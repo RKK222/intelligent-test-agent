@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { ArrowLeftRight, Plus, Save, ServerCog } from "lucide-vue-next";
+import { ArrowLeftRight, Eye, EyeOff, Plus, Save, ServerCog } from "lucide-vue-next";
 import { ElDatePicker, ElDialog } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
+
+export type PreviewMode = "off" | "full" | "split";
 
 // 透传类型：直接复用后端 VO（ApplicationWorkspaceTemplate / ApplicationWorkspaceVersion），
 // 父组件负责把 versions 懒加载后回填到 template.versions 上。
@@ -26,6 +28,10 @@ const props = defineProps<{
   saving?: boolean;
   /** 是否展示保存按钮（仅编辑器场景） */
   showSave?: boolean;
+  /** 是否展示 MD 预览按钮（仅 Markdown 文件时显示） */
+  showPreviewButton?: boolean;
+  /** 当前 MD 预览模式 */
+  markdownPreviewMode?: PreviewMode;
   /** 当前应用名（用于菜单首行提示与按钮文案） */
   appName?: string;
   /** 归属当前应用的工作空间模板列表；为空则不展示两级菜单 */
@@ -48,6 +54,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "save"): void;
+  (e: "update:markdownPreviewMode", mode: PreviewMode): void;
   // 选择某工作空间下的某个版本：父组件负责切换运行态 Workspace。
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
   // 要求父组件按需懒加载某模板下的版本列表
@@ -314,6 +321,34 @@ function onDocumentKeydown(event: KeyboardEvent) {
   }
 }
 
+let previewClickTimer: ReturnType<typeof setTimeout> | null = null;
+
+function handlePreviewClick() {
+  if (previewClickTimer !== null) {
+    return;
+  }
+  previewClickTimer = setTimeout(() => {
+    previewClickTimer = null;
+    if (props.markdownPreviewMode === "off") {
+      emit("update:markdownPreviewMode", "full");
+    } else {
+      emit("update:markdownPreviewMode", "off");
+    }
+  }, 220);
+}
+
+function handlePreviewDblClick() {
+  if (previewClickTimer !== null) {
+    clearTimeout(previewClickTimer);
+    previewClickTimer = null;
+  }
+  if (props.markdownPreviewMode === "split") {
+    emit("update:markdownPreviewMode", "off");
+  } else {
+    emit("update:markdownPreviewMode", "split");
+  }
+}
+
 onMounted(() => {
   document.addEventListener("click", onDocumentClick);
   document.addEventListener("keydown", onDocumentKeydown);
@@ -323,6 +358,10 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", onDocumentKeydown);
   // 工作空间两级菜单的全局监听兜底
   clearCascadeSubmenuCloseTimer();
+  if (previewClickTimer !== null) {
+    clearTimeout(previewClickTimer);
+    previewClickTimer = null;
+  }
   window.removeEventListener("scroll", onCascadePosScrollOrResizeBound, true);
   window.removeEventListener("resize", onCascadePosScrollOrResizeBound);
   if (cascadePosRafId !== null) {
@@ -506,7 +545,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
       </button>
       <template v-else-if="showSave">
         <span class="ta-workbench-footer-path">
-          写入路径：<span class="ta-workbench-footer-path-value">{{ writePath ?? "—" }}</span>
+          路径：<span class="ta-workbench-footer-path-value">{{ writePath ?? "—" }}</span>
         </span>
         <span class="ta-workbench-footer-separator">|</span>
         <span class="ta-workbench-footer-updated">更新时间：{{ updatedLabel }}</span>
@@ -515,6 +554,18 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 
     <div v-if="showSave" class="ta-workbench-footer-right">
       <button
+        v-if="showPreviewButton"
+        type="button"
+        :class="['ta-workbench-footer-preview', { 'is-active': markdownPreviewMode !== 'off' }]"
+        :title="markdownPreviewMode === 'split' ? '分屏预览 (双击分上下)' : markdownPreviewMode === 'full' ? '整体预览 (双击分上下)' : '预览 (单击整体/双击分上下)'"
+        :aria-pressed="markdownPreviewMode !== 'off'"
+        data-testid="footer-markdown-preview"
+        @click="handlePreviewClick"
+        @dblclick="handlePreviewDblClick"
+      >
+        <component :is="markdownPreviewMode !== 'off' ? EyeOff : Eye" class="ta-workbench-footer-icon" />
+      </button>
+      <button
         type="button"
         class="ta-workbench-footer-save"
         :disabled="!dirty || readonly || saving"
@@ -522,7 +573,6 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         @click="emit('save')"
       >
         <Save class="ta-workbench-footer-save-icon" />
-        <span>保存</span>
       </button>
     </div>
   </footer>
@@ -751,29 +801,42 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   color: #888;
 }
 
+.ta-workbench-footer-preview,
 .ta-workbench-footer-save {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 12px;
-  background: #eeeeee;
-  color: #333333;
-  font: inherit;
-  font-weight: 500;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0.8px solid #dfdfdf;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
+.ta-workbench-footer-preview:hover:not(:disabled),
 .ta-workbench-footer-save:hover:not(:disabled) {
-  background: #e2e2e5;
-  color: #111111;
+  background: #f5f5f5;
+  border-color: #b5b5b5;
+  color: #111;
+}
+
+.ta-workbench-footer-preview.is-active {
+  background: #eaf0ff;
+  border-color: #b9c8ff;
+  color: #1d3fb0;
+}
+
+.ta-workbench-footer-preview.is-active:hover {
+  background: #dde7ff;
 }
 
 .ta-workbench-footer-save:disabled {
   background: #f4f4f5;
+  border-color: #e4e4e7;
   color: #a1a1aa;
   cursor: not-allowed;
 }

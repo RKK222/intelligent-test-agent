@@ -9,6 +9,8 @@ export type EditorSelectionContext = {
   text: string;
 };
 
+export type PreviewMode = "off" | "full" | "split";
+
 export type CodeEditorProps = {
   path?: string;
   content?: string;
@@ -16,11 +18,13 @@ export type CodeEditorProps = {
   readonly?: boolean;
   saving?: boolean;
   /**
-   * Markdown 预览开关（受控）。开启后会在编辑器下方追加分屏预览区，
-   * 关闭后回到全屏编辑。组件本身不维护该状态，由父级（通常是 tab 表头）
-   * 提供按钮并双向绑定，避免同一状态出现两处入口。
+   * Markdown 预览开关（受控）。开启后按 previewMode 渲染全屏或分屏预览区，
+   * 关闭后回到全屏编辑。组件本身不维护该状态，由父级（通常是底部 footer）
+   * 提供按钮并双向绑定。
    */
   showPreview?: boolean;
+  /** 预览模式：off(关闭) | full(整体预览) | split(分上下) */
+  previewMode?: PreviewMode;
 };
 
 export type CodeEditorEmits = {
@@ -29,6 +33,7 @@ export type CodeEditorEmits = {
   addSelectionContext: [];
   selectionChange: [selection: EditorSelectionContext | undefined];
   "update:showPreview": [enabled: boolean];
+  "update:previewMode": [mode: PreviewMode];
 };
 </script>
 
@@ -45,11 +50,18 @@ const displayName = computed(() => {
 });
 const emit = defineEmits<CodeEditorEmits>();
 
-// 当前文件是否为 Markdown：决定是否展示预览开关与分屏能力
+// 当前文件是否为 Markdown：决定是否展示预览与分屏能力
 const isMarkdown = computed(() => !!props.path && languageFromPath(props.path) === "markdown");
-// 预览开关：受控模式，状态完全由父级驱动（tab 表头上的预览按钮）。
-// 不再保留组件内部副本，避免出现"两处入口不同步"的问题。
-const showPreview = computed(() => props.showPreview ?? false);
+
+// 规范化的预览模式：off | full | split
+const effectivePreviewMode = computed<PreviewMode>(() => {
+  if (!isMarkdown.value) return "off";
+  if (props.previewMode) return props.previewMode;
+  return props.showPreview ? "full" : "off";
+});
+
+// 保持向下兼容 showPreview boolean 计算
+const showPreview = computed(() => effectivePreviewMode.value !== "off");
 // 上下分屏比例（上=编辑器百分比），仅组件内状态，不持久化
 const splitPct = ref(50);
 
@@ -215,7 +227,7 @@ onMounted(async () => {
 
 // 路径与预览分屏状态变化：重新触发 Monaco layout，确保容器尺寸变动后渲染正常
 watch(
-  () => [props.showPreview, splitPct.value, props.path],
+  () => [effectivePreviewMode.value, splitPct.value, props.path],
   async () => {
     await nextTick();
     layoutEditor();
@@ -435,16 +447,16 @@ defineExpose({
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">
     <!-- 编辑器主体始终保留同一个容器，避免 v-if 切换销毁 Monaco 已挂载的 DOM；
-         Markdown 预览开启时在下方追加 sash + 预览，形成上下分屏。
-         预览开关已上提到 tab 表头，受控于 showPreview prop。 -->
+         Markdown 预览整体(full)/分屏(split)受控于 effectivePreviewMode。 -->
     <div ref="splitContainerEl" class="flex min-h-0 flex-1 flex-col">
       <div
+        v-show="effectivePreviewMode !== 'full'"
         ref="containerEl"
         class="min-h-0 w-full shrink-0 overflow-hidden"
         data-testid="code-editor-source"
-        :style="isMarkdown && showPreview ? { height: splitPct + '%', flex: 'none' } : { flex: 1 }"
+        :style="effectivePreviewMode === 'split' ? { height: splitPct + '%', flex: 'none' } : { flex: 1 }"
       />
-      <template v-if="isMarkdown && showPreview">
+      <template v-if="effectivePreviewMode === 'split'">
         <div
           class="relative h-[8px] w-full shrink-0 cursor-row-resize border-t border-b border-[var(--ta-border)] bg-[var(--ta-bg-2)] hover:bg-[var(--ta-hover)] transition-colors duration-150 flex items-center justify-center"
           @pointerdown="onSashDown"
@@ -454,14 +466,15 @@ defineExpose({
           <!-- 拖拽手柄 -->
           <div class="h-[2px] w-8 rounded-full bg-[var(--ta-border-strong)] z-20" />
         </div>
-        <MarkdownPreview
-          ref="previewRef"
-          :content="content"
-          class="min-h-0 flex-1"
-          @scroll="onPreviewScroll"
-          @ready="syncFromEditor"
-        />
       </template>
+      <MarkdownPreview
+        v-if="effectivePreviewMode !== 'off'"
+        ref="previewRef"
+        :content="content"
+        class="min-h-0 flex-1"
+        @scroll="onPreviewScroll"
+        @ready="syncFromEditor"
+      />
     </div>
   </div>
 </template>

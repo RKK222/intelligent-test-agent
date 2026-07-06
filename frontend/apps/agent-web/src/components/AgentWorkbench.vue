@@ -63,6 +63,7 @@ import FigmaShell from "./FigmaShell.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
+import { type PreviewMode } from "./WorkbenchFooter.vue";
 import OpencodeProcessStartupDialog from "./OpencodeProcessStartupDialog.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
@@ -88,6 +89,12 @@ import {
   nextCenterModeAfterRunDiff,
   nextCenterModeAfterVcsRefresh,
   notifyOnAttention,
+  OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
+  OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
+  OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
+  opencodeAvailabilityFromHealth,
+  opencodeAvailabilityFromProcess,
+  opencodeHealthRequestFromProcess,
   parseCommand,
   prepareAutoRetryRun,
   promptFromParts,
@@ -103,6 +110,7 @@ import {
   text,
   workspaceLoadIsCurrent,
   type AutoRetryRunDraft,
+  type OpencodeAvailabilityState,
   type RetryDeadlineMap
 } from "./workbench-utils";
 
@@ -114,8 +122,6 @@ const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
 const chatContextStore = useChatContextStore();
 const router = useRouter();
-const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
-const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
 const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
 const AGENT_CATALOG_REQUEST_TIMEOUT_MS = 8000;
 const RUN_EVENT_SSE_ERROR_TITLE = "RunEvent SSE 连接异常";
@@ -287,9 +293,10 @@ const selectedServerWorkspaceServerId = ref<string | undefined>(undefined);
 const liveTrack = ref(false);
 // 已跟随过的 tool partId，避免同一工具调用重复读盘刷新。
 const liveFollowedParts = ref<Set<string>>(new Set());
-// Markdown 预览开关：状态由 FigmaEditorArea tab 表头按钮双向绑定到 CodeEditor 的 showPreview。
+// Markdown 预览模式：off | full(整体预览) | split(分上下)。
 // 切换非 Markdown 文件时由 watch 主动复位，避免下次切回 md 时残留之前的开启状态。
-const markdownPreview = ref(false);
+const markdownPreviewMode = ref<PreviewMode>("off");
+const markdownPreview = computed(() => markdownPreviewMode.value !== "off");
 // 只有用户主动触发的健康刷新需要短暂阻止提交；后台轮询刷新不应周期性打断输入体验。
 const manualOpencodeProcessRefreshing = ref(false);
 
@@ -598,17 +605,33 @@ const opencodeProcessQuery = useQuery({
   enabled: opencodeProcessEnabled,
   queryFn: () => api.getMyOpencodeProcess(),
   retry: false,
-  // 未 READY 时保持快速探测；READY 后降频，避免每个工作台标签页持续压测 manager health。
-  refetchInterval: (query) => {
-    const status = (query.state.data as UserOpencodeProcess | undefined)?.status;
-    return status === "READY"
-      ? OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS
-      : OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS;
-  },
-  refetchIntervalInBackground: false
+  refetchOnWindowFocus: false,
+  refetchInterval: false
 });
 const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
-const opencodeProcessReady = computed(() => opencodeProcessStatus.value?.status === "READY");
+const opencodeAvailability = ref<OpencodeAvailabilityState>({ ready: false, source: "process" });
+const opencodeHealthRequest = computed(() => opencodeHealthRequestFromProcess(opencodeProcessStatus.value));
+const opencodeHealthQuery = useQuery({
+  queryKey: computed(
+    () =>
+      [
+        "runtime",
+        "opencode-process",
+        "health",
+        authStore.token ?? "",
+        opencodeHealthRequest.value?.linuxServerId ?? "",
+        opencodeHealthRequest.value?.containerId ?? "",
+        opencodeHealthRequest.value?.port ?? 0
+      ] as const
+  ),
+  enabled: () => opencodeProcessEnabled.value && Boolean(opencodeHealthRequest.value),
+  queryFn: () => api.getMyOpencodeProcessHealth(opencodeHealthRequest.value!),
+  retry: false,
+  refetchInterval: OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
+  refetchIntervalInBackground: false
+});
+const opencodeHealthReady = computed(() => opencodeAvailability.value.ready);
+const opencodeProcessReady = computed(() => opencodeHealthReady.value);
 const workspaceFileRouteReadyById = ref<Record<string, boolean>>({});
 const selectedWorkspaceFileRouteReady = computed(() => {
   const workspaceId = selectedWorkspaceIdRef.value;
@@ -618,6 +641,7 @@ const processStartupDialogOpen = ref(false);
 const processStartupActionLabel = ref("启动进程");
 const processStartupOperation = ref<OpencodeProcessStartOperation | null>(null);
 let processStartupPollTimer: ReturnType<typeof setInterval> | null = null;
+let lastUnhealthyHealthIdentity = "";
 
 function newProcessStartupOperationId(): string {
   const randomPart =
@@ -720,11 +744,11 @@ function beginInitializeOpencodeProcess() {
 const authReady = computed(() => authStore.isAuthenticated());
 // 2. 文件路由：只需要 workspace 存在，不依赖 opencode 状态
 const fileRouteReady = computed(() => Boolean(selectedWorkspaceIdRef.value));
-// 3. Runtime 目录（Agent、Command）：需要 opencode READY + workspace
+// 3. Runtime 目录（Agent、Command）：需要 opencode 弱健康 READY + workspace
 const opencodeCatalogReady = computed(() => opencodeProcessReady.value && Boolean(selectedWorkspaceIdRef.value));
-// 4. LSP、MCP、VCS：需要 opencode READY + workspace
+// 4. LSP、MCP、VCS：需要 opencode 弱健康 READY + workspace
 const runtimeReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
-// 5. Run 启动：需要 opencode READY + workspace 文件路由成功
+// 5. Run 启动：需要 opencode 弱健康 READY + workspace 文件路由成功
 const runReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
 
 // 模型和 Provider 登录后立即加载
@@ -762,14 +786,14 @@ const lspStatusQuery = useQuery({
   enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getLspStatus(selectedWorkspaceIdRef.value!),
   retry: false,
-  refetchInterval: 30000
+  refetchInterval: OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS
 });
 const mcpStatusQuery = useQuery({
   queryKey: ["runtime", "mcp", "status", selectedWorkspaceIdRef],
   enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getMcpStatus(selectedWorkspaceIdRef.value!),
   retry: false,
-  refetchInterval: 30000
+  refetchInterval: OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS
 });
 const mcpResourcesQuery = useQuery({
   queryKey: ["runtime", "mcp", "resources", selectedWorkspaceIdRef],
@@ -791,7 +815,7 @@ const vcsStatusQuery = useQuery({
   enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getVcsStatus(selectedWorkspaceIdRef.value!),
   retry: false,
-  refetchInterval: 30000
+  refetchInterval: OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS
 });
 
 const agents = computed(() => agentsQuery.data.value ?? []);
@@ -832,6 +856,31 @@ const selectedModelInfo = computed(() => {
   return allModels.value.find((model) => modelValue(model) === selectedModel.value || model.id === selected);
 });
 const selectedModelLabel = computed(() => selectedModelInfo.value?.name ?? selectedModel.value ?? "未选择模型");
+
+watch(opencodeProcessStatus, (status) => {
+  if (!status) {
+    opencodeAvailability.value = { ready: false, source: "process" };
+    return;
+  }
+  opencodeAvailability.value = opencodeAvailabilityFromProcess(status);
+}, { immediate: true });
+
+watch(opencodeHealthQuery.data, (health) => {
+  if (!health) return;
+  opencodeAvailability.value = opencodeAvailabilityFromHealth(health);
+  const identity = `${health.linuxServerId}:${health.containerId}:${health.port}:${health.status}:${health.message}`;
+  if (health.healthy) {
+    lastUnhealthyHealthIdentity = "";
+    return;
+  }
+  if (identity === lastUnhealthyHealthIdentity) {
+    return;
+  }
+  lastUnhealthyHealthIdentity = identity;
+  if (opencodeProcessEnabled.value && !opencodeProcessQuery.isFetching.value) {
+    void opencodeProcessQuery.refetch();
+  }
+});
 
 function refreshOpencodeProcessStatus() {
   if (!opencodeProcessEnabled.value || opencodeProcessQuery.isFetching.value) return;
@@ -1205,7 +1254,7 @@ watch(activePath, () => {
   // 但保留 true 会让后续切回 md 时立刻弹出预览，违背"默认不预览"的心智。
   const path = activePath.value;
   if (!path || languageFromPath(path) !== "markdown") {
-    markdownPreview.value = false;
+    markdownPreviewMode.value = "off";
   }
 });
 watch(selectedWorkspaceIdRef, (id, previous) => {
@@ -2006,7 +2055,7 @@ function resetWorkspaceState() {
   liveFollowedParts.value = new Set();
   selectedAgent.value = "";
   // 模型和 Provider 是用户级运行偏好，刷新后切回 recent workspace 时不能清空。
-  markdownPreview.value = false;
+  markdownPreviewMode.value = "off";
   // 切工作区时同步清掉任务消耗计时与上一轮终态展示，避免旧 Run 的 token/duration 残留。
   chatStartedAt.value = null;
   accumulatedTokens.value = 0;
@@ -3758,6 +3807,7 @@ async function handleLogout() {
           :creating-version="creatingVersion"
           :show-server-workspace-switch="isSuperAdmin"
           :markdown-preview="markdownPreview"
+          :markdown-preview-mode="markdownPreviewMode"
           @activate="(path: string) => workbench.setActivePath(path)"
           @close="handleCloseTab"
           @close-many="handleCloseTabs"
@@ -3768,7 +3818,8 @@ async function handleLogout() {
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
           @open-server-workspace-picker="openServerWorkspacePicker"
-          @update:markdown-preview="(value: boolean) => (markdownPreview = value)"
+          @update:markdown-preview="(value: boolean) => (markdownPreviewMode = value ? 'full' : 'off')"
+          @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
         >
           <CodeEditor
             ref="codeEditorRef"
@@ -3778,6 +3829,7 @@ async function handleLogout() {
             :readonly="activeTab?.readonly"
             :saving="saveMutation.isPending.value"
             :show-preview="markdownPreview"
+            :preview-mode="markdownPreviewMode"
             @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
             @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
             @add-selection-context="addCurrentSelectionToChatContext"

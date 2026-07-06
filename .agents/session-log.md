@@ -25,6 +25,25 @@
   - 只修改 `ReasoningPartGroup.vue`、`ReasoningPartView.vue`、`.oc-reasoning-part*` 样式、包说明和定向时间线测试；不改 Run API、SSE、后端 opencode prompt parts、用户消息附件展示或最终回答样式。
 - Result:
   - `corepack pnpm test packages/agent-chat/tests/opencode-timeline.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/runtime-reducer.test.ts`、`corepack pnpm --filter @test-agent/agent-chat typecheck`、`git diff --check` 通过；浏览器样式读取确认当前回答正文仍为 `.oc-text-part` Markdown 路径。
+### 2026-07-06 - 编辑器页脚与文件Tab样式交互优化
+
+- Why:
+  - 1. 用户要求将 Markdown 预览按钮从 Tab 行表头移至底部页脚保存按钮左侧，且保持仅 Markdown 文件时出现。
+  - 2. 用户要求预览按钮单击时为整体预览（100% 预览，不再分上下），双击时才进入分屏预览（分上下）。
+  - 3. 用户要求预览按钮和保存按钮均只显示图标，不显示文字。
+  - 4. 用户要求页脚“写入路径：”文字改为“路径：”，取消“写入”二字。
+  - 5. 用户要求文件 Tab 页中的图标改为与工作空间文件树一致的分类型 Material 文件图标。
+- What:
+  - 1. `WorkbenchFooter` 页脚右侧新增 MD 预览图标按钮，放在 Save 按钮左侧，仅在 `showPreviewButton`（`activeIsMarkdown`）为 true 时渲染。
+  - 2. `WorkbenchFooter` 增加单双击识别定时器逻辑：单击切换为 `full` 整体预览或 `off` 关闭，双击切换为 `split` 分上下屏或 `off` 关闭；`CodeEditor` 支持受控 `previewMode` (`off` | `full` | `split`) 渲染。
+  - 3. `WorkbenchFooter` 中的预览与保存按钮去除了 `<span>` 文字标签，并统一定制为 26x26 方形精美图标按钮。
+  - 4. `WorkbenchFooter` 将“写入路径：”标签文案修改为“路径：”。
+  - 5. `FigmaEditorArea` 使用 `@test-agent/file-explorer` 的 `FileIcon` 替换原 Tab 页通用静态文件图标，实现按扩展名/文件名与工作区文件树同步渲染彩色 Material 文件图标。
+- How:
+  - 仅修改前端 `FigmaEditorArea.vue`、`WorkbenchFooter.vue`、`CodeEditor.vue`、`AgentWorkbench.vue` 及对应 Vitest 单元测试，不改动任何后端 API、数据库或环境配置文件。
+- Result:
+  - Vitest 定向测试 `packages/editor/tests/CodeEditor.preview.test.ts` 全部 6 个用例通过。
+
 ### 2026-07-06 - 修复所有文件偶发性白板不显示内容问题
 
 - Why:
