@@ -1,0 +1,100 @@
+# 企业内 Docker 部署文件
+
+本目录提供企业内部署的容器侧文件：2 个前端静态容器、1 个 Nginx 入口、2 个 `opencode-worker` 容器。Java 后端仍按当前方案直接部署，不放进本 Compose。
+
+## 端口约束
+
+Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart..portEnd` 里选择端口，并用 `TEST_AGENT_SERVER_ADVERTISED_HOST/.serverhost + port` 生成 `baseUrl`。当前协议没有独立的 `containerPort` 和 `publishedPort` 字段。
+
+因此 `opencode-worker` 的端口池必须就是宿主机发布端口：
+
+- `OPENCODE_MANAGER_PORT_START/END` 写宿主机可访问端口。
+- Compose 的 `ports` 必须保持 `hostPort:containerPort` 数值一致，例如 `4096-4105:4096-4105`。
+- 不要写 `14096:4096` 这类内外不一致映射，否则 Java 会生成错误的 `baseUrl`。
+
+每个 worker 容器内只有 1 个 `opencode-manager run` 常驻进程；manager 按端口池动态启动 0..N 个 `opencode serve` 子进程。
+
+## Java 直接部署前提
+
+两路 Java 后端示例：
+
+```bash
+server.port=8080
+SPRING_PROFILES_ACTIVE=prod
+TEST_AGENT_DEPLOYMENT_MODE=internal
+TEST_AGENT_SERVER_ADVERTISED_HOST=<host-ip-or-dns>
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=<same-manager-token>
+TEST_AGENT_CORS_ALLOWED_ORIGINS=http://<gateway-host>
+TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
+TEST_AGENT_SERVER_BROADCAST_ENABLED=true
+```
+
+第二路 Java 使用不同 `server.port`，例如 `8081`。如果两路 Java 在同一台 Linux 上，保持相同 `TEST_AGENT_LINUX_SERVER_ID`；如果在不同服务器上，每台服务器使用自己的稳定 ID。Java 的 `SYS_DATA_ROOT_DIR` 需要与 worker 挂载的 `TEST_AGENT_DATA_ROOT` 对齐，默认是 `/data/.testagent`，以便 worker 读取 `.serverid` 和 `.serverhost`。
+
+## 构建镜像
+
+在仓库根目录执行：
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -f deploy/internal/frontend.Dockerfile \
+  -t test-agent-frontend:internal \
+  --load \
+  .
+
+docker buildx build \
+  --platform linux/amd64 \
+  -f deploy/internal/opencode-worker.Dockerfile \
+  -t test-agent-opencode-worker:internal \
+  --load \
+  .
+```
+
+离线交付时导出 tar：
+
+```bash
+docker save -o test-agent-frontend-internal-amd64.tar test-agent-frontend:internal
+docker save -o test-agent-opencode-worker-internal-amd64.tar test-agent-opencode-worker:internal
+```
+
+目标机器导入：
+
+```bash
+docker load -i test-agent-frontend-internal-amd64.tar
+docker load -i test-agent-opencode-worker-internal-amd64.tar
+```
+
+## 启动 Compose
+
+复制环境变量模板：
+
+```bash
+cp deploy/internal/env.example deploy/internal/.env
+```
+
+编辑 `deploy/internal/.env`，至少修改：
+
+- `TEST_AGENT_BACKEND_1`
+- `TEST_AGENT_BACKEND_2`
+- `TEST_AGENT_OPENCODE_MANAGER_TOKEN`
+- `TEST_AGENT_DATA_ROOT`
+- 两个 worker 的端口池
+
+启动：
+
+```bash
+cd deploy/internal
+docker compose --env-file .env up -d
+```
+
+检查：
+
+```bash
+docker compose --env-file .env ps
+curl -fsS http://127.0.0.1:${TEST_AGENT_GATEWAY_HTTP_PORT:-80}/health
+```
+
+## 运行时外部依赖
+
+镜像内已包含前端静态产物、`opencode-manager` 和 npm 安装的 `opencode-ai` CLI。目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、Git/SSH 网络和 Java 后端所需密钥。`/data/.testagent/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。

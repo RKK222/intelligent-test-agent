@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-06 - 新增企业内 Docker Compose 部署文件
+
+- Why:
+  - 需要按“Java 直接部署、2 个前端容器、2 个后端直连入口、opencode+manager 镜像部署”的企业内拓扑补齐可落地的 Dockerfile 和 Compose 文件，并明确 Java 使用 manager 上报端口生成 opencode `baseUrl` 的端口约束。
+- What:
+  - 新增 `deploy/internal/`：前端静态镜像 Dockerfile、opencode worker 镜像 Dockerfile、2 前端 + 网关 + 2 worker 的 `docker-compose.yml`、Nginx 模板、env 示例和 README。
+  - opencode worker 镜像内包含 1 个 `opencode-manager` 和 npm 安装的 `opencode-ai` CLI；运行期由 manager 按端口池动态拉起 0..N 个 `opencode serve` 子进程。
+- How:
+  - Compose 中 worker 使用 `4096-4105:4096-4105`、`4106-4115:4106-4115` 这类 hostPort 与 containerPort 数值一致的映射；README 明确禁止 `14096:4096` 这类内外端口不一致配置。
+  - Java 后端不纳入 Compose，由 gateway 通过 `TEST_AGENT_BACKEND_1/2` 代理直接部署的两个 Java 端口。
+- Result:
+  - `docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 通过并展开出 2 个前端、2 个 worker 和网关；本机 Buildx 不支持 `--check`，未执行镜像构建。
+
 ### 2026-07-05 - 合并 retry rebase 冲突
 
 - Why:
