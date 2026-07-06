@@ -4077,3 +4077,22 @@ bash /tmp/test-api-after-restart.sh
   - 同步修改 `frontend/vitest.setup.ts` 和 `frontend-opencode/tests/setup.ts` 测试配置文件，保证单元测试在 JSDOM 运行环境下也能够自动过滤并屏蔽该取消错误。
 - Result: 成功屏蔽了 Monaco Editor 的未捕获取消异常，控制台不再有 `Uncaught (in promise) Canceled` 的干扰日志；前端主工程与复刻工程的 Vue Typecheck、Vitest 单元测试全数顺利通过。
 
+### 2026-07-06 - 优化提问/权限弹窗与符合前端规范的字号/色彩调整
+
+- Why:
+  - 用户反馈 `question.asked` 提问弹框与权限确认卡片的字号有点大，整体设计和颜色（写死的十六进制、RGB 值）没有遵守前端样式规约与语义 Token 要求。
+- What:
+  - 1. 调整字号与字重以对齐前端排版体系：
+     - 将提问标题 `.figma-chat-question-title` 字号由 `16px` (700) 调至 `14px` (600)；
+     - 将进度文本 `.figma-chat-question-progress` 和指示头 `.figma-chat-question-header` 的 font-weight 分别调整为 400 和 500；
+     - 将提示文本 `.figma-chat-question-hint` 从 `13px` 调至 `12px`；
+     - 将选项文字 `.figma-chat-question-option` / 自定义输入等字号整体调整，去除了非标准的 `13px` 设定，自定义输入 `.figma-chat-question-custom-input` 改为 `14px`，按钮文字统一调整为标准的 `14px` 按钮字号；
+     - 将选项 label `.figma-chat-question-option-label` 的字重由强烈的 `700` (Bold) 调整为标准的 `500` (Medium)，选项描述从 `13px` 调整为 `12px` (Caption) 400。
+  - 2. 色彩及边框对齐全局语义 Token 体系，避免写死颜色：
+     - 所有 background 和 border 调整为消费 `var(--ta-chat-border)`, `var(--ta-chat-surface)`, `var(--ta-chat-text)`, `var(--ta-chat-muted)` 以及 `var(--ta-accent)` 等全局 token；
+     - 权限弹窗 `.figma-chat-permission-card` 的警告色边框与背景替换为与全局 `--warning` (#946015) 匹配的 RGB 透明度版本，保持优雅统一的浅冷色调视觉设计。
+- How:
+  - 仅修改 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 组件中的 `<style>` 样式模块，不涉及任何底层数据结构、API 契约或后端业务逻辑。
+- Result:
+  - 1. `corepack pnpm test FigmaChatPanel` 单元测试全部通过。
+  - 2. `corepack pnpm typecheck` 及 `corepack pnpm lint` 检查全部无报错通过。
