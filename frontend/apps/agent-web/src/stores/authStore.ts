@@ -4,7 +4,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 
 /**
- * Token 在 localStorage 中的存储 key。
+ * Token 在 sessionStorage 中的存储 key。
  */
 const TOKEN_KEY = "test-agent.auth.token";
 
@@ -16,7 +16,7 @@ export const useAuthStore = defineStore("auth", () => {
   // 当前登录用户信息
   const currentUser = ref<CurrentUser | null>(null);
   // 认证 Token
-  const token = ref<string | null>(localStorage.getItem(TOKEN_KEY));
+  const token = ref<string | null>(sessionStorage.getItem(TOKEN_KEY));
   // 是否正在加载
   const loading = ref(false);
 
@@ -28,11 +28,11 @@ export const useAuthStore = defineStore("auth", () => {
   };
 
   /**
-   * 保存 Token 到内存和 localStorage。
+   * 保存 Token 到内存和 sessionStorage。
    */
   const saveToken = (newToken: string) => {
     token.value = newToken;
-    localStorage.setItem(TOKEN_KEY, newToken);
+    sessionStorage.setItem(TOKEN_KEY, newToken);
   };
 
   /**
@@ -41,7 +41,7 @@ export const useAuthStore = defineStore("auth", () => {
   const clearAuth = () => {
     token.value = null;
     currentUser.value = null;
-    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
   };
 
   /**

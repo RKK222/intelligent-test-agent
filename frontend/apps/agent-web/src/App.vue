@@ -13,7 +13,7 @@ const router = useRouter();
 
 onMounted(() => {
   const TOKEN_KEY = "test-agent.auth.token";
-  const storedToken = localStorage.getItem(TOKEN_KEY);
+  const storedToken = sessionStorage.getItem(TOKEN_KEY);
   if (storedToken && !authStore.token) {
     authStore.saveToken(storedToken);
   }

@@ -96,7 +96,7 @@ router.beforeEach(async (to, _from) => {
       const data = await response.json();
       if (data.data && data.data.token) {
         authStore.saveToken(data.data.token);
-        localStorage.setItem(UNIFIED_AUTH_ID_KEY, unifiedAuthId);
+        sessionStorage.setItem(UNIFIED_AUTH_ID_KEY, unifiedAuthId);
       }
     } catch (error) {
       console.error("统一认证登录失败:", error);
@@ -104,7 +104,7 @@ router.beforeEach(async (to, _from) => {
     return { path: to.path, query: restQuery, replace: true };
   }
 
-  const token = localStorage.getItem(TOKEN_KEY);
+  const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) {
     jumpAam(window.location.href, AAM_BASE_URL);
     return false;

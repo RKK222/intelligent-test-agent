@@ -244,8 +244,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     if (init.body != null && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
-    // 自动附加用户 Token：优先使用 options 中的 apiToken，其次从 localStorage 读取
-    const userToken = options.apiToken ?? (typeof localStorage !== "undefined" ? localStorage.getItem("test-agent.auth.token") : null);
+    // 自动附加用户 Token：优先使用 options 中的 apiToken，其次从 sessionStorage 读取
+    const userToken = options.apiToken ?? (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("test-agent.auth.token") : null);
     if (userToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${userToken}`);
     }
@@ -343,7 +343,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     const headers = new Headers(init.headers);
     headers.set("Accept", "text/csv");
     headers.set("X-Trace-Id", traceId);
-    const userToken = options.apiToken ?? (typeof localStorage !== "undefined" ? localStorage.getItem("test-agent.auth.token") : null);
+    const userToken = options.apiToken ?? (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("test-agent.auth.token") : null);
     if (userToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${userToken}`);
     }
