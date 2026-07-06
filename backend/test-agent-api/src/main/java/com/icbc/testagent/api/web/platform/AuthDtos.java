@@ -29,11 +29,14 @@ public final class AuthDtos {
     /**
      * 统一认证登录请求体（通过 AAM 跳转后登录）。
      */
-    public record UnifiedAuthLoginRequest(String unifiedAuthId) {
+    public record UnifiedAuthLoginRequest(String unifiedAuthId, String token) {
 
         public UnifiedAuthLoginRequest {
             if (unifiedAuthId == null || unifiedAuthId.isBlank()) {
                 throw new IllegalArgumentException("统一认证号不能为空");
+            }
+            if (token == null || token.isBlank()) {
+                throw new IllegalArgumentException("Token 不能为空");
             }
         }
     }

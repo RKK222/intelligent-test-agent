@@ -76,6 +76,7 @@ public class AuthController {
 
         AuthPrincipal principal = authApplicationService.loginByUnifiedAuthId(
                 request.unifiedAuthId(),
+                request.token(),
                 ipFrom(exchange),
                 userAgentFrom(exchange));
 

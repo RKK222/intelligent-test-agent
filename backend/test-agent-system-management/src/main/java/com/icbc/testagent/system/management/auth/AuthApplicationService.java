@@ -98,15 +98,16 @@ public class AuthApplicationService {
     }
 
     /**
-     * 通过统一认证号登录：验证用户存在后生成 Token，保存登录日志。
+     * 通过统一认证号登录：验证用户存在后使用第三方 Token 存入 Redis，保存登录日志。
      *
      * @param unifiedAuthId 统一认证号（来自 AAM）
+     * @param token         第三方登录平台返回的 Token（作为系统 Token 使用）
      * @param ipAddress     请求 IP
      * @param userAgent     浏览器 User-Agent
      * @return 认证成功后的 {@link AuthPrincipal}，包含 Token 和用户基本信息
      * @throws com.icbc.testagent.common.error.PlatformException 用户不存在或账户已停用时
      */
-    public AuthPrincipal loginByUnifiedAuthId(String unifiedAuthId, String ipAddress, String userAgent) {
+    public AuthPrincipal loginByUnifiedAuthId(String unifiedAuthId, String token, String ipAddress, String userAgent) {
         User user = userDomainService.findByUnifiedAuthId(unifiedAuthId);
 
         if (!user.canLogin()) {
@@ -114,7 +115,6 @@ public class AuthApplicationService {
                     com.icbc.testagent.common.error.ErrorCode.FORBIDDEN, "用户账户已停用");
         }
 
-        String token = UUID.randomUUID().toString().replace("-", "");
         Instant now = Instant.now();
         AuthPrincipal principal = new AuthPrincipal(
                 token, user.userId(), user.username(), user.unifiedAuthId(),

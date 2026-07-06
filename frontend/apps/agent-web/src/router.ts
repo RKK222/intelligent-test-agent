@@ -76,7 +76,8 @@ router.beforeEach(async (to, _from) => {
   const authStore = useAuthStore();
 
   const unifiedAuthId = to.query.userId;
-  if (unifiedAuthId && typeof unifiedAuthId === "string") {
+  const urlToken = to.query.token;
+  if (unifiedAuthId && typeof unifiedAuthId === "string" && urlToken && typeof urlToken === "string") {
     const { token: _, userId: __, ...restQuery } = to.query;
     try {
       const baseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -85,7 +86,7 @@ router.beforeEach(async (to, _from) => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ unifiedAuthId }),
+        body: JSON.stringify({ unifiedAuthId, token: urlToken }),
       });
 
       if (!response.ok) {
