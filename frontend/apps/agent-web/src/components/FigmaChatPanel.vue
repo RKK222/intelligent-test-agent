@@ -6590,9 +6590,9 @@ function onCompositionEnd() {
 
 .figma-chat-textarea {
   width: 100%;
-  min-height: 64px;
+  min-height: 40px;
   max-height: 140px;
-  padding: 10px 12px 6px;
+  padding: 8px 12px 4px;
   font-family: 'Inter', 'PingFang SC', sans-serif;
   font-size: 14px;
   line-height: 20px;
