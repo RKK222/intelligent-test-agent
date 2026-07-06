@@ -1309,7 +1309,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `PATCH` | `/api/sessions/{sessionId}` | 更新会话标题或置顶状态。 |
 | `DELETE` | `/api/sessions/{sessionId}` | 软删除会话，状态变为 `ARCHIVED`。 |
 | `POST` | `/api/sessions/{sessionId}/messages` | 追加会话消息。 |
-| `GET` | `/api/sessions/{sessionId}/messages` | 分页读取会话消息。 |
+| `GET` | `/api/sessions/{sessionId}/messages` | 兼容分页读取会话消息；主历史恢复优先使用 session tree。 |
 | `GET` | `/api/sessions/{sessionId}/session-tree/messages` | 查询 root session 下全量历史 session tree message snapshot。 |
 | `GET` | `/api/sessions/{sessionId}/active-run` | 查询会话最近的非终态 Run；没有时 `data=null`。 |
 
@@ -1361,9 +1361,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`GET /api/sessions/{sessionId}/messages` 会先在存在 agent binding 时，从 bounded-elastic 线程分页读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
+`GET /api/sessions/{sessionId}/messages` 是兼容分页接口，查询参数为 `page`、`size` 和可选 `refresh`。`refresh` 默认 `true`，会在存在 agent binding 时从 bounded-elastic 线程分页读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；`refresh=false` 只读数据库快照，用于前端反馈 messageId 映射、只读 transcript 或旧客户端过渡，避免触发远端快照刷新。如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
 
-`GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 返回 Session root 下全量历史消息树快照，旧 `/api/sessions/{sessionId}/session-tree/messages` 和平台内部 URL 继续兼容。后端通过 `AgentSessionBinding` 找到 root remote session，再按 `run_session_scope_sessions.root_session_id` 拉取跨 Run 已发现的 root/child session；scope 表为空时返回 root-only snapshot。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`。
+`GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 是前端工作台历史恢复的主接口，返回 Session root 下全量历史消息树快照，旧 `/api/sessions/{sessionId}/session-tree/messages` 和平台内部 URL 继续兼容。后端通过 `AgentSessionBinding` 找到 root remote session，再按 `run_session_scope_sessions.root_session_id` 拉取跨 Run 已发现的 root/child session；scope 表为空时返回 root-only snapshot。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`。
 
 `SessionMessageResponse` 基础字段：`messageId`、`sessionId`、`role`、`content`、`createdAt`。当前 role 使用 `USER`、`ASSISTANT`、`SYSTEM`。
 

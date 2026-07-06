@@ -8,6 +8,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.error.ErrorCode;
@@ -754,7 +755,8 @@ class RuntimeControllerTest {
         when(service.listMessages(
                         eq(new SessionId("ses_1234567890abcdef")),
                         any(),
-                        eq("trace_1234567890abcdef")))
+                        eq("trace_1234567890abcdef"),
+                        eq(true)))
                 .thenAnswer(ignored -> {
                     calledOnNonBlockingThread.set(Schedulers.isInNonBlockingThread());
                     return new PageResponse<>(List.of(), 1, 20, 0);
@@ -772,6 +774,34 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.items").isArray();
 
         assertThat(calledOnNonBlockingThread).isFalse();
+    }
+
+    @Test
+    void sessionControllerPassesRefreshFlagToMessageListing() {
+        SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
+        when(service.listMessages(
+                        eq(new SessionId("ses_1234567890abcdef")),
+                        any(),
+                        eq("trace_1234567890abcdef"),
+                        eq(false)))
+                .thenReturn(new PageResponse<>(List.of(), 1, 20, 0));
+        WebTestClient client = WebTestClient.bindToController(new SessionController(service))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/sessions/ses_1234567890abcdef/messages?page=1&size=20&refresh=false")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.items").isArray();
+
+        verify(service).listMessages(
+                eq(new SessionId("ses_1234567890abcdef")),
+                any(),
+                eq("trace_1234567890abcdef"),
+                eq(false));
     }
 
     private static org.springframework.web.server.WebFilter authenticatedUserFilter() {

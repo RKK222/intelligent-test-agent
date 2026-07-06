@@ -11,11 +11,11 @@
 - 支持 `agentId?: string` 配置，默认 `opencode`；Run、Diff 和 runtime 相关请求统一走 `/api/internal/agent/{agentId}/...`。
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。
-- 暴露 Workspace 查询、文件、Session、Session message、Run、Diff API 方法；Session 支持 workspace 列表、全局搜索、标题/置顶更新和软删除。Workspace/Session 查询仍走平台 URL，不放入 agent URL。
+- 暴露 Workspace 查询、文件、Session、Session message、Run、Diff API 方法；Session 支持 workspace 列表、全局搜索、标题/置顶更新和软删除。工作台历史恢复使用 `getSessionTreeMessages(sessionId)` 访问 `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages`；兼容 `listSessionMessages` 支持 `refresh=false`，用于反馈平台 messageId 映射和只读 transcript。Workspace/Session 基础查询仍走平台 URL，不放入 agent URL。
 - 工作区文件列表、读取、写入、状态和删除统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。
 - 暴露 `listWorkspaceBackendServers()`、`listServerWorkspaceDirectories()`、`createServerWorkspace()` 等超级管理员服务器工作空间选择方法，目录浏览和创建也通过目标后端文件 WebSocket ticket 执行。
 - 暴露 `getActiveRun(sessionId)`，用于刷新或重进会话后恢复仍在执行的 RunEvent SSE 订阅；返回 `null` 表示当前会话没有非终态 Run。
-- Session message 和 Run 响应透传可选 `parts`、`tokens`、`costUsd` 等新增字段，旧后端缺字段时保持兼容。
+- Session message、Session tree 和 Run 响应透传可选 `parts`、`tokens`、`costUsd`、`events` 等新增字段，旧后端缺字段时保持兼容。
 - 暴露配置管理和个人 SSH key API 方法，统一走 `/api/internal/platform/configuration-management`，不直连 Git 服务或 opencode server；代码库新增 payload 包含 `englishName`、`repositoryType`、`deploymentMode` 和兼容 `standard`，编辑 payload 只发送名称/英文名，`listRepositoryTypes()` 读取版本库类型下拉字典，`getRepositoryDeploymentOptions()` 读取部署模式默认值与内部 SSH 前缀；应用工作空间创建支持 `operationId`/`version` 并通过 `getWorkspaceCreateOperation(operationId)` 轮询后端进度。
 - 暴露应用版本工作区和个人工作区 API 方法，统一走 `/api/internal/platform/workspace-management`，包括成员应用、模板、版本、个人空间、最近使用、diff、同步和版本工作区 `gitPullWorkspaceVersion(versionId)`；版本响应透传目标 commit 与服务器副本状态字段。
 - 暴露 Agent 配置管理 API 方法，统一走 `/api/internal/platform/workspace-management/agent-config`；公共/工作空间 Agent 配置文件列表、读取、写入使用“agent-config file route + 目标后端 ticket + 文件 WebSocket RPC”，公共 worktree 切换列表通过 `listPublicAgentWorktrees(linuxServerId)` 读取元数据，Git 更新、worktree、diff、stage/unstage、commit、publish 和 operation progress 仍走对应 HTTP/进度 WebSocket；进度 WebSocket 返回前会等待连接 open，避免 Git 发布首条 `command` 事件丢失；publish 冲突文件通过统一错误 `details.conflictFiles` 透传给 UI；不直连 Git 仓库或 opencode server。

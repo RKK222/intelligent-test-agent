@@ -196,11 +196,12 @@ public class SessionController {
             @PathVariable String sessionId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
+            @RequestParam(required = false, defaultValue = "true") Boolean refresh,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         // 历史消息查询会同步刷新远端快照，必须整体 offload，避免在 Reactor 事件线程调用 block()。
         return Mono.fromCallable(() -> ApiResponse.ok(RuntimeDtos.messagePage(sessionService.listMessages(
-                        new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId)), traceId))
+                        new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId, Boolean.TRUE.equals(refresh))), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

@@ -1121,11 +1121,41 @@ describe("backend-api", () => {
     );
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
 
-    await expect(client.listSessionMessages("ses_1", 1, 100)).resolves.toMatchObject({
+    await expect(client.listSessionMessages("ses_1", 1, 100, { refresh: false })).resolves.toMatchObject({
       items: [{ messageId: "msg_1", content: "hello" }]
     });
 
-    expect(fetcher).toHaveBeenCalledWith("http://api/api/sessions/ses_1/messages?page=1&size=100", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith("http://api/api/sessions/ses_1/messages?page=1&size=100&refresh=false", expect.any(Object));
+  });
+
+  it("reads session tree messages through the agent-scoped history API", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            sessionId: "ses_1",
+            sessions: [],
+            messagesBySessionId: {},
+            childSessionIdByTaskPartId: {},
+            events: [{ type: "message.updated", sessionId: "ses_1", payload: { message: { id: "msg_1", role: "assistant" } } }]
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.getSessionTreeMessages("ses_1")).resolves.toMatchObject({
+      sessionId: "ses_1",
+      events: [{ type: "message.updated" }]
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/agent/opencode/sessions/ses_1/session-tree/messages",
+      expect.any(Object)
+    );
   });
 
   it("reads the latest active run for session resume", async () => {

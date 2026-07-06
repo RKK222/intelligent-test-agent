@@ -23,8 +23,12 @@ import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.session.SessionRepository;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -215,12 +219,13 @@ public class RunSessionMessageSnapshotService {
         if (!isAssistant(projected.message())) {
             return Optional.empty();
         }
-        String remoteMessageId = firstText(projected.message(), "messageID", "messageId", "id").orElse(null);
         String serializedParts = partsJson(projected.parts()).orElse(null);
         Optional<String> projectedContent = content(projected);
         if (projectedContent.isEmpty() && serializedParts == null) {
             return Optional.empty();
         }
+        String remoteMessageId = firstText(projected.message(), "messageID", "messageId", "id")
+                .orElseGet(() -> syntheticRemoteMessageId(sessionId, projected, projectedContent.orElse(""), serializedParts));
         Optional<SessionMessage> existing = sessionMessageRepository.findBySessionIdAndRemoteMessageId(sessionId, remoteMessageId);
         Instant now = Instant.now();
         Instant createdAt = existing.map(SessionMessage::createdAt)
@@ -242,6 +247,26 @@ public class RunSessionMessageSnapshotService {
                 now);
         sessionMessageRepository.save(message);
         return Optional.of(usage);
+    }
+
+    private String syntheticRemoteMessageId(
+            SessionId sessionId,
+            AgentSessionMessage projected,
+            String projectedContent,
+            String serializedParts) {
+        // 上游历史投影偶发缺少 message id；用稳定内容指纹补一个内部幂等键，避免每次刷新都插入重复 assistant 快照。
+        String seed = String.join("\n",
+                sessionId.value(),
+                firstText(projected.message(), "role", "type").orElse("assistant"),
+                projectedCreatedAt(projected).map(Instant::toString).orElse(""),
+                projectedContent == null ? "" : projectedContent,
+                serializedParts == null ? "" : serializedParts);
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(seed.getBytes(StandardCharsets.UTF_8));
+            return "synthetic:" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 digest is unavailable", exception);
+        }
     }
 
     private Optional<Instant> projectedCreatedAt(AgentSessionMessage projected) {

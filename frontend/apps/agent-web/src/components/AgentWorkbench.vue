@@ -63,6 +63,8 @@ import { notifyFeedback } from "./notify";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy, type FollowUpDraft } from "./follow-up-queue";
 import {
   buildPromptParts,
+  chatStateFromSessionTreeSnapshot,
+  dedupeSessionMessages,
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
   errorFeedback,
@@ -2722,12 +2724,13 @@ function hasUnmappedAssistantRemoteMessages(): boolean {
 
 async function refreshPersistedFeedbackIdentities(sessionId: string, attempt = 1): Promise<void> {
   try {
-    const page = await api.listSessionMessages(sessionId, 1, 100);
+    const page = await api.listSessionMessages(sessionId, 1, 100, { refresh: false });
     if (session.value?.sessionId !== sessionId) {
       return;
     }
-    rememberPersistedMessageIdentities(page.items);
-    await loadFeedbacksForMessages(page.items, sessionId);
+    const persistedMessages = dedupeSessionMessages(page.items);
+    rememberPersistedMessageIdentities(persistedMessages);
+    await loadFeedbacksForMessages(persistedMessages, sessionId);
     if (attempt < 3 && hasUnmappedAssistantRemoteMessages()) {
       setTimeout(() => void refreshPersistedFeedbackIdentities(sessionId, attempt + 1), 500);
     }
@@ -3281,23 +3284,32 @@ async function switchSession(sessionId: string) {
   nowTick.value = Date.now();
   clearAutoRetryState();
   try {
-    const page = await api.listSessionMessages(sessionId, 1, 100);
+    const [treeSnapshot, page] = await Promise.all([
+      api.getSessionTreeMessages(sessionId).catch(() => null),
+      api.listSessionMessages(sessionId, 1, 100, { refresh: false })
+    ]);
     if (switchSeq !== historySwitchSeq) {
       return;
     }
-    rememberPersistedMessageIdentities(page.items);
-    dispatchChat({ type: "reset", messages: messagesFromSessionMessages(page.items) });
+    const persistedMessages = dedupeSessionMessages(page.items);
+    rememberPersistedMessageIdentities(persistedMessages);
+    const restoredState = treeSnapshot ? chatStateFromSessionTreeSnapshot(treeSnapshot, persistedMessages) : null;
+    if (restoredState && restoredState.messages.length > 0) {
+      chatState.value = restoredState;
+    } else {
+      dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
+    }
     historyLoadingSessionId.value = null;
     // 正文是历史切换的首要结果；反馈状态随后补齐，不阻塞用户阅读。
-    void loadFeedbacksForMessages(page.items, sessionId);
-    const restoredFiles = diffFilesFromSessionMessages(page.items).map((file) => ({
+    void loadFeedbacksForMessages(persistedMessages, sessionId);
+    const restoredFiles = diffFilesFromSessionMessages(persistedMessages).map((file) => ({
       ...file,
       path: normalizeWorkspacePath(file.path) || file.path
     }));
     diffFiles.value = restoredFiles;
 
     // 寻找最新的 runId 从而恢复 Run 状态与文件 Diff
-    const lastMsgWithRunId = [...page.items].reverse().find((m) => m.runId);
+    const lastMsgWithRunId = [...persistedMessages].reverse().find((m) => m.runId);
     if (lastMsgWithRunId?.runId) {
       try {
         const [runDetail, diffDetail] = await Promise.all([

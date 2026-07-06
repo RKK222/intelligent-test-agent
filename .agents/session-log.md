@@ -4060,3 +4060,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `Run.applyTerminalFact` 允许应用层记录后到 root 终态事实；`RunApplicationService` 对 `Streaming response failed` 等 transport error 增加短暂延迟窗口，窗口内收到 root 终态则不追加旧 `run.failed`，无 root 终态时仍收敛失败；前端 reducer 在新 Run 请求和后到成功/取消终态时清理旧 `run.failed` 失败卡。
 - How: 先补充后端“transport error 先到、root success 后到”红灯用例和前端 reducer 失败卡残留红灯用例，再修改 runtime 终态处理与 agent-chat reducer，并扩展 workbench mock E2E 断言旧 SSE 错误、失败卡和底部“任务失败”不跨新一轮成功残留。同步 domain/runtime/frontend/agent-chat README、包说明和 `docs/api/event-stream.md`。
 - Result: `mvn -pl test-agent-domain,test-agent-opencode-runtime -am test`、`corepack pnpm exec vitest run packages/agent-chat/tests/runtime-reducer.test.ts`、目标 workbench Playwright、`corepack pnpm typecheck` 和后端 `mvn clean package -DskipTests` 均通过；未修改数据库 schema、Flyway、HTTP API 字段或 SSE 事件类型。
+
+### 2026-07-06 - 历史会话读取改用 session tree 并阻止重复消息
+
+- Why: 历史会话主读取仍调用兼容 `/api/sessions/{sessionId}/messages`，该接口默认刷新远端快照；上游投影缺少 message id 时会重复落库 assistant 快照，前端逐条渲染导致历史消息重复。
+- What: 工作台历史恢复改用 agent-scoped session tree；兼容 messages 接口新增 `refresh=false` DB-only；前端对历史 DB rows 和 session-tree events 做读时去重；后端缺少远端 id 时生成合成 `remoteMessageId` 做幂等 upsert。
+- How: 更新 `SessionController`、`SessionApplicationService`、`RunSessionMessageSnapshotService`、`backend-api`、`shared-types`、`AgentWorkbench`、`workbench-utils` 和 `ReadonlyTranscript`，补充前后端测试并同步 HTTP API 与相关 README。不删除历史重复数据，不改数据库 schema、RunEvent 类型或 generated SDK。
+- Result: 定向 backend API/runtime 测试、frontend Vitest/typecheck 与历史切换 Playwright 用例通过；历史重复 DB rows 会在读取时隐藏，后续刷新不会因缺少远端 id 继续新增重复 assistant 快照。

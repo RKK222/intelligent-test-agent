@@ -274,6 +274,33 @@ export type SessionMessage = {
   tokens?: TokenUsage;
 };
 
+export type RunSessionTreeSessionResponse = {
+  rootSessionId?: string | null;
+  sessionId: string;
+  parentSessionId?: string | null;
+  childSession: boolean;
+  taskMessageId?: string | null;
+  taskPartId?: string | null;
+  taskCallId?: string | null;
+};
+
+export type RunSessionTreeEventResponse = {
+  type: string;
+  rootSessionId?: string | null;
+  sessionId?: string | null;
+  parentSessionId?: string | null;
+  childSession?: boolean | null;
+  payload: Record<string, unknown>;
+};
+
+export type SessionTreeMessagesResponse = {
+  sessionId: string;
+  sessions: RunSessionTreeSessionResponse[];
+  messagesBySessionId: Record<string, Record<string, unknown>[]>;
+  childSessionIdByTaskPartId: Record<string, string>;
+  events: RunSessionTreeEventResponse[];
+};
+
 export type AiFeedbackRating = "POSITIVE" | "NEGATIVE";
 
 export type AiFeedbackReasonCode =

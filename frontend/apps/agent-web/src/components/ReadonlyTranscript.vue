@@ -8,6 +8,7 @@ import { createBackendApiClient } from "@test-agent/backend-api";
 import type { Session, SessionMessage } from "@test-agent/shared-types";
 import { type Feedback } from "@test-agent/ui-kit";
 import { notifyFeedback } from "./notify";
+import { dedupeSessionMessages } from "./workbench-utils";
 
 const props = defineProps<ReadonlyTranscriptProps>();
 
@@ -19,9 +20,12 @@ const feedback = ref<Feedback | null>(null);
 
 async function load() {
   try {
-    const [nextSession, page] = await Promise.all([api.getSession(props.sessionId), api.listSessionMessages(props.sessionId, 1, 200)]);
+    const [nextSession, page] = await Promise.all([
+      api.getSession(props.sessionId),
+      api.listSessionMessages(props.sessionId, 1, 200, { refresh: false })
+    ]);
     session.value = nextSession;
-    messages.value = page.items;
+    messages.value = dedupeSessionMessages(page.items);
   } catch (error) {
     feedback.value = {
       kind: "error",

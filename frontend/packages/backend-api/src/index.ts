@@ -89,6 +89,7 @@ import type {
   SessionDiff,
   Session,
   SessionMessage,
+  SessionTreeMessagesResponse,
   SshKeyMetadata,
   SshKeyPublicKeyResponse,
   SyncWorkspacePayload,
@@ -858,8 +859,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     updateSession: (sessionId: string, payload: { title?: string; pinned?: boolean }) =>
       request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "PATCH", body: JSON.stringify(payload) }),
     deleteSession: (sessionId: string) => request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
-    listSessionMessages: (sessionId: string, page = 1, size = 100) =>
-      request<PageResponse<SessionMessage>>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?page=${page}&size=${size}`),
+    listSessionMessages: (sessionId: string, page = 1, size = 100, options: { refresh?: boolean } = {}) =>
+      request<PageResponse<SessionMessage>>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/messages${query({ page, size, refresh: options.refresh })}`
+      ),
+    getSessionTreeMessages: (sessionId: string) =>
+      request<SessionTreeMessagesResponse>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/session-tree/messages`)),
     putMessageFeedback: (messageId: string, payload: AiMessageFeedbackPayload) =>
       request<AiMessageFeedback>(`/api/internal/platform/opencode-runtime/messages/${encodeURIComponent(messageId)}/feedback`, {
         method: "PUT",
@@ -1623,7 +1628,7 @@ function normalizeFailure(body: unknown, fallbackTraceId: string, status: number
   };
 }
 
-function query(values: Record<string, string | number | null | undefined>) {
+function query(values: Record<string, string | number | boolean | null | undefined>) {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") {

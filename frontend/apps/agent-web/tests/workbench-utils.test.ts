@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { MessagePart, PromptPart, Run, RunDiffFile } from "@test-agent/shared-types";
+import type { MessagePart, PromptPart, Run, RunDiffFile, SessionMessage, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import {
+  chatStateFromSessionTreeSnapshot,
+  dedupeSessionMessages,
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
   filterWorkspaceRootEntries,
@@ -8,6 +10,7 @@ import {
   runEventMatchesRun,
   mergeDiffFiles,
   messagesFromSessionMessages,
+  messagesFromSessionTreeSnapshot,
   normalizePathKey,
   nextCenterModeAfterVcsRefresh,
   nextCenterModeAfterRunDiff,
@@ -307,6 +310,173 @@ describe("nextCenterModeAfterRunDiff", () => {
 });
 
 describe("historical session restoration", () => {
+  it("deduplicates persisted history rows before rendering", () => {
+    const messages: SessionMessage[] = [
+      {
+        messageId: "msg_platform_1",
+        remoteMessageId: "remote_assistant_1",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "重复回答",
+        createdAt: "2026-06-28T08:00:00Z"
+      },
+      {
+        messageId: "msg_platform_2",
+        remoteMessageId: "remote_assistant_1",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "重复回答",
+        createdAt: "2026-06-28T08:00:01Z"
+      },
+      {
+        messageId: "msg_platform_3",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "缺少远端 ID 的重复回答",
+        createdAt: "2026-06-28T08:00:02Z"
+      },
+      {
+        messageId: "msg_platform_4",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "缺少远端 ID 的重复回答",
+        createdAt: "2026-06-28T08:00:03Z"
+      }
+    ];
+
+    expect(dedupeSessionMessages(messages).map((message) => message.messageId)).toEqual(["msg_platform_1", "msg_platform_3"]);
+  });
+
+  it("restores session tree snapshots through RunEvent reducer without duplicate messages", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          parentSessionId: undefined,
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "remote_msg_1", role: "assistant", content: "主回答" }
+          }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          parentSessionId: undefined,
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "remote_msg_1", role: "assistant", content: "主回答" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          parentSessionId: undefined,
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageId: "remote_msg_1",
+            part: { id: "part_task", type: "tool", tool: "task", state: { status: "completed", input: { description: "child" } } }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          parentSessionId: undefined,
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageId: "remote_msg_1",
+            part: { id: "part_task", type: "tool", tool: "task", state: { status: "completed", input: { description: "child" } } }
+          }
+        }
+      ]
+    };
+
+    const mapped = messagesFromSessionTreeSnapshot(snapshot);
+
+    expect(mapped).toHaveLength(1);
+    expect(mapped[0]).toMatchObject({
+      role: "assistant",
+      text: "主回答",
+      parts: [{ partId: "part_task", type: "tool", toolName: "task" }]
+    });
+  });
+
+  it("keeps persisted user turns when session tree supplies assistant snapshots", () => {
+    const persisted: SessionMessage[] = [
+      {
+        messageId: "msg_user",
+        sessionId: "ses_root",
+        role: "USER",
+        content: "请生成登录测试报告",
+        createdAt: "2026-06-28T08:00:00Z"
+      },
+      {
+        messageId: "msg_assistant",
+        sessionId: "ses_root",
+        role: "ASSISTANT",
+        content: "测试报告已生成",
+        createdAt: "2026-06-28T08:01:00Z"
+      }
+    ];
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "remote_assistant", role: "assistant", content: "测试报告已生成" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageId: "remote_assistant",
+            part: { id: "part_file", type: "file", name: "登录测试报告.md", path: "docs/登录测试报告.md" }
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, persisted);
+
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]).toMatchObject({ role: "user", text: "请生成登录测试报告" });
+    expect(state.messages[1]).toMatchObject({
+      role: "assistant",
+      text: "测试报告已生成",
+      parts: [{ partId: "part_file", type: "file", path: "docs/登录测试报告.md" }]
+    });
+  });
+
   it("normalizes raw opencode parts and restores generated documents", () => {
     const messages = [
       {

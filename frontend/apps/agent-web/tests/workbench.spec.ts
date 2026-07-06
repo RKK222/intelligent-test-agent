@@ -950,8 +950,23 @@ test("discarding the last VCS diff closes the stale diff panel", async ({ page }
   await expect(page.getByText("基线版本（只读）")).toHaveCount(0);
 });
 
-test("switching history restores assistant documents and the file changes drawer", async ({ page }) => {
+test("switching history restores assistant documents and the file changes summary", async ({ page }) => {
+  const sessionTreeRequests: string[] = [];
+  const sessionMessageRequests: string[] = [];
   await mockBackendApi(page, {
+    sessionTreeRequests,
+    sessionMessageRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
     sessions: [
       {
         sessionId: "ses_history",
@@ -991,6 +1006,63 @@ test("switching history restores assistant documents and the file changes drawer
         ]
       }
     ],
+    sessionTreeMessages: {
+      sessionId: "ses_history",
+      sessions: [{ rootSessionId: "ses_history", sessionId: "ses_history", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_history",
+          sessionId: "ses_history",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_history",
+            sessionId: "ses_history",
+            message: { id: "remote_assistant", role: "assistant", content: "测试报告已生成" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_history",
+          sessionId: "ses_history",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_history",
+            sessionId: "ses_history",
+            messageId: "remote_assistant",
+            messageID: "remote_assistant",
+            part: {
+              id: "part_text",
+              messageID: "remote_assistant",
+              type: "text",
+              text: "测试报告已生成"
+            }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_history",
+          sessionId: "ses_history",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_history",
+            sessionId: "ses_history",
+            messageId: "remote_assistant",
+            messageID: "remote_assistant",
+            part: {
+              id: "part_file",
+              messageID: "remote_assistant",
+              type: "file",
+              name: "登录测试报告.md",
+              path: "docs/登录测试报告.md",
+              mimeType: "text/markdown"
+            }
+          }
+        }
+      ]
+    },
     historyRun: {
       runId: "run_history",
       sessionId: "ses_history",
@@ -1014,12 +1086,13 @@ test("switching history restores assistant documents and the file changes drawer
   await page.getByRole("button", { name: "历史" }).click();
   await page.getByRole("button", { name: /请生成登录测试报告/ }).click();
 
+  await expect.poll(() => sessionTreeRequests).toContain("/api/internal/agent/opencode/sessions/ses_history/session-tree/messages");
+  await expect.poll(() => sessionMessageRequests).toContain("/api/sessions/ses_history/messages?page=1&size=100&refresh=false");
   await expect(page.getByText("测试报告已生成")).toBeVisible();
-  await expect(page.getByText("登录测试报告.md")).toBeVisible();
-  const changesCard = page.locator(".figma-chat-changes-card");
-  await expect(changesCard).toContainText("1 个文件已更改");
+  const changesCard = page.getByRole("button", { name: /文件修改 1/ });
+  await expect(changesCard).toContainText("+1");
   await changesCard.click();
-  await expect(page.getByRole("dialog", { name: "文件变更 Diff" })).toContainText("docs/登录测试报告.md");
+  await expect(page.getByText("docs/登录测试报告.md")).toBeVisible();
 });
 
 test("switching history resumes the active run event stream", async ({ page }) => {
@@ -1028,6 +1101,17 @@ test("switching history resumes the active run event stream", async ({ page }) =
   await mockBackendApi(page, {
     activeRunRequests,
     runEventRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
     sessions: [
       {
         sessionId: "ses_history",
@@ -1095,8 +1179,23 @@ test("history loading shows immediately and does not wait for message feedback",
     releaseMessageFeedback = resolve;
   });
   const feedbackRequests: string[] = [];
+  const sessionTreeRequests: string[] = [];
+  const sessionMessageRequests: string[] = [];
 
   await mockBackendApi(page, {
+    sessionTreeRequests,
+    sessionMessageRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
     sessions: [
       {
         sessionId: "ses_history",
@@ -1110,13 +1209,50 @@ test("history loading shows immediately and does not wait for message feedback",
     ],
     sessionMessages: [
       {
-        messageId: "msg_assistant",
+        messageId: "msg_1234567890abcdef1234567890abcdef",
         sessionId: "ses_history",
         role: "ASSISTANT",
         content: "历史正文已加载",
         createdAt: "2026-06-28T08:01:00Z"
+      },
+      {
+        messageId: "msg_2234567890abcdef1234567890abcdef",
+        sessionId: "ses_history",
+        role: "ASSISTANT",
+        content: "历史正文已加载",
+        createdAt: "2026-06-28T08:01:01Z"
       }
     ],
+    sessionTreeMessages: {
+      sessionId: "ses_history",
+      sessions: [{ rootSessionId: "ses_history", sessionId: "ses_history", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_history",
+          sessionId: "ses_history",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_history",
+            sessionId: "ses_history",
+            message: { id: "remote_dup", role: "assistant", content: "历史正文已加载" }
+          }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_history",
+          sessionId: "ses_history",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_history",
+            sessionId: "ses_history",
+            message: { id: "remote_dup", role: "assistant", content: "历史正文已加载" }
+          }
+        }
+      ]
+    },
     sessionMessagesGate,
     messageFeedbackGate,
     feedbackRequests
@@ -1129,8 +1265,12 @@ test("history loading shows immediately and does not wait for message feedback",
   await expect(page.getByText("正在加载历史对话…")).toBeVisible();
 
   releaseSessionMessages();
-  await expect(page.getByText("历史正文已加载")).toBeVisible();
-  await expect.poll(() => feedbackRequests).toContain("/api/internal/platform/opencode-runtime/messages/msg_assistant/feedback/me");
+  await expect(page.getByText("历史正文已加载")).toHaveCount(1);
+  await expect.poll(() => sessionTreeRequests).toContain("/api/internal/agent/opencode/sessions/ses_history/session-tree/messages");
+  await expect.poll(() => sessionMessageRequests).toContain("/api/sessions/ses_history/messages?page=1&size=100&refresh=false");
+  await expect.poll(() => feedbackRequests).toEqual([
+    "/api/internal/platform/opencode-runtime/messages/msg_1234567890abcdef1234567890abcdef/feedback/me"
+  ]);
   await expect(page.getByText("正在加载历史对话…")).toHaveCount(0);
 
   releaseMessageFeedback();
@@ -1589,7 +1729,10 @@ async function mockBackendApi(
     initializeFailureThenReady?: boolean;
     ensureDefaultRequiresReady?: boolean;
     sessions?: Array<Record<string, unknown>>;
+    sessionTreeMessages?: Record<string, unknown>;
+    sessionTreeRequests?: string[];
     sessionMessages?: Array<Record<string, unknown>>;
+    sessionMessageRequests?: string[];
     sessionMessagesGate?: Promise<void>;
     messageFeedbackGate?: Promise<void>;
     feedbackRequests?: string[];
@@ -1996,7 +2139,20 @@ async function mockBackendApi(
       await route.fulfill(json(pageOf(capture.sessions ?? [])));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/sessions/ses_history/messages") {
+    if (method === "GET" && /^\/api\/internal\/agent\/opencode\/sessions\/[^/]+\/session-tree\/messages$/.test(url.pathname)) {
+      capture.sessionTreeRequests?.push(`${url.pathname}${url.search}`);
+      const sessionId = url.pathname.match(/\/sessions\/([^/]+)\/session-tree\/messages$/)?.[1] ?? "ses_history";
+      await route.fulfill(json(capture.sessionTreeMessages ?? {
+        sessionId,
+        sessions: [],
+        messagesBySessionId: {},
+        childSessionIdByTaskPartId: {},
+        events: []
+      }));
+      return;
+    }
+    if (method === "GET" && /^\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
+      capture.sessionMessageRequests?.push(`${url.pathname}${url.search}`);
       await capture.sessionMessagesGate;
       await route.fulfill(json(pageOf(capture.sessionMessages ?? [])));
       return;

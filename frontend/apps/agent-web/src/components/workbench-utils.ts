@@ -13,12 +13,19 @@ import type {
   RuntimeToolInfo,
   Session,
   SessionMessage,
+  SessionTreeMessagesResponse,
   Workspace
 } from "@test-agent/shared-types";
-import type { AgentChatRuntimeAction, OpencodeLikeRuntimeStatus } from "@test-agent/agent-chat";
+import type { AgentChatRuntimeAction, AgentChatRuntimeState, OpencodeLikeRuntimeStatus } from "@test-agent/agent-chat";
 import type { EditorSelectionContext } from "@test-agent/editor";
 import type { Feedback } from "@test-agent/ui-kit";
-import { buildComposerPromptParts, normalizeMessagePart, type ComposerAttachment } from "@test-agent/agent-chat";
+import {
+  buildComposerPromptParts,
+  createInitialAgentChatRuntimeState,
+  normalizeMessagePart,
+  reduceAgentChatRuntime,
+  type ComposerAttachment
+} from "@test-agent/agent-chat";
 import { buildEditorFilePromptPart } from "./prompt-context";
 
 /**
@@ -463,8 +470,42 @@ export function historyItems(run: Run | null, sessions: Session[]) {
   ];
 }
 
+export function dedupeSessionMessages(messages: SessionMessage[]): SessionMessage[] {
+  const seen = new Set<string>();
+  const deduped: SessionMessage[] = [];
+  for (const message of messages) {
+    const key = sessionMessageDedupeKey(message);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(message);
+  }
+  return deduped;
+}
+
+function sessionMessageDedupeKey(message: SessionMessage): string {
+  if (message.remoteMessageId) {
+    return `remote:${message.sessionId}:${message.role}:${message.remoteMessageId}`;
+  }
+  const partIds = (message.parts ?? [])
+    .map((part, index) => {
+      const raw = record(part);
+      return text(raw?.partId) ?? text(raw?.partID) ?? text(raw?.id) ?? `part-${index}`;
+    })
+    .join("|");
+  if (partIds) {
+    return `parts:${message.sessionId}:${message.role}:${partIds}:${stableStringify(message.parts)}`;
+  }
+  if (message.role !== "ASSISTANT") {
+    return `platform:${message.sessionId}:${message.messageId}`;
+  }
+  // 重复快照通常由多次刷新插入，createdAt 会不同；缺少远端 ID 时只能按可见内容做只读展示去重。
+  return `assistant-content:${message.sessionId}:${message.content}:${stableStringify(message.parts ?? [])}`;
+}
+
 export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMessage[] {
-  return messages.map((message) => {
+  return dedupeSessionMessages(messages).map((message) => {
     const role = message.role === "USER" ? "user" : "assistant";
     if (role === "user") {
       return {
@@ -488,6 +529,147 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
       createdAt: message.createdAt
     };
   });
+}
+
+export function chatStateFromSessionTreeSnapshot(
+  snapshot: SessionTreeMessagesResponse,
+  persistedMessages: SessionMessage[] = []
+): AgentChatRuntimeState {
+  let state = createInitialAgentChatRuntimeState();
+  dedupeSessionTreeEvents(snapshot.events ?? []).forEach((event, index) => {
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEventFromSessionTreeEvent(snapshot, event, index)
+    });
+  });
+  const persistedAgentMessages = messagesFromSessionMessages(persistedMessages);
+  if (state.messages.length > 0 && persistedAgentMessages.length > 0) {
+    return {
+      ...state,
+      messages: mergeSessionTreeMessages(persistedAgentMessages, state.messages)
+    };
+  }
+  return state;
+}
+
+export function messagesFromSessionTreeSnapshot(snapshot: SessionTreeMessagesResponse): AgentMessage[] {
+  return chatStateFromSessionTreeSnapshot(snapshot).messages;
+}
+
+function mergeSessionTreeMessages(persistedMessages: AgentMessage[], treeMessages: AgentMessage[]): AgentMessage[] {
+  const usedTreeIndexes = new Set<number>();
+  const merged = persistedMessages.map((message) => {
+    if (message.role !== "assistant") {
+      return message;
+    }
+    const treeIndex = treeMessages.findIndex((candidate, index) =>
+      !usedTreeIndexes.has(index) && candidate.role === "assistant" && agentMessagesMatch(message, candidate)
+    );
+    if (treeIndex < 0) {
+      return message;
+    }
+    usedTreeIndexes.add(treeIndex);
+    // 平台 DB 保留 user 顺序和反馈身份；session tree assistant 保留更完整的工具/file parts。
+    return treeMessages[treeIndex];
+  });
+  treeMessages.forEach((message, index) => {
+    if (!usedTreeIndexes.has(index)) {
+      merged.push(message);
+    }
+  });
+  return merged;
+}
+
+function agentMessagesMatch(left: AgentMessage, right: AgentMessage): boolean {
+  if (left.role === "card" || right.role === "card") {
+    return false;
+  }
+  const leftIds = [left.messageId, left.remoteMessageId, left.id].filter(Boolean);
+  const rightIds = [right.messageId, right.remoteMessageId, right.id].filter(Boolean);
+  if (leftIds.some((id) => rightIds.includes(id))) {
+    return true;
+  }
+  return left.role === right.role && Boolean(left.text) && left.text === right.text;
+}
+
+function dedupeSessionTreeEvents(events: SessionTreeMessagesResponse["events"]): SessionTreeMessagesResponse["events"] {
+  const seen = new Set<string>();
+  const deduped: SessionTreeMessagesResponse["events"] = [];
+  for (const event of events) {
+    const key = sessionTreeEventDedupeKey(event);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(event);
+  }
+  return deduped;
+}
+
+function runEventFromSessionTreeEvent(
+  snapshot: SessionTreeMessagesResponse,
+  event: SessionTreeMessagesResponse["events"][number],
+  index: number
+): RunEvent {
+  const payload = {
+    ...(event.payload ?? {}),
+    ...(event.rootSessionId ? { rootSessionId: event.rootSessionId } : {}),
+    ...(event.sessionId ? { sessionId: event.sessionId } : {}),
+    ...(event.parentSessionId ? { parentSessionId: event.parentSessionId } : {}),
+    ...(event.childSession !== undefined && event.childSession !== null ? { isChildSession: event.childSession } : {})
+  };
+  const payloadRecord = record(payload) ?? {};
+  const message = record(payloadRecord.message) ?? record(payloadRecord.info);
+  const occurredAt = text(payloadRecord.occurredAt) ?? text(message?.createdAt) ?? new Date(0).toISOString();
+  return {
+    eventId: `session-tree:${snapshot.sessionId}:${sessionTreeEventDedupeKey(event)}`,
+    runId: text(payloadRecord.runId) ?? `session-tree:${snapshot.sessionId}`,
+    seq: index + 1,
+    type: event.type,
+    traceId: text(payloadRecord.traceId) ?? "trace_session_tree",
+    occurredAt,
+    payload
+  };
+}
+
+function sessionTreeEventDedupeKey(event: SessionTreeMessagesResponse["events"][number]): string {
+  const payload = event.payload ?? {};
+  const payloadRecord = record(payload) ?? {};
+  const raw = record(payloadRecord.part) ?? record(payloadRecord.message) ?? payloadRecord;
+  const messageId =
+    text(payloadRecord.messageId) ??
+    text(payloadRecord.messageID) ??
+    text(raw.messageId) ??
+    text(raw.messageID) ??
+    text(raw.id);
+  const partId = text(raw.partId) ?? text(raw.partID) ?? text(raw.id);
+  return [
+    event.type,
+    event.rootSessionId ?? "",
+    event.sessionId ?? "",
+    messageId ?? "",
+    event.type.includes("part") ? partId ?? "" : "",
+    stableStringify(payload)
+  ].join(":");
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(stableValue(value));
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stableValue);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, stableValue(entry)])
+    );
+  }
+  return value;
 }
 
 /**

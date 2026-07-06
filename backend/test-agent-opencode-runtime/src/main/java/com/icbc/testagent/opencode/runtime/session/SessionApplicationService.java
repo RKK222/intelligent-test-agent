@@ -181,8 +181,19 @@ public class SessionApplicationService {
      * 分页列出 Session 消息，优先刷新 agent 投影，刷新失败时使用数据库快照 fallback。
      */
     public PageResponse<SessionMessage> listMessages(SessionId sessionId, PageRequest pageRequest, String traceId) {
+        return listMessages(sessionId, pageRequest, traceId, true);
+    }
+
+    /**
+     * 分页列出 Session 消息；反馈映射等只读场景可关闭远端刷新，避免兼容接口重复拉取快照。
+     */
+    public PageResponse<SessionMessage> listMessages(
+            SessionId sessionId,
+            PageRequest pageRequest,
+            String traceId,
+            boolean refreshSnapshot) {
         Session session = getSession(sessionId);
-        if (snapshotService != null) {
+        if (refreshSnapshot && snapshotService != null) {
             snapshotService.refreshSessionSnapshot("opencode", session, traceId);
         }
         return sessionMessageRepository.findBySessionId(sessionId, pageRequest);

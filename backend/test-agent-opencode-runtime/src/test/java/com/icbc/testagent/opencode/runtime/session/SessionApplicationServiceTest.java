@@ -2,6 +2,9 @@ package com.icbc.testagent.opencode.runtime.session;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
@@ -21,11 +24,13 @@ import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
+import com.icbc.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class SessionApplicationServiceTest {
 
@@ -121,6 +126,49 @@ class SessionApplicationServiceTest {
         assertThat(message.senderUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
         assertThat(messages.saved).singleElement().satisfies(saved ->
                 assertThat(saved.senderUserId()).isEqualTo(new UserId("usr_1234567890abcdef")));
+    }
+
+    @Test
+    void listMessagesCanSkipAgentSnapshotRefreshForReadOnlyMapping() {
+        RunSessionMessageSnapshotService snapshotService = Mockito.mock(RunSessionMessageSnapshotService.class);
+        FakeMessageRepository messages = new FakeMessageRepository();
+        Session activeSession = session();
+        messages.save(new SessionMessage(
+                new SessionMessageId("msg_1234567890abcdef1234567890abcdef"),
+                activeSession.sessionId(),
+                SessionMessageRole.ASSISTANT,
+                "done",
+                NOW,
+                "trace_1234567890abcdef"));
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                new FakeSessionRepository(activeSession),
+                messages,
+                snapshotService);
+
+        PageResponse<SessionMessage> page = service.listMessages(
+                SESSION_ID,
+                new PageRequest(1, 20),
+                "trace_1234567890abcdef",
+                false);
+
+        assertThat(page.items()).hasSize(1);
+        verify(snapshotService, never()).refreshSessionSnapshot(eq("opencode"), eq(activeSession), eq("trace_1234567890abcdef"));
+    }
+
+    @Test
+    void listMessagesRefreshesAgentSnapshotByDefaultForCompatibility() {
+        RunSessionMessageSnapshotService snapshotService = Mockito.mock(RunSessionMessageSnapshotService.class);
+        Session activeSession = session();
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                new FakeSessionRepository(activeSession),
+                new FakeMessageRepository(),
+                snapshotService);
+
+        service.listMessages(SESSION_ID, new PageRequest(1, 20), "trace_1234567890abcdef");
+
+        verify(snapshotService).refreshSessionSnapshot(eq("opencode"), eq(activeSession), eq("trace_1234567890abcdef"));
     }
 
     private static SessionApplicationService service(
