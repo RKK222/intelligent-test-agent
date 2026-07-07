@@ -24,7 +24,7 @@
 - `components/EditorPane.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。
-- `components/workbench-utils.ts`：Diff payload 解析、错误反馈、history/runtime status 派生、opencode 弱健康 ready 规则、命令解析，以及普通工作空间根目录 `.opencode` 过滤等纯函数。
+- `components/workbench-utils.ts`：Diff payload 解析、错误反馈、history/runtime status 派生、session-tree 历史快照恢复和子 Agent 索引兜底、opencode 弱健康 ready 规则、命令解析，以及普通工作空间根目录 `.opencode` 过滤等纯函数。
 - `styles/globals.css`：Tailwind 4 全局入口、theme token、dockview-vue/Monaco 视觉适配、滚动条、panel chrome 和工作台级动画。
 - `../vite.config.ts`：Vite 应用配置（Vue 插件、Tailwind 插件、workspace alias、dev server）。
 

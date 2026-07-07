@@ -14,6 +14,7 @@ import type {
   Session,
   SessionMessage,
   SessionTreeMessagesResponse,
+  SubagentSession,
   UserOpencodeProcess,
   UserOpencodeProcessHealth,
   UserOpencodeProcessHealthRequest,
@@ -590,6 +591,7 @@ export function chatStateFromSessionTreeSnapshot(
       event: runEventFromSessionTreeEvent(snapshot, event, index)
     });
   });
+  state = hydrateSubagentIndexesFromSessionTreeSnapshot(state, snapshot);
   const persistedAgentMessages = messagesFromSessionMessages(persistedMessages);
   if (state.messages.length > 0 && persistedAgentMessages.length > 0) {
     return {
@@ -602,6 +604,92 @@ export function chatStateFromSessionTreeSnapshot(
 
 export function messagesFromSessionTreeSnapshot(snapshot: SessionTreeMessagesResponse): AgentMessage[] {
   return chatStateFromSessionTreeSnapshot(snapshot).messages;
+}
+
+function hydrateSubagentIndexesFromSessionTreeSnapshot(
+  state: AgentChatRuntimeState,
+  snapshot: SessionTreeMessagesResponse
+): AgentChatRuntimeState {
+  let changed = false;
+  const subagentsBySessionId: Record<string, SubagentSession> = { ...state.subagentsBySessionId };
+  const subagentByTaskPartId: Record<string, string> = { ...state.subagentByTaskPartId };
+  for (const session of snapshot.sessions ?? []) {
+    if (!session.childSession || !session.sessionId || !session.taskPartId) {
+      continue;
+    }
+    const sessionId = snapshot.childSessionIdByTaskPartId?.[session.taskPartId] ?? session.sessionId;
+    if (!subagentByTaskPartId[session.taskPartId]) {
+      subagentByTaskPartId[session.taskPartId] = sessionId;
+      changed = true;
+    }
+    if (subagentsBySessionId[sessionId]) {
+      continue;
+    }
+    // 历史 snapshot 可能缺少 durable discovery 事件；此处仅用顶层 session 索引补齐导航所需的最小子 Agent 状态。
+    subagentsBySessionId[sessionId] = subagentFromSnapshotSession(state.messages, session, sessionId);
+    changed = true;
+  }
+  return changed ? { ...state, subagentsBySessionId, subagentByTaskPartId } : state;
+}
+
+function subagentFromSnapshotSession(
+  messages: AgentMessage[],
+  session: SessionTreeMessagesResponse["sessions"][number],
+  sessionId: string
+): SubagentSession {
+  const task = findTaskPartForSnapshotSession(messages, session.taskMessageId ?? undefined, session.taskPartId ?? undefined);
+  const taskInput = record(task?.part.input);
+  const title =
+    text(taskInput?.description) ??
+    firstNonEmptyLine(text(taskInput?.prompt)) ??
+    "Subagent task";
+  const agentName = displayAgentName(text(taskInput?.subagent_type) ?? "Task");
+  return {
+    sessionId,
+    parentSessionId: session.parentSessionId ?? undefined,
+    taskMessageId: session.taskMessageId ?? undefined,
+    taskPartId: session.taskPartId ?? undefined,
+    taskCallId: session.taskCallId ?? task?.part.callId,
+    agentName,
+    title,
+    status: task?.part.status ?? "running",
+    updatedAt: task?.message.createdAt ?? new Date(0).toISOString()
+  };
+}
+
+function findTaskPartForSnapshotSession(
+  messages: AgentMessage[],
+  taskMessageId: string | undefined,
+  taskPartId: string | undefined
+): { message: Extract<AgentMessage, { role: "assistant" }>; part: Extract<MessagePart, { type: "tool" }> } | undefined {
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    const messageMatches = !taskMessageId || message.messageId === taskMessageId || message.id === taskMessageId;
+    for (const part of message.parts ?? []) {
+      if (part.type !== "tool" || part.toolName !== "task") {
+        continue;
+      }
+      if (taskPartId && part.partId !== taskPartId) {
+        continue;
+      }
+      if (!messageMatches && taskPartId === undefined) {
+        continue;
+      }
+      return { message, part };
+    }
+  }
+  return undefined;
+}
+
+function firstNonEmptyLine(value: string | undefined): string | undefined {
+  return value?.split(/\r?\n/).map((item) => item.trim()).find(Boolean);
+}
+
+function displayAgentName(value: string): string {
+  const trimmed = value.trim();
+  return trimmed ? `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}` : "Task";
 }
 
 function mergeSessionTreeMessages(persistedMessages: AgentMessage[], treeMessages: AgentMessage[]): AgentMessage[] {

@@ -1,6 +1,8 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
+import { chatStateFromSessionTreeSnapshot } from "../src/components/workbench-utils";
 import FigmaChatPanel from "../src/components/FigmaChatPanel.vue";
+import type { SessionTreeMessagesResponse } from "@test-agent/shared-types";
 
 // MarkdownView 内部用 150ms 定时器 + 动态 import 异步渲染正文，
 // 单测同步断言时会停在“渲染中…”占位。这里桩成同步直出 source，
@@ -874,6 +876,98 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).toContain("Explore");
+    expect(wrapper.text()).toContain("Explore project structure");
+    expect(wrapper.text()).not.toContain("子 Agent 输出");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("子 Agent 输出");
+  });
+
+  it("makes historical subagent cards clickable from session tree snapshot indexes", async () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: { prt_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "msg_root", role: "assistant" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              state: {
+                status: "completed",
+                input: { description: "Explore project structure", subagent_type: "explore" }
+              }
+            }
+          }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskMessageId: "msg_root",
+            taskPartId: "prt_task",
+            taskCallId: "call_task",
+            message: { id: "msg_child", role: "assistant", content: "子 Agent 输出" }
+          }
+        }
+      ]
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: state.messages,
+        messageScopesById: state.messageScopesById,
+        subagentsBySessionId: state.subagentsBySessionId,
+        subagentByTaskPartId: state.subagentByTaskPartId,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).toContain("Explore project structure");
     expect(wrapper.text()).not.toContain("子 Agent 输出");
 

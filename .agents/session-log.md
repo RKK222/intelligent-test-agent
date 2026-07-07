@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-07 - 修复历史子智能体点击恢复
+
+- Why:
+  - 历史 session-tree 只回放 RunEvent 快照时，旧数据可能缺少 durable `session.child.discovered` 或 task metadata，导致 root task 子 Agent 卡片无法拿到 `subagent.sessionId`，卡片保持 disabled 且不能切换到 child timeline。
+- What:
+  - `chatStateFromSessionTreeSnapshot()` 在事件重放后扫描 snapshot 顶层 `sessions` 和 `childSessionIdByTaskPartId`，为 `childSession=true && taskPartId` 的记录补齐 `subagentsBySessionId` / `subagentByTaskPartId` 兜底索引；标题、Agent 名和状态优先从 root task part 推导，实时 SSE reducer 不变。补充 workbench-utils 和 FigmaChatPanel 历史 snapshot 回归用例，并同步前端 README/PACKAGE 说明。
+- How:
+  - 仅修改前端历史恢复链路和测试，不改后端 API、DTO、数据库或 SSE 契约；兜底索引只在 reducer 未建立对应 child session 时生效。
+- Result:
+  - `apps/agent-web/tests/workbench-utils.test.ts` 全量通过，新增 snapshot 聚焦回归通过，`vue-tsc -p apps/agent-web/tsconfig.json` 和 `git diff --check` 通过；计划要求的完整 `FigmaChatPanel.test.ts` 仍有既有 composer 拖拽高度断言失败（期望 100px、实际 40px），完整 `opencode-timeline.test.ts` 仍有既有 diff 路径展示断言失败（测试期望 `src/...`，当前 UI 显示 basename 并把完整路径放在 `title`）。
+
 ### 2026-07-07 - 修复企业内 opencode worker 打包链路
 
 - Why:

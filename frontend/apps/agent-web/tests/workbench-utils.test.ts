@@ -516,6 +516,92 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("restores subagent indexes from snapshot sessions when discovery events are absent", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: { prt_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "msg_root", role: "assistant" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              state: {
+                status: "completed",
+                input: { description: "Explore project structure", subagent_type: "explore" }
+              }
+            }
+          }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskMessageId: "msg_root",
+            taskPartId: "prt_task",
+            taskCallId: "call_task",
+            message: { id: "msg_child", role: "assistant", content: "子 Agent 输出" }
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+
+    expect(state.subagentByTaskPartId.prt_task).toBe("ses_child");
+    expect(state.subagentsBySessionId.ses_child).toMatchObject({
+      sessionId: "ses_child",
+      parentSessionId: "ses_root",
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task",
+      agentName: "Explore",
+      title: "Explore project structure",
+      status: "completed"
+    });
+  });
+
   it("keeps persisted user turns when session tree supplies assistant snapshots", () => {
     const persisted: SessionMessage[] = [
       {
