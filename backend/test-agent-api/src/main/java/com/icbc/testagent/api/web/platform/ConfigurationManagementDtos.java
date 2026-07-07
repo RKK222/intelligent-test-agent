@@ -28,6 +28,7 @@ final class ConfigurationManagementDtos {
             String branch,
             String directoryPath,
             String workspaceName,
+            Boolean directoryNew,
             String version,
             String operationId) {
     }

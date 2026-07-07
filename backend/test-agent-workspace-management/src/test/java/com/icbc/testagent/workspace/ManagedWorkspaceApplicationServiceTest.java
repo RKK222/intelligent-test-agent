@@ -105,6 +105,80 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void workspaceCreateForTestRepositoryRequiresDirectChildOfApplicationRoot() {
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(true),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace/F1"));
+
+        assertThatThrownBy(() -> service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "feature_testagent_20260707",
+                "F-GCMS/workspace/F1",
+                "deep",
+                false,
+                null,
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_direct_child"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void workspaceCreateCanCreateNewDirectChildDirectoryAfterClone() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/existing");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse response = service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "feature_testagent_20260707",
+                "F-GCMS/NewSpace",
+                "新目录",
+                true,
+                null,
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_new_dir");
+
+        assertThat(response.directoryPath()).isEqualTo("F-GCMS/NewSpace");
+        assertThat(Files.isDirectory(root.resolve("appworkspace/20260707/gcms/F-GCMS/NewSpace"))).isTrue();
+    }
+
+    @Test
+    void workspaceCreateRejectsDuplicateWorkspaceAliasInSameApplication() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/W1"));
+
+        assertThatThrownBy(() -> service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "feature_testagent_20260707",
+                "F-GCMS/W1",
+                "GCMS Workspace",
+                false,
+                null,
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_duplicate_alias"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
     void internalRepositoryGitOperationsUseCurrentUsersEffectiveGitUrl() throws Exception {
         UserId userId = new UserId("usr_1");
         CodeRepository internalRepository = new CodeRepository(
@@ -1890,6 +1964,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final CodeRepository repository;
         private final List<UserSshKey> sshKeys;
         private final ApplicationWorkspace workspace;
+        private final List<ApplicationWorkspace> savedWorkspaces = new ArrayList<>();
 
         private FakeConfigurationRepository(boolean member) {
             this(member, new CodeRepository(
@@ -1921,17 +1996,26 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override public List<ApplicationDefinition> findApplicationsByRepository(CodeRepositoryId repositoryId) { return List.of(app); }
         @Override public void linkRepository(ApplicationId appId, CodeRepositoryId repositoryId) {}
         @Override public void unlinkRepository(ApplicationId appId, CodeRepositoryId repositoryId) {}
-        @Override public List<ApplicationWorkspace> findWorkspaces(ApplicationId appId) { return List.of(workspace); }
+        @Override public List<ApplicationWorkspace> findWorkspaces(ApplicationId appId) {
+            List<ApplicationWorkspace> result = new ArrayList<>();
+            result.add(workspace);
+            result.addAll(savedWorkspaces);
+            return result;
+        }
         @Override public Optional<ApplicationWorkspace> findWorkspace(ApplicationWorkspaceId workspaceId) { return Optional.of(workspace); }
         @Override public Optional<ApplicationWorkspace> findWorkspaceByLocation(ApplicationId appId, CodeRepositoryId repositoryId, String branch, String directoryPath) {
-            return workspace.appId().equals(appId)
-                    && workspace.repositoryId().equals(repositoryId)
-                    && workspace.branch().equals(branch)
-                    && workspace.directoryPath().equals(directoryPath)
-                    ? Optional.of(workspace)
-                    : Optional.empty();
+            return findWorkspaces(appId).stream()
+                    .filter(item -> item.repositoryId().equals(repositoryId)
+                            && item.branch().equals(branch)
+                            && item.directoryPath().equals(directoryPath))
+                    .findFirst();
         }
-        @Override public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) { return workspace; }
+        @Override public Optional<ApplicationWorkspace> findWorkspaceByName(ApplicationId appId, String workspaceName) {
+            return findWorkspaces(appId).stream()
+                    .filter(item -> item.workspaceName().equals(workspaceName))
+                    .findFirst();
+        }
+        @Override public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) { savedWorkspaces.add(workspace); return workspace; }
         @Override public ApplicationWorkspace updateWorkspace(ApplicationWorkspace workspace) { return workspace; }
         @Override public void deleteWorkspace(ApplicationWorkspaceId workspaceId) {}
         @Override public List<UserSshKey> findSshKeys(UserId userId) { return sshKeys; }

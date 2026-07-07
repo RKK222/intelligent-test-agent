@@ -11,6 +11,10 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.SshKeyEncryptionService;
+import com.icbc.testagent.domain.configuration.ApplicationDefinition;
+import com.icbc.testagent.domain.configuration.ApplicationId;
+import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
+import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepositoryType;
 import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
@@ -228,6 +232,43 @@ class ConfigurationManagementApplicationServiceTest {
     }
 
     @Test
+    void renameWorkspaceRejectsDuplicateAliasInSameApplication() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ApplicationId appId = new ApplicationId("app_1");
+        ApplicationWorkspace current = new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_1"),
+                appId,
+                new CodeRepositoryId("repo_1"),
+                "main",
+                "F-COSS/W1",
+                "工作空间1",
+                NOW,
+                NOW);
+        ApplicationWorkspace duplicate = new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_2"),
+                appId,
+                new CodeRepositoryId("repo_1"),
+                "main",
+                "F-COSS/W2",
+                "ai-test",
+                NOW,
+                NOW);
+        when(repository.findWorkspace(current.workspaceId())).thenReturn(Optional.of(current));
+        when(repository.findWorkspaceByName(appId, "ai-test")).thenReturn(Optional.of(duplicate));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+
+        assertThatThrownBy(() -> service.renameWorkspace("app_1", "awp_1", " ai-test "))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
     void sshRepositoryBranchesUseCurrentUsersStoredPrivateKey() {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
         UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);
@@ -286,6 +327,94 @@ class ConfigurationManagementApplicationServiceTest {
         verify(gitRemoteService).listBranches(
                 "ssh://001177621@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
                 PRIVATE_KEY);
+    }
+
+    @Test
+    void repositoryTreeFiltersTestWorkRepositoryToCurrentAppRoot() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);
+        GitRemoteService gitRemoteService = org.mockito.Mockito.mock(GitRemoteService.class);
+        SshKeyEncryptionService encryptionService = sshKeyFixtures.encryptionService();
+        UserId userId = new UserId("usr_123");
+        UserSshKey storedKey = sshKeyFixtures.encryptedSshKey(
+                new SshKeyId("ssh_123"), userId, "work", PRIVATE_KEY, NOW);
+        ApplicationDefinition app = new ApplicationDefinition(new ApplicationId("app_f_coss"), "F-COSS", true, NOW, NOW);
+        CodeRepository codeRepository = new CodeRepository(
+                new CodeRepositoryId("repo_123"),
+                "git@gitee.com:demo/repo.git",
+                "测试库",
+                "test-repo",
+                CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                true,
+                NOW,
+                NOW);
+        List<GitRemoteService.RemoteTreeNode> remoteTree = List.of(
+                new GitRemoteService.RemoteTreeNode(
+                        "F-COSS",
+                        "F-COSS",
+                        "directory",
+                        List.of(new GitRemoteService.RemoteTreeNode(
+                                "W1",
+                                "F-COSS/W1",
+                                "directory",
+                                List.of(new GitRemoteService.RemoteTreeNode(
+                                        "case.md",
+                                        "F-COSS/W1/case.md",
+                                        "file",
+                                        List.of()))))),
+                new GitRemoteService.RemoteTreeNode(
+                        "OTHER",
+                        "OTHER",
+                        "directory",
+                        List.of()));
+
+        when(repository.findApplication(app.appId())).thenReturn(Optional.of(app));
+        when(repository.findRepository(codeRepository.repositoryId())).thenReturn(Optional.of(codeRepository));
+        when(repository.findRepositoriesByApplication(app.appId())).thenReturn(List.of(codeRepository));
+        when(repository.findSshKeys(userId)).thenReturn(List.of(storedKey));
+        when(gitRemoteService.listTree(codeRepository.gitUrl(), "feature_testagent_20260707", PRIVATE_KEY)).thenReturn(remoteTree);
+
+        ConfigurationManagementApplicationService service =
+                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, createTestCacheService(), encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+
+        ConfigurationManagementResponses.RepositoryTreeResponse response =
+                service.listRepositoryTree("app_f_coss", "repo_123", "feature_testagent_20260707", userId);
+
+        assertThat(response.nodes()).singleElement().satisfies(root -> {
+            assertThat(root.name()).isEqualTo("F-COSS");
+            assertThat(root.children()).singleElement().satisfies(child -> {
+                assertThat(child.path()).isEqualTo("F-COSS/W1");
+                assertThat(child.children()).singleElement()
+                        .extracting(ConfigurationManagementResponses.RepositoryTreeNodeResponse::type)
+                        .isEqualTo("file");
+            });
+        });
+    }
+
+    @Test
+    void repositoryTreeReturnsAllNodesForNonTestRepository() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);
+        GitRemoteService gitRemoteService = org.mockito.Mockito.mock(GitRemoteService.class);
+        ApplicationDefinition app = new ApplicationDefinition(new ApplicationId("app_f_coss"), "F-COSS", true, NOW, NOW);
+        CodeRepository codeRepository = codeRepository("https://gitee.com/demo/repo.git");
+        List<GitRemoteService.RemoteTreeNode> remoteTree = List.of(
+                new GitRemoteService.RemoteTreeNode("src", "src", "directory", List.of()),
+                new GitRemoteService.RemoteTreeNode("README.md", "README.md", "file", List.of()));
+
+        when(repository.findApplication(app.appId())).thenReturn(Optional.of(app));
+        when(repository.findRepository(codeRepository.repositoryId())).thenReturn(Optional.of(codeRepository));
+        when(repository.findRepositoriesByApplication(app.appId())).thenReturn(List.of(codeRepository));
+        when(gitRemoteService.listTree(codeRepository.gitUrl(), "main", null)).thenReturn(remoteTree);
+
+        ConfigurationManagementApplicationService service =
+                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, createTestCacheService(), sshKeyFixtures.encryptionService(), org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+
+        ConfigurationManagementResponses.RepositoryTreeResponse response =
+                service.listRepositoryTree("app_f_coss", "repo_123", "main", new UserId("usr_123"));
+
+        assertThat(response.nodes()).extracting(ConfigurationManagementResponses.RepositoryTreeNodeResponse::path)
+                .containsExactly("src", "README.md");
     }
 
     @Test

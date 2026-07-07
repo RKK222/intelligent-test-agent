@@ -395,6 +395,13 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     }
 
     @Override
+    public Optional<ApplicationWorkspace> findWorkspaceByName(ApplicationId appId, String workspaceName) {
+        return findWorkspaces(appId).stream()
+                .filter(workspace -> workspace.workspaceName().equals(workspaceName))
+                .findFirst();
+    }
+
+    @Override
     public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) {
         jdbcClient.sql("""
                         insert into application_workspaces(

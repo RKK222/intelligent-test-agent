@@ -705,6 +705,23 @@ describe("backend-api", () => {
         success: true,
         traceId: "trace_fixed",
         data: {
+          nodes: [
+            {
+              name: "F-COSS",
+              path: "F-COSS",
+              type: "directory",
+              children: [
+                { name: "W1", path: "F-COSS/W1", type: "directory", children: [] },
+                { name: "case.md", path: "F-COSS/case.md", type: "file", children: [] }
+              ]
+            }
+          ]
+        }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
           workspaceId: "awp_1",
           appId: "app_1",
           repositoryId: "repo_1",
@@ -736,10 +753,25 @@ describe("backend-api", () => {
       repositoryType: "TEST_WORK_REPOSITORY",
       standard: true
     });
+    await expect(client.getRepositoryTree("app_1", "repo_1", "feature_testagent_20260707"))
+      .resolves.toEqual({
+        nodes: [
+          {
+            name: "F-COSS",
+            path: "F-COSS",
+            type: "directory",
+            children: [
+              { name: "W1", path: "F-COSS/W1", type: "directory", children: [] },
+              { name: "case.md", path: "F-COSS/case.md", type: "file", children: [] }
+            ]
+          }
+        ]
+      });
     await client.createApplicationWorkspace("app_1", {
       repositoryId: "repo_1",
       branch: "feature_testagent_20260707",
       directoryPath: "src",
+      directoryNew: true,
       operationId: "wco_123"
     });
     await client.getWorkspaceCreateOperation("wco_123");
@@ -750,8 +782,9 @@ describe("backend-api", () => {
       repositoryType: "TEST_WORK_REPOSITORY",
       standard: true
     });
-    expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toMatchObject({ operationId: "wco_123" });
-    expect(fetcher.mock.calls[2]?.[0]).toBe("http://api/api/internal/platform/configuration-management/workspace-create-operations/wco_123");
+    expect(fetcher.mock.calls[1]?.[0]).toBe("http://api/api/internal/platform/configuration-management/applications/app_1/repositories/repo_1/tree?branch=feature_testagent_20260707");
+    expect(JSON.parse(String(fetcher.mock.calls[2]?.[1]?.body))).toMatchObject({ operationId: "wco_123", directoryNew: true });
+    expect(fetcher.mock.calls[3]?.[0]).toBe("http://api/api/internal/platform/configuration-management/workspace-create-operations/wco_123");
   });
 
   it("loads repository type options from configuration APIs", async () => {

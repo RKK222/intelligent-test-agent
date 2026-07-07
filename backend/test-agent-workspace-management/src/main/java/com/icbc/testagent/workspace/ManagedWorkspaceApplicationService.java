@@ -389,6 +389,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 targetLinuxServerId,
                 traceId,
                 true,
+                false,
                 WorkspaceCreateProgress.noop());
     }
 
@@ -398,6 +399,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String branch,
             String directoryPath,
             String workspaceName,
+            Boolean directoryNew,
             String version,
             String operationId,
             UserId userId,
@@ -417,6 +419,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String normalizedVersion = repository.standard()
                     ? versionFromStandardBranch(normalizedBranch)
                     : normalizeNonStandardWorkspaceCreateVersion(version);
+            validateWorkspaceCreateRules(application, repository, normalizedBranch, normalizedPath);
+            boolean createMissingDirectory = Boolean.TRUE.equals(directoryNew);
 
             progress.step(WorkspaceCreateOperationStep.SAVING_TEMPLATE);
             ApplicationWorkspace template = saveOrReuseWorkspaceTemplate(
@@ -437,6 +441,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     targetLinuxServerId,
                     traceId,
                     configurationRepository.isActiveMember(application.appId(), userId),
+                    createMissingDirectory,
                     progress);
             progress.succeeded(template.workspaceId(), new ApplicationWorkspaceVersionId(initialVersion.versionId()));
             return ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse.from(template, initialVersion);
@@ -459,6 +464,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String branch,
             String directoryPath,
             String workspaceName,
+            Boolean directoryNew,
             String version,
             String operationId,
             UserId userId,
@@ -484,6 +490,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 branch,
                 directoryPath,
                 workspaceName,
+                directoryNew,
                 version,
                 normalizedOperationId,
                 userId,
@@ -517,6 +524,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String branch,
             String directoryPath,
             String workspaceName,
+            Boolean directoryNew,
             String version,
             String normalizedOperationId,
             UserId userId,
@@ -531,6 +539,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String normalizedVersion = repository.standard()
                     ? versionFromStandardBranch(normalizedBranch)
                     : normalizeNonStandardWorkspaceCreateVersion(version);
+            validateWorkspaceCreateRules(application, repository, normalizedBranch, normalizedPath);
+            boolean createMissingDirectory = Boolean.TRUE.equals(directoryNew);
 
             progress.step(WorkspaceCreateOperationStep.SAVING_TEMPLATE);
             ApplicationWorkspace template = saveOrReuseWorkspaceTemplate(
@@ -551,6 +561,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     targetLinuxServerId,
                     traceId,
                     configurationRepository.isActiveMember(application.appId(), userId),
+                    createMissingDirectory,
                     progress);
 
             LOGGER.info("Workspace create completed, operationId={}, workspaceId={}, versionId={}",
@@ -587,6 +598,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String targetLinuxServerId,
             String traceId,
             boolean markRecent,
+            boolean createMissingDirectory,
             WorkspaceCreateProgress progress) {
         Optional<ApplicationWorkspaceVersion> existing = managedWorkspaceRepository.findVersionByTemplateAndVersion(template.workspaceId(), normalizedVersion);
         if (existing.isPresent()) {
@@ -605,7 +617,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String workspaceRootValue = appWorkspaceValue(normalizedVersion, repository, template);
         String privateKey = privateKeyFor(repository, userId);
         progress.step(WorkspaceCreateOperationStep.PREPARING_REPOSITORY);
-        prepareApplicationRepo(repository, resolvedBranch, repoRoot, workspaceRoot, privateKey, effectiveGitUrl(repository, userId));
+        prepareApplicationRepo(repository, resolvedBranch, repoRoot, workspaceRoot, privateKey, effectiveGitUrl(repository, userId), createMissingDirectory);
         progress.step(WorkspaceCreateOperationStep.CREATING_RUNTIME_WORKSPACE);
         Workspace runtimeWorkspace = createRuntimeWorkspace(
                 template.workspaceName() + "-" + normalizedVersion,
@@ -1992,7 +2004,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .map(ManagedWorkspaceResponses.BranchPreferenceResponse::from);
     }
 
-    private void prepareApplicationRepo(CodeRepository repository, String branch, Path repoRoot, Path workspaceRoot, String privateKey, String effectiveGitUrl) {
+    private void prepareApplicationRepo(CodeRepository repository, String branch, Path repoRoot, Path workspaceRoot, String privateKey, String effectiveGitUrl, boolean createMissingDirectory) {
         try {
             if (Files.exists(repoRoot)) {
                 if (!Files.isDirectory(repoRoot)) {
@@ -2007,6 +2019,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             } else {
                 Files.createDirectories(repoRoot.getParent());
                 gitWorkspaceService.cloneBranch(effectiveGitUrl, branch, repoRoot, privateKey);
+            }
+            if (createMissingDirectory && !Files.exists(workspaceRoot)) {
+                Path normalizedRepoRoot = repoRoot.toAbsolutePath().normalize();
+                Path normalizedWorkspaceRoot = workspaceRoot.toAbsolutePath().normalize();
+                if (!normalizedWorkspaceRoot.startsWith(normalizedRepoRoot)) {
+                    throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目录路径无效", Map.of("path", workspaceRoot.toString()));
+                }
+                Files.createDirectories(workspaceRoot);
             }
             if (!Files.isDirectory(workspaceRoot)) {
                 throw new PlatformException(ErrorCode.CONFLICT, "应用工作区目录不存在", Map.of("path", workspaceRoot.toString()));
@@ -2048,7 +2068,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String repoRootValue = appRepoValue(version.version(), repository);
         String workspaceRootValue = appWorkspaceValue(version.version(), repository, template);
         String privateKey = privateKeyFor(repository, userId);
-        prepareApplicationRepo(repository, version.branch(), repoRoot, workspaceRoot, privateKey, effectiveGitUrl(repository, userId));
+        prepareApplicationRepo(repository, version.branch(), repoRoot, workspaceRoot, privateKey, effectiveGitUrl(repository, userId), false);
         Optional<ApplicationWorkspaceVersionReplica> existing = managedWorkspaceRepository.findVersionReplica(
                 version.versionId(),
                 serverIdentity.linuxServerId());
@@ -2491,6 +2511,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String resolvedName = workspaceName == null || workspaceName.isBlank()
                 ? defaultWorkspaceName(directoryPath)
                 : workspaceName.trim();
+        ensureWorkspaceNameUnique(appId, resolvedName, null);
         Instant now = Instant.now();
         return configurationRepository.saveWorkspace(new ApplicationWorkspace(
                 new ApplicationWorkspaceId(RuntimeIdGenerator.applicationWorkspaceId()),
@@ -2507,6 +2528,44 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String value = directoryPath == null || directoryPath.isBlank() ? "workspace" : directoryPath;
         int index = value.lastIndexOf('/');
         return index >= 0 ? value.substring(index + 1) : value;
+    }
+
+    private void ensureWorkspaceNameUnique(ApplicationId appId, String workspaceName, ApplicationWorkspaceId currentWorkspaceId) {
+        configurationRepository.findWorkspaceByName(appId, workspaceName).ifPresent(existing -> {
+            if (currentWorkspaceId == null || !existing.workspaceId().equals(currentWorkspaceId)) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "同一应用下工作空间别名不能重复",
+                        Map.of("workspaceName", workspaceName, "workspaceId", existing.workspaceId().value()));
+            }
+        });
+    }
+
+    /**
+     * 设置页保存测试工作库模板时，只允许应用根目录下一级目录作为工作空间。
+     * 文件、应用根自身和更深层目录只能浏览，不能作为 workspace root。
+     */
+    private void validateWorkspaceCreateRules(
+            ApplicationDefinition application,
+            CodeRepository repository,
+            String normalizedBranch,
+            String normalizedPath) {
+        if (!repository.standard()) {
+            return;
+        }
+        versionFromStandardBranch(normalizedBranch);
+        String appName = requireText(application.appName(), "应用名称不能为空", "appName");
+        String[] segments = normalizedPath.split("/", -1);
+        if (segments.length != 2
+                || !appName.equals(segments[0])
+                || segments[1].isBlank()
+                || ".".equals(segments[1])
+                || "..".equals(segments[1])) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "测试工作库只能选择应用同名目录的一级子目录作为工作空间",
+                    Map.of("directoryPath", normalizedPath, "appName", appName));
+        }
     }
 
     private void ensureMember(ApplicationId appId, UserId userId) {

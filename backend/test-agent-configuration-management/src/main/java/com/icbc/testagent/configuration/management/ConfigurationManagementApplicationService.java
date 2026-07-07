@@ -12,10 +12,13 @@ import com.icbc.testagent.configuration.management.ConfigurationManagementRespon
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.CodeRepositoryResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryDeploymentOptionResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryDeploymentOptionsResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTreeNodeResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTreeResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTypeOptionResponse;
 import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.SshKeyResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.UserResponse;
+import com.icbc.testagent.common.git.GitRemoteService.RemoteTreeNode;
 import com.icbc.testagent.domain.configuration.ApplicationDefinition;
 import com.icbc.testagent.domain.configuration.ApplicationId;
 import com.icbc.testagent.domain.configuration.ApplicationMember;
@@ -56,7 +59,6 @@ public class ConfigurationManagementApplicationService {
     private static final Pattern SCP_LIKE_SSH_URL = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+:.+");
     private static final Pattern REPOSITORY_ENGLISH_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?$");
     private static final Pattern WHITESPACE = Pattern.compile("\\s");
-
     private final ConfigurationManagementRepository configurationRepository;
     private final DictionaryRepository dictionaryRepository;
     private final UserRepository userRepository;
@@ -298,6 +300,29 @@ public class ConfigurationManagementApplicationService {
         return gitCloneCacheService.listDirectories(effectiveGitUrl(repository, currentUserId), normalizedBranch, privateKey);
     }
 
+    /**
+     * 读取应用已关联版本库的远端目录/文件树。新接口只使用 git archive，不触发 clone/cache 落盘。
+     * 测试工作库仅返回当前应用同名根目录及其完整子树。
+     */
+    public RepositoryTreeResponse listRepositoryTree(String appId, String repositoryId, String branch, UserId currentUserId) {
+        ApplicationDefinition application = existingEnabledApp(appId);
+        CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
+        ensureRepositoryLinked(application.appId(), repository.repositoryId());
+        String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+        String privateKey = privateKeyFor(repository, currentUserId);
+        List<RemoteTreeNode> nodes = gitRemoteService.listTree(
+                effectiveGitUrl(repository, currentUserId),
+                normalizedBranch,
+                privateKey);
+        if (repository.standard()) {
+            nodes = nodes.stream()
+                    .filter(node -> GitRemoteService.NODE_TYPE_DIRECTORY.equals(node.type()))
+                    .filter(node -> application.appName().equals(node.name()) && application.appName().equals(node.path()))
+                    .toList();
+        }
+        return new RepositoryTreeResponse(nodes.stream().map(this::treeNodeResponse).toList());
+    }
+
     public List<ApplicationWorkspaceResponse> listWorkspaces(String appId) {
         ApplicationId applicationId = existingEnabledApp(appId).appId();
         return configurationRepository.findWorkspaces(applicationId).stream()
@@ -325,6 +350,7 @@ public class ConfigurationManagementApplicationService {
         String resolvedName = workspaceName == null || workspaceName.isBlank()
                 ? defaultWorkspaceName(normalizedPath)
                 : workspaceName.trim();
+        ensureWorkspaceNameUnique(applicationId, resolvedName, null);
         Instant now = Instant.now();
         ApplicationWorkspace workspace = new ApplicationWorkspace(
                 new ApplicationWorkspaceId(RuntimeIdGenerator.applicationWorkspaceId()),
@@ -343,7 +369,9 @@ public class ConfigurationManagementApplicationService {
         ApplicationWorkspace workspace = configurationRepository.findWorkspace(new ApplicationWorkspaceId(workspaceId))
                 .filter(found -> found.appId().equals(applicationId))
                 .orElseThrow(() -> notFound("应用工作空间不存在", "workspaceId", workspaceId));
-        ApplicationWorkspace updated = workspace.rename(requireText(workspaceName, "工作空间名称不能为空", "workspaceName"), Instant.now());
+        String normalizedName = requireText(workspaceName, "工作空间名称不能为空", "workspaceName");
+        ensureWorkspaceNameUnique(applicationId, normalizedName, workspace.workspaceId());
+        ApplicationWorkspace updated = workspace.rename(normalizedName, Instant.now());
         return workspaceResponse(configurationRepository.updateWorkspace(updated));
     }
 
@@ -589,6 +617,17 @@ public class ConfigurationManagementApplicationService {
         return index >= 0 ? directoryPath.substring(index + 1) : directoryPath;
     }
 
+    private void ensureWorkspaceNameUnique(ApplicationId appId, String workspaceName, ApplicationWorkspaceId currentWorkspaceId) {
+        configurationRepository.findWorkspaceByName(appId, workspaceName).ifPresent(existing -> {
+            if (currentWorkspaceId == null || !existing.workspaceId().equals(currentWorkspaceId)) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "同一应用下工作空间别名不能重复",
+                        Map.of("workspaceName", workspaceName, "workspaceId", existing.workspaceId().value()));
+            }
+        });
+    }
+
     private String normalizePrivateKey(String privateKey) {
         String value = requireText(privateKey, "SSH 私钥不能为空", "privateKey")
                 .replace("\r\n", "\n")
@@ -661,6 +700,14 @@ public class ConfigurationManagementApplicationService {
                 workspace.workspaceName(),
                 workspace.createdAt(),
                 workspace.updatedAt());
+    }
+
+    private RepositoryTreeNodeResponse treeNodeResponse(RemoteTreeNode node) {
+        return new RepositoryTreeNodeResponse(
+                node.name(),
+                node.path(),
+                node.type(),
+                node.children().stream().map(this::treeNodeResponse).toList());
     }
 
     private SshKeyResponse sshKeyResponse(UserSshKey sshKey) {

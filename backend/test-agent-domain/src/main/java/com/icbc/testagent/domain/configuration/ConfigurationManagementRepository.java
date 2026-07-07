@@ -51,6 +51,8 @@ public interface ConfigurationManagementRepository {
 
     Optional<ApplicationWorkspace> findWorkspaceByLocation(ApplicationId appId, CodeRepositoryId repositoryId, String branch, String directoryPath);
 
+    Optional<ApplicationWorkspace> findWorkspaceByName(ApplicationId appId, String workspaceName);
+
     ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace);
 
     ApplicationWorkspace updateWorkspace(ApplicationWorkspace workspace);

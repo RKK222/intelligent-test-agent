@@ -2,10 +2,11 @@ import { defineComponent, h, inject, provide } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
-import type { CodeRepositoryConfig } from "@test-agent/shared-types";
+import type { CodeRepositoryConfig, RepositoryTreeResponse } from "@test-agent/shared-types";
 import SettingsAppWorkspacePanel from "../src/components/settings/SettingsAppWorkspacePanel.vue";
 
 const selectCreateRepositoryValue = "__create_repository__";
+const branchRuleTooltip = "测试工作库的分支命名规则为：feature_testagent_yyyymmdd，yyyymmdd为投产日。";
 
 const repositories: CodeRepositoryConfig[] = [
   {
@@ -32,6 +33,49 @@ const repositories: CodeRepositoryConfig[] = [
   }
 ];
 
+const repositoryTree: RepositoryTreeResponse = {
+  nodes: [
+    {
+      name: "F-COSS",
+      path: "F-COSS",
+      type: "directory",
+      children: [
+        {
+          name: "W1",
+          path: "F-COSS/W1",
+          type: "directory",
+          children: [
+            {
+              name: "F1",
+              path: "F-COSS/W1/F1",
+              type: "directory",
+              children: []
+            },
+            {
+              name: "case.md",
+              path: "F-COSS/W1/case.md",
+              type: "file",
+              children: []
+            }
+          ]
+        },
+        {
+          name: "W2",
+          path: "F-COSS/W2",
+          type: "directory",
+          children: []
+        }
+      ]
+    },
+    {
+      name: "OTHER-APP",
+      path: "OTHER-APP",
+      type: "directory",
+      children: []
+    }
+  ]
+};
+
 function createApi(): Partial<BackendApiClient> {
   return {
     listApplications: vi.fn().mockResolvedValue([{ appId: "F-COSS", appName: "F-COSS", enabled: true }]),
@@ -47,6 +91,7 @@ function createApi(): Partial<BackendApiClient> {
     listApplicationWorkspaces: vi.fn().mockResolvedValue([]),
     listRepositoryBranches: vi.fn().mockResolvedValue(["main"]),
     listRepositoryDirectories: vi.fn().mockResolvedValue(["tests"]),
+    getRepositoryTree: vi.fn().mockResolvedValue(repositoryTree),
     createApplicationWorkspace: vi.fn().mockResolvedValue({}),
     getWorkspaceCreateOperation: vi.fn().mockResolvedValue({
       operationId: "wco_test",
@@ -103,9 +148,18 @@ const ElSelectStub = defineComponent({
 });
 
 const ElOptionStub = defineComponent({
-  props: ["label", "value"],
+  props: ["label", "value", "disabled", "title"],
   setup(props) {
-    return () => h("option", { value: String(props.value) }, String(props.label));
+    return () =>
+      h(
+        "option",
+        {
+          value: String(props.value),
+          disabled: Boolean(props.disabled),
+          title: props.title ? String(props.title) : undefined
+        },
+        String(props.label)
+      );
   }
 });
 
@@ -187,8 +241,9 @@ function renderPanel(api = createApi()) {
         },
         ElAutocomplete: ElAutocompleteStub,
         ElButton: {
+          props: ["disabled"],
           emits: ["click"],
-          template: `<button type="button" @click="$emit('click')"><slot /></button>`
+          template: `<button type="button" :disabled="disabled" @click="$emit('click')"><slot /></button>`
         },
         ElCheckbox: ElCheckboxStub,
         ElDatePicker: ElDatePickerStub,
@@ -265,71 +320,149 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(emitted()["switch-menu"][0]).toEqual(["repository"]);
   });
 
-  it("shows workspace creation as three labeled steps", async () => {
-    const { container, findByText, getByText, queryByText, getAllByText } = renderPanel();
+  it("shows workspace creation as a single form and automatically loads branches and tree", async () => {
+    const api = createApi();
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707", "main"]);
+    api.getRepositoryTree = vi.fn().mockResolvedValue(repositoryTree);
+    const { container, findByText, getByText, queryByText, getAllByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
 
     const createSection = getAllByText("创建工作空间").find(el => el.tagName === "H4")?.closest(".ta-section");
     expect(createSection).toBeTruthy();
-    const steps = container.querySelectorAll(".ta-workspace-step");
-    expect(steps[0].textContent).toContain("刷新分支");
-    expect(steps[1].textContent).toContain("加载目录");
-    expect(steps[2].textContent).toContain("创建工作空间");
     expect(within(createSection as HTMLElement).getByText("已关联版本库")).toBeTruthy();
     expect(within(createSection as HTMLElement).getByText("分支")).toBeTruthy();
-    expect(within(createSection as HTMLElement).getByText("目录")).toBeTruthy();
-    expect(within(createSection as HTMLElement).getByText("工作空间名称")).toBeTruthy();
-    expect(within(createSection as HTMLElement).getAllByText("刷新分支").length).toBeGreaterThan(0);
+    expect(within(createSection as HTMLElement).getByText("目录树")).toBeTruthy();
+    expect(within(createSection as HTMLElement).getByText("工作空间别名")).toBeTruthy();
+    expect(within(createSection as HTMLElement).getByText("保存")).toBeTruthy();
     expect(queryByText("加载分支")).toBeNull();
-    expect(container.querySelectorAll(".ta-workspace-step").length).toBe(3);
+    expect(queryByText("加载目录")).toBeNull();
+    expect(container.querySelectorAll(".ta-workspace-step").length).toBe(0);
+    await waitFor(() => expect(api.listRepositoryBranches).toHaveBeenCalledWith("repo_wr"));
+    await waitFor(() => expect(api.getRepositoryTree).toHaveBeenCalledWith("F-COSS", "repo_wr", "feature_testagent_20260707"));
   });
 
-  it("creates standard workspaces with an operation id and polls backend progress", async () => {
+  it("disables invalid test-work-repository branches and exposes the immediate tooltip text", async () => {
     const api = createApi();
-    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
-    api.listRepositoryDirectories = vi.fn().mockResolvedValue(["F-WRTESTAPP/workspace"]);
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("12345678-1234-1234-1234-123456789abc");
-    const { findByText, getByText, getAllByText } = renderPanel(api);
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["main", "feature_testagent_20260707"]);
+    const { findByText, getByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
-    await fireEvent.click(getAllByText("刷新分支").find(el => el.tagName === "BUTTON")!);
-    await fireEvent.click(getAllByText("加载目录").find(el => el.tagName === "BUTTON")!);
-    await fireEvent.click(getByText("创建"));
+
+    await waitFor(() => expect(api.listRepositoryBranches).toHaveBeenCalled());
+    const invalidOption = Array.from(document.querySelectorAll("option")).find((option) => option.textContent === "main") as HTMLOptionElement;
+    expect(invalidOption.disabled).toBe(true);
+    expect(invalidOption.title).toBe(branchRuleTooltip);
+  });
+
+  it("shows only the current app subtree and selects only app direct-child directories", async () => {
+    const api = createApi();
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
+    api.getRepositoryTree = vi.fn().mockResolvedValue(repositoryTree);
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("12345678-1234-1234-1234-123456789abc");
+    const { findByText, getByText, queryByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+
+    expect(await findByText("F-COSS")).toBeTruthy();
+    expect(await findByText("F-COSS/W1")).toBeTruthy();
+    expect(await findByText("F-COSS/W1/F1")).toBeTruthy();
+    expect(await findByText("F-COSS/W1/case.md")).toBeTruthy();
+    expect(queryByText("OTHER-APP")).toBeNull();
+    expect((getByText("F-COSS/W1").closest("button") as HTMLButtonElement).disabled).toBe(false);
+    expect((getByText("F-COSS/W1/F1").closest("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((getByText("F-COSS/W1/case.md").closest("button") as HTMLButtonElement).disabled).toBe(true);
+
+    await fireEvent.click(getByText("F-COSS/W1"));
+    await fireEvent.click(getByText("保存"));
 
     await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", {
       repositoryId: "repo_wr",
       branch: "feature_testagent_20260707",
-      directoryPath: "F-WRTESTAPP/workspace",
-      workspaceName: undefined,
+      directoryPath: "F-COSS/W1",
+      workspaceName: "ai-test",
       operationId: "wco_12345678123412341234123456789abc"
     }));
     await waitFor(() => expect(api.getWorkspaceCreateOperation).toHaveBeenCalledWith("wco_12345678123412341234123456789abc"));
+  });
+
+  it("adds a new direct child directory in memory and sends directoryNew on save", async () => {
+    const api = createApi();
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
+    api.getRepositoryTree = vi.fn().mockResolvedValue({ nodes: [repositoryTree.nodes[0]] });
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("32345678-1234-1234-1234-123456789abc");
+    const { findAllByText, findByText, getByPlaceholderText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+
+    await findByText("F-COSS");
+    await fireEvent.update(getByPlaceholderText("新增一级目录"), "W3");
+    await fireEvent.click(getByText("新增目录"));
+    expect((await findAllByText("F-COSS/W3")).length).toBeGreaterThan(0);
+    await fireEvent.click(getByText("保存"));
+
+    await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", expect.objectContaining({
+      repositoryId: "repo_wr",
+      branch: "feature_testagent_20260707",
+      directoryPath: "F-COSS/W3",
+      workspaceName: "ai-test",
+      directoryNew: true,
+      operationId: "wco_32345678123412341234123456789abc"
+    })));
+  });
+
+  it("defaults workspace alias to ai-test and disables saving duplicate aliases", async () => {
+    const api = createApi();
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
+    api.listApplicationWorkspaces = vi.fn().mockResolvedValue([
+      {
+        workspaceId: "ws_existing",
+        appId: "F-COSS",
+        repositoryId: "repo_wr",
+        branch: "feature_testagent_20260701",
+        directoryPath: "F-COSS/W0",
+        workspaceName: "ai-test",
+        createdAt: "2026-07-01T00:00:00Z",
+        updatedAt: "2026-07-01T00:00:00Z"
+      }
+    ]);
+    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+
+    expect((getByPlaceholderText("ai-test") as HTMLInputElement).value).toBe("ai-test");
+    expect(await findByText("工作空间别名已存在")).toBeTruthy();
+    expect((getByText("保存") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("requires yyyyMMdd version when creating a non-standard workspace", async () => {
     const api = createApi();
     api.listApplicationRepositories = vi.fn().mockResolvedValue([repositories[1]]);
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature/demo"]);
-    api.listRepositoryDirectories = vi.fn().mockResolvedValue(["src"]);
+    api.getRepositoryTree = vi.fn().mockResolvedValue({
+      nodes: [{ name: "src", path: "src", type: "directory", children: [] }]
+    });
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("22345678-1234-1234-1234-123456789abc");
-    const { findByText, getByPlaceholderText, getByText, getAllByText } = renderPanel(api);
+    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
-    await fireEvent.click(getAllByText("刷新分支").find(el => el.tagName === "BUTTON")!);
-    await fireEvent.click(getAllByText("加载目录").find(el => el.tagName === "BUTTON")!);
     expect(await findByText("非标准库版本")).toBeTruthy();
 
+    await fireEvent.click(await findByText("src"));
     await fireEvent.update(getByPlaceholderText("选择日期"), "20260707");
-    await fireEvent.click(getByText("创建"));
+    await fireEvent.click(getByText("保存"));
 
     await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", expect.objectContaining({
       repositoryId: "repo_mimo",
       branch: "feature/demo",
       directoryPath: "src",
+      workspaceName: "ai-test",
       version: "20260707"
     })));
   });

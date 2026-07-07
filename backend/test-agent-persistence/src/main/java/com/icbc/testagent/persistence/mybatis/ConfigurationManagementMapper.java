@@ -71,6 +71,10 @@ public interface ConfigurationManagementMapper {
             @Param("branch") String branch,
             @Param("directoryPath") String directoryPath);
 
+    ApplicationWorkspaceRow findWorkspaceByName(
+            @Param("appId") String appId,
+            @Param("workspaceName") String workspaceName);
+
     int insertWorkspace(ApplicationWorkspaceRow workspace);
 
     int updateWorkspace(ApplicationWorkspaceRow workspace);

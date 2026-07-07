@@ -238,6 +238,15 @@
           and directory_path = #{directoryPath}
     </select>
 
+    <select id="findWorkspaceByName" resultMap="ApplicationWorkspaceMap">
+        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        from application_workspaces
+        where app_id = #{appId}
+          and workspace_name = #{workspaceName}
+        order by updated_at desc, workspace_id
+        limit 1
+    </select>
+
     <insert id="insertWorkspace" parameterType="com.icbc.testagent.persistence.mybatis.ApplicationWorkspaceRow">
         insert into application_workspaces(
             workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at

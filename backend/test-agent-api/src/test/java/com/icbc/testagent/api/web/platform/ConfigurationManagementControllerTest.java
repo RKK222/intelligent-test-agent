@@ -14,6 +14,8 @@ import com.icbc.testagent.configuration.management.ConfigurationManagementRespon
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.CodeRepositoryResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryDeploymentOptionResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryDeploymentOptionsResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTreeNodeResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTreeResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTypeOptionResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.SshKeyResponse;
 import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
@@ -248,6 +250,27 @@ class ConfigurationManagementControllerTest {
     }
 
     @Test
+    void appAdminCanLoadApplicationRepositoryRemoteTree() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.listRepositoryTree("app_gcms", "repo_123", "feature_testagent_20260707", USER_ID))
+                .thenReturn(new RepositoryTreeResponse(List.of(new RepositoryTreeNodeResponse(
+                        "F-COSS",
+                        "F-COSS",
+                        "directory",
+                        List.of(new RepositoryTreeNodeResponse("W1", "F-COSS/W1", "directory", List.of()))))));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/configuration-management/applications/app_gcms/repositories/repo_123/tree?branch=feature_testagent_20260707")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.nodes[0].name").isEqualTo("F-COSS")
+                .jsonPath("$.data.nodes[0].children[0].path").isEqualTo("F-COSS/W1");
+    }
+
+    @Test
     void personalSshKeyResponseDoesNotExposePrivateKey() {
         ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
         when(service.addSshKey(eq(USER_ID), eq("work"), anyString(), anyString(), anyString(), anyString()))
@@ -297,6 +320,7 @@ class ConfigurationManagementControllerTest {
                 eq("feature_testagent_20260707"),
                 eq("src/main"),
                 eq("主工作区"),
+                eq(true),
                 eq(null),
                 eq("wco_12345678"),
                 eq(USER_ID),
@@ -313,7 +337,7 @@ class ConfigurationManagementControllerTest {
                 .header("X-Trace-Id", TRACE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
-                        {"repositoryId":"repo_123","branch":"feature_testagent_20260707","directoryPath":"src/main","workspaceName":"主工作区","operationId":"wco_12345678"}
+                        {"repositoryId":"repo_123","branch":"feature_testagent_20260707","directoryPath":"src/main","workspaceName":"主工作区","directoryNew":true,"operationId":"wco_12345678"}
                         """)
                 .exchange()
                 .expectStatus().isOk()

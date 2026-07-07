@@ -4481,3 +4481,14 @@ bash /tmp/test-api-after-restart.sh
   - 只保留本项目实际读取的变量；openclaw 的 `MIMOAGENT_ICBC_OPENAI_UCID/ENVIRONMENT` 没有本项目消费路径，未写入部署模板。真实 token 不入库，仅保留占位符。
 - Result:
   - compose config、部署脚本语法检查和 `git diff --check` 通过。
+
+### 2026-07-07 - 设置页工作空间创建改为远端树一次性表单
+
+- Why:
+  - 工作空间创建不再按刷新分支、加载目录、创建三步执行；分支和目录浏览阶段不能 clone 或落磁盘，测试工作库需要按应用同名目录过滤并只允许选择一级子目录。
+- What:
+  - 前端设置页创建工作空间改为版本库/分支/目录树/别名/保存的一次性表单，测试工作库无效分支禁选并展示命名规则提示，新增目录只作为前端内存节点随 `directoryNew=true` 保存。后端新增应用维度远端树 API，保存阶段强校验测试工作库分支和目录规则，并对同应用工作空间别名做 trim 后唯一校验。
+- How:
+  - `GitRemoteService` 通过 `git archive --remote` 解析目录/文件树；configuration-management 树接口校验应用、关联版本库和 SSH key，不使用本地 clone cache；workspace-management 只在保存时 clone/checkout，并在 `directoryNew=true` 且目标目录不存在时创建目录。新增 MyBatis XML 查询工作空间别名，JDBC 实现仅复用存量内存过滤。
+- Result:
+  - 精确前端面板/backend-api Vitest、agent-web/backend-api typecheck、后端目标 Maven 和 `git diff --check` 通过；计划命令 `corepack pnpm test -- backend-api` 仍会触发仓库中既有无关的 chat/git 面板断言失败。

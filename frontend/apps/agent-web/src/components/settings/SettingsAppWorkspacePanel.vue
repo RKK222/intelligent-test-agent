@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, defineComponent, h, inject, onBeforeUnmount, ref, watch, type PropType, type VNode } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   ApplicationDefinition,
   ApplicationMember,
   ApplicationWorkspaceConfig,
   CodeRepositoryConfig,
+  CreateApplicationWorkspacePayload,
   CurrentUser,
   PlatformUserSummary,
+  RepositoryTreeNode,
   RepositoryTypeOption,
   WorkspaceCreateOperation
 } from "@test-agent/shared-types";
@@ -17,6 +19,8 @@ const ADD_REPOSITORY_OPTION_VALUE = "__create_repository__";
 const TEST_WORK_REPOSITORY_TYPE = "TEST_WORK_REPOSITORY";
 const APPLICATION_CODE_REPOSITORY_TYPE = "APPLICATION_CODE_REPOSITORY";
 const STANDARD_REPOSITORY_TOOLTIP = "测试工作库等价于原标准库，会按标准库分支规则创建工作空间。";
+const TEST_WORK_BRANCH_RULE_TOOLTIP = "测试工作库的分支命名规则为：feature_testagent_yyyymmdd，yyyymmdd为投产日。";
+const DEFAULT_WORKSPACE_ALIAS = "ai-test";
 const DEFAULT_REPOSITORY_TYPES: RepositoryTypeOption[] = [
   { typeCode: TEST_WORK_REPOSITORY_TYPE, typeLabel: "测试工作库" },
   { typeCode: APPLICATION_CODE_REPOSITORY_TYPE, typeLabel: "应用代码库" },
@@ -27,6 +31,53 @@ type PendingDangerAction =
   | { type: "remove-member"; member: ApplicationMember }
   | { type: "unlink-repository"; repository: CodeRepositoryConfig }
   | { type: "delete-workspace"; workspace: ApplicationWorkspaceConfig };
+
+type WorkspaceTreeNode = Omit<RepositoryTreeNode, "children"> & {
+  children: WorkspaceTreeNode[];
+  directoryNew?: boolean;
+};
+
+const WorkspaceDirectoryTree = defineComponent({
+  name: "WorkspaceDirectoryTree",
+  props: {
+    nodes: { type: Array as PropType<WorkspaceTreeNode[]>, required: true },
+    selectedPath: { type: String, default: "" }
+  },
+  emits: ["select"],
+  setup(props, { emit }) {
+    const renderNodes = (nodes: WorkspaceTreeNode[], depth = 0): VNode =>
+      h(
+        "ul",
+        { class: "ta-workspace-tree-list", "data-depth": String(depth) },
+        nodes.map((node) => {
+          const selectable = isSelectableWorkspaceTreeNode(node);
+          return h("li", { key: node.path, class: ["ta-workspace-tree-item", `is-${node.type}`] }, [
+            h(
+              "button",
+              {
+                type: "button",
+                class: [
+                  "ta-workspace-tree-node",
+                  { "is-selected": props.selectedPath === node.path, "is-selectable": selectable }
+                ],
+                style: { paddingLeft: `${8 + depth * 16}px` },
+                disabled: !selectable,
+                title: workspaceTreeNodeTitle(node),
+                onClick: () => selectable && emit("select", node)
+              },
+              [
+                h("span", { class: "ta-workspace-tree-icon", "aria-hidden": "true" }, node.type === "directory" ? "▸" : "·"),
+                h("span", { class: "ta-workspace-tree-path" }, node.path),
+                node.directoryNew ? h("span", { class: "ta-workspace-tree-badge" }, "新增") : null
+              ]
+            ),
+            node.children.length ? renderNodes(node.children, depth + 1) : null
+          ]);
+        })
+      );
+    return () => renderNodes(props.nodes);
+  }
+});
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -94,9 +145,12 @@ const workspaces = ref<ApplicationWorkspaceConfig[]>([]);
 const workspaceRepositoryId = ref("");
 const branches = ref<string[]>([]);
 const workspaceBranch = ref("");
-const directories = ref<string[]>([]);
 const workspaceDirectory = ref("");
-const workspaceName = ref("");
+const workspaceDirectoryNew = ref(false);
+const repositoryTree = ref<WorkspaceTreeNode[]>([]);
+const newDirectoryName = ref("");
+const treeErrorMessage = ref("");
+const workspaceName = ref(DEFAULT_WORKSPACE_ALIAS);
 const workspaceVersion = ref("");
 const workspaceCreateOperation = ref<WorkspaceCreateOperation | null>(null);
 let workspaceCreatePollTimer: number | undefined;
@@ -107,6 +161,22 @@ const selectedWorkspaceRepository = computed(() => appRepositories.value.find((i
 const requiresWorkspaceVersion = computed(() => selectedWorkspaceRepository.value != null && !selectedWorkspaceRepository.value.standard);
 const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.steps ?? []);
 const customBranchError = ref("");
+const selectedAppName = computed(() => selectedApp.value?.appName ?? "");
+const workspaceAlias = computed(() => workspaceName.value.trim());
+const workspaceAliasDuplicate = computed(() => {
+  const alias = workspaceAlias.value;
+  return Boolean(alias) && workspaces.value.some((workspace) => workspace.workspaceName.trim() === alias);
+});
+const canAddWorkspaceDirectory = computed(() => {
+  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return false;
+  return Boolean(findTreeNode(repositoryTree.value, selectedAppName.value));
+});
+const canSaveWorkspace = computed(() => {
+  if (loading.value || !workspaceRepositoryId.value || !workspaceBranch.value || !workspaceDirectory.value) return false;
+  if (customBranchError.value || workspaceAliasDuplicate.value || !workspaceAlias.value) return false;
+  if (requiresWorkspaceVersion.value && !/^\d{8}$/.test(workspaceVersion.value ?? "")) return false;
+  return true;
+});
 
 /**
  * 校验分支名是否符合标准库格式：feature_testagent_yyyyMMdd
@@ -136,7 +206,7 @@ function isValidStandardBranch(branch: string): boolean {
  * 判断分支是否应该被禁用
  */
 function isBranchDisabled(branch: string): boolean {
-  if (!selectedWorkspaceRepository.value?.standard) return false;
+  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return false;
   return !isValidStandardBranch(branch);
 }
 
@@ -146,18 +216,23 @@ function isBranchDisabled(branch: string): boolean {
 function handleBranchChange(branch: string) {
   customBranchError.value = "";
 
-  if (selectedWorkspaceRepository.value?.standard && branch) {
+  if (isTestWorkRepository(selectedWorkspaceRepository.value) && branch) {
     if (!isValidStandardBranch(branch)) {
-      customBranchError.value = "标准库只能使用 feature_testagent_yyyyMMdd 格式的分支";
+      customBranchError.value = TEST_WORK_BRANCH_RULE_TOOLTIP;
+      repositoryTree.value = [];
+      workspaceDirectory.value = "";
+      workspaceDirectoryNew.value = false;
+      return;
     }
   }
+  void loadRepositoryTree();
 }
 
 /**
  * 排序后的分支列表：符合格式的排在前面，不符合格式的排在后面
  */
 const sortedBranches = computed(() => {
-  if (!selectedWorkspaceRepository.value?.standard) {
+  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) {
     // 非标准库：按原始顺序返回
     return branches.value;
   }
@@ -235,7 +310,7 @@ function clearAppContext() {
   appRepositories.value = [];
   workspaces.value = [];
   branches.value = [];
-  directories.value = [];
+  repositoryTree.value = [];
 }
 
 async function loadAppContext() {
@@ -349,6 +424,7 @@ async function loadRepositories() {
   if (!workspaceRepositoryId.value || !linked.some((item) => item.repositoryId === workspaceRepositoryId.value)) {
     workspaceRepositoryId.value = linked[0]?.repositoryId ?? "";
   }
+  await loadBranches();
 }
 
 function formatRepositoryOption(repository: CodeRepositoryConfig) {
@@ -383,6 +459,7 @@ async function loadWorkspaces() {
 async function loadBranches() {
   loadingBranches.value = true;
   await run(async () => {
+    const repositoryId = workspaceRepositoryId.value;
     branches.value = workspaceRepositoryId.value ? await api.listRepositoryBranches(workspaceRepositoryId.value) : [];
 
     // 智能选择默认分支（基于排序后的列表）
@@ -405,28 +482,78 @@ async function loadBranches() {
       workspaceBranch.value = "";
     }
 
-    directories.value = [];
+    repositoryTree.value = [];
     workspaceDirectory.value = "";
+    workspaceDirectoryNew.value = false;
+    newDirectoryName.value = "";
+    treeErrorMessage.value = "";
     customBranchError.value = "";
+    if (repositoryId && workspaceBranch.value) {
+      await loadRepositoryTree();
+    }
   }).finally(() => {
     loadingBranches.value = false;
   });
 }
 
-async function loadDirectories() {
+async function loadRepositoryTree() {
+  if (!workspaceRepositoryId.value || !workspaceBranch.value || customBranchError.value) {
+    repositoryTree.value = [];
+    workspaceDirectory.value = "";
+    workspaceDirectoryNew.value = false;
+    return;
+  }
   loadingDirectories.value = true;
   await run(async () => {
-    directories.value =
-      workspaceRepositoryId.value && workspaceBranch.value
-        ? await api.listRepositoryDirectories(workspaceRepositoryId.value, workspaceBranch.value)
-        : [];
-    workspaceDirectory.value = directories.value[0] ?? "";
+    const response = await api.getRepositoryTree(selectedAppId.value, workspaceRepositoryId.value, workspaceBranch.value);
+    repositoryTree.value = filterRepositoryTree(response.nodes.map(cloneTreeNode));
+    workspaceDirectory.value = "";
+    workspaceDirectoryNew.value = false;
+    newDirectoryName.value = "";
+    treeErrorMessage.value = "";
   }).finally(() => {
     loadingDirectories.value = false;
   });
 }
 
+function selectWorkspaceTreeNode(node: WorkspaceTreeNode) {
+  if (!isSelectableWorkspaceTreeNode(node)) return;
+  workspaceDirectory.value = node.path;
+  workspaceDirectoryNew.value = Boolean(node.directoryNew);
+  treeErrorMessage.value = "";
+}
+
+function addWorkspaceDirectory() {
+  const appName = selectedAppName.value;
+  const rootNode = findTreeNode(repositoryTree.value, appName);
+  const name = newDirectoryName.value.trim();
+  if (!rootNode || !canAddWorkspaceDirectory.value) return;
+  if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+    treeErrorMessage.value = "新增目录名称只能是一级目录名";
+    return;
+  }
+  const path = `${appName}/${name}`;
+  if (findTreeNode(repositoryTree.value, path)) {
+    treeErrorMessage.value = "目录已存在";
+    return;
+  }
+  rootNode.children.push({ name, path, type: "directory", children: [], directoryNew: true });
+  rootNode.children = sortTreeNodes(rootNode.children);
+  workspaceDirectory.value = path;
+  workspaceDirectoryNew.value = true;
+  newDirectoryName.value = "";
+  treeErrorMessage.value = "";
+}
+
 async function createWorkspace() {
+  if (!workspaceAlias.value) {
+    errorMessage.value = "工作空间别名不能为空";
+    return;
+  }
+  if (workspaceAliasDuplicate.value) {
+    errorMessage.value = "工作空间别名已存在";
+    return;
+  }
   if (requiresWorkspaceVersion.value && !/^\d{8}$/.test(workspaceVersion.value ?? '')) {
     errorMessage.value = "非标准库版本必须选择日期";
     return;
@@ -437,20 +564,26 @@ async function createWorkspace() {
     // POST 失败时停止轮询（此时 operation 未创建或后端校验未通过），
     // POST 成功后由 refreshWorkspaceCreateOperation 在终态时停止，或组件卸载后清理。
     try {
-      await api.createApplicationWorkspace(selectedAppId.value, {
+      const payload: CreateApplicationWorkspacePayload = {
         repositoryId: workspaceRepositoryId.value,
         branch: workspaceBranch.value,
         directoryPath: workspaceDirectory.value,
-        workspaceName: workspaceName.value.trim() || undefined,
-        version: requiresWorkspaceVersion.value ? (workspaceVersion.value ?? '').trim() || undefined : undefined,
+        workspaceName: workspaceAlias.value,
         operationId
-      });
+      };
+      if (workspaceDirectoryNew.value) {
+        payload.directoryNew = true;
+      }
+      if (requiresWorkspaceVersion.value) {
+        payload.version = (workspaceVersion.value ?? '').trim() || undefined;
+      }
+      await api.createApplicationWorkspace(selectedAppId.value, payload);
     } catch (error) {
       stopWorkspaceCreatePolling();
       throw error;
     }
     await refreshWorkspaceCreateOperation(operationId);
-    workspaceName.value = "";
+    workspaceName.value = DEFAULT_WORKSPACE_ALIAS;
     workspaceVersion.value = "";
     await loadWorkspaces();
   });
@@ -544,44 +677,73 @@ watch(selectedAppId, async (appId) => {
 watch(workspaceRepositoryId, () => {
   branches.value = [];
   workspaceBranch.value = "";
-  directories.value = [];
+  repositoryTree.value = [];
   workspaceDirectory.value = "";
+  workspaceDirectoryNew.value = false;
   customBranchError.value = "";
 });
 
 watch(workspaceBranch, () => {
-  directories.value = [];
+  repositoryTree.value = [];
   workspaceDirectory.value = "";
+  workspaceDirectoryNew.value = false;
 });
 
-const directorySearchQuery = ref("");
-
-function handleDirectoryFilter(val: string) {
-  directorySearchQuery.value = val;
+function isTestWorkRepository(repository: CodeRepositoryConfig | null) {
+  return Boolean(repository?.standard || repository?.repositoryType === TEST_WORK_REPOSITORY_TYPE);
 }
 
-function handleDirectoryVisibleChange(visible: boolean) {
-  if (!visible) {
-    directorySearchQuery.value = "";
+function cloneTreeNode(node: RepositoryTreeNode): WorkspaceTreeNode {
+  return {
+    name: node.name,
+    path: node.path,
+    type: node.type,
+    children: sortTreeNodes((node.children ?? []).map(cloneTreeNode))
+  };
+}
+
+function filterRepositoryTree(nodes: WorkspaceTreeNode[]) {
+  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) {
+    return sortTreeNodes(nodes);
   }
+  const appName = selectedAppName.value;
+  return sortTreeNodes(nodes.filter((node) => node.type === "directory" && node.name === appName && node.path === appName));
 }
 
-const filteredDirectories = computed(() => {
-  const query = directorySearchQuery.value.trim().toLowerCase();
-  return directories.value.filter(dir => {
-    const isHidden = dir.split(/[/\\]/).some(segment => segment.startsWith('.'));
-    if (isHidden) {
-      if (!query) {
-        return false;
-      }
-      return dir.toLowerCase().includes(query);
+function sortTreeNodes(nodes: WorkspaceTreeNode[]) {
+  return [...nodes].sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === "directory" ? -1 : 1;
     }
-    if (!query) {
-      return true;
-    }
-    return dir.toLowerCase().includes(query);
+    return left.name.localeCompare(right.name);
   });
-});
+}
+
+function findTreeNode(nodes: WorkspaceTreeNode[], path: string): WorkspaceTreeNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    const found = findTreeNode(node.children, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+function isSelectableWorkspaceTreeNode(node: WorkspaceTreeNode) {
+  if (node.type !== "directory") return false;
+  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return true;
+  const appName = selectedAppName.value;
+  const parts = node.path.split("/");
+  return parts.length === 2 && parts[0] === appName && Boolean(parts[1]);
+}
+
+function workspaceTreeNodeTitle(node: WorkspaceTreeNode) {
+  if (isSelectableWorkspaceTreeNode(node)) return "选择为工作空间";
+  if (node.type === "file") return "文件仅可浏览，不能选择为工作空间";
+  if (isTestWorkRepository(selectedWorkspaceRepository.value)) {
+    return "测试工作库只能选择应用同名目录的一级子目录";
+  }
+  return "目录";
+}
 
 onBeforeUnmount(() => {
   stopWorkspaceCreatePolling();
@@ -700,107 +862,82 @@ onBeforeUnmount(() => {
       <div v-if="selectedAppId && appTab === 'workspaces'" class="ta-panel-content">
         <div class="ta-section">
           <h4 class="ta-section-title">创建工作空间</h4>
-          <div class="ta-workspace-create-steps">
-            <div class="ta-workspace-step" :class="{ 'is-completed': branches.length > 0, 'is-active': branches.length === 0 }">
-              <div class="ta-workspace-step-heading">
-                <span class="ta-workspace-step-index">1</span>
-                <span class="ta-workspace-step-title">刷新分支</span>
-              </div>
-              <div class="ta-workspace-step-controls">
-                <div class="ta-workspace-step-inputs">
-                  <label class="ta-form-field" style="width: 320px">
-                    <span class="ta-form-label">已关联版本库</span>
-                    <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: 100%">
-                      <el-option v-for="repo in appRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
-                    </el-select>
-                  </label>
-                </div>
-                <el-button :disabled="loading || !workspaceRepositoryId" :loading="loadingBranches" @click="loadBranches">刷新分支</el-button>
-              </div>
-              <div v-if="loadingBranches" class="ta-workspace-step-progress">
-                <el-progress :percentage="100" :indeterminate="true" :duration="1" :show-text="false" :stroke-width="2" style="width: 100%" />
-              </div>
+          <div class="ta-workspace-create-form">
+            <div class="ta-workspace-form-grid">
+              <label class="ta-form-field">
+                <span class="ta-form-label">已关联版本库</span>
+                <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: 100%" @change="loadBranches">
+                  <el-option v-for="repo in appRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
+                </el-select>
+              </label>
+              <label class="ta-form-field">
+                <span class="ta-form-label">分支</span>
+                <el-select
+                  v-model="workspaceBranch"
+                  filterable
+                  default-first-option
+                  placeholder="选择分支"
+                  style="width: 100%"
+                  @change="handleBranchChange"
+                >
+                  <el-option
+                    v-for="branch in sortedBranches"
+                    :key="branch"
+                    :label="branch"
+                    :value="branch"
+                    :disabled="isBranchDisabled(branch)"
+                    :title="isBranchDisabled(branch) ? TEST_WORK_BRANCH_RULE_TOOLTIP : undefined"
+                  >
+                    <el-tooltip v-if="isBranchDisabled(branch)" :content="TEST_WORK_BRANCH_RULE_TOOLTIP" :show-after="0" placement="right">
+                      <span>{{ branch }}</span>
+                    </el-tooltip>
+                    <span v-else>{{ branch }}</span>
+                  </el-option>
+                </el-select>
+                <div v-if="customBranchError" class="ta-branch-error">{{ customBranchError }}</div>
+              </label>
+              <label class="ta-form-field">
+                <span class="ta-form-label">工作空间别名</span>
+                <el-input v-model="workspaceName" placeholder="ai-test" style="width: 100%" />
+                <div v-if="workspaceAliasDuplicate" class="ta-branch-error">工作空间别名已存在</div>
+              </label>
+              <label v-if="requiresWorkspaceVersion" class="ta-form-field">
+                <span class="ta-form-label">非标准库版本</span>
+                <el-date-picker
+                  v-model="workspaceVersion"
+                  type="date"
+                  value-format="YYYYMMDD"
+                  format="YYYYMMDD"
+                  placeholder="选择日期"
+                  style="width: 100%"
+                />
+              </label>
             </div>
 
-            <div class="ta-workspace-step" :class="{ 'is-disabled': branches.length === 0, 'is-completed': branches.length > 0 && directories.length > 0, 'is-active': branches.length > 0 && directories.length === 0 }">
-              <div class="ta-workspace-step-heading">
-                <span class="ta-workspace-step-index">2</span>
-                <span class="ta-workspace-step-title">加载目录</span>
+            <div class="ta-workspace-tree-panel">
+              <div class="ta-workspace-tree-header">
+                <span class="ta-form-label">目录树</span>
+                <span v-if="workspaceDirectory" class="ta-workspace-selected-path">{{ workspaceDirectory }}</span>
               </div>
-              <div class="ta-workspace-step-controls">
-                <div class="ta-workspace-step-inputs">
-                  <label class="ta-form-field" style="width: 240px">
-                    <span class="ta-form-label">分支</span>
-                    <el-select
-                      v-model="workspaceBranch"
-                      filterable
-                      allow-create
-                      default-first-option
-                      placeholder="选择或输入分支"
-                      style="width: 100%"
-                      @change="handleBranchChange"
-                    >
-                      <el-option
-                        v-for="branch in sortedBranches"
-                        :key="branch"
-                        :label="branch"
-                        :value="branch"
-                        :disabled="isBranchDisabled(branch)"
-                      />
-                    </el-select>
-                    <!-- 标准库分支格式错误提示 -->
-                    <div v-if="customBranchError" class="ta-branch-error">
-                      {{ customBranchError }}
-                    </div>
-                  </label>
-                </div>
-                <el-button :disabled="loading || !workspaceBranch || !!customBranchError" :loading="loadingDirectories" @click="loadDirectories">加载目录</el-button>
-              </div>
-              <div v-if="loadingDirectories" class="ta-workspace-step-progress">
+              <div v-if="loadingBranches || loadingDirectories" class="ta-workspace-tree-progress">
                 <el-progress :percentage="100" :indeterminate="true" :duration="1" :show-text="false" :stroke-width="2" style="width: 100%" />
               </div>
+              <WorkspaceDirectoryTree
+                v-if="repositoryTree.length"
+                :nodes="repositoryTree"
+                :selected-path="workspaceDirectory"
+                @select="selectWorkspaceTreeNode"
+              />
+              <div v-else class="ta-empty-hint">暂无目录树</div>
+              <div v-if="canAddWorkspaceDirectory" class="ta-workspace-new-directory">
+                <el-input v-model="newDirectoryName" placeholder="新增一级目录" style="width: 180px" />
+                <el-button :disabled="loading || !newDirectoryName.trim()" @click="addWorkspaceDirectory">新增目录</el-button>
+              </div>
+              <div v-if="treeErrorMessage" class="ta-branch-error">{{ treeErrorMessage }}</div>
             </div>
 
-            <div class="ta-workspace-step" :class="{ 'is-disabled': directories.length === 0, 'is-active': directories.length > 0 }">
-              <div class="ta-workspace-step-heading">
-                <span class="ta-workspace-step-index">3</span>
-                <span class="ta-workspace-step-title">创建工作空间</span>
-              </div>
-              <div class="ta-workspace-step-controls">
-                <div class="ta-workspace-step-inputs">
-                  <label class="ta-form-field" style="width: 240px">
-                    <span class="ta-form-label">目录</span>
-                    <el-select
-                      v-model="workspaceDirectory"
-                      filterable
-                      allow-create
-                      default-first-option
-                      :filter-method="handleDirectoryFilter"
-                      @visible-change="handleDirectoryVisibleChange"
-                      placeholder="选择或输入目录"
-                      style="width: 100%"
-                    >
-                      <el-option v-for="dir in filteredDirectories" :key="dir" :label="dir" :value="dir" />
-                    </el-select>
-                  </label>
-                  <label class="ta-form-field" style="width: 180px">
-                    <span class="ta-form-label">工作空间名称</span>
-                    <el-input v-model="workspaceName" placeholder="工作空间名称" style="width: 100%" />
-                  </label>
-                  <label v-if="requiresWorkspaceVersion" class="ta-form-field" style="width: 160px">
-                    <span class="ta-form-label">非标准库版本</span>
-                    <el-date-picker
-                      v-model="workspaceVersion"
-                      type="date"
-                      value-format="YYYYMMDD"
-                      format="YYYYMMDD"
-                      placeholder="选择日期"
-                      style="width: 100%"
-                    />
-                  </label>
-                </div>
-                <el-button type="primary" :disabled="loading || !workspaceDirectory" @click="createWorkspace">创建</el-button>
-              </div>
+            <div class="ta-workspace-form-actions">
+              <el-button type="primary" :disabled="!canSaveWorkspace" @click="createWorkspace">保存</el-button>
             </div>
           </div>
           <div v-if="workspaceCreateOperation" class="ta-workspace-progress">
@@ -1029,6 +1166,128 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 6px;
   min-width: 0;
+}
+
+.ta-workspace-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+.ta-workspace-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.ta-workspace-create-form .ta-form-field {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+.ta-workspace-tree-panel {
+  position: relative;
+  min-height: 160px;
+  overflow: hidden;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+.ta-workspace-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #ebeef5;
+  background: #ffffff;
+}
+.ta-workspace-selected-path {
+  min-width: 0;
+  overflow: hidden;
+  color: #3366ff;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ta-workspace-tree-progress {
+  line-height: 1;
+}
+.ta-workspace-tree-progress :deep(.el-progress) {
+  margin: 0;
+}
+:deep(.ta-workspace-tree-list) {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+:deep(.ta-workspace-tree-item) {
+  margin: 0;
+  padding: 0;
+}
+:deep(.ta-workspace-tree-node) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  border: 0;
+  background: transparent;
+  color: #303133;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+}
+:deep(.ta-workspace-tree-node.is-selectable) {
+  cursor: pointer;
+}
+:deep(.ta-workspace-tree-node:disabled) {
+  cursor: default;
+  color: #909399;
+}
+:deep(.ta-workspace-tree-node.is-selected) {
+  background: #eaf1ff;
+  color: #244ec9;
+}
+:deep(.ta-workspace-tree-icon) {
+  flex: 0 0 auto;
+  width: 12px;
+  color: #909399;
+}
+:deep(.ta-workspace-tree-path) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:deep(.ta-workspace-tree-badge) {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #ecfdf3;
+  color: #168a52;
+  font-size: 11px;
+}
+.ta-workspace-new-directory {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid #ebeef5;
+  background: #ffffff;
+}
+.ta-workspace-form-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* Step states styling */

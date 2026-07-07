@@ -158,6 +158,12 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
     }
 
     @Override
+    public Optional<ApplicationWorkspace> findWorkspaceByName(ApplicationId appId, String workspaceName) {
+        return Optional.ofNullable(mapper.findWorkspaceByName(appId.value(), workspaceName))
+                .map(this::toWorkspace);
+    }
+
+    @Override
     public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) {
         mapper.insertWorkspace(toRow(workspace));
         return workspace;

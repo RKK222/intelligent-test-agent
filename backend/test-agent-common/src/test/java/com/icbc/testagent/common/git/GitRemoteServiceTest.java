@@ -32,6 +32,53 @@ class GitRemoteServiceTest {
     }
 
     @Test
+    void parseArchiveTarOutputToDirectoryAndFileTree() {
+        GitRemoteService service = new GitRemoteService(new FakeExecutor(List.of(), tarWith(
+                "F-COSS/W1/F1/case.md",
+                "F-COSS/W1/readme.md",
+                "F-COSS/W2/",
+                "README.md")));
+
+        assertThat(service.listTree("git@example.com:demo/repo.git", "main", "PRIVATE KEY"))
+                .usingRecursiveComparison()
+                .isEqualTo(List.of(
+                        new GitRemoteService.RemoteTreeNode(
+                                "F-COSS",
+                                "F-COSS",
+                                "directory",
+                                List.of(
+                                        new GitRemoteService.RemoteTreeNode(
+                                                "W1",
+                                                "F-COSS/W1",
+                                                "directory",
+                                                List.of(
+                                                        new GitRemoteService.RemoteTreeNode(
+                                                                "F1",
+                                                                "F-COSS/W1/F1",
+                                                                "directory",
+                                                                List.of(new GitRemoteService.RemoteTreeNode(
+                                                                        "case.md",
+                                                                        "F-COSS/W1/F1/case.md",
+                                                                        "file",
+                                                                        List.of()))),
+                                                        new GitRemoteService.RemoteTreeNode(
+                                                                "readme.md",
+                                                                "F-COSS/W1/readme.md",
+                                                                "file",
+                                                                List.of()))),
+                                        new GitRemoteService.RemoteTreeNode(
+                                                "W2",
+                                                "F-COSS/W2",
+                                                "directory",
+                                                List.of()))),
+                        new GitRemoteService.RemoteTreeNode(
+                                "README.md",
+                                "README.md",
+                                "file",
+                                List.of())));
+    }
+
+    @Test
     void mapGitTimeoutToPlatformError() {
         GitRemoteService service = new GitRemoteService((command, privateKey, timeout) -> {
             throw new PlatformException(ErrorCode.GIT_TIMEOUT, "Git 操作超时");

@@ -70,6 +70,7 @@ import type {
   PublicAgentRepositoryStatus,
   ProviderInfo,
   RepositoryDeploymentOptions,
+  RepositoryTreeResponse,
   PublishPersonalWorkspacePayload,
   PublishPersonalWorkspaceResult,
   ResolveWorkspaceGitConflictPayload,
@@ -1228,6 +1229,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<string[]>(`${configurationBase}/repositories/${encodeURIComponent(repositoryId)}/branches`),
     listRepositoryDirectories: (repositoryId: string, branch: string) =>
       request<string[]>(`${configurationBase}/repositories/${encodeURIComponent(repositoryId)}/directories${query({ branch })}`),
+    getRepositoryTree: (appId: string, repositoryId: string, branch: string) =>
+      request<RepositoryTreeResponse>(
+        `${configurationBase}/applications/${encodeURIComponent(appId)}/repositories/${encodeURIComponent(repositoryId)}/tree${query({ branch })}`
+      ),
     listApplicationWorkspaces: (appId: string) =>
       request<ApplicationWorkspaceConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`),
     createApplicationWorkspace: (appId: string, payload: CreateApplicationWorkspacePayload) =>

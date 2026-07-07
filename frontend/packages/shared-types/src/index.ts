@@ -1550,6 +1550,17 @@ export type WorkspaceCreateOperation = {
   updatedAt?: string;
 };
 
+export type RepositoryTreeNode = {
+  name: string;
+  path: string;
+  type: "directory" | "file";
+  children?: RepositoryTreeNode[];
+};
+
+export type RepositoryTreeResponse = {
+  nodes: RepositoryTreeNode[];
+};
+
 /** 工作空间创建已接受的响应（异步模式） */
 export type CreateWorkspaceAcceptedResponse = {
   operationId: string;
@@ -1658,6 +1669,7 @@ export type CreateApplicationWorkspacePayload = {
   branch: string;
   directoryPath: string;
   workspaceName?: string;
+  directoryNew?: boolean;
   version?: string;
   operationId?: string;
 };

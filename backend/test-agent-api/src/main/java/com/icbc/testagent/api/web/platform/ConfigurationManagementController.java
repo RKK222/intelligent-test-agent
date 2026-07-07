@@ -217,6 +217,16 @@ public class ConfigurationManagementController {
         return ok(exchange, service.listDirectories(repositoryId, branch, userId));
     }
 
+    @GetMapping("/applications/{appId}/repositories/{repositoryId}/tree")
+    public ApiResponse<Object> listRepositoryTree(
+            @PathVariable String appId,
+            @PathVariable String repositoryId,
+            @RequestParam String branch,
+            ServerWebExchange exchange) {
+        UserId userId = requireAdmin(exchange);
+        return ok(exchange, service.listRepositoryTree(appId, repositoryId, branch, userId));
+    }
+
     @GetMapping("/applications/{appId}/workspaces")
     public ApiResponse<Object> listWorkspaces(@PathVariable String appId, ServerWebExchange exchange) {
         requireAdmin(exchange);
@@ -236,6 +246,7 @@ public class ConfigurationManagementController {
                 request.branch(),
                 request.directoryPath(),
                 request.workspaceName(),
+                request.directoryNew(),
                 request.version(),
                 request.operationId(),
                 userId,

@@ -1,6 +1,7 @@
 package com.icbc.testagent.configuration.management;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 配置管理对 API 层暴露的安全响应模型；SSH key 只包含元信息，不包含明文或密文。
@@ -65,6 +66,22 @@ public final class ConfigurationManagementResponses {
             String workspaceName,
             Instant createdAt,
             Instant updatedAt) {
+    }
+
+    public record RepositoryTreeNodeResponse(
+            String name,
+            String path,
+            String type,
+            List<RepositoryTreeNodeResponse> children) {
+        public RepositoryTreeNodeResponse {
+            children = children == null ? List.of() : List.copyOf(children);
+        }
+    }
+
+    public record RepositoryTreeResponse(List<RepositoryTreeNodeResponse> nodes) {
+        public RepositoryTreeResponse {
+            nodes = nodes == null ? List.of() : List.copyOf(nodes);
+        }
     }
 
     public record SshKeyResponse(String sshKeyId, String name, String fingerprint, Instant createdAt) {
