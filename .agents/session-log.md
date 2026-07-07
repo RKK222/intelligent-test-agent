@@ -4525,3 +4525,15 @@ bash /tmp/test-api-after-restart.sh
   - `GitRemoteService` 通过 `git archive --remote` 解析目录/文件树；configuration-management 树接口校验应用、关联版本库和 SSH key，不使用本地 clone cache；workspace-management 只在保存时 clone/checkout，并在 `directoryNew=true` 且目标目录不存在时创建目录。新增 MyBatis XML 查询工作空间别名，JDBC 实现仅复用存量内存过滤。
 - Result:
   - 精确前端面板/backend-api Vitest、agent-web/backend-api typecheck、后端目标 Maven 和 `git diff --check` 通过；计划命令 `corepack pnpm test -- backend-api` 仍会触发仓库中既有无关的 chat/git 面板断言失败。
+
+### 2026-07-07 - Redis 服务器广播开启时避免启动期循环依赖
+
+- Why:
+  - 企业内部署模板开启 `TEST_AGENT_SERVER_BROADCAST_ENABLED=true` 后，Java jar 启动失败；根因是 `RedisServerBroadcastPublisher` 构造器注入所有 `ServerBroadcastHandler`，而 `AgentConfigProgressHub` 同时作为 handler 又依赖 `ServerBroadcastPublisher` 发布进度，形成 Spring 构造器循环依赖。本地默认广播关闭走 Noop 实现，所以未暴露。
+- What:
+  - `RedisServerBroadcastPublisher` 改为注入 `ObjectProvider<ServerBroadcastHandler>`，收到 Redis 消息时再延迟枚举并调用支持该事件类型的 handler，保留 Redis 广播功能和原有 handler 分发语义。
+  - 新增 app 装配测试覆盖 Redis 广播开启时 `RedisServerBroadcastPublisher` 与 `AgentConfigProgressHub` 同时存在的上下文。
+- How:
+  - 只修改 event 模块广播发布器和 app 模块测试，不改变部署变量、Redis channel、API、数据库或广播事件协议。
+- Result:
+  - `mvn -pl test-agent-event -am -Dtest=ServerBroadcastPublisherTest -Dsurefire.failIfNoSpecifiedTests=false test`、`mvn -pl test-agent-app -am -Dtest=ServerBroadcastContextTest -Dsurefire.failIfNoSpecifiedTests=false test` 和 `mvn -pl test-agent-app -am package -DskipTests` 均通过；新的 Spring Boot jar 已产出到 `backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar`。

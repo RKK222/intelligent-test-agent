@@ -6,9 +6,9 @@ import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastHandler;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastPublisher;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,7 +35,7 @@ public class RedisServerBroadcastPublisher implements ServerBroadcastPublisher, 
     private final ObjectMapper objectMapper;
     private final String channel;
     private final String instanceId;
-    private final List<ServerBroadcastHandler> handlers;
+    private final ObjectProvider<ServerBroadcastHandler> handlers;
     private final RedisMessageListenerContainer listenerContainer;
     private final MessageListener messageListener = this::onMessage;
     private volatile boolean running;
@@ -47,12 +47,12 @@ public class RedisServerBroadcastPublisher implements ServerBroadcastPublisher, 
             StringRedisTemplate redisTemplate,
             RedisConnectionFactory connectionFactory,
             ObjectMapper objectMapper,
-            List<ServerBroadcastHandler> handlers,
+            ObjectProvider<ServerBroadcastHandler> handlers,
             @Value("${test-agent.server-broadcast.channel:test-agent:server-broadcast}") String channel,
             @Value("${test-agent.server-broadcast.instance-id:}") String configuredInstanceId) {
         this.redisTemplate = Objects.requireNonNull(redisTemplate, "redisTemplate must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.handlers = handlers == null ? List.of() : List.copyOf(handlers);
+        this.handlers = Objects.requireNonNull(handlers, "handlers must not be null");
         this.channel = Objects.requireNonNull(channel, "channel must not be null");
         this.instanceId = configuredInstanceId == null || configuredInstanceId.isBlank()
                 ? UUID.randomUUID().toString()
@@ -125,7 +125,8 @@ public class RedisServerBroadcastPublisher implements ServerBroadcastPublisher, 
             if (instanceId.equals(event.originInstanceId())) {
                 return;
             }
-            for (ServerBroadcastHandler handler : handlers) {
+            // 延迟枚举 handler，避免广播发布器与同时需要发布广播的 handler 在 Spring 启动期形成构造器循环依赖。
+            for (ServerBroadcastHandler handler : handlers.orderedStream().toList()) {
                 if (!handler.supports(event.type())) {
                     continue;
                 }
