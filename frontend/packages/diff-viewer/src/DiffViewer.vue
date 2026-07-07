@@ -100,6 +100,19 @@ watch(isDirty, (newVal) => {
   emit("dirtyChange", newVal);
 });
 
+function getFileName(path: string): string {
+  if (!path) return "";
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || path;
+}
+
+function getStatusLabel(status?: string): string {
+  if (!status) return "M";
+  const s = status.toLowerCase();
+  if (s === "untracked") return "U";
+  return s.charAt(0).toUpperCase();
+}
+
 async function initMonaco(el: HTMLElement) {
   if (diffEditor.value) return;
   const mod = await import("./monaco-env");
@@ -322,10 +335,11 @@ onBeforeUnmount(() => {
             'mb-1 flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left hover:bg-[#e7e9ed]',
             selected?.path === file.path && 'border-[#2f4a8f] bg-[rgba(96,165,250,.12)] text-[#2f4a8f] font-semibold'
           )"
+          :title="file.path"
           @click="emit('selectFile', file.path)"
         >
-          <Badge :tone="file.status === 'deleted' ? 'danger' : file.status === 'added' ? 'success' : 'warning'">{{ file.status }}</Badge>
-          <span :class="cn('min-w-0 flex-1 truncate font-mono text-[12px] text-slate-700', selected?.path === file.path && 'text-[#2f4a8f]')">{{ file.path }}</span>
+          <Badge :tone="file.status === 'deleted' ? 'danger' : file.status === 'added' ? 'success' : 'warning'">{{ getStatusLabel(file.status) }}</Badge>
+          <span :class="cn('min-w-0 flex-1 truncate font-mono text-[12px] text-slate-700', selected?.path === file.path && 'text-[#2f4a8f]')">{{ getFileName(file.path) }}</span>
         </button>
         <div v-if="hunks.length" class="mt-3 border-t border-slate-200 pt-2">
           <div class="mb-1 px-1 text-[11px] font-semibold uppercase text-slate-500">Hunks</div>

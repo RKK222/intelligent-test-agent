@@ -355,6 +355,9 @@ func serverHostFilePath(rt configRuntime) (string, error) {
 }
 
 func sysDataRootDir(rt configRuntime) (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("SYS_DATA_ROOT_DIR")); configured != "" {
+		return configured, nil
+	}
 	switch strings.ToLower(rt.goos) {
 	case "darwin":
 		home, err := rt.userHomeDir()

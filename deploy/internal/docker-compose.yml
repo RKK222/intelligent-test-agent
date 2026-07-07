@@ -1,65 +1,7 @@
 name: test-agent-internal
 
 services:
-  gateway:
-    image: nginx:1.27-alpine
-    container_name: test-agent-gateway
-    restart: unless-stopped
-    ports:
-      - "${TEST_AGENT_GATEWAY_HTTP_PORT:-80}:8080"
-    environment:
-      TEST_AGENT_FRONTEND_1: "frontend-1:8080"
-      TEST_AGENT_FRONTEND_2: "frontend-2:8080"
-      TEST_AGENT_BACKEND_1: "${TEST_AGENT_BACKEND_1:-host.docker.internal:8080}"
-      TEST_AGENT_BACKEND_2: "${TEST_AGENT_BACKEND_2:-host.docker.internal:8081}"
-    volumes:
-      - ./nginx/gateway.conf.template:/etc/nginx/templates/default.conf.template:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      frontend-1:
-        condition: service_healthy
-      frontend-2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health | grep -q ok"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-
-  frontend-1:
-    image: ${TEST_AGENT_FRONTEND_IMAGE:-test-agent-frontend:internal}
-    build:
-      context: ../..
-      dockerfile: deploy/internal/frontend.Dockerfile
-      args:
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
-        COREPACK_NPM_REGISTRY: ${COREPACK_NPM_REGISTRY:-https://registry.npmmirror.com}
-        VITE_TEST_AGENT_API_BASE_URL: ${VITE_TEST_AGENT_API_BASE_URL:-}
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health | grep -q ok"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-
-  frontend-2:
-    image: ${TEST_AGENT_FRONTEND_IMAGE:-test-agent-frontend:internal}
-    build:
-      context: ../..
-      dockerfile: deploy/internal/frontend.Dockerfile
-      args:
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
-        COREPACK_NPM_REGISTRY: ${COREPACK_NPM_REGISTRY:-https://registry.npmmirror.com}
-        VITE_TEST_AGENT_API_BASE_URL: ${VITE_TEST_AGENT_API_BASE_URL:-}
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health | grep -q ok"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-
-  opencode-worker-1:
+  opencode-worker:
     image: ${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}
     build:
       context: ../..
@@ -70,59 +12,26 @@ services:
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         OPENCODE_AI_PACKAGE: ${OPENCODE_AI_PACKAGE:-opencode-ai@1.17.8}
-    container_name: test-agent-opencode-worker-1
-    hostname: test-agent-opencode-worker-1
+    container_name: test-agent-opencode-worker
+    hostname: test-agent-opencode-worker
     restart: unless-stopped
     ports:
-      - "${OPENCODE_WORKER_1_PORT_START:-4096}-${OPENCODE_WORKER_1_PORT_END:-4105}:${OPENCODE_WORKER_1_PORT_START:-4096}-${OPENCODE_WORKER_1_PORT_END:-4105}"
+      - "${OPENCODE_WORKER_PORT_START:-4096}-${OPENCODE_WORKER_PORT_END:-4105}:${OPENCODE_WORKER_PORT_START:-4096}-${OPENCODE_WORKER_PORT_END:-4105}"
     environment:
-      OPENCODE_MANAGER_BACKEND_PORT: "${OPENCODE_WORKER_1_BACKEND_PORT:-8080}"
-      OPENCODE_MANAGER_PORT_START: "${OPENCODE_WORKER_1_PORT_START:-4096}"
-      OPENCODE_MANAGER_PORT_END: "${OPENCODE_WORKER_1_PORT_END:-4105}"
+      OPENCODE_MANAGER_BACKEND_PORT: "${OPENCODE_WORKER_BACKEND_PORT:-8080}"
+      OPENCODE_MANAGER_PORT_START: "${OPENCODE_WORKER_PORT_START:-4096}"
+      OPENCODE_MANAGER_PORT_END: "${OPENCODE_WORKER_PORT_END:-4105}"
       OPENCODE_MANAGER_TOKEN: "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:?set TEST_AGENT_OPENCODE_MANAGER_TOKEN}"
-      OPENCODE_MANAGER_STATE_DIR: "/data/.testagent/agent-opencode/manager/worker-1"
-      OPENCODE_BIN: "/usr/local/bin/opencode"
+      SYS_DATA_ROOT_DIR: "/data/testagent/data"
+      OPENCODE_MANAGER_STATE_DIR: "/data/testagent/data/agent-opencode/manager/worker"
+      OPENCODE_BIN: "/data/testagent/programs/opencode/bin/opencode"
+      TEST_AGENT_PROGRAM_ROOT: "/data/testagent/programs"
       OPENCODE_ALLOWED_CORS: "${OPENCODE_ALLOWED_CORS:-}"
       OPENCODE_MANAGER_HEARTBEAT_INTERVAL: "${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
       OPENCODE_MANAGER_RECONNECT_INTERVAL: "${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
     volumes:
-      - "${TEST_AGENT_DATA_ROOT:-/data/.testagent}:/data/.testagent"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'opencode-manager run' >/dev/null"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-
-  opencode-worker-2:
-    image: ${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}
-    build:
-      context: ../..
-      dockerfile: deploy/internal/opencode-worker.Dockerfile
-      args:
-        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
-        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
-        DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
-        OPENCODE_AI_PACKAGE: ${OPENCODE_AI_PACKAGE:-opencode-ai@1.17.8}
-    container_name: test-agent-opencode-worker-2
-    hostname: test-agent-opencode-worker-2
-    restart: unless-stopped
-    ports:
-      - "${OPENCODE_WORKER_2_PORT_START:-4106}-${OPENCODE_WORKER_2_PORT_END:-4115}:${OPENCODE_WORKER_2_PORT_START:-4106}-${OPENCODE_WORKER_2_PORT_END:-4115}"
-    environment:
-      OPENCODE_MANAGER_BACKEND_PORT: "${OPENCODE_WORKER_2_BACKEND_PORT:-8081}"
-      OPENCODE_MANAGER_PORT_START: "${OPENCODE_WORKER_2_PORT_START:-4106}"
-      OPENCODE_MANAGER_PORT_END: "${OPENCODE_WORKER_2_PORT_END:-4115}"
-      OPENCODE_MANAGER_TOKEN: "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:?set TEST_AGENT_OPENCODE_MANAGER_TOKEN}"
-      OPENCODE_MANAGER_STATE_DIR: "/data/.testagent/agent-opencode/manager/worker-2"
-      OPENCODE_BIN: "/usr/local/bin/opencode"
-      OPENCODE_ALLOWED_CORS: "${OPENCODE_ALLOWED_CORS:-}"
-      OPENCODE_MANAGER_HEARTBEAT_INTERVAL: "${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
-      OPENCODE_MANAGER_RECONNECT_INTERVAL: "${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
-    volumes:
-      - "${TEST_AGENT_DATA_ROOT:-/data/.testagent}:/data/.testagent"
+      - "${TEST_AGENT_DATA_ROOT:-/data/testagent/data}:/data/testagent/data"
+      - "${TEST_AGENT_PROGRAM_ROOT:-/data/testagent/programs}:/data/testagent/programs:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

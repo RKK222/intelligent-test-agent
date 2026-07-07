@@ -1,3 +1,6 @@
 **
 !opencode-manager/
 !opencode-manager/**
+!deploy/
+!deploy/internal/
+!deploy/internal/opencode-worker-entrypoint.sh

@@ -9,7 +9,6 @@ export type ReasoningPartViewProps = {
 
 <script setup lang="ts">
 import { computed } from "vue";
-import MarkdownView from "../../../MarkdownView.vue";
 import OcDisclosure from "../primitives/OcDisclosure.vue";
 import { compactPartPreview, readPartText } from "../../state/part-text";
 
@@ -43,7 +42,8 @@ const detailText = computed(() => compactPartPreview(source.value));
     :default-open="false"
   >
     <div class="oc-reasoning-part__body">
-      <MarkdownView :source="source" body-class="oc-markdown" />
+      <!-- 单条 reasoning 同样使用纯文本，避免展开时触发 Markdown 动态加载和高亮渲染。 -->
+      <pre class="oc-reasoning-part__plain">{{ source || "暂无详细思考内容" }}</pre>
     </div>
   </OcDisclosure>
 </template>

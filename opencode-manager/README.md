@@ -42,13 +42,14 @@ opencode-manager 不允许随意新增环境变量。新增前必须先确认该
 |---|---|
 | `OPENCODE_MANAGER_CONTAINER_ID` | 仅作为非 Windows 容器 ID 的最后兜底。非 Windows 先读系统 hostname，再读 `/etc/hostname`，两者为空时才读该环境变量；不再读取 `HOSTNAME` 环境变量。Windows 直接读机器名，不读取该变量。最终为空则启动失败。 |
 | `OPENCODE_MANAGER_BACKEND_PORT` | `8080`，manager 按 `.serverhost` 派生初始 WebSocket 入口时使用。 |
+| `SYS_DATA_ROOT_DIR` | 可选；覆盖 manager 启动前读取 `.serverid/.serverhost` 的系统数据根目录。企业部署建议与 Java 通用参数保持一致，例如 `/data/testagent/data`。 |
 | `OPENCODE_BIN` | `opencode` |
 | `OPENCODE_MANAGER_STATE_DIR` | `/data/opencode/manager` |
 | `OPENCODE_ALLOWED_CORS` | 空，多个 origin 用逗号分隔 |
 | `OPENCODE_MANAGER_HEARTBEAT_INTERVAL` | `5s` |
 | `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `10s` |
 
-`OPENCODE_MANAGER_LINUX_SERVER_ID` 和 `OPENCODE_MANAGER_SERVER_IP_FILE` 不再作为生产路径使用。非 Windows 环境的服务器身份必须来自 `SYS_DATA_ROOT_DIR/.serverid`，后端连接地址必须来自 `SYS_DATA_ROOT_DIR/.serverhost`；Go manager 启动前无法连接 Java 查询数据库，因此按系统通用参数的内置平台默认值派生：Linux `/data/.testagent/.serverid`、`/data/.testagent/.serverhost`，macOS `$HOME/.testagent/.serverid`、`$HOME/.testagent/.serverhost`。`containerId` 优先来自系统 hostname，其次来自 `/etc/hostname`，最后才使用 `OPENCODE_MANAGER_CONTAINER_ID`。Windows 本机开发态跳过文件等待，使用机器名作为 `linuxServerId/containerId`，并探测本机非回环 IPv4 作为 `.serverhost` 等价地址。
+`OPENCODE_MANAGER_LINUX_SERVER_ID` 和 `OPENCODE_MANAGER_SERVER_IP_FILE` 不再作为生产路径使用。非 Windows 环境的服务器身份必须来自 `SYS_DATA_ROOT_DIR/.serverid`，后端连接地址必须来自 `SYS_DATA_ROOT_DIR/.serverhost`；Go manager 启动前无法连接 Java 查询数据库，因此未配置 `SYS_DATA_ROOT_DIR` 环境变量时按系统通用参数的内置平台默认值派生：Linux `/data/.testagent/.serverid`、`/data/.testagent/.serverhost`，macOS `$HOME/.testagent/.serverid`、`$HOME/.testagent/.serverhost`。企业部署如果把系统数据根迁到 `/data/testagent/data`，需要同时设置 Java 通用参数和 manager 环境变量 `SYS_DATA_ROOT_DIR=/data/testagent/data`。`containerId` 优先来自系统 hostname，其次来自 `/etc/hostname`，最后才使用 `OPENCODE_MANAGER_CONTAINER_ID`。Windows 本机开发态跳过文件等待，使用机器名作为 `linuxServerId/containerId`，并探测本机非回环 IPv4 作为 `.serverhost` 等价地址。
 
 `OPENCODE_MANAGER_ID` 不再作为环境变量配置。manager 启动时会按 `mgr_<normalized_container_id>_<normalized_manager_process_name>` 派生内部 `managerId`，其中管理进程逻辑名固定为 `opencode-manager`，例如容器名 `kakadeMacBook-Pro.local` 会派生为 `mgr_kakadeMacBook_Pro_local_opencode_manager`。运行管理、Redis 快照和数据库拓扑中的 `managerId` 仍是内部协议 ID，唯一性来自同一共享 Redis 集群内的容器名称加管理进程名称；一个容器只运行一个 `opencode-manager`。
 

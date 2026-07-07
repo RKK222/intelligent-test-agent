@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import tabCloseUrl from "../assets/figma/tab-close.svg";
-import fileIconUrl from "../assets/figma/file-icon.svg";
 import { computed, onBeforeUnmount, ref, watch, nextTick } from "vue";
-import { Eye, EyeOff } from "lucide-vue-next";
+import { FileIcon } from "@test-agent/file-explorer";
 import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
 import { languageFromPath } from "@test-agent/editor";
-import WorkbenchFooter, { type AppWorkspaceTemplate, type AppWorkspaceVersion } from "./WorkbenchFooter.vue";
+import WorkbenchFooter, { type AppWorkspaceTemplate, type AppWorkspaceVersion, type PreviewMode } from "./WorkbenchFooter.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -28,16 +27,20 @@ const props = withDefaults(
     creatingVersion?: boolean;
     showServerWorkspaceSwitch?: boolean;
     serverWorkspaceSwitchDisabled?: boolean;
-    /** Markdown 预览开关（受控），由父级双向绑定到 CodeEditor 的 showPreview。 */
+    /** Markdown 预览开关（受控），保持向下兼容 */
     markdownPreview?: boolean;
+    /** Markdown 预览模式：off | full | split */
+    markdownPreviewMode?: PreviewMode;
   }>(),
-  { markdownPreview: false }
+  { markdownPreview: false, markdownPreviewMode: "off" }
 );
 
 const emit = defineEmits<{
   activate: [path: string];
   close: [path: string];
   closeMany: [paths: string[]];
+  addFileContext: [path: string];
+  locateFile: [path: string];
   editorAction: [];
   save: [];
   "select-version": [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -45,6 +48,7 @@ const emit = defineEmits<{
   "create-version": [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
   "open-server-workspace-picker": [];
   "update:markdownPreview": [enabled: boolean];
+  "update:markdownPreviewMode": [mode: PreviewMode];
 }>();
 
 // 当前激活 tab 是否是 Markdown 文件：是的话才在 tab 表头最右侧显示预览开关。
@@ -72,11 +76,6 @@ const rightTabPaths = computed(() => {
 });
 
 const allTabPaths = computed(() => props.tabs.map((tab) => tab.path));
-
-function toggleMarkdownPreview() {
-  if (!activeIsMarkdown.value) return;
-  emit("update:markdownPreview", !props.markdownPreview);
-}
 
 function openTabMenu(event: MouseEvent, path: string) {
   event.preventDefault();
@@ -138,10 +137,11 @@ watch(
         :aria-selected="activePath === tab.path"
         tabindex="0"
         @click="emit('activate', tab.path)"
+        @dblclick="emit('locateFile', tab.path)"
         @contextmenu="openTabMenu($event, tab.path)"
       >
         <div class="figma-editor-tab-inner">
-          <img :src="fileIconUrl" alt="file" class="figma-editor-tab-icon" />
+          <FileIcon :entry="{ name: tab.title, path: tab.path, type: 'file' }" class="figma-editor-tab-icon" />
           <span
             v-if="!tab.livePreview && tab.content !== tab.savedContent"
             class="figma-editor-tab-dirty-star"
@@ -157,24 +157,6 @@ watch(
           </button>
         </div>
       </div>
-      <!--
-        Markdown 预览开关：放在 tab 行最右侧（margin-left: auto 推右）。
-        只在当前激活 tab 是 Markdown 文件时显示，避免其他文件类型出现无效按钮。
-        状态完全受控于父级：与 CodeEditor 的 showPreview 双向绑定。
-      -->
-      <button
-        v-if="activeIsMarkdown"
-        type="button"
-        :class="['figma-editor-tab-preview', { 'is-active': markdownPreview }]"
-        :aria-label="markdownPreview ? '关闭 Markdown 预览' : '打开 Markdown 预览'"
-        :title="markdownPreview ? '关闭预览' : '预览'"
-        :aria-pressed="markdownPreview"
-        data-testid="editor-tab-markdown-preview"
-        @click.stop="toggleMarkdownPreview"
-      >
-        <component :is="markdownPreview ? EyeOff : Eye" :size="14" />
-        <span>{{ markdownPreview ? "关闭预览" : "预览" }}</span>
-      </button>
     </div>
 
     <Teleport to="body">
@@ -190,6 +172,14 @@ watch(
         role="menu"
         :style="{ left: `${tabMenu.x}px`, top: `${tabMenu.y}px` }"
       >
+        <button
+          type="button"
+          role="menuitem"
+          class="figma-editor-tab-menu-item"
+          @click="emit('addFileContext', tabMenu.path); closeTabMenu()"
+        >
+          添加当前文件到对话
+        </button>
         <button
           type="button"
           role="menuitem"
@@ -239,8 +229,11 @@ watch(
       :creating-version="creatingVersion"
       :show-server-workspace-switch="showServerWorkspaceSwitch"
       :server-workspace-switch-disabled="serverWorkspaceSwitchDisabled"
+      :show-preview-button="activeIsMarkdown"
+      :markdown-preview-mode="markdownPreviewMode"
       show-save
       @save="emit('save')"
+      @update:markdown-preview-mode="(mode) => emit('update:markdownPreviewMode', mode)"
       @select-version="(payload) => emit('select-version', payload)"
       @load-versions="(templateId) => emit('load-versions', templateId)"
       @create-version="(payload) => emit('create-version', payload)"
@@ -330,9 +323,9 @@ watch(
 }
 
 .figma-editor-tab-icon {
-  width: 24px;
+  width: 16px;
   height: 16px;
-  opacity: 0.6;
+  flex-shrink: 0;
 }
 
 .figma-editor-tab-dirty-star {
@@ -386,44 +379,7 @@ watch(
   height: 14px;
 }
 
-/* Markdown 预览开关按钮：放在 tab 行最右侧，视觉上与 tab 区分（无下边线、紧凑按钮）。
-   active 态用与活动 tab 接近的高亮色，方便用户感知"预览已开启"。*/
-.figma-editor-tab-preview {
-  margin-left: auto;
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  margin-right: 8px;
-  border: 0.8px solid #dfdfdf;
-  border-radius: 6px;
-  background: #fff;
-  color: #555;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-}
 
-.figma-editor-tab-preview:hover {
-  background: #f0f0f0;
-  border-color: #cfcfcf;
-  color: #333;
-}
-
-.figma-editor-tab-preview.is-active {
-  background: #eaf0ff;
-  border-color: #b9c8ff;
-  color: #1d3fb0;
-}
-
-.figma-editor-tab-preview.is-active:hover {
-  background: #dde7ff;
-}
 
 .figma-editor-tab-menu-backdrop {
   position: fixed;

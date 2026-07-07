@@ -134,6 +134,135 @@ describe("FigmaChatPanel", () => {
     expect(newConversationButton.text()).toBe("");
   });
 
+  it("renders workspace context attachments and blocks oversized input before sending", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        chatContexts: [
+          {
+            id: "ctx_1",
+            type: "selection",
+            source: "workspace",
+            path: "src/UserService.java",
+            fileName: "UserService.java",
+            startLine: 20,
+            endLine: 35,
+            text: "class UserService {}",
+            charCount: 20,
+            createdAt: 1
+          }
+        ],
+        chatContextTotalChars: 20
+      } as any
+    });
+
+    expect(wrapper.text()).toContain("已添加 1 个上下文");
+    expect(wrapper.text()).toContain("UserService.java");
+    expect(wrapper.text()).toContain("L20-L35");
+
+    await wrapper.get("textarea").setValue("x".repeat(20_001));
+    await wrapper.get(".figma-chat-send-card").trigger("click");
+
+    expect(wrapper.emitted("send")).toBeUndefined();
+    expect(wrapper.text()).toContain("输入内容过长，请精简后再发送");
+
+    await wrapper.get(".chat-context-card-remove").trigger("click");
+    expect(wrapper.emitted("remove-chat-context")).toEqual([["ctx_1"]]);
+  });
+
+  it("resizes the composer textarea by dragging the top edge", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    const textarea = wrapper.get("textarea");
+    const handle = wrapper.get(".figma-chat-composer-resize-handle");
+
+    expect(textarea.classes()).toContain("figma-chat-textarea");
+    expect(handle.attributes("aria-label")).toBe("拖动调整输入框高度");
+    expect(getComputedStyle(textarea.element).resize).toBe("none");
+    expect(getComputedStyle(textarea.element).maxHeight).toBe("260px");
+
+    handle.element.dispatchEvent(new MouseEvent("pointerdown", { button: 0, clientY: 240, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("pointermove", { clientY: 180 }));
+    window.dispatchEvent(new MouseEvent("pointerup", { clientY: 180 }));
+
+    expect((textarea.element as HTMLTextAreaElement).style.height).toBe("100px");
+  });
+
+  it("does not expose serialized workspace contexts in user message bubbles", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "msg_user_context",
+            role: "user",
+            text: [
+              "用户问题：",
+              "写了什么内容",
+              "",
+              "以下是用户添加的工作区上下文：",
+              "",
+              '<context type="selection" path="docs/a.md" lines="1-2">',
+              "上下文内容",
+              "</context>"
+            ].join("\n"),
+            createdAt: "2026-07-06T00:00:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    expect(wrapper.text()).toContain("写了什么内容");
+    expect(wrapper.text()).toContain("选区");
+    expect(wrapper.text()).toContain("a.md");
+    expect(wrapper.text()).toContain("L1-2");
+    expect(wrapper.text()).not.toContain("<context");
+    expect(wrapper.text()).not.toContain("以下是用户添加的工作区上下文");
+  });
+
+  it("renders associated workspace contexts from native user message file parts", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "msg_user_parts",
+            role: "user",
+            text: "写了什么内容",
+            parts: [
+              { type: "text", text: "写了什么内容" },
+              {
+                type: "file",
+                path: "src/UserService.java",
+                name: "UserService.java",
+                content: "class UserService {}",
+                source: {
+                  text: "class UserService {}",
+                  startLine: 20,
+                  endLine: 35,
+                  contextType: "selection"
+                }
+              }
+            ],
+            createdAt: "2026-07-06T00:00:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    expect(wrapper.text()).toContain("写了什么内容");
+    expect(wrapper.text()).toContain("选区");
+    expect(wrapper.text()).toContain("UserService.java");
+    expect(wrapper.text()).toContain("L20-35");
+    expect(wrapper.text()).not.toContain("<context");
+  });
+
   it("shows mentionable subagent/all agents when the user types at-sign", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -789,33 +918,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("send")).toEqual([["后台刷新时发送"]]);
   });
 
-  it("requests a process refresh when the user focuses the composer textarea", async () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [],
-        processStatus: { status: "READY", initializable: false, message: "ready" }
-      }
-    });
-
-    await wrapper.get("textarea").trigger("focus");
-
-    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
-  });
-
-  it("requests a process refresh when the user clicks the composer card", async () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [],
-        processStatus: { status: "READY", initializable: false, message: "ready" }
-      }
-    });
-
-    await wrapper.get(".figma-chat-input-card").trigger("click");
-
-    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
-  });
-
-  it("deduplicates focus and click refresh requests from the same interaction", async () => {
+  it("does not request a process refresh when the user focuses or clicks the composer", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -826,7 +929,7 @@ describe("FigmaChatPanel", () => {
     await wrapper.get("textarea").trigger("focus");
     await wrapper.get(".figma-chat-input-card").trigger("click");
 
-    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
+    expect(wrapper.emitted("refresh-process")).toBeUndefined();
   });
 
   it("blocks submit actions and skips duplicate refresh while process status is refreshing", async () => {

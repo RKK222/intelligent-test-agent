@@ -12,6 +12,7 @@ import type {
   TodoItem
 } from "@test-agent/shared-types";
 import type { OpencodeLikeRuntimeStatus } from "./opencode-like";
+import { displayTextFromUserPrompt } from "./user-message-display";
 
 const SESSION_STATUS_RETRY_WAIT_SECONDS = 60;
 const SESSION_STATUS_MAX_RETRY_ATTEMPTS = 3;
@@ -422,6 +423,21 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
   if (exactMessage?.role === "user") {
     return messages;
   }
+  const displayDelta = displayTextFromUserPrompt(delta);
+  const delayedUserPartIndex = displayDelta !== delta ? findUnlinkedUserByText(messages, delta) : -1;
+  if (delayedUserPartIndex >= 0) {
+    const user = messages[delayedUserPartIndex];
+    if (user.role === "user") {
+      return replaceOrAppendMessage(messages, delayedUserPartIndex, {
+        ...user,
+        id: messageId,
+        messageId,
+        remoteMessageId: messageId,
+        text: displayDelta,
+        parts: appendPromptPart(user.parts, { type: "text", text: delta })
+      });
+    }
+  }
   const exact = findAssistantMessage(messages, messageId);
   const lastIdx = exact.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
@@ -485,12 +501,17 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
   );
   const exactMessage = exactMessageIndex >= 0 ? messages[exactMessageIndex] : undefined;
   if (exactMessage?.role === "user") {
-    const userText = text(raw.text) ?? text(raw.content);
-    return userText === undefined || exactMessage.text
-      ? messages
-      : replaceOrAppendMessage(messages, exactMessageIndex, { ...exactMessage, text: userText });
+    const userText = syntheticTextPart(raw) ? undefined : text(raw.text) ?? text(raw.content);
+    const userPart = promptPartFromUserRaw(raw);
+    const nextParts = userPart ? appendPromptPart(exactMessage.parts, userPart) : exactMessage.parts;
+    const nextText = userText === undefined || exactMessage.text ? exactMessage.text : displayTextFromUserPrompt(userText);
+    if (nextText === exactMessage.text && nextParts === exactMessage.parts) {
+      return messages;
+    }
+    return replaceOrAppendMessage(messages, exactMessageIndex, { ...exactMessage, text: nextText, parts: nextParts });
   }
   const delayedUserText = text(raw.text) ?? text(raw.content);
+  const delayedUserPart = promptPartFromUserRaw(raw);
   const delayedUserPartIndex = findUnlinkedUserByText(messages, delayedUserText);
   if (delayedUserPartIndex >= 0) {
     const user = messages[delayedUserPartIndex];
@@ -500,7 +521,8 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
         id: messageId,
         messageId,
         remoteMessageId: messageId,
-        text: delayedUserText ?? user.text
+        text: delayedUserText ? displayTextFromUserPrompt(delayedUserText) : user.text,
+        parts: delayedUserPart ? appendPromptPart(user.parts, delayedUserPart) : user.parts
       });
     }
   }
@@ -547,6 +569,66 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
   });
 }
 
+function promptPartFromUserRaw(raw: Record<string, unknown>): PromptPart | undefined {
+  const partType = text(raw.type) ?? text(raw.partType);
+  if (partType === "text" && !syntheticTextPart(raw)) {
+    const value = text(raw.text) ?? text(raw.content);
+    return value ? { type: "text", text: value } : undefined;
+  }
+  if (partType !== "file") {
+    return undefined;
+  }
+  const rawSource = record(raw.source);
+  const source = promptPartSource(rawSource);
+  return {
+    type: "file",
+    path: text(raw.path) ?? text(rawSource?.path),
+    name: text(raw.name) ?? text(raw.filename),
+    mimeType: text(raw.mimeType) ?? text(raw.mime),
+    content: text(raw.content),
+    url: text(raw.url),
+    source
+  };
+}
+
+function promptPartSource(source: Record<string, unknown> | undefined): Extract<PromptPart, { type: "file" }>["source"] | undefined {
+  if (!source) {
+    return undefined;
+  }
+  const nestedText = record(source.text);
+  return {
+    start: number(source.start) ?? number(nestedText?.start),
+    end: number(source.end) ?? number(nestedText?.end),
+    text: text(source.text) ?? text(nestedText?.value),
+    startLine: number(source.startLine),
+    endLine: number(source.endLine),
+    contextType: text(source.contextType),
+    ...(text(source.path) ? { path: text(source.path) } : {})
+  } as Extract<PromptPart, { type: "file" }>["source"];
+}
+
+function appendPromptPart(parts: PromptPart[] | undefined, part: PromptPart): PromptPart[] {
+  const existing = parts ?? [];
+  if (existing.some((item) => promptPartKey(item) === promptPartKey(part))) {
+    return existing;
+  }
+  return [...existing, part];
+}
+
+function promptPartKey(part: PromptPart): string {
+  if (part.type === "file") {
+    return `file:${part.path ?? ""}:${part.name ?? ""}:${part.url ?? ""}:${part.source?.startLine ?? ""}:${part.source?.endLine ?? ""}`;
+  }
+  if (part.type === "text") {
+    return `text:${part.text}`;
+  }
+  return JSON.stringify(part);
+}
+
+function syntheticTextPart(raw: Record<string, unknown>): boolean {
+  return raw.synthetic === true;
+}
+
 function removePart(messages: AgentMessage[], event: RunEvent) {
   const messageId = text(event.payload.messageId) ?? text(event.payload.messageID);
   const partId = text(event.payload.partId) ?? text(event.payload.partID) ?? text(event.payload.id);
@@ -585,7 +667,7 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
     id: messageId,
     messageId,
     remoteMessageId: messageId,
-    text: incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
+    text: role === "user" && incomingText ? displayTextFromUserPrompt(incomingText) : incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
     createdAt: text(raw.createdAt) ?? event.occurredAt,
   };
   const message: AgentMessage = role === "user"
@@ -630,8 +712,9 @@ function findUnlinkedUserByText(messages: AgentMessage[], incomingText: string |
   if (incomingText === undefined) {
     return -1;
   }
+  const displayText = displayTextFromUserPrompt(incomingText);
   return messages.findIndex(
-    (message) => message.role === "user" && !message.messageId && message.text === incomingText
+    (message) => message.role === "user" && !message.messageId && (message.text === incomingText || message.text === displayText)
   );
 }
 

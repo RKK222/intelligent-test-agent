@@ -16,6 +16,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -34,6 +36,7 @@ import reactor.core.publisher.Mono;
 @Component
 public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(GeneratedOpencodeSdkGateway.class);
     private static final int OPENCODE_RESPONSE_MAX_IN_MEMORY_SIZE = 16 * 1024 * 1024;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -123,6 +126,18 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         ApiClient apiClient = apiClient(node, traceId);
         // prompt_async 的 parts 是 union schema；用稳定 JSON Map 避免 generated DTO 对 file/source 字段的类型遮蔽。
         Map<String, Object> request = promptAsyncRequest(parts, messageId, agent, modelProviderId, modelId, variant, prompt);
+        logPromptAsyncRequestPrepared(
+                node,
+                opencodeSessionId,
+                directory,
+                workspace,
+                messageId,
+                agent,
+                modelProviderId,
+                modelId,
+                variant,
+                traceId,
+                request);
         ParameterizedTypeReference<Void> returnType = new ParameterizedTypeReference<>() {
         };
         Map<String, Object> pathParams = new HashMap<>();
@@ -147,6 +162,12 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         new String[]{},
                         returnType)
                 .bodyToMono(returnType)
+                .doOnSuccess(ignored -> logPromptAsyncRequestAccepted(
+                        node,
+                        opencodeSessionId,
+                        messageId,
+                        traceId,
+                        request))
                 .thenReturn(new OpencodeStartRunResult(true));
     }
 
@@ -261,6 +282,170 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .toList();
         request.put("parts", requestParts);
         return Map.copyOf(request);
+    }
+
+    /**
+     * 记录发给 opencode prompt_async 的结构摘要，避免正文、data URL 和 source.text 原文进入日志。
+     */
+    private void logPromptAsyncRequestPrepared(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String messageId,
+            String agent,
+            String modelProviderId,
+            String modelId,
+            String variant,
+            String traceId,
+            Map<String, Object> request) {
+        LOGGER.info(
+                "opencode_prompt_async_request_prepared traceId={} nodeId={} baseUrl={} sessionId={} directoryPresent={} workspacePresent={} messageId={} agent={} modelProviderId={} modelId={} variant={} partsCount={} partsSummary={}",
+                traceId,
+                node.executionNodeId().value(),
+                node.baseUrl(),
+                opencodeSessionId,
+                optionalText(directory) != null,
+                optionalText(workspace) != null,
+                optionalText(messageId),
+                optionalText(agent),
+                optionalText(modelProviderId),
+                optionalText(modelId),
+                optionalText(variant),
+                promptAsyncParts(request).size(),
+                summarizePromptAsyncRequest(request));
+    }
+
+    /**
+     * 记录 opencode 已接受 prompt_async 请求，便于和后续 global/event 中的 user message parts 对照。
+     */
+    private void logPromptAsyncRequestAccepted(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String messageId,
+            String traceId,
+            Map<String, Object> request) {
+        LOGGER.info(
+                "opencode_prompt_async_request_accepted traceId={} nodeId={} baseUrl={} sessionId={} messageId={} partsCount={} partsSummary={}",
+                traceId,
+                node.executionNodeId().value(),
+                node.baseUrl(),
+                opencodeSessionId,
+                optionalText(messageId),
+                promptAsyncParts(request).size(),
+                summarizePromptAsyncRequest(request));
+    }
+
+    /**
+     * 提取 prompt_async parts 的脱敏摘要，保留 type/mime/filename/source 范围用于核对原生附件形态。
+     */
+    static List<Map<String, Object>> summarizePromptAsyncRequest(Map<String, Object> request) {
+        return promptAsyncParts(request).stream()
+                .map(GeneratedOpencodeSdkGateway::summarizePromptPart)
+                .toList();
+    }
+
+    private static List<Map<String, Object>> promptAsyncParts(Map<String, Object> request) {
+        Object rawParts = request == null ? null : request.get("parts");
+        if (!(rawParts instanceof List<?> list)) {
+            return List.of();
+        }
+        List<Map<String, Object>> parts = new ArrayList<>();
+        for (Object rawPart : list) {
+            if (rawPart instanceof Map<?, ?> part) {
+                parts.add(copyStringObjectMap(part));
+            }
+        }
+        return List.copyOf(parts);
+    }
+
+    private static Map<String, Object> summarizePromptPart(Map<String, Object> part) {
+        LinkedHashMap<String, Object> summary = new LinkedHashMap<>();
+        String type = promptSummaryStringValue(part.get("type"));
+        putIfPresent(summary, "type", type);
+        if ("text".equals(type)) {
+            putIfPresent(summary, "textChars", textLength(part.get("text")));
+        } else if ("file".equals(type)) {
+            putIfPresent(summary, "mime", promptSummaryStringValue(part.get("mime")));
+            putIfPresent(summary, "filename", promptSummaryStringValue(part.get("filename")));
+            summary.put("url", summarizeUrl(part.get("url")));
+            summary.put("source", summarizeSource(part.get("source")));
+        } else if ("agent".equals(type)) {
+            putIfPresent(summary, "name", promptSummaryStringValue(part.get("name")));
+            summary.put("source", summarizeSource(part.get("source")));
+        }
+        return Map.copyOf(summary);
+    }
+
+    private static Map<String, Object> summarizeUrl(Object rawUrl) {
+        String url = promptSummaryStringValue(rawUrl);
+        if (url == null) {
+            return Map.of("present", false);
+        }
+        LinkedHashMap<String, Object> summary = new LinkedHashMap<>();
+        summary.put("present", true);
+        summary.put("chars", url.length());
+        int schemeEnd = url.indexOf(':');
+        String scheme = schemeEnd > 0 ? url.substring(0, schemeEnd) : "unknown";
+        summary.put("scheme", scheme);
+        summary.put("dataUrl", url.startsWith("data:"));
+        int base64Start = url.indexOf(";base64,");
+        if (base64Start >= 0) {
+            summary.put("base64Chars", url.length() - base64Start - ";base64,".length());
+        }
+        return Map.copyOf(summary);
+    }
+
+    private static Map<String, Object> summarizeSource(Object rawSource) {
+        if (!(rawSource instanceof Map<?, ?> source)) {
+            return Map.of("present", false);
+        }
+        LinkedHashMap<String, Object> summary = new LinkedHashMap<>();
+        summary.put("present", true);
+        putIfPresent(summary, "type", promptSummaryStringValue(source.get("type")));
+        putIfPresent(summary, "path", promptSummaryStringValue(source.get("path")));
+        Object rawText = source.get("text");
+        if (rawText instanceof Map<?, ?> textMap) {
+            LinkedHashMap<String, Object> textSummary = new LinkedHashMap<>();
+            textSummary.put("present", true);
+            putIfPresent(textSummary, "chars", textLength(textMap.get("value")));
+            putIfPresent(textSummary, "start", numberValue(textMap.get("start")));
+            putIfPresent(textSummary, "end", numberValue(textMap.get("end")));
+            summary.put("text", Map.copyOf(textSummary));
+        } else if (rawText instanceof String text) {
+            summary.put("text", Map.of("present", true, "chars", text.length()));
+        } else {
+            summary.put("text", Map.of("present", false));
+        }
+        return Map.copyOf(summary);
+    }
+
+    private static Map<String, Object> copyStringObjectMap(Map<?, ?> source) {
+        LinkedHashMap<String, Object> copy = new LinkedHashMap<>();
+        source.forEach((key, value) -> {
+            if (key instanceof String name) {
+                copy.put(name, value);
+            }
+        });
+        return Map.copyOf(copy);
+    }
+
+    private static String promptSummaryStringValue(Object value) {
+        return value instanceof String string ? string : null;
+    }
+
+    private static Integer textLength(Object value) {
+        return value instanceof String string ? string.length() : null;
+    }
+
+    private static Object numberValue(Object value) {
+        return value instanceof Number number ? number : null;
+    }
+
+    private static void putIfPresent(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
     }
 
     /**

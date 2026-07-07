@@ -38,6 +38,19 @@ const toolPayload = computed(() => {
 
 const diffFiles = computed(() => (props.message.payload.files as RunDiffFile[] | undefined) ?? []);
 const eventSummary = computed(() => text(props.message.payload.summary) ?? text(props.message.payload.message) ?? text(props.message.payload.status));
+
+function getFileName(path: string): string {
+  if (!path) return "";
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || path;
+}
+
+function getStatusLabel(status?: string): string {
+  if (!status) return "M";
+  const s = status.toLowerCase();
+  if (s === "untracked") return "U";
+  return s.charAt(0).toUpperCase();
+}
 </script>
 
 <template>
@@ -92,9 +105,9 @@ const eventSummary = computed(() => text(props.message.payload.summary) ?? text(
         :key="file.path"
         class="grid grid-cols-[minmax(0,1.5fr)_minmax(96px,.6fr)_minmax(96px,.45fr)] border-b border-dashed border-[var(--ta-chat-border)] px-4 py-2 last:border-b-0"
       >
-        <div class="min-w-0 truncate font-mono text-[12px] text-[var(--ta-chat-text)]">{{ file.path }}</div>
+        <div class="min-w-0 truncate font-mono text-[12px] text-[var(--ta-chat-text)]" :title="file.path">{{ getFileName(file.path) }}</div>
         <div>
-          <Badge tone="warning" class="bg-[rgba(245,158,11,.18)] font-bold uppercase tracking-wide">{{ file.status.toUpperCase() }}</Badge>
+          <Badge tone="warning" class="bg-[rgba(245,158,11,.18)] font-bold uppercase tracking-wide">{{ getStatusLabel(file.status) }}</Badge>
         </div>
         <div class="font-semibold text-[var(--ta-chat-text)]">{{ lineChange(file) }}</div>
       </div>

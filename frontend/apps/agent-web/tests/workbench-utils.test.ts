@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MessagePart, PromptPart, Run, RunDiffFile, SessionMessage, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import {
+  OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
+  OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
+  OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
+  opencodeAvailabilityFromHealth,
+  opencodeAvailabilityFromProcess,
+  opencodeHealthRequestFromProcess,
   chatStateFromSessionTreeSnapshot,
   dedupeSessionMessages,
   diffFilesFromPayload,
@@ -76,6 +82,99 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
+  });
+});
+
+describe("opencode readiness helpers", () => {
+  it("keeps health, runtime catalog and VCS refresh intervals explicit", () => {
+    expect(OPENCODE_HEALTH_REFETCH_INTERVAL_MS).toBe(10_000);
+    expect(OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS).toBe(300_000);
+    expect(OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS).toBe(30_000);
+  });
+
+  it("builds weak health request only after process assignment is known", () => {
+    expect(
+      opencodeHealthRequestFromProcess({
+        status: "READY",
+        initializable: false,
+        message: "ready",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 4096,
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toEqual({ linuxServerId: "server-a", containerId: "ctr_01", port: 4096 });
+
+    expect(
+      opencodeHealthRequestFromProcess({
+        status: "READY",
+        initializable: false,
+        message: "ready",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toBeNull();
+
+    expect(
+      opencodeHealthRequestFromProcess({
+        status: "READY",
+        initializable: false,
+        message: "ready",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 0,
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toBeNull();
+  });
+
+  it("lets processes/me override readiness when it returns", () => {
+    expect(
+      opencodeAvailabilityFromProcess({
+        status: "READY",
+        initializable: false,
+        message: "ready",
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toEqual({ ready: true, source: "process" });
+
+    expect(
+      opencodeAvailabilityFromProcess({
+        status: "UNAVAILABLE",
+        initializable: true,
+        message: "unhealthy",
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toEqual({ ready: false, source: "process" });
+  });
+
+  it("uses weak health as the normal readiness source between processes/me refreshes", () => {
+    expect(
+      opencodeAvailabilityFromHealth({
+        healthy: true,
+        status: "HEALTHY",
+        serviceStatus: "RUNNING",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 4096,
+        checkedAt: "2026-07-06T00:00:00Z",
+        message: "ok"
+      })
+    ).toEqual({ ready: true, source: "health" });
+
+    expect(
+      opencodeAvailabilityFromHealth({
+        healthy: false,
+        status: "UNHEALTHY",
+        serviceStatus: "NOT_RUNNING",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 4096,
+        checkedAt: "2026-07-06T00:00:10Z",
+        message: "HTTP 503"
+      })
+    ).toEqual({ ready: false, source: "health" });
   });
 });
 
@@ -477,6 +576,95 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("keeps user file parts from session tree when persisted user message has no parts", () => {
+    const persisted: SessionMessage[] = [
+      {
+        messageId: "msg_user_platform",
+        sessionId: "ses_root",
+        role: "USER",
+        content: "这个文件里有什么内容",
+        createdAt: "2026-07-06T08:00:00Z"
+      },
+      {
+        messageId: "msg_assistant_platform",
+        sessionId: "ses_root",
+        role: "ASSISTANT",
+        content: "文件内容如下",
+        createdAt: "2026-07-06T08:01:00Z"
+      }
+    ];
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "remote_user", role: "user", content: "这个文件里有什么内容" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "remote_user",
+            part: {
+              id: "part_file",
+              messageID: "remote_user",
+              type: "file",
+              filename: "冲突文件.md",
+              url: "data:text/plain;base64,LS0t",
+              source: {
+                path: "99-测试数据/Git冲突处理/冲突文件.md",
+                contextType: "file"
+              }
+            }
+          }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "remote_assistant", role: "assistant", content: "文件内容如下" }
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, persisted);
+
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]).toMatchObject({
+      role: "user",
+      messageId: "msg_user_platform",
+      text: "这个文件里有什么内容",
+      parts: [
+        {
+          type: "file",
+          path: "99-测试数据/Git冲突处理/冲突文件.md",
+          name: "冲突文件.md",
+          url: "data:text/plain;base64,LS0t",
+          source: { contextType: "file", path: "99-测试数据/Git冲突处理/冲突文件.md" }
+        }
+      ]
+    });
+  });
+
   it("normalizes raw opencode parts and restores generated documents", () => {
     const messages = [
       {
@@ -526,6 +714,52 @@ describe("historical session restoration", () => {
         status: "added"
       }
     ]);
+  });
+
+  it("keeps native opencode file parts when restoring user messages", () => {
+    const mapped = messagesFromSessionMessages([
+      {
+        messageId: "msg_user",
+        sessionId: "ses_1",
+        role: "USER",
+        content: "what in this",
+        createdAt: "2026-07-06T08:00:00Z",
+        parts: [
+          {
+            id: "part_text",
+            type: "text",
+            text: "what in this"
+          },
+          {
+            id: "part_synthetic",
+            type: "text",
+            synthetic: true,
+            text: "Called the Read tool"
+          },
+          {
+            id: "part_file",
+            type: "file",
+            filename: "CLAUDE.md",
+            mime: "text/plain",
+            url: "data:text/plain;base64,IyBDbGF1ZGU="
+          }
+        ] as never
+      }
+    ]);
+
+    expect(mapped[0]).toMatchObject({
+      role: "user",
+      text: "what in this",
+      parts: [
+        { type: "text", text: "what in this" },
+        {
+          type: "file",
+          name: "CLAUDE.md",
+          mimeType: "text/plain",
+          url: "data:text/plain;base64,IyBDbGF1ZGU="
+        }
+      ]
+    });
   });
 
   it("keeps platform and remote message ids when restoring assistant messages", () => {

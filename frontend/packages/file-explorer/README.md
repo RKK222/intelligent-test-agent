@@ -17,6 +17,7 @@
 - 文件树行支持在文件名后展示变更行数 `+N -N`（绿/红，与 Changed Files 面板一致）：由 app 层传入 `changedFiles` 与 `workspaceRootPath`，本包把 diff 路径归一化为 workspace 相对路径后按文件匹配，行数来自 `RunDiffFile.additions/deletions`。
 - 保持文件树、Changed Files 和搜索结果的紧凑列表视觉，不因长路径、状态徽标或选中态改变行高。
 - `@` context 和 prompt file context 只消费 app 层传入的选择回调；本包不读取文件内容。
+- 文件行和搜索结果行可通过右键 emit “添加文件到对话”事件；文件读取、二进制/超大文件拦截和上下文 store 写入仍由 app 层完成。
 
 ## 禁止事项
 

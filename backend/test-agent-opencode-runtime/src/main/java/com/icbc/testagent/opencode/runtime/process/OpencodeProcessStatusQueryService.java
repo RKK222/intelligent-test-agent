@@ -2,6 +2,8 @@ package com.icbc.testagent.opencode.runtime.process;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
+import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
@@ -31,6 +33,7 @@ public class OpencodeProcessStatusQueryService {
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final Clock clock;
     private final OpencodeServerAddressResolver addressResolver;
+    private final OpencodeWeakHealthHttpClient weakHealthHttpClient;
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -71,11 +74,22 @@ public class OpencodeProcessStatusQueryService {
             OpencodeProcessHeartbeatStore heartbeatStore,
             Clock clock,
             OpencodeServerAddressResolver addressResolver) {
+        this(repository, gateway, heartbeatStore, clock, addressResolver, new JdkOpencodeWeakHealthHttpClient());
+    }
+
+    OpencodeProcessStatusQueryService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            Clock clock,
+            OpencodeServerAddressResolver addressResolver,
+            OpencodeWeakHealthHttpClient weakHealthHttpClient) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.addressResolver = addressResolver;
+        this.weakHealthHttpClient = Objects.requireNonNull(weakHealthHttpClient, "weakHealthHttpClient must not be null");
     }
 
     /**
@@ -97,6 +111,80 @@ public class OpencodeProcessStatusQueryService {
                     null);
         }
         return queryExisting(process.get(), checkedAt, traceId);
+    }
+
+    /**
+     * 前端轮询用弱健康检查：只读取 Redis 快照并直接访问 opencode /global/health。
+     *
+     * <p>该方法不读取或写入数据库，不调用 manager gateway，也不刷新 Redis heartbeat；
+     * 它只表达当前瞬时健康结果，供前端降低 `/processes/me` 强状态查询频率。
+     */
+    public OpencodeProcessWeakHealthResponse weakHealth(
+            OpencodeProcessWeakHealthRequest request,
+            String traceId) {
+        Objects.requireNonNull(request, "request must not be null");
+        Instant checkedAt = Instant.now(clock);
+        String linuxServerId = normalized(request.linuxServerId());
+        String containerId = normalized(request.containerId());
+        if (linuxServerId.isBlank() || containerId.isBlank() || request.port() < 1 || request.port() > 65535) {
+            return weakHealthUnavailable(
+                    OpencodeProcessWeakHealthStatus.PROCESS_NOT_FOUND,
+                    linuxServerId,
+                    containerId,
+                    request.port(),
+                    null,
+                    checkedAt,
+                    "弱健康检查参数无效");
+        }
+        Optional<ManagerRuntimeSnapshot> managerSnapshot = heartbeatStore.liveManagerSnapshots().stream()
+                .filter(snapshot -> linuxServerId.equals(snapshot.container().linuxServerId().value()))
+                .filter(snapshot -> containerId.equals(snapshot.container().containerId().value()))
+                .max(java.util.Comparator.comparing(snapshot -> snapshot.manager().lastHeartbeatAt()));
+        if (managerSnapshot.isEmpty()) {
+            return weakHealthUnavailable(
+                    OpencodeProcessWeakHealthStatus.MANAGER_UNAVAILABLE,
+                    linuxServerId,
+                    containerId,
+                    request.port(),
+                    null,
+                    checkedAt,
+                    "Redis 中未找到目标 manager 快照");
+        }
+        Optional<ManagedOpencodeProcessSnapshot> process = managerSnapshot.get().managedProcesses().stream()
+                .filter(candidate -> candidate.port() == request.port())
+                .findFirst();
+        if (process.isEmpty()) {
+            return weakHealthUnavailable(
+                    OpencodeProcessWeakHealthStatus.PROCESS_NOT_FOUND,
+                    linuxServerId,
+                    containerId,
+                    request.port(),
+                    null,
+                    checkedAt,
+                    "Redis manager 快照中未找到目标 opencode 进程");
+        }
+        String baseUrl = weakHealthBaseUrl(process.get());
+        OpencodeWeakHealthHttpResult result = weakHealthHttpClient.check(baseUrl, traceId);
+        if (result.healthy()) {
+            return new OpencodeProcessWeakHealthResponse(
+                    true,
+                    OpencodeProcessWeakHealthStatus.HEALTHY,
+                    "RUNNING",
+                    linuxServerId,
+                    containerId,
+                    request.port(),
+                    baseUrl,
+                    checkedAt,
+                    result.message());
+        }
+        return weakHealthUnavailable(
+                OpencodeProcessWeakHealthStatus.UNHEALTHY,
+                linuxServerId,
+                containerId,
+                request.port(),
+                baseUrl,
+                checkedAt,
+                result.message());
     }
 
     private OpencodeProcessStatusProbe queryExisting(
@@ -218,6 +306,37 @@ public class OpencodeProcessStatusQueryService {
 
     private String healthBaseUrl(OpencodeServerProcess process) {
         return addressResolver == null ? process.baseUrl() : addressResolver.baseUrl(process.port());
+    }
+
+    private String weakHealthBaseUrl(ManagedOpencodeProcessSnapshot process) {
+        if (addressResolver != null) {
+            return addressResolver.baseUrl(process.port());
+        }
+        return process.baseUrl();
+    }
+
+    private OpencodeProcessWeakHealthResponse weakHealthUnavailable(
+            OpencodeProcessWeakHealthStatus status,
+            String linuxServerId,
+            String containerId,
+            int port,
+            String baseUrl,
+            Instant checkedAt,
+            String message) {
+        return new OpencodeProcessWeakHealthResponse(
+                false,
+                status,
+                "NOT_RUNNING",
+                linuxServerId,
+                containerId,
+                port,
+                baseUrl,
+                checkedAt,
+                message);
+    }
+
+    private String normalized(String value) {
+        return value == null ? "" : value.trim();
     }
 
     /**

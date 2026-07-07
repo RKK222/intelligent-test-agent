@@ -14,6 +14,9 @@ import type {
   Session,
   SessionMessage,
   SessionTreeMessagesResponse,
+  UserOpencodeProcess,
+  UserOpencodeProcessHealth,
+  UserOpencodeProcessHealthRequest,
   Workspace
 } from "@test-agent/shared-types";
 import type { AgentChatRuntimeAction, AgentChatRuntimeState, OpencodeLikeRuntimeStatus } from "@test-agent/agent-chat";
@@ -59,6 +62,50 @@ export function runEventMatchesRun(
   currentRun: Pick<Run, "runId"> | null | undefined
 ): boolean {
   return Boolean(event.runId && subscribedRunId && currentRun?.runId && event.runId === subscribedRunId && event.runId === currentRun.runId);
+}
+
+export const OPENCODE_HEALTH_REFETCH_INTERVAL_MS = 10_000;
+export const OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS = 300_000;
+export const OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS = 30_000;
+
+export type OpencodeAvailabilitySource = "process" | "health";
+export type OpencodeAvailabilityState = {
+  ready: boolean;
+  source: OpencodeAvailabilitySource;
+};
+
+/**
+ * 弱健康检查必须基于 /processes/me 返回的分配归属，缺任一字段时不发请求。
+ */
+export function opencodeHealthRequestFromProcess(
+  process: Partial<UserOpencodeProcess> | null | undefined
+): UserOpencodeProcessHealthRequest | null {
+  if (!process?.linuxServerId || !process.containerId || !Number.isInteger(process.port) || (process.port as number) <= 0) {
+    return null;
+  }
+  return {
+    linuxServerId: process.linuxServerId,
+    containerId: process.containerId,
+    port: process.port as number
+  };
+}
+
+/**
+ * /processes/me 是强状态查询；它一旦返回，就覆盖当前前端 readiness。
+ */
+export function opencodeAvailabilityFromProcess(
+  process: Partial<UserOpencodeProcess> | null | undefined
+): OpencodeAvailabilityState {
+  return { ready: process?.status === "READY", source: "process" };
+}
+
+/**
+ * 弱健康检查是常态 readiness 来源；只更新健康态，不改变进程归属。
+ */
+export function opencodeAvailabilityFromHealth(
+  health: Partial<UserOpencodeProcessHealth> | null | undefined
+): OpencodeAvailabilityState {
+  return { ready: Boolean(health?.healthy), source: "health" };
 }
 
 export type RetryDeadlineMap = Record<string, number>;
@@ -515,6 +562,7 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
         remoteMessageId: message.remoteMessageId,
         role: "user",
         text: message.content,
+        parts: normalizeSessionPromptParts(message),
         createdAt: message.createdAt
       };
     }
@@ -559,6 +607,17 @@ export function messagesFromSessionTreeSnapshot(snapshot: SessionTreeMessagesRes
 function mergeSessionTreeMessages(persistedMessages: AgentMessage[], treeMessages: AgentMessage[]): AgentMessage[] {
   const usedTreeIndexes = new Set<number>();
   const merged = persistedMessages.map((message) => {
+    if (message.role === "user") {
+      const treeIndex = treeMessages.findIndex((candidate, index) =>
+        !usedTreeIndexes.has(index) && candidate.role === "user" && agentMessagesMatch(message, candidate)
+      );
+      if (treeIndex < 0) {
+        return message;
+      }
+      usedTreeIndexes.add(treeIndex);
+      // 历史 DB 保留平台 messageId；session tree 可能才有原生 file parts，用于恢复关联文件 chip。
+      return mergeUserMessageWithTreeParts(message, treeMessages[treeIndex] as Extract<AgentMessage, { role: "user" }>);
+    }
     if (message.role !== "assistant") {
       return message;
     }
@@ -578,6 +637,50 @@ function mergeSessionTreeMessages(persistedMessages: AgentMessage[], treeMessage
     }
   });
   return merged;
+}
+
+function mergeUserMessageWithTreeParts(
+  persisted: Extract<AgentMessage, { role: "user" }>,
+  tree: Extract<AgentMessage, { role: "user" }>
+): Extract<AgentMessage, { role: "user" }> {
+  const parts = mergePromptParts(persisted.parts, tree.parts);
+  return {
+    ...persisted,
+    remoteMessageId: persisted.remoteMessageId ?? tree.remoteMessageId ?? tree.messageId ?? tree.id,
+    parts: parts.length > 0 ? parts : persisted.parts
+  };
+}
+
+function mergePromptParts(left: PromptPart[] | undefined, right: PromptPart[] | undefined): PromptPart[] {
+  const merged: PromptPart[] = [];
+  const seen = new Set<string>();
+  for (const part of [...(left ?? []), ...(right ?? [])]) {
+    const key = promptPartStableKey(part);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(part);
+  }
+  return merged;
+}
+
+function promptPartStableKey(part: PromptPart): string {
+  if (part.type === "file") {
+    return [
+      "file",
+      part.path ?? "",
+      part.name ?? "",
+      part.url ?? "",
+      part.source?.contextType ?? "",
+      part.source?.startLine ?? "",
+      part.source?.endLine ?? ""
+    ].join(":");
+  }
+  if (part.type === "text") {
+    return `text:${part.text}`;
+  }
+  return stableStringify(part);
 }
 
 function agentMessagesMatch(left: AgentMessage, right: AgentMessage): boolean {
@@ -688,6 +791,45 @@ function normalizeSessionMessageParts(message: SessionMessage): MessagePart[] {
       );
     })
     .filter((part): part is MessagePart => part !== null);
+}
+
+function normalizeSessionPromptParts(message: SessionMessage): PromptPart[] {
+  return (message.parts ?? [])
+    .map((part): PromptPart | null => {
+      if (!part || typeof part !== "object") {
+        return null;
+      }
+      const raw = part as unknown as Record<string, unknown>;
+      const partType = text(raw.type);
+      if (partType === "text" && raw.synthetic !== true) {
+        const value = text(raw.text) ?? text(raw.content);
+        return value ? { type: "text", text: value } satisfies PromptPart : null;
+      }
+      if (partType !== "file") {
+        return null;
+      }
+      const source = record(raw.source);
+      const nestedText = record(source?.text);
+      return {
+        type: "file",
+        path: text(raw.path) ?? text(source?.path),
+        name: text(raw.name) ?? text(raw.filename),
+        mimeType: text(raw.mimeType) ?? text(raw.mime),
+        content: text(raw.content),
+        url: text(raw.url),
+        source: source
+          ? {
+              start: number(source.start) ?? number(nestedText?.start),
+              end: number(source.end) ?? number(nestedText?.end),
+              text: text(source.text) ?? text(nestedText?.value),
+              startLine: number(source.startLine),
+              endLine: number(source.endLine),
+              contextType: text(source.contextType)
+            }
+          : undefined
+      } satisfies PromptPart;
+    })
+    .filter((part): part is PromptPart => part !== null);
 }
 
 /**

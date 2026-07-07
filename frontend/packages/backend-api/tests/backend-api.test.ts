@@ -210,6 +210,49 @@ describe("backend-api", () => {
     expect(headers.get("Authorization")).toBe("Bearer token_123");
   });
 
+  it("checks current user opencode process weak health through agent-scoped URL", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            healthy: true,
+            status: "HEALTHY",
+            serviceStatus: "RUNNING",
+            linuxServerId: "server-a",
+            containerId: "ctr_01",
+            port: 4096,
+            baseUrl: "http://10.8.0.12:4096",
+            checkedAt: "2026-06-24T00:00:01Z",
+            message: "ok"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(
+      client.getMyOpencodeProcessHealth({ linuxServerId: "server-a", containerId: "ctr_01", port: 4096 })
+    ).resolves.toMatchObject({
+      healthy: true,
+      status: "HEALTHY",
+      serviceStatus: "RUNNING",
+      baseUrl: "http://10.8.0.12:4096"
+    });
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/agent/opencode/processes/me/health?linuxServerId=server-a&containerId=ctr_01&port=4096"
+    );
+    expect((fetcher.mock.calls[0]?.[1]?.headers as Headers).get("Authorization")).toBe("Bearer token_123");
+  });
+
   it("maps opencode runtime management overview through platform URL with filters", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

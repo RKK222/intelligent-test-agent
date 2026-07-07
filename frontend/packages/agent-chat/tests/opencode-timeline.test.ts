@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, within } from "@testing-library/vue";
 import { nextTick } from "vue";
-import type { AgentMessage, MessagePart } from "@test-agent/shared-types";
+import type { AgentMessage, MessagePart, PromptPart } from "@test-agent/shared-types";
 import OpencodeTimeline from "../src/opencode-like/components/OpencodeTimeline.vue";
 import { createOpencodeLikeState } from "../src/opencode-like/state/adapter";
 import AssistantThread from "../src/AssistantThread.vue";
@@ -57,6 +57,98 @@ describe("OpencodeTimeline", () => {
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
     await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
     expect(getByText("src/checkout.ts")).toBeTruthy();
+  });
+
+  it("renders only the original question for serialized workspace context prompts", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage(
+          "msg_user_context",
+          [
+            "用户问题：",
+            "写了什么内容",
+            "",
+            "以下是用户添加的工作区上下文：",
+            "",
+            '<context type="file" path="docs/api.md">',
+            "接口说明",
+            "</context>"
+          ].join("\n")
+        )
+      ]
+    });
+
+    const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("写了什么内容")).toBeTruthy();
+    expect(getByText("文件")).toBeTruthy();
+    expect(getByText("api.md")).toBeTruthy();
+    expect(queryByText(/<context/)).toBeNull();
+    expect(container.querySelector(".oc-user-message__bubble")?.textContent).not.toContain("以下是用户添加的工作区上下文");
+  });
+
+  it("renders selection and file chips from user prompt parts without exposing serialized context", () => {
+    const serializedPrompt = [
+      "用户问题：",
+      "能看到什么内容",
+      "",
+      "以下是用户添加的工作区上下文：",
+      "",
+      '<context type="selection" path="99-测试数据/Git冲突处理/冲突文件.md" lines="5-5">',
+      "应用分支上的修改，用于制造合并冲突。",
+      "</context>"
+    ].join("\n");
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_context_part", "能看到什么内容", [
+          { type: "text", text: serializedPrompt },
+          {
+            type: "file",
+            path: "docs/api.md",
+            name: "api.md",
+            content: "# API",
+            source: { contextType: "file" }
+          }
+        ])
+      ]
+    });
+
+    const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("能看到什么内容")).toBeTruthy();
+    expect(getByText("选区")).toBeTruthy();
+    expect(getByText("冲突文件.md")).toBeTruthy();
+    expect(getByText("L5-5")).toBeTruthy();
+    expect(getByText("文件")).toBeTruthy();
+    expect(getByText("api.md")).toBeTruthy();
+    expect(queryByText(/<context/)).toBeNull();
+    expect(container.querySelector(".oc-user-message__bubble")?.textContent).not.toContain("以下是用户添加的工作区上下文");
+  });
+
+  it("opens reasoning details as plain text without mounting MarkdownView", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_reasoning", "分析流程"),
+        assistantMessage("msg_assistant_reasoning", [
+          reasoningPart(
+            "part_reasoning",
+            ["第一步：读取上下文", "", "- 保留原始换行", "- 不触发 Markdown 渲染器"].join("\n")
+          )
+        ])
+      ]
+    });
+
+    const { container, getByText, queryByTestId } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("思考状态")).toBeTruthy();
+    expect(container.querySelector(".oc-reasoning-part__plain")).toBeNull();
+
+    await fireEvent.click(container.querySelector(".oc-reasoning-part .oc-disclosure__trigger") as HTMLElement);
+
+    const plain = container.querySelector(".oc-reasoning-part__plain");
+    expect(plain?.textContent).toContain("第一步：读取上下文");
+    expect(plain?.textContent).toContain("- 不触发 Markdown 渲染器");
+    expect(queryByTestId("md-view")).toBeNull();
   });
 
   it("keeps diff files collapsed by default and updates folded line totals when files change", async () => {
@@ -581,6 +673,29 @@ describe("OpencodeTimeline", () => {
     expect(getByText("我是测试智能体。")).toBeTruthy();
   });
 
+  it("keeps step-start metadata on the same assistant line as reasoning", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "这个文件里有什么内容"),
+        assistantMessage("msg_assistant_reasoning", [
+          { partId: "part_step_start", type: "step-start", snapshot: "start" },
+          reasoningPart("part_reasoning", "先读取文件内容。")
+        ])
+      ]
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    await waitMarkdown();
+
+    const frame = container.querySelector(".oc-assistant-frame.has-header");
+    expect(frame).toBeTruthy();
+    expect(frame?.querySelector(".oc-assistant-frame__avatar")).toBeTruthy();
+    expect(frame?.textContent).toContain("思考状态");
+    expect(container.querySelectorAll(".oc-assistant-frame")).toHaveLength(1);
+    expect(container.querySelector(".oc-unknown-part")).toBeNull();
+    expect(getByText("思考状态")).toBeTruthy();
+  });
+
   it("merges repeated reasoning rows across split assistant messages in one turn", async () => {
     const state = createOpencodeLikeState({
       messages: [
@@ -605,10 +720,10 @@ describe("OpencodeTimeline", () => {
     expect(getByText("思考状态")).toBeTruthy();
 
     await fireEvent.click(container.querySelector(".oc-reasoning-part .oc-disclosure__trigger") as HTMLElement);
-    await waitMarkdown();
-    expect(getByText("先识别用户问题。")).toBeTruthy();
-    expect(getByText("再读取相关能力说明。")).toBeTruthy();
-    expect(getByText("最后组织回答。")).toBeTruthy();
+    const plain = container.querySelector(".oc-reasoning-part__plain");
+    expect(plain?.textContent).toContain("先识别用户问题。");
+    expect(plain?.textContent).toContain("再读取相关能力说明。");
+    expect(plain?.textContent).toContain("最后组织回答。");
   });
 
   it("merges repeated tool rows by tool type in one user turn", async () => {
@@ -706,8 +821,8 @@ describe("OpencodeTimeline", () => {
   });
 });
 
-function userMessage(id: string, text: string): Extract<AgentMessage, { role: "user" }> {
-  return { id, messageId: id, role: "user", text, createdAt: "2026-07-03T00:00:00Z" };
+function userMessage(id: string, text: string, parts?: PromptPart[]): Extract<AgentMessage, { role: "user" }> {
+  return { id, messageId: id, role: "user", text, parts, createdAt: "2026-07-03T00:00:00Z" };
 }
 
 function assistantMessage(id: string, parts: MessagePart[]): Extract<AgentMessage, { role: "assistant" }> {

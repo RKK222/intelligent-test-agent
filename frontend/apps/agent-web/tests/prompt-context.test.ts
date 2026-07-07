@@ -23,19 +23,15 @@ describe("prompt editor context", () => {
       source: {
         start: 2,
         end: 2,
-        text: "line 2"
+        text: "line 2",
+        startLine: 2,
+        endLine: 2,
+        contextType: "selection"
       }
     });
   });
 
-  it("falls back to the active file content when there is no selection", () => {
-    expect(buildEditorFilePromptPart(tab, undefined)).toEqual({
-      type: "file",
-      path: "src/spec.ts",
-      name: "spec.ts",
-      source: {
-        text: "line 1\nline 2\nline 3"
-      }
-    });
+  it("does not fall back to the active file content when there is no selection", () => {
+    expect(buildEditorFilePromptPart(tab, undefined)).toBeUndefined();
   });
 });

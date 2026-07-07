@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { computed, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
@@ -50,10 +50,20 @@ import {
   type EditorTab
 } from "@test-agent/workbench-shell";
 import { useAuthStore } from "../stores/authStore";
+import {
+  chatContextItemsToPromptParts,
+  createContextId,
+  serializeChatContexts,
+  summarizeChatContextItems,
+  useChatContextStore,
+  validateChatSend,
+  type ChatContextItem
+} from "../stores/chatContextStore";
 import FigmaShell from "./FigmaShell.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
+import { type PreviewMode } from "./WorkbenchFooter.vue";
 import OpencodeProcessStartupDialog from "./OpencodeProcessStartupDialog.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
@@ -79,6 +89,12 @@ import {
   nextCenterModeAfterRunDiff,
   nextCenterModeAfterVcsRefresh,
   notifyOnAttention,
+  OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
+  OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
+  OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
+  opencodeAvailabilityFromHealth,
+  opencodeAvailabilityFromProcess,
+  opencodeHealthRequestFromProcess,
   parseCommand,
   prepareAutoRetryRun,
   promptFromParts,
@@ -94,6 +110,7 @@ import {
   text,
   workspaceLoadIsCurrent,
   type AutoRetryRunDraft,
+  type OpencodeAvailabilityState,
   type RetryDeadlineMap
 } from "./workbench-utils";
 
@@ -103,9 +120,8 @@ provide("api", api);
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
+const chatContextStore = useChatContextStore();
 const router = useRouter();
-const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
-const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
 const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
 const AGENT_CATALOG_REQUEST_TIMEOUT_MS = 8000;
 const RUN_EVENT_SSE_ERROR_TITLE = "RunEvent SSE 连接异常";
@@ -277,9 +293,10 @@ const selectedServerWorkspaceServerId = ref<string | undefined>(undefined);
 const liveTrack = ref(false);
 // 已跟随过的 tool partId，避免同一工具调用重复读盘刷新。
 const liveFollowedParts = ref<Set<string>>(new Set());
-// Markdown 预览开关：状态由 FigmaEditorArea tab 表头按钮双向绑定到 CodeEditor 的 showPreview。
+// Markdown 预览模式：off | full(整体预览) | split(分上下)。
 // 切换非 Markdown 文件时由 watch 主动复位，避免下次切回 md 时残留之前的开启状态。
-const markdownPreview = ref(false);
+const markdownPreviewMode = ref<PreviewMode>("off");
+const markdownPreview = computed(() => markdownPreviewMode.value !== "off");
 // 只有用户主动触发的健康刷新需要短暂阻止提交；后台轮询刷新不应周期性打断输入体验。
 const manualOpencodeProcessRefreshing = ref(false);
 
@@ -402,6 +419,7 @@ const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
+const codeEditorRef = ref<any>(null);
 const breadcrumbDisplay = computed(() => {
   if (!activePath.value) return "";
   return activePath.value.split(/[\\/]+/).filter(Boolean).join(" › ");
@@ -587,17 +605,33 @@ const opencodeProcessQuery = useQuery({
   enabled: opencodeProcessEnabled,
   queryFn: () => api.getMyOpencodeProcess(),
   retry: false,
-  // 未 READY 时保持快速探测；READY 后降频，避免每个工作台标签页持续压测 manager health。
-  refetchInterval: (query) => {
-    const status = (query.state.data as UserOpencodeProcess | undefined)?.status;
-    return status === "READY"
-      ? OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS
-      : OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS;
-  },
-  refetchIntervalInBackground: false
+  refetchOnWindowFocus: false,
+  refetchInterval: false
 });
 const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
-const opencodeProcessReady = computed(() => opencodeProcessStatus.value?.status === "READY");
+const opencodeAvailability = ref<OpencodeAvailabilityState>({ ready: false, source: "process" });
+const opencodeHealthRequest = computed(() => opencodeHealthRequestFromProcess(opencodeProcessStatus.value));
+const opencodeHealthQuery = useQuery({
+  queryKey: computed(
+    () =>
+      [
+        "runtime",
+        "opencode-process",
+        "health",
+        authStore.token ?? "",
+        opencodeHealthRequest.value?.linuxServerId ?? "",
+        opencodeHealthRequest.value?.containerId ?? "",
+        opencodeHealthRequest.value?.port ?? 0
+      ] as const
+  ),
+  enabled: () => opencodeProcessEnabled.value && Boolean(opencodeHealthRequest.value),
+  queryFn: () => api.getMyOpencodeProcessHealth(opencodeHealthRequest.value!),
+  retry: false,
+  refetchInterval: OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
+  refetchIntervalInBackground: false
+});
+const opencodeHealthReady = computed(() => opencodeAvailability.value.ready);
+const opencodeProcessReady = computed(() => opencodeHealthReady.value);
 const workspaceFileRouteReadyById = ref<Record<string, boolean>>({});
 const selectedWorkspaceFileRouteReady = computed(() => {
   const workspaceId = selectedWorkspaceIdRef.value;
@@ -607,6 +641,7 @@ const processStartupDialogOpen = ref(false);
 const processStartupActionLabel = ref("启动进程");
 const processStartupOperation = ref<OpencodeProcessStartOperation | null>(null);
 let processStartupPollTimer: ReturnType<typeof setInterval> | null = null;
+let lastUnhealthyHealthIdentity = "";
 
 function newProcessStartupOperationId(): string {
   const randomPart =
@@ -709,11 +744,11 @@ function beginInitializeOpencodeProcess() {
 const authReady = computed(() => authStore.isAuthenticated());
 // 2. 文件路由：只需要 workspace 存在，不依赖 opencode 状态
 const fileRouteReady = computed(() => Boolean(selectedWorkspaceIdRef.value));
-// 3. Runtime 目录（Agent、Command）：需要 opencode READY + workspace
+// 3. Runtime 目录（Agent、Command）：需要 opencode 弱健康 READY + workspace
 const opencodeCatalogReady = computed(() => opencodeProcessReady.value && Boolean(selectedWorkspaceIdRef.value));
-// 4. LSP、MCP、VCS：需要 opencode READY + workspace
+// 4. LSP、MCP、VCS：需要 opencode 弱健康 READY + workspace
 const runtimeReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
-// 5. Run 启动：需要 opencode READY + workspace 文件路由成功
+// 5. Run 启动：需要 opencode 弱健康 READY + workspace 文件路由成功
 const runReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
 
 // 模型和 Provider 登录后立即加载
@@ -751,14 +786,14 @@ const lspStatusQuery = useQuery({
   enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getLspStatus(selectedWorkspaceIdRef.value!),
   retry: false,
-  refetchInterval: 30000
+  refetchInterval: OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS
 });
 const mcpStatusQuery = useQuery({
   queryKey: ["runtime", "mcp", "status", selectedWorkspaceIdRef],
   enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getMcpStatus(selectedWorkspaceIdRef.value!),
   retry: false,
-  refetchInterval: 30000
+  refetchInterval: OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS
 });
 const mcpResourcesQuery = useQuery({
   queryKey: ["runtime", "mcp", "resources", selectedWorkspaceIdRef],
@@ -780,7 +815,7 @@ const vcsStatusQuery = useQuery({
   enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getVcsStatus(selectedWorkspaceIdRef.value!),
   retry: false,
-  refetchInterval: 30000
+  refetchInterval: OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS
 });
 
 const agents = computed(() => agentsQuery.data.value ?? []);
@@ -821,6 +856,31 @@ const selectedModelInfo = computed(() => {
   return allModels.value.find((model) => modelValue(model) === selectedModel.value || model.id === selected);
 });
 const selectedModelLabel = computed(() => selectedModelInfo.value?.name ?? selectedModel.value ?? "未选择模型");
+
+watch(opencodeProcessStatus, (status) => {
+  if (!status) {
+    opencodeAvailability.value = { ready: false, source: "process" };
+    return;
+  }
+  opencodeAvailability.value = opencodeAvailabilityFromProcess(status);
+}, { immediate: true });
+
+watch(opencodeHealthQuery.data, (health) => {
+  if (!health) return;
+  opencodeAvailability.value = opencodeAvailabilityFromHealth(health);
+  const identity = `${health.linuxServerId}:${health.containerId}:${health.port}:${health.status}:${health.message}`;
+  if (health.healthy) {
+    lastUnhealthyHealthIdentity = "";
+    return;
+  }
+  if (identity === lastUnhealthyHealthIdentity) {
+    return;
+  }
+  lastUnhealthyHealthIdentity = identity;
+  if (opencodeProcessEnabled.value && !opencodeProcessQuery.isFetching.value) {
+    void opencodeProcessQuery.refetch();
+  }
+});
 
 function refreshOpencodeProcessStatus() {
   if (!opencodeProcessEnabled.value || opencodeProcessQuery.isFetching.value) return;
@@ -1194,12 +1254,13 @@ watch(activePath, () => {
   // 但保留 true 会让后续切回 md 时立刻弹出预览，违背"默认不预览"的心智。
   const path = activePath.value;
   if (!path || languageFromPath(path) !== "markdown") {
-    markdownPreview.value = false;
+    markdownPreviewMode.value = "off";
   }
 });
 watch(selectedWorkspaceIdRef, (id, previous) => {
   if (previous && previous !== id) {
     void queryClient.cancelQueries({ queryKey: ["runtime", "agents", previous], exact: true });
+    chatContextStore.clearContexts();
   }
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
@@ -1994,7 +2055,7 @@ function resetWorkspaceState() {
   liveFollowedParts.value = new Set();
   selectedAgent.value = "";
   // 模型和 Provider 是用户级运行偏好，刷新后切回 recent workspace 时不能清空。
-  markdownPreview.value = false;
+  markdownPreviewMode.value = "off";
   // 切工作区时同步清掉任务消耗计时与上一轮终态展示，避免旧 Run 的 token/duration 残留。
   chatStartedAt.value = null;
   accumulatedTokens.value = 0;
@@ -2516,6 +2577,106 @@ async function openFile(path: string) {
   }
 }
 
+async function handlePreviewContext(item: ChatContextItem) {
+  if (!item.path) {
+    return;
+  }
+  await openFile(item.path);
+  if (item.type === "selection") {
+    setTimeout(() => {
+      codeEditorRef.value?.revealSelection({
+        startLine: item.startLine,
+        endLine: item.endLine,
+        text: item.text
+      });
+    }, 150);
+  }
+}
+
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path;
+}
+
+function notifyChatContextValidation(result: { ok: true } | { ok: false; reason: string }, successTitle?: string) {
+  if (!result.ok) {
+    feedback.value = { kind: "info", title: "无法添加上下文", description: result.reason };
+    return;
+  }
+  if (successTitle) {
+    feedback.value = { kind: "success", title: successTitle };
+  }
+}
+
+function addCurrentSelectionToChatContext() {
+  if (!activeTab.value?.path || !editorSelection.value?.text.trim()) {
+    feedback.value = { kind: "info", title: "请先选中文本", description: "在编辑器中选中代码或文本后再添加到对话。" };
+    return;
+  }
+  const tab = activeTab.value;
+  const selection = editorSelection.value;
+  const text = selection.text;
+  const result = chatContextStore.addSelectionContext({
+    id: createContextId(),
+    type: "selection",
+    source: "workspace",
+    path: tab.path,
+    fileName: fileNameOf(tab.path),
+    language: languageFromPath(tab.path),
+    startLine: selection.startLineNumber,
+    endLine: selection.endLineNumber,
+    text,
+    charCount: text.length,
+    createdAt: Date.now()
+  });
+  notifyChatContextValidation(result, "已添加选区上下文");
+}
+
+function looksBinaryContent(content: string): boolean {
+  if (!content) return false;
+  if (content.includes("\u0000")) return true;
+  const sample = content.slice(0, 4096);
+  let control = 0;
+  for (let i = 0; i < sample.length; i += 1) {
+    const code = sample.charCodeAt(i);
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+      control += 1;
+    }
+  }
+  return sample.length > 0 && control / sample.length > 0.08;
+}
+
+async function addWorkspaceFileToChatContext(path: string) {
+  if (!selectedWorkspace.value) {
+    feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到可用工作区。" };
+    return;
+  }
+  try {
+    const file = await api.readFile(selectedWorkspace.value.workspaceId, path);
+    if (looksBinaryContent(file.content)) {
+      feedback.value = { kind: "info", title: "暂不支持添加二进制文件", description: path };
+      return;
+    }
+    const content = file.content;
+    const lineCount = content.length === 0 ? 0 : content.split("\n").length;
+    const result = chatContextStore.addFileContext({
+      id: createContextId(),
+      type: "file",
+      source: "workspace",
+      path,
+      fileName: fileNameOf(path),
+      language: languageFromPath(path),
+      content,
+      charCount: content.length,
+      lineCount,
+      sizeBytes: new Blob([content]).size,
+      createdAt: Date.now()
+    });
+    notifyChatContextValidation(result, "已添加文件上下文");
+  } catch (error) {
+    feedback.value = errorFeedback("添加文件上下文失败", error);
+  }
+}
+
 async function openAgentFile(payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }) {
   centerMode.value = "editor";
   const tabPath = agentTabPath(payload.scope, payload.path, payload.worktreeId, payload.linuxServerId);
@@ -2580,12 +2741,42 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区，再发送任务。" };
     return;
   }
-  const parts = buildPromptParts(prompt, activeTab.value, attachments, diffContextParts.value, editorSelection.value);
-  const displayPrompt = prompt.trim() || promptFromParts(parts);
-  lastPrompt.value = displayPrompt;
+  const sendValidation = validateChatSend(prompt.trim(), chatContextStore.items);
+  if (!sendValidation.ok) {
+    feedback.value = { kind: "info", title: "上下文过长", description: sendValidation.reason };
+    return;
+  }
+  const chatContextParts = chatContextItemsToPromptParts(chatContextStore.items);
+  // 显式上下文附件存在时，不再叠加旧的“当前活动编辑器/选区”隐式 PromptPart，
+  // 避免同一选区或整个活动文件在本轮请求中重复进入模型上下文。
+  const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
+  const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;
+  const selectionContexts = chatContextStore.items.filter((item): item is Extract<ChatContextItem, { type: "selection" }> => item.type === "selection");
+  const displayParts = buildPromptParts(prompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
+  const displayPrompt = prompt.trim() || promptFromParts(displayParts);
+  const rawSubmitPrompt = prompt.trim() || displayPrompt;
+  // 选区文本直接作为结构化 prompt 发送，避免 opencode 将其回放成整文件附件或触发原生文件读取。
+  const submitPrompt = selectionContexts.length > 0 ? serializeChatContexts(rawSubmitPrompt, selectionContexts) : rawSubmitPrompt;
+  // prompt_async 有 parts 时只发送 parts；selection 必须进入 text part，不能只放在顶层 prompt。
+  const parts = buildPromptParts(submitPrompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
+  if (chatContextStore.items.length > 0) {
+    console.debug("workspace_context_send_prepared", {
+      component: "AgentWorkbench",
+      action: "send_prompt",
+      contextCount: chatContextStore.items.length,
+      selectionContextCount: selectionContexts.length,
+      attachmentsCount: attachments.length,
+      diffContextCount: diffContextParts.value.length,
+      partsCount: parts.length,
+      promptChars: prompt.trim().length,
+      contexts: summarizeChatContextItems(chatContextStore.items),
+      parts: summarizePromptParts(parts)
+    });
+  }
+  lastPrompt.value = submitPrompt;
   diffContextParts.value = [];
   dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
-  if (!displayPrompt) {
+  if (!submitPrompt) {
     return;
   }
   // 启动计时 + 重置任务消耗累计（lastDuration/lastTokens 保留上一轮终态以供刷新对比）
@@ -2594,16 +2785,45 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   // 解析命令（包括 Skill Command，格式为 /skill-name）
   const command = parseCommand(prompt, promptMode.value);
   if (runtimeBusy.value) {
-    followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(displayPrompt, parts, undefined, command ?? undefined));
+    followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(submitPrompt, parts, undefined, command ?? undefined));
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
+    chatContextStore.clearContexts();
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
-  const runDraft: AutoRetryRunDraft = { prompt: displayPrompt, parts, title: displayPrompt, command: command ?? undefined };
+  const runDraft: AutoRetryRunDraft = { prompt: submitPrompt, parts, title: displayPrompt, command: command ?? undefined };
   lastRunDraft.value = runDraft;
   clearRunEventSseFeedback();
   dispatchChat({ type: "run.requested" });
+  chatContextStore.clearContexts();
   startRunMutation.mutate(runDraft);
+}
+
+function summarizePromptParts(parts: PromptPart[]) {
+  return parts.map((part) => {
+    if (part.type === "file") {
+      return {
+        type: part.type,
+        path: part.path,
+        name: part.name,
+        mimeType: part.mimeType,
+        hasContent: Boolean(part.content),
+        hasUrl: Boolean(part.url),
+        source: part.source
+          ? {
+              contextType: part.source.contextType,
+              startLine: part.source.startLine,
+              endLine: part.source.endLine,
+              hasText: Boolean(part.source.text)
+            }
+          : undefined
+      };
+    }
+    if (part.type === "text") {
+      return { type: part.type, charCount: part.text.length };
+    }
+    return { type: part.type };
+  });
 }
 
 function handleStopRun() {
@@ -2881,6 +3101,25 @@ function expandPathToFile(relPath: string) {
     }
   }
   expandedDirectories.value = next;
+}
+
+// 双击 Tab 页：在左侧文件树中展开并滚动定位到对应文件
+function handleLocateFile(path: string) {
+  if (!path) return;
+  workbench.setActivePath(path);
+  expandPathToFile(path);
+  void nextTick(() => {
+    scrollToActiveFileTreeRow();
+    setTimeout(scrollToActiveFileTreeRow, 100);
+    setTimeout(scrollToActiveFileTreeRow, 300);
+  });
+}
+
+function scrollToActiveFileTreeRow() {
+  const activeRowEl = document.querySelector(".ta-file-tree-scroll .ta-file-tree-row.is-active") as HTMLElement | null;
+  if (activeRowEl) {
+    activeRowEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
 }
 
 // 从 tool card 消息的 payload 提取工具名，兼容多种字段名。
@@ -3497,6 +3736,7 @@ async function handleLogout() {
           :file-tree-error="fileTreeError"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
+          @add-file-context="addWorkspaceFileToChatContext"
           @open-diff="handleOpenDiff"
           @refresh="refreshCurrentWorkspacePanels"
           @changes-refreshed="(payload) => refreshWorkspaceGitDiff({
@@ -3586,26 +3826,33 @@ async function handleLogout() {
           :creating-version="creatingVersion"
           :show-server-workspace-switch="isSuperAdmin"
           :markdown-preview="markdownPreview"
+          :markdown-preview-mode="markdownPreviewMode"
           @activate="(path: string) => workbench.setActivePath(path)"
+          @locate-file="handleLocateFile"
           @close="handleCloseTab"
           @close-many="handleCloseTabs"
+          @add-file-context="addWorkspaceFileToChatContext"
           @editor-action="() => {}"
           @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
           @open-server-workspace-picker="openServerWorkspacePicker"
-          @update:markdown-preview="(value: boolean) => (markdownPreview = value)"
+          @update:markdown-preview="(value: boolean) => { if (!value) markdownPreviewMode = 'off'; else if (markdownPreviewMode === 'off') markdownPreviewMode = 'full'; }"
+          @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
         >
           <CodeEditor
+            ref="codeEditorRef"
             :path="activeTab?.path"
             :content="activeTab?.content"
             :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
             :readonly="activeTab?.readonly"
             :saving="saveMutation.isPending.value"
             :show-preview="markdownPreview"
+            :preview-mode="markdownPreviewMode"
             @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
             @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+            @add-selection-context="addCurrentSelectionToChatContext"
             @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
           />
         </FigmaEditorArea>
@@ -3637,6 +3884,10 @@ async function handleLogout() {
           :permissions="chatState.permissions"
           :questions="chatState.questions"
           :todos="chatState.todos"
+          :chat-contexts="chatContextStore.items"
+          :chat-context-total-chars="chatContextStore.totalCharCount"
+          :chat-context-over-limit="chatContextStore.isOverLimit"
+          :chat-context-error="chatContextStore.lastError"
           :selected-model-label="selectedModelLabel"
           :model-picker-disabled="false"
           :agents="agents"
@@ -3659,9 +3910,9 @@ async function handleLogout() {
           @retry="handleRetryRun"
           @new-conversation="handleNewConversation"
           @initialize-process="beginInitializeOpencodeProcess"
-          @refresh-process="refreshOpencodeProcessStatus"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @open-file="openFile"
+          @preview-context="handlePreviewContext"
           @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
           @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
           @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
@@ -3671,6 +3922,8 @@ async function handleLogout() {
           @select-model="(model) => selectRuntimeModel(model)"
           @submit-feedback="handleSubmitFeedback"
           @clear-raw-output="clearCurrentRawOutput"
+          @remove-chat-context="chatContextStore.removeContext"
+          @clear-chat-contexts="chatContextStore.clearContexts"
           @close="rightPanelOpen = false"
         />
       </div>

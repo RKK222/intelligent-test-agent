@@ -406,11 +406,12 @@ class RunApplicationServiceTest {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 new FakeSessionRepository(session()),
                 runs,
-                new FakeSessionMessageRepository(),
+                messages,
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
@@ -422,13 +423,25 @@ class RunApplicationServiceTest {
                         null,
                         List.of(
                                 StartRunInput.PromptPart.text("review this file"),
-                                StartRunInput.PromptPart.file(
+                                new StartRunInput.PromptPart(
+                                        "file",
+                                        null,
                                         "src/App.tsx",
                                         "App.tsx",
                                         "text/plain",
-                                        null,
                                         "export function App() { return null; }",
-                                        Map.of("origin", "editor")),
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        Map.<String, Object>of(
+                                                "contextType", "selection",
+                                                "startLine", 20,
+                                                "endLine", 35,
+                                                "start", 0,
+                                                "end", 37),
+                                        null),
                                 StartRunInput.PromptPart.agent("build", "Build")),
                         "msg_remote1234567890abcdef",
                         "build",
@@ -450,8 +463,20 @@ class RunApplicationServiceTest {
         assertThat(command.parts().get(0).type()).isEqualTo("text");
         assertThat(command.parts().get(1).type()).isEqualTo("file");
         assertThat(command.parts().get(1).url()).startsWith("data:text/plain");
+        assertThat(command.parts().get(1).source()).containsEntry("contextType", "selection");
+        assertThat(command.parts().get(1).source()).containsEntry("startLine", 20);
+        assertThat(command.parts().get(1).source()).containsEntry("endLine", 35);
         assertThat(command.parts().get(2).type()).isEqualTo("agent");
         assertThat(command.parts().get(2).name()).isEqualTo("Build");
+        assertThat(messages.saved).hasSize(1);
+        assertThat(messages.saved.getFirst()).satisfies(userMessage -> {
+            assertThat(userMessage.role()).isEqualTo(com.icbc.testagent.domain.session.SessionMessageRole.USER);
+            assertThat(userMessage.partsJson()).contains("\"type\":\"file\"");
+            assertThat(userMessage.partsJson()).contains("\"path\":\"src/App.tsx\"");
+            assertThat(userMessage.partsJson()).contains("\"contextType\":\"selection\"");
+            assertThat(userMessage.partsJson()).contains("\"startLine\":20");
+            assertThat(userMessage.partsJson()).contains("\"endLine\":35");
+        });
     }
 
     @Test

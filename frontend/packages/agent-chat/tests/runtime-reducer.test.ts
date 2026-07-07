@@ -582,6 +582,64 @@ describe("agent-chat runtime reducer", () => {
     expect(completed.messages).toHaveLength(2);
   });
 
+  it("keeps native opencode user file parts on the user message", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "what in this",
+      createdAt: "2026-07-06T00:00:00Z"
+    });
+    const withRemoteUser = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.updated", {
+        message: { id: "msg_user_file", role: "user" }
+      })
+    });
+    const withSyntheticReadText = reduceAgentChatRuntime(withRemoteUser, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_user_file",
+        part: {
+          id: "part_synthetic_read",
+          messageID: "msg_user_file",
+          type: "text",
+          synthetic: true,
+          text: "Called the Read tool with the following input"
+        }
+      })
+    });
+    const withFilePart = reduceAgentChatRuntime(withSyntheticReadText, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_user_file",
+        part: {
+          id: "part_file",
+          messageID: "msg_user_file",
+          type: "file",
+          filename: "CLAUDE.md",
+          mime: "text/plain",
+          url: "data:text/plain;base64,IyBDbGF1ZGU="
+        }
+      })
+    });
+
+    expect(withFilePart.messages).toMatchObject([
+      {
+        role: "user",
+        messageId: "msg_user_file",
+        text: "what in this",
+        parts: [
+          {
+            type: "file",
+            name: "CLAUDE.md",
+            mimeType: "text/plain",
+            url: "data:text/plain;base64,IyBDbGF1ZGU="
+          }
+        ]
+      }
+    ]);
+    expect(withFilePart.messages).toHaveLength(1);
+  });
+
   it("keeps expanded slash command user parts out of the assistant response", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",
@@ -656,6 +714,97 @@ describe("agent-chat runtime reducer", () => {
     ]);
     expect(completed.messages).toHaveLength(1);
     expect(completed.messages.some((message) => message.role === "assistant" && message.text.includes("# 路径法案例生成"))).toBe(false);
+  });
+
+  it("binds delayed serialized workspace context user parts without rendering the internal prompt", () => {
+    const serializedPrompt = [
+      "用户问题：",
+      "能看到什么内容",
+      "",
+      "以下是用户添加的工作区上下文：",
+      "",
+      '<context type="selection" path="99-测试数据/Git冲突处理/冲突文件.md" lines="5-5">',
+      "应用分支上的修改，用于制造合并冲突。",
+      "</context>"
+    ].join("\n");
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "能看到什么内容",
+      parts: [{ type: "text", text: serializedPrompt }],
+      createdAt: "2026-07-06T00:00:00Z"
+    });
+    const completed = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.part.updated", {
+        sessionID: "ses_workspace_context",
+        rawType: "message.part.updated",
+        part: {
+          type: "text",
+          text: serializedPrompt,
+          messageID: "msg_user_workspace_context",
+          sessionID: "ses_workspace_context",
+          id: "prt_user_workspace_context"
+        }
+      })
+    });
+
+    expect(completed.messages).toMatchObject([
+      {
+        role: "user",
+        messageId: "msg_user_workspace_context",
+        text: "能看到什么内容",
+        parts: [{ type: "text", text: serializedPrompt }]
+      }
+    ]);
+    expect(completed.messages).toHaveLength(1);
+    expect(
+      completed.messages.some(
+        (message) => message.role === "assistant" && message.text.includes("以下是用户添加的工作区上下文")
+      )
+    ).toBe(false);
+  });
+
+  it("binds delayed serialized workspace context user deltas without rendering the internal prompt", () => {
+    const serializedPrompt = [
+      "用户问题：",
+      "能看到什么内容",
+      "",
+      "以下是用户添加的工作区上下文：",
+      "",
+      '<context type="selection" path="99-测试数据/Git冲突处理/冲突文件.md" lines="5-5">',
+      "应用分支上的修改，用于制造合并冲突。",
+      "</context>"
+    ].join("\n");
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "能看到什么内容",
+      parts: [{ type: "text", text: serializedPrompt }],
+      createdAt: "2026-07-06T00:00:00Z"
+    });
+    const completed = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.part.delta", {
+        messageID: "msg_user_workspace_context",
+        partID: "prt_user_workspace_context",
+        partType: "text",
+        delta: serializedPrompt
+      })
+    });
+
+    expect(completed.messages).toMatchObject([
+      {
+        role: "user",
+        messageId: "msg_user_workspace_context",
+        text: "能看到什么内容",
+        parts: [{ type: "text", text: serializedPrompt }]
+      }
+    ]);
+    expect(completed.messages).toHaveLength(1);
+    expect(
+      completed.messages.some(
+        (message) => message.role === "assistant" && message.text.includes("以下是用户添加的工作区上下文")
+      )
+    ).toBe(false);
   });
 
   it("merges a delayed remote user snapshot back into the optimistic user message", () => {

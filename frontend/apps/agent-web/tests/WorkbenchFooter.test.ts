@@ -125,4 +125,26 @@ describe("WorkbenchFooter", () => {
 
     expect(document.body.textContent).toContain("worktree: feature_testagent_20260618_usr_888888888_default");
   });
+
+  it("handles preview button single click (full) and double click (split)", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        showPreviewButton: true,
+        markdownPreviewMode: "off"
+      }
+    });
+
+    const previewBtn = wrapper.find('[data-testid="footer-markdown-preview"]');
+    expect(previewBtn.exists()).toBe(true);
+
+    // 单击
+    await previewBtn.trigger("click");
+    await new Promise((r) => setTimeout(r, 260));
+    expect(wrapper.emitted("update:markdownPreviewMode")).toEqual([["full"]]);
+
+    // 双击
+    await previewBtn.trigger("dblclick");
+    expect(wrapper.emitted("update:markdownPreviewMode")?.at(-1)).toEqual(["split"]);
+  });
 });

@@ -2,6 +2,236 @@
 
 ## Entries
 
+### 2026-07-06 - 修复 FigmaChatPanel.vue onComposerCardClick 缺失导致的 vue-tsc 编译错误
+
+- Why:
+  - 近期在优化聊天输入框组件时，清理了弃用的进程刷新逻辑，但误删了 `<script setup>` 中的 `onComposerCardClick` 点击处理函数，同时模板中遗留了多余未闭合的 `<div class="figma-chat-input-card">` 标签，导致 `pnpm build` 执行 `vue-tsc --noEmit` 时抛出 `TS2339: Property 'onComposerCardClick' does not exist on type...` 终止构建。
+- What:
+  - 1. 在 `FigmaChatPanel.vue` 的 `<script setup>` 中恢复并完善 `onComposerCardClick` 点击逻辑（点击输入卡片空白区域时聚焦内部 textarea，并避开按钮、手柄和下拉框等交互元素）。
+  - 2. 清理模板中多余的重复 `<div class="figma-chat-input-card">` 标签。
+- How:
+  - 仅修改前端 `FigmaChatPanel.vue` 的交互函数及模板结构，无后端 API 或底层架构变更。
+- Result:
+  - 执行 `npx vue-tsc --noEmit` 校验 0 错误，前端构建恢复成功。
+
+### 2026-07-06 - 优化 Diff 文件列表展示及聊天高度拉伸手柄美化
+
+- Why:
+  - 1. 用户要求优化 Diff 区域文件列表展示：将状态（modified, untracked, deleted, added）缩写为首字母，隐藏具体冗长路径仅展示文件名，鼠标悬浮时提供全路径 tooltip，以提升信息密度并保持界面简洁整齐。
+  - 2. 用户反馈聊天卡片的输入卡片高度拉伸手柄样式太丑（默认会显示横跨整行宽度的亮蓝色条，过于突兀）。
+- What:
+  - 1. 对 GitChangesPanel.vue、DiffViewer.vue、DiffSummaryRow.vue、FileExplorer.vue、AgentCard.vue 和 FigmaChatPanel.vue 多个文件列表进行统一重构，通过 getStatusLabel 与 getFileName（或 fileNameOf）将状态转为首字母大写（如 M, U, D, A），路径切为 basename，并加上 :title="file.path" 保证鼠标 hover 可看全路径。
+  - 2. 对 FigmaChatPanel.vue 的 .figma-chat-composer-resize-handle 拖拽手柄样式进行重塑，移除了原来突兀的整行亮蓝色细条，改用居中对齐、大小 36px * 4px、圆角 2px 且更淡雅的半透明灰色（rgba(0,0,0,0.1)）小药丸拉伸手柄；并在 hover 和拖拽时带有微观过渡动画（宽度由 36px 延伸至 48px，颜色加深为 rgba(0,0,0,0.3)）。
+- How:
+  - 仅限前端 Vue 组件结构微调及 CSS 优化，不改动任何后端 API、DTO、数据库结构、或者打包部署脚本。
+- Result:
+  - corepack pnpm typecheck 与 corepack pnpm lint 在 frontend 目录下顺利执行通过，0 编译错误，0 格式/类型警告。
+
+### 2026-07-06 - 收紧思考状态展开渲染
+
+- Why:
+  - opencode reasoning 展开时首次挂载 Markdown 渲染器会触发动态加载和高亮处理，体感打开慢；同时思考过程不应抢占最终回答的字号和视觉重量。
+- What:
+  - `agent-chat` 的 opencode-like reasoning 展开详情改为紧凑纯文本渲染，字号压到 10px，触发区高度和行高同步收紧；对 `.oc-reasoning-part` 内可能残留的 Markdown 思考详情也增加同作用域字号兜底；最终回答 `TextPartView` / `.oc-text-part` 仍保持原 Markdown 渲染路径和字号。
+- How:
+  - 只修改 `ReasoningPartGroup.vue`、`ReasoningPartView.vue`、`.oc-reasoning-part*` 样式、包说明和定向时间线测试；不改 Run API、SSE、后端 opencode prompt parts、用户消息附件展示或最终回答样式。
+- Result:
+  - `corepack pnpm test packages/agent-chat/tests/opencode-timeline.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/runtime-reducer.test.ts`、`corepack pnpm --filter @test-agent/agent-chat typecheck`、`git diff --check` 通过；浏览器样式读取确认当前回答正文仍为 `.oc-text-part` Markdown 路径。
+### 2026-07-06 - 支持双击编辑器 Tab 页自动展开并定位到左侧文件树
+
+- Why:
+  - 用户希望双击编辑器顶部的文件 Tab 页（如 `OpenCode自我介绍.md`）时，左侧工作区文件树能够立刻展开各层父级目录，并平滑滚动定位到对应的文件节点。
+- What:
+  - `FigmaEditorArea` 增加 Tab 节点 `@dblclick` 事件，向上派发 `locateFile` 事件。
+  - `AgentWorkbench` 监听 `locate-file`，调用 `expandPathToFile` 将所有祖先目录加入 `expandedDirectories` 并按需懒加载；同时触发 `scrollToActiveFileTreeRow` 使用 `scrollIntoView({ block: "nearest", behavior: "smooth" })` 自动将目标文件滚动居中定位。
+- How:
+  - 仅修改前端 `FigmaEditorArea.vue`、`AgentWorkbench.vue` 及对应 Vitest 单元测试，不改动任何后端 API、数据库或环境配置文件。
+- Result:
+  - Vitest 定向测试 `apps/agent-web/tests/FigmaEditorArea.test.ts` 全部 3 个用例通过；`npx vue-tsc --noEmit` 静态类型检查 0 报错。
+
+### 2026-07-06 - opencode 弱健康检查与前端轮询收敛
+
+- Why:
+  - 页面静置时 `/processes/me`、MCP/LSP 等强状态查询仍高频刷新，后台日志持续输出；需要把常态健康判定改为轻量轮询，降低数据库、manager 强健康和运行态目录压力。
+- What:
+  - 新增 `/api/internal/agent/{agentId}/processes/me/health`，由 `OpencodeProcessStatusQueryService.weakHealth` 只读 Redis manager 快照并直接调用 opencode `/global/health`；跨服务器请求使用公共 `BackendJavaRouteResolver` 和 `BackendHttpForwarder` 按 `linuxServerId` 随机转发目标 Java。
+  - 前端 `/processes/me` 取消定时轮询，登录/刷新获取分配信息后每 10 秒调用弱健康；弱健康不健康、头像打开和初始化完成才复查 `/processes/me`。发送、目录加载和运行态 ready 以弱健康为常态来源，`/processes/me` 返回时覆盖一次当前状态；MCP/LSP 改 5 分钟，VCS 保持 30 秒。
+- How:
+  - 不改数据库、不改 generated SDK、不新增前端直连 opencode；同步 `backend-api`、`shared-types`、HTTP API 文档、前后端 README/PACKAGE，并补后端/前端定向测试。
+- Result:
+  - 后端目标 Maven 测试、前端 backend-api/workbench-utils/FigmaChatPanel Vitest、`@test-agent/agent-web` 与 `@test-agent/backend-api` typecheck 均通过。
+
+### 2026-07-06 - 编辑器页脚与文件Tab样式交互优化
+
+- Why:
+  - 1. 用户要求将 Markdown 预览按钮从 Tab 行表头移至底部页脚保存按钮左侧，且保持仅 Markdown 文件时出现。
+  - 2. 用户要求预览按钮单击时为整体预览（100% 预览，不再分上下），双击时才进入分屏预览（分上下）。
+  - 3. 用户要求预览按钮和保存按钮均只显示图标，不显示文字。
+  - 4. 用户要求页脚“写入路径：”文字改为“路径：”，取消“写入”二字。
+  - 5. 用户要求文件 Tab 页中的图标改为与工作空间文件树一致的分类型 Material 文件图标。
+- What:
+  - 1. `WorkbenchFooter` 页脚右侧新增 MD 预览图标按钮，放在 Save 按钮左侧，仅在 `showPreviewButton`（`activeIsMarkdown`）为 true 时渲染。
+  - 2. `WorkbenchFooter` 增加单双击识别定时器逻辑：单击切换为 `full` 整体预览或 `off` 关闭，双击切换为 `split` 分上下屏或 `off` 关闭；修复了层级传递中 `update:markdownPreview` 覆盖 `markdownPreviewMode` 导致的双击分屏无法保持的漏洞；`CodeEditor` 支持受控 `previewMode` (`off` | `full` | `split`) 渲染。
+  - 3. `WorkbenchFooter` 中的预览与保存按钮去除了 `<span>` 文字标签，并统一定制为 26x26 方形精美图标按钮；包裹 `ElTooltip` 并配置 `:show-after="0"`，预览按钮悬浮文案定制为两行“单击：整体预览 / 双击：分屏预览”，无原生延时。
+  - 4. `WorkbenchFooter` 将“写入路径：”标签文案修改为“路径：”。
+  - 5. `FigmaEditorArea` 使用 `@test-agent/file-explorer` 的 `FileIcon` 替换原 Tab 页通用静态文件图标，实现按扩展名/文件名与工作区文件树同步渲染彩色 Material 文件图标。
+- How:
+  - 仅修改前端 `FigmaEditorArea.vue`、`WorkbenchFooter.vue`、`CodeEditor.vue`、`AgentWorkbench.vue` 及对应 Vitest 单元测试，不改动任何后端 API、数据库或环境配置文件。
+- Result:
+  - Vitest 定向测试 `packages/editor/tests/CodeEditor.preview.test.ts` 与 `apps/agent-web/tests/WorkbenchFooter.test.ts` 全部 10 个用例通过。
+
+### 2026-07-06 - 修复所有文件偶发性白板不显示内容问题
+
+- Why:
+  - 文件查看时，偶发性出现所有文件都无法查看到内容（白板），但后端接口有返回（Markdown预览区可正常显示）。根因是 `CodeEditor.vue` 中的 `ensureMonacoEditor` 在方法被调用时过早捕获了当时为空的 `content` 入参；当首次打开文件触发 Monaco 库异步按需加载 (`await import`) 时，若后端文件内容请求在等待期间返回，会因 `model` 尚未创建而在 `watch` 中被丢弃。当加载恢复后，编辑器使用已被丢弃响应的旧空内容创建并挂载模型，导致内容永久性白板；由于所有异步等待均阻塞在对 Monaco 包加载的 `await` 上，如果用户在卡顿期间连续点击多个文件，这批文件的实际内容都会被吞掉从而全部白板。
+- What:
+  - 修改 `CodeEditor.vue` 中的 `ensureMonacoEditor` 签名，移除 `content` 入参。
+  - 在创建或更新 `model` 时，直接从 `props.content` 读取最新文本而不是依赖过期的闭包参数，确保不管是否存在由于等待 Monaco 包加载带来的时间差，编辑器都能渲染真实返回的最新内容。
+- How:
+  - 仅修改前端 `frontend/packages/editor/src/CodeEditor.vue` 的状态获取时机，不改动生命周期流程或销毁逻辑；不改后端 API 契约、数据库结构或环境配置。
+- Result:
+  - 前端渲染竞态漏洞已堵塞，修复了偶发性的全部文件白板问题。
+
+### 2026-07-06 - 收敛选区上下文回放展示
+
+- Why:
+  - 选区上下文改为 text prompt-only 后，opencode 回放的 user text part 可能包含完整 `<context>` prompt；旧 reducer 在远端 user part 晚到或以 delta 到达时会误建 assistant 文本块，导致内部 prompt 在对话中可见，且 text part 中的选区 chip 恢复不稳定。
+- What:
+  - `agent-chat` 用 `displayTextFromUserPrompt()` 归一化远端 user message/part 匹配；序列化工作区 prompt 的 `message.part.updated` 和完整 `message.part.delta` 都会归并回乐观 user 消息，不再渲染为 assistant 输出。
+  - 用户消息附件恢复同时解析 text prompt part 与原生 file part；整文件仍走 opencode 原生 file part，选区继续走 text prompt-only。
+- How:
+  - 不新增 API、SSE 字段、数据库或后端链路；复用现有 Run `parts`、用户消息展示解析和 opencode file part 适配。
+- Result:
+  - 定向 Vitest（`user-message-display`、`runtime-reducer`、`opencode-timeline`、`chat-context-store`、`prompt-context`）、`@test-agent/agent-chat` typecheck、`@test-agent/agent-web` typecheck、`git diff --check` 通过；本地 test profile 三服务重启成功，health/readiness/frontend/CORS 检查通过。
+
+### 2026-07-06 - 修复历史对话关联文件恢复
+
+- Why:
+  - 历史会话中用户消息只显示文本，未展示本轮关联的工作区文件/选区 chip；根因是平台 DB 的 user `session_messages.parts_json` 未保存 Run 启动时的 prompt parts，且前端合并 session tree 时会保留 DB user 消息而丢掉 tree user file parts。
+- What:
+  - `RunApplicationService` 保存用户消息时同步序列化 `StartRunInput.parts` 到 `partsJson`，并继续透传 file source 中的 `contextType/startLine/endLine`。
+  - 前端历史恢复合并 DB 与 session tree 时，user 消息保留平台 messageId，同时吸收 tree user 的 file parts，作为旧历史/回放数据的兜底。
+- How:
+  - 不新增 API、SSE 字段或数据库结构；复用既有 `session_messages.parts_json`、`PromptPart` 和用户消息展示层的 file chip 解析逻辑。
+- Result:
+  - 后端定向 `RunApplicationServiceTest#servicePassesPromptPartsAndRuntimeSelectionToOpencodeFacade` 通过；前端 `prompt-context`、`workbench-utils`、`user-message-display` 和 `opencode-timeline` 定向 Vitest 通过。
+
+### 2026-07-06 - opencode worker 支持外置程序优先
+
+- Why:
+  - 企业内希望镜像主要承载运行环境，第一版仍内置 opencode 和 opencode-manager，但后续升级可以直接替换宿主机外挂程序而不重打镜像。
+- What:
+  - `opencode-worker` 镜像新增启动包装脚本，优先使用 `/opt/test-agent/programs/bin/opencode-manager` 和 `/opt/test-agent/programs/opencode/bin/opencode`，不可用时回退镜像内置程序。
+  - Compose 为两个 worker 增加 `TEST_AGENT_PROGRAM_ROOT` 挂载；打包脚本从 worker 镜像导出 `dist/programs/` 和 `test-agent-programs.tar.gz`。
+- How:
+  - 镜像仍通过 npm 安装 `opencode-ai` 并编译当前仓库 `opencode-manager`；导出外挂程序时从镜像内复制 manager 二进制、opencode 全局 bin 和 `opencode-ai` npm 包。
+- Result:
+  - `bash -n deploy/internal/package-release.sh`、`bash -n deploy/internal/opencode-worker-entrypoint.sh`、`deploy/internal/package-release.sh --help`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 和 `git diff --check` 通过；未实际构建镜像。
+
+### 2026-07-06 - 补充工作区上下文原生附件链路日志
+
+- Why:
+  - 需要证明工作区文件/选区上下文不是另起 `<context>` prompt 拼接链路，而是适配 opencode 原生 `text/file/agent` parts；同时 UI 发送后用户气泡应只显示原始问题并展示关联文件 chip。
+- What:
+  - 前端发送前新增 `workspace_context_parts_built`、`workspace_context_send_prepared` 摘要调试日志；后端 `GeneratedOpencodeSdkGateway` 在调用 `/session/{sessionID}/prompt_async` 前后新增 `opencode_prompt_async_request_prepared`、`opencode_prompt_async_request_accepted` 摘要日志。
+  - 用户消息工作区上下文 chip 按 `type/path/lines` 去重，避免本地 optimistic user message 与 opencode 实时 user file part 重复显示同一附件。
+- How:
+  - 日志只输出 part 类型、路径、文件名、mime、URL scheme/dataUrl、字符数和 source 范围，不输出用户正文、附件正文、完整 data URL、token 或密钥；仍复用既有 Run API parts、后端 `AgentPromptPart` 和 opencode gateway 链路。
+- Result:
+  - 本地 UI 使用 `888888888/123456` 登录、启动 opencode 进程、从工作区文件树右键添加 `99-测试数据/Git冲突处理/冲突文件.md` 并发送，后端日志确认发给 opencode 的 `prompt_async` 为 2 个 parts：text + file，file 为 `data:` URL、`mime=text/plain`、`filename=冲突文件.md`、`source.path=99-测试数据/Git冲突处理/冲突文件.md`、`source.text.chars=59`。
+
+### 2026-07-06 - 工作区上下文改走原生 file parts
+
+- Why:
+  - opencode 原生附件抓包显示用户输入和附件应落在同一个 user message 的 `text` / `file` parts 中；此前工作区上下文附件通过 `<context>` 文本拼接进入 prompt，和原生附件链路不一致。
+- What:
+  - 工作区整文件和 Monaco 选区发送时转换为 `PromptPart.type=file`，选区通过 `source.contextType/startLine/endLine` 保留来源；用户消息展示优先从 user `file` parts 渲染关联文件/选区 chip，旧 `<context>` 文本仅保留历史兼容解析。
+- How:
+  - 复用既有 Run API `parts`、后端 `AgentPromptPart.file` 和 opencode `prompt_async.parts` 链路；不新增后端接口、不改数据库、不直连 opencode server。
+- Result:
+  - 已补充 store、runtime reducer、历史消息恢复、用户消息展示回归测试；验证结果以本次收尾命令为准。
+
+### 2026-07-06 - 对话界面样式及交互优化美化（TDesign风格）
+
+- Why:
+  - 1. 上下文中添加文件的卡片样式和外框略显粗糙；
+  - 2. 智能体输出内容中的复制按钮定位在右上角，有时会与大段文本内容发生遮挡重合；
+  - 3. 用户消息气泡和智能体消息风格不统一，需要按照 TDesign Chat 的高级美学来统一视觉风格；
+  - 4. 用户输入的消息也应该配备复制按钮，并能带入包含可能携带的附件上下文和部分文本在内的完整内容；
+  - 5. 用户与智能体消息布局与头像不对称，用户是左右横向排列且头像是圆角矩形，而智能体是纵向上下排列且原头像无精致背景框。
+- What:
+  - 1. 调整了 ChatContextAttachmentList.vue 和 ChatContextAttachmentCard.vue 的样式，移除粗糙的外框，降低卡片高度为 26px，去除 "文件/选区" 文字标签，增加 hover 时莫兰迪灰蓝（#4f5e7b）与浅灰蓝背景的联动，更加紧凑精美。
+  - 2. 在 UserMessageRow.vue 中引入并挂载 OcCopyButton，复制时绑定为 message.text 完整输入以保留附件及部分文本；同时全局调小了复制按钮（oc-icon-button）及其图标的尺寸。
+  - 3. 重构 rows.css 中用户消息气泡为白色底（无底色）和超淡灰蓝色细边框（#e3e8f7），恢复深色文字，使其整体显得极其雅致、自然；附件 chip 变更为浅灰蓝背景（#f0f3f8）和灰蓝字（#4f5e7b），统一色系。
+  - 4. 彻底解决重叠：在 rows.css 的用户气泡与 parts.css 的智能体气泡中加了 36px 右安全边距（padding-right: 36px），微调缩小后的复制按钮在气泡右上角定位，防止与文本重合。
+  - 5. 消息布局与头像对称化：重构 rows.css 中智能体框架布局（.oc-assistant-frame），将头像与内容排列由 column 变更为 row 左右水平对齐，并在 continuation 态时为正文层提供 40px 的左内边距以保持完美侧边对齐；显式指定智能体头像宽高为 28px（与用户一致），圆角 9px，并换上更匹配色系的莫兰迪深灰蓝（#2e384d）背景，达成左右对齐和头像外观的完全对称。
+  - 6. 输入框扁平化优化：调小 FigmaChatPanel.vue 聊天文本框（.figma-chat-textarea）的 min-height（由 64px 降为 40px），收紧 padding 为 8px 12px 4px，使未输入文本时的整体输入卡片更扁平精巧，更具现代感。
+  - 7. 气泡扁平化微调：将用户输入气泡（.oc-user-message__bubble）和智能体回答气泡（.oc-text-part）的上下 padding 从 8px 调小为 6px，使气泡整体高度更矮、更精简紧凑；同步把对应的复制按钮绝对定位 top 偏移从 7px 调整为 5px 保持垂直居中。
+  - 8. 附件列表对齐优化：为 ChatContextAttachmentList.vue（.chat-context-list）添加 margin-left: 10px 和 margin-right: 10px，使其在水平宽度上与下方的输入容器完美居中对齐，消除顶到两侧边缘的不对称感。
+- How:
+  - 完全由前端 CSS 和局部的展示 Vue 组件承载，未修改任何后端 API、DTO、数据库结构或环境配置文件。
+- Result:
+  - 前端编译和打包 pnpm build (vue-tsc --noEmit && vite build) 顺利执行通过。
+
+### 2026-07-06 - 修复上下文附件发送后展示
+
+- Why:
+  - 工作区上下文附件发送后仍停留在输入区，且历史/回放消息会把前端序列化的 `<context>` prompt 当作用户气泡正文展示。
+- What:
+  - 发送被本地接受或排队后清空 `useChatContextStore`；`agent-chat` 用户消息展示层从序列化 prompt 中提取原始问题，隐藏工作区上下文块，并在用户气泡下方展示本轮关联文件/选区 chip；上下文附件条样式收敛为更紧凑的附件 chip。
+- How:
+  - 不改 Run API、SSE、数据库或后端消息存储；仅在前端展示层派生可见文案，发送给 Agent 的结构化上下文仍保持不变。
+- Result:
+  - 已补充用户消息展示和 FigmaChatPanel 回归测试，验证结果以本次收尾命令为准。
+
+### 2026-07-06 - 工作区上下文附件前端接入
+
+- Why:
+  - 企业内部适配优先需要把工作区选区和文件作为对话上下文传给 Agent，并在前端先完成大小拦截，避免超长上下文直接进入模型。
+- What:
+  - 新增 `useChatContextStore`、上下文附件列表/卡片/预览抽屉；接入 Monaco 选区右键、文件树右键菜单和编辑器 Tab 右键菜单；发送时把上下文序列化进 prompt。
+- How:
+  - 第一版不改后端 API/SSE/数据库；显式上下文存在时不再叠加旧的活动编辑器隐式 PromptPart，避免重复携带同一选区或文件。
+- Result:
+  - `agent-web`/`file-explorer`/`editor` typecheck、上下文 store 与聊天面板定向 Vitest、`git diff --check` 通过；现有前端 dev server `http://127.0.0.1:3000` 返回 200。
+
+### 2026-07-06 - Docker Compose 收敛为仅 opencode worker
+
+- Why:
+  - 用户明确 Nginx 也按实体服务部署，Docker 只用于 `opencode + opencode-manager` worker 容器。
+- What:
+  - `deploy/internal/docker-compose.yml` 删除 gateway 和 frontend Nginx 容器，只保留两个 opencode worker。
+  - 实体 Nginx 模板改为直接 `root ${TEST_AGENT_FRONTEND_ROOT}` 托管前端 dist，并把 `/api` 代理到两个 Java 后端。
+  - `env.example` 和 README 同步说明 Compose 不再管理 Nginx 或前端容器。
+- How:
+  - 保留 `deploy/internal/nginx/` 作为实体 Nginx 配置参考，不由 Compose 挂载或启动。
+- Result:
+  - `docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 展开后只包含 `opencode-worker-1/2`；`bash -n deploy/internal/package-release.sh` 和 `git diff --check` 通过。
+
+### 2026-07-06 - 企业内打包改为 jar + frontend dist + worker 镜像
+
+- Why:
+  - 用户确认前端不需要业务镜像，应直接交付 `dist/`；同时企业内打包结果应包含后端可执行 jar。
+- What:
+  - `deploy/internal/package-release.sh` 取代 `build-images.sh`，打包产物包括 `dist/backend/test-agent-app.jar`、`dist/frontend/`、`test-agent-frontend-dist.tar.gz` 和 opencode-worker 镜像 tar。
+  - 删除前端 Dockerfile；Compose 中两个前端服务改为标准 `nginx:1.27-alpine` 挂载 `TEST_AGENT_FRONTEND_DIST_DIR`。
+- How:
+  - 后端 jar 通过 `mvn -pl test-agent-app -am -DskipTests package` 生成后复制到交付目录；前端通过 `corepack pnpm --filter @test-agent/agent-web build` 生成 dist；opencode-worker 仍使用 Dockerfile 构建。
+- Result:
+  - `bash -n deploy/internal/package-release.sh`、`deploy/internal/package-release.sh --help`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 和 `git diff --check` 通过；未执行完整打包构建。
+
+### 2026-07-06 - 补充企业内镜像打包脚本
+
+- Why:
+  - 企业内 Docker 部署文件已有 Dockerfile 和 Compose，但还缺少一条可重复执行的镜像构建与离线 tar 导出入口。
+- What:
+  - 新增 `deploy/internal/build-images.sh`，默认读取 `deploy/internal/.env` 或 `env.example`，构建前端和 opencode worker 的 `linux/amd64` 镜像，并导出 docker-loadable tar 包。
+  - `deploy/internal/env.example` 增加 `TEST_AGENT_IMAGE_OUTPUT_DIR`，README 增加脚本用法。
+- How:
+  - 脚本自行解析 `KEY=VALUE` dotenv，不执行文件内容；构建参数继续复用既有镜像 tag、npm/Corepack、Go proxy、Debian mirror 和 `OPENCODE_AI_PACKAGE` 配置。
+- Result:
+  - `bash -n deploy/internal/build-images.sh`、`deploy/internal/build-images.sh --help`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 和 `git diff --check` 通过；未实际构建镜像。
+
 ### 2026-07-06 - 全面作废后端旧接口
 
 - Why:
@@ -4192,3 +4422,62 @@ bash /tmp/test-api-after-restart.sh
   - 复用 `GitWorkspaceService.conflictPaths`、`AgentConfigPanel` 已有公共冲突处理 API 和 `MergeConflictEditor`，新增轻量冲突路径 HTTP/API client 方法，并扩展面板可见入口和 `AgentConfigTreeNode` 冲突标识。
 - Result:
   - `corepack pnpm test -- apps/agent-web/tests/agent-config-panel.test.ts`、`corepack pnpm typecheck`、`mvn -pl test-agent-api -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=AgentConfigControllerTest test` 和 `git diff --check` 通过。
+
+### 2026-07-06 - 企业内单服务器部署配置收敛为单实例
+
+- Why:
+  - 企业内第一版部署口径应是一台服务器启动 1 个实体 Nginx、1 份前端 dist、1 个 Java 后端和 1 个 opencode worker 容器，之前示例误按双 Java、双 worker 编排。
+- What:
+  - 将 `deploy/internal/docker-compose.yml` 收敛为单个 `opencode-worker` 服务；`deploy/internal/env.example` 改为单个 `TEST_AGENT_BACKEND` 和单组 `OPENCODE_WORKER_*` 端口变量；Nginx 模板改为单后端 upstream，并用 `TEST_AGENT_NGINX_LISTEN_PORT` 控制入口监听端口。
+- How:
+  - 保留 Java 直接部署、前端 dist 由实体 Nginx 托管、opencode/manager 外挂程序优先的既有设计，只修正实例数量、变量命名和部署说明。
+- Result:
+  - `docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 只解析出一个 worker，且 opencode 端口保持宿主机端口与容器端口一致；脚本语法检查和 `git diff --check` 通过。
+
+### 2026-07-06 - 工作区选区上下文不再走 opencode file attachment
+
+- Why:
+  - 用户只选择文件第一行时，发送后仍出现“文件 冲突文件.md”附件并可能触发整文件读取；用 opencode file part 承载选区会被原生能力按文件附件回放，不适合表达局部选中文本。
+- What:
+  - 选区上下文改为直接拼入本轮 `submitPrompt` 的结构化 `<context type="selection">` 文本；用户气泡仍展示原始问题，避免大段上下文外露。
+  - `chatContextItemsToPromptParts` 只把整文件上下文转换为 opencode 原生 `file` part，选区不再生成 `file` part。
+  - `prompt_async` 有 `parts` 时 opencode 实际消费 text part，因此发送时必须用包含选区的 `submitPrompt` 重新构造 `parts`，不能只改顶层 prompt。
+  - 本条结论覆盖同日上一版“选区对齐 opencode 原生 file part”的尝试；该方案会让 opencode 把局部选区当文件附件回放。
+- How:
+  - 修改 `AgentWorkbench.handleSend` 和 `chatContextStore`，保留整文件原生附件链路，收敛选区链路为 prompt-only。
+- Result:
+  - 前端 4 个定向测试文件 48 条用例通过，`@test-agent/agent-web` typecheck 通过；本地服务已通过 `./restart-dev-services.sh` 重启，前端 `http://127.0.0.1:3000`、后端 readiness 均正常。
+
+### 2026-07-06 - 工作区选区上下文对齐 opencode 原生 file part
+
+- Why:
+  - 工作区选中几行后发送，UI 和对话效果仍可能表现为携带整个活动文件；根因是旧的隐式编辑器附件在无选区时会回退为活动文件全文，且后端转 opencode file part 时没有把 `contextType/startLine/endLine` 来源字段透传回来。
+- What:
+  - 收紧前端隐式编辑器 part：只有存在真实选区文本时才生成 file prompt part，不再用活动文件全文兜底；选区 part 补齐 `contextType=selection`、`startLine`、`endLine`。
+  - 后端 `RunApplicationService` 转换 file prompt part 时保留平台 source 中的上下文类型和行号，保证 opencode message part 回放后前端仍能识别为“选区 Lx-Ly”，而不是普通整文件。
+- How:
+  - 修改 `frontend/apps/agent-web/src/components/prompt-context.ts` 和 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`，并补充前端 prompt-context 单测与后端 RunApplicationService 单测。
+- Result:
+  - `corepack pnpm exec vitest run apps/agent-web/tests/prompt-context.test.ts apps/agent-web/tests/workbench-utils.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/opencode-timeline.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和后端定向 `RunApplicationServiceTest#servicePassesPromptPartsAndRuntimeSelectionToOpencodeFacade` 通过。
+
+### 2026-07-06 - 企业内部署目录统一到 /data/testagent
+
+- Why:
+  - 企业内单服务器部署要求项目基础目录统一为 `/data/testagent`，前端包、opencode 外挂程序、数据目录和打包输出都要在该目录下扩展；前端构建也需要直接写企业 API base URL。
+- What:
+  - `deploy/internal/env.example` 改为 `/data/testagent/{data,frontend,programs,dist}` 路径；compose 和 worker 镜像容器内路径同步改成 `/data/testagent`；`VITE_TEST_AGENT_API_BASE_URL` 示例改为企业 API base URL；Go manager 支持 `SYS_DATA_ROOT_DIR` 环境变量覆盖启动前读取 `.serverid/.serverhost` 的目录。
+- How:
+  - 保留前端客户端自动拼接 `/api` 的约定，文档明确 `VITE_TEST_AGENT_API_BASE_URL` 不要追加 `/api`；Java 的 `SYS_DATA_ROOT_DIR` 通用参数需要配置为 `/data/testagent/data`，并与 compose 传给 manager 的同名环境变量一致。
+- Result:
+  - `go test ./internal/config`、compose config、脚本语法检查、`package-release.sh --help` 和 `git diff --check` 通过；compose 解析结果显示数据和程序挂载、manager 环境变量均指向 `/data/testagent`。
+
+### 2026-07-06 - 企业内部署模板补齐 ICBC OpenAI 配置
+
+- Why:
+  - 部署 env 中需要参考桌面 openclaw 企业配置补齐 `icbc-openai` 模型地址和 token 变量，避免只配置前端 API 地址后 Java 仍缺少企业模型运行参数。
+- What:
+  - 在 `deploy/internal/env.example` 增加 `TEST_AGENT_MODEL_CATALOG_SOURCE=internal`、`TEST_AGENT_ICBC_OPENAI_BASE_URL`、`TEST_AGENT_ICBC_OPENAI_TOKEN_ENV`、`ICBC_OPENAI_AUTH_TOKEN` 占位符、`TEST_AGENT_ICBC_OPENAI_AUTH_MODE=bearer` 和 openclaw 默认模型 `Qwen3.6-35B-A3B`；部署 README 同步 Java 启动示例和必改项。
+- How:
+  - 只保留本项目实际读取的变量；openclaw 的 `MIMOAGENT_ICBC_OPENAI_UCID/ENVIRONMENT` 没有本项目消费路径，未写入部署模板。真实 token 不入库，仅保留占位符。
+- Result:
+  - compose config、部署脚本语法检查和 `git diff --check` 通过。

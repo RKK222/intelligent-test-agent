@@ -580,6 +580,32 @@ export type UserOpencodeProcess = {
   checkedAt: string;
 };
 
+export type UserOpencodeProcessHealthStatus =
+  | "HEALTHY"
+  | "UNHEALTHY"
+  | "PROCESS_NOT_FOUND"
+  | "MANAGER_UNAVAILABLE"
+  | "BACKEND_UNAVAILABLE"
+  | string;
+
+export type UserOpencodeProcessHealthRequest = {
+  linuxServerId: string;
+  containerId: string;
+  port: number;
+};
+
+export type UserOpencodeProcessHealth = {
+  healthy: boolean;
+  status: UserOpencodeProcessHealthStatus;
+  serviceStatus: "RUNNING" | "NOT_RUNNING" | string;
+  linuxServerId: string;
+  containerId: string;
+  port: number;
+  baseUrl?: string | null;
+  checkedAt: string;
+  message: string;
+};
+
 export type OpencodeProcessStartOperationStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | string;
 export type OpencodeProcessStartOperationStepStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | string;
 
@@ -1067,7 +1093,14 @@ export type PromptPart =
       mimeType?: string;
       content?: string;
       url?: string;
-      source?: { start?: number; end?: number; text?: string };
+      source?: {
+        start?: number;
+        end?: number;
+        text?: string;
+        startLine?: number;
+        endLine?: number;
+        contextType?: "selection" | "file" | string;
+      };
     }
   | { type: "agent"; agentId: string; name?: string }
   | { type: "reference"; id: string; label: string; uri?: string; metadata?: Record<string, unknown> };

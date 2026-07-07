@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from 'vue'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -46,6 +46,9 @@ import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
 import { MarkdownView, OpencodeTimeline, TodoPanel, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
+import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
+import type { ChatContextItem } from '../stores/chatContextStore'
+import { validateChatSend } from '../stores/chatContextStore'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -665,6 +668,11 @@ const props =
     streamingTextByPartId?: Record<string, string>
     /** opencode todo.updated 投影出的任务列表，固定展示在输入框上方。 */
     todos?: TodoItem[]
+    /** 用户从工作区添加到本轮对话的选区/文件上下文附件。 */
+    chatContexts?: ChatContextItem[]
+    chatContextTotalChars?: number
+    chatContextOverLimit?: boolean
+    chatContextError?: string | null
     /** permission.asked 投影出的待处理权限请求。 */
     permissions?: PermissionRequest[]
     /** question.asked 投影出的待处理提问请求。 */
@@ -682,6 +690,7 @@ const props =
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
     todos: () => [],
+    chatContexts: () => [],
     permissions: () => [],
     questions: () => [],
     messageScopesById: () => ({}),
@@ -703,11 +712,13 @@ const emit =
     (e: 'open-diff', path: string): void
     (e: 'open-file', path: string): void
     (e: 'initialize-process'): void
-    (e: 'refresh-process'): void
     (e: 'select-model', model: any): void
     (e: 'change-agent', agentId: string): void
     (e: 'refresh-agents'): void
     (e: 'clear-raw-output'): void
+    (e: 'remove-chat-context', id: string): void
+    (e: 'clear-chat-contexts'): void
+    (e: 'preview-context', item: ChatContextItem): void
     (e: 'reply-permission', requestId: string, decision: 'once' | 'always' | 'reject'): void
     (e: 'reply-question', requestId: string, answers: unknown[]): void
     (e: 'reject-question', requestId: string): void
@@ -725,6 +736,12 @@ const emit =
 const collapsedMessages = ref<Record<string, boolean>>({})
 
 const localInput = ref(props.inputValue ?? '')
+const COMPOSER_TEXTAREA_MIN_HEIGHT = 40
+const COMPOSER_TEXTAREA_MAX_HEIGHT = 260
+const composerTextareaHeight = ref(COMPOSER_TEXTAREA_MIN_HEIGHT)
+const isResizingComposer = ref(false)
+let composerResizeStartY = 0
+let composerResizeStartHeight = COMPOSER_TEXTAREA_MIN_HEIGHT
 const dropdownOpen = ref(false)
 const modelSearch = ref('')
 const agentDropdownOpen = ref(false)
@@ -757,7 +774,61 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeDropdown)
+  stopComposerResize()
 })
+
+const composerTextareaStyle = computed<CSSProperties>(() => ({
+  height: `${composerTextareaHeight.value}px`,
+  maxHeight: `${COMPOSER_TEXTAREA_MAX_HEIGHT}px`,
+  resize: 'none'
+}))
+
+function clampComposerTextareaHeight(height: number) {
+  return Math.min(COMPOSER_TEXTAREA_MAX_HEIGHT, Math.max(COMPOSER_TEXTAREA_MIN_HEIGHT, height))
+}
+
+function onComposerResizeMove(event: PointerEvent) {
+  if (!isResizingComposer.value) return
+  const deltaY = composerResizeStartY - event.clientY
+  composerTextareaHeight.value = clampComposerTextareaHeight(composerResizeStartHeight + deltaY)
+}
+
+function stopComposerResize() {
+  if (!isResizingComposer.value) return
+  isResizingComposer.value = false
+  window.removeEventListener('pointermove', onComposerResizeMove)
+  window.removeEventListener('pointerup', stopComposerResize)
+  window.removeEventListener('pointercancel', stopComposerResize)
+}
+
+function startComposerResize(event: PointerEvent) {
+  if (event.button !== 0 && event.pointerType === 'mouse') return
+  isResizingComposer.value = true
+  composerResizeStartY = event.clientY
+  composerResizeStartHeight = composerTextareaHeight.value
+  window.addEventListener('pointermove', onComposerResizeMove)
+  window.addEventListener('pointerup', stopComposerResize)
+  window.addEventListener('pointercancel', stopComposerResize)
+}
+
+/**
+ * 点击输入框卡片空白区域时，自动聚焦到内部文本输入框（避开按钮、手柄和下拉框等子元素）
+ */
+function onComposerCardClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  if (
+    target?.closest('button') ||
+    target?.closest('.figma-chat-composer-resize-handle') ||
+    target?.closest('.figma-chat-agent-dropdown') ||
+    target?.closest('.figma-chat-model-dropdown')
+  ) {
+    return
+  }
+  const textarea = (event.currentTarget as HTMLElement | null)?.querySelector('textarea')
+  if (textarea && document.activeElement !== textarea) {
+    textarea.focus()
+  }
+}
 
 const allModels = computed(() => {
   const byValue = new Map<string, any>()
@@ -1749,6 +1820,14 @@ const processSubmitBlocked = computed(
     !processReady.value ||
     (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
+const contextSendValidation = computed(() => validateChatSend(localInput.value.trim(), props.chatContexts ?? []))
+const contextSubmitBlocked = computed(() => !contextSendValidation.value.ok || props.chatContextOverLimit === true)
+const contextSendBlockedReason = computed(() => {
+  if (!contextSendValidation.value.ok) return contextSendValidation.value.reason
+  if (props.chatContextOverLimit) return '上下文超过限制，无法发送'
+  return ''
+})
+const sendSubmitBlocked = computed(() => processSubmitBlocked.value || contextSubmitBlocked.value)
 const processStatusVisible = computed(
   () =>
     props.processRequired || props.processLoading || props.processStatus != null
@@ -1974,29 +2053,8 @@ function onProcessStatusDotResize() {
   )
 }
 
-const PROCESS_REFRESH_DEDUPE_MS = 2000
-let lastProcessRefreshRequestedAt = 0
-
-function requestProcessRefresh() {
-  if (
-    props.running ||
-    props.processLoading ||
-    props.processRefreshing ||
-    (!props.processRequired && !props.processStatus)
-  ) {
-    return
-  }
-  const now = Date.now()
-  // focus 和 click 经常在同一次用户交互里连续触发，做轻量去重避免重复健康检查。
-  if (now - lastProcessRefreshRequestedAt < PROCESS_REFRESH_DEDUPE_MS) return
-  lastProcessRefreshRequestedAt = now
-  emit('refresh-process')
-}
-
-function onComposerCardClick(event: MouseEvent) {
-  const target = event.target as HTMLElement | null
-  if (target?.closest('button')) return
-  requestProcessRefresh()
+function onContextPreview(item: ChatContextItem) {
+  emit('preview-context', item)
 }
 
 // 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
@@ -2748,7 +2806,7 @@ function formatTime(iso: string) {
 
 function submit() {
   const text = localInput.value.trim()
-  if (!text || processSubmitBlocked.value) return
+  if (!text || sendSubmitBlocked.value) return
   wasStopped.value = false
   wasCompleted.value = false
   wasFailed.value = false
@@ -3788,16 +3846,37 @@ function onCompositionEnd() {
       </template>
     </section>
     <TodoPanel v-if="!activeSubagentSessionId" :todos="todos" />
+    <ChatContextAttachmentList
+      v-if="!activeSubagentSessionId"
+      :items="chatContexts"
+      :total-char-count="chatContextTotalChars ?? 0"
+      :over-limit="chatContextOverLimit || contextSubmitBlocked"
+      :error="chatContextError || contextSendBlockedReason"
+      @remove="emit('remove-chat-context', $event)"
+      @clear="emit('clear-chat-contexts')"
+      @preview="onContextPreview"
+    />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
-      <div class="figma-chat-input-card" @click="onComposerCardClick">
+      <div
+        class="figma-chat-input-card"
+        :class="{ 'is-resizing': isResizingComposer }"
+        @click="onComposerCardClick"
+      >
+        <div
+          class="figma-chat-composer-resize-handle"
+          role="separator"
+          aria-label="拖动调整输入框高度"
+          aria-orientation="horizontal"
+          @pointerdown.stop.prevent="startComposerResize"
+        />
         <textarea
           v-model="localInput"
           class="figma-chat-textarea"
+          :style="composerTextareaStyle"
           :placeholder="placeholder || 'Ask the AI agent...'"
           rows="1"
           :disabled="running || !processReady"
-          @focus="requestProcessRefresh"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
           @compositionend="onCompositionEnd"
@@ -3996,7 +4075,8 @@ function onCompositionEnd() {
             v-if="!running"
             type="button"
             class="figma-chat-send-card"
-            :disabled="!localInput.trim() || processSubmitBlocked"
+            :disabled="!localInput.trim() || sendSubmitBlocked"
+            :title="contextSendBlockedReason || '发送'"
             aria-label="发送"
             @click="submit"
           >
@@ -4210,14 +4290,14 @@ function onCompositionEnd() {
                     ]"
                     >{{
                       file.status === 'added'
-                        ? '新增'
+                        ? 'A'
                         : file.status === 'deleted'
-                        ? '删除'
-                        : '修改'
+                        ? 'D'
+                        : 'M'
                     }}</span
                   >
                   <span class="figma-chat-drawer-file-path">{{
-                    file.path
+                    getFileName(file.path)
                   }}</span>
                   <span class="figma-chat-drawer-file-stats">
                     <span v-if="file.additions" class="figma-chat-add"
@@ -6544,6 +6624,7 @@ function onCompositionEnd() {
 
 /* 统一输入卡片：圆角边框容器，textarea + 底部工具行整合在一起 */
 .figma-chat-input-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   border: 1px solid #d4d4d4;
@@ -6554,6 +6635,41 @@ function onCompositionEnd() {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.figma-chat-composer-resize-handle {
+  position: absolute;
+  z-index: 2;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  cursor: ns-resize;
+  touch-action: none;
+  display: flex;
+  justify-content: center;
+}
+
+.figma-chat-composer-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.1);
+  transition: background-color 0.15s ease, width 0.15s ease;
+}
+
+.figma-chat-composer-resize-handle:hover::before,
+.figma-chat-input-card.is-resizing .figma-chat-composer-resize-handle::before {
+  background: rgba(0, 0, 0, 0.3);
+  width: 48px;
+}
+
+.figma-chat-input-card.is-resizing {
+  border-color: #3366ff;
+  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
 .figma-chat-input-card:focus-within {
   border-color: #3366ff;
   box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
@@ -6561,9 +6677,9 @@ function onCompositionEnd() {
 
 .figma-chat-textarea {
   width: 100%;
-  min-height: 64px;
-  max-height: 140px;
-  padding: 10px 12px 6px;
+  min-height: 40px;
+  max-height: 260px;
+  padding: 8px 12px 4px;
   font-family: 'Inter', 'PingFang SC', sans-serif;
   font-size: 14px;
   line-height: 20px;
@@ -6573,6 +6689,7 @@ function onCompositionEnd() {
   resize: none;
   outline: none;
   box-sizing: border-box;
+  overflow-y: auto;
 }
 
 .figma-chat-textarea:disabled {

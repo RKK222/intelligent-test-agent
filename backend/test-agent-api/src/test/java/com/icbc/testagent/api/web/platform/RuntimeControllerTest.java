@@ -20,6 +20,10 @@ import com.icbc.testagent.opencode.runtime.run.RunDiffFileResponse;
 import com.icbc.testagent.opencode.runtime.run.RunDiffResponse;
 import com.icbc.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.icbc.testagent.opencode.runtime.run.StartRunInput;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessStatusQueryService;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessWeakHealthRequest;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessWeakHealthResponse;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessWeakHealthStatus;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
@@ -280,6 +284,7 @@ class RuntimeControllerTest {
     @Test
     void opencodeProcessControllerReturnsCurrentUserProcessStatusAndInitializesIt() {
         UserOpencodeProcessAssignmentService service = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessStatusQueryService statusQueryService = org.mockito.Mockito.mock(OpencodeProcessStatusQueryService.class);
         UserOpencodeProcessStatusResponse ready = new UserOpencodeProcessStatusResponse(
                 UserOpencodeProcessAvailability.READY,
                 false,
@@ -312,7 +317,7 @@ class RuntimeControllerTest {
                         "trace_1234567890abcdef",
                         NOW,
                         NOW)));
-        WebTestClient client = WebTestClient.bindToController(new UserOpencodeProcessController(service))
+        WebTestClient client = WebTestClient.bindToController(new UserOpencodeProcessController(service, statusQueryService))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter(authenticatedUserFilter())
                 .build();
@@ -360,11 +365,54 @@ class RuntimeControllerTest {
     }
 
     @Test
+    void opencodeProcessControllerReturnsWeakHealthWithoutStrongStatusQuery() {
+        UserOpencodeProcessAssignmentService service = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessStatusQueryService statusQueryService = org.mockito.Mockito.mock(OpencodeProcessStatusQueryService.class);
+        when(statusQueryService.weakHealth(
+                        eq(new OpencodeProcessWeakHealthRequest("server-a", "ctr_01", 4096)),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new OpencodeProcessWeakHealthResponse(
+                        true,
+                        OpencodeProcessWeakHealthStatus.HEALTHY,
+                        "RUNNING",
+                        "server-a",
+                        "ctr_01",
+                        4096,
+                        "http://10.8.0.12:4096",
+                        NOW,
+                        "ok"));
+        WebTestClient client = WebTestClient.bindToController(new UserOpencodeProcessController(service, statusQueryService))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/agent/opencode/processes/me/health?linuxServerId=server-a&containerId=ctr_01&port=4096")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.healthy").isEqualTo(true)
+                .jsonPath("$.data.status").isEqualTo("HEALTHY")
+                .jsonPath("$.data.serviceStatus").isEqualTo("RUNNING")
+                .jsonPath("$.data.linuxServerId").isEqualTo("server-a")
+                .jsonPath("$.data.containerId").isEqualTo("ctr_01")
+                .jsonPath("$.data.port").isEqualTo(4096)
+                .jsonPath("$.data.baseUrl").isEqualTo("http://10.8.0.12:4096")
+                .jsonPath("$.data.message").isEqualTo("ok");
+
+        verify(service, org.mockito.Mockito.never()).status(any(), any(), any());
+        verify(service, org.mockito.Mockito.never()).routingLinuxServerId(any(), any());
+    }
+
+    @Test
     void opencodeProcessControllerRequiresAuthenticationAndOpencodeAgent() {
         UserOpencodeProcessAssignmentService service = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessStatusQueryService statusQueryService = org.mockito.Mockito.mock(OpencodeProcessStatusQueryService.class);
         doThrow(new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 opencode 用户进程"))
                 .when(service).status(any(), eq("otheragent"), eq("trace_1234567890abcdef"));
-        WebTestClient unauthenticatedClient = WebTestClient.bindToController(new UserOpencodeProcessController(service))
+        WebTestClient unauthenticatedClient = WebTestClient.bindToController(new UserOpencodeProcessController(service, statusQueryService))
                 .webFilter(new TraceIdWebFilter())
                 .controllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -377,7 +425,7 @@ class RuntimeControllerTest {
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("UNAUTHENTICATED");
 
-        WebTestClient authenticatedClient = WebTestClient.bindToController(new UserOpencodeProcessController(service))
+        WebTestClient authenticatedClient = WebTestClient.bindToController(new UserOpencodeProcessController(service, statusQueryService))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter(authenticatedUserFilter())
                 .controllerAdvice(new GlobalExceptionHandler())

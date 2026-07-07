@@ -24,6 +24,7 @@ vi.mock("../src/monaco-env", () => {
     getTopForLineNumber: () => 0,
     setScrollTop: () => {},
     addCommand: () => null,
+    addAction: () => null,
     dispose: () => {}
   };
   const mockMonaco = {
@@ -48,7 +49,7 @@ import CodeEditor from "../src/CodeEditor.vue";
 const baseProps = { content: "# hi", dirty: false, readonly: false, saving: false };
 
 describe("CodeEditor Markdown 预览受控", () => {
-  // 预览开关已上提到 FigmaEditorArea tab 表头，CodeEditor 只负责受控渲染预览区。
+  // 预览开关在 WorkbenchFooter，CodeEditor 只负责受控渲染预览区。
   it("打开 .md 文件且 showPreview=false 时不渲染预览区", () => {
     const { queryByText } = render(CodeEditor, {
       props: { ...baseProps, path: "docs/README.md", showPreview: false }
@@ -56,19 +57,28 @@ describe("CodeEditor Markdown 预览受控", () => {
     expect(queryByText("正在准备预览…")).toBeNull();
   });
 
-  it("打开 .md 文件且 showPreview=true 时进入预览加载态", async () => {
-    const { findByText } = render(CodeEditor, {
-      props: { ...baseProps, path: "docs/README.md", showPreview: true }
+  it("打开 .md 文件且 previewMode='full' 时整体预览（隐藏源码编辑器）", async () => {
+    const { findByText, getByTestId } = render(CodeEditor, {
+      props: { ...baseProps, path: "docs/README.md", previewMode: "full" }
     });
-    // 预览组件首次渲染会显示「正在准备预览…」占位（markdown-it 懒加载中）
     expect(await findByText("正在准备预览…")).toBeTruthy();
+    const sourceEl = getByTestId("code-editor-source");
+    expect(sourceEl.style.display).toBe("none");
+  });
+
+  it("打开 .md 文件且 previewMode='split' 时分屏预览（显示源码编辑器）", async () => {
+    const { findByText, getByTestId } = render(CodeEditor, {
+      props: { ...baseProps, path: "docs/README.md", previewMode: "split" }
+    });
+    expect(await findByText("正在准备预览…")).toBeTruthy();
+    const sourceEl = getByTestId("code-editor-source");
+    expect(sourceEl.style.display).not.toBe("none");
   });
 
   it("CodeEditor 自身不再渲染预览开关按钮", () => {
     const { queryByLabelText } = render(CodeEditor, {
       props: { ...baseProps, path: "docs/README.md", showPreview: false }
     });
-    // tab 表头按钮上提到 FigmaEditorArea，这里只断言 CodeEditor 不再自带入口
     expect(queryByLabelText("预览")).toBeNull();
     expect(queryByLabelText("关闭预览")).toBeNull();
   });
@@ -85,7 +95,7 @@ describe("CodeEditor Markdown 预览受控", () => {
   it("预览分屏打开时按源码容器实际尺寸布局 Monaco，避免原文区域空白", async () => {
     editorLayout.mockClear();
     const { findByTestId } = render(CodeEditor, {
-      props: { ...baseProps, path: "docs/README.md", showPreview: true }
+      props: { ...baseProps, path: "docs/README.md", showPreview: true, previewMode: "split" }
     });
     const source = await findByTestId("code-editor-source");
     Object.defineProperty(source, "clientWidth", { configurable: true, value: 960 });

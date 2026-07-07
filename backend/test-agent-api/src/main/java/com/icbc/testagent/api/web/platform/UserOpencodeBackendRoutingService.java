@@ -193,6 +193,9 @@ class UserOpencodeBackendRoutingService {
         if ("/runs".equals(suffix)) {
             return HttpMethod.POST.equals(method) ? Optional.of(agentId) : Optional.empty();
         }
+        if (isProcessWeakHealthRead(suffix, method)) {
+            return Optional.empty();
+        }
         if (isProcessInitializeOperationRead(suffix, method)) {
             return Optional.empty();
         }
@@ -205,6 +208,11 @@ class UserOpencodeBackendRoutingService {
     private boolean isProcessInitializeOperationRead(String suffix, HttpMethod method) {
         return HttpMethod.GET.equals(method)
                 && suffix.startsWith("/processes/me/initialize-operations/");
+    }
+
+    private boolean isProcessWeakHealthRead(String suffix, HttpMethod method) {
+        return HttpMethod.GET.equals(method)
+                && "/processes/me/health".equals(suffix);
     }
 
     private boolean isPlatformRuntimePath(String path, HttpMethod method) {
