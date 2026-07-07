@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-07 - 补全三机企业部署 README 操作清单
+
+- Why:
+  - 部署方需要明确每台服务器分别部署什么、文件放在哪里、基础配置文件如何拆分、哪些配置必须改，以及整体访问链路图，避免只看到 `env.example` 时不知道该改哪些项。
+- What:
+  - 扩展 `deploy/internal/README.md`，增加三机部署 Mermaid 链路图；按 `122.233.30.2` 前端 Nginx、`122.233.30.4` 后端 Java + Docker worker、`122.233.30.20` Redis、PostgreSQL 待定分别列出目录、配置文件、必须修改项、通常保持默认项、启动和验证命令；明确每台服务器需要从打包 `dist/` 中拿哪些产物、哪些不要放；前端 Nginx 提供可直接复制的完整 `/etc/nginx/conf.d/test-agent.conf`，不要求运维理解模板变量。同步修正 `backend.env.example` 注释，使其指向 `/data/testagent/config/docker.env`。
+- How:
+  - 仅复用既有 `deploy/internal` README、Nginx 模板、Compose 文件和 env 模板，不新增部署入口、不改 API/数据库/事件契约。
+- Result:
+  - `backend.env.example` 可被 shell source；`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 可展开；Nginx 模板展开后确认 `listen 80`、`root /data/testagent/frontend`、后端为 `122.233.30.4:8080`；`git diff --check` 通过。真实 Java/worker 未启动，因为 PostgreSQL 仍待定且目标服务器不在当前机器。
+
 ### 2026-07-07 - 固化企业内三机部署配置模板
 
 - Why:
