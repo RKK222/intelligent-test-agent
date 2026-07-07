@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-07 - 修复企业内 opencode worker 打包链路
+
+- Why:
+  - `deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env` 在构建 worker 镜像时，`node:22-bookworm-slim` 尚无 CA 根证书就切到 HTTPS Debian 镜像源，导致 `apt-get update` 证书校验失败；修复后又暴露 Docker Desktop 复制 npm 全局 `opencode` symlink 失败。
+- What:
+  - `deploy/internal/opencode-worker.Dockerfile` 先通过基础镜像默认 Debian 源安装 `ca-certificates`，再切换 `DEBIAN_MIRROR/DEBIAN_SECURITY_MIRROR`；`package-release.sh` 导出外挂程序时改为复制 `opencode-ai` 包目录后在交付目录内创建相对 symlink，并在 `docker create` 时显式传入构建平台；`deploy/internal/README.md` 补充 HTTPS 镜像源说明。
+- How:
+  - 未修改外置 `/data/testagent/config/docker.env` 或任何密钥配置；复用既有打包脚本和 worker 镜像结构，只调整镜像 bootstrap 顺序与程序导出方式。
+- Result:
+  - `bash -n deploy/internal/package-release.sh`、`bash -n deploy/internal/opencode-worker-entrypoint.sh`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config`、`git diff --check` 通过；完整执行 `deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env` 成功，产物位于 `deploy/internal/dist/`。
+
 ### 2026-07-07 - 补全三机企业部署 README 操作清单
 
 - Why:

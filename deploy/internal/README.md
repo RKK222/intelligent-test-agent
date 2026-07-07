@@ -470,6 +470,8 @@ docker buildx build \
   .
 ```
 
+镜像构建允许使用 `https://` Debian 镜像源；Dockerfile 会先通过基础镜像默认源安装 `ca-certificates`，再切换到 `DEBIAN_MIRROR/DEBIAN_SECURITY_MIRROR`，避免 slim 基础镜像缺少 CA 根证书时 `apt-get update` 失败。
+
 离线交付时导出 tar：
 
 ```bash

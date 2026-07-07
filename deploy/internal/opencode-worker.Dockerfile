@@ -23,6 +23,13 @@ ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG OPENCODE_AI_PACKAGE=opencode-ai@1.17.8
 
+# node:bookworm-slim 初始层不保证包含 CA 根证书；先用默认 Debian 源安装证书，
+# 再切到可配置的 HTTPS 镜像源，避免 apt update 在证书校验阶段失败。
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates; \
+    rm -rf /var/lib/apt/lists/*
+
 RUN set -eux; \
     for file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
       if [ -f "${file}" ]; then \
@@ -37,7 +44,6 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       bash \
-      ca-certificates \
       git \
       openssh-client \
       procps \

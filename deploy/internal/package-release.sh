@@ -185,19 +185,21 @@ build_opencode_worker_image() {
 export_worker_programs() {
   local programs_dir="${OUTPUT_DIR}/programs"
   local container_id
-  container_id="$(docker create "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" true)"
+  container_id="$(docker create --platform "${PLATFORM}" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" true)"
 
   rm -rf "${programs_dir}"
   mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode/bin" "${programs_dir}/opencode/lib/node_modules"
 
   if ! docker cp "${container_id}:/usr/local/bin/opencode-manager" "${programs_dir}/bin/opencode-manager" \
-    || ! docker cp "${container_id}:/usr/local/bin/opencode" "${programs_dir}/opencode/bin/opencode" \
     || ! docker cp "${container_id}:/usr/local/lib/node_modules/opencode-ai" "${programs_dir}/opencode/lib/node_modules/opencode-ai"; then
     docker rm -f "${container_id}" >/dev/null 2>&1 || true
     return 1
   fi
   docker rm -f "${container_id}" >/dev/null
 
+  # npm 全局 bin 是跨目录符号链接，Docker Desktop 直接 docker cp 该链接到宿主机时可能失败；
+  # 先复制包目录，再在交付目录内创建相同相对链接，保证目标 Linux 机器解压后可执行。
+  ln -sfn "../lib/node_modules/opencode-ai/bin/opencode.exe" "${programs_dir}/opencode/bin/opencode"
   chmod +x "${programs_dir}/bin/opencode-manager" || true
   chmod +x "${programs_dir}/opencode/bin/opencode" || true
   printf 'opencode package: %s\n' "${OPENCODE_AI_PACKAGE}" >"${programs_dir}/VERSION"
