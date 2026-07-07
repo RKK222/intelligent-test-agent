@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-07 - 固化企业内三机部署配置模板
+
+- Why:
+  - 企业内部署拓扑已明确为 `122.233.30.2` 前端 Nginx、`122.233.30.4` 后端 Java + Docker worker、`122.233.30.20` Redis，PostgreSQL 地址待定；部署配置需要从命令和服务文件中拆出，便于服务器现场修改。
+- What:
+  - `deploy/internal/env.example` 按当前前端入口和后端地址更新；新增 `deploy/internal/backend.env.example` 作为 Java 后端外置环境变量模板；`deploy/internal/README.md` 补充三机部署规划、外置 `backend.env/docker.env` 路径和加载方式。本机私有 `deploy/internal/.env` 同步写入当前前后端 IP，但该文件被 `.gitignore` 排除，不纳入提交。
+- How:
+  - 复用既有 `deploy/internal/package-release.sh`、`docker-compose.yml` 和 Nginx 模板，不新增部署编排入口；Java 通过 `set -a; . /data/testagent/config/backend.env` 或 systemd `EnvironmentFile` 加载配置，Docker worker 通过 `docker compose --env-file /data/testagent/config/docker.env` 加载配置。
+- Result:
+  - `bash -n deploy/internal/package-release.sh`、`bash -n deploy/internal/opencode-worker-entrypoint.sh`、`set -a; . deploy/internal/backend.env.example`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config`、`git diff --check` 通过；未启动真实 Java/worker，因为 PostgreSQL 仍待定且目标服务器不在当前机器。
+
 ### 2026-07-06 - 修复 FigmaChatPanel.vue onComposerCardClick 缺失导致的 vue-tsc 编译错误
 
 - Why:
