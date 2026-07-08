@@ -1,7 +1,7 @@
 .oc-text-part {
   position: relative;
   line-height: var(--oc-line-height);
-  color: var(--oc-fg);
+  color: #000000;
   font-size: var(--oc-text-md);
   background: var(--oc-surface);
   border: 1px solid #e3e8f7;
@@ -85,8 +85,8 @@
   width: 100%;
   max-width: 100%;
   min-height: 22px;
-  grid-template-columns: 72px minmax(0, 1fr) 48px 14px;
-  column-gap: 6px;
+  grid-template-columns: 96px minmax(0, 1fr) 56px 16px;
+  column-gap: 8px;
   padding: 0 8px;
   align-items: center;
   color: var(--oc-muted);
@@ -98,21 +98,22 @@
   align-items: center;
   gap: 5px;
   color: var(--oc-muted);
-  font-size: var(--oc-text-xs);
-  font-weight: 600;
-  line-height: 14px;
+  font-size: var(--oc-text-sm);
+  font-weight: 500;
+  line-height: 18px;
 }
 
 .oc-reasoning-part .oc-disclosure__trigger .oc-tool__subtitle {
-  font-size: var(--oc-text-xs);
-  line-height: 14px;
+  grid-column: 2;
+  font-size: var(--oc-text-sm);
+  line-height: 18px;
 }
 
 .oc-reasoning-part .oc-disclosure__trigger .oc-tool__status {
   grid-column: 3;
   justify-self: end;
-  font-size: var(--oc-text-xs);
-  padding: 1px 5px;
+  font-size: 10px;
+  padding: 2px 6px;
 }
 
 .oc-reasoning-part .oc-disclosure__trigger .oc-tool__chevron {
@@ -192,4 +193,12 @@
   font-family: var(--oc-font-mono);
   font-size: var(--oc-text-xs);
   white-space: pre-wrap;
+}
+
+@media (max-width: 520px) {
+  .oc-reasoning-part .oc-disclosure__trigger {
+    grid-template-columns: 80px minmax(0, 1fr) 48px 16px;
+    column-gap: 6px;
+    padding: 0 6px;
+  }
 }

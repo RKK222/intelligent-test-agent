@@ -56,7 +56,7 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-text-part .oc-icon-button")).toBeTruthy();
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
     await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
-    expect(getByText("src/checkout.ts")).toBeTruthy();
+    expect(getByText("checkout.ts")).toBeTruthy();
   });
 
   it("renders only the original question for serialized workspace context prompts", () => {
@@ -173,7 +173,7 @@ describe("OpencodeTimeline", () => {
 
       await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
       expect(container.querySelector(".oc-diff-summary__header")?.getAttribute("aria-expanded")).toBe("true");
-      expect(getByText("src/a.ts")).toBeTruthy();
+      expect(getByText("a.ts")).toBeTruthy();
 
       await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
       expect(container.querySelector(".oc-diff-summary__header")?.getAttribute("aria-expanded")).toBe("false");

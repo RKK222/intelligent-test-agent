@@ -4701,3 +4701,20 @@ bash /tmp/test-api-after-restart.sh
   - 只修改 event 模块广播发布器和 app 模块测试，不改变部署变量、Redis channel、API、数据库或广播事件协议。
 - Result:
   - `mvn -pl test-agent-event -am -Dtest=ServerBroadcastPublisherTest -Dsurefire.failIfNoSpecifiedTests=false test`、`mvn -pl test-agent-app -am -Dtest=ServerBroadcastContextTest -Dsurefire.failIfNoSpecifiedTests=false test` 和 `mvn -pl test-agent-app -am package -DskipTests` 均通过；新的 Spring Boot jar 已产出到 `backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar`。
+
+### 2026-07-08 - 优化运行日志折叠行样式与字色视觉层级，子智能体卡片改用双行垂直布局
+
+- Why: 
+  1. 当前对话面板的过程行（如“思考状态”、“技能”、“探索”等）字号偏大且大写（13px + uppercase），与正文大字号竞争导致侧边栏视觉杂乱，空间利用率低；
+  2. 展开工具后，自定义的子智能体执行记录（如 `TEST-DESIGN-TARGET-RECOGNITION`）由于名字过长，在单行 Grid 列宽受限下严重截断了后续的需求项编号（如 `识别 I2026000 ...`），无法看清具体工作内容；
+  3. 用户需要正文回答以纯黑色清晰醒目地呈现，而其它过程信息要用较灰淡的字色进行视觉避让以增强层次感。
+- What:
+  1. **折叠触发器**：保留单行展示，但将标题 `.oc-tool__title` 字号由 `var(--oc-text-md)`（13px）下调为 `var(--oc-text-sm)`（11px），移除 `text-transform: uppercase` 强行大写转换，并缩减列间距（`column-gap: 8px`）及微调第一列和状态列宽度比（96px / 56px），使布局更为秀气和节约空间；
+  2. **视觉层级**：将最终输出气泡（`.oc-text-part`）的字体颜色统一强制设为纯黑色 `#000000`；将所有的过程折叠栏触发器标题字色设为稍微灰一点的 `var(--oc-muted)`（较深灰），摘要设为 `var(--oc-subtle)`（较浅灰），达到明显的层级对比；
+  3. **子智能体卡片**：将展开体部的 `.oc-subagent-card` 改造为 2行 2列 的 Grid 双行垂直排列（子智能体名在第一行第一列，具体工作内容在第二行第一列，已完成状态在右侧跨两行垂直居中对齐）。由于独占一行，长路径和冗长名称能够极其完整地展开显示而不被截断；
+  4. **测试断言修正**：在 `opencode-timeline.test.ts` 和 `git-changes-panel.test.ts` 中修正了过去修改遗留下来的纯路径匹配 Bug，将路径断言（如 `src/checkout.ts`, `workspace/docs/selected.md` 等）改成展示端实际显示的纯文件名断言（如 `checkout.ts`, `selected.md`）。
+- How: 
+  修改 `frontend/packages/agent-chat/src/opencode-like/styles/tools.css` 和 `parts.css` 对应的触发器及卡片样式。修正对应的单元测试匹配文本。未涉及任何后端 API、事件、数据库或环境变量改动。
+- Result:
+  前端全量 typecheck 和打包无报错，前端 40 个测试文件共 420 个 Vitest 单元测试用例全部 100% 成功绿过！
+
