@@ -2,6 +2,7 @@ import { BackendApiError } from "@test-agent/backend-api";
 import type {
   AgentMessage,
   FileTreeEntry,
+  MessageScope,
   MessagePart,
   ModelInfo,
   PromptPart,
@@ -591,19 +592,220 @@ export function chatStateFromSessionTreeSnapshot(
       event: runEventFromSessionTreeEvent(snapshot, event, index)
     });
   });
+  state = replaySessionTreeMessagesBySessionId(state, snapshot);
   state = hydrateSubagentIndexesFromSessionTreeSnapshot(state, snapshot);
   const persistedAgentMessages = messagesFromSessionMessages(persistedMessages);
-  if (state.messages.length > 0 && persistedAgentMessages.length > 0) {
-    return {
+  if (persistedAgentMessages.length > 0) {
+    state = {
       ...state,
-      messages: mergeSessionTreeMessages(persistedAgentMessages, state.messages)
+      messages: state.messages.length > 0 ? mergeSessionTreeMessages(persistedAgentMessages, state.messages) : persistedAgentMessages
     };
   }
-  return state;
+  return hydrateSubagentOutputsFromTaskParts(state);
 }
 
 export function messagesFromSessionTreeSnapshot(snapshot: SessionTreeMessagesResponse): AgentMessage[] {
   return chatStateFromSessionTreeSnapshot(snapshot).messages;
+}
+
+function replaySessionTreeMessagesBySessionId(
+  state: AgentChatRuntimeState,
+  snapshot: SessionTreeMessagesResponse
+): AgentChatRuntimeState {
+  let next = state;
+  let index = 0;
+  for (const [sessionId, payloads] of Object.entries(snapshot.messagesBySessionId ?? {})) {
+    if (!Array.isArray(payloads)) {
+      continue;
+    }
+    for (const rawPayload of payloads) {
+      const payload = record(rawPayload);
+      const message = record(payload?.message) ?? record(payload?.info);
+      if (!payload || !message) {
+        continue;
+      }
+      next = reduceAgentChatRuntime(next, {
+        type: "event",
+        event: runEventFromSessionTreeMessage(snapshot, sessionId, payload, message, index)
+      });
+      index += 1;
+    }
+  }
+  return next;
+}
+
+// 后端 snapshot 会把 message payload 同时按 session 分组；即使 events 被裁剪，也要按原 RunEvent reducer 口径恢复 scope。
+function runEventFromSessionTreeMessage(
+  snapshot: SessionTreeMessagesResponse,
+  sessionId: string,
+  payload: Record<string, unknown>,
+  message: Record<string, unknown>,
+  index: number
+): RunEvent {
+  const scopedPayload = {
+    ...payload,
+    sessionId: text(payload.sessionId) ?? sessionId,
+    rootSessionId: text(payload.rootSessionId) ?? snapshot.sessionId
+  };
+  const messageId = text(message.messageId) ?? text(message.messageID) ?? text(message.id) ?? `message-${index + 1}`;
+  const occurredAt = text(payload.occurredAt) ?? text(message.createdAt) ?? new Date(0).toISOString();
+  return {
+    eventId: `session-tree-message:${snapshot.sessionId}:${sessionId}:${messageId}:${index}`,
+    runId: text(payload.runId) ?? `session-tree:${snapshot.sessionId}`,
+    seq: 10_000 + index,
+    type: "message.updated",
+    traceId: text(payload.traceId) ?? "trace_session_tree",
+    occurredAt,
+    payload: scopedPayload
+  };
+}
+
+// 旧历史可能只持久化 root task part，child session 远端恢复为空；task_result 是可展示的只读子 Agent 正文。
+function hydrateSubagentOutputsFromTaskParts(state: AgentChatRuntimeState): AgentChatRuntimeState {
+  let changed = false;
+  let messages = state.messages;
+  const messageScopesById: Record<string, MessageScope> = { ...state.messageScopesById };
+  const subagentsBySessionId: Record<string, SubagentSession> = { ...state.subagentsBySessionId };
+  const subagentByTaskPartId: Record<string, string> = { ...state.subagentByTaskPartId };
+  for (const message of state.messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const part of message.parts ?? []) {
+      if (part.type !== "tool" || part.toolName !== "task") {
+        continue;
+      }
+      const sessionId = taskChildSessionId(part);
+      const outputText = taskOutputText(part.output);
+      if (!sessionId || !outputText || childMessageAlreadyRestored(messages, messageScopesById, sessionId, part)) {
+        continue;
+      }
+      const subagent = subagentsBySessionId[sessionId] ?? subagentFromTaskOutput(message, part, sessionId, messageScopesById);
+      if (!subagentsBySessionId[sessionId]) {
+        subagentsBySessionId[sessionId] = subagent;
+        changed = true;
+      }
+      for (const alias of [part.partId, part.callId, subagent.taskPartId, subagent.taskCallId]) {
+        if (alias && !subagentByTaskPartId[alias]) {
+          subagentByTaskPartId[alias] = sessionId;
+          changed = true;
+        }
+      }
+      const synthetic = subagentOutputMessage(message, part, sessionId, outputText);
+      messages = [...messages, synthetic];
+      messageScopesById[synthetic.id] = {
+        sessionId,
+        rootSessionId: subagent.parentSessionId ?? messageScopesById[message.messageId ?? message.id]?.rootSessionId,
+        parentSessionId: subagent.parentSessionId,
+        isChildSession: true,
+        taskMessageId: subagent.taskMessageId,
+        taskPartId: subagent.taskPartId,
+        taskCallId: subagent.taskCallId
+      };
+      changed = true;
+    }
+  }
+  return changed ? { ...state, messages, messageScopesById, subagentsBySessionId, subagentByTaskPartId } : state;
+}
+
+function subagentOutputMessage(
+  parentMessage: Extract<AgentMessage, { role: "assistant" }>,
+  part: Extract<MessagePart, { type: "tool" }>,
+  sessionId: string,
+  outputText: string
+): Extract<AgentMessage, { role: "assistant" }> {
+  const messageId = `task-output:${sessionId}:${part.partId}`;
+  return {
+    id: messageId,
+    messageId,
+    role: "assistant",
+    text: outputText,
+    parts: [{ partId: `${messageId}:text`, type: "text", text: outputText, status: "completed" }],
+    createdAt: part.endedAt ?? part.startedAt ?? parentMessage.createdAt
+  };
+}
+
+function subagentFromTaskOutput(
+  message: Extract<AgentMessage, { role: "assistant" }>,
+  part: Extract<MessagePart, { type: "tool" }>,
+  sessionId: string,
+  scopesById: Record<string, MessageScope>
+): SubagentSession {
+  const metadata = part.metadata ?? {};
+  const output = record(part.output);
+  const parentScope = scopesById[message.messageId ?? message.id] ?? scopesById[message.id];
+  return {
+    sessionId,
+    parentSessionId: text(metadata.parentSessionId) ?? text(output?.parentSessionId) ?? parentScope?.sessionId ?? parentScope?.rootSessionId,
+    taskMessageId: message.messageId ?? message.id,
+    taskPartId: part.partId,
+    taskCallId: part.callId,
+    agentName: displayAgentName(text(metadata.agentName) ?? text(metadata.agent) ?? text(part.input?.subagent_type) ?? "Task"),
+    title: text(metadata.title) ?? text(part.input?.description) ?? firstNonEmptyLine(text(part.input?.prompt)) ?? "Subagent task",
+    status: part.status ?? "completed",
+    updatedAt: part.endedAt ?? part.startedAt ?? message.createdAt
+  };
+}
+
+function childMessageAlreadyRestored(
+  messages: AgentMessage[],
+  scopesById: Record<string, MessageScope>,
+  sessionId: string,
+  part: Extract<MessagePart, { type: "tool" }>
+): boolean {
+  const syntheticId = `task-output:${sessionId}:${part.partId}`;
+  return messages.some((message) => {
+    if (message.role === "card") {
+      return false;
+    }
+    if (message.id === syntheticId || message.messageId === syntheticId) {
+      return true;
+    }
+    const scope = scopesById[message.messageId ?? message.id] ?? scopesById[message.id];
+    if (scope?.sessionId === sessionId) {
+      return true;
+    }
+    if (scope?.isChildSession && part.partId && scope.taskPartId === part.partId) {
+      return true;
+    }
+    return Boolean(scope?.isChildSession && part.callId && scope.taskCallId === part.callId);
+  });
+}
+
+function taskChildSessionId(part: Extract<MessagePart, { type: "tool" }>): string | undefined {
+  const metadata = part.metadata ?? {};
+  const output = record(part.output);
+  return (
+    text(metadata.sessionId) ??
+    text(metadata.sessionID) ??
+    text(metadata.childSessionId) ??
+    text(metadata.childSessionID) ??
+    text(output?.sessionId) ??
+    text(output?.sessionID) ??
+    taskOutputSessionId(part.output)
+  );
+}
+
+function taskOutputSessionId(output: unknown): string | undefined {
+  if (typeof output !== "string") {
+    return undefined;
+  }
+  return text(output.match(/<task\s+[^>]*id=["']([^"']+)["']/i)?.[1]);
+}
+
+function taskOutputText(output: unknown): string | undefined {
+  if (typeof output === "string") {
+    const result = output.match(/<task_result>\s*([\s\S]*?)\s*<\/task_result>/i)?.[1] ?? output;
+    return text(result);
+  }
+  const value = record(output);
+  return (
+    text(value?.taskResult) ??
+    text(value?.task_result) ??
+    text(value?.result) ??
+    text(value?.content) ??
+    text(value?.text)
+  );
 }
 
 function hydrateSubagentIndexesFromSessionTreeSnapshot(

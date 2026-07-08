@@ -1,4 +1,5 @@
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import { chatStateFromSessionTreeSnapshot } from "../src/components/workbench-utils";
 import FigmaChatPanel from "../src/components/FigmaChatPanel.vue";
@@ -192,6 +193,7 @@ describe("FigmaChatPanel", () => {
     handle.element.dispatchEvent(new MouseEvent("pointerdown", { button: 0, clientY: 240, bubbles: true }));
     window.dispatchEvent(new MouseEvent("pointermove", { clientY: 180 }));
     window.dispatchEvent(new MouseEvent("pointerup", { clientY: 180 }));
+    await nextTick();
 
     expect((textarea.element as HTMLTextAreaElement).style.height).toBe("100px");
   });
@@ -1136,6 +1138,55 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
     expect(wrapper.text()).toContain("子 Agent 工作详情");
+  });
+
+  it("opens historical subagent cards restored from persisted task output", async () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: []
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot, [
+      {
+        messageId: "msg_root",
+        sessionId: "ses_platform",
+        role: "ASSISTANT",
+        content: "",
+        createdAt: "2026-07-05T13:14:00Z",
+        parts: [
+          {
+            partId: "prt_rendered_task",
+            type: "tool",
+            toolName: "task",
+            callId: "call_task",
+            status: "completed",
+            input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" },
+            metadata: { sessionId: "ses_child" },
+            output: "<task id=\"ses_child\" state=\"completed\"><task_result>\n子智能体已识别测试对象详情\n</task_result></task>"
+          }
+        ]
+      }
+    ]);
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: state.messages,
+        messageScopesById: state.messageScopesById,
+        subagentsBySessionId: state.subagentsBySessionId,
+        subagentByTaskPartId: state.subagentByTaskPartId,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).not.toContain("子智能体已识别测试对象详情");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("子智能体已识别测试对象详情");
   });
 
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {

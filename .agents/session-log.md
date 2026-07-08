@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-08 - 修复历史子智能体空白视图与工具间距
+
+- Why:
+  - 本地历史会话 `ses_f9ad74a4e51f4089958c0f4e8a88ea75` 的 `session-tree/messages` 当前返回空 tree，平台 `session_messages.parts_json` 只保留 root task part；后续试探性放开点击守卫后，metadata-only task 卡片会进入没有 child 消息的空子视图。
+  - 该历史的 task part `output` 已持久化 `<task_result>` 子 Agent 结果，可作为只读 child timeline 恢复来源；工具头部与子智能体卡片列间距也偏紧。
+- What:
+  - `chatStateFromSessionTreeSnapshot()` 现在会消费 `messagesBySessionId`，并且在 tree 为空或缺少 child message 时，把平台历史 task part output 的 `<task_result>` 合成为带 child scope 的只读 assistant message，同时补齐 `subagentsBySessionId` 与 `subagentByTaskPartId`。
+  - 恢复 `FigmaChatPanel`/`AssistantThread` 的 subagent 打开守卫，避免只有 metadata sessionId、没有已恢复 child 内容的卡片进入空视图；`.oc-tool__trigger` / context/tool group trigger 与 `.oc-subagent-card` 网格列间距从 8px 调整为 14px，并加宽 agent/status 列。
+- How:
+  - 仅修改前端 `agent-web` 历史状态恢复、`agent-chat` 子视图守卫与样式、定向测试和包 README/PACKAGE；不改后端 API、RunEvent 契约、数据库或 generated SDK。
+- Result:
+  - 新增 empty session-tree + persisted task output、`messagesBySessionId` child message 和组件点击回归用例；修正 composer 拖拽测试等待 Vue tick。`FigmaChatPanel.test.ts`、`workbench-utils.test.ts`、`opencode-like-state.test.ts`、`@test-agent/agent-chat` typecheck、`@test-agent/agent-web` typecheck 和 `git diff --check` 通过；Chrome 实测点击 07/05 21:13 历史会话第一个子 Agent 可显示对象识别正文。
+
 ### 2026-07-08 - 收敛工作台极简线框并修复历史子智能体卡片
 
 - Why:

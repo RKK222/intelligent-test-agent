@@ -671,6 +671,147 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("restores subagent output from persisted task parts when the session tree is empty", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: []
+    };
+    const persisted: SessionMessage[] = [
+      {
+        messageId: "msg_root",
+        sessionId: "ses_platform",
+        role: "ASSISTANT",
+        content: "",
+        createdAt: "2026-07-05T13:14:00Z",
+        parts: [
+          {
+            partId: "prt_task",
+            type: "tool",
+            toolName: "task",
+            callId: "call_task",
+            status: "completed",
+            input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" },
+            metadata: { sessionId: "ses_child" },
+            output: "<task id=\"ses_child\" state=\"completed\"><task_result>\n## 子 Agent 工作内容\n识别完成。\n</task_result></task>"
+          }
+        ]
+      }
+    ];
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, persisted);
+    const childMessage = state.messages.find((message) => message.id === "task-output:ses_child:prt_task");
+
+    expect(state.subagentsBySessionId.ses_child).toMatchObject({
+      sessionId: "ses_child",
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task",
+      agentName: "Test-design-target-recognition",
+      title: "识别 I2026000 测试对象",
+      status: "completed"
+    });
+    expect(state.subagentByTaskPartId.prt_task).toBe("ses_child");
+    expect(state.subagentByTaskPartId.call_task).toBe("ses_child");
+    expect(childMessage).toMatchObject({
+      role: "assistant",
+      text: "## 子 Agent 工作内容\n识别完成。"
+    });
+    expect(state.messageScopesById["task-output:ses_child:prt_task"]).toMatchObject({
+      sessionId: "ses_child",
+      isChildSession: true,
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task"
+    });
+  });
+
+  it("replays child messages from session tree messagesBySessionId", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {
+        ses_child: [
+          {
+            rootSessionId: "ses_root",
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskMessageId: "msg_root",
+            taskPartId: "prt_task",
+            taskCallId: "call_task",
+            message: { id: "msg_child", role: "assistant", content: "子 Agent messagesBySessionId 输出" }
+          }
+        ]
+      },
+      childSessionIdByTaskPartId: { prt_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "msg_root", role: "assistant" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              state: {
+                status: "completed",
+                input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" }
+              }
+            }
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+
+    expect(state.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "msg_child",
+        role: "assistant",
+        text: "子 Agent messagesBySessionId 输出"
+      })
+    ]));
+    expect(state.messageScopesById.msg_child).toMatchObject({
+      sessionId: "ses_child",
+      isChildSession: true,
+      taskPartId: "prt_task",
+      taskCallId: "call_task"
+    });
+  });
+
   it("keeps persisted user turns when session tree supplies assistant snapshots", () => {
     const persisted: SessionMessage[] = [
       {

@@ -13,9 +13,9 @@
 .oc-tool-group__trigger {
   display: grid;
   width: 100%;
-  grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
+  grid-template-columns: 104px minmax(0, 1fr) 68px 16px;
   padding: 0 10px;
-  column-gap: 8px;
+  column-gap: 14px;
   align-items: center;
   color: var(--oc-muted);
   background: transparent;
@@ -77,9 +77,9 @@
 .oc-tool__trigger {
   width: 100%;
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
+  grid-template-columns: 104px minmax(0, 1fr) 68px 16px;
   align-items: center;
-  column-gap: 8px;
+  column-gap: 14px;
   padding: 0 10px;
   color: var(--oc-fg);
   background: transparent;
@@ -180,12 +180,12 @@
 
 .oc-subagent-card {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) auto;
+  grid-template-columns: 104px minmax(0, 1fr) max-content;
   align-items: center;
   width: 100%;
   min-height: 38px;
   padding: 6px 10px;
-  column-gap: 8px;
+  column-gap: 14px;
   border: 1px solid var(--oc-border);
   border-radius: var(--oc-radius-sm);
   background: var(--oc-surface);
