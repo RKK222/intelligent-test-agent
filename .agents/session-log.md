@@ -21,6 +21,18 @@
 - Result:
   - `apps/agent-web/tests/workbench-utils.test.ts` 全量通过，新增 snapshot 聚焦回归通过，`vue-tsc -p apps/agent-web/tsconfig.json` 和 `git diff --check` 通过；计划要求的完整 `FigmaChatPanel.test.ts` 仍有既有 composer 拖拽高度断言失败（期望 100px、实际 40px），完整 `opencode-timeline.test.ts` 仍有既有 diff 路径展示断言失败（测试期望 `src/...`，当前 UI 显示 basename 并把完整路径放在 `title`）。
 
+### 2026-07-08 - 优化工作空间目录树默认展开和视觉密度
+
+- Why:
+  - 创建工作空间目录树默认只露出应用根目录，用户还需要手动展开到常用工作空间层级；上一版行距、选中态和输入区视觉过重。
+- What:
+  - `SettingsAppWorkspacePanel.vue` 的目录树默认展开应用根目录和下一级目录，更深层继续按需点击展开；同步收紧树行高、字体、hover/选中态、边框背景和新增目录操作条样式。
+  - 更新 `frontend/apps/agent-web/README.md` 中目录树默认展开说明，并调整设置页回归测试期望。
+- How:
+  - 延续现有内嵌 `WorkspaceDirectoryTree`，不新增组件/API/后端契约；仍只渲染默认两层和用户展开分支，避免回到全量深层渲染。
+- Result:
+  - 通过：`corepack pnpm --dir frontend test apps/agent-web/tests/settings-app-workspace-panel.test.ts`、`corepack pnpm --dir frontend --filter @test-agent/agent-web typecheck`、`git diff --check`。前端 Vite `http://127.0.0.1:3000` 返回 200；三服务重启被 `.env.test` PostgreSQL `192.168.100.200:5432` 当前 `No route to host` 阻塞，后端未能完成 health 验证。
+
 ### 2026-07-08 - 收紧工作空间管理已有项操作与目录树渲染
 
 - Why:

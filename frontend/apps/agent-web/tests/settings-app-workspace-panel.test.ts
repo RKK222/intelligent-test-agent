@@ -365,7 +365,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(invalidOption.title).toBe(branchRuleTooltip);
   });
 
-  it("shows only the current app subtree and expands nodes before selecting direct-child directories", async () => {
+  it("shows only the current app subtree and expands to direct-child directories by default", async () => {
     const api = createApi();
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
     api.getRepositoryTree = vi.fn().mockResolvedValue(repositoryTree);
@@ -378,14 +378,9 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await findByText("F-COSS");
     const appRoot = getTreePathElement(container, "F-COSS")!;
     expect(appRoot).toBeTruthy();
-    expect(queryByText("F-COSS/W1")).toBeNull();
-    expect(queryByText("F-COSS/W1/F1")).toBeNull();
     expect(queryByText("OTHER-APP")).toBeNull();
-    await fireEvent.click(getTreePathButton(container, "F-COSS"));
     expect(await findByText("F-COSS/W1")).toBeTruthy();
     expect((getByText("F-COSS/W1").closest("button") as HTMLButtonElement).disabled).toBe(false);
-    expect(queryByText("F-COSS/W1/F1")).toBeNull();
-    await fireEvent.click(getTreePathButton(container, "F-COSS/W1"));
     expect(await findByText("F-COSS/W1/F1")).toBeTruthy();
     expect(await findByText("F-COSS/W1/case.md")).toBeTruthy();
     expect((getByText("F-COSS/W1/F1").closest("button") as HTMLButtonElement).disabled).toBe(true);
@@ -415,7 +410,6 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await fireEvent.click(getByText("工作空间管理"));
 
     await findByText("F-COSS");
-    await fireEvent.click(getTreePathButton(container, "F-COSS"));
     await fireEvent.update(getByPlaceholderText("新增一级目录"), "W3");
     await fireEvent.click(getByText("新增目录"));
     expect((await findAllByText("F-COSS/W3")).length).toBeGreaterThan(0);

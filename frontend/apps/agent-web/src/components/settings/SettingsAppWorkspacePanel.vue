@@ -45,11 +45,21 @@ const WorkspaceDirectoryTree = defineComponent({
   emits: ["select"],
   setup(props, { emit }) {
     const expandedPaths = ref(new Set<string>());
+    const collectDefaultExpandedPaths = (nodes: WorkspaceTreeNode[], depth = 0, acc = new Set<string>()) => {
+      for (const node of nodes) {
+        if (node.type === "directory" && node.children.length > 0 && depth <= 1) {
+          acc.add(node.path);
+          collectDefaultExpandedPaths(node.children, depth + 1, acc);
+        }
+      }
+      return acc;
+    };
     watch(
       () => props.nodes,
-      () => {
-        expandedPaths.value = new Set<string>();
-      }
+      (nodes) => {
+        expandedPaths.value = collectDefaultExpandedPaths(nodes);
+      },
+      { immediate: true }
     );
     const toggleExpanded = (path: string) => {
       const next = new Set(expandedPaths.value);
@@ -1181,25 +1191,26 @@ onBeforeUnmount(() => {
   position: relative;
   min-height: 160px;
   overflow: hidden;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  background: #fbfcfe;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
 }
 .ta-workspace-tree-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 32px;
-  padding: 8px 10px;
-  border-bottom: 1px solid #ebeef5;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-bottom: 1px solid #e5e7eb;
   background: #ffffff;
 }
 .ta-workspace-selected-path {
   min-width: 0;
   overflow: hidden;
-  color: #3366ff;
+  color: #2563eb;
   font-size: 12px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1212,7 +1223,6 @@ onBeforeUnmount(() => {
 :deep(.ta-workspace-tree-list) {
   display: flex;
   flex-direction: column;
-  gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1224,31 +1234,41 @@ onBeforeUnmount(() => {
 :deep(.ta-workspace-tree-node) {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
-  min-height: 26px;
+  height: 24px;
   border: 0;
   background: transparent;
-  color: #303133;
-  font-size: 12px;
-  line-height: 1.4;
+  color: #374151;
+  font-family: var(--ta-tree-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-size: 13px;
+  line-height: 24px;
   text-align: left;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
-:deep(.ta-workspace-tree-node.is-selectable) {
+:deep(.ta-workspace-tree-node:not(:disabled)) {
   cursor: pointer;
+}
+:deep(.ta-workspace-tree-node:not(:disabled):hover) {
+  background: #eef2f7;
+  color: #111827;
 }
 :deep(.ta-workspace-tree-node:disabled) {
   cursor: default;
-  color: #909399;
+  color: #9ca3af;
 }
 :deep(.ta-workspace-tree-node.is-selected) {
-  background: #eaf1ff;
-  color: #244ec9;
+  background: #e8f0ff;
+  color: #1d4ed8;
+  font-weight: 500;
 }
 :deep(.ta-workspace-tree-icon) {
   flex: 0 0 auto;
   width: 12px;
-  color: #909399;
+  color: #9ca3af;
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
 }
 :deep(.ta-workspace-tree-path) {
   min-width: 0;
@@ -1268,9 +1288,17 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px 10px;
-  border-top: 1px solid #ebeef5;
+  padding: 8px 12px;
+  border-top: 1px solid #e5e7eb;
   background: #ffffff;
+}
+.ta-workspace-new-directory :deep(.el-input__wrapper) {
+  min-height: 30px;
+  border-radius: 6px;
+}
+.ta-workspace-new-directory :deep(.el-button) {
+  height: 30px;
+  border-radius: 6px;
 }
 .ta-workspace-form-actions {
   display: flex;
