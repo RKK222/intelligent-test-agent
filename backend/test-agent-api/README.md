@@ -27,7 +27,7 @@
 - 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页参数、创建用户请求和单角色调整请求转换；用户创建、角色替换和 ROLE 字典校验委托 `test-agent-system-management`。
 - 暴露 AI 回复反馈 API，Controller 只读取当前登录用户、messageId、traceId 和请求体，具体 assistant role 与归属校验由 runtime 服务完成。
 - 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、通用筛选参数传递、CSV 响应头和统一错误转换；查询服务只读 rollup。
-- Session 历史恢复主入口是 agent-scoped session tree messages；内部平台 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 支持 `refresh=false` 只读数据库快照，供前端反馈 messageId 映射和只读 transcript 使用；active-run API 供前端刷新后恢复 SSE。
+- `GET /api/internal/platform/opencode-runtime/sessions` 是当前登录用户历史会话分页接口，支持 `page/size/q`，返回 `workspaceContext`（应用、应用工作空间模板和版本上下文）且按 `updatedAt desc` 排序；列表不校验当前应用成员资格，点击切换时再由 workspace-management recent 接口校验权限。Session 历史正文恢复主入口是 agent-scoped session tree messages；内部平台 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 支持 `refresh=false` 只读数据库快照，供前端反馈 messageId 映射和只读 transcript 使用；active-run API 供前端刷新后恢复 SSE。
 - 本地 CORS 默认允许主前端和 `frontend-opencode` Vite/Preview/E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式收敛。
 
 ## 允许依赖

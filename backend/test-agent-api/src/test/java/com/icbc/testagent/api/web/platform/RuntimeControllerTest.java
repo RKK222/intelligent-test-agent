@@ -40,8 +40,10 @@ import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.Session;
+import com.icbc.testagent.domain.session.SessionHistoryItem;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.session.SessionWorkspaceContext;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
@@ -732,8 +734,16 @@ class RuntimeControllerTest {
     @Test
     void sessionControllerListsSearchesUpdatesAndSoftDeletesSessions() {
         SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
-        when(service.listSessions(eq("demo"), any()))
-                .thenReturn(new PageResponse<>(List.of(session("Demo session", true, SessionStatus.ACTIVE)), 1, 20, 1));
+        when(service.listUserSessions(eq(new UserId("usr_1234567890abcdef")), eq("demo"), any()))
+                .thenReturn(new PageResponse<>(List.of(new SessionHistoryItem(
+                        session("Demo session", true, SessionStatus.ACTIVE),
+                        new SessionWorkspaceContext(
+                                "app_1234567890abcdef",
+                                "智能测试",
+                                "aw_1234567890abcdef",
+                                "主工作区",
+                                "ver_1234567890abcdef",
+                                "20260708"))), 1, 20, 1));
         when(service.updateSession(
                         eq(new SessionId("ses_1234567890abcdef")),
                         eq("Renamed"),
@@ -744,6 +754,7 @@ class RuntimeControllerTest {
                 .thenReturn(session("Renamed", false, SessionStatus.ARCHIVED));
         WebTestClient client = WebTestClient.bindToController(new SessionController(service))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -753,7 +764,15 @@ class RuntimeControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.items[0].title").isEqualTo("Demo session")
-                .jsonPath("$.data.items[0].pinned").isEqualTo(true);
+                .jsonPath("$.data.items[0].pinned").isEqualTo(true)
+                .jsonPath("$.data.items[0].workspaceContext.appId").isEqualTo("app_1234567890abcdef")
+                .jsonPath("$.data.items[0].workspaceContext.appName").isEqualTo("智能测试")
+                .jsonPath("$.data.items[0].workspaceContext.applicationWorkspaceId").isEqualTo("aw_1234567890abcdef")
+                .jsonPath("$.data.items[0].workspaceContext.workspaceName").isEqualTo("主工作区")
+                .jsonPath("$.data.items[0].workspaceContext.versionId").isEqualTo("ver_1234567890abcdef")
+                .jsonPath("$.data.items[0].workspaceContext.version").isEqualTo("20260708");
+
+        verify(service).listUserSessions(eq(new UserId("usr_1234567890abcdef")), eq("demo"), any());
 
         client.patch()
                 .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef")
@@ -780,10 +799,13 @@ class RuntimeControllerTest {
     @Test
     void sessionControllerAlsoExposesInternalPlatformSessionUrl() {
         SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
-        when(service.listSessions(eq("demo"), any()))
-                .thenReturn(new PageResponse<>(List.of(session("Demo session", true, SessionStatus.ACTIVE)), 1, 20, 1));
+        when(service.listUserSessions(eq(new UserId("usr_1234567890abcdef")), eq("demo"), any()))
+                .thenReturn(new PageResponse<>(List.of(new SessionHistoryItem(
+                        session("Demo session", true, SessionStatus.ACTIVE),
+                        null)), 1, 20, 1));
         WebTestClient client = WebTestClient.bindToController(new SessionController(service))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()

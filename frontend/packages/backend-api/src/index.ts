@@ -896,7 +896,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }
       return socket;
     },
-    listAllSessions: (page = 1, size = 20, q?: string) =>
+    listAllSessions: (page = 1, size = 30, q?: string) =>
       request<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),
     listSessions: (workspaceId: string, page = 1, size = 20) =>
       request<PageResponse<Session>>(`${opencodeRuntimeBase}/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),

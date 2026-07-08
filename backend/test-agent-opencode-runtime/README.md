@@ -6,7 +6,7 @@
 
 ## 主要职责
 
-- Session 创建、查询、消息追加和归档。
+- Session 创建、查询、消息追加、归档和当前用户历史会话分页；用户历史由 `SessionHistoryRepository` 只读端口提供，按会话创建人、Run 触发人、消息发送人归因，保留 `pinned` 字段但排序只使用更新时间倒序。
 - Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt 或原生 session command，不等待远端长任务完成才返回 Run。root `run.succeeded/run.failed` 终态事件是 Run 终态事实源；`Streaming response failed` 等提交/订阅 transport error 会短暂延迟收敛，若窗口内收到 root 终态则以 root 终态为准，不追加旧失败；若无 root 终态才写 `run.failed`，且 payload 会携带单行、长度受限的安全错误说明。后到 root 终态允许纠正先到 transport error 临时失败并刷新最终快照。事件订阅先经 `RunSessionScopeRouter` 判定 root/child scope，并在 root 成功/失败终态后结束，避免其它会话或同一会话下一轮消息串入旧 Run。
 - AI 回复满意度反馈归属校验和 upsert：只允许登录用户对自己会话或自己触发 Run 的 `ASSISTANT` 消息提交 `POSITIVE/NEGATIVE` 反馈，评论最多 300 字。
 - 运营分析 rollup 与查询：主链路只写事实，后台 runner 通过数据库锁默认刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图；查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
@@ -62,7 +62,7 @@
 - `RunSessionScopeRouterTest` 覆盖 root/child idle/error 终态派生、task metadata/session parentID/session.children child discovery、task metadata discovery 不改写 root task part scope、原生 pending task part 到 child session.created 的 FIFO 绑定、未知 child pending drain、嵌套 session 防串流、raw event dedup 和全局 unknown 噪声过滤。
 - `RunSessionScopeRuntimeCacheTest` 覆盖 Redis pending/dedup key、30 分钟 TTL、pending JSON drain 和 Redis 不可用降级。
 - `RunMessageRecoveryServiceTest` 覆盖 agent session messages 中 assistant 恢复为 transient SSE snapshot、Run scope 下 root + child snapshot、Session root 下全量历史 snapshot、user part 不重复回放，以及未绑定/远端失败时降级为空。
-- `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新、消息追加默认 role 和消息列表 DB fallback。
+- `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新、当前用户历史会话查询委托、消息追加默认 role 和消息列表 DB fallback。
 - `AiMessageFeedbackApplicationServiceTest` 覆盖反馈创建/更新、assistant role 校验、消息归属校验和评论长度边界。
 - `AnalyticsQueryServiceTest` 覆盖 overview 指标口径、空分母、参数边界和 CSV 不含 cost 字段。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。

@@ -620,9 +620,27 @@ const props =
     /** 文件变更行（来自 SSE 事件统计） */
     fileChanges?: FileChangeStat[]
     /** 历史对话列表 */
-    history?: Array<{ id: string; title: string; createdAt?: string; updatedAt?: string }>
+    history?: Array<{
+      id: string
+      title: string
+      createdAt?: string
+      updatedAt?: string
+      appName?: string
+      workspaceName?: string
+      version?: string
+    }>
+    /** 受控历史搜索词，由父组件负责远端查询。 */
+    historySearch?: string
+    /** 当前搜索条件下的历史总数。 */
+    historyTotal?: number
+    /** 是否还有下一页历史。 */
+    historyHasMore?: boolean
+    /** 正在加载下一页历史。 */
+    historyLoadingMore?: boolean
     /** 正在切换历史会话；旧正文在此期间隐藏，避免误以为点击无响应。 */
     historyLoading?: boolean
+    /** 当前历史会话只读原因；存在时禁止继续发送。 */
+    readonlyReason?: string
     /** 当前选中的模型展示名 */
     selectedModelLabel?: string
     /** 模型选择按钮是否禁用 */
@@ -706,6 +724,8 @@ const emit =
     (e: 'new-conversation'): void
     (e: 'close'): void
     (e: 'open-history'): void
+    (e: 'history-search-change', query: string): void
+    (e: 'load-more-history'): void
     (e: 'select-session', id: string): void
     (e: 'open-tasks'): void
     (e: 'update:inputValue', value: string): void
@@ -1820,6 +1840,8 @@ const processSubmitBlocked = computed(
     !processReady.value ||
     (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
+const readonlyBlockedReason = computed(() => props.readonlyReason?.trim() ?? '')
+const readonlySubmitBlocked = computed(() => Boolean(readonlyBlockedReason.value))
 const contextSendValidation = computed(() => validateChatSend(localInput.value.trim(), props.chatContexts ?? []))
 const contextSubmitBlocked = computed(() => !contextSendValidation.value.ok || props.chatContextOverLimit === true)
 const contextSendBlockedReason = computed(() => {
@@ -1827,7 +1849,10 @@ const contextSendBlockedReason = computed(() => {
   if (props.chatContextOverLimit) return '上下文超过限制，无法发送'
   return ''
 })
-const sendSubmitBlocked = computed(() => processSubmitBlocked.value || contextSubmitBlocked.value)
+const sendBlockedTitle = computed(() => readonlyBlockedReason.value || contextSendBlockedReason.value || '发送')
+const sendSubmitBlocked = computed(
+  () => processSubmitBlocked.value || readonlySubmitBlocked.value || contextSubmitBlocked.value
+)
 const processStatusVisible = computed(
   () =>
     props.processRequired || props.processLoading || props.processStatus != null
@@ -2123,18 +2148,16 @@ function selectDrawerFile(path: string) {
 }
 
 const historyDrawerOpen = ref(false)
-const historySearchQuery = ref('')
-const filteredHistory = computed(() => {
-  const list = props.history || []
-  const q = historySearchQuery.value.trim().toLowerCase()
-  if (!q) return list
-  return list.filter(
-    (item) =>
-      item.title.toLowerCase().includes(q) ||
-      (item.createdAt && item.createdAt.includes(q)) ||
-      (item.updatedAt && item.updatedAt.includes(q))
-  )
+const localHistorySearchQuery = ref('')
+const historySearchQuery = computed({
+  get: () => props.historySearch ?? localHistorySearchQuery.value,
+  set: (value: string) => {
+    localHistorySearchQuery.value = value
+    emit('history-search-change', value)
+  }
 })
+const visibleHistory = computed(() => props.history || [])
+const historyTotalCount = computed(() => props.historyTotal ?? visibleHistory.value.length)
 
 function historyTime(value?: string) {
   if (!value) return '暂无'
@@ -2153,11 +2176,18 @@ function historyTime(value?: string) {
 
 function closeHistoryDrawer() {
   historyDrawerOpen.value = false
-  historySearchQuery.value = ''
 }
 function selectHistoryItem(id: string) {
   emit('select-session', id)
   closeHistoryDrawer()
+}
+
+function historyContextText(item: { appName?: string; workspaceName?: string; version?: string }) {
+  return [
+    item.appName?.trim() || '未关联应用',
+    item.workspaceName?.trim() || '未知工作空间',
+    item.version?.trim() || '无版本'
+  ].join(' · ')
 }
 
 type RawOutputFilter = 'all' | RawOutputKind
@@ -3876,7 +3906,8 @@ function onCompositionEnd() {
           :style="composerTextareaStyle"
           :placeholder="placeholder || 'Ask the AI agent...'"
           rows="1"
-          :disabled="running || !processReady"
+          :disabled="running || !processReady || readonlySubmitBlocked"
+          :title="readonlyBlockedReason || undefined"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
           @compositionend="onCompositionEnd"
@@ -4076,7 +4107,7 @@ function onCompositionEnd() {
             type="button"
             class="figma-chat-send-card"
             :disabled="!localInput.trim() || sendSubmitBlocked"
-            :title="contextSendBlockedReason || '发送'"
+            :title="sendBlockedTitle"
             aria-label="发送"
             @click="submit"
           >
@@ -4405,7 +4436,7 @@ function onCompositionEnd() {
         <header class="figma-chat-drawer-header">
           <div class="figma-chat-drawer-title">
             <span class="figma-chat-drawer-title-text">历史对话</span>
-            <span class="figma-chat-drawer-count">{{ (props.history || []).length }}</span>
+            <span class="figma-chat-drawer-count">{{ historyTotalCount }}</span>
           </div>
           <button
             type="button"
@@ -4427,14 +4458,14 @@ function onCompositionEnd() {
         </div>
 
         <div class="figma-chat-history-body">
-          <div v-if="filteredHistory.length === 0" class="figma-chat-history-empty">
+          <div v-if="visibleHistory.length === 0" class="figma-chat-history-empty">
             <History :size="32" class="figma-chat-history-empty-icon" />
             <p class="figma-chat-history-empty-text">
               {{ historySearchQuery.trim() ? '无匹配的历史对话' : '暂无历史对话记录，快在下方开启新会话吧~' }}
             </p>
           </div>
           <ul v-else class="figma-chat-history-list">
-            <li v-for="item in filteredHistory" :key="item.id">
+            <li v-for="item in visibleHistory" :key="item.id">
               <button
                 type="button"
                 class="figma-chat-history-card"
@@ -4446,6 +4477,7 @@ function onCompositionEnd() {
                 </div>
                 <div class="figma-chat-history-card-content">
                   <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
+                  <div class="figma-chat-history-card-context">{{ historyContextText(item) }}</div>
                   <div class="figma-chat-history-card-meta">
                     <span>创建 {{ historyTime(item.createdAt) }}</span>
                     <span>更新 {{ historyTime(item.updatedAt) }}</span>
@@ -4455,6 +4487,16 @@ function onCompositionEnd() {
               </button>
             </li>
           </ul>
+          <div v-if="historyHasMore" class="figma-chat-history-load-more">
+            <button
+              type="button"
+              class="figma-chat-history-load-more-btn"
+              :disabled="historyLoadingMore"
+              @click="emit('load-more-history')"
+            >
+              {{ historyLoadingMore ? '加载中...' : '显示更多历史会话' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -4941,6 +4983,15 @@ function onCompositionEnd() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.figma-chat-history-card-context {
+  margin-bottom: 4px;
+  color: var(--ta-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .figma-chat-history-card-meta {
   display: flex;
   align-items: center;
@@ -4952,6 +5003,28 @@ function onCompositionEnd() {
 .figma-chat-history-card-id {
   font-family: var(--font-mono);
   opacity: 0.8;
+}
+.figma-chat-history-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 4px;
+}
+.figma-chat-history-load-more-btn {
+  min-width: 160px;
+  min-height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--ta-border);
+  background: var(--ta-surface);
+  color: var(--ta-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.figma-chat-history-load-more-btn:hover:not(:disabled) {
+  background: var(--ta-hover);
+}
+.figma-chat-history-load-more-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .figma-chat-root {

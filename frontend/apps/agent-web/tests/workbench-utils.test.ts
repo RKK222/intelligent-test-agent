@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MessagePart, PromptPart, Run, RunDiffFile, SessionMessage, SessionTreeMessagesResponse } from "@test-agent/shared-types";
+import type { MessagePart, PromptPart, Run, RunDiffFile, Session, SessionMessage, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import {
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
@@ -13,6 +13,7 @@ import {
   diffFilesFromSessionMessages,
   filterWorkspaceRootEntries,
   inferDiffFromToolPart,
+  historyItems,
   runEventMatchesRun,
   mergeDiffFiles,
   messagesFromSessionMessages,
@@ -82,6 +83,40 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
+  });
+});
+
+describe("historyItems", () => {
+  it("only returns backend sessions and maps workspace context fields", () => {
+    const sessions: Session[] = [
+      {
+        sessionId: "ses_1234567890abcdef",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "用户历史",
+        status: "ACTIVE",
+        createdAt: "2026-07-08T09:00:00Z",
+        updatedAt: "2026-07-08T10:00:00Z",
+        workspaceContext: {
+          appId: "app_1234567890abcdef",
+          appName: "智能测试平台",
+          applicationWorkspaceId: "aw_1234567890abcdef",
+          workspaceName: "主干工作区",
+          versionId: "ver_1234567890abcdef",
+          version: "20260708"
+        }
+      }
+    ];
+
+    expect(historyItems(null, sessions)).toEqual([
+      expect.objectContaining({
+        id: "ses_1234567890abcdef",
+        title: "用户历史",
+        appName: "智能测试平台",
+        workspaceName: "主干工作区",
+        version: "20260708"
+      })
+    ]);
+    expect(historyItems(null, sessions)).not.toContainEqual(expect.objectContaining({ id: "local" }));
   });
 });
 

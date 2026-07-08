@@ -258,6 +258,16 @@ export type Session = {
   model?: ModelRef;
   costUsd?: number;
   tokens?: TokenUsage;
+  workspaceContext?: SessionWorkspaceContext | null;
+};
+
+export type SessionWorkspaceContext = {
+  appId?: string | null;
+  appName?: string | null;
+  applicationWorkspaceId?: string | null;
+  workspaceName?: string | null;
+  versionId?: string | null;
+  version?: string | null;
 };
 
 export type SessionMessage = {

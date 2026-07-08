@@ -142,6 +142,7 @@ const SELECTED_MODEL_STORAGE_KEY = "ta_selected_model";
 const ACTIVE_RUN_PROBE_INTERVAL_MS = 1500;
 const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 10000;
 const RAW_OUTPUT_BODY_LIMIT = 200_000;
+const SESSION_HISTORY_PAGE_SIZE = 30;
 
 type RawOutputKind = "request" | "response" | "sse";
 
@@ -227,6 +228,8 @@ const feedback = ref<Feedback | null>(null);
 const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
 const isDiffDirty = ref(false);
 const sessionSearch = ref("");
+const sessionHistoryPage = ref(1);
+const sessionHistoryItems = ref<Session[]>([]);
 const followUpQueue = ref<FollowUpDraft[]>([]);
 const retryDeadlines = ref<RetryDeadlineMap>({});
 const retryActionInFlightKey = ref<string | null>(null);
@@ -590,13 +593,39 @@ watch(selectedAppId, () => {
 });
 
 const sessionsQuery = useQuery({
-  queryKey: ["sessions", selectedWorkspaceIdRef, sessionSearchTrim],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) || Boolean(sessionSearchTrim.value),
+  queryKey: ["sessions", "user-history", sessionSearchTrim, sessionHistoryPage],
+  enabled: () => authStore.isAuthenticated(),
   queryFn: () => {
     const query = sessionSearchTrim.value;
-    return query ? api.listAllSessions(1, 30, query) : api.listSessions(selectedWorkspaceIdRef.value!, 1, 30);
+    return api.listAllSessions(
+      sessionHistoryPage.value,
+      SESSION_HISTORY_PAGE_SIZE,
+      query || undefined
+    );
   }
 });
+
+watch(sessionSearchTrim, () => {
+  sessionHistoryPage.value = 1;
+  sessionHistoryItems.value = [];
+});
+
+watch(
+  () => sessionsQuery.data.value,
+  (page) => {
+    if (!page) return;
+    if (page.page === 1) {
+      sessionHistoryItems.value = page.items;
+      return;
+    }
+    const seen = new Set(sessionHistoryItems.value.map((item) => item.sessionId));
+    sessionHistoryItems.value = [
+      ...sessionHistoryItems.value,
+      ...page.items.filter((item) => !seen.has(item.sessionId))
+    ];
+  },
+  { immediate: true }
+);
 
 const opencodeProcessEnabled = computed(() => authStore.isAuthenticated());
 const opencodeProcessQueryKey = computed(() => ["runtime", "opencode-process", "me", authStore.token ?? ""] as const);
@@ -850,7 +879,10 @@ const opencodeProcessInitialLoading = computed(
 const opencodeProcessRefreshing = computed(
   () => opencodeProcessEnabled.value && Boolean(opencodeProcessStatus.value) && manualOpencodeProcessRefreshing.value
 );
-const sessionsItems = computed(() => sessionsQuery.data.value?.items ?? []);
+const sessionsItems = computed(() => sessionHistoryItems.value);
+const sessionHistoryTotal = computed(() => sessionsQuery.data.value?.total ?? sessionHistoryItems.value.length);
+const sessionHistoryHasMore = computed(() => sessionHistoryTotal.value > sessionHistoryItems.value.length);
+const sessionHistoryLoadingMore = computed(() => sessionsQuery.isFetching.value && sessionHistoryPage.value > 1);
 const selectedModelInfo = computed(() => {
   const selected = modelIdOnly(selectedModel.value);
   return allModels.value.find((model) => modelValue(model) === selectedModel.value || model.id === selected);
@@ -908,6 +940,26 @@ function refreshAgentsCatalog() {
 const historyList = computed(() => historyItems(run.value, sessionsItems.value));
 const historyLoadingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
+
+function handleHistorySearchChange(query: string) {
+  if (sessionSearch.value === query) return;
+  sessionSearch.value = query;
+}
+
+function loadMoreHistory() {
+  if (sessionsQuery.isFetching.value || !sessionHistoryHasMore.value) return;
+  sessionHistoryPage.value += 1;
+}
+
+async function refreshHistoryOnOpen() {
+  if (sessionsQuery.isFetching.value) return;
+  if (sessionHistoryPage.value !== 1) {
+    sessionHistoryPage.value = 1;
+    sessionHistoryItems.value = [];
+    await nextTick();
+  }
+  void sessionsQuery.refetch();
+}
 const resourcesList = computed(() => runtimeResources(mcpResourcesData.value, activeTab.value));
 const runtimeStatusValue = computed(() =>
   runtimeStatus(session.value, run.value, selectedAgent.value, selectedModel.value, vcsStatusData.value, lspStatusData.value, mcpStatusData.value, mcpToolsData.value, mcpResourcesData.value)
@@ -3555,29 +3607,8 @@ function handleSaveDiffFile(path: string, content: string) {
 async function switchSession(sessionId: string) {
   const switchSeq = ++historySwitchSeq;
   historyLoadingSessionId.value = sessionId;
-  const selected = sessionsQuery.data.value?.items.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
-  let readonlyReason = "";
-  if (selected.workspaceId !== selectedWorkspaceIdRef.value) {
-    try {
-      let workspace = await api.getWorkspace(selected.workspaceId);
-      try {
-        // markRecentManagedWorkspace 会同时回写 versionId/applicationWorkspaceId，
-        // 这里把响应合并到工作区上，确保会话切换后左下角按钮也能定位到当前版本。
-        const response = await api.markRecentManagedWorkspace(selected.workspaceId);
-        if (response) {
-          workspace = mergeRecentRuntimeResponse(workspace, response);
-        }
-      } catch (error) {
-        if (error instanceof BackendApiError && error.code === "FORBIDDEN") {
-          throw error;
-        }
-      }
-      await switchWorkspace(workspace);
-    } catch (error) {
-      readonlyReason = "当前会话绑定的工作区不可用或无权限，已切换为只读。";
-      feedback.value = errorFeedback("切换 Session 工作区失败", error);
-    }
-  }
+  const selected = sessionsItems.value.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
+  const readonlyReason = await switchToHistorySessionWorkspace(selected);
   session.value = selected;
   readonlySessionReason.value = readonlyReason;
   // 切换会话后先清空上一轮任务的消耗统计，防止上一轮对话的耗时残留。
@@ -3646,6 +3677,54 @@ async function switchSession(sessionId: string) {
       historyLoadingSessionId.value = null;
     }
   }
+}
+
+async function switchToHistorySessionWorkspace(selected: Session): Promise<string> {
+  const expectedAppId = selected.workspaceContext?.appId?.trim();
+  const requiresManagedWorkspace = Boolean(expectedAppId);
+  try {
+    let workspace = await api.getWorkspace(selected.workspaceId);
+    try {
+      // markRecentManagedWorkspace 会校验当前用户仍可进入历史会话所属应用，并回填版本/模板信息。
+      const response = await api.markRecentManagedWorkspace(selected.workspaceId);
+      if (response) {
+        workspace = mergeRecentRuntimeResponse(workspace, response);
+      }
+    } catch (error) {
+      if (error instanceof BackendApiError && error.code === "NOT_FOUND" && !requiresManagedWorkspace) {
+        // 非托管旧工作区没有应用 recent 关系时允许直接切运行态工作区。
+      } else {
+        throw error;
+      }
+    }
+    const nextAppId = workspace.appId || expectedAppId;
+    if (nextAppId) {
+      selectedAppId.value = nextAppId;
+    }
+    if (workspace.workspaceId !== selectedWorkspaceIdRef.value) {
+      await switchWorkspace(workspace);
+    } else {
+      cacheWorkspace(workspace);
+      selectedWorkspaceSnapshot.value = workspace;
+      syncCurrentVersionFromWorkspace(workspace);
+    }
+    return "";
+  } catch (error) {
+    feedback.value = errorFeedback("切换 Session 工作区失败", error);
+    return readonlyReasonForHistorySwitch(error);
+  }
+}
+
+function readonlyReasonForHistorySwitch(error: unknown): string {
+  if (error instanceof BackendApiError) {
+    if (error.code === "FORBIDDEN") {
+      return "你已不属于该历史会话所属应用，当前会话只读。";
+    }
+    if (error.code === "NOT_FOUND") {
+      return "历史会话所属应用或工作空间已不可用，当前会话只读。";
+    }
+  }
+  return "无法切换到历史会话所属工作空间，当前会话只读。";
 }
 
 function handleNewConversation() {
@@ -3943,6 +4022,10 @@ async function handleLogout() {
           :file-changes="diffFiles"
           :task-usage="taskUsage"
           :history="historyList"
+          :history-search="sessionSearch"
+          :history-total="sessionHistoryTotal"
+          :history-has-more="sessionHistoryHasMore"
+          :history-loading-more="sessionHistoryLoadingMore"
           :history-loading="Boolean(historyLoadingSessionId)"
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
@@ -3978,6 +4061,9 @@ async function handleLogout() {
           @stop="handleStopRun"
           @retry="handleRetryRun"
           @new-conversation="handleNewConversation"
+          @open-history="refreshHistoryOnOpen"
+          @history-search-change="handleHistorySearchChange"
+          @load-more-history="loadMoreHistory"
           @initialize-process="beginInitializeOpencodeProcess"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @open-file="openFile"

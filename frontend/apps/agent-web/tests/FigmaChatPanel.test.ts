@@ -137,6 +137,71 @@ describe("FigmaChatPanel", () => {
     expect(newConversationButton.text()).toBe("");
   });
 
+  it("renders history context fields and emits controlled search plus load more", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "ses_1234567890abcdef",
+            title: "回归测试历史",
+            appName: "智能测试平台",
+            workspaceName: "主干工作区",
+            version: "20260708",
+            createdAt: "2026-07-08T09:00:00Z",
+            updatedAt: "2026-07-08T10:00:00Z"
+          },
+          {
+            id: "ses_abcdef1234567890",
+            title: "无上下文历史",
+            createdAt: "2026-07-07T09:00:00Z",
+            updatedAt: "2026-07-07T10:00:00Z"
+          }
+        ],
+        historyTotal: 61,
+        historyHasMore: true,
+        historySearch: ""
+      } as any
+    });
+
+    await wrapper.get('button[title="查看历史对话"]').trigger("click");
+
+    expect(wrapper.text()).toContain("61");
+    expect(wrapper.text()).toContain("智能测试平台 · 主干工作区 · 20260708");
+    expect(wrapper.text()).toContain("未关联应用 · 未知工作空间 · 无版本");
+
+    await wrapper.get(".figma-chat-history-search-input").setValue("回归");
+    expect(wrapper.emitted("history-search-change")).toEqual([["回归"]]);
+
+    const loadMore = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("显示更多历史会话"));
+    expect(loadMore).toBeTruthy();
+    await loadMore!.trigger("click");
+    expect(wrapper.emitted("load-more-history")).toEqual([[]]);
+  });
+
+  it("disables composer controls and exposes readonly reason on hover title", () => {
+    const readonlyReason = "你已不属于该历史会话所属应用，当前会话只读。";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "继续执行",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        readonlyReason
+      } as any
+    });
+
+    const textarea = wrapper.get("textarea");
+    const sendButton = wrapper.get(".figma-chat-send-card");
+
+    expect(textarea.attributes("disabled")).toBeDefined();
+    expect(textarea.attributes("title")).toBe(readonlyReason);
+    expect(sendButton.attributes("disabled")).toBeDefined();
+    expect(sendButton.attributes("title")).toBe(readonlyReason);
+  });
+
   it("renders workspace context attachments and blocks oversized input before sending", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

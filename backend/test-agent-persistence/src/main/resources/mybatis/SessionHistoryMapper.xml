@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.SessionHistoryMapper">
+    <resultMap id="SessionHistoryRowMap" type="com.icbc.testagent.persistence.mybatis.SessionHistoryRow">
+        <constructor>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="title" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="opencode_session_id" javaType="java.lang.String"/>
+            <arg column="opencode_execution_node_id" javaType="java.lang.String"/>
+            <arg column="pinned" javaType="java.lang.Boolean"/>
+            <arg column="source_type" javaType="java.lang.String"/>
+            <arg column="source_ref_id" javaType="java.lang.String"/>
+            <arg column="created_by_user_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="app_name" javaType="java.lang.String"/>
+            <arg column="application_workspace_id" javaType="java.lang.String"/>
+            <arg column="workspace_name" javaType="java.lang.String"/>
+            <arg column="version_id" javaType="java.lang.String"/>
+            <arg column="version" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="SessionHistoryColumns">
+        s.session_id,
+        s.workspace_id,
+        s.title,
+        s.status,
+        s.trace_id,
+        s.created_at,
+        s.updated_at,
+        s.opencode_session_id,
+        s.opencode_execution_node_id,
+        s.pinned,
+        s.source_type,
+        s.source_ref_id,
+        s.created_by_user_id,
+        coalesce(v.app_id, pw.app_id) as app_id,
+        a.app_name,
+        coalesce(v.application_workspace_id, pw.application_workspace_id) as application_workspace_id,
+        coalesce(aw.workspace_name, w.name) as workspace_name,
+        v.version_id,
+        v.version
+    </sql>
+
+    <sql id="SessionHistoryFrom">
+        from sessions s
+        left join workspaces w on w.workspace_id = s.workspace_id
+        left join personal_workspaces pw on pw.runtime_workspace_id = s.workspace_id
+        left join application_workspace_versions v_personal on v_personal.version_id = pw.app_workspace_version_id
+        left join application_workspace_versions v_direct on v_direct.runtime_workspace_id = s.workspace_id
+        left join application_workspace_version_replicas vr on vr.runtime_workspace_id = s.workspace_id
+        left join application_workspace_versions v_replica on v_replica.version_id = vr.version_id
+        left join application_workspace_versions v
+          on v.version_id = coalesce(v_direct.version_id, v_replica.version_id, v_personal.version_id)
+        left join application_workspaces aw on aw.workspace_id = coalesce(v.application_workspace_id, pw.application_workspace_id)
+        left join applications a on a.app_id = coalesce(v.app_id, pw.app_id)
+    </sql>
+
+    <sql id="SessionHistoryWhere">
+        where s.status = 'ACTIVE'
+          and (
+            s.created_by_user_id = #{userId}
+            or exists (
+                select 1
+                from runs r
+                where r.session_id = s.session_id
+                  and r.triggered_by_user_id = #{userId}
+            )
+            or exists (
+                select 1
+                from session_messages sm
+                where sm.session_id = s.session_id
+                  and sm.sender_user_id = #{userId}
+            )
+          )
+        <if test="queryPattern != null">
+          and (
+            lower(s.title) like #{queryPattern}
+            or lower(s.session_id) like #{queryPattern}
+          )
+        </if>
+    </sql>
+
+    <select id="findUserHistory" resultMap="SessionHistoryRowMap">
+        select
+        <include refid="SessionHistoryColumns"/>
+        <include refid="SessionHistoryFrom"/>
+        <include refid="SessionHistoryWhere"/>
+        order by s.updated_at desc, s.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countUserHistory" resultType="long">
+        select count(*)
+        <include refid="SessionHistoryFrom"/>
+        <include refid="SessionHistoryWhere"/>
+    </select>
+</mapper>

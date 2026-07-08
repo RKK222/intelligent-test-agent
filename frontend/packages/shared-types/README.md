@@ -6,7 +6,7 @@
 
 ## 主要职责
 
-- 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Workspace 可选携带 `linuxServerId`，用于前端文件 WebSocket 同服务器路由。
+- 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Workspace 可选携带 `linuxServerId`，用于前端文件 WebSocket 同服务器路由。`Session.workspaceContext` 可选携带历史会话所属 `appId/appName/applicationWorkspaceId/workspaceName/versionId/version`，旧后端或单会话详情缺失时前端必须兼容 `null/undefined`。
 - `SessionMessage` 保留旧 `content` 字段，并可选承载 `runId`、`remoteMessageId`、`parts`、`tokens`、`costUsd`、`updatedAt`，用于展示后端持久化的 Run 快照和 opencode message part projection；旧响应缺失这些字段时前端继续按纯文本展示。
 - `AgentMessage` 可选区分 `platformMessageId` 与 `remoteMessageId`：前者表示平台 `session_messages.message_id`，用于反馈等平台 API；后者表示实时 opencode message id，只用于运行期归并和终态后映射。
 - `Run` 可选承载 `tokens`、`costUsd`，统计口径为单次 Run；缺失字段必须按未知消耗处理。

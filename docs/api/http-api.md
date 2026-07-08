@@ -1345,7 +1345,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/api/internal/platform/opencode-runtime/sessions` | 创建会话。 |
-| `GET` | `/api/internal/platform/opencode-runtime/sessions?q=&page=&size=` | 全局搜索/分页查询 ACTIVE 会话，置顶优先。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions?q=&page=&size=` | 当前登录用户历史会话分页；`q` 为空时返回该用户全部 ACTIVE 会话，默认前端每页 30 条。 |
 | `GET` | `/api/internal/platform/opencode-runtime/workspaces/{workspaceId}/sessions` | 按工作区分页查询会话。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` | 查询会话详情。 |
 | `PATCH` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` | 更新会话标题或置顶状态。 |
@@ -1376,11 +1376,27 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`。
+`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`、`workspaceContext`。
+
+`workspaceContext` 仅在用户历史列表中尽量补齐，详情/更新/删除等单会话接口可为 `null`：
+
+```json
+{
+  "appId": "app_...",
+  "appName": "智能测试平台",
+  "applicationWorkspaceId": "aw_...",
+  "workspaceName": "主干工作区",
+  "versionId": "ver_...",
+  "version": "20260708"
+}
+```
 
 兼容要求：
 
-- `GET /api/internal/platform/opencode-runtime/sessions` 用于 History 全局搜索，`q` 为空时返回所有 `ACTIVE` 会话。
+- `GET /api/internal/platform/opencode-runtime/sessions` 只返回当前登录用户的历史会话。用户归因按 `sessions.created_by_user_id` 优先，并用 `runs.triggered_by_user_id`、`session_messages.sender_user_id` 兜底兼容旧会话；完全没有用户归因的旧会话不返回，避免泄露其他用户历史。
+- 列表严格按 `updatedAt desc, id desc` 排序，`pinned` 字段保留在响应中但不再影响历史排序。
+- 列表查询不校验当前用户是否仍属于历史会话所属应用，确保用户被移出应用后仍能看到自己的历史；前端点击历史会话时再调用 `/workspace-management/workspaces/{workspaceId}/recent` 校验切换权限，失败后只能只读查看该会话。
+- `workspaceContext.workspaceName` 对托管工作区展示应用工作空间模板名；非托管工作区回退运行态 `workspaces.name`。应用、版本或模板缺失时对应字段可为 `null`。
 - `DELETE /api/internal/platform/opencode-runtime/sessions/{sessionId}` 为软删除，不删除消息、Run、事件或远端 opencode 映射；普通详情、列表和消息追加会把 `ARCHIVED` 会话视为不存在。
 
 `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 请求体：

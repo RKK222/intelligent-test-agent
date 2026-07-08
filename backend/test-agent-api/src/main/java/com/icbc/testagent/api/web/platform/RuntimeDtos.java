@@ -14,9 +14,11 @@ import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.Session;
+import com.icbc.testagent.domain.session.SessionHistoryItem;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageRole;
+import com.icbc.testagent.domain.session.SessionWorkspaceContext;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.event.RunEventSsePayload;
 import jakarta.validation.constraints.AssertTrue;
@@ -231,6 +233,34 @@ final class RuntimeDtos {
     }
 
     /**
+     * 历史会话所属工作区上下文响应 DTO。
+     */
+    record SessionWorkspaceContextResponse(
+            String appId,
+            String appName,
+            String applicationWorkspaceId,
+            String workspaceName,
+            String versionId,
+            String version) {
+
+        /**
+         * 从领域上下文映射为 API 响应；上下文缺失时返回 null。
+         */
+        static SessionWorkspaceContextResponse from(SessionWorkspaceContext context) {
+            if (context == null) {
+                return null;
+            }
+            return new SessionWorkspaceContextResponse(
+                    context.appId(),
+                    context.appName(),
+                    context.applicationWorkspaceId(),
+                    context.workspaceName(),
+                    context.versionId(),
+                    context.version());
+        }
+    }
+
+    /**
      * 会话响应 DTO。
      */
     record SessionResponse(
@@ -240,7 +270,8 @@ final class RuntimeDtos {
             String status,
             boolean pinned,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            SessionWorkspaceContextResponse workspaceContext) {
 
         /**
          * 从领域会话映射为 API 响应。
@@ -253,7 +284,24 @@ final class RuntimeDtos {
                     session.status().name(),
                     session.pinned(),
                     session.createdAt(),
-                    session.updatedAt());
+                    session.updatedAt(),
+                    null);
+        }
+
+        /**
+         * 从历史会话列表项映射为 API 响应，附带应用/工作空间/版本上下文。
+         */
+        static SessionResponse from(SessionHistoryItem item) {
+            Session session = item.session();
+            return new SessionResponse(
+                    session.sessionId().value(),
+                    session.workspaceId().value(),
+                    session.title(),
+                    session.status().name(),
+                    session.pinned(),
+                    session.createdAt(),
+                    session.updatedAt(),
+                    SessionWorkspaceContextResponse.from(item.workspaceContext()));
         }
     }
 
@@ -705,6 +753,13 @@ final class RuntimeDtos {
      * 映射会话分页响应。
      */
     static PageResponse<SessionResponse> sessionPage(PageResponse<Session> page) {
+        return new PageResponse<>(page.items().stream().map(SessionResponse::from).toList(), page.page(), page.size(), page.total());
+    }
+
+    /**
+     * 映射用户历史会话分页响应。
+     */
+    static PageResponse<SessionResponse> sessionHistoryPage(PageResponse<SessionHistoryItem> page) {
         return new PageResponse<>(page.items().stream().map(SessionResponse::from).toList(), page.page(), page.size(), page.total());
     }
 

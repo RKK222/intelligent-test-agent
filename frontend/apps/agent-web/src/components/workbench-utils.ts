@@ -498,25 +498,19 @@ function displayValue(value: unknown): string | undefined {
 }
 
 export function historyItems(run: Run | null, sessions: Session[]) {
-  return [
-    ...sessions.map((item) => ({
-      id: item.sessionId,
-      title: item.title,
-      preview: `${item.agent ?? "agent"} ${item.model?.id ?? ""}`.trim() || "Session",
-      status: item.status,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-      pinned: item.pinned
-    })),
-    {
-      id: run?.runId ?? "local",
-      title: run ? `Run ${run.runId}` : "本地会话",
-      preview: run ? `状态 ${run.status}` : "等待发起智能体任务",
-      status: run?.status ?? "IDLE",
-      createdAt: run?.createdAt,
-      updatedAt: run?.updatedAt ?? new Date().toISOString()
-    }
-  ];
+  void run;
+  return sessions.map((item) => ({
+    id: item.sessionId,
+    title: item.title,
+    preview: `${item.agent ?? "agent"} ${item.model?.id ?? ""}`.trim() || "Session",
+    status: item.status,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    pinned: item.pinned,
+    appName: item.workspaceContext?.appName ?? undefined,
+    workspaceName: item.workspaceContext?.workspaceName ?? undefined,
+    version: item.workspaceContext?.version ?? undefined
+  }));
 }
 
 export function dedupeSessionMessages(messages: SessionMessage[]): SessionMessage[] {

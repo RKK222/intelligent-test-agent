@@ -4801,3 +4801,16 @@ bash /tmp/test-api-after-restart.sh
   修改 `frontend/packages/agent-chat/src/opencode-like/styles/tools.css` 和 `parts.css` 对应的触发器及卡片样式。修正对应的单元测试匹配文本。未涉及任何后端 API、事件、数据库或环境变量改动。
 - Result:
   前端全量 typecheck 和打包无报错，前端 40 个测试文件共 420 个 Vitest 单元测试用例全部 100% 成功绿过！
+
+### 2026-07-08 - 历史对话改为当前用户级分页列表
+
+- Why:
+  - 历史对话抽屉需要展示当前登录用户的全部 ACTIVE 会话，而不是当前工作空间会话；点击历史会话时还要能恢复所属应用、工作空间和版本上下文，若用户已无权限或上下文缺失则只读打开。
+- What:
+  - 新增 `SessionHistoryRepository` 及 MyBatis 查询链路，按 `sessions.created_by_user_id`、`runs.triggered_by_user_id`、`session_messages.sender_user_id` 归因当前用户，按 `updated_at desc` 分页返回，并补充应用、工作空间模板、版本上下文。
+  - 前端历史抽屉改为受控搜索和分页加载，每页 30 条，卡片展示应用/工作空间/版本；点击历史会话先校验并切换所属上下文，失败时保留当前上下文并以只读原因禁用输入和发送。
+  - 增加用户历史列表相关索引 migration，并同步 API、数据库和模块 README。
+- How:
+  - 后端列表接口不校验应用成员资格，避免用户被移出应用后看不到自己的历史；发送前仍通过切换/校验结果控制只读。E2E 鉴权辅助改为写入 `sessionStorage`，与 `authStore` 的读取位置保持一致。
+- Result:
+  - 历史会话相关后端定向 reactor 测试、前端 typecheck、Vitest 目标集和 Playwright 历史点击成功/失败路径均通过。计划中的后端 full reactor 命令 `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-persistence -am test` 当前会被未改动模块 `test-agent-workspace-management` 的既有 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 阻断，原因是测试期望目录删除抛错而当前实现允许递归删除目录，本次未修改该无关行为。
