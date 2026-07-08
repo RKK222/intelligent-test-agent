@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 补齐企业部署 Java 内部代理 API key
+
+- Why:
+  - 今日实际运行 `.env` 已增加 Java 内部模型代理鉴权变量 `TEST_AGENT_INTERNAL_PROXY_API_KEY`，但企业内 `backend.env` 模板和部署说明未同步，目标环境按模板部署会缺少该 key。
+- What:
+  - 在 `deploy/internal/backend.env.example` 增加 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 占位符；部署 README 和企业离线部署 skill 明确该 key 只配置在 Java 的 `backend.env`，不要放到 worker 的 `docker.env`。
+- How:
+  - 复用现有内部模型代理链路：Java 校验该 key，并在启动用户 opencode server 时通过 manager command 注入给子进程；不修改真实 `.env.local`、`.env.test` 或 `/data/testagent/config/*.env`。
+- Result:
+  - `set -a; . deploy/internal/backend.env.example`、`set -a; . deploy/internal/env.example` 和 `git diff --check` 通过。
+
 ### 2026-07-08 - 移除企业内 worker 的 host-gateway 依赖
 
 - Why:

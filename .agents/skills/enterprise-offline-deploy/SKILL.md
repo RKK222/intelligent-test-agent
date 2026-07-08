@@ -107,6 +107,7 @@ TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://<前端入口>
 TEST_AGENT_API_TOKEN=
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-token>
+TEST_AGENT_INTERNAL_PROXY_API_KEY=<random-internal-proxy-api-key>
 
 TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
@@ -132,6 +133,7 @@ TEST_AGENT_BACKEND=<后端服务器IP或域名>:8080
 ```
 
 端口池必须是宿主机可访问端口，Docker 映射保持 `4096-4105:4096-4105` 这种内外一致形式，不要做 `14096:4096`。
+`TEST_AGENT_INTERNAL_PROXY_API_KEY` 是 Java 内部模型代理鉴权 key，只配置在 `backend.env`，不要放到 `docker.env`；Java 会在启动用户 opencode server 时通过 manager command 注入给子进程。
 
 ## 标准部署顺序
 
