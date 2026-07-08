@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 修复历史对话遮挡下拉菜单
+
+- Why:
+  - 当展示“历史对话”或其它工作区抽屉遮罩时，其 z-index (40) 加上 history-drawer (100) 逃逸了普通的堆叠上下文，导致覆盖在 header (z-index: 30) 的上方。当用户尝试点击 header 处的应用选择下拉框（“F-COSS ^”）时，下拉菜单被历史对话等抽屉遮挡，用户无法看见或进行点击操作。
+- What:
+  - 将 `FigmaShell.vue` 中的顶部 header `.figma-header` 的 `z-index` 从 `30` 提升至 `50`，使其高过 `.figma-chat-drawer-mask` (z-index 40)。同时它仍低于确认框背景 (`.ta-confirm-backdrop` z-index 100) 以及轻量启动弹窗背景 (`z-index: 80`/`100`) 等全局 modal backdrop，确保 modal 依旧能够全局遮罩 header。
+- How:
+  - 修改 `FigmaShell.vue` 样式表中的 `.figma-header` 类，将 `z-index` 调整为 `50`。
+- Result:
+  - 静态类型检查 `vue-tsc` 与全量前端 Vitest 单元测试 (427 Passed) 顺利执行通过，确认无任何 UI 逻辑或构建异常。
+
 ### 2026-07-08 - 优化编辑器底部状态栏与保存按钮
 
 - Why:

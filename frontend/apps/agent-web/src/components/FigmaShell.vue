@@ -1149,7 +1149,7 @@ function submitJoinApp() {
   background: #fff;
   padding: 0 10px;
   flex-shrink: 0;
-  z-index: 30;
+  z-index: 50;
   position: relative;
 }
 
