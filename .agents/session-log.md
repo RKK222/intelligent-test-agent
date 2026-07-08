@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 新增企业内离线部署问答技能
+
+- Why:
+  - 后续部署问答需要固定以“Mac 联网打包、企业内完全离线部署”为前提，并且每次都要说明打包后怎么操作、全流程顺序和需要修改哪些配置文件，避免只给零散命令或沿用本地 `.env`。
+- What:
+  - 新增 `.agents/skills/enterprise-offline-deploy/SKILL.md`，触发企业内、离线、Mac 打包、`package-release.sh`、`backend.env`、`docker.env`、opencode worker/manager 等问题时，要求完整输出 Mac 打包、产物分发、配置文件、Java/worker 启动顺序、验证命令和常见 manager 端口/连接排查点。
+- How:
+  - 复用现有 `deploy/internal` 纯 Docker worker 部署方案，不改脚本、不改真实环境配置、不新增生产变量；强调 `SYS_DATA_ROOT_DIR=/data/testagent/data` 与 worker `TEST_AGENT_DATA_ROOT=/data/testagent/data` 必须一致。
+- Result:
+  - 仅新增项目 skill 和本会话日志，未改业务代码、API、数据库或部署脚本。
+
 ### 2026-07-08 - 调整子智能体卡片视觉密度
 
 - Why:
@@ -4717,4 +4728,3 @@ bash /tmp/test-api-after-restart.sh
   修改 `frontend/packages/agent-chat/src/opencode-like/styles/tools.css` 和 `parts.css` 对应的触发器及卡片样式。修正对应的单元测试匹配文本。未涉及任何后端 API、事件、数据库或环境变量改动。
 - Result:
   前端全量 typecheck 和打包无报错，前端 40 个测试文件共 420 个 Vitest 单元测试用例全部 100% 成功绿过！
-
