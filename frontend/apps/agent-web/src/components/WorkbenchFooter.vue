@@ -599,8 +599,6 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
             复制路径
           </button>
         </span>
-        <span class="ta-workbench-footer-separator">|</span>
-        <span class="ta-workbench-footer-updated">更新时间：{{ updatedLabel }}</span>
       </template>
     </div>
 
