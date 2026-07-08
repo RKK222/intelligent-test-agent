@@ -34,6 +34,18 @@
   - 复用现有用户、角色和 ROLE 字典领域仓储，不新增数据库表或审批通知模型；角色替换在业务服务事务内先删除旧角色再写入新角色。Controller 继续只做鉴权与 DTO 转换。
 - Result:
   - 已补后端 service/controller、backend-api 和 agent-web 页面测试，并同步 HTTP API、模块/包 README 与架构速查文档；审批通知流未实现，后续若需要应单独设计审批申请表、超管待办和状态流转。
+### 2026-07-08 - 在前端通用组件库中实现 Spinner 组件
+
+- Why:
+  - 为了给 Vue 前端提供加载动画反馈，需要复刻 `@opencode-ai/ui/spinner` 对应的 4x4 呼吸点阵加载动画。
+- What:
+  - 在 `@test-agent/ui-kit` 通用 UI 包中新建 [Spinner.vue](file:///Users/huang/workspace/intelligent-test-agent-gitee/frontend/packages/ui-kit/src/Spinner.vue) 组件。
+  - 在 [index.ts](file:///Users/huang/workspace/intelligent-test-agent-gitee/frontend/packages/ui-kit/src/index.ts) 中导出 `Spinner` 组件。
+  - 在 `@test-agent/ui-kit` 的 [README.md](file:///Users/huang/workspace/intelligent-test-agent-gitee/frontend/packages/ui-kit/README.md) 中登记新增的 `Spinner` 基础组件。
+- How:
+  - 移植 Solid.js 原版 Spinner 逻辑，使用 Vue 3 模板重新实现 16 点阵 SVG rect 网格，并绑定随机动画延时；在组件内部定义 `@keyframes pulse-opacity` 和 `pulse-opacity-dim` 呼吸动效。
+- Result:
+  - 执行 `corepack pnpm install` 及全包的 `typecheck` 成功，13 个前端工程全部编译通过。
 
 ### 2026-07-08 - 调整测试设计 opencode agent/skill 路径规则
 
