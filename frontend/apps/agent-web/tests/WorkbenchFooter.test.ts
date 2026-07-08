@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
 
 describe("WorkbenchFooter", () => {
@@ -146,5 +146,87 @@ describe("WorkbenchFooter", () => {
     // 双击
     await previewBtn.trigger("dblclick");
     expect(wrapper.emitted("update:markdownPreviewMode")?.at(-1)).toEqual(["split"]);
+  });
+
+  it("displays filename in path value, sets writePath as title, and copies path on copy-path click", async () => {
+    // mock window.isSecureContext and navigator.clipboard
+    Object.defineProperty(window, "isSecureContext", {
+      value: true,
+      writable: true,
+      configurable: true
+    });
+    const mockWriteText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: mockWriteText,
+      },
+      writable: true,
+      configurable: true
+    });
+
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        writePath: "src/components/WorkbenchFooter.vue"
+      }
+    });
+
+    // 应该显示文件名
+    const pathVal = wrapper.find(".ta-workbench-footer-path-value");
+    expect(pathVal.text()).toBe("WorkbenchFooter.vue");
+    expect(pathVal.attributes("title")).toBe("src/components/WorkbenchFooter.vue");
+
+    // 点击复制路径按钮
+    const copyBtn = wrapper.find(".ta-workbench-footer-copy-path");
+    expect(copyBtn.exists()).toBe(true);
+    await copyBtn.trigger("click");
+    expect(mockWriteText).toHaveBeenCalledWith("src/components/WorkbenchFooter.vue");
+  });
+
+  it("renders locate button when writePath is defined, and emits locate on click", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        writePath: "src/components/WorkbenchFooter.vue"
+      }
+    });
+
+    const locateBtn = wrapper.find(".ta-workbench-footer-locate");
+    expect(locateBtn.exists()).toBe(true);
+
+    await locateBtn.trigger("click");
+    expect(wrapper.emitted("locate")).toEqual([["src/components/WorkbenchFooter.vue"]]);
+  });
+
+  it("renders save button only when dirty or saving is true", async () => {
+    // Case 1: not dirty, not saving
+    const wrapper1 = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        dirty: false,
+        saving: false
+      }
+    });
+    expect(wrapper1.find(".ta-workbench-footer-save").exists()).toBe(false);
+
+    // Case 2: dirty = true
+    const wrapper2 = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        dirty: true,
+        saving: false
+      }
+    });
+    expect(wrapper2.find(".ta-workbench-footer-save").exists()).toBe(true);
+
+    // Case 3: saving = true
+    const wrapper3 = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        dirty: false,
+        saving: true
+      }
+    });
+    expect(wrapper3.find(".ta-workbench-footer-save").exists()).toBe(true);
   });
 });

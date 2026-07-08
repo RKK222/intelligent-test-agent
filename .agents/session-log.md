@@ -2,6 +2,21 @@
 
 ## Entries
 
+### 2026-07-08 - 优化编辑器底部状态栏与保存按钮
+
+- Why:
+  - 1. 编辑器底部路径展示过长，占用太多空间，需隐藏完整路径只展示文件名并支持复制。
+  - 2. 需要快速在文件树中定位当前文件的入口（瞄准器按钮）。
+  - 3. 保存按钮在常态无修改下应默认隐藏以保持界面整洁。
+- What:
+  - 1. 修改 `WorkbenchFooter.vue`，展示文件名并带 hover 完整路径提示，同时添加蓝色字体的“复制路径”链接按钮，支持复制到剪贴板。
+  - 2. 在保存按钮左侧集成瞄准器（`Target`）按钮，向外 emit `locate` 事件；并在 `FigmaEditorArea.vue` 和 `AgentWorkbench.vue` 中处理和转发为 `locateFile`。
+  - 3. 限制保存按钮只在 `dirty || saving` 时通过 `v-if` 展现。
+- How:
+  - 在前端组件层以 Vue computed 提取文件名并调用 Clipboard API。通过组件自定义事件把定位行为转发至工作台的主定位方法。
+- Result:
+  - 修改 `WorkbenchFooter.test.ts` 补充了上述三项功能的单元测试，全数通过。前端通过了 `typecheck` 和 `lint`。
+
 ### 2026-07-08 - 补齐企业部署 Java 内部代理 API key
 
 - Why:

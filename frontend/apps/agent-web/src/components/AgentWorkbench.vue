@@ -3863,6 +3863,7 @@ async function handleLogout() {
             :show-server-workspace-switch="isSuperAdmin"
             show-save
             @save="() => diffViewerRef?.handleSave()"
+            @locate="handleLocateFile"
             @select-version="handleSelectVersion"
             @load-versions="handleLoadVersions"
             @create-version="handleCreateVersion"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { ArrowLeftRight, Eye, EyeOff, Plus, Save, ServerCog } from "lucide-vue-next";
-import { ElDatePicker, ElDialog, ElTooltip } from "element-plus";
+import { ArrowLeftRight, Eye, EyeOff, Plus, Save, ServerCog, Target } from "lucide-vue-next";
+import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
 
@@ -54,6 +54,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "save"): void;
+  (e: "locate", path: string): void;
   (e: "update:markdownPreviewMode", mode: PreviewMode): void;
   // 选择某工作空间下的某个版本：父组件负责切换运行态 Workspace。
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
@@ -82,6 +83,49 @@ const updatedLabel = computed(() => {
   if (days < 30) return `${days}d ago`;
   return new Date(value).toLocaleDateString("zh-CN");
 });
+
+const displayFilename = computed(() => {
+  if (!props.writePath) return "—";
+  return props.writePath.split("/").pop() || props.writePath;
+});
+
+function copyPath() {
+  if (!props.writePath) return;
+  const textToCopy = props.writePath;
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(textToCopy)
+      .then(() => {
+        ElMessage.success("路径已复制到剪贴板");
+      })
+      .catch(() => {
+        fallbackCopyText(textToCopy);
+      });
+  } else {
+    fallbackCopyText(textToCopy);
+  }
+}
+
+function fallbackCopyText(text: string) {
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    textArea.style.top = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const successful = document.execCommand("copy");
+    document.body.removeChild(textArea);
+    if (successful) {
+      ElMessage.success("路径已复制到剪贴板");
+    } else {
+      ElMessage.error("复制路径失败，请手动复制");
+    }
+  } catch (err) {
+    ElMessage.error("复制路径失败，请手动复制");
+  }
+}
 
 const templates = computed(() => props.templates ?? []);
 
@@ -545,7 +589,15 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
       </button>
       <template v-else-if="showSave">
         <span class="ta-workbench-footer-path">
-          路径：<span class="ta-workbench-footer-path-value">{{ writePath ?? "—" }}</span>
+          路径：<span class="ta-workbench-footer-path-value" :title="writePath">{{ displayFilename }}</span>
+          <button
+            v-if="writePath"
+            type="button"
+            class="ta-workbench-footer-copy-path"
+            @click="copyPath"
+          >
+            复制路径
+          </button>
         </span>
         <span class="ta-workbench-footer-separator">|</span>
         <span class="ta-workbench-footer-updated">更新时间：{{ updatedLabel }}</span>
@@ -574,6 +626,21 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         </button>
       </ElTooltip>
       <ElTooltip
+        v-if="writePath"
+        content="定位到当前文件"
+        placement="top"
+        :show-after="0"
+      >
+        <button
+          type="button"
+          class="ta-workbench-footer-locate"
+          @click="emit('locate', writePath)"
+        >
+          <Target class="ta-workbench-footer-locate-icon" />
+        </button>
+      </ElTooltip>
+      <ElTooltip
+        v-if="dirty || saving"
         :content="readonly ? '只读文件不可保存' : saving ? '保存中…' : '保存 (Ctrl+S)'"
         placement="top"
         :show-after="0"
@@ -581,7 +648,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         <button
           type="button"
           class="ta-workbench-footer-save"
-          :disabled="!dirty || readonly || saving"
+          :disabled="readonly || saving"
           @click="emit('save')"
         >
           <Save class="ta-workbench-footer-save-icon" />
@@ -815,7 +882,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 }
 
 .ta-workbench-footer-preview,
-.ta-workbench-footer-save {
+.ta-workbench-footer-save,
+.ta-workbench-footer-locate {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -831,7 +899,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 }
 
 .ta-workbench-footer-preview:hover:not(:disabled),
-.ta-workbench-footer-save:hover:not(:disabled) {
+.ta-workbench-footer-save:hover:not(:disabled),
+.ta-workbench-footer-locate:hover:not(:disabled) {
   background: #f5f5f5;
   border-color: #b5b5b5;
   color: #111;
@@ -847,16 +916,35 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   background: #dde7ff;
 }
 
-.ta-workbench-footer-save:disabled {
+.ta-workbench-footer-save:disabled,
+.ta-workbench-footer-locate:disabled {
   background: #f4f4f5;
   border-color: #e4e4e7;
   color: #a1a1aa;
   cursor: not-allowed;
 }
 
-.ta-workbench-footer-save-icon {
+.ta-workbench-footer-save-icon,
+.ta-workbench-footer-locate-icon {
   width: 14px;
   height: 14px;
+}
+
+.ta-workbench-footer-copy-path {
+  color: #2563eb;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 8px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.ta-workbench-footer-copy-path:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
 }
 
 /* ===== 两级菜单样式 ===== */

@@ -233,6 +233,7 @@ watch(
       :markdown-preview-mode="markdownPreviewMode"
       show-save
       @save="emit('save')"
+      @locate="(path) => emit('locateFile', path)"
       @update:markdown-preview-mode="(mode) => emit('update:markdownPreviewMode', mode)"
       @select-version="(payload) => emit('select-version', payload)"
       @load-versions="(templateId) => emit('load-versions', templateId)"
