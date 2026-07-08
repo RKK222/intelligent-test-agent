@@ -223,6 +223,14 @@ const ElCheckboxStub = defineComponent({
   }
 });
 
+function getTreePathElement(container: ParentNode, path: string) {
+  return Array.from(container.querySelectorAll(".ta-workspace-tree-path")).find((item) => item.textContent === path) as HTMLElement | undefined;
+}
+
+function getTreePathButton(container: ParentNode, path: string) {
+  return getTreePathElement(container, path)!.closest("button") as HTMLButtonElement;
+}
+
 function renderPanel(api = createApi()) {
   return render(SettingsAppWorkspacePanel, {
     props: {
@@ -357,26 +365,33 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(invalidOption.title).toBe(branchRuleTooltip);
   });
 
-  it("shows only the current app subtree and selects only app direct-child directories", async () => {
+  it("shows only the current app subtree and expands nodes before selecting direct-child directories", async () => {
     const api = createApi();
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
     api.getRepositoryTree = vi.fn().mockResolvedValue(repositoryTree);
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("12345678-1234-1234-1234-123456789abc");
-    const { findByText, getByText, queryByText } = renderPanel(api);
+    const { container, findByText, getByText, queryByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
 
-    expect(await findByText("F-COSS")).toBeTruthy();
+    await findByText("F-COSS");
+    const appRoot = getTreePathElement(container, "F-COSS")!;
+    expect(appRoot).toBeTruthy();
+    expect(queryByText("F-COSS/W1")).toBeNull();
+    expect(queryByText("F-COSS/W1/F1")).toBeNull();
+    expect(queryByText("OTHER-APP")).toBeNull();
+    await fireEvent.click(getTreePathButton(container, "F-COSS"));
     expect(await findByText("F-COSS/W1")).toBeTruthy();
+    expect((getByText("F-COSS/W1").closest("button") as HTMLButtonElement).disabled).toBe(false);
+    expect(queryByText("F-COSS/W1/F1")).toBeNull();
+    await fireEvent.click(getTreePathButton(container, "F-COSS/W1"));
     expect(await findByText("F-COSS/W1/F1")).toBeTruthy();
     expect(await findByText("F-COSS/W1/case.md")).toBeTruthy();
-    expect(queryByText("OTHER-APP")).toBeNull();
-    expect((getByText("F-COSS/W1").closest("button") as HTMLButtonElement).disabled).toBe(false);
     expect((getByText("F-COSS/W1/F1").closest("button") as HTMLButtonElement).disabled).toBe(true);
     expect((getByText("F-COSS/W1/case.md").closest("button") as HTMLButtonElement).disabled).toBe(true);
 
-    await fireEvent.click(getByText("F-COSS/W1"));
+    await fireEvent.click(getTreePathButton(container, "F-COSS/W1"));
     await fireEvent.click(getByText("保存"));
 
     await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", {
@@ -394,12 +409,13 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
     api.getRepositoryTree = vi.fn().mockResolvedValue({ nodes: [repositoryTree.nodes[0]] });
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("32345678-1234-1234-1234-123456789abc");
-    const { findAllByText, findByText, getByPlaceholderText, getByText } = renderPanel(api);
+    const { container, findAllByText, findByText, getByPlaceholderText, getByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
 
     await findByText("F-COSS");
+    await fireEvent.click(getTreePathButton(container, "F-COSS"));
     await fireEvent.update(getByPlaceholderText("新增一级目录"), "W3");
     await fireEvent.click(getByText("新增目录"));
     expect((await findAllByText("F-COSS/W3")).length).toBeGreaterThan(0);
@@ -515,7 +531,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await waitFor(() => expect(api.unlinkApplicationRepository).toHaveBeenCalledWith("F-COSS", "repo_wr"));
   });
 
-  it("confirms before deleting a workspace", async () => {
+  it("shows existing workspaces as read-only items without rename or delete operations", async () => {
     const api = createApi();
     api.listApplicationWorkspaces = vi.fn().mockResolvedValue([
       {
@@ -526,22 +542,15 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
         repositoryId: "repo_wr"
       }
     ]);
-    const { findByText, getByText, queryByText, getAllByText } = renderPanel(api);
+    const { findByText, getByText, queryByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
     expect(await findByText("测试工作空间")).toBeTruthy();
 
-    await fireEvent.click(getByText("删除"));
-    expect(await findByText("确认删除工作空间")).toBeTruthy();
-    expect(getByText("确认删除工作空间[测试工作空间]吗？删除后数据将无法恢复。")).toBeTruthy();
+    expect(queryByText("重命名")).toBeNull();
+    expect(queryByText("删除")).toBeNull();
     expect(api.deleteApplicationWorkspace).not.toHaveBeenCalled();
-
-    await fireEvent.click(getByText("取消"));
-    expect(queryByText("确认删除工作空间[测试工作空间]吗？删除后数据将无法恢复。")).toBeNull();
-
-    await fireEvent.click(getAllByText("删除").find(el => el.tagName === "BUTTON")!);
-    await fireEvent.click(getByText("确认删除"));
-    await waitFor(() => expect(api.deleteApplicationWorkspace).toHaveBeenCalledWith("F-COSS", "ws_test"));
+    expect(queryByText("确认删除工作空间")).toBeNull();
   });
 });

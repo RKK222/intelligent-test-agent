@@ -29,8 +29,7 @@ const DEFAULT_REPOSITORY_TYPES: RepositoryTypeOption[] = [
 
 type PendingDangerAction =
   | { type: "remove-member"; member: ApplicationMember }
-  | { type: "unlink-repository"; repository: CodeRepositoryConfig }
-  | { type: "delete-workspace"; workspace: ApplicationWorkspaceConfig };
+  | { type: "unlink-repository"; repository: CodeRepositoryConfig };
 
 type WorkspaceTreeNode = Omit<RepositoryTreeNode, "children"> & {
   children: WorkspaceTreeNode[];
@@ -45,12 +44,30 @@ const WorkspaceDirectoryTree = defineComponent({
   },
   emits: ["select"],
   setup(props, { emit }) {
+    const expandedPaths = ref(new Set<string>());
+    watch(
+      () => props.nodes,
+      () => {
+        expandedPaths.value = new Set<string>();
+      }
+    );
+    const toggleExpanded = (path: string) => {
+      const next = new Set(expandedPaths.value);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      expandedPaths.value = next;
+    };
     const renderNodes = (nodes: WorkspaceTreeNode[], depth = 0): VNode =>
       h(
         "ul",
         { class: "ta-workspace-tree-list", "data-depth": String(depth) },
         nodes.map((node) => {
           const selectable = isSelectableWorkspaceTreeNode(node);
+          const expandable = node.type === "directory" && node.children.length > 0;
+          const expanded = expandedPaths.value.has(node.path);
           return h("li", { key: node.path, class: ["ta-workspace-tree-item", `is-${node.type}`] }, [
             h(
               "button",
@@ -61,17 +78,22 @@ const WorkspaceDirectoryTree = defineComponent({
                   { "is-selected": props.selectedPath === node.path, "is-selectable": selectable }
                 ],
                 style: { paddingLeft: `${8 + depth * 16}px` },
-                disabled: !selectable,
+                disabled: !selectable && !expandable,
                 title: workspaceTreeNodeTitle(node),
-                onClick: () => selectable && emit("select", node)
+                "aria-expanded": expandable ? String(expanded) : undefined,
+                onClick: () => {
+                  // 目录树可能很大：默认只渲染展开分支，点击目录时再展开/收起并复用同一次点击完成选择。
+                  if (expandable) toggleExpanded(node.path);
+                  if (selectable) emit("select", node);
+                }
               },
               [
-                h("span", { class: "ta-workspace-tree-icon", "aria-hidden": "true" }, node.type === "directory" ? "▸" : "·"),
+                h("span", { class: "ta-workspace-tree-icon", "aria-hidden": "true" }, expandable ? (expanded ? "▾" : "▸") : "·"),
                 h("span", { class: "ta-workspace-tree-path" }, node.path),
                 node.directoryNew ? h("span", { class: "ta-workspace-tree-badge" }, "新增") : null
               ]
             ),
-            node.children.length ? renderNodes(node.children, depth + 1) : null
+            expanded ? renderNodes(node.children, depth + 1) : null
           ]);
         })
       );
@@ -106,7 +128,6 @@ const selectedApp = computed(() => applications.value.find((item) => item.appId 
 const pendingDangerTitle = computed(() => {
   if (!pendingDangerAction.value) return "";
   if (pendingDangerAction.value.type === "remove-member") return "确认移除成员";
-  if (pendingDangerAction.value.type === "delete-workspace") return "确认删除工作空间";
   return "确认解除关联";
 });
 const pendingDangerMessage = computed(() => {
@@ -115,15 +136,11 @@ const pendingDangerMessage = computed(() => {
   if (action.type === "remove-member") {
     return `确认移除成员[${action.member.username}]吗？`;
   }
-  if (action.type === "delete-workspace") {
-    return `确认删除工作空间[${action.workspace.workspaceName}]吗？删除后数据将无法恢复。`;
-  }
   return `确认解除版本库[${action.repository.name}]与当前应用的关联吗？`;
 });
 const pendingDangerConfirmText = computed(() => {
   if (!pendingDangerAction.value) return "确认";
   if (pendingDangerAction.value.type === "remove-member") return "确认移除";
-  if (pendingDangerAction.value.type === "delete-workspace") return "确认删除";
   return "确认解除";
 });
 
@@ -399,13 +416,6 @@ async function confirmDangerAction() {
     });
     return;
   }
-  if (action.type === "delete-workspace") {
-    await run(async () => {
-      await api.deleteApplicationWorkspace(selectedAppId.value, action.workspace.workspaceId);
-      await loadWorkspaces();
-    });
-    return;
-  }
   await run(async () => {
     await api.unlinkApplicationRepository(selectedAppId.value, action.repository.repositoryId);
     await loadRepositories();
@@ -640,23 +650,6 @@ async function refreshWorkspaceCreateOperation(operationId: string) {
   } catch {
     // 创建请求刚发出时后端可能尚未写入 operation，下一轮轮询继续读取。
   }
-}
-
-async function renameWorkspace(workspace: ApplicationWorkspaceConfig) {
-  const nextName = window.prompt("工作空间名称", workspace.workspaceName);
-  if (!nextName || !nextName.trim()) return;
-  await run(async () => {
-    await api.renameApplicationWorkspace(selectedAppId.value, workspace.workspaceId, { workspaceName: nextName.trim() });
-    await loadWorkspaces();
-  });
-}
-
-/**
- * 删除工作空间：先弹出页面内二次确认框，用户确认后再执行删除。
- * 使用 pendingDangerAction 模式，与移除成员、解除关联版本库保持一致。
- */
-function confirmDeleteWorkspace(workspace: ApplicationWorkspaceConfig) {
-  pendingDangerAction.value = { type: "delete-workspace", workspace };
 }
 
 // 初始加载
@@ -964,12 +957,6 @@ onBeforeUnmount(() => {
             <div>
               <div class="ta-item-title">{{ ws.workspaceName }}</div>
               <div class="ta-item-subtitle">{{ ws.branch }} · {{ ws.directoryPath }}</div>
-            </div>
-            <div class="ta-item-actions">
-              <el-button size="small" :disabled="loading" @click="renameWorkspace(ws)">重命名</el-button>
-              <el-button size="small" type="danger" plain :disabled="loading" @click="confirmDeleteWorkspace(ws)">
-                删除
-              </el-button>
             </div>
           </div>
         </div>

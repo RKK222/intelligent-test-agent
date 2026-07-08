@@ -21,6 +21,18 @@
 - Result:
   - `apps/agent-web/tests/workbench-utils.test.ts` 全量通过，新增 snapshot 聚焦回归通过，`vue-tsc -p apps/agent-web/tsconfig.json` 和 `git diff --check` 通过；计划要求的完整 `FigmaChatPanel.test.ts` 仍有既有 composer 拖拽高度断言失败（期望 100px、实际 40px），完整 `opencode-timeline.test.ts` 仍有既有 diff 路径展示断言失败（测试期望 `src/...`，当前 UI 显示 basename 并把完整路径放在 `title`）。
 
+### 2026-07-08 - 收紧工作空间管理已有项操作与目录树渲染
+
+- Why:
+  - 设置页“已有工作空间”属于已落库模板，不应在同级继续提供重命名或删除入口；创建工作空间目录树一次性渲染深层节点会在大目录下增加页面压力。
+- What:
+  - `SettingsAppWorkspacePanel.vue` 移除已有工作空间的重命名/删除入口和对应前端调用分支；工作空间目录树改为默认折叠，点击目录再展开并只渲染展开分支，仍保留可选一级目录点击选择。
+  - 同步更新 `frontend/apps/agent-web/README.md`，补充目录树折叠渲染和已有工作空间只读展示说明。
+- How:
+  - 复用现有设置页组件和测试文件，不新增 API、不修改后端、数据库或事件契约；新增/调整 Vitest 覆盖折叠展开、一级目录选择、新增目录和已有工作空间只读行为。
+- Result:
+  - 通过：`corepack pnpm --dir frontend test apps/agent-web/tests/settings-app-workspace-panel.test.ts`、`corepack pnpm --dir frontend --filter @test-agent/agent-web typecheck`、`git diff --check`；使用 `.env.test` 重启三服务成功，后端 health/readiness 为 `UP`，前端 `http://127.0.0.1:3000` 返回 200，登录 CORS preflight 正常。
+
 ### 2026-07-08 - 接入企业内部模型代理与 opencode 原生模型目录
 
 - Why:
