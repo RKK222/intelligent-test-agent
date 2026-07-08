@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 移除企业内 worker 的 host-gateway 依赖
+
+- Why:
+  - 现场执行 `opencode-worker-docker.sh restart` 时 Docker 不支持 `--add-host host.docker.internal:host-gateway`，报 `invalid IP address in add-host: "host-gateway"`；企业内 worker 实际不依赖该别名。
+- What:
+  - 从纯 Docker worker 启动脚本删除 `host.docker.internal` / `host-gateway` 注入；补充脚本校验用例，确保后续不再要求该映射；部署 README 明确 worker 使用默认 bridge 网络即可，manager 通过 `.serverhost` 访问 Java。
+- How:
+  - 保持纯 Docker 管理方式、端口池一致映射和 `/data/testagent/data` 挂载不变；不修改 `/data/testagent/config/docker.env` 或 `.env.local` 等真实环境文件。
+- Result:
+  - `tools/verify-dev-scripts.sh`、`git diff --check` 和 `deploy/internal/opencode-worker-docker.sh --env-file deploy/internal/env.example status` 通过；未真实执行 `restart`，避免删除当前机器可能存在的 worker 容器。
+
 ### 2026-07-08 - 用户管理测试页支持超管直接调整角色
 
 - Why:

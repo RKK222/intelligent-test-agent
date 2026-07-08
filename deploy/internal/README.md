@@ -310,6 +310,8 @@ cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
 
+纯 Docker worker 使用默认 bridge 网络即可，脚本不会注入 `host.docker.internal` 或 `host-gateway` 映射；manager 连接 Java 时读取 `/data/testagent/data/.serverhost`，因此该文件必须是容器内可访问的后端服务器 IP 或域名。
+
 验证：
 
 ```bash
@@ -667,6 +669,8 @@ cp deploy/internal/env.example /data/testagent/config/docker.env
 cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
+
+脚本不依赖 Docker 20.10 的 `host-gateway` 特性，也不会要求额外创建自定义 Docker network。只要容器能访问 `.serverhost` 中记录的 Java 后端地址，并且宿主机发布端口池 `4096-4105` 可访问即可。
 
 检查：
 
