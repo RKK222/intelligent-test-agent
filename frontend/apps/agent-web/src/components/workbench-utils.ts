@@ -14,6 +14,7 @@ import type {
   RuntimeToolInfo,
   Session,
   SessionMessage,
+  SessionRuntimeState,
   SessionTreeMessagesResponse,
   SubagentSession,
   UserOpencodeProcess,
@@ -497,20 +498,29 @@ function displayValue(value: unknown): string | undefined {
   return undefined;
 }
 
-export function historyItems(run: Run | null, sessions: Session[]) {
+export function historyItems(run: Run | null, sessions: Session[], runtimeStatesBySessionId: Record<string, SessionRuntimeState> = {}) {
   void run;
-  return sessions.map((item) => ({
-    id: item.sessionId,
-    title: item.title,
-    preview: `${item.agent ?? "agent"} ${item.model?.id ?? ""}`.trim() || "Session",
-    status: item.status,
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt,
-    pinned: item.pinned,
-    appName: item.workspaceContext?.appName ?? undefined,
-    workspaceName: item.workspaceContext?.workspaceName ?? undefined,
-    version: item.workspaceContext?.version ?? undefined
-  }));
+  return sessions.map((item) => {
+    const runtimeState = runtimeStatesBySessionId[item.sessionId];
+    return {
+      id: item.sessionId,
+      title: item.title,
+      preview: `${item.agent ?? "agent"} ${item.model?.id ?? ""}`.trim() || "Session",
+      status: item.status,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      pinned: item.pinned,
+      appName: item.workspaceContext?.appName ?? undefined,
+      workspaceName: item.workspaceContext?.workspaceName ?? undefined,
+      version: item.workspaceContext?.version ?? undefined,
+      runtimeState: (runtimeState ? "running" : "completed") as "running" | "completed",
+      runId: runtimeState?.runId,
+      runStatus: runtimeState?.runStatus,
+      pendingQuestion: runtimeState?.attention === "QUESTION",
+      attentionEventId: runtimeState?.attentionEventId ?? undefined,
+      attentionAt: runtimeState?.attentionAt ?? undefined
+    };
+  });
 }
 
 export function dedupeSessionMessages(messages: SessionMessage[]): SessionMessage[] {
