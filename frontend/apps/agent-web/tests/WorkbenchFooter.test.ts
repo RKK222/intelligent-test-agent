@@ -148,7 +148,7 @@ describe("WorkbenchFooter", () => {
     expect(wrapper.emitted("update:markdownPreviewMode")?.at(-1)).toEqual(["split"]);
   });
 
-  it("displays filename in path value, sets writePath as title, and copies path on copy-path click", async () => {
+  it("copies path and sets title on copy-path click", async () => {
     // mock window.isSecureContext and navigator.clipboard
     Object.defineProperty(window, "isSecureContext", {
       value: true,
@@ -171,14 +171,10 @@ describe("WorkbenchFooter", () => {
       }
     });
 
-    // 应该显示文件名
-    const pathVal = wrapper.find(".ta-workbench-footer-path-value");
-    expect(pathVal.text()).toBe("WorkbenchFooter.vue");
-    expect(pathVal.attributes("title")).toBe("src/components/WorkbenchFooter.vue");
-
-    // 点击复制路径按钮
+    // 点击复制路径按钮，此时按钮上应有完整的 writePath 悬浮提示
     const copyBtn = wrapper.find(".ta-workbench-footer-copy-path");
     expect(copyBtn.exists()).toBe(true);
+    expect(copyBtn.attributes("title")).toBe("src/components/WorkbenchFooter.vue");
     await copyBtn.trigger("click");
     expect(mockWriteText).toHaveBeenCalledWith("src/components/WorkbenchFooter.vue");
   });

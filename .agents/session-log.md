@@ -9,7 +9,7 @@
   - 2. 需要快速在文件树中定位当前文件的入口（瞄准器按钮）。
   - 3. 保存按钮在常态无修改下应默认隐藏以保持界面整洁。
 - What:
-  - 1. 修改 `WorkbenchFooter.vue`，展示文件名并带 hover 完整路径提示，同时添加蓝色字体的“复制路径”链接按钮，支持复制到剪贴板。
+  - 1. 修改 `WorkbenchFooter.vue`，不显示路径与文件名以节约底部空间，但按钮上保留 hover 完整路径提示，点击“复制路径”可复制到剪贴板。
   - 2. 在保存按钮左侧集成瞄准器（`Target`）按钮，向外 emit `locate` 事件；并在 `FigmaEditorArea.vue` 和 `AgentWorkbench.vue` 中处理和转发为 `locateFile`。
   - 3. 限制保存按钮只在 `dirty || saving` 时通过 `v-if` 展现。
 - How:

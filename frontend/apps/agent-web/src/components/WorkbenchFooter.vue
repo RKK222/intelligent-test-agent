@@ -589,11 +589,11 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
       </button>
       <template v-else-if="showSave">
         <span class="ta-workbench-footer-path">
-          路径：<span class="ta-workbench-footer-path-value" :title="writePath">{{ displayFilename }}</span>
           <button
             v-if="writePath"
             type="button"
             class="ta-workbench-footer-copy-path"
+            :title="writePath"
             @click="copyPath"
           >
             复制路径
