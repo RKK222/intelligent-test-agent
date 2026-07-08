@@ -45,7 +45,7 @@ Browser
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
 | `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/删除、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、当前用户 opencode 进程强状态/弱健康/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
-| `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理（测试）查询/新增用户。 |
+| `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理查询、创建测试用户和单角色调整。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器和参数更新跨实例广播。 |
 | `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、Cron 调整、手动触发和协作式停止管理服务；具体业务任务放回所属业务模块。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
@@ -61,7 +61,7 @@ Browser
 
 | 包 | 职责 |
 |---|---|
-| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、会话级前端原始报文内存查看器、设置模态（含版本库英文名、版本库类型、工作空间创建进度和用户管理（测试）页签）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
+| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、会话级前端原始报文内存查看器、设置模态（含版本库英文名、版本库类型、工作空间创建进度和用户管理页签，用户管理支持查询、创建测试用户和超管直接调角色）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
 | `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、可选安全原始 HTTP 交换 observer、超级管理员服务器目录选择、平台文件 WebSocket route/ticket/RPC（workspace 与 Agent 配置文件）、工作区 Git diff/stage/unstage/冲突 API、用户 opencode 进程状态/初始化、运行管理 overview 与指标历史、定时任务管理、配置管理、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE client，负责按默认 `opencode` agent URL 连接、自动重连、解析前原始 `MessageEvent.data` 回调、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、工作台级 Pinia 状态，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |

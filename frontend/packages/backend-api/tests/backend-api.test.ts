@@ -51,6 +51,45 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("updates a managed user's role through system management endpoint", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            userId: "usr_target",
+            username: "alice",
+            unifiedAuthId: "AUTH_1",
+            status: "ACTIVE",
+            roles: ["USER"],
+            roleLabels: ["普通用户"],
+            createdAt: "2026-06-26T00:00:00Z"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.updateUserRole("usr_target", { role: "USER" })).resolves.toMatchObject({
+      userId: "usr_target",
+      roles: ["USER"]
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/system-management/users/usr_target/roles",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ role: "USER" })
+      })
+    );
+  });
+
   it("reports raw backend exchanges without exposing sensitive request headers", async () => {
     const responseText = JSON.stringify({
       success: true,

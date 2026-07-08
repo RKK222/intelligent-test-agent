@@ -25,9 +25,9 @@ const items = computed<MenuItem[]>(() => {
     );
   }
   menuItems.push({ key: "personal", label: "个人设置", icon: User });
-  // 用户管理（测试）仅超级管理员可见
+  // 用户管理仅超级管理员可见
   if (props.currentUser?.roles?.includes("SUPER_ADMIN")) {
-    menuItems.push({ key: "userManagement", label: "用户管理（测试）", icon: UserFilled });
+    menuItems.push({ key: "userManagement", label: "用户管理", icon: UserFilled });
   }
   return menuItems;
 });

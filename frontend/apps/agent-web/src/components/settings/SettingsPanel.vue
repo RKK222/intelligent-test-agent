@@ -22,7 +22,7 @@ const panels: Record<string, PanelDef> = {
   appWorkspace: { title: "应用管理", component: SettingsAppWorkspacePanel },
   repository: { title: "版本库管理", component: SettingsRepositoryPanel },
   personal: { title: "个人设置", component: SettingsPersonalPanel },
-  userManagement: { title: "用户管理（测试）", component: SettingsUserManagementPanel }
+  userManagement: { title: "用户管理", component: SettingsUserManagementPanel }
 };
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);

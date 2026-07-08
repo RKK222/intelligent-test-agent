@@ -1502,6 +1502,10 @@ export type CreateUserPayload = {
   department?: string | null;
 };
 
+export type UpdateUserRolePayload = {
+  role: string;
+};
+
 export type RoleOption = {
   roleCode: string;
   roleLabel: string;

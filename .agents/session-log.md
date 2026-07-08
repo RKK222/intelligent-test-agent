@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 用户管理测试页支持超管直接调整角色
+
+- Why:
+  - 设置页“用户管理（测试）”只能新增测试用户，无法直接查看并调整已有用户角色；当前仓库也没有普通用户发起审批通知的基础设施，本次范围确认先做超管直接调整角色。
+- What:
+  - 在 system-management 用户管理链路新增 `PUT /api/internal/platform/system-management/users/{userId}/roles`，由 `SUPER_ADMIN` 直接替换目标用户单个全局角色；前端用户列表增加角色下拉，顶部统一保存本页已修改角色，提交时逐条调用 `updateUserRole` 契约。
+- How:
+  - 复用现有用户、角色和 ROLE 字典领域仓储，不新增数据库表或审批通知模型；角色替换在业务服务事务内先删除旧角色再写入新角色。Controller 继续只做鉴权与 DTO 转换。
+- Result:
+  - 已补后端 service/controller、backend-api 和 agent-web 页面测试，并同步 HTTP API、模块/包 README 与架构速查文档；审批通知流未实现，后续若需要应单独设计审批申请表、超管待办和状态流转。
+
 ### 2026-07-08 - 调整测试设计 opencode agent/skill 路径规则
 
 - Why:

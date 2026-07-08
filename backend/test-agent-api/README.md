@@ -24,6 +24,7 @@
 - 后端 Java 路由统一使用 runtime 的 `BackendJavaRouteResolver` 解析当前服务器、`linuxServerId -> BackendJavaProcess` 和 `containerId -> linuxServerId`；API 层所有 Java->Java HTTP 转发统一走 `BackendHttpForwarder`，由它设置 `X-Test-Agent-Backend-Routed` 防循环并透传 Authorization、traceId、query 和 body。后续新增任何 opencode-manager 路由或 Java->manager 控制入口，都必须复用这套公共程序，不得在 Controller、WebFilter、WebSocket handler 或业务 service 中自行扫描 Redis 快照、拼接目标 Java URL、复制转发逻辑或定义新的防循环 header。
 - 暴露超级管理员运行管理 overview、容器/按稳定服务器身份的后端指标历史和有主/无主 opencode server 重启/停止 API；旧后端进程指标入口已作废。Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、traceId 处理；重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是当前 Java 或同服务器选中 Java 时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 `port ... is not managed` 后重新拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员定时任务管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
+- 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页参数、创建用户请求和单角色调整请求转换；用户创建、角色替换和 ROLE 字典校验委托 `test-agent-system-management`。
 - 暴露 AI 回复反馈 API，Controller 只读取当前登录用户、messageId、traceId 和请求体，具体 assistant role 与归属校验由 runtime 服务完成。
 - 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、通用筛选参数传递、CSV 响应头和统一错误转换；查询服务只读 rollup。
 - Session 历史恢复主入口是 agent-scoped session tree messages；内部平台 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 支持 `refresh=false` 只读数据库快照，供前端反馈 messageId 映射和只读 transcript 使用；active-run API 供前端刷新后恢复 SSE。
@@ -54,6 +55,7 @@
 - `RuntimeControllerTest` 覆盖 Workspace 查询、Session、Run、Diff、agent-scoped Run URL、当前用户 opencode 进程强状态、弱健康和初始化进度 GET、RunEvent SSE 恢复快照、Run/Session session-tree messages 和内部平台 URL。
 - `RuntimeManagementControllerTest` 覆盖运行管理 overview、按 `linuxServerId` 的后端指标历史主 API 和进程重启/停止 API 的 `SUPER_ADMIN` 成功、跨 Java 后端路由优先于本地 manager gateway、manager 下属 opencode server 明细与归属字段响应映射、命令结果响应映射、用户名筛选/响应映射、`windowMinutes` 预设窗口、`hours` 兼容、历史参数默认值与上限、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId；`RuntimeManagementBackendRoutingServiceTest` 覆盖按容器归属服务器转发命令和路由头防循环。
 - `SchedulerManagementControllerTest` 覆盖定时任务管理 API 的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝、非法状态参数、任务 patch、手动触发和运行记录查询。
+- `UserManagementControllerTest` 覆盖用户管理 API 的 `SUPER_ADMIN` 查询、创建、角色调整、角色列表和非超管/匿名拒绝。
 - `AiMessageFeedbackControllerTest` 覆盖登录用户提交/查询自己的消息反馈，以及匿名请求拒绝。
 - `AnalyticsControllerTest` 覆盖运营分析 API 的 `SUPER_ADMIN` 成功、非超级管理员/匿名拒绝和非法时间参数统一校验错误。
 - `ManagerControlWebSocketHandlerTest` 覆盖 `register`、`managerHeartbeat`、兼容 `backendListRequest` 忽略、命令结果和错误 envelope 的 WebSocket 入口适配。

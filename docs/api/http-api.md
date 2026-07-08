@@ -39,7 +39,7 @@
 | `/api/internal/platform/opencode-runtime/manager-backends` | 已作废，返回 `410 API_GONE`；运行管理请使用 `management/overview`。 |
 | `/api/internal/platform/opencode-runtime/management/overview` | 超级管理员只读运行管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/internal/platform/scheduler-management` | 超级管理员定时任务管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
-| `/api/internal/platform/system-management` | 超级管理员用户管理（测试）入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
+| `/api/internal/platform/system-management` | 超级管理员用户管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
 
 当前已落地的新平台入口：
@@ -78,6 +78,7 @@
 | `scheduler-management` | `/api/internal/platform/scheduler-management/tasks` | 无旧 URL |
 | `scheduler-management` | `/api/internal/platform/scheduler-management/runs` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/users` | 无旧 URL |
+| `system-management` | `/api/internal/platform/system-management/users/{userId}/roles` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/roles` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
@@ -1931,9 +1932,9 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和进程记录中的 `baseUrl` 作为本次运行目标；`baseUrl` 由当前 advertised host 与端口生成。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
 Run 进入成功、失败或取消终态后，后端会尝试分页拉取 agent 标准 session messages，将 assistant 可见 text、完整 parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。
 
-### system-management 用户管理（测试）API
+### system-management 用户管理 API
 
-用户管理（测试）API 是高权限平台接口，仅用于研发测试便捷造号，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。创建用户时使用默认密码 `123456`，前端不传密码字段。
+用户管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。当前创建用户能力用于研发测试便捷造号，创建时使用默认密码 `123456`，前端不传密码字段。当前不包含普通用户发起审批通知流，角色调整由超级管理员直接操作。
 
 Base URL：`/api/internal/platform/system-management`
 
@@ -1941,6 +1942,7 @@ Base URL：`/api/internal/platform/system-management`
 |---|---|---|
 | `GET` | `/users` | 分页查询用户列表，可按关键字匹配用户名/统一认证号。 |
 | `POST` | `/users` | 创建测试用户，密码默认为 `123456`，并授予单个角色。 |
+| `PUT` | `/users/{userId}/roles` | 替换指定用户的全局角色，当前测试入口只保留单个角色。 |
 | `GET` | `/roles` | 查询可选角色列表，供前端新增用户下拉选择。 |
 
 `GET /users` 查询参数：
@@ -1985,6 +1987,19 @@ Base URL：`/api/internal/platform/system-management`
 - 密码由后端注入默认值 `123456`，前端不传。
 - 用户名或统一认证号已存在时返回 `CONFLICT`。
 - 角色无效时返回 `VALIDATION_ERROR`。
+
+`PUT /users/{userId}/roles` 请求体：
+
+```json
+{
+  "role": "USER"
+}
+```
+
+- `userId` 为平台用户 ID。
+- `role` 必填，必须是 `ROLE` 字典中的有效角色 code。
+- 用户不存在时返回 `NOT_FOUND`；角色无效时返回 `VALIDATION_ERROR`。
+- 更新成功后返回更新后的用户响应字段，`roles` / `roleLabels` 反映最新角色。
 
 `GET /roles` 响应：
 

@@ -7,8 +7,11 @@ import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
 import com.icbc.testagent.system.management.user.UserManagementApplicationService;
 import com.icbc.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
+import com.icbc.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -16,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 
 /**
- * 用户管理（测试）HTTP 入口，仅做鉴权、参数转换和统一响应包装。
+ * 用户管理 HTTP 入口，仅做鉴权、参数转换和统一响应包装。
  *
  * <p>所有接口仅限 SUPER_ADMIN 访问，用于研发测试查询用户、创建测试用户（默认密码 123456）。
  */
@@ -62,6 +65,18 @@ public class UserManagementController {
                 request.department(),
                 request.role());
         return ok(exchange, service.createUser(command));
+    }
+
+    /**
+     * 调整指定用户的全局角色，当前测试入口只支持设置单个角色。
+     */
+    @PutMapping("/users/{userId}/roles")
+    public ApiResponse<Object> updateUserRole(
+            @PathVariable("userId") String userId,
+            @RequestBody UserManagementDtos.UpdateUserRoleRequest request,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ok(exchange, service.updateUserRole(new UpdateUserRoleCommand(userId, request.role())));
     }
 
     /**
