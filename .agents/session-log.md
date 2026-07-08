@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 补齐企业内部署升级和日志处理文档
+
+- Why:
+  - 上一轮只同步了本地 manager 身份目录和前端权限文档，企业内部署层面对“最新代码如何升级”“Java/worker 日志怎么看”“`.serverhost` 读旧地址怎么排查”还不够集中；`deploy/internal` 示例仍有部分 `replace-with` 占位，不符合当前交付要求。
+- What:
+  - `deploy/internal/backend.env.example` 与 `env.example` 改为当前企业内规划值，manager token 在 Java/worker 两侧保持一致；`deploy/internal/README.md` 固化 PostgreSQL `122.42.203.103:8000/testagent`、新增最新代码升级步骤和日志排障清单；`docs/deployment/backend.md` 补充身份文件、生产日志处理和旧 `.serverhost` 故障项；`docs/deployment/frontend.md` 指向企业内统一打包入口。
+- How:
+  - 不修改 `.env.local` 等本机敏感配置，不改部署脚本行为；文档保持“先启动 Java 写 `${SYS_DATA_ROOT_DIR}/.serverid/.serverhost，再重启 worker 让 manager 读取同一挂载目录”的既有设计。
+- Result:
+  - 通过 `set -a; . deploy/internal/backend.env.example`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config`、`bash -n deploy/internal/package-release.sh`、`bash -n deploy/internal/opencode-worker-entrypoint.sh`、`git diff --check`；本地三服务仍在上一轮启动的 screen 会话中运行，后端 readiness `UP`、前端 200。
+
 ### 2026-07-08 - 收紧非超管配置入口并修复本地 manager 身份目录
 
 - Why:

@@ -15,6 +15,8 @@ corepack pnpm build
 
 `apps/agent-web` 使用 Vite 生产构建，产物输出到 `apps/agent-web/dist/`：纯静态 HTML/JS/CSS，可由任意静态服务器或反向代理托管，无需 Node 运行时。
 
+企业内当前三机部署不单独手工执行本节命令，统一使用 `deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env` 生成 `test-agent-frontend-dist.tar.gz`，再按 `deploy/internal/README.md` 分发到 `122.233.30.2:/data/testagent/frontend` 并由实体 Nginx 托管。
+
 `frontend-opencode` 使用 Vite 生产构建：
 
 ```bash

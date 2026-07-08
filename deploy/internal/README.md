@@ -1,6 +1,6 @@
 # 企业内 Docker 部署文件
 
-本目录提供企业内部署文件。当前部署采用三机拆分：前端实体 Nginx 单独部署，后端 Java 与 `opencode-worker` 部署在同一台服务器，Redis 独立部署，PostgreSQL 地址待定。Docker Compose 只负责启动 `opencode-worker` 容器，不启动前端、Nginx、Java、Redis 或 PostgreSQL。
+本目录提供企业内部署文件。当前部署采用三机拆分：前端实体 Nginx 单独部署，后端 Java 与 `opencode-worker` 部署在同一台服务器，Redis 独立部署，PostgreSQL 使用 `122.42.203.103:8000/testagent`。Docker Compose 只负责启动 `opencode-worker` 容器，不启动前端、Nginx、Java、Redis 或 PostgreSQL。
 
 企业部署根目录统一使用 `/data/testagent`，建议目录规划如下：
 
@@ -21,7 +21,7 @@
 | 前端入口 | `122.233.30.2` | 实体 Nginx，托管 `/data/testagent/frontend`，把 `/api` 反向代理到 `122.233.30.4:8080`。 |
 | 后端与 worker | `122.233.30.4` | JDK 21 直接运行 `test-agent-app.jar`，Docker Compose 运行 `opencode-worker`。 |
 | Redis | `122.233.30.20` | Redis 外部依赖，Java 后端连接该地址。 |
-| PostgreSQL | 待定 | 确认后写入后端外置配置 `TEST_AGENT_DB_URL/USERNAME/PASSWORD`。 |
+| PostgreSQL | `122.42.203.103:8000` | Java 后端通过 `jdbc:postgresql://122.42.203.103:8000/testagent` 连接。 |
 
 部署链路图：
 
@@ -31,7 +31,7 @@ flowchart LR
   FrontNginx -->|"静态资源"| FrontFiles["前端 dist"]
   FrontNginx -->|"/api / SSE / WebSocket\n反代到 122.233.30.4:8080"| Backend["122.233.30.4\nJava test-agent-app.jar\n/data/testagent/dist/backend"]
   Backend -->|"Redis 6379"| Redis["122.233.30.20\nRedis"]
-  Backend -->|"JDBC 5432"| PostgreSQL["PostgreSQL\n地址待定"]
+  Backend -->|"JDBC 8000"| PostgreSQL["122.42.203.103:8000\nPostgreSQL testagent"]
   Backend -->|"模型 API"| Model["企业模型服务\nicbc-openai"]
   Worker["122.233.30.4\nDocker opencode-worker\n/data/testagent/data + programs"] <-->|"manager WebSocket\n/api/internal/platform/..."| Backend
   Worker -->|"动态启动\nopencode serve 4096-4105"| Opencode["用户 opencode 进程"]
@@ -231,16 +231,16 @@ cp deploy/internal/backend.env.example /data/testagent/config/backend.env
 cp deploy/internal/env.example /data/testagent/config/docker.env
 ```
 
-`/data/testagent/config/backend.env` 必须改：
+`/data/testagent/config/backend.env` 当前模板已按本次企业内部署填好以下值，现场只有在地址、账号或密钥变化时再修改：
 
-| 配置项 | 当前模板值 | 必须怎么改 |
+| 配置项 | 当前模板值 | 修改场景 |
 |---|---|---|
-| `TEST_AGENT_DB_URL` | `jdbc:postgresql://replace-with-pg-host:5432/replace-with-database` | PostgreSQL 确定后改成真实 JDBC URL。 |
-| `TEST_AGENT_DB_USERNAME` | `replace-with-pg-username` | 改成 PostgreSQL 用户名。 |
-| `TEST_AGENT_DB_PASSWORD` | `replace-with-pg-password` | 改成 PostgreSQL 密码。 |
-| `TEST_AGENT_API_TOKEN` | `replace-with-platform-api-token` | 改成平台 API Bearer token。 |
-| `TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `replace-with-manager-token` | 改成随机长 token，并与 `docker.env` 完全一致。 |
-| `ICBC_OPENAI_AUTH_TOKEN` | `replace-with-icbc-openai-token` | 改成企业模型服务 token。 |
+| `TEST_AGENT_DB_URL` | `jdbc:postgresql://122.42.203.103:8000/testagent` | PostgreSQL 地址、端口或库名变化时修改。 |
+| `TEST_AGENT_DB_USERNAME` | `testagent` | PostgreSQL 用户名变化时修改。 |
+| `TEST_AGENT_DB_PASSWORD` | `testagent#123!` | PostgreSQL 密码变化时修改。 |
+| `TEST_AGENT_API_TOKEN` | 空 | 需要启用额外平台 API Bearer token 时填写；登录态鉴权不依赖该值。 |
+| `TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `test-agent-manager-token-122-233-30-4` | 与 `docker.env` 必须完全一致；正式交付如要替换为随机长 token，两处一起改。 |
+| `ICBC_OPENAI_AUTH_TOKEN` | `eyJzdWIiOiJzbWFydHRlc3Q6dGVzdC1jYXNlLWdlbmVyYXRpb24ifQ.1qbws` | 企业模型服务 token 变化时修改。 |
 
 `/data/testagent/config/backend.env` 通常保持不变：
 
@@ -252,12 +252,12 @@ cp deploy/internal/env.example /data/testagent/config/docker.env
 | `TEST_AGENT_CORS_ALLOWED_ORIGINS` | `http://122.233.30.2` | 浏览器访问前端的 origin。 |
 | `SYS_DATA_ROOT_DIR` | `/data/testagent/data` | 必须与 worker 的 `TEST_AGENT_DATA_ROOT` 对齐。 |
 
-`/data/testagent/config/docker.env` 必须改：
+`/data/testagent/config/docker.env` 当前模板已按本次企业内部署填好以下值，现场只有在地址、端口或密钥变化时再修改：
 
-| 配置项 | 当前模板值 | 必须怎么改 |
+| 配置项 | 当前模板值 | 修改场景 |
 |---|---|---|
-| `TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `change-me-manager-token` | 改成与 `backend.env` 相同的 manager token。 |
-| `ICBC_OPENAI_AUTH_TOKEN` | `replace-with-icbc-auth-token` | 如果该文件也用于打包和交付，改成企业模型服务 token；不要提交真实值。 |
+| `TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `test-agent-manager-token-122-233-30-4` | 与 `backend.env` 必须完全一致；正式交付如要替换为随机长 token，两处一起改。 |
+| `ICBC_OPENAI_AUTH_TOKEN` | `eyJzdWIiOiJzbWFydHRlc3Q6dGVzdC1jYXNlLWdlbmVyYXRpb24ifQ.1qbws` | 企业模型服务 token 变化时修改；打包机和目标机使用同一份外置 `docker.env`。 |
 
 `/data/testagent/config/docker.env` 通常保持不变：
 
@@ -338,17 +338,17 @@ TEST_AGENT_REDIS_PASSWORD=
 如果 Redis 设置密码，必须同步修改 `122.233.30.4` 上的 `/data/testagent/config/backend.env`：
 
 ```dotenv
-TEST_AGENT_REDIS_PASSWORD=<redis-password>
+TEST_AGENT_REDIS_PASSWORD=
 ```
 
-### PostgreSQL 待定服务器
+### `122.42.203.103:8000` PostgreSQL
 
-PostgreSQL 地址确定后，只需要修改 `122.233.30.4` 上的 `/data/testagent/config/backend.env`：
+当前企业内部署的 PostgreSQL 已按以下值写入 `122.233.30.4` 上的 `/data/testagent/config/backend.env`：
 
 ```dotenv
-TEST_AGENT_DB_URL=jdbc:postgresql://<pg-host>:5432/<database>
-TEST_AGENT_DB_USERNAME=<pg-username>
-TEST_AGENT_DB_PASSWORD=<pg-password>
+TEST_AGENT_DB_URL=jdbc:postgresql://122.42.203.103:8000/testagent
+TEST_AGENT_DB_USERNAME=testagent
+TEST_AGENT_DB_PASSWORD=testagent#123!
 ```
 
 Java 后端启动时会执行 Flyway migration 初始化或校验库表结构。不要把测试、演示或个人开发数据写进生产 migration。
@@ -374,6 +374,83 @@ deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env
 | `test-agent-opencode-worker_internal-linux-amd64.tar` | `122.233.30.4` | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` |
 | `deploy/internal/` | `122.233.30.2`、`122.233.30.4` | `/data/testagent/deploy/internal/`，前端用 Nginx 模板，后端用 Compose 文件。 |
 
+## 升级最新代码操作
+
+从最新代码部署到企业内环境时，按“构建机打包 → 前端服务器替换静态资源 → 后端服务器替换 jar/程序/镜像 → 先重启 Java 再重启 worker”的顺序执行。不要清理 `/data/testagent/data`，该目录包含 Java 写给 manager 的 `.serverid/.serverhost`、公共配置、用户 session、应用工作区和 manager state。
+
+1. 构建机打包：
+
+```bash
+cd /data/testagent/source/intelligent-test-agent
+deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env
+```
+
+2. 分发产物：
+
+```bash
+scp /data/testagent/dist/test-agent-frontend-dist.tar.gz 122.233.30.2:/data/testagent/dist/
+scp /data/testagent/dist/backend/test-agent-app.jar 122.233.30.4:/data/testagent/dist/backend/test-agent-app.jar.new
+scp /data/testagent/dist/test-agent-programs.tar.gz 122.233.30.4:/data/testagent/dist/
+scp /data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar 122.233.30.4:/data/testagent/dist/
+rsync -a --delete deploy/internal/ 122.233.30.4:/data/testagent/deploy/internal/
+```
+
+3. 在 `122.233.30.2` 更新前端：
+
+```bash
+rm -rf /data/testagent/frontend.bak
+cp -a /data/testagent/frontend /data/testagent/frontend.bak
+tar -C /data/testagent -xzf /data/testagent/dist/test-agent-frontend-dist.tar.gz
+nginx -t
+systemctl reload nginx
+curl -fsS http://122.233.30.2/health
+curl -fsS http://122.233.30.2/
+```
+
+4. 在 `122.233.30.4` 更新 Java 与 worker 程序：
+
+```bash
+systemctl stop test-agent-backend
+cp -a /data/testagent/dist/backend/test-agent-app.jar /data/testagent/dist/backend/test-agent-app.jar.bak.$(date +%Y%m%d%H%M%S)
+mv /data/testagent/dist/backend/test-agent-app.jar.new /data/testagent/dist/backend/test-agent-app.jar
+tar -C /data/testagent -xzf /data/testagent/dist/test-agent-programs.tar.gz
+docker load -i /data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar
+```
+
+5. 先启动 Java，确认它写入当前服务器身份文件：
+
+```bash
+systemctl start test-agent-backend
+journalctl -u test-agent-backend -n 120 --no-pager
+curl -fsS http://122.233.30.4:8080/actuator/health
+cat /data/testagent/data/.serverid
+cat /data/testagent/data/.serverhost
+```
+
+当前期望 `.serverid=test-agent-backend-122-233-30-4`，`.serverhost=122.233.30.4`。如果不一致，先修 `/data/testagent/config/backend.env` 中的 `TEST_AGENT_LINUX_SERVER_ID`、`TEST_AGENT_SERVER_ADVERTISED_HOST` 和 `SYS_DATA_ROOT_DIR`，不要急着重启 worker。
+
+6. 重启 worker，让 manager 使用同一 `SYS_DATA_ROOT_DIR` 连接 Java：
+
+```bash
+cd /data/testagent/deploy/internal
+docker compose --env-file /data/testagent/config/docker.env up -d --force-recreate opencode-worker
+docker compose --env-file /data/testagent/config/docker.env ps
+docker logs --tail 120 test-agent-opencode-worker
+```
+
+日志中应看到 manager 成功应用 Java 下发配置，类似 `manager config update applied`。如果看到连接旧 IP、`websocket disconnected` 或等待 `.serverhost` 超时，先检查 `/data/testagent/config/backend.env` 的 `SYS_DATA_ROOT_DIR` 是否等于 `/data/testagent/config/docker.env` 的 `TEST_AGENT_DATA_ROOT`。
+
+7. 验收：
+
+```bash
+curl -fsS http://122.233.30.4:8080/actuator/health/readiness
+curl -fsS http://122.233.30.2/
+cd /data/testagent/deploy/internal
+docker compose --env-file /data/testagent/config/docker.env logs --tail=120 opencode-worker
+```
+
+超级管理员进入“系统管理 → 运行管理”确认 Java、manager、容器均在线；进入“系统管理 → 配置管理 → opencode公共配置管理”确认 `122.233.30.4` 已初始化公共配置。已有用户进程如需切到新 opencode/manager 版本，可在运行管理中重启对应用户进程；只替换外挂程序不会自动重启已存在的 `opencode serve` 子进程。
+
 ## 端口约束
 
 Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart..portEnd` 里选择端口，并用 `TEST_AGENT_SERVER_ADVERTISED_HOST/.serverhost + port` 生成 `baseUrl`。当前协议没有独立的 `containerPort` 和 `publishedPort` 字段。
@@ -394,16 +471,18 @@ Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart
 server.port=8080
 SPRING_PROFILES_ACTIVE=prod
 TEST_AGENT_DEPLOYMENT_MODE=internal
-TEST_AGENT_SERVER_ADVERTISED_HOST=<host-ip-or-dns>
-TEST_AGENT_OPENCODE_MANAGER_TOKEN=<same-manager-token>
-TEST_AGENT_CORS_ALLOWED_ORIGINS=http://<gateway-host>
+TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.4
+TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-4
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=test-agent-manager-token-122-233-30-4
+TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
+SYS_DATA_ROOT_DIR=/data/testagent/data
 TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 TEST_AGENT_INTERNAL_DEFAULT_MODEL=Qwen3.6-35B-A3B
 TEST_AGENT_ICBC_OPENAI_BASE_URL=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
 TEST_AGENT_ICBC_OPENAI_TOKEN_ENV=ICBC_OPENAI_AUTH_TOKEN
-ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
+ICBC_OPENAI_AUTH_TOKEN=eyJzdWIiOiJzbWFydHRlc3Q6dGVzdC1jYXNlLWdlbmVyYXRpb24ifQ.1qbws
 TEST_AGENT_ICBC_OPENAI_AUTH_MODE=bearer
 TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME=ucid
 ```
@@ -577,6 +656,46 @@ docker compose --env-file /data/testagent/config/docker.env up -d
 ```bash
 docker compose --env-file /data/testagent/config/docker.env ps
 ```
+
+## 运行日志与排障
+
+企业内部署日志分四层看，定位问题时不要只看浏览器提示：
+
+| 层级 | 查看命令或路径 | 主要用途 |
+|---|---|---|
+| 前端 Nginx | `tail -f /var/log/nginx/access.log /var/log/nginx/error.log` | 静态资源、`/api` 反代、SSE/WebSocket upgrade 和 502/504。 |
+| Java 后端 | `journalctl -u test-agent-backend -f` | 登录、API、Flyway、Redis、manager WebSocket、用户初始化流程和统一错误 traceId。 |
+| worker/manager | `docker logs -f test-agent-opencode-worker` 或 `docker compose --env-file /data/testagent/config/docker.env logs -f opencode-worker` | manager 是否读取到 `.serverid/.serverhost`、是否连接 Java、是否收到 `configUpdate`、端口池和心跳。 |
+| 用户 opencode 子进程 | `/data/testagent/data/agent-opencode/manager/worker/logs/{port}.log` | 单个用户 `opencode serve` 的 stdout/stderr，排查模型、插件、skill、OpenCode schema 和健康检查。 |
+| manager 本地 state | `/data/testagent/data/agent-opencode/manager/worker/processes/{port}.json` | manager 记录的 PID、端口、session/config path；这是运行状态，不是普通日志。 |
+
+常用排查命令：
+
+```bash
+# Java 是否写入当前服务器身份文件
+cat /data/testagent/data/.serverid
+cat /data/testagent/data/.serverhost
+
+# worker 容器内是否读到同一份身份文件
+docker exec test-agent-opencode-worker cat /data/testagent/data/.serverid
+docker exec test-agent-opencode-worker cat /data/testagent/data/.serverhost
+
+# manager 是否连上 Java 并应用配置
+docker logs --tail 200 test-agent-opencode-worker | egrep 'config update applied|websocket|serverhost|serverid|OPENCODE_UNAVAILABLE'
+
+# 查看某个用户端口的 opencode 日志和 state
+ls -lah /data/testagent/data/agent-opencode/manager/worker/processes/
+ls -lah /data/testagent/data/agent-opencode/manager/worker/logs/
+tail -n 200 /data/testagent/data/agent-opencode/manager/worker/logs/4096.log
+```
+
+日志处理要求：
+
+- Java 后端使用 console 日志，systemd 部署时由 journald 接管；如现场改为 `nohup`，把 stdout/stderr 写到 `/data/testagent/logs/backend.log` 并配置 logrotate，不要写进仓库目录。
+- worker 使用 Docker stdout；建议在 Docker daemon 或 Compose 层配置 `json-file` 日志轮转，避免 `/var/lib/docker/containers` 被 manager 心跳日志打满。
+- `/data/testagent/data/agent-opencode/manager/worker/processes/*.json` 是 manager 运行态 state，不要当日志清理；只有确认对应用户进程已停止且需要清理坏 state 时，才在停 worker 或通过运行管理停止进程后处理。
+- `/data/testagent/data/agent-opencode/manager/worker/logs/{port}.log` 可按端口归档；归档前先确认是否仍有同端口进程在运行，避免截断正在写入的文件。
+- 对外发送日志前必须脱敏 `Authorization`、token、Cookie、完整 prompt、私钥和用户完整输入；优先提供 traceId、userId、linuxServerId、containerId、port、错误码和最后 200 行上下文。
 
 ## 运行时外部依赖
 
