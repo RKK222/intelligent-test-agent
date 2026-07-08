@@ -2,6 +2,20 @@
 
 ## Entries
 
+### 2026-07-08 - 修复与优化前端圆角、尖角对齐与线重合、水平线对齐样式
+
+- Why:
+  - 界面上存在未激活 Tab 底边悬浮缺失分割线、文件树小操作按钮 hover 呈现直角正方形、文件树和 Git 变更面板区域展开/折叠时双分割线重合（2px粗线）、聊天卡片工具栏尖角外露、附件按钮高度偏矮导致水平未对齐、聊天页脚底分割线与编辑器不一致，以及聊天窗右上角按钮组线重合与直角等一系列 UI 样式与美感缺陷。
+- What:
+  - 在 `FigmaEditorArea.vue` 中对 `.figma-editor-tabs` 添加 `border-bottom`，设置 active tab 的 bottom-border-color 为 `#fff` 并给予 `margin-bottom: -1px` 压线。
+  - 在 `FigmaFileExplorer.vue` 中将工具操作按钮 Hover 改为 `border-radius: 4px`；重构相邻 section 与 header 的 border 分割规则，消除双重边框重叠。
+  - 在 `GitChangesPanel.vue` 中对 `.staged-section` 的顶部边框改为动态 class，在 resizer 存在时自动移除其 `border-t`。
+  - 在 `FigmaChatPanel.vue` 中为工具行 actions 容器添加 `border-bottom-left/right-radius: 15px` 完美收纳于 16px 圆角父框；移除了附件按钮 `.figma-chat-attachment-btn` 的硬编码 `height: 26px;` 以继承 28px；将 `.figma-chat-footer` 的 border-top 颜色统一为语义 token `var(--ta-border)`。将 `.figma-chat-header-btn` 从自带边框重构成 Ghost 按钮样式，常态下无边框，hover 时显示圆角 4px 灰色背景；同时收紧 flex 容器 `gap` 为 8px，完全消除了右上角线重合与直角问题。
+- How:
+  - 仅限于前端 CSS 与 HTML 模板小范围调整，不涉及任何接口 API、后端逻辑或数据库。
+- Result:
+  - `tools/dev-frontend-check.sh` 顺利通过，Vite 重新构建成功，Lint & Typecheck 均为 0 错误。主应用 Vitest 运行无新增回归失败，既有的 3 项 Vitest 测试失败为历史已知 baseline 问题，与本次样式改动无关。
+
 ### 2026-07-08 - 企业内 worker 部署改为纯 Docker
 
 - Why:

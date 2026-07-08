@@ -364,7 +364,7 @@ defineExpose({
 }
 
 /* Border separator when resizer is NOT present */
-.figma-fe-section + .figma-fe-section {
+.figma-fe-section + .figma-fe-section .figma-fe-section-header {
   border-top: 1px solid var(--ta-tree-border);
 }
 
@@ -375,7 +375,6 @@ defineExpose({
   height: 24px;
   padding: 0 6px;
   background: var(--ta-tree-bg);
-  border-bottom: 1px solid var(--ta-tree-border);
   user-select: none;
   flex-shrink: 0;
 }
@@ -431,7 +430,7 @@ defineExpose({
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 0;
+  border-radius: 4px;
   background: transparent;
   color: var(--ta-tree-muted);
   cursor: pointer;

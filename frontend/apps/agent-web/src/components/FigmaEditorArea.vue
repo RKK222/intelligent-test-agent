@@ -260,6 +260,7 @@ watch(
   overflow-y: hidden !important;
   background: #fafafa;
   scrollbar-width: none;
+  border-bottom: 1px solid #eaeaea;
 }
 
 .figma-editor-tabs::-webkit-scrollbar {
@@ -297,12 +298,15 @@ watch(
   background: #eaeaea;
   border-top: 2px solid transparent;
   border-right: 1px solid rgba(0, 0, 0, 0.08);
+  margin-bottom: -1px;
+  border-bottom: 1px solid transparent;
 }
 
 .figma-editor-tab--active {
   background: #fff;
   border-top-color: #555;
   border-top-width: 2px;
+  border-bottom-color: #fff;
 }
 
 .figma-editor-tab:focus {

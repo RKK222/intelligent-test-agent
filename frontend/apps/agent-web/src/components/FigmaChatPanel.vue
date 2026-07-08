@@ -4616,7 +4616,7 @@ function onCompositionEnd() {
 .figma-chat-header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
@@ -4624,13 +4624,13 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
   color: var(--ta-muted);
   background: transparent;
-  border: 1px solid var(--ta-border);
+  border: 1px solid transparent;
   transition: all 0.15s ease;
   cursor: pointer;
   flex-shrink: 0;
@@ -4638,7 +4638,7 @@ function onCompositionEnd() {
 .figma-chat-header-btn:hover {
   color: var(--ta-text);
   background: var(--ta-hover);
-  border-color: var(--ta-muted);
+  border-color: transparent;
 }
 .figma-chat-raw-output-panel {
   position: fixed;
@@ -6708,6 +6708,8 @@ function onCompositionEnd() {
   gap: 4px;
   padding: 4px 8px 8px;
   border-top: 1px solid #f0f0f0;
+  border-bottom-left-radius: 15px;
+  border-bottom-right-radius: 15px;
 }
 
 .figma-chat-card-spacer {
@@ -6745,7 +6747,6 @@ function onCompositionEnd() {
 
 .figma-chat-attachment-btn {
   width: 28px;
-  height: 26px;
   padding: 0;
   justify-content: center;
 }
@@ -6841,7 +6842,7 @@ function onCompositionEnd() {
   flex-shrink: 0;
   height: 30px;
   background: #fff;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--ta-border);
   display: flex;
   align-items: center;
   padding: 0 16px;
