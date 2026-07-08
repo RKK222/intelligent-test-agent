@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-08 - 收敛工作台极简线框并修复历史子智能体卡片
+
+- Why:
+  - 左侧工作区 tabbar 和右侧面板圆角/线色不统一，中间空态与输入框仍有阴影感；历史会话里子智能体卡片在 `taskPartId` 与实际渲染 task part id 不一致时仍可能不可点击，且历史卡片名称缺失时只显示泛化“智能体”。
+- What:
+  - 将 `FigmaShell` 三栏收敛为填满主区域的极简矩形布局，移除主工作区外框、圆角和投影，统一左/中/右顶部 chrome 的 `--ta-border` 分割线，并把左右 resize handle 从 6px 空白槽改成连续 1px 视觉线；移除聊天输入卡片、子智能体卡片与编辑器空态图标投影。
+  - `chatStateFromSessionTreeSnapshot()` 兜底恢复子智能体索引时同时登记 snapshot `taskPartId`、实际渲染 task `partId` 和 `taskCallId`；子智能体卡片从 `metadata.agentName/agent/title` 兜底展示名称与标题，并在索引缺失时用 task `callId` 或 part metadata/output 中的 child session id 恢复点击入口；进入子 Agent 视图时按 child scoped `taskPartId/taskCallId` 兜底匹配输出。
+- How:
+  - 仅修改前端展示层、历史快照恢复纯函数、相关前端测试和包 README/PACKAGE；不改后端 API、RunEvent 契约、数据库或 generated SDK。
+- Result:
+  - 通过 `workbench-utils.test.ts`、`FigmaChatPanel.test.ts -t "subagent cards"`、`@test-agent/agent-web` / `@test-agent/agent-chat` / `@test-agent/editor` typecheck 和 `git diff --check`；in-app browser 刷新 `http://127.0.0.1:3000/` 后确认主容器、输入卡片、编辑器空态图标 `box-shadow: none`，三段顶部线均为 `rgb(234,234,234)`。
+
 ### 2026-07-08 - 修复与优化前端圆角、尖角对齐与线重合、水平线对齐样式
 
 - Why:

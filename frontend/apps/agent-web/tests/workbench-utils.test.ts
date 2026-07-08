@@ -602,6 +602,75 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("restores historical subagent binding when snapshot taskPartId differs from rendered task part id", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "toolu_snapshot_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: { toolu_snapshot_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "msg_root", role: "assistant" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_rendered_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              metadata: { agent: "build", title: "构建回归用例" },
+              state: {
+                status: "completed",
+                input: { description: "构建回归用例" }
+              }
+            }
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+
+    expect(state.subagentByTaskPartId.toolu_snapshot_task).toBe("ses_child");
+    expect(state.subagentByTaskPartId.prt_rendered_task).toBe("ses_child");
+    expect(state.subagentByTaskPartId.call_task).toBe("ses_child");
+    expect(state.subagentsBySessionId.ses_child).toMatchObject({
+      taskPartId: "prt_rendered_task",
+      taskCallId: "call_task",
+      agentName: "Build",
+      title: "构建回归用例",
+      status: "completed"
+    });
+  });
+
   it("keeps persisted user turns when session tree supplies assistant snapshots", () => {
     const persisted: SessionMessage[] = [
       {

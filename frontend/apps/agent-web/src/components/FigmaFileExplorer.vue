@@ -331,6 +331,7 @@ defineExpose({
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   background: var(--ta-tree-bg);
   color: var(--ta-tree-text);
   font-family: var(--ta-tree-font-family);
@@ -338,6 +339,7 @@ defineExpose({
 
 .figma-file-explorer > .ta-icon-tabbar {
   padding-right: 36px; /* Make space for the absolutely-positioned sidebar toggle button */
+  border-radius: 0;
 }
 
 .figma-fe-body {

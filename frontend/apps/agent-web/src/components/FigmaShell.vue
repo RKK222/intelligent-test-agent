@@ -1145,6 +1145,7 @@ function submitJoinApp() {
   align-items: center;
   justify-content: space-between;
   height: 36px;
+  border-bottom: 1px solid var(--ta-border, #eaeaea);
   background: #fff;
   padding: 0 10px;
   flex-shrink: 0;
@@ -1708,6 +1709,10 @@ function submitJoinApp() {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -1731,20 +1736,12 @@ function submitJoinApp() {
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: #ffffff;
+  background: var(--ta-border, #eaeaea);
   transition: background-color 0.14s ease;
 }
 
 .figma-files-resize-handle::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  margin-left: -0.5px;
-  background: #eaeaea;
-  transition: background-color 0.14s ease;
+  content: none;
 }
 
 .figma-files-resize-handle:hover {
@@ -1764,7 +1761,7 @@ function submitJoinApp() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
+  background: transparent;
   padding: 0;
 }
 
@@ -1773,10 +1770,7 @@ function submitJoinApp() {
   min-width: 0;
   display: flex;
   background: #ffffff;
-  border-radius: 16px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
   overflow: hidden;
-  border: 1px solid #eaeaea;
 }
 
 .figma-panel-center {
@@ -1811,25 +1805,17 @@ function submitJoinApp() {
 }
 
 .figma-chat-resize-handle {
-  width: 6px;
+  width: 1px;
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: #ffffff;
+  background: var(--ta-border, #eaeaea);
   transition: background-color 0.14s ease;
 }
 
 .figma-chat-resize-handle::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  margin-left: -0.5px;
-  background: #eaeaea;
-  transition: background-color 0.14s ease;
+  content: none;
 }
 
 .figma-chat-resize-handle:hover {

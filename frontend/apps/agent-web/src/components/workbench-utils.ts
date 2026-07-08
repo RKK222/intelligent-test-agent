@@ -618,16 +618,18 @@ function hydrateSubagentIndexesFromSessionTreeSnapshot(
       continue;
     }
     const sessionId = snapshot.childSessionIdByTaskPartId?.[session.taskPartId] ?? session.sessionId;
-    if (!subagentByTaskPartId[session.taskPartId]) {
-      subagentByTaskPartId[session.taskPartId] = sessionId;
+    // 历史 snapshot 可能缺少 durable discovery 事件；此处仅用顶层 session 索引补齐导航所需的最小子 Agent 状态。
+    const subagent = subagentsBySessionId[sessionId] ?? subagentFromSnapshotSession(state.messages, session, sessionId);
+    if (!subagentsBySessionId[sessionId]) {
+      subagentsBySessionId[sessionId] = subagent;
       changed = true;
     }
-    if (subagentsBySessionId[sessionId]) {
-      continue;
+    for (const alias of [session.taskPartId, session.taskCallId, subagent.taskPartId, subagent.taskCallId]) {
+      if (alias && !subagentByTaskPartId[alias]) {
+        subagentByTaskPartId[alias] = sessionId;
+        changed = true;
+      }
     }
-    // 历史 snapshot 可能缺少 durable discovery 事件；此处仅用顶层 session 索引补齐导航所需的最小子 Agent 状态。
-    subagentsBySessionId[sessionId] = subagentFromSnapshotSession(state.messages, session, sessionId);
-    changed = true;
   }
   return changed ? { ...state, subagentsBySessionId, subagentByTaskPartId } : state;
 }
@@ -637,18 +639,30 @@ function subagentFromSnapshotSession(
   session: SessionTreeMessagesResponse["sessions"][number],
   sessionId: string
 ): SubagentSession {
-  const task = findTaskPartForSnapshotSession(messages, session.taskMessageId ?? undefined, session.taskPartId ?? undefined);
+  const task = findTaskPartForSnapshotSession(
+    messages,
+    session.taskMessageId ?? undefined,
+    session.taskPartId ?? undefined,
+    session.taskCallId ?? undefined
+  );
   const taskInput = record(task?.part.input);
+  const taskMetadata = record(task?.part.metadata);
   const title =
+    text(taskMetadata?.title) ??
     text(taskInput?.description) ??
     firstNonEmptyLine(text(taskInput?.prompt)) ??
     "Subagent task";
-  const agentName = displayAgentName(text(taskInput?.subagent_type) ?? "Task");
+  const agentName = displayAgentName(
+    text(taskInput?.subagent_type) ??
+    text(taskMetadata?.agentName) ??
+    text(taskMetadata?.agent) ??
+    "Task"
+  );
   return {
     sessionId,
     parentSessionId: session.parentSessionId ?? undefined,
     taskMessageId: session.taskMessageId ?? undefined,
-    taskPartId: session.taskPartId ?? undefined,
+    taskPartId: task?.part.partId ?? session.taskPartId ?? undefined,
     taskCallId: session.taskCallId ?? task?.part.callId,
     agentName,
     title,
@@ -660,7 +674,8 @@ function subagentFromSnapshotSession(
 function findTaskPartForSnapshotSession(
   messages: AgentMessage[],
   taskMessageId: string | undefined,
-  taskPartId: string | undefined
+  taskPartId: string | undefined,
+  taskCallId: string | undefined
 ): { message: Extract<AgentMessage, { role: "assistant" }>; part: Extract<MessagePart, { type: "tool" }> } | undefined {
   for (const message of messages) {
     if (message.role !== "assistant") {
@@ -671,10 +686,12 @@ function findTaskPartForSnapshotSession(
       if (part.type !== "tool" || part.toolName !== "task") {
         continue;
       }
-      if (taskPartId && part.partId !== taskPartId) {
+      const partMatches = taskPartId ? part.partId === taskPartId : false;
+      const callMatches = taskCallId ? part.callId === taskCallId : false;
+      if ((taskPartId || taskCallId) && !partMatches && !callMatches) {
         continue;
       }
-      if (!messageMatches && taskPartId === undefined) {
+      if (!messageMatches && taskPartId === undefined && taskCallId === undefined) {
         continue;
       }
       return { message, part };

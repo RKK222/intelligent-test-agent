@@ -421,7 +421,7 @@ defineExpose({
 <template>
   <div v-if="!path" class="flex h-full min-h-0 flex-col items-center justify-center bg-[var(--ta-panel-2)] text-slate-500 px-6">
     <div class="text-center max-w-[280px] flex flex-col items-center">
-      <div class="mb-4 flex items-center justify-center w-16 h-16 rounded-full bg-slate-50 shadow-sm border border-slate-100/50">
+      <div class="code-editor-empty-icon">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" class="text-indigo-500">
           <defs>
             <linearGradient id="folderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -480,6 +480,19 @@ defineExpose({
 </template>
 
 <style scoped>
+.code-editor-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 16px;
+  border: 1px solid var(--ta-border, #eaeaea);
+  border-radius: 999px;
+  background: #f8f8f8;
+  box-shadow: none;
+}
+
 /* Monaco 编辑器内部滚动条细线化（同时影响水平与竖向） */
 :deep(.monaco-scrollable-element)::-webkit-scrollbar {
   width: 6px;

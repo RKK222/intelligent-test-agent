@@ -977,6 +977,167 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("子 Agent 输出");
   });
 
+  it("keeps historical subagent cards clickable and named when snapshot ids differ from rendered task part ids", async () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "toolu_snapshot_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: { toolu_snapshot_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "msg_root", role: "assistant" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_rendered_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              metadata: { agent: "build", title: "构建回归用例" },
+              state: {
+                status: "completed",
+                input: { description: "构建回归用例" }
+              }
+            }
+          }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskMessageId: "msg_root",
+            taskPartId: "toolu_snapshot_task",
+            taskCallId: "call_task",
+            message: { id: "msg_child", role: "assistant", content: "子 Agent 输出" }
+          }
+        }
+      ]
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: state.messages,
+        messageScopesById: state.messageScopesById,
+        subagentsBySessionId: state.subagentsBySessionId,
+        subagentByTaskPartId: state.subagentByTaskPartId,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).toContain("Build");
+    expect(wrapper.text()).toContain("构建回归用例");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("子 Agent 输出");
+  });
+
+  it("keeps task cards clickable when only task call id matches historical subagent state", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "msg_root",
+            messageId: "msg_root",
+            role: "assistant",
+            text: "",
+            parts: [
+              {
+                partId: "prt_rendered_task",
+                type: "tool",
+                toolName: "task",
+                callId: "call_task",
+                status: "completed",
+                input: { description: "识别 I2026002 测试对象" }
+              }
+            ],
+            createdAt: "2026-07-03T00:00:01Z"
+          },
+          {
+            id: "msg_child",
+            messageId: "msg_child",
+            role: "assistant",
+            text: "子 Agent 工作详情",
+            parts: [{ partId: "prt_child_text", type: "text", text: "子 Agent 工作详情" }],
+            createdAt: "2026-07-03T00:00:02Z"
+          }
+        ],
+        messageScopesById: {
+          msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+          msg_child: {
+            sessionId: "ses_root",
+            rootSessionId: "ses_root",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskCallId: "call_task"
+          }
+        },
+        subagentsBySessionId: {
+          ses_child: {
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            taskMessageId: "msg_root",
+            taskPartId: "toolu_snapshot_task",
+            taskCallId: "call_task",
+            agentName: "TEST-DESIGN-TARGET-RECOGNITION",
+            title: "识别 I2026002 测试对象",
+            status: "completed",
+            updatedAt: "2026-07-03T00:00:00Z"
+          }
+        },
+        subagentByTaskPartId: {},
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).toContain("TEST-DESIGN-TARGET-RECOGNITION");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("子 Agent 工作详情");
+  });
+
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

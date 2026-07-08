@@ -6630,9 +6630,9 @@ function onCompositionEnd() {
   border: 1px solid #d4d4d4;
   border-radius: 16px;
   background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
   overflow: visible;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease;
 }
 
 .figma-chat-composer-resize-handle {
@@ -6667,12 +6667,12 @@ function onCompositionEnd() {
 
 .figma-chat-input-card.is-resizing {
   border-color: #3366ff;
-  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
 }
 
 .figma-chat-input-card:focus-within {
   border-color: #3366ff;
-  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
 }
 
 .figma-chat-textarea {

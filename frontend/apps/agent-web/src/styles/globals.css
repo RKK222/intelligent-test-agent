@@ -363,7 +363,7 @@ h3 {
   display: flex;
   height: 30px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--ta-tree-border);
+  border-bottom: 1px solid var(--ta-border);
   background: var(--ta-tree-bg);
   font-family: var(--ta-tree-font-family);
 }

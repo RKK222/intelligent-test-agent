@@ -260,7 +260,7 @@ watch(
   overflow-y: hidden !important;
   background: #fafafa;
   scrollbar-width: none;
-  border-bottom: 1px solid #eaeaea;
+  border-bottom: 1px solid var(--ta-border, #eaeaea);
 }
 
 .figma-editor-tabs::-webkit-scrollbar {

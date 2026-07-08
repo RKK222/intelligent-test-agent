@@ -50,9 +50,55 @@ const component = computed<Component>(() => {
 });
 
 const subagent = computed(() => {
-  const sessionId = props.subagentByTaskPartId?.[props.part.partId];
-  return sessionId ? props.subagentsBySessionId?.[sessionId] : undefined;
+  const sessionId =
+    props.subagentByTaskPartId?.[props.part.partId] ??
+    (props.part.callId ? props.subagentByTaskPartId?.[props.part.callId] : undefined);
+  const indexed = sessionId ? props.subagentsBySessionId?.[sessionId] : undefined;
+  if (indexed) {
+    return indexed;
+  }
+  const matched = Object.values(props.subagentsBySessionId ?? {}).find((item) =>
+    item.taskPartId === props.part.partId || (props.part.callId ? item.taskCallId === props.part.callId : false)
+  );
+  if (matched) {
+    return matched;
+  }
+  const metadata = props.part.metadata ?? {};
+  const output = record(props.part.output);
+  const metadataSessionId =
+    text(metadata.sessionId) ??
+    text(metadata.sessionID) ??
+    text(metadata.childSessionId) ??
+    text(metadata.childSessionID) ??
+    text(output?.sessionId) ??
+    text(output?.sessionID);
+  if (!metadataSessionId) {
+    return undefined;
+  }
+  return {
+    sessionId: metadataSessionId,
+    parentSessionId: text(metadata.parentSessionId) ?? text(output?.parentSessionId),
+    taskPartId: props.part.partId,
+    taskCallId: props.part.callId,
+    agentName: displayName(text(metadata.agentName) ?? text(metadata.agent) ?? text(props.part.input?.subagent_type) ?? "Task"),
+    title: text(metadata.title) ?? text(props.part.input?.description) ?? text(props.part.input?.prompt) ?? "Subagent task",
+    status: props.part.status ?? "running",
+    updatedAt: props.part.endedAt ?? props.part.startedAt ?? new Date(0).toISOString()
+  };
 });
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function displayName(value: string): string {
+  const trimmed = value.trim();
+  return trimmed ? `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}` : "Task";
+}
 </script>
 
 <template>
