@@ -1,6 +1,6 @@
 # 企业内 Docker 部署文件
 
-本目录提供企业内部署文件。当前部署采用三机拆分：前端实体 Nginx 单独部署，后端 Java 与 `opencode-worker` 部署在同一台服务器，Redis 独立部署，PostgreSQL 使用 `122.42.203.103:8000/testagent`。Docker Compose 只负责启动 `opencode-worker` 容器，不启动前端、Nginx、Java、Redis 或 PostgreSQL。
+本目录提供企业内部署文件。当前部署采用三机拆分：前端实体 Nginx 单独部署，后端 Java 与 `opencode-worker` 部署在同一台服务器，Redis 独立部署，PostgreSQL 使用 `122.42.203.103:8000/testagent`。企业内 `opencode-worker` 统一用纯 Docker 命令管理，不使用 Docker Compose；前端、Nginx、Java、Redis 和 PostgreSQL 也不由 Docker 编排启动。
 
 企业部署根目录统一使用 `/data/testagent`，建议目录规划如下：
 
@@ -19,7 +19,7 @@
 | 角色 | 地址 | 部署内容 |
 |---|---|---|
 | 前端入口 | `122.233.30.2` | 实体 Nginx，托管 `/data/testagent/frontend`，把 `/api` 反向代理到 `122.233.30.4:8080`。 |
-| 后端与 worker | `122.233.30.4` | JDK 21 直接运行 `test-agent-app.jar`，Docker Compose 运行 `opencode-worker`。 |
+| 后端与 worker | `122.233.30.4` | JDK 21 直接运行 `test-agent-app.jar`，纯 Docker 运行 `opencode-worker`。 |
 | Redis | `122.233.30.20` | Redis 外部依赖，Java 后端连接该地址。 |
 | PostgreSQL | `122.42.203.103:8000` | Java 后端通过 `jdbc:postgresql://122.42.203.103:8000/testagent` 连接。 |
 
@@ -42,7 +42,7 @@ flowchart LR
 ```text
 /data/testagent/config/
   backend.env     Java 后端运行环境变量，模板见 deploy/internal/backend.env.example
-  docker.env      opencode-worker Compose 和打包环境变量，模板见 deploy/internal/env.example
+  docker.env      opencode-worker 纯 Docker 启动和打包环境变量，模板见 deploy/internal/env.example
   nginx.env       前端 Nginx 配置生成变量，可按下文内容手工创建
 ```
 
@@ -198,7 +198,7 @@ curl -fsS http://122.233.30.2/
 | `/data/testagent/dist/backend/test-agent-app.jar` | `/data/testagent/dist/backend/test-agent-app.jar` | Java 后端启动包。 |
 | `/data/testagent/dist/test-agent-programs.tar.gz` | `/data/testagent/dist/test-agent-programs.tar.gz` | 解压成 `/data/testagent/programs/`，供 worker 优先使用外挂 opencode 程序。 |
 | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` | `docker load` 导入 worker 镜像。 |
-| 仓库 `deploy/internal/` | `/data/testagent/deploy/internal/` | 运行 `docker-compose.yml`。 |
+| 仓库 `deploy/internal/` | `/data/testagent/deploy/internal/` | 运行纯 Docker worker 管理脚本和保留部署模板。 |
 
 不要放到后端服务器：
 
@@ -210,11 +210,11 @@ curl -fsS http://122.233.30.2/
 |---|---|---|
 | `/data/testagent/dist/backend/test-agent-app.jar` | Java 后端可执行 jar | 打包产物。 |
 | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` | worker 镜像 tar | 打包产物，目标机 `docker load`。 |
-| `/data/testagent/deploy/internal/docker-compose.yml` | worker Compose 文件 | 从仓库 `deploy/internal/` 目录复制。 |
+| `/data/testagent/deploy/internal/opencode-worker-docker.sh` | worker 纯 Docker 管理脚本 | 从仓库 `deploy/internal/` 目录复制。 |
 | `/data/testagent/programs/` | 外挂 `opencode-manager` 和 `opencode` CLI | 解压 `test-agent-programs.tar.gz`。 |
 | `/data/testagent/data/` | Java 的 `SYS_DATA_ROOT_DIR`，也是 worker 数据挂载目录 | 运行期目录，必须持久化。 |
 | `/data/testagent/config/backend.env` | Java 后端外置配置 | 从 `deploy/internal/backend.env.example` 复制后修改。 |
-| `/data/testagent/config/docker.env` | Docker Compose 和打包配置 | 从 `deploy/internal/env.example` 复制后修改。 |
+| `/data/testagent/config/docker.env` | Docker worker 和打包配置 | 从 `deploy/internal/env.example` 复制后修改。 |
 
 创建基础目录：
 
@@ -307,7 +307,7 @@ WantedBy=multi-user.target
 
 ```bash
 cd /data/testagent/deploy/internal
-docker compose --env-file /data/testagent/config/docker.env up -d
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
 
 验证：
@@ -315,7 +315,8 @@ docker compose --env-file /data/testagent/config/docker.env up -d
 ```bash
 curl -fsS http://122.233.30.4:8080/actuator/health
 cd /data/testagent/deploy/internal
-docker compose --env-file /data/testagent/config/docker.env ps
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env status
+docker logs --tail 120 test-agent-opencode-worker
 ```
 
 ### `122.233.30.20` Redis
@@ -389,7 +390,7 @@ deploy/internal/package-release.sh --output-dir /data/testagent/dist
 | `backend/test-agent-app.jar` | `122.233.30.4` | `/data/testagent/dist/backend/test-agent-app.jar` |
 | `test-agent-programs.tar.gz` | `122.233.30.4` | `/data/testagent/dist/test-agent-programs.tar.gz` |
 | `test-agent-opencode-worker_internal-linux-amd64.tar` | `122.233.30.4` | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` |
-| `deploy/internal/` | `122.233.30.2`、`122.233.30.4` | `/data/testagent/deploy/internal/`，前端用 Nginx 模板，后端用 Compose 文件。 |
+| `deploy/internal/` | `122.233.30.2`、`122.233.30.4` | `/data/testagent/deploy/internal/`，前端用 Nginx 模板，后端用纯 Docker worker 管理脚本。 |
 
 ## 升级最新代码操作
 
@@ -450,8 +451,8 @@ cat /data/testagent/data/.serverhost
 
 ```bash
 cd /data/testagent/deploy/internal
-docker compose --env-file /data/testagent/config/docker.env up -d --force-recreate opencode-worker
-docker compose --env-file /data/testagent/config/docker.env ps
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env status
 docker logs --tail 120 test-agent-opencode-worker
 ```
 
@@ -462,8 +463,7 @@ docker logs --tail 120 test-agent-opencode-worker
 ```bash
 curl -fsS http://122.233.30.4:8080/actuator/health/readiness
 curl -fsS http://122.233.30.2/
-cd /data/testagent/deploy/internal
-docker compose --env-file /data/testagent/config/docker.env logs --tail=120 opencode-worker
+docker logs --tail 120 test-agent-opencode-worker
 ```
 
 超级管理员进入“系统管理 → 运行管理”确认 Java、manager、容器均在线；进入“系统管理 → 配置管理 → opencode公共配置管理”确认 `122.233.30.4` 已初始化公共配置。已有用户进程如需切到新 opencode/manager 版本，可在运行管理中重启对应用户进程；只替换外挂程序不会自动重启已存在的 `opencode serve` 子进程。
@@ -475,7 +475,7 @@ Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart
 因此 `opencode-worker` 的端口池必须就是宿主机发布端口：
 
 - `OPENCODE_MANAGER_PORT_START/END` 写宿主机可访问端口。
-- Compose 的 `ports` 必须保持 `hostPort:containerPort` 数值一致，例如 `4096-4105:4096-4105`。
+- `docker run` 发布端口必须保持 `hostPort:containerPort` 数值一致，例如 `4096-4105:4096-4105`。
 - 不要写 `14096:4096` 这类内外不一致映射，否则 Java 会生成错误的 `baseUrl`。
 
 每个 worker 容器内只有 1 个 `opencode-manager run` 常驻进程；manager 按端口池动态启动 0..N 个 `opencode serve` 子进程。
@@ -545,7 +545,7 @@ deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
 ```
 
 也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，实体 Nginx 直接托管 `dist/frontend`。
-第一版 `opencode-worker` 镜像里仍内置 `opencode-manager` 和 `opencode-ai` CLI；同时脚本会把这两个程序导出到 `dist/programs/`，Compose 默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。
+第一版 `opencode-worker` 镜像里仍内置 `opencode-manager` 和 `opencode-ai` CLI；同时脚本会把这两个程序导出到 `dist/programs/`，纯 Docker worker 管理脚本默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。
 
 只打某一类交付物：
 
@@ -613,7 +613,7 @@ TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 
 ```bash
 cd /data/testagent/deploy/internal
-docker compose --env-file /data/testagent/config/docker.env restart opencode-worker
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
 
 如果已有用户 `opencode serve` 子进程在运行，建议先通过平台运行管理停止或重启相关用户进程，避免旧子进程继续使用旧版本。
@@ -625,7 +625,7 @@ docker compose --env-file /data/testagent/config/docker.env restart opencode-wor
 - 静态资源根目录指向 `/data/testagent/frontend/` 或解压后的 `test-agent-frontend-dist.tar.gz`。
 - `/api`、SSE 和 WebSocket 请求反向代理到 `122.233.30.4:8080` 的 Java 后端。
 
-`deploy/internal/nginx/` 下的配置文件只作为实体 Nginx 配置参考，不由 Docker Compose 启动。
+`deploy/internal/nginx/` 下的配置文件只作为实体 Nginx 配置参考，不由 Docker 容器启动。
 
 示例模板 `deploy/internal/nginx/gateway.conf.template` 使用这些变量：
 
@@ -643,7 +643,7 @@ envsubst '${TEST_AGENT_NGINX_LISTEN_PORT} ${TEST_AGENT_FRONTEND_ROOT} ${TEST_AGE
   > /etc/nginx/conf.d/test-agent.conf
 ```
 
-## 启动 opencode worker Compose
+## 启动 opencode worker（纯 Docker）
 
 复制环境变量模板：
 
@@ -665,13 +665,14 @@ cp deploy/internal/env.example /data/testagent/config/docker.env
 
 ```bash
 cd /data/testagent/deploy/internal
-docker compose --env-file /data/testagent/config/docker.env up -d
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
 
 检查：
 
 ```bash
-docker compose --env-file /data/testagent/config/docker.env ps
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env status
+docker logs --tail 120 test-agent-opencode-worker
 ```
 
 ## 运行日志与排障
@@ -682,7 +683,7 @@ docker compose --env-file /data/testagent/config/docker.env ps
 |---|---|---|
 | 前端 Nginx | `tail -f /var/log/nginx/access.log /var/log/nginx/error.log` | 静态资源、`/api` 反代、SSE/WebSocket upgrade 和 502/504。 |
 | Java 后端 | `journalctl -u test-agent-backend -f` | 登录、API、Flyway、Redis、manager WebSocket、用户初始化流程和统一错误 traceId。 |
-| worker/manager | `docker logs -f test-agent-opencode-worker` 或 `docker compose --env-file /data/testagent/config/docker.env logs -f opencode-worker` | manager 是否读取到 `.serverid/.serverhost`、是否连接 Java、是否收到 `configUpdate`、端口池和心跳。 |
+| worker/manager | `docker logs -f test-agent-opencode-worker` | manager 是否读取到 `.serverid/.serverhost`、是否连接 Java、是否收到 `configUpdate`、端口池和心跳。 |
 | 用户 opencode 子进程 | `/data/testagent/data/agent-opencode/manager/worker/logs/{port}.log` | 单个用户 `opencode serve` 的 stdout/stderr，排查模型、插件、skill、OpenCode schema 和健康检查。 |
 | manager 本地 state | `/data/testagent/data/agent-opencode/manager/worker/processes/{port}.json` | manager 记录的 PID、端口、session/config path；这是运行状态，不是普通日志。 |
 
@@ -709,7 +710,7 @@ tail -n 200 /data/testagent/data/agent-opencode/manager/worker/logs/4096.log
 日志处理要求：
 
 - Java 后端使用 console 日志，systemd 部署时由 journald 接管；如现场改为 `nohup`，把 stdout/stderr 写到 `/data/testagent/logs/backend.log` 并配置 logrotate，不要写进仓库目录。
-- worker 使用 Docker stdout；建议在 Docker daemon 或 Compose 层配置 `json-file` 日志轮转，避免 `/var/lib/docker/containers` 被 manager 心跳日志打满。
+- worker 使用 Docker stdout；建议在 Docker daemon 层配置 `json-file` 日志轮转，避免 `/var/lib/docker/containers` 被 manager 心跳日志打满。
 - `/data/testagent/data/agent-opencode/manager/worker/processes/*.json` 是 manager 运行态 state，不要当日志清理；只有确认对应用户进程已停止且需要清理坏 state 时，才在停 worker 或通过运行管理停止进程后处理。
 - `/data/testagent/data/agent-opencode/manager/worker/logs/{port}.log` 可按端口归档；归档前先确认是否仍有同端口进程在运行，避免截断正在写入的文件。
 - 对外发送日志前必须脱敏 `Authorization`、token、Cookie、完整 prompt、私钥和用户完整输入；优先提供 traceId、userId、linuxServerId、containerId、port、错误码和最后 200 行上下文。

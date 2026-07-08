@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 企业内 worker 部署改为纯 Docker
+
+- Why:
+  - 企业内导入部署后续不再使用 `docker compose`，部署流程、README 和排障命令需要避免继续引导现场人员走 compose。
+- What:
+  - 删除 `deploy/internal/docker-compose.yml`，新增 `deploy/internal/opencode-worker-docker.sh`，用纯 `docker run/rm/ps/logs` 管理 `test-agent-opencode-worker`；同步更新 `deploy/internal/README.md`、`deploy/internal/env.example`、`docs/deployment/backend.md` 和 `docs/deployment/frontend.md`。
+- How:
+  - 保留 `/data/testagent/config/docker.env` 作为打包和 worker 启动的外置环境变量文件，Java 配置仍在 `/data/testagent/config/backend.env`；不修改本机或企业真实 `.env`。
+- Result:
+  - `bash -n deploy/internal/opencode-worker-docker.sh`、`deploy/internal/opencode-worker-docker.sh --env-file deploy/internal/env.example status`、`bash -n deploy/internal/package-release.sh`、`bash -n deploy/internal/opencode-worker-entrypoint.sh`、`git diff --check`、后端 readiness 和前端 HTTP 200 通过。
+
 ### 2026-07-08 - 修复企业打包脚本本地默认输出目录
 
 - Why:
