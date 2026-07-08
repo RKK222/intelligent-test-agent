@@ -4186,27 +4186,15 @@ function onCompositionEnd() {
           <span v-else class="figma-chat-usage-dot" aria-hidden="true" />
           <span class="figma-chat-usage-label">任务消耗：</span>
           <span class="figma-chat-usage-value">
-            <template
-              v-if="
-                displayTokens !== undefined ||
-                taskUsage?.totalDuration
-              "
-              >(</template
-            >
             <template v-if="taskUsage?.totalDuration">
-              {{ taskUsage.totalDuration }}</template
-            >
-
+              {{ taskUsage.totalDuration }}
+            </template>
+            <template v-if="taskUsage?.totalDuration && displayTokens !== undefined">
+              &nbsp;
+            </template>
             <template v-if="displayTokens !== undefined">
-              · ↓ {{ formatTokens(displayTokens) }} tokens</template
-            >
-            <template
-              v-if="
-                displayTokens !== undefined ||
-                taskUsage?.totalDuration
-              "
-              >)</template
-            >
+              {{ formatTokens(displayTokens) }} tokens
+            </template>
           </span>
         </template>
       </div>
