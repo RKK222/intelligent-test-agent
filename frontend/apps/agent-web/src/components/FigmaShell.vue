@@ -1740,20 +1740,37 @@ function submitJoinApp() {
   transition: background-color 0.14s ease;
 }
 
+.figma-files-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 36px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.1);
+  transition: background-color 0.15s ease, height 0.15s ease;
+}
+
 .figma-files-resize-handle::after {
-  content: none;
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  background: transparent;
+  cursor: col-resize;
 }
 
 .figma-files-resize-handle:hover {
-  background: #e8e8e8;
+  background: #d8d8d8;
 }
 
-.figma-files-resize-handle:hover::after {
-  background: #bbb;
-}
-
-.figma-files-resize-handle:active {
-  background: #e0e0e0;
+.figma-files-resize-handle:hover::before {
+  background: rgba(0, 0, 0, 0.3);
+  height: 48px;
 }
 
 .figma-main-card-container {
@@ -1814,20 +1831,37 @@ function submitJoinApp() {
   transition: background-color 0.14s ease;
 }
 
+.figma-chat-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 36px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.1);
+  transition: background-color 0.15s ease, height 0.15s ease;
+}
+
 .figma-chat-resize-handle::after {
-  content: none;
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  background: transparent;
+  cursor: col-resize;
 }
 
 .figma-chat-resize-handle:hover {
-  background: #e8e8e8;
+  background: #d8d8d8;
 }
 
-.figma-chat-resize-handle:hover::after {
-  background: #bbb;
-}
-
-.figma-chat-resize-handle:active {
-  background: #e0e0e0;
+.figma-chat-resize-handle:hover::before {
+  background: rgba(0, 0, 0, 0.3);
+  height: 48px;
 }
 
 .figma-chat-body {

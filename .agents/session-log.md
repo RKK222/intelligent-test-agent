@@ -8,12 +8,14 @@
   - 1. 编辑器底部路径展示过长，占用太多空间，需隐藏完整路径只展示文件名并支持复制。
   - 2. 需要快速在文件树中定位当前文件的入口（瞄准器按钮）。
   - 3. 保存按钮在常态无修改下应默认隐藏以保持界面整洁。
+  - 4. 左右 resize handle 拉伸边界只有 1px 宽且无明显 Hover 指示，用户“看不出是可以移动的效果”。
 - What:
   - 1. 修改 `WorkbenchFooter.vue`，不显示路径与文件名以节约底部空间，但按钮上保留 hover 完整路径提示，点击“复制路径”可复制到剪贴板。
   - 2. 在保存按钮左侧集成瞄准器（`Target`）按钮，向外 emit `locate` 事件；并在 `FigmaEditorArea.vue` 和 `AgentWorkbench.vue` 中处理和转发为 `locateFile`。
   - 3. 限制保存按钮只在 `dirty || saving` 时通过 `v-if` 展现。
+  - 4. 优化 `FigmaShell.vue` 中左右 resize handle 的样式：用 `::after` 拓展 7px 鼠标热区，并在正中心添加垂直方向的半透明小药丸指示器手柄（高36px，宽4px，圆角2px），hover 时手柄拉伸为 48px 且颜色加深为 rgba(0,0,0,0.3)，提供与对话框输入框一致的视觉拉伸效果。
 - How:
-  - 在前端组件层以 Vue computed 提取文件名并调用 Clipboard API。通过组件自定义事件把定位行为转发至工作台的主定位方法。
+  - 在前端组件层以 Vue computed 提取文件名并调用 Clipboard API。通过组件自定义事件把定位行为转发至工作台的主定位方法。在 FigmaShell.vue 样式表里为 resize-handle 增加伪元素绝对定位、半透明小药丸把手及 hover 过渡动画。
 - Result:
   - 修改 `WorkbenchFooter.test.ts` 补充了上述三项功能的单元测试，全数通过。前端通过了 `typecheck` 和 `lint`。
 
