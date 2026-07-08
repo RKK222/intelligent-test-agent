@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 调整子智能体卡片视觉密度
+
+- Why:
+  - 上一版把子智能体卡片拆成两行后视觉过重；用户要求保持原高度，只在 Agent 名与任务标题之间增加间隔，同时完整展示 Agent 名并降低字号。
+- What:
+  - `oc-subagent-card` 恢复单行 38px 最小高度，改为 `max-content / title / status` 三列；Agent 名字号降到 10px、保持完整不省略，Agent 与标题列间距加到 18px，卡片之间保留 10px 间隔。
+- How:
+  - 仅修改 `agent-chat` 的 opencode-like CSS 和包说明，不改历史恢复逻辑、API、事件或数据库。
+- Result:
+  - `packages/agent-chat/tests/opencode-like-state.test.ts`、`@test-agent/agent-chat` typecheck 和 `git diff --check` 通过；本地后端 readiness 与前端 3000 HTTP 继续可用。
+
 ### 2026-07-08 - 修复历史子智能体空白视图与工具间距
 
 - Why:

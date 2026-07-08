@@ -180,12 +180,12 @@
 
 .oc-subagent-card {
   display: grid;
-  grid-template-columns: 104px minmax(0, 1fr) max-content;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   align-items: center;
   width: 100%;
   min-height: 38px;
   padding: 6px 10px;
-  column-gap: 14px;
+  column-gap: 18px;
   border: 1px solid var(--oc-border);
   border-radius: var(--oc-radius-sm);
   background: var(--oc-surface);
@@ -196,7 +196,7 @@
 }
 
 .oc-subagent-card + .oc-subagent-card {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .oc-subagent-card.is-clickable {
@@ -213,13 +213,11 @@
 }
 
 .oc-subagent-card__agent {
-  min-width: 0;
+  min-width: max-content;
   color: var(--oc-warning);
-  font-size: var(--oc-text-md);
+  font-size: 10px;
   font-weight: 600;
-  line-height: 20px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 16px;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -235,6 +233,7 @@
 }
 
 .oc-subagent-card__status {
+  justify-self: end;
   color: var(--oc-subtle);
   font-size: var(--oc-text-xs);
   line-height: 16px;
