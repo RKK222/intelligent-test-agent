@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 修复企业打包脚本本地默认输出目录
+
+- Why:
+  - 在 macOS 本地直接执行 `deploy/internal/package-release.sh` 时，脚本读取 `deploy/internal/.env` / `env.example` 中的 `TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist`，导致尝试创建只读根目录 `/data` 并失败；直接项目内打包应输出到 `deploy/internal/dist`。
+- What:
+  - `package-release.sh` 改为默认输出 `deploy/internal/dist`，只在显式 `--output-dir`、shell 预先导出 `TEST_AGENT_IMAGE_OUTPUT_DIR` 或显式 `--env-file` 时使用外部输出目录；同时为后端打包自动查找 JDK 25..21。同步更新 `deploy/internal/README.md` 的本地 Mac/企业 Linux 构建机路径边界。
+- How:
+  - 不修改本地未跟踪 `deploy/internal/.env`，保留企业构建机通过显式 `--env-file /data/testagent/config/docker.env` 输出 `/data/testagent/dist` 的能力。
+- Result:
+  - 通过完整 `deploy/internal/package-release.sh`，后端 jar、前端 dist、worker 镜像 tar 和外挂程序包均输出到项目内 `deploy/internal/dist`；`bash -n deploy/internal/package-release.sh`、`git diff --check`、后端 readiness 和前端 HTTP 200 通过。
+
 ### 2026-07-08 - 补齐企业内部署升级和日志处理文档
 
 - Why:

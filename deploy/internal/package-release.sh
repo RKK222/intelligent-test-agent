@@ -10,11 +10,13 @@ if [[ ! -f "${ENV_FILE}" ]]; then
 fi
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 OUTPUT_DIR_FROM_ARG=0
+ENV_FILE_FROM_ARG=0
 PLATFORM="linux/amd64"
 PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
 SAVE_TARBALL=1
+OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
 
 usage() {
   cat <<'USAGE'
@@ -27,7 +29,9 @@ Build enterprise internal delivery artifacts:
 
 Options:
   --env-file <path>       Dotenv file to read. Defaults to deploy/internal/.env, then env.example.
-  --output-dir <path>     Artifact output directory. Defaults to TEST_AGENT_IMAGE_OUTPUT_DIR or deploy/internal/dist.
+  --output-dir <path>     Artifact output directory. Defaults to deploy/internal/dist.
+                          TEST_AGENT_IMAGE_OUTPUT_DIR is honored only when exported by the shell
+                          or loaded from an explicit --env-file.
   --platform <platform>   Docker build platform for opencode-worker. Defaults to linux/amd64.
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.
@@ -41,6 +45,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --env-file)
       ENV_FILE="$2"
+      ENV_FILE_FROM_ARG=1
       shift 2
       ;;
     --output-dir)
@@ -117,6 +122,71 @@ require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Required command not found: $1" >&2
     exit 1
+  fi
+}
+
+configure_java_home() {
+  local detected_home="" java_version
+  local versions=()
+
+  if [[ -n "${JAVA_HOME:-}" && -z "${JAVA_VERSION:-}" ]] && java_home_is_usable "${JAVA_HOME}"; then
+    return
+  fi
+
+  if [[ -n "${JAVA_VERSION:-}" ]]; then
+    versions=("${JAVA_VERSION}")
+  else
+    versions=(25 24 23 22 21)
+  fi
+
+  for java_version in "${versions[@]}"; do
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      detected_home="$(/usr/libexec/java_home -v "${java_version}" 2>/dev/null || true)"
+      if [[ -n "${detected_home}" ]] && ! java_home_is_usable "${detected_home}" "${java_version}"; then
+        detected_home=""
+      fi
+    fi
+
+    if [[ -z "${detected_home}" ]]; then
+      for candidate in \
+        "${HOME}/Library/Java/JavaVirtualMachines/openjdk-${java_version}.0.1/Contents/Home" \
+        "/Library/Java/JavaVirtualMachines/openjdk-${java_version}/Contents/Home" \
+        "/usr/lib/jvm/java-${java_version}" \
+        "/usr/lib/jvm/openjdk-${java_version}" \
+        "${HOME}/.sdkman/candidates/java/current"; do
+        if [[ -d "${candidate}" ]] && java_home_is_usable "${candidate}" "${java_version}"; then
+          detected_home="${candidate}"
+          break
+        fi
+      done
+    fi
+
+    [[ -n "${detected_home}" ]] && break
+  done
+
+  if [[ -n "${detected_home}" ]]; then
+    export JAVA_HOME="${detected_home}"
+    export PATH="${JAVA_HOME}/bin:${PATH}"
+  fi
+}
+
+java_home_is_usable() {
+  local java_home="$1"
+  local expected_major="${2:-}"
+  local version_line major
+  [[ -x "${java_home}/bin/java" ]] || return 1
+  version_line="$("${java_home}/bin/java" -version 2>&1 | head -n 1 || true)"
+  if [[ "${version_line}" =~ \"1\.([0-9]+) ]]; then
+    major="${BASH_REMATCH[1]}"
+  elif [[ "${version_line}" =~ \"([0-9]+) ]]; then
+    major="${BASH_REMATCH[1]}"
+  else
+    return 1
+  fi
+  if [[ -n "${expected_major}" ]]; then
+    [[ "${major}" -eq "${expected_major}" ]]
+  else
+    [[ "${major}" -ge 21 ]]
   fi
 }
 
@@ -209,7 +279,7 @@ export_worker_programs() {
 
 load_dotenv "${ENV_FILE}"
 
-if [[ "${OUTPUT_DIR_FROM_ARG}" -eq 0 && -n "${TEST_AGENT_IMAGE_OUTPUT_DIR:-}" ]]; then
+if [[ "${OUTPUT_DIR_FROM_ARG}" -eq 0 && -n "${TEST_AGENT_IMAGE_OUTPUT_DIR:-}" && ( "${ENV_FILE_FROM_ARG}" -eq 1 || -n "${OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV}" ) ]]; then
   if [[ "${TEST_AGENT_IMAGE_OUTPUT_DIR}" = /* ]]; then
     OUTPUT_DIR="${TEST_AGENT_IMAGE_OUTPUT_DIR}"
   else
@@ -232,6 +302,7 @@ echo "Output dir: ${OUTPUT_DIR}"
 echo "Platform: ${PLATFORM}"
 
 if [[ "${PACKAGE_BACKEND}" -eq 1 ]]; then
+  configure_java_home
   require_command mvn
   package_backend
 fi
