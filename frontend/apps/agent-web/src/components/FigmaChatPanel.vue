@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSPro
 import {
   AlertTriangle,
   ArrowUpRight,
+  Bell,
   BookOpen,
   CheckCircle,
   ChevronDown,
@@ -628,7 +629,17 @@ const props =
       appName?: string
       workspaceName?: string
       version?: string
+      runtimeState?: 'running' | 'completed'
+      runId?: string
+      runStatus?: string
+      pendingQuestion?: boolean
+      attentionEventId?: string
+      attentionAt?: string
     }>
+    /** 当前用户历史中仍在运行的会话数。 */
+    historyRunningCount?: number
+    /** 当前用户历史中存在待回答 question 的会话数。 */
+    historyQuestionCount?: number
     /** 受控历史搜索词，由父组件负责远端查询。 */
     historySearch?: string
     /** 当前搜索条件下的历史总数。 */
@@ -1850,6 +1861,9 @@ const processSubmitBlocked = computed(
     !processReady.value ||
     (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
+const newConversationBlocked = computed(
+  () => !processReady.value || (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
+)
 const readonlyBlockedReason = computed(() => props.readonlyReason?.trim() ?? '')
 const readonlySubmitBlocked = computed(() => Boolean(readonlyBlockedReason.value))
 const contextSendValidation = computed(() => validateChatSend(localInput.value.trim(), props.chatContexts ?? []))
@@ -2168,6 +2182,10 @@ const historySearchQuery = computed({
 })
 const visibleHistory = computed(() => props.history || [])
 const historyTotalCount = computed(() => props.historyTotal ?? visibleHistory.value.length)
+const visibleHistoryRunningCount = computed(() => visibleHistory.value.filter((item) => item.runtimeState === 'running').length)
+const visibleHistoryQuestionCount = computed(() => visibleHistory.value.filter((item) => item.pendingQuestion).length)
+const historyRunningCount = computed(() => props.historyRunningCount ?? visibleHistoryRunningCount.value)
+const historyQuestionCount = computed(() => props.historyQuestionCount ?? visibleHistoryQuestionCount.value)
 
 function historyTime(value?: string) {
   if (!value) return '暂无'
@@ -2198,6 +2216,10 @@ function historyContextText(item: { appName?: string; workspaceName?: string; ve
     item.workspaceName?.trim() || '未知工作空间',
     item.version?.trim() || '无版本'
   ].join(' · ')
+}
+
+function historyRuntimeLabel(item: { runtimeState?: string }) {
+  return item.runtimeState === 'running' ? '运行中' : '已完成'
 }
 
 type RawOutputFilter = 'all' | RawOutputKind
@@ -2899,8 +2921,23 @@ function onCompositionEnd() {
           title="查看历史对话"
           @click="historyDrawerOpen = true; emit('open-history')"
         >
-          <History :size="15" />
+          <span class="figma-chat-history-header-icon">
+            <Loader2
+              v-if="historyRunningCount > 0"
+              :size="15"
+              class="figma-chat-history-header-spinner figma-chat-spin"
+            />
+            <History v-else :size="15" />
+            <span v-if="historyRunningCount > 0" class="figma-chat-history-running-badge">
+              {{ historyRunningCount }}
+            </span>
+          </span>
           <span>历史</span>
+          <Bell
+            v-if="historyQuestionCount > 0"
+            :size="13"
+            class="figma-chat-history-alert-bell"
+          />
         </button>
       </div>
     </header>
@@ -4109,7 +4146,7 @@ function onCompositionEnd() {
               type="button"
               class="figma-chat-card-btn figma-chat-new-btn"
               aria-label="新建对话"
-              :disabled="processSubmitBlocked"
+              :disabled="newConversationBlocked"
               @click="emit('new-conversation')"
             >
               <SquarePen class="figma-chat-btn-icon" />
@@ -4474,10 +4511,36 @@ function onCompositionEnd() {
                 @click="selectHistoryItem(item.id)"
               >
                 <div class="figma-chat-history-card-icon">
-                  <BookOpen :size="15" />
+                  <Loader2
+                    v-if="item.runtimeState === 'running'"
+                    :size="15"
+                    class="figma-chat-history-card-spinner figma-chat-spin"
+                  />
+                  <CheckCircle
+                    v-else
+                    :size="15"
+                    class="figma-chat-history-card-completed"
+                  />
+                  <Bell
+                    v-if="item.pendingQuestion"
+                    :size="10"
+                    class="figma-chat-history-card-attention"
+                  />
                 </div>
                 <div class="figma-chat-history-card-content">
-                  <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
+                  <div class="figma-chat-history-card-title-row">
+                    <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
+                    <span
+                      :class="[
+                        'figma-chat-history-card-status',
+                        item.runtimeState === 'running'
+                          ? 'figma-chat-history-card-status--running'
+                          : 'figma-chat-history-card-status--completed'
+                      ]"
+                    >
+                      {{ historyRuntimeLabel(item) }}
+                    </span>
+                  </div>
                   <div class="figma-chat-history-card-context">{{ historyContextText(item) }}</div>
                   <div class="figma-chat-history-card-meta">
                     <span>创建 {{ historyTime(item.createdAt) }}</span>
@@ -4682,6 +4745,39 @@ function onCompositionEnd() {
   color: var(--ta-text);
   background: var(--ta-hover);
   border-color: transparent;
+}
+.figma-chat-history-header-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.figma-chat-history-header-spinner {
+  color: #2563eb;
+}
+.figma-chat-history-running-badge {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  border: 1px solid var(--ta-surface);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+.figma-chat-history-alert-bell {
+  color: #d97706;
+  animation: figma-chat-bell 1.35s ease-in-out infinite;
+  transform-origin: 50% 0;
 }
 .figma-chat-raw-output-panel {
   position: fixed;
@@ -4967,22 +5063,68 @@ function onCompositionEnd() {
   transform: translateY(-1px);
 }
 .figma-chat-history-card-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
   color: var(--ta-muted);
   padding-top: 2px;
+}
+.figma-chat-history-card-spinner {
+  color: #2563eb;
+}
+.figma-chat-history-card-completed {
+  color: #16a34a;
+}
+.figma-chat-history-card-attention {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  color: #d97706;
+  fill: #fbbf24;
+  animation: figma-chat-bell 1.35s ease-in-out infinite;
+  transform-origin: 50% 0;
 }
 .figma-chat-history-card-content {
   flex: 1;
   min-width: 0;
 }
+.figma-chat-history-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
 .figma-chat-history-card-title {
+  flex: 1;
+  min-width: 0;
   font-size: 14px;
   font-weight: 500;
   color: var(--ta-text);
-  margin-bottom: 4px;
+  margin-bottom: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.figma-chat-history-card-status {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.figma-chat-history-card-status--running {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+.figma-chat-history-card-status--completed {
+  color: #166534;
+  background: #dcfce7;
 }
 .figma-chat-history-card-context {
   margin-bottom: 4px;
@@ -5741,6 +5883,25 @@ function onCompositionEnd() {
 
 .figma-chat-spin {
   animation: figma-chat-spin 1s linear infinite;
+}
+
+@keyframes figma-chat-bell {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  20% {
+    transform: rotate(14deg);
+  }
+  40% {
+    transform: rotate(-12deg);
+  }
+  60% {
+    transform: rotate(8deg);
+  }
+  80% {
+    transform: rotate(-6deg);
+  }
 }
 
 .figma-chat-running-timer {

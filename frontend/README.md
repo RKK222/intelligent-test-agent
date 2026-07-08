@@ -134,7 +134,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 - 前端不得直连 opencode server。
 - HTTP 请求只能通过 `packages/backend-api`；Run/Diff/runtime 默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` 后端 URL。
-- RunEvent SSE 只能通过 `packages/event-stream-client`；默认使用 `/api/internal/agent/opencode/runs/{runId}/events`；刷新或重进运行中会话时先通过 `backend-api.getActiveRun(sessionId)` 查询非终态 Run，再恢复 SSE 订阅；前端只把事件应用到当前订阅且仍为页面活动态的 Run。`session.status.retry` 会在右侧时间线展示原因和 60 秒倒计时，等待期间仍视为运行中，第 1/2 次到期后用最近一次 Run 草稿自动重试，第 3 次后本地兜底为失败；新 Run 请求和后到成功/取消终态会清理上一轮 `run.failed` 失败卡与 SSE 连接错误提示，避免旧 `Streaming response failed` 覆盖后续轮次。
+- RunEvent SSE 和用户级运行态 fetch SSE 只能通过 `packages/event-stream-client`；RunEvent 默认使用 `/api/internal/agent/opencode/runs/{runId}/events`，刷新或重进运行中会话时先通过 `backend-api.getActiveRun(sessionId)` 查询非终态 Run，再恢复 SSE 订阅；用户级运行态使用 `/api/internal/platform/opencode-runtime/sessions/runtime-state/events` 携带 Bearer Token 推送历史运行中计数和 `question.asked` 待答提醒。运行中点击新建对话只清空当前视图和关闭当前 RunEvent SSE，不调用 cancel/abort；前端只把 RunEvent 应用到当前订阅且仍为页面活动态的 Run。`session.status.retry` 会在右侧时间线展示原因和 60 秒倒计时，等待期间仍视为运行中，第 1/2 次到期后用最近一次 Run 草稿自动重试，第 3 次后本地兜底为失败；新 Run 请求和后到成功/取消终态会清理上一轮 `run.failed` 失败卡与 SSE 连接错误提示，避免旧 `Streaming response failed` 覆盖后续轮次。
 - 右侧 Agent 面板的“原始输出”只展示当前页面生命周期内，前端捕获的浏览器与平台后端 HTTP 请求/响应正文和 RunEvent SSE `MessageEvent.data`；它不记录 opencode server 原始事件、不落库，刷新或换浏览器后不保留。
 - `apps/agent-web` 负责组合页面；业务能力必须沉淀到对应 package。
 - opencode Web App 复刻以运行态能力为范围，交互行为参考 `opencode-source/opencode-1.17.8/packages/app`；顶层 `frontend-opencode` 承载 Vue/Vite 复刻工程，opencode `packages/web` 官网/文档/公网分享轮询不进入默认边界。

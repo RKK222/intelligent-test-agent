@@ -18,6 +18,8 @@ import com.icbc.testagent.domain.session.SessionHistoryItem;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageRole;
+import com.icbc.testagent.domain.session.SessionRuntimeState;
+import com.icbc.testagent.domain.session.SessionRuntimeStateSummary;
 import com.icbc.testagent.domain.session.SessionWorkspaceContext;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.event.RunEventSsePayload;
@@ -389,6 +391,50 @@ final class RuntimeDtos {
                     run.updatedAt(),
                     TokenUsageResponse.from(run.tokenUsage()),
                     run.costUsd());
+        }
+    }
+
+    /**
+     * 用户级会话运行态摘要响应 DTO。
+     */
+    record SessionRuntimeStateResponse(
+            int runningCount,
+            int questionCount,
+            List<SessionRuntimeStateItemResponse> sessions,
+            Instant generatedAt) {
+
+        static SessionRuntimeStateResponse from(SessionRuntimeStateSummary summary) {
+            return new SessionRuntimeStateResponse(
+                    summary.runningCount(),
+                    summary.questionCount(),
+                    summary.sessions().stream()
+                            .map(SessionRuntimeStateItemResponse::from)
+                            .toList(),
+                    summary.generatedAt());
+        }
+    }
+
+    /**
+     * 单个历史会话的运行中状态，attention 为 null 时表示不需要额外提醒。
+     */
+    record SessionRuntimeStateItemResponse(
+            String sessionId,
+            String runId,
+            String runStatus,
+            String attention,
+            String attentionEventId,
+            Instant attentionAt,
+            Instant updatedAt) {
+
+        static SessionRuntimeStateItemResponse from(SessionRuntimeState state) {
+            return new SessionRuntimeStateItemResponse(
+                    state.sessionId().value(),
+                    state.runId().value(),
+                    state.runStatus().name(),
+                    state.attention() == null ? null : state.attention().name(),
+                    state.attentionEventId(),
+                    state.attentionAt(),
+                    state.updatedAt());
         }
     }
 

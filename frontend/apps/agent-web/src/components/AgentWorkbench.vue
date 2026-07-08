@@ -7,7 +7,7 @@ import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState
 import { BackendApiError, createBackendApiClient, type RawHttpExchange } from "@test-agent/backend-api";
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
-import { subscribeRunEvents, type RunEventRawMessage } from "@test-agent/event-stream-client";
+import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
 import { Code2, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
@@ -32,6 +32,8 @@ import type {
   ProviderInfo,
   Session,
   SessionMessage,
+  SessionRuntimeState,
+  SessionRuntimeStateSummary,
   OpencodeProcessStartOperation,
   UserOpencodeProcess,
   Workspace,
@@ -230,6 +232,7 @@ const isDiffDirty = ref(false);
 const sessionSearch = ref("");
 const sessionHistoryPage = ref(1);
 const sessionHistoryItems = ref<Session[]>([]);
+const sessionRuntimeState = shallowRef<SessionRuntimeStateSummary | null>(null);
 const followUpQueue = ref<FollowUpDraft[]>([]);
 const retryDeadlines = ref<RetryDeadlineMap>({});
 const retryActionInFlightKey = ref<string | null>(null);
@@ -447,6 +450,7 @@ const selectedWorkspace = computed(() => {
 });
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
+const sessionRuntimeStateQueryKey = ["sessions", "runtime-state"] as const;
 
 const managedApplicationsQuery = useQuery({
   queryKey: ["managed-workspace", "applications"],
@@ -605,6 +609,13 @@ const sessionsQuery = useQuery({
   }
 });
 
+const sessionRuntimeStateQuery = useQuery({
+  queryKey: sessionRuntimeStateQueryKey,
+  enabled: () => authStore.isAuthenticated(),
+  queryFn: () => api.getSessionRuntimeState(),
+  refetchOnWindowFocus: false
+});
+
 watch(sessionSearchTrim, () => {
   sessionHistoryPage.value = 1;
   sessionHistoryItems.value = [];
@@ -623,6 +634,39 @@ watch(
       ...sessionHistoryItems.value,
       ...page.items.filter((item) => !seen.has(item.sessionId))
     ];
+  },
+  { immediate: true }
+);
+
+watch(
+  () => sessionRuntimeStateQuery.data.value,
+  (summary) => {
+    if (summary) {
+      sessionRuntimeState.value = summary;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => authStore.token,
+  (token, _oldToken, onCleanup) => {
+    if (!token) {
+      sessionRuntimeState.value = null;
+      return;
+    }
+    const subscription = subscribeSessionRuntimeState({
+      baseUrl: apiBaseUrl,
+      token,
+      onEvent: (summary) => {
+        sessionRuntimeState.value = summary;
+        queryClient.setQueryData(sessionRuntimeStateQueryKey, summary);
+      },
+      onStatus: (status) => {
+        logs.value = [...logs.value.slice(-200), `[runtime-state] ${status}`];
+      }
+    });
+    onCleanup(() => subscription.close());
   },
   { immediate: true }
 );
@@ -880,6 +924,10 @@ const opencodeProcessRefreshing = computed(
   () => opencodeProcessEnabled.value && Boolean(opencodeProcessStatus.value) && manualOpencodeProcessRefreshing.value
 );
 const sessionsItems = computed(() => sessionHistoryItems.value);
+const runtimeStatesBySessionId = computed<Record<string, SessionRuntimeState>>(() => {
+  const entries = sessionRuntimeState.value?.sessions ?? [];
+  return Object.fromEntries(entries.map((item) => [item.sessionId, item]));
+});
 const sessionHistoryTotal = computed(() => sessionsQuery.data.value?.total ?? sessionHistoryItems.value.length);
 const sessionHistoryHasMore = computed(() => sessionHistoryTotal.value > sessionHistoryItems.value.length);
 const sessionHistoryLoadingMore = computed(() => sessionsQuery.isFetching.value && sessionHistoryPage.value > 1);
@@ -937,7 +985,7 @@ function refreshAgentsCatalog() {
   if (!opencodeCatalogReady.value || agentsQuery.isFetching.value) return;
   void agentsQuery.refetch();
 }
-const historyList = computed(() => historyItems(run.value, sessionsItems.value));
+const historyList = computed(() => historyItems(run.value, sessionsItems.value, runtimeStatesBySessionId.value));
 const historyLoadingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 
@@ -3727,9 +3775,41 @@ function readonlyReasonForHistorySwitch(error: unknown): string {
   return "无法切换到历史会话所属工作空间，当前会话只读。";
 }
 
+function rememberCurrentRunAsBackgroundRuntimeState() {
+  const currentSession = session.value;
+  const currentRun = run.value;
+  if (!currentSession || !currentRun || !isRunBusyStatus(currentRun.status)) {
+    return;
+  }
+  const existing = sessionRuntimeState.value?.sessions.find((item) => item.sessionId === currentSession.sessionId);
+  const nextState: SessionRuntimeState = {
+    sessionId: currentSession.sessionId,
+    runId: currentRun.runId,
+    runStatus: currentRun.status,
+    attention: existing?.attention ?? null,
+    attentionEventId: existing?.attentionEventId ?? null,
+    attentionAt: existing?.attentionAt ?? null,
+    updatedAt: currentRun.updatedAt ?? new Date().toISOString()
+  };
+  const nextSessions = [
+    nextState,
+    ...(sessionRuntimeState.value?.sessions ?? []).filter((item) => item.sessionId !== currentSession.sessionId)
+  ];
+  const nextSummary: SessionRuntimeStateSummary = {
+    runningCount: nextSessions.length,
+    questionCount: nextSessions.filter((item) => item.attention === "QUESTION").length,
+    sessions: nextSessions,
+    generatedAt: new Date().toISOString()
+  };
+  sessionRuntimeState.value = nextSummary;
+  queryClient.setQueryData(sessionRuntimeStateQueryKey, nextSummary);
+}
+
 function handleNewConversation() {
+  rememberCurrentRunAsBackgroundRuntimeState();
   session.value = null;
   run.value = null;
+  void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   clearAutoRetryState();
   dispatchChat({ type: "reset" });
   messageFeedbacks.value = {};
@@ -4027,6 +4107,8 @@ async function handleLogout() {
           :history-has-more="sessionHistoryHasMore"
           :history-loading-more="sessionHistoryLoadingMore"
           :history-loading="Boolean(historyLoadingSessionId)"
+          :history-running-count="sessionRuntimeState?.runningCount ?? 0"
+          :history-question-count="sessionRuntimeState?.questionCount ?? 0"
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
           process-required

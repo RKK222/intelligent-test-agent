@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseRunEvent, subscribeRunEvents, type EventSourceLike } from "../src";
+import { describe, expect, it, vi } from "vitest";
+import { parseRunEvent, subscribeRunEvents, subscribeSessionRuntimeState, type EventSourceLike } from "../src";
 
 class FakeEventSource implements EventSourceLike {
   onopen: ((event: Event) => void) | null = null;
@@ -233,4 +233,85 @@ describe("event-stream-client", () => {
 
     expect(received).toEqual(["hel", "lo"]);
   });
+
+  it("subscribes to session runtime state with bearer token and parses snapshot plus updates", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      sseResponse([
+        "event: session-runtime.snapshot\n",
+        'data: {"runningCount":0,"questionCount":0,"sessions":[],"generatedAt":"2026-07-08T08:00:00Z"}\n\n',
+        "event: session-runtime.updated\n",
+        'data: {"runningCount":1,"questionCount":1,"sessions":[{"sessionId":"ses_1","runId":"run_1","runStatus":"RUNNING","attention":"QUESTION","attentionEventId":"evt_1","attentionAt":"2026-07-08T08:01:00Z","updatedAt":"2026-07-08T08:01:02Z"}],"generatedAt":"2026-07-08T08:01:03Z"}\n\n'
+      ])
+    );
+    const received: Array<{ runningCount: number; questionCount: number }> = [];
+    const statuses: string[] = [];
+
+    subscribeSessionRuntimeState({
+      baseUrl: "http://api",
+      token: "token_secret",
+      fetcher,
+      onStatus: (status) => statuses.push(status),
+      onEvent: (event) => received.push(event)
+    });
+
+    await waitFor(() => received.length === 2);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/sessions/runtime-state/events",
+      expect.objectContaining({ headers: expect.any(Headers), signal: expect.any(AbortSignal) })
+    );
+    const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer token_secret");
+    expect(headers.get("Accept")).toBe("text/event-stream");
+    expect(received).toEqual([
+      expect.objectContaining({ runningCount: 0, questionCount: 0 }),
+      expect.objectContaining({ runningCount: 1, questionCount: 1 })
+    ]);
+    expect(statuses).toContain("open");
+    expect(statuses.at(-1)).toBe("closed");
+  });
+
+  it("aborts the session runtime state fetch when closed", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+      capturedSignal = init?.signal as AbortSignal;
+      return Promise.resolve(new Response(new ReadableStream(), { headers: { "content-type": "text/event-stream" } }));
+    });
+    const statuses: string[] = [];
+
+    const subscription = subscribeSessionRuntimeState({
+      baseUrl: "http://api",
+      token: "token_secret",
+      fetcher,
+      onStatus: (status) => statuses.push(status),
+      onEvent: () => undefined
+    });
+
+    await waitFor(() => capturedSignal !== undefined);
+    subscription.close();
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(statuses.at(-1)).toBe("closed");
+  });
 });
+
+function sseResponse(chunks: string[]) {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        chunks.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
+        controller.close();
+      }
+    }),
+    { headers: { "content-type": "text/event-stream" } }
+  );
+}
+
+async function waitFor(predicate: () => boolean) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("condition was not met");
+}

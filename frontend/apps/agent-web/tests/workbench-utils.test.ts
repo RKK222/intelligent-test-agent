@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MessagePart, PromptPart, Run, RunDiffFile, Session, SessionMessage, SessionTreeMessagesResponse } from "@test-agent/shared-types";
+import type { MessagePart, PromptPart, Run, RunDiffFile, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import {
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
@@ -117,6 +117,52 @@ describe("historyItems", () => {
       })
     ]);
     expect(historyItems(null, sessions)).not.toContainEqual(expect.objectContaining({ id: "local" }));
+  });
+
+  it("merges runtime state and question attention into history items", () => {
+    const sessions: Session[] = [
+      {
+        sessionId: "ses_running",
+        workspaceId: "wrk_1",
+        title: "运行中历史",
+        status: "ACTIVE",
+        createdAt: "2026-07-08T09:00:00Z",
+        updatedAt: "2026-07-08T10:00:00Z"
+      },
+      {
+        sessionId: "ses_done",
+        workspaceId: "wrk_1",
+        title: "已完成历史",
+        status: "ACTIVE",
+        createdAt: "2026-07-08T09:00:00Z",
+        updatedAt: "2026-07-08T10:00:00Z"
+      }
+    ];
+    const runtimeState: SessionRuntimeState = {
+      sessionId: "ses_running",
+      runId: "run_1",
+      runStatus: "RUNNING",
+      attention: "QUESTION",
+      attentionEventId: "evt_1",
+      attentionAt: "2026-07-08T10:01:00Z",
+      updatedAt: "2026-07-08T10:01:02Z"
+    };
+
+    expect(historyItems(null, sessions, { ses_running: runtimeState })).toEqual([
+      expect.objectContaining({
+        id: "ses_running",
+        runtimeState: "running",
+        runId: "run_1",
+        runStatus: "RUNNING",
+        pendingQuestion: true,
+        attentionEventId: "evt_1"
+      }),
+      expect.objectContaining({
+        id: "ses_done",
+        runtimeState: "completed",
+        pendingQuestion: false
+      })
+    ]);
   });
 });
 

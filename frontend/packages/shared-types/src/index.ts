@@ -270,6 +270,25 @@ export type SessionWorkspaceContext = {
   version?: string | null;
 };
 
+export type SessionRuntimeAttention = "QUESTION" | string;
+
+export type SessionRuntimeState = {
+  sessionId: string;
+  runId: string;
+  runStatus: "PENDING" | "RUNNING" | "CANCELLING" | string;
+  attention?: SessionRuntimeAttention | null;
+  attentionEventId?: string | null;
+  attentionAt?: string | null;
+  updatedAt: string;
+};
+
+export type SessionRuntimeStateSummary = {
+  runningCount: number;
+  questionCount: number;
+  sessions: SessionRuntimeState[];
+  generatedAt: string;
+};
+
 export type SessionMessage = {
   messageId: string;
   sessionId: string;

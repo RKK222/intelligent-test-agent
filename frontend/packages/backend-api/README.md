@@ -15,6 +15,7 @@
 - 工作区文件列表、读取、写入、状态和删除统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。
 - 暴露 `listWorkspaceBackendServers()`、`listServerWorkspaceDirectories()`、`createServerWorkspace()` 等超级管理员服务器工作空间选择方法，目录浏览和创建也通过目标后端文件 WebSocket ticket 执行。
 - 暴露 `getActiveRun(sessionId)`，用于刷新或重进会话后恢复仍在执行的 RunEvent SSE 订阅；返回 `null` 表示当前会话没有非终态 Run。
+- 暴露 `getSessionRuntimeState()`，读取 `/api/internal/platform/opencode-runtime/sessions/runtime-state` 的当前用户历史会话运行态摘要，供工作台历史按钮和历史列表初始化运行中/待答状态。
 - Session message、Session tree 和 Run 响应透传可选 `parts`、`tokens`、`costUsd`、`events` 等新增字段，旧后端缺字段时保持兼容。
 - 暴露配置管理和个人 SSH key API 方法，统一走 `/api/internal/platform/configuration-management`，不直连 Git 服务或 opencode server；代码库新增 payload 包含 `englishName`、`repositoryType`、`deploymentMode` 和兼容 `standard`，编辑 payload 只发送名称/英文名，`listRepositoryTypes()` 读取版本库类型下拉字典，`getRepositoryDeploymentOptions()` 读取部署模式默认值与内部 SSH 前缀；`getRepositoryTree(appId, repositoryId, branch)` 读取应用关联版本库的远端目录/文件树，不落本地磁盘；应用工作空间创建支持 `operationId`/`version`/`directoryNew` 并通过 `getWorkspaceCreateOperation(operationId)` 轮询后端进度。
 - 暴露应用版本工作区和个人工作区 API 方法，统一走 `/api/internal/platform/workspace-management`，包括成员应用、模板、版本、个人空间、最近使用、diff、同步和版本工作区 `gitPullWorkspaceVersion(versionId)`；版本响应透传目标 commit 与服务器副本状态字段。

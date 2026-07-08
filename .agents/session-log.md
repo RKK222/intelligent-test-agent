@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-08 - 增加后台运行会话历史状态提醒
+
+- Why:
+  - 运行中的会话点击“新建对话”时需要转入后台继续执行，历史入口需要显示后台运行数量、运行中状态和 `question.asked` 待回答提醒，且不能破坏现有历史切换、工作区切换和 active-run 恢复流程。
+- What:
+  - 新增用户级会话运行态摘要 HTTP API 和 fetch SSE 通道，前端在工作台订阅该通道并合并到历史按钮/历史列表；运行中点击新建对话只清空当前视图和关闭当前 RunEvent SSE，不调用 cancel/abort。
+- How:
+  - 后端用 `SessionRuntimeStateApplicationService` 读取 MyBatis XML 运行态摘要，并通过 `RunEventLiveBus.streamAll()` 的 run/question 事件和低频轮询触发刷新；API 层只做鉴权、traceId、DTO 和 SSE 输出。前端新增 shared-types、backend-api、event-stream-client 方法，并在 `AgentWorkbench`/`FigmaChatPanel` 中展示 Spinner、计数徽标和铃铛。
+- Result:
+  - 定向后端新增/修改测试与前端 event-stream-client/backend-api/workbench-utils/FigmaChatPanel 测试通过；`@test-agent/agent-web` typecheck 通过。完整后端 `-am test` 仍被既有 `test-agent-workspace-management` 的 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 失败阻塞，目标模块未进入执行。
+
 ### 2026-07-08 - 优化任务消耗展示格式
 
 - Why:

@@ -156,6 +156,47 @@ payload 字段：
 
 `answers` 外层数组顺序必须与 `questions[]` 顺序一致，内层数组为该问题的一组答案文本。
 
+## 用户会话运行态 fetch SSE
+
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 是用户级历史运行状态提醒通道，用于历史按钮运行计数、旋转图标和 `question.asked` 铃铛。该通道使用 fetch SSE，而不是浏览器原生 `EventSource`，因为请求必须携带当前用户的 `Authorization: Bearer ...`。
+
+事件类型：
+
+| event name | 说明 |
+|---|---|
+| `session-runtime.snapshot` | 建连后的首帧当前快照。 |
+| `session-runtime.updated` | 后续摘要发生变化时推送。 |
+
+SSE `id` 使用本次摘要的 `generatedAt` 字符串，只用于客户端调试和日志关联，不作为可持久续传游标。客户端断线重连后应直接重新建立连接并接收新的 `session-runtime.snapshot`。
+
+data 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `runningCount` | number | 当前用户可见 ACTIVE 历史会话中，最近 Run 为 `PENDING/RUNNING/CANCELLING` 的会话数。 |
+| `questionCount` | number | 上述运行中会话里，最新 question 状态仍为 `question.asked` 的会话数。 |
+| `sessions` | array | 单会话运行态列表，同一会话最多一条最近非终态 Run。 |
+| `generatedAt` | string | 后端生成本次摘要的 ISO-8601 时间。 |
+
+`sessions[]` 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `sessionId` | string | 平台 session id。 |
+| `runId` | string | 最近非终态 Run id。 |
+| `runStatus` | string | `PENDING/RUNNING/CANCELLING`。 |
+| `attention` | string/null | 当前仅支持 `"QUESTION"`，没有待关注事项时为 `null`。 |
+| `attentionEventId` | string/null | 触发待答提醒的 `question.asked` 事件 id，仅用于展示/去重，不是续传游标。 |
+| `attentionAt` | string/null | 触发待答提醒的事件时间。 |
+| `updatedAt` | string | Run 更新时间。 |
+
+服务端触发规则：
+
+- `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled` 会触发摘要刷新。
+- `question.asked/question.replied/question.rejected` 会触发摘要刷新。
+- 低频轮询作为兜底，避免本机或 Redis 实时触发丢失时状态长期不更新。
+- 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 和 active-run 恢复。
+
 ## `session.status`
 
 `session.status` 表示 opencode session 的运行状态变化。平台会保留 opencode 原生 `status` 对象，前端必须兼容 `payload.status` 为字符串或对象两种形态。

@@ -28,6 +28,7 @@
 - 暴露 AI 回复反馈 API，Controller 只读取当前登录用户、messageId、traceId 和请求体，具体 assistant role 与归属校验由 runtime 服务完成。
 - 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、通用筛选参数传递、CSV 响应头和统一错误转换；查询服务只读 rollup。
 - `GET /api/internal/platform/opencode-runtime/sessions` 是当前登录用户历史会话分页接口，支持 `page/size/q`，返回 `workspaceContext`（应用、应用工作空间模板和版本上下文）且按 `updatedAt desc` 排序；列表不校验当前应用成员资格，点击切换时再由 workspace-management recent 接口校验权限。Session 历史正文恢复主入口是 agent-scoped session tree messages；内部平台 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 支持 `refresh=false` 只读数据库快照，供前端反馈 messageId 映射和只读 transcript 使用；active-run API 供前端刷新后恢复 SSE。
+- `GET /api/internal/platform/opencode-runtime/sessions/runtime-state` 和 `/runtime-state/events` 暴露当前登录用户历史会话运行态摘要和 fetch SSE 状态通道；Controller 只读取登录主体、traceId、映射 DTO 和输出 SSE，运行计数、question 待关注状态和事件触发刷新委托 `test-agent-opencode-runtime`。
 - 本地 CORS 默认允许主前端和 `frontend-opencode` Vite/Preview/E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式收敛。
 
 ## 允许依赖
@@ -53,6 +54,7 @@
 ## 测试覆盖
 
 - `RuntimeControllerTest` 覆盖 Workspace 查询、Session、Run、Diff、agent-scoped Run URL、当前用户 opencode 进程强状态、弱健康和初始化进度 GET、RunEvent SSE 恢复快照、Run/Session session-tree messages 和内部平台 URL。
+- `SessionRuntimeStateControllerTest` 覆盖当前登录用户运行态摘要、匿名拒绝、fetch SSE 首帧 snapshot 和 Run/question 事件后的 updated 推送。
 - `RuntimeManagementControllerTest` 覆盖运行管理 overview、按 `linuxServerId` 的后端指标历史主 API 和进程重启/停止 API 的 `SUPER_ADMIN` 成功、跨 Java 后端路由优先于本地 manager gateway、manager 下属 opencode server 明细与归属字段响应映射、命令结果响应映射、用户名筛选/响应映射、`windowMinutes` 预设窗口、`hours` 兼容、历史参数默认值与上限、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId；`RuntimeManagementBackendRoutingServiceTest` 覆盖按容器归属服务器转发命令和路由头防循环。
 - `SchedulerManagementControllerTest` 覆盖定时任务管理 API 的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝、非法状态参数、任务 patch、手动触发和运行记录查询。
 - `UserManagementControllerTest` 覆盖用户管理 API 的 `SUPER_ADMIN` 查询、创建、角色调整、角色列表和非超管/匿名拒绝。

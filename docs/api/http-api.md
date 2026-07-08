@@ -2207,8 +2207,37 @@ Session 运行态接口：
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions` | 读取 pending question。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [[...], ...] }`；`answers` 为 `List<List<String>>`，外层按子问题顺序排列，内层是该问题的选中 label，一次回复覆盖同一请求下的全部子问题。平台也兼容扁平 `string[]`，按单问题整体包成单个内层数组。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reject` | 拒绝 question。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state` | 查询当前登录用户历史会话运行态摘要，用于历史入口运行计数和 ask 提醒。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state/events` | fetch SSE 订阅当前登录用户历史会话运行态摘要变更，首帧 snapshot，后续 updated。 |
 
 旧 `/api/sessions/{sessionId}/...` 运行态入口已作废，统一返回 `410 API_GONE`。agent path 使用 `/api/internal/agent/{agentId}/session/{sessionId}/...`；当前 `opencode` 的 children、todo、diff、abort、fork、compact、revert、unrevert、command、shell 路径保持 `/api/internal/agent/opencode/session/{sessionId}/...`。permission/question 的 agent path 入口使用 `/api/internal/agent/{agentId}/permission|question`，并通过 query `sessionId` 定位平台 session。
+
+用户级会话运行态摘要只面向已登录用户，统计范围与当前用户可见历史会话一致：会话创建人、Run 触发人或消息发送人为当前用户，且会话仍为 ACTIVE。`runningCount` 只统计 `PENDING/RUNNING/CANCELLING` Run；同一会话只返回最近一个非终态 Run。`questionCount` 只统计最新 question 状态仍为 `question.asked` 的运行中会话；收到 `question.replied`、`question.rejected` 或 Run 终态后，该会话会从待关注集合移除。
+
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state` 响应仍包裹 `ApiResponse<T>`，`data` 结构为：
+
+```json
+{
+  "runningCount": 2,
+  "questionCount": 1,
+  "sessions": [
+    {
+      "sessionId": "ses_...",
+      "runId": "run_...",
+      "runStatus": "RUNNING",
+      "attention": "QUESTION",
+      "attentionEventId": "evt_...",
+      "attentionAt": "2026-07-08T14:00:00Z",
+      "updatedAt": "2026-07-08T14:00:01Z"
+    }
+  ],
+  "generatedAt": "2026-07-08T14:00:02Z"
+}
+```
+
+`attention` 目前仅支持 `"QUESTION"` 或 `null`。前端不得把 `attentionEventId` 当作通用 RunEvent 续传游标，只用于去重/展示待答提醒。
+
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 返回 `text/event-stream`，使用 fetch SSE 以携带 `Authorization: Bearer ...`。SSE data 为上面的摘要 DTO 本体，不再额外包裹 `ApiResponse`；事件名首帧为 `session-runtime.snapshot`，后续变更为 `session-runtime.updated`。服务端在 `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled/question.asked/question.replied/question.rejected` 后刷新摘要，并保留低频轮询兜底；该通道是用户级提醒通道，不替代单个 Run 的 RunEvent SSE 或 active-run 恢复。
 
 兼容和安全约束：
 

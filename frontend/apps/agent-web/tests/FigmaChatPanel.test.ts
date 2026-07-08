@@ -182,6 +182,64 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("load-more-history")).toEqual([[]]);
   });
 
+  it("shows runtime count, spinning history icon and question bell in history controls", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        historyRunningCount: 2,
+        historyQuestionCount: 1,
+        history: [
+          {
+            id: "ses_running",
+            title: "等待回答",
+            runtimeState: "running",
+            runStatus: "RUNNING",
+            pendingQuestion: true,
+            createdAt: "2026-07-08T09:00:00Z",
+            updatedAt: "2026-07-08T10:00:00Z"
+          },
+          {
+            id: "ses_done",
+            title: "已完成",
+            runtimeState: "completed",
+            createdAt: "2026-07-07T09:00:00Z",
+            updatedAt: "2026-07-07T10:00:00Z"
+          }
+        ]
+      } as any
+    });
+
+    const historyButton = wrapper.get('button[title="查看历史对话"]');
+    expect(historyButton.find(".figma-chat-history-running-badge").text()).toBe("2");
+    expect(historyButton.find(".figma-chat-history-alert-bell").exists()).toBe(true);
+
+    await historyButton.trigger("click");
+
+    expect(wrapper.find(".figma-chat-history-card-status--running").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-history-card-status--completed").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-history-card-attention").exists()).toBe(true);
+    expect(wrapper.text()).toContain("运行中");
+    expect(wrapper.text()).toContain("已完成");
+  });
+
+  it("keeps new conversation enabled while a run is active and the process is ready", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        running: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    const newConversationButton = wrapper.get(".figma-chat-new-btn");
+    expect(newConversationButton.attributes("disabled")).toBeUndefined();
+
+    await newConversationButton.trigger("click");
+
+    expect(wrapper.emitted("new-conversation")).toEqual([[]]);
+  });
+
   it("disables composer controls and exposes readonly reason on hover title", () => {
     const readonlyReason = "你已不属于该历史会话所属应用，当前会话只读。";
     const wrapper = mount(FigmaChatPanel, {

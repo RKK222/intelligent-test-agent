@@ -21,8 +21,8 @@
 ## 已有实现
 
 - `RunEventAppender`：追加 `RunEventDraft` 并返回持久化后的 `RunEvent`。
-- `RunEventLiveBus`：按 runId 发布/订阅当前进程内实时事件，durable 事件带 seq，transient 事件 `seq=0`；慢客户端或并发背压溢出时按 best-effort 丢弃当前 live 帧，不能终止全局实时通道。
-- `RunEventRemotePublisher` / `NoopRunEventRemotePublisher` / `RedisRunEventRemotePublisher`：跨实例实时广播端口、默认空实现和可选 Redis pub/sub 实现；Redis 不可用时降级为本机 live bus。
+- `RunEventLiveBus`：按 runId 发布/订阅当前进程内实时事件，并提供 `streamAll()` 全局事件触发流供用户级运行态摘要刷新使用；durable 事件带 seq，transient 事件 `seq=0`；慢客户端或并发背压溢出时按 best-effort 丢弃当前 live 帧，不能终止全局实时通道。
+- `RunEventRemotePublisher` / `NoopRunEventRemotePublisher` / `RedisRunEventRemotePublisher`：跨实例实时广播端口、默认空实现和可选 Redis pub/sub 实现；`streamAll()` 会把远端 RunEvent 广播合入全局事件触发流，Redis 不可用时降级为本机 live bus。
 - `ServerBroadcastPublisher` / `NoopServerBroadcastPublisher` / `RedisServerBroadcastPublisher`：通用服务器广播端口的 event 模块实现，当前用于应用版本工作区副本同步；默认关闭，开启 `test-agent.server-broadcast.enabled=true` 后走 Redis channel `test-agent:server-broadcast`。
 - `RunEventReplayService`：解析 `Last-Event-ID` 并按 `runId + seq` 增量回放；Session 历史树可按 root session 读取 durable 状态事件。
 - `RunEventSseMapper`：将 durable RunEvent 映射为带 `id=seq` 的 SSE，将 transient live output 映射为不带 SSE `id` 的 SSE。

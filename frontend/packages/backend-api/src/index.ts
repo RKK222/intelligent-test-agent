@@ -95,6 +95,7 @@ import type {
   SessionDiff,
   Session,
   SessionMessage,
+  SessionRuntimeStateSummary,
   SessionTreeMessagesResponse,
   SshKeyMetadata,
   SshKeyPublicKeyResponse,
@@ -898,6 +899,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     listAllSessions: (page = 1, size = 30, q?: string) =>
       request<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),
+    getSessionRuntimeState: () =>
+      request<SessionRuntimeStateSummary>(`${opencodeRuntimeBase}/sessions/runtime-state`),
     listSessions: (workspaceId: string, page = 1, size = 20) =>
       request<PageResponse<Session>>(`${opencodeRuntimeBase}/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),
     getSession: (sessionId: string) => request<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`),
