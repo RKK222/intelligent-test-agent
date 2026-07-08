@@ -9,7 +9,7 @@
 - What:
   - 更新 `.testagent/agent-opencode/.config/opencode` 下测试设计与测试执行 agent/skill Markdown：统一放宽 read/list/grep/glob/edit/bash/skill 权限，补充 `designContext/sourceFiles/sourceDirs/outputTarget` 解析，生成、审查、执行产物优先写用户显式目标。
 - How:
-  - 参考 OpenCode 中文文档的 agents、skills、permissions 与 config 说明，保留 Task 编排和真实执行业务约束；`.testagent/` 仍是 ignored 运行时目录，本次只精确 force-add 被修改的 Markdown，不纳入 `opencode.jsonc`、node_modules 或敏感配置。
+  - 参考 OpenCode 中文文档的 agents、skills、permissions 与 config 说明，保留 Task 编排和真实执行业务约束；`.testagent/agent-opencode/.config` 是独立 Git 配置仓库，本次只在该仓库暂存被修改的 Markdown，不纳入 `opencode.jsonc`、node_modules 或敏感配置。
 - Result:
   - `OPENCODE_CONFIG_DIR=.testagent/agent-opencode/.config/opencode opencode agent list` 可读取配置；agent frontmatter、skill 名称与 deny 权限扫描通过。未改后端、前端 API、数据库或 generated SDK。
 
