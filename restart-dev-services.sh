@@ -329,6 +329,25 @@ apply_manager_backend_port_defaults() {
   fi
 }
 
+prepare_manager_server_identity_files() {
+  if ! should_start_opencode_manager; then
+    return
+  fi
+
+  local data_root server_id server_host
+  data_root="${SYS_DATA_ROOT_DIR:-}"
+  if [[ -z "${data_root}" ]]; then
+    return
+  fi
+
+  server_id="${TEST_AGENT_LINUX_SERVER_ID:-$(hostname)}"
+  server_host="${TEST_AGENT_SERVER_ADVERTISED_HOST:-$(url_host "${backend_url}")}"
+  mkdir -p "${data_root}"
+  printf '%s\n' "${server_id}" >"${data_root}/.serverid"
+  printf '%s\n' "${server_host}" >"${data_root}/.serverhost"
+  echo "Prepared opencode-manager identity files under ${data_root} for server ${server_id} at ${server_host}."
+}
+
 is_local_opencode_url() {
   local url="$1"
   local host local_ipv4
@@ -829,8 +848,8 @@ start_opencode_manager() {
   : >"${LOG_DIR}/opencode-manager.log"
   if command -v screen >/dev/null 2>&1; then
     local manager_cmd
-    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_CONTAINER_ID=%q OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_BIN=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
-      "${ROOT_DIR}" "${container_id}" "${backend_port}" "${port_start}" "${port_end}" "${manager_state_dir}" "${bin}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode-manager.log"
+    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_CONTAINER_ID=%q OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_BIN=%q SYS_DATA_ROOT_DIR=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
+      "${ROOT_DIR}" "${container_id}" "${backend_port}" "${port_start}" "${port_end}" "${manager_state_dir}" "${bin}" "${SYS_DATA_ROOT_DIR}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode-manager.log"
     screen -dmS "${OPENCODE_MANAGER_SCREEN_SESSION}" bash -lc "${manager_cmd}"
   else
     (
@@ -842,6 +861,7 @@ start_opencode_manager() {
       export OPENCODE_MANAGER_TOKEN="${TEST_AGENT_OPENCODE_MANAGER_TOKEN}"
       export OPENCODE_MANAGER_STATE_DIR="${manager_state_dir}"
       export OPENCODE_BIN="${bin}"
+      export SYS_DATA_ROOT_DIR="${SYS_DATA_ROOT_DIR}"
       export OPENCODE_ALLOWED_CORS="http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}"
       export OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
       export OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
@@ -889,12 +909,15 @@ frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
 # TESTAGENT 是早期本地测试库已使用的兼容别名，保留以避免公共配置路径下发给 manager 时变成字面量。
 export TEST_AGENT_ROOT="${TEST_AGENT_ROOT:-${ROOT_DIR}}"
 export TESTAGENT="${TESTAGENT:-${TEST_AGENT_ROOT}}"
+export SYS_DATA_ROOT_DIR="${SYS_DATA_ROOT_DIR:-${TESTAGENT}/.testagent}"
 echo "TEST_AGENT_ROOT set to: ${TEST_AGENT_ROOT}"
+echo "SYS_DATA_ROOT_DIR set to: ${SYS_DATA_ROOT_DIR}"
 
 derive_frontend_runtime_settings
 apply_frontend_origin_defaults
 apply_detected_runtime_ip_defaults
 apply_manager_backend_port_defaults
+prepare_manager_server_identity_files
 export SPRING_PROFILES_ACTIVE="${profile}"
 
 # 开发和测试默认给 opencode-manager 一个与后端共享的 token，避免每次手配本机 dotenv。

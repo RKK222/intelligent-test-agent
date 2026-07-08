@@ -25,7 +25,16 @@ const panels: Record<string, PanelDef> = {
   userManagement: { title: "用户管理（测试）", component: SettingsUserManagementPanel }
 };
 
-const current = computed<PanelDef>(() => panels[props.activeKey] ?? panels.appWorkspace);
+const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+
+const effectiveKey = computed(() => {
+  if (hasSuperAdmin.value) {
+    return panels[props.activeKey] ? props.activeKey : "appWorkspace";
+  }
+  return "personal";
+});
+
+const current = computed<PanelDef>(() => panels[effectiveKey.value] ?? panels.personal);
 </script>
 
 <template>

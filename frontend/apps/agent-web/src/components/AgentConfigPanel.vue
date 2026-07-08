@@ -215,6 +215,15 @@ function isRootActive(scope: Scope) {
   return activeScope.value === scope && activeFileByScope.value[scope] === null;
 }
 
+function visibleEntries(scope: Scope, path: string) {
+  const entries = entriesByScope.value[scope][path] ?? [];
+  if (props.canWrite || path !== "") {
+    return entries;
+  }
+  // 普通用户只看 opencode 有效的 agents/skills 根目录，隐藏配置仓库工程杂项。
+  return entries.filter((entry) => entry.path === "agents" || entry.path === "skills");
+}
+
 async function loadDirectory(scope: Scope, path: string, force = false) {
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
@@ -893,16 +902,26 @@ async function submitCreateWorkspacePackage() {
 function workspaceSkillTemplate(displayName: string, packageName: string) {
   return `---
 name: ${packageName}
-description: ${displayName}应用级技能包
+description: ${displayName} application workspace skill
+compatibility: opencode
+metadata:
+  scope: workspace
+  source: test-agent
 ---
 
 # ${displayName}
 
-## Instructions
+## What I do
 
-1. Read the current application workspace files and any resources under this skill package.
-2. Apply only rules that are relevant to this application or workspace.
-3. Return verifiable output and list unresolved assumptions.
+- Load application-specific testing, design, and delivery instructions for this workspace.
+- Use the files under \`rules/\` and \`templates/\` only when they are relevant to the current task.
+- Return verifiable output and list unresolved assumptions.
+
+## When to use me
+
+Use this skill for tasks that need ${displayName} application context, reusable rules, or output templates.
+
+Ask clarifying questions when the target application, version, or workspace is ambiguous.
 
 ## Resources
 
@@ -912,16 +931,16 @@ description: ${displayName}应用级技能包
 }
 
 function workspaceRulesTemplate(displayName: string) {
-  return `# ${displayName}规则
+  return `# ${displayName} Rules
 
-在此目录新增应用专属规则 Markdown 文件，并在 \`../SKILL.md\` 的使用流程中说明读取时机。
+Add application-specific rule Markdown files here. Reference them from \`../SKILL.md\` only when the skill should load them for a concrete workflow.
 `;
 }
 
 function workspaceTemplatesTemplate(displayName: string) {
-  return `# ${displayName}模板
+  return `# ${displayName} Templates
 
-在此目录新增应用专属输出模板，并在 \`../SKILL.md\` 中说明模板用途和选择条件。
+Add reusable output templates here. Document the purpose and selection conditions in \`../SKILL.md\`.
 `;
 }
 
@@ -933,9 +952,9 @@ function slugifyPackageName(value: string) {
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/[^a-z0-9]+/g, "-")
     .replace(/-{2,}/g, "-")
-    .replace(/^[._-]+|[._-]+$/g, "")
+    .replace(/^-+|-+$/g, "")
     .slice(0, 64);
 }
 
@@ -1243,7 +1262,7 @@ defineExpose({
         </div>
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <AgentConfigTreeNode
-          v-for="entry in entriesByScope.PUBLIC[''] ?? []"
+          v-for="entry in visibleEntries('PUBLIC', '')"
           :key="`PUBLIC:${entry.path}`"
           :entry="entry"
           :depth="0"
@@ -1295,7 +1314,7 @@ defineExpose({
       <div v-if="rootExpanded.has('WORKSPACE')" class="agent-node-list">
         <div v-if="loadingByScope.WORKSPACE.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <AgentConfigTreeNode
-          v-for="entry in entriesByScope.WORKSPACE[''] ?? []"
+          v-for="entry in visibleEntries('WORKSPACE', '')"
           :key="`WORKSPACE:${entry.path}`"
           :entry="entry"
           :depth="0"

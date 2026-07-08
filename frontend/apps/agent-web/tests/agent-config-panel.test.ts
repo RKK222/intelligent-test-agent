@@ -172,6 +172,33 @@ describe("AgentConfigPanel", () => {
     expect(view.container.querySelector("use")?.getAttribute("href")).toContain("#Readme");
   });
 
+  it("keeps agents and skills visible for normal users while hiding repository root noise", async () => {
+    apiClientMock.listPublicAgentFiles.mockResolvedValue([
+      { path: ".DS_Store", name: ".DS_Store", type: "file" },
+      { path: ".gitignore", name: ".gitignore", type: "file" },
+      { path: ".keep", name: ".keep", type: "file" },
+      { path: "agents", name: "agents", type: "directory" },
+      { path: "node_modules", name: "node_modules", type: "directory" },
+      { path: "opencode.jsonc", name: "opencode.jsonc", type: "file" },
+      { path: "package-lock.json", name: "package-lock.json", type: "file" },
+      { path: "package.json", name: "package.json", type: "file" },
+      { path: "skills", name: "skills", type: "directory" }
+    ]);
+
+    const { view } = renderPanel(undefined, { canWrite: false });
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    expect(await view.findByText("agents")).toBeTruthy();
+    expect(await view.findByText("skills")).toBeTruthy();
+    expect(view.queryByText(".DS_Store")).toBeNull();
+    expect(view.queryByText(".gitignore")).toBeNull();
+    expect(view.queryByText(".keep")).toBeNull();
+    expect(view.queryByText("node_modules")).toBeNull();
+    expect(view.queryByText("opencode.jsonc")).toBeNull();
+    expect(view.queryByText("package-lock.json")).toBeNull();
+    expect(view.queryByText("package.json")).toBeNull();
+  });
+
   it("highlights the opened agent file instead of keeping the root scope active", async () => {
     apiClientMock.listPublicAgentFiles.mockResolvedValue([
       { path: ".gitignore", name: ".gitignore", type: "file" }
@@ -244,9 +271,12 @@ describe("AgentConfigPanel", () => {
     ]);
     const skillContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
     expect(skillContent).toContain("name: zhi-fu-ce-shi-ji-neng");
-    expect(skillContent).toContain("description: 支付测试技能应用级技能包");
+    expect(skillContent).toContain("description: 支付测试技能 application workspace skill");
+    expect(skillContent).toContain("compatibility: opencode");
+    expect(skillContent).toContain("metadata:");
     expect(skillContent).not.toContain("version:");
-    expect(skillContent).toContain("## Instructions");
+    expect(skillContent).toContain("## What I do");
+    expect(skillContent).toContain("## When to use me");
     expect(skillContent).toContain("## Resources");
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
   });
@@ -462,7 +492,7 @@ type WorkbenchStoreMock = {
   publicConfigLinuxServerId: string | null;
 };
 
-function renderPanel(setup?: (workbench: WorkbenchStoreMock) => void) {
+function renderPanel(setup?: (workbench: WorkbenchStoreMock) => void, options?: { canWrite?: boolean }) {
   const pinia = createPinia();
   const workbench = currentWorkbenchStore();
   setup?.(workbench);
@@ -470,7 +500,7 @@ function renderPanel(setup?: (workbench: WorkbenchStoreMock) => void) {
     props: {
       baseUrl: "http://api",
       workspaceId: "wrk_1234567890abcdef",
-      canWrite: true,
+      canWrite: options?.canWrite ?? true,
       hideHeader: true
     },
     global: {

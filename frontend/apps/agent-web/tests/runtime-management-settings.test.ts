@@ -137,6 +137,7 @@ describe("runtime management settings", () => {
     });
 
     expect(superAdmin.getByText("应用管理")).toBeTruthy();
+    expect(superAdmin.getByText("版本库管理")).toBeTruthy();
     expect(superAdmin.queryByText("应用与工作区")).toBeNull();
     expect(superAdmin.queryByText("运行管理")).toBeNull();
     superAdmin.unmount();
@@ -152,6 +153,9 @@ describe("runtime management settings", () => {
         }
       }
     });
+    expect(appAdmin.queryByText("应用管理")).toBeNull();
+    expect(appAdmin.queryByText("版本库管理")).toBeNull();
+    expect(appAdmin.getByText("个人设置")).toBeTruthy();
     expect(appAdmin.queryByText("运行管理")).toBeNull();
   });
 
@@ -176,6 +180,30 @@ describe("runtime management settings", () => {
 
     expect(view.getByText("应用管理")).toBeTruthy();
     expect(view.queryByText("应用与工作区")).toBeNull();
+  });
+
+  it("falls back to personal settings when a non-super-admin receives a hidden settings key", () => {
+    const view = render(SettingsPanel, {
+      props: {
+        activeKey: "appWorkspace",
+        currentUser: {
+          userId: "usr_app",
+          username: "app",
+          unifiedAuthId: "AUTH_2",
+          roles: ["APP_ADMIN"]
+        }
+      },
+      global: {
+        stubs: {
+          SettingsAppWorkspacePanel: { template: "<div>app workspace panel</div>" },
+          SettingsPersonalPanel: { template: "<div>personal panel</div>" }
+        }
+      }
+    });
+
+    expect(view.getByText("个人设置")).toBeTruthy();
+    expect(view.getByText("personal panel")).toBeTruthy();
+    expect(view.queryByText("app workspace panel")).toBeNull();
   });
 
   it("loads runtime management overview and renders empty state", async () => {

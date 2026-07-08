@@ -17,10 +17,13 @@ const emit = defineEmits<{
 type MenuItem = { key: MenuKey; label: string; icon: Component };
 
 const items = computed<MenuItem[]>(() => {
-  const menuItems: MenuItem[] = [
-    { key: "appWorkspace", label: "应用管理", icon: Setting },
-    { key: "repository", label: "版本库管理", icon: Folder }
-  ];
+  const menuItems: MenuItem[] = [];
+  if (props.currentUser?.roles?.includes("SUPER_ADMIN")) {
+    menuItems.push(
+      { key: "appWorkspace", label: "应用管理", icon: Setting },
+      { key: "repository", label: "版本库管理", icon: Folder }
+    );
+  }
   menuItems.push({ key: "personal", label: "个人设置", icon: User });
   // 用户管理（测试）仅超级管理员可见
   if (props.currentUser?.roles?.includes("SUPER_ADMIN")) {

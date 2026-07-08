@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-08 - 收紧非超管配置入口并修复本地 manager 身份目录
+
+- Why:
+  - 普通用户切到 Agent 配置页时会看到公共配置仓库根目录中的 `.DS_Store`、`node_modules`、`package.json` 等工程杂项；设置页对非 `SUPER_ADMIN` 暴露应用管理和版本库管理入口也不符合当前权限要求。另一次本地 `wr` 用户初始化 opencode 失败定位到 Go manager 读取 `$HOME/.testagent/.serverhost` 旧 IP，未与 Java 使用的 `SYS_DATA_ROOT_DIR` 对齐。
+- What:
+  - 前端设置页只给 `SUPER_ADMIN` 展示应用管理、版本库管理和用户管理，非超管强制回落个人设置；Agent 配置树对普通用户仍展示 `agents/` 与 `skills/`，仅隐藏根级工程杂项；应用级新建 skill 按当前 opencode skill 模板生成 `name/description/compatibility/metadata` frontmatter。
+  - `restart-dev-services.sh` 默认导出 `SYS_DATA_ROOT_DIR=${TESTAGENT}/.testagent`，启动 manager 前写入同目录 `.serverid/.serverhost`，并把该环境变量传给 screen/nohup manager 进程。
+- How:
+  - 未改用户进程绑定、调度或启动公共服务链路；用户 opencode 进程仍由 `OpencodeProcessStartupService`、binding、execution node、manager state 和健康检查决定。脚本改动只修复本机 Java 与 Go manager 的控制面连接引导目录一致性。
+- Result:
+  - 通过 `bash -n restart-dev-services.sh`、`tools/verify-dev-scripts.sh`、`corepack pnpm --dir frontend test apps/agent-web/tests/agent-config-panel.test.ts apps/agent-web/tests/runtime-management-settings.test.ts`、`corepack pnpm --dir frontend --filter @test-agent/agent-web typecheck`、`git diff --check`；使用 `JAVA_VERSION=25 ./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 重启三服务成功，后端 health/readiness 为 `UP`，前端 `http://127.0.0.1:3000` 返回 200，`.testagent/.serverhost` 为当前 `172.20.10.2`，manager 日志显示已应用 Java 下发配置且无旧 `192.168.100.103` 断连记录。
+
 ### 2026-07-08 - 明确 opencode 全局空配置约束
 
 - Changed: 将本机 `~/.config/opencode/opencode.jsonc` / `opencode.json` 置为空 schema，并把原模型供应商配置迁到项目公共配置目录 `.testagent/agent-opencode/.config/opencode/opencode.jsonc`；同步后端、manager、HTTP API、SSE 和部署文档，明确公共配置 Git 的 `opencode/opencode.jsonc` 是模型与供应商事实源。

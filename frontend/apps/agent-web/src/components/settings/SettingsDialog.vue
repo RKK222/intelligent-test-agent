@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { provide, ref, watch } from "vue";
+import { computed, provide, ref, watch } from "vue";
 import { createBackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser } from "@test-agent/shared-types";
 import SettingsMenu from "./SettingsMenu.vue";
@@ -22,12 +22,24 @@ provide("api", api);
 
 const activeKey = ref<MenuKey>("appWorkspace");
 const autoOpenCreate = ref(false);
+const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const defaultMenuKey = computed<MenuKey>(() => hasSuperAdmin.value ? "appWorkspace" : "personal");
 
 watch(
   () => props.open,
   (open) => {
     if (open) {
-      activeKey.value = "appWorkspace";
+      activeKey.value = defaultMenuKey.value;
+      autoOpenCreate.value = false;
+    }
+  }
+);
+
+watch(
+  () => props.currentUser?.roles,
+  () => {
+    if (!hasSuperAdmin.value && activeKey.value !== "personal") {
+      activeKey.value = "personal";
       autoOpenCreate.value = false;
     }
   }
@@ -38,6 +50,10 @@ function close() {
 }
 
 function handleSwitchMenu(key: string) {
+  if (!hasSuperAdmin.value && key !== "personal") {
+    selectMenu("personal");
+    return;
+  }
   if (key === "repository") {
     autoOpenCreate.value = true;
   }
@@ -45,6 +61,11 @@ function handleSwitchMenu(key: string) {
 }
 
 function selectMenu(key: MenuKey) {
+  if (!hasSuperAdmin.value && key !== "personal") {
+    activeKey.value = "personal";
+    autoOpenCreate.value = false;
+    return;
+  }
   activeKey.value = key;
   if (key !== "repository") {
     autoOpenCreate.value = false;
