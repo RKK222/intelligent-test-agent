@@ -2,6 +2,14 @@
 
 ## Entries
 
+### 2026-07-08 - 明确 opencode 全局空配置约束
+
+- Changed: 将本机 `~/.config/opencode/opencode.jsonc` / `opencode.json` 置为空 schema，并把原模型供应商配置迁到项目公共配置目录 `.testagent/agent-opencode/.config/opencode/opencode.jsonc`；同步后端、manager、HTTP API、SSE 和部署文档，明确公共配置 Git 的 `opencode/opencode.jsonc` 是模型与供应商事实源。
+- Pitfalls: OpenCode 会合并用户全局配置和 `OPENCODE_CONFIG_DIR`，仅设置 `OPENCODE_CONFIG_DIR` 不会自动忽略 `~/.config/opencode`；本次还发现 session log 存在未解决合并标记，已保留双方条目合并。
+- Resolved: Yes - 采用企业部署前置条件：运行用户全局 opencode 配置必须为空，不改 manager 环境注入逻辑。
+- Verification: 本机 PostgreSQL 已切到存量 `127.0.0.1:15432/testagent`（`testagent/testagent`），Redis 已切到 `127.0.0.1:16379`，PostgreSQL 默认时区改为 `Asia/Shanghai`；`./restart-dev-services.sh --profile test --env-file .env.test --skip-backend-build --skip-frontend-build` 启动后，后端 readiness `UP`、前端 200、opencode-manager 进程存在。
+- Next: None。
+
 ### 2026-07-07 - 修复历史子智能体点击恢复
 
 - Why:
@@ -12,6 +20,17 @@
   - 仅修改前端历史恢复链路和测试，不改后端 API、DTO、数据库或 SSE 契约；兜底索引只在 reducer 未建立对应 child session 时生效。
 - Result:
   - `apps/agent-web/tests/workbench-utils.test.ts` 全量通过，新增 snapshot 聚焦回归通过，`vue-tsc -p apps/agent-web/tsconfig.json` 和 `git diff --check` 通过；计划要求的完整 `FigmaChatPanel.test.ts` 仍有既有 composer 拖拽高度断言失败（期望 100px、实际 40px），完整 `opencode-timeline.test.ts` 仍有既有 diff 路径展示断言失败（测试期望 `src/...`，当前 UI 显示 basename 并把完整路径放在 `title`）。
+
+### 2026-07-08 - 修复应用工作区发布成功后进度回退
+
+- Why:
+  - 个人工作区发布接口已返回 `MERGED + remotePushed=true` 后，进度 WebSocket 仍可能延迟补到旧的 `PUSH_REMOTE/RUNNING` command 事件，导致提交并推送弹窗最后一步从成功态回退为运行中，用户误以为远端仍在推送。
+- What:
+  - `GitChangesPanel.vue` 在 HTTP 发布响应确认成功后记录终态，后续忽略延迟到达的进度 WebSocket 事件；新增前端回归测试覆盖成功后晚到 `RUNNING` 事件不会覆盖四个步骤的 `SUCCEEDED` 状态。
+- How:
+  - 复用现有 `publishPersonalWorkspace` 最终响应和 `connectAgentConfigProgress` 进度事件，不新增 API、不改后端契约；只在前端进度状态机加终态保护。
+- Result:
+  - 定向 Vitest 新增用例、`git diff --check` 通过；本地后端 health 为 `UP`，前端 dev server `http://127.0.0.1:3000` 返回 200。`@test-agent/agent-web` typecheck 当前被工作区未提交的新文件 `InternalModelProviderPanel.vue` 中 `lucide-vue-next` 不存在的 `Refresh` 导入阻塞，未纳入本次修复。
 
 ### 2026-07-07 - 修复企业内 opencode worker 打包链路
 
