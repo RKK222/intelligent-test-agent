@@ -1158,6 +1158,16 @@ function questionProgressText(item: QuestionRequest): string {
   return `${currentQuestionIndex(item) + 1}/${item.questions.length} 个问题`
 }
 
+function questionTypeText(question: FigmaQuestionItem): string {
+  if (isMultipleQuestion(question)) {
+    return '多选'
+  }
+  if (isTextQuestion(question)) {
+    return '文本'
+  }
+  return '单选'
+}
+
 function questionHelpText(question: FigmaQuestionItem): string {
   if (isMultipleQuestion(question)) {
     return '可选择多个答案'
@@ -3790,7 +3800,10 @@ function onCompositionEnd() {
         >
           <div class="figma-chat-question-scroll">
             <div class="figma-chat-question-page-head">
-              <div class="figma-chat-question-progress">{{ questionProgressText(item) }}</div>
+              <div class="figma-chat-question-page-meta">
+                <div class="figma-chat-question-progress">{{ questionProgressText(item) }}</div>
+                <div class="figma-chat-question-type">{{ questionTypeText(currentQuestionRequired(item)) }}</div>
+              </div>
               <div v-if="currentQuestionRequired(item).header" class="figma-chat-question-header">
                 {{ currentQuestionRequired(item).header }}
               </div>
@@ -6028,11 +6041,30 @@ function onCompositionEnd() {
   gap: 10px;
 }
 
+.figma-chat-question-page-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
 .figma-chat-question-progress {
   font-size: 12px;
   line-height: 16px;
   font-weight: 400;
   color: var(--ta-chat-muted, #7a7a7a);
+}
+
+.figma-chat-question-type {
+  flex: 0 0 auto;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: var(--ta-chat-process-bg, #f5f5f5);
+  color: var(--ta-chat-subtle, #555555);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
 }
 
 .figma-chat-question-header {

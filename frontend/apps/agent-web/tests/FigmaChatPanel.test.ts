@@ -454,6 +454,7 @@ describe("FigmaChatPanel", () => {
     expect(composer.exists()).toBe(true);
     expect(dock.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(dock.text()).toContain("1/1 个问题");
+    expect(dock.get(".figma-chat-question-type").text()).toBe("单选");
     expect(dock.text()).toContain("请选择目标环境");
     expect(dock.text()).toContain("连接预发服务验证");
 
@@ -576,6 +577,8 @@ describe("FigmaChatPanel", () => {
         ]
       } as any
     });
+
+    expect(wrapper.get(".figma-chat-question-type").text()).toBe("多选");
 
     await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("需求文档"))!.trigger("click");
     await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("UI 界面"))!.trigger("click");
