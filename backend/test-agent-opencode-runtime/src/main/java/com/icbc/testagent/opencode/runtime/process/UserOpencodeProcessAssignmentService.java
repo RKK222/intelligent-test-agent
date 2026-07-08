@@ -435,6 +435,7 @@ public class UserOpencodeProcessAssignmentService {
                 command.baseUrl(),
                 command.sessionPath(),
                 command.configPath(),
+                command.environment(),
                 traceId), progress);
         progress.succeeded(process.processId().value(), serviceAddress(process));
         return ready(process, "opencode 进程可用", now);
@@ -552,6 +553,7 @@ public class UserOpencodeProcessAssignmentService {
                 baseUrl,
                 sessionPath(port),
                 configPath(),
+                Map.of(),
                 traceId);
     }
 

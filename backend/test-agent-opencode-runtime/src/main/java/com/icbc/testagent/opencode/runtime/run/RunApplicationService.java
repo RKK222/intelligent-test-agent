@@ -306,17 +306,7 @@ public class RunApplicationService {
                 input.sessionId().value(),
                 traceId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
-        if (modelCatalogService != null && modelCatalogService.internalSourceEnabled() && userId == null) {
-            throw new PlatformException(
-                    ErrorCode.UNAUTHENTICATED,
-                    "internal model source requires current login user");
-        }
         UserOpencodeProcessAssignment userProcessAssignment = resolveUserProcessAssignment(userId, resolvedAgentId, traceId);
-        if (modelCatalogService != null && modelCatalogService.internalSourceEnabled() && userProcessAssignment == null) {
-            throw new PlatformException(
-                    ErrorCode.OPENCODE_UNAVAILABLE,
-                    "internal model source requires dedicated user opencode process");
-        }
         Instant now = Instant.now();
         SessionId sessionId = input.sessionId();
         String prompt = input.effectivePrompt();
@@ -357,7 +347,6 @@ public class RunApplicationService {
                     workspace,
                     target.node(),
                     traceId);
-            syncProviderConfig(runtime, target.node(), traceId, userId);
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
             recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId);
@@ -494,15 +483,6 @@ public class RunApplicationService {
                 .filter(Objects::nonNull)
                 .toList());
         return parts.isEmpty() ? List.of(AgentPromptPart.text(input.effectivePrompt())) : parts;
-    }
-
-    /**
-     * 托管模型源启用时，在真正 prompt_async 前尽力同步 provider 定义到 opencode。
-     */
-    private void syncProviderConfig(AgentRuntime runtime, ExecutionNode node, String traceId, UserId userId) {
-        if (modelCatalogService != null && modelCatalogService.managedSourceEnabled()) {
-            modelCatalogService.syncProviderConfig(runtime, node, traceId, userId);
-        }
     }
 
     /**
@@ -701,34 +681,10 @@ public class RunApplicationService {
     }
 
     /**
-     * 托管模型目录启用时，运行请求中的 model 只作为期望值；目录外或格式非法的历史选择统一回退到当前默认模型。
+     * 模型目录由 opencode 原生配置文件决定，Java 端只解析 provider/model 并透传。
      */
     private ModelSelection resolveModelSelection(String model) {
-        ModelSelection requested = parseModel(model);
-        if (modelCatalogService == null || !modelCatalogService.managedSourceEnabled()) {
-            return requested;
-        }
-        List<ModelCatalogEntry> models = modelCatalogService.listModels().stream()
-                .map(this::toModelCatalogEntry)
-                .filter(Objects::nonNull)
-                .toList();
-        if (models.isEmpty()) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "当前没有可用模型，请检查模型目录配置");
-        }
-        if (requested.providerId() != null && requested.modelId() != null) {
-            Optional<ModelCatalogEntry> matched = models.stream()
-                    .filter(item -> item.providerId().equals(requested.providerId()))
-                    .filter(item -> item.modelId().equals(requested.modelId()))
-                    .findFirst();
-            if (matched.isPresent()) {
-                return requested;
-            }
-        }
-        ModelCatalogEntry fallback = models.stream()
-                .filter(ModelCatalogEntry::defaultModel)
-                .findFirst()
-                .orElse(models.getFirst());
-        return new ModelSelection(fallback.providerId(), fallback.modelId());
+        return parseModel(model);
     }
 
     private ModelCatalogEntry toModelCatalogEntry(Map<String, Object> payload) {

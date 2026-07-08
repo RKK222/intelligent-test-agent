@@ -21,6 +21,21 @@
 - Result:
   - `apps/agent-web/tests/workbench-utils.test.ts` 全量通过，新增 snapshot 聚焦回归通过，`vue-tsc -p apps/agent-web/tsconfig.json` 和 `git diff --check` 通过；计划要求的完整 `FigmaChatPanel.test.ts` 仍有既有 composer 拖拽高度断言失败（期望 100px、实际 40px），完整 `opencode-timeline.test.ts` 仍有既有 diff 路径展示断言失败（测试期望 `src/...`，当前 UI 显示 basename 并把完整路径放在 `title`）。
 
+### 2026-07-08 - 接入企业内部模型代理与 opencode 原生模型目录
+
+- Why:
+  - 企业内部模型供应商需要通过 Java 内部代理统一注入 `ICBC_OPENAI_AUTH_TOKEN`、`ucid` 和供应商标识，并把流式响应中的 `<think>...</think>` 内容转换为 `reasoning_content`；前端对话框模型/供应商目录也要回到 opencode 原生配置，不再以数据库模型目录为事实源。
+- What:
+  - 后端运行态改为 `listModels/listProviders` 始终代理 opencode `/api/model`、`/api/provider`，Run 启动不再同步 `/global/config` 或用数据库目录校验/回退模型；新增内部模型供应商领域端口、MyBatis XML 仓储、Flyway 表、内存 registry、内部 OpenAI-compatible 代理和 think SSE 转换；opencode 子进程启动时注入 `TEST_AGENT_INTERNAL_PROXY_API_KEY`、`TEST_AGENT_INTERNAL_PROXY_BASE_URL`、`ICBC_UCID`。
+  - `opencode-manager` start 协议新增 `environment`，启动命令展示会隐藏内部代理 apikey；前端系统管理新增“内部模型供应商”配置页，可维护 provider/baseUrl/enabled/sortOrder 和全局 token，只显示 token 是否配置。
+  - 同步更新 HTTP/API、事件补充、数据库、后端部署、模块 README 与 opencode 配置样例。
+- How:
+  - 新增关系型 SQL 均落在 MyBatis XML mapper，避免继续扩展 JDBC SQL；内部代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`，再向下游供应商注入数据库明文保存的 ICBC token 和 `ucid` header；新增跨实例刷新广播让各 Java 从数据库重载内存。
+- Result:
+  - 通过：相关后端模块 `compile`、runtime 后端定向测试、新增内部供应商 MyBatis/Flyway 定向测试、`opencode-manager go test ./...`、前端 `corepack pnpm typecheck`、`git diff --check`；使用 Java 25 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 成功启动后端、opencode-manager、前端，后端 readiness 为 `UP`，前端 `http://127.0.0.1:3000` 可返回 HTML。
+  - 未完全覆盖：全量后端测试仍被既有 `JdbcRepositoryIntegrationTest` 的 H2 `on conflict` 方言问题和历史 seed 断言阻塞；全量前端 Vitest 仍被既有 FigmaChatPanel、GitChangesPanel、agent-chat diff 路径展示用例阻塞。
+  - 未完成：当前管理端 `refresh-status` 返回本 Java 内存快照，广播会触发其他 Java 重载，但还没有聚合展示每个 Java 进程的刷新结果和内存快照；后续应在保持模块边界的前提下补一个跨 Java 聚合查询/转发通道。
+
 ### 2026-07-08 - 修复应用工作区发布成功后进度回退
 
 - Why:

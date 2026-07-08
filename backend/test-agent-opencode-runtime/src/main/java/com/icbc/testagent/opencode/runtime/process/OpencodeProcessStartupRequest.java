@@ -6,6 +6,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.support.DomainValidation;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -25,6 +26,7 @@ public record OpencodeProcessStartupRequest(
         String baseUrl,
         String sessionPath,
         String configPath,
+        Map<String, String> environment,
         String traceId) {
 
     public OpencodeProcessStartupRequest {
@@ -37,6 +39,7 @@ public record OpencodeProcessStartupRequest(
         baseUrl = DomainValidation.requireText(baseUrl, "baseUrl");
         sessionPath = DomainValidation.requireText(sessionPath, "sessionPath");
         configPath = DomainValidation.requireText(configPath, "configPath");
+        environment = environment == null ? Map.of() : Map.copyOf(environment);
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 }

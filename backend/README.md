@@ -114,13 +114,14 @@ cp .env.local.example .env.local
 | `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
 | `TEST_AGENT_DEPLOYMENT_MODE` | 部署模式：`external`（外部部署，默认）或 `internal`（企业内部部署）。 |
 | `TEST_AGENT_SERVER_ADVERTISED_HOST` | 当前 Java/用户 opencode server 对其它后端和浏览器可访问的主机地址；缺失时复用现有内网 IPv4 探测。 |
-| `TEST_AGENT_MODEL_CATALOG_SOURCE` | 模型目录来源：`opencode` 保持原生代理，`external` 直连 OpenAI-compatible `/models`，`internal` 从数据库读取企业内模型。local 默认 `external`，test/prod 默认 `internal`；历史 `bailian` 值保留旧 Model Studio 默认模型。 |
+| `TEST_AGENT_MODEL_CATALOG_SOURCE` | 历史兼容项。前端对话框模型/供应商目录已统一走 opencode 原生 `/api/model`、`/api/provider`，不再从数据库模型目录读取。 |
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |
-| `ICBC_OPENAI_AUTH_TOKEN` | 企业内 `icbc-openai` 访问 token；变量名可通过 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 改为其他环境变量名。 |
+| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。 |
+| `ICBC_OPENAI_AUTH_TOKEN` | 历史兼容项；新实现从数据库 `internal_model_proxy_settings` 明文读取全局 token，由前端“内部模型供应商”页面写入。 |
 | `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
 | `TEST_AGENT_ICBC_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `icbc-openai` 地址一致。 |
-| `TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME` | 企业内 OpenAI-compatible API 接收当前登录人统一认证号的 header 名，默认 `ucid`；Run 前会从当前 `User.unifiedAuthId` 取值写入用户专属 opencode 进程的 provider headers。 |
+| `TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME` | 历史兼容项；新实现固定由 opencode 配置把环境变量 `ICBC_UCID` 注入请求头 `ucid`。 |
 
 `guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh`、`restart-dev-services.sh --profile guo --env-file .env.local` 或 `restart-dev-services.ps1 -Profile guo -EnvFile .env.local` 时，`.env.local` 仍可覆盖 yml，便于本地联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile，test profile 下默认启动本机 Go manager，即使 `.env.test` 中 `TEST_AGENT_OPENCODE_BASE_URL` 指向共享测试地址；停止 manager 时会清理其托管的用户 opencode 子进程和 state JSON，防止端口池残留进程导致下次初始化失败。生产和本地都不再配置 `OPENCODE_MANAGER_ID`，Go manager 会由容器名称和固定管理进程名 `opencode-manager` 派生内部 `managerId`。
 
@@ -188,7 +189,7 @@ mvn test
 - Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent、skill 管理业务放在 `test-agent-workspace-management`。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
-- Model 目录与 opencode provider 同步逻辑放在 `test-agent-opencode-runtime`；企业内模型主数据端口放在 `test-agent-domain`，MyBatis/Flyway 实现放在 `test-agent-persistence`。
+- Model/Provider 目录始终由 opencode 配置文件决定；内部模型代理和 `<think>` 流式转换放在 `test-agent-opencode-runtime` / `test-agent-api`，内部供应商地址和 token 端口放在 `test-agent-domain`，MyBatis/Flyway 实现放在 `test-agent-persistence`。
 - 新增或修改关系型数据库 SQL 必须放在 `test-agent-persistence` 的 MyBatis XML mapper 中；存量 `Jdbc*Repository` 只保留迁移窗口，不承接新 SQL。
 - 涉及 opencode-manager 路由、Java 到 manager 控制、用户 opencode 进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway` 公共链路；禁止新增自写 Redis 快照扫描、Java->Java HTTP 转发、防循环 header、本机降级或本地绕过。涉及 opencode server 启动、停止或状态查询时，分别复用 `OpencodeProcessStartupService`、`OpencodeProcessStopService` 和 `OpencodeProcessStatusQueryService`。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。

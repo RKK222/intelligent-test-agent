@@ -1925,8 +1925,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 - `parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段，旧前端不需要改动。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
 - file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType` 是可选前端来源元数据，当前用于工作区选区附件展示，旧客户端和旧后端可忽略。
-- `model` 使用 `providerId/modelId` 字符串格式；未启用托管模型目录时，格式不完整仍保持旧行为，不向 opencode 传 model override。
-- 当后端启用托管模型目录时，前端从 Model 目录接口获取可选模型并仍按 `providerId/modelId` 提交；后端会按当前模型目录校验该期望模型。请求缺失、格式不完整或模型已不在当前目录内时，后端回退到 `defaultModel=true` 的模型，找不到默认项时使用目录首项；目录为空时返回 `VALIDATION_ERROR`，不启动远端 run。企业内默认模型为 `icbc-openai/DeepSeek-V4-Flash-W8A8`。
+- `model` 使用 `providerId/modelId` 字符串格式；Java 端只解析并透传给 opencode，不再读取数据库模型目录做校验、默认模型回退或 `/global/config` provider 同步。前端模型和供应商下拉始终以 opencode 配置文件的 `/api/model`、`/api/provider` 原生结果为准。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
 启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和进程记录中的 `baseUrl` 作为本次运行目标；`baseUrl` 由当前 advertised host 与端口生成。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
@@ -2102,11 +2101,59 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 
 Model/Provider 目录兼容说明：
 
-- `test-agent.model-catalog.source=opencode` 时，`/api/internal/platform/opencode-runtime/models` 和 `/api/internal/platform/opencode-runtime/providers` 保持原生行为，直接代理 opencode。
-- `source=external` 时，`/api/internal/platform/opencode-runtime/models` 由后端请求外部 OpenAI-compatible `/models` 获取；请求失败时返回配置内置外网模型，Provider 默认为 `external-openai`。
-- `source=bailian` 时，保留历史 Model Studio provider、`MODELSTUDIO_API_KEY` 和内置 qwen/kimi 模型清单，用于兼容旧本地配置。
-- `source=internal` 时，`/api/internal/platform/opencode-runtime/models` 从 `ai_model_configs` 表读取启用模型，Provider 为 `icbc-openai`；启动时会按 openclaw 企业 patch 的模型清单初始化表，默认模型为 `DeepSeek-V4-Flash-W8A8`。
-- Model 响应对象包含兼容字段 `id`、`modelId`、`modelID`、`providerId`、`providerID`、`name`，托管来源还会返回 `contextLimit`、`outputLimit` 和 `defaultModel`。前端优先选中 `defaultModel=true` 的模型；浏览器已保存的模型偏好若不在当前目录内或与 provider 不匹配，会自动清理并切回当前默认模型。
+- `/api/internal/platform/opencode-runtime/models` 和 `/api/internal/platform/opencode-runtime/providers` 始终代理当前用户 opencode server 的 `/api/model`、`/api/provider`，不再受 `ai_model_configs`、内部供应商表或 `test-agent.model-catalog.source` 影响。
+- 前端会把 opencode 原生 provider map 和 model map 归一化成已有 `ModelInfo` / `ProviderInfo`，但不新增数据库模型字段；浏览器历史偏好仍按当前 opencode 返回目录做前端侧清理。
+
+内部模型供应商配置 API：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/internal/platform/configuration-management/internal-model-providers` | 查询内部供应商地址配置和 token 是否已配置。 |
+| `PUT` | `/api/internal/platform/configuration-management/internal-model-providers` | 覆盖保存内部供应商地址配置；`authToken` 传空/缺失时不修改 token。 |
+| `GET` | `/api/internal/platform/configuration-management/internal-model-providers/refresh-status` | 查询当前 Java 进程内存中的启用供应商快照。 |
+| `POST` | `/api/internal/platform/configuration-management/internal-model-providers/refresh` | 发布跨实例刷新事件并返回当前 Java 内存快照。 |
+
+内部模型代理 API：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `*` | `/api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` | 仅供 opencode 子进程调用的 OpenAI-compatible 代理，不给前端 SDK 暴露会话便捷方法。 |
+
+代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-ICBC-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ICBC_UCID` 注入。Java 从内存供应商快照找到 `baseUrl` 后转发到对应 OpenAI-compatible 路径，并向上游注入 `Authorization: Bearer <ICBC_OPENAI_AUTH_TOKEN>`、`ucid` 和 traceId。流式响应中 `delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`。
+
+opencode 配置样例：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "icbc-qwen/Qwen3.6-35B-A3B",
+  "provider": {
+    "icbc-qwen": {
+      "name": "ICBC Qwen",
+      "npm": "@ai-sdk/openai-compatible",
+      "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+      "env": ["TEST_AGENT_INTERNAL_PROXY_API_KEY", "TEST_AGENT_INTERNAL_PROXY_BASE_URL", "ICBC_UCID"],
+      "options": {
+        "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
+        "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+        "headers": {
+          "X-ICBC-Model-Provider": "icbc-qwen",
+          "ucid": "{env:ICBC_UCID}"
+        }
+      },
+      "models": {
+        "Qwen3.6-35B-A3B": {
+          "name": "Qwen3.6-35B-A3B",
+          "tool_call": true,
+          "interleaved": { "field": "reasoning_content" },
+          "modalities": { "input": ["text"], "output": ["text"] },
+          "limit": { "context": 131072, "output": 16384 }
+        }
+      }
+    }
+  }
+}
+```
 
 Session 运行态接口：
 

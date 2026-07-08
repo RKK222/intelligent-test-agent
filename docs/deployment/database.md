@@ -735,7 +735,7 @@ V10 种子数据对 F-COSS 的影响：
 
 ## V12 AI 模型配置表
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V12__create_ai_model_configs.sql` 创建 `ai_model_configs`，用于企业内模型目录接口读取和默认模型控制。
+`backend/test-agent-persistence/src/main/resources/db/migration/V12__create_ai_model_configs.sql` 创建 `ai_model_configs`。该表保留历史兼容，不再作为前端对话框模型和供应商目录事实源；对话框目录始终来自 opencode 配置文件的 `/api/model`、`/api/provider`。
 
 | 字段 | 说明 |
 |---|---|
@@ -760,9 +760,13 @@ V10 种子数据对 F-COSS 的影响：
 
 兼容策略：
 
-- 启动时由 runtime 服务按配置 seed openclaw 企业 patch 中的内网模型清单；已存在的 `(provider_id, model_id)` 不会被覆盖，表内人工调整的启停、排序和默认模型会保留。
-- 表内不保存调用密钥；`ICBC_OPENAI_AUTH_TOKEN` 或自定义 token 环境变量只在运行时同步 opencode provider 配置时引用。
-- 删除模型建议先设 `enabled=false`，避免前端仍持有旧 `providerId/modelId` 时出现不可解释的目录缺失。
+- 新实现不再启动时 seed 企业内模型清单，也不再用该表校验 Run 请求模型；历史数据可留存用于追溯。
+
+`V20260708100000__create_internal_model_provider_tables.sql` 创建内部模型代理配置表：
+
+- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 保存内部供应商地址；`provider_id` 对应 opencode 配置中的 provider key 和代理请求头 `X-ICBC-Model-Provider`。
+- `internal_model_proxy_settings(setting_id='default', icbc_openai_auth_token, created_at, updated_at)` 保存全局 `ICBC_OPENAI_AUTH_TOKEN`，按需求明文保存，不回显到前端。
+- Java 启动时把启用供应商和 token 加载到内存；管理端保存后发布 `internal-model-provider.refresh-requested` 广播，各 Java 从数据库重新加载内存快照。
 
 ## V16 会话消息与 Run 消耗快照字段
 

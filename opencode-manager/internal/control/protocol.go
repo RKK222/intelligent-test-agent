@@ -67,6 +67,7 @@ type Message struct {
 	CommandID                  string            `json:"commandId,omitempty"`
 	Command                    string            `json:"command,omitempty"`
 	Port                       int               `json:"port,omitempty"`
+	Environment                map[string]string `json:"environment,omitempty"`
 	TimeoutMillis              int64             `json:"timeoutMillis,omitempty"`
 	Status                     string            `json:"status,omitempty"`
 	PID                        int               `json:"pid,omitempty"`

@@ -383,11 +383,23 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。启用 `TEST_AGENT_MODEL_CATALOG_SOURCE=internal` 时，`ModelCatalogApplicationService` 会把企业内模型清单 seed 到 `ai_model_configs`，后续可通过改表控制模型显示、启停和默认值。
 启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRegistry` 会同步代码注册任务，`ScheduledTaskRunner` 后台线程会扫描 due task 和管理员手动触发 pending run。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；停止请求会先写入 `STOPPING`，具体 handler 需在长循环或外部调用间隙检查 `ScheduledTaskContext.stopRequested()` / `throwIfStopRequested()` 后退出，最终由 runner 保存 `MANUALLY_STOPPED`。
 
-## 模型目录配置
+## 内部模型代理与模型目录配置
+
+前端对话框模型和供应商目录始终来自用户 opencode server 配置文件中的 `/api/model`、`/api/provider`，不再从数据库 `ai_model_configs` 或 `ModelCatalogApplicationService` 返回托管目录。Run 启动前也不再 `PATCH /global/config` 写入供应商、UCID 或供应商地址。
+
+Java 进程需要配置 `TEST_AGENT_INTERNAL_PROXY_API_KEY`，用于校验 opencode 子进程访问内部代理。用户 opencode server 启动时，Java 通过 manager `start` command 的 `environment` 注入：
+
+```bash
+TEST_AGENT_INTERNAL_PROXY_API_KEY=<proxy-api-key>
+TEST_AGENT_INTERNAL_PROXY_BASE_URL=http://<same-node-java>/api/internal/platform/opencode-runtime/internal-model-proxy/v1
+ICBC_UCID=<current-user-unified-auth-id>
+```
+
+`ICBC_OPENAI_AUTH_TOKEN` 不再要求通过 Java 环境变量提供；超级管理员在前端“系统管理 → 内部模型供应商”维护内部供应商 `providerId/name/baseUrl/enabled/sortOrder` 和全局 token，token 明文保存在 `internal_model_proxy_settings`，前端只展示已配置/未配置。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 配置样例”。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `TEST_AGENT_MODEL_CATALOG_SOURCE` | local: `external`；test/prod: `internal` | 模型目录来源。`opencode` 保持原生代理，`external` 直连 OpenAI-compatible `/models`，`internal` 从数据库读取企业内模型；历史本地百炼/Model Studio 配置使用 `bailian`，会展示内置 qwen/kimi 模型清单。 |
+| `TEST_AGENT_MODEL_CATALOG_SOURCE` | local: `external`；test/prod: `internal` | 历史兼容项。模型/供应商展示已统一以 opencode 配置文件为准。 |
 | `TEST_AGENT_EXTERNAL_MODEL_PROVIDER_ID` | `external-openai` | 外部 OpenAI-compatible provider ID，例如 DeepSeek 可设为 `deepseek`。 |
 | `TEST_AGENT_EXTERNAL_MODEL_PROVIDER_NAME` | `External OpenAI Compatible` | 外部 OpenAI-compatible provider 展示名。 |
 | `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 空 | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
@@ -395,8 +407,9 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 | `test-agent.model-catalog.external.api-key` | 空 | 外部模型密钥的 yml 直配值；本地 IDEA 启动优先使用该值，未配置时回退到 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 指向的环境变量。 |
 | `TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL` | 空 | 外部模式同步给 opencode 的默认模型，例如 `deepseek-v4-pro`。旧 `TEST_AGENT_BAILIAN_DEFAULT_MODEL` 仍作为兼容兜底。 |
 | `MODELSTUDIO_API_KEY` | 空 | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置的 `modelstudio` provider、`https://coding.dashscope.aliyuncs.com/v1` base URL 和 `qwen3.5-plus` 默认模型。 |
+| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | 空 | 内部模型代理鉴权 apikey，Java 校验 opencode 子进程请求并注入用户 opencode server 环境；敏感，不得写入日志或 startCommand 明文。 |
 | `TEST_AGENT_ICBC_OPENAI_BASE_URL` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | 企业内 OpenAI-compatible base URL，与 openclaw 企业 patch 保持一致。 |
-| `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 token 所在环境变量名。 |
+| `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` | `ICBC_OPENAI_AUTH_TOKEN` | 历史兼容项。新实现从数据库 `internal_model_proxy_settings` 读取全局 token。 |
 | `test-agent.model-catalog.internal.api-key` | 空 | 企业内 token 的 yml 直配值；未配置时回退到 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 指向的环境变量。 |
 | `TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME` | `ucid` | 企业内 API 接收当前登录人统一认证号的 header 名；`internal` 模式 Run 前会把当前 `User.unifiedAuthId` 写入用户专属 opencode 进程的 provider headers，避免共用进程串号。 |
 | `TEST_AGENT_ICBC_OPENAI_AUTH_MODE` | `auth-token` | 企业内调用鉴权头模式，默认写入 `Auth-Token`。 |

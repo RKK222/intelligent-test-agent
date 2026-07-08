@@ -990,6 +990,33 @@ export type CommonParameterChangeLog = {
   createdAt: string;
 };
 
+export type InternalModelProviderConfig = {
+  providerId: string;
+  name: string;
+  baseUrl: string;
+  enabled: boolean;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type InternalModelProviderManagementResponse = {
+  providers: InternalModelProviderConfig[];
+  tokenConfigured: boolean;
+};
+
+export type InternalModelProviderUpdatePayload = {
+  providers: Array<Pick<InternalModelProviderConfig, "providerId" | "name" | "baseUrl" | "enabled" | "sortOrder">>;
+  authToken?: string | null;
+};
+
+export type InternalModelProviderRefreshStatus = {
+  providers: InternalModelProviderConfig[];
+  tokenConfigured: boolean;
+  loadedAt?: string;
+  traceId?: string;
+};
+
 export type RunEventType =
   | "run.created"
   | "run.started"

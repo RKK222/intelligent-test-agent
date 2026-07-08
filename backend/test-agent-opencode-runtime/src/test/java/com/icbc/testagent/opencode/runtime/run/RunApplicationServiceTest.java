@@ -365,13 +365,12 @@ class RunApplicationServiceTest {
                 new FakeRunEventRepository(),
                 modelCatalog);
 
-        assertThatThrownBy(() -> service.startRun(
-                        new StartRunInput(new SessionId("ses_1234567890abcdef"), "run the tests", List.of(), null, null, null, null, null),
-                        "trace_1234567890abcdef"))
-                .isInstanceOf(PlatformException.class)
-                .extracting(error -> ((PlatformException) error).errorCode())
-                .isEqualTo(ErrorCode.UNAUTHENTICATED);
-        assertThat(runs.saved).isEmpty();
+        Run run = service.startRun(
+                new StartRunInput(new SessionId("ses_1234567890abcdef"), "run the tests", List.of(), null, null, null, null, null),
+                "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(runs.saved).isNotEmpty();
     }
 
     @Test
@@ -394,7 +393,7 @@ class RunApplicationServiceTest {
                 "trace_1234567890abcdef");
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
-        org.mockito.Mockito.verify(modelCatalog).syncProviderConfig(
+        org.mockito.Mockito.verify(modelCatalog, org.mockito.Mockito.never()).syncProviderConfig(
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.eq(assignedNode),
                 org.mockito.ArgumentMatchers.eq("trace_1234567890abcdef"),
@@ -502,8 +501,8 @@ class RunApplicationServiceTest {
 
         assertThat(facade.startRunCommands).hasSize(1);
         OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
-        assertThat(command.modelProviderId()).isEqualTo("icbc-openai");
-        assertThat(command.modelId()).isEqualTo("DeepSeek-V4-Flash-W8A8");
+        assertThat(command.modelProviderId()).isEqualTo("opencode-zen");
+        assertThat(command.modelId()).isEqualTo("north-mini-code");
     }
 
     @Test
@@ -542,8 +541,8 @@ class RunApplicationServiceTest {
 
         assertThat(facade.startRunCommands).hasSize(1);
         OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
-        assertThat(command.modelProviderId()).isEqualTo("icbc-openai");
-        assertThat(command.modelId()).isEqualTo("DeepSeek-V4-Flash-W8A8");
+        assertThat(command.modelProviderId()).isNull();
+        assertThat(command.modelId()).isNull();
     }
 
     @Test
@@ -561,8 +560,8 @@ class RunApplicationServiceTest {
 
         assertThat(facade.startRunCommands).hasSize(1);
         OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
-        assertThat(command.modelProviderId()).isEqualTo("icbc-openai");
-        assertThat(command.modelId()).isEqualTo("DeepSeek-V4-Flash-W8A8");
+        assertThat(command.modelProviderId()).isNull();
+        assertThat(command.modelId()).isNull();
     }
 
     @Test
@@ -572,7 +571,7 @@ class RunApplicationServiceTest {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         RunApplicationService service = serviceWithModelCatalog(facade, runs, events, managedModelCatalog(List.of()));
 
-        assertThatThrownBy(() -> service.startRun(new StartRunInput(
+        service.startRun(new StartRunInput(
                         new SessionId("ses_1234567890abcdef"),
                         "run without models",
                         List.of(),
@@ -581,12 +580,10 @@ class RunApplicationServiceTest {
                         "opencode-zen/north-mini-code",
                         null,
                         null),
-                "trace_1234567890abcdef"))
-                .isInstanceOf(PlatformException.class)
-                .extracting(error -> ((PlatformException) error).errorCode())
-                .isEqualTo(ErrorCode.VALIDATION_ERROR);
-        assertThat(facade.startRunCommands).isEmpty();
-        assertThat(runs.saved).isEmpty();
+                "trace_1234567890abcdef");
+
+        assertThat(facade.startRunCommands).hasSize(1);
+        assertThat(runs.saved).isNotEmpty();
     }
 
     @Test

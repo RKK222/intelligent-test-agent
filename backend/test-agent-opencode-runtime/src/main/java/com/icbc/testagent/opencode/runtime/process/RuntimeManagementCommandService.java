@@ -12,6 +12,7 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -134,6 +135,7 @@ public class RuntimeManagementCommandService {
                 process.baseUrl(),
                 process.sessionPath(),
                 process.configPath(),
+                Map.of(),
                 traceId);
     }
 

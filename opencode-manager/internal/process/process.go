@@ -40,8 +40,9 @@ var errPublicConfigNotInitialized = errors.New("public config directory not init
 
 // StartRequest 描述一次启动 opencode server 的本地命令。
 type StartRequest struct {
-	Port    int
-	TraceID string
+	Port        int
+	Environment map[string]string
+	TraceID     string
 }
 
 // StopRequest 描述一次停止命令，Timeout 控制 SIGTERM 后等待多久再强杀。
@@ -215,6 +216,11 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 		args = append(args, "--cors", origin)
 	}
 	env := map[string]string{"XDG_DATA_HOME": sessionPath, "OPENCODE_CONFIG_DIR": cfg.ConfigDir}
+	for key, value := range request.Environment {
+		if strings.TrimSpace(key) != "" {
+			env[key] = value
+		}
+	}
 	return StartSpec{
 		Command:      cfg.OpencodeBin,
 		Args:         args,
@@ -508,8 +514,17 @@ func flattenEnv(values map[string]string) []string {
 
 func formatStartCommand(command string, args []string, env map[string]string) string {
 	parts := make([]string, 0, len(args)+3)
-	for _, key := range []string{"XDG_DATA_HOME", "OPENCODE_CONFIG_DIR"} {
+	for _, key := range []string{
+		"XDG_DATA_HOME",
+		"OPENCODE_CONFIG_DIR",
+		"TEST_AGENT_INTERNAL_PROXY_BASE_URL",
+		"TEST_AGENT_INTERNAL_PROXY_API_KEY",
+		"ICBC_UCID",
+	} {
 		if value, ok := env[key]; ok {
+			if key == "TEST_AGENT_INTERNAL_PROXY_API_KEY" {
+				value = "<redacted>"
+			}
 			parts = append(parts, key+"="+shellQuote(value))
 		}
 	}

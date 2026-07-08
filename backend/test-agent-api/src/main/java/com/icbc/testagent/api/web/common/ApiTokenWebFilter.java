@@ -26,6 +26,11 @@ import reactor.core.publisher.Mono;
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class ApiTokenWebFilter implements WebFilter {
 
+    private static final String INTERNAL_MODEL_PROXY_PATH =
+            "/api/internal/platform/opencode-runtime/internal-model-proxy/v1/";
+    private static final String INTERNAL_MODEL_PROXY_ROOT_PATH =
+            "/api/internal/platform/opencode-runtime/internal-model-proxy/v1";
+
     private final String apiToken;
     private final ObjectMapper objectMapper;
 
@@ -50,7 +55,10 @@ public class ApiTokenWebFilter implements WebFilter {
      */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        if (!exchange.getRequest().getPath().pathWithinApplication().value().startsWith("/api/")
+        String path = exchange.getRequest().getPath().pathWithinApplication().value();
+        if (!path.startsWith("/api/")
+                || path.equals(INTERNAL_MODEL_PROXY_ROOT_PATH)
+                || path.startsWith(INTERNAL_MODEL_PROXY_PATH)
                 || apiToken == null) {
             return chain.filter(exchange);
         }

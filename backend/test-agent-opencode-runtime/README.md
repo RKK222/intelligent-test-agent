@@ -36,21 +36,13 @@
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化；不调用 opencode `/vcs/diff?mode=working`，实际 Git patch 和精确行数由工作区 Git Diff 接口读取。
 - Run Diff 查询、接受和拒绝。
 - agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
-- Model 目录编排：`opencode` 来源保持原生代理；`external` 来源直连 OpenAI-compatible `/models` 并把外部 provider 配置同步给 opencode；`internal` 来源读取 `ai_model_configs` 表并按 openclaw 企业 patch 的 `icbc-openai` 兼容配置同步给 opencode。历史 `bailian` source 保留旧 Model Studio 默认 provider 和模型清单。
+- Model/Provider 目录编排：前端对话框始终通过 runtime 代理 opencode 原生 `/api/model`、`/api/provider`，不再从 `ai_model_configs` 或 `ModelCatalogApplicationService` 返回托管目录；Run 启动前不再 `PATCH /global/config` 同步 provider。
+- 内部模型代理：按 `X-ICBC-Model-Provider` 查 JVM 内存中的内部供应商地址，向上游注入数据库保存的全局 `ICBC_OPENAI_AUTH_TOKEN` 和 `ucid`，并把流式 `<think>...</think>` 转换为 `reasoning_content`。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
 
 ## Model 目录配置
 
-`test-agent.model-catalog.source` 控制模型来源：
-
-| source | 行为 |
-|---|---|
-| `opencode` | 保持原生行为，`/api/model`、`/api/provider` 直接代理 opencode。 |
-| `external` | 外网测试模式，后端请求 `external.base-url + /models` 获取模型列表；获取失败时回退到配置内置外网模型。 |
-| `bailian` | 历史兼容模式，使用旧 Model Studio provider、`MODELSTUDIO_API_KEY` 和内置 qwen/kimi 模型清单。 |
-| `internal` | 企业内模式，启动时把 openclaw 企业 patch 中的模型清单 seed 到 `ai_model_configs`，接口从数据库读取启用模型。默认模型为 `DeepSeek-V4-Flash-W8A8`。 |
-
-在 `external`、`bailian` 和 `internal` 模式下，Run 启动前会尽力 `PATCH /global/config` 到当前 opencode 执行节点，写入 OpenAI-compatible provider、默认模型和请求头配置；模型/Provider 目录读取直接来自平台目录，不触发 opencode 健康检查。Run 请求中的 `model` 会按当前模型目录校验；请求缺失、格式非法或目录外模型会回退到 `defaultModel`，目录为空时返回 `VALIDATION_ERROR` 且不启动远端 run，避免历史浏览器偏好继续命中不可用 provider。provider API Key 优先读取 `test-agent.model-catalog.<external|internal>.api-key`，未配置时回退到 `api-key-env` 指定的环境变量，便于 IDEA 直接启动和脚本启动同时兼容。`internal` 模式要求当前登录用户和用户专属 opencode 进程，Run 前会从 `User.unifiedAuthId` 取当前用户 UCID，并按 `test-agent.model-catalog.internal.ucid-header-name`（默认 `ucid`）写入 provider headers；同步失败只记录告警，Run 仍走原有错误处理路径。
+`test-agent.model-catalog.source` 和 `ai_model_configs` 相关类保留历史兼容，但不再参与前端模型目录、供应商目录、Run 模型校验或默认模型回退。内部供应商地址维护在 `internal_model_providers`，全局 token 维护在 `internal_model_proxy_settings`；Java 启动和刷新事件会把启用供应商加载到 `InternalModelProviderRegistry`。
 
 ## 测试覆盖
 
@@ -74,7 +66,7 @@
 - `AiMessageFeedbackApplicationServiceTest` 覆盖反馈创建/更新、assistant role 校验、消息归属校验和评论长度边界。
 - `AnalyticsQueryServiceTest` 覆盖 overview 指标口径、空分母、参数边界和 CSV 不含 cost 字段。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
-- `ModelCatalogApplicationServiceTest` 覆盖企业内模型 seed、`DeepSeek-V4-Flash-W8A8` 默认模型、internal provider 配置同步时写入当前用户 UCID header，以及 opencode provider 配置同步请求；`RunApplicationServiceTest` 覆盖托管模型目录下合法选择保留、过期/非法/缺失模型回退默认模型，以及目录为空时拒绝启动。
+- `InternalModelThinkStreamConverterTest` 覆盖企业内部模型流式 `<think>` 标签跨 chunk 转换为 `reasoning_content`；模型目录接口和 Run 选择测试以 opencode 原生目录透传为准。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
 - `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码和本地进程适配。
 

@@ -219,6 +219,7 @@ class OpencodeProcessStartupServiceTest {
                 "http://10.8.0.12:4097",
                 "/data/opencode/session/4097",
                 "/data/opencode/.config/opencode/",
+                java.util.Map.of(),
                 TRACE_ID);
     }
 

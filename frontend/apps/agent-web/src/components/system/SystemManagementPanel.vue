@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, type Component } from "vue";
-import { Activity, BarChart3, CalendarClock, Settings2, SlidersHorizontal } from "lucide-vue-next";
+import { Activity, BarChart3, CalendarClock, Network, Settings2, SlidersHorizontal } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
 import ScheduledTaskManagementPanel from "./ScheduledTaskManagementPanel.vue";
 import ConfigurationManagementPanel from "./ConfigurationManagementPanel.vue";
 import GeneralParamManagementPanel from "./GeneralParamManagementPanel.vue";
 import AnalyticsManagementPanel from "./AnalyticsManagementPanel.vue";
+import InternalModelProviderPanel from "./InternalModelProviderPanel.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
 }>();
 
-type SystemMenuKey = "scheduler" | "runtime" | "params" | "config" | "analytics";
+type SystemMenuKey = "scheduler" | "runtime" | "params" | "internalModels" | "config" | "analytics";
 type SystemMenuItem = { key: SystemMenuKey; label: string; icon: Component };
 
 const activeKey = ref<SystemMenuKey>("scheduler");
@@ -22,6 +23,7 @@ const items: SystemMenuItem[] = [
   { key: "scheduler", label: "定时任务管理", icon: CalendarClock },
   { key: "runtime", label: "运行管理", icon: Activity },
   { key: "params", label: "通用参数管理", icon: SlidersHorizontal },
+  { key: "internalModels", label: "内部模型供应商", icon: Network },
   { key: "config", label: "配置管理", icon: Settings2 },
   { key: "analytics", label: "运营分析", icon: BarChart3 }
 ];
@@ -56,6 +58,7 @@ function selectMenu(key: SystemMenuKey) {
         <ScheduledTaskManagementPanel v-if="activeKey === 'scheduler'" :current-user="currentUser" />
         <RuntimeManagementPanel v-else-if="activeKey === 'runtime'" :current-user="currentUser" />
         <GeneralParamManagementPanel v-else-if="activeKey === 'params'" :current-user="currentUser" />
+        <InternalModelProviderPanel v-else-if="activeKey === 'internalModels'" :current-user="currentUser" />
         <ConfigurationManagementPanel v-else-if="activeKey === 'config'" :current-user="currentUser" />
         <AnalyticsManagementPanel v-else />
       </div>

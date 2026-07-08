@@ -46,6 +46,9 @@ import type {
   GeneralParameter,
   GeneralParameterListParams,
   GeneralParameterUpdatePayload,
+  InternalModelProviderManagementResponse,
+  InternalModelProviderRefreshStatus,
+  InternalModelProviderUpdatePayload,
   LoginRequest,
   LoginResponse,
   ManagedApplication,
@@ -1012,6 +1015,17 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }),
     listCommonParameterChangeLogs: (parameterId: string) =>
       request<CommonParameterChangeLog[]>(`${commonParameterBase}/${encodeURIComponent(parameterId)}/change-logs`),
+    getInternalModelProviders: () =>
+      request<InternalModelProviderManagementResponse>(`${configurationBase}/internal-model-providers`),
+    updateInternalModelProviders: (payload: InternalModelProviderUpdatePayload) =>
+      request<InternalModelProviderManagementResponse>(`${configurationBase}/internal-model-providers`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      }),
+    getInternalModelProviderRefreshStatus: () =>
+      request<InternalModelProviderRefreshStatus>(`${configurationBase}/internal-model-providers/refresh-status`),
+    refreshInternalModelProviders: () =>
+      request<InternalModelProviderRefreshStatus>(`${configurationBase}/internal-model-providers/refresh`, { method: "POST" }),
     getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),

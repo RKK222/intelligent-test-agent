@@ -45,7 +45,8 @@ public record ManagerControlMessage(
         List<ManagerBackendEndpoint> backendEndpoints,
         String metricsSource,
         String sessionRoot,
-        String configDir) {
+        String configDir,
+        Map<String, String> environment) {
 
     /**
      * 规整可扩展能力字段，避免调用方持有可变 Map。
@@ -55,6 +56,7 @@ public record ManagerControlMessage(
         managedProcesses = managedProcesses == null ? List.of() : List.copyOf(managedProcesses);
         connectedBackendProcessIds = connectedBackendProcessIds == null ? List.of() : List.copyOf(connectedBackendProcessIds);
         backendEndpoints = backendEndpoints == null ? List.of() : List.copyOf(backendEndpoints);
+        environment = environment == null ? Map.of() : Map.copyOf(environment);
     }
 
     /**
@@ -131,6 +133,7 @@ public record ManagerControlMessage(
                 errorCode,
                 connectedBackendProcessIds,
                 backendEndpoints,
+                null,
                 null,
                 null,
                 null);
@@ -211,6 +214,7 @@ public record ManagerControlMessage(
                 connectedBackendProcessIds,
                 backendEndpoints,
                 metricsSource,
+                null,
                 null,
                 null);
     }
@@ -491,6 +495,19 @@ public record ManagerControlMessage(
             int port,
             long timeoutMillis,
             String traceId) {
+        return command(commandId, command, port, Map.of(), timeoutMillis, traceId);
+    }
+
+    /**
+     * 构造后端发往管理进程的命令消息，并可携带单次 start 环境变量。
+     */
+    public static ManagerControlMessage command(
+            String commandId,
+            String command,
+            int port,
+            Map<String, String> environment,
+            long timeoutMillis,
+            String traceId) {
         return new ManagerControlMessage(
                 ManagerControlProtocol.TYPE_COMMAND,
                 ManagerControlProtocol.VERSION,
@@ -525,7 +542,11 @@ public record ManagerControlMessage(
                 null,
                 null,
                 null,
-                null);
+                null,
+                null,
+                null,
+                null,
+                environment);
     }
 
     /**
@@ -660,7 +681,8 @@ public record ManagerControlMessage(
                 null,
                 null,
                 sessionRoot,
-                configDir);
+                configDir,
+                null);
     }
 
     /**

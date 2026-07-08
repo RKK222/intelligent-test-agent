@@ -15,6 +15,9 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
+import com.icbc.testagent.domain.user.User;
+import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.time.Clock;
 import java.time.Duration;
@@ -47,6 +50,8 @@ public class OpencodeProcessStartupService {
     private final Duration startupHealthTimeout;
     private final Duration startupHealthPollInterval;
     private final Consumer<Duration> startupHealthSleeper;
+    private final InternalModelProxyRuntimeSettings internalProxySettings;
+    private final UserRepository userRepository;
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -58,7 +63,9 @@ public class OpencodeProcessStartupService {
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
             OpencodeProcessStatusQueryService statusQueryService,
-            ManagerControlSettings managerControlSettings) {
+            ManagerControlSettings managerControlSettings,
+            InternalModelProxyRuntimeSettings internalProxySettings,
+            UserRepository userRepository) {
         this(
                 repository,
                 executionNodeRepository,
@@ -68,7 +75,9 @@ public class OpencodeProcessStartupService {
                 Clock.systemUTC(),
                 managerControlSettings.commandTimeout(),
                 DEFAULT_STARTUP_HEALTH_POLL_INTERVAL,
-                OpencodeProcessStartupService::sleepCurrentThread);
+                OpencodeProcessStartupService::sleepCurrentThread,
+                internalProxySettings,
+                userRepository);
     }
 
     /**
@@ -129,6 +138,32 @@ public class OpencodeProcessStartupService {
             Duration startupHealthTimeout,
             Duration startupHealthPollInterval,
             Consumer<Duration> startupHealthSleeper) {
+        this(
+                repository,
+                executionNodeRepository,
+                gateway,
+                heartbeatStore,
+                statusQueryService,
+                clock,
+                startupHealthTimeout,
+                startupHealthPollInterval,
+                startupHealthSleeper,
+                null,
+                null);
+    }
+
+    OpencodeProcessStartupService(
+            OpencodeProcessManagementRepository repository,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessStatusQueryService statusQueryService,
+            Clock clock,
+            Duration startupHealthTimeout,
+            Duration startupHealthPollInterval,
+            Consumer<Duration> startupHealthSleeper,
+            InternalModelProxyRuntimeSettings internalProxySettings,
+            UserRepository userRepository) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
@@ -140,6 +175,8 @@ public class OpencodeProcessStartupService {
         this.startupHealthTimeout = positive(startupHealthTimeout, DEFAULT_STARTUP_HEALTH_TIMEOUT);
         this.startupHealthPollInterval = positive(startupHealthPollInterval, DEFAULT_STARTUP_HEALTH_POLL_INTERVAL);
         this.startupHealthSleeper = Objects.requireNonNull(startupHealthSleeper, "startupHealthSleeper must not be null");
+        this.internalProxySettings = internalProxySettings;
+        this.userRepository = userRepository;
     }
 
     /**
@@ -351,7 +388,29 @@ public class OpencodeProcessStartupService {
                 request.baseUrl(),
                 request.sessionPath(),
                 request.configPath(),
+                internalProxyEnvironment(request),
                 request.traceId());
+    }
+
+    private Map<String, String> internalProxyEnvironment(OpencodeProcessStartupRequest request) {
+        if (internalProxySettings == null) {
+            return request.environment();
+        }
+        Map<String, String> environment = new java.util.LinkedHashMap<>(request.environment());
+        environment.put(InternalModelProxyRuntimeSettings.API_KEY_ENV_NAME, internalProxySettings.requireApiKey());
+        environment.put(InternalModelProxyRuntimeSettings.BASE_URL_ENV_NAME, internalProxySettings.sameNodeProxyBaseUrl());
+        environment.put(InternalModelProxyRuntimeSettings.UCID_ENV_NAME, unifiedAuthId(request.userId()));
+        return Map.copyOf(environment);
+    }
+
+    private String unifiedAuthId(com.icbc.testagent.domain.user.UserId userId) {
+        if (userRepository == null) {
+            return userId.value();
+        }
+        return userRepository.findByUserId(userId)
+                .map(User::unifiedAuthId)
+                .filter(value -> value != null && !value.isBlank())
+                .orElse(userId.value());
     }
 
     private ExecutionNode projectExecutionNode(OpencodeServerProcess process, Instant now, String traceId) {

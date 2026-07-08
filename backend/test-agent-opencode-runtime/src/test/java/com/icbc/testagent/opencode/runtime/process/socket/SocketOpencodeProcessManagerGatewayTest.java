@@ -27,6 +27,7 @@ import com.icbc.testagent.opencode.runtime.process.OpencodeProcessStartResult;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -41,7 +42,9 @@ class SocketOpencodeProcessManagerGatewayTest {
                 new ContainerManagerId("mgr_1234567890abcdef"),
                 new OpencodeContainerId("ctr_01"),
                 new BackendProcessId("bjp_1234567890abcdef"),
-                message -> pending.complete(message.commandId(), ManagerControlMessage.commandResult(
+                message -> {
+                    assertThat(message.environment()).containsEntry("ICBC_UCID", "U001");
+                    pending.complete(message.commandId(), ManagerControlMessage.commandResult(
                         message.commandId(),
                         message.command(),
                         "STARTED",
@@ -52,7 +55,8 @@ class SocketOpencodeProcessManagerGatewayTest {
                         "/data/opencode/.config/opencode/",
                         true,
                         "started",
-                        message.traceId())));
+                        message.traceId()));
+                });
         SocketOpencodeProcessManagerGateway gateway = gateway(repository, registry, pending);
 
         OpencodeProcessStartResult result = gateway.startProcess(new OpencodeProcessStartCommand(
@@ -63,6 +67,7 @@ class SocketOpencodeProcessManagerGatewayTest {
                 "http://10.8.0.12:4096",
                 "/data/opencode/session/4096",
                 "/data/opencode/.config/opencode/",
+                Map.of("ICBC_UCID", "U001"),
                 "trace_1234567890abcdef"));
 
         assertThat(result.pid()).isEqualTo(12345L);
@@ -101,6 +106,7 @@ class SocketOpencodeProcessManagerGatewayTest {
                 "http://10.8.0.12:4096",
                 "/data/opencode/session/4096",
                 "/data/opencode/.config/opencode/",
+                Map.of(),
                 "trace_1234567890abcdef")))
                 .isInstanceOf(PlatformException.class)
                 .satisfies(error -> {
@@ -236,6 +242,7 @@ class SocketOpencodeProcessManagerGatewayTest {
                 "http://10.8.0.12:4096",
                 "/data/opencode/session/4096",
                 "/data/opencode/.config/opencode/",
+                Map.of(),
                 "trace_1234567890abcdef")))
                 .isInstanceOf(PlatformException.class)
                 .extracting(error -> ((PlatformException) error).errorCode())

@@ -476,3 +476,7 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 3. 新事件类型必须有默认忽略策略。
 4. opencode raw event 不直接透传；已知事件映射为平台稳定类型，未知事件映射为 `opencode.event.unknown` 并保留安全的 `rawType`、`rawEventId`、`rawPayload`。
 5. RunEvent payload 当前以 JSON 文本持久化；后续切换 PostgreSQL JSONB 时必须保持读取兼容。
+
+## manager 控制面补充
+
+manager WebSocket `command` 帧支持可选 `environment` 字段。Java 启动用户 opencode server 时通过该字段注入 `TEST_AGENT_INTERNAL_PROXY_API_KEY`、`TEST_AGENT_INTERNAL_PROXY_BASE_URL` 和 `ICBC_UCID`；manager 生成的 `startCommand` 只允许展示代理 base URL 和 UCID，`TEST_AGENT_INTERNAL_PROXY_API_KEY` 必须显示为 `<redacted>`。
