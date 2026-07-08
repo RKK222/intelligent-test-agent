@@ -2,6 +2,8 @@ package com.icbc.testagent.workspace;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,6 +13,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -120,20 +123,48 @@ public class WorkspaceFileService {
     }
 
     /**
-     * 删除 rootPath 内的普通文件；目录删除不在文件 WebSocket v1 开放，避免误删目录树。
+     * 删除 rootPath 内的文件或目录（支持递归删除目录）。
      */
     public void deleteFile(String rootPath, String relativePath) {
         Path target = resolveInsideRoot(rootPath, relativePath);
-        if (Files.isDirectory(target)) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目录删除暂不支持", Map.of("path", safePath(relativePath)));
-        }
-        if (!Files.isRegularFile(target)) {
-            throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在", Map.of("path", safePath(relativePath)));
+        if (!Files.exists(target)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "文件或目录不存在", Map.of("path", safePath(relativePath)));
         }
         try {
-            Files.delete(target);
+            if (Files.isDirectory(target)) {
+                // 先递归删除目录内的所有内容（不包括 target 本身）
+                try (Stream<Path> walk = Files.walk(target)) {
+                    walk.sorted(Comparator.reverseOrder())
+                        .filter(path -> !path.equals(target))
+                        .forEach(path -> {
+                            try {
+                                Files.delete(path);
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        });
+                }
+                // 再删除 target 目录本身
+                Files.delete(target);
+            } else {
+                Files.delete(target);
+            }
+        } catch (UncheckedIOException e) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "删除失败", Map.of("path", safePath(relativePath)), e.getCause());
         } catch (Exception exception) {
-            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "删除文件失败", Map.of("path", safePath(relativePath)), exception);
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "删除失败", Map.of("path", safePath(relativePath)), exception);
+        }
+    }
+
+    /**
+     * 在 rootPath 内创建目录；已存在时不报错，不存在时递归创建父目录。
+     */
+    public void createDirectory(String rootPath, String relativePath) {
+        Path target = resolveInsideRoot(rootPath, relativePath);
+        try {
+            Files.createDirectories(target);
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建目录失败", Map.of("path", safePath(relativePath)), exception);
         }
     }
 

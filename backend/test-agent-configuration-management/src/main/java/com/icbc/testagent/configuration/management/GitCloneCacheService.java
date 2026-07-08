@@ -87,8 +87,8 @@ public class GitCloneCacheService {
         String cacheKey = buildCacheKey(gitUrl, branch);
         Path cacheDir = cacheRoot.resolve(cacheKey);
 
-        // 检查缓存是否有效
-        if (isCacheValid(cacheDir)) {
+        // 检查缓存是否有效（包括 URL 校验，防止不同仓库的缓存冲突）
+        if (isCacheValid(cacheDir, gitUrl)) {
             log.debug("使用缓存目录: {}", cacheDir);
             return listCachedDirectories(cacheDir);
         }
@@ -97,7 +97,7 @@ public class GitCloneCacheService {
         Object lock = queryLocks.computeIfAbsent(cacheKey, k -> new Object());
         synchronized (lock) {
             // 双重检查
-            if (isCacheValid(cacheDir)) {
+            if (isCacheValid(cacheDir, gitUrl)) {
                 return listCachedDirectories(cacheDir);
             }
 
@@ -128,12 +128,29 @@ public class GitCloneCacheService {
     }
 
     /**
-     * 构建缓存键：URL hash + branch
+     * 构建缓存键：URL SHA-256 前16位 + branch
      */
     private String buildCacheKey(String gitUrl, String branch) {
-        int urlHash = Math.abs(gitUrl.hashCode());
+        String urlHash = sha256Hex(gitUrl).substring(0, 16);
         String safeBranch = branch.replaceAll("[^A-Za-z0-9._-]", "_");
         return String.format(CACHE_DIR_FORMAT, urlHash, safeBranch);
+    }
+
+    /**
+     * 计算 SHA-256 十六进制哈希。
+     */
+    private String sha256Hex(String input) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
     }
 
     /**
@@ -143,6 +160,18 @@ public class GitCloneCacheService {
      * 2. .git 目录存在
      * 3. FETCH_HEAD 文件存在（说明已经 fetch 过）
      * 4. 未过期
+     * 5. 缓存中的 URL 与请求的一致（防止 hash 冲突导致读取到别的仓库缓存）
+     */
+    private boolean isCacheValid(Path cacheDir, String gitUrl) {
+        if (!isCacheValid(cacheDir)) {
+            return false;
+        }
+        String cachedUrl = readCacheUrl(cacheDir);
+        return gitUrl.equals(cachedUrl);
+    }
+
+    /**
+     * 检查缓存是否有效（不校验 URL，仅用于过期清理）。
      */
     private boolean isCacheValid(Path cacheDir) {
         if (!Files.exists(cacheDir) || !Files.isDirectory(cacheDir)) {
@@ -174,6 +203,30 @@ public class GitCloneCacheService {
     }
 
     /**
+     * 读取缓存目录中记录的仓库 URL。
+     */
+    private String readCacheUrl(Path cacheDir) {
+        Path urlFile = cacheDir.resolve(".git").resolve("cache-url");
+        try {
+            return Files.readString(urlFile, StandardCharsets.UTF_8).trim();
+        } catch (IOException e) {
+            return "";
+        }
+    }
+
+    /**
+     * 写入缓存目录中记录的仓库 URL。
+     */
+    private void writeCacheUrl(Path cacheDir, String gitUrl) {
+        Path urlFile = cacheDir.resolve(".git").resolve("cache-url");
+        try {
+            Files.writeString(urlFile, gitUrl, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.warn("写入缓存 URL 文件失败: {}", urlFile, e);
+        }
+    }
+
+    /**
      * 获取远程分支的目录结构。
      * 步骤：
      * 1. 创建临时 Git 仓库
@@ -197,6 +250,9 @@ public class GitCloneCacheService {
             executeCommand(List.of("git", "-C", cacheDir.toString(), "fetch", "origin", branch, "--depth=1"),
                     privateKey, "获取远程分支失败");
 
+            // 4. 记录仓库 URL，用于后续缓存校验
+            writeCacheUrl(cacheDir, gitUrl);
+
             log.info("已获取远程分支: {} {}", gitUrl, branch);
 
         } catch (PlatformException e) {
@@ -213,6 +269,7 @@ public class GitCloneCacheService {
         // 执行 git ls-tree -r -d --name-only FETCH_HEAD
         List<String> command = List.of(
                 "git", "-C", cacheDir.toString(),
+                "-c", "core.quotepath=false",
                 "ls-tree", "-r", "-d", "--name-only", "FETCH_HEAD"
         );
 

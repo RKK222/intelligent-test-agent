@@ -203,6 +203,14 @@ public class WorkspaceApplicationService {
     }
 
     /**
+     * 在工作区内创建目录；已存在时不报错，不存在时递归创建父目录。
+     */
+    public void createDirectory(WorkspaceId workspaceId, String path) {
+        Workspace workspace = getWorkspace(workspaceId);
+        fileService.createDirectory(workspace.rootPath(), path);
+    }
+
+    /**
      * 查询工作区内文件或目录状态；不存在时返回 exists=false，而不是抛出 NOT_FOUND。
      */
     public FileStatusResponse fileStatus(WorkspaceId workspaceId, String path) {

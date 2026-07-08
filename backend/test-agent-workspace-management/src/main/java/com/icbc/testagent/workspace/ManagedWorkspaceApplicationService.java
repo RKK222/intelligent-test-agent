@@ -1009,7 +1009,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private void ensurePersonalWorktreeRoot(Path applicationRepoRoot, Path repoRoot, String branch, String privateKey) {
         if (Files.exists(repoRoot)) {
             if (gitWorkspaceService.isGitRepository(repoRoot) && branch.equals(gitWorkspaceService.currentBranch(repoRoot))) {
-                // 已有同路径同分支的有效 worktree，直接复用。
+                // 已有同路径同分支的有效 worktree，同步远程最新代码后复用。
+                gitWorkspaceService.fetch(repoRoot, privateKey);
+                gitWorkspaceService.pullFastForward(repoRoot, branch, privateKey);
                 return;
             }
             if (isEmptyDirectory(repoRoot)) {

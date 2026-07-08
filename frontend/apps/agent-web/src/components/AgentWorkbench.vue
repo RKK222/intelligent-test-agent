@@ -2577,6 +2577,72 @@ async function openFile(path: string) {
   }
 }
 
+async function handleCreateEntry(directory: string, name: string, type: "file" | "directory") {
+  if (!selectedWorkspace.value) {
+    return;
+  }
+  const workspaceId = selectedWorkspace.value.workspaceId;
+  // 判断目录使用的路径分隔符
+  const sep = directory.includes("\\") ? "\\" : "/";
+  const fullPath = directory ? `${directory}${sep}${name}` : name;
+  try {
+    if (type === "directory") {
+      await api.createDirectory(workspaceId, fullPath);
+      // 新创建的空目录默认没有子项，记录为空数组以避免显示展开箭头
+      entriesByDirectory.value = { ...entriesByDirectory.value, [fullPath]: [] };
+    } else {
+      await api.writeFile(workspaceId, fullPath, "");
+    }
+    await loadDirectory(directory, undefined, true);
+    if (type === "file") {
+      await openFile(fullPath);
+    }
+  } catch (error) {
+    feedback.value = errorFeedback(`创建${type === "file" ? "文件" : "文件夹"}失败`, error);
+  }
+}
+
+async function handleDeleteEntry(path: string, type: "file" | "directory") {
+  if (!selectedWorkspace.value) {
+    return;
+  }
+  const workspaceId = selectedWorkspace.value.workspaceId;
+  try {
+    await api.deleteWorkspaceFile(workspaceId, path);
+    // 同时支持 / 和 \ 作为路径分隔符
+    const lastSepIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    const parentDir = lastSepIndex >= 0 ? path.slice(0, lastSepIndex) : "";
+
+    // 先从父目录条目中移除被删除的项，确保前端立即更新
+    const currentEntries = entriesByDirectory.value[parentDir] ?? [];
+    const filtered = currentEntries.filter((e) => e.path !== path);
+    entriesByDirectory.value = { ...entriesByDirectory.value, [parentDir]: filtered };
+
+    // 如果被删除的是目录，同时清理其子目录缓存和展开状态
+    if (type === "directory") {
+      const nextEntries = { ...entriesByDirectory.value };
+      for (const key of Object.keys(nextEntries)) {
+        if (key === path || key.startsWith(`${path}/`) || key.startsWith(`${path}\\`)) {
+          delete nextEntries[key];
+        }
+      }
+      entriesByDirectory.value = nextEntries;
+      if (expandedDirectories.value.has(path)) {
+        const nextExpanded = new Set(expandedDirectories.value);
+        nextExpanded.delete(path);
+        expandedDirectories.value = nextExpanded;
+      }
+    }
+
+    // 如果被删除的是当前打开的文件，关闭标签页
+    if (type === "file" && activePath.value === path) {
+      workbench.closeTab(`file:${path}`);
+    }
+  } catch (error) {
+    feedback.value = errorFeedback(`删除${type === "file" ? "文件" : "文件夹"}失败`, error);
+  }
+}
+
 async function handlePreviewContext(item: ChatContextItem) {
   if (!item.path) {
     return;
@@ -3750,6 +3816,8 @@ async function handleLogout() {
           @open-agent-file="openAgentFile"
           @open-server-workspace-picker="openServerWorkspacePicker"
           @search="handleFileSearch"
+          @create-entry="handleCreateEntry"
+          @delete-entry="handleDeleteEntry"
         />
       </div>
       <div v-else class="managed-workspace-empty">

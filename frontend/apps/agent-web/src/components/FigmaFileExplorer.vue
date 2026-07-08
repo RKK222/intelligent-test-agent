@@ -65,6 +65,10 @@ const emit = defineEmits<{
   openServerWorkspacePicker: [];
   // 搜索事件
   search: [keyword: string];
+  // 创建文件或文件夹
+  createEntry: [directory: string, name: string, type: "file" | "directory"];
+  // 删除文件或文件夹
+  deleteEntry: [path: string, type: "file" | "directory"];
 }>();
 
 const workspaceExpanded = ref(true);
@@ -249,6 +253,8 @@ defineExpose({
               @open-diff="emit('openDiff', $event)"
               @refresh="emit('refresh')"
               @search="emit('search', $event)"
+              @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
+              @delete-entry="(path, type) => emit('deleteEntry', path, type)"
             />
           </div>
         </div>

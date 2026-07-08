@@ -41,6 +41,8 @@ const emit = defineEmits<{
   openDiff: [path: string];
   refresh: [];
   search: [keyword: string];
+  createEntry: [directory: string, name: string, type: "file" | "directory"];
+  deleteEntry: [path: string, type: "file" | "directory"];
 }>();
 
 const tab = ref<ExplorerTab>("explorer");
@@ -159,6 +161,8 @@ function fileIconClass(name: string, path: string) {
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"
         @add-file-context="emit('addFileContext', $event)"
+        @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
+        @delete-entry="(path, type) => emit('deleteEntry', path, type)"
       />
     </div>
     <div v-else-if="computedTab === 'search'" class="ta-file-tree-scroll">

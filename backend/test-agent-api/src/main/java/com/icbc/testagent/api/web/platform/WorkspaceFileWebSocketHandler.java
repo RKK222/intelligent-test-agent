@@ -120,6 +120,10 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     workspaceService.deleteFile(workspaceId(ticket, params), requiredText(params, "path"));
                     yield null;
                 }
+                case "workspace.mkdir" -> {
+                    workspaceService.createDirectory(workspaceId(ticket, params), requiredText(params, "path"));
+                    yield null;
+                }
                 case "agent-config.list" -> agentConfigList(ticket, params);
                 case "agent-config.read" -> agentConfigRead(ticket, params);
                 case "agent-config.write" -> {

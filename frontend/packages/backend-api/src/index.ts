@@ -635,6 +635,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     deleteWorkspaceFile: (workspaceId: string, path: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.delete", { path }),
+    createDirectory: (workspaceId: string, path: string) =>
+      workspaceFileRpc<void>(workspaceId, "workspace.mkdir", { path }),
     searchFiles: async (workspaceId: string, query: string) => {
       const results = await workspaceFileRpc<BackendFileSearchResult[]>(workspaceId, "workspace.search", { query });
       return results.map((result) => ({
