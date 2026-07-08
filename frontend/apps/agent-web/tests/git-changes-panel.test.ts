@@ -614,6 +614,65 @@ describe("GitChangesPanel", () => {
     expect(view.queryByText("git -C /repo commit -m fix: remote")).toBeNull();
   });
 
+  it("does not regress completed publish progress when a late running command event arrives", async () => {
+    let progressHandler: ((event: { currentStep?: string; command?: string; status?: string }) => void) | undefined;
+    let resolvePublish: ((value: unknown) => void) | undefined;
+    apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: typeof progressHandler) => {
+      progressHandler = handler;
+      return { close: vi.fn() };
+    });
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", staged: false, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockReturnValueOnce(new Promise((resolve) => {
+      resolvePublish = resolve;
+    }));
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("selected.ts")).toBeTruthy();
+    await fireEvent.click(view.getByTitle("暂存文件"));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: remote");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await waitFor(() => expect(apiClientMock.connectAgentConfigProgress).toHaveBeenCalled());
+    progressHandler?.({
+      currentStep: "PUSH_REMOTE",
+      command: "git -C /repo push origin feature_test",
+      status: "RUNNING"
+    });
+
+    resolvePublish?.({
+      status: "MERGED",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: [],
+      message: "合并成功",
+      remotePushed: true,
+      currentStep: "COMPLETED",
+      executedCommands: ["git -C /repo push origin feature_test"],
+      headCommit: "commit_merged"
+    });
+    await waitFor(() => expect(view.getAllByText("SUCCEEDED")).toHaveLength(4));
+
+    progressHandler?.({
+      currentStep: "PUSH_REMOTE",
+      command: "git -C /repo rev-parse HEAD",
+      status: "RUNNING"
+    });
+
+    await waitFor(() => expect(view.getAllByText("SUCCEEDED")).toHaveLength(4));
+    expect(view.queryByText("RUNNING")).toBeNull();
+    expect(view.queryByText("git -C /repo rev-parse HEAD")).toBeNull();
+  });
+
   it("opens the three-way editor for a conflict row", async () => {
     apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
       files: [{ path: "src/conflict.ts", status: "conflict", rawStatus: "UU", staged: true, patch: "", additions: 0, deletions: 0 }]

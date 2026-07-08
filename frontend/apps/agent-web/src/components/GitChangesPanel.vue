@@ -125,6 +125,7 @@ const showCommitProgressDialog = ref(false);
 const commitStep = ref(0);
 const executedCommands = ref<string[]>([]);
 const hasLivePublishCommand = ref(false);
+const publishResultConfirmed = ref(false);
 const mergeResolutionCompleted = ref(false);
 
 type PublishGitStep =
@@ -226,6 +227,11 @@ function applyPublishExecution(step: string | null | undefined, commands?: strin
 }
 
 function applyPublishProgressEvent(event: AgentConfigProgressEvent) {
+  // HTTP 发布响应已经确认终态后，进度 WebSocket 可能仍有延迟 command 事件到达；
+  // 此时不能再让旧 RUNNING 事件把成功弹框回退到运行中。
+  if (publishResultConfirmed.value) {
+    return;
+  }
   if (event.currentStep) {
     commitStep.value = commitStepNumber(event.currentStep);
     if (!event.command?.trim() && event.status === "RUNNING") {
@@ -668,6 +674,7 @@ async function handleCommit(push = false) {
   progressMessage.value = "";
   executedCommands.value = [];
   hasLivePublishCommand.value = false;
+  publishResultConfirmed.value = false;
   showCommitProgressDialog.value = false;
   commitStep.value = 0;
 
@@ -764,6 +771,7 @@ async function handleCommit(push = false) {
       if (result.status !== "MERGED" || result.remotePushed !== true) {
         throw new Error("远端推送结果未确认，请刷新变更列表并检查远程分支后重试。");
       }
+      publishResultConfirmed.value = true;
       commitStep.value = 5; // Success
       // 推送成功：清除暂存状态
       stagedWorkspacePaths.value.clear();
