@@ -9,6 +9,7 @@
     "typecheck": "vue-tsc --noEmit --pretty false"
   },
   "dependencies": {
+    "@test-agent/file-explorer": "workspace:*",
     "@test-agent/shared-types": "workspace:*",
     "@test-agent/ui-kit": "workspace:*",
     "dompurify": "3.2.6",

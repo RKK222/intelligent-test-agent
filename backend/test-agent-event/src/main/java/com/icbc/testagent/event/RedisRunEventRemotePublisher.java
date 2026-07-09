@@ -87,6 +87,14 @@ public class RedisRunEventRemotePublisher implements RunEventRemotePublisher, Sm
         return sink.asFlux().filter(event -> runId.value().equals(event.payload().runId()));
     }
 
+    /**
+     * 订阅 Redis 转发到本机的全部事件；调用方按状态关注的事件类型自行过滤。
+     */
+    @Override
+    public Flux<RunEventLiveEvent> streamAll() {
+        return sink.asFlux();
+    }
+
     @Override
     public void start() {
         if (running) {

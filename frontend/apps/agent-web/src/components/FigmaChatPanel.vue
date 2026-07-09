@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSPro
 import {
   AlertTriangle,
   ArrowUpRight,
+  Bell,
   BookOpen,
   CheckCircle,
   ChevronDown,
@@ -620,9 +621,37 @@ const props =
     /** 文件变更行（来自 SSE 事件统计） */
     fileChanges?: FileChangeStat[]
     /** 历史对话列表 */
-    history?: Array<{ id: string; title: string; createdAt?: string; updatedAt?: string }>
+    history?: Array<{
+      id: string
+      title: string
+      createdAt?: string
+      updatedAt?: string
+      appName?: string
+      workspaceName?: string
+      version?: string
+      runtimeState?: 'running' | 'completed'
+      runId?: string
+      runStatus?: string
+      pendingQuestion?: boolean
+      attentionEventId?: string
+      attentionAt?: string
+    }>
+    /** 当前用户历史中仍在运行的会话数。 */
+    historyRunningCount?: number
+    /** 当前用户历史中存在待回答 question 的会话数。 */
+    historyQuestionCount?: number
+    /** 受控历史搜索词，由父组件负责远端查询。 */
+    historySearch?: string
+    /** 当前搜索条件下的历史总数。 */
+    historyTotal?: number
+    /** 是否还有下一页历史。 */
+    historyHasMore?: boolean
+    /** 正在加载下一页历史。 */
+    historyLoadingMore?: boolean
     /** 正在切换历史会话；旧正文在此期间隐藏，避免误以为点击无响应。 */
     historyLoading?: boolean
+    /** 当前历史会话只读原因；存在时禁止继续发送。 */
+    readonlyReason?: string
     /** 当前选中的模型展示名 */
     selectedModelLabel?: string
     /** 模型选择按钮是否禁用 */
@@ -706,6 +735,8 @@ const emit =
     (e: 'new-conversation'): void
     (e: 'close'): void
     (e: 'open-history'): void
+    (e: 'history-search-change', query: string): void
+    (e: 'load-more-history'): void
     (e: 'select-session', id: string): void
     (e: 'open-tasks'): void
     (e: 'update:inputValue', value: string): void
@@ -1138,6 +1169,16 @@ function questionProgressText(item: QuestionRequest): string {
   return `${currentQuestionIndex(item) + 1}/${item.questions.length} 个问题`
 }
 
+function questionTypeText(question: FigmaQuestionItem): string {
+  if (isMultipleQuestion(question)) {
+    return '多选'
+  }
+  if (isTextQuestion(question)) {
+    return '文本'
+  }
+  return '单选'
+}
+
 function questionHelpText(question: FigmaQuestionItem): string {
   if (isMultipleQuestion(question)) {
     return '可选择多个答案'
@@ -1175,6 +1216,14 @@ function isQuestionOptionSelected(question: FigmaQuestionItem, label: string): b
     return questionMultiAnswers.value[question.questionId]?.includes(label) ?? false
   }
   return questionAnswers.value[question.questionId] === label
+}
+
+/**
+ * 自定义答案是否已输入并选中
+ */
+function isCustomAnswerSelected(question: FigmaQuestionItem): boolean {
+  const val = questionCustomAnswers.value[question.questionId]
+  return typeof val === 'string' && val.trim().length > 0
 }
 
 function chooseQuestionOption(question: FigmaQuestionItem, label: string) {
@@ -1820,6 +1869,11 @@ const processSubmitBlocked = computed(
     !processReady.value ||
     (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
+const newConversationBlocked = computed(
+  () => !processReady.value || (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
+)
+const readonlyBlockedReason = computed(() => props.readonlyReason?.trim() ?? '')
+const readonlySubmitBlocked = computed(() => Boolean(readonlyBlockedReason.value))
 const contextSendValidation = computed(() => validateChatSend(localInput.value.trim(), props.chatContexts ?? []))
 const contextSubmitBlocked = computed(() => !contextSendValidation.value.ok || props.chatContextOverLimit === true)
 const contextSendBlockedReason = computed(() => {
@@ -1827,7 +1881,10 @@ const contextSendBlockedReason = computed(() => {
   if (props.chatContextOverLimit) return '上下文超过限制，无法发送'
   return ''
 })
-const sendSubmitBlocked = computed(() => processSubmitBlocked.value || contextSubmitBlocked.value)
+const sendBlockedTitle = computed(() => readonlyBlockedReason.value || contextSendBlockedReason.value || '发送')
+const sendSubmitBlocked = computed(
+  () => processSubmitBlocked.value || readonlySubmitBlocked.value || contextSubmitBlocked.value
+)
 const processStatusVisible = computed(
   () =>
     props.processRequired || props.processLoading || props.processStatus != null
@@ -2123,18 +2180,20 @@ function selectDrawerFile(path: string) {
 }
 
 const historyDrawerOpen = ref(false)
-const historySearchQuery = ref('')
-const filteredHistory = computed(() => {
-  const list = props.history || []
-  const q = historySearchQuery.value.trim().toLowerCase()
-  if (!q) return list
-  return list.filter(
-    (item) =>
-      item.title.toLowerCase().includes(q) ||
-      (item.createdAt && item.createdAt.includes(q)) ||
-      (item.updatedAt && item.updatedAt.includes(q))
-  )
+const localHistorySearchQuery = ref('')
+const historySearchQuery = computed({
+  get: () => props.historySearch ?? localHistorySearchQuery.value,
+  set: (value: string) => {
+    localHistorySearchQuery.value = value
+    emit('history-search-change', value)
+  }
 })
+const visibleHistory = computed(() => props.history || [])
+const historyTotalCount = computed(() => props.historyTotal ?? visibleHistory.value.length)
+const visibleHistoryRunningCount = computed(() => visibleHistory.value.filter((item) => item.runtimeState === 'running').length)
+const visibleHistoryQuestionCount = computed(() => visibleHistory.value.filter((item) => item.pendingQuestion).length)
+const historyRunningCount = computed(() => props.historyRunningCount ?? visibleHistoryRunningCount.value)
+const historyQuestionCount = computed(() => props.historyQuestionCount ?? visibleHistoryQuestionCount.value)
 
 function historyTime(value?: string) {
   if (!value) return '暂无'
@@ -2153,11 +2212,22 @@ function historyTime(value?: string) {
 
 function closeHistoryDrawer() {
   historyDrawerOpen.value = false
-  historySearchQuery.value = ''
 }
 function selectHistoryItem(id: string) {
   emit('select-session', id)
   closeHistoryDrawer()
+}
+
+function historyContextText(item: { appName?: string; workspaceName?: string; version?: string }) {
+  return [
+    item.appName?.trim() || '未关联应用',
+    item.workspaceName?.trim() || '未知工作空间',
+    item.version?.trim() || '无版本'
+  ].join(' · ')
+}
+
+function historyRuntimeLabel(item: { runtimeState?: string }) {
+  return item.runtimeState === 'running' ? '运行中' : '已完成'
 }
 
 type RawOutputFilter = 'all' | RawOutputKind
@@ -2859,8 +2929,23 @@ function onCompositionEnd() {
           title="查看历史对话"
           @click="historyDrawerOpen = true; emit('open-history')"
         >
-          <History :size="15" />
+          <span class="figma-chat-history-header-icon">
+            <Loader2
+              v-if="historyRunningCount > 0"
+              :size="15"
+              class="figma-chat-history-header-spinner figma-chat-spin"
+            />
+            <History v-else :size="15" />
+            <span v-if="historyRunningCount > 0" class="figma-chat-history-running-badge">
+              {{ historyRunningCount }}
+            </span>
+          </span>
           <span>历史</span>
+          <Bell
+            v-if="historyQuestionCount > 0"
+            :size="13"
+            class="figma-chat-history-alert-bell"
+          />
         </button>
       </div>
     </header>
@@ -3760,7 +3845,10 @@ function onCompositionEnd() {
         >
           <div class="figma-chat-question-scroll">
             <div class="figma-chat-question-page-head">
-              <div class="figma-chat-question-progress">{{ questionProgressText(item) }}</div>
+              <div class="figma-chat-question-page-meta">
+                <div class="figma-chat-question-progress">{{ questionProgressText(item) }}</div>
+                <div class="figma-chat-question-type">{{ questionTypeText(currentQuestionRequired(item)) }}</div>
+              </div>
               <div v-if="currentQuestionRequired(item).header" class="figma-chat-question-header">
                 {{ currentQuestionRequired(item).header }}
               </div>
@@ -3775,7 +3863,7 @@ function onCompositionEnd() {
                 placeholder="输入你的答案..."
                 @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
               />
-              <div v-else class="figma-chat-question-options">
+              <div v-else class="figma-chat-question-options" :class="{ 'is-multiple': isMultipleQuestion(currentQuestionRequired(item)) }">
                 <button
                   v-for="option in questionOptions(currentQuestionRequired(item))"
                   :key="option.id"
@@ -3792,7 +3880,12 @@ function onCompositionEnd() {
                     <span v-if="option.description" class="figma-chat-question-option-description">{{ option.description }}</span>
                   </span>
                 </button>
-                <label class="figma-chat-question-custom-card">
+                <label
+                  :class="[
+                    'figma-chat-question-custom-card',
+                    isCustomAnswerSelected(currentQuestionRequired(item)) && 'is-selected',
+                  ]"
+                >
                   <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
                   <span class="figma-chat-question-option-copy">
                     <span class="figma-chat-question-option-label">输入自己的答案</span>
@@ -3876,7 +3969,8 @@ function onCompositionEnd() {
           :style="composerTextareaStyle"
           :placeholder="placeholder || 'Ask the AI agent...'"
           rows="1"
-          :disabled="running || !processReady"
+          :disabled="running || !processReady || readonlySubmitBlocked"
+          :title="readonlyBlockedReason || undefined"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
           @compositionend="onCompositionEnd"
@@ -4065,7 +4159,7 @@ function onCompositionEnd() {
               type="button"
               class="figma-chat-card-btn figma-chat-new-btn"
               aria-label="新建对话"
-              :disabled="processSubmitBlocked"
+              :disabled="newConversationBlocked"
               @click="emit('new-conversation')"
             >
               <SquarePen class="figma-chat-btn-icon" />
@@ -4076,7 +4170,7 @@ function onCompositionEnd() {
             type="button"
             class="figma-chat-send-card"
             :disabled="!localInput.trim() || sendSubmitBlocked"
-            :title="contextSendBlockedReason || '发送'"
+            :title="sendBlockedTitle"
             aria-label="发送"
             @click="submit"
           >
@@ -4142,27 +4236,15 @@ function onCompositionEnd() {
           <span v-else class="figma-chat-usage-dot" aria-hidden="true" />
           <span class="figma-chat-usage-label">任务消耗：</span>
           <span class="figma-chat-usage-value">
-            <template
-              v-if="
-                displayTokens !== undefined ||
-                taskUsage?.totalDuration
-              "
-              >(</template
-            >
             <template v-if="taskUsage?.totalDuration">
-              {{ taskUsage.totalDuration }}</template
-            >
-
+              {{ taskUsage.totalDuration }}
+            </template>
+            <template v-if="taskUsage?.totalDuration && displayTokens !== undefined">
+              &nbsp;
+            </template>
             <template v-if="displayTokens !== undefined">
-              · ↓ {{ formatTokens(displayTokens) }} tokens</template
-            >
-            <template
-              v-if="
-                displayTokens !== undefined ||
-                taskUsage?.totalDuration
-              "
-              >)</template
-            >
+              {{ formatTokens(displayTokens) }} tokens
+            </template>
           </span>
         </template>
       </div>
@@ -4405,7 +4487,7 @@ function onCompositionEnd() {
         <header class="figma-chat-drawer-header">
           <div class="figma-chat-drawer-title">
             <span class="figma-chat-drawer-title-text">历史对话</span>
-            <span class="figma-chat-drawer-count">{{ (props.history || []).length }}</span>
+            <span class="figma-chat-drawer-count">{{ historyTotalCount }}</span>
           </div>
           <button
             type="button"
@@ -4427,14 +4509,14 @@ function onCompositionEnd() {
         </div>
 
         <div class="figma-chat-history-body">
-          <div v-if="filteredHistory.length === 0" class="figma-chat-history-empty">
+          <div v-if="visibleHistory.length === 0" class="figma-chat-history-empty">
             <History :size="32" class="figma-chat-history-empty-icon" />
             <p class="figma-chat-history-empty-text">
               {{ historySearchQuery.trim() ? '无匹配的历史对话' : '暂无历史对话记录，快在下方开启新会话吧~' }}
             </p>
           </div>
           <ul v-else class="figma-chat-history-list">
-            <li v-for="item in filteredHistory" :key="item.id">
+            <li v-for="item in visibleHistory" :key="item.id">
               <button
                 type="button"
                 class="figma-chat-history-card"
@@ -4442,10 +4524,37 @@ function onCompositionEnd() {
                 @click="selectHistoryItem(item.id)"
               >
                 <div class="figma-chat-history-card-icon">
-                  <BookOpen :size="15" />
+                  <Loader2
+                    v-if="item.runtimeState === 'running'"
+                    :size="15"
+                    class="figma-chat-history-card-spinner figma-chat-spin"
+                  />
+                  <CheckCircle
+                    v-else
+                    :size="15"
+                    class="figma-chat-history-card-completed"
+                  />
+                  <Bell
+                    v-if="item.pendingQuestion"
+                    :size="10"
+                    class="figma-chat-history-card-attention"
+                  />
                 </div>
                 <div class="figma-chat-history-card-content">
-                  <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
+                  <div class="figma-chat-history-card-title-row">
+                    <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
+                    <span
+                      :class="[
+                        'figma-chat-history-card-status',
+                        item.runtimeState === 'running'
+                          ? 'figma-chat-history-card-status--running'
+                          : 'figma-chat-history-card-status--completed'
+                      ]"
+                    >
+                      {{ historyRuntimeLabel(item) }}
+                    </span>
+                  </div>
+                  <div class="figma-chat-history-card-context">{{ historyContextText(item) }}</div>
                   <div class="figma-chat-history-card-meta">
                     <span>创建 {{ historyTime(item.createdAt) }}</span>
                     <span>更新 {{ historyTime(item.updatedAt) }}</span>
@@ -4455,6 +4564,16 @@ function onCompositionEnd() {
               </button>
             </li>
           </ul>
+          <div v-if="historyHasMore" class="figma-chat-history-load-more">
+            <button
+              type="button"
+              class="figma-chat-history-load-more-btn"
+              :disabled="historyLoadingMore"
+              @click="emit('load-more-history')"
+            >
+              {{ historyLoadingMore ? '加载中...' : '显示更多历史会话' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -4616,7 +4735,7 @@ function onCompositionEnd() {
 .figma-chat-header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
@@ -4624,13 +4743,13 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
   color: var(--ta-muted);
   background: transparent;
-  border: 1px solid var(--ta-border);
+  border: 1px solid transparent;
   transition: all 0.15s ease;
   cursor: pointer;
   flex-shrink: 0;
@@ -4638,7 +4757,40 @@ function onCompositionEnd() {
 .figma-chat-header-btn:hover {
   color: var(--ta-text);
   background: var(--ta-hover);
-  border-color: var(--ta-muted);
+  border-color: transparent;
+}
+.figma-chat-history-header-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.figma-chat-history-header-spinner {
+  color: #2563eb;
+}
+.figma-chat-history-running-badge {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  border: 1px solid var(--ta-surface);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+.figma-chat-history-alert-bell {
+  color: #d97706;
+  animation: figma-chat-bell 1.35s ease-in-out infinite;
+  transform-origin: 50% 0;
 }
 .figma-chat-raw-output-panel {
   position: fixed;
@@ -4924,19 +5076,74 @@ function onCompositionEnd() {
   transform: translateY(-1px);
 }
 .figma-chat-history-card-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
   color: var(--ta-muted);
   padding-top: 2px;
+}
+.figma-chat-history-card-spinner {
+  color: #2563eb;
+}
+.figma-chat-history-card-completed {
+  color: #16a34a;
+}
+.figma-chat-history-card-attention {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  color: #d97706;
+  fill: #fbbf24;
+  animation: figma-chat-bell 1.35s ease-in-out infinite;
+  transform-origin: 50% 0;
 }
 .figma-chat-history-card-content {
   flex: 1;
   min-width: 0;
 }
+.figma-chat-history-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
 .figma-chat-history-card-title {
+  flex: 1;
+  min-width: 0;
   font-size: 14px;
   font-weight: 500;
   color: var(--ta-text);
+  margin-bottom: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.figma-chat-history-card-status {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.figma-chat-history-card-status--running {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+.figma-chat-history-card-status--completed {
+  color: #166534;
+  background: #dcfce7;
+}
+.figma-chat-history-card-context {
   margin-bottom: 4px;
+  color: var(--ta-muted);
+  font-size: 12px;
+  line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4952,6 +5159,28 @@ function onCompositionEnd() {
 .figma-chat-history-card-id {
   font-family: var(--font-mono);
   opacity: 0.8;
+}
+.figma-chat-history-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 4px;
+}
+.figma-chat-history-load-more-btn {
+  min-width: 160px;
+  min-height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--ta-border);
+  background: var(--ta-surface);
+  color: var(--ta-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.figma-chat-history-load-more-btn:hover:not(:disabled) {
+  background: var(--ta-hover);
+}
+.figma-chat-history-load-more-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .figma-chat-root {
@@ -5669,6 +5898,25 @@ function onCompositionEnd() {
   animation: figma-chat-spin 1s linear infinite;
 }
 
+@keyframes figma-chat-bell {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  20% {
+    transform: rotate(14deg);
+  }
+  40% {
+    transform: rotate(-12deg);
+  }
+  60% {
+    transform: rotate(8deg);
+  }
+  80% {
+    transform: rotate(-6deg);
+  }
+}
+
 .figma-chat-running-timer {
   color: #8c8c8c;
   margin-left: 4px;
@@ -5955,11 +6203,30 @@ function onCompositionEnd() {
   gap: 10px;
 }
 
+.figma-chat-question-page-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
 .figma-chat-question-progress {
   font-size: 12px;
   line-height: 16px;
   font-weight: 400;
   color: var(--ta-chat-muted, #7a7a7a);
+}
+
+.figma-chat-question-type {
+  flex: 0 0 auto;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: var(--ta-chat-process-bg, #f5f5f5);
+  color: var(--ta-chat-subtle, #555555);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
 }
 
 .figma-chat-question-header {
@@ -6032,7 +6299,8 @@ function onCompositionEnd() {
 
 .figma-chat-question-option:hover,
 .figma-chat-question-option.is-selected,
-.figma-chat-question-custom-card:focus-within {
+.figma-chat-question-custom-card:focus-within,
+.figma-chat-question-custom-card.is-selected {
   border-color: var(--ta-accent, #333333);
   background: var(--ta-chat-hover, #eeeeee);
   color: var(--ta-chat-text, #333333);
@@ -6049,11 +6317,13 @@ function onCompositionEnd() {
   background: var(--ta-chat-surface, #ffffff);
 }
 
-.figma-chat-question-option.is-selected .figma-chat-question-option-mark {
+.figma-chat-question-option.is-selected .figma-chat-question-option-mark,
+.figma-chat-question-custom-card.is-selected .figma-chat-question-option-mark {
   border-color: var(--ta-accent, #333333);
 }
 
-.figma-chat-question-option.is-selected .figma-chat-question-option-mark::after {
+.figma-chat-question-option.is-selected .figma-chat-question-option-mark::after,
+.figma-chat-question-custom-card.is-selected .figma-chat-question-option-mark::after {
   position: absolute;
   top: 3px;
   left: 3px;
@@ -6061,6 +6331,32 @@ function onCompositionEnd() {
   height: 6px;
   border-radius: 999px;
   background: var(--ta-accent, #333333);
+  content: "";
+}
+
+/* 多选题勾选框样式 */
+.is-multiple .figma-chat-question-option-mark {
+  border-radius: 3px;
+}
+
+.is-multiple .figma-chat-question-option.is-selected .figma-chat-question-option-mark,
+.is-multiple .figma-chat-question-custom-card.is-selected .figma-chat-question-option-mark {
+  background: var(--ta-accent, #333333);
+  border-color: var(--ta-accent, #333333);
+}
+
+.is-multiple .figma-chat-question-option.is-selected .figma-chat-question-option-mark::after,
+.is-multiple .figma-chat-question-custom-card.is-selected .figma-chat-question-option-mark::after {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  width: 4px;
+  height: 7px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  border-radius: 0;
+  transform: rotate(45deg);
+  background: transparent;
   content: "";
 }
 
@@ -6630,9 +6926,9 @@ function onCompositionEnd() {
   border: 1px solid #d4d4d4;
   border-radius: 16px;
   background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
   overflow: visible;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease;
 }
 
 .figma-chat-composer-resize-handle {
@@ -6667,12 +6963,12 @@ function onCompositionEnd() {
 
 .figma-chat-input-card.is-resizing {
   border-color: #3366ff;
-  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
 }
 
 .figma-chat-input-card:focus-within {
   border-color: #3366ff;
-  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
 }
 
 .figma-chat-textarea {
@@ -6708,6 +7004,8 @@ function onCompositionEnd() {
   gap: 4px;
   padding: 4px 8px 8px;
   border-top: 1px solid #f0f0f0;
+  border-bottom-left-radius: 15px;
+  border-bottom-right-radius: 15px;
 }
 
 .figma-chat-card-spacer {
@@ -6745,7 +7043,6 @@ function onCompositionEnd() {
 
 .figma-chat-attachment-btn {
   width: 28px;
-  height: 26px;
   padding: 0;
   justify-content: center;
 }
@@ -6841,7 +7138,7 @@ function onCompositionEnd() {
   flex-shrink: 0;
   height: 30px;
   background: #fff;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--ta-border);
   display: flex;
   align-items: center;
   padding: 0 16px;

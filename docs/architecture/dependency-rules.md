@@ -41,6 +41,7 @@ test-agent-opencode-runtime
   -> test-agent-domain
   -> test-agent-event
   -> test-agent-agent-runtime
+  -> test-agent-scheduler
 
 test-agent-agent-runtime
   -> test-agent-common
@@ -98,7 +99,7 @@ test-agent-event
 
 - Workspace、文件查看/新增/修改/删除、git 操作、差异比对、应用版本工作区、个人工作区、agent 和 skill 管理：`test-agent-workspace-management`。
 - 多 agent 运行时接口、agentId registry、统一日志/指标包装、opencode/otheragent 适配骨架：`test-agent-agent-runtime`。
-- Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、terminal ticket/PTY：`test-agent-opencode-runtime`。
+- Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、terminal ticket/PTY、opencode runtime 业务定时任务：`test-agent-opencode-runtime`。
 - 用户、角色、权限等平台内部管理：`test-agent-system-management`。
 - 应用定义只读消费、应用成员、代码库配置、应用工作空间模板、个人 SSH key 和 Git 远端只读目录查询：`test-agent-configuration-management`。
 - 通用定时任务注册、Cron 调度、Redis 分布式锁、统一运行记录、Cron 调整、手动触发和协作式停止管理服务：`test-agent-scheduler`；具体业务任务实现放回所属业务模块，并通过 `ScheduledTaskContext` 检查停止请求。

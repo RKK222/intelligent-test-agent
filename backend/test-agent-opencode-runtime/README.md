@@ -6,8 +6,10 @@
 
 ## 主要职责
 
-- Session 创建、查询、消息追加和归档。
+- Session 创建、查询、消息追加、归档和当前用户历史会话分页；用户历史由 `SessionHistoryRepository` 只读端口提供，按会话创建人、Run 触发人、消息发送人归因，保留 `pinned` 字段但排序只使用更新时间倒序。
+- 用户级会话运行态摘要和状态流；`SessionRuntimeStateApplicationService` 读取当前用户可见历史会话中的非终态 Run，按最新 `question.asked/replied/rejected` 派生待回答关注状态，并通过 `RunEventLiveBus.streamAll()` 的 run/question 事件触发刷新，同时保留低频轮询兜底。
 - Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt 或原生 session command，不等待远端长任务完成才返回 Run。root `run.succeeded/run.failed` 终态事件是 Run 终态事实源；`Streaming response failed` 等提交/订阅 transport error 会短暂延迟收敛，若窗口内收到 root 终态则以 root 终态为准，不追加旧失败；若无 root 终态才写 `run.failed`，且 payload 会携带单行、长度受限的安全错误说明。后到 root 终态允许纠正先到 transport error 临时失败并刷新最终快照。事件订阅先经 `RunSessionScopeRouter` 判定 root/child scope，并在 root 成功/失败终态后结束，避免其它会话或同一会话下一轮消息串入旧 Run。
+- stale active Run 收敛：`StaleActiveRunReconcileTaskHandler` 作为业务 `ScheduledTaskHandler` 注册到 `test-agent-scheduler`，默认 cron `0 */5 * * * *`、锁 TTL 5 分钟。`StaleActiveRunReconcileService` 每轮最多扫描 200 条 `updated_at` 超过 2 小时且仍为 `PENDING/RUNNING/CANCELLING` 的 Run；收敛前先查 Redis 运行态，`test-agent:run-output-activity:{runId}` 30 分钟内存在代表仍有用户可见输出，`test-agent:run-pending-ask:{runId}` 存在代表当前最新状态仍停在未处理 ask，二者任一存在都跳过。pending ask 只由实时 RunEvent 处理写入 Redis，不通过数据库 RunEvent 反查；当前 ask 类事件包括 `permission.asked` 和 `question.asked`，对应 `permission.replied/question.replied/question.rejected` 或 Run 终态会清理。Redis 读取异常时保守跳过，避免误杀仍在运行或等待用户处理的会话。真正超时的 Run 通过 `saveIfStatus` CAS 标记为 `FAILED`，追加 `run.failed`，message 固定为“运行超时，后台订阅已失效或长时间无输出”，并 best-effort 刷新 session message snapshot；该机制只修复平台 Run 状态，不主动 cancel/abort 远端 opencode 会话。
 - AI 回复满意度反馈归属校验和 upsert：只允许登录用户对自己会话或自己触发 Run 的 `ASSISTANT` 消息提交 `POSITIVE/NEGATIVE` 反馈，评论最多 300 字。
 - 运营分析 rollup 与查询：主链路只写事实，后台 runner 通过数据库锁默认刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图；查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
@@ -35,7 +37,7 @@
 - Run 终态/取消后的 `session_messages` 快照持久化会按 agent projected messages cursor 分页拉取，包含 assistant 可见 text、完整 message parts 和 token/cost；reasoning/tool output 不拼入回答正文，无 text 的工具步骤以空正文加结构化 parts 保存。上游 projected message 缺少稳定 message id 时，会用 session、可见正文、parts 和创建时间生成内部合成 `remoteMessageId`，只用于幂等 upsert，避免历史刷新反复落重复 assistant 快照。
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化；不调用 opencode `/vcs/diff?mode=working`，实际 Git patch 和精确行数由工作区 Git Diff 接口读取。
 - Run Diff 查询、接受和拒绝。
-- agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
+- agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；permission/question 代理使用 opencode v2 `/api/session/{remoteSessionId}/permission|question` 路由，平台外部 API 和请求体保持兼容。
 - Model/Provider 目录编排：前端对话框始终通过 runtime 代理 opencode 原生 `/api/model`、`/api/provider`，不再从 `ai_model_configs` 或 `ModelCatalogApplicationService` 返回托管目录；Run 启动前不再 `PATCH /global/config` 同步 provider。
 - 内部模型代理：按 `X-ICBC-Model-Provider` 查 JVM 内存中的内部供应商地址，向上游注入数据库保存的全局 `ICBC_OPENAI_AUTH_TOKEN` 和 `ucid`，并把流式 `<think>...</think>` 转换为 `reasoning_content`。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
@@ -46,7 +48,9 @@
 
 ## 测试覆盖
 
-- `RunApplicationServiceTest` 覆盖 Run 创建、远端 prompt 非阻塞提交及异步失败错误说明、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、internal 模式拒绝匿名 Run 并把当前用户传给 provider 同步、sticky node、prompt parts、终态事件、终态消息快照/token 分页持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生、取消编排，以及 `run.succeeded` 与 `Streaming response failed` 竞态：成功先到时不追加冲突失败，transport error 先到但随后 root 成功时最终仍为成功，没有 root 终态时延迟收敛失败且保留安全错误说明。
+- `RunApplicationServiceTest` 覆盖 Run 创建、远端 prompt 非阻塞提交及异步失败错误说明、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、internal 模式拒绝匿名 Run 并把当前用户传给 provider 同步、sticky node、prompt parts、终态事件、终态消息快照/token 分页持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生、取消编排、用户可见输出刷新 Redis 活跃标记、permission/question ask Redis 待处理状态维护，以及 `run.succeeded` 与 `Streaming response failed` 竞态：成功先到时不追加冲突失败，transport error 先到但随后 root 成功时最终仍为成功，没有 root 终态时延迟收敛失败且保留安全错误说明。
+- `StaleActiveRunReconcileServiceTest` 覆盖超过 2 小时且无近期输出/未处理 ask 时标记 `FAILED` 并追加 `run.failed`、Redis 近期输出存在时跳过、Redis pending ask 存在时跳过、Run 已刷新或终态时跳过、CAS 失败不追加事件、Redis 读取异常保守跳过。
+- `StaleActiveRunReconcileTaskHandlerTest` 覆盖业务任务 key、5 分钟 cron、5 分钟锁 TTL、启动 catch-up 不扫描和手动触发仍扫描。
 - `BackendJavaRouteResolverTest` 覆盖同服务器多 Java 快照保留、manager 连接优先于最新心跳、当前服务器本地兜底、远端目标判断、`containerId` 按最新 manager 快照解析所属服务器，以及目标 Java 不可用时统一 `OPENCODE_UNAVAILABLE`。
 - `OpencodeProcessStatusQueryServiceTest` 覆盖公共状态查询服务的进程记录缺失、health healthy、not-running 映射 STOPPED、普通不健康和 manager 异常返回 STALE 且不覆盖数据库稳定状态、heartbeat 刷新，以及弱健康只读 Redis 快照、不触碰 Repository/gateway/heartbeat 的行为。
 - `OpencodeProcessStartupServiceTest` 覆盖公共启动服务的 start、候选进程保存、启动后公共状态查询、短暂 HTTP health 不可达时等待恢复、manager 控制错误立即失败、持续健康失败超时、失败候选状态收敛、RUNNING/binding/heartbeat/ExecutionNode 回写和旧进程/绑定时间复用。
@@ -62,12 +66,13 @@
 - `RunSessionScopeRouterTest` 覆盖 root/child idle/error 终态派生、task metadata/session parentID/session.children child discovery、task metadata discovery 不改写 root task part scope、原生 pending task part 到 child session.created 的 FIFO 绑定、未知 child pending drain、嵌套 session 防串流、raw event dedup 和全局 unknown 噪声过滤。
 - `RunSessionScopeRuntimeCacheTest` 覆盖 Redis pending/dedup key、30 分钟 TTL、pending JSON drain 和 Redis 不可用降级。
 - `RunMessageRecoveryServiceTest` 覆盖 agent session messages 中 assistant 恢复为 transient SSE snapshot、Run scope 下 root + child snapshot、Session root 下全量历史 snapshot、user part 不重复回放，以及未绑定/远端失败时降级为空。
-- `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新、消息追加默认 role 和消息列表 DB fallback。
+- `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新、当前用户历史会话查询委托、消息追加默认 role 和消息列表 DB fallback。
+- `SessionRuntimeStateApplicationServiceTest` 覆盖用户级运行态 snapshot、首帧输出、run/question 全局事件触发刷新，以及 message-only 事件不触发摘要变更。
 - `AiMessageFeedbackApplicationServiceTest` 覆盖反馈创建/更新、assistant role 校验、消息归属校验和评论长度边界。
 - `AnalyticsQueryServiceTest` 覆盖 overview 指标口径、空分母、参数边界和 CSV 不含 cost 字段。
-- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
+- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传、permission/question v2 session-scoped path、permission reply body 兼容和过期请求 `CONFLICT + STALE_RUNTIME_REQUEST` 映射。
 - `InternalModelThinkStreamConverterTest` 覆盖企业内部模型流式 `<think>` 标签跨 chunk 转换为 `reasoning_content`；模型目录接口和 Run 选择测试以 opencode 原生目录透传为准。
-- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
+- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传、permission/question v2 session-scoped path、permission reply body 兼容和过期请求 `CONFLICT + STALE_RUNTIME_REQUEST` 映射。
 - `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码和本地进程适配。
 
 ## 允许依赖
@@ -76,6 +81,7 @@
 - `test-agent-domain`。
 - `test-agent-event`。
 - `test-agent-agent-runtime`。
+- `test-agent-scheduler`，仅用于注册本模块业务定时任务，不把业务任务放入 scheduler 模块。
 - Reactor、Jackson、Spring Context。
 
 ## 禁止依赖

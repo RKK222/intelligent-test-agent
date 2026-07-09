@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 用户管理（测试）对 API 层暴露的响应模型与创建命令。
+ * 用户管理对 API 层暴露的响应模型与命令。
  *
  * <p>该功能仅用于研发测试便捷造号，所有响应均不包含密码哈希等敏感字段。
  */
@@ -25,6 +25,12 @@ public final class UserManagementResponses {
             String rdDepartment,
             String department,
             String role) {
+    }
+
+    /**
+     * 更新用户全局角色命令。当前测试管理入口只允许设置单个全局角色，避免和登录态多角色展示混淆。
+     */
+    public record UpdateUserRoleCommand(String userId, String role) {
     }
 
     /**

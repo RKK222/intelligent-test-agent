@@ -39,7 +39,7 @@
 | `/api/internal/platform/opencode-runtime/manager-backends` | 已作废，返回 `410 API_GONE`；运行管理请使用 `management/overview`。 |
 | `/api/internal/platform/opencode-runtime/management/overview` | 超级管理员只读运行管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/internal/platform/scheduler-management` | 超级管理员定时任务管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
-| `/api/internal/platform/system-management` | 超级管理员用户管理（测试）入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
+| `/api/internal/platform/system-management` | 超级管理员用户管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
 
 当前已落地的新平台入口：
@@ -78,6 +78,7 @@
 | `scheduler-management` | `/api/internal/platform/scheduler-management/tasks` | 无旧 URL |
 | `scheduler-management` | `/api/internal/platform/scheduler-management/runs` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/users` | 无旧 URL |
+| `system-management` | `/api/internal/platform/system-management/users/{userId}/roles` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/roles` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
@@ -1344,7 +1345,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/api/internal/platform/opencode-runtime/sessions` | 创建会话。 |
-| `GET` | `/api/internal/platform/opencode-runtime/sessions?q=&page=&size=` | 全局搜索/分页查询 ACTIVE 会话，置顶优先。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions?q=&page=&size=` | 当前登录用户历史会话分页；`q` 为空时返回该用户全部 ACTIVE 会话，默认前端每页 30 条。 |
 | `GET` | `/api/internal/platform/opencode-runtime/workspaces/{workspaceId}/sessions` | 按工作区分页查询会话。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` | 查询会话详情。 |
 | `PATCH` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` | 更新会话标题或置顶状态。 |
@@ -1375,11 +1376,27 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`。
+`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`、`workspaceContext`。
+
+`workspaceContext` 仅在用户历史列表中尽量补齐，详情/更新/删除等单会话接口可为 `null`：
+
+```json
+{
+  "appId": "app_...",
+  "appName": "智能测试平台",
+  "applicationWorkspaceId": "aw_...",
+  "workspaceName": "主干工作区",
+  "versionId": "ver_...",
+  "version": "20260708"
+}
+```
 
 兼容要求：
 
-- `GET /api/internal/platform/opencode-runtime/sessions` 用于 History 全局搜索，`q` 为空时返回所有 `ACTIVE` 会话。
+- `GET /api/internal/platform/opencode-runtime/sessions` 只返回当前登录用户的历史会话。用户归因按 `sessions.created_by_user_id` 优先，并用 `runs.triggered_by_user_id`、`session_messages.sender_user_id` 兜底兼容旧会话；完全没有用户归因的旧会话不返回，避免泄露其他用户历史。
+- 列表严格按 `updatedAt desc, id desc` 排序，`pinned` 字段保留在响应中但不再影响历史排序。
+- 列表查询不校验当前用户是否仍属于历史会话所属应用，确保用户被移出应用后仍能看到自己的历史；前端点击历史会话时再调用 `/workspace-management/workspaces/{workspaceId}/recent` 校验切换权限，失败后只能只读查看该会话。
+- `workspaceContext.workspaceName` 对托管工作区展示应用工作空间模板名；非托管工作区回退运行态 `workspaces.name`。应用、版本或模板缺失时对应字段可为 `null`。
 - `DELETE /api/internal/platform/opencode-runtime/sessions/{sessionId}` 为软删除，不删除消息、Run、事件或远端 opencode 映射；普通详情、列表和消息追加会把 `ARCHIVED` 会话视为不存在。
 
 `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 请求体：
@@ -1931,9 +1948,9 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和进程记录中的 `baseUrl` 作为本次运行目标；`baseUrl` 由当前 advertised host 与端口生成。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
 Run 进入成功、失败或取消终态后，后端会尝试分页拉取 agent 标准 session messages，将 assistant 可见 text、完整 parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。
 
-### system-management 用户管理（测试）API
+### system-management 用户管理 API
 
-用户管理（测试）API 是高权限平台接口，仅用于研发测试便捷造号，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。创建用户时使用默认密码 `123456`，前端不传密码字段。
+用户管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。当前创建用户能力用于研发测试便捷造号，创建时使用默认密码 `123456`，前端不传密码字段。当前不包含普通用户发起审批通知流，角色调整由超级管理员直接操作。
 
 Base URL：`/api/internal/platform/system-management`
 
@@ -1941,6 +1958,7 @@ Base URL：`/api/internal/platform/system-management`
 |---|---|---|
 | `GET` | `/users` | 分页查询用户列表，可按关键字匹配用户名/统一认证号。 |
 | `POST` | `/users` | 创建测试用户，密码默认为 `123456`，并授予单个角色。 |
+| `PUT` | `/users/{userId}/roles` | 替换指定用户的全局角色，当前测试入口只保留单个角色。 |
 | `GET` | `/roles` | 查询可选角色列表，供前端新增用户下拉选择。 |
 
 `GET /users` 查询参数：
@@ -1985,6 +2003,19 @@ Base URL：`/api/internal/platform/system-management`
 - 密码由后端注入默认值 `123456`，前端不传。
 - 用户名或统一认证号已存在时返回 `CONFLICT`。
 - 角色无效时返回 `VALIDATION_ERROR`。
+
+`PUT /users/{userId}/roles` 请求体：
+
+```json
+{
+  "role": "USER"
+}
+```
+
+- `userId` 为平台用户 ID。
+- `role` 必填，必须是 `ROLE` 字典中的有效角色 code。
+- 用户不存在时返回 `NOT_FOUND`；角色无效时返回 `VALIDATION_ERROR`。
+- 更新成功后返回更新后的用户响应字段，`roles` / `roleLabels` 反映最新角色。
 
 `GET /roles` 响应：
 
@@ -2176,15 +2207,44 @@ Session 运行态接口：
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions` | 读取 pending question。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [[...], ...] }`；`answers` 为 `List<List<String>>`，外层按子问题顺序排列，内层是该问题的选中 label，一次回复覆盖同一请求下的全部子问题。平台也兼容扁平 `string[]`，按单问题整体包成单个内层数组。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reject` | 拒绝 question。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state` | 查询当前登录用户历史会话运行态摘要，用于历史入口运行计数和 ask 提醒。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state/events` | fetch SSE 订阅当前登录用户历史会话运行态摘要变更，首帧 snapshot，后续 updated。 |
 
 旧 `/api/sessions/{sessionId}/...` 运行态入口已作废，统一返回 `410 API_GONE`。agent path 使用 `/api/internal/agent/{agentId}/session/{sessionId}/...`；当前 `opencode` 的 children、todo、diff、abort、fork、compact、revert、unrevert、command、shell 路径保持 `/api/internal/agent/opencode/session/{sessionId}/...`。permission/question 的 agent path 入口使用 `/api/internal/agent/{agentId}/permission|question`，并通过 query `sessionId` 定位平台 session。
+
+用户级会话运行态摘要只面向已登录用户，统计范围与当前用户可见历史会话一致：会话创建人、Run 触发人或消息发送人为当前用户，且会话仍为 ACTIVE。`runningCount` 只统计 `PENDING/RUNNING/CANCELLING` Run；同一会话只返回最近一个非终态 Run。`questionCount` 只统计最新 question 状态仍为 `question.asked` 的运行中会话；收到 `question.replied`、`question.rejected` 或 Run 终态后，该会话会从待关注集合移除。
+
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state` 响应仍包裹 `ApiResponse<T>`，`data` 结构为：
+
+```json
+{
+  "runningCount": 2,
+  "questionCount": 1,
+  "sessions": [
+    {
+      "sessionId": "ses_...",
+      "runId": "run_...",
+      "runStatus": "RUNNING",
+      "attention": "QUESTION",
+      "attentionEventId": "evt_...",
+      "attentionAt": "2026-07-08T14:00:00Z",
+      "updatedAt": "2026-07-08T14:00:01Z"
+    }
+  ],
+  "generatedAt": "2026-07-08T14:00:02Z"
+}
+```
+
+`attention` 目前仅支持 `"QUESTION"` 或 `null`。前端不得把 `attentionEventId` 当作通用 RunEvent 续传游标，只用于去重/展示待答提醒。
+
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 返回 `text/event-stream`，使用 fetch SSE 以携带 `Authorization: Bearer ...`。SSE data 为上面的摘要 DTO 本体，不再额外包裹 `ApiResponse`；事件名首帧为 `session-runtime.snapshot`，后续变更为 `session-runtime.updated`。服务端在 `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled/question.asked/question.replied/question.rejected` 后刷新摘要，并保留低频轮询兜底；该通道是用户级提醒通道，不替代单个 Run 的 RunEvent SSE 或 active-run 恢复。
 
 兼容和安全约束：
 
 - 所有响应仍包裹 `ApiResponse<T>`，错误仍走统一错误码和 traceId。
 - `workspaceId` 为平台 workspace id，后端只把 workspace root 映射为 opencode `directory`；不得把平台 id 当作 opencode `workspace` query。
 - `sessionId` 为平台 session id。无用户主体时，后端通过 `agent_session_bindings` 中的 `(sessionId, agentId)` 定位远端 session；`opencode` 会兼容读取旧 `sessions.opencode_*` 字段并回填 binding，未绑定远端 session 时返回 `CONFLICT`。有用户主体且 agent 为 `opencode` 时，缺失或不匹配的绑定会自动在当前用户进程上重建。
-- `permission`/`question` 的平台路径保留在 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/...` 下，后端实际映射到 opencode `/permission`、`/question` 族 API。
+- `permission`/`question` 的平台路径和请求体保持兼容，后端实际映射到 opencode v2 session-scoped API：`GET /api/session/{remoteSessionId}/permission`、`POST /api/session/{remoteSessionId}/permission/{requestId}/reply`、`GET /api/session/{remoteSessionId}/question`、`POST /api/session/{remoteSessionId}/question/{requestId}/reply`、`POST /api/session/{remoteSessionId}/question/{requestId}/reject`。仅在 permission/question 回复或拒绝时，opencode 404 会转为平台 `CONFLICT`，消息为“权限请求已失效，请重新运行任务”或“提问请求已失效，请重新运行任务”，`details.reason=STALE_RUNTIME_REQUEST`，用于前端清理已过期卡片；其它 opencode 404 映射不变。
 - config/provider auth/worktree/share/MCP auth 均为受控代理能力，前端不得改为直接调用 opencode 原 URL；provider secret 不得写入 localStorage 或日志。
 - 只读 transcript 页面 `/s/{sessionId}` 只消费平台 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}` 与 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages?refresh=false`，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
 - PTY WebSocket 未进入默认 HTTP/SSE 契约；P2 只能按 `docs/standards/security.md` 新增受控 ticket + WebSocket 例外。ticket 只通过新平台 URL `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` 创建，响应中的 `webSocketUrl` 固定为新 WebSocket path。
@@ -2192,7 +2252,7 @@ Session 运行态接口：
 对应测试：
 
 - `OpencodeRuntimeFacadeTest`：验证 facade runtime 调用不泄漏 generated DTO。
-- `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、用户进程节点路由、固定节点 fallback、远端 session id、binding mismatch 自动重建、permission reply body、MCP resources/tools、config/provider OAuth/worktree/share/MCP auth 映射。
+- `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、用户进程节点路由、固定节点 fallback、远端 session id、binding mismatch 自动重建、permission/question v2 session-scoped path、reply body 兼容、过期请求 `CONFLICT` 映射、MCP resources/tools、config/provider OAuth/worktree/share/MCP auth 映射。
 - `PlatformOpencodeRuntimeControllerTest`：验证平台路径统一响应、MCP tools 查询、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest`：验证 `/api/internal/agent/opencode/...` agent path 统一响应、agentId 选择、traceId 和可选用户主体透传。
 - `RuntimeControllerTest`：验证 `/api/internal/agent/opencode/runs` 与内部平台 Run URL 的 DTO、错误格式和 service 实现；`LegacyApiGoneWebFilterTest` 覆盖旧 Run URL 返回 `410 API_GONE`。

@@ -82,7 +82,17 @@ function messageVisibleInView(
 ): boolean {
   const scope = input.messageScopesById?.[messageId];
   if (activeSubagentSessionId) {
-    return scope?.sessionId === activeSubagentSessionId;
+    if (scope?.sessionId === activeSubagentSessionId) {
+      return true;
+    }
+    const activeSubagent = input.subagentsBySessionId?.[activeSubagentSessionId];
+    if (scope?.isChildSession && activeSubagent?.taskPartId && scope.taskPartId === activeSubagent.taskPartId) {
+      return true;
+    }
+    if (scope?.isChildSession && activeSubagent?.taskCallId && scope.taskCallId === activeSubagent.taskCallId) {
+      return true;
+    }
+    return false;
   }
   return scope?.isChildSession !== true;
 }

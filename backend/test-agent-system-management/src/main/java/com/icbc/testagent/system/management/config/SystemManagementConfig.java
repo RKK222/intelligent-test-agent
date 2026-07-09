@@ -44,7 +44,7 @@ public class SystemManagementConfig {
     }
 
     /**
-     * 用户管理（测试）应用服务 Bean，用于查询用户、创建测试用户和查询可选角色。
+     * 用户管理应用服务 Bean，用于查询用户、创建测试用户、调整角色和查询可选角色。
      */
     @Bean
     public UserManagementApplicationService userManagementApplicationService(

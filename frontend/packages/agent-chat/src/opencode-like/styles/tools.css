@@ -13,8 +13,8 @@
 .oc-tool-group__trigger {
   display: grid;
   width: 100%;
-  grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
-  padding: 0 10px;
+  grid-template-columns: 96px minmax(0, 1fr) 56px 16px;
+  padding: 0 8px;
   column-gap: 8px;
   align-items: center;
   color: var(--oc-muted);
@@ -41,11 +41,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--oc-fg);
-  font-weight: 600;
-  font-size: var(--oc-text-md);
-  line-height: 20px;
-  text-transform: uppercase;
+  color: var(--oc-muted);
+  font-weight: 500;
+  font-size: var(--oc-text-sm);
+  line-height: 18px;
+  text-transform: none;
 }
 
 /* No lowercase transform for tool titles */
@@ -77,10 +77,10 @@
 .oc-tool__trigger {
   width: 100%;
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
+  grid-template-columns: 96px minmax(0, 1fr) 56px 16px;
   align-items: center;
   column-gap: 8px;
-  padding: 0 10px;
+  padding: 0 8px;
   color: var(--oc-fg);
   background: transparent;
   border: 0;
@@ -101,18 +101,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--oc-fg);
-  font-weight: 600;
-  font-size: var(--oc-text-md);
-  line-height: 20px;
-  text-transform: uppercase;
+  color: var(--oc-muted);
+  font-weight: 500;
+  font-size: var(--oc-text-sm);
+  line-height: 18px;
+  text-transform: none;
 }
 
 .oc-tool__trigger .oc-tool__subtitle {
   grid-column: 2;
   min-width: 0;
   margin-left: 0;
-  color: var(--oc-muted);
+  color: var(--oc-subtle);
   font-size: var(--oc-text-sm);
   line-height: 18px;
   overflow: hidden;
@@ -180,23 +180,25 @@
 
 .oc-subagent-card {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-rows: auto auto;
   align-items: center;
   width: 100%;
   min-height: 38px;
   padding: 6px 10px;
-  column-gap: 8px;
+  column-gap: 12px;
+  row-gap: 2px;
   border: 1px solid var(--oc-border);
   border-radius: var(--oc-radius-sm);
   background: var(--oc-surface);
   color: var(--oc-fg);
   font-family: var(--oc-font-sans);
   text-align: left;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .oc-subagent-card + .oc-subagent-card {
-  margin-top: 6px;
+  margin-top: 10px;
 }
 
 .oc-subagent-card.is-clickable {
@@ -213,28 +215,36 @@
 }
 
 .oc-subagent-card__agent {
+  grid-column: 1;
+  grid-row: 1;
   min-width: 0;
   color: var(--oc-warning);
-  font-size: var(--oc-text-md);
+  font-size: 10px;
   font-weight: 600;
-  line-height: 20px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 14px;
   text-transform: uppercase;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .oc-subagent-card__title {
+  grid-column: 1;
+  grid-row: 2;
   min-width: 0;
-  color: var(--oc-fg);
-  font-size: var(--oc-text-md);
-  line-height: 20px;
+  color: var(--oc-muted);
+  font-size: var(--oc-text-sm);
+  line-height: 16px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .oc-subagent-card__status {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: end;
   color: var(--oc-subtle);
   font-size: var(--oc-text-xs);
   line-height: 16px;
@@ -280,11 +290,14 @@
   .oc-context-group__trigger,
   .oc-tool-group__trigger,
   .oc-tool__trigger {
-    grid-template-columns: 74px minmax(0, 1fr) 50px 16px;
+    grid-template-columns: 80px minmax(0, 1fr) 48px 16px;
+    column-gap: 6px;
+    padding: 0 6px;
   }
 
   .oc-tool__status {
-    font-size: var(--oc-text-sm);
+    font-size: 10px;
+    padding: 1px 4px;
   }
 }
 

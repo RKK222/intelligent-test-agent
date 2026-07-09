@@ -35,6 +35,7 @@ else
   echo "Skipping windows restart script PowerShell parse: pwsh/powershell not found."
 fi
 run_check "dev backend script bash syntax" bash -n "${ROOT_DIR}/tools/dev-backend-run.sh"
+run_check "internal worker docker script bash syntax" bash -n "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh"
 
 restart_help="$(sh "${ROOT_DIR}/restart-dev-services.sh" --help)"
 if [[ "${restart_help}" != *"backend profile: test"* ]]; then
@@ -217,6 +218,48 @@ if [[ "$(sed -n '1,220p' "${ROOT_DIR}/tools/dev-backend-run.sh")" != *"-Djava.ne
 fi
 if [[ "$(sed -n '1,220p' "${ROOT_DIR}/tools/dev-backend-run.sh")" != *"-DsocksProxyHost="* ]]; then
   fail "dev backend script should clear JVM SOCKS proxy host"
+fi
+
+worker_env="${tmp_dir}/worker.env"
+worker_data_root="${tmp_dir}/worker-data"
+worker_program_root="${tmp_dir}/worker-programs"
+worker_docker_calls="${tmp_dir}/worker-docker.calls"
+cat >"${worker_env}" <<EOF
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=test-token
+TEST_AGENT_DATA_ROOT=${worker_data_root}
+TEST_AGENT_PROGRAM_ROOT=${worker_program_root}
+TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
+OPENCODE_WORKER_BACKEND_PORT=8080
+OPENCODE_WORKER_PORT_START=4096
+OPENCODE_WORKER_PORT_END=4105
+EOF
+cat >"${tmp_dir}/bin/docker" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >>$(printf "%q" "${worker_docker_calls}")
+if [[ "\${1:-}" == "rm" ]]; then
+  exit 0
+fi
+if [[ "\${1:-}" == "run" ]]; then
+  if [[ " \$* " == *" --add-host "* ]]; then
+    echo "worker docker run should not inject host.docker.internal mapping" >&2
+    exit 1
+  fi
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${tmp_dir}/bin/docker"
+
+worker_output="$(
+  PATH="${tmp_dir}/bin:${PATH}" bash "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" \
+    --env-file "${worker_env}" \
+    --name test-agent-opencode-worker-verify \
+    restart 2>&1
+)"
+if [[ "$(cat "${worker_docker_calls}")" == *"--add-host"* ]]; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker docker script should not require host.docker.internal add-host mapping"
 fi
 
 echo "Development script verification passed."

@@ -1,4 +1,5 @@
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import { chatStateFromSessionTreeSnapshot } from "../src/components/workbench-utils";
 import FigmaChatPanel from "../src/components/FigmaChatPanel.vue";
@@ -136,6 +137,129 @@ describe("FigmaChatPanel", () => {
     expect(newConversationButton.text()).toBe("");
   });
 
+  it("renders history context fields and emits controlled search plus load more", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "ses_1234567890abcdef",
+            title: "回归测试历史",
+            appName: "智能测试平台",
+            workspaceName: "主干工作区",
+            version: "20260708",
+            createdAt: "2026-07-08T09:00:00Z",
+            updatedAt: "2026-07-08T10:00:00Z"
+          },
+          {
+            id: "ses_abcdef1234567890",
+            title: "无上下文历史",
+            createdAt: "2026-07-07T09:00:00Z",
+            updatedAt: "2026-07-07T10:00:00Z"
+          }
+        ],
+        historyTotal: 61,
+        historyHasMore: true,
+        historySearch: ""
+      } as any
+    });
+
+    await wrapper.get('button[title="查看历史对话"]').trigger("click");
+
+    expect(wrapper.text()).toContain("61");
+    expect(wrapper.text()).toContain("智能测试平台 · 主干工作区 · 20260708");
+    expect(wrapper.text()).toContain("未关联应用 · 未知工作空间 · 无版本");
+
+    await wrapper.get(".figma-chat-history-search-input").setValue("回归");
+    expect(wrapper.emitted("history-search-change")).toEqual([["回归"]]);
+
+    const loadMore = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("显示更多历史会话"));
+    expect(loadMore).toBeTruthy();
+    await loadMore!.trigger("click");
+    expect(wrapper.emitted("load-more-history")).toEqual([[]]);
+  });
+
+  it("shows runtime count, spinning history icon and question bell in history controls", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        historyRunningCount: 2,
+        historyQuestionCount: 1,
+        history: [
+          {
+            id: "ses_running",
+            title: "等待回答",
+            runtimeState: "running",
+            runStatus: "RUNNING",
+            pendingQuestion: true,
+            createdAt: "2026-07-08T09:00:00Z",
+            updatedAt: "2026-07-08T10:00:00Z"
+          },
+          {
+            id: "ses_done",
+            title: "已完成",
+            runtimeState: "completed",
+            createdAt: "2026-07-07T09:00:00Z",
+            updatedAt: "2026-07-07T10:00:00Z"
+          }
+        ]
+      } as any
+    });
+
+    const historyButton = wrapper.get('button[title="查看历史对话"]');
+    expect(historyButton.find(".figma-chat-history-running-badge").text()).toBe("2");
+    expect(historyButton.find(".figma-chat-history-alert-bell").exists()).toBe(true);
+
+    await historyButton.trigger("click");
+
+    expect(wrapper.find(".figma-chat-history-card-status--running").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-history-card-status--completed").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-history-card-attention").exists()).toBe(true);
+    expect(wrapper.text()).toContain("运行中");
+    expect(wrapper.text()).toContain("已完成");
+  });
+
+  it("keeps new conversation enabled while a run is active and the process is ready", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        running: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    const newConversationButton = wrapper.get(".figma-chat-new-btn");
+    expect(newConversationButton.attributes("disabled")).toBeUndefined();
+
+    await newConversationButton.trigger("click");
+
+    expect(wrapper.emitted("new-conversation")).toEqual([[]]);
+  });
+
+  it("disables composer controls and exposes readonly reason on hover title", () => {
+    const readonlyReason = "你已不属于该历史会话所属应用，当前会话只读。";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "继续执行",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        readonlyReason
+      } as any
+    });
+
+    const textarea = wrapper.get("textarea");
+    const sendButton = wrapper.get(".figma-chat-send-card");
+
+    expect(textarea.attributes("disabled")).toBeDefined();
+    expect(textarea.attributes("title")).toBe(readonlyReason);
+    expect(sendButton.attributes("disabled")).toBeDefined();
+    expect(sendButton.attributes("title")).toBe(readonlyReason);
+  });
+
   it("renders workspace context attachments and blocks oversized input before sending", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -192,6 +316,7 @@ describe("FigmaChatPanel", () => {
     handle.element.dispatchEvent(new MouseEvent("pointerdown", { button: 0, clientY: 240, bubbles: true }));
     window.dispatchEvent(new MouseEvent("pointermove", { clientY: 180 }));
     window.dispatchEvent(new MouseEvent("pointerup", { clientY: 180 }));
+    await nextTick();
 
     expect((textarea.element as HTMLTextAreaElement).style.height).toBe("100px");
   });
@@ -387,6 +512,7 @@ describe("FigmaChatPanel", () => {
     expect(composer.exists()).toBe(true);
     expect(dock.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(dock.text()).toContain("1/1 个问题");
+    expect(dock.get(".figma-chat-question-type").text()).toBe("单选");
     expect(dock.text()).toContain("请选择目标环境");
     expect(dock.text()).toContain("连接预发服务验证");
 
@@ -509,6 +635,8 @@ describe("FigmaChatPanel", () => {
         ]
       } as any
     });
+
+    expect(wrapper.get(".figma-chat-question-type").text()).toBe("多选");
 
     await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("需求文档"))!.trigger("click");
     await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("UI 界面"))!.trigger("click");
@@ -975,6 +1103,216 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
     expect(wrapper.text()).toContain("子 Agent 输出");
+  });
+
+  it("keeps historical subagent cards clickable and named when snapshot ids differ from rendered task part ids", async () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "toolu_snapshot_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: { toolu_snapshot_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "msg_root", role: "assistant" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_rendered_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              metadata: { agent: "build", title: "构建回归用例" },
+              state: {
+                status: "completed",
+                input: { description: "构建回归用例" }
+              }
+            }
+          }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskMessageId: "msg_root",
+            taskPartId: "toolu_snapshot_task",
+            taskCallId: "call_task",
+            message: { id: "msg_child", role: "assistant", content: "子 Agent 输出" }
+          }
+        }
+      ]
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: state.messages,
+        messageScopesById: state.messageScopesById,
+        subagentsBySessionId: state.subagentsBySessionId,
+        subagentByTaskPartId: state.subagentByTaskPartId,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).toContain("Build");
+    expect(wrapper.text()).toContain("构建回归用例");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("子 Agent 输出");
+  });
+
+  it("keeps task cards clickable when only task call id matches historical subagent state", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "msg_root",
+            messageId: "msg_root",
+            role: "assistant",
+            text: "",
+            parts: [
+              {
+                partId: "prt_rendered_task",
+                type: "tool",
+                toolName: "task",
+                callId: "call_task",
+                status: "completed",
+                input: { description: "识别 I2026002 测试对象" }
+              }
+            ],
+            createdAt: "2026-07-03T00:00:01Z"
+          },
+          {
+            id: "msg_child",
+            messageId: "msg_child",
+            role: "assistant",
+            text: "子 Agent 工作详情",
+            parts: [{ partId: "prt_child_text", type: "text", text: "子 Agent 工作详情" }],
+            createdAt: "2026-07-03T00:00:02Z"
+          }
+        ],
+        messageScopesById: {
+          msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+          msg_child: {
+            sessionId: "ses_root",
+            rootSessionId: "ses_root",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskCallId: "call_task"
+          }
+        },
+        subagentsBySessionId: {
+          ses_child: {
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            taskMessageId: "msg_root",
+            taskPartId: "toolu_snapshot_task",
+            taskCallId: "call_task",
+            agentName: "TEST-DESIGN-TARGET-RECOGNITION",
+            title: "识别 I2026002 测试对象",
+            status: "completed",
+            updatedAt: "2026-07-03T00:00:00Z"
+          }
+        },
+        subagentByTaskPartId: {},
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).toContain("TEST-DESIGN-TARGET-RECOGNITION");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("子 Agent 工作详情");
+  });
+
+  it("opens historical subagent cards restored from persisted task output", async () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: []
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot, [
+      {
+        messageId: "msg_root",
+        sessionId: "ses_platform",
+        role: "ASSISTANT",
+        content: "",
+        createdAt: "2026-07-05T13:14:00Z",
+        parts: [
+          {
+            partId: "prt_rendered_task",
+            type: "tool",
+            toolName: "task",
+            callId: "call_task",
+            status: "completed",
+            input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" },
+            metadata: { sessionId: "ses_child" },
+            output: "<task id=\"ses_child\" state=\"completed\"><task_result>\n子智能体已识别测试对象详情\n</task_result></task>"
+          }
+        ]
+      }
+    ]);
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: state.messages,
+        messageScopesById: state.messageScopesById,
+        subagentsBySessionId: state.subagentsBySessionId,
+        subagentByTaskPartId: state.subagentByTaskPartId,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).not.toContain("子智能体已识别测试对象详情");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("子智能体已识别测试对象详情");
   });
 
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {

@@ -17,7 +17,7 @@
 - `CronScheduleCalculator`：统一使用 UTC 计算 Cron 下次触发时间。
 - `ScheduledTaskRegistry`：扫描 handler Bean 并同步代码注册任务定义。
 - `RedisScheduledTaskLock`、`ScheduledTaskLockLease`：Redis token 锁、续租和释放。
-- `ScheduledTaskRunner`：后台线程扫描 due task 和 pending manual run，统一记录运行状态。
+- `ScheduledTaskRunner`：应用启动时先同步代码注册任务；启用 scheduler 后后台线程扫描 due task 和 pending manual run，统一记录运行状态。
 - `SchedulerManagementService`、`ScheduledTaskUpdateCommand`：管理 API 使用的应用服务与命令对象。
 - `SchedulerProperties`、`SchedulerStartupValidator`：配置绑定与启用 Redis 必需校验。
 

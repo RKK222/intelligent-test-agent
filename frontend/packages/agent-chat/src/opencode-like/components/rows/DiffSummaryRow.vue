@@ -10,6 +10,7 @@ export type DiffSummaryRowProps = {
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { ChevronDown, ChevronRight, FileDiff } from "lucide-vue-next";
 import { formatDisplayPath } from "../../state/tool-registry";
+import { FileIcon } from "@test-agent/file-explorer";
 
 const props = defineProps<DiffSummaryRowProps>();
 const emit = defineEmits<{
@@ -92,7 +93,10 @@ onBeforeUnmount(clearTotalsBumpTimer);
         class="oc-diff-file is-clickable"
         @click="emit('openFile', file.path)"
       >
-        <span class="oc-diff-file__path" :title="file.path">{{ getFileName(file.path) }}</span>
+        <span class="oc-diff-file__path-wrapper">
+          <FileIcon :entry="{ name: getFileName(file.path), path: file.path, type: 'file' }" class="oc-diff-file__icon" />
+          <span class="oc-diff-file__path" :title="file.path">{{ getFileName(file.path) }}</span>
+        </span>
         <span class="oc-diff-line is-add">+{{ file.additions }}</span>
         <span class="oc-diff-line is-del">-{{ file.deletions }}</span>
       </div>

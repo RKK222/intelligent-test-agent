@@ -1,6 +1,8 @@
 package com.icbc.testagent.domain.run;
 
 import com.icbc.testagent.domain.session.SessionId;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -33,5 +35,12 @@ public interface RunRepository {
      */
     default Optional<Run> findLatestActiveBySessionId(SessionId sessionId) {
         return Optional.empty();
+    }
+
+    /**
+     * 查询更新时间早于指定时间的非终态 Run，用于后台定时收敛失去事件订阅的历史运行。
+     */
+    default List<Run> findStaleActiveRuns(Instant updatedBefore, int limit) {
+        return List.of();
     }
 }

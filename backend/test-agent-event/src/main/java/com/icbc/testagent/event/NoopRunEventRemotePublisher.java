@@ -25,4 +25,9 @@ public final class NoopRunEventRemotePublisher implements RunEventRemotePublishe
     public Flux<RunEventLiveEvent> stream(RunId runId) {
         return Flux.empty();
     }
+
+    @Override
+    public Flux<RunEventLiveEvent> streamAll() {
+        return Flux.empty();
+    }
 }

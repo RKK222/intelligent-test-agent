@@ -12,6 +12,7 @@ import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
 import com.icbc.testagent.system.management.user.UserManagementResponses.RoleOption;
+import com.icbc.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import com.icbc.testagent.system.management.user.UserManagementResponses.UserResponse;
 import java.util.List;
 import java.util.Objects;
@@ -19,7 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 用户管理（测试）应用服务，封装查询用户列表、创建测试用户、查询可选角色的业务编排。
+ * 用户管理应用服务，封装查询用户列表、创建测试用户、调整角色和查询可选角色的业务编排。
  *
  * <p>仅用于研发测试：创建用户时使用固定默认密码，并为其授予单个角色。业务层不依赖 API 模块，
  * 通过领域仓储接口操作用户与角色数据。
@@ -92,6 +93,32 @@ public class UserManagementApplicationService {
         // 重新读取以带回刚授予的角色
         return userResponse(userRepository.findByUserId(user.userId())
                 .orElseThrow(() -> new PlatformException(ErrorCode.INTERNAL_ERROR, "用户创建后读取失败")));
+    }
+
+    /**
+     * 替换指定用户的全局角色。
+     *
+     * <p>该入口服务于研发测试用户管理页：一次只保留一个角色，先校验用户和目标角色存在，
+     * 再在同一事务内删除旧角色并写入新角色，避免前端看到多角色半更新状态。
+     *
+     * @throws PlatformException 当用户不存在或角色无效时
+     */
+    @Transactional
+    public UserResponse updateUserRole(UpdateUserRoleCommand command) {
+        User user = userRepository.findByUserId(new com.icbc.testagent.domain.user.UserId(command.userId()))
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "用户不存在"));
+        String roleCode = command.role();
+        if (roleCode == null || roleCode.isBlank()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "角色不能为空");
+        }
+        Dictionary roleDictionary = dictionaryRepository
+                .findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, roleCode)
+                .orElseThrow(() -> new PlatformException(ErrorCode.VALIDATION_ERROR, "角色无效"));
+
+        List<UserRole> existingRoles = userRoleRepository.findByUserId(user.userId());
+        existingRoles.forEach(userRoleRepository::delete);
+        userRoleRepository.save(UserRole.create(user.userId(), roleDictionary.dictId()));
+        return userResponse(user);
     }
 
     /**

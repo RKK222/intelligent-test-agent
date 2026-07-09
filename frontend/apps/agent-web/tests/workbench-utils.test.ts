@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { MessagePart, PromptPart, Run, RunDiffFile, SessionMessage, SessionTreeMessagesResponse } from "@test-agent/shared-types";
+import { BackendApiError } from "@test-agent/backend-api";
+import type { MessagePart, PromptPart, Run, RunDiffFile, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import {
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
@@ -13,6 +14,8 @@ import {
   diffFilesFromSessionMessages,
   filterWorkspaceRootEntries,
   inferDiffFromToolPart,
+  isStaleRuntimeRequest,
+  historyItems,
   runEventMatchesRun,
   mergeDiffFiles,
   messagesFromSessionMessages,
@@ -26,6 +29,7 @@ import {
   retryExpirationDecision,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
+  staleRuntimeRequestFeedback,
   workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
 import type { FileTreeEntry } from "@test-agent/shared-types";
@@ -82,6 +86,117 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
+  });
+});
+
+describe("staleRuntimeRequestFeedback", () => {
+  it("detects stale runtime request conflicts and keeps feedback readable", () => {
+    const staleError = new BackendApiError(409, {
+      success: false,
+      code: "CONFLICT",
+      message: "权限请求已失效，请重新运行任务",
+      traceId: "trace_stale",
+      retryable: false,
+      details: { reason: "STALE_RUNTIME_REQUEST" }
+    });
+    const otherConflict = new BackendApiError(409, {
+      success: false,
+      code: "CONFLICT",
+      message: "其它冲突",
+      traceId: "trace_other",
+      retryable: false,
+      details: { reason: "DIFFERENT_REASON" }
+    });
+
+    expect(isStaleRuntimeRequest(staleError)).toBe(true);
+    expect(isStaleRuntimeRequest(otherConflict)).toBe(false);
+    expect(isStaleRuntimeRequest(new Error("network"))).toBe(false);
+    expect(staleRuntimeRequestFeedback("权限请求已失效", staleError)).toEqual({
+      kind: "info",
+      title: "权限请求已失效",
+      description: "权限请求已失效，请重新运行任务",
+      traceId: "trace_stale"
+    });
+  });
+});
+
+describe("historyItems", () => {
+  it("only returns backend sessions and maps workspace context fields", () => {
+    const sessions: Session[] = [
+      {
+        sessionId: "ses_1234567890abcdef",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "用户历史",
+        status: "ACTIVE",
+        createdAt: "2026-07-08T09:00:00Z",
+        updatedAt: "2026-07-08T10:00:00Z",
+        workspaceContext: {
+          appId: "app_1234567890abcdef",
+          appName: "智能测试平台",
+          applicationWorkspaceId: "aw_1234567890abcdef",
+          workspaceName: "主干工作区",
+          versionId: "ver_1234567890abcdef",
+          version: "20260708"
+        }
+      }
+    ];
+
+    expect(historyItems(null, sessions)).toEqual([
+      expect.objectContaining({
+        id: "ses_1234567890abcdef",
+        title: "用户历史",
+        appName: "智能测试平台",
+        workspaceName: "主干工作区",
+        version: "20260708"
+      })
+    ]);
+    expect(historyItems(null, sessions)).not.toContainEqual(expect.objectContaining({ id: "local" }));
+  });
+
+  it("merges runtime state and question attention into history items", () => {
+    const sessions: Session[] = [
+      {
+        sessionId: "ses_running",
+        workspaceId: "wrk_1",
+        title: "运行中历史",
+        status: "ACTIVE",
+        createdAt: "2026-07-08T09:00:00Z",
+        updatedAt: "2026-07-08T10:00:00Z"
+      },
+      {
+        sessionId: "ses_done",
+        workspaceId: "wrk_1",
+        title: "已完成历史",
+        status: "ACTIVE",
+        createdAt: "2026-07-08T09:00:00Z",
+        updatedAt: "2026-07-08T10:00:00Z"
+      }
+    ];
+    const runtimeState: SessionRuntimeState = {
+      sessionId: "ses_running",
+      runId: "run_1",
+      runStatus: "RUNNING",
+      attention: "QUESTION",
+      attentionEventId: "evt_1",
+      attentionAt: "2026-07-08T10:01:00Z",
+      updatedAt: "2026-07-08T10:01:02Z"
+    };
+
+    expect(historyItems(null, sessions, { ses_running: runtimeState })).toEqual([
+      expect.objectContaining({
+        id: "ses_running",
+        runtimeState: "running",
+        runId: "run_1",
+        runStatus: "RUNNING",
+        pendingQuestion: true,
+        attentionEventId: "evt_1"
+      }),
+      expect.objectContaining({
+        id: "ses_done",
+        runtimeState: "completed",
+        pendingQuestion: false
+      })
+    ]);
   });
 });
 
@@ -599,6 +714,216 @@ describe("historical session restoration", () => {
       agentName: "Explore",
       title: "Explore project structure",
       status: "completed"
+    });
+  });
+
+  it("restores historical subagent binding when snapshot taskPartId differs from rendered task part id", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "toolu_snapshot_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: { toolu_snapshot_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "msg_root", role: "assistant" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_rendered_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              metadata: { agent: "build", title: "构建回归用例" },
+              state: {
+                status: "completed",
+                input: { description: "构建回归用例" }
+              }
+            }
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+
+    expect(state.subagentByTaskPartId.toolu_snapshot_task).toBe("ses_child");
+    expect(state.subagentByTaskPartId.prt_rendered_task).toBe("ses_child");
+    expect(state.subagentByTaskPartId.call_task).toBe("ses_child");
+    expect(state.subagentsBySessionId.ses_child).toMatchObject({
+      taskPartId: "prt_rendered_task",
+      taskCallId: "call_task",
+      agentName: "Build",
+      title: "构建回归用例",
+      status: "completed"
+    });
+  });
+
+  it("restores subagent output from persisted task parts when the session tree is empty", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: []
+    };
+    const persisted: SessionMessage[] = [
+      {
+        messageId: "msg_root",
+        sessionId: "ses_platform",
+        role: "ASSISTANT",
+        content: "",
+        createdAt: "2026-07-05T13:14:00Z",
+        parts: [
+          {
+            partId: "prt_task",
+            type: "tool",
+            toolName: "task",
+            callId: "call_task",
+            status: "completed",
+            input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" },
+            metadata: { sessionId: "ses_child" },
+            output: "<task id=\"ses_child\" state=\"completed\"><task_result>\n## 子 Agent 工作内容\n识别完成。\n</task_result></task>"
+          }
+        ]
+      }
+    ];
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, persisted);
+    const childMessage = state.messages.find((message) => message.id === "task-output:ses_child:prt_task");
+
+    expect(state.subagentsBySessionId.ses_child).toMatchObject({
+      sessionId: "ses_child",
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task",
+      agentName: "Test-design-target-recognition",
+      title: "识别 I2026000 测试对象",
+      status: "completed"
+    });
+    expect(state.subagentByTaskPartId.prt_task).toBe("ses_child");
+    expect(state.subagentByTaskPartId.call_task).toBe("ses_child");
+    expect(childMessage).toMatchObject({
+      role: "assistant",
+      text: "## 子 Agent 工作内容\n识别完成。"
+    });
+    expect(state.messageScopesById["task-output:ses_child:prt_task"]).toMatchObject({
+      sessionId: "ses_child",
+      isChildSession: true,
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task"
+    });
+  });
+
+  it("replays child messages from session tree messagesBySessionId", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {
+        ses_child: [
+          {
+            rootSessionId: "ses_root",
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskMessageId: "msg_root",
+            taskPartId: "prt_task",
+            taskCallId: "call_task",
+            message: { id: "msg_child", role: "assistant", content: "子 Agent messagesBySessionId 输出" }
+          }
+        ]
+      },
+      childSessionIdByTaskPartId: { prt_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "msg_root", role: "assistant" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              state: {
+                status: "completed",
+                input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" }
+              }
+            }
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+
+    expect(state.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "msg_child",
+        role: "assistant",
+        text: "子 Agent messagesBySessionId 输出"
+      })
+    ]));
+    expect(state.messageScopesById.msg_child).toMatchObject({
+      sessionId: "ses_child",
+      isChildSession: true,
+      taskPartId: "prt_task",
+      taskCallId: "call_task"
     });
   });
 

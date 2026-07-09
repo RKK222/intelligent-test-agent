@@ -92,6 +92,13 @@ public class RunEventLiveBus {
     }
 
     /**
+     * 订阅本机和跨实例实时事件的全局流；用于用户级运行态聚合在 run/question 事件后刷新快照。
+     */
+    public Flux<RunEventLiveEvent> streamAll() {
+        return Flux.merge(sink.asFlux(), remotePublisher.streamAll());
+    }
+
+    /**
      * 向 Reactor sink 写入事件；无订阅者时静默丢弃，并发发布时短时间 busy loop 重试。
      */
     private void emit(RunEventLiveEvent liveEvent) {

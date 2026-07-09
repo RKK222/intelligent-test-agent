@@ -1,4 +1,4 @@
-import { defineComponent, h } from "vue";
+import { defineComponent, h, inject, provide } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
@@ -30,11 +30,13 @@ function createApi(): Partial<BackendApiClient> {
   return {
     listUsers: vi.fn().mockResolvedValue({ items: users, page: 1, size: 20, total: users.length }),
     listRoles: vi.fn().mockResolvedValue(roles),
-    createUser: vi.fn().mockResolvedValue(users[0])
+    createUser: vi.fn().mockResolvedValue(users[0]),
+    updateUserRole: vi.fn().mockResolvedValue({ ...users[0], roles: ["USER"], roleLabels: ["普通用户"] })
   };
 }
 
 const radioGroupKey = Symbol("radio-group");
+const tableRowsKey = Symbol("table-rows");
 
 const ElSelectStub = defineComponent({
   props: ["modelValue", "placeholder", "ariaLabel"],
@@ -76,6 +78,28 @@ const ElInputStub = defineComponent({
   }
 });
 
+const ElTableStub = defineComponent({
+  props: ["data"],
+  setup(props, { slots }) {
+    provide(tableRowsKey, props);
+    return () => h("div", { class: "ta-table-stub" }, slots.default?.());
+  }
+});
+
+const ElTableColumnStub = defineComponent({
+  props: ["prop", "label"],
+  setup(props, { slots }) {
+    const tableProps = inject<{ data?: UserManagementUser[] }>(tableRowsKey, {});
+    return () =>
+      h(
+        "div",
+        { "data-prop": props.prop },
+        (tableProps.data ?? []).flatMap((row) => slots.default?.({ row }) ?? [h("span", String(props.prop ? row[props.prop as keyof UserManagementUser] ?? "" : props.label))]
+        )
+      );
+  }
+});
+
 const adminUser: CurrentUser = {
   userId: "usr_admin",
   username: "admin",
@@ -95,7 +119,7 @@ function renderPanel(api: Partial<BackendApiClient> = createApi(), currentUser: 
         ElButton: {
           emits: ["click"],
           props: ["disabled", "type"],
-          template: `<button type="button" :disabled="disabled" @click="$emit('click')"><slot /></button>`
+          template: `<button v-bind="$attrs" type="button" :disabled="disabled" @click="$emit('click')"><slot /></button>`
         },
         ElIcon: { template: `<span><slot /></span>` },
         ElInput: ElInputStub,
@@ -106,8 +130,8 @@ function renderPanel(api: Partial<BackendApiClient> = createApi(), currentUser: 
           props: ["label"],
           template: `<div><label>{{ label }}</label><slot /></div>`
         },
-        ElTable: { template: `<div class="ta-table-stub"><slot /></div>` },
-        ElTableColumn: { props: ["prop", "label"], template: `<span :data-prop="prop">{{ label }}</span>` },
+        ElTable: ElTableStub,
+        ElTableColumn: ElTableColumnStub,
         ElPagination: { props: ["total"], template: `<div class="ta-pagination-stub">total={{ total }}</div>` }
       },
       provide: {
@@ -124,12 +148,13 @@ describe("SettingsUserManagementPanel", () => {
 
   it("loads users and roles on mount for super admin", async () => {
     const api = createApi();
-    const { findByText } = renderPanel(api);
+    const { container, findByText } = renderPanel(api);
 
     // 列表区标题渲染即表示挂载后已发起请求
     await findByText("用户列表");
     await waitFor(() => expect(api.listUsers).toHaveBeenCalledWith(undefined, 1, 20));
     expect(api.listRoles).toHaveBeenCalled();
+    expect(container.textContent?.indexOf("用户列表")).toBeLessThan(container.textContent?.indexOf("新增用户") ?? 0);
   });
 
   it("creates user with default role and refreshes list", async () => {
@@ -148,6 +173,21 @@ describe("SettingsUserManagementPanel", () => {
     const payload = (api.createUser as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload).toMatchObject({ unifiedAuthId: "AUTH_2", username: "bob", role: "USER" });
     // 创建成功后刷新列表
+    await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("saves changed roles from the list header and refreshes list", async () => {
+    const api = createApi();
+    const { findByText, getByLabelText, getByRole } = renderPanel(api);
+
+    await waitFor(() => expect(api.listUsers).toHaveBeenCalledWith(undefined, 1, 20));
+    await findByText("alice");
+
+    await fireEvent.update(getByLabelText("调整 alice 的角色"), "USER");
+    await findByText("已修改");
+    await fireEvent.click(getByRole("button", { name: "保存角色修改（1）" }));
+
+    await waitFor(() => expect(api.updateUserRole).toHaveBeenCalledWith("usr_existing", { role: "USER" }));
     await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 

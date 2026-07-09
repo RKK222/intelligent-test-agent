@@ -28,6 +28,8 @@ const total = ref(0);
 const page = ref(1);
 const size = ref(20);
 const keyword = ref("");
+const roleDrafts = ref<Record<string, string>>({});
+const savingRoles = ref(false);
 
 const loading = ref(false);
 const errorMessage = ref("");
@@ -125,6 +127,11 @@ async function loadUsers() {
     const result = await api.listUsers(keyword.value.trim() || undefined, page.value, size.value);
     users.value = result.items;
     total.value = result.total;
+    const nextDrafts: Record<string, string> = {};
+    for (const user of result.items) {
+      nextDrafts[user.userId] = user.roles?.[0] ?? "";
+    }
+    roleDrafts.value = nextDrafts;
   });
 }
 
@@ -182,6 +189,44 @@ async function createUser() {
   }
 }
 
+function currentRole(row: UserManagementUser) {
+  return row.roles?.[0] ?? "";
+}
+
+const changedRoleRows = computed(() =>
+  users.value.filter((row) => {
+    const role = roleDrafts.value[row.userId];
+    return Boolean(role && role !== currentRole(row));
+  })
+);
+
+const changedRoleCount = computed(() => changedRoleRows.value.length);
+
+async function saveRoleChanges() {
+  const changes = changedRoleRows.value.map((row) => ({
+    userId: row.userId,
+    username: row.username,
+    role: roleDrafts.value[row.userId]
+  }));
+  if (changes.length === 0) {
+    return;
+  }
+  savingRoles.value = true;
+  errorMessage.value = "";
+  try {
+    // 后端目前是单用户角色更新接口，这里按用户逐条提交，避免新增批量契约。
+    for (const change of changes) {
+      await api.updateUserRole(change.userId, { role: change.role });
+    }
+    ElMessage.success(`已保存 ${changes.length} 个用户角色`);
+    await loadUsers();
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "保存角色失败";
+  } finally {
+    savingRoles.value = false;
+  }
+}
+
 onMounted(() => {
   if (hasPermission.value) {
     loadUsers();
@@ -192,22 +237,81 @@ onMounted(() => {
 
 <template>
   <div class="ta-user-mgmt">
-    <el-alert
-      type="warning"
-      :closable="false"
-      show-icon
-      title="仅用于研发测试"
-      description="该功能用于便捷造测试账号，新增用户默认密码为 123456，请登录后及时修改。"
-      class="ta-warn"
-    />
-
     <el-alert v-if="!hasPermission" type="error" :closable="false" show-icon title="无权限" description="仅超级管理员可使用用户管理功能。" />
     <template v-else>
       <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" />
 
+      <!-- 用户列表 -->
+      <section class="ta-section ta-section-primary">
+        <div class="ta-list-header">
+          <h4 class="ta-section-title">用户列表</h4>
+          <div class="ta-list-actions">
+            <div class="ta-list-search">
+              <el-input
+                v-model="keyword"
+                placeholder="按用户名/认证号搜索"
+                style="width: 220px"
+                clearable
+                @keyup.enter="search"
+              />
+              <el-button :disabled="loading || savingRoles" @click="search">查询</el-button>
+            </div>
+            <el-button
+              type="primary"
+              :disabled="savingRoles || changedRoleCount === 0"
+              @click="saveRoleChanges"
+            >
+              {{ changedRoleCount > 0 ? `保存角色修改（${changedRoleCount}）` : '保存角色修改' }}
+            </el-button>
+          </div>
+        </div>
+        <el-table :data="users" v-loading="loading" size="small" border class="ta-user-table">
+          <el-table-column prop="username" label="用户名" min-width="120" />
+          <el-table-column prop="unifiedAuthId" label="统一认证号" min-width="140" />
+          <el-table-column prop="organization" label="组织" min-width="120" />
+          <el-table-column prop="department" label="部门" min-width="120" />
+          <el-table-column label="角色" min-width="180">
+            <template #default="{ row }">
+              <div class="ta-role-cell">
+                <el-select
+                  v-model="roleDrafts[row.userId]"
+                  :aria-label="`调整 ${row.username} 的角色`"
+                  size="small"
+                  style="width: 160px"
+                >
+                  <el-option
+                    v-for="role in roles"
+                    :key="role.roleCode"
+                    :label="role.roleLabel"
+                    :value="role.roleCode"
+                  />
+                </el-select>
+                <span v-if="roleDrafts[row.userId] && roleDrafts[row.userId] !== currentRole(row)" class="ta-role-dirty">
+                  已修改
+                </span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="90" />
+        </el-table>
+        <div class="ta-pagination">
+          <el-pagination
+            background
+            layout="prev, pager, next, total"
+            :current-page="page"
+            :page-size="size"
+            :total="total"
+            @current-change="handlePageChange"
+          />
+        </div>
+      </section>
+
       <!-- 新增用户表单 -->
-      <div class="ta-section">
-        <h4 class="ta-section-title">新增用户</h4>
+      <section class="ta-section ta-create-section">
+        <div class="ta-create-heading">
+          <h4 class="ta-section-title">新增用户</h4>
+          <span class="ta-inline-note">默认密码 123456</span>
+        </div>
         <el-form label-position="top" class="ta-settings-form">
           <div class="ta-form-row">
             <el-form-item label="统一认证号">
@@ -241,6 +345,7 @@ onMounted(() => {
           <el-form-item>
             <el-button
               type="primary"
+              class="ta-create-button"
               :disabled="creating || !form.unifiedAuthId.trim() || !form.username.trim() || !form.role"
               @click="createUser"
             >
@@ -248,46 +353,7 @@ onMounted(() => {
             </el-button>
           </el-form-item>
         </el-form>
-      </div>
-
-      <!-- 用户列表 -->
-      <div class="ta-section">
-        <div class="ta-list-header">
-          <h4 class="ta-section-title">用户列表</h4>
-          <div class="ta-list-search">
-            <el-input
-              v-model="keyword"
-              placeholder="按用户名/认证号搜索"
-              style="width: 220px"
-              clearable
-              @keyup.enter="search"
-            />
-            <el-button :disabled="loading" @click="search">查询</el-button>
-          </div>
-        </div>
-        <el-table :data="users" v-loading="loading" size="small" border>
-          <el-table-column prop="username" label="用户名" min-width="120" />
-          <el-table-column prop="unifiedAuthId" label="统一认证号" min-width="140" />
-          <el-table-column prop="organization" label="组织" min-width="120" />
-          <el-table-column prop="department" label="部门" min-width="120" />
-          <el-table-column label="角色" min-width="140">
-            <template #default="{ row }">
-              <span>{{ (row.roleLabels ?? []).join("、") || (row.roles ?? []).join("、") }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="90" />
-        </el-table>
-        <div class="ta-pagination">
-          <el-pagination
-            background
-            layout="prev, pager, next, total"
-            :current-page="page"
-            :page-size="size"
-            :total="total"
-            @current-change="handlePageChange"
-          />
-        </div>
-      </div>
+      </section>
 
       <!-- 数据库 IDENTITY 运维 -->
       <el-collapse v-model="identityVisible" class="ta-identity-collapse">
@@ -326,22 +392,39 @@ onMounted(() => {
 .ta-user-mgmt {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-}
-.ta-warn {
-  max-width: 600px;
+  gap: 12px;
 }
 .ta-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+  box-sizing: border-box;
+}
+.ta-section-primary {
+  padding-top: 12px;
+}
+.ta-create-section {
+  background: #fcfcfd;
 }
 .ta-section-title {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: #18181b;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.ta-create-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ta-inline-note {
+  color: #909399;
+  font-size: 12px;
 }
 .ta-list-header {
   display: flex;
@@ -349,22 +432,46 @@ onMounted(() => {
   justify-content: space-between;
   gap: 12px;
 }
+.ta-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .ta-list-search {
   display: flex;
   gap: 8px;
 }
+.ta-user-table {
+  width: 100%;
+}
 .ta-form-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  column-gap: 18px;
+  row-gap: 4px;
+}
+.ta-role-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ta-role-dirty {
+  flex: none;
+  color: #d97706;
+  font-size: 12px;
+}
+.ta-create-button {
+  min-width: 96px;
 }
 .ta-pagination {
   display: flex;
   justify-content: flex-end;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 .ta-identity-collapse {
-  margin-top: 8px;
+  margin-top: 2px;
 }
 .ta-identity-toolbar {
   display: flex;

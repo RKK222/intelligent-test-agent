@@ -164,9 +164,9 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentDiff).toHaveBeenCalled());
 
     expect(view.queryByRole("button", { name: "加载测试数据" })).toBeNull();
-    expect(await view.findByText("需求/登录测试.md")).toBeTruthy();
-    expect(await view.findByText("agents/payment-test.md", { exact: false })).toBeTruthy();
-    expect(await view.findByText("skills/payment-case-design/SKILL.md", { exact: false })).toBeTruthy();
+    expect(await view.findByText("登录测试.md")).toBeTruthy();
+    expect(await view.findByText("payment-test.md", { exact: false })).toBeTruthy();
+    expect(await view.findByText("SKILL.md", { exact: false })).toBeTruthy();
     expect(view.queryByText("F-COSS/workspace/02-设计/Test Material.md", { exact: false })).toBeNull();
     expect(view.queryByText("[公共]", { exact: false })).toBeNull();
     expect(view.queryByText("opencode/agents/public_agent_test.json", { exact: false })).toBeNull();
@@ -231,14 +231,14 @@ describe("GitChangesPanel", () => {
       }
     });
 
-    expect(await view.findByText("workspace/02-设计/Test Material.md")).toBeTruthy();
+    expect(await view.findByText("Test Material.md")).toBeTruthy();
 
     const discardButton = view.getByTitle("回退文件改动");
     await fireEvent.click(discardButton);
 
     await waitFor(() => expect(apiClientMock.discardWorkspaceGitFiles)
       .toHaveBeenCalledWith("wrk_1234567890abcdef", ["workspace/02-设计/Test Material.md"]));
-    await waitFor(() => expect(view.queryByText("workspace/02-设计/Test Material.md")).toBeNull());
+    await waitFor(() => expect(view.queryByText("Test Material.md")).toBeNull());
     await waitFor(() => expect(changesRefreshed).toHaveBeenCalledWith(expect.objectContaining({
       paths: ["workspace/02-设计/Test Material.md"]
     })));
@@ -312,8 +312,8 @@ describe("GitChangesPanel", () => {
       }
     });
 
-    expect(await view.findByText("src/selected.ts")).toBeTruthy();
-    expect(await view.findByText("src/unselected.ts")).toBeTruthy();
+    expect(await view.findByText("selected.ts")).toBeTruthy();
+    expect(await view.findByText("unselected.ts")).toBeTruthy();
 
     await fireEvent.click(view.getAllByTitle("暂存文件")[0]);
     await waitFor(() => expect(apiClientMock.stageWorkspaceGitFiles)
@@ -328,8 +328,8 @@ describe("GitChangesPanel", () => {
     })));
     expect(apiClientMock.publishPersonalWorkspace.mock.calls[0][1]).not.toHaveProperty("expectedApplicationHead");
     expect(apiClientMock.previewPersonalWorkspacePublish).not.toHaveBeenCalled();
-    await waitFor(() => expect(view.queryByText("src/selected.ts")).toBeNull());
-    expect(await view.findByText("src/unselected.ts")).toBeTruthy();
+    await waitFor(() => expect(view.queryByText("selected.ts")).toBeNull());
+    expect(await view.findByText("unselected.ts")).toBeTruthy();
   });
 
   it("keeps conflict prompt after publish refresh and separates unmerged files from staged files", async () => {
@@ -404,7 +404,7 @@ describe("GitChangesPanel", () => {
       }
     });
 
-    expect(await view.findByText("workspace/docs/selected.md")).toBeTruthy();
+    expect(await view.findByText("selected.md")).toBeTruthy();
 
     await fireEvent.click(view.getByTitle("暂存文件"));
     await waitFor(() => expect(apiClientMock.stageWorkspaceGitFiles)
@@ -422,7 +422,7 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText(/合并产生 1 个冲突文件/)).toBeTruthy();
     expect(await view.findByText("CONFLICT")).toBeTruthy();
     expect(await view.findByText("AU")).toBeTruthy();
-    expect(await view.findByText("workspace/docs/auto-merged-delete.md")).toBeTruthy();
+    expect(await view.findByText("auto-merged-delete.md")).toBeTruthy();
     expect(await view.findByText("可继续取消暂存普通文件；解决全部冲突后 Git 才允许提交")).toBeTruthy();
     expect(view.getByText("STAGED (已暂存) (1)")).toBeTruthy();
     expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
@@ -452,7 +452,7 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    expect(await view.findByText("src/selected.ts")).toBeTruthy();
+    expect(await view.findByText("selected.ts")).toBeTruthy();
     await fireEvent.click(view.getByTitle("暂存文件"));
     await waitFor(() => expect(apiClientMock.stageWorkspaceGitFiles)
       .toHaveBeenCalledWith("wrk_1234567890abcdef", ["src/selected.ts"]));
@@ -516,7 +516,7 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    expect(await view.findByText("src/selected.ts")).toBeTruthy();
+    expect(await view.findByText("selected.ts")).toBeTruthy();
     await fireEvent.click(view.getByTitle("暂存文件"));
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: remote");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
@@ -543,7 +543,7 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    expect(await view.findByText("src/selected.ts")).toBeTruthy();
+    expect(await view.findByText("selected.ts")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: remote");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
@@ -578,7 +578,7 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    expect(await view.findByText("src/selected.ts")).toBeTruthy();
+    expect(await view.findByText("selected.ts")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: remote");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
@@ -682,7 +682,7 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    await fireEvent.click(await view.findByText("src/conflict.ts"));
+    await fireEvent.click(await view.findByText("conflict.ts"));
 
     await waitFor(() => expect(apiClientMock.getWorkspaceGitConflict)
       .toHaveBeenCalledWith("wrk_1234567890abcdef", "src/conflict.ts"));
@@ -727,12 +727,12 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    const fileName = await view.findByText(unstaged.path);
+    const fileName = await view.findByText(unstaged.path.split("/").pop() || unstaged.path);
     expect(fileName.parentElement?.getAttribute("title")).toBe(unstaged.path);
     await fireEvent.click(view.getByTitle("暂存文件"));
     await waitFor(() => expect(apiClientMock.stageWorkspaceGitFiles)
       .toHaveBeenCalledWith("wrk_1234567890abcdef", [unstaged.path]));
-    const stagedName = await view.findByText(unstaged.path);
+    const stagedName = await view.findByText(unstaged.path.split("/").pop() || unstaged.path);
     const unstage = stagedName.parentElement?.querySelector<HTMLButtonElement>('button[title="取消暂存"]');
     expect(unstage).toBeTruthy();
     if (!unstage) throw new Error("取消暂存按钮不存在");
@@ -759,7 +759,7 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    await fireEvent.click(await view.findByText(file.path));
+    await fireEvent.click(await view.findByText(file.path.split("/").pop() || file.path));
 
     expect(view.emitted("openDiff")).toEqual([[{
       path: file.path,

@@ -240,6 +240,7 @@ cp deploy/internal/env.example /data/testagent/config/docker.env
 | `TEST_AGENT_DB_PASSWORD` | `testagent#123!` | PostgreSQL 密码变化时修改。 |
 | `TEST_AGENT_API_TOKEN` | 空 | 需要启用额外平台 API Bearer token 时填写；登录态鉴权不依赖该值。 |
 | `TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `test-agent-manager-token-122-233-30-4` | 与 `docker.env` 必须完全一致；正式交付如要替换为随机长 token，两处一起改。 |
+| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | `replace-with-random-internal-proxy-api-key` | Java 内部模型代理鉴权 key，正式部署必须替换为随机长 key；只配置在 `backend.env`，不要放到 `docker.env`。 |
 | `ICBC_OPENAI_AUTH_TOKEN` | `eyJzdWIiOiJzbWFydHRlc3Q6dGVzdC1jYXNlLWdlbmVyYXRpb24ifQ.1qbws` | 企业模型服务 token 变化时修改。 |
 
 `/data/testagent/config/backend.env` 通常保持不变：
@@ -309,6 +310,8 @@ WantedBy=multi-user.target
 cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
+
+纯 Docker worker 使用默认 bridge 网络即可，脚本不会注入 `host.docker.internal` 或 `host-gateway` 映射；manager 连接 Java 时读取 `/data/testagent/data/.serverhost`，因此该文件必须是容器内可访问的后端服务器 IP 或域名。
 
 验证：
 
@@ -496,6 +499,7 @@ SYS_DATA_ROOT_DIR=/data/testagent/data
 TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
+TEST_AGENT_INTERNAL_PROXY_API_KEY=replace-with-random-internal-proxy-api-key
 TEST_AGENT_INTERNAL_DEFAULT_MODEL=Qwen3.6-35B-A3B
 TEST_AGENT_ICBC_OPENAI_BASE_URL=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
 TEST_AGENT_ICBC_OPENAI_TOKEN_ENV=ICBC_OPENAI_AUTH_TOKEN
@@ -667,6 +671,8 @@ cp deploy/internal/env.example /data/testagent/config/docker.env
 cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
+
+脚本不依赖 Docker 20.10 的 `host-gateway` 特性，也不会要求额外创建自定义 Docker network。只要容器能访问 `.serverhost` 中记录的 Java 后端地址，并且宿主机发布端口池 `4096-4105` 可访问即可。
 
 检查：
 

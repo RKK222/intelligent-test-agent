@@ -6,6 +6,8 @@ import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.session.Session;
+import com.icbc.testagent.domain.session.SessionHistoryItem;
+import com.icbc.testagent.domain.session.SessionHistoryRepository;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageId;
@@ -36,6 +38,7 @@ public class SessionApplicationService {
 
     private final WorkspaceRepository workspaceRepository;
     private final SessionRepository sessionRepository;
+    private final SessionHistoryRepository sessionHistoryRepository;
     private final SessionMessageRepository sessionMessageRepository;
     private final RunSessionMessageSnapshotService snapshotService;
 
@@ -46,10 +49,27 @@ public class SessionApplicationService {
     public SessionApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
+            SessionHistoryRepository sessionHistoryRepository,
             SessionMessageRepository sessionMessageRepository,
             RunSessionMessageSnapshotService snapshotService) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.sessionHistoryRepository = Objects.requireNonNull(sessionHistoryRepository, "sessionHistoryRepository must not be null");
+        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
+        this.snapshotService = snapshotService;
+    }
+
+    /**
+     * 创建兼容旧测试的服务实例，历史查询端口缺失时禁止调用用户级历史方法。
+     */
+    public SessionApplicationService(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            SessionMessageRepository sessionMessageRepository,
+            RunSessionMessageSnapshotService snapshotService) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.sessionHistoryRepository = null;
         this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
         this.snapshotService = snapshotService;
     }
@@ -113,6 +133,16 @@ public class SessionApplicationService {
      */
     public PageResponse<Session> listSessions(String query, PageRequest pageRequest) {
         return sessionRepository.findPage(query, pageRequest);
+    }
+
+    /**
+     * 按当前登录用户查询历史 Session；不校验当前应用成员关系，避免用户离开应用后丢失自己的历史记录。
+     */
+    public PageResponse<SessionHistoryItem> listUserSessions(UserId userId, String query, PageRequest pageRequest) {
+        if (sessionHistoryRepository == null) {
+            throw new IllegalStateException("sessionHistoryRepository must be provided for user history query");
+        }
+        return sessionHistoryRepository.findUserHistory(userId, query, pageRequest);
     }
 
     /**

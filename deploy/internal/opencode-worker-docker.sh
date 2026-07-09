@@ -119,7 +119,6 @@ start_container() {
     -e "OPENCODE_MANAGER_RECONNECT_INTERVAL=${OPENCODE_MANAGER_RECONNECT_INTERVAL}" \
     -v "${TEST_AGENT_DATA_ROOT}:/data/testagent/data" \
     -v "${TEST_AGENT_PROGRAM_ROOT}:/data/testagent/programs:ro" \
-    --add-host "host.docker.internal:host-gateway" \
     --health-cmd "pgrep -f 'opencode-manager run' >/dev/null" \
     --health-interval 10s \
     --health-timeout 3s \

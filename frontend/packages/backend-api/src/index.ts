@@ -95,6 +95,7 @@ import type {
   SessionDiff,
   Session,
   SessionMessage,
+  SessionRuntimeStateSummary,
   SessionTreeMessagesResponse,
   SshKeyMetadata,
   SshKeyPublicKeyResponse,
@@ -102,6 +103,7 @@ import type {
   TerminalTicketRequest,
   TerminalTicketResponse,
   TodoItem,
+  UpdateUserRolePayload,
   UpdateRepositoryPayload,
   UserManagementUser,
   UserOpencodeProcess,
@@ -895,8 +897,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }
       return socket;
     },
-    listAllSessions: (page = 1, size = 20, q?: string) =>
+    listAllSessions: (page = 1, size = 30, q?: string) =>
       request<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),
+    getSessionRuntimeState: () =>
+      request<SessionRuntimeStateSummary>(`${opencodeRuntimeBase}/sessions/runtime-state`),
     listSessions: (workspaceId: string, page = 1, size = 20) =>
       request<PageResponse<Session>>(`${opencodeRuntimeBase}/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),
     getSession: (sessionId: string) => request<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`),
@@ -1184,7 +1188,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     searchUsers: (keyword?: string, page = 1, size = 20) =>
       request<PageResponse<PlatformUserSummary>>(`${configurationBase}/users${query({ keyword, page, size })}`),
 
-    // ---- 用户管理（测试）API ----
+    // ---- 用户管理 API ----
 
     /** 分页查询用户列表（仅 SUPER_ADMIN）。 */
     listUsers: (keyword?: string, page = 1, size = 50) =>
@@ -1192,6 +1196,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     /** 创建测试用户，密码由后端注入默认值 123456。 */
     createUser: (payload: CreateUserPayload) =>
       request<UserManagementUser>(`${systemManagementBase}/users`, { method: "POST", body: JSON.stringify(payload) }),
+    /** 调整指定用户的全局角色（仅 SUPER_ADMIN）。 */
+    updateUserRole: (userId: string, payload: UpdateUserRolePayload) =>
+      request<UserManagementUser>(`${systemManagementBase}/users/${encodeURIComponent(userId)}/roles`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      }),
     /** 查询可选角色列表，供新增用户下拉选择。 */
     listRoles: () => request<RoleOption[]>(`${systemManagementBase}/roles`),
 

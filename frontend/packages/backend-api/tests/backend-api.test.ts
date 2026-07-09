@@ -51,6 +51,45 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("updates a managed user's role through system management endpoint", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            userId: "usr_target",
+            username: "alice",
+            unifiedAuthId: "AUTH_1",
+            status: "ACTIVE",
+            roles: ["USER"],
+            roleLabels: ["普通用户"],
+            createdAt: "2026-06-26T00:00:00Z"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.updateUserRole("usr_target", { role: "USER" })).resolves.toMatchObject({
+      userId: "usr_target",
+      roles: ["USER"]
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/system-management/users/usr_target/roles",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ role: "USER" })
+      })
+    );
+  });
+
   it("reports raw backend exchanges without exposing sensitive request headers", async () => {
     const responseText = JSON.stringify({
       success: true,
@@ -111,6 +150,50 @@ describe("backend-api", () => {
     await client.startRun("ses_1", "hello");
 
     expect(fetcher).toHaveBeenCalledWith("http://api/api/internal/agent/otheragent/runs", expect.any(Object));
+  });
+
+  it("gets session runtime state from the platform opencode runtime URL", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            runningCount: 1,
+            questionCount: 1,
+            sessions: [
+              {
+                sessionId: "ses_1",
+                runId: "run_1",
+                runStatus: "RUNNING",
+                attention: "QUESTION",
+                attentionEventId: "evt_1",
+                attentionAt: "2026-07-08T08:01:00Z",
+                updatedAt: "2026-07-08T08:01:02Z"
+              }
+            ],
+            generatedAt: "2026-07-08T08:01:03Z"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getSessionRuntimeState()).resolves.toMatchObject({
+      runningCount: 1,
+      questionCount: 1,
+      sessions: [expect.objectContaining({ sessionId: "ses_1", attention: "QUESTION" })]
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/sessions/runtime-state",
+      expect.any(Object)
+    );
   });
 
   it("maps current user opencode process status and initialization through agent-scoped URLs", async () => {

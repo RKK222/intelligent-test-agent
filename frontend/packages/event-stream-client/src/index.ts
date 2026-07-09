@@ -1,8 +1,13 @@
-import type { RunEvent, RunEventType } from "@test-agent/shared-types";
+import type { RunEvent, RunEventType, SessionRuntimeStateSummary } from "@test-agent/shared-types";
 
 export type RunEventStreamStatus = "connecting" | "open" | "closed" | "error";
+export type SessionRuntimeStateStreamStatus = "connecting" | "open" | "closed" | "error";
 
 export type RunEventSubscription = {
+  close: () => void;
+};
+
+export type SessionRuntimeStateSubscription = {
   close: () => void;
 };
 
@@ -35,6 +40,15 @@ export type EventSourceLike = {
 };
 
 export type EventSourceFactory = (url: string) => EventSourceLike;
+
+export type SessionRuntimeStateSubscribeOptions = {
+  baseUrl?: string;
+  token?: string | null;
+  fetcher?: typeof fetch;
+  onEvent: (event: SessionRuntimeStateSummary, meta: { eventName: string }) => void;
+  onStatus?: (status: SessionRuntimeStateStreamStatus) => void;
+  onError?: (error: unknown) => void;
+};
 
 export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
   "run.created",
@@ -140,12 +154,86 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
   };
 }
 
+export function subscribeSessionRuntimeState(
+  options: SessionRuntimeStateSubscribeOptions
+): SessionRuntimeStateSubscription {
+  const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const fetcher = options.fetcher ?? fetch;
+  const controller = new AbortController();
+  let closed = false;
+
+  options.onStatus?.("connecting");
+
+  void (async () => {
+    try {
+      const headers = new Headers();
+      headers.set("Accept", "text/event-stream");
+      if (options.token?.trim()) {
+        headers.set("Authorization", `Bearer ${options.token.trim()}`);
+      }
+      const response = await fetcher(sessionRuntimeStateEventsUrl(baseUrl), {
+        headers,
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error(`session runtime state stream failed: ${response.status}`);
+      }
+      if (!response.body) {
+        throw new Error("session runtime state stream has no body");
+      }
+      if (closed) {
+        return;
+      }
+      options.onStatus?.("open");
+      await readSseStream(response.body, (message) => {
+        if (closed) {
+          return;
+        }
+        if (!isSessionRuntimeStateEvent(message.eventName)) {
+          return;
+        }
+        const parsed = parseSessionRuntimeState(message.data);
+        if (parsed) {
+          options.onEvent(parsed, { eventName: message.eventName });
+        }
+      });
+      if (!closed) {
+        closed = true;
+        options.onStatus?.("closed");
+      }
+    } catch (error) {
+      if (closed || controller.signal.aborted) {
+        return;
+      }
+      options.onStatus?.("error");
+      options.onError?.(error);
+      closed = true;
+      options.onStatus?.("closed");
+    }
+  })();
+
+  return {
+    close: () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      controller.abort();
+      options.onStatus?.("closed");
+    }
+  };
+}
+
 function runEventsUrl(baseUrl: string, agentId: string, runId: string, lastEventId?: string) {
   const url = new URL(`${baseUrl}/api/internal/agent/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/events`);
   if (lastEventId && lastEventId.trim().length > 0) {
     url.searchParams.set("lastEventId", lastEventId.trim());
   }
   return url.toString();
+}
+
+function sessionRuntimeStateEventsUrl(baseUrl: string) {
+  return `${baseUrl}/api/internal/platform/opencode-runtime/sessions/runtime-state/events`;
 }
 
 function normalizeAgentId(agentId: string) {
@@ -171,6 +259,104 @@ export function parseRunEvent(data: string): RunEvent | null {
       traceId: value.traceId ?? "trace_unknown",
       occurredAt: value.occurredAt ?? new Date().toISOString(),
       payload: value.payload ?? {}
+    };
+  } catch {
+    return null;
+  }
+}
+
+type ParsedSseMessage = {
+  eventName: string;
+  data: string;
+};
+
+async function readSseStream(
+  stream: ReadableStream<Uint8Array>,
+  onMessage: (message: ParsedSseMessage) => void
+) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      buffer = drainSseBuffer(buffer, onMessage);
+    }
+    buffer += decoder.decode();
+    drainSseBuffer(`${buffer}\n\n`, onMessage);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function drainSseBuffer(buffer: string, onMessage: (message: ParsedSseMessage) => void) {
+  let remaining = buffer;
+  while (true) {
+    const delimiter = findSseDelimiter(remaining);
+    if (!delimiter) {
+      return remaining;
+    }
+    const block = remaining.slice(0, delimiter.index);
+    remaining = remaining.slice(delimiter.index + delimiter.length);
+    const parsed = parseSseBlock(block);
+    if (parsed) {
+      onMessage(parsed);
+    }
+  }
+}
+
+function findSseDelimiter(value: string): { index: number; length: number } | null {
+  const lf = value.indexOf("\n\n");
+  const crlf = value.indexOf("\r\n\r\n");
+  if (lf === -1 && crlf === -1) {
+    return null;
+  }
+  if (crlf !== -1 && (lf === -1 || crlf < lf)) {
+    return { index: crlf, length: 4 };
+  }
+  return { index: lf, length: 2 };
+}
+
+function parseSseBlock(block: string): ParsedSseMessage | null {
+  let eventName = "message";
+  const dataLines: string[] = [];
+  for (const line of block.replace(/\r\n/g, "\n").split("\n")) {
+    if (line.startsWith(":")) {
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      eventName = line.slice("event:".length).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trimStart());
+    }
+  }
+  if (dataLines.length === 0) {
+    return null;
+  }
+  return { eventName, data: dataLines.join("\n") };
+}
+
+function isSessionRuntimeStateEvent(eventName: string) {
+  return eventName === "session-runtime.snapshot" || eventName === "session-runtime.updated" || eventName === "message";
+}
+
+function parseSessionRuntimeState(data: string): SessionRuntimeStateSummary | null {
+  try {
+    const value = JSON.parse(data) as Partial<SessionRuntimeStateSummary>;
+    if (typeof value.runningCount !== "number" || typeof value.questionCount !== "number" || !Array.isArray(value.sessions)) {
+      return null;
+    }
+    return {
+      runningCount: value.runningCount,
+      questionCount: value.questionCount,
+      sessions: value.sessions,
+      generatedAt: typeof value.generatedAt === "string" ? value.generatedAt : new Date().toISOString()
     };
   } catch {
     return null;

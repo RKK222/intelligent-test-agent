@@ -15,6 +15,7 @@ import com.icbc.testagent.persistence.mybatis.MyBatisRunRepository;
 import com.icbc.testagent.persistence.mybatis.RunMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
@@ -107,6 +108,26 @@ class MyBatisRunRepositoryIntegrationTest {
         repository.save(latestRunning);
 
         assertThat(repository.findLatestActiveBySessionId(SESSION_ID)).contains(latestRunning);
+    }
+
+    @Test
+    void findStaleActiveRunsReturnsOnlyOldNonTerminalRunsInStableOrder() {
+        Run stalePending = run("run_stale_pending123456", RunStatus.PENDING, NOW.plusSeconds(1));
+        Run staleRunning = run("run_stale_running123456", RunStatus.RUNNING, NOW.plusSeconds(2));
+        Run staleCancelling = run("run_stale_cancel1234567", RunStatus.CANCELLING, NOW.plusSeconds(3));
+        Run terminal = run("run_stale_done123456789", RunStatus.SUCCEEDED, NOW.plusSeconds(1));
+        Run freshRunning = run("run_stale_fresh12345678", RunStatus.RUNNING, NOW.plusSeconds(30));
+        repository.save(staleRunning);
+        repository.save(freshRunning);
+        repository.save(staleCancelling);
+        repository.save(terminal);
+        repository.save(stalePending);
+
+        List<Run> firstPage = repository.findStaleActiveRuns(NOW.plusSeconds(10), 2);
+        List<Run> fullPage = repository.findStaleActiveRuns(NOW.plusSeconds(10), 10);
+
+        assertThat(firstPage).containsExactly(stalePending, staleRunning);
+        assertThat(fullPage).containsExactly(stalePending, staleRunning, staleCancelling);
     }
 
     private Run run(String runId, RunStatus status, Instant updatedAt) {

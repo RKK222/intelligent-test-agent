@@ -23,6 +23,7 @@ import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
 import com.icbc.testagent.system.management.user.UserManagementResponses.RoleOption;
+import com.icbc.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import com.icbc.testagent.system.management.user.UserManagementResponses.UserResponse;
 import java.time.Instant;
 import java.util.List;
@@ -130,6 +131,52 @@ class UserManagementApplicationServiceTest {
                 "AUTH_3", "casper", null, null, null, "GHOST")))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void updateUserRoleReplacesExistingRolesAndReturnsUpdatedUser() {
+        UserRepository userRepository = mock(UserRepository.class);
+        User user = User.createNew(
+                "usr_1234567890abcdef", "AUTH_1", "alice",
+                "$2a$10$hashedvalue", "工行", "研发部", "测试部");
+        when(userRepository.findByUserId(user.userId())).thenReturn(Optional.of(user));
+
+        UserRoleRepository userRoleRepository = mock(UserRoleRepository.class);
+        UserRole oldRole = UserRole.create(user.userId(), APP_ADMIN_DICT_ID);
+        when(userRoleRepository.findByUserId(user.userId()))
+                .thenReturn(List.of(oldRole))
+                .thenReturn(List.of(UserRole.create(user.userId(), USER_DICT_ID)));
+
+        DictionaryRepository dictionaryRepository = mock(DictionaryRepository.class);
+        when(dictionaryRepository.findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, "USER"))
+                .thenReturn(Optional.of(roleDictionary(USER_DICT_ID, "USER", "普通用户", 4)));
+        when(dictionaryRepository.findByDictId(USER_DICT_ID))
+                .thenReturn(Optional.of(roleDictionary(USER_DICT_ID, "USER", "普通用户", 4)));
+
+        UserManagementApplicationService service = new UserManagementApplicationService(
+                new UserDomainService(userRepository), userRepository, userRoleRepository, dictionaryRepository);
+
+        UserResponse response = service.updateUserRole(
+                new UpdateUserRoleCommand(user.userId().value(), "USER"));
+
+        assertThat(response.roles()).containsExactly("USER");
+        assertThat(response.roleLabels()).containsExactly("普通用户");
+        verify(userRoleRepository).delete(oldRole);
+        verify(userRoleRepository).save(argThat((UserRole role) ->
+                role.userId().equals(user.userId()) && role.dictId().equals(USER_DICT_ID)));
+    }
+
+    @Test
+    void updateUserRoleRejectsMissingUser() {
+        UserRepository userRepository = mock(UserRepository.class);
+        when(userRepository.findByUserId(new UserId("usr_missing"))).thenReturn(Optional.empty());
+        UserManagementApplicationService service = new UserManagementApplicationService(
+                new UserDomainService(userRepository), userRepository,
+                mock(UserRoleRepository.class), mock(DictionaryRepository.class));
+
+        assertThatThrownBy(() -> service.updateUserRole(new UpdateUserRoleCommand("usr_missing", "USER")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
     }
 
     @Test

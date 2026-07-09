@@ -2,6 +2,7 @@
 
 ## Entries
 
+<<<<<<< HEAD
 ### 2026-07-09 - 修复公共配置未初始化时 listPublicGitConflicts 报错
 
 - Why:
@@ -23,6 +24,220 @@
   - 执行 `DELETE FROM user_ssh_keys WHERE id IN (3, 10)` 清理脏数据。
 - Result:
   - 验证无残留损坏数据；用户 `usr_test_dev` 和 `usr_test_superadmin20` 需重新配置 SSH 密钥。
+=======
+### 2026-07-09 - 优化多选题勾选框样式并支持自定义答案输入自动选中
+
+- Why:
+  - 1. 用户要求在 ask 提问卡片展示中，多选题的选项标志应为方形勾选框（Checkbox），而非圆形单选框（Radio）。
+  - 2. 当用户在“输入自己的答案”文本输入框中输入内容时，需要自动将该自定义答案卡片状态设为选中（Checked）。
+- What:
+  - 1. 在 FigmaChatPanel.vue 的多选题选项容器上附加 `is-multiple` 类名，并在 CSS 中为该类下的 `.figma-chat-question-option-mark` 设定 3px 圆角的方形外观和白色对勾动画/伪元素样式。
+  - 2. 新增 `isCustomAnswerSelected` 辅助方法判断自定义答案是否包含有效输入；如果包含，则自动为 `.figma-chat-question-custom-card` 卡片赋予 `.is-selected` 选中态类名和选中样式。
+- How:
+  - 在 FigmaChatPanel.vue 中通过 Vue 模板属性动态绑定 `is-multiple` 及自定义卡片的 `is-selected`，并定义相应的 CSS 样式覆写。
+- Result:
+  - 静态类型检查 `npm run lint` 通过，0 类型或构建错误。
+
+### 2026-07-09 - 修复 scheduler 关闭时任务定义不展示
+
+- Why:
+  - 定时任务管理页没有显示新增的 `opencode-runtime.stale-active-run-reconcile` 任务；根因是 `test-agent.scheduler.enabled=false` 时 `ScheduledTaskRunner.start()` 直接返回，连 `ScheduledTaskHandler` 代码注册任务同步也被跳过，`scheduled_tasks` 表没有任务定义。
+- What:
+  - 调整 `ScheduledTaskRunner` 启动流程：应用启动时始终先同步代码注册任务，`scheduler.enabled=false` 只关闭后台扫描线程和 pending run 执行；补充 runner 单测覆盖禁用 scheduler 时仍同步任务定义。
+- How:
+  - 将 `ScheduledTaskRegistry.syncRegisteredTasks()` 移到 enabled 判断之前；同步更新 scheduler README、包说明和部署文档，明确管理页展示与后台扫描开关的边界。
+- Result:
+  - 定向测试覆盖了禁用 scheduler 仍能注册任务且 runner 不进入 running 状态；当前运行中的后端需重启后才会执行启动同步并在管理页显示新增任务。
+
+### 2026-07-09 - 增加 stale active Run 收敛任务
+
+- Why:
+  - 历史会话中几天前的 Run 仍显示 `PENDING/RUNNING/CANCELLING`，实际点击后没有输出；需要后台修复平台 Run 状态，同时不能误杀仍有输出或停在用户待处理 ask 的会话。
+- What:
+  - `test-agent-opencode-runtime` 新增 `StaleActiveRunReconcileTaskHandler` 和 `StaleActiveRunReconcileService`，复用 `test-agent-scheduler` 每 5 分钟扫描超过 2 小时的 active Run；新增 `RunActivityStateStore` 在 Redis 记录 30 分钟输出活跃和未处理 ask 状态。pending ask 只从实时 RunEvent 写 Redis，当前覆盖 `permission.asked` 和 `question.asked`，不通过数据库 RunEvent 反查。
+- How:
+  - `RunApplicationService` 在用户可见输出事件刷新 `test-agent:run-output-activity:{runId}`，在 ask/reply/reject/terminal 事件维护 `test-agent:run-pending-ask:{runId}`；收敛任务先查 Redis，Redis 异常保守跳过，无近期输出且无 pending ask 时用 `RunRepository.saveIfStatus` CAS 标记 `FAILED` 并追加固定消息的 `run.failed`。关系型候选查询通过 MyBatis XML `findStaleActiveRuns` 实现，无 Flyway 变更。
+- Result:
+  - 目标测试 `StaleActiveRunReconcileServiceTest`、`StaleActiveRunReconcileTaskHandlerTest`、`RunApplicationServiceTest`、`MyBatisRunRepositoryIntegrationTest` 通过，`mvn -pl test-agent-app -am -DskipTests package` 通过。计划中的全量 `mvn -pl test-agent-opencode-runtime,test-agent-persistence,test-agent-scheduler,test-agent-event -am test` 仍被既有 persistence H2/JDBC/fixture 用例阻断；`mvn -pl test-agent-app -am test` 仍被既有 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 阻断，本次未修改这些无关问题。
+
+### 2026-07-09 - 修复 Permission/Question 过期回复语义
+
+- Why:
+  - 现场 permission/question 点击回复时后端仍代理旧 opencode `/permission|question` 路径，当前 opencode v2 要求携带远端 session id；同时远端 pending request 过期后的 404 被包装成 `OPENCODE_BAD_GATEWAY`，前端不会清理卡片。
+- What:
+  - `OpencodeRuntimeApplicationService` 改为代理 `/api/session/{remoteSessionId}/permission|question`，保留平台请求体兼容；仅在 permission/question 回复或拒绝链路把 opencode 404 转为 `CONFLICT`，`details.reason=STALE_RUNTIME_REQUEST`。前端识别该错误后派发本地 replied action 清理卡片并展示可理解反馈。
+- How:
+  - 补充 runtime service 单测覆盖 v2 path、permission/question reply 和 question reject 的 stale 404 映射；补充前端 helper/reducer 单测覆盖 stale 判断和本地卡片移除；同步 HTTP API 与 runtime README。
+- Result:
+  - 指定 runtime/API Controller 测试、前端 vitest/typecheck 和 `backend mvn clean package -DskipTests` 均通过；未修改 generated SDK、数据库、环境配置或 opencode 进程启停/状态公共程序。
+
+### 2026-07-08 - 增加后台运行会话历史状态提醒
+
+- Why:
+  - 运行中的会话点击“新建对话”时需要转入后台继续执行，历史入口需要显示后台运行数量、运行中状态和 `question.asked` 待回答提醒，且不能破坏现有历史切换、工作区切换和 active-run 恢复流程。
+- What:
+  - 新增用户级会话运行态摘要 HTTP API 和 fetch SSE 通道，前端在工作台订阅该通道并合并到历史按钮/历史列表；运行中点击新建对话只清空当前视图和关闭当前 RunEvent SSE，不调用 cancel/abort。
+- How:
+  - 后端用 `SessionRuntimeStateApplicationService` 读取 MyBatis XML 运行态摘要，并通过 `RunEventLiveBus.streamAll()` 的 run/question 事件和低频轮询触发刷新；API 层只做鉴权、traceId、DTO 和 SSE 输出。前端新增 shared-types、backend-api、event-stream-client 方法，并在 `AgentWorkbench`/`FigmaChatPanel` 中展示 Spinner、计数徽标和铃铛。
+- Result:
+  - 定向后端新增/修改测试与前端 event-stream-client/backend-api/workbench-utils/FigmaChatPanel 测试通过；`@test-agent/agent-web` typecheck 通过。完整后端 `-am test` 仍被既有 `test-agent-workspace-management` 的 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 失败阻塞，目标模块未进入执行。
+
+### 2026-07-08 - 优化任务消耗展示格式
+
+- Why:
+  - 任务消耗原展示格式 `( · ↓ 168.8w tokens)` 含有多余的括号 `()`、间隔符 `·` 和下落箭头 `↓` 等多余字符，视觉效果杂乱，用户要求将其清除以精简页面展示。
+- What:
+  - 移除了任务消耗值格式中的括号 `( )`、中间的分隔符 `·` 和下落箭头 `↓`。如果同时显示耗时和 Token 消耗，则使用空格分隔开；如果只有其一，则直接展示。
+- How:
+  - 修改 `FigmaChatPanel.vue` 中的 `.figma-chat-usage-value` 模板块，移除多余的硬编码 `(`、`)`、`·` 和 `↓` 标记，并加入条件空格逻辑。
+- Result:
+  - 静态类型检查 `vue-tsc` 与全量前端 Vitest 单元测试 (427 Passed) 顺利执行通过，确认无任何 UI 逻辑或构建异常。
+
+### 2026-07-08 - 修复历史对话遮挡下拉菜单
+
+- Why:
+  - 当展示“历史对话”或其它工作区抽屉遮罩时，其 z-index (40) 加上 history-drawer (100) 逃逸了普通的堆叠上下文，导致覆盖在 header (z-index: 30) 的上方。当用户尝试点击 header 处的应用选择下拉框（“F-COSS ^”）时，下拉菜单被历史对话等抽屉遮挡，用户无法看见或进行点击操作。
+- What:
+  - 将 `FigmaShell.vue` 中的顶部 header `.figma-header` 的 `z-index` 从 `30` 提升至 `50`，使其高过 `.figma-chat-drawer-mask` (z-index 40)。同时它仍低于确认框背景 (`.ta-confirm-backdrop` z-index 100) 以及轻量启动弹窗背景 (`z-index: 80`/`100`) 等全局 modal backdrop，确保 modal 依旧能够全局遮罩 header。
+- How:
+  - 修改 `FigmaShell.vue` 样式表中的 `.figma-header` 类，将 `z-index` 调整为 `50`。
+- Result:
+  - 静态类型检查 `vue-tsc` 与全量前端 Vitest 单元测试 (427 Passed) 顺利执行通过，确认无任何 UI 逻辑或构建异常。
+
+### 2026-07-08 - 优化编辑器底部状态栏与保存按钮
+
+- Why:
+  - 1. 编辑器底部路径及更新时间展示占用空间，需隐藏它们以节约布局空间，只保留“复制路径”按钮。
+  - 2. 需要快速在文件树中定位当前文件的入口（瞄准器按钮）。
+  - 3. 保存按钮在常态无修改下应默认隐藏以保持界面整洁。
+  - 4. 左右 resize handle 拉伸边界只有 1px 宽且无明显 Hover 指示，用户“看不出是可以移动的效果”。
+- What:
+  - 1. 修改 `WorkbenchFooter.vue`，不显示路径、文件名和更新时间以节约底部空间，但按钮上保留 hover 完整路径提示，点击“复制路径”可复制到剪贴板。
+  - 2. 在保存按钮左侧集成瞄准器（`Target`）按钮，向外 emit `locate` 事件；并在 `FigmaEditorArea.vue` 和 `AgentWorkbench.vue` 中处理和转发为 `locateFile`。
+  - 3. 限制保存按钮只在 `dirty || saving` 时通过 `v-if` 展现。
+  - 4. 优化 `FigmaShell.vue` 中左右 resize handle 的样式：用 `::after` 拓展 7px 鼠标热区，并在正中心添加垂直方向的半透明小药丸指示器手柄（高36px，宽4px，圆角2px），hover 时手柄拉伸为 48px 且颜色加深为 rgba(0,0,0,0.3)，提供与对话框输入框一致的视觉拉伸效果。
+- How:
+  - 在前端组件层以 Vue computed 提取文件名并调用 Clipboard API。通过组件自定义事件把定位行为转发至工作台的主定位方法。在 FigmaShell.vue 样式表里为 resize-handle 增加伪元素绝对定位、半透明小药丸把手及 hover 过渡动画。
+- Result:
+  - 修改 `WorkbenchFooter.test.ts` 补充了上述三项功能的单元测试，全数通过。前端通过了 `typecheck` 和 `lint`。
+
+### 2026-07-08 - 补齐企业部署 Java 内部代理 API key
+
+- Why:
+  - 今日实际运行 `.env` 已增加 Java 内部模型代理鉴权变量 `TEST_AGENT_INTERNAL_PROXY_API_KEY`，但企业内 `backend.env` 模板和部署说明未同步，目标环境按模板部署会缺少该 key。
+- What:
+  - 在 `deploy/internal/backend.env.example` 增加 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 占位符；部署 README 和企业离线部署 skill 明确该 key 只配置在 Java 的 `backend.env`，不要放到 worker 的 `docker.env`。
+- How:
+  - 复用现有内部模型代理链路：Java 校验该 key，并在启动用户 opencode server 时通过 manager command 注入给子进程；不修改真实 `.env.local`、`.env.test` 或 `/data/testagent/config/*.env`。
+- Result:
+  - `set -a; . deploy/internal/backend.env.example`、`set -a; . deploy/internal/env.example` 和 `git diff --check` 通过。
+
+### 2026-07-08 - 移除企业内 worker 的 host-gateway 依赖
+
+- Why:
+  - 现场执行 `opencode-worker-docker.sh restart` 时 Docker 不支持 `--add-host host.docker.internal:host-gateway`，报 `invalid IP address in add-host: "host-gateway"`；企业内 worker 实际不依赖该别名。
+- What:
+  - 从纯 Docker worker 启动脚本删除 `host.docker.internal` / `host-gateway` 注入；补充脚本校验用例，确保后续不再要求该映射；部署 README 明确 worker 使用默认 bridge 网络即可，manager 通过 `.serverhost` 访问 Java。
+- How:
+  - 保持纯 Docker 管理方式、端口池一致映射和 `/data/testagent/data` 挂载不变；不修改 `/data/testagent/config/docker.env` 或 `.env.local` 等真实环境文件。
+- Result:
+  - `tools/verify-dev-scripts.sh`、`git diff --check` 和 `deploy/internal/opencode-worker-docker.sh --env-file deploy/internal/env.example status` 通过；未真实执行 `restart`，避免删除当前机器可能存在的 worker 容器。
+
+### 2026-07-08 - 用户管理测试页支持超管直接调整角色
+
+- Why:
+  - 设置页“用户管理（测试）”只能新增测试用户，无法直接查看并调整已有用户角色；当前仓库也没有普通用户发起审批通知的基础设施，本次范围确认先做超管直接调整角色。
+- What:
+  - 在 system-management 用户管理链路新增 `PUT /api/internal/platform/system-management/users/{userId}/roles`，由 `SUPER_ADMIN` 直接替换目标用户单个全局角色；前端用户列表增加角色下拉，顶部统一保存本页已修改角色，提交时逐条调用 `updateUserRole` 契约。
+- How:
+  - 复用现有用户、角色和 ROLE 字典领域仓储，不新增数据库表或审批通知模型；角色替换在业务服务事务内先删除旧角色再写入新角色。Controller 继续只做鉴权与 DTO 转换。
+- Result:
+  - 已补后端 service/controller、backend-api 和 agent-web 页面测试，并同步 HTTP API、模块/包 README 与架构速查文档；审批通知流未实现，后续若需要应单独设计审批申请表、超管待办和状态流转。
+### 2026-07-08 - 在前端通用组件库中实现 Spinner 组件
+
+- Why:
+  - 为了给 Vue 前端提供加载动画反馈，需要复刻 `@opencode-ai/ui/spinner` 对应的 4x4 呼吸点阵加载动画。
+- What:
+  - 在 `@test-agent/ui-kit` 通用 UI 包中新建 [Spinner.vue](file:///Users/huang/workspace/intelligent-test-agent-gitee/frontend/packages/ui-kit/src/Spinner.vue) 组件。
+  - 在 [index.ts](file:///Users/huang/workspace/intelligent-test-agent-gitee/frontend/packages/ui-kit/src/index.ts) 中导出 `Spinner` 组件。
+  - 在 `@test-agent/ui-kit` 的 [README.md](file:///Users/huang/workspace/intelligent-test-agent-gitee/frontend/packages/ui-kit/README.md) 中登记新增的 `Spinner` 基础组件。
+- How:
+  - 移植 Solid.js 原版 Spinner 逻辑，使用 Vue 3 模板重新实现 16 点阵 SVG rect 网格，并绑定随机动画延时；在组件内部定义 `@keyframes pulse-opacity` 和 `pulse-opacity-dim` 呼吸动效。
+- Result:
+  - 执行 `corepack pnpm install` 及全包的 `typecheck` 成功，13 个前端工程全部编译通过。
+
+### 2026-07-08 - 调整测试设计 opencode agent/skill 路径规则
+
+- Why:
+  - 测试设计入口不再只依赖“绑定子条目”动作，用户可能通过对话或右键传入文件/目录并指定非 `content` 的输出位置；旧提示词仍固定 `041-测试设计/`，且 agent 权限对 edit/bash/skill 过紧。
+- What:
+  - 更新 `.testagent/agent-opencode/.config/opencode` 下测试设计与测试执行 agent/skill Markdown：统一放宽 read/list/grep/glob/edit/bash/skill 权限，补充 `designContext/sourceFiles/sourceDirs/outputTarget` 解析，生成、审查、执行产物优先写用户显式目标。
+- How:
+  - 参考 OpenCode 中文文档的 agents、skills、permissions 与 config 说明，保留 Task 编排和真实执行业务约束；`.testagent/agent-opencode/.config` 是独立 Git 配置仓库，本次只在该仓库暂存被修改的 Markdown，不纳入 `opencode.jsonc`、node_modules 或敏感配置。
+- Result:
+  - `OPENCODE_CONFIG_DIR=.testagent/agent-opencode/.config/opencode opencode agent list` 可读取配置；agent frontmatter、skill 名称与 deny 权限扫描通过。未改后端、前端 API、数据库或 generated SDK。
+
+### 2026-07-08 - 新增企业内离线部署问答技能
+
+- Why:
+  - 后续部署问答需要固定以“Mac 联网打包、企业内完全离线部署”为前提，并且每次都要说明打包后怎么操作、全流程顺序和需要修改哪些配置文件，避免只给零散命令或沿用本地 `.env`。
+- What:
+  - 新增 `.agents/skills/enterprise-offline-deploy/SKILL.md`，触发企业内、离线、Mac 打包、`package-release.sh`、`backend.env`、`docker.env`、opencode worker/manager 等问题时，要求完整输出 Mac 打包、产物分发、配置文件、Java/worker 启动顺序、验证命令和常见 manager 端口/连接排查点。
+- How:
+  - 复用现有 `deploy/internal` 纯 Docker worker 部署方案，不改脚本、不改真实环境配置、不新增生产变量；强调 `SYS_DATA_ROOT_DIR=/data/testagent/data` 与 worker `TEST_AGENT_DATA_ROOT=/data/testagent/data` 必须一致。
+- Result:
+  - 仅新增项目 skill 和本会话日志，未改业务代码、API、数据库或部署脚本。
+
+### 2026-07-08 - 调整子智能体卡片视觉密度
+
+- Why:
+  - 上一版把子智能体卡片拆成两行后视觉过重；用户要求保持原高度，只在 Agent 名与任务标题之间增加间隔，同时完整展示 Agent 名并降低字号。
+- What:
+  - `oc-subagent-card` 恢复单行 38px 最小高度，改为 `max-content / title / status` 三列；Agent 名字号降到 10px、保持完整不省略，Agent 与标题列间距加到 18px，卡片之间保留 10px 间隔。
+- How:
+  - 仅修改 `agent-chat` 的 opencode-like CSS 和包说明，不改历史恢复逻辑、API、事件或数据库。
+- Result:
+  - `packages/agent-chat/tests/opencode-like-state.test.ts`、`@test-agent/agent-chat` typecheck 和 `git diff --check` 通过；本地后端 readiness 与前端 3000 HTTP 继续可用。
+
+### 2026-07-08 - 修复历史子智能体空白视图与工具间距
+
+- Why:
+  - 本地历史会话 `ses_f9ad74a4e51f4089958c0f4e8a88ea75` 的 `session-tree/messages` 当前返回空 tree，平台 `session_messages.parts_json` 只保留 root task part；后续试探性放开点击守卫后，metadata-only task 卡片会进入没有 child 消息的空子视图。
+  - 该历史的 task part `output` 已持久化 `<task_result>` 子 Agent 结果，可作为只读 child timeline 恢复来源；工具头部与子智能体卡片列间距也偏紧。
+- What:
+  - `chatStateFromSessionTreeSnapshot()` 现在会消费 `messagesBySessionId`，并且在 tree 为空或缺少 child message 时，把平台历史 task part output 的 `<task_result>` 合成为带 child scope 的只读 assistant message，同时补齐 `subagentsBySessionId` 与 `subagentByTaskPartId`。
+  - 恢复 `FigmaChatPanel`/`AssistantThread` 的 subagent 打开守卫，避免只有 metadata sessionId、没有已恢复 child 内容的卡片进入空视图；`.oc-tool__trigger` / context/tool group trigger 与 `.oc-subagent-card` 网格列间距从 8px 调整为 14px，并加宽 agent/status 列。
+- How:
+  - 仅修改前端 `agent-web` 历史状态恢复、`agent-chat` 子视图守卫与样式、定向测试和包 README/PACKAGE；不改后端 API、RunEvent 契约、数据库或 generated SDK。
+- Result:
+  - 新增 empty session-tree + persisted task output、`messagesBySessionId` child message 和组件点击回归用例；修正 composer 拖拽测试等待 Vue tick。`FigmaChatPanel.test.ts`、`workbench-utils.test.ts`、`opencode-like-state.test.ts`、`@test-agent/agent-chat` typecheck、`@test-agent/agent-web` typecheck 和 `git diff --check` 通过；Chrome 实测点击 07/05 21:13 历史会话第一个子 Agent 可显示对象识别正文。
+
+### 2026-07-08 - 收敛工作台极简线框并修复历史子智能体卡片
+
+- Why:
+  - 左侧工作区 tabbar 和右侧面板圆角/线色不统一，中间空态与输入框仍有阴影感；历史会话里子智能体卡片在 `taskPartId` 与实际渲染 task part id 不一致时仍可能不可点击，且历史卡片名称缺失时只显示泛化“智能体”。
+- What:
+  - 将 `FigmaShell` 三栏收敛为填满主区域的极简矩形布局，移除主工作区外框、圆角和投影，统一左/中/右顶部 chrome 的 `--ta-border` 分割线，并把左右 resize handle 从 6px 空白槽改成连续 1px 视觉线；移除聊天输入卡片、子智能体卡片与编辑器空态图标投影。
+  - `chatStateFromSessionTreeSnapshot()` 兜底恢复子智能体索引时同时登记 snapshot `taskPartId`、实际渲染 task `partId` 和 `taskCallId`；子智能体卡片从 `metadata.agentName/agent/title` 兜底展示名称与标题，并在索引缺失时用 task `callId` 或 part metadata/output 中的 child session id 恢复点击入口；进入子 Agent 视图时按 child scoped `taskPartId/taskCallId` 兜底匹配输出。
+- How:
+  - 仅修改前端展示层、历史快照恢复纯函数、相关前端测试和包 README/PACKAGE；不改后端 API、RunEvent 契约、数据库或 generated SDK。
+- Result:
+  - 通过 `workbench-utils.test.ts`、`FigmaChatPanel.test.ts -t "subagent cards"`、`@test-agent/agent-web` / `@test-agent/agent-chat` / `@test-agent/editor` typecheck 和 `git diff --check`；in-app browser 刷新 `http://127.0.0.1:3000/` 后确认主容器、输入卡片、编辑器空态图标 `box-shadow: none`，三段顶部线均为 `rgb(234,234,234)`。
+
+### 2026-07-08 - 修复与优化前端圆角、尖角对齐与线重合、水平线对齐样式
+
+- Why:
+  - 界面上存在未激活 Tab 底边悬浮缺失分割线、文件树小操作按钮 hover 呈现直角正方形、文件树和 Git 变更面板区域展开/折叠时双分割线重合（2px粗线）、聊天卡片工具栏尖角外露、附件按钮高度偏矮导致水平未对齐、聊天页脚底分割线与编辑器不一致，以及聊天窗右上角按钮组线重合与直角等一系列 UI 样式与美感缺陷。
+- What:
+  - 在 `FigmaEditorArea.vue` 中对 `.figma-editor-tabs` 添加 `border-bottom`，设置 active tab 的 bottom-border-color 为 `#fff` 并给予 `margin-bottom: -1px` 压线。
+  - 在 `FigmaFileExplorer.vue` 中将工具操作按钮 Hover 改为 `border-radius: 4px`；重构相邻 section 与 header 的 border 分割规则，消除双重边框重叠。
+  - 在 `GitChangesPanel.vue` 中对 `.staged-section` 的顶部边框改为动态 class，在 resizer 存在时自动移除其 `border-t`。
+  - 在 `FigmaChatPanel.vue` 中为工具行 actions 容器添加 `border-bottom-left/right-radius: 15px` 完美收纳于 16px 圆角父框；移除了附件按钮 `.figma-chat-attachment-btn` 的硬编码 `height: 26px;` 以继承 28px；将 `.figma-chat-footer` 的 border-top 颜色统一为语义 token `var(--ta-border)`。将 `.figma-chat-header-btn` 从自带边框重构成 Ghost 按钮样式，常态下无边框，hover 时显示圆角 4px 灰色背景；同时收紧 flex 容器 `gap` 为 8px，完全消除了右上角线重合与直角问题。
+- How:
+  - 仅限于前端 CSS 与 HTML 模板小范围调整，不涉及任何接口 API、后端逻辑或数据库。
+- Result:
+  - `tools/dev-frontend-check.sh` 顺利通过，Vite 重新构建成功，Lint & Typecheck 均为 0 错误。主应用 Vitest 运行无新增回归失败，既有的 3 项 Vitest 测试失败为历史已知 baseline 问题，与本次样式改动无关。
+>>>>>>> 6374d06b440452c750aab9ee15a129471eea74cd
 
 ### 2026-07-08 - 企业内 worker 部署改为纯 Docker
 
@@ -4673,3 +4888,32 @@ bash /tmp/test-api-after-restart.sh
   - 只修改 event 模块广播发布器和 app 模块测试，不改变部署变量、Redis channel、API、数据库或广播事件协议。
 - Result:
   - `mvn -pl test-agent-event -am -Dtest=ServerBroadcastPublisherTest -Dsurefire.failIfNoSpecifiedTests=false test`、`mvn -pl test-agent-app -am -Dtest=ServerBroadcastContextTest -Dsurefire.failIfNoSpecifiedTests=false test` 和 `mvn -pl test-agent-app -am package -DskipTests` 均通过；新的 Spring Boot jar 已产出到 `backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar`。
+
+### 2026-07-08 - 优化运行日志折叠行样式与字色视觉层级，子智能体卡片改用双行垂直布局
+
+- Why: 
+  1. 当前对话面板的过程行（如“思考状态”、“技能”、“探索”等）字号偏大且大写（13px + uppercase），与正文大字号竞争导致侧边栏视觉杂乱，空间利用率低；
+  2. 展开工具后，自定义的子智能体执行记录（如 `TEST-DESIGN-TARGET-RECOGNITION`）由于名字过长，在单行 Grid 列宽受限下严重截断了后续的需求项编号（如 `识别 I2026000 ...`），无法看清具体工作内容；
+  3. 用户需要正文回答以纯黑色清晰醒目地呈现，而其它过程信息要用较灰淡的字色进行视觉避让以增强层次感。
+- What:
+  1. **折叠触发器**：保留单行展示，但将标题 `.oc-tool__title` 字号由 `var(--oc-text-md)`（13px）下调为 `var(--oc-text-sm)`（11px），移除 `text-transform: uppercase` 强行大写转换，并缩减列间距（`column-gap: 8px`）及微调第一列和状态列宽度比（96px / 56px），使布局更为秀气和节约空间；
+  2. **视觉层级**：将最终输出气泡（`.oc-text-part`）的字体颜色统一强制设为纯黑色 `#000000`；将所有的过程折叠栏触发器标题字色设为稍微灰一点的 `var(--oc-muted)`（较深灰），摘要设为 `var(--oc-subtle)`（较浅灰），达到明显的层级对比；
+  3. **子智能体卡片**：将展开体部的 `.oc-subagent-card` 改造为 2行 2列 的 Grid 双行垂直排列（子智能体名在第一行第一列，具体工作内容在第二行第一列，已完成状态在右侧跨两行垂直居中对齐）。由于独占一行，长路径和冗长名称能够极其完整地展开显示而不被截断；
+  4. **测试断言修正**：在 `opencode-timeline.test.ts` 和 `git-changes-panel.test.ts` 中修正了过去修改遗留下来的纯路径匹配 Bug，将路径断言（如 `src/checkout.ts`, `workspace/docs/selected.md` 等）改成展示端实际显示的纯文件名断言（如 `checkout.ts`, `selected.md`）。
+- How: 
+  修改 `frontend/packages/agent-chat/src/opencode-like/styles/tools.css` 和 `parts.css` 对应的触发器及卡片样式。修正对应的单元测试匹配文本。未涉及任何后端 API、事件、数据库或环境变量改动。
+- Result:
+  前端全量 typecheck 和打包无报错，前端 40 个测试文件共 420 个 Vitest 单元测试用例全部 100% 成功绿过！
+
+### 2026-07-08 - 历史对话改为当前用户级分页列表
+
+- Why:
+  - 历史对话抽屉需要展示当前登录用户的全部 ACTIVE 会话，而不是当前工作空间会话；点击历史会话时还要能恢复所属应用、工作空间和版本上下文，若用户已无权限或上下文缺失则只读打开。
+- What:
+  - 新增 `SessionHistoryRepository` 及 MyBatis 查询链路，按 `sessions.created_by_user_id`、`runs.triggered_by_user_id`、`session_messages.sender_user_id` 归因当前用户，按 `updated_at desc` 分页返回，并补充应用、工作空间模板、版本上下文。
+  - 前端历史抽屉改为受控搜索和分页加载，每页 30 条，卡片展示应用/工作空间/版本；点击历史会话先校验并切换所属上下文，失败时保留当前上下文并以只读原因禁用输入和发送。
+  - 增加用户历史列表相关索引 migration，并同步 API、数据库和模块 README。
+- How:
+  - 后端列表接口不校验应用成员资格，避免用户被移出应用后看不到自己的历史；发送前仍通过切换/校验结果控制只读。E2E 鉴权辅助改为写入 `sessionStorage`，与 `authStore` 的读取位置保持一致。
+- Result:
+  - 历史会话相关后端定向 reactor 测试、前端 typecheck、Vitest 目标集和 Playwright 历史点击成功/失败路径均通过。计划中的后端 full reactor 命令 `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-persistence -am test` 当前会被未改动模块 `test-agent-workspace-management` 的既有 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 阻断，原因是测试期望目录删除抛错而当前实现允许递归删除目录，本次未修改该无关行为。

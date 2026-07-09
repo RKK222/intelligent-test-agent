@@ -96,7 +96,7 @@ public class SessionController {
     }
 
     /**
-     * 跨工作区分页查询会话，并支持标题关键字搜索。
+     * 当前用户跨工作区分页查询历史会话，并支持标题关键字搜索。
      */
     @GetMapping("/api/internal/platform/opencode-runtime/sessions")
     public ApiResponse<PageResponse<RuntimeDtos.SessionResponse>> listAllSessions(
@@ -105,8 +105,9 @@ public class SessionController {
             @RequestParam(required = false) Integer size,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
-        return ApiResponse.ok(RuntimeDtos.sessionPage(sessionService.listSessions(
-                query, RuntimeApiSupport.pageRequest(page, size))), traceId);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return ApiResponse.ok(RuntimeDtos.sessionHistoryPage(sessionService.listUserSessions(
+                userId, query, RuntimeApiSupport.pageRequest(page, size))), traceId);
     }
 
     /**

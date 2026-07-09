@@ -1,7 +1,7 @@
 package com.icbc.testagent.api.web.platform;
 
 /**
- * 用户管理（测试）API 的请求 DTO。
+ * 用户管理 API 的请求 DTO。
  */
 public final class UserManagementDtos {
 
@@ -29,6 +29,21 @@ public final class UserManagementDtos {
             if (username == null || username.isBlank()) {
                 throw new IllegalArgumentException("用户名不能为空");
             }
+            if (role == null || role.isBlank()) {
+                throw new IllegalArgumentException("角色不能为空");
+            }
+        }
+    }
+
+    /**
+     * 更新用户角色请求体。当前测试管理入口只接收单个全局角色 code。
+     */
+    public record UpdateUserRoleRequest(String role) {
+
+        /**
+         * 校验角色不能为空，具体角色合法性由业务层按 ROLE 字典校验。
+         */
+        public UpdateUserRoleRequest {
             if (role == null || role.isBlank()) {
                 throw new IllegalArgumentException("角色不能为空");
             }

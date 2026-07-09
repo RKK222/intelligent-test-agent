@@ -11,10 +11,11 @@
 - 支持 `agentId?: string` 配置，默认 `opencode`；Run、Diff 和 runtime 相关请求统一走 `/api/internal/agent/{agentId}/...`。
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。
-- 暴露 Workspace 查询、文件、Session、Session message、Run、Diff API 方法；Session 支持 workspace 列表、全局搜索、标题/置顶更新和软删除。工作台历史恢复使用 `getSessionTreeMessages(sessionId)` 访问 `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages`；`listSessionMessages` 走 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 并支持 `refresh=false`，用于反馈平台 messageId 映射和只读 transcript。Workspace/Session 基础查询走 internal platform URL，不放入 agent URL。
+- 暴露 Workspace 查询、文件、Session、Session message、Run、Diff API 方法；`listAllSessions(page=1, size=30, q?)` 对应当前登录用户历史会话分页，响应 `Session.workspaceContext` 可携带应用、应用工作空间模板和版本上下文；workspace 维度 Session 列表、标题/置顶更新和软删除继续保留。工作台历史恢复使用 `getSessionTreeMessages(sessionId)` 访问 `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages`；`listSessionMessages` 走 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 并支持 `refresh=false`，用于反馈平台 messageId 映射和只读 transcript。Workspace/Session 基础查询走 internal platform URL，不放入 agent URL。
 - 工作区文件列表、读取、写入、状态和删除统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。
 - 暴露 `listWorkspaceBackendServers()`、`listServerWorkspaceDirectories()`、`createServerWorkspace()` 等超级管理员服务器工作空间选择方法，目录浏览和创建也通过目标后端文件 WebSocket ticket 执行。
 - 暴露 `getActiveRun(sessionId)`，用于刷新或重进会话后恢复仍在执行的 RunEvent SSE 订阅；返回 `null` 表示当前会话没有非终态 Run。
+- 暴露 `getSessionRuntimeState()`，读取 `/api/internal/platform/opencode-runtime/sessions/runtime-state` 的当前用户历史会话运行态摘要，供工作台历史按钮和历史列表初始化运行中/待答状态。
 - Session message、Session tree 和 Run 响应透传可选 `parts`、`tokens`、`costUsd`、`events` 等新增字段，旧后端缺字段时保持兼容。
 - 暴露配置管理和个人 SSH key API 方法，统一走 `/api/internal/platform/configuration-management`，不直连 Git 服务或 opencode server；代码库新增 payload 包含 `englishName`、`repositoryType`、`deploymentMode` 和兼容 `standard`，编辑 payload 只发送名称/英文名，`listRepositoryTypes()` 读取版本库类型下拉字典，`getRepositoryDeploymentOptions()` 读取部署模式默认值与内部 SSH 前缀；`getRepositoryTree(appId, repositoryId, branch)` 读取应用关联版本库的远端目录/文件树，不落本地磁盘；应用工作空间创建支持 `operationId`/`version`/`directoryNew` 并通过 `getWorkspaceCreateOperation(operationId)` 轮询后端进度。
 - 暴露应用版本工作区和个人工作区 API 方法，统一走 `/api/internal/platform/workspace-management`，包括成员应用、模板、版本、个人空间、最近使用、diff、同步和版本工作区 `gitPullWorkspaceVersion(versionId)`；版本响应透传目标 commit 与服务器副本状态字段。
@@ -25,7 +26,7 @@
 - 暴露超级管理员定时任务管理方法：任务分页/详情/更新/手动触发、运行记录分页/详情/停止，统一走 `/api/internal/platform/scheduler-management`，自动携带用户 Bearer Token。
 - 暴露 AI 回复反馈方法：`putMessageFeedback(messageId, payload)`、`getMyMessageFeedback(messageId)`，统一走 `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback...`，只提交评分、原因和备注，不提交 prompt/assistant 原文。
 - 暴露超级管理员运营分析方法：overview、timeseries、peaks、users、organizations、satisfaction、exceptions 和 `exportAnalyticsCsv(type, params)`，统一走 `/api/internal/platform/analytics`；CSV 以 `Blob` 返回，不提供 cost/costUsd 字段。
-- 暴露超级管理员用户管理（测试）方法：用户分页查询、创建用户（默认密码 123456）、角色列表，统一走 `/api/internal/platform/system-management`，自动携带用户 Bearer Token；仅用于研发测试便捷造号。
+- 暴露超级管理员用户管理方法：用户分页查询、创建用户（默认密码 123456）、调整用户全局角色和角色列表，统一走 `/api/internal/platform/system-management`，自动携带用户 Bearer Token；创建用户能力仅用于研发测试便捷造号，角色调整由超管直接操作，不包含普通用户审批通知流。
 - `startRun` 同时支持旧 `(sessionId, prompt)` 参数和对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`、`command`、`arguments`）；slash 技能通过可选命令字段进入同一可恢复 Run 链路。
 - 暴露 opencode Web App 标准运行态方法：Agent/Model/Provider/Command/Reference 目录、config、provider auth/OAuth、worktree、Session active-run/children/todo/diff/abort/fork/compact/revert/command/shell/share、permission/question、fs/vcs/lsp/mcp status/resources/tools/auth 和 terminal ticket；这些只读目录、Session 操作、fs/vcs/lsp/mcp 和 terminal ticket 统一走 `/api/internal/platform/opencode-runtime/...`，Run/Diff/SSE、当前用户 opencode 进程和历史 session-tree 主读取继续按 `/api/internal/agent/{agentId}/...` 调用。`listAgents(workspaceId, init?)` 支持透传单请求 `signal` / `timeoutMs`，用于工作区切换取消旧请求和 Agent 下拉短超时重试；内部模型供应商管理方法只覆盖系统管理页 DTO，不给内部代理暴露前端便捷方法。
 - Command catalog 映射会保留 opencode runtime 的 `source/hints` 可选字段，供 frontend-opencode 生成 slash command 参数表单。

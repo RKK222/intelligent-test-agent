@@ -258,6 +258,35 @@ export type Session = {
   model?: ModelRef;
   costUsd?: number;
   tokens?: TokenUsage;
+  workspaceContext?: SessionWorkspaceContext | null;
+};
+
+export type SessionWorkspaceContext = {
+  appId?: string | null;
+  appName?: string | null;
+  applicationWorkspaceId?: string | null;
+  workspaceName?: string | null;
+  versionId?: string | null;
+  version?: string | null;
+};
+
+export type SessionRuntimeAttention = "QUESTION" | string;
+
+export type SessionRuntimeState = {
+  sessionId: string;
+  runId: string;
+  runStatus: "PENDING" | "RUNNING" | "CANCELLING" | string;
+  attention?: SessionRuntimeAttention | null;
+  attentionEventId?: string | null;
+  attentionAt?: string | null;
+  updatedAt: string;
+};
+
+export type SessionRuntimeStateSummary = {
+  runningCount: number;
+  questionCount: number;
+  sessions: SessionRuntimeState[];
+  generatedAt: string;
 };
 
 export type SessionMessage = {
@@ -1500,6 +1529,10 @@ export type CreateUserPayload = {
   organization?: string | null;
   rdDepartment?: string | null;
   department?: string | null;
+};
+
+export type UpdateUserRolePayload = {
+  role: string;
 };
 
 export type RoleOption = {

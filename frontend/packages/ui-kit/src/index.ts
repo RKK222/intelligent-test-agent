@@ -7,3 +7,4 @@ export { default as SegmentedTabs } from "./Tabs.vue";
 export type { TabItem } from "./Tabs.vue";
 export { default as FeedbackBanner } from "./Toast.vue";
 export type { Feedback } from "./Toast.vue";
+export { default as Spinner } from "./Spinner.vue";

@@ -138,6 +138,8 @@ describe("runtime management settings", () => {
 
     expect(superAdmin.getByText("应用管理")).toBeTruthy();
     expect(superAdmin.getByText("版本库管理")).toBeTruthy();
+    expect(superAdmin.getByText("用户管理")).toBeTruthy();
+    expect(superAdmin.queryByText("用户管理（测试）")).toBeNull();
     expect(superAdmin.queryByText("应用与工作区")).toBeNull();
     expect(superAdmin.queryByText("运行管理")).toBeNull();
     superAdmin.unmount();

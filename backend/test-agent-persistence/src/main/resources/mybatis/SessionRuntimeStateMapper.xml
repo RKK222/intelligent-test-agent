@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.SessionRuntimeStateMapper">
+    <resultMap id="SessionRuntimeStateRowMap" type="com.icbc.testagent.persistence.mybatis.SessionRuntimeStateRow">
+        <constructor>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="run_status" javaType="java.lang.String"/>
+            <arg column="attention" javaType="java.lang.String"/>
+            <arg column="attention_event_id" javaType="java.lang.String"/>
+            <arg column="attention_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findUserRuntimeState" resultMap="SessionRuntimeStateRowMap">
+        with visible_sessions as (
+            select s.session_id
+            from sessions s
+            where s.status = 'ACTIVE'
+              and (
+                s.created_by_user_id = #{userId}
+                or exists (
+                    select 1
+                    from runs visible_runs
+                    where visible_runs.session_id = s.session_id
+                      and visible_runs.triggered_by_user_id = #{userId}
+                )
+                or exists (
+                    select 1
+                    from session_messages visible_messages
+                    where visible_messages.session_id = s.session_id
+                      and visible_messages.sender_user_id = #{userId}
+                )
+              )
+        ),
+        ranked_runs as (
+            select
+                r.id,
+                r.session_id,
+                r.run_id,
+                r.status,
+                r.updated_at,
+                row_number() over (
+                    partition by r.session_id
+                    order by r.updated_at desc, r.id desc
+                ) as run_rank
+            from runs r
+            join visible_sessions vs on vs.session_id = r.session_id
+            where r.status in ('PENDING', 'RUNNING', 'CANCELLING')
+        ),
+        active_runs as (
+            select id, session_id, run_id, status, updated_at
+            from ranked_runs
+            where run_rank = 1
+        ),
+        latest_question_events as (
+            select
+                e.run_id,
+                e.event_id,
+                e.type,
+                e.occurred_at,
+                row_number() over (
+                    partition by e.run_id
+                    order by e.occurred_at desc, e.seq desc
+                ) as event_rank
+            from run_events e
+            join active_runs ar on ar.run_id = e.run_id
+            where e.type in ('question.asked', 'question.replied', 'question.rejected')
+        )
+        select
+            ar.session_id,
+            ar.run_id,
+            ar.status as run_status,
+            case when qe.type = 'question.asked' then 'QUESTION' else null end as attention,
+            case when qe.type = 'question.asked' then qe.event_id else null end as attention_event_id,
+            case when qe.type = 'question.asked' then qe.occurred_at else null end as attention_at,
+            ar.updated_at
+        from active_runs ar
+        left join latest_question_events qe
+          on qe.run_id = ar.run_id
+         and qe.event_rank = 1
+        order by ar.updated_at desc, ar.id desc
+    </select>
+</mapper>

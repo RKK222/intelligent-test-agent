@@ -1098,7 +1098,7 @@ defineExpose({
       />
 
       <!-- 2. STAGED SECTION -->
-      <div class="git-section staged-section border-t border-[#e4e4e7]" :class="{ 'is-collapsed': !stagedExpanded }">
+      <div class="git-section staged-section" :class="[{ 'border-t border-[#e4e4e7]': !(unstagedExpanded && stagedExpanded) }, { 'is-collapsed': !stagedExpanded }]">
         <div class="git-section-header" @click="stagedExpanded = !stagedExpanded">
           <ChevronDown v-if="stagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />

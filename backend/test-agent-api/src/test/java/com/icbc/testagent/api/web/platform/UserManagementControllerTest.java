@@ -16,6 +16,7 @@ import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.system.management.user.UserManagementApplicationService;
 import com.icbc.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
 import com.icbc.testagent.system.management.user.UserManagementResponses.RoleOption;
+import com.icbc.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import com.icbc.testagent.system.management.user.UserManagementResponses.UserResponse;
 import java.time.Instant;
 import java.util.List;
@@ -91,6 +92,27 @@ class UserManagementControllerTest {
                 .expectBody()
                 .jsonPath("$.data[0].roleCode").isEqualTo("SUPER_ADMIN")
                 .jsonPath("$.data[1].roleLabel").isEqualTo("应用管理员");
+    }
+
+    @Test
+    void superAdminCanUpdateUserRole() {
+        UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
+        when(service.updateUserRole(any(UpdateUserRoleCommand.class)))
+                .thenReturn(userResponse("usr_target", "alice"));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.put()
+                .uri("/api/internal/platform/system-management/users/usr_target/roles")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"role\":\"USER\"}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.userId").isEqualTo("usr_target");
+
+        verify(service).updateUserRole(org.mockito.ArgumentMatchers.argThat((UpdateUserRoleCommand command) ->
+                "usr_target".equals(command.userId()) && "USER".equals(command.role())));
     }
 
     @Test

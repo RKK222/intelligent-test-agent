@@ -175,7 +175,7 @@ test("user avatar menu logs out and returns to login", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "智能测试代理平台" })).toBeVisible();
   await expect.poll(() => logoutRequests).toEqual(["POST /api/auth/logout"]);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("test-agent.auth.token"))).toBeNull();
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("test-agent.auth.token"))).toBeNull();
 });
 
 test("login redirects to workbench and clears the initial opencode process checking state", async ({ page }) => {
@@ -1276,6 +1276,156 @@ test("history loading shows immediately and does not wait for message feedback",
   releaseMessageFeedback();
 });
 
+test("switching history changes to the session application and workspace", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const markRecentRequests: string[] = [];
+  const historyWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_history_coss",
+    name: "F-COSS 历史工作区",
+    rootPath: "/Users/huang/workspace/history-coss",
+    appId: "app_coss",
+    versionId: "awv_coss",
+    applicationWorkspaceId: "awp_coss"
+  };
+  await mockBackendApi(page, {
+    fileRequests,
+    markRecentRequests,
+    applications: [
+      { appId: "app_gcms", appName: "F-GCMS", enabled: true },
+      { appId: "app_coss", appName: "F-COSS", enabled: true }
+    ],
+    workspaces: [workspace(), historyWorkspace],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    markRecentWorkspaces: {
+      wrk_history_coss: historyWorkspace
+    },
+    sessions: [
+      {
+        sessionId: "ses_history_coss",
+        workspaceId: "wrk_history_coss",
+        title: "COSS 历史会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-08T08:00:00Z",
+        updatedAt: "2026-07-08T09:00:00Z",
+        workspaceContext: {
+          appId: "app_coss",
+          appName: "F-COSS",
+          applicationWorkspaceId: "awp_coss",
+          workspaceName: "COSS 主干",
+          versionId: "awv_coss",
+          version: "20260708"
+        }
+      }
+    ],
+    sessionMessages: [
+      {
+        messageId: "msg_history_coss",
+        sessionId: "ses_history_coss",
+        role: "USER",
+        content: "COSS 历史会话",
+        createdAt: "2026-07-08T08:00:00Z"
+      }
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "历史" }).click();
+  await expect(page.getByText("F-COSS · COSS 主干 · 20260708")).toBeVisible();
+  await page.getByRole("button", { name: /COSS 历史会话/ }).click();
+
+  await expect.poll(() => markRecentRequests).toContain("wrk_history_coss");
+  await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
+  await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_history_coss", path: "" });
+});
+
+test("history switch failure keeps current context and makes the session readonly", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const markRecentRequests: string[] = [];
+  const forbiddenWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_forbidden_coss",
+    name: "F-COSS 已失效工作区",
+    rootPath: "/Users/huang/workspace/forbidden-coss",
+    appId: "app_coss",
+    versionId: "awv_forbidden",
+    applicationWorkspaceId: "awp_coss"
+  };
+  await mockBackendApi(page, {
+    fileRequests,
+    markRecentRequests,
+    applications: [
+      { appId: "app_gcms", appName: "F-GCMS", enabled: true },
+      { appId: "app_coss", appName: "F-COSS", enabled: true }
+    ],
+    workspaces: [workspace(), forbiddenWorkspace],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    markRecentFailures: {
+      wrk_forbidden_coss: { code: "FORBIDDEN", message: "无该应用工作区权限" }
+    },
+    sessions: [
+      {
+        sessionId: "ses_forbidden_coss",
+        workspaceId: "wrk_forbidden_coss",
+        title: "失效应用历史",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-08T08:00:00Z",
+        updatedAt: "2026-07-08T09:00:00Z",
+        workspaceContext: {
+          appId: "app_coss",
+          appName: "F-COSS",
+          applicationWorkspaceId: "awp_coss",
+          workspaceName: "COSS 主干",
+          versionId: "awv_forbidden",
+          version: "20260708"
+        }
+      }
+    ],
+    sessionMessages: [
+      {
+        messageId: "msg_forbidden_coss",
+        sessionId: "ses_forbidden_coss",
+        role: "ASSISTANT",
+        content: "只读历史正文",
+        createdAt: "2026-07-08T08:00:00Z"
+      }
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: /失效应用历史/ }).click();
+
+  await expect.poll(() => markRecentRequests).toContain("wrk_forbidden_coss");
+  await expect(page.getByRole("button", { name: "F-GCMS" })).toBeVisible();
+  await expect.poll(() => fileRequests).not.toContainEqual({ workspaceId: "wrk_forbidden_coss", path: "" });
+  await expect(page.getByText("只读历史正文")).toBeVisible();
+  await expect(page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因")).toBeDisabled();
+  await expect(page.locator(".figma-chat-send-card")).toHaveAttribute("title", "你已不属于该历史会话所属应用，当前会话只读。");
+});
+
 test("workbench disables chat until opencode process is initialized", async ({ page }) => {
   const processInitializations: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { processStatus: "NEEDS_INITIALIZATION", processInitializations });
@@ -1693,6 +1843,7 @@ async function mockBackendApi(
     terminalTickets?: Array<Record<string, unknown>>;
     fileRequests?: Array<{ workspaceId: string; path: string }>;
     gitDiffRequests?: string[];
+    workspaces?: Array<ReturnType<typeof workspace> & Record<string, unknown>>;
     runEvents?: Array<ReturnType<typeof event>>;
     runIds?: string[];
     runEventsByRunId?: Record<string, Array<ReturnType<typeof event>>>;
@@ -1712,6 +1863,9 @@ async function mockBackendApi(
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     recentWorkspaces?: Record<string, (ReturnType<typeof workspace> & Record<string, unknown>) | null>;
     forbiddenRecentWorkspaces?: Record<string, { code: string; message: string; details?: Record<string, unknown>; status?: number }>;
+    markRecentRequests?: string[];
+    markRecentWorkspaces?: Record<string, ReturnType<typeof workspace> & Record<string, unknown>>;
+    markRecentFailures?: Record<string, { code: string; message: string; details?: Record<string, unknown>; status?: number }>;
     personalWorkspaces?: Record<string, Array<Record<string, unknown>>>;
     personalWorkspaceRequests?: string[];
     /** 自定义 /vcs/status 返回，覆盖默认的 { status: "ready", branch: "main", defaultBranch: "main" }。 */
@@ -1750,7 +1904,7 @@ async function mockBackendApi(
   });
   if (!capture.skipInitialAuthToken) {
     await page.addInitScript(() => {
-      localStorage.setItem("test-agent.auth.token", "test-token");
+      sessionStorage.setItem("test-agent.auth.token", "test-token");
     });
   }
   await page.addInitScript(({ fileContents }) => {
@@ -1862,7 +2016,7 @@ async function mockBackendApi(
   await page.route("https://fonts.gstatic.com/**", async (route) => {
     await route.fulfill({ status: 200, body: "" });
   });
-  const workspaceItems = [workspace()];
+  const workspaceItems = capture.workspaces ?? [workspace()];
   const applications = capture.applications ?? [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }];
   const managedApplications = capture.managedApplications ?? applications;
   const agentResponses = [...(capture.agentResponses ?? [])];
@@ -1999,16 +2153,30 @@ async function mockBackendApi(
         return;
       }
       if (method === "POST" && /^\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/recent$/.test(url.pathname)) {
-        await route.fulfill(json(null));
+        const workspaceId = url.pathname.match(/\/workspaces\/([^/]+)\/recent$/)?.[1] ?? "";
+        capture.markRecentRequests?.push(workspaceId);
+        const failure = capture.markRecentFailures?.[workspaceId];
+        if (failure) {
+          await route.fulfill({
+            status: failure.status ?? 403,
+            ...jsonFailure(failure.code, failure.message, failure.details)
+          });
+          return;
+        }
+        await route.fulfill(json(capture.markRecentWorkspaces?.[workspaceId] ?? null));
         return;
       }
-      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates") {
-        await route.fulfill(json(capture.workspaceTemplates?.app_gcms ?? []));
+      const workspaceTemplatesMatch = url.pathname.match(/^\/api\/internal\/platform\/workspace-management\/applications\/([^/]+)\/workspace-templates$/);
+      if (method === "GET" && workspaceTemplatesMatch) {
+        const appId = workspaceTemplatesMatch[1] ?? "";
+        await route.fulfill(json(capture.workspaceTemplates?.[appId] ?? []));
         return;
       }
-      if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/applications\/app_gcms\/workspace-templates\/[^/]+\/versions$/.test(url.pathname)) {
+      const workspaceVersionsMatch = url.pathname.match(/^\/api\/internal\/platform\/workspace-management\/applications\/([^/]+)\/workspace-templates\/([^/]+)\/versions$/);
+      if (method === "GET" && workspaceVersionsMatch) {
+        const appId = workspaceVersionsMatch[1] ?? "";
         const templateId = url.pathname.match(/\/workspace-templates\/([^/]+)\/versions$/)?.[1] ?? "";
-        await route.fulfill(json(capture.workspaceVersions?.[`app_gcms:${templateId}`] ?? []));
+        await route.fulfill(json(capture.workspaceVersions?.[`${appId}:${templateId}`] ?? []));
         return;
       }
       if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/applications\/app_gcms\/workspace-templates\/[^/]+\/versions$/.test(url.pathname)) {

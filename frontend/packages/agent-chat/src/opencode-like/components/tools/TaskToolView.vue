@@ -8,8 +8,21 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 
-const title = computed(() => props.subagent?.title ?? text(props.part.input?.description) ?? text(props.part.input?.prompt) ?? "准备子 Agent");
-const agentName = computed(() => props.subagent?.agentName ?? (text(props.part.input?.subagent_type) ? displayName(text(props.part.input?.subagent_type) ?? "") : "智能体"));
+const title = computed(() =>
+  props.subagent?.title ??
+  text(props.part.metadata?.title) ??
+  text(props.part.input?.description) ??
+  text(props.part.input?.prompt) ??
+  "准备子 Agent"
+);
+const agentName = computed(() => {
+  const raw =
+    props.subagent?.agentName ??
+    text(props.part.input?.subagent_type) ??
+    text(props.part.metadata?.agentName) ??
+    text(props.part.metadata?.agent);
+  return raw ? displayName(raw) : "智能体";
+});
 const status = computed(() => props.subagent?.status ?? props.part.status);
 const clickable = computed(() => Boolean(props.subagent?.sessionId));
 

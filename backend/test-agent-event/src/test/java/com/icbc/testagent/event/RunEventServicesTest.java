@@ -129,6 +129,26 @@ class RunEventServicesTest {
     }
 
     @Test
+    void liveBusStreamAllPublishesLocalEventsWithoutBreakingRunScopedStream() {
+        RunEventLiveBus liveBus = new RunEventLiveBus();
+        RunId runId = new RunId("run_1234567890abcdef");
+
+        StepVerifier.create(Flux.zip(liveBus.streamAll().take(1), liveBus.stream(runId).take(1)))
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        runId,
+                        RunEventType.QUESTION_ASKED,
+                        "trace_1234567890abcdef",
+                        NOW,
+                        Map.of("requestId", "q_1"))))
+                .assertNext(tuple -> {
+                    assertThat(tuple.getT1().payload().type()).isEqualTo("question.asked");
+                    assertThat(tuple.getT2().payload().type()).isEqualTo("question.asked");
+                    assertThat(tuple.getT2().payload().runId()).isEqualTo(runId.value());
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void liveBusKeepsAcceptingEventsAfterSubscriberCompletes() {
         RunEventLiveBus liveBus = new RunEventLiveBus();
         RunId runId = new RunId("run_1234567890abcdef");
@@ -394,6 +414,29 @@ class RunEventServicesTest {
     }
 
     @Test
+    void liveBusStreamAllIncludesRemoteEvents() {
+        FakeRunEventRemotePublisher remotePublisher = new FakeRunEventRemotePublisher();
+        RunEventLiveBus liveBus = new RunEventLiveBus(remotePublisher);
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventSsePayload remotePayload = new RunEventSsePayload(
+                "evt_live_remote",
+                runId.value(),
+                0,
+                "run.succeeded",
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("status", "SUCCEEDED"));
+
+        StepVerifier.create(liveBus.streamAll().take(1))
+                .then(() -> remotePublisher.emit(RunEventLiveEvent.transientOnly(remotePayload)))
+                .assertNext(event -> {
+                    assertThat(event.payload()).isEqualTo(remotePayload);
+                    assertThat(event.payload().type()).isEqualTo("run.succeeded");
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void sseStreamContinuesPollingAfterTransientReplayFailure() {
         FakeRunEventRepository repository = new FakeRunEventRepository();
         repository.remainingFindFailures = 1;
@@ -475,6 +518,11 @@ class RunEventServicesTest {
         @Override
         public reactor.core.publisher.Flux<RunEventLiveEvent> stream(RunId runId) {
             return sink.asFlux().filter(event -> runId.value().equals(event.payload().runId()));
+        }
+
+        @Override
+        public reactor.core.publisher.Flux<RunEventLiveEvent> streamAll() {
+            return sink.asFlux();
         }
 
         private void emit(RunEventLiveEvent event) {

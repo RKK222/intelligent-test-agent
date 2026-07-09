@@ -16,6 +16,8 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunApplicationService`：Run 启动、路由、通用 agent binding 创建/复用、root session scope 记录、事件订阅、active-run 查询和取消；root `run.succeeded/run.failed` 是最终事实源，`Streaming response failed` 等 transport error 先到时延迟收敛，后到 root 终态可纠正临时失败。
 - `run.RunSessionScopeRouter`：在 runtime 层维护当前 Run root/child session scope，负责 child discovery、pending drain、raw event dedup、child 终态过滤和无 session 全局 unknown 噪声过滤。
 - `run.RunSessionScopeRuntimeCache`：Redis 运行态增强，维护 `test-agent:run-scope:{runId}:pending:{sessionId}` 与 `test-agent:run-scope:{runId}:dedup:{sessionId}:{rawEventId}`，TTL 30 分钟，Redis 不可用时降级。
+- `run.RunActivityStateStore`：维护 stale active Run 收敛所需 Redis 轻量状态，`test-agent:run-output-activity:{runId}` 保存 30 分钟内用户可见输出活跃标记，`test-agent:run-pending-ask:{runId}` 保存最新未处理 ask 状态；pending ask 只从实时 RunEvent 写入，不反查数据库。
+- `run.StaleActiveRunReconcileTaskHandler` / `run.StaleActiveRunReconcileService`：复用 scheduler 框架每 5 分钟扫描超过 2 小时的 active Run；无近期输出且无 pending ask 时 CAS 标记 `FAILED` 并追加固定消息的 `run.failed`，只修复平台 Run 状态，不主动取消远端 opencode 会话。
 - `run.RunDiffApplicationService`：Run 级 Diff 查询、接受和拒绝，通过当前 agent runtime fallback 查询远端 Diff。
 - `run.RunEventPersistencePolicy`：区分 durable RunEvent 与 transient live output，并清洗 tool 大字段。
 - `run.RunMessageRecoveryService`：SSE 建连时从 agent projected messages 生成 transient message snapshot；存在 Run scope 时按 root + child session 恢复当前 Run 子树。
@@ -28,6 +30,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 
 - `test-agent-common`、`test-agent-domain`、`test-agent-event`。
 - `test-agent-agent-runtime`。
+- `test-agent-scheduler`，仅用于业务 `ScheduledTaskHandler` 接入。
 - Reactor、Jackson、Spring Context、Spring Data Redis。
 
 ## 禁止依赖
@@ -40,7 +43,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 ## 测试位置
 
 - `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime`。
-- `run.*` 测试必须覆盖 Run 创建、通用 agent binding 保存/复用、远端 session 懒创建/复用、事件持久化策略、终态快照/token 回写、active-run、Diff fallback 和消息恢复。
+- `run.*` 测试必须覆盖 Run 创建、通用 agent binding 保存/复用、远端 session 懒创建/复用、事件持久化策略、终态快照/token 回写、active-run、Diff fallback、消息恢复、Redis 输出活跃/待处理 ask 状态和 stale active Run 收敛任务。
 - `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新、消息追加默认 role 和消息列表数据库 fallback。
 - `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤和 permission/question body 兼容。
 - `process.*` 测试必须覆盖用户进程分配、公共状态查询、公共启动/停止健康确认、通用参数路径读取、manager 控制面命令路由、后端心跳注册和运行管理快照聚合。

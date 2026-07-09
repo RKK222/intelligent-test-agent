@@ -11,6 +11,8 @@ import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
@@ -73,6 +75,19 @@ public class MyBatisRunRepository implements RunRepository {
     public Optional<Run> findLatestActiveBySessionId(SessionId sessionId) {
         return Optional.ofNullable(mapper.findLatestActiveBySessionId(sessionId.value()))
                 .map(this::toDomain);
+    }
+
+    @Override
+    public List<Run> findStaleActiveRuns(Instant updatedBefore, int limit) {
+        if (updatedBefore == null) {
+            throw new IllegalArgumentException("updatedBefore must not be null");
+        }
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be between 1 and 1000");
+        }
+        return mapper.findStaleActiveRuns(updatedBefore, limit).stream()
+                .map(this::toDomain)
+                .toList();
     }
 
     private Run toDomain(RunRow row) {

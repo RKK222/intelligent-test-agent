@@ -17,4 +17,9 @@ public interface RunEventRemotePublisher {
      * 订阅其他实例转发到本机的实时事件流。
      */
     Flux<RunEventLiveEvent> stream(RunId runId);
+
+    /**
+     * 订阅其他实例转发到本机的全部实时事件流，用于用户级状态聚合按事件类型触发刷新。
+     */
+    Flux<RunEventLiveEvent> streamAll();
 }
