@@ -108,6 +108,8 @@ import {
   runtimeStatus,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
+  isStaleRuntimeRequest,
+  staleRuntimeRequestFeedback,
   syntheticEvent,
   text,
   workspaceLoadIsCurrent,
@@ -2059,7 +2061,12 @@ const replyPermissionMutation = useMutation({
     return api.replySessionPermission(session.value.sessionId, payload.requestId, { decision: payload.decision });
   },
   onSuccess: (_result, payload) => dispatchChat({ type: "permission.replied", requestId: payload.requestId }),
-  onError: (error) => {
+  onError: (error, payload) => {
+    if (isStaleRuntimeRequest(error)) {
+      dispatchChat({ type: "permission.replied", requestId: payload.requestId });
+      feedback.value = staleRuntimeRequestFeedback("权限请求已失效", error);
+      return;
+    }
     feedback.value = errorFeedback("权限回复失败", error);
   }
 });
@@ -2072,7 +2079,12 @@ const replyQuestionMutation = useMutation({
     return api.replySessionQuestion(session.value.sessionId, payload.requestId, { answers: payload.answers });
   },
   onSuccess: (_result, payload) => dispatchChat({ type: "question.replied", requestId: payload.requestId }),
-  onError: (error) => {
+  onError: (error, payload) => {
+    if (isStaleRuntimeRequest(error)) {
+      dispatchChat({ type: "question.replied", requestId: payload.requestId });
+      feedback.value = staleRuntimeRequestFeedback("提问请求已失效", error);
+      return;
+    }
     feedback.value = errorFeedback("提问回复失败", error);
   }
 });
@@ -2085,7 +2097,12 @@ const rejectQuestionMutation = useMutation({
     return api.rejectSessionQuestion(session.value.sessionId, requestId);
   },
   onSuccess: (_result, requestId) => dispatchChat({ type: "question.replied", requestId }),
-  onError: (error) => {
+  onError: (error, requestId) => {
+    if (isStaleRuntimeRequest(error)) {
+      dispatchChat({ type: "question.replied", requestId });
+      feedback.value = staleRuntimeRequestFeedback("提问请求已失效", error);
+      return;
+    }
     feedback.value = errorFeedback("拒绝提问失败", error);
   }
 });

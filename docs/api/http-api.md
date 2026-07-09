@@ -2244,7 +2244,7 @@ Session 运行态接口：
 - 所有响应仍包裹 `ApiResponse<T>`，错误仍走统一错误码和 traceId。
 - `workspaceId` 为平台 workspace id，后端只把 workspace root 映射为 opencode `directory`；不得把平台 id 当作 opencode `workspace` query。
 - `sessionId` 为平台 session id。无用户主体时，后端通过 `agent_session_bindings` 中的 `(sessionId, agentId)` 定位远端 session；`opencode` 会兼容读取旧 `sessions.opencode_*` 字段并回填 binding，未绑定远端 session 时返回 `CONFLICT`。有用户主体且 agent 为 `opencode` 时，缺失或不匹配的绑定会自动在当前用户进程上重建。
-- `permission`/`question` 的平台路径保留在 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/...` 下，后端实际映射到 opencode `/permission`、`/question` 族 API。
+- `permission`/`question` 的平台路径和请求体保持兼容，后端实际映射到 opencode v2 session-scoped API：`GET /api/session/{remoteSessionId}/permission`、`POST /api/session/{remoteSessionId}/permission/{requestId}/reply`、`GET /api/session/{remoteSessionId}/question`、`POST /api/session/{remoteSessionId}/question/{requestId}/reply`、`POST /api/session/{remoteSessionId}/question/{requestId}/reject`。仅在 permission/question 回复或拒绝时，opencode 404 会转为平台 `CONFLICT`，消息为“权限请求已失效，请重新运行任务”或“提问请求已失效，请重新运行任务”，`details.reason=STALE_RUNTIME_REQUEST`，用于前端清理已过期卡片；其它 opencode 404 映射不变。
 - config/provider auth/worktree/share/MCP auth 均为受控代理能力，前端不得改为直接调用 opencode 原 URL；provider secret 不得写入 localStorage 或日志。
 - 只读 transcript 页面 `/s/{sessionId}` 只消费平台 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}` 与 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages?refresh=false`，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
 - PTY WebSocket 未进入默认 HTTP/SSE 契约；P2 只能按 `docs/standards/security.md` 新增受控 ticket + WebSocket 例外。ticket 只通过新平台 URL `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` 创建，响应中的 `webSocketUrl` 固定为新 WebSocket path。
@@ -2252,7 +2252,7 @@ Session 运行态接口：
 对应测试：
 
 - `OpencodeRuntimeFacadeTest`：验证 facade runtime 调用不泄漏 generated DTO。
-- `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、用户进程节点路由、固定节点 fallback、远端 session id、binding mismatch 自动重建、permission reply body、MCP resources/tools、config/provider OAuth/worktree/share/MCP auth 映射。
+- `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、用户进程节点路由、固定节点 fallback、远端 session id、binding mismatch 自动重建、permission/question v2 session-scoped path、reply body 兼容、过期请求 `CONFLICT` 映射、MCP resources/tools、config/provider OAuth/worktree/share/MCP auth 映射。
 - `PlatformOpencodeRuntimeControllerTest`：验证平台路径统一响应、MCP tools 查询、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest`：验证 `/api/internal/agent/opencode/...` agent path 统一响应、agentId 选择、traceId 和可选用户主体透传。
 - `RuntimeControllerTest`：验证 `/api/internal/agent/opencode/runs` 与内部平台 Run URL 的 DTO、错误格式和 service 实现；`LegacyApiGoneWebFilterTest` 覆盖旧 Run URL 返回 `410 API_GONE`。

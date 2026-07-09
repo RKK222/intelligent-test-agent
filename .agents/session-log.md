@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 修复 Permission/Question 过期回复语义
+
+- Why:
+  - 现场 permission/question 点击回复时后端仍代理旧 opencode `/permission|question` 路径，当前 opencode v2 要求携带远端 session id；同时远端 pending request 过期后的 404 被包装成 `OPENCODE_BAD_GATEWAY`，前端不会清理卡片。
+- What:
+  - `OpencodeRuntimeApplicationService` 改为代理 `/api/session/{remoteSessionId}/permission|question`，保留平台请求体兼容；仅在 permission/question 回复或拒绝链路把 opencode 404 转为 `CONFLICT`，`details.reason=STALE_RUNTIME_REQUEST`。前端识别该错误后派发本地 replied action 清理卡片并展示可理解反馈。
+- How:
+  - 补充 runtime service 单测覆盖 v2 path、permission/question reply 和 question reject 的 stale 404 映射；补充前端 helper/reducer 单测覆盖 stale 判断和本地卡片移除；同步 HTTP API 与 runtime README。
+- Result:
+  - 指定 runtime/API Controller 测试、前端 vitest/typecheck 和 `backend mvn clean package -DskipTests` 均通过；未修改 generated SDK、数据库、环境配置或 opencode 进程启停/状态公共程序。
+
 ### 2026-07-08 - 增加后台运行会话历史状态提醒
 
 - Why:
