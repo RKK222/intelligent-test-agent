@@ -148,6 +148,38 @@ describe("WorkbenchFooter", () => {
     expect(wrapper.emitted("update:markdownPreviewMode")?.at(-1)).toEqual(["split"]);
   });
 
+  it("handles preview button transitions from split or full preview back to off", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        showPreviewButton: true,
+        markdownPreviewMode: "split"
+      }
+    });
+
+    const previewBtn = wrapper.find('[data-testid="footer-markdown-preview"]');
+
+    // From split state, single click should transition to off
+    await previewBtn.trigger("click");
+    await new Promise((r) => setTimeout(r, 260));
+    expect(wrapper.emitted("update:markdownPreviewMode")).toEqual([["off"]]);
+
+    const wrapper2 = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        showPreviewButton: true,
+        markdownPreviewMode: "full"
+      }
+    });
+
+    const previewBtn2 = wrapper2.find('[data-testid="footer-markdown-preview"]');
+
+    // From full state, single click should transition to off
+    await previewBtn2.trigger("click");
+    await new Promise((r) => setTimeout(r, 260));
+    expect(wrapper2.emitted("update:markdownPreviewMode")).toEqual([["off"]]);
+  });
+
   it("copies path and sets title on copy-path click", async () => {
     // mock window.isSecureContext and navigator.clipboard
     Object.defineProperty(window, "isSecureContext", {

@@ -1437,13 +1437,8 @@ watch(selectedWorkspace, (sw) => {
 });
 watch(activePath, () => {
   editorSelection.value = undefined;
-  // 切换到非 Markdown 文件时强制关闭预览；开启 Markdown 文件时，默认使用 Monaco + markdown-it 分屏模式
-  const path = activePath.value;
-  if (!path || languageFromPath(path) !== "markdown") {
-    markdownPreviewMode.value = "off";
-  } else {
-    markdownPreviewMode.value = "split";
-  }
+  // 切换文件或新打开文件时均重置预览状态为关闭，默认以编辑模式打开
+  markdownPreviewMode.value = "off";
 });
 watch(selectedWorkspaceIdRef, (id, previous) => {
   if (previous && previous !== id) {

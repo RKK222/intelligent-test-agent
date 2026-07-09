@@ -373,13 +373,11 @@ function handlePreviewClick() {
   }
   previewClickTimer = setTimeout(() => {
     previewClickTimer = null;
-    // 单击时，如果当前是分屏模式，切换到全屏预览；如果是全屏，切换回分屏；如果关闭，则切到全屏（保留单击时整屏渲染功能）
-    if (props.markdownPreviewMode === "split") {
+    // 单击预览按钮：编辑状态(off)下进入全屏预览(full)；全屏(full)或分屏(split)状态下退回纯编辑模式(off)
+    if (props.markdownPreviewMode === "off") {
       emit("update:markdownPreviewMode", "full");
-    } else if (props.markdownPreviewMode === "full") {
-      emit("update:markdownPreviewMode", "split");
     } else {
-      emit("update:markdownPreviewMode", "full");
+      emit("update:markdownPreviewMode", "off");
     }
   }, 250);
 }
@@ -389,7 +387,7 @@ function handlePreviewDblClick() {
     clearTimeout(previewClickTimer);
     previewClickTimer = null;
   }
-  // 双击时，如果在预览状态（分屏或全屏），则关闭预览切换回纯编辑；否则开启分屏编辑+预览模式
+  // 双击预览按钮：编辑状态(off)下进入分屏编辑+渲染模式(split)；分屏(split)或全屏(full)下退回纯编辑模式(off)
   if (props.markdownPreviewMode === "off") {
     emit("update:markdownPreviewMode", "split");
   } else {
