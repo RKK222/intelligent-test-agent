@@ -1084,10 +1084,10 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 将所选个人工作区文件同步到应用版本工作区；目标副本必须 clean，后端先 fetch/pull --ff-only，再复制文件、提交并 push。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 将所选应用版本工作区文件同步到个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 显式确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
-| `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, rawStatus, status, staged, patch, additions, deletions }] }`；Git unmerged 状态会返回 `status=conflict`。 |
-| `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
-| `POST` | `/workspaces/{workspaceId}/git-stage` | 把当前个人 worktree 中指定的非冲突文件定点加入真实 Git index。 |
-| `POST` | `/workspaces/{workspaceId}/git-unstage` | 把当前个人 worktree 中指定的非冲突文件从真实 Git index 撤回工作树。 |
+| `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取应用版本工作区或个人 worktree 的变更文件列表，返回 `{ files: [{ path, rawStatus, status, staged, patch, additions, deletions }] }`；Git unmerged 状态会返回 `status=conflict`。 |
+| `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前应用版本工作区或个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
+| `POST` | `/workspaces/{workspaceId}/git-stage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件定点加入真实 Git index。 |
+| `POST` | `/workspaces/{workspaceId}/git-unstage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件从真实 Git index 撤回工作树。 |
 | `GET` | `/workspaces/{workspaceId}/git-conflict?path={path}` | 读取个人 worktree 冲突文件的 Git base/current/incoming stage 与工作树结果。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/resolve` | 解决单个冲突并定点 stage，支持当前、应用、两者、手工内容和删除语义。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/resolve-all` | 使用 Git index 原生 ours/theirs 批量解决全部冲突；只支持 `CURRENT/INCOMING`。 |
@@ -1113,7 +1113,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - 内部部署模式版本库在应用版本、服务器副本和个人工作区的 clone/fetch/pull/push 前，都会按当前操作人统一认证号拼接实际 Git URL，并在本地仓库 origin 中刷新为当前操作人的地址；校验已有 origin 时忽略 `ssh://任意用户@` 前缀，只比较数据库保存的 `host[:port]/path`。
 - 应用版本工作区物理仓库根目录读取通用参数 `OPENCODE_APP_WORKSPACE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终仓库目录为 `{root}/{branchFragment}/{repository.englishName}`，opencode root 为仓库目录下模板 `directoryPath`。新记录入库保存 `appworkspace:` 逻辑路径，响应返回解析后的当前服务器物理路径。
 - 历史代码库若缺少 `englishName`，创建或接管应用版本工作区会返回 `VALIDATION_ERROR`，需要先在版本库管理补齐英文名称。
-- 磁盘目录已存在时，后端校验 origin URL 和当前分支，匹配则接管，不覆盖、不删除；不匹配返回 `CONFLICT`。
+- 磁盘目录已存在时，空目录会删除后重新 clone；目录仅包含 `.git` 且无有效 HEAD 时视为上次 Git clone 超时/中断留下的残留，会删除后重新 clone。已有有效 Git 仓库会校验 origin URL 和当前分支，匹配则接管，不匹配返回 `CONFLICT`；非 Git 非空目录返回 `CONFLICT`，不覆盖用户内容。
 - SSH Git 操作只使用当前登录用户保存的唯一 SSH key；HTTPS 不额外支持账号或 token。
 - 多服务器部署下，版本主记录保存 `targetCommitHash`，每台服务器通过 `application_workspace_version_replicas` 记录本机副本路径、运行态 Workspace、当前 commit 和同步状态。`runtimeWorkspace` 返回当前用户 READY 的 opencode agent 所在服务器副本；目标副本未就绪时返回 `CONFLICT`。
 
@@ -1176,8 +1176,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 无请求体。后端逻辑：
 
 1. 先查询 `(versionId, userId, workspaceName=default)` 是否已有个人工作区记录。
-2. 存在：直接复用，返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
-3. 不存在：先按 `ENSURE_LOCAL` 确保当前服务器有 READY 应用版本副本，再后台创建个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果当前服务器没有副本，后端会基于 `OPENCODE_APP_WORKSPACE_ROOT` 创建本机副本；禁止再用旧 `application_workspace_versions` 绝对路径伪造成 READY replica。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录；如果同名分支仍登记在旧路径且目标规范路径不存在，后端会先 `git worktree move` 重挂载到规范路径。只有目标目录被其他内容占用时返回 `CONFLICT`。
+2. 存在：先校验记录里的运行态目录、仓库根和分支是否仍是可用 Git worktree；校验通过才复用并返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
+3. 不存在或已有记录的物理 worktree 缺失/不可复用：先按 `ENSURE_LOCAL` 确保当前服务器有 READY 应用版本副本，再后台创建或修复个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果当前服务器没有副本，后端会基于 `OPENCODE_APP_WORKSPACE_ROOT` 创建本机副本；禁止再用旧 `application_workspace_versions` 绝对路径伪造成 READY replica。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录；如果同名分支仍登记在旧路径且目标规范路径不存在，后端会先 `git worktree move` 重挂载到规范路径。已有 default 记录但规范物理目录被删除时，显式 ensure 会重新创建该 worktree 并刷新运行态记录。只有目标目录被其他内容占用时返回 `CONFLICT`。
 
 默认个人工作区分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有 `workspaceName=default` 的旧个人工作区记录如果 branch/path 不符合新规范，`ensure-default-personal-workspace` 会非破坏式创建或重挂载规范 worktree，并把 `personal_workspaces` 与关联运行态 `workspaces.root_path` 更新为 `personalworktree:` 逻辑路径；旧物理目录不会被自动删除。新建自定义私人空间同样使用 `{应用版本分支}_{userId}_{workspaceName}`。
 
@@ -1201,7 +1201,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 ### 工作区本地 Git Diff
 
-`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace，使用其 `repoRootPath` 执行 `git status --porcelain` + `git diff`，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计，返回每个变更文件的 path、rawStatus、status、staged、patch、additions、deletions。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`，供前端把冲突文件从普通 staged/unstaged 文件中拆出展示。不依赖 opencode `/vcs/diff`，opencode 服务异常不影响变更列表刷新。
+`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace、应用版本工作区副本或应用版本工作区记录，使用对应 `repoRootPath` 执行 `git status --porcelain` + `git diff`，应用模板子目录通过 pathspec 限定扫描范围，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计。响应中的 `path` 始终是当前运行态工作区相对路径，例如仓库内 `F-GCMS/workspace/docs/app.md` 返回为 `docs/app.md`。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`，供前端把冲突文件从普通 staged/unstaged 文件中拆出展示。不依赖 opencode `/vcs/diff`，opencode 服务异常不影响变更列表刷新。
 
 响应 `WorkspaceGitDiffResponse`：
 
@@ -1229,7 +1229,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`files` 使用 `git-diff` 响应中的工作区相对路径。后端只允许当前用户个人 worktree 的运行态 workspace 调用；会先把路径映射到仓库相对路径，已跟踪修改/删除执行 `git restore --staged --worktree -- <file>`，新增或未跟踪文件先取消暂存再执行定点 `git clean -f -- <file>`。成功后无业务响应体，前端刷新 `git-diff` 后该文件不再出现在变更列表中。
+`files` 使用 `git-diff` 响应中的工作区相对路径。后端允许当前用户可访问的应用版本工作区或当前用户个人 worktree 的运行态 workspace 调用；会先把路径映射到仓库相对路径，已跟踪修改/删除执行 `git restore --staged --worktree -- <file>`，新增或未跟踪文件先取消暂存再执行定点 `git clean -f -- <file>`。成功后无业务响应体，前端刷新 `git-diff` 后该文件不再出现在变更列表中。
 
 `POST /workspaces/{workspaceId}/git-stage` 与 `POST /workspaces/{workspaceId}/git-unstage` 使用相同请求体：
 
@@ -1239,7 +1239,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-后端复用个人工作区归属和路径校验，把工作区相对路径映射为仓库相对路径后分别执行定点 `git add -- <files>` 和 `git restore --staged -- <files>`。merge 冲突期间仍允许操作普通非冲突文件；unmerged 路径必须通过 `git-conflict/resolve` 处理，传入普通 stage/unstage API 会返回 `CONFLICT`。只要仍存在 unmerged 文件，Git 原生规则仍禁止 commit/push。
+后端复用托管工作区归属和路径校验，把工作区相对路径映射为仓库相对路径后分别执行定点 `git add -- <files>` 和 `git restore --staged -- <files>`。merge 冲突期间仍允许操作普通非冲突文件；unmerged 路径必须通过 `git-conflict/resolve` 处理，传入普通 stage/unstage API 会返回 `CONFLICT`。只要仍存在 unmerged 文件，Git 原生规则仍禁止 commit/push。
 
 `GET /workspaces/{workspaceId}/git-conflict?path=src/App.java` 返回 `path/rawStatus/baseContent/currentContent/incomingContent/resultContent`。四个 content 可为 `null`，表示对应 Git stage 或工作树中不存在文件；文本上限 1MB。`POST /workspaces/{workspaceId}/git-conflict/resolve` 请求体为：
 

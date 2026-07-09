@@ -914,13 +914,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Path expectedRepoRoot = personalRepoRootWithName(version, userId, expectedBranch);
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         Path expectedWorkspaceRoot = effectiveWorkspaceRoot(expectedRepoRoot, expectedRepoRoot.resolve(template.directoryPath()).normalize());
-        Path expectedRepoPath = expectedRepoRoot.toAbsolutePath().normalize();
-        Path expectedWorkspacePath = expectedWorkspaceRoot.toAbsolutePath().normalize();
-        boolean matches = expectedBranch.equals(personal.branch())
-                && sameNormalizedPath(expectedRepoPath, personal.repoRootPath())
-                && sameNormalizedPath(expectedWorkspacePath, personal.workspaceRootPath())
-                && sameNormalizedPath(expectedWorkspacePath, runtimeWorkspace.rootPath());
-        if (matches || canReuseExistingPersonalWorkspace(personal, runtimeWorkspace, expectedBranch)) {
+        if (canReuseExistingPersonalWorkspace(personal, runtimeWorkspace, expectedBranch)) {
             return personal;
         }
         CodeRepository repository = existingRepository(version.repositoryId());
@@ -931,8 +925,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 expectedBranch,
                 privateKeyFor(repository, userId));
         expectedWorkspaceRoot = effectiveWorkspaceRoot(expectedRepoRoot, expectedRepoRoot.resolve(template.directoryPath()).normalize());
-        expectedRepoPath = realPath(expectedRepoRoot);
-        expectedWorkspacePath = realPath(expectedWorkspaceRoot);
+        Path expectedRepoPath = realPath(expectedRepoRoot);
+        Path expectedWorkspacePath = realPath(expectedWorkspaceRoot);
         String expectedRepoValue = personalRepoValue(version, userId, expectedBranch);
         String expectedWorkspaceValue = personalWorkspaceValue(version, template, userId, expectedBranch);
         if (expectedWorkspacePath.equals(expectedRepoPath)) {
@@ -987,13 +981,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
-    private boolean sameNormalizedPath(Path left, String right) {
-        if (left == null || right == null) {
-            return false;
-        }
-        return left.toAbsolutePath().normalize().equals(pathResolver.resolve(right).toAbsolutePath().normalize());
-    }
-
     private Path effectiveWorkspaceRoot(Path repoRoot, Path configuredWorkspaceRoot) {
         Path normalizedConfigured = configuredWorkspaceRoot.toAbsolutePath().normalize();
         if (Files.isDirectory(normalizedConfigured)) {
@@ -1039,12 +1026,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     private void deleteEmptyDirectory(Path directory) {
+        deleteEmptyDirectory(directory, "默认私人工作区空目录残留清理失败");
+    }
+
+    private void deleteEmptyDirectory(Path directory, String errorMessage) {
         try {
             Files.delete(directory);
         } catch (Exception exception) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "默认私人工作区空目录残留清理失败",
+                    errorMessage,
                     Map.of("path", directory.toString()),
                     exception);
         }
@@ -1101,32 +1092,21 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     /**
      * 基于本地 Git 获取工作区变更文件列表（不依赖 opencode runtime /vcs/diff）。
-     * 通过 workspace 反查 personal workspace，若找到则基于其 repoRoot 进行 git status/diff；
-     * 若找不到则尝试基于 workspace rootPath 自身。
+     * 通过 runtime workspace 反查应用版本仓库或个人 worktree，始终在 Git 仓库根目录执行命令，
+     * 再把结果路径裁剪成当前运行态工作区内的相对路径。
      */
     public ManagedWorkspaceResponses.WorkspaceGitDiffResponse getWorkspaceGitDiff(String workspaceId, UserId userId) {
-        Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
-        // 尝试通过运行时 workspace 反查个人工作区
-        Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId());
-        Path gitRoot;
-        String displayPathPrefix = "";
-        if (personal.isPresent()) {
-            ensurePersonalOwner(personal.get(), userId);
-            gitRoot = pathResolver.resolve(personal.get().repoRootPath());
-            displayPathPrefix = repoRelativePrefix(gitRoot, pathResolver.resolve(personal.get().workspaceRootPath()));
-        } else {
-            // 回退：直接基于 workspace rootPath（可能是应用版本工作区副本）
-            gitRoot = pathResolver.resolve(workspace.rootPath());
-        }
-        if (!Files.exists(gitRoot)) {
+        WorkspaceGitContext context = workspaceGitContext(workspaceId, userId);
+        if (!Files.exists(context.repoRoot())) {
             return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(List.of());
         }
         try {
-            String porcelain = gitWorkspaceService.statusPorcelain(gitRoot);
-            String finalDisplayPathPrefix = displayPathPrefix;
-            List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = gitWorkspaceService.collectDiffFiles(gitRoot, porcelain).stream()
+            String porcelain = context.pathspec().isBlank()
+                    ? gitWorkspaceService.statusPorcelain(context.repoRoot())
+                    : gitWorkspaceService.statusPorcelain(context.repoRoot(), context.pathspec());
+            List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = gitWorkspaceService.collectDiffFiles(context.repoRoot(), porcelain).stream()
                     .map(file -> new ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse(
-                            stripDisplayPathPrefix(file.path(), finalDisplayPathPrefix),
+                            stripDisplayPathPrefix(file.path(), context.displayPathPrefix()),
                             file.rawStatus(),
                             file.status(),
                             file.staged(),
@@ -1141,17 +1121,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     public void discardWorkspaceGitFiles(String workspaceId, List<String> files, UserId userId) {
-        Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
-        Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId());
-        if (personal.isEmpty()) {
-            throw new PlatformException(ErrorCode.NOT_FOUND, "个人工作区不存在", Map.of("workspaceId", workspaceId));
-        }
-        PersonalWorkspace current = personal.get();
-        ensurePersonalOwner(current, userId);
-        ApplicationWorkspaceVersion version = existingVersion(current.versionId());
-        CodeRepository repository = existingRepository(version.repositoryId());
-        Path repoRoot = pathResolver.resolve(current.repoRootPath());
-        Path workspaceRoot = pathResolver.resolve(current.workspaceRootPath());
+        WorkspaceGitContext context = workspaceGitContext(workspaceId, userId);
+        Path repoRoot = context.repoRoot();
+        Path workspaceRoot = context.workspaceRoot();
         List<String> gitFiles = repoRelativeFiles(repoRoot, workspaceRoot, normalizeFiles(files));
         try {
             Map<String, GitStatusEntry> statuses = new LinkedHashMap<>();
@@ -1171,12 +1143,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     trackedFiles.add(gitFile);
                 }
             }
-            String privateKey = privateKeyFor(repository, userId);
-            gitWorkspaceService.restoreFiles(repoRoot, trackedFiles, privateKey);
-            gitWorkspaceService.unstageFiles(repoRoot, stagedNewFiles, privateKey);
+            gitWorkspaceService.restoreFiles(repoRoot, trackedFiles, context.privateKey());
+            gitWorkspaceService.unstageFiles(repoRoot, stagedNewFiles, context.privateKey());
             List<String> filesToClean = new ArrayList<>(stagedNewFiles);
             filesToClean.addAll(untrackedFiles);
-            gitWorkspaceService.cleanUntrackedFiles(repoRoot, filesToClean, privateKey);
+            gitWorkspaceService.cleanUntrackedFiles(repoRoot, filesToClean, context.privateKey());
         } catch (PlatformException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -1185,7 +1156,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 把个人工作区中的非冲突文件定点加入 Git index。
+     * 把托管工作区中的非冲突文件定点加入 Git index。
      * 未解决冲突必须继续通过冲突解决接口处理，避免普通 stage 覆盖 index 的 stage 1/2/3。
      */
     public void stageWorkspaceGitFiles(String workspaceId, List<String> files, UserId userId) {
@@ -1193,7 +1164,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 把个人工作区中的非冲突文件从 Git index 撤回工作树。
+     * 把托管工作区中的非冲突文件从 Git index 撤回工作树。
      * merge 期间允许撤回普通文件，但 Git 原生仍会阻止存在 unmerged 文件时提交。
      */
     public void unstageWorkspaceGitFiles(String workspaceId, List<String> files, UserId userId) {
@@ -1205,7 +1176,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             List<String> files,
             UserId userId,
             boolean stage) {
-        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        WorkspaceGitContext context = workspaceGitContext(workspaceId, userId);
         List<String> displayFiles = normalizeFiles(files);
         List<String> gitFiles = repoRelativeFiles(context.repoRoot(), context.workspaceRoot(), displayFiles);
         Set<String> conflicts = gitWorkspaceService.parseStatusPorcelain(
@@ -1228,6 +1199,54 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         } else {
             gitWorkspaceService.unstageFiles(context.repoRoot(), gitFiles, context.privateKey());
         }
+    }
+
+    private WorkspaceGitContext workspaceGitContext(String workspaceId, UserId userId) {
+        Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
+        Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId());
+        if (personal.isPresent()) {
+            PersonalWorkspace current = personal.get();
+            ensurePersonalOwner(current, userId);
+            ApplicationWorkspaceVersion version = existingVersion(current.versionId());
+            CodeRepository repository = existingRepository(version.repositoryId());
+            return workspaceGitContext(
+                    pathResolver.resolve(current.repoRootPath()),
+                    pathResolver.resolve(current.workspaceRootPath()),
+                    privateKeyFor(repository, userId));
+        }
+        Optional<ApplicationWorkspaceVersionReplica> replica =
+                managedWorkspaceRepository.findVersionReplicaByRuntimeWorkspace(workspace.workspaceId());
+        if (replica.isPresent()) {
+            ApplicationWorkspaceVersion version = existingVersion(replica.get().versionId());
+            ensureMember(version.appId(), userId, loadingContextForVersion(
+                    "workspace-git", version, "应用版本工作区", workspace.name())
+                    .workspaceId(workspace.workspaceId().value()));
+            return workspaceGitContext(
+                    pathResolver.resolve(replica.get().repoRootPath()),
+                    pathResolver.resolve(replica.get().workspaceRootPath()),
+                    null);
+        }
+        Optional<ApplicationWorkspaceVersion> version =
+                managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspace.workspaceId());
+        if (version.isPresent()) {
+            ensureMember(version.get().appId(), userId, loadingContextForVersion(
+                    "workspace-git", version.get(), "应用版本工作区", workspace.name())
+                    .workspaceId(workspace.workspaceId().value()));
+            return workspaceGitContext(
+                    pathResolver.resolve(version.get().repoRootPath()),
+                    pathResolver.resolve(version.get().workspaceRootPath()),
+                    null);
+        }
+        Path root = pathResolver.resolve(workspace.rootPath());
+        return workspaceGitContext(root, root, null);
+    }
+
+    private WorkspaceGitContext workspaceGitContext(Path repoRoot, Path workspaceRoot, String privateKey) {
+        String displayPathPrefix = repoRelativePrefix(repoRoot, workspaceRoot);
+        String pathspec = displayPathPrefix.endsWith("/")
+                ? displayPathPrefix.substring(0, displayPathPrefix.length() - 1)
+                : displayPathPrefix;
+        return new WorkspaceGitContext(repoRoot, workspaceRoot, privateKey, displayPathPrefix, pathspec);
     }
 
     /**
@@ -1414,6 +1433,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     private record PersonalGitContext(Path repoRoot, Path workspaceRoot, String privateKey) {
+    }
+
+    private record WorkspaceGitContext(
+            Path repoRoot,
+            Path workspaceRoot,
+            String privateKey,
+            String displayPathPrefix,
+            String pathspec) {
     }
 
     private String repoRelativePrefix(Path repoRoot, Path workspaceRoot) {
@@ -2012,12 +2039,30 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 if (!Files.isDirectory(repoRoot)) {
                     throw new PlatformException(ErrorCode.CONFLICT, "工作区仓库路径已存在且不是目录", Map.of("path", repoRoot.toString()));
                 }
-                String origin = gitWorkspaceService.originUrl(repoRoot);
-                String currentBranch = gitWorkspaceService.currentBranch(repoRoot);
-                if (!repository.matchesStoredOrigin(origin) || !branch.equals(currentBranch)) {
-                    throw new PlatformException(ErrorCode.CONFLICT, "已有目录不是目标代码库分支", Map.of("path", repoRoot.toString()));
+                if (isEmptyDirectory(repoRoot)) {
+                    deleteEmptyDirectory(repoRoot, "应用版本工作区空目录残留清理失败");
+                    Files.createDirectories(repoRoot.getParent());
+                    gitWorkspaceService.cloneBranch(effectiveGitUrl, branch, repoRoot, privateKey);
+                } else {
+                    if (!gitWorkspaceService.isGitRepository(repoRoot)) {
+                        throw new PlatformException(
+                                ErrorCode.CONFLICT,
+                                "已有工作区仓库路径不是 Git 仓库",
+                                Map.of("path", repoRoot.toString()));
+                    }
+                    if (isIncompleteApplicationClone(repoRoot)) {
+                        deleteDirectoryRecursively(repoRoot, "应用版本工作区 Git 克隆残留清理失败");
+                        Files.createDirectories(repoRoot.getParent());
+                        gitWorkspaceService.cloneBranch(effectiveGitUrl, branch, repoRoot, privateKey);
+                    } else {
+                        String origin = gitWorkspaceService.originUrl(repoRoot);
+                        String currentBranch = gitWorkspaceService.currentBranch(repoRoot);
+                        if (!repository.matchesStoredOrigin(origin) || !branch.equals(currentBranch)) {
+                            throw new PlatformException(ErrorCode.CONFLICT, "已有目录不是目标代码库分支", Map.of("path", repoRoot.toString()));
+                        }
+                        ensureInternalOrigin(repository, effectiveGitUrl, repoRoot, privateKey);
+                    }
                 }
-                ensureInternalOrigin(repository, effectiveGitUrl, repoRoot, privateKey);
             } else {
                 Files.createDirectories(repoRoot.getParent());
                 gitWorkspaceService.cloneBranch(effectiveGitUrl, branch, repoRoot, privateKey);
@@ -2037,6 +2082,42 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             throw exception;
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "创建应用版本工作区失败", Map.of("path", repoRoot.toString()), exception);
+        }
+    }
+
+    private boolean isIncompleteApplicationClone(Path repoRoot) {
+        if (!hasOnlyGitMetadata(repoRoot)) {
+            return false;
+        }
+        try {
+            String head = gitWorkspaceService.headCommit(repoRoot);
+            return head == null || head.isBlank();
+        } catch (PlatformException exception) {
+            return true;
+        }
+    }
+
+    private boolean hasOnlyGitMetadata(Path repoRoot) {
+        try (var stream = Files.list(repoRoot)) {
+            List<Path> children = stream.toList();
+            return !children.isEmpty()
+                    && children.stream().allMatch(path -> ".git".equals(path.getFileName().toString()));
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    private void deleteDirectoryRecursively(Path directory, String errorMessage) {
+        try (var stream = Files.walk(directory)) {
+            for (Path current : stream.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(current);
+            }
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    errorMessage,
+                    Map.of("path", directory.toString()),
+                    exception);
         }
     }
 

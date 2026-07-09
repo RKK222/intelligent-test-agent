@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 修复应用工作区 Git 根目录和默认个人 worktree 重建
+
+- Why:
+  - 应用版本工作区磁盘上只有模板子目录，没有仓库根 `.git`；删除历史 `appworkspace` / `personalworktree` 目录后，已有 default 个人工作区记录还会直接返回成功，导致 recent 指向不存在的 worktree。
+- What:
+  - 应用版本工作区创建/副本准备在仓库根目录已存在时先校验它是真实 Git 仓库，空目录才删除后重新 clone，只有 `.git` 且 HEAD 无效的 Git 超时残留会删除后重新 clone，非 Git 非空目录直接返回冲突；普通工作区 `git-diff/stage/unstage/discard` 通过 runtime workspace 反查应用版本副本或个人 worktree，在仓库根目录执行 Git 并把路径裁剪成当前模板目录相对路径；`ensure-default-personal-workspace` 只有确认物理目录是真实 Git worktree 且分支匹配时才复用，否则会重建规范 worktree 并刷新运行态记录。同步恢复 `workspace.delete` 仅删除普通文件的安全语义，前端文件树不再向目录显示删除入口。
+- How:
+  - 增加应用工作区非 Git 目录拒绝、Git 超时残留重拉、应用工作区 Git diff/stage 使用 repoRoot、已有 default 记录但物理 worktree 缺失时重建的回归测试；复用既有 `WorkspaceFileServiceTest` 作为目录删除安全回归，并新增 `DirectoryRows` 组件测试确认只允许文件删除；同步 `docs/api/http-api.md` 的工作区 Git 与默认个人工作区修复语义。
+- Result:
+  - `mvn -pl test-agent-workspace-management -am test` 通过；API 定向测试 `ManagedWorkspaceControllerTest` / 文件 WebSocket ticket / handler 通过；前端全量 `corepack pnpm typecheck` 通过，`corepack pnpm test` 为 439 passed / 1 skipped。后端全量 `mvn test` 到 `test-agent-persistence` 前均通过，persistence 仍命中既有 H2 `ON CONFLICT`、`usr_test_dev` fixture 外键和默认/loopback seed 断言问题，本次未修改这些无关路径。使用 `restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 重启本地服务后，已清空 `.testagent/agent-opencode/workspace/appworkspace` 和 `personalworktree` 历史子目录；登录 `usr_test_dev`，进入 F-COSS `20260618` default worktree，后端重新拉取应用仓库到 `appworkspace/20260618/coss/.git` 并创建 `personalworktree/20260618/usr_test_dev/coss/feature_testagent_20260618_usr_test_dev_default`，recent 与应用/个人 `git-diff` API 均可用。
+
 ### 2026-07-09 - 增加企业内一键升级脚本
 
 - Why:

@@ -109,6 +109,9 @@ function submitCreateDialog() {
 }
 
 function openDeleteDialog(entry: FileTreeEntry) {
+  if (entry.type !== "file") {
+    return;
+  }
   deleteDialogEntry.value = { path: entry.path, name: entry.name, type: entry.type };
   showDeleteDialog.value = true;
 }
@@ -175,6 +178,7 @@ function submitDeleteDialog() {
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
+          v-if="entry.type === 'file'"
           type="button"
           class="ta-file-tree-delete-btn"
           title="删除"
@@ -312,7 +316,7 @@ function submitDeleteDialog() {
         <section
           role="dialog"
           aria-modal="true"
-          :aria-label="`删除${deleteDialogEntry?.type === 'directory' ? '文件夹' : '文件'}`"
+          aria-label="删除文件"
           class="flex w-[min(360px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
         >
           <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
@@ -320,9 +324,9 @@ function submitDeleteDialog() {
           </header>
           <div class="flex flex-col gap-3">
             <p class="text-[12px] text-[var(--ta-text)]">
-              确定要删除 {{ deleteDialogEntry?.type === 'directory' ? '文件夹' : '文件' }}
+              确定要删除文件
               <strong class="text-[var(--ta-danger,#b91c1c)]">{{ deleteDialogEntry?.name }}</strong>
-              吗？{{ deleteDialogEntry?.type === 'directory' ? '此操作将删除文件夹及其所有内容，' : '' }}删除后无法恢复。
+              吗？删除后无法恢复。
             </p>
           </div>
           <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
