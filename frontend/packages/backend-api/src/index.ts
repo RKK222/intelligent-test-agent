@@ -1577,7 +1577,7 @@ function toQuestionRequest(value: Record<string, unknown>, fallbackSessionId: st
   const questions = Array.isArray(value.questions) ? value.questions : Array.isArray(value.items) ? value.items : [value];
   return {
     requestId,
-    sessionId: text(value.sessionId) ?? fallbackSessionId,
+    sessionId: text(value.sessionId) ?? text(value.sessionID) ?? fallbackSessionId,
     questions: questions
       .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
       .map((item, index) => ({
