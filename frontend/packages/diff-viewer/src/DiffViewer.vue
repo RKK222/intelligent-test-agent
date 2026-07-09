@@ -285,7 +285,7 @@ onBeforeUnmount(() => {
       <div v-if="source !== 'vcs' && source !== 'agent'" class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-700">{{ sourceTitle(source) }}</div>
       <div v-else class="min-w-0 flex-1 flex items-center gap-2">
         <span class="font-mono text-[12px] text-slate-600 truncate max-w-[200px] sm:max-w-[400px]" :title="selected?.path">
-          {{ selected?.path }}
+          {{ getFileName(selected?.path ?? "") }}
         </span>
         <span v-if="isDirty" class="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存的修改" />
         <Button 

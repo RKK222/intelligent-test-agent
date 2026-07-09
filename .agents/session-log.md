@@ -12,6 +12,17 @@
   - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+### 2026-07-09 - 优化文件比对头部路径展示
+
+- Why:
+  - 文件比对 (Diff Viewer) 上方默认直接以 font-mono 格式展示了长长完整的文件路径，在页面布局有限或深层嵌套结构中占据了太多空间且不够美观。用户期望这里仅展示纯文件名，同时在鼠标悬停时才以气泡形式显示完整路径。
+- What:
+  - 在 `DiffViewer.vue` 头部的文件路径显示区域（`source === 'vcs' || source === 'agent'` 状态下的 span），将直接渲染 `selected?.path` 修改为调用 `getFileName(selected?.path ?? "")` 以仅显示文件名。
+- How:
+  - 修改 `packages/diff-viewer/src/DiffViewer.vue`，保留原有的 `:title="selected?.path"` 实现悬停气泡提示，只将标签文本内容更改为 `getFileName(...)`。
+- Result:
+  - 文件比对头部文字已成功精简为仅展示当前选中文件名，且悬浮时能够即时气泡显示包含文件名的完整路径；前端全量单元测试通过。
+
 ### 2026-07-09 - 优化工作空间搜索结果展示
 
 - Why:
