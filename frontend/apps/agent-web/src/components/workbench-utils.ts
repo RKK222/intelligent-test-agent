@@ -465,19 +465,6 @@ export function errorFeedback(title: string, error: unknown, fallbackContext: Re
   return { kind: "error", title, description: error instanceof Error ? error.message : "未知错误" };
 }
 
-export function isStaleRuntimeRequest(error: unknown): error is BackendApiError {
-  return error instanceof BackendApiError && error.code === "CONFLICT" && error.details.reason === "STALE_RUNTIME_REQUEST";
-}
-
-export function staleRuntimeRequestFeedback(title: string, error: BackendApiError): Feedback {
-  return {
-    kind: "info",
-    title,
-    description: error.message,
-    traceId: error.traceId
-  };
-}
-
 function formatLoadingContext(details: Record<string, unknown>, fallbackContext: Record<string, unknown>): string {
   const merged = { ...fallbackContext, ...details };
   const hasContext = ["appId", "appName", "version", "versionId", "workspaceKind", "workspaceName", "workspaceId", "personalWorkspaceId"]
@@ -534,6 +521,30 @@ export function historyItems(run: Run | null, sessions: Session[], runtimeStates
       attentionAt: runtimeState?.attentionAt ?? undefined
     };
   });
+}
+
+/**
+ * 历史按钮 badge 只表达历史第一页内的后台未完成数量；加载更多后的运行态仍由 historyItems 单独展示。
+ */
+export function historyRuntimeBadgeCounts(
+  sessions: Session[],
+  runtimeStatesBySessionId: Record<string, SessionRuntimeState> = {},
+  limit: number
+) {
+  const limitedSessions = sessions.slice(0, Math.max(0, limit));
+  let runningCount = 0;
+  let questionCount = 0;
+  for (const session of limitedSessions) {
+    const runtimeState = runtimeStatesBySessionId[session.sessionId];
+    if (!runtimeState) {
+      continue;
+    }
+    runningCount += 1;
+    if (runtimeState.attention === "QUESTION") {
+      questionCount += 1;
+    }
+  }
+  return { runningCount, questionCount };
 }
 
 export function dedupeSessionMessages(messages: SessionMessage[]): SessionMessage[] {

@@ -954,20 +954,6 @@ describe("agent-chat runtime reducer", () => {
 
     expect(replied.permissions).toHaveLength(0);
     expect(replied.questions).toHaveLength(1);
-
-    const localPermissionReply = reduceAgentChatRuntime(asked, {
-      type: "permission.replied",
-      requestId: "permission.asked-1"
-    });
-    const localQuestionReply = reduceAgentChatRuntime(asked, {
-      type: "question.replied",
-      requestId: "question.asked-1"
-    });
-
-    expect(localPermissionReply.permissions).toHaveLength(0);
-    expect(localPermissionReply.questions).toHaveLength(1);
-    expect(localQuestionReply.permissions).toHaveLength(1);
-    expect(localQuestionReply.questions).toHaveLength(0);
   });
 
   it("normalizes opencode question.asked options into single-choice questions", () => {

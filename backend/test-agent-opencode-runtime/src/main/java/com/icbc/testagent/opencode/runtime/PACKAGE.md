@@ -22,7 +22,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunEventPersistencePolicy`：区分 durable RunEvent 与 transient live output，并清洗 tool 大字段。
 - `run.RunMessageRecoveryService`：SSE 建连时从 agent projected messages 生成 transient message snapshot；存在 Run scope 时按 root + child session 恢复当前 Run 子树。
 - `run.RunSessionMessageSnapshotService`：Run 终态/取消后持久化 assistant 快照、parts、token/cost，并支持消息列表刷新 fallback。
-- `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射；question reply/reject 支持 `remoteSessionId` 覆盖远端会话段，用于 task 子会话 ask。
+- `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射。
 - `process.*`：当前用户 opencode 进程分配、公共状态查询、公共启动/停止健康确认、通用参数 session/config 路径读取、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。
 - `terminal.*`：PTY ticket、限流、WebSocket 背后的业务状态和本地进程适配。
 
@@ -45,7 +45,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime`。
 - `run.*` 测试必须覆盖 Run 创建、通用 agent binding 保存/复用、远端 session 懒创建/复用、事件持久化策略、终态快照/token 回写、active-run、Diff fallback、消息恢复、Redis 输出活跃/待处理 ask 状态和 stale active Run 收敛任务。
 - `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新、消息追加默认 role 和消息列表数据库 fallback。
-- `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤、question child remote session override 和 permission/question body 兼容。
+- `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤和 permission/question body 兼容。
 - `process.*` 测试必须覆盖用户进程分配、公共状态查询、公共启动/停止健康确认、通用参数路径读取、manager 控制面命令路由、后端心跳注册和运行管理快照聚合。
 - `terminal.*` 测试必须覆盖 ticket 签发/消费/过期、active session 互斥、输入输出限流、WebSocket envelope 和进程适配。
 

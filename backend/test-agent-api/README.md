@@ -15,7 +15,7 @@
 - 暴露配置管理接口，Controller 只委托 configuration-management 业务服务；应用与工作区接口统一校验 `APP_ADMIN`，`SUPER_ADMIN` 继承该能力。版本库类型下拉、部署模式选项接口、新增代码库的 `repositoryType/deploymentMode` DTO、应用版本库远端树接口和工作空间创建 `directoryNew` DTO 仅做协议转换，旧 `standard` 兼容派生、内部模式 SSH 前缀、远端树过滤和别名唯一校验由业务服务处理。设置页保存应用工作空间接口会读取当前用户 READY opencode 进程的 Linux 服务器并委托 workspace-management 创建初始版本工作区，进度通过 `workspace-create-operations/{operationId}` HTTP 轮询查询；分支和远端树加载接口不触发 clone。
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO。
-- runtime Controller 只读取可选认证主体并传入 `test-agent-opencode-runtime`，有用户主体时由业务层使用用户专属 opencode 进程，无用户主体时保持 static-token 兼容 fallback；question reply/reject 的可选 `remoteSessionId` 只作为请求体透传给业务层，API 层不解析或自行路由 opencode session。
+- runtime Controller 只读取可选认证主体并传入 `test-agent-opencode-runtime`，有用户主体时由业务层使用用户专属 opencode 进程，无用户主体时保持 static-token 兼容 fallback。
 - 当前用户 opencode 进程接口包含 `/processes/me` 强状态查询、`/processes/me/health` 弱健康检查、初始化和初始化进度查询。弱健康检查只做协议适配，业务逻辑委托 `OpencodeProcessStatusQueryService.weakHealth`，跨 Java 路由由专用过滤器按 query 中的 `linuxServerId` 和 Redis 后端快照处理，不读取用户 binding 数据库；初始化接口支持可选 `operationId` 请求体，`initialize-operations/{operationId}` 只读查询不触发 manager health/start 或 RunEvent。
 - RunEvent SSE 建连时先委托 runtime 按 Run scope 恢复 opencode projected messages，再进入 durable replay 与 live bus 合流；HTTP `GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 返回同一当前 Run 子树 snapshot 并合并当前 Run durable 状态事件，`GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 返回 root 下跨 Run 已发现的历史子树并按 root session 合并 durable 状态事件，旧 `/api/runs/...` 与 `/api/sessions/...` 已作废。
 - 暴露 Workspace/Agent 配置文件 WebSocket 路由、ticket 和 WebSocket RPC 入口：Controller/Handler 只做鉴权、`SUPER_ADMIN` 校验、ticket、Origin、traceId、协议 envelope 和统一错误包装，文件系统操作继续委托 `test-agent-workspace-management`。Workspace 路由优先使用用户进程服务器归属；ticket 签发在轻量归属未 READY 时会复查当前用户 opencode 强状态，避免文件树与右侧进程状态卡展示不一致，仍不触发 start 命令；Agent 配置文件路由按 scope/workspace/worktree 的服务器归属定位目标后端，不新增跨服务器 HTTP 文件代理；Run、初始化和用户进程状态接口仍由 runtime 执行强健康检查。
@@ -64,7 +64,7 @@
 - `UserOpencodeBackendRoutingWebFilterTest` 覆盖用户 opencode 进程请求按已有 binding 所属服务器转发、内部路由头防循环、只读状态 GET 在目标后端不可用时返回 binding-only 分配状态，以及初始化、Run、配置工作区创建、应用版本工作区创建和版本 `git pull` 等需要用户 opencode 服务器的入口。
 - `UserOpencodeWeakHealthRoutingWebFilterTest` 覆盖 `/processes/me/health` 按 query `linuxServerId` 随机转发到目标服务器在线 Java、目标后端缺失返回 `healthy=false`、路由头防循环和本服务器请求放行。
 - `BackendHttpForwarderTest` 覆盖 Java->Java HTTP 转发对 Authorization、`X-Trace-Id`、query、body、content-type 和 `X-Test-Agent-Backend-Routed` 的统一透传。
-- `PlatformOpencodeRuntimeControllerTest` 覆盖 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission/question reply、session share、traceId 和可选用户主体透传。
+- `PlatformOpencodeRuntimeControllerTest` 覆盖 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission reply、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/{agentId}/...` 原始 opencode 路径兼容、agentId、traceId 和可选用户主体透传。
 - `AuthWebSupportTest` 覆盖可选认证主体读取，确保 static-token 兼容入口不会因缺少用户主体抛错。
 - `TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖 PTY ticket、内部平台 WebSocket URL、origin 拒绝、单会话互斥、输入限流、关闭和超时。

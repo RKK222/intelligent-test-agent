@@ -2,123 +2,27 @@
 
 ## Entries
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-### 2026-07-09 - 修复公共配置未初始化时 listPublicGitConflicts 报错
+### 2026-07-09 - 修复应用工作区 Git 根目录和默认个人 worktree 重建
 
 - Why:
-  - 公共配置仓库未初始化（UNINITIALIZED）时，`listPublicGitConflicts` API 直接调用 Git 命令导致 "Git 远端读取失败" 错误。
+  - 应用版本工作区磁盘上只有模板子目录，没有仓库根 `.git`；删除历史 `appworkspace` / `personalworktree` 目录后，已有 default 个人工作区记录还会直接返回成功，导致 recent 指向不存在的 worktree。
 - What:
-  - 在 `AgentConfigApplicationService.publicGitConflictFiles()` 方法中增加仓库存在性检查，未初始化时返回空列表。
+  - 应用版本工作区创建/副本准备在仓库根目录已存在时先校验它是真实 Git 仓库，空目录才删除后重新 clone，只有 `.git` 且 HEAD 无效的 Git 超时残留会删除后重新 clone，非 Git 非空目录直接返回冲突；普通工作区 `git-diff/stage/unstage/discard` 通过 runtime workspace 反查应用版本副本或个人 worktree，在仓库根目录执行 Git 并把路径裁剪成当前模板目录相对路径；`ensure-default-personal-workspace` 只有确认物理目录是真实 Git worktree 且分支匹配时才复用，否则会重建规范 worktree 并刷新运行态记录。同步恢复 `workspace.delete` 仅删除普通文件的安全语义，前端文件树不再向目录显示删除入口。
 - How:
-  - 修改 `publicGitConflictFiles()` 方法，先调用 `gitWorkspaceService.isGitRepository()` 检查仓库是否存在。
+  - 增加应用工作区非 Git 目录拒绝、Git 超时残留重拉、应用工作区 Git diff/stage 使用 repoRoot、已有 default 记录但物理 worktree 缺失时重建的回归测试；复用既有 `WorkspaceFileServiceTest` 作为目录删除安全回归，并新增 `DirectoryRows` 组件测试确认只允许文件删除；同步 `docs/api/http-api.md` 的工作区 Git 与默认个人工作区修复语义。
 - Result:
-  - 公共配置未初始化时，该 API 正常返回空列表而非报错；后端重启后运行正常。
+  - `mvn -pl test-agent-workspace-management -am test` 通过；API 定向测试 `ManagedWorkspaceControllerTest` / 文件 WebSocket ticket / handler 通过；前端全量 `corepack pnpm typecheck` 通过，`corepack pnpm test` 为 439 passed / 1 skipped。后端全量 `mvn test` 到 `test-agent-persistence` 前均通过，persistence 仍命中既有 H2 `ON CONFLICT`、`usr_test_dev` fixture 外键和默认/loopback seed 断言问题，本次未修改这些无关路径。使用 `restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 重启本地服务后，已清空 `.testagent/agent-opencode/workspace/appworkspace` 和 `personalworktree` 历史子目录；登录 `usr_test_dev`，进入 F-COSS `20260618` default worktree，后端重新拉取应用仓库到 `appworkspace/20260618/coss/.git` 并创建 `personalworktree/20260618/usr_test_dev/coss/feature_testagent_20260618_usr_test_dev_default`，recent 与应用/个人 `git-diff` API 均可用。
 
-### 2026-07-09 - 修复 user_ssh_keys 表 Base64 数据损坏导致的切换工作区失败
+### 2026-07-09 - 增加企业内一键升级脚本
 
 - Why:
-  - 用户切换应用版本时报错 "Last unit does not have enough valid bits"，后端堆栈显示 Base64 解码失败。
+  - 企业内部署升级需要把构建包传到 `122.233.30.4:/data/0709` 后自动完成解压、前端 `scp`、Nginx reload、Java jar 替换、worker 镜像导入和重启，避免现场反复手工执行分散命令。
 - What:
-  - 删除 `user_ssh_keys` 表中两条 `encrypted_aes_key` 字段长度为 343（应为 344）的损坏记录。
+  - 新增 `deploy/internal/deploy-internal-release.sh`，默认读取 `/data/0709/internal.zip`，适配当前 `122.233.30.2` 前端、`122.233.30.4` 后端/worker 和 `/data/testagent` 目录；`package-release.sh` 全量打包时额外生成 `test-agent-internal-release.zip`，并保留 `--no-zip`。
 - How:
-  - 执行 `DELETE FROM user_ssh_keys WHERE id IN (3, 10)` 清理脏数据。
+  - 部署脚本先校验 zip 内 `dist` 产物和 `deploy/internal`，再按“前端更新并 reload Nginx -> 替换后端 jar/程序/worker 镜像 -> 启动 Java 并校验 `.serverid/.serverhost` -> 重启 worker 等待 `manager config update applied`”执行；`--validate-only` 可只检查 zip 结构不触发远程操作。
 - Result:
-  - 验证无残留损坏数据；用户 `usr_test_dev` 和 `usr_test_superadmin20` 需重新配置 SSH 密钥。
-=======
-=======
-### 2026-07-09 - 公共 Agent Git 单参数支持内外网
-
-- Why:
-  - 公共 Agent Git 地址需要和应用版本库一样按部署模式解释，但不能新增 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL`；同一个 `OPENCODE_PUBLIC_AGENT_GIT_URL` 在外部部署保存完整 URL，在内部部署保存 `host[:port]/path` 片段。通用参数编辑弹窗也需要接近版本库新增弹窗的横向表单样式。
-- What:
-  - 回退新增内部参数的运行时消费；原样保留已执行过的 `V20260709110000` 以兼容 Flyway 历史，再追加清理 migration 删除旧内部参数行并恢复单一参数中文名。公共配置状态、初始化、拉取、发布、worktree 和跨 Java 本地仓库状态查询继续传当前用户；后端按单参数保存值形态判断是否拼接 `ssh://{unifiedAuthId}@...`，origin 匹配复用同一内部片段判断；通用参数修改弹窗改为 `el-form label-width=120px` 横向布局并可选择外部/内部模式，外部模式不再显示额外填写说明。
-- How:
-  - 在远端 `origin/main` 基线上完成 rebase 冲突处理，复用 `CodeRepositoryDeploymentMode` 语义，只调整公共 Agent 配置 Git 解释逻辑、通用参数页面提示、测试和文档；通用参数页复用 `repository-deployment-options` 展示当前内部/外部部署模式，不新增第二个参数。
-- Result:
-  - 定向后端/前端测试和 agent-web typecheck 通过；`.env.test` 重启链路完成，后端 health/readiness、前端、CORS 和 manager 日志检查通过。当前开发库中 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL` 已被 cleanup migration 删除，只剩 `OPENCODE_PUBLIC_AGENT_GIT_URL` 一行。
-### 2026-07-09 - 修复子会话 ask 回复误判过期
-
-- Why:
-  - task 子会话触发的 `question.asked` 带有子会话远端 sessionId，前端回复时只按平台根 session 调用后端，后端再用根远端 session 代理 opencode question reply，导致远端找不到 requestId 并返回 404，前端显示“提问请求已失效，请重新运行任务”。
-- What:
-  - 前端 ask 回复/拒绝事件透传 `question.asked.sessionId`，`backend-api` 在 reply/reject 请求体支持可选 `remoteSessionId`；后端 platform/agent runtime question reject 接口接受可选 body，runtime service 只在 opencode question path 中使用该远端会话覆盖值，平台 session 仍用于定位用户进程和 workspace。
-- How:
-  - 保留原平台 session 绑定与过期请求冲突映射；对 v2 permission/question 的远端 sessionId 使用单路径片段 URL 编码，避免包含斜杠时被远端路由拆段；同步 HTTP API、Event Stream、前后端 README/PACKAGE 说明和回归测试。
-- Result:
-  - 后端新增子会话 ask reply/reject 与路径编码单测，前端新增 FigmaChatPanel/backend-api/workbench 覆盖；受影响模块编译、Vitest、类型检查和 Controller 测试通过。Playwright 单条 workbench 用例仍在既有文件上传 input 等待处超时，本次未改该问题。
-
-### 2026-07-09 - 将历史对话及顶部栏的加载动画替换为 Spinner 组件
-
-- Why:
-  - 为了统一前端加载动效并美化 UI，需要将对话历史相关的旋转圈圈（Loader2）替换为项目中已实现的点阵呼吸加载动画 Spinner 组件。
-- What:
-  - 1. 在 `FigmaChatPanel.vue` 中引入 `@test-agent/ui-kit` 中的 `Spinner` 组件。
-  - 2. 替换顶部栏 "历史" 按钮在后台任务运行中时的 Loader2 旋转图标为 `Spinner`，并限制宽高为 15px 保持一致。
-  - 3. 替换历史记录列表内状态为 `running` 会话卡片的 Loader2 旋转图标为 `Spinner`，限制宽高为 15px。
-  - 4. 替换对话滚动区域历史消息加载状态（historyLoading）中的 Loader2 为 `Spinner`。
-- How:
-  - 通过 Vue 模板替换，为 Spinner 组件指定局部尺寸样式并保留原有的配色 class，同时移除旋转类。
-- Result:
-  - 前端 Lint 检查、Vite 构建与 434 项 Vitest 单元测试全部顺利通过。
-
-### 2026-07-09 - 修复定时任务管理页查询 500
-
-- Why:
-  - 定时任务管理页显示 `INTERNAL_ERROR`；后端日志定位为 `SchedulerManagementController.tasks` 组装任务列表时查询 active run 失败，PostgreSQL 报 `could not determine data type of parameter $2`。
-- What:
-  - 修复 `JdbcScheduledTaskRepository.findActiveRunByTaskKey` 中 `excludedTaskRunId=null` 的参数绑定，显式按 `VARCHAR` 传入，避免 PostgreSQL 在 `:excludedTaskRunId is null` 表达式中无法推断类型。
-- How:
-  - 不新增或修改 SQL 文本，只把存量 JDBC 白名单仓储的 null 参数改为 typed binding；新增单测锁定该行为，防止管理页查询任务列表再次触发 500。
-- Result:
-  - 目标单测先复现未 typed null 绑定的失败，再通过；修复部署后需重启后端才能让当前管理页接口使用新代码。
-
->>>>>>> da576164d50892b0c088aef99efbf04f9c0381f9
-### 2026-07-09 - 优化多选题勾选框样式并支持自定义答案输入自动选中
-
-- Why:
-  - 1. 用户要求在 ask 提问卡片展示中，多选题的选项标志应为方形勾选框（Checkbox），而非圆形单选框（Radio）。
-  - 2. 当用户在“输入自己的答案”文本输入框中输入内容时，需要自动将该自定义答案卡片状态设为选中（Checked）。
-- What:
-  - 1. 在 FigmaChatPanel.vue 的多选题选项容器上附加 `is-multiple` 类名，并在 CSS 中为该类下的 `.figma-chat-question-option-mark` 设定 3px 圆角的方形外观和白色对勾动画/伪元素样式。
-  - 2. 新增 `isCustomAnswerSelected` 辅助方法判断自定义答案是否包含有效输入；如果包含，则自动为 `.figma-chat-question-custom-card` 卡片赋予 `.is-selected` 选中态类名和选中样式。
-- How:
-  - 在 FigmaChatPanel.vue 中通过 Vue 模板属性动态绑定 `is-multiple` 及自定义卡片的 `is-selected`，并定义相应的 CSS 样式覆写。
-- Result:
-  - 静态类型检查 `npm run lint` 通过，0 类型或构建错误。
-
-### 2026-07-09 - 修复 scheduler 关闭时任务定义不展示
-
-- Why:
-  - 定时任务管理页没有显示新增的 `opencode-runtime.stale-active-run-reconcile` 任务；根因是 `test-agent.scheduler.enabled=false` 时 `ScheduledTaskRunner.start()` 直接返回，连 `ScheduledTaskHandler` 代码注册任务同步也被跳过，`scheduled_tasks` 表没有任务定义。
-- What:
-  - 调整 `ScheduledTaskRunner` 启动流程：应用启动时始终先同步代码注册任务，`scheduler.enabled=false` 只关闭后台扫描线程和 pending run 执行；补充 runner 单测覆盖禁用 scheduler 时仍同步任务定义。
-- How:
-  - 将 `ScheduledTaskRegistry.syncRegisteredTasks()` 移到 enabled 判断之前；同步更新 scheduler README、包说明和部署文档，明确管理页展示与后台扫描开关的边界。
-- Result:
-  - 定向测试覆盖了禁用 scheduler 仍能注册任务且 runner 不进入 running 状态；当前运行中的后端需重启后才会执行启动同步并在管理页显示新增任务。
-
-### 2026-07-09 - 增加 stale active Run 收敛任务
-
-- Why:
-  - 历史会话中几天前的 Run 仍显示 `PENDING/RUNNING/CANCELLING`，实际点击后没有输出；需要后台修复平台 Run 状态，同时不能误杀仍有输出或停在用户待处理 ask 的会话。
-- What:
-  - `test-agent-opencode-runtime` 新增 `StaleActiveRunReconcileTaskHandler` 和 `StaleActiveRunReconcileService`，复用 `test-agent-scheduler` 每 5 分钟扫描超过 2 小时的 active Run；新增 `RunActivityStateStore` 在 Redis 记录 30 分钟输出活跃和未处理 ask 状态。pending ask 只从实时 RunEvent 写 Redis，当前覆盖 `permission.asked` 和 `question.asked`，不通过数据库 RunEvent 反查。
-- How:
-  - `RunApplicationService` 在用户可见输出事件刷新 `test-agent:run-output-activity:{runId}`，在 ask/reply/reject/terminal 事件维护 `test-agent:run-pending-ask:{runId}`；收敛任务先查 Redis，Redis 异常保守跳过，无近期输出且无 pending ask 时用 `RunRepository.saveIfStatus` CAS 标记 `FAILED` 并追加固定消息的 `run.failed`。关系型候选查询通过 MyBatis XML `findStaleActiveRuns` 实现，无 Flyway 变更。
-- Result:
-  - 目标测试 `StaleActiveRunReconcileServiceTest`、`StaleActiveRunReconcileTaskHandlerTest`、`RunApplicationServiceTest`、`MyBatisRunRepositoryIntegrationTest` 通过，`mvn -pl test-agent-app -am -DskipTests package` 通过。计划中的全量 `mvn -pl test-agent-opencode-runtime,test-agent-persistence,test-agent-scheduler,test-agent-event -am test` 仍被既有 persistence H2/JDBC/fixture 用例阻断；`mvn -pl test-agent-app -am test` 仍被既有 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 阻断，本次未修改这些无关问题。
-
-### 2026-07-09 - 修复 Permission/Question 过期回复语义
-
-- Why:
-  - 现场 permission/question 点击回复时后端仍代理旧 opencode `/permission|question` 路径，当前 opencode v2 要求携带远端 session id；同时远端 pending request 过期后的 404 被包装成 `OPENCODE_BAD_GATEWAY`，前端不会清理卡片。
-- What:
-  - `OpencodeRuntimeApplicationService` 改为代理 `/api/session/{remoteSessionId}/permission|question`，保留平台请求体兼容；仅在 permission/question 回复或拒绝链路把 opencode 404 转为 `CONFLICT`，`details.reason=STALE_RUNTIME_REQUEST`。前端识别该错误后派发本地 replied action 清理卡片并展示可理解反馈。
-- How:
-  - 补充 runtime service 单测覆盖 v2 path、permission/question reply 和 question reject 的 stale 404 映射；补充前端 helper/reducer 单测覆盖 stale 判断和本地卡片移除；同步 HTTP API 与 runtime README。
-- Result:
-  - 指定 runtime/API Controller 测试、前端 vitest/typecheck 和 `backend mvn clean package -DskipTests` 均通过；未修改 generated SDK、数据库、环境配置或 opencode 进程启停/状态公共程序。
+  - `bash -n deploy/internal/deploy-internal-release.sh deploy/internal/package-release.sh`、两个脚本 `--help`、临时 zip 的 `deploy-internal-release.sh --validate-only` 和 `git diff --check` 通过；未真实连接 122 服务器、未重启 systemd/Nginx/Docker。
 
 ### 2026-07-08 - 增加后台运行会话历史状态提醒
 
@@ -285,8 +189,6 @@
   - 仅限于前端 CSS 与 HTML 模板小范围调整，不涉及任何接口 API、后端逻辑或数据库。
 - Result:
   - `tools/dev-frontend-check.sh` 顺利通过，Vite 重新构建成功，Lint & Typecheck 均为 0 错误。主应用 Vitest 运行无新增回归失败，既有的 3 项 Vitest 测试失败为历史已知 baseline 问题，与本次样式改动无关。
->>>>>>> 6374d06b440452c750aab9ee15a129471eea74cd
-
 ### 2026-07-08 - 企业内 worker 部署改为纯 Docker
 
 - Why:

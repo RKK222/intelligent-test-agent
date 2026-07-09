@@ -85,8 +85,8 @@ const emit = defineEmits<{
   retry: [];
   cancel: [];
   replyPermission: [requestId: string, decision: "once" | "always" | "reject"];
-  replyQuestion: [requestId: string, answers: unknown[], remoteSessionId?: string];
-  rejectQuestion: [requestId: string, remoteSessionId?: string];
+  replyQuestion: [requestId: string, answers: unknown[]];
+  rejectQuestion: [requestId: string];
   agentChange: [agentId: string];
   providerChange: [providerId: string];
   modelChange: [modelId: string];
@@ -160,8 +160,8 @@ function onHistorySearchInput(value: string) {
         :permissions="permissions"
         :questions="questions"
         @reply-permission="(id, decision) => emit('replyPermission', id, decision)"
-        @reply-question="(id, answers, remoteSessionId) => emit('replyQuestion', id, answers, remoteSessionId)"
-        @reject-question="(id, remoteSessionId) => emit('rejectQuestion', id, remoteSessionId)"
+        @reply-question="(id, answers) => emit('replyQuestion', id, answers)"
+        @reject-question="(id) => emit('rejectQuestion', id)"
       />
       <section aria-label="Agent 对话线程" class="ta-agent-thread-shell">
         <AssistantThread

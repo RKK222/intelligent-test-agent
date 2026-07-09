@@ -105,6 +105,56 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void createVersionRejectsExistingApplicationRepoDirectoryWithoutGitMetadata() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.strictGitRepositoryDetection = true;
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        Files.createDirectories(applicationRepoRoot().resolve("F-GCMS/workspace"));
+
+        assertThatThrownBy(() -> service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_existing_plain_dir"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("不是 Git 仓库");
+                });
+    }
+
+    @Test
+    void createVersionReclonesIncompleteApplicationRepoLeftByTimedOutClone() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.strictGitRepositoryDetection = true;
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        Path repoRoot = applicationRepoRoot();
+        Files.createDirectories(repoRoot.resolve(".git"));
+        git.gitRoots.add(repoRoot);
+        git.invalidHeadCommitRoots.add(repoRoot);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse response = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_incomplete_clone");
+
+        assertThat(response.runtimeWorkspace().rootPath()).endsWith("appworkspace/20260707/gcms/F-GCMS/workspace");
+        assertThat(git.clonedBranch).isEqualTo("feature_testagent_20260707");
+        assertThat(Files.isDirectory(repoRoot.resolve("F-GCMS/workspace"))).isTrue();
+        assertThat(git.invalidHeadCommitRoots).doesNotContain(repoRoot);
+    }
+
+    @Test
     void workspaceCreateForTestRepositoryRequiresDirectChildOfApplicationRoot() {
         ManagedWorkspaceApplicationService service = service(
                 new FakeConfigurationRepository(true),
@@ -587,6 +637,41 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void ensureDefaultPersonalWorkspaceRecreatesMissingRecordedWorktree() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+        Path repoRoot = root.resolve("personalworktree/20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default");
+        deleteRecursively(repoRoot);
+        git.reusedWorktreeBranch = null;
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse repaired = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_repair_missing");
+
+        assertThat(repaired.personalWorkspaceId()).isEqualTo(personal.personalWorkspaceId());
+        assertThat(git.reusedWorktreeBranch).isEqualTo("feature_testagent_20260707_usr_1_default");
+        assertThat(Files.isDirectory(repoRoot.resolve("F-GCMS/workspace"))).isTrue();
+        assertThat(repaired.runtimeWorkspace().rootPath().replace('\\', '/'))
+                .contains("/personalworktree/20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace");
+    }
+
+    @Test
     void ensureDefaultPersonalWorkspaceReusesExistingValidWorktreeEvenWhenPathDiffersFromConfiguredRoot() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -889,6 +974,38 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void applicationWorkspaceGitDiffUsesRepoRootAndWorkspaceRelativePath() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        git.nextStatusPorcelain = " M F-GCMS/workspace/docs/app.md\n";
+        git.diffByFile.put(
+                "F-GCMS/workspace/docs/app.md",
+                "diff --git a/F-GCMS/workspace/docs/app.md b/F-GCMS/workspace/docs/app.md\n@@ -1 +1 @@\n-old\n+new\n");
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                version.runtimeWorkspace().workspaceId(),
+                new UserId("usr_1"));
+
+        assertThat(git.statusRepoRoot).isEqualTo(applicationRepoRoot());
+        assertThat(git.statusPathspec).isEqualTo("F-GCMS/workspace");
+        assertThat(diff.files()).singleElement().satisfies(file -> {
+            assertThat(file.path()).isEqualTo("docs/app.md");
+            assertThat(file.patch()).contains("+new");
+        });
+    }
+
+    @Test
     void discardWorkspaceGitFilesRestoresTrackedAndCleansNewFiles() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -919,6 +1036,31 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.cleanedFiles).containsExactly(
                 "F-GCMS/workspace/需求/staged-new.md",
                 "F-GCMS/workspace/需求/new.md");
+    }
+
+    @Test
+    void applicationWorkspaceGitStageUsesRepoRootAndWorkspaceRelativePath() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        git.nextStatusPorcelain = " M F-GCMS/workspace/docs/app.md\n";
+
+        service.stageWorkspaceGitFiles(
+                version.runtimeWorkspace().workspaceId(),
+                List.of("docs/app.md"),
+                new UserId("usr_1"));
+
+        assertThat(git.stagedFilesRepoRoot).isEqualTo(applicationRepoRoot());
+        assertThat(git.stagedFiles).containsExactly("F-GCMS/workspace/docs/app.md");
     }
 
     @Test
@@ -1557,6 +1699,17 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.pushes).isEmpty();
     }
 
+    private static void deleteRecursively(Path path) throws Exception {
+        if (!Files.exists(path)) {
+            return;
+        }
+        try (var stream = Files.walk(path)) {
+            for (Path current : stream.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(current);
+            }
+        }
+    }
+
     private ManagedWorkspaceApplicationService service(
             FakeConfigurationRepository configuration,
             FakeManagedWorkspaceRepository managed,
@@ -1706,10 +1859,14 @@ class ManagedWorkspaceApplicationServiceTest {
         private List<String> unstagedFiles = List.of();
         private List<String> cleanedFiles = List.of();
         private String currentBranchValue;
+        private boolean strictGitRepositoryDetection;
+        private final Set<Path> gitRoots = new java.util.LinkedHashSet<>();
         // 个人 worktree 推送（合并回应用版本特性分支）链路记录
         private Path stagedRepoRoot;
         private Path stagedFilesRepoRoot;
         private List<String> stagedFiles = List.of();
+        private Path statusRepoRoot;
+        private String statusPathspec;
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
         private Path fetchedRepoRoot;
@@ -1728,6 +1885,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private String clonedGitUrl;
         private String originUrlValue = "https://example.com/gcms.git";
         private final List<OriginUpdate> originUpdates = new ArrayList<>();
+        private final Set<Path> invalidHeadCommitRoots = new java.util.LinkedHashSet<>();
 
         private FakeGitWorkspaceService(String directoryPath) {
             this.directoryPath = directoryPath;
@@ -1739,7 +1897,11 @@ class ManagedWorkspaceApplicationServiceTest {
             this.clonedGitUrl = gitUrl;
             this.clonedBranch = branch;
             try {
+                Files.createDirectories(repoRoot.resolve(".git"));
                 Files.createDirectories(repoRoot.resolve(directoryPath));
+                Path normalized = repoRoot.toAbsolutePath().normalize();
+                gitRoots.add(normalized);
+                invalidHeadCommitRoots.remove(normalized);
             } catch (Exception exception) {
                 throw new RuntimeException(exception);
             }
@@ -1767,11 +1929,17 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public boolean isGitRepository(Path repoRoot) {
+            if (strictGitRepositoryDetection) {
+                return gitRoots.contains(repoRoot.toAbsolutePath().normalize());
+            }
             return Files.isDirectory(repoRoot);
         }
 
         @Override
         public String currentBranch(Path repoRoot) {
+            if (strictGitRepositoryDetection && !isGitRepository(repoRoot)) {
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "not a git repository", Map.of("path", repoRoot.toString()));
+            }
             if (currentBranchValue != null) {
                 return currentBranchValue;
             }
@@ -1783,6 +1951,9 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public String originUrl(Path repoRoot) {
+            if (strictGitRepositoryDetection && !isGitRepository(repoRoot)) {
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "not a git repository", Map.of("path", repoRoot.toString()));
+            }
             return originUrlValue;
         }
 
@@ -1810,6 +1981,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private void createWorktreeDirectory(Path worktreeRoot) {
             try {
                 Files.createDirectories(worktreeRoot.resolve(worktreeDirectoryPath));
+                gitRoots.add(worktreeRoot.toAbsolutePath().normalize());
             } catch (Exception exception) {
                 throw new RuntimeException(exception);
             }
@@ -1819,6 +1991,9 @@ class ManagedWorkspaceApplicationServiceTest {
         public String headCommit(Path repoRoot) {
             calls.add("head:" + repoRoot);
             this.headCommitRepoRoot = repoRoot;
+            if (invalidHeadCommitRoots.contains(repoRoot.toAbsolutePath().normalize())) {
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "HEAD 不存在", Map.of("path", repoRoot.toString()));
+            }
             return nextHeadCommit;
         }
 
@@ -1938,6 +2113,15 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public String statusPorcelain(Path repoRoot) {
+            this.statusRepoRoot = repoRoot;
+            this.statusPathspec = null;
+            return nextStatusPorcelain;
+        }
+
+        @Override
+        public String statusPorcelain(Path repoRoot, String pathspec) {
+            this.statusRepoRoot = repoRoot;
+            this.statusPathspec = pathspec;
             return nextStatusPorcelain;
         }
 

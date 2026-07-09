@@ -3,8 +3,6 @@ package com.icbc.testagent.opencode.runtime.runtime;
 import com.icbc.testagent.agent.runtime.AgentRuntimeCommand;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.icbc.testagent.agent.runtime.AgentRuntimeResult;
-import com.icbc.testagent.common.error.ErrorCode;
-import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.session.SessionRepository;
@@ -461,7 +459,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object listPermissions(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, sessionV2Path(location, "permission"), Map.of(), traceId);
+        return get(location, "/permission", Map.of(), traceId);
     }
 
     /**
@@ -469,15 +467,11 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object replyPermission(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        try {
-            return post(
-                    location,
-                    sessionV2Path(location, "permission") + "/" + encodePath(requestId) + "/reply",
-                    permissionReplyBody(body),
-                    traceId);
-        } catch (PlatformException exception) {
-            throw staleRuntimeRequestIfNotFound(exception, "权限请求已失效，请重新运行任务", requestId);
-        }
+        return post(
+                location,
+                "/permission/" + encodePath(requestId) + "/reply",
+                permissionReplyBody(body),
+                traceId);
     }
 
     /**
@@ -485,7 +479,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object listQuestions(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, sessionV2Path(location, "question"), Map.of(), traceId);
+        return get(location, "/question", Map.of(), traceId);
     }
 
     /**
@@ -493,38 +487,23 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object replyQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        try {
-            return post(
-                    location,
-                    questionSessionV2Path(location, body) + "/" + encodePath(requestId) + "/reply",
-                    questionReplyBody(body),
-                    traceId);
-        } catch (PlatformException exception) {
-            throw staleRuntimeRequestIfNotFound(exception, "提问请求已失效，请重新运行任务", requestId);
-        }
+        return post(
+                location,
+                "/question/" + encodePath(requestId) + "/reply",
+                questionReplyBody(body),
+                traceId);
     }
 
     /**
      * 拒绝远端 question 请求。
      */
     public Object rejectQuestion(String sessionId, String requestId, String traceId) {
-        return rejectQuestion(sessionId, requestId, Map.of(), traceId);
-    }
-
-    /**
-     * 拒绝远端 question 请求，兼容 task 子会话 ask 携带的远端 session id。
-     */
-    public Object rejectQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        try {
-            return post(
-                    location,
-                    questionSessionV2Path(location, body) + "/" + encodePath(requestId) + "/reject",
-                    Map.of(),
-                    traceId);
-        } catch (PlatformException exception) {
-            throw staleRuntimeRequestIfNotFound(exception, "提问请求已失效，请重新运行任务", requestId);
-        }
+        return post(
+                location,
+                "/question/" + encodePath(requestId) + "/reject",
+                Map.of(),
+                traceId);
     }
 
     /**
@@ -686,42 +665,6 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
-     * opencode v2 permission/question 接口要求在路径中携带远端 session id。
-     */
-    private String sessionV2Path(AgentRuntimeTargetResolver.SessionRuntimeTarget location, String resource) {
-        return "/api/session/" + encodePathSegment(location.remoteSessionId()) + "/" + resource;
-    }
-
-    /**
-     * question.asked 可能来自 task 子会话；前端会把事件中的远端 session id 放入 remoteSessionId。
-     * 平台 session 仍用于定位用户进程和 workspace，这里只覆盖 opencode question path 的远端会话段。
-     */
-    private String questionSessionV2Path(AgentRuntimeTargetResolver.SessionRuntimeTarget location, Map<String, Object> body) {
-        String remoteSessionId = text(safeBody(body).get("remoteSessionId"));
-        String targetRemoteSessionId = remoteSessionId == null ? location.remoteSessionId() : remoteSessionId;
-        return "/api/session/" + encodePathSegment(targetRemoteSessionId) + "/question";
-    }
-
-    /**
-     * 将 pending permission/question 已被远端清理的 404 转成前端可处理的过期请求冲突。
-     */
-    private PlatformException staleRuntimeRequestIfNotFound(PlatformException exception, String message, String requestId) {
-        if (exception.errorCode() == ErrorCode.OPENCODE_BAD_GATEWAY && Integer.valueOf(404).equals(status(exception))) {
-            return new PlatformException(
-                    ErrorCode.CONFLICT,
-                    message,
-                    Map.of("reason", "STALE_RUNTIME_REQUEST", "requestId", requestId),
-                    exception);
-        }
-        return exception;
-    }
-
-    private Integer status(PlatformException exception) {
-        Object value = exception.details().get("status");
-        return value instanceof Number number ? number.intValue() : null;
-    }
-
-    /**
      * 规范化可选请求体，null body 以空对象发送。
      */
     private Map<String, Object> safeBody(Map<String, Object> body) {
@@ -797,16 +740,6 @@ public class OpencodeRuntimeApplicationService {
                 .filter(Objects::nonNull)
                 .map(String::valueOf)
                 .toList();
-    }
-
-    /**
-     * 对单一路径片段编码；session id 不能保留斜杠，否则会被远端路由拆成多级路径。
-     */
-    private String encodePathSegment(String segment) {
-        if (segment == null || segment.isBlank()) {
-            return "";
-        }
-        return URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     /**
