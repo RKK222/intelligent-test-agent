@@ -20,6 +20,11 @@ public interface OpencodeClientFacade {
     Mono<OpencodeCreateSessionResult> createSession(OpencodeCreateSessionCommand command);
 
     /**
+     * 校验远端 opencode session 是否仍存在；404 映射为 false。
+     */
+    Mono<Boolean> sessionExists(OpencodeSessionExistsCommand command);
+
+    /**
      * 取消远端 opencode session，并返回远端是否接受取消。
      */
     Mono<OpencodeCancelResult> cancelSession(OpencodeCancelCommand command);

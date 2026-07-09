@@ -35,6 +35,11 @@ final class ObservedAgentRuntime implements AgentRuntime {
     }
 
     @Override
+    public Mono<Boolean> sessionExists(AgentSessionExistsCommand command) {
+        return observe("sessionExists", command.traceId(), delegate.sessionExists(command));
+    }
+
+    @Override
     public Mono<AgentStartRunResult> startRun(AgentStartRunCommand command) {
         return observe("startRun", command.traceId(), delegate.startRun(command));
     }

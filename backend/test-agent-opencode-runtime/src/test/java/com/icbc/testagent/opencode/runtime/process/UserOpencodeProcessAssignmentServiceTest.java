@@ -92,13 +92,24 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(gateway.startCommands).hasSize(1);
         assertThat(gateway.healthCommands).hasSize(1);
         assertThat(gateway.startCommands.getFirst().containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
-        assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(SESSION_DIR + "4200");
+        assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(USER_SESSION_DIR);
         assertThat(gateway.startCommands.getFirst().configPath()).isEqualTo(CONFIG_DIR);
         assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
         assertThat(repository.savedNodes).hasSize(1);
         assertThat(repository.savedNodes.getFirst().baseUrl()).isEqualTo("http://10.8.0.21:4200");
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeRejectsUnsafeUserIdForSessionDirectory() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.13", 4200, 4205, 4, 0));
+        UserOpencodeProcessAssignmentService service = service(repository, new RecordingGateway());
+
+        assertThatThrownBy(() -> service.initialize(new UserId("../bad/user"), "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
     }
 
     @org.junit.jupiter.api.Test
@@ -753,6 +764,7 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     private static final String SESSION_DIR = "/tmp/testagent/.session/";
+    private static final String USER_SESSION_DIR = SESSION_DIR + "users/usr_1234567890abcdef";
     private static final String CONFIG_DIR = "/tmp/testagent/.config/opencode/";
 
     private static CommonParameterValues commonParameters() {

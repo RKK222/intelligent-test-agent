@@ -98,19 +98,43 @@ class RuntimeManagementCommandServiceTest {
     }
 
     @Test
+    void restartTrackedUserProcessStopsThenStartsWithPersistedSessionPath() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(running.processId(), running);
+        repository.bindingsByProcessId.put(running.processId(), binding(running, NOW.minusSeconds(1800)));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("port 4097 is not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        OpencodeProcessControlResult result = service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
+
+        assertThat(gateway.restartCommands).isEmpty();
+        assertThat(gateway.stopCommands).hasSize(1);
+        assertThat(gateway.startCommands).singleElement().satisfies(command -> {
+            assertThat(command.port()).isEqualTo(4097);
+            assertThat(command.sessionPath()).isEqualTo(running.sessionPath());
+        });
+        assertThat(result.status()).isEqualTo("STARTED");
+    }
+
+    @Test
     void restartFallsBackToStartWhenManagerStateIsMissing() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess unhealthy = process("ocp_unhealthy", 4097, OpencodeServerProcessStatus.UNHEALTHY);
         repository.processes.put(unhealthy.processId(), unhealthy);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.restartFailure = new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "port 4097 is not managed");
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("port 4097 is not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
         RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         OpencodeProcessControlResult result = service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
 
-        assertThat(gateway.restartCommands).hasSize(1);
+        assertThat(gateway.restartCommands).isEmpty();
+        assertThat(gateway.stopCommands).hasSize(1);
         assertThat(gateway.startCommands).hasSize(1);
-        assertThat(gateway.healthCommands).hasSize(1);
+        assertThat(gateway.healthCommands).hasSize(2);
         assertThat(result.status()).isEqualTo("STARTED");
     }
 

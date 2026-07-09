@@ -4,6 +4,7 @@ import com.example.opencode.sdk.ApiClient;
 import com.example.opencode.sdk.api.EventApi;
 import com.example.opencode.sdk.api.GlobalApi;
 import com.example.opencode.sdk.api.SessionApi;
+import com.example.opencode.sdk.api.SessionsApi;
 import com.example.opencode.sdk.model.SnapshotFileDiff;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.observability.TraceConstants;
@@ -88,6 +89,17 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         returnType)
                 .bodyToMono(returnType)
                 .map(body -> new OpencodeCreateSessionResult(extractSessionId(body)));
+    }
+
+    /**
+     * 通过 v2 session get 判断远端 session 是否存在；404 由 facade 统一转换为 false。
+     */
+    @Override
+    public Mono<Boolean> sessionExists(ExecutionNode node, String opencodeSessionId, String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        return new SessionsApi(apiClient)
+                .v2SessionGet(opencodeSessionId)
+                .thenReturn(true);
     }
 
     /**

@@ -109,6 +109,11 @@ class OpencodeRuntimeFacadeTest {
         }
 
         @Override
+        public Mono<Boolean> sessionExists(ExecutionNode node, String opencodeSessionId, String traceId) {
+            return Mono.just(true);
+        }
+
+        @Override
         public Mono<OpencodeCancelResult> cancelSession(ExecutionNode node, String opencodeSessionId, String directory, String workspace, String traceId) {
             return Mono.just(new OpencodeCancelResult(true));
         }

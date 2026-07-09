@@ -316,6 +316,49 @@ class DefaultOpencodeClientFacadeTest {
         assertThat(gateway.lastCursor).isNull();
     }
 
+    @Test
+    void facadeReportsExistingRemoteSession() {
+        FakeGateway gateway = new FakeGateway();
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        Boolean exists = facade.sessionExists(new OpencodeSessionExistsCommand(
+                node(),
+                "ses_remote1234567890abcdef",
+                "trace_1234567890abcdef")).block();
+
+        assertThat(exists).isTrue();
+        assertThat(gateway.lastTraceId).isEqualTo("trace_1234567890abcdef");
+        assertThat(gateway.lastOpencodeSessionId).isEqualTo("ses_remote1234567890abcdef");
+    }
+
+    @Test
+    void facadeReportsMissingRemoteSessionWhenSessionGetReturns404() {
+        FakeGateway gateway = new FakeGateway();
+        gateway.sessionExists = Mono.error(remoteError(404));
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        Boolean exists = facade.sessionExists(new OpencodeSessionExistsCommand(
+                node(),
+                "ses_missing1234567890abcdef",
+                "trace_1234567890abcdef")).block();
+
+        assertThat(exists).isFalse();
+    }
+
+    @Test
+    void facadeDoesNotHideNon404SessionExistsFailures() {
+        FakeGateway gateway = new FakeGateway();
+        gateway.sessionExists = Mono.error(remoteError(503));
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        assertThatThrownBy(() -> facade.sessionExists(new OpencodeSessionExistsCommand(
+                        node(),
+                        "ses_remote1234567890abcdef",
+                        "trace_1234567890abcdef")).block())
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+    }
+
     private static OpencodeClientFacade facade(FakeGateway gateway, Duration timeout, int maxRetries) {
         return new DefaultOpencodeClientFacade(
                 gateway,
@@ -367,6 +410,7 @@ class DefaultOpencodeClientFacadeTest {
         private String lastCursor;
         private List<OpencodePromptPart> lastParts = List.of();
         private OpencodeSessionMessagesResult sessionMessagesResult = new OpencodeSessionMessagesResult(List.of(), null, null);
+        private Mono<Boolean> sessionExists = Mono.just(true);
 
         @Override
         public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
@@ -531,6 +575,16 @@ class DefaultOpencodeClientFacadeTest {
             lastOrder = order;
             lastCursor = cursor;
             return Mono.just(sessionMessagesResult);
+        }
+
+        @Override
+        public Mono<Boolean> sessionExists(
+                ExecutionNode node,
+                String opencodeSessionId,
+                String traceId) {
+            lastTraceId = traceId;
+            lastOpencodeSessionId = opencodeSessionId;
+            return sessionExists;
         }
 
         private String lastPrompt;

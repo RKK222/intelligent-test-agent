@@ -14,6 +14,7 @@ import com.icbc.testagent.opencode.client.OpencodeRejectDiffCommand;
 import com.icbc.testagent.opencode.client.OpencodeRejectDiffResult;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
+import com.icbc.testagent.opencode.client.OpencodeSessionExistsCommand;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessage;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesCommand;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult;
@@ -55,6 +56,14 @@ public class OpencodeAgentRuntime implements AgentRuntime {
                         command.title(),
                         command.traceId()))
                 .map(this::toCreateSessionResult);
+    }
+
+    @Override
+    public Mono<Boolean> sessionExists(AgentSessionExistsCommand command) {
+        return opencodeClientFacade.sessionExists(new OpencodeSessionExistsCommand(
+                command.node(),
+                command.remoteSessionId(),
+                command.traceId()));
     }
 
     @Override

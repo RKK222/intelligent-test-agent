@@ -4938,3 +4938,15 @@ bash /tmp/test-api-after-restart.sh
   - 后端列表接口不校验应用成员资格，避免用户被移出应用后看不到自己的历史；发送前仍通过切换/校验结果控制只读。E2E 鉴权辅助改为写入 `sessionStorage`，与 `authStore` 的读取位置保持一致。
 - Result:
   - 历史会话相关后端定向 reactor 测试、前端 typecheck、Vitest 目标集和 Playwright 历史点击成功/失败路径均通过。计划中的后端 full reactor 命令 `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-persistence -am test` 当前会被未改动模块 `test-agent-workspace-management` 的既有 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 阻断，原因是测试期望目录删除抛错而当前实现允许递归删除目录，本次未修改该无关行为。
+
+### 2026-07-09 - 修复历史会话远端 opencode session 跨端口失效
+
+- Why:
+  - 用户 opencode 进程重建后端口可能从 4096 漂移到 4097，但旧实现把 `XDG_DATA_HOME` 按 `{OPENCODE_SESSION_DIR}/{port}` 生成，历史 `remoteSessionId` 对应的 SQLite 数据仍在旧端口目录，导致下一次提问校验/调用远端 session 时返回 404 并被映射为“opencode 服务响应异常”。
+- What:
+  - 用户 opencode 原生 session 目录改为 `{OPENCODE_SESSION_DIR}/users/{userId}`，Java 显式拒绝空白、`/`、`\` 和 `..` userId 路径片段；Java start 命令帧携带 `sessionPath`，Go manager 优先使用显式路径并在 restart 时保留 state 中的 `sessionPath`，旧命令帧才 fallback `{sessionRoot}/{port}`。运行管理对已有平台进程记录的重启改为公共 stop + startup，并保留 `process.sessionPath`。
+  - opencode client facade 新增 `sessionExists`，调用 generated `SessionsApi.v2SessionGet`；404 返回 `false`，其它错误继续按统一 opencode 错误码抛出。`AgentRuntimeTargetResolver` 复用同节点 binding 前校验远端 session，404 缺失时记录 WARN 并重建 `AgentSessionBinding` 与兼容 `sessions.opencode_*` 字段。
+- How:
+  - 未手改 generated SDK、未改 HTTP API/SSE/数据库。旧 `{OPENCODE_SESSION_DIR}/{port}` 目录本次不自动合并，平台历史消息仍可展示，缺失远端 session 会在下次提问前重建。
+- Result:
+  - `cd opencode-manager && go test ./...` 通过；`cd backend && mvn -pl test-agent-opencode-runtime,test-agent-agent-runtime,test-agent-opencode-client -am test` 通过。同步更新 opencode-manager、backend、opencode-runtime、opencode-client 和 agent-runtime README/PACKAGE 文档。

@@ -45,6 +45,31 @@ func TestBuildStartSpecUsesFixedOpencodeServeCommand(t *testing.T) {
 	}
 }
 
+func TestBuildStartSpecPrefersExplicitSessionPath(t *testing.T) {
+	cfg := testConfig(t)
+	sessionPath := "/tmp/sessions/users/usr_1234567890abcdef"
+
+	spec, err := BuildStartSpec(cfg, StartRequest{
+		Port:        4096,
+		SessionPath: sessionPath,
+		TraceID:     "trace_1234567890abcdef",
+	})
+	if err != nil {
+		t.Fatalf("BuildStartSpec returned error: %v", err)
+	}
+
+	if spec.SessionPath != sessionPath {
+		t.Fatalf("expected explicit session path %q, got %q", sessionPath, spec.SessionPath)
+	}
+	if spec.Env["XDG_DATA_HOME"] != sessionPath {
+		t.Fatalf("expected XDG_DATA_HOME from explicit session path, got %#v", spec.Env)
+	}
+	wantStartCommand := "XDG_DATA_HOME=/tmp/sessions/users/usr_1234567890abcdef OPENCODE_CONFIG_DIR=/tmp/config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
+	if spec.StartCommand != wantStartCommand {
+		t.Fatalf("unexpected start command %q", spec.StartCommand)
+	}
+}
+
 func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 	cfg := testConfig(t)
 	store := state.NewFileStore(t.TempDir())
@@ -304,6 +329,47 @@ func TestManagerStopTerminatesProcessAndRemovesState(t *testing.T) {
 	_, ok, err := store.Get(4096)
 	if err != nil || ok {
 		t.Fatalf("expected state to be removed, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestManagerRestartPreservesStoredSessionPath(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	sessionPath := "/tmp/sessions/users/usr_1234567890abcdef"
+	if err := store.Save(state.ProcessRecord{
+		Port:         4096,
+		PID:          12345,
+		BaseURL:      "http://10.8.0.12:4096",
+		SessionPath:  sessionPath,
+		ConfigPath:   cfg.ConfigDir,
+		StartedAt:    time.Now().UTC(),
+		StartCommand: "old",
+		TraceID:      "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save process state: %v", err)
+	}
+	starter := &fakeStarter{pid: 22345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return false },
+	})
+
+	result, err := manager.Restart(context.Background(), StopRequest{
+		Port:    4096,
+		TraceID: "trace_1234567890abcdef",
+		Timeout: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Restart returned error: %v", err)
+	}
+
+	if result.SessionPath != sessionPath {
+		t.Fatalf("expected restart result to keep session path %q, got %q", sessionPath, result.SessionPath)
+	}
+	if len(starter.specs) != 1 {
+		t.Fatalf("expected one start after stop, got %d", len(starter.specs))
+	}
+	if starter.specs[0].SessionPath != sessionPath {
+		t.Fatalf("expected restart to use stored session path %q, got %q", sessionPath, starter.specs[0].SessionPath)
 	}
 }
 

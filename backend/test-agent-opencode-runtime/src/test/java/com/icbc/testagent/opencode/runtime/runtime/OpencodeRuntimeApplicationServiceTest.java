@@ -34,6 +34,7 @@ import com.icbc.testagent.opencode.client.OpencodeCreateSessionCommand;
 import com.icbc.testagent.opencode.client.OpencodeCreateSessionResult;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
+import com.icbc.testagent.opencode.client.OpencodeSessionExistsCommand;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -249,6 +250,7 @@ class OpencodeRuntimeApplicationServiceTest {
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/share");
         assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        verify(fixture.facade).sessionExists(any(OpencodeSessionExistsCommand.class));
         verify(fixture.facade, never()).createSession(any());
     }
 
@@ -278,6 +280,56 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(binding.remoteSessionId()).isEqualTo("ses_userremote1234567890abcdef");
         assertThat(binding.executionNodeId()).isEqualTo(userNode.executionNodeId());
         verify(fixture.facade).createSession(any(OpencodeCreateSessionCommand.class));
+    }
+
+    @Test
+    void sessionRuntimeRebuildsRemoteSessionWhenExistingBindingIsMissingRemotely() {
+        Fixture fixture = new Fixture();
+        ExecutionNode userNode = Fixture.node();
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(userNode));
+        when(fixture.facade.sessionExists(any())).thenReturn(Mono.just(false));
+        when(fixture.facade.createSession(any())).thenReturn(Mono.just(new OpencodeCreateSessionResult("ses_rebuilt1234567890abcdef")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("url", "https://opencode.ai/s/rebuilt")))));
+
+        fixture.service.withUser(
+                new UserId("usr_1234567890abcdef"),
+                () -> fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef"));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/session/ses_rebuilt1234567890abcdef/share");
+        AgentSessionBinding binding = fixture.bindingRepository
+                .findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode")
+                .orElseThrow();
+        assertThat(binding.remoteSessionId()).isEqualTo("ses_rebuilt1234567890abcdef");
+        verify(fixture.facade).createSession(any(OpencodeCreateSessionCommand.class));
+    }
+
+    @Test
+    void sessionRuntimePropagatesRemoteSessionValidationFailures() {
+        Fixture fixture = new Fixture();
+        ExecutionNode userNode = Fixture.node();
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(userNode));
+        when(fixture.facade.sessionExists(any())).thenReturn(Mono.error(new PlatformException(
+                ErrorCode.OPENCODE_UNAVAILABLE,
+                "opencode 服务不可用")));
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        new UserId("usr_1234567890abcdef"),
+                        () -> fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        verify(fixture.facade, never()).createSession(any());
+        verify(fixture.facade, never()).runtime(any());
     }
 
     @Test
@@ -564,6 +616,7 @@ class OpencodeRuntimeApplicationServiceTest {
                             invocation.getArgument(4))));
             when(executionNodeRepository.findRoutableNodes(1)).thenReturn(List.of(node()));
             when(executionNodeRepository.findById(new ExecutionNodeId("node_1234567890abcdef"))).thenReturn(Optional.of(node()));
+            when(facade.sessionExists(any())).thenReturn(Mono.just(true));
         }
 
         private OpencodeRuntimeCommand captureCommand() {

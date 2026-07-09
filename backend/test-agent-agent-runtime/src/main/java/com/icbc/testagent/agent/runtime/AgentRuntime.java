@@ -22,6 +22,13 @@ public interface AgentRuntime {
     }
 
     /**
+     * 校验远端 agent 会话是否仍存在。
+     */
+    default Mono<Boolean> sessionExists(AgentSessionExistsCommand command) {
+        return Mono.error(unsupported("sessionExists"));
+    }
+
+    /**
      * 启动一次远端运行。
      */
     default Mono<AgentStartRunResult> startRun(AgentStartRunCommand command) {

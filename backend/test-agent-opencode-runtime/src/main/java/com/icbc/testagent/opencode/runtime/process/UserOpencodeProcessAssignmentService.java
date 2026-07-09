@@ -551,7 +551,7 @@ public class UserOpencodeProcessAssignmentService {
                 container.containerId(),
                 port,
                 baseUrl,
-                sessionPath(port),
+                sessionPath(userId),
                 configPath(),
                 Map.of(),
                 traceId);
@@ -583,8 +583,25 @@ public class UserOpencodeProcessAssignmentService {
                 traceId);
     }
 
-    private String sessionPath(int port) {
-        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_SESSION_DIR)) + port;
+    private String sessionPath(UserId userId) {
+        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_SESSION_DIR)) + "users/" + userSessionPathSegment(userId);
+    }
+
+    private String userSessionPathSegment(UserId userId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        String segment = userId.value();
+        // userId 会进入服务端文件系统路径片段，必须先拒绝所有可能跳出 users 目录的形式。
+        if (segment == null
+                || segment.isBlank()
+                || segment.contains("/")
+                || segment.contains("\\")
+                || segment.contains("..")) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "用户 ID 不能作为 opencode session 路径片段",
+                    Map.of("userId", segment == null ? "" : segment));
+        }
+        return segment;
     }
 
     private String configPath() {
