@@ -93,7 +93,7 @@ test-agent:
       auth-mode: ${TEST_AGENT_ICBC_OPENAI_AUTH_MODE:auth-token}
       default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:DeepSeek-V4-Flash-W8A8}
   scheduler:
-    enabled: ${TEST_AGENT_SCHEDULER_ENABLED:false}
+    enabled: ${TEST_AGENT_SCHEDULER_ENABLED:true}
     scan-interval: ${TEST_AGENT_SCHEDULER_SCAN_INTERVAL:30s}
     due-task-limit: ${TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT:50}
     manual-run-limit: ${TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT:50}

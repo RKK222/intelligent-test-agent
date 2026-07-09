@@ -15,7 +15,7 @@
 - `package-info.java`：说明 event 包是平台事件模型、SSE 和回放边界。
 - `RunEventAppender`：通过 domain 端口追加事件草稿。
 - `RunEventLiveBus`、`RunEventLiveEvent`：当前进程内按 runId 广播 durable/transient 实时事件，并把本机事件交给可选远端广播端口；背压溢出时按 best-effort 丢弃当前 live 帧，保持全局通道可继续发布。
-- `RunEventRemotePublisher`、`NoopRunEventRemotePublisher`、`RedisRunEventRemotePublisher`：跨实例广播端口、默认空实现和 Redis pub/sub 实现。
+- `RunEventRemotePublisher`、`NoopRunEventRemotePublisher`、`RedisRunEventRemotePublisher`：兼容跨实例广播端口、默认空实现和 Redis pub/sub 实现；单 Run SSE 跨 Java 实时消息由 API 层路由到生产 Java，不再依赖 Redis bus。
 - `RunEventReplayService`：处理 Last-Event-ID、按 Run 增量回放和按 root session 回放历史状态事件。
 - `RunEventSseMapper`：将 durable RunEvent 映射为带 `id=seq` 的 `ServerSentEvent`，将 transient payload 映射为不带 SSE `id` 的 `ServerSentEvent`。
 - `RunEventSseStreamService`：合并 durable polling replay、本机 live bus 和可选 Redis 远端事件的 RunEvent SSE 输出服务，并提供 HTTP 历史接口复用的 durable payload snapshot；阻塞式回放查询 offload 到 `boundedElastic`，单次回放失败跳过本轮轮询并保持订阅。
@@ -51,7 +51,7 @@
 
 ## 测试位置
 
-- event 模块单元测试，覆盖 durable SSE id、transient SSE 无 id、live bus 并发背压不终止通道、Redis 远端事件合流和 Last-Event-ID。
+- event 模块单元测试，覆盖 durable SSE id、transient SSE 无 id、live bus 并发背压不终止通道、Redis 兼容远端事件合流和 Last-Event-ID。
 - SSE 集成测试。
 - Last-Event-ID、seq 单调递增、断线续传和事件映射测试。
 

@@ -2324,6 +2324,8 @@ Session 运行态接口：
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/events` 返回 `text/event-stream`；旧 `GET /api/runs/{runId}/events` 返回 `410 API_GONE`。`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output 不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `?lastEventId={seq}`，后端 header 优先、query 兜底。
 
+RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding 路由。任意 Java 收到 `/runs/{runId}/events` 后，先用 `routing_decisions -> executionNodeId -> opencode process -> linuxServerId` 定位生产服务器；如果目标不是当前 Java，则流式转发到目标 Java 并保留 `Authorization`、`X-Trace-Id`、`Last-Event-ID`、query 和 `text/event-stream`。目标 Java 继续执行现有消息 snapshot、DB durable replay 和本机 live bus。目标 Java 不在线时可退回本机 snapshot/DB replay，不能依赖 Redis Pub/Sub 补实时消息。
+
 SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取标准 session messages，并仅把 assistant 消息转换为 transient `message.updated` / `message.part.updated` 发给前端；user 消息已在 Run 启动前由平台保存，不重复回放其 text part，避免被前端误拼进 assistant 正文。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照；旧 `/api/runs/{runId}/session-tree/messages` 返回 `410 API_GONE`。scope 表存在时后端按 root + 当前 Run child session 逐个拉取 agent projected messages；scope 表为空时按 root-only 远端 session 降级。响应 `events` 会合并本次消息 snapshot 与当前 Run 的 durable RunEvent，因此 permission/question/todo 等状态类事件可随 HTTP 历史响应恢复；`messagesBySessionId` 只包含 `message.*` payload，不会混入状态事件。响应 `data`：

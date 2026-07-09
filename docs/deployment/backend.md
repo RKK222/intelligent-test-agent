@@ -366,7 +366,7 @@ Redis 是系统必需依赖，生产部署必须提供外部地址：
 ```bash
 TEST_AGENT_REDIS_HOST=<redis-host>
 TEST_AGENT_REDIS_PORT=6379
-TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
+TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=false
 TEST_AGENT_RUN_EVENT_REDIS_BUS_CHANNEL=test-agent:run-events
 TEST_AGENT_SCHEDULER_ENABLED=false
 TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
@@ -376,7 +376,7 @@ TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 
 运行管理在线态和监控历史都只使用 Redis，不写入关系型数据库。Java/manager latest snapshot TTL 固定为 10 秒；指标历史使用 ZSET key `test-agent:runtime-metrics:server:{linuxServerId}`、`test-agent:runtime-metrics:backend:{linuxServerId}` 与 `test-agent:runtime-metrics:container:{containerId}`，每 5 秒追加原始样本，保留近 48 小时，key 过期兜底约 49 小时；旧 `test-agent:runtime-metrics:backend:{backendProcessId}` 仅供兼容 API 在无法解析稳定服务器身份时回退读取。运行管理 API 默认查询近 1 小时，前端提供 1 分钟、30 分钟、1 小时、6 小时、12 小时、24 小时、48 小时预设窗口。Java latest snapshot、在线心跳、服务器 CPU/内存/磁盘容量和 JVM 内存/GC/线程都按 `linuxServerId` 连续保存，同一稳定服务器身份下 Java 后端重启后会覆盖 latest snapshot 并连续追加历史。Redis 历史只保证同一稳定服务器身份的 Java 后端重启后连续；若 Redis 自身重启且未启用 AOF/RDB，历史样本会丢失。Java 指标来自 JDK MXBean 和当前工作目录所在文件系统；Go manager 使用 `gopsutil/v4` 与 `opencontainers/cgroups`，Linux 生产态优先按当前进程 cgroup v2/v1 子路径采集容器 CPU、内存和磁盘 IO，`metricsSource=cgroup`；cgroup 不可读时降级当前 manager 进程 CPU/内存，`metricsSource=process`；macOS/Windows 开发态同样使用进程指标；完全不可采集时 `metricsSource=unavailable`。采集失败只影响指标字段，不阻断心跳。
 
-`TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制 RunEvent 跨实例实时 fan-out；数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。该开关关闭时 RunEvent 自动退回本机 live bus + DB replay，但用户进程运行管理、manager 心跳、Token 存储、scheduler 和运行指标历史仍直接依赖 Redis。
+`TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制可选兼容的 RunEvent Redis Pub/Sub fan-out；单个 Run 的跨 Java 实时 SSE 已改为按 Run 原始归属路由到生产 Java，并由目标 Java 的本机 live bus 推送。数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。该开关关闭时，非生产 Java 收到 RunEvent SSE 会流式转发到生产 Java；目标 Java 不在线时只能退回本机 snapshot/DB replay，不再依赖 Redis Pub/Sub 补实时消息。用户进程运行管理、manager 心跳、Token 存储、scheduler 和运行指标历史仍直接依赖 Redis。
 
 `TEST_AGENT_SCHEDULER_ENABLED` 默认 `false`。环境变量存在但值为空时按 `false` 处理，必须显式设置为 `true` 才会启用后台扫描。应用启动时会先同步 `ScheduledTaskHandler` 代码注册任务，确保超级管理员定时任务管理页能看到任务定义；只有启用 scheduler 后才启动后台扫描线程并执行 due task 或 pending manual run。关闭时管理端手动触发会返回 `CONFLICT`，不会再创建无法执行的 `PENDING` 运行记录；历史已存在的 `PENDING` 记录需要启用 scheduler 后由后台扫描消费，或由管理员按排障流程显式处理。启用后会使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。
 

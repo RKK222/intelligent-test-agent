@@ -34,6 +34,17 @@
   - 部署脚本先校验 zip 内 `dist` 产物和 `deploy/internal`，再按“前端更新并 reload Nginx -> 替换后端 jar/程序/worker 镜像 -> 启动 Java 并校验 `.serverid/.serverhost` -> 重启 worker 等待 `manager config update applied`”执行；`--validate-only` 可只检查 zip 结构不触发远程操作。
 - Result:
   - `bash -n deploy/internal/deploy-internal-release.sh deploy/internal/package-release.sh`、两个脚本 `--help`、临时 zip 的 `deploy-internal-release.sh --validate-only` 和 `git diff --check` 通过；未真实连接 122 服务器、未重启 systemd/Nginx/Docker。
+### 2026-07-09 - RunEvent SSE 跟随生产 Java 路由
+
+- Why:
+  - 会话实时消息不应依赖 Redis Pub/Sub 的 best-effort 广播；当浏览器重新进入运行中会话，或 Run 创建请求与 SSE 请求落到不同 Java 时，SSE 应跟随 Run 原始生产 Java，而不是按当前用户最新 binding 或 Redis 远端事件补实时消息。
+- What:
+  - 新增 `RunEventSseRouteService` 按 `routing_decisions -> node_ocp_* -> opencode process -> linuxServerId` 定位 Run 生产 Java；API 层新增 `RunEventSseBackendRoutingWebFilter` 和 `BackendSseForwarder`，对 `/runs/{runId}/events` 做 `text/event-stream` 流式转发；`TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 在文档中降级为可选兼容开关。
+- How:
+  - 普通 HTTP 仍用 `BackendHttpForwarder`，SSE 因不能缓冲 `byte[]` 改用 WebClient DataBuffer 流式写回，并复用 `X-Test-Agent-Backend-Routed` 防循环头，透传 `Authorization`、`X-Trace-Id`、`Last-Event-ID` 和 query。目标 Java 不在线或旧 Run 无法解析生产进程时，入口降级为本机 snapshot/DB replay，不使用 Redis Pub/Sub 补实时消息。
+- Result:
+  - 新增 runtime/API 定向测试覆盖生产 Java 路由、SSE header/query 保留、平台/agent URL、防循环和目标缺失降级；Redis 仍保留给 Java 在线发现、manager 心跳、Token、scheduler 和运行指标等基础设施。
+
 ### 2026-07-09 - 修复系统管理定时任务等页面垂直滚动条缺失和遮挡问题
 
 - Why:
