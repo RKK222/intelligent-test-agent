@@ -23,7 +23,6 @@ import type {
   MessagePart,
   PageResponse,
   PromptPart,
-  QuestionRequest,
   Run,
   RunDiffFile,
   RunEvent,
@@ -98,7 +97,6 @@ import {
   opencodeAvailabilityFromHealth,
   opencodeAvailabilityFromProcess,
   opencodeHealthRequestFromProcess,
-  historyRuntimeBadgeCounts,
   parseCommand,
   prepareAutoRetryRun,
   promptFromParts,
@@ -990,9 +988,6 @@ function refreshAgentsCatalog() {
   void agentsQuery.refetch();
 }
 const historyList = computed(() => historyItems(run.value, sessionsItems.value, runtimeStatesBySessionId.value));
-const historyBadgeCounts = computed(() =>
-  historyRuntimeBadgeCounts(sessionsItems.value, runtimeStatesBySessionId.value, SESSION_HISTORY_PAGE_SIZE)
-);
 const historyLoadingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 
@@ -2084,15 +2079,6 @@ function questionRemoteSessionId(candidate?: string): string | undefined {
   return value;
 }
 
-async function refreshPendingQuestionsAfterStale(sessionId: string) {
-  try {
-    const questions: QuestionRequest[] = await api.listSessionQuestions(sessionId);
-    dispatchChat({ type: "questions.reconciled", questions });
-  } catch {
-    // 刷新失败时保留本地提问卡片，避免可重试错误把用户可操作入口清掉。
-  }
-}
-
 const replyQuestionMutation = useMutation({
   mutationFn: async (payload: { requestId: string; answers: unknown[]; remoteSessionId?: string }) => {
     if (!session.value) {
@@ -2105,13 +2091,10 @@ const replyQuestionMutation = useMutation({
     });
   },
   onSuccess: (_result, payload) => dispatchChat({ type: "question.replied", requestId: payload.requestId }),
-  onError: (error) => {
+  onError: (error, payload) => {
     if (isStaleRuntimeRequest(error)) {
+      dispatchChat({ type: "question.replied", requestId: payload.requestId });
       feedback.value = staleRuntimeRequestFeedback("提问请求已失效", error);
-      const sessionId = session.value?.sessionId;
-      if (sessionId) {
-        void refreshPendingQuestionsAfterStale(sessionId);
-      }
       return;
     }
     feedback.value = errorFeedback("提问回复失败", error);
@@ -2131,13 +2114,10 @@ const rejectQuestionMutation = useMutation({
     );
   },
   onSuccess: (_result, payload) => dispatchChat({ type: "question.replied", requestId: payload.requestId }),
-  onError: (error) => {
+  onError: (error, payload) => {
     if (isStaleRuntimeRequest(error)) {
+      dispatchChat({ type: "question.replied", requestId: payload.requestId });
       feedback.value = staleRuntimeRequestFeedback("提问请求已失效", error);
-      const sessionId = session.value?.sessionId;
-      if (sessionId) {
-        void refreshPendingQuestionsAfterStale(sessionId);
-      }
       return;
     }
     feedback.value = errorFeedback("拒绝提问失败", error);
@@ -4161,8 +4141,8 @@ async function handleLogout() {
           :history-has-more="sessionHistoryHasMore"
           :history-loading-more="sessionHistoryLoadingMore"
           :history-loading="Boolean(historyLoadingSessionId)"
-          :history-running-count="historyBadgeCounts.runningCount"
-          :history-question-count="historyBadgeCounts.questionCount"
+          :history-running-count="sessionRuntimeState?.runningCount ?? 0"
+          :history-question-count="sessionRuntimeState?.questionCount ?? 0"
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
           process-required

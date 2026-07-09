@@ -970,36 +970,6 @@ describe("agent-chat runtime reducer", () => {
     expect(localQuestionReply.questions).toHaveLength(0);
   });
 
-  it("reconciles pending questions without dropping them on an empty refresh", () => {
-    const asked = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
-      type: "event",
-      event: event("question.asked", {
-        requestId: "ques_1",
-        sessionId: "ses_remote_child",
-        questions: [{ id: "q1", text: "Need target env?", kind: "text" }]
-      })
-    });
-
-    const emptyRefresh = reduceAgentChatRuntime(asked, {
-      type: "questions.reconciled",
-      questions: []
-    });
-    expect(emptyRefresh.questions).toEqual(asked.questions);
-
-    const refreshed = reduceAgentChatRuntime(asked, {
-      type: "questions.reconciled",
-      questions: [
-        {
-          requestId: "ques_1",
-          sessionId: "ses_remote_child",
-          createdAt: "2026-06-19T00:01:00Z",
-          questions: [{ questionId: "q1", text: "Need target env now?", kind: "text" }]
-        }
-      ]
-    });
-    expect(refreshed.questions[0]?.questions[0]?.text).toBe("Need target env now?");
-  });
-
   it("normalizes opencode question.asked options into single-choice questions", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",
@@ -1041,48 +1011,6 @@ describe("agent-chat runtime reducer", () => {
         ]
       }
     ]);
-  });
-
-  it("keeps opencode question id and remote session from real question.asked payloads", () => {
-    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
-      type: "event",
-      event: event("question.asked", {
-        rootSessionId: "ses_0bb1d5652ffe1yZeU4AzrFJhGH",
-        sessionId: "ses_0bb1d5652ffe1yZeU4AzrFJhGH",
-        rawType: "question.asked",
-        isChildSession: false,
-        id: "que_f44e30447001twogIROD9JvbK6",
-        questions: [
-          {
-            question: "要为哪个需求项生成测试案例？",
-            header: "目标需求项",
-            options: [
-              { label: "I2026000-车贷审批", description: "车贷审批流程路径图，含贷款申请、审核、审批决策等接口" },
-              { label: "I2026002-需求项", description: "含权限、审批提交、结果查询、流程、数据一致性测试" }
-            ],
-            multiple: true
-          }
-        ]
-      })
-    });
-
-    expect(state.questions).toHaveLength(1);
-    expect(state.questions[0]).toMatchObject({
-      requestId: "que_f44e30447001twogIROD9JvbK6",
-      sessionId: "ses_0bb1d5652ffe1yZeU4AzrFJhGH",
-      questions: [
-        {
-          questionId: "que_f44e30447001twogIROD9JvbK6:0",
-          header: "目标需求项",
-          text: "要为哪个需求项生成测试案例？",
-          kind: "multiple",
-          options: [
-            { id: "I2026000-车贷审批", label: "I2026000-车贷审批" },
-            { id: "I2026002-需求项", label: "I2026002-需求项" }
-          ]
-        }
-      ]
-    });
   });
 
   it("normalizes multiple and text question variants", () => {

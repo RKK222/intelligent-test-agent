@@ -138,28 +138,6 @@ public class AgentRuntimeTargetResolver {
     }
 
     /**
-     * 解析 pending permission/question 的原始绑定目标。
-     * opencode pending ask 绑定在产生 ask 的远端 session 和进程内存中，回复前不能因当前用户进程校验而换绑或重建。
-     */
-    public SessionRuntimeTarget existingSessionBindingTarget(String agentId, String sessionId, String traceId) {
-        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
-        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
-        Session session = findSession(new SessionId(sessionId));
-        Workspace workspace = findWorkspace(session.workspaceId());
-        AgentSessionBinding binding = findAgentBinding(resolvedAgentId, session, traceId)
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.CONFLICT,
-                        "Session 尚未绑定远端 agent 会话",
-                        Map.of("sessionId", sessionId, "agentId", resolvedAgentId)));
-        ExecutionNode node = executionNodeRepository.findById(binding.executionNodeId())
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.OPENCODE_UNAVAILABLE,
-                        "会话绑定的 agent 执行节点不存在",
-                        Map.of("agentId", resolvedAgentId, "nodeId", binding.executionNodeId().value())));
-        return new SessionRuntimeTarget(runtime, node, workspaceRoot(workspace), binding.remoteSessionId());
-    }
-
-    /**
      * 解析用户专属 opencode 进程；非认证、非默认 opencode 时返回空以保留旧固定节点链路。
      */
     public Optional<UserOpencodeProcessAssignment> resolveUserProcessAssignment(

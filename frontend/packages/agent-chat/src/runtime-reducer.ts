@@ -40,7 +40,6 @@ export type AgentChatRuntimeAction =
   | { type: "user.submitted"; prompt: string; parts?: PromptPart[]; createdAt?: string }
   | { type: "permission.replied"; requestId: string }
   | { type: "question.replied"; requestId: string }
-  | { type: "questions.reconciled"; questions: QuestionRequest[] }
   | { type: "reset"; messages?: AgentMessage[] };
 
 export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []): AgentChatRuntimeState {
@@ -104,9 +103,6 @@ export function reduceAgentChatRuntime(
   }
   if (action.type === "question.replied") {
     return { ...state, questions: state.questions.filter((item) => item.requestId !== action.requestId) };
-  }
-  if (action.type === "questions.reconciled") {
-    return action.questions.length > 0 ? { ...state, questions: action.questions.reduce(upsertById, state.questions) } : state;
   }
   if (action.type === "user.submitted") {
     const now = action.createdAt ?? new Date().toISOString();
