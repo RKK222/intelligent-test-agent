@@ -19,6 +19,11 @@ class BackendRuntimeMetricsCollectorTest {
         assertThat(metrics.jvmMemoryUsedBytes()).isNotNull();
         assertThat(metrics.jvmMemoryCommittedBytes()).isNotNull();
         assertThat(metrics.jvmThreadsLive()).isNotNull();
+        assertThat(metrics.jvmHeapUsedBytes()).isNotNull();
+        assertThat(metrics.jvmNonHeapUsedBytes()).isNotNull();
+        assertThat(metrics.jvmThreadsDaemon()).isNotNull();
+        assertThat(metrics.jvmThreadsPeak()).isNotNull();
+        assertThat(metrics.jvmThreadsTotalStarted()).isNotNull();
     }
 
     @Test
@@ -65,6 +70,12 @@ class BackendRuntimeMetricsCollectorTest {
 
         BackendRuntimeMetrics metrics = collector.sample();
 
+        if (metrics.memoryTotalBytes() != null) {
+            assertThat(metrics.memoryMaxBytes()).isEqualTo(metrics.memoryTotalBytes());
+        }
+        if (metrics.memoryTotalBytes() != null && metrics.memoryAvailableBytes() != null) {
+            assertThat(metrics.memoryUsedBytes()).isEqualTo(metrics.memoryTotalBytes() - metrics.memoryAvailableBytes());
+        }
         // 如果内存信息可用，已用内存不应超过总内存
         if (metrics.memoryMaxBytes() != null && metrics.memoryUsedBytes() != null) {
             assertThat(metrics.memoryUsedBytes()).isLessThanOrEqualTo(metrics.memoryMaxBytes());
@@ -84,6 +95,7 @@ class BackendRuntimeMetricsCollectorTest {
         // 磁盘信息应该总是能获取
         assertThat(metrics.diskMaxBytes()).isNotNull().isPositive();
         assertThat(metrics.diskUsedBytes()).isNotNull().isPositive();
+        assertThat(metrics.diskAvailableBytes()).isNotNull();
         assertThat(metrics.diskUsedBytes()).isLessThanOrEqualTo(metrics.diskMaxBytes());
         assertThat(metrics.diskUsagePercent()).isBetween(0.0, 100.0);
     }
@@ -98,6 +110,11 @@ class BackendRuntimeMetricsCollectorTest {
         assertThat(metrics.jvmMemoryUsedBytes()).isNotNull().isPositive();
         assertThat(metrics.jvmMemoryCommittedBytes()).isNotNull().isPositive();
         assertThat(metrics.jvmMemoryUsedBytes()).isLessThanOrEqualTo(metrics.jvmMemoryCommittedBytes());
+        assertThat(metrics.jvmHeapUsedBytes()).isNotNull();
+        assertThat(metrics.jvmHeapCommittedBytes()).isNotNull();
+        assertThat(metrics.jvmNonHeapUsedBytes()).isNotNull();
+        assertThat(metrics.jvmNonHeapCommittedBytes()).isNotNull();
+        assertThat(metrics.jvmGcPauseMillis()).isEqualTo(metrics.jvmGcCollectionTimeDeltaMillis());
         // 线程数
         assertThat(metrics.jvmThreadsLive()).isNotNull().isPositive();
     }

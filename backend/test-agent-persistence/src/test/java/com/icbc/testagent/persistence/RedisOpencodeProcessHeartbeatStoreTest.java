@@ -126,8 +126,16 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                 contains("\"diskUsagePercent\":25.0"),
                 eq((double) NOW.toEpochMilli()));
         verify(fixture.zsets).add(
+                eq("test-agent:runtime-metrics:server:10.8.0.12"),
+                contains("\"memoryAvailableBytes\":1536"),
+                eq((double) NOW.toEpochMilli()));
+        verify(fixture.zsets).add(
                 eq("test-agent:runtime-metrics:backend:10.8.0.12"),
                 contains("\"jvmThreadsLive\":42"),
+                eq((double) NOW.toEpochMilli()));
+        verify(fixture.zsets).add(
+                eq("test-agent:runtime-metrics:backend:10.8.0.12"),
+                contains("\"jvmProcessResidentMemoryBytes\":700"),
                 eq((double) NOW.toEpochMilli()));
         verify(fixture.zsets).removeRangeByScore(
                 "test-agent:runtime-metrics:server:10.8.0.12",
@@ -151,14 +159,14 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                 NOW.minusSeconds(60).toEpochMilli(),
                 NOW.toEpochMilli()))
                 .thenReturn(java.util.Set.of("""
-                        {"sampledAt":"2026-06-24T00:00:00Z","cpuUsagePercent":22.5,"memoryMaxBytes":2048,"memoryUsedBytes":1024,"memoryUsagePercent":50.0,"diskMaxBytes":4096,"diskUsedBytes":1024,"diskUsagePercent":25.0}
+                        {"sampledAt":"2026-06-24T00:00:00Z","cpuUsagePercent":22.5,"cpuCoreCount":8,"loadAverage1m":1.5,"memoryMaxBytes":2048,"memoryTotalBytes":2048,"memoryAvailableBytes":1536,"memoryFreeBytes":1280,"memoryUsedBytes":512,"memoryUsagePercent":25.0,"memoryBuffersBytes":64,"memoryCachedBytes":256,"swapTotalBytes":1024,"swapFreeBytes":768,"swapUsedBytes":256,"swapUsagePercent":25.0,"diskMaxBytes":4096,"diskAvailableBytes":3072,"diskUsedBytes":1024,"diskUsagePercent":25.0,"futureField":"ignored"}
                         """));
         when(fixture.zsets.rangeByScore(
                 "test-agent:runtime-metrics:backend:10.8.0.12",
                 NOW.minusSeconds(60).toEpochMilli(),
                 NOW.toEpochMilli()))
                 .thenReturn(java.util.Set.of("""
-                        {"sampledAt":"2026-06-24T00:00:00Z","cpuUsagePercent":22.5,"memoryMaxBytes":2048,"memoryUsedBytes":1024,"memoryUsagePercent":50.0,"diskMaxBytes":4096,"diskUsedBytes":1024,"diskUsagePercent":25.0,"jvmMemoryUsedBytes":300,"jvmMemoryCommittedBytes":400,"jvmMemoryMaxBytes":500,"jvmGcPauseMillis":7,"jvmThreadsLive":42}
+                        {"sampledAt":"2026-06-24T00:00:00Z","jvmProcessCpuUsagePercent":7.5,"jvmProcessResidentMemoryBytes":700,"jvmMemoryUsedBytes":300,"jvmMemoryCommittedBytes":400,"jvmMemoryMaxBytes":500,"jvmHeapUsedBytes":200,"jvmNonHeapUsedBytes":100,"jvmGcPauseMillis":7,"jvmGcCollectionTimeDeltaMillis":7,"jvmGcCollectionCountDelta":3,"jvmThreadsLive":42}
                         """));
 
         List<ContainerRuntimeMetricSample> containerSamples = store.containerMetricSamples(
@@ -180,9 +188,16 @@ class RedisOpencodeProcessHeartbeatStoreTest {
         org.assertj.core.api.Assertions.assertThat(serverSamples)
                 .extracting(ServerRuntimeMetricSample::diskUsagePercent)
                 .containsExactly(25.0);
+        org.assertj.core.api.Assertions.assertThat(serverSamples)
+                .extracting(ServerRuntimeMetricSample::memoryAvailableBytes)
+                .containsExactly(1536L);
         org.assertj.core.api.Assertions.assertThat(backendSamples)
                 .extracting(BackendRuntimeMetricSample::jvmThreadsLive)
                 .containsExactly(42);
+        org.assertj.core.api.Assertions.assertThat(backendSamples)
+                .extracting(BackendRuntimeMetricSample::jvmProcessResidentMemoryBytes)
+                .containsExactly(700L);
+        org.assertj.core.api.Assertions.assertThat(backendSamples.getFirst().jvmThreadsDaemon()).isNull();
     }
 
     private static BackendRuntimeSnapshot backendSnapshot() {
@@ -220,17 +235,58 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                 snapshot.backendProcess(),
                 new BackendRuntimeMetrics(
                         22.5,
+                        8,
+                        1.5,
+                        1.2,
+                        0.8,
                         2048L,
+                        2048L,
+                        1536L,
+                        1280L,
+                        512L,
+                        25.0,
+                        64L,
+                        256L,
                         1024L,
-                        50.0,
+                        768L,
+                        256L,
+                        25.0,
                         4096L,
+                        3072L,
                         1024L,
                         25.0,
+                        7.5,
+                        0.6,
+                        123456789L,
+                        700L,
+                        900L,
+                        4096L,
+                        32L,
+                        50L,
+                        1024L,
                         300L,
                         400L,
                         500L,
+                        200L,
+                        300L,
+                        400L,
+                        100L,
+                        100L,
+                        100L,
+                        2L,
+                        16L,
+                        32L,
+                        1L,
+                        8L,
+                        16L,
                         7L,
-                        42));
+                        7L,
+                        3L,
+                        0.4,
+                        42,
+                        12,
+                        48,
+                        1000L));
     }
 
     private static ManagerRuntimeSnapshot managerSnapshot() {

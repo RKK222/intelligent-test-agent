@@ -351,21 +351,62 @@ public class RuntimeManagementQueryService {
         for (ServerRuntimeMetricSample sample : serverSamples) {
             BackendMetricAccumulator accumulator = bySampledAt.computeIfAbsent(sample.sampledAt(), BackendMetricAccumulator::new);
             accumulator.cpuUsagePercent = sample.cpuUsagePercent();
+            accumulator.cpuCoreCount = sample.cpuCoreCount();
+            accumulator.loadAverage1m = sample.loadAverage1m();
+            accumulator.loadAverage5m = sample.loadAverage5m();
+            accumulator.loadAverage15m = sample.loadAverage15m();
             accumulator.memoryMaxBytes = sample.memoryMaxBytes();
+            accumulator.memoryTotalBytes = sample.memoryTotalBytes();
+            accumulator.memoryAvailableBytes = sample.memoryAvailableBytes();
+            accumulator.memoryFreeBytes = sample.memoryFreeBytes();
             accumulator.memoryUsedBytes = sample.memoryUsedBytes();
             accumulator.memoryUsagePercent = sample.memoryUsagePercent();
+            accumulator.memoryBuffersBytes = sample.memoryBuffersBytes();
+            accumulator.memoryCachedBytes = sample.memoryCachedBytes();
+            accumulator.swapTotalBytes = sample.swapTotalBytes();
+            accumulator.swapFreeBytes = sample.swapFreeBytes();
+            accumulator.swapUsedBytes = sample.swapUsedBytes();
+            accumulator.swapUsagePercent = sample.swapUsagePercent();
             accumulator.diskMaxBytes = sample.diskMaxBytes();
+            accumulator.diskAvailableBytes = sample.diskAvailableBytes();
             accumulator.diskUsedBytes = sample.diskUsedBytes();
             accumulator.diskUsagePercent = sample.diskUsagePercent();
         }
         for (BackendRuntimeMetricSample sample : backendSamples) {
             BackendMetricAccumulator accumulator = bySampledAt.computeIfAbsent(sample.sampledAt(), BackendMetricAccumulator::new);
             // server:{linuxServerId} 是服务器级指标权威来源；backend:{backendProcessId} 只合并当前 JVM 指标。
+            accumulator.jvmProcessCpuUsagePercent = sample.jvmProcessCpuUsagePercent();
+            accumulator.jvmProcessCpuCoreUsage = sample.jvmProcessCpuCoreUsage();
+            accumulator.jvmProcessCpuTimeNanos = sample.jvmProcessCpuTimeNanos();
+            accumulator.jvmProcessResidentMemoryBytes = sample.jvmProcessResidentMemoryBytes();
+            accumulator.jvmProcessPeakResidentMemoryBytes = sample.jvmProcessPeakResidentMemoryBytes();
+            accumulator.jvmProcessVirtualMemoryBytes = sample.jvmProcessVirtualMemoryBytes();
+            accumulator.jvmProcessSwapBytes = sample.jvmProcessSwapBytes();
+            accumulator.jvmOpenFileDescriptorCount = sample.jvmOpenFileDescriptorCount();
+            accumulator.jvmMaxFileDescriptorCount = sample.jvmMaxFileDescriptorCount();
             accumulator.jvmMemoryUsedBytes = sample.jvmMemoryUsedBytes();
             accumulator.jvmMemoryCommittedBytes = sample.jvmMemoryCommittedBytes();
             accumulator.jvmMemoryMaxBytes = sample.jvmMemoryMaxBytes();
+            accumulator.jvmHeapUsedBytes = sample.jvmHeapUsedBytes();
+            accumulator.jvmHeapCommittedBytes = sample.jvmHeapCommittedBytes();
+            accumulator.jvmHeapMaxBytes = sample.jvmHeapMaxBytes();
+            accumulator.jvmNonHeapUsedBytes = sample.jvmNonHeapUsedBytes();
+            accumulator.jvmNonHeapCommittedBytes = sample.jvmNonHeapCommittedBytes();
+            accumulator.jvmNonHeapMaxBytes = sample.jvmNonHeapMaxBytes();
+            accumulator.jvmDirectBufferCount = sample.jvmDirectBufferCount();
+            accumulator.jvmDirectBufferUsedBytes = sample.jvmDirectBufferUsedBytes();
+            accumulator.jvmDirectBufferCapacityBytes = sample.jvmDirectBufferCapacityBytes();
+            accumulator.jvmMappedBufferCount = sample.jvmMappedBufferCount();
+            accumulator.jvmMappedBufferUsedBytes = sample.jvmMappedBufferUsedBytes();
+            accumulator.jvmMappedBufferCapacityBytes = sample.jvmMappedBufferCapacityBytes();
             accumulator.jvmGcPauseMillis = sample.jvmGcPauseMillis();
+            accumulator.jvmGcCollectionTimeDeltaMillis = sample.jvmGcCollectionTimeDeltaMillis();
+            accumulator.jvmGcCollectionCountDelta = sample.jvmGcCollectionCountDelta();
+            accumulator.jvmGcTimePercent = sample.jvmGcTimePercent();
             accumulator.jvmThreadsLive = sample.jvmThreadsLive();
+            accumulator.jvmThreadsDaemon = sample.jvmThreadsDaemon();
+            accumulator.jvmThreadsPeak = sample.jvmThreadsPeak();
+            accumulator.jvmThreadsTotalStarted = sample.jvmThreadsTotalStarted();
         }
         return bySampledAt.values().stream()
                 .map(BackendMetricAccumulator::toSample)
@@ -597,17 +638,58 @@ public class RuntimeManagementQueryService {
             result.add(new RuntimeManagementBackendMetricSample(
                     last.sampledAt(),
                     averageDouble(bucket.stream().map(BackendRuntimeMetricSample::cpuUsagePercent).toList()),
+                    averageInteger(bucket.stream().map(BackendRuntimeMetricSample::cpuCoreCount).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::loadAverage1m).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::loadAverage5m).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::loadAverage15m).toList()),
                     averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryMaxBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryTotalBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryAvailableBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryFreeBytes).toList()),
                     averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryUsedBytes).toList()),
                     averageDouble(bucket.stream().map(BackendRuntimeMetricSample::memoryUsagePercent).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryBuffersBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryCachedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::swapTotalBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::swapFreeBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::swapUsedBytes).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::swapUsagePercent).toList()),
                     averageLong(bucket.stream().map(BackendRuntimeMetricSample::diskMaxBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::diskAvailableBytes).toList()),
                     averageLong(bucket.stream().map(BackendRuntimeMetricSample::diskUsedBytes).toList()),
                     averageDouble(bucket.stream().map(BackendRuntimeMetricSample::diskUsagePercent).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::jvmProcessCpuUsagePercent).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::jvmProcessCpuCoreUsage).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmProcessCpuTimeNanos).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmProcessResidentMemoryBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmProcessPeakResidentMemoryBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmProcessVirtualMemoryBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmProcessSwapBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmOpenFileDescriptorCount).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMaxFileDescriptorCount).toList()),
                     averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMemoryUsedBytes).toList()),
                     averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMemoryCommittedBytes).toList()),
                     averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMemoryMaxBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmHeapUsedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmHeapCommittedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmHeapMaxBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmNonHeapUsedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmNonHeapCommittedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmNonHeapMaxBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmDirectBufferCount).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmDirectBufferUsedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmDirectBufferCapacityBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMappedBufferCount).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMappedBufferUsedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMappedBufferCapacityBytes).toList()),
                     averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmGcPauseMillis).toList()),
-                    averageInteger(bucket.stream().map(BackendRuntimeMetricSample::jvmThreadsLive).toList())));
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmGcCollectionTimeDeltaMillis).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmGcCollectionCountDelta).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::jvmGcTimePercent).toList()),
+                    averageInteger(bucket.stream().map(BackendRuntimeMetricSample::jvmThreadsLive).toList()),
+                    averageInteger(bucket.stream().map(BackendRuntimeMetricSample::jvmThreadsDaemon).toList()),
+                    averageInteger(bucket.stream().map(BackendRuntimeMetricSample::jvmThreadsPeak).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmThreadsTotalStarted).toList())));
         }
         return result;
     }
@@ -674,17 +756,58 @@ public class RuntimeManagementQueryService {
         return new RuntimeManagementBackendMetricSample(
                 sample.sampledAt(),
                 sample.cpuUsagePercent(),
+                sample.cpuCoreCount(),
+                sample.loadAverage1m(),
+                sample.loadAverage5m(),
+                sample.loadAverage15m(),
                 sample.memoryMaxBytes(),
+                sample.memoryTotalBytes(),
+                sample.memoryAvailableBytes(),
+                sample.memoryFreeBytes(),
                 sample.memoryUsedBytes(),
                 sample.memoryUsagePercent(),
+                sample.memoryBuffersBytes(),
+                sample.memoryCachedBytes(),
+                sample.swapTotalBytes(),
+                sample.swapFreeBytes(),
+                sample.swapUsedBytes(),
+                sample.swapUsagePercent(),
                 sample.diskMaxBytes(),
+                sample.diskAvailableBytes(),
                 sample.diskUsedBytes(),
                 sample.diskUsagePercent(),
+                sample.jvmProcessCpuUsagePercent(),
+                sample.jvmProcessCpuCoreUsage(),
+                sample.jvmProcessCpuTimeNanos(),
+                sample.jvmProcessResidentMemoryBytes(),
+                sample.jvmProcessPeakResidentMemoryBytes(),
+                sample.jvmProcessVirtualMemoryBytes(),
+                sample.jvmProcessSwapBytes(),
+                sample.jvmOpenFileDescriptorCount(),
+                sample.jvmMaxFileDescriptorCount(),
                 sample.jvmMemoryUsedBytes(),
                 sample.jvmMemoryCommittedBytes(),
                 sample.jvmMemoryMaxBytes(),
+                sample.jvmHeapUsedBytes(),
+                sample.jvmHeapCommittedBytes(),
+                sample.jvmHeapMaxBytes(),
+                sample.jvmNonHeapUsedBytes(),
+                sample.jvmNonHeapCommittedBytes(),
+                sample.jvmNonHeapMaxBytes(),
+                sample.jvmDirectBufferCount(),
+                sample.jvmDirectBufferUsedBytes(),
+                sample.jvmDirectBufferCapacityBytes(),
+                sample.jvmMappedBufferCount(),
+                sample.jvmMappedBufferUsedBytes(),
+                sample.jvmMappedBufferCapacityBytes(),
                 sample.jvmGcPauseMillis(),
-                sample.jvmThreadsLive());
+                sample.jvmGcCollectionTimeDeltaMillis(),
+                sample.jvmGcCollectionCountDelta(),
+                sample.jvmGcTimePercent(),
+                sample.jvmThreadsLive(),
+                sample.jvmThreadsDaemon(),
+                sample.jvmThreadsPeak(),
+                sample.jvmThreadsTotalStarted());
     }
 
     private Double averageDouble(List<Double> values) {
@@ -748,17 +871,58 @@ public class RuntimeManagementQueryService {
     private static final class BackendMetricAccumulator {
         private final Instant sampledAt;
         private Double cpuUsagePercent;
+        private Integer cpuCoreCount;
+        private Double loadAverage1m;
+        private Double loadAverage5m;
+        private Double loadAverage15m;
         private Long memoryMaxBytes;
+        private Long memoryTotalBytes;
+        private Long memoryAvailableBytes;
+        private Long memoryFreeBytes;
         private Long memoryUsedBytes;
         private Double memoryUsagePercent;
+        private Long memoryBuffersBytes;
+        private Long memoryCachedBytes;
+        private Long swapTotalBytes;
+        private Long swapFreeBytes;
+        private Long swapUsedBytes;
+        private Double swapUsagePercent;
         private Long diskMaxBytes;
+        private Long diskAvailableBytes;
         private Long diskUsedBytes;
         private Double diskUsagePercent;
+        private Double jvmProcessCpuUsagePercent;
+        private Double jvmProcessCpuCoreUsage;
+        private Long jvmProcessCpuTimeNanos;
+        private Long jvmProcessResidentMemoryBytes;
+        private Long jvmProcessPeakResidentMemoryBytes;
+        private Long jvmProcessVirtualMemoryBytes;
+        private Long jvmProcessSwapBytes;
+        private Long jvmOpenFileDescriptorCount;
+        private Long jvmMaxFileDescriptorCount;
         private Long jvmMemoryUsedBytes;
         private Long jvmMemoryCommittedBytes;
         private Long jvmMemoryMaxBytes;
+        private Long jvmHeapUsedBytes;
+        private Long jvmHeapCommittedBytes;
+        private Long jvmHeapMaxBytes;
+        private Long jvmNonHeapUsedBytes;
+        private Long jvmNonHeapCommittedBytes;
+        private Long jvmNonHeapMaxBytes;
+        private Long jvmDirectBufferCount;
+        private Long jvmDirectBufferUsedBytes;
+        private Long jvmDirectBufferCapacityBytes;
+        private Long jvmMappedBufferCount;
+        private Long jvmMappedBufferUsedBytes;
+        private Long jvmMappedBufferCapacityBytes;
         private Long jvmGcPauseMillis;
+        private Long jvmGcCollectionTimeDeltaMillis;
+        private Long jvmGcCollectionCountDelta;
+        private Double jvmGcTimePercent;
         private Integer jvmThreadsLive;
+        private Integer jvmThreadsDaemon;
+        private Integer jvmThreadsPeak;
+        private Long jvmThreadsTotalStarted;
 
         private BackendMetricAccumulator(Instant sampledAt) {
             this.sampledAt = sampledAt;
@@ -768,17 +932,58 @@ public class RuntimeManagementQueryService {
             return new BackendRuntimeMetricSample(
                     sampledAt,
                     cpuUsagePercent,
+                    cpuCoreCount,
+                    loadAverage1m,
+                    loadAverage5m,
+                    loadAverage15m,
                     memoryMaxBytes,
+                    memoryTotalBytes,
+                    memoryAvailableBytes,
+                    memoryFreeBytes,
                     memoryUsedBytes,
                     memoryUsagePercent,
+                    memoryBuffersBytes,
+                    memoryCachedBytes,
+                    swapTotalBytes,
+                    swapFreeBytes,
+                    swapUsedBytes,
+                    swapUsagePercent,
                     diskMaxBytes,
+                    diskAvailableBytes,
                     diskUsedBytes,
                     diskUsagePercent,
+                    jvmProcessCpuUsagePercent,
+                    jvmProcessCpuCoreUsage,
+                    jvmProcessCpuTimeNanos,
+                    jvmProcessResidentMemoryBytes,
+                    jvmProcessPeakResidentMemoryBytes,
+                    jvmProcessVirtualMemoryBytes,
+                    jvmProcessSwapBytes,
+                    jvmOpenFileDescriptorCount,
+                    jvmMaxFileDescriptorCount,
                     jvmMemoryUsedBytes,
                     jvmMemoryCommittedBytes,
                     jvmMemoryMaxBytes,
+                    jvmHeapUsedBytes,
+                    jvmHeapCommittedBytes,
+                    jvmHeapMaxBytes,
+                    jvmNonHeapUsedBytes,
+                    jvmNonHeapCommittedBytes,
+                    jvmNonHeapMaxBytes,
+                    jvmDirectBufferCount,
+                    jvmDirectBufferUsedBytes,
+                    jvmDirectBufferCapacityBytes,
+                    jvmMappedBufferCount,
+                    jvmMappedBufferUsedBytes,
+                    jvmMappedBufferCapacityBytes,
                     jvmGcPauseMillis,
-                    jvmThreadsLive);
+                    jvmGcCollectionTimeDeltaMillis,
+                    jvmGcCollectionCountDelta,
+                    jvmGcTimePercent,
+                    jvmThreadsLive,
+                    jvmThreadsDaemon,
+                    jvmThreadsPeak,
+                    jvmThreadsTotalStarted);
         }
     }
 }

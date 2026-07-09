@@ -1,6 +1,7 @@
 package com.icbc.testagent.persistence;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
 import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeMetricSample;
@@ -53,7 +54,9 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
      */
     public RedisOpencodeProcessHeartbeatStore(StringRedisTemplate redisTemplate) {
         this.redisTemplate = Objects.requireNonNull(redisTemplate, "redisTemplate must not be null");
-        this.objectMapper = new ObjectMapper().findAndRegisterModules();
+        this.objectMapper = new ObjectMapper()
+                .findAndRegisterModules()
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
     @Override
@@ -253,10 +256,24 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
         ServerRuntimeMetricSample serverSample = new ServerRuntimeMetricSample(
                 snapshot.backendProcess().lastHeartbeatAt(),
                 metrics.cpuUsagePercent(),
+                metrics.cpuCoreCount(),
+                metrics.loadAverage1m(),
+                metrics.loadAverage5m(),
+                metrics.loadAverage15m(),
                 metrics.memoryMaxBytes(),
+                metrics.memoryTotalBytes(),
+                metrics.memoryAvailableBytes(),
+                metrics.memoryFreeBytes(),
                 metrics.memoryUsedBytes(),
                 metrics.memoryUsagePercent(),
+                metrics.memoryBuffersBytes(),
+                metrics.memoryCachedBytes(),
+                metrics.swapTotalBytes(),
+                metrics.swapFreeBytes(),
+                metrics.swapUsedBytes(),
+                metrics.swapUsagePercent(),
                 metrics.diskMaxBytes(),
+                metrics.diskAvailableBytes(),
                 metrics.diskUsedBytes(),
                 metrics.diskUsagePercent());
         appendMetricSample(SERVER_METRICS_KEY_PREFIX + snapshot.linuxServer().linuxServerId().value(), serverSample.sampledAt(), serverSample);
@@ -269,11 +286,52 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                metrics.jvmProcessCpuUsagePercent(),
+                metrics.jvmProcessCpuCoreUsage(),
+                metrics.jvmProcessCpuTimeNanos(),
+                metrics.jvmProcessResidentMemoryBytes(),
+                metrics.jvmProcessPeakResidentMemoryBytes(),
+                metrics.jvmProcessVirtualMemoryBytes(),
+                metrics.jvmProcessSwapBytes(),
+                metrics.jvmOpenFileDescriptorCount(),
+                metrics.jvmMaxFileDescriptorCount(),
                 metrics.jvmMemoryUsedBytes(),
                 metrics.jvmMemoryCommittedBytes(),
                 metrics.jvmMemoryMaxBytes(),
+                metrics.jvmHeapUsedBytes(),
+                metrics.jvmHeapCommittedBytes(),
+                metrics.jvmHeapMaxBytes(),
+                metrics.jvmNonHeapUsedBytes(),
+                metrics.jvmNonHeapCommittedBytes(),
+                metrics.jvmNonHeapMaxBytes(),
+                metrics.jvmDirectBufferCount(),
+                metrics.jvmDirectBufferUsedBytes(),
+                metrics.jvmDirectBufferCapacityBytes(),
+                metrics.jvmMappedBufferCount(),
+                metrics.jvmMappedBufferUsedBytes(),
+                metrics.jvmMappedBufferCapacityBytes(),
                 metrics.jvmGcPauseMillis(),
-                metrics.jvmThreadsLive());
+                metrics.jvmGcCollectionTimeDeltaMillis(),
+                metrics.jvmGcCollectionCountDelta(),
+                metrics.jvmGcTimePercent(),
+                metrics.jvmThreadsLive(),
+                metrics.jvmThreadsDaemon(),
+                metrics.jvmThreadsPeak(),
+                metrics.jvmThreadsTotalStarted());
         appendMetricSample(BACKEND_METRICS_KEY_PREFIX + snapshot.backendProcess().linuxServerId().value(), sample.sampledAt(), sample);
     }
 

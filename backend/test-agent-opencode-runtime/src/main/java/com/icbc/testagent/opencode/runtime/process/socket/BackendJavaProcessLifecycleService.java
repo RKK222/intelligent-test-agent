@@ -1,6 +1,7 @@
 package com.icbc.testagent.opencode.runtime.process.socket;
 
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
+import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
@@ -47,8 +48,9 @@ public class BackendJavaProcessLifecycleService {
     public BackendJavaProcessLifecycleService(
             OpencodeProcessManagementRepository repository,
             OpencodeProcessHeartbeatStore heartbeatStore,
-            ManagerControlSettings settings) {
-        this(repository, heartbeatStore, settings, Clock.systemUTC());
+            ManagerControlSettings settings,
+            CommonParameterValues commonParameterValues) {
+        this(repository, heartbeatStore, settings, Clock.systemUTC(), new BackendRuntimeMetricsCollector(metricsDiskPath(commonParameterValues)));
     }
 
     /**
@@ -97,6 +99,23 @@ public class BackendJavaProcessLifecycleService {
         this.metricsCollector = Objects.requireNonNull(metricsCollector, "metricsCollector must not be null");
         this.backendProcessId = new BackendProcessId(RuntimeIdGenerator.backendProcessId());
         this.startedAt = Instant.now(clock);
+    }
+
+    /**
+     * 运行管理磁盘容量优先监控系统数据根目录；通用参数缺失或路径非法时回退 Java 当前工作目录。
+     */
+    private static Path metricsDiskPath(CommonParameterValues commonParameterValues) {
+        if (commonParameterValues != null) {
+            try {
+                return commonParameterValues.resolvedValue("SYS_DATA_ROOT_DIR")
+                        .filter(value -> !value.isBlank())
+                        .map(value -> Path.of(value.trim()).toAbsolutePath().normalize())
+                        .orElseGet(() -> Path.of("").toAbsolutePath().normalize());
+            } catch (RuntimeException ignored) {
+                return Path.of("").toAbsolutePath().normalize();
+            }
+        }
+        return Path.of("").toAbsolutePath().normalize();
     }
 
     /**

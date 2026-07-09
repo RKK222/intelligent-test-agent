@@ -4933,3 +4933,16 @@ bash /tmp/test-api-after-restart.sh
   - 不改 HTTP API、SSE、数据库、Go manager 控制帧或 generated SDK；仅调整 Java 路径身份来源、单测假仓储和相关 README/session-log 说明。
 - Result:
   - 已先用失败断言复现实际仍为 `users/usr_...`，修复后 `UserOpencodeProcessAssignmentServiceTest` 全类、后端 opencode runtime/client/agent-runtime reactor 和 `opencode-manager go test ./...` 均通过。
+
+### 2026-07-09 - 运行管理后端指标扩展为服务器/Java/JVM 分组
+
+- Why:
+  - 运行管理只展示整机 CPU、粗粒度内存/磁盘和 JVM 聚合值，无法定位 Linux load、MemAvailable、swap、Java RSS/FD、heap/non-heap/direct buffer、GC delta 和线程峰值等问题；同一服务器 Java 重启后仍需按稳定 `linuxServerId` 连续查看历史。
+- What:
+  - `BackendRuntimeMetrics`、Redis 样本、runtime API DTO 和前端 shared-types 扩展服务器、Java 进程和 JVM 指标字段；旧字段保留，`memoryMaxBytes=memoryTotalBytes`、`jvmGcPauseMillis=jvmGcCollectionTimeDeltaMillis`、`cpuUsagePercent` 仍为整机 CPU。
+  - runtime 新增 Linux `/proc` 采集器，Linux 读取 `/proc/stat` 差值、`loadavg`、`meminfo`、`/proc/self/status`、`fd`，非 Linux 保持 best-effort 且 Linux-only 字段为 `null`；磁盘路径优先使用 `SYS_DATA_ROOT_DIR`，不新增环境变量。
+  - Redis 历史继续按 `server:{linuxServerId}` 保存服务器字段，按 `backend:{linuxServerId}` 保存 Java/JVM 字段，查询时合并并宽容旧 JSON 缺字段；前端表格和趋势图展示整机/Java CPU、内存/RSS、heap、线程/FD 及六组趋势。
+- How:
+  - 未改数据库、SSE、API 路径、generated SDK 或 `.env.local`；同步更新 HTTP API、后端/前端 README 和运行管理相关单测/Vitest。
+- Result:
+  - 定向采集器、Redis、RuntimeManagementQueryService、运行管理前端和 backend-api 运行管理用例通过；计划中的 `-am test`、API 测试编译和前端全量 typecheck/聚合 Vitest 当前被已有 scheduler diagnostics 未完成改动阻断（缺少 `ScheduledTaskLockInspection` / `SchedulerDiagnostics` / `getSchedulerDiagnostics`），本次未修改这些无关文件。

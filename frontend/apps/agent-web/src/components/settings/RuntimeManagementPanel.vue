@@ -441,6 +441,31 @@ function formatBytesRate(value?: number | null) {
   return formatted === "-" ? "-" : `${formatted}/s`;
 }
 
+function formatLoad(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "-";
+  }
+  return value.toFixed(value >= 10 ? 1 : 2);
+}
+
+function formatCountPair(value?: number | null, max?: number | null) {
+  const current = value === null || value === undefined || !Number.isFinite(value) ? "-" : String(Math.round(value));
+  const upper = max === null || max === undefined || !Number.isFinite(max) ? "-" : String(Math.round(max));
+  return `${current}/${upper}`;
+}
+
+function backendMemoryTotal(backend?: OpencodeRuntimeBackendProcess) {
+  return backend?.memoryTotalBytes ?? backend?.memoryMaxBytes;
+}
+
+function backendJvmHeapUsed(backend?: OpencodeRuntimeBackendProcess) {
+  return backend?.jvmHeapUsedBytes ?? backend?.jvmMemoryUsedBytes;
+}
+
+function backendJvmHeapMax(backend?: OpencodeRuntimeBackendProcess) {
+  return backend?.jvmHeapMaxBytes ?? backend?.jvmMemoryMaxBytes;
+}
+
 function formatMetricsSource(value?: string | null) {
   if (!value) {
     return "-";
@@ -687,10 +712,10 @@ function startResize(e: MouseEvent) {
                       <th style="width: 120px; position: relative;">Java 进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 90px; position: relative;">服务器状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 90px; position: relative;">Java 状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
-                      <th style="width: 80px; position: relative;">CPU<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
-                      <th style="width: 150px; position: relative;">内存<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 130px; position: relative;">CPU<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 190px; position: relative;">内存<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 150px; position: relative;">磁盘<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
-                      <th style="width: 150px; position: relative;">JVM<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 180px; position: relative;">JVM<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 140px; position: relative;">心跳<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 120px; position: relative;">容量<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 100px; position: relative;">操作<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
@@ -717,10 +742,22 @@ function startResize(e: MouseEvent) {
                         <span v-if="row.backend" :class="['ta-status', statusClass(row.backend.status)]">{{ row.backend.status }}</span>
                         <span v-else>-</span>
                       </td>
-                      <td>{{ formatPercent(row.backend?.cpuUsagePercent) }}</td>
-                      <td>{{ formatPercent(row.backend?.memoryUsagePercent) }} / {{ formatBytes(row.backend?.memoryUsedBytes) }}</td>
-                      <td>{{ formatPercent(row.backend?.diskUsagePercent) }} / {{ formatBytes(row.backend?.diskUsedBytes) }}</td>
-                      <td>{{ formatBytes(row.backend?.jvmMemoryUsedBytes) }} / {{ row.backend?.jvmThreadsLive ?? "-" }} 线程</td>
+                      <td class="is-metric-stack">
+                        <span>整机 {{ formatPercent(row.backend?.cpuUsagePercent) }} / {{ row.backend?.cpuCoreCount ?? "-" }}核</span>
+                        <span>Java {{ formatPercent(row.backend?.jvmProcessCpuUsagePercent) }} / {{ formatLoad(row.backend?.jvmProcessCpuCoreUsage) }}核</span>
+                      </td>
+                      <td class="is-metric-stack">
+                        <span>整机 {{ formatBytes(row.backend?.memoryUsedBytes) }} / {{ formatBytes(backendMemoryTotal(row.backend)) }}</span>
+                        <span>可用 {{ formatBytes(row.backend?.memoryAvailableBytes) }} · RSS {{ formatBytes(row.backend?.jvmProcessResidentMemoryBytes) }}</span>
+                      </td>
+                      <td class="is-metric-stack">
+                        <span>{{ formatPercent(row.backend?.diskUsagePercent) }} / {{ formatBytes(row.backend?.diskUsedBytes) }}</span>
+                        <span>可用 {{ formatBytes(row.backend?.diskAvailableBytes) }}</span>
+                      </td>
+                      <td class="is-metric-stack">
+                        <span>Heap {{ formatBytes(backendJvmHeapUsed(row.backend)) }} / {{ formatBytes(backendJvmHeapMax(row.backend)) }}</span>
+                        <span>线程 {{ row.backend?.jvmThreadsLive ?? "-" }}/{{ row.backend?.jvmThreadsPeak ?? "-" }} · FD {{ formatCountPair(row.backend?.jvmOpenFileDescriptorCount, row.backend?.jvmMaxFileDescriptorCount) }}</span>
+                      </td>
                       <td>{{ formatDate(row.backend?.lastHeartbeatAt ?? row.server?.lastHeartbeatAt) }}</td>
                       <td class="is-compact">{{ compactRecord(row.server?.capacitySummary) }}</td>
                       <td>
@@ -764,30 +801,62 @@ function startResize(e: MouseEvent) {
               <div v-else-if="metricsQuery.isLoading.value" class="ta-runtime-placeholder">正在加载监控趋势...</div>
               <div v-else class="ta-runtime-chart-grid">
                 <RuntimeMetricChart
-                  title="服务器 CPU / 内存 / 磁盘"
+                  title="服务器 CPU / Load"
                   :samples="metricSamples"
                   :series="[
                     { name: 'CPU %', field: 'cpuUsagePercent' },
+                    { name: 'load 1m', field: 'loadAverage1m' },
+                    { name: 'load 5m', field: 'loadAverage5m' },
+                    { name: 'load 15m', field: 'loadAverage15m' }
+                  ]"
+                />
+                <RuntimeMetricChart
+                  title="服务器内存 / Swap / 磁盘"
+                  :samples="metricSamples"
+                  :series="[
                     { name: '内存 %', field: 'memoryUsagePercent' },
+                    { name: 'swap %', field: 'swapUsagePercent' },
                     { name: '磁盘 %', field: 'diskUsagePercent' }
                   ]"
                 />
                 <RuntimeMetricChart
-                  title="JVM 内存（Java 服务）"
+                  title="Java 进程 CPU"
                   :samples="metricSamples"
                   :series="[
-                    { name: 'used', field: 'jvmMemoryUsedBytes' },
-                    { name: 'committed', field: 'jvmMemoryCommittedBytes' },
-                    { name: 'max', field: 'jvmMemoryMaxBytes' }
+                    { name: 'Java CPU %', field: 'jvmProcessCpuUsagePercent' },
+                    { name: 'Java CPU cores', field: 'jvmProcessCpuCoreUsage' }
+                  ]"
+                />
+                <RuntimeMetricChart
+                  title="Java 进程内存 / RSS"
+                  :samples="metricSamples"
+                  :series="[
+                    { name: 'RSS', field: 'jvmProcessResidentMemoryBytes' },
+                    { name: 'peak RSS', field: 'jvmProcessPeakResidentMemoryBytes' },
+                    { name: 'virtual', field: 'jvmProcessVirtualMemoryBytes' },
+                    { name: 'swap', field: 'jvmProcessSwapBytes' }
                   ]"
                   yAxis-unit="G"
                 />
                 <RuntimeMetricChart
-                  title="JVM GC / 线程（Java 服务）"
+                  title="JVM Heap / Non-Heap / Direct"
                   :samples="metricSamples"
                   :series="[
-                    { name: 'GC pause ms', field: 'jvmGcPauseMillis' },
-                    { name: 'live threads', field: 'jvmThreadsLive' }
+                    { name: 'heap used', field: 'jvmHeapUsedBytes' },
+                    { name: 'non-heap used', field: 'jvmNonHeapUsedBytes' },
+                    { name: 'direct used', field: 'jvmDirectBufferUsedBytes' },
+                    { name: 'mapped used', field: 'jvmMappedBufferUsedBytes' }
+                  ]"
+                  yAxis-unit="G"
+                />
+                <RuntimeMetricChart
+                  title="GC / 线程 / FD"
+                  :samples="metricSamples"
+                  :series="[
+                    { name: 'GC ms', field: 'jvmGcCollectionTimeDeltaMillis' },
+                    { name: 'GC count', field: 'jvmGcCollectionCountDelta' },
+                    { name: 'live threads', field: 'jvmThreadsLive' },
+                    { name: 'open FD', field: 'jvmOpenFileDescriptorCount' }
                   ]"
                 />
               </div>
@@ -1326,6 +1395,16 @@ function startResize(e: MouseEvent) {
   height: 44px;
   color: #909399;
   text-align: center;
+}
+.ta-runtime-table td.is-metric-stack {
+  white-space: normal;
+  line-height: 1.45;
+}
+.ta-runtime-table td.is-metric-stack span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ta-runtime-expand-icon {
   display: inline-block;

@@ -309,26 +309,27 @@ class RuntimeManagementQueryServiceTest {
         heartbeatStore.serverSamples.add(new ServerRuntimeMetricSample(
                 NOW.minusSeconds(40),
                 55.0,
+                8,
+                1.5,
+                1.2,
+                0.8,
                 1600L,
+                1600L,
+                900L,
                 800L,
-                50.0,
+                700L,
+                43.75,
+                64L,
+                256L,
+                1000L,
+                800L,
+                200L,
+                20.0,
                 10000L,
+                4000L,
                 6000L,
                 60.0));
-        heartbeatStore.backendSamples.add(new BackendRuntimeMetricSample(
-                NOW.minusSeconds(20),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                300L,
-                400L,
-                500L,
-                7L,
-                42));
+        heartbeatStore.backendSamples.add(backendOnlySample(NOW.minusSeconds(20)));
         RuntimeManagementQueryService service = service(repository, heartbeatStore);
 
         RuntimeManagementBackendMetricHistory history = service.backendServerMetrics(
@@ -344,10 +345,16 @@ class RuntimeManagementQueryServiceTest {
         assertThat(history.samples()).hasSize(2);
         RuntimeManagementBackendMetricSample serverSample = history.samples().get(0);
         assertThat(serverSample.cpuUsagePercent()).isEqualTo(55.0);
+        assertThat(serverSample.memoryAvailableBytes()).isEqualTo(900L);
+        assertThat(serverSample.swapUsagePercent()).isEqualTo(20.0);
         assertThat(serverSample.diskUsagePercent()).isEqualTo(60.0);
         assertThat(serverSample.jvmThreadsLive()).isNull();
         RuntimeManagementBackendMetricSample jvmSample = history.samples().get(1);
         assertThat(jvmSample.cpuUsagePercent()).isNull();
+        assertThat(jvmSample.jvmProcessResidentMemoryBytes()).isEqualTo(700L);
+        assertThat(jvmSample.jvmHeapUsedBytes()).isEqualTo(200L);
+        assertThat(jvmSample.jvmGcCollectionCountDelta()).isEqualTo(3L);
+        assertThat(jvmSample.jvmThreadsDaemon()).isEqualTo(12);
         assertThat(jvmSample.jvmThreadsLive()).isEqualTo(42);
     }
 
@@ -965,6 +972,64 @@ class RuntimeManagementQueryServiceTest {
             @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
             @Override public void cleanupExpiredHeartbeats() { }
         };
+    }
+
+    private static BackendRuntimeMetricSample backendOnlySample(Instant sampledAt) {
+        return new BackendRuntimeMetricSample(
+                sampledAt,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                7.5,
+                0.6,
+                123456789L,
+                700L,
+                900L,
+                4096L,
+                32L,
+                50L,
+                1024L,
+                300L,
+                400L,
+                500L,
+                200L,
+                300L,
+                400L,
+                100L,
+                100L,
+                100L,
+                2L,
+                16L,
+                32L,
+                1L,
+                8L,
+                16L,
+                7L,
+                7L,
+                3L,
+                0.4,
+                42,
+                12,
+                48,
+                1000L);
     }
 
     private static final class RedisSnapshotHeartbeatStore implements OpencodeProcessHeartbeatStore {

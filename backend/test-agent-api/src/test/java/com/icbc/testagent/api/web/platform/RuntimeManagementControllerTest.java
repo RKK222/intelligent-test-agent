@@ -338,17 +338,58 @@ class RuntimeManagementControllerTest {
                         List.of(new RuntimeManagementBackendMetricSample(
                                 NOW,
                                 22.5,
+                                8,
+                                1.5,
+                                1.2,
+                                0.8,
                                 2048L,
+                                2048L,
+                                1536L,
+                                1280L,
+                                512L,
+                                25.0,
+                                64L,
+                                256L,
                                 1024L,
-                                50.0,
+                                768L,
+                                256L,
+                                25.0,
                                 4096L,
+                                3072L,
                                 1024L,
                                 25.0,
+                                7.5,
+                                0.6,
+                                123456789L,
+                                700L,
+                                900L,
+                                4096L,
+                                32L,
+                                50L,
+                                1024L,
                                 300L,
                                 400L,
                                 500L,
+                                200L,
+                                300L,
+                                400L,
+                                100L,
+                                100L,
+                                100L,
+                                2L,
+                                16L,
+                                32L,
+                                1L,
+                                8L,
+                                16L,
                                 7L,
-                                42))));
+                                7L,
+                                3L,
+                                0.4,
+                                42,
+                                12,
+                                48,
+                                1000L))));
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
@@ -368,6 +409,11 @@ class RuntimeManagementControllerTest {
                 .expectBody()
                 .jsonPath("$.data.linuxServerId").isEqualTo("10.8.0.12")
                 .jsonPath("$.data.backendProcessId").isEqualTo("bjp_1234567890abcdef")
+                .jsonPath("$.data.samples[0].memoryAvailableBytes").isEqualTo(1536)
+                .jsonPath("$.data.samples[0].jvmProcessResidentMemoryBytes").isEqualTo(700)
+                .jsonPath("$.data.samples[0].jvmHeapUsedBytes").isEqualTo(200)
+                .jsonPath("$.data.samples[0].jvmGcCollectionCountDelta").isEqualTo(3)
+                .jsonPath("$.data.samples[0].jvmThreadsDaemon").isEqualTo(12)
                 .jsonPath("$.data.samples[0].jvmThreadsLive").isEqualTo(42);
     }
 

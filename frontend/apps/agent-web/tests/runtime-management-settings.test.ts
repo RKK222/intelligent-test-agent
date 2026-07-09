@@ -275,9 +275,9 @@ describe("runtime management settings", () => {
     expect(await findByText("服务器 / Java 进程")).toBeTruthy();
     expect(await findByText("bjp_1234567890abcdef")).toBeTruthy();
     expect((await findAllByText("10.8.0.12")).length).toBeGreaterThanOrEqual(2);
-    expect(await findByText("12.5%")).toBeTruthy();
+    expect(await findByText("整机 12.5% / -核")).toBeTruthy();
     expect(await findByText((_content, element) =>
-      element?.tagName === "TD" && Boolean(element.textContent?.includes("42 线程"))
+      element?.tagName === "TD" && Boolean(element.textContent?.includes("线程 42/-"))
     )).toBeTruthy();
     expect(queryByText("Linux 服务器")).toBeNull();
     expect(queryByText("后端 Java 进程")).toBeNull();
@@ -788,11 +788,29 @@ describe("runtime management settings", () => {
           updatedAt: "2026-06-24T08:00:00Z",
           traceId: "trace_1234567890abcdef",
           cpuUsagePercent: 22.5,
+          cpuCoreCount: 8,
+          loadAverage1m: 1.5,
+          loadAverage5m: 1.2,
+          loadAverage15m: 0.8,
+          memoryTotalBytes: 2048,
+          memoryAvailableBytes: 1536,
           memoryUsedBytes: 1024,
           memoryUsagePercent: 50,
+          swapUsagePercent: 25,
+          diskAvailableBytes: 3072,
           diskUsedBytes: 4096,
           diskUsagePercent: 25,
+          jvmProcessCpuUsagePercent: 7.5,
+          jvmProcessCpuCoreUsage: 0.6,
+          jvmProcessResidentMemoryBytes: 700,
+          jvmOpenFileDescriptorCount: 50,
+          jvmMaxFileDescriptorCount: 1024,
           jvmMemoryUsedBytes: 300,
+          jvmHeapUsedBytes: 200,
+          jvmHeapMaxBytes: 500,
+          jvmGcCollectionCountDelta: 3,
+          jvmThreadsDaemon: 12,
+          jvmThreadsPeak: 48,
           jvmThreadsLive: 42
         }
       ]
@@ -806,8 +824,27 @@ describe("runtime management settings", () => {
         from: "2026-06-24T07:00:00Z",
         to: "2026-06-24T08:00:00Z",
         samples: [
-          { sampledAt: "2026-06-24T07:59:40Z", cpuUsagePercent: 22.5, diskUsagePercent: 25 },
-          { sampledAt: "2026-06-24T07:59:45Z", jvmMemoryUsedBytes: 300, jvmThreadsLive: 42 }
+          {
+            sampledAt: "2026-06-24T07:59:40Z",
+            cpuUsagePercent: 22.5,
+            loadAverage1m: 1.5,
+            memoryUsagePercent: 50,
+            swapUsagePercent: 25,
+            diskUsagePercent: 25
+          },
+          {
+            sampledAt: "2026-06-24T07:59:45Z",
+            jvmProcessCpuUsagePercent: 7.5,
+            jvmProcessCpuCoreUsage: 0.6,
+            jvmProcessResidentMemoryBytes: 700,
+            jvmHeapUsedBytes: 200,
+            jvmNonHeapUsedBytes: 100,
+            jvmDirectBufferUsedBytes: 16,
+            jvmGcCollectionTimeDeltaMillis: 7,
+            jvmGcCollectionCountDelta: 3,
+            jvmOpenFileDescriptorCount: 50,
+            jvmThreadsLive: 42
+          }
         ]
       })
     };
@@ -819,9 +856,14 @@ describe("runtime management settings", () => {
       "10.8.0.12",
       expect.objectContaining({ windowMinutes: 60, maxPoints: 720 })
     ));
-    expect(await findByText("服务器 CPU / 内存 / 磁盘")).toBeTruthy();
-    expect(await findByText("JVM 内存（Java 服务）")).toBeTruthy();
-    expect(await findByText("JVM GC / 线程（Java 服务）")).toBeTruthy();
+    expect(await findByText("Java 7.5% / 0.60核")).toBeTruthy();
+    expect(await findByText("Heap 200 B / 500 B")).toBeTruthy();
+    expect(await findByText("服务器 CPU / Load")).toBeTruthy();
+    expect(await findByText("服务器内存 / Swap / 磁盘")).toBeTruthy();
+    expect(await findByText("Java 进程 CPU")).toBeTruthy();
+    expect(await findByText("Java 进程内存 / RSS")).toBeTruthy();
+    expect(await findByText("JVM Heap / Non-Heap / Direct")).toBeTruthy();
+    expect(await findByText("GC / 线程 / FD")).toBeTruthy();
 
     queryClient.clear();
   });
