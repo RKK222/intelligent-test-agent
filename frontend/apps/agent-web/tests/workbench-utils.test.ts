@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BackendApiError } from "@test-agent/backend-api";
 import type { MessagePart, PromptPart, Run, RunDiffFile, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
+import * as workbenchUtils from "../src/components/workbench-utils";
 import {
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
@@ -197,6 +198,36 @@ describe("historyItems", () => {
         pendingQuestion: false
       })
     ]);
+  });
+});
+
+describe("historyRuntimeBadgeCounts", () => {
+  it("counts unfinished sessions only from the first history page", () => {
+    const sessions: Session[] = Array.from({ length: 31 }, (_, index) => ({
+      sessionId: `ses_${index + 1}`,
+      workspaceId: "wrk_1",
+      title: `历史 ${index + 1}`,
+      status: "ACTIVE",
+      createdAt: "2026-07-08T09:00:00Z",
+      updatedAt: "2026-07-08T10:00:00Z"
+    }));
+    const runtimeStates = Object.fromEntries(
+      sessions.map((session, index) => [
+        session.sessionId,
+        {
+          sessionId: session.sessionId,
+          runId: `run_${index + 1}`,
+          runStatus: "RUNNING",
+          attention: index === 0 || index === 30 ? "QUESTION" : null,
+          updatedAt: "2026-07-08T10:01:00Z"
+        } satisfies SessionRuntimeState
+      ])
+    );
+
+    expect(workbenchUtils.historyRuntimeBadgeCounts(sessions, runtimeStates, 30)).toEqual({
+      runningCount: 30,
+      questionCount: 1
+    });
   });
 });
 

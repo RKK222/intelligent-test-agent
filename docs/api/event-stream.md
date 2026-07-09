@@ -160,7 +160,7 @@ payload 字段：
 
 ## 用户会话运行态 fetch SSE
 
-`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 是用户级历史运行状态提醒通道，用于历史按钮运行计数、旋转图标和 `question.asked` 铃铛。该通道使用 fetch SSE，而不是浏览器原生 `EventSource`，因为请求必须携带当前用户的 `Authorization: Bearer ...`。
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 是用户级历史运行状态提醒通道，用于前端派生历史按钮运行计数、旋转图标和 `question.asked` 铃铛；历史按钮数字只统计历史第一页 30 条会话中的未完成会话。该通道使用 fetch SSE，而不是浏览器原生 `EventSource`，因为请求必须携带当前用户的 `Authorization: Bearer ...`。
 
 事件类型：
 

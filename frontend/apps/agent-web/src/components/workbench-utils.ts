@@ -536,6 +536,30 @@ export function historyItems(run: Run | null, sessions: Session[], runtimeStates
   });
 }
 
+/**
+ * 历史按钮 badge 只表达历史第一页内的后台未完成数量；加载更多后的运行态仍由 historyItems 单独展示。
+ */
+export function historyRuntimeBadgeCounts(
+  sessions: Session[],
+  runtimeStatesBySessionId: Record<string, SessionRuntimeState> = {},
+  limit: number
+) {
+  const limitedSessions = sessions.slice(0, Math.max(0, limit));
+  let runningCount = 0;
+  let questionCount = 0;
+  for (const session of limitedSessions) {
+    const runtimeState = runtimeStatesBySessionId[session.sessionId];
+    if (!runtimeState) {
+      continue;
+    }
+    runningCount += 1;
+    if (runtimeState.attention === "QUESTION") {
+      questionCount += 1;
+    }
+  }
+  return { runningCount, questionCount };
+}
+
 export function dedupeSessionMessages(messages: SessionMessage[]): SessionMessage[] {
   const seen = new Set<string>();
   const deduped: SessionMessage[] = [];
