@@ -1,5 +1,7 @@
 package com.icbc.testagent.persistence.mybatis;
 
+import java.time.Instant;
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -20,4 +22,8 @@ public interface RunMapper {
     RunRow findById(@Param("runId") String runId);
 
     RunRow findLatestActiveBySessionId(@Param("sessionId") String sessionId);
+
+    List<RunRow> findStaleActiveRuns(
+            @Param("updatedBefore") Instant updatedBefore,
+            @Param("limit") int limit);
 }

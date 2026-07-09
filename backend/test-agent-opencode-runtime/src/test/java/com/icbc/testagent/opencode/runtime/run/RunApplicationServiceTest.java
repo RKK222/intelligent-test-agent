@@ -37,6 +37,7 @@ import com.icbc.testagent.domain.session.SessionStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import com.icbc.testagent.event.RunEventAppender;
@@ -1137,6 +1138,65 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void serviceRecordsOutputActivityAndAskStateForVisibleRuntimeEvents() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.MESSAGE_PART_DELTA,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of("messageID", "msg_1", "partID", "part_1", "delta", "hello")),
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.QUESTION_ASKED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of("requestId", "question_1")),
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.QUESTION_REPLIED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of("requestId", "question_1")),
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.OPENCODE_EVENT_UNKNOWN,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of("rawType", "server.heartbeat")));
+        RecordingRunActivityStateStore activityStore = new RecordingRunActivityStateStore();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                null,
+                null,
+                activityStore);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitActivityEvents(activityStore, 3);
+        assertThat(activityStore.outputRunIds).hasSize(3);
+        assertThat(activityStore.pendingAskRunIds).hasSize(1);
+        assertThat(activityStore.clearedAskRunIds).hasSize(1);
+    }
+
+    @Test
     void servicePersistsLiveDiffFromCompletedEditToolPart() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
@@ -1546,6 +1606,17 @@ class RunApplicationServiceTest {
         assertThat(liveBus.transientPayloads).hasSizeGreaterThanOrEqualTo(expected);
     }
 
+    private static void awaitActivityEvents(RecordingRunActivityStateStore activityStore, int expectedOutputEvents) {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            if (activityStore.outputRunIds.size() >= expectedOutputEvents) {
+                return;
+            }
+            sleepBriefly();
+        }
+        assertThat(activityStore.outputRunIds).hasSizeGreaterThanOrEqualTo(expectedOutputEvents);
+    }
+
     private static void awaitMessageCount(FakeSessionMessageRepository messages, int expected) {
         long deadline = System.nanoTime() + 2_000_000_000L;
         while (System.nanoTime() < deadline) {
@@ -1843,6 +1914,31 @@ class RunApplicationServiceTest {
             RunEventLiveEvent event = super.publishTransient(draft);
             transientPayloads.add(event.payload());
             return event;
+        }
+    }
+
+    private static final class RecordingRunActivityStateStore extends RunActivityStateStore {
+        private final List<RunId> outputRunIds = new CopyOnWriteArrayList<>();
+        private final List<RunId> pendingAskRunIds = new CopyOnWriteArrayList<>();
+        private final List<RunId> clearedAskRunIds = new CopyOnWriteArrayList<>();
+
+        private RecordingRunActivityStateStore() {
+            super(null);
+        }
+
+        @Override
+        void recordOutput(RunId runId, Instant occurredAt) {
+            outputRunIds.add(runId);
+        }
+
+        @Override
+        void markPendingAsk(RunId runId, RunEventType type, Instant occurredAt) {
+            pendingAskRunIds.add(runId);
+        }
+
+        @Override
+        void clearPendingAsk(RunId runId) {
+            clearedAskRunIds.add(runId);
         }
     }
 

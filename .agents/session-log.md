@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 增加 stale active Run 收敛任务
+
+- Why:
+  - 历史会话中几天前的 Run 仍显示 `PENDING/RUNNING/CANCELLING`，实际点击后没有输出；需要后台修复平台 Run 状态，同时不能误杀仍有输出或停在用户待处理 ask 的会话。
+- What:
+  - `test-agent-opencode-runtime` 新增 `StaleActiveRunReconcileTaskHandler` 和 `StaleActiveRunReconcileService`，复用 `test-agent-scheduler` 每 5 分钟扫描超过 2 小时的 active Run；新增 `RunActivityStateStore` 在 Redis 记录 30 分钟输出活跃和未处理 ask 状态。pending ask 只从实时 RunEvent 写 Redis，当前覆盖 `permission.asked` 和 `question.asked`，不通过数据库 RunEvent 反查。
+- How:
+  - `RunApplicationService` 在用户可见输出事件刷新 `test-agent:run-output-activity:{runId}`，在 ask/reply/reject/terminal 事件维护 `test-agent:run-pending-ask:{runId}`；收敛任务先查 Redis，Redis 异常保守跳过，无近期输出且无 pending ask 时用 `RunRepository.saveIfStatus` CAS 标记 `FAILED` 并追加固定消息的 `run.failed`。关系型候选查询通过 MyBatis XML `findStaleActiveRuns` 实现，无 Flyway 变更。
+- Result:
+  - 目标测试 `StaleActiveRunReconcileServiceTest`、`StaleActiveRunReconcileTaskHandlerTest`、`RunApplicationServiceTest`、`MyBatisRunRepositoryIntegrationTest` 通过，`mvn -pl test-agent-app -am -DskipTests package` 通过。计划中的全量 `mvn -pl test-agent-opencode-runtime,test-agent-persistence,test-agent-scheduler,test-agent-event -am test` 仍被既有 persistence H2/JDBC/fixture 用例阻断；`mvn -pl test-agent-app -am test` 仍被既有 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 阻断，本次未修改这些无关问题。
+
 ### 2026-07-09 - 修复 Permission/Question 过期回复语义
 
 - Why:

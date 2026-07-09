@@ -24,6 +24,7 @@
 6. 不把 opencode raw event 原样透传给前端，也不把大段日志、bash/tool output 或高频文本 delta 作为平台持久化事件保存。
 7. generated SDK 事件必须在 `test-agent-event` 或 `test-agent-opencode-client` 映射为平台事件。
 8. root `run.succeeded/run.failed/run.cancelled` 是 Run 终态事实源；`Streaming response failed` 等 prompt_async 提交错误、SSE 订阅 transport error 或浏览器连接错误没有独立业务终态含义，先到时只可延迟收敛为失败，窗口内若收到 root 终态则不得补写旧 `run.failed`；若临时失败已经先落库，后到 root 终态仍可按最后 root 终态纠正 Run 状态和最终快照。
+9. stale active Run 后台收敛也会追加既有 `run.failed` 事件。该事件只表示平台侧长时间未收到有效运行输出且本地后台订阅可能失效，不代表后端主动取消或中止远端 opencode 会话。
 
 ## RunEvent 基础字段
 
@@ -196,6 +197,28 @@ data 字段：
 - `question.asked/question.replied/question.rejected` 会触发摘要刷新。
 - 低频轮询作为兜底，避免本机或 Redis 实时触发丢失时状态长期不更新。
 - 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 和 active-run 恢复。
+
+## stale active `run.failed`
+
+当 `StaleActiveRunReconcileTaskHandler` 扫描到超过 2 小时仍处于 `PENDING/RUNNING/CANCELLING` 的 Run 时，服务端会先检查 Redis 运行态：
+
+- `test-agent:run-output-activity:{runId}`：30 分钟 TTL，存在代表最近仍有用户可见输出。
+- `test-agent:run-pending-ask:{runId}`：无固定 TTL，存在代表最新状态仍停在未处理 ask；当前 ask 类事件包括 `permission.asked` 和 `question.asked`，收到 `permission.replied/question.replied/question.rejected` 或 Run 终态后清理。
+
+只有两个 Redis 状态都不存在，且 CAS 确认 Run 仍是 active 状态时，后端才把 Run 标记为 `FAILED` 并追加 `run.failed`。该判断不通过数据库 RunEvent 反查 ask 状态，避免历史事件与当前运行态不一致。
+
+payload 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `message` | string | 固定为“运行超时，后台订阅已失效或长时间无输出”。 |
+| `error.name` | string | 固定为 `StaleActiveRunTimeout`。 |
+| `error.message` | string | 同 `message`。 |
+| `reason` | string | 固定为 `STALE_ACTIVE_RUN_TIMEOUT`。 |
+| `activeTimeoutSeconds` | number | 默认 7200。 |
+| `recentOutputWindowSeconds` | number | 默认 1800。 |
+
+兼容性说明：这是已有 `run.failed` 事件的新增 payload 来源，前端继续按失败终态展示即可；旧客户端会忽略新增的 `reason/activeTimeoutSeconds/recentOutputWindowSeconds` 字段。
 
 ## `session.status`
 

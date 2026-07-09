@@ -78,6 +78,48 @@ public class RunApplicationService {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
     private static final Duration TRANSPORT_ERROR_TERMINAL_GRACE = Duration.ofMillis(300);
+    private static final Set<RunEventType> OUTPUT_ACTIVITY_TYPES = Set.of(
+            RunEventType.ASSISTANT_MESSAGE_DELTA,
+            RunEventType.MESSAGE_UPDATED,
+            RunEventType.MESSAGE_REMOVED,
+            RunEventType.MESSAGE_PART_UPDATED,
+            RunEventType.MESSAGE_PART_REMOVED,
+            RunEventType.MESSAGE_PART_DELTA,
+            RunEventType.SESSION_DIFF,
+            RunEventType.SESSION_STATUS,
+            RunEventType.TODO_UPDATED,
+            RunEventType.TOOL_STARTED,
+            RunEventType.TOOL_FINISHED,
+            RunEventType.DIFF_PROPOSED,
+            RunEventType.SESSION_CREATED,
+            RunEventType.SESSION_UPDATED,
+            RunEventType.SESSION_DELETED,
+            RunEventType.TEST_FINISHED,
+            RunEventType.SESSION_ERROR,
+            RunEventType.SESSION_CHILD_DISCOVERED,
+            RunEventType.SESSION_SCOPE_UPDATED,
+            RunEventType.PERMISSION_ASKED,
+            RunEventType.PERMISSION_REPLIED,
+            RunEventType.QUESTION_ASKED,
+            RunEventType.QUESTION_REPLIED,
+            RunEventType.QUESTION_REJECTED,
+            RunEventType.VCS_BRANCH_UPDATED,
+            RunEventType.LSP_UPDATED,
+            RunEventType.MCP_TOOLS_CHANGED,
+            RunEventType.REFERENCE_UPDATED,
+            RunEventType.FILE_EDITED,
+            RunEventType.FILE_WATCHER_UPDATED);
+    private static final Set<RunEventType> ASK_REQUEST_TYPES = Set.of(
+            RunEventType.PERMISSION_ASKED,
+            RunEventType.QUESTION_ASKED);
+    private static final Set<RunEventType> ASK_RESOLVED_TYPES = Set.of(
+            RunEventType.PERMISSION_REPLIED,
+            RunEventType.QUESTION_REPLIED,
+            RunEventType.QUESTION_REJECTED);
+    private static final Set<RunEventType> TERMINAL_TYPES = Set.of(
+            RunEventType.RUN_SUCCEEDED,
+            RunEventType.RUN_FAILED,
+            RunEventType.RUN_CANCELLED);
 
     private final WorkspaceRepository workspaceRepository;
     private final com.icbc.testagent.domain.session.SessionRepository sessionRepository;
@@ -98,10 +140,53 @@ public class RunApplicationService {
     private final RunSessionScopeRepository runSessionScopeRepository;
     private final RunSessionScopeRuntimeCache runSessionScopeRuntimeCache;
     private final RunSessionScopeRouter runSessionScopeRouter;
+    private final RunActivityStateStore runActivityStateStore;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
-     * 创建生产用 Run 编排服务，显式注入实时事件总线和持久化策略。
+     * 创建兼容旧装配的 Run 编排服务；未显式注入运行态 Redis 存储时使用降级 no-op。
+     */
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runEventLiveBus,
+                runEventPersistencePolicy,
+                modelCatalogService,
+                userProcessAssignmentService,
+                workspacePathResolver,
+                snapshotService,
+                runSessionScopeRepository,
+                runSessionScopeRuntimeCache,
+                null);
+    }
+
+    /**
+     * 创建生产用 Run 编排服务，显式注入实时事件总线、持久化策略和运行态 Redis 存储。
      */
     @Autowired
     public RunApplicationService(
@@ -121,7 +206,8 @@ public class RunApplicationService {
             ManagedWorkspacePathResolver workspacePathResolver,
             RunSessionMessageSnapshotService snapshotService,
             RunSessionScopeRepository runSessionScopeRepository,
-            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache) {
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -159,6 +245,9 @@ public class RunApplicationService {
                 ? RunSessionScopeRuntimeCache.disabled()
                 : runSessionScopeRuntimeCache;
         this.runSessionScopeRouter = new RunSessionScopeRouter(runSessionScopeRepository, this.runSessionScopeRuntimeCache);
+        this.runActivityStateStore = runActivityStateStore == null
+                ? new RunActivityStateStore(null)
+                : runActivityStateStore;
     }
 
     /**
@@ -894,7 +983,9 @@ public class RunApplicationService {
      * 追加平台 RunEvent，统一封装 RunEventDraft 构造。
      */
     private void append(RunId runId, RunEventType type, String traceId, Instant occurredAt, Map<String, Object> payload) {
-        runEventAppender.append(new RunEventDraft(runId, type, traceId, occurredAt, payload));
+        RunEventDraft draft = new RunEventDraft(runId, type, traceId, occurredAt, payload);
+        recordRuntimeActivity(draft);
+        runEventAppender.append(draft);
     }
 
     /**
@@ -953,6 +1044,7 @@ public class RunApplicationService {
      * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
     private void appendStreamEvent(String agentId, Run originalRun, Workspace workspace, RunEventDraft draft) {
+        recordRuntimeActivity(draft);
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
             RunStatus terminalStatus = draft.type() == RunEventType.RUN_SUCCEEDED
@@ -973,6 +1065,34 @@ public class RunApplicationService {
             return;
         }
         runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
+    }
+
+    /**
+     * 维护 stale 收敛使用的轻量 Redis 状态。当前 ask 类事件只有 permission/question 两组，待回复期间不允许被定时任务判为超时。
+     */
+    private void recordRuntimeActivity(RunEventDraft draft) {
+        try {
+            RunEventType type = draft.type();
+            if (OUTPUT_ACTIVITY_TYPES.contains(type)) {
+                runActivityStateStore.recordOutput(draft.runId(), draft.occurredAt());
+            }
+            if (ASK_REQUEST_TYPES.contains(type)) {
+                runActivityStateStore.markPendingAsk(draft.runId(), type, draft.occurredAt());
+            }
+            if (ASK_RESOLVED_TYPES.contains(type)) {
+                runActivityStateStore.clearPendingAsk(draft.runId());
+            }
+            if (TERMINAL_TYPES.contains(type)) {
+                runActivityStateStore.clearRunState(draft.runId());
+            }
+        } catch (RuntimeException exception) {
+            LOGGER.debug(
+                    "Run activity state update skipped, runId={}, eventType={}, traceId={}",
+                    draft.runId().value(),
+                    draft.type().wireName(),
+                    draft.traceId(),
+                    exception);
+        }
     }
 
     /**
