@@ -3993,6 +3993,7 @@ async function handleLogout() {
           :search-loading="searchLoading"
           :search-keyword="searchKeyword"
           :file-tree-error="fileTreeError"
+          :user-id="authStore.currentUser?.userId"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @add-file-context="addWorkspaceFileToChatContext"

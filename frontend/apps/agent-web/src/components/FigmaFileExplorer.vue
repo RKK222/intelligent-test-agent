@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
 import type { FileContent, FileSearchResult } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
 import GitChangesPanel from "./GitChangesPanel.vue";
-import { ChevronDown, ChevronRight, FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe2, RefreshCw, Search } from "lucide-vue-next";
 
-defineProps<FileExplorerProps & {
+const props = defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
   /** 当前应用名，传递给 WorkbenchFooter 作为两级菜单首行提示 */
   appName?: string;
@@ -42,6 +42,8 @@ defineProps<FileExplorerProps & {
   searchKeyword?: string;
   /** 文件树面板内错误（根目录加载失败时不覆盖全局反馈） */
   fileTreeError?: string | null;
+  /** 当前用户 ID，用于拼接 iframe URL */
+  userId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -81,6 +83,62 @@ const workspaceHeight = ref<number | null>(null);
 const resizing = ref(false);
 let dragStartY = 0;
 let dragStartHeight = 0;
+
+const iframeDialogVisible = ref(false);
+const iframeRef = ref<HTMLIFrameElement | null>(null);
+
+const iframeUrl = computed(() => {
+  const baseUrl = import.meta.env.VITE_IFRAME_URL ?? "";
+  if (!baseUrl) return "";
+  
+  const now = new Date();
+  const version = `${now.getFullYear()}年${now.getMonth() + 1}月`;
+  
+  const params = new URLSearchParams();
+  if (props.userId) {
+    params.append("userId", props.userId);
+  }
+  if (props.appName) {
+    params.append("appName", props.appName);
+  }
+  params.append("version", version);
+  
+  const url = new URL(baseUrl);
+  url.search = params.toString();
+  return url.toString();
+});
+
+function openIframeDialog() {
+  iframeDialogVisible.value = true;
+}
+
+function closeIframeDialog() {
+  iframeDialogVisible.value = false;
+}
+
+function handleIframeMessage(event: MessageEvent) {
+  try {
+    const data = event.data;
+    if (data && typeof data.type === "string") {
+      console.log("[FigmaFileExplorer] Received postMessage:", data);
+      
+      if (data.type === "FUNC_DISPATCH" && data.payload === "workspace_reload") {
+        console.log('更新工作空间：',data)
+        emit("refresh");
+      }
+    }
+  } catch (e) {
+    console.error("[FigmaFileExplorer] Failed to parse postMessage:", e);
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("message", handleIframeMessage);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("message", handleIframeMessage);
+});
 
 const workspaceStyle = computed(() => {
   if (!workspaceExpanded.value) return {};
@@ -210,6 +268,17 @@ defineExpose({
               </el-tooltip>
             </button>
             <div class="figma-fe-section-actions" v-if="workspaceExpanded">
+              <button
+                v-if="tab === 'explorer'"
+                type="button"
+                class="figma-fe-section-action-btn"
+                title="打开外部页面"
+                aria-label="打开外部页面"
+                :disabled="!workspaceId"
+                @click="openIframeDialog"
+              >
+                <Globe2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </button>
                <button
                 v-if="tab === 'explorer'"
                 type="button"
@@ -322,6 +391,34 @@ defineExpose({
       @create-version="(payload) => emit('createVersion', payload)"
       @open-server-workspace-picker="emit('openServerWorkspacePicker')"
     />
+
+    <Teleport to="body">
+      <div v-if="iframeDialogVisible" class="figma-fe-iframe-overlay" @click="closeIframeDialog">
+        <div class="figma-fe-iframe-dialog" @click.stop>
+          <div class="figma-fe-iframe-header">
+            <span class="figma-fe-iframe-title">外部页面</span>
+            <button
+              type="button"
+              class="figma-fe-iframe-close"
+              title="关闭"
+              aria-label="关闭"
+              @click="closeIframeDialog"
+            >
+              <span class="figma-fe-iframe-close-icon">×</span>
+            </button>
+          </div>
+          <div class="figma-fe-iframe-content">
+            <iframe
+              ref="iframeRef"
+              :src="iframeUrl"
+              class="figma-fe-iframe"
+              title="外部页面"
+              sandbox="allow-scripts allow-same-origin allow-forms"
+            />
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -547,5 +644,98 @@ defineExpose({
 
 .figma-fe-error-retry:hover {
   background: #fee2e2;
+}
+
+.figma-fe-iframe-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: figma-fe-iframe-fade-in 0.2s ease;
+}
+
+@keyframes figma-fe-iframe-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.figma-fe-iframe-dialog {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+  width: 90%;
+  max-width: 1000px;
+  height: 80%;
+  max-height: 600px;
+  display: flex;
+  flex-direction: column;
+  animation: figma-fe-iframe-slide-up 0.2s ease;
+}
+
+@keyframes figma-fe-iframe-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.figma-fe-iframe-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.figma-fe-iframe-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #18181b;
+}
+
+.figma-fe-iframe-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.figma-fe-iframe-close:hover {
+  background: #f3f4f6;
+}
+
+.figma-fe-iframe-close-icon {
+  font-size: 20px;
+  color: #6b7280;
+  line-height: 1;
+}
+
+.figma-fe-iframe-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.figma-fe-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 </style>
