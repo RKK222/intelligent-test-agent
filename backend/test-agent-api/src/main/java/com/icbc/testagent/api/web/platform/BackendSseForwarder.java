@@ -9,7 +9,6 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -40,9 +39,8 @@ public class BackendSseForwarder {
 
     private final WebClient webClient;
 
-    @Autowired
-    public BackendSseForwarder(WebClient.Builder webClientBuilder) {
-        this(webClientBuilder.build());
+    public BackendSseForwarder() {
+        this(WebClient.create());
     }
 
     BackendSseForwarder(WebClient webClient) {

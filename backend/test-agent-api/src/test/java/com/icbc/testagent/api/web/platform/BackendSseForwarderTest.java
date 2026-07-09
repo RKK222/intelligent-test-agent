@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
@@ -27,6 +28,13 @@ class BackendSseForwarderTest {
 
     private static final Instant NOW = Instant.parse("2026-07-09T00:00:00Z");
     private static final String RUN_ID = "run_1234567890abcdef";
+
+    @Test
+    void springBeanStartsWithoutWebClientBuilderBean() {
+        new ApplicationContextRunner()
+                .withBean(BackendSseForwarder.class)
+                .run(context -> assertThat(context).hasSingleBean(BackendSseForwarder.class));
+    }
 
     @Test
     void streamsSseResponseAndPreservesAuthTraceLastEventIdAndQuery() throws Exception {

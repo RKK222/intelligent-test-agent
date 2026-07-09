@@ -12,6 +12,17 @@
   - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+### 2026-07-09 - 修复 BackendSseForwarder 启动装配
+
+- Why:
+  - 打包后的 `test-agent-app` 启动时报 `BackendSseForwarder` 缺少 `WebClient.Builder` Bean，原因是 API 模块新增 SSE 流式转发器时假设 Spring 上下文一定提供 `WebClient.Builder`，但当前应用没有该自动装配 Bean。
+- What:
+  - `BackendSseForwarder` 改为生产构造器内部使用 `WebClient.create()` 自建客户端，保留包内 `WebClient` 构造器给单元测试注入；新增装配回归测试覆盖没有 `WebClient.Builder` Bean 时仍能启动。
+- How:
+  - 先用 `BackendSseForwarderTest.springBeanStartsWithoutWebClientBuilderBean` 复现 `UnsatisfiedDependencyException`，再做最小实现修复；不改变 SSE 转发 header/query/payload 行为。
+- Result:
+  - `mvn -pl test-agent-api -am -Dtest=BackendSseForwarderTest -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`、SSE 路由/转发定向测试、`mvn -pl test-agent-app -am -DskipTests package` 和 `git diff --check` 通过。
+
 ### 2026-07-09 - 修改 opencode 进程状态提示文字为 TestAgent
 
 - Why:
