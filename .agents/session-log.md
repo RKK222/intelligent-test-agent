@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-09 - 修改历史会话为消息列表并更换图标
+
+- Why:
+  - 为了更符合用户的交互习惯与语义命名，需要将界面中的“历史”/“历史对话”文案统一重命名为“消息列表”，并将其图标更换为更能体现消息列表语义的 `MessageSquare` 图标。
+- What:
+  - 1. 替换 `FigmaChatPanel.vue` 中所有涉及给用户展现的“历史”/“历史对话”文案为“消息列表”；并更新抽屉里的搜索框占位符、空数据提示文案等。
+  - 2. 在 `FigmaChatPanel.vue` 中引入并用 `MessageSquare` 替换原 `History` 图标（在面板顶部按钮及抽屉空数据提示中生效）。
+  - 3. 修改 `AgentWorkbench.vue` 中有关会话切换失败的只读提示文案，将“历史会话”描述修正为“会话”。
+- How:
+  - 在 `FigmaChatPanel.vue` 模板中将 `<History>` 图标替换为 `<MessageSquare>`，并修改其相关的标签和 Tooltip 属性；在 `AgentWorkbench.vue` 的切换失败错误文案中删除“历史”词缀。
+- Result:
+  - 界面顶部及抽屉中的“历史”已成功更换为“消息列表”，且图标已对应更换为聊天气泡样式的 `MessageSquare`；前端编译、类型检查、lint 以及 Vitest 单元测试全部顺利通过。
+
 ### 2026-07-09 - 废除 RunEvent Redis bus
 
 - Why:

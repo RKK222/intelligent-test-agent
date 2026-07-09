@@ -3766,13 +3766,13 @@ async function switchToHistorySessionWorkspace(selected: Session): Promise<strin
 function readonlyReasonForHistorySwitch(error: unknown): string {
   if (error instanceof BackendApiError) {
     if (error.code === "FORBIDDEN") {
-      return "你已不属于该历史会话所属应用，当前会话只读。";
+      return "你已不属于该会话所属应用，当前会话只读。";
     }
     if (error.code === "NOT_FOUND") {
-      return "历史会话所属应用或工作空间已不可用，当前会话只读。";
+      return "会话所属应用或工作空间已不可用，当前会话只读。";
     }
   }
-  return "无法切换到历史会话所属工作空间，当前会话只读。";
+  return "无法切换到会话所属工作空间，当前会话只读。";
 }
 
 function rememberCurrentRunAsBackgroundRuntimeState() {

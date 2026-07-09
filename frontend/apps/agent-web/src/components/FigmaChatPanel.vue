@@ -14,7 +14,7 @@ import {
   EyeOff,
   FileText,
   Folder,
-  History,
+  MessageSquare,
   Loader2,
   MinusCircle,
   PanelRightClose,
@@ -2933,7 +2933,7 @@ function onCompositionEnd() {
         <button
           type="button"
           class="figma-chat-header-btn"
-          title="查看历史对话"
+          title="查看消息列表"
           @click="historyDrawerOpen = true; emit('open-history')"
         >
           <span class="figma-chat-history-header-icon">
@@ -2942,12 +2942,12 @@ function onCompositionEnd() {
               class="figma-chat-history-header-spinner"
               style="width: 15px; height: 15px;"
             />
-            <History v-else :size="15" />
+            <MessageSquare v-else :size="15" />
             <span v-if="historyRunningCount > 0" class="figma-chat-history-running-badge">
               {{ historyRunningCount }}
             </span>
           </span>
-          <span>历史</span>
+          <span>消息列表</span>
           <Bell
             v-if="historyQuestionCount > 0"
             :size="13"
@@ -2960,7 +2960,7 @@ function onCompositionEnd() {
     <div ref="scrollEl" class="figma-chat-scroll" @scroll="handleChatScroll">
       <div v-if="historyLoading" class="figma-chat-history-loading" role="status">
         <Spinner />
-        <span>正在加载历史对话…</span>
+        <span>正在加载消息列表…</span>
       </div>
       <OpencodeTimeline
         v-else
@@ -4478,7 +4478,7 @@ function onCompositionEnd() {
       </div>
     </div>
 
-    <!-- 历史对话抽屉 -->
+    <!-- 消息列表抽屉 -->
     <div
       v-if="historyDrawerOpen"
       class="figma-chat-drawer-mask"
@@ -4489,17 +4489,17 @@ function onCompositionEnd() {
         class="figma-chat-history-drawer"
         role="dialog"
         aria-modal="true"
-        aria-label="历史对话记录"
+        aria-label="消息列表记录"
       >
         <header class="figma-chat-drawer-header">
           <div class="figma-chat-drawer-title">
-            <span class="figma-chat-drawer-title-text">历史对话</span>
+            <span class="figma-chat-drawer-title-text">消息列表</span>
             <span class="figma-chat-drawer-count">{{ historyTotalCount }}</span>
           </div>
           <button
             type="button"
             class="figma-chat-drawer-close"
-            aria-label="关闭历史对话抽屉"
+            aria-label="关闭消息列表抽屉"
             @click="closeHistoryDrawer"
           >
             <X :size="14" />
@@ -4510,16 +4510,16 @@ function onCompositionEnd() {
           <input
             v-model="historySearchQuery"
             type="text"
-            placeholder="搜索历史对话..."
+            placeholder="搜索消息列表..."
             class="figma-chat-history-search-input"
           />
         </div>
 
         <div class="figma-chat-history-body">
           <div v-if="visibleHistory.length === 0" class="figma-chat-history-empty">
-            <History :size="32" class="figma-chat-history-empty-icon" />
+            <MessageSquare :size="32" class="figma-chat-history-empty-icon" />
             <p class="figma-chat-history-empty-text">
-              {{ historySearchQuery.trim() ? '无匹配的历史对话' : '暂无历史对话记录，快在下方开启新会话吧~' }}
+              {{ historySearchQuery.trim() ? '无匹配的消息列表' : '暂无消息记录，快在下方开启新会话吧~' }}
             </p>
           </div>
           <ul v-else class="figma-chat-history-list">
@@ -4578,7 +4578,7 @@ function onCompositionEnd() {
               :disabled="historyLoadingMore"
               @click="emit('load-more-history')"
             >
-              {{ historyLoadingMore ? '加载中...' : '显示更多历史会话' }}
+              {{ historyLoadingMore ? '加载中...' : '显示更多会话' }}
             </button>
           </div>
         </div>
