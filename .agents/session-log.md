@@ -34,17 +34,18 @@
 - Result:
   - `corepack pnpm vitest run apps/agent-web/tests/ssh-crypto.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和 `corepack pnpm --filter @test-agent/agent-web build` 通过；构建仍有既有 CSS `@import` 顺序 warning 和大 chunk warning。
 ### 2026-07-09 - 前端提问提交流程增加防重保护
+### 2026-07-09 - 前端提问卡片防重与 sessionId 字段映射对齐
 
 - Why:
-  - 提问卡片的“提交”与“忽略”按钮在发送请求期间没有置灰防重。如果用户双击或连续点击，后到的重复请求会因为提问已被首次请求消费移除而返回 404，被后端转换为 409 Conflict（“提问请求已失效，请重新运行任务”）报错打断，造成实际提交成功但报错提示失败的糟糕体验。
+  - 1. 提问卡片在提交或忽略期间没有按钮置灰保护，用户双击或多次点击会引发重复提交请求。后到的重复请求由于提问已被前次消费而返回 404，被后端转换为 409 Conflict 并报错“提问请求已失效”，带来体验缺陷。
+  - 2. 前端通过 SSE 接收提问卡片与通过 HTTP API 拉取提问列表时，对 `sessionId` 的映射逻辑不一致（SSE 映射为平台 sessionId，而 HTTP 接口列表拉取映射为远端 remoteSessionId），导致卡片在局部重试刷新时 sessionId 产生变化。
 - What:
-  - 在 `FigmaChatPanel.vue` 中新增 `questionSubmitting` 与 `questionRejecting` 两个 props，并在 `AgentWorkbench.vue` 中分别绑定 `replyQuestionMutation.isPending.value` 与 `rejectQuestionMutation.isPending.value`。
-  - 在 `FigmaChatPanel.vue` 内部计算 `isAnyQuestionActionPending`，在提交或忽略进行中置灰所有单选/多选/文本选项、自定义输入框、上一步/下一步、忽略与提交按钮，并将忽略与提交按钮文案动态变为“忽略中...”/“提交中...”。
-  - 在 `FigmaChatPanel.test.ts` 中新增单测用例，验证置灰状态与按钮文案的动态更新。
+  - 1. 在 `FigmaChatPanel.vue` 中新增 `questionSubmitting` 与 `questionRejecting` 两个 props，在 `AgentWorkbench.vue` 中绑定 Mutation 状态。在提交或忽略期间置灰所有选项、自定义输入框、动作与辅助按钮，并将按钮文案动态更新为“提交中...”与“忽略中...”。
+  - 2. 修改 `packages/backend-api/src/index.ts` 中的 `toQuestionRequest`，在 fallback 时使用 `fallbackSessionId`（平台 sessionId）取代远端 `sessionID` 赋值给 `sessionId`，使之与 SSE 接收提问卡片时的 sessionId 表现完全一致。
 - How:
-  - 在 Vue setup 中定义 props、computed 属性与模板状态绑定，添加单元测试并通过 Vitest 运行验证。
+  - 修改 `FigmaChatPanel.vue` 模板与状态绑定，微调 `backend-api` 的映射函数。在 `FigmaChatPanel.test.ts` 与 `backend-api.test.ts` 中分别补充测试用例并使用 Vitest 运行验证。
 - Result:
-  - 前端 Vitest 单元测试全部通过，`pnpm typecheck` 与 `pnpm lint` 检查全部通过。
+  - 前端单元测试、`pnpm typecheck` 及 `pnpm lint` 检查全部成功通过。
 
 ### 2026-07-09 - 公共 Agent Git 单参数支持内外网
 

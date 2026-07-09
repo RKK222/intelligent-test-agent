@@ -1257,6 +1257,37 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("maps remote sessionID to platform sessionId in listSessionQuestions to align with SSE", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: [
+            {
+              id: "que_123",
+              sessionID: "123456_root_remote",
+              questions: [
+                {
+                  questionId: "q1",
+                  text: "测试问题",
+                  kind: "single",
+                  options: [{ id: "opt1", label: "选项" }]
+                }
+              ]
+            }
+          ]
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    const questions = await client.listSessionQuestions("ses_1234567890abcdef");
+    expect(questions).toHaveLength(1);
+    expect(questions[0].sessionId).toBe("ses_1234567890abcdef");
+  });
+
   it("maps MCP tool ids from the platform runtime API", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: ["bash", "read"] }), { status: 200 })
