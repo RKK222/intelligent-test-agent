@@ -14,10 +14,10 @@
 ## 主要职责
 
 - 定义 `ScheduledTaskHandler`、`ScheduledTaskContext`、`ScheduledTaskResult` 任务处理契约。
-- 启动时扫描 `ScheduledTaskHandler` Bean，并把代码注册任务同步到 `scheduled_tasks`。
+- 启动时扫描 `ScheduledTaskHandler` Bean，并把代码注册任务同步到 `scheduled_tasks`；`test-agent.scheduler.enabled=false` 时仍同步任务定义，便于管理页展示。
 - 使用 Spring `CronExpression` 计算 `nextFireAt`；漏扫只补执行一次，不回放所有错过的 cron 次数。
 - 使用 Redis `SET NX PX` 获取锁，Lua 脚本按 token 续租和释放锁，锁 key 为 `test-agent:scheduler:lock:{taskKey}`。
-- 后台线程扫描 due task 和管理员手动触发 pending run，统一写入 `scheduled_task_runs`。
+- 启用 scheduler 后，后台线程扫描 due task 和管理员手动触发 pending run，统一写入 `scheduled_task_runs`。
 - 提供 `SchedulerManagementService` 给 API 模块实现超级管理员管理入口，支持查看任务/运行记录、调整 Cron、手动触发和协作式停止 `RUNNING` 运行记录。
 - `ScheduledTaskContext` 提供 `stopRequested()` 和 `throwIfStopRequested()`；未来具体业务任务在长循环或外部调用间隙必须主动检查停止请求，退出后由 runner 记录 `MANUALLY_STOPPED`。
 
@@ -46,7 +46,7 @@
 
 ## 配置
 
-- `test-agent.scheduler.enabled` / `TEST_AGENT_SCHEDULER_ENABLED`：默认 `false`，关闭后台扫描。
+- `test-agent.scheduler.enabled` / `TEST_AGENT_SCHEDULER_ENABLED`：默认 `false`，只关闭后台扫描和 pending run 执行；代码注册任务仍会在应用启动时同步到 `scheduled_tasks`，管理页可正常展示。
 - `test-agent.scheduler.scan-interval` / `TEST_AGENT_SCHEDULER_SCAN_INTERVAL`：扫描间隔，默认 `30s`。
 - `test-agent.scheduler.due-task-limit` / `TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT`：单轮扫描 due task 上限，默认 `50`。
 - `test-agent.scheduler.manual-run-limit` / `TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT`：单轮扫描手动 pending run 上限，默认 `50`。

@@ -71,14 +71,14 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
     }
 
     /**
-     * 启动后台扫描线程；默认关闭时不启动线程，也不会同步触发任务。
+     * 先同步代码注册任务，便于管理页展示；默认关闭时只是不启动后台扫描线程。
      */
     @Override
     public void start() {
+        registry.syncRegisteredTasks(TraceIdSupport.generate());
         if (!properties.isEnabled() || running) {
             return;
         }
-        registry.syncRegisteredTasks(TraceIdSupport.generate());
         running = true;
         scanThread = namedThreadFactory("test-agent-scheduler-scan").newThread(this::scanLoop);
         scanThread.start();

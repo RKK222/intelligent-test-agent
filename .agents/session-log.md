@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 修复 scheduler 关闭时任务定义不展示
+
+- Why:
+  - 定时任务管理页没有显示新增的 `opencode-runtime.stale-active-run-reconcile` 任务；根因是 `test-agent.scheduler.enabled=false` 时 `ScheduledTaskRunner.start()` 直接返回，连 `ScheduledTaskHandler` 代码注册任务同步也被跳过，`scheduled_tasks` 表没有任务定义。
+- What:
+  - 调整 `ScheduledTaskRunner` 启动流程：应用启动时始终先同步代码注册任务，`scheduler.enabled=false` 只关闭后台扫描线程和 pending run 执行；补充 runner 单测覆盖禁用 scheduler 时仍同步任务定义。
+- How:
+  - 将 `ScheduledTaskRegistry.syncRegisteredTasks()` 移到 enabled 判断之前；同步更新 scheduler README、包说明和部署文档，明确管理页展示与后台扫描开关的边界。
+- Result:
+  - 定向测试覆盖了禁用 scheduler 仍能注册任务且 runner 不进入 running 状态；当前运行中的后端需重启后才会执行启动同步并在管理页显示新增任务。
+
 ### 2026-07-09 - 增加 stale active Run 收敛任务
 
 - Why:

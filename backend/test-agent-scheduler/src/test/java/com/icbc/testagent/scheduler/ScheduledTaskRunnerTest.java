@@ -55,6 +55,20 @@ class ScheduledTaskRunnerTest {
     }
 
     @Test
+    void applicationRunnerSynchronizesRegisteredTasksEvenWhenSchedulerDisabled() {
+        InMemoryScheduledTaskRepository repository = new InMemoryScheduledTaskRepository();
+        ScheduledTaskRunner runner = runner(
+                repository,
+                new FakeScheduledTaskLock(),
+                new RecordingHandler(false));
+
+        runner.run(null);
+
+        assertThat(repository.findTaskByKey(TASK_KEY)).isPresent();
+        assertThat(runner.isRunning()).isFalse();
+    }
+
+    @Test
     void overlappingCronTriggerWritesSkippedRunWithoutCallingHandler() {
         InMemoryScheduledTaskRepository repository = new InMemoryScheduledTaskRepository();
         repository.saveTask(dueTask());
