@@ -4,9 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
@@ -370,10 +371,13 @@ class OpencodeRuntimeApplicationServiceTest {
 
         fixture.service.listPermissions("ses_1234567890abcdef", "trace_1234567890abcdef");
 
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.method()).isEqualTo("GET");
-        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/permission");
-        assertThat(command.directory()).isEqualTo("/tmp/demo");
+        List<OpencodeRuntimeCommand> commands = fixture.captureCommands();
+        assertThat(commands).extracting(OpencodeRuntimeCommand::path)
+                .containsExactly(
+                        "/api/session/ses_remote1234567890abcdef/permission",
+                        "/api/permission/request");
+        assertThat(commands.get(0).method()).isEqualTo("GET");
+        assertThat(commands.get(0).directory()).isEqualTo("/tmp/demo");
     }
 
     @Test
@@ -445,6 +449,37 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void replyPermissionRetriesWithPendingOwnerSessionWhenRootSessionMissesRequest() {
+        Fixture fixture = new Fixture();
+        Map<String, Object> pendingPermissions = Map.of(
+                "data", List.of(Map.of(
+                        "id", "per_child",
+                        "sessionID", "ses_remote_child",
+                        "action", "bash")));
+        when(fixture.facade.runtime(any()))
+                .thenReturn(Mono.error(new PlatformException(
+                        ErrorCode.OPENCODE_BAD_GATEWAY,
+                        ErrorCode.OPENCODE_BAD_GATEWAY.defaultMessage(),
+                        Map.of("status", 404))))
+                .thenReturn(Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(pendingPermissions))))
+                .thenReturn(Mono.just(new OpencodeRuntimeResult(objectMapper.createObjectNode().put("accepted", true))));
+
+        fixture.service.replyPermission(
+                "ses_1234567890abcdef",
+                "per_child",
+                Map.of("decision", "once"),
+                "trace_1234567890abcdef");
+
+        List<OpencodeRuntimeCommand> commands = fixture.captureCommands();
+        assertThat(commands).extracting(OpencodeRuntimeCommand::path)
+                .containsExactly(
+                        "/api/session/ses_remote1234567890abcdef/permission/per_child/reply",
+                        "/api/permission/request",
+                        "/api/session/ses_remote_child/permission/per_child/reply");
+        assertThat(commands.get(2).body()).isEqualTo(Map.of("reply", "once"));
+    }
+
+    @Test
     void listQuestionsUsesSessionScopedV2Path() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
@@ -452,10 +487,13 @@ class OpencodeRuntimeApplicationServiceTest {
 
         fixture.service.listQuestions("ses_1234567890abcdef", "trace_1234567890abcdef");
 
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.method()).isEqualTo("GET");
-        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question");
-        assertThat(command.directory()).isEqualTo("/tmp/demo");
+        List<OpencodeRuntimeCommand> commands = fixture.captureCommands();
+        assertThat(commands).extracting(OpencodeRuntimeCommand::path)
+                .containsExactly(
+                        "/api/session/ses_remote1234567890abcdef/question",
+                        "/api/question/request");
+        assertThat(commands.get(0).method()).isEqualTo("GET");
+        assertThat(commands.get(0).directory()).isEqualTo("/tmp/demo");
     }
 
     @Test
@@ -473,9 +511,12 @@ class OpencodeRuntimeApplicationServiceTest {
                 new UserId("usr_1234567890abcdef"),
                 () -> fixture.service.listQuestions("ses_1234567890abcdef", "trace_1234567890abcdef"));
 
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question");
-        assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        List<OpencodeRuntimeCommand> commands = fixture.captureCommands();
+        assertThat(commands).extracting(OpencodeRuntimeCommand::path)
+                .containsExactly(
+                        "/api/session/ses_remote1234567890abcdef/question",
+                        "/api/question/request");
+        assertThat(commands.get(0).node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
         verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
         verify(fixture.facade, never()).sessionExists(any());
         verify(fixture.facade, never()).createSession(any());
@@ -580,6 +621,37 @@ class OpencodeRuntimeApplicationServiceTest {
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.path()).isEqualTo("/api/session/ses_remote_child/question/req_child/reply");
         assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("继续"))));
+    }
+
+    @Test
+    void replyQuestionRetriesWithPendingOwnerSessionWhenRootSessionMissesRequest() {
+        Fixture fixture = new Fixture();
+        Map<String, Object> pendingQuestions = Map.of(
+                "data", List.of(Map.of(
+                        "id", "que_child",
+                        "sessionID", "ses_remote_child",
+                        "questions", List.of(Map.of("question", "继续？")))));
+        when(fixture.facade.runtime(any()))
+                .thenReturn(Mono.error(new PlatformException(
+                        ErrorCode.OPENCODE_BAD_GATEWAY,
+                        ErrorCode.OPENCODE_BAD_GATEWAY.defaultMessage(),
+                        Map.of("status", 404))))
+                .thenReturn(Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(pendingQuestions))))
+                .thenReturn(Mono.just(new OpencodeRuntimeResult(objectMapper.createObjectNode().put("accepted", true))));
+
+        fixture.service.replyQuestion(
+                "ses_1234567890abcdef",
+                "que_child",
+                Map.of("answers", List.of(List.of("继续"))),
+                "trace_1234567890abcdef");
+
+        List<OpencodeRuntimeCommand> commands = fixture.captureCommands();
+        assertThat(commands).extracting(OpencodeRuntimeCommand::path)
+                .containsExactly(
+                        "/api/session/ses_remote1234567890abcdef/question/que_child/reply",
+                        "/api/question/request",
+                        "/api/session/ses_remote_child/question/que_child/reply");
+        assertThat(commands.get(2).body()).isEqualTo(Map.of("answers", List.of(List.of("继续"))));
     }
 
     @Test
@@ -729,6 +801,12 @@ class OpencodeRuntimeApplicationServiceTest {
             ArgumentCaptor<OpencodeRuntimeCommand> captor = ArgumentCaptor.forClass(OpencodeRuntimeCommand.class);
             verify(facade).runtime(captor.capture());
             return captor.getValue();
+        }
+
+        private List<OpencodeRuntimeCommand> captureCommands() {
+            ArgumentCaptor<OpencodeRuntimeCommand> captor = ArgumentCaptor.forClass(OpencodeRuntimeCommand.class);
+            verify(facade, atLeastOnce()).runtime(captor.capture());
+            return captor.getAllValues();
         }
 
         private static Workspace workspace() {

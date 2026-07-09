@@ -156,7 +156,7 @@ payload 字段：
 }
 ```
 
-`answers` 外层数组顺序必须与 `questions[]` 顺序一致，内层数组为该问题的一组答案文本。`remoteSessionId` 可选；当 `question.asked.sessionId/sessionID` 指向 task 子会话且不同于平台 Session 时，前端必须透传该值，后端仍用 URL 中的平台 Session 定位用户进程和 workspace，只把 opencode question path 切到对应远端会话。
+`answers` 外层数组顺序必须与 `questions[]` 顺序一致，内层数组为该问题的一组答案文本。`remoteSessionId` 可选；当 `question.asked.sessionId/sessionID` 指向 task 子会话且不同于平台 Session 时，前端应透传该值，后端仍用 URL 中的平台 Session 定位用户进程和 workspace，只把 opencode question path 切到对应远端会话。若首次回复命中 root session 后 opencode 返回 404，后端会查询同 workspace/directory 的全局 pending question request，并按 `requestId -> sessionID` 反查真实 owner session 后重试一次；重试后仍不存在才返回 `STALE_RUNTIME_REQUEST`。
 
 ## 用户会话运行态 fetch SSE
 
