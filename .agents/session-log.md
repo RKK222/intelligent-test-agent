@@ -4944,9 +4944,20 @@ bash /tmp/test-api-after-restart.sh
 - Why:
   - 用户 opencode 进程重建后端口可能从 4096 漂移到 4097，但旧实现把 `XDG_DATA_HOME` 按 `{OPENCODE_SESSION_DIR}/{port}` 生成，历史 `remoteSessionId` 对应的 SQLite 数据仍在旧端口目录，导致下一次提问校验/调用远端 session 时返回 404 并被映射为“opencode 服务响应异常”。
 - What:
-  - 用户 opencode 原生 session 目录改为 `{OPENCODE_SESSION_DIR}/users/{userId}`，Java 显式拒绝空白、`/`、`\` 和 `..` userId 路径片段；Java start 命令帧携带 `sessionPath`，Go manager 优先使用显式路径并在 restart 时保留 state 中的 `sessionPath`，旧命令帧才 fallback `{sessionRoot}/{port}`。运行管理对已有平台进程记录的重启改为公共 stop + startup，并保留 `process.sessionPath`。
+  - 用户 opencode 原生 session 目录改为 `{OPENCODE_SESSION_DIR}/users/{unifiedAuthId}`，Java 通过用户仓储解析统一认证号，并显式拒绝空白、`/`、`\` 和 `..` 统一认证号路径片段；Java start 命令帧携带 `sessionPath`，Go manager 优先使用显式路径并在 restart 时保留 state 中的 `sessionPath`，旧命令帧才 fallback `{sessionRoot}/{port}`。运行管理对已有平台进程记录的重启改为公共 stop + startup，并保留 `process.sessionPath`。
   - opencode client facade 新增 `sessionExists`，调用 generated `SessionsApi.v2SessionGet`；404 返回 `false`，其它错误继续按统一 opencode 错误码抛出。`AgentRuntimeTargetResolver` 复用同节点 binding 前校验远端 session，404 缺失时记录 WARN 并重建 `AgentSessionBinding` 与兼容 `sessions.opencode_*` 字段。
 - How:
   - 未手改 generated SDK、未改 HTTP API/SSE/数据库。旧 `{OPENCODE_SESSION_DIR}/{port}` 目录本次不自动合并，平台历史消息仍可展示，缺失远端 session 会在下次提问前重建。
 - Result:
   - `cd opencode-manager && go test ./...` 通过；`cd backend && mvn -pl test-agent-opencode-runtime,test-agent-agent-runtime,test-agent-opencode-client -am test` 通过。同步更新 opencode-manager、backend、opencode-runtime、opencode-client 和 agent-runtime README/PACKAGE 文档。
+
+### 2026-07-09 - 修正 opencode session 目录身份为统一认证号
+
+- Why:
+  - 用户确认 `{OPENCODE_SESSION_DIR}/users/{...}` 的稳定身份不能使用平台 `userId`，必须使用统一认证号，避免用户业务 ID 与企业认证号不一致时生成错误的 opencode 原生 session 目录。
+- What:
+  - `UserOpencodeProcessAssignmentService` 通过 `UserRepository.findByUserId` 解析 `User.unifiedAuthId` 后生成 `{OPENCODE_SESSION_DIR}/users/{unifiedAuthId}`，并拒绝空白、`/`、`\` 和 `..` 统一认证号路径片段；测试桩补齐用户仓储，启动命令断言改为 `ucid_001`。
+- How:
+  - 不改 HTTP API、SSE、数据库、Go manager 控制帧或 generated SDK；仅调整 Java 路径身份来源、单测假仓储和相关 README/session-log 说明。
+- Result:
+  - 已先用失败断言复现实际仍为 `users/usr_...`，修复后 `UserOpencodeProcessAssignmentServiceTest` 全类、后端 opencode runtime/client/agent-runtime reactor 和 `opencode-manager go test ./...` 均通过。

@@ -23,7 +23,9 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
+import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.net.URI;
@@ -92,6 +94,7 @@ public class UserOpencodeProcessAssignmentService {
     private final OpencodeServerAddressResolver addressResolver;
     private final BackendJavaRouteResolver routeResolver;
     private final OpencodeProcessStartOperationRepository startOperationRepository;
+    private final UserRepository userRepository;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -142,7 +145,65 @@ public class UserOpencodeProcessAssignmentService {
             BackendJavaRouteResolver routeResolver,
             OpencodeProcessStartupService startupService,
             OpencodeProcessStatusQueryService statusQueryService,
+            OpencodeProcessStartOperationRepository startOperationRepository,
+            UserRepository userRepository) {
+        this(
+                repository,
+                commonParameterValues,
+                executionNodeRepository,
+                gateway,
+                backendLifecycle,
+                heartbeatStore,
+                routeResolver,
+                startupService,
+                statusQueryService,
+                startOperationRepository,
+                userRepository,
+                true);
+    }
+
+    /**
+     * 兼容旧测试构造器，未显式注入用户仓储时不会回退 userId 作为 session 路径身份。
+     */
+    public UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            CommonParameterValues commonParameterValues,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaRouteResolver routeResolver,
+            OpencodeProcessStartupService startupService,
+            OpencodeProcessStatusQueryService statusQueryService,
             OpencodeProcessStartOperationRepository startOperationRepository) {
+        this(
+                repository,
+                commonParameterValues,
+                executionNodeRepository,
+                gateway,
+                backendLifecycle,
+                heartbeatStore,
+                routeResolver,
+                startupService,
+                statusQueryService,
+                startOperationRepository,
+                null,
+                false);
+    }
+
+    private UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            CommonParameterValues commonParameterValues,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaRouteResolver routeResolver,
+            OpencodeProcessStartupService startupService,
+            OpencodeProcessStatusQueryService statusQueryService,
+            OpencodeProcessStartOperationRepository startOperationRepository,
+            UserRepository userRepository,
+            boolean requireUserRepository) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
@@ -157,6 +218,9 @@ public class UserOpencodeProcessAssignmentService {
                 ? defaultRouteResolver(heartbeatStore, backendLifecycle)
                 : routeResolver;
         this.startOperationRepository = startOperationRepository;
+        this.userRepository = requireUserRepository
+                ? Objects.requireNonNull(userRepository, "userRepository must not be null")
+                : userRepository;
         this.startupService = startupService == null
                 ? new OpencodeProcessStartupService(
                         repository,
@@ -584,22 +648,33 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     private String sessionPath(UserId userId) {
-        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_SESSION_DIR)) + "users/" + userSessionPathSegment(userId);
+        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_SESSION_DIR)) + "users/" + userUnifiedAuthPathSegment(userId);
     }
 
-    private String userSessionPathSegment(UserId userId) {
+    private String userUnifiedAuthPathSegment(UserId userId) {
         Objects.requireNonNull(userId, "userId must not be null");
-        String segment = userId.value();
-        // userId 会进入服务端文件系统路径片段，必须先拒绝所有可能跳出 users 目录的形式。
-        if (segment == null
-                || segment.isBlank()
+        if (userRepository == null) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "用户仓储未注入，无法解析 opencode session 目录统一认证号",
+                    Map.of("userId", userId.value()));
+        }
+        String segment = userRepository.findByUserId(userId)
+                .map(User::unifiedAuthId)
+                .map(String::trim)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.INTERNAL_ERROR,
+                        "用户统一认证号未配置，无法创建 opencode session 目录",
+                        Map.of("userId", userId.value())));
+        // 统一认证号会进入服务端文件系统路径片段，必须先拒绝所有可能跳出 users 目录的形式。
+        if (segment.isBlank()
                 || segment.contains("/")
                 || segment.contains("\\")
                 || segment.contains("..")) {
             throw new PlatformException(
                     ErrorCode.INTERNAL_ERROR,
-                    "用户 ID 不能作为 opencode session 路径片段",
-                    Map.of("userId", segment == null ? "" : segment));
+                    "用户统一认证号不能作为 opencode session 路径片段",
+                    Map.of("userId", userId.value(), "field", "unifiedAuthId"));
         }
         return segment;
     }
