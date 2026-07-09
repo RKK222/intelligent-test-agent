@@ -363,20 +363,6 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
-    void listPermissionsUsesSessionScopedV2Path() {
-        Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("data", List.of(Map.of("id", "per_1")))))));
-
-        fixture.service.listPermissions("ses_1234567890abcdef", "trace_1234567890abcdef");
-
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.method()).isEqualTo("GET");
-        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/permission");
-        assertThat(command.directory()).isEqualTo("/tmp/demo");
-    }
-
-    @Test
     void replyPermissionUsesRemoteSessionIdAndRequestBody() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
@@ -390,43 +376,9 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.method()).isEqualTo("POST");
-        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/permission/req_1/reply");
+        assertThat(command.path()).isEqualTo("/permission/req_1/reply");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(command.body()).isEqualTo(Map.of("reply", "once"));
-    }
-
-    @Test
-    void replyPermissionMapsNotFoundToStaleConflict() {
-        Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.error(new PlatformException(
-                ErrorCode.OPENCODE_BAD_GATEWAY,
-                ErrorCode.OPENCODE_BAD_GATEWAY.defaultMessage(),
-                Map.of("status", 404))));
-
-        assertThatThrownBy(() -> fixture.service.replyPermission(
-                        "ses_1234567890abcdef",
-                        "req_1",
-                        Map.of("decision", "once"),
-                        "trace_1234567890abcdef"))
-                .isInstanceOfSatisfying(PlatformException.class, exception -> {
-                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
-                    assertThat(exception.getMessage()).isEqualTo("权限请求已失效，请重新运行任务");
-                    assertThat(exception.details()).containsEntry("reason", "STALE_RUNTIME_REQUEST");
-                });
-    }
-
-    @Test
-    void listQuestionsUsesSessionScopedV2Path() {
-        Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("data", List.of(Map.of("id", "que_1")))))));
-
-        fixture.service.listQuestions("ses_1234567890abcdef", "trace_1234567890abcdef");
-
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.method()).isEqualTo("GET");
-        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question");
-        assertThat(command.directory()).isEqualTo("/tmp/demo");
     }
 
     @Test
@@ -444,7 +396,7 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.method()).isEqualTo("POST");
-        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question/req_1/reply");
+        assertThat(command.path()).isEqualTo("/question/req_1/reply");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("confirm"))));
     }
@@ -481,60 +433,6 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("沙箱"), List.of("两个"))));
-    }
-
-    @Test
-    void rejectQuestionUsesSessionScopedV2Path() {
-        Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("accepted", true)))));
-
-        fixture.service.rejectQuestion("ses_1234567890abcdef", "req_1", "trace_1234567890abcdef");
-
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.method()).isEqualTo("POST");
-        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question/req_1/reject");
-        assertThat(command.directory()).isEqualTo("/tmp/demo");
-        assertThat(command.body()).isEqualTo(Map.of());
-    }
-
-    @Test
-    void replyQuestionMapsNotFoundToStaleConflict() {
-        Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.error(new PlatformException(
-                ErrorCode.OPENCODE_BAD_GATEWAY,
-                ErrorCode.OPENCODE_BAD_GATEWAY.defaultMessage(),
-                Map.of("status", 404))));
-
-        assertThatThrownBy(() -> fixture.service.replyQuestion(
-                        "ses_1234567890abcdef",
-                        "req_1",
-                        Map.of("answers", List.of("confirm")),
-                        "trace_1234567890abcdef"))
-                .isInstanceOfSatisfying(PlatformException.class, exception -> {
-                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
-                    assertThat(exception.getMessage()).isEqualTo("提问请求已失效，请重新运行任务");
-                    assertThat(exception.details()).containsEntry("reason", "STALE_RUNTIME_REQUEST");
-                });
-    }
-
-    @Test
-    void rejectQuestionMapsNotFoundToStaleConflict() {
-        Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.error(new PlatformException(
-                ErrorCode.OPENCODE_BAD_GATEWAY,
-                ErrorCode.OPENCODE_BAD_GATEWAY.defaultMessage(),
-                Map.of("status", 404))));
-
-        assertThatThrownBy(() -> fixture.service.rejectQuestion(
-                        "ses_1234567890abcdef",
-                        "req_1",
-                        "trace_1234567890abcdef"))
-                .isInstanceOfSatisfying(PlatformException.class, exception -> {
-                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
-                    assertThat(exception.getMessage()).isEqualTo("提问请求已失效，请重新运行任务");
-                    assertThat(exception.details()).containsEntry("reason", "STALE_RUNTIME_REQUEST");
-                });
     }
 
     private static final class Fixture {

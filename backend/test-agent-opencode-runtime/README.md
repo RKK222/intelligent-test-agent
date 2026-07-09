@@ -37,7 +37,7 @@
 - Run 终态/取消后的 `session_messages` 快照持久化会按 agent projected messages cursor 分页拉取，包含 assistant 可见 text、完整 message parts 和 token/cost；reasoning/tool output 不拼入回答正文，无 text 的工具步骤以空正文加结构化 parts 保存。上游 projected message 缺少稳定 message id 时，会用 session、可见正文、parts 和创建时间生成内部合成 `remoteMessageId`，只用于幂等 upsert，避免历史刷新反复落重复 assistant 快照。
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化；不调用 opencode `/vcs/diff?mode=working`，实际 Git patch 和精确行数由工作区 Git Diff 接口读取。
 - Run Diff 查询、接受和拒绝。
-- agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；permission/question 代理使用 opencode v2 `/api/session/{remoteSessionId}/permission|question` 路由，平台外部 API 和请求体保持兼容。
+- agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
 - Model/Provider 目录编排：前端对话框始终通过 runtime 代理 opencode 原生 `/api/model`、`/api/provider`，不再从 `ai_model_configs` 或 `ModelCatalogApplicationService` 返回托管目录；Run 启动前不再 `PATCH /global/config` 同步 provider。
 - 内部模型代理：按 `X-ICBC-Model-Provider` 查 JVM 内存中的内部供应商地址，向上游注入数据库保存的全局 `ICBC_OPENAI_AUTH_TOKEN` 和 `ucid`，并把流式 `<think>...</think>` 转换为 `reasoning_content`。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
@@ -70,9 +70,9 @@
 - `SessionRuntimeStateApplicationServiceTest` 覆盖用户级运行态 snapshot、首帧输出、run/question 全局事件触发刷新，以及 message-only 事件不触发摘要变更。
 - `AiMessageFeedbackApplicationServiceTest` 覆盖反馈创建/更新、assistant role 校验、消息归属校验和评论长度边界。
 - `AnalyticsQueryServiceTest` 覆盖 overview 指标口径、空分母、参数边界和 CSV 不含 cost 字段。
-- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传、permission/question v2 session-scoped path、permission reply body 兼容和过期请求 `CONFLICT + STALE_RUNTIME_REQUEST` 映射。
+- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
 - `InternalModelThinkStreamConverterTest` 覆盖企业内部模型流式 `<think>` 标签跨 chunk 转换为 `reasoning_content`；模型目录接口和 Run 选择测试以 opencode 原生目录透传为准。
-- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传、permission/question v2 session-scoped path、permission reply body 兼容和过期请求 `CONFLICT + STALE_RUNTIME_REQUEST` 映射。
+- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
 - `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码和本地进程适配。
 
 ## 允许依赖

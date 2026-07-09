@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { BackendApiError } from "@test-agent/backend-api";
 import type { MessagePart, PromptPart, Run, RunDiffFile, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import * as workbenchUtils from "../src/components/workbench-utils";
 import {
@@ -15,7 +14,6 @@ import {
   diffFilesFromSessionMessages,
   filterWorkspaceRootEntries,
   inferDiffFromToolPart,
-  isStaleRuntimeRequest,
   historyItems,
   runEventMatchesRun,
   mergeDiffFiles,
@@ -30,7 +28,6 @@ import {
   retryExpirationDecision,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
-  staleRuntimeRequestFeedback,
   workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
 import type { FileTreeEntry } from "@test-agent/shared-types";
@@ -87,37 +84,6 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
-  });
-});
-
-describe("staleRuntimeRequestFeedback", () => {
-  it("detects stale runtime request conflicts and keeps feedback readable", () => {
-    const staleError = new BackendApiError(409, {
-      success: false,
-      code: "CONFLICT",
-      message: "权限请求已失效，请重新运行任务",
-      traceId: "trace_stale",
-      retryable: false,
-      details: { reason: "STALE_RUNTIME_REQUEST" }
-    });
-    const otherConflict = new BackendApiError(409, {
-      success: false,
-      code: "CONFLICT",
-      message: "其它冲突",
-      traceId: "trace_other",
-      retryable: false,
-      details: { reason: "DIFFERENT_REASON" }
-    });
-
-    expect(isStaleRuntimeRequest(staleError)).toBe(true);
-    expect(isStaleRuntimeRequest(otherConflict)).toBe(false);
-    expect(isStaleRuntimeRequest(new Error("network"))).toBe(false);
-    expect(staleRuntimeRequestFeedback("权限请求已失效", staleError)).toEqual({
-      kind: "info",
-      title: "权限请求已失效",
-      description: "权限请求已失效，请重新运行任务",
-      traceId: "trace_stale"
-    });
   });
 });
 

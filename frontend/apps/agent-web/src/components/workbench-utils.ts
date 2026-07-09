@@ -465,19 +465,6 @@ export function errorFeedback(title: string, error: unknown, fallbackContext: Re
   return { kind: "error", title, description: error instanceof Error ? error.message : "未知错误" };
 }
 
-export function isStaleRuntimeRequest(error: unknown): error is BackendApiError {
-  return error instanceof BackendApiError && error.code === "CONFLICT" && error.details.reason === "STALE_RUNTIME_REQUEST";
-}
-
-export function staleRuntimeRequestFeedback(title: string, error: BackendApiError): Feedback {
-  return {
-    kind: "info",
-    title,
-    description: error.message,
-    traceId: error.traceId
-  };
-}
-
 function formatLoadingContext(details: Record<string, unknown>, fallbackContext: Record<string, unknown>): string {
   const merged = { ...fallbackContext, ...details };
   const hasContext = ["appId", "appName", "version", "versionId", "workspaceKind", "workspaceName", "workspaceId", "personalWorkspaceId"]
