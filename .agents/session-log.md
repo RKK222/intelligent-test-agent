@@ -44,18 +44,6 @@
   - 补充 `ssh-crypto.test.ts` 先复现旧裸异常，再改加密入口；同步前端 README、agent-web README 和包说明记录 Chromium 108 与安全上下文约束。
 - Result:
   - `corepack pnpm vitest run apps/agent-web/tests/ssh-crypto.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和 `corepack pnpm --filter @test-agent/agent-web build` 通过；构建仍有既有 CSS `@import` 顺序 warning 和大 chunk warning。
-### 2026-07-09 - 前端提问提交流程增加防重保护
-
-- Why:
-  - 提问卡片的“提交”与“忽略”按钮在发送请求期间没有置灰防重。如果用户双击或连续点击，后到的重复请求会因为提问已被首次请求消费移除而返回 404，被后端转换为 409 Conflict（“提问请求已失效，请重新运行任务”）报错打断，造成实际提交成功但报错提示失败的糟糕体验。
-- What:
-  - 在 `FigmaChatPanel.vue` 中新增 `questionSubmitting` 与 `questionRejecting` 两个 props，并在 `AgentWorkbench.vue` 中分别绑定 `replyQuestionMutation.isPending.value` 与 `rejectQuestionMutation.isPending.value`。
-  - 在 `FigmaChatPanel.vue` 内部计算 `isAnyQuestionActionPending`，在提交或忽略进行中置灰所有单选/多选/文本选项、自定义输入框、上一步/下一步、忽略与提交按钮，并将忽略与提交按钮文案动态变为“忽略中...”/“提交中...”。
-  - 在 `FigmaChatPanel.test.ts` 中新增单测用例，验证置灰状态与按钮文案的动态更新。
-- How:
-  - 在 Vue setup 中定义 props、computed 属性与模板状态绑定，添加单元测试并通过 Vitest 运行验证。
-- Result:
-  - 前端 Vitest 单元测试全部通过，`pnpm typecheck` 与 `pnpm lint` 检查全部通过。
 
 ### 2026-07-09 - 公共 Agent Git 单参数支持内外网
 
