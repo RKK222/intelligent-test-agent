@@ -12,6 +12,20 @@
   - 在远端 `origin/main` 基线上完成 rebase 冲突处理，复用 `CodeRepositoryDeploymentMode` 语义，只调整公共 Agent 配置 Git 解释逻辑、通用参数页面提示、测试和文档；通用参数页复用 `repository-deployment-options` 展示当前内部/外部部署模式，不新增第二个参数。
 - Result:
   - 定向后端/前端测试和 agent-web typecheck 通过；`.env.test` 重启链路完成，后端 health/readiness、前端、CORS 和 manager 日志检查通过。当前开发库中 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL` 已被 cleanup migration 删除，只剩 `OPENCODE_PUBLIC_AGENT_GIT_URL` 一行。
+### 2026-07-09 - 将历史对话及顶部栏的加载动画替换为 Spinner 组件
+
+- Why:
+  - 为了统一前端加载动效并美化 UI，需要将对话历史相关的旋转圈圈（Loader2）替换为项目中已实现的点阵呼吸加载动画 Spinner 组件。
+- What:
+  - 1. 在 `FigmaChatPanel.vue` 中引入 `@test-agent/ui-kit` 中的 `Spinner` 组件。
+  - 2. 替换顶部栏 "历史" 按钮在后台任务运行中时的 Loader2 旋转图标为 `Spinner`，并限制宽高为 15px 保持一致。
+  - 3. 替换历史记录列表内状态为 `running` 会话卡片的 Loader2 旋转图标为 `Spinner`，限制宽高为 15px。
+  - 4. 替换对话滚动区域历史消息加载状态（historyLoading）中的 Loader2 为 `Spinner`。
+- How:
+  - 通过 Vue 模板替换，为 Spinner 组件指定局部尺寸样式并保留原有的配色 class，同时移除旋转类。
+- Result:
+  - 前端 Lint 检查、Vite 构建与 434 项 Vitest 单元测试全部顺利通过。
+
 ### 2026-07-09 - 修复定时任务管理页查询 500
 
 - Why:

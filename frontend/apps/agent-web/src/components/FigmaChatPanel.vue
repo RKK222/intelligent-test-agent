@@ -48,6 +48,7 @@ import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
 import { MarkdownView, OpencodeTimeline, TodoPanel, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
+import { Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
 
@@ -2930,10 +2931,10 @@ function onCompositionEnd() {
           @click="historyDrawerOpen = true; emit('open-history')"
         >
           <span class="figma-chat-history-header-icon">
-            <Loader2
+            <Spinner
               v-if="historyRunningCount > 0"
-              :size="15"
-              class="figma-chat-history-header-spinner figma-chat-spin"
+              class="figma-chat-history-header-spinner"
+              style="width: 15px; height: 15px;"
             />
             <History v-else :size="15" />
             <span v-if="historyRunningCount > 0" class="figma-chat-history-running-badge">
@@ -2952,7 +2953,7 @@ function onCompositionEnd() {
 
     <div ref="scrollEl" class="figma-chat-scroll" @scroll="handleChatScroll">
       <div v-if="historyLoading" class="figma-chat-history-loading" role="status">
-        <Loader2 :size="18" class="figma-chat-history-loading-icon" />
+        <Spinner />
         <span>正在加载历史对话…</span>
       </div>
       <OpencodeTimeline
@@ -4524,10 +4525,10 @@ function onCompositionEnd() {
                 @click="selectHistoryItem(item.id)"
               >
                 <div class="figma-chat-history-card-icon">
-                  <Loader2
+                  <Spinner
                     v-if="item.runtimeState === 'running'"
-                    :size="15"
-                    class="figma-chat-history-card-spinner figma-chat-spin"
+                    class="figma-chat-history-card-spinner"
+                    style="width: 15px; height: 15px;"
                   />
                   <CheckCircle
                     v-else
