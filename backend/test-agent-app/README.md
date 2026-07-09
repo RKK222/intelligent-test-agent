@@ -33,7 +33,8 @@
 - `config.OpencodeManagerControlConfig`：绑定 manager 控制面 token，解析稳定服务器身份和 advertised host，按 advertised host 与 `server.port` 派生后端实例直连地址，提供 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 路径解析器、5 秒 Java 心跳、10 秒 Redis 快照 TTL 和命令超时；启动时注册后端实例心跳，并把服务器身份与可访问地址写入 `.serverid/.serverhost` 供 Go manager 读取，本地和生产都走 manager WebSocket 控制面。
 - `config.RedisHealthIndicator`：基于 Spring 标准 `spring.data.redis.*` 的运行态 Redis 健康检查。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson 配置。
-- `log4j2-spring.xml`：Log4j2 控制台日志配置，默认输出 `key=value` 结构化字段并对 message、thread 和 traceId 做 CRLF 编码。
+- `config.WebClientConfig`：提供运行态共享 `WebClient.Builder`，供后端 Java 间 SSE 转发等基础设施注入。
+- `log4j2-spring.xml`：Log4j2 控制台和文件日志配置，默认输出 `key=value` 结构化字段并对 message、thread 和 traceId 做 CRLF 编码；`logs/backend.log` 保存后端全量运行日志，`logs/sse.log` 额外保存 SSE 相关 logger，`logs/error.log` 额外保存 `ERROR` 及以上日志。
 - `backend/Dockerfile`：只构建并运行 `test-agent-app` Java 进程，不包含 PostgreSQL、Redis 或 opencode server。
 - `tools/dev-backend-run.sh`：本地后端启动入口，默认读取仓库根目录未跟踪的 `.env.local`，`--profile test` 读取 `.env.test`。
 
@@ -59,6 +60,7 @@
 - `OpencodeManagerControlConfigTest` 覆盖稳定服务器身份按环境变量优先、主机名兜底，advertised host 按环境变量优先、探测 IPv4 兜底，以及后端直连地址由 advertised host 和 `server.port` 自动派生。
 - `RedisHealthIndicatorTest` 覆盖 Redis 必需依赖的 TCP 健康检查。
 - `LoggingFrameworkBindingTest` 覆盖运行态使用 Log4j2 作为 SLF4J 实际绑定。
+- `WebClientConfigTest` 覆盖运行态提供可构建的 `WebClient.Builder`。
 
 ## 允许依赖
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,7 +80,9 @@ func (s *Supervisor) ensureConnection(parent context.Context, backend BackendEnd
 	go func() {
 		for {
 			if err := s.runConnection(ctx, state); err != nil && ctx.Err() == nil {
-				log.Printf("manager websocket disconnected from backend %s: %v", state.endpoint.WebSocketURL, err)
+				log.Printf("event=manager_websocket_disconnected backendWebSocketUrl=%s error=%s",
+					state.endpoint.WebSocketURL,
+					sanitizeLogValue(err.Error()))
 			}
 			select {
 			case <-ctx.Done():
@@ -97,6 +100,9 @@ func (s *Supervisor) runConnection(ctx context.Context, state *connectionState) 
 	if err != nil {
 		return err
 	}
+	log.Printf("event=manager_websocket_connected backendWebSocketUrl=%s linuxServerId=%s",
+		state.endpoint.WebSocketURL,
+		state.endpoint.LinuxServerID)
 	state.setConnection(connection)
 	defer func() {
 		state.clearConnection(connection)
@@ -130,7 +136,7 @@ func (s *Supervisor) readLoop(ctx context.Context, state *connectionState, conne
 				return err
 			}
 		case messageTypeBackendListResponse:
-			log.Printf("manager websocket ignored backend list response: manager connects only local backend")
+			log.Printf("event=manager_websocket_message_ignored type=%s reason=local_backend_only", message.Type)
 		case messageTypeCommand:
 			result := s.executeCommand(ctx, message)
 			if err := state.writeJSON(ctx, result); err != nil {
@@ -142,21 +148,28 @@ func (s *Supervisor) readLoop(ctx context.Context, state *connectionState, conne
 				}
 			}
 		case messageTypeError:
-			log.Printf("manager websocket received backend error: %s", message.ErrorCode)
+			log.Printf("event=manager_websocket_backend_error traceId=%s errorCode=%s", message.TraceID, message.ErrorCode)
 		case messageTypeConfigUpdate:
 			previous := s.manager.MaxProcesses()
 			applied, err := s.manager.ApplyRuntimeConfig(message.MaxProcesses, message.SessionRoot, message.ConfigDir)
 			if err != nil {
-				log.Printf("manager config update rejected: traceId=%s value=%d err=%v", message.TraceID, message.MaxProcesses, err)
+				log.Printf("event=manager_config_update status=rejected traceId=%s value=%d error=%s",
+					message.TraceID,
+					message.MaxProcesses,
+					sanitizeLogValue(err.Error()))
 				continue
 			}
-			log.Printf("manager config update applied: traceId=%s maxProcesses %d -> %d (requested %d)", message.TraceID, previous, applied, message.MaxProcesses)
+			log.Printf("event=manager_config_update status=applied traceId=%s previousMaxProcesses=%d appliedMaxProcesses=%d requestedMaxProcesses=%d",
+				message.TraceID,
+				previous,
+				applied,
+				message.MaxProcesses)
 			// 配置热更新会影响运行管理容量展示，立即补发心跳避免前端等待下一个周期。
 			if err := state.writeJSON(ctx, s.topologyMessage(messageTypeManagerHeartbeat)); err != nil {
 				return err
 			}
 		default:
-			log.Printf("manager websocket ignored message type: %s", message.Type)
+			log.Printf("event=manager_websocket_message_ignored type=%s reason=unknown_type", message.Type)
 		}
 	}
 }
@@ -167,7 +180,7 @@ func (s *Supervisor) sendManagerHeartbeat(ctx context.Context) {
 		return
 	}
 	if err := state.writeJSON(ctx, s.topologyMessage(messageTypeManagerHeartbeat)); err != nil {
-		log.Printf("manager heartbeat failed: %v", err)
+		log.Printf("event=manager_heartbeat status=failed error=%s", sanitizeLogValue(err.Error()))
 	}
 }
 
@@ -179,6 +192,13 @@ func (s *Supervisor) executeCommand(ctx context.Context, message Message) Messag
 	commandCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	startedAt := time.Now()
+	log.Printf("event=manager_command_entry traceId=%s commandId=%s command=%s port=%d timeoutMs=%d",
+		message.TraceID,
+		message.CommandID,
+		message.Command,
+		message.Port,
+		timeout.Milliseconds())
 	result, err := s.dispatchProcessCommand(commandCtx, message, timeout)
 	healthy := result.Status == process.StatusHealthy || result.Status == process.StatusStarted
 	status := string(result.Status)
@@ -186,6 +206,16 @@ func (s *Supervisor) executeCommand(ctx context.Context, message Message) Messag
 	if err != nil && responseMessage == "" {
 		responseMessage = err.Error()
 	}
+	log.Printf("event=manager_command_exit traceId=%s commandId=%s command=%s port=%d status=%s healthy=%t durationMs=%d errorCode=%s message=%s",
+		message.TraceID,
+		message.CommandID,
+		message.Command,
+		result.Port,
+		status,
+		healthy,
+		time.Since(startedAt).Milliseconds(),
+		result.ErrorCode,
+		sanitizeLogValue(responseMessage))
 	return Message{
 		Type:            messageTypeCommandResult,
 		ProtocolVersion: protocolVersion,
@@ -210,6 +240,12 @@ func shouldSendImmediateHeartbeat(message Message) bool {
 	}
 	// 只有会改变本地进程拓扑的成功命令需要立即补发心跳，health 仍等待周期心跳。
 	return message.Status == string(process.StatusStarted) || message.Status == string(process.StatusStopped)
+}
+
+func sanitizeLogValue(value string) string {
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return value
 }
 
 func (s *Supervisor) dispatchProcessCommand(ctx context.Context, message Message, timeout time.Duration) (process.Result, error) {

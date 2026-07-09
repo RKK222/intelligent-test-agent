@@ -289,6 +289,22 @@ class ApiLoggingAspectTest {
                     .expectNextMatches(r -> r instanceof ApiResponse)
                     .verifyComplete();
         }
+
+        @Test
+        @DisplayName("Mono.empty 返回值也完成出口日志链路")
+        void logApiCall_emptyMonoReturn() throws Throwable {
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.delete("/api/test").build());
+
+            when(joinPoint.getArgs()).thenReturn(new Object[]{exchange});
+            when(joinPoint.proceed()).thenReturn(Mono.empty());
+
+            Object result = aspect.logApiCall(joinPoint);
+
+            assertTrue(result instanceof Mono);
+            StepVerifier.create((Mono<?>) result)
+                    .verifyComplete();
+        }
     }
 
     // 测试辅助类

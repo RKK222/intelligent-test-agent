@@ -25,6 +25,17 @@
   - 保持 `/runs/{runId}/events`、`Last-Event-ID`、SSE event name 和 payload 不变；跨 Java 单 Run 实时消息继续走 API 层 SSE 路由到生产 Java。用户级 `sessions/runtime-state/events` 不再接收 Redis 远端事件，接受既有约 10 秒低频轮询兜底。
 - Result:
   - `RunEventServicesTest` 更新为覆盖本机 `streamAll()`、durable replay + live bus 合流；`mvn -pl test-agent-event -Dtest=RunEventServicesTest test`、`mvn -pl test-agent-opencode-runtime -Dtest=SessionRuntimeStateApplicationServiceTest test`、`mvn -pl test-agent-api -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=RunEventSseBackendRoutingWebFilterTest,BackendSseForwarderTest test`、`mvn -pl test-agent-event,test-agent-opencode-runtime,test-agent-api -am -DskipTests package`、`git diff --check` 和精确引用清理扫描均通过。
+### 2026-07-09 - 补齐 Java 与 opencode-manager 分文件日志
+
+- Why:
+  - 本地排查前端操作、Service 调用和 SSE 长连接时，需要统一查 `backend.log`，同时把 SSE 与 error 独立拆文件；opencode-manager 也缺少运行态和错误态的本地日志文件。
+- What:
+  - Java 端 Log4j2 新增 `logs/backend.log`、`logs/sse.log`、`logs/error.log` 分流；API AOP 改为按目标 Controller logger 记录前端 HTTP 操作入口/出口，新增 Service AOP 记录所有 `@Service` public 方法入口、出口、流结束和异常；SSE 相关 Controller/Service/logger 同时写入 `sse.log`；错误日志统一 ERROR 级别进入 `error.log`。opencode-manager supervisor 模式新增 `{stateDir}/logs/manager.log` 与 `manager-error.log`，命令、WebSocket、配置热更新和失败状态结构化记录。
+- How:
+  - 复用现有 traceId/MDC、敏感字段脱敏和 routing logger；Service 参数只输出类型/长度摘要，避免把 token、body 或对象全量打入日志。补充 `ApiLoggingAspectTest`、`ServiceLoggingAspectTest`、`WebClientConfigTest` 和 manager 日志路由测试；本地通过重启脚本实际验证 `/api/auth/me` 与 session runtime SSE。
+- Result:
+  - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`mvn -pl test-agent-app -am test -Dtest=WebClientConfigTest -Dsurefire.failIfNoSpecifiedTests=false`、`mvn -pl test-agent-app -am package -DskipTests` 和 `go test ./cmd/opencode-manager ./internal/control` 通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 启动后，普通 API 和 SSE 均返回，`backend.log`、`sse.log`、`error.log`、`manager.log`、`manager-error.log` 均已落盘。`go test ./...` 仍被既有 `internal/config` Windows 分支测试阻塞，本次未修改该路径。
+
 ### 2026-07-09 - 补充双后端企业部署和前端本地更新脚本
 
 - Why:

@@ -12,7 +12,6 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
-import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
@@ -44,7 +43,6 @@ import reactor.core.publisher.Mono;
 @Component
 public class ApiLoggingAspect {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ApiLoggingAspect.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     /**
@@ -66,21 +64,21 @@ public class ApiLoggingAspect {
         String httpMethod = httpMethod(exchange);
         String path = requestPath(exchange);
         String clientIp = clientIp(exchange);
+        org.slf4j.Logger logger = loggerFor(joinPoint);
 
-        // 记录入口日志
+        // 前端每次 HTTP 操作进入 Controller 时记录一次入口，出口在响应完成后记录。
         String requestBody = extractRequestBody(joinPoint.getArgs());
-        LOGGER.info("event=api_entry traceId={} userId={} method={} httpMethod={} path={} clientIp={} requestBody={}",
+        logger.info("event=api_entry traceId={} userId={} method={} httpMethod={} path={} clientIp={} requestBody={}",
                 traceId, userId, methodName, httpMethod, path, clientIp, requestBody);
 
         long startTime = System.currentTimeMillis();
 
         try {
             Object result = joinPoint.proceed();
-            return handleResult(result, traceId, userId, methodName, startTime);
+            return handleResult(result, logger, traceId, userId, methodName, httpMethod, path, startTime);
         } catch (Throwable error) {
-            // 异常情况记录错误日志
             long duration = System.currentTimeMillis() - startTime;
-            logError(traceId, userId, methodName, duration, error);
+            logError(logger, traceId, userId, methodName, httpMethod, path, duration, error);
             throw error;
         }
     }
@@ -88,21 +86,28 @@ public class ApiLoggingAspect {
     /**
      * 根据返回类型处理日志记录。
      */
-    private Object handleResult(Object result, String traceId, String userId, String methodName, long startTime) {
+    private Object handleResult(
+            Object result,
+            org.slf4j.Logger logger,
+            String traceId,
+            String userId,
+            String methodName,
+            String httpMethod,
+            String path,
+            long startTime) {
         if (result instanceof Mono<?> mono) {
             return mono
-                    .doOnNext(value -> logSuccess(traceId, userId, methodName, startTime, value))
-                    .doOnError(error -> logError(traceId, userId, methodName,
+                    .doOnSuccess(value -> logSuccess(logger, traceId, userId, methodName, httpMethod, path, startTime, value))
+                    .doOnError(error -> logError(logger, traceId, userId, methodName, httpMethod, path,
                             System.currentTimeMillis() - startTime, error));
         } else if (result instanceof Flux<?> flux) {
-            // SSE 流式接口，记录流开始事件
-            LOGGER.info("event=api_stream_start traceId={} userId={} method={}", traceId, userId, methodName);
+            logger.info("event=api_stream_start traceId={} userId={} method={} httpMethod={} path={}",
+                    traceId, userId, methodName, httpMethod, path);
             return flux.doFinally(signal ->
-                    LOGGER.info("event=api_stream_end traceId={} userId={} method={} signal={} durationMs={}",
-                            traceId, userId, methodName, signal, System.currentTimeMillis() - startTime));
+                    logger.info("event=api_stream_end traceId={} userId={} method={} httpMethod={} path={} signal={} durationMs={}",
+                            traceId, userId, methodName, httpMethod, path, signal, System.currentTimeMillis() - startTime));
         } else {
-            // 同步返回
-            logSuccess(traceId, userId, methodName, startTime, result);
+            logSuccess(logger, traceId, userId, methodName, httpMethod, path, startTime, result);
             return result;
         }
     }
@@ -110,23 +115,39 @@ public class ApiLoggingAspect {
     /**
      * 记录成功出口日志。
      */
-    private void logSuccess(String traceId, String userId, String methodName, long startTime, Object result) {
+    private void logSuccess(
+            org.slf4j.Logger logger,
+            String traceId,
+            String userId,
+            String methodName,
+            String httpMethod,
+            String path,
+            long startTime,
+            Object result) {
         long duration = System.currentTimeMillis() - startTime;
         String responseBody = serializeResponse(result);
-        LOGGER.info("event=api_exit traceId={} userId={} method={} durationMs={} status=success responseBody={}",
-                traceId, userId, methodName, duration, responseBody);
+        logger.info("event=api_exit traceId={} userId={} method={} httpMethod={} path={} durationMs={} status=success responseBody={}",
+                traceId, userId, methodName, httpMethod, path, duration, responseBody);
     }
 
     /**
      * 记录错误出口日志。
      */
-    private void logError(String traceId, String userId, String methodName, long duration, Throwable error) {
+    private void logError(
+            org.slf4j.Logger logger,
+            String traceId,
+            String userId,
+            String methodName,
+            String httpMethod,
+            String path,
+            long duration,
+            Throwable error) {
         String errorType = error.getClass().getSimpleName();
         String errorCode = extractErrorCode(error);
         String errorMessage = error.getMessage();
 
-        LOGGER.warn("event=api_exit traceId={} userId={} method={} durationMs={} status=error errorType={} errorCode={} message={}",
-                traceId, userId, methodName, duration, errorType, errorCode, errorMessage, error);
+        logger.error("event=api_exit traceId={} userId={} method={} httpMethod={} path={} durationMs={} status=error errorType={} errorCode={} message={}",
+                traceId, userId, methodName, httpMethod, path, duration, errorType, errorCode, errorMessage, error);
     }
 
     /**
@@ -213,6 +234,14 @@ public class ApiLoggingAspect {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         String className = signature.getDeclaringType().getSimpleName();
         return className + "." + signature.getName();
+    }
+
+    /**
+     * 使用目标 Controller 的 logger，便于 Log4j2 按具体 Controller 包名分流 SSE 日志。
+     */
+    private org.slf4j.Logger loggerFor(ProceedingJoinPoint joinPoint) {
+        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+        return LoggerFactory.getLogger(signature.getDeclaringType());
     }
 
     /**

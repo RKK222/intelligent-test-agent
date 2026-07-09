@@ -6,8 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,6 +61,18 @@ func runSupervisor() int {
 		writeJSON(process.Result{Status: process.StatusFailed, Message: err.Error()})
 		return 2
 	}
+	closeLogs, err := configureSupervisorLogs(cfg.StateDir)
+	if err != nil {
+		writeJSON(process.Result{Status: process.StatusFailed, Message: err.Error()})
+		return 2
+	}
+	defer closeLogs()
+	log.Printf("event=manager_run_start managerId=%s containerId=%s linuxServerId=%s backendWebSocketUrl=%s stateDir=%s",
+		cfg.ManagerID,
+		cfg.ContainerID,
+		cfg.LinuxServerID,
+		cfg.BackendWebSocketURL,
+		cfg.StateDir)
 	manager := process.NewManager(
 		cfg.Config,
 		state.NewFileStore(cfg.StateDir),
@@ -69,9 +84,11 @@ func runSupervisor() int {
 	defer stop()
 	supervisor := control.NewSupervisor(cfg, manager)
 	if err := supervisor.Run(ctx); err != nil && ctx.Err() == nil {
+		log.Printf("event=manager_run_exit status=error error=%s", sanitizeLogValue(err.Error()))
 		writeJSON(process.Result{Status: process.StatusFailed, Message: err.Error()})
 		return 1
 	}
+	log.Printf("event=manager_run_exit status=success")
 	return 0
 }
 
@@ -139,4 +156,61 @@ func writeJSON(value process.Result) {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetEscapeHTML(false)
 	_ = encoder.Encode(value)
+}
+
+func configureSupervisorLogs(stateDir string) (func(), error) {
+	logDir := filepath.Join(stateDir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create manager log dir failed: %w", err)
+	}
+	managerLog, err := os.OpenFile(filepath.Join(logDir, "manager.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open manager log failed: %w", err)
+	}
+	errorLog, err := os.OpenFile(filepath.Join(logDir, "manager-error.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		_ = managerLog.Close()
+		return nil, fmt.Errorf("open manager error log failed: %w", err)
+	}
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.LUTC)
+	log.SetOutput(managerLogWriter{
+		all:   io.MultiWriter(os.Stderr, managerLog),
+		error: errorLog,
+	})
+	return func() {
+		_ = managerLog.Close()
+		_ = errorLog.Close()
+	}, nil
+}
+
+type managerLogWriter struct {
+	all   io.Writer
+	error io.Writer
+}
+
+func (w managerLogWriter) Write(p []byte) (int, error) {
+	if _, err := w.all.Write(p); err != nil {
+		return 0, err
+	}
+	if isErrorLogLine(string(p)) {
+		if _, err := w.error.Write(p); err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
+}
+
+func isErrorLogLine(line string) bool {
+	lower := strings.ToLower(line)
+	return strings.Contains(lower, " status=error") ||
+		strings.Contains(lower, " status=failed") ||
+		strings.Contains(lower, " failed") ||
+		strings.Contains(lower, " rejected") ||
+		strings.Contains(lower, " disconnected") ||
+		strings.Contains(lower, " error=") ||
+		strings.Contains(lower, " err=")
+}
+
+func sanitizeLogValue(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "\r", " "), "\n", " ")
 }

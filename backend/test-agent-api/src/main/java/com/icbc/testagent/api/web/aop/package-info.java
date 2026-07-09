@@ -4,6 +4,7 @@
  * <p>本包提供：
  * <ul>
  *   <li>{@link com.icbc.testagent.api.web.aop.ApiLoggingAspect}：API 日志切面，统一记录所有 Controller 方法的入口和出口日志</li>
+ *   <li>{@link com.icbc.testagent.api.web.aop.ServiceLoggingAspect}：Service 日志切面，统一记录业务服务入口、出口、耗时和错误</li>
  *   <li>{@link com.icbc.testagent.api.web.aop.SensitiveDataMasker}：敏感数据脱敏工具</li>
  * </ul>
  */

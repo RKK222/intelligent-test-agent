@@ -22,6 +22,7 @@
 - 暴露 Agent 配置管理 HTTP 和进度 WebSocket 入口：Controller 只做认证、`SUPER_ADMIN` 写权限、目标服务器路由、DTO 和 traceId 转换；公共仓库初始化和显式拉取按 `linuxServerId` 路由到目标 Java 后端执行，公共 worktree 列表接口只返回指定服务器上的 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容仍必须走文件 WebSocket；进度 WebSocket 使用一次性 ticket、Origin 白名单和 `snapshot/step/completed/failed` envelope，`step` 可携带当前安全 Git `command`，业务逻辑委托 `test-agent-workspace-management`。
 - 暴露 opencode-manager WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配和 traceId 处理；旧 manager-backends HTTP 诊断入口已作废，Go manager 运行路径不通过 HTTP 与 Java 交互，只连接本服务器 Java，`backendListRequest/backendListResponse` 仅保留为兼容诊断协议。
 - 后端 Java 路由统一使用 runtime 的 `BackendJavaRouteResolver` 解析当前服务器、`linuxServerId -> BackendJavaProcess` 和 `containerId -> linuxServerId`；API 层普通 Java->Java HTTP 转发走 `BackendHttpForwarder`，RunEvent SSE 长连接走 `BackendSseForwarder` 流式转发，两者都设置 `X-Test-Agent-Backend-Routed` 防循环并透传 Authorization、traceId 和 query。后续新增任何 opencode-manager 路由或 Java->manager 控制入口，都必须复用这套公共程序，不得在 Controller、WebFilter、WebSocket handler 或业务 service 中自行扫描 Redis 快照、拼接目标 Java URL、复制转发逻辑或定义新的防循环 header。
+- `web.aop.ApiLoggingAspect` 按目标 Controller logger 记录前端 HTTP 操作入口、出口、耗时、状态和脱敏请求/响应摘要；`web.aop.ServiceLoggingAspect` 按目标 Service logger 记录业务服务入口、出口、耗时、状态和轻量参数摘要。二者统一进入 `logs/backend.log`，ERROR 级别同时进入 `logs/error.log`；SSE 相关 Controller/Service/logger 还会额外进入 `logs/sse.log`。
 - 暴露超级管理员运行管理 overview、容器/按稳定服务器身份的后端指标历史和有主/无主 opencode server 重启/停止 API；旧后端进程指标入口已作废。Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、后端指标 DTO 映射和 traceId 处理；后端指标 DTO 按可空字段透传服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped/GC/线程字段，并保留旧别名 `memoryMaxBytes`、`jvmGcPauseMillis`。重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是当前 Java 或同服务器选中 Java 时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 `port ... is not managed` 后重新拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员定时任务管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
 - 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页参数、创建用户请求和单角色调整请求转换；用户创建、角色替换和 ROLE 字典校验委托 `test-agent-system-management`。
@@ -76,6 +77,7 @@
 - `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单。
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。
+- `ApiLoggingAspectTest` / `ServiceLoggingAspectTest` 覆盖 Controller 与 Service 日志切面在同步、响应式和错误路径下保留原调用语义。
 
 ## 后续 AI 编码指引
 
