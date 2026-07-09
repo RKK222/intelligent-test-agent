@@ -1151,6 +1151,7 @@ function Start-OpencodeManager {
         "OPENCODE_ALLOWED_CORS" = "http://localhost:$($script:FrontendPort),http://127.0.0.1:$($script:FrontendPort)"
         "OPENCODE_MANAGER_HEARTBEAT_INTERVAL" = (Get-EnvValue "OPENCODE_MANAGER_HEARTBEAT_INTERVAL" "5s")
         "OPENCODE_MANAGER_RECONNECT_INTERVAL" = (Get-EnvValue "OPENCODE_MANAGER_RECONNECT_INTERVAL" "10s")
+        "SYS_DATA_ROOT_DIR" = "D:/data/.testagent"
     }
 
     $logPath = Join-Path $LogDir "opencode-manager.log"

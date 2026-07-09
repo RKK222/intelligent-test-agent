@@ -308,6 +308,13 @@ func resolveServerIdentityAndHost(rt configRuntime) (string, string, error) {
 		if !isStableServerID(linuxServerID) {
 			return "", "", fmt.Errorf("Windows hostname must contain a stable linux server id")
 		}
+		// 优先读取 .serverhost 文件，允许用户通过环境变量或文件覆盖自动探测的 IP
+		hostPath, err := serverHostFilePath(rt)
+		if err == nil {
+			if serverHost, err := waitForServerHostFile(rt, hostPath); err == nil {
+				return linuxServerID, serverHost, nil
+			}
+		}
 		ip, err := rt.localIPv4()
 		if err != nil {
 			return "", "", fmt.Errorf("detect Windows local IPv4 failed: %w", err)

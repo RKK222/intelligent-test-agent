@@ -27,12 +27,21 @@ final class ServerAdvertisedHostResolver {
 
     /**
      * 环境变量可覆盖自动探测地址；缺失时使用现有内网 IPv4 探测结果。
+     * 测试环境下如果环境变量未设置，默认使用 127.0.0.1。
      */
     String resolve() {
         String configured = env.get(ADVERTISED_HOST_ENV);
-        String host = configured == null || configured.isBlank()
-                ? linuxServerIpResolver.resolve()
-                : configured.trim();
+        String host;
+        if (configured != null && !configured.isBlank()) {
+            host = configured.trim();
+        } else {
+            String activeProfile = env.get("SPRING_PROFILES_ACTIVE");
+            if ("test".equals(activeProfile)) {
+                host = "127.0.0.1";
+            } else {
+                host = linuxServerIpResolver.resolve();
+            }
+        }
         return normalizeHost(host);
     }
 
