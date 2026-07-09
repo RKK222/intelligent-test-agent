@@ -268,7 +268,7 @@ retry 字段：
 - 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传优先使用 `GET /api/internal/agent/{agentId}/runs/{runId}/events?lastEventId={seq}`，默认 `agentId=opencode`。内部平台入口 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}` 继续有效；旧 `GET /api/runs/{runId}/events?lastEventId={seq}` 已作废，返回 `410 API_GONE`。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
-- 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。快照恢复与 durable replay、本机 live bus、远端广播并发订阅，不能让较慢的快照查询阻塞实时 delta 下发。当前 `opencode` 实现适配 opencode 标准 `GET /session/{sessionID}/message`，并通过远端 cursor 分页恢复。opencode workspace 级事件流由 opencode-client 保留 raw/mapped DTO 边界，事件是否属于当前 Run 的 root/child scope 由 runtime `RunSessionScopeRouter` 判定；显式属于未知 session 的事件不会按 root 入库。当前 Run 收到 root 成功/失败终态后结束远端订阅，避免同一会话后续轮次串流。前端刷新恢复时用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 加载历史树；如需平台 messageId 映射，再用 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages?refresh=false` 只读数据库快照，并用 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 判断是否重新订阅本 Run SSE。
+- 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。快照恢复与 durable replay、本机 live bus 并发订阅，不能让较慢的快照查询阻塞实时 delta 下发。当前 `opencode` 实现适配 opencode 标准 `GET /session/{sessionID}/message`，并通过远端 cursor 分页恢复。opencode workspace 级事件流由 opencode-client 保留 raw/mapped DTO 边界，事件是否属于当前 Run 的 root/child scope 由 runtime `RunSessionScopeRouter` 判定；显式属于未知 session 的事件不会按 root 入库。当前 Run 收到 root 成功/失败终态后结束远端订阅，避免同一会话后续轮次串流。前端刷新恢复时用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 加载历史树；如需平台 messageId 映射，再用 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages?refresh=false` 只读数据库快照，并用 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 判断是否重新订阅本 Run SSE。
 
 ## Run Session Scope
 
@@ -482,10 +482,10 @@ data: {"eventId":"evt_live_...","runId":"run_...","seq":0,"type":"message.part.d
 实现策略：
 
 - RunEvent SSE 入口先按 Run 创建时保存的 `routing_decisions -> executionNodeId -> opencode process -> linuxServerId` 定位生产 Java；目标不是当前 Java 时通过 `BackendSseForwarder` 流式转发 `text/event-stream`，并透传 `Authorization`、`X-Trace-Id`、`Last-Event-ID` 和 query。目标 Java 收到内部路由头后跳过二次路由，继续执行现有 RunEvent SSE 输出。
-- 目标 Java 的 SSE 合并三个来源：durable replay 继续按 `run_events` 查询可恢复事件；本机 live bus 即时发送当前进程新产生的 durable 和 transient 事件；Redis run-event bus 开启时仅作为兼容增强接收其他实例发布的 live event。单个 Run 的跨 Java 实时消息链路不再依赖 Redis Pub/Sub，而是依赖 SSE 跟随 Run 生产 Java。
+- 目标 Java 的 SSE 合并两个来源：durable replay 继续按 `run_events` 查询可恢复事件；本机 live bus 即时发送当前进程新产生的 durable 和 transient 事件。单个 Run 的跨 Java 实时消息链路不依赖 Redis Pub/Sub，而是依赖 SSE 跟随 Run 生产 Java。
 - durable replay 每次按 `runId + lastSeq` 查询增量事件，默认批量上限 100。
 - **durable 事件可能重复投递**：落库的 durable 事件既经 live bus 即时下发，又可能在下一轮 replay 轮询中被查出（live 推送与轮询游标推进存在竞态）。同一 durable 事件携带稳定的 `evt_` 前缀 `eventId`，前端必须按 `eventId` 去重；transient 事件 `eventId` 为 `evt_live_` 前缀且 `seq=0`，同样按 `eventId` 去重。
-- `RunEventLiveBus` 基于 Reactor `Sinks`，默认只服务当前进程已连接的 SSE 订阅。live bus 是 best-effort 实时通道：客户端消费过慢、断开或并发发布产生背压时，后端可以丢弃当前 live 帧，但不得让全局 live bus 进入 error/complete；durable 事件仍可通过 `run_events` replay 恢复，transient 消息内容仍依赖消息快照恢复。设置 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true` 或 `test-agent.run-event.redis-bus.enabled=true` 后，后端会把 durable/transient `RunEventSsePayload` 发布到 Redis channel `test-agent:run-events`，消息包含 `originInstanceId`；本机收到自己发布的消息会忽略，其他实例收到后转发给本机 SSE 客户端。该 Redis bus 是灰度兼容和全局运行态刷新增强，不是 RunEvent SSE 跨 Java 实时消息的必要链路；Redis 不可用、未启用或发布/订阅失败时单 Run SSE 仍通过生产 Java 本机 live bus + durable replay 工作。
+- `RunEventLiveBus` 基于 Reactor `Sinks`，只服务当前进程已连接的 SSE 订阅。live bus 是 best-effort 实时通道：客户端消费过慢、断开或并发发布产生背压时，后端可以丢弃当前 live 帧，但不得让全局 live bus 进入 error/complete；durable 事件仍可通过 `run_events` replay 恢复，transient 消息内容仍依赖消息快照恢复。用户级 `sessions/runtime-state/events` 跨 Java 即时刷新不再依赖 Redis 远端事件，保留既有 10 秒低频轮询兜底。
 - polling 查询必须 offload 阻塞式 Repository；单次回放查询失败不改变 Run 状态，后端跳过本轮轮询并在下一轮继续尝试，客户端仍按既有 SSE 续传规则处理。
 - 客户端断开时释放 Flux 订阅。
 - `Last-Event-ID` 解析委托 `RunEventReplayService`；非法值映射为 `VALIDATION_ERROR`。

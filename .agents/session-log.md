@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 废除 RunEvent Redis bus
+
+- Why:
+  - 单 Run 跨 Java 实时 SSE 已由按 Run 生产 Java 路由和流式转发承接，会话消息实时链路继续保留 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 会增加配置和代码复杂度，且 Redis Pub/Sub 本身不适合作为稳定补偿通道。
+- What:
+  - 删除 `RunEventRemotePublisher`、`NoopRunEventRemotePublisher`、`RedisRunEventRemotePublisher`，简化 `RunEventLiveBus` 为本机 Reactor sink，`RunEventSseStreamService` 只合并 DB durable replay 和本机 live bus；移除 `test-agent.run-event.redis-bus.*` 与 `TEST_AGENT_RUN_EVENT_REDIS_BUS_*` 配置/部署/文档引用。
+- How:
+  - 保持 `/runs/{runId}/events`、`Last-Event-ID`、SSE event name 和 payload 不变；跨 Java 单 Run 实时消息继续走 API 层 SSE 路由到生产 Java。用户级 `sessions/runtime-state/events` 不再接收 Redis 远端事件，接受既有约 10 秒低频轮询兜底。
+- Result:
+  - `RunEventServicesTest` 更新为覆盖本机 `streamAll()`、durable replay + live bus 合流；`mvn -pl test-agent-event -Dtest=RunEventServicesTest test`、`mvn -pl test-agent-opencode-runtime -Dtest=SessionRuntimeStateApplicationServiceTest test`、`mvn -pl test-agent-api -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=RunEventSseBackendRoutingWebFilterTest,BackendSseForwarderTest test`、`mvn -pl test-agent-event,test-agent-opencode-runtime,test-agent-api -am -DskipTests package`、`git diff --check` 和精确引用清理扫描均通过。
+
 ### 2026-07-09 - 增强公共配置 Git 超时排查日志
 
 - Why:

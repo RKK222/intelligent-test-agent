@@ -103,11 +103,6 @@ test-agent:
     enabled: ${TEST_AGENT_SERVER_BROADCAST_ENABLED:false}
     channel: ${TEST_AGENT_SERVER_BROADCAST_CHANNEL:test-agent:server-broadcast}
     instance-id: ${TEST_AGENT_SERVER_BROADCAST_INSTANCE_ID:}
-  run-event:
-    redis-bus:
-      enabled: ${TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED:false}
-      channel: ${TEST_AGENT_RUN_EVENT_REDIS_BUS_CHANNEL:test-agent:run-events}
-      instance-id: ${TEST_AGENT_RUN_EVENT_REDIS_BUS_INSTANCE_ID:}
   analytics:
     rollup:
       enabled: ${TEST_AGENT_ANALYTICS_ROLLUP_ENABLED:true}

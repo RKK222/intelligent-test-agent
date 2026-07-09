@@ -98,7 +98,7 @@ class RunEventServicesTest {
     }
 
     @Test
-    void liveBusSpringBeanStartsWithoutRemotePublisherBean() {
+    void liveBusSpringBeanStartsAsStandaloneBean() {
         new ApplicationContextRunner()
                 .withBean(RunEventLiveBus.class)
                 .run(context -> assertThat(context).hasSingleBean(RunEventLiveBus.class));
@@ -372,66 +372,44 @@ class RunEventServicesTest {
     }
 
     @Test
-    void liveBusPublishesToRemotePublisherAndSseStreamMergesRemoteEvents() {
+    void sseStreamMergesDurableReplayAndLocalLiveBusEvents() {
         FakeRunEventRepository repository = new FakeRunEventRepository();
-        FakeRunEventRemotePublisher remotePublisher = new FakeRunEventRemotePublisher();
-        RunEventLiveBus liveBus = new RunEventLiveBus(remotePublisher);
+        RunEventAppender appender = new RunEventAppender(repository);
+        RunEventLiveBus liveBus = new RunEventLiveBus();
         RunId runId = new RunId("run_1234567890abcdef");
-        RunEventSsePayload remotePayload = new RunEventSsePayload(
-                "evt_live_remote",
-                runId.value(),
-                0,
-                "message.part.delta",
-                "trace_1234567890abcdef",
-                NOW,
-                Map.of("delta", "remote"));
         RunEventSseStreamService streamService = new RunEventSseStreamService(
                 new RunEventReplayService(repository),
                 new RunEventSseMapper(),
-                liveBus,
-                remotePublisher);
-
-        RunEventLiveEvent published = liveBus.publishTransient(new RunEventDraft(
+                liveBus);
+        appender.append(new RunEventDraft(
                 runId,
-                RunEventType.MESSAGE_PART_DELTA,
+                RunEventType.RUN_STARTED,
                 "trace_1234567890abcdef",
                 NOW,
-                Map.of("delta", "local")));
+                Map.of("status", "RUNNING")));
 
-        assertThat(remotePublisher.published).containsExactly(published);
         StepVerifier.create(streamService.streamAfter(
                         runId,
                         "0",
                         Duration.ofSeconds(30),
-                        50).take(1))
-                .then(() -> remotePublisher.emit(RunEventLiveEvent.transientOnly(remotePayload)))
+                        50).take(2))
+                .assertNext(event -> {
+                    assertThat(event.id()).isEqualTo("1");
+                    assertThat(event.event()).isEqualTo("run.started");
+                    assertThat(event.data()).isNotNull();
+                    assertThat(event.data().payload()).containsEntry("status", "RUNNING");
+                })
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        runId,
+                        RunEventType.MESSAGE_PART_DELTA,
+                        "trace_1234567890abcdef",
+                        NOW,
+                        Map.of("delta", "live"))))
                 .assertNext(event -> {
                     assertThat(event.id()).isNull();
                     assertThat(event.event()).isEqualTo("message.part.delta");
-                    assertThat(event.data()).isEqualTo(remotePayload);
-                })
-                .verifyComplete();
-    }
-
-    @Test
-    void liveBusStreamAllIncludesRemoteEvents() {
-        FakeRunEventRemotePublisher remotePublisher = new FakeRunEventRemotePublisher();
-        RunEventLiveBus liveBus = new RunEventLiveBus(remotePublisher);
-        RunId runId = new RunId("run_1234567890abcdef");
-        RunEventSsePayload remotePayload = new RunEventSsePayload(
-                "evt_live_remote",
-                runId.value(),
-                0,
-                "run.succeeded",
-                "trace_1234567890abcdef",
-                NOW,
-                Map.of("status", "SUCCEEDED"));
-
-        StepVerifier.create(liveBus.streamAll().take(1))
-                .then(() -> remotePublisher.emit(RunEventLiveEvent.transientOnly(remotePayload)))
-                .assertNext(event -> {
-                    assertThat(event.payload()).isEqualTo(remotePayload);
-                    assertThat(event.payload().type()).isEqualTo("run.succeeded");
+                    assertThat(event.data()).isNotNull();
+                    assertThat(event.data().payload()).containsEntry("delta", "live");
                 })
                 .verifyComplete();
     }
@@ -505,28 +483,4 @@ class RunEventServicesTest {
         }
     }
 
-    private static final class FakeRunEventRemotePublisher implements RunEventRemotePublisher {
-        private final List<RunEventLiveEvent> published = new ArrayList<>();
-        private final reactor.core.publisher.Sinks.Many<RunEventLiveEvent> sink =
-                reactor.core.publisher.Sinks.many().multicast().directBestEffort();
-
-        @Override
-        public void publish(RunEventLiveEvent event) {
-            published.add(event);
-        }
-
-        @Override
-        public reactor.core.publisher.Flux<RunEventLiveEvent> stream(RunId runId) {
-            return sink.asFlux().filter(event -> runId.value().equals(event.payload().runId()));
-        }
-
-        @Override
-        public reactor.core.publisher.Flux<RunEventLiveEvent> streamAll() {
-            return sink.asFlux();
-        }
-
-        private void emit(RunEventLiveEvent event) {
-            sink.tryEmitNext(event);
-        }
-    }
 }
