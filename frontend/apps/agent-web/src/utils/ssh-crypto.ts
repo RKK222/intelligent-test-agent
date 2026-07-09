@@ -31,6 +31,17 @@ function bufferToUrlSafeBase64NoPad(buffer: ArrayBuffer): string {
     .replace(/=+$/, "");
 }
 
+type RequiredSshCrypto = Crypto & { subtle: SubtleCrypto };
+
+/** SSH 私钥必须在浏览器端加密；Web Crypto 不可用时禁止继续提交明文。 */
+function requireSshCrypto(): RequiredSshCrypto {
+  const webCrypto = globalThis.crypto;
+  if (!webCrypto || !webCrypto.subtle || typeof webCrypto.getRandomValues !== "function") {
+    throw new Error("当前浏览器环境不支持 Web Crypto 加密，无法安全保存 SSH key。请使用 HTTPS 访问系统，或在本机 localhost/127.0.0.1 下访问后重试。");
+  }
+  return webCrypto as RequiredSshCrypto;
+}
+
 /**
  * 规范化 SSH 私钥，逻辑与后端 ConfigurationManagementApplicationService.normalizePrivateKey 一致：
  * CRLF/CR → LF，去除首尾空白，校验格式，末尾补一个换行。
@@ -47,15 +58,15 @@ export function normalizePrivateKey(privateKey: string): string {
 }
 
 /** 计算 SHA-256 指纹，格式 SHA256:<url-safe-base64-no-padding>，与后端 fingerprint 对齐。 */
-async function computeFingerprint(plaintext: string): Promise<string> {
+async function computeFingerprint(cryptoApi: RequiredSshCrypto, plaintext: string): Promise<string> {
   const encoded = new TextEncoder().encode(plaintext);
-  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  const digest = await cryptoApi.subtle.digest("SHA-256", encoded);
   return `SHA256:${bufferToUrlSafeBase64NoPad(digest)}`;
 }
 
 /** 生成临时 AES-256-GCM 密钥（可导出，便于用 RSA 加密其原始字节）。 */
-async function generateAesKey(): Promise<CryptoKey> {
-  return crypto.subtle.generateKey(
+async function generateAesKey(cryptoApi: RequiredSshCrypto): Promise<CryptoKey> {
+  return cryptoApi.subtle.generateKey(
     { name: "AES-GCM", length: 256 },
     true,
     ["encrypt"],
@@ -64,13 +75,14 @@ async function generateAesKey(): Promise<CryptoKey> {
 
 /** 用 AES-256-GCM 加密 SSH 私钥，返回密文和 nonce（均为标准 Base64）。 */
 async function aesEncryptPrivateKey(
+  cryptoApi: RequiredSshCrypto,
   plaintext: string,
   aesKey: CryptoKey,
 ): Promise<{ encryptedPrivateKey: string; nonce: string }> {
-  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const nonce = cryptoApi.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plaintext);
   // Web Crypto AES-GCM 输出 = 密文 + 128 位 tag，与 Java GCM doFinal 期望的格式一致
-  const encrypted = await crypto.subtle.encrypt(
+  const encrypted = await cryptoApi.subtle.encrypt(
     { name: "AES-GCM", iv: nonce, tagLength: 128 },
     aesKey,
     encoded,
@@ -83,10 +95,11 @@ async function aesEncryptPrivateKey(
 
 /** 用服务端 RSA 公钥（RSA-OAEP/SHA-256）加密临时 AES 密钥的原始字节。 */
 async function rsaEncryptAesKey(
+  cryptoApi: RequiredSshCrypto,
   aesKeyRaw: ArrayBuffer,
   rsaPublicKey: CryptoKey,
 ): Promise<string> {
-  const encrypted = await crypto.subtle.encrypt(
+  const encrypted = await cryptoApi.subtle.encrypt(
     { name: "RSA-OAEP" },
     rsaPublicKey,
     aesKeyRaw,
@@ -110,21 +123,22 @@ export async function encryptSshKey(
   encryptionNonce: string;
   fingerprint: string;
 }> {
+  const cryptoApi = requireSshCrypto();
   const normalized = normalizePrivateKey(privateKey);
-  const fingerprint = await computeFingerprint(normalized);
+  const fingerprint = await computeFingerprint(cryptoApi, normalized);
 
-  const aesKey = await generateAesKey();
-  const aesKeyRaw = await crypto.subtle.exportKey("raw", aesKey);
-  const { encryptedPrivateKey, nonce } = await aesEncryptPrivateKey(normalized, aesKey);
+  const aesKey = await generateAesKey(cryptoApi);
+  const aesKeyRaw = await cryptoApi.subtle.exportKey("raw", aesKey);
+  const { encryptedPrivateKey, nonce } = await aesEncryptPrivateKey(cryptoApi, normalized, aesKey);
 
-  const rsaPublicKey = await crypto.subtle.importKey(
+  const rsaPublicKey = await cryptoApi.subtle.importKey(
     "spki",
     base64ToArrayBuffer(serverPublicKeyBase64),
     { name: "RSA-OAEP", hash: "SHA-256" },
     false,
     ["encrypt"],
   );
-  const encryptedAesKey = await rsaEncryptAesKey(aesKeyRaw, rsaPublicKey);
+  const encryptedAesKey = await rsaEncryptAesKey(cryptoApi, aesKeyRaw, rsaPublicKey);
 
   return {
     encryptedPrivateKey,

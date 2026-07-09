@@ -2,8 +2,6 @@
 
 ## Entries
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 ### 2026-07-09 - 修复公共配置未初始化时 listPublicGitConflicts 报错
 
 - Why:
@@ -25,8 +23,17 @@
   - 执行 `DELETE FROM user_ssh_keys WHERE id IN (3, 10)` 清理脏数据。
 - Result:
   - 验证无残留损坏数据；用户 `usr_test_dev` 和 `usr_test_superadmin20` 需重新配置 SSH 密钥。
-=======
-=======
+### 2026-07-09 - 适配企业 Chromium 108 的 SSH key 加密入口
+
+- Why:
+  - 企业内部浏览器内核为 Chromium 108，用户在添加个人 SSH key 时遇到 `Cannot read properties of undefined (reading 'digest')`；根因是内网 HTTP 或浏览器策略下 `crypto.subtle` 不可用，原前端直接调用 Web Crypto 的 `digest`。
+- What:
+  - `ssh-crypto.ts` 在加密前统一检测 `crypto.subtle` 和 `getRandomValues`，不可用时返回明确的 Web Crypto/HTTPS/localhost 提示，禁止明文降级；`agent-web` 生产构建显式设置 `build.target/cssTarget=chrome108`；右侧对话复制按钮补充 Clipboard 安全上下文保护。
+- How:
+  - 补充 `ssh-crypto.test.ts` 先复现旧裸异常，再改加密入口；同步前端 README、agent-web README 和包说明记录 Chromium 108 与安全上下文约束。
+- Result:
+  - `corepack pnpm vitest run apps/agent-web/tests/ssh-crypto.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和 `corepack pnpm --filter @test-agent/agent-web build` 通过；构建仍有既有 CSS `@import` 顺序 warning 和大 chunk warning。
+
 ### 2026-07-09 - 公共 Agent Git 单参数支持内外网
 
 - Why:
@@ -73,7 +80,6 @@
 - Result:
   - 目标单测先复现未 typed null 绑定的失败，再通过；修复部署后需重启后端才能让当前管理页接口使用新代码。
 
->>>>>>> da576164d50892b0c088aef99efbf04f9c0381f9
 ### 2026-07-09 - 优化多选题勾选框样式并支持自定义答案输入自动选中
 
 - Why:
@@ -285,8 +291,6 @@
   - 仅限于前端 CSS 与 HTML 模板小范围调整，不涉及任何接口 API、后端逻辑或数据库。
 - Result:
   - `tools/dev-frontend-check.sh` 顺利通过，Vite 重新构建成功，Lint & Typecheck 均为 0 错误。主应用 Vitest 运行无新增回归失败，既有的 3 项 Vitest 测试失败为历史已知 baseline 问题，与本次样式改动无关。
->>>>>>> 6374d06b440452c750aab9ee15a129471eea74cd
-
 ### 2026-07-08 - 企业内 worker 部署改为纯 Docker
 
 - Why:

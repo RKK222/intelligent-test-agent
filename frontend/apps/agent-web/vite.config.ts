@@ -44,6 +44,8 @@ export default defineConfig({
     port: 3000
   },
   build: {
+    target: "chrome108",
+    cssTarget: "chrome108",
     rollupOptions: {
       output: {
         // 代码分割策略：将大型第三方库独立分 chunk，优化缓存和首屏加载

@@ -364,23 +364,29 @@ function renderCodeWithLineNumbers(content: string, filePath: string): string {
 
 function copyErrorMessage() {
   const errorText = taskFailureMessage.value
-  navigator.clipboard.writeText(errorText).then(() => {
+  copyTextWithClipboard(errorText, () => {
     console.log('Error copied to clipboard')
-  }).catch((err) => {
-    console.error('Failed to copy: ', err)
   })
 }
 
 const copySuccessId = ref<string | null>(null)
 function copyText(text: string, id: string) {
-  navigator.clipboard.writeText(text).then(() => {
+  copyTextWithClipboard(text, () => {
     copySuccessId.value = id
     setTimeout(() => {
       if (copySuccessId.value === id) {
         copySuccessId.value = null
       }
     }, 1500)
-  }).catch((err) => {
+  })
+}
+
+function copyTextWithClipboard(text: string, onSuccess: () => void) {
+  if (!navigator.clipboard || !window.isSecureContext) {
+    console.warn('Clipboard API is unavailable in this browser context')
+    return
+  }
+  navigator.clipboard.writeText(text).then(onSuccess).catch((err) => {
     console.error('Failed to copy: ', err)
   })
 }
