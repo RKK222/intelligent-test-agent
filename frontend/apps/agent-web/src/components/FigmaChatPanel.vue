@@ -1905,18 +1905,18 @@ const effectiveServiceStatus = computed<string>(() => {
   return resolveServiceTarget(p) ? 'NOT_RUNNING' : 'UNASSIGNED'
 })
 const processStatusTitle = computed(() => {
-  if (props.processLoading && !props.processStatus) return '正在检查 opencode 进程'
+  if (props.processLoading && !props.processStatus) return '正在检查 TestAgent 进程'
   if (props.processRequired && !props.processStatus)
-    return 'opencode 进程状态未知'
+    return 'TestAgent 进程状态未知'
   if (!props.processStatus) return ''
-  if (props.processStatus.status === 'READY') return 'opencode 进程可用'
+  if (props.processStatus.status === 'READY') return 'TestAgent 进程可用'
   if (props.processStatus.status === 'NEEDS_INITIALIZATION') {
     // 二级状态区分"尚未分配"与"已分配未运行"，与头像菜单一致
-    if (effectiveServiceStatus.value === 'NOT_RUNNING') return 'opencode 专属进程未运行'
-    if (effectiveServiceStatus.value === 'UNASSIGNED') return '尚未分配 opencode 专属进程'
-    return '需要初始化 opencode 进程' // serviceStatus 异常兜底
+    if (effectiveServiceStatus.value === 'NOT_RUNNING') return 'TestAgent 专属进程未运行'
+    if (effectiveServiceStatus.value === 'UNASSIGNED') return '尚未分配 TestAgent 专属进程'
+    return '需要初始化 TestAgent 进程' // serviceStatus 异常兜底
   }
-  return 'opencode 进程不可用'
+  return 'TestAgent 进程不可用'
 })
 // 初始化按钮文案：未分配→分配专属进程，已分配未运行→启动进程；进行中分别显示分配中/启动中
 const processInitButtonLabel = computed(() => {

@@ -1342,7 +1342,7 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    expect(wrapper.text()).not.toContain("正在检查 opencode 进程");
+    expect(wrapper.text()).not.toContain("正在检查 TestAgent 进程");
     expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
 
     await wrapper.get('[aria-label="发送"]').trigger("click");
@@ -1520,7 +1520,7 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    expect(wrapper.text()).toContain("正在检查 opencode 进程");
+    expect(wrapper.text()).toContain("正在检查 TestAgent 进程");
     expect(wrapper.text()).toContain("正在检查当前用户可用进程");
     expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeDefined();
   });
@@ -2084,7 +2084,7 @@ describe("FigmaChatPanel", () => {
     });
 
     // 未传 serviceStatus 且无地址，回退推断为 UNASSIGNED
-    expect(wrapper.text()).toContain("尚未分配 opencode 专属进程");
+    expect(wrapper.text()).toContain("尚未分配 TestAgent 专属进程");
 
     const initButton = wrapper.get(".figma-chat-process-init");
     expect(initButton.text()).toBe("分配专属进程");
@@ -2109,7 +2109,7 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    expect(wrapper.text()).toContain("opencode 专属进程未运行");
+    expect(wrapper.text()).toContain("TestAgent 专属进程未运行");
 
     const initButton = wrapper.get(".figma-chat-process-init");
     expect(initButton.text()).toBe("启动进程");
@@ -2133,7 +2133,7 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    expect(wrapper.text()).toContain("尚未分配 opencode 专属进程");
+    expect(wrapper.text()).toContain("尚未分配 TestAgent 专属进程");
     expect(wrapper.get(".figma-chat-process-init").text()).toBe("分配专属进程");
   });
 
@@ -2153,9 +2153,9 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    expect(wrapper.text()).toContain("opencode 进程不可用");
+    expect(wrapper.text()).toContain("TestAgent 进程不可用");
     expect(wrapper.get(".figma-chat-process-message").text()).toBe("server-a / 192.168.100.115:4097");
-    expect(wrapper.text()).not.toContain("尚未分配 opencode 专属进程");
+    expect(wrapper.text()).not.toContain("尚未分配 TestAgent 专属进程");
   });
 
   it("shows the assigned server name without deriving a fake address", async () => {

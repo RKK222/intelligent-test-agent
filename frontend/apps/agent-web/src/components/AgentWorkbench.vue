@@ -778,7 +778,7 @@ function failLocalProcessStartupOperation(error: unknown) {
   }
   const apiError = error instanceof BackendApiError ? error : null;
   const errorCode = apiError?.code ?? "INTERNAL_ERROR";
-  const errorMessage = apiError?.message ?? (error instanceof Error ? error.message : "初始化 opencode 进程失败");
+  const errorMessage = apiError?.message ?? (error instanceof Error ? error.message : "初始化 TestAgent 进程失败");
   const traceId = apiError?.traceId ?? current.traceId;
   const currentStep = current.currentStep || "STARTING_PROCESS";
   processStartupOperation.value = {
@@ -1704,7 +1704,7 @@ const startRunMutation = useMutation({
     command?: { command: string; arguments: string };
   }) => {
     if (!opencodeProcessReady.value) {
-      throw new Error("请先初始化 opencode 进程");
+      throw new Error("请先初始化 TestAgent 进程");
     }
     if (!selectedWorkspace.value) {
       throw new Error("未选择 Workspace");
@@ -1789,7 +1789,7 @@ const initializeOpencodeProcessMutation = useMutation({
         const refreshed = await opencodeProcessQuery.refetch();
         if (refreshed.data?.status === "READY") {
           queryClient.setQueryData(opencodeProcessQueryKey.value, refreshed.data);
-          feedback.value = { kind: "info", title: "opencode 进程可用", description: refreshed.data.serviceAddress ?? refreshed.data.message };
+          feedback.value = { kind: "info", title: "TestAgent 进程可用", description: refreshed.data.serviceAddress ?? refreshed.data.message };
           stopProcessStartupPolling();
           processStartupDialogOpen.value = false;
           return;
@@ -1802,7 +1802,7 @@ const initializeOpencodeProcessMutation = useMutation({
       }
       failLocalProcessStartupOperation(error);
       stopProcessStartupPolling();
-      feedback.value = errorFeedback("初始化 opencode 进程失败", error);
+      feedback.value = errorFeedback("初始化 TestAgent 进程失败", error);
     })();
   }
 });
@@ -2979,10 +2979,10 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
           : "UNASSIGNED");
     const procTitle =
       svc === "NOT_RUNNING"
-        ? "opencode 专属进程未运行"
+        ? "TestAgent 专属进程未运行"
         : svc === "UNASSIGNED"
-        ? "尚未分配 opencode 专属进程"
-        : "请先初始化 opencode 进程";
+        ? "尚未分配 TestAgent 专属进程"
+        : "请先初始化 TestAgent 进程";
     feedback.value = {
       kind: "info",
       title: procTitle,

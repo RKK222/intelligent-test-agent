@@ -74,7 +74,7 @@ function statusIcon(step: OpencodeProcessStartOperationStep) {
 
       <div v-if="failed" class="ta-process-startup-error">
         <strong>{{ operation?.errorCode ?? "INTERNAL_ERROR" }}</strong>
-        <p>{{ operation?.errorMessage ?? "初始化 opencode 进程失败" }}</p>
+        <p>{{ operation?.errorMessage ?? "初始化 TestAgent 进程失败" }}</p>
         <small v-if="operation?.traceId">traceId: {{ operation.traceId }}</small>
       </div>
 

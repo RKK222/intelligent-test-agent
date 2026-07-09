@@ -12,6 +12,20 @@
   - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+### 2026-07-09 - 修改 opencode 进程状态提示文字为 TestAgent
+
+- Why:
+  - 界面上关于后台运行环境进程的各种状态文字显示为 "opencode 进程"，为了与平台整体对外的产品语义（TestAgent）统一，需要将这部分文字中的 "opencode" 更换为 "TestAgent"。
+- What:
+  - 1. 替换 `FigmaChatPanel.vue` 中所有展示在主输入框上方的进程就绪/未运行/初始化状态标题文字中的 "opencode" 为 "TestAgent"。
+  - 2. 替换 `AgentWorkbench.vue` 中初始化失败、未初始化以及只读态下的状态/警告文字中的 "opencode" 为 "TestAgent"。
+  - 3. 替换 `OpencodeProcessStartupDialog.vue` 弹窗错误提示文字中的 "opencode" 为 "TestAgent"。
+  - 4. 同步更新 `FigmaChatPanel.test.ts` 中对应的文本断言，确保全量测试无误。
+- How:
+  - 在三个组件及测试文件中将 `'正在检查 opencode 进程'`、`'opencode 进程可用'` 等字符串修改为 `'正在检查 TestAgent 进程'`、`'TestAgent 进程可用'`。
+- Result:
+  - 状态状态条与错误提示里的 "opencode" 文案已被成功替换为 "TestAgent"；前端类型检查、代码格式以及 Vitest 测试全部通过。
+
 ### 2026-07-09 - 运行态资源盘点移动到顶部应用切换左侧
 
 - Why:
