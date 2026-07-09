@@ -12,6 +12,16 @@
   - 在远端 `origin/main` 基线上完成 rebase 冲突处理，复用 `CodeRepositoryDeploymentMode` 语义，只调整公共 Agent 配置 Git 解释逻辑、通用参数页面提示、测试和文档；通用参数页复用 `repository-deployment-options` 展示当前内部/外部部署模式，不新增第二个参数。
 - Result:
   - 定向后端/前端测试和 agent-web typecheck 通过；`.env.test` 重启链路完成，后端 health/readiness、前端、CORS 和 manager 日志检查通过。当前开发库中 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL` 已被 cleanup migration 删除，只剩 `OPENCODE_PUBLIC_AGENT_GIT_URL` 一行。
+### 2026-07-09 - 修复定时任务管理页查询 500
+
+- Why:
+  - 定时任务管理页显示 `INTERNAL_ERROR`；后端日志定位为 `SchedulerManagementController.tasks` 组装任务列表时查询 active run 失败，PostgreSQL 报 `could not determine data type of parameter $2`。
+- What:
+  - 修复 `JdbcScheduledTaskRepository.findActiveRunByTaskKey` 中 `excludedTaskRunId=null` 的参数绑定，显式按 `VARCHAR` 传入，避免 PostgreSQL 在 `:excludedTaskRunId is null` 表达式中无法推断类型。
+- How:
+  - 不新增或修改 SQL 文本，只把存量 JDBC 白名单仓储的 null 参数改为 typed binding；新增单测锁定该行为，防止管理页查询任务列表再次触发 500。
+- Result:
+  - 目标单测先复现未 typed null 绑定的失败，再通过；修复部署后需重启后端才能让当前管理页接口使用新代码。
 
 ### 2026-07-09 - 优化多选题勾选框样式并支持自定义答案输入自动选中
 

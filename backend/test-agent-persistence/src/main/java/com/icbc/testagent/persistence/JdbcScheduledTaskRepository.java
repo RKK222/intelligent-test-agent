@@ -19,6 +19,7 @@ import com.icbc.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRunStatus;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskTriggerType;
 import com.icbc.testagent.domain.user.UserId;
+import java.sql.Types;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -339,9 +340,6 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
     }
 
     private Optional<ScheduledTaskRun> findActiveRunByTaskKey(ScheduledTaskKey taskKey, ScheduledTaskRunId excludedTaskRunId) {
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("taskKey", taskKey.value());
-        params.put("excludedTaskRunId", excludedTaskRunId == null ? null : excludedTaskRunId.value());
         return jdbcClient.sql("""
                         select %s
                         from scheduled_task_runs
@@ -351,7 +349,9 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
                         order by updated_at desc, id desc
                         limit 1
                         """.formatted(RUN_COLUMNS))
-                .params(params)
+                .param("taskKey", taskKey.value())
+                // PostgreSQL 无法从 ":excludedTaskRunId is null" 推断 null 类型，必须显式按 varchar 绑定。
+                .param("excludedTaskRunId", excludedTaskRunId == null ? null : excludedTaskRunId.value(), Types.VARCHAR)
                 .query(runRowMapper)
                 .optional();
     }
