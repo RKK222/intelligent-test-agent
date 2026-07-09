@@ -1076,8 +1076,20 @@ function Start-Backend {
     $errorLogPath = Get-ErrorLogPath $logPath
     Write-Host "Starting backend with profile '$BackendProfile'. Logs: $logPath"
     Write-Host "Backend JVM proxy settings are disabled for direct DB/Redis connections."
+
+    $envVars = @{}
+    foreach ($entry in Get-ChildItem Env: | Where-Object { $_.Name -like 'TEST_AGENT_*' }) {
+        $envVars[$entry.Name] = $entry.Value
+    }
+    foreach ($name in @('EXTERNAL_API_KEY', 'ICBC_OPENAI_AUTH_TOKEN', 'SPRING_PROFILES_ACTIVE')) {
+        $value = [Environment]::GetEnvironmentVariable($name, "Process")
+        if (-not [string]::IsNullOrEmpty($value)) {
+            $envVars[$name] = $value
+        }
+    }
+
     $args = @($BackendJavaDirectNetworkArgs + @("-jar", $BackendJar, "--spring.profiles.active=$BackendProfile"))
-    $wrapperProcessId = Start-BackgroundCommand -WorkingDirectory $BackendDir -Command "java" -Arguments $args -LogPath $logPath
+    $wrapperProcessId = Start-BackgroundCommand -WorkingDirectory $BackendDir -Command "java" -Arguments $args -LogPath $logPath -Environment $envVars
     Write-PidFile (Join-Path $LogDir "backend.pid") @($wrapperProcessId)
     # 实时输出后端启动日志，直到看到启动完成标志或超时
     Wait-BackendLogReady $logPath $errorLogPath 120

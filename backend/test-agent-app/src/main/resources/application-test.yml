@@ -24,6 +24,8 @@ management:
       enabled: true
 
 test-agent:
+  internal-model-proxy:
+    api-key: ${TEST_AGENT_INTERNAL_PROXY_API_KEY:test-agent-internal-proxy-key}
   managed-workspace:
     replica-reconciler:
       enabled: false

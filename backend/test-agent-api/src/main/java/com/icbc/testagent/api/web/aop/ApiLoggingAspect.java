@@ -126,7 +126,7 @@ public class ApiLoggingAspect {
         String errorMessage = error.getMessage();
 
         LOGGER.warn("event=api_exit traceId={} userId={} method={} durationMs={} status=error errorType={} errorCode={} message={}",
-                traceId, userId, methodName, duration, errorType, errorCode, errorMessage);
+                traceId, userId, methodName, duration, errorType, errorCode, errorMessage, error);
     }
 
     /**

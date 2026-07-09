@@ -2,6 +2,28 @@
 
 ## Entries
 
+### 2026-07-09 - 修复公共配置未初始化时 listPublicGitConflicts 报错
+
+- Why:
+  - 公共配置仓库未初始化（UNINITIALIZED）时，`listPublicGitConflicts` API 直接调用 Git 命令导致 "Git 远端读取失败" 错误。
+- What:
+  - 在 `AgentConfigApplicationService.publicGitConflictFiles()` 方法中增加仓库存在性检查，未初始化时返回空列表。
+- How:
+  - 修改 `publicGitConflictFiles()` 方法，先调用 `gitWorkspaceService.isGitRepository()` 检查仓库是否存在。
+- Result:
+  - 公共配置未初始化时，该 API 正常返回空列表而非报错；后端重启后运行正常。
+
+### 2026-07-09 - 修复 user_ssh_keys 表 Base64 数据损坏导致的切换工作区失败
+
+- Why:
+  - 用户切换应用版本时报错 "Last unit does not have enough valid bits"，后端堆栈显示 Base64 解码失败。
+- What:
+  - 删除 `user_ssh_keys` 表中两条 `encrypted_aes_key` 字段长度为 343（应为 344）的损坏记录。
+- How:
+  - 执行 `DELETE FROM user_ssh_keys WHERE id IN (3, 10)` 清理脏数据。
+- Result:
+  - 验证无残留损坏数据；用户 `usr_test_dev` 和 `usr_test_superadmin20` 需重新配置 SSH 密钥。
+
 ### 2026-07-08 - 企业内 worker 部署改为纯 Docker
 
 - Why:
