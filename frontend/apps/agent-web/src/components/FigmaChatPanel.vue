@@ -39,8 +39,6 @@ import type {
   MessagePart,
   PermissionRequest,
   QuestionRequest,
-  RuntimeResourceInfo,
-  RuntimeToolInfo,
   RunDiffFile,
   SubagentSession,
   TodoItem,
@@ -700,12 +698,6 @@ const props =
     feedbackSubmitting?: Record<string, boolean>
     /** 可用命令列表（含 source=skill 的 Skill Command） */
     commands?: Array<{ commandId: string; name: string; description?: string; source?: string; arguments?: string }>
-    /** MCP 服务器状态原始响应；只用于底部运行态资源盘点，不直接驱动业务请求。 */
-    mcpStatus?: unknown
-    /** MCP resources 目录，来自 backend-api 对 opencode runtime 的代理。 */
-    mcpResources?: RuntimeResourceInfo[]
-    /** MCP tools 目录，来自 backend-api 对 opencode runtime 的代理。 */
-    mcpTools?: RuntimeToolInfo[]
     /** 当前会话在前端内存中捕获的浏览器与平台后端原始报文 */
     rawOutputEntries?: RawOutputEntry[]
     /** message.part.delta 的流式 overlay，避免 text/reasoning 闪烁或重复。 */
@@ -731,8 +723,6 @@ const props =
     processRefreshBlocksSubmit: true,
     commands: () => [],
     agents: () => [],
-    mcpResources: () => [],
-    mcpTools: () => [],
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
     todos: () => [],
@@ -814,7 +804,6 @@ function toggleAgentDropdown(event: Event) {
 function closeDropdown() {
   dropdownOpen.value = false
   agentDropdownOpen.value = false
-  runtimeInventoryOpen.value = false
 }
 
 onMounted(() => {
@@ -1298,130 +1287,6 @@ const showSkillPanel = ref(false)
 const skillFilterText = ref('')
 const showAgentPanel = ref(false)
 const agentFilterText = ref('')
-const runtimeInventoryOpen = ref(false)
-
-type RuntimeInventoryItem = {
-  id: string
-  name: string
-  description?: string
-  status?: string
-}
-
-function compactInventoryText(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  return ''
-}
-
-function mcpEntrySource(value: unknown): unknown {
-  const raw = recordValue(value)
-  const data = recordValue(raw?.data)
-  if (data?.servers || data?.mcp || data?.providers) {
-    return data.servers ?? data.mcp ?? data.providers
-  }
-  return raw?.servers ?? raw?.mcp ?? raw?.providers ?? value
-}
-
-function mcpStatusItems(value: unknown): RuntimeInventoryItem[] {
-  const source = mcpEntrySource(value)
-  if (Array.isArray(source)) {
-    return source
-      .map((entry, index) => {
-        const record = recordValue(entry)
-        const name = textValue(record?.name) ?? textValue(record?.id) ?? `MCP ${index + 1}`
-        return {
-          id: textValue(record?.id) ?? name,
-          name,
-          status: compactInventoryText(record?.status),
-          description: textValue(record?.description) ?? textValue(record?.message),
-        }
-      })
-      .filter((item) => item.name)
-  }
-  const record = recordValue(source)
-  if (!record) return []
-  return Object.entries(record)
-    .filter(([key, entry]) => {
-      if (['status', 'tools', 'resources', 'message', 'error'].includes(key)) return false
-      return typeof entry === 'object' && entry !== null
-    })
-    .map(([key, entry]) => {
-      const item = recordValue(entry) ?? {}
-      return {
-        id: textValue(item.id) ?? key,
-        name: textValue(item.name) ?? key,
-        status: compactInventoryText(item.status),
-        description: textValue(item.description) ?? textValue(item.message),
-      }
-    })
-}
-
-const visibleRuntimeAgents = computed<RuntimeInventoryItem[]>(() =>
-  props.agents
-    .filter((agent) => !agent.hidden)
-    .map((agent) => ({
-      id: agentValue(agent),
-      name: agentLabel(agent),
-      status: agent.mode,
-      description: agent.description,
-    }))
-)
-
-const runtimeSkillItems = computed<RuntimeInventoryItem[]>(() =>
-  skills.value.map((skill) => ({
-    id: skill.commandId,
-    name: skill.name,
-    description: skill.description,
-  }))
-)
-
-const runtimeMcpItems = computed<RuntimeInventoryItem[]>(() => mcpStatusItems(props.mcpStatus))
-
-const runtimeMcpToolItems = computed<RuntimeInventoryItem[]>(() =>
-  (props.mcpTools ?? []).map((tool) => ({
-    id: tool.toolId,
-    name: tool.name,
-    description: tool.description,
-    status: tool.source,
-  }))
-)
-
-const runtimeMcpResourceItems = computed<RuntimeInventoryItem[]>(() =>
-  (props.mcpResources ?? []).map((resource) => ({
-    id: resource.id,
-    name: resource.name,
-    description: resource.uri,
-    status: resource.type,
-  }))
-)
-
-const runtimePluginItems = computed<RuntimeInventoryItem[]>(() =>
-  (props.commands ?? [])
-    .filter((command) => command.source === 'plugin')
-    .map((command) => ({
-      id: command.commandId,
-      name: command.name,
-      description: command.description,
-    }))
-)
-
-const runtimeInventoryCounts = computed(() => ({
-  agents: visibleRuntimeAgents.value.length,
-  skills: runtimeSkillItems.value.length,
-  mcp: runtimeMcpItems.value.length,
-  plugins: runtimePluginItems.value.length,
-}))
-
-function toggleRuntimeInventory(event: MouseEvent) {
-  event.stopPropagation()
-  const nextOpen = !runtimeInventoryOpen.value
-  closeDropdown()
-  runtimeInventoryOpen.value = nextOpen
-}
-
-function closeRuntimeInventory() {
-  runtimeInventoryOpen.value = false
-}
 
 const filteredSkills = computed(() => {
   const q = skillFilterText.value.toLowerCase()
@@ -4389,100 +4254,8 @@ function onCompositionEnd() {
             </template>
           </span>
         </template>
-        <button
-          type="button"
-          class="figma-chat-inventory-summary"
-          data-testid="runtime-inventory-summary"
-          :aria-expanded="runtimeInventoryOpen"
-          aria-label="查看运行态资源详情"
-          @click="toggleRuntimeInventory"
-        >
-          <span>Agent {{ runtimeInventoryCounts.agents }}</span>
-          <span>Skill {{ runtimeInventoryCounts.skills }}</span>
-          <span>MCP {{ runtimeInventoryCounts.mcp }}</span>
-          <span>Plugin {{ runtimeInventoryCounts.plugins }}</span>
-        </button>
       </div>
     </div>
-
-    <section
-      v-if="!activeSubagentSessionId && runtimeInventoryOpen"
-      class="figma-chat-inventory-panel"
-      data-testid="runtime-inventory-panel"
-      role="dialog"
-      aria-label="运行态资源详情"
-      @click.stop
-    >
-      <header class="figma-chat-inventory-header">
-        <div>
-          <div class="figma-chat-inventory-title">运行态资源</div>
-          <div class="figma-chat-inventory-subtitle">当前已加载目录的只读盘点</div>
-        </div>
-        <button type="button" class="figma-chat-inventory-close" aria-label="关闭运行态资源详情" @click="closeRuntimeInventory">
-          <X :size="14" />
-        </button>
-      </header>
-      <div class="figma-chat-inventory-body">
-        <section class="figma-chat-inventory-section">
-          <div class="figma-chat-inventory-section-title">Agent <span>{{ runtimeInventoryCounts.agents }}</span></div>
-          <ul v-if="visibleRuntimeAgents.length" class="figma-chat-inventory-list">
-            <li v-for="agent in visibleRuntimeAgents" :key="agent.id" class="figma-chat-inventory-row">
-              <span class="figma-chat-inventory-name">{{ agent.name }}</span>
-              <span v-if="agent.status" class="figma-chat-inventory-tag">{{ agent.status }}</span>
-              <span v-if="agent.description" class="figma-chat-inventory-desc">{{ agent.description }}</span>
-            </li>
-          </ul>
-          <div v-else class="figma-chat-inventory-empty">暂无已加载 Agent</div>
-        </section>
-        <section class="figma-chat-inventory-section">
-          <div class="figma-chat-inventory-section-title">Skill <span>{{ runtimeInventoryCounts.skills }}</span></div>
-          <ul v-if="runtimeSkillItems.length" class="figma-chat-inventory-list">
-            <li v-for="skill in runtimeSkillItems" :key="skill.id" class="figma-chat-inventory-row">
-              <span class="figma-chat-inventory-name">{{ skill.name }}</span>
-              <span v-if="skill.description" class="figma-chat-inventory-desc">{{ skill.description }}</span>
-            </li>
-          </ul>
-          <div v-else class="figma-chat-inventory-empty">暂无已加载 Skill</div>
-        </section>
-        <section class="figma-chat-inventory-section">
-          <div class="figma-chat-inventory-section-title">MCP <span>{{ runtimeInventoryCounts.mcp }}</span></div>
-          <ul v-if="runtimeMcpItems.length" class="figma-chat-inventory-list">
-            <li v-for="mcp in runtimeMcpItems" :key="mcp.id" class="figma-chat-inventory-row">
-              <span class="figma-chat-inventory-name">{{ mcp.name }}</span>
-              <span v-if="mcp.status" class="figma-chat-inventory-tag">{{ mcp.status }}</span>
-              <span v-if="mcp.description" class="figma-chat-inventory-desc">{{ mcp.description }}</span>
-            </li>
-          </ul>
-          <div v-else class="figma-chat-inventory-empty">暂无 MCP 状态条目</div>
-          <div class="figma-chat-inventory-subsection">
-            <span>MCP tools {{ runtimeMcpToolItems.length }}</span>
-            <span>MCP resources {{ runtimeMcpResourceItems.length }}</span>
-          </div>
-          <ul v-if="runtimeMcpToolItems.length || runtimeMcpResourceItems.length" class="figma-chat-inventory-list is-compact">
-            <li v-for="tool in runtimeMcpToolItems" :key="`tool:${tool.id}`" class="figma-chat-inventory-row">
-              <span class="figma-chat-inventory-name">{{ tool.name }}</span>
-              <span class="figma-chat-inventory-tag">tool</span>
-              <span v-if="tool.description" class="figma-chat-inventory-desc">{{ tool.description }}</span>
-            </li>
-            <li v-for="resource in runtimeMcpResourceItems" :key="`resource:${resource.id}`" class="figma-chat-inventory-row">
-              <span class="figma-chat-inventory-name">{{ resource.name }}</span>
-              <span class="figma-chat-inventory-tag">resource</span>
-              <span v-if="resource.description" class="figma-chat-inventory-desc">{{ resource.description }}</span>
-            </li>
-          </ul>
-        </section>
-        <section class="figma-chat-inventory-section">
-          <div class="figma-chat-inventory-section-title">Plugin <span>{{ runtimeInventoryCounts.plugins }}</span></div>
-          <ul v-if="runtimePluginItems.length" class="figma-chat-inventory-list">
-            <li v-for="plugin in runtimePluginItems" :key="plugin.id" class="figma-chat-inventory-row">
-              <span class="figma-chat-inventory-name">{{ plugin.name }}</span>
-              <span v-if="plugin.description" class="figma-chat-inventory-desc">{{ plugin.description }}</span>
-            </li>
-          </ul>
-          <div v-else class="figma-chat-inventory-empty">当前运行态未提供独立 Plugin 目录</div>
-        </section>
-      </div>
-    </section>
 
     <div
       v-if="attachmentDialogOpen"
@@ -6958,187 +6731,6 @@ function onCompositionEnd() {
   opacity: 0.5;
   margin: 0 2px;
   flex-shrink: 0;
-}
-
-.figma-chat-inventory-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  margin-left: 10px;
-  padding: 0 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  background: #f8fafc;
-  color: #4b5563;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.figma-chat-inventory-summary:hover,
-.figma-chat-inventory-summary[aria-expanded='true'] {
-  color: #111827;
-  border-color: #c7d2fe;
-  background: #eef2ff;
-}
-
-.figma-chat-inventory-panel {
-  position: absolute;
-  right: 12px;
-  bottom: 34px;
-  z-index: 42;
-  width: min(520px, calc(100% - 24px));
-  max-height: min(520px, calc(100% - 72px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--ta-border);
-  border-radius: 8px;
-  background: var(--ta-surface, #fff);
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
-}
-
-.figma-chat-inventory-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--ta-border);
-  background: var(--ta-panel, #f8fafc);
-}
-
-.figma-chat-inventory-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ta-text, #111827);
-}
-
-.figma-chat-inventory-subtitle {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--ta-muted, #6b7280);
-}
-
-.figma-chat-inventory-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--ta-border);
-  border-radius: 6px;
-  background: var(--ta-surface, #fff);
-  color: var(--ta-muted, #6b7280);
-  cursor: pointer;
-}
-
-.figma-chat-inventory-close:hover {
-  color: var(--ta-text, #111827);
-  background: var(--ta-hover, #f3f4f6);
-}
-
-.figma-chat-inventory-body {
-  min-height: 0;
-  overflow: auto;
-  padding: 10px 12px 12px;
-}
-
-.figma-chat-inventory-section + .figma-chat-inventory-section {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--ta-border);
-}
-
-.figma-chat-inventory-section-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 7px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--ta-text, #111827);
-}
-
-.figma-chat-inventory-section-title span {
-  color: var(--ta-muted, #6b7280);
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 600;
-}
-
-.figma-chat-inventory-list {
-  display: grid;
-  gap: 5px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.figma-chat-inventory-list.is-compact {
-  margin-top: 6px;
-}
-
-.figma-chat-inventory-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 8px;
-  align-items: center;
-  min-height: 26px;
-  padding: 5px 7px;
-  border: 1px solid #edf0f3;
-  border-radius: 6px;
-  background: #fff;
-}
-
-.figma-chat-inventory-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ta-text, #111827);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.figma-chat-inventory-tag {
-  padding: 2px 5px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: var(--ta-muted, #6b7280);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.figma-chat-inventory-desc {
-  grid-column: 1 / -1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ta-muted, #6b7280);
-  font-size: 11px;
-}
-
-.figma-chat-inventory-empty {
-  padding: 7px 8px;
-  border: 1px dashed #e5e7eb;
-  border-radius: 6px;
-  color: var(--ta-muted, #6b7280);
-  font-size: 12px;
-}
-
-.figma-chat-inventory-subsection {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  color: var(--ta-muted, #6b7280);
-  font-size: 11px;
-  font-weight: 600;
 }
 
 .figma-chat-add {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
-import { ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-vue-next";
+import { ChevronDown, LogOut, ShieldCheck, UserRound, X } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
@@ -10,6 +10,22 @@ export type AppItem = {
   name: string;
   description?: string;
   icon?: string;
+};
+
+export type RuntimeInventoryItem = {
+  id: string;
+  name: string;
+  description?: string;
+  status?: string;
+};
+
+export type RuntimeInventorySummary = {
+  agents: RuntimeInventoryItem[];
+  skills: RuntimeInventoryItem[];
+  mcp: RuntimeInventoryItem[];
+  plugins: RuntimeInventoryItem[];
+  mcpTools?: RuntimeInventoryItem[];
+  mcpResources?: RuntimeInventoryItem[];
 };
 
 const props = withDefaults(
@@ -25,6 +41,7 @@ const props = withDefaults(
     opencodeProcessLoading?: boolean;
     showLeftPanel?: boolean;
     showRightPanel?: boolean;
+    runtimeInventory?: RuntimeInventorySummary;
   }>(),
   {
     apps: () => [
@@ -76,6 +93,7 @@ const emit = defineEmits<{
 
 const appMenuOpen = ref(false);
 const userMenuOpen = ref(false);
+const runtimeInventoryOpen = ref(false);
 
 function toggleLeftPanel() {
   leftPanelOpen.value = !leftPanelOpen.value;
@@ -89,6 +107,7 @@ function toggleRightPanel() {
 function toggleAppMenu() {
   appMenuOpen.value = !appMenuOpen.value;
   userMenuOpen.value = false;
+  runtimeInventoryOpen.value = false;
 }
 
 function closeAppMenu() {
@@ -99,6 +118,7 @@ function toggleUserMenu() {
   const nextOpen = !userMenuOpen.value;
   userMenuOpen.value = nextOpen;
   appMenuOpen.value = false;
+  runtimeInventoryOpen.value = false;
   if (nextOpen) {
     emit("refresh-opencode-process");
   }
@@ -111,6 +131,7 @@ function closeUserMenu() {
 function closeHeaderMenus() {
   closeAppMenu();
   closeUserMenu();
+  closeRuntimeInventory();
 }
 
 function logout() {
@@ -126,6 +147,31 @@ function selectApp(app: AppItem) {
 const selectedApp = computed(
   () => props.apps.find((a) => a.id === props.selectedAppId) ?? props.apps[0] ?? { id: "", name: "未选择应用" }
 );
+const runtimeInventory = computed<RuntimeInventorySummary>(() => props.runtimeInventory ?? {
+  agents: [],
+  skills: [],
+  mcp: [],
+  plugins: [],
+  mcpTools: [],
+  mcpResources: []
+});
+const runtimeInventoryCounts = computed(() => ({
+  agents: runtimeInventory.value.agents.length,
+  skills: runtimeInventory.value.skills.length,
+  mcp: runtimeInventory.value.mcp.length,
+  plugins: runtimeInventory.value.plugins.length
+}));
+
+function toggleRuntimeInventory(event: MouseEvent) {
+  event.stopPropagation();
+  runtimeInventoryOpen.value = !runtimeInventoryOpen.value;
+  appMenuOpen.value = false;
+  userMenuOpen.value = false;
+}
+
+function closeRuntimeInventory() {
+  runtimeInventoryOpen.value = false;
+}
 const userName = computed(() => props.currentUserName?.trim() || "未登录");
 // 右上角用户菜单顶部的「角色」灰显行：来自后端 /api/auth/me 的 roleLabels（dictionaries.dict_label）。
 // 多个角色用「、」拼接；roleLabels 为空或缺失时整行不渲染，避免在未登录或字典缺失时出现 "角色：" 空文案。
@@ -883,6 +929,102 @@ function submitJoinApp() {
 
 
       <div class="figma-header-right">
+        <div class="figma-runtime-inventory-wrapper" @click.stop>
+          <button
+            type="button"
+            class="figma-runtime-inventory-summary"
+            data-testid="runtime-inventory-summary"
+            :aria-expanded="runtimeInventoryOpen"
+            aria-label="查看运行态资源详情"
+            @click="toggleRuntimeInventory"
+          >
+            <span>Agent {{ runtimeInventoryCounts.agents }}</span>
+            <span>Skill {{ runtimeInventoryCounts.skills }}</span>
+            <span>MCP {{ runtimeInventoryCounts.mcp }}</span>
+            <span>Plugin {{ runtimeInventoryCounts.plugins }}</span>
+          </button>
+          <section
+            v-if="runtimeInventoryOpen"
+            class="figma-runtime-inventory-panel"
+            data-testid="runtime-inventory-panel"
+            role="dialog"
+            aria-label="运行态资源详情"
+            @click.stop
+          >
+            <header class="figma-runtime-inventory-header">
+              <div>
+                <div class="figma-runtime-inventory-title">运行态资源</div>
+                <div class="figma-runtime-inventory-subtitle">当前已加载目录的只读盘点</div>
+              </div>
+              <button type="button" class="figma-runtime-inventory-close" aria-label="关闭运行态资源详情" @click="closeRuntimeInventory">
+                <X :size="14" />
+              </button>
+            </header>
+            <div class="figma-runtime-inventory-body">
+              <section class="figma-runtime-inventory-section">
+                <div class="figma-runtime-inventory-section-title">Agent <span>{{ runtimeInventoryCounts.agents }}</span></div>
+                <ul v-if="runtimeInventory.agents.length" class="figma-runtime-inventory-list">
+                  <li v-for="agent in runtimeInventory.agents" :key="agent.id" class="figma-runtime-inventory-row">
+                    <span class="figma-runtime-inventory-name">{{ agent.name }}</span>
+                    <span v-if="agent.status" class="figma-runtime-inventory-tag">{{ agent.status }}</span>
+                    <span v-if="agent.description" class="figma-runtime-inventory-desc">{{ agent.description }}</span>
+                  </li>
+                </ul>
+                <div v-else class="figma-runtime-inventory-empty">暂无已加载 Agent</div>
+              </section>
+              <section class="figma-runtime-inventory-section">
+                <div class="figma-runtime-inventory-section-title">Skill <span>{{ runtimeInventoryCounts.skills }}</span></div>
+                <ul v-if="runtimeInventory.skills.length" class="figma-runtime-inventory-list">
+                  <li v-for="skill in runtimeInventory.skills" :key="skill.id" class="figma-runtime-inventory-row">
+                    <span class="figma-runtime-inventory-name">{{ skill.name }}</span>
+                    <span v-if="skill.description" class="figma-runtime-inventory-desc">{{ skill.description }}</span>
+                  </li>
+                </ul>
+                <div v-else class="figma-runtime-inventory-empty">暂无已加载 Skill</div>
+              </section>
+              <section class="figma-runtime-inventory-section">
+                <div class="figma-runtime-inventory-section-title">MCP <span>{{ runtimeInventoryCounts.mcp }}</span></div>
+                <ul v-if="runtimeInventory.mcp.length" class="figma-runtime-inventory-list">
+                  <li v-for="mcp in runtimeInventory.mcp" :key="mcp.id" class="figma-runtime-inventory-row">
+                    <span class="figma-runtime-inventory-name">{{ mcp.name }}</span>
+                    <span v-if="mcp.status" class="figma-runtime-inventory-tag">{{ mcp.status }}</span>
+                    <span v-if="mcp.description" class="figma-runtime-inventory-desc">{{ mcp.description }}</span>
+                  </li>
+                </ul>
+                <div v-else class="figma-runtime-inventory-empty">暂无 MCP 状态条目</div>
+                <div class="figma-runtime-inventory-subsection">
+                  <span>MCP tools {{ runtimeInventory.mcpTools?.length ?? 0 }}</span>
+                  <span>MCP resources {{ runtimeInventory.mcpResources?.length ?? 0 }}</span>
+                </div>
+                <ul
+                  v-if="(runtimeInventory.mcpTools?.length ?? 0) || (runtimeInventory.mcpResources?.length ?? 0)"
+                  class="figma-runtime-inventory-list is-compact"
+                >
+                  <li v-for="tool in runtimeInventory.mcpTools" :key="`tool:${tool.id}`" class="figma-runtime-inventory-row">
+                    <span class="figma-runtime-inventory-name">{{ tool.name }}</span>
+                    <span class="figma-runtime-inventory-tag">tool</span>
+                    <span v-if="tool.description" class="figma-runtime-inventory-desc">{{ tool.description }}</span>
+                  </li>
+                  <li v-for="resource in runtimeInventory.mcpResources" :key="`resource:${resource.id}`" class="figma-runtime-inventory-row">
+                    <span class="figma-runtime-inventory-name">{{ resource.name }}</span>
+                    <span class="figma-runtime-inventory-tag">resource</span>
+                    <span v-if="resource.description" class="figma-runtime-inventory-desc">{{ resource.description }}</span>
+                  </li>
+                </ul>
+              </section>
+              <section class="figma-runtime-inventory-section">
+                <div class="figma-runtime-inventory-section-title">Plugin <span>{{ runtimeInventoryCounts.plugins }}</span></div>
+                <ul v-if="runtimeInventory.plugins.length" class="figma-runtime-inventory-list">
+                  <li v-for="plugin in runtimeInventory.plugins" :key="plugin.id" class="figma-runtime-inventory-row">
+                    <span class="figma-runtime-inventory-name">{{ plugin.name }}</span>
+                    <span v-if="plugin.description" class="figma-runtime-inventory-desc">{{ plugin.description }}</span>
+                  </li>
+                </ul>
+                <div v-else class="figma-runtime-inventory-empty">当前运行态未提供独立 Plugin 目录</div>
+              </section>
+            </div>
+          </section>
+        </div>
         <div class="figma-app-menu-wrapper" @click.stop>
           <button
             type="button"
@@ -1218,6 +1360,192 @@ function submitJoinApp() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.figma-runtime-inventory-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.figma-runtime-inventory-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0.8px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #4b5563;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.figma-runtime-inventory-summary:hover,
+.figma-runtime-inventory-summary[aria-expanded='true'] {
+  color: #111827;
+  border-color: #c7d2fe;
+  background: #eef2ff;
+}
+
+.figma-runtime-inventory-panel {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 100;
+  width: min(520px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 72px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ta-border, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+}
+
+.figma-runtime-inventory-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ta-border, #e5e7eb);
+  background: #f8fafc;
+}
+
+.figma-runtime-inventory-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.figma-runtime-inventory-subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.figma-runtime-inventory-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.figma-runtime-inventory-close:hover {
+  color: #111827;
+  background: #f3f4f6;
+}
+
+.figma-runtime-inventory-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 12px;
+}
+
+.figma-runtime-inventory-section + .figma-runtime-inventory-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.figma-runtime-inventory-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.figma-runtime-inventory-section-title span {
+  color: #6b7280;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 600;
+}
+
+.figma-runtime-inventory-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.figma-runtime-inventory-list.is-compact {
+  margin-top: 6px;
+}
+
+.figma-runtime-inventory-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  min-height: 26px;
+  padding: 5px 7px;
+  border: 1px solid #edf0f3;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.figma-runtime-inventory-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.figma-runtime-inventory-tag {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.figma-runtime-inventory-desc {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.figma-runtime-inventory-empty {
+  padding: 7px 8px;
+  border: 1px dashed #e5e7eb;
+  border-radius: 6px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.figma-runtime-inventory-subsection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 /* ---- App Dropdown ---- */

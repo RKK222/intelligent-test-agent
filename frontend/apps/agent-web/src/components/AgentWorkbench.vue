@@ -61,7 +61,7 @@ import {
   validateChatSend,
   type ChatContextItem
 } from "../stores/chatContextStore";
-import FigmaShell from "./FigmaShell.vue";
+import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } from "./FigmaShell.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
@@ -916,6 +916,93 @@ const mcpToolsData = computed<RuntimeToolInfo[]>(() => mcpToolsQuery.data.value 
 const vcsStatusData = computed(() => vcsStatusQuery.data.value);
 const lspStatusData = computed(() => lspStatusQuery.data.value);
 const mcpStatusData = computed(() => mcpStatusQuery.data.value);
+function runtimeInventoryText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return undefined;
+}
+
+function runtimeMcpEntrySource(value: unknown): unknown {
+  const raw = recordValue(value);
+  const data = recordValue(raw?.data);
+  if (data?.servers || data?.mcp || data?.providers) {
+    return data.servers ?? data.mcp ?? data.providers;
+  }
+  return raw?.servers ?? raw?.mcp ?? raw?.providers ?? value;
+}
+
+function runtimeMcpItems(value: unknown): RuntimeInventoryItem[] {
+  const source = runtimeMcpEntrySource(value);
+  if (Array.isArray(source)) {
+    return source
+      .map((entry, index) => {
+        const item = recordValue(entry);
+        const name = text(item?.name) ?? text(item?.id) ?? `MCP ${index + 1}`;
+        return {
+          id: text(item?.id) ?? name,
+          name,
+          status: runtimeInventoryText(item?.status),
+          description: text(item?.description) ?? text(item?.message)
+        };
+      })
+      .filter((item) => item.name);
+  }
+  const record = recordValue(source);
+  if (!record) return [];
+  return Object.entries(record)
+    .filter(([key, entry]) => {
+      if (["status", "tools", "resources", "message", "error"].includes(key)) return false;
+      return typeof entry === "object" && entry !== null;
+    })
+    .map(([key, entry]) => {
+      const item = recordValue(entry) ?? {};
+      return {
+        id: text(item.id) ?? key,
+        name: text(item.name) ?? key,
+        status: runtimeInventoryText(item.status),
+        description: text(item.description) ?? text(item.message)
+      };
+    });
+}
+
+// 顶部资源盘点只消费已加载目录，不主动触发额外 runtime 请求。
+const runtimeInventoryForShell = computed<RuntimeInventorySummary>(() => ({
+  agents: agents.value
+    .filter((agent) => !agent.hidden)
+    .map((agent) => ({
+      id: agent.agentId || agent.name,
+      name: agent.name || agent.agentId,
+      status: agent.mode,
+      description: agent.description
+    })),
+  skills: commands.value
+    .filter((command) => command.source === "skill")
+    .map((command) => ({
+      id: command.commandId,
+      name: command.name,
+      description: command.description
+    })),
+  mcp: runtimeMcpItems(mcpStatusData.value),
+  plugins: commands.value
+    .filter((command) => command.source === "plugin")
+    .map((command) => ({
+      id: command.commandId,
+      name: command.name,
+      description: command.description
+    })),
+  mcpTools: mcpToolsData.value.map((tool) => ({
+    id: tool.toolId,
+    name: tool.name,
+    status: tool.source,
+    description: tool.description
+  })),
+  mcpResources: (mcpResourcesData.value ?? []).map((resource) => ({
+    id: resource.id,
+    name: resource.name,
+    status: resource.type,
+    description: resource.uri
+  }))
+}));
 // 只在首个状态响应回来前展示"正在检查"，避免 READY 数据后台刷新时把对话区重新置为阻塞态。
 const opencodeProcessInitialLoading = computed(
   () => opencodeProcessEnabled.value && !opencodeProcessStatus.value && (opencodeProcessQuery.isPending.value || opencodeProcessQuery.isFetching.value)
@@ -3885,6 +3972,7 @@ async function handleLogout() {
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
+    :runtime-inventory="runtimeInventoryForShell"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
@@ -4138,9 +4226,6 @@ async function handleLogout() {
           :message-feedbacks="messageFeedbacks"
           :feedback-submitting="feedbackSubmitting"
           :commands="commands"
-          :mcp-status="mcpStatusData"
-          :mcp-resources="mcpResourcesData"
-          :mcp-tools="mcpToolsData"
           :raw-output-entries="currentRawOutputEntries"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"

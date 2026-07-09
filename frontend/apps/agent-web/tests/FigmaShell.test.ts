@@ -3,6 +3,50 @@ import { describe, expect, it } from "vitest";
 import FigmaShell from "../src/components/FigmaShell.vue";
 
 describe("FigmaShell", () => {
+  it("shows runtime inventory before the application switch and opens details", async () => {
+    const wrapper = mount(FigmaShell, {
+      props: {
+        currentUserName: "developer",
+        apps: [{ id: "app_coss", name: "F-COSS", description: "已启用" }],
+        selectedAppId: "app_coss",
+        runtimeInventory: {
+          agents: [
+            { id: "build", name: "Build", status: "primary" },
+            { id: "review", name: "Review", status: "subagent" }
+          ],
+          skills: [{ id: "skill-test", name: "test-skill", description: "测试技能" }],
+          mcp: [
+            { id: "filesystem", name: "filesystem", status: "connected" },
+            { id: "github", name: "github", status: "failed" }
+          ],
+          plugins: [],
+          mcpTools: [{ id: "read-file", name: "read_file", status: "mcp" }],
+          mcpResources: [{ id: "repo", name: "Repository", status: "git" }]
+        }
+      } as any
+    });
+
+    const headerRight = wrapper.get(".figma-header-right");
+    const summary = wrapper.get('[data-testid="runtime-inventory-summary"]');
+    const appSwitch = wrapper.get(".figma-app-menu-wrapper");
+    expect(headerRight.element.compareDocumentPosition(summary.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(summary.element.compareDocumentPosition(appSwitch.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(summary.text()).toContain("Agent 2");
+    expect(summary.text()).toContain("Skill 1");
+    expect(summary.text()).toContain("MCP 2");
+    expect(summary.text()).toContain("Plugin 0");
+
+    await summary.trigger("click");
+
+    expect(wrapper.find('[data-testid="runtime-inventory-panel"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Build");
+    expect(wrapper.text()).toContain("test-skill");
+    expect(wrapper.text()).toContain("filesystem");
+    expect(wrapper.text()).toContain("read_file");
+    expect(wrapper.text()).toContain("Repository");
+    expect(wrapper.text()).toContain("当前运行态未提供独立 Plugin 目录");
+  });
+
   it("shows process status with server name and resolved address", async () => {
     const wrapper = mount(FigmaShell, {
       props: {

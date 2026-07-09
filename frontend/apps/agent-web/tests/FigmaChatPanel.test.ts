@@ -108,54 +108,6 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("refresh-agents")).toEqual([[], []]);
   });
 
-  it("shows runtime resource counts in the footer and opens the detail panel", async () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [],
-        processStatus: { status: "READY", initializable: false, message: "ready" },
-        agents: [
-          { agentId: "build", name: "Build", mode: "primary" },
-          { agentId: "review", name: "Review", mode: "subagent" },
-          { agentId: "hidden", name: "Hidden", mode: "primary", hidden: true }
-        ],
-        commands: [
-          { commandId: "skill-test", name: "test-skill", source: "skill", description: "测试技能" },
-          { commandId: "command-build", name: "build", source: "command" }
-        ],
-        mcpStatus: {
-          filesystem: { status: "connected" },
-          github: { status: "failed" }
-        },
-        mcpResources: [
-          { id: "repo", name: "Repository", type: "git" }
-        ],
-        mcpTools: [
-          { toolId: "read-file", name: "read_file", source: "mcp" }
-        ]
-      } as any
-    });
-
-    const summary = wrapper.get('[data-testid="runtime-inventory-summary"]');
-    expect(summary.text()).toContain("Agent 2");
-    expect(summary.text()).toContain("Skill 1");
-    expect(summary.text()).toContain("MCP 2");
-    expect(summary.text()).toContain("Plugin 0");
-
-    await summary.trigger("click");
-    await nextTick();
-
-    expect(wrapper.find('[data-testid="runtime-inventory-panel"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain("Build");
-    expect(wrapper.text()).toContain("Review");
-    expect(wrapper.text()).not.toContain("Hidden");
-    expect(wrapper.text()).toContain("test-skill");
-    expect(wrapper.text()).toContain("filesystem");
-    expect(wrapper.text()).toContain("github");
-    expect(wrapper.text()).toContain("read_file");
-    expect(wrapper.text()).toContain("Repository");
-    expect(wrapper.text()).toContain("当前运行态未提供独立 Plugin 目录");
-  });
-
   it("shows an empty state when the agent catalog has no main agents", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

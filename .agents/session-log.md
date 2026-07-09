@@ -12,6 +12,17 @@
   - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+### 2026-07-09 - 运行态资源盘点移动到顶部应用切换左侧
+
+- Why:
+  - 用户确认资源数量不放在右侧对话 footer，而是展示在顶部应用切换控件左边，避免占用对话任务栏空间。
+- What:
+  - 将 Agent/Skill/MCP/Plugin 数量摘要和详情弹层从 `FigmaChatPanel` 移到 `FigmaShell` 顶部栏；`AgentWorkbench` 统一汇总已加载的 Agent、`source=skill` 命令、MCP status/tools/resources 和 plugin 命令后传给 shell。
+- How:
+  - 新增 `FigmaShell.test.ts` 覆盖资源摘要位于应用切换按钮之前并可展开详情；删除 `FigmaChatPanel` 中上一轮 footer 资源入口、props、样式和对应测试。
+- Result:
+  - 资源盘点入口现在位于顶部应用切换左侧，右侧对话 footer 恢复只展示任务状态与任务消耗。
+
 ### 2026-07-09 - 优化文件比对头部路径展示
 
 - Why:
