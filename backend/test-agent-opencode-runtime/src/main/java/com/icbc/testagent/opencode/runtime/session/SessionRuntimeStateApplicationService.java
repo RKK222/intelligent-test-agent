@@ -9,6 +9,7 @@ import com.icbc.testagent.event.RunEventLiveEvent;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -36,6 +37,7 @@ public class SessionRuntimeStateApplicationService {
     private final RunEventLiveBus runEventLiveBus;
     private final Duration refreshInterval;
 
+    @Autowired
     public SessionRuntimeStateApplicationService(
             SessionRuntimeStateRepository repository,
             RunEventLiveBus runEventLiveBus) {
