@@ -6,6 +6,7 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,18 @@ class GitRemoteServiceTest {
                 abcdef1234567892\trefs/tags/v1
                 """))
                 .containsExactly("main", "feature/app-config");
+    }
+
+    @Test
+    void listBranchesAllowsSlowEnterpriseGitServers() {
+        RecordingTimeoutExecutor executor = new RecordingTimeoutExecutor("""
+                abcdef1234567890\trefs/heads/master
+                """);
+        GitRemoteService service = new GitRemoteService(executor);
+
+        assertThat(service.listBranches("ssh://AUTH_ADMIN@scm.example.com:29418/team/agent-config.git", "PRIVATE KEY"))
+                .containsExactly("master");
+        assertThat(executor.timeouts).containsExactly(Duration.ofSeconds(60));
     }
 
     @Test
@@ -125,6 +138,21 @@ class GitRemoteServiceTest {
         @Override
         public GitCommandResult execute(List<String> command, String privateKey, Duration timeout) {
             return new GitCommandResult(0, String.join("\n", stdoutLines), stdoutBytes);
+        }
+    }
+
+    private static final class RecordingTimeoutExecutor implements GitCommandExecutor {
+        private final String stdout;
+        private final List<Duration> timeouts = new ArrayList<>();
+
+        private RecordingTimeoutExecutor(String stdout) {
+            this.stdout = stdout;
+        }
+
+        @Override
+        public GitCommandResult execute(List<String> command, String privateKey, Duration timeout) {
+            timeouts.add(timeout);
+            return new GitCommandResult(0, stdout, stdout.getBytes(StandardCharsets.UTF_8));
         }
     }
 }

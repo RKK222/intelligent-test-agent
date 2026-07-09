@@ -34,6 +34,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -281,7 +282,33 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     public List<String> publicBranches(UserId userId) {
         PublicConfig config = requireEnabledPublicConfig(userId);
-        return gitRemoteService.listBranches(config.gitUrl(), decryptSingleSshKey(userId));
+        long startedAt = System.nanoTime();
+        LOGGER.info(
+                "event=agent_config_public_branches_start linuxServerId={} userId={} gitUrl={} gitRoot={}",
+                serverIdentity.linuxServerId(),
+                userId.value(),
+                safeGitUrlForLog(config.gitUrl()),
+                config.gitRoot());
+        try {
+            List<String> branches = gitRemoteService.listBranches(config.gitUrl(), decryptSingleSshKey(userId));
+            LOGGER.info(
+                    "event=agent_config_public_branches_success linuxServerId={} userId={} branchCount={} durationMs={}",
+                    serverIdentity.linuxServerId(),
+                    userId.value(),
+                    branches.size(),
+                    elapsedMillis(startedAt));
+            return branches;
+        } catch (PlatformException exception) {
+            LOGGER.warn(
+                    "event=agent_config_public_branches_failed linuxServerId={} userId={} errorCode={} durationMs={} gitUrl={} message={}",
+                    serverIdentity.linuxServerId(),
+                    userId.value(),
+                    exception.errorCode(),
+                    elapsedMillis(startedAt),
+                    safeGitUrlForLog(config.gitUrl()),
+                    exception.getMessage());
+            throw exception;
+        }
     }
 
     public AgentConfigResponses.PublicRepositoryStatusResponse localPublicRepositoryStatus() {
@@ -303,15 +330,45 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         try {
             PublicConfig config = requireEnabledPublicConfig(userId);
             String privateKey = decryptSingleSshKey(userId);
+            LOGGER.info(
+                    "event=agent_config_public_repository_initialize_start linuxServerId={} userId={} branch={} gitUrl={} gitRoot={} configDir={}",
+                    serverIdentity.linuxServerId(),
+                    userId.value(),
+                    normalizedBranch,
+                    safeGitUrlForLog(config.gitUrl()),
+                    config.gitRoot(),
+                    config.configDir());
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
             ensurePublicRepositoryReady(config, normalizedBranch, privateKey);
             requireInitializedConfigDirectory(config);
-            progress.succeeded(gitWorkspaceService.headCommit(config.gitRoot()));
+            String commitHash = gitWorkspaceService.headCommit(config.gitRoot());
+            progress.succeeded(commitHash);
+            LOGGER.info(
+                    "event=agent_config_public_repository_initialize_success linuxServerId={} userId={} branch={} gitRoot={} commitHash={}",
+                    serverIdentity.linuxServerId(),
+                    userId.value(),
+                    normalizedBranch,
+                    config.gitRoot(),
+                    commitHash);
             return publicRepositoryStatus(config);
         } catch (PlatformException exception) {
+            LOGGER.warn(
+                    "event=agent_config_public_repository_initialize_failed linuxServerId={} userId={} branch={} errorCode={} message={}",
+                    serverIdentity.linuxServerId(),
+                    userId.value(),
+                    normalizedBranch,
+                    exception.errorCode(),
+                    exception.getMessage());
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
             throw exception;
         } catch (Exception exception) {
+            LOGGER.warn(
+                    "event=agent_config_public_repository_initialize_failed linuxServerId={} userId={} branch={} errorCode={} message={}",
+                    serverIdentity.linuxServerId(),
+                    userId.value(),
+                    normalizedBranch,
+                    ErrorCode.INTERNAL_ERROR,
+                    exception.toString());
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "初始化公共 Agent 配置仓库失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "初始化公共 Agent 配置仓库失败", Map.of(), exception);
         }
@@ -1490,6 +1547,38 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     Map.of());
         }
         return current + (current.endsWith("\n") ? "" : "\n") + incoming;
+    }
+
+    private static long elapsedMillis(long startedAt) {
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+    }
+
+    /**
+     * 日志只保留远端定位信息，隐藏内部部署动态拼接的统一认证号或 HTTPS token。
+     */
+    private static String safeGitUrlForLog(String gitUrl) {
+        if (gitUrl == null || gitUrl.isBlank()) {
+            return "";
+        }
+        String value = gitUrl.trim();
+        if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("ssh://")) {
+            try {
+                URI uri = URI.create(value);
+                if (uri.getUserInfo() == null || uri.getHost() == null) {
+                    return value;
+                }
+                String authority = "***@" + uri.getHost() + (uri.getPort() >= 0 ? ":" + uri.getPort() : "");
+                return new URI(uri.getScheme(), authority, uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
+            } catch (Exception ignored) {
+                return value.replaceFirst("^(https?://|ssh://)[^/@]+@", "$1***@");
+            }
+        }
+        int at = value.indexOf('@');
+        int colon = value.indexOf(':', at + 1);
+        if (at > 0 && colon > at + 1 && !value.substring(0, at).contains("/")) {
+            return "***@" + value.substring(at + 1);
+        }
+        return value;
     }
 
     private List<String> normalizeWorkspaceAgentFiles(List<String> files) {

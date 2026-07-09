@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 增强公共配置 Git 超时排查日志
+
+- Why:
+  - 部署后在“系统管理 → 配置管理 → opencode公共配置管理”点击初始化时，初始化弹窗会先调用 `GET /public/branches` 执行 `git ls-remote --heads`；该步骤超时时前端只显示“加载远端分支失败：Git 操作超时”，后端日志缺少脱敏 Git URL、命令阶段、耗时和失败归因，难以区分私钥、网络、仓库地址或远端响应慢。
+- What:
+  - 将远端只读 Git 查询超时从 20 秒放宽到 60 秒；Git SSH 命令增加非交互、10 秒连接超时和 keepalive；`ProcessGitCommandExecutor` 在超时、失败和慢命令时输出结构化日志，并在 `GIT_TIMEOUT` details 中带 `gitFailureType=TIMEOUT`、`gitFailureHint`、脱敏 command、超时和耗时。公共配置分支加载和初始化入口增加 `agent_config_public_branches_*` / `agent_config_public_repository_initialize_*` 日志。
+- How:
+  - 新增 `GitRemoteServiceTest.listBranchesAllowsSlowEnterpriseGitServers` 和 `ProcessGitCommandExecutorTest.timeoutDetailsMaskCredentialsInCommand`，先确认旧实现红灯，再实现最小改动；同步 `docs/api/http-api.md`、`docs/deployment/backend.md` 和 `backend/test-agent-workspace-management/README.md`。
+- Result:
+  - `mvn -pl test-agent-common test -Dtest=GitRemoteServiceTest,ProcessGitCommandExecutorTest` 通过；`mvn -pl test-agent-workspace-management -am test -Dtest=AgentConfigApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false` 通过。排查时用前端 traceId 搜索 Java 日志中的 `agent_config_public_branches_failed` 和 `git_command_timeout`。
+
 ### 2026-07-09 - 修复应用工作区 Git 根目录和默认个人 worktree 重建
 
 - Why:

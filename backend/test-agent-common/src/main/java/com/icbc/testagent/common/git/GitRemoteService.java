@@ -15,7 +15,7 @@ import java.util.TreeSet;
  */
 public class GitRemoteService {
 
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(20);
+    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(60);
     public static final String NODE_TYPE_DIRECTORY = "directory";
     public static final String NODE_TYPE_FILE = "file";
 
