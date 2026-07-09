@@ -12,6 +12,16 @@
   - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+### 2026-07-09 - 右侧对话 footer 增加运行态资源盘点
+
+- Why:
+  - 用户要求在对话框底部任务栏展示当前已加载的 Agent、Skill、MCP、Plugin 数量，并可点击查看详细信息。
+- What:
+  - `FigmaChatPanel` 底部 footer 新增资源摘要按钮，统计已加载 Agent、`source=skill` 命令、MCP status 条目和 Plugin 命令；点击后弹出只读详情面板，展示 Agent/Skill/MCP 详情，并列出 MCP tools/resources。`AgentWorkbench` 透传已有 MCP status/resources/tools 查询结果，不新增后端 API。
+- How:
+  - 采用测试先行：新增 `FigmaChatPanel.test.ts` 用例先确认缺少资源摘要时失败，再实现组件 props、统计逻辑、弹层和样式；同步 `frontend/README.md`、`frontend/apps/agent-web/README.md` 和 `frontend/apps/agent-web/src/PACKAGE.md`。完整 `FigmaChatPanel.test.ts` 当前仍有 3 个既有历史入口断言查找“查看历史对话/历史”而组件已按上一条日志改为“消息列表”，本次未顺手修改该无关文案。
+- Result:
+  - 新增资源摘要定向测试通过，`@test-agent/agent-web` typecheck 通过；完整 `FigmaChatPanel.test.ts` 的失败点已确认为既有测试文案断言与“消息列表”改名不一致。
 
 ### 2026-07-09 - 修改历史会话为消息列表并更换图标
 
