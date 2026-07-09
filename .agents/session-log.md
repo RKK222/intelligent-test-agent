@@ -15,16 +15,14 @@
 ### 2026-07-09 - 修改 opencode 进程状态提示文字为 TestAgent
 
 - Why:
-  - 界面上关于后台运行环境进程的各种状态文字显示为 "opencode 进程"，为了与平台整体对外的产品语义（TestAgent）统一，需要将这部分文字中的 "opencode" 更换为 "TestAgent"。
+  - 界面上及后端返回的关于运行环境进程的各种状态、错误和就绪的提示文字显示为 "opencode 进程" / "opencode 容器"，为了与平台整体对外的产品语义（TestAgent）统一，需要将这部分文字中的 "opencode" 全量更换为 "TestAgent"。
 - What:
-  - 1. 替换 `FigmaChatPanel.vue` 中所有展示在主输入框上方的进程就绪/未运行/初始化状态标题文字中的 "opencode" 为 "TestAgent"。
-  - 2. 替换 `AgentWorkbench.vue` 中初始化失败、未初始化以及只读态下的状态/警告文字中的 "opencode" 为 "TestAgent"。
-  - 3. 替换 `OpencodeProcessStartupDialog.vue` 弹窗错误提示文字中的 "opencode" 为 "TestAgent"。
-  - 4. 同步更新 `FigmaChatPanel.test.ts` 中对应的文本断言，确保全量测试无误。
+  - 1. 前端部分：替换 `FigmaChatPanel.vue`、`AgentWorkbench.vue` 和 `OpencodeProcessStartupDialog.vue` 中的标题、就绪提示、失败异常和警告描述文案中的 "opencode" 为 "TestAgent"，并修复 `FigmaChatPanel.test.ts` 的既有文本断言。
+  - 2. 后端部分：替换 `UserOpencodeProcessAssignmentService.java`、`OpencodeProcessStartProgress.java` 和 `OpencodeProcessStatusQueryService.java` 中返回的就绪、未就绪、需要初始化或暂不可用状态的后端文字字段中的 "opencode 进程/容器" 为 "TestAgent 进程/容器"，并更新 API 与 runtime 各个层级的 Mock 单元测试。
 - How:
-  - 在三个组件及测试文件中将 `'正在检查 opencode 进程'`、`'opencode 进程可用'` 等字符串修改为 `'正在检查 TestAgent 进程'`、`'TestAgent 进程可用'`。
+  - 检索前后端以 "opencode 进程" 或 "opencode 容器" 渲染/返回的所有文本，对应更名为 "TestAgent 进程" 或 "TestAgent 容器"。
 - Result:
-  - 状态状态条与错误提示里的 "opencode" 文案已被成功替换为 "TestAgent"；前端类型检查、代码格式以及 Vitest 测试全部通过。
+  - 前后端返回和显示的状态卡片状态文案均已被替换为 "TestAgent" 产品标识；前端/后端全量单元测试与编译检查全部成功通过。
 
 ### 2026-07-09 - 运行态资源盘点移动到顶部应用切换左侧
 

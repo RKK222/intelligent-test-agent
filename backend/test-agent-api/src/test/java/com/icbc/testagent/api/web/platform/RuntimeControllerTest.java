@@ -290,7 +290,7 @@ class RuntimeControllerTest {
         UserOpencodeProcessStatusResponse ready = new UserOpencodeProcessStatusResponse(
                 UserOpencodeProcessAvailability.READY,
                 false,
-                "opencode 进程可用",
+                "TestAgent 进程可用",
                 "ocp_1234567890abcdef",
                 "server-a",
                 "ctr_01",

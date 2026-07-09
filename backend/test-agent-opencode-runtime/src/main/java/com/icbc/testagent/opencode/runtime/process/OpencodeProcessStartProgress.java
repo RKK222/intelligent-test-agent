@@ -84,7 +84,7 @@ final class OpencodeProcessStartProgress {
             failed(platformException);
             return;
         }
-        failed(ErrorCode.INTERNAL_ERROR.name(), "初始化 opencode 进程失败");
+        failed(ErrorCode.INTERNAL_ERROR.name(), "初始化 TestAgent 进程失败");
     }
 
     void failed(String errorCode, String errorMessage) {
@@ -102,7 +102,7 @@ final class OpencodeProcessStartProgress {
 
     private static String safeMessage(String message) {
         if (message == null || message.isBlank()) {
-            return "初始化 opencode 进程失败";
+            return "初始化 TestAgent 进程失败";
         }
         return message.trim();
     }

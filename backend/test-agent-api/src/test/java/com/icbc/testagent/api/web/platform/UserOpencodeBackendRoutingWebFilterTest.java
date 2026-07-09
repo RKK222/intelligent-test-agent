@@ -180,7 +180,7 @@ class UserOpencodeBackendRoutingWebFilterTest {
                         Mockito.eq("opencode"),
                         Mockito.anyString(),
                         Mockito.eq("trace_1234567890abcdef")))
-                .thenReturn(allocatedStatus("目标服务器后端不可用，暂无法确认 opencode 进程健康状态"));
+                .thenReturn(allocatedStatus("目标服务器后端不可用，暂无法确认 TestAgent 进程健康状态"));
         RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
         UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.33"), httpClient);
         MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
@@ -215,7 +215,7 @@ class UserOpencodeBackendRoutingWebFilterTest {
                         Mockito.eq("opencode"),
                         Mockito.anyString(),
                         Mockito.eq("trace_1234567890abcdef")))
-                .thenReturn(allocatedStatus("目标服务器后端不可用，暂无法确认 opencode 进程健康状态"));
+                .thenReturn(allocatedStatus("目标服务器后端不可用，暂无法确认 TestAgent 进程健康状态"));
         RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}", true);
         UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore(List.of(
                 backend("bjp_1234567890abcdef", "server-b", "http://10.8.0.22:8080", NOW))), httpClient);

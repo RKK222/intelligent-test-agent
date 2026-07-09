@@ -105,7 +105,7 @@ public class OpencodeProcessStatusQueryService {
                     Optional.empty(),
                     "NOT_RUNNING",
                     "NOT_RUNNING",
-                    "opencode 进程未启动",
+                    "TestAgent 进程未启动",
                     checkedAt,
                     true,
                     null);
@@ -248,7 +248,7 @@ public class OpencodeProcessStatusQueryService {
                     ? platformException.errorCode()
                     : ErrorCode.OPENCODE_BAD_GATEWAY;
             String message = exception.getMessage() == null || exception.getMessage().isBlank()
-                    ? "opencode 健康检测异常"
+                    ? "TestAgent 健康检测异常"
                     : exception.getMessage();
             return staleProbe(process, checkedAt, message, errorCode);
         }

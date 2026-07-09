@@ -315,20 +315,20 @@ public class UserOpencodeProcessAssignmentService {
                 .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE);
         if (binding.isEmpty()) {
             return hasInitializableContainer()
-                    ? needsInitialization("需要初始化 opencode 进程", now)
-                    : unavailable("没有可用的 opencode 容器", now);
+                    ? needsInitialization("需要初始化 TestAgent 进程", now)
+                    : unavailable("没有可用的 TestAgent 容器", now);
         }
         Optional<OpencodeServerProcess> process = boundProcess(binding.get());
         if (process.isEmpty()) {
             return canRebuildOn(binding.get().linuxServerId())
-                    ? needsInitialization("opencode 进程不可用，需要重新初始化", binding.get(), now)
-                    : unavailable("原 Linux 服务器没有可用的 opencode 容器", binding.get(), now);
+                    ? needsInitialization("TestAgent 进程不可用，需要重新初始化", binding.get(), now)
+                    : unavailable("原 Linux 服务器没有可用的 TestAgent 容器", binding.get(), now);
         }
         OpencodeServerProcess current = process.get();
         OpencodeProcessStatusProbe probe = statusQueryService.query(current.processId(), traceId);
         if (probe.status() == OpencodeProcessProbeStatus.RUNNING) {
             OpencodeServerProcess refreshed = probe.process().orElse(current);
-            return ready(refreshed, "opencode 进程可用", now);
+            return ready(refreshed, "TestAgent 进程可用", now);
         }
         OpencodeServerProcess refreshed = probe.process().orElse(current);
         // STALE 只在最后一次成功健康检查后的短暂宽限期内保留可用状态。
@@ -338,14 +338,14 @@ public class UserOpencodeProcessAssignmentService {
             }
             return canRebuildOn(binding.get().linuxServerId())
                     ? needsInitialization(statusFailureMessage(probe), refreshed, now)
-                    : unavailable("opencode 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
+                    : unavailable("TestAgent 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
         }
         if (probe.errorCode() != null) {
             // 有错误码但非 STALE，可能是明确的失败，根据上次状态决定
             if (current.status() == OpencodeServerProcessStatus.RUNNING) {
                 return ready(refreshed, "状态暂时无法确认：" + probe.message(), now);
             }
-            return unavailable("opencode 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
+            return unavailable("TestAgent 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
         }
         return canRebuildOn(binding.get().linuxServerId())
                 ? needsInitialization(statusFailureMessage(probe), refreshed, now)
@@ -366,14 +366,14 @@ public class UserOpencodeProcessAssignmentService {
                 .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE);
         if (binding.isEmpty()) {
             return hasInitializableContainer()
-                    ? needsInitializationAffinity("需要初始化 opencode 进程", now)
-                    : unavailableAffinity("没有可用的 opencode 容器", now);
+                    ? needsInitializationAffinity("需要初始化 TestAgent 进程", now)
+                    : unavailableAffinity("没有可用的 TestAgent 容器", now);
         }
         Optional<OpencodeServerProcess> process = activeProcess(binding.get());
         if (process.isEmpty()) {
             return canRebuildOn(binding.get().linuxServerId())
-                    ? needsInitializationAffinity("opencode 进程不可用，需要重新初始化", binding.get(), now)
-                    : unavailableAffinity("原 Linux 服务器没有可用的 opencode 容器", binding.get(), now);
+                    ? needsInitializationAffinity("TestAgent 进程不可用，需要重新初始化", binding.get(), now)
+                    : unavailableAffinity("原 Linux 服务器没有可用的 TestAgent 容器", binding.get(), now);
         }
         return readyAffinity(process.get(), "文件路由服务器归属可用", now);
     }
@@ -408,11 +408,11 @@ public class UserOpencodeProcessAssignmentService {
         return binding
                 .map(item -> unavailable(
                         allocatedMessage == null || allocatedMessage.isBlank()
-                                ? "已分配 opencode 专属进程，但暂无法确认进程健康状态"
+                                ? "已分配 TestAgent 专属进程，但暂无法确认进程健康状态"
                                 : allocatedMessage,
                         item,
                         now))
-                .orElseGet(() -> unavailable("当前用户尚未分配 opencode 专属进程", now));
+                .orElseGet(() -> unavailable("当前用户尚未分配 TestAgent 专属进程", now));
     }
 
     /**
@@ -470,7 +470,7 @@ public class UserOpencodeProcessAssignmentService {
                 ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
                 executionNodeRepository.save(node);
                 progress.succeeded(refreshed.processId().value(), serviceAddress(refreshed));
-                return ready(refreshed, "opencode 进程可用", now);
+                return ready(refreshed, "TestAgent 进程可用", now);
             }
         }
 
@@ -489,20 +489,20 @@ public class UserOpencodeProcessAssignmentService {
         progress.step(OpencodeProcessStartOperationStep.PREPARING_STARTUP);
         OpencodeProcessStartCommand command = startCommand(userId, container, traceId);
         OpencodeServerProcess process = startupService.startAndVerify(new OpencodeProcessStartupRequest(
-                userId,
-                existingBinding.map(UserOpencodeProcessBinding::processId).orElse(null),
-                existingProcess.map(OpencodeServerProcess::createdAt).orElse(null),
-                existingBinding.map(UserOpencodeProcessBinding::createdAt).orElse(null),
-                command.linuxServerId(),
-                command.containerId(),
-                command.port(),
-                command.baseUrl(),
-                command.sessionPath(),
-                command.configPath(),
-                command.environment(),
-                traceId), progress);
+            userId,
+            existingBinding.map(UserOpencodeProcessBinding::processId).orElse(null),
+            existingProcess.map(OpencodeServerProcess::createdAt).orElse(null),
+            existingBinding.map(UserOpencodeProcessBinding::createdAt).orElse(null),
+            command.linuxServerId(),
+            command.containerId(),
+            command.port(),
+            command.baseUrl(),
+            command.sessionPath(),
+            command.configPath(),
+            command.environment(),
+            traceId), progress);
         progress.succeeded(process.processId().value(), serviceAddress(process));
-        return ready(process, "opencode 进程可用", now);
+        return ready(process, "TestAgent 进程可用", now);
     }
 
     /**

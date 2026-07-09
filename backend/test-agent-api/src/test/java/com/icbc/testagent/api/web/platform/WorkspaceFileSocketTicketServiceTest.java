@@ -158,7 +158,7 @@ class WorkspaceFileSocketTicketServiceTest {
         return new UserOpencodeProcessFileRoutingAffinity(
                 UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
                 true,
-                "需要初始化 opencode 进程",
+                "需要初始化 TestAgent 进程",
                 null,
                 null,
                 null,
