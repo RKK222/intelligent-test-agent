@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 打包前补齐企业内拆分部署入口说明
+
+- Why:
+  - 最新企业内交付需要明确完整 zip 分发到 `122.233.30.2`、`122.233.30.4`、`122.233.30.114`，并在后端无法免密 scp 前端机时采用“前端本地手工更新 + 两台后端各自一键部署 Java/worker”的拆分流程。
+- What:
+  - 更新 `deploy/internal/README.md` 的产物分发表和升级步骤，补充完整 `test-agent-internal-release.zip` 的三机导入路径、前端 `deploy-internal-frontend.sh` 本地执行命令，以及 `122.233.30.4`/`122.233.30.114` 后端部署脚本带 `--skip-frontend` 的推荐命令。
+- How:
+  - 保留后端脚本可选 scp 前端的能力，但把统一登录受限现场的默认推荐流程改为不依赖后端到前端 SSH；不修改真实 `/data/testagent/config/*.env`。
+- Result:
+  - 待本次打包前执行脚本语法、zip 校验和完整 `package-release.sh`。
+
 ### 2026-07-09 - 补齐 WebSocket 操作日志和启动日志提示
 
 - Why:

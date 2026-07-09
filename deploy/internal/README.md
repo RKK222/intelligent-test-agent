@@ -399,36 +399,51 @@ deploy/internal/package-release.sh --output-dir /data/testagent/dist
 
 | 产物 | 放到哪台 | 目标路径 |
 |---|---|---|
+| `test-agent-internal-release.zip` | `122.233.30.2`、`122.233.30.4`、`122.233.30.114` | `/data/0709/internal.zip`，推荐统一只传完整 zip，再由各服务器本地脚本解压部署。 |
 | `test-agent-frontend-dist.tar.gz` | `122.233.30.2` | `/data/testagent/dist/test-agent-frontend-dist.tar.gz` |
-| `backend/test-agent-app.jar` | `122.233.30.4` | `/data/testagent/dist/backend/test-agent-app.jar` |
-| `test-agent-programs.tar.gz` | `122.233.30.4` | `/data/testagent/dist/test-agent-programs.tar.gz` |
-| `test-agent-opencode-worker_internal-linux-amd64.tar` | `122.233.30.4` | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` |
-| `deploy/internal/` | `122.233.30.2`、`122.233.30.4` | `/data/testagent/deploy/internal/`，前端用 Nginx 模板，后端用纯 Docker worker 管理脚本。 |
+| `backend/test-agent-app.jar` | `122.233.30.4`、`122.233.30.114` | `/data/testagent/dist/backend/test-agent-app.jar` |
+| `test-agent-programs.tar.gz` | `122.233.30.4`、`122.233.30.114` | `/data/testagent/dist/test-agent-programs.tar.gz` |
+| `test-agent-opencode-worker_internal-linux-amd64.tar` | `122.233.30.4`、`122.233.30.114` | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` |
+| `deploy/internal/` | `122.233.30.2`、`122.233.30.4`、`122.233.30.114` | `/data/testagent/deploy/internal/`，前端用本地部署脚本和 Nginx 模板，后端用一键部署脚本和纯 Docker worker 管理脚本。 |
 
 ## 升级最新代码操作
 
 从最新代码部署到企业内环境时，按“构建机打包 → 前端服务器替换静态资源 → 后端服务器替换 jar/程序/镜像 → 先重启 Java 再重启 worker”的顺序执行。不要清理 `/data/testagent/data`，该目录包含 Java 写给 manager 的 `.serverid/.serverhost`、公共配置、用户 session、应用工作区和 manager state。
 
-如果已经把本次交付物压成 zip 并放到 `122.233.30.4:/data/0709/internal.zip`，优先在 `122.233.30.4` 上执行一键部署脚本：
+推荐把完整 zip 分别放到 `122.233.30.2`、`122.233.30.4` 和 `122.233.30.114` 的 `/data/0709/internal.zip`，然后按“前端机本地手工更新静态资源，两个后端节点各自一键部署 Java + worker”的方式执行。这个方式不依赖 `122.233.30.4` 免密 scp 到 `122.233.30.2`，适合统一登录或堡垒机限制直连的现场。
+
+前端机 `122.233.30.2` 手工本地更新：
 
 ```bash
-cd /data/testagent/deploy/internal
-bash deploy-internal-release.sh --archive /data/0709/internal.zip
+unzip -p /data/0709/internal.zip deploy/internal/deploy-internal-frontend.sh > /tmp/deploy-internal-frontend.sh
+bash /tmp/deploy-internal-frontend.sh --archive /data/0709/internal.zip --validate-only
+bash /tmp/deploy-internal-frontend.sh --archive /data/0709/internal.zip
 ```
 
-如果这是第一次使用新脚本，目标机旧目录里还没有 `deploy-internal-release.sh`，可以直接从 zip 里抽出脚本执行：
+后端/worker A `122.233.30.4` 一键部署：
 
 ```bash
 unzip -p /data/0709/internal.zip deploy/internal/deploy-internal-release.sh > /tmp/deploy-internal-release.sh
-bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip
+bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip --validate-only
+bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip --backend-host 122.233.30.4 --skip-frontend
 ```
 
-脚本默认完成以下动作：
+后端/worker B `122.233.30.114` 一键部署：
+
+```bash
+unzip -p /data/0709/internal.zip deploy/internal/deploy-internal-release.sh > /tmp/deploy-internal-release.sh
+bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip --validate-only
+bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip --backend-host 122.233.30.114 --skip-frontend
+```
+
+如果现场确认后端服务器可以免密直连 `122.233.30.2`，也可以只在其中一台后端不加 `--skip-frontend`，让后端部署脚本顺带 scp 前端包并 reload Nginx。若出现 `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`，回到上面的“前端机本地手工更新 + 后端加 `--skip-frontend`”。
+
+后端部署脚本默认完成以下动作：
 
 - 解压 `/data/0709/internal.zip` 到临时目录。
 - 自动定位 `test-agent-frontend-dist.tar.gz`、`backend/test-agent-app.jar`、`test-agent-programs.tar.gz`、`test-agent-opencode-worker_internal-linux-amd64.tar` 和 `deploy/internal/`。
-- 用 `scp` 把前端包和 `deploy/internal/` 复制到 `122.233.30.2:/data/testagent`，远程备份旧前端目录、解压新前端、执行 `nginx -t` 和 `systemctl reload nginx`。
-- 在本机 `122.233.30.4` 备份旧 jar，替换 `/data/testagent/dist/backend/test-agent-app.jar`，解压外挂程序，`docker load` 新 worker 镜像。
+- 未加 `--skip-frontend` 时，用 `scp` 把前端包和 `deploy/internal/` 复制到 `122.233.30.2:/data/testagent`，远程备份旧前端目录、解压新前端、执行 `nginx -t` 和 `systemctl reload nginx`。
+- 在本机备份旧 jar，替换 `/data/testagent/dist/backend/test-agent-app.jar`，解压外挂程序，`docker load` 新 worker 镜像。
 - 按顺序 `systemctl restart` 等价地停启 `test-agent-backend`，等待 `/actuator/health` 和 `/actuator/health/readiness`，校验 `/data/testagent/data/.serverid` 和 `.serverhost`。
 - 重启 `opencode-worker`，等待日志出现 `manager config update applied`，最后验收前端和后端 HTTP。
 
