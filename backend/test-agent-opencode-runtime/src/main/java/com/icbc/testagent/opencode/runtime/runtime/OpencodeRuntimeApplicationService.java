@@ -15,12 +15,10 @@ import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,8 +32,6 @@ import org.springframework.stereotype.Service;
 public class OpencodeRuntimeApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OpencodeRuntimeApplicationService.class);
-    private static final String PENDING_PERMISSION_REQUEST_PATH = "/api/permission/request";
-    private static final String PENDING_QUESTION_REQUEST_PATH = "/api/question/request";
 
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentRuntimeTargetResolver targetResolver;
@@ -470,10 +466,7 @@ public class OpencodeRuntimeApplicationService {
     public Object listPermissions(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = pendingAskSessionLocation(sessionId, traceId);
         try {
-            Object sessionScoped = get(location, sessionV2Path(location, "permission"), Map.of(), traceId);
-            return mergePendingAskResponses(
-                    sessionScoped,
-                    safeGlobalPendingAskList(location, PENDING_PERMISSION_REQUEST_PATH, traceId));
+            return get(location, sessionV2Path(location, "permission"), Map.of(), traceId);
         } catch (PlatformException exception) {
             logPendingAskFailure("listPermission", sessionId, null, location, location.remoteSessionId(), false, exception, traceId);
             throw staleRuntimeRequestIfNotFound(exception, "权限请求已失效，请重新运行任务", null);
@@ -493,22 +486,6 @@ public class OpencodeRuntimeApplicationService {
                     traceId);
         } catch (PlatformException exception) {
             logPendingAskFailure("replyPermission", sessionId, requestId, location, location.remoteSessionId(), false, exception, traceId);
-            if (isOpencodeNotFound(exception)) {
-                Optional<Object> ownerRetry = retryPendingAskPostWithOwner(
-                        "replyPermission",
-                        sessionId,
-                        requestId,
-                        location,
-                        location.remoteSessionId(),
-                        PENDING_PERMISSION_REQUEST_PATH,
-                        "permission",
-                        "reply",
-                        permissionReplyBody(body),
-                        traceId);
-                if (ownerRetry.isPresent()) {
-                    return ownerRetry.get();
-                }
-            }
             throw staleRuntimeRequestIfNotFound(exception, "权限请求已失效，请重新运行任务", requestId);
         }
     }
@@ -519,10 +496,7 @@ public class OpencodeRuntimeApplicationService {
     public Object listQuestions(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = pendingAskSessionLocation(sessionId, traceId);
         try {
-            Object sessionScoped = get(location, sessionV2Path(location, "question"), Map.of(), traceId);
-            return mergePendingAskResponses(
-                    sessionScoped,
-                    safeGlobalPendingAskList(location, PENDING_QUESTION_REQUEST_PATH, traceId));
+            return get(location, sessionV2Path(location, "question"), Map.of(), traceId);
         } catch (PlatformException exception) {
             logPendingAskFailure("listQuestion", sessionId, null, location, location.remoteSessionId(), false, exception, traceId);
             throw staleRuntimeRequestIfNotFound(exception, "提问请求已失效，请重新运行任务", null);
@@ -552,22 +526,6 @@ public class OpencodeRuntimeApplicationService {
                     hasRemoteSessionOverride,
                     exception,
                     traceId);
-            if (isOpencodeNotFound(exception)) {
-                Optional<Object> ownerRetry = retryPendingAskPostWithOwner(
-                        "replyQuestion",
-                        sessionId,
-                        requestId,
-                        location,
-                        targetRemoteSessionId,
-                        PENDING_QUESTION_REQUEST_PATH,
-                        "question",
-                        "reply",
-                        questionReplyBody(body),
-                        traceId);
-                if (ownerRetry.isPresent()) {
-                    return ownerRetry.get();
-                }
-            }
             throw staleRuntimeRequestIfNotFound(exception, "提问请求已失效，请重新运行任务", requestId);
         }
     }
@@ -602,22 +560,6 @@ public class OpencodeRuntimeApplicationService {
                     hasRemoteSessionOverride,
                     exception,
                     traceId);
-            if (isOpencodeNotFound(exception)) {
-                Optional<Object> ownerRetry = retryPendingAskPostWithOwner(
-                        "rejectQuestion",
-                        sessionId,
-                        requestId,
-                        location,
-                        targetRemoteSessionId,
-                        PENDING_QUESTION_REQUEST_PATH,
-                        "question",
-                        "reject",
-                        Map.of(),
-                        traceId);
-                if (ownerRetry.isPresent()) {
-                    return ownerRetry.get();
-                }
-            }
             throw staleRuntimeRequestIfNotFound(exception, "提问请求已失效，请重新运行任务", requestId);
         }
     }
@@ -811,164 +753,6 @@ public class OpencodeRuntimeApplicationService {
         return "/api/session/" + encodePathSegment(targetRemoteSessionId) + "/question";
     }
 
-    /**
-     * session-scoped ask 在 root session 查不到时，按全局 pending request 反查真实 owner session 后重试。
-     */
-    private Optional<Object> retryPendingAskPostWithOwner(
-            String action,
-            String platformSessionId,
-            String requestId,
-            AgentRuntimeTargetResolver.SessionRuntimeTarget location,
-            String attemptedRemoteSessionId,
-            String globalPendingPath,
-            String resource,
-            String terminalAction,
-            Map<String, Object> body,
-            String traceId) {
-        Optional<String> ownerSessionId = pendingAskOwnerSessionId(location, globalPendingPath, requestId, traceId);
-        if (ownerSessionId.isEmpty() || ownerSessionId.get().equals(attemptedRemoteSessionId)) {
-            return Optional.empty();
-        }
-        LOGGER.info(
-                "opencode_pending_ask_retry_owner action={} traceId={} platformSessionId={} requestId={} attemptedRemoteSessionId={} ownerRemoteSessionId={}",
-                action,
-                traceId,
-                platformSessionId,
-                requestId,
-                attemptedRemoteSessionId,
-                ownerSessionId.get());
-        try {
-            return Optional.ofNullable(post(
-                    location,
-                    sessionScopedAskPath(ownerSessionId.get(), resource) + "/" + encodePath(requestId) + "/" + terminalAction,
-                    body,
-                    traceId));
-        } catch (PlatformException retryException) {
-            logPendingAskFailure(
-                    action + "OwnerRetry",
-                    platformSessionId,
-                    requestId,
-                    location,
-                    ownerSessionId.get(),
-                    true,
-                    retryException,
-                    traceId);
-            throw retryException;
-        }
-    }
-
-    private String sessionScopedAskPath(String remoteSessionId, String resource) {
-        return "/api/session/" + encodePathSegment(remoteSessionId) + "/" + resource;
-    }
-
-    private Optional<String> pendingAskOwnerSessionId(
-            AgentRuntimeTargetResolver.SessionRuntimeTarget location,
-            String globalPendingPath,
-            String requestId,
-            String traceId) {
-        if (requestId == null || requestId.isBlank()) {
-            return Optional.empty();
-        }
-        return safeGlobalPendingAskList(location, globalPendingPath, traceId)
-                .flatMap(response -> pendingAskItems(response).stream()
-                        .filter(item -> requestId.equals(pendingAskRequestId(item)))
-                        .map(this::pendingAskSessionId)
-                        .flatMap(Optional::stream)
-                        .findFirst());
-    }
-
-    private Optional<Object> safeGlobalPendingAskList(
-            AgentRuntimeTargetResolver.SessionRuntimeTarget location,
-            String globalPendingPath,
-            String traceId) {
-        try {
-            return Optional.ofNullable(get(location, globalPendingPath, Map.of(), traceId));
-        } catch (PlatformException exception) {
-            LOGGER.debug(
-                    "opencode_pending_ask_global_list_failed traceId={} path={} nodeId={} status={} errorCode={}",
-                    traceId,
-                    globalPendingPath,
-                    location.node().executionNodeId().value(),
-                    status(exception),
-                    exception.errorCode());
-            return Optional.empty();
-        }
-    }
-
-    /**
-     * HTTP 刷新时同时返回 root session 与同 workspace/directory 全局 pending ask，避免 child ask 列表为空。
-     */
-    private Object mergePendingAskResponses(Object sessionScoped, Optional<Object> globalPending) {
-        if (globalPending.isEmpty()) {
-            return sessionScoped;
-        }
-        List<Map<String, Object>> sessionItems = pendingAskItems(sessionScoped);
-        List<Map<String, Object>> globalItems = pendingAskItems(globalPending.get());
-        if (globalItems.isEmpty()) {
-            return sessionScoped;
-        }
-        LinkedHashMap<String, Map<String, Object>> merged = new LinkedHashMap<>();
-        appendPendingAskItems(merged, sessionItems);
-        appendPendingAskItems(merged, globalItems);
-        if (merged.size() == sessionItems.size()) {
-            return sessionScoped;
-        }
-        LinkedHashMap<String, Object> envelope = new LinkedHashMap<>();
-        if (sessionScoped instanceof Map<?, ?> map) {
-            map.forEach((key, value) -> {
-                if (key instanceof String textKey) {
-                    envelope.put(textKey, value);
-                }
-            });
-        }
-        envelope.put("data", new ArrayList<>(merged.values()));
-        return envelope;
-    }
-
-    private void appendPendingAskItems(LinkedHashMap<String, Map<String, Object>> target, List<Map<String, Object>> items) {
-        for (Map<String, Object> item : items) {
-            String requestId = pendingAskRequestId(item);
-            target.putIfAbsent(requestId == null ? "unknown:" + target.size() : requestId, item);
-        }
-    }
-
-    private List<Map<String, Object>> pendingAskItems(Object response) {
-        Object data = response;
-        if (response instanceof Map<?, ?> map) {
-            data = map.get("data");
-        }
-        if (!(data instanceof List<?> list)) {
-            return List.of();
-        }
-        List<Map<String, Object>> items = new ArrayList<>();
-        for (Object item : list) {
-            if (item instanceof Map<?, ?> map) {
-                LinkedHashMap<String, Object> converted = new LinkedHashMap<>();
-                map.forEach((key, value) -> {
-                    if (key instanceof String textKey) {
-                        converted.put(textKey, value);
-                    }
-                });
-                items.add(converted);
-            }
-        }
-        return List.copyOf(items);
-    }
-
-    private String pendingAskRequestId(Map<String, Object> item) {
-        String requestId = text(item.get("requestId"));
-        if (requestId != null) {
-            return requestId;
-        }
-        requestId = text(item.get("requestID"));
-        return requestId == null ? text(item.get("id")) : requestId;
-    }
-
-    private Optional<String> pendingAskSessionId(Map<String, Object> item) {
-        String sessionId = text(item.get("sessionId"));
-        return Optional.ofNullable(sessionId == null ? text(item.get("sessionID")) : sessionId);
-    }
-
     private void logPendingAskFailure(
             String action,
             String platformSessionId,
@@ -996,7 +780,7 @@ public class OpencodeRuntimeApplicationService {
      * 将 pending permission/question 已被远端清理的 404 转成前端可处理的过期请求冲突。
      */
     private PlatformException staleRuntimeRequestIfNotFound(PlatformException exception, String message, String requestId) {
-        if (isOpencodeNotFound(exception)) {
+        if (exception.errorCode() == ErrorCode.OPENCODE_BAD_GATEWAY && Integer.valueOf(404).equals(status(exception))) {
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("reason", "STALE_RUNTIME_REQUEST");
             if (requestId != null && !requestId.isBlank()) {
@@ -1009,10 +793,6 @@ public class OpencodeRuntimeApplicationService {
                     exception);
         }
         return exception;
-    }
-
-    private boolean isOpencodeNotFound(PlatformException exception) {
-        return exception.errorCode() == ErrorCode.OPENCODE_BAD_GATEWAY && Integer.valueOf(404).equals(status(exception));
     }
 
     private Integer status(PlatformException exception) {

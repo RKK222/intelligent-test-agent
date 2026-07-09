@@ -45,17 +45,6 @@
 - Result:
   - `corepack pnpm vitest run apps/agent-web/tests/ssh-crypto.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和 `corepack pnpm --filter @test-agent/agent-web build` 通过；构建仍有既有 CSS `@import` 顺序 warning 和大 chunk warning。
 ### 2026-07-09 - 前端提问提交流程增加防重保护
-### 2026-07-09 - ask 回复按 pending owner session 兜底
-
-- Why:
-  - 所有 ask 类回复出现 `STALE_RUNTIME_REQUEST`；手工查询根 session 的 `/questions` 返回空列表，说明当前按平台根 session 查询或回复时可能拿不到子会话/任务会话实际持有的 pending request。
-- What:
-  - `OpencodeRuntimeApplicationService` 在 permission/question 列表中合并根 session-scoped pending 与 opencode 全局 pending request；permission/question 回复或拒绝如果根 session 路径返回 opencode 404，则按 requestId 查询全局 pending owner session 并重试一次。
-- How:
-  - 复用同一 runtime 节点、工作目录和 profile 调用 `/api/permission/request`、`/api/question/request`，只在 opencode 404 场景触发 owner session fallback，避免掩盖其他错误。
-- Result:
-  - `OpencodeRuntimeApplicationServiceTest` 新增 permission/question owner session fallback 回归用例并通过；HTTP API、Event Stream 与 runtime README 已同步说明。
-
 ### 2026-07-09 - 前端提问卡片防重与 sessionId 字段映射对齐
 
 - Why:
