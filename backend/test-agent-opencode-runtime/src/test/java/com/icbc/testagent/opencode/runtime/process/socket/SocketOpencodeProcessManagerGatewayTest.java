@@ -44,6 +44,7 @@ class SocketOpencodeProcessManagerGatewayTest {
                 new BackendProcessId("bjp_1234567890abcdef"),
                 message -> {
                     assertThat(message.environment()).containsEntry("ICBC_UCID", "U001");
+                    assertThat(message.sessionPath()).isEqualTo("/data/opencode/session/users/usr_1234567890abcdef");
                     pending.complete(message.commandId(), ManagerControlMessage.commandResult(
                         message.commandId(),
                         message.command(),
@@ -65,7 +66,7 @@ class SocketOpencodeProcessManagerGatewayTest {
                 new OpencodeContainerId("ctr_01"),
                 4096,
                 "http://10.8.0.12:4096",
-                "/data/opencode/session/4096",
+                "/data/opencode/session/users/usr_1234567890abcdef",
                 "/data/opencode/.config/opencode/",
                 Map.of("ICBC_UCID", "U001"),
                 "trace_1234567890abcdef"));

@@ -67,7 +67,14 @@ class MyBatisCommonParameterRepositoryIntegrationTest {
                 .contains("D:/data/.testagent");
         assertThat(repository.findAll())
                 .extracting(CommonParameter::englishName)
-                .contains("OPENCODE_PUBLIC_AGENT_GIT_URL", "OPENCODE_PUBLIC_CONFIG_GIT_ROOT");
+                .contains("OPENCODE_PUBLIC_AGENT_GIT_URL", "OPENCODE_PUBLIC_CONFIG_GIT_ROOT")
+                .doesNotContain("OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL");
+        assertThat(repository.findByEnglishNameAndPlatform("OPENCODE_PUBLIC_AGENT_GIT_URL", ParameterPlatform.ALL))
+                .get()
+                .satisfies(parameter -> {
+                    assertThat(parameter.chineseName()).isEqualTo("公共agent配置Git库地址");
+                    assertThat(parameter.editable()).isTrue();
+                });
     }
 
     @Test

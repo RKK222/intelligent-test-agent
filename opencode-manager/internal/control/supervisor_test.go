@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +21,56 @@ import (
 func TestRestartStopTimeoutReservesHalfOfCommandBudgetForStartup(t *testing.T) {
 	if got := restartStopTimeout(10 * time.Second); got != 5*time.Second {
 		t.Fatalf("expected 5s stop timeout, got %s", got)
+	}
+}
+
+func TestDispatchStartCommandPassesSessionPathToProcessManager(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "opencode-config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("pre-create config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".ready"), []byte("ready"), 0o644); err != nil {
+		t.Fatalf("write config marker: %v", err)
+	}
+	starter := &capturingStarter{pid: 12345}
+	manager := process.NewManager(
+		config.Config{
+			ContainerID:   "ctr_01",
+			LinuxServerID: "10.8.0.12",
+			PortStart:     4096,
+			PortEnd:       4100,
+			MaxProcesses:  4,
+			OpencodeBin:   "opencode",
+			StateDir:      t.TempDir(),
+			SessionRoot:   "/tmp/opencode-session",
+			ConfigDir:     configDir,
+		},
+		state.NewFileStore(t.TempDir()),
+		starter,
+		noopSignaler{},
+		health.Checker{},
+	)
+	supervisor := NewSupervisor(supervisorTestConfig("ws://127.0.0.1:1"), manager)
+	sessionPath := "/tmp/opencode-session/users/usr_1234567890abcdef"
+
+	result, err := supervisor.dispatchProcessCommand(context.Background(), Message{
+		Command:     "start",
+		Port:        4096,
+		SessionPath: sessionPath,
+		TraceID:     "trace_1234567890abcdef",
+	}, time.Second)
+	if err != nil {
+		t.Fatalf("dispatchProcessCommand returned error: %v", err)
+	}
+
+	if result.SessionPath != sessionPath {
+		t.Fatalf("expected result session path %q, got %q", sessionPath, result.SessionPath)
+	}
+	if len(starter.specs) != 1 {
+		t.Fatalf("expected one start spec, got %d", len(starter.specs))
+	}
+	if starter.specs[0].SessionPath != sessionPath {
+		t.Fatalf("expected start spec session path %q, got %q", sessionPath, starter.specs[0].SessionPath)
 	}
 }
 
@@ -611,6 +663,21 @@ type staticMetricsCollector struct {
 func (s staticMetricsCollector) Sample() RuntimeMetricsSample {
 	return s.sample
 }
+
+type capturingStarter struct {
+	pid   int
+	specs []process.StartSpec
+}
+
+func (c *capturingStarter) Start(_ context.Context, spec process.StartSpec) (int, error) {
+	c.specs = append(c.specs, spec)
+	return c.pid, nil
+}
+
+type noopSignaler struct{}
+
+func (noopSignaler) Terminate(int) error { return nil }
+func (noopSignaler) Kill(int) error      { return nil }
 
 func float64Ptr(value float64) *float64 {
 	return &value

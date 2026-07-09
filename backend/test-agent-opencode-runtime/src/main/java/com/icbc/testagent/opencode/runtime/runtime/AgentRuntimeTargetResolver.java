@@ -6,6 +6,7 @@ import com.icbc.testagent.agent.runtime.AgentCreateSessionCommand;
 import com.icbc.testagent.agent.runtime.AgentCreateSessionResult;
 import com.icbc.testagent.agent.runtime.AgentRuntime;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.agent.runtime.AgentSessionExistsCommand;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.node.ExecutionNode;
@@ -24,6 +25,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +35,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AgentRuntimeTargetResolver {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AgentRuntimeTargetResolver.class);
 
     private final WorkspaceRepository workspaceRepository;
     private final SessionRepository sessionRepository;
@@ -162,7 +167,16 @@ public class AgentRuntimeTargetResolver {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         Optional<AgentSessionBinding> existing = findAgentBinding(resolvedAgentId, session, traceId);
         if (existing.isPresent() && existing.get().executionNodeId().equals(node.executionNodeId())) {
-            return existing.get();
+            if (remoteSessionAvailable(runtime, node, existing.get(), traceId)) {
+                return existing.get();
+            }
+            LOGGER.warn(
+                    "agent_remote_session_missing_recreate traceId={} sessionId={} agentId={} nodeId={} remoteSessionId={}",
+                    traceId,
+                    session.sessionId().value(),
+                    resolvedAgentId,
+                    node.executionNodeId().value(),
+                    existing.get().remoteSessionId());
         }
         // 首次或用户进程迁移后才创建远端 session；旧远端 session 保留给 opencode 自身清理。
         AgentCreateSessionResult created = runtime.createSession(new AgentCreateSessionCommand(
@@ -203,6 +217,29 @@ public class AgentRuntimeTargetResolver {
                             Map.of("sessionId", session.sessionId().value())));
         }
         return binding;
+    }
+
+    private boolean remoteSessionAvailable(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            AgentSessionBinding binding,
+            String traceId) {
+        // 只在即将复用同节点绑定时探测远端；404 缺失交给上层重建绑定，其他错误继续抛出。
+        Boolean exists = runtime.sessionExists(new AgentSessionExistsCommand(
+                        node,
+                        binding.remoteSessionId(),
+                        traceId))
+                .block();
+        if (exists == null) {
+            throw new PlatformException(
+                    ErrorCode.OPENCODE_BAD_GATEWAY,
+                    "agent session 校验未返回结果",
+                    Map.of(
+                            "sessionId", binding.sessionId().value(),
+                            "agentId", binding.agentId(),
+                            "nodeId", node.executionNodeId().value()));
+        }
+        return exists;
     }
 
     /**

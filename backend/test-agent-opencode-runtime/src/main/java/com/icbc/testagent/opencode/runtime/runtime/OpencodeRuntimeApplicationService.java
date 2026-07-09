@@ -496,7 +496,7 @@ public class OpencodeRuntimeApplicationService {
         try {
             return post(
                     location,
-                    sessionV2Path(location, "question") + "/" + encodePath(requestId) + "/reply",
+                    questionSessionV2Path(location, body) + "/" + encodePath(requestId) + "/reply",
                     questionReplyBody(body),
                     traceId);
         } catch (PlatformException exception) {
@@ -508,11 +508,18 @@ public class OpencodeRuntimeApplicationService {
      * 拒绝远端 question 请求。
      */
     public Object rejectQuestion(String sessionId, String requestId, String traceId) {
+        return rejectQuestion(sessionId, requestId, Map.of(), traceId);
+    }
+
+    /**
+     * 拒绝远端 question 请求，兼容 task 子会话 ask 携带的远端 session id。
+     */
+    public Object rejectQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         try {
             return post(
                     location,
-                    sessionV2Path(location, "question") + "/" + encodePath(requestId) + "/reject",
+                    questionSessionV2Path(location, body) + "/" + encodePath(requestId) + "/reject",
                     Map.of(),
                     traceId);
         } catch (PlatformException exception) {
@@ -682,7 +689,17 @@ public class OpencodeRuntimeApplicationService {
      * opencode v2 permission/question 接口要求在路径中携带远端 session id。
      */
     private String sessionV2Path(AgentRuntimeTargetResolver.SessionRuntimeTarget location, String resource) {
-        return "/api/session/" + encodePath(location.remoteSessionId()) + "/" + resource;
+        return "/api/session/" + encodePathSegment(location.remoteSessionId()) + "/" + resource;
+    }
+
+    /**
+     * question.asked 可能来自 task 子会话；前端会把事件中的远端 session id 放入 remoteSessionId。
+     * 平台 session 仍用于定位用户进程和 workspace，这里只覆盖 opencode question path 的远端会话段。
+     */
+    private String questionSessionV2Path(AgentRuntimeTargetResolver.SessionRuntimeTarget location, Map<String, Object> body) {
+        String remoteSessionId = text(safeBody(body).get("remoteSessionId"));
+        String targetRemoteSessionId = remoteSessionId == null ? location.remoteSessionId() : remoteSessionId;
+        return "/api/session/" + encodePathSegment(targetRemoteSessionId) + "/question";
     }
 
     /**
@@ -780,6 +797,16 @@ public class OpencodeRuntimeApplicationService {
                 .filter(Objects::nonNull)
                 .map(String::valueOf)
                 .toList();
+    }
+
+    /**
+     * 对单一路径片段编码；session id 不能保留斜杠，否则会被远端路由拆成多级路径。
+     */
+    private String encodePathSegment(String segment) {
+        if (segment == null || segment.isBlank()) {
+            return "";
+        }
+        return URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     /**

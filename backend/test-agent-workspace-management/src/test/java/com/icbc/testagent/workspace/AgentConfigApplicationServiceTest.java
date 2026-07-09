@@ -30,6 +30,7 @@ import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.user.UserStatus;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
@@ -71,6 +72,68 @@ class AgentConfigApplicationServiceTest {
         assertThat(status.gitUrl()).isEqualTo("UNCONFIGURED");
         assertThat(status.agentDirectory().replace('\\', '/'))
                 .endsWith("/.config/opencode");
+    }
+
+    @Test
+    void publicStatusUsesPublicGitParameterAsInternalFragmentWithCurrentUnifiedAuthId() {
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "scm.example.com:29418/team/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+
+        AgentConfigResponses.AgentConfigStatusResponse status = service.publicStatus(true, ADMIN);
+
+        assertThat(status.enabled()).isTrue();
+        assertThat(status.gitUrl()).isEqualTo("ssh://AUTH_ADMIN@scm.example.com:29418/team/agent-config.git");
+    }
+
+    @Test
+    void publicStatusUsesCompletePublicGitUrlDirectlyEvenWhenDeploymentModeIsInternal() {
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.empty(),
+                "internal");
+
+        AgentConfigResponses.AgentConfigStatusResponse status = service.publicStatus(true, ADMIN);
+
+        assertThat(status.enabled()).isTrue();
+        assertThat(status.gitUrl()).isEqualTo("git@gitee.com:test/agent-config.git");
+    }
+
+    @Test
+    void internalPublicRepositoryStatusIgnoresSshUserInOrigin() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.originUrl = "ssh://OTHER_USER@scm.example.com:29418/team/agent-config.git";
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "scm.example.com:29418/team/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.empty(),
+                "internal");
+
+        AgentConfigResponses.PublicRepositoryStatusResponse status = service.localPublicRepositoryStatus(ADMIN);
+
+        assertThat(status.status()).isEqualTo("READY");
+        assertThat(status.initialized()).isTrue();
+        assertThat(status.initializationAllowed()).isTrue();
     }
 
     @Test
@@ -1001,6 +1064,16 @@ class AgentConfigApplicationServiceTest {
             RecordingGitWorkspaceService git,
             ServerBroadcastPublisher publisher,
             Optional<Workspace> workspace) {
+        return service(parameters, agentConfigs, git, publisher, workspace, "external");
+    }
+
+    private AgentConfigApplicationService service(
+            Map<String, String> parameters,
+            AgentConfigRepository agentConfigs,
+            RecordingGitWorkspaceService git,
+            ServerBroadcastPublisher publisher,
+            Optional<Workspace> workspace,
+            String deploymentMode) {
         CommonParameterValues commonParameters = commonParameters(parameters);
         ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
         when(configuration.findSshKeys(eq(ADMIN))).thenReturn(List.of(encryptedSshKey()));
@@ -1016,10 +1089,12 @@ class AgentConfigApplicationServiceTest {
                 git,
                 sshKeyFixtures.encryptionService(),
                 new WorkspaceFileService(),
+                ManagedWorkspacePathResolver.legacyOnly(),
                 new WorkspaceServerIdentity("linux-1"),
                 publisher,
                 Clock.fixed(NOW, ZoneOffset.UTC),
-                new RecordingAgentConfigProgressSink());
+                new RecordingAgentConfigProgressSink(),
+                deploymentMode);
     }
 
     private CommonParameterValues commonParameters(Map<String, String> parameters) {
@@ -1062,6 +1137,7 @@ class AgentConfigApplicationServiceTest {
         private String worktreeBranch;
         private Path worktreeRoot;
         private boolean worktreeClean = true;
+        private String originUrl = "git@gitee.com:test/agent-config.git";
         private String resetCommit;
         private String pulledBranch;
         private int fetchCallCount;
@@ -1102,7 +1178,7 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public String originUrl(Path repoRoot) {
-            return "git@gitee.com:test/agent-config.git";
+            return originUrl;
         }
 
         @Override
@@ -1286,6 +1362,19 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public Optional<User> findByUserId(UserId userId) {
+            if (ADMIN.equals(userId)) {
+                return Optional.of(new User(
+                        userId,
+                        "AUTH_ADMIN",
+                        "admin",
+                        "hash",
+                        "org",
+                        "rd",
+                        "dept",
+                        UserStatus.ACTIVE,
+                        NOW,
+                        NOW));
+            }
             if (new UserId("usr_alice").equals(userId)) {
                 return Optional.of(new User(
                         userId,

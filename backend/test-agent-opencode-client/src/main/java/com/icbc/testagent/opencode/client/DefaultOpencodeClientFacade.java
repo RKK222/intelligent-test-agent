@@ -89,6 +89,24 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     }
 
     /**
+     * 校验远端 opencode session 是否仍存在；历史绑定跨端口失效时 404 只表示需要重建绑定。
+     */
+    @Override
+    public Mono<Boolean> sessionExists(OpencodeSessionExistsCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        return applyPolicy(
+                Mono.defer(() -> gateway.sessionExists(
+                                command.node(),
+                                command.opencodeSessionId(),
+                                command.traceId()))
+                        .onErrorResume(
+                                this::isNotFoundResponse,
+                                ignored -> Mono.just(false)),
+                "sessionExists",
+                command.node());
+    }
+
+    /**
      * 取消远端 opencode session，并把远端响应归一为平台取消结果。
      */
     @Override
@@ -320,6 +338,12 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
             return status == 502 || status == 503 || (status >= 500 && status < 600);
         }
         return hasCause(current, ConnectException.class);
+    }
+
+    private boolean isNotFoundResponse(Throwable error) {
+        Throwable current = unwrapRetry(error);
+        return current instanceof WebClientResponseException exception
+                && exception.getStatusCode().value() == 404;
     }
 
     /**

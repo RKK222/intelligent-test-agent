@@ -508,6 +508,20 @@ public record ManagerControlMessage(
             Map<String, String> environment,
             long timeoutMillis,
             String traceId) {
+        return command(commandId, command, port, null, environment, timeoutMillis, traceId);
+    }
+
+    /**
+     * 构造后端发往管理进程的命令消息，并可携带用户稳定 session 目录。
+     */
+    public static ManagerControlMessage command(
+            String commandId,
+            String command,
+            int port,
+            String sessionPath,
+            Map<String, String> environment,
+            long timeoutMillis,
+            String traceId) {
         return new ManagerControlMessage(
                 ManagerControlProtocol.TYPE_COMMAND,
                 ManagerControlProtocol.VERSION,
@@ -536,7 +550,7 @@ public record ManagerControlMessage(
                 null,
                 null,
                 null,
-                null,
+                sessionPath,
                 null,
                 null,
                 null,

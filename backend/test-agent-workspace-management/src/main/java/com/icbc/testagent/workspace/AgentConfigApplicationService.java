@@ -19,6 +19,7 @@ import com.icbc.testagent.domain.configuration.AgentConfigRepository;
 import com.icbc.testagent.domain.configuration.AgentConfigScope;
 import com.icbc.testagent.domain.configuration.AgentConfigWorktree;
 import com.icbc.testagent.domain.configuration.AgentConfigWorktreeStatus;
+import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.icbc.testagent.domain.configuration.UserSshKey;
@@ -50,6 +51,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -102,6 +104,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private final ServerBroadcastPublisher broadcastPublisher;
     private final Clock clock;
     private final AgentConfigProgressSink progressSink;
+    private final CodeRepositoryDeploymentMode publicGitDeploymentMode;
 
     /**
      * Spring 构造器：进度 Sink 由 API 模块提供，缺失时降级为 NOOP，便于模块级测试。
@@ -118,7 +121,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
             ObjectProvider<AgentConfigProgressSink> progressSinkProvider,
-            SshKeyEncryptionService sshKeyEncryptionService) {
+            SshKeyEncryptionService sshKeyEncryptionService,
+            @Value("${test-agent.deployment.mode:external}") String deploymentMode) {
         this(
                 commonParameterValues,
                 configurationRepository,
@@ -133,7 +137,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 serverIdentity,
                 broadcastPublisher,
                 Clock.systemUTC(),
-                Optional.ofNullable(progressSinkProvider.getIfAvailable()).orElse(AgentConfigProgressSink.NOOP));
+                Optional.ofNullable(progressSinkProvider.getIfAvailable()).orElse(AgentConfigProgressSink.NOOP),
+                deploymentMode);
     }
 
     AgentConfigApplicationService(
@@ -151,6 +156,40 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             ServerBroadcastPublisher broadcastPublisher,
             Clock clock,
             AgentConfigProgressSink progressSink) {
+        this(
+                commonParameterValues,
+                configurationRepository,
+                workspaceRepository,
+                agentConfigRepository,
+                userRepository,
+                gitRemoteService,
+                gitWorkspaceService,
+                sshKeyEncryptionService,
+                fileService,
+                pathResolver,
+                serverIdentity,
+                broadcastPublisher,
+                clock,
+                progressSink,
+                CodeRepositoryDeploymentMode.EXTERNAL.value());
+    }
+
+    AgentConfigApplicationService(
+            CommonParameterValues commonParameterValues,
+            ConfigurationManagementRepository configurationRepository,
+            WorkspaceRepository workspaceRepository,
+            AgentConfigRepository agentConfigRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyEncryptionService sshKeyEncryptionService,
+            WorkspaceFileService fileService,
+            ManagedWorkspacePathResolver pathResolver,
+            WorkspaceServerIdentity serverIdentity,
+            ServerBroadcastPublisher broadcastPublisher,
+            Clock clock,
+            AgentConfigProgressSink progressSink,
+            String deploymentMode) {
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
@@ -166,6 +205,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         this.broadcastPublisher = broadcastPublisher == null ? NOOP_BROADCAST : broadcastPublisher;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.progressSink = progressSink == null ? AgentConfigProgressSink.NOOP : progressSink;
+        this.publicGitDeploymentMode = CodeRepositoryDeploymentMode.fromDeploymentProperty(deploymentMode);
     }
 
     AgentConfigApplicationService(
@@ -196,11 +236,16 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 serverIdentity,
                 broadcastPublisher,
                 clock,
-                progressSink);
+                progressSink,
+                CodeRepositoryDeploymentMode.EXTERNAL.value());
     }
 
     public AgentConfigResponses.AgentConfigStatusResponse publicStatus(boolean superAdmin) {
-        PublicConfig config = publicConfig();
+        return publicStatus(superAdmin, null);
+    }
+
+    public AgentConfigResponses.AgentConfigStatusResponse publicStatus(boolean superAdmin, UserId userId) {
+        PublicConfig config = publicConfig(userId);
         boolean enabled = config.enabled();
         String currentBranch = null;
         String commitHash = null;
@@ -235,12 +280,16 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     public List<String> publicBranches(UserId userId) {
-        PublicConfig config = requireEnabledPublicConfig();
+        PublicConfig config = requireEnabledPublicConfig(userId);
         return gitRemoteService.listBranches(config.gitUrl(), decryptSingleSshKey(userId));
     }
 
     public AgentConfigResponses.PublicRepositoryStatusResponse localPublicRepositoryStatus() {
-        PublicConfig config = publicConfig();
+        return localPublicRepositoryStatus(null);
+    }
+
+    public AgentConfigResponses.PublicRepositoryStatusResponse localPublicRepositoryStatus(UserId userId) {
+        PublicConfig config = publicConfig(userId);
         return publicRepositoryStatus(config);
     }
 
@@ -252,7 +301,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "initialize-repository", normalizedBranch, traceId);
         try {
-            PublicConfig config = requireEnabledPublicConfig();
+            PublicConfig config = requireEnabledPublicConfig(userId);
             String privateKey = decryptSingleSshKey(userId);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
             ensurePublicRepositoryReady(config, normalizedBranch, privateKey);
@@ -288,7 +337,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "update", normalizedBranch, traceId);
         try {
-            PublicConfig config = requireEnabledPublicConfig();
+            PublicConfig config = requireEnabledPublicConfig(userId);
             String privateKey = decryptSingleSshKey(userId);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
             ensurePublicRepositoryReady(config, normalizedBranch, privateKey, discardLocalChanges);
@@ -329,7 +378,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "update-and-push", normalizedBranch, traceId);
         GitCommandExecutor.startRecording(command -> progress.command(command, traceId));
         try {
-            PublicConfig config = requireEnabledPublicConfig();
+            PublicConfig config = requireEnabledPublicConfig(userId);
             String privateKey = decryptSingleSshKey(userId);
             Path repoRoot = config.gitRoot();
             if (!gitWorkspaceService.isGitRepository(repoRoot)) {
@@ -567,7 +616,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     "公共 Agent worktree 必须在目标服务器创建",
                     Map.of("targetLinuxServerId", linuxServerId.trim(), "currentLinuxServerId", serverIdentity.linuxServerId()));
         }
-        PublicConfig config = requireEnabledPublicConfig();
+        PublicConfig config = requireEnabledPublicConfig(userId);
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         String worktreeName = worktreeName(baseName);
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "create-worktree", normalizedBranch, traceId);
@@ -671,7 +720,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         Path repoRoot = workspaceRoot(workspace);
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.WORKSPACE, workspace.workspaceId(), "create-worktree", normalizedBranch, traceId);
         try {
-            ensureExistingCleanRepository(repoRoot, null);
+            ensureExistingCleanRepository(repoRoot, (String) null);
             progress.step(AgentConfigOperationStep.CREATING_WORKTREE);
             Path worktreeBase = Path.of(requiredParameter(PARAM_PERSONAL_WORKTREE_ROOT))
                     .resolve("agentconfig")
@@ -759,7 +808,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             String operationId,
             UserId userId,
             String traceId) {
-        PublicConfig config = requireEnabledPublicConfig();
+        PublicConfig config = requireEnabledPublicConfig(userId);
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "publish", null, traceId);
         try {
             String privateKey = decryptSingleSshKey(userId);
@@ -767,14 +816,14 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             String branch;
             if (worktreeId == null || worktreeId.isBlank()) {
                 Path repoRoot = config.gitRoot();
-                ensureExistingCleanRepository(repoRoot, config.gitUrl());
+                ensureExistingCleanRepository(repoRoot, config);
                 branch = gitWorkspaceService.currentBranch(repoRoot);
                 progress.step(AgentConfigOperationStep.PUSHING);
                 commitHash = gitPublishWorkflow.publishDirectBranch(repoRoot, branch, false, privateKey).headCommit();
             } else {
                 AgentConfigWorktree worktree = existingWorktree(worktreeId, AgentConfigScope.PUBLIC, null);
                 Path repoRoot = config.gitRoot();
-                ensureExistingCleanRepository(repoRoot, config.gitUrl());
+                ensureExistingCleanRepository(repoRoot, config);
                 branch = gitWorkspaceService.currentBranch(repoRoot);
                 progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
                 progress.step(AgentConfigOperationStep.MERGING);
@@ -812,7 +861,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         try {
             String privateKey = decryptSingleSshKey(userId);
             Path repoRoot = workspaceRoot(workspace);
-            ensureExistingCleanRepository(repoRoot, null);
+            ensureExistingCleanRepository(repoRoot, (String) null);
             String branch = gitWorkspaceService.currentBranch(repoRoot);
             String commitHash;
             if (worktreeId != null && !worktreeId.isBlank()) {
@@ -958,7 +1007,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             boolean discardLocalChanges) {
         Path gitRoot = config.gitRoot();
         if (gitWorkspaceService.isGitRepository(gitRoot)) {
-            ensureExistingRepositoryReadyForSync(gitRoot, config.gitUrl(), discardLocalChanges);
+            ensureExistingRepositoryReadyForSync(gitRoot, config, discardLocalChanges);
             gitWorkspaceService.fetch(gitRoot, privateKey);
             gitWorkspaceService.checkoutTrackingBranch(gitRoot, branch, privateKey);
             gitWorkspaceService.pullFastForward(gitRoot, branch, privateKey);
@@ -979,7 +1028,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         if (!gitWorkspaceService.isGitRepository(config.gitRoot())) {
             throw publicRepositoryUninitialized(config.gitRoot());
         }
-        ensureExistingCleanRepository(config.gitRoot(), config.gitUrl());
+        ensureExistingCleanRepository(config.gitRoot(), config);
         gitWorkspaceService.fetch(config.gitRoot(), privateKey);
         gitWorkspaceService.checkoutTrackingBranch(config.gitRoot(), branch, privateKey);
         gitWorkspaceService.pullFastForward(config.gitRoot(), branch, privateKey);
@@ -1000,7 +1049,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         } else if (gitWorkspaceService.isGitRepository(config.gitRoot())) {
             currentBranch = gitWorkspaceService.currentBranch(config.gitRoot());
             commitHash = gitWorkspaceService.headCommit(config.gitRoot());
-            boolean originMatched = Objects.equals(gitWorkspaceService.originUrl(config.gitRoot()), config.gitUrl());
+            boolean originMatched = config.matchesOrigin(gitWorkspaceService.originUrl(config.gitRoot()));
             boolean clean = gitWorkspaceService.isWorktreeClean(config.gitRoot());
             boolean configReady = isInitializedConfigDirectory(config);
             initialized = originMatched && configReady;
@@ -1070,17 +1119,42 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         ensureExistingRepositoryReadyForSync(repoRoot, expectedOrigin, false);
     }
 
+    private void ensureExistingCleanRepository(Path repoRoot, PublicConfig config) {
+        ensureExistingRepositoryReadyForSync(repoRoot, config, false);
+    }
+
     private void ensureExistingRepositoryReadyForSync(
             Path repoRoot,
             String expectedOrigin,
+            boolean discardLocalChanges) {
+        ensureExistingRepositoryReadyForSync(repoRoot, expectedOrigin, null, discardLocalChanges);
+    }
+
+    private void ensureExistingRepositoryReadyForSync(
+            Path repoRoot,
+            PublicConfig config,
+            boolean discardLocalChanges) {
+        ensureExistingRepositoryReadyForSync(repoRoot, null, config, discardLocalChanges);
+    }
+
+    private void ensureExistingRepositoryReadyForSync(
+            Path repoRoot,
+            String expectedOrigin,
+            PublicConfig config,
             boolean discardLocalChanges) {
         if (!gitWorkspaceService.isGitRepository(repoRoot)) {
             // 消息带上具体目录，便于前端直接定位问题路径
             throw new PlatformException(ErrorCode.CONFLICT, "目录不是 Git 仓库：" + repoRoot, Map.of("path", repoRoot.toString()));
         }
         String origin = gitWorkspaceService.originUrl(repoRoot);
-        if (expectedOrigin != null && !expectedOrigin.isBlank() && !Objects.equals(origin, expectedOrigin)) {
+        boolean originMismatch = config != null
+                ? !config.matchesOrigin(origin)
+                : expectedOrigin != null && !expectedOrigin.isBlank() && !Objects.equals(origin, expectedOrigin);
+        if (originMismatch) {
             throw new PlatformException(ErrorCode.CONFLICT, "Git origin 与配置不一致", Map.of("path", repoRoot.toString()));
+        }
+        if (config != null && config.internalDeployment()) {
+            gitWorkspaceService.setOriginUrl(repoRoot, config.gitUrl(), null);
         }
         if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
             if (!discardLocalChanges) {
@@ -1211,12 +1285,16 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     private PublicConfig requireEnabledPublicConfig() {
-        PublicConfig config = publicConfig();
+        return requireEnabledPublicConfig(null);
+    }
+
+    private PublicConfig requireEnabledPublicConfig(UserId userId) {
+        PublicConfig config = publicConfig(userId);
         if (!config.enabled()) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
                     publicGitUrlUnconfiguredMessage(),
-                    Map.of("parameter", PARAM_PUBLIC_AGENT_GIT_URL));
+                    Map.of("parameter", config.parameterName()));
         }
         return config;
     }
@@ -1230,12 +1308,68 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     private PublicConfig publicConfig() {
+        return publicConfig(null);
+    }
+
+    private PublicConfig publicConfig(UserId userId) {
         // gitUrl 缺失或为 UNCONFIGURED 均视为公共级功能未启用（合法语义，不抛异常）。
-        String gitUrl = optionalParameter(PARAM_PUBLIC_AGENT_GIT_URL, UNCONFIGURED);
+        String parameterName = PARAM_PUBLIC_AGENT_GIT_URL;
+        String storedGitUrl = optionalParameter(parameterName, UNCONFIGURED);
+        String gitUrl = effectivePublicGitUrl(storedGitUrl, userId, parameterName);
         Path gitRoot = Path.of(requiredParameter(PARAM_PUBLIC_CONFIG_GIT_ROOT)).normalize();
         Path configDir = Path.of(optionalParameter(PARAM_PUBLIC_CONFIG_DIR, gitRoot.resolve("opencode").toString())).normalize();
         Path worktreeRoot = Path.of(requiredParameter(PARAM_PUBLIC_CONFIG_WORKTREE_ROOT)).normalize();
-        return new PublicConfig(gitUrl, gitRoot, configDir, worktreeRoot);
+        return new PublicConfig(
+                publicGitDeploymentMode,
+                parameterName,
+                storedGitUrl,
+                gitUrl,
+                gitRoot,
+                configDir,
+                worktreeRoot);
+    }
+
+    private String effectivePublicGitUrl(String storedGitUrl, UserId userId, String parameterName) {
+        if (storedGitUrl == null || storedGitUrl.isBlank() || UNCONFIGURED.equalsIgnoreCase(storedGitUrl.trim())) {
+            return storedGitUrl;
+        }
+        String fragment = storedGitUrl.trim();
+        if (!PublicConfig.isInternalStoredGitUrl(fragment)) {
+            return fragment;
+        }
+        validateInternalPublicGitUrl(fragment, parameterName);
+        if (userId == null) return fragment;
+        User user = userRepository.findByUserId(userId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "用户不存在",
+                        Map.of("userId", userId.value())));
+        return "ssh://" + user.unifiedAuthId().trim() + "@" + fragment;
+    }
+
+    private void validateInternalPublicGitUrl(String gitUrl, String parameterName) {
+        if (gitUrl.contains("://") || gitUrl.contains("@") || gitUrl.chars().anyMatch(Character::isWhitespace)) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "内部公共 Agent Git 地址必须为 host[:port]/path，不包含协议、用户和空白字符",
+                    Map.of("parameter", parameterName));
+        }
+        int slash = gitUrl.indexOf('/');
+        if (slash <= 0 || slash == gitUrl.length() - 1) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "内部公共 Agent Git 地址必须包含仓库路径",
+                    Map.of("parameter", parameterName));
+        }
+        String path = gitUrl.substring(slash + 1);
+        for (String segment : path.split("/")) {
+            if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "内部公共 Agent Git 地址路径无效",
+                        Map.of("parameter", parameterName));
+            }
+        }
     }
 
     /**
@@ -1445,9 +1579,52 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return Instant.now(clock);
     }
 
-    private record PublicConfig(String gitUrl, Path gitRoot, Path configDir, Path worktreeRoot) {
+    private record PublicConfig(
+            CodeRepositoryDeploymentMode deploymentMode,
+            String parameterName,
+            String storedGitUrl,
+            String gitUrl,
+            Path gitRoot,
+            Path configDir,
+            Path worktreeRoot) {
         private boolean enabled() {
-            return gitUrl != null && !gitUrl.isBlank() && !UNCONFIGURED.equalsIgnoreCase(gitUrl.trim());
+            return storedGitUrl != null && !storedGitUrl.isBlank() && !UNCONFIGURED.equalsIgnoreCase(storedGitUrl.trim());
+        }
+
+        private boolean internalDeployment() {
+            return isInternalStoredGitUrl(storedGitUrl);
+        }
+
+        private boolean matchesOrigin(String originUrl) {
+            if (originUrl == null) {
+                return false;
+            }
+            String value = originUrl.trim();
+            if (internalDeployment()) {
+                return storedGitUrl.equals(stripInternalSshUser(value));
+            }
+            return storedGitUrl.equals(value);
+        }
+
+        private static String stripInternalSshUser(String value) {
+            String prefix = "ssh://";
+            if (!value.regionMatches(true, 0, prefix, 0, prefix.length())) {
+                return value;
+            }
+            String rest = value.substring(prefix.length());
+            int at = rest.indexOf('@');
+            return at > 0 ? rest.substring(at + 1) : value;
+        }
+
+        private static boolean isInternalStoredGitUrl(String value) {
+            if (value == null || value.isBlank() || UNCONFIGURED.equalsIgnoreCase(value.trim())) {
+                return false;
+            }
+            String normalized = value.trim();
+            return !normalized.contains("://")
+                    && !normalized.contains("@")
+                    && normalized.contains("/")
+                    && normalized.chars().noneMatch(Character::isWhitespace);
         }
     }
 

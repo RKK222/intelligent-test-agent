@@ -61,21 +61,30 @@ public class RuntimeManagementCommandService {
      */
     public OpencodeProcessControlResult restartManagedProcess(OpencodeContainerId containerId, int port, String traceId) {
         Optional<OpencodeServerProcess> process = latestProcess(containerId, port);
-        if (process.isPresent() && process.get().status() == OpencodeServerProcessStatus.STOPPED) {
-            return startExistingProcess(process.get(), traceId);
+        if (process.isPresent()) {
+            return restartTrackedProcess(process.get(), traceId);
         }
-        try {
-            OpencodeProcessControlResult result = gateway.restartProcess(new OpencodeProcessControlCommand(containerId, port, traceId));
-            if (result == null) {
-                throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程重启未返回结果");
-            }
-            return process.map(item -> verifyRestartedProcess(item, result, traceId)).orElse(result);
-        } catch (PlatformException exception) {
-            if (process.isPresent() && notManaged(exception)) {
-                return startExistingProcess(process.get(), traceId);
-            }
-            throw exception;
+        return restartUntrackedProcess(containerId, port, traceId);
+    }
+
+    private OpencodeProcessControlResult restartTrackedProcess(OpencodeServerProcess process, String traceId) {
+        if (process.status() == OpencodeServerProcessStatus.STOPPED) {
+            return startExistingProcess(process, traceId);
         }
+        if (startupService == null) {
+            return gateway.restartProcess(new OpencodeProcessControlCommand(process.containerId(), process.port(), traceId));
+        }
+        stopService.stopAndVerify(OpencodeProcessStopRequest.tracked(process, traceId));
+        OpencodeServerProcess running = startupService.startAndVerify(startupRequest(process, traceId));
+        return controlResult(running, traceId);
+    }
+
+    private OpencodeProcessControlResult restartUntrackedProcess(OpencodeContainerId containerId, int port, String traceId) {
+        OpencodeProcessControlResult result = gateway.restartProcess(new OpencodeProcessControlCommand(containerId, port, traceId));
+        if (result == null) {
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程重启未返回结果");
+        }
+        return result;
     }
 
     /**
@@ -98,21 +107,6 @@ public class RuntimeManagementCommandService {
                 .stream()
                 .filter(process -> process.port() == port)
                 .max(Comparator.comparing(OpencodeServerProcess::updatedAt));
-    }
-
-    private OpencodeProcessControlResult verifyRestartedProcess(
-            OpencodeServerProcess process,
-            OpencodeProcessControlResult result,
-            String traceId) {
-        if (startupService == null) {
-            return result;
-        }
-        OpencodeProcessStartupRequest request = startupRequest(process, traceId);
-        OpencodeServerProcess running = startupService.markStartedAndVerify(
-                request,
-                result.pid() == null ? process.pid() : result.pid(),
-                result.message());
-        return controlResult(running, traceId);
     }
 
     private OpencodeProcessControlResult startExistingProcess(OpencodeServerProcess process, String traceId) {
@@ -162,8 +156,4 @@ public class RuntimeManagementCommandService {
                 traceId);
     }
 
-    private boolean notManaged(PlatformException exception) {
-        String message = exception.getMessage() == null ? "" : exception.getMessage().toLowerCase(java.util.Locale.ROOT);
-        return message.contains("not managed");
-    }
 }

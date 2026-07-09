@@ -31,7 +31,7 @@ class AgentConfigControllerTest {
     @Test
     void authenticatedUserCanReadPublicStatus() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
-        when(service.publicStatus(false)).thenReturn(new AgentConfigStatusResponse(
+        when(service.publicStatus(false, USER_ID)).thenReturn(new AgentConfigStatusResponse(
                 "PUBLIC",
                 false,
                 false,
@@ -185,7 +185,7 @@ class AgentConfigControllerTest {
     @Test
     void superAdminCanReadLocalPublicRepositoryStatus() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
-        when(service.localPublicRepositoryStatus()).thenReturn(new PublicRepositoryStatusResponse(
+        when(service.localPublicRepositoryStatus(USER_ID)).thenReturn(new PublicRepositoryStatusResponse(
                 "127.0.0.1",
                 "127.0.0.1",
                 "/data/.testagent/agent-opencode/.config",

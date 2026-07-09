@@ -41,6 +41,7 @@ var errPublicConfigNotInitialized = errors.New("public config directory not init
 // StartRequest 描述一次启动 opencode server 的本地命令。
 type StartRequest struct {
 	Port        int
+	SessionPath string
 	Environment map[string]string
 	TraceID     string
 }
@@ -210,7 +211,13 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 		return StartSpec{}, fmt.Errorf("traceId is required")
 	}
 
-	sessionPath := cfg.SessionPath(request.Port)
+	sessionPath := strings.TrimSpace(request.SessionPath)
+	if sessionPath == "" {
+		sessionPath = cfg.SessionPath(request.Port)
+	} else {
+		// Java 侧按用户生成稳定目录；manager 只规整路径并保留旧端口目录 fallback。
+		sessionPath = filepath.Clean(sessionPath)
+	}
 	args := []string{"serve", "--hostname", "0.0.0.0", "--port", strconv.Itoa(request.Port), "--print-logs"}
 	for _, origin := range cfg.AllowedCORS {
 		args = append(args, "--cors", origin)
@@ -337,10 +344,18 @@ func (m *Manager) Stop(ctx context.Context, request StopRequest) (Result, error)
 
 // Restart 先停止旧进程，再使用同一端口启动新进程。
 func (m *Manager) Restart(ctx context.Context, request StopRequest) (Result, error) {
+	record, ok, err := m.store.Get(request.Port)
+	if err != nil {
+		return failed(request.Port, request.TraceID, err), err
+	}
+	sessionPath := ""
+	if ok {
+		sessionPath = record.SessionPath
+	}
 	if _, err := m.Stop(ctx, request); err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
-	return m.Start(ctx, StartRequest{Port: request.Port, TraceID: request.TraceID})
+	return m.Start(ctx, StartRequest{Port: request.Port, SessionPath: sessionPath, TraceID: request.TraceID})
 }
 
 // Health 查询本地 state 后执行 PID 和 HTTP 健康检测。
@@ -404,7 +419,11 @@ func (m *Manager) withDerivedStartCommands(records []state.ProcessRecord, traceI
 		if records[i].StartCommand != "" {
 			continue
 		}
-		spec, err := BuildStartSpec(cfg, StartRequest{Port: records[i].Port, TraceID: nonEmptyTraceID(traceID)})
+		spec, err := BuildStartSpec(cfg, StartRequest{
+			Port:        records[i].Port,
+			SessionPath: records[i].SessionPath,
+			TraceID:     nonEmptyTraceID(traceID),
+		})
 		if err == nil {
 			records[i].StartCommand = spec.StartCommand
 		}

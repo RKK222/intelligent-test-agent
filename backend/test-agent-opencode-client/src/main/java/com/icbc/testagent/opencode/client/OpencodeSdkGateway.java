@@ -26,6 +26,11 @@ public interface OpencodeSdkGateway {
             String traceId);
 
     /**
+     * 调用远端 session get API，确认指定 session 是否存在。
+     */
+    Mono<Boolean> sessionExists(ExecutionNode node, String opencodeSessionId, String traceId);
+
+    /**
      * 调用远端 session abort API，返回远端布尔响应的稳定包装。
      */
     Mono<OpencodeCancelResult> cancelSession(

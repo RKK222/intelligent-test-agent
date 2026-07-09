@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.pagination.PageRequest;
+import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.configuration.CommonParameter;
 import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
@@ -35,7 +37,9 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
+import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.nio.file.Path;
@@ -92,13 +96,33 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(gateway.startCommands).hasSize(1);
         assertThat(gateway.healthCommands).hasSize(1);
         assertThat(gateway.startCommands.getFirst().containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
-        assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(SESSION_DIR + "4200");
+        assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(USER_SESSION_DIR);
         assertThat(gateway.startCommands.getFirst().configPath()).isEqualTo(CONFIG_DIR);
         assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
         assertThat(repository.savedNodes).hasSize(1);
         assertThat(repository.savedNodes.getFirst().baseUrl()).isEqualTo("http://10.8.0.21:4200");
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeRejectsUnsafeUnifiedAuthIdForSessionDirectory() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.13", 4200, 4205, 4, 0));
+        UserId badUserId = new UserId("usr_bad_1234567890abcdef");
+        repository.users.put(badUserId.value(), User.createNew(
+                badUserId.value(),
+                "../bad/ucid",
+                "bad-user",
+                "password-hash",
+                "org",
+                "rd",
+                "dept"));
+        UserOpencodeProcessAssignmentService service = service(repository, new RecordingGateway());
+
+        assertThatThrownBy(() -> service.initialize(badUserId, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
     }
 
     @org.junit.jupiter.api.Test
@@ -749,10 +773,16 @@ class UserOpencodeProcessAssignmentServiceTest {
                                 Duration.ofSeconds(5),
                                 100)),
                 heartbeatStore,
-                operationRepository);
+                null,
+                null,
+                null,
+                operationRepository,
+                repository);
     }
 
     private static final String SESSION_DIR = "/tmp/testagent/.session/";
+    private static final String USER_UNIFIED_AUTH_ID = "ucid_001";
+    private static final String USER_SESSION_DIR = SESSION_DIR + "users/" + USER_UNIFIED_AUTH_ID;
     private static final String CONFIG_DIR = "/tmp/testagent/.config/opencode/";
 
     private static CommonParameterValues commonParameters() {
@@ -1086,13 +1116,25 @@ class UserOpencodeProcessAssignmentServiceTest {
         }
     }
 
-    static class FakeRepository implements OpencodeProcessManagementRepository, ExecutionNodeRepository {
+    static class FakeRepository implements OpencodeProcessManagementRepository, ExecutionNodeRepository, UserRepository {
         private final Map<String, OpencodeContainer> containers = new LinkedHashMap<>();
         private final Map<String, OpencodeServerProcess> processes = new LinkedHashMap<>();
         private final Map<String, UserOpencodeProcessBinding> bindings = new LinkedHashMap<>();
+        private final Map<String, User> users = new LinkedHashMap<>();
         private final List<ExecutionNode> savedNodes = new ArrayList<>();
         int findUserBindingCalls;
         int findContainerCalls;
+
+        FakeRepository() {
+            users.put(USER_ID.value(), User.createNew(
+                    USER_ID.value(),
+                    USER_UNIFIED_AUTH_ID,
+                    "test-user",
+                    "password-hash",
+                    "org",
+                    "rd",
+                    "dept"));
+        }
 
         @Override
         public List<OpencodeContainer> findHealthyContainers(int limit) {
@@ -1173,6 +1215,45 @@ class UserOpencodeProcessAssignmentServiceTest {
         @Override
         public List<ExecutionNode> findRoutableNodes(int limit) {
             return savedNodes.stream().limit(limit).toList();
+        }
+
+        @Override
+        public void save(User user) {
+            users.put(user.userId().value(), user);
+        }
+
+        @Override
+        public Optional<User> findByUserId(UserId userId) {
+            return Optional.ofNullable(users.get(userId.value()));
+        }
+
+        @Override
+        public Optional<User> findByUnifiedAuthId(String unifiedAuthId) {
+            return users.values().stream()
+                    .filter(user -> user.unifiedAuthId().equals(unifiedAuthId))
+                    .findFirst();
+        }
+
+        @Override
+        public Optional<User> findByUsername(String username) {
+            return users.values().stream()
+                    .filter(user -> user.username().equals(username))
+                    .findFirst();
+        }
+
+        @Override
+        public PageResponse<User> findPage(String keyword, PageRequest pageRequest) {
+            return new PageResponse<>(List.copyOf(users.values()), pageRequest.page(), pageRequest.size(), users.size());
+        }
+
+        @Override
+        public boolean existsByUsername(String username) {
+            return findByUsername(username).isPresent();
+        }
+
+        @Override
+        public boolean existsByUnifiedAuthId(String unifiedAuthId) {
+            return findByUnifiedAuthId(unifiedAuthId).isPresent();
         }
 
         @Override public LinuxServer saveLinuxServer(LinuxServer linuxServer) { return linuxServer; }

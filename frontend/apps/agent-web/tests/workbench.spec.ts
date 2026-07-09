@@ -1540,7 +1540,7 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   await page.getByPlaceholder("回答").fill("staging");
   await page.getByRole("button", { name: "回复" }).click();
   await expect.poll(() => questionReplies.length).toBe(1);
-  expect(questionReplies[0]).toEqual({ answers: [["staging"]] });
+  expect(questionReplies[0]).toEqual({ answers: [["staging"]], remoteSessionId: "ses_remote_child" });
 
   await expect(page.getByText("Agent 提出了文件修改")).toBeVisible();
   await page.locator(".oc-diff-summary__header").click();
@@ -2431,7 +2431,7 @@ async function mockBackendApi(
           event(1, "permission.asked", { requestId: "perm_1", sessionId: "ses_1", title: "Run bash", description: "Allow npm test?" }),
           event(2, "question.asked", {
             requestId: "ques_1",
-            sessionId: "ses_1",
+            sessionId: "ses_remote_child",
             questions: [{ id: "q1", text: "Need target env?", kind: "text" }]
           }),
           event(3, "diff.proposed", { files: [diffFile()] }),

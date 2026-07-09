@@ -2,8 +2,10 @@ package com.icbc.testagent.api.web.platform;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
@@ -109,9 +111,10 @@ class AgentConfigBackendRoutingService {
     }
 
     List<AgentConfigResponses.PublicRepositoryStatusResponse> listPublicRepositories(ServerWebExchange exchange, String traceId) {
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
         Map<String, BackendJavaProcess> remoteBackends = routeResolver.remoteBackendsByServer();
         Map<String, AgentConfigResponses.PublicRepositoryStatusResponse> responsesByServer = new LinkedHashMap<>();
-        AgentConfigResponses.PublicRepositoryStatusResponse local = service.localPublicRepositoryStatus();
+        AgentConfigResponses.PublicRepositoryStatusResponse local = service.localPublicRepositoryStatus(principal.userId());
         responsesByServer.put(local.linuxServerId(), local);
         for (BackendJavaProcess backend : remoteBackends.values().stream()
                 .sorted(Comparator.comparing(process -> process.linuxServerId().value()))

@@ -56,7 +56,7 @@ public class AgentConfigController {
     @GetMapping("/public/status")
     public ApiResponse<Object> publicStatus(ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
-        return ok(exchange, service.publicStatus(isSuperAdmin(principal)));
+        return ok(exchange, service.publicStatus(isSuperAdmin(principal), principal.userId()));
     }
 
     @GetMapping("/workspaces/{workspaceId}/status")
@@ -80,8 +80,8 @@ public class AgentConfigController {
 
     @GetMapping("/public/repositories/local")
     public ApiResponse<AgentConfigResponses.PublicRepositoryStatusResponse> localPublicRepository(ServerWebExchange exchange) {
-        AuthWebSupport.getAuthPrincipal(exchange);
-        return ApiResponse.ok(service.localPublicRepositoryStatus(), RuntimeApiSupport.traceId(exchange));
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        return ApiResponse.ok(service.localPublicRepositoryStatus(principal.userId()), RuntimeApiSupport.traceId(exchange));
     }
 
     @PostMapping("/public/repositories/{linuxServerId}/initialize")
@@ -122,7 +122,7 @@ public class AgentConfigController {
                             Boolean.TRUE.equals(request.discardLocalChanges()),
                             principal.userId(),
                             RuntimeApiSupport.traceId(exchange));
-                    return ApiResponse.ok(service.localPublicRepositoryStatus(), RuntimeApiSupport.traceId(exchange));
+                    return ApiResponse.ok(service.localPublicRepositoryStatus(principal.userId()), RuntimeApiSupport.traceId(exchange));
                 });
     }
 

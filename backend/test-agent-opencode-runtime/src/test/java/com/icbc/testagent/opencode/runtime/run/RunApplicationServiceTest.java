@@ -61,6 +61,7 @@ import com.icbc.testagent.opencode.client.OpencodeRejectDiffCommand;
 import com.icbc.testagent.opencode.client.OpencodeRejectDiffResult;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
+import com.icbc.testagent.opencode.client.OpencodeSessionExistsCommand;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessage;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesCommand;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult;
@@ -2003,6 +2004,11 @@ class RunApplicationServiceTest {
                 return Mono.error(createSessionError);
             }
             return Mono.just(new OpencodeCreateSessionResult(REMOTE_SESSION_ID));
+        }
+
+        @Override
+        public Mono<Boolean> sessionExists(OpencodeSessionExistsCommand command) {
+            return Mono.just(true);
         }
 
         @Override

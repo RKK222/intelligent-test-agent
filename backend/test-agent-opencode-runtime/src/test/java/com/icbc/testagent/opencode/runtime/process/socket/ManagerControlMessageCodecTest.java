@@ -50,6 +50,27 @@ class ManagerControlMessageCodecTest {
     }
 
     @Test
+    void encodesCommandSessionPath() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        ManagerControlMessageCodec codec = new ManagerControlMessageCodec(objectMapper);
+        ManagerControlMessage command = ManagerControlMessage.command(
+                "cmd_1234567890abcdef",
+                "start",
+                4096,
+                "/data/opencode/session/users/usr_1234567890abcdef",
+                Map.of("ICBC_UCID", "U001"),
+                10_000,
+                "trace_1234567890abcdef");
+
+        String payload = codec.encode(command);
+        ManagerControlMessage decoded = codec.decode(payload);
+
+        assertThat(objectMapper.readTree(payload).path("sessionPath").asText())
+                .isEqualTo("/data/opencode/session/users/usr_1234567890abcdef");
+        assertThat(decoded.sessionPath()).isEqualTo("/data/opencode/session/users/usr_1234567890abcdef");
+    }
+
+    @Test
     void encodesManagerHeartbeatWithConnectedBackendIds() {
         ManagerControlMessageCodec codec = new ManagerControlMessageCodec(new ObjectMapper());
         ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
