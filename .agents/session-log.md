@@ -12,6 +12,18 @@
   - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+### 2026-07-09 - 默认不展示聊天面板头部标题
+
+- Why:
+  - 聊天面板左上角在初始或没有设置具体会话标题时，默认会显示“生成测试案例”的硬编码备用标题。根据用户反馈，默认状态下不应展示标题。
+- What:
+  - 1. 修改 `AgentWorkbench.vue`，在 `chatTitle` 计算属性中将 null/undefined 会话标题的备用默认值由 `"生成测试案例"` 改为 `""`。
+  - 2. 修改 `FigmaChatPanel.vue`，去掉 `<h2>` 标题元素的 `'生成测试案例'` 备用默认值，使其在 `title` 属性为空时渲染为空（依然保持 `flex: 1` 占据空间以保证右侧按钮对齐）。
+- How:
+  - 清理 default fallback 文字，并在 `frontend` 目录运行 `corepack pnpm lint`、`typecheck`、`test` 和 `build` 进行全量回归校验。
+- Result:
+  - 修改后，聊天面板在无会话标题的默认状态下，顶部左侧不再显示“生成测试案例”标题；前端的 lint、类型检查、测试（441 项测试全部通过）和生产构建（`corepack pnpm build`）均成功执行。
+
 ### 2026-07-09 - 修复 BackendSseForwarder 启动装配
 
 - Why:

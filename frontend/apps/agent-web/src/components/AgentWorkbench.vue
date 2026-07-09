@@ -275,7 +275,7 @@ let retryingWorkspaceAfterOpencodeReady = false;
 let selectingAppId: string | undefined;
 let appSelectionSeq = 0;
 const readonlySessionReason = ref("");
-const chatTitle = computed(() => session.value?.title ?? "生成测试案例");
+const chatTitle = computed(() => session.value?.title ?? "");
 const currentRawOutputEntries = computed(() => {
   const sessionId = session.value?.sessionId;
   return sessionId ? rawEntriesBySessionId.value[sessionId] ?? [] : [];

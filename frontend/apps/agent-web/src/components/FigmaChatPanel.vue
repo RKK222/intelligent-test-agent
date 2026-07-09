@@ -2920,7 +2920,7 @@ function onCompositionEnd() {
   <div class="figma-chat-root">
     <header class="figma-chat-header">
       <div class="figma-chat-header-left">
-        <h2 class="figma-chat-title" :title="title || '生成测试案例'">{{ title || '生成测试案例' }}</h2>
+        <h2 class="figma-chat-title" :title="title">{{ title }}</h2>
         <button
           type="button"
           class="figma-chat-header-btn"
