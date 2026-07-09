@@ -536,7 +536,7 @@ function formatError(error: unknown) {
   color: #6b7280;
 }
 .ta-scheduler-section {
-  min-height: 0;
+  flex-shrink: 0;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   background: #fff;

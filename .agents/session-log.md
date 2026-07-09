@@ -34,6 +34,19 @@
   - 部署脚本先校验 zip 内 `dist` 产物和 `deploy/internal`，再按“前端更新并 reload Nginx -> 替换后端 jar/程序/worker 镜像 -> 启动 Java 并校验 `.serverid/.serverhost` -> 重启 worker 等待 `manager config update applied`”执行；`--validate-only` 可只检查 zip 结构不触发远程操作。
 - Result:
   - `bash -n deploy/internal/deploy-internal-release.sh deploy/internal/package-release.sh`、两个脚本 `--help`、临时 zip 的 `deploy-internal-release.sh --validate-only` 和 `git diff --check` 通过；未真实连接 122 服务器、未重启 systemd/Nginx/Docker。
+### 2026-07-09 - 修复系统管理定时任务等页面垂直滚动条缺失和遮挡问题
+
+- Why:
+  - 1. 系统管理页下的“.ta-system-content”和“.ta-config-content”布局容器被定义为普通块级 div，导致其内部具有 “height: 100%; overflow: auto;” 的子组件无法正确解析百分比高度，从而自适应高度并撑开外层布局，造成页面遮挡和无滚动条。
+  - 2. 当内容容器转为 flex 容器后，子组件 `.ta-scheduler-management` 内的各 card 块（.ta-scheduler-section）默认具有 `flex-shrink: 1` 和 `min-height: 0`，导致在空间受限时浏览器会将“定时任务”表格块等直接压缩成 0 高度（完全不可见），且容器因不溢出而仍旧无法产生垂直滚动条。
+- What:
+  - 1. 调整 `.ta-system-content` 和 `.ta-config-content` 的样式，扩展为 `display: flex; flex-direction: column;`。
+  - 2. 调整 `.ta-scheduler-section` 样式，设置 `flex-shrink: 0`。
+- How:
+  - 在 `SystemManagementPanel.vue` 和 `ConfigurationManagementPanel.vue` 中将子包容器配置为 flex 列布局；并在 `ScheduledTaskManagementPanel.vue` 中移除 `.ta-scheduler-section` 的 `min-height: 0` 并加上 `flex-shrink: 0`，允许各 section 块保持其原本内容高度，从而触发外部容器滚动。
+- Result:
+  - 成功修复定时任务管理中卡片/表格不可见、页面遮挡截断以及无垂直滚动条的问题；Vitest 与前端校验命令全部成功。
+
 ### 2026-07-09 - 增加 scheduler 运行诊断前台能力
 
 - Why:
