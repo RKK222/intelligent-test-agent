@@ -1790,7 +1790,7 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 
 ### scheduler-management 定时任务管理 API
 
-定时任务管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页、任务 key、状态、触发类型、Cron 或锁 TTL 返回 `VALIDATION_ERROR`。本接口只管理框架任务定义和运行记录，不开放普通用户级 Cron 计划创建 API，也不创建定时会话或 Run。
+定时任务管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页、任务 key、状态、触发类型、Cron 或锁 TTL 返回 `VALIDATION_ERROR`。全局 `TEST_AGENT_SCHEDULER_ENABLED=false` 时手动触发返回 `CONFLICT`，避免创建不会被后台 runner 消费的 `PENDING` 运行记录。本接口只管理框架任务定义和运行记录，不开放普通用户级 Cron 计划创建 API，也不创建定时会话或 Run。
 
 Base URL：`/api/internal/platform/scheduler-management`
 
@@ -1799,7 +1799,7 @@ Base URL：`/api/internal/platform/scheduler-management`
 | `GET` | `/tasks` | 分页查询代码注册的任务定义。 |
 | `GET` | `/tasks/{taskKey}` | 查询单个任务定义。 |
 | `PATCH` | `/tasks/{taskKey}` | 调整任务启停、Cron 表达式和锁 TTL。 |
-| `POST` | `/tasks/{taskKey}/trigger` | 创建管理员手动触发运行记录，后台 runner 异步执行；任务停用时超级管理员仍可手动触发。 |
+| `POST` | `/tasks/{taskKey}/trigger` | 创建管理员手动触发运行记录，后台 runner 异步执行；要求全局 scheduler 已启用，任务停用时超级管理员仍可手动触发。 |
 | `GET` | `/runs` | 分页查询运行记录，可按任务、状态、触发类型和请求用户过滤。 |
 | `GET` | `/runs/{taskRunId}` | 查询单次运行记录详情。 |
 | `POST` | `/runs/{taskRunId}/stop` | 对正在执行的运行记录发起协作式停止。 |

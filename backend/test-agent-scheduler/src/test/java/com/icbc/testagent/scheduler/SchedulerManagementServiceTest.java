@@ -73,6 +73,24 @@ class SchedulerManagementServiceTest {
     }
 
     @Test
+    void triggerRejectsWhenSchedulerDisabledToAvoidPermanentPendingRun() {
+        InMemoryScheduledTaskRepository repository = repositoryWithTask();
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setEnabled(false);
+        SchedulerManagementService service = service(repository, dispatcher, properties);
+
+        assertThatThrownBy(() -> service.trigger(
+                        TASK_KEY,
+                        new UserId("usr_admin_1234567890"),
+                        "trace_scheduler_test"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("定时任务后台扫描未启用");
+        assertThat(repository.allRuns()).isEmpty();
+        assertThat(dispatcher.wakeUps).isZero();
+    }
+
+    @Test
     void triggerRejectsWhenSameTaskAlreadyHasActiveRun() {
         InMemoryScheduledTaskRepository repository = repositoryWithTask();
         ScheduledTaskRun active = ScheduledTaskRun.pending(
@@ -129,9 +147,19 @@ class SchedulerManagementServiceTest {
     }
 
     private SchedulerManagementService service(InMemoryScheduledTaskRepository repository, RecordingDispatcher dispatcher) {
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setEnabled(true);
+        return service(repository, dispatcher, properties);
+    }
+
+    private SchedulerManagementService service(
+            InMemoryScheduledTaskRepository repository,
+            RecordingDispatcher dispatcher,
+            SchedulerProperties properties) {
         return new SchedulerManagementService(
                 repository,
                 new CronScheduleCalculator(),
+                properties,
                 dispatcher,
                 new EmptyDictionaryRepository(),
                 Clock.fixed(NOW, ZoneOffset.UTC));

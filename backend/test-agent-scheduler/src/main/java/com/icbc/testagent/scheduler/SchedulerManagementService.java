@@ -35,21 +35,24 @@ public class SchedulerManagementService {
 
     private final ScheduledTaskRepository repository;
     private final CronScheduleCalculator cronScheduleCalculator;
+    private final SchedulerProperties properties;
     private final ScheduledTaskDispatcher dispatcher;
     private final DictionaryRepository dictionaryRepository;
     private final Clock clock;
 
     /**
-     * 注入持久化端口、Cron 校验器、后台 runner 唤醒端口、字典仓储和系统时钟。
+     * 注入持久化端口、Cron 校验器、scheduler 配置、后台 runner 唤醒端口、字典仓储和系统时钟。
      */
     public SchedulerManagementService(
             ScheduledTaskRepository repository,
             CronScheduleCalculator cronScheduleCalculator,
+            SchedulerProperties properties,
             ScheduledTaskDispatcher dispatcher,
             DictionaryRepository dictionaryRepository,
             Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.cronScheduleCalculator = Objects.requireNonNull(cronScheduleCalculator, "cronScheduleCalculator must not be null");
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher must not be null");
         this.dictionaryRepository = Objects.requireNonNull(dictionaryRepository, "dictionaryRepository must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
@@ -102,6 +105,12 @@ public class SchedulerManagementService {
      */
     public ScheduledTaskRun trigger(ScheduledTaskKey taskKey, UserId requestedByUserId, String traceId) {
         getTask(taskKey);
+        if (!properties.isEnabled()) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "定时任务后台扫描未启用，无法手动触发任务",
+                    Map.of("taskKey", taskKey.value(), "schedulerEnabled", false));
+        }
         repository.findActiveRunByTaskKey(taskKey).ifPresent(activeRun -> {
             throw new PlatformException(
                     ErrorCode.CONFLICT,

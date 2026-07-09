@@ -46,7 +46,7 @@
 
 ## 配置
 
-- `test-agent.scheduler.enabled` / `TEST_AGENT_SCHEDULER_ENABLED`：默认 `false`，只关闭后台扫描和 pending run 执行；代码注册任务仍会在应用启动时同步到 `scheduled_tasks`，管理页可正常展示。
+- `test-agent.scheduler.enabled` / `TEST_AGENT_SCHEDULER_ENABLED`：默认 `false`，关闭后台扫描和 pending run 执行；代码注册任务仍会在应用启动时同步到 `scheduled_tasks`，管理页可正常展示。关闭时管理端手动触发会直接返回冲突错误，避免写入无法执行的 `PENDING` 运行记录。
 - `test-agent.scheduler.scan-interval` / `TEST_AGENT_SCHEDULER_SCAN_INTERVAL`：扫描间隔，默认 `30s`。
 - `test-agent.scheduler.due-task-limit` / `TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT`：单轮扫描 due task 上限，默认 `50`。
 - `test-agent.scheduler.manual-run-limit` / `TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT`：单轮扫描手动 pending run 上限，默认 `50`。
@@ -65,7 +65,7 @@
 - `ScheduledTaskRegistryTest` 覆盖任务注册同步、nextFireAt 计算和管理员覆盖值保留。
 - `ScheduledTaskRunnerTest` 覆盖 Cron 成功执行、重叠触发 `SKIPPED`、Redis 锁失败、handler 异常 `FAILED`、手动 pending run 执行和停止请求最终记录 `MANUALLY_STOPPED`。
 - `RedisScheduledTaskLockTest` 覆盖 Redis `SET NX` 获取锁和 token Lua 续租/释放。
-- `SchedulerManagementServiceTest` 覆盖管理端 patch、非法 Cron、手动触发 active 冲突和只允许停止 `RUNNING`。
+- `SchedulerManagementServiceTest` 覆盖管理端 patch、非法 Cron、scheduler 关闭时拒绝手动触发、手动触发 active 冲突和只允许停止 `RUNNING`。
 - `SchedulerStartupValidatorTest` 覆盖默认关闭、启用时 Redis 必需。
 
 ## 后续 AI 编码指引

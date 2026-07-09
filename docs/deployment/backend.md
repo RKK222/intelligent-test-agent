@@ -378,7 +378,7 @@ TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 
 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制 RunEvent 跨实例实时 fan-out；数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。该开关关闭时 RunEvent 自动退回本机 live bus + DB replay，但用户进程运行管理、manager 心跳、Token 存储、scheduler 和运行指标历史仍直接依赖 Redis。
 
-`TEST_AGENT_SCHEDULER_ENABLED` 默认 `false`。应用启动时会先同步 `ScheduledTaskHandler` 代码注册任务，确保超级管理员定时任务管理页能看到任务定义；只有启用 scheduler 后才启动后台扫描线程并执行 due task 或 pending manual run。启用后会使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。
+`TEST_AGENT_SCHEDULER_ENABLED` 默认 `false`。应用启动时会先同步 `ScheduledTaskHandler` 代码注册任务，确保超级管理员定时任务管理页能看到任务定义；只有启用 scheduler 后才启动后台扫描线程并执行 due task 或 pending manual run。关闭时管理端手动触发会返回 `CONFLICT`，不会再创建无法执行的 `PENDING` 运行记录；历史已存在的 `PENDING` 记录需要启用 scheduler 后由后台扫描消费，或由管理员按排障流程显式处理。启用后会使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。
 
 ## 运行示例
 
@@ -403,7 +403,7 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。启用 `TEST_AGENT_MODEL_CATALOG_SOURCE=internal` 时，`ModelCatalogApplicationService` 会把企业内模型清单 seed 到 `ai_model_configs`，后续可通过改表控制模型显示、启停和默认值。
-应用启动时，`ScheduledTaskRegistry` 会同步代码注册任务；启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRunner` 后台线程才会扫描 due task 和管理员手动触发 pending run。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；停止请求会先写入 `STOPPING`，具体 handler 需在长循环或外部调用间隙检查 `ScheduledTaskContext.stopRequested()` / `throwIfStopRequested()` 后退出，最终由 runner 保存 `MANUALLY_STOPPED`。
+应用启动时，`ScheduledTaskRegistry` 会同步代码注册任务；启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRunner` 后台线程才会扫描 due task 和管理员手动触发 pending run。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；scheduler 未启用时手工启动返回冲突错误，不会写入新的 pending run。停止请求会先写入 `STOPPING`，具体 handler 需在长循环或外部调用间隙检查 `ScheduledTaskContext.stopRequested()` / `throwIfStopRequested()` 后退出，最终由 runner 保存 `MANUALLY_STOPPED`。
 
 ## 内部模型代理与模型目录配置
 

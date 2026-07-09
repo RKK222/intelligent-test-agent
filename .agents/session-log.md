@@ -34,6 +34,16 @@
   - 部署脚本先校验 zip 内 `dist` 产物和 `deploy/internal`，再按“前端更新并 reload Nginx -> 替换后端 jar/程序/worker 镜像 -> 启动 Java 并校验 `.serverid/.serverhost` -> 重启 worker 等待 `manager config update applied`”执行；`--validate-only` 可只检查 zip 结构不触发远程操作。
 - Result:
   - `bash -n deploy/internal/deploy-internal-release.sh deploy/internal/package-release.sh`、两个脚本 `--help`、临时 zip 的 `deploy-internal-release.sh --validate-only` 和 `git diff --check` 通过；未真实连接 122 服务器、未重启 systemd/Nginx/Docker。
+### 2026-07-09 - 防止 scheduler 关闭时手动任务永久待执行
+
+- Why:
+  - `opencode-runtime.stale-active-run-reconcile` 手动运行记录 `str_e6c57bf58157422d85e0fca85f40ebf0` 一直停留在 `PENDING`；排查发现当前 `.env.local` / `.env.test` 未显式配置 `TEST_AGENT_SCHEDULER_ENABLED`，应用按默认 `false` 启动时不会运行后台扫描线程，也不会消费 pending manual run。
+- What:
+  - `SchedulerManagementService.trigger` 注入 `SchedulerProperties`，在全局 scheduler 未启用时直接返回 `CONFLICT`，不再创建无法执行的新 `PENDING` 手动运行记录；同步 scheduler README、HTTP API 和部署文档说明。
+- How:
+  - 先补红灯测试确认旧实现会在 scheduler 关闭时写入悬挂 pending run，再加配置保护；不修改 `.env.local` / `.env.test`，不处理历史数据库运行记录，历史 pending 需要启用 scheduler 后由后台消费或由管理员显式处置。
+- Result:
+  - `mvn -pl test-agent-scheduler -am -Dsurefire.failIfNoSpecifiedTests=false test` 和 `mvn -pl test-agent-app -am package -DskipTests` 通过。
 
 ### 2026-07-08 - 增加后台运行会话历史状态提醒
 
