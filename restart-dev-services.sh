@@ -13,7 +13,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 BACKEND_DIR="${ROOT_DIR}/backend"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
 BACKEND_JAR="${BACKEND_DIR}/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar"
+BACKEND_APP_LOG_DIR="${BACKEND_DIR}/logs"
 LOG_DIR="${ROOT_DIR}/.tmp/dev-services"
+OPENCODE_MANAGER_RUNTIME_STATE_DIR=""
 BACKEND_SCREEN_SESSION="test-agent-backend"
 FRONTEND_SCREEN_SESSION="test-agent-frontend"
 OPENCODE_SCREEN_SESSION="test-agent-opencode"
@@ -60,7 +62,9 @@ Defaults:
   backend URL:     TEST_AGENT_BASE_URL or http://127.0.0.1:8080
   frontend URL:    TEST_AGENT_FRONTEND_URL or http://127.0.0.1:3000
   manager token:   TEST_AGENT_OPENCODE_MANAGER_TOKEN or local-manager-token (dev/test default)
-  logs:            .tmp/dev-services/
+  process logs:    .tmp/dev-services/
+  backend logs:    backend/logs/backend.log, backend/logs/sse.log, backend/logs/error.log
+  manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
 
 Options:
@@ -764,7 +768,8 @@ start_backend() {
   fi
 
   mkdir -p "${LOG_DIR}"
-  echo "Starting backend with profile '${profile}'. Logs: ${LOG_DIR}/backend.log"
+  echo "Starting backend with profile '${profile}'. Process log: ${LOG_DIR}/backend.log"
+  echo "Backend app logs: ${BACKEND_APP_LOG_DIR}/backend.log, ${BACKEND_APP_LOG_DIR}/sse.log, ${BACKEND_APP_LOG_DIR}/error.log"
   echo "Backend JVM proxy settings are disabled for direct DB/Redis connections."
   : >"${LOG_DIR}/backend.log"
   if command -v screen >/dev/null 2>&1; then
@@ -839,12 +844,13 @@ start_opencode_manager() {
   port_start="${OPENCODE_MANAGER_PORT_START:-$(url_port "${TEST_AGENT_OPENCODE_BASE_URL:-http://127.0.0.1:4096}")}"
   port_end="${OPENCODE_MANAGER_PORT_END:-$((port_start + 9))}"
   container_id="${OPENCODE_MANAGER_CONTAINER_ID:-ctr_local_opencode}"
-  manager_state_dir="${OPENCODE_MANAGER_STATE_DIR:-${LOG_DIR}/opencode-manager-state}"
+  manager_state_dir="${OPENCODE_MANAGER_RUNTIME_STATE_DIR}"
   backend_port="${OPENCODE_MANAGER_BACKEND_PORT:-$(url_port "${backend_url}")}"
   version="$("${bin}" --version 2>/dev/null || true)"
 
   mkdir -p "${LOG_DIR}" "${manager_state_dir}"
-  echo "Starting opencode-manager for ${container_id} (${version:-opencode unknown}). Logs: ${LOG_DIR}/opencode-manager.log"
+  echo "Starting opencode-manager for ${container_id} (${version:-opencode unknown}). Process log: ${LOG_DIR}/opencode-manager.log"
+  echo "opencode-manager app logs: ${manager_state_dir}/logs/manager.log, ${manager_state_dir}/logs/manager-error.log"
   : >"${LOG_DIR}/opencode-manager.log"
   if command -v screen >/dev/null 2>&1; then
     local manager_cmd
@@ -882,7 +888,7 @@ start_frontend() {
   ensure_frontend_dependencies
 
   mkdir -p "${LOG_DIR}"
-  echo "Starting frontend on ${frontend_host}:${frontend_port}. Logs: ${LOG_DIR}/frontend.log"
+  echo "Starting frontend on ${frontend_host}:${frontend_port}. Process log: ${LOG_DIR}/frontend.log"
   : >"${LOG_DIR}/frontend.log"
   if command -v screen >/dev/null 2>&1; then
     local frontend_cmd
@@ -904,6 +910,7 @@ start_frontend() {
 load_env_file "${env_file}"
 backend_url="${TEST_AGENT_BASE_URL:-${backend_url}}"
 frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
+OPENCODE_MANAGER_RUNTIME_STATE_DIR="${OPENCODE_MANAGER_STATE_DIR:-${LOG_DIR}/opencode-manager-state}"
 
 # 通用参数中的 $TEST_AGENT_ROOT 由 Java 进程展开；允许调用方显式覆盖以适配其他工作目录。
 # TESTAGENT 是早期本地测试库已使用的兼容别名，保留以避免公共配置路径下发给 manager 时变成字面量。
@@ -967,11 +974,11 @@ seed_demo_workspaces
 
 # 清理旧的日志文件，避免日志累积过大
 clear_service_logs() {
-  echo "Cleaning up old service logs..."
+  echo "Cleaning up old process logs..."
   rm -f "${LOG_DIR}/backend.log" "${LOG_DIR}/frontend.log" "${LOG_DIR}/opencode-manager.log" "${LOG_DIR}/opencode.log"
   rm -f "${LOG_DIR}/backend.pid" "${LOG_DIR}/frontend.pid" "${LOG_DIR}/opencode-manager.pid" "${LOG_DIR}/opencode.pid"
   # 保留 opencode-manager-state 和 opencode-manager-session 目录，因为它们包含运行态数据
-  echo "Service logs cleared successfully."
+  echo "Process logs cleared successfully."
 }
 
 clear_service_logs
@@ -1003,7 +1010,11 @@ start_frontend
 echo "Restart complete."
 echo "Backend:  ${backend_url}"
 echo "Frontend: ${frontend_url}"
-echo "Logs:     ${LOG_DIR}"
+echo "Process logs: ${LOG_DIR}"
+echo "Backend logs: ${BACKEND_APP_LOG_DIR}/backend.log, ${BACKEND_APP_LOG_DIR}/sse.log, ${BACKEND_APP_LOG_DIR}/error.log"
+if should_start_opencode_manager; then
+  echo "Manager logs: ${OPENCODE_MANAGER_RUNTIME_STATE_DIR}/logs/manager.log, ${OPENCODE_MANAGER_RUNTIME_STATE_DIR}/logs/manager-error.log"
+fi
 if command -v screen >/dev/null 2>&1; then
   echo "Screen:   ${BACKEND_SCREEN_SESSION}, ${OPENCODE_MANAGER_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
 fi

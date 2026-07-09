@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 补齐 WebSocket 操作日志和启动日志提示
+
+- Why:
+  - 前一轮日志切面已覆盖 HTTP Controller 和 Service，但前端 WebSocket 长连接入口本身不属于 Controller；同时本地重启脚本仍把 `.tmp/dev-services/*.log` 统称为 Logs，容易和新的结构化业务日志文件混淆。
+- What:
+  - 新增 `WebSocketLoggingAspect`，统一记录 API 层 WebSocket handler 的入口、结束 signal、耗时和异常；启动脚本输出改为区分 process log、backend app logs 和 opencode-manager app logs，并把 frontend 启动行同步为 process log 口径。
+- How:
+  - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
+- Result:
+  - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+
 ### 2026-07-09 - 修改历史会话为消息列表并更换图标
 
 - Why:
