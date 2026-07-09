@@ -2071,24 +2071,12 @@ const replyPermissionMutation = useMutation({
   }
 });
 
-function questionRemoteSessionId(candidate?: string): string | undefined {
-  const value = candidate?.trim();
-  if (!value || value === session.value?.sessionId) {
-    return undefined;
-  }
-  return value;
-}
-
 const replyQuestionMutation = useMutation({
-  mutationFn: async (payload: { requestId: string; answers: unknown[]; remoteSessionId?: string }) => {
+  mutationFn: async (payload: { requestId: string; answers: unknown[] }) => {
     if (!session.value) {
       throw new Error("当前没有 Session");
     }
-    const remoteSessionId = questionRemoteSessionId(payload.remoteSessionId);
-    return api.replySessionQuestion(session.value.sessionId, payload.requestId, {
-      answers: payload.answers,
-      remoteSessionId
-    });
+    return api.replySessionQuestion(session.value.sessionId, payload.requestId, { answers: payload.answers });
   },
   onSuccess: (_result, payload) => dispatchChat({ type: "question.replied", requestId: payload.requestId }),
   onError: (error, payload) => {
@@ -2102,21 +2090,16 @@ const replyQuestionMutation = useMutation({
 });
 
 const rejectQuestionMutation = useMutation({
-  mutationFn: async (payload: { requestId: string; remoteSessionId?: string }) => {
+  mutationFn: async (requestId: string) => {
     if (!session.value) {
       throw new Error("当前没有 Session");
     }
-    const remoteSessionId = questionRemoteSessionId(payload.remoteSessionId);
-    return api.rejectSessionQuestion(
-      session.value.sessionId,
-      payload.requestId,
-      remoteSessionId ? { remoteSessionId } : undefined
-    );
+    return api.rejectSessionQuestion(session.value.sessionId, requestId);
   },
-  onSuccess: (_result, payload) => dispatchChat({ type: "question.replied", requestId: payload.requestId }),
-  onError: (error, payload) => {
+  onSuccess: (_result, requestId) => dispatchChat({ type: "question.replied", requestId }),
+  onError: (error, requestId) => {
     if (isStaleRuntimeRequest(error)) {
-      dispatchChat({ type: "question.replied", requestId: payload.requestId });
+      dispatchChat({ type: "question.replied", requestId });
       feedback.value = staleRuntimeRequestFeedback("提问请求已失效", error);
       return;
     }
@@ -4185,15 +4168,8 @@ async function handleLogout() {
           @open-file="openFile"
           @preview-context="handlePreviewContext"
           @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
-          @reply-question="(requestId: string, answers: unknown[], remoteSessionId?: string) => replyQuestionMutation.mutate({
-            requestId,
-            answers,
-            remoteSessionId
-          })"
-          @reject-question="(requestId: string, remoteSessionId?: string) => rejectQuestionMutation.mutate({
-            requestId,
-            remoteSessionId
-          })"
+          @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
+          @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
           @select-session="(id: string) => switchSession(id)"
           @change-agent="selectRuntimeAgent"
           @refresh-agents="refreshAgentsCatalog"

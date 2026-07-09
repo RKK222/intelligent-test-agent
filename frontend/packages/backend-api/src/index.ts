@@ -1126,15 +1126,14 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       listFromRuntimeEnvelope(await request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions`)).map((item) =>
         toQuestionRequest(item, sessionId)
       ),
-    replySessionQuestion: (sessionId: string, requestId: string, payload: { answers: unknown[]; remoteSessionId?: string }) =>
+    replySessionQuestion: (sessionId: string, requestId: string, payload: { answers: unknown[] }) =>
       request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reply`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
-    rejectSessionQuestion: (sessionId: string, requestId: string, payload?: { remoteSessionId?: string }) =>
+    rejectSessionQuestion: (sessionId: string, requestId: string) =>
       request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reject`, {
-        method: "POST",
-        body: payload == null ? undefined : JSON.stringify(compactObject(payload))
+        method: "POST"
       }),
     createTerminalTicket: (sessionId: string, payload: TerminalTicketRequest = {}) =>
       request<TerminalTicketResponse>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/terminal/tickets`, {

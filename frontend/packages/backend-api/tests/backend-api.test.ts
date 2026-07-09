@@ -1231,32 +1231,6 @@ describe("backend-api", () => {
     );
   });
 
-  it("passes question remote session ids through platform runtime replies", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
-      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { accepted: true } }), { status: 200 })
-    );
-    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
-
-    await client.replySessionQuestion("ses_1234567890abcdef", "que_123", {
-      remoteSessionId: "ses_remote_child",
-      answers: [["继续"]]
-    });
-    await client.rejectSessionQuestion("ses_1234567890abcdef", "que_456", { remoteSessionId: "ses_remote_child" });
-
-    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
-      [
-        "http://api/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/questions/que_123/reply",
-        "POST",
-        JSON.stringify({ remoteSessionId: "ses_remote_child", answers: [["继续"]] })
-      ],
-      [
-        "http://api/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/questions/que_456/reject",
-        "POST",
-        JSON.stringify({ remoteSessionId: "ses_remote_child" })
-      ]
-    ]);
-  });
-
   it("maps MCP tool ids from the platform runtime API", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: ["bash", "read"] }), { status: 200 })

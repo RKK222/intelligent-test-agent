@@ -537,9 +537,8 @@ public class PlatformOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> rejectQuestion(
             @PathVariable String sessionId,
             @PathVariable String requestId,
-            @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return platformResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
     }
 
     /**
@@ -588,9 +587,8 @@ public class PlatformOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> rejectQuestionByOpencodePath(
             @RequestParam String sessionId,
             @PathVariable String requestId,
-            @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return platformResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
     }
 
     /**
