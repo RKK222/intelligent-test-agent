@@ -20,6 +20,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +30,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class OpencodeRuntimeApplicationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(OpencodeRuntimeApplicationService.class);
 
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentRuntimeTargetResolver targetResolver;
@@ -460,15 +464,20 @@ public class OpencodeRuntimeApplicationService {
      * 查询远端 permission 请求列表。
      */
     public Object listPermissions(String sessionId, String traceId) {
-        AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, sessionV2Path(location, "permission"), Map.of(), traceId);
+        AgentRuntimeTargetResolver.SessionRuntimeTarget location = pendingAskSessionLocation(sessionId, traceId);
+        try {
+            return get(location, sessionV2Path(location, "permission"), Map.of(), traceId);
+        } catch (PlatformException exception) {
+            logPendingAskFailure("listPermission", sessionId, null, location, location.remoteSessionId(), false, exception, traceId);
+            throw staleRuntimeRequestIfNotFound(exception, "权限请求已失效，请重新运行任务", null);
+        }
     }
 
     /**
      * 回复远端 permission 请求，并兼容前端 decision 字段到 opencode reply 字段。
      */
     public Object replyPermission(String sessionId, String requestId, Map<String, Object> body, String traceId) {
-        AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
+        AgentRuntimeTargetResolver.SessionRuntimeTarget location = pendingAskSessionLocation(sessionId, traceId);
         try {
             return post(
                     location,
@@ -476,6 +485,7 @@ public class OpencodeRuntimeApplicationService {
                     permissionReplyBody(body),
                     traceId);
         } catch (PlatformException exception) {
+            logPendingAskFailure("replyPermission", sessionId, requestId, location, location.remoteSessionId(), false, exception, traceId);
             throw staleRuntimeRequestIfNotFound(exception, "权限请求已失效，请重新运行任务", requestId);
         }
     }
@@ -484,22 +494,38 @@ public class OpencodeRuntimeApplicationService {
      * 查询远端 question 请求列表。
      */
     public Object listQuestions(String sessionId, String traceId) {
-        AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, sessionV2Path(location, "question"), Map.of(), traceId);
+        AgentRuntimeTargetResolver.SessionRuntimeTarget location = pendingAskSessionLocation(sessionId, traceId);
+        try {
+            return get(location, sessionV2Path(location, "question"), Map.of(), traceId);
+        } catch (PlatformException exception) {
+            logPendingAskFailure("listQuestion", sessionId, null, location, location.remoteSessionId(), false, exception, traceId);
+            throw staleRuntimeRequestIfNotFound(exception, "提问请求已失效，请重新运行任务", null);
+        }
     }
 
     /**
      * 回复远端 question 请求。
      */
     public Object replyQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
-        AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
+        AgentRuntimeTargetResolver.SessionRuntimeTarget location = pendingAskSessionLocation(sessionId, traceId);
+        String targetRemoteSessionId = questionTargetRemoteSessionId(location, body);
+        boolean hasRemoteSessionOverride = hasQuestionRemoteSessionOverride(body);
         try {
             return post(
                     location,
-                    questionSessionV2Path(location, body) + "/" + encodePath(requestId) + "/reply",
+                    questionSessionV2Path(targetRemoteSessionId) + "/" + encodePath(requestId) + "/reply",
                     questionReplyBody(body),
                     traceId);
         } catch (PlatformException exception) {
+            logPendingAskFailure(
+                    "replyQuestion",
+                    sessionId,
+                    requestId,
+                    location,
+                    targetRemoteSessionId,
+                    hasRemoteSessionOverride,
+                    exception,
+                    traceId);
             throw staleRuntimeRequestIfNotFound(exception, "提问请求已失效，请重新运行任务", requestId);
         }
     }
@@ -515,14 +541,25 @@ public class OpencodeRuntimeApplicationService {
      * 拒绝远端 question 请求，兼容 task 子会话 ask 携带的远端 session id。
      */
     public Object rejectQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
-        AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
+        AgentRuntimeTargetResolver.SessionRuntimeTarget location = pendingAskSessionLocation(sessionId, traceId);
+        String targetRemoteSessionId = questionTargetRemoteSessionId(location, body);
+        boolean hasRemoteSessionOverride = hasQuestionRemoteSessionOverride(body);
         try {
             return post(
                     location,
-                    questionSessionV2Path(location, body) + "/" + encodePath(requestId) + "/reject",
+                    questionSessionV2Path(targetRemoteSessionId) + "/" + encodePath(requestId) + "/reject",
                     Map.of(),
                     traceId);
         } catch (PlatformException exception) {
+            logPendingAskFailure(
+                    "rejectQuestion",
+                    sessionId,
+                    requestId,
+                    location,
+                    targetRemoteSessionId,
+                    hasRemoteSessionOverride,
+                    exception,
+                    traceId);
             throw staleRuntimeRequestIfNotFound(exception, "提问请求已失效，请重新运行任务", requestId);
         }
     }
@@ -638,6 +675,13 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
+     * pending permission/question 必须回到产生 ask 的原始 binding，不能触发用户进程切换或远端 session 重建。
+     */
+    private AgentRuntimeTargetResolver.SessionRuntimeTarget pendingAskSessionLocation(String sessionId, String traceId) {
+        return targetResolver.existingSessionBindingTarget(currentAgentId(), sessionId, traceId);
+    }
+
+    /**
      * 返回当前请求上下文中的 agentId；未设置时兼容旧入口默认 opencode。
      */
     private String currentAgentId() {
@@ -696,10 +740,40 @@ public class OpencodeRuntimeApplicationService {
      * question.asked 可能来自 task 子会话；前端会把事件中的远端 session id 放入 remoteSessionId。
      * 平台 session 仍用于定位用户进程和 workspace，这里只覆盖 opencode question path 的远端会话段。
      */
-    private String questionSessionV2Path(AgentRuntimeTargetResolver.SessionRuntimeTarget location, Map<String, Object> body) {
+    private String questionTargetRemoteSessionId(AgentRuntimeTargetResolver.SessionRuntimeTarget location, Map<String, Object> body) {
         String remoteSessionId = text(safeBody(body).get("remoteSessionId"));
-        String targetRemoteSessionId = remoteSessionId == null ? location.remoteSessionId() : remoteSessionId;
+        return remoteSessionId == null ? location.remoteSessionId() : remoteSessionId;
+    }
+
+    private boolean hasQuestionRemoteSessionOverride(Map<String, Object> body) {
+        return text(safeBody(body).get("remoteSessionId")) != null;
+    }
+
+    private String questionSessionV2Path(String targetRemoteSessionId) {
         return "/api/session/" + encodePathSegment(targetRemoteSessionId) + "/question";
+    }
+
+    private void logPendingAskFailure(
+            String action,
+            String platformSessionId,
+            String requestId,
+            AgentRuntimeTargetResolver.SessionRuntimeTarget location,
+            String targetRemoteSessionId,
+            boolean hasRemoteSessionOverride,
+            PlatformException exception,
+            String traceId) {
+        LOGGER.warn(
+                "opencode_pending_ask_failed action={} traceId={} platformSessionId={} targetRemoteSessionId={} requestId={} nodeId={} directoryPresent={} hasRemoteSessionOverride={} status={} errorCode={}",
+                action,
+                traceId,
+                platformSessionId,
+                targetRemoteSessionId,
+                requestId,
+                location.node().executionNodeId().value(),
+                location.directory() != null && !location.directory().isBlank(),
+                hasRemoteSessionOverride,
+                status(exception),
+                exception.errorCode());
     }
 
     /**
@@ -707,10 +781,15 @@ public class OpencodeRuntimeApplicationService {
      */
     private PlatformException staleRuntimeRequestIfNotFound(PlatformException exception, String message, String requestId) {
         if (exception.errorCode() == ErrorCode.OPENCODE_BAD_GATEWAY && Integer.valueOf(404).equals(status(exception))) {
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("reason", "STALE_RUNTIME_REQUEST");
+            if (requestId != null && !requestId.isBlank()) {
+                details.put("requestId", requestId);
+            }
             return new PlatformException(
                     ErrorCode.CONFLICT,
                     message,
-                    Map.of("reason", "STALE_RUNTIME_REQUEST", "requestId", requestId),
+                    details,
                     exception);
         }
         return exception;

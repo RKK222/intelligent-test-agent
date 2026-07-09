@@ -396,6 +396,35 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void replyPermissionPreservesExistingBindingWhenCurrentUserProcessDiffers() {
+        Fixture fixture = new Fixture();
+        ExecutionNode userNode = Fixture.userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(userNode));
+        when(fixture.facade.createSession(any())).thenReturn(Mono.just(new OpencodeCreateSessionResult("ses_wrong1234567890abcdef")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        fixture.service.withUser(
+                new UserId("usr_1234567890abcdef"),
+                () -> fixture.service.replyPermission(
+                        "ses_1234567890abcdef",
+                        "req_1",
+                        Map.of("decision", "once"),
+                        "trace_1234567890abcdef"));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/permission/req_1/reply");
+        assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
+        verify(fixture.facade, never()).sessionExists(any());
+        verify(fixture.facade, never()).createSession(any());
+    }
+
+    @Test
     void replyPermissionMapsNotFoundToStaleConflict() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.error(new PlatformException(
@@ -430,6 +459,29 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void listQuestionsPreservesExistingBindingWithoutRemoteValidation() {
+        Fixture fixture = new Fixture();
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(Fixture.node()));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("data", List.of(Map.of("id", "que_1")))))));
+
+        fixture.service.withUser(
+                new UserId("usr_1234567890abcdef"),
+                () -> fixture.service.listQuestions("ses_1234567890abcdef", "trace_1234567890abcdef"));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question");
+        assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
+        verify(fixture.facade, never()).sessionExists(any());
+        verify(fixture.facade, never()).createSession(any());
+    }
+
+    @Test
     void replyQuestionNormalizesFlatAnswersToNestedShape() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
@@ -447,6 +499,35 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question/req_1/reply");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("confirm"))));
+    }
+
+    @Test
+    void replyQuestionPreservesBindingNodeWhenCurrentUserProcessDiffers() {
+        Fixture fixture = new Fixture();
+        ExecutionNode userNode = Fixture.userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(userNode));
+        when(fixture.facade.createSession(any())).thenReturn(Mono.just(new OpencodeCreateSessionResult("ses_wrong1234567890abcdef")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        fixture.service.withUser(
+                new UserId("usr_1234567890abcdef"),
+                () -> fixture.service.replyQuestion(
+                        "ses_1234567890abcdef",
+                        "req_1",
+                        Map.of("answers", List.of("confirm")),
+                        "trace_1234567890abcdef"));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question/req_1/reply");
+        assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
+        verify(fixture.facade, never()).sessionExists(any());
+        verify(fixture.facade, never()).createSession(any());
     }
 
     @Test
@@ -530,6 +611,31 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question/req_1/reject");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(command.body()).isEqualTo(Map.of());
+    }
+
+    @Test
+    void rejectQuestionPreservesBindingNodeWhenCurrentUserProcessDiffers() {
+        Fixture fixture = new Fixture();
+        ExecutionNode userNode = Fixture.userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(userNode));
+        when(fixture.facade.createSession(any())).thenReturn(Mono.just(new OpencodeCreateSessionResult("ses_wrong1234567890abcdef")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        fixture.service.withUser(
+                new UserId("usr_1234567890abcdef"),
+                () -> fixture.service.rejectQuestion("ses_1234567890abcdef", "req_1", "trace_1234567890abcdef"));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question/req_1/reject");
+        assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
+        verify(fixture.facade, never()).sessionExists(any());
+        verify(fixture.facade, never()).createSession(any());
     }
 
     @Test

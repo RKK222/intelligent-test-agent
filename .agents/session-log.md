@@ -4992,3 +4992,14 @@ bash /tmp/test-api-after-restart.sh
   - 不改 HTTP API、SSE、数据库、Go manager 控制帧或 generated SDK；仅调整 Java 路径身份来源、单测假仓储和相关 README/session-log 说明。
 - Result:
   - 已先用失败断言复现实际仍为 `users/usr_...`，修复后 `UserOpencodeProcessAssignmentServiceTest` 全类、后端 opencode runtime/client/agent-runtime reactor 和 `opencode-manager go test ./...` 均通过。
+
+### 2026-07-09 - 修复 question 回复前 session target 重建导致的误 stale
+
+- Why:
+  - 用户提交 `question.asked` 后前端提示“提问请求已失效”并清空提问框；排查确认 Redis `test-agent:run-pending-ask:{runId}` 只用于 stale active Run 超时保护，不会调用 opencode question reply/reject，也不是 404 直接原因。更高风险点是 pending ask 回复前沿用普通 session runtime target，认证用户路径可能校验或重建远端 session，导致回复打到非产生 ask 的 opencode session/process。
+- What:
+  - pending permission/question list/reply/reject 改为保留平台 Session 当前 `AgentSessionBinding` 和绑定节点，不调用用户进程解析、`sessionExists` 或 `createSession`；question `remoteSessionId` 仅覆盖 opencode question path 的远端 session 段。前端 question stale 409 不再派发 `question.replied` 清理卡片，而是提示可重试错误并刷新 pending question list，刷新为空或失败时保留卡片。
+- How:
+  - 在 `AgentRuntimeTargetResolver` 增加保留绑定的 target 解析，`OpencodeRuntimeApplicationService` 的 pending ask 路径改用该解析并在 404 映射前记录安全诊断字段；`AgentWorkbench` 增加 stale 后 pending question 刷新，`agent-chat` reducer 增加 `questions.reconciled`。
+- Result:
+  - 后端 `OpencodeRuntimeApplicationServiceTest` 新增用例覆盖 pending ask 不触发重建、异节点仍走原 binding node；前端 reducer 覆盖真实 `question.asked` payload 的 requestId/remoteSessionId 解析和空刷新不清卡片，Playwright 覆盖 stale 409 后问题卡片仍可见。

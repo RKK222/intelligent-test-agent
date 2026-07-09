@@ -1537,8 +1537,8 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   expect(permissionReplies[0]).toEqual({ decision: "once" });
 
   await expect(page.getByText("Need target env?")).toBeVisible();
-  await page.getByPlaceholder("回答").fill("staging");
-  await page.getByRole("button", { name: "回复" }).click();
+  await page.getByPlaceholder("输入你的答案...").fill("staging");
+  await page.getByRole("button", { name: "提交" }).click();
   await expect.poll(() => questionReplies.length).toBe(1);
   expect(questionReplies[0]).toEqual({ answers: [["staging"]], remoteSessionId: "ses_remote_child" });
 
@@ -1556,6 +1556,61 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   await page.getByRole("button", { name: "连接终端" }).click();
   await expect.poll(() => terminalTickets.length).toBe(1);
   expect(terminalTickets[0]).toEqual({ workspaceId: "wrk_1234567890abcdef", cols: 120, rows: 32 });
+});
+
+test("workbench keeps a question visible after stale reply conflict and refreshes pending questions", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const sessionRequests: Array<Record<string, unknown>> = [];
+  const questionReplies: Array<Record<string, unknown>> = [];
+  const sessionQuestionRequests: string[] = [];
+  await mockBackendApi(page, {
+    runRequests,
+    sessionRequests,
+    questionReplies,
+    sessionQuestionRequests,
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    },
+    questionReplyFailure: {
+      status: 409,
+      code: "CONFLICT",
+      message: "提问请求已失效，请重新运行任务",
+      details: { reason: "STALE_RUNTIME_REQUEST", requestId: "ques_1" }
+    },
+    sessionQuestions: [
+      {
+        id: "ques_1",
+        sessionId: "ses_remote_child",
+        questions: [{ id: "q1", text: "Need target env?", kind: "text" }]
+      }
+    ]
+  });
+
+  await gotoWorkbench(page);
+
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("analyze checkout");
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+  await expect.poll(() => sessionRequests.length).toBe(1);
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect(page.getByText("Need target env?")).toBeVisible();
+
+  await page.getByPlaceholder("输入你的答案...").fill("staging");
+  await page.getByRole("button", { name: "提交" }).click();
+
+  await expect.poll(() => questionReplies.length).toBe(1);
+  await expect.poll(() => sessionQuestionRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_1/questions");
+  await expect(page.getByText("提问请求已失效", { exact: true })).toBeVisible();
+  await expect(page.getByText("Need target env?")).toBeVisible();
 });
 
 test("slash skill starts a recoverable run instead of a direct session command", async ({ page }) => {
@@ -1887,6 +1942,9 @@ async function mockBackendApi(
     sessionTreeRequests?: string[];
     sessionMessages?: Array<Record<string, unknown>>;
     sessionMessageRequests?: string[];
+    sessionQuestionRequests?: string[];
+    sessionQuestions?: Array<Record<string, unknown>>;
+    questionReplyFailure?: { status?: number; code: string; message: string; details?: Record<string, unknown> };
     sessionMessagesGate?: Promise<void>;
     messageFeedbackGate?: Promise<void>;
     feedbackRequests?: string[];
@@ -2247,6 +2305,14 @@ async function mockBackendApi(
       await route.fulfill(json(opencodeProcessStatus(currentProcessStatus)));
       return;
     }
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me/health") {
+      await route.fulfill(json({
+        healthy: currentProcessStatus === "READY",
+        serviceStatus: currentProcessStatus === "READY" ? "RUNNING" : "NOT_RUNNING",
+        checkedAt: "2026-06-24T00:00:00Z"
+      }));
+      return;
+    }
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/processes/me/initialize") {
       capture.processInitializations?.push({});
       if (capture.initializeFailureThenReady) {
@@ -2325,6 +2391,11 @@ async function mockBackendApi(
       await route.fulfill(json(pageOf(capture.sessionMessages ?? [])));
       return;
     }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/questions$/.test(url.pathname)) {
+      capture.sessionQuestionRequests?.push(url.pathname);
+      await route.fulfill(json(capture.sessionQuestions ?? []));
+      return;
+    }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/messages\/[^/]+\/feedback\/me$/.test(url.pathname)) {
       capture.feedbackRequests?.push(url.pathname);
       await capture.messageFeedbackGate;
@@ -2400,7 +2471,7 @@ async function mockBackendApi(
       await route.fulfill(json(capture.vcsStatus ?? { status: "ready", branch: "main", defaultBranch: "main" }));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/runs") {
+    if (method === "POST" && /^\/api\/internal\/agent\/[^/]+\/runs$/.test(url.pathname)) {
       capture.runRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       const requestIndex = (capture.runRequests?.length ?? 1) - 1;
       const runId = capture.runIds?.[requestIndex] ?? "run_1";
@@ -2414,12 +2485,12 @@ async function mockBackendApi(
       }));
       return;
     }
-    if (method === "POST" && /^\/api\/internal\/agent\/opencode\/session\/[^/]+\/command$/.test(url.pathname)) {
+    if (method === "POST" && /^\/api\/internal\/agent\/[^/]+\/session\/[^/]+\/command$/.test(url.pathname)) {
       capture.commandRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
       return;
     }
-    const runEventsMatch = url.pathname.match(/^\/api\/internal\/agent\/opencode\/runs\/([^/]+)\/events$/);
+    const runEventsMatch = url.pathname.match(/^\/api\/internal\/agent\/[^/]+\/runs\/([^/]+)\/events$/);
     if (method === "GET" && runEventsMatch) {
       const runId = runEventsMatch[1] ?? "run_1";
       capture.runEventRequests?.push(url.pathname);
@@ -2451,6 +2522,17 @@ async function mockBackendApi(
     }
     if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions/ses_1/questions/ques_1/reply") {
       capture.questionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      if (capture.questionReplyFailure) {
+        await route.fulfill({
+          status: capture.questionReplyFailure.status ?? 409,
+          ...jsonFailure(
+            capture.questionReplyFailure.code,
+            capture.questionReplyFailure.message,
+            capture.questionReplyFailure.details
+          )
+        });
+        return;
+      }
       await route.fulfill(json({ accepted: true }));
       return;
     }
