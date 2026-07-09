@@ -34,6 +34,17 @@
   - 部署脚本先校验 zip 内 `dist` 产物和 `deploy/internal`，再按“前端更新并 reload Nginx -> 替换后端 jar/程序/worker 镜像 -> 启动 Java 并校验 `.serverid/.serverhost` -> 重启 worker 等待 `manager config update applied`”执行；`--validate-only` 可只检查 zip 结构不触发远程操作。
 - Result:
   - `bash -n deploy/internal/deploy-internal-release.sh deploy/internal/package-release.sh`、两个脚本 `--help`、临时 zip 的 `deploy-internal-release.sh --validate-only` 和 `git diff --check` 通过；未真实连接 122 服务器、未重启 systemd/Nginx/Docker。
+### 2026-07-09 - 兼容空 scheduler enabled 环境变量
+
+- Why:
+  - 后端启动时如果运行环境导出了 `TEST_AGENT_SCHEDULER_ENABLED=` 空值，Spring 会把 `${TEST_AGENT_SCHEDULER_ENABLED:false}` 解析为空字符串，并在绑定 primitive boolean 时失败，导致应用无法启动。
+- What:
+  - `SchedulerProperties#setEnabled` 改为接收 `Boolean`，把空值绑定结果按 `false` 处理；补充空字符串配置绑定回归测试，并同步 scheduler README 和后端部署文档。
+- How:
+  - 先用 `ApplicationContextRunner` 复现 `test-agent.scheduler.enabled=` 的启动绑定失败，再收敛到配置属性 setter 层修复；不修改 `.env.local`、`.env.test` 或其它真实环境配置文件。
+- Result:
+  - `mvn -pl test-agent-scheduler -am -Dsurefire.failIfNoSpecifiedTests=false test` 和 `mvn -pl test-agent-app -am package -DskipTests` 通过。
+
 ### 2026-07-09 - 防止 scheduler 关闭时手动任务永久待执行
 
 - Why:

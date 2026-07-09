@@ -1,5 +1,6 @@
 package com.icbc.testagent.scheduler;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -7,9 +8,16 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 class SchedulerStartupValidatorTest {
+
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
+            .withBean(SchedulerProperties.class);
 
     @Test
     void disabledSchedulerDoesNotRequireRedis() {
@@ -17,6 +25,16 @@ class SchedulerStartupValidatorTest {
 
         assertThatCode(() -> new SchedulerStartupValidator(properties, provider(null)).validate())
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void blankEnabledPropertyBindsAsDisabled() {
+        contextRunner
+                .withPropertyValues("test-agent.scheduler.enabled=")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(SchedulerProperties.class).isEnabled()).isFalse();
+                });
     }
 
     @Test

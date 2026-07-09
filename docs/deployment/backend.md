@@ -378,7 +378,7 @@ TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 
 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制 RunEvent 跨实例实时 fan-out；数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。该开关关闭时 RunEvent 自动退回本机 live bus + DB replay，但用户进程运行管理、manager 心跳、Token 存储、scheduler 和运行指标历史仍直接依赖 Redis。
 
-`TEST_AGENT_SCHEDULER_ENABLED` 默认 `false`。应用启动时会先同步 `ScheduledTaskHandler` 代码注册任务，确保超级管理员定时任务管理页能看到任务定义；只有启用 scheduler 后才启动后台扫描线程并执行 due task 或 pending manual run。关闭时管理端手动触发会返回 `CONFLICT`，不会再创建无法执行的 `PENDING` 运行记录；历史已存在的 `PENDING` 记录需要启用 scheduler 后由后台扫描消费，或由管理员按排障流程显式处理。启用后会使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。
+`TEST_AGENT_SCHEDULER_ENABLED` 默认 `false`。环境变量存在但值为空时按 `false` 处理，必须显式设置为 `true` 才会启用后台扫描。应用启动时会先同步 `ScheduledTaskHandler` 代码注册任务，确保超级管理员定时任务管理页能看到任务定义；只有启用 scheduler 后才启动后台扫描线程并执行 due task 或 pending manual run。关闭时管理端手动触发会返回 `CONFLICT`，不会再创建无法执行的 `PENDING` 运行记录；历史已存在的 `PENDING` 记录需要启用 scheduler 后由后台扫描消费，或由管理员按排障流程显式处理。启用后会使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。
 
 ## 运行示例
 

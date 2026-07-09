@@ -28,8 +28,8 @@ public class SchedulerProperties {
     /**
      * 绑定是否启用后台扫描线程。
      */
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
+    public void setEnabled(Boolean enabled) {
+        this.enabled = Boolean.TRUE.equals(enabled);
     }
 
     /**
