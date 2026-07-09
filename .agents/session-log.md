@@ -11,7 +11,7 @@
 - How:
   - 保留后端脚本可选 scp 前端的能力，但把统一登录受限现场的默认推荐流程改为不依赖后端到前端 SSH；不修改真实 `/data/testagent/config/*.env`。
 - Result:
-  - 待本次打包前执行脚本语法、zip 校验和完整 `package-release.sh`。
+  - `bash -n` 覆盖部署/打包脚本，临时 zip 的后端/前端 `--validate-only` 通过；完整 `deploy/internal/package-release.sh` 成功生成 `deploy/internal/dist/test-agent-internal-release.zip`，SHA256 为 `da0351130443aa28d96656dcdfe82ea6351bcc42c8f3ab4c416999bd474c153a`，zip 内容包含后端 jar、前端 tar、worker 镜像 tar、programs 包、前后端部署脚本和双后端 README。
 
 ### 2026-07-09 - 补齐 WebSocket 操作日志和启动日志提示
 
