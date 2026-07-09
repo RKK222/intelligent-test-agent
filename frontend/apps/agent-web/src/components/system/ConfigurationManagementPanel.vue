@@ -22,7 +22,7 @@ const activeKey = ref<ConfigMenuKey>("opencode-public");
         @click="activeKey = 'opencode-public'"
       >
         <FolderGit2 class="ta-config-submenu-icon" :stroke-width="1.6" />
-        <span>opencode公共配置管理</span>
+        <span>TestAgent公共配置管理</span>
       </button>
     </nav>
     <div class="ta-config-content">

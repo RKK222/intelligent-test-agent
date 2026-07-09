@@ -1120,7 +1120,7 @@ function submitJoinApp() {
               class="figma-user-menu-service"
               :class="`figma-user-menu-service--${opencodeServiceDisplay.tone}`"
               role="status"
-              aria-label="opencode 服务状态"
+              aria-label="TestAgent 服务状态"
             >
               <span class="figma-user-menu-service-dot" aria-hidden="true" />
               <span class="figma-user-menu-service-text" :title="opencodeServiceDisplay.text">{{ opencodeServiceDisplay.text }}</span>

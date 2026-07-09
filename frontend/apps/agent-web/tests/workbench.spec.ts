@@ -196,7 +196,7 @@ test("login redirects to workbench and clears the initial opencode process check
   await expect.poll(() => processStatusRequests.length).toBeGreaterThanOrEqual(1);
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("登录后发送任务");
   await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
-  await expect(page.getByText("正在检查 opencode 进程")).toHaveCount(0);
+  await expect(page.getByText("正在检查 TestAgent 进程")).toHaveCount(0);
 });
 
 test("application switch menu excludes unjoined apps and keeps them in join dialog", async ({ page }) => {
@@ -1432,12 +1432,12 @@ test("workbench disables chat until opencode process is initialized", async ({ p
 
   await gotoWorkbench(page);
 
-  await expect(page.getByText("需要初始化 opencode 进程").first()).toBeVisible();
+  await expect(page.getByText("需要初始化 TestAgent 进程").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
   await page.getByRole("button", { name: "分配专属进程" }).click();
 
   await expect.poll(() => processInitializations.length).toBe(1);
-  await expect(page.getByText("opencode 进程可用").first()).toBeVisible();
+  await expect(page.getByText("TestAgent 进程可用").first()).toBeVisible();
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("run after init");
   await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
 });
@@ -1458,8 +1458,8 @@ test("workbench refetches opencode status when initialize returns a stale failur
 
   await expect.poll(() => processInitializations.length).toBe(1);
   await expect.poll(() => processStatusRequests.length).toBeGreaterThanOrEqual(2);
-  await expect(page.getByText("opencode 进程可用").first()).toBeVisible();
-  await expect(page.getByText("初始化 opencode 进程失败")).toHaveCount(0);
+  await expect(page.getByText("TestAgent 进程可用").first()).toBeVisible();
+  await expect(page.getByText("初始化 TestAgent 进程失败")).toHaveCount(0);
 });
 
 test("workbench does not create default personal workspace while opencode becomes ready", async ({ page }) => {
@@ -2212,7 +2212,7 @@ async function mockBackendApi(
         if (capture.ensureDefaultRequiresReady && currentProcessStatus !== "READY") {
           await route.fulfill({
             status: 409,
-            ...jsonFailure("OPENCODE_PROCESS_STARTING", "opencode 进程正在启动")
+            ...jsonFailure("OPENCODE_PROCESS_STARTING", "TestAgent 进程正在启动")
           });
           return;
         }
@@ -2253,7 +2253,7 @@ async function mockBackendApi(
         currentProcessStatus = "READY";
         await route.fulfill({
           status: 409,
-          ...jsonFailure("OPENCODE_PROCESS_STARTING", "opencode 进程正在启动")
+          ...jsonFailure("OPENCODE_PROCESS_STARTING", "TestAgent 进程正在启动")
         });
         return;
       }
@@ -2582,7 +2582,7 @@ function opencodeProcessStatus(status: "READY" | "NEEDS_INITIALIZATION" | "UNAVA
     return {
       status,
       initializable: false,
-      message: "opencode 进程可用",
+      message: "TestAgent 进程可用",
       processId: "ocp_1234567890abcdef",
       linuxServerId: "server-a",
       containerId: "ctr_01",
@@ -2596,7 +2596,7 @@ function opencodeProcessStatus(status: "READY" | "NEEDS_INITIALIZATION" | "UNAVA
   return {
     status,
     initializable: status === "NEEDS_INITIALIZATION",
-    message: status === "NEEDS_INITIALIZATION" ? "需要初始化 opencode 进程" : "没有可用的 opencode 容器",
+    message: status === "NEEDS_INITIALIZATION" ? "需要初始化 TestAgent 进程" : "没有可用的 TestAgent 容器",
     checkedAt: "2026-06-24T00:00:00Z"
   };
 }

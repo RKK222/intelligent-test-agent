@@ -308,7 +308,7 @@ function handleZoomReset() {
     </div>
     <div v-if="!hasTopology" class="ta-runtime-topology-empty">暂无拓扑关系</div>
     <template v-else>
-      <div ref="chartEl" class="ta-runtime-topology-canvas" aria-label="Java、Manager 与 opencode server 网络拓扑图" role="img"></div>
+      <div ref="chartEl" class="ta-runtime-topology-canvas" aria-label="Java、Manager 与 TestAgent server 网络拓扑图" role="img"></div>
       <div class="ta-runtime-topology-zoom-controls">
         <button @click="handleZoomIn" title="放大" aria-label="放大">+</button>
         <button @click="handleZoomOut" title="缩小" aria-label="缩小">-</button>

@@ -54,7 +54,7 @@ describe("FigmaShell", () => {
         opencodeProcessStatus: {
           status: "NEEDS_INITIALIZATION",
           initializable: true,
-          message: "opencode 进程不可用，需要重新初始化",
+          message: "TestAgent 进程不可用，需要重新初始化",
           linuxServerId: "server-a",
           port: 82,
           serviceStatus: "NOT_RUNNING",

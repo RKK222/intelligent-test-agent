@@ -59,7 +59,7 @@ type ManagedProcessActionRequest = {
 
 const processStatusOptions = ["RUNNING"];
 const metricsSourceHelp =
-  "“cgroup”: Linux 容器/cgroup 整体指标，包含 manager 和下属 opencode server 等进程\n" +
+  "“cgroup”: Linux 容器/cgroup 整体指标，包含 manager 和下属 TestAgent server 等进程\n" +
   "“process”: 降级为当前 Go manager 进程指标\n" +
   "“不可采集”: 当前环境无法安全采集\n" +
   "“-”: 旧数据或未上报";
@@ -196,7 +196,7 @@ const userProcessErrorMessage = computed(() => {
   if (error instanceof BackendApiError) {
     return `${error.message}（${error.code}）`;
   }
-  return error.message || "用户 opencode 进程加载失败";
+  return error.message || "用户 TestAgent 进程加载失败";
 });
 const totalPages = computed(() => Math.max(1, Math.ceil((processPage.value?.total ?? 0) / userProcessSize.value)));
 const summaryCards = computed(() => {
@@ -206,7 +206,7 @@ const summaryCards = computed(() => {
     { label: "后端进程", value: item?.backendProcesses ?? 0, extra: `${item?.readyBackendProcesses ?? 0} READY` },
     { label: "容器", value: item?.containers ?? 0, extra: `${item?.readyContainers ?? 0} READY` },
     { label: "管理进程", value: item?.managers ?? 0, extra: `${item?.connectedManagers ?? 0} CONNECTED` },
-    { label: "opencode 进程", value: item?.opencodeProcesses ?? 0, extra: `${item?.runningOpencodeProcesses ?? 0} RUNNING` },
+    { label: "TestAgent 进程", value: item?.opencodeProcesses ?? 0, extra: `${item?.runningOpencodeProcesses ?? 0} RUNNING` },
     { label: "用户绑定", value: item?.userBindings ?? 0, extra: `${item?.managerBackendConnections ?? 0} 连接` }
   ];
 });
@@ -986,7 +986,7 @@ function startResize(e: MouseEvent) {
                                           class="ta-runtime-action-button"
                                           :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'restart') }"
                                           :disabled="isManagedProcessActionDisabled(row, process)"
-                                          title="重启该 opencode server"
+                                          title="重启该 TestAgent server"
                                           @click.stop="runManagedProcessAction(row, process, 'restart')"
                                         >
                                           重启
@@ -996,7 +996,7 @@ function startResize(e: MouseEvent) {
                                           class="ta-runtime-action-button is-danger"
                                           :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'stop') }"
                                           :disabled="isManagedProcessActionDisabled(row, process)"
-                                          title="停止该 opencode server"
+                                          title="停止该 TestAgent server"
                                           @click.stop="runManagedProcessAction(row, process, 'stop')"
                                         >
                                           停止
@@ -1046,7 +1046,7 @@ function startResize(e: MouseEvent) {
                                           class="ta-runtime-action-button"
                                           :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'restart') }"
                                           :disabled="isManagedProcessActionDisabled(row, process)"
-                                          title="重启该无主 opencode server"
+                                          title="重启该无主 TestAgent server"
                                           @click.stop="runManagedProcessAction(row, process, 'restart')"
                                         >
                                           重启
@@ -1056,7 +1056,7 @@ function startResize(e: MouseEvent) {
                                           class="ta-runtime-action-button is-danger"
                                           :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'stop') }"
                                           :disabled="isManagedProcessActionDisabled(row, process)"
-                                          title="停止该无主 opencode server"
+                                          title="停止该无主 TestAgent server"
                                           @click.stop="runManagedProcessAction(row, process, 'stop')"
                                         >
                                           停止
@@ -1132,7 +1132,7 @@ function startResize(e: MouseEvent) {
 
         <section class="ta-runtime-section">
           <header class="ta-runtime-section-header">
-            <h4>用户 opencode server 进程</h4>
+            <h4>用户 TestAgent server 进程</h4>
             <span>{{ processPage?.total ?? 0 }} 条</span>
           </header>
           <div class="ta-runtime-user-query">
@@ -1166,9 +1166,9 @@ function startResize(e: MouseEvent) {
                 </tr>
               </thead>
               <tbody>
-                <tr v-if="!hasUserProcessQuery"><td colspan="13" class="is-empty">请输入用户关键字查询 opencode 进程</td></tr>
-                <tr v-else-if="isUserProcessFetching && !processRows.length"><td colspan="13" class="is-empty">正在查询用户 opencode 进程...</td></tr>
-                <tr v-else-if="!processRows.length"><td colspan="13" class="is-empty">暂无该用户 opencode 进程</td></tr>
+                <tr v-if="!hasUserProcessQuery"><td colspan="13" class="is-empty">请输入用户关键字查询 TestAgent 进程</td></tr>
+                <tr v-else-if="isUserProcessFetching && !processRows.length"><td colspan="13" class="is-empty">正在查询用户 TestAgent 进程...</td></tr>
+                <tr v-else-if="!processRows.length"><td colspan="13" class="is-empty">暂无该用户 TestAgent 进程</td></tr>
                 <tr v-for="process in processRows" :key="process.processId">
                   <td class="is-compact" :title="process.processId ?? undefined">{{ process.processId }}</td>
                   <td class="is-compact" :title="(process.username || process.userId) ?? undefined">{{ process.username || process.userId }}</td>
@@ -1194,7 +1194,7 @@ function startResize(e: MouseEvent) {
                       class="ta-runtime-action-button"
                       :class="{ 'is-running': isUserProcessRestartRunning(process) }"
                       :disabled="managedProcessActionMutation.isPending.value"
-                      title="重启该用户 opencode server"
+                      title="重启该用户 TestAgent server"
                       @click="runUserProcessRestart(process)"
                     >
                       重启

@@ -215,7 +215,7 @@ describe("runtime management settings", () => {
     };
     const { findByText, queryClient } = renderRuntimePanel(api);
 
-    expect(await findByText("请输入用户关键字查询 opencode 进程")).toBeTruthy();
+    expect(await findByText("请输入用户关键字查询 TestAgent 进程")).toBeTruthy();
     expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledWith(
       expect.objectContaining({ page: 1, size: 20 })
     );
@@ -411,7 +411,7 @@ describe("runtime management settings", () => {
     };
     const { findByText, getByPlaceholderText, getByText, queryClient } = renderRuntimePanel(api);
 
-    expect(await findByText("请输入用户关键字查询 opencode 进程")).toBeTruthy();
+    expect(await findByText("请输入用户关键字查询 TestAgent 进程")).toBeTruthy();
     await fireEvent.update(getByPlaceholderText("用户名 / userId / 统一认证号"), "wr");
     await fireEvent.click(getByText("查询用户进程"));
 
@@ -488,7 +488,7 @@ describe("runtime management settings", () => {
     };
     const { findByText, getByPlaceholderText, getByText, queryClient } = renderRuntimePanel(api);
 
-    expect(await findByText("请输入用户关键字查询 opencode 进程")).toBeTruthy();
+    expect(await findByText("请输入用户关键字查询 TestAgent 进程")).toBeTruthy();
     await fireEvent.update(getByPlaceholderText("用户名 / userId / 统一认证号"), "wr");
     await fireEvent.click(getByText("查询用户进程"));
     expect(await findByText("process pid is not alive")).toBeTruthy();

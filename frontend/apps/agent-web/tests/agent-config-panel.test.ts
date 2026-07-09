@@ -119,7 +119,7 @@ describe("AgentConfigPanel", () => {
     await fireEvent.click(view.getByText("创建公共 worktree"));
 
     expect(await view.findByText("远端分支")).toBeTruthy();
-    expect(await view.findByText("没有已初始化服务器，请到系统管理 > 配置管理 > opencode公共配置管理初始化。")).toBeTruthy();
+    expect(await view.findByText("没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。")).toBeTruthy();
     expect((view.getByRole("button", { name: "确定" }) as HTMLButtonElement).disabled).toBe(true);
   });
 

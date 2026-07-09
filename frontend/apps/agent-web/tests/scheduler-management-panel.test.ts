@@ -266,7 +266,7 @@ describe("scheduler management panel", () => {
 
     await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
 
-    expect(await view.findByText("opencode公共配置管理")).toBeTruthy();
+    expect(await view.findByText("TestAgent公共配置管理")).toBeTruthy();
     expect(await view.findByText("/data/opencode-public-config")).toBeTruthy();
     await fireEvent.click(view.getByRole("button", { name: "初始化" }));
 
@@ -296,7 +296,7 @@ describe("scheduler management panel", () => {
 
     await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
 
-    expect(await view.findByText("opencode公共配置管理")).toBeTruthy();
+    expect(await view.findByText("TestAgent公共配置管理")).toBeTruthy();
     await fireEvent.click(view.getByRole("button", { name: "拉取" }));
 
     await waitFor(() =>

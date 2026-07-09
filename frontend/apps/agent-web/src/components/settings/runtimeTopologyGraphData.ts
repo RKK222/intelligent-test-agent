@@ -139,7 +139,7 @@ export function buildRuntimeTopologyGraph(overview?: OpencodeRuntimeManagementOv
         subtitle: `${owner} / ${process.processStatus ?? "-"}`,
         status: process.processStatus,
         tooltip: [
-          `opencode server: ${process.port}`,
+          `TestAgent server: ${process.port}`,
           `归属: ${bound ? "有主" : "无主"}`,
           `用户: ${owner}`,
           `状态: ${process.processStatus ?? "-"}`,

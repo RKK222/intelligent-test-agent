@@ -2078,7 +2078,7 @@ describe("FigmaChatPanel", () => {
         processStatus: {
           status: "NEEDS_INITIALIZATION",
           initializable: true,
-          message: "需要初始化 opencode 进程"
+          message: "需要初始化 TestAgent 进程"
         }
       }
     });
@@ -2104,7 +2104,7 @@ describe("FigmaChatPanel", () => {
           initializable: true,
           serviceStatus: "NOT_RUNNING",
           serviceAddress: "10.0.0.1:3000",
-          message: "opencode 进程不可用，需要重新初始化"
+          message: "TestAgent 进程不可用，需要重新初始化"
         }
       }
     });
@@ -2128,7 +2128,7 @@ describe("FigmaChatPanel", () => {
           status: "NEEDS_INITIALIZATION",
           initializable: true,
           serviceStatus: "UNASSIGNED",
-          message: "需要初始化 opencode 进程"
+          message: "需要初始化 TestAgent 进程"
         }
       }
     });
@@ -2148,7 +2148,7 @@ describe("FigmaChatPanel", () => {
           serviceStatus: "NOT_RUNNING",
           linuxServerId: "server-a",
           serviceAddress: "192.168.100.115:4097",
-          message: "目标服务器后端不可用，暂无法确认 opencode 进程健康状态"
+          message: "目标服务器后端不可用，暂无法确认 TestAgent 进程健康状态"
         }
       }
     });
@@ -2169,7 +2169,7 @@ describe("FigmaChatPanel", () => {
           serviceStatus: "NOT_RUNNING",
           linuxServerId: "server-a",
           port: 4097,
-          message: "目标服务器后端不可用，暂无法确认 opencode 进程健康状态"
+          message: "目标服务器后端不可用，暂无法确认 TestAgent 进程健康状态"
         }
       }
     });
@@ -2188,7 +2188,7 @@ describe("FigmaChatPanel", () => {
           status: "NEEDS_INITIALIZATION",
           initializable: true,
           serviceStatus: "UNASSIGNED",
-          message: "需要初始化 opencode 进程"
+          message: "需要初始化 TestAgent 进程"
         }
       }
     });
@@ -2204,7 +2204,7 @@ describe("FigmaChatPanel", () => {
           initializable: true,
           serviceStatus: "NOT_RUNNING",
           serviceAddress: "10.0.0.1:3000",
-          message: "opencode 进程不可用，需要重新初始化"
+          message: "TestAgent 进程不可用，需要重新初始化"
         }
       }
     });

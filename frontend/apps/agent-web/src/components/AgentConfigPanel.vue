@@ -765,7 +765,7 @@ async function publicFileLinuxServerId() {
   selectedPublicLinuxServerId.value = nextServer;
   publicConfigLinuxServerId.value = nextServer || null;
   if (!nextServer) {
-    throw new Error("没有已初始化服务器，请到系统管理 > 配置管理 > opencode公共配置管理初始化。");
+    throw new Error("没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。");
   }
   return nextServer;
 }
@@ -791,7 +791,7 @@ async function loadPublicSwitchOptions() {
     publicRepositories.value = await api.listPublicAgentRepositories();
     switchPublicLinuxServerId.value = preferredPublicServer(publicRepositories.value);
     if (!switchPublicLinuxServerId.value) {
-      switchWorktreeOptionsError.value = "没有已初始化服务器，请到系统管理 > 配置管理 > opencode公共配置管理初始化。";
+      switchWorktreeOptionsError.value = "没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。";
       switchPublicWorktrees.value = [];
       switchPublicWorktreeId.value = DIRECT_PUBLIC_CONFIG_OPTION;
       return;
@@ -1004,7 +1004,7 @@ async function submitCreateWorktree() {
   const branch = currentRepoBranch.value;
   const targetLinuxServerId = selectedPublicLinuxServerId.value;
   if (scope === "PUBLIC" && (!selectedPublicBranch.value || !selectedPublicLinuxServerId.value)) {
-    createWorktreeOptionsError.value = "没有已初始化服务器，请到系统管理 > 配置管理 > opencode公共配置管理初始化。";
+    createWorktreeOptionsError.value = "没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。";
     return;
   }
 
@@ -1432,7 +1432,7 @@ defineExpose({
                 {{ selectedSwitchRepository.gitRootPath }}
               </span>
               <span v-else-if="!switchWorktreeOptionsLoading" class="agent-modal-help">
-                没有已初始化服务器，请到系统管理 &gt; 配置管理 &gt; opencode公共配置管理初始化。
+                没有已初始化服务器，请到系统管理 &gt; 配置管理 &gt; TestAgent公共配置管理初始化。
               </span>
             </div>
 
@@ -1744,7 +1744,7 @@ defineExpose({
                   {{ selectedPublicRepository.gitRootPath }}
                 </span>
                 <span v-else-if="!createWorktreeOptionsLoading" class="agent-modal-help">
-                  没有已初始化服务器，请到系统管理 &gt; 配置管理 &gt; opencode公共配置管理初始化。
+                  没有已初始化服务器，请到系统管理 &gt; 配置管理 &gt; TestAgent公共配置管理初始化。
                 </span>
               </div>
             </div>
