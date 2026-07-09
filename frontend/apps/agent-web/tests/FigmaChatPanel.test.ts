@@ -213,7 +213,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    await wrapper.get('button[title="查看历史对话"]').trigger("click");
+    await wrapper.get('button[title="查看消息列表"]').trigger("click");
 
     expect(wrapper.text()).toContain("61");
     expect(wrapper.text()).toContain("智能测试平台 · 主干工作区 · 20260708");
@@ -224,7 +224,7 @@ describe("FigmaChatPanel", () => {
 
     const loadMore = wrapper
       .findAll("button")
-      .find((button) => button.text().includes("显示更多历史会话"));
+      .find((button) => button.text().includes("显示更多会话"));
     expect(loadMore).toBeTruthy();
     await loadMore!.trigger("click");
     expect(wrapper.emitted("load-more-history")).toEqual([[]]);
@@ -258,7 +258,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    const historyButton = wrapper.get('button[title="查看历史对话"]');
+    const historyButton = wrapper.get('button[title="查看消息列表"]');
     expect(historyButton.find(".figma-chat-history-running-badge").text()).toBe("2");
     expect(historyButton.find(".figma-chat-history-alert-bell").exists()).toBe(true);
 
@@ -289,7 +289,7 @@ describe("FigmaChatPanel", () => {
   });
 
   it("disables composer controls and exposes readonly reason on hover title", () => {
-    const readonlyReason = "你已不属于该历史会话所属应用，当前会话只读。";
+    const readonlyReason = "你已不属于该会话所属应用，当前会话只读。";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -1548,7 +1548,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    const historyButton = wrapper.findAll("button").find((button) => button.text().includes("历史"));
+    const historyButton = wrapper.findAll("button").find((button) => button.text().includes("消息列表"));
     expect(historyButton).toBeTruthy();
     await historyButton!.trigger("click");
 

@@ -184,6 +184,7 @@ function fileIconClass(name: string, path: string) {
           type="button"
           :class="cn('ta-file-tree-row')"
           :style="{ paddingLeft: '6px' }"
+          :title="entry.path"
           @click="emit('openFile', entry.path)"
           @contextmenu.prevent="emit('addFileContext', entry.path)"
         >
@@ -195,7 +196,6 @@ function fileIconClass(name: string, path: string) {
               <span v-else>{{ segment.text }}</span>
             </template>
           </span>
-          <span v-if="entry.directory" class="ta-file-tree-path truncate">{{ entry.directory }}</span>
         </button>
       </div>
     </div>

@@ -12,6 +12,19 @@
   - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+### 2026-07-09 - 优化工作空间搜索结果展示
+
+- Why:
+  - 工作空间搜索结果原来在每一行右侧以灰色文本展示其父目录路径。这在较窄的侧边栏布局中导致视觉上拥挤杂乱且文件名被截断。用户要求隐藏这些路径，并支持在鼠标悬停在文件名上时立即显示包含文件名的完整路径。
+- What:
+  - 1. 在 `FileExplorer.vue` 搜索结果行中移除了灰色的目录路径 `<span>` 节点，不再直接于列表中展示路径。
+  - 2. 为搜索结果行 `<button>` 节点添加 `:title="entry.path"` 属性，使鼠标悬停时可以直接通过悬浮气泡即时显式完整路径和文件名。
+  - 3. 修复了由于上一步“历史”重命名为“消息列表”而导致 `FigmaChatPanel.test.ts` 中查找“查看历史对话”以及 includes("历史") 断言报错的既有测试遗留问题。
+- How:
+  - 在 `packages/file-explorer/src/FileExplorer.vue` 模板中将 `<button>` 加上 `:title="entry.path"`，移除底部的 `.ta-file-tree-path` 标签；并在 `FigmaChatPanel.test.ts` 中同步将所有的查找历史文案修改为消息列表匹配。
+- Result:
+  - 搜索结果不再直接展示目录路径，页面变得清爽整洁；悬停文件能立即看到完整路径；全量前端 typecheck、lint 和 441 项 Vitest 单元测试全部顺利通过。
+
 ### 2026-07-09 - 右侧对话 footer 增加运行态资源盘点
 
 - Why:
