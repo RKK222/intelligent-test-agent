@@ -13,19 +13,20 @@
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
 ### 2026-07-09 - Markdown 文件编辑切换为 Monaco + markdown-it 分屏模式
+### 2026-07-09 - Markdown 文件编辑默认 Monaco + markdown-it 分屏模式并保留单键全屏预览
 
 - Why:
-  - 针对 Markdown (.md) 文件的编辑与预览，原有的 previewMode 支持 'off'(纯编辑)、'full'(纯预览，隐藏 Monaco 编辑器)、'split'(分屏预览)。在 'full' 模式下，由于 Monaco 被隐藏，用户无法进行编辑。为了满足“Monaco 组件负责编辑，markdown-it 负责渲染”的要求，需要将 Markdown 文件的预览统一为 Monaco + markdown-it 模式（即分屏模式），消除隐藏编辑器的 'full' 模式。
+  - 针对 Markdown (.md) 文件的编辑与预览，原有的编辑预览默认关闭，且单键切换会进入隐藏 Monaco 编辑器的 `full` 模式，导致无法编辑。为了实现“Monaco 组件负责编辑，markdown-it 负责渲染”的模式，我们需要在用户打开 Markdown 文件时默认展示分屏的 Monaco + markdown-it 模式（`split` 模式），同时保留用户通过单击底部 eye 图标切换到全屏渲染（`full` 模式）的需求。
 - What:
-  - 1. 修改 `CodeEditor.vue`，在计算属性 `effectivePreviewMode` 中，如果外部传入或自动判断为 `full` 预览模式，均强制映射/降级为 `split` 分屏模式，使得 Monaco 编辑区与 markdown-it 预览区始终共存。
-  - 2. 修改 `WorkbenchFooter.vue` 中的预览点击处理函数 `handlePreviewClick` 和双击处理函数 `handlePreviewDblClick`，使得单击不再切换到 `full`，而是直接在 `off` 和 `split` 模式之间切换；双击同样限制在 `off` 与 `split` 之间。
-  - 3. 修改 `AgentWorkbench.vue` 上的 `@update:markdown-preview` 事件处理逻辑，当开启预览时直接将模式更新为 `split` 模式。
-  - 4. 更新相关的单元测试 `CodeEditor.preview.test.ts` 和 `WorkbenchFooter.test.ts` 以对齐这一行为（单击产出 `split`，`full` 模式降级为 `split` 且不隐藏 Monaco 编辑器）。
+  - 1. 修改 `AgentWorkbench.vue` 的 `activePath` 监听，使 Markdown 文件在打开时默认将 `markdownPreviewMode` 初始化为 `split` 模式，实现开箱即用的分屏编辑+渲染。
+  - 2. 修改 `WorkbenchFooter.vue` 的点击处理，单击时在 `split`（分屏编辑渲染）与 `full`（全屏渲染）模式之间进行切换，关闭状态下单击切换至 `full`；双击时在 `split`（开启分屏）与 `off`（关闭预览）之间进行切换。
+  - 3. 在 `CodeEditor.vue` 中恢复支持原本的 `full` 模式（隐藏 Monaco 编辑器），保证全屏渲染体验。
+  - 4. 调整单元测试 `CodeEditor.preview.test.ts` 与 `WorkbenchFooter.test.ts` 的断言，以适配单键点击进入 `full`、双键点击/默认进入 `split` 模式的行为。
   - 5. 同步更新 `@test-agent/editor` 包的 `README.md` 和 `PACKAGE.md` 稳定文档。
 - How:
-  - 在 `effectivePreviewMode` 和 footer 点击事件中将目标状态由 `full` 修改为 `split`，对测试文件中的断言进行对应修改。在 `frontend` 目录运行 `corepack pnpm test --run`、`corepack pnpm typecheck` 和 `corepack pnpm lint` 校验。
+  - 在 `AgentWorkbench.vue` 增加开箱默认 `split` 状态，并在 footer 点击逻辑里实现 `split` <-> `full` 切换、双击 `off` <-> `split` 切换。在 `frontend` 目录运行 `corepack pnpm test --run`、`corepack pnpm typecheck` 和 `corepack pnpm lint` 校验。
 - Result:
-  - Markdown 文件的预览开启后将始终处于 Monaco + markdown-it 模式下，左/上侧 Monaco 负责正常编辑，右/下侧 markdown-it 负责预览渲染。全部 441 项 Vitest 单元测试、TypeScript 类型检查和 ESLint 校验全部通过。
+  - Markdown 文件打开时默认呈现分屏模式，Monaco 可正常编辑，markdown-it 实时渲染。单击 footer 按钮可全屏预览（使用 markdown-it），再次单击切换回分屏，双击可关闭预览。全部 441 项 Vitest 单元测试、TypeScript 类型检查和 ESLint 校验全部通过。
 
 ### 2026-07-09 - 默认不展示聊天面板头部标题
 

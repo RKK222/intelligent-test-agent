@@ -1437,11 +1437,12 @@ watch(selectedWorkspace, (sw) => {
 });
 watch(activePath, () => {
   editorSelection.value = undefined;
-  // 切换到非 Markdown 文件时强制关闭预览：CodeEditor 的预览区在非 md 文件下不会渲染，
-  // 但保留 true 会让后续切回 md 时立刻弹出预览，违背"默认不预览"的心智。
+  // 切换到非 Markdown 文件时强制关闭预览；开启 Markdown 文件时，默认使用 Monaco + markdown-it 分屏模式
   const path = activePath.value;
   if (!path || languageFromPath(path) !== "markdown") {
     markdownPreviewMode.value = "off";
+  } else {
+    markdownPreviewMode.value = "split";
   }
 });
 watch(selectedWorkspaceIdRef, (id, previous) => {

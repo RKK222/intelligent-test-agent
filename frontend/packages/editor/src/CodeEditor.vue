@@ -56,9 +56,8 @@ const isMarkdown = computed(() => !!props.path && languageFromPath(props.path) =
 // 规范化的预览模式：off | full | split
 const effectivePreviewMode = computed<PreviewMode>(() => {
   if (!isMarkdown.value) return "off";
-  // 将 full/split 均映射为 split，使得编辑与渲染分屏始终共存，确保 Monaco 始终负责编辑
-  const mode = props.previewMode || (props.showPreview ? "split" : "off");
-  return mode === "full" ? "split" : mode;
+  if (props.previewMode) return props.previewMode;
+  return props.showPreview ? "full" : "off";
 });
 
 // 保持向下兼容 showPreview boolean 计算

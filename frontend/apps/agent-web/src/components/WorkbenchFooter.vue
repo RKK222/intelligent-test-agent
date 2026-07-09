@@ -373,11 +373,13 @@ function handlePreviewClick() {
   }
   previewClickTimer = setTimeout(() => {
     previewClickTimer = null;
-    // 单击直接在 off 和 split 之间切换，不再支持隐藏编辑器的 full 模式，确保 Monaco 始终负责编辑
-    if (props.markdownPreviewMode === "off") {
+    // 单击时，如果当前是分屏模式，切换到全屏预览；如果是全屏，切换回分屏；如果关闭，则切到全屏（保留单击时整屏渲染功能）
+    if (props.markdownPreviewMode === "split") {
+      emit("update:markdownPreviewMode", "full");
+    } else if (props.markdownPreviewMode === "full") {
       emit("update:markdownPreviewMode", "split");
     } else {
-      emit("update:markdownPreviewMode", "off");
+      emit("update:markdownPreviewMode", "full");
     }
   }, 250);
 }
@@ -387,11 +389,11 @@ function handlePreviewDblClick() {
     clearTimeout(previewClickTimer);
     previewClickTimer = null;
   }
-  // 双击同样在 off 和 split 之间切换，保持逻辑一致
-  if (props.markdownPreviewMode === "split") {
-    emit("update:markdownPreviewMode", "off");
-  } else {
+  // 双击时，如果在预览状态（分屏或全屏），则关闭预览切换回纯编辑；否则开启分屏编辑+预览模式
+  if (props.markdownPreviewMode === "off") {
     emit("update:markdownPreviewMode", "split");
+  } else {
+    emit("update:markdownPreviewMode", "off");
   }
 }
 

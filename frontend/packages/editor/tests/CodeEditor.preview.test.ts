@@ -57,13 +57,13 @@ describe("CodeEditor Markdown 预览受控", () => {
     expect(queryByText("正在准备预览…")).toBeNull();
   });
 
-  it("打开 .md 文件且 previewMode='full' 时整体预览（降级/表现为分屏预览，不隐藏源码编辑器）", async () => {
+  it("打开 .md 文件且 previewMode='full' 时整体预览（隐藏源码编辑器）", async () => {
     const { findByText, getByTestId } = render(CodeEditor, {
       props: { ...baseProps, path: "docs/README.md", previewMode: "full" }
     });
     expect(await findByText("正在准备预览…")).toBeTruthy();
     const sourceEl = getByTestId("code-editor-source");
-    expect(sourceEl.style.display).not.toBe("none");
+    expect(sourceEl.style.display).toBe("none");
   });
 
   it("打开 .md 文件且 previewMode='split' 时分屏预览（显示源码编辑器）", async () => {
