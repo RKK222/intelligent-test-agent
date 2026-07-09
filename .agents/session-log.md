@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 公共 Agent Git 单参数支持内外网
+
+- Why:
+  - 公共 Agent Git 地址需要和应用版本库一样按部署模式解释，但不能新增 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL`；同一个 `OPENCODE_PUBLIC_AGENT_GIT_URL` 在外部部署保存完整 URL，在内部部署保存 `host[:port]/path` 片段。通用参数编辑弹窗也需要接近版本库新增弹窗的横向表单样式。
+- What:
+  - 回退新增内部参数的运行时消费；原样保留已执行过的 `V20260709110000` 以兼容 Flyway 历史，再追加清理 migration 删除旧内部参数行并恢复单一参数中文名。公共配置状态、初始化、拉取、发布、worktree 和跨 Java 本地仓库状态查询继续传当前用户；后端按单参数保存值形态判断是否拼接 `ssh://{unifiedAuthId}@...`，origin 匹配复用同一内部片段判断；通用参数修改弹窗改为 `el-form label-width=120px` 横向布局并可选择外部/内部模式，外部模式不再显示额外填写说明。
+- How:
+  - 在远端 `origin/main` 基线上完成 rebase 冲突处理，复用 `CodeRepositoryDeploymentMode` 语义，只调整公共 Agent 配置 Git 解释逻辑、通用参数页面提示、测试和文档；通用参数页复用 `repository-deployment-options` 展示当前内部/外部部署模式，不新增第二个参数。
+- Result:
+  - 定向后端/前端测试和 agent-web typecheck 通过；`.env.test` 重启链路完成，后端 health/readiness、前端、CORS 和 manager 日志检查通过。当前开发库中 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL` 已被 cleanup migration 删除，只剩 `OPENCODE_PUBLIC_AGENT_GIT_URL` 一行。
+
 ### 2026-07-09 - 优化多选题勾选框样式并支持自定义答案输入自动选中
 
 - Why:
@@ -97,7 +108,6 @@
   - 在前端组件层以 Vue computed 提取文件名并调用 Clipboard API。通过组件自定义事件把定位行为转发至工作台的主定位方法。在 FigmaShell.vue 样式表里为 resize-handle 增加伪元素绝对定位、半透明小药丸把手及 hover 过渡动画。
 - Result:
   - 修改 `WorkbenchFooter.test.ts` 补充了上述三项功能的单元测试，全数通过。前端通过了 `typecheck` 和 `lint`。
-
 ### 2026-07-08 - 补齐企业部署 Java 内部代理 API key
 
 - Why:

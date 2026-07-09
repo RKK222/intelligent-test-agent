@@ -780,8 +780,16 @@ class JdbcRepositoryIntegrationTest {
                 });
 
         assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_PUBLIC_AGENT_GIT_URL", ParameterPlatform.ALL))
-                .map(CommonParameter::parameterValue)
-                .contains("UNCONFIGURED");
+                .get()
+                .satisfies(parameter -> {
+                    assertThat(parameter.parameterValue()).isEqualTo("UNCONFIGURED");
+                    assertThat(parameter.chineseName()).isEqualTo("公共agent配置Git库地址");
+                    assertThat(parameter.editable()).isTrue();
+                });
+        assertThat(commonParameters.findByEnglishNameAndPlatform(
+                "OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL",
+                ParameterPlatform.ALL))
+                .isEmpty();
         assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_PUBLIC_CONFIG_GIT_ROOT", ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
                 .contains("${SYS_DATA_ROOT_DIR}/agent-opencode/.config/");

@@ -4,7 +4,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh, Clock } from "@element-plus/icons-vue";
 import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem, ElDrawer, ElEmpty, ElTag } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
-import type { CurrentUser, GeneralParameter, CommonParameterChangeLog } from "@test-agent/shared-types";
+import type {
+  CurrentUser,
+  GeneralParameter,
+  CommonParameterChangeLog,
+  RepositoryDeploymentOptions
+} from "@test-agent/shared-types";
+
+const PUBLIC_AGENT_GIT_PARAM = "OPENCODE_PUBLIC_AGENT_GIT_URL";
+const EXTERNAL_DEPLOYMENT_MODE = "EXTERNAL";
+const INTERNAL_DEPLOYMENT_MODE = "INTERNAL";
+const DEFAULT_REPOSITORY_DEPLOYMENT_OPTIONS: RepositoryDeploymentOptions = {
+  defaultDeploymentMode: EXTERNAL_DEPLOYMENT_MODE,
+  internalSshPrefix: "",
+  options: [
+    { mode: EXTERNAL_DEPLOYMENT_MODE, label: "外部部署" },
+    { mode: INTERNAL_DEPLOYMENT_MODE, label: "内部部署" }
+  ]
+};
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -22,6 +39,7 @@ const activePlatform = ref("");
 const editDialogOpen = ref(false);
 const editingParam = ref<GeneralParameter | null>(null);
 const editingValue = ref("");
+const editPublicAgentGitDeploymentMode = ref(EXTERNAL_DEPLOYMENT_MODE);
 const saving = ref(false);
 
 // 修改历史抽屉状态
@@ -43,11 +61,44 @@ const query = useQuery({
   queryFn: () => api.listGeneralParameters(params.value)
 });
 
+const repositoryDeploymentOptionsQuery = useQuery({
+  queryKey: ["repository-deployment-options"],
+  enabled: () => hasSuperAdmin.value,
+  retry: false,
+  queryFn: () => api.getRepositoryDeploymentOptions()
+});
+
 const rows = computed(() => query.data.value?.items ?? []);
 const total = computed(() => query.data.value?.total ?? 0);
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / size.value)));
 const isFetching = computed(() => query.isFetching.value);
 const errorMessage = computed(() => formatError(query.error.value));
+const repositoryDeploymentOptions = computed(() =>
+  repositoryDeploymentOptionsQuery.data.value ?? DEFAULT_REPOSITORY_DEPLOYMENT_OPTIONS
+);
+const currentRepositoryDeploymentMode = computed(() =>
+  repositoryDeploymentOptions.value.defaultDeploymentMode || EXTERNAL_DEPLOYMENT_MODE
+);
+const internalSshPrefix = computed(() => {
+  if (repositoryDeploymentOptions.value.internalSshPrefix) return repositoryDeploymentOptions.value.internalSshPrefix;
+  return props.currentUser?.unifiedAuthId ? `ssh://${props.currentUser.unifiedAuthId}@` : "ssh://";
+});
+const publicAgentGitModeLabel = computed(() => deploymentModeLabel(currentRepositoryDeploymentMode.value));
+const publicAgentGitValueRule = computed(() => {
+  return publicAgentGitRuleForMode(currentRepositoryDeploymentMode.value);
+});
+const publicAgentGitToolbarNote = computed(() => {
+  if (repositoryDeploymentOptionsQuery.error.value) {
+    return "公共 Git 部署模式读取失败，请刷新后再修改该参数。";
+  }
+  return publicAgentGitValueRule.value
+    ? `公共 Git 当前为${publicAgentGitModeLabel.value}：${publicAgentGitValueRule.value}`
+    : `公共 Git 当前为${publicAgentGitModeLabel.value}`;
+});
+const editPublicAgentGitDeploymentModeLabel = computed(() => deploymentModeLabel(editPublicAgentGitDeploymentMode.value));
+const editPublicAgentGitModeHint = computed(() =>
+  publicAgentGitRuleForMode(editPublicAgentGitDeploymentMode.value)
+);
 
 const updateMutation = useMutation({
   mutationFn: ({ parameterId, value }: { parameterId: string; value: string }) =>
@@ -107,16 +158,73 @@ function nextPage() {
   page.value = Math.min(totalPages.value, page.value + 1);
 }
 
+function deploymentModeLabel(mode: string) {
+  return repositoryDeploymentOptions.value.options.find((item) => item.mode === mode)?.label ?? mode;
+}
+
+function publicAgentGitRuleForMode(mode: string) {
+  if (mode === INTERNAL_DEPLOYMENT_MODE) {
+    return `参数值只填写 host[:port]/path；后端会按当前用户拼接 ${internalSshPrefix.value}。`;
+  }
+  return "";
+}
+
+function isPublicAgentGitParam(param?: GeneralParameter | null) {
+  return param?.englishName === PUBLIC_AGENT_GIT_PARAM;
+}
+
+function publicAgentGitHint(param?: GeneralParameter | null) {
+  return isPublicAgentGitParam(param) ? publicAgentGitValueRule.value : "";
+}
+
+function isInternalPublicAgentGitValue(value: string) {
+  const normalized = value.trim();
+  if (!normalized || normalized.toUpperCase() === "UNCONFIGURED") return false;
+  return !normalized.includes("://") && !normalized.includes("@") && normalized.includes("/") && !/\s/.test(normalized);
+}
+
+function inferPublicAgentGitDeploymentMode(value: string) {
+  if (isInternalPublicAgentGitValue(value)) return INTERNAL_DEPLOYMENT_MODE;
+  const currentMode = currentRepositoryDeploymentMode.value;
+  if (!value.trim() || value.trim().toUpperCase() === "UNCONFIGURED") return currentMode;
+  return EXTERNAL_DEPLOYMENT_MODE;
+}
+
+function normalizePublicAgentGitInputForMode(value: string, mode: string) {
+  const normalized = value.trim();
+  if (mode !== INTERNAL_DEPLOYMENT_MODE) return normalized;
+  if (normalized.startsWith(internalSshPrefix.value)) {
+    return normalized.slice(internalSshPrefix.value.length);
+  }
+  if (normalized.toLowerCase().startsWith("ssh://")) {
+    const rest = normalized.slice("ssh://".length);
+    const at = rest.indexOf("@");
+    return at > 0 ? rest.slice(at + 1) : normalized;
+  }
+  return normalized;
+}
+
+function editValueForSubmit() {
+  if (!isPublicAgentGitParam(editingParam.value)) return editingValue.value.trim();
+  return normalizePublicAgentGitInputForMode(editingValue.value, editPublicAgentGitDeploymentMode.value);
+}
+
 // Dialog 编辑逻辑
 const isDialogValueDirty = computed(() => {
   if (!editingParam.value) return false;
-  const val = editingValue.value.trim();
+  const val = editValueForSubmit();
   return !!val && val !== editingParam.value.parameterValue;
 });
 
 function openEditDialog(param: GeneralParameter) {
   editingParam.value = param;
-  editingValue.value = param.parameterValue;
+  if (isPublicAgentGitParam(param)) {
+    editPublicAgentGitDeploymentMode.value = inferPublicAgentGitDeploymentMode(param.parameterValue);
+    editingValue.value = normalizePublicAgentGitInputForMode(param.parameterValue, editPublicAgentGitDeploymentMode.value);
+  } else {
+    editPublicAgentGitDeploymentMode.value = EXTERNAL_DEPLOYMENT_MODE;
+    editingValue.value = param.parameterValue;
+  }
   editDialogOpen.value = true;
 }
 
@@ -124,11 +232,17 @@ function closeEditDialog() {
   editDialogOpen.value = false;
   editingParam.value = null;
   editingValue.value = "";
+  editPublicAgentGitDeploymentMode.value = EXTERNAL_DEPLOYMENT_MODE;
+}
+
+function handleEditPublicAgentGitDeploymentModeChange(mode: string) {
+  editPublicAgentGitDeploymentMode.value = mode;
+  editingValue.value = normalizePublicAgentGitInputForMode(editingValue.value, mode);
 }
 
 async function submitEdit() {
   if (!editingParam.value) return;
-  const value = editingValue.value.trim();
+  const value = editValueForSubmit();
   if (!value || value === editingParam.value.parameterValue) return;
 
   saving.value = true;
@@ -212,6 +326,7 @@ function formatError(error: unknown) {
           <el-button size="small" text @click="clearFilter">重置</el-button>
         </div>
         <span class="ta-common-param-toolbar-note">通用参数为系统级配置，仅可修改参数值，不可新增或删除；标记为只读的参数不可在前端修改。</span>
+        <span class="ta-common-param-toolbar-note ta-common-param-toolbar-note-strong">{{ publicAgentGitToolbarNote }}</span>
       </div>
 
       <div v-if="errorMessage" class="ta-common-param-alert" role="alert">{{ errorMessage }}</div>
@@ -234,7 +349,12 @@ function formatError(error: unknown) {
             </tr>
             <tr v-for="param in rows" :key="param.parameterId">
               <td class="ta-common-param-mono">{{ param.englishName }}</td>
-              <td>{{ param.chineseName }}</td>
+              <td>
+                <div class="ta-common-param-name-cell">
+                  <span>{{ param.chineseName }}</span>
+                  <span v-if="publicAgentGitHint(param)" class="ta-common-param-row-hint">{{ publicAgentGitHint(param) }}</span>
+                </div>
+              </td>
               <td><span class="ta-common-param-tag">{{ param.platform }}</span></td>
               <td>
                 <div
@@ -273,43 +393,74 @@ function formatError(error: unknown) {
       <el-dialog
         v-model="editDialogOpen"
         title="修改通用参数"
-        width="560px"
+        width="540px"
         destroy-on-close
         :close-on-click-modal="false"
+        align-center
         class="ta-common-param-dialog"
       >
-        <div v-if="editingParam" class="ta-common-param-form">
-          <div class="ta-dialog-form-item">
-            <span class="ta-dialog-form-label">参数英文名</span>
-            <div class="ta-dialog-form-value ta-common-param-mono">{{ editingParam.englishName }}</div>
-          </div>
-          <div class="ta-dialog-form-item">
-            <span class="ta-dialog-form-label">参数中文名</span>
-            <div class="ta-dialog-form-value">{{ editingParam.chineseName }}</div>
-          </div>
-          <div class="ta-dialog-form-item">
-            <span class="ta-dialog-form-label">适用平台</span>
-            <div class="ta-dialog-form-value">
+        <el-form v-if="editingParam" label-width="120px" class="ta-common-param-edit-form">
+          <el-form-item label="参数英文名">
+            <span class="ta-common-param-readonly-field ta-common-param-mono">{{ editingParam.englishName }}</span>
+          </el-form-item>
+          <el-form-item label="参数中文名">
+            <span class="ta-common-param-readonly-field">{{ editingParam.chineseName }}</span>
+          </el-form-item>
+          <el-form-item label="适用平台">
+            <span class="ta-common-param-readonly-field">
               <span class="ta-common-param-tag">{{ editingParam.platform }}</span>
+            </span>
+          </el-form-item>
+          <el-form-item v-if="isPublicAgentGitParam(editingParam)" label="部署模式">
+            <el-select
+              :model-value="editPublicAgentGitDeploymentMode"
+              aria-label="公共 Git 部署模式"
+              style="width: 160px"
+              @update:model-value="handleEditPublicAgentGitDeploymentModeChange"
+            >
+              <el-option
+                v-for="option in repositoryDeploymentOptions.options"
+                :key="option.mode"
+                :label="option.label"
+                :value="option.mode"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="参数值">
+            <div class="ta-common-param-edit-value">
+              <div class="ta-common-param-edit-value-row">
+                <div
+                  v-if="isPublicAgentGitParam(editingParam) && editPublicAgentGitDeploymentMode === INTERNAL_DEPLOYMENT_MODE"
+                  class="ta-common-param-git-url-input-group"
+                >
+                  <span class="ta-common-param-git-url-prefix">{{ internalSshPrefix }}</span>
+                  <el-input
+                    v-model="editingValue"
+                    placeholder="host[:port]/path"
+                    :disabled="saving || !editingParam?.editable"
+                  />
+                </div>
+                <el-input
+                  v-else
+                  v-model="editingValue"
+                  placeholder="Git URL"
+                  :disabled="saving || !editingParam?.editable"
+                />
+                <el-tag v-if="editingParam && !editingParam.editable" size="small" type="info">只读参数</el-tag>
+              </div>
+              <div v-if="editingParam && !editingParam.editable" class="ta-common-param-readonly-alert" role="alert">
+                只读参数，修改后将影响系统正常运行
+              </div>
+              <div
+                v-if="isPublicAgentGitParam(editingParam) && editPublicAgentGitModeHint"
+                class="ta-common-param-mode-hint"
+                role="note"
+              >
+                已选择{{ editPublicAgentGitDeploymentModeLabel }}。{{ editPublicAgentGitModeHint }}
+              </div>
             </div>
-          </div>
-          <div class="ta-dialog-form-item">
-            <div class="ta-dialog-form-label-row">
-              <span class="ta-dialog-form-label">参数值</span>
-              <el-tag v-if="editingParam && !editingParam.editable" size="small" type="info">只读参数</el-tag>
-            </div>
-            <el-input
-              v-model="editingValue"
-              type="textarea"
-              :rows="4"
-              placeholder="参数值不能为空"
-              :disabled="saving || !editingParam?.editable"
-            />
-            <div v-if="editingParam && !editingParam.editable" class="ta-common-param-readonly-alert" role="alert">
-              ⚠ 只读参数 · 修改后将影响系统正常运行
-            </div>
-          </div>
-        </div>
+          </el-form-item>
+        </el-form>
         <template #footer>
           <div class="ta-dialog-footer">
             <el-button @click="closeEditDialog" :disabled="saving">取消</el-button>
@@ -416,6 +567,9 @@ function formatError(error: unknown) {
   color: #6b7280;
   font-size: 12px;
 }
+.ta-common-param-toolbar-note-strong {
+  color: #374151;
+}
 .ta-common-param-alert {
   padding: 8px 12px;
   border: 1px solid #fecaca;
@@ -431,6 +585,15 @@ function formatError(error: unknown) {
   background: #fffbeb;
   color: #b45309;
   font-size: 12px;
+}
+.ta-common-param-mode-hint {
+  padding: 8px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .ta-change-log-param-card {
   margin-bottom: 12px;
@@ -496,6 +659,17 @@ function formatError(error: unknown) {
 .ta-common-param-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #111827;
+}
+.ta-common-param-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ta-common-param-row-hint {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: normal;
 }
 .ta-common-param-tag {
   display: inline-block;
@@ -572,39 +746,51 @@ function formatError(error: unknown) {
   color: #1d4ed8;
 }
 
-/* Dialog Form Styling */
-.ta-common-param-form {
+.ta-common-param-edit-form {
+  padding: 4px 0 12px;
+}
+.ta-common-param-readonly-field {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  max-width: 100%;
+  color: #606266;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.ta-common-param-edit-value {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 8px 0;
+  gap: 8px;
+  width: 100%;
 }
-.ta-dialog-form-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ta-dialog-form-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #4b5563;
-}
-.ta-dialog-form-label-row {
+.ta-common-param-edit-value-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
 }
-.ta-dialog-form-value {
-  font-size: 13px;
-  color: #1f2937;
-  padding: 6px 12px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  min-height: 32px;
+.ta-common-param-git-url-input-group {
   display: flex;
   align-items: center;
-  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.ta-common-param-git-url-prefix {
+  flex-shrink: 0;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 8px;
+  height: 32px;
+  line-height: 32px;
+  font-size: 12px;
+  color: #606266;
+  border: 1px solid #dcdfe6;
+  border-right: 0;
+  border-radius: 4px 0 0 4px;
+  background: #f5f7fa;
 }
 .ta-dialog-footer {
   display: flex;

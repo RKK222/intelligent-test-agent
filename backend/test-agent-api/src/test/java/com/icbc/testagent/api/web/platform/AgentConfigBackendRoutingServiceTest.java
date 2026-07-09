@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.icbc.testagent.api.web.common.AuthWebSupport;
+import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
@@ -45,11 +47,19 @@ import org.springframework.mock.web.server.MockServerWebExchange;
 class AgentConfigBackendRoutingServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-24T00:00:00Z");
+    private static final AuthPrincipal PRINCIPAL = new AuthPrincipal(
+            "token",
+            new com.icbc.testagent.domain.user.UserId("usr_admin"),
+            "admin",
+            "AUTH_ADMIN",
+            List.of("SUPER_ADMIN"),
+            NOW,
+            NOW.plusSeconds(3600));
 
     @Test
     void publicRepositoriesDeduplicateRemoteBackendsByLinuxServerId() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
-        when(service.localPublicRepositoryStatus()).thenReturn(new AgentConfigResponses.PublicRepositoryStatusResponse(
+        when(service.localPublicRepositoryStatus(PRINCIPAL.userId())).thenReturn(new AgentConfigResponses.PublicRepositoryStatusResponse(
                 "10.8.0.12",
                 "10.8.0.12",
                 "/data/config",
@@ -74,10 +84,12 @@ class AgentConfigBackendRoutingServiceTest {
                 new ObjectMapper().findAndRegisterModules(),
                 httpClient);
 
-        List<AgentConfigResponses.PublicRepositoryStatusResponse> responses = routingService.listPublicRepositories(
-                MockServerWebExchange.from(MockServerHttpRequest
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                         .get("/api/internal/platform/workspace-management/agent-config/public/repositories")
-                        .header("X-Trace-Id", "trace_agent_config_forward")),
+                        .header("X-Trace-Id", "trace_agent_config_forward"));
+        exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, PRINCIPAL);
+        List<AgentConfigResponses.PublicRepositoryStatusResponse> responses = routingService.listPublicRepositories(
+                exchange,
                 "trace_agent_config_forward");
 
         assertThat(responses).extracting(AgentConfigResponses.PublicRepositoryStatusResponse::linuxServerId)

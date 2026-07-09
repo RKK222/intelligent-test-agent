@@ -2,7 +2,14 @@ import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendApiClient } from "@test-agent/backend-api";
-import type { CommonParameterChangeLog, CurrentUser, GeneralParameter, PageResponse } from "@test-agent/shared-types";
+import type {
+  CommonParameterChangeLog,
+  CurrentUser,
+  GeneralParameter,
+  GeneralParameterListParams,
+  PageResponse,
+  RepositoryDeploymentOptions
+} from "@test-agent/shared-types";
 import GeneralParamManagementPanel from "../src/components/system/GeneralParamManagementPanel.vue";
 
 const currentUser: CurrentUser = {
@@ -26,13 +33,30 @@ const macosParameter: GeneralParameter = {
 const editableParameter: GeneralParameter = {
   parameterId: "opencode_public_agent_git_url_all",
   englishName: "OPENCODE_PUBLIC_AGENT_GIT_URL",
-  chineseName: "公共 Agent 仓库地址",
+  chineseName: "公共agent配置Git库地址",
   parameterValue: "https://example.com/agent.git",
   platform: "all",
   editable: true,
   createdAt: "2026-06-29T00:00:00Z",
   updatedAt: "2026-06-29T00:00:00Z"
 };
+
+const externalDeploymentOptions: RepositoryDeploymentOptions = {
+  defaultDeploymentMode: "EXTERNAL",
+  internalSshPrefix: "ssh://AUTH_1@",
+  options: [
+    { mode: "EXTERNAL", label: "外部部署" },
+    { mode: "INTERNAL", label: "内部部署" }
+  ]
+};
+
+function backendApiWith(overrides: Partial<BackendApiClient>) {
+  return {
+    getRepositoryDeploymentOptions: vi.fn(async () => externalDeploymentOptions),
+    listCommonParameterChangeLogs: vi.fn().mockResolvedValue([]),
+    ...overrides
+  } as Partial<BackendApiClient> as BackendApiClient;
+}
 
 function renderPanel(backendApi: BackendApiClient) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -72,16 +96,16 @@ describe("general parameter management panel", () => {
   });
 
   it("lists macos and refreshes immediately after platform selection", async () => {
-    const listGeneralParameters = vi.fn(async ({ platform }: { platform?: string }) => ({
-      items: platform === "macos" ? [macosParameter] : [],
+    const listGeneralParameters = vi.fn(async (params: GeneralParameterListParams = {}) => ({
+      items: params.platform === "macos" ? [macosParameter] : [],
       page: 1,
       size: 50,
-      total: platform === "macos" ? 1 : 0
+      total: params.platform === "macos" ? 1 : 0
     } satisfies PageResponse<GeneralParameter>));
-    const backendApi = {
+    const backendApi = backendApiWith({
       listGeneralParameters,
       listCommonParameterChangeLogs: vi.fn().mockResolvedValue([])
-    } as Partial<BackendApiClient> as BackendApiClient;
+    });
     const view = renderPanel(backendApi);
 
     await waitFor(() => expect(listGeneralParameters).toHaveBeenCalledWith({
@@ -120,11 +144,10 @@ describe("general parameter management panel", () => {
       total: 1
     } satisfies PageResponse<GeneralParameter>));
     const listCommonParameterChangeLogs = vi.fn(async () => [changeLog]);
-    const backendApi = {
+    const backendApi = backendApiWith({
       listGeneralParameters,
-      listCommonParameterLoadSnapshots: vi.fn().mockResolvedValue([]),
       listCommonParameterChangeLogs
-    } as Partial<BackendApiClient> as BackendApiClient;
+    });
     const view = renderPanel(backendApi);
 
     await view.findByText("OPENCODE_SESSION_DIR");
@@ -145,10 +168,10 @@ describe("general parameter management panel", () => {
       size: 50,
       total: 1
     } satisfies PageResponse<GeneralParameter>));
-    const backendApi = {
+    const backendApi = backendApiWith({
       listGeneralParameters,
       listCommonParameterChangeLogs: vi.fn().mockResolvedValue([])
-    } as Partial<BackendApiClient> as BackendApiClient;
+    });
     const view = renderPanel(backendApi);
 
     await view.findByText("OPENCODE_SESSION_DIR");
@@ -166,10 +189,10 @@ describe("general parameter management panel", () => {
       size: 50,
       total: 1
     } satisfies PageResponse<GeneralParameter>));
-    const backendApi = {
+    const backendApi = backendApiWith({
       listGeneralParameters,
       listCommonParameterChangeLogs: vi.fn().mockResolvedValue([])
-    } as Partial<BackendApiClient> as BackendApiClient;
+    });
     const view = renderPanel(backendApi);
 
     await view.findByText("OPENCODE_PUBLIC_AGENT_GIT_URL");
@@ -177,6 +200,59 @@ describe("general parameter management panel", () => {
 
     expect(view.queryByText("只读参数")).toBeNull();
     expect(view.queryByText(/修改后将影响系统正常运行/)).toBeNull();
+    view.queryClient.clear();
+  });
+
+  it("shows the current deployment mode hint for public agent git parameter", async () => {
+    const getRepositoryDeploymentOptions = vi.fn(async () => ({
+      defaultDeploymentMode: "INTERNAL",
+      internalSshPrefix: "ssh://AUTH_1@",
+      options: [
+        { mode: "EXTERNAL", label: "外部部署" },
+        { mode: "INTERNAL", label: "内部部署" }
+      ]
+    } satisfies RepositoryDeploymentOptions));
+    const listGeneralParameters = vi.fn(async () => ({
+      items: [editableParameter],
+      page: 1,
+      size: 50,
+      total: 1
+    } satisfies PageResponse<GeneralParameter>));
+    const backendApi = backendApiWith({
+      getRepositoryDeploymentOptions,
+      listGeneralParameters
+    });
+    const view = renderPanel(backendApi);
+
+    expect(await view.findByText(/公共 Git 当前为内部部署/)).toBeTruthy();
+    expect((await view.findAllByText(/host\[:port\]\/path/)).length).toBeGreaterThan(0);
+    expect((await view.findAllByText(/ssh:\/\/AUTH_1@/)).length).toBeGreaterThan(0);
+    await fireEvent.click(view.getByText("https://example.com/agent.git"));
+
+    expect((await view.findAllByText(/后端会按当前用户拼接 ssh:\/\/AUTH_1@/)).length).toBeGreaterThan(0);
+    expect(getRepositoryDeploymentOptions).toHaveBeenCalled();
+    view.queryClient.clear();
+  });
+
+  it("allows selecting internal mode while editing public agent git parameter", async () => {
+    const listGeneralParameters = vi.fn(async () => ({
+      items: [editableParameter],
+      page: 1,
+      size: 50,
+      total: 1
+    } satisfies PageResponse<GeneralParameter>));
+    const backendApi = backendApiWith({
+      listGeneralParameters
+    });
+    const view = renderPanel(backendApi);
+
+    await view.findByText("OPENCODE_PUBLIC_AGENT_GIT_URL");
+    await fireEvent.click(view.getByText("https://example.com/agent.git"));
+    await fireEvent.update(view.getByRole("combobox", { name: "公共 Git 部署模式" }), "INTERNAL");
+
+    expect((await view.findAllByText("ssh://AUTH_1@")).length).toBeGreaterThan(0);
+    expect(await view.findByText(/已选择内部部署/)).toBeTruthy();
+    expect((await view.findAllByText(/host\[:port\]\/path/)).length).toBeGreaterThan(0);
     view.queryClient.clear();
   });
 });

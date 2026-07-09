@@ -402,7 +402,7 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 
 - 历史代码库的 `english_name` 保持 `null`；列表和详情响应允许返回 `null`，但新增/编辑代码库时必须提供合法英文名。
 - 缺少英文名的历史代码库不能创建新的应用版本工作区，后端返回 `VALIDATION_ERROR`，避免新路径规则下目录冲突。
-- 通用参数读取按 `当前平台 -> all` 顺序选择，命中即用；未命中或值为空时抛 `INTERNAL_ERROR` 业务异常（`通用参数未配置：<参数英文名>`），强制运维在 `common_parameters` 表中补配。`OPENCODE_PUBLIC_AGENT_GIT_URL` 例外，其缺失或为 `UNCONFIGURED` 时视为公共级功能未启用，不抛异常。
+- 通用参数读取按 `当前平台 -> all` 顺序选择，命中即用；未命中或值为空时抛 `INTERNAL_ERROR` 业务异常（`通用参数未配置：<参数英文名>`），强制运维在 `common_parameters` 表中补配。公共 Agent Git 地址参数例外：始终读取 `OPENCODE_PUBLIC_AGENT_GIT_URL`，外部部署直接作为完整 URL 使用，内部部署按 `host[:port]/path` 片段解释；参数缺失或为 `UNCONFIGURED` 时视为公共级功能未启用，不抛异常。
 - `workspace_create_operations` 只服务 HTTP 轮询进度，不写入 `run_events`，也不参与 RunEvent SSE 续传。
 
 ## V20260702153000 版本库类型字典与字段
@@ -448,16 +448,27 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 
 ## V20260701100000 通用参数 editable 列
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260701100000__add_common_parameter_editable_column.sql` 为 `common_parameters` 新增 `editable` 列（`boolean not null default false`），标识是否允许在前端修改参数值：`true` 可修改，`false` 只读（部署/初始化参数，修改将影响系统正常运行）。仅 `OPENCODE_MANAGER_MAX_PROCESSES` 与 `OPENCODE_PUBLIC_AGENT_GIT_URL` 置为 `true`，其余参数为 `false`。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260701100000__add_common_parameter_editable_column.sql` 为 `common_parameters` 新增 `editable` 列（`boolean not null default false`），标识是否允许在前端修改参数值：`true` 可修改，`false` 只读（部署/初始化参数，修改将影响系统正常运行）。该迁移仅将 `OPENCODE_MANAGER_MAX_PROCESSES` 与 `OPENCODE_PUBLIC_AGENT_GIT_URL` 置为 `true`，其余参数为 `false`。
 
 兼容策略：
 
 - 纯加列带默认值 `false`，存量行自动为只读；不停机、不破坏既有读取。
 - `updateValue` 不触及 `editable` 列（仍只 `set parameter_value` 与 `updated_at`）；可改性由 `CommonParameterManagementApplicationService` 的 `existing.editable()` 校验，只读参数更新返回 `VALIDATION_ERROR`「该通用参数为只读参数，修改后将影响系统正常运行」。
-- 仅 `OPENCODE_MANAGER_MAX_PROCESSES` 与 `OPENCODE_PUBLIC_AGENT_GIT_URL` 为生产必需的可改参数；本 migration 回填的 `editable=true` 属生产系统参数，非测试/演示数据。
-- API 响应 `CommonParameterResponse` 增 `editable` 字段（additive，向后兼容）；`OPENCODE_PUBLIC_AGENT_GIT_URL` 更新经 `common-parameter.refresh-requested` 广播保证跨实例 DB 一致，但不触发 manager 热刷新，由 AgentConfig 下次操作直读 DB 生效。
+- `OPENCODE_MANAGER_MAX_PROCESSES` 与公共 Git 地址参数为生产必需的可改参数；本 migration 回填的 `editable=true` 属生产系统参数，非测试/演示数据。
+- API 响应 `CommonParameterResponse` 增 `editable` 字段（additive，向后兼容）；公共 Git 地址参数更新经 `common-parameter.refresh-requested` 广播保证跨实例 DB 一致，但不触发 manager 热刷新，由 AgentConfig 下次操作按当前部署模式直读 DB 生效。
 
-macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `tools/cleanup-old-path-data.sql` 的默认审计模式；确认引用后，再传入 `apply_cleanup=true` 和绝对 `test_agent_root` 迁移 `workspaces`、版本、replica、个人工作区、Agent worktree 和非运行 opencode 进程的路径字段。六个 macOS 通用参数和 `OPENCODE_PUBLIC_AGENT_GIT_URL` 必须通过通用参数管理 API/页面修改，以保留修改历史并触发 manager 配置联动。该脚本不删除 Session、Run、审计记录或磁盘目录，也不是 Flyway migration。
+## V20260709130000 清理公共 Agent 内部 Git 参数
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260709130000__cleanup_public_agent_internal_git_parameter.sql` 清理由短暂方案写入的 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL` 参数行。公共 Agent Git 地址只保留 `OPENCODE_PUBLIC_AGENT_GIT_URL` 一个通用参数，外部部署保存完整 SSH/HTTPS Git URL，内部部署保存 `host[:port]/path` 片段，Java 后端按当前用户统一认证号动态拼接 SSH URL。
+
+兼容策略：
+
+- 源码中保留 `V20260709110000__add_public_agent_internal_git_url_parameter.sql` 的原始内容，专门兼容已经执行过该版本的环境，避免 Flyway validate 报 “applied migration not resolved locally”；新环境会先执行该旧迁移再执行本清理迁移，最终仍只剩一个公共 Git 参数。
+- 先删除旧内部参数关联的 `common_parameter_change_logs`，再删除 `common_parameters` 行，避免外键阻塞升级。
+- 新环境没有旧内部参数时该 migration 为幂等 no-op；已有环境会在升级后从通用参数页面移除第二个地址。
+- 回填 `OPENCODE_PUBLIC_AGENT_GIT_URL` 的中文名为 `公共agent配置Git库地址` 且保持 `editable=true`。前端修改弹窗复用 `repository-deployment-options` 提供外部/内部选择；内部模式仅保存 `host[:port]/path` 片段，Java 后端按保存值形态判断是否拼接当前用户统一认证号，不通过新增参数表达内部/外部。
+
+macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `tools/cleanup-old-path-data.sql` 的默认审计模式；确认引用后，再传入 `apply_cleanup=true` 和绝对 `test_agent_root` 迁移 `workspaces`、版本、replica、个人工作区、Agent worktree 和非运行 opencode 进程的路径字段。六个 macOS 通用参数和公共 Git 地址参数必须通过通用参数管理 API/页面修改，以保留修改历史并触发配置联动。该脚本不删除 Session、Run、审计记录或磁盘目录，也不是 Flyway migration。
 
 
 ## V20260626170000 公共 Agent 配置管理
@@ -481,7 +492,7 @@ macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `too
 
 兼容策略：
 
-- `OPENCODE_PUBLIC_AGENT_GIT_URL` 默认 `UNCONFIGURED`，功能只读展示但禁用 Git 更新/发布；运维更新参数值后启用。
+- `OPENCODE_PUBLIC_AGENT_GIT_URL` 默认 `UNCONFIGURED`；外部部署保存完整 Git URL，内部部署保存 `host[:port]/path` 片段并由 Java 按当前用户拼接 SSH URL。未配置时功能只读展示但禁用 Git 更新/发布；运维更新该参数值后启用。
 - scope/status 枚举由领域对象校验，数据库保存字符串并保留非空约束，避免 H2 与 PostgreSQL 在同名列 check 表达式上的兼容差异。
 - 公共 agent 标准目录是 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT/opencode/agents/`；读兼容 legacy `opencode/agent/`，写入标准目录。
 - 公共配置 Git 根目录首次使用时允许缺失或为空目录，初始化/公共更新流程会按所选分支 clone；公共 worktree 创建不再 clone，必须选择已初始化服务器，已有非空非 Git 目录不会被覆盖。
