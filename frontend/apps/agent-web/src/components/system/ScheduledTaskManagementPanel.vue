@@ -5,6 +5,7 @@ import { Refresh, Search } from "@element-plus/icons-vue";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
+  SchedulerDiagnostics,
   ScheduledTaskManagementRun,
   ScheduledTaskManagementTask,
   ScheduledTaskRunListParams,
@@ -68,13 +69,22 @@ const runQuery = useQuery({
   queryFn: () => api.listScheduledTaskRuns(runParams.value)
 });
 
+const diagnosticsQuery = useQuery({
+  queryKey: computed(() => ["scheduler-management", "diagnostics", selectedTaskKey.value]),
+  enabled: () => hasSuperAdmin.value && Boolean(selectedTaskKey.value),
+  retry: false,
+  queryFn: () => api.getSchedulerDiagnostics(selectedTaskKey.value)
+});
+
 const taskRows = computed(() => taskQuery.data.value?.items ?? []);
 const runRows = computed(() => runQuery.data.value?.items ?? []);
+const diagnostics = computed<SchedulerDiagnostics | null>(() => diagnosticsQuery.data.value ?? null);
 const taskTotalPages = computed(() => Math.max(1, Math.ceil((taskQuery.data.value?.total ?? 0) / taskSize.value)));
 const runTotalPages = computed(() => Math.max(1, Math.ceil((runQuery.data.value?.total ?? 0) / runSize.value)));
 const isTaskFetching = computed(() => taskQuery.isFetching.value);
 const isRunFetching = computed(() => runQuery.isFetching.value);
-const errorMessage = computed(() => formatError(taskQuery.error.value) || formatError(runQuery.error.value));
+const isDiagnosticsFetching = computed(() => diagnosticsQuery.isFetching.value);
+const errorMessage = computed(() => formatError(taskQuery.error.value) || formatError(runQuery.error.value) || formatError(diagnosticsQuery.error.value));
 
 watch(
   taskRows,
@@ -221,6 +231,41 @@ function formatDate(value?: string | null) {
   }).format(new Date(value));
 }
 
+function yesNo(value?: boolean | null) {
+  return value ? "是" : "否";
+}
+
+function readyText(value?: boolean | null) {
+  return value ? "就绪" : "受阻";
+}
+
+function formatSeconds(value?: number | null) {
+  if (value == null) {
+    return "-";
+  }
+  return `${value} 秒`;
+}
+
+function formatMillisAsSeconds(value?: number | null) {
+  if (value == null) {
+    return "-";
+  }
+  return `${Math.max(0, Math.round(value / 1000))} 秒`;
+}
+
+function lockStatusText(value: SchedulerDiagnostics | null) {
+  if (!value) {
+    return "-";
+  }
+  if (!value.redisLock.checkable) {
+    return value.redisLock.errorMessage ? `不可检查：${value.redisLock.errorMessage}` : "不可检查";
+  }
+  if (!value.redisLock.locked) {
+    return "未占用";
+  }
+  return `锁占用，剩余 ${formatMillisAsSeconds(value.redisLock.ttlMillis)}`;
+}
+
 function formatError(error: unknown) {
   if (!error) {
     return "";
@@ -242,6 +287,72 @@ function formatError(error: unknown) {
       </div>
 
       <div v-if="errorMessage" class="ta-scheduler-alert" role="alert">{{ errorMessage }}</div>
+
+      <section class="ta-scheduler-section">
+        <header class="ta-scheduler-section-header">
+          <h4>运行条件</h4>
+          <span v-if="isDiagnosticsFetching">刷新中</span>
+          <span v-else>当前进程实际生效值</span>
+        </header>
+        <div v-if="diagnostics" class="ta-scheduler-diagnostics">
+          <div class="ta-scheduler-diagnostic-group">
+            <span class="ta-scheduler-diagnostic-label">全局 scheduler</span>
+            <strong :class="['ta-status', diagnostics.scheduler.enabled ? 'is-ok' : 'is-bad']">
+              {{ diagnostics.scheduler.enabled ? "启用" : "关闭" }}
+            </strong>
+          </div>
+          <div class="ta-scheduler-diagnostic-group">
+            <span class="ta-scheduler-diagnostic-label">扫描线程</span>
+            <strong :class="['ta-status', diagnostics.scheduler.runnerRunning ? 'is-ok' : 'is-bad']">
+              {{ diagnostics.scheduler.runnerRunning ? "运行中" : "未运行" }}
+            </strong>
+          </div>
+          <div class="ta-scheduler-diagnostic-group">
+            <span class="ta-scheduler-diagnostic-label">实例</span>
+            <strong>实例 {{ diagnostics.scheduler.instanceId }}</strong>
+          </div>
+          <div class="ta-scheduler-diagnostic-group">
+            <span class="ta-scheduler-diagnostic-label">扫描参数</span>
+            <strong>
+              间隔 {{ formatSeconds(diagnostics.scheduler.scanIntervalSeconds) }} /
+              due {{ diagnostics.scheduler.dueTaskLimit }} /
+              manual {{ diagnostics.scheduler.manualRunLimit }}
+            </strong>
+          </div>
+          <div class="ta-scheduler-diagnostic-group">
+            <span class="ta-scheduler-diagnostic-label">最近扫描</span>
+            <strong>{{ formatDate(diagnostics.scheduler.lastScanStartedAt) }} → {{ formatDate(diagnostics.scheduler.lastScanFinishedAt) }}</strong>
+          </div>
+          <div class="ta-scheduler-diagnostic-group">
+            <span class="ta-scheduler-diagnostic-label">Redis 锁</span>
+            <strong>{{ lockStatusText(diagnostics) }}</strong>
+          </div>
+          <div class="ta-scheduler-diagnostic-group">
+            <span class="ta-scheduler-diagnostic-label">手工触发</span>
+            <strong :class="['ta-status', diagnostics.diagnosis.manualTriggerReady ? 'is-ok' : 'is-pending']">
+              {{ readyText(diagnostics.diagnosis.manualTriggerReady) }}
+            </strong>
+          </div>
+          <div class="ta-scheduler-diagnostic-group">
+            <span class="ta-scheduler-diagnostic-label">Cron 触发</span>
+            <strong :class="['ta-status', diagnostics.diagnosis.cronReady ? 'is-ok' : 'is-pending']">
+              {{ readyText(diagnostics.diagnosis.cronReady) }}
+            </strong>
+          </div>
+        </div>
+        <div v-if="diagnostics" class="ta-scheduler-blockers">
+          <span class="ta-scheduler-diagnostic-label">任务阻塞诊断</span>
+          <span v-if="diagnostics.diagnosis.blockers.length === 0" class="ta-scheduler-ok-text">当前没有阻塞项</span>
+          <span
+            v-for="blocker in diagnostics.diagnosis.blockers"
+            :key="blocker.code"
+            class="ta-scheduler-blocker"
+          >
+            {{ blocker.message }}
+          </span>
+        </div>
+        <div v-else class="ta-scheduler-placeholder">请选择一个定时任务查看诊断信息</div>
+      </section>
 
       <section class="ta-scheduler-section">
         <header class="ta-scheduler-section-header">
@@ -448,6 +559,55 @@ function formatError(error: unknown) {
 .ta-scheduler-section-header span {
   font-size: 12px;
   color: #6b7280;
+}
+.ta-scheduler-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #eef0f3;
+}
+.ta-scheduler-diagnostic-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: #111827;
+  font-size: 12px;
+}
+.ta-scheduler-diagnostic-label {
+  color: #6b7280;
+  font-size: 11px;
+}
+.ta-scheduler-diagnostic-group strong {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-word;
+}
+.ta-scheduler-blockers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+}
+.ta-scheduler-blocker,
+.ta-scheduler-ok-text {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.ta-scheduler-blocker {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+.ta-scheduler-ok-text {
+  color: #047857;
+  background: #ecfdf5;
 }
 .ta-scheduler-table-scroll {
   overflow: auto;

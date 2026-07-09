@@ -21,7 +21,13 @@ import com.icbc.testagent.domain.scheduler.ScheduledTaskRunStatus;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskTriggerType;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.scheduler.ScheduledTaskUpdateCommand;
+import com.icbc.testagent.scheduler.SchedulerDiagnostics;
+import com.icbc.testagent.scheduler.SchedulerRuntimeDiagnostics;
 import com.icbc.testagent.scheduler.SchedulerManagementService;
+import com.icbc.testagent.scheduler.ScheduledTaskLockInspection;
+import com.icbc.testagent.scheduler.ScheduledTaskRuntimeDiagnostics;
+import com.icbc.testagent.scheduler.ScheduledTaskDiagnosis;
+import com.icbc.testagent.scheduler.SchedulerDiagnosticBlocker;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -164,6 +170,29 @@ class SchedulerManagementControllerTest {
     }
 
     @Test
+    void superAdminCanQuerySchedulerDiagnostics() {
+        SchedulerManagementService service = org.mockito.Mockito.mock(SchedulerManagementService.class);
+        when(service.diagnostics(eq(TASK_KEY))).thenReturn(diagnostics());
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/scheduler-management/diagnostics?taskKey=daily.cleanup")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.scheduler.enabled").isEqualTo(true)
+                .jsonPath("$.data.scheduler.runnerRunning").isEqualTo(false)
+                .jsonPath("$.data.scheduler.instanceId").isEqualTo("scheduler-test-instance")
+                .jsonPath("$.data.redisLock.locked").isEqualTo(true)
+                .jsonPath("$.data.redisLock.ttlMillis").isEqualTo(42000)
+                .jsonPath("$.data.task.taskKey").isEqualTo("daily.cleanup")
+                .jsonPath("$.data.task.pendingManualRunCount").isEqualTo(1)
+                .jsonPath("$.data.diagnosis.manualTriggerReady").isEqualTo(false)
+                .jsonPath("$.data.diagnosis.blockers[0].code").isEqualTo("RUNNER_NOT_RUNNING");
+    }
+
+    @Test
     void appAdminAndAnonymousUsersCannotAccessSchedulerManagement() {
         SchedulerManagementService service = org.mockito.Mockito.mock(SchedulerManagementService.class);
 
@@ -266,6 +295,35 @@ class SchedulerManagementControllerTest {
             return running.succeed(Map.of("ok", true), NOW.plusSeconds(1));
         }
         return running.fail("INTERNAL_ERROR", "failed", NOW.plusSeconds(1));
+    }
+
+    private static SchedulerDiagnostics diagnostics() {
+        return new SchedulerDiagnostics(
+                new SchedulerRuntimeDiagnostics(
+                        true,
+                        false,
+                        "scheduler-test-instance",
+                        30,
+                        50,
+                        50,
+                        NOW.minusSeconds(30),
+                        NOW.minusSeconds(20),
+                        null),
+                ScheduledTaskLockInspection.locked("test-agent:scheduler:lock:daily.cleanup", 42_000L),
+                new ScheduledTaskRuntimeDiagnostics(
+                        "daily.cleanup",
+                        true,
+                        "REGISTERED",
+                        "已注册",
+                        Instant.parse("2026-06-25T02:00:00Z"),
+                        300,
+                        null,
+                        null,
+                        1),
+                new ScheduledTaskDiagnosis(
+                        false,
+                        false,
+                        List.of(new SchedulerDiagnosticBlocker("RUNNER_NOT_RUNNING", "后台扫描线程未运行"))));
     }
 
     private static void mockLabels(SchedulerManagementService service) {

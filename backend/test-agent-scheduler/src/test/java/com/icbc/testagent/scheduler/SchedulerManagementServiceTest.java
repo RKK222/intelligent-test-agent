@@ -146,6 +146,80 @@ class SchedulerManagementServiceTest {
                 .hasMessageContaining("只有运行中的定时任务可以停止");
     }
 
+    @Test
+    void diagnosticsReportsDisabledSchedulerAndRunnerState() {
+        InMemoryScheduledTaskRepository repository = repositoryWithTask();
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        dispatcher.running = false;
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setEnabled(false);
+        properties.setInstanceId("scheduler-test-instance");
+        SchedulerManagementService service = service(repository, dispatcher, properties, ScheduledTaskLockInspection.unlocked("test-agent:scheduler:lock:daily.cleanup"));
+
+        SchedulerDiagnostics diagnostics = service.diagnostics(TASK_KEY);
+
+        assertThat(diagnostics.scheduler().enabled()).isFalse();
+        assertThat(diagnostics.scheduler().runnerRunning()).isFalse();
+        assertThat(diagnostics.scheduler().instanceId()).isEqualTo("scheduler-test-instance");
+        assertThat(diagnostics.diagnosis().manualTriggerReady()).isFalse();
+        assertThat(diagnostics.diagnosis().cronReady()).isFalse();
+        assertThat(diagnostics.diagnosis().blockers())
+                .extracting(SchedulerDiagnosticBlocker::code)
+                .contains("SCHEDULER_DISABLED", "RUNNER_NOT_RUNNING");
+    }
+
+    @Test
+    void diagnosticsReportsActiveRunAndHeldLock() {
+        InMemoryScheduledTaskRepository repository = repositoryWithTask();
+        ScheduledTaskRun active = ScheduledTaskRun.pending(
+                        new ScheduledTaskRunId("str_active_1234567890abcdef"),
+                        TASK_KEY,
+                        null,
+                        ScheduledTaskTriggerType.MANUAL,
+                        new UserId("usr_admin_1234567890"),
+                        NOW.minusSeconds(30),
+                        "trace_scheduler_test")
+                .start("scheduler-test-instance", NOW.minusSeconds(20));
+        repository.saveRun(active);
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        dispatcher.running = true;
+        SchedulerManagementService service = service(
+                repository,
+                dispatcher,
+                enabledProperties(),
+                ScheduledTaskLockInspection.locked("test-agent:scheduler:lock:daily.cleanup", 120_000L));
+
+        SchedulerDiagnostics diagnostics = service.diagnostics(TASK_KEY);
+
+        assertThat(diagnostics.redisLock().locked()).isTrue();
+        assertThat(diagnostics.redisLock().ttlMillis()).isEqualTo(120_000L);
+        assertThat(diagnostics.task().currentRun().taskRunId()).isEqualTo("str_active_1234567890abcdef");
+        assertThat(diagnostics.diagnosis().manualTriggerReady()).isFalse();
+        assertThat(diagnostics.diagnosis().blockers())
+                .extracting(SchedulerDiagnosticBlocker::code)
+                .contains("ACTIVE_RUN", "LOCK_HELD");
+    }
+
+    @Test
+    void diagnosticsReportsReadyTaskWithoutBlockers() {
+        InMemoryScheduledTaskRepository repository = repositoryWithTask();
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        dispatcher.running = true;
+        SchedulerManagementService service = service(
+                repository,
+                dispatcher,
+                enabledProperties(),
+                ScheduledTaskLockInspection.unlocked("test-agent:scheduler:lock:daily.cleanup"));
+
+        SchedulerDiagnostics diagnostics = service.diagnostics(TASK_KEY);
+
+        assertThat(diagnostics.scheduler().enabled()).isTrue();
+        assertThat(diagnostics.task().pendingManualRunCount()).isZero();
+        assertThat(diagnostics.diagnosis().manualTriggerReady()).isTrue();
+        assertThat(diagnostics.diagnosis().cronReady()).isTrue();
+        assertThat(diagnostics.diagnosis().blockers()).isEmpty();
+    }
+
     private SchedulerManagementService service(InMemoryScheduledTaskRepository repository, RecordingDispatcher dispatcher) {
         SchedulerProperties properties = new SchedulerProperties();
         properties.setEnabled(true);
@@ -156,13 +230,29 @@ class SchedulerManagementServiceTest {
             InMemoryScheduledTaskRepository repository,
             RecordingDispatcher dispatcher,
             SchedulerProperties properties) {
+        return service(repository, dispatcher, properties, ScheduledTaskLockInspection.unlocked("test-agent:scheduler:lock:daily.cleanup"));
+    }
+
+    private SchedulerManagementService service(
+            InMemoryScheduledTaskRepository repository,
+            RecordingDispatcher dispatcher,
+            SchedulerProperties properties,
+            ScheduledTaskLockInspection lockInspection) {
         return new SchedulerManagementService(
                 repository,
                 new CronScheduleCalculator(),
                 properties,
                 dispatcher,
+                new InspectOnlyScheduledTaskLock(lockInspection),
                 new EmptyDictionaryRepository(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private SchedulerProperties enabledProperties() {
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setEnabled(true);
+        properties.setInstanceId("scheduler-test-instance");
+        return properties;
     }
 
     private InMemoryScheduledTaskRepository repositoryWithTask() {
@@ -180,10 +270,29 @@ class SchedulerManagementServiceTest {
 
     private static final class RecordingDispatcher implements ScheduledTaskDispatcher {
         private int wakeUps;
+        private boolean running = true;
 
         @Override
         public void wakeUp() {
             wakeUps++;
+        }
+
+        @Override
+        public boolean runnerRunning() {
+            return running;
+        }
+    }
+
+    private record InspectOnlyScheduledTaskLock(ScheduledTaskLockInspection inspection) implements ScheduledTaskLock {
+
+        @Override
+        public Optional<ScheduledTaskLockLease> acquire(ScheduledTaskKey taskKey, Duration ttl) {
+            return Optional.empty();
+        }
+
+        @Override
+        public ScheduledTaskLockInspection inspect(ScheduledTaskKey taskKey) {
+            return inspection;
         }
     }
 

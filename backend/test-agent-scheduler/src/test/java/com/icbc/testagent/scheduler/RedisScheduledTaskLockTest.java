@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskKey;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -60,5 +61,43 @@ class RedisScheduledTaskLockTest {
                 .thenReturn(false);
 
         assertThat(new RedisScheduledTaskLock(redisTemplate).acquire(taskKey, ttl)).isEmpty();
+    }
+
+    @Test
+    void inspectReportsUnlockedWhenRedisKeyDoesNotExist() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ScheduledTaskKey taskKey = new ScheduledTaskKey("daily.cleanup");
+        when(redisTemplate.getExpire(RedisScheduledTaskLock.lockKey(taskKey), TimeUnit.MILLISECONDS)).thenReturn(-2L);
+
+        ScheduledTaskLockInspection inspection = new RedisScheduledTaskLock(redisTemplate).inspect(taskKey);
+
+        assertThat(inspection.checkable()).isTrue();
+        assertThat(inspection.locked()).isFalse();
+        assertThat(inspection.ttlMillis()).isNull();
+        assertThat(inspection.lockKey()).isEqualTo("test-agent:scheduler:lock:daily.cleanup");
+    }
+
+    @Test
+    void inspectReportsHeldLockWithTtl() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ScheduledTaskKey taskKey = new ScheduledTaskKey("daily.cleanup");
+        when(redisTemplate.getExpire(RedisScheduledTaskLock.lockKey(taskKey), TimeUnit.MILLISECONDS)).thenReturn(42_000L);
+
+        ScheduledTaskLockInspection inspection = new RedisScheduledTaskLock(redisTemplate).inspect(taskKey);
+
+        assertThat(inspection.locked()).isTrue();
+        assertThat(inspection.ttlMillis()).isEqualTo(42_000L);
+    }
+
+    @Test
+    void inspectReportsHeldLockWithoutTtl() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ScheduledTaskKey taskKey = new ScheduledTaskKey("daily.cleanup");
+        when(redisTemplate.getExpire(RedisScheduledTaskLock.lockKey(taskKey), TimeUnit.MILLISECONDS)).thenReturn(-1L);
+
+        ScheduledTaskLockInspection inspection = new RedisScheduledTaskLock(redisTemplate).inspect(taskKey);
+
+        assertThat(inspection.locked()).isTrue();
+        assertThat(inspection.ttlMillis()).isNull();
     }
 }

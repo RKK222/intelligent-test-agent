@@ -34,6 +34,17 @@
   - 部署脚本先校验 zip 内 `dist` 产物和 `deploy/internal`，再按“前端更新并 reload Nginx -> 替换后端 jar/程序/worker 镜像 -> 启动 Java 并校验 `.serverid/.serverhost` -> 重启 worker 等待 `manager config update applied`”执行；`--validate-only` 可只检查 zip 结构不触发远程操作。
 - Result:
   - `bash -n deploy/internal/deploy-internal-release.sh deploy/internal/package-release.sh`、两个脚本 `--help`、临时 zip 的 `deploy-internal-release.sh --validate-only` 和 `git diff --check` 通过；未真实连接 122 服务器、未重启 systemd/Nginx/Docker。
+### 2026-07-09 - 增加 scheduler 运行诊断前台能力
+
+- Why:
+  - scheduler enabled、扫描线程、active run 和 Redis 锁都会影响 `PENDING` 任务是否执行；仅靠定时任务列表无法判断“参数已改 true 但仍待执行”的具体阻塞点。
+- What:
+  - 新增 scheduler diagnostics 只读 API 和前端诊断区，展示当前 Java 进程实际 scheduler 配置、runner 状态、最近扫描时间、Redis 锁 TTL、pending 手工运行数和阻塞原因；不暴露环境变量原始值或锁 token。
+- How:
+  - 扩展 `ScheduledTaskLock.inspect` 和 `ScheduledTaskDispatcher` 只读状态，`SchedulerManagementService.diagnostics` 汇总诊断；前端通过 `backend-api.getSchedulerDiagnostics(taskKey)` 随选中任务刷新。
+- Result:
+  - scheduler/API 定向测试、scheduler 模块全量测试、前端 Vitest/typecheck 和 app 打包通过；计划中的 `mvn -pl test-agent-scheduler,test-agent-api -am test` 仍被既有 `WorkspaceFileServiceTest.serviceDeletesOnlyRegularFilesInsideWorkspaceRoot` 失败阻塞。
+
 ### 2026-07-09 - 兼容空 scheduler enabled 环境变量
 
 - Why:

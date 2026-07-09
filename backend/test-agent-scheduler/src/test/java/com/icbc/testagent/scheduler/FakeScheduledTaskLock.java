@@ -23,6 +23,13 @@ final class FakeScheduledTaskLock implements ScheduledTaskLock {
         return Optional.of(new Lease(taskKey, ttl));
     }
 
+    @Override
+    public ScheduledTaskLockInspection inspect(ScheduledTaskKey taskKey) {
+        return acquire
+                ? ScheduledTaskLockInspection.unlocked("fake:" + taskKey.value())
+                : ScheduledTaskLockInspection.locked("fake:" + taskKey.value(), 30_000L);
+    }
+
     private final class Lease implements ScheduledTaskLockLease {
         private final ScheduledTaskKey taskKey;
         private final Duration ttl;

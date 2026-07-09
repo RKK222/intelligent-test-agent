@@ -87,6 +87,7 @@ import type {
   RunDiffAction,
   RuntimeResourceInfo,
   RuntimeToolInfo,
+  SchedulerDiagnostics,
   ScheduledTaskListParams,
   ScheduledTaskManagementRun,
   ScheduledTaskManagementTask,
@@ -986,6 +987,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       ),
     getScheduledTask: (taskKey: string) =>
       request<ScheduledTaskManagementTask>(`${schedulerManagementBase}/tasks/${encodeURIComponent(taskKey)}`),
+    getSchedulerDiagnostics: (taskKey: string) =>
+      request<SchedulerDiagnostics>(`${schedulerManagementBase}/diagnostics${query({ taskKey })}`),
     updateScheduledTask: (taskKey: string, payload: ScheduledTaskUpdatePayload) =>
       request<ScheduledTaskManagementTask>(`${schedulerManagementBase}/tasks/${encodeURIComponent(taskKey)}`, {
         method: "PATCH",

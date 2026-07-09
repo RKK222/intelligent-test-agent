@@ -50,6 +50,9 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
             namedThreadFactory("test-agent-scheduler-lock-renewal"));
 
     private volatile boolean running;
+    private volatile Instant lastScanStartedAt;
+    private volatile Instant lastScanFinishedAt;
+    private volatile String lastScanErrorMessage;
     private Thread scanThread;
 
     /**
@@ -103,6 +106,26 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
     }
 
     @Override
+    public boolean runnerRunning() {
+        return running;
+    }
+
+    @Override
+    public Instant lastScanStartedAt() {
+        return lastScanStartedAt;
+    }
+
+    @Override
+    public Instant lastScanFinishedAt() {
+        return lastScanFinishedAt;
+    }
+
+    @Override
+    public String lastScanErrorMessage() {
+        return lastScanErrorMessage;
+    }
+
+    @Override
     public boolean isAutoStartup() {
         return false;
     }
@@ -129,9 +152,18 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
      * 执行单轮扫描，供单元测试和后台循环复用。
      */
     public void scanOnce() {
+        lastScanStartedAt = clock.instant();
         Instant now = clock.instant();
-        scanDueTasks(now);
-        scanPendingManualRuns(now);
+        try {
+            scanDueTasks(now);
+            scanPendingManualRuns(now);
+            lastScanErrorMessage = null;
+        } catch (RuntimeException exception) {
+            lastScanErrorMessage = exception.getMessage();
+            throw exception;
+        } finally {
+            lastScanFinishedAt = clock.instant();
+        }
     }
 
     private void scanLoop() {

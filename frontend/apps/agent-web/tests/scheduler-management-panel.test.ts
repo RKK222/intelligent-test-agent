@@ -9,7 +9,8 @@ import type {
   PageResponse,
   PublicAgentRepositoryStatus,
   ScheduledTaskManagementRun,
-  ScheduledTaskManagementTask
+  ScheduledTaskManagementTask,
+  SchedulerDiagnostics
 } from "@test-agent/shared-types";
 import ScheduledTaskManagementPanel from "../src/components/system/ScheduledTaskManagementPanel.vue";
 import SystemManagementPanel from "../src/components/system/SystemManagementPanel.vue";
@@ -66,6 +67,42 @@ const runningRun: ScheduledTaskManagementRun = {
   updatedAt: "2026-06-25T00:00:01Z"
 };
 
+const diagnostics: SchedulerDiagnostics = {
+  scheduler: {
+    enabled: true,
+    runnerRunning: false,
+    instanceId: "scheduler-test-instance",
+    scanIntervalSeconds: 30,
+    dueTaskLimit: 50,
+    manualRunLimit: 50,
+    lastScanStartedAt: "2026-06-25T00:00:00Z",
+    lastScanFinishedAt: "2026-06-25T00:00:01Z",
+    lastScanErrorMessage: null
+  },
+  redisLock: {
+    checkable: true,
+    lockKey: "test-agent:scheduler:lock:daily.cleanup",
+    locked: true,
+    ttlMillis: 42_000
+  },
+  task: {
+    taskKey: "daily.cleanup",
+    enabled: true,
+    registrationStatus: "REGISTERED",
+    registrationStatusLabel: "已注册",
+    nextFireAt: "2026-06-25T02:00:00Z",
+    lockTtlSeconds: 300,
+    currentRun: null,
+    latestRun: null,
+    pendingManualRunCount: 1
+  },
+  diagnosis: {
+    manualTriggerReady: false,
+    cronReady: false,
+    blockers: [{ code: "RUNNER_NOT_RUNNING", message: "后台扫描线程未运行" }]
+  }
+};
+
 const emptyRuntimeOverview: OpencodeRuntimeManagementOverview = {
   generatedAt: "2026-06-25T00:00:00Z",
   summary: {
@@ -116,6 +153,7 @@ function api(overrides: Partial<BackendApiClient> = {}) {
     listScheduledTaskRuns: vi.fn().mockResolvedValue(pageOf([runningRun])),
     getScheduledTaskRun: vi.fn().mockResolvedValue(runningRun),
     stopScheduledTaskRun: vi.fn().mockResolvedValue({ ...runningRun, status: "STOPPING", statusLabel: "停止中" }),
+    getSchedulerDiagnostics: vi.fn().mockResolvedValue(diagnostics),
     getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyRuntimeOverview),
     listPublicAgentRepositories: vi.fn().mockResolvedValue([publicRepository]),
     listPublicAgentBranches: vi.fn().mockResolvedValue(["main", "develop"]),
@@ -194,6 +232,18 @@ describe("scheduler management panel", () => {
     await fireEvent.click(view.getByText("停止"));
 
     await waitFor(() => expect(backendApi.stopScheduledTaskRun).toHaveBeenCalledWith("str_1234567890abcdef"));
+    view.queryClient.clear();
+  });
+
+  it("shows scheduler diagnostics and selected task blockers", async () => {
+    const backendApi = api();
+    const view = renderWithApi(ScheduledTaskManagementPanel, backendApi);
+
+    expect(await view.findByText("运行条件")).toBeTruthy();
+    expect(await view.findByText("实例 scheduler-test-instance")).toBeTruthy();
+    expect(await view.findByText("后台扫描线程未运行")).toBeTruthy();
+    expect(await view.findByText("锁占用，剩余 42 秒")).toBeTruthy();
+    await waitFor(() => expect(backendApi.getSchedulerDiagnostics).toHaveBeenCalledWith("daily.cleanup"));
     view.queryClient.clear();
   });
 

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
@@ -50,6 +51,20 @@ public class RedisScheduledTaskLock implements ScheduledTaskLock {
             return Optional.empty();
         }
         return Optional.of(new RedisScheduledTaskLockLease(taskKey, lockKey, token, ttl, redisTemplate));
+    }
+
+    @Override
+    public ScheduledTaskLockInspection inspect(ScheduledTaskKey taskKey) {
+        Objects.requireNonNull(taskKey, "taskKey must not be null");
+        String lockKey = lockKey(taskKey);
+        Long ttlMillis = redisTemplate.getExpire(lockKey, TimeUnit.MILLISECONDS);
+        if (ttlMillis == null || ttlMillis == -2L) {
+            return ScheduledTaskLockInspection.unlocked(lockKey);
+        }
+        if (ttlMillis == -1L) {
+            return ScheduledTaskLockInspection.locked(lockKey, null);
+        }
+        return ScheduledTaskLockInspection.locked(lockKey, ttlMillis);
     }
 
     /**

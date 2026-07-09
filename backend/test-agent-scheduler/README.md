@@ -19,6 +19,7 @@
 - 使用 Redis `SET NX PX` 获取锁，Lua 脚本按 token 续租和释放锁，锁 key 为 `test-agent:scheduler:lock:{taskKey}`。
 - 启用 scheduler 后，后台线程扫描 due task 和管理员手动触发 pending run，统一写入 `scheduled_task_runs`。
 - 提供 `SchedulerManagementService` 给 API 模块实现超级管理员管理入口，支持查看任务/运行记录、调整 Cron、手动触发和协作式停止 `RUNNING` 运行记录。
+- 提供只读诊断能力，展示当前进程 scheduler 生效配置、扫描线程状态、任务 active/pending 运行和 Redis 锁 TTL，用于判断任务为何无法执行。
 - `ScheduledTaskContext` 提供 `stopRequested()` 和 `throwIfStopRequested()`；未来具体业务任务在长循环或外部调用间隙必须主动检查停止请求，退出后由 runner 记录 `MANUALLY_STOPPED`。
 
 ## 不负责
@@ -64,8 +65,8 @@
 - `CronScheduleCalculatorTest` 覆盖 Cron 下次触发和非法 Cron 统一错误。
 - `ScheduledTaskRegistryTest` 覆盖任务注册同步、nextFireAt 计算和管理员覆盖值保留。
 - `ScheduledTaskRunnerTest` 覆盖 Cron 成功执行、重叠触发 `SKIPPED`、Redis 锁失败、handler 异常 `FAILED`、手动 pending run 执行和停止请求最终记录 `MANUALLY_STOPPED`。
-- `RedisScheduledTaskLockTest` 覆盖 Redis `SET NX` 获取锁和 token Lua 续租/释放。
-- `SchedulerManagementServiceTest` 覆盖管理端 patch、非法 Cron、scheduler 关闭时拒绝手动触发、手动触发 active 冲突和只允许停止 `RUNNING`。
+- `RedisScheduledTaskLockTest` 覆盖 Redis `SET NX` 获取锁、token Lua 续租/释放和锁 TTL 只读检查。
+- `SchedulerManagementServiceTest` 覆盖管理端 patch、非法 Cron、scheduler 关闭时拒绝手动触发、手动触发 active 冲突、只允许停止 `RUNNING` 和诊断阻塞原因。
 - `SchedulerStartupValidatorTest` 覆盖默认关闭、空字符串启用值按关闭绑定、启用时 Redis 必需。
 
 ## 后续 AI 编码指引

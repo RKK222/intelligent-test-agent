@@ -13,4 +13,9 @@ public interface ScheduledTaskLock {
      * 尝试获取 taskKey 的全局锁，成功时返回可续租和释放的租约。
      */
     Optional<ScheduledTaskLockLease> acquire(ScheduledTaskKey taskKey, Duration ttl);
+
+    /**
+     * 只读检查 taskKey 对应的锁状态；不得返回或依赖锁 token。
+     */
+    ScheduledTaskLockInspection inspect(ScheduledTaskKey taskKey);
 }

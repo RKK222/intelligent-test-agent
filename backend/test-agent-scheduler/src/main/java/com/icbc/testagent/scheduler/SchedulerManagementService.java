@@ -20,6 +20,8 @@ import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -37,6 +39,7 @@ public class SchedulerManagementService {
     private final CronScheduleCalculator cronScheduleCalculator;
     private final SchedulerProperties properties;
     private final ScheduledTaskDispatcher dispatcher;
+    private final ScheduledTaskLock lock;
     private final DictionaryRepository dictionaryRepository;
     private final Clock clock;
 
@@ -48,12 +51,14 @@ public class SchedulerManagementService {
             CronScheduleCalculator cronScheduleCalculator,
             SchedulerProperties properties,
             ScheduledTaskDispatcher dispatcher,
+            ScheduledTaskLock lock,
             DictionaryRepository dictionaryRepository,
             Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.cronScheduleCalculator = Objects.requireNonNull(cronScheduleCalculator, "cronScheduleCalculator must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher must not be null");
+        this.lock = Objects.requireNonNull(lock, "lock must not be null");
         this.dictionaryRepository = Objects.requireNonNull(dictionaryRepository, "dictionaryRepository must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
@@ -167,6 +172,46 @@ public class SchedulerManagementService {
                 .findFirst();
     }
 
+    /**
+     * 汇总当前进程配置、runner 状态、任务运行记录和 Redis 锁状态，供前台只读排障。
+     */
+    public SchedulerDiagnostics diagnostics(ScheduledTaskKey taskKey) {
+        ScheduledTask task = getTask(taskKey);
+        Optional<ScheduledTaskRun> currentRun = findCurrentRunByTaskKey(taskKey);
+        Optional<ScheduledTaskRun> latestRun = findLatestRunByTaskKey(taskKey);
+        long pendingManualRunCount = repository.findRuns(
+                        new ScheduledTaskRunFilter(
+                                taskKey,
+                                ScheduledTaskRunStatus.PENDING,
+                                ScheduledTaskTriggerType.MANUAL,
+                                null),
+                        new PageRequest(1, 1))
+                .total();
+        ScheduledTaskLockInspection lockInspection = inspectLock(taskKey);
+        SchedulerRuntimeDiagnostics scheduler = new SchedulerRuntimeDiagnostics(
+                properties.isEnabled(),
+                dispatcher.runnerRunning(),
+                properties.getInstanceId(),
+                properties.getScanInterval().toSeconds(),
+                properties.getDueTaskLimit(),
+                properties.getManualRunLimit(),
+                dispatcher.lastScanStartedAt(),
+                dispatcher.lastScanFinishedAt(),
+                dispatcher.lastScanErrorMessage());
+        ScheduledTaskRuntimeDiagnostics taskDiagnostics = new ScheduledTaskRuntimeDiagnostics(
+                task.taskKey().value(),
+                task.enabled(),
+                task.registrationStatus().name(),
+                registrationStatusLabel(task.registrationStatus()),
+                task.nextFireAt(),
+                task.lockTtl().toSeconds(),
+                currentRun.map(this::runSummary).orElse(null),
+                latestRun.map(this::runSummary).orElse(null),
+                pendingManualRunCount);
+        ScheduledTaskDiagnosis diagnosis = diagnose(task, scheduler, currentRun, lockInspection);
+        return new SchedulerDiagnostics(scheduler, lockInspection, taskDiagnostics, diagnosis);
+    }
+
     public String registrationStatusLabel(ScheduledTaskRegistrationStatus status) {
         return label(Dictionary.DICT_KEY_SCHEDULER_TASK_REGISTRATION_STATUS, status.name());
     }
@@ -177,6 +222,61 @@ public class SchedulerManagementService {
 
     public String triggerTypeLabel(ScheduledTaskTriggerType triggerType) {
         return label(Dictionary.DICT_KEY_SCHEDULER_TRIGGER_TYPE, triggerType.name());
+    }
+
+    private ScheduledTaskRunDiagnosticSummary runSummary(ScheduledTaskRun run) {
+        return new ScheduledTaskRunDiagnosticSummary(
+                run.taskRunId().value(),
+                run.status().name(),
+                runStatusLabel(run.status()),
+                run.triggerType().name(),
+                triggerTypeLabel(run.triggerType()),
+                run.requestedByUserId() == null ? null : run.requestedByUserId().value(),
+                run.scheduledFireAt(),
+                run.startedAt(),
+                run.endedAt(),
+                run.ownerInstanceId());
+    }
+
+    private ScheduledTaskLockInspection inspectLock(ScheduledTaskKey taskKey) {
+        try {
+            return lock.inspect(taskKey);
+        } catch (RuntimeException exception) {
+            return ScheduledTaskLockInspection.unavailable(RedisScheduledTaskLock.lockKey(taskKey), exception.getMessage());
+        }
+    }
+
+    private ScheduledTaskDiagnosis diagnose(
+            ScheduledTask task,
+            SchedulerRuntimeDiagnostics scheduler,
+            Optional<ScheduledTaskRun> currentRun,
+            ScheduledTaskLockInspection lockInspection) {
+        List<SchedulerDiagnosticBlocker> blockers = new ArrayList<>();
+        if (!scheduler.enabled()) {
+            blockers.add(new SchedulerDiagnosticBlocker("SCHEDULER_DISABLED", "当前 Java 进程未启用 scheduler 后台扫描"));
+        }
+        if (!scheduler.runnerRunning()) {
+            blockers.add(new SchedulerDiagnosticBlocker("RUNNER_NOT_RUNNING", "后台扫描线程未运行"));
+        }
+        if (task.registrationStatus() != ScheduledTaskRegistrationStatus.REGISTERED) {
+            blockers.add(new SchedulerDiagnosticBlocker("HANDLER_MISSING", "任务 handler 未注册"));
+        }
+        if (!task.enabled()) {
+            blockers.add(new SchedulerDiagnosticBlocker("TASK_DISABLED_FOR_CRON", "任务已停用，Cron 不会自动触发"));
+        }
+        currentRun.ifPresent(run -> blockers.add(new SchedulerDiagnosticBlocker(
+                "ACTIVE_RUN",
+                "同一 taskKey 已有未结束运行：" + run.taskRunId().value())));
+        if (lockInspection.locked()) {
+            blockers.add(new SchedulerDiagnosticBlocker("LOCK_HELD", "Redis 分布式锁仍被占用"));
+        }
+        boolean manualReady = scheduler.enabled()
+                && scheduler.runnerRunning()
+                && task.registrationStatus() == ScheduledTaskRegistrationStatus.REGISTERED
+                && currentRun.isEmpty()
+                && !lockInspection.locked();
+        boolean cronReady = manualReady && task.enabled();
+        return new ScheduledTaskDiagnosis(manualReady, cronReady, List.copyOf(blockers));
     }
 
     private PlatformException notFound(String message, String key, String value) {

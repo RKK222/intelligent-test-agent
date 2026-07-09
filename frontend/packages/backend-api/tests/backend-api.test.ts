@@ -558,7 +558,15 @@ describe("backend-api", () => {
             backendProcessId: "bjp_1234567890abcdef",
             from: "2026-06-22T00:00:00Z",
             to: "2026-06-24T00:00:00Z",
-            samples: [{ sampledAt: "2026-06-24T00:00:00Z", jvmThreadsLive: 42 }]
+            samples: [{
+              sampledAt: "2026-06-24T00:00:00Z",
+              memoryAvailableBytes: 1536,
+              jvmProcessResidentMemoryBytes: 700,
+              jvmHeapUsedBytes: 200,
+              jvmGcCollectionCountDelta: 3,
+              jvmThreadsDaemon: 12,
+              jvmThreadsLive: 42
+            }]
           }
         }),
         { status: 200 }
@@ -568,7 +576,14 @@ describe("backend-api", () => {
     await expect(client.getOpencodeRuntimeBackendServerMetrics("10.8.0.12")).resolves.toMatchObject({
       linuxServerId: "10.8.0.12",
       backendProcessId: "bjp_1234567890abcdef",
-      samples: [{ jvmThreadsLive: 42 }]
+      samples: [{
+        memoryAvailableBytes: 1536,
+        jvmProcessResidentMemoryBytes: 700,
+        jvmHeapUsedBytes: 200,
+        jvmGcCollectionCountDelta: 3,
+        jvmThreadsDaemon: 12,
+        jvmThreadsLive: 42
+      }]
     });
     expect(fetcher.mock.calls[1]?.[0]).toBe(
       "http://api/api/internal/platform/opencode-runtime/management/linux-servers/10.8.0.12/backend-metrics"
@@ -645,6 +660,41 @@ describe("backend-api", () => {
       createdAt: "2026-06-25T00:00:00Z",
       updatedAt: "2026-06-25T00:00:02Z"
     };
+    const diagnostics = {
+      scheduler: {
+        enabled: true,
+        runnerRunning: false,
+        instanceId: "scheduler-test-instance",
+        scanIntervalSeconds: 30,
+        dueTaskLimit: 50,
+        manualRunLimit: 50,
+        lastScanStartedAt: "2026-06-25T00:00:00Z",
+        lastScanFinishedAt: "2026-06-25T00:00:01Z",
+        lastScanErrorMessage: null
+      },
+      redisLock: {
+        checkable: true,
+        lockKey: "test-agent:scheduler:lock:daily.cleanup",
+        locked: true,
+        ttlMillis: 42000
+      },
+      task: {
+        taskKey: "daily.cleanup",
+        enabled: true,
+        registrationStatus: "REGISTERED",
+        registrationStatusLabel: "已注册",
+        nextFireAt: "2026-06-25T02:00:00Z",
+        lockTtlSeconds: 300,
+        currentRun: null,
+        latestRun: null,
+        pendingManualRunCount: 1
+      },
+      diagnosis: {
+        manualTriggerReady: false,
+        cronReady: false,
+        blockers: [{ code: "RUNNER_NOT_RUNNING", message: "后台扫描线程未运行" }]
+      }
+    };
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: taskPage }), { status: 200 })
     );
@@ -654,7 +704,8 @@ describe("backend-api", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: run }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { items: [run], page: 1, size: 20, total: 1 } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: run }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: run }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: run }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: diagnostics }), { status: 200 }));
     const client = createBackendApiClient({
       baseUrl: "http://api",
       apiToken: "token_123",
@@ -668,6 +719,10 @@ describe("backend-api", () => {
     await client.listScheduledTaskRuns({ taskKey: "daily.cleanup", status: "RUNNING", triggerType: "MANUAL", page: 1, size: 20 });
     await client.getScheduledTaskRun("str_1234567890abcdef");
     await client.stopScheduledTaskRun("str_1234567890abcdef");
+    await expect(client.getSchedulerDiagnostics("daily.cleanup")).resolves.toMatchObject({
+      scheduler: { enabled: true, runnerRunning: false },
+      diagnosis: { blockers: [{ code: "RUNNER_NOT_RUNNING" }] }
+    });
 
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
       "http://api/api/internal/platform/scheduler-management/tasks?page=1&size=20",
@@ -675,7 +730,8 @@ describe("backend-api", () => {
       "http://api/api/internal/platform/scheduler-management/tasks/daily.cleanup/trigger",
       "http://api/api/internal/platform/scheduler-management/runs?taskKey=daily.cleanup&status=RUNNING&triggerType=MANUAL&page=1&size=20",
       "http://api/api/internal/platform/scheduler-management/runs/str_1234567890abcdef",
-      "http://api/api/internal/platform/scheduler-management/runs/str_1234567890abcdef/stop"
+      "http://api/api/internal/platform/scheduler-management/runs/str_1234567890abcdef/stop",
+      "http://api/api/internal/platform/scheduler-management/diagnostics?taskKey=daily.cleanup"
     ]);
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
       method: "PATCH",

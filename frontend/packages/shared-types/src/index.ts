@@ -967,6 +967,63 @@ export type ScheduledTaskManagementRun = {
   updatedAt: string;
 };
 
+export type SchedulerRuntimeDiagnostics = {
+  enabled: boolean;
+  runnerRunning: boolean;
+  instanceId: string;
+  scanIntervalSeconds: number;
+  dueTaskLimit: number;
+  manualRunLimit: number;
+  lastScanStartedAt?: string | null;
+  lastScanFinishedAt?: string | null;
+  lastScanErrorMessage?: string | null;
+};
+
+export type ScheduledTaskLockDiagnostics = {
+  checkable: boolean;
+  lockKey: string;
+  locked: boolean;
+  ttlMillis?: number | null;
+  errorMessage?: string | null;
+};
+
+export type ScheduledTaskRuntimeDiagnostics = {
+  taskKey: string;
+  enabled: boolean;
+  registrationStatus: SchedulerTaskRegistrationStatus;
+  registrationStatusLabel?: string;
+  nextFireAt?: string | null;
+  lockTtlSeconds: number;
+  currentRun?: ScheduledTaskRunSummary | null;
+  latestRun?: ScheduledTaskRunSummary | null;
+  pendingManualRunCount: number;
+};
+
+export type SchedulerDiagnosticBlocker = {
+  code:
+    | "SCHEDULER_DISABLED"
+    | "RUNNER_NOT_RUNNING"
+    | "HANDLER_MISSING"
+    | "TASK_DISABLED_FOR_CRON"
+    | "ACTIVE_RUN"
+    | "LOCK_HELD"
+    | string;
+  message: string;
+};
+
+export type ScheduledTaskDiagnosis = {
+  manualTriggerReady: boolean;
+  cronReady: boolean;
+  blockers: SchedulerDiagnosticBlocker[];
+};
+
+export type SchedulerDiagnostics = {
+  scheduler: SchedulerRuntimeDiagnostics;
+  redisLock: ScheduledTaskLockDiagnostics;
+  task: ScheduledTaskRuntimeDiagnostics;
+  diagnosis: ScheduledTaskDiagnosis;
+};
+
 export type ScheduledTaskUpdatePayload = {
   enabled?: boolean;
   cronExpression?: string;

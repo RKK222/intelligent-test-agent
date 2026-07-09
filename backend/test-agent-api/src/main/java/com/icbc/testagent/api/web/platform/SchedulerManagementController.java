@@ -67,6 +67,14 @@ public class SchedulerManagementController {
         return blocking(traceId, () -> SchedulerManagementDtos.TaskResponse.from(service.getTask(key), service));
     }
 
+    @GetMapping("/diagnostics")
+    public Mono<ApiResponse<Object>> diagnostics(@RequestParam String taskKey, ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        ScheduledTaskKey key = parseTaskKey(taskKey);
+        return blocking(traceId, () -> service.diagnostics(key));
+    }
+
     @PatchMapping("/tasks/{taskKey}")
     public Mono<ApiResponse<Object>> updateTask(
             @PathVariable String taskKey,

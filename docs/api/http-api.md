@@ -1786,7 +1786,7 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 }
 ```
 
-后端 Java 进程行会额外返回 `cpuUsagePercent`、`memoryMaxBytes`、`memoryUsedBytes`、`memoryUsagePercent`、`diskMaxBytes`、`diskUsedBytes`、`diskUsagePercent`、`jvmMemoryUsedBytes`、`jvmMemoryCommittedBytes`、`jvmMemoryMaxBytes`、`jvmGcPauseMillis`、`jvmThreadsLive`，字段不可采集时为 `null`。容器行和容器 history 样本可返回 `metricsSource`，取值为 `cgroup`、`process`、`unavailable` 或旧样本的 `null`；容器 history 样本包含 `sampledAt/maxProcesses/currentProcesses/metricsSource/cpuUsagePercent/memoryMaxBytes/memoryUsedBytes/memoryUsagePercent/diskReadBytesPerSecond/diskWriteBytesPerSecond`；后端 history 响应包含 `linuxServerId`，`backendProcessId` 保留为可空兼容字段。后端 history 样本保持 overview 后端指标同名字段，服务器 CPU、内存、磁盘来自 `test-agent:runtime-metrics:server:{linuxServerId}`，JVM 指标来自 `test-agent:runtime-metrics:backend:{linuxServerId}`，因此同一服务器上的 Java 后端重启后服务器资源和 JVM 趋势都按 `linuxServerId` 连续查询；旧 `backendProcessId` history API 已作废，返回 `410 API_GONE`。运行管理页面按 `linuxServerId` 合并服务器与 Java 行，点击行或“趋势”按钮查询该服务器 Java 服务指标历史；异常缺服务器或缺 Java 时展示 `-`，不改变 overview JSON 结构。`managers[].managedProcesses[]` 在 manager 本地快照字段之外可返回归属字段：`ownership` 为 `BOUND` 表示该端口匹配到当前 `ACTIVE` 用户绑定，前端展示为“有主进程”；`UNBOUND` 表示没有当前活跃绑定或没有匹配用户进程，前端展示为“无主进程”。`processId`、`processStatus`、`healthMessage` 来自同服务器同容器同端口的用户进程候选；`userId`、`username`、`bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在 `ACTIVE` 绑定存在时返回。所有归属字段保持可空/可缺失以兼容旧后端、旧 manager 和旧 Redis 快照；运行管理页面按 `containerId` 合并容器与 manager 行，若容器 `currentProcesses` 与 `managedProcesses.length` 不一致，会提示容量计数来自 manager state，而明细来自 manager 上报数组。`user-processes` 返回的 `managerStatus` 表示 manager/PID 层面的实际状态，`healthStatus` 表示 opencode HTTP 健康检查结果：`HEALTHY` 为健康，`NOT_RUNNING` 表示 manager 确认进程未运行或 PID 不存在，`UNHEALTHY` 表示 PID 存在但 HTTP 健康检查失败，`CHECK_FAILED` 表示 manager 通信或探测异常；`restartable=true` 时前端允许调用 restart 命令。Manager 与后端连接不再以独立表格展示，前端改为使用 `managerBackendConnections[]` 生成 Java 到 manager 的连线，并使用 `managers[].managedProcesses[]` 生成 manager 到 opencode server 的连线；旧响应缺少 `managedProcesses` 时仍展示 manager 节点，manager 到 opencode 的边为空。展开明细中的“重启/停止”按钮调用上述 HTTP 命令端点，成功后前端重新拉取 overview；底部用户进程列表中的“重启”按钮同样按该进程的 `containerId + port` 调用 restart，成功后刷新当前用户查询。对已有平台用户进程记录的端口，restart 成功必须经过公共启动服务再次 health 确认；用户进程已 `STOPPED` 或 manager 返回 `port ... is not managed` 时，目标 Java 会复用原 `containerId + port` 调用 manager `start` 并同样确认 health 后才返回成功。对已有平台用户进程记录的端口，stop 成功必须经过公共停止服务再次 health 确认，health 仍 healthy 时返回统一错误且不回写 `STOPPED`；health 不健康时才回写 `STOPPED`，返回的 command result 中 `healthy=false`。没有平台用户进程记录的无主 manager state 仍只同步返回本次 manager 回包。命令结果不代表后续 Redis 快照一定已经刷新。拓扑列表固定最多返回 500 条，避免管理页一次性读取过多连接和进程快照。Java 后端每 5 秒按 `backendProcessId` 写入 Redis Java 快照，并按 `linuxServerId` 分组用于服务器级展示和目标选择；Go manager 每 5 秒通过 WebSocket 写入 Redis manager 快照，两类快照 TTL 固定 10 秒；manager 成功应用 `configUpdate` 时会立即补发心跳，使容量参数变更尽快进入 overview。运行管理前端打开页面后每 5 秒刷新 overview，避免长时间停留时继续展示旧 Redis 快照；底部用户进程查询只在输入用户关键字后触发，不随 overview 自动展示所有进程。数据库中的历史 heartbeat 字段保留兼容但不参与在线判断。Java/manager 运行指标历史写入 Redis ZSET，保留近 48 小时原始 5 秒样本，history API 默认查询近 1 小时，前端使用 `windowMinutes` 在 1 分钟到 48 小时预设之间切换，超出 `maxPoints` 时按时间桶降采样。Redis 历史只保证同一稳定服务器身份的 Java 后端重启后连续；若 Redis 自身重启且未启用 AOF/RDB，历史样本会丢失。opencode server 由后端每 3 分钟通过 manager health 命令确认并刷新 Redis 进程心跳，Redis 进程心跳 key 5 分钟过期，索引清理每 5 分钟执行一次。`opencodeProcesses.items[]` 的 `bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在该进程仍是当前用户绑定时返回，否则为 `null`。
+后端 Java 进程行和后端 history 样本会额外返回可空运行指标；旧字段保留并维持语义：`cpuUsagePercent` 仍表示整机 CPU，`memoryMaxBytes` 等同 `memoryTotalBytes`，`jvmGcPauseMillis` 等同 `jvmGcCollectionTimeDeltaMillis`。服务器字段包括 `cpuCoreCount`、`loadAverage1m/loadAverage5m/loadAverage15m`、`memoryTotalBytes/memoryAvailableBytes/memoryFreeBytes/memoryBuffersBytes/memoryCachedBytes`、`swapTotalBytes/swapFreeBytes/swapUsedBytes/swapUsagePercent`、`diskAvailableBytes`，并继续返回 `memoryUsedBytes/memoryUsagePercent/diskMaxBytes/diskUsedBytes/diskUsagePercent`。Java 进程字段包括 `jvmProcessCpuUsagePercent`、`jvmProcessCpuCoreUsage`、`jvmProcessCpuTimeNanos`、`jvmProcessResidentMemoryBytes`、`jvmProcessPeakResidentMemoryBytes`、`jvmProcessVirtualMemoryBytes`、`jvmProcessSwapBytes`、`jvmOpenFileDescriptorCount`、`jvmMaxFileDescriptorCount`。JVM 字段包括 heap/non-heap used/committed/max、direct/mapped buffer count/used/capacity、`jvmGcCollectionTimeDeltaMillis`、`jvmGcCollectionCountDelta`、`jvmGcTimePercent`、`jvmThreadsDaemon`、`jvmThreadsPeak`、`jvmThreadsTotalStarted`，并继续返回 `jvmMemoryUsedBytes/jvmMemoryCommittedBytes/jvmMemoryMaxBytes/jvmThreadsLive`。容器行和容器 history 样本可返回 `metricsSource`，取值为 `cgroup`、`process`、`unavailable` 或旧样本的 `null`；容器 history 样本包含 `sampledAt/maxProcesses/currentProcesses/metricsSource/cpuUsagePercent/memoryMaxBytes/memoryUsedBytes/memoryUsagePercent/diskReadBytesPerSecond/diskWriteBytesPerSecond`；后端 history 响应包含 `linuxServerId`，`backendProcessId` 保留为可空兼容字段。服务器 CPU/load/内存/swap/磁盘来自 `test-agent:runtime-metrics:server:{linuxServerId}`，Java 进程与 JVM 指标来自 `test-agent:runtime-metrics:backend:{linuxServerId}`，history API 会按时间合并两类样本并按新旧字段降采样；旧 Redis JSON 缺字段读取为 `null`，未知字段会被忽略。旧 `backendProcessId` history API 已作废，返回 `410 API_GONE`。运行管理页面按 `linuxServerId` 合并服务器与 Java 行，点击行或“趋势”按钮查询该服务器 Java 服务指标历史；异常缺服务器或缺 Java 时展示 `-`，不改变 overview JSON 结构。`managers[].managedProcesses[]` 在 manager 本地快照字段之外可返回归属字段：`ownership` 为 `BOUND` 表示该端口匹配到当前 `ACTIVE` 用户绑定，前端展示为“有主进程”；`UNBOUND` 表示没有当前活跃绑定或没有匹配用户进程，前端展示为“无主进程”。`processId`、`processStatus`、`healthMessage` 来自同服务器同容器同端口的用户进程候选；`userId`、`username`、`bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在 `ACTIVE` 绑定存在时返回。所有归属字段保持可空/可缺失以兼容旧后端、旧 manager 和旧 Redis 快照；运行管理页面按 `containerId` 合并容器与 manager 行，若容器 `currentProcesses` 与 `managedProcesses.length` 不一致，会提示容量计数来自 manager state，而明细来自 manager 上报数组。`user-processes` 返回的 `managerStatus` 表示 manager/PID 层面的实际状态，`healthStatus` 表示 opencode HTTP 健康检查结果：`HEALTHY` 为健康，`NOT_RUNNING` 表示 manager 确认进程未运行或 PID 不存在，`UNHEALTHY` 表示 PID 存在但 HTTP 健康检查失败，`CHECK_FAILED` 表示 manager 通信或探测异常；`restartable=true` 时前端允许调用 restart 命令。Manager 与后端连接不再以独立表格展示，前端改为使用 `managerBackendConnections[]` 生成 Java 到 manager 的连线，并使用 `managers[].managedProcesses[]` 生成 manager 到 opencode server 的连线；旧响应缺少 `managedProcesses` 时仍展示 manager 节点，manager 到 opencode 的边为空。展开明细中的“重启/停止”按钮调用上述 HTTP 命令端点，成功后前端重新拉取 overview；底部用户进程列表中的“重启”按钮同样按该进程的 `containerId + port` 调用 restart，成功后刷新当前用户查询。对已有平台用户进程记录的端口，restart 成功必须经过公共启动服务再次 health 确认；用户进程已 `STOPPED` 或 manager 返回 `port ... is not managed` 时，目标 Java 会复用原 `containerId + port` 调用 manager `start` 并同样确认 health 后才返回成功。对已有平台用户进程记录的端口，stop 成功必须经过公共停止服务再次 health 确认，health 仍 healthy 时返回统一错误且不回写 `STOPPED`；health 不健康时才回写 `STOPPED`，返回的 command result 中 `healthy=false`。没有平台用户进程记录的无主 manager state 仍只同步返回本次 manager 回包。命令结果不代表后续 Redis 快照一定已经刷新。拓扑列表固定最多返回 500 条，避免管理页一次性读取过多连接和进程快照。Java 后端每 5 秒按 `backendProcessId` 写入 Redis Java 快照，并按 `linuxServerId` 分组用于服务器级展示和目标选择；Go manager 每 5 秒通过 WebSocket 写入 Redis manager 快照，两类快照 TTL 固定 10 秒；manager 成功应用 `configUpdate` 时会立即补发心跳，使容量参数变更尽快进入 overview。运行管理前端打开页面后每 5 秒刷新 overview，避免长时间停留时继续展示旧 Redis 快照；底部用户进程查询只在输入用户关键字后触发，不随 overview 自动展示所有进程。数据库中的历史 heartbeat 字段保留兼容但不参与在线判断。Java/manager 运行指标历史写入 Redis ZSET，保留近 48 小时原始 5 秒样本，history API 默认查询近 1 小时，前端使用 `windowMinutes` 在 1 分钟到 48 小时预设之间切换，超出 `maxPoints` 时按时间桶降采样。Redis 历史只保证同一稳定服务器身份的 Java 后端重启后连续；若 Redis 自身重启且未启用 AOF/RDB，历史样本会丢失。opencode server 由后端每 3 分钟通过 manager health 命令确认并刷新 Redis 进程心跳，Redis 进程心跳 key 5 分钟过期，索引清理每 5 分钟执行一次。`opencodeProcesses.items[]` 的 `bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在该进程仍是当前用户绑定时返回，否则为 `null`。
 
 ### scheduler-management 定时任务管理 API
 
@@ -1798,6 +1798,7 @@ Base URL：`/api/internal/platform/scheduler-management`
 |---|---|---|
 | `GET` | `/tasks` | 分页查询代码注册的任务定义。 |
 | `GET` | `/tasks/{taskKey}` | 查询单个任务定义。 |
+| `GET` | `/diagnostics?taskKey={taskKey}` | 查询当前 Java 进程内 scheduler 生效配置、扫描线程、Redis 锁和选中任务阻塞原因。 |
 | `PATCH` | `/tasks/{taskKey}` | 调整任务启停、Cron 表达式和锁 TTL。 |
 | `POST` | `/tasks/{taskKey}/trigger` | 创建管理员手动触发运行记录，后台 runner 异步执行；要求全局 scheduler 已启用，任务停用时超级管理员仍可手动触发。 |
 | `GET` | `/runs` | 分页查询运行记录，可按任务、状态、触发类型和请求用户过滤。 |
@@ -1841,6 +1842,55 @@ Base URL：`/api/internal/platform/scheduler-management`
   "traceId": "trace_..."
 }
 ```
+
+`GET /diagnostics` 查询参数：
+
+| 参数 | 说明 |
+|---|---|
+| `taskKey` | 必填任务 key。 |
+
+诊断响应字段：
+
+```json
+{
+  "scheduler": {
+    "enabled": true,
+    "runnerRunning": true,
+    "instanceId": "backend-...",
+    "scanIntervalSeconds": 30,
+    "dueTaskLimit": 50,
+    "manualRunLimit": 50,
+    "lastScanStartedAt": "2026-06-25T02:00:00Z",
+    "lastScanFinishedAt": "2026-06-25T02:00:01Z",
+    "lastScanErrorMessage": null
+  },
+  "redisLock": {
+    "checkable": true,
+    "lockKey": "test-agent:scheduler:lock:daily.cleanup",
+    "locked": false,
+    "ttlMillis": null,
+    "errorMessage": null
+  },
+  "task": {
+    "taskKey": "daily.cleanup",
+    "enabled": true,
+    "registrationStatus": "REGISTERED",
+    "registrationStatusLabel": "已注册",
+    "nextFireAt": "2026-06-25T02:00:00Z",
+    "lockTtlSeconds": 300,
+    "currentRun": null,
+    "latestRun": null,
+    "pendingManualRunCount": 0
+  },
+  "diagnosis": {
+    "manualTriggerReady": true,
+    "cronReady": true,
+    "blockers": []
+  }
+}
+```
+
+`diagnosis.blockers[].code` 是稳定诊断码，当前可能值：`SCHEDULER_DISABLED`、`RUNNER_NOT_RUNNING`、`HANDLER_MISSING`、`TASK_DISABLED_FOR_CRON`、`ACTIVE_RUN`、`LOCK_HELD`。诊断接口只读，不抢锁、不释放锁、不修改运行记录；`redisLock` 不返回锁 token。
 
 `PATCH /tasks/{taskKey}` 请求体，字段均可选，缺失表示保持原值：
 
