@@ -25,6 +25,16 @@
   - 保持 `/runs/{runId}/events`、`Last-Event-ID`、SSE event name 和 payload 不变；跨 Java 单 Run 实时消息继续走 API 层 SSE 路由到生产 Java。用户级 `sessions/runtime-state/events` 不再接收 Redis 远端事件，接受既有约 10 秒低频轮询兜底。
 - Result:
   - `RunEventServicesTest` 更新为覆盖本机 `streamAll()`、durable replay + live bus 合流；`mvn -pl test-agent-event -Dtest=RunEventServicesTest test`、`mvn -pl test-agent-opencode-runtime -Dtest=SessionRuntimeStateApplicationServiceTest test`、`mvn -pl test-agent-api -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=RunEventSseBackendRoutingWebFilterTest,BackendSseForwarderTest test`、`mvn -pl test-agent-event,test-agent-opencode-runtime,test-agent-api -am -DskipTests package`、`git diff --check` 和精确引用清理扫描均通过。
+### 2026-07-09 - 补充双后端企业部署和前端本地更新脚本
+
+- Why:
+  - 现场 `122.233.30.4 -> 122.233.30.2` 直连 scp 被统一登录策略拦截，报 `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`；同时企业内需要新增后端/worker 节点 `122.233.30.114`。
+- What:
+  - 新增 `deploy/internal/deploy-internal-frontend.sh`，支持在前端机本地从同一个 `internal.zip` 更新静态资源并 reload Nginx；`deploy-internal-release.sh` 增加 `--backend-host` 自动推导 health URL 和 `.serverid/.serverhost` 校验，并在 ssh 预检失败时提示前端本地部署路径。新增 `README-two-backend-122-233-30-114.md`，主部署文档改为双后端拓扑。
+- How:
+  - 双后端方案要求 `122.233.30.4` 和 `122.233.30.114` 各自运行 Java + 本机 worker，共用 Redis/PostgreSQL/前端入口；前端 Nginx upstream 同时配置两台 Java；统一登录场景下 zip 分别放到前端和两个后端节点，后端部署统一加 `--skip-frontend`。
+- Result:
+  - `bash -n` 覆盖三个部署/打包脚本，两个部署脚本 `--help` 可用；临时完整 zip 分别通过后端脚本 `--backend-host 122.233.30.114 --validate-only` 和前端脚本 `--validate-only`；`git diff --check` 通过。未真实连接 122 服务器、未重启 systemd/Nginx/Docker。
 
 ### 2026-07-09 - 增强公共配置 Git 超时排查日志
 

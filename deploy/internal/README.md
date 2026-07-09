@@ -1,6 +1,6 @@
 # 企业内 Docker 部署文件
 
-本目录提供企业内部署文件。当前部署采用三机拆分：前端实体 Nginx 单独部署，后端 Java 与 `opencode-worker` 部署在同一台服务器，Redis 独立部署，PostgreSQL 使用 `122.42.203.103:8000/testagent`。企业内 `opencode-worker` 统一用纯 Docker 命令管理，不使用 Docker Compose；前端、Nginx、Java、Redis 和 PostgreSQL 也不由 Docker 编排启动。
+本目录提供企业内部署文件。当前部署采用前端实体 Nginx 单独部署，后端 Java 与 `opencode-worker` 可在多台服务器横向部署；当前规划为 `122.233.30.4` 和 `122.233.30.114` 两台后端/worker 节点，Redis 独立部署，PostgreSQL 使用 `122.42.203.103:8000/testagent`。企业内 `opencode-worker` 统一用纯 Docker 命令管理，不使用 Docker Compose；前端、Nginx、Java、Redis 和 PostgreSQL 也不由 Docker 编排启动。
 
 企业部署根目录统一使用 `/data/testagent`，建议目录规划如下：
 
@@ -12,14 +12,17 @@
   dist/       打包脚本输出的 jar、前端包、程序包和镜像 tar
 ```
 
-## 当前三机部署规划
+## 当前部署规划
+
+双后端详细部署、配置差异和排查命令见 `deploy/internal/README-two-backend-122-233-30-114.md`。
 
 当前企业内部署按以下服务器拆分：
 
 | 角色 | 地址 | 部署内容 |
 |---|---|---|
-| 前端入口 | `122.233.30.2` | 实体 Nginx，托管 `/data/testagent/frontend`，把 `/api` 反向代理到 `122.233.30.4:8080`。 |
-| 后端与 worker | `122.233.30.4` | JDK 21 直接运行 `test-agent-app.jar`，纯 Docker 运行 `opencode-worker`。 |
+| 前端入口 | `122.233.30.2` | 实体 Nginx，托管 `/data/testagent/frontend`，把 `/api` 反向代理到 `122.233.30.4:8080` 和 `122.233.30.114:8080`。 |
+| 后端与 worker A | `122.233.30.4` | JDK 21 直接运行 `test-agent-app.jar`，纯 Docker 运行 `opencode-worker`。 |
+| 后端与 worker B | `122.233.30.114` | 新增 JDK 21 后端节点和本机 `opencode-worker`，与 `122.233.30.4` 共用 PostgreSQL、Redis 和前端入口。 |
 | Redis | `122.233.30.20` | Redis 外部依赖，Java 后端连接该地址。 |
 | PostgreSQL | `122.42.203.103:8000` | Java 后端通过 `jdbc:postgresql://122.42.203.103:8000/testagent` 连接。 |
 
@@ -29,12 +32,19 @@
 flowchart LR
   Browser["浏览器用户"] -->|"HTTP 80"| FrontNginx["122.233.30.2\n实体 Nginx\n/data/testagent/frontend"]
   FrontNginx -->|"静态资源"| FrontFiles["前端 dist"]
-  FrontNginx -->|"/api / SSE / WebSocket\n反代到 122.233.30.4:8080"| Backend["122.233.30.4\nJava test-agent-app.jar\n/data/testagent/dist/backend"]
-  Backend -->|"Redis 6379"| Redis["122.233.30.20\nRedis"]
-  Backend -->|"JDBC 8000"| PostgreSQL["122.42.203.103:8000\nPostgreSQL testagent"]
-  Backend -->|"模型 API"| Model["企业模型服务\nicbc-openai"]
-  Worker["122.233.30.4\nDocker opencode-worker\n/data/testagent/data + programs"] <-->|"manager WebSocket\n/api/internal/platform/..."| Backend
-  Worker -->|"动态启动\nopencode serve 4096-4105"| Opencode["用户 opencode 进程"]
+  FrontNginx -->|"/api / SSE / WebSocket"| BackendA["122.233.30.4\nJava test-agent-app.jar"]
+  FrontNginx -->|"/api / SSE / WebSocket"| BackendB["122.233.30.114\nJava test-agent-app.jar"]
+  BackendA <-->|"Java 间转发\n用户进程归属路由"| BackendB
+  BackendA -->|"Redis 6379"| Redis["122.233.30.20\nRedis"]
+  BackendB -->|"Redis 6379"| Redis
+  BackendA -->|"JDBC 8000"| PostgreSQL["122.42.203.103:8000\nPostgreSQL testagent"]
+  BackendB -->|"JDBC 8000"| PostgreSQL
+  BackendA -->|"模型 API"| Model["企业模型服务\nicbc-openai"]
+  BackendB -->|"模型 API"| Model
+  WorkerA["122.233.30.4\nDocker opencode-worker\n/data/testagent/data + programs"] <-->|"manager WebSocket"| BackendA
+  WorkerB["122.233.30.114\nDocker opencode-worker\n/data/testagent/data + programs"] <-->|"manager WebSocket"| BackendB
+  WorkerA -->|"动态启动\nopencode serve 4096-4105"| OpencodeA["用户 opencode 进程 A"]
+  WorkerB -->|"动态启动\nopencode serve 4096-4105"| OpencodeB["用户 opencode 进程 B"]
 ```
 
 外置配置文件建议固定放在：
@@ -46,7 +56,7 @@ flowchart LR
   nginx.env       前端 Nginx 配置生成变量，可按下文内容手工创建
 ```
 
-其中 `docker.env` 里的 `VITE_TEST_AGENT_API_BASE_URL` 已按当前前端入口写为 `http://122.233.30.2`，`TEST_AGENT_BACKEND` 已按当前后端写为 `122.233.30.4:8080`。
+其中 `docker.env` 里的 `VITE_TEST_AGENT_API_BASE_URL` 已按当前前端入口写为 `http://122.233.30.2`；`TEST_AGENT_BACKEND` 只服务单后端 Nginx 模板，双后端时按 `README-two-backend-122-233-30-114.md` 手工写 Nginx upstream。
 
 ## 每台服务器部署清单
 
@@ -553,7 +563,7 @@ TEST_AGENT_ICBC_OPENAI_AUTH_MODE=bearer
 TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME=ucid
 ```
 
-当前三机部署时，后端服务器 `122.233.30.4` 推荐把 Java 配置单独放到 `/data/testagent/config/backend.env`，从仓库模板复制后改 PostgreSQL、token 和模型密钥：
+当前多后端部署时，每台后端服务器都推荐把 Java 配置单独放到 `/data/testagent/config/backend.env`；`122.233.30.4` 可从仓库模板复制后改 PostgreSQL、token 和模型密钥，`122.233.30.114` 还必须把 `TEST_AGENT_SERVER_ADVERTISED_HOST` 和 `TEST_AGENT_LINUX_SERVER_ID` 改成本机值：
 
 ```bash
 mkdir -p /data/testagent/config /data/testagent/data

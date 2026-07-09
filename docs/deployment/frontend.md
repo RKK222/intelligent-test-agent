@@ -15,9 +15,9 @@ corepack pnpm build
 
 `apps/agent-web` 使用 Vite 生产构建，产物输出到 `apps/agent-web/dist/`：纯静态 HTML/JS/CSS，可由任意静态服务器或反向代理托管，无需 Node 运行时。
 
-企业内当前三机部署不单独手工执行本节命令，统一使用 `deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env` 生成 `test-agent-frontend-dist.tar.gz` 和完整 `test-agent-internal-release.zip`，再按 `deploy/internal/README.md` 分发到 `122.233.30.2:/data/testagent/frontend` 并由实体 Nginx 托管。
+企业内当前部署不单独手工执行本节命令，统一使用 `deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env` 生成 `test-agent-frontend-dist.tar.gz` 和完整 `test-agent-internal-release.zip`，再按 `deploy/internal/README.md` 与 `deploy/internal/README-two-backend-122-233-30-114.md` 部署到 `122.233.30.2:/data/testagent/frontend` 并由实体 Nginx 托管。
 
-如果交付 zip 已放到后端服务器 `122.233.30.4:/data/0709/internal.zip`，优先在该服务器执行 `/data/testagent/deploy/internal/deploy-internal-release.sh --archive /data/0709/internal.zip`；脚本会用 `scp` 分发前端包到 `122.233.30.2`，解压 `/data/testagent/frontend`，执行 `nginx -t` 和 `systemctl reload nginx`，并继续完成后端 Java 与 worker 的升级顺序。
+如果后端服务器能免密直连前端服务器，可在后端执行 `/data/testagent/deploy/internal/deploy-internal-release.sh --archive /data/0709/internal.zip`，脚本会用 `scp` 分发前端包到 `122.233.30.2`。如果现场统一登录策略导致 `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`，把同一个 zip 放到 `122.233.30.2:/data/0709/internal.zip`，在前端机本地执行 `deploy/internal/deploy-internal-frontend.sh --archive /data/0709/internal.zip`，后端节点部署时统一加 `--skip-frontend`。
 
 `frontend-opencode` 使用 Vite 生产构建：
 

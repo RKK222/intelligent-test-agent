@@ -4,17 +4,18 @@ set -euo pipefail
 ARCHIVE="/data/0709/internal.zip"
 EXTRACT_DIR="/data/0709/test-agent-internal-release"
 INSTALL_ROOT="/data/testagent"
+BACKEND_HOST="122.233.30.4"
 FRONTEND_HOST="122.233.30.2"
 FRONTEND_USER=""
 FRONTEND_ROOT="/data/testagent"
 BACKEND_SERVICE="test-agent-backend"
-BACKEND_HEALTH_URL="http://122.233.30.4:8080/actuator/health"
-BACKEND_READINESS_URL="http://122.233.30.4:8080/actuator/health/readiness"
+BACKEND_HEALTH_URL=""
+BACKEND_READINESS_URL=""
 FRONTEND_HEALTH_URL="http://122.233.30.2/health"
 FRONTEND_URL="http://122.233.30.2/"
 DOCKER_ENV="/data/testagent/config/docker.env"
-EXPECTED_SERVER_ID="test-agent-backend-122-233-30-4"
-EXPECTED_SERVER_HOST="122.233.30.4"
+EXPECTED_SERVER_ID=""
+EXPECTED_SERVER_HOST=""
 SKIP_FRONTEND=0
 SKIP_WORKER=0
 KEEP_EXTRACT=0
@@ -24,8 +25,8 @@ usage() {
   cat <<'USAGE'
 Usage: deploy/internal/deploy-internal-release.sh [options]
 
-Deploy an enterprise internal release zip from the backend server. The default
-matches the current three-machine deployment:
+Deploy an enterprise internal release zip from a backend server. The default
+matches the first backend node in the current enterprise deployment:
   - release zip: /data/0709/internal.zip
   - backend/worker server: local 122.233.30.4
   - frontend server: 122.233.30.2
@@ -35,6 +36,7 @@ Options:
   --archive <path>              Release zip path. Default: /data/0709/internal.zip.
   --extract-dir <path>          Temporary unzip directory. Default: /data/0709/test-agent-internal-release.
   --install-root <path>         Backend install root. Default: /data/testagent.
+  --backend-host <host>         Local backend advertised host. Default: 122.233.30.4.
   --frontend-host <host>        Frontend SSH/SCP host. Default: 122.233.30.2.
   --frontend-user <user>        SSH user for frontend host. Default: current ssh config user.
   --frontend-root <path>        Frontend install root. Default: /data/testagent.
@@ -66,6 +68,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --install-root)
       INSTALL_ROOT="$2"
+      shift 2
+      ;;
+    --backend-host)
+      BACKEND_HOST="$2"
       shift 2
       ;;
     --frontend-host)
@@ -144,6 +150,11 @@ log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+server_id_from_host() {
+  local host="$1"
+  printf 'test-agent-backend-%s' "${host//./-}"
+}
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Required command not found: $1" >&2
@@ -163,6 +174,21 @@ ssh_target() {
     printf '%s@%s' "${FRONTEND_USER}" "${FRONTEND_HOST}"
   else
     printf '%s' "${FRONTEND_HOST}"
+  fi
+}
+
+configure_backend_defaults() {
+  if [[ -z "${BACKEND_HEALTH_URL}" ]]; then
+    BACKEND_HEALTH_URL="http://${BACKEND_HOST}:8080/actuator/health"
+  fi
+  if [[ -z "${BACKEND_READINESS_URL}" ]]; then
+    BACKEND_READINESS_URL="http://${BACKEND_HOST}:8080/actuator/health/readiness"
+  fi
+  if [[ -z "${EXPECTED_SERVER_HOST}" ]]; then
+    EXPECTED_SERVER_HOST="${BACKEND_HOST}"
+  fi
+  if [[ -z "${EXPECTED_SERVER_ID}" ]]; then
+    EXPECTED_SERVER_ID="$(server_id_from_host "${BACKEND_HOST}")"
   fi
 }
 
@@ -217,6 +243,24 @@ run_frontend_update() {
 
   # 前端服务器只接收静态包和 deploy/internal 模板；不把后端 jar 或 worker 镜像传过去。
   log "Copy frontend artifacts to ${frontend_target}"
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "${frontend_target}" true >/dev/null 2>&1; then
+    cat >&2 <<EOF
+Cannot access frontend server with non-interactive ssh: ${frontend_target}
+
+If unified login or bastion policy blocks direct ssh/scp from this backend host,
+copy the same release zip to the frontend server through the approved channel,
+then deploy the frontend on 122.233.30.2 itself:
+
+  unzip -p ${ARCHIVE} deploy/internal/deploy-internal-frontend.sh > /tmp/deploy-internal-frontend.sh
+  bash /tmp/deploy-internal-frontend.sh --archive ${ARCHIVE}
+
+Then deploy this backend node without touching the frontend:
+
+  bash $0 --archive ${ARCHIVE} --backend-host ${BACKEND_HOST} --skip-frontend
+
+EOF
+    exit 1
+  fi
   ssh "${frontend_target}" "mkdir -p '${FRONTEND_ROOT}/dist' '${FRONTEND_ROOT}/deploy'"
   scp "${frontend_archive}" "${frontend_target}:${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
 
@@ -267,6 +311,8 @@ wait_worker_config_update() {
     sleep 3
   done
 }
+
+configure_backend_defaults
 
 require_command unzip
 require_command find
