@@ -102,6 +102,9 @@ const iframeUrl = computed(() => {
     params.append("appName", props.appName);
   }
   params.append("version", version);
+  if (props.workspaceRootPath) {
+    params.append("workspacePath", props.workspaceRootPath);
+  }
   
   const url = new URL(baseUrl);
   url.search = params.toString();
@@ -125,6 +128,7 @@ function handleIframeMessage(event: MessageEvent) {
       if (data.type === "FUNC_DISPATCH" && data.payload === "workspace_reload") {
         console.log('更新工作空间：',data)
         emit("refresh");
+        closeIframeDialog();
       }
     }
   } catch (e) {
