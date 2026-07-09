@@ -5124,3 +5124,16 @@ bash /tmp/test-api-after-restart.sh
   - 未改数据库、SSE、API 路径、generated SDK 或 `.env.local`；同步更新 HTTP API、后端/前端 README 和运行管理相关单测/Vitest。
 - Result:
   - 定向采集器、Redis、RuntimeManagementQueryService、运行管理前端和 backend-api 运行管理用例通过；计划中的 `-am test`、API 测试编译和前端全量 typecheck/聚合 Vitest 当前被已有 scheduler diagnostics 未完成改动阻断（缺少 `ScheduledTaskLockInspection` / `SchedulerDiagnostics` / `getSchedulerDiagnostics`），本次未修改这些无关文件。
+
+### 2026-07-09 - 修复 Mermaid.js 动态导入与语法解析错误的渲染体验
+
+- Why: 
+  - 1. 用户在工作台打开 Markdown 预览或在聊天界面查看 Mermaid 图表时，如果 Mermaid 图表代码中存在语法解析错误（如双引号未包裹完整等），渲染时会抛出异常。因 catch 中直接将 UI 恢复/保持在“脚本”展示，导致用户点击“图表”无反应且不知晓错误根因；
+  - 2. `mermaid` v11 作为 ESM-only 包，动态 `import` 时可能因 `.default` 缺失而抛出 `TypeError` 从而导致静默失效。
+- What:
+  - 优化了动态加载 `mermaid` 库后的实例获取逻辑，通过 fallback 保证 ESM/CJS 模块兼容性并绕过 TS 编译器判定限制；
+  - 在 `MarkdownPreview.vue` 与 `MarkdownView.vue` 中增加了对渲染报错的捕获：渲染失败时不再静默回退，而是在“图表”面板展示经过 HTML 转义的安全错误提示框（含具体解析报错细节），并支持在已有错误提示时允许重新触发渲染。
+- How:
+  - 修改 `frontend/packages/editor/src/MarkdownPreview.vue` 与 `frontend/packages/agent-chat/src/MarkdownView.vue` 两个核心组件的 `ensureLibs`、点击事件处理函数及增加 `.ta-mermaid-error` 错误展示样式。不涉及任何后端 API、事件、数据库、generated SDK 或环境配置修改。
+- Result:
+  - 前端 `corepack pnpm typecheck` 全量类型检查通过；`MarkdownPreview.test.ts` 及 `MarkdownView.test.ts` 单元测试全部通过；前端生产打包成功无误。

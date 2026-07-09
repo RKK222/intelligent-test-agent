@@ -43,8 +43,9 @@ async function ensureLibs(needMermaid = false) {
   if (needMermaid && !mermaidInstance) {
     if (!mermaidLoadPromise) {
       mermaidLoadPromise = (async () => {
-        const mermaidMod = await import("mermaid");
-        mermaidInstance = mermaidMod.default;
+        const mermaidMod = (await import("mermaid")) as any;
+        const instance = mermaidMod.default ?? mermaidMod;
+        mermaidInstance = (instance.initialize && instance.render) ? instance : (instance.default ?? instance);
         mermaidInstance.initialize({
           startOnLoad: false,
           theme: "neutral",
@@ -152,7 +153,8 @@ async function handleMdPreviewClick(event: MouseEvent) {
 
   try {
     await ensureLibs(true);
-    if (mermaidInstance && !chartEl.innerHTML.trim()) {
+    const hasError = chartEl.querySelector(".ta-mermaid-error");
+    if (mermaidInstance && (!chartEl.innerHTML.trim() || hasError)) {
       const { svg } = await mermaidInstance.render(blockId + "-svg", content);
       chartEl.innerHTML = svg;
     }
@@ -162,13 +164,24 @@ async function handleMdPreviewClick(event: MouseEvent) {
     block.classList.remove("is-script");
   } catch (err) {
     console.error("Mermaid render error:", err);
-    if (scriptEl) scriptEl.hidden = false;
-    chartEl.hidden = true;
-    block.classList.add("is-script");
-    block.classList.remove("is-chart");
-
     const badDiv = document.getElementById(`d${blockId}-svg`);
     if (badDiv) badDiv.remove();
+
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const escapedMsg = errMsg
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+    chartEl.innerHTML = `<div class="ta-mermaid-error">
+      <div class="ta-mermaid-error-title">图表解析错误</div>
+      <pre class="ta-mermaid-error-detail">${escapedMsg}</pre>
+    </div>`;
+    if (scriptEl) scriptEl.hidden = true;
+    chartEl.hidden = false;
+    block.classList.add("is-chart");
+    block.classList.remove("is-script");
   } finally {
     btn.disabled = false;
     btn.textContent = originalText;
@@ -418,6 +431,42 @@ defineExpose({ scrollToSourceLine });
   display: flex;
   justify-content: center;
   min-width: 360px;
+}
+
+.markdown-body :deep(.ta-mermaid-error) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 12px;
+  background: var(--ta-mermaid-error-bg, rgba(239, 68, 68, 0.06));
+  border: 1px dashed var(--ta-mermaid-error-border, rgba(239, 68, 68, 0.4));
+  border-radius: 6px;
+  color: var(--ta-mermaid-error-text, #b91c1c);
+  font-family: inherit;
+  margin: 4px 0;
+  text-align: left;
+}
+
+.markdown-body :deep(.ta-mermaid-error-title) {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.markdown-body :deep(.ta-mermaid-error-detail) {
+  margin: 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+  font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  width: 100%;
+  color: inherit;
+  border: none;
 }
 </style>
 
