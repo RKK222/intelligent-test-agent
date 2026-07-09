@@ -713,6 +713,10 @@ const props =
     permissions?: PermissionRequest[]
     /** question.asked 投影出的待处理提问请求。 */
     questions?: QuestionRequest[]
+    /** 是否正在提交提问回复 */
+    questionSubmitting?: boolean
+    /** 是否正在忽略提问 */
+    questionRejecting?: boolean
     /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
     messageScopesById?: Record<string, MessageScope>
     /** 当前运行期发现的子 Agent 会话索引。 */
@@ -729,6 +733,8 @@ const props =
     chatContexts: () => [],
     permissions: () => [],
     questions: () => [],
+    questionSubmitting: false,
+    questionRejecting: false,
     messageScopesById: () => ({}),
     subagentsBySessionId: () => ({}),
     subagentByTaskPartId: () => ({})
@@ -1262,8 +1268,10 @@ function canReplyQuestion(item: QuestionRequest): boolean {
   return item.questions.every((question) => answersForQuestion(question).length > 0)
 }
 
+const isAnyQuestionActionPending = computed(() => Boolean(props.questionSubmitting || props.questionRejecting))
+
 function replyQuestion(item: QuestionRequest) {
-  if (!canReplyQuestion(item)) return
+  if (!canReplyQuestion(item) || isAnyQuestionActionPending.value) return
   emit('reply-question', item.requestId, buildQuestionAnswers(item), item.sessionId)
 }
 
@@ -3866,6 +3874,7 @@ function onCompositionEnd() {
               <input
                 v-if="isTextQuestion(currentQuestionRequired(item))"
                 :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
+                :disabled="isAnyQuestionActionPending"
                 class="figma-chat-question-custom-input"
                 placeholder="输入你的答案..."
                 @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
@@ -3875,6 +3884,7 @@ function onCompositionEnd() {
                   v-for="option in questionOptions(currentQuestionRequired(item))"
                   :key="option.id"
                   type="button"
+                  :disabled="isAnyQuestionActionPending"
                   :class="[
                     'figma-chat-question-option',
                     isQuestionOptionSelected(currentQuestionRequired(item), option.label) && 'is-selected',
@@ -3898,6 +3908,7 @@ function onCompositionEnd() {
                     <span class="figma-chat-question-option-label">输入自己的答案</span>
                     <input
                       :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
+                      :disabled="isAnyQuestionActionPending"
                       class="figma-chat-question-custom-input"
                       placeholder="输入你的答案..."
                       @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
@@ -3911,15 +3922,17 @@ function onCompositionEnd() {
             <button
               type="button"
               class="figma-chat-question-reject"
+              :disabled="isAnyQuestionActionPending"
               @click="emit('reject-question', item.requestId, item.sessionId)"
             >
-              忽略
+              {{ questionRejecting ? '忽略中...' : '忽略' }}
             </button>
             <div class="figma-chat-question-action-spacer"></div>
             <button
               v-if="!isFirstQuestionPage(item)"
               type="button"
               class="figma-chat-question-prev"
+              :disabled="isAnyQuestionActionPending"
               @click="showPreviousQuestion(item)"
             >
               上一步
@@ -3928,6 +3941,7 @@ function onCompositionEnd() {
               v-if="!isLastQuestionPage(item)"
               type="button"
               class="figma-chat-question-next"
+              :disabled="isAnyQuestionActionPending"
               @click="showNextQuestion(item)"
             >
               下一步
@@ -3936,10 +3950,10 @@ function onCompositionEnd() {
               v-else
               type="button"
               class="figma-chat-question-submit"
-              :disabled="!canReplyQuestion(item)"
+              :disabled="isAnyQuestionActionPending || !canReplyQuestion(item)"
               @click="replyQuestion(item)"
             >
-              提交
+              {{ questionSubmitting ? '提交中...' : '提交' }}
             </button>
           </div>
         </div>

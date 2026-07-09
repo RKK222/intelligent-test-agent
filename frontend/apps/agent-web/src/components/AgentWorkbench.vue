@@ -4171,6 +4171,8 @@ async function handleLogout() {
           :process-initializing="initializeOpencodeProcessMutation.isPending.value"
           :permissions="chatState.permissions"
           :questions="chatState.questions"
+          :question-submitting="replyQuestionMutation.isPending.value"
+          :question-rejecting="rejectQuestionMutation.isPending.value"
           :todos="chatState.todos"
           :chat-contexts="chatContextStore.items"
           :chat-context-total-chars="chatContextStore.totalCharCount"

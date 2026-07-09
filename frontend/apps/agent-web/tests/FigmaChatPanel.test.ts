@@ -585,6 +585,75 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("reply-question")).toEqual([["ques_child", [["子任务"]], "ses_remote_child"]]);
   });
 
+  it("disables all option/action buttons and changes text when replying or rejecting is in progress", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questionSubmitting: true,
+        questionRejecting: false,
+        questions: [
+          {
+            requestId: "ques_disable",
+            sessionId: "ses_1",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [
+              {
+                questionId: "q1",
+                text: "测试提交中置灰",
+                kind: "single",
+                options: [{ id: "opt1", label: "选项一" }],
+                custom: true
+              }
+            ]
+          }
+        ]
+      } as any
+    });
+
+    const optionBtn = wrapper.find(".figma-chat-question-option");
+    expect(optionBtn.attributes("disabled")).toBeDefined();
+
+    const customInput = wrapper.find(".figma-chat-question-custom-input");
+    expect(customInput.attributes("disabled")).toBeDefined();
+
+    const rejectBtn = wrapper.find(".figma-chat-question-reject");
+    expect(rejectBtn.attributes("disabled")).toBeDefined();
+
+    const submitBtn = wrapper.find(".figma-chat-question-submit");
+    expect(submitBtn.attributes("disabled")).toBeDefined();
+    expect(submitBtn.text()).toBe("提交中...");
+
+    const wrapperRejecting = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questionSubmitting: false,
+        questionRejecting: true,
+        questions: [
+          {
+            requestId: "ques_disable",
+            sessionId: "ses_1",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [
+              {
+                questionId: "q1",
+                text: "测试忽略中置灰",
+                kind: "single",
+                options: [{ id: "opt1", label: "选项一" }],
+                custom: true
+              }
+            ]
+          }
+        ]
+      } as any
+    });
+
+    const rejectBtn2 = wrapperRejecting.find(".figma-chat-question-reject");
+    expect(rejectBtn2.attributes("disabled")).toBeDefined();
+    expect(rejectBtn2.text()).toBe("忽略中...");
+  });
+
   it("pages through multiple questions and only submits from the last page", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
