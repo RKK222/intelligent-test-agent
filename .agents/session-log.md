@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 支持 HTTP 内网 Chromium 108 添加 SSH key
+
+- Why:
+  - 企业内网使用 HTTP 访问且浏览器内核为 Chromium 108 时，页面不是安全上下文，`crypto.subtle` 不可用；上一版只把旧的 `digest` 空指针改成了明确错误，仍无法添加 SSH key。
+- What:
+  - 前端 SSH key 加密入口保留 Web Crypto 优先路径，并新增 node-forge 纯 JS 回退：在 `crypto.subtle` 不可用但 `getRandomValues` 可用时，仍在浏览器端完成 AES-GCM + RSA-OAEP/SHA-256 混合加密，不向后端提交明文。
+- How:
+  - 复用现有 `encryptSshKey` 契约和后端 RSA/AES 解密格式，新增针对 `subtle` 缺失场景的可解密单测，并同步前端 README/PACKAGE 说明。
+- Result:
+  - `ssh-crypto` 定向 Vitest、`@test-agent/agent-web` typecheck/build 和本地三服务重启验证通过；构建仍有既有 CSS `@import` 顺序 warning 和大 chunk warning。
+
 ### 2026-07-09 - 修复公共配置未初始化时 listPublicGitConflicts 报错
 
 - Why:

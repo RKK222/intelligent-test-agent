@@ -19,7 +19,7 @@
 - `stores/chatContextStore.ts`：管理工作区上下文附件，包含 selection/file 类型、字符数限制、添加/删除/清空、总量统计、发送前校验和前端 prompt 序列化。
 - `components/ChatContextAttachmentList.vue` / `ChatContextAttachmentCard.vue` / `ChatContextPreviewDrawer.vue`：输入框上方的上下文附件展示、单卡片删除和只读预览抽屉。
 - `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、版本库管理、版本库关联、应用工作空间和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示；"应用人员管理" tab 用 `el-autocomplete` 懒加载搜索候选用户（userId/unifiedAuthId/username LIKE 匹配，空输入不查后端），选中后主按钮从"搜索"切换为"添加"；"工作空间管理" tab 校验版本库英文名，创建区按刷新分支、加载目录、创建工作空间三步展示，非标准库额外要求 `yyyyMMdd` 版本，创建时生成 `operationId` 并轮询后端进度接口；移除应用成员、解除应用与版本库关联前必须弹出页面内 div 确认框。
-- `utils/ssh-crypto.ts`：个人 SSH key 浏览器端混合加密工具，按后端契约生成 AES-GCM 私钥密文、RSA-OAEP/SHA-256 临时 AES 密钥密文和 SHA-256 指纹；加密前必须检测 `crypto.subtle` 与 `getRandomValues`，企业内 Chromium 108 或 HTTP 内网访问不满足安全上下文时返回明确错误，不允许明文降级。
+- `utils/ssh-crypto.ts`：个人 SSH key 浏览器端混合加密工具，按后端契约生成 AES-GCM 私钥密文、RSA-OAEP/SHA-256 临时 AES 密钥密文和 SHA-256 指纹；优先使用 Web Crypto，企业内 Chromium 108 的 HTTP 内网访问缺少 `crypto.subtle` 时使用 node-forge 纯 JS 回退；如果 `getRandomValues` 不可用则返回明确错误，不允许明文降级。
 - `components/SystemManagementWrapper.vue`、`components/system/SystemManagementPanel.vue`：超级管理员系统管理入口和二级导航，包含定时任务管理与运行管理。
 - `components/system/ScheduledTaskManagementPanel.vue`：定时任务管理页，展示任务定义、当前/最近执行状态和历史执行记录，支持启停、Cron 编辑、手工启动和停止 `RUNNING` 运行记录。
 - `components/EditorPane.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
