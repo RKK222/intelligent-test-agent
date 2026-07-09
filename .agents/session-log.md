@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-09 - 增加企业内一键升级脚本
+
+- Why:
+  - 企业内部署升级需要把构建包传到 `122.233.30.4:/data/0709` 后自动完成解压、前端 `scp`、Nginx reload、Java jar 替换、worker 镜像导入和重启，避免现场反复手工执行分散命令。
+- What:
+  - 新增 `deploy/internal/deploy-internal-release.sh`，默认读取 `/data/0709/internal.zip`，适配当前 `122.233.30.2` 前端、`122.233.30.4` 后端/worker 和 `/data/testagent` 目录；`package-release.sh` 全量打包时额外生成 `test-agent-internal-release.zip`，并保留 `--no-zip`。
+- How:
+  - 部署脚本先校验 zip 内 `dist` 产物和 `deploy/internal`，再按“前端更新并 reload Nginx -> 替换后端 jar/程序/worker 镜像 -> 启动 Java 并校验 `.serverid/.serverhost` -> 重启 worker 等待 `manager config update applied`”执行；`--validate-only` 可只检查 zip 结构不触发远程操作。
+- Result:
+  - `bash -n deploy/internal/deploy-internal-release.sh deploy/internal/package-release.sh`、两个脚本 `--help`、临时 zip 的 `deploy-internal-release.sh --validate-only` 和 `git diff --check` 通过；未真实连接 122 服务器、未重启 systemd/Nginx/Docker。
+
 ### 2026-07-08 - 增加后台运行会话历史状态提醒
 
 - Why:

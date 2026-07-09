@@ -16,6 +16,7 @@ PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
 SAVE_TARBALL=1
+PACKAGE_ZIP=1
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
 
 usage() {
@@ -37,6 +38,7 @@ Options:
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
   --no-save               Build opencode image but do not export tarball.
+  --no-zip                Do not create the complete enterprise release zip.
   -h, --help              Show this help.
 USAGE
 }
@@ -77,6 +79,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-save)
       SAVE_TARBALL=0
+      shift
+      ;;
+    --no-zip)
+      PACKAGE_ZIP=0
       shift
       ;;
     -h|--help)
@@ -252,6 +258,36 @@ build_opencode_worker_image() {
   fi
 }
 
+package_release_zip() {
+  local staging_dir="${OUTPUT_DIR}/.release-zip"
+  local zip_path
+
+  require_command zip
+  require_command rsync
+  rm -rf "${staging_dir}"
+  mkdir -p "${staging_dir}/dist" "${staging_dir}/deploy/internal"
+  zip_path="$(cd "${OUTPUT_DIR}" && pwd)/test-agent-internal-release.zip"
+
+  # 交付 zip 只放部署所需产物和脚本，避免把 deploy/internal/dist 自身递归打进去。
+  if [[ -d "${OUTPUT_DIR}/backend" ]]; then
+    mkdir -p "${staging_dir}/dist/backend"
+    cp -a "${OUTPUT_DIR}/backend/test-agent-app.jar" "${staging_dir}/dist/backend/test-agent-app.jar"
+  fi
+  [[ -f "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" ]] && cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
+  [[ -f "${OUTPUT_DIR}/test-agent-programs.tar.gz" ]] && cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${staging_dir}/dist/"
+
+  local worker_tar
+  worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+  [[ -f "${worker_tar}" ]] && cp -a "${worker_tar}" "${staging_dir}/dist/"
+
+  rsync -a --exclude 'dist' --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
+
+  rm -f "${zip_path}"
+  (cd "${staging_dir}" && zip -qr "${zip_path}" .)
+  rm -rf "${staging_dir}"
+  ls -lh "${zip_path}"
+}
+
 export_worker_programs() {
   local programs_dir="${OUTPUT_DIR}/programs"
   local container_id
@@ -317,6 +353,10 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then
   build_opencode_worker_image
 fi
 
+if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  package_release_zip
+fi
+
 echo
 echo "Artifacts:"
 if [[ "${PACKAGE_BACKEND}" -eq 1 ]]; then
@@ -333,4 +373,7 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo
   echo "Target import:"
   echo "  docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+fi
+if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  echo "  complete release zip: ${OUTPUT_DIR}/test-agent-internal-release.zip"
 fi

@@ -399,6 +399,52 @@ deploy/internal/package-release.sh --output-dir /data/testagent/dist
 
 从最新代码部署到企业内环境时，按“构建机打包 → 前端服务器替换静态资源 → 后端服务器替换 jar/程序/镜像 → 先重启 Java 再重启 worker”的顺序执行。不要清理 `/data/testagent/data`，该目录包含 Java 写给 manager 的 `.serverid/.serverhost`、公共配置、用户 session、应用工作区和 manager state。
 
+如果已经把本次交付物压成 zip 并放到 `122.233.30.4:/data/0709/internal.zip`，优先在 `122.233.30.4` 上执行一键部署脚本：
+
+```bash
+cd /data/testagent/deploy/internal
+bash deploy-internal-release.sh --archive /data/0709/internal.zip
+```
+
+如果这是第一次使用新脚本，目标机旧目录里还没有 `deploy-internal-release.sh`，可以直接从 zip 里抽出脚本执行：
+
+```bash
+unzip -p /data/0709/internal.zip deploy/internal/deploy-internal-release.sh > /tmp/deploy-internal-release.sh
+bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip
+```
+
+脚本默认完成以下动作：
+
+- 解压 `/data/0709/internal.zip` 到临时目录。
+- 自动定位 `test-agent-frontend-dist.tar.gz`、`backend/test-agent-app.jar`、`test-agent-programs.tar.gz`、`test-agent-opencode-worker_internal-linux-amd64.tar` 和 `deploy/internal/`。
+- 用 `scp` 把前端包和 `deploy/internal/` 复制到 `122.233.30.2:/data/testagent`，远程备份旧前端目录、解压新前端、执行 `nginx -t` 和 `systemctl reload nginx`。
+- 在本机 `122.233.30.4` 备份旧 jar，替换 `/data/testagent/dist/backend/test-agent-app.jar`，解压外挂程序，`docker load` 新 worker 镜像。
+- 按顺序 `systemctl restart` 等价地停启 `test-agent-backend`，等待 `/actuator/health` 和 `/actuator/health/readiness`，校验 `/data/testagent/data/.serverid` 和 `.serverhost`。
+- 重启 `opencode-worker`，等待日志出现 `manager config update applied`，最后验收前端和后端 HTTP。
+
+常用参数：
+
+```bash
+# zip 文件名不是默认值
+bash deploy-internal-release.sh --archive /data/0709/internal-20260709.zip
+
+# 前端服务器需要指定 SSH 用户
+bash deploy-internal-release.sh --frontend-user root
+
+# 只校验 zip 里产物是否齐全，不执行 scp、重启或 reload
+bash deploy-internal-release.sh --archive /data/0709/internal.zip --validate-only
+
+# 只升级后端与 worker，不碰前端
+bash deploy-internal-release.sh --skip-frontend
+
+# 只升级 Java 和前端，不重启 worker
+bash deploy-internal-release.sh --skip-worker
+```
+
+如果 zip 文件是从 Mac 上项目内 `deploy/internal/dist/` 和 `deploy/internal/` 打出来的，脚本能识别常见目录层级；如果现场改了服务器地址、安装根目录、systemd 服务名或健康检查 URL，执行 `bash deploy-internal-release.sh --help` 查看可覆盖参数。
+
+下面是脚本内部执行的拆解步骤，现场需要人工排查或分步回滚时可参考。
+
 1. 构建机打包：
 
 ```bash
@@ -546,10 +592,12 @@ deploy/internal/dist/test-agent-frontend-dist.tar.gz
 deploy/internal/dist/programs/
 deploy/internal/dist/test-agent-programs.tar.gz
 deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
+deploy/internal/dist/test-agent-internal-release.zip
 ```
 
 也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，实体 Nginx 直接托管 `dist/frontend`。
 第一版 `opencode-worker` 镜像里仍内置 `opencode-manager` 和 `opencode-ai` CLI；同时脚本会把这两个程序导出到 `dist/programs/`，纯 Docker worker 管理脚本默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。
+`test-agent-internal-release.zip` 是完整企业升级包，包含上述必要产物和 `deploy/internal/` 脚本目录；传到 `122.233.30.4:/data/0709/internal.zip` 后即可用 `deploy-internal-release.sh` 解压部署。
 
 只打某一类交付物：
 
@@ -557,6 +605,12 @@ deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
 deploy/internal/package-release.sh --backend-only
 deploy/internal/package-release.sh --frontend-only
 deploy/internal/package-release.sh --opencode-only
+```
+
+如果只想保留散文件产物，不生成完整 zip：
+
+```bash
+deploy/internal/package-release.sh --no-zip
 ```
 
 opencode worker 镜像也可以手工执行：
