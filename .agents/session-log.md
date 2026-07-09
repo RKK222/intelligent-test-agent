@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-09 - 优化多选题勾选框样式并支持自定义答案输入自动选中
+
+- Why:
+  - 1. 用户要求在 ask 提问卡片展示中，多选题的选项标志应为方形勾选框（Checkbox），而非圆形单选框（Radio）。
+  - 2. 当用户在“输入自己的答案”文本输入框中输入内容时，需要自动将该自定义答案卡片状态设为选中（Checked）。
+- What:
+  - 1. 在 FigmaChatPanel.vue 的多选题选项容器上附加 `is-multiple` 类名，并在 CSS 中为该类下的 `.figma-chat-question-option-mark` 设定 3px 圆角的方形外观和白色对勾动画/伪元素样式。
+  - 2. 新增 `isCustomAnswerSelected` 辅助方法判断自定义答案是否包含有效输入；如果包含，则自动为 `.figma-chat-question-custom-card` 卡片赋予 `.is-selected` 选中态类名和选中样式。
+- How:
+  - 在 FigmaChatPanel.vue 中通过 Vue 模板属性动态绑定 `is-multiple` 及自定义卡片的 `is-selected`，并定义相应的 CSS 样式覆写。
+- Result:
+  - 静态类型检查 `npm run lint` 通过，0 类型或构建错误。
+
 ### 2026-07-09 - 修复 scheduler 关闭时任务定义不展示
 
 - Why:

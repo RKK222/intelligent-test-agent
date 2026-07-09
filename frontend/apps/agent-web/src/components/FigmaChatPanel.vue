@@ -1218,6 +1218,14 @@ function isQuestionOptionSelected(question: FigmaQuestionItem, label: string): b
   return questionAnswers.value[question.questionId] === label
 }
 
+/**
+ * 自定义答案是否已输入并选中
+ */
+function isCustomAnswerSelected(question: FigmaQuestionItem): boolean {
+  const val = questionCustomAnswers.value[question.questionId]
+  return typeof val === 'string' && val.trim().length > 0
+}
+
 function chooseQuestionOption(question: FigmaQuestionItem, label: string) {
   if (isMultipleQuestion(question)) {
     toggleMultiQuestionAnswer(question.questionId, label)
@@ -3855,7 +3863,7 @@ function onCompositionEnd() {
                 placeholder="输入你的答案..."
                 @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
               />
-              <div v-else class="figma-chat-question-options">
+              <div v-else class="figma-chat-question-options" :class="{ 'is-multiple': isMultipleQuestion(currentQuestionRequired(item)) }">
                 <button
                   v-for="option in questionOptions(currentQuestionRequired(item))"
                   :key="option.id"
@@ -3872,7 +3880,12 @@ function onCompositionEnd() {
                     <span v-if="option.description" class="figma-chat-question-option-description">{{ option.description }}</span>
                   </span>
                 </button>
-                <label class="figma-chat-question-custom-card">
+                <label
+                  :class="[
+                    'figma-chat-question-custom-card',
+                    isCustomAnswerSelected(currentQuestionRequired(item)) && 'is-selected',
+                  ]"
+                >
                   <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
                   <span class="figma-chat-question-option-copy">
                     <span class="figma-chat-question-option-label">输入自己的答案</span>
@@ -6286,7 +6299,8 @@ function onCompositionEnd() {
 
 .figma-chat-question-option:hover,
 .figma-chat-question-option.is-selected,
-.figma-chat-question-custom-card:focus-within {
+.figma-chat-question-custom-card:focus-within,
+.figma-chat-question-custom-card.is-selected {
   border-color: var(--ta-accent, #333333);
   background: var(--ta-chat-hover, #eeeeee);
   color: var(--ta-chat-text, #333333);
@@ -6303,11 +6317,13 @@ function onCompositionEnd() {
   background: var(--ta-chat-surface, #ffffff);
 }
 
-.figma-chat-question-option.is-selected .figma-chat-question-option-mark {
+.figma-chat-question-option.is-selected .figma-chat-question-option-mark,
+.figma-chat-question-custom-card.is-selected .figma-chat-question-option-mark {
   border-color: var(--ta-accent, #333333);
 }
 
-.figma-chat-question-option.is-selected .figma-chat-question-option-mark::after {
+.figma-chat-question-option.is-selected .figma-chat-question-option-mark::after,
+.figma-chat-question-custom-card.is-selected .figma-chat-question-option-mark::after {
   position: absolute;
   top: 3px;
   left: 3px;
@@ -6315,6 +6331,32 @@ function onCompositionEnd() {
   height: 6px;
   border-radius: 999px;
   background: var(--ta-accent, #333333);
+  content: "";
+}
+
+/* 多选题勾选框样式 */
+.is-multiple .figma-chat-question-option-mark {
+  border-radius: 3px;
+}
+
+.is-multiple .figma-chat-question-option.is-selected .figma-chat-question-option-mark,
+.is-multiple .figma-chat-question-custom-card.is-selected .figma-chat-question-option-mark {
+  background: var(--ta-accent, #333333);
+  border-color: var(--ta-accent, #333333);
+}
+
+.is-multiple .figma-chat-question-option.is-selected .figma-chat-question-option-mark::after,
+.is-multiple .figma-chat-question-custom-card.is-selected .figma-chat-question-option-mark::after {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  width: 4px;
+  height: 7px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  border-radius: 0;
+  transform: rotate(45deg);
+  background: transparent;
   content: "";
 }
 
