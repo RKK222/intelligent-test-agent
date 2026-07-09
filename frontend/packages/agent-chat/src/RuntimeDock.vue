@@ -14,8 +14,8 @@ import { Button, Input } from "@test-agent/ui-kit";
 defineProps<RuntimeDockProps>();
 const emit = defineEmits<{
   replyPermission: [requestId: string, decision: "once" | "always" | "reject"];
-  replyQuestion: [requestId: string, answers: unknown[]];
-  rejectQuestion: [requestId: string];
+  replyQuestion: [requestId: string, answers: unknown[], remoteSessionId?: string];
+  rejectQuestion: [requestId: string, remoteSessionId?: string];
 }>();
 
 // 单选/文本题：按 questionId 记录选中的 option id 或输入文本。
@@ -113,9 +113,9 @@ function canReplyItem(item: QuestionRequest): boolean {
           size="sm"
           variant="primary"
           :disabled="!canReplyItem(item)"
-          @click="emit('replyQuestion', item.requestId, buildItemAnswers(item))"
+          @click="emit('replyQuestion', item.requestId, buildItemAnswers(item), item.sessionId)"
         >回复</Button>
-        <Button type="button" size="sm" variant="secondary" @click="emit('rejectQuestion', item.requestId)">拒绝</Button>
+        <Button type="button" size="sm" variant="secondary" @click="emit('rejectQuestion', item.requestId, item.sessionId)">拒绝</Button>
       </div>
     </div>
   </div>

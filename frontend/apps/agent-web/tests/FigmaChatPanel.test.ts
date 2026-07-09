@@ -519,7 +519,7 @@ describe("FigmaChatPanel", () => {
     await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("预发环境"))!.trigger("click");
     await wrapper.get(".figma-chat-question-submit").trigger("click");
 
-    expect(wrapper.emitted("reply-question")).toEqual([["ques_1", [["预发环境"]]]]);
+    expect(wrapper.emitted("reply-question")).toEqual([["ques_1", [["预发环境"]], "ses_1"]]);
   });
 
   it("submits a custom answer instead of the selected single-choice option", async () => {
@@ -553,7 +553,36 @@ describe("FigmaChatPanel", () => {
     await wrapper.get(".figma-chat-question-custom-input").setValue("灰度环境");
     await wrapper.get(".figma-chat-question-submit").trigger("click");
 
-    expect(wrapper.emitted("reply-question")).toEqual([["ques_custom", [["灰度环境"]]]]);
+    expect(wrapper.emitted("reply-question")).toEqual([["ques_custom", [["灰度环境"]], "ses_1"]]);
+  });
+
+  it("emits the question remote session when replying to a child session ask", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questions: [
+          {
+            requestId: "ques_child",
+            sessionId: "ses_remote_child",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [
+              {
+                questionId: "q1",
+                text: "需要在哪个子任务里继续？",
+                kind: "single",
+                options: [{ id: "child", label: "子任务" }]
+              }
+            ]
+          }
+        ]
+      } as any
+    });
+
+    await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("子任务"))!.trigger("click");
+    await wrapper.get(".figma-chat-question-submit").trigger("click");
+
+    expect(wrapper.emitted("reply-question")).toEqual([["ques_child", [["子任务"]], "ses_remote_child"]]);
   });
 
   it("pages through multiple questions and only submits from the last page", async () => {
@@ -605,7 +634,7 @@ describe("FigmaChatPanel", () => {
     await wrapper.get(".figma-chat-question-next").trigger("click");
     await wrapper.get(".figma-chat-question-submit").trigger("click");
 
-    expect(wrapper.emitted("reply-question")).toEqual([["ques_multi_page", [["换淡入效果"], ["需要更轻量"]]]]);
+    expect(wrapper.emitted("reply-question")).toEqual([["ques_multi_page", [["换淡入效果"], ["需要更轻量"]], "ses_1"]]);
   });
 
   it("submits multiple selected labels with an additional custom answer", async () => {
@@ -644,7 +673,7 @@ describe("FigmaChatPanel", () => {
     await wrapper.get(".figma-chat-question-submit").trigger("click");
 
     expect(wrapper.emitted("reply-question")).toEqual([
-      ["ques_multiple", [["需求文档", "UI 界面", "还要调整交互文案"]]]
+      ["ques_multiple", [["需求文档", "UI 界面", "还要调整交互文案"]], "ses_1"]
     ]);
   });
 
@@ -702,7 +731,7 @@ describe("FigmaChatPanel", () => {
     });
 
     await wrapper.get(".figma-chat-question-reject").trigger("click");
-    expect(wrapper.emitted("reject-question")).toEqual([["ques_reject"]]);
+    expect(wrapper.emitted("reject-question")).toEqual([["ques_reject", "ses_1"]]);
   });
 
   it("renders todos above the composer and expands the task list on demand", async () => {

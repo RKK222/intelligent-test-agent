@@ -532,8 +532,9 @@ public class AgentOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> rejectQuestionByOpencodePath(
             @RequestParam String sessionId,
             @PathVariable String requestId,
+            @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return agentResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
+        return agentResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, body, traceId));
     }
 
     /**

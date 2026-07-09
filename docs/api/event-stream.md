@@ -147,15 +147,16 @@ payload 字段：
 - `options[].label/description` 必须保留；提交答案时使用用户选择的 `label` 文本，而不是本地展示用 id。
 - 自定义答案作为该问题的有效答案：单选题中与选项互斥，多选题中作为附加答案提交。
 
-回复接口仍使用 HTTP `POST /api/internal/agent/{agentId}/sessions/{sessionId}/questions/{requestId}/reply`，body 为：
+回复接口使用 HTTP `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reply`，body 为：
 
 ```json
 {
+  "remoteSessionId": "ses_remote_child",
   "answers": [["需求文档"], ["需要更轻量"]]
 }
 ```
 
-`answers` 外层数组顺序必须与 `questions[]` 顺序一致，内层数组为该问题的一组答案文本。
+`answers` 外层数组顺序必须与 `questions[]` 顺序一致，内层数组为该问题的一组答案文本。`remoteSessionId` 可选；当 `question.asked.sessionId/sessionID` 指向 task 子会话且不同于平台 Session 时，前端必须透传该值，后端仍用 URL 中的平台 Session 定位用户进程和 workspace，只把 opencode question path 切到对应远端会话。
 
 ## 用户会话运行态 fetch SSE
 

@@ -20,7 +20,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的同类型非 task 工具会合并成一个默认折叠的工具组，展开后仍渲染每条原始工具详情；task 子 Agent 卡片始终独立展示，不进入工具组折叠；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
 - 工具视图统一使用 `.oc-*` primitives 和轻量折叠壳，工具详情默认折叠，过程行的标题、摘要、状态和展开箭头使用固定列对齐；最终文本直接以轻量气泡展示，不额外加“最终输出”标题，并保留复制按钮；工作区内长绝对路径在列表中展示为面向用户的短路径，完整路径只保留在悬浮提示中，避免 `.testagent`/personal worktree 前缀撑开对话区域。
 - 运行中状态以 `thinking` 行、工具状态和单个 `working-status` 行展示；`runtimeStatus.type=retry` 时改为展示 retry 行和倒计时文案，不再追加“思考中”或空工作态；retry 行展示原始错误内容、可选 action 链接和“重试中 N 秒后 - 第 X 次 / 共 3 次”，失败运行追加统一错误行。
-- 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和输入框上方 `TodoPanel`；question dock 只能由 RunEvent `question.asked` 归并出的 `QuestionRequest` 驱动，分页展示单选/多选/文本题、选项说明和自定义答案输入，提交时使用选项 label 或自定义文本；Todo 收起态展示待处理/进行中/已完成/已取消/其他和总数，展开态展示任务列表、状态和优先级。模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
+- 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和输入框上方 `TodoPanel`；question dock 只能由 RunEvent `question.asked` 归并出的 `QuestionRequest` 驱动，分页展示单选/多选/文本题、选项说明和自定义答案输入，提交时使用选项 label 或自定义文本，并透传 `QuestionRequest.sessionId` 供 app 层回答 task 子会话 ask；Todo 收起态展示待处理/进行中/已完成/已取消/其他和总数，展开态展示任务列表、状态和优先级。模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
 - Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端展示为 Skill 调用块，展示 Skill 名称、用途、状态和折叠详情。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
 - History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用和历史正文加载态由 app 层完成，正文展示不等待消息反馈等附属请求。

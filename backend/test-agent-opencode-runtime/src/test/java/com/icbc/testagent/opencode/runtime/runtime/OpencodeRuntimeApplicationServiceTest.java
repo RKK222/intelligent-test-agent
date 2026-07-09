@@ -432,6 +432,40 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void replyQuestionUsesRemoteSessionIdFromBodyForChildSessionAsk() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        // task 子会话中的 question.asked 会携带 child remote session，回复必须发回该远端会话。
+        fixture.service.replyQuestion(
+                "ses_1234567890abcdef",
+                "req_child",
+                Map.of("remoteSessionId", "ses_remote_child", "answers", List.of(List.of("继续"))),
+                "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/api/session/ses_remote_child/question/req_child/reply");
+        assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("继续"))));
+    }
+
+    @Test
+    void replyQuestionEncodesRemoteSessionIdAsSinglePathSegment() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        fixture.service.replyQuestion(
+                "ses_1234567890abcdef",
+                "req_child",
+                Map.of("remoteSessionId", "ses_remote/child", "answers", List.of(List.of("继续"))),
+                "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/api/session/ses_remote%2Fchild/question/req_child/reply");
+    }
+
+    @Test
     void rejectQuestionUsesSessionScopedV2Path() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
@@ -443,6 +477,23 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.method()).isEqualTo("POST");
         assertThat(command.path()).isEqualTo("/api/session/ses_remote1234567890abcdef/question/req_1/reject");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
+        assertThat(command.body()).isEqualTo(Map.of());
+    }
+
+    @Test
+    void rejectQuestionUsesRemoteSessionIdFromBodyForChildSessionAsk() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        fixture.service.rejectQuestion(
+                "ses_1234567890abcdef",
+                "req_child",
+                Map.of("remoteSessionId", "ses_remote_child"),
+                "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/api/session/ses_remote_child/question/req_child/reject");
         assertThat(command.body()).isEqualTo(Map.of());
     }
 

@@ -12,6 +12,17 @@
   - 在远端 `origin/main` 基线上完成 rebase 冲突处理，复用 `CodeRepositoryDeploymentMode` 语义，只调整公共 Agent 配置 Git 解释逻辑、通用参数页面提示、测试和文档；通用参数页复用 `repository-deployment-options` 展示当前内部/外部部署模式，不新增第二个参数。
 - Result:
   - 定向后端/前端测试和 agent-web typecheck 通过；`.env.test` 重启链路完成，后端 health/readiness、前端、CORS 和 manager 日志检查通过。当前开发库中 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL` 已被 cleanup migration 删除，只剩 `OPENCODE_PUBLIC_AGENT_GIT_URL` 一行。
+### 2026-07-09 - 修复子会话 ask 回复误判过期
+
+- Why:
+  - task 子会话触发的 `question.asked` 带有子会话远端 sessionId，前端回复时只按平台根 session 调用后端，后端再用根远端 session 代理 opencode question reply，导致远端找不到 requestId 并返回 404，前端显示“提问请求已失效，请重新运行任务”。
+- What:
+  - 前端 ask 回复/拒绝事件透传 `question.asked.sessionId`，`backend-api` 在 reply/reject 请求体支持可选 `remoteSessionId`；后端 platform/agent runtime question reject 接口接受可选 body，runtime service 只在 opencode question path 中使用该远端会话覆盖值，平台 session 仍用于定位用户进程和 workspace。
+- How:
+  - 保留原平台 session 绑定与过期请求冲突映射；对 v2 permission/question 的远端 sessionId 使用单路径片段 URL 编码，避免包含斜杠时被远端路由拆段；同步 HTTP API、Event Stream、前后端 README/PACKAGE 说明和回归测试。
+- Result:
+  - 后端新增子会话 ask reply/reject 与路径编码单测，前端新增 FigmaChatPanel/backend-api/workbench 覆盖；受影响模块编译、Vitest、类型检查和 Controller 测试通过。Playwright 单条 workbench 用例仍在既有文件上传 input 等待处超时，本次未改该问题。
+
 ### 2026-07-09 - 将历史对话及顶部栏的加载动画替换为 Spinner 组件
 
 - Why:

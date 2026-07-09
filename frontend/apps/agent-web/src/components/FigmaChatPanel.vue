@@ -752,8 +752,8 @@ const emit =
     (e: 'clear-chat-contexts'): void
     (e: 'preview-context', item: ChatContextItem): void
     (e: 'reply-permission', requestId: string, decision: 'once' | 'always' | 'reject'): void
-    (e: 'reply-question', requestId: string, answers: unknown[]): void
-    (e: 'reject-question', requestId: string): void
+    (e: 'reply-question', requestId: string, answers: unknown[], remoteSessionId?: string): void
+    (e: 'reject-question', requestId: string, remoteSessionId?: string): void
     (
       e: 'submit-feedback',
       payload: {
@@ -1258,7 +1258,7 @@ function canReplyQuestion(item: QuestionRequest): boolean {
 
 function replyQuestion(item: QuestionRequest) {
   if (!canReplyQuestion(item)) return
-  emit('reply-question', item.requestId, buildQuestionAnswers(item))
+  emit('reply-question', item.requestId, buildQuestionAnswers(item), item.sessionId)
 }
 
 // ===== 技能面板 =====
@@ -3905,7 +3905,7 @@ function onCompositionEnd() {
             <button
               type="button"
               class="figma-chat-question-reject"
-              @click="emit('reject-question', item.requestId)"
+              @click="emit('reject-question', item.requestId, item.sessionId)"
             >
               忽略
             </button>
