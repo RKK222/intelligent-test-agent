@@ -373,8 +373,9 @@ function handlePreviewClick() {
   }
   previewClickTimer = setTimeout(() => {
     previewClickTimer = null;
+    // 单击直接在 off 和 split 之间切换，不再支持隐藏编辑器的 full 模式，确保 Monaco 始终负责编辑
     if (props.markdownPreviewMode === "off") {
-      emit("update:markdownPreviewMode", "full");
+      emit("update:markdownPreviewMode", "split");
     } else {
       emit("update:markdownPreviewMode", "off");
     }
@@ -386,6 +387,7 @@ function handlePreviewDblClick() {
     clearTimeout(previewClickTimer);
     previewClickTimer = null;
   }
+  // 双击同样在 off 和 split 之间切换，保持逻辑一致
   if (props.markdownPreviewMode === "split") {
     emit("update:markdownPreviewMode", "off");
   } else {

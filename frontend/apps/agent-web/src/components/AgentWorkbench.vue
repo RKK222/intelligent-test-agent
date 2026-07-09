@@ -4155,7 +4155,7 @@ async function handleLogout() {
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
           @open-server-workspace-picker="openServerWorkspacePicker"
-          @update:markdown-preview="(value: boolean) => { if (!value) markdownPreviewMode = 'off'; else if (markdownPreviewMode === 'off') markdownPreviewMode = 'full'; }"
+          @update:markdown-preview="(value: boolean) => { if (!value) markdownPreviewMode = 'off'; else if (markdownPreviewMode === 'off') markdownPreviewMode = 'split'; }"
           @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
         >
           <CodeEditor

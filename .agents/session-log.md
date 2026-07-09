@@ -12,6 +12,21 @@
   - WebSocket 日志只记录 handler 名、path、traceId、signal 和错误摘要，不记录消息内容；HTTP、SSE 和 Service 仍由既有 `ApiLoggingAspect`、`ServiceLoggingAspect` 和 Log4j2 分文件配置承接。
 - Result:
   - `mvn -pl test-agent-api -am test -Dtest=ApiLoggingAspectTest,ServiceLoggingAspectTest,WebSocketLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`、`bash -n restart-dev-services.sh` 和 `./restart-dev-services.sh --help` 检查通过；`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 已重新启动本地后端、opencode-manager 和前端，输出已显示 process/backend/manager 日志分流路径。
+### 2026-07-09 - Markdown 文件编辑切换为 Monaco + markdown-it 分屏模式
+
+- Why:
+  - 针对 Markdown (.md) 文件的编辑与预览，原有的 previewMode 支持 'off'(纯编辑)、'full'(纯预览，隐藏 Monaco 编辑器)、'split'(分屏预览)。在 'full' 模式下，由于 Monaco 被隐藏，用户无法进行编辑。为了满足“Monaco 组件负责编辑，markdown-it 负责渲染”的要求，需要将 Markdown 文件的预览统一为 Monaco + markdown-it 模式（即分屏模式），消除隐藏编辑器的 'full' 模式。
+- What:
+  - 1. 修改 `CodeEditor.vue`，在计算属性 `effectivePreviewMode` 中，如果外部传入或自动判断为 `full` 预览模式，均强制映射/降级为 `split` 分屏模式，使得 Monaco 编辑区与 markdown-it 预览区始终共存。
+  - 2. 修改 `WorkbenchFooter.vue` 中的预览点击处理函数 `handlePreviewClick` 和双击处理函数 `handlePreviewDblClick`，使得单击不再切换到 `full`，而是直接在 `off` 和 `split` 模式之间切换；双击同样限制在 `off` 与 `split` 之间。
+  - 3. 修改 `AgentWorkbench.vue` 上的 `@update:markdown-preview` 事件处理逻辑，当开启预览时直接将模式更新为 `split` 模式。
+  - 4. 更新相关的单元测试 `CodeEditor.preview.test.ts` 和 `WorkbenchFooter.test.ts` 以对齐这一行为（单击产出 `split`，`full` 模式降级为 `split` 且不隐藏 Monaco 编辑器）。
+  - 5. 同步更新 `@test-agent/editor` 包的 `README.md` 和 `PACKAGE.md` 稳定文档。
+- How:
+  - 在 `effectivePreviewMode` 和 footer 点击事件中将目标状态由 `full` 修改为 `split`，对测试文件中的断言进行对应修改。在 `frontend` 目录运行 `corepack pnpm test --run`、`corepack pnpm typecheck` 和 `corepack pnpm lint` 校验。
+- Result:
+  - Markdown 文件的预览开启后将始终处于 Monaco + markdown-it 模式下，左/上侧 Monaco 负责正常编辑，右/下侧 markdown-it 负责预览渲染。全部 441 项 Vitest 单元测试、TypeScript 类型检查和 ESLint 校验全部通过。
+
 ### 2026-07-09 - 默认不展示聊天面板头部标题
 
 - Why:

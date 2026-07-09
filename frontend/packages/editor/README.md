@@ -15,7 +15,7 @@ Monaco 文件编辑器包。
 - 保存动作通过回调交给 app 层调用 `backend-api`。
 - 选区上下文只上报文件路径、语言、选区范围和文本片段；是否转换为 `PromptPart` 由 app 层负责。
 - 编辑器容器需要保持稳定高度和最小宽度，避免保存反馈、只读状态或长文件名挤压 Monaco 区域。
-- Markdown 预览：`.md` 文件的「预览」开关由调用方（当前为编辑器 tab 表头）受控传入，文件打开时默认不预览；开启后编辑器主体上下分屏，上为 Monaco 源码、下为渲染预览，中间为可拖拽 sash（20%~80%）。源码宿主在分屏和容器尺寸变化时会按实际宽高显式触发 Monaco `layout()`，避免原文区域空白。预览由 `MarkdownPreview.vue` 懒加载 `markdown-it`（转 HTML）+ `highlight.js`（代码高亮）+ `dompurify`（安全消毒）渲染，`github-markdown-css` 提供基础排版样式；这套库不进入首屏同步 bundle；切换文件时预览自动重置为关闭。
+- Markdown 预览：`.md` 文件的「预览」开关由调用方受控传入，文件打开时默认不预览；开启后采用 Monaco + markdown-it 模式，现有的 Monaco 组件负责源码编辑，markdown-it 负责渲染，编辑器主体上下分屏（上为 Monaco 源码、下为渲染预览），中间为可拖拽 sash（20%~80%）。源码宿主在分屏和容器尺寸变化时会按实际宽高显式触发 Monaco `layout()`，避免原文区域空白。预览由 `MarkdownPreview.vue` 懒加载 `markdown-it`（转 HTML）+ `highlight.js`（代码高亮）+ `dompurify`（安全消毒）渲染，`github-markdown-css` 提供基础排版样式；这套库不进入首屏同步 bundle；切换文件时预览自动重置为关闭。
 - 源码↔预览对齐：`markdown-it` 顶级块带 `data-source-line`（源码行号），在预览左侧 gutter 显示行号；编辑器与预览双向按源码行滚动联动（编辑器顶部行 → 预览对应块顶端；预览顶部块 → 编辑器对应行），用 `scrollLock` 防回环。
 
 ## 禁止事项
