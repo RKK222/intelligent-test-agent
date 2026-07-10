@@ -260,9 +260,9 @@ retry 字段：
 
 ## `session.updated`
 
-`session.updated` 是既有的 opencode session 更新 RunEvent。runtime 仅在事件已被 `RunSessionScopeRouter` 确认为当前 Run 的 root session、且远端 root session ID 与对应平台 Session 绑定一致时，提取有效标题并回写该平台 Session。标题优先读取 `payload.info.title`；为兼容 OpenCode raw/sync 包装，也读取 `payload.rawPayload.properties.info.title`。标题去除首尾空白后为空时不回写。
+`session.updated` 是既有的 opencode session 更新 RunEvent。runtime 仅在事件已被 `RunSessionScopeRouter` 确认为当前 Run 的 root session、且远端 root session ID 与对应平台 Session 绑定一致时，提取有效标题并回写该平台 Session。标题优先读取 `payload.info.title`；为兼容 OpenCode raw/sync 包装，也读取 `payload.rawPayload.properties.info.title`。标题去除首尾空白后为空，或仍是 OpenCode 默认的 `New session - <timestamp>` / `Child session - <timestamp>` 时不回写。
 
-标题成功持久化后，runtime 才会在同一个既有 `session.updated` payload 增加 `platformSessionTitleSynchronized: true` 和 `platformSessionTitle: <已持久化标题>`。child session、未知归属事件、远端 root ID 与平台绑定不一致的事件、空标题或标题仓储持久化失败都不得改变平台 Session 标题；这些事件仍按既有规则持久化和通过 SSE 发布，但不携带上述标记。
+标题成功持久化后，runtime 才会在同一个既有 `session.updated` payload 增加 `platformSessionTitleSynchronized: true` 和 `platformSessionTitle: <已持久化标题>`。首轮 root Run 成功后，如果原生标题尚未到达，平台继续监听同一远端 root session 的 `title` agent 完成消息；完成后读取该远端 session 的最终标题，并合成为同一种既有 `session.updated` 同步事件。等待期间不会创建临时 session、再次调用 title agent 或根据超时生成替代标题。下一轮对话、手动改名、归档/删除会取消等待；等待流断开时只对同一远端 root session 做一次读取补偿，读取不到标题便关闭等待。child session、未知归属事件、远端 root ID 与平台绑定不一致的事件、默认标题、空标题、已被原生标题或用户手动改名的会话、标题仓储持久化失败都不得改变平台 Session 标题；这些事件仍按既有规则持久化和通过 SSE 发布，但不携带上述标记。
 
 前端按既有 wire name `session.updated` 订阅，只消费 `platformSessionTitleSynchronized=true` 与 `platformSessionTitle`，不再从 `info` 或 `rawPayload` 推断标题。只有该事件所属的订阅 Run 绑定的平台 Session 仍是当前会话，且事件不是 child session、平台确认标题有效时，才更新当前会话及已加载历史会话中的标题，并失效 sessions cache；切换历史会话后到达的旧订阅事件不得覆盖新当前会话标题。
 

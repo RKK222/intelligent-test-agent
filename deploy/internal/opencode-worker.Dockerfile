@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 FROM golang:1.23-bookworm AS manager-build
 
 ARG GOPROXY=https://goproxy.cn,direct

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.icbc.testagent.common.error.ErrorCode;
@@ -28,6 +29,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import com.icbc.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
+import com.icbc.testagent.opencode.runtime.run.RunSessionTitleWatchService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -100,6 +102,37 @@ class SessionApplicationServiceTest {
         assertThat(updated.title()).isEqualTo("Demo session");
         assertThat(updated.pinned()).isTrue();
         assertThat(sessions.saved.getLast()).isEqualTo(updated);
+    }
+
+    @Test
+    void updateSessionCancelsTitleWatchOnlyWhenTitleActuallyChanges() {
+        RunSessionTitleWatchService titleWatchService = Mockito.mock(RunSessionTitleWatchService.class);
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                new FakeSessionRepository(session()),
+                new FakeMessageRepository(),
+                null,
+                titleWatchService);
+
+        service.updateSession(SESSION_ID, "  ", true, "trace_1234567890abcdef");
+        service.updateSession(SESSION_ID, "手动标题", null, "trace_1234567890abcdef");
+
+        verify(titleWatchService, times(1)).cancelForSession(SESSION_ID, "trace_1234567890abcdef");
+    }
+
+    @Test
+    void archiveSessionCancelsTitleWatch() {
+        RunSessionTitleWatchService titleWatchService = Mockito.mock(RunSessionTitleWatchService.class);
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                new FakeSessionRepository(session()),
+                new FakeMessageRepository(),
+                null,
+                titleWatchService);
+
+        service.archiveSession(SESSION_ID, "trace_1234567890abcdef");
+
+        verify(titleWatchService).cancelForSession(SESSION_ID, "trace_1234567890abcdef");
     }
 
     @Test

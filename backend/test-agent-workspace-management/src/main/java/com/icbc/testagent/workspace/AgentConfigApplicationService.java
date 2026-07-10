@@ -282,15 +282,16 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     public List<String> publicBranches(UserId userId) {
         PublicConfig config = requireEnabledPublicConfig(userId);
+        String gitCommandUrl = publicGitCommandUrl(config, userId);
         long startedAt = System.nanoTime();
         LOGGER.info(
                 "event=agent_config_public_branches_start linuxServerId={} userId={} gitUrl={} gitRoot={}",
                 serverIdentity.linuxServerId(),
                 userId.value(),
-                safeGitUrlForLog(config.gitUrl()),
+                safeGitUrlForLog(gitCommandUrl),
                 config.gitRoot());
         try {
-            List<String> branches = gitRemoteService.listBranches(config.gitUrl(), decryptSingleSshKey(userId));
+            List<String> branches = gitRemoteService.listBranches(gitCommandUrl, decryptSingleSshKey(userId));
             LOGGER.info(
                     "event=agent_config_public_branches_success linuxServerId={} userId={} branchCount={} durationMs={}",
                     serverIdentity.linuxServerId(),
@@ -305,7 +306,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     userId.value(),
                     exception.errorCode(),
                     elapsedMillis(startedAt),
-                    safeGitUrlForLog(config.gitUrl()),
+                    safeGitUrlForLog(gitCommandUrl),
                     exception.getMessage());
             throw exception;
         }
@@ -1149,7 +1150,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         if (!isInitializedConfigDirectory(config)) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "服务器" + serverIdentity.linuxServerId() + "上公共配置目录在" + config.configDir() + "目录中未初始化。",
+                    "服务器" + serverIdentity.linuxServerId() + "上公共配置目录" + config.configDir()
+                            + "未初始化；请先用公共 Agent Git 仓库初始化该服务器，确保仓库中包含 opencode 配置目录和配置文件。",
                     Map.of("linuxServerId", serverIdentity.linuxServerId(), "configDirPath", config.configDir().toString()));
         }
     }
@@ -1402,6 +1404,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                         "用户不存在",
                         Map.of("userId", userId.value())));
         return "ssh://" + user.unifiedAuthId().trim() + "@" + fragment;
+    }
+
+    /**
+     * 公共配置 Git 命令必须用当前操作人的有效 URL，避免内部部署保存片段被直接传给 ls-remote/clone。
+     */
+    private String publicGitCommandUrl(PublicConfig config, UserId userId) {
+        return effectivePublicGitUrl(config.storedGitUrl(), userId, config.parameterName());
     }
 
     private void validateInternalPublicGitUrl(String gitUrl, String parameterName) {
