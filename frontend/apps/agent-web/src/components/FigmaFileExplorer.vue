@@ -105,7 +105,11 @@ const iframeUrl = computed(() => {
   if (props.workspaceRootPath) {
     params.append("workspacePath", props.workspaceRootPath);
   }
-  
+
+  const backendUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? null;
+  if(backendUrl){
+    params.append("backendUrl", backendUrl);
+  }
   const url = new URL(baseUrl);
   url.search = params.toString();
   return url.toString();
