@@ -322,9 +322,14 @@
                     case when m.role = 'USER' then 1 else 0 end as user_message_hit
                 from session_messages m
                 join sessions s on s.session_id = m.session_id
+                left join runs message_run on message_run.run_id = m.run_id
                 where m.created_at &gt;= #{startInclusive}
                   and m.created_at &lt; #{endExclusive}
                   and m.role = 'USER'
+                  and (
+                        coalesce(message_run.storage_mode, 'LEGACY_FULL') != 'REDIS_SUMMARY'
+                        or (message_run.storage_mode = 'REDIS_SUMMARY' and m.content_kind = 'SUMMARY')
+                      )
                 union all
                 select
                     r.session_id,
@@ -383,6 +388,10 @@
             where m.created_at &gt;= #{startInclusive}
               and m.created_at &lt; #{endExclusive}
               and m.role in ('USER', 'ASSISTANT')
+              and (
+                    coalesce(r.storage_mode, 'LEGACY_FULL') != 'REDIS_SUMMARY'
+                    or (r.storage_mode = 'REDIS_SUMMARY' and m.content_kind = 'SUMMARY')
+                  )
 
             union all
 
@@ -469,6 +478,54 @@
             where e.occurred_at &gt;= #{startInclusive}
               and e.occurred_at &lt; #{endExclusive}
               and e.type in ('diff.proposed', 'diff.accepted', 'diff.rejected')
+              and coalesce(r.storage_mode, 'LEGACY_FULL') != 'REDIS_SUMMARY'
+
+            union all
+
+            select
+                r.updated_at as occurred_at,
+                coalesce(r.triggered_by_user_id, s.created_by_user_id, '__unknown__') as user_id,
+                u.username,
+                u.organization,
+                u.rd_department,
+                u.department,
+                r.workspace_id,
+                coalesce(r.agent_id, '__none__') as agent_id,
+                coalesce(r.model_id, '__none__') as model_id,
+                0 as login_count,
+                0 as session_count,
+                0 as active_session_count,
+                0 as empty_session_count,
+                0 as continuous_session_count,
+                0 as user_message_count,
+                0 as assistant_message_count,
+                0 as run_count,
+                0 as succeeded_run_count,
+                0 as failed_run_count,
+                0 as cancelled_run_count,
+                0 as active_termination_count,
+                0 as valid_interaction_count,
+                0 as positive_feedback_count,
+                0 as negative_feedback_count,
+                coalesce(r.diff_proposed_count, 0) as diff_proposed_count,
+                coalesce(r.diff_accepted_count, 0) as diff_accepted_count,
+                coalesce(r.diff_rejected_count, 0) as diff_rejected_count,
+                0 as tokens_input,
+                0 as tokens_output,
+                0 as tokens_reasoning,
+                0 as tokens_total,
+                0 as duration_total_ms,
+                0 as duration_run_count
+            from runs r
+            join sessions s on s.session_id = r.session_id
+            left join users u on u.user_id = coalesce(r.triggered_by_user_id, s.created_by_user_id)
+            where r.storage_mode = 'REDIS_SUMMARY'
+              and r.status in ('SUCCEEDED', 'FAILED', 'CANCELLED')
+              and r.updated_at &gt;= #{startInclusive}
+              and r.updated_at &lt; #{endExclusive}
+              and (coalesce(r.diff_proposed_count, 0) &gt; 0
+                   or coalesce(r.diff_accepted_count, 0) &gt; 0
+                   or coalesce(r.diff_rejected_count, 0) &gt; 0)
 
             union all
 

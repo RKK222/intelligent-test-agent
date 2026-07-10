@@ -12,6 +12,7 @@ import com.icbc.testagent.opencode.runtime.process.OpencodeProcessWeakHealthResp
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
+import com.icbc.testagent.domain.run.RunStorageMode;
 import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionHistoryItem;
@@ -325,12 +326,26 @@ final class RuntimeDtos {
             List<Map<String, Object>> parts,
             TokenUsageResponse tokens,
             BigDecimal costUsd,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String contentKind,
+            String summaryStatus,
+            Integer summaryVersion) {
 
         /**
-         * 从领域消息映射为 API 响应。
+         * 从旧领域消息映射为 API 响应；摘要元数据保持可空，避免旧数据被误标记为终态摘要。
          */
         static SessionMessageResponse from(SessionMessage message) {
+            return from(message, null, null, null);
+        }
+
+        /**
+         * 从消息和终态摘要投影元数据映射响应，供新存储模式的历史读取链路接线。
+         */
+        static SessionMessageResponse from(
+                SessionMessage message,
+                String contentKind,
+                String summaryStatus,
+                Integer summaryVersion) {
             return new SessionMessageResponse(
                     message.messageId().value(),
                     message.sessionId().value(),
@@ -342,7 +357,10 @@ final class RuntimeDtos {
                     parseParts(message.partsJson()),
                     TokenUsageResponse.from(message.tokenUsage()),
                     message.costUsd(),
-                    message.updatedAt());
+                    message.updatedAt(),
+                    contentKind,
+                    summaryStatus,
+                    summaryVersion);
         }
     }
 
@@ -380,12 +398,26 @@ final class RuntimeDtos {
             Instant createdAt,
             Instant updatedAt,
             TokenUsageResponse tokens,
-            BigDecimal costUsd) {
+            BigDecimal costUsd,
+            String storageMode,
+            String clientRequestId,
+            Instant detailsAvailableUntil) {
 
         /**
-         * 从领域运行对象映射为 API 响应。
+         * 从旧领域运行对象映射为 API 响应；新存储元数据保持可空以兼容历史 Run。
          */
         static RunResponse from(Run run) {
+            return from(run, null, null, null);
+        }
+
+        /**
+         * 从 Run 与无原文锚点元数据映射响应，供新模式创建、查询和恢复入口复用。
+         */
+        static RunResponse from(
+                Run run,
+                RunStorageMode storageMode,
+                String clientRequestId,
+                Instant detailsAvailableUntil) {
             return new RunResponse(
                     run.runId().value(),
                     run.sessionId().value(),
@@ -394,7 +426,10 @@ final class RuntimeDtos {
                     run.createdAt(),
                     run.updatedAt(),
                     TokenUsageResponse.from(run.tokenUsage()),
-                    run.costUsd());
+                    run.costUsd(),
+                    storageMode == null ? null : storageMode.name(),
+                    clientRequestId,
+                    detailsAvailableUntil);
         }
     }
 
@@ -450,16 +485,32 @@ final class RuntimeDtos {
             List<RunSessionTreeSessionResponse> sessions,
             Map<String, List<Map<String, Object>>> messagesBySessionId,
             Map<String, String> childSessionIdByTaskPartId,
-            List<RunSessionTreeEventResponse> events) {
+            List<RunSessionTreeEventResponse> events,
+            String historyRepresentation,
+            Boolean replayAvailable,
+            Instant detailsAvailableUntil) {
 
         static RunSessionTreeMessagesResponse from(String runId, List<RunEventSsePayload> snapshotEvents) {
+            return from(runId, snapshotEvents, "FULL", true, null);
+        }
+
+        /** 显式映射历史来源元数据；所有新增字段保持可选响应兼容。 */
+        static RunSessionTreeMessagesResponse from(
+                String runId,
+                List<RunEventSsePayload> snapshotEvents,
+                String historyRepresentation,
+                boolean replayAvailable,
+                Instant detailsAvailableUntil) {
             SessionTreeProjection projection = sessionTreeProjection(snapshotEvents);
             return new RunSessionTreeMessagesResponse(
                     runId,
                     projection.sessions(),
                     projection.messagesBySessionId(),
                     projection.childSessionIdByTaskPartId(),
-                    projection.events());
+                    projection.events(),
+                    historyRepresentation,
+                    replayAvailable,
+                    detailsAvailableUntil);
         }
     }
 
@@ -471,16 +522,35 @@ final class RuntimeDtos {
             List<RunSessionTreeSessionResponse> sessions,
             Map<String, List<Map<String, Object>>> messagesBySessionId,
             Map<String, String> childSessionIdByTaskPartId,
-            List<RunSessionTreeEventResponse> events) {
+            List<RunSessionTreeEventResponse> events,
+            String historyRepresentation,
+            Boolean replayAvailable,
+            Instant detailsAvailableUntil) {
 
+        /** 旧历史读取链路仍返回完整可回放内容，并保留可空的详情过期时间。 */
         static SessionTreeMessagesResponse from(String sessionId, List<RunEventSsePayload> snapshotEvents) {
+            return from(sessionId, snapshotEvents, "FULL", true, null);
+        }
+
+        /**
+         * 映射历史来源元数据；新链路可明确标识 Redis/OpenCode 完整详情或 PostgreSQL 摘要降级。
+         */
+        static SessionTreeMessagesResponse from(
+                String sessionId,
+                List<RunEventSsePayload> snapshotEvents,
+                String historyRepresentation,
+                boolean replayAvailable,
+                Instant detailsAvailableUntil) {
             SessionTreeProjection projection = sessionTreeProjection(snapshotEvents);
             return new SessionTreeMessagesResponse(
                     sessionId,
                     projection.sessions(),
                     projection.messagesBySessionId(),
                     projection.childSessionIdByTaskPartId(),
-                    projection.events());
+                    projection.events(),
+                    historyRepresentation,
+                    replayAvailable,
+                    detailsAvailableUntil);
         }
     }
 

@@ -4,9 +4,12 @@ import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
 import com.icbc.testagent.opencode.runtime.run.RunDiffApplicationService;
+import com.icbc.testagent.opencode.runtime.run.RunHistoryRecoveryResult;
+import com.icbc.testagent.opencode.runtime.run.RunHistoryRecoverySource;
 import com.icbc.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunStorageMode;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.event.RunEventSseMapper;
 import com.icbc.testagent.event.RunEventSsePayload;
@@ -86,7 +89,7 @@ public class RunController {
             @Valid @RequestBody RuntimeDtos.StartRunRequest request,
             ServerWebExchange exchange) {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return blockingResponse(exchange, traceId -> RuntimeDtos.RunResponse.from(
+        return blockingResponse(exchange, traceId -> toRunResponse(
                 hasAgentId(agentId)
                         ? runService.startRun(userId, agentId, request.toInput(), traceId)
                         : runService.startRun(userId, request.toInput(), traceId)));
@@ -103,7 +106,7 @@ public class RunController {
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
-        return blockingResponse(exchange, ignored -> RuntimeDtos.RunResponse.from(runService.getRun(new RunId(runId))));
+        return blockingResponse(exchange, ignored -> toRunResponse(runService.getRun(new RunId(runId))));
     }
 
     /**
@@ -118,9 +121,19 @@ public class RunController {
             @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId ->
-                RuntimeDtos.RunResponse.from(hasAgentId(agentId)
+                toRunResponse(hasAgentId(agentId)
                         ? runService.cancelRun(agentId, new RunId(runId), traceId)
                         : runService.cancelRun(new RunId(runId), traceId)));
+    }
+
+    private RuntimeDtos.RunResponse toRunResponse(com.icbc.testagent.domain.run.Run run) {
+        return runService.storageMetadata(run.runId())
+                .map(metadata -> RuntimeDtos.RunResponse.from(
+                        run,
+                        metadata.storageMode(),
+                        metadata.clientRequestId(),
+                        metadata.detailsAvailableUntil()))
+                .orElseGet(() -> RuntimeDtos.RunResponse.from(run));
     }
 
     /**
@@ -193,7 +206,8 @@ public class RunController {
         String resumeEventId = lastEventId != null ? lastEventId : lastEventIdQuery;
         RunId currentRunId = new RunId(runId);
         String traceId = RuntimeApiSupport.traceId(exchange);
-        Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = messageRecoveryService == null
+        boolean redisSummary = runService.eventStorageMode(currentRunId) == RunStorageMode.REDIS_SUMMARY;
+        Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = messageRecoveryService == null || redisSummary
                 ? Flux.empty()
                 : (hasAgentId(agentId)
                         ? messageRecoveryService.recover(agentId, currentRunId, traceId)
@@ -221,17 +235,25 @@ public class RunController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         RunId currentRunId = new RunId(runId);
         return Mono.fromCallable(() -> {
-                    List<RunEventSsePayload> snapshotEvents = messageRecoveryService == null
-                            ? List.of()
+                    RunHistoryRecoveryResult recovery = messageRecoveryService == null
+                            ? RunHistoryRecoveryResult.full(
+                                    List.of(), null, RunHistoryRecoverySource.OPENCODE)
                             : (hasAgentId(agentId)
-                                    ? messageRecoveryService.recover(agentId, currentRunId, traceId)
-                                    : messageRecoveryService.recover(currentRunId, traceId))
-                                    .collectList()
+                                    ? messageRecoveryService.recoverHistory(agentId, currentRunId, traceId)
+                                    : messageRecoveryService.recoverHistory(currentRunId, traceId))
                                     .block(Duration.ofSeconds(30));
-                    List<RunEventSsePayload> allEvents = new ArrayList<>(snapshotEvents);
-                    allEvents.addAll(durableSnapshotPayloads(currentRunId));
+                    List<RunEventSsePayload> allEvents = new ArrayList<>(recovery.events());
+                    if (recovery.source() == RunHistoryRecoverySource.OPENCODE) {
+                        // legacy OpenCode 快照仍补齐数据库 durable 状态；Redis/摘要来源禁止回查旧事件表。
+                        allEvents.addAll(durableSnapshotPayloads(currentRunId));
+                    }
                     return ApiResponse.ok(
-                            RuntimeDtos.RunSessionTreeMessagesResponse.from(runId, allEvents),
+                            RuntimeDtos.RunSessionTreeMessagesResponse.from(
+                                    runId,
+                                    allEvents,
+                                    recovery.historyRepresentation(),
+                                    recovery.replayAvailable(),
+                                    recovery.detailsAvailableUntil()),
                             traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());

@@ -1,6 +1,10 @@
 package com.icbc.testagent.opencode.runtime.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
@@ -17,12 +21,24 @@ import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.run.Run;
+import com.icbc.testagent.domain.run.RunConversationSummary;
+import com.icbc.testagent.domain.run.RunDetailsLocator;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeReplay;
+import com.icbc.testagent.domain.run.RunRuntimeSnapshot;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.RunStorageMode;
+import com.icbc.testagent.domain.run.RunSummaryPersistencePort;
+import com.icbc.testagent.domain.run.RunSummaryStatus;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
+import com.icbc.testagent.domain.session.SessionMessageId;
+import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.event.RunEventSsePayload;
 import com.icbc.testagent.opencode.client.OpencodeCancelCommand;
@@ -65,6 +81,180 @@ class RunMessageRecoveryServiceTest {
     private static final RunId RUN_ID = new RunId("run_1234567890abcdef");
     private static final SessionId SESSION_ID = new SessionId("ses_1234567890abcdef");
     private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
+
+    @Test
+    void historyRecoveryUsesRedisSnapshotBeforeOpenCodeAndPostgresql() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        RunRepository runRepository = mock(RunRepository.class);
+        com.icbc.testagent.domain.session.SessionRepository sessionRepository =
+                mock(com.icbc.testagent.domain.session.SessionRepository.class);
+        ExecutionNodeRepository executionNodeRepository = mock(ExecutionNodeRepository.class);
+        AgentSessionBindingRepository bindingRepository = mock(AgentSessionBindingRepository.class);
+        RunRuntimeManifest manifest = runtimeManifest();
+        RunEventDraft snapshotMessage = new RunEventDraft(
+                RUN_ID,
+                com.icbc.testagent.domain.event.RunEventType.MESSAGE_UPDATED,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("message", Map.of(
+                        "id", "msg_redis", "role", "assistant", "text", "redis answer")));
+        when(runtimeStore.findManifest(RUN_ID)).thenReturn(Optional.of(manifest));
+        when(runtimeStore.replayAfter(RUN_ID, 0L, RunRuntimeStore.MAX_DURABLE_EVENTS))
+                .thenReturn(new RunRuntimeReplay(
+                        manifest,
+                        new RunRuntimeSnapshot(RUN_ID, 2L, 2L, 0L, List.of(snapshotMessage), NOW),
+                        List.of(),
+                        false,
+                        null));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                runRepository,
+                sessionRepository,
+                executionNodeRepository,
+                runtimeRegistry(facade),
+                bindingRepository,
+                null,
+                runtimeStore,
+                summaryPersistence);
+
+        RunHistoryRecoveryResult result = service
+                .recoverHistory(RUN_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.source()).isEqualTo(RunHistoryRecoverySource.REDIS);
+        assertThat(result.historyRepresentation()).isEqualTo("FULL");
+        assertThat(result.replayAvailable()).isTrue();
+        assertThat(result.detailsAvailableUntil()).isEqualTo(manifest.detailsExpiresAt());
+        assertThat(result.events()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo("message.updated");
+            assertThat(event.payload()).containsEntry("sessionId", REMOTE_SESSION_ID);
+        });
+        assertThat(facade.lastCommand).isNull();
+        verifyNoInteractions(
+                runRepository,
+                sessionRepository,
+                executionNodeRepository,
+                bindingRepository,
+                summaryPersistence);
+    }
+
+    @Test
+    void historyRecoveryFallsBackToPostgresqlSummariesWhenRedisAndOpenCodeAreUnavailable() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.error = new IllegalStateException("opencode unavailable");
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        when(runtimeStore.findManifest(RUN_ID)).thenReturn(Optional.empty());
+        when(summaryPersistence.findSummariesByRunId(RUN_ID)).thenReturn(List.of(
+                summary("msg_user_summary", SessionMessageRole.USER, "prompt summary"),
+                summary("msg_assistant_summary", SessionMessageRole.ASSISTANT, "answer summary")));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                null,
+                runtimeStore,
+                summaryPersistence);
+
+        RunHistoryRecoveryResult result = service
+                .recoverHistory(RUN_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.source()).isEqualTo(RunHistoryRecoverySource.POSTGRESQL_SUMMARY);
+        assertThat(result.historyRepresentation()).isEqualTo("SUMMARY");
+        assertThat(result.replayAvailable()).isFalse();
+        assertThat(result.detailsAvailableUntil()).isNull();
+        assertThat(result.events()).extracting(RunEventSsePayload::type)
+                .containsExactly(
+                        "message.updated", "message.part.updated",
+                        "message.updated", "message.part.updated");
+        assertThat(result.events().get(0).payload()).containsEntry("contentKind", "SUMMARY");
+        assertThat(result.events().get(0).payload()).containsEntry("summaryStatus", "COMPLETE");
+    }
+
+    @Test
+    void sessionHistoryUsesRecentRedisSnapshotsInChronologicalRunOrder() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.error = new IllegalStateException("opencode unavailable");
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        RunRuntimeManifest newer = runtimeManifest();
+        RunId olderRunId = new RunId("run_0000000000000001");
+        RunRuntimeManifest older = runtimeManifest(olderRunId, NOW.minusSeconds(60));
+        when(runtimeStore.findRecentBySession(SESSION_ID, 100)).thenReturn(List.of(newer, older));
+        when(runtimeStore.replayAfter(olderRunId, 0L, RunRuntimeStore.MAX_DURABLE_EVENTS))
+                .thenReturn(replayWithText(older, "older"));
+        when(runtimeStore.replayAfter(RUN_ID, 0L, RunRuntimeStore.MAX_DURABLE_EVENTS))
+                .thenReturn(replayWithText(newer, "newer"));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                null,
+                runtimeStore,
+                summaryPersistence);
+
+        RunHistoryRecoveryResult result = service
+                .recoverSessionTreeHistory(SESSION_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.source()).isEqualTo(RunHistoryRecoverySource.REDIS);
+        assertThat(result.events()).extracting(event ->
+                        String.valueOf(((Map<?, ?>) event.payload().get("message")).get("text")))
+                .containsExactly("older", "newer");
+        assertThat(result.detailsAvailableUntil()).isEqualTo(older.detailsExpiresAt());
+        assertThat(facade.lastCommand).isNotNull();
+        verify(summaryPersistence).findSummariesBySessionId(SESSION_ID);
+    }
+
+    @Test
+    void sessionHistoryMergesExpiredSummariesBeforeRecentRedisWhenOpenCodeIsUnavailable() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.error = new IllegalStateException("opencode unavailable");
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        RunRuntimeManifest recent = runtimeManifest();
+        RunId expiredRunId = new RunId("run_0000000000000000");
+        when(runtimeStore.findRecentBySession(SESSION_ID, 100)).thenReturn(List.of(recent));
+        when(runtimeStore.replayAfter(RUN_ID, 0L, RunRuntimeStore.MAX_DURABLE_EVENTS))
+                .thenReturn(replayWithText(recent, "recent redis"));
+        when(summaryPersistence.findSummariesBySessionId(SESSION_ID)).thenReturn(List.of(
+                summary(expiredRunId, "msg_user_expired", SessionMessageRole.USER, "expired user summary"),
+                summary(expiredRunId, "msg_assistant_expired", SessionMessageRole.ASSISTANT, "expired answer summary"),
+                summary(RUN_ID, "msg_duplicate_recent", SessionMessageRole.ASSISTANT, "must be deduplicated")));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                null,
+                runtimeStore,
+                summaryPersistence);
+
+        RunHistoryRecoveryResult result = service
+                .recoverSessionTreeHistory(SESSION_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.source()).isEqualTo(RunHistoryRecoverySource.REDIS_POSTGRESQL_SUMMARY);
+        assertThat(result.historyRepresentation()).isEqualTo("SUMMARY");
+        assertThat(result.replayAvailable()).isFalse();
+        assertThat(result.detailsAvailableUntil()).isEqualTo(recent.detailsExpiresAt());
+        assertThat(result.events()).extracting(event -> event.payload().toString())
+                .anyMatch(payload -> payload.contains("expired user summary"))
+                .anyMatch(payload -> payload.contains("expired answer summary"))
+                .anyMatch(payload -> payload.contains("recent redis"))
+                .noneMatch(payload -> payload.contains("must be deduplicated"));
+    }
 
     @Test
     void recoveryLoadsOpencodeProjectedMessagesAsTransientSnapshotEvents() {
@@ -284,6 +474,67 @@ class RunMessageRecoveryServiceTest {
     }
 
     @Test
+    void openCodeHistoryKeepsUserMessageWhenRedisDetailsHaveExpired() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.result = new OpencodeSessionMessagesResult(
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of("id", "msg_user_history", "role", "user"),
+                                List.of(Map.of(
+                                        "id", "part_user_history",
+                                        "messageID", "msg_user_history",
+                                        "type", "text",
+                                        "text", "完整用户输入"))),
+                        new OpencodeSessionMessage(
+                                Map.of("id", "msg_assistant_history", "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_assistant_history",
+                                        "messageID", "msg_assistant_history",
+                                        "type", "text",
+                                        "text", "完整助手回答")))),
+                null,
+                null);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        RunRepository runRepository = mock(RunRepository.class);
+        com.icbc.testagent.domain.session.SessionRepository sessionRepository =
+                mock(com.icbc.testagent.domain.session.SessionRepository.class);
+        AgentSessionBindingRepository bindingRepository = mock(AgentSessionBindingRepository.class);
+        when(runtimeStore.findManifest(RUN_ID)).thenReturn(Optional.empty());
+        when(summaryPersistence.findDetailsLocator(RUN_ID)).thenReturn(Optional.of(new RunDetailsLocator(
+                RUN_ID,
+                RunStorageMode.REDIS_SUMMARY,
+                REMOTE_SESSION_ID,
+                node().executionNodeId().value(),
+                "msg_remote",
+                "part_remote",
+                NOW.plus(Duration.ofHours(24)))));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                runRepository,
+                sessionRepository,
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                bindingRepository,
+                null,
+                runtimeStore,
+                summaryPersistence);
+
+        RunHistoryRecoveryResult result = service
+                .recoverHistory(RUN_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.source()).isEqualTo(RunHistoryRecoverySource.OPENCODE_REDIS_SUMMARY);
+        assertThat(result.events()).extracting(event -> event.type())
+                .containsExactly(
+                        "message.updated", "message.part.updated",
+                        "message.updated", "message.part.updated");
+        assertThat(((Map<?, ?>) result.events().get(0).payload().get("message")).get("role"))
+                .isEqualTo("user");
+        verifyNoInteractions(runRepository, sessionRepository, bindingRepository);
+    }
+
+    @Test
     void recoverySkipsWhenSessionHasNoOpencodeMapping() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         RunMessageRecoveryService service = new RunMessageRecoveryService(
@@ -318,6 +569,86 @@ class RunMessageRecoveryServiceTest {
 
         assertThat(payloads).isEmpty();
         assertThat(facade.lastCommand).isNotNull();
+    }
+
+    private static RunRuntimeManifest runtimeManifest() {
+        return runtimeManifest(RUN_ID, NOW);
+    }
+
+    private static RunRuntimeManifest runtimeManifest(RunId runId, Instant createdAt) {
+        return new RunRuntimeManifest(
+                runId,
+                RunStorageMode.REDIS_SUMMARY,
+                new UserId("usr_1234567890abcdef"),
+                SESSION_ID,
+                new WorkspaceId("wrk_1234567890abcdef"),
+                "opencode",
+                "client_1234567890abcdef",
+                "msg_dispatch_1234567890abcdef",
+                "server-a",
+                "backend-a",
+                node().executionNodeId().value(),
+                "process_1234567890abcdef",
+                REMOTE_SESSION_ID,
+                RunStatus.SUCCEEDED,
+                2L,
+                2L,
+                1L,
+                0L,
+                false,
+                2L,
+                1024L,
+                null,
+                null,
+                null,
+                createdAt.plusSeconds(86_400),
+                createdAt,
+                createdAt.plusSeconds(1));
+    }
+
+    private static RunRuntimeReplay replayWithText(RunRuntimeManifest manifest, String text) {
+        RunEventDraft message = new RunEventDraft(
+                manifest.runId(),
+                com.icbc.testagent.domain.event.RunEventType.MESSAGE_UPDATED,
+                "trace_1234567890abcdef",
+                manifest.createdAt(),
+                Map.of(
+                        "rootSessionId", REMOTE_SESSION_ID,
+                        "sessionId", REMOTE_SESSION_ID,
+                        "isChildSession", false,
+                        "message", Map.of(
+                                "id", "msg_" + text,
+                                "role", "assistant",
+                                "text", text)));
+        return new RunRuntimeReplay(
+                manifest,
+                new RunRuntimeSnapshot(manifest.runId(), 1L, 1L, 0L, List.of(message), NOW),
+                List.of(),
+                false,
+                null);
+    }
+
+    private static RunConversationSummary summary(
+            String messageId,
+            SessionMessageRole role,
+            String content) {
+        return summary(RUN_ID, messageId, role, content);
+    }
+
+    private static RunConversationSummary summary(
+            RunId runId,
+            String messageId,
+            SessionMessageRole role,
+            String content) {
+        return new RunConversationSummary(
+                new SessionMessageId(messageId),
+                role,
+                content,
+                runId.value() + ":" + role.name().toLowerCase(Locale.ROOT),
+                1,
+                RunSummaryStatus.COMPLETE,
+                NOW,
+                role == SessionMessageRole.ASSISTANT ? "msg_remote" : null);
     }
 
     private static Run run() {

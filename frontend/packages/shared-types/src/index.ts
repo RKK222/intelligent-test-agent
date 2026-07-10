@@ -298,6 +298,9 @@ export type SessionRuntimeStateSummary = {
   generatedAt: string;
 };
 
+export type SessionMessageContentKind = "RAW_LEGACY" | "SUMMARY" | string;
+export type SessionMessageSummaryStatus = "COMPLETE" | "PARTIAL" | "FALLBACK" | string;
+
 export type SessionMessage = {
   messageId: string;
   sessionId: string;
@@ -310,6 +313,10 @@ export type SessionMessage = {
   parts?: MessagePart[];
   costUsd?: number;
   tokens?: TokenUsage;
+  /** 旧后端或旧数据可缺失；RAW_LEGACY 表示历史原文，SUMMARY 表示终态摘要。 */
+  contentKind?: SessionMessageContentKind | null;
+  summaryStatus?: SessionMessageSummaryStatus | null;
+  summaryVersion?: number | null;
 };
 
 export type RunSessionTreeSessionResponse = {
@@ -337,6 +344,10 @@ export type SessionTreeMessagesResponse = {
   messagesBySessionId: Record<string, Record<string, unknown>[]>;
   childSessionIdByTaskPartId: Record<string, string>;
   events: RunSessionTreeEventResponse[];
+  /** 完整历史来自 Redis/OpenCode，摘要历史来自 PostgreSQL 终态投影。 */
+  historyRepresentation?: "FULL" | "SUMMARY" | string | null;
+  replayAvailable?: boolean | null;
+  detailsAvailableUntil?: string | null;
 };
 
 export type AiFeedbackRating = "POSITIVE" | "NEGATIVE";
@@ -587,7 +598,9 @@ export type Run = {
   runId: string;
   sessionId: string;
   workspaceId: string;
-  clientRequestId?: string;
+  storageMode?: "LEGACY_FULL" | "REDIS_SUMMARY" | string | null;
+  clientRequestId?: string | null;
+  detailsAvailableUntil?: string | null;
   status: "PENDING" | "RUNNING" | "CANCELLING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | string;
   createdAt: string;
   updatedAt: string;

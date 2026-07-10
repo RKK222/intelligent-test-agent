@@ -18,6 +18,8 @@ import com.icbc.testagent.opencode.runtime.run.RunDiffActionResponse;
 import com.icbc.testagent.opencode.runtime.run.RunDiffApplicationService;
 import com.icbc.testagent.opencode.runtime.run.RunDiffFileResponse;
 import com.icbc.testagent.opencode.runtime.run.RunDiffResponse;
+import com.icbc.testagent.opencode.runtime.run.RunHistoryRecoveryResult;
+import com.icbc.testagent.opencode.runtime.run.RunHistoryRecoverySource;
 import com.icbc.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.icbc.testagent.opencode.runtime.run.StartRunInput;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessStatusQueryService;
@@ -38,6 +40,7 @@ import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.RunStorageMode;
 import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionHistoryItem;
@@ -605,6 +608,63 @@ class RuntimeControllerTest {
     }
 
     @Test
+    void redisSummarySseUsesRedisStreamSnapshotWithoutOpenCodeOrDatabaseRecovery() {
+        RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
+        RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
+        RunMessageRecoveryService recoveryService = org.mockito.Mockito.mock(RunMessageRecoveryService.class);
+        RunId runId = new RunId("run_1234567890abcdef");
+        when(runService.eventStorageMode(runId)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        when(eventStreamService.streamAfterWithSnapshot(eq(runId), eq(null), any(), eq(100), any()))
+                .thenReturn(Flux.empty());
+        WebTestClient client = WebTestClient.bindToController(new RunController(
+                        runService,
+                        null,
+                        eventStreamService,
+                        recoveryService,
+                        new RunEventSseMapper()))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/runs/run_1234567890abcdef/events")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk();
+
+        org.mockito.Mockito.verifyNoInteractions(recoveryService);
+        org.mockito.Mockito.verify(eventStreamService).streamAfterWithSnapshot(
+                eq(runId), eq(null), any(), eq(100), any());
+    }
+
+    @Test
+    void expiredRedisSummarySseReturnsGoneWithoutFallingBackToLegacyRecovery() {
+        RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
+        RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
+        RunMessageRecoveryService recoveryService = org.mockito.Mockito.mock(RunMessageRecoveryService.class);
+        RunId runId = new RunId("run_1234567890abcdef");
+        when(runService.eventStorageMode(runId)).thenThrow(new PlatformException(ErrorCode.RUN_DETAILS_EXPIRED));
+        WebTestClient client = WebTestClient.bindToController(new RunController(
+                        runService,
+                        null,
+                        eventStreamService,
+                        recoveryService,
+                        new RunEventSseMapper()))
+                .controllerAdvice(new GlobalExceptionHandler())
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/runs/run_1234567890abcdef/events")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isEqualTo(410)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("RUN_DETAILS_EXPIRED");
+
+        org.mockito.Mockito.verifyNoInteractions(recoveryService, eventStreamService);
+    }
+
+    @Test
     void runControllerExposesAgentScopedSessionTreeMessages() {
         RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
         RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
@@ -639,8 +699,9 @@ class RuntimeControllerTest {
                         "parentSessionId", "ses_root",
                         "isChildSession", true,
                         "requestId", "perm_1"));
-        when(recoveryService.recover(eq("opencode"), eq(runId), eq("trace_1234567890abcdef")))
-                .thenReturn(Flux.just(snapshot));
+        when(recoveryService.recoverHistory(eq("opencode"), eq(runId), eq("trace_1234567890abcdef")))
+                .thenReturn(Mono.just(RunHistoryRecoveryResult.full(
+                        List.of(snapshot), null, RunHistoryRecoverySource.OPENCODE)));
         when(eventStreamService.snapshotDurablePayloads(eq(runId), eq(0L), eq(100)))
                 .thenReturn(List.of(permission));
         WebTestClient client = WebTestClient.bindToController(new RunController(
@@ -665,9 +726,43 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.childSessionIdByTaskPartId.part_task").isEqualTo("ses_child")
                 .jsonPath("$.data.messagesBySessionId.ses_child[0].message.id").isEqualTo("msg_child")
                 .jsonPath("$.data.messagesBySessionId.ses_child.length()").isEqualTo(1)
+                .jsonPath("$.data.historyRepresentation").isEqualTo("FULL")
+                .jsonPath("$.data.replayAvailable").isEqualTo(true)
                 .jsonPath("$.data.events[0].type").isEqualTo("message.updated")
                 .jsonPath("$.data.events[1].type").isEqualTo("permission.asked")
                 .jsonPath("$.data.events[1].payload.requestId").isEqualTo("perm_1");
+    }
+
+    @Test
+    void runControllerExposesRedisHistoryExpiryWithoutLegacyDurableQuery() {
+        RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
+        RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
+        RunMessageRecoveryService recoveryService = org.mockito.Mockito.mock(RunMessageRecoveryService.class);
+        RunId runId = new RunId("run_1234567890abcdef");
+        Instant detailsAvailableUntil = NOW.plus(Duration.ofHours(24));
+        when(recoveryService.recoverHistory(eq("opencode"), eq(runId), eq("trace_1234567890abcdef")))
+                .thenReturn(Mono.just(RunHistoryRecoveryResult.full(
+                        List.of(), detailsAvailableUntil, RunHistoryRecoverySource.REDIS)));
+        WebTestClient client = WebTestClient.bindToController(new RunController(
+                        runService,
+                        null,
+                        eventStreamService,
+                        recoveryService,
+                        new RunEventSseMapper()))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/agent/opencode/runs/run_1234567890abcdef/session-tree/messages")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.historyRepresentation").isEqualTo("FULL")
+                .jsonPath("$.data.replayAvailable").isEqualTo(true)
+                .jsonPath("$.data.detailsAvailableUntil").isEqualTo(detailsAvailableUntil.toString());
+
+        org.mockito.Mockito.verifyNoInteractions(eventStreamService);
     }
 
     @Test
@@ -705,8 +800,10 @@ class RuntimeControllerTest {
                         "parentSessionId", "ses_root",
                         "isChildSession", true,
                         "requestId", "q_1"));
-        when(recoveryService.recoverSessionTree(eq("opencode"), eq(sessionId), eq("trace_1234567890abcdef")))
-                .thenReturn(Flux.just(snapshot));
+        when(recoveryService.recoverSessionTreeHistory(
+                        eq("opencode"), eq(sessionId), eq("trace_1234567890abcdef")))
+                .thenReturn(Mono.just(RunHistoryRecoveryResult.full(
+                        List.of(snapshot), null, RunHistoryRecoverySource.OPENCODE)));
         when(eventStreamService.snapshotDurablePayloadsByRootSessionId(eq("ses_root"), eq(0L), eq(100)))
                 .thenReturn(List.of(question));
         WebTestClient client = WebTestClient.bindToController(new SessionController(
@@ -730,6 +827,8 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.childSessionIdByTaskPartId.part_task").isEqualTo("ses_child")
                 .jsonPath("$.data.messagesBySessionId.ses_child[0].message.id").isEqualTo("msg_child")
                 .jsonPath("$.data.messagesBySessionId.ses_child.length()").isEqualTo(1)
+                .jsonPath("$.data.historyRepresentation").isEqualTo("FULL")
+                .jsonPath("$.data.replayAvailable").isEqualTo(true)
                 .jsonPath("$.data.events[0].type").isEqualTo("message.updated")
                 .jsonPath("$.data.events[1].type").isEqualTo("question.asked")
                 .jsonPath("$.data.events[1].payload.requestId").isEqualTo("q_1");

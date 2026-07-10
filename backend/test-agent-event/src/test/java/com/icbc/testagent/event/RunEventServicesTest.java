@@ -3,6 +3,7 @@ package com.icbc.testagent.event;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -38,6 +39,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.codec.ServerSentEvent;
@@ -165,6 +167,33 @@ class RunEventServicesTest {
 
         verify(repository, never()).append(draft);
         verify(runtimeStore).appendDurable(draft);
+    }
+
+    @Test
+    void tenThousandRedisSummaryEventsNeverTouchPostgresqlRepository() {
+        RunEventRepository repository = mock(RunEventRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunId runId = new RunId("run_redis_ten_thousand");
+        AtomicLong seq = new AtomicLong();
+        when(runtimeStore.appendDurable(any())).thenAnswer(invocation -> {
+            RunEventDraft draft = invocation.getArgument(0);
+            long next = seq.incrementAndGet();
+            return new RunRuntimeAppendResult(event(draft, next), false, 0, next);
+        });
+        RunEventAppender appender = new RunEventAppender(repository, new RunEventLiveBus(), runtimeStore);
+
+        for (int index = 0; index < 10_000; index++) {
+            appender.append(new RunEventDraft(
+                    runId,
+                    RunEventType.TOOL_STARTED,
+                    "trace_redis_volume",
+                    NOW,
+                    Map.of("index", index)), RunStorageMode.REDIS_SUMMARY);
+        }
+
+        verify(repository, never()).append(any());
+        verify(runtimeStore, org.mockito.Mockito.times(10_000)).appendDurable(any());
+        assertThat(seq).hasValue(10_000L);
     }
 
     @Test
@@ -626,6 +655,42 @@ class RunEventServicesTest {
         verify(runtimeStore).tailAfter(runId, 10L, 2);
         verify(runtimeStore).tailAfter(runId, 12L, 2);
         verify(runtimeStore).tailAfter(runId, 14L, 2);
+    }
+
+    @Test
+    void tenMinuteRedisSummarySseSafetyScansNeverPollPostgresql() {
+        RunEventRepository repository = mock(RunEventRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunId runId = new RunId("run_redis_ten_minute_sse");
+        RunRuntimeManifest manifest = manifest(runId, 0L, 1L, 0L, false);
+        RunRuntimeReplay initial = new RunRuntimeReplay(
+                manifest,
+                RunRuntimeSnapshot.empty(runId),
+                List.of(),
+                false,
+                null);
+        when(runtimeStore.storageMode(runId)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        when(runtimeStore.replayAfter(runId, 0L, 50)).thenReturn(initial);
+        when(runtimeStore.tailAfter(runId, 0L, 50)).thenReturn(new RunRuntimeTail(
+                manifest,
+                RunRuntimeSnapshot.empty(runId),
+                List.of(),
+                false,
+                null));
+        RunEventSseStreamService service = new RunEventSseStreamService(
+                new RunEventReplayService(repository, runtimeStore),
+                new RunEventSseMapper(),
+                new RunEventLiveBus());
+
+        StepVerifier.withVirtualTime(() -> service
+                        .streamAfter(runId, "0", Duration.ofMillis(500), 50)
+                        .take(Duration.ofMinutes(10)))
+                .assertNext(reset -> assertThat(reset.event()).isEqualTo("run.snapshot.reset"))
+                .thenAwait(Duration.ofMinutes(10))
+                .verifyComplete();
+
+        verify(repository, never()).findByRunIdAfter(runId, 0L, 50);
+        verify(runtimeStore, org.mockito.Mockito.atLeast(100)).tailAfter(runId, 0L, 50);
     }
 
     private static RunRuntimeTail tail(

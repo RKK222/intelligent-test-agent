@@ -24,9 +24,15 @@ import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.routing.RoutingDecision;
 import com.icbc.testagent.domain.routing.RoutingDecisionRepository;
 import com.icbc.testagent.domain.run.Run;
+import com.icbc.testagent.domain.run.RunDetailsLocator;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.RunStorageMode;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
+import com.icbc.testagent.domain.run.RunRuntimeAppendResult;
+import com.icbc.testagent.domain.run.RunSummaryPersistencePort;
 import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.run.ConversationRunContext;
 import com.icbc.testagent.domain.session.Session;
@@ -86,6 +92,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -377,6 +384,130 @@ class RunApplicationServiceTest {
             assertThat(command.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
             assertThat(command.directory()).isEqualTo("/tmp/demo");
         });
+    }
+
+    @Test
+    void redisSummaryExistingSessionStartsAndCancelsWithoutLegacyWrites() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        Workspace workspaceSnapshot = workspace().withLinuxServerId("server-a", "trace_redis_summary", NOW);
+        ExecutionNode nodeSnapshot = userProcessNode(
+                "node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
+        Session sessionSnapshot = session().attachOpencodeSession(
+                REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(), NOW, "trace_redis_summary");
+        AgentSessionBinding bindingSnapshot = new AgentSessionBinding(
+                sessionSnapshot.sessionId(), "opencode", REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(),
+                NOW, NOW, "trace_redis_summary");
+        ConversationRunContext context = new ConversationRunContext(
+                userId, "opencode", "ocp_1234567890abcdef", "server-a",
+                sessionSnapshot, workspaceSnapshot, nodeSnapshot, bindingSnapshot, 1, NOW.plusSeconds(3600));
+        StartRunInput input = new StartRunInput(
+                sessionSnapshot.sessionId(), "run the tests", List.of(), "msg_user_summary",
+                null, null, null, null, null, null, "ctx_secret", "request-summary-123");
+        ConversationRunContextResolver contextResolver = org.mockito.Mockito.mock(ConversationRunContextResolver.class);
+        org.mockito.Mockito.when(contextResolver.resolve(userId, "opencode", input, "trace_redis_summary"))
+                .thenReturn(Optional.of(context));
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, context)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        AtomicReference<RunRuntimeManifest> runtimeManifest = new AtomicReference<>();
+        RunRuntimeStore runtimeStore = mockRuntimeStoreForStart(runtimeManifest);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        org.mockito.Mockito.when(identity.backendProcessId()).thenReturn("bjp_summary_backend");
+        RunTerminalProjectionService terminalProjectionService =
+                org.mockito.Mockito.mock(RunTerminalProjectionService.class);
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        FakeRoutingDecisionRepository routing = new FakeRoutingDecisionRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            assertThat(facade.createSessionCommands).isEmpty();
+            assertThat(facade.startRunCommands).isEmpty();
+            return true;
+        });
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                messages,
+                new FakeExecutionNodeRepository(),
+                routing,
+                new RunEventAppender(new FakeRunEventRepository(), new RunEventLiveBus(), runtimeStore),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class),
+                null,
+                null,
+                null,
+                contextResolver,
+                runtimeStore,
+                selector,
+                summaryPort,
+                terminalProjectionService,
+                identity);
+
+        Run run = service.startRun(userId, "opencode", input, "trace_redis_summary");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(runs.saved).isEmpty();
+        assertThat(messages.saved).isEmpty();
+        assertThat(routing.saved).isEmpty();
+        org.mockito.Mockito.verify(summaryPort).insertAnchor(org.mockito.ArgumentMatchers.argThat(anchor ->
+                anchor.storageMode() == RunStorageMode.REDIS_SUMMARY
+                        && anchor.clientRequestId().equals("request-summary-123")
+                        && anchor.dispatchMessageId().equals("msg_user_summary")
+                        && anchor.rootRemoteSessionId().equals(REMOTE_SESSION_ID)));
+        org.mockito.Mockito.verify(runtimeStore, org.mockito.Mockito.atLeastOnce())
+                .appendDurable(org.mockito.ArgumentMatchers.argThat(draft ->
+                        draft.type() == RunEventType.RUN_CREATED
+                                && draft.payload().get("assistantSummaryMessageId") instanceof String messageId
+                                && messageId.startsWith("msg_")));
+        assertThat(facade.createSessionCommands).isEmpty();
+        assertThat(facade.startRunCommands).singleElement().satisfies(command -> {
+            assertThat(command.messageId()).isEqualTo("msg_user_summary");
+            assertThat(command.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
+        });
+        assertThat(runtimeManifest.get().status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(service.eventStorageMode(run.runId())).isEqualTo(RunStorageMode.REDIS_SUMMARY);
+        org.mockito.Mockito.verify(summaryPort, org.mockito.Mockito.never())
+                .findDetailsLocator(run.runId());
+
+        Run cancelled = service.cancelRun("opencode", run.runId(), "trace_redis_summary_cancel");
+
+        assertThat(cancelled.status()).isEqualTo(RunStatus.CANCELLED);
+        assertThat(runs.saved).isEmpty();
+        assertThat(messages.saved).isEmpty();
+        assertThat(routing.saved).isEmpty();
+        assertThat(facade.cancelSessionCommands).singleElement().satisfies(command ->
+                assertThat(command.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID));
+        org.mockito.Mockito.verify(terminalProjectionService).project(
+                org.mockito.ArgumentMatchers.eq(run.runId()),
+                org.mockito.ArgumentMatchers.eq(RunStatus.CANCELLED),
+                org.mockito.ArgumentMatchers.eq("USER_CANCEL"),
+                org.mockito.ArgumentMatchers.eq("USER_REQUESTED"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(true),
+                org.mockito.ArgumentMatchers.eq("trace_redis_summary_cancel"));
+
+        runtimeManifest.set(null);
+        org.mockito.Mockito.when(summaryPort.findDetailsLocator(run.runId())).thenReturn(Optional.of(
+                new RunDetailsLocator(
+                        run.runId(),
+                        RunStorageMode.REDIS_SUMMARY,
+                        REMOTE_SESSION_ID,
+                        nodeSnapshot.executionNodeId().value(),
+                        "msg_remote_summary",
+                        "part_remote_summary",
+                        NOW.plusSeconds(86_400))));
+        assertThatThrownBy(() -> service.eventStorageMode(run.runId()))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.RUN_DETAILS_EXPIRED));
     }
 
     @Test
@@ -1756,6 +1887,62 @@ class RunApplicationServiceTest {
         return (Map<String, Object>) value;
     }
 
+    private static RunRuntimeStore mockRuntimeStoreForStart(AtomicReference<RunRuntimeManifest> state) {
+        RunRuntimeStore store = org.mockito.Mockito.mock(RunRuntimeStore.class);
+        org.mockito.Mockito.when(store.findByClientRequest(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(Optional.empty());
+        org.mockito.Mockito.when(store.claimClientRequest(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(true);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            state.set(invocation.getArgument(0));
+            return null;
+        }).when(store).initialize(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.when(store.findManifest(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> Optional.ofNullable(state.get()));
+        org.mockito.Mockito.when(store.appendDurable(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    RunEventDraft draft = invocation.getArgument(0);
+                    RunRuntimeManifest current = state.get();
+                    RunStatus nextStatus = switch (draft.type()) {
+                        case RUN_STARTED -> RunStatus.RUNNING;
+                        case RUN_SUCCEEDED -> RunStatus.SUCCEEDED;
+                        case RUN_FAILED -> RunStatus.FAILED;
+                        case RUN_CANCELLED -> RunStatus.CANCELLED;
+                        default -> current.status();
+                    };
+                    long statusVersion = current.statusVersion()
+                            + (nextStatus == current.status() ? 0L : 1L);
+                    long seq = current.lastSeq() + 1L;
+                    RunRuntimeManifest next = new RunRuntimeManifest(
+                            current.runId(), current.storageMode(), current.userId(), current.sessionId(),
+                            current.workspaceId(), current.agentId(), current.clientRequestId(),
+                            current.dispatchMessageId(), current.producerLinuxServerId(), current.backendProcessId(),
+                            current.executionNodeId(), current.opencodeProcessId(), current.rootRemoteSessionId(),
+                            nextStatus, statusVersion, seq, current.earliestSeq(), current.resetGeneration(),
+                            current.detailsTruncated(), current.durableEventCount() + 1L, current.detailBytes(),
+                            current.attention(), current.attentionEventId(), current.attentionAt(),
+                            current.detailsExpiresAt(), current.createdAt(), Instant.now());
+                    state.set(next);
+                    RunEvent event = new RunEvent(
+                            new RunEventId("evt_runtime_store_" + seq),
+                            draft.runId(),
+                            seq,
+                            draft.type(),
+                            draft.traceId(),
+                            draft.occurredAt(),
+                            draft.payload(),
+                            draft.scopeContext());
+                    return new RunRuntimeAppendResult(event, false, 0L, 1L);
+                });
+        org.mockito.Mockito.when(store.projectTransient(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        return store;
+    }
+
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {
         private int findByIdCalls;
 
@@ -2090,6 +2277,7 @@ class RunApplicationServiceTest {
     private static final class FakeOpencodeFacade implements OpencodeClientFacade {
         private final List<OpencodeCreateSessionCommand> createSessionCommands = new ArrayList<>();
         private final List<OpencodeStartRunCommand> startRunCommands = new ArrayList<>();
+        private final List<OpencodeCancelCommand> cancelSessionCommands = new ArrayList<>();
         private final List<OpencodeStartCommand> startCommandCommands = new ArrayList<>();
         private final List<OpencodeRuntimeCommand> runtimeCommands = new ArrayList<>();
         private final List<OpencodeSessionMessagesCommand> sessionMessagesCommands = new ArrayList<>();
@@ -2126,6 +2314,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Mono<OpencodeCancelResult> cancelSession(OpencodeCancelCommand command) {
+            cancelSessionCommands.add(command);
             return Mono.just(new OpencodeCancelResult(true));
         }
 

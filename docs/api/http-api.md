@@ -1419,7 +1419,15 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 是分页接口，查询参数为 `page`、`size` 和可选 `refresh`。`refresh` 默认 `true`，会在存在 agent binding 时从 bounded-elastic 线程分页读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；`refresh=false` 只读数据库快照，用于前端反馈 messageId 映射、只读 transcript 或过渡只读场景，避免触发远端快照刷新。如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
 
-`GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 是前端工作台历史恢复的主接口，返回 Session root 下全量历史消息树快照；内部平台入口 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` 保留，旧 `/api/sessions/{sessionId}/session-tree/messages` 返回 `410 API_GONE`。后端通过 `AgentSessionBinding` 找到 root remote session，再按 `run_session_scope_sessions.root_session_id` 拉取跨 Run 已发现的 root/child session；scope 表为空时返回 root-only snapshot。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`。
+`GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 是前端工作台历史恢复的主接口，返回 Session root 下全量历史消息树快照；内部平台入口 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` 保留，旧 `/api/sessions/{sessionId}/session-tree/messages` 返回 `410 API_GONE`。完整历史按 Redis 24 小时详情、OpenCode 完整会话、PostgreSQL 终态摘要的顺序读取。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`，并增加以下可选兼容字段：
+
+| 字段 | 说明 |
+|---|---|
+| `historyRepresentation` | `FULL` 表示完整详情，`SUMMARY` 表示 PostgreSQL 双摘要降级。旧完整历史映射默认返回 `FULL`。 |
+| `replayAvailable` | 是否仍可恢复完整消息、part 与状态事件；摘要降级时为 `false`。 |
+| `detailsAvailableUntil` | Redis 运行详情的到期时间；无 Redis 详情或旧数据时可为 `null`。 |
+
+旧客户端可以忽略这些字段；旧后端缺失字段时，新前端按 `FULL` 兼容展示，但不得据此假定 Redis 详情永久可用。
 
 `SessionMessageResponse` 基础字段：`messageId`、`sessionId`、`role`、`content`、`createdAt`。当前 role 使用 `USER`、`ASSISTANT`、`SYSTEM`。
 
@@ -1433,6 +1441,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `tokens` | `{ input, output, reasoning, cacheRead, cacheWrite }`，字段均可空。 |
 | `costUsd` | 单次 Run 成本快照，可空。 |
 | `updatedAt` | 快照更新时间。 |
+| `contentKind` | `RAW_LEGACY` 表示旧原文，`SUMMARY` 表示新模式终态摘要；旧数据可空。 |
+| `summaryStatus` | 摘要状态；正常、截断和安全兜底分别使用 `COMPLETE`、`PARTIAL`、`FALLBACK`。 |
+| `summaryVersion` | 确定性摘要规则版本；旧数据可空。 |
 
 ### Run、Cancel 和 Event API
 
@@ -2362,7 +2373,9 @@ Session 运行态接口：
 
 成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。
 
-`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`。`tokens` 字段结构同 `SessionMessageResponse.tokens`。
+`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`、`storageMode`、`clientRequestId`、`detailsAvailableUntil`。`storageMode` 为创建时固定的 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动 Run 不允许中途切换；`clientRequestId` 用于同一次发送的幂等关联；`detailsAvailableUntil` 表示 Redis 完整详情最晚可用时间。三个新字段对旧 Run、旧后端或尚未接入新锚点的兼容响应均可为 `null`/缺失；`tokens` 字段结构同 `SessionMessageResponse.tokens`。
+
+`REDIS_SUMMARY` 的 `run.created` 事件还会携带 `assistantSummaryMessageId`，格式为稳定的 `msg_` + 32 位十六进制；终态 ASSISTANT 摘要复用同一 ID。新前端直接把最终 root assistant 绑定到该平台 ID，不再轮询 Session 消息列表寻找反馈目标；旧模式继续使用原有终态消息兼容查询。
 
 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供 runtime-state 流不可用时做一次恢复 fallback。用户已有 Redis 运行态 marker 时只读取 `active:session` 索引并回读 manifest 校验用户/Session/状态，即使索引为空也不回查 PostgreSQL；legacy 用户继续使用最近非终态 Run 查询。没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
 
@@ -2376,7 +2389,7 @@ RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding
 
 `LEGACY_FULL` SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取标准 session messages，并仅把 assistant 消息转换为 transient `message.updated` / `message.part.updated` 发给前端；user 消息已在 Run 启动前由平台保存，不重复回放其 text part，避免被前端误拼进 assistant 正文。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。`REDIS_SUMMARY` 不触发该兼容远端 snapshot，而是完全使用 Redis 物化 snapshot 与 `runtime-events` Stream 恢复当前 Run 详情。
 
-`GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照；旧 `/api/runs/{runId}/session-tree/messages` 返回 `410 API_GONE`。scope 表存在时后端按 root + 当前 Run child session 逐个拉取 agent projected messages；scope 表为空时按 root-only 远端 session 降级。响应 `events` 会合并本次消息 snapshot 与当前 Run 的 durable RunEvent，因此 permission/question/todo 等状态类事件可随 HTTP 历史响应恢复；`messagesBySessionId` 只包含 `message.*` payload，不会混入状态事件。响应 `data`：
+`GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照；旧 `/api/runs/{runId}/session-tree/messages` 返回 `410 API_GONE`。读取顺序固定为 Redis 24 小时物化详情 → OpenCode 完整会话 → PostgreSQL 终态双摘要：Redis 命中时不查询 Run、Session、binding、scope 或 `run_events`；Redis 缺失或不可用时才读取 OpenCode，历史接口会保留完整 user/assistant 消息；OpenCode 也不可用时把最多两条摘要映射成既有 `message.updated` / `message.part.updated` reducer 事件，事件同时带 `contentKind=SUMMARY`、`summaryStatus` 和 `summaryVersion`。只有命中 legacy OpenCode 来源时才补读旧 durable RunEvent；`messagesBySessionId` 仍只包含 `message.*` payload，不混入状态事件。响应 `data`：
 
 ```json
 {
@@ -2401,11 +2414,14 @@ RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding
   "events": [
     { "type": "message.updated", "sessionId": "ses_child", "payload": {} },
     { "type": "permission.asked", "sessionId": "ses_child", "payload": { "requestId": "perm_..." } }
-  ]
+  ],
+  "historyRepresentation": "FULL",
+  "replayAvailable": true,
+  "detailsAvailableUntil": "2026-07-12T00:00:00Z"
 }
 ```
 
-该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回当前 Run scope 子树；root session 下全量历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。Session 级接口会按消息 snapshot 中的远端 `rootSessionId` 补读 `run_events.root_session_id` 下的 durable 状态事件，用于恢复跨 Run child permission/question/todo 状态。
+三个历史元数据字段与 Session 级接口语义一致，均保持可选以兼容旧客户端；Redis 来源的 `detailsAvailableUntil` 取 manifest 到期时间，OpenCode 完整来源可为 `null`，PostgreSQL 摘要来源固定返回 `historyRepresentation=SUMMARY`、`replayAvailable=false`。该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回当前 Run scope 子树；root session 下全量历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。Session 级命中 legacy OpenCode 来源时仍按消息 snapshot 中的远端 `rootSessionId` 补读 `run_events.root_session_id` 下的 durable 状态事件；Redis 和摘要来源禁止回查旧事件表。
 
 PTY WebSocket 不在上述默认 HTTP/SSE 契约内，已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 
@@ -2484,9 +2500,9 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 
 读取顺序：
 
-1. 优先使用该 Run 最新 `diff.proposed` 事件 payload 中的 `diff` 或 `files`；运行中的写文件工具完成时也会派生该事件，用于实时追踪文件变化。
-2. 若事件中没有 Diff 且 Session 已绑定远端 agent session，则通过当前 `AgentRuntime.diff` 查询；`opencode` 实现适配到 opencode `sessionDiff`。
-3. 若没有可用映射，返回空文件列表，不暴露内部 agent binding 或远端字段。
+1. `REDIS_SUMMARY` 优先使用 Redis 物化 snapshot 中最新 `diff.proposed` 的 `diff/files`；命中时不查询 PostgreSQL `run_events` 或 Run 锚点。legacy 继续读取该 Run 最新 `diff.proposed` 事件。
+2. 若 snapshot/legacy 事件中没有 Diff，则通过当前 `AgentRuntime.diff` 查询；新模式只在远端 message/part 缺失时读取 `runs` 非原文定位字段，legacy 继续使用 Session agent binding。
+3. 新模式 Redis manifest 已过期但 PostgreSQL 锚点仍存在时返回 `410 RUN_DETAILS_EXPIRED`，禁止回退 legacy 事件表；legacy 没有可用映射时仍返回空文件列表。
 
 `POST /api/internal/agent/{agentId}/runs/{runId}/diff/accept` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/diff/accept` 不修改文件系统；语义为“保留当前工作区变更并追加平台事件”。响应：
 
@@ -2499,13 +2515,13 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 }
 ```
 
-后端会追加 `diff.accepted` RunEvent，payload 至少包含 `action`、`status`、`fileCount`。
+后端会追加 `diff.accepted` RunEvent，payload 至少包含 `action`、`status`、`fileCount`。`REDIS_SUMMARY` 只追加 Redis 事件，并在成功后以单条 SQL 增加 `runs.diff_accepted_count`；不写 `run_events`。
 
-`POST /api/internal/agent/{agentId}/runs/{runId}/diff/reject` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/diff/reject` 语义为“拒绝本次 Run 对应消息产生的变更”。旧 `POST /api/runs/{runId}/diff/reject` 返回 `410 API_GONE`。后端会从 RunEvent payload 中查找最近的远端 `messageID`，并通过当前 `AgentRuntime.rejectDiff` 执行回滚；`opencode` 实现适配到 opencode `sessionRevert`。成功后追加 `diff.rejected` RunEvent。
+`POST /api/internal/agent/{agentId}/runs/{runId}/diff/reject` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/diff/reject` 语义为“拒绝本次 Run 对应消息产生的变更”。旧 `POST /api/runs/{runId}/diff/reject` 返回 `410 API_GONE`。后端会从 Redis snapshot/legacy RunEvent payload 中查找最近的远端 `messageID`，新模式必要时使用 Run 锚点中的 `last_remote_message_id/last_remote_part_id`，再通过当前 `AgentRuntime.rejectDiff` 执行回滚；`opencode` 实现适配到 opencode `sessionRevert`。成功后追加 `diff.rejected`；新模式再以单条 SQL 增加 `runs.diff_rejected_count`，不写 `run_events`。
 
 拒绝失败规则：
 
-- 缺少 `messageID` 返回 `CONFLICT`。
+- legacy 缺少 `messageID` 返回 `CONFLICT`；新模式的 Redis 与 Run 锚点都无法提供定位 ID 时返回 `RUN_DETAILS_EXPIRED`。
 - Session 未绑定远端 agent session 返回 `CONFLICT`。
 - opencode 超时、不可用或异常仍映射为 `OPENCODE_TIMEOUT`、`OPENCODE_UNAVAILABLE` 或 `OPENCODE_BAD_GATEWAY`。
 
@@ -2513,7 +2529,7 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 
 - Diff 文件对象可新增字段，前端必须忽略未知字段。
 - 当前不支持 per-file 后端回滚；前端“当前文件接受/拒绝”只能作为当前选择和反馈，不承诺后端按文件应用。
-- 不新增数据库 migration；接受/拒绝动作通过 append-only RunEvent 记录。
+- legacy 接受/拒绝继续通过 append-only RunEvent 记录；`REDIS_SUMMARY` 只在 Redis 保存动作详情，PostgreSQL 仅更新聚合计数。
 
 ### 健康检查
 

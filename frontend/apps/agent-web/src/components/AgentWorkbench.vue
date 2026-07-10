@@ -84,6 +84,7 @@ import {
 } from "./conversation-run-context";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy, type FollowUpDraft } from "./follow-up-queue";
 import {
+  assistantSummaryMessageId,
   buildPromptParts,
   chatStateFromSessionTreeSnapshot,
   dedupeSessionMessages,
@@ -383,6 +384,7 @@ const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
 const messageFeedbacks = ref<Record<string, AiMessageFeedback | null>>({});
 const feedbackSubmitting = ref<Record<string, boolean>>({});
 const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
+const assistantSummaryMessageIdsByRunId = ref<Record<string, string>>({});
 function dispatchChat(action: Parameters<typeof reduceAgentChatRuntime>[1]) {
   chatState.value = reduceAgentChatRuntime(chatState.value, action);
 }
@@ -3315,6 +3317,15 @@ function applyRunEventWorkbenchProjection(event: RunEvent, allowNotification: bo
   if (allowNotification) {
     notifyOnAttention(event, selectedWorkspace.value, session.value);
   }
+  if (event.type === "run.created") {
+    const summaryMessageId = assistantSummaryMessageId(event.payload);
+    if (summaryMessageId) {
+      assistantSummaryMessageIdsByRunId.value = {
+        ...assistantSummaryMessageIdsByRunId.value,
+        [event.runId]: summaryMessageId
+      };
+    }
+  }
   if (event.type === "assistant.message.delta") {
     return;
   } else if (event.type === "diff.proposed") {
@@ -3379,9 +3390,30 @@ function applyRunEventWorkbenchProjection(event: RunEvent, allowNotification: bo
       lastTokens = payload.tokens;
     }
     if (run.value?.sessionId) {
-      // 实时 RunEvent 中的 message id 来自 opencode，反馈接口需要平台落库后的 messageId。
-      // 终态后异步刷新 Session 快照，把 remoteMessageId 映射到平台 messageId 后再开放反馈按钮。
-      void refreshPersistedFeedbackIdentities(run.value.sessionId);
+      const assistantSummaryMessageId = assistantSummaryMessageIdsByRunId.value[event.runId];
+      const latestAssistant = [...chatState.value.messages]
+        .reverse()
+        .find(message => message.role === "assistant");
+      const remoteMessageId = latestAssistant?.role === "assistant"
+        ? remoteMessageIdForAgentMessage(latestAssistant)
+        : undefined;
+      if (assistantSummaryMessageId) {
+        if (remoteMessageId) {
+          // REDIS_SUMMARY 在 Run 创建时即给出稳定平台 messageId；终态直接绑定，不轮询 Session 消息表。
+          platformMessageIdsByRemoteId.value = {
+            ...platformMessageIdsByRemoteId.value,
+            [remoteMessageId]: assistantSummaryMessageId
+          };
+          void loadFeedbacksForMessages([{
+            messageId: assistantSummaryMessageId,
+            role: "ASSISTANT",
+            remoteMessageId
+          }], run.value.sessionId);
+        }
+      } else {
+        // legacy 后端没有稳定摘要 ID，继续使用原有短期兼容查询。
+        void refreshPersistedFeedbackIdentities(run.value.sessionId);
+      }
     }
     // 触发 taskUsage 重新计算
     nowTick.value = Date.now();
@@ -4167,6 +4199,7 @@ function handleNewConversation() {
   messageFeedbacks.value = {};
   feedbackSubmitting.value = {};
   platformMessageIdsByRemoteId.value = {};
+  assistantSummaryMessageIdsByRunId.value = {};
   readonlySessionReason.value = "";
   diffFiles.value = [];
   

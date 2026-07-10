@@ -12,6 +12,7 @@ import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunDiffCounts;
 import com.icbc.testagent.domain.run.RunRuntimeAppendResult;
 import com.icbc.testagent.domain.run.RunRuntimeInput;
 import com.icbc.testagent.domain.run.RunRuntimeManifest;
@@ -66,6 +67,16 @@ class RedisRunRuntimeStoreIntegrationTest {
         RunRuntimeManifest manifest = manifest("run_redis_concurrent", RunStatus.RUNNING);
         try {
             store.initialize(manifest, input(manifest.runId()));
+            assertThat(store.findInput(manifest.runId())).contains(input(manifest.runId()));
+            assertThat(store.claimClientRequest(manifest.sessionId(), "req-1", manifest.runId())).isTrue();
+            assertThat(store.claimClientRequest(
+                    manifest.sessionId(), "req-1", new RunId("run_redis_duplicate"))).isFalse();
+            assertThat(store.findByClientRequest(manifest.sessionId(), "req-1")).contains(manifest.runId());
+            store.releaseClientRequest(manifest.sessionId(), "req-1", new RunId("run_redis_duplicate"));
+            assertThat(store.findByClientRequest(manifest.sessionId(), "req-1")).contains(manifest.runId());
+            store.bindRemoteSession(manifest.runId(), "remote-session-bound");
+            assertThat(store.findManifest(manifest.runId()).orElseThrow().rootRemoteSessionId())
+                    .isEqualTo("remote-session-bound");
             List<CompletableFuture<RunRuntimeAppendResult>> futures = new ArrayList<>();
             for (int index = 0; index < 24; index++) {
                 int eventIndex = index;
@@ -92,6 +103,11 @@ class RedisRunRuntimeStoreIntegrationTest {
                     .allSatisfy(key -> assertThat(key).contains("{" + manifest.runId().value() + "}"));
             assertThat(redis.getExpire("test-agent:run:{" + manifest.runId().value() + "}:manifest"))
                     .isPositive();
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.DIFF_PROPOSED, "trace_diff", NOW, Map.of("diffId", "diff-1")));
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.DIFF_ACCEPTED, "trace_diff", NOW, Map.of("diffId", "diff-1")));
+            assertThat(store.diffCounts(manifest.runId())).isEqualTo(new RunDiffCounts(1, 1, 0));
 
             RunRuntimeManifest current = store.findManifest(manifest.runId()).orElseThrow();
             store.updateStatus(manifest.runId(), RunStatus.SUCCEEDED, current.statusVersion(), null);
@@ -99,6 +115,9 @@ class RedisRunRuntimeStoreIntegrationTest {
                     .snapshot().runtimeVersion();
             assertThat(store.findActiveBySession(manifest.sessionId())).isEmpty();
             assertThat(store.findActiveByUser(manifest.userId())).isEmpty();
+            assertThat(store.findRecentBySession(manifest.sessionId(), 10))
+                    .extracting(RunRuntimeManifest::runId)
+                    .containsExactly(manifest.runId());
             RunRuntimeAppendResult ignored = store.appendDurable(new RunEventDraft(
                     manifest.runId(), RunEventType.RUN_STARTED, "trace_late_started", NOW.plusSeconds(1),
                     Map.of("status", "RUNNING")));

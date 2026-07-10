@@ -4,6 +4,8 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.agent.runtime.AgentCancelCommand;
+import com.icbc.testagent.agent.runtime.AgentCreateSessionCommand;
+import com.icbc.testagent.agent.runtime.AgentCreateSessionResult;
 import com.icbc.testagent.agent.runtime.AgentPromptPart;
 import com.icbc.testagent.agent.runtime.AgentRuntime;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
@@ -18,6 +20,7 @@ import com.icbc.testagent.domain.event.RunSessionScopeRepository;
 import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.node.ExecutionNode;
+import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.routing.ExecutionNodeRouter;
 import com.icbc.testagent.domain.routing.RoutingDecision;
@@ -29,7 +32,10 @@ import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStorageMode;
 import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeInput;
 import com.icbc.testagent.domain.run.RunRuntimeStore;
+import com.icbc.testagent.domain.run.RunPersistenceAnchor;
+import com.icbc.testagent.domain.run.RunSummaryPersistencePort;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.Session;
@@ -39,6 +45,7 @@ import com.icbc.testagent.domain.session.SessionMessageId;
 import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -147,6 +154,10 @@ public class RunApplicationService {
     private final RunActivityStateStore runActivityStateStore;
     private final ConversationRunContextResolver conversationContextResolver;
     private RunRuntimeStore runRuntimeStore;
+    private RunStorageModeSelector runStorageModeSelector;
+    private RunSummaryPersistencePort runSummaryPersistencePort;
+    private RunTerminalProjectionService runTerminalProjectionService;
+    private BackendInstanceIdentity backendInstanceIdentity;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -300,6 +311,10 @@ public class RunApplicationService {
                 : runActivityStateStore;
         this.conversationContextResolver = conversationContextResolver;
         this.runRuntimeStore = null;
+        this.runStorageModeSelector = null;
+        this.runSummaryPersistencePort = null;
+        this.runTerminalProjectionService = null;
+        this.backendInstanceIdentity = null;
     }
 
     /** Spring 生产构造器额外接入 Redis Run 数据面；旧手工构造器继续只服务 LEGACY_FULL 测试。 */
@@ -324,7 +339,11 @@ public class RunApplicationService {
             RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
             RunActivityStateStore runActivityStateStore,
             ConversationRunContextResolver conversationContextResolver,
-            RunRuntimeStore runRuntimeStore) {
+            RunRuntimeStore runRuntimeStore,
+            RunStorageModeSelector runStorageModeSelector,
+            RunSummaryPersistencePort runSummaryPersistencePort,
+            RunTerminalProjectionService runTerminalProjectionService,
+            BackendInstanceIdentity backendInstanceIdentity) {
         this(
                 workspaceRepository,
                 sessionRepository,
@@ -346,6 +365,11 @@ public class RunApplicationService {
                 runActivityStateStore,
                 conversationContextResolver);
         this.runRuntimeStore = Objects.requireNonNull(runRuntimeStore, "runRuntimeStore must not be null");
+        this.runStorageModeSelector = Objects.requireNonNull(runStorageModeSelector, "runStorageModeSelector must not be null");
+        this.runSummaryPersistencePort = Objects.requireNonNull(runSummaryPersistencePort, "runSummaryPersistencePort must not be null");
+        this.runTerminalProjectionService = Objects.requireNonNull(
+                runTerminalProjectionService, "runTerminalProjectionService must not be null");
+        this.backendInstanceIdentity = Objects.requireNonNull(backendInstanceIdentity, "backendInstanceIdentity must not be null");
         this.runSessionScopeRouter = new RunSessionScopeRouter(
                 runSessionScopeRepository,
                 this.runSessionScopeRuntimeCache,
@@ -524,8 +548,25 @@ public class RunApplicationService {
             pending = pending.withSource(ConversationSourceType.MANUAL, null, userId);
         }
         pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
-        // Phase 2 先完成 Redis 数据面与 shadow 验证；Phase 3 创建无原文锚点后才允许选择 REDIS_SUMMARY。
-        RunStorageMode storageMode = RunStorageMode.LEGACY_FULL;
+        RunStorageMode storageMode = runStorageModeSelector == null
+                ? RunStorageMode.LEGACY_FULL
+                : runStorageModeSelector.select(userId, input, conversationContext);
+        if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+            return startRedisSummaryRun(
+                    userId,
+                    resolvedAgentId,
+                    input,
+                    traceId,
+                    conversationContext,
+                    runtime,
+                    session,
+                    workspace,
+                    modelSelection,
+                    opencodeAgent,
+                    pending,
+                    prompt,
+                    now);
+        }
         runRepository.save(pending);
         saveUserMessage(session.sessionId(), pending.runId(), prompt, input.parts(), userId, traceId, now);
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
@@ -592,7 +633,8 @@ public class RunApplicationService {
                     .subscribe(
                             ignored -> {
                             },
-                            error -> failRunFromStream(resolvedAgentId, running, traceId, error));
+                            error -> failRunFromStream(
+                                    resolvedAgentId, running, RunStorageMode.LEGACY_FULL, traceId, error));
             return running;
         } catch (PlatformException exception) {
             LOGGER.error("Run failed to start, runId={}, errorCode={}, traceId={}",
@@ -606,6 +648,284 @@ public class RunApplicationService {
             runSessionScopeRouter.finishRun(failed.runId());
             throw exception;
         }
+    }
+
+    /**
+     * 新模式启动链路：Redis 初始化和单条无原文锚点 INSERT 全部成功后才允许创建远端 Session/发送 prompt。
+     */
+    private Run startRedisSummaryRun(
+            UserId userId,
+            String resolvedAgentId,
+            StartRunInput input,
+            String traceId,
+            ConversationRunContext context,
+            AgentRuntime runtime,
+            Session session,
+            Workspace workspace,
+            ModelSelection modelSelection,
+            String opencodeAgent,
+            Run pending,
+            String prompt,
+            Instant now) {
+        requireRedisSummaryDependencies(context);
+        Optional<Run> existing = redisSummaryRetry(input, context);
+        if (existing.isPresent()) {
+            return existing.orElseThrow();
+        }
+        if (!runRuntimeStore.claimClientRequest(session.sessionId(), input.clientRequestId(), pending.runId())) {
+            return redisSummaryRetry(input, context)
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                            "clientRequestId 已被占用但 Run 运行态尚不可见"));
+        }
+
+        String dispatchMessageId = input.messageId() != null && input.messageId().startsWith("msg_")
+                ? input.messageId()
+                : RuntimeIdGenerator.messageId();
+        AgentRoutingTarget target = conversationContextTarget(context, pending.runId(), now, traceId);
+        RunRuntimeManifest manifest = new RunRuntimeManifest(
+                pending.runId(),
+                RunStorageMode.REDIS_SUMMARY,
+                userId,
+                session.sessionId(),
+                workspace.workspaceId(),
+                resolvedAgentId,
+                input.clientRequestId(),
+                dispatchMessageId,
+                context.linuxServerId(),
+                backendInstanceIdentity.backendProcessId(),
+                target.node().executionNodeId().value(),
+                context.processId(),
+                context.remoteSessionId(),
+                RunStatus.PENDING,
+                0L,
+                0L,
+                1L,
+                0L,
+                false,
+                0L,
+                0L,
+                null,
+                null,
+                null,
+                now.plus(RunRuntimeStore.ACTIVE_TTL),
+                now,
+                now);
+        boolean anchorInserted = false;
+        try {
+            runRuntimeStore.initialize(
+                    manifest,
+                    new RunRuntimeInput(
+                            pending.runId(),
+                            prompt,
+                            runtimeInputParts(input),
+                            dispatchMessageId,
+                            now));
+            append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
+                    Map.of(
+                            "status", RunStatus.PENDING.name(),
+                            "storageMode", RunStorageMode.REDIS_SUMMARY.name(),
+                            "clientRequestId", input.clientRequestId(),
+                            "assistantSummaryMessageId", RunSummaryIdentifiers.assistant(pending.runId()).value()),
+                    RunStorageMode.REDIS_SUMMARY);
+            Instant startedAt = Instant.now();
+            Run running = pending.start(startedAt);
+            append(running.runId(), RunEventType.RUN_STARTED, traceId, startedAt,
+                    Map.of("status", RunStatus.RUNNING.name()), RunStorageMode.REDIS_SUMMARY);
+            RunRuntimeManifest runningManifest = runRuntimeStore.findManifest(running.runId())
+                    .orElseThrow(() -> new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run manifest 不存在"));
+            boolean inserted = runSummaryPersistencePort.insertAnchor(new RunPersistenceAnchor(
+                    running.runId(),
+                    running.sessionId(),
+                    running.workspaceId(),
+                    RunStatus.RUNNING,
+                    RunStorageMode.REDIS_SUMMARY,
+                    runningManifest.statusVersion(),
+                    input.clientRequestId(),
+                    context.linuxServerId(),
+                    target.node().executionNodeId().value(),
+                    context.processId(),
+                    context.remoteSessionId(),
+                    dispatchMessageId,
+                    RunSummaryIdentifiers.assistant(running.runId()),
+                    traceId,
+                    running.createdAt(),
+                    running.updatedAt(),
+                    runningManifest.detailsExpiresAt(),
+                    running.sourceType(),
+                    running.sourceRefId(),
+                    running.triggeredByUserId(),
+                    resolvedAgentId,
+                    firstText(modelSelection.modelId(), input.model())));
+            if (!inserted) {
+                runRuntimeStore.releaseClientRequest(session.sessionId(), input.clientRequestId(), running.runId());
+                return runSummaryPersistencePort
+                        .findBySessionAndClientRequestId(session.sessionId(), input.clientRequestId())
+                        .map(this::anchorRun)
+                        .orElseThrow(() -> new PlatformException(
+                                ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                                "Run 幂等锚点冲突但既有记录不可见"));
+            }
+            anchorInserted = true;
+
+            try {
+                AgentSessionBinding binding = context.bindingSnapshot() != null
+                        ? context.bindingSnapshot()
+                        : createInitialAgentSession(
+                                resolvedAgentId, runtime, session, workspace, target.node(), traceId);
+                runRuntimeStore.bindRemoteSession(running.runId(), binding.remoteSessionId());
+                recordRootSessionScope(
+                        resolvedAgentId, running, binding.remoteSessionId(), traceId, RunStorageMode.REDIS_SUMMARY);
+                subscribeAgentEvents(
+                        resolvedAgentId,
+                        runtime,
+                        running,
+                        binding.remoteSessionId(),
+                        target.node(),
+                        workspace,
+                        RunStorageMode.REDIS_SUMMARY,
+                        traceId);
+                AgentStartRunCommand command = new AgentStartRunCommand(
+                        target.node(),
+                        binding.remoteSessionId(),
+                        workspaceRootPath(workspace),
+                        null,
+                        prompt,
+                        toAgentPromptParts(input, workspace),
+                        dispatchMessageId,
+                        opencodeAgent,
+                        modelSelection.providerId(),
+                        modelSelection.modelId(),
+                        input.variant(),
+                        input.command(),
+                        input.arguments(),
+                        traceId);
+                Mono.defer(() -> runtime.startRun(command))
+                        .subscribe(
+                                ignored -> {
+                                },
+                                error -> failRunFromStream(
+                                        resolvedAgentId,
+                                        running,
+                                        RunStorageMode.REDIS_SUMMARY,
+                                        traceId,
+                                        error));
+                return running;
+            } catch (PlatformException exception) {
+                failRedisSummaryRun(running, traceId, exception.errorCode().name(), exception.getMessage());
+                throw exception;
+            } catch (RuntimeException exception) {
+                failRedisSummaryRun(running, traceId, "START_FAILED", safeStreamErrorMessage(exception));
+                throw exception;
+            }
+        } catch (RuntimeException exception) {
+            // 锚点写入前失败时绝不触发远端副作用；request claim 释放后允许客户端安全重试。
+            if (!anchorInserted) {
+                runRuntimeStore.releaseClientRequest(session.sessionId(), input.clientRequestId(), pending.runId());
+            }
+            throw exception;
+        }
+    }
+
+    private void requireRedisSummaryDependencies(ConversationRunContext context) {
+        if (context == null
+                || runRuntimeStore == null
+                || runSummaryPersistencePort == null
+                || runTerminalProjectionService == null
+                || backendInstanceIdentity == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Redis 摘要运行链路未完整配置");
+        }
+        if (!context.linuxServerId().equals(backendInstanceIdentity.linuxServerId())) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "会话上下文未路由到绑定服务器");
+        }
+    }
+
+    private Optional<Run> redisSummaryRetry(StartRunInput input, ConversationRunContext context) {
+        Optional<RunId> runId = runRuntimeStore.findByClientRequest(input.sessionId(), input.clientRequestId());
+        if (runId.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<RunRuntimeManifest> manifest = runRuntimeStore.findManifest(runId.orElseThrow());
+        if (manifest.isPresent()) {
+            return manifest.map(this::runtimeRun);
+        }
+        return runSummaryPersistencePort
+                .findBySessionAndClientRequestId(context.sessionId(), input.clientRequestId())
+                .map(this::anchorRun);
+    }
+
+    private Run anchorRun(RunPersistenceAnchor anchor) {
+        return new Run(
+                anchor.runId(),
+                anchor.sessionId(),
+                anchor.workspaceId(),
+                anchor.status(),
+                anchor.createdAt(),
+                anchor.updatedAt(),
+                anchor.traceId(),
+                com.icbc.testagent.domain.run.TokenUsage.empty(),
+                null,
+                anchor.sourceType(),
+                anchor.sourceRefId(),
+                anchor.triggeredByUserId(),
+                anchor.agentId(),
+                anchor.modelId());
+    }
+
+    private List<Map<String, Object>> runtimeInputParts(StartRunInput input) {
+        return input.parts().stream()
+                .map(part -> {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> mapped = OBJECT_MAPPER.convertValue(part, Map.class);
+                    return Map.copyOf(mapped);
+                })
+                .toList();
+    }
+
+    private AgentSessionBinding createInitialAgentSession(
+            String agentId,
+            AgentRuntime runtime,
+            Session session,
+            Workspace workspace,
+            ExecutionNode node,
+            String traceId) {
+        AgentCreateSessionResult created = runtime.createSession(new AgentCreateSessionCommand(
+                        node,
+                        workspaceRootPath(workspace),
+                        null,
+                        session.title(),
+                        traceId))
+                .block();
+        if (created == null) {
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "agent 创建会话未返回结果");
+        }
+        Instant now = Instant.now();
+        AgentSessionBinding binding = new AgentSessionBinding(
+                session.sessionId(),
+                agentId,
+                created.remoteSessionId(),
+                node.executionNodeId(),
+                now,
+                now,
+                traceId);
+        runSummaryPersistencePort.persistInitialAgentBinding(binding);
+        return binding;
+    }
+
+    private void failRedisSummaryRun(Run run, String traceId, String reasonCode, String safeMessage) {
+        Instant occurredAt = Instant.now();
+        append(run.runId(), RunEventType.RUN_FAILED, traceId, occurredAt,
+                Map.of("errorCode", reasonCode, "message", safeMessage == null ? "Run 启动失败" : safeMessage),
+                RunStorageMode.REDIS_SUMMARY);
+        runTerminalProjectionService.project(
+                run.runId(),
+                RunStatus.FAILED,
+                "LOCAL_START",
+                reasonCode,
+                safeMessage,
+                false,
+                traceId);
+        runSessionScopeRouter.finishRun(run.runId());
     }
 
     private UserOpencodeProcessAssignment resolveUserProcessAssignment(UserId userId, String agentId, String traceId) {
@@ -972,6 +1292,40 @@ public class RunApplicationService {
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Run 不存在", Map.of("runId", runId.value())));
     }
 
+    /** 返回 Redis manifest 中的创建时固定模式和详情窗口；legacy/旧数据保持空。 */
+    public Optional<RunStorageMetadata> storageMetadata(RunId runId) {
+        if (runRuntimeStore == null) {
+            return Optional.empty();
+        }
+        return runRuntimeStore.findManifest(runId)
+                .map(manifest -> new RunStorageMetadata(
+                        manifest.storageMode(), manifest.clientRequestId(), manifest.detailsExpiresAt()));
+    }
+
+    /**
+     * SSE 建连先读 Redis manifest；仅在 manifest 已消失时低频查询无原文锚点以区分 legacy 与详情过期。
+     */
+    public RunStorageMode eventStorageMode(RunId runId) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        if (runRuntimeStore == null) {
+            return RunStorageMode.LEGACY_FULL;
+        }
+        Optional<RunRuntimeManifest> manifest = runRuntimeStore.findManifest(runId);
+        if (manifest.isPresent()) {
+            return manifest.orElseThrow().storageMode();
+        }
+        if (runSummaryPersistencePort != null
+                && runSummaryPersistencePort.findDetailsLocator(runId)
+                        .filter(locator -> locator.storageMode() == RunStorageMode.REDIS_SUMMARY)
+                        .isPresent()) {
+            throw new PlatformException(
+                    ErrorCode.RUN_DETAILS_EXPIRED,
+                    "Run 详情已过期",
+                    Map.of("runId", runId.value()));
+        }
+        return RunStorageMode.LEGACY_FULL;
+    }
+
     /**
      * 查询指定会话最近的非终态 Run，供前端刷新后恢复 SSE 订阅。
      */
@@ -1026,6 +1380,13 @@ public class RunApplicationService {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         LOGGER.info("Run cancellation requested, runId={}, agentId={}, traceId={}", runId.value(), resolvedAgentId, traceId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+        if (runRuntimeStore != null) {
+            Optional<RunRuntimeManifest> runtimeManifest = runRuntimeStore.findManifest(runId)
+                    .filter(manifest -> manifest.storageMode() == RunStorageMode.REDIS_SUMMARY);
+            if (runtimeManifest.isPresent()) {
+                return cancelRedisSummaryRun(resolvedAgentId, runtime, runtimeManifest.orElseThrow(), traceId);
+            }
+        }
         Run run = getRun(runId);
         if (run.status().isTerminal()) {
             LOGGER.warn("Cannot cancel terminal run, runId={}, status={}, traceId={}", runId.value(), run.status().name(), traceId);
@@ -1062,6 +1423,97 @@ public class RunApplicationService {
         runSessionScopeRouter.finishRun(runId);
         LOGGER.info("Run cancelled, runId={}, traceId={}", runId.value(), traceId);
         return cancelled;
+    }
+
+    /** 新模式取消只写 Redis 运行态和终态摘要事务；远端取消所需路径/节点属于显式低频控制面读取。 */
+    private Run cancelRedisSummaryRun(
+            String resolvedAgentId,
+            AgentRuntime runtime,
+            RunRuntimeManifest manifest,
+            String traceId) {
+        if (!resolvedAgentId.equals(manifest.agentId())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "Run agent 与取消路径不一致",
+                    Map.of("runId", manifest.runId().value(), "agentId", manifest.agentId()));
+        }
+        if (manifest.status().isTerminal()) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "Run 已结束，不能取消",
+                    Map.of("runId", manifest.runId().value(), "status", manifest.status().name()));
+        }
+        Instant now = Instant.now();
+        if (manifest.status() == RunStatus.RUNNING) {
+            append(
+                    manifest.runId(),
+                    RunEventType.RUN_CANCELLING,
+                    traceId,
+                    now,
+                    Map.of("status", RunStatus.CANCELLING.name()),
+                    RunStorageMode.REDIS_SUMMARY);
+        }
+
+        boolean remoteStopConfirmed = cancelRedisSummaryRemoteBestEffort(
+                runtime, manifest, traceId);
+        Instant cancelledAt = Instant.now();
+        append(
+                manifest.runId(),
+                RunEventType.RUN_CANCELLED,
+                traceId,
+                cancelledAt,
+                Map.of("status", RunStatus.CANCELLED.name(), "remoteStopConfirmed", remoteStopConfirmed),
+                RunStorageMode.REDIS_SUMMARY);
+        runTerminalProjectionService.project(
+                manifest.runId(),
+                RunStatus.CANCELLED,
+                "USER_CANCEL",
+                "USER_REQUESTED",
+                null,
+                remoteStopConfirmed,
+                traceId);
+        runSessionScopeRouter.finishRun(manifest.runId());
+        RunRuntimeManifest terminal = runRuntimeStore.findManifest(manifest.runId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run manifest 不存在"));
+        LOGGER.info(
+                "Redis summary Run cancelled, runId={}, remoteStopConfirmed={}, traceId={}",
+                manifest.runId().value(),
+                remoteStopConfirmed,
+                traceId);
+        return runtimeRun(terminal);
+    }
+
+    private boolean cancelRedisSummaryRemoteBestEffort(
+            AgentRuntime runtime,
+            RunRuntimeManifest manifest,
+            String traceId) {
+        try {
+            if (manifest.rootRemoteSessionId() == null || manifest.rootRemoteSessionId().isBlank()) {
+                return false;
+            }
+            ExecutionNode node = executionNodeRepository
+                    .findById(new ExecutionNodeId(manifest.executionNodeId()))
+                    .orElse(null);
+            Workspace workspace = workspaceRepository.findById(manifest.workspaceId()).orElse(null);
+            if (node == null || workspace == null) {
+                return false;
+            }
+            var result = runtime.cancelSession(new AgentCancelCommand(
+                            node,
+                            manifest.rootRemoteSessionId(),
+                            workspaceRootPath(workspace),
+                            null,
+                            traceId))
+                    .block();
+            return result != null && result.cancelled();
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Best-effort remote cancellation failed, runId={}, traceId={}",
+                    manifest.runId().value(),
+                    traceId,
+                    exception);
+            return false;
+        }
     }
 
     /**
@@ -1239,7 +1691,7 @@ public class RunApplicationService {
                                     ? Mono.error(error)
                                     : Mono.empty();
                         }))
-                .doOnError(error -> failRunFromStream(agentId, run, traceId, error))
+                .doOnError(error -> failRunFromStream(agentId, run, storageMode, traceId, error))
                 .subscribe(ignored -> {
                 }, ignored -> {
                     // 错误已在 doOnError 中落库，这里消费异常以避免 Reactor dropped error 日志。
@@ -1257,6 +1709,27 @@ public class RunApplicationService {
             RunEventDraft draft) {
         recordRuntimeActivity(draft);
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
+            if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+                try {
+                    RunStatus terminalStatus = draft.type() == RunEventType.RUN_SUCCEEDED
+                            ? RunStatus.SUCCEEDED
+                            : RunStatus.FAILED;
+                    runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft), storageMode);
+                    runTerminalProjectionService.project(
+                            originalRun.runId(),
+                            terminalStatus,
+                            "REMOTE_ROOT",
+                            terminalStatus == RunStatus.SUCCEEDED ? "COMPLETED" : "REMOTE_FAILED",
+                            terminalStatus == RunStatus.FAILED
+                                    ? firstMapText(draft.payload(), "message", "error").orElse(null)
+                                    : null,
+                            false,
+                            draft.traceId());
+                } finally {
+                    runSessionScopeRouter.finishRun(originalRun.runId());
+                }
+                return;
+            }
             try {
                 Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
                 RunStatus terminalStatus = draft.type() == RunEventType.RUN_SUCCEEDED
@@ -1520,7 +1993,12 @@ public class RunApplicationService {
     /**
      * 事件流异常时尽力把 Run 标记失败；失败落库本身异常只记录日志。
      */
-    private void failRunFromStream(String agentId, Run run, String traceId, Throwable error) {
+    private void failRunFromStream(
+            String agentId,
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            Throwable error) {
         if (isStreamingTransportError(error)) {
             LOGGER.info(
                     "Delay Run failure for transport error, runId={}, delayMs={}, traceId={}",
@@ -1530,7 +2008,7 @@ public class RunApplicationService {
             Mono.delay(TRANSPORT_ERROR_TERMINAL_GRACE)
                     .publishOn(Schedulers.boundedElastic())
                     .subscribe(
-                            ignored -> failRunFromStreamNow(agentId, run, traceId, error),
+                            ignored -> failRunFromStreamNow(agentId, run, storageMode, traceId, error),
                             delayedError -> LOGGER.warn(
                                     "Failed to schedule delayed Run stream failure, runId={}, traceId={}",
                                     run.runId().value(),
@@ -1538,11 +2016,40 @@ public class RunApplicationService {
                                     delayedError));
             return;
         }
-        failRunFromStreamNow(agentId, run, traceId, error);
+        failRunFromStreamNow(agentId, run, storageMode, traceId, error);
     }
 
-    private void failRunFromStreamNow(String agentId, Run run, String traceId, Throwable error) {
+    private void failRunFromStreamNow(
+            String agentId,
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            Throwable error) {
         try {
+            if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+                RunRuntimeManifest manifest = runRuntimeStore.findManifest(run.runId()).orElse(null);
+                if (manifest == null || manifest.status().isTerminal()) {
+                    return;
+                }
+                Instant occurredAt = Instant.now();
+                String safeMessage = safeStreamErrorMessage(error);
+                append(run.runId(), RunEventType.RUN_FAILED, traceId, occurredAt,
+                        Map.of(
+                                "error", Map.of(
+                                        "name", error.getClass().getSimpleName(),
+                                        "message", safeMessage),
+                                "message", safeMessage),
+                        RunStorageMode.REDIS_SUMMARY);
+                runTerminalProjectionService.project(
+                        run.runId(),
+                        RunStatus.FAILED,
+                        "TRANSPORT_ERROR",
+                        "STREAM_ERROR",
+                        safeMessage,
+                        false,
+                        traceId);
+                return;
+            }
             Run current = runRepository.findById(run.runId()).orElse(run);
             if (!current.status().isTerminal()) {
                 Instant occurredAt = Instant.now();
