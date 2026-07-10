@@ -294,6 +294,9 @@ let lastDuration: string | undefined;
 let lastTokens = 0;
 const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
+const robotSideQuestionAnswer = ref<string | null>(null);
+const robotSideQuestionError = ref<string | null>(null);
+const robotSideQuestionLoading = ref(false);
 const serverWorkspacePickerOpen = ref(false);
 const serverWorkspacePickerLoading = ref(false);
 const serverWorkspaceServers = shallowRef<WorkspaceBackendServer[]>([]);
@@ -3168,6 +3171,45 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   startRunMutation.mutate(runDraft);
 }
 
+function latestRemoteMessageId(): string | undefined {
+  for (let index = chatState.value.messages.length - 1; index >= 0; index -= 1) {
+    const message = chatState.value.messages[index];
+    const remoteMessageId = remoteMessageIdForAgentMessage(message);
+    if (remoteMessageId) {
+      return remoteMessageId;
+    }
+  }
+  return undefined;
+}
+
+async function handleRobotSideQuestion(question: string) {
+  robotSideQuestionAnswer.value = null;
+  robotSideQuestionError.value = null;
+  if (!session.value?.sessionId) {
+    robotSideQuestionError.value = "当前还没有可复用的对话上下文";
+    return;
+  }
+  robotSideQuestionLoading.value = true;
+  try {
+    const result = await api.askSideQuestion(session.value.sessionId, {
+      question,
+      messageId: latestRemoteMessageId(),
+      agent: "plan",
+      model: selectedModel.value || undefined
+    });
+    robotSideQuestionAnswer.value = result.answer;
+  } catch (error) {
+    robotSideQuestionError.value = error instanceof BackendApiError ? error.message : "旁路问答暂时不可用";
+  } finally {
+    robotSideQuestionLoading.value = false;
+  }
+}
+
+function handleCloseRobotSideQuestion() {
+  robotSideQuestionAnswer.value = null;
+  robotSideQuestionError.value = null;
+}
+
 function summarizePromptParts(parts: PromptPart[]) {
   return parts.map((part) => {
     if (part.type === "file") {
@@ -4124,6 +4166,9 @@ async function handleLogout() {
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
+    :side-question-answer="robotSideQuestionAnswer"
+    :side-question-error="robotSideQuestionError"
+    :side-question-loading="robotSideQuestionLoading"
     :runtime-inventory="runtimeInventoryForShell"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
@@ -4131,6 +4176,8 @@ async function handleLogout() {
     @refresh-opencode-process="refreshOpencodeProcessStatus"
     @logout="handleLogout"
     @join-app="handleJoinApp"
+    @robot-side-question="handleRobotSideQuestion"
+    @close-robot-side-question="handleCloseRobotSideQuestion"
   >
     <template #activity>
       <nav class="figma-activity-nav" aria-label="工作台活动栏">

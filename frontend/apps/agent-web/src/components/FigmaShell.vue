@@ -39,6 +39,9 @@ const props = withDefaults(
     currentUserRoleLabels?: string[];
     opencodeProcessStatus?: UserOpencodeProcess | null;
     opencodeProcessLoading?: boolean;
+    sideQuestionAnswer?: string | null;
+    sideQuestionError?: string | null;
+    sideQuestionLoading?: boolean;
     showLeftPanel?: boolean;
     showRightPanel?: boolean;
     runtimeInventory?: RuntimeInventorySummary;
@@ -89,6 +92,8 @@ const emit = defineEmits<{
   (e: "logout"): void;
   (e: "refresh-opencode-process"): void;
   (e: "join-app", appId: string, callback: (success: boolean) => void): void;
+  (e: "robot-side-question", question: string): void;
+  (e: "close-robot-side-question"): void;
 }>();
 
 const appMenuOpen = ref(false);
@@ -308,6 +313,8 @@ type RobotState =
 const robotState = ref<RobotState>("sleeping");
 const robotX = ref(0);
 const robotY = ref(0);
+const robotQuestionOpen = ref(false);
+const robotQuestionDraft = ref("");
 const robotDirection = ref<"left" | "right" | "front">("front");
 const robotTransition = ref("none");
 
@@ -339,6 +346,7 @@ let robotDragWasEffective = false;
 let robotDragTarget: HTMLElement | null = null;
 let robotDragPreviousCursor = "";
 let robotDragPreviousUserSelect = "";
+let robotSuppressClick = false;
 
 // Throttled activity timer
 let lastActivityTime = 0;
@@ -459,6 +467,10 @@ function finishRobotDrag(pointerId?: number) {
     robotHasSavedPosition.value = true;
     saveRobotPosition();
     robotKeepVisible.value = false;
+    robotSuppressClick = true;
+    window.setTimeout(() => {
+      robotSuppressClick = false;
+    }, 0);
     resumeNaturalRobotBehavior();
   }
   cleanupRobotDrag();
@@ -531,6 +543,10 @@ function getBirthPosition() {
 function triggerExit() {
   if (robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
     return;
+  }
+
+  if (robotQuestionOpen.value) {
+    closeRobotQuestion();
   }
 
   // Clear running timers
@@ -1078,6 +1094,34 @@ const robotStyle = computed(() => ({
   opacity: 0.85
 }));
 
+const robotQuestionStyle = computed<CSSProperties>(() => {
+  const width = 292;
+  const left = Math.min(Math.max(8, robotX.value + ROBOT_WIDTH + 10), Math.max(8, window.innerWidth - width - 8));
+  const top = Math.min(Math.max(8, robotY.value - 8), Math.max(8, window.innerHeight - 240));
+  return { left: `${left}px`, top: `${top}px` };
+});
+
+function closeRobotQuestion() {
+  robotQuestionOpen.value = false;
+  robotQuestionDraft.value = "";
+  emit("close-robot-side-question");
+}
+
+function onRobotClick() {
+  if (robotSuppressClick) {
+    robotSuppressClick = false;
+    return;
+  }
+  if (robotState.value === "sleeping") return;
+  robotQuestionOpen.value = true;
+}
+
+function submitRobotQuestion() {
+  const question = robotQuestionDraft.value.trim();
+  if (!question || props.sideQuestionLoading) return;
+  emit("robot-side-question", question);
+}
+
 function handleFocusChange() {
   finishRobotDrag();
   resetInactivityTimer();
@@ -1536,6 +1580,7 @@ function submitJoinApp() {
       @pointercancel="finishRobotPointerDrag"
       @lostpointercapture="onRobotLostPointerCapture"
       @keydown="onRobotKeydown"
+      @click="onRobotClick"
     >
       <span id="figma-robot-instructions" class="figma-robot-instructions">可拖动小宠物；也可使用方向键每次移动 8 像素。</span>
       <div class="robot-dir-wrap" :class="[`facing-${robotDirection}`]">
@@ -1571,6 +1616,44 @@ function submitJoinApp() {
         </div>
       </div>
     </div>
+    <section
+      v-if="robotQuestionOpen && robotState !== 'sleeping'"
+      class="figma-robot-side-question"
+      data-testid="robot-side-question"
+      :style="robotQuestionStyle"
+      aria-label="宠物旁路问答"
+      @pointerdown.stop
+      @click.stop
+    >
+      <header class="figma-robot-side-question-header">
+        <span>问问小宠物</span>
+        <button type="button" aria-label="关闭宠物旁路问答" @click="closeRobotQuestion">×</button>
+      </header>
+      <textarea
+        v-model="robotQuestionDraft"
+        data-testid="robot-side-question-input"
+        class="figma-robot-side-question-input"
+        rows="2"
+        maxlength="4000"
+        placeholder="问问当前任务，不会写入主对话"
+        @keydown.enter.exact.prevent="submitRobotQuestion"
+      />
+      <div class="figma-robot-side-question-footer">
+        <span>临时上下文 · 不改主历史</span>
+        <button
+          type="button"
+          data-testid="robot-side-question-submit"
+          :disabled="sideQuestionLoading || !robotQuestionDraft.trim()"
+          @click="submitRobotQuestion"
+        >
+          {{ sideQuestionLoading ? "思考中…" : "提问" }}
+        </button>
+      </div>
+      <div v-if="sideQuestionError" class="figma-robot-side-question-error">{{ sideQuestionError }}</div>
+      <div v-else-if="sideQuestionAnswer" data-testid="robot-side-question-answer" class="figma-robot-side-question-answer">
+        {{ sideQuestionAnswer }}
+      </div>
+    </section>
   </div>
 </template>
 
@@ -1718,6 +1801,115 @@ function submitJoinApp() {
 .figma-robot-visibility-toggle--activity[aria-pressed='true'] {
   border-color: transparent;
   background: #e8e8e8;
+}
+
+.figma-robot-side-question {
+  position: fixed;
+  z-index: 10000;
+  width: 292px;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid #dbe3ec;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 30px rgba(33, 52, 71, 0.16);
+  color: #27384b;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.figma-robot-side-question-header,
+.figma-robot-side-question-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.figma-robot-side-question-header {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.figma-robot-side-question-header button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #718096;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.figma-robot-side-question-header button:hover {
+  background: #f0f4f8;
+  color: #27384b;
+}
+
+.figma-robot-side-question-input {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  outline: none;
+  color: #27384b;
+  font: 12px/1.5 "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.figma-robot-side-question-input:focus {
+  border-color: #7ca7c8;
+  box-shadow: 0 0 0 2px rgba(124, 167, 200, 0.15);
+}
+
+.figma-robot-side-question-footer {
+  margin-top: 7px;
+  color: #8795a5;
+  font-size: 10px;
+}
+
+.figma-robot-side-question-footer button {
+  min-width: 44px;
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: #42617a;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.figma-robot-side-question-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.figma-robot-side-question-answer,
+.figma-robot-side-question-error {
+  max-height: 150px;
+  margin-top: 9px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.figma-robot-side-question-answer {
+  background: #f3f8fb;
+  color: #334e68;
+}
+
+.figma-robot-side-question-error {
+  background: #fff4f2;
+  color: #b04b3a;
 }
 
 .figma-runtime-inventory-summary {

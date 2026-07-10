@@ -176,6 +176,76 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void sideQuestionForksSendsOneMessageAndDeletesTemporarySessionWithoutCompactingSmallContext() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.sessionMessages(any())).thenReturn(Mono.just(new com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult(
+                List.of(new com.icbc.testagent.opencode.client.OpencodeSessionMessage(
+                        Map.of("role", "user"),
+                        List.of(Map.of("type", "text", "text", "short context")))),
+                null,
+                null)));
+        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
+            OpencodeRuntimeCommand command = invocation.getArgument(0);
+            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(switch (command.method() + " " + command.path()) {
+                case "POST /session/ses_remote1234567890abcdef/fork" -> Map.of("id", "ses_side1234567890abcdef");
+                case "POST /session/ses_side1234567890abcdef/message" -> Map.of(
+                        "parts", List.of(Map.of("type", "text", "text", "answer from context")));
+                case "DELETE /session/ses_side1234567890abcdef" -> Map.of("deleted", true);
+                default -> Map.of("unexpected", command.path());
+            })));
+        });
+
+        var result = fixture.service.sideQuestion(
+                "ses_1234567890abcdef",
+                new SideQuestionInput("what did we decide?", "last_message", "plan", "anthropic/claude-sonnet"),
+                "trace_1234567890abcdef");
+
+        assertThat(result.answer()).isEqualTo("answer from context");
+        assertThat(result.compacted()).isFalse();
+        verify(fixture.facade).runtime(org.mockito.ArgumentMatchers.argThat(command ->
+                command != null
+                        && command.method().equals("POST")
+                        && command.path().endsWith("/message")
+                        && ((Map<?, ?>) command.body()).get("tools").equals(Map.of("*", false))));
+        verify(fixture.facade).runtime(org.mockito.ArgumentMatchers.argThat(command ->
+                command != null && command.method().equals("DELETE") && command.path().endsWith("ses_side1234567890abcdef")));
+        verify(fixture.facade, never()).runtime(org.mockito.ArgumentMatchers.argThat(command -> command != null && command.path().endsWith("/summarize")));
+    }
+
+    @Test
+    void sideQuestionCompactsTemporaryForkWhenContextExceedsBudget() {
+        Fixture fixture = new Fixture();
+        String largeText = "x".repeat(50_000);
+        when(fixture.facade.sessionMessages(any())).thenReturn(Mono.just(new com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult(
+                List.of(new com.icbc.testagent.opencode.client.OpencodeSessionMessage(
+                        Map.of("role", "assistant"),
+                        List.of(Map.of("type", "text", "text", largeText)))),
+                null,
+                null)));
+        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
+            OpencodeRuntimeCommand command = invocation.getArgument(0);
+            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(switch (command.method() + " " + command.path()) {
+                case "POST /session/ses_remote1234567890abcdef/fork" -> Map.of("id", "ses_side1234567890abcdef");
+                case "POST /session/ses_side1234567890abcdef/summarize" -> Map.of("ok", true);
+                case "POST /session/ses_side1234567890abcdef/message" -> Map.of(
+                        "parts", List.of(Map.of("type", "text", "text", "compacted answer")));
+                case "DELETE /session/ses_side1234567890abcdef" -> Map.of("deleted", true);
+                default -> Map.of("unexpected", command.path());
+            })));
+        });
+
+        var result = fixture.service.sideQuestion(
+                "ses_1234567890abcdef",
+                new SideQuestionInput("summarize the current direction", null, "plan", "anthropic/claude-sonnet"),
+                "trace_1234567890abcdef");
+
+        assertThat(result.answer()).isEqualTo("compacted answer");
+        assertThat(result.compacted()).isTrue();
+        verify(fixture.facade).runtime(org.mockito.ArgumentMatchers.argThat(command ->
+                command != null && command.method().equals("POST") && command.path().endsWith("/summarize")));
+    }
+
+    @Test
     void getConfigUsesGlobalConfigPath() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(

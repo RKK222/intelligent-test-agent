@@ -12,6 +12,8 @@ import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionInput;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionResult;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -122,6 +124,32 @@ class PlatformOpencodeRuntimeControllerTest {
                 .expectBody()
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.url").isEqualTo("https://opencode.ai/s/abc");
+    }
+
+    @Test
+    void runtimeControllerAnswersSideQuestionWithoutExposingTemporarySession() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        when(service.sideQuestion(
+                        eq("ses_1234567890abcdef"),
+                        eq(new SideQuestionInput("what did we decide?", "msg_1", "plan", "anthropic/claude-sonnet")),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new SideQuestionResult("answer from fork", true));
+        stubWithUser(service);
+        WebTestClient client = client(service, null);
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"question":"what did we decide?","messageId":"msg_1","agent":"plan","model":"anthropic/claude-sonnet"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.answer").isEqualTo("answer from fork")
+                .jsonPath("$.data.compacted").isEqualTo(true);
     }
 
     @Test

@@ -3,6 +3,8 @@ package com.icbc.testagent.opencode.runtime.runtime;
 import com.icbc.testagent.agent.runtime.AgentRuntimeCommand;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.icbc.testagent.agent.runtime.AgentRuntimeResult;
+import com.icbc.testagent.agent.runtime.AgentSessionMessagesCommand;
+import com.icbc.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.session.SessionRepository;
@@ -19,6 +21,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -27,6 +31,11 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class OpencodeRuntimeApplicationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(OpencodeRuntimeApplicationService.class);
+    private static final int SIDE_QUESTION_CONTEXT_MESSAGE_LIMIT = 40;
+    private static final int SIDE_QUESTION_CONTEXT_CHAR_LIMIT = 48_000;
+    private static final int SIDE_QUESTION_MAX_LENGTH = 4_000;
 
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentRuntimeTargetResolver targetResolver;
@@ -400,6 +409,91 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
+     * 在临时 fork 中执行一次旁路问答：先按消息数/文本量判断是否需要压缩，再发送单条消息，最后删除临时会话。
+     * 主会话不会追加旁路问题；压缩也只作用于临时 fork，避免改变用户正在进行的主上下文。
+     */
+    public SideQuestionResult sideQuestion(String sessionId, SideQuestionInput input, String traceId) {
+        Objects.requireNonNull(input, "input must not be null");
+        if (input.question().length() > SIDE_QUESTION_MAX_LENGTH) {
+            throw new IllegalArgumentException("question exceeds the maximum length");
+        }
+
+        AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
+        AgentSessionMessagesResult context = location.runtime().sessionMessages(new AgentSessionMessagesCommand(
+                        location.node(),
+                        location.remoteSessionId(),
+                        SIDE_QUESTION_CONTEXT_MESSAGE_LIMIT + 1,
+                        "desc",
+                        null,
+                        traceId))
+                .block();
+        boolean shouldCompact = context != null
+                && (context.messages().size() > SIDE_QUESTION_CONTEXT_MESSAGE_LIMIT
+                || estimateContextChars(context) > SIDE_QUESTION_CONTEXT_CHAR_LIMIT);
+
+        LinkedHashMap<String, Object> forkBody = new LinkedHashMap<>();
+        if (input.messageId() != null) {
+            forkBody.put("messageID", input.messageId());
+        }
+        Object forkResponse = post(
+                location,
+                "/session/" + encodePath(location.remoteSessionId()) + "/fork",
+                forkBody,
+                traceId);
+        String temporarySessionId = extractSessionId(forkResponse);
+        if (temporarySessionId == null) {
+            throw new IllegalStateException("opencode fork response did not contain a session id");
+        }
+
+        boolean compacted = false;
+        try {
+            ModelSelection model = parseModel(input.model());
+            if (shouldCompact) {
+                if (model == null) {
+                    throw new IllegalArgumentException("side question requires model provider/model when context compaction is needed");
+                }
+                post(
+                        location,
+                        "/session/" + encodePath(temporarySessionId) + "/summarize",
+                        Map.of("providerID", model.providerId(), "modelID", model.modelId()),
+                        traceId);
+                compacted = true;
+            }
+
+            LinkedHashMap<String, Object> messageBody = new LinkedHashMap<>();
+            if (input.agent() != null) {
+                messageBody.put("agent", input.agent());
+            }
+            if (model != null) {
+                messageBody.put("model", Map.of("providerID", model.providerId(), "modelID", model.modelId()));
+            }
+            // 旁路问题只读取已有上下文并返回一次答案，不允许临时 fork 继续读写工作区或调用外部工具。
+            messageBody.put("tools", Map.of("*", false));
+            messageBody.put("parts", List.of(Map.of("type", "text", "text", input.question())));
+            Object answerResponse = post(
+                    location,
+                    "/session/" + encodePath(temporarySessionId) + "/message",
+                    messageBody,
+                    traceId);
+            String answer = extractAnswer(answerResponse);
+            if (answer == null) {
+                throw new IllegalStateException("opencode side question response did not contain text");
+            }
+            return new SideQuestionResult(answer, compacted);
+        } finally {
+            try {
+                delete(location, "/session/" + encodePath(temporarySessionId), Map.of(), traceId);
+            } catch (RuntimeException cleanupFailure) {
+                LOGGER.warn(
+                        "event=opencode_side_question_cleanup_failed traceId={} sessionId={} error={}",
+                        traceId,
+                        temporarySessionId,
+                        cleanupFailure.getClass().getSimpleName());
+            }
+        }
+    }
+
+    /**
      * 请求远端 compact/summarize session。
      */
     public Object compactSession(String sessionId, Map<String, Object> body, String traceId) {
@@ -601,6 +695,112 @@ public class OpencodeRuntimeApplicationService {
                         traceId))
                 .block();
         return objectMapper.convertValue(result.body(), Object.class);
+    }
+
+    /**
+     * 估算 fork 上下文规模，只计算字符串内容并对递归结构做统一遍历；该值用于触发 compact，不作为精确 token 计费。
+     */
+    private int estimateContextChars(AgentSessionMessagesResult result) {
+        return result.messages().stream()
+                .mapToInt(message -> estimateValueChars(message.message()) + estimateValueChars(message.parts()))
+                .sum();
+    }
+
+    private int estimateValueChars(Object value) {
+        if (value instanceof String text) {
+            return text.length();
+        }
+        if (value instanceof Map<?, ?> map) {
+            return map.entrySet().stream().mapToInt(entry -> estimateValueChars(entry.getKey()) + estimateValueChars(entry.getValue())).sum();
+        }
+        if (value instanceof Iterable<?> iterable) {
+            int total = 0;
+            for (Object item : iterable) {
+                total += estimateValueChars(item);
+                if (total > SIDE_QUESTION_CONTEXT_CHAR_LIMIT) {
+                    return total;
+                }
+            }
+            return total;
+        }
+        return 0;
+    }
+
+    private String extractSessionId(Object response) {
+        if (!(response instanceof Map<?, ?> map)) {
+            return null;
+        }
+        for (String key : List.of("id", "sessionID", "sessionId")) {
+            String value = text(map.get(key));
+            if (value != null) {
+                return value;
+            }
+        }
+        for (Object value : map.values()) {
+            String nested = extractSessionId(value);
+            if (nested != null) {
+                return nested;
+            }
+        }
+        return null;
+    }
+
+    private String extractAnswer(Object response) {
+        if (!(response instanceof Map<?, ?> map)) {
+            return text(response);
+        }
+        String partsText = extractPartsText(map.get("parts"));
+        if (partsText != null) {
+            return partsText;
+        }
+        for (String key : List.of("answer", "content", "text")) {
+            String value = text(map.get(key));
+            if (value != null) {
+                return value;
+            }
+        }
+        return extractAnswer(map.get("info"));
+    }
+
+    private String extractPartsText(Object value) {
+        if (!(value instanceof Iterable<?> iterable)) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Object item : iterable) {
+            if (!(item instanceof Map<?, ?> part)) {
+                continue;
+            }
+            String type = text(part.get("type"));
+            if (type != null && !type.equals("text")) {
+                continue;
+            }
+            String text = text(part.get("text"));
+            if (text == null) {
+                text = text(part.get("content"));
+            }
+            if (text != null) {
+                if (!builder.isEmpty()) {
+                    builder.append('\n');
+                }
+                builder.append(text);
+            }
+        }
+        return builder.isEmpty() ? null : builder.toString();
+    }
+
+    private ModelSelection parseModel(String model) {
+        if (model == null || model.isBlank()) {
+            return null;
+        }
+        int separator = model.indexOf('/');
+        if (separator <= 0 || separator >= model.length() - 1) {
+            throw new IllegalArgumentException("model must use provider/model format");
+        }
+        return new ModelSelection(model.substring(0, separator), model.substring(separator + 1));
+    }
+
+    private record ModelSelection(String providerId, String modelId) {
     }
 
     /**

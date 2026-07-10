@@ -30,6 +30,7 @@
 - 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、通用筛选参数传递、CSV 响应头和统一错误转换；查询服务只读 rollup。
 - `GET /api/internal/platform/opencode-runtime/sessions` 是当前登录用户历史会话分页接口，支持 `page/size/q`，返回 `workspaceContext`（应用、应用工作空间模板和版本上下文）且按 `updatedAt desc` 排序；列表不校验当前应用成员资格，点击切换时再由 workspace-management recent 接口校验权限。Session 历史正文恢复主入口是 agent-scoped session tree messages；内部平台 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 支持 `refresh=false` 只读数据库快照，供前端反馈 messageId 映射和只读 transcript 使用；active-run API 供前端刷新后恢复 SSE。
 - `GET /api/internal/platform/opencode-runtime/sessions/runtime-state` 和 `/runtime-state/events` 暴露当前登录用户历史会话运行态摘要和 fetch SSE 状态通道；Controller 只读取登录主体、traceId、映射 DTO 和输出 SSE，运行计数、question 待关注状态和事件触发刷新委托 `test-agent-opencode-runtime`。
+- `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question` 与 agent-scoped 等价路径提供宠物旁路问答；Controller 只做 DTO/traceId/认证主体适配，运行时在临时 fork 中按上下文规模决定是否 compact，禁用工具，返回回答后删除临时会话，不追加主会话历史。
 - 本地 CORS 默认允许主前端和 `frontend-opencode` Vite/Preview/E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式收敛。
 
 ## 允许依赖

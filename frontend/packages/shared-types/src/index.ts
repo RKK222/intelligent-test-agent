@@ -303,6 +303,18 @@ export type SessionMessage = {
   tokens?: TokenUsage;
 };
 
+export type SideQuestionRequest = {
+  question: string;
+  messageId?: string;
+  agent?: string;
+  model?: string;
+};
+
+export type SideQuestionResponse = {
+  answer: string;
+  compacted: boolean;
+};
+
 export type RunSessionTreeSessionResponse = {
   rootSessionId?: string | null;
   sessionId: string;

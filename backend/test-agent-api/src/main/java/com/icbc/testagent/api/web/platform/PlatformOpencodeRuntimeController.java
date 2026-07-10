@@ -2,6 +2,7 @@ package com.icbc.testagent.api.web.platform;
 
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
+import com.icbc.testagent.api.web.common.SideQuestionDtos;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
@@ -393,6 +394,19 @@ public class PlatformOpencodeRuntimeController {
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
         return platformResponse(exchange, traceId -> runtimeService.forkSession(sessionId, body, traceId));
+    }
+
+    /**
+     * 执行一次不写入主会话历史的宠物旁路问答，临时 fork 的生命周期由应用层负责清理。
+     */
+    @PostMapping({
+            "/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question"
+    })
+    public Mono<ApiResponse<Object>> sideQuestion(
+            @PathVariable String sessionId,
+            @jakarta.validation.Valid @RequestBody SideQuestionDtos.Request request,
+            ServerWebExchange exchange) {
+        return platformResponse(exchange, traceId -> SideQuestionDtos.Response.from(runtimeService.sideQuestion(sessionId, request.toInput(), traceId)));
     }
 
     /**

@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 增加宠物旁路问答并按上下文预算控制临时 fork
+
+- Why:
+  - 用户希望小宠物具备类似 Claude Code `/btw` 的对话能力，同时不污染主对话历史；本轮进一步要求控制 fork 传入上下文，必要时调用 OpenCode compact。
+- What:
+  - 新增平台和 agent-scoped `side-question` API、前端 `askSideQuestion` client 与宠物一次性问答浮层。运行时读取当前消息规模，超过 40 条或约 48000 字符时仅对临时 fork 调用 summarize，再以 `tools: {"*": false}` 发送单条问题，finally 删除临时会话，回答只返回浮层。
+- How:
+  - 复用 `AgentRuntimeTargetResolver`、`AgentSessionMessagesCommand`、runtime HTTP 代理和现有 FigmaShell/AgentWorkbench；新增 DTO、稳定 shared types、定向单测/Controller 测试及 API/模块文档，不新增数据库、SSE 或环境配置。
+- Result:
+  - 后端 `mvn -pl test-agent-api -am test`（JDK 25）通过；旁路服务 24/24、平台 Controller 8/8。前端 `corepack pnpm test --run packages/backend-api/tests/backend-api.test.ts apps/agent-web/tests/FigmaShell.test.ts` 66/66，`corepack pnpm typecheck` 通过，当前 `http://127.0.0.1:3000/` 返回 200。包含既有聊天时间线改动的 FigmaChatPanel 全量定向测试仍有 1 个既有失败，未把该无关改动纳入本次提交。
+
 ### 2026-07-10 - 修复宠物误离场并调整开关位置
 
 - Why:

@@ -2,6 +2,7 @@ package com.icbc.testagent.api.web.agent;
 
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
+import com.icbc.testagent.api.web.common.SideQuestionDtos;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
@@ -394,6 +395,19 @@ public class AgentOpencodeRuntimeController {
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
         return agentResponse(exchange, traceId -> runtimeService.forkSession(sessionId, body, traceId));
+    }
+
+    /**
+     * 执行一次不写入主会话历史的宠物旁路问答，复用当前 agent 路由和用户进程归属。
+     */
+    @PostMapping({
+            "/api/internal/agent/{agentId}/session/{sessionId}/side-question"
+    })
+    public Mono<ApiResponse<Object>> sideQuestion(
+            @PathVariable String sessionId,
+            @jakarta.validation.Valid @RequestBody SideQuestionDtos.Request request,
+            ServerWebExchange exchange) {
+        return agentResponse(exchange, traceId -> SideQuestionDtos.Response.from(runtimeService.sideQuestion(sessionId, request.toInput(), traceId)));
     }
 
     /**

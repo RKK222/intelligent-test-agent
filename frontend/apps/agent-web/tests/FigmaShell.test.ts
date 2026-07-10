@@ -310,6 +310,25 @@ describe("FigmaShell", () => {
     expect(wrapper.get(".figma-user-avatar").classes()).toContain("figma-user-avatar--compact");
   });
 
+  it("opens a transient side-question bubble from the pet and emits the question", async () => {
+    const wrapper = mountShell({
+      props: {
+        sideQuestionAnswer: "当前上下文已经完成初始化。"
+      }
+    });
+    await summonRobot(wrapper);
+
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
+
+    const input = wrapper.get('[data-testid="robot-side-question-input"]');
+    await input.setValue("刚才做了什么？");
+    await wrapper.get('[data-testid="robot-side-question-submit"]').trigger("click");
+
+    expect(wrapper.emitted("robot-side-question")?.[0]).toEqual(["刚才做了什么？"]);
+    expect(wrapper.get('[data-testid="robot-side-question-answer"]').text()).toContain("当前上下文已经完成初始化");
+  });
+
   it("toggles the pet immediately and restores a saved manual position after a full idle minute", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);

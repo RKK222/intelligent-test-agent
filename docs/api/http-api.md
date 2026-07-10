@@ -2248,6 +2248,7 @@ Session 运行态接口：
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/diff?messageId=` | 查询 session/message 级 Diff。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/abort` | 中止当前 session 执行。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/fork` | fork session。 |
+| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question` | 旁路问答：从指定消息边界创建临时 fork，必要时只在临时 fork 上调用 summarize/compact，再发送一条禁用工具的消息并删除临时会话；问题和回答不写入主会话历史。body 为 `{ question, messageId?, agent?, model? }`，`question` 最长 4000 字；上下文超过 40 条消息或约 48000 字符时必须提供 `provider/model` 格式的 `model`。响应为 `{ answer, compacted }`。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/compact` | 调用 opencode summarize/compact。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/revert` | revert 指定 message。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/unrevert` | 取消 revert。 |
@@ -2263,7 +2264,7 @@ Session 运行态接口：
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state` | 查询当前登录用户历史会话运行态摘要，用于历史入口运行计数和 ask 提醒。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state/events` | fetch SSE 订阅当前登录用户历史会话运行态摘要变更，首帧 snapshot，后续 updated。 |
 
-旧 `/api/sessions/{sessionId}/...` 运行态入口已作废，统一返回 `410 API_GONE`。agent path 使用 `/api/internal/agent/{agentId}/session/{sessionId}/...`；当前 `opencode` 的 children、todo、diff、abort、fork、compact、revert、unrevert、command、shell 路径保持 `/api/internal/agent/opencode/session/{sessionId}/...`。permission/question 的 agent path 入口使用 `/api/internal/agent/{agentId}/permission|question`，并通过 query `sessionId` 定位平台 session。
+旧 `/api/sessions/{sessionId}/...` 运行态入口已作废，统一返回 `410 API_GONE`。agent path 使用 `/api/internal/agent/{agentId}/session/{sessionId}/...`；当前 `opencode` 的 children、todo、diff、abort、fork、side-question、compact、revert、unrevert、command、shell 路径保持 `/api/internal/agent/opencode/session/{sessionId}/...`。permission/question 的 agent path 入口使用 `/api/internal/agent/{agentId}/permission|question`，并通过 query `sessionId` 定位平台 session。
 
 用户级会话运行态摘要只面向已登录用户，统计范围与当前用户可见历史会话一致：会话创建人、Run 触发人或消息发送人为当前用户，且会话仍为 ACTIVE。`runningCount` 只统计 `PENDING/RUNNING/CANCELLING` Run；同一会话只返回最近一个非终态 Run。`questionCount` 只统计最新 question 状态仍为 `question.asked` 的运行中会话；收到 `question.replied`、`question.rejected` 或 Run 终态后，该会话会从待关注集合移除。
 

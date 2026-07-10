@@ -96,6 +96,8 @@ import type {
   SessionDiff,
   Session,
   SessionMessage,
+  SideQuestionRequest,
+  SideQuestionResponse,
   SessionRuntimeStateSummary,
   SessionTreeMessagesResponse,
   SshKeyMetadata,
@@ -922,6 +924,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     getMyMessageFeedback: (messageId: string) =>
       request<AiMessageFeedback | null>(`/api/internal/platform/opencode-runtime/messages/${encodeURIComponent(messageId)}/feedback/me`),
     getActiveRun: (sessionId: string) => request<Run | null>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/active-run`),
+    askSideQuestion: (sessionId: string, payload: SideQuestionRequest) =>
+      request<SideQuestionResponse>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/side-question`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeoutMs: 120000
+      }),
     createSession: (workspaceId: string, title: string) =>
       request<Session>(`${opencodeRuntimeBase}/sessions`, { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
     startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>
