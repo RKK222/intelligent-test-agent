@@ -2022,6 +2022,24 @@ function defaultProcessDotPos() {
   )
 }
 
+function effectiveProcessStatusCardSize(cardSize: { width: number; height: number }) {
+  return {
+    width: Math.min(cardSize.width, Math.max(0, window.innerWidth - PROCESS_STATUS_CARD_VIEWPORT_INSET)),
+    height: Math.min(cardSize.height, Math.max(0, window.innerHeight - PROCESS_STATUS_CARD_VIEWPORT_INSET)),
+  }
+}
+
+// 临时精确锚点只豁免首次切换；后续拖动和窗口缩小时仍必须留在当前可视区域内。
+function clampProcessStatusCardAnchor(position: { x: number; y: number }) {
+  const size = effectiveProcessStatusCardSize(processStatusCardSize.value)
+  const maxX = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerWidth - size.width - PROCESS_STATUS_CARD_MARGIN)
+  const maxY = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerHeight - size.height - PROCESS_STATUS_CARD_MARGIN)
+  return {
+    x: Math.min(Math.max(position.x, PROCESS_STATUS_CARD_MARGIN), maxX),
+    y: Math.min(Math.max(position.y, PROCESS_STATUS_CARD_MARGIN), maxY),
+  }
+}
+
 function loadProcessDotPos() {
   if (typeof window === 'undefined') return
   try {
@@ -2080,10 +2098,7 @@ function calculateProcessStatusCardPos(
   if (typeof window === 'undefined') return { x: dotPos.x, y: dotPos.y }
 
   // CSS 会把卡片限制在视口内，这里用同一有效尺寸计算位置，避免测量值过大时定位失真。
-  const effectiveCardSize = {
-    width: Math.min(cardSize.width, Math.max(0, window.innerWidth - PROCESS_STATUS_CARD_VIEWPORT_INSET)),
-    height: Math.min(cardSize.height, Math.max(0, window.innerHeight - PROCESS_STATUS_CARD_VIEWPORT_INSET)),
-  }
+  const effectiveCardSize = effectiveProcessStatusCardSize(cardSize)
   const right = dotPos.x + PROCESS_DOT_SIZE + PROCESS_STATUS_CARD_GAP
   const bottom = dotPos.y + PROCESS_DOT_SIZE + PROCESS_STATUS_CARD_GAP
   // 放置优先级：默认右下；单独越界时分别翻到左侧或上方，最后再夹进视口。
@@ -2235,10 +2250,10 @@ function onProcessDotPointerMove(event: PointerEvent) {
       dragOriginY + dy
     )
     if (dragCardAnchorOrigin) {
-      processStatusCardAnchor.value = {
+      processStatusCardAnchor.value = clampProcessStatusCardAnchor({
         x: dragCardAnchorOrigin.x + dx,
         y: dragCardAnchorOrigin.y + dy,
-      }
+      })
     }
   }
 }
@@ -2326,7 +2341,9 @@ onBeforeUnmount(() => {
 })
 
 function onProcessStatusDotResize() {
-  if (processStatusFloating.value && processStatusDotPos.value) {
+  if (processStatusCardAnchor.value) {
+    processStatusCardAnchor.value = clampProcessStatusCardAnchor(processStatusCardAnchor.value)
+  } else if (processStatusFloating.value && processStatusDotPos.value) {
     processStatusDotPos.value = clampProcessDotPos(
       processStatusDotPos.value.x,
       processStatusDotPos.value.y
