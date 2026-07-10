@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-10 - 统一进程浮层为卡片锚点坐标
+
+- Why:
+  - 旧版同时维护绿点坐标与临时卡片锚点，卡片尺寸变化或视口缩小时可能分别夹取，导致收起和展开的位置不同步。
+- What:
+  - `FigmaChatPanel` 仅保存卡片左上角锚点，使用版本化 `{ v: 2, cardX, cardY }`；绿点由锚点、卡片尺寸和安全边距派生。旧 `{x,y}` 记录在读取时转换、夹取并立即重写为 v2。
+- How:
+  - 绿点/卡片拖动、ResizeObserver 和窗口缩放统一只移动或夹取该锚点；首次从内联卡片拖动时写入拖动前的实际 rect，保留无跳位体验。单测覆盖迁移重挂载、边缘、收起重开、尺寸增长、缩放、8px 绿点与子 Agent 隐藏。
+- Result:
+  - 先验证旧实现 RED（2 failed，92 passed，1 skipped）；最终 `FigmaShell` + `FigmaChatPanel` 为 110 passed，1 skipped，`pnpm lint`、`pnpm typecheck`、`pnpm build` 均通过；新前端 dev server 的 `http://127.0.0.1:3001/` HTTP 200。构建仍有既有 CSS `@import` 顺序和大包体积警告。
+- Next:
+  - 未完成浏览器人工边缘拖动、缩放和收起/重开验收。
+
 ### 2026-07-10 - 支持小宠物与进程状态卡本地定位
 
 - Why:
