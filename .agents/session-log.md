@@ -11,7 +11,7 @@
 - How:
   - 未新增或变更 API、RunEvent SSE、数据库、安全或兼容性契约；通过既有组件和单测覆盖拖动、持久化、边缘换向及缩放约束。
 - Result:
-  - `cd frontend && corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts`（97 passed，1 skipped）、`corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build` 和 `git diff --check` 均通过。以 `corepack pnpm --filter @test-agent/agent-web dev -- --host 127.0.0.1 --port 3010` 启动当前 HEAD，因 3000/3001 已占用实际监听 `http://127.0.0.1:3002/`，`curl` 返回 200；构建仅有既有 CSS `@import` 顺序及大包体积警告。
+  - `cd frontend && corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts`（97 passed，1 skipped）及最终小宠物计时器回归 `corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts`（13 passed）、`corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build` 和 `git diff --check` 均通过。以 `corepack pnpm --filter @test-agent/agent-web dev -- --host 127.0.0.1 --port 3010` 启动当前 HEAD，因 3000/3001 已占用实际监听 `http://127.0.0.1:3002/`，`curl` 返回 200；构建仅有既有 CSS `@import` 顺序及大包体积警告。
 - Next:
   - 未执行浏览器人工拖动、刷新和缩放验收；可在 `http://127.0.0.1:3002/` 按 README 所述交互复核。
 
