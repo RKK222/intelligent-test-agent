@@ -10,6 +10,9 @@ import com.icbc.testagent.domain.dictionary.UserRole;
 import com.icbc.testagent.domain.dictionary.UserRoleRepository;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextUserMutation;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.icbc.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
 import com.icbc.testagent.system.management.user.UserManagementResponses.RoleOption;
 import com.icbc.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
@@ -17,6 +20,8 @@ import com.icbc.testagent.system.management.user.UserManagementResponses.UserRes
 import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -35,6 +40,13 @@ public class UserManagementApplicationService {
     private final UserRepository userRepository;
     private final UserRoleRepository userRoleRepository;
     private final DictionaryRepository dictionaryRepository;
+    private ConversationContextStore conversationContextStore;
+
+    /** 角色调整属于权限边界变化，在关系型写入前后按用户清除运行上下文。 */
+    @Autowired(required = false)
+    void setConversationContextStore(ConversationContextStore conversationContextStore) {
+        this.conversationContextStore = conversationContextStore;
+    }
 
     /**
      * 注入用户领域服务与用户、角色、字典仓储。
@@ -115,10 +127,56 @@ public class UserManagementApplicationService {
                 .findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, roleCode)
                 .orElseThrow(() -> new PlatformException(ErrorCode.VALIDATION_ERROR, "角色无效"));
 
-        List<UserRole> existingRoles = userRoleRepository.findByUserId(user.userId());
-        existingRoles.forEach(userRoleRepository::delete);
-        userRoleRepository.save(UserRole.create(user.userId(), roleDictionary.dictId()));
+        ConversationContextUserMutation mutation = conversationContextStore == null
+                ? null
+                : conversationContextStore.beginUserMutation(user.userId());
+        boolean transactionCompletionRegistered = registerMutationCompletion(mutation);
+        try {
+            List<UserRole> existingRoles = userRoleRepository.findByUserId(user.userId());
+            existingRoles.forEach(userRoleRepository::delete);
+            userRoleRepository.save(UserRole.create(user.userId(), roleDictionary.dictId()));
+        } catch (RuntimeException exception) {
+            if (mutation != null && !transactionCompletionRegistered) {
+                abortUserMutation(mutation, exception);
+            }
+            throw exception;
+        }
+        if (mutation != null && !transactionCompletionRegistered) {
+            conversationContextStore.completeUserMutation(mutation);
+        }
         return userResponse(user);
+    }
+
+    /**
+     * 生产事务在真正 commit 后才原子完成 Redis gate；回滚时仅释放当前 gate。
+     */
+    private boolean registerMutationCompletion(ConversationContextUserMutation mutation) {
+        if (mutation == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            return false;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                conversationContextStore.completeUserMutation(mutation);
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                    return;
+                }
+                conversationContextStore.abortUserMutation(mutation);
+            }
+        });
+        return true;
+    }
+
+    private void abortUserMutation(ConversationContextUserMutation mutation, RuntimeException original) {
+        try {
+            conversationContextStore.abortUserMutation(mutation);
+        } catch (RuntimeException abortFailure) {
+            original.addSuppressed(abortFailure);
+        }
     }
 
     /**

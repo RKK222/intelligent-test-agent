@@ -52,6 +52,23 @@ describe("FigmaChatPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("blocks submit while a history session is still loading", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "切换历史时不能发送",
+        historyLoading: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    const sendButton = wrapper.get('button[aria-label="发送"]');
+    expect(sendButton.attributes("disabled")).toBeDefined();
+    await sendButton.trigger("click");
+
+    expect(wrapper.emitted("send")).toBeUndefined();
+  });
+
   it("uses the native timeline without a mode toggle or activity overlay", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

@@ -21,6 +21,8 @@ import com.icbc.testagent.domain.dictionary.UserRoleRepository;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextUserMutation;
 import com.icbc.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
 import com.icbc.testagent.system.management.user.UserManagementResponses.RoleOption;
 import com.icbc.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
@@ -57,7 +59,6 @@ class UserManagementApplicationServiceTest {
 
         UserManagementApplicationService service = new UserManagementApplicationService(
                 new UserDomainService(userRepository), userRepository, userRoleRepository, dictionaryRepository);
-
         PageResponse<UserResponse> page = service.listUsers("ali", new PageRequest(1, 50));
 
         assertThat(page.items()).hasSize(1);
@@ -155,6 +156,11 @@ class UserManagementApplicationServiceTest {
 
         UserManagementApplicationService service = new UserManagementApplicationService(
                 new UserDomainService(userRepository), userRepository, userRoleRepository, dictionaryRepository);
+        ConversationContextStore contextStore = mock(ConversationContextStore.class);
+        ConversationContextUserMutation mutation =
+                new ConversationContextUserMutation(user.userId(), "mutation-role");
+        when(contextStore.beginUserMutation(user.userId())).thenReturn(mutation);
+        service.setConversationContextStore(contextStore);
 
         UserResponse response = service.updateUserRole(
                 new UpdateUserRoleCommand(user.userId().value(), "USER"));
@@ -164,6 +170,8 @@ class UserManagementApplicationServiceTest {
         verify(userRoleRepository).delete(oldRole);
         verify(userRoleRepository).save(argThat((UserRole role) ->
                 role.userId().equals(user.userId()) && role.dictId().equals(USER_DICT_ID)));
+        verify(contextStore).beginUserMutation(user.userId());
+        verify(contextStore).completeUserMutation(mutation);
     }
 
     @Test

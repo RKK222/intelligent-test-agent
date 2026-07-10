@@ -107,6 +107,41 @@ class OpencodeProcessStatusQueryServiceTest {
     }
 
     @Test
+    void cachedRunningSnapshotHealthCheckDoesNotReadOrRewriteRepository() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess cached = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING, 11111L);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.healthy("ok");
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        OpencodeProcessStatusQueryService service = service(repository, gateway, heartbeatStore);
+
+        OpencodeProcessStatusProbe probe = service.querySnapshot(cached, TRACE_ID);
+
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.RUNNING);
+        assertThat(probe.process()).contains(cached);
+        assertThat(repository.findProcessCalls).isZero();
+        assertThat(repository.savedProcesses).isEmpty();
+        assertThat(heartbeatStore.recordedProcessIds).containsExactly(cached.processId());
+    }
+
+    @Test
+    void cachedSnapshotPersistsOnlyARealStatusTransitionWithoutRepositoryRead() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess cached = process("ocp_unhealthy", 4097, OpencodeServerProcessStatus.UNHEALTHY, 11111L);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.healthy("ok");
+        OpencodeProcessStatusQueryService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        OpencodeProcessStatusProbe probe = service.querySnapshot(cached, TRACE_ID);
+
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.RUNNING);
+        assertThat(probe.process()).get().extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.RUNNING);
+        assertThat(repository.findProcessCalls).isZero();
+        assertThat(repository.savedProcesses).containsOnlyKeys(cached.processId());
+    }
+
+    @Test
     void healthyProcessRefreshesBaseUrlFromAdvertisedHostForStableServerId() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess old = process(

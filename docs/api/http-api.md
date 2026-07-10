@@ -56,6 +56,7 @@
 | `workspace-management` | `/api/internal/platform/workspace-management/applications/{appId}/workspace-templates/{templateId}/versions` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspace-versions/{versionId}/personal-workspaces` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions` | 旧 `/api/sessions/**` 返回 `410 API_GONE`。 |
+| `opencode-runtime` | `/api/internal/agent/{agentId}/sessions/{sessionId}/run-context` | 无旧 URL；签发后续 Run 使用的会话运行上下文。 |
 | `opencode-runtime` | `/api/internal/agent/{agentId}/runs` 或 `/api/internal/platform/opencode-runtime/runs` | 旧 `/api/runs/**` 返回 `410 API_GONE`。 |
 | `opencode-runtime` | `/api/internal/agent/{agentId}/runs/{runId}/events` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/events` | 旧 `/api/runs/{runId}/events` 返回 `410 API_GONE`。 |
 | `opencode-runtime` | `/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` | 旧 `/api/runs/{runId}/session-tree/messages` 返回 `410 API_GONE`。 |
@@ -89,6 +90,7 @@
 
 | 新 URL | 平台业务实现 |
 |---|---|
+| `/api/internal/agent/{agentId}/sessions/{sessionId}/run-context` | 为当前登录用户签发会话运行上下文。 |
 | `/api/internal/agent/{agentId}/runs` | 启动 Run；默认前端传 `opencode`。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/events` | 订阅 RunEvent SSE。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` | 查询当前 Run scope 的 root + child session message snapshot。 |
@@ -258,11 +260,15 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `FORBIDDEN` | 403 | 无权限 |
 | `NOT_FOUND` | 404 | 资源不存在 |
 | `CONFLICT` | 409 | 状态冲突 |
+| `CONVERSATION_CONTEXT_REQUIRED` | 409 | 需要会话运行上下文 |
+| `CONVERSATION_CONTEXT_EXPIRED` | 409 | 会话运行上下文已过期 |
+| `RUN_DETAILS_EXPIRED` | 410 | 运行详情已过期 |
 | `RATE_LIMITED` | 429 | 请求过于频繁 |
 | `INTERNAL_ERROR` | 500 | 服务器内部错误 |
 | `OPENCODE_BAD_GATEWAY` | 502 | opencode 服务响应异常 |
 | `OPENCODE_UNAVAILABLE` | 503 | opencode 服务不可用 |
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
+| `RUNTIME_STATE_UNAVAILABLE` | 503 | 运行态存储不可用 |
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
 | `GIT_TIMEOUT` | 504 | Git 操作超时 |
 
@@ -984,7 +990,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 }
 ```
 
-`POST /api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` 使用当前登录用户的 `opencode` 进程服务器归属定位同服务器后端，返回浏览器应直连的目标后端地址。该路由查询只读取 ACTIVE binding 和可恢复进程记录，不下发 opencode-manager `health` 或 `start` 命令；工作区服务器归属、用户 opencode 进程服务器和目标后端服务器不一致时返回统一 `CONFLICT`。本地服务器身份变化或切换测试库后，若历史 workspace 仍绑定旧 `linuxServerId`，且旧服务器没有在线后端快照、当前 opencode 进程在本后端、workspace 根目录在本机可访问，后端会在路由时把 workspace 回绑到当前服务器；多机环境中旧服务器仍在线或目录不可访问时不会自动迁移。Run 启动、用户进程初始化和 `/processes/me` 状态查询仍按用户进程 API 执行强健康检查。
+`POST /api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` 使用当前登录用户的 `opencode` 进程服务器归属定位同服务器后端，返回浏览器应直连的目标后端地址。该路由查询只读取 ACTIVE binding 和可恢复进程记录，不下发 opencode-manager `health` 或 `start` 命令；工作区服务器归属、用户 opencode 进程服务器和目标后端服务器不一致时返回统一 `CONFLICT`。本地服务器身份变化或切换测试库后，若历史 workspace 仍绑定旧 `linuxServerId`，且旧服务器没有在线后端快照、当前 opencode 进程在本后端、workspace 根目录在本机可访问，后端会在路由时把 workspace 回绑到当前服务器；多机环境中旧服务器仍在线或目录不可访问时不会自动迁移。用户进程初始化、`/processes/me` 状态查询和未携带有效会话运行上下文的兼容 Run 启动仍按用户进程 API 执行强健康检查。
 
 响应 `WorkspaceFileRouteResponse`：
 
@@ -1469,7 +1475,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 ### 用户 opencode 进程 API
 
-用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`，并保留绑定的 `linuxServerId/port`；若能解析到目标服务器当前在线 Java 的可访问 host，则返回 `serviceAddress={currentHost}:{端口}`，否则 `serviceAddress=null`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或 `STALE`；健康成功和明确未启动才更新稳定状态，瞬时 HTTP/manager 异常保留数据库最近状态。已有 RUNNING 进程仅在最近成功健康检查后的 60 秒内允许沿用 READY，超过宽限期后状态查询和 Run 前置校验都会拒绝旧绿灯。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID、`/global/health` 和 `/global/config` 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`，并保留绑定的 `linuxServerId/port`；若能解析到目标服务器当前在线 Java 的可访问 host，则返回 `serviceAddress={currentHost}:{端口}`，否则 `serviceAddress=null`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或 `STALE`；健康成功和明确未启动才更新稳定状态，瞬时 HTTP/manager 异常保留数据库最近状态。已有 RUNNING 进程仅在最近成功健康检查后的 60 秒内允许沿用 READY，超过宽限期后状态查询和未携带有效会话运行上下文的兼容 Run 前置校验都会拒绝旧绿灯。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID、`/global/health` 和 `/global/config` 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -1950,16 +1956,50 @@ Base URL：`/api/internal/platform/scheduler-management`
 - 分布式互斥只使用 Redis 锁；Redis 不可用时 scheduler 不降级为本机锁。
 - 对应测试：`SchedulerManagementControllerTest`、`SchedulerManagementServiceTest`、`ScheduledTaskRunnerTest`。
 
+### 会话运行上下文 API
+
+`POST /api/internal/agent/{agentId}/sessions/{sessionId}/run-context` 为当前登录用户签发后续 Run 使用的会话运行上下文，无请求体。前端在新建 Session、首次进入或切换到历史 Session 时调用一次；页面内后续 Run 复用同一个结果，只有上下文失效或页面刷新后才重新签发。
+
+后端从权威 Session、Workspace、当前用户 `READY` 进程、agent binding、执行节点、Linux 服务器和后端解析后的可信工作区根路径构造上下文。响应只暴露 opaque token、版本和过期时间，不返回上述内部字段：
+
+```json
+{
+  "success": true,
+  "data": {
+    "contextToken": "ctx_<256-bit-opaque-token>",
+    "contextVersion": 1,
+    "expiresAt": "2026-07-11T08:00:00Z"
+  },
+  "traceId": "trace_1234567890abcdef"
+}
+```
+
+`contextToken` 使用 256 位安全随机数生成，绑定认证用户、Session、Workspace、agent、完整进程快照、执行节点、Linux 服务器、可复用远端 session 和可信工作区路径。原始 token 只返回给浏览器并保存在当前页面内存；Redis token key 只保存 token 的 SHA-256 摘要。Redis 同时维护五类 ZSET 反向索引、generation、Session revoke gate 与 user/Workspace mutation gate；三类 gate TTL 均为 24 小时。签发先校验 Session owner；托管 Workspace 随后权威校验应用仍启用、当前用户仍是有效成员，个人 Workspace 还必须属于当前用户，`SUPER_ADMIN` 不旁路。该权限校验先于历史 Workspace 回绑；自回绑发生后放弃本轮保存并只用全新租约完整重读一次，其它 CAS 失败直接返回过期。非托管历史 Workspace 沿用 Session owner、ACTIVE、可信路径和服务器归属规则。
+
+主动失效入口包括 Session 归档、进程状态变化、Workspace 可信字段变化、成员/角色撤权和可信路径参数重载。用户权限及 Workspace 关系型变更先建立 mutation gate 并失效旧 token，保存成功后 Lua 原子再次失效并释放自己的 gate token，数据库失败只释放自己的 token；Redis 完成失败时 gate 留存 fail-closed，最多 24 小时。generation 不设 TTL，确保 gate 过期后旧 token 仍不能复活。Redis 读取、脚本或写入失败返回 `503 RUNTIME_STATE_UNAVAILABLE`，不回退 PostgreSQL 或 JVM 内存。
+
+鉴权、Session/Workspace 归属或当前用户进程校验失败仍使用既有 `UNAUTHENTICATED`、`FORBIDDEN`、`NOT_FOUND`、`OPENCODE_UNAVAILABLE`。Run 缺少 token 且兼容开关关闭时返回 `409 CONVERSATION_CONTEXT_REQUIRED`；token 未命中、过期、版本不匹配或与当前用户/agent/Session 不匹配时返回 `409 CONVERSATION_CONTEXT_EXPIRED`。
+
+对应测试：`ConversationContextControllerTest`、`ConversationContextApplicationServiceTest`、`ManagedConversationWorkspaceAccessAuthorizerTest`、`ConversationMemberRevocationIntegrationTest`、`ConversationRunContextResolverTest`、`RedisConversationContextStoreTest`、`RedisConversationContextStoreIntegrationTest`。
+
+### Run 创建
+
 `POST /api/internal/agent/{agentId}/runs` 请求体：
 
 ```json
 {
   "sessionId": "ses_...",
-  "prompt": "run prompt"
+  "prompt": "run prompt",
+  "contextToken": "ctx_...",
+  "clientRequestId": "req_..."
 }
 ```
 
 Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 `RUNNING`，不等待 agent 的 prompt HTTP 请求完成。prompt 提交或后续事件流失败时通过同一 RunEvent 链路追加 `run.failed`，前端不应把创建 Run 接口的等待时间当作智能体执行超时。
+
+携带有效 `contextToken` 时，`ConversationRunContextResolver` 在 Run 产生数据库副作用前完成 Redis 校验，并以完整进程快照调用公共状态服务 `querySnapshot` 动态探测；该路径不按 processId 查询数据库，稳定 `RUNNING` 为 0 次 Repository SELECT、0 次数据库写入，只有状态、PID 或服务地址确有变化时写一次。探测返回 `STALE` 时拒绝本次 Run 但保留 token；只有明确返回 `NOT_STARTED` 时才按 processId 失效相关上下文。`RunApplicationService` 随后直接复用 Session、Workspace、ExecutionNode 和可空 AgentSessionBinding 快照，已有远端 session 的其余控制面查询仍为 0 次 PostgreSQL SELECT。
+
+`POST /api/internal/agent/{agentId}/runs` 与兼容入口 `POST /api/internal/platform/opencode-runtime/runs` 在进入 Controller 前也会读取一次缓存请求体，硬上限为 32 MiB，超限返回 `400 VALIDATION_ERROR` 且不执行 assignment 查询。存在 `contextToken` 时，路由过滤器调用 Redis `resolveForRouting` 校验认证用户、agent、Session、过期时间、全部 generation 与 revoke gate，再按上下文 `linuxServerId` 使用公共路由器选择目标 Java；该读取不续期、不修改 Redis，也不查询用户进程 assignment。字段已出现但为空、非字符串或无效时返回 `409 CONVERSATION_CONTEXT_EXPIRED`，不得回退无 token 兼容路径。过滤器装饰后的请求体可供远端转发器或本地 Controller 再次完整读取。无 token 请求仅在兼容期开启时走原 assignment 路由。
 
 请求体保持向后兼容，并支持以下可选字段：
 
@@ -1967,6 +2007,8 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 {
   "sessionId": "ses_...",
   "prompt": "run prompt",
+  "contextToken": "ctx_...",
+  "clientRequestId": "req_...",
   "parts": [
     { "type": "text", "text": "run prompt" },
     {
@@ -1992,13 +2034,15 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 兼容要求：
 
 - 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
-- `parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段，旧前端不需要改动。
+- `contextToken`、`clientRequestId`、`parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段；新前端必须传入前两项，旧客户端在 `test-agent.redis-summary.legacy-run-without-context-enabled=true` 的兼容窗口内仍可省略。
+- `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。
+- 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
 - file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType` 是可选前端来源元数据，当前用于工作区选区附件展示，旧客户端和旧后端可忽略。
 - `model` 使用 `providerId/modelId` 字符串格式；Java 端只解析并透传给 opencode，不再读取数据库模型目录做校验、默认模型回退或 `/global/config` provider 同步。前端模型和供应商下拉始终以 opencode 配置文件的 `/api/model`、`/api/provider` 原生结果为准。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
-启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和进程记录中的 `baseUrl` 作为本次运行目标；`baseUrl` 由当前 advertised host 与端口生成。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
+有效 `contextToken` 的启动流程复用完整进程、执行节点和可空 binding 快照；公共 `querySnapshot` 复用统一 manager health 映射，但不先查询进程 Repository。稳定 `RUNNING` 只刷新 Redis heartbeat，状态、PID 或服务地址变化时最多写一次；`STALE` 拒绝本次 Run 但不删除 token，`NOT_STARTED` 才失效该进程关联的上下文。未携带 token 的兼容路径仍先校验当前认证用户是否已有 `READY` opencode 进程，未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run；其余 binding 兼容与匿名固定节点路由保持不变。
 Run 进入成功、失败或取消终态后，后端会尝试分页拉取 agent 标准 session messages，将 assistant 可见 text、完整 parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。
 
 ### system-management 用户管理 API
@@ -2291,7 +2335,7 @@ Session 运行态接口：
 
 `attention` 目前仅支持 `"QUESTION"` 或 `null`。前端不得把 `attentionEventId` 当作通用 RunEvent 续传游标，只用于去重/展示待答提醒。
 
-`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 返回 `text/event-stream`，使用 fetch SSE 以携带 `Authorization: Bearer ...`。SSE data 为上面的摘要 DTO 本体，不再额外包裹 `ApiResponse`；事件名首帧为 `session-runtime.snapshot`，后续变更为 `session-runtime.updated`。服务端在 `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled/question.asked/question.replied/question.rejected` 后刷新摘要，并保留低频轮询兜底；该通道是用户级提醒通道，不替代单个 Run 的 RunEvent SSE 或 active-run 恢复。
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 返回 `text/event-stream`，使用 fetch SSE 以携带 `Authorization: Bearer ...`。SSE data 为上面的摘要 DTO 本体，不再额外包裹 `ApiResponse`；事件名首帧为 `session-runtime.snapshot`，后续变更为 `session-runtime.updated`。服务端在 `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled/question.asked/question.replied/question.rejected` 后刷新摘要，并保留低频轮询兜底。新前端把该 SSE 作为恢复主入口，不再并行调用 runtime-state HTTP；断线按 1、2、5、10、30 秒退避重连，30 秒为后续重试上限。只有流不可用时，当前 Session 才允许执行一次 `active-run` HTTP fallback；重连成功并收到新摘要后再恢复下一故障窗口的 fallback 资格。该用户级通道不替代单个 Run 的 RunEvent SSE。
 
 兼容和安全约束：
 
@@ -2311,8 +2355,8 @@ Session 运行态接口：
 - `AgentOpencodeRuntimeControllerTest`：验证 `/api/internal/agent/opencode/...` agent path 统一响应、agentId 选择、traceId 和可选用户主体透传。
 - `RuntimeControllerTest`：验证 `/api/internal/agent/opencode/runs` 与内部平台 Run URL 的 DTO、错误格式和 service 实现；`LegacyApiGoneWebFilterTest` 覆盖旧 Run URL 返回 `410 API_GONE`。
 
-- 首次 Run：先校验当前用户已有 `READY` opencode 进程，再通过该进程投影出的 execution node 创建远端 session，保存 `agent_session_bindings`；`opencode` 兼容字段 `sessions.opencode_session_id/opencode_execution_node_id` 暂时同步写入。
-- 后续 Run：优先复用已保存且指向当前用户进程节点的同 agent 远端 session；若绑定节点与当前用户进程不一致，则重新创建远端 session 并覆盖绑定。用户进程不可用、节点不存在、离线或容量不可用时返回 `OPENCODE_UNAVAILABLE`。
+- 首次 Run 或签发上下文时尚无可复用 binding：先确认当前用户已有 `READY` opencode 进程，再通过该进程投影出的 execution node 创建远端 session，保存 `agent_session_bindings`；`opencode` 兼容字段 `sessions.opencode_session_id/opencode_execution_node_id` 暂时同步写入。
+- 已有远端 session 且携带有效上下文：先以签发时的完整进程快照调用公共 `querySnapshot` 动态健康探测，再直接复用 Session、Workspace、ExecutionNode 和 AgentSessionBinding 快照；探测本身不读取进程 Repository，稳定 `RUNNING` 不落库。未携带 token 的兼容路径仍按当前 binding/进程解析；binding 节点不一致时重新创建远端 session 并覆盖绑定，用户进程不可用、节点不存在、离线或容量不可用时返回 `OPENCODE_UNAVAILABLE`。
 - 本地集成默认只向 opencode 传 `directory=workspace.rootPath`，不把平台 `wrk_...` 作为 opencode `workspace` query 传入。
 
 成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。

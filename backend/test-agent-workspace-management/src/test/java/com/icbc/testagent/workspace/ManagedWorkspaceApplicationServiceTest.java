@@ -42,6 +42,8 @@ import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.user.UserStatus;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextWorkspaceMutation;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -750,7 +752,12 @@ class ManagedWorkspaceApplicationServiceTest {
                 null,
                 new UserId("usr_1"),
                 "trace_version");
+        ConversationContextStore contextStore = org.mockito.Mockito.mock(ConversationContextStore.class);
+        service.setConversationContextStore(contextStore);
         WorkspaceId runtimeId = new WorkspaceId("wrk_legacy_default");
+        ConversationContextWorkspaceMutation mutation =
+                new ConversationContextWorkspaceMutation(runtimeId, "mutation-personal-repair");
+        org.mockito.Mockito.when(contextStore.beginWorkspaceMutation(runtimeId)).thenReturn(mutation);
         workspaces.save(new Workspace(
                 runtimeId,
                 "default",
@@ -790,6 +797,8 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(workspaces.findById(runtimeId)).get()
                 .satisfies(workspace -> assertThat(workspace.rootPath())
                         .isEqualTo("personalworktree:20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace"));
+        org.mockito.Mockito.verify(contextStore).beginWorkspaceMutation(runtimeId);
+        org.mockito.Mockito.verify(contextStore).completeWorkspaceMutation(mutation);
     }
 
     @Test
@@ -1404,6 +1413,13 @@ class ManagedWorkspaceApplicationServiceTest {
                 now,
                 "127.0.0.1",
                 "trace_stale"));
+        ConversationContextStore contextStore = org.mockito.Mockito.mock(ConversationContextStore.class);
+        ConversationContextWorkspaceMutation mutation = new ConversationContextWorkspaceMutation(
+                current.runtimeWorkspaceId(),
+                "mutation-replica-repair");
+        org.mockito.Mockito.when(contextStore.beginWorkspaceMutation(current.runtimeWorkspaceId()))
+                .thenReturn(mutation);
+        service.setConversationContextStore(contextStore);
 
         git.nextHeadCommit = "commit_merged_repaired";
 
@@ -1421,6 +1437,8 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(managed.replicas.get(0).repoRootPath()).isEqualTo("appworkspace:20260707/gcms");
         assertThat(applicationRepoRoot).isEqualTo(root.resolve("appworkspace/20260707/gcms").toAbsolutePath().normalize());
         assertThat(runtimeWorkspace.rootPath()).doesNotContain("D:\\data");
+        org.mockito.Mockito.verify(contextStore).beginWorkspaceMutation(current.runtimeWorkspaceId());
+        org.mockito.Mockito.verify(contextStore).completeWorkspaceMutation(mutation);
         assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_repaired");
     }

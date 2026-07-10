@@ -42,6 +42,8 @@ import com.icbc.testagent.domain.managedworkspace.WorkspaceReplicaSyncStatus;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextWorkspaceMutation;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
@@ -133,6 +135,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final AgentConfigProgressSink progressSink;
     private final String broadcastInstanceId;
     private final Object defaultPersonalWorkspaceLock = new Object();
+    private ConversationContextStore conversationContextStore;
+
+    /**
+     * 可选注入运行上下文端口；测试构造器无需感知 Redis，实现仍保持模块只依赖 domain。
+     */
+    @Autowired(required = false)
+    void setConversationContextStore(ConversationContextStore conversationContextStore) {
+        this.conversationContextStore = conversationContextStore;
+    }
 
     /**
      * Spring 构造器：注入通用参数仓库和 SSH key 加密密钥。
@@ -933,7 +944,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             expectedWorkspaceValue = expectedRepoValue;
         }
         Instant now = Instant.now();
-        Workspace repairedRuntime = workspaceRepository.save(new Workspace(
+        Workspace repairedRuntime = saveRuntimeWorkspace(new Workspace(
                 runtimeWorkspace.workspaceId(),
                 runtimeWorkspace.name(),
                 expectedWorkspaceValue,
@@ -941,7 +952,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 runtimeWorkspace.createdAt(),
                 now,
                 runtimeWorkspace.linuxServerId(),
-                traceId));
+                traceId), runtimeWorkspace);
         PersonalWorkspace repaired = new PersonalWorkspace(
                 personal.personalWorkspaceId(),
                 personal.versionId(),
@@ -2158,16 +2169,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Instant now = Instant.now();
         Workspace runtimeWorkspace = existing
                 .flatMap(replica -> workspaceRepository.findById(replica.runtimeWorkspaceId()))
-                .map(current -> new Workspace(
-                        current.workspaceId(),
-                        current.name(),
-                        workspaceRootValue,
-                        current.status(),
-                        current.createdAt(),
-                        now,
-                        serverIdentity.linuxServerId(),
-                        traceId))
-                .map(workspaceRepository::save)
+                .map(current -> saveRuntimeWorkspace(new Workspace(
+                                current.workspaceId(),
+                                current.name(),
+                                workspaceRootValue,
+                                current.status(),
+                                current.createdAt(),
+                                now,
+                                serverIdentity.linuxServerId(),
+                                traceId),
+                        current))
                 .orElseGet(() -> createRuntimeWorkspace(template.workspaceName() + "-" + version.version(), workspaceRoot, workspaceRootValue, traceId));
         String currentCommit = syncReplicaToTargetCommit(version, repoRoot, privateKey, existing.orElse(null), traceId);
         ApplicationWorkspaceVersion updatedVersion = version.targetCommitHash() == null
@@ -2203,6 +2214,33 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         now,
                         now));
         return managedWorkspaceRepository.saveVersionReplica(replica);
+    }
+
+    /**
+     * 保存已有运行工作区时，仅在可信 root/server/status 真正变化时于写库前后清除关联上下文。
+     */
+    private Workspace saveRuntimeWorkspace(Workspace next, Workspace current) {
+        boolean trustedBindingChanged = !Objects.equals(current.rootPath(), next.rootPath())
+                || !Objects.equals(current.linuxServerId(), next.linuxServerId())
+                || current.status() != next.status();
+        if (!trustedBindingChanged || conversationContextStore == null) {
+            return workspaceRepository.save(next);
+        }
+        ConversationContextWorkspaceMutation mutation =
+                conversationContextStore.beginWorkspaceMutation(next.workspaceId());
+        Workspace saved;
+        try {
+            saved = workspaceRepository.save(next);
+        } catch (RuntimeException exception) {
+            try {
+                conversationContextStore.abortWorkspaceMutation(mutation);
+            } catch (RuntimeException abortFailure) {
+                exception.addSuppressed(abortFailure);
+            }
+            throw exception;
+        }
+        conversationContextStore.completeWorkspaceMutation(mutation);
+        return saved;
     }
 
     private String syncReplicaToTargetCommit(

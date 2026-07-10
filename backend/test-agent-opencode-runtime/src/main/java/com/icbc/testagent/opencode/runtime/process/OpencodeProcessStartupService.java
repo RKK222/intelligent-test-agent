@@ -15,6 +15,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
+import com.icbc.testagent.domain.run.ConversationContextStore;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
@@ -52,6 +53,7 @@ public class OpencodeProcessStartupService {
     private final Consumer<Duration> startupHealthSleeper;
     private final InternalModelProxyRuntimeSettings internalProxySettings;
     private final UserRepository userRepository;
+    private final ConversationContextStore conversationContextStore;
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -65,7 +67,8 @@ public class OpencodeProcessStartupService {
             OpencodeProcessStatusQueryService statusQueryService,
             ManagerControlSettings managerControlSettings,
             InternalModelProxyRuntimeSettings internalProxySettings,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            ConversationContextStore conversationContextStore) {
         this(
                 repository,
                 executionNodeRepository,
@@ -77,7 +80,8 @@ public class OpencodeProcessStartupService {
                 DEFAULT_STARTUP_HEALTH_POLL_INTERVAL,
                 OpencodeProcessStartupService::sleepCurrentThread,
                 internalProxySettings,
-                userRepository);
+                userRepository,
+                conversationContextStore);
     }
 
     /**
@@ -88,7 +92,13 @@ public class OpencodeProcessStartupService {
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, executionNodeRepository, gateway, heartbeatStore, null, Clock.systemUTC());
+        this(
+                repository,
+                executionNodeRepository,
+                gateway,
+                heartbeatStore,
+                (OpencodeProcessStatusQueryService) null,
+                Clock.systemUTC());
     }
 
     /**
@@ -100,7 +110,38 @@ public class OpencodeProcessStartupService {
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
             Clock clock) {
-        this(repository, executionNodeRepository, gateway, heartbeatStore, null, clock);
+        this(
+                repository,
+                executionNodeRepository,
+                gateway,
+                heartbeatStore,
+                (OpencodeProcessStatusQueryService) null,
+                clock);
+    }
+
+    /**
+     * 测试构造器允许验证进程重新启动后的上下文失效。
+     */
+    OpencodeProcessStartupService(
+            OpencodeProcessManagementRepository repository,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ConversationContextStore conversationContextStore,
+            Clock clock) {
+        this(
+                repository,
+                executionNodeRepository,
+                gateway,
+                heartbeatStore,
+                null,
+                clock,
+                DEFAULT_STARTUP_HEALTH_TIMEOUT,
+                DEFAULT_STARTUP_HEALTH_POLL_INTERVAL,
+                duration -> { },
+                null,
+                null,
+                conversationContextStore);
     }
 
     /**
@@ -149,6 +190,7 @@ public class OpencodeProcessStartupService {
                 startupHealthPollInterval,
                 startupHealthSleeper,
                 null,
+                null,
                 null);
     }
 
@@ -163,7 +205,8 @@ public class OpencodeProcessStartupService {
             Duration startupHealthPollInterval,
             Consumer<Duration> startupHealthSleeper,
             InternalModelProxyRuntimeSettings internalProxySettings,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            ConversationContextStore conversationContextStore) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
@@ -177,6 +220,7 @@ public class OpencodeProcessStartupService {
         this.startupHealthSleeper = Objects.requireNonNull(startupHealthSleeper, "startupHealthSleeper must not be null");
         this.internalProxySettings = internalProxySettings;
         this.userRepository = userRepository;
+        this.conversationContextStore = conversationContextStore;
     }
 
     /**
@@ -263,6 +307,9 @@ public class OpencodeProcessStartupService {
                     Map.of("processId", candidate.processId().value(), "port", candidate.port()));
         }
         OpencodeServerProcess running = probe.process().orElse(candidate);
+        if (conversationContextStore != null) {
+            conversationContextStore.invalidateProcess(running.processId().value());
+        }
         resolvedProgress.step(OpencodeProcessStartOperationStep.SAVING_BINDING);
         repository.saveUserBinding(new UserOpencodeProcessBinding(
                 running.userId(),

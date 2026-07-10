@@ -25,6 +25,7 @@
 7. generated SDK 事件必须在 `test-agent-event` 或 `test-agent-opencode-client` 映射为平台事件。
 8. root `run.succeeded/run.failed/run.cancelled` 是 Run 终态事实源；`Streaming response failed` 等 prompt_async 提交错误、SSE 订阅 transport error 或浏览器连接错误没有独立业务终态含义，先到时只可延迟收敛为失败，窗口内若收到 root 终态则不得补写旧 `run.failed`；若临时失败已经先落库，后到 root 终态仍可按最后 root 终态纠正 Run 状态和最终快照。
 9. stale active Run 后台收敛也会追加既有 `run.failed` 事件。该事件只表示平台侧长时间未收到有效运行输出且本地后台订阅可能失效，不代表后端主动取消或中止远端 opencode 会话。
+10. 前端 `onRawMessage` 捕获的 RunEvent SSE `MessageEvent.data` 只用于页面“原始输出”观察副本；它与 HTTP 原始报文共用预缓存安全处理，递归脱敏所有层级、大小写不敏感的 `contextToken` 后再截断和缓存。该处理不改写交给 RunEvent reducer 的实际事件，但禁止原始 SSE 数据绕过脱敏直接进入调试缓存。
 
 ## RunEvent 基础字段
 
@@ -170,6 +171,13 @@ payload 字段：
 
 SSE `id` 使用本次摘要的 `generatedAt` 字符串，只用于客户端调试和日志关联，不作为可持久续传游标。客户端断线重连后应直接重新建立连接并接收新的 `session-runtime.snapshot`。
 
+前端恢复规则：
+
+- runtime-state fetch SSE 是用户级运行态恢复主入口；前端不在连接期间并行调用 `GET .../sessions/runtime-state`，也不使用固定间隔 HTTP 热轮询。
+- 连接失败或关闭后按 1、2、5、10、30 秒退避重连；连续失败时保持 30 秒上限，收到任一合法 snapshot/updated 后重新从 1 秒开始计算下一次故障窗口。
+- 只有 SSE 已判定不可用时，当前 Session 才执行一次 `GET .../sessions/{sessionId}/active-run` fallback；同一故障窗口和同一 Session 不重复查询。短连接反复收到摘要后立即断开仍归入同一故障窗口，连接稳定保持 5 秒后才判定恢复，后续新的故障窗口才允许再次 fallback。fallback 请求必须携带当前 outage lease；任一更新的 runtime-state 摘要、稳定恢复或认证重置都会使旧 lease 失效，迟到 HTTP 结果不得覆盖摘要已接管的 Run。
+- runtime-state 摘要中的非终态 `runId/runStatus` 可直接接管单 Run SSE，无需再通过 active-run 查询确认；历史切换也先复用当前摘要。
+
 data 字段：
 
 | 字段 | 类型 | 说明 |
@@ -196,7 +204,7 @@ data 字段：
 - `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled` 会触发摘要刷新。
 - `question.asked/question.replied/question.rejected` 会触发摘要刷新。
 - 低频轮询作为兜底，避免本机或 Redis 实时触发丢失时状态长期不更新。
-- 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 和 active-run 恢复。
+- 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 恢复正文，active-run 只作为上述流不可用时的单次 fallback。
 
 ## stale active `run.failed`
 

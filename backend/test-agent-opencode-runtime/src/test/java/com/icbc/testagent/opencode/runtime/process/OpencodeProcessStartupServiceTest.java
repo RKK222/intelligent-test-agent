@@ -29,6 +29,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
+import com.icbc.testagent.domain.run.ConversationContextStore;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Instant;
@@ -43,6 +44,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class OpencodeProcessStartupServiceTest {
 
@@ -96,6 +98,26 @@ class OpencodeProcessStartupServiceTest {
             assertThat(binding.processId()).isEqualTo(processId);
             assertThat(binding.createdAt()).isEqualTo(bindingCreatedAt);
         });
+    }
+
+    @Test
+    void successfulRestartInvalidatesPreviousProcessConversationContexts() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        OpencodeProcessStartupService service = new OpencodeProcessStartupService(
+                repository,
+                repository,
+                gateway,
+                heartbeatStore,
+                contextStore,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_existing");
+
+        service.startAndVerify(request(processId, NOW.minusSeconds(3600), NOW.minusSeconds(1800)));
+
+        Mockito.verify(contextStore).invalidateProcess(processId.value());
     }
 
     @Test

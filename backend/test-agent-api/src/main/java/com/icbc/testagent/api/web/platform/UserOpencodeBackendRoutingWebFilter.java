@@ -31,17 +31,21 @@ class UserOpencodeBackendRoutingWebFilter implements WebFilter {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        return AuthWebSupport.getOptionalAuthPrincipal(exchange)
-                .flatMap(principal -> routeTarget(exchange, principal))
-                .map(target -> routingService.forward(exchange, target.principal(), target.linuxServerId()))
-                .orElseGet(() -> chain.filter(exchange));
-    }
-
-    private java.util.Optional<RouteTarget> routeTarget(ServerWebExchange exchange, AuthPrincipal principal) {
-        return routingService.targetLinuxServerId(exchange, principal)
-                .map(linuxServerId -> new RouteTarget(principal, linuxServerId));
-    }
-
-    private record RouteTarget(AuthPrincipal principal, String linuxServerId) {
+        java.util.Optional<AuthPrincipal> principal = AuthWebSupport.getOptionalAuthPrincipal(exchange);
+        if (principal.isEmpty()) {
+            return chain.filter(exchange);
+        }
+        Mono<Mono<Void>> routeAction = routingService.resolveRoute(exchange, principal.get())
+                .map(resolution -> resolution.linuxServerId()
+                        .map(linuxServerId -> routingService.forward(
+                                resolution.exchange(),
+                                principal.get(),
+                                linuxServerId))
+                        .orElseGet(() -> chain.filter(resolution.exchange())));
+        return routeAction
+                .onErrorResume(
+                        com.icbc.testagent.common.error.PlatformException.class,
+                        exception -> Mono.just(routingService.writePlatformError(exchange, exception)))
+                .flatMap(action -> action);
     }
 }

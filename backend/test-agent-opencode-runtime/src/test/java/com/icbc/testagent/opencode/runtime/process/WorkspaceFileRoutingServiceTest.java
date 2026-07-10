@@ -19,6 +19,9 @@ import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextWorkspaceMutation;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -100,17 +103,23 @@ class WorkspaceFileRoutingServiceTest {
         WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        ConversationContextWorkspaceMutation mutation =
+                new ConversationContextWorkspaceMutation(WORKSPACE_ID, "mutation-file-route");
+        when(contextStore.beginWorkspaceMutation(WORKSPACE_ID)).thenReturn(mutation);
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.99", root.toString())));
         when(workspaceRepository.save(any(Workspace.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID)).thenReturn(affinity("10.8.0.12"));
         when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12")));
 
-        WorkspaceFileRouteResponse response = service(workspaceRepository, assignmentService, heartbeatStore)
+        WorkspaceFileRouteResponse response = service(workspaceRepository, assignmentService, heartbeatStore, contextStore)
                 .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID);
 
         assertThat(response.linuxServerId()).isEqualTo("10.8.0.12");
         verify(workspaceRepository).save(Mockito.argThat(workspace ->
                 "10.8.0.12".equals(workspace.linuxServerId()) && WORKSPACE_ID.equals(workspace.workspaceId())));
+        verify(contextStore).beginWorkspaceMutation(WORKSPACE_ID);
+        verify(contextStore).completeWorkspaceMutation(mutation);
     }
 
     @Test
@@ -146,6 +155,29 @@ class WorkspaceFileRoutingServiceTest {
                         Duration.ofSeconds(10),
                         100),
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static WorkspaceFileRoutingService service(
+            WorkspaceRepository workspaceRepository,
+            UserOpencodeProcessAssignmentService assignmentService,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ConversationContextStore contextStore) {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        ManagerControlSettings settings = new ManagerControlSettings(
+                "secret-token",
+                "http://10.8.0.12:8080",
+                new LinuxServerId("10.8.0.12"),
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(10),
+                Duration.ofSeconds(10),
+                100);
+        return new WorkspaceFileRoutingService(
+                workspaceRepository,
+                assignmentService,
+                new BackendJavaRouteResolver(heartbeatStore, settings, clock),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                clock,
+                contextStore);
     }
 
     private static Workspace workspace(String linuxServerId) {

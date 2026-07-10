@@ -110,7 +110,16 @@ public class OpencodeProcessStatusQueryService {
                     true,
                     null);
         }
-        return queryExisting(process.get(), checkedAt, traceId);
+        return queryExisting(process.get(), checkedAt, traceId, true);
+    }
+
+    /**
+     * 使用签发上下文中的可信进程快照执行公共健康探测，不再按 processId 查询数据库。
+     * 稳定 RUNNING 快照只刷新 Redis heartbeat；仅状态、PID 或服务地址确有变化时落库。
+     */
+    public OpencodeProcessStatusProbe querySnapshot(OpencodeServerProcess processSnapshot, String traceId) {
+        Objects.requireNonNull(processSnapshot, "processSnapshot must not be null");
+        return queryExisting(processSnapshot, Instant.now(clock), traceId, false);
     }
 
     /**
@@ -190,7 +199,8 @@ public class OpencodeProcessStatusQueryService {
     private OpencodeProcessStatusProbe queryExisting(
             OpencodeServerProcess process,
             Instant checkedAt,
-            String traceId) {
+            String traceId,
+            boolean persistStableSnapshot) {
         try {
             OpencodeProcessHealthResult health = gateway.checkHealth(new OpencodeProcessHealthCommand(
                     process.processId(),
@@ -201,13 +211,16 @@ public class OpencodeProcessStatusQueryService {
                 return staleProbe(process, checkedAt, "opencode 健康检测未返回结果", ErrorCode.OPENCODE_BAD_GATEWAY);
             }
             if (health.healthy()) {
-                OpencodeServerProcess running = saveSnapshot(
-                        process,
-                        OpencodeServerProcessStatus.RUNNING,
-                        process.pid(),
-                        health.message(),
-                        checkedAt,
-                        traceId);
+                OpencodeServerProcess running = persistStableSnapshot
+                                || stableSnapshotChanged(process, OpencodeServerProcessStatus.RUNNING, process.pid())
+                        ? saveSnapshot(
+                                process,
+                                OpencodeServerProcessStatus.RUNNING,
+                                process.pid(),
+                                health.message(),
+                                checkedAt,
+                                traceId)
+                        : process;
                 heartbeatStore.recordOpencodeHeartbeat(running.processId(), checkedAt);
                 return new OpencodeProcessStatusProbe(
                         OpencodeProcessProbeStatus.RUNNING,
@@ -221,13 +234,16 @@ public class OpencodeProcessStatusQueryService {
             }
             // 只有进程明确死亡或 Manager 明确返回 not managed/not running 才立即写入 STOPPED
             if (isNotRunningHealthMessage(health.message())) {
-                OpencodeServerProcess stopped = saveSnapshot(
-                        process,
-                        OpencodeServerProcessStatus.STOPPED,
-                        null,
-                        health.message(),
-                        checkedAt,
-                        traceId);
+                OpencodeServerProcess stopped = persistStableSnapshot
+                                || stableSnapshotChanged(process, OpencodeServerProcessStatus.STOPPED, null)
+                        ? saveSnapshot(
+                                process,
+                                OpencodeServerProcessStatus.STOPPED,
+                                null,
+                                health.message(),
+                                checkedAt,
+                                traceId)
+                        : process;
                 return new OpencodeProcessStatusProbe(
                         OpencodeProcessProbeStatus.NOT_STARTED,
                         Optional.of(stopped),
@@ -302,6 +318,15 @@ public class OpencodeProcessStatusQueryService {
 
     private String refreshedBaseUrl(OpencodeServerProcess process) {
         return addressResolver == null ? process.baseUrl() : addressResolver.baseUrl(process.port());
+    }
+
+    private boolean stableSnapshotChanged(
+            OpencodeServerProcess process,
+            OpencodeServerProcessStatus targetStatus,
+            Long targetPid) {
+        return process.status() != targetStatus
+                || !Objects.equals(process.pid(), targetPid)
+                || !process.baseUrl().equals(refreshedBaseUrl(process));
     }
 
     private String healthBaseUrl(OpencodeServerProcess process) {

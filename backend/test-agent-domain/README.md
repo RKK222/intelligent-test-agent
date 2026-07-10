@@ -12,16 +12,19 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
+- Workspace、Session、AgentSessionBinding、Run、ConversationRunContext、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 
 ## 已有模型
 
 - Workspace：`Workspace`、`WorkspaceId`。
+- 会话 Workspace 权限：`ConversationWorkspaceAccessAuthorizer` 隔离 runtime 与托管应用/个人 Workspace 权威成员查询；`TrustedWorkspaceResolver` 负责当前节点可信 root/server 解析，两者职责分离。
 - Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。
 - AgentSessionBinding：`AgentSessionBinding`、`AgentSessionBindingRepository`；按 `(sessionId, agentId)` 表达平台 session 到远端 agent session/node 的通用绑定，旧 opencode 字段只作兼容。
 - Run：`Run`、`RunId`、`RunStatus`、`TokenUsage`；Run 可保存单次对话 token/cost 快照。`RunRepository.saveIfStatus` 提供按当前状态条件保存语义，用于终态事件与异步 transport error 并发到达时避免旧快照覆盖已落库终态；`Run.applyTerminalFact` 只接受 root `run.succeeded/run.failed/run.cancelled` 等终态事实，用于以后到 root 终态纠正先到的 transport error 临时失败。
+- 会话运行上下文：`ConversationContextStore`、`ConversationContextIssueLease`、Session revoke 凭证及 user/workspace mutation 凭证定义签发 fence、生命周期撤销和跨 Redis/关系型写入窗口的 fail-closed gate；基础设施 key/Lua 不进入领域层。
+- ConversationRunContext：`ConversationRunContext` 保存认证用户、agent、完整用户进程、Linux 服务器，以及完整的 Session、Workspace、ExecutionNode 和可空 AgentSessionBinding 服务端快照；`ConversationContextStore` 定义签发租约、代次 CAS 保存、路由只读解析、校验后原子续期、Session revoke gate，以及按用户+Session、用户、Session、Workspace、进程和全局代次失效的领域端口，不暴露 Redis key、Lua 或序列化细节。`TrustedWorkspaceResolver` 负责在可访问真实路径的当前节点安全解析或回填历史 Workspace 服务器归属。
 - RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`、`RunEventScopeContext`；RunEventRepository 支持按 Run 回放和按 root session 回放历史状态事件。RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*`、`session.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated`。
 - RunSessionScope：`RunSessionScope`、`RunSessionScopeSession`、`RunSessionScopeRepository`；表达当前 Run root/child opencode session scope，DB 是恢复事实源，Redis 只作为运行中 cache/pending buffer。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
@@ -47,6 +50,7 @@
 
 - `WorkspaceTest` 覆盖工作区默认状态、traceId 占位和更新时间边界。
 - `RunStatusTest`、`RunTest` 覆盖 Run 状态机、终态、取消请求、非法流转、时间边界和 token/cost 快照兼容。
+- `ConversationRunContextTest` 覆盖 Session/Workspace/ExecutionNode/AgentSessionBinding 快照一致性、agent 规范化、可空远端 session、版本和滑动过期副本边界。
 - `SessionMessageTest`、`SessionTest` 覆盖消息约束、parts/token/cost 可选快照、会话归档、置顶和内部 opencode session/node 映射边界。
 - `AgentSessionBindingTest` 覆盖 agentId 规范化、远端 session/node 绑定和 traceId 边界。
 - `ExecutionNodeRouterTest`、`ExecutionNodeTest` 覆盖执行节点容量、可路由状态和路由冲突错误。

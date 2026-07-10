@@ -270,6 +270,15 @@ export type SessionWorkspaceContext = {
   version?: string | null;
 };
 
+/**
+ * 服务端签发的会话运行上下文。token 只允许保存在页面内存中，不能进入持久化前端状态或调试原始报文。
+ */
+export type ConversationRunContext = {
+  contextToken: string;
+  contextVersion: number;
+  expiresAt: string;
+};
+
 export type SessionRuntimeAttention = "QUESTION" | string;
 
 export type SessionRuntimeState = {
@@ -590,6 +599,7 @@ export type Run = {
   runId: string;
   sessionId: string;
   workspaceId: string;
+  clientRequestId?: string;
   status: "PENDING" | "RUNNING" | "CANCELLING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | string;
   createdAt: string;
   updatedAt: string;

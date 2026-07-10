@@ -168,6 +168,8 @@ class RuntimeControllerTest {
                         argThat(input -> new SessionId("ses_1234567890abcdef").equals(input.sessionId())
                                 && "run the tests".equals(input.effectivePrompt())
                                 && input.parts().size() == 1
+                                && "ctx_1234567890abcdef".equals(input.contextToken())
+                                && "req_1234567890abcdef".equals(input.clientRequestId())
                                 && "build".equals(input.agent())
                                 && "anthropic/claude-sonnet-4-5".equals(input.model())),
                         eq("trace_1234567890abcdef")))
@@ -185,6 +187,8 @@ class RuntimeControllerTest {
                         {
                           "sessionId":"ses_1234567890abcdef",
                           "parts":[{"type":"text","text":"run the tests"}],
+                          "contextToken":"ctx_1234567890abcdef",
+                          "clientRequestId":"req_1234567890abcdef",
                           "agent":"build",
                           "model":"anthropic/claude-sonnet-4-5",
                           "variant":"default",
@@ -750,7 +754,10 @@ class RuntimeControllerTest {
                         eq(false),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(session("Renamed", false, SessionStatus.ACTIVE));
-        when(service.archiveSession(eq(new SessionId("ses_1234567890abcdef")), eq("trace_1234567890abcdef")))
+        when(service.archiveSession(
+                        eq(new UserId("usr_1234567890abcdef")),
+                        eq(new SessionId("ses_1234567890abcdef")),
+                        eq("trace_1234567890abcdef")))
                 .thenReturn(session("Renamed", false, SessionStatus.ARCHIVED));
         WebTestClient client = WebTestClient.bindToController(new SessionController(service))
                 .webFilter(new TraceIdWebFilter())
@@ -794,6 +801,10 @@ class RuntimeControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.status").isEqualTo("ARCHIVED");
+        verify(service).archiveSession(
+                eq(new UserId("usr_1234567890abcdef")),
+                eq(new SessionId("ses_1234567890abcdef")),
+                eq("trace_1234567890abcdef"));
     }
 
     @Test

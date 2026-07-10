@@ -13,8 +13,12 @@ class ErrorCodeTest {
         assertThat(ErrorCode.FORBIDDEN.httpStatus()).isEqualTo(403);
         assertThat(ErrorCode.NOT_FOUND.httpStatus()).isEqualTo(404);
         assertThat(ErrorCode.CONFLICT.httpStatus()).isEqualTo(409);
+        assertThat(ErrorCode.CONVERSATION_CONTEXT_REQUIRED.httpStatus()).isEqualTo(409);
+        assertThat(ErrorCode.CONVERSATION_CONTEXT_EXPIRED.httpStatus()).isEqualTo(409);
+        assertThat(ErrorCode.RUN_DETAILS_EXPIRED.httpStatus()).isEqualTo(410);
         assertThat(ErrorCode.RATE_LIMITED.httpStatus()).isEqualTo(429);
         assertThat(ErrorCode.INTERNAL_ERROR.httpStatus()).isEqualTo(500);
+        assertThat(ErrorCode.RUNTIME_STATE_UNAVAILABLE.httpStatus()).isEqualTo(503);
         assertThat(ErrorCode.OPENCODE_BAD_GATEWAY.httpStatus()).isEqualTo(502);
         assertThat(ErrorCode.OPENCODE_UNAVAILABLE.httpStatus()).isEqualTo(503);
         assertThat(ErrorCode.OPENCODE_TIMEOUT.httpStatus()).isEqualTo(504);

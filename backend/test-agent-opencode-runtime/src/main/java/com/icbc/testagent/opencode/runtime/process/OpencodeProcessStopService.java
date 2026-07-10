@@ -5,6 +5,7 @@ import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
+import com.icbc.testagent.domain.run.ConversationContextStore;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
@@ -25,6 +26,7 @@ public class OpencodeProcessStopService {
     private final OpencodeProcessManagementRepository repository;
     private final OpencodeProcessStatusQueryService statusQueryService;
     private final Clock clock;
+    private final ConversationContextStore conversationContextStore;
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -33,8 +35,19 @@ public class OpencodeProcessStopService {
     public OpencodeProcessStopService(
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessManagementRepository repository,
+            OpencodeProcessStatusQueryService statusQueryService,
+            ConversationContextStore conversationContextStore) {
+        this(gateway, repository, statusQueryService, conversationContextStore, Clock.systemUTC());
+    }
+
+    /**
+     * 保留三参数手工装配入口；生产 Spring 使用带上下文存储的构造器。
+     */
+    public OpencodeProcessStopService(
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessManagementRepository repository,
             OpencodeProcessStatusQueryService statusQueryService) {
-        this(gateway, repository, statusQueryService, Clock.systemUTC());
+        this(gateway, repository, statusQueryService, null, Clock.systemUTC());
     }
 
     /**
@@ -43,14 +56,14 @@ public class OpencodeProcessStopService {
     public OpencodeProcessStopService(
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessManagementRepository repository) {
-        this(gateway, repository, null, Clock.systemUTC());
+        this(gateway, repository, null, null, Clock.systemUTC());
     }
 
     /**
      * 无平台进程记录时仍可复用本服务向 manager 下发 stop。
      */
     public OpencodeProcessStopService(OpencodeProcessManagerGateway gateway) {
-        this(gateway, null, null, Clock.systemUTC());
+        this(gateway, null, null, null, Clock.systemUTC());
     }
 
     /**
@@ -60,7 +73,7 @@ public class OpencodeProcessStopService {
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessManagementRepository repository,
             Clock clock) {
-        this(gateway, repository, null, clock);
+        this(gateway, repository, null, null, clock);
     }
 
     /**
@@ -71,12 +84,25 @@ public class OpencodeProcessStopService {
             OpencodeProcessManagementRepository repository,
             OpencodeProcessStatusQueryService statusQueryService,
             Clock clock) {
+        this(gateway, repository, statusQueryService, null, clock);
+    }
+
+    /**
+     * 完整测试构造器允许验证停止后的上下文失效。
+     */
+    OpencodeProcessStopService(
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessStatusQueryService statusQueryService,
+            ConversationContextStore conversationContextStore,
+            Clock clock) {
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.repository = repository;
         this.statusQueryService = statusQueryService == null && repository != null
                 ? new OpencodeProcessStatusQueryService(repository, gateway, disabledHeartbeatStore(), clock)
                 : statusQueryService;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.conversationContextStore = conversationContextStore;
     }
 
     /**
@@ -109,6 +135,9 @@ public class OpencodeProcessStopService {
                 probe.message(),
                 Instant.now(clock),
                 request.traceId()));
+        if (conversationContextStore != null) {
+            conversationContextStore.invalidateProcess(stoppedProcess.processId().value());
+        }
         return new OpencodeProcessControlResult(
                 "stop",
                 "STOPPED",

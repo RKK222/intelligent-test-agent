@@ -538,14 +538,14 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeServerProcess refreshed = probe.process().orElse(process);
             ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
             executionNodeRepository.save(node);
-            return new UserOpencodeProcessAssignment(node, refreshed.linuxServerId().value());
+            return new UserOpencodeProcessAssignment(node, refreshed.linuxServerId().value(), refreshed);
         }
         // STALE 只在最后一次成功健康检查后的短暂宽限期内放行。
         if (probe.status() == OpencodeProcessProbeStatus.STALE
                 && isWithinStaleReadyGrace(process, probe.checkedAt())) {
             ExecutionNode node = projectExecutionNode(process, now, traceId);
             executionNodeRepository.save(node);
-            return new UserOpencodeProcessAssignment(node, process.linuxServerId().value());
+            return new UserOpencodeProcessAssignment(node, process.linuxServerId().value(), process);
         }
         throw unavailableException("opencode 进程不可用，请先初始化");
     }

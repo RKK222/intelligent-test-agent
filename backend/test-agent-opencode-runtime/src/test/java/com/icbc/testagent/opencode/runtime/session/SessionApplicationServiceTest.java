@@ -12,6 +12,8 @@ import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextSessionRevocation;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionHistoryItem;
 import com.icbc.testagent.domain.session.SessionHistoryRepository;
@@ -90,6 +92,90 @@ class SessionApplicationServiceTest {
         assertThatThrownBy(() -> service.getSession(SESSION_ID))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+    }
+
+    @Test
+    void archiveSessionEstablishesRevocationGateBeforePersisting() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        ConversationContextSessionRevocation revocation = new ConversationContextSessionRevocation(
+                SESSION_ID,
+                "revoke_123");
+        Mockito.when(contextStore.revokeSession(SESSION_ID)).thenReturn(revocation);
+        SessionRepository sessions = Mockito.mock(SessionRepository.class);
+        Mockito.when(sessions.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+        Mockito.when(sessions.save(Mockito.any(Session.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                sessions,
+                Mockito.mock(SessionHistoryRepository.class),
+                new FakeMessageRepository(),
+                null,
+                contextStore);
+
+        Session archived = service.archiveSession(userId, SESSION_ID, "trace_1234567890abcdef");
+
+        assertThat(archived.status()).isEqualTo(SessionStatus.ARCHIVED);
+        assertThat(session().createdByUserId()).isNull();
+        org.mockito.InOrder order = Mockito.inOrder(contextStore, sessions);
+        order.verify(contextStore).revokeSession(SESSION_ID);
+        order.verify(sessions).save(Mockito.any(Session.class));
+        verify(contextStore, never()).restoreSessionRevocation(revocation);
+        verify(contextStore, never()).invalidateSession(SESSION_ID);
+        verify(contextStore, never()).invalidate(userId, SESSION_ID);
+    }
+
+    @Test
+    void archiveDoesNotPersistWhenRuntimeContextInvalidationFails() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        Mockito.doThrow(new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE))
+                .when(contextStore)
+                .revokeSession(SESSION_ID);
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                sessions,
+                Mockito.mock(SessionHistoryRepository.class),
+                new FakeMessageRepository(),
+                null,
+                contextStore);
+
+        assertThatThrownBy(() -> service.archiveSession(userId, SESSION_ID, "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.RUNTIME_STATE_UNAVAILABLE));
+
+        assertThat(sessions.saved).isEmpty();
+        assertThat(sessions.findById(SESSION_ID)).get()
+                .extracting(Session::status)
+                .isEqualTo(SessionStatus.ACTIVE);
+    }
+
+    @Test
+    void archiveDatabaseFailureRollsBackOnlyItsRevocationToken() {
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        ConversationContextSessionRevocation revocation = new ConversationContextSessionRevocation(
+                SESSION_ID,
+                "revoke_own");
+        Mockito.when(contextStore.revokeSession(SESSION_ID)).thenReturn(revocation);
+        SessionRepository sessions = Mockito.mock(SessionRepository.class);
+        Mockito.when(sessions.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+        Mockito.when(sessions.save(Mockito.any(Session.class)))
+                .thenThrow(new IllegalStateException("db unavailable"));
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                sessions,
+                Mockito.mock(SessionHistoryRepository.class),
+                new FakeMessageRepository(),
+                null,
+                contextStore);
+
+        assertThatThrownBy(() -> service.archiveSession(SESSION_ID, "trace_1234567890abcdef"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("db unavailable");
+
+        verify(contextStore).restoreSessionRevocation(revocation);
     }
 
     @Test

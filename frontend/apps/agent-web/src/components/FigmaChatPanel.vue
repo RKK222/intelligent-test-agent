@@ -1890,7 +1890,10 @@ const contextSendBlockedReason = computed(() => {
 })
 const sendBlockedTitle = computed(() => readonlyBlockedReason.value || contextSendBlockedReason.value || '发送')
 const sendSubmitBlocked = computed(
-  () => processSubmitBlocked.value || readonlySubmitBlocked.value || contextSubmitBlocked.value
+  () => props.historyLoading === true
+    || processSubmitBlocked.value
+    || readonlySubmitBlocked.value
+    || contextSubmitBlocked.value
 )
 const processStatusVisible = computed(
   () =>

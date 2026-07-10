@@ -76,6 +76,8 @@ final class RuntimeDtos {
      */
     record StartRunRequest(
             @NotBlank String sessionId,
+            String contextToken,
+            String clientRequestId,
             String prompt,
             List<PromptPartRequest> parts,
             String messageId,
@@ -124,7 +126,9 @@ final class RuntimeDtos {
                     variant,
                     mode,
                     command,
-                    arguments);
+                    arguments,
+                    contextToken,
+                    clientRequestId);
         }
 
         /**

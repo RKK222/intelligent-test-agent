@@ -10,6 +10,10 @@ import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
+import com.icbc.testagent.domain.workspace.TrustedWorkspaceResolver;
+import com.icbc.testagent.domain.workspace.TrustedWorkspaceResolution;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextWorkspaceMutation;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -25,7 +29,7 @@ import org.springframework.stereotype.Service;
  * Workspace 应用服务，负责工作区注册、查询和文件服务编排，避免 Controller 直接访问 Repository 或文件系统。
  */
 @Service
-public class WorkspaceApplicationService {
+public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkspaceApplicationService.class);
 
@@ -33,6 +37,7 @@ public class WorkspaceApplicationService {
     private final WorkspaceFileService fileService;
     private final WorkspaceServerIdentity serverIdentity;
     private final ManagedWorkspacePathResolver pathResolver;
+    private final ConversationContextStore conversationContextStore;
 
     /**
      * 构造 Workspace 应用服务，注入领域 Repository 端口和文件服务，避免 Controller 直接访问底层资源。
@@ -42,11 +47,27 @@ public class WorkspaceApplicationService {
             WorkspaceRepository workspaceRepository,
             WorkspaceFileService fileService,
             WorkspaceServerIdentity serverIdentity,
+            ManagedWorkspacePathResolver pathResolver,
+            ConversationContextStore conversationContextStore) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
+        this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+        this.conversationContextStore = Objects.requireNonNull(
+                conversationContextStore,
+                "conversationContextStore must not be null");
+    }
+
+    public WorkspaceApplicationService(
+            WorkspaceRepository workspaceRepository,
+            WorkspaceFileService fileService,
+            WorkspaceServerIdentity serverIdentity,
             ManagedWorkspacePathResolver pathResolver) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+        this.conversationContextStore = null;
     }
 
     /**
@@ -136,12 +157,33 @@ public class WorkspaceApplicationService {
      * 校验工作区属于当前后端服务器；历史空服务器字段在根目录可访问时回填当前服务器。
      */
     public Workspace requireWorkspaceOnCurrentServer(WorkspaceId workspaceId, String traceId) {
+        return resolveTrustedWorkspace(workspaceId, traceId).workspace();
+    }
+
+    /**
+     * 返回可信工作区并显式标记历史 server 回填，供上下文签发只对该自失效场景做一次有界重签。
+     */
+    @Override
+    public TrustedWorkspaceResolution resolveTrustedWorkspace(WorkspaceId workspaceId, String traceId) {
         Workspace workspace = rawWorkspace(workspaceId);
         String currentLinuxServerId = serverIdentity.linuxServerId();
         if (workspace.linuxServerId() == null) {
             validateRootPath(resolvedRootPath(workspace));
             Workspace bound = workspace.withLinuxServerId(currentLinuxServerId, traceId, Instant.now());
-            return workspaceForResponse(workspaceRepository.save(bound));
+            if (conversationContextStore == null) {
+                return new TrustedWorkspaceResolution(workspaceForResponse(workspaceRepository.save(bound)), true);
+            }
+            ConversationContextWorkspaceMutation mutation =
+                    conversationContextStore.beginWorkspaceMutation(workspaceId);
+            Workspace saved;
+            try {
+                saved = workspaceRepository.save(bound);
+            } catch (RuntimeException exception) {
+                abortWorkspaceMutation(mutation, exception);
+                throw exception;
+            }
+            conversationContextStore.completeWorkspaceMutation(mutation);
+            return new TrustedWorkspaceResolution(workspaceForResponse(saved), true);
         }
         if (!currentLinuxServerId.equals(workspace.linuxServerId())) {
             throw new PlatformException(
@@ -153,7 +195,17 @@ public class WorkspaceApplicationService {
                             "currentLinuxServerId", currentLinuxServerId));
         }
         validateRootPath(resolvedRootPath(workspace));
-        return workspaceForResponse(workspace);
+        return new TrustedWorkspaceResolution(workspaceForResponse(workspace), false);
+    }
+
+    private void abortWorkspaceMutation(
+            ConversationContextWorkspaceMutation mutation,
+            RuntimeException original) {
+        try {
+            conversationContextStore.abortWorkspaceMutation(mutation);
+        } catch (RuntimeException abortFailure) {
+            original.addSuppressed(abortFailure);
+        }
     }
 
     /**

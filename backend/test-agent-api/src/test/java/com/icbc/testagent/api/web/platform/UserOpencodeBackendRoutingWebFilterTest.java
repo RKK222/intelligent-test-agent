@@ -16,6 +16,9 @@ import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
 import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationRunContext;
+import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
@@ -23,10 +26,12 @@ import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResp
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeServiceStatus;
 import com.icbc.testagent.workspace.WorkspaceServerIdentity;
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.net.Authenticator;
 import java.net.CookieHandler;
 import java.net.ProxySelector;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
@@ -40,6 +45,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -48,6 +54,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
@@ -168,6 +175,200 @@ class UserOpencodeBackendRoutingWebFilterTest {
         assertThat(chainCalled).isFalse();
         assertThat(httpClient.requests).isEmpty();
         assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE.httpStatus());
+    }
+
+    @Test
+    void startRunWithContextRoutesFromRedisWithoutReadingProcessAssignmentAndPreservesBody() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        ConversationRunContext context = Mockito.mock(ConversationRunContext.class);
+        Mockito.when(context.linuxServerId()).thenReturn("server-b");
+        Mockito.when(contextStore.resolveForRouting(
+                        "ctx_secret",
+                        USER_ID,
+                        "opencode",
+                        new SessionId("ses_1234567890abcdef")))
+                .thenReturn(Optional.of(context));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore("server-b"),
+                httpClient,
+                contextStore);
+        String requestBody = "{\"sessionId\":\"ses_1234567890abcdef\",\"prompt\":\"run\","
+                + "\"contextToken\":\"ctx_secret\"}";
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/runs")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body(requestBody));
+
+        filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        Mockito.verifyNoInteractions(assignmentService);
+        assertThat(httpClient.requestBodies).containsExactly(requestBody);
+        assertThat(httpClient.requests).singleElement().satisfies(request ->
+                assertThat(request.uri().toString()).isEqualTo(
+                        "http://server-b:8080/api/internal/agent/opencode/runs"));
+    }
+
+    @Test
+    void localStartRunWithContextPreservesBodyForControllerWithoutReadingAssignment() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        ConversationRunContext context = Mockito.mock(ConversationRunContext.class);
+        Mockito.when(context.linuxServerId()).thenReturn("10.8.0.21");
+        Mockito.when(contextStore.resolveForRouting(
+                        "ctx_local",
+                        USER_ID,
+                        "opencode",
+                        new SessionId("ses_1234567890abcdef")))
+                .thenReturn(Optional.of(context));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore("server-b"),
+                httpClient,
+                contextStore);
+        String requestBody = "{\"sessionId\":\"ses_1234567890abcdef\","
+                + "\"contextToken\":\"ctx_local\",\"prompt\":\"local\"}";
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/runs")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body(requestBody));
+        List<String> controllerBodies = new ArrayList<>();
+
+        filter.filter(exchange, chain(routedExchange -> DataBufferUtils.join(routedExchange.getRequest().getBody())
+                .doOnNext(buffer -> {
+                    byte[] bytes = new byte[buffer.readableByteCount()];
+                    buffer.read(bytes);
+                    controllerBodies.add(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+                    DataBufferUtils.release(buffer);
+                })
+                .then())).block(Duration.ofSeconds(2));
+
+        Mockito.verifyNoInteractions(assignmentService);
+        assertThat(controllerBodies).containsExactly(requestBody);
+        assertThat(httpClient.requests).isEmpty();
+    }
+
+    @Test
+    void platformStartRunCompatibilityPathAlsoRoutesFromContextWithoutAssignmentLookup() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        ConversationRunContext context = Mockito.mock(ConversationRunContext.class);
+        Mockito.when(context.linuxServerId()).thenReturn("server-b");
+        Mockito.when(contextStore.resolveForRouting(
+                        "ctx_platform",
+                        USER_ID,
+                        "opencode",
+                        new SessionId("ses_1234567890abcdef")))
+                .thenReturn(Optional.of(context));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore("server-b"),
+                httpClient,
+                contextStore);
+        String requestBody = "{\"sessionId\":\"ses_1234567890abcdef\","
+                + "\"contextToken\":\"ctx_platform\",\"prompt\":\"compat\"}";
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/platform/opencode-runtime/runs")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body(requestBody));
+
+        filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        Mockito.verifyNoInteractions(assignmentService);
+        assertThat(httpClient.requestBodies).containsExactly(requestBody);
+        assertThat(httpClient.requests).singleElement().satisfies(request ->
+                assertThat(request.uri().getRawPath()).isEqualTo("/api/internal/platform/opencode-runtime/runs"));
+    }
+
+    @Test
+    void expiredContextAtRoutingLayerReturnsUnified409WithoutAssignmentLookup() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        Mockito.when(contextStore.resolveForRouting(
+                        "ctx_expired",
+                        USER_ID,
+                        "opencode",
+                        new SessionId("ses_1234567890abcdef")))
+                .thenReturn(Optional.empty());
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore("server-b"),
+                httpClient,
+                contextStore);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body("{\"sessionId\":\"ses_1234567890abcdef\",\"contextToken\":\"ctx_expired\"}"));
+
+        filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        Mockito.verifyNoInteractions(assignmentService);
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(409);
+        assertThat(exchange.getResponse().getBodyAsString().block())
+                .contains("\"code\":\"CONVERSATION_CONTEXT_EXPIRED\"")
+                .doesNotContain("ctx_expired");
+    }
+
+    @Test
+    void presentButInvalidContextTokenFailsClosedWithoutAssignmentLookup() {
+        for (String invalidToken : List.of("\"   \"", "123", "null")) {
+            UserOpencodeProcessAssignmentService assignmentService =
+                    Mockito.mock(UserOpencodeProcessAssignmentService.class);
+            ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+            RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+            UserOpencodeBackendRoutingWebFilter filter = filter(
+                    assignmentService,
+                    heartbeatStore("server-b"),
+                    httpClient,
+                    contextStore);
+            MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                    .post("/api/internal/agent/opencode/runs")
+                    .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                    .body("{\"sessionId\":\"ses_1234567890abcdef\",\"contextToken\":" + invalidToken + "}"));
+
+            filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
+
+            Mockito.verifyNoInteractions(assignmentService, contextStore);
+            assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(409);
+            assertThat(exchange.getResponse().getBodyAsString().block())
+                    .contains("\"code\":\"CONVERSATION_CONTEXT_EXPIRED\"");
+            assertThat(httpClient.requests).isEmpty();
+        }
+    }
+
+    @Test
+    void oversizedStartRunBodyReturnsValidationErrorBeforeRoutingLookup() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = new UserOpencodeBackendRoutingWebFilter(
+                new UserOpencodeBackendRoutingService(
+                        assignmentService,
+                        new WorkspaceServerIdentity("10.8.0.21"),
+                        heartbeatStore("server-b"),
+                        new ObjectMapper().findAndRegisterModules(),
+                        httpClient,
+                        contextStore,
+                        64));
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/runs")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body("{\"sessionId\":\"ses_1234567890abcdef\",\"prompt\":\"" + "x".repeat(64) + "\"}"));
+
+        filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        Mockito.verifyNoInteractions(assignmentService, contextStore);
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(400);
+        assertThat(exchange.getResponse().getBodyAsString().block())
+                .contains("\"code\":\"VALIDATION_ERROR\"")
+                .contains("\"maxBytes\":64");
+        assertThat(httpClient.requests).isEmpty();
     }
 
     @Test
@@ -329,6 +530,20 @@ class UserOpencodeBackendRoutingWebFilterTest {
                 httpClient));
     }
 
+    private static UserOpencodeBackendRoutingWebFilter filter(
+            UserOpencodeProcessAssignmentService assignmentService,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            RecordingHttpClient httpClient,
+            ConversationContextStore contextStore) {
+        return new UserOpencodeBackendRoutingWebFilter(new UserOpencodeBackendRoutingService(
+                assignmentService,
+                new WorkspaceServerIdentity("10.8.0.21"),
+                heartbeatStore,
+                new ObjectMapper().findAndRegisterModules(),
+                httpClient,
+                contextStore));
+    }
+
     private static WebFilterChain chain(java.util.function.Function<org.springframework.web.server.ServerWebExchange, Mono<Void>> delegate) {
         return delegate::apply;
     }
@@ -400,6 +615,7 @@ class UserOpencodeBackendRoutingWebFilterTest {
         private final String responseBody;
         private final boolean failSend;
         private final List<HttpRequest> requests = new ArrayList<>();
+        private final List<String> requestBodies = new ArrayList<>();
 
         private RecordingHttpClient(int status, String responseBody) {
             this(status, responseBody, false);
@@ -426,10 +642,43 @@ class UserOpencodeBackendRoutingWebFilterTest {
         public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
                 throws IOException, InterruptedException {
             requests.add(request);
+            requestBodies.add(readRequestBody(request));
             if (failSend) {
                 throw new IOException("connection refused");
             }
             return new BytesResponse<>((T) responseBody.getBytes(java.nio.charset.StandardCharsets.UTF_8), request, status);
+        }
+
+        private static String readRequestBody(HttpRequest request) {
+            if (request.bodyPublisher().isEmpty()) {
+                return "";
+            }
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            CompletableFuture<String> completed = new CompletableFuture<>();
+            request.bodyPublisher().orElseThrow().subscribe(new Flow.Subscriber<>() {
+                @Override
+                public void onSubscribe(Flow.Subscription subscription) {
+                    subscription.request(Long.MAX_VALUE);
+                }
+
+                @Override
+                public void onNext(ByteBuffer item) {
+                    byte[] bytes = new byte[item.remaining()];
+                    item.get(bytes);
+                    output.writeBytes(bytes);
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    completed.completeExceptionally(throwable);
+                }
+
+                @Override
+                public void onComplete() {
+                    completed.complete(output.toString(java.nio.charset.StandardCharsets.UTF_8));
+                }
+            });
+            return completed.join();
         }
 
         @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {

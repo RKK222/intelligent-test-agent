@@ -1,5 +1,6 @@
 package com.icbc.testagent.api.web.platform;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.common.api.ApiErrorResponse;
 import com.icbc.testagent.common.api.ApiResponse;
@@ -9,6 +10,9 @@ import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationRunContext;
+import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.observability.TraceConstants;
 import com.icbc.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
@@ -23,12 +27,17 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferLimitException;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 /**
  * 用户 opencode 进程跨后端路由服务。
@@ -48,13 +57,32 @@ class UserOpencodeBackendRoutingService {
             "/api/internal/platform/configuration-management/applications/";
     private static final String WORKSPACE_MANAGEMENT_PREFIX =
             "/api/internal/platform/workspace-management/";
+    private static final int DEFAULT_MAX_START_RUN_BODY_BYTES = 32 * 1024 * 1024;
 
     private final UserOpencodeProcessAssignmentService assignmentService;
     private final BackendJavaRouteResolver routeResolver;
     private final BackendHttpForwarder forwarder;
     private final ObjectMapper objectMapper;
+    private final ConversationContextStore conversationContextStore;
+    private final int maxStartRunBodyBytes;
 
     @Autowired
+    UserOpencodeBackendRoutingService(
+            UserOpencodeProcessAssignmentService assignmentService,
+            BackendJavaRouteResolver routeResolver,
+            BackendHttpForwarder forwarder,
+            ObjectMapper objectMapper,
+            ConversationContextStore conversationContextStore) {
+        this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
+        this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
+        this.forwarder = Objects.requireNonNull(forwarder, "forwarder must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.conversationContextStore = Objects.requireNonNull(
+                conversationContextStore,
+                "conversationContextStore must not be null");
+        this.maxStartRunBodyBytes = DEFAULT_MAX_START_RUN_BODY_BYTES;
+    }
+
     UserOpencodeBackendRoutingService(
             UserOpencodeProcessAssignmentService assignmentService,
             BackendJavaRouteResolver routeResolver,
@@ -64,6 +92,8 @@ class UserOpencodeBackendRoutingService {
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
         this.forwarder = Objects.requireNonNull(forwarder, "forwarder must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.conversationContextStore = null;
+        this.maxStartRunBodyBytes = DEFAULT_MAX_START_RUN_BODY_BYTES;
     }
 
     UserOpencodeBackendRoutingService(
@@ -73,6 +103,45 @@ class UserOpencodeBackendRoutingService {
             ObjectMapper objectMapper,
             HttpClient httpClient) {
         this(assignmentService, testRouteResolver(serverIdentity, heartbeatStore), new BackendHttpForwarder(objectMapper, httpClient), objectMapper);
+    }
+
+    UserOpencodeBackendRoutingService(
+            UserOpencodeProcessAssignmentService assignmentService,
+            WorkspaceServerIdentity serverIdentity,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ObjectMapper objectMapper,
+            HttpClient httpClient,
+            ConversationContextStore conversationContextStore) {
+        this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
+        this.routeResolver = testRouteResolver(serverIdentity, heartbeatStore);
+        this.forwarder = new BackendHttpForwarder(objectMapper, httpClient);
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.conversationContextStore = Objects.requireNonNull(
+                conversationContextStore,
+                "conversationContextStore must not be null");
+        this.maxStartRunBodyBytes = DEFAULT_MAX_START_RUN_BODY_BYTES;
+    }
+
+    /** 仅供路由层边界测试注入较小请求体上限，生产构造固定使用 32 MiB。 */
+    UserOpencodeBackendRoutingService(
+            UserOpencodeProcessAssignmentService assignmentService,
+            WorkspaceServerIdentity serverIdentity,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ObjectMapper objectMapper,
+            HttpClient httpClient,
+            ConversationContextStore conversationContextStore,
+            int maxStartRunBodyBytes) {
+        this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
+        this.routeResolver = testRouteResolver(serverIdentity, heartbeatStore);
+        this.forwarder = new BackendHttpForwarder(objectMapper, httpClient);
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.conversationContextStore = Objects.requireNonNull(
+                conversationContextStore,
+                "conversationContextStore must not be null");
+        if (maxStartRunBodyBytes <= 0) {
+            throw new IllegalArgumentException("maxStartRunBodyBytes must be greater than zero");
+        }
+        this.maxStartRunBodyBytes = maxStartRunBodyBytes;
     }
 
     private static BackendJavaRouteResolver testRouteResolver(
@@ -117,6 +186,130 @@ class UserOpencodeBackendRoutingService {
         }
         return assignmentService.routingLinuxServerId(principal.userId(), agentId.get())
                 .flatMap(routeResolver::remoteTarget);
+    }
+
+    /**
+     * 解析路由并在 start-run 场景缓存请求体；携带 contextToken 时只读 Redis 快照，禁止查询进程 assignment。
+     */
+    Mono<RoutingResolution> resolveRoute(ServerWebExchange exchange, AuthPrincipal principal) {
+        Objects.requireNonNull(exchange, "exchange must not be null");
+        Objects.requireNonNull(principal, "principal must not be null");
+        if (exchange.getRequest().getHeaders().getFirst(BackendHttpForwarder.ROUTED_HEADER) != null) {
+            return Mono.just(new RoutingResolution(exchange, Optional.empty()));
+        }
+        Optional<String> startRunAgentId = startRunAgentId(exchange);
+        if (startRunAgentId.isEmpty()) {
+            return Mono.just(new RoutingResolution(exchange, targetLinuxServerId(exchange, principal)));
+        }
+        return cacheRequestBody(exchange)
+                .map(cached -> resolveStartRun(cached, principal, startRunAgentId.get()));
+    }
+
+    private RoutingResolution resolveStartRun(
+            CachedRequest cached,
+            AuthPrincipal principal,
+            String agentId) {
+        JsonNode body;
+        try {
+            body = cached.body().length == 0
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(cached.body());
+        } catch (Exception ignored) {
+            // 非法 JSON 仍交给 Controller 返回统一校验错误；兼容路径按原 assignment 路由。
+            return new RoutingResolution(cached.exchange(), legacyTarget(principal, agentId));
+        }
+        boolean contextTokenPresent = body.isObject() && body.has("contextToken");
+        if (!contextTokenPresent || conversationContextStore == null) {
+            return new RoutingResolution(cached.exchange(), legacyTarget(principal, agentId));
+        }
+        String contextToken = textField(body, "contextToken");
+        if (contextToken == null) {
+            throw new PlatformException(
+                    ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
+                    "会话运行上下文已过期或与当前请求不匹配");
+        }
+        String sessionIdValue = textField(body, "sessionId");
+        if (sessionIdValue == null) {
+            throw new PlatformException(
+                    ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
+                    "会话运行上下文已过期或与当前请求不匹配");
+        }
+        SessionId sessionId;
+        try {
+            sessionId = new SessionId(sessionIdValue);
+        } catch (RuntimeException exception) {
+            throw new PlatformException(
+                    ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
+                    "会话运行上下文已过期或与当前请求不匹配");
+        }
+        ConversationRunContext context = conversationContextStore.resolveForRouting(
+                        contextToken,
+                        principal.userId(),
+                        agentId,
+                        sessionId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONVERSATION_CONTEXT_EXPIRED));
+        return new RoutingResolution(cached.exchange(), routeResolver.remoteTarget(context.linuxServerId()));
+    }
+
+    private Optional<String> legacyTarget(AuthPrincipal principal, String agentId) {
+        return assignmentService.routingLinuxServerId(principal.userId(), agentId)
+                .flatMap(routeResolver::remoteTarget);
+    }
+
+    private Optional<String> startRunAgentId(ServerWebExchange exchange) {
+        String path = exchange.getRequest().getURI().getRawPath();
+        if (!HttpMethod.POST.equals(exchange.getRequest().getMethod()) || path == null) {
+            return Optional.empty();
+        }
+        if ((PLATFORM_RUNTIME_PREFIX + "/runs").equals(path)) {
+            return Optional.of(OPENCODE_AGENT_ID);
+        }
+        return agentPathAgentId(path, HttpMethod.POST)
+                .filter(ignored -> path.equals(AGENT_PREFIX + OPENCODE_AGENT_ID + "/runs"));
+    }
+
+    private Mono<CachedRequest> cacheRequestBody(ServerWebExchange exchange) {
+        return DataBufferUtils.join(exchange.getRequest().getBody(), maxStartRunBodyBytes)
+                .map(buffer -> {
+                    byte[] body = new byte[buffer.readableByteCount()];
+                    buffer.read(body);
+                    DataBufferUtils.release(buffer);
+                    return new CachedRequest(withBody(exchange, body), body);
+                })
+                .onErrorMap(
+                        DataBufferLimitException.class,
+                        exception -> new PlatformException(
+                                ErrorCode.VALIDATION_ERROR,
+                                "Run 请求体超过允许上限",
+                                Map.of("maxBytes", maxStartRunBodyBytes)))
+                .defaultIfEmpty(new CachedRequest(withBody(exchange, new byte[0]), new byte[0]));
+    }
+
+    private ServerWebExchange withBody(ServerWebExchange exchange, byte[] body) {
+        ServerHttpRequestDecorator request = new ServerHttpRequestDecorator(exchange.getRequest()) {
+            @Override
+            public Flux<DataBuffer> getBody() {
+                return Flux.defer(() -> Flux.just(exchange.getResponse().bufferFactory().wrap(body)));
+            }
+        };
+        return exchange.mutate().request(request).build();
+    }
+
+    private static String textField(JsonNode body, String field) {
+        if (body == null || !body.isObject()) {
+            return null;
+        }
+        JsonNode value = body.get(field);
+        if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+            return null;
+        }
+        return value.textValue().trim();
+    }
+
+    record RoutingResolution(ServerWebExchange exchange, Optional<String> linuxServerId) {
+    }
+
+    private record CachedRequest(ServerWebExchange exchange, byte[] body) {
     }
 
     /**
@@ -295,6 +488,15 @@ class UserOpencodeBackendRoutingService {
         } catch (Exception exception) {
             return Mono.error(exception);
         }
+    }
+
+    /** WebFilter 发生上下文错误时直接写统一 API 错误，避免绕过 ControllerAdvice 后退化为 500。 */
+    Mono<Void> writePlatformError(ServerWebExchange exchange, PlatformException exception) {
+        return writeError(
+                exchange,
+                exception.errorCode(),
+                exception.getMessage(),
+                exception.details());
     }
 
     private String traceId(ServerWebExchange exchange) {
