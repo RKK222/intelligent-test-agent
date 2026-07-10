@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 重新验证企业内完整交付包
+
+- Why:
+  - 现场再次执行企业内打包时，Docker worker 的 Go 编译阶段约 69 秒输出较少，容易被误判为打包失败；需要确认最新完整交付包是否生成并记录新的传输校验值。
+- What:
+  - 重新执行 `deploy/internal/package-release.sh`，生成后端 jar、前端静态包、worker 镜像 tar、外挂程序包和完整升级 zip。
+- How:
+  - 未修改部署脚本或生产配置；仅在 Mac 构建机完成构建、Docker `linux/amd64` 镜像导出和 zip 完整性校验。
+- Result:
+  - 打包以 exit code 0 完成，`unzip -tq deploy/internal/dist/test-agent-internal-release.zip` 通过。当前交付包 `deploy/internal/dist/test-agent-internal-release.zip` 的 SHA256 为 `47cd399a39a553bbf43acbf98168e7605af4b8ed7bc9a1f3620dc973c18fdb4c`；交付时应以此值为准。
+
 ### 2026-07-09 - 打包前补齐企业内拆分部署入口说明
 
 - Why:
