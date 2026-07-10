@@ -37,7 +37,7 @@ describe("FigmaShell", () => {
     window.localStorage.removeItem("figma-shell-robot-pos");
   });
 
-  it("restores a saved robot root position as a static idle robot", async () => {
+  it("restores a saved robot root position as the next natural start position", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 120, y: 180 }));
 
     const wrapper = mountShell();
@@ -48,8 +48,25 @@ describe("FigmaShell", () => {
     expect(robot.attributes("style")).toContain("left: 120px");
     expect(robot.attributes("style")).toContain("top: 180px");
     expect(robot.classes()).toContain("figma-robot-agent");
-    expect(robot.classes()).toContain("is-manually-positioned");
     expect(robot.find(".state-idle").exists()).toBe(true);
+  });
+
+  it("reuses the pet head, antenna, and eye geometry in the visibility toggle", async () => {
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+    const petSvg = wrapper.get(".robot-svg");
+    const toggleSvg = wrapper.get('[data-testid="robot-visibility-toggle"] svg');
+
+    for (const selector of [
+      ".robot-antenna-l",
+      ".robot-antenna-l-tip",
+      ".robot-antenna-r",
+      ".robot-antenna-r-tip",
+      ".robot-head",
+      ".robot-eye"
+    ]) {
+      expect(toggleSvg.get(selector).attributes()).toEqual(petSvg.get(selector).attributes());
+    }
   });
 
   it("persists a pointer drag after crossing the movement threshold", async () => {
@@ -180,16 +197,13 @@ describe("FigmaShell", () => {
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 160, y: 160 }));
   });
 
-  it("keeps an effectively dragged autonomous pet static beyond behavior and exit timers", async () => {
+  it("resumes natural actions and natural exit timers after an effective drag", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
-
-    await vi.advanceTimersByTimeAsync(60_000);
-    await wrapper.vm.$nextTick();
-    await vi.advanceTimersByTimeAsync(1_100);
-    await wrapper.vm.$nextTick();
-
+    await summonRobot(wrapper);
     const robot = wrapper.get('[data-testid="figma-robot"]');
     const robotElement = robot.element as HTMLElement;
     const initialX = Number.parseInt(robotElement.style.left, 10);
@@ -204,13 +218,30 @@ describe("FigmaShell", () => {
     expect(parsedSavedPosition.x).toBeGreaterThan(initialX);
     expect(parsedSavedPosition.y).toBeGreaterThan(initialY);
 
-    await vi.advanceTimersByTimeAsync(180_000);
+    await vi.advanceTimersByTimeAsync(1_100);
     await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="figma-robot"] .state-walking').exists()).toBe(true);
 
-    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
-    expect(robotElement.style.left).toBe(`${parsedSavedPosition.x}px`);
-    expect(robotElement.style.top).toBe(`${parsedSavedPosition.y}px`);
+    await vi.advanceTimersByTimeAsync(18_000);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(savedPosition);
+  });
+
+  it("can enter the added shake and celebration actions", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.8);
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+    await vi.advanceTimersByTimeAsync(1_801);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="figma-robot"] .state-shaking').exists()).toBe(true);
+
+    random.mockReturnValue(0.9);
+    await vi.advanceTimersByTimeAsync(3_000);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="figma-robot"] .state-celebrating').exists()).toBe(true);
   });
 
   it("toggles the pet immediately and restores a saved manual position after a full idle minute", async () => {

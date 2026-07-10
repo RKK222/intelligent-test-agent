@@ -301,7 +301,9 @@ type RobotState =
   | "walking"
   | "sitting"
   | "flipping"
-  | "hanging";
+  | "hanging"
+  | "shaking"
+  | "celebrating";
 
 const robotState = ref<RobotState>("sleeping");
 const robotX = ref(0);
@@ -315,9 +317,8 @@ let behaviorTimer: ReturnType<typeof setTimeout> | null = null;
 let movementTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const robotCurrentLevel = ref<"top" | "bottom">("top");
-const robotManuallyPositioned = ref(false);
-// 手动唤起只控制本次展示是否静止，不能与「已保存坐标」混用，否则隐藏后无法重新进入自动待机计时。
-const robotManuallySummoned = ref(false);
+// 保存坐标只作为下一次出现的起点，不代表要冻结动作或离场逻辑。
+const robotHasSavedPosition = ref(false);
 const robotDragging = ref(false);
 
 const ROBOT_WIDTH = 24;
@@ -373,15 +374,25 @@ function saveRobotPosition() {
 }
 
 function pauseRobotForManualPlacement() {
-  // 用户手动安放后必须停止计时器，否则随机动作或离场会覆盖用户选择的位置。
+  // 拖动期间暂停当前计时器，释放后立即恢复同一套自然动作和离场调度。
   clearAllRobotTimers();
   if (inactivityTimer) clearTimeout(inactivityTimer);
   inactivityTimer = null;
-  robotManuallyPositioned.value = true;
-  robotManuallySummoned.value = false;
   robotState.value = "idle";
   robotDirection.value = "front";
   robotTransition.value = "none";
+}
+
+function scheduleNaturalExit() {
+  if (naturalExitTimer) clearTimeout(naturalExitTimer);
+  const stayDuration = (15 + Math.random() * 45) * 1000;
+  naturalExitTimer = setTimeout(triggerExit, stayDuration);
+}
+
+function resumeNaturalRobotBehavior() {
+  if (robotState.value === "sleeping") return;
+  scheduleNaturalExit();
+  scheduleNextAction();
 }
 
 function cleanupRobotDrag() {
@@ -438,7 +449,9 @@ function finishRobotDrag(pointerId?: number) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
     robotX.value = position.x;
     robotY.value = position.y;
+    robotHasSavedPosition.value = true;
     saveRobotPosition();
+    resumeNaturalRobotBehavior();
   }
   cleanupRobotDrag();
 }
@@ -461,13 +474,15 @@ function onRobotKeydown(event: KeyboardEvent) {
   const movement = movements[event.key];
   if (!movement) return;
 
-  // 键盘移动与拖动走同一手动定位路径，确保位置不会被随机行为重新覆盖。
+  // 键盘移动与拖动走同一手动定位路径，释放后恢复自然行为。
   event.preventDefault();
   pauseRobotForManualPlacement();
   const position = clampRobotPosition({ x: robotX.value + movement.x, y: robotY.value + movement.y });
   robotX.value = position.x;
   robotY.value = position.y;
+  robotHasSavedPosition.value = true;
   saveRobotPosition();
+  resumeNaturalRobotBehavior();
 }
 
 // Safe X ranges logic
@@ -505,7 +520,7 @@ function getBirthPosition() {
 
 // Exit logic (interrupted or naturally)
 function triggerExit() {
-  if (robotManuallyPositioned.value || robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
+  if (robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
     return;
   }
 
@@ -563,8 +578,7 @@ function resetInactivityTimer() {
   if (inactivityTimer) clearTimeout(inactivityTimer);
   inactivityTimer = null;
   if (robotState.value !== "sleeping") {
-    // 手动安放或手动唤起的宠物保持静止；自动出现的宠物仍会因用户活动离场。
-    if (!robotManuallyPositioned.value && !robotManuallySummoned.value && robotState.value !== "waving" && robotState.value !== "exiting-charge" && robotState.value !== "exiting-fly") {
+    if (robotState.value !== "waving" && robotState.value !== "exiting-charge" && robotState.value !== "exiting-fly") {
       triggerExit();
     }
     return;
@@ -589,18 +603,22 @@ function spawnRobot() {
   clearAllRobotTimers();
   if (inactivityTimer) clearTimeout(inactivityTimer);
 
-  // 已手动安放的宠物在一分钟无操作后原地静态回归，不能再次随机跳动。
-  if (robotManuallyPositioned.value) {
+  const savedPosition = loadSavedRobotPosition();
+  const birth = savedPosition ?? getBirthPosition();
+  robotX.value = birth.x;
+  robotY.value = birth.y;
+  robotHasSavedPosition.value = Boolean(savedPosition);
+  robotCurrentLevel.value = savedPosition && savedPosition.y > window.innerHeight / 2 ? "bottom" : "top";
+
+  // 有保存坐标时从该起点直接进入自然待机；坐标不是静止开关，动作和离场仍照常启动。
+  if (savedPosition) {
     robotState.value = "idle";
     robotDirection.value = "front";
     robotTransition.value = "none";
+    resumeNaturalRobotBehavior();
     return;
   }
 
-  const birth = getBirthPosition();
-  robotX.value = birth.x;
-  robotY.value = birth.y;
-  robotCurrentLevel.value = "top";
   robotState.value = "spawning";
   robotTransition.value = "none";
 
@@ -642,12 +660,7 @@ function spawnRobot() {
             // Start idle behavior
             robotState.value = "idle";
 
-            // Schedule natural exit
-            const stayDuration = (15 + Math.random() * 45) * 1000;
-            naturalExitTimer = setTimeout(triggerExit, stayDuration);
-
-            // Start random behaviors loop
-            scheduleNextAction();
+            resumeNaturalRobotBehavior();
           }, 250);
         }, 400);
       }, 400);
@@ -657,7 +670,6 @@ function spawnRobot() {
 
 // Action selection
 function scheduleNextAction() {
-  if (robotManuallyPositioned.value) return;
   if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
 
   if (behaviorTimer) clearTimeout(behaviorTimer);
@@ -667,12 +679,18 @@ function scheduleNextAction() {
     if (robotCurrentLevel.value === "top") {
       // At top: restrict upward jumps to prevent going off-screen
       const rand = Math.random();
-      if (rand < 0.40) {
+      if (rand < 0.30) {
         executeWalking();
-      } else if (rand < 0.65) {
+      } else if (rand < 0.48) {
         executeHanging();
-      } else if (rand < 0.85) {
+      } else if (rand < 0.64) {
         executeBigJump(); // Drop down to bottom
+      } else if (rand < 0.75) {
+        executeSitting();
+      } else if (rand < 0.87) {
+        executeShaking();
+      } else if (rand < 0.97) {
+        executeCelebrating();
       } else {
         if (Math.random() < 0.6) {
           executeSitting();
@@ -693,6 +711,10 @@ function scheduleNextAction() {
         executeBigJump(); // Jump up to top navbar
       } else if (rand < 0.92) {
         executeBounce();
+      } else if (rand < 0.97) {
+        executeShaking();
+      } else if (rand < 0.995) {
+        executeCelebrating();
       } else {
         if (Math.random() < 0.6) {
           executeSitting();
@@ -735,6 +757,32 @@ function executeHanging() {
     robotDirection.value = Math.random() < 0.5 ? "left" : "right";
     scheduleNextAction();
   }, hangDuration);
+}
+
+function executeShaking() {
+  robotState.value = "shaking";
+  robotDirection.value = "front";
+  robotTransition.value = "none";
+  const duration = 450 + Math.random() * 350;
+  movementTimeout = setTimeout(() => {
+    if (robotState.value !== "shaking") return;
+    robotState.value = "idle";
+    robotDirection.value = Math.random() < 0.5 ? "left" : "right";
+    scheduleNextAction();
+  }, duration);
+}
+
+function executeCelebrating() {
+  robotState.value = "celebrating";
+  robotDirection.value = "front";
+  robotTransition.value = "none";
+  const duration = 700 + Math.random() * 500;
+  movementTimeout = setTimeout(() => {
+    if (robotState.value !== "celebrating") return;
+    robotState.value = "idle";
+    robotDirection.value = Math.random() < 0.5 ? "left" : "right";
+    scheduleNextAction();
+  }, duration);
 }
 
 function executeWalking() {
@@ -979,7 +1027,10 @@ function executeBigJump() {
 }
 
 // User activity listener
-function handleUserActivity() {
+function handleUserActivity(event?: Event) {
+  // 机器人自身的按下事件用于拖动，不应在 pointerdown 前被全局空闲逻辑触发离场。
+  const target = event?.target as Element | null;
+  if (target?.closest?.(".figma-robot-agent")) return;
   const now = Date.now();
   if (now - lastActivityTime < 100) return;
   lastActivityTime = now;
@@ -987,7 +1038,7 @@ function handleUserActivity() {
 }
 
 function handleWindowResize() {
-  if (robotManuallyPositioned.value) {
+  if (robotHasSavedPosition.value) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
     robotX.value = position.x;
     robotY.value = position.y;
@@ -1028,24 +1079,23 @@ function toggleRobotVisibility() {
     if (inactivityTimer) clearTimeout(inactivityTimer);
     inactivityTimer = null;
     robotState.value = "sleeping";
-    robotManuallySummoned.value = false;
     resetInactivityTimer();
     return;
   }
 
-  // 手动唤起不触发随机出生动画，优先复用用户保存的位置并保持静止。
+  // 手动唤起从保存坐标开始，但随后与自然出现共享动作和离场调度。
   const saved = loadSavedRobotPosition();
   const position = saved ?? clampRobotPosition(getBirthPosition());
   robotX.value = position.x;
   robotY.value = position.y;
-  robotManuallyPositioned.value = Boolean(saved);
-  robotManuallySummoned.value = true;
-  robotCurrentLevel.value = "top";
+  robotHasSavedPosition.value = Boolean(saved);
+  robotCurrentLevel.value = saved && saved.y > window.innerHeight / 2 ? "bottom" : "top";
   robotDirection.value = "front";
   robotTransition.value = "none";
   robotState.value = "idle";
   if (inactivityTimer) clearTimeout(inactivityTimer);
   inactivityTimer = null;
+  resumeNaturalRobotBehavior();
 }
 
 onMounted(() => {
@@ -1066,7 +1116,7 @@ onMounted(() => {
   if (savedPosition) {
     robotX.value = savedPosition.x;
     robotY.value = savedPosition.y;
-    robotManuallyPositioned.value = true;
+    robotHasSavedPosition.value = true;
   }
   // 无论是否有保存位置，初次进入都保持隐藏，等连续一分钟无操作后再出现。
   resetInactivityTimer();
@@ -1239,7 +1289,15 @@ function submitJoinApp() {
           title="唤起或收起小宠物"
           @click.stop="toggleRobotVisibility"
         >
-          <span aria-hidden="true">🤖</span>
+          <svg viewBox="0 0 24 32" class="robot-toggle-svg" width="18" height="24" aria-hidden="true">
+            <!-- 开关复用宠物相同的天线、脑袋和眼睛几何，避免出现两个不同机器人图标。 -->
+            <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
+            <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#7c6bb5" />
+            <path class="robot-antenna-r" d="M16,4 L18,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
+            <circle class="robot-antenna-r-tip" cx="18" cy="1.5" r="0.8" fill="#5aa9a6" />
+            <rect class="robot-head" x="6" y="4" width="12" height="10" rx="2.5" fill="#27384b" />
+            <circle class="robot-eye" cx="12" cy="9" r="1.2" fill="#7cd5d0" />
+          </svg>
         </button>
         <div class="figma-app-menu-wrapper" @click.stop>
           <button
@@ -1448,7 +1506,7 @@ function submitJoinApp() {
     <div
       v-if="robotState !== 'sleeping'"
       class="figma-robot-agent"
-      :class="{ 'is-dragging': robotDragging, 'is-manually-positioned': robotManuallyPositioned }"
+      :class="{ 'is-dragging': robotDragging }"
       :style="robotStyle"
       data-testid="figma-robot"
       role="group"
@@ -2563,10 +2621,6 @@ function submitJoinApp() {
   cursor: grabbing;
 }
 
-.figma-robot-agent.is-manually-positioned .robot-squash-wrap.state-idle {
-  animation: none;
-}
-
 .figma-robot-instructions {
   position: absolute;
   width: 1px;
@@ -2641,6 +2695,12 @@ function submitJoinApp() {
 
 .robot-svg {
   display: block;
+}
+
+.robot-toggle-svg {
+  display: block;
+  width: 18px;
+  height: 24px;
 }
 
 /* Eye glowing/breathing animation */
@@ -2757,6 +2817,28 @@ function submitJoinApp() {
 /* Flipping (Backflip) state */
 .robot-squash-wrap.state-flipping {
   animation: robot-backflip 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 快速抖动：短促左右摆动，作为随机行为的一种轻量反馈。 */
+.robot-squash-wrap.state-shaking {
+  animation: robot-shake 0.42s ease-in-out;
+}
+
+@keyframes robot-shake {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  25% { transform: translateX(-2px) rotate(-6deg); }
+  75% { transform: translateX(2px) rotate(6deg); }
+}
+
+/* 旋转庆祝：完整旋转一圈后回到自然站姿。 */
+.robot-squash-wrap.state-celebrating {
+  animation: robot-celebrate 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes robot-celebrate {
+  0% { transform: rotate(0deg) scale(1); }
+  45% { transform: rotate(180deg) scale(1.08); }
+  100% { transform: rotate(360deg) scale(1); }
 }
 
 @keyframes robot-backflip {
