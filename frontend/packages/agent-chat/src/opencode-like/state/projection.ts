@@ -111,6 +111,18 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
       action: state.runtimeStatus.action
     });
   }
+  if (!state.running) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      if (row.type === "assistant-part") {
+        const part = state.partsByMessageId[row.messageId]?.find((candidate) => candidate.partId === row.partId);
+        if (part?.type === "text") {
+          row.isFinalSummary = true;
+          break;
+        }
+      }
+    }
+  }
 
   return rows;
 }

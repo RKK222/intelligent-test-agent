@@ -4,6 +4,7 @@ import type { MessagePart } from "@test-agent/shared-types";
 export type TextPartViewProps = {
   part: Extract<MessagePart, { type: "text" }>;
   streamingTextByPartId?: Record<string, string>;
+  isFinalSummary?: boolean;
 };
 </script>
 
@@ -13,17 +14,18 @@ import MarkdownView from "../../../MarkdownView.vue";
 import OcCopyButton from "../primitives/OcCopyButton.vue";
 import { readPartText } from "../../state/part-text";
 
-const props = defineProps<TextPartViewProps>();
+const props = withDefaults(defineProps<TextPartViewProps>(), {
+  isFinalSummary: false
+});
 const source = computed(() => readPartText(props.part, props.streamingTextByPartId));
 const hasSource = computed(() => source.value.trim().length > 0);
 const normalizedStatus = computed(() => (props.part.status ?? "completed").toLowerCase());
 const isWorkingOutput = computed(() => normalizedStatus.value === "running" || normalizedStatus.value === "pending");
-// running 文本直接展示源内容，避免高频 delta 反复挂载 Markdown 渲染器。
 const usesLivePreview = computed(() => hasSource.value && isWorkingOutput.value);
 </script>
 
 <template>
-  <div :class="['oc-text-part', isWorkingOutput ? 'is-working-output' : 'is-final-output']">
+  <div :class="['oc-text-part', isFinalSummary && 'oc-summary', isWorkingOutput ? 'is-working-output' : 'is-final-output']">
     <div v-if="hasSource" class="oc-text-part__copy">
       <OcCopyButton :value="source" />
     </div>
