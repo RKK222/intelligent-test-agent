@@ -93,6 +93,28 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicBranchesUseEffectiveInternalGitUrlWithCurrentUnifiedAuthId() {
+        RecordingGitRemoteService remote = new RecordingGitRemoteService(List.of("main"));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "scm.example.com:29418/team/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                remote,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.empty(),
+                "external");
+
+        List<String> branches = service.publicBranches(ADMIN);
+
+        assertThat(branches).containsExactly("main");
+        assertThat(remote.gitUrl).isEqualTo("ssh://AUTH_ADMIN@scm.example.com:29418/team/agent-config.git");
+        assertThat(remote.privateKey).isEqualTo(PRIVATE_KEY);
+    }
+
+    @Test
     void publicStatusUsesCompletePublicGitUrlDirectlyEvenWhenDeploymentModeIsInternal() {
         AgentConfigApplicationService service = service(
                 Map.of(
@@ -1074,6 +1096,24 @@ class AgentConfigApplicationServiceTest {
             ServerBroadcastPublisher publisher,
             Optional<Workspace> workspace,
             String deploymentMode) {
+        return service(
+                parameters,
+                agentConfigs,
+                new GitRemoteService(),
+                git,
+                publisher,
+                workspace,
+                deploymentMode);
+    }
+
+    private AgentConfigApplicationService service(
+            Map<String, String> parameters,
+            AgentConfigRepository agentConfigs,
+            GitRemoteService remote,
+            RecordingGitWorkspaceService git,
+            ServerBroadcastPublisher publisher,
+            Optional<Workspace> workspace,
+            String deploymentMode) {
         CommonParameterValues commonParameters = commonParameters(parameters);
         ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
         when(configuration.findSshKeys(eq(ADMIN))).thenReturn(List.of(encryptedSshKey()));
@@ -1085,7 +1125,7 @@ class AgentConfigApplicationServiceTest {
                 workspaces,
                 agentConfigs,
                 new InMemoryUserRepository(),
-                new GitRemoteService(),
+                remote,
                 git,
                 sshKeyFixtures.encryptionService(),
                 new WorkspaceFileService(),
@@ -1128,6 +1168,23 @@ class AgentConfigApplicationServiceTest {
 
     private UserSshKey encryptedSshKey() {
         return sshKeyFixtures.encryptedSshKey(new SshKeyId("ssh_admin"), ADMIN, "admin", PRIVATE_KEY, NOW);
+    }
+
+    private static final class RecordingGitRemoteService extends GitRemoteService {
+        private final List<String> branches;
+        private String gitUrl;
+        private String privateKey;
+
+        private RecordingGitRemoteService(List<String> branches) {
+            this.branches = branches;
+        }
+
+        @Override
+        public List<String> listBranches(String gitUrl, String privateKey) {
+            this.gitUrl = gitUrl;
+            this.privateKey = privateKey;
+            return branches;
+        }
     }
 
     private static final class RecordingGitWorkspaceService extends GitWorkspaceService {
