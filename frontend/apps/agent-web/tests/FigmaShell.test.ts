@@ -26,6 +26,7 @@ describe("FigmaShell", () => {
   afterEach(() => {
     mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount());
     vi.restoreAllMocks();
+    vi.useRealTimers();
     Object.defineProperty(window, "innerWidth", originalInnerWidth!);
     Object.defineProperty(window, "innerHeight", originalInnerHeight!);
     window.localStorage.removeItem("figma-shell-robot-pos");
@@ -165,6 +166,39 @@ describe("FigmaShell", () => {
     expect(document.body.style.cursor).toBe("");
     expect(document.body.style.userSelect).toBe("");
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 160, y: 160 }));
+  });
+
+  it("keeps an effectively dragged autonomous pet static beyond behavior and exit timers", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await wrapper.vm.$nextTick();
+    await vi.advanceTimersByTimeAsync(1_100);
+    await wrapper.vm.$nextTick();
+
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+    const robotElement = robot.element as HTMLElement;
+    const initialX = Number.parseInt(robotElement.style.left, 10);
+    const initialY = Number.parseInt(robotElement.style.top, 10);
+    dispatchPointer(robotElement, "pointerdown", 13, initialX, initialY, "mouse");
+    dispatchPointer(robotElement, "pointermove", 13, initialX + 20, initialY + 30, "mouse");
+    dispatchPointer(robotElement, "pointerup", 13, initialX + 20, initialY + 30, "mouse");
+    await wrapper.vm.$nextTick();
+
+    const savedPosition = window.localStorage.getItem("figma-shell-robot-pos");
+    const parsedSavedPosition = JSON.parse(savedPosition!);
+    expect(parsedSavedPosition.x).toBeGreaterThan(initialX);
+    expect(parsedSavedPosition.y).toBeGreaterThan(initialY);
+
+    await vi.advanceTimersByTimeAsync(180_000);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
+    expect(robotElement.style.left).toBe(`${parsedSavedPosition.x}px`);
+    expect(robotElement.style.top).toBe(`${parsedSavedPosition.y}px`);
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(savedPosition);
   });
 
   it("shows runtime inventory before the application switch and opens details", async () => {
