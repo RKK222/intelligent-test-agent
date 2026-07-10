@@ -5283,11 +5283,10 @@ bash /tmp/test-api-after-restart.sh
   - 小宠物虽然支持随机出现和手动定位，但缺少明确的唤起/收起入口，连续使用页面时很难等到出现；进程绿点展开后也需要支持继续拖动，且未建立用户位置偏好时应回到原有对话内联位置。
 - What:
   - `FigmaShell` 顶栏新增可访问的小宠物开关；宠物默认隐藏，页面聚焦且可见时连续 60 秒无鼠标、键盘、滚动或点击自动出现。手动唤起保持静止，收起清理行为计时器并重新开始空闲计时；保存过位置的宠物自动回归时原地静止。
-  - `FigmaChatPanel` 区分默认内联和用户浮动状态：无有效本地拖动坐标时显示内联状态卡，收起只建立会话内浮动状态，有效拖动才持久化绿点坐标。绿点和展开卡共用 Pointer 拖动与阈值，内联卡越过阈值时反推共享锚点以避免切换 fixed 定位时跳位；绿点改为 8px 半透明柔光点，子 Agent 视图不显示进程状态入口。
+  - `FigmaChatPanel` 区分默认内联和用户浮动状态：无有效本地拖动坐标时显示内联状态卡，收起只建立会话内浮动状态，有效拖动才持久化绿点坐标。绿点和展开卡共用 Pointer 拖动与阈值；内联卡首次越过阈值时只反推共享锚点并切换 fixed 定位，保持该事件前的 rect 原位，下一次 pointermove 才应用增量，避免边缘翻转或夹取造成跳位。初始化按钮的 Enter/Space 不会冒泡收起父卡。绿点改为 8px 半透明柔光点，子 Agent 视图不显示进程状态入口。
 - How:
   - 仅修改 `agent-web` 的两处现有组件、其组件测试、README 和本次设计/计划文档；没有新增 API、SSE、数据库、环境配置或后端逻辑。
-  - 新增聚焦 Vitest 覆盖宠物开关、60 秒空闲与活动/焦点/可见性守卫、保存坐标静态回归，以及进程内联/浮动、展开卡拖动不跳位、拖后 click 抑制和子 Agent 隐藏。
+  - 新增聚焦 Vitest 覆盖宠物开关不会关闭既有头部菜单、60 秒空闲与活动/焦点/可见性守卫、保存坐标静态回归，以及进程内联/浮动、近边缘内联卡首次阈值移动保持原 rect、展开卡拖动、拖后 click 抑制、初始化键盘事件隔离、8px 半透明样式 token 和子 Agent 隐藏。
 - Result:
-  - `corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts`：103 passed、1 skipped。
-  - `corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build` 均通过；构建仅保留既有 CSS `@import` 顺序和大 chunk 警告。
+  - 追补后的 `corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts`：106 passed、1 skipped；`corepack pnpm typecheck` 通过。此前的 `corepack pnpm lint`、`corepack pnpm build` 也通过；构建仅保留既有 CSS `@import` 顺序和大 chunk 警告。
   - 本地 Vite 已启动并确认 `http://127.0.0.1:3001/` 返回 HTTP 200。未做浏览器人工拖动验收，后续可在该地址验证宠物开关/空闲出现及绿点、展开卡拖动。

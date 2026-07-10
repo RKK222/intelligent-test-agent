@@ -268,6 +268,16 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
   });
 
+  it("does not close an open header menu when toggling the pet", async () => {
+    const wrapper = mountShell();
+    const appMenu = wrapper.get(".figma-app-menu-trigger");
+    await appMenu.trigger("click");
+    expect(wrapper.find(".figma-app-menu-dropdown").exists()).toBe(true);
+
+    await wrapper.get('[data-testid="robot-visibility-toggle"]').trigger("click");
+    expect(wrapper.find(".figma-app-menu-dropdown").exists()).toBe(true);
+  });
+
   it("shows runtime inventory before the application switch and opens details", async () => {
     const wrapper = mountShell({
       props: {

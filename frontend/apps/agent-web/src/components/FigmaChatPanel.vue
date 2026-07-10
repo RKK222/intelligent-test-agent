@@ -2204,11 +2204,16 @@ function onProcessDotPointerMove(event: PointerEvent) {
     Math.hypot(dx, dy) >= PROCESS_DOT_DRAG_THRESHOLD
   ) {
     didDragProcessDot.value = true
-    if (dragStartedOnCard) {
+    if (dragStartedOnCard && !processStatusFloating.value) {
       prepareCardForFloatingDrag()
       const origin = processStatusDotPos.value ?? defaultProcessDotPos()
       dragOriginX = origin.x
       dragOriginY = origin.y
+      // 首次跨过阈值只完成内联 → fixed 的无跳位切换；以当前指针为新的拖动原点，
+      // 后续 pointermove 才叠加位移，避免本次事件把卡片立即推离原始 rect。
+      dragStartX = event.clientX
+      dragStartY = event.clientY
+      return
     }
   }
   if (didDragProcessDot.value) {
@@ -3951,6 +3956,7 @@ function onCompositionEnd() {
           processInitializing || processLoading || !processStatus.initializable
         "
         @click.stop="emit('initialize-process')"
+        @keydown.stop
       >
         {{ processInitButtonLabel }}
       </button>

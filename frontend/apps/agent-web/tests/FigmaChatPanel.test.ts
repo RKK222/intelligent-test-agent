@@ -1,4 +1,6 @@
 import { mount } from "@vue/test-utils";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { nextTick } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatStateFromSessionTreeSnapshot } from "../src/components/workbench-utils";
@@ -109,6 +111,53 @@ describe("FigmaChatPanel", () => {
     }
   });
 
+  it("keeps an inline card at its near-edge rect on the threshold move before applying later drag deltas", async () => {
+    setViewport(1000, 800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("figma-chat-process-status")
+        ? ({ x: 632, y: 582, width: 240, height: 90, top: 582, right: 872, bottom: 672, left: 632, toJSON: () => ({}) } as DOMRect)
+        : ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect);
+    });
+    const wrapper = mount(FigmaChatPanel, {
+      props: { messages: [], processStatus: { status: "READY", initializable: false, message: "ready" } } as any,
+    });
+    try {
+      const card = wrapper.get(".figma-chat-process-status");
+      dispatchPointer(card.element, "pointerdown", 33, 700, 620);
+      dispatchPointer(window, "pointermove", 33, 720, 640);
+      await nextTick();
+      expect((card.element as HTMLElement).style.left).toBe("632px");
+      expect((card.element as HTMLElement).style.top).toBe("582px");
+
+      dispatchPointer(window, "pointermove", 33, 725, 645);
+      await nextTick();
+      expect((card.element as HTMLElement).style.left).toBe("637px");
+      expect((card.element as HTMLElement).style.top).toBe("587px");
+    } finally {
+      wrapper.unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("does not collapse the status card when its initialize button receives Enter or Space", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "NEEDS_INITIALIZATION", initializable: true, message: "start required" },
+      } as any,
+    });
+    try {
+      const initButton = wrapper.get(".figma-chat-process-init");
+      await initButton.trigger("keydown", { key: "Enter" });
+      await initButton.trigger("keydown", { key: " " });
+      expect(wrapper.find(".figma-chat-process-status").exists()).toBe(true);
+      await initButton.trigger("click");
+      expect(wrapper.emitted("initialize-process")).toEqual([[]]);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("uses an eight-pixel translucent halo dot and keeps all process status UI out of child-agent view", async () => {
     window.localStorage.setItem("figma-chat-process-dot-pos", JSON.stringify({ x: 100, y: 120 }));
     const wrapper = mount(FigmaChatPanel, {
@@ -125,6 +174,14 @@ describe("FigmaChatPanel", () => {
       await nextTick();
       expect(wrapper.get(".figma-chat-process-status-dot").attributes("style")).toContain("--figma-process-dot-x: 100px");
       expect(wrapper.get(".figma-chat-process-status-dot").classes()).toContain("is-ready");
+      const componentSource = readFileSync(
+        resolve(process.cwd(), "apps/agent-web/src/components/FigmaChatPanel.vue"),
+        "utf8"
+      );
+      expect(componentSource).toContain("width: 8px;");
+      expect(componentSource).toContain("background: rgba(24, 169, 120, 0.42);");
+      expect(componentSource).toContain("opacity: 0.42;");
+      expect(componentSource).not.toContain("#34d399 0%");
       const taskCard = wrapper.find(".oc-subagent-card");
       await taskCard.trigger("click");
       await nextTick();
