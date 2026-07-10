@@ -15,6 +15,7 @@
 - @tanstack/vue-query
 - dockview-vue（Dockview 官方 Vue 封装）
 - Monaco Editor（原生 `monaco-editor`，按需懒加载）
+- Vue Flow（`@vue-flow/core`，仅在 Mermaid 可视化编辑时懒加载）
 - lucide-vue-next
 - @vscode/codicons（仅文件浏览区使用）
 - pnpm workspace
@@ -35,6 +36,8 @@ packages/test-runner
 packages/ui-kit
 packages/shared-types
 ```
+
+`packages/editor` 在 Markdown 预览中支持 Mermaid `flowchart`/`graph` 与 `sequenceDiagram` 可视化编辑。图模型、parser、serializer 与 Vue Flow 画布均留在 editor 包内；应用后只回写当前 Markdown fence，并继续复用工作台 dirty、Git Diff 与 workspace 文件保存链路。
 
 ## 本地命令
 

@@ -1,15 +1,33 @@
+import { defineComponent } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/vue";
 import MarkdownPreview from "../src/MarkdownPreview.vue";
+
+const mermaidParse = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 
 vi.mock("mermaid", () => {
   return {
     default: {
       initialize: vi.fn(),
+      parse: mermaidParse,
       render: vi.fn().mockResolvedValue({ svg: "<svg id='mock-preview-svg'>Mocked SVG</svg>" })
     }
   };
 });
+
+vi.mock("@vue-flow/core", () => ({
+  VueFlow: defineComponent({
+    props: ["nodes", "edges"],
+    emits: ["nodeClick", "nodeDragStop", "connect"],
+    template: `<div data-testid="vue-flow-mock">
+      <button data-testid="mock-select-a" @click="$emit('nodeClick', { node: { id: 'A' } })">select A</button>
+    </div>`
+  }),
+  Handle: defineComponent({ template: "<span />" }),
+  BaseEdge: defineComponent({ template: "<path />" }),
+  Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
+  MarkerType: { ArrowClosed: "arrowclosed", Arrow: "arrow" }
+}));
 
 // 等待防抖（150ms）+ markdown-it/dompurify/highlight.js 动态 import 完成并完成 DOM 更新
 const waitRender = () => new Promise((r) => setTimeout(r, 350));
@@ -102,5 +120,96 @@ describe("MarkdownPreview", () => {
       await fireEvent.click(scriptBtn);
       expect((container.querySelector(".ta-mermaid-script") as HTMLElement | null)?.hidden).toBe(false);
     }
+  });
+
+  it("可视化编辑节点后只回写当前 Mermaid block", async () => {
+    const content = `# 设计
+
+\`\`\`mermaid
+flowchart TD
+A[开始] --> B[结束]
+classDef important fill:red
+\`\`\`
+
+正文`;
+    const { container, emitted, findByRole, getByTestId, getByLabelText } = render(MarkdownPreview, {
+      props: { content }
+    });
+    await waitRender();
+
+    const visualButton = container.querySelector('[data-mermaid-mode="visual"]');
+    expect(visualButton?.textContent).toContain("可视化编辑");
+    await fireEvent.click(visualButton as Element);
+    expect(await findByRole("dialog", { name: "Mermaid 可视化编辑" })).toBeTruthy();
+
+    await fireEvent.click(getByTestId("mock-select-a"));
+    await fireEvent.update(getByLabelText("节点名称"), "准备");
+    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }));
+
+    await vi.waitFor(() => expect(emitted().change).toBeTruthy());
+    const changes = emitted().change as Array<[string]>;
+    expect(changes).toHaveLength(1);
+    expect(changes[0]?.[0]).toContain('A["准备"]');
+    expect(changes[0]?.[0]).toContain("classDef important fill:red");
+    expect(changes[0]?.[0]).toContain("# 设计");
+    expect(changes[0]?.[0]).toContain("正文");
+  });
+
+  it("官方 parser 拒绝语法时显示原因且不修改 Markdown", async () => {
+    mermaidParse.mockRejectedValueOnce(new Error("Mermaid Syntax Error"));
+    const { container, emitted, findByText } = render(MarkdownPreview, {
+      props: { content: "```mermaid\nflowchart TD\nA -->> B\n```" }
+    });
+    await waitRender();
+
+    await fireEvent.click(container.querySelector('[data-mermaid-mode="visual"]') as Element);
+
+    expect(await findByText("无法进行可视化编辑")).toBeTruthy();
+    expect(await findByText(/Mermaid Syntax Error/)).toBeTruthy();
+    expect(emitted().change).toBeUndefined();
+  });
+
+  it("打开编辑器后 block 被外部刷新时拒绝覆盖新内容", async () => {
+    const original = "```mermaid\nflowchart TD\nA --> B\n```";
+    const refreshed = "```mermaid\nflowchart TD\nA --> B\nstyle A fill:red\n```";
+    const { container, emitted, findByRole, rerender, findByText } = render(MarkdownPreview, {
+      props: { content: original }
+    });
+    await waitRender();
+
+    await fireEvent.click(container.querySelector('[data-mermaid-mode="visual"]') as Element);
+    await findByRole("dialog", { name: "Mermaid 可视化编辑" });
+    await rerender({ content: refreshed });
+    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }));
+
+    expect(await findByText(/代码块已发生变化/)).toBeTruthy();
+    expect(emitted().change).toBeUndefined();
+  });
+
+  it("sequenceDiagram 可编辑有序消息并保留复杂语句", async () => {
+    const content = `# 时序
+
+\`\`\`mermaid
+sequenceDiagram
+actor U as 用户
+participant S as 服务
+U->>S: 请求
+Note over U,S: 保留说明
+\`\`\``;
+    const { container, emitted, findByRole, getByLabelText } = render(MarkdownPreview, {
+      props: { content }
+    });
+    await waitRender();
+
+    await fireEvent.click(container.querySelector('[data-mermaid-mode="visual"]') as Element);
+    await findByRole("dialog", { name: "Mermaid 可视化编辑" });
+    await fireEvent.update(getByLabelText("消息 1 标签"), "登录请求");
+    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }));
+
+    await vi.waitFor(() => expect(emitted().change).toBeTruthy());
+    const markdown = (emitted().change as Array<[string]>)[0]?.[0] ?? "";
+    expect(markdown).toContain("sequenceDiagram");
+    expect(markdown).toContain("U->>S: 登录请求");
+    expect(markdown).toContain("Note over U,S: 保留说明");
   });
 });

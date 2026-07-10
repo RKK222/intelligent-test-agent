@@ -32,6 +32,75 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
 });
 
+test("Markdown Mermaid Flowchart 和 Sequence 可视化编辑后复用保存链路", async ({ page }) => {
+  test.setTimeout(60_000);
+  const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
+  await mockBackendApi(page, {
+    fileWriteRequests,
+    fileContents: {
+      "docs/mermaid.md": `# 可视化设计
+
+\`\`\`mermaid
+flowchart TD
+A[开始] --> B[结束]
+classDef important fill:red
+\`\`\`
+
+\`\`\`mermaid
+sequenceDiagram
+actor U as 用户
+participant S as 服务
+U->>S: 请求
+Note over U,S: 保留说明
+\`\`\``
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    }
+  });
+
+  await gotoWorkbench(page);
+  await expect(page.getByText("MIMO测试智能体")).toBeVisible();
+  await expect(page.getByRole("button", { name: /tests/ })).toBeVisible();
+  await page.getByRole("button", { name: /docs/ }).click();
+  await page.getByRole("button", { name: /mermaid.md/ }).click();
+  await expect(page.locator(".monaco-editor")).toContainText("可视化设计", { timeout: 10_000 });
+  await page.getByTestId("footer-markdown-preview").click();
+
+  const visualButtons = page.getByRole("button", { name: "可视化编辑" });
+  await expect(visualButtons).toHaveCount(2);
+  await visualButtons.nth(0).click();
+  const dialog = page.getByRole("dialog", { name: "Mermaid 可视化编辑" });
+  await expect(dialog).toBeVisible();
+  await dialog.locator(".vue-flow__node").filter({ hasText: "开始" }).click();
+  await dialog.getByLabel("节点名称").fill("准备");
+  await dialog.getByRole("button", { name: "应用到 Markdown" }).click();
+
+  await expect(visualButtons).toHaveCount(2);
+  await visualButtons.nth(1).click();
+  await dialog.getByLabel("消息 1 标签").fill("登录请求");
+  await dialog.getByRole("button", { name: "应用到 Markdown" }).click();
+
+  await page.locator(".ta-workbench-footer-save").click();
+  await expect.poll(() => fileWriteRequests.length).toBe(1);
+  expect(fileWriteRequests[0]).toMatchObject({
+    workspaceId: "wrk_personal_default",
+    path: "docs/mermaid.md"
+  });
+  expect(fileWriteRequests[0]?.content).toContain('A["准备"]');
+  expect(fileWriteRequests[0]?.content).toContain("U->>S: 登录请求");
+  expect(fileWriteRequests[0]?.content).toContain("classDef important fill:red");
+  expect(fileWriteRequests[0]?.content).toContain("Note over U,S: 保留说明");
+});
+
 test("switching to an application without recent workspace clears the previous file tree", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   const defaultPersonalRequests: string[] = [];
@@ -2941,6 +3010,7 @@ async function mockBackendApi(
     questionReplies?: Array<Record<string, unknown>>;
     terminalTickets?: Array<Record<string, unknown>>;
     fileRequests?: Array<{ workspaceId: string; path: string }>;
+    fileWriteRequests?: Array<{ workspaceId: string; path: string; content: string }>;
     gitDiffRequests?: string[];
     workspaces?: Array<ReturnType<typeof workspace> & Record<string, unknown>>;
     workspaceRequests?: string[];
@@ -3020,6 +3090,9 @@ async function mockBackendApi(
   await page.exposeFunction("__taRecordWorkspaceFileRequest", (workspaceId: string, path: string) => {
     capture.fileRequests?.push({ workspaceId, path });
   });
+  await page.exposeFunction("__taRecordWorkspaceFileWrite", (workspaceId: string, path: string, content: string) => {
+    capture.fileWriteRequests?.push({ workspaceId, path, content });
+  });
   if (!capture.skipInitialAuthToken) {
     await page.addInitScript(() => {
       sessionStorage.setItem("test-agent.auth.token", "test-token");
@@ -3029,8 +3102,15 @@ async function mockBackendApi(
     const recordFileRequest = (workspaceId: string, path: string) => {
       const win = window as Window & {
         __taRecordWorkspaceFileRequest?: (workspaceId: string, path: string) => void;
+        __taRecordWorkspaceFileWrite?: (workspaceId: string, path: string, content: string) => void;
       };
       win.__taRecordWorkspaceFileRequest?.(workspaceId, path);
+    };
+    const recordFileWrite = (workspaceId: string, path: string, content: string) => {
+      const win = window as Window & {
+        __taRecordWorkspaceFileWrite?: (workspaceId: string, path: string, content: string) => void;
+      };
+      win.__taRecordWorkspaceFileWrite?.(workspaceId, path, content);
     };
     const entries = (path: string, workspaceId = "wrk_1234567890abcdef") => {
       if (workspaceId === "wrk_project_a") {
@@ -3038,12 +3118,25 @@ async function mockBackendApi(
           ? [{ path: "src/main.ts", name: "main.ts", directory: false, size: 90, lastModifiedAt: "2026-06-19T00:00:00Z" }]
           : [{ path: "src", name: "src", directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" }];
       }
-      return path === "tests"
-        ? [{ path: "tests/checkout.spec.ts", name: "checkout.spec.ts", directory: false, size: 120, lastModifiedAt: "2026-06-19T00:00:00Z" }]
-        : [
-            { path: "tests", name: "tests", directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" },
-            { path: "package.json", name: "package.json", directory: false, size: 80, lastModifiedAt: "2026-06-19T00:00:00Z" }
-          ];
+      if (path === "tests") {
+        return [{ path: "tests/checkout.spec.ts", name: "checkout.spec.ts", directory: false, size: 120, lastModifiedAt: "2026-06-19T00:00:00Z" }];
+      }
+      const configuredFiles = Object.keys(fileContents as Record<string, string>);
+      if (path) {
+        const prefix = `${path}/`;
+        const directFiles = configuredFiles
+          .filter((filePath) => filePath.startsWith(prefix) && !filePath.slice(prefix.length).includes("/"))
+          .map((filePath) => ({ path: filePath, name: filePath.slice(prefix.length), directory: false, size: (fileContents as Record<string, string>)[filePath]?.length ?? 0, lastModifiedAt: "2026-06-19T00:00:00Z" }));
+        if (directFiles.length) return directFiles;
+      }
+      const configuredDirectories = Array.from(new Set(configuredFiles.filter((filePath) => filePath.includes("/")).map((filePath) => filePath.split("/")[0] ?? "")))
+        .filter(Boolean)
+        .map((name) => ({ path: name, name, directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" }));
+      return [
+        { path: "tests", name: "tests", directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" },
+        ...configuredDirectories.filter((entry) => entry.name !== "tests"),
+        { path: "package.json", name: "package.json", directory: false, size: 80, lastModifiedAt: "2026-06-19T00:00:00Z" }
+      ];
     };
     const directories = (path?: string) => {
       if (path === "/Users/huang/workspace/project-a") {
@@ -3093,6 +3186,11 @@ async function mockBackendApi(
             size: 80,
             readonly: false
           };
+        } else if (request.op === "workspace.write") {
+          const path = params.path ?? "";
+          const content = params.content ?? "";
+          recordFileWrite(params.workspaceId ?? "", path, content);
+          (fileContents as Record<string, string>)[path] = content;
         } else if (request.op === "workspace.status") {
           data = { path: params.path ?? "", exists: true, directory: false, size: 80, lastModifiedAt: "2026-06-19T00:00:00Z" };
         } else if (request.op === "directory.list") {
@@ -3414,6 +3512,14 @@ async function mockBackendApi(
         await capture.workspaceRequestGates?.[workspaceId];
       }
       await route.fulfill(json(workspaceItems.find((item) => item.workspaceId === workspaceId) ?? workspace()));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/file/content") {
+      const path = url.searchParams.get("path") ?? "";
+      await route.fulfill(json({
+        type: "file",
+        content: capture.fileContents?.[path] ?? ""
+      }));
       return;
     }
     if (method === "GET" && url.pathname.endsWith("/files")) {

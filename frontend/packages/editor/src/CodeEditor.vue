@@ -474,6 +474,7 @@ defineExpose({
         class="min-h-0 flex-1"
         @scroll="onPreviewScroll"
         @ready="syncFromEditor"
+        @change="emit('change', $event)"
       />
     </div>
   </div>

@@ -14,7 +14,8 @@ let mermaidLoadPromise: Promise<void> | null = null;
 </script>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
+import type { MermaidEditableDiagram } from "./mermaid/diagram";
 // github-markdown-css 提供 .markdown-body 基础排版样式，侧载一次即可
 import "github-markdown-css/github-markdown.css";
 
@@ -24,7 +25,20 @@ const emit = defineEmits<{
   scroll: [line: number];
   // 首次渲染完成，供父级做一次初始对齐
   ready: [];
+  // 可视化编辑应用后上报完整 Markdown，继续复用 CodeEditor 的 change/save 链路
+  change: [content: string];
 }>();
+
+const MermaidEditorDialog = defineAsyncComponent(
+  () => import("./mermaid/visual-editor/MermaidEditorDialog.vue")
+);
+type VisualEditorState = {
+  blockIndex: number;
+  originalSource: string;
+  model?: MermaidEditableDiagram;
+  error?: string;
+};
+const visualEditor = ref<VisualEditorState>();
 
 // 渲染后的 HTML（已消毒），用 shallowRef 避免对大段 HTML 做深度代理
 const html = ref("");
@@ -75,9 +89,14 @@ async function ensureLibs(needMermaid = false) {
       // 给顶级块打上源码行号（1 起），用于滚动联动与左侧序号对齐；
       // 只取 level===0，避免列表项/引用内段落数字堆叠
       md.core.ruler.push("source_line", (state) => {
+        let mermaidIndex = 0;
         for (const tok of state.tokens) {
           if (tok.level === 0 && tok.map) {
             tok.attrSet("data-source-line", String(tok.map[0] + 1));
+          }
+          if (tok.type === "fence" && tok.info.trim() === "mermaid") {
+            tok.meta = { ...(tok.meta ?? {}), mermaidIndex };
+            mermaidIndex += 1;
           }
         }
       });
@@ -89,10 +108,12 @@ async function ensureLibs(needMermaid = false) {
         if (lang === "mermaid") {
           const id = `ta-mermaid-${Math.random().toString(36).substring(2, 9)}`;
           const escapedCode = md.utils.escapeHtml(token.content);
-          return `<div${attrs} class="mermaid-block is-script" id="${id}" data-content="${encodeURIComponent(token.content)}">
+          const mermaidIndex = typeof token.meta?.mermaidIndex === "number" ? token.meta.mermaidIndex : 0;
+          return `<div${attrs} class="mermaid-block is-script" id="${id}" data-content="${encodeURIComponent(token.content)}" data-block-index="${mermaidIndex}">
             <div class="ta-mermaid-header">
               <button type="button" class="ta-mermaid-mode-btn is-active" data-mermaid-mode="script" data-block-id="${id}">脚本</button>
               <button type="button" class="ta-mermaid-mode-btn ta-mermaid-preview-btn" data-mermaid-mode="chart" data-block-id="${id}">图表</button>
+              <button type="button" class="ta-mermaid-mode-btn ta-mermaid-visual-btn" data-mermaid-mode="visual" data-block-id="${id}">可视化编辑</button>
             </div>
             <pre class="hljs ta-mermaid-script"><code class="language-mermaid">${escapedCode}</code></pre>
             <div class="ta-mermaid-chart" hidden></div>
@@ -132,6 +153,11 @@ async function handleMdPreviewClick(event: MouseEvent) {
   const mode = btn.getAttribute("data-mermaid-mode") ?? "script";
   const scriptEl = block.querySelector<HTMLElement>(".ta-mermaid-script");
   const chartEl = block.querySelector<HTMLElement>(".ta-mermaid-chart");
+
+  if (mode === "visual") {
+    await openVisualEditor(block, btn);
+    return;
+  }
 
   block.querySelectorAll<HTMLButtonElement>(".ta-mermaid-mode-btn").forEach((button) => {
     button.classList.toggle("is-active", button === btn);
@@ -185,6 +211,58 @@ async function handleMdPreviewClick(event: MouseEvent) {
   } finally {
     btn.disabled = false;
     btn.textContent = originalText;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** 点击时才加载 Mermaid parser、领域 parser 和 Vue Flow 对话框，避免影响 Markdown 首屏。 */
+async function openVisualEditor(block: HTMLElement, button: HTMLButtonElement) {
+  const originalSource = decodeURIComponent(block.getAttribute("data-content") ?? "");
+  const blockIndex = Number(block.getAttribute("data-block-index") ?? "0");
+  const originalText = button.textContent ?? "可视化编辑";
+  button.disabled = true;
+  button.textContent = "准备中";
+  try {
+    await ensureLibs(true);
+    await mermaidInstance.parse(originalSource);
+    const { parseMermaidDiagram } = await import("./mermaid/diagram");
+    visualEditor.value = {
+      blockIndex,
+      originalSource,
+      model: parseMermaidDiagram(originalSource)
+    };
+  } catch (error) {
+    visualEditor.value = {
+      blockIndex,
+      originalSource,
+      error: errorMessage(error)
+    };
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+/** 序列化和官方 parser 二次校验都成功后，才把完整 Markdown 交回现有 change 链路。 */
+async function applyVisualEditor(diagram: MermaidEditableDiagram) {
+  const state = visualEditor.value;
+  if (!state) return;
+  try {
+    const [{ serializeMermaidDiagram }, { replaceMermaidBlock }] = await Promise.all([
+      import("./mermaid/diagram"),
+      import("./mermaid/markdown-blocks")
+    ]);
+    const source = serializeMermaidDiagram(diagram);
+    await ensureLibs(true);
+    await mermaidInstance.parse(source);
+    const markdown = replaceMermaidBlock(props.content, state.blockIndex, source, state.originalSource);
+    emit("change", markdown);
+    visualEditor.value = undefined;
+  } catch (error) {
+    visualEditor.value = { ...state, model: diagram, error: errorMessage(error) };
   }
 }
 
@@ -293,6 +371,13 @@ defineExpose({ scrollToSourceLine });
     <div v-else-if="!content.trim()" class="text-[12px] text-[var(--ta-muted)]">无内容</div>
     <!-- 经 DOMPurify 消毒后的 HTML，可安全注入；.markdown-body 提供基础排版 -->
     <div v-else v-html="html" class="markdown-body min-w-0" />
+    <MermaidEditorDialog
+      v-if="visualEditor"
+      :model="visualEditor.model"
+      :error="visualEditor.error"
+      @apply="applyVisualEditor"
+      @cancel="visualEditor = undefined"
+    />
   </div>
 </template>
 
