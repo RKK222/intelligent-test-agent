@@ -41,6 +41,16 @@ Token 校验流程：
 9. Redis 不可用时签发或读取上下文返回 `RUNTIME_STATE_UNAVAILABLE`，禁止回退 PostgreSQL、JVM 内存或接受客户端传入的工作区路径/进程快照。
 10. start-run 路由层缓存请求体的硬上限为 32 MiB，超限必须在 assignment 或 Controller 查询前返回统一 `VALIDATION_ERROR`；请求 JSON 已出现 `contextToken` 但值为空、非字符串或无效时必须 fail-closed 返回 `CONVERSATION_CONTEXT_EXPIRED`，不得回退无 token 兼容路径。
 
+## Run 运行数据面安全
+
+1. `REDIS_SUMMARY` 的 Redis 详情可能包含完整 prompt、消息/part、工具输入输出、附件内容和运行事件，因此 Redis 必须视为敏感业务数据存储：只允许受控内网访问，生产必须启用 TLS、独立最小权限 ACL 用户和静态/磁盘层加密能力；不得使用无密码公网 Redis、共享 `default` 管理用户或把 Redis 端口暴露给浏览器。
+2. 单 Run 的 manifest、input、durable/runtime 双 Stream、snapshot Hash + order ZSET、动态 key registry、scope、dedup 和 pending key 必须使用同一个 `{runId}` hash tag，active 用户/Session/服务器索引只能保存 Run ID 与过期时间。读取 active 索引后必须回读 manifest 校验认证用户、Session、服务器和非终态状态，禁止仅凭可猜测的索引成员跨用户返回运行态。
+3. Run durable seq、全事件 runtimeVersion 分配，双 Stream 追加，Hash/ZSET snapshot 投影，manifest 容量计数和动态 key TTL 刷新必须由同 slot Lua 原子执行；durable Stream ID 固定为 `${seq}-0`，runtime Stream ID 固定为 `${runtimeVersion}-0`。脚本、JSON、连接或 manifest 异常统一返回安全的 `RUNTIME_STATE_UNAVAILABLE` / `RUN_DETAILS_EXPIRED`，错误详情和日志不得包含 Redis value、prompt、消息、工具内容、附件或内部连接凭据。
+4. 生产 Redis 必须使用 `noeviction` 和 AOF `everysec`，并对容量、AOF、复制、命令延迟、拒绝连接及 `evicted_keys` 告警。单 Run durable/runtime 事件或 snapshot 投影项超过 20,000，或 input + scope + 双 Stream + snapshot 详情超过 32 MiB 时，只允许应用 Lua 显式删除旧 Stream、规范化过大 payload、优先移除低价值投影、保留当前关键物化状态并生成 `run.snapshot.reset`；禁止依赖 LRU/LFU/随机淘汰、Stream 静默裁剪或跨租户 key 清理。
+5. `run.snapshot.reset` 只允许携带当前 Run 的物化状态和安全元数据，不设置 SSE `id`，不作为鉴权或续传凭据。Redis 新模式 SSE 首帧和容量换代后的 reset 都必须经过同一用户/Run 归属校验；前端只清空当前订阅 Run 的 reducer，再按顺序应用 snapshot；未知/空 snapshot 必须安全兼容，不能借 reset 读取其它 Run 或覆盖当前认证/Workspace 上下文。
+6. Redis 运行态不可用时新模式必须 fail-closed，禁止把完整输入输出、reasoning、工具内容或原始事件降级写入 PostgreSQL/JVM 内存，也禁止切换活动 Run 的 storageMode。legacy/旧 Run 仅按其创建时模式使用既有数据库恢复，不得通过请求参数伪造模式。
+7. 当前生产 Run 创建仍固定使用 `LEGACY_FULL`，Redis summary 开关默认关闭、rollout 为 0；在无原文 Run 锚点和终态摘要链路发布前不得开启生产流量。该边界不影响对 Redis 数据面、SSE reset 和真实 Redis/Lua/Streams 集成测试的验证。
+
 ## 限流
 
 1. 登录、创建 session、发送 message、代理 opencode 请求等高风险接口必须考虑限流。

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseRunEvent, subscribeRunEvents, subscribeSessionRuntimeState, type EventSourceLike } from "../src";
+import {
+  KNOWN_RUN_EVENT_TYPES,
+  parseRunEvent,
+  subscribeRunEvents,
+  subscribeSessionRuntimeState,
+  type EventSourceLike
+} from "../src";
 
 class FakeEventSource implements EventSourceLike {
   onopen: ((event: Event) => void) | null = null;
@@ -151,6 +157,34 @@ describe("event-stream-client", () => {
 
     expect(source.listeners.get("session.updated")).toHaveLength(1);
     expect(received).toEqual(["session.updated"]);
+  });
+
+  it("delivers transient snapshot reset without replacing the durable SSE cursor", () => {
+    const source = new FakeEventSource();
+    const received: string[] = [];
+    const rawLastEventIds: Array<string | undefined> = [];
+
+    subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_1",
+      lastEventId: "7",
+      eventSourceFactory: () => source,
+      onRawMessage: (message) => rawLastEventIds.push(message.lastEventId),
+      onEvent: (event) => received.push(event.type)
+    });
+
+    // transient reset 不带自己的 SSE id，浏览器暴露的 lastEventId 仍是之前的 durable 游标。
+    source.emit("run.snapshot.reset", {
+      eventId: "evt_snapshot_reset_run_1_2",
+      runId: "run_1",
+      seq: 0,
+      type: "run.snapshot.reset",
+      payload: { snapshot: { barrierSeq: 7, events: [] } }
+    }, "7");
+
+    expect(KNOWN_RUN_EVENT_TYPES).toContain("run.snapshot.reset");
+    expect(received).toEqual(["run.snapshot.reset"]);
+    expect(rawLastEventIds).toEqual(["7"]);
   });
 
   it("ignores queued messages after close and events from other runs", () => {

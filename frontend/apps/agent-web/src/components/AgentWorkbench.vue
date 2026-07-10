@@ -114,6 +114,7 @@ import {
   retryCountdownSeconds,
   retryExpirationDecision,
   runEventMatchesRun,
+  runEventProjection,
   runtimeResources,
   runtimeStatus,
   platformSessionTitleFromSynchronizedEventPayload,
@@ -3454,7 +3455,32 @@ function handleRetryRun() {
 function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
   logs.value = [...logs.value.slice(-200), `[${event.seq}] ${event.type}`];
   dispatchChat({ type: "event", event });
-  notifyOnAttention(event, selectedWorkspace.value, session.value);
+  const projection = runEventProjection(event);
+  if (projection.reset) {
+    // reducer 已经原子完成“清空 + 快照重放”；Workbench 还需清掉独立维护的 Diff/工具跟随状态，
+    // 再按相同顺序应用快照事件的页面副作用。恢复快照不重复触发桌面通知。
+    diffFiles.value = [];
+    diffSource.value = "run";
+    liveFollowedParts.value = new Set();
+    workbench.setSelectedDiffPath(undefined);
+    for (const snapshotEvent of projection.events) {
+      logs.value = [...logs.value.slice(-200), `[snapshot:${snapshotEvent.seq}] ${snapshotEvent.type}`];
+      applyRunEventWorkbenchProjection(snapshotEvent, false, subscribedSessionId);
+    }
+    return;
+  }
+  applyRunEventWorkbenchProjection(event, true, subscribedSessionId);
+}
+
+/** 将单条业务事件投影到 reducer 之外的 Workbench 状态。 */
+function applyRunEventWorkbenchProjection(
+  event: RunEvent,
+  allowNotification: boolean,
+  subscribedSessionId?: string
+) {
+  if (allowNotification) {
+    notifyOnAttention(event, selectedWorkspace.value, session.value);
+  }
   if (event.type === "session.updated") {
     const matchesCurrentSession = sessionTitleEventMatchesCurrentSession(subscribedSessionId, session.value?.sessionId);
     // 后端可能把 pending 标记与终态事件分开推送；只要仍是当前 root 会话，就保留同一条 SSE。

@@ -15,6 +15,7 @@ public enum RunEventType {
     RUN_SUCCEEDED("run.succeeded"),
     RUN_FAILED("run.failed"),
     RUN_CANCELLED("run.cancelled"),
+    RUN_SNAPSHOT_RESET("run.snapshot.reset"),
     ASSISTANT_MESSAGE_DELTA("assistant.message.delta"),
     MESSAGE_UPDATED("message.updated"),
     MESSAGE_REMOVED("message.removed"),

@@ -31,6 +31,9 @@ import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.ConversationRunContext;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
+import com.icbc.testagent.domain.run.RunStorageMode;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.Session;
@@ -150,6 +153,7 @@ public class RunApplicationService {
     private final RunActivityStateStore runActivityStateStore;
     private final RunSessionTitleWatchService sessionTitleWatchService;
     private final ConversationRunContextResolver conversationContextResolver;
+    private final RunRuntimeStore runRuntimeStore;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -234,6 +238,7 @@ public class RunApplicationService {
                 runSessionScopeRuntimeCache,
                 runActivityStateStore,
                 null,
+                null,
                 null);
     }
 
@@ -280,81 +285,11 @@ public class RunApplicationService {
                 runSessionScopeRuntimeCache,
                 runActivityStateStore,
                 conversationContextResolver,
+                null,
                 null);
     }
 
-    /**
-     * 生产构造器同时注入会话上下文策略与原生标题监听服务。
-     */
-    @Autowired
-    public RunApplicationService(
-            WorkspaceRepository workspaceRepository,
-            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
-            RunRepository runRepository,
-            SessionMessageRepository sessionMessageRepository,
-            ExecutionNodeRepository executionNodeRepository,
-            RoutingDecisionRepository routingDecisionRepository,
-            RunEventAppender runEventAppender,
-            AgentRuntimeRegistry agentRuntimeRegistry,
-            AgentSessionBindingRepository agentSessionBindingRepository,
-            RunEventLiveBus runEventLiveBus,
-            RunEventPersistencePolicy runEventPersistencePolicy,
-            ModelCatalogApplicationService modelCatalogService,
-            UserOpencodeProcessAssignmentService userProcessAssignmentService,
-            ManagedWorkspacePathResolver workspacePathResolver,
-            RunSessionMessageSnapshotService snapshotService,
-            RunSessionScopeRepository runSessionScopeRepository,
-            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
-            RunActivityStateStore runActivityStateStore,
-            ConversationRunContextResolver conversationContextResolver,
-            RunSessionTitleWatchService sessionTitleWatchService) {
-        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
-        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
-        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.routingDecisionRepository = Objects.requireNonNull(routingDecisionRepository, "routingDecisionRepository must not be null");
-        this.runEventAppender = Objects.requireNonNull(runEventAppender, "runEventAppender must not be null");
-        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
-        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
-        this.runEventLiveBus = Objects.requireNonNull(runEventLiveBus, "runEventLiveBus must not be null");
-        this.runEventPersistencePolicy = Objects.requireNonNull(runEventPersistencePolicy, "runEventPersistencePolicy must not be null");
-        this.modelCatalogService = modelCatalogService;
-        this.userProcessAssignmentService = userProcessAssignmentService;
-        this.workspacePathResolver = Objects.requireNonNull(workspacePathResolver, "workspacePathResolver must not be null");
-        this.runtimeTargetResolver = new AgentRuntimeTargetResolver(
-                workspaceRepository,
-                sessionRepository,
-                executionNodeRepository,
-                agentRuntimeRegistry,
-                agentSessionBindingRepository,
-                userProcessAssignmentService,
-                this.workspacePathResolver);
-        this.snapshotService = snapshotService == null
-                ? new RunSessionMessageSnapshotService(
-                        runRepository,
-                        sessionRepository,
-                        sessionMessageRepository,
-                        executionNodeRepository,
-                        agentRuntimeRegistry,
-                        agentSessionBindingRepository,
-                        new ObjectMapper())
-                : snapshotService;
-        this.runSessionScopeRepository = runSessionScopeRepository;
-        this.runSessionScopeRuntimeCache = runSessionScopeRuntimeCache == null
-                ? RunSessionScopeRuntimeCache.disabled()
-                : runSessionScopeRuntimeCache;
-        this.runSessionScopeRouter = new RunSessionScopeRouter(runSessionScopeRepository, this.runSessionScopeRuntimeCache);
-        this.runActivityStateStore = runActivityStateStore == null
-                ? new RunActivityStateStore(null)
-                : runActivityStateStore;
-        this.conversationContextResolver = conversationContextResolver;
-        this.sessionTitleWatchService = sessionTitleWatchService;
-    }
-
-    /**
-     * 兼容只注入原生标题监听服务的调用方。
-     */
+    /** 兼容只注入原生标题监听服务的调用方。 */
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
             com.icbc.testagent.domain.session.SessionRepository sessionRepository,
@@ -395,7 +330,173 @@ public class RunApplicationService {
                 runSessionScopeRuntimeCache,
                 runActivityStateStore,
                 null,
-                sessionTitleWatchService);
+                sessionTitleWatchService,
+                null);
+    }
+
+    /** 兼容同时注入会话上下文策略与原生标题监听、但尚未接入 Redis Run 数据面的调用方。 */
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            ConversationRunContextResolver conversationContextResolver,
+            RunSessionTitleWatchService sessionTitleWatchService) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runEventLiveBus,
+                runEventPersistencePolicy,
+                modelCatalogService,
+                userProcessAssignmentService,
+                workspacePathResolver,
+                snapshotService,
+                runSessionScopeRepository,
+                runSessionScopeRuntimeCache,
+                runActivityStateStore,
+                conversationContextResolver,
+                sessionTitleWatchService,
+                null);
+    }
+
+    /** Spring 生产构造器同时接入会话上下文、原生标题监听与 Redis Run 数据面。 */
+    @Autowired
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            ConversationRunContextResolver conversationContextResolver,
+            RunSessionTitleWatchService sessionTitleWatchService,
+            RunRuntimeStore runRuntimeStore) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
+        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
+        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
+        this.routingDecisionRepository = Objects.requireNonNull(routingDecisionRepository, "routingDecisionRepository must not be null");
+        this.runEventAppender = Objects.requireNonNull(runEventAppender, "runEventAppender must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
+        this.runEventLiveBus = Objects.requireNonNull(runEventLiveBus, "runEventLiveBus must not be null");
+        this.runEventPersistencePolicy = Objects.requireNonNull(runEventPersistencePolicy, "runEventPersistencePolicy must not be null");
+        this.modelCatalogService = modelCatalogService;
+        this.userProcessAssignmentService = userProcessAssignmentService;
+        this.workspacePathResolver = Objects.requireNonNull(workspacePathResolver, "workspacePathResolver must not be null");
+        this.runtimeTargetResolver = new AgentRuntimeTargetResolver(
+                workspaceRepository,
+                sessionRepository,
+                executionNodeRepository,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                userProcessAssignmentService,
+                this.workspacePathResolver);
+        this.snapshotService = snapshotService == null
+                ? new RunSessionMessageSnapshotService(
+                        runRepository,
+                        sessionRepository,
+                        sessionMessageRepository,
+                        executionNodeRepository,
+                        agentRuntimeRegistry,
+                        agentSessionBindingRepository,
+                        new ObjectMapper())
+                : snapshotService;
+        this.runSessionScopeRepository = runSessionScopeRepository;
+        this.runSessionScopeRuntimeCache = runSessionScopeRuntimeCache == null
+                ? RunSessionScopeRuntimeCache.disabled()
+                : runSessionScopeRuntimeCache;
+        this.runRuntimeStore = runRuntimeStore;
+        this.runSessionScopeRouter = runRuntimeStore == null
+                ? new RunSessionScopeRouter(runSessionScopeRepository, this.runSessionScopeRuntimeCache)
+                : new RunSessionScopeRouter(runSessionScopeRepository, this.runSessionScopeRuntimeCache, runRuntimeStore);
+        this.runActivityStateStore = runActivityStateStore == null
+                ? new RunActivityStateStore(null)
+                : runActivityStateStore;
+        this.conversationContextResolver = conversationContextResolver;
+        this.sessionTitleWatchService = sessionTitleWatchService;
+    }
+
+    /**
+     * 兼容只注入原生标题监听服务的调用方。
+     */
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            ConversationRunContextResolver conversationContextResolver,
+            RunRuntimeStore runRuntimeStore) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runEventLiveBus,
+                runEventPersistencePolicy,
+                modelCatalogService,
+                userProcessAssignmentService,
+                workspacePathResolver,
+                snapshotService,
+                runSessionScopeRepository,
+                runSessionScopeRuntimeCache,
+                runActivityStateStore,
+                conversationContextResolver,
+                null,
+                Objects.requireNonNull(runRuntimeStore, "runRuntimeStore must not be null"));
     }
 
     /**
@@ -577,9 +678,12 @@ public class RunApplicationService {
             pending = pending.withSource(ConversationSourceType.MANUAL, null, userId);
         }
         pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
+        // Phase 2 先完成 Redis 数据面与 shadow 验证；Phase 3 创建无原文锚点后才允许选择 REDIS_SUMMARY。
+        RunStorageMode storageMode = RunStorageMode.LEGACY_FULL;
         runRepository.save(pending);
         saveUserMessage(session.sessionId(), pending.runId(), prompt, input.parts(), userId, traceId, now);
-        append(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
+        append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
+                Map.of("status", RunStatus.PENDING.name()), storageMode);
 
         try {
             AgentRoutingTarget target = userProcessAssignment == null
@@ -614,8 +718,9 @@ public class RunApplicationService {
                     workspace,
                     binding.remoteSessionId());
             Run running = runRepository.save(pending.start(Instant.now()));
-            append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
-            recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId);
+            append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(),
+                    Map.of("status", RunStatus.RUNNING.name()), storageMode);
+            recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId, storageMode);
             LOGGER.info("Run started, runId={}, nodeId={}, remoteSessionId={}, traceId={}",
                     running.runId().value(),
                     target.node().executionNodeId().value(),
@@ -629,6 +734,7 @@ public class RunApplicationService {
                     binding.remoteSessionId(),
                     target.node(),
                     workspace,
+                    storageMode,
                     traceId,
                     titleWatchToken);
             AgentStartRunCommand command = new AgentStartRunCommand(
@@ -659,8 +765,10 @@ public class RunApplicationService {
                     exception.errorCode().name(),
                     traceId);
             Run failed = runRepository.save(pending.fail(Instant.now()));
-            append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(), Map.of("errorCode", exception.errorCode().name()));
+            append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(),
+                    Map.of("errorCode", exception.errorCode().name()), storageMode);
             snapshotService.persistRunSnapshot(resolvedAgentId, failed, traceId);
+            runSessionScopeRouter.finishRun(failed.runId());
             throw exception;
         }
     }
@@ -680,7 +788,12 @@ public class RunApplicationService {
         return conversationContextResolver.resolve(userId, agentId, input, traceId).orElse(null);
     }
 
-    private void recordRootSessionScope(String agentId, Run run, String remoteSessionId, String traceId) {
+    private void recordRootSessionScope(
+            String agentId,
+            Run run,
+            String remoteSessionId,
+            String traceId,
+            RunStorageMode storageMode) {
         Instant now = Instant.now();
         RunSessionScope scope = new RunSessionScope(
                 run.runId(),
@@ -704,6 +817,13 @@ public class RunApplicationService {
                 now,
                 now,
                 Map.of("agentId", agentId));
+        if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+            if (runRuntimeStore == null) {
+                throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis 运行态未配置");
+            }
+            runRuntimeStore.saveScope(scope, rootSession);
+            return;
+        }
         runSessionScopeRuntimeCache.recordScopeSession(scope, rootSession);
         if (runSessionScopeRepository == null) {
             return;
@@ -1104,10 +1224,19 @@ public class RunApplicationService {
             String traceId) {
         runRepository.findLatestActiveBySessionId(sessionId).ifPresent(current -> {
             Instant occurredAt = Instant.now();
+            RunStorageMode storageMode = runRuntimeStore == null
+                    ? RunStorageMode.LEGACY_FULL
+                    : runRuntimeStore.storageMode(current.runId());
             Run succeeded = current.succeed(occurredAt);
             saveRunIfStatus(succeeded, current.status(), traceId, "interaction_reply_reconcile")
                     .ifPresent(saved -> {
-                        publishRecoveredFinalMessage(saved, remoteSessionId, finalMessage, traceId, occurredAt);
+                        publishRecoveredFinalMessage(
+                                saved,
+                                remoteSessionId,
+                                finalMessage,
+                                traceId,
+                                occurredAt,
+                                storageMode);
                         append(
                                 saved.runId(),
                                 RunEventType.RUN_SUCCEEDED,
@@ -1116,7 +1245,8 @@ public class RunApplicationService {
                                 Map.of(
                                         "status", RunStatus.SUCCEEDED.name(),
                                         "source", "interaction_reply_reconcile",
-                                        "sessionID", remoteSessionId));
+                                        "sessionID", remoteSessionId),
+                                storageMode);
                         snapshotService.persistRunSnapshot(agentId, saved, traceId);
                     });
         });
@@ -1128,7 +1258,8 @@ public class RunApplicationService {
             String remoteSessionId,
             AgentSessionMessage finalMessage,
             String traceId,
-            Instant occurredAt) {
+            Instant occurredAt,
+            RunStorageMode storageMode) {
         LinkedHashMap<String, Object> message = new LinkedHashMap<>(finalMessage.message());
         String messageId = textValue(message.get("id")).orElse(null);
         if (messageId != null) {
@@ -1141,8 +1272,8 @@ public class RunApplicationService {
                 "isChildSession", false);
         LinkedHashMap<String, Object> messagePayload = new LinkedHashMap<>(scope);
         messagePayload.put("message", Map.copyOf(message));
-        runEventLiveBus.publishTransient(new RunEventDraft(
-                run.runId(), RunEventType.MESSAGE_UPDATED, traceId, occurredAt, Map.copyOf(messagePayload)));
+        publishTransient(new RunEventDraft(
+                run.runId(), RunEventType.MESSAGE_UPDATED, traceId, occurredAt, Map.copyOf(messagePayload)), storageMode);
         for (Map<String, Object> originalPart : finalMessage.parts()) {
             LinkedHashMap<String, Object> part = new LinkedHashMap<>(originalPart);
             if (messageId != null) {
@@ -1159,9 +1290,48 @@ public class RunApplicationService {
                 partPayload.put("messageID", messageId);
                 partPayload.put("messageId", messageId);
             }
-            runEventLiveBus.publishTransient(new RunEventDraft(
-                    run.runId(), RunEventType.MESSAGE_PART_UPDATED, traceId, occurredAt, Map.copyOf(partPayload)));
+            publishTransient(new RunEventDraft(
+                    run.runId(), RunEventType.MESSAGE_PART_UPDATED, traceId, occurredAt, Map.copyOf(partPayload)), storageMode);
         }
+    }
+
+    private void publishTransient(RunEventDraft draft, RunStorageMode storageMode) {
+        RunEventDraft sanitized = runEventPersistencePolicy.sanitizeForPersistence(draft);
+        if (!runEventAppender.publishTransient(sanitized, storageMode)) {
+            runEventLiveBus.publishTransient(sanitized);
+        }
+    }
+
+    /**
+     * 新客户端 active-run fallback 优先读取 Redis session 索引；用户进入新模式后即使当前为空也不回查数据库。
+     */
+    public Optional<Run> findActiveRun(UserId userId, SessionId sessionId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        if (runRuntimeStore != null && runRuntimeStore.hasUserRuntimeState(userId)) {
+            return runRuntimeStore.findActiveBySession(sessionId)
+                    .filter(manifest -> userId.equals(manifest.userId()))
+                    .map(this::runtimeRun);
+        }
+        return findActiveRun(sessionId);
+    }
+
+    private Run runtimeRun(RunRuntimeManifest manifest) {
+        return new Run(
+                manifest.runId(),
+                manifest.sessionId(),
+                manifest.workspaceId(),
+                manifest.status(),
+                manifest.createdAt(),
+                manifest.updatedAt(),
+                "trace_runtime_redis",
+                com.icbc.testagent.domain.run.TokenUsage.empty(),
+                null,
+                ConversationSourceType.MANUAL,
+                null,
+                manifest.userId(),
+                manifest.agentId(),
+                null);
     }
 
     /**
@@ -1211,6 +1381,7 @@ public class RunApplicationService {
                 : runRepository.save(cancelling.cancel(Instant.now()));
         append(runId, RunEventType.RUN_CANCELLED, traceId, Instant.now(), Map.of("status", cancelled.status().name()));
         snapshotService.persistRunSnapshot(resolvedAgentId, cancelled, traceId);
+        runSessionScopeRouter.finishRun(runId);
         LOGGER.info("Run cancelled, runId={}, traceId={}", runId.value(), traceId);
         return cancelled;
     }
@@ -1386,6 +1557,18 @@ public class RunApplicationService {
         runEventAppender.append(draft);
     }
 
+    private void append(
+            RunId runId,
+            RunEventType type,
+            String traceId,
+            Instant occurredAt,
+            Map<String, Object> payload,
+            RunStorageMode storageMode) {
+        RunEventDraft draft = new RunEventDraft(runId, type, traceId, occurredAt, payload);
+        recordRuntimeActivity(draft);
+        runEventAppender.append(draft, storageMode);
+    }
+
     /**
      * 订阅 agent 事件流，事件处理串行 offload，避免阻塞 Netty 线程。
      */
@@ -1396,6 +1579,7 @@ public class RunApplicationService {
             String remoteSessionId,
             ExecutionNode node,
             Workspace workspace,
+            RunStorageMode storageMode,
             String traceId,
             RunSessionTitleWatchRegistry.TitleWatchToken titleWatchToken) {
         RunEventScopeContext rootScope = RunEventScopeContext.root(run.runId(), remoteSessionId);
@@ -1428,7 +1612,7 @@ public class RunApplicationService {
                 .filter(draft -> acceptsTitleWatchEvent(titleWatchToken, draft))
                 // title agent 完成消息不是平台对话正文；在 scope router 前读取最终 session 标题并转换为 root session.updated。
                 .concatMap(draft -> titleCompletionEvent(titleWatchToken, draft))
-                .concatMap(draft -> Mono.fromCallable(() -> runSessionScopeRouter.route(rootScope, draft))
+                .concatMap(draft -> Mono.fromCallable(() -> runSessionScopeRouter.route(rootScope, draft, storageMode))
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(Flux::fromIterable)
                         .onErrorResume(error -> {
@@ -1438,12 +1622,15 @@ public class RunApplicationService {
                                     draft.type().wireName(),
                                     traceId,
                                     error);
-                            return Flux.empty();
+                            return storageMode == RunStorageMode.REDIS_SUMMARY
+                                    ? Flux.error(error)
+                                    : Flux.empty();
                         }))
                 // 成功 root Run 会转入 TITLE_WAIT，直至原生标题或主动取消；失败仍按既有规则立即结束订阅。
                 .takeUntil(draft -> shouldCloseAgentEventStream(titleWatchToken, draft))
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
-                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(agentId, run, workspace, draft))
+                .concatMap(draft -> Mono.fromRunnable(
+                                () -> appendStreamEvent(agentId, run, workspace, storageMode, draft))
                         .subscribeOn(Schedulers.boundedElastic())
                         .onErrorResume(error -> {
                             LOGGER.warn(
@@ -1452,9 +1639,13 @@ public class RunApplicationService {
                                     draft.type().wireName(),
                                     traceId,
                                     error);
-                            return Mono.empty();
+                            return storageMode == RunStorageMode.REDIS_SUMMARY
+                                    ? Mono.error(error)
+                                    : Mono.empty();
                         }))
                 .doOnError(error -> failRunFromStream(agentId, run, traceId, error))
+                // 无标题等待时在 root 终态后结束；有标题等待时延至标题完成/取消，统一释放订阅级 scope。
+                .doFinally(ignored -> runSessionScopeRouter.finishRun(run.runId()))
                 .subscribe(ignored -> {
                 }, ignored -> {
                     // 错误已在 doOnError 中落库，这里消费异常以避免 Reactor dropped error 日志。
@@ -1501,7 +1692,12 @@ public class RunApplicationService {
     /**
      * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
-    private void appendStreamEvent(String agentId, Run originalRun, Workspace workspace, RunEventDraft draft) {
+    private void appendStreamEvent(
+            String agentId,
+            Run originalRun,
+            Workspace workspace,
+            RunStorageMode storageMode,
+            RunEventDraft draft) {
         RunEventDraft eventDraft = synchronizeRootSessionTitle(originalRun, draft);
         if (eventDraft.type() == RunEventType.RUN_SUCCEEDED && isTitleWatchPending(originalRun.runId())) {
             eventDraft = withPendingPlatformSessionTitle(eventDraft);
@@ -1515,18 +1711,18 @@ public class RunApplicationService {
             // root run.succeeded/run.failed 是远端会话终态事实源；它允许纠正先到的 transport error 临时失败。
             Run terminal = current.applyTerminalFact(terminalStatus, eventDraft.occurredAt());
             Run saved = runRepository.save(terminal);
-            runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft));
+            runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft), storageMode);
             snapshotService.persistRunSnapshot(agentId, saved, eventDraft.traceId());
             return;
         }
         if (eventDraft.type() == RunEventType.MESSAGE_PART_UPDATED) {
-            appendLiveDiffFromToolPart(originalRun, workspace, eventDraft);
+            appendLiveDiffFromToolPart(originalRun, workspace, storageMode, eventDraft);
         }
         if (!runEventPersistencePolicy.shouldPersist(eventDraft)) {
-            runEventLiveBus.publishTransient(runEventPersistencePolicy.sanitizeForPersistence(eventDraft));
+            publishTransient(eventDraft, storageMode);
             return;
         }
-        runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft));
+        runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft), storageMode);
     }
 
     /**
@@ -1654,16 +1850,24 @@ public class RunApplicationService {
     /**
      * 从 agent tool part 完成态派生轻量 Diff 事件，供前端在 Run 未结束时实时刷新文件树。
      */
-    private void appendLiveDiffFromToolPart(Run originalRun, Workspace workspace, RunEventDraft draft) {
+    private void appendLiveDiffFromToolPart(
+            Run originalRun,
+            Workspace workspace,
+            RunStorageMode storageMode,
+            RunEventDraft draft) {
         try {
             liveDiffFromToolPart(originalRun, workspace, draft)
-                    .ifPresent(diff -> runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(diff)));
+                    .ifPresent(diff -> runEventAppender.append(
+                            runEventPersistencePolicy.sanitizeForPersistence(diff), storageMode));
         } catch (RuntimeException exception) {
             LOGGER.warn(
                     "Failed to derive live diff from tool part, runId={}, traceId={}",
                     originalRun.runId().value(),
                     draft.traceId(),
                     exception);
+            if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+                throw exception;
+            }
         }
     }
 
@@ -1890,6 +2094,8 @@ public class RunApplicationService {
         } catch (RuntimeException exception) {
             LOGGER.warn("Failed to persist opencode stream failure, runId={}, traceId={}",
                     run.runId().value(), traceId, exception);
+        } finally {
+            runSessionScopeRouter.finishRun(run.runId());
         }
     }
 

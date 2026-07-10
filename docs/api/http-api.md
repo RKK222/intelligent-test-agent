@@ -1363,7 +1363,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` | 分页读取会话消息；主历史恢复优先使用 session tree。 |
 | `GET` | `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` | 查询 root session 下全量历史 session tree message snapshot，工作台历史恢复主入口。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` | 同上，内部平台入口。 |
-| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` | 查询会话最近的非终态 Run；没有时 `data=null`。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` | 查询会话最近的非终态 Run；用户已有 Redis 运行态 marker 时只读 Session active 索引，legacy 用户兼容查询数据库；没有时 `data=null`。 |
 
 旧 `/api/sessions/**` 和 `/api/workspaces/{workspaceId}/sessions` 已作废，返回 `410 API_GONE`。
 
@@ -2045,6 +2045,8 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 有效 `contextToken` 的启动流程复用完整进程、执行节点和可空 binding 快照；公共 `querySnapshot` 复用统一 manager health 映射，但不先查询进程 Repository。稳定 `RUNNING` 只刷新 Redis heartbeat，状态、PID 或服务地址变化时最多写一次；`STALE` 拒绝本次 Run 但不删除 token，`NOT_STARTED` 才失效该进程关联的上下文。未携带 token 的兼容路径仍先校验当前认证用户是否已有 `READY` opencode 进程，未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run；其余 binding 兼容与匿名固定节点路由保持不变。
 Run 进入成功、失败或取消终态后，后端会尝试分页拉取 agent 标准 session messages，将 assistant 可见 text、完整 parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。
 
+当前 Run 创建仍固定为 `LEGACY_FULL`。Redis manifest/Stream/snapshot/active 索引和 `run.snapshot.reset` 恢复契约已经可供验证，但 `test-agent.redis-summary.enabled=false`、rollout `0` 是稳定默认；在无原文 Run 锚点和终态摘要链路发布前，部署方不得把开关改为生产启用状态。
+
 ### system-management 用户管理 API
 
 用户管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。当前创建用户能力用于研发测试便捷造号，创建时使用默认密码 `123456`，前端不传密码字段。当前不包含普通用户发起审批通知流，角色调整由超级管理员直接操作。
@@ -2335,7 +2337,7 @@ Session 运行态接口：
 
 `attention` 目前仅支持 `"QUESTION"` 或 `null`。前端不得把 `attentionEventId` 当作通用 RunEvent 续传游标，只用于去重/展示待答提醒。
 
-`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 返回 `text/event-stream`，使用 fetch SSE 以携带 `Authorization: Bearer ...`。SSE data 为上面的摘要 DTO 本体，不再额外包裹 `ApiResponse`；事件名首帧为 `session-runtime.snapshot`，后续变更为 `session-runtime.updated`。服务端在 `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled/question.asked/question.replied/question.rejected` 后刷新摘要，并保留低频轮询兜底。新前端把该 SSE 作为恢复主入口，不再并行调用 runtime-state HTTP；断线按 1、2、5、10、30 秒退避重连，30 秒为后续重试上限。只有流不可用时，当前 Session 才允许执行一次 `active-run` HTTP fallback；重连成功并收到新摘要后再恢复下一故障窗口的 fallback 资格。该用户级通道不替代单个 Run 的 RunEvent SSE。
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 返回 `text/event-stream`，使用 fetch SSE 以携带 `Authorization: Bearer ...`。SSE data 为上面的摘要 DTO 本体，不再额外包裹 `ApiResponse`；事件名首帧为 `session-runtime.snapshot`，后续变更为 `session-runtime.updated`。服务端在 `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled/question.asked/question.replied/question.rejected` 后刷新摘要，并保留低频触发器兜底；用户已有 Redis 运行态 marker 时，首帧、事件触发和低频触发都只读取 Redis active 索引/manifest，不查询 PostgreSQL。新前端把该 SSE 作为恢复主入口，不再并行调用 runtime-state HTTP；断线按 1、2、5、10、30 秒退避重连，30 秒为后续重试上限。只有流不可用时，当前 Session 才允许执行一次 `active-run` HTTP fallback；重连成功并收到新摘要后再恢复下一故障窗口的 fallback 资格。该用户级通道不替代单个 Run 的 RunEvent SSE。
 
 兼容和安全约束：
 
@@ -2363,15 +2365,17 @@ Session 运行态接口：
 
 `RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`。`tokens` 字段结构同 `SessionMessageResponse.tokens`。
 
-`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供前端刷新后恢复 RunEvent SSE；没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
+`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供 runtime-state 流不可用时做一次恢复 fallback。用户已有 Redis 运行态 marker 时只读取 `active:session` 索引并回读 manifest 校验用户/Session/状态，即使索引为空也不回查 PostgreSQL；legacy 用户继续使用最近非终态 Run 查询。没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
 
 `POST /api/internal/agent/{agentId}/runs/{runId}/cancel` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会在存在 agent binding 时通过当前 `AgentRuntime.cancel` 取消远端执行，并追加 `run.cancelling`、`run.cancelled`；取消完成后也会触发一次消息快照持久化。
 
-`GET /api/internal/agent/{agentId}/runs/{runId}/events` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/events` 返回 `text/event-stream`；旧 `GET /api/runs/{runId}/events` 返回 `410 API_GONE`。`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output 不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `?lastEventId={seq}`，后端 header 优先、query 兜底。
+`GET /api/internal/agent/{agentId}/runs/{runId}/events` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/events` 返回 `text/event-stream`；旧 `GET /api/runs/{runId}/events` 返回 `410 API_GONE`。`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output（含 `run.snapshot.reset`）不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `?lastEventId={seq}`，后端 header 优先、query 兜底。
 
-RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding 路由。任意 Java 收到 `/runs/{runId}/events` 后，先用 `routing_decisions -> executionNodeId -> opencode process -> linuxServerId` 定位生产服务器；如果目标不是当前 Java，则流式转发到目标 Java 并保留 `Authorization`、`X-Trace-Id`、`Last-Event-ID`、query 和 `text/event-stream`。目标 Java 继续执行现有消息 snapshot、DB durable replay 和本机 live bus。目标 Java 不在线时可退回本机 snapshot/DB replay，不能依赖 Redis Pub/Sub 补实时消息。
+RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding 路由。任意 Java 收到 `/runs/{runId}/events` 后，优先从 Redis manifest 读取 `producerLinuxServerId`；manifest 缺失的 legacy/旧 Run 才使用 `routing_decisions -> executionNodeId -> opencode process -> linuxServerId`。如果目标不是当前 Java，则流式转发到目标 Java 并保留 `Authorization`、`X-Trace-Id`、`Last-Event-ID`、query 和 `text/event-stream`。
 
-SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取标准 session messages，并仅把 assistant 消息转换为 transient `message.updated` / `message.part.updated` 发给前端；user 消息已在 Run 启动前由平台保存，不重复回放其 text part，避免被前端误拼进 assistant 正文。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。
+目标 Java 按 manifest 的 `storageMode` 固定分流：`LEGACY_FULL` 继续执行消息 snapshot、DB durable polling replay 和本机 live bus；`REDIS_SUMMARY` 首帧总发送完整 Redis 物化 `run.snapshot.reset`，再以 `snapshot.runtimeVersion` 为起点，由最短 5 秒的 Redis 安全扫描和本机 live bus 只唤醒、分页读取 `${runtimeVersion}-0` 的 durable/transient 尾流，live 事件仍即时唤醒但帧本身不直接输出，活跃 SSE 连接不轮询 PostgreSQL。初始 reset 的 reason 为 `TRANSIENT_SNAPSHOT_RECOVERY`，旧 durable 游标需重置时为 `CURSOR_BEFORE_EARLIEST_OR_DETAILS_TRUNCATED`，连接期间容量换代为 `RUNTIME_STREAM_TRUNCATED`。payload 包含 `reason/resetGeneration/earliestSeq/detailsAvailableUntil/snapshot.barrierSeq/snapshot.runtimeVersion/snapshot.events`；前端先清空该 Run reducer 并按顺序应用 snapshot，再只用随后 durable SSE id 推进 `Last-Event-ID`。Redis manifest/详情缺失返回 `410 RUN_DETAILS_EXPIRED`，Redis 不可用返回 `503 RUNTIME_STATE_UNAVAILABLE`，不得回退 PostgreSQL 原始事件。
+
+`LEGACY_FULL` SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取标准 session messages，并仅把 assistant 消息转换为 transient `message.updated` / `message.part.updated` 发给前端；user 消息已在 Run 启动前由平台保存，不重复回放其 text part，避免被前端误拼进 assistant 正文。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。`REDIS_SUMMARY` 不触发该兼容远端 snapshot，而是完全使用 Redis 物化 snapshot 与 `runtime-events` Stream 恢复当前 Run 详情。
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照；旧 `/api/runs/{runId}/session-tree/messages` 返回 `410 API_GONE`。scope 表存在时后端按 root + 当前 Run child session 逐个拉取 agent projected messages；scope 表为空时按 root-only 远端 session 降级。响应 `events` 会合并本次消息 snapshot 与当前 Run 的 durable RunEvent，因此 permission/question/todo 等状态类事件可随 HTTP 历史响应恢复；`messagesBySessionId` 只包含 `message.*` payload，不会混入状态事件。响应 `data`：
 

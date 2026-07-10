@@ -498,6 +498,62 @@ test("runtime-state uses the SSE snapshot without a parallel HTTP read", async (
   expect(runtimeStateHttpRequests).toEqual([]);
 });
 
+test("run snapshot reset replaces stale live output with the materialized snapshot", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    runEvents: [
+      event(1, "message.part.delta", {
+        messageId: "msg_runtime",
+        partId: "part_text",
+        partType: "text",
+        delta: "即将被快照替换的旧增量"
+      }),
+      event(0, "run.snapshot.reset", {
+        reason: "TRANSIENT_SNAPSHOT_RECOVERY",
+        resetGeneration: 0,
+        earliestSeq: 1,
+        snapshot: {
+          barrierSeq: 1,
+          runtimeVersion: 4,
+          events: [
+            { ...event(0, "message.updated", {
+              messageId: "msg_input",
+              role: "user",
+              text: "验证快照恢复",
+              message: {
+                id: "msg_input",
+                role: "user",
+                text: "验证快照恢复"
+              }
+            }), eventId: "evt_snapshot_0" },
+            { ...event(0, "message.part.updated", {
+              messageId: "msg_runtime",
+              partId: "part_text",
+              part: {
+                id: "part_text",
+                messageID: "msg_runtime",
+                type: "text",
+                text: "Redis 物化快照中的最终回答"
+              }
+            }), eventId: "evt_snapshot_1" }
+          ]
+        }
+      })
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("验证快照恢复");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect(page.getByText("Redis 物化快照中的最终回答")).toBeVisible();
+  await expect(page.getByText("即将被快照替换的旧增量")).toHaveCount(0);
+  await expect(page.getByText("验证快照恢复")).toBeVisible();
+});
+
 test("late session creation cannot replace a history switch", async ({ page }) => {
   let releaseSessionRequest!: () => void;
   const sessionRequestGate = new Promise<void>((resolve) => {

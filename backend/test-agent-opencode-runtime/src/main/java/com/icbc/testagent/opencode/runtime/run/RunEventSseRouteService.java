@@ -2,17 +2,20 @@ package com.icbc.testagent.opencode.runtime.run;
 
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.routing.RoutingDecision;
 import com.icbc.testagent.domain.routing.RoutingDecisionRepository;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -31,16 +34,27 @@ public class RunEventSseRouteService {
     private final RoutingDecisionRepository routingDecisionRepository;
     private final OpencodeProcessManagementRepository processRepository;
     private final BackendJavaRouteResolver routeResolver;
+    private final RunRuntimeStore runRuntimeStore;
 
     public RunEventSseRouteService(
             RoutingDecisionRepository routingDecisionRepository,
             OpencodeProcessManagementRepository processRepository,
             BackendJavaRouteResolver routeResolver) {
+        this(routingDecisionRepository, processRepository, routeResolver, null);
+    }
+
+    @Autowired
+    public RunEventSseRouteService(
+            RoutingDecisionRepository routingDecisionRepository,
+            OpencodeProcessManagementRepository processRepository,
+            BackendJavaRouteResolver routeResolver,
+            RunRuntimeStore runRuntimeStore) {
         this.routingDecisionRepository = Objects.requireNonNull(
                 routingDecisionRepository,
                 "routingDecisionRepository must not be null");
         this.processRepository = Objects.requireNonNull(processRepository, "processRepository must not be null");
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
+        this.runRuntimeStore = runRuntimeStore;
     }
 
     /**
@@ -48,6 +62,12 @@ public class RunEventSseRouteService {
      */
     public Optional<BackendJavaProcess> forwardTarget(RunId runId) {
         Objects.requireNonNull(runId, "runId must not be null");
+        if (runRuntimeStore != null) {
+            var manifest = runRuntimeStore.findManifest(runId);
+            if (manifest.isPresent()) {
+                return forwardTarget(runId, manifest.get().producerLinuxServerId());
+            }
+        }
         Optional<RoutingDecision> decision = routingDecisionRepository.findByRunId(runId);
         if (decision.isEmpty()) {
             return Optional.empty();
@@ -60,14 +80,19 @@ public class RunEventSseRouteService {
         if (process.isEmpty()) {
             return Optional.empty();
         }
+        return forwardTarget(runId, process.get().linuxServerId().value());
+    }
+
+    private Optional<BackendJavaProcess> forwardTarget(RunId runId, String linuxServerId) {
         try {
-            return routeResolver.remoteTarget(process.get().linuxServerId())
+            LinuxServerId targetServerId = new LinuxServerId(linuxServerId);
+            return routeResolver.remoteTarget(targetServerId)
                     .map(routeResolver::requireBackend);
         } catch (PlatformException exception) {
             LOGGER.warn(
                     "RunEvent SSE target backend unavailable, falling back to local replay. runId={} linuxServerId={} errorCode={}",
                     runId.value(),
-                    process.get().linuxServerId().value(),
+                    linuxServerId,
                     exception.errorCode());
             return Optional.empty();
         }

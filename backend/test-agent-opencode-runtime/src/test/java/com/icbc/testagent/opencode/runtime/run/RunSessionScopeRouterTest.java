@@ -1,6 +1,10 @@
 package com.icbc.testagent.opencode.runtime.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventScopeContext;
@@ -9,6 +13,8 @@ import com.icbc.testagent.domain.event.RunSessionScope;
 import com.icbc.testagent.domain.event.RunSessionScopeRepository;
 import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
+import com.icbc.testagent.domain.run.RunStorageMode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -397,6 +403,36 @@ class RunSessionScopeRouterTest {
         }
     }
 
+    @Test
+    void redisSummaryScopeUsesSubscriptionStateWithoutDatabaseReadsOrWrites() {
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        when(runtimeStore.findScopeSession(any(), any())).thenReturn(Optional.empty());
+        when(runtimeStore.claimRawEvent(any(), any(), any())).thenReturn(true);
+        when(runtimeStore.drainPending(any(), any())).thenReturn(List.of());
+        when(runtimeStore.scopeVersion(RUN_ID)).thenReturn(11L);
+        RunSessionScopeRouter redisRouter = new RunSessionScopeRouter(repository, cache, runtimeStore);
+        RunEventDraft childCreated = childSessionCreatedDraft(CHILD_SESSION_ID, "Explore Redis (@explore subagent)");
+
+        List<RunEventDraft> discovered = redisRouter.route(rootScope(), childCreated, RunStorageMode.REDIS_SUMMARY);
+        List<RunEventDraft> childStatus = redisRouter.route(
+                rootScope(),
+                childScopedDraft(RunEventType.SESSION_STATUS, "session.status"),
+                RunStorageMode.REDIS_SUMMARY);
+
+        assertThat(discovered).extracting(RunEventDraft::type)
+                .containsExactly(
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.SESSION_CREATED);
+        assertThat(childStatus).singleElement().satisfies(event -> {
+            assertThat(event.scopeContext().sessionId()).isEqualTo(CHILD_SESSION_ID);
+            assertThat(event.scopeContext().scopeVersion()).isEqualTo(12L);
+        });
+        assertThat(repository.totalCalls()).isZero();
+        assertThat(repository.sessions).isEmpty();
+        verify(runtimeStore).saveScope(any(RunSessionScope.class), any(RunSessionScopeSession.class));
+    }
+
     private List<RunEventDraft> route(RunEventDraft... drafts) {
         List<RunEventDraft> routed = new ArrayList<>();
         for (RunEventDraft draft : drafts) {
@@ -498,23 +534,28 @@ class RunSessionScopeRouterTest {
     private static final class FakeRunSessionScopeRepository implements RunSessionScopeRepository {
 
         private final Map<String, RunSessionScopeSession> sessions = new LinkedHashMap<>();
+        private int totalCalls;
 
         @Override
         public void upsertScope(RunSessionScope scope) {
+            totalCalls += 1;
         }
 
         @Override
         public void upsertSession(RunSessionScopeSession session) {
+            totalCalls += 1;
             sessions.put(session.sessionId(), session);
         }
 
         @Override
         public List<RunSessionScopeSession> findSessionsByRunId(RunId runId) {
+            totalCalls += 1;
             return List.copyOf(sessions.values());
         }
 
         @Override
         public List<RunSessionScopeSession> findSessionsByRootSessionId(String rootSessionId) {
+            totalCalls += 1;
             return sessions.values().stream()
                     .filter(session -> session.rootSessionId().equals(rootSessionId))
                     .toList();
@@ -522,7 +563,12 @@ class RunSessionScopeRouterTest {
 
         @Override
         public Optional<RunSessionScopeSession> findSession(RunId runId, String sessionId) {
+            totalCalls += 1;
             return Optional.ofNullable(sessions.get(sessionId));
+        }
+
+        private int totalCalls() {
+            return totalCalls;
         }
     }
 

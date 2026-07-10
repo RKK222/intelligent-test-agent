@@ -1716,6 +1716,12 @@ class RunApplicationServiceTest {
                 "trace_1234567890abcdef");
 
         awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        awaitEventTypes(
+                events,
+                RunEventType.RUN_CREATED,
+                RunEventType.RUN_STARTED,
+                RunEventType.QUESTION_ASKED,
+                RunEventType.RUN_SUCCEEDED);
         assertThat(events.events).extracting(RunEvent::type)
                 .contains(RunEventType.RUN_SUCCEEDED);
         assertThat(liveBus.transientPayloads).extracting(RunEventSsePayload::type)

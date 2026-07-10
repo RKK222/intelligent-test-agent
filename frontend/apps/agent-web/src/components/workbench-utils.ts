@@ -30,6 +30,7 @@ import {
   createInitialAgentChatRuntimeState,
   normalizeMessagePart,
   reduceAgentChatRuntime,
+  snapshotEventsFromRunReset,
   type ComposerAttachment
 } from "@test-agent/agent-chat";
 import { buildEditorFilePromptPart } from "./prompt-context";
@@ -75,6 +76,17 @@ export function sessionTitleEventMatchesCurrentSession(
   currentSessionId: string | undefined
 ): boolean {
   return Boolean(subscribedSessionId && currentSessionId && subscribedSessionId === currentSessionId);
+}
+
+/**
+ * Workbench 将 reset wrapper 与需要重建独立副作用状态的快照事件拆开。
+ * reducer 会原子重放对话状态；这里的 events 仅供 Diff、Run 终态等页面投影按原顺序同步。
+ */
+export function runEventProjection(event: RunEvent): { reset: boolean; events: RunEvent[] } {
+  if (event.type !== "run.snapshot.reset") {
+    return { reset: false, events: [event] };
+  }
+  return { reset: true, events: snapshotEventsFromRunReset(event) };
 }
 
 export const OPENCODE_HEALTH_REFETCH_INTERVAL_MS = 10_000;

@@ -12,7 +12,12 @@ export { createOpencodeLikeState, createTimelineRows } from "./opencode-like";
 export type { OpencodeLikeConversationState, OpencodeLikeRuntimeStatus, TimelineRow } from "./opencode-like";
 export { buildComposerPromptParts, fileToPromptAttachment } from "./prompt-parts";
 export type { ComposerAttachment } from "./prompt-parts";
-export { reduceAgentChatRuntime, createInitialAgentChatRuntimeState, normalizeMessagePart } from "./runtime-reducer";
+export {
+  reduceAgentChatRuntime,
+  createInitialAgentChatRuntimeState,
+  normalizeMessagePart,
+  snapshotEventsFromRunReset
+} from "./runtime-reducer";
 export type { AgentChatRuntimeState, AgentChatRuntimeAction } from "./runtime-reducer";
 export {
   displayTextFromUserPrompt,

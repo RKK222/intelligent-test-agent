@@ -1319,6 +1319,113 @@ describe("agent-chat runtime reducer", () => {
     const part = (message as { parts?: { type: string; metadata?: { filesMap?: Record<string, string> } }[] }).parts?.[0];
     expect(part?.metadata?.filesMap?.["a.ts"]).toContain("+y");
   });
+
+  it("clears stale run projection before replaying snapshot reset events in order", () => {
+    const staleEvents = [
+      event("assistant.message.delta", { delta: "旧回答" }),
+      event("permission.asked", { id: "perm_old", sessionId: "ses_1", type: "edit" }),
+      event("question.asked", { id: "question_old", sessionId: "ses_1", questions: [{ question: "旧问题" }] }),
+      event("todo.updated", { todos: [{ content: "旧任务", status: "pending" }] }),
+      event("diff.proposed", { sessionId: "ses_1", files: [{ path: "old.ts" }] })
+    ];
+    const staleState = staleEvents.reduce(
+      (state, item) => reduceAgentChatRuntime(state, { type: "event", event: item }),
+      createInitialAgentChatRuntimeState()
+    );
+    const reset = {
+      ...event("run.snapshot.reset", {
+        snapshot: {
+          barrierSeq: 9,
+          events: [
+            { ...event("assistant.message.delta", { delta: "新" }), eventId: "evt_snapshot_1", seq: 0 },
+            { ...event("assistant.message.delta", { delta: "回答" }), eventId: "evt_snapshot_2", seq: 0 },
+            {
+              ...event("todo.updated", { todos: [{ content: "新任务", status: "in_progress" }] }),
+              eventId: "evt_snapshot_3",
+              seq: 0
+            },
+            {
+              ...event("question.asked", {
+                id: "question_new",
+                sessionId: "ses_1",
+                questions: [{ question: "新问题" }]
+              }),
+              eventId: "evt_snapshot_4",
+              seq: 0
+            }
+          ]
+        }
+      }),
+      eventId: "evt_snapshot_reset_run_1_2",
+      seq: 0
+    } satisfies RunEvent;
+
+    const restored = reduceAgentChatRuntime(staleState, { type: "event", event: reset });
+
+    expect(restored.messages).toHaveLength(1);
+    expect(restored.messages[0]).toMatchObject({ role: "assistant", text: "新回答" });
+    expect(restored.permissions).toEqual([]);
+    expect(restored.questions).toHaveLength(1);
+    expect(restored.questions[0]?.requestId).toBe("question_new");
+    expect(restored.todos).toEqual([expect.objectContaining({ text: "新任务", status: "in_progress" })]);
+    expect(restored.diff).toBeUndefined();
+    expect(restored.seenEventIds).toEqual(expect.arrayContaining([
+      "evt_snapshot_1",
+      "evt_snapshot_2",
+      "evt_snapshot_3",
+      "evt_snapshot_4",
+      "evt_snapshot_reset_run_1_2"
+    ]));
+  });
+
+  it("clears run projection when snapshot reset payload is absent or empty", () => {
+    const stale = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("assistant.message.delta", { delta: "旧回答" })
+    });
+
+    const missing = reduceAgentChatRuntime(stale, {
+      type: "event",
+      event: { ...event("run.snapshot.reset", {}), eventId: "evt_reset_missing", seq: 0 }
+    });
+    const empty = reduceAgentChatRuntime(stale, {
+      type: "event",
+      event: {
+        ...event("run.snapshot.reset", { snapshot: { events: [] } }),
+        eventId: "evt_reset_empty",
+        seq: 0
+      }
+    });
+
+    expect(missing.messages).toEqual([]);
+    expect(empty.messages).toEqual([]);
+  });
+
+  it("keeps persisted transcript messages while clearing transient run messages", () => {
+    const persisted = {
+      id: "msg_1234567890abcdef1234567890abcdef",
+      messageId: "msg_1234567890abcdef1234567890abcdef",
+      platformMessageId: "msg_1234567890abcdef1234567890abcdef",
+      role: "user" as const,
+      text: "历史问题",
+      createdAt: "2026-07-09T00:00:00Z"
+    };
+    const withTransient = reduceAgentChatRuntime(createInitialAgentChatRuntimeState([persisted]), {
+      type: "event",
+      event: event("assistant.message.delta", { delta: "未完成回答" })
+    });
+
+    const restored = reduceAgentChatRuntime(withTransient, {
+      type: "event",
+      event: {
+        ...event("run.snapshot.reset", { snapshot: { events: [] } }),
+        eventId: "evt_reset_keep_history",
+        seq: 0
+      }
+    });
+
+    expect(restored.messages).toEqual([persisted]);
+  });
 });
 
 function event(type: string, payload: Record<string, unknown>): RunEvent {
