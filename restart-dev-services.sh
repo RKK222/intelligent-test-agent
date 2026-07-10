@@ -41,7 +41,7 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile local|test|guo] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--help]
+Usage: ./restart-dev-services.sh [--profile test] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
@@ -68,7 +68,7 @@ Defaults:
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
 
 Options:
-  --profile              Backend Spring profile, local, test, or guo. Default: test.
+  --profile              Only test is supported; default is test.
   --env-file             Backend dotenv file. Relative paths are resolved from the repo root.
   --log-dir              Service log directory. Relative paths are resolved from the repo root.
   --skip-backend-build   Restart backend without running Maven package first.
@@ -130,10 +130,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${profile}" in
-  local|test|guo)
+  test)
     ;;
   *)
-    echo "Unsupported profile: ${profile}. Expected local, test, or guo." >&2
+    echo "Unsupported profile: ${profile}. Expected test." >&2
     exit 2
     ;;
 esac

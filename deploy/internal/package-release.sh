@@ -207,6 +207,9 @@ tag_to_tar_name() {
 
 package_backend() {
   local backend_dir="${OUTPUT_DIR}/backend"
+  local extract_dir
+  require_command unzip
+  require_command zip
   mkdir -p "${backend_dir}"
   echo "Building backend jar"
   (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am -DskipTests package)
@@ -217,7 +220,19 @@ package_backend() {
     echo "Backend jar not found under backend/test-agent-app/target" >&2
     exit 1
   fi
+  rm -rf "${backend_dir}"
+  mkdir -p "${backend_dir}"
   cp "${jar}" "${backend_dir}/test-agent-app.jar"
+  extract_dir="$(mktemp -d "${OUTPUT_DIR}/.backend-lib.XXXXXX")"
+  unzip -q "${backend_dir}/test-agent-app.jar" 'BOOT-INF/lib/*' -d "${extract_dir}"
+  mv "${extract_dir}/BOOT-INF/lib" "${backend_dir}/lib"
+  rm -rf "${extract_dir}"
+  # 交付包只保留启动器和业务 classes，所有依赖由 PropertiesLauncher 从外置 lib 加载。
+  zip -qd "${backend_dir}/test-agent-app.jar" 'BOOT-INF/lib/*' >/dev/null
+  [[ -n "$(find "${backend_dir}/lib" -maxdepth 1 -type f -name '*.jar' -print -quit)" ]] || {
+    echo "External backend libraries were not extracted" >&2
+    exit 1
+  }
   ls -lh "${backend_dir}/test-agent-app.jar"
 }
 
@@ -271,7 +286,7 @@ package_release_zip() {
   # 交付 zip 只放部署所需产物和脚本，避免把 deploy/internal/dist 自身递归打进去。
   if [[ -d "${OUTPUT_DIR}/backend" ]]; then
     mkdir -p "${staging_dir}/dist/backend"
-    cp -a "${OUTPUT_DIR}/backend/test-agent-app.jar" "${staging_dir}/dist/backend/test-agent-app.jar"
+    cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   fi
   [[ -f "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" ]] && cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
   [[ -f "${OUTPUT_DIR}/test-agent-programs.tar.gz" ]] && cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${staging_dir}/dist/"

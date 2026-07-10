@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 统一后端配置并外置 Spring Boot 依赖
+
+- Why:
+  - 企业现场需要不重打业务 jar 即可替换 JDBC 依赖，同时要求后端只保留默认 `application.yml` 和 `application-test.yml`。
+- What:
+  - 删除 `prod`、`local`、`local-h2`、`guo` profile yml；企业打包将 `BOOT-INF/lib` 提取到 `dist/backend/lib` 并生成薄 jar，部署脚本原子替换该目录，systemd 示例改为 `PropertiesLauncher`。
+- How:
+  - 业务代码、API、事件和数据库结构未改；默认运行配置全部由环境变量提供，本地启动仅保留默认和 `test` 模式。
+- Result:
+  - 薄 jar 从外置 lib 启动后可加载所有应用依赖；完整 zip 的 `--validate-only` 通过，SHA256 为 `ff1a3c67088b836342cf253daa47ac77e7c5558fc506204984d3551f8c26591f`。
+
 ### 2026-07-10 - 生产环境 JDBC 驱动类配置与基础配置对齐
 
 - Why:

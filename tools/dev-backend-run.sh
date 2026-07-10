@@ -5,25 +5,24 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 usage() {
   cat <<'USAGE'
-Usage: tools/dev-backend-run.sh [--profile local|test|guo] [--env-file <path>] [--help]
+Usage: tools/dev-backend-run.sh [--profile test] [--env-file <path>] [--help]
 
 Start the backend test-agent-app executable jar with environment variables
 loaded from an untracked dotenv file. The script parses KEY=VALUE lines and
 does not source the file, so dotenv content is not executed as shell code.
 
 Defaults:
-  --profile local  reads .env.local
+  default           reads .env.local
   --profile test   reads .env.test
-  --profile guo    reads .env.guo
 
 Options:
-  --profile   Spring profile to run, local, test, or guo. Default: local.
+  --profile   Only test is supported; default uses application.yml without a profile.
   --env-file  Override the dotenv file path.
   --help      Show this help.
 USAGE
 }
 
-profile="local"
+profile=""
 env_file=""
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
 BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
@@ -69,16 +68,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${profile}" in
-  local|test|guo)
+  ""|test)
     ;;
   *)
-    echo "Unsupported profile: ${profile}. Expected local, test, or guo." >&2
+    echo "Unsupported profile: ${profile}. Expected test or no profile." >&2
     exit 2
     ;;
 esac
 
 if [[ -z "${env_file}" ]]; then
-  env_file="${ROOT_DIR}/.env.${profile}"
+  env_file="${ROOT_DIR}/.env${profile:+.${profile}}"
 elif [[ "${env_file}" != /* ]]; then
   env_file="${ROOT_DIR}/${env_file}"
 fi
@@ -122,7 +121,7 @@ load_env_file() {
 }
 
 load_env_file "${env_file}"
-export SPRING_PROFILES_ACTIVE="${profile}"
+if [[ -n "${profile}" ]]; then export SPRING_PROFILES_ACTIVE="${profile}"; else unset SPRING_PROFILES_ACTIVE || true; fi
 
 # 设置 JAVA_HOME
 java_version="${JAVA_VERSION:-21}"
@@ -139,11 +138,10 @@ if [[ -n "${JAVA_VERSION:-}" ]] || [[ -z "${JAVA_HOME:-}" ]]; then
   fi
 fi
 
-echo "Starting backend with profile '${profile}' using $(basename "${env_file}")."
+echo "Starting backend with ${profile:-default} configuration using $(basename "${env_file}")."
 echo "Sensitive environment values are loaded but not printed."
 echo "Backend JVM proxy settings are disabled for direct DB/Redis connections."
 
 cd "${ROOT_DIR}/backend"
 mvn -pl test-agent-app -am -DskipTests package
-exec java "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}" -jar "${ROOT_DIR}/backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar" \
-  --spring.profiles.active="${profile}"
+exec java "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}" -jar "${ROOT_DIR}/backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar" ${profile:+--spring.profiles.active="${profile}"}

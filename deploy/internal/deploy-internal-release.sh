@@ -340,6 +340,7 @@ unzip -q "${ARCHIVE}" -d "${EXTRACT_DIR}"
 
 FRONTEND_ARCHIVE="$(find_first_file "${EXTRACT_DIR}" 'test-agent-frontend-dist.tar.gz')"
 BACKEND_JAR="$(find_first_file "${EXTRACT_DIR}" 'test-agent-app.jar')"
+BACKEND_LIB_DIR="$(find "${EXTRACT_DIR}" -maxdepth 6 -type d -path '*/backend/lib' | sort | head -n 1)"
 PROGRAMS_ARCHIVE="$(find_first_file "${EXTRACT_DIR}" 'test-agent-programs.tar.gz')"
 WORKER_IMAGE_TAR="$(find_first_tar "${EXTRACT_DIR}")"
 DEPLOY_WORKER_SCRIPT="$(find_first_file "${EXTRACT_DIR}" 'opencode-worker-docker.sh')"
@@ -350,6 +351,10 @@ fi
 
 require_file "${FRONTEND_ARCHIVE}"
 require_file "${BACKEND_JAR}"
+[[ -n "${BACKEND_LIB_DIR}" && -n "$(find "${BACKEND_LIB_DIR}" -maxdepth 1 -type f -name '*.jar' -print -quit)" ]] || {
+  echo "backend external lib directory not found in archive" >&2
+  exit 1
+}
 require_file "${PROGRAMS_ARCHIVE}"
 if [[ "${SKIP_WORKER}" -eq 0 ]]; then
   require_file "${WORKER_IMAGE_TAR}"
@@ -363,6 +368,7 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   log "Release archive validation passed"
   printf 'frontend archive: %s\n' "${FRONTEND_ARCHIVE}"
   printf 'backend jar: %s\n' "${BACKEND_JAR}"
+  printf 'backend lib: %s\n' "${BACKEND_LIB_DIR}"
   printf 'programs archive: %s\n' "${PROGRAMS_ARCHIVE}"
   if [[ "${SKIP_WORKER}" -eq 0 ]]; then
     printf 'worker image tar: %s\n' "${WORKER_IMAGE_TAR}"
@@ -383,6 +389,8 @@ timestamp="$(date +%Y%m%d%H%M%S)"
 mkdir -p "${INSTALL_ROOT}/dist/backend" "${INSTALL_ROOT}/dist" "${INSTALL_ROOT}/programs" "${INSTALL_ROOT}/deploy"
 
 cp "${BACKEND_JAR}" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.new"
+rm -rf "${INSTALL_ROOT}/dist/backend/lib.new"
+cp -a "${BACKEND_LIB_DIR}" "${INSTALL_ROOT}/dist/backend/lib.new"
 cp "${PROGRAMS_ARCHIVE}" "${INSTALL_ROOT}/dist/test-agent-programs.tar.gz"
 if [[ "${SKIP_WORKER}" -eq 0 ]]; then
   cp "${WORKER_IMAGE_TAR}" "${INSTALL_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
@@ -402,7 +410,12 @@ systemctl stop "${BACKEND_SERVICE}"
 if [[ -f "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" ]]; then
   cp -a "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.bak.${timestamp}"
 fi
+if [[ -d "${INSTALL_ROOT}/dist/backend/lib" ]]; then
+  rm -rf "${INSTALL_ROOT}/dist/backend/lib.bak.${timestamp}"
+  mv "${INSTALL_ROOT}/dist/backend/lib" "${INSTALL_ROOT}/dist/backend/lib.bak.${timestamp}"
+fi
 mv "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.new" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar"
+mv "${INSTALL_ROOT}/dist/backend/lib.new" "${INSTALL_ROOT}/dist/backend/lib"
 
 log "Extract external programs"
 tar -C "${INSTALL_ROOT}" -xzf "${INSTALL_ROOT}/dist/test-agent-programs.tar.gz"
