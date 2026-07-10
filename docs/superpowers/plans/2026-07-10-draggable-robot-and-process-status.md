@@ -91,7 +91,7 @@ cd frontend && corepack pnpm build
 
 Expected: all commands exit 0.
 
-- [x] **Step 3: Start the runnable UI and inspect the interaction**
+- [ ] **Step 3: Start the runnable UI and inspect the interaction**
 
 Run from repository root:
 
