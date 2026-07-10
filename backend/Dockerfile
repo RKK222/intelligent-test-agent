@@ -26,7 +26,5 @@ COPY --from=build /workspace/test-agent-app/target/test-agent-app-*.jar /app/tes
 USER testagent
 
 EXPOSE 8080
-ENV SPRING_PROFILES_ACTIVE=prod
-
 # 容器只运行后端 Java 进程；数据库、Redis 和 opencode server 必须通过环境变量指向外部服务。
 ENTRYPOINT ["java", "-jar", "/app/test-agent-app.jar"]

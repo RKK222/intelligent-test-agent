@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 清理企业模板中的废弃 prod profile
+
+- Why:
+  - 删除 `application-prod.yml` 后，企业 `backend.env` 模板、Dockerfile 和部署文档仍保留 `SPRING_PROFILES_ACTIVE=prod`，会误导现场。
+- What:
+  - 移除上述 prod profile 遗留配置并重新生成完整企业升级包。
+- How:
+  - 默认 `application.yml` 继续通过环境变量接收所有企业配置；`test` 是唯一保留的显式 profile。
+- Result:
+  - 完整打包成功，最新升级包 SHA256 为 `0ca7dfe60cdaa0a7728794980188c7b6caca47d0b8ac264a628e26093b552098`。
+
 ### 2026-07-10 - 统一后端配置并外置 Spring Boot 依赖
 
 - Why:

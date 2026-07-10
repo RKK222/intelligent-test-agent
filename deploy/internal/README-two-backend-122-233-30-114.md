@@ -53,7 +53,6 @@ deploy/internal/dist/test-agent-internal-release.zip
 保持或确认这些值：
 
 ```dotenv
-SPRING_PROFILES_ACTIVE=prod
 SERVER_PORT=8080
 TEST_AGENT_DEPLOYMENT_MODE=internal
 TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.4

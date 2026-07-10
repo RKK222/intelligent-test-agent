@@ -561,7 +561,6 @@ Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart
 
 ```bash
 server.port=8080
-SPRING_PROFILES_ACTIVE=prod
 TEST_AGENT_DEPLOYMENT_MODE=internal
 TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.4
 TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-4
