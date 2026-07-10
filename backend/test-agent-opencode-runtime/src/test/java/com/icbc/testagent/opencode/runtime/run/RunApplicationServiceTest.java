@@ -768,6 +768,38 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void serviceDoesNotSynchronizeRootTitleWhenPlatformSessionRemoteBindingDiffers() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        sessions.remoteSessionIdOverride = "ses_mismatched1234567890abcdef";
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.SESSION_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "session.updated",
+                        "sessionID", REMOTE_SESSION_ID,
+                        "info", Map.of("title", "不应覆盖的平台标题"))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
+        assertThat(sessions.current.title()).isEqualTo("Demo session");
+    }
+
+    @Test
     void serviceSynchronizesRootSessionTitleFromWrappedSessionUpdatedEvent() {
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
@@ -1912,6 +1944,7 @@ class RunApplicationServiceTest {
     private static final class FakeSessionRepository implements com.icbc.testagent.domain.session.SessionRepository {
         private Session current;
         private boolean failTitleUpdate;
+        private String remoteSessionIdOverride;
 
         private FakeSessionRepository() {
             this(session());
@@ -1952,7 +1985,11 @@ class RunApplicationServiceTest {
                 ExecutionNodeId executionNodeId,
                 Instant updatedAt,
                 String traceId) {
-            current = current.attachOpencodeSession(opencodeSessionId, executionNodeId, updatedAt, traceId);
+            current = current.attachOpencodeSession(
+                    remoteSessionIdOverride == null ? opencodeSessionId : remoteSessionIdOverride,
+                    executionNodeId,
+                    updatedAt,
+                    traceId);
             return Optional.of(current);
         }
     }

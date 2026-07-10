@@ -11,7 +11,7 @@
 - How:
   - 复用 `Session.updateTitleAndPinned` 和 `SessionRepository.save`；仅接受 root scope 且远端 root id 与平台绑定一致的非空标题，兼容直出与 `rawPayload.properties.info` 包裹事件；标题仓储失败只记录中文 WARN，不阻断原始 `session.updated` 持久化与 SSE 发布。
 - Result:
-  - `RunApplicationServiceTest` 覆盖 root、包裹事件、已发现 child、未知归属、空白标题及标题仓储失败；使用 JDK 25 执行定向 Maven 测试 41 项均通过。
+  - `RunApplicationServiceTest` 覆盖 root、包裹事件、已发现 child、未知归属、空白标题、标题仓储失败及平台远端绑定不一致；使用 JDK 25 执行定向 Maven 测试 42 项均通过。
 
 ### 2026-07-10 - 清理企业模板中的废弃 prod profile
 
