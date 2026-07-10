@@ -125,6 +125,7 @@ class RunApplicationServiceTest {
         assertThat(facade.createSessionCommands).hasSize(1);
         assertThat(facade.createSessionCommands.getFirst().directory()).isEqualTo("/tmp/demo");
         assertThat(facade.createSessionCommands.getFirst().workspace()).isNull();
+        assertThat(facade.createSessionCommands.getFirst().title()).isNull();
         assertThat(facade.startRunCommands).hasSize(1);
         assertThat(facade.startRunCommands.getFirst().opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(facade.startRunCommands.getFirst().workspace()).isNull();
@@ -319,6 +320,7 @@ class RunApplicationServiceTest {
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         assertThat(facade.createSessionCommands).hasSize(1);
         assertThat(facade.createSessionCommands.getFirst().node().executionNodeId()).isEqualTo(assignedNode.executionNodeId());
+        assertThat(facade.createSessionCommands.getFirst().title()).isNull();
         assertThat(facade.startRunCommands.getFirst().opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(bindings.findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode"))
                 .get()

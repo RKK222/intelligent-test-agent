@@ -15,13 +15,13 @@ public record OpencodeCreateSessionCommand(
         String traceId) {
 
     /**
-     * 校验创建 session 的目录、标题和 traceId，workspace 为空白时不传给远端。
+     * 校验创建 session 的目录和 traceId，标题或 workspace 为空时不传给远端。
      */
     public OpencodeCreateSessionCommand {
         Objects.requireNonNull(node, "node must not be null");
         directory = DomainValidation.requireText(directory, "directory");
         workspace = optionalText(workspace);
-        title = DomainValidation.requireText(title, "title");
+        title = optionalText(title);
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 

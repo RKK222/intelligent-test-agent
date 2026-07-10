@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 保留 OpenCode 默认标题以启用自动命名
+
+- Why:
+  - 实际运行事件证明平台已收到并转发 root `session.updated`，但标题始终是首条原文；平台创建远端会话时传入了临时标题，OpenCode 1.17.7 因此跳过只针对默认标题运行的内置 title agent。
+- What:
+  - 根远端会话首次创建及重建不再传平台临时标题；创建命令标题支持 null/空白，SDK gateway 在标题缺失时发送 `{}`。
+- How:
+  - 复用 `AgentRuntimeTargetResolver -> OpencodeAgentRuntime -> OpencodeClientFacade -> GeneratedOpencodeSdkGateway` 既有创建链路；平台临时标题和既有 `session.updated` 同步不变，显式非空标题继续原样透传。
+- Result:
+  - JDK 25 定向 reactor 测试 59 项通过（client 16、agent-runtime 1、runtime 42）；仍需以全新远端会话完成真实 UI 标题生成验证，旧远端会话不会重命名。
+
 ### 2026-07-10 - 同步 OpenCode root 会话标题
 
 - Why:

@@ -183,7 +183,7 @@ public class AgentRuntimeTargetResolver {
                         node,
                         workspaceRoot(workspace),
                         null,
-                        session.title(),
+                        null,
                         traceId))
                 .block();
         if (created == null) {

@@ -56,6 +56,25 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
+    void gatewayCreatesSessionWithEmptyRequestBodyWhenTitleIsAbsent() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respond(exchange, 200, "application/json", "{\"id\":\"" + REMOTE_SESSION_ID + "\"}");
+        });
+
+        try {
+            new GeneratedOpencodeSdkGateway()
+                    .createSession(node(server), "/tmp/demo", null, null, TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(request.get().body()).isEqualTo("{}");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void gatewayStartsRunWithoutWorkspaceQueryAndPropagatesTraceId() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {

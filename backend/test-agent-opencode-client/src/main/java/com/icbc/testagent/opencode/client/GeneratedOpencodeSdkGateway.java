@@ -68,7 +68,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         };
         Map<String, Object> pathParams = new HashMap<>();
         MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
-        Map<String, Object> request = Map.of("title", title);
+        Map<String, Object> request = title == null ? Map.of() : Map.of("title", title);
         HttpHeaders headerParams = new HttpHeaders();
         MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
         MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
