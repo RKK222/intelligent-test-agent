@@ -106,6 +106,7 @@ import {
   runEventMatchesRun,
   runtimeResources,
   runtimeStatus,
+  sessionTitleEventMatchesCurrentSession,
   sessionTitleFromFirstMessage,
   sessionTitleFromUpdatedEventPayload,
   shouldFailExhaustedRetry,
@@ -1535,7 +1536,7 @@ watch(run, (r, _old, onCleanup) => {
       if (!runEventMatchesRun(event, r.runId, run.value)) {
         return;
       }
-      handleRunEvent(event);
+      handleRunEvent(event, r.sessionId);
     },
     onStatus: (status) => {
       logs.value = [...logs.value.slice(-200), `[sse] ${status}`];
@@ -3105,15 +3106,15 @@ function handleRetryRun() {
   handleSend(prompt);
 }
 
-function handleRunEvent(event: RunEvent) {
+function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
   logs.value = [...logs.value.slice(-200), `[${event.seq}] ${event.type}`];
   dispatchChat({ type: "event", event });
   notifyOnAttention(event, selectedWorkspace.value, session.value);
   if (event.type === "session.updated") {
     const title = sessionTitleFromUpdatedEventPayload(event.payload);
-    // 前端没有暴露远端 root session id；RunEvent 订阅已限定当前活动 Run，
-    // 因此仅接受后端标记为非子会话的有效标题，并同步当前平台会话与已加载的历史项。
-    if (title && event.payload.isChildSession !== true && session.value) {
+    // 前端没有暴露远端 root session id；除后端标记的子会话外，还必须确认
+    // 当前页面仍指向建立该 SSE 订阅的平台会话，避免历史切换后的旧事件覆盖标题。
+    if (title && event.payload.isChildSession !== true && sessionTitleEventMatchesCurrentSession(subscribedSessionId, session.value?.sessionId) && session.value) {
       const currentSessionId = session.value.sessionId;
       session.value = { ...session.value, title };
       sessionHistoryItems.value = sessionHistoryItems.value.map((item) =>

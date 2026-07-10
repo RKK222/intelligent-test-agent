@@ -67,6 +67,16 @@ export function runEventMatchesRun(
   return Boolean(event.runId && subscribedRunId && currentRun?.runId && event.runId === subscribedRunId && event.runId === currentRun.runId);
 }
 
+/**
+ * 历史切换后旧 SSE 的关闭回调可能晚到；标题只能写回仍指向该订阅平台会话的当前页面。
+ */
+export function sessionTitleEventMatchesCurrentSession(
+  subscribedSessionId: string | undefined,
+  currentSessionId: string | undefined
+): boolean {
+  return Boolean(subscribedSessionId && currentSessionId && subscribedSessionId === currentSessionId);
+}
+
 export const OPENCODE_HEALTH_REFETCH_INTERVAL_MS = 10_000;
 export const OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS = 300_000;
 export const OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS = 30_000;

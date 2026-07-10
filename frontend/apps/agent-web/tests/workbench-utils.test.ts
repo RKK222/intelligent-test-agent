@@ -26,6 +26,7 @@ import {
   resolveRetryDeadline,
   retryCountdownSeconds,
   retryExpirationDecision,
+  sessionTitleEventMatchesCurrentSession,
   sessionTitleFromUpdatedEventPayload,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
@@ -85,6 +86,14 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
+  });
+});
+
+describe("sessionTitleEventMatchesCurrentSession", () => {
+  it("accepts a title event only when its subscribed platform session remains current", () => {
+    expect(sessionTitleEventMatchesCurrentSession("ses_current", "ses_current")).toBe(true);
+    expect(sessionTitleEventMatchesCurrentSession("ses_previous", "ses_current")).toBe(false);
+    expect(sessionTitleEventMatchesCurrentSession("ses_current", undefined)).toBe(false);
   });
 });
 
