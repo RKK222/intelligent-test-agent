@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-10 - 补齐进程锚点方位与实测约束时机
+
+- Why:
+  - 首版卡片锚点 v2 未保存绿点相对方位，旧版右下绿点迁移后可能翻到卡片另一侧；同时合法 v2 会在卡片尚未展开时被回退尺寸提前夹取并改写。
+- What:
+  - 本地偏好扩展为 `{ v: 2, cardX, cardY, dotSide }`；`dotSide` 仅表示 `top/bottom-left/right` 方位。v1 迁移保存原方位，已校验 v2 在实际卡片测量前保持原始锚点。
+- How:
+  - 只在展开卡片获得非零真实 rect 后进行锚点夹取和持久化；拖动后的首个合成 click 单独消费并清除标记，后续真实 click 仍可收起。
+- Result:
+  - 新增 v1 右下迁移方位、v2 延迟夹取/回写和连续 click 回归；`FigmaShell` + `FigmaChatPanel` 定向测试为 112 passed，1 skipped，`pnpm lint`、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过，新的 `http://127.0.0.1:3011/` 返回 HTTP 200。构建仍有既有 CSS `@import` 顺序和大包体积警告。
+- Next:
+  - 继续保留浏览器人工边缘拖动、缩放和收起/重开验收。
+
 ### 2026-07-10 - 统一进程浮层为卡片锚点坐标
 
 - Why:

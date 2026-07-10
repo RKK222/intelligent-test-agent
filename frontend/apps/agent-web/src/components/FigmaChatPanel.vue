@@ -1977,12 +1977,17 @@ const PROCESS_STATUS_CARD_GAP = 8
 const PROCESS_STATUS_CARD_MARGIN = 16
 const PROCESS_STATUS_CARD_FALLBACK_SIZE = { width: 280, height: 84 }
 const PROCESS_STATUS_CARD_VIEWPORT_INSET = PROCESS_STATUS_CARD_MARGIN * 2
+type ProcessStatusDotSide = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 const processStatusCard = ref<HTMLElement | null>(null)
 const processStatusCardSize = ref({ ...PROCESS_STATUS_CARD_FALLBACK_SIZE })
 // v2 的唯一持久化坐标：卡片固定定位的左上角；绿点仅由它派生，绝不单独持久化。
 const processStatusCardAnchor = ref<{ x: number; y: number } | null>(null)
+// 方位只描述绿点相对卡片的方向，不引入第二套可持久化坐标。
+const processStatusDotSide = ref<ProcessStatusDotSide>('top-left')
+const processStatusCardMeasured = ref(false)
 const isDraggingProcessDot = ref(false)
 const didDragProcessDot = ref(false)
+let suppressNextProcessStatusClick = false
 let processStatusCardResizeObserver: ResizeObserver | null = null
 let dragPointerId: number | null = null
 let dragStartX = 0
@@ -2033,11 +2038,18 @@ function isFinitePosition(position: { x?: unknown; y?: unknown }): position is {
   )
 }
 
+function isProcessStatusDotSide(value: unknown): value is ProcessStatusDotSide {
+  return value === 'top-left' || value === 'top-right' || value === 'bottom-left' || value === 'bottom-right'
+}
+
 function saveProcessStatusCardAnchor() {
   if (typeof window === 'undefined' || !processStatusCardAnchor.value) return
   try {
     const { x: cardX, y: cardY } = processStatusCardAnchor.value
-    window.localStorage.setItem(PROCESS_DOT_POS_KEY, JSON.stringify({ v: 2, cardX, cardY }))
+    window.localStorage.setItem(
+      PROCESS_DOT_POS_KEY,
+      JSON.stringify({ v: 2, cardX, cardY, dotSide: processStatusDotSide.value })
+    )
   } catch {
     // 忽略 localStorage 写入失败（如隐私模式）
   }
@@ -2051,19 +2063,33 @@ function loadProcessDotPos() {
       processStatusFloating.value = false
       return
     }
-    const parsed = JSON.parse(raw) as { v?: unknown; cardX?: unknown; cardY?: unknown; x?: unknown; y?: unknown }
+    const parsed = JSON.parse(raw) as {
+      v?: unknown
+      cardX?: unknown
+      cardY?: unknown
+      dotSide?: unknown
+      x?: unknown
+      y?: unknown
+    }
     const v2Position = { x: parsed.cardX, y: parsed.cardY }
     const legacyDotPosition = { x: parsed.x, y: parsed.y }
-    if (parsed.v === 2 && isFinitePosition(v2Position)) {
-      processStatusCardAnchor.value = clampProcessStatusCardAnchor(v2Position)
+    if (parsed.v === 2 && isFinitePosition(v2Position) && isProcessStatusDotSide(parsed.dotSide)) {
+      // 已校验的 v2 不在回退尺寸阶段夹取或回写，等展开后拿到真实卡片尺寸再处理。
+      processStatusCardAnchor.value = v2Position
+      processStatusDotSide.value = parsed.dotSide
       processStatusFloating.value = true
       processStatusCollapsed.value = true
-      saveProcessStatusCardAnchor()
+    } else if (parsed.v === 2 && isFinitePosition(v2Position)) {
+      // 兼容最早一版缺少方位的 v2；同样等待真实测量后再升级写回。
+      processStatusCardAnchor.value = v2Position
+      processStatusDotSide.value = dotSideForCardAnchor(v2Position)
+      processStatusFloating.value = true
+      processStatusCollapsed.value = true
     } else if (isFinitePosition(legacyDotPosition)) {
       // 兼容 v1 绿点坐标：按既有换向规则折算为卡片锚点，并立即覆盖为 v2。
-      processStatusCardAnchor.value = clampProcessStatusCardAnchor(
-        calculateProcessStatusCardPos(legacyDotPosition, processStatusCardSize.value)
-      )
+      const placement = calculateProcessStatusCardPlacement(legacyDotPosition, processStatusCardSize.value)
+      processStatusCardAnchor.value = placement.anchor
+      processStatusDotSide.value = placement.dotSide
       processStatusFloating.value = true
       processStatusCollapsed.value = true
       saveProcessStatusCardAnchor()
@@ -2077,7 +2103,7 @@ function loadProcessDotPos() {
 
 const processStatusDotStyle = computed(() => {
   const pos = processStatusCardAnchor.value
-    ? dotPositionForCardAnchor(processStatusCardAnchor.value)
+    ? dotPositionForCardAnchor(processStatusCardAnchor.value, processStatusDotSide.value)
     : { x: PROCESS_DOT_MARGIN, y: PROCESS_DOT_MARGIN }
   return {
     '--figma-process-dot-x': `${pos.x}px`,
@@ -2085,31 +2111,32 @@ const processStatusDotStyle = computed(() => {
   } as Record<string, string>
 })
 
-// 仅用于兼容旧版 v1 绿点记录的迁移：新代码不会由绿点反推或保存卡片位置。
-function calculateProcessStatusCardPos(
+// 仅用于兼容旧版 v1 绿点记录的迁移：同时保存旧绿点相对卡片的视觉方位。
+function calculateProcessStatusCardPlacement(
   dotPos: { x: number; y: number },
   cardSize: { width: number; height: number }
 ) {
-  if (typeof window === 'undefined') return { x: dotPos.x, y: dotPos.y }
+  if (typeof window === 'undefined') {
+    return { anchor: { x: dotPos.x, y: dotPos.y }, dotSide: 'top-left' as ProcessStatusDotSide }
+  }
 
   // CSS 会把卡片限制在视口内，这里用同一有效尺寸计算位置，避免测量值过大时定位失真。
   const effectiveCardSize = effectiveProcessStatusCardSize(cardSize)
   const right = dotPos.x + PROCESS_DOT_SIZE + PROCESS_STATUS_CARD_GAP
   const bottom = dotPos.y + PROCESS_DOT_SIZE + PROCESS_STATUS_CARD_GAP
-  // 放置优先级：默认右下；单独越界时分别翻到左侧或上方，最后再夹进视口。
-  const preferredX =
-    right + effectiveCardSize.width <= window.innerWidth - PROCESS_STATUS_CARD_MARGIN
-      ? right
-      : dotPos.x - PROCESS_STATUS_CARD_GAP - effectiveCardSize.width
-  const preferredY =
-    bottom + effectiveCardSize.height <= window.innerHeight - PROCESS_STATUS_CARD_MARGIN
-      ? bottom
-      : dotPos.y - PROCESS_STATUS_CARD_GAP - effectiveCardSize.height
+  const cardIsRight = right + effectiveCardSize.width <= window.innerWidth - PROCESS_STATUS_CARD_MARGIN
+  const cardIsBelow = bottom + effectiveCardSize.height <= window.innerHeight - PROCESS_STATUS_CARD_MARGIN
+  // 放置优先级：默认右下；单独越界时翻向。dotSide 记录的是绿点相对卡片的象限。
+  const preferredX = cardIsRight ? right : dotPos.x - PROCESS_STATUS_CARD_GAP - effectiveCardSize.width
+  const preferredY = cardIsBelow ? bottom : dotPos.y - PROCESS_STATUS_CARD_GAP - effectiveCardSize.height
   const maxX = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerWidth - effectiveCardSize.width - PROCESS_STATUS_CARD_MARGIN)
   const maxY = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerHeight - effectiveCardSize.height - PROCESS_STATUS_CARD_MARGIN)
   return {
-    x: Math.min(Math.max(preferredX, PROCESS_STATUS_CARD_MARGIN), maxX),
-    y: Math.min(Math.max(preferredY, PROCESS_STATUS_CARD_MARGIN), maxY),
+    anchor: {
+      x: Math.min(Math.max(preferredX, PROCESS_STATUS_CARD_MARGIN), maxX),
+      y: Math.min(Math.max(preferredY, PROCESS_STATUS_CARD_MARGIN), maxY),
+    },
+    dotSide: `${cardIsBelow ? 'top' : 'bottom'}-${cardIsRight ? 'left' : 'right'}` as ProcessStatusDotSide,
   }
 }
 
@@ -2136,6 +2163,7 @@ function measureProcessStatusCard() {
   const rect = card.getBoundingClientRect()
   if (rect.width > 0 && rect.height > 0) {
     processStatusCardSize.value = { width: rect.width, height: rect.height }
+    processStatusCardMeasured.value = true
     clampFloatingProcessStatusCardAnchor()
   }
 }
@@ -2167,15 +2195,24 @@ watch(processStatusCardVisible, (visible) => {
   }
 })
 
-// 卡片是唯一真实坐标；绿点根据卡片大小选择相邻安全侧，在空间不足时再夹进视口。
-function dotPositionForCardAnchor(cardPos: { x: number; y: number }) {
-  const size = processStatusCardSize.value
-  const effectiveSize = effectiveProcessStatusCardSize(size)
+function dotSideForCardAnchor(cardPos: { x: number; y: number }): ProcessStatusDotSide {
   const left = cardPos.x - PROCESS_DOT_SIZE - PROCESS_STATUS_CARD_GAP
   const top = cardPos.y - PROCESS_DOT_SIZE - PROCESS_STATUS_CARD_GAP
+  return `${top >= PROCESS_DOT_MARGIN ? 'top' : 'bottom'}-${left >= PROCESS_DOT_MARGIN ? 'left' : 'right'}` as ProcessStatusDotSide
+}
+
+// 卡片是唯一真实坐标；绿点仅以方位、卡片大小和安全边距派生，不单独保存坐标。
+function dotPositionForCardAnchor(cardPos: { x: number; y: number }, dotSide: ProcessStatusDotSide) {
+  const effectiveSize = effectiveProcessStatusCardSize(processStatusCardSize.value)
+  const dotIsTop = dotSide.startsWith('top')
+  const dotIsLeft = dotSide.endsWith('left')
   return clampProcessDotPos(
-    left >= PROCESS_DOT_MARGIN ? left : cardPos.x + effectiveSize.width + PROCESS_STATUS_CARD_GAP,
-    top >= PROCESS_DOT_MARGIN ? top : cardPos.y + effectiveSize.height + PROCESS_STATUS_CARD_GAP
+    dotIsLeft
+      ? cardPos.x - PROCESS_DOT_SIZE - PROCESS_STATUS_CARD_GAP
+      : cardPos.x + effectiveSize.width + PROCESS_STATUS_CARD_GAP,
+    dotIsTop
+      ? cardPos.y - PROCESS_DOT_SIZE - PROCESS_STATUS_CARD_GAP
+      : cardPos.y + effectiveSize.height + PROCESS_STATUS_CARD_GAP
   )
 }
 
@@ -2185,15 +2222,17 @@ function prepareCardForFloatingDrag() {
   const rect = card.getBoundingClientRect()
   if (rect.width > 0 && rect.height > 0) {
     processStatusCardSize.value = { width: rect.width, height: rect.height }
+    processStatusCardMeasured.value = true
   }
   // 内联转浮动时直接采用拖动前的实际 rect，确保首次越过阈值不会发生视觉跳位。
   processStatusCardAnchor.value = clampProcessStatusCardAnchor({ x: rect.left, y: rect.top })
+  processStatusDotSide.value = dotSideForCardAnchor(processStatusCardAnchor.value)
   processStatusFloating.value = true
 }
 
 function clampFloatingProcessStatusCardAnchor() {
   const anchor = processStatusCardAnchor.value
-  if (!processStatusFloating.value || !anchor) return
+  if (!processStatusFloating.value || !anchor || !processStatusCardMeasured.value) return
   const clamped = clampProcessStatusCardAnchor(anchor)
   if (clamped.x === anchor.x && clamped.y === anchor.y) return
   processStatusCardAnchor.value = clamped
@@ -2210,6 +2249,7 @@ function onProcessDotPointerMove(event: PointerEvent) {
     Math.hypot(dx, dy) >= PROCESS_DOT_DRAG_THRESHOLD
   ) {
     didDragProcessDot.value = true
+    suppressNextProcessStatusClick = true
     if (dragStartedOnCard && !processStatusFloating.value) {
       prepareCardForFloatingDrag()
       dragCardAnchorOrigin = processStatusCardAnchor.value
@@ -2277,7 +2317,8 @@ function onProcessStatusCardPointerDown(event: PointerEvent) {
 
 function handleProcessStatusDotClick() {
   // 拖动产生的 pointerup 会触发 click，这里通过阈值标记过滤掉真实拖动
-  if (didDragProcessDot.value) {
+  if (suppressNextProcessStatusClick) {
+    suppressNextProcessStatusClick = false
     didDragProcessDot.value = false
     return
   }
@@ -2285,7 +2326,8 @@ function handleProcessStatusDotClick() {
 }
 
 function handleProcessStatusCardClick() {
-  if (didDragProcessDot.value) {
+  if (suppressNextProcessStatusClick) {
+    suppressNextProcessStatusClick = false
     didDragProcessDot.value = false
     return
   }

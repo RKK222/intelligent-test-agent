@@ -153,7 +153,7 @@ Update the README and session log with actual verification results; re-check `do
 
 - [x] **Step 1: Write failing coordinate-model tests**
 
-Add tests for an extreme left/top inline-card drag, collapse/reopen retaining the exact clamped card anchor, edge card/dot dragging followed by viewport shrink, ResizeObserver content-size growth, and legacy `{x,y}` storage restoration. Assert v2 `{ v: 2, cardX, cardY }` migration rewrite and remount restoration; after both card-size and viewport changes, assert the canonical anchor is clamped/persisted and the collapsed derived dot remains visible. Retain the no-storage default-inline test.
+Add tests for an extreme left/top inline-card drag, collapse/reopen retaining the exact clamped card anchor, edge card/dot dragging followed by viewport shrink, ResizeObserver content-size growth, and legacy `{x,y}` storage restoration. Assert v2 `{ v: 2, cardX, cardY, dotSide }` migration rewrite/remount and a bottom-right legacy record preserving visible dot placement; assert a v2 anchor valid under actual dimensions is not overwritten by fallback dimensions before first measurement. Verify pointerup-outside drag-click suppression is released before the next genuine click. After card-size and viewport changes, assert the canonical anchor is clamped/persisted and the collapsed derived dot remains visible. Retain the no-storage default-inline test.
 
 - [x] **Step 2: Verify RED**
 
@@ -163,7 +163,7 @@ Expected: FAIL because the temporary card anchor and dot coordinate are currentl
 
 - [x] **Step 3: Replace dual positions with one card anchor**
 
-Make a clamped fixed card left/top anchor the only floating-position state and persistence source, serialized as validated `{ v: 2, cardX, cardY }`. Derive the dot position from that anchor, card dimensions, preferred placement and safe viewport constraints. Convert an old `{x,y}` dot storage record to an anchor on read, clamp and rewrite the v2 record; preserve default inline mode if no record exists. Make card/dot drag, ResizeObserver, and window resize move or clamp only the anchor, persisting a changed clamp. Preserve drag threshold, click suppression, keyboard/init behavior, child-agent hiding and 8px translucent dot.
+Make a fixed card left/top anchor the only floating coordinate state and persistence source, serialized as validated `{ v: 2, cardX, cardY, dotSide }`; `dotSide` records only relative direction. Do not fallback-clamp or overwrite a validated v2 anchor before its first real-card measurement. Derive the dot position from anchor, direction, card dimensions and safe viewport constraints. Convert an old `{x,y}` dot storage record to an anchor plus direction on read and rewrite v2 while preserving its visible edge placement; preserve default inline mode if no record exists. Make card/dot drag, ResizeObserver, and window resize move or clamp only the anchor, persisting a changed clamp. Clear drag-click suppression after the originating synthetic click window so a later genuine click works. Preserve drag threshold, keyboard/init behavior, child-agent hiding and 8px translucent dot.
 
 - [ ] **Step 4: Verify GREEN and run UI**
 
