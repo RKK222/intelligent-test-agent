@@ -2828,6 +2828,117 @@ async function handleDeleteEntry(path: string, type: "file" | "directory") {
   }
 }
 
+type CacheFileData = {
+  title: string;
+  content: string;
+};
+
+type SingleResponse = {
+  data: {
+    jumpUrl: string;
+  };
+};
+
+async function handleCacheAndNavigate(path: string, type: "file" | "directory") {
+  if (!selectedWorkspace.value) {
+    return;
+  }
+  const workspaceId = selectedWorkspace.value.workspaceId;
+  const appName = selectedManagedApplication.value?.appName ?? "";
+  const now = new Date();
+  const version = `${now.getFullYear()}年${now.getMonth() + 1}月`;
+  const cacheDataUrl = import.meta.env.VITE_CACHE_DATA_URL ?? "";
+
+  if (!cacheDataUrl) {
+    ElMessage.error("缓存数据地址未配置");
+    return;
+  }
+
+  try {
+    let files: CacheFileData[] = [];
+    let cacheType = "md";
+
+    if (type === "directory") {
+      if (path.includes("测试执行")) {
+        cacheType = "json";
+        files = await collectAllFilesInDirectory(workspaceId, path);
+      } else {
+        ElMessage.warning("仅测试执行目录支持文件夹缓存跳转");
+        return;
+      }
+    } else {
+      if (path.includes("测试设计")) {
+        cacheType = "md";
+        const fileContent = await api.readFile(workspaceId, path);
+        files = [{ title: fileNameOf(path), content: fileContent.content }];
+      } else if (path.includes("测试执行")) {
+        cacheType = "json";
+        const fileContent = await api.readFile(workspaceId, path);
+        files = [{ title: fileNameOf(path), content: fileContent.content }];
+      } else {
+        ElMessage.warning("仅测试设计和测试执行目录下的文件支持单文件缓存跳转");
+        return;
+      }
+    }
+
+    if (files.length === 0) {
+      ElMessage.warning("没有可缓存的文件");
+      return;
+    }
+
+    const body = JSON.stringify({
+      type: cacheType,
+      appName,
+      version,
+      data: files,
+    });
+
+    const response = await fetch(`${cacheDataUrl}/aiTool/cacheData`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+
+    const result = await response.json() as SingleResponse;
+    console.log("============请求后台=====================", result);
+
+    if (result.data?.jumpUrl) {
+      window.open(result.data.jumpUrl, "_blank", "noopener,noreferrer");
+    } else {
+      ElMessage.error("获取跳转地址失败");
+    }
+  } catch (error) {
+    console.error("缓存数据并跳转失败", error);
+    ElMessage.error(error instanceof Error ? error.message : "缓存数据并跳转失败");
+  }
+}
+
+async function collectAllFilesInDirectory(workspaceId: string, directoryPath: string): Promise<CacheFileData[]> {
+  const files: CacheFileData[] = [];
+  const queue: string[] = [directoryPath];
+
+  while (queue.length > 0) {
+    const currentPath = queue.shift()!;
+    const entries = await api.listFiles(workspaceId, currentPath);
+
+    for (const entry of entries) {
+      if (entry.type === "directory") {
+        queue.push(entry.path);
+      } else {
+        const fileContent = await api.readFile(workspaceId, entry.path);
+        files.push({
+          title: entry.name,
+          content: fileContent.content,
+        });
+      }
+    }
+  }
+
+  return files;
+}
+
 async function handlePreviewContext(item: ChatContextItem) {
   if (!item.path) {
     return;
@@ -4080,6 +4191,7 @@ async function handleLogout() {
           @search="handleFileSearch"
           @create-entry="handleCreateEntry"
           @delete-entry="handleDeleteEntry"
+          @cache-and-navigate="handleCacheAndNavigate"
         />
       </div>
       <div v-else class="managed-workspace-empty">
@@ -4171,6 +4283,7 @@ async function handleLogout() {
           @open-server-workspace-picker="openServerWorkspacePicker"
           @update:markdown-preview="(value: boolean) => { if (!value) markdownPreviewMode = 'off'; else if (markdownPreviewMode === 'off') markdownPreviewMode = 'split'; }"
           @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
+          @cache-and-navigate="(path: string) => handleCacheAndNavigate(path, 'file')"
         >
           <CodeEditor
             ref="codeEditorRef"

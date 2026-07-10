@@ -8,10 +8,14 @@ export type EditorPaneProps = {
 </script>
 
 <script setup lang="ts">
-import { X } from "lucide-vue-next";
+import { Plane, X } from "lucide-vue-next";
 
 defineProps<EditorPaneProps>();
-const emit = defineEmits<{ activate: [path: string]; close: [path: string] }>();
+const emit = defineEmits<{ 
+  activate: [path: string]; 
+  close: [path: string];
+  cacheAndNavigate: [path: string];
+}>();
 </script>
 
 <template>
@@ -32,6 +36,16 @@ const emit = defineEmits<{ activate: [path: string]; close: [path: string] }>();
         <span class="truncate">{{ tab.title }}</span>
         <span v-if="tab.livePreview" class="rounded bg-[var(--ta-cyan)]/15 px-1 text-[10px] leading-4 text-[var(--ta-cyan)]">实时</span>
         <span v-else-if="tab.content !== tab.savedContent" class="h-1.5 w-1.5 rounded-full bg-[#b07a2b]" />
+        <span
+          v-if="tab.path.includes('测试设计')"
+          role="button"
+          tabindex="0"
+          class="rounded p-0.5 text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-accent)]"
+          title="缓存并跳转"
+          @click.stop="emit('cacheAndNavigate', tab.path)"
+        >
+          <Plane class="h-3.5 w-3.5" />
+        </span>
         <span
           role="button"
           tabindex="0"

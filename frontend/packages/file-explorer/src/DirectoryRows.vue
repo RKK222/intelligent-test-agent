@@ -15,7 +15,7 @@ export type DirectoryRowsProps = {
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Plus, Trash2 } from "lucide-vue-next";
+import { Plane, Plus, Trash2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileIcon from "./FileIcon.vue";
 
@@ -26,6 +26,7 @@ const emit = defineEmits<{
   addFileContext: [path: string];
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
+  cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
 
 const entries = computed(() => {
@@ -109,9 +110,6 @@ function submitCreateDialog() {
 }
 
 function openDeleteDialog(entry: FileTreeEntry) {
-  if (entry.type !== "file") {
-    return;
-  }
   deleteDialogEntry.value = { path: entry.path, name: entry.name, type: entry.type };
   showDeleteDialog.value = true;
 }
@@ -178,7 +176,6 @@ function submitDeleteDialog() {
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
-          v-if="entry.type === 'file'"
           type="button"
           class="ta-file-tree-delete-btn"
           title="删除"
@@ -186,6 +183,16 @@ function submitDeleteDialog() {
           @click.stop="openDeleteDialog(entry)"
         >
           <Trash2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+        </button>
+        <button
+          v-if="entry.type === 'directory' && entry.name.includes('测试执行')"
+          type="button"
+          class="ta-file-tree-plane-btn"
+          title="缓存并跳转"
+          aria-label="缓存并跳转"
+          @click.stop="emit('cacheAndNavigate', entry.path, entry.type)"
+        >
+          <Plane class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
       </button>
       <DirectoryRows
@@ -202,6 +209,7 @@ function submitDeleteDialog() {
         @add-file-context="emit('addFileContext', $event)"
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
+        @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
       />
     </div>
     <Teleport to="body">
@@ -324,7 +332,7 @@ function submitDeleteDialog() {
           </header>
           <div class="flex flex-col gap-3">
             <p class="text-[12px] text-[var(--ta-text)]">
-              确定要删除文件
+              确定要删除{{ deleteDialogEntry?.type === 'directory' ? '文件夹' : '文件' }}
               <strong class="text-[var(--ta-danger,#b91c1c)]">{{ deleteDialogEntry?.name }}</strong>
               吗？删除后无法恢复。
             </p>
@@ -440,5 +448,30 @@ function submitDeleteDialog() {
 .ta-file-tree-delete-btn:hover {
   background: var(--ta-hover, #f1f5f9);
   color: var(--ta-danger, #b91c1c);
+}
+
+.ta-file-tree-plane-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ta-tree-muted, #8b949e);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  margin-left: 4px;
+}
+
+.ta-file-tree-row:hover .ta-file-tree-plane-btn {
+  display: inline-flex;
+}
+
+.ta-file-tree-plane-btn:hover {
+  background: var(--ta-hover, #f1f5f9);
+  color: var(--ta-accent, #3366ff);
 }
 </style>

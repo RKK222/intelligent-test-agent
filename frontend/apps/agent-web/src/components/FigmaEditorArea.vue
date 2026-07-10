@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import tabCloseUrl from "../assets/figma/tab-close.svg";
 import { computed, onBeforeUnmount, ref, watch, nextTick } from "vue";
+import { Plane } from "lucide-vue-next";
 import { FileIcon } from "@test-agent/file-explorer";
 import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
 import { languageFromPath } from "@test-agent/editor";
@@ -49,6 +50,7 @@ const emit = defineEmits<{
   "open-server-workspace-picker": [];
   "update:markdownPreview": [enabled: boolean];
   "update:markdownPreviewMode": [mode: PreviewMode];
+  "cacheAndNavigate": [path: string];
 }>();
 
 // 当前激活 tab 是否是 Markdown 文件：是的话才在 tab 表头最右侧显示预览开关。
@@ -147,6 +149,16 @@ watch(
             class="figma-editor-tab-dirty-star"
           >*</span>
           <span class="figma-editor-tab-title">{{ tab.title }}</span>
+          <button
+            v-if="tab.path.includes('测试设计') || tab.path.includes('测试执行')"
+            type="button"
+            class="figma-editor-tab-plane"
+            aria-label="缓存并跳转"
+            title="缓存并跳转"
+            @click.stop="emit('cacheAndNavigate', tab.path)"
+          >
+            <Plane class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </button>
           <button
             type="button"
             class="figma-editor-tab-close"
@@ -354,6 +366,31 @@ watch(
 
 .figma-editor-tab--active .figma-editor-tab-title {
   color: #111;
+}
+
+.figma-editor-tab-plane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+  color: #8b949e;
+}
+
+.figma-editor-tab:hover .figma-editor-tab-plane,
+.figma-editor-tab--active .figma-editor-tab-plane {
+  opacity: 1;
+}
+
+.figma-editor-tab-plane:hover {
+  background: #ddd;
+  color: #3366ff;
 }
 
 .figma-editor-tab-close {

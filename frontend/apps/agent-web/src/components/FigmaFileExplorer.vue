@@ -71,6 +71,8 @@ const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   // 删除文件或文件夹
   deleteEntry: [path: string, type: "file" | "directory"];
+  // 缓存并跳转
+  cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
 
 const workspaceExpanded = ref(true);
@@ -332,6 +334,7 @@ defineExpose({
               @search="emit('search', $event)"
               @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
               @delete-entry="(path, type) => emit('deleteEntry', path, type)"
+              @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
             />
           </div>
         </div>
