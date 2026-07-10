@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-10 - 保护宠物起点并填充同款图标
+
+- Why:
+  - 自然动作期间窗口缩放不应覆盖用户保存的下一次起点；顶部同款宠物图标的实际可见几何也需要占满按钮。
+- What:
+  - 窗口缩放只夹取当前内存动画位置，保存坐标只在手动拖动/键盘定位时写回；开关 SVG 视口裁剪到宠物头部几何，填充 24×28 图标区域。
+- How:
+  - 新增起点持久化和 viewBox 回归测试，未新增 API、事件、数据库或环境配置。
+- Result:
+  - `FigmaShell` 19/19 通过；Shell + Chat 定向回归 117 passed、1 skipped，agent-web lint/typecheck/build 和 HTTP 200 均通过。仍有既有 CSS、chunk 和 DirectoryRows 警告；未做浏览器人工验收。
+- Next:
+  - 评估类似 Claude Code `/btw` 的旁路问答，不把它表述为已实现能力。
+
 ### 2026-07-10 - 合并验证宠物互动与进程浮层修复
 
 - Why:
