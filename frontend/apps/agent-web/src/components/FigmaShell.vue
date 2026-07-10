@@ -316,6 +316,8 @@ let movementTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const robotCurrentLevel = ref<"top" | "bottom">("top");
 const robotManuallyPositioned = ref(false);
+// 手动唤起只控制本次展示是否静止，不能与「已保存坐标」混用，否则隐藏后无法重新进入自动待机计时。
+const robotManuallySummoned = ref(false);
 const robotDragging = ref(false);
 
 const ROBOT_WIDTH = 24;
@@ -376,6 +378,7 @@ function pauseRobotForManualPlacement() {
   if (inactivityTimer) clearTimeout(inactivityTimer);
   inactivityTimer = null;
   robotManuallyPositioned.value = true;
+  robotManuallySummoned.value = false;
   robotState.value = "idle";
   robotDirection.value = "front";
   robotTransition.value = "none";
@@ -557,16 +560,15 @@ function clearAllRobotTimers() {
 
 // Reset activity and 1-minute inactivity timer
 function resetInactivityTimer() {
-  if (robotManuallyPositioned.value) return;
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = null;
   if (robotState.value !== "sleeping") {
-    // Already active, check if we need to exit
-    if (robotState.value !== "waving" && robotState.value !== "exiting-charge" && robotState.value !== "exiting-fly") {
+    // 手动安放或手动唤起的宠物保持静止；自动出现的宠物仍会因用户活动离场。
+    if (!robotManuallyPositioned.value && !robotManuallySummoned.value && robotState.value !== "waving" && robotState.value !== "exiting-charge" && robotState.value !== "exiting-fly") {
       triggerExit();
     }
     return;
   }
-
-  if (inactivityTimer) clearTimeout(inactivityTimer);
 
   // Only trigger when page is active and in focus
   if (document.hidden || !document.hasFocus()) {
@@ -578,7 +580,7 @@ function resetInactivityTimer() {
 
 // Spawn logic
 function spawnRobot() {
-  if (robotManuallyPositioned.value || robotState.value !== "sleeping") return;
+  if (robotState.value !== "sleeping") return;
   if (document.hidden || !document.hasFocus()) {
     resetInactivityTimer();
     return;
@@ -586,6 +588,14 @@ function spawnRobot() {
 
   clearAllRobotTimers();
   if (inactivityTimer) clearTimeout(inactivityTimer);
+
+  // 已手动安放的宠物在一分钟无操作后原地静态回归，不能再次随机跳动。
+  if (robotManuallyPositioned.value) {
+    robotState.value = "idle";
+    robotDirection.value = "front";
+    robotTransition.value = "none";
+    return;
+  }
 
   const birth = getBirthPosition();
   robotX.value = birth.x;
@@ -970,7 +980,6 @@ function executeBigJump() {
 
 // User activity listener
 function handleUserActivity() {
-  if (robotManuallyPositioned.value) return;
   const now = Date.now();
   if (now - lastActivityTime < 100) return;
   lastActivityTime = now;
@@ -1011,6 +1020,34 @@ function handleFocusChange() {
   resetInactivityTimer();
 }
 
+function toggleRobotVisibility() {
+  if (robotState.value !== "sleeping") {
+    // 收起后清理全部动作/离场计时，再重新开始完整的一分钟无操作等待。
+    finishRobotDrag();
+    clearAllRobotTimers();
+    if (inactivityTimer) clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+    robotState.value = "sleeping";
+    robotManuallySummoned.value = false;
+    resetInactivityTimer();
+    return;
+  }
+
+  // 手动唤起不触发随机出生动画，优先复用用户保存的位置并保持静止。
+  const saved = loadSavedRobotPosition();
+  const position = saved ?? clampRobotPosition(getBirthPosition());
+  robotX.value = position.x;
+  robotY.value = position.y;
+  robotManuallyPositioned.value = Boolean(saved);
+  robotManuallySummoned.value = true;
+  robotCurrentLevel.value = "top";
+  robotDirection.value = "front";
+  robotTransition.value = "none";
+  robotState.value = "idle";
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = null;
+}
+
 onMounted(() => {
   window.addEventListener("resize", handleWindowResize);
 
@@ -1030,12 +1067,9 @@ onMounted(() => {
     robotX.value = savedPosition.x;
     robotY.value = savedPosition.y;
     robotManuallyPositioned.value = true;
-    robotState.value = "idle";
-    robotDirection.value = "front";
-    robotTransition.value = "none";
-  } else {
-    resetInactivityTimer();
   }
+  // 无论是否有保存位置，初次进入都保持隐藏，等连续一分钟无操作后再出现。
+  resetInactivityTimer();
 });
 
 onUnmounted(() => {
@@ -1196,6 +1230,17 @@ function submitJoinApp() {
             </div>
           </section>
         </div>
+        <button
+          type="button"
+          class="figma-robot-visibility-toggle"
+          data-testid="robot-visibility-toggle"
+          :aria-label="robotState === 'sleeping' ? '唤起小宠物' : '收起小宠物'"
+          :aria-pressed="robotState !== 'sleeping'"
+          title="唤起或收起小宠物"
+          @click.stop="toggleRobotVisibility"
+        >
+          <span aria-hidden="true">🤖</span>
+        </button>
         <div class="figma-app-menu-wrapper" @click.stop>
           <button
             type="button"
@@ -1551,6 +1596,29 @@ function submitJoinApp() {
   position: relative;
   display: inline-flex;
   align-items: center;
+}
+
+.figma-robot-visibility-toggle {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.figma-robot-visibility-toggle:hover,
+.figma-robot-visibility-toggle[aria-pressed='true'] {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.figma-robot-visibility-toggle:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .figma-runtime-inventory-summary {

@@ -45,6 +45,97 @@ describe("FigmaChatPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps a READY card inline without a saved drag and only uses floating mode after a drag", async () => {
+    window.localStorage.removeItem("figma-chat-process-dot-pos");
+    const wrapper = mount(FigmaChatPanel, {
+      props: { messages: [], processStatus: { status: "READY", initializable: false, message: "ready" } } as any,
+    });
+    try {
+      await nextTick();
+      const inlineCard = wrapper.get(".figma-chat-process-status");
+      expect((inlineCard.element as HTMLElement).style.position).toBe("");
+      expect(wrapper.find(".figma-chat-process-status-dot").exists()).toBe(false);
+
+      await inlineCard.trigger("click");
+      const dot = wrapper.get(".figma-chat-process-status-dot");
+      dispatchPointer(dot.element, "pointerdown", 31, 100, 100);
+      dispatchPointer(window, "pointermove", 31, 160, 140);
+      dispatchPointer(window, "pointerup", 31, 160, 140);
+      await nextTick();
+      expect(window.localStorage.getItem("figma-chat-process-dot-pos")).toBeTruthy();
+
+      await dot.trigger("click");
+      await dot.trigger("click");
+      await nextTick();
+      expect((wrapper.get(".figma-chat-process-status").element as HTMLElement).style.position).toBe("fixed");
+    } finally {
+      wrapper.unmount();
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
+  it("drags the expanded status card without a jump and suppresses its follow-up click", async () => {
+    window.localStorage.setItem("figma-chat-process-dot-pos", JSON.stringify({ x: 880, y: 680 }));
+    setViewport(1000, 800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("figma-chat-process-status")
+        ? ({ x: 632, y: 582, width: 240, height: 90, top: 582, right: 872, bottom: 672, left: 632, toJSON: () => ({}) } as DOMRect)
+        : ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect);
+    });
+    const wrapper = mount(FigmaChatPanel, {
+      props: { messages: [], processStatus: { status: "READY", initializable: false, message: "ready" } } as any,
+    });
+    try {
+      await nextTick();
+      await wrapper.get(".figma-chat-process-status-dot").trigger("click");
+      await nextTick();
+      const card = wrapper.get(".figma-chat-process-status");
+      expect((card.element as HTMLElement).style.left).toBe("632px");
+      expect((card.element as HTMLElement).style.top).toBe("582px");
+      dispatchPointer(card.element, "pointerdown", 32, 700, 620);
+      dispatchPointer(window, "pointermove", 32, 720, 640);
+      await nextTick();
+      expect((card.element as HTMLElement).style.left).toBe("652px");
+      expect((card.element as HTMLElement).style.top).toBe("602px");
+      dispatchPointer(window, "pointerup", 32, 720, 640);
+      await card.trigger("click");
+      await nextTick();
+      expect(wrapper.find(".figma-chat-process-status").exists()).toBe(true);
+      expect(window.localStorage.getItem("figma-chat-process-dot-pos")).not.toBe(JSON.stringify({ x: 880, y: 680 }));
+    } finally {
+      wrapper.unmount();
+      vi.restoreAllMocks();
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
+  it("uses an eight-pixel translucent halo dot and keeps all process status UI out of child-agent view", async () => {
+    window.localStorage.setItem("figma-chat-process-dot-pos", JSON.stringify({ x: 100, y: 120 }));
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          { id: "m1", role: "assistant", parts: [{ id: "task", type: "tool", toolName: "task", status: "completed", input: { description: "child" } }] }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        subagentsBySessionId: { ses_child: { sessionId: "ses_child", title: "child" } },
+        subagentByTaskPartId: { task: "ses_child" }
+      } as any,
+    });
+    try {
+      await nextTick();
+      expect(wrapper.get(".figma-chat-process-status-dot").attributes("style")).toContain("--figma-process-dot-x: 100px");
+      expect(wrapper.get(".figma-chat-process-status-dot").classes()).toContain("is-ready");
+      const taskCard = wrapper.find(".oc-subagent-card");
+      await taskCard.trigger("click");
+      await nextTick();
+      expect(wrapper.find(".figma-chat-process-status-dot").exists()).toBe(false);
+      expect(wrapper.find(".figma-chat-process-status").exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
   it("persists a dragged READY dot and expands the status card beside that location", async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
@@ -84,8 +175,8 @@ describe("FigmaChatPanel", () => {
       const card = wrapper.get(".figma-chat-process-status");
       const cardElement = card.element as HTMLElement;
       expect(cardElement.style.position).toBe("fixed");
-      expect(cardElement.style.left).toBe("280px");
-      expect(cardElement.style.top).toBe("240px");
+      expect(cardElement.style.left).toBe("276px");
+      expect(cardElement.style.top).toBe("236px");
 
       await card.trigger("click");
       await nextTick();
@@ -157,8 +248,8 @@ describe("FigmaChatPanel", () => {
       window.dispatchEvent(new Event("resize"));
       await nextTick();
 
-      expect(cardElement.style.left).toBe("164px");
-      expect(cardElement.style.top).toBe("244px");
+      expect(cardElement.style.left).toBe("168px");
+      expect(cardElement.style.top).toBe("248px");
     } finally {
       wrapper.unmount();
       vi.restoreAllMocks();
@@ -1031,6 +1122,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("Explore frontend structure");
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
 
+    await wrapper.get(".figma-chat-process-status").trigger("click");
     await wrapper.get(".figma-chat-process-status-dot").trigger("click");
     await nextTick();
     await nextTick();

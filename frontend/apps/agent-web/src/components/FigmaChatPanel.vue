@@ -1935,14 +1935,15 @@ const processStatusText = computed(() => {
 
 const activeSubagentSessionId = ref<string | null>(null)
 
-// 进程状态卡片可折叠：默认收起为右下角一个小圆点（带渐变虚化），
-// 点击展开/收起，节省聊天面板纵向空间
-const processStatusCollapsed = ref(true)
+// 没有用户拖拽记录时沿用原对话顶部的内联状态卡；只有用户拖动后才进入可持久化的浮动模式。
+const processStatusCollapsed = ref(false)
+const processStatusFloating = ref(false)
 const processStatusDotVisible = computed(
   () =>
     processStatusVisible.value &&
     processStatusCollapsed.value &&
-    processReady.value
+    processReady.value &&
+    processStatusFloating.value
 )
 // 观察器以卡片实际挂载条件为准，子 Agent 视图会卸载卡片，不能只看进程状态。
 const processStatusCardVisible = computed(
@@ -1960,13 +1961,17 @@ watch(
   }
 )
 function toggleProcessStatus() {
+  if (!processStatusCollapsed.value) {
+    // 单次收起允许本次会话使用浮动圆点，但不写入 localStorage，避免误把点击当成拖动偏好。
+    processStatusFloating.value = true
+  }
   processStatusCollapsed.value = !processStatusCollapsed.value
 }
 
 // 收起态小圆点：可拖动改变位置，位置持久化到 localStorage。
 // 区分拖动和点击：只有未发生明显位移的 pointerup 才视为点击展开。
 const PROCESS_DOT_POS_KEY = 'figma-chat-process-dot-pos'
-const PROCESS_DOT_SIZE = 12
+const PROCESS_DOT_SIZE = 8
 const PROCESS_DOT_MARGIN = 16
 const PROCESS_DOT_DRAG_THRESHOLD = 4
 const PROCESS_STATUS_CARD_GAP = 8
@@ -1984,6 +1989,8 @@ let dragStartX = 0
 let dragStartY = 0
 let dragOriginX = 0
 let dragOriginY = 0
+let dragStartedOnCard = false
+let processDragTarget: HTMLElement | null = null
 
 function clampProcessDotPos(x: number, y: number) {
   if (typeof window === 'undefined') return { x, y }
@@ -2016,7 +2023,8 @@ function loadProcessDotPos() {
   try {
     const raw = window.localStorage.getItem(PROCESS_DOT_POS_KEY)
     if (!raw) {
-      processStatusDotPos.value = defaultProcessDotPos()
+      processStatusDotPos.value = null
+      processStatusFloating.value = false
       return
     }
     const parsed = JSON.parse(raw) as { x?: number; y?: number }
@@ -2027,11 +2035,15 @@ function loadProcessDotPos() {
       Number.isFinite(parsed.y)
     ) {
       processStatusDotPos.value = clampProcessDotPos(parsed.x, parsed.y)
+      processStatusFloating.value = true
+      processStatusCollapsed.value = true
     } else {
-      processStatusDotPos.value = defaultProcessDotPos()
+      processStatusDotPos.value = null
+      processStatusFloating.value = false
     }
   } catch {
-    processStatusDotPos.value = defaultProcessDotPos()
+    processStatusDotPos.value = null
+    processStatusFloating.value = false
   }
 }
 
@@ -2088,6 +2100,9 @@ function calculateProcessStatusCardPos(
 }
 
 const processStatusCardStyle = computed(() => {
+  if (!processStatusFloating.value) {
+    return {} as CSSProperties
+  }
   const pos = calculateProcessStatusCardPos(
     processStatusDotPos.value ?? defaultProcessDotPos(),
     processStatusCardSize.value
@@ -2140,6 +2155,45 @@ watch(processStatusCardVisible, (visible) => {
   }
 })
 
+// 将当前卡片左上角反推为共享圆点坐标。枚举右下/左上翻转候选再复算，
+// 可在边缘夹取场景保持卡片位置不跳动。
+function dotPositionForCardPosition(cardPos: { x: number; y: number }) {
+  const size = processStatusCardSize.value
+  const xCandidates = [
+    cardPos.x - PROCESS_DOT_SIZE - PROCESS_STATUS_CARD_GAP,
+    cardPos.x + size.width + PROCESS_STATUS_CARD_GAP,
+  ]
+  const yCandidates = [
+    cardPos.y - PROCESS_DOT_SIZE - PROCESS_STATUS_CARD_GAP,
+    cardPos.y + size.height + PROCESS_STATUS_CARD_GAP,
+  ]
+  let best = clampProcessDotPos(xCandidates[0], yCandidates[0])
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const x of xCandidates) {
+    for (const y of yCandidates) {
+      const candidate = clampProcessDotPos(x, y)
+      const calculated = calculateProcessStatusCardPos(candidate, size)
+      const distance = Math.hypot(calculated.x - cardPos.x, calculated.y - cardPos.y)
+      if (distance < bestDistance) {
+        best = candidate
+        bestDistance = distance
+      }
+    }
+  }
+  return best
+}
+
+function prepareCardForFloatingDrag() {
+  const card = processStatusCard.value
+  if (!card || processStatusFloating.value) return
+  const rect = card.getBoundingClientRect()
+  if (rect.width > 0 && rect.height > 0) {
+    processStatusCardSize.value = { width: rect.width, height: rect.height }
+  }
+  processStatusDotPos.value = dotPositionForCardPosition({ x: rect.left, y: rect.top })
+  processStatusFloating.value = true
+}
+
 function onProcessDotPointerMove(event: PointerEvent) {
   if (!isDraggingProcessDot.value) return
   if (dragPointerId !== event.pointerId) return
@@ -2150,6 +2204,12 @@ function onProcessDotPointerMove(event: PointerEvent) {
     Math.hypot(dx, dy) >= PROCESS_DOT_DRAG_THRESHOLD
   ) {
     didDragProcessDot.value = true
+    if (dragStartedOnCard) {
+      prepareCardForFloatingDrag()
+      const origin = processStatusDotPos.value ?? defaultProcessDotPos()
+      dragOriginX = origin.x
+      dragOriginY = origin.y
+    }
   }
   if (didDragProcessDot.value) {
     processStatusDotPos.value = clampProcessDotPos(
@@ -2168,21 +2228,28 @@ function onProcessDotPointerEnd(event: PointerEvent) {
     }
   }
   dragPointerId = null
+  if (processDragTarget?.hasPointerCapture?.(event.pointerId)) {
+    processDragTarget.releasePointerCapture?.(event.pointerId)
+  }
+  processDragTarget = null
+  dragStartedOnCard = false
   window.removeEventListener('pointermove', onProcessDotPointerMove)
   window.removeEventListener('pointerup', onProcessDotPointerEnd)
   window.removeEventListener('pointercancel', onProcessDotPointerEnd)
 }
 
-function onProcessStatusDotPointerDown(event: PointerEvent) {
+function startProcessStatusDrag(event: PointerEvent, startedOnCard: boolean) {
   if (event.button !== 0 && event.pointerType === 'mouse') return
-  const target = event.currentTarget as HTMLButtonElement | null
+  const target = event.currentTarget as HTMLElement | null
   target?.setPointerCapture?.(event.pointerId)
+  processDragTarget = target
   dragPointerId = event.pointerId
   const origin = processStatusDotPos.value ?? defaultProcessDotPos()
   dragStartX = event.clientX
   dragStartY = event.clientY
   dragOriginX = origin.x
   dragOriginY = origin.y
+  dragStartedOnCard = startedOnCard
   didDragProcessDot.value = false
   isDraggingProcessDot.value = true
   window.addEventListener('pointermove', onProcessDotPointerMove)
@@ -2190,8 +2257,26 @@ function onProcessStatusDotPointerDown(event: PointerEvent) {
   window.addEventListener('pointercancel', onProcessDotPointerEnd)
 }
 
+function onProcessStatusDotPointerDown(event: PointerEvent) {
+  startProcessStatusDrag(event, false)
+}
+
+function onProcessStatusCardPointerDown(event: PointerEvent) {
+  // 初始化按钮是独立操作，不能被卡片拖动逻辑截获。
+  if ((event.target as HTMLElement | null)?.closest('.figma-chat-process-init')) return
+  startProcessStatusDrag(event, true)
+}
+
 function handleProcessStatusDotClick() {
   // 拖动产生的 pointerup 会触发 click，这里通过阈值标记过滤掉真实拖动
+  if (didDragProcessDot.value) {
+    didDragProcessDot.value = false
+    return
+  }
+  toggleProcessStatus()
+}
+
+function handleProcessStatusCardClick() {
   if (didDragProcessDot.value) {
     didDragProcessDot.value = false
     return
@@ -2215,7 +2300,7 @@ onBeforeUnmount(() => {
 })
 
 function onProcessStatusDotResize() {
-  if (processStatusDotPos.value) {
+  if (processStatusFloating.value && processStatusDotPos.value) {
     processStatusDotPos.value = clampProcessDotPos(
       processStatusDotPos.value.x,
       processStatusDotPos.value.y
@@ -3818,7 +3903,7 @@ function onCompositionEnd() {
 
 
 
-    <!-- 收起态：右下角一个小圆点，带渐变虚化；点击展开，支持拖动改位置 -->
+    <!-- 收起态：仅浮动模式展示柔光小圆点；点击展开，支持拖动改位置 -->
     <button
       v-if="!activeSubagentSessionId && processStatusDotVisible"
       type="button"
@@ -3834,7 +3919,7 @@ function onCompositionEnd() {
       @pointerdown="onProcessStatusDotPointerDown"
     />
 
-    <!-- 展开态：原状态卡片；点击收起回圆点 -->
+    <!-- 展开态：无用户拖动记录时保留历史内联位置，进入浮动模式后锚定到圆点附近。 -->
     <div
       v-else-if="!activeSubagentSessionId && processStatusVisible"
       :class="[
@@ -3847,9 +3932,10 @@ function onCompositionEnd() {
       tabindex="0"
       :title="`收起进程状态`"
       aria-label="收起进程状态"
-      @click="toggleProcessStatus"
-      @keydown.enter.prevent="toggleProcessStatus"
-      @keydown.space.prevent="toggleProcessStatus"
+      @click="handleProcessStatusCardClick"
+      @keydown.enter.prevent="handleProcessStatusCardClick"
+      @keydown.space.prevent="handleProcessStatusCardClick"
+      @pointerdown="onProcessStatusCardPointerDown"
     >
       <div class="figma-chat-process-copy">
         <span class="figma-chat-process-title">{{ processStatusTitle }}</span>
@@ -6875,12 +6961,12 @@ function onCompositionEnd() {
   transform: scale(0.99);
 }
 
-/* 收起态：右下角一颗带虚化渐变的小圆点；与时间线圆点使用独立类，避免样式冲突。 */
+/* 收起态：8px 半透明柔光点；独立类避免时间线圆点覆盖其视觉契约。 */
 .figma-chat-process-status-dot {
   flex-shrink: 0;
   align-self: flex-end;
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   border-radius: 9999px;
   border: none;
   margin: 0;
@@ -6916,31 +7002,21 @@ function onCompositionEnd() {
 .figma-chat-process-status-dot::after {
   content: '';
   position: absolute;
-  inset: -6px;
+  inset: -7px;
   border-radius: 9999px;
   background: inherit;
   filter: blur(8px);
-  opacity: 0.55;
+  opacity: 0.42;
   z-index: -1;
   pointer-events: none;
 }
 .figma-chat-process-status-dot.is-ready {
-  background: radial-gradient(
-    circle at 35% 35%,
-    #34d399 0%,
-    rgba(24, 169, 120, 0.85) 25%,
-    rgba(24, 169, 120, 0.25) 100%
-  );
-  box-shadow: 0 0 6px rgba(24, 169, 120, 0.45);
+  background: rgba(24, 169, 120, 0.42);
+  box-shadow: 0 0 4px rgba(24, 169, 120, 0.26);
 }
 .figma-chat-process-status-dot.is-blocking {
-  background: radial-gradient(
-    circle at 35% 35%,
-    #fb7185 0%,
-    rgba(235, 94, 83, 0.85) 25%,
-    rgba(235, 94, 83, 0.25) 100%
-  );
-  box-shadow: 0 0 6px rgba(235, 94, 83, 0.45);
+  background: rgba(235, 94, 83, 0.42);
+  box-shadow: 0 0 4px rgba(235, 94, 83, 0.26);
 }
 .figma-chat-process-status-dot:focus-visible {
   outline: 2px solid #2563eb;

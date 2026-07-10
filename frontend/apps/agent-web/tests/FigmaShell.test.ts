@@ -12,6 +12,11 @@ function mountShell(options?: any) {
   return wrapper;
 }
 
+async function summonRobot(wrapper: ReturnType<typeof mountShell>) {
+  await wrapper.get('[data-testid="robot-visibility-toggle"]').trigger("click");
+  await wrapper.vm.$nextTick();
+}
+
 function dispatchPointer(element: Element, type: string, pointerId: number, clientX: number, clientY: number, pointerType: string) {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
   Object.defineProperties(event, {
@@ -37,6 +42,7 @@ describe("FigmaShell", () => {
 
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
     expect(robot.attributes("style")).toContain("left: 120px");
@@ -50,6 +56,7 @@ describe("FigmaShell", () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
     dispatchPointer(robot.element, "pointerdown", 7, 110, 110, "mouse");
@@ -75,6 +82,7 @@ describe("FigmaShell", () => {
     const wrapper = mountShell();
     await window.dispatchEvent(new Event("resize"));
     await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
 
     const robot = wrapper.get('[data-testid="figma-robot"]');
     expect(robot.attributes("style")).toContain("left: 288px");
@@ -102,6 +110,7 @@ describe("FigmaShell", () => {
     });
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
     const robot = wrapper.get('[data-testid="figma-robot"]');
     expect(() => {
       dispatchPointer(robot.element, "pointerdown", 9, 100, 100, "mouse");
@@ -118,6 +127,7 @@ describe("FigmaShell", () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
     dispatchPointer(robot.element, "pointerdown", 10, 100, 100, "pen");
@@ -132,6 +142,7 @@ describe("FigmaShell", () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
     expect(robot.attributes("tabindex")).toBe("0");
@@ -146,6 +157,7 @@ describe("FigmaShell", () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
     dispatchPointer(robot.element, "pointerdown", 11, 100, 100, "mouse");
@@ -199,6 +211,61 @@ describe("FigmaShell", () => {
     expect(robotElement.style.left).toBe(`${parsedSavedPosition.x}px`);
     expect(robotElement.style.top).toBe(`${parsedSavedPosition.y}px`);
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(savedPosition);
+  });
+
+  it("toggles the pet immediately and restores a saved manual position after a full idle minute", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 140, y: 160 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+
+    const toggle = wrapper.get('[data-testid="robot-visibility-toggle"]');
+    expect(toggle.attributes("aria-label")).toBe("唤起小宠物");
+    expect(toggle.attributes("aria-pressed")).toBe("false");
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-label")).toBe("收起小宠物");
+    expect(toggle.attributes("aria-pressed")).toBe("true");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("left: 140px");
+
+    await toggle.trigger("click");
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await wrapper.vm.$nextTick();
+
+    const restored = wrapper.get('[data-testid="figma-robot"]');
+    expect(restored.attributes("style")).toContain("left: 140px");
+    expect(restored.attributes("style")).toContain("top: 160px");
+    expect(restored.find(".state-idle").exists()).toBe(true);
+  });
+
+  it("restarts the hidden pet timer after activity and only counts while focused and visible", async () => {
+    vi.useFakeTimers();
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    const wrapper = mountShell();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    window.dispatchEvent(new MouseEvent("mousedown"));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="robot-visibility-toggle"]').trigger("click");
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+    hidden.mockReturnValue(false);
+    hasFocus.mockReturnValue(true);
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
   });
 
   it("shows runtime inventory before the application switch and opens details", async () => {
