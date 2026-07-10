@@ -86,6 +86,16 @@ describe("FigmaChatPanel", () => {
       expect(cardElement.style.position).toBe("fixed");
       expect(cardElement.style.left).toBe("280px");
       expect(cardElement.style.top).toBe("240px");
+
+      await card.trigger("click");
+      await nextTick();
+
+      const restoredDot = wrapper.get(".figma-chat-process-status-dot.is-ready");
+      expect(restoredDot.attributes("style")).toContain("--figma-process-dot-x: 260px");
+      expect(restoredDot.attributes("style")).toContain("--figma-process-dot-y: 220px");
+      expect(window.localStorage.getItem("figma-chat-process-dot-pos")).toBe(
+        JSON.stringify({ x: 260, y: 220 })
+      );
     } finally {
       wrapper.unmount();
       vi.restoreAllMocks();
@@ -100,9 +110,20 @@ describe("FigmaChatPanel", () => {
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
     window.localStorage.setItem("figma-chat-process-dot-pos", JSON.stringify({ x: 880, y: 680 }));
     setViewport(1000, 800);
+    let cardSize = { width: 240, height: 90 };
+    const resizeObservers: TestResizeObserver[] = [];
+    class TestResizeObserver {
+      observe = vi.fn();
+      disconnect = vi.fn();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        resizeObservers.push(this);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       return this.classList.contains("figma-chat-process-status")
-        ? ({ x: 0, y: 0, width: 240, height: 90, top: 0, right: 240, bottom: 90, left: 0, toJSON: () => ({}) } as DOMRect)
+        ? ({ x: 0, y: 0, width: cardSize.width, height: cardSize.height, top: 0, right: cardSize.width, bottom: cardSize.height, left: 0, toJSON: () => ({}) } as DOMRect)
         : ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect);
     });
 
@@ -123,13 +144,61 @@ describe("FigmaChatPanel", () => {
       const cardElement = card.element as HTMLElement;
       expect(cardElement.style.left).toBe("632px");
       expect(cardElement.style.top).toBe("582px");
+      expect(resizeObservers).toHaveLength(1);
+
+      cardSize = { width: 300, height: 120 };
+      resizeObservers[0].callback([], resizeObservers[0] as unknown as ResizeObserver);
+      await nextTick();
+
+      expect(cardElement.style.left).toBe("572px");
+      expect(cardElement.style.top).toBe("552px");
 
       setViewport(500, 400);
       window.dispatchEvent(new Event("resize"));
       await nextTick();
 
-      expect(cardElement.style.left).toBe("224px");
-      expect(cardElement.style.top).toBe("274px");
+      expect(cardElement.style.left).toBe("164px");
+      expect(cardElement.style.top).toBe("244px");
+    } finally {
+      wrapper.unmount();
+      vi.restoreAllMocks();
+      Object.defineProperty(window, "innerWidth", originalInnerWidth!);
+      Object.defineProperty(window, "innerHeight", originalInnerHeight!);
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
+  it("keeps an oversized expanded status card usable inside the viewport margins", async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    window.localStorage.setItem("figma-chat-process-dot-pos", JSON.stringify({ x: 200, y: 180 }));
+    setViewport(400, 300);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("figma-chat-process-status")
+        ? ({ x: 0, y: 0, width: 600, height: 500, top: 0, right: 600, bottom: 500, left: 0, toJSON: () => ({}) } as DOMRect)
+        : ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect);
+    });
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+      } as any,
+    });
+
+    try {
+      await nextTick();
+      await wrapper.get(".figma-chat-process-status-dot").trigger("click");
+      await nextTick();
+      await nextTick();
+
+      const card = wrapper.get(".figma-chat-process-status");
+      const cardElement = card.element as HTMLElement;
+      expect(cardElement.style.left).toBe("16px");
+      expect(cardElement.style.top).toBe("16px");
+      expect(cardElement.style.maxWidth).toBe("calc(100vw - 32px)");
+      expect(cardElement.style.maxHeight).toBe("calc(100vh - 32px)");
+      expect(cardElement.style.overflowY).toBe("auto");
+      expect(cardElement.style.overflowWrap).toBe("anywhere");
     } finally {
       wrapper.unmount();
       vi.restoreAllMocks();
@@ -984,6 +1053,8 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
     expect(resizeObservers).toHaveLength(2);
     expect(resizeObservers[1].observe).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+    expect(resizeObservers[1].disconnect).toHaveBeenCalledTimes(1);
   });
 
   it("shows multiple subagent cards directly without folding them into a task group", () => {

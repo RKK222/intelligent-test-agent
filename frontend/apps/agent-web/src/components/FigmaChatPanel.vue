@@ -1972,6 +1972,7 @@ const PROCESS_DOT_DRAG_THRESHOLD = 4
 const PROCESS_STATUS_CARD_GAP = 8
 const PROCESS_STATUS_CARD_MARGIN = 16
 const PROCESS_STATUS_CARD_FALLBACK_SIZE = { width: 280, height: 84 }
+const PROCESS_STATUS_CARD_VIEWPORT_INSET = PROCESS_STATUS_CARD_MARGIN * 2
 const processStatusDotPos = ref<{ x: number; y: number } | null>(null)
 const processStatusCard = ref<HTMLElement | null>(null)
 const processStatusCardSize = ref({ ...PROCESS_STATUS_CARD_FALLBACK_SIZE })
@@ -2062,19 +2063,24 @@ function calculateProcessStatusCardPos(
 ) {
   if (typeof window === 'undefined') return { x: dotPos.x, y: dotPos.y }
 
+  // CSS 会把卡片限制在视口内，这里用同一有效尺寸计算位置，避免测量值过大时定位失真。
+  const effectiveCardSize = {
+    width: Math.min(cardSize.width, Math.max(0, window.innerWidth - PROCESS_STATUS_CARD_VIEWPORT_INSET)),
+    height: Math.min(cardSize.height, Math.max(0, window.innerHeight - PROCESS_STATUS_CARD_VIEWPORT_INSET)),
+  }
   const right = dotPos.x + PROCESS_DOT_SIZE + PROCESS_STATUS_CARD_GAP
   const bottom = dotPos.y + PROCESS_DOT_SIZE + PROCESS_STATUS_CARD_GAP
   // 放置优先级：默认右下；单独越界时分别翻到左侧或上方，最后再夹进视口。
   const preferredX =
-    right + cardSize.width <= window.innerWidth - PROCESS_STATUS_CARD_MARGIN
+    right + effectiveCardSize.width <= window.innerWidth - PROCESS_STATUS_CARD_MARGIN
       ? right
-      : dotPos.x - PROCESS_STATUS_CARD_GAP - cardSize.width
+      : dotPos.x - PROCESS_STATUS_CARD_GAP - effectiveCardSize.width
   const preferredY =
-    bottom + cardSize.height <= window.innerHeight - PROCESS_STATUS_CARD_MARGIN
+    bottom + effectiveCardSize.height <= window.innerHeight - PROCESS_STATUS_CARD_MARGIN
       ? bottom
-      : dotPos.y - PROCESS_STATUS_CARD_GAP - cardSize.height
-  const maxX = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerWidth - cardSize.width - PROCESS_STATUS_CARD_MARGIN)
-  const maxY = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerHeight - cardSize.height - PROCESS_STATUS_CARD_MARGIN)
+      : dotPos.y - PROCESS_STATUS_CARD_GAP - effectiveCardSize.height
+  const maxX = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerWidth - effectiveCardSize.width - PROCESS_STATUS_CARD_MARGIN)
+  const maxY = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerHeight - effectiveCardSize.height - PROCESS_STATUS_CARD_MARGIN)
   return {
     x: Math.min(Math.max(preferredX, PROCESS_STATUS_CARD_MARGIN), maxX),
     y: Math.min(Math.max(preferredY, PROCESS_STATUS_CARD_MARGIN), maxY),
@@ -2090,6 +2096,11 @@ const processStatusCardStyle = computed(() => {
     position: 'fixed',
     left: `${pos.x}px`,
     top: `${pos.y}px`,
+    maxWidth: `calc(100vw - ${PROCESS_STATUS_CARD_VIEWPORT_INSET}px)`,
+    maxHeight: `calc(100vh - ${PROCESS_STATUS_CARD_VIEWPORT_INSET}px)`,
+    overflowY: 'auto',
+    overflowWrap: 'anywhere',
+    boxSizing: 'border-box',
   } as CSSProperties
 })
 
@@ -6854,7 +6865,7 @@ function onCompositionEnd() {
   cursor: pointer;
   user-select: none;
   z-index: 50;
-  max-width: calc(100vw - 32px);
+  min-width: 0;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 .figma-chat-process-status:hover {
@@ -6930,6 +6941,10 @@ function onCompositionEnd() {
     rgba(235, 94, 83, 0.25) 100%
   );
   box-shadow: 0 0 6px rgba(235, 94, 83, 0.45);
+}
+.figma-chat-process-status-dot:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 4px;
 }
 
 .figma-chat-process-status.is-ready {
