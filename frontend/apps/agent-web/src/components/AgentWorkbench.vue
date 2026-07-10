@@ -4677,3 +4677,6 @@ async function handleLogout() {
   background: #ea580c; /* 深橙色 */
 }
 </style>
+          :current-session-id="session?.sessionId"
+          :current-run-id="run?.runId"
+          :current-run-status="run?.status"

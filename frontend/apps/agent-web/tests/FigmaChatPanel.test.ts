@@ -588,10 +588,13 @@ describe("FigmaChatPanel", () => {
       const cardElement = card.element as HTMLElement;
       expect(cardElement.style.left).toBe("700px");
       expect(cardElement.style.top).toBe("600px");
-      expect(resizeObservers).toHaveLength(1);
+      const processCardObserver = resizeObservers.find((observer) =>
+        observer.observe.mock.calls.some(([target]) => target === cardElement)
+      );
+      expect(processCardObserver).toBeDefined();
 
       cardSize = { width: 300, height: 120 };
-      resizeObservers[0].callback([], resizeObservers[0] as unknown as ResizeObserver);
+      processCardObserver!.callback([], processCardObserver! as unknown as ResizeObserver);
       await nextTick();
 
       expect(cardElement.style.left).toBe("684px");
@@ -1482,7 +1485,10 @@ describe("FigmaChatPanel", () => {
     await wrapper.get(".figma-chat-process-status-dot").trigger("click");
     await nextTick();
     await nextTick();
-    expect(resizeObservers).toHaveLength(1);
+    const processCardObservers = () => resizeObservers.filter((observer) =>
+      observer.observe.mock.calls.some(([target]) => (target as HTMLElement).classList.contains("figma-chat-process-status"))
+    );
+    expect(processCardObservers()).toHaveLength(1);
 
     await wrapper.get(".oc-subagent-card").trigger("click");
 
@@ -1491,7 +1497,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("子 Agent 已读取前端目录。");
     expect(wrapper.text()).toContain("子 Agent 不支持对话");
     expect(wrapper.find(".figma-chat-subagent-return").exists()).toBe(true);
-    expect(resizeObservers[0].disconnect).toHaveBeenCalledTimes(1);
+    expect(processCardObservers()[0].disconnect).toHaveBeenCalledTimes(1);
 
     await wrapper.get(".figma-chat-subagent-return").trigger("click");
     await nextTick();
@@ -1499,10 +1505,10 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
-    expect(resizeObservers).toHaveLength(2);
-    expect(resizeObservers[1].observe).toHaveBeenCalledTimes(1);
+    expect(processCardObservers()).toHaveLength(2);
+    expect(processCardObservers()[1].observe).toHaveBeenCalledTimes(1);
     wrapper.unmount();
-    expect(resizeObservers[1].disconnect).toHaveBeenCalledTimes(1);
+    expect(processCardObservers()[1].disconnect).toHaveBeenCalledTimes(1);
   });
 
   it("shows multiple subagent cards directly without folding them into a task group", () => {
@@ -3526,5 +3532,184 @@ describe("FigmaChatPanel", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("opens and closes the read-only activity panel without replacing Timeline or moving the question dock", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "ses-root",
+        currentRunId: "run-current",
+        currentRunStatus: "RUNNING",
+        todos: [{ id: "todo-1", text: "检查日志", status: "in_progress" }],
+        questions: [{
+          requestId: "ask-1",
+          sessionId: "ses-root",
+          createdAt: "2026-07-10T00:00:00Z",
+          questions: [{ questionId: "q-1", text: "继续吗？", kind: "text" }]
+        }]
+      } as any
+    });
+
+    try {
+      const trigger = wrapper.get('[data-testid="chat-activity-trigger"]');
+      expect(trigger.attributes("aria-expanded")).toBe("false");
+
+      await trigger.trigger("click");
+      expect(wrapper.get('[data-testid="chat-activity-panel"]').isVisible()).toBe(true);
+      expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
+      expect(wrapper.get(".figma-chat-question-dock").isVisible()).toBe(true);
+      expect(wrapper.find('[data-testid="chat-activity-panel"] button.figma-chat-question-submit').exists()).toBe(false);
+
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await nextTick();
+      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("uses the chat container width to show a non-modal activity popover at 720px and closes it on outside click or Escape", async () => {
+    const resizeObservers: Array<{ callback: ResizeObserverCallback; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
+    class TestResizeObserver {
+      observe = vi.fn();
+      disconnect = vi.fn();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        resizeObservers.push(this);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    const wrapper = mount(FigmaChatPanel, {
+      attachTo: document.body,
+      props: {
+        messages: [],
+        currentSessionId: "ses-root",
+        currentRunId: "run-current",
+        currentRunStatus: "RUNNING",
+        todos: [{ id: "todo-1", text: "检查日志", status: "in_progress" }],
+      } as any,
+    });
+
+    try {
+      const root = wrapper.get('.figma-chat-root').element;
+      const activityObserver = resizeObservers.find((observer) =>
+        observer.observe.mock.calls.some(([target]) => target === root)
+      )!;
+      activityObserver.callback(
+        [{ target: root, contentRect: { width: 720 } } as ResizeObserverEntry],
+        activityObserver as unknown as ResizeObserver,
+      );
+      await nextTick();
+
+      const trigger = wrapper.get('[data-testid="chat-activity-trigger"]');
+      await trigger.trigger("click");
+      const panel = wrapper.get('[data-testid="chat-activity-panel"]');
+      expect(panel.attributes("role")).toBe("region");
+      expect(panel.attributes("aria-modal")).toBeUndefined();
+      expect(trigger.attributes("aria-controls")).toBe(panel.attributes("id"));
+
+      document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      await nextTick();
+      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
+
+      await trigger.trigger("click");
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await nextTick();
+      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("uses a focus-trapped modal activity drawer below 720px and restores focus to its trigger", async () => {
+    const resizeObservers: Array<{ callback: ResizeObserverCallback; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
+    class TestResizeObserver {
+      observe = vi.fn();
+      disconnect = vi.fn();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        resizeObservers.push(this);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    const wrapper = mount(FigmaChatPanel, {
+      attachTo: document.body,
+      props: {
+        messages: [],
+        currentSessionId: "ses-root",
+        currentRunId: "run-current",
+        currentRunStatus: "RUNNING",
+        todos: [{ id: "todo-1", text: "检查日志", status: "in_progress" }],
+      } as any,
+    });
+
+    try {
+      const root = wrapper.get('.figma-chat-root').element;
+      const activityObserver = resizeObservers.find((observer) =>
+        observer.observe.mock.calls.some(([target]) => target === root)
+      )!;
+      activityObserver.callback(
+        [{ target: root, contentRect: { width: 719 } } as ResizeObserverEntry],
+        activityObserver as unknown as ResizeObserver,
+      );
+      await nextTick();
+
+      const trigger = wrapper.get('[data-testid="chat-activity-trigger"]');
+      await trigger.trigger("click");
+      await nextTick();
+      const drawer = wrapper.get('[data-testid="chat-activity-panel"]');
+      expect(drawer.attributes("role")).toBe("dialog");
+      expect(drawer.attributes("aria-modal")).toBe("true");
+      expect(document.activeElement).toBe(wrapper.get('[aria-label="关闭本轮活动"]').element);
+
+      const closeButton = wrapper.get('[aria-label="关闭本轮活动"]');
+      await closeButton.trigger("keydown", { key: "Tab" });
+      expect(document.activeElement).toBe(closeButton.element);
+
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await nextTick();
+      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
+      expect(document.activeElement).toBe(trigger.element);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("does not open the activity drawer while another existing overlay is active", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "ses-root",
+        currentRunId: "run-current",
+        currentRunStatus: "RUNNING",
+        todos: [{ id: "todo-1", text: "检查日志", status: "in_progress" }],
+      } as any,
+    });
+
+    try {
+      await wrapper.get('[aria-label="上传附件"]').trigger("click");
+      const trigger = wrapper.get('[data-testid="chat-activity-trigger"]');
+      expect((trigger.element as HTMLButtonElement).disabled).toBe(true);
+      await trigger.trigger("click");
+      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("keeps dialogs, popovers, and the question dock on the restrained overlay visual system", () => {
+    const componentSource = readFileSync(
+      resolve(process.cwd(), "apps/agent-web/src/components/FigmaChatPanel.vue"),
+      "utf8"
+    );
+
+    expect(componentSource).toContain("/* ---- Restrained overlay visual system ----");
+    expect(componentSource).toContain("--figma-chat-overlay-radius: 10px;");
+    expect(componentSource).toContain("var(--figma-chat-overlay-border)");
+    expect(componentSource).toContain(".figma-chat-question-dock,");
+    expect(componentSource).toContain(".figma-chat-attachment-dialog,");
+    expect(componentSource).toContain(".figma-chat-agent-dropdown,");
+    expect(componentSource).toContain(":global(.figma-chat-feedback-dialog)");
   });
 });

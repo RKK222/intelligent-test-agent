@@ -48,9 +48,11 @@ import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
 import { MarkdownView, OpencodeTimeline, TodoPanel, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
+import ChatActivityPanel from './ChatActivityPanel.vue'
 import { Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
+import { buildChatActivitySummary } from './chat-activity-summary'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -617,6 +619,10 @@ type DiffLine = {
 const props =
   withDefaults(defineProps<{
     messages: ChatMessageInput[]
+    /** 仅供外层只读活动摘要使用，不能传入或改变原生 Timeline。 */
+    currentSessionId?: string
+    currentRunId?: string
+    currentRunStatus?: string
     running?: boolean
     runtimeStatus?: string
     timelineRuntimeStatus?: OpencodeLikeRuntimeStatus
@@ -2611,6 +2617,96 @@ function closeRawOutput() {
   stopRawOutputDrag()
 }
 
+const activityPanelOpen = ref(false)
+const chatRoot = ref<HTMLElement | null>(null)
+const activityTrigger = ref<HTMLButtonElement | null>(null)
+const activityPanelPresentation = ref<'popover' | 'drawer'>('popover')
+const activityPanelId = 'figma-chat-activity-panel'
+let activityPanelResizeObserver: ResizeObserver | null = null
+let restoreActivityTriggerFocus = false
+
+// 活动面板仅复用宿主已经归一化的 Todo、子 Agent、Ask、Permission 与 Run 状态，
+// 不读取、包裹或修改 OpencodeTimeline 的任何消息/part 投影。
+const activitySummary = computed(() => {
+  if (!props.currentSessionId) return null
+  return buildChatActivitySummary({
+    sessionId: props.currentSessionId,
+    run: props.currentRunId
+      ? { runId: props.currentRunId, status: props.currentRunStatus ?? '' }
+      : null,
+    todos: props.todos,
+    subagentsBySessionId: props.subagentsBySessionId,
+    permissions: props.permissions,
+    questions: props.questions,
+  })
+})
+
+const activityPanelBlocked = computed(() =>
+  attachmentDialogOpen.value ||
+  rawOutputOpen.value ||
+  historyDrawerOpen.value ||
+  drawerOpen.value ||
+  negativeFeedbackOpen.value ||
+  dropdownOpen.value ||
+  agentDropdownOpen.value ||
+  showSkillPanel.value ||
+  showAgentPanel.value
+)
+
+function closeActivityPanel() {
+  activityPanelOpen.value = false
+  if (restoreActivityTriggerFocus) {
+    restoreActivityTriggerFocus = false
+    nextTick(() => activityTrigger.value?.focus())
+  }
+}
+
+function toggleActivityPanel() {
+  if (!activitySummary.value || activityPanelBlocked.value) return
+  activityPanelOpen.value = !activityPanelOpen.value
+}
+
+/**
+ * 以聊天容器而非浏览器视口判断布局，避免工作台分栏或嵌入式窄栏误用桌面浮层。
+ */
+function updateActivityPanelPresentation(width: number) {
+  if (!Number.isFinite(width) || width <= 0) return
+  activityPanelPresentation.value = width < 720 ? 'drawer' : 'popover'
+}
+
+function measureActivityPanelContainer() {
+  updateActivityPanelPresentation(chatRoot.value?.getBoundingClientRect().width ?? 0)
+}
+
+function onActivityPanelKeydown(event: KeyboardEvent) {
+  if (activityPanelPresentation.value !== 'drawer' || event.key !== 'Tab') return
+  // 当前抽屉只有关闭按钮一个可聚焦控件；拦截 Tab 保持焦点留在模态范围内。
+  event.preventDefault()
+  const closeButton = chatRoot.value?.querySelector<HTMLButtonElement>('.figma-chat-activity-close')
+  closeButton?.focus()
+}
+
+function onActivityPanelOutsidePointerDown(event: PointerEvent) {
+  if (!activityPanelOpen.value || activityPanelPresentation.value !== 'popover') return
+  const target = event.target as Node | null
+  if (!target) return
+  if (activityTrigger.value?.contains(target)) return
+  if (chatRoot.value?.querySelector('[data-testid="chat-activity-panel"]')?.contains(target)) return
+  closeActivityPanel()
+}
+
+watch([activityPanelBlocked, activitySummary], ([blocked, summary]) => {
+  if (blocked || !summary) closeActivityPanel()
+})
+
+watch(activityPanelOpen, async (open) => {
+  if (open && activityPanelPresentation.value === 'drawer') {
+    restoreActivityTriggerFocus = true
+    await nextTick()
+    chatRoot.value?.querySelector<HTMLButtonElement>('.figma-chat-activity-close')?.focus()
+  }
+})
+
 function rawOutputSearchText(entry: RawOutputEntry) {
   return [
     entry.kind,
@@ -2741,14 +2837,31 @@ function onOverlayKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && drawerOpen.value) {
     event.preventDefault()
     closeChangesDrawer()
+    return
+  }
+  if (event.key === 'Escape' && activityPanelOpen.value) {
+    event.preventDefault()
+    closeActivityPanel()
   }
 }
 
 onMounted(() => {
   window.addEventListener('keydown', onOverlayKeydown)
+  document.addEventListener('pointerdown', onActivityPanelOutsidePointerDown)
+  measureActivityPanelContainer()
+  if (typeof ResizeObserver !== 'undefined' && chatRoot.value) {
+    activityPanelResizeObserver = new ResizeObserver((entries) => {
+      const rootEntry = entries.find((entry) => entry.target === chatRoot.value)
+      updateActivityPanelPresentation(rootEntry?.contentRect.width ?? 0)
+    })
+    activityPanelResizeObserver.observe(chatRoot.value)
+  }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onOverlayKeydown)
+  document.removeEventListener('pointerdown', onActivityPanelOutsidePointerDown)
+  activityPanelResizeObserver?.disconnect()
+  activityPanelResizeObserver = null
   stopRawOutputDrag()
   stopRunTimer()
 })
@@ -3239,10 +3352,28 @@ function onCompositionEnd() {
 </script>
 
 <template>
-  <div class="figma-chat-root">
+  <div ref="chatRoot" class="figma-chat-root">
     <header class="figma-chat-header">
       <div class="figma-chat-header-left">
         <h2 class="figma-chat-title" :title="title">{{ title }}</h2>
+        <button
+          v-if="activitySummary"
+          type="button"
+          class="figma-chat-header-btn"
+          data-testid="chat-activity-trigger"
+          ref="activityTrigger"
+          :aria-expanded="activityPanelOpen"
+          :aria-controls="activityPanelId"
+          :disabled="activityPanelBlocked"
+          title="查看本轮活动"
+          @click="toggleActivityPanel"
+        >
+          <Circle :size="12" />
+          <span>本轮活动</span>
+          <span v-if="activitySummary.pendingConfirmationCount > 0">
+            {{ activitySummary.pendingConfirmationCount }}
+          </span>
+        </button>
         <button
           type="button"
           class="figma-chat-header-btn"
@@ -4033,6 +4164,21 @@ function onCompositionEnd() {
 
 
 
+
+    <!-- 与滚动消息区同级：只读活动浮层不改变 Timeline 或问题 dock 的布局。 -->
+    <div
+      v-if="activityPanelOpen && activitySummary"
+      :class="['figma-chat-activity-overlay-host', `is-${activityPanelPresentation}`]"
+      @keydown="onActivityPanelKeydown"
+    >
+      <ChatActivityPanel
+        :open="activityPanelOpen"
+        :summary="activitySummary"
+        :presentation="activityPanelPresentation"
+        :panel-id="activityPanelId"
+        @close="closeActivityPanel"
+      />
+    </div>
 
     <!-- 收起态：仅浮动模式展示柔光小圆点；点击展开，支持拖动改位置 -->
     <button
@@ -5092,6 +5238,47 @@ function onCompositionEnd() {
   background: var(--ta-hover);
   border-color: transparent;
 }
+.figma-chat-header-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.figma-chat-activity-overlay-host {
+  position: absolute;
+  top: 38px;
+  right: 10px;
+  z-index: 20;
+}
+
+.figma-chat-activity-overlay-host.is-drawer {
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 10px calc(env(safe-area-inset-bottom) + 96px);
+  background: rgba(24, 24, 27, 0.18);
+}
+
+.figma-chat-activity-overlay-host.is-drawer :deep(.figma-chat-activity-panel) {
+  width: 100%;
+  max-width: none;
+  max-height: min(56cqh, calc(100cqh - 120px));
+  border-radius: 12px 12px 8px 8px;
+}
+
+@container figma-chat (max-width: 719px) {
+  .figma-chat-activity-overlay-host.is-drawer {
+    right: 0;
+    left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .figma-chat-activity-overlay-host,
+  .figma-chat-activity-overlay-host :deep(.figma-chat-activity-panel) {
+    transition: none !important;
+    animation: none !important;
+  }
+}
 .figma-chat-history-header-icon {
   position: relative;
   display: inline-flex;
@@ -5525,6 +5712,8 @@ function onCompositionEnd() {
   font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   /* 抽屉遮罩使用 position: absolute 覆盖在聊天面板上，需要 root 作为定位上下文 */
   position: relative;
+  container-type: inline-size;
+  container-name: figma-chat;
 }
 
 /* ---- Header ---- */
@@ -8893,5 +9082,328 @@ details[open] .figma-chat-process-chevron {
 :global(.figma-chat-feedback-submit:hover) {
   background: #2552d4;
   border-color: #2552d4;
+}
+
+/* ---- Restrained overlay visual system ----
+   仅统一现有浮层与 dock 的视觉 token；不改变任何弹窗层级、触发或关闭逻辑。 */
+.figma-chat-root {
+  --figma-chat-overlay-radius: 10px;
+  --figma-chat-overlay-border: var(--ta-border);
+  --figma-chat-overlay-surface: var(--ta-surface);
+  --figma-chat-overlay-subtle: var(--ta-panel);
+  --figma-chat-overlay-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+}
+
+.figma-chat-question-dock,
+.figma-chat-skill-panel,
+.figma-chat-agent-panel,
+.figma-chat-attachment-dialog,
+.figma-chat-raw-output-panel,
+.figma-chat-history-drawer,
+.figma-chat-agent-dropdown,
+.figma-chat-model-dropdown {
+  border-color: var(--figma-chat-overlay-border);
+  border-radius: var(--figma-chat-overlay-radius);
+  background: var(--figma-chat-overlay-surface);
+  box-shadow: var(--figma-chat-overlay-shadow);
+  color: var(--ta-text);
+}
+
+.figma-chat-question-dock {
+  margin: 0 10px 10px;
+  padding: 8px;
+  gap: 8px;
+}
+
+.figma-chat-question-card,
+.figma-chat-permission-card {
+  gap: 12px;
+  padding: 12px;
+  border-color: var(--figma-chat-overlay-border);
+  border-radius: 8px;
+  background: var(--figma-chat-overlay-surface);
+}
+
+.figma-chat-permission-card {
+  border-left: 3px solid var(--ta-chat-status-running);
+  background: var(--figma-chat-process-bg);
+}
+
+.figma-chat-question-option,
+.figma-chat-question-custom-card {
+  min-height: 42px;
+  border-radius: 8px;
+  border-color: var(--figma-chat-overlay-border);
+  background: var(--figma-chat-overlay-surface);
+}
+
+.figma-chat-question-option:hover,
+.figma-chat-question-option.is-selected,
+.figma-chat-question-custom-card:focus-within,
+.figma-chat-question-custom-card.is-selected {
+  border-color: var(--ta-chat-border-strong);
+  background: var(--ta-hover);
+}
+
+.figma-chat-question-custom-input,
+.figma-chat-agent-search-input,
+.figma-chat-model-search-input,
+.figma-chat-history-search-input,
+.figma-chat-raw-search-input {
+  border-radius: 8px;
+  border-color: var(--figma-chat-overlay-border);
+  background: var(--figma-chat-overlay-surface);
+  color: var(--ta-text);
+}
+
+.figma-chat-question-custom-input:focus,
+.figma-chat-agent-search-input:focus,
+.figma-chat-model-search-input:focus,
+.figma-chat-history-search-input:focus,
+.figma-chat-raw-search-input:focus {
+  border-color: var(--ta-chat-border-strong);
+  box-shadow: 0 0 0 2px var(--ta-hover);
+}
+
+.figma-chat-question-submit,
+.figma-chat-feedback-submit {
+  border-color: var(--ta-accent);
+  background: var(--ta-accent);
+  color: var(--ta-surface);
+}
+
+.figma-chat-question-submit:not(:disabled):hover,
+.figma-chat-feedback-submit:hover {
+  border-color: var(--ta-accent-2);
+  background: var(--ta-accent-2);
+}
+
+.figma-chat-question-reject,
+.figma-chat-question-prev,
+.figma-chat-question-next,
+.figma-chat-attachment-close,
+.figma-chat-drawer-close,
+.figma-chat-raw-filter,
+.figma-chat-raw-action,
+.figma-chat-raw-close,
+.figma-chat-feedback-cancel {
+  border-color: var(--figma-chat-overlay-border);
+  border-radius: 6px;
+  background: var(--figma-chat-overlay-surface);
+  color: var(--ta-muted);
+}
+
+.figma-chat-question-reject:hover,
+.figma-chat-question-prev:hover,
+.figma-chat-question-next:hover,
+.figma-chat-attachment-close:hover,
+.figma-chat-drawer-close:hover,
+.figma-chat-raw-filter:hover,
+.figma-chat-raw-action:hover,
+.figma-chat-raw-close:hover,
+.figma-chat-feedback-cancel:hover {
+  border-color: var(--ta-chat-border-strong);
+  background: var(--ta-hover);
+  color: var(--ta-text);
+}
+
+.figma-chat-skill-panel,
+.figma-chat-agent-panel {
+  margin: 0 10px 10px;
+  padding: 10px;
+}
+
+.figma-chat-choice-header {
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+
+.figma-chat-choice-question,
+.figma-chat-attachment-title,
+.figma-chat-raw-output-title,
+.figma-chat-drawer-title-text {
+  color: var(--ta-text);
+}
+
+.figma-chat-skill-row,
+.figma-chat-agent-row {
+  border-radius: 6px;
+}
+
+.figma-chat-skill-row:hover,
+.figma-chat-agent-row:hover,
+.figma-chat-history-card:hover {
+  background: var(--ta-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+.figma-chat-attachment-mask,
+.figma-chat-drawer-mask {
+  background: rgba(24, 24, 27, 0.22);
+}
+
+.figma-chat-attachment-header,
+.figma-chat-raw-output-header,
+.figma-chat-history-search,
+.figma-chat-drawer-header {
+  padding: 12px;
+  border-color: var(--figma-chat-overlay-border);
+  background: var(--figma-chat-overlay-subtle);
+}
+
+.figma-chat-attachment-drop {
+  border-color: var(--ta-chat-border-strong);
+  border-radius: 8px;
+  background: var(--figma-chat-process-bg);
+  color: var(--ta-text);
+}
+
+.figma-chat-attachment-drop-icon {
+  border-radius: 8px;
+  background: var(--ta-hover);
+  color: var(--ta-text);
+}
+
+.figma-chat-attachment-disabled {
+  border-radius: 6px;
+  background: var(--ta-panel);
+  color: var(--ta-muted);
+}
+
+.figma-chat-raw-output-panel {
+  min-width: min(360px, calc(100vw - 32px));
+}
+
+.figma-chat-raw-output-header,
+.figma-chat-raw-search,
+.figma-chat-history-search {
+  border-color: var(--figma-chat-overlay-border);
+}
+
+.figma-chat-raw-entry,
+.figma-chat-history-card {
+  border-color: var(--figma-chat-overlay-border);
+  border-radius: 8px;
+  background: var(--figma-chat-overlay-surface);
+}
+
+.figma-chat-raw-entry-meta,
+.figma-chat-raw-entry-details {
+  padding-right: 12px;
+  padding-left: 12px;
+}
+
+.figma-chat-raw-pre {
+  border-color: var(--figma-chat-overlay-border);
+  background: var(--figma-chat-process-bg);
+}
+
+.figma-chat-agent-dropdown,
+.figma-chat-model-dropdown {
+  max-width: calc(100cqw - 20px);
+  overflow: visible;
+}
+
+.figma-chat-agent-dropdown::after,
+.figma-chat-model-dropdown::after {
+  background: var(--figma-chat-overlay-surface);
+  border-color: var(--figma-chat-overlay-border);
+}
+
+.figma-chat-agent-dropdown-search,
+.figma-chat-model-dropdown-search,
+.figma-chat-model-section {
+  border-color: var(--figma-chat-overlay-border);
+}
+
+.figma-chat-agent-option-item.is-active,
+.figma-chat-model-option-item.is-active,
+.figma-chat-model-rec-item.is-active,
+.figma-chat-raw-filter.is-active {
+  border-color: var(--ta-chat-border-strong);
+  background: var(--ta-hover);
+  color: var(--ta-text);
+}
+
+:global(.figma-chat-feedback-dialog) {
+  --figma-chat-overlay-radius: 10px;
+  --figma-chat-overlay-border: var(--ta-border);
+  --figma-chat-overlay-surface: var(--ta-surface);
+  --figma-chat-overlay-subtle: var(--ta-panel);
+  --figma-chat-overlay-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+  border: 1px solid var(--figma-chat-overlay-border) !important;
+  border-radius: var(--figma-chat-overlay-radius) !important;
+  background: var(--figma-chat-overlay-surface) !important;
+  box-shadow: var(--figma-chat-overlay-shadow) !important;
+}
+
+:global(.figma-chat-feedback-dialog .el-dialog__header),
+:global(.figma-chat-feedback-dialog .el-dialog__footer) {
+  border-color: var(--figma-chat-overlay-border) !important;
+  background: var(--figma-chat-overlay-subtle);
+}
+
+:global(.figma-chat-feedback-dialog .el-dialog__title) {
+  color: var(--ta-text) !important;
+}
+
+:global(.figma-chat-feedback-dialog .el-textarea__inner) {
+  border-color: var(--figma-chat-overlay-border);
+  border-radius: 8px;
+  background: var(--figma-chat-overlay-surface);
+  color: var(--ta-text);
+}
+
+:global(.figma-chat-feedback-reason) {
+  border-color: var(--figma-chat-overlay-border);
+  border-radius: 6px;
+  background: var(--figma-chat-overlay-surface);
+  color: var(--ta-text);
+}
+
+:global(.figma-chat-feedback-reason.is-selected),
+:global(.figma-chat-feedback-reason:hover) {
+  border-color: var(--ta-chat-border-strong) !important;
+  background: var(--ta-hover) !important;
+  color: var(--ta-text) !important;
+}
+
+@container figma-chat (max-width: 479px) {
+  .figma-chat-question-dock {
+    max-height: min(56cqh, calc(100cqh - 132px));
+    margin-right: 8px;
+    margin-left: 8px;
+  }
+
+  .figma-chat-question-actions {
+    flex-wrap: wrap;
+  }
+
+  .figma-chat-question-action-spacer {
+    display: none;
+  }
+
+  .figma-chat-agent-dropdown,
+  .figma-chat-model-dropdown {
+    width: calc(100cqw - 20px);
+    max-height: min(52cqh, 320px);
+  }
+
+  .figma-chat-model-recommended-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .figma-chat-question-option,
+  .figma-chat-question-custom-card,
+  .figma-chat-skill-row,
+  .figma-chat-agent-row,
+  .figma-chat-history-card,
+  .figma-chat-attachment-dialog {
+    transition: none;
+    animation: none;
+  }
 }
 </style>

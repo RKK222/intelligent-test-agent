@@ -5377,3 +5377,14 @@ bash /tmp/test-api-after-restart.sh
   - 设计说明明确当前 session 的 active Run 摘要与待处理 Ask/Permission 的存活边界，使用容器查询在 720px 容器宽度切换桌面非模态浮层和窄屏模态底部抽屉；活动面板仅展示既有状态摘要，不复制原生工具或 Ask 的渲染/操作。
 - Result:
   - `docs/superpowers/specs/2026-07-10-chat-focus-native-timeline-design.md` 已经独立审阅通过。当前仅完成设计确认，尚未编写实现计划或修改运行代码。
+
+### 2026-07-10 - 对话专注模式与弹框视觉统一
+
+- Why:
+  - 用户希望降低对话过程噪声，但明确要求保留 OpenCode 原生 Timeline；同时允许既有弹框统一为同一套克制视觉风格，且不能破坏其行为。
+- What:
+  - `FigmaChatPanel` 新增外层“本轮活动”只读入口；只聚合当前会话的 Ask/Permission、运行中子 Agent、Todo 和失败 Run 状态。桌面使用 popover，窄聊天容器使用 modal 底部抽屉。附件、历史、原始输出、下拉、反馈、Ask/Permission dock 的视觉统一为 token 化边框、圆角、阴影、间距和窄屏表现。
+- How:
+  - 不改 `packages/agent-chat/src/opencode-like/`；活动面板位于 Timeline 滚动容器外，使用 ResizeObserver 的 720px 容器断点、Escape/外部点击关闭、焦点恢复和已有浮层冲突保护。既有 Question/Permission dock 的模板、动作与提交逻辑保持原位。
+- Result:
+  - 定向 153 passed / 1 skipped，前端 lint、typecheck、build 通过；`.env.test` 的三服务重启后 backend health/readiness 为 UP，前端 3000 返回 200。构建仍有既有 CSS import 顺序/大包体积警告，测试仍有既有 DirectoryRows 嵌套 button Vite warning。
