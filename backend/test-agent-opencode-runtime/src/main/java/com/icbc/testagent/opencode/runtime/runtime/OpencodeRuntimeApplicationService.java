@@ -36,6 +36,10 @@ public class OpencodeRuntimeApplicationService {
     private static final int SIDE_QUESTION_CONTEXT_MESSAGE_LIMIT = 40;
     private static final int SIDE_QUESTION_CONTEXT_CHAR_LIMIT = 48_000;
     private static final int SIDE_QUESTION_MAX_LENGTH = 4_000;
+    private static final String SIDE_QUESTION_SYSTEM_PROMPT = "You are a side-question answerer. "
+            + "You may use read-only inspection tools when needed to verify the answer, but never edit files, run destructive commands, or change state. "
+            + "After the read-only tools finish, return only a concise natural-language answer to the user's question. "
+            + "Do not stop after a tool call. If the context is insufficient, say so plainly.";
 
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentRuntimeTargetResolver targetResolver;
@@ -467,8 +471,8 @@ public class OpencodeRuntimeApplicationService {
             if (model != null) {
                 messageBody.put("model", Map.of("providerID", model.providerId(), "modelID", model.modelId()));
             }
-            // 旁路问题只读取已有上下文并返回一次答案，不允许临时 fork 继续读写工作区或调用外部工具。
-            messageBody.put("tools", Map.of("*", false));
+            // 使用 plan agent 的权限边界允许只读检查；不再用 tools=false，否则模型只能把工具调用协议写成文本而无法得到工具结果。
+            messageBody.put("system", SIDE_QUESTION_SYSTEM_PROMPT);
             messageBody.put("parts", List.of(Map.of("type", "text", "text", input.question())));
             Object answerResponse = post(
                     location,
@@ -477,7 +481,7 @@ public class OpencodeRuntimeApplicationService {
                     traceId);
             String answer = extractAnswer(answerResponse);
             if (answer == null) {
-                throw new IllegalStateException("opencode side question response did not contain text");
+                throw new IllegalStateException("opencode side question response did not contain a natural-language answer");
             }
             return new SideQuestionResult(answer, compacted);
         } finally {
@@ -747,19 +751,49 @@ public class OpencodeRuntimeApplicationService {
 
     private String extractAnswer(Object response) {
         if (!(response instanceof Map<?, ?> map)) {
-            return text(response);
+            return sanitizeSideQuestionText(text(response));
         }
         String partsText = extractPartsText(map.get("parts"));
         if (partsText != null) {
-            return partsText;
+            return sanitizeSideQuestionText(partsText);
         }
         for (String key : List.of("answer", "content", "text")) {
             String value = text(map.get(key));
             if (value != null) {
-                return value;
+                return sanitizeSideQuestionText(value);
             }
         }
         return extractAnswer(map.get("info"));
+    }
+
+    /**
+     * 过滤模型把工具调用协议伪装成普通文本的情况；只有自然语言片段可以进入宠物气泡。
+     */
+    private String sanitizeSideQuestionText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String remaining = value;
+        StringBuilder result = new StringBuilder();
+        while (true) {
+            int start = remaining.indexOf("<tool_calls");
+            if (start < 0) {
+                result.append(remaining);
+                break;
+            }
+            result.append(remaining, 0, start);
+            int closingStart = remaining.indexOf("</tool_calls", start);
+            if (closingStart < 0) {
+                break;
+            }
+            int closingEnd = remaining.indexOf('>', closingStart);
+            if (closingEnd < 0) {
+                break;
+            }
+            remaining = remaining.substring(closingEnd + 1);
+        }
+        String normalized = result.toString().trim();
+        return normalized.isEmpty() || normalized.contains("<tool_call") ? null : normalized;
     }
 
     private String extractPartsText(Object value) {

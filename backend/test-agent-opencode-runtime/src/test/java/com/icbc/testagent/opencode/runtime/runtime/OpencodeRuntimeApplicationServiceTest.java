@@ -206,7 +206,9 @@ class OpencodeRuntimeApplicationServiceTest {
                 command != null
                         && command.method().equals("POST")
                         && command.path().endsWith("/message")
-                        && ((Map<?, ?>) command.body()).get("tools").equals(Map.of("*", false))));
+                        && !((Map<?, ?>) command.body()).containsKey("tools")
+                        && String.valueOf(((Map<?, ?>) command.body()).get("system"))
+                                .contains("read-only inspection tools")));
         verify(fixture.facade).runtime(org.mockito.ArgumentMatchers.argThat(command ->
                 command != null && command.method().equals("DELETE") && command.path().endsWith("ses_side1234567890abcdef")));
         verify(fixture.facade, never()).runtime(org.mockito.ArgumentMatchers.argThat(command -> command != null && command.path().endsWith("/summarize")));
@@ -243,6 +245,62 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(result.compacted()).isTrue();
         verify(fixture.facade).runtime(org.mockito.ArgumentMatchers.argThat(command ->
                 command != null && command.method().equals("POST") && command.path().endsWith("/summarize")));
+    }
+
+    @Test
+    void sideQuestionRejectsPseudoToolCallTextInsteadOfShowingItAsAnswer() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.sessionMessages(any())).thenReturn(Mono.just(new com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult(
+                List.of(new com.icbc.testagent.opencode.client.OpencodeSessionMessage(
+                        Map.of("role", "user"),
+                        List.of(Map.of("type", "text", "text", "short context")))),
+                null,
+                null)));
+        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
+            OpencodeRuntimeCommand command = invocation.getArgument(0);
+            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(switch (command.method() + " " + command.path()) {
+                case "POST /session/ses_remote1234567890abcdef/fork" -> Map.of("id", "ses_side1234567890abcdef");
+                case "POST /session/ses_side1234567890abcdef/message" -> Map.of(
+                        "parts", List.of(Map.of("type", "text", "text", "<tool_calls:abc>\\n<tool_call:abc>Bash\\ncommand=ls\\n</tool_calls:abc>")));
+                case "DELETE /session/ses_side1234567890abcdef" -> Map.of("deleted", true);
+                default -> Map.of("unexpected", command.path());
+            })));
+        });
+
+        assertThatThrownBy(() -> fixture.service.sideQuestion(
+                        "ses_1234567890abcdef",
+                        new SideQuestionInput("what did we decide?", null, "plan", "anthropic/claude-sonnet"),
+                        "trace_1234567890abcdef"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("natural-language");
+    }
+
+    @Test
+    void sideQuestionKeepsFinalAnswerAfterPseudoToolCallBlock() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.sessionMessages(any())).thenReturn(Mono.just(new com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult(
+                List.of(new com.icbc.testagent.opencode.client.OpencodeSessionMessage(
+                        Map.of("role", "user"),
+                        List.of(Map.of("type", "text", "text", "short context")))),
+                null,
+                null)));
+        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
+            OpencodeRuntimeCommand command = invocation.getArgument(0);
+            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(switch (command.method() + " " + command.path()) {
+                case "POST /session/ses_remote1234567890abcdef/fork" -> Map.of("id", "ses_side1234567890abcdef");
+                case "POST /session/ses_side1234567890abcdef/message" -> Map.of(
+                        "parts", List.of(Map.of("type", "text", "text", "<tool_calls:abc>\n<tool_call:abc>Bash\ncommand=ls\n</tool_calls:abc>\n实际答案")));
+                case "DELETE /session/ses_side1234567890abcdef" -> Map.of("deleted", true);
+                default -> Map.of("unexpected", command.path());
+            })));
+        });
+
+        assertThat(fixture.service.sideQuestion(
+                        "ses_1234567890abcdef",
+                        new SideQuestionInput("what did we decide?", null, "plan", "anthropic/claude-sonnet"),
+                        "trace_1234567890abcdef"))
+                .extracting(SideQuestionResult::answer)
+                .isEqualTo("实际答案");
     }
 
     @Test
