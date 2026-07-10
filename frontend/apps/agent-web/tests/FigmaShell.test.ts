@@ -268,6 +268,48 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="figma-robot"] .state-celebrating').exists()).toBe(true);
   });
 
+  it("keeps the summoned pet visible when the user continues interacting with the page", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    window.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    window.dispatchEvent(new Event("scroll"));
+    await vi.advanceTimersByTimeAsync(2_000);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
+  });
+
+  it("keeps a manually summoned pet visible until the user hides or repositions it", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
+  });
+
+  it("places the pet toggle in the lower activity rail and keeps the avatar compact", () => {
+    const wrapper = mountShell({
+      slots: {
+        activity: '<nav class="figma-activity-nav"><div class="figma-activity-bottom"><button class="figma-activity-btn" aria-label="系统设置">设置</button></div></nav>'
+      }
+    });
+
+    const toggle = wrapper.get('[data-testid="robot-visibility-toggle"]');
+    expect(toggle.classes()).toContain("figma-robot-visibility-toggle--activity");
+    expect(wrapper.get(".figma-activity-bar").find('[data-testid="robot-visibility-toggle"]').exists()).toBe(true);
+    expect(wrapper.get(".figma-user-avatar").classes()).toContain("figma-user-avatar--compact");
+  });
+
   it("toggles the pet immediately and restores a saved manual position after a full idle minute", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);

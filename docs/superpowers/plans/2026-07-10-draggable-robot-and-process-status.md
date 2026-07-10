@@ -119,7 +119,7 @@ Before staging, reread the recent `.agents/session-log.md` entries and complete 
 
 - [x] **Step 1: Write failing interaction tests**
 
-Add focused tests for the header `robot-visibility-toggle` (`aria-label` / `aria-pressed`, immediate show/hide, click propagation), one-minute idle auto-spawn, activity/focus/visibility reset, and saved-position reappearance after manual hide. Add process tests for remount with no saved key (default inline top card) versus a validated saved drag key (floating mode); pointer capture/threshold drag of an expanded card without jump or accidental collapse; below-threshold card click collapse; dot/card persistence, edge clamp, and child-Agent hiding. The no-jump card test must assert the first fixed left/top exactly equal the pre-drag card rect, including a near-edge case. Assert the dedicated dot visual contract: 8px and translucent halo without an opaque core.
+Add focused tests for the activity-rail `robot-visibility-toggle` (`aria-label` / `aria-pressed`, immediate show/hide, click propagation), one-minute idle auto-spawn, activity/focus/visibility reset, manual summon persistence, and saved-position reappearance after manual hide. Add process tests for remount with no saved key (default inline top card) versus a validated saved drag key (floating mode); pointer capture/threshold drag of an expanded card without jump or accidental collapse; below-threshold card click collapse; dot/card persistence, edge clamp, and child-Agent hiding. The no-jump card test must assert the first fixed left/top exactly equal the pre-drag card rect, including a near-edge case. Assert the dedicated dot visual contract: 8px and translucent halo without an opaque core.
 
 - [x] **Step 2: Verify RED**
 
@@ -129,11 +129,11 @@ Expected: FAIL because the header control, default card mode, expanded-card drag
 
 - [x] **Step 3: Implement the minimum behavior changes**
 
-Add the accessible header `robot-visibility-toggle` in the existing right-side header controls, stopping header-root click propagation. Model hidden/manual-positioned pet state separately so hide clears active behavior timers yet restarts 60-second inactivity detection; saved pets reappear statically at their saved position. Keep the process card inline at the original chat-top location when no valid saved drag exists. Make collapse create only a session-local floating mode; make effective drag of the dot or card persist the shared coordinate. Implement card pointerdown/move/up/cancel/capture with existing threshold. At a card-drag threshold, retain the captured inline rect left/top and derive/invert a clamped shared dot coordinate for which the existing card placement calculation yields exactly that rect before applying movement deltas; this prevents gap, flip or clamp from causing a jump. If the left/top edge makes that inverse impossible under the required dot margin, retain a temporary exact card anchor throughout the drag/expanded state while storing the nearest safe dot coordinate; verify the first fixed rect is unchanged. Suppress click after a real drag, and preserve non-drag click/Enter/Space/initialize semantics. Reduce the dedicated dot to the specified 8px translucent halo style. Preserve child-Agent hiding, observer cleanup and viewport bounds. Add Chinese comments for hidden pet scheduling and default-versus-user-position modes.
+Add the accessible `robot-visibility-toggle` above the system-settings button in the left activity rail, stopping shell-root click propagation. Model hidden/manual-positioned pet state separately so hide clears active behavior timers yet restarts 60-second inactivity detection; manual summon remains visible until hide or reposition, while saved pets auto-reappear at their saved position. Page activity no longer triggers an already visible pet to leave. Keep the process card inline at the original chat-top location when no valid saved drag exists. Make collapse create only a session-local floating mode; make effective drag of the dot or card persist the shared coordinate. Implement card pointerdown/move/up/cancel/capture with existing threshold. At a card-drag threshold, retain the captured inline rect left/top and derive/invert a clamped shared dot coordinate for which the existing card placement calculation yields exactly that rect before applying movement deltas; this prevents gap, flip or clamp from causing a jump. If the left/top edge makes that inverse impossible under the required dot margin, retain a temporary exact card anchor throughout the drag/expanded state while storing the nearest safe dot coordinate; verify the first fixed rect is unchanged. Suppress click after a real drag, and preserve non-drag click/Enter/Space/initialize semantics. Reduce the dedicated dot to the specified 8px translucent halo style. Preserve child-Agent hiding, observer cleanup and viewport bounds. Add Chinese comments for hidden pet scheduling and default-versus-user-position modes.
 
 - [ ] **Step 4: Verify GREEN and run the UI**
 
-Run focused tests, lint, typecheck and build. Start the frontend and manually verify: top pet toggle, automatic one-minute spawn, process-card default position, card drag/collapse, translucent dot and child-Agent hiding.
+Run focused tests, lint, typecheck and build. Start the frontend and manually verify: lower-left pet toggle beside settings, manual summon persistence, automatic one-minute spawn, process-card default position, card drag/collapse, translucent dot and child-Agent hiding.
 
   - 已完成自动验证和本地启动（定向测试、lint、typecheck、build、HTTP 200）；尚未进行浏览器人工拖动验收，因此本步骤保持未勾选。
 
@@ -153,7 +153,7 @@ Update the README and session log with actual verification results; re-check `do
 
 - [x] **Step 1: Write failing tests**
 
-Add tests that assert the header toggle contains the same head/antenna/eye geometry as the pet SVG, and that after a manual drag the pet follows the same action/exit timers as natural spawn while fake time advances through multiple random-action cycles. Cover the two added抖动/旋转动作 states and toggle hide/show behavior.
+Add tests that assert the activity-rail toggle contains the same head/antenna/eye geometry as the pet SVG, and that after a manual drag the pet follows the same action/exit timers as natural spawn while fake time advances through multiple random-action cycles. Cover the two added抖动/旋转动作 states, manual summon persistence, and toggle hide/show behavior.
 
 - [x] **Step 2: Verify RED**
 
@@ -163,7 +163,7 @@ Expected: FAIL because the header uses a generic icon and manual placement curre
 
 - [x] **Step 3: Implement interactive manual placement**
 
-Replace the generic header icon with the existing pet head geometry. Remove the manual-freeze special branch: manual positioning only changes the next start coordinate, then schedules the same walking/jump/flip/hang/抖动/旋转 action loop and natural exit timers as ordinary spawn. Keep hidden/visible timers, pointer/keyboard drag, bounds, accessibility and cleanup unchanged.
+Reuse the existing pet head geometry in the activity-rail toggle. Keep manual summon visible while still running the walking/jump/flip/hang/抖动/旋转 action loop; manual positioning only changes the next start coordinate and then restores the same natural exit timers as ordinary spawn. Keep hidden/visible timers, pointer/keyboard drag, bounds, accessibility and cleanup unchanged.
 
 - [x] **Step 4: Verify GREEN**
 

@@ -319,6 +319,8 @@ let movementTimeout: ReturnType<typeof setTimeout> | null = null;
 const robotCurrentLevel = ref<"top" | "bottom">("top");
 // 保存坐标只作为下一次出现的起点，不代表要冻结动作或离场逻辑。
 const robotHasSavedPosition = ref(false);
+// 手动唤起后保持可见；用户拖动或键盘定位后才恢复自然宠物的离场规则。
+const robotKeepVisible = ref(false);
 const robotDragging = ref(false);
 
 const ROBOT_WIDTH = 24;
@@ -391,7 +393,12 @@ function scheduleNaturalExit() {
 
 function resumeNaturalRobotBehavior() {
   if (robotState.value === "sleeping") return;
-  scheduleNaturalExit();
+  if (robotKeepVisible.value) {
+    if (naturalExitTimer) clearTimeout(naturalExitTimer);
+    naturalExitTimer = null;
+  } else {
+    scheduleNaturalExit();
+  }
   scheduleNextAction();
 }
 
@@ -451,6 +458,7 @@ function finishRobotDrag(pointerId?: number) {
     robotY.value = position.y;
     robotHasSavedPosition.value = true;
     saveRobotPosition();
+    robotKeepVisible.value = false;
     resumeNaturalRobotBehavior();
   }
   cleanupRobotDrag();
@@ -482,6 +490,7 @@ function onRobotKeydown(event: KeyboardEvent) {
   robotY.value = position.y;
   robotHasSavedPosition.value = true;
   saveRobotPosition();
+  robotKeepVisible.value = false;
   resumeNaturalRobotBehavior();
 }
 
@@ -578,9 +587,8 @@ function resetInactivityTimer() {
   if (inactivityTimer) clearTimeout(inactivityTimer);
   inactivityTimer = null;
   if (robotState.value !== "sleeping") {
-    if (robotState.value !== "waving" && robotState.value !== "exiting-charge" && robotState.value !== "exiting-fly") {
-      triggerExit();
-    }
+    // 页面活动只负责重新计算“隐藏态的一分钟自动出现”计时，不能把已经唤起的宠物当成离场信号。
+    // 宠物的自然离场由 scheduleNaturalExit 单独控制，避免用户点击/输入后宠物突然消失。
     return;
   }
 
@@ -608,6 +616,7 @@ function spawnRobot() {
   robotX.value = birth.x;
   robotY.value = birth.y;
   robotHasSavedPosition.value = Boolean(savedPosition);
+  robotKeepVisible.value = false;
   robotCurrentLevel.value = savedPosition && savedPosition.y > window.innerHeight / 2 ? "bottom" : "top";
 
   // 有保存坐标时从该起点直接进入自然待机；坐标不是静止开关，动作和离场仍照常启动。
@@ -1028,9 +1037,9 @@ function executeBigJump() {
 
 // User activity listener
 function handleUserActivity(event?: Event) {
-  // 机器人自身的按下事件用于拖动，不应在 pointerdown 前被全局空闲逻辑触发离场。
+  // 宠物自身的拖动和唤起/收起按钮都不应被全局空闲逻辑当成离场信号。
   const target = event?.target as Element | null;
-  if (target?.closest?.(".figma-robot-agent")) return;
+  if (target?.closest?.(".figma-robot-agent, .figma-robot-visibility-toggle")) return;
   const now = Date.now();
   if (now - lastActivityTime < 100) return;
   lastActivityTime = now;
@@ -1082,16 +1091,18 @@ function toggleRobotVisibility() {
     if (inactivityTimer) clearTimeout(inactivityTimer);
     inactivityTimer = null;
     robotState.value = "sleeping";
+    robotKeepVisible.value = false;
     resetInactivityTimer();
     return;
   }
 
-  // 手动唤起从保存坐标开始，但随后与自然出现共享动作和离场调度。
+  // 手动唤起从保存坐标开始，共享随机动作循环，但保持可见直到用户再次收起或重新定位。
   const saved = loadSavedRobotPosition();
   const position = saved ?? clampRobotPosition(getBirthPosition());
   robotX.value = position.x;
   robotY.value = position.y;
   robotHasSavedPosition.value = Boolean(saved);
+  robotKeepVisible.value = true;
   robotCurrentLevel.value = saved && saved.y > window.innerHeight / 2 ? "bottom" : "top";
   robotDirection.value = "front";
   robotTransition.value = "none";
@@ -1283,25 +1294,6 @@ function submitJoinApp() {
             </div>
           </section>
         </div>
-        <button
-          type="button"
-          class="figma-robot-visibility-toggle"
-          data-testid="robot-visibility-toggle"
-          :aria-label="robotState === 'sleeping' ? '唤起小宠物' : '收起小宠物'"
-          :aria-pressed="robotState !== 'sleeping'"
-          title="唤起或收起小宠物"
-          @click.stop="toggleRobotVisibility"
-        >
-          <svg viewBox="5 0 14 16" class="robot-toggle-svg" width="24" height="28" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-            <!-- 开关复用宠物相同的天线、脑袋和眼睛几何，避免出现两个不同机器人图标。 -->
-            <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
-            <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#7c6bb5" />
-            <path class="robot-antenna-r" d="M16,4 L18,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
-            <circle class="robot-antenna-r-tip" cx="18" cy="1.5" r="0.8" fill="#5aa9a6" />
-            <rect class="robot-head" x="6" y="4" width="12" height="10" rx="2.5" fill="#27384b" />
-            <circle class="robot-eye" cx="12" cy="9" r="1.2" fill="#7cd5d0" />
-          </svg>
-        </button>
         <div class="figma-app-menu-wrapper" @click.stop>
           <button
             type="button"
@@ -1386,7 +1378,7 @@ function submitJoinApp() {
             :aria-expanded="userMenuOpen"
             @click="toggleUserMenu"
           >
-            <span class="figma-user-avatar">{{ userInitial }}</span>
+            <span class="figma-user-avatar figma-user-avatar--compact">{{ userInitial }}</span>
           </button>
           <div v-if="userMenuOpen" class="figma-user-menu-dropdown" role="menu">
             <div v-if="userRoleText" class="figma-user-menu-role" role="presentation" aria-label="当前用户角色">
@@ -1462,6 +1454,27 @@ function submitJoinApp() {
 
       <aside class="figma-activity-bar">
         <slot name="activity" />
+        <div class="figma-robot-toggle-activity">
+          <button
+            type="button"
+            class="figma-robot-visibility-toggle figma-robot-visibility-toggle--activity"
+            data-testid="robot-visibility-toggle"
+            :aria-label="robotState === 'sleeping' ? '唤起小宠物' : '收起小宠物'"
+            :aria-pressed="robotState !== 'sleeping'"
+            title="唤起或收起小宠物"
+            @click.stop="toggleRobotVisibility"
+          >
+            <svg viewBox="5 0 14 16" class="robot-toggle-svg" width="24" height="28" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+              <!-- 开关复用宠物相同的天线、脑袋和眼睛几何，避免出现两个不同机器人图标。 -->
+              <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
+              <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#7c6bb5" />
+              <path class="robot-antenna-r" d="M16,4 L18,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
+              <circle class="robot-antenna-r-tip" cx="18" cy="1.5" r="0.8" fill="#5aa9a6" />
+              <rect class="robot-head" x="6" y="4" width="12" height="10" rx="2.5" fill="#27384b" />
+              <circle class="robot-eye" cx="12" cy="9" r="1.2" fill="#7cd5d0" />
+            </svg>
+          </button>
+        </div>
       </aside>
 
       <div class="figma-panel-group">
@@ -1684,6 +1697,27 @@ function submitJoinApp() {
 .figma-robot-visibility-toggle:focus-visible {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
+}
+
+.figma-robot-toggle-activity {
+  position: absolute;
+  left: 5px;
+  bottom: 52px;
+  z-index: 2;
+}
+
+.figma-robot-visibility-toggle--activity {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.figma-robot-visibility-toggle--activity:hover,
+.figma-robot-visibility-toggle--activity[aria-pressed='true'] {
+  border-color: transparent;
+  background: #e8e8e8;
 }
 
 .figma-runtime-inventory-summary {
@@ -2152,6 +2186,12 @@ function submitJoinApp() {
   line-height: 1;
 }
 
+.figma-user-avatar--compact {
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+}
+
 .figma-user-menu-dropdown {
   position: absolute;
   top: calc(100% + 6px);
@@ -2341,6 +2381,7 @@ function submitJoinApp() {
 }
 
 .figma-activity-bar {
+  position: relative;
   width: 48px;
   flex-shrink: 0;
   background: #fff;
