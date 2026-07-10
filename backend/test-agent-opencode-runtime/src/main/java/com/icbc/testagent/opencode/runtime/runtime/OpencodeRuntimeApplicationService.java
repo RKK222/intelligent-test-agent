@@ -13,10 +13,13 @@ import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -349,6 +352,106 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object removeWorktree(Map<String, Object> body, String traceId) {
         return delete(workspaceLocation(text(safeBody(body).get("workspaceId")), traceId), "/experimental/worktree", safeBody(body), traceId);
+    }
+
+    /**
+     * 复用 OpenCode 内置 title agent 为首轮对话生成标题。临时远端会话不映射到平台，完成或失败后都会删除。
+     */
+    public Optional<String> generateNativeSessionTitle(
+            String workspaceId,
+            String prompt,
+            Duration timeout,
+            Duration pollInterval,
+            String traceId) {
+        if (prompt == null || prompt.isBlank()) {
+            return Optional.empty();
+        }
+        Duration resolvedTimeout = timeout == null || timeout.isNegative() || timeout.isZero()
+                ? Duration.ofSeconds(5)
+                : timeout;
+        Duration resolvedPollInterval = pollInterval == null || pollInterval.isNegative() || pollInterval.isZero()
+                ? Duration.ofMillis(100)
+                : pollInterval;
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = workspaceLocation(workspaceId, traceId);
+        String temporarySessionId = null;
+        try {
+            temporarySessionId = text(map(post(location, "/session", Map.of(), traceId)).get("id"));
+            if (temporarySessionId == null) {
+                return Optional.empty();
+            }
+            post(
+                    location,
+                    "/session/" + encodePath(temporarySessionId) + "/prompt_async",
+                    Map.of(
+                            "agent", "title",
+                            "parts", List.of(Map.of("type", "text", "text", prompt.trim()))),
+                    traceId);
+            Instant deadline = Instant.now().plus(resolvedTimeout);
+            do {
+                Optional<String> title = titleAgentResponse(get(
+                        location,
+                        "/session/" + encodePath(temporarySessionId) + "/message",
+                        Map.of(),
+                        traceId));
+                if (title.isPresent()) {
+                    return title;
+                }
+            } while (waitForTitlePoll(deadline, resolvedPollInterval));
+            return Optional.empty();
+        } finally {
+            if (temporarySessionId != null) {
+                try {
+                    delete(location, "/session/" + encodePath(temporarySessionId), Map.of(), traceId);
+                } catch (RuntimeException ignored) {
+                    // 临时会话不会映射到平台；清理失败不应影响原 Run 的终态和标题同步。
+                }
+            }
+        }
+    }
+
+    private boolean waitForTitlePoll(Instant deadline, Duration pollInterval) {
+        if (!Instant.now().isBefore(deadline)) {
+            return false;
+        }
+        try {
+            Thread.sleep(Math.min(pollInterval.toMillis(), Math.max(1L, Duration.between(Instant.now(), deadline).toMillis())));
+            return !Thread.currentThread().isInterrupted();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private Optional<String> titleAgentResponse(Object response) {
+        if (!(response instanceof List<?> messages)) {
+            return Optional.empty();
+        }
+        for (int index = messages.size() - 1; index >= 0; index--) {
+            Map<String, Object> message = map(messages.get(index));
+            Map<String, Object> info = map(message.get("info"));
+            if (!"assistant".equals(text(info.get("role"))) || !"title".equals(text(info.get("agent")))) {
+                continue;
+            }
+            Object parts = message.get("parts");
+            if (!(parts instanceof List<?> partList)) {
+                continue;
+            }
+            for (Object part : partList) {
+                Map<String, Object> partMap = map(part);
+                if ("text".equals(text(partMap.get("type")))) {
+                    String title = text(partMap.get("text"));
+                    if (title != null) {
+                        return Optional.of(title.trim());
+                    }
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object value) {
+        return value instanceof Map<?, ?> raw ? (Map<String, Object>) raw : Map.of();
     }
 
     /**

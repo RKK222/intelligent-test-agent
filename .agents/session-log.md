@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 修复企业内公共 Agent Git 分支查询 URL
+
+- Why:
+  - 企业内部公共 Agent Git 地址只保存 `host[:port]/path` 片段时，初始化弹窗加载远端分支的 `git ls-remote` 可能直接使用片段，缺少 `ssh://{unifiedAuthId}@`，导致 Gerrit 分支读取超时或认证失败；同时现场容易把 `configDirPath` 误认为 manager 启动时会自动创建。
+- What:
+  - 公共分支查询在执行 Git 命令前强制按当前用户重新计算有效 Git URL，日志继续只输出脱敏后的地址；公共配置目录未初始化的错误文案明确要求先用公共 Agent Git 仓库初始化目标服务器。
+- How:
+  - 复用既有 `effectivePublicGitUrl` / 保存值形态判断，不新增第二个公共 Git 参数，也不创建空 `OPENCODE_PUBLIC_CONFIG_DIR`。
+- Result:
+  - `AgentConfigApplicationServiceTest` 新增内部片段分支查询回归测试；目标 Maven 测试通过。部署时 `configDirPath` 仍必须来自公共配置 Git 仓库中的非空 `opencode` 配置目录。
+
 ### 2026-07-10 - 保留 OpenCode 默认标题以启用自动命名
 
 - Why:
@@ -5214,3 +5225,15 @@ bash /tmp/test-api-after-restart.sh
   - 修改 `frontend/packages/editor/src/MarkdownPreview.vue` 与 `frontend/packages/agent-chat/src/MarkdownView.vue` 两个核心组件的 `ensureLibs`、点击事件处理函数及增加 `.ta-mermaid-error` 错误展示样式。不涉及任何后端 API、事件、数据库、generated SDK 或环境配置修改。
 - Result:
   - 前端 `corepack pnpm typecheck` 全量类型检查通过；`MarkdownPreview.test.ts` 及 `MarkdownView.test.ts` 单元测试全部通过；前端生产打包成功无误。
+
+### 2026-07-10 - 首轮 OpenCode 会话标题增加原生兜底
+
+- Why:
+  - OpenCode 内置 `title` agent 与主 Run 并行执行；主智能体快速结束时，root `session.updated` 可能只到达 `New session - <timestamp>` 默认标题，或尚未来得及到达有效 AI 标题，右侧会话标题无法更新。
+- What:
+  - 默认时间戳标题不再同步到平台 Session；首轮 root Run 成功且尚无原生标题确认时，以同一用户、同一 workspace 创建并自动删除临时远端 session，调用同一个 OpenCode 原生 `title` agent。成功后通过 MyBatis 条件更新（当前标题仍为临时标题）再追加既有 `session.updated`，保留 `platformSessionTitleSynchronized` / `platformSessionTitle` 并增加 `platformSessionTitleFallback: true`。
+  - 新增 `test-agent.opencode.session-title` 的开关、超时（默认 5 秒）和轮询间隔（默认 100 毫秒），不增加自定义模型、prompt、HTTP API、数据库或 generated SDK。
+- How:
+  - 仅对用户发起的首轮 `opencode` root Run 生效；原生标题事件优先，条件更新防止异步兜底覆盖用户手动改名或后到的原生标题，非首轮、失败/超时或已同步标题均不覆盖。临时调用复用现有 `OpencodeRuntimeApplicationService` 与用户进程路由链路，不直连 OpenCode。
+- Result:
+  - `RunApplicationServiceTest`、`RunSessionTitleFallbackServiceTest`、`OpencodeRuntimeApplicationServiceTest` 共 70 项通过，`MyBatisSessionTitleUpdateRepositoryIntegrationTest` 通过，`test-agent-app -am -DskipTests package` 通过；`.env.test` / `test` profile 下本地后端 health/readiness、前端和 CORS 通过。重启后当前测试用户遗留的 4097 进程绑定已不被新 manager 管理，页面显示“进程不可用”，因此本轮未能完成浏览器内真实快速对话的最终标题验证；需先由平台重新初始化该用户进程后再验证。

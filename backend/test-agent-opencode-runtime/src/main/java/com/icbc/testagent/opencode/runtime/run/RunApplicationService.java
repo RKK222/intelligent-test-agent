@@ -141,6 +141,7 @@ public class RunApplicationService {
     private final RunSessionScopeRuntimeCache runSessionScopeRuntimeCache;
     private final RunSessionScopeRouter runSessionScopeRouter;
     private final RunActivityStateStore runActivityStateStore;
+    private final RunSessionTitleFallbackService sessionTitleFallbackService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -188,7 +189,6 @@ public class RunApplicationService {
     /**
      * 创建生产用 Run 编排服务，显式注入实时事件总线、持久化策略和运行态 Redis 存储。
      */
-    @Autowired
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
             com.icbc.testagent.domain.session.SessionRepository sessionRepository,
@@ -208,6 +208,52 @@ public class RunApplicationService {
             RunSessionScopeRepository runSessionScopeRepository,
             RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
             RunActivityStateStore runActivityStateStore) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runEventLiveBus,
+                runEventPersistencePolicy,
+                modelCatalogService,
+                userProcessAssignmentService,
+                workspacePathResolver,
+                snapshotService,
+                runSessionScopeRepository,
+                runSessionScopeRuntimeCache,
+                runActivityStateStore,
+                null);
+    }
+
+    /**
+     * 创建生产用 Run 编排服务，并注入首轮 OpenCode 原生标题兜底策略。
+     */
+    @Autowired
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            RunSessionTitleFallbackService sessionTitleFallbackService) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -248,6 +294,7 @@ public class RunApplicationService {
         this.runActivityStateStore = runActivityStateStore == null
                 ? new RunActivityStateStore(null)
                 : runActivityStateStore;
+        this.sessionTitleFallbackService = sessionTitleFallbackService;
     }
 
     /**
@@ -1056,6 +1103,9 @@ public class RunApplicationService {
             Run saved = runRepository.save(terminal);
             runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft));
             snapshotService.persistRunSnapshot(agentId, saved, eventDraft.traceId());
+            if (eventDraft.type() == RunEventType.RUN_SUCCEEDED && sessionTitleFallbackService != null) {
+                sessionTitleFallbackService.schedule(agentId, saved);
+            }
             return;
         }
         if (eventDraft.type() == RunEventType.MESSAGE_PART_UPDATED) {
@@ -1084,6 +1134,8 @@ public class RunApplicationService {
         }
         try {
             return sessionUpdatedTitle(draft.payload())
+                    // OpenCode 的默认标题只是 title agent 的执行前状态，不能覆盖页面的首条消息临时标题。
+                    .filter(title -> !OpencodeSessionTitlePolicy.isDefaultTitle(title))
                     .flatMap(title -> sessionRepository.findById(originalRun.sessionId())
                             // 额外校验平台会话绑定的远端 root id，防止陈旧或错误路由的事件改写标题。
                             .filter(session -> scope.rootSessionId().equals(session.opencodeSessionId()))

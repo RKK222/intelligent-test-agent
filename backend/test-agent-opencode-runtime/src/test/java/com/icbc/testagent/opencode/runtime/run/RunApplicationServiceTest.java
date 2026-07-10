@@ -853,6 +853,78 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void serviceDoesNotSynchronizeOpenCodeDefaultSessionTitle() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.SESSION_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "session.updated",
+                        "sessionID", REMOTE_SESSION_ID,
+                        "info", Map.of("title", "New session - 2026-07-10T04:56:46.518Z"))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
+        assertThat(sessions.current.title()).isEqualTo("Demo session");
+        assertThat(events.events.get(2).payload())
+                .doesNotContainKeys("platformSessionTitleSynchronized", "platformSessionTitle");
+    }
+
+    @Test
+    void serviceSchedulesTitleFallbackAfterSuccessfulRootRun() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                command.traceId(),
+                Instant.now(),
+                Map.of("status", "idle")));
+        RunSessionTitleFallbackService titleFallback = org.mockito.Mockito.mock(RunSessionTitleFallbackService.class);
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                null,
+                null,
+                null,
+                titleFallback);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+        org.mockito.Mockito.verify(titleFallback).schedule(
+                org.mockito.Mockito.eq("opencode"), org.mockito.Mockito.any(Run.class));
+    }
+
+    @Test
     void serviceDoesNotSynchronizeDiscoveredChildSessionTitleToPlatformRootSession() {
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
