@@ -5248,3 +5248,18 @@ bash /tmp/test-api-after-restart.sh
   - 仅对用户发起的首轮 `opencode` root Run 生效；原生标题事件优先，条件更新防止异步兜底覆盖用户手动改名或后到的原生标题，非首轮、失败/超时或已同步标题均不覆盖。临时调用复用现有 `OpencodeRuntimeApplicationService` 与用户进程路由链路，不直连 OpenCode。
 - Result:
   - `RunApplicationServiceTest`、`RunSessionTitleFallbackServiceTest`、`OpencodeRuntimeApplicationServiceTest` 共 70 项通过，`MyBatisSessionTitleUpdateRepositoryIntegrationTest` 通过，`test-agent-app -am -DskipTests package` 通过；`.env.test` / `test` profile 下本地后端 health/readiness、前端和 CORS 通过。重启后当前测试用户遗留的 4097 进程绑定已不被新 manager 管理，页面显示“进程不可用”，因此本轮未能完成浏览器内真实快速对话的最终标题验证；需先由平台重新初始化该用户进程后再验证。
+
+### 2026-07-10 - 重新生成企业内部署离线包
+
+- Why:
+  - 用户需要基于最新代码重新生成企业内离线部署包；首次打包因 Dockerfile syntax 前端镜像从 Docker Hub 拉取超时而中断。
+- What:
+  - 删除 `deploy/internal/opencode-worker.Dockerfile` 中不必要的 `# syntax=docker/dockerfile:1.7` 声明，避免普通多阶段构建在本地缓存可用时额外访问 Docker Hub 的 Dockerfile frontend。
+  - 重新构建后端外置依赖 jar、前端静态资源、最新 amd64 opencode-worker 镜像和外挂程序，并生成完整 `test-agent-internal-release.zip`。
+- How:
+  - 执行 `deploy/internal/package-release.sh`；Docker buildx 使用本地基础镜像和缓存完成 Go manager 编译及 worker 镜像导出。
+  - 对 zip 完整性、后端 `PropertiesLauncher` manifest、瘦 jar、外置 `backend/lib`、PostgreSQL 驱动和解压后的部署脚本执行校验。
+- Result:
+  - 企业包已生成：`deploy/internal/dist/test-agent-internal-release.zip`。
+  - SHA-256：`835f5428d745052e462e6703f72752845fe23739be35453121cec1539df7d0c8`。
+  - zip 测试通过，后端 jar 不含 `BOOT-INF/lib`，manifest 含 `Loader-Path: /data/testagent/dist/backend/lib`，部署脚本 `--validate-only --skip-worker` 通过。
