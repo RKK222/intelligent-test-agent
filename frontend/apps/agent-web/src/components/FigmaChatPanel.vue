@@ -1933,6 +1933,8 @@ const processStatusText = computed(() => {
   return resolveServiceTarget(props.processStatus) || props.processStatus.message
 })
 
+const activeSubagentSessionId = ref<string | null>(null)
+
 // 进程状态卡片可折叠：默认收起为右下角一个小圆点（带渐变虚化），
 // 点击展开/收起，节省聊天面板纵向空间
 const processStatusCollapsed = ref(true)
@@ -1941,6 +1943,13 @@ const processStatusDotVisible = computed(
     processStatusVisible.value &&
     processStatusCollapsed.value &&
     processReady.value
+)
+// 观察器以卡片实际挂载条件为准，子 Agent 视图会卸载卡片，不能只看进程状态。
+const processStatusCardVisible = computed(
+  () =>
+    !activeSubagentSessionId.value &&
+    processStatusVisible.value &&
+    !processStatusDotVisible.value
 )
 watch(
   () => props.processStatus?.status,
@@ -2095,7 +2104,7 @@ function measureProcessStatusCard() {
 
 async function startProcessStatusCardObservation() {
   await nextTick()
-  if (processStatusCollapsed.value || !processStatusVisible.value) return
+  if (!processStatusCardVisible.value) return
   const card = processStatusCard.value
   if (!card) return
   measureProcessStatusCard()
@@ -2112,18 +2121,10 @@ function stopProcessStatusCardObservation() {
   processStatusCardResizeObserver = null
 }
 
-watch(processStatusCollapsed, (collapsed) => {
-  if (collapsed) {
-    stopProcessStatusCardObservation()
-  } else {
-    void startProcessStatusCardObservation()
-  }
-})
-
-watch(processStatusVisible, (visible) => {
+watch(processStatusCardVisible, (visible) => {
   if (!visible) {
     stopProcessStatusCardObservation()
-  } else if (!processStatusCollapsed.value) {
+  } else {
     void startProcessStatusCardObservation()
   }
 })
@@ -2190,7 +2191,7 @@ function handleProcessStatusDotClick() {
 onMounted(() => {
   loadProcessDotPos()
   window.addEventListener('resize', onProcessStatusDotResize)
-  if (processStatusVisible.value && !processStatusDotVisible.value) {
+  if (processStatusCardVisible.value) {
     void startProcessStatusCardObservation()
   }
 })
@@ -2696,8 +2697,6 @@ const timelineDiffFiles = computed<RunDiffFile[]>(() =>
     status: file.status ?? 'modified',
   }))
 )
-
-const activeSubagentSessionId = ref<string | null>(null)
 
 const opencodeTimelineState = computed(() =>
   createOpencodeLikeState({

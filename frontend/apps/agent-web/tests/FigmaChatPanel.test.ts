@@ -1,6 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatStateFromSessionTreeSnapshot } from "../src/components/workbench-utils";
 import FigmaChatPanel from "../src/components/FigmaChatPanel.vue";
 import type { SessionTreeMessagesResponse } from "@test-agent/shared-types";
@@ -41,6 +41,10 @@ function setViewport(width: number, height: number) {
 }
 
 describe("FigmaChatPanel", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("persists a dragged READY dot and expands the status card beside that location", async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
@@ -859,6 +863,17 @@ describe("FigmaChatPanel", () => {
   });
 
   it("switches from the root timeline to a subagent timeline without showing the composer", async () => {
+    const resizeObservers: TestResizeObserver[] = [];
+    class TestResizeObserver {
+      observe = vi.fn();
+      disconnect = vi.fn();
+
+      constructor(_callback: ResizeObserverCallback) {
+        resizeObservers.push(this);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -947,6 +962,11 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("Explore frontend structure");
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
 
+    await wrapper.get(".figma-chat-process-status-dot").trigger("click");
+    await nextTick();
+    await nextTick();
+    expect(resizeObservers).toHaveLength(1);
+
     await wrapper.get(".oc-subagent-card").trigger("click");
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
@@ -954,11 +974,16 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("子 Agent 已读取前端目录。");
     expect(wrapper.text()).toContain("子 Agent 不支持对话");
     expect(wrapper.find(".figma-chat-subagent-return").exists()).toBe(true);
+    expect(resizeObservers[0].disconnect).toHaveBeenCalledTimes(1);
 
     await wrapper.get(".figma-chat-subagent-return").trigger("click");
+    await nextTick();
+    await nextTick();
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
+    expect(resizeObservers).toHaveLength(2);
+    expect(resizeObservers[1].observe).toHaveBeenCalledTimes(1);
   });
 
   it("shows multiple subagent cards directly without folding them into a task group", () => {
