@@ -1175,6 +1175,40 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("reply-question")).toEqual([["ques_1", [["预发环境"]]]]);
   });
 
+  it("renders a pending permission and keeps every native reply decision available", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        permissions: [
+          {
+            requestId: "perm_1",
+            sessionId: "ses_1",
+            type: "bash",
+            title: "允许执行命令",
+            description: "pnpm test",
+            createdAt: "2026-07-10T09:00:00.000Z"
+          }
+        ]
+      } as any
+    });
+
+    const dock = wrapper.get(".figma-chat-question-dock");
+    expect(dock.text()).toContain("允许执行命令");
+    expect(dock.text()).toContain("pnpm test");
+
+    const actions = dock.findAll("button");
+    await actions[0]!.trigger("click");
+    await actions[1]!.trigger("click");
+    await actions[2]!.trigger("click");
+
+    expect(wrapper.emitted("reply-permission")).toEqual([
+      ["perm_1", "once"],
+      ["perm_1", "always"],
+      ["perm_1", "reject"]
+    ]);
+  });
+
   it("submits a custom answer instead of the selected single-choice option", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -2743,7 +2777,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-task-panel").exists()).toBe(false);
   });
 
-  it("defaults to focused reading and restores native process rows when the full-process toggle is used", async () => {
+  it("keeps every native message type in focused reading and changes presentation only", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -2763,6 +2797,14 @@ describe("FigmaChatPanel", () => {
               { partId: "focus-reasoning", type: "reasoning", text: "先分析现有代码", status: "completed" },
               { partId: "focus-read", type: "tool", toolName: "read", status: "completed", input: { filePath: "Login.vue" } },
               { partId: "focus-file", type: "file", path: "Login.vue", name: "Login.vue" },
+              {
+                partId: "focus-bash",
+                type: "tool",
+                toolName: "bash",
+                status: "completed",
+                input: { command: "pnpm test" },
+                output: "passed"
+              },
               {
                 partId: "focus-task",
                 type: "tool",
@@ -2787,17 +2829,40 @@ describe("FigmaChatPanel", () => {
     const modeToggle = wrapper.get('[data-testid="chat-timeline-mode-toggle"]');
     expect(modeToggle.attributes("aria-label")).toBe("完整过程");
     expect(wrapper.text()).toContain("登录流程检查完成。");
-    expect(wrapper.find(".oc-context-group").exists()).toBe(false);
-    expect(wrapper.find(".oc-reasoning-part").exists()).toBe(false);
-    expect(wrapper.find(".oc-tool").exists()).toBe(false);
-    expect(wrapper.find(".oc-subagent-card").exists()).toBe(false);
+    expect(wrapper.find(".oc-context-group").exists()).toBe(true);
+    expect(wrapper.find(".oc-reasoning-part").exists()).toBe(true);
+    expect(wrapper.find(".oc-tool").exists()).toBe(true);
+    expect(wrapper.find(".oc-subagent-card").exists()).toBe(true);
+    expect(wrapper.get(".figma-chat-root").classes()).toContain("is-focused-reading");
 
     await modeToggle.trigger("click");
 
     expect(wrapper.get('[data-testid="chat-timeline-mode-toggle"]').attributes("aria-label")).toBe("专注阅读");
+    expect(wrapper.get(".figma-chat-root").classes()).not.toContain("is-focused-reading");
     expect(wrapper.find(".oc-context-group").exists()).toBe(true);
     expect(wrapper.find(".oc-reasoning-part").exists()).toBe(true);
     expect(wrapper.find(".oc-subagent-card").exists()).toBe(true);
+  });
+
+  it("keeps the copy action and final-output marker on the last completed assistant text", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          { id: "final-user", role: "user", text: "给出结论", createdAt: "2026-07-10T09:00:00.000Z" },
+          {
+            id: "final-assistant",
+            role: "assistant",
+            text: "这是最终结论。",
+            parts: [{ partId: "final-text", type: "text", text: "这是最终结论。", status: "completed" }],
+            createdAt: "2026-07-10T09:00:01.000Z"
+          }
+        ]
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.get(".oc-text-part").classes()).toContain("oc-summary");
+    expect(wrapper.get('[aria-label="复制"]')).toBeTruthy();
   });
 
   it("opens a frontend-only attachment dialog from the composer action", async () => {
@@ -3800,5 +3865,8 @@ describe("FigmaChatPanel", () => {
     expect(componentSource).toContain(".figma-chat-attachment-dialog,");
     expect(componentSource).toContain(".figma-chat-agent-dropdown,");
     expect(componentSource).toContain(":global(.figma-chat-feedback-dialog)");
+    expect(componentSource).toContain("不隐藏或重建任何 OpenCode message part");
+    expect(componentSource).toContain(":deep(.oc-text-part__copy)");
+    expect(componentSource).toContain(":deep(.oc-text-part.oc-summary)");
   });
 });

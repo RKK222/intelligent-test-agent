@@ -3039,20 +3039,8 @@ const timelineDiffFiles = computed<RunDiffFile[]>(() =>
   }))
 )
 
-// 专注阅读只向原生 Timeline 提供用户消息和最终文本 part；完整过程仍复用原始状态，
-// 因而工具、思考、文件和子 Agent 的原始渲染与交互都不会被改写。
+// 专注阅读只调整宿主视觉密度，所有 OpenCode 原生 message part 与事件仍走同一个 Timeline state。
 const focusedReading = ref(true)
-const focusedTimelineMessages = computed<AgentMessage[]>(() =>
-  timelineMessages.value
-    .filter((message): message is Extract<AgentMessage, { role: 'user' | 'assistant' }> => message.role !== 'card')
-    .map((message) => {
-      if (message.role === 'user') return message
-      return {
-        ...message,
-        parts: (message.parts ?? []).filter((part): part is Extract<MessagePart, { type: 'text' }> => part.type === 'text'),
-      }
-    })
-)
 
 const opencodeTimelineState = computed(() =>
   createOpencodeLikeState({
@@ -3068,26 +3056,6 @@ const opencodeTimelineState = computed(() =>
     subagentByTaskPartId: props.subagentByTaskPartId,
     activeSubagentSessionId: activeSubagentSessionId.value,
   })
-)
-
-const focusedTimelineState = computed(() =>
-  createOpencodeLikeState({
-    messages: focusedTimelineMessages.value,
-    // 专注模式由外层活动入口承接运行过程，不让 Timeline 再生成思考、重试、Diff 或工作态行。
-    running: false,
-    runtimeStatus: { type: 'idle' },
-    diffFiles: [],
-    streamingTextByPartId: props.streamingTextByPartId,
-    todos: [],
-    messageScopesById: props.messageScopesById,
-    subagentsBySessionId: {},
-    subagentByTaskPartId: {},
-    activeSubagentSessionId: activeSubagentSessionId.value,
-  })
-)
-
-const visibleTimelineState = computed(() =>
-  focusedReading.value ? focusedTimelineState.value : opencodeTimelineState.value
 )
 
 function toggleTimelineReadingMode() {
@@ -3392,7 +3360,7 @@ function onCompositionEnd() {
 </script>
 
 <template>
-  <div ref="chatRoot" class="figma-chat-root">
+  <div ref="chatRoot" :class="['figma-chat-root', focusedReading && 'is-focused-reading']">
     <header class="figma-chat-header">
       <div class="figma-chat-header-left">
         <h2 class="figma-chat-title" :title="title">{{ title }}</h2>
@@ -3468,7 +3436,7 @@ function onCompositionEnd() {
       </div>
       <OpencodeTimeline
         v-else
-        :state="visibleTimelineState"
+        :state="opencodeTimelineState"
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
@@ -9143,6 +9111,43 @@ details[open] .figma-chat-process-chevron {
   --figma-chat-overlay-surface: var(--ta-surface);
   --figma-chat-overlay-subtle: var(--ta-panel);
   --figma-chat-overlay-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+}
+
+/* 专注阅读只降低过程行的视觉权重；不隐藏或重建任何 OpenCode message part。 */
+.figma-chat-root.is-focused-reading :deep(.oc-context-group__trigger),
+.figma-chat-root.is-focused-reading :deep(.oc-tool-group__trigger),
+.figma-chat-root.is-focused-reading :deep(.oc-tool__trigger),
+.figma-chat-root.is-focused-reading :deep(.oc-reasoning-part .oc-disclosure__trigger) {
+  min-height: 22px;
+  opacity: 0.78;
+}
+
+/* 恢复助手正文复制入口；放入原组件 layer，覆盖其中仅为旧视觉隐藏的 important 规则。 */
+@layer oc-components {
+  .figma-chat-root :deep(.oc-text-part__copy) {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 1;
+    display: block !important;
+    opacity: 0;
+    transition: opacity 0.14s ease;
+  }
+
+  .figma-chat-root :deep(.oc-text-part:hover .oc-text-part__copy),
+  .figma-chat-root :deep(.oc-text-part__copy:focus-within),
+  .figma-chat-root :deep(.oc-text-part.oc-summary .oc-text-part__copy) {
+    opacity: 1;
+  }
+}
+
+/* 只对完成态最后一条 text part 使用最终输出容器。 */
+.figma-chat-root :deep(.oc-text-part.oc-summary) {
+  padding: 12px 40px 12px 14px;
+  border: 1px solid #dce5f5;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 3px 12px rgba(35, 61, 104, 0.05);
 }
 
 .figma-chat-question-dock,

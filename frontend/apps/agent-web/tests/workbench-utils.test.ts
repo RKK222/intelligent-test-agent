@@ -1336,4 +1336,47 @@ describe("inferDiffFromToolPart", () => {
     const result = inferDiffFromToolPart(toolPart({ content: "abc" }));
     expect(result).toBeUndefined();
   });
+
+  it("restores pending historical question and permission events from the session tree", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [{ sessionId: "ses_root", rootSessionId: "ses_root", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "question.asked",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            id: "ques_history",
+            sessionID: "ses_root",
+            questions: [{ id: "q_history", question: "是否继续执行？", options: [{ label: "继续" }] }]
+          }
+        },
+        {
+          type: "permission.asked",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            id: "perm_history",
+            sessionID: "ses_root",
+            permission: "bash",
+            title: "允许执行命令"
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+
+    expect(state.questions).toMatchObject([
+      { requestId: "ques_history", sessionId: "ses_root", questions: [{ text: "是否继续执行？" }] }
+    ]);
+    expect(state.permissions).toMatchObject([
+      { requestId: "perm_history", sessionId: "ses_root", type: "bash", title: "允许执行命令" }
+    ]);
+  });
 });

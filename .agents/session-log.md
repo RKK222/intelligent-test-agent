@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-11 - 恢复对话原生事件、复制入口与最终输出样式
+
+- Why: 对话“专注阅读”错误过滤了 reasoning/tool/file/task 等非文本 part，包级视觉规则又隐藏了复制按钮；最终完成文本缺少独立样式，历史 question/permission 的恢复与继续缺少回归保障。
+- What: 专注阅读改为只降低过程行视觉权重，切换前后始终复用同一份 `OpencodeTimeline` state；完成态最后一条 assistant text 使用轻量最终输出容器并恢复复制按钮。补齐当前 permission 三种决策、当前 question、历史 session-tree question/permission 回放及全 message type 保留测试。
+- How: 仅修改 `FigmaChatPanel` 宿主展示层和测试，未修改 `frontend/packages/agent-chat/src/opencode-like/` 的 reducer、投影、组件或 Huangzhenren 已有回复链路；复制覆盖放入原 `oc-components` cascade layer，避免旧 `!important` 隐藏规则继续生效。同步 agent-web README。
+- Result: 对话相关 226 passed、1 skipped，前端 typecheck/lint/build 通过；Playwright 在真实历史会话验证 reasoning/tool 切换前后数量一致、最终输出和复制按钮可见，390px 视口内最终输出未溢出对话栏。`.env.test`/`test` profile 重启后 backend/readiness/frontend/CORS 均正常。前端全量另有 1 个既有无关失败：`DirectoryRows.test.ts` 期望目录不显示删除按钮，而当前 HEAD 会同时显示文件与目录删除按钮。
+
 ### 2026-07-10 - 增加宠物旁路问答并按上下文预算控制临时 fork
 
 - Why:
