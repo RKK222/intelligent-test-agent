@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-10 - 支持小宠物与进程状态卡本地定位
+
+- Why:
+  - 工作台小宠物需要在不喧宾夺主的前提下支持用户定位，TestAgent 进程状态卡需要在折叠绿点的位置展开。
+- What:
+  - MIMO 使用低饱和蓝灰、青色和紫色点缀，指针或键盘定位仅保存在浏览器本地，手动定位后暂停随机动作；进程绿点本地保存坐标，展开卡固定锚定、按可用视口换向并在内容尺寸变化时重新约束。同步更新 `frontend/apps/agent-web/README.md`，保留设计说明和实施计划。
+- How:
+  - 未新增或变更 API、RunEvent SSE、数据库、安全或兼容性契约；通过既有组件和单测覆盖拖动、持久化、边缘换向及缩放约束。
+- Result:
+  - `cd frontend && corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts`（97 passed，1 skipped）、`corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build` 和 `git diff --check` 均通过。以 `corepack pnpm --filter @test-agent/agent-web dev -- --host 127.0.0.1 --port 3010` 启动当前 HEAD，因 3000/3001 已占用实际监听 `http://127.0.0.1:3002/`，`curl` 返回 200；构建仅有既有 CSS `@import` 顺序及大包体积警告。
+- Next:
+  - 未执行浏览器人工拖动、刷新和缩放验收；可在 `http://127.0.0.1:3002/` 按 README 所述交互复核。
+
 ### 2026-07-10 - 删除 OpenCode 会话标题超时兜底
 
 - Why:
