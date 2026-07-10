@@ -20,7 +20,7 @@
 
 - [x] **Step 1: Write failing component tests**
 
-Extend the existing `FigmaShell` tests without replacing current coverage. Use fake timers, clear `localStorage`, and mock focused/visible document state in setup; restore timers and globals in teardown. Add isolated tests that assert cyan/violet accent classes, a drag beyond the threshold saves root-element `{ x, y }` coordinates and pauses autonomous behavior, a saved position restores after remount, a resize reclamps and persists the saved value, below-threshold pointer movement does not pause autonomous behavior, and read/write storage failures safely retain the default or in-memory position.
+Extend the existing `FigmaShell` tests without replacing current coverage. Use fake timers, clear `localStorage`, and mock focused/visible document state in setup; restore timers and globals in teardown. Add isolated tests that assert cyan/violet accent classes, a drag beyond the threshold saves root-element `{ x, y }` coordinates and resumes natural behavior after release, a saved position restores after remount, a resize reclamps and persists the saved value, below-threshold pointer movement does not pause autonomous behavior, and read/write storage failures safely retain the default or in-memory position.
 
 - [x] **Step 2: Run test to verify RED**
 
@@ -30,7 +30,7 @@ Expected: FAIL because no colored accent or drag-persistence behavior exists.
 
 - [x] **Step 3: Add the smallest robot position controller**
 
-In `FigmaShell.vue`, add named robot width, height, viewport-margin, and drag-threshold constants; persist root-element `left/top` coordinates (not the existing state’s pre-offset Y value) and use that same convention in style binding, load, resize, and tests. Use guarded storage read/write helpers so blocked storage retains the default or current in-memory position without throwing. Add manual-placement state, pointer-drag bookkeeping, pointer capture/release, and resize handling. On a drag beyond the threshold, clear current behavior timers, save the clamped coordinate, and leave the robot idle instead of scheduling another behavior. Guard activity, inactivity, and exit scheduling while manual placement is active so global mouse movement cannot remove it during a drag. Restore a saved position as a static idle robot; otherwise preserve the current random spawn/action flow. During only an active drag, set `document.body` to `grabbing`/nonselectable; restore both styles and release capture on pointerup, pointercancel, and unmount. Apply muted cyan and violet SVG accent classes without replacing the current SVG structure. Add Chinese comments for the coordinate contract, behavior-pause rule, and listener/body-style teardown.
+In `FigmaShell.vue`, add named robot width, height, viewport-margin, and drag-threshold constants; persist root-element `left/top` coordinates (not the existing state’s pre-offset Y value) and use that same convention in style binding, load, resize, and tests. Use guarded storage read/write helpers so blocked storage retains the default or current in-memory position without throwing. Add manual-placement state, pointer-drag bookkeeping, pointer capture/release, and resize handling. On a drag beyond the threshold, clear current behavior timers, save the clamped coordinate, and resume the same natural behavior and exit timers immediately after release. Restore a saved position as the next natural start coordinate; otherwise preserve the current random spawn/action flow. During only an active drag, set `document.body` to `grabbing`/nonselectable; restore both styles and release capture on pointerup, pointercancel, and unmount. Apply muted cyan and violet SVG accent classes without replacing the current SVG structure. Add Chinese comments for the coordinate contract, behavior-pause rule, and listener/body-style teardown.
 
 - [x] **Step 4: Run test to verify GREEN**
 
@@ -140,6 +140,38 @@ Run focused tests, lint, typecheck and build. Start the frontend and manually ve
 - [x] **Step 5: Update docs, session log and commit**
 
 Update the README and session log with actual verification results; re-check `docs/guides/self-checklist.md`, then commit only this task’s files with a Chinese message.
+
+## Chunk 6: 提升宠物互动性
+
+### Task 6: 复用宠物头部图标并恢复手动定位后的随机动作
+
+**Files:**
+- Modify: `frontend/apps/agent-web/src/components/FigmaShell.vue`
+- Modify: `frontend/apps/agent-web/tests/FigmaShell.test.ts`
+- Modify: `frontend/apps/agent-web/README.md`
+- Modify: `.agents/session-log.md`
+
+- [x] **Step 1: Write failing tests**
+
+Add tests that assert the header toggle contains the same head/antenna/eye geometry as the pet SVG, and that after a manual drag the pet follows the same action/exit timers as natural spawn while fake time advances through multiple random-action cycles. Cover the two added抖动/旋转动作 states and toggle hide/show behavior.
+
+- [x] **Step 2: Verify RED**
+
+Run: `cd frontend && corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts`
+
+Expected: FAIL because the header uses a generic icon and manual placement currently suppresses random scheduling.
+
+- [x] **Step 3: Implement interactive manual placement**
+
+Replace the generic header icon with the existing pet head geometry. Remove the manual-freeze special branch: manual positioning only changes the next start coordinate, then schedules the same walking/jump/flip/hang/抖动/旋转 action loop and natural exit timers as ordinary spawn. Keep hidden/visible timers, pointer/keyboard drag, bounds, accessibility and cleanup unchanged.
+
+- [x] **Step 4: Verify GREEN**
+
+Run the focused Shell tests, then full frontend lint/typecheck/build. Start the frontend and record the HTTP smoke result.
+
+- [x] **Step 5: Update docs/session log and commit**
+
+Document that manually positioned pets continue interactive actions and natural disappearance; update session log with actual verification and keep manual browser interaction status truthful. Commit only Task 6 files with a Chinese message.
 
 ## Chunk 5: 统一进程浮层坐标模型
 

@@ -2,6 +2,32 @@
 
 ## Entries
 
+### 2026-07-10 - 合并验证宠物互动与进程浮层修复
+
+- Why:
+  - 收尾本轮宠物随机互动、同款头部图标和进程绿点边缘迁移修复，确认两组提交合并后没有回归。
+- What:
+  - 宠物开关图标填充 28×28 按钮，手动定位后继续自然动作/离场并新增抖动、旋转庆祝；进程状态保留 v2 卡片锚点、dotSide、旧坐标迁移和完整边缘拖动。
+- How:
+  - 仅复用现有 FigmaShell/FigmaChatPanel 与测试，不新增 API、SSE、数据库或环境配置。
+- Result:
+  - `cd frontend && corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts`：116 passed、1 skipped；`corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build` 和 `curl -I http://127.0.0.1:3000/`（HTTP 200）通过。仍有既有 DirectoryRows 嵌套 button、CSS `@import` 顺序和大 chunk 警告。
+- Next:
+  - 未做浏览器人工交互验收；下一步再评估类似 Claude Code `/btw` 的旁路问答设计。
+
+### 2026-07-10 - 完成宠物互动与进程浮层收尾
+
+- Why:
+  - 用户要求顶部宠物图标与本体一致且填满按钮，手动定位后继续自然随机互动；进程绿点需要覆盖完整安全视口并兼容旧位置记录。
+- What:
+  - 宠物复用同一套天线/脑袋/眼睛 SVG，开关图标调整为 24×28；手动拖动或键盘定位后继续自然动作和自然离场，并新增抖动、旋转庆祝动作。进程浮层补齐 v1 迁移、v2 `dotSide` 方位和边缘拖动/点击抑制回归。
+- How:
+  - 复用现有 FigmaShell/FigmaChatPanel 状态机与本地存储，不新增 API、SSE、数据库或环境配置；测试先行覆盖图标几何、计时器、动作和浮层边缘路径。
+- Result:
+  - 宠物定向测试 18/18 通过；进程浮层定向测试 98/98 通过、1 跳过；agent-web 类型检查、lint、build 与 HTTP 冒烟均已由对应提交验证。人工浏览器拖动、缩放和收起/重开仍未验收。
+- Next:
+  - 完成合并后的全量前端定向回归，再评估宠物旁路问答（类似 Claude Code `/btw`）设计。
+
 ### 2026-07-10 - 补齐进程锚点方位与实测约束时机
 
 - Why:
