@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
-import { ChevronDown, LogOut, ShieldCheck, UserRound, X } from "lucide-vue-next";
+import { ChevronDown, LogOut, ShieldCheck, UserRound, X, Pin, PinOff } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
@@ -137,6 +137,7 @@ function closeHeaderMenus() {
   closeAppMenu();
   closeUserMenu();
   closeRuntimeInventory();
+  closeRobotQuestion();
 }
 
 function logout() {
@@ -317,6 +318,7 @@ const robotQuestionOpen = ref(false);
 const robotQuestionDraft = ref("");
 const robotDirection = ref<"left" | "right" | "front">("front");
 const robotTransition = ref("none");
+const robotFixed = ref(false);
 
 let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 let naturalExitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -336,6 +338,24 @@ const ROBOT_VIEWPORT_MARGIN = 8;
 const ROBOT_DRAG_THRESHOLD = 4;
 const ROBOT_KEYBOARD_STEP = 8;
 const ROBOT_POSITION_STORAGE_KEY = "figma-shell-robot-pos";
+const ROBOT_FIXED_STORAGE_KEY = "figma-shell-robot-fixed";
+
+function loadRobotFixed(): boolean {
+  try {
+    const raw = window.localStorage.getItem(ROBOT_FIXED_STORAGE_KEY);
+    return raw === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveRobotFixed(fixed: boolean) {
+  try {
+    window.localStorage.setItem(ROBOT_FIXED_STORAGE_KEY, String(fixed));
+  } catch {
+    // Ignore storage errors in private mode
+  }
+}
 
 let robotDragPointerId: number | null = null;
 let robotDragStartClientX = 0;
@@ -394,6 +414,11 @@ function pauseRobotForManualPlacement() {
 }
 
 function scheduleNaturalExit() {
+  if (robotFixed.value) {
+    if (naturalExitTimer) clearTimeout(naturalExitTimer);
+    naturalExitTimer = null;
+    return;
+  }
   if (naturalExitTimer) clearTimeout(naturalExitTimer);
   const stayDuration = (15 + Math.random() * 45) * 1000;
   naturalExitTimer = setTimeout(triggerExit, stayDuration);
@@ -401,6 +426,7 @@ function scheduleNaturalExit() {
 
 function resumeNaturalRobotBehavior() {
   if (robotState.value === "sleeping") return;
+  if (robotFixed.value) return;
   if (robotKeepVisible.value) {
     if (naturalExitTimer) clearTimeout(naturalExitTimer);
     naturalExitTimer = null;
@@ -408,6 +434,22 @@ function resumeNaturalRobotBehavior() {
     scheduleNaturalExit();
   }
   scheduleNextAction();
+}
+
+function toggleRobotFixed() {
+  robotFixed.value = !robotFixed.value;
+  saveRobotFixed(robotFixed.value);
+  
+  if (robotFixed.value) {
+    clearAllRobotTimers();
+    if (inactivityTimer) clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+    robotState.value = "idle";
+    robotDirection.value = "front";
+    robotTransition.value = "none";
+  } else {
+    resumeNaturalRobotBehavior();
+  }
 }
 
 function cleanupRobotDrag() {
@@ -602,6 +644,7 @@ function clearAllRobotTimers() {
 function resetInactivityTimer() {
   if (inactivityTimer) clearTimeout(inactivityTimer);
   inactivityTimer = null;
+  if (robotFixed.value) return;
   if (robotState.value !== "sleeping") {
     // 页面活动只负责重新计算“隐藏态的一分钟自动出现”计时，不能把已经唤起的宠物当成离场信号。
     // 宠物的自然离场由 scheduleNaturalExit 单独控制，避免用户点击/输入后宠物突然消失。
@@ -695,6 +738,7 @@ function spawnRobot() {
 
 // Action selection
 function scheduleNextAction() {
+  if (robotFixed.value) return;
   if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
 
   if (behaviorTimer) clearTimeout(behaviorTimer);
@@ -1107,13 +1151,25 @@ function closeRobotQuestion() {
   emit("close-robot-side-question");
 }
 
+let clickTimer: ReturnType<typeof setTimeout> | null = null;
+
 function onRobotClick() {
   if (robotSuppressClick) {
     robotSuppressClick = false;
     return;
   }
   if (robotState.value === "sleeping") return;
-  robotQuestionOpen.value = true;
+
+  if (clickTimer) {
+    clearTimeout(clickTimer);
+    clickTimer = null;
+    toggleRobotFixed();
+  } else {
+    clickTimer = setTimeout(() => {
+      clickTimer = null;
+      robotQuestionOpen.value = true;
+    }, 250);
+  }
 }
 
 function submitRobotQuestion() {
@@ -1140,20 +1196,31 @@ function toggleRobotVisibility() {
     return;
   }
 
-  // 手动唤起从保存坐标开始，共享随机动作循环，但保持可见直到用户再次收起或重新定位。
+  // 手动唤起从保存坐标开始
   const saved = loadSavedRobotPosition();
   const position = saved ?? clampRobotPosition(getBirthPosition());
   robotX.value = position.x;
   robotY.value = position.y;
   robotHasSavedPosition.value = Boolean(saved);
-  robotKeepVisible.value = true;
-  robotCurrentLevel.value = saved && saved.y > window.innerHeight / 2 ? "bottom" : "top";
-  robotDirection.value = "front";
-  robotTransition.value = "none";
-  robotState.value = "idle";
-  if (inactivityTimer) clearTimeout(inactivityTimer);
-  inactivityTimer = null;
-  resumeNaturalRobotBehavior();
+  
+  robotFixed.value = loadRobotFixed();
+  if (robotFixed.value) {
+    robotState.value = "idle";
+    robotDirection.value = "front";
+    robotTransition.value = "none";
+    robotCurrentLevel.value = position.y > window.innerHeight / 2 ? "bottom" : "top";
+    if (inactivityTimer) clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+  } else {
+    robotKeepVisible.value = true;
+    robotCurrentLevel.value = saved && saved.y > window.innerHeight / 2 ? "bottom" : "top";
+    robotDirection.value = "front";
+    robotTransition.value = "none";
+    robotState.value = "idle";
+    if (inactivityTimer) clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+    resumeNaturalRobotBehavior();
+  }
 }
 
 onMounted(() => {
@@ -1176,8 +1243,21 @@ onMounted(() => {
     robotY.value = savedPosition.y;
     robotHasSavedPosition.value = true;
   }
-  // 无论是否有保存位置，初次进入都保持隐藏，等连续一分钟无操作后再出现。
-  resetInactivityTimer();
+  
+  robotFixed.value = loadRobotFixed();
+  if (robotFixed.value) {
+    const position = savedPosition ?? clampRobotPosition(getBirthPosition());
+    robotX.value = position.x;
+    robotY.value = position.y;
+    robotHasSavedPosition.value = Boolean(savedPosition);
+    robotState.value = "idle";
+    robotDirection.value = "front";
+    robotTransition.value = "none";
+    robotCurrentLevel.value = position.y > window.innerHeight / 2 ? "bottom" : "top";
+  } else {
+    // 无论是否有保存位置，初次进入都保持隐藏，等连续一分钟无操作后再出现。
+    resetInactivityTimer();
+  }
 });
 
 onUnmounted(() => {
@@ -1193,6 +1273,7 @@ onUnmounted(() => {
 
   clearAllRobotTimers();
   if (inactivityTimer) clearTimeout(inactivityTimer);
+  if (clickTimer) clearTimeout(clickTimer);
   // 组件销毁也必须恢复文档样式与 pointer capture，避免拖动中路由切换留下不可选中文本。
   cleanupRobotDrag();
 });
@@ -1566,7 +1647,7 @@ function submitJoinApp() {
     <div
       v-if="robotState !== 'sleeping'"
       class="figma-robot-agent"
-      :class="{ 'is-dragging': robotDragging }"
+      :class="{ 'is-dragging': robotDragging, 'is-fixed': robotFixed }"
       :style="robotStyle"
       data-testid="figma-robot"
       role="group"
@@ -1580,9 +1661,15 @@ function submitJoinApp() {
       @pointercancel="finishRobotPointerDrag"
       @lostpointercapture="onRobotLostPointerCapture"
       @keydown="onRobotKeydown"
-      @click="onRobotClick"
+      @click.stop="onRobotClick"
     >
       <span id="figma-robot-instructions" class="figma-robot-instructions">可拖动小宠物；也可使用方向键每次移动 8 像素。</span>
+      
+      <!-- Pin Indicator -->
+      <div v-if="robotFixed" class="robot-pin-indicator" title="已固定小宠物 (双击取消)">
+        <Pin :size="8" class="robot-pin-icon" />
+      </div>
+
       <div class="robot-dir-wrap" :class="[`facing-${robotDirection}`]">
         <div class="robot-squash-wrap" :class="[`state-${robotState}`]">
           <svg viewBox="0 0 24 32" class="robot-svg" width="24" height="32">
@@ -2855,6 +2942,38 @@ function submitJoinApp() {
   cursor: grab;
   transform: translate3d(0, 0, 0);
   opacity: 0.85;
+}
+
+.robot-pin-indicator {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #6366f1;
+  border: 1.5px solid #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  z-index: 10001;
+  pointer-events: none;
+  animation: pop-in 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.robot-pin-icon {
+  transform: rotate(45deg);
+}
+
+@keyframes pop-in {
+  0% {
+    transform: scale(0);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .figma-robot-agent.is-dragging {

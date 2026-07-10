@@ -18,16 +18,16 @@
   position: relative;
   width: fit-content;
   max-width: 100%;
-  border: 1px solid #e3e8f7;
-  background: #ffffff;
+  border: 1px solid #dbe5fb;
+  background: var(--blue-bg, #eff5ff);
   color: var(--oc-fg);
   font-size: var(--oc-text-md);
-  border-radius: var(--oc-radius-md);
-  border-top-right-radius: 2px;
-  padding: 6px 36px 6px 12px;
+  border-radius: 8px 8px 2px 8px;
+  padding: 9px 36px 9px 10px;
   line-height: var(--oc-line-height);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
+
 
 .oc-user-message__bubble p {
   margin: 0;

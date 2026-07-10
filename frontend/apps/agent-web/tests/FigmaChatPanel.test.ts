@@ -42,6 +42,14 @@ function setViewport(width: number, height: number) {
   Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
 }
 
+// 原生 Timeline 的细节交互属于“完整过程”模式；专注阅读默认隐藏这些行。
+async function showFullTimeline(wrapper: any) {
+  const toggle = wrapper.get('[data-testid="chat-timeline-mode-toggle"]');
+  if (toggle.attributes("aria-label") === "完整过程") {
+    await toggle.trigger("click");
+  }
+}
+
 describe("FigmaChatPanel", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -421,6 +429,7 @@ describe("FigmaChatPanel", () => {
       expect(componentSource).toContain("background: rgba(24, 169, 120, 0.42);");
       expect(componentSource).toContain("opacity: 0.42;");
       expect(componentSource).not.toContain("#34d399 0%");
+      await showFullTimeline(wrapper);
       const taskCard = wrapper.find(".oc-subagent-card");
       await taskCard.trigger("click");
       await nextTick();
@@ -1476,6 +1485,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
     expect(wrapper.find(".oc-subagent-card").exists()).toBe(true);
     expect(wrapper.text()).toContain("Explore frontend structure");
@@ -1488,7 +1498,9 @@ describe("FigmaChatPanel", () => {
     const processCardObservers = () => resizeObservers.filter((observer) =>
       observer.observe.mock.calls.some(([target]) => (target as HTMLElement).classList.contains("figma-chat-process-status"))
     );
-    expect(processCardObservers()).toHaveLength(1);
+    const processObserverCountBeforeSubagent = processCardObservers().length;
+    expect(processObserverCountBeforeSubagent).toBeGreaterThan(0);
+    const expandedProcessCardObserver = processCardObservers().at(-1)!;
 
     await wrapper.get(".oc-subagent-card").trigger("click");
 
@@ -1497,7 +1509,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("子 Agent 已读取前端目录。");
     expect(wrapper.text()).toContain("子 Agent 不支持对话");
     expect(wrapper.find(".figma-chat-subagent-return").exists()).toBe(true);
-    expect(processCardObservers()[0].disconnect).toHaveBeenCalledTimes(1);
+    expect(expandedProcessCardObserver.disconnect).toHaveBeenCalledTimes(1);
 
     await wrapper.get(".figma-chat-subagent-return").trigger("click");
     await nextTick();
@@ -1505,13 +1517,13 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
-    expect(processCardObservers()).toHaveLength(2);
-    expect(processCardObservers()[1].observe).toHaveBeenCalledTimes(1);
+    expect(processCardObservers()).toHaveLength(processObserverCountBeforeSubagent + 1);
+    expect(processCardObservers().at(-1)!.observe).toHaveBeenCalledTimes(1);
     wrapper.unmount();
-    expect(processCardObservers()[1].disconnect).toHaveBeenCalledTimes(1);
+    expect(processCardObservers().at(-1)!.disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it("shows multiple subagent cards directly without folding them into a task group", () => {
+  it("shows multiple subagent cards directly without folding them into a task group", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -1585,6 +1597,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find("[data-testid='oc-tool-group']").exists()).toBe(false);
     expect(wrapper.findAll(".oc-subagent-card")).toHaveLength(2);
     expect(wrapper.text()).toContain("Explore backend structure");
@@ -1630,6 +1643,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeDefined();
     expect(wrapper.text()).toContain("智能体");
     expect(wrapper.text()).toContain("准备中");
@@ -1766,6 +1780,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).toContain("Explore project structure");
     expect(wrapper.text()).not.toContain("子 Agent 输出");
@@ -1859,6 +1874,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).toContain("Build");
     expect(wrapper.text()).toContain("构建回归用例");
@@ -1928,6 +1944,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).toContain("TEST-DESIGN-TARGET-RECOGNITION");
 
@@ -1977,6 +1994,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).not.toContain("子智能体已识别测试对象详情");
 
@@ -2662,7 +2680,7 @@ describe("FigmaChatPanel", () => {
     expect(text).not.toContain("您的请求断开，请重试");
   });
 
-  it("uses the opencode timeline instead of the legacy running task panel", () => {
+  it("uses the opencode timeline instead of the legacy running task panel", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         running: true,
@@ -2719,9 +2737,67 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
     expect(wrapper.find(".oc-tool").exists()).toBe(true);
     expect(wrapper.find(".figma-chat-task-panel").exists()).toBe(false);
+  });
+
+  it("defaults to focused reading and restores native process rows when the full-process toggle is used", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "focus-user",
+            messageId: "focus-user",
+            role: "user",
+            text: "帮我检查登录流程",
+            createdAt: "2026-07-10T09:00:00.000Z"
+          },
+          {
+            id: "focus-assistant",
+            messageId: "focus-assistant",
+            role: "assistant",
+            text: "登录流程检查完成。",
+            parts: [
+              { partId: "focus-reasoning", type: "reasoning", text: "先分析现有代码", status: "completed" },
+              { partId: "focus-read", type: "tool", toolName: "read", status: "completed", input: { filePath: "Login.vue" } },
+              { partId: "focus-file", type: "file", path: "Login.vue", name: "Login.vue" },
+              {
+                partId: "focus-task",
+                type: "tool",
+                toolName: "task",
+                status: "completed",
+                input: { description: "检查登录表单" }
+              },
+              { partId: "focus-text", type: "text", text: "登录流程检查完成。", status: "completed" }
+            ],
+            createdAt: "2026-07-10T09:00:01.000Z"
+          }
+        ],
+        subagentsBySessionId: {
+          focus_child: { sessionId: "focus_child", title: "登录表单检查", taskPartId: "focus-task" }
+        },
+        subagentByTaskPartId: { "focus-task": "focus_child" },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const modeToggle = wrapper.get('[data-testid="chat-timeline-mode-toggle"]');
+    expect(modeToggle.attributes("aria-label")).toBe("完整过程");
+    expect(wrapper.text()).toContain("登录流程检查完成。");
+    expect(wrapper.find(".oc-context-group").exists()).toBe(false);
+    expect(wrapper.find(".oc-reasoning-part").exists()).toBe(false);
+    expect(wrapper.find(".oc-tool").exists()).toBe(false);
+    expect(wrapper.find(".oc-subagent-card").exists()).toBe(false);
+
+    await modeToggle.trigger("click");
+
+    expect(wrapper.get('[data-testid="chat-timeline-mode-toggle"]').attributes("aria-label")).toBe("专注阅读");
+    expect(wrapper.find(".oc-context-group").exists()).toBe(true);
+    expect(wrapper.find(".oc-reasoning-part").exists()).toBe(true);
+    expect(wrapper.find(".oc-subagent-card").exists()).toBe(true);
   });
 
   it("opens a frontend-only attachment dialog from the composer action", async () => {
@@ -2884,7 +2960,7 @@ describe("FigmaChatPanel", () => {
 
   // ===== 消息分层展示回归测试 =====
 
-  it("does NOT include tool stdout/stderr in the assistant main text bubble", () => {
+  it("does NOT include tool stdout/stderr in the assistant main text bubble", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -2904,6 +2980,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     // MarkdownView stub 渲染 source 为纯文本；找到 source 为"这是最终回答"的那个
     // （即主正文的 MarkdownView），它不应包含 tool output/stderr
     const mdViews = wrapper.findAllComponents(markdownViewStub);
@@ -2921,7 +2998,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("2 次");
   });
 
-  it("does NOT include reasoning text in the main content", () => {
+  it("does NOT include reasoning text in the main content", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -2940,6 +3017,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     // 检查主正文的 MarkdownView source 不包含 reasoning 文本
     const mdViews = wrapper.findAllComponents(markdownViewStub);
     const mainMd = mdViews.find((w) => (w.props("source") as string).includes("最终分析结论"));
@@ -2975,12 +3053,13 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     const reasoning = wrapper.get(".oc-reasoning-part");
     expect(reasoning.text()).toContain("思考状态");
     expect(wrapper.text()).toContain("正在生成回答");
   });
 
-  it("keeps the reasoning and tool details collapsed for older assistant messages", () => {
+  it("keeps the reasoning and tool details collapsed for older assistant messages", async () => {
     // 历史会话中：第一条 assistant（已答过）应当保持收起；只有最后一条才默认展开。
     // 中间用一条 user 消息隔开，避免 FigmaChatPanel 的"连续 assistant 合并"把
     // a1/a2 拼成一条，导致 details 数变成 3 而不是 4。
@@ -3022,6 +3101,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.findAll(".oc-reasoning-part")).toHaveLength(2);
     expect(wrapper.findAll(".oc-tool")).toHaveLength(2);
     expect(wrapper.findAll(".oc-tool__body")).toHaveLength(0);
@@ -3088,7 +3168,7 @@ describe("FigmaChatPanel", () => {
     expect(initial.find(".figma-chat-question-dock").exists()).toBe(false);
   });
 
-  it("shows the assistant avatar beside the running status", () => {
+  it("shows the assistant avatar beside the running status", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -3097,10 +3177,11 @@ describe("FigmaChatPanel", () => {
       }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-thinking-row").exists()).toBe(true);
   });
 
-  it("shows opencode retry status instead of leaving the run as thinking", () => {
+  it("shows opencode retry status instead of leaving the run as thinking", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -3130,6 +3211,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-thinking-row").exists()).toBe(false);
     expect(wrapper.find(".oc-retry-row").text()).toContain("重试中 60 秒后 - 第 1 次 / 共 3 次");
     expect(wrapper.find(".oc-retry-row").text()).toContain("Free usage exceeded, subscribe to Go");
@@ -3156,6 +3238,7 @@ describe("FigmaChatPanel", () => {
       }
     });
 
+    await showFullTimeline(wrapper);
     const exploreSection = wrapper.find(".oc-context-group");
     expect(exploreSection.exists()).toBe(true);
     expect(exploreSection.text()).not.toContain("login.test.ts");
@@ -3191,6 +3274,7 @@ describe("FigmaChatPanel", () => {
       }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-tool").exists()).toBe(true);
     expect(wrapper.text()).toContain("写入");
     expect(wrapper.text()).toContain("tmp/long.ts");
@@ -3244,6 +3328,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     // 主正文 MarkdownView 只含 text part
     const mdViews = wrapper.findAllComponents(markdownViewStub);
     const mainMd = mdViews.find((w) => (w.props("source") as string).includes("文件内容如下"));
@@ -3278,13 +3363,14 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     expect(wrapper.findAll(".oc-tool")).toHaveLength(1);
     expect(wrapper.text()).toContain("命令行");
     await wrapper.get(".oc-tool__trigger").trigger("click");
     expect(wrapper.text()).toContain("编译成功");
   });
 
-  it("renders retry part as an error block, not in main body", () => {
+  it("renders retry part as an error block, not in main body", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -3303,6 +3389,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     const mdViews = wrapper.findAllComponents(markdownViewStub);
     const mainMd = mdViews.find((w) => (w.props("source") as string).includes("重试后成功"));
     expect(mainMd).toBeTruthy();
@@ -3339,6 +3426,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     // 正文中不出现 state.error
     const allText = wrapper.text();
     expect(allText).not.toContain("No such file or directory");
@@ -3367,6 +3455,7 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
+    await showFullTimeline(wrapper);
     const bashTool = wrapper.get(".oc-tool");
     expect(wrapper.text()).toContain("命令行");
     expect(wrapper.find(".oc-tool__body").exists()).toBe(false);

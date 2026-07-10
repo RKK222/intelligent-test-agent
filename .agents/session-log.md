@@ -5399,3 +5399,30 @@ bash /tmp/test-api-after-restart.sh
   - 不改 `packages/agent-chat/src/opencode-like/`；活动面板位于 Timeline 滚动容器外，使用 ResizeObserver 的 720px 容器断点、Escape/外部点击关闭、焦点恢复和已有浮层冲突保护。既有 Question/Permission dock 的模板、动作与提交逻辑保持原位。
 - Result:
   - 定向 153 passed / 1 skipped，前端 lint、typecheck、build 通过；`.env.test` 的三服务重启后 backend health/readiness 为 UP，前端 3000 返回 200。构建仍有既有 CSS import 顺序/大包体积警告，测试仍有既有 DirectoryRows 嵌套 button Vite warning。
+
+### 2026-07-10 - 对话面板设计稿样式最偏近改造与响应式双栏
+
+- Why:
+  - 配合用户需求，在不影响 Timeline 等 Opencode 原生渲染与折叠逻辑的前提下，让对话面板在视觉和布局上最贴近设计稿（方案 F）的样式。
+- What:
+  - **样式与细节对齐**：优化了用户消息气泡背景（淡蓝 `#eff5ff`）、边框（`1px solid #dbe5fb`）及弧度圆角（`8px 8px 2px 8px`）；决策区（提问/权限请求卡片）边框和背景对齐设计稿的淡米黄色外观，调整标题与正文字号和颜色。
+  - **双栏 Grid 响应式布局**：调整桌面端（宽度 >= 720px）下，当活动面板展开时，主聊天视口（包含 Timeline 滚动区域、输入框、问答 dock 等）平滑向左收缩并空出 `280px` 空间，让活动面板做为侧栏常驻右侧（非遮挡式绝对定位）；窄屏端保持底部抽屉，单栏完整展示。
+  - **内联“活动入口”按钮**：在 Timeline 底部新增 inline 活动状态指示按钮，展现当前任务统计（如 `正在处理 · 1 个子任务...`），点击可平滑触发展开侧边活动栏。
+- How:
+  - 仅修改了 `rows.css` 以及 `FigmaChatPanel.vue` 的 CSS 类与样式；在 template 中引入动态 `has-activity-sidebar` 类以支持网格伸缩动画，并在 Timeline 下方新增内联触发按钮；未对 Timeline 行投影做任何修改，未更改任何功能性 API 交互。
+- Result:
+  - 运行 `pnpm vitest run packages/agent-chat apps/agent-web/tests/FigmaChatPanel.test.ts` 验证通过，共计 197 个测试全部成功。
+
+### 2026-07-10 - 宠物增加双击固定及单击打开对话与点击外部关闭交互
+
+- Why:
+  - 用户希望能够固定/锁定小宠物的位置，防止其随机游走或自动退出；同时简化弹出交互为单击唤起对话，且双击时触发固定/取消固定，点击外部或关闭按钮可以关闭对话。
+- What:
+  - **双击固定/取消固定**：引入 `robotFixed` 状态并持久化至 `localStorage`（`figma-shell-robot-fixed`）。双击小宠物可切换固定状态。固定后，清除所有动作与自动退出计时器，使宠物保持在 `idle` 状态且保持可见。页面重新加载时，若为固定状态，将直接在保存的坐标或出生点以 `idle` 状态渲染显示，不再进入一分钟的无操作隐蔽期。
+  - **单双击区分与防抖**：小宠物的 click 事件引入 250ms 的防抖延时。若 250ms 内再次触发 click，则清除定时器并触发双击的固定/取消固定动作；若无二次点击，则触发单击的对话框打开事件，避免了双击时误打开/重复打开对话框。
+  - **点击外部与 X 关闭**：更新外层容器 click 处理逻辑 `closeHeaderMenus`，包含关闭宠物对话框；宠物和对话框自身的事件添加 `@click.stop` 以阻止冒泡导致的意外关闭。
+  - **状态视觉反馈**：小宠物右上角新增一个可爱的 `Pin` 图标角标指示器，并在固定时配合 `pop-in` 缩放微动画弹出，提升视觉品质感与可见性。
+- How:
+  - 仅修改前端 `FigmaShell.vue` 与测试 `FigmaShell.test.ts`。无新增 HTTP API、SSE、数据库或环境配置改动。
+- Result:
+  - 运行 `pnpm test apps/agent-web/tests/FigmaShell.test.ts`：所有 25 个测试全部通过。

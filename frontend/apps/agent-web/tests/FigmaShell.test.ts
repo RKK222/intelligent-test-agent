@@ -35,6 +35,7 @@ describe("FigmaShell", () => {
     Object.defineProperty(window, "innerWidth", originalInnerWidth!);
     Object.defineProperty(window, "innerHeight", originalInnerHeight!);
     window.localStorage.removeItem("figma-shell-robot-pos");
+    window.localStorage.removeItem("figma-shell-robot-fixed");
   });
 
   it("restores a saved robot root position as the next natural start position", async () => {
@@ -311,6 +312,7 @@ describe("FigmaShell", () => {
   });
 
   it("opens a transient side-question bubble from the pet and emits the question", async () => {
+    vi.useFakeTimers();
     const wrapper = mountShell({
       props: {
         sideQuestionAnswer: "当前上下文已经完成初始化。"
@@ -319,6 +321,8 @@ describe("FigmaShell", () => {
     await summonRobot(wrapper);
 
     await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
     expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
 
     const input = wrapper.get('[data-testid="robot-side-question-input"]');
@@ -553,5 +557,57 @@ describe("FigmaShell", () => {
 
     expect(wrapper.emitted("join-app")).toBeTruthy();
     expect(wrapper.emitted("join-app")![0][0]).toBe("app_gcms");
+  });
+
+  it("toggles the fixed state on double click and halts behavior cycles", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    // Double click: click twice rapidly (< 250ms)
+    await robot.trigger("click");
+    await vi.advanceTimersByTimeAsync(50);
+    await robot.trigger("click");
+    await wrapper.vm.$nextTick();
+
+    // Verify visual pin indicator is rendered and fixed status saved
+    expect(robot.find(".robot-pin-indicator").exists()).toBe(true);
+    expect(window.localStorage.getItem("figma-shell-robot-fixed")).toBe("true");
+
+    // Double click again to cancel
+    await robot.trigger("click");
+    await vi.advanceTimersByTimeAsync(50);
+    await robot.trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(robot.find(".robot-pin-indicator").exists()).toBe(false);
+    expect(window.localStorage.getItem("figma-shell-robot-fixed")).toBe("false");
+  });
+
+  it("opens side question dialogue on single click after delay, and closes it when clicking elsewhere", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    // Single click
+    await robot.trigger("click");
+    // Verify question is not open immediately
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
+
+    // Wait 250ms
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
+
+    // Click elsewhere (the main figma-app wrapper)
+    await wrapper.get(".figma-app").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
   });
 });

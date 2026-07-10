@@ -4386,6 +4386,9 @@ async function handleLogout() {
           :subagents-by-session-id="chatState.subagentsBySessionId"
           :subagent-by-task-part-id="chatState.subagentByTaskPartId"
           :running="runtimeBusy"
+          :current-session-id="session?.sessionId"
+          :current-run-id="run?.runId"
+          :current-run-status="run?.status"
           :runtime-status="chatState.status ?? run?.status"
           :timeline-runtime-status="timelineRuntimeStatusForPanel"
           :title="chatTitle"
@@ -4724,6 +4727,3 @@ async function handleLogout() {
   background: #ea580c; /* 深橙色 */
 }
 </style>
-          :current-session-id="session?.sessionId"
-          :current-run-id="run?.runId"
-          :current-run-status="run?.status"
