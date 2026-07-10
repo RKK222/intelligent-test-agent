@@ -5316,3 +5316,14 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 追补后的 `corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts`：108 passed、1 skipped；`corepack pnpm typecheck` 通过。此前的 `corepack pnpm lint`、`corepack pnpm build` 也通过；构建仅保留既有 CSS `@import` 顺序和大 chunk 警告。
   - 本地 Vite 已启动并确认 `http://127.0.0.1:3001/` 返回 HTTP 200。未做浏览器人工拖动验收，后续可在该地址验证宠物开关/空闲出现及绿点、展开卡拖动。
+
+### 2026-07-10 - 对话面板采用原生 Timeline 外层专注模式
+
+- Why:
+  - 用户认为聊天中对话、工具、子 Agent、Ask 和任务状态同时作为卡片出现过于混乱，希望采用专注对话模式并兼顾可拖拽工作台中的窄面板。
+- What:
+  - 已确认只在 `FigmaChatPanel` 等原生 Timeline 宿主外层设计“本轮活动”入口和响应式浮层/底部抽屉；不调整 `opencode-like` Timeline、消息投影、part 渲染、样式或其原生头像。
+- How:
+  - 设计说明明确当前 session 的 active Run 摘要与待处理 Ask/Permission 的存活边界，使用容器查询在 720px 容器宽度切换桌面非模态浮层和窄屏模态底部抽屉；活动面板仅展示既有状态摘要，不复制原生工具或 Ask 的渲染/操作。
+- Result:
+  - `docs/superpowers/specs/2026-07-10-chat-focus-native-timeline-design.md` 已经独立审阅通过。当前仅完成设计确认，尚未编写实现计划或修改运行代码。
