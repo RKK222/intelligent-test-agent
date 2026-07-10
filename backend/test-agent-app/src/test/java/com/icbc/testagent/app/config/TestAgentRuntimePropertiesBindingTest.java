@@ -265,4 +265,18 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(properties.getOpencode().getManagerControl().getToken()).isEqualTo("manager-secret");
                 });
     }
+
+    @Test
+    void prodProfileResolvesDatabaseDriverClassFromEnvironment() {
+        profileContextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=prod",
+                        "TEST_AGENT_DB_DRIVER_CLASS_NAME=com.example.enterprise.jdbc.Driver",
+                        "TEST_AGENT_DB_URL=jdbc:enterprise://prod-database.example.internal:5432/test_agent",
+                        "TEST_AGENT_DB_USERNAME=test_agent",
+                        "TEST_AGENT_DB_PASSWORD=secret")
+                .run(context -> assertThat(context.getEnvironment()
+                        .getProperty("spring.datasource.druid.driver-class-name"))
+                        .isEqualTo("com.example.enterprise.jdbc.Driver"));
+    }
 }

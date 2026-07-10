@@ -4,7 +4,7 @@ spring:
       on-profile: prod
   datasource:
     druid:
-      driver-class-name: org.postgresql.Driver
+      driver-class-name: ${TEST_AGENT_DB_DRIVER_CLASS_NAME:org.postgresql.Driver}
       url: ${TEST_AGENT_DB_URL}
       username: ${TEST_AGENT_DB_USERNAME}
       password: ${TEST_AGENT_DB_PASSWORD}

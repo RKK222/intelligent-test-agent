@@ -46,7 +46,7 @@
 - `application-guo.yml`：连接个人调试环境，CORS 默认继承本地端口白名单，并允许通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 覆盖；配合根目录 `restart-dev-services.sh` 用局域网 IP 启动时，脚本会自动追加实际前端 origin。
 - IDEA 运行配置 `.idea/runConfigurations/TestAgentApplication_guo.xml` 直接启动 `TestAgentApplication`，通过 `-Dspring.profiles.active=guo` 读取 `application-guo.yml`。该 yml 已内置原 `.env.local` 中 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置，Windows 开发人员不需要执行 shell 启动脚本。
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
-- `application-prod.yml`：数据库、API token、CORS 和 Redis 均通过环境变量注入，不提供真实密钥默认值。
+- `application-prod.yml`：数据库、API token、CORS 和 Redis 均通过环境变量注入，不提供真实密钥默认值；JDBC 驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`，指定类必须已经在启动 classpath 中。
 - `application.yml`：`test-agent.scheduler.enabled` 默认 `false`，可通过 `TEST_AGENT_SCHEDULER_ENABLED` 显式启用。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
 - 用户进程运行管理和 manager 控制面在线状态强依赖 Redis；多服务器应用版本工作区副本实时同步也需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。

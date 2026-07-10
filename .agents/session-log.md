@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 生产环境 JDBC 驱动类配置与基础配置对齐
+
+- Why:
+  - `application.yml` 已通过 `TEST_AGENT_DB_DRIVER_CLASS_NAME` 预留 JDBC 驱动类配置，但 `application-prod.yml` 重复写死 PostgreSQL 类，导致企业生产配置无法覆盖。
+- What:
+  - `application-prod.yml` 改为复用同一环境变量占位符；新增 prod profile 配置绑定回归测试，并在企业 `backend.env` 模板、部署说明和 app README 中记录变量语义。
+- How:
+  - 只允许变量选择已在 Java 启动 classpath 中的驱动类，默认仍是 `org.postgresql.Driver`；未新增外置 jar 加载或运行时热替换机制。
+- Result:
+  - 定向测试先在旧配置下断言失败、修改后通过；`mvn -pl test-agent-app -am -DskipTests package`、完整 `deploy/internal/package-release.sh`、zip 完整性检查通过。完整 `TestAgentRuntimePropertiesBindingTest` 仍有两条既有断言与当前 yml 默认值不一致（Druid `test-on-borrow`、scheduler enabled），本次未改无关默认配置。最新交付包 SHA256：`3c4718b31059f2c354475977c476314d93e6d40543583693a2642022f7528582`。
+
 ### 2026-07-10 - 重新验证企业内完整交付包
 
 - Why:

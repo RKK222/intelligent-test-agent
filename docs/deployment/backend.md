@@ -339,6 +339,8 @@ SPRING_PROFILES_ACTIVE=prod
 TEST_AGENT_DB_URL=jdbc:postgresql://<pg-host>:5432/<database>
 TEST_AGENT_DB_USERNAME=<username>
 TEST_AGENT_DB_PASSWORD=<password>
+# 可选，默认 org.postgresql.Driver；指定类必须随后端 jar 或启动 classpath 一起交付。
+TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 TEST_AGENT_API_TOKEN=<api-token>
 TEST_AGENT_CORS_ALLOWED_ORIGINS=https://<frontend-origin>
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
