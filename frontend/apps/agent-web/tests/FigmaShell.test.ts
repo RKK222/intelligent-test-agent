@@ -57,6 +57,9 @@ describe("FigmaShell", () => {
     const petSvg = wrapper.get(".robot-svg");
     const toggleSvg = wrapper.get('[data-testid="robot-visibility-toggle"] svg');
 
+    expect(toggleSvg.attributes("width")).toBe("24");
+    expect(toggleSvg.attributes("height")).toBe("28");
+
     for (const selector of [
       ".robot-antenna-l",
       ".robot-antenna-l-tip",

@@ -1289,7 +1289,7 @@ function submitJoinApp() {
           title="唤起或收起小宠物"
           @click.stop="toggleRobotVisibility"
         >
-          <svg viewBox="0 0 24 32" class="robot-toggle-svg" width="18" height="24" aria-hidden="true">
+          <svg viewBox="0 0 24 32" class="robot-toggle-svg" width="24" height="28" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
             <!-- 开关复用宠物相同的天线、脑袋和眼睛几何，避免出现两个不同机器人图标。 -->
             <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
             <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#7c6bb5" />
@@ -1657,6 +1657,9 @@ function submitJoinApp() {
 }
 
 .figma-robot-visibility-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 28px;
   height: 28px;
   border: 1px solid #e5e7eb;
@@ -1666,6 +1669,7 @@ function submitJoinApp() {
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
+  padding: 0;
 }
 
 .figma-robot-visibility-toggle:hover,
@@ -2699,8 +2703,8 @@ function submitJoinApp() {
 
 .robot-toggle-svg {
   display: block;
-  width: 18px;
-  height: 24px;
+  width: 24px;
+  height: 28px;
 }
 
 /* Eye glowing/breathing animation */
