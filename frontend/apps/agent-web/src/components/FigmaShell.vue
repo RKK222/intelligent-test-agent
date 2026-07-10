@@ -1042,7 +1042,10 @@ function handleWindowResize() {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
     robotX.value = position.x;
     robotY.value = position.y;
-    saveRobotPosition();
+    // 隐藏态保存的是下一次起点，缩放时可同步夹紧；可见态坐标可能正在自然动画，不能覆盖起点偏好。
+    if (robotState.value === "sleeping") {
+      saveRobotPosition();
+    }
     return;
   }
   if (robotState.value === "sleeping") return;

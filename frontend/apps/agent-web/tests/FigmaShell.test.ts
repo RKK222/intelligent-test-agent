@@ -110,6 +110,26 @@ describe("FigmaShell", () => {
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 288, y: 200 }));
   });
 
+  it("does not overwrite the saved start position when natural motion is reclamped on resize", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const savedPosition = { x: 280, y: 100 };
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify(savedPosition));
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    // 让自然动作先把当前内存坐标移动到另一个位置，再模拟窗口缩小。
+    await vi.advanceTimersByTimeAsync(1_100);
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 200 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 240 });
+    await window.dispatchEvent(new Event("resize"));
+    await wrapper.vm.$nextTick();
+
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify(savedPosition));
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("left: 168px");
+  });
+
   it("ignores malformed robot positions and storage access failures", async () => {
     for (const invalidPosition of ["not-json", JSON.stringify({ x: "120", y: 180 }), JSON.stringify({ x: 120 })]) {
       window.localStorage.setItem("figma-shell-robot-pos", invalidPosition);
