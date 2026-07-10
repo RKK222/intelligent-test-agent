@@ -2641,6 +2641,7 @@ const activitySummary = computed(() => {
   })
 })
 
+
 const activityPanelBlocked = computed(() =>
   attachmentDialogOpen.value ||
   rawOutputOpen.value ||
@@ -3038,6 +3039,21 @@ const timelineDiffFiles = computed<RunDiffFile[]>(() =>
   }))
 )
 
+// 专注阅读只向原生 Timeline 提供用户消息和最终文本 part；完整过程仍复用原始状态，
+// 因而工具、思考、文件和子 Agent 的原始渲染与交互都不会被改写。
+const focusedReading = ref(true)
+const focusedTimelineMessages = computed<AgentMessage[]>(() =>
+  timelineMessages.value
+    .filter((message): message is Extract<AgentMessage, { role: 'user' | 'assistant' }> => message.role !== 'card')
+    .map((message) => {
+      if (message.role === 'user') return message
+      return {
+        ...message,
+        parts: (message.parts ?? []).filter((part): part is Extract<MessagePart, { type: 'text' }> => part.type === 'text'),
+      }
+    })
+)
+
 const opencodeTimelineState = computed(() =>
   createOpencodeLikeState({
     messages: timelineMessages.value,
@@ -3053,6 +3069,30 @@ const opencodeTimelineState = computed(() =>
     activeSubagentSessionId: activeSubagentSessionId.value,
   })
 )
+
+const focusedTimelineState = computed(() =>
+  createOpencodeLikeState({
+    messages: focusedTimelineMessages.value,
+    // 专注模式由外层活动入口承接运行过程，不让 Timeline 再生成思考、重试、Diff 或工作态行。
+    running: false,
+    runtimeStatus: { type: 'idle' },
+    diffFiles: [],
+    streamingTextByPartId: props.streamingTextByPartId,
+    todos: [],
+    messageScopesById: props.messageScopesById,
+    subagentsBySessionId: {},
+    subagentByTaskPartId: {},
+    activeSubagentSessionId: activeSubagentSessionId.value,
+  })
+)
+
+const visibleTimelineState = computed(() =>
+  focusedReading.value ? focusedTimelineState.value : opencodeTimelineState.value
+)
+
+function toggleTimelineReadingMode() {
+  focusedReading.value = !focusedReading.value
+}
 
 function openTimelineDiff() {
   emit('open-diff', props.fileChanges?.at(-1)?.path ?? '')
@@ -3357,6 +3397,17 @@ function onCompositionEnd() {
       <div class="figma-chat-header-left">
         <h2 class="figma-chat-title" :title="title">{{ title }}</h2>
         <button
+          type="button"
+          class="figma-chat-header-btn"
+          data-testid="chat-timeline-mode-toggle"
+          :aria-label="focusedReading ? '完整过程' : '专注阅读'"
+          :aria-pressed="!focusedReading"
+          :title="focusedReading ? '查看完整过程' : '切换为专注阅读'"
+          @click="toggleTimelineReadingMode"
+        >
+          <span>{{ focusedReading ? '完整过程' : '专注阅读' }}</span>
+        </button>
+        <button
           v-if="activitySummary"
           type="button"
           class="figma-chat-header-btn"
@@ -3417,7 +3468,7 @@ function onCompositionEnd() {
       </div>
       <OpencodeTimeline
         v-else
-        :state="opencodeTimelineState"
+        :state="visibleTimelineState"
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
@@ -5250,6 +5301,7 @@ function onCompositionEnd() {
   z-index: 20;
 }
 
+
 .figma-chat-activity-overlay-host.is-drawer {
   inset: 0;
   display: flex;
@@ -5790,6 +5842,7 @@ function onCompositionEnd() {
   background: var(--ta-hover, #f4f4f5);
   border-color: var(--ta-border-strong, #d4d4d8);
 }
+
 
 /* ---- File Changes Card (above task usage) ---- */
 .figma-chat-changes-card {
@@ -6675,11 +6728,12 @@ function onCompositionEnd() {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 10px;
-  padding: 10px 8px;
-  border: 1px solid var(--ta-chat-border, #eaeaea);
-  border-radius: 8px;
-  background: var(--ta-chat-surface, #ffffff);
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #f3ebd4;
+  border-left: 2px solid #d8b75f;
+  border-radius: 4px;
+  background: #fffdf8;
 }
 
 .figma-chat-question-card {
@@ -6687,10 +6741,6 @@ function onCompositionEnd() {
   flex: 1 1 auto;
 }
 
-.figma-chat-permission-card {
-  border-color: rgba(148, 96, 21, 0.35);
-  background: rgba(148, 96, 21, 0.06);
-}
 
 .figma-chat-question-item {
   display: flex;
@@ -6762,24 +6812,25 @@ function onCompositionEnd() {
 }
 
 .figma-chat-question-title {
-  font-size: 14px;
-  line-height: 18px;
-  font-weight: 600;
-  color: var(--ta-chat-text, #333333);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 700;
+  color: #936000;
 }
 
 .figma-chat-question-description {
   white-space: pre-wrap;
   font-size: 12px;
   line-height: 16px;
-  color: var(--ta-chat-muted, #7a7a7a);
+  color: #4b4536;
 }
 
 .figma-chat-question-hint {
   font-size: 12px;
   line-height: 16px;
-  color: var(--ta-chat-muted, #7a7a7a);
+  color: #4b4536;
 }
+
 
 .figma-chat-question-options {
   display: flex;

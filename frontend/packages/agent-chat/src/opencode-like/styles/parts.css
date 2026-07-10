@@ -1,14 +1,11 @@
 .oc-text-part {
   position: relative;
   line-height: var(--oc-line-height);
-  color: #000000;
+  color: #383836;
   font-size: var(--oc-text-md);
-  background: var(--oc-surface);
-  border: 1px solid #e3e8f7;
-  padding: 6px 36px 6px 12px;
-  border-radius: var(--oc-radius-md);
-  border-top-left-radius: 2px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  background: transparent;
+  border: none;
+  padding: 0;
   margin-top: 0;
   display: block;
   width: 100%;
@@ -17,16 +14,9 @@
 }
 
 .oc-text-part__copy {
-  position: absolute;
-  top: 5px;
-  right: 8px;
-  opacity: 0.45;
+  display: none !important;
 }
 
-.oc-text-part:hover .oc-text-part__copy,
-.oc-text-part__copy:focus-within {
-  opacity: 1;
-}
 
 .oc-text-part.is-working-output {
   border-color: rgba(49, 91, 220, 0.22);

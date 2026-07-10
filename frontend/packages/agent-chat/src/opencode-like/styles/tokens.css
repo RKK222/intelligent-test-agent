@@ -1,20 +1,20 @@
 .oc-timeline-root,
 .oc-todo-panel,
 .oc-conversation-locator__panel {
-  --oc-bg: var(--ta-chat-surface, #ffffff);
-  --oc-surface: var(--ta-chat-surface, #ffffff);
-  --oc-surface-muted: var(--ta-chat-message-bg, #f2f4f7);
-  --oc-fg: var(--ta-chat-text, #25282d);
-  --oc-muted: var(--ta-chat-muted, #6f747c);
-  --oc-subtle: var(--ta-chat-subtle, #9aa3af);
-  --oc-border: var(--ta-chat-border, #e5e7eb);
-  --oc-border-strong: var(--ta-chat-border-strong, rgba(31, 35, 40, 0.18));
-  --oc-accent: var(--ta-primary, #315bdc);
-  --oc-danger: var(--ta-danger, #b42318);
-  --oc-success: var(--ta-chat-status-done, #2f7d55);
-  --oc-warning: var(--ta-warn, #9a6700);
-  --oc-code-bg: var(--ta-chat-detail-bg, rgba(31, 35, 40, 0.04));
-  --oc-code-border: var(--ta-chat-border, rgba(31, 35, 40, 0.1));
+  --oc-bg: #ffffff;
+  --oc-surface: #ffffff;
+  --oc-surface-muted: #f7f7f5;
+  --oc-fg: #292929;
+  --oc-muted: #777774;
+  --oc-subtle: #9aa3af;
+  --oc-border: #e5e5e1;
+  --oc-border-strong: #dededb;
+  --oc-accent: #2563c8;
+  --oc-danger: #b42318;
+  --oc-success: #167545;
+  --oc-warning: #936000;
+  --oc-code-bg: rgba(31, 35, 40, 0.04);
+  --oc-code-border: rgba(31, 35, 40, 0.1);
   --oc-radius-xs: 4px;
   --oc-radius-sm: 6px;
   --oc-radius-md: 8px;
@@ -25,11 +25,12 @@
   --oc-space-4: 16px;
   --oc-space-5: 20px;
   --oc-space-6: 24px;
-  --oc-font-sans: var(--font-sans, "Geist", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif);
-  --oc-font-mono: var(--font-mono, "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace);
-  --oc-text-xs: 10px;
+  --oc-font-sans: ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --oc-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --oc-text-xs: 11px;
   --oc-text-sm: 11px;
   --oc-text-md: 13px;
   --oc-text-lg: 15px;
-  --oc-line-height: 1.4;
+  --oc-line-height: 1.5;
 }
+
