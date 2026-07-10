@@ -3,6 +3,8 @@ package com.icbc.testagent.api.web.platform;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
+import com.icbc.testagent.opencode.runtime.run.RunHistoryRecoveryResult;
+import com.icbc.testagent.opencode.runtime.run.RunHistoryRecoverySource;
 import com.icbc.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.icbc.testagent.opencode.runtime.session.SessionApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
@@ -223,17 +225,26 @@ public class SessionController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         SessionId currentSessionId = new SessionId(sessionId);
         return Mono.fromCallable(() -> {
-                    List<RunEventSsePayload> snapshotEvents = messageRecoveryService == null
-                            ? List.of()
+                    RunHistoryRecoveryResult recovery = messageRecoveryService == null
+                            ? RunHistoryRecoveryResult.full(
+                                    List.of(), null, RunHistoryRecoverySource.OPENCODE)
                             : (hasAgentId(agentId)
-                                    ? messageRecoveryService.recoverSessionTree(agentId, currentSessionId, traceId)
-                                    : messageRecoveryService.recoverSessionTree(currentSessionId, traceId))
-                                    .collectList()
+                                    ? messageRecoveryService.recoverSessionTreeHistory(
+                                            agentId, currentSessionId, traceId)
+                                    : messageRecoveryService.recoverSessionTreeHistory(currentSessionId, traceId))
                                     .block(Duration.ofSeconds(30));
-                    List<RunEventSsePayload> allEvents = new ArrayList<>(snapshotEvents);
-                    allEvents.addAll(durableSnapshotPayloadsByRootSessionId(snapshotEvents));
+                    List<RunEventSsePayload> allEvents = new ArrayList<>(recovery.events());
+                    if (recovery.source() == RunHistoryRecoverySource.OPENCODE) {
+                        // 只有 legacy OpenCode 历史仍需补齐旧 run_events；Redis/摘要来源不触发数据库事件查询。
+                        allEvents.addAll(durableSnapshotPayloadsByRootSessionId(recovery.events()));
+                    }
                     return ApiResponse.ok(
-                            RuntimeDtos.SessionTreeMessagesResponse.from(sessionId, allEvents),
+                            RuntimeDtos.SessionTreeMessagesResponse.from(
+                                    sessionId,
+                                    allEvents,
+                                    recovery.historyRepresentation(),
+                                    recovery.replayAvailable(),
+                                    recovery.detailsAvailableUntil()),
                             traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());

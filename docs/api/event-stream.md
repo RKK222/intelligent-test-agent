@@ -44,7 +44,7 @@
 
 | wire name | 说明 |
 |---|---|
-| `run.created` | Run 已创建。 |
+| `run.created` | Run 已创建；`REDIS_SUMMARY` 额外携带 `storageMode/clientRequestId/assistantSummaryMessageId`，其中稳定平台消息 ID 供终态反馈直接使用。 |
 | `run.started` | Run 已开始执行。 |
 | `run.cancelling` | Run 正在取消。 |
 | `run.succeeded` | Run 成功结束。 |
@@ -107,6 +107,19 @@ payload 字段：
 event: run.snapshot.reset
 data: {"eventId":"evt_snapshot_reset_run_x_2_10520","runId":"run_x","seq":0,"type":"run.snapshot.reset","traceId":"trace_runtime_snapshot","occurredAt":"2026-07-10T08:00:00Z","payload":{"reason":"RUNTIME_STREAM_TRUNCATED","resetGeneration":2,"earliestSeq":10002,"detailsAvailableUntil":"2026-07-11T08:00:00Z","snapshot":{"barrierSeq":10001,"runtimeVersion":10520,"events":[]}}}
 ```
+
+`REDIS_SUMMARY` 的首个 `run.created` payload 示例：
+
+```json
+{
+  "status": "PENDING",
+  "storageMode": "REDIS_SUMMARY",
+  "clientRequestId": "request-uuid",
+  "assistantSummaryMessageId": "msg_0123456789abcdef0123456789abcdef"
+}
+```
+
+`assistantSummaryMessageId` 在 Run 开始时确定，并与终态 PostgreSQL ASSISTANT 摘要行复用同一 ID；前端不得再通过轮询 Session 消息列表寻找反馈 ID。
 
 前端处理顺序固定为：
 
@@ -590,7 +603,7 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 3. 新事件类型必须有默认忽略策略。
 4. opencode raw event 不直接透传；已知事件映射为平台稳定类型，未知事件映射为 `opencode.event.unknown` 并保留安全的 `rawType`、`rawEventId`、`rawPayload`。
 5. `LEGACY_FULL` RunEvent payload 继续以 PostgreSQL JSON 文本读取；`REDIS_SUMMARY` 使用 Redis JSON/Stream。manifest 缺失按 legacy 兼容，旧前端未知 `run.snapshot.reset` 时至少必须安全忽略；支持新模式的前端应按上文清空并重放 snapshot。
-6. 当前 Run 创建仍固定使用 `LEGACY_FULL`，Redis summary 开关默认关闭且 rollout 为 0；已实现的新模式数据面和事件契约用于验证/后续启用，不能据此认定终态摘要持久化或故障接管已经发布。
+6. 新 Run 仅在请求携带已校验的 `contextToken + clientRequestId` 且命中 userId 稳定灰度桶时使用 `REDIS_SUMMARY`；开关默认关闭且 rollout 为 0。storageMode 在创建时固定，回滚比例只影响后续 Run。
 
 ## manager 控制面补充
 

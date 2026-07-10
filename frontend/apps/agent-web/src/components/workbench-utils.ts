@@ -89,6 +89,14 @@ export function runEventProjection(event: RunEvent): { reset: boolean; events: R
   return { reset: true, events: snapshotEventsFromRunReset(event) };
 }
 
+/** 新模式在 run.created 中下发稳定反馈 ID；只接受平台 msg UUID 形状，避免误用远端 message id。 */
+export function assistantSummaryMessageId(payload: Record<string, unknown>): string | undefined {
+  const candidate = payload.assistantSummaryMessageId;
+  return typeof candidate === "string" && /^msg_[0-9a-f]{32}$/i.test(candidate)
+    ? candidate
+    : undefined;
+}
+
 export const OPENCODE_HEALTH_REFETCH_INTERVAL_MS = 10_000;
 export const OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS = 300_000;
 export const OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS = 30_000;

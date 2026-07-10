@@ -4,13 +4,25 @@ import { BackendApiError, createBackendApiClient, type WorkspaceWebSocketFactory
 describe("backend-api", () => {
   it("sends trace id and unwraps successful responses", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { runId: "run_1" } }), {
-        status: 200
-      })
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          runId: "run_1",
+          storageMode: "REDIS_SUMMARY",
+          clientRequestId: "req_1",
+          detailsAvailableUntil: "2026-07-11T00:00:00Z"
+        }
+      }), { status: 200 })
     );
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
 
-    await expect(client.getRun("run_1")).resolves.toEqual({ runId: "run_1" });
+    await expect(client.getRun("run_1")).resolves.toEqual({
+      runId: "run_1",
+      storageMode: "REDIS_SUMMARY",
+      clientRequestId: "req_1",
+      detailsAvailableUntil: "2026-07-11T00:00:00Z"
+    });
 
     expect(fetcher).toHaveBeenCalledWith(
       "http://api/api/internal/agent/opencode/runs/run_1",
@@ -1482,7 +1494,20 @@ describe("backend-api", () => {
         JSON.stringify({
           success: true,
           traceId: "trace_fixed",
-          data: { items: [{ messageId: "msg_1", sessionId: "ses_1", role: "USER", content: "hello" }], page: 1, size: 100, total: 1 }
+          data: {
+            items: [{
+              messageId: "msg_1",
+              sessionId: "ses_1",
+              role: "USER",
+              content: "hello",
+              contentKind: "SUMMARY",
+              summaryStatus: "PARTIAL",
+              summaryVersion: 1
+            }],
+            page: 1,
+            size: 100,
+            total: 1
+          }
         }),
         { status: 200 }
       )
@@ -1490,7 +1515,13 @@ describe("backend-api", () => {
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
 
     await expect(client.listSessionMessages("ses_1", 1, 100, { refresh: false })).resolves.toMatchObject({
-      items: [{ messageId: "msg_1", content: "hello" }]
+      items: [{
+        messageId: "msg_1",
+        content: "hello",
+        contentKind: "SUMMARY",
+        summaryStatus: "PARTIAL",
+        summaryVersion: 1
+      }]
     });
 
     expect(fetcher).toHaveBeenCalledWith(
@@ -1510,7 +1541,10 @@ describe("backend-api", () => {
             sessions: [],
             messagesBySessionId: {},
             childSessionIdByTaskPartId: {},
-            events: [{ type: "message.updated", sessionId: "ses_1", payload: { message: { id: "msg_1", role: "assistant" } } }]
+            events: [{ type: "message.updated", sessionId: "ses_1", payload: { message: { id: "msg_1", role: "assistant" } } }],
+            historyRepresentation: "FULL",
+            replayAvailable: true,
+            detailsAvailableUntil: "2026-07-11T00:00:00Z"
           }
         }),
         { status: 200 }
@@ -1520,7 +1554,10 @@ describe("backend-api", () => {
 
     await expect(client.getSessionTreeMessages("ses_1")).resolves.toMatchObject({
       sessionId: "ses_1",
-      events: [{ type: "message.updated" }]
+      events: [{ type: "message.updated" }],
+      historyRepresentation: "FULL",
+      replayAvailable: true,
+      detailsAvailableUntil: "2026-07-11T00:00:00Z"
     });
 
     expect(fetcher).toHaveBeenCalledWith(

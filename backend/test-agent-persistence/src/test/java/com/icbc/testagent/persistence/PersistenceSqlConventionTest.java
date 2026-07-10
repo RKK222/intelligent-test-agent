@@ -99,6 +99,23 @@ class PersistenceSqlConventionTest {
     }
 
     @Test
+    void runSummaryPersistenceUsesMyBatisXmlAndNeverPersistsPartsJson() throws IOException {
+        Path javaRoot = locate("src/main/java");
+        Path resourceRoot = locate("src/main/resources");
+
+        assertThat(javaRoot.resolve("com/icbc/testagent/persistence/mybatis/MyBatisRunSummaryPersistenceRepository.java"))
+                .exists();
+        assertThat(javaRoot.resolve("com/icbc/testagent/persistence/mybatis/RunSummaryMapper.java"))
+                .exists();
+        String mapperXml = Files.readString(resourceRoot.resolve("mybatis/RunSummaryMapper.xml"));
+        assertThat(mapperXml)
+                .contains("parts_json")
+                .contains("cast(null as varchar)")
+                .contains("on conflict(session_id, client_request_id) do nothing")
+                .doesNotContain("payload_json");
+    }
+
+    @Test
     void runSessionScopeMergeUsesTimestampCastsForPostgreSql() throws IOException {
         Path resourceRoot = locate("src/main/resources");
         String mapperXml = Files.readString(resourceRoot.resolve("mybatis/RunSessionScopeMapper.xml"));

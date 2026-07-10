@@ -12,6 +12,7 @@ import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.event.RunSessionScope;
 import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunDiffCounts;
 import com.icbc.testagent.domain.run.RunRuntimeAppendResult;
 import com.icbc.testagent.domain.run.RunRuntimeInput;
 import com.icbc.testagent.domain.run.RunRuntimeManifest;
@@ -57,6 +58,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               'lastSeq', '0', 'earliestSeq', '1', 'runtimeVersion', '0',
               'earliestRuntimeVersion', '1', 'resetGeneration', '0',
               'detailsTruncated', '0', 'durableEventCount', '0', 'runtimeEventCount', '0',
+              'diffProposedCount', '0', 'diffAcceptedCount', '0', 'diffRejectedCount', '0',
               'inputBytes', ARGV[8], 'scopeBytes', '0', 'streamBytes', '0',
               'snapshotBytes', tostring(string.len(ARGV[9])),
               'detailBytes', tostring(tonumber(ARGV[8]) + string.len(ARGV[9])),
@@ -68,6 +70,21 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             redis.call('PEXPIRE', KEYS[1], ARGV[7])
             redis.call('SADD', KEYS[3], KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6], KEYS[7])
             redis.call('PEXPIRE', KEYS[3], ARGV[7])
+            return 1
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> RELEASE_CLIENT_REQUEST_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+              return redis.call('DEL', KEYS[1])
+            end
+            return 0
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> BIND_REMOTE_SESSION_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+            redis.call('HSET', KEYS[1], 'rootRemoteSessionId', ARGV[1], 'updatedAt', ARGV[2])
+            for _, key in ipairs(redis.call('SMEMBERS', KEYS[2])) do redis.call('PEXPIRE', key, ARGV[3]) end
+            redis.call('PEXPIRE', KEYS[2], ARGV[3])
             return 1
             """, Long.class);
 
@@ -91,6 +108,13 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                   earliestSeq=tonumber(redis.call('HGET', KEYS[1], 'earliestSeq') or '1'),
                   earliestRuntimeVersion=tonumber(redis.call('HGET', KEYS[1], 'earliestRuntimeVersion') or '1')})
               end
+            end
+            if ARGV[25] == 'PROPOSED' then
+              redis.call('HINCRBY', KEYS[1], 'diffProposedCount', 1)
+            elseif ARGV[25] == 'ACCEPTED' then
+              redis.call('HINCRBY', KEYS[1], 'diffAcceptedCount', 1)
+            elseif ARGV[25] == 'REJECTED' then
+              redis.call('HINCRBY', KEYS[1], 'diffRejectedCount', 1)
             end
             local seq = redis.call('HINCRBY', KEYS[1], 'lastSeq', 1)
             local runtimeVersion = redis.call('HINCRBY', KEYS[1], 'runtimeVersion', 1)
@@ -639,10 +663,57 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 redisTemplate.opsForValue().set(userRuntimeMarkerKey(manifest.userId()), "1", terminalTtl);
             }
             indexActive(manifest);
+            indexHistory(manifest);
         } catch (RuntimeException exception) {
             if (exception instanceof PlatformException platformException) {
                 throw platformException;
             }
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public boolean claimClientRequest(SessionId sessionId, String clientRequestId, RunId runId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        Objects.requireNonNull(runId, "runId must not be null");
+        if (clientRequestId == null || clientRequestId.isBlank()) {
+            throw new IllegalArgumentException("clientRequestId must not be blank");
+        }
+        try {
+            return Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(
+                    clientRequestKey(sessionId, clientRequestId), runId.value(), pendingTtl));
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public Optional<RunId> findByClientRequest(SessionId sessionId, String clientRequestId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        if (clientRequestId == null || clientRequestId.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            String value = redisTemplate.opsForValue().get(clientRequestKey(sessionId, clientRequestId));
+            return value == null ? Optional.empty() : Optional.of(new RunId(value));
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public void releaseClientRequest(SessionId sessionId, String clientRequestId, RunId runId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        Objects.requireNonNull(runId, "runId must not be null");
+        if (clientRequestId == null || clientRequestId.isBlank()) {
+            return;
+        }
+        try {
+            redisTemplate.execute(
+                    RELEASE_CLIENT_REQUEST_SCRIPT,
+                    List.of(clientRequestKey(sessionId, clientRequestId)),
+                    runId.value());
+        } catch (RuntimeException exception) {
             throw unavailable(exception);
         }
     }
@@ -659,6 +730,68 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             return Optional.of(overlay(base, fields));
         } catch (JsonProcessingException exception) {
             throw unavailable(exception);
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public Optional<RunRuntimeInput> findInput(RunId runId) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        try {
+            String json = redisTemplate.opsForValue().get(inputKey(runId));
+            return json == null
+                    ? Optional.empty()
+                    : Optional.of(objectMapper.readValue(json, RunRuntimeInput.class));
+        } catch (JsonProcessingException exception) {
+            throw unavailable(exception);
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public RunDiffCounts diffCounts(RunId runId) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        try {
+            List<Object> values = redisTemplate.opsForHash().multiGet(
+                    manifestKey(runId),
+                    List.of("diffProposedCount", "diffAcceptedCount", "diffRejectedCount"));
+            if (values == null || values.size() != 3) {
+                throw new PlatformException(ErrorCode.RUN_DETAILS_EXPIRED, "Run 详情已过期");
+            }
+            return new RunDiffCounts(integer(values.get(0)), integer(values.get(1)), integer(values.get(2)));
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public void bindRemoteSession(RunId runId, String remoteSessionId) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        if (remoteSessionId == null || remoteSessionId.isBlank()) {
+            throw new IllegalArgumentException("remoteSessionId must not be blank");
+        }
+        try {
+            Duration ttl = ttlFor(runId);
+            Long updated = redisTemplate.execute(
+                    BIND_REMOTE_SESSION_SCRIPT,
+                    List.of(manifestKey(runId), registryKey(runId)),
+                    remoteSessionId,
+                    clock.instant().toString(),
+                    Long.toString(ttl.toMillis()));
+            if (updated == null || updated == 0L) {
+                throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
+            }
         } catch (RuntimeException exception) {
             if (exception instanceof PlatformException platformException) {
                 throw platformException;
@@ -1012,6 +1145,37 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     }
 
     @Override
+    public List<RunRuntimeManifest> findRecentBySession(SessionId sessionId, int limit) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        if (limit < 1 || limit > 200) {
+            throw new IllegalArgumentException("limit must be between 1 and 200");
+        }
+        String key = historySessionKey(sessionId);
+        try {
+            Set<String> members = redisTemplate.opsForZSet().reverseRange(key, 0, limit - 1L);
+            if (members == null || members.isEmpty()) {
+                return List.of();
+            }
+            Instant now = clock.instant();
+            List<RunRuntimeManifest> manifests = new ArrayList<>();
+            for (String member : members) {
+                Optional<RunRuntimeManifest> manifest = findManifest(new RunId(member))
+                        .filter(item -> item.sessionId().equals(sessionId))
+                        .filter(item -> item.detailsExpiresAt().isAfter(now));
+                if (manifest.isPresent()) {
+                    manifests.add(manifest.orElseThrow());
+                } else {
+                    redisTemplate.opsForZSet().remove(key, member);
+                }
+            }
+            return List.copyOf(manifests);
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) throw platformException;
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
     public List<RunRuntimeManifest> findActiveByUser(UserId userId) {
         return findActiveFromIndex(activeUserKey(userId), manifest -> userId.equals(manifest.userId()));
     }
@@ -1088,6 +1252,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             if (manifest.active()) {
                 indexActive(manifest);
             }
+            indexHistory(manifest);
         } catch (RuntimeException exception) {
             throw unavailable(exception);
         }
@@ -1147,11 +1312,21 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 activeServerKey(manifest.producerLinuxServerId()), manifest.runId().value());
     }
 
+    private void indexHistory(RunRuntimeManifest manifest) {
+        Duration ttl = runtimeTtl(manifest);
+        String key = historySessionKey(manifest.sessionId());
+        redisTemplate.opsForZSet().add(key, manifest.runId().value(), manifest.updatedAt().toEpochMilli());
+        redisTemplate.expire(key, ttl);
+    }
+
     private RunRuntimeManifest overlay(RunRuntimeManifest base, Map<Object, Object> fields) {
         return new RunRuntimeManifest(
                 base.runId(), base.storageMode(), base.userId(), base.sessionId(), base.workspaceId(), base.agentId(),
                 base.clientRequestId(), base.dispatchMessageId(), base.producerLinuxServerId(), base.backendProcessId(),
-                base.executionNodeId(), base.opencodeProcessId(), base.rootRemoteSessionId(),
+                base.executionNodeId(), base.opencodeProcessId(),
+                optionalText(fields, "rootRemoteSessionId") == null
+                        ? base.rootRemoteSessionId()
+                        : optionalText(fields, "rootRemoteSessionId"),
                 RunStatus.valueOf(text(fields, "status")),
                 number(fields, "statusVersion"), number(fields, "lastSeq"), number(fields, "earliestSeq"),
                 number(fields, "resetGeneration"), "1".equals(text(fields, "detailsTruncated")),
@@ -1209,6 +1384,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         } else {
             removeActive(manifest);
         }
+        indexHistory(manifest);
         if (manifest.userId() != null) {
             Duration runtimeTtl = runtimeTtl(manifest);
             Duration markerTtl = runtimeTtl.compareTo(terminalTtl) > 0 ? runtimeTtl : terminalTtl;
@@ -1261,7 +1437,17 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                         ? "evt_redis_" + draft.runId().value().substring("run_".length()) + "_"
                         : "evt_runtime_" + draft.runId().value() + "_",
                 draft.occurredAt().toString(),
-                snapshotJson(draft)
+                snapshotJson(draft),
+                durable ? diffMutation(draft.type()) : ""
+        };
+    }
+
+    private String diffMutation(RunEventType type) {
+        return switch (type) {
+            case DIFF_PROPOSED -> "PROPOSED";
+            case DIFF_ACCEPTED -> "ACCEPTED";
+            case DIFF_REJECTED -> "REJECTED";
+            default -> "";
         };
     }
 
@@ -1270,22 +1456,27 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         String messageId = input.messageId() == null || input.messageId().isBlank()
                 ? "msg_input_" + input.runId().value().substring("run_".length())
                 : input.messageId();
-        Map<String, Object> message = Map.of(
-                "id", messageId,
-                "sessionID", manifest.rootRemoteSessionId(),
-                "role", "user",
-                "text", input.prompt());
+        LinkedHashMap<String, Object> message = new LinkedHashMap<>();
+        message.put("id", messageId);
+        message.put("role", "user");
+        message.put("text", input.prompt());
+        if (manifest.rootRemoteSessionId() != null) {
+            message.put("sessionID", manifest.rootRemoteSessionId());
+        }
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("messageId", messageId);
+        payload.put("role", "user");
+        payload.put("text", input.prompt());
+        payload.put("message", Map.copyOf(message));
+        if (manifest.rootRemoteSessionId() != null) {
+            payload.put("sessionId", manifest.rootRemoteSessionId());
+        }
         return new RunEventDraft(
                 input.runId(),
                 RunEventType.MESSAGE_UPDATED,
                 "trace_runtime_input",
                 input.createdAt(),
-                Map.of(
-                        "messageId", messageId,
-                        "sessionId", manifest.rootRemoteSessionId(),
-                        "role", "user",
-                        "text", input.prompt(),
-                        "message", message));
+                Map.copyOf(payload));
     }
 
     private String snapshotJson(RunEventDraft draft) {
@@ -1555,6 +1746,10 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         return Long.parseLong(text(fields, key));
     }
 
+    private int integer(Object value) {
+        return value == null ? 0 : Integer.parseInt(value.toString());
+    }
+
     private PlatformException unavailable(Throwable cause) {
         return new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis 运行态不可用", Map.of(), cause);
     }
@@ -1576,6 +1771,10 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     private String activeUserKey(UserId userId) { return PREFIX + "active:user:{" + userId.value() + "}"; }
     private String userRuntimeMarkerKey(UserId userId) { return PREFIX + "runtime-user:{" + userId.value() + "}"; }
     private String activeSessionKey(SessionId sessionId) { return PREFIX + "active:session:{" + sessionId.value() + "}"; }
+    private String historySessionKey(SessionId sessionId) { return PREFIX + "history:session:{" + sessionId.value() + "}"; }
+    private String clientRequestKey(SessionId sessionId, String clientRequestId) {
+        return PREFIX + "request:{" + sessionId.value() + "}:" + digest(clientRequestId);
+    }
     private String activeServerKey(String serverId) { return PREFIX + "active:server:{" + safe(serverId) + "}"; }
     private String safe(String value) { return value == null ? "unknown" : value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
 

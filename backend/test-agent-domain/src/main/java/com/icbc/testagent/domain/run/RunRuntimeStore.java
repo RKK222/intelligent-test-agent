@@ -22,7 +22,23 @@ public interface RunRuntimeStore {
 
     void initialize(RunRuntimeManifest manifest, RunRuntimeInput input);
 
+    /** 在 Redis 中声明 session + clientRequestId；false 表示同一请求已由其它 Run 接管。 */
+    boolean claimClientRequest(SessionId sessionId, String clientRequestId, RunId runId);
+
+    Optional<RunId> findByClientRequest(SessionId sessionId, String clientRequestId);
+
+    void releaseClientRequest(SessionId sessionId, String clientRequestId, RunId runId);
+
     Optional<RunRuntimeManifest> findManifest(RunId runId);
+
+    /** 读取本轮完整输入，仅供终态摘要和故障恢复；调用方不得写入日志或 PostgreSQL。 */
+    Optional<RunRuntimeInput> findInput(RunId runId);
+
+    /** 返回低频终态投影所需的 Diff 数量，不读取原始事件。 */
+    RunDiffCounts diffCounts(RunId runId);
+
+    /** 首次创建远端 session 后回填 manifest；不触发关系库写入。 */
+    void bindRemoteSession(RunId runId, String remoteSessionId);
 
     default RunStorageMode storageMode(RunId runId) {
         return findManifest(runId).map(RunRuntimeManifest::storageMode).orElse(RunStorageMode.LEGACY_FULL);
@@ -55,6 +71,9 @@ public interface RunRuntimeStore {
     List<RunEventDraft> drainPending(RunId runId, String sessionId);
 
     Optional<RunRuntimeManifest> findActiveBySession(SessionId sessionId);
+
+    /** 查询仍在详情 TTL 内的最近 Run，供历史按 Redis → OpenCode → PostgreSQL 顺序恢复。 */
+    List<RunRuntimeManifest> findRecentBySession(SessionId sessionId, int limit);
 
     List<RunRuntimeManifest> findActiveByUser(UserId userId);
 

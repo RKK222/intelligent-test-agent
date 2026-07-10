@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.RunSummaryMapper">
+    <resultMap id="RunPersistenceAnchorRowMap" type="com.icbc.testagent.persistence.mybatis.RunPersistenceAnchorRow">
+        <constructor>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="storage_mode" javaType="java.lang.String"/>
+            <arg column="status_version" javaType="_long"/>
+            <arg column="client_request_id" javaType="java.lang.String"/>
+            <arg column="producer_linux_server_id" javaType="java.lang.String"/>
+            <arg column="execution_node_id_snapshot" javaType="java.lang.String"/>
+            <arg column="opencode_process_id_snapshot" javaType="java.lang.String"/>
+            <arg column="root_remote_session_id" javaType="java.lang.String"/>
+            <arg column="dispatch_message_id" javaType="java.lang.String"/>
+            <arg column="assistant_summary_message_id" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="details_expires_at" javaType="java.time.Instant"/>
+            <arg column="source_type" javaType="java.lang.String"/>
+            <arg column="source_ref_id" javaType="java.lang.String"/>
+            <arg column="triggered_by_user_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="RunSummaryRowMap" type="com.icbc.testagent.persistence.mybatis.RunSummaryRow">
+        <constructor>
+            <arg column="message_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="role" javaType="java.lang.String"/>
+            <arg column="content" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="remote_message_id" javaType="java.lang.String"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="source_type" javaType="java.lang.String"/>
+            <arg column="source_ref_id" javaType="java.lang.String"/>
+            <arg column="sender_user_id" javaType="java.lang.String"/>
+            <arg column="content_kind" javaType="java.lang.String"/>
+            <arg column="summary_key" javaType="java.lang.String"/>
+            <arg column="summary_version" javaType="_int"/>
+            <arg column="summary_status" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="RunDetailsLocatorRowMap" type="com.icbc.testagent.persistence.mybatis.RunDetailsLocatorRow">
+        <constructor>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="storage_mode" javaType="java.lang.String"/>
+            <arg column="root_remote_session_id" javaType="java.lang.String"/>
+            <arg column="execution_node_id_snapshot" javaType="java.lang.String"/>
+            <arg column="last_remote_message_id" javaType="java.lang.String"/>
+            <arg column="last_remote_part_id" javaType="java.lang.String"/>
+            <arg column="details_expires_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="RunPersistenceAnchorColumns">
+        run_id, session_id, workspace_id, status, storage_mode, status_version,
+        client_request_id, producer_linux_server_id, execution_node_id_snapshot,
+        opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
+        assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
+        source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+    </sql>
+
+    <insert id="insertAnchor" databaseId="postgresql">
+        insert into runs(
+            run_id, session_id, workspace_id, status, storage_mode, status_version,
+            client_request_id, producer_linux_server_id, execution_node_id_snapshot,
+            opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
+            assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
+            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+        ) values (
+            #{row.runId}, #{row.sessionId}, #{row.workspaceId}, #{row.status}, #{row.storageMode}, #{row.statusVersion},
+            #{row.clientRequestId}, #{row.producerLinuxServerId}, #{row.executionNodeIdSnapshot},
+            #{row.opencodeProcessIdSnapshot}, #{row.rootRemoteSessionId}, #{row.dispatchMessageId},
+            #{row.assistantSummaryMessageId}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt}, #{row.detailsExpiresAt},
+            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId}
+        )
+        on conflict(session_id, client_request_id) do nothing
+    </insert>
+
+    <!-- H2 PostgreSQL mode 不支持 ON CONFLICT；通用测试路径用同语义单语句 MERGE。 -->
+    <insert id="insertAnchor">
+        merge into runs as target
+        using (values (
+            #{row.runId}, #{row.sessionId}, #{row.workspaceId}, #{row.status}, #{row.storageMode}, #{row.statusVersion},
+            #{row.clientRequestId}, #{row.producerLinuxServerId}, #{row.executionNodeIdSnapshot},
+            #{row.opencodeProcessIdSnapshot}, #{row.rootRemoteSessionId}, #{row.dispatchMessageId},
+            #{row.assistantSummaryMessageId}, #{row.traceId}, cast(#{row.createdAt} as timestamp),
+            cast(#{row.updatedAt} as timestamp), cast(#{row.detailsExpiresAt} as timestamp),
+            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId}
+        )) as source(
+            run_id, session_id, workspace_id, status, storage_mode, status_version,
+            client_request_id, producer_linux_server_id, execution_node_id_snapshot,
+            opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
+            assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
+            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+        )
+        on target.session_id = source.session_id and target.client_request_id = source.client_request_id
+        when not matched then insert (
+            run_id, session_id, workspace_id, status, storage_mode, status_version,
+            client_request_id, producer_linux_server_id, execution_node_id_snapshot,
+            opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
+            assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
+            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+        ) values (
+            source.run_id, source.session_id, source.workspace_id, source.status, source.storage_mode,
+            source.status_version, source.client_request_id, source.producer_linux_server_id,
+            source.execution_node_id_snapshot, source.opencode_process_id_snapshot,
+            source.root_remote_session_id, source.dispatch_message_id, source.assistant_summary_message_id,
+            source.trace_id, source.created_at, source.updated_at, source.details_expires_at,
+            source.source_type, source.source_ref_id, source.triggered_by_user_id, source.agent_id, source.model_id
+        )
+    </insert>
+
+    <select id="findBySessionAndClientRequestId" resultMap="RunPersistenceAnchorRowMap">
+        select
+        <include refid="RunPersistenceAnchorColumns"/>
+        from runs
+        where session_id = #{sessionId}
+          and client_request_id = #{clientRequestId}
+    </select>
+
+    <select id="findDetailsLocator" resultMap="RunDetailsLocatorRowMap">
+        select run_id, storage_mode, root_remote_session_id, execution_node_id_snapshot,
+               last_remote_message_id, last_remote_part_id, details_expires_at
+        from runs
+        where run_id = #{runId}
+          and storage_mode = 'REDIS_SUMMARY'
+    </select>
+
+    <update id="recordDiffAction">
+        update runs
+        set diff_accepted_count = coalesce(diff_accepted_count, 0)
+                + case when #{action} = 'ACCEPTED' then 1 else 0 end,
+            diff_rejected_count = coalesce(diff_rejected_count, 0)
+                + case when #{action} = 'REJECTED' then 1 else 0 end
+        where run_id = #{runId}
+          and storage_mode = 'REDIS_SUMMARY'
+    </update>
+
+    <insert id="insertInitialAgentBinding" databaseId="postgresql">
+        insert into agent_session_bindings(
+            session_id, agent_id, remote_session_id, execution_node_id, created_at, updated_at, trace_id
+        ) values (
+            #{binding.sessionId.value}, #{binding.agentId}, #{binding.remoteSessionId},
+            #{binding.executionNodeId.value}, #{binding.createdAt}, #{binding.updatedAt}, #{binding.traceId}
+        )
+        on conflict(session_id, agent_id) do update set
+            remote_session_id = excluded.remote_session_id,
+            execution_node_id = excluded.execution_node_id,
+            updated_at = excluded.updated_at,
+            trace_id = excluded.trace_id
+    </insert>
+
+    <insert id="insertInitialAgentBinding">
+        merge into agent_session_bindings as target
+        using (values (
+            #{binding.sessionId.value}, #{binding.agentId}, #{binding.remoteSessionId},
+            #{binding.executionNodeId.value}, cast(#{binding.createdAt} as timestamp),
+            cast(#{binding.updatedAt} as timestamp), #{binding.traceId}
+        )) as source(session_id, agent_id, remote_session_id, execution_node_id, created_at, updated_at, trace_id)
+        on target.session_id = source.session_id and target.agent_id = source.agent_id
+        when matched then update set
+            remote_session_id = source.remote_session_id,
+            execution_node_id = source.execution_node_id,
+            updated_at = source.updated_at,
+            trace_id = source.trace_id
+        when not matched then insert (
+            session_id, agent_id, remote_session_id, execution_node_id, created_at, updated_at, trace_id
+        ) values (
+            source.session_id, source.agent_id, source.remote_session_id, source.execution_node_id,
+            source.created_at, source.updated_at, source.trace_id
+        )
+    </insert>
+
+    <update id="updateLegacySessionBinding">
+        update sessions
+        set opencode_session_id = #{binding.remoteSessionId},
+            opencode_execution_node_id = #{binding.executionNodeId.value},
+            updated_at = #{binding.updatedAt},
+            trace_id = #{binding.traceId}
+        where session_id = #{binding.sessionId.value}
+    </update>
+
+    <update id="updateTerminalIfVersion">
+        update runs
+        set status = #{row.status},
+            status_version = status_version + 1,
+            terminal_source = #{row.terminalSource},
+            terminal_reason_code = #{row.terminalReasonCode},
+            safe_error_message = #{row.safeErrorMessage},
+            remote_stop_confirmed = #{row.remoteStopConfirmed},
+            last_event_seq = #{row.lastEventSeq},
+            details_expires_at = #{row.detailsExpiresAt},
+            root_remote_session_id = #{row.rootRemoteSessionId},
+            diff_proposed_count = case
+                when coalesce(diff_proposed_count, 0) &gt; #{row.diffProposedCount}
+                    then diff_proposed_count else #{row.diffProposedCount} end,
+            diff_accepted_count = case
+                when coalesce(diff_accepted_count, 0) &gt; #{row.diffAcceptedCount}
+                    then diff_accepted_count else #{row.diffAcceptedCount} end,
+            diff_rejected_count = case
+                when coalesce(diff_rejected_count, 0) &gt; #{row.diffRejectedCount}
+                    then diff_rejected_count else #{row.diffRejectedCount} end,
+            last_remote_message_id = #{row.lastRemoteMessageId},
+            last_remote_part_id = #{row.lastRemotePartId},
+            tokens_input = #{row.tokensInput},
+            tokens_output = #{row.tokensOutput},
+            tokens_reasoning = #{row.tokensReasoning},
+            tokens_cache_read = #{row.tokensCacheRead},
+            tokens_cache_write = #{row.tokensCacheWrite},
+            cost_usd = #{row.costUsd},
+            updated_at = #{row.updatedAt}
+        where run_id = #{row.runId}
+          and session_id = #{row.sessionId}
+          and storage_mode = 'REDIS_SUMMARY'
+          and (
+              status_version = #{row.expectedStatusVersion}
+              or (
+                  status_version = #{row.expectedStatusVersion} + 1
+                  and status = #{row.status}
+                  and last_event_seq &lt; #{row.lastEventSeq}
+              )
+          )
+    </update>
+
+    <insert id="upsertSummaries">
+        merge into session_messages as target
+        using (values
+        <foreach collection="rows" item="row" separator=",">
+            (
+                #{row.messageId}, #{row.sessionId}, #{row.role}, #{row.content}, #{row.traceId},
+                cast(#{row.createdAt} as timestamp), #{row.runId}, #{row.agentId}, #{row.remoteMessageId},
+                cast(null as varchar), cast(#{row.updatedAt} as timestamp), #{row.sourceType}, #{row.sourceRefId},
+                #{row.senderUserId}, #{row.contentKind}, #{row.summaryKey}, #{row.summaryVersion}, #{row.summaryStatus}
+            )
+        </foreach>
+        ) as source(
+            message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
+            remote_message_id, parts_json, updated_at, source_type, source_ref_id, sender_user_id,
+            content_kind, summary_key, summary_version, summary_status
+        )
+        on target.summary_key = source.summary_key
+        when matched then update set
+            session_id = source.session_id,
+            role = source.role,
+            content = source.content,
+            trace_id = source.trace_id,
+            run_id = source.run_id,
+            agent_id = source.agent_id,
+            remote_message_id = source.remote_message_id,
+            parts_json = cast(null as varchar),
+            updated_at = source.updated_at,
+            source_type = source.source_type,
+            source_ref_id = source.source_ref_id,
+            sender_user_id = source.sender_user_id,
+            content_kind = source.content_kind,
+            summary_version = source.summary_version,
+            summary_status = source.summary_status
+        when not matched then insert (
+            message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
+            remote_message_id, parts_json, updated_at, source_type, source_ref_id, sender_user_id,
+            content_kind, summary_key, summary_version, summary_status
+        ) values (
+            source.message_id, source.session_id, source.role, source.content, source.trace_id, source.created_at,
+            source.run_id, source.agent_id, source.remote_message_id, source.parts_json, source.updated_at,
+            source.source_type, source.source_ref_id, source.sender_user_id, source.content_kind,
+            source.summary_key, source.summary_version, source.summary_status
+        )
+    </insert>
+
+    <update id="touchSession">
+        update sessions
+        set updated_at = #{updatedAt}
+        where session_id = #{sessionId}
+    </update>
+
+    <select id="findSummariesByRunId" resultMap="RunSummaryRowMap">
+        select message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
+               remote_message_id, updated_at, source_type, source_ref_id, sender_user_id,
+               content_kind, summary_key, summary_version, summary_status
+        from session_messages
+        where run_id = #{runId}
+          and content_kind = 'SUMMARY'
+        order by created_at, id
+    </select>
+
+    <select id="findSummariesBySessionId" resultMap="RunSummaryRowMap">
+        select message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
+               remote_message_id, updated_at, source_type, source_ref_id, sender_user_id,
+               content_kind, summary_key, summary_version, summary_status
+        from session_messages
+        where session_id = #{sessionId}
+          and content_kind = 'SUMMARY'
+        order by created_at, id
+    </select>
+</mapper>

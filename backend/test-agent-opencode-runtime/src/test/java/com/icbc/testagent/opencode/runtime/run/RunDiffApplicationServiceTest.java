@@ -2,6 +2,11 @@ package com.icbc.testagent.opencode.runtime.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
@@ -21,9 +26,19 @@ import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.run.Run;
+import com.icbc.testagent.domain.run.RunDetailsLocator;
+import com.icbc.testagent.domain.run.RunDiffAction;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeAppendResult;
+import com.icbc.testagent.domain.run.RunRuntimeReplay;
+import com.icbc.testagent.domain.run.RunRuntimeSnapshot;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
+import com.icbc.testagent.domain.run.RunStorageMode;
+import com.icbc.testagent.domain.run.RunSummaryPersistencePort;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionStatus;
@@ -161,19 +176,138 @@ class RunDiffApplicationServiceTest {
         });
     }
 
+    @Test
+    void redisSummaryReadsMaterializedDiffWithoutQueryingLegacyRunEvents() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        when(runtimeStore.findManifest(run().runId())).thenReturn(Optional.of(redisSummaryManifest()));
+        when(runtimeStore.replayAfter(run().runId(), 0L, 1)).thenReturn(new RunRuntimeReplay(
+                redisSummaryManifest(),
+                new RunRuntimeSnapshot(
+                        run().runId(),
+                        3L,
+                        3L,
+                        0L,
+                        List.of(diffProposed(Map.of("files", List.of(Map.of("path", "src/Redis.ts"))))),
+                        NOW),
+                List.of(),
+                false,
+                null));
+        RunDiffApplicationService service = service(
+                events, new FakeOpencodeFacade(), mappedSession(), runtimeStore, summaryPersistence);
+
+        RunDiffResponse response = service.getDiff(run().runId(), "trace_1234567890abcdef");
+
+        assertThat(response.files()).extracting(RunDiffFileResponse::path).containsExactly("src/Redis.ts");
+        assertThat(events.readCount).isZero();
+        verify(summaryPersistence, never()).findDetailsLocator(run().runId());
+    }
+
+    @Test
+    void redisSummaryReturnsDetailsExpiredInsteadOfFallingBackToLegacyEvents() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        when(runtimeStore.findManifest(run().runId())).thenReturn(Optional.empty());
+        when(summaryPersistence.findDetailsLocator(run().runId())).thenReturn(Optional.of(detailsLocator()));
+        RunDiffApplicationService service = service(
+                events, new FakeOpencodeFacade(), mappedSession(), runtimeStore, summaryPersistence);
+
+        assertThatThrownBy(() -> service.getDiff(run().runId(), "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.RUN_DETAILS_EXPIRED));
+        assertThat(events.readCount).isZero();
+    }
+
+    @Test
+    void legacyDiffStillUsesDatabaseEventsWhenRedisIsUnavailable() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        events.append(diffProposed(Map.of("files", List.of(Map.of("path", "src/Legacy.ts")))));
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        when(runtimeStore.findManifest(run().runId()))
+                .thenThrow(new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Redis unavailable"));
+        when(summaryPersistence.findDetailsLocator(run().runId())).thenReturn(Optional.empty());
+        RunDiffApplicationService service = service(
+                events, new FakeOpencodeFacade(), mappedSession(), runtimeStore, summaryPersistence);
+
+        RunDiffResponse response = service.getDiff(run().runId(), "trace_1234567890abcdef");
+
+        assertThat(response.files()).extracting(RunDiffFileResponse::path).containsExactly("src/Legacy.ts");
+        assertThat(events.readCount).isEqualTo(1);
+    }
+
+    @Test
+    void redisSummaryAcceptAppendsRedisEventThenUpdatesRunCounterWithoutLegacyEventWrite() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        when(runtimeStore.findManifest(run().runId())).thenReturn(Optional.of(redisSummaryManifest()));
+        when(runtimeStore.replayAfter(run().runId(), 0L, 1)).thenReturn(new RunRuntimeReplay(
+                redisSummaryManifest(),
+                new RunRuntimeSnapshot(
+                        run().runId(),
+                        3L,
+                        3L,
+                        0L,
+                        List.of(diffProposed(Map.of("files", List.of(Map.of("path", "src/Redis.ts"))))),
+                        NOW),
+                List.of(),
+                false,
+                null));
+        when(runtimeStore.appendDurable(any())).thenAnswer(invocation -> {
+            RunEventDraft draft = invocation.getArgument(0);
+            return new RunRuntimeAppendResult(new RunEvent(
+                    new RunEventId("evt_redis_diff_action"),
+                    draft.runId(),
+                    4L,
+                    draft.type(),
+                    draft.traceId(),
+                    draft.occurredAt(),
+                    draft.payload()), false, 0L, 1L);
+        });
+        when(summaryPersistence.recordDiffAction(run().runId(), RunDiffAction.ACCEPTED)).thenReturn(true);
+        RunDiffApplicationService service = service(
+                events, new FakeOpencodeFacade(), mappedSession(), runtimeStore, summaryPersistence);
+
+        RunDiffActionResponse response = service.acceptDiff(run().runId(), "trace_1234567890abcdef");
+
+        assertThat(response.status()).isEqualTo("accepted");
+        assertThat(events.events).isEmpty();
+        verify(runtimeStore).appendDurable(org.mockito.ArgumentMatchers.argThat(
+                draft -> draft.type() == RunEventType.DIFF_ACCEPTED));
+        verify(summaryPersistence).recordDiffAction(run().runId(), RunDiffAction.ACCEPTED);
+    }
+
     private static RunDiffApplicationService service(
             FakeRunEventRepository events,
             FakeOpencodeFacade facade,
             Session session) {
+        return service(events, facade, session, null, null);
+    }
+
+    private static RunDiffApplicationService service(
+            FakeRunEventRepository events,
+            FakeOpencodeFacade facade,
+            Session session,
+            RunRuntimeStore runtimeStore,
+            RunSummaryPersistencePort summaryPersistence) {
+        RunEventAppender appender = runtimeStore == null
+                ? new RunEventAppender(events)
+                : new RunEventAppender(events, null, runtimeStore);
         return new RunDiffApplicationService(
                 new FakeWorkspaceRepository(),
                 new FakeSessionRepository(session),
                 new FakeRunRepository(),
                 events,
                 new FakeExecutionNodeRepository(),
-                new RunEventAppender(events),
+                appender,
                 runtimeRegistry(facade),
-                new FakeAgentSessionBindingRepository());
+                new FakeAgentSessionBindingRepository(),
+                com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
+                runtimeStore,
+                summaryPersistence);
     }
 
     private static AgentRuntimeRegistry runtimeRegistry(FakeOpencodeFacade facade) {
@@ -240,6 +374,48 @@ class RunDiffApplicationServiceTest {
                 NOW,
                 NOW,
                 "trace_1234567890abcdef");
+    }
+
+    private static RunRuntimeManifest redisSummaryManifest() {
+        return new RunRuntimeManifest(
+                run().runId(),
+                RunStorageMode.REDIS_SUMMARY,
+                new UserId("usr_diff_runtime"),
+                run().sessionId(),
+                run().workspaceId(),
+                "opencode",
+                "request-diff-runtime",
+                "msg_dispatch_diff_runtime",
+                "server-a",
+                "backend-a",
+                node().executionNodeId().value(),
+                "opc_diff_runtime",
+                "ses_remote1234567890abcdef",
+                RunStatus.SUCCEEDED,
+                2L,
+                3L,
+                1L,
+                0L,
+                false,
+                3L,
+                1_024L,
+                null,
+                null,
+                null,
+                NOW.plusSeconds(86_400),
+                NOW,
+                NOW.plusSeconds(10));
+    }
+
+    private static RunDetailsLocator detailsLocator() {
+        return new RunDetailsLocator(
+                run().runId(),
+                RunStorageMode.REDIS_SUMMARY,
+                "ses_remote1234567890abcdef",
+                node().executionNodeId().value(),
+                "msg_remote1234567890abcdef",
+                "prt_remote1234567890abcdef",
+                NOW.plusSeconds(86_400));
     }
 
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {
@@ -311,6 +487,7 @@ class RunDiffApplicationServiceTest {
 
     private static final class FakeRunEventRepository implements RunEventRepository {
         private final List<RunEvent> events = new ArrayList<>();
+        private int readCount;
 
         @Override
         public RunEvent append(RunEventDraft draft) {
@@ -328,6 +505,7 @@ class RunDiffApplicationServiceTest {
 
         @Override
         public List<RunEvent> findByRunIdAfter(RunId runId, long lastSeq, int limit) {
+            readCount++;
             return events.stream()
                     .filter(event -> event.runId().equals(runId))
                     .filter(event -> event.seq() > lastSeq)

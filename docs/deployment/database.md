@@ -102,6 +102,28 @@
 - `ai_model_configs` 只保存模型目录元数据，不保存 token、API key 或 provider secret；企业内调用密钥继续由部署环境变量或配置中心注入。
 - 删除或重命名状态、事件类型、数据库字段必须拆分为读取兼容、数据迁移、清理三个阶段。
 
+## V20260710143000 Run 摘要控制面
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260710143000__add_run_summary_persistence.sql` 将 PostgreSQL 调整为新模式控制面锚点，不承载运行中原始数据：
+
+| 表 | 字段组 | 说明 |
+|---|---|---|
+| `runs` | `storage_mode/status_version/client_request_id` | 创建时固定存储模式、终态 CAS 版本和 Session 内客户端幂等键。`(session_id, client_request_id)` 唯一。 |
+| `runs` | `producer_linux_server_id/execution_node_id_snapshot/opencode_process_id_snapshot` | 生产服务器、执行节点和用户进程路由快照。 |
+| `runs` | `root_remote_session_id/dispatch_message_id/assistant_summary_message_id` | 远端根会话、稳定派发 ID 和前端反馈使用的稳定助手摘要 ID。 |
+| `runs` | `terminal_* / remote_stop_confirmed / last_event_seq / details_expires_at` | 终态来源、安全错误说明、远端停止确认、Redis 最后序号和详情期限。 |
+| `runs` | `diff_*_count/last_remote_message_id/last_remote_part_id` | Analytics Diff 计数和显式低频 Diff 动作定位。 |
+| `session_messages` | `content_kind/summary_key/summary_version/summary_status` | 区分历史 `RAW_LEGACY` 与新模式 `SUMMARY`，摘要键唯一并记录规则版本、完整/截断/fallback 状态。 |
+
+兼容与写入约束：
+
+- 历史 Run 和消息分别默认 `LEGACY_FULL`、`RAW_LEGACY`；迁移不清理、不改写既有原文。
+- 新模式启动只 INSERT 一条不含 prompt/回答/parts/事件的 Run 锚点；已有远端 Session 的正常启动不执行关系型 SELECT。
+- 终态事务最多三条 SQL：按 `status_version` CAS 更新 Run、批量 MERGE USER/ASSISTANT 最多两条摘要、更新 Session 时间。摘要 `parts_json` 必须为 `NULL`。
+- USER 摘要最多 512、ASSISTANT 最多 2000 个 Unicode 字符；完整 prompt、回答、reasoning、工具输入输出、附件正文和原始事件不得写入 PostgreSQL。
+- 接受/拒绝 Diff 是显式低频动作，各允许一条 MyBatis XML UPDATE 更新 `runs.diff_*_count`；不写 `run_events`。终态 CAS 使用单调最大值，避免并发动作计数被旧投影覆盖。
+- Analytics 按 `storage_mode` 双读：legacy 读取旧消息/事件，新模式读取摘要消息和 Run Diff 计数；即使灰度验证残留 shadow 事件也不得双计数。
+
 ## V20260703141000 Run Session Scope
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260703141000__create_run_session_scopes.sql` 为 Run session tree 和断线恢复增加结构化 scope：

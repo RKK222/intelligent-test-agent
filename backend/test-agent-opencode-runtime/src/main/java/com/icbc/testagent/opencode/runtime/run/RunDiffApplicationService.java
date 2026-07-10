@@ -11,15 +11,21 @@ import com.icbc.testagent.agent.runtime.AgentRuntime;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
-import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventRepository;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.run.Run;
+import com.icbc.testagent.domain.run.RunDetailsLocator;
+import com.icbc.testagent.domain.run.RunDiffAction;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeReplay;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
+import com.icbc.testagent.domain.run.RunStorageMode;
+import com.icbc.testagent.domain.run.RunSummaryPersistencePort;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
@@ -52,6 +58,8 @@ public class RunDiffApplicationService {
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentSessionBindingRepository agentSessionBindingRepository;
     private final ManagedWorkspacePathResolver pathResolver;
+    private final RunRuntimeStore runRuntimeStore;
+    private final RunSummaryPersistencePort runSummaryPersistencePort;
 
     /**
      * 创建 Run Diff 应用服务，依赖领域仓储和 agent runtime registry，不直接访问持久化实现。
@@ -66,7 +74,9 @@ public class RunDiffApplicationService {
             RunEventAppender runEventAppender,
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentSessionBindingRepository agentSessionBindingRepository,
-            ManagedWorkspacePathResolver pathResolver) {
+            ManagedWorkspacePathResolver pathResolver,
+            RunRuntimeStore runRuntimeStore,
+            RunSummaryPersistencePort runSummaryPersistencePort) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -76,8 +86,9 @@ public class RunDiffApplicationService {
         this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
         this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+        this.runRuntimeStore = runRuntimeStore;
+        this.runSummaryPersistencePort = runSummaryPersistencePort;
     }
-
     public RunDiffApplicationService(
             WorkspaceRepository workspaceRepository,
             com.icbc.testagent.domain.session.SessionRepository sessionRepository,
@@ -96,7 +107,9 @@ public class RunDiffApplicationService {
                 runEventAppender,
                 agentRuntimeRegistry,
                 agentSessionBindingRepository,
-                ManagedWorkspacePathResolver.legacyOnly());
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                null);
     }
 
     /**
@@ -113,22 +126,33 @@ public class RunDiffApplicationService {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = findRun(runId);
-        List<RunEvent> events = runEvents(run.runId());
+        DiffDetails details = diffDetails(run.runId());
+        return getDiff(resolvedAgentId, runtime, run, details, traceId);
+    }
+
+    private RunDiffResponse getDiff(
+            String resolvedAgentId,
+            AgentRuntime runtime,
+            Run run,
+            DiffDetails details,
+            String traceId) {
+        List<RunEventDraft> events = details.events();
         List<RunDiffFileResponse> eventFiles = latestDiffFiles(events);
         if (!eventFiles.isEmpty()) {
             return new RunDiffResponse(run.runId().value(), eventFiles);
         }
-        Session session = findSession(run);
-        Optional<AgentSessionBinding> binding = findAgentBinding(resolvedAgentId, session, traceId);
-        if (binding.isEmpty()) {
+        Optional<RunDetailsLocator> locator = detailsLocator(details, run.runId());
+        Optional<AgentDiffTarget> target = agentTarget(resolvedAgentId, run, details, locator, traceId);
+        if (target.isEmpty()) {
             return new RunDiffResponse(run.runId().value(), List.of());
         }
         Workspace workspace = findWorkspace(run);
-        ExecutionNode node = findNode(binding.get());
-        String messageId = latestTextPayloadValue(events, "messageID").orElse(null);
+        String messageId = latestTextPayloadValue(events, "messageID")
+                .or(() -> locator.map(RunDetailsLocator::lastRemoteMessageId))
+                .orElse(null);
         AgentDiffResult result = runtime.getDiff(new AgentDiffCommand(
-                        node,
-                        binding.get().remoteSessionId(),
+                        target.orElseThrow().node(),
+                        target.orElseThrow().remoteSessionId(),
                         workspaceRoot(workspace),
                         null,
                         messageId,
@@ -151,8 +175,19 @@ public class RunDiffApplicationService {
      * 接受指定 agent 的当前 Run Diff，只追加平台接受事件。
      */
     public RunDiffActionResponse acceptDiff(String agentId, RunId runId, String traceId) {
-        RunDiffResponse diff = getDiff(agentId, runId, traceId);
-        appendActionEvent(runId, RunEventType.DIFF_ACCEPTED, "accept", "accepted", diff.files().size(), traceId);
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+        Run run = findRun(runId);
+        DiffDetails details = diffDetails(runId);
+        RunDiffResponse diff = getDiff(resolvedAgentId, runtime, run, details, traceId);
+        appendActionEvent(
+                runId,
+                RunEventType.DIFF_ACCEPTED,
+                "accept",
+                "accepted",
+                diff.files().size(),
+                traceId,
+                details.storageMode());
         return new RunDiffActionResponse(runId.value(), "accept", "accepted", diff.files().size());
     }
 
@@ -170,24 +205,31 @@ public class RunDiffApplicationService {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = findRun(runId);
-        List<RunEvent> events = runEvents(run.runId());
+        DiffDetails details = diffDetails(run.runId());
+        List<RunEventDraft> events = details.events();
+        Optional<RunDetailsLocator> locator = detailsLocator(details, runId);
         String messageId = latestTextPayloadValue(events, "messageID")
+                .or(() -> locator.map(RunDetailsLocator::lastRemoteMessageId))
                 .orElseThrow(() -> new PlatformException(
-                        ErrorCode.CONFLICT,
-                        "缺少 agent messageID，无法拒绝 Diff",
+                        details.storageMode() == RunStorageMode.REDIS_SUMMARY
+                                ? ErrorCode.RUN_DETAILS_EXPIRED
+                                : ErrorCode.CONFLICT,
+                        details.storageMode() == RunStorageMode.REDIS_SUMMARY
+                                ? "Run Diff 定位详情已过期"
+                                : "缺少 agent messageID，无法拒绝 Diff",
                         Map.of("runId", runId.value())));
-        String partId = latestTextPayloadValue(events, "partID").orElse(null);
-        Session session = findSession(run);
-        AgentSessionBinding binding = findAgentBinding(resolvedAgentId, session, traceId)
+        String partId = latestTextPayloadValue(events, "partID")
+                .or(() -> locator.map(RunDetailsLocator::lastRemotePartId))
+                .orElse(null);
+        AgentDiffTarget target = agentTarget(resolvedAgentId, run, details, locator, traceId)
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.CONFLICT,
                         "Session 未绑定 agent 会话，无法拒绝 Diff",
-                        Map.of("runId", runId.value(), "sessionId", session.sessionId().value(), "agentId", resolvedAgentId)));
+                        Map.of("runId", runId.value(), "sessionId", run.sessionId().value(), "agentId", resolvedAgentId)));
         Workspace workspace = findWorkspace(run);
-        ExecutionNode node = findNode(binding);
         AgentRejectDiffResult result = runtime.rejectDiff(new AgentRejectDiffCommand(
-                        node,
-                        binding.remoteSessionId(),
+                        target.node(),
+                        target.remoteSessionId(),
                         workspaceRoot(workspace),
                         null,
                         messageId,
@@ -201,7 +243,14 @@ public class RunDiffApplicationService {
                     Map.of("runId", runId.value(), "agentId", resolvedAgentId));
         }
         int fileCount = latestDiffFiles(events).size();
-        appendActionEvent(runId, RunEventType.DIFF_REJECTED, "reject", "rejected", fileCount, traceId);
+        appendActionEvent(
+                runId,
+                RunEventType.DIFF_REJECTED,
+                "reject",
+                "rejected",
+                fileCount,
+                traceId,
+                details.storageMode());
         return new RunDiffActionResponse(runId.value(), "reject", "rejected", fileCount);
     }
 
@@ -253,18 +302,34 @@ public class RunDiffApplicationService {
                                 "nodeId", binding.executionNodeId().value())));
     }
 
+    private ExecutionNode findNode(String executionNodeId) {
+        return executionNodeRepository.findById(new com.icbc.testagent.domain.node.ExecutionNodeId(executionNodeId))
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "Run 绑定的 agent 执行节点不存在",
+                        Map.of("nodeId", executionNodeId)));
+    }
+
     /**
      * 读取最近一段 RunEvent，用于寻找 Diff 和 messageID，避免全量扫描历史事件。
      */
-    private List<RunEvent> runEvents(RunId runId) {
-        return runEventRepository.findByRunIdAfter(runId, 0, EVENT_LOOKBACK_LIMIT);
+    private List<RunEventDraft> runEvents(RunId runId) {
+        return runEventRepository.findByRunIdAfter(runId, 0, EVENT_LOOKBACK_LIMIT).stream()
+                .map(event -> new RunEventDraft(
+                        event.runId(),
+                        event.type(),
+                        event.traceId(),
+                        event.occurredAt(),
+                        event.payload(),
+                        event.scopeContext()))
+                .toList();
     }
 
     /**
      * 从事件列表中倒序寻找最近一次 Diff proposal，并解析为响应文件列表。
      */
-    private List<RunDiffFileResponse> latestDiffFiles(List<RunEvent> events) {
-        List<RunEvent> reversed = new ArrayList<>(events);
+    private List<RunDiffFileResponse> latestDiffFiles(List<RunEventDraft> events) {
+        List<RunEventDraft> reversed = new ArrayList<>(events);
         Collections.reverse(reversed);
         return reversed.stream()
                 .filter(event -> event.type() == RunEventType.DIFF_PROPOSED)
@@ -352,8 +417,8 @@ public class RunDiffApplicationService {
     /**
      * 倒序查找最近的文本 payload 字段，用于定位 opencode messageID/partID。
      */
-    private Optional<String> latestTextPayloadValue(List<RunEvent> events, String key) {
-        List<RunEvent> reversed = new ArrayList<>(events);
+    private Optional<String> latestTextPayloadValue(List<RunEventDraft> events, String key) {
+        List<RunEventDraft> reversed = new ArrayList<>(events);
         Collections.reverse(reversed);
         return reversed.stream()
                 .map(event -> textValue(event.payload().get(key)))
@@ -394,7 +459,8 @@ public class RunDiffApplicationService {
             String action,
             String status,
             int fileCount,
-            String traceId) {
+            String traceId,
+            RunStorageMode storageMode) {
         runEventAppender.append(new RunEventDraft(
                 runId,
                 type,
@@ -403,6 +469,102 @@ public class RunDiffApplicationService {
                 Map.of(
                         "action", action,
                         "status", status,
-                        "fileCount", fileCount)));
+                        "fileCount", fileCount)), storageMode);
+        if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+            RunDiffAction diffAction = type == RunEventType.DIFF_ACCEPTED
+                    ? RunDiffAction.ACCEPTED
+                    : RunDiffAction.REJECTED;
+            if (runSummaryPersistencePort == null
+                    || !runSummaryPersistencePort.recordDiffAction(runId, diffAction)) {
+                throw new PlatformException(
+                        ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                        "Diff 动作已进入运行态但控制面计数更新失败",
+                        Map.of("runId", runId.value(), "action", diffAction.name()));
+            }
+        }
+    }
+
+    /**
+     * 新模式只读取 Redis 物化快照；manifest 缺失但关系库仍有摘要锚点时明确判定为详情过期。
+     */
+    private DiffDetails diffDetails(RunId runId) {
+        if (runRuntimeStore != null) {
+            try {
+                Optional<RunRuntimeManifest> manifest = runRuntimeStore.findManifest(runId);
+                if (manifest.filter(item -> item.storageMode() == RunStorageMode.REDIS_SUMMARY).isPresent()) {
+                    RunRuntimeReplay replay = runRuntimeStore.replayAfter(runId, 0L, 1);
+                    return new DiffDetails(
+                            RunStorageMode.REDIS_SUMMARY,
+                            replay.snapshot().events(),
+                            manifest);
+                }
+            } catch (PlatformException exception) {
+                if (exception.errorCode() != ErrorCode.RUNTIME_STATE_UNAVAILABLE
+                        || runSummaryPersistencePort == null
+                        || runSummaryPersistencePort.findDetailsLocator(runId).isPresent()) {
+                    throw exception;
+                }
+                // Redis 故障不能改变已确认 legacy Run 的数据库事实源；新模式锚点存在时仍 fail-closed。
+                return legacyDetails(runId);
+            }
+        }
+        Optional<RunDetailsLocator> locator = runSummaryPersistencePort == null
+                ? Optional.empty()
+                : runSummaryPersistencePort.findDetailsLocator(runId);
+        if (locator.filter(item -> item.storageMode() == RunStorageMode.REDIS_SUMMARY).isPresent()) {
+            throw new PlatformException(
+                    ErrorCode.RUN_DETAILS_EXPIRED,
+                    "Run 详情已过期",
+                    Map.of("runId", runId.value()));
+        }
+        return legacyDetails(runId);
+    }
+
+    private DiffDetails legacyDetails(RunId runId) {
+        return new DiffDetails(RunStorageMode.LEGACY_FULL, runEvents(runId), Optional.empty());
+    }
+
+    /** Redis snapshot 已足够时不读取 PostgreSQL；仅 fallback 定位远端 message/part 时查一次锚点。 */
+    private Optional<RunDetailsLocator> detailsLocator(DiffDetails details, RunId runId) {
+        if (details.storageMode() != RunStorageMode.REDIS_SUMMARY || runSummaryPersistencePort == null) {
+            return Optional.empty();
+        }
+        return runSummaryPersistencePort.findDetailsLocator(runId);
+    }
+
+    private Optional<AgentDiffTarget> agentTarget(
+            String resolvedAgentId,
+            Run run,
+            DiffDetails details,
+            Optional<RunDetailsLocator> locator,
+            String traceId) {
+        if (details.storageMode() == RunStorageMode.REDIS_SUMMARY) {
+            RunRuntimeManifest manifest = details.manifest().orElseThrow();
+            String remoteSessionId = textValue(manifest.rootRemoteSessionId())
+                    .or(() -> locator.map(RunDetailsLocator::rootRemoteSessionId))
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.RUN_DETAILS_EXPIRED,
+                            "Run 远端 Session 定位详情已过期",
+                            Map.of("runId", run.runId().value())));
+            String executionNodeId = textValue(manifest.executionNodeId())
+                    .or(() -> locator.map(RunDetailsLocator::executionNodeId))
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.RUN_DETAILS_EXPIRED,
+                            "Run 执行节点定位详情已过期",
+                            Map.of("runId", run.runId().value())));
+            return Optional.of(new AgentDiffTarget(findNode(executionNodeId), remoteSessionId));
+        }
+        Session session = findSession(run);
+        return findAgentBinding(resolvedAgentId, session, traceId)
+                .map(binding -> new AgentDiffTarget(findNode(binding), binding.remoteSessionId()));
+    }
+
+    private record DiffDetails(
+            RunStorageMode storageMode,
+            List<RunEventDraft> events,
+            Optional<RunRuntimeManifest> manifest) {
+    }
+
+    private record AgentDiffTarget(ExecutionNode node, String remoteSessionId) {
     }
 }

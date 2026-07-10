@@ -49,7 +49,9 @@ Token 校验流程：
 4. 生产 Redis 必须使用 `noeviction` 和 AOF `everysec`，并对容量、AOF、复制、命令延迟、拒绝连接及 `evicted_keys` 告警。单 Run durable/runtime 事件或 snapshot 投影项超过 20,000，或 input + scope + 双 Stream + snapshot 详情超过 32 MiB 时，只允许应用 Lua 显式删除旧 Stream、规范化过大 payload、优先移除低价值投影、保留当前关键物化状态并生成 `run.snapshot.reset`；禁止依赖 LRU/LFU/随机淘汰、Stream 静默裁剪或跨租户 key 清理。
 5. `run.snapshot.reset` 只允许携带当前 Run 的物化状态和安全元数据，不设置 SSE `id`，不作为鉴权或续传凭据。Redis 新模式 SSE 首帧和容量换代后的 reset 都必须经过同一用户/Run 归属校验；前端只清空当前订阅 Run 的 reducer，再按顺序应用 snapshot；未知/空 snapshot 必须安全兼容，不能借 reset 读取其它 Run 或覆盖当前认证/Workspace 上下文。
 6. Redis 运行态不可用时新模式必须 fail-closed，禁止把完整输入输出、reasoning、工具内容或原始事件降级写入 PostgreSQL/JVM 内存，也禁止切换活动 Run 的 storageMode。legacy/旧 Run 仅按其创建时模式使用既有数据库恢复，不得通过请求参数伪造模式。
-7. 当前生产 Run 创建仍固定使用 `LEGACY_FULL`，Redis summary 开关默认关闭、rollout 为 0；在无原文 Run 锚点和终态摘要链路发布前不得开启生产流量。该边界不影响对 Redis 数据面、SSE reset 和真实 Redis/Lua/Streams 集成测试的验证。
+7. `REDIS_SUMMARY` 只允许携带已校验 `contextToken + clientRequestId` 的新请求按 userId 稳定灰度进入；开关默认关闭、rollout 为 0。活动 Run 不得切换模式，回滚只把后续新 Run 比例调为 0。
+8. 新模式 PostgreSQL 只允许保存无原文 Run 锚点和终态 USER/ASSISTANT 双摘要。摘要生成必须确定性删除 `<context>`、reasoning、工具输入输出、附件正文、data URL、控制字符、私钥、Bearer/JWT/常见云密钥和 secret 赋值；USER/ASSISTANT 分别限制 512/2000 Unicode 字符，失败只写固定 `FALLBACK`，不得把原文当降级内容。
+9. `safe_error_message` 必须经过同一敏感模式清洗并限制长度；任何数据库异常、终态重试或 Redis 故障不得把 prompt、回答、parts、原始事件、Redis value 或第三方响应正文写入 PostgreSQL/日志。稳定 `assistantSummaryMessageId` 只作为平台消息业务 ID，不是鉴权凭据。
 
 ## 限流
 

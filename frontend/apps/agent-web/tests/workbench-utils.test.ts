@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MessagePart, PromptPart, Run, RunDiffFile, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import * as workbenchUtils from "../src/components/workbench-utils";
 import {
+  assistantSummaryMessageId,
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
   OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
@@ -95,6 +96,16 @@ describe("sessionTitleEventMatchesCurrentSession", () => {
     expect(sessionTitleEventMatchesCurrentSession("ses_current", "ses_current")).toBe(true);
     expect(sessionTitleEventMatchesCurrentSession("ses_previous", "ses_current")).toBe(false);
     expect(sessionTitleEventMatchesCurrentSession("ses_current", undefined)).toBe(false);
+  });
+});
+
+describe("assistantSummaryMessageId", () => {
+  it("accepts only the stable platform feedback id carried by run.created", () => {
+    expect(assistantSummaryMessageId({
+      assistantSummaryMessageId: "msg_0123456789abcdef0123456789abcdef"
+    })).toBe("msg_0123456789abcdef0123456789abcdef");
+    expect(assistantSummaryMessageId({ assistantSummaryMessageId: "msg_remote-opencode" })).toBeUndefined();
+    expect(assistantSummaryMessageId({})).toBeUndefined();
   });
 });
 
