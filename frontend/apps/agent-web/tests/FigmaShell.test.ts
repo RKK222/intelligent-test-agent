@@ -59,6 +59,7 @@ describe("FigmaShell", () => {
 
     expect(toggleSvg.attributes("width")).toBe("24");
     expect(toggleSvg.attributes("height")).toBe("28");
+    expect(toggleSvg.attributes("viewBox")).toBe("5 0 14 16");
 
     for (const selector of [
       ".robot-antenna-l",
