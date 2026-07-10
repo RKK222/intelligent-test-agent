@@ -2,6 +2,16 @@ import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import FigmaShell from "../src/components/FigmaShell.vue";
 
+const mountedWrappers: Array<{ unmount: () => void }> = [];
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+
+function mountShell(options?: any) {
+  const wrapper = mount(FigmaShell, options);
+  mountedWrappers.push(wrapper);
+  return wrapper;
+}
+
 function dispatchPointer(element: Element, type: string, pointerId: number, clientX: number, clientY: number, pointerType: string) {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
   Object.defineProperties(event, {
@@ -14,14 +24,17 @@ function dispatchPointer(element: Element, type: string, pointerId: number, clie
 
 describe("FigmaShell", () => {
   afterEach(() => {
+    mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount());
     vi.restoreAllMocks();
+    Object.defineProperty(window, "innerWidth", originalInnerWidth!);
+    Object.defineProperty(window, "innerHeight", originalInnerHeight!);
     window.localStorage.removeItem("figma-shell-robot-pos");
   });
 
   it("restores a saved robot root position as a static idle robot", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 120, y: 180 }));
 
-    const wrapper = mount(FigmaShell);
+    const wrapper = mountShell();
     await wrapper.vm.$nextTick();
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
@@ -34,7 +47,7 @@ describe("FigmaShell", () => {
 
   it("persists a pointer drag after crossing the movement threshold", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
-    const wrapper = mount(FigmaShell);
+    const wrapper = mountShell();
     await wrapper.vm.$nextTick();
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
@@ -58,7 +71,7 @@ describe("FigmaShell", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 240 });
 
-    const wrapper = mount(FigmaShell);
+    const wrapper = mountShell();
     await window.dispatchEvent(new Event("resize"));
     await wrapper.vm.$nextTick();
 
@@ -71,23 +84,22 @@ describe("FigmaShell", () => {
   it("ignores malformed robot positions and storage access failures", async () => {
     for (const invalidPosition of ["not-json", JSON.stringify({ x: "120", y: 180 }), JSON.stringify({ x: 120 })]) {
       window.localStorage.setItem("figma-shell-robot-pos", invalidPosition);
-      const wrapper = mount(FigmaShell);
+      const wrapper = mountShell();
       await wrapper.vm.$nextTick();
       expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
-      wrapper.unmount();
     }
 
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });
-    expect(() => mount(FigmaShell)).not.toThrow();
+    expect(() => mountShell()).not.toThrow();
     vi.restoreAllMocks();
 
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });
-    const wrapper = mount(FigmaShell);
+    const wrapper = mountShell();
     await wrapper.vm.$nextTick();
     const robot = wrapper.get('[data-testid="figma-robot"]');
     expect(() => {
@@ -103,7 +115,7 @@ describe("FigmaShell", () => {
 
   it("persists a pen Pointer drag", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
-    const wrapper = mount(FigmaShell);
+    const wrapper = mountShell();
     await wrapper.vm.$nextTick();
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
@@ -115,8 +127,48 @@ describe("FigmaShell", () => {
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 125, y: 135 }));
   });
 
+  it("moves the pet with arrow keys and persists the clamped position", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    expect(robot.attributes("tabindex")).toBe("0");
+    expect(robot.attributes("aria-label")).toContain("方向键移动");
+    await robot.trigger("keydown", { key: "ArrowRight" });
+    await robot.trigger("keydown", { key: "ArrowDown" });
+
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 108, y: 108 }));
+  });
+
+  it("cleans up an interrupted drag after lost pointer capture and window blur", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    dispatchPointer(robot.element, "pointerdown", 11, 100, 100, "mouse");
+    dispatchPointer(robot.element, "pointermove", 11, 140, 130, "mouse");
+    dispatchPointer(robot.element, "lostpointercapture", 11, 140, 130, "mouse");
+    await wrapper.vm.$nextTick();
+
+    expect(document.body.style.cursor).toBe("");
+    expect(document.body.style.userSelect).toBe("");
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 140, y: 130 }));
+
+    dispatchPointer(robot.element, "pointerdown", 12, 140, 130, "touch");
+    dispatchPointer(robot.element, "pointermove", 12, 160, 160, "touch");
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("blur"));
+    await wrapper.vm.$nextTick();
+
+    expect(document.body.style.cursor).toBe("");
+    expect(document.body.style.userSelect).toBe("");
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 160, y: 160 }));
+  });
+
   it("shows runtime inventory before the application switch and opens details", async () => {
-    const wrapper = mount(FigmaShell, {
+    const wrapper = mountShell({
       props: {
         currentUserName: "developer",
         apps: [{ id: "app_coss", name: "F-COSS", description: "已启用" }],
@@ -160,7 +212,7 @@ describe("FigmaShell", () => {
   });
 
   it("shows process status with server name and resolved address", async () => {
-    const wrapper = mount(FigmaShell, {
+    const wrapper = mountShell({
       props: {
         currentUserName: "888888888",
         opencodeProcessStatus: {
@@ -183,7 +235,7 @@ describe("FigmaShell", () => {
   });
 
   it("shows server name without inventing an address when service address is missing", async () => {
-    const wrapper = mount(FigmaShell, {
+    const wrapper = mountShell({
       props: {
         currentUserName: "888888888",
         opencodeProcessStatus: {
@@ -206,7 +258,7 @@ describe("FigmaShell", () => {
   });
 
   it("shows unknown instead of unassigned when process status query has no data", async () => {
-    const wrapper = mount(FigmaShell, {
+    const wrapper = mountShell({
       props: {
         currentUserName: "888888888",
         opencodeProcessStatus: null,
@@ -221,7 +273,7 @@ describe("FigmaShell", () => {
   });
 
   it("can open join app overlay and emit join-app event", async () => {
-    const wrapper = mount(FigmaShell, {
+    const wrapper = mountShell({
       props: {
         currentUserName: "developer",
         apps: [

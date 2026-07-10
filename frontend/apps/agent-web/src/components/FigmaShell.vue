@@ -322,6 +322,7 @@ const ROBOT_WIDTH = 24;
 const ROBOT_HEIGHT = 32;
 const ROBOT_VIEWPORT_MARGIN = 8;
 const ROBOT_DRAG_THRESHOLD = 4;
+const ROBOT_KEYBOARD_STEP = 8;
 const ROBOT_POSITION_STORAGE_KEY = "figma-shell-robot-pos";
 
 let robotDragPointerId: number | null = null;
@@ -381,14 +382,18 @@ function pauseRobotForManualPlacement() {
 }
 
 function cleanupRobotDrag() {
-  if (robotDragTarget && robotDragPointerId !== null && robotDragTarget.hasPointerCapture?.(robotDragPointerId)) {
-    robotDragTarget.releasePointerCapture?.(robotDragPointerId);
-  }
+  const target = robotDragTarget;
+  const pointerId = robotDragPointerId;
+  if (!robotDragging.value && !target && pointerId === null) return;
+
   robotDragging.value = false;
   robotDragPointerId = null;
   robotDragTarget = null;
   document.body.style.cursor = robotDragPreviousCursor;
   document.body.style.userSelect = robotDragPreviousUserSelect;
+  if (target && pointerId !== null && target.hasPointerCapture?.(pointerId)) {
+    target.releasePointerCapture?.(pointerId);
+  }
 }
 
 function onRobotPointerDown(event: PointerEvent) {
@@ -424,8 +429,8 @@ function onRobotPointerMove(event: PointerEvent) {
   robotY.value = position.y;
 }
 
-function finishRobotPointerDrag(event: PointerEvent) {
-  if (event.pointerId !== robotDragPointerId) return;
+function finishRobotDrag(pointerId?: number) {
+  if (robotDragPointerId === null || (pointerId !== undefined && pointerId !== robotDragPointerId)) return;
   if (robotDragWasEffective) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
     robotX.value = position.x;
@@ -433,6 +438,33 @@ function finishRobotPointerDrag(event: PointerEvent) {
     saveRobotPosition();
   }
   cleanupRobotDrag();
+}
+
+function finishRobotPointerDrag(event: PointerEvent) {
+  finishRobotDrag(event.pointerId);
+}
+
+function onRobotLostPointerCapture(event: PointerEvent) {
+  finishRobotDrag(event.pointerId);
+}
+
+function onRobotKeydown(event: KeyboardEvent) {
+  const movements: Record<string, RobotPosition> = {
+    ArrowUp: { x: 0, y: -ROBOT_KEYBOARD_STEP },
+    ArrowDown: { x: 0, y: ROBOT_KEYBOARD_STEP },
+    ArrowLeft: { x: -ROBOT_KEYBOARD_STEP, y: 0 },
+    ArrowRight: { x: ROBOT_KEYBOARD_STEP, y: 0 }
+  };
+  const movement = movements[event.key];
+  if (!movement) return;
+
+  // 键盘移动与拖动走同一手动定位路径，确保位置不会被随机行为重新覆盖。
+  event.preventDefault();
+  pauseRobotForManualPlacement();
+  const position = clampRobotPosition({ x: robotX.value + movement.x, y: robotY.value + movement.y });
+  robotX.value = position.x;
+  robotY.value = position.y;
+  saveRobotPosition();
 }
 
 // Safe X ranges logic
@@ -975,6 +1007,7 @@ const robotStyle = computed(() => ({
 }));
 
 function handleFocusChange() {
+  finishRobotDrag();
   resetInactivityTimer();
 }
 
@@ -1373,12 +1406,19 @@ function submitJoinApp() {
       :class="{ 'is-dragging': robotDragging, 'is-manually-positioned': robotManuallyPositioned }"
       :style="robotStyle"
       data-testid="figma-robot"
-      aria-label="可拖动的 MIMO 小宠物"
+      role="group"
+      tabindex="0"
+      aria-label="可拖动的 MIMO 小宠物，可使用方向键移动"
+      aria-describedby="figma-robot-instructions"
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       @pointerdown="onRobotPointerDown"
       @pointermove="onRobotPointerMove"
       @pointerup="finishRobotPointerDrag"
       @pointercancel="finishRobotPointerDrag"
+      @lostpointercapture="onRobotLostPointerCapture"
+      @keydown="onRobotKeydown"
     >
+      <span id="figma-robot-instructions" class="figma-robot-instructions">可拖动小宠物；也可使用方向键每次移动 8 像素。</span>
       <div class="robot-dir-wrap" :class="[`facing-${robotDirection}`]">
         <div class="robot-squash-wrap" :class="[`state-${robotState}`]">
           <svg viewBox="0 0 24 32" class="robot-svg" width="24" height="32">
@@ -2457,6 +2497,18 @@ function submitJoinApp() {
 
 .figma-robot-agent.is-manually-positioned .robot-squash-wrap.state-idle {
   animation: none;
+}
+
+.figma-robot-instructions {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .robot-dir-wrap {
