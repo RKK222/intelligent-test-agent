@@ -107,6 +107,7 @@ import {
   runtimeResources,
   runtimeStatus,
   sessionTitleFromFirstMessage,
+  sessionTitleFromUpdatedEventPayload,
   shouldFailExhaustedRetry,
   syntheticEvent,
   text,
@@ -3108,7 +3109,19 @@ function handleRunEvent(event: RunEvent) {
   logs.value = [...logs.value.slice(-200), `[${event.seq}] ${event.type}`];
   dispatchChat({ type: "event", event });
   notifyOnAttention(event, selectedWorkspace.value, session.value);
-  if (event.type === "assistant.message.delta") {
+  if (event.type === "session.updated") {
+    const title = sessionTitleFromUpdatedEventPayload(event.payload);
+    // 前端没有暴露远端 root session id；RunEvent 订阅已限定当前活动 Run，
+    // 因此仅接受后端标记为非子会话的有效标题，并同步当前平台会话与已加载的历史项。
+    if (title && event.payload.isChildSession !== true && session.value) {
+      const currentSessionId = session.value.sessionId;
+      session.value = { ...session.value, title };
+      sessionHistoryItems.value = sessionHistoryItems.value.map((item) =>
+        item.sessionId === currentSessionId ? { ...item, title } : item
+      );
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    }
+  } else if (event.type === "assistant.message.delta") {
     return;
   } else if (event.type === "diff.proposed") {
     // opencode session.diff 与后端自生成的 diff.proposed 都映射为该事件类型。

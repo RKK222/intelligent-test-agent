@@ -130,6 +130,29 @@ describe("event-stream-client", () => {
     expect(received).toEqual(["message.part.delta"]);
   });
 
+  it("subscribes to session.updated named SSE events", () => {
+    const source = new FakeEventSource();
+    const received: string[] = [];
+
+    subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_1",
+      eventSourceFactory: () => source,
+      onEvent: (event) => received.push(event.type)
+    });
+
+    source.emit("session.updated", {
+      eventId: "evt_session_title",
+      runId: "run_1",
+      seq: 6,
+      type: "session.updated",
+      payload: { info: { title: "自动标题" } }
+    });
+
+    expect(source.listeners.get("session.updated")).toHaveLength(1);
+    expect(received).toEqual(["session.updated"]);
+  });
+
   it("ignores queued messages after close and events from other runs", () => {
     const source = new FakeEventSource();
     const received: string[] = [];

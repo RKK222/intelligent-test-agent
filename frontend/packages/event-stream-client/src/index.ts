@@ -63,6 +63,7 @@ export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
   "message.part.updated",
   "message.part.removed",
   "message.part.delta",
+  "session.updated",
   "session.diff",
   "session.status",
   "todo.updated",

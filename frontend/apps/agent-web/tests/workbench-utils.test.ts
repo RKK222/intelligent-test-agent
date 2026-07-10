@@ -26,6 +26,7 @@ import {
   resolveRetryDeadline,
   retryCountdownSeconds,
   retryExpirationDecision,
+  sessionTitleFromUpdatedEventPayload,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
   workspaceLoadIsCurrent
@@ -1200,6 +1201,25 @@ describe("historical session restoration", () => {
     const longTitle = "a".repeat(80);
 
     expect(sessionTitleFromFirstMessage(longTitle)).toBe(`${"a".repeat(69)}...`);
+  });
+});
+
+describe("sessionTitleFromUpdatedEventPayload", () => {
+  it("reads and trims the standard session.updated info title", () => {
+    expect(sessionTitleFromUpdatedEventPayload({ info: { title: "  自动生成的标题  " } })).toBe("自动生成的标题");
+  });
+
+  it("falls back to the raw OpenCode payload title", () => {
+    expect(
+      sessionTitleFromUpdatedEventPayload({
+        rawPayload: { properties: { info: { title: "  原始报文标题  " } } }
+      })
+    ).toBe("原始报文标题");
+  });
+
+  it("returns an empty title for blank or missing payload fields", () => {
+    expect(sessionTitleFromUpdatedEventPayload({ info: { title: " \n " } })).toBe("");
+    expect(sessionTitleFromUpdatedEventPayload({ rawPayload: { properties: { info: {} } } })).toBe("");
   });
 });
 

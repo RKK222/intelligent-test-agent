@@ -1203,6 +1203,23 @@ export function sessionTitleFromFirstMessage(message: string): string {
   return line.length > 72 ? `${line.slice(0, 69)}...` : line;
 }
 
+/**
+ * OpenCode 标题事件既可能是平台归一化后的 info，也可能保留在原始报文包装内；
+ * 只接受去除空白后仍有内容的标题，避免空事件覆盖当前会话名称。
+ */
+export function sessionTitleFromUpdatedEventPayload(payload: Record<string, unknown>): string {
+  const info = record(payload.info);
+  const rawProperties = record(record(payload.rawPayload)?.properties);
+  const rawInfo = record(rawProperties?.info);
+  const candidates = [info?.title, rawInfo?.title];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
 export function modelValue(model: ModelInfo) {
   return model.providerId ? `${model.providerId}/${model.id}` : model.id;
 }
