@@ -315,9 +315,125 @@ let behaviorTimer: ReturnType<typeof setTimeout> | null = null;
 let movementTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const robotCurrentLevel = ref<"top" | "bottom">("top");
+const robotManuallyPositioned = ref(false);
+const robotDragging = ref(false);
+
+const ROBOT_WIDTH = 24;
+const ROBOT_HEIGHT = 32;
+const ROBOT_VIEWPORT_MARGIN = 8;
+const ROBOT_DRAG_THRESHOLD = 4;
+const ROBOT_POSITION_STORAGE_KEY = "figma-shell-robot-pos";
+
+let robotDragPointerId: number | null = null;
+let robotDragStartClientX = 0;
+let robotDragStartClientY = 0;
+let robotDragStartX = 0;
+let robotDragStartY = 0;
+let robotDragWasEffective = false;
+let robotDragTarget: HTMLElement | null = null;
+let robotDragPreviousCursor = "";
+let robotDragPreviousUserSelect = "";
 
 // Throttled activity timer
 let lastActivityTime = 0;
+
+type RobotPosition = { x: number; y: number };
+
+// 坐标统一表示机器人根元素左上角相对 viewport 的位置，避免存储、渲染和拖动出现 32px 偏移。
+function clampRobotPosition(position: RobotPosition): RobotPosition {
+  const maxX = Math.max(ROBOT_VIEWPORT_MARGIN, window.innerWidth - ROBOT_WIDTH - ROBOT_VIEWPORT_MARGIN);
+  const maxY = Math.max(ROBOT_VIEWPORT_MARGIN, window.innerHeight - ROBOT_HEIGHT - ROBOT_VIEWPORT_MARGIN);
+  return {
+    x: Math.min(maxX, Math.max(ROBOT_VIEWPORT_MARGIN, position.x)),
+    y: Math.min(maxY, Math.max(ROBOT_VIEWPORT_MARGIN, position.y))
+  };
+}
+
+function loadSavedRobotPosition(): RobotPosition | null {
+  try {
+    const raw = window.localStorage.getItem(ROBOT_POSITION_STORAGE_KEY);
+    if (!raw) return null;
+    const position = JSON.parse(raw) as Partial<RobotPosition>;
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return null;
+    return clampRobotPosition({ x: position.x!, y: position.y! });
+  } catch {
+    return null;
+  }
+}
+
+function saveRobotPosition() {
+  try {
+    window.localStorage.setItem(ROBOT_POSITION_STORAGE_KEY, JSON.stringify({ x: robotX.value, y: robotY.value }));
+  } catch {
+    // 隐私模式或存储配额异常时保留当前内存位置，不影响机器人交互。
+  }
+}
+
+function pauseRobotForManualPlacement() {
+  // 用户手动安放后必须停止计时器，否则随机动作或离场会覆盖用户选择的位置。
+  clearAllRobotTimers();
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = null;
+  robotManuallyPositioned.value = true;
+  robotState.value = "idle";
+  robotDirection.value = "front";
+  robotTransition.value = "none";
+}
+
+function cleanupRobotDrag() {
+  if (robotDragTarget && robotDragPointerId !== null && robotDragTarget.hasPointerCapture?.(robotDragPointerId)) {
+    robotDragTarget.releasePointerCapture?.(robotDragPointerId);
+  }
+  robotDragging.value = false;
+  robotDragPointerId = null;
+  robotDragTarget = null;
+  document.body.style.cursor = robotDragPreviousCursor;
+  document.body.style.userSelect = robotDragPreviousUserSelect;
+}
+
+function onRobotPointerDown(event: PointerEvent) {
+  if (event.isPrimary === false || robotDragPointerId !== null) return;
+  robotDragPointerId = event.pointerId;
+  robotDragStartClientX = event.clientX;
+  robotDragStartClientY = event.clientY;
+  robotDragStartX = robotX.value;
+  robotDragStartY = robotY.value;
+  robotDragWasEffective = false;
+  robotDragTarget = event.currentTarget as HTMLElement;
+  robotDragTarget.setPointerCapture?.(event.pointerId);
+  robotDragging.value = true;
+  robotDragPreviousCursor = document.body.style.cursor;
+  robotDragPreviousUserSelect = document.body.style.userSelect;
+  document.body.style.cursor = "grabbing";
+  document.body.style.userSelect = "none";
+}
+
+function onRobotPointerMove(event: PointerEvent) {
+  if (event.pointerId !== robotDragPointerId) return;
+  const deltaX = event.clientX - robotDragStartClientX;
+  const deltaY = event.clientY - robotDragStartClientY;
+  if (!robotDragWasEffective && Math.hypot(deltaX, deltaY) < ROBOT_DRAG_THRESHOLD) return;
+
+  if (!robotDragWasEffective) {
+    robotDragWasEffective = true;
+    pauseRobotForManualPlacement();
+  }
+  event.preventDefault();
+  const position = clampRobotPosition({ x: robotDragStartX + deltaX, y: robotDragStartY + deltaY });
+  robotX.value = position.x;
+  robotY.value = position.y;
+}
+
+function finishRobotPointerDrag(event: PointerEvent) {
+  if (event.pointerId !== robotDragPointerId) return;
+  if (robotDragWasEffective) {
+    const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
+    robotX.value = position.x;
+    robotY.value = position.y;
+    saveRobotPosition();
+  }
+  cleanupRobotDrag();
+}
 
 // Safe X ranges logic
 function getSafeXRange(level: "top" | "bottom") {
@@ -346,15 +462,15 @@ function getBirthPosition() {
     const rect = el.getBoundingClientRect();
     return {
       x: rect.left + rect.width / 2,
-      y: rect.bottom
+      y: rect.bottom - ROBOT_HEIGHT
     };
   }
-  return { x: 100, y: 36 };
+  return { x: 100, y: 36 - ROBOT_HEIGHT };
 }
 
 // Exit logic (interrupted or naturally)
 function triggerExit() {
-  if (robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
+  if (robotManuallyPositioned.value || robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
     return;
   }
 
@@ -409,6 +525,7 @@ function clearAllRobotTimers() {
 
 // Reset activity and 1-minute inactivity timer
 function resetInactivityTimer() {
+  if (robotManuallyPositioned.value) return;
   if (robotState.value !== "sleeping") {
     // Already active, check if we need to exit
     if (robotState.value !== "waving" && robotState.value !== "exiting-charge" && robotState.value !== "exiting-fly") {
@@ -429,7 +546,7 @@ function resetInactivityTimer() {
 
 // Spawn logic
 function spawnRobot() {
-  if (robotState.value !== "sleeping") return;
+  if (robotManuallyPositioned.value || robotState.value !== "sleeping") return;
   if (document.hidden || !document.hasFocus()) {
     resetInactivityTimer();
     return;
@@ -447,7 +564,7 @@ function spawnRobot() {
 
   const [minX, maxX] = getSafeXRange("top");
   const targetX = minX + Math.random() * (maxX - minX);
-  const targetY = 36; // navbar bottom floor
+  const targetY = 36 - ROBOT_HEIGHT; // navbar bottom floor
 
   robotDirection.value = targetX > birth.x ? "right" : "left";
 
@@ -498,6 +615,7 @@ function spawnRobot() {
 
 // Action selection
 function scheduleNextAction() {
+  if (robotManuallyPositioned.value) return;
   if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
 
   if (behaviorTimer) clearTimeout(behaviorTimer);
@@ -748,7 +866,7 @@ function executeBigJump() {
   const startX = robotX.value;
   const startY = robotY.value;
   const targetLevel = robotCurrentLevel.value === "top" ? "bottom" : "top";
-  const targetY = targetLevel === "top" ? 36 : window.innerHeight - 4;
+  const targetY = targetLevel === "top" ? 36 - ROBOT_HEIGHT : window.innerHeight - ROBOT_HEIGHT - 4;
   const [minX, maxX] = getSafeXRange(targetLevel);
   const targetX = minX + Math.random() * (maxX - minX);
 
@@ -820,6 +938,7 @@ function executeBigJump() {
 
 // User activity listener
 function handleUserActivity() {
+  if (robotManuallyPositioned.value) return;
   const now = Date.now();
   if (now - lastActivityTime < 100) return;
   lastActivityTime = now;
@@ -827,23 +946,30 @@ function handleUserActivity() {
 }
 
 function handleWindowResize() {
+  if (robotManuallyPositioned.value) {
+    const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
+    robotX.value = position.x;
+    robotY.value = position.y;
+    saveRobotPosition();
+    return;
+  }
   if (robotState.value === "sleeping") return;
   const [minX, maxX] = getSafeXRange(robotCurrentLevel.value);
   if (robotX.value > maxX) robotX.value = maxX;
   if (robotX.value < minX) robotX.value = minX;
   if (robotCurrentLevel.value === "bottom") {
-    robotY.value = window.innerHeight - 4;
+    robotY.value = window.innerHeight - ROBOT_HEIGHT - 4;
   }
 }
 
 const robotStyle = computed(() => ({
   position: "fixed" as const,
   left: `${robotX.value}px`,
-  top: `${robotY.value - 32}px`, // Offset by character height (32px)
-  width: "24px",
-  height: "32px",
+  top: `${robotY.value}px`,
+  width: `${ROBOT_WIDTH}px`,
+  height: `${ROBOT_HEIGHT}px`,
   zIndex: 9999,
-  pointerEvents: "none" as const,
+  pointerEvents: "auto" as const,
   transition: robotTransition.value,
   opacity: 0.85
 }));
@@ -866,7 +992,17 @@ onMounted(() => {
   window.addEventListener("blur", handleFocusChange);
   document.addEventListener("visibilitychange", handleFocusChange);
 
-  resetInactivityTimer();
+  const savedPosition = loadSavedRobotPosition();
+  if (savedPosition) {
+    robotX.value = savedPosition.x;
+    robotY.value = savedPosition.y;
+    robotManuallyPositioned.value = true;
+    robotState.value = "idle";
+    robotDirection.value = "front";
+    robotTransition.value = "none";
+  } else {
+    resetInactivityTimer();
+  }
 });
 
 onUnmounted(() => {
@@ -882,6 +1018,8 @@ onUnmounted(() => {
 
   clearAllRobotTimers();
   if (inactivityTimer) clearTimeout(inactivityTimer);
+  // 组件销毁也必须恢复文档样式与 pointer capture，避免拖动中路由切换留下不可选中文本。
+  cleanupRobotDrag();
 });
 
 // --- Join Applications Logic ---
@@ -1232,37 +1370,44 @@ function submitJoinApp() {
     <div
       v-if="robotState !== 'sleeping'"
       class="figma-robot-agent"
+      :class="{ 'is-dragging': robotDragging, 'is-manually-positioned': robotManuallyPositioned }"
       :style="robotStyle"
+      data-testid="figma-robot"
+      aria-label="可拖动的 MIMO 小宠物"
+      @pointerdown="onRobotPointerDown"
+      @pointermove="onRobotPointerMove"
+      @pointerup="finishRobotPointerDrag"
+      @pointercancel="finishRobotPointerDrag"
     >
       <div class="robot-dir-wrap" :class="[`facing-${robotDirection}`]">
         <div class="robot-squash-wrap" :class="[`state-${robotState}`]">
           <svg viewBox="0 0 24 32" class="robot-svg" width="24" height="32">
             <!-- Antennas -->
-            <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#1F2937" stroke-width="1.2" stroke-linecap="round" />
-            <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#1F2937" />
+            <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
+            <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#7c6bb5" />
 
-            <path class="robot-antenna-r" d="M16,4 L18,2" stroke="#1F2937" stroke-width="1.2" stroke-linecap="round" />
-            <circle class="robot-antenna-r-tip" cx="18" cy="1.5" r="0.8" fill="#1F2937" />
+            <path class="robot-antenna-r" d="M16,4 L18,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
+            <circle class="robot-antenna-r-tip" cx="18" cy="1.5" r="0.8" fill="#5aa9a6" />
 
             <!-- Head -->
-            <rect class="robot-head" x="6" y="4" width="12" height="10" rx="2.5" fill="#1F2937" />
+            <rect class="robot-head" x="6" y="4" width="12" height="10" rx="2.5" fill="#27384b" />
             <!-- Facial sensor (glowing/breath) -->
-            <circle class="robot-eye" cx="12" cy="9" r="1.2" fill="#FFFFFF" />
+            <circle class="robot-eye" cx="12" cy="9" r="1.2" fill="#7cd5d0" />
 
             <!-- Body -->
-            <rect class="robot-body" x="5" y="15.5" width="14" height="10" rx="4" fill="#1F2937" />
+            <rect class="robot-body" x="5" y="15.5" width="14" height="10" rx="4" fill="#354d66" />
 
             <!-- Left Arm -->
-            <rect class="robot-arm-l" x="2.5" y="16" width="2" height="6.5" rx="1" fill="#1F2937" />
+            <rect class="robot-arm-l" x="2.5" y="16" width="2" height="6.5" rx="1" fill="#42617a" />
 
             <!-- Right Arm -->
-            <rect class="robot-arm-r" x="19.5" y="16" width="2" height="6.5" rx="1" fill="#1F2937" />
+            <rect class="robot-arm-r" x="19.5" y="16" width="2" height="6.5" rx="1" fill="#42617a" />
 
             <!-- Left Leg -->
-            <rect class="robot-leg-l" x="9" y="26.5" width="2.5" height="5" rx="1.25" fill="#1F2937" />
+            <rect class="robot-leg-l" x="9" y="26.5" width="2.5" height="5" rx="1.25" fill="#42617a" />
 
             <!-- Right Leg -->
-            <rect class="robot-leg-r" x="12.5" y="26.5" width="2.5" height="5" rx="1.25" fill="#1F2937" />
+            <rect class="robot-leg-r" x="12.5" y="26.5" width="2.5" height="5" rx="1.25" fill="#42617a" />
           </svg>
         </div>
       </div>
@@ -2298,10 +2443,20 @@ function submitJoinApp() {
 
 /* ---- MIMO Test Agent Idle Egg Character ---- */
 .figma-robot-agent {
-  pointer-events: none;
+  pointer-events: auto;
   user-select: none;
+  touch-action: none;
+  cursor: grab;
   transform: translate3d(0, 0, 0);
   opacity: 0.85;
+}
+
+.figma-robot-agent.is-dragging {
+  cursor: grabbing;
+}
+
+.figma-robot-agent.is-manually-positioned .robot-squash-wrap.state-idle {
+  animation: none;
 }
 
 .robot-dir-wrap {

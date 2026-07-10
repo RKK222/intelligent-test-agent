@@ -1,8 +1,120 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import FigmaShell from "../src/components/FigmaShell.vue";
 
+function dispatchPointer(element: Element, type: string, pointerId: number, clientX: number, clientY: number, pointerType: string) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    pointerType: { value: pointerType },
+    isPrimary: { value: true }
+  });
+  element.dispatchEvent(event);
+}
+
 describe("FigmaShell", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.removeItem("figma-shell-robot-pos");
+  });
+
+  it("restores a saved robot root position as a static idle robot", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 120, y: 180 }));
+
+    const wrapper = mount(FigmaShell);
+    await wrapper.vm.$nextTick();
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    expect(robot.attributes("style")).toContain("left: 120px");
+    expect(robot.attributes("style")).toContain("top: 180px");
+    expect(robot.classes()).toContain("figma-robot-agent");
+    expect(robot.classes()).toContain("is-manually-positioned");
+    expect(robot.find(".state-idle").exists()).toBe(true);
+  });
+
+  it("persists a pointer drag after crossing the movement threshold", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mount(FigmaShell);
+    await wrapper.vm.$nextTick();
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    dispatchPointer(robot.element, "pointerdown", 7, 110, 110, "mouse");
+    dispatchPointer(robot.element, "pointermove", 7, 112, 112, "mouse");
+    dispatchPointer(robot.element, "pointerup", 7, 112, 112, "mouse");
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 100, y: 100 }));
+
+    dispatchPointer(robot.element, "pointerdown", 8, 110, 110, "touch");
+    dispatchPointer(robot.element, "pointermove", 8, 170, 160, "touch");
+    dispatchPointer(robot.element, "pointerup", 8, 170, 160, "touch");
+    await wrapper.vm.$nextTick();
+
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 160, y: 150 }));
+    expect(robot.attributes("style")).toContain("left: 160px");
+    expect(robot.attributes("style")).toContain("top: 150px");
+  });
+
+  it("clamps and persists a manually positioned robot when the viewport shrinks", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 900, y: 700 }));
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 240 });
+
+    const wrapper = mount(FigmaShell);
+    await window.dispatchEvent(new Event("resize"));
+    await wrapper.vm.$nextTick();
+
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+    expect(robot.attributes("style")).toContain("left: 288px");
+    expect(robot.attributes("style")).toContain("top: 200px");
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 288, y: 200 }));
+  });
+
+  it("ignores malformed robot positions and storage access failures", async () => {
+    for (const invalidPosition of ["not-json", JSON.stringify({ x: "120", y: 180 }), JSON.stringify({ x: 120 })]) {
+      window.localStorage.setItem("figma-shell-robot-pos", invalidPosition);
+      const wrapper = mount(FigmaShell);
+      await wrapper.vm.$nextTick();
+      expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+      wrapper.unmount();
+    }
+
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    expect(() => mount(FigmaShell)).not.toThrow();
+    vi.restoreAllMocks();
+
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    const wrapper = mount(FigmaShell);
+    await wrapper.vm.$nextTick();
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+    expect(() => {
+      dispatchPointer(robot.element, "pointerdown", 9, 100, 100, "mouse");
+      dispatchPointer(robot.element, "pointermove", 9, 140, 140, "mouse");
+      dispatchPointer(robot.element, "pointerup", 9, 140, 140, "mouse");
+    }).not.toThrow();
+    await wrapper.vm.$nextTick();
+    expect(setItem).toHaveBeenCalled();
+    expect(robot.attributes("style")).toContain("left: 140px");
+    expect(robot.attributes("style")).toContain("top: 140px");
+  });
+
+  it("persists a pen Pointer drag", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mount(FigmaShell);
+    await wrapper.vm.$nextTick();
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    dispatchPointer(robot.element, "pointerdown", 10, 100, 100, "pen");
+    dispatchPointer(robot.element, "pointermove", 10, 125, 135, "pen");
+    dispatchPointer(robot.element, "pointerup", 10, 125, 135, "pen");
+    await wrapper.vm.$nextTick();
+
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 125, y: 135 }));
+  });
+
   it("shows runtime inventory before the application switch and opens details", async () => {
     const wrapper = mount(FigmaShell, {
       props: {
