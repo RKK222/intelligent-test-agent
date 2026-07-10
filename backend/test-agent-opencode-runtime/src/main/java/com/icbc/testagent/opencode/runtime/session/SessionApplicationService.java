@@ -16,6 +16,8 @@ import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
 import com.icbc.testagent.domain.session.ConversationSourceType;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextSessionRevocation;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -41,9 +43,28 @@ public class SessionApplicationService {
     private final SessionHistoryRepository sessionHistoryRepository;
     private final SessionMessageRepository sessionMessageRepository;
     private final RunSessionMessageSnapshotService snapshotService;
+    private final ConversationContextStore conversationContextStore;
 
     /**
      * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
+     */
+    public SessionApplicationService(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            SessionHistoryRepository sessionHistoryRepository,
+            SessionMessageRepository sessionMessageRepository,
+            RunSessionMessageSnapshotService snapshotService) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                sessionHistoryRepository,
+                sessionMessageRepository,
+                snapshotService,
+                null);
+    }
+
+    /**
+     * 生产构造器注入会话上下文存储，使归档与 Redis token 失效处于同一业务入口。
      */
     @Autowired
     public SessionApplicationService(
@@ -51,12 +72,14 @@ public class SessionApplicationService {
             SessionRepository sessionRepository,
             SessionHistoryRepository sessionHistoryRepository,
             SessionMessageRepository sessionMessageRepository,
-            RunSessionMessageSnapshotService snapshotService) {
+            RunSessionMessageSnapshotService snapshotService,
+            ConversationContextStore conversationContextStore) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.sessionHistoryRepository = Objects.requireNonNull(sessionHistoryRepository, "sessionHistoryRepository must not be null");
         this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
         this.snapshotService = snapshotService;
+        this.conversationContextStore = conversationContextStore;
     }
 
     /**
@@ -72,6 +95,7 @@ public class SessionApplicationService {
         this.sessionHistoryRepository = null;
         this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
         this.snapshotService = snapshotService;
+        this.conversationContextStore = null;
     }
 
     /**
@@ -169,10 +193,32 @@ public class SessionApplicationService {
      * 归档 Session；归档后查询接口会按不存在处理。
      */
     public Session archiveSession(SessionId sessionId, String traceId) {
+        return archiveSession(null, sessionId, traceId);
+    }
+
+    /**
+     * 归档 Session，并在持久化前建立会话撤销 gate，阻止并发 bootstrap 把旧快照迟到写回。
+     */
+    public Session archiveSession(UserId userId, SessionId sessionId, String traceId) {
         Session current = getSession(sessionId);
-        Session archived = sessionRepository.save(current.archive(Instant.now(), traceId));
-        LOGGER.info("Session archived, sessionId={}, traceId={}", sessionId.value(), traceId);
-        return archived;
+        ConversationContextSessionRevocation revocation = conversationContextStore == null
+                ? null
+                : conversationContextStore.revokeSession(sessionId);
+        try {
+            Session archived = sessionRepository.save(current.archive(Instant.now(), traceId));
+            LOGGER.info("Session archived, sessionId={}, traceId={}", sessionId.value(), traceId);
+            return archived;
+        } catch (RuntimeException persistFailure) {
+            if (revocation != null) {
+                try {
+                    conversationContextStore.restoreSessionRevocation(revocation);
+                } catch (RuntimeException restoreFailure) {
+                    // 数据库未归档但 gate 回滚失败时保持 fail-closed，并保留两个异常供排查。
+                    persistFailure.addSuppressed(restoreFailure);
+                }
+            }
+            throw persistFailure;
+        }
     }
 
     /**

@@ -31,6 +31,7 @@ import type {
   CodeRepositoryConfig,
   CommandInfo,
   CommonParameterChangeLog,
+  ConversationRunContext,
   CreateApplicationWorkspacePayload,
   CreateWorkspaceAcceptedResponse,
   CreatePersonalWorkspacePayload,
@@ -211,6 +212,8 @@ export type StartRunPayload = {
   mode?: string;
   command?: string;
   arguments?: string;
+  contextToken?: string;
+  clientRequestId?: string;
 };
 
 export type ExtraRequestInit = RequestInit & { timeoutMs?: number };
@@ -285,7 +288,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       path: pathFromUrl(url),
       traceId,
       requestHeaders: safeRequestHeaders(headers),
-      requestBody: bodyToRawText(init.body),
+      requestBody: bodyToObservedRawText(init.body),
       startedAt
     };
     let rawExchangeReported = false;
@@ -298,7 +301,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         ...rawBase,
         responseStatus: response.status,
         responseHeaders: responseHeadersToRecord(response.headers),
-        responseText,
+        // 观察器可能将完整响应展示在调试面板，必须递归清除上下文 token；业务解析仍使用原始 responseText。
+        responseText: redactObservedJsonText(responseText),
         phase: "response",
         ...rawTiming(startedAtMs)
       });
@@ -922,6 +926,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     getMyMessageFeedback: (messageId: string) =>
       request<AiMessageFeedback | null>(`/api/internal/platform/opencode-runtime/messages/${encodeURIComponent(messageId)}/feedback/me`),
     getActiveRun: (sessionId: string) => request<Run | null>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/active-run`),
+    getRunContext: (sessionId: string) =>
+      request<ConversationRunContext>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/run-context`), { method: "POST" }),
     createSession: (workspaceId: string, title: string) =>
       request<Session>(`${opencodeRuntimeBase}/sessions`, { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
     startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>
@@ -1648,6 +1654,81 @@ function bodyToRawText(body: BodyInit | null | undefined): string | undefined {
     return body.toString();
   }
   return undefined;
+}
+
+/**
+ * 原始报文观察器面向页面调试，不能暴露服务端签发的会话上下文 token。
+ * 这里只改观察副本，实际 fetch body 仍保持原值发送给后端。
+ */
+function bodyToObservedRawText(body: BodyInit | null | undefined): string | undefined {
+  const raw = bodyToRawText(body);
+  if (!raw || typeof body !== "string") {
+    return raw;
+  }
+  return redactObservedJsonText(raw);
+}
+
+/** 优先递归脱敏 JSON；解析失败时继续按字段名处理 SSE/截断文本，调试副本禁止泄露 token。 */
+function redactObservedJsonText(raw: string): string {
+  try {
+    return JSON.stringify(redactConversationContextToken(JSON.parse(raw)));
+  } catch {
+    return redactConversationContextTokenText(raw);
+  }
+}
+
+function redactConversationContextTokenText(raw: string): string {
+  const keyPattern = /(["']?)\bcontexttoken\b\1\s*[:=]\s*/gi;
+  let redacted = "";
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = keyPattern.exec(raw)) !== null) {
+    redacted += raw.slice(cursor, match.index) + match[0];
+    const valueStart = keyPattern.lastIndex;
+    const quote = raw[valueStart];
+    let valueEnd = valueStart;
+    let closedQuote = false;
+    if (quote === '"' || quote === "'") {
+      valueEnd += 1;
+      let escaped = false;
+      while (valueEnd < raw.length) {
+        const current = raw[valueEnd];
+        if (current === "\n" || current === "\r") break;
+        if (escaped) {
+          escaped = false;
+        } else if (current === "\\") {
+          escaped = true;
+        } else if (current === quote) {
+          closedQuote = true;
+          valueEnd += 1;
+          break;
+        }
+        valueEnd += 1;
+      }
+      redacted += `${quote}[REDACTED]${closedQuote ? quote : ""}`;
+    } else {
+      while (valueEnd < raw.length && !/[\s,;&}\]]/.test(raw[valueEnd])) valueEnd += 1;
+      redacted += "[REDACTED]";
+    }
+    cursor = valueEnd;
+    keyPattern.lastIndex = valueEnd;
+  }
+  return redacted + raw.slice(cursor);
+}
+
+function redactConversationContextToken(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactConversationContextToken);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      key.toLowerCase() === "contexttoken" ? "[REDACTED]" : redactConversationContextToken(item)
+    ])
+  );
 }
 
 function pathFromUrl(url: string): string {

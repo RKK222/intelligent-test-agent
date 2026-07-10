@@ -19,7 +19,9 @@ public record StartRunInput(
         String variant,
         String mode,
         String command,
-        String arguments) {
+        String arguments,
+        String contextToken,
+        String clientRequestId) {
 
     /**
      * 规范化 Run 启动输入，保留非空可选字段并固化 prompt parts。
@@ -35,6 +37,25 @@ public record StartRunInput(
         mode = optionalText(mode);
         command = optionalText(command);
         arguments = optionalText(arguments);
+        contextToken = optionalText(contextToken);
+        clientRequestId = optionalText(clientRequestId);
+    }
+
+    /**
+     * 保留新增上下文字段前的十参数构造方式。
+     */
+    public StartRunInput(
+            SessionId sessionId,
+            String prompt,
+            List<PromptPart> parts,
+            String messageId,
+            String agent,
+            String model,
+            String variant,
+            String mode,
+            String command,
+            String arguments) {
+        this(sessionId, prompt, parts, messageId, agent, model, variant, mode, command, arguments, null, null);
     }
 
     /**
@@ -49,14 +70,26 @@ public record StartRunInput(
             String model,
             String variant,
             String mode) {
-        this(sessionId, prompt, parts, messageId, agent, model, variant, mode, null, null);
+        this(sessionId, prompt, parts, messageId, agent, model, variant, mode, null, null, null, null);
     }
 
     /**
      * 创建兼容旧 API 的纯文本启动输入。
      */
     public static StartRunInput ofPrompt(SessionId sessionId, String prompt) {
-        return new StartRunInput(sessionId, prompt, List.of(PromptPart.text(prompt)), null, null, null, null, null, null, null);
+        return new StartRunInput(
+                sessionId,
+                prompt,
+                List.of(PromptPart.text(prompt)),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     /**

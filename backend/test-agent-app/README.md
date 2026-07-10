@@ -55,6 +55,7 @@
 ## 测试覆盖
 
 - `AppModuleBoundaryTest` 保证 app 模块不回流 workspace、session、run、runtime、terminal、web 等业务包。
+- `ConversationMemberRevocationIntegrationTest` 跨 configuration/workspace/runtime 验证成员移除会使旧 token 失效，并让同一托管 Workspace 的后续上下文签发返回 `FORBIDDEN`。
 - `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、终端安全阈值、Spring Redis 配置入口、scheduler 默认关闭、废弃 opencode 固定节点配置缺失、废弃普通工作区目录选择配置缺失、manager 控制面 5 秒心跳和 10 秒 TTL。
 - `ServerIdentityFilePathResolverTest` / `ServerIdentityFileWriterTest` 覆盖 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 派生、参数缺失失败、父目录创建、旧内容覆盖和单行身份/地址写入。
 - `OpencodeManagerControlConfigTest` 覆盖稳定服务器身份按环境变量优先、主机名兜底，advertised host 按环境变量优先、探测 IPv4 兜底，以及后端直连地址由 advertised host 和 `server.port` 自动派生。

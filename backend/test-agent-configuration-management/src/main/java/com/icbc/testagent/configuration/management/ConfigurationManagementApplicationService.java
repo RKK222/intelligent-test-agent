@@ -37,6 +37,8 @@ import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextUserMutation;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
@@ -67,6 +69,13 @@ public class ConfigurationManagementApplicationService {
     private final SshKeyEncryptionService sshKeyEncryptionService;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final String defaultRepositoryDeploymentMode;
+    private ConversationContextStore conversationContextStore;
+
+    /** 成员撤权后按用户失效运行上下文；测试构造路径可不注入。 */
+    @Autowired(required = false)
+    void setConversationContextStore(ConversationContextStore conversationContextStore) {
+        this.conversationContextStore = conversationContextStore;
+    }
 
     /**
      * 注入领域端口和公共 Git/加密服务。
@@ -151,7 +160,27 @@ public class ConfigurationManagementApplicationService {
     }
 
     public void removeMember(String appId, String userId) {
-        configurationRepository.deleteMember(new ApplicationId(appId), new UserId(userId));
+        UserId removedUserId = new UserId(userId);
+        if (conversationContextStore == null) {
+            configurationRepository.deleteMember(new ApplicationId(appId), removedUserId);
+            return;
+        }
+        ConversationContextUserMutation mutation = conversationContextStore.beginUserMutation(removedUserId);
+        try {
+            configurationRepository.deleteMember(new ApplicationId(appId), removedUserId);
+        } catch (RuntimeException exception) {
+            abortUserMutation(mutation, exception);
+            throw exception;
+        }
+        conversationContextStore.completeUserMutation(mutation);
+    }
+
+    private void abortUserMutation(ConversationContextUserMutation mutation, RuntimeException original) {
+        try {
+            conversationContextStore.abortUserMutation(mutation);
+        } catch (RuntimeException abortFailure) {
+            original.addSuppressed(abortFailure);
+        }
     }
 
     public PageResponse<UserResponse> searchUsers(String keyword, PageRequest pageRequest) {

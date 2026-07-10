@@ -9,12 +9,16 @@ public enum ErrorCode {
     FORBIDDEN(403, "无权限"),
     NOT_FOUND(404, "资源不存在"),
     CONFLICT(409, "状态冲突"),
+    CONVERSATION_CONTEXT_REQUIRED(409, "需要会话运行上下文"),
+    CONVERSATION_CONTEXT_EXPIRED(409, "会话运行上下文已过期"),
     API_GONE(410, "接口已作废"),
+    RUN_DETAILS_EXPIRED(410, "运行详情已过期"),
     RATE_LIMITED(429, "请求过于频繁"),
     INTERNAL_ERROR(500, "服务器内部错误"),
     OPENCODE_BAD_GATEWAY(502, "opencode 服务响应异常"),
     OPENCODE_UNAVAILABLE(503, "opencode 服务不可用"),
     OPENCODE_TIMEOUT(504, "opencode 服务超时"),
+    RUNTIME_STATE_UNAVAILABLE(503, "运行态存储不可用"),
     GIT_UNAVAILABLE(503, "Git 服务不可用"),
     GIT_TIMEOUT(504, "Git 操作超时");
 

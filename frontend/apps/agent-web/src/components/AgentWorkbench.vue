@@ -72,6 +72,16 @@ import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
+import { prepareRawOutputBody } from "./raw-output";
+import {
+  createRuntimeStateOutageTracker,
+  type RuntimeStateFallbackLease
+} from "./runtime-state-outage";
+import {
+  createClientRequestId,
+  createConversationRunContextCache,
+  startRunWithConversationContext
+} from "./conversation-run-context";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy, type FollowUpDraft } from "./follow-up-queue";
 import {
   buildPromptParts,
@@ -118,6 +128,7 @@ import {
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
 const api = createBackendApiClient({ baseUrl: apiBaseUrl, rawExchangeObserver: observeRawHttpExchange });
+const conversationRunContexts = createConversationRunContextCache((sessionId) => api.getRunContext(sessionId));
 provide("api", api);
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
@@ -141,7 +152,7 @@ const OPENCODE_PROCESS_START_STEPS = [
 ] as const;
 const SELECTED_PROVIDER_STORAGE_KEY = "ta_selected_provider";
 const SELECTED_MODEL_STORAGE_KEY = "ta_selected_model";
-const ACTIVE_RUN_PROBE_INTERVAL_MS = 1500;
+const RUNTIME_STATE_RECOVERY_STABLE_MS = 5_000;
 const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 10000;
 const RAW_OUTPUT_BODY_LIMIT = 200_000;
 const SESSION_HISTORY_PAGE_SIZE = 30;
@@ -233,6 +244,12 @@ const sessionSearch = ref("");
 const sessionHistoryPage = ref(1);
 const sessionHistoryItems = ref<Session[]>([]);
 const sessionRuntimeState = shallowRef<SessionRuntimeStateSummary | null>(null);
+const runtimeStateOutages = createRuntimeStateOutageTracker(RUNTIME_STATE_RECOVERY_STABLE_MS);
+let conversationInteractionGeneration = 0;
+// 必须早于认证 token 的 immediate watch 初始化，统一 interaction 失效时才能安全释放历史切换锁。
+const historyLoadingSessionId = ref<string | null>(null);
+let historySwitchSeq = 0;
+let activeRunProbeSeq = 0;
 const followUpQueue = ref<FollowUpDraft[]>([]);
 const retryDeadlines = ref<RetryDeadlineMap>({});
 const retryActionInFlightKey = ref<string | null>(null);
@@ -353,9 +370,10 @@ onMounted(() => {
   window.addEventListener("keydown", onWindowKeydown);
 });
 onBeforeUnmount(() => {
+  invalidateConversationInteraction();
   window.removeEventListener("keydown", onWindowKeydown);
   clearFileTreeRetryTimers();
-  stopActiveRunProbe();
+  runtimeStateOutages.reset();
   stopProcessStartupPolling();
 });
 
@@ -609,13 +627,6 @@ const sessionsQuery = useQuery({
   }
 });
 
-const sessionRuntimeStateQuery = useQuery({
-  queryKey: sessionRuntimeStateQueryKey,
-  enabled: () => authStore.isAuthenticated(),
-  queryFn: () => api.getSessionRuntimeState(),
-  refetchOnWindowFocus: false
-});
-
 watch(sessionSearchTrim, () => {
   sessionHistoryPage.value = 1;
   sessionHistoryItems.value = [];
@@ -639,18 +650,14 @@ watch(
 );
 
 watch(
-  () => sessionRuntimeStateQuery.data.value,
-  (summary) => {
-    if (summary) {
-      sessionRuntimeState.value = summary;
-    }
-  },
-  { immediate: true }
-);
-
-watch(
   () => authStore.token,
-  (token, _oldToken, onCleanup) => {
+  (token, oldToken, onCleanup) => {
+    if (token !== oldToken) {
+      // context 与认证用户绑定，切换登录态必须丢弃页面内存缓存。
+      invalidateConversationInteraction();
+      conversationRunContexts.clear();
+      runtimeStateOutages.reset();
+    }
     if (!token) {
       sessionRuntimeState.value = null;
       return;
@@ -659,17 +666,77 @@ watch(
       baseUrl: apiBaseUrl,
       token,
       onEvent: (summary) => {
+        runtimeStateOutages.onSnapshot();
+        activeRunProbeSeq += 1;
         sessionRuntimeState.value = summary;
         queryClient.setQueryData(sessionRuntimeStateQueryKey, summary);
+        adoptRuntimeStateForCurrentSession(summary, "runtime-state-event");
       },
       onStatus: (status) => {
         logs.value = [...logs.value.slice(-200), `[runtime-state] ${status}`];
+        if (status === "open") {
+          runtimeStateOutages.onOpen();
+        }
+        if (status === "error") {
+          runtimeStateOutages.onError();
+          fallbackActiveRunOnce("runtime-state-unavailable");
+        }
       }
     });
-    onCleanup(() => subscription.close());
+    onCleanup(() => {
+      runtimeStateOutages.reset();
+      subscription.close();
+    });
   },
   { immediate: true }
 );
+
+/**
+ * 用户级 runtime-state 已包含接管 RunEvent SSE 所需的 runId/status；直接构造前端 Run，避免再查数据库。
+ */
+function adoptRuntimeStateForCurrentSession(summary: SessionRuntimeStateSummary | null, reason: string): boolean {
+  const currentSession = session.value;
+  if (!currentSession || !summary) {
+    return false;
+  }
+  const active = summary.sessions.find(
+    (item) => item.sessionId === currentSession.sessionId && isRunBusyStatus(item.runStatus)
+  );
+  if (!active || ignoredRunIds.value.has(active.runId)) {
+    return false;
+  }
+  const existing = run.value?.runId === active.runId ? run.value : null;
+  if (!existing || existing.status !== active.runStatus || existing.updatedAt !== active.updatedAt) {
+    const adopted: Run = {
+      runId: active.runId,
+      sessionId: currentSession.sessionId,
+      workspaceId: currentSession.workspaceId,
+      status: active.runStatus,
+      createdAt: existing?.createdAt ?? active.updatedAt,
+      updatedAt: active.updatedAt
+    };
+    run.value = adopted;
+    rememberRunSession(adopted);
+    logs.value = [...logs.value.slice(-200), `[run] recovered ${active.runId} ${active.runStatus} via ${reason}`];
+  }
+  return true;
+}
+
+function fallbackActiveRunOnce(reason: string) {
+  const sessionId = session.value?.sessionId;
+  if (!sessionId || isRunBusyStatus(run.value?.status)) {
+    return;
+  }
+  const generation = runtimeStateOutages.takeFallback(sessionId);
+  if (!generation) {
+    return;
+  }
+  void recoverActiveRunForSession(
+    sessionId,
+    `${reason}-generation-${generation.outageGeneration}`,
+    generation
+  );
+}
 
 const opencodeProcessEnabled = computed(() => authStore.isAuthenticated());
 const opencodeProcessQueryKey = computed(() => ["runtime", "opencode-process", "me", authStore.token ?? ""] as const);
@@ -1073,8 +1140,6 @@ function refreshAgentsCatalog() {
   void agentsQuery.refetch();
 }
 const historyList = computed(() => historyItems(run.value, sessionsItems.value, runtimeStatesBySessionId.value));
-const historyLoadingSessionId = ref<string | null>(null);
-let historySwitchSeq = 0;
 
 function handleHistorySearchChange(query: string) {
   if (sessionSearch.value === query) return;
@@ -1154,16 +1219,6 @@ function selectRuntimeAgent(agentId: string) {
   selectedAgent.value = agentId;
 }
 
-let activeRunProbeSeq = 0;
-let activeRunProbeTimer: ReturnType<typeof setInterval> | null = null;
-
-function stopActiveRunProbe() {
-  if (activeRunProbeTimer) {
-    clearInterval(activeRunProbeTimer);
-    activeRunProbeTimer = null;
-  }
-}
-
 function observeRawHttpExchange(exchange: RawHttpExchange) {
   if (!isConversationRawExchange(exchange)) {
     return;
@@ -1172,7 +1227,6 @@ function observeRawHttpExchange(exchange: RawHttpExchange) {
   if (!sessionId) {
     return;
   }
-  const requestBody = truncateRawOutputBody(exchange.requestBody ?? "");
   appendRawOutputEntry(sessionId, {
     id: nextRawOutputId("req"),
     kind: "request",
@@ -1180,12 +1234,10 @@ function observeRawHttpExchange(exchange: RawHttpExchange) {
     method: exchange.method,
     path: exchange.path,
     traceId: exchange.traceId,
-    body: requestBody.body,
-    truncated: requestBody.truncated,
+    body: exchange.requestBody ?? "",
     occurredAt: exchange.startedAt
   });
 
-  const responseBody = truncateRawOutputBody(exchange.responseText ?? exchange.errorMessage ?? "");
   appendRawOutputEntry(sessionId, {
     id: nextRawOutputId("res"),
     kind: "response",
@@ -1195,8 +1247,7 @@ function observeRawHttpExchange(exchange: RawHttpExchange) {
     status: exchange.responseStatus,
     traceId: exchange.responseHeaders?.["x-trace-id"] ?? exchange.traceId,
     contentType: exchange.responseHeaders?.["content-type"],
-    body: responseBody.body,
-    truncated: responseBody.truncated,
+    body: exchange.responseText ?? exchange.errorMessage ?? "",
     occurredAt: exchange.endedAt
   });
 }
@@ -1208,7 +1259,6 @@ function observeRawRunEventMessage(message: RunEventRawMessage, fallbackSessionI
   if (!sessionId) {
     return;
   }
-  const body = truncateRawOutputBody(message.data);
   appendRawOutputEntry(sessionId, {
     id: nextRawOutputId("sse"),
     kind: "sse",
@@ -1216,8 +1266,7 @@ function observeRawRunEventMessage(message: RunEventRawMessage, fallbackSessionI
     eventName: message.eventName,
     runId: message.runId,
     traceId,
-    body: body.body,
-    truncated: body.truncated,
+    body: message.data,
     occurredAt: message.receivedAt
   });
 }
@@ -1247,9 +1296,15 @@ function nextRawOutputId(prefix: string) {
 
 function appendRawOutputEntry(sessionId: string, entry: RawOutputEntry) {
   const current = rawEntriesBySessionId.value[sessionId] ?? [];
+  const preparedBody = prepareRawOutputBody(entry.body, RAW_OUTPUT_BODY_LIMIT);
+  const preparedEntry: RawOutputEntry = {
+    ...entry,
+    body: preparedBody.body,
+    truncated: preparedBody.truncated
+  };
   rawEntriesBySessionId.value = {
     ...rawEntriesBySessionId.value,
-    [sessionId]: [...current, entry].slice(-RAW_OUTPUT_MAX_ENTRIES_PER_SESSION)
+    [sessionId]: [...current, preparedEntry].slice(-RAW_OUTPUT_MAX_ENTRIES_PER_SESSION)
   };
 }
 
@@ -1271,16 +1326,6 @@ function rememberRunSession(value: Run | null | undefined) {
   rawRunSessionMap.value = {
     ...rawRunSessionMap.value,
     [value.runId]: value.sessionId
-  };
-}
-
-function truncateRawOutputBody(body: string): { body: string; truncated?: boolean } {
-  if (body.length <= RAW_OUTPUT_BODY_LIMIT) {
-    return { body };
-  }
-  return {
-    body: `${body.slice(0, RAW_OUTPUT_BODY_LIMIT)}\n...[已截断，原始长度 ${body.length} 字符]`,
-    truncated: true
   };
 }
 
@@ -1383,14 +1428,22 @@ function rawText(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-async function recoverActiveRunForSession(sessionId: string, reason: string): Promise<Run | null> {
+async function recoverActiveRunForSession(
+  sessionId: string,
+  reason: string,
+  fallbackLease: RuntimeStateFallbackLease
+): Promise<Run | null> {
   if (autoRetryStarting.value) {
     return null;
   }
   const seq = ++activeRunProbeSeq;
   try {
     const activeRun = await api.getActiveRun(sessionId);
-    if (seq !== activeRunProbeSeq || session.value?.sessionId !== sessionId) {
+    if (
+      seq !== activeRunProbeSeq
+      || session.value?.sessionId !== sessionId
+      || !runtimeStateOutages.isCurrent(fallbackLease)
+    ) {
       return null;
     }
     if (activeRun && isRunBusyStatus(activeRun.status)) {
@@ -1554,18 +1607,6 @@ watch(run, (r, _old, onCleanup) => {
   onCleanup(() => subscription.close());
 });
 
-// 自动恢复 Session 的活动 Run，确保页面刷新、挂载或重新连入时仍能通过 SSE 接管后台执行。
-watch(
-  () => session.value?.sessionId,
-  async (sessionId) => {
-    if (!sessionId) return;
-    if (!isRunBusyStatus(run.value?.status)) {
-      await recoverActiveRunForSession(sessionId, "session-watch");
-    }
-  },
-  { immediate: true }
-);
-
 // agent 写文件用的 opencode 工具名；这些工具的 input 带文件路径，完成时磁盘已写入。
 const LIVE_WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "str_replace", "multi_edit", "create_file", "delete"]);
 
@@ -1692,45 +1733,198 @@ function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: 
   };
 }
 
+type StartRunDraft = {
+  prompt: string;
+  parts: PromptPart[];
+  title?: string;
+  command?: { command: string; arguments: string };
+};
+
+// 一次发送只允许修改其发起时的认证、会话和工作区；任何交互切换都会让旧异步结果失效。
+type ConversationInteractionGuard = {
+  generation: number;
+  authToken: string | null;
+  sessionId: string | null;
+  workspaceId: string | null;
+  runId: string | null;
+};
+
+type StartRunMutationRequest = {
+  input: StartRunDraft;
+  guard: ConversationInteractionGuard;
+};
+
+class StaleConversationInteractionError extends Error {
+  constructor() {
+    super("会话交互上下文已变化");
+    this.name = "StaleConversationInteractionError";
+  }
+}
+
+class StartRunMutationError extends Error {
+  constructor(
+    readonly originalError: unknown,
+    readonly guard: ConversationInteractionGuard,
+    readonly activeSessionId: string | null,
+    readonly clientRequestId: string
+  ) {
+    super(originalError instanceof Error ? originalError.message : "启动 Run 失败");
+    this.name = "StartRunMutationError";
+  }
+}
+
+function invalidateConversationInteraction() {
+  conversationInteractionGeneration += 1;
+  activeRunProbeSeq += 1;
+  // 非历史交互会取消当前 switch；递增 owner 代次可确保旧 finally 无权清除后来启动的新 switch。
+  historySwitchSeq += 1;
+  historyLoadingSessionId.value = null;
+}
+
+function captureConversationInteraction(): ConversationInteractionGuard {
+  return {
+    generation: conversationInteractionGeneration,
+    authToken: authStore.token ?? null,
+    sessionId: session.value?.sessionId ?? null,
+    workspaceId: selectedWorkspace.value?.workspaceId ?? null,
+    runId: run.value?.runId ?? null
+  };
+}
+
+function conversationInteractionIsCurrent(
+  guard: ConversationInteractionGuard,
+  expectedSessionId: string | null = guard.sessionId
+): boolean {
+  return guard.generation === conversationInteractionGeneration
+    && guard.authToken === (authStore.token ?? null)
+    && guard.workspaceId === (selectedWorkspaceIdRef.value ?? null)
+    && expectedSessionId === (session.value?.sessionId ?? null);
+}
+
+function assertConversationInteractionCurrent(
+  guard: ConversationInteractionGuard,
+  expectedSessionId: string | null = guard.sessionId
+) {
+  if (!conversationInteractionIsCurrent(guard, expectedSessionId)) {
+    throw new StaleConversationInteractionError();
+  }
+}
+
+function ambiguousRunStartFailure(error: unknown): boolean {
+  if (!(error instanceof BackendApiError)) {
+    return true;
+  }
+  return error.status === 408 || error.status >= 500;
+}
+
+function runRecoveredAfterStartRequest(
+  guard: ConversationInteractionGuard,
+  sessionId: string,
+  clientRequestId: string,
+  error?: unknown
+): boolean {
+  const currentRun = run.value;
+  if (
+    !currentRun
+    || !isRunBusyStatus(currentRun.status)
+    || currentRun.sessionId !== sessionId
+    || currentRun.runId === guard.runId
+  ) {
+    return false;
+  }
+  if (currentRun.clientRequestId) {
+    return currentRun.clientRequestId === clientRequestId;
+  }
+  // Phase 1 的旧 runtime-state 摘要没有 clientRequestId，只对 HTTP 歧义错误使用同交互 busy Run 兜底。
+  return error === undefined || ambiguousRunStartFailure(error);
+}
+
 const startRunMutation = useMutation({
-  mutationFn: async (input: {
-    prompt: string;
-    parts: PromptPart[];
-    title?: string;
-    command?: { command: string; arguments: string };
-  }) => {
-    if (!opencodeProcessReady.value) {
-      throw new Error("请先初始化 TestAgent 进程");
+  mutationFn: async ({ input, guard }: StartRunMutationRequest) => {
+    const clientRequestId = createClientRequestId();
+    let activeSessionId = guard.sessionId;
+    try {
+      assertConversationInteractionCurrent(guard);
+      if (!opencodeProcessReady.value) {
+        throw new Error("请先初始化 TestAgent 进程");
+      }
+      if (!guard.workspaceId) {
+        throw new Error("未选择 Workspace");
+      }
+      let activeSession = session.value;
+      if (!activeSession) {
+        const createdSession = await api.createSession(
+          guard.workspaceId,
+          sessionTitleFromFirstMessage(input.title ?? input.prompt)
+        );
+        assertConversationInteractionCurrent(guard);
+        activeSession = createdSession;
+        activeSessionId = createdSession.sessionId;
+        session.value = createdSession;
+        void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      }
+      activeSessionId = activeSession.sessionId;
+      assertConversationInteractionCurrent(guard, activeSessionId);
+      const assertCurrent = () => assertConversationInteractionCurrent(guard, activeSessionId);
+      const started = await startRunWithConversationContext({
+        cache: conversationRunContexts,
+        clientRequestId,
+        assertCurrent,
+        payload: {
+          sessionId: activeSessionId,
+          prompt: input.prompt,
+          parts: input.parts,
+          agent: selectedAgent.value || undefined,
+          model: selectedModel.value || undefined,
+          mode: promptMode.value,
+          command: input.command?.command,
+          arguments: input.command?.arguments
+        },
+        startRun: (payload) => {
+          assertCurrent();
+          return api.startRun(payload);
+        }
+      });
+      assertCurrent();
+      return { started, guard, activeSessionId, clientRequestId };
+    } catch (error) {
+      throw new StartRunMutationError(error, guard, activeSessionId, clientRequestId);
     }
-    if (!selectedWorkspace.value) {
-      throw new Error("未选择 Workspace");
-    }
-    const activeSession =
-      session.value ??
-      (await api.createSession(
-        selectedWorkspace.value.workspaceId,
-        sessionTitleFromFirstMessage(input.title ?? input.prompt)
-      ));
-    session.value = activeSession;
-    void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-    return api.startRun({
-      sessionId: activeSession.sessionId,
-      prompt: input.prompt,
-      parts: input.parts,
-      agent: selectedAgent.value || undefined,
-      model: selectedModel.value || undefined,
-      mode: promptMode.value,
-      command: input.command?.command,
-      arguments: input.command?.arguments
-    });
   },
-  onSuccess: (started) => {
+  onSuccess: ({ started, guard, activeSessionId, clientRequestId }) => {
+    if (!conversationInteractionIsCurrent(guard, activeSessionId)) {
+      return;
+    }
+    if (runRecoveredAfterStartRequest(guard, activeSessionId, clientRequestId)) {
+      return;
+    }
     run.value = started;
     rememberRunSession(started);
     logs.value = [...logs.value, `[run] ${started.runId} ${started.status}`];
   },
   onError: (error) => {
-    const startFailureFeedback = errorFeedback("启动 Run 失败", error);
+    const failure = error instanceof StartRunMutationError ? error : null;
+    const originalError = failure?.originalError ?? error;
+    if (
+      !failure
+      || originalError instanceof StaleConversationInteractionError
+      || !conversationInteractionIsCurrent(failure.guard, failure.activeSessionId)
+    ) {
+      return;
+    }
+    if (
+      failure.activeSessionId
+      && runRecoveredAfterStartRequest(
+        failure.guard,
+        failure.activeSessionId,
+        failure.clientRequestId,
+        originalError
+      )
+    ) {
+      logs.value = [...logs.value.slice(-200), `[run] HTTP result ignored after runtime-state recovery ${failure.clientRequestId}`];
+      return;
+    }
+    const startFailureFeedback = errorFeedback("启动 Run 失败", originalError);
     feedback.value = startFailureFeedback;
     dispatchChat({ type: "run.request.failed", message: startFailureFeedback.description });
     // Session 创建或 Run HTTP 提交失败时没有 RunEvent 终态，前端需要本地锁定本轮耗时。
@@ -1740,32 +1934,8 @@ const startRunMutation = useMutation({
       chatStartedAt.value = null;
       nowTick.value = Date.now();
     }
-    if (session.value?.sessionId && !isRunBusyStatus(run.value?.status)) {
-      void recoverActiveRunForSession(session.value.sessionId, "start-run-error");
-    }
   }
 });
-
-// startRun 的 HTTP 请求可能因为首次拉起 runtime 或长任务初始化而迟迟不返回；此时后端
-// 可能已经创建了非终态 Run。pending 期间轮询 active-run，尽早拿到 runId 并订阅 SSE。
-watch(
-  [() => startRunMutation.isPending.value, () => session.value?.sessionId, () => run.value?.status],
-  ([pending, sessionId, status]) => {
-    stopActiveRunProbe();
-    if (!pending || !sessionId || isRunBusyStatus(status)) {
-      return;
-    }
-    void recoverActiveRunForSession(sessionId, "start-run-pending");
-    activeRunProbeTimer = setInterval(() => {
-      if (!startRunMutation.isPending.value || !session.value?.sessionId || isRunBusyStatus(run.value?.status)) {
-        stopActiveRunProbe();
-        return;
-      }
-      void recoverActiveRunForSession(session.value.sessionId, "start-run-pending");
-    }, ACTIVE_RUN_PROBE_INTERVAL_MS);
-  },
-  { immediate: true }
-);
 
 const initializeOpencodeProcessMutation = useMutation({
   mutationFn: (operationId?: string) => api.initializeMyOpencodeProcess(operationId),
@@ -2028,7 +2198,7 @@ function handleAutoRetryRun() {
   clearRunEventSseFeedback();
   lastRunDraft.value = prepared.input;
   dispatchChat({ type: "run.requested" });
-  startRunMutation.mutate(prepared.input, {
+  startRunMutation.mutate({ input: prepared.input, guard: captureConversationInteraction() }, {
     onSettled: () => {
       autoRetryStarting.value = false;
     }
@@ -2054,7 +2224,7 @@ watch(
     const draft: AutoRetryRunDraft = { prompt: next.prompt, parts: next.parts, command: next.command };
     lastRunDraft.value = draft;
     dispatchChat({ type: "run.requested" });
-    startRunMutation.mutate(draft);
+    startRunMutation.mutate({ input: draft, guard: captureConversationInteraction() });
   }
 );
 
@@ -2075,6 +2245,7 @@ const updateSessionMutation = useMutation({
 const deleteSessionMutation = useMutation({
   mutationFn: async (sessionId: string) => api.deleteSession(sessionId),
   onSuccess: (deleted) => {
+    conversationRunContexts.invalidate(deleted.sessionId);
     if (session.value?.sessionId === deleted.sessionId) {
       session.value = null;
       run.value = null;
@@ -2366,7 +2537,13 @@ function selectedServerWorkspaceServer() {
   return serverWorkspaceServers.value.find((server) => server.linuxServerId === selectedServerWorkspaceServerId.value);
 }
 
-async function switchWorkspace(workspace: Workspace) {
+async function switchWorkspace(
+  workspace: Workspace,
+  options: { preserveConversationInteraction?: boolean } = {}
+) {
+  if (!options.preserveConversationInteraction) {
+    invalidateConversationInteraction();
+  }
   resetWorkspaceState();
   cacheWorkspace(workspace);
   selectedWorkspaceId.value = workspace.workspaceId;
@@ -2408,6 +2585,7 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
 // 切换到某个应用版本：通过 ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区，
 // 将返回的 runtimeWorkspace 作为当前工作区。同一用户同一版本复用 default 空间，避免重复创建。
 async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
+  invalidateConversationInteraction();
   try {
     const defaultPw = await api.ensureDefaultPersonalWorkspace(payload.version.versionId);
     const runtimeWorkspaceId = defaultPw.runtimeWorkspace?.workspaceId;
@@ -2512,6 +2690,7 @@ function refreshCurrentWorkspacePanels() {
 // 成功后失效该模板下的版本查询，让 useQueries 重新拉取；同时把新版本切到工作区。
 const creatingVersion = ref(false);
 async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version: string; branch?: string }) {
+  invalidateConversationInteraction();
   const appId = selectedAppId.value;
   if (!appId) {
     feedback.value = { kind: "error", title: "未选择应用", description: "请先选择要新增版本的应用。" };
@@ -2565,6 +2744,7 @@ async function handleSelectApp(appId: string) {
   if (selectingAppId === appId) {
     return;
   }
+  invalidateConversationInteraction();
   const selectionSeq = ++appSelectionSeq;
   selectingAppId = appId;
   // 切换应用时先清空旧 workspace 状态，避免文件树继续展示上一个应用的 workspace 内容
@@ -2598,6 +2778,7 @@ async function handleSelectApp(appId: string) {
 }
 
 async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBackendServer; path: string }) {
+  invalidateConversationInteraction();
   serverWorkspacePickerLoading.value = true;
   try {
     const existing = workspaces.value.find(
@@ -2958,6 +3139,10 @@ function toggleDirectory(path: string) {
 }
 
 function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
+  // 历史切换完成前，当前 session 仍可能是上一会话；父层再次设防，避免绕过按钮状态误发 Run。
+  if (historyLoadingSessionId.value) {
+    return;
+  }
   if (readonlySessionReason.value) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
     return;
@@ -3045,7 +3230,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   clearRunEventSseFeedback();
   dispatchChat({ type: "run.requested" });
   chatContextStore.clearContexts();
-  startRunMutation.mutate(runDraft);
+  startRunMutation.mutate({ input: runDraft, guard: captureConversationInteraction() });
 }
 
 function summarizePromptParts(parts: PromptPart[]) {
@@ -3736,12 +3921,36 @@ function handleSaveDiffFile(path: string, content: string) {
 }
 
 async function switchSession(sessionId: string) {
-  const switchSeq = ++historySwitchSeq;
+  invalidateConversationInteraction();
+  const historyInteractionGeneration = conversationInteractionGeneration;
+  const switchSeq = historySwitchSeq;
+  // 所有 await 后复用同一 guard，避免较慢的旧历史请求覆盖后点击的新会话。
+  const switchIsCurrent = () => switchSeq === historySwitchSeq
+    && historyInteractionGeneration === conversationInteractionGeneration;
   historyLoadingSessionId.value = sessionId;
-  const selected = sessionsItems.value.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
-  const readonlyReason = await switchToHistorySessionWorkspace(selected);
+  let selected = sessionsItems.value.find((item) => item.sessionId === sessionId);
+  if (!selected) {
+    selected = await api.getSession(sessionId);
+    if (!switchIsCurrent()) {
+      return;
+    }
+  }
+  const readonlyReason = await switchToHistorySessionWorkspace(selected, switchIsCurrent);
+  if (!switchIsCurrent() || readonlyReason === null) {
+    return;
+  }
   session.value = selected;
   readonlySessionReason.value = readonlyReason;
+  if (!readonlyReason) {
+    // 历史会话切到可交互工作区后预取一次；立即发送会复用同一个 in-flight Promise。
+    void conversationRunContexts.get(sessionId).catch((error) => {
+      console.warn("预取会话运行上下文失败", error);
+    });
+  }
+  const adoptedRuntimeRun = adoptRuntimeStateForCurrentSession(sessionRuntimeState.value, "switch-session");
+  if (!adoptedRuntimeRun) {
+    fallbackActiveRunOnce("switch-session-stream-unavailable");
+  }
   // 切换会话后先清空上一轮任务的消耗统计，防止上一轮对话的耗时残留。
   chatStartedAt.value = null;
   accumulatedTokens.value = 0;
@@ -3755,7 +3964,7 @@ async function switchSession(sessionId: string) {
       api.getSessionTreeMessages(sessionId).catch(() => null),
       api.listSessionMessages(sessionId, 1, 100, { refresh: false })
     ]);
-    if (switchSeq !== historySwitchSeq) {
+    if (!switchIsCurrent()) {
       return;
     }
     const persistedMessages = dedupeSessionMessages(page.items);
@@ -3766,9 +3975,9 @@ async function switchSession(sessionId: string) {
     } else {
       dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
     }
-    historyLoadingSessionId.value = null;
-    // 正文是历史切换的首要结果；反馈状态随后补齐，不阻塞用户阅读。
-    void loadFeedbacksForMessages(persistedMessages, sessionId);
+    // 正文可以先展示，但发送锁必须保留到关联 Run/Diff 投影完成，避免迟到历史详情覆盖新 Run。
+    // 反馈状态独立异步补齐，不延长这把锁。
+    void loadFeedbacksForMessages(persistedMessages, sessionId, switchIsCurrent);
     const restoredFiles = diffFilesFromSessionMessages(persistedMessages).map((file) => ({
       ...file,
       path: normalizeWorkspacePath(file.path) || file.path
@@ -3783,6 +3992,9 @@ async function switchSession(sessionId: string) {
           api.getRun(lastMsgWithRunId.runId),
           api.getRunDiff(lastMsgWithRunId.runId).catch(() => ({ files: [] }))
         ]);
+        if (!switchIsCurrent()) {
+          return;
+        }
         run.value = runDetail;
         rememberRunSession(runDetail);
         const runFiles = (diffDetail.files ?? []).map((file) => ({
@@ -3791,33 +4003,52 @@ async function switchSession(sessionId: string) {
         }));
         diffFiles.value = mergeDiffFiles(restoredFiles, runFiles);
       } catch (runErr) {
-        console.error("加载关联 Run 失败", runErr);
+        if (switchIsCurrent()) {
+          console.error("加载关联 Run 失败", runErr);
+        }
       }
     } else {
       run.value = null;
     }
 
-    // 优先通过 getActiveRun 获取当前最新活跃的非终态活动 Run（如正在后台运行的任务）来重建连接。
-    await recoverActiveRunForSession(sessionId, "switch-session");
+    // 历史 Run 详情可能覆盖切换开始时从 runtime-state 接管的活跃 Run，加载结束后再以实时摘要校正一次。
+    if (!switchIsCurrent()) {
+      return;
+    }
+    const restoredRuntimeRun = adoptRuntimeStateForCurrentSession(sessionRuntimeState.value, "switch-session-loaded");
+    if (!restoredRuntimeRun) {
+      fallbackActiveRunOnce("switch-session-loaded-stream-unavailable");
+    }
 
     feedback.value = { kind: "info", title: "已切换 Session", description: selected.title };
   } catch (error) {
-    feedback.value = errorFeedback("加载 Session 消息失败", error);
+    if (switchIsCurrent()) {
+      feedback.value = errorFeedback("加载 Session 消息失败", error);
+    }
   } finally {
-    if (switchSeq === historySwitchSeq) {
+    if (switchIsCurrent()) {
       historyLoadingSessionId.value = null;
     }
   }
 }
 
-async function switchToHistorySessionWorkspace(selected: Session): Promise<string> {
+async function switchToHistorySessionWorkspace(
+  selected: Session,
+  interactionIsCurrent: () => boolean
+): Promise<string | null> {
   const expectedAppId = selected.workspaceContext?.appId?.trim();
   const requiresManagedWorkspace = Boolean(expectedAppId);
   try {
     let workspace = await api.getWorkspace(selected.workspaceId);
+    if (!interactionIsCurrent()) {
+      return null;
+    }
     try {
       // markRecentManagedWorkspace 会校验当前用户仍可进入历史会话所属应用，并回填版本/模板信息。
       const response = await api.markRecentManagedWorkspace(selected.workspaceId);
+      if (!interactionIsCurrent()) {
+        return null;
+      }
       if (response) {
         workspace = mergeRecentRuntimeResponse(workspace, response);
       }
@@ -3829,18 +4060,33 @@ async function switchToHistorySessionWorkspace(selected: Session): Promise<strin
       }
     }
     const nextAppId = workspace.appId || expectedAppId;
+    if (!interactionIsCurrent()) {
+      return null;
+    }
     if (nextAppId) {
       selectedAppId.value = nextAppId;
     }
     if (workspace.workspaceId !== selectedWorkspaceIdRef.value) {
-      await switchWorkspace(workspace);
+      if (!interactionIsCurrent()) {
+        return null;
+      }
+      await switchWorkspace(workspace, { preserveConversationInteraction: true });
+      if (!interactionIsCurrent()) {
+        return null;
+      }
     } else {
+      if (!interactionIsCurrent()) {
+        return null;
+      }
       cacheWorkspace(workspace);
       selectedWorkspaceSnapshot.value = workspace;
       syncCurrentVersionFromWorkspace(workspace);
     }
     return "";
   } catch (error) {
+    if (!interactionIsCurrent()) {
+      return null;
+    }
     feedback.value = errorFeedback("切换 Session 工作区失败", error);
     return readonlyReasonForHistorySwitch(error);
   }
@@ -3889,6 +4135,7 @@ function rememberCurrentRunAsBackgroundRuntimeState() {
 }
 
 function handleNewConversation() {
+  invalidateConversationInteraction();
   rememberCurrentRunAsBackgroundRuntimeState();
   session.value = null;
   run.value = null;
@@ -3912,7 +4159,8 @@ function handleNewConversation() {
 
 async function loadFeedbacksForMessages(
   messages: Array<Pick<SessionMessage, "messageId" | "role" | "remoteMessageId">>,
-  expectedSessionId?: string
+  expectedSessionId?: string,
+  interactionIsCurrent: () => boolean = () => true
 ) {
   rememberPersistedMessageIdentities(messages);
   const assistantMessageIds = messages
@@ -3927,7 +4175,7 @@ async function loadFeedbacksForMessages(
       loaded[messageId] = null;
     }
   }));
-  if (!expectedSessionId || session.value?.sessionId === expectedSessionId) {
+  if (interactionIsCurrent() && (!expectedSessionId || session.value?.sessionId === expectedSessionId)) {
     messageFeedbacks.value = loaded;
   }
 }

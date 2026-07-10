@@ -22,6 +22,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
+import com.icbc.testagent.domain.run.ConversationContextStore;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class OpencodeProcessStopServiceTest {
 
@@ -66,6 +68,26 @@ class OpencodeProcessStopServiceTest {
             assertThat(process.pid()).isNull();
             assertThat(process.healthMessage()).isEqualTo("process not found");
         });
+    }
+
+    @Test
+    void successfulTrackedStopInvalidatesProcessConversationContexts() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(running.processId(), running);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("process not found");
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        OpencodeProcessStopService service = new OpencodeProcessStopService(
+                gateway,
+                repository,
+                null,
+                contextStore,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        service.stopAndVerify(OpencodeProcessStopRequest.tracked(running, TRACE_ID));
+
+        Mockito.verify(contextStore).invalidateProcess(running.processId().value());
     }
 
     @Test

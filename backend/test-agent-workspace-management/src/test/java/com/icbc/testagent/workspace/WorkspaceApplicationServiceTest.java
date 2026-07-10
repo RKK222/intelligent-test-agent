@@ -10,12 +10,17 @@ import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
+import com.icbc.testagent.domain.workspace.WorkspaceStatus;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextWorkspaceMutation;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
 class WorkspaceApplicationServiceTest {
 
@@ -87,6 +92,39 @@ class WorkspaceApplicationServiceTest {
         service.deleteFile(workspace.workspaceId(), "notes/todo.txt");
 
         assertThat(service.fileStatus(workspace.workspaceId(), "notes/todo.txt").exists()).isFalse();
+    }
+
+    @Test
+    void historicalWorkspaceBindingUsesMutationGateAcrossDatabaseSave() {
+        FakeWorkspaceRepository repository = new FakeWorkspaceRepository();
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        java.time.Instant now = java.time.Instant.parse("2026-07-10T00:00:00Z");
+        repository.save(new Workspace(
+                workspaceId,
+                "Demo",
+                root.toString(),
+                WorkspaceStatus.ACTIVE,
+                now,
+                now,
+                null,
+                "trace_old"));
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        ConversationContextWorkspaceMutation mutation =
+                new ConversationContextWorkspaceMutation(workspaceId, "mutation-workspace");
+        Mockito.when(contextStore.beginWorkspaceMutation(workspaceId)).thenReturn(mutation);
+        WorkspaceApplicationService service = new WorkspaceApplicationService(
+                repository,
+                new WorkspaceFileService(),
+                new WorkspaceServerIdentity("server-a"),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                contextStore);
+
+        Workspace resolved = service.requireWorkspaceOnCurrentServer(workspaceId, "trace_bind");
+
+        assertThat(resolved.linuxServerId()).isEqualTo("server-a");
+        Mockito.verify(contextStore).beginWorkspaceMutation(workspaceId);
+        Mockito.verify(contextStore).completeWorkspaceMutation(mutation);
+        assertThat(repository.saved.getLast()).isEqualTo(resolved);
     }
 
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {

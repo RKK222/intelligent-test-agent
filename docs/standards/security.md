@@ -22,11 +22,24 @@ Token 校验流程：
 
 本地占位策略：
 
-- Redis 是系统必需依赖，用户 Token、运行心跳、调度锁和运行指标均不提供内存降级。
+- Redis 是系统必需依赖，用户 Token、会话运行上下文、运行心跳、调度锁和运行指标均不提供内存或数据库降级。
 - 未配置 `TEST_AGENT_API_TOKEN` 时，`/api/**` 默认放行，便于本地联调。
 - 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 必须携带 `Authorization: Bearer <token>`。
 - 鉴权失败返回统一错误格式，错误码 `UNAUTHENTICATED`，不得回显 token。
 - Actuator health 不使用占位 token，生产暴露范围后续单独收敛。
+
+## 会话运行上下文安全
+
+1. `contextToken` 是 256 位安全随机生成的 opaque token，只用于引用后端已解析的可信会话运行上下文，不能替代用户 Bearer Token、权限校验或 Session 归属校验。
+2. 上下文必须绑定认证用户、Session、Workspace、agent、用户进程、执行节点、Linux 服务器、可复用远端 session 和后端解析的可信工作区根路径；Run 请求中的用户、agent 和 Session 任一不匹配都按上下文失效处理，客户端不能用请求字段覆盖可信路径或运行归属。
+3. 浏览器只可把原始 `contextToken` 保存在当前页面内存，禁止写入 localStorage、sessionStorage、IndexedDB、持久化 Pinia 状态、URL、埋点或错误上报。页面刷新、退出登录或认证用户变化后必须丢弃。
+4. Redis token key 只保存原始 token 的 SHA-256 摘要，不得把原始 token 写入 Redis key、value、集合成员或 PostgreSQL。所有上下文 key 使用同一 hash tag，并维护用户+Session、用户、Session、Workspace、进程五类 ZSET 反向索引、资源/全局 generation，以及 Session revoke、user mutation、Workspace mutation gate；索引 score 使用 token 绝对过期时间，保存、续期和失效脚本必须先清理过期成员。`saveIfCurrent`、`resolveForRouting` 和 `touch` 必须校验关联 generation 与全部 gate，禁止失效、归档或 mutation 窗口中的旧快照迟到写入或续期。
+5. 权限或可信 Workspace 变更必须用 mutation gate 覆盖整个关系型写入窗口：先建 gate 并失效，数据库成功后原子“再次失效 + 释放自己的 gate token”，数据库失败只释放自己的 token；Redis 完成失败时保留 gate fail-closed。Session revoke 与两类 mutation gate TTL 均为 24 小时，避免异常永久锁死；资源/global generation 不设 TTL，确保 gate 过期后旧 token 仍不能复活。权限变化无法低成本反查 app→Session 时按用户粗粒度失效，不得新增数据库扫描。
+6. 签发托管 Workspace 上下文必须在任何历史 Workspace 回绑副作用前实时校验：应用仍启用、当前用户仍为有效成员，个人 Workspace 还必须属于当前用户；`SUPER_ADMIN` 不旁路应用成员规则。找不到托管版本或个人映射的历史 Workspace 沿用 Session owner、Workspace ACTIVE、可信路径及服务器归属校验。自回绑发生后必须放弃当前签发并只使用全新租约完整重读一次，任何其它 CAS 失败不得猜测原因后重试。
+7. 每次 context fast path Run 都必须用缓存的完整进程快照调用公共 `OpencodeProcessStatusQueryService.querySnapshot` 动态探测，不能为了零数据库读取而跳过健康检查，也不能重新按 processId 查询 Repository。稳定 `RUNNING` 只能刷新 Redis heartbeat，数据库状态、PID 和服务地址均未变化时不得写库；`STALE` 只拒绝本次 Run 并保留 token，只有公共状态服务明确返回 `NOT_STARTED` 才按进程反向索引失效上下文。
+8. 后端 API/Service 日志、请求响应摘要和异常详情必须把 `contextToken` 脱敏；响应该 token 的签发接口也不得由通用日志切面记录明文响应体。前端 HTTP 与 RunEvent SSE 原始输出统一在写入页面缓存前递归脱敏所有层级、大小写不敏感的 `contextToken` 字段，再执行长度截断；不得让 SSE `MessageEvent.data` 绕过同一边界。
+9. Redis 不可用时签发或读取上下文返回 `RUNTIME_STATE_UNAVAILABLE`，禁止回退 PostgreSQL、JVM 内存或接受客户端传入的工作区路径/进程快照。
+10. start-run 路由层缓存请求体的硬上限为 32 MiB，超限必须在 assignment 或 Controller 查询前返回统一 `VALIDATION_ERROR`；请求 JSON 已出现 `contextToken` 但值为空、非字符串或无效时必须 fail-closed 返回 `CONVERSATION_CONTEXT_EXPIRED`，不得回退无 token 兼容路径。
 
 ## 限流
 
@@ -53,7 +66,7 @@ Token 校验流程：
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、token。
+- Authorization、Cookie、API key、用户 Token 和 `contextToken`。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。

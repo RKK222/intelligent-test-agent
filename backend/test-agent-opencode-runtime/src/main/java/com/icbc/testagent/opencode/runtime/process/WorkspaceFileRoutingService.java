@@ -7,6 +7,8 @@ import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextWorkspaceMutation;
 import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
@@ -38,6 +40,7 @@ public class WorkspaceFileRoutingService {
     private final BackendJavaRouteResolver routeResolver;
     private final ManagedWorkspacePathResolver pathResolver;
     private final Clock clock;
+    private final ConversationContextStore conversationContextStore;
 
     /**
      * 生产构造器使用系统时钟。
@@ -47,8 +50,15 @@ public class WorkspaceFileRoutingService {
             WorkspaceRepository workspaceRepository,
             UserOpencodeProcessAssignmentService assignmentService,
             BackendJavaRouteResolver routeResolver,
-            ManagedWorkspacePathResolver pathResolver) {
-        this(workspaceRepository, assignmentService, routeResolver, pathResolver, Clock.systemUTC());
+            ManagedWorkspacePathResolver pathResolver,
+            ConversationContextStore conversationContextStore) {
+        this(
+                workspaceRepository,
+                assignmentService,
+                routeResolver,
+                pathResolver,
+                Clock.systemUTC(),
+                conversationContextStore);
     }
 
     /**
@@ -68,11 +78,22 @@ public class WorkspaceFileRoutingService {
             BackendJavaRouteResolver routeResolver,
             ManagedWorkspacePathResolver pathResolver,
             Clock clock) {
+        this(workspaceRepository, assignmentService, routeResolver, pathResolver, clock, null);
+    }
+
+    public WorkspaceFileRoutingService(
+            WorkspaceRepository workspaceRepository,
+            UserOpencodeProcessAssignmentService assignmentService,
+            BackendJavaRouteResolver routeResolver,
+            ManagedWorkspacePathResolver pathResolver,
+            Clock clock,
+            ConversationContextStore conversationContextStore) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.conversationContextStore = conversationContextStore;
     }
 
     /**
@@ -152,7 +173,24 @@ public class WorkspaceFileRoutingService {
             return workspace;
         }
         Workspace rebound = workspace.withLinuxServerId(agentLinuxServerId, traceId, Instant.now(clock));
-        return workspaceRepository.save(rebound);
+        if (conversationContextStore == null) {
+            return workspaceRepository.save(rebound);
+        }
+        ConversationContextWorkspaceMutation mutation =
+                conversationContextStore.beginWorkspaceMutation(rebound.workspaceId());
+        Workspace saved;
+        try {
+            saved = workspaceRepository.save(rebound);
+        } catch (RuntimeException exception) {
+            try {
+                conversationContextStore.abortWorkspaceMutation(mutation);
+            } catch (RuntimeException abortFailure) {
+                exception.addSuppressed(abortFailure);
+            }
+            throw exception;
+        }
+        conversationContextStore.completeWorkspaceMutation(mutation);
+        return saved;
     }
 
     private boolean hasReadyBackend(LinuxServerId linuxServerId) {

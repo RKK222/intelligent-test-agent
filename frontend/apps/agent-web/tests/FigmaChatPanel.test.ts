@@ -14,6 +14,23 @@ const markdownViewStub = {
 };
 
 describe("FigmaChatPanel", () => {
+  it("blocks submit while a history session is still loading", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "切换历史时不能发送",
+        historyLoading: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    const sendButton = wrapper.get('button[aria-label="发送"]');
+    expect(sendButton.attributes("disabled")).toBeDefined();
+    await sendButton.trigger("click");
+
+    expect(wrapper.emitted("send")).toBeUndefined();
+  });
+
   it("loads model options from provider model lists when the flat model list is empty", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

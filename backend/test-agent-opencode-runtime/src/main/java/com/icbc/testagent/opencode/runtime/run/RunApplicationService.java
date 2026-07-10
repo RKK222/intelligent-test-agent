@@ -24,6 +24,7 @@ import com.icbc.testagent.domain.routing.RoutingDecision;
 import com.icbc.testagent.domain.routing.RoutingDecisionRepository;
 import com.icbc.testagent.domain.routing.RoutingReason;
 import com.icbc.testagent.domain.run.Run;
+import com.icbc.testagent.domain.run.ConversationRunContext;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStatus;
@@ -141,6 +142,7 @@ public class RunApplicationService {
     private final RunSessionScopeRuntimeCache runSessionScopeRuntimeCache;
     private final RunSessionScopeRouter runSessionScopeRouter;
     private final RunActivityStateStore runActivityStateStore;
+    private final ConversationRunContextResolver conversationContextResolver;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -188,7 +190,6 @@ public class RunApplicationService {
     /**
      * 创建生产用 Run 编排服务，显式注入实时事件总线、持久化策略和运行态 Redis 存储。
      */
-    @Autowired
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
             com.icbc.testagent.domain.session.SessionRepository sessionRepository,
@@ -208,6 +209,52 @@ public class RunApplicationService {
             RunSessionScopeRepository runSessionScopeRepository,
             RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
             RunActivityStateStore runActivityStateStore) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runEventLiveBus,
+                runEventPersistencePolicy,
+                modelCatalogService,
+                userProcessAssignmentService,
+                workspacePathResolver,
+                snapshotService,
+                runSessionScopeRepository,
+                runSessionScopeRuntimeCache,
+                runActivityStateStore,
+                null);
+    }
+
+    /**
+     * 生产构造器额外注入会话上下文策略，新客户端启动路径不再重复解析控制面对象。
+     */
+    @Autowired
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            ConversationRunContextResolver conversationContextResolver) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -248,6 +295,7 @@ public class RunApplicationService {
         this.runActivityStateStore = runActivityStateStore == null
                 ? new RunActivityStateStore(null)
                 : runActivityStateStore;
+        this.conversationContextResolver = conversationContextResolver;
     }
 
     /**
@@ -389,18 +437,25 @@ public class RunApplicationService {
 
     private Run startRunInternal(UserId userId, String agentId, StartRunInput input, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        ConversationRunContext conversationContext = resolveConversationContext(userId, resolvedAgentId, input, traceId);
         LOGGER.info("Run starting, userId={}, agentId={}, sessionId={}, traceId={}",
                 userId != null ? userId.value() : "anonymous",
                 resolvedAgentId,
                 input.sessionId().value(),
                 traceId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
-        UserOpencodeProcessAssignment userProcessAssignment = resolveUserProcessAssignment(userId, resolvedAgentId, traceId);
+        UserOpencodeProcessAssignment userProcessAssignment = conversationContext == null
+                ? resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
+                : null;
         Instant now = Instant.now();
         SessionId sessionId = input.sessionId();
         String prompt = input.effectivePrompt();
-        Session session = findSession(sessionId);
-        Workspace workspace = findWorkspace(session.workspaceId());
+        Session session = conversationContext == null
+                ? findSession(sessionId)
+                : conversationContext.sessionSnapshot();
+        Workspace workspace = conversationContext == null
+                ? findWorkspace(session.workspaceId())
+                : conversationContext.workspaceSnapshot();
         ModelSelection modelSelection = resolveModelSelection(input.model());
         String opencodeAgent = resolveOpencodeAgent(input);
         Run pending = new Run(
@@ -421,7 +476,9 @@ public class RunApplicationService {
 
         try {
             AgentRoutingTarget target = userProcessAssignment == null
-                    ? resolveAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
+                    ? (conversationContext == null
+                            ? resolveAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
+                            : conversationContextTarget(conversationContext, pending.runId(), now, traceId))
                     : userProcessTarget(userProcessAssignment, pending.runId(), now, traceId);
             LOGGER.debug("Run routed, runId={}, nodeId={}, reason={}, traceId={}",
                     pending.runId().value(),
@@ -429,13 +486,16 @@ public class RunApplicationService {
                     target.decision().reason().name(),
                     traceId);
             routingDecisionRepository.save(target.decision());
-            AgentSessionBinding binding = runtimeTargetResolver.ensureAgentSession(
-                    resolvedAgentId,
-                    runtime,
-                    session,
-                    workspace,
-                    target.node(),
-                    traceId);
+            AgentSessionBinding binding = conversationContext != null
+                            && conversationContext.bindingSnapshot() != null
+                    ? conversationContext.bindingSnapshot()
+                    : runtimeTargetResolver.ensureAgentSession(
+                            resolvedAgentId,
+                            runtime,
+                            session,
+                            workspace,
+                            target.node(),
+                            traceId);
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
             recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId);
@@ -491,6 +551,17 @@ public class RunApplicationService {
         return runtimeTargetResolver.resolveUserProcessAssignment(userId, agentId, traceId).orElse(null);
     }
 
+    private ConversationRunContext resolveConversationContext(
+            UserId userId,
+            String agentId,
+            StartRunInput input,
+            String traceId) {
+        if (userId == null || conversationContextResolver == null) {
+            return null;
+        }
+        return conversationContextResolver.resolve(userId, agentId, input, traceId).orElse(null);
+    }
+
     private void recordRootSessionScope(String agentId, Run run, String remoteSessionId, String traceId) {
         Instant now = Instant.now();
         RunSessionScope scope = new RunSessionScope(
@@ -539,6 +610,17 @@ public class RunApplicationService {
             String traceId) {
         // 用户进程节点可能是本地直联合成节点，先落兼容节点，避免后续路由审计和 binding 外键失败。
         ExecutionNode node = executionNodeRepository.save(assignment.node());
+        return new AgentRoutingTarget(
+                node,
+                new RoutingDecision(runId, node.executionNodeId(), RoutingReason.MANUAL_OVERRIDE, now, traceId));
+    }
+
+    private AgentRoutingTarget conversationContextTarget(
+            ConversationRunContext context,
+            RunId runId,
+            Instant now,
+            String traceId) {
+        ExecutionNode node = context.executionNodeSnapshot();
         return new AgentRoutingTarget(
                 node,
                 new RoutingDecision(runId, node.executionNodeId(), RoutingReason.MANUAL_OVERRIDE, now, traceId));

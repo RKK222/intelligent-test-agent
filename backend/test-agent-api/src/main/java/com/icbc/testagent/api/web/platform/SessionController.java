@@ -172,7 +172,9 @@ public class SessionController {
             @PathVariable String sessionId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
-        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.archiveSession(new SessionId(sessionId), traceId)), traceId);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(
+                sessionService.archiveSession(userId, new SessionId(sessionId), traceId)), traceId);
     }
 
     /**

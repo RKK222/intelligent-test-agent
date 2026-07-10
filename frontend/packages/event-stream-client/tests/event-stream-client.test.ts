@@ -246,7 +246,7 @@ describe("event-stream-client", () => {
     const received: Array<{ runningCount: number; questionCount: number }> = [];
     const statuses: string[] = [];
 
-    subscribeSessionRuntimeState({
+    const subscription = subscribeSessionRuntimeState({
       baseUrl: "http://api",
       token: "token_secret",
       fetcher,
@@ -255,6 +255,7 @@ describe("event-stream-client", () => {
     });
 
     await waitFor(() => received.length === 2);
+    subscription.close();
 
     expect(fetcher).toHaveBeenCalledWith(
       "http://api/api/internal/platform/opencode-runtime/sessions/runtime-state/events",
@@ -292,6 +293,39 @@ describe("event-stream-client", () => {
 
     expect(capturedSignal?.aborted).toBe(true);
     expect(statuses.at(-1)).toBe("closed");
+  });
+
+  it("reconnects session runtime state with 1/2/5/10/30 second backoff and stops after close", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("stream unavailable"));
+    const statuses: string[] = [];
+    const subscription = subscribeSessionRuntimeState({
+      baseUrl: "http://api",
+      token: "token_secret",
+      fetcher,
+      onStatus: (status) => statuses.push(status),
+      onEvent: () => undefined
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      for (const [delay, expectedCalls] of [[1_000, 2], [2_000, 3], [5_000, 4], [10_000, 5], [30_000, 6]] as const) {
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(fetcher).toHaveBeenCalledTimes(expectedCalls - 1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetcher).toHaveBeenCalledTimes(expectedCalls);
+      }
+
+      subscription.close();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(fetcher).toHaveBeenCalledTimes(6);
+      expect(statuses.at(-1)).toBe("closed");
+    } finally {
+      subscription.close();
+      vi.useRealTimers();
+    }
   });
 });
 

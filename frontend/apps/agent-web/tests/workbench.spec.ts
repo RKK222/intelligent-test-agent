@@ -425,6 +425,134 @@ test("model picker groups models by provider and updates run model", async ({ pa
   });
 });
 
+test("new runs use one in-memory conversation context and a client request id", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runContextRequests: string[] = [];
+  await mockBackendApi(page, { ...runnableWorkspaceSetup(), runRequests, runContextRequests });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("context run");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runContextRequests).toEqual(["ses_1"]);
+  expect(runRequests[0]).toMatchObject({
+    sessionId: "ses_1",
+    contextToken: "ctx_e2e_1"
+  });
+  expect(String(runRequests[0]?.clientRequestId)).toMatch(/^req_/);
+});
+
+test("expired conversation context retries once with the same client request id", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runContextRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    runContextRequests,
+    runContextTokens: ["ctx_old", "ctx_new"],
+    runFailures: ["CONVERSATION_CONTEXT_EXPIRED"]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("retry context");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(2);
+  expect(runContextRequests).toEqual(["ses_1", "ses_1"]);
+  expect(runRequests.map((request) => request.contextToken)).toEqual(["ctx_old", "ctx_new"]);
+  expect(runRequests[0]?.clientRequestId).toBe(runRequests[1]?.clientRequestId);
+});
+
+test("pending startRun does not poll active-run every 1.5 seconds", async ({ page }) => {
+  let releaseRunRequest!: () => void;
+  const runRequestGate = new Promise<void>((resolve) => {
+    releaseRunRequest = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  const activeRunRequests: string[] = [];
+  const runEventRequests: string[] = [];
+  await mockBackendApi(page, { ...runnableWorkspaceSetup(), runRequests, activeRunRequests, runEventRequests, runRequestGate });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("slow start");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  await page.waitForTimeout(1800);
+  expect(activeRunRequests.length).toBeLessThanOrEqual(1);
+  const fallbackCount = activeRunRequests.length;
+  await page.waitForTimeout(1800);
+  expect(activeRunRequests).toHaveLength(fallbackCount);
+  releaseRunRequest();
+  await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
+});
+
+test("runtime-state uses the SSE snapshot without a parallel HTTP read", async ({ page }) => {
+  const runtimeStateHttpRequests: string[] = [];
+  await mockBackendApi(page, { runtimeStateHttpRequests });
+
+  await gotoWorkbench(page);
+  await page.waitForTimeout(200);
+
+  expect(runtimeStateHttpRequests).toEqual([]);
+});
+
+test("late session creation cannot replace a history switch", async ({ page }) => {
+  let releaseSessionRequest!: () => void;
+  const sessionRequestGate = new Promise<void>((resolve) => {
+    releaseSessionRequest = resolve;
+  });
+  const sessionRequests: Array<Record<string, unknown>> = [];
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runContextRequests: string[] = [];
+  const sessionMessageRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    sessionRequestGate,
+    sessionRequests,
+    runRequests,
+    runContextRequests,
+    sessionMessageRequests,
+    sessions: [{
+      sessionId: "ses_history_target",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "目标历史会话",
+      status: "ACTIVE",
+      pinned: false,
+      createdAt: "2026-07-10T01:00:00Z",
+      updatedAt: "2026-07-10T01:01:00Z"
+    }],
+    sessionMessagesBySessionId: {
+      ses_history_target: [{
+        messageId: "msg_history_target",
+        sessionId: "ses_history_target",
+        role: "ASSISTANT",
+        content: "目标历史正文",
+        createdAt: "2026-07-10T01:01:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("等待创建会话");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => sessionRequests.length).toBe(1);
+
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "目标历史会话" }).click();
+  await expect(page.getByText("目标历史正文")).toBeVisible();
+  releaseSessionRequest();
+  await page.waitForTimeout(200);
+
+  expect(runRequests).toEqual([]);
+  expect(runContextRequests).toEqual(["ses_history_target"]);
+  expect(sessionMessageRequests).toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_history_target/messages?page=1&size=100&refresh=false"
+  );
+  await expect(page.getByText("目标历史正文")).toBeVisible();
+});
+
 test("agent picker updates the run agent", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const agentRequests: string[] = [];
@@ -1083,7 +1211,7 @@ test("switching history restores assistant documents and the file changes summar
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: /消息列表/ }).click();
   await page.getByRole("button", { name: /请生成登录测试报告/ }).click();
 
   await expect.poll(() => sessionTreeRequests).toContain("/api/internal/agent/opencode/sessions/ses_history/session-tree/messages");
@@ -1095,12 +1223,74 @@ test("switching history restores assistant documents and the file changes summar
   await expect(page.getByText("docs/登录测试报告.md")).toBeVisible();
 });
 
-test("switching history resumes the active run event stream", async ({ page }) => {
+test("history run projection keeps sending locked until stale details cannot overwrite a new run", async ({ page }) => {
+  let releaseHistoryRun!: () => void;
+  const historyRunGate = new Promise<void>((resolve) => {
+    releaseHistoryRun = resolve;
+  });
+  const historyRunRequests: string[] = [];
+  const runRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    historyRunGate,
+    historyRunRequests,
+    runRequests,
+    sessions: [{
+      sessionId: "ses_history",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "等待历史运行详情",
+      status: "ACTIVE",
+      pinned: false,
+      createdAt: "2026-07-10T03:00:00Z",
+      updatedAt: "2026-07-10T03:01:00Z"
+    }],
+    sessionMessages: [{
+      messageId: "msg_history_projection",
+      sessionId: "ses_history",
+      role: "ASSISTANT",
+      content: "历史正文已就绪",
+      runId: "run_history",
+      createdAt: "2026-07-10T03:01:00Z"
+    }],
+    historyRun: {
+      runId: "run_history",
+      sessionId: "ses_history",
+      workspaceId: "wrk_1234567890abcdef",
+      status: "SUCCEEDED",
+      createdAt: "2026-07-10T03:00:00Z",
+      updatedAt: "2026-07-10T03:01:00Z"
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "等待历史运行详情" }).click();
+  await expect.poll(() => historyRunRequests).toContain("/api/internal/agent/opencode/runs/run_history");
+  await expect(page.getByRole("status")).toContainText("正在加载消息列表");
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await composer.fill("历史投影完成后发送");
+  await expect(sendButton).toBeDisabled();
+  await sendButton.click({ force: true });
+  expect(runRequests).toEqual([]);
+
+  releaseHistoryRun();
+  await expect(page.getByText("历史正文已就绪")).toBeVisible();
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({ sessionId: "ses_history", prompt: "历史投影完成后发送" });
+});
+
+test("switching history resumes the runtime-state run without active-run lookup", async ({ page }) => {
   const activeRunRequests: string[] = [];
   const runEventRequests: string[] = [];
+  const runContextRequests: string[] = [];
   await mockBackendApi(page, {
     activeRunRequests,
     runEventRequests,
+    runContextRequests,
     recentWorkspaces: {
       app_gcms: {
         ...workspace(),
@@ -1141,13 +1331,17 @@ test("switching history resumes the active run event stream", async ({ page }) =
       createdAt: "2026-06-28T08:00:00Z",
       updatedAt: "2026-06-28T08:01:00Z"
     },
-    activeRun: {
-      runId: "run_1",
-      sessionId: "ses_history",
-      workspaceId: "wrk_1234567890abcdef",
-      status: "RUNNING",
-      createdAt: "2026-06-28T08:02:00Z",
-      updatedAt: "2026-06-28T08:02:01Z"
+    runtimeStateSummary: {
+      runningCount: 1,
+      questionCount: 0,
+      sessions: [{
+        sessionId: "ses_history",
+        runId: "run_1",
+        runStatus: "RUNNING",
+        attention: null,
+        updatedAt: "2026-06-28T08:02:01Z"
+      }],
+      generatedAt: "2026-06-28T08:02:02Z"
     },
     runEvents: [
       event(1, "message.part.delta", {
@@ -1161,12 +1355,689 @@ test("switching history resumes the active run event stream", async ({ page }) =
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: /消息列表/ }).click();
   await page.getByRole("button", { name: /generate-cases-orthogonal/ }).click();
 
-  await expect.poll(() => activeRunRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_history/active-run");
   await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
+  expect(activeRunRequests).toEqual([]);
+  expect(runContextRequests).toEqual(["ses_history"]);
   await expect(page.getByText("正交表实时输出")).toBeVisible();
+});
+
+test("runtime-state outage performs only one active-run fallback", async ({ page }) => {
+  const activeRunRequests: string[] = [];
+  const runtimeStateEventRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    activeRunRequests,
+    runtimeStateEventRequests,
+    runtimeStateStreamFailure: true,
+    sessions: [{
+      sessionId: "ses_history",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "恢复中的会话",
+      status: "ACTIVE",
+      pinned: false,
+      createdAt: "2026-06-28T08:00:00Z",
+      updatedAt: "2026-06-28T08:01:00Z"
+    }],
+    activeRun: null
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /恢复中的会话/ }).click();
+  await expect.poll(() => runtimeStateEventRequests.length).toBeGreaterThanOrEqual(2);
+  await page.waitForTimeout(3500);
+
+  expect(activeRunRequests).toEqual(["/api/internal/platform/opencode-runtime/sessions/ses_history/active-run"]);
+});
+
+test("runtime-state outage falls back once for each switched session in the same outage", async ({ page }) => {
+  const activeRunRequests: string[] = [];
+  const runtimeStateEventRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    activeRunRequests,
+    runtimeStateEventRequests,
+    runtimeStateStreamFailure: true,
+    sessions: [
+      {
+        sessionId: "ses_outage_a",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "故障会话 A",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-06-28T08:00:00Z",
+        updatedAt: "2026-06-28T08:01:00Z"
+      },
+      {
+        sessionId: "ses_outage_b",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "故障会话 B",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-06-28T08:02:00Z",
+        updatedAt: "2026-06-28T08:03:00Z"
+      }
+    ],
+    activeRun: null
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "故障会话 A" }).click();
+  await expect.poll(() => activeRunRequests).toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_outage_a/active-run"
+  );
+
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "故障会话 B" }).click();
+  await expect.poll(() => activeRunRequests).toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_outage_b/active-run"
+  );
+  await expect.poll(() => runtimeStateEventRequests.length).toBeGreaterThanOrEqual(2);
+  await page.waitForTimeout(3500);
+
+  expect(activeRunRequests).toEqual([
+    "/api/internal/platform/opencode-runtime/sessions/ses_outage_a/active-run",
+    "/api/internal/platform/opencode-runtime/sessions/ses_outage_b/active-run"
+  ]);
+});
+
+test("a delayed history switch cannot overwrite a newer session and workspace", async ({ page }) => {
+  let releaseWorkspaceA!: () => void;
+  const workspaceAGate = new Promise<void>((resolve) => {
+    releaseWorkspaceA = resolve;
+  });
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const workspaceRequests: string[] = [];
+  const runContextRequests: string[] = [];
+  const sessionMessageRequests: string[] = [];
+  const workspaceA = {
+    ...workspace(),
+    workspaceId: "wrk_race_a",
+    name: "竞态工作区 A",
+    rootPath: "/Users/huang/workspace/race-a",
+    appId: "app_gcms"
+  };
+  const workspaceB = {
+    ...workspace(),
+    workspaceId: "wrk_race_b",
+    name: "竞态工作区 B",
+    rootPath: "/Users/huang/workspace/race-b",
+    appId: "app_gcms"
+  };
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileRequests,
+    workspaceRequests,
+    workspaceRequestGates: { wrk_race_a: workspaceAGate },
+    runContextRequests,
+    sessionMessageRequests,
+    workspaces: [workspace(), workspaceA, workspaceB],
+    markRecentWorkspaces: { wrk_race_a: workspaceA, wrk_race_b: workspaceB },
+    sessions: [
+      {
+        sessionId: "ses_race_a",
+        workspaceId: "wrk_race_a",
+        title: "竞态会话 A",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T02:00:00Z",
+        updatedAt: "2026-07-10T02:01:00Z"
+      },
+      {
+        sessionId: "ses_race_b",
+        workspaceId: "wrk_race_b",
+        title: "竞态会话 B",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T02:02:00Z",
+        updatedAt: "2026-07-10T02:03:00Z"
+      }
+    ],
+    sessionMessagesBySessionId: {
+      ses_race_a: [{
+        messageId: "msg_race_a",
+        sessionId: "ses_race_a",
+        role: "ASSISTANT",
+        content: "竞态正文 A",
+        createdAt: "2026-07-10T02:01:00Z"
+      }],
+      ses_race_b: [{
+        messageId: "msg_race_b",
+        sessionId: "ses_race_b",
+        role: "ASSISTANT",
+        content: "竞态正文 B",
+        createdAt: "2026-07-10T02:03:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  fileRequests.length = 0;
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "竞态会话 A" }).click();
+  await expect.poll(() => workspaceRequests).toContain("wrk_race_a");
+
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "竞态会话 B" }).click();
+  await expect(page.getByText("竞态正文 B")).toBeVisible();
+  releaseWorkspaceA();
+  await page.waitForTimeout(200);
+
+  expect(runContextRequests).toEqual(["ses_race_b"]);
+  expect(sessionMessageRequests).toEqual([
+    "/api/internal/platform/opencode-runtime/sessions/ses_race_b/messages?page=1&size=100&refresh=false"
+  ]);
+  expect(fileRequests).toContainEqual({ workspaceId: "wrk_race_b", path: "" });
+  expect(fileRequests).not.toContainEqual({ workspaceId: "wrk_race_a", path: "" });
+  await expect(page.getByText("竞态正文 B")).toBeVisible();
+  await expect(page.getByText("竞态正文 A")).toHaveCount(0);
+});
+
+test("history loading cannot send a run to the previous session", async ({ page }) => {
+  let releaseTargetWorkspace!: () => void;
+  const targetWorkspaceGate = new Promise<void>((resolve) => {
+    releaseTargetWorkspace = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  const workspaceRequests: string[] = [];
+  const previousWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_history_send_previous",
+    name: "发送保护旧工作区",
+    rootPath: "/Users/huang/workspace/history-send-previous",
+    appId: "app_gcms"
+  };
+  const targetWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_history_send_target",
+    name: "发送保护目标工作区",
+    rootPath: "/Users/huang/workspace/history-send-target",
+    appId: "app_gcms"
+  };
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    workspaceRequests,
+    workspaceRequestGates: { wrk_history_send_target: targetWorkspaceGate },
+    workspaces: [workspace(), previousWorkspace, targetWorkspace],
+    markRecentWorkspaces: {
+      wrk_history_send_previous: previousWorkspace,
+      wrk_history_send_target: targetWorkspace
+    },
+    sessions: [
+      {
+        sessionId: "ses_history_send_previous",
+        workspaceId: "wrk_history_send_previous",
+        title: "发送保护旧会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T02:04:00Z",
+        updatedAt: "2026-07-10T02:05:00Z"
+      },
+      {
+        sessionId: "ses_history_send_target",
+        workspaceId: "wrk_history_send_target",
+        title: "发送保护目标会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T02:06:00Z",
+        updatedAt: "2026-07-10T02:07:00Z"
+      }
+    ],
+    sessionMessagesBySessionId: {
+      ses_history_send_previous: [{
+        messageId: "msg_history_send_previous",
+        sessionId: "ses_history_send_previous",
+        role: "ASSISTANT",
+        content: "发送保护旧正文",
+        createdAt: "2026-07-10T02:05:00Z"
+      }],
+      ses_history_send_target: [{
+        messageId: "msg_history_send_target",
+        sessionId: "ses_history_send_target",
+        role: "ASSISTANT",
+        content: "发送保护目标正文",
+        createdAt: "2026-07-10T02:07:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "发送保护旧会话" }).click();
+  await expect(page.getByText("发送保护旧正文")).toBeVisible();
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("切换中不得发送");
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "发送保护目标会话" }).click();
+  await expect.poll(() => workspaceRequests).toContain("wrk_history_send_target");
+
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await expect(sendButton).toBeDisabled();
+  await sendButton.click({ force: true });
+  await page.waitForTimeout(100);
+  expect(runRequests).toEqual([]);
+
+  releaseTargetWorkspace();
+  await expect(page.getByText("发送保护目标正文")).toBeVisible();
+  expect(runRequests).toEqual([]);
+});
+
+test("a delayed history switch cannot survive a new conversation", async ({ page }) => {
+  let releaseHistoryWorkspace!: () => void;
+  const historyWorkspaceGate = new Promise<void>((resolve) => {
+    releaseHistoryWorkspace = resolve;
+  });
+  const runContextRequests: string[] = [];
+  const runRequests: Array<Record<string, unknown>> = [];
+  const sessionRequests: Array<Record<string, unknown>> = [];
+  const sessionMessageRequests: string[] = [];
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const historyWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_history_new_conversation",
+    name: "新对话竞态工作区",
+    rootPath: "/Users/huang/workspace/history-new-conversation",
+    appId: "app_gcms"
+  };
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runContextRequests,
+    runRequests,
+    sessionRequests,
+    sessionMessageRequests,
+    fileRequests,
+    workspaceRequestGates: { wrk_history_new_conversation: historyWorkspaceGate },
+    workspaces: [workspace(), historyWorkspace],
+    markRecentWorkspaces: { wrk_history_new_conversation: historyWorkspace },
+    sessions: [{
+      sessionId: "ses_history_new_conversation",
+      workspaceId: "wrk_history_new_conversation",
+      title: "等待后新建对话",
+      status: "ACTIVE",
+      pinned: false,
+      createdAt: "2026-07-10T02:10:00Z",
+      updatedAt: "2026-07-10T02:11:00Z"
+    }],
+    sessionMessagesBySessionId: {
+      ses_history_new_conversation: [{
+        messageId: "msg_history_new_conversation",
+        sessionId: "ses_history_new_conversation",
+        role: "ASSISTANT",
+        content: "不应恢复的新对话正文",
+        createdAt: "2026-07-10T02:11:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  fileRequests.length = 0;
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "等待后新建对话" }).click();
+  await page.getByRole("button", { name: "新建对话" }).click();
+  releaseHistoryWorkspace();
+  await page.waitForTimeout(200);
+
+  expect(runContextRequests).not.toContain("ses_history_new_conversation");
+  expect(sessionMessageRequests).not.toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_history_new_conversation/messages?page=1&size=100&refresh=false"
+  );
+  expect(fileRequests).not.toContainEqual({ workspaceId: "wrk_history_new_conversation", path: "" });
+  await expect(page.getByText("不应恢复的新对话正文")).toHaveCount(0);
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await composer.fill("新对话恢复发送");
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+  await expect.poll(() => runRequests.length).toBe(1);
+
+  expect(sessionRequests).toHaveLength(1);
+  expect(sessionRequests[0]).toMatchObject({ workspaceId: "wrk_personal_default" });
+  expect(runContextRequests).toEqual(["ses_1"]);
+  expect(runRequests[0]).toMatchObject({ sessionId: "ses_1", prompt: "新对话恢复发送" });
+});
+
+test("a delayed history switch cannot overwrite a manual application workspace switch", async ({ page }) => {
+  let releaseHistoryWorkspace!: () => void;
+  const historyWorkspaceGate = new Promise<void>((resolve) => {
+    releaseHistoryWorkspace = resolve;
+  });
+  const runContextRequests: string[] = [];
+  const runRequests: Array<Record<string, unknown>> = [];
+  const sessionRequests: Array<Record<string, unknown>> = [];
+  const sessionMessageRequests: string[] = [];
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const historyWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_history_manual_switch",
+    name: "迟到历史工作区",
+    rootPath: "/Users/huang/workspace/history-manual-switch",
+    appId: "app_gcms"
+  };
+  const cossWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_coss_manual_switch",
+    name: "COSS 手动工作区",
+    rootPath: "/Users/huang/workspace/coss-manual-switch",
+    appId: "app_coss",
+    versionId: "awv_coss_manual",
+    applicationWorkspaceId: "awp_coss_manual"
+  };
+  await mockBackendApi(page, {
+    fileRequests,
+    runContextRequests,
+    runRequests,
+    sessionRequests,
+    sessionMessageRequests,
+    applications: [
+      { appId: "app_gcms", appName: "F-GCMS", enabled: true },
+      { appId: "app_coss", appName: "F-COSS", enabled: true }
+    ],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      },
+      app_coss: cossWorkspace
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")],
+      awv_coss_manual: [{
+        ...defaultPersonalWorkspace("awv_coss_manual"),
+        appId: "app_coss",
+        applicationWorkspaceId: "awp_coss_manual",
+        runtimeWorkspace: cossWorkspace
+      }]
+    },
+    workspaceRequestGates: { wrk_history_manual_switch: historyWorkspaceGate },
+    workspaces: [workspace(), historyWorkspace, cossWorkspace],
+    markRecentWorkspaces: {
+      wrk_history_manual_switch: historyWorkspace,
+      wrk_coss_manual_switch: cossWorkspace
+    },
+    sessions: [{
+      sessionId: "ses_history_manual_switch",
+      workspaceId: "wrk_history_manual_switch",
+      title: "等待手动切工作区",
+      status: "ACTIVE",
+      pinned: false,
+      createdAt: "2026-07-10T02:20:00Z",
+      updatedAt: "2026-07-10T02:21:00Z"
+    }]
+  });
+
+  await gotoWorkbench(page);
+  fileRequests.length = 0;
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "等待手动切工作区" }).click();
+
+  await page.getByRole("button", { name: "F-GCMS" }).click();
+  await page.getByRole("option", { name: /F-COSS/ }).click();
+  await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_coss_manual_switch", path: "" });
+  releaseHistoryWorkspace();
+  await page.waitForTimeout(200);
+
+  expect(runContextRequests).not.toContain("ses_history_manual_switch");
+  expect(sessionMessageRequests).not.toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_history_manual_switch/messages?page=1&size=100&refresh=false"
+  );
+  expect(fileRequests).not.toContainEqual({ workspaceId: "wrk_history_manual_switch", path: "" });
+  await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await composer.fill("新工作区恢复发送");
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+  await expect.poll(() => runRequests.length).toBe(1);
+
+  expect(sessionRequests).toHaveLength(1);
+  expect(sessionRequests[0]).toMatchObject({ workspaceId: "wrk_coss_manual_switch" });
+  expect(runContextRequests).toEqual(["ses_1"]);
+  expect(runRequests[0]).toMatchObject({ sessionId: "ses_1", prompt: "新工作区恢复发送" });
+});
+
+test("a delayed history switch cannot survive an authentication change", async ({ page }) => {
+  let releaseHistoryWorkspace!: () => void;
+  const historyWorkspaceGate = new Promise<void>((resolve) => {
+    releaseHistoryWorkspace = resolve;
+  });
+  const runContextRequests: string[] = [];
+  const sessionMessageRequests: string[] = [];
+  const logoutRequests: string[] = [];
+  const historyWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_history_auth_change",
+    name: "认证竞态工作区",
+    rootPath: "/Users/huang/workspace/history-auth-change",
+    appId: "app_gcms"
+  };
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    logoutRequests,
+    runContextRequests,
+    sessionMessageRequests,
+    workspaceRequestGates: { wrk_history_auth_change: historyWorkspaceGate },
+    workspaces: [workspace(), historyWorkspace],
+    markRecentWorkspaces: { wrk_history_auth_change: historyWorkspace },
+    sessions: [{
+      sessionId: "ses_history_auth_change",
+      workspaceId: "wrk_history_auth_change",
+      title: "等待认证变化",
+      status: "ACTIVE",
+      pinned: false,
+      createdAt: "2026-07-10T02:30:00Z",
+      updatedAt: "2026-07-10T02:31:00Z"
+    }]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "等待认证变化" }).click();
+  await page.getByRole("button", { name: /当前用户/ }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
+  await expect.poll(() => logoutRequests).toEqual(["POST /api/auth/logout"]);
+  releaseHistoryWorkspace();
+  await page.waitForTimeout(200);
+
+  expect(runContextRequests).not.toContain("ses_history_auth_change");
+  expect(sessionMessageRequests).not.toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_history_auth_change/messages?page=1&size=100&refresh=false"
+  );
+});
+
+test("a delayed conversation context cannot dispatch after switching history", async ({ page }) => {
+  let releaseContextA!: () => void;
+  const contextAGate = new Promise<void>((resolve) => {
+    releaseContextA = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runContextRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    runContextRequests,
+    runContextRequestGates: { ses_context_a: contextAGate },
+    sessions: [
+      {
+        sessionId: "ses_context_a",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "上下文会话 A",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T03:00:00Z",
+        updatedAt: "2026-07-10T03:01:00Z"
+      },
+      {
+        sessionId: "ses_context_b",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "上下文会话 B",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T03:02:00Z",
+        updatedAt: "2026-07-10T03:03:00Z"
+      }
+    ],
+    sessionMessagesBySessionId: {
+      ses_context_a: [{
+        messageId: "msg_context_a",
+        sessionId: "ses_context_a",
+        role: "ASSISTANT",
+        content: "上下文正文 A",
+        createdAt: "2026-07-10T03:01:00Z"
+      }],
+      ses_context_b: [{
+        messageId: "msg_context_b",
+        sessionId: "ses_context_b",
+        role: "ASSISTANT",
+        content: "上下文正文 B",
+        createdAt: "2026-07-10T03:03:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "上下文会话 A" }).click();
+  await expect(page.getByText("上下文正文 A")).toBeVisible();
+  await expect.poll(() => runContextRequests).toContain("ses_context_a");
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("等待上下文");
+  await page.getByRole("button", { name: "发送" }).click();
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "上下文会话 B" }).click();
+  await expect(page.getByText("上下文正文 B")).toBeVisible();
+  releaseContextA();
+  await page.waitForTimeout(200);
+
+  expect(runRequests).toEqual([]);
+  await expect(page.getByText("上下文正文 B")).toBeVisible();
+});
+
+test("a delayed startRun response cannot replace a newer history session", async ({ page }) => {
+  let releaseRunRequest!: () => void;
+  const runRequestGate = new Promise<void>((resolve) => {
+    releaseRunRequest = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runEventRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequestGate,
+    runRequests,
+    runEventRequests,
+    sessions: [
+      {
+        sessionId: "ses_start_a",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "启动会话 A",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T04:00:00Z",
+        updatedAt: "2026-07-10T04:01:00Z"
+      },
+      {
+        sessionId: "ses_start_b",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "启动会话 B",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T04:02:00Z",
+        updatedAt: "2026-07-10T04:03:00Z"
+      }
+    ],
+    sessionMessagesBySessionId: {
+      ses_start_a: [{
+        messageId: "msg_start_a",
+        sessionId: "ses_start_a",
+        role: "ASSISTANT",
+        content: "启动正文 A",
+        createdAt: "2026-07-10T04:01:00Z"
+      }],
+      ses_start_b: [{
+        messageId: "msg_start_b",
+        sessionId: "ses_start_b",
+        role: "ASSISTANT",
+        content: "启动正文 B",
+        createdAt: "2026-07-10T04:03:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "启动会话 A" }).click();
+  await expect(page.getByText("启动正文 A")).toBeVisible();
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("等待启动结果");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(1);
+  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: "启动会话 B" }).click();
+  await expect(page.getByText("启动正文 B")).toBeVisible();
+  releaseRunRequest();
+  await page.waitForTimeout(200);
+
+  expect(runEventRequests).not.toContain("/api/internal/agent/opencode/runs/run_1/events");
+  await expect(page.getByText("启动正文 B")).toBeVisible();
+});
+
+test("an ambiguous startRun failure does not fail a run recovered by runtime-state", async ({ page }) => {
+  let releaseRuntimeState!: () => void;
+  let releaseRunRequest!: () => void;
+  const runtimeStateEventGate = new Promise<void>((resolve) => {
+    releaseRuntimeState = resolve;
+  });
+  const runRequestGate = new Promise<void>((resolve) => {
+    releaseRunRequest = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runEventRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runtimeStateEventGate,
+    runRequestGate,
+    runRequests,
+    runEventRequests,
+    runFailureResponses: [{ status: 504, code: "OPENCODE_TIMEOUT", message: "启动确认超时" }],
+    runtimeStateSummary: {
+      runningCount: 1,
+      questionCount: 0,
+      sessions: [{
+        sessionId: "ses_1",
+        runId: "run_runtime_recovered",
+        runStatus: "RUNNING",
+        attention: null,
+        updatedAt: "2026-07-10T05:01:00Z"
+      }],
+      generatedAt: "2026-07-10T05:01:01Z"
+    },
+    runEventsByRunId: { run_runtime_recovered: [] }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("超时但已受理");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(1);
+
+  releaseRuntimeState();
+  await expect.poll(() => runEventRequests).toContain(
+    "/api/internal/agent/opencode/runs/run_runtime_recovered/events"
+  );
+  releaseRunRequest();
+  await page.waitForTimeout(200);
+
+  await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
+  await expect(page.getByText("启动 Run 失败")).toHaveCount(0);
+  await expect(page.getByText("启动确认超时")).toHaveCount(0);
 });
 
 test("history loading shows immediately and does not wait for message feedback", async ({ page }) => {
@@ -1844,6 +2715,8 @@ async function mockBackendApi(
     fileRequests?: Array<{ workspaceId: string; path: string }>;
     gitDiffRequests?: string[];
     workspaces?: Array<ReturnType<typeof workspace> & Record<string, unknown>>;
+    workspaceRequests?: string[];
+    workspaceRequestGates?: Record<string, Promise<void>>;
     runEvents?: Array<ReturnType<typeof event>>;
     runIds?: string[];
     runEventsByRunId?: Record<string, Array<ReturnType<typeof event>>>;
@@ -1883,18 +2756,35 @@ async function mockBackendApi(
     initializeFailureThenReady?: boolean;
     ensureDefaultRequiresReady?: boolean;
     sessions?: Array<Record<string, unknown>>;
+    sessionRequestGate?: Promise<void>;
     sessionTreeMessages?: Record<string, unknown>;
+    sessionTreeMessagesBySessionId?: Record<string, Record<string, unknown>>;
     sessionTreeRequests?: string[];
     sessionMessages?: Array<Record<string, unknown>>;
+    sessionMessagesBySessionId?: Record<string, Array<Record<string, unknown>>>;
     sessionMessageRequests?: string[];
     sessionMessagesGate?: Promise<void>;
     messageFeedbackGate?: Promise<void>;
     feedbackRequests?: string[];
     historyRun?: Record<string, unknown>;
     historyDiffFiles?: Array<Record<string, unknown>>;
+    historyRunGate?: Promise<void>;
+    historyRunRequests?: string[];
     activeRun?: Record<string, unknown> | null;
     activeRunRequests?: string[];
+    activeRunRequestGate?: Promise<void>;
     runEventRequests?: string[];
+    runContextRequests?: string[];
+    runContextTokens?: string[];
+    runContextRequestGates?: Record<string, Promise<void>>;
+    runFailures?: string[];
+    runFailureResponses?: Array<{ status: number; code: string; message: string }>;
+    runRequestGate?: Promise<void>;
+    runtimeStateHttpRequests?: string[];
+    runtimeStateSummary?: Record<string, unknown>;
+    runtimeStateEventGate?: Promise<void>;
+    runtimeStateStreamFailure?: boolean;
+    runtimeStateEventRequests?: string[];
     skipInitialAuthToken?: boolean;
     loginRequests?: Array<{ username?: string; password?: string }>;
   } = {}
@@ -2247,6 +3137,18 @@ async function mockBackendApi(
       await route.fulfill(json(opencodeProcessStatus(currentProcessStatus)));
       return;
     }
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me/health") {
+      await route.fulfill(json({
+        healthy: currentProcessStatus === "READY",
+        status: currentProcessStatus === "READY" ? "HEALTHY" : "UNHEALTHY",
+        message: currentProcessStatus === "READY" ? "TestAgent 进程可用" : "TestAgent 进程不可用",
+        linuxServerId: url.searchParams.get("linuxServerId") ?? "server-a",
+        containerId: url.searchParams.get("containerId") ?? "ctr_01",
+        port: Number(url.searchParams.get("port") ?? 4096),
+        checkedAt: "2026-07-10T00:00:00Z"
+      }));
+      return;
+    }
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/processes/me/initialize") {
       capture.processInitializations?.push({});
       if (capture.initializeFailureThenReady) {
@@ -2279,6 +3181,10 @@ async function mockBackendApi(
     }
     if (method === "GET" && /^\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+$/.test(url.pathname)) {
       const workspaceId = url.pathname.match(/\/api\/internal\/platform\/workspace-management\/workspaces\/([^/]+)$/)?.[1];
+      if (workspaceId) {
+        capture.workspaceRequests?.push(workspaceId);
+        await capture.workspaceRequestGates?.[workspaceId];
+      }
       await route.fulfill(json(workspaceItems.find((item) => item.workspaceId === workspaceId) ?? workspace()));
       return;
     }
@@ -2300,6 +3206,7 @@ async function mockBackendApi(
     }
     if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions") {
       capture.sessionRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      await capture.sessionRequestGate;
       await route.fulfill(json(session()));
       return;
     }
@@ -2307,10 +3214,47 @@ async function mockBackendApi(
       await route.fulfill(json(pageOf(capture.sessions ?? [])));
       return;
     }
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/sessions/runtime-state") {
+      capture.runtimeStateHttpRequests?.push(url.pathname);
+      await route.fulfill(json({ runningCount: 0, questionCount: 0, sessions: [], generatedAt: "2026-07-10T00:00:00Z" }));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/sessions/runtime-state/events") {
+      capture.runtimeStateEventRequests?.push(url.pathname);
+      await capture.runtimeStateEventGate;
+      if (capture.runtimeStateStreamFailure) {
+        await route.fulfill({ status: 503, ...jsonFailure("RUNTIME_STATE_UNAVAILABLE", "运行态流不可用") });
+        return;
+      }
+      const summary = capture.runtimeStateSummary ?? {
+        runningCount: 0,
+        questionCount: 0,
+        sessions: [],
+        generatedAt: "2026-07-10T00:00:00Z"
+      };
+      await route.fulfill({
+        status: 200,
+        headers: { ...corsHeaders(), "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+        body: `event: session-runtime.snapshot\ndata: ${JSON.stringify(summary)}\n\n`
+      });
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/agent\/opencode\/sessions\/[^/]+\/run-context$/.test(url.pathname)) {
+      const sessionId = decodeURIComponent(url.pathname.match(/\/sessions\/([^/]+)\/run-context$/)?.[1] ?? "ses_1");
+      capture.runContextRequests?.push(sessionId);
+      await capture.runContextRequestGates?.[sessionId];
+      const contextIndex = (capture.runContextRequests?.length ?? 1) - 1;
+      await route.fulfill(json({
+        contextToken: capture.runContextTokens?.[contextIndex] ?? `ctx_e2e_${contextIndex + 1}`,
+        contextVersion: contextIndex + 1,
+        expiresAt: "2026-07-11T00:00:00Z"
+      }));
+      return;
+    }
     if (method === "GET" && /^\/api\/internal\/agent\/opencode\/sessions\/[^/]+\/session-tree\/messages$/.test(url.pathname)) {
       capture.sessionTreeRequests?.push(`${url.pathname}${url.search}`);
       const sessionId = url.pathname.match(/\/sessions\/([^/]+)\/session-tree\/messages$/)?.[1] ?? "ses_history";
-      await route.fulfill(json(capture.sessionTreeMessages ?? {
+      await route.fulfill(json(capture.sessionTreeMessagesBySessionId?.[sessionId] ?? capture.sessionTreeMessages ?? {
         sessionId,
         sessions: [],
         messagesBySessionId: {},
@@ -2322,7 +3266,8 @@ async function mockBackendApi(
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
       capture.sessionMessageRequests?.push(`${url.pathname}${url.search}`);
       await capture.sessionMessagesGate;
-      await route.fulfill(json(pageOf(capture.sessionMessages ?? [])));
+      const sessionId = url.pathname.match(/\/sessions\/([^/]+)\/messages$/)?.[1] ?? "ses_history";
+      await route.fulfill(json(pageOf(capture.sessionMessagesBySessionId?.[sessionId] ?? capture.sessionMessages ?? [])));
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/messages\/[^/]+\/feedback\/me$/.test(url.pathname)) {
@@ -2333,10 +3278,13 @@ async function mockBackendApi(
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/active-run$/.test(url.pathname)) {
       capture.activeRunRequests?.push(url.pathname);
+      await capture.activeRunRequestGate;
       await route.fulfill(json(capture.activeRun ?? null));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_history") {
+      capture.historyRunRequests?.push(url.pathname);
+      await capture.historyRunGate;
       await route.fulfill(json(capture.historyRun ?? {}));
       return;
     }
@@ -2401,14 +3349,30 @@ async function mockBackendApi(
       return;
     }
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/runs") {
-      capture.runRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      capture.runRequests?.push(request);
+      await capture.runRequestGate;
       const requestIndex = (capture.runRequests?.length ?? 1) - 1;
+      const failureResponse = capture.runFailureResponses?.shift();
+      if (failureResponse) {
+        await route.fulfill({
+          status: failureResponse.status,
+          ...jsonFailure(failureResponse.code, failureResponse.message)
+        });
+        return;
+      }
+      const failureCode = capture.runFailures?.shift();
+      if (failureCode) {
+        await route.fulfill({ status: 409, ...jsonFailure(failureCode, "会话运行上下文已失效") });
+        return;
+      }
       const runId = capture.runIds?.[requestIndex] ?? "run_1";
       await route.fulfill(json({
         runId,
-        sessionId: "ses_1",
+        sessionId: String(request.sessionId ?? "ses_1"),
         workspaceId: "wrk_1234567890abcdef",
         status: "RUNNING",
+        clientRequestId: request.clientRequestId,
         createdAt: "2026-06-19T00:00:00Z",
         updatedAt: "2026-06-19T00:00:00Z"
       }));
@@ -2527,6 +3491,22 @@ function workspace() {
     status: "ACTIVE",
     createdAt: "2026-06-19T00:00:00Z",
     updatedAt: "2026-06-19T00:00:00Z"
+  };
+}
+
+function runnableWorkspaceSetup() {
+  return {
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
   };
 }
 

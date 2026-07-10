@@ -9,7 +9,7 @@
 - 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Workspace 可选携带 `linuxServerId`，用于前端文件 WebSocket 同服务器路由。`Session.workspaceContext` 可选携带历史会话所属 `appId/appName/applicationWorkspaceId/workspaceName/versionId/version`，旧后端或单会话详情缺失时前端必须兼容 `null/undefined`。
 - `SessionMessage` 保留旧 `content` 字段，并可选承载 `runId`、`remoteMessageId`、`parts`、`tokens`、`costUsd`、`updatedAt`，用于展示后端持久化的 Run 快照和 opencode message part projection；旧响应缺失这些字段时前端继续按纯文本展示。
 - `AgentMessage` 可选区分 `platformMessageId` 与 `remoteMessageId`：前者表示平台 `session_messages.message_id`，用于反馈等平台 API；后者表示实时 opencode message id，只用于运行期归并和终态后映射。
-- `Run` 可选承载 `tokens`、`costUsd`，统计口径为单次 Run；缺失字段必须按未知消耗处理。
+- `Run` 可选承载 `tokens`、`costUsd`、`clientRequestId`，统计口径为单次 Run；缺失消耗字段必须按未知处理，缺失 `clientRequestId` 时调用方只能在同认证、Session、Workspace、交互代次且 runtime-state 已接管 busy Run 的条件下兼容判断 HTTP 歧义结果。
 - 定义 `SessionRuntimeStateSummary` / `SessionRuntimeState` / `SessionRuntimeAttention`，表达当前用户历史会话中的运行中 Run 数、待回答 question 数和单会话运行态；字段需兼容旧后端缺失场景，由消费方降级为空摘要。
 - 新增 PromptPart、MessagePart、ToolPart、PermissionRequest、QuestionRequest、AgentInfo、ModelInfo、ProviderInfo、CommandInfo、RuntimeResourceInfo、RuntimeToolInfo、SessionDiff、TodoItem、RuntimeStatus、TerminalTicketRequest、TerminalTicketResponse 等 Web App 运行态 projection 类型；`PromptPart.type=file` 的 `source` 可选携带 `startLine/endLine/contextType`，用于工作区选区上下文在前端展示和 opencode prompt parts 透传时保留来源元数据。
 - `CommandInfo` 的 `source/hints` 为可选字段，用于保留 opencode command catalog 的来源和参数提示；旧 payload 不提供时前端必须兼容。

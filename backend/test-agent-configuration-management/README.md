@@ -61,6 +61,7 @@
 - `SshKeyEncryptionService`：包装 common 模块的 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成能力，保持配置管理业务入口稳定。
 - `listRepositoryTree()`：返回已关联版本库指定分支的远端目录/文件树，测试工作库只暴露当前应用同名目录子树。
 - `CommonParameterManagementApplicationService`：通用参数管理编排服务，提供分页列表查询（可按平台过滤）与受控 value 更新；不提供新增/删除，参数不存在抛 `NOT_FOUND`，空值抛 `VALIDATION_ERROR`，只读参数（`editable=false`）抛 `VALIDATION_ERROR`「该通用参数为只读参数，修改后将影响系统正常运行」。前端只允许更新 `editable=true` 的通用参数（`OPENCODE_MANAGER_MAX_PROCESSES`、公共 Git 地址 `OPENCODE_PUBLIC_AGENT_GIT_URL`），其它通用参数为只读，必须通过部署配置、数据库迁移或对应初始化流程调整。公共 Git 地址不拆内部/外部两个参数；通用参数编辑弹窗复用 `repositoryDeploymentOptions()` 选项，内部模式展示当前用户 SSH 前缀但只保存 `host[:port]/path`，公共 Agent Git 操作由 workspace-management 按保存值形态决定是否拼接 SSH URL。
+- `ConfigurationManagementApplicationService.removeMember` 在成员删除前建立 user mutation gate，不为 app→Session 反查数据库；gate 覆盖整个关系型写入窗口并阻断该用户签发/续期/路由，保存成功后原子再次失效并释放自己的 gate token，失败时只撤回自己的 token。该粗粒度策略会安全地同时失效该用户其它应用的上下文。`CommonParameterUpdateBroadcaster` 的本地和跨 Java 重载事件由 runtime 过滤三个可信路径参数并提升上下文全局代次。
 - `RepositoryCommonParameterValues`：通用参数运行态读模型，每次读取都通过 Repository 从数据库获取最新值，按当前平台读取并展开 `${englishName}`、环境变量 `$NAME`、路径开头 `$HOME` 和 `~/`；消费方应使用 `resolvedValue` 而不是数据库原始值，不得把通用参数缓存在 JVM 或 Redis 中。`${NAME}` 在通用参数未命中时才回退环境变量。被引用参数按「解析上下文平台」查找（先该平台、再回退 `all`）；`all` 行由调用方以当前 JVM 平台或目标平台作为上下文，因此 `all` 参数也能引用平台参数（如 `SYS_DATA_ROOT_DIR` 仅有平台行、无 `all` 行）。`SYS_DATA_ROOT_DIR` 是系统数据根目录通用参数，macOS 默认值 `$HOME/.testagent` 也通过该解析链路展开。
 - `ConfigurationManagementResponses`：对 API 层安全暴露的响应模型，不包含私钥明文或密文。
 

@@ -1,0 +1,81 @@
+export type PreparedRawOutputBody = {
+  body: string;
+  truncated?: boolean;
+};
+
+/**
+ * 原始输出统一在进入页面缓存前脱敏并截断，避免 HTTP/SSE 新入口绕过安全边界。
+ */
+export function prepareRawOutputBody(body: string, maxLength: number): PreparedRawOutputBody {
+  const redactedBody = redactContextTokensFromJson(body);
+  if (redactedBody.length <= maxLength) {
+    return { body: redactedBody };
+  }
+  return {
+    body: `${redactedBody.slice(0, maxLength)}\n...[已截断，原始长度 ${redactedBody.length} 字符]`,
+    truncated: true
+  };
+}
+
+function redactContextTokensFromJson(body: string): string {
+  try {
+    return JSON.stringify(redactContextTokens(JSON.parse(body)));
+  } catch {
+    // SSE data 前缀、截断 JSON 或表单文本都可能让整体解析失败；调试副本仍必须 fail-closed 脱敏。
+    return redactContextTokensFromText(body);
+  }
+}
+
+function redactContextTokensFromText(body: string): string {
+  const keyPattern = /(["']?)\bcontexttoken\b\1\s*[:=]\s*/gi;
+  let redacted = "";
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = keyPattern.exec(body)) !== null) {
+    redacted += body.slice(cursor, match.index) + match[0];
+    const valueStart = keyPattern.lastIndex;
+    const quote = body[valueStart];
+    let valueEnd = valueStart;
+    let closedQuote = false;
+    if (quote === '"' || quote === "'") {
+      valueEnd += 1;
+      let escaped = false;
+      while (valueEnd < body.length) {
+        const current = body[valueEnd];
+        if (current === "\n" || current === "\r") break;
+        if (escaped) {
+          escaped = false;
+        } else if (current === "\\") {
+          escaped = true;
+        } else if (current === quote) {
+          closedQuote = true;
+          valueEnd += 1;
+          break;
+        }
+        valueEnd += 1;
+      }
+      redacted += `${quote}[REDACTED]${closedQuote ? quote : ""}`;
+    } else {
+      while (valueEnd < body.length && !/[\s,;&}\]]/.test(body[valueEnd])) valueEnd += 1;
+      redacted += "[REDACTED]";
+    }
+    cursor = valueEnd;
+    keyPattern.lastIndex = valueEnd;
+  }
+  return redacted + body.slice(cursor);
+}
+
+function redactContextTokens(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactContextTokens);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      key.toLowerCase() === "contexttoken" ? "[REDACTED]" : redactContextTokens(item)
+    ])
+  );
+}

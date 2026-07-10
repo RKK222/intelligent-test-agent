@@ -50,6 +50,8 @@ export type SessionRuntimeStateSubscribeOptions = {
   onError?: (error: unknown) => void;
 };
 
+const SESSION_RUNTIME_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
+
 export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
   "run.created",
   "run.started",
@@ -159,56 +161,73 @@ export function subscribeSessionRuntimeState(
 ): SessionRuntimeStateSubscription {
   const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
   const fetcher = options.fetcher ?? fetch;
-  const controller = new AbortController();
   let closed = false;
-
-  options.onStatus?.("connecting");
+  let controller: AbortController | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resolveRetryWait: (() => void) | null = null;
 
   void (async () => {
-    try {
-      const headers = new Headers();
-      headers.set("Accept", "text/event-stream");
-      if (options.token?.trim()) {
-        headers.set("Authorization", `Bearer ${options.token.trim()}`);
-      }
-      const response = await fetcher(sessionRuntimeStateEventsUrl(baseUrl), {
-        headers,
-        signal: controller.signal
-      });
-      if (!response.ok) {
-        throw new Error(`session runtime state stream failed: ${response.status}`);
-      }
-      if (!response.body) {
-        throw new Error("session runtime state stream has no body");
-      }
-      if (closed) {
-        return;
-      }
-      options.onStatus?.("open");
-      await readSseStream(response.body, (message) => {
+    let failureCount = 0;
+    while (!closed) {
+      controller = new AbortController();
+      let receivedEvent = false;
+      options.onStatus?.("connecting");
+      try {
+        const headers = new Headers();
+        headers.set("Accept", "text/event-stream");
+        if (options.token?.trim()) {
+          headers.set("Authorization", `Bearer ${options.token.trim()}`);
+        }
+        const response = await fetcher(sessionRuntimeStateEventsUrl(baseUrl), {
+          headers,
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`session runtime state stream failed: ${response.status}`);
+        }
+        if (!response.body) {
+          throw new Error("session runtime state stream has no body");
+        }
         if (closed) {
           return;
         }
-        if (!isSessionRuntimeStateEvent(message.eventName)) {
+        options.onStatus?.("open");
+        await readSseStream(response.body, (message) => {
+          if (closed || !isSessionRuntimeStateEvent(message.eventName)) {
+            return;
+          }
+          const parsed = parseSessionRuntimeState(message.data);
+          if (parsed) {
+            receivedEvent = true;
+            options.onEvent(parsed, { eventName: message.eventName });
+          }
+        });
+        if (closed) {
           return;
         }
-        const parsed = parseSessionRuntimeState(message.data);
-        if (parsed) {
-          options.onEvent(parsed, { eventName: message.eventName });
+        throw new Error("session runtime state stream closed");
+      } catch (error) {
+        if (closed || controller.signal.aborted) {
+          return;
         }
-      });
-      if (!closed) {
-        closed = true;
-        options.onStatus?.("closed");
+        options.onStatus?.("error");
+        options.onError?.(error);
+        if (receivedEvent) {
+          failureCount = 0;
+        }
+        const delay = SESSION_RUNTIME_RECONNECT_DELAYS_MS[
+          Math.min(failureCount, SESSION_RUNTIME_RECONNECT_DELAYS_MS.length - 1)
+        ];
+        failureCount += 1;
+        await new Promise<void>((resolve) => {
+          resolveRetryWait = resolve;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            resolveRetryWait = null;
+            resolve();
+          }, delay);
+        });
       }
-    } catch (error) {
-      if (closed || controller.signal.aborted) {
-        return;
-      }
-      options.onStatus?.("error");
-      options.onError?.(error);
-      closed = true;
-      options.onStatus?.("closed");
     }
   })();
 
@@ -218,7 +237,13 @@ export function subscribeSessionRuntimeState(
         return;
       }
       closed = true;
-      controller.abort();
+      controller?.abort();
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      resolveRetryWait?.();
+      resolveRetryWait = null;
       options.onStatus?.("closed");
     }
   };

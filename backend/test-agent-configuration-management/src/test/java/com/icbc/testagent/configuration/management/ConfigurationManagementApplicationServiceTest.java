@@ -30,6 +30,8 @@ import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.user.UserStatus;
+import com.icbc.testagent.domain.run.ConversationContextStore;
+import com.icbc.testagent.domain.run.ConversationContextUserMutation;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -43,6 +45,83 @@ class ConfigurationManagementApplicationServiceTest {
     private static final String PRIVATE_KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n";
 
     private final SshKeyTestFixtures sshKeyFixtures = new SshKeyTestFixtures();
+
+    @Test
+    void removeMemberInvalidatesUserContextsAfterRepositoryDeleteSucceeds() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ConversationContextStore contextStore = org.mockito.Mockito.mock(ConversationContextStore.class);
+        ConversationContextUserMutation mutation = new ConversationContextUserMutation(
+                new UserId("usr_1234567890abcdef"),
+                "mutation-1");
+        org.mockito.Mockito.when(contextStore.beginUserMutation(new UserId("usr_1234567890abcdef")))
+                .thenReturn(mutation);
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+        service.setConversationContextStore(contextStore);
+
+        service.removeMember("app_1234567890abcdef", "usr_1234567890abcdef");
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(repository, contextStore);
+        order.verify(contextStore).beginUserMutation(new UserId("usr_1234567890abcdef"));
+        order.verify(repository).deleteMember(
+                new ApplicationId("app_1234567890abcdef"),
+                new UserId("usr_1234567890abcdef"));
+        order.verify(contextStore).completeUserMutation(mutation);
+    }
+
+    @Test
+    void removeMemberDoesNotChangeDatabaseWhenFailClosedInvalidationFails() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ConversationContextStore contextStore = org.mockito.Mockito.mock(ConversationContextStore.class);
+        org.mockito.Mockito.doThrow(new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE))
+                .when(contextStore)
+                .beginUserMutation(new UserId("usr_1234567890abcdef"));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+        service.setConversationContextStore(contextStore);
+
+        assertThatThrownBy(() -> service.removeMember("app_1234567890abcdef", "usr_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.RUNTIME_STATE_UNAVAILABLE));
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .deleteMember(org.mockito.Mockito.any(), org.mockito.Mockito.any());
+    }
+
+    @Test
+    void removeMemberReleasesOnlyItsMutationGateWhenDatabaseWriteFails() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ConversationContextStore contextStore = org.mockito.Mockito.mock(ConversationContextStore.class);
+        UserId userId = new UserId("usr_1234567890abcdef");
+        ConversationContextUserMutation mutation = new ConversationContextUserMutation(userId, "mutation-rollback");
+        org.mockito.Mockito.when(contextStore.beginUserMutation(userId)).thenReturn(mutation);
+        org.mockito.Mockito.doThrow(new IllegalStateException("database unavailable"))
+                .when(repository)
+                .deleteMember(new ApplicationId("app_1234567890abcdef"), userId);
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+        service.setConversationContextStore(contextStore);
+
+        assertThatThrownBy(() -> service.removeMember("app_1234567890abcdef", userId.value()))
+                .isInstanceOf(IllegalStateException.class);
+
+        org.mockito.Mockito.verify(contextStore).abortUserMutation(mutation);
+        org.mockito.Mockito.verify(contextStore, org.mockito.Mockito.never()).completeUserMutation(mutation);
+    }
 
     @Test
     void createRepositoryNormalizesEnglishNameBeforeSaving() {

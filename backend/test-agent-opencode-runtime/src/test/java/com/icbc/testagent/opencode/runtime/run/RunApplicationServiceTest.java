@@ -28,6 +28,7 @@ import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.run.TokenUsage;
+import com.icbc.testagent.domain.run.ConversationRunContext;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
@@ -273,6 +274,109 @@ class RunApplicationServiceTest {
         assertThat(facade.createSessionCommands).hasSize(1);
         assertThat(facade.createSessionCommands.getFirst().node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
         assertThat(facade.startRunCommands.getFirst().node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
+    }
+
+    @Test
+    void contextBackedExistingSessionStartsWithoutRepeatedControlPlaneReads() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        FakeExecutionNodeRepository nodes = new FakeExecutionNodeRepository();
+        FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationRunContextResolver contextResolver = org.mockito.Mockito.mock(ConversationRunContextResolver.class);
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        Workspace workspaceSnapshot = workspace().withLinuxServerId(
+                "server-a",
+                "trace_1234567890abcdef",
+                NOW);
+        ExecutionNode nodeSnapshot = userProcessNode(
+                "node_ocp_1234567890abcdef",
+                "http://10.8.0.12:4096");
+        Session sessionSnapshot = session().attachOpencodeSession(
+                REMOTE_SESSION_ID,
+                nodeSnapshot.executionNodeId(),
+                NOW,
+                "trace_1234567890abcdef");
+        AgentSessionBinding bindingSnapshot = new AgentSessionBinding(
+                sessionSnapshot.sessionId(),
+                "opencode",
+                REMOTE_SESSION_ID,
+                nodeSnapshot.executionNodeId(),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+        ConversationRunContext context = new ConversationRunContext(
+                userId,
+                "opencode",
+                "ocp_1234567890abcdef",
+                "server-a",
+                sessionSnapshot,
+                workspaceSnapshot,
+                nodeSnapshot,
+                bindingSnapshot,
+                1,
+                NOW.plusSeconds(3600));
+        StartRunInput input = new StartRunInput(
+                sessionSnapshot.sessionId(),
+                "run the tests",
+                List.of(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "ctx_secret",
+                "request-123");
+        org.mockito.Mockito.when(contextResolver.resolve(
+                        userId,
+                        "opencode",
+                        input,
+                        "trace_1234567890abcdef"))
+                .thenReturn(Optional.of(context));
+        RunApplicationService service = new RunApplicationService(
+                workspaces,
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                nodes,
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                bindings,
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                assignmentService,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class),
+                null,
+                null,
+                null,
+                contextResolver);
+
+        Run run = service.startRun(userId, "opencode", input, "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(workspaces.findByIdCalls).isZero();
+        assertThat(sessions.findByIdCalls).isZero();
+        assertThat(nodes.findByIdCalls).isZero();
+        assertThat(nodes.saved).isEmpty();
+        assertThat(bindings.findBySessionIdAndAgentIdCalls).isZero();
+        org.mockito.Mockito.verifyNoInteractions(assignmentService);
+        org.mockito.Mockito.verify(contextResolver).resolve(
+                userId,
+                "opencode",
+                input,
+                "trace_1234567890abcdef");
+        assertThat(facade.createSessionCommands).isEmpty();
+        assertThat(facade.startRunCommands).singleElement().satisfies(command -> {
+            assertThat(command.node()).isEqualTo(nodeSnapshot);
+            assertThat(command.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
+            assertThat(command.directory()).isEqualTo("/tmp/demo");
+        });
     }
 
     @Test
@@ -1653,6 +1757,8 @@ class RunApplicationServiceTest {
     }
 
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {
+        private int findByIdCalls;
+
         @Override
         public Workspace save(Workspace workspace) {
             return workspace;
@@ -1660,6 +1766,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Optional<Workspace> findById(WorkspaceId workspaceId) {
+            findByIdCalls++;
             return Optional.of(workspace());
         }
 
@@ -1671,6 +1778,7 @@ class RunApplicationServiceTest {
 
     private static final class FakeSessionRepository implements com.icbc.testagent.domain.session.SessionRepository {
         private Session current;
+        private int findByIdCalls;
 
         private FakeSessionRepository() {
             this(session());
@@ -1688,6 +1796,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Optional<Session> findById(SessionId sessionId) {
+            findByIdCalls++;
             return Optional.of(current);
         }
 
@@ -1836,6 +1945,7 @@ class RunApplicationServiceTest {
         private final ExecutionNode node;
         private final List<ExecutionNode> saved = new ArrayList<>();
         private int findRoutableNodesCalls;
+        private int findByIdCalls;
 
         private FakeExecutionNodeRepository() {
             this(node());
@@ -1853,6 +1963,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Optional<ExecutionNode> findById(ExecutionNodeId executionNodeId) {
+            findByIdCalls++;
             return Optional.of(node);
         }
 
@@ -1949,6 +2060,7 @@ class RunApplicationServiceTest {
 
     private static final class FakeAgentSessionBindingRepository implements AgentSessionBindingRepository {
         private final Map<String, AgentSessionBinding> bindings = new LinkedHashMap<>();
+        private int findBySessionIdAndAgentIdCalls;
 
         @Override
         public AgentSessionBinding save(AgentSessionBinding binding) {
@@ -1958,6 +2070,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Optional<AgentSessionBinding> findBySessionIdAndAgentId(SessionId sessionId, String agentId) {
+            findBySessionIdAndAgentIdCalls++;
             return Optional.ofNullable(bindings.get(key(sessionId, agentId)));
         }
 

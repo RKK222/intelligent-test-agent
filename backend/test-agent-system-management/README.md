@@ -4,6 +4,8 @@
 
 系统内部管理业务模块，承载用户、角色、权限等平台管理能力。
 
+用户全局角色替换先通过领域 `ConversationContextStore.beginUserMutation` 建立临时 gate；事务真正提交后原子再次失效并释放 gate，事务回滚只撤回自己的 gate token。gate 覆盖数据库写入窗口，避免撤权期间签发新 token；模块不依赖 Redis 实现或 persistence。
+
 ## 当前状态
 
 已完成用户认证相关的基础能力：

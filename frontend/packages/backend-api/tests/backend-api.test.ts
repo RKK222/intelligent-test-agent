@@ -134,6 +134,111 @@ describe("backend-api", () => {
     expect(JSON.stringify(exchanges[0])).not.toContain("Authorization");
   });
 
+  it("redacts conversation context tokens from raw request bodies", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_backend",
+          data: { runId: "run_1", sessionId: "ses_1", workspaceId: "wrk_1", status: "RUNNING" }
+        }),
+        { status: 200 }
+      )
+    );
+    const exchanges: Array<Record<string, unknown>> = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_frontend",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    await client.startRun({
+      sessionId: "ses_1",
+      prompt: "hello",
+      contextToken: "ctx_secret_value",
+      clientRequestId: "req_stable"
+    });
+
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      contextToken: "ctx_secret_value",
+      clientRequestId: "req_stable"
+    });
+    expect(exchanges[0]?.requestBody).toBe(
+      JSON.stringify({
+        sessionId: "ses_1",
+        prompt: "hello",
+        contextToken: "[REDACTED]",
+        clientRequestId: "req_stable"
+      })
+    );
+    expect(JSON.stringify(exchanges)).not.toContain("ctx_secret_value");
+  });
+
+  it("redacts conversation context tokens from raw response bodies without changing returned data", async () => {
+    const responseText = JSON.stringify({
+      success: true,
+      traceId: "trace_backend",
+      data: {
+        contextToken: "ctx_response_secret",
+        contextVersion: 1,
+        expiresAt: "2026-07-11T08:00:00Z"
+      }
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(responseText, { status: 200 }));
+    const exchanges: Array<Record<string, unknown>> = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_frontend",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    await expect(client.getRunContext("ses_1")).resolves.toMatchObject({
+      contextToken: "ctx_response_secret"
+    });
+    expect(JSON.parse(String(exchanges[0]?.responseText))).toMatchObject({
+      data: { contextToken: "[REDACTED]" }
+    });
+    expect(JSON.stringify(exchanges)).not.toContain("ctx_response_secret");
+  });
+
+  it("redacts context tokens from non-JSON raw response observations", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response('data: {"contextToken":"ctx_stream_secret","keep":"visible"}\n\n', { status: 503 })
+    );
+    const exchanges: Array<Record<string, unknown>> = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_frontend",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    await expect(client.getRunContext("ses_1")).rejects.toBeInstanceOf(BackendApiError);
+    expect(exchanges[0]?.responseText).toContain('"contextToken":"[REDACTED]"');
+    expect(exchanges[0]?.responseText).toContain('"keep":"visible"');
+    expect(JSON.stringify(exchanges)).not.toContain("ctx_stream_secret");
+  });
+
+  it("redacts an unterminated quoted token without catastrophic backtracking", async () => {
+    const malformed = `contextToken:"${"\\".repeat(20_000)}ctx_unterminated_secret`;
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(malformed, { status: 503 }));
+    const exchanges: Array<Record<string, unknown>> = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+    const startedAt = performance.now();
+
+    await expect(client.getRunContext("ses_1")).rejects.toBeInstanceOf(BackendApiError);
+
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+    expect(JSON.stringify(exchanges)).not.toContain("ctx_unterminated_secret");
+    expect(exchanges[0]?.responseText).toContain('contextToken:"[REDACTED]');
+  });
+
   it("uses a custom agent id for agent-scoped run APIs", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { runId: "run_1" } }), {
@@ -193,6 +298,38 @@ describe("backend-api", () => {
     expect(fetcher).toHaveBeenCalledWith(
       "http://api/api/internal/platform/opencode-runtime/sessions/runtime-state",
       expect.any(Object)
+    );
+  });
+
+  it("gets a conversation run context from the agent-scoped session URL", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            contextToken: "ctx_opaque",
+            contextVersion: 1,
+            expiresAt: "2026-07-11T08:00:00Z"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getRunContext("ses_/with space")).resolves.toEqual({
+      contextToken: "ctx_opaque",
+      contextVersion: 1,
+      expiresAt: "2026-07-11T08:00:00Z"
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/agent/opencode/sessions/ses_%2Fwith%20space/run-context",
+      expect.objectContaining({ method: "POST" })
     );
   });
 
@@ -786,7 +923,9 @@ describe("backend-api", () => {
       agent: "build",
       model: "anthropic/claude-sonnet-4-5",
       variant: "default",
-      mode: "build"
+      mode: "build",
+      contextToken: "ctx_opaque",
+      clientRequestId: "req_stable"
     });
 
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
@@ -797,7 +936,9 @@ describe("backend-api", () => {
       agent: "build",
       model: "anthropic/claude-sonnet-4-5",
       variant: "default",
-      mode: "build"
+      mode: "build",
+      contextToken: "ctx_opaque",
+      clientRequestId: "req_stable"
     });
   });
 

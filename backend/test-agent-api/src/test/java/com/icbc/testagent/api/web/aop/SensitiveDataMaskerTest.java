@@ -54,6 +54,17 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
+        @DisplayName("脱敏会话运行上下文 token 字段")
+        void mask_contextToken() {
+            String input = "{\"contextToken\":\"ctx_do-not-log\",\"contextVersion\":1}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"contextToken\":\"***\""));
+            assertTrue(result.contains("\"contextVersion\":1"));
+        }
+
+        @Test
         @DisplayName("脱敏多个敏感字段")
         void mask_multipleSensitiveFields() {
             String input = "{\"password\":\"pass1\",\"token\":\"tok1\",\"secret\":\"sec1\",\"name\":\"test\"}";
