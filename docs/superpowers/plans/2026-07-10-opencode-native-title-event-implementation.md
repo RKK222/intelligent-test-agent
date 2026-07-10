@@ -34,8 +34,8 @@
   Expected: FAIL，缺少 token 状态机/终态后标题处理。
 
 - [ ] **Step 3: 最小实现**
-  - 增加局部 `ACTIVE → TITLE_WAIT → CLOSED` token registry 和 watch service，不创建跨 Java 共享桥；token 保存不可变路由与 `Sinks.One` 取消信号。
-  - `RunApplicationService` 改为在 scope router 前按 `TITLE_WAIT` 过滤，只接受 root `session.updated` 和 title agent 完成的 `message.updated`；`takeUntilOther` 消费 token 取消信号并释放远端流。
+  - 增加局部 `ACTIVE → TITLE_WAIT → CLOSED` token registry 和 watch service，不创建跨 Java 共享桥；token 保存本次实际 `AgentRuntime`、`ExecutionNode`、directory、workspace、远端 session ID 与 `Sinks.One` 取消信号。
+  - `RunApplicationService` 改为在 scope router 前按 `TITLE_WAIT` 过滤，只接受 root `session.updated` 和 `sessionID` 匹配、`info.role=assistant`、`info.agent=title`、`info.time.completed` 非空的 raw `message.updated`；`takeUntilOther` 消费 token 取消信号并释放远端流。
   - 原生标题同步复用 `SessionTitleUpdateRepository.updateTitleIfCurrent`，不再直接 `SessionRepository.save` 覆盖标题。
   - `SessionApplicationService.updateSession/archiveSession` 调用 watch service 取消等待；token 结束时追加既有 `session.updated`，带 `platformSessionTitlePending=false` 与 `platformSessionTitleWatchClosed=true`；成功时同时带既有同步字段。
 
@@ -54,7 +54,7 @@
 - Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
 
 - [ ] **Step 1: 写出失败测试**
-  - `findRemoteSessionTitle(titleWatchToken, traceId)` 从 OpenCode `GET /session/{remoteSessionId}` 的 top-level `title` 或 `info.title` 提取有效文本；只使用 token 固化的路由信息，禁止经可能重建 binding 的 resolver。
+  - `findRemoteSessionTitle(titleWatchToken, traceId)` 从 OpenCode `GET /session/{remoteSessionId}` 的 top-level `title` 或 `info.title` 提取有效文本；直接用 token 内实际 runtime/node/directory/workspace/sessionId 构造调用，禁止 `workspaceLocation`、`sessionLocation`、`withAgent` 和任何可能重建 binding 的 resolver。
   - 404、超时、默认标题和空标题不修改平台标题。
   - `TITLE_WAIT` 流断线重连后读取远端 title，并以同一 token + CAS 发出确认事件；title agent 完成消息即使未收到 `session.updated` 也必须读取最终 title 并关闭等待。
 
