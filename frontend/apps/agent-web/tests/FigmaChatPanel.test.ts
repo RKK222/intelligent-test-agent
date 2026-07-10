@@ -91,11 +91,16 @@ describe("FigmaChatPanel", () => {
     const wrapper = mount(FigmaChatPanel, { props });
     try {
       await nextTick();
+      // v1 迁移必须等展开卡片完成真实测量后再写回，挂载阶段仍保留原始绿点。
       expect(window.localStorage.getItem("figma-chat-process-dot-pos")).toBe(
-        JSON.stringify({ v: 2, cardX: 116, cardY: 136, dotSide: "top-left" })
+        JSON.stringify({ x: 100, y: 120 })
       );
       await wrapper.get(".figma-chat-process-status-dot").trigger("click");
       await nextTick();
+      await nextTick();
+      expect(window.localStorage.getItem("figma-chat-process-dot-pos")).toBe(
+        JSON.stringify({ v: 2, cardX: 116, cardY: 136, dotSide: "top-left" })
+      );
       expect((wrapper.get(".figma-chat-process-status").element as HTMLElement).style.left).toBe("116px");
       expect((wrapper.get(".figma-chat-process-status").element as HTMLElement).style.top).toBe("136px");
       wrapper.unmount();
@@ -121,13 +126,18 @@ describe("FigmaChatPanel", () => {
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
     setViewport(1000, 800);
     window.localStorage.setItem("figma-chat-process-dot-pos", JSON.stringify({ x: 880, y: 680 }));
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("figma-chat-process-status")
+        ? ({ x: 0, y: 0, width: 240, height: 90, top: 0, right: 240, bottom: 90, left: 0, toJSON: () => ({}) } as DOMRect)
+        : ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect);
+    });
     const wrapper = mount(FigmaChatPanel, {
       props: { messages: [], processStatus: { status: "READY", initializable: false, message: "ready" } } as any,
     });
     try {
       await nextTick();
       expect(window.localStorage.getItem("figma-chat-process-dot-pos")).toBe(
-        JSON.stringify({ v: 2, cardX: 592, cardY: 696, dotSide: "top-right" })
+        JSON.stringify({ x: 880, y: 680 })
       );
       expect(wrapper.get(".figma-chat-process-status-dot").attributes("style")).toContain(
         "--figma-process-dot-x: 880px"
@@ -135,8 +145,15 @@ describe("FigmaChatPanel", () => {
       expect(wrapper.get(".figma-chat-process-status-dot").attributes("style")).toContain(
         "--figma-process-dot-y: 680px"
       );
+      await wrapper.get(".figma-chat-process-status-dot").trigger("click");
+      await nextTick();
+      await nextTick();
+      expect(window.localStorage.getItem("figma-chat-process-dot-pos")).toBe(
+        JSON.stringify({ v: 2, cardX: 632, cardY: 582, dotSide: "bottom-right" })
+      );
     } finally {
       wrapper.unmount();
+      vi.restoreAllMocks();
       Object.defineProperty(window, "innerWidth", originalInnerWidth!);
       Object.defineProperty(window, "innerHeight", originalInnerHeight!);
       window.localStorage.removeItem("figma-chat-process-dot-pos");
@@ -472,6 +489,63 @@ describe("FigmaChatPanel", () => {
       Object.defineProperty(window, "innerWidth", originalInnerWidth!);
       Object.defineProperty(window, "innerHeight", originalInnerHeight!);
       window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
+  it("lets the dot reach the bottom-right safe viewport by changing its card side", async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    setViewport(1000, 800);
+    window.localStorage.setItem(
+      "figma-chat-process-dot-pos",
+      JSON.stringify({ v: 2, cardX: 116, cardY: 136, dotSide: "top-left" })
+    );
+    const wrapper = mount(FigmaChatPanel, {
+      props: { messages: [], processStatus: { status: "READY", initializable: false, message: "ready" } } as any,
+    });
+    try {
+      await nextTick();
+      const dot = wrapper.get(".figma-chat-process-status-dot");
+      dispatchPointer(dot.element, "pointerdown", 41, 100, 120);
+      dispatchPointer(window, "pointermove", 41, 980, 780);
+      await nextTick();
+      expect(dot.attributes("style")).toContain("--figma-process-dot-x: 976px");
+      expect(dot.attributes("style")).toContain("--figma-process-dot-y: 776px");
+      dispatchPointer(window, "pointerup", 41, 980, 780);
+      expect(window.localStorage.getItem("figma-chat-process-dot-pos")).toBe(
+        JSON.stringify({ v: 2, cardX: 688, cardY: 684, dotSide: "bottom-right" })
+      );
+    } finally {
+      wrapper.unmount();
+      Object.defineProperty(window, "innerWidth", originalInnerWidth!);
+      Object.defineProperty(window, "innerHeight", originalInnerHeight!);
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
+  it("expires drag click suppression when pointerup happens outside without a follow-up click", async () => {
+    vi.useFakeTimers();
+    window.localStorage.setItem(
+      "figma-chat-process-dot-pos",
+      JSON.stringify({ v: 2, cardX: 116, cardY: 136, dotSide: "top-left" })
+    );
+    const wrapper = mount(FigmaChatPanel, {
+      props: { messages: [], processStatus: { status: "READY", initializable: false, message: "ready" } } as any,
+    });
+    try {
+      await nextTick();
+      const dot = wrapper.get(".figma-chat-process-status-dot");
+      dispatchPointer(dot.element, "pointerdown", 42, 100, 120);
+      dispatchPointer(window, "pointermove", 42, 160, 160);
+      dispatchPointer(window, "pointerup", 42, 160, 160);
+      vi.advanceTimersByTime(501);
+      await dot.trigger("click");
+      await nextTick();
+      expect(wrapper.find(".figma-chat-process-status").exists()).toBe(true);
+    } finally {
+      wrapper.unmount();
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+      vi.useRealTimers();
     }
   });
 
