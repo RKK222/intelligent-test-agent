@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-11 - 增加 Flowchart 与 Sequence diagram 可视化编辑
+
+- Why:
+  - Markdown 预览虽然能渲染 Mermaid，但流程图和时序图只能修改源码，缺少拖拽、结构编辑和稳定回写能力；同时必须保持 Markdown 为唯一事实源并复用现有文件保存链路。
+- What:
+  - `@test-agent/editor` 新增 Flowchart/graph 与 Sequence diagram 独立领域模型、parser、serializer、unknown line 保留和 `%% editor-layout:` 坐标 metadata；新增懒加载的 `@vue-flow/core` 编辑对话框，支持流程节点/边和时序参与者/有序消息的增删、拖拽及属性编辑。
+  - Mermaid block 增加“可视化编辑”入口，打开和应用时均调用 Mermaid 官方 parser；应用只替换目标 fence，打开期间内容被 Agent 刷新时拒绝覆盖。完整 Markdown 继续通过 `CodeEditor change` 进入 dirty、Ctrl/Cmd+S、workspace.write 和 Git Diff 原链路。
+- How:
+  - Flowchart 与 Sequence 使用判别联合类型接入同一对话框，Vue Flow 类型被限制在画布 adapter；Sequence 消息用带序号的错层自定义边表达顺序，复杂 `Note`、`activate`、`loop` 等语句暂不编辑但原样写回。全部新增行为遵循 parser/serializer、adapter、组件、Markdown 接入和保存转发的 TDD 红绿周期。
+- Result:
+  - 定向领域与组件测试覆盖官方 Mermaid parse、round trip、unknown line、坐标、拖拽、连接、属性编辑、消息排序、单 block 回写、语法错误、外部刷新冲突和 CodeEditor change 转发；未新增后端 API、事件、数据库、全局 store 或环境配置。
+
 ### 2026-07-09 - 补齐 WebSocket 操作日志和启动日志提示
 
 - Why:

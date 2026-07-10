@@ -11,6 +11,7 @@
   "dependencies": {
     "@test-agent/shared-types": "workspace:*",
     "@test-agent/ui-kit": "workspace:*",
+    "@vue-flow/core": "1.48.2",
     "dompurify": "3.2.6",
     "github-markdown-css": "^5.9.0",
     "highlight.js": "^11.11.1",

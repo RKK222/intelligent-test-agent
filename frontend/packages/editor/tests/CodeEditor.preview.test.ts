@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/vue";
+import { defineComponent } from "vue";
+import { fireEvent, render } from "@testing-library/vue";
 
 const editorLayout = vi.fn();
 
@@ -43,6 +44,22 @@ vi.mock("../src/monaco-env", () => {
     monaco: mockMonaco
   };
 });
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    parse: vi.fn().mockResolvedValue(true),
+    render: vi.fn().mockResolvedValue({ svg: "<svg />" })
+  }
+}));
+
+vi.mock("@vue-flow/core", () => ({
+  VueFlow: defineComponent({ props: ["nodes", "edges"], template: "<div data-testid='code-editor-flow-mock' />" }),
+  Handle: defineComponent({ template: "<span />" }),
+  BaseEdge: defineComponent({ template: "<path />" }),
+  Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
+  MarkerType: { ArrowClosed: "arrowclosed", Arrow: "arrow" }
+}));
 
 import CodeEditor from "../src/CodeEditor.vue";
 
@@ -104,5 +121,19 @@ describe("CodeEditor Markdown 预览受控", () => {
     await new Promise(resolve => requestAnimationFrame(resolve));
 
     expect(editorLayout).toHaveBeenLastCalledWith({ width: 960, height: 360 });
+  });
+
+  it("可视化编辑应用后把完整 Markdown 通过既有 change 事件上报", async () => {
+    const content = "```mermaid\nflowchart TD\nA --> B\n```";
+    const { container, emitted, findByRole } = render(CodeEditor, {
+      props: { ...baseProps, content, path: "docs/README.md", previewMode: "full" }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    await fireEvent.click(container.querySelector('[data-mermaid-mode="visual"]') as Element);
+    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }));
+
+    await vi.waitFor(() => expect(emitted().change).toBeTruthy());
+    expect((emitted().change as Array<[string]>)[0]?.[0]).toContain("%% editor-layout:");
   });
 });
