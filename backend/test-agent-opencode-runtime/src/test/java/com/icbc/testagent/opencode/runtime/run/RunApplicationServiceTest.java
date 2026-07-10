@@ -17,6 +17,9 @@ import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventId;
 import com.icbc.testagent.domain.event.RunEventRepository;
 import com.icbc.testagent.domain.event.RunEventType;
+import com.icbc.testagent.domain.event.RunSessionScope;
+import com.icbc.testagent.domain.event.RunSessionScopeRepository;
+import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
@@ -686,6 +689,211 @@ class RunApplicationServiceTest {
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+    }
+
+    @Test
+    void serviceSynchronizesRootSessionTitleFromSessionUpdatedEvent() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.SESSION_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "session.updated",
+                        "sessionID", REMOTE_SESSION_ID,
+                        "info", Map.of("title", "AI 生成的会话标题"))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                new FakeRunSessionScopeRepository(),
+                null,
+                null);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
+        assertThat(sessions.current.title()).isEqualTo("AI 生成的会话标题");
+        assertThat(events.events.get(2).payload())
+                .containsEntry("rootSessionId", REMOTE_SESSION_ID)
+                .containsEntry("sessionId", REMOTE_SESSION_ID)
+                .containsEntry("isChildSession", false);
+    }
+
+    @Test
+    void serviceSynchronizesRootSessionTitleFromWrappedSessionUpdatedEvent() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.SESSION_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "session.updated",
+                        "rawPayload", Map.of("properties", Map.of(
+                                "sessionID", REMOTE_SESSION_ID,
+                                "info", Map.of("title", "兼容事件标题"))))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                new FakeRunSessionScopeRepository(),
+                null,
+                null);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
+        assertThat(sessions.current.title()).isEqualTo("兼容事件标题");
+    }
+
+    @Test
+    void serviceDoesNotSynchronizeDiscoveredChildSessionTitleToPlatformRootSession() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        facade.streamEvents = command -> Flux.just(
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.SESSION_CREATED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of(
+                                "rawType", "session.created",
+                                "sessionID", "ses_child1234567890abcdef",
+                                "parentID", REMOTE_SESSION_ID)),
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.SESSION_UPDATED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of(
+                                "rawType", "session.updated",
+                                "sessionID", "ses_child1234567890abcdef",
+                                "parentID", REMOTE_SESSION_ID,
+                                "info", Map.of("title", "子智能体标题"))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                new FakeRunSessionScopeRepository(),
+                null,
+                null);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(
+                events,
+                RunEventType.RUN_CREATED,
+                RunEventType.RUN_STARTED,
+                RunEventType.SESSION_CHILD_DISCOVERED,
+                RunEventType.SESSION_SCOPE_UPDATED,
+                RunEventType.SESSION_CREATED,
+                RunEventType.SESSION_UPDATED);
+        assertThat(sessions.current.title()).isEqualTo("Demo session");
+    }
+
+    @Test
+    void serviceDoesNotSynchronizeUnknownSessionTitleToPlatformRootSession() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.SESSION_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "session.updated",
+                        "sessionID", "ses_unknown1234567890abcdef",
+                        "info", Map.of("title", "未知会话标题"))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
+        assertThat(sessions.current.title()).isEqualTo("Demo session");
+    }
+
+    @Test
+    void serviceDoesNotSynchronizeBlankRootSessionTitle() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.SESSION_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "session.updated",
+                        "sessionID", REMOTE_SESSION_ID,
+                        "info", Map.of("title", "   "))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
+        assertThat(sessions.current.title()).isEqualTo("Demo session");
     }
 
     @Test
@@ -1875,6 +2083,39 @@ class RunApplicationServiceTest {
         @Override
         public Optional<RoutingDecision> findByRunId(RunId runId) {
             return Optional.empty();
+        }
+    }
+
+    private static final class FakeRunSessionScopeRepository implements RunSessionScopeRepository {
+        private final Map<String, RunSessionScopeSession> sessions = new LinkedHashMap<>();
+
+        @Override
+        public void upsertScope(RunSessionScope scope) {
+        }
+
+        @Override
+        public void upsertSession(RunSessionScopeSession session) {
+            sessions.put(session.sessionId(), session);
+        }
+
+        @Override
+        public List<RunSessionScopeSession> findSessionsByRunId(RunId runId) {
+            return sessions.values().stream()
+                    .filter(session -> session.runId().equals(runId))
+                    .toList();
+        }
+
+        @Override
+        public List<RunSessionScopeSession> findSessionsByRootSessionId(String rootSessionId) {
+            return sessions.values().stream()
+                    .filter(session -> session.rootSessionId().equals(rootSessionId))
+                    .toList();
+        }
+
+        @Override
+        public Optional<RunSessionScopeSession> findSession(RunId runId, String sessionId) {
+            return Optional.ofNullable(sessions.get(sessionId))
+                    .filter(session -> session.runId().equals(runId));
         }
     }
 

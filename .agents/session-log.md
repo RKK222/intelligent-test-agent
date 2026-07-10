@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 同步 OpenCode root 会话标题
+
+- Why:
+  - OpenCode 内置 title agent 已发送 `session.updated`，但平台 Session 仍保留首条消息生成的标题，Web 消息列表无法展示 AI 标题。
+- What:
+  - 在 `RunApplicationService` 的既有流式事件处理处，将已路由确认的 root `session.updated` 标题回写到对应平台 Session。
+- How:
+  - 复用 `Session.updateTitleAndPinned` 和 `SessionRepository.save`；仅接受 root scope 且远端 root id 与平台绑定一致的非空标题，兼容直出与 `rawPayload.properties.info` 包裹事件。
+- Result:
+  - `RunApplicationServiceTest` 覆盖 root、包裹事件、已发现 child、未知归属和空白标题；使用 JDK 25 执行定向 Maven 测试 40 项均通过。
+
 ### 2026-07-10 - 清理企业模板中的废弃 prod profile
 
 - Why:

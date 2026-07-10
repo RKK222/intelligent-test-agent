@@ -1045,6 +1045,7 @@ public class RunApplicationService {
      */
     private void appendStreamEvent(String agentId, Run originalRun, Workspace workspace, RunEventDraft draft) {
         recordRuntimeActivity(draft);
+        synchronizeRootSessionTitle(originalRun, draft);
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
             RunStatus terminalStatus = draft.type() == RunEventType.RUN_SUCCEEDED
@@ -1065,6 +1066,42 @@ public class RunApplicationService {
             return;
         }
         runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
+    }
+
+    /**
+     * 将 OpenCode 内置 title agent 发出的 root session.updated 标题回写到平台会话。
+     */
+    private void synchronizeRootSessionTitle(Run originalRun, RunEventDraft draft) {
+        if (draft.type() != RunEventType.SESSION_UPDATED) {
+            return;
+        }
+        RunEventScopeContext scope = draft.scopeContext();
+        // 只有路由器已确认的 root scope 才能改平台标题，避免 child 或未知远端会话覆盖当前会话。
+        if (scope == null
+                || scope.childSession()
+                || !scope.rootSessionId().equals(scope.sessionId())) {
+            return;
+        }
+        sessionUpdatedTitle(draft.payload()).ifPresent(title -> sessionRepository.findById(originalRun.sessionId())
+                // 额外校验平台会话绑定的远端 root id，防止陈旧或错误路由的事件改写标题。
+                .filter(session -> scope.rootSessionId().equals(session.opencodeSessionId()))
+                .ifPresent(session -> sessionRepository.save(session.updateTitleAndPinned(
+                        title,
+                        session.pinned(),
+                        draft.occurredAt(),
+                        draft.traceId()))));
+    }
+
+    /**
+     * 兼容 OpenCode 直出事件和 sync 包裹事件中的 session 标题字段。
+     */
+    private Optional<String> sessionUpdatedTitle(Map<String, Object> payload) {
+        return mapValue(payload.get("info"))
+                .flatMap(info -> textValue(info.get("title")))
+                .or(() -> mapValue(payload.get("rawPayload"))
+                        .flatMap(rawPayload -> mapValue(rawPayload.get("properties")))
+                        .flatMap(properties -> mapValue(properties.get("info")))
+                        .flatMap(info -> textValue(info.get("title"))));
     }
 
     /**
