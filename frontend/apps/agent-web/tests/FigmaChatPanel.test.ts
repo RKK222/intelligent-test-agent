@@ -139,6 +139,38 @@ describe("FigmaChatPanel", () => {
     }
   });
 
+  it("keeps an extreme left-top inline card at its exact rect while collapsing to the nearest safe dot", async () => {
+    setViewport(1000, 800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("figma-chat-process-status")
+        ? ({ x: 16, y: 16, width: 240, height: 90, top: 16, right: 256, bottom: 106, left: 16, toJSON: () => ({}) } as DOMRect)
+        : ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect);
+    });
+    const wrapper = mount(FigmaChatPanel, {
+      props: { messages: [], processStatus: { status: "READY", initializable: false, message: "ready" } } as any,
+    });
+    try {
+      const card = wrapper.get(".figma-chat-process-status");
+      dispatchPointer(card.element, "pointerdown", 34, 30, 30);
+      dispatchPointer(window, "pointermove", 34, 50, 50);
+      await nextTick();
+      expect((card.element as HTMLElement).style.left).toBe("16px");
+      expect((card.element as HTMLElement).style.top).toBe("16px");
+
+      dispatchPointer(window, "pointerup", 34, 50, 50);
+      await card.trigger("click");
+      await card.trigger("click");
+      await nextTick();
+      const dot = wrapper.get(".figma-chat-process-status-dot");
+      expect(dot.attributes("style")).toContain("--figma-process-dot-x: 16px");
+      expect(dot.attributes("style")).toContain("--figma-process-dot-y: 16px");
+    } finally {
+      wrapper.unmount();
+      vi.restoreAllMocks();
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
   it("does not collapse the status card when its initialize button receives Enter or Space", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

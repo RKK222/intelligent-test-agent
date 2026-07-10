@@ -1964,6 +1964,7 @@ function toggleProcessStatus() {
   if (!processStatusCollapsed.value) {
     // 单次收起允许本次会话使用浮动圆点，但不写入 localStorage，避免误把点击当成拖动偏好。
     processStatusFloating.value = true
+    processStatusCardAnchor.value = null
   }
   processStatusCollapsed.value = !processStatusCollapsed.value
 }
@@ -1981,6 +1982,8 @@ const PROCESS_STATUS_CARD_VIEWPORT_INSET = PROCESS_STATUS_CARD_MARGIN * 2
 const processStatusDotPos = ref<{ x: number; y: number } | null>(null)
 const processStatusCard = ref<HTMLElement | null>(null)
 const processStatusCardSize = ref({ ...PROCESS_STATUS_CARD_FALLBACK_SIZE })
+// 极端边缘无法反推出满足绿点安全边距的精确坐标时，保留临时卡片锚点直到收起。
+const processStatusCardAnchor = ref<{ x: number; y: number } | null>(null)
 const isDraggingProcessDot = ref(false)
 const didDragProcessDot = ref(false)
 let processStatusCardResizeObserver: ResizeObserver | null = null
@@ -1991,6 +1994,7 @@ let dragOriginX = 0
 let dragOriginY = 0
 let dragStartedOnCard = false
 let processDragTarget: HTMLElement | null = null
+let dragCardAnchorOrigin: { x: number; y: number } | null = null
 
 function clampProcessDotPos(x: number, y: number) {
   if (typeof window === 'undefined') return { x, y }
@@ -2103,7 +2107,7 @@ const processStatusCardStyle = computed(() => {
   if (!processStatusFloating.value) {
     return {} as CSSProperties
   }
-  const pos = calculateProcessStatusCardPos(
+  const pos = processStatusCardAnchor.value ?? calculateProcessStatusCardPos(
     processStatusDotPos.value ?? defaultProcessDotPos(),
     processStatusCardSize.value
   )
@@ -2190,8 +2194,16 @@ function prepareCardForFloatingDrag() {
   if (rect.width > 0 && rect.height > 0) {
     processStatusCardSize.value = { width: rect.width, height: rect.height }
   }
-  processStatusDotPos.value = dotPositionForCardPosition({ x: rect.left, y: rect.top })
+  const originalCardPos = { x: rect.left, y: rect.top }
+  const dotPos = dotPositionForCardPosition(originalCardPos)
+  processStatusDotPos.value = dotPos
   processStatusFloating.value = true
+  const calculatedCardPos = calculateProcessStatusCardPos(dotPos, processStatusCardSize.value)
+  // 安全边距把绿点夹住后，若反推仍不能精确还原卡片位置，使用独立锚点维持视觉连续性。
+  processStatusCardAnchor.value =
+    calculatedCardPos.x === originalCardPos.x && calculatedCardPos.y === originalCardPos.y
+      ? null
+      : originalCardPos
 }
 
 function onProcessDotPointerMove(event: PointerEvent) {
@@ -2209,6 +2221,7 @@ function onProcessDotPointerMove(event: PointerEvent) {
       const origin = processStatusDotPos.value ?? defaultProcessDotPos()
       dragOriginX = origin.x
       dragOriginY = origin.y
+      dragCardAnchorOrigin = processStatusCardAnchor.value
       // 首次跨过阈值只完成内联 → fixed 的无跳位切换；以当前指针为新的拖动原点，
       // 后续 pointermove 才叠加位移，避免本次事件把卡片立即推离原始 rect。
       dragStartX = event.clientX
@@ -2221,6 +2234,12 @@ function onProcessDotPointerMove(event: PointerEvent) {
       dragOriginX + dx,
       dragOriginY + dy
     )
+    if (dragCardAnchorOrigin) {
+      processStatusCardAnchor.value = {
+        x: dragCardAnchorOrigin.x + dx,
+        y: dragCardAnchorOrigin.y + dy,
+      }
+    }
   }
 }
 
@@ -2238,6 +2257,7 @@ function onProcessDotPointerEnd(event: PointerEvent) {
   }
   processDragTarget = null
   dragStartedOnCard = false
+  dragCardAnchorOrigin = null
   window.removeEventListener('pointermove', onProcessDotPointerMove)
   window.removeEventListener('pointerup', onProcessDotPointerEnd)
   window.removeEventListener('pointercancel', onProcessDotPointerEnd)
@@ -2255,6 +2275,7 @@ function startProcessStatusDrag(event: PointerEvent, startedOnCard: boolean) {
   dragOriginX = origin.x
   dragOriginY = origin.y
   dragStartedOnCard = startedOnCard
+  dragCardAnchorOrigin = startedOnCard ? processStatusCardAnchor.value : null
   didDragProcessDot.value = false
   isDraggingProcessDot.value = true
   window.addEventListener('pointermove', onProcessDotPointerMove)
