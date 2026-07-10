@@ -1082,14 +1082,24 @@ public class RunApplicationService {
                 || !scope.rootSessionId().equals(scope.sessionId())) {
             return;
         }
-        sessionUpdatedTitle(draft.payload()).ifPresent(title -> sessionRepository.findById(originalRun.sessionId())
-                // 额外校验平台会话绑定的远端 root id，防止陈旧或错误路由的事件改写标题。
-                .filter(session -> scope.rootSessionId().equals(session.opencodeSessionId()))
-                .ifPresent(session -> sessionRepository.save(session.updateTitleAndPinned(
-                        title,
-                        session.pinned(),
-                        draft.occurredAt(),
-                        draft.traceId()))));
+        try {
+            sessionUpdatedTitle(draft.payload()).ifPresent(title -> sessionRepository.findById(originalRun.sessionId())
+                    // 额外校验平台会话绑定的远端 root id，防止陈旧或错误路由的事件改写标题。
+                    .filter(session -> scope.rootSessionId().equals(session.opencodeSessionId()))
+                    .ifPresent(session -> sessionRepository.save(session.updateTitleAndPinned(
+                            title,
+                            session.pinned(),
+                            draft.occurredAt(),
+                            draft.traceId()))));
+        } catch (RuntimeException exception) {
+            // 标题只是会话展示增强，仓储短暂故障不能阻断原始 session.updated 的持久化与 SSE 发布。
+            LOGGER.warn(
+                    "同步 OpenCode 会话标题失败，继续处理原始事件，runId={}, remoteSessionId={}, traceId={}",
+                    originalRun.runId().value(),
+                    scope.rootSessionId(),
+                    draft.traceId(),
+                    exception);
+        }
     }
 
     /**

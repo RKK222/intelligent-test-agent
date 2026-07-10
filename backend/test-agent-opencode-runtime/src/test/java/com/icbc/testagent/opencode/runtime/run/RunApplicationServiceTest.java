@@ -736,6 +736,38 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void servicePersistsSessionUpdatedWhenTitleSynchronizationFails() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        sessions.failTitleUpdate = true;
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.SESSION_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "session.updated",
+                        "sessionID", REMOTE_SESSION_ID,
+                        "info", Map.of("title", "AI 标题保存失败"))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
+        assertThat(sessions.current.title()).isEqualTo("Demo session");
+    }
+
+    @Test
     void serviceSynchronizesRootSessionTitleFromWrappedSessionUpdatedEvent() {
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
@@ -1879,6 +1911,7 @@ class RunApplicationServiceTest {
 
     private static final class FakeSessionRepository implements com.icbc.testagent.domain.session.SessionRepository {
         private Session current;
+        private boolean failTitleUpdate;
 
         private FakeSessionRepository() {
             this(session());
@@ -1890,6 +1923,9 @@ class RunApplicationServiceTest {
 
         @Override
         public Session save(Session session) {
+            if (failTitleUpdate && "AI 标题保存失败".equals(session.title())) {
+                throw new DataAccessResourceFailureException("title save failed");
+            }
             current = session;
             return session;
         }
