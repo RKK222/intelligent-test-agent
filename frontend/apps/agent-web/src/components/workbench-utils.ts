@@ -1214,20 +1214,13 @@ export function sessionTitleFromFirstMessage(message: string): string {
 }
 
 /**
- * OpenCode 标题事件既可能是平台归一化后的 info，也可能保留在原始报文包装内；
- * 只接受去除空白后仍有内容的标题，避免空事件覆盖当前会话名称。
+ * 只消费后端已成功持久化的平台标题，禁止以 OpenCode 原始 payload 乐观覆盖页面状态。
  */
-export function sessionTitleFromUpdatedEventPayload(payload: Record<string, unknown>): string {
-  const info = record(payload.info);
-  const rawProperties = record(record(payload.rawPayload)?.properties);
-  const rawInfo = record(rawProperties?.info);
-  const candidates = [info?.title, rawInfo?.title];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
+export function platformSessionTitleFromSynchronizedEventPayload(payload: Record<string, unknown>): string {
+  if (payload.platformSessionTitleSynchronized !== true || typeof payload.platformSessionTitle !== "string") {
+    return "";
   }
-  return "";
+  return payload.platformSessionTitle.trim();
 }
 
 export function modelValue(model: ModelInfo) {

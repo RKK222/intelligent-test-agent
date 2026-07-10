@@ -106,9 +106,9 @@ import {
   runEventMatchesRun,
   runtimeResources,
   runtimeStatus,
+  platformSessionTitleFromSynchronizedEventPayload,
   sessionTitleEventMatchesCurrentSession,
   sessionTitleFromFirstMessage,
-  sessionTitleFromUpdatedEventPayload,
   shouldFailExhaustedRetry,
   syntheticEvent,
   text,
@@ -3111,10 +3111,14 @@ function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
   dispatchChat({ type: "event", event });
   notifyOnAttention(event, selectedWorkspace.value, session.value);
   if (event.type === "session.updated") {
-    const title = sessionTitleFromUpdatedEventPayload(event.payload);
-    // 前端没有暴露远端 root session id；除后端标记的子会话外，还必须确认
-    // 当前页面仍指向建立该 SSE 订阅的平台会话，避免历史切换后的旧事件覆盖标题。
-    if (title && event.payload.isChildSession !== true && sessionTitleEventMatchesCurrentSession(subscribedSessionId, session.value?.sessionId) && session.value) {
+    const title = platformSessionTitleFromSynchronizedEventPayload(event.payload);
+    // 只有后端确认标题已写入平台 Session 后才刷新页面；同时拒绝子会话和历史切换后晚到的旧事件。
+    if (
+      title
+      && event.payload.isChildSession !== true
+      && sessionTitleEventMatchesCurrentSession(subscribedSessionId, session.value?.sessionId)
+      && session.value
+    ) {
       const currentSessionId = session.value.sessionId;
       session.value = { ...session.value, title };
       sessionHistoryItems.value = sessionHistoryItems.value.map((item) =>

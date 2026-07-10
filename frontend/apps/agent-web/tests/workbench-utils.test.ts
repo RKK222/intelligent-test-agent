@@ -27,7 +27,7 @@ import {
   retryCountdownSeconds,
   retryExpirationDecision,
   sessionTitleEventMatchesCurrentSession,
-  sessionTitleFromUpdatedEventPayload,
+  platformSessionTitleFromSynchronizedEventPayload,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
   workspaceLoadIsCurrent
@@ -1213,22 +1213,40 @@ describe("historical session restoration", () => {
   });
 });
 
-describe("sessionTitleFromUpdatedEventPayload", () => {
-  it("reads and trims the standard session.updated info title", () => {
-    expect(sessionTitleFromUpdatedEventPayload({ info: { title: "  自动生成的标题  " } })).toBe("自动生成的标题");
-  });
-
-  it("falls back to the raw OpenCode payload title", () => {
+describe("platformSessionTitleFromSynchronizedEventPayload", () => {
+  it("reads and trims a title only after the platform persistence marker", () => {
     expect(
-      sessionTitleFromUpdatedEventPayload({
-        rawPayload: { properties: { info: { title: "  原始报文标题  " } } }
+      platformSessionTitleFromSynchronizedEventPayload({
+        platformSessionTitleSynchronized: true,
+        platformSessionTitle: "  已持久化的标题  "
       })
-    ).toBe("原始报文标题");
+    ).toBe("已持久化的标题");
   });
 
-  it("returns an empty title for blank or missing payload fields", () => {
-    expect(sessionTitleFromUpdatedEventPayload({ info: { title: " \n " } })).toBe("");
-    expect(sessionTitleFromUpdatedEventPayload({ rawPayload: { properties: { info: {} } } })).toBe("");
+  it("rejects missing or false persistence markers instead of falling back to OpenCode payloads", () => {
+    expect(
+      platformSessionTitleFromSynchronizedEventPayload({
+        platformSessionTitle: "不应乐观更新",
+        info: { title: "原始标题" },
+        rawPayload: { properties: { info: { title: "原始包装标题" } } }
+      })
+    ).toBe("");
+    expect(
+      platformSessionTitleFromSynchronizedEventPayload({
+        platformSessionTitleSynchronized: false,
+        platformSessionTitle: "不应乐观更新"
+      })
+    ).toBe("");
+  });
+
+  it("returns an empty title when the synchronized title is blank or missing", () => {
+    expect(
+      platformSessionTitleFromSynchronizedEventPayload({
+        platformSessionTitleSynchronized: true,
+        platformSessionTitle: " \n "
+      })
+    ).toBe("");
+    expect(platformSessionTitleFromSynchronizedEventPayload({ platformSessionTitleSynchronized: true })).toBe("");
   });
 });
 
