@@ -307,7 +307,7 @@ After=network-online.target
 [Service]
 WorkingDirectory=/data/testagent
 EnvironmentFile=/data/testagent/config/backend.env
-ExecStart=/usr/bin/java -Dloader.path=/data/testagent/dist/backend/lib -cp /data/testagent/dist/backend/test-agent-app.jar org.springframework.boot.loader.launch.PropertiesLauncher
+ExecStart=/usr/bin/java -jar /data/testagent/dist/backend/test-agent-app.jar
 Restart=always
 RestartSec=5
 

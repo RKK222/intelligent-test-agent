@@ -207,9 +207,10 @@ tag_to_tar_name() {
 
 package_backend() {
   local backend_dir="${OUTPUT_DIR}/backend"
-  local extract_dir
+  local extract_dir manifest_file
   require_command unzip
   require_command zip
+  require_command jar
   mkdir -p "${backend_dir}"
   echo "Building backend jar"
   (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am -DskipTests package)
@@ -229,6 +230,13 @@ package_backend() {
   rm -rf "${extract_dir}"
   # 交付包只保留启动器和业务 classes，所有依赖由 PropertiesLauncher 从外置 lib 加载。
   zip -qd "${backend_dir}/test-agent-app.jar" 'BOOT-INF/lib/*' >/dev/null
+  manifest_file="$(mktemp "${OUTPUT_DIR}/.backend-manifest.XXXXXX")"
+  unzip -p "${backend_dir}/test-agent-app.jar" META-INF/MANIFEST.MF | tr -d '\r' \
+    | sed 's#Main-Class: org.springframework.boot.loader.launch.JarLauncher#Main-Class: org.springframework.boot.loader.launch.PropertiesLauncher#' \
+    | sed '${/^$/d;}' >"${manifest_file}"
+  printf 'Loader-Path: /data/testagent/dist/backend/lib\n\n' >>"${manifest_file}"
+  jar umf "${manifest_file}" "${backend_dir}/test-agent-app.jar" >/dev/null 2>&1
+  rm -f "${manifest_file}"
   [[ -n "$(find "${backend_dir}/lib" -maxdepth 1 -type f -name '*.jar' -print -quit)" ]] || {
     echo "External backend libraries were not extracted" >&2
     exit 1
