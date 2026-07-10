@@ -13,7 +13,128 @@ const markdownViewStub = {
   template: '<div class="ta-md-view">{{ source }}</div>',
 };
 
+function dispatchPointer(
+  target: EventTarget,
+  type: string,
+  pointerId: number,
+  clientX: number,
+  clientY: number,
+  pointerType = "mouse"
+) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX,
+    clientY,
+  });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    pointerType: { value: pointerType },
+    isPrimary: { value: true },
+  });
+  target.dispatchEvent(event);
+}
+
+function setViewport(width: number, height: number) {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+}
+
 describe("FigmaChatPanel", () => {
+  it("persists a dragged READY dot and expands the status card beside that location", async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    window.localStorage.setItem("figma-chat-process-dot-pos", JSON.stringify({ x: 100, y: 120 }));
+    setViewport(1000, 800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("figma-chat-process-status")
+        ? ({ x: 0, y: 0, width: 240, height: 90, top: 0, right: 240, bottom: 90, left: 0, toJSON: () => ({}) } as DOMRect)
+        : ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect);
+    });
+
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+      } as any,
+    });
+
+    try {
+      await nextTick();
+      const dot = wrapper.get(".figma-chat-process-status-dot.is-ready");
+      dispatchPointer(dot.element, "pointerdown", 1, 100, 120);
+      dispatchPointer(window, "pointermove", 1, 260, 220);
+      dispatchPointer(window, "pointerup", 1, 260, 220);
+      await nextTick();
+
+      expect(window.localStorage.getItem("figma-chat-process-dot-pos")).toBe(
+        JSON.stringify({ x: 260, y: 220 })
+      );
+
+      // 浏览器会在 pointerup 后补发 click；先复现这次被拖拽阈值过滤的 click。
+      await dot.trigger("click");
+      await dot.trigger("click");
+      await nextTick();
+      await nextTick();
+
+      const card = wrapper.get(".figma-chat-process-status");
+      const cardElement = card.element as HTMLElement;
+      expect(cardElement.style.position).toBe("fixed");
+      expect(cardElement.style.left).toBe("280px");
+      expect(cardElement.style.top).toBe("240px");
+    } finally {
+      wrapper.unmount();
+      vi.restoreAllMocks();
+      Object.defineProperty(window, "innerWidth", originalInnerWidth!);
+      Object.defineProperty(window, "innerHeight", originalInnerHeight!);
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
+  it("flips the expanded status card near the bottom right and reclamps it after resize", async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    window.localStorage.setItem("figma-chat-process-dot-pos", JSON.stringify({ x: 880, y: 680 }));
+    setViewport(1000, 800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("figma-chat-process-status")
+        ? ({ x: 0, y: 0, width: 240, height: 90, top: 0, right: 240, bottom: 90, left: 0, toJSON: () => ({}) } as DOMRect)
+        : ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect);
+    });
+
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+      } as any,
+    });
+
+    try {
+      await nextTick();
+      await wrapper.get(".figma-chat-process-status-dot").trigger("click");
+      await nextTick();
+      await nextTick();
+
+      const card = wrapper.get(".figma-chat-process-status");
+      const cardElement = card.element as HTMLElement;
+      expect(cardElement.style.left).toBe("632px");
+      expect(cardElement.style.top).toBe("582px");
+
+      setViewport(500, 400);
+      window.dispatchEvent(new Event("resize"));
+      await nextTick();
+
+      expect(cardElement.style.left).toBe("224px");
+      expect(cardElement.style.top).toBe("274px");
+    } finally {
+      wrapper.unmount();
+      vi.restoreAllMocks();
+      Object.defineProperty(window, "innerWidth", originalInnerWidth!);
+      Object.defineProperty(window, "innerHeight", originalInnerHeight!);
+      window.localStorage.removeItem("figma-chat-process-dot-pos");
+    }
+  });
+
   it("loads model options from provider model lists when the flat model list is empty", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

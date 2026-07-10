@@ -1960,9 +1960,15 @@ const PROCESS_DOT_POS_KEY = 'figma-chat-process-dot-pos'
 const PROCESS_DOT_SIZE = 12
 const PROCESS_DOT_MARGIN = 16
 const PROCESS_DOT_DRAG_THRESHOLD = 4
+const PROCESS_STATUS_CARD_GAP = 8
+const PROCESS_STATUS_CARD_MARGIN = 16
+const PROCESS_STATUS_CARD_FALLBACK_SIZE = { width: 280, height: 84 }
 const processStatusDotPos = ref<{ x: number; y: number } | null>(null)
+const processStatusCard = ref<HTMLElement | null>(null)
+const processStatusCardSize = ref({ ...PROCESS_STATUS_CARD_FALLBACK_SIZE })
 const isDraggingProcessDot = ref(false)
 const didDragProcessDot = ref(false)
+let processStatusCardResizeObserver: ResizeObserver | null = null
 let dragPointerId: number | null = null
 let dragStartX = 0
 let dragStartY = 0
@@ -2039,6 +2045,89 @@ const processStatusDotStyle = computed(() => {
   } as Record<string, string>
 })
 
+// 小圆点坐标始终是 viewport 内左上角坐标；卡片与圆点共用这一坐标合同，
+// 因而无论圆点拖到哪里，展开后都能从同一位置附近出现。
+function calculateProcessStatusCardPos(
+  dotPos: { x: number; y: number },
+  cardSize: { width: number; height: number }
+) {
+  if (typeof window === 'undefined') return { x: dotPos.x, y: dotPos.y }
+
+  const right = dotPos.x + PROCESS_DOT_SIZE + PROCESS_STATUS_CARD_GAP
+  const bottom = dotPos.y + PROCESS_DOT_SIZE + PROCESS_STATUS_CARD_GAP
+  // 放置优先级：默认右下；单独越界时分别翻到左侧或上方，最后再夹进视口。
+  const preferredX =
+    right + cardSize.width <= window.innerWidth - PROCESS_STATUS_CARD_MARGIN
+      ? right
+      : dotPos.x - PROCESS_STATUS_CARD_GAP - cardSize.width
+  const preferredY =
+    bottom + cardSize.height <= window.innerHeight - PROCESS_STATUS_CARD_MARGIN
+      ? bottom
+      : dotPos.y - PROCESS_STATUS_CARD_GAP - cardSize.height
+  const maxX = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerWidth - cardSize.width - PROCESS_STATUS_CARD_MARGIN)
+  const maxY = Math.max(PROCESS_STATUS_CARD_MARGIN, window.innerHeight - cardSize.height - PROCESS_STATUS_CARD_MARGIN)
+  return {
+    x: Math.min(Math.max(preferredX, PROCESS_STATUS_CARD_MARGIN), maxX),
+    y: Math.min(Math.max(preferredY, PROCESS_STATUS_CARD_MARGIN), maxY),
+  }
+}
+
+const processStatusCardStyle = computed(() => {
+  const pos = calculateProcessStatusCardPos(
+    processStatusDotPos.value ?? defaultProcessDotPos(),
+    processStatusCardSize.value
+  )
+  return {
+    position: 'fixed',
+    left: `${pos.x}px`,
+    top: `${pos.y}px`,
+  } as CSSProperties
+})
+
+function measureProcessStatusCard() {
+  const card = processStatusCard.value
+  if (!card) return
+  const rect = card.getBoundingClientRect()
+  if (rect.width > 0 && rect.height > 0) {
+    processStatusCardSize.value = { width: rect.width, height: rect.height }
+  }
+}
+
+async function startProcessStatusCardObservation() {
+  await nextTick()
+  if (processStatusCollapsed.value || !processStatusVisible.value) return
+  const card = processStatusCard.value
+  if (!card) return
+  measureProcessStatusCard()
+  // 卡片展开后才监听内容尺寸；收起或卸载时立即断开，避免保留失效 DOM 引用。
+  if (typeof ResizeObserver !== 'undefined') {
+    processStatusCardResizeObserver?.disconnect()
+    processStatusCardResizeObserver = new ResizeObserver(() => measureProcessStatusCard())
+    processStatusCardResizeObserver.observe(card)
+  }
+}
+
+function stopProcessStatusCardObservation() {
+  processStatusCardResizeObserver?.disconnect()
+  processStatusCardResizeObserver = null
+}
+
+watch(processStatusCollapsed, (collapsed) => {
+  if (collapsed) {
+    stopProcessStatusCardObservation()
+  } else {
+    void startProcessStatusCardObservation()
+  }
+})
+
+watch(processStatusVisible, (visible) => {
+  if (!visible) {
+    stopProcessStatusCardObservation()
+  } else if (!processStatusCollapsed.value) {
+    void startProcessStatusCardObservation()
+  }
+})
+
 function onProcessDotPointerMove(event: PointerEvent) {
   if (!isDraggingProcessDot.value) return
   if (dragPointerId !== event.pointerId) return
@@ -2101,8 +2190,12 @@ function handleProcessStatusDotClick() {
 onMounted(() => {
   loadProcessDotPos()
   window.addEventListener('resize', onProcessStatusDotResize)
+  if (processStatusVisible.value && !processStatusDotVisible.value) {
+    void startProcessStatusCardObservation()
+  }
 })
 onBeforeUnmount(() => {
+  stopProcessStatusCardObservation()
   window.removeEventListener('resize', onProcessStatusDotResize)
   window.removeEventListener('pointermove', onProcessDotPointerMove)
   window.removeEventListener('pointerup', onProcessDotPointerEnd)
@@ -2110,11 +2203,14 @@ onBeforeUnmount(() => {
 })
 
 function onProcessStatusDotResize() {
-  if (!processStatusDotPos.value) return
-  processStatusDotPos.value = clampProcessDotPos(
-    processStatusDotPos.value.x,
-    processStatusDotPos.value.y
-  )
+  if (processStatusDotPos.value) {
+    processStatusDotPos.value = clampProcessDotPos(
+      processStatusDotPos.value.x,
+      processStatusDotPos.value.y
+    )
+  }
+  // 窗口尺寸变化时重新取实际卡片尺寸，再按同一翻转/夹取规则定位。
+  measureProcessStatusCard()
 }
 
 function onContextPreview(item: ChatContextItem) {
@@ -3717,7 +3813,7 @@ function onCompositionEnd() {
       v-if="!activeSubagentSessionId && processStatusDotVisible"
       type="button"
       :class="[
-        'figma-chat-process-dot',
+        'figma-chat-process-status-dot',
         processReady ? 'is-ready' : 'is-blocking',
         isDraggingProcessDot && 'is-dragging',
       ]"
@@ -3735,6 +3831,8 @@ function onCompositionEnd() {
         'figma-chat-process-status',
         processReady ? 'is-ready' : 'is-blocking',
       ]"
+      ref="processStatusCard"
+      :style="processStatusCardStyle"
       role="button"
       tabindex="0"
       :title="`收起进程状态`"
@@ -6748,7 +6846,7 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 12px 8px;
+  margin: 0;
   padding: 12px 16px;
   border: 1px solid #d7d7d7;
   border-radius: 12px;
@@ -6756,6 +6854,8 @@ function onCompositionEnd() {
   color: #333;
   cursor: pointer;
   user-select: none;
+  z-index: 50;
+  max-width: calc(100vw - 32px);
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 .figma-chat-process-status:hover {
@@ -6765,8 +6865,8 @@ function onCompositionEnd() {
   transform: scale(0.99);
 }
 
-/* 收起态：右下角一颗带虚化渐变的小圆点；点击展开，支持拖动改位置 */
-.figma-chat-process-dot {
+/* 收起态：右下角一颗带虚化渐变的小圆点；与时间线圆点使用独立类，避免样式冲突。 */
+.figma-chat-process-status-dot {
   flex-shrink: 0;
   align-self: flex-end;
   width: 12px;
@@ -6790,7 +6890,7 @@ function onCompositionEnd() {
   z-index: 50;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.figma-chat-process-dot:hover {
+.figma-chat-process-status-dot:hover {
   transform: translate3d(
       var(--figma-process-dot-x, 0px),
       var(--figma-process-dot-y, 0px),
@@ -6798,12 +6898,12 @@ function onCompositionEnd() {
     )
     scale(1.15);
 }
-.figma-chat-process-dot:active,
-.figma-chat-process-dot.is-dragging {
+.figma-chat-process-status-dot:active,
+.figma-chat-process-status-dot.is-dragging {
   cursor: grabbing;
   transition: none;
 }
-.figma-chat-process-dot::after {
+.figma-chat-process-status-dot::after {
   content: '';
   position: absolute;
   inset: -6px;
@@ -6814,7 +6914,7 @@ function onCompositionEnd() {
   z-index: -1;
   pointer-events: none;
 }
-.figma-chat-process-dot.is-ready {
+.figma-chat-process-status-dot.is-ready {
   background: radial-gradient(
     circle at 35% 35%,
     #34d399 0%,
@@ -6823,7 +6923,7 @@ function onCompositionEnd() {
   );
   box-shadow: 0 0 6px rgba(24, 169, 120, 0.45);
 }
-.figma-chat-process-dot.is-blocking {
+.figma-chat-process-status-dot.is-blocking {
   background: radial-gradient(
     circle at 35% 35%,
     #fb7185 0%,
