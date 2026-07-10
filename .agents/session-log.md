@@ -9,9 +9,9 @@
 - What:
   - 在 `RunApplicationService` 的既有流式事件处理处，将已路由确认的 root `session.updated` 标题回写到对应平台 Session。
 - How:
-  - 复用 `Session.updateTitleAndPinned` 和 `SessionRepository.save`；仅接受 root scope 且远端 root id 与平台绑定一致的非空标题，兼容直出与 `rawPayload.properties.info` 包裹事件；标题仓储失败只记录中文 WARN，不阻断原始 `session.updated` 持久化与 SSE 发布。
+  - 复用 `Session.updateTitleAndPinned` 和 `SessionRepository.save`；仅接受 root scope 且远端 root id 与平台绑定一致的非空标题，兼容直出与 `rawPayload.properties.info` 包裹事件；标题仓储失败只记录中文 WARN，不阻断原始 `session.updated` 持久化与 SSE 发布。标题保存成功时复制既有 draft，增加已同步标记和去首尾空白的标题，确保 raw 包装事件清洗后仍可实时传递。
 - Result:
-  - `RunApplicationServiceTest` 覆盖 root、包裹事件、已发现 child、未知归属、空白标题、标题仓储失败及平台远端绑定不一致；使用 JDK 25 执行定向 Maven 测试 42 项均通过。
+  - `RunApplicationServiceTest` 覆盖 root、包裹事件、已发现 child、未知归属、空白标题、标题仓储失败及平台远端绑定不一致；成功事件含同步字段，失败或不匹配事件不含该字段；使用 JDK 25 执行定向 Maven 测试 42 项均通过。
 
 ### 2026-07-10 - 清理企业模板中的废弃 prod profile
 

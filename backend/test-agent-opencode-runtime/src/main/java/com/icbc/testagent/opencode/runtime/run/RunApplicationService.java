@@ -1044,53 +1044,58 @@ public class RunApplicationService {
      * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
     private void appendStreamEvent(String agentId, Run originalRun, Workspace workspace, RunEventDraft draft) {
-        recordRuntimeActivity(draft);
-        synchronizeRootSessionTitle(originalRun, draft);
-        if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
+        RunEventDraft eventDraft = synchronizeRootSessionTitle(originalRun, draft);
+        recordRuntimeActivity(eventDraft);
+        if (eventDraft.type() == RunEventType.RUN_SUCCEEDED || eventDraft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
-            RunStatus terminalStatus = draft.type() == RunEventType.RUN_SUCCEEDED
+            RunStatus terminalStatus = eventDraft.type() == RunEventType.RUN_SUCCEEDED
                     ? RunStatus.SUCCEEDED
                     : RunStatus.FAILED;
             // root run.succeeded/run.failed 是远端会话终态事实源；它允许纠正先到的 transport error 临时失败。
-            Run terminal = current.applyTerminalFact(terminalStatus, draft.occurredAt());
+            Run terminal = current.applyTerminalFact(terminalStatus, eventDraft.occurredAt());
             Run saved = runRepository.save(terminal);
-            runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
-            snapshotService.persistRunSnapshot(agentId, saved, draft.traceId());
+            runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft));
+            snapshotService.persistRunSnapshot(agentId, saved, eventDraft.traceId());
             return;
         }
-        if (draft.type() == RunEventType.MESSAGE_PART_UPDATED) {
-            appendLiveDiffFromToolPart(originalRun, workspace, draft);
+        if (eventDraft.type() == RunEventType.MESSAGE_PART_UPDATED) {
+            appendLiveDiffFromToolPart(originalRun, workspace, eventDraft);
         }
-        if (!runEventPersistencePolicy.shouldPersist(draft)) {
-            runEventLiveBus.publishTransient(runEventPersistencePolicy.sanitizeForPersistence(draft));
+        if (!runEventPersistencePolicy.shouldPersist(eventDraft)) {
+            runEventLiveBus.publishTransient(runEventPersistencePolicy.sanitizeForPersistence(eventDraft));
             return;
         }
-        runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
+        runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft));
     }
 
     /**
      * 将 OpenCode 内置 title agent 发出的 root session.updated 标题回写到平台会话。
      */
-    private void synchronizeRootSessionTitle(Run originalRun, RunEventDraft draft) {
+    private RunEventDraft synchronizeRootSessionTitle(Run originalRun, RunEventDraft draft) {
         if (draft.type() != RunEventType.SESSION_UPDATED) {
-            return;
+            return draft;
         }
         RunEventScopeContext scope = draft.scopeContext();
         // 只有路由器已确认的 root scope 才能改平台标题，避免 child 或未知远端会话覆盖当前会话。
         if (scope == null
                 || scope.childSession()
                 || !scope.rootSessionId().equals(scope.sessionId())) {
-            return;
+            return draft;
         }
         try {
-            sessionUpdatedTitle(draft.payload()).ifPresent(title -> sessionRepository.findById(originalRun.sessionId())
-                    // 额外校验平台会话绑定的远端 root id，防止陈旧或错误路由的事件改写标题。
-                    .filter(session -> scope.rootSessionId().equals(session.opencodeSessionId()))
-                    .ifPresent(session -> sessionRepository.save(session.updateTitleAndPinned(
-                            title,
-                            session.pinned(),
-                            draft.occurredAt(),
-                            draft.traceId()))));
+            return sessionUpdatedTitle(draft.payload())
+                    .flatMap(title -> sessionRepository.findById(originalRun.sessionId())
+                            // 额外校验平台会话绑定的远端 root id，防止陈旧或错误路由的事件改写标题。
+                            .filter(session -> scope.rootSessionId().equals(session.opencodeSessionId()))
+                            .map(session -> {
+                                sessionRepository.save(session.updateTitleAndPinned(
+                                        title,
+                                        session.pinned(),
+                                        draft.occurredAt(),
+                                        draft.traceId()));
+                                return withSynchronizedPlatformSessionTitle(draft, title.trim());
+                            }))
+                    .orElse(draft);
         } catch (RuntimeException exception) {
             // 标题只是会话展示增强，仓储短暂故障不能阻断原始 session.updated 的持久化与 SSE 发布。
             LOGGER.warn(
@@ -1099,7 +1104,24 @@ public class RunApplicationService {
                     scope.rootSessionId(),
                     draft.traceId(),
                     exception);
+            return draft;
         }
+    }
+
+    /**
+     * 标题成功保存后复制事件草稿，为前端提供不依赖 OpenCode 原始报文的同步结果。
+     */
+    private RunEventDraft withSynchronizedPlatformSessionTitle(RunEventDraft draft, String title) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>(draft.payload());
+        payload.put("platformSessionTitleSynchronized", true);
+        payload.put("platformSessionTitle", title);
+        return new RunEventDraft(
+                draft.runId(),
+                draft.type(),
+                draft.traceId(),
+                draft.occurredAt(),
+                payload,
+                draft.scopeContext());
     }
 
     /**

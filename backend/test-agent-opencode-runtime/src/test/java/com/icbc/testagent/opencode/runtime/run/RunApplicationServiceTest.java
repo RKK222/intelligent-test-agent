@@ -704,7 +704,7 @@ class RunApplicationServiceTest {
                 Map.of(
                         "rawType", "session.updated",
                         "sessionID", REMOTE_SESSION_ID,
-                        "info", Map.of("title", "AI 生成的会话标题"))));
+                        "info", Map.of("title", "  AI 生成的会话标题  "))));
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 sessions,
@@ -728,11 +728,13 @@ class RunApplicationServiceTest {
         service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
-        assertThat(sessions.current.title()).isEqualTo("AI 生成的会话标题");
+        assertThat(sessions.current.title()).isEqualTo("  AI 生成的会话标题  ");
         assertThat(events.events.get(2).payload())
                 .containsEntry("rootSessionId", REMOTE_SESSION_ID)
                 .containsEntry("sessionId", REMOTE_SESSION_ID)
-                .containsEntry("isChildSession", false);
+                .containsEntry("isChildSession", false)
+                .containsEntry("platformSessionTitleSynchronized", true)
+                .containsEntry("platformSessionTitle", "AI 生成的会话标题");
     }
 
     @Test
@@ -765,6 +767,8 @@ class RunApplicationServiceTest {
 
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
         assertThat(sessions.current.title()).isEqualTo("Demo session");
+        assertThat(events.events.get(2).payload())
+                .doesNotContainKeys("platformSessionTitleSynchronized", "platformSessionTitle");
     }
 
     @Test
@@ -797,6 +801,8 @@ class RunApplicationServiceTest {
 
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
         assertThat(sessions.current.title()).isEqualTo("Demo session");
+        assertThat(events.events.get(2).payload())
+                .doesNotContainKeys("platformSessionTitleSynchronized", "platformSessionTitle");
     }
 
     @Test
@@ -813,7 +819,7 @@ class RunApplicationServiceTest {
                         "rawType", "session.updated",
                         "rawPayload", Map.of("properties", Map.of(
                                 "sessionID", REMOTE_SESSION_ID,
-                                "info", Map.of("title", "兼容事件标题"))))));
+                                "info", Map.of("title", "  兼容事件标题  "))))));
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 sessions,
@@ -837,7 +843,11 @@ class RunApplicationServiceTest {
         service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
-        assertThat(sessions.current.title()).isEqualTo("兼容事件标题");
+        assertThat(sessions.current.title()).isEqualTo("  兼容事件标题  ");
+        assertThat(events.events.get(2).payload())
+                .containsEntry("platformSessionTitleSynchronized", true)
+                .containsEntry("platformSessionTitle", "兼容事件标题")
+                .doesNotContainKey("rawPayload");
     }
 
     @Test
@@ -896,6 +906,8 @@ class RunApplicationServiceTest {
                 RunEventType.SESSION_CREATED,
                 RunEventType.SESSION_UPDATED);
         assertThat(sessions.current.title()).isEqualTo("Demo session");
+        assertThat(events.events.get(5).payload())
+                .doesNotContainKeys("platformSessionTitleSynchronized", "platformSessionTitle");
     }
 
     @Test
@@ -958,6 +970,8 @@ class RunApplicationServiceTest {
 
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
         assertThat(sessions.current.title()).isEqualTo("Demo session");
+        assertThat(events.events.get(2).payload())
+                .doesNotContainKeys("platformSessionTitleSynchronized", "platformSessionTitle");
     }
 
     @Test
