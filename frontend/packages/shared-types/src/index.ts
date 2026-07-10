@@ -1202,6 +1202,7 @@ export type RunEventType =
   | "run.succeeded"
   | "run.failed"
   | "run.cancelled"
+  | "run.snapshot.reset"
   | "assistant.message.delta"
   | "message.updated"
   | "message.removed"
@@ -1238,6 +1239,22 @@ export type RunEvent = {
   traceId: string;
   occurredAt: string;
   payload: Record<string, unknown>;
+};
+
+/** Redis 详情游标失效后由后端下发的 Run 物化快照；字段保持可选以兼容旧响应。 */
+export type RunRuntimeSnapshot = {
+  barrierSeq?: number;
+  runtimeVersion?: number;
+  events?: RunEvent[];
+};
+
+/** `run.snapshot.reset` 的 payload；该 transient 事件不参与 durable Last-Event-ID 推进。 */
+export type RunSnapshotResetPayload = {
+  reason?: string;
+  resetGeneration?: number;
+  earliestSeq?: number;
+  detailsAvailableUntil?: string;
+  snapshot?: RunRuntimeSnapshot;
 };
 
 export type MessageScope = {

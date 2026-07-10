@@ -2,6 +2,11 @@ package com.icbc.testagent.event;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
@@ -11,6 +16,18 @@ import com.icbc.testagent.domain.event.RunEventId;
 import com.icbc.testagent.domain.event.RunEventRepository;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunRuntimeAppendResult;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeReplay;
+import com.icbc.testagent.domain.run.RunRuntimeSnapshot;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
+import com.icbc.testagent.domain.run.RunRuntimeStreamEvent;
+import com.icbc.testagent.domain.run.RunRuntimeTail;
+import com.icbc.testagent.domain.run.RunStorageMode;
+import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.session.SessionId;
+import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -126,6 +143,89 @@ class RunEventServicesTest {
                     assertThat(payload.type()).isEqualTo("run.started");
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    void redisSummaryAppenderSkipsDatabaseAndPublishesRedisAssignedEvent() {
+        RunEventRepository repository = mock(RunEventRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunEventLiveBus liveBus = new RunEventLiveBus();
+        RunId runId = new RunId("run_redis_summary_event");
+        RunEventDraft draft = new RunEventDraft(
+                runId, RunEventType.RUN_STARTED, "trace_redis", NOW, Map.of("status", "RUNNING"));
+        RunEvent redisEvent = event(draft, 9L);
+        when(runtimeStore.storageMode(runId)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        when(runtimeStore.appendDurable(draft)).thenReturn(new RunRuntimeAppendResult(redisEvent, false, 0, 1));
+        RunEventAppender appender = new RunEventAppender(repository, liveBus, runtimeStore);
+
+        StepVerifier.create(liveBus.stream(runId).take(1))
+                .then(() -> assertThat(appender.append(draft)).isEqualTo(redisEvent))
+                .assertNext(live -> assertThat(live.payload().seq()).isEqualTo(9L))
+                .verifyComplete();
+
+        verify(repository, never()).append(draft);
+        verify(runtimeStore).appendDurable(draft);
+    }
+
+    @Test
+    void redisSummaryTransientProjectsSnapshotBeforePublishingLiveEvent() {
+        RunEventRepository repository = mock(RunEventRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunEventLiveBus liveBus = mock(RunEventLiveBus.class);
+        RunId runId = new RunId("run_redis_transient_event");
+        RunEventDraft draft = new RunEventDraft(
+                runId, RunEventType.MESSAGE_PART_DELTA, "trace_redis", NOW, Map.of("delta", "hello"));
+        when(runtimeStore.storageMode(runId)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        when(runtimeStore.projectTransient(draft)).thenReturn(true);
+        RunEventAppender appender = new RunEventAppender(repository, liveBus, runtimeStore);
+
+        assertThat(appender.publishTransient(draft)).isTrue();
+
+        var ordered = inOrder(runtimeStore, liveBus);
+        ordered.verify(runtimeStore).projectTransient(draft);
+        ordered.verify(liveBus).publishTransient(draft);
+        verify(repository, never()).append(draft);
+    }
+
+    @Test
+    void redisSummaryDoesNotPublishStatusEventRejectedByRuntimeStore() {
+        RunEventRepository repository = mock(RunEventRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunEventLiveBus liveBus = mock(RunEventLiveBus.class);
+        RunId runId = new RunId("run_redis_terminal_late_event");
+        RunEventDraft durable = new RunEventDraft(
+                runId, RunEventType.RUN_STARTED, "trace_late_durable", NOW, Map.of("status", "RUNNING"));
+        RunEventDraft transientDraft = new RunEventDraft(
+                runId, RunEventType.RUN_STARTED, "trace_late_transient", NOW, Map.of("status", "RUNNING"));
+        RunEvent ignoredEvent = event(durable, 10L);
+        when(runtimeStore.appendDurable(durable))
+                .thenReturn(new RunRuntimeAppendResult(ignoredEvent, false, 0, 1, false));
+        when(runtimeStore.projectTransient(transientDraft)).thenReturn(false);
+        RunEventAppender appender = new RunEventAppender(repository, liveBus, runtimeStore);
+
+        assertThat(appender.append(durable, RunStorageMode.REDIS_SUMMARY)).isEqualTo(ignoredEvent);
+        assertThat(appender.publishTransient(transientDraft, RunStorageMode.REDIS_SUMMARY)).isFalse();
+
+        verify(liveBus, never()).publishDurable(ignoredEvent);
+        verify(liveBus, never()).publishTransient(transientDraft);
+        verify(repository, never()).append(durable);
+    }
+
+    @Test
+    void explicitLegacyModeKeepsDatabaseAsFactWhenShadowRedisIsUnavailable() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunEventLiveBus liveBus = mock(RunEventLiveBus.class);
+        RunId runId = new RunId("run_legacy_shadow_failure");
+        RunEventDraft draft = new RunEventDraft(
+                runId, RunEventType.RUN_STARTED, "trace_legacy", NOW, Map.of("status", "RUNNING"));
+        when(runtimeStore.findManifest(runId)).thenThrow(new IllegalStateException("redis unavailable"));
+        RunEventAppender appender = new RunEventAppender(repository, liveBus, runtimeStore);
+
+        RunEvent event = appender.append(draft, RunStorageMode.LEGACY_FULL);
+
+        assertThat(event.seq()).isEqualTo(1L);
+        verify(liveBus).publishDurable(event);
     }
 
     @Test
@@ -439,6 +539,163 @@ class RunEventServicesTest {
                     assertThat(event.event()).isEqualTo("run.started");
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    void redisSummarySseEmitsTransientResetSnapshotThenDurableStreamWithoutDatabasePolling() {
+        RunEventRepository repository = mock(RunEventRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunId runId = new RunId("run_redis_reset_event");
+        RunEventDraft snapshotDraft = new RunEventDraft(
+                runId, RunEventType.MESSAGE_UPDATED, "trace_redis", NOW, Map.of("messageId", "msg_1"));
+        RunEvent durable = event(new RunEventDraft(
+                runId, RunEventType.RUN_SUCCEEDED, "trace_redis", NOW, Map.of("status", "SUCCEEDED")), 8L);
+        RunRuntimeManifest manifest = manifest(runId, 8L, 7L, 2L, true);
+        RunRuntimeReplay replay = new RunRuntimeReplay(
+                manifest,
+                new RunRuntimeSnapshot(runId, 7L, 7L, 2L, List.of(snapshotDraft), NOW),
+                List.of(),
+                true,
+                "CURSOR_BEFORE_EARLIEST_OR_DETAILS_TRUNCATED");
+        when(runtimeStore.storageMode(runId)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        when(runtimeStore.replayAfter(runId, 1L, 50)).thenReturn(replay);
+        when(runtimeStore.tailAfter(runId, 7L, 50)).thenReturn(new RunRuntimeTail(
+                manifest,
+                RunRuntimeSnapshot.empty(runId),
+                List.of(new RunRuntimeStreamEvent(8L, true, 8L, new RunEventDraft(
+                        runId, durable.type(), durable.traceId(), durable.occurredAt(), durable.payload()))),
+                false,
+                null));
+        RunEventSseStreamService service = new RunEventSseStreamService(
+                new RunEventReplayService(repository, runtimeStore),
+                new RunEventSseMapper(),
+                new RunEventLiveBus());
+
+        StepVerifier.create(service.streamAfter(runId, "1", Duration.ofMillis(10), 50).take(2))
+                .assertNext(reset -> {
+                    assertThat(reset.id()).isNull();
+                    assertThat(reset.event()).isEqualTo("run.snapshot.reset");
+                    assertThat(reset.data()).isNotNull();
+                    assertThat(reset.data().payload()).containsEntry("resetGeneration", 2L);
+                    assertThat(reset.data().payload()).containsKey("snapshot");
+                })
+                .assertNext(event -> {
+                    assertThat(event.id()).isEqualTo("8");
+                    assertThat(event.event()).isEqualTo("run.succeeded");
+                })
+                .verifyComplete();
+
+        verify(repository, never()).findByRunIdAfter(runId, 1L, 50);
+        verify(runtimeStore).replayAfter(runId, 1L, 50);
+        verify(runtimeStore).tailAfter(runId, 7L, 50);
+    }
+
+    @Test
+    void redisSummarySsePaginatesRuntimeStreamWithoutLosingEventsPastBatchLimit() {
+        RunEventRepository repository = mock(RunEventRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunId runId = new RunId("run_redis_runtime_pages");
+        RunRuntimeManifest manifest = manifest(runId, 5L, 1L, 0L, false);
+        RunRuntimeReplay initial = new RunRuntimeReplay(
+                manifest,
+                new RunRuntimeSnapshot(runId, 0L, 10L, 0L, List.of(), NOW),
+                List.of(),
+                false,
+                null);
+        when(runtimeStore.storageMode(runId)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        when(runtimeStore.replayAfter(runId, 0L, 2)).thenReturn(initial);
+        when(runtimeStore.tailAfter(runId, 10L, 2)).thenReturn(tail(
+                manifest, 11L, 1L, 12L, 2L));
+        when(runtimeStore.tailAfter(runId, 12L, 2)).thenReturn(tail(
+                manifest, 13L, 3L, 14L, 4L));
+        when(runtimeStore.tailAfter(runId, 14L, 2)).thenReturn(tail(
+                manifest, 15L, 5L));
+        RunEventSseStreamService service = new RunEventSseStreamService(
+                new RunEventReplayService(repository, runtimeStore),
+                new RunEventSseMapper(),
+                new RunEventLiveBus());
+
+        StepVerifier.create(service.streamAfter(runId, "0", Duration.ofMillis(10), 2).take(6))
+                .assertNext(reset -> assertThat(reset.event()).isEqualTo("run.snapshot.reset"))
+                .thenConsumeWhile(
+                        event -> event.id() != null,
+                        event -> assertThat(event.event()).isEqualTo("todo.updated"))
+                .verifyComplete();
+
+        verify(repository, never()).findByRunIdAfter(runId, 0L, 2);
+        verify(runtimeStore).tailAfter(runId, 10L, 2);
+        verify(runtimeStore).tailAfter(runId, 12L, 2);
+        verify(runtimeStore).tailAfter(runId, 14L, 2);
+    }
+
+    private static RunRuntimeTail tail(
+            RunRuntimeManifest manifest,
+            long... runtimeVersionAndDurableSeq) {
+        List<RunRuntimeStreamEvent> events = new ArrayList<>();
+        for (int index = 0; index < runtimeVersionAndDurableSeq.length; index += 2) {
+            long runtimeVersion = runtimeVersionAndDurableSeq[index];
+            long seq = runtimeVersionAndDurableSeq[index + 1];
+            events.add(new RunRuntimeStreamEvent(
+                    runtimeVersion,
+                    true,
+                    seq,
+                    new RunEventDraft(
+                            manifest.runId(),
+                            RunEventType.TODO_UPDATED,
+                            "trace_runtime_page",
+                            NOW,
+                            Map.of("todos", List.of(), "pageSeq", seq))));
+        }
+        return new RunRuntimeTail(
+                manifest, RunRuntimeSnapshot.empty(manifest.runId()), events, false, null);
+    }
+
+    private static RunEvent event(RunEventDraft draft, long seq) {
+        return new RunEvent(
+                new RunEventId("evt_redis_" + seq),
+                draft.runId(),
+                seq,
+                draft.type(),
+                draft.traceId(),
+                draft.occurredAt(),
+                draft.payload(),
+                draft.scopeContext());
+    }
+
+    private static RunRuntimeManifest manifest(
+            RunId runId,
+            long lastSeq,
+            long earliestSeq,
+            long resetGeneration,
+            boolean truncated) {
+        return new RunRuntimeManifest(
+                runId,
+                RunStorageMode.REDIS_SUMMARY,
+                new UserId("usr_redis_event"),
+                new SessionId("ses_redis_event"),
+                new WorkspaceId("wrk_redis_event"),
+                "opencode",
+                "req_redis_event",
+                "msg_dispatch_redis_event",
+                "server-a",
+                "bjp_server_a",
+                "node_ocp_redis_event",
+                "ocp_redis_event",
+                "remote-session-redis-event",
+                RunStatus.RUNNING,
+                0,
+                lastSeq,
+                earliestSeq,
+                resetGeneration,
+                truncated,
+                1,
+                128,
+                null,
+                null,
+                null,
+                NOW.plus(Duration.ofHours(24)),
+                NOW,
+                NOW);
     }
 
     private static final class FakeRunEventRepository implements RunEventRepository {

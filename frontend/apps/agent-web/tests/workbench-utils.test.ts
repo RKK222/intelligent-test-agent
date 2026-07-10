@@ -26,6 +26,7 @@ import {
   resolveRetryDeadline,
   retryCountdownSeconds,
   retryExpirationDecision,
+  runEventProjection,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
   workspaceLoadIsCurrent
@@ -84,6 +85,31 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
+  });
+});
+
+describe("runEventProjection", () => {
+  it("marks snapshot reset and exposes its materialized events in source order", () => {
+    const first = {
+      eventId: "evt_snapshot_1",
+      runId: "run_1",
+      seq: 0,
+      type: "message.updated",
+      traceId: "trace_1",
+      occurredAt: "2026-07-10T00:00:00Z",
+      payload: { messageId: "msg_1" }
+    };
+    const second = { ...first, eventId: "evt_snapshot_2", type: "todo.updated" };
+    const reset = {
+      ...first,
+      eventId: "evt_snapshot_reset",
+      type: "run.snapshot.reset",
+      payload: { snapshot: { barrierSeq: 8, events: [first, second] } }
+    };
+
+    expect(runEventProjection(reset)).toEqual({ reset: true, events: [first, second] });
+    expect(runEventProjection({ ...reset, payload: {} })).toEqual({ reset: true, events: [] });
+    expect(runEventProjection(first)).toEqual({ reset: false, events: [first] });
   });
 });
 

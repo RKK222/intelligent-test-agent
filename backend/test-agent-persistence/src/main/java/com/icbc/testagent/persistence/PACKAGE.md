@@ -24,6 +24,7 @@
 - `mybatis.MyBatisRunEventRepository`：RunEvent 领域端口的生产 Bean，保留 `(run_id, seq)` 冲突重试、`runId + lastSeq` 增量读取和 root session 历史状态读取。
 - `mybatis.RunSessionScopeMapper` / `mybatis/RunSessionScopeMapper.xml`：Run session scope MyBatis SQL，包含按 Run 和按 root session 查询；`MERGE ... USING (VALUES ...)` 写入时间参数时显式 cast 为 `timestamp`，兼容 PostgreSQL 参数类型推断。
 - `mybatis.MyBatisRunSessionScopeRepository`：RunSessionScope 领域端口的生产 Bean。
+- `RedisRunRuntimeStore` / `RunRuntimeStoreConfig`：Run 运行数据面领域端口的 Redis 唯一生产实现和装配；单 Run key 使用 `{runId}` hash tag，durable `events` Stream 使用 `${seq}-0`，durable/transient `runtime-events` Stream 使用 `${runtimeVersion}-0`，snapshot 使用 Hash + order ZSET 物化当前实体状态，外部 snapshot 同时 CAS seq/runtimeVersion，动态 key registry 统一滑动 TTL；Lua 原子追加/投影，durable/runtime 事件或 snapshot 投影项超过 20,000，或 input + scope + 双 Stream + snapshot 规范化详情超过 32 MiB 时显式截断旧 Stream、规范化大 payload、优先移除低价值投影并保留 reset 元数据。
 - `JdbcWorkspaceRepository`：实现 Workspace 持久化端口。
 - `JdbcSessionRepository`：实现 Session 持久化端口，并保存平台 session 到远端 opencode session/node 的内部映射。
 - `JdbcSessionRepository.findPage`：全局 ACTIVE session 查询按置顶、更新时间和自增 ID 排序；空搜索不绑定可空 query pattern，兼容 PostgreSQL 参数类型推断。
@@ -54,7 +55,7 @@
 - `db/migration/V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`：为 `user_ssh_keys` 增加 `encrypted_aes_key` 列，禁止复用已落库的 V10。
 - `db/migration/V20260627020000__seed_opencode_manager_max_processes_param.sql`：初始化 `OPENCODE_MANAGER_MAX_PROCESSES` 通用参数，供 manager 运行时最大进程数配置使用。
 - `db/migration/V20260703141000__create_run_session_scopes.sql`：创建 Run session scope 表并为 `run_events` 预留 scope/raw event id 列。
-- 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现。
+- 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现；Run 运行数据面不得新增 PostgreSQL 或 JVM 内存降级实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。
 
 ## 允许依赖
@@ -83,7 +84,7 @@
 ## 下游依赖
 
 - 数据库。
-- Redis，可选。
+- Redis，系统必需依赖。
 - domain 模型。
 
 ## 测试位置
@@ -100,6 +101,7 @@
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL、MyBatis 注解 SQL，并固化 PostgreSQL 专有 SQL 兼容约束。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
 - Flyway migration 命名测试必须覆盖版本唯一性和已落库历史文件仍可解析；V18 之后新增 migration 只能使用 `VyyyyMMddHHmmss__description.sql`。
+- `RedisRunRuntimeStoreIntegrationTest` 必须连接真实 Redis，覆盖 Lua 并发 seq/runtimeVersion、双 Stream、Hash/ZSET 物化、分页 tail、动态 key TTL、attention/active 索引、scope/dedup/pending 和容量截断；H2 或 mock 不能替代 Redis Streams/Lua 行为验证。
 
 ## 修改时必须同步更新
 

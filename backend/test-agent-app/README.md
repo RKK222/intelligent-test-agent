@@ -14,7 +14,7 @@
 
 - 启动 `TestAgentApplication`，扫描 `com.icbc.testagent` 下的后端组件。
 - 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口、opencode execution node seed、Spring Scheduling，以及 Java/opencode 运行心跳和运营分析 rollup 周期任务装配。
-- 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包；多服务器部署时由 event 模块装配 Redis 服务器广播，workspace-management 模块执行应用版本工作区副本补偿。
+- 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包；persistence 装配 Redis 唯一 `RunRuntimeStore`，负责 manifest、durable/runtime 双 Stream、Hash/ZSET 物化 snapshot 和 active 索引，event/runtime 只依赖领域端口；多服务器部署时由 event 模块装配 Redis 服务器广播，workspace-management 模块执行应用版本工作区副本补偿。
 - 装配 `test-agent-scheduler`，默认关闭后台扫描；启用后由 scheduler 模块校验 Redis 必需。
 - 保持生产容器只运行 Java 进程；PostgreSQL、Redis 和 opencode server 均由外部配置注入。
 
@@ -50,6 +50,7 @@
 - `application.yml`：`test-agent.scheduler.enabled` 默认 `false`，可通过 `TEST_AGENT_SCHEDULER_ENABLED` 显式启用。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
 - 用户进程运行管理和 manager 控制面在线状态强依赖 Redis；多服务器应用版本工作区副本实时同步也需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。
+- Run 运行数据面同样强依赖 Redis；`REDIS_SUMMARY` 的 manifest/input/Stream/snapshot/scope/active 索引不提供 PostgreSQL 或 JVM 内存降级。当前 Run 创建仍固定为 `LEGACY_FULL`，`test-agent.redis-summary.enabled=false`、rollout `0` 是无原文 Run 锚点和终态摘要链路发布前的部署边界。Redis `noeviction`、AOF `everysec`、ACL/TLS 和容量告警要求见 `docs/deployment/backend.md`。
 - `com.h2database:h2` 仅以 test scope 存在，用于 Docker 不可用时的无持久化启动冒烟；正式 local profile 仍以 PostgreSQL/Flyway 为准。
 
 ## 测试覆盖

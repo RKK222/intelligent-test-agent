@@ -24,6 +24,7 @@
 3. 高频事件不得逐条触发重型渲染，必须合并、节流或按面板局部更新。
 4. 事件类型和字段变更必须同步 `docs/api/event-stream.md`。SSE 契约以该文件为单一事实源。
 5. 原始 SSE 调试回调只能保存浏览器 `EventSource` 暴露的 `MessageEvent.data`、事件名和 `lastEventId` 等前端可见字段；它不是完整 HTTP wire bytes，也不得替代 RunEvent 契约文档。
+6. `run.snapshot.reset` 是 transient 恢复事件，不设置 SSE `id`。event client 不得从 payload `seq/eventId` 或 `snapshot.runtimeVersion` 推导 durable 游标；reducer 必须先清空当前 Run 运行投影，再按 `snapshot.events` 顺序重放，空/缺失/未知字段安全兼容。页面若维护 reducer 外的 Diff、通知或工具跟随状态，必须在 reset 时同步清理并重放，且不得重复触发用户通知。
 
 ## 组件与状态
 

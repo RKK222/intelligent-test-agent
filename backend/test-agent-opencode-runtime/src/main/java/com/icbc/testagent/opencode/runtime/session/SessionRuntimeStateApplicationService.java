@@ -3,6 +3,9 @@ package com.icbc.testagent.opencode.runtime.session;
 import com.icbc.testagent.domain.session.SessionRuntimeState;
 import com.icbc.testagent.domain.session.SessionRuntimeStateRepository;
 import com.icbc.testagent.domain.session.SessionRuntimeStateSummary;
+import com.icbc.testagent.domain.session.SessionRuntimeAttention;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.event.RunEventLiveBus;
 import com.icbc.testagent.event.RunEventLiveEvent;
@@ -35,13 +38,21 @@ public class SessionRuntimeStateApplicationService {
 
     private final SessionRuntimeStateRepository repository;
     private final RunEventLiveBus runEventLiveBus;
+    private final RunRuntimeStore runRuntimeStore;
     private final Duration refreshInterval;
+
+    public SessionRuntimeStateApplicationService(
+            SessionRuntimeStateRepository repository,
+            RunEventLiveBus runEventLiveBus) {
+        this(repository, runEventLiveBus, null, DEFAULT_REFRESH_INTERVAL);
+    }
 
     @Autowired
     public SessionRuntimeStateApplicationService(
             SessionRuntimeStateRepository repository,
-            RunEventLiveBus runEventLiveBus) {
-        this(repository, runEventLiveBus, DEFAULT_REFRESH_INTERVAL);
+            RunEventLiveBus runEventLiveBus,
+            RunRuntimeStore runRuntimeStore) {
+        this(repository, runEventLiveBus, runRuntimeStore, DEFAULT_REFRESH_INTERVAL);
     }
 
     /**
@@ -51,8 +62,17 @@ public class SessionRuntimeStateApplicationService {
             SessionRuntimeStateRepository repository,
             RunEventLiveBus runEventLiveBus,
             Duration refreshInterval) {
+        this(repository, runEventLiveBus, null, refreshInterval);
+    }
+
+    public SessionRuntimeStateApplicationService(
+            SessionRuntimeStateRepository repository,
+            RunEventLiveBus runEventLiveBus,
+            RunRuntimeStore runRuntimeStore,
+            Duration refreshInterval) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.runEventLiveBus = Objects.requireNonNull(runEventLiveBus, "runEventLiveBus must not be null");
+        this.runRuntimeStore = runRuntimeStore;
         this.refreshInterval = Objects.requireNonNull(refreshInterval, "refreshInterval must not be null");
     }
 
@@ -61,7 +81,33 @@ public class SessionRuntimeStateApplicationService {
      */
     public SessionRuntimeStateSummary snapshot(UserId userId) {
         Objects.requireNonNull(userId, "userId must not be null");
+        if (runRuntimeStore != null && runRuntimeStore.hasUserRuntimeState(userId)) {
+            return redisSnapshot(runRuntimeStore.findActiveByUser(userId));
+        }
         return repository.findUserRuntimeState(userId);
+    }
+
+    private SessionRuntimeStateSummary redisSnapshot(java.util.List<RunRuntimeManifest> manifests) {
+        java.util.List<SessionRuntimeState> sessions = manifests.stream()
+                .filter(RunRuntimeManifest::active)
+                .sorted(java.util.Comparator.comparing(RunRuntimeManifest::updatedAt).reversed())
+                .map(manifest -> new SessionRuntimeState(
+                        manifest.sessionId(),
+                        manifest.runId(),
+                        manifest.status(),
+                        "QUESTION".equalsIgnoreCase(manifest.attention()) ? SessionRuntimeAttention.QUESTION : null,
+                        manifest.attentionEventId(),
+                        manifest.attentionAt(),
+                        manifest.updatedAt()))
+                .toList();
+        int questionCount = (int) sessions.stream()
+                .filter(state -> state.attention() == SessionRuntimeAttention.QUESTION)
+                .count();
+        java.time.Instant generatedAt = manifests.stream()
+                .map(RunRuntimeManifest::updatedAt)
+                .max(java.time.Instant::compareTo)
+                .orElseGet(java.time.Instant::now);
+        return new SessionRuntimeStateSummary(sessions.size(), questionCount, sessions, generatedAt);
     }
 
     /**

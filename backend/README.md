@@ -21,20 +21,20 @@
 | 模块 | 作用 |
 |---|---|
 | `test-agent-common` | 公共基础模型与工具 |
-| `test-agent-domain` | 纯领域模型与状态机，包括 opencode 用户进程管理拓扑模型和运营分析/反馈领域端口 |
+| `test-agent-domain` | 纯领域模型与状态机，包括 Run 运行数据面、opencode 用户进程管理拓扑模型和运营分析/反馈领域端口 |
 | `test-agent-observability` | 日志、trace、指标等观测性封装 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-agent-runtime` | 多 agent 运行时接口、registry、统一日志/指标包装和 opencode 适配器 |
 | `test-agent-workspace-management` | Workspace、文件、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent 和 skill 管理业务 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、用户级会话运行态摘要、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query 和 PTY terminal 业务 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、Redis active/session scope 路由、用户级会话运行态摘要、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query 和 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、应用工作空间和个人 SSH key 配置管理 |
 | `test-agent-scheduler` | 分布式定时任务框架，提供任务注册、Cron 调度、Redis 锁、运行记录、Cron 调整、手动触发和协作式停止管理服务，不包含具体业务任务 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
-| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 opencode 用户进程管理表映射、AI 反馈表和运营分析 rollup 表 |
-| `test-agent-event` | RunEvent、SSE、事件转换与回放，以及用户级运行态刷新所需的全局事件触发流 |
+| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、opencode 用户进程管理表映射、AI 反馈表和运营分析 rollup 表 |
+| `test-agent-event` | 按 storage mode 分流的 RunEvent 追加、SSE、Redis/数据库回放，以及用户级运行态刷新所需的全局事件触发流 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
 
@@ -109,6 +109,7 @@ cp .env.local.example .env.local
 | `TESTAGENT` | 本地测试库历史兼容别名，启动脚本默认与 `TEST_AGENT_ROOT` 相同；仅用于展开既有 `$TESTAGENT/...` 通用参数路径。 |
 | `TEST_AGENT_LOCAL_DB_*` | 本地 PostgreSQL 连接信息 |
 | `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | Redis 连接信息，绑定到 Spring 标准 `spring.data.redis.*`；Redis 是系统必需依赖。 |
+| `TEST_AGENT_REDIS_SUMMARY_ENABLED` / `TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE` | Redis summary 运行模式开关和稳定灰度比例，当前默认 `false/0`；Run 创建仍固定使用 `LEGACY_FULL`，在无原文 Run 锚点和终态摘要链路发布前不得开启生产灰度。 |
 | `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 false；启用时使用同一 Redis。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | 本地脚本判断是否启动 opencode-manager 和端口池的地址，不再作为 Java 固定 opencode node 配置。 |
 | `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
@@ -126,6 +127,8 @@ cp .env.local.example .env.local
 `guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh`、`restart-dev-services.sh --profile guo --env-file .env.local` 或 `restart-dev-services.ps1 -Profile guo -EnvFile .env.local` 时，`.env.local` 仍可覆盖 yml，便于本地联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile，test profile 下默认启动本机 Go manager，即使 `.env.test` 中 `TEST_AGENT_OPENCODE_BASE_URL` 指向共享测试地址；停止 manager 时会清理其托管的用户 opencode 子进程和 state JSON，防止端口池残留进程导致下次初始化失败。生产和本地都不再配置 `OPENCODE_MANAGER_ID`，Go manager 会由容器名称和固定管理进程名 `opencode-manager` 派生内部 `managerId`。
 
 用户专属 opencode 进程的 session/config 路径来自数据库 `common_parameters`，不是 `.env.local`。opencode 原生 session 数据目录固定为 `{OPENCODE_SESSION_DIR}/users/{unifiedAuthId}`，Java 通过用户仓储解析统一认证号，并拒绝无法作为安全路径片段的统一认证号；旧 `{OPENCODE_SESSION_DIR}/{port}` 目录不自动合并，平台历史消息仍可展示，缺失的远端 session 会在下次提问前校验并重建绑定。系统级数据根目录通过 `SYS_DATA_ROOT_DIR` 维护，默认值为 macOS `$HOME/.testagent`、Linux `/data/.testagent`、Windows `D:/data/.testagent`；Java 后端启动时写入 `SYS_DATA_ROOT_DIR/.serverid` 和 `.serverhost`，分别表示稳定服务器身份和可访问主机地址，Go manager 在连接 Java 前按同一系统参数的平台默认路径读取这两个文件。每个 manager 只连接本服务器 Java；同一服务器允许运行多个 Java，多个 Java 共享同一个 `linuxServerId`，入口 Java 会通过 `BackendJavaRouteResolver` 优先选择与目标服务器 manager 已连接的 Java，其次选择同服务器最新心跳 Java，再通过 `BackendHttpForwarder` 透传到目标 Java，由目标 Java 控制本服务器 managers。是否已分配只以 `user_opencode_process_bindings` 的 ACTIVE 记录为准；`/processes/me` 状态查询在目标后端不可用时会返回已分配但健康不可确认的 `NOT_RUNNING + serviceAddress`，初始化、Run 和 runtime 代理仍必须由目标服务器执行，不做本机降级。所有强状态查询、健康探测、状态回写和 Redis opencode heartbeat 刷新都必须走 `OpencodeProcessStatusQueryService`：先确认平台进程记录是否存在，再通过目标 Java 的本机 manager health 归一为未启动、运行中或健康检查异常。点击初始化且没有远端路由时，Java 后端按本实例已连接的健康容器视图选择进程数最少且有空闲端口的目标容器，再调用 `OpencodeProcessStartupService` 向该容器对应的 manager 下发携带用户 `sessionPath` 的 `start`；新进程 `baseUrl` 使用 `.serverhost` / `TEST_AGENT_SERVER_ADVERTISED_HOST`，不再由 `linuxServerId` 拼接。该公共启动服务会先保存候选进程，再复用公共状态查询服务确认本地 state/PID 和 opencode HTTP health，默认最多等待 manager command-timeout（10 秒）让 opencode HTTP 端点 ready，只有健康后才写入 `RUNNING`、ACTIVE binding、Redis heartbeat 和兼容 `ExecutionNode`。后续所有涉及 opencode server 启动、重启后拉起或端口复用的业务入口都必须调用这套公共启动程序，不得自行实现 start、状态回写或健康确认；所有涉及 opencode server 停止或停止后状态回写的业务入口都必须调用 `OpencodeProcessStopService`，不得自行实现 stop、停止成功判定或 `STOPPED` 回写。manager 使用通过 `configRequest/configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`，该目录下的 `opencode.jsonc` 来自公共配置 Git 库，是模型和供应商事实源；企业部署必须保证运行用户的 `~/.config/opencode` 不维护模型或供应商，最多保留空 schema 配置，避免 OpenCode 合并全局配置污染公共目录。目录存在且非空的检查只在目标 manager 所在服务器执行。目录缺失、为空、非目录或不可读时，manager 返回 `OPENCODE_UNAVAILABLE`，错误消息包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化；Java 仅映射为统一平台错误，不在本机提前检查。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
+
+Run 运行数据面通过 domain `RunRuntimeStore` 与 persistence `RedisRunRuntimeStore` 隔离：单 Run manifest/input/双 Stream/snapshot/scope key 使用 `{runId}` hash tag，durable `events` Stream ID 为 `${seq}-0`，durable/transient 全事件 `runtime-events` Stream ID 为 `${runtimeVersion}-0`，snapshot 使用 Hash + order ZSET 保留当前物化状态。`REDIS_SUMMARY` 下每条事件不访问 PostgreSQL；SSE 首帧总是发送完整 `run.snapshot.reset`，然后由最短 5 秒的 Redis 安全扫描和本机 live bus 只唤醒按 `runtimeVersion` 分页读 Redis 尾流，live 事件仍即时唤醒但帧本身不直接输出；容量换代导致游标过旧时再次发送 reset。legacy 仍以 PostgreSQL 为事实源并保留旧轮询恢复。生产 Redis 的持久化、安全和容量要求见 `docs/deployment/backend.md`。
 
 运行管理中的 Java 后端快照按 `backendProcessId` 写入 Redis，并按 `linuxServerId` 分组选择目标 Java；`linuxServerId` 表示稳定服务器身份，不再要求是 IP。超级管理员在运行管理页重启/停止 opencode server 时，入口 Java 会先按统一 resolver 定位 `containerId` 所属服务器，目标不是当前 Java 或同服务器选中 Java 时转发到目标 Java，再由目标 Java 控制本服务器 manager；已有平台进程记录的重启先走公共停止服务，再用进程记录里的 `sessionPath` 走公共启动服务，无平台记录的无主端口才保留 manager `restart` fallback。公共配置管理页同样按稳定 `linuxServerId` 合并服务器视图。
 

@@ -27,6 +27,9 @@ import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.ConversationRunContext;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
+import com.icbc.testagent.domain.run.RunStorageMode;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.Session;
@@ -140,9 +143,10 @@ public class RunApplicationService {
     private final RunSessionMessageSnapshotService snapshotService;
     private final RunSessionScopeRepository runSessionScopeRepository;
     private final RunSessionScopeRuntimeCache runSessionScopeRuntimeCache;
-    private final RunSessionScopeRouter runSessionScopeRouter;
+    private RunSessionScopeRouter runSessionScopeRouter;
     private final RunActivityStateStore runActivityStateStore;
     private final ConversationRunContextResolver conversationContextResolver;
+    private RunRuntimeStore runRuntimeStore;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -234,7 +238,6 @@ public class RunApplicationService {
     /**
      * 生产构造器额外注入会话上下文策略，新客户端启动路径不再重复解析控制面对象。
      */
-    @Autowired
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
             com.icbc.testagent.domain.session.SessionRepository sessionRepository,
@@ -296,6 +299,57 @@ public class RunApplicationService {
                 ? new RunActivityStateStore(null)
                 : runActivityStateStore;
         this.conversationContextResolver = conversationContextResolver;
+        this.runRuntimeStore = null;
+    }
+
+    /** Spring 生产构造器额外接入 Redis Run 数据面；旧手工构造器继续只服务 LEGACY_FULL 测试。 */
+    @Autowired
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            ConversationRunContextResolver conversationContextResolver,
+            RunRuntimeStore runRuntimeStore) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runEventLiveBus,
+                runEventPersistencePolicy,
+                modelCatalogService,
+                userProcessAssignmentService,
+                workspacePathResolver,
+                snapshotService,
+                runSessionScopeRepository,
+                runSessionScopeRuntimeCache,
+                runActivityStateStore,
+                conversationContextResolver);
+        this.runRuntimeStore = Objects.requireNonNull(runRuntimeStore, "runRuntimeStore must not be null");
+        this.runSessionScopeRouter = new RunSessionScopeRouter(
+                runSessionScopeRepository,
+                this.runSessionScopeRuntimeCache,
+                this.runRuntimeStore);
     }
 
     /**
@@ -470,9 +524,12 @@ public class RunApplicationService {
             pending = pending.withSource(ConversationSourceType.MANUAL, null, userId);
         }
         pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
+        // Phase 2 先完成 Redis 数据面与 shadow 验证；Phase 3 创建无原文锚点后才允许选择 REDIS_SUMMARY。
+        RunStorageMode storageMode = RunStorageMode.LEGACY_FULL;
         runRepository.save(pending);
         saveUserMessage(session.sessionId(), pending.runId(), prompt, input.parts(), userId, traceId, now);
-        append(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
+        append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
+                Map.of("status", RunStatus.PENDING.name()), storageMode);
 
         try {
             AgentRoutingTarget target = userProcessAssignment == null
@@ -497,8 +554,9 @@ public class RunApplicationService {
                             target.node(),
                             traceId);
             Run running = runRepository.save(pending.start(Instant.now()));
-            append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
-            recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId);
+            append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(),
+                    Map.of("status", RunStatus.RUNNING.name()), storageMode);
+            recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId, storageMode);
             LOGGER.info("Run started, runId={}, nodeId={}, remoteSessionId={}, traceId={}",
                     running.runId().value(),
                     target.node().executionNodeId().value(),
@@ -512,6 +570,7 @@ public class RunApplicationService {
                     binding.remoteSessionId(),
                     target.node(),
                     workspace,
+                    storageMode,
                     traceId);
             AgentStartRunCommand command = new AgentStartRunCommand(
                     target.node(),
@@ -541,8 +600,10 @@ public class RunApplicationService {
                     exception.errorCode().name(),
                     traceId);
             Run failed = runRepository.save(pending.fail(Instant.now()));
-            append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(), Map.of("errorCode", exception.errorCode().name()));
+            append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(),
+                    Map.of("errorCode", exception.errorCode().name()), storageMode);
             snapshotService.persistRunSnapshot(resolvedAgentId, failed, traceId);
+            runSessionScopeRouter.finishRun(failed.runId());
             throw exception;
         }
     }
@@ -562,7 +623,12 @@ public class RunApplicationService {
         return conversationContextResolver.resolve(userId, agentId, input, traceId).orElse(null);
     }
 
-    private void recordRootSessionScope(String agentId, Run run, String remoteSessionId, String traceId) {
+    private void recordRootSessionScope(
+            String agentId,
+            Run run,
+            String remoteSessionId,
+            String traceId,
+            RunStorageMode storageMode) {
         Instant now = Instant.now();
         RunSessionScope scope = new RunSessionScope(
                 run.runId(),
@@ -586,6 +652,13 @@ public class RunApplicationService {
                 now,
                 now,
                 Map.of("agentId", agentId));
+        if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+            if (runRuntimeStore == null) {
+                throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis 运行态未配置");
+            }
+            runRuntimeStore.saveScope(scope, rootSession);
+            return;
+        }
         runSessionScopeRuntimeCache.recordScopeSession(scope, rootSession);
         if (runSessionScopeRepository == null) {
             return;
@@ -908,6 +981,38 @@ public class RunApplicationService {
     }
 
     /**
+     * 新客户端 active-run fallback 优先读取 Redis session 索引；用户进入新模式后即使当前为空也不回查数据库。
+     */
+    public Optional<Run> findActiveRun(UserId userId, SessionId sessionId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        if (runRuntimeStore != null && runRuntimeStore.hasUserRuntimeState(userId)) {
+            return runRuntimeStore.findActiveBySession(sessionId)
+                    .filter(manifest -> userId.equals(manifest.userId()))
+                    .map(this::runtimeRun);
+        }
+        return findActiveRun(sessionId);
+    }
+
+    private Run runtimeRun(RunRuntimeManifest manifest) {
+        return new Run(
+                manifest.runId(),
+                manifest.sessionId(),
+                manifest.workspaceId(),
+                manifest.status(),
+                manifest.createdAt(),
+                manifest.updatedAt(),
+                "trace_runtime_redis",
+                com.icbc.testagent.domain.run.TokenUsage.empty(),
+                null,
+                ConversationSourceType.MANUAL,
+                null,
+                manifest.userId(),
+                manifest.agentId(),
+                null);
+    }
+
+    /**
      * 请求取消 Run：先更新本地状态，再尽力通知默认 agent 远端 session abort，最后落取消事件。
      */
     public Run cancelRun(RunId runId, String traceId) {
@@ -954,6 +1059,7 @@ public class RunApplicationService {
                 : runRepository.save(cancelling.cancel(Instant.now()));
         append(runId, RunEventType.RUN_CANCELLED, traceId, Instant.now(), Map.of("status", cancelled.status().name()));
         snapshotService.persistRunSnapshot(resolvedAgentId, cancelled, traceId);
+        runSessionScopeRouter.finishRun(runId);
         LOGGER.info("Run cancelled, runId={}, traceId={}", runId.value(), traceId);
         return cancelled;
     }
@@ -1070,6 +1176,18 @@ public class RunApplicationService {
         runEventAppender.append(draft);
     }
 
+    private void append(
+            RunId runId,
+            RunEventType type,
+            String traceId,
+            Instant occurredAt,
+            Map<String, Object> payload,
+            RunStorageMode storageMode) {
+        RunEventDraft draft = new RunEventDraft(runId, type, traceId, occurredAt, payload);
+        recordRuntimeActivity(draft);
+        runEventAppender.append(draft, storageMode);
+    }
+
     /**
      * 订阅 agent 事件流，事件处理串行 offload，避免阻塞 Netty 线程。
      */
@@ -1080,6 +1198,7 @@ public class RunApplicationService {
             String remoteSessionId,
             ExecutionNode node,
             Workspace workspace,
+            RunStorageMode storageMode,
             String traceId) {
         RunEventScopeContext rootScope = RunEventScopeContext.root(run.runId(), remoteSessionId);
         runtime.streamRunEvents(new AgentStreamEventsCommand(
@@ -1089,7 +1208,7 @@ public class RunApplicationService {
                         workspaceRootPath(workspace),
                         null,
                         traceId))
-                .concatMap(draft -> Mono.fromCallable(() -> runSessionScopeRouter.route(rootScope, draft))
+                .concatMap(draft -> Mono.fromCallable(() -> runSessionScopeRouter.route(rootScope, draft, storageMode))
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(Flux::fromIterable)
                         .onErrorResume(error -> {
@@ -1099,12 +1218,15 @@ public class RunApplicationService {
                                     draft.type().wireName(),
                                     traceId,
                                     error);
-                            return Flux.empty();
+                            return storageMode == RunStorageMode.REDIS_SUMMARY
+                                    ? Flux.error(error)
+                                    : Flux.empty();
                         }))
                 // opencode event SSE 是长连接；本 Run 收到首个终态后结束订阅，避免同一远端会话的下一轮消息串入旧 Run。
                 .takeUntil(draft -> draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED)
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
-                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(agentId, run, workspace, draft))
+                .concatMap(draft -> Mono.fromRunnable(
+                                () -> appendStreamEvent(agentId, run, workspace, storageMode, draft))
                         .subscribeOn(Schedulers.boundedElastic())
                         .onErrorResume(error -> {
                             LOGGER.warn(
@@ -1113,7 +1235,9 @@ public class RunApplicationService {
                                     draft.type().wireName(),
                                     traceId,
                                     error);
-                            return Mono.empty();
+                            return storageMode == RunStorageMode.REDIS_SUMMARY
+                                    ? Mono.error(error)
+                                    : Mono.empty();
                         }))
                 .doOnError(error -> failRunFromStream(agentId, run, traceId, error))
                 .subscribe(ignored -> {
@@ -1125,28 +1249,41 @@ public class RunApplicationService {
     /**
      * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
-    private void appendStreamEvent(String agentId, Run originalRun, Workspace workspace, RunEventDraft draft) {
+    private void appendStreamEvent(
+            String agentId,
+            Run originalRun,
+            Workspace workspace,
+            RunStorageMode storageMode,
+            RunEventDraft draft) {
         recordRuntimeActivity(draft);
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
-            Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
-            RunStatus terminalStatus = draft.type() == RunEventType.RUN_SUCCEEDED
-                    ? RunStatus.SUCCEEDED
-                    : RunStatus.FAILED;
-            // root run.succeeded/run.failed 是远端会话终态事实源；它允许纠正先到的 transport error 临时失败。
-            Run terminal = current.applyTerminalFact(terminalStatus, draft.occurredAt());
-            Run saved = runRepository.save(terminal);
-            runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
-            snapshotService.persistRunSnapshot(agentId, saved, draft.traceId());
+            try {
+                Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
+                RunStatus terminalStatus = draft.type() == RunEventType.RUN_SUCCEEDED
+                        ? RunStatus.SUCCEEDED
+                        : RunStatus.FAILED;
+                // root run.succeeded/run.failed 是远端会话终态事实源；它允许纠正先到的 transport error 临时失败。
+                Run terminal = current.applyTerminalFact(terminalStatus, draft.occurredAt());
+                Run saved = runRepository.save(terminal);
+                runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft), storageMode);
+                snapshotService.persistRunSnapshot(agentId, saved, draft.traceId());
+            } finally {
+                runSessionScopeRouter.finishRun(originalRun.runId());
+            }
             return;
         }
         if (draft.type() == RunEventType.MESSAGE_PART_UPDATED) {
-            appendLiveDiffFromToolPart(originalRun, workspace, draft);
+            appendLiveDiffFromToolPart(originalRun, workspace, storageMode, draft);
         }
         if (!runEventPersistencePolicy.shouldPersist(draft)) {
-            runEventLiveBus.publishTransient(runEventPersistencePolicy.sanitizeForPersistence(draft));
+            RunEventDraft sanitized = runEventPersistencePolicy.sanitizeForPersistence(draft);
+            if (!runEventAppender.publishTransient(sanitized, storageMode)) {
+                // 兼容手工装配/旧测试构造器；生产 appender 与本服务注入同一个 live bus。
+                runEventLiveBus.publishTransient(sanitized);
+            }
             return;
         }
-        runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
+        runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft), storageMode);
     }
 
     /**
@@ -1180,16 +1317,24 @@ public class RunApplicationService {
     /**
      * 从 agent tool part 完成态派生轻量 Diff 事件，供前端在 Run 未结束时实时刷新文件树。
      */
-    private void appendLiveDiffFromToolPart(Run originalRun, Workspace workspace, RunEventDraft draft) {
+    private void appendLiveDiffFromToolPart(
+            Run originalRun,
+            Workspace workspace,
+            RunStorageMode storageMode,
+            RunEventDraft draft) {
         try {
             liveDiffFromToolPart(originalRun, workspace, draft)
-                    .ifPresent(diff -> runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(diff)));
+                    .ifPresent(diff -> runEventAppender.append(
+                            runEventPersistencePolicy.sanitizeForPersistence(diff), storageMode));
         } catch (RuntimeException exception) {
             LOGGER.warn(
                     "Failed to derive live diff from tool part, runId={}, traceId={}",
                     originalRun.runId().value(),
                     draft.traceId(),
                     exception);
+            if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+                throw exception;
+            }
         }
     }
 
@@ -1416,6 +1561,8 @@ public class RunApplicationService {
         } catch (RuntimeException exception) {
             LOGGER.warn("Failed to persist opencode stream failure, runId={}, traceId={}",
                     run.runId().value(), traceId, exception);
+        } finally {
+            runSessionScopeRouter.finishRun(run.runId());
         }
     }
 

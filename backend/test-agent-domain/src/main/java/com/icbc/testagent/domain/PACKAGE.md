@@ -2,7 +2,7 @@
 
 ## 职责
 
-纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置、通用参数、工作空间创建进度、定时任务框架等核心业务概念和状态规则。
+纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置、通用参数、工作空间创建进度、定时任务框架等核心业务概念和状态规则。
 
 ## 不负责
 
@@ -18,7 +18,8 @@
 - `agent.AgentSessionBinding`、`agent.AgentSessionBindingRepository`：平台 session 到远端 agent session/node 的通用绑定模型和持久化端口。
 - `session.SessionMessage`、`session.SessionMessageId`、`session.SessionMessageRole`、`session.SessionMessageRepository`：会话消息领域对象、角色和值对象、持久化端口；消息可携带 runId、远端 messageId、parts_json、token/cost 快照。
 - `run.Run`、`run.RunId`、`run.RunStatus`、`run.TokenUsage`、`run.RunRepository`：运行聚合和值对象、状态机、单次 token 消耗和值对象、持久化端口；`RunRepository.saveIfStatus` 用于按当前状态条件保存，防止终态事件与异步 transport error 竞态时旧状态覆盖新终态；`Run.applyTerminalFact` 只记录 root 终态事实，允许后到 root 终态纠正先到 transport error 临时失败。
-- `event.RunEvent`、`event.RunEventDraft`、`event.RunEventId`、`event.RunEventType`、`event.RunEventRepository`：平台运行事件模型和 append-only 端口，支持按 Run 和按 root session 回放；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated` 等运行态事件。
+- `run.RunStorageMode`、`run.RunRuntimeManifest`、`run.RunRuntimeInput`、`run.RunRuntimeSnapshot`、`run.RunRuntimeReplay`、`run.RunRuntimeStreamEvent`、`run.RunRuntimeTail`、`run.RunRuntimeStore`：Run 运行数据面的模式、manifest、输入、物化快照、durable seq 回放、durable/transient `runtimeVersion` 有序尾部和领域端口；Redis key、Lua、TTL 实现留在 persistence，`REDIS_SUMMARY` 不允许回退 PostgreSQL 或 JVM 内存。
+- `event.RunEvent`、`event.RunEventDraft`、`event.RunEventId`、`event.RunEventType`、`event.RunEventRepository`：平台运行事件模型和 append-only 端口，支持按 Run 和按 root session 回放；RunEventType 覆盖基础 `run.*`（含 transient `run.snapshot.reset`）、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated` 等运行态事件。
 - `node.ExecutionNode`、`node.ExecutionNodeId`、`node.ExecutionNodeStatus`、`node.ExecutionNodeRepository`：执行节点模型和查询端口。
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
 - `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。

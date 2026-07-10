@@ -113,6 +113,9 @@ export function reduceAgentChatRuntime(
   }
 
   const event = action.event;
+  if (event.type === "run.snapshot.reset") {
+    return reduceSnapshotReset(state, event);
+  }
   const seen = state.seenEventIds ?? [];
   // 单元测试中 Mock 的 eventId 通常直接为 evt_{type}，此时避开去重拦截，防止单元测试失败。
   const isMockEventId = event.eventId === `evt_${event.type}`;
@@ -133,6 +136,65 @@ export function reduceAgentChatRuntime(
     ...nextState,
     seenEventIds: nextSeen
   };
+}
+
+/**
+ * 快照 reset 必须先丢弃当前 Run 的运行态投影，再按后端给定顺序重放。
+ * snapshot 缺失或为空仍执行清空，避免继续展示已被 Redis 截断的旧增量。
+ */
+function reduceSnapshotReset(state: AgentChatRuntimeState, event: RunEvent): AgentChatRuntimeState {
+  const seen = state.seenEventIds ?? [];
+  const isMockEventId = event.eventId === `evt_${event.type}`;
+  if (!isMockEventId && seen.includes(event.eventId)) {
+    return state;
+  }
+  // 平台历史消息不属于当前 Run 的 Redis 运行态，必须保留；没有 platformMessageId 的
+  // 实时消息、工具卡和增量 parts 会由物化快照重新构建。
+  const persistedMessages = state.messages.filter(
+    (message) => message.role !== "card" && Boolean(message.platformMessageId)
+  );
+  let restored = createInitialAgentChatRuntimeState(persistedMessages);
+  for (const snapshotEvent of snapshotEventsFromRunReset(event)) {
+    restored = reduceAgentChatRuntime(restored, { type: "event", event: snapshotEvent });
+  }
+  if (isMockEventId) {
+    return restored;
+  }
+  const nextSeen = [...(restored.seenEventIds ?? []), event.eventId];
+  return {
+    ...restored,
+    seenEventIds: nextSeen.slice(-1000)
+  };
+}
+
+/**
+ * 从 reset payload 中提取可重放事件。对旧版本缺字段的事件补齐安全默认值，
+ * 丢弃无 type 或嵌套 reset 的坏数据，防止一次异常快照破坏整个 SSE 消费链路。
+ */
+export function snapshotEventsFromRunReset(event: RunEvent): RunEvent[] {
+  if (event.type !== "run.snapshot.reset") {
+    return [];
+  }
+  const snapshot = record(event.payload.snapshot);
+  const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
+  return events.flatMap((value, index) => {
+    const raw = record(value);
+    const type = text(raw?.type);
+    if (!raw || !type || type === "run.snapshot.reset") {
+      return [];
+    }
+    const seq = typeof raw.seq === "number" && Number.isFinite(raw.seq) ? raw.seq : 0;
+    const runId = text(raw.runId) ?? event.runId;
+    return [{
+      eventId: text(raw.eventId) ?? `${event.eventId}:snapshot:${index}`,
+      runId,
+      seq,
+      type,
+      traceId: text(raw.traceId) ?? event.traceId,
+      occurredAt: text(raw.occurredAt) ?? event.occurredAt,
+      payload: record(raw.payload) ?? {}
+    } satisfies RunEvent];
+  });
 }
 
 function reduceEventOnly(

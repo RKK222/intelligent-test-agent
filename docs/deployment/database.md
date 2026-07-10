@@ -18,7 +18,7 @@
 | `workspaces` | 平台工作区，包含业务 ID、名称、根路径、服务器归属、状态、traceId、创建和更新时间。 |
 | `sessions` | 智能体会话，关联 workspace，包含标题、状态、traceId、创建和更新时间。 |
 | `runs` | 运行记录，关联 session/workspace，包含 Run 状态、traceId、创建和更新时间；V10 后可记录单次 Run token/cost 快照。 |
-| `run_events` | RunEvent append-only 事件流，按 `(run_id, seq)` 唯一并支持增量回放。 |
+| `run_events` | `LEGACY_FULL` RunEvent append-only 事件流，按 `(run_id, seq)` 唯一并支持增量回放；`REDIS_SUMMARY` 不写该表。 |
 | `execution_nodes` | opencode 执行节点，包含 baseUrl、健康状态、运行容量、权重、心跳和能力标签。 |
 | `routing_decisions` | Run 到 ExecutionNode 的路由决策审计记录。 |
 
@@ -95,8 +95,8 @@
 - `agent_session_bindings` 是 agent 运行态绑定主数据源，按 `(session_id, agent_id)` 记录平台 session 到远端 session/node 的映射。
 - `sessions.opencode_session_id` 和 `sessions.opencode_execution_node_id` 是后端内部兼容字段，不进入 API DTO；旧 session 两列为空时由首次 `opencode` Run 懒创建远端 session，非 opencode agent 不扩展这些列。
 - `sessions.pinned` 进入 Session API DTO；软删除复用 `status=ARCHIVED`，不新增删除时间字段，旧数据默认 `ACTIVE` 且 `pinned=false`。
-- `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；未来迁移到 JSONB 时必须先保持旧列读取兼容。
-- `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复。
+- `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；前者只服务 `LEGACY_FULL`/旧数据，`REDIS_SUMMARY` 的运行态 JSON 位于 Redis。未来迁移到 JSONB 时必须先保持旧列读取兼容。
+- `LEGACY_FULL` 的 `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复；`REDIS_SUMMARY` seq 由 Redis Lua 原子分配，Stream ID 为 `${seq}-0`。
 - `run_events.raw_event_id` 可空；opencode raw event id 缺失时必须保持 `NULL`，不能写入 `"unknown"` 这类伪值，否则会导致唯一索引误去重。
 - `session_messages.content` 保留为旧文本 fallback；V10 后新增的 `parts_json`、token/cost 字段允许为空，旧数据和旧前端继续只读 `content`。
 - `ai_model_configs` 只保存模型目录元数据，不保存 token、API key 或 provider secret；企业内调用密钥继续由部署环境变量或配置中心注入。
@@ -108,7 +108,7 @@
 
 | 表/字段 | 说明 |
 |---|---|
-| `run_session_scopes` | Run 到 root opencode session 的 scope 主表，DB 是恢复事实源。 |
+| `run_session_scopes` | Run 到 root opencode session 的 scope 主表，只服务 `LEGACY_FULL`/旧数据的恢复；`REDIS_SUMMARY` 不写该表。 |
 | `run_session_scopes.root_session_id` | 当前 Run root opencode session ID。 |
 | `run_session_scopes.scope_version` | scope 版本，发现 child 时递增。 |
 | `run_session_scopes.metadata_json` | scope 扩展元数据 JSON 文本，不使用 JSONB。 |
@@ -129,7 +129,7 @@
 - `run_events.root_session_id` 也用于 Session 级历史树读取跨 Run durable 状态事件；新增查询必须继续放在 MyBatis XML。
 - `idx_run_session_scope_sessions_root(root_session_id, discovered_at)` 支持 Session 级历史树按 root session 汇总跨 Run 已发现 child。
 
-当前 `RunSessionScopeRepository` 与 `RunEventRepository` 均已通过 MyBatis XML 实现。Run 启动后会记录 root scope；runtime 发现 child session 后写入 `run_session_scope_sessions`，并在 `run_events` append 时写入结构化 scope 列。`RunSessionScopeMapper.xml` 使用 PostgreSQL `MERGE ... USING (VALUES ...)` 时会显式 cast 时间参数为 `timestamp`，避免未定型参数在 PostgreSQL 中被推断为 `text`。`RunEventRepository` 支持按 Run 回放和按 root session 回放，后者用于 Session 级历史树恢复 permission/question/todo 等 durable 状态。`JdbcRunEventRepository` 仅保留迁移窗口，不再作为生产 Spring Bean。`raw_event_id` 缺失必须写 `NULL`；root session 事件派生的 `run.succeeded/run.failed` 不复用原始 raw event id，避免与对应 session 事件误去重。
+当前 `RunSessionScopeRepository` 与 `RunEventRepository` 均已通过 MyBatis XML 实现，并只作为 `LEGACY_FULL`/旧数据恢复链路使用。legacy Run 启动后记录 root scope；runtime 发现 child session 后写入 `run_session_scope_sessions`，并在 `run_events` append 时写入结构化 scope 列。`REDIS_SUMMARY` 的 scope、dedup、pending 和 durable 事件只进入 Redis，不查询或写入上述表。`RunSessionScopeMapper.xml` 使用 PostgreSQL `MERGE ... USING (VALUES ...)` 时会显式 cast 时间参数为 `timestamp`，避免未定型参数在 PostgreSQL 中被推断为 `text`。`RunEventRepository` 支持按 Run 回放和按 root session 回放，后者用于 legacy Session 历史树恢复 permission/question/todo 等 durable 状态。`JdbcRunEventRepository` 仅保留迁移窗口，不再作为生产 Spring Bean。`raw_event_id` 缺失必须写 `NULL`；root session 事件派生的 `run.succeeded/run.failed` 不复用原始 raw event id，避免与对应 session 事件误去重。
 
 ## V5 用户认证表
 
@@ -995,7 +995,7 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 | `workspaces` | 平台工作区表，包含业务ID、名称、根路径、服务器归属、状态等信息 |
 | `sessions` | 智能体会话表，关联workspace，包含标题、状态、来源等信息 |
 | `runs` | 运行记录表，关联session/workspace，记录Run状态、token消耗等信息 |
-| `run_events` | RunEvent事件流表，append-only，按(run_id, seq)唯一并支持增量回放 |
+| `run_events` | `LEGACY_FULL` RunEvent 事件流表，append-only，按 `(run_id, seq)` 唯一并支持增量回放；新模式不写 |
 | `execution_nodes` | opencode执行节点表，包含baseUrl、健康状态、运行容量、权重、心跳和能力标签 |
 | `routing_decisions` | Run到ExecutionNode的路由决策审计记录表 |
 | `session_messages` | 会话消息表，记录用户与助手的对话内容 |

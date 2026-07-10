@@ -1,17 +1,24 @@
 package com.icbc.testagent.opencode.runtime.session;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
+import com.icbc.testagent.domain.run.RunStorageMode;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionRuntimeAttention;
 import com.icbc.testagent.domain.session.SessionRuntimeState;
 import com.icbc.testagent.domain.session.SessionRuntimeStateRepository;
 import com.icbc.testagent.domain.session.SessionRuntimeStateSummary;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.event.RunEventLiveBus;
 import java.time.Duration;
 import java.time.Instant;
@@ -88,6 +95,30 @@ class SessionRuntimeStateApplicationServiceTest {
         assertThat(repository.calls()).isEqualTo(1);
     }
 
+    @Test
+    void redisRuntimeMarkerPreventsDatabaseSnapshotPolling() {
+        SessionRuntimeStateRepository repository = mock(SessionRuntimeStateRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunRuntimeManifest manifest = runtimeManifest();
+        when(runtimeStore.hasUserRuntimeState(USER_ID)).thenReturn(true);
+        when(runtimeStore.findActiveByUser(USER_ID)).thenReturn(List.of(manifest));
+        SessionRuntimeStateApplicationService service = new SessionRuntimeStateApplicationService(
+                repository,
+                new RunEventLiveBus(),
+                runtimeStore,
+                Duration.ofHours(1));
+
+        SessionRuntimeStateSummary summary = service.snapshot(USER_ID);
+
+        assertThat(summary.runningCount()).isEqualTo(1);
+        assertThat(summary.questionCount()).isEqualTo(1);
+        assertThat(summary.sessions()).singleElement().satisfies(state -> {
+            assertThat(state.runId()).isEqualTo(manifest.runId());
+            assertThat(state.attentionEventId()).isEqualTo("question_redis");
+        });
+        verifyNoInteractions(repository);
+    }
+
     private static SessionRuntimeStateSummary summary(int runningCount, int questionCount) {
         List<SessionRuntimeState> sessions = runningCount == 0
                 ? List.of()
@@ -100,6 +131,31 @@ class SessionRuntimeStateApplicationServiceTest {
                         questionCount > 0 ? NOW : null,
                         NOW));
         return new SessionRuntimeStateSummary(runningCount, questionCount, sessions, NOW);
+    }
+
+    private static RunRuntimeManifest runtimeManifest() {
+        return new RunRuntimeManifest(
+                new RunId("run_runtime_redis"),
+                RunStorageMode.REDIS_SUMMARY,
+                USER_ID,
+                new SessionId("ses_runtime_redis"),
+                new WorkspaceId("wrk_runtime_redis"),
+                "opencode",
+                "req_runtime_redis",
+                "msg_dispatch_runtime_redis",
+                "server-a",
+                "bjp_server_a",
+                "node_ocp_runtime_redis",
+                "ocp_runtime_redis",
+                "remote-session-runtime-redis",
+                RunStatus.RUNNING,
+                2, 7, 1, 0, false, 7, 1024,
+                "QUESTION",
+                "question_redis",
+                NOW,
+                NOW.plus(Duration.ofHours(3)),
+                NOW,
+                NOW);
     }
 
     private static final class FakeRepository implements SessionRuntimeStateRepository {

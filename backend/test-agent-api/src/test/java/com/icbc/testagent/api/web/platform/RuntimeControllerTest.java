@@ -903,9 +903,12 @@ class RuntimeControllerTest {
     void sessionControllerReturnsLatestActiveRunForRefreshRecovery() {
         SessionApplicationService sessionService = org.mockito.Mockito.mock(SessionApplicationService.class);
         RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
-        when(runService.findActiveRun(eq(new SessionId("ses_1234567890abcdef"))))
+        when(runService.findActiveRun(
+                eq(new UserId("usr_1234567890abcdef")),
+                eq(new SessionId("ses_1234567890abcdef"))))
                 .thenReturn(Optional.of(run()));
         WebTestClient client = WebTestClient.bindToController(new SessionController(sessionService, runService))
+                .webFilter(authenticatedUserFilter())
                 .webFilter(new TraceIdWebFilter())
                 .build();
 

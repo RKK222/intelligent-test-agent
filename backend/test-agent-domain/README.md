@@ -12,7 +12,7 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、Run、ConversationRunContext、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
+- Workspace、Session、AgentSessionBinding、Run、ConversationRunContext、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 
@@ -23,10 +23,11 @@
 - Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。
 - AgentSessionBinding：`AgentSessionBinding`、`AgentSessionBindingRepository`；按 `(sessionId, agentId)` 表达平台 session 到远端 agent session/node 的通用绑定，旧 opencode 字段只作兼容。
 - Run：`Run`、`RunId`、`RunStatus`、`TokenUsage`；Run 可保存单次对话 token/cost 快照。`RunRepository.saveIfStatus` 提供按当前状态条件保存语义，用于终态事件与异步 transport error 并发到达时避免旧快照覆盖已落库终态；`Run.applyTerminalFact` 只接受 root `run.succeeded/run.failed/run.cancelled` 等终态事实，用于以后到 root 终态纠正先到的 transport error 临时失败。
+- Run 运行数据面：`RunStorageMode`、`RunRuntimeManifest`、`RunRuntimeInput`、`RunRuntimeSnapshot`、`RunRuntimeReplay`、`RunRuntimeStreamEvent`、`RunRuntimeTail`、`RunRuntimeStore`；领域端口定义 manifest、输入、durable seq 回放、durable/transient `runtimeVersion` 有序尾部、物化快照、scope、去重、pending、active 索引和状态 CAS，不暴露 Redis key、Lua 或序列化细节。`LEGACY_FULL` 保持旧数据库事实源，`REDIS_SUMMARY` 的运行中详情只允许通过 Redis 实现承载，禁止自动回退 PostgreSQL 或 JVM 内存。
 - 会话运行上下文：`ConversationContextStore`、`ConversationContextIssueLease`、Session revoke 凭证及 user/workspace mutation 凭证定义签发 fence、生命周期撤销和跨 Redis/关系型写入窗口的 fail-closed gate；基础设施 key/Lua 不进入领域层。
 - ConversationRunContext：`ConversationRunContext` 保存认证用户、agent、完整用户进程、Linux 服务器，以及完整的 Session、Workspace、ExecutionNode 和可空 AgentSessionBinding 服务端快照；`ConversationContextStore` 定义签发租约、代次 CAS 保存、路由只读解析、校验后原子续期、Session revoke gate，以及按用户+Session、用户、Session、Workspace、进程和全局代次失效的领域端口，不暴露 Redis key、Lua 或序列化细节。`TrustedWorkspaceResolver` 负责在可访问真实路径的当前节点安全解析或回填历史 Workspace 服务器归属。
-- RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`、`RunEventScopeContext`；RunEventRepository 支持按 Run 回放和按 root session 回放历史状态事件。RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*`、`session.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated`。
-- RunSessionScope：`RunSessionScope`、`RunSessionScopeSession`、`RunSessionScopeRepository`；表达当前 Run root/child opencode session scope，DB 是恢复事实源，Redis 只作为运行中 cache/pending buffer。
+- RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`、`RunEventScopeContext`；RunEventRepository 支持按 Run 回放和按 root session 回放历史状态事件。RunEventType 覆盖基础 `run.*`（含 transient `run.snapshot.reset`）、`tool.*`、`diff.*`、`session.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated`。
+- RunSessionScope：`RunSessionScope`、`RunSessionScopeSession`、`RunSessionScopeRepository`；表达当前 Run root/child opencode session scope。`LEGACY_FULL` 继续以数据库作为恢复事实源，`REDIS_SUMMARY` 只使用订阅级已知 session 状态和 `RunRuntimeStore`，不读写 scope 表。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
 - OpencodeProcess：`LinuxServer`、`BackendJavaProcess`、`BackendRuntimeSnapshot`、`BackendRuntimeMetrics`、`ServerRuntimeMetricSample`、`BackendRuntimeMetricSample`、`OpencodeContainer`、`OpencodeContainerManager`、`ManagerRuntimeSnapshot`、`OpencodeManagerBackendConnection`、`OpencodeServerProcess`、`OpencodeServerProcessFilter`、`UserOpencodeProcessBinding`、`OpencodeProcessManagementRepository` 和 `OpencodeProcessHeartbeatStore`；只表达 Linux 服务器、容器、管理进程、用户专属 opencode 进程拓扑、Redis 运行快照、查询筛选、服务器级/Java 进程/JVM/容器指标样本和运行心跳端口，不直接发起进程操作或 socket 通信。后端运行指标按可空字段兼容扩展，`memoryMaxBytes` 是 `memoryTotalBytes` 旧别名，`jvmGcPauseMillis` 是 `jvmGcCollectionTimeDeltaMillis` 旧别名。

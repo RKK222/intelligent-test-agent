@@ -59,6 +59,7 @@ export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
   "run.succeeded",
   "run.failed",
   "run.cancelled",
+  "run.snapshot.reset",
   "assistant.message.delta",
   "message.updated",
   "message.removed",
@@ -132,6 +133,8 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
       }
       seen.add(key);
     }
+    // durable 游标只由浏览器解析 SSE `id` 字段维护；不能从 payload.eventId 或 seq=0 的
+    // run.snapshot.reset 推导 Last-Event-ID，否则重连会跳过快照后的 durable 事件。
     options.onEvent(parsed);
   };
 

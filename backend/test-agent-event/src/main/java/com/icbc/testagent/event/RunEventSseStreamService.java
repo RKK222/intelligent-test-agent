@@ -2,8 +2,14 @@ package com.icbc.testagent.event;
 
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunRuntimeSnapshot;
+import com.icbc.testagent.domain.run.RunRuntimeStreamEvent;
+import com.icbc.testagent.domain.run.RunRuntimeTail;
+import com.icbc.testagent.domain.run.RunStorageMode;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -26,6 +32,7 @@ import reactor.core.scheduler.Schedulers;
 public class RunEventSseStreamService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RunEventSseStreamService.class);
+    private static final Duration REDIS_SAFETY_SCAN_INTERVAL = Duration.ofSeconds(5);
 
     private final RunEventReplayService replayService;
     private final RunEventSseMapper sseMapper;
@@ -64,7 +71,22 @@ public class RunEventSseStreamService {
         if (pollInterval.isNegative() || pollInterval.isZero()) {
             throw new IllegalArgumentException("pollInterval must be positive");
         }
+        if (batchLimit <= 0) {
+            throw new IllegalArgumentException("batchLimit must be positive");
+        }
         long resolvedSeq = replayService.resolveLastSeq(lastEventId);
+        if (replayService.storageMode(runId) == RunStorageMode.REDIS_SUMMARY) {
+            return streamRedisAfter(runId, lastEventId, pollInterval, batchLimit, resolvedSeq);
+        }
+        return streamLegacyAfter(runId, lastEventId, pollInterval, batchLimit, resolvedSeq);
+    }
+
+    private Flux<ServerSentEvent<RunEventSsePayload>> streamLegacyAfter(
+            RunId runId,
+            String lastEventId,
+            Duration pollInterval,
+            int batchLimit,
+            long resolvedSeq) {
         LOGGER.info("SSE stream started, runId={}, lastEventId={}, resolvedSeq={}",
                 runId.value(), lastEventId, resolvedSeq);
         AtomicLong cursor = new AtomicLong(resolvedSeq);
@@ -92,6 +114,127 @@ public class RunEventSseStreamService {
     }
 
     /**
+     * Redis 新模式只执行一次 snapshot barrier + Stream 回放，之后完全依赖本机 live bus；不创建 DB polling interval。
+     */
+    private Flux<ServerSentEvent<RunEventSsePayload>> streamRedisAfter(
+            RunId runId,
+            String lastEventId,
+            Duration pollInterval,
+            int batchLimit,
+            long resolvedSeq) {
+        LOGGER.info("Redis SSE stream started, runId={}, lastEventId={}, resolvedSeq={}",
+                runId.value(), lastEventId, resolvedSeq);
+        return Flux.defer(() -> Mono.fromCallable(
+                        () -> replayService.replayRuntimeAfter(runId, lastEventId, batchLimit))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(initial -> {
+                    AtomicLong runtimeCursor = new AtomicLong(initial.snapshot().runtimeVersion());
+                    String initialReason = initial.cursorResetRequired()
+                            ? initial.resetReason()
+                            : "TRANSIENT_SNAPSHOT_RECOVERY";
+                    Flux<ServerSentEvent<RunEventSsePayload>> reset = Flux.just(snapshotReset(
+                            initial.manifest(), initial.snapshot(), initialReason));
+                    Duration safetyScanInterval = pollInterval.compareTo(REDIS_SAFETY_SCAN_INTERVAL) < 0
+                            ? REDIS_SAFETY_SCAN_INTERVAL
+                            : pollInterval;
+                    Flux<Object> triggers = Flux.merge(
+                                    Flux.interval(Duration.ZERO, safetyScanInterval).map(ignored -> (Object) ignored),
+                                    liveBus.stream(runId).map(ignored -> (Object) ignored))
+                            .onBackpressureLatest();
+                    Flux<ServerSentEvent<RunEventSsePayload>> tail = triggers.concatMap(ignored ->
+                            Mono.fromCallable(() -> readRuntimeTailPages(runId, runtimeCursor, batchLimit))
+                                    .subscribeOn(Schedulers.boundedElastic())
+                                    .flatMapMany(Flux::fromIterable));
+                    // 首帧总是完整物化 reset；live bus 只作低延迟唤醒，事实帧严格从 Redis runtime Stream 顺序读取。
+                    return Flux.concat(reset, tail);
+                }))
+                .doOnCancel(() -> LOGGER.info("Redis SSE stream cancelled, runId={}", runId.value()))
+                .doOnError(error -> LOGGER.warn(
+                        "Redis SSE stream error, runId={}, error={}", runId.value(), error.getMessage()));
+    }
+
+    private List<ServerSentEvent<RunEventSsePayload>> readRuntimeTailPages(
+            RunId runId,
+            AtomicLong runtimeCursor,
+            int batchLimit) {
+        List<ServerSentEvent<RunEventSsePayload>> output = new java.util.ArrayList<>();
+        int maxPages = Math.max(2, (com.icbc.testagent.domain.run.RunRuntimeStore.MAX_DURABLE_EVENTS / batchLimit) + 2);
+        for (int page = 0; page < maxPages; page++) {
+            RunRuntimeTail tail = replayService.tailRuntimeAfter(runId, runtimeCursor.get(), batchLimit);
+            if (tail.resetRequired()) {
+                runtimeCursor.set(tail.snapshot().runtimeVersion());
+                output.add(snapshotReset(tail.manifest(), tail.snapshot(), tail.resetReason()));
+                break;
+            }
+            if (tail.events().isEmpty()) {
+                break;
+            }
+            for (RunRuntimeStreamEvent event : tail.events()) {
+                runtimeCursor.set(event.runtimeVersion());
+                output.add(runtimeEvent(event));
+            }
+            if (tail.events().size() < batchLimit) {
+                break;
+            }
+        }
+        return List.copyOf(output);
+    }
+
+    private ServerSentEvent<RunEventSsePayload> runtimeEvent(RunRuntimeStreamEvent runtimeEvent) {
+        if (runtimeEvent.durable()) {
+            RunEvent event = new RunEvent(
+                    new com.icbc.testagent.domain.event.RunEventId(
+                            "evt_redis_" + runtimeEvent.draft().runId().value().substring("run_".length())
+                                    + "_" + runtimeEvent.durableSeq()),
+                    runtimeEvent.draft().runId(),
+                    runtimeEvent.durableSeq(),
+                    runtimeEvent.draft().type(),
+                    runtimeEvent.draft().traceId(),
+                    runtimeEvent.draft().occurredAt(),
+                    runtimeEvent.draft().payload(),
+                    runtimeEvent.draft().scopeContext());
+            return toSse(event);
+        }
+        RunEventSsePayload payload = RunEventSsePayload.transientFrom(
+                runtimeEvent.draft(),
+                "evt_runtime_" + runtimeEvent.draft().runId().value() + "_" + runtimeEvent.runtimeVersion());
+        return sseMapper.toTransientSse(payload);
+    }
+
+    private ServerSentEvent<RunEventSsePayload> snapshotReset(
+            com.icbc.testagent.domain.run.RunRuntimeManifest manifest,
+            RunRuntimeSnapshot runtimeSnapshot,
+            String reason) {
+        List<RunEventSsePayload> snapshotEvents = java.util.stream.IntStream
+                .range(0, runtimeSnapshot.events().size())
+                .mapToObj(index -> RunEventSsePayload.transientFrom(
+                        runtimeSnapshot.events().get(index),
+                        "evt_snapshot_" + manifest.runId().value() + "_"
+                                + runtimeSnapshot.resetGeneration() + "_" + index))
+                .toList();
+        LinkedHashMap<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("barrierSeq", runtimeSnapshot.barrierSeq());
+        snapshot.put("runtimeVersion", runtimeSnapshot.runtimeVersion());
+        snapshot.put("events", snapshotEvents);
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("reason", reason);
+        payload.put("resetGeneration", runtimeSnapshot.resetGeneration());
+        payload.put("earliestSeq", manifest.earliestSeq());
+        payload.put("detailsAvailableUntil", manifest.detailsExpiresAt());
+        payload.put("snapshot", Map.copyOf(snapshot));
+        RunEventSsePayload reset = new RunEventSsePayload(
+                "evt_snapshot_reset_" + manifest.runId().value() + "_"
+                        + runtimeSnapshot.resetGeneration() + "_" + runtimeSnapshot.runtimeVersion(),
+                manifest.runId().value(),
+                0L,
+                "run.snapshot.reset",
+                "trace_runtime_snapshot",
+                manifest.updatedAt(),
+                Map.copyOf(payload));
+        return sseMapper.toTransientSse(reset);
+    }
+
+    /**
      * 初始消息快照与实时事件并发输出，避免远端快照查询期间尚未订阅 live bus 而丢失增量。
      */
     public Flux<ServerSentEvent<RunEventSsePayload>> streamAfterWithSnapshot(
@@ -101,6 +244,10 @@ public class RunEventSseStreamService {
             int batchLimit,
             Flux<ServerSentEvent<RunEventSsePayload>> initialSnapshot) {
         Objects.requireNonNull(initialSnapshot, "initialSnapshot must not be null");
+        if (replayService.storageMode(runId) == RunStorageMode.REDIS_SUMMARY) {
+            // Redis snapshot 已是新模式恢复事实；避免订阅会触发控制面/远端快照查询的兼容 Flux。
+            return streamAfter(runId, lastEventId, pollInterval, batchLimit);
+        }
         return Flux.merge(
                 initialSnapshot,
                 streamAfter(runId, lastEventId, pollInterval, batchLimit))

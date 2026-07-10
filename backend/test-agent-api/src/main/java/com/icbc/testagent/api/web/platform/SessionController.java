@@ -143,9 +143,10 @@ public class SessionController {
             @PathVariable String sessionId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         RuntimeDtos.RunResponse response = runService == null
                 ? null
-                : runService.findActiveRun(new SessionId(sessionId))
+                : runService.findActiveRun(userId, new SessionId(sessionId))
                         .map(RuntimeDtos.RunResponse::from)
                         .orElse(null);
         return ApiResponse.ok(response, traceId);

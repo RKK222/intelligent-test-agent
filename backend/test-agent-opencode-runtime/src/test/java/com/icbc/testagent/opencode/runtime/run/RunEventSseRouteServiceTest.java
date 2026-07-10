@@ -21,7 +21,13 @@ import com.icbc.testagent.domain.routing.RoutingDecision;
 import com.icbc.testagent.domain.routing.RoutingDecisionRepository;
 import com.icbc.testagent.domain.routing.RoutingReason;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunRuntimeManifest;
+import com.icbc.testagent.domain.run.RunRuntimeStore;
+import com.icbc.testagent.domain.run.RunStorageMode;
+import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import java.time.Instant;
 import java.util.Map;
@@ -102,6 +108,24 @@ class RunEventSseRouteServiceTest {
         verifyNoInteractions(processes, routeResolver);
     }
 
+    @Test
+    void resolvesRedisManifestProducerWithoutDatabaseRoutingQueries() {
+        RoutingDecisionRepository routingDecisions = mock(RoutingDecisionRepository.class);
+        OpencodeProcessManagementRepository processes = mock(OpencodeProcessManagementRepository.class);
+        BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        BackendJavaProcess target = backend("bjp_target_backend", SERVER_B, "http://10.8.0.22:8080");
+        when(runtimeStore.findManifest(RUN_ID)).thenReturn(Optional.of(runtimeManifest()));
+        when(routeResolver.remoteTarget(SERVER_B)).thenReturn(Optional.of(SERVER_B));
+        when(routeResolver.requireBackend(SERVER_B)).thenReturn(target);
+        RunEventSseRouteService service = new RunEventSseRouteService(
+                routingDecisions, processes, routeResolver, runtimeStore);
+
+        assertThat(service.forwardTarget(RUN_ID)).contains(target);
+
+        verifyNoInteractions(routingDecisions, processes);
+    }
+
     private static RoutingDecision decision(String executionNodeId) {
         return new RoutingDecision(
                 RUN_ID,
@@ -142,5 +166,27 @@ class RunEventSseRouteServiceTest {
                 NOW,
                 NOW,
                 "trace_backend");
+    }
+
+    private static RunRuntimeManifest runtimeManifest() {
+        return new RunRuntimeManifest(
+                RUN_ID,
+                RunStorageMode.REDIS_SUMMARY,
+                new UserId("usr_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                "opencode",
+                "req_route",
+                "msg_dispatch_route",
+                SERVER_B.value(),
+                "bjp_target_backend",
+                "node_" + PROCESS_ID.value(),
+                PROCESS_ID.value(),
+                "remote-session-route",
+                RunStatus.RUNNING,
+                0, 0, 1, 0, false, 0, 0, null, null, null,
+                NOW.plusSeconds(10_800),
+                NOW,
+                NOW);
     }
 }
