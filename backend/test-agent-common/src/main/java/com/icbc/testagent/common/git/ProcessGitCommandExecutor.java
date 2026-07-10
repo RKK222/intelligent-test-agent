@@ -13,6 +13,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,6 +25,10 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
     private static final Logger LOGGER = LoggerFactory.getLogger(ProcessGitCommandExecutor.class);
     private static final int MAX_STDOUT_BYTES = 8 * 1024 * 1024;
     private static final int MAX_STDERR_BYTES = 16 * 1024;
+    private static final String TIMEOUT_HINT = "请检查后端服务器到 Git 远端的网络、DNS、SSH 端口连通性，或确认远端仓库响应时间是否超过平台超时。";
+    private static final Pattern URI_USER_INFO_PATTERN = Pattern.compile("(?i)(https?://|ssh://)[^\\s/@]+@");
+    private static final Pattern SSH_PRINCIPAL_PATTERN = Pattern.compile(
+            "(?<![\\w./-])([A-Za-z0-9._%+-]+)@([A-Za-z0-9._-]+(?::\\d+)?)(?=[:\\s/]|$)");
 
     @Override
     public GitCommandResult execute(List<String> command, String privateKey, Duration timeout) {
@@ -31,6 +36,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
         Path keyFile = null;
         long startedAt = System.nanoTime();
         String safeCommand = safeCommand(command);
+        LOGGER.info("event=git_command_start timeoutMs={} command={}", timeout.toMillis(), safeCommand);
         try {
             ProcessBuilder builder = new ProcessBuilder(command)
                     .redirectInput(ProcessBuilder.Redirect.PIPE);
@@ -60,9 +66,11 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
                 process.destroyForcibly();
                 long durationMs = elapsedMillis(startedAt);
                 LOGGER.warn(
-                        "event=git_command_timeout durationMs={} timeoutMs={} command={}",
+                        "event=git_command_timeout durationMs={} timeoutMs={} failureType={} failureHint={} command={}",
                         durationMs,
                         timeout.toMillis(),
+                        "TIMEOUT",
+                        TIMEOUT_HINT,
                         safeCommand);
                 throw new PlatformException(
                         ErrorCode.GIT_TIMEOUT,
@@ -72,7 +80,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
                                 "timeoutMillis", timeout.toMillis(),
                                 "durationMillis", durationMs,
                                 "gitFailureType", "TIMEOUT",
-                                "gitFailureHint", "请检查后端服务器到 Git 远端的网络、DNS、SSH 端口连通性，或确认远端仓库响应时间是否超过平台超时。"));
+                                "gitFailureHint", TIMEOUT_HINT));
             }
             out.join(1000);
             err.join(1000);
@@ -81,10 +89,11 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
                 String stderrText = safeStderr(stderr);
                 GitCommandFailure failure = GitCommandFailureClassifier.classify(command, stderrText);
                 LOGGER.warn(
-                        "event=git_command_failed durationMs={} exitCode={} failureType={} command={} stderr={}",
+                        "event=git_command_failed durationMs={} exitCode={} failureType={} failureHint={} command={} stderr={}",
                         elapsedMillis(startedAt),
                         exit,
                         failure.type(),
+                        failure.hint(),
                         safeCommand,
                         stderrText);
                 throw new PlatformException(
@@ -102,7 +111,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
             if (durationMs >= 5000) {
                 LOGGER.info("event=git_command_slow durationMs={} command={}", durationMs, safeCommand);
             } else {
-                LOGGER.debug("event=git_command_success durationMs={} command={}", durationMs, safeCommand);
+                LOGGER.info("event=git_command_success durationMs={} command={}", durationMs, safeCommand);
             }
             return new GitCommandResult(exit, new String(stdoutBytes, StandardCharsets.UTF_8), stdoutBytes);
         } catch (PlatformException exception) {
@@ -201,10 +210,12 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
     }
 
     private static String safeStderr(ByteArrayOutputStream stderr) {
-        return new String(stderr.toByteArray(), StandardCharsets.UTF_8)
+        String text = new String(stderr.toByteArray(), StandardCharsets.UTF_8)
                 .replace('\r', ' ')
                 .replace('\n', ' ')
                 .trim();
+        text = URI_USER_INFO_PATTERN.matcher(text).replaceAll("$1***@");
+        return SSH_PRINCIPAL_PATTERN.matcher(text).replaceAll("***@$2");
     }
 
     private static String shellQuote(String value) {

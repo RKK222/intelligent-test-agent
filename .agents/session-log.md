@@ -7,11 +7,11 @@
 - Why:
   - 企业内部公共 Agent Git 地址只保存 `host[:port]/path` 片段时，初始化弹窗加载远端分支的 `git ls-remote` 可能直接使用片段，缺少 `ssh://{unifiedAuthId}@`，导致 Gerrit 分支读取超时或认证失败；同时现场容易把 `configDirPath` 误认为 manager 启动时会自动创建。
 - What:
-  - 公共分支查询在执行 Git 命令前强制按当前用户重新计算有效 Git URL，日志继续只输出脱敏后的地址；公共配置目录未初始化的错误文案明确要求先用公共 Agent Git 仓库初始化目标服务器。
+  - 公共分支查询在执行 Git 命令前强制按当前用户重新计算有效 Git URL；底层 Git 执行器补齐 `git_command_start/success/failed/timeout` INFO/WARN 日志，stderr 和命令中的 URL 用户信息继续脱敏；公共配置目录未初始化的错误文案明确要求先用公共 Agent Git 仓库初始化目标服务器。
 - How:
   - 复用既有 `effectivePublicGitUrl` / 保存值形态判断，不新增第二个公共 Git 参数，也不创建空 `OPENCODE_PUBLIC_CONFIG_DIR`。
 - Result:
-  - `AgentConfigApplicationServiceTest` 新增内部片段分支查询回归测试；目标 Maven 测试通过。部署时 `configDirPath` 仍必须来自公共配置 Git 仓库中的非空 `opencode` 配置目录。
+  - `AgentConfigApplicationServiceTest` 新增内部片段分支查询回归测试；`ProcessGitCommandExecutorTest` 覆盖 Git 命令开始/成功日志输出、失败日志输出和统一认证号脱敏。部署时 `configDirPath` 仍必须来自公共配置 Git 仓库中的非空 `opencode` 配置目录。
 
 ### 2026-07-10 - 保留 OpenCode 默认标题以启用自动命名
 

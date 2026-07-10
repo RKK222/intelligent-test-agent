@@ -26,7 +26,7 @@
 - `PlatformException`：业务层抛出的平台基础异常。
 - `PageRequest`、`PageResponse<T>`：分页请求和响应模型。
 - `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间、应用版本工作区、应用版本服务器副本、服务器广播事件、个人工作区、同步记录、SSH key 和 scheduler 运行/计划的稳定前缀 ID。
-- `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads`、`git archive --remote`、tar 目录/文件树解析、超时、输出上限、非交互环境和临时 SSH key 文件清理。
+- `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads`、`git archive --remote`、tar 目录/文件树解析、超时、输出上限、非交互环境、临时 SSH key 文件清理，以及 `git_command_start/success/slow/failed/timeout/unavailable` 单行脱敏日志。
 - `GitWorkspaceService`：封装 clone、worktree add、分支/origin/head/status、porcelain/diff、索引恢复到 HEAD、冲突 stage 1/2/3 读取、提交、push/pull/fetch、冲突文件列表和 `merge --abort` 等 Git 原子命令；冲突路径关闭 `core.quotepath`，批量 ours/theirs 正确处理目标侧删除。
 - `SshKeyCryptoService`：封装个人 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成。
 - `RsaKeyService`：封装 SSH key 前端混合加密所需的 RSA 公钥导出和私钥解密；解密优先使用浏览器 Web Crypto 对齐的 RSA-OAEP/SHA-256 + MGF1-SHA-256 参数，并兼容历史 Java 默认 OAEP 参数密文。
@@ -36,7 +36,7 @@
 - `ApiResponseTest`、`ApiErrorResponseTest`、`PlatformExceptionTest` 覆盖统一响应和平台异常。
 - `PageRequestTest`、`PageResponseTest` 覆盖分页边界、offset、总页数和列表防御性复制。
 - `ErrorCodeTest`、`RuntimeIdGeneratorTest` 覆盖稳定 HTTP 状态、默认中文说明和运行时 ID 前缀格式。
-- `GitRemoteServiceTest` 覆盖分支解析、archive tar 目录解析、目录/文件树解析和 Git 超时错误映射。
+- `GitRemoteServiceTest` 覆盖分支解析、archive tar 目录解析、目录/文件树解析和 Git 超时错误映射；`ProcessGitCommandExecutorTest` 覆盖 Git 命令日志输出和 URL 用户信息脱敏。
 - `GitWorkspaceServiceTest` 覆盖 clone 分支、worktree 创建、同名分支复用、分支/origin/head/status 查询、porcelain 路径解码、staged/unstaged diff 聚合、提交、push、pull、fetch/reset、合并冲突文件列表解析、merge abort 和临时 SSH key 清理；内部版本库刷新 origin 的业务语义由 workspace-management 定向测试覆盖。
 - `SshKeyCryptoServiceTest` 覆盖 SSH key 加解密、指纹和密钥配置错误。
 - `RsaKeyServiceTest` 覆盖浏览器 Web Crypto RSA-OAEP/SHA-256 密文的后端解密兼容性。
