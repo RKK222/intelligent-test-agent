@@ -36,9 +36,7 @@ import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
 import com.icbc.testagent.opencode.client.OpencodeSessionExistsCommand;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -435,52 +433,6 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("沙箱"), List.of("两个"))));
-    }
-
-    @Test
-    void nativeTitleAgentUsesTemporarySessionAndAlwaysDeletesIt() {
-        Fixture fixture = new Fixture();
-        ExecutionNode userNode = Fixture.userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
-        when(fixture.assignmentService.requireReadyProcess(
-                        new UserId("usr_1234567890abcdef"),
-                        "opencode",
-                        "trace_1234567890abcdef"))
-                .thenReturn(new UserOpencodeProcessAssignment(userNode));
-        List<OpencodeRuntimeCommand> commands = new ArrayList<>();
-        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
-            OpencodeRuntimeCommand command = invocation.getArgument(0);
-            commands.add(command);
-            Object response = switch (command.path()) {
-                case "/session" -> Map.of("id", "ses_title1234567890abcdef");
-                case "/session/ses_title1234567890abcdef/prompt_async" -> Map.of("accepted", true);
-                case "/session/ses_title1234567890abcdef/message" -> List.of(Map.of(
-                        "info", Map.of("role", "assistant", "agent", "title"),
-                        "parts", List.of(Map.of("type", "text", "text", "金额新增参数审核测试"))));
-                case "/session/ses_title1234567890abcdef" -> Map.of("deleted", true);
-                default -> throw new AssertionError("unexpected path: " + command.path());
-            };
-            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(response)));
-        });
-
-        Optional<String> title = fixture.service.withUser(
-                new UserId("usr_1234567890abcdef"),
-                () -> fixture.service.generateNativeSessionTitle(
-                        "wrk_1234567890abcdef",
-                        "测试金额新增参数审核",
-                        Duration.ofSeconds(1),
-                        Duration.ofMillis(1),
-                        "trace_1234567890abcdef"));
-
-        assertThat(title).contains("金额新增参数审核测试");
-        assertThat(commands).extracting(OpencodeRuntimeCommand::path).containsExactly(
-                "/session",
-                "/session/ses_title1234567890abcdef/prompt_async",
-                "/session/ses_title1234567890abcdef/message",
-                "/session/ses_title1234567890abcdef");
-        assertThat(commands.get(1).body()).isEqualTo(Map.of(
-                "agent", "title",
-                "parts", List.of(Map.of("type", "text", "text", "测试金额新增参数审核"))));
-        assertThat(commands.get(3).method()).isEqualTo("DELETE");
     }
 
     private static final class Fixture {

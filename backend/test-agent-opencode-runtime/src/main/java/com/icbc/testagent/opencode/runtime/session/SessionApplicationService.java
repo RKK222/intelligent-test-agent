@@ -20,6 +20,7 @@ import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
+import com.icbc.testagent.opencode.runtime.run.RunSessionTitleWatchService;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -41,6 +42,7 @@ public class SessionApplicationService {
     private final SessionHistoryRepository sessionHistoryRepository;
     private final SessionMessageRepository sessionMessageRepository;
     private final RunSessionMessageSnapshotService snapshotService;
+    private final RunSessionTitleWatchService titleWatchService;
 
     /**
      * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
@@ -51,12 +53,30 @@ public class SessionApplicationService {
             SessionRepository sessionRepository,
             SessionHistoryRepository sessionHistoryRepository,
             SessionMessageRepository sessionMessageRepository,
-            RunSessionMessageSnapshotService snapshotService) {
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionTitleWatchService titleWatchService) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.sessionHistoryRepository = Objects.requireNonNull(sessionHistoryRepository, "sessionHistoryRepository must not be null");
         this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
         this.snapshotService = snapshotService;
+        this.titleWatchService = titleWatchService;
+    }
+
+    /** 兼容未接入标题监听的既有调用方。 */
+    public SessionApplicationService(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            SessionHistoryRepository sessionHistoryRepository,
+            SessionMessageRepository sessionMessageRepository,
+            RunSessionMessageSnapshotService snapshotService) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                sessionHistoryRepository,
+                sessionMessageRepository,
+                snapshotService,
+                null);
     }
 
     /**
@@ -72,6 +92,22 @@ public class SessionApplicationService {
         this.sessionHistoryRepository = null;
         this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
         this.snapshotService = snapshotService;
+        this.titleWatchService = null;
+    }
+
+    /** 为会话变更测试和非 Web 调用方提供可选标题监听取消服务。 */
+    public SessionApplicationService(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            SessionMessageRepository sessionMessageRepository,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionTitleWatchService titleWatchService) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.sessionHistoryRepository = null;
+        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
+        this.snapshotService = snapshotService;
+        this.titleWatchService = titleWatchService;
     }
 
     /**
@@ -162,7 +198,12 @@ public class SessionApplicationService {
         Session current = getSession(sessionId);
         String nextTitle = title == null || title.isBlank() ? current.title() : title;
         boolean nextPinned = pinned == null ? current.pinned() : pinned;
-        return sessionRepository.save(current.updateTitleAndPinned(nextTitle, nextPinned, Instant.now(), traceId));
+        Session updated = sessionRepository.save(current.updateTitleAndPinned(nextTitle, nextPinned, Instant.now(), traceId));
+        // 仅标题确实已保存时才使原生 title agent 的旧代际失效；置顶等元数据更新不能中断标题等待。
+        if (!nextTitle.equals(current.title()) && titleWatchService != null) {
+            titleWatchService.cancelForSession(sessionId, traceId);
+        }
+        return updated;
     }
 
     /**
@@ -171,6 +212,9 @@ public class SessionApplicationService {
     public Session archiveSession(SessionId sessionId, String traceId) {
         Session current = getSession(sessionId);
         Session archived = sessionRepository.save(current.archive(Instant.now(), traceId));
+        if (titleWatchService != null) {
+            titleWatchService.cancelForSession(sessionId, traceId);
+        }
         LOGGER.info("Session archived, sessionId={}, traceId={}", sessionId.value(), traceId);
         return archived;
     }

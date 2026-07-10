@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-10 - 删除 OpenCode 会话标题超时兜底
+
+- Why:
+  - 临时远端会话、二次调用 title agent 和固定超时会制造与真实会话无关的标题来源，且无法保证主 Run 快速完成后仍能正确同步原生标题。
+- What:
+  - 删除 `RunSessionTitleFallbackService`、`OpencodeSessionTitleProperties`、临时会话 `generateNativeSessionTitle`、相关测试和 `test-agent.opencode.session-title` 配置；`RunApplicationService` 不再注入或调度兜底服务。
+- How:
+  - 只保留 `RunSessionTitleWatchRegistry` / `RunSessionTitleWatchService` 对同一远端 root session 的事件驱动监听：原生 title agent 完成后读取最终标题并通过已有 `session.updated` SSE 同步；下一轮对话、手动改名、归档/删除会主动取消等待。
+- Result:
+  - 不创建临时 session、不重复调用 title agent、也不依据超时产生替代标题；配置、运行时代码、测试和稳定文档均不再保留该兜底路径。
+
 ### 2026-07-10 - 修复企业内公共 Agent Git 分支查询 URL
 
 - Why:

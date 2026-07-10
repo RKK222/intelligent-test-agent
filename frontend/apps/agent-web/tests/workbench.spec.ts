@@ -694,6 +694,178 @@ test("the first sent message becomes the new session title", async ({ page }) =>
   });
 });
 
+test("a title-pending run keeps its SSE open until the synchronized native title arrives", async ({ page }) => {
+  await page.addInitScript(() => {
+    type StreamProbe = { runId: string; closed: boolean };
+    const probes: StreamProbe[] = [];
+    (window as Window & { __titleWatchRunStreams?: StreamProbe[] }).__titleWatchRunStreams = probes;
+
+    class MockRunEventSource {
+      onopen: ((event: Event) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      private readonly listeners = new Map<string, Set<EventListener>>();
+      private closed = false;
+      private readonly probe: StreamProbe;
+
+      constructor(readonly url: string) {
+        const runId = decodeURIComponent(url).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
+        this.probe = { runId, closed: false };
+        probes.push(this.probe);
+        window.setTimeout(() => this.onopen?.(new Event("open")), 0);
+        window.setTimeout(() => this.emit("run.succeeded", runId, 1, { platformSessionTitlePending: true }), 10);
+        window.setTimeout(() => this.emit("session.updated", runId, 2, {
+          platformSessionTitleSynchronized: true,
+          platformSessionTitle: "登录功能测试设计",
+          isChildSession: false
+        }), 80);
+      }
+
+      addEventListener(type: string, listener: EventListener) {
+        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      removeEventListener(type: string, listener: EventListener) {
+        this.listeners.get(type)?.delete(listener);
+      }
+
+      close() {
+        this.closed = true;
+        this.probe.closed = true;
+      }
+
+      private emit(type: string, runId: string, seq: number, payload: Record<string, unknown>) {
+        if (this.closed) return;
+        const event = new MessageEvent(type, {
+          data: JSON.stringify({
+            eventId: `evt_title_watch_${seq}`,
+            runId,
+            seq,
+            type,
+            traceId: "trace_e2e",
+            occurredAt: "2026-06-19T00:00:00Z",
+            payload
+          }),
+          lastEventId: String(seq)
+        });
+        this.listeners.get(type)?.forEach((listener) => listener(event));
+      }
+    }
+
+    (window as Window & { EventSource: typeof EventSource }).EventSource = MockRunEventSource as unknown as typeof EventSource;
+  });
+  await mockBackendApi(page, {
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  });
+  await gotoWorkbench(page);
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("请设计登录功能测试");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect(page.getByText("任务完成")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(false);
+  await expect(page.locator(".figma-chat-title")).toHaveText("登录功能测试设计");
+  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(true);
+});
+
+test("a title-pending SSE closes when the backend closes the title watch or a new run starts", async ({ page }) => {
+  await page.addInitScript(() => {
+    type StreamProbe = { runId: string; closed: boolean };
+    const probes: StreamProbe[] = [];
+    (window as Window & { __titleWatchRunStreams?: StreamProbe[] }).__titleWatchRunStreams = probes;
+
+    class MockRunEventSource {
+      onopen: ((event: Event) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      private readonly listeners = new Map<string, Set<EventListener>>();
+      private closed = false;
+      private readonly probe: StreamProbe;
+
+      constructor(readonly url: string) {
+        const runId = decodeURIComponent(url).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
+        this.probe = { runId, closed: false };
+        probes.push(this.probe);
+        window.setTimeout(() => this.onopen?.(new Event("open")), 0);
+        if (runId === "run_1") {
+          window.setTimeout(() => this.emit("run.succeeded", runId, 1, { platformSessionTitlePending: true }), 10);
+        }
+      }
+
+      addEventListener(type: string, listener: EventListener) {
+        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      removeEventListener(type: string, listener: EventListener) {
+        this.listeners.get(type)?.delete(listener);
+      }
+
+      close() {
+        this.closed = true;
+        this.probe.closed = true;
+      }
+
+      private emit(type: string, runId: string, seq: number, payload: Record<string, unknown>) {
+        if (this.closed) return;
+        const event = new MessageEvent(type, {
+          data: JSON.stringify({
+            eventId: `evt_title_watch_${runId}_${seq}`,
+            runId,
+            seq,
+            type,
+            traceId: "trace_e2e",
+            occurredAt: "2026-06-19T00:00:00Z",
+            payload
+          }),
+          lastEventId: String(seq)
+        });
+        this.listeners.get(type)?.forEach((listener) => listener(event));
+      }
+    }
+
+    (window as Window & { EventSource: typeof EventSource }).EventSource = MockRunEventSource as unknown as typeof EventSource;
+  });
+  await mockBackendApi(page, {
+    runIds: ["run_1", "run_2"],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  });
+  await gotoWorkbench(page);
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("第一轮等待原生标题");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect(page.getByText("任务完成")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(false);
+
+  await composer.fill("第二轮开始后关闭旧标题监听");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(true);
+});
+
 test("retrying a failed chat run sends the previous prompt again", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {

@@ -212,6 +212,9 @@ const searchResults = ref<FileSearchResult[]>([]);
 const searchLoading = ref(false);
 const session = shallowRef<Session | null>(null);
 const run = shallowRef<Run | null>(null);
+// OpenCode 原生 title agent 会在 root Run 成功后异步发出 session.updated。
+// 该 Run 处于待命名状态时，保留既有 Run SSE，直到后端确认标题已持久化或显式关闭监听。
+const pendingSessionTitleRunId = ref<string | null>(null);
 const rawEntriesBySessionId = ref<Record<string, RawOutputEntry[]>>({});
 const rawRunSessionMap = ref<Record<string, string>>({});
 const reportedRunEventStreamErrors = new Set<string>();
@@ -1520,9 +1523,9 @@ watch([() => selectedProvider.value, () => selectedModel.value, allModels], ([pr
   }
 });
 
-// ===== RunEvent SSE 订阅：Run 处于运行/取消中时建立，卸载/状态变化时关闭 =====
-watch(run, (r, _old, onCleanup) => {
-  if (!r || !isRunBusyStatus(r.status)) {
+// ===== RunEvent SSE 订阅：Run 运行中或等待 OpenCode 原生标题时建立 =====
+watch([run, pendingSessionTitleRunId], ([r, pendingTitleRunId], _old, onCleanup) => {
+  if (!r || (!isRunBusyStatus(r.status) && pendingTitleRunId !== r.runId)) {
     return;
   }
   const subscription = subscribeRunEvents({
@@ -1727,6 +1730,8 @@ const startRunMutation = useMutation({
     });
   },
   onSuccess: (started) => {
+    // 下一轮 Run 已启动时，旧 Run 的标题监听不能继续消费同一 root session 的后续事件。
+    pendingSessionTitleRunId.value = null;
     run.value = started;
     rememberRunSession(started);
     logs.value = [...logs.value, `[run] ${started.runId} ${started.status}`];
@@ -2078,6 +2083,7 @@ const deleteSessionMutation = useMutation({
   mutationFn: async (sessionId: string) => api.deleteSession(sessionId),
   onSuccess: (deleted) => {
     if (session.value?.sessionId === deleted.sessionId) {
+      pendingSessionTitleRunId.value = null;
       session.value = null;
       run.value = null;
       clearAutoRetryState();
@@ -2228,6 +2234,7 @@ function resetWorkspaceState() {
   searchSeq++;
   session.value = null;
   run.value = null;
+  pendingSessionTitleRunId.value = null;
   logs.value = [];
   diffFiles.value = [];
   diffSource.value = "run";
@@ -3111,20 +3118,32 @@ function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
   dispatchChat({ type: "event", event });
   notifyOnAttention(event, selectedWorkspace.value, session.value);
   if (event.type === "session.updated") {
+    const matchesCurrentSession = sessionTitleEventMatchesCurrentSession(subscribedSessionId, session.value?.sessionId);
+    // 后端可能把 pending 标记与终态事件分开推送；只要仍是当前 root 会话，就保留同一条 SSE。
+    if (event.payload.platformSessionTitlePending === true && matchesCurrentSession) {
+      pendingSessionTitleRunId.value = event.runId;
+    }
     const title = platformSessionTitleFromSynchronizedEventPayload(event.payload);
-    // 只有后端确认标题已写入平台 Session 后才刷新页面；同时拒绝子会话和历史切换后晚到的旧事件。
-    if (
+    const synchronizedCurrentRootTitle = Boolean(
       title
       && event.payload.isChildSession !== true
-      && sessionTitleEventMatchesCurrentSession(subscribedSessionId, session.value?.sessionId)
+      && matchesCurrentSession
       && session.value
-    ) {
+    );
+    // 只有后端确认标题已写入平台 Session 后才刷新页面；同时拒绝子会话和历史切换后晚到的旧事件。
+    if (synchronizedCurrentRootTitle && session.value) {
       const currentSessionId = session.value.sessionId;
       session.value = { ...session.value, title };
       sessionHistoryItems.value = sessionHistoryItems.value.map((item) =>
         item.sessionId === currentSessionId ? { ...item, title } : item
       );
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    }
+    if (
+      pendingSessionTitleRunId.value === event.runId
+      && (synchronizedCurrentRootTitle || event.payload.platformSessionTitleWatchClosed === true)
+    ) {
+      pendingSessionTitleRunId.value = null;
     }
   } else if (event.type === "assistant.message.delta") {
     return;
@@ -3186,6 +3205,11 @@ function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
       chatStartedAt.value = null;
     }
     const payload = event.payload as Record<string, unknown>;
+    if (event.type === "run.succeeded" && payload.platformSessionTitlePending === true) {
+      pendingSessionTitleRunId.value = event.runId;
+    } else if (event.type !== "run.succeeded" && pendingSessionTitleRunId.value === event.runId) {
+      pendingSessionTitleRunId.value = null;
+    }
     if (typeof payload.tokens === "number") {
       lastTokens = payload.tokens;
     }
@@ -3754,6 +3778,8 @@ function handleSaveDiffFile(path: string, content: string) {
 }
 
 async function switchSession(sessionId: string) {
+  // 历史切换必须释放旧 Run 的标题待定订阅，避免晚到事件改写新打开的会话。
+  pendingSessionTitleRunId.value = null;
   const switchSeq = ++historySwitchSeq;
   historyLoadingSessionId.value = sessionId;
   const selected = sessionsItems.value.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
@@ -3908,6 +3934,7 @@ function rememberCurrentRunAsBackgroundRuntimeState() {
 
 function handleNewConversation() {
   rememberCurrentRunAsBackgroundRuntimeState();
+  pendingSessionTitleRunId.value = null;
   session.value = null;
   run.value = null;
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });

@@ -119,10 +119,6 @@ test-agent:
     ticket-capacity: 10
     ticket-window: 1m
   opencode:
-    session-title:
-      fallback-enabled: ${TEST_AGENT_OPENCODE_SESSION_TITLE_FALLBACK_ENABLED:true}
-      fallback-timeout: ${TEST_AGENT_OPENCODE_SESSION_TITLE_FALLBACK_TIMEOUT:5s}
-      fallback-poll-interval: ${TEST_AGENT_OPENCODE_SESSION_TITLE_FALLBACK_POLL_INTERVAL:100ms}
     manager-control:
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
       heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:5s}

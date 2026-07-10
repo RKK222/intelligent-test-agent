@@ -694,6 +694,52 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void serviceRegistersOnlyFirstRunTitleWatchAndClosesOlderTitleWaitBeforeStartingNextRun() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunSessionTitleWatchService titleWatchService = org.mockito.Mockito.mock(RunSessionTitleWatchService.class);
+        Session initialTitleSession = session().updateTitleAndPinned(
+                OpencodeSessionTitlePolicy.initialPlatformTitle("run the tests"),
+                false,
+                NOW,
+                "trace_1234567890abcdef");
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(initialTitleSession),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                null,
+                null,
+                null,
+                titleWatchService);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        org.mockito.Mockito.verify(titleWatchService).closeTitleWaitForNextRun(
+                org.mockito.ArgumentMatchers.eq(new SessionId("ses_1234567890abcdef")),
+                org.mockito.ArgumentMatchers.eq("trace_1234567890abcdef"));
+        org.mockito.Mockito.verify(titleWatchService).registerFirstRun(
+                org.mockito.ArgumentMatchers.eq(new SessionId("ses_1234567890abcdef")),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(REMOTE_SESSION_ID),
+                org.mockito.ArgumentMatchers.eq(OpencodeSessionTitlePolicy.initialPlatformTitle("run the tests")));
+    }
+
+    @Test
     void serviceSynchronizesRootSessionTitleFromSessionUpdatedEvent() {
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
@@ -883,45 +929,6 @@ class RunApplicationServiceTest {
         assertThat(sessions.current.title()).isEqualTo("Demo session");
         assertThat(events.events.get(2).payload())
                 .doesNotContainKeys("platformSessionTitleSynchronized", "platformSessionTitle");
-    }
-
-    @Test
-    void serviceSchedulesTitleFallbackAfterSuccessfulRootRun() {
-        FakeRunEventRepository events = new FakeRunEventRepository();
-        FakeOpencodeFacade facade = new FakeOpencodeFacade();
-        facade.streamEvents = command -> Flux.just(new RunEventDraft(
-                command.runId(),
-                RunEventType.RUN_SUCCEEDED,
-                command.traceId(),
-                Instant.now(),
-                Map.of("status", "idle")));
-        RunSessionTitleFallbackService titleFallback = org.mockito.Mockito.mock(RunSessionTitleFallbackService.class);
-        RunApplicationService service = new RunApplicationService(
-                new FakeWorkspaceRepository(),
-                new FakeSessionRepository(session()),
-                new FakeRunRepository(),
-                new FakeSessionMessageRepository(),
-                new FakeExecutionNodeRepository(),
-                new FakeRoutingDecisionRepository(),
-                new RunEventAppender(events),
-                runtimeRegistry(facade),
-                new FakeAgentSessionBindingRepository(),
-                new RunEventLiveBus(),
-                new RunEventPersistencePolicy(),
-                null,
-                null,
-                ManagedWorkspacePathResolver.legacyOnly(),
-                null,
-                null,
-                null,
-                null,
-                titleFallback);
-
-        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
-
-        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
-        org.mockito.Mockito.verify(titleFallback).schedule(
-                org.mockito.Mockito.eq("opencode"), org.mockito.Mockito.any(Run.class));
     }
 
     @Test

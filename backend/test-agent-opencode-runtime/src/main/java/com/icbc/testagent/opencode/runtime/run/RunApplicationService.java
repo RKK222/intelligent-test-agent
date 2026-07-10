@@ -3,6 +3,7 @@ package com.icbc.testagent.opencode.runtime.run;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
+import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.agent.runtime.AgentCancelCommand;
 import com.icbc.testagent.agent.runtime.AgentPromptPart;
 import com.icbc.testagent.agent.runtime.AgentRuntime;
@@ -78,6 +79,7 @@ public class RunApplicationService {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
     private static final Duration TRANSPORT_ERROR_TERMINAL_GRACE = Duration.ofMillis(300);
+    private static final Duration TITLE_WAIT_RECONNECT_DELAY = Duration.ofSeconds(1);
     private static final Set<RunEventType> OUTPUT_ACTIVITY_TYPES = Set.of(
             RunEventType.ASSISTANT_MESSAGE_DELTA,
             RunEventType.MESSAGE_UPDATED,
@@ -141,7 +143,7 @@ public class RunApplicationService {
     private final RunSessionScopeRuntimeCache runSessionScopeRuntimeCache;
     private final RunSessionScopeRouter runSessionScopeRouter;
     private final RunActivityStateStore runActivityStateStore;
-    private final RunSessionTitleFallbackService sessionTitleFallbackService;
+    private RunSessionTitleWatchService sessionTitleWatchService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -186,9 +188,7 @@ public class RunApplicationService {
                 null);
     }
 
-    /**
-     * 创建生产用 Run 编排服务，显式注入实时事件总线、持久化策略和运行态 Redis 存储。
-     */
+    /** 创建生产用 Run 编排服务，显式注入实时事件总线、持久化策略和运行态 Redis 存储。 */
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
             com.icbc.testagent.domain.session.SessionRepository sessionRepository,
@@ -208,52 +208,6 @@ public class RunApplicationService {
             RunSessionScopeRepository runSessionScopeRepository,
             RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
             RunActivityStateStore runActivityStateStore) {
-        this(
-                workspaceRepository,
-                sessionRepository,
-                runRepository,
-                sessionMessageRepository,
-                executionNodeRepository,
-                routingDecisionRepository,
-                runEventAppender,
-                agentRuntimeRegistry,
-                agentSessionBindingRepository,
-                runEventLiveBus,
-                runEventPersistencePolicy,
-                modelCatalogService,
-                userProcessAssignmentService,
-                workspacePathResolver,
-                snapshotService,
-                runSessionScopeRepository,
-                runSessionScopeRuntimeCache,
-                runActivityStateStore,
-                null);
-    }
-
-    /**
-     * 创建生产用 Run 编排服务，并注入首轮 OpenCode 原生标题兜底策略。
-     */
-    @Autowired
-    public RunApplicationService(
-            WorkspaceRepository workspaceRepository,
-            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
-            RunRepository runRepository,
-            SessionMessageRepository sessionMessageRepository,
-            ExecutionNodeRepository executionNodeRepository,
-            RoutingDecisionRepository routingDecisionRepository,
-            RunEventAppender runEventAppender,
-            AgentRuntimeRegistry agentRuntimeRegistry,
-            AgentSessionBindingRepository agentSessionBindingRepository,
-            RunEventLiveBus runEventLiveBus,
-            RunEventPersistencePolicy runEventPersistencePolicy,
-            ModelCatalogApplicationService modelCatalogService,
-            UserOpencodeProcessAssignmentService userProcessAssignmentService,
-            ManagedWorkspacePathResolver workspacePathResolver,
-            RunSessionMessageSnapshotService snapshotService,
-            RunSessionScopeRepository runSessionScopeRepository,
-            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
-            RunActivityStateStore runActivityStateStore,
-            RunSessionTitleFallbackService sessionTitleFallbackService) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -294,7 +248,53 @@ public class RunApplicationService {
         this.runActivityStateStore = runActivityStateStore == null
                 ? new RunActivityStateStore(null)
                 : runActivityStateStore;
-        this.sessionTitleFallbackService = sessionTitleFallbackService;
+        this.sessionTitleWatchService = null;
+    }
+
+    /**
+     * 生产装配会额外注入原生标题监听服务；旧构造器仍保留给历史测试和兼容调用方。
+     */
+    @Autowired
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            RunSessionTitleWatchService sessionTitleWatchService) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runEventLiveBus,
+                runEventPersistencePolicy,
+                modelCatalogService,
+                userProcessAssignmentService,
+                workspacePathResolver,
+                snapshotService,
+                runSessionScopeRepository,
+                runSessionScopeRuntimeCache,
+                runActivityStateStore);
+        this.sessionTitleWatchService = sessionTitleWatchService;
     }
 
     /**
@@ -447,6 +447,10 @@ public class RunApplicationService {
         SessionId sessionId = input.sessionId();
         String prompt = input.effectivePrompt();
         Session session = findSession(sessionId);
+        boolean firstUserRun = isFirstUserRun(sessionId);
+        if (sessionTitleWatchService != null) {
+            sessionTitleWatchService.closeTitleWaitForNextRun(sessionId, traceId);
+        }
         Workspace workspace = findWorkspace(session.workspaceId());
         ModelSelection modelSelection = resolveModelSelection(input.model());
         String opencodeAgent = resolveOpencodeAgent(input);
@@ -483,6 +487,16 @@ public class RunApplicationService {
                     workspace,
                     target.node(),
                     traceId);
+            RunSessionTitleWatchRegistry.TitleWatchToken titleWatchToken = registerFirstRunTitleWatch(
+                    resolvedAgentId,
+                    firstUserRun,
+                    session,
+                    pending,
+                    prompt,
+                    runtime,
+                    target.node(),
+                    workspace,
+                    binding.remoteSessionId());
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
             recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId);
@@ -499,7 +513,8 @@ public class RunApplicationService {
                     binding.remoteSessionId(),
                     target.node(),
                     workspace,
-                    traceId);
+                    traceId,
+                    titleWatchToken);
             AgentStartRunCommand command = new AgentStartRunCommand(
                     target.node(),
                     binding.remoteSessionId(),
@@ -953,6 +968,65 @@ public class RunApplicationService {
                 : message.withSource(ConversationSourceType.MANUAL, null, userId));
     }
 
+    /** 注册条件只在写入本轮用户消息前判断，遍历分页结果而不是假定前 200 条足以代表会话历史。 */
+    private boolean isFirstUserRun(SessionId sessionId) {
+        if (sessionTitleWatchService == null) {
+            return false;
+        }
+        int page = 1;
+        final int size = 200;
+        while (true) {
+            var response = sessionMessageRepository.findBySessionId(sessionId, new PageRequest(page, size));
+            if (response.items().stream().anyMatch(message -> message.role() == SessionMessageRole.USER)) {
+                return false;
+            }
+            if (response.items().isEmpty() || (long) page * size >= response.total()) {
+                return true;
+            }
+            page++;
+        }
+    }
+
+    /** 仅 OpenCode 首轮且页面标题仍是首条消息临时标题时注册原生 title 监听。 */
+    private RunSessionTitleWatchRegistry.TitleWatchToken registerFirstRunTitleWatch(
+            String agentId,
+            boolean firstUserRun,
+            Session session,
+            Run run,
+            String prompt,
+            AgentRuntime runtime,
+            ExecutionNode node,
+            Workspace workspace,
+            String remoteSessionId) {
+        if (sessionTitleWatchService == null || !"opencode".equals(agentId) || !firstUserRun) {
+            return null;
+        }
+        String expectedTitle = OpencodeSessionTitlePolicy.initialPlatformTitle(prompt);
+        if (!expectedTitle.equals(session.title())) {
+            return null;
+        }
+        return sessionTitleWatchService.registerFirstRun(
+                session.sessionId(),
+                run.runId(),
+                runtime,
+                node,
+                workspaceRootPath(workspace),
+                null,
+                remoteSessionId,
+                expectedTitle);
+    }
+
+    /** 兼容 OpenCode 直出和 sync 包装事件的远端 session 字段。 */
+    private Optional<String> eventSessionId(Map<String, Object> payload) {
+        Optional<String> direct = firstMapText(payload, "sessionID", "sessionId");
+        if (direct.isPresent()) {
+            return direct;
+        }
+        return mapValue(payload.get("rawPayload"))
+                .flatMap(rawPayload -> mapValue(rawPayload.get("properties")))
+                .flatMap(properties -> firstMapText(properties, "sessionID", "sessionId"));
+    }
+
     /**
      * 保存用户原始 prompt parts，历史对话可据此恢复本轮关联文件/选区 chip。
      */
@@ -1045,15 +1119,38 @@ public class RunApplicationService {
             String remoteSessionId,
             ExecutionNode node,
             Workspace workspace,
-            String traceId) {
+            String traceId,
+            RunSessionTitleWatchRegistry.TitleWatchToken titleWatchToken) {
         RunEventScopeContext rootScope = RunEventScopeContext.root(run.runId(), remoteSessionId);
-        runtime.streamRunEvents(new AgentStreamEventsCommand(
+        Flux<RunEventDraft> stream = Flux.defer(() -> runtime.streamRunEvents(new AgentStreamEventsCommand(
                         node,
                         run.runId(),
                         remoteSessionId,
                         workspaceRootPath(workspace),
                         null,
-                        traceId))
+                        traceId)));
+        if (titleWatchToken != null) {
+            stream = stream
+                    // 标题等待的意外断线只做一次冻结路由补偿，不允许把已经成功的 Run 回滚为失败。
+                    .onErrorResume(error -> {
+                        if (sessionTitleWatchService == null || !sessionTitleWatchService.isWaitingForTitle(titleWatchToken)) {
+                            return Flux.error(error);
+                        }
+                        return Flux.fromStream(sessionTitleWatchService
+                                .compensateAfterTitleWaitDisconnect(titleWatchToken, traceId)
+                                .stream());
+                    })
+                    // SSE 正常结束但标题仍在后台生成时，以同一不可变 token 重连；取消后状态已变更，不会重连。
+                    .repeatWhen(completions -> completions
+                            .delayElements(TITLE_WAIT_RECONNECT_DELAY)
+                            .takeWhile(ignored -> sessionTitleWatchService != null
+                                    && sessionTitleWatchService.isWaitingForTitle(titleWatchToken)))
+                    .takeUntilOther(titleWatchToken.cancellationSignal());
+        }
+        stream
+                .filter(draft -> acceptsTitleWatchEvent(titleWatchToken, draft))
+                // title agent 完成消息不是平台对话正文；在 scope router 前读取最终 session 标题并转换为 root session.updated。
+                .concatMap(draft -> titleCompletionEvent(titleWatchToken, draft))
                 .concatMap(draft -> Mono.fromCallable(() -> runSessionScopeRouter.route(rootScope, draft))
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(Flux::fromIterable)
@@ -1066,8 +1163,8 @@ public class RunApplicationService {
                                     error);
                             return Flux.empty();
                         }))
-                // opencode event SSE 是长连接；本 Run 收到首个终态后结束订阅，避免同一远端会话的下一轮消息串入旧 Run。
-                .takeUntil(draft -> draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED)
+                // 成功 root Run 会转入 TITLE_WAIT，直至原生标题或主动取消；失败仍按既有规则立即结束订阅。
+                .takeUntil(draft -> shouldCloseAgentEventStream(titleWatchToken, draft))
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
                 .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(agentId, run, workspace, draft))
                         .subscribeOn(Schedulers.boundedElastic())
@@ -1087,11 +1184,51 @@ public class RunApplicationService {
                 });
     }
 
+    /** TITLE_WAIT 只放行同一 root session 的 session.updated 或精确匹配的 title agent 完成消息。 */
+    private boolean acceptsTitleWatchEvent(
+            RunSessionTitleWatchRegistry.TitleWatchToken token,
+            RunEventDraft draft) {
+        if (token == null || token.state() == RunSessionTitleWatchRegistry.State.ACTIVE) {
+            return true;
+        }
+        if (draft.type() == RunEventType.SESSION_UPDATED) {
+            return eventSessionId(draft.payload())
+                    .map(token.remoteSessionId()::equals)
+                    .orElse(false);
+        }
+        return sessionTitleWatchService != null && sessionTitleWatchService.isCompletedTitleAgentMessage(token, draft);
+    }
+
+    private Mono<RunEventDraft> titleCompletionEvent(
+            RunSessionTitleWatchRegistry.TitleWatchToken token,
+            RunEventDraft draft) {
+        if (sessionTitleWatchService == null || !sessionTitleWatchService.isCompletedTitleAgentMessage(token, draft)) {
+            return Mono.just(draft);
+        }
+        return Mono.justOrEmpty(sessionTitleWatchService.completeTitleAgentMessage(token, draft));
+    }
+
+    /** root 成功后切换到 TITLE_WAIT；其他终态继续结束当前远端事件流。 */
+    private boolean shouldCloseAgentEventStream(
+            RunSessionTitleWatchRegistry.TitleWatchToken token,
+            RunEventDraft draft) {
+        if (draft.type() == RunEventType.RUN_SUCCEEDED
+                && token != null
+                && sessionTitleWatchService != null
+                && sessionTitleWatchService.enterTitleWait(token)) {
+            return false;
+        }
+        return draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED;
+    }
+
     /**
      * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
     private void appendStreamEvent(String agentId, Run originalRun, Workspace workspace, RunEventDraft draft) {
         RunEventDraft eventDraft = synchronizeRootSessionTitle(originalRun, draft);
+        if (eventDraft.type() == RunEventType.RUN_SUCCEEDED && isTitleWatchPending(originalRun.runId())) {
+            eventDraft = withPendingPlatformSessionTitle(eventDraft);
+        }
         recordRuntimeActivity(eventDraft);
         if (eventDraft.type() == RunEventType.RUN_SUCCEEDED || eventDraft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
@@ -1103,9 +1240,6 @@ public class RunApplicationService {
             Run saved = runRepository.save(terminal);
             runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft));
             snapshotService.persistRunSnapshot(agentId, saved, eventDraft.traceId());
-            if (eventDraft.type() == RunEventType.RUN_SUCCEEDED && sessionTitleFallbackService != null) {
-                sessionTitleFallbackService.schedule(agentId, saved);
-            }
             return;
         }
         if (eventDraft.type() == RunEventType.MESSAGE_PART_UPDATED) {
@@ -1122,6 +1256,9 @@ public class RunApplicationService {
      * 将 OpenCode 内置 title agent 发出的 root session.updated 标题回写到平台会话。
      */
     private RunEventDraft synchronizeRootSessionTitle(Run originalRun, RunEventDraft draft) {
+        if (sessionTitleWatchService != null) {
+            return sessionTitleWatchService.synchronizeNativeTitle(draft);
+        }
         if (draft.type() != RunEventType.SESSION_UPDATED) {
             return draft;
         }
@@ -1174,6 +1311,27 @@ public class RunApplicationService {
                 draft.occurredAt(),
                 payload,
                 draft.scopeContext());
+    }
+
+    /** root 成功但原生 title 尚未到达时，通知前端继续消费同一 Run SSE。 */
+    private RunEventDraft withPendingPlatformSessionTitle(RunEventDraft draft) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>(draft.payload());
+        payload.put("platformSessionTitlePending", true);
+        return new RunEventDraft(
+                draft.runId(),
+                draft.type(),
+                draft.traceId(),
+                draft.occurredAt(),
+                payload,
+                draft.scopeContext());
+    }
+
+    private boolean isTitleWatchPending(RunId runId) {
+        return sessionTitleWatchService != null
+                && sessionTitleWatchService.tokenForRun(runId)
+                        .map(token -> token.state() == RunSessionTitleWatchRegistry.State.TITLE_WAIT
+                                || token.state() == RunSessionTitleWatchRegistry.State.TITLE_READING)
+                        .orElse(false);
     }
 
     /**
