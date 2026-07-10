@@ -58,7 +58,7 @@
 | `session.status` | session busy/idle/status 更新。 |
 | `session.error` | session 错误事件；root session error 额外派生 `run.failed`，child error 不改变 Run 终态。 |
 | `session.created` | opencode session 创建事件，payload 可携带 `parentID`。 |
-| `session.updated` | opencode session 更新事件。 |
+| `session.updated` | opencode session 更新事件；root session 的有效标题会同步到对应平台 Session。 |
 | `session.deleted` | opencode session 删除事件。 |
 | `session.child.discovered` | 平台发现 child session 并纳入当前 Run scope。 |
 | `session.scope.updated` | 当前 Run session scope 更新。 |
@@ -257,6 +257,16 @@ retry 字段：
 - 等待 retry 时前端运行态仍视为运行中，不出队 busy follow-up，不关闭 RunEvent SSE，也不显示失败卡。
 - 前端按固定 60 秒倒计时展示每次 retry；最多等待 3 次。第 1/2 次倒计时结束后可 best-effort 取消当前等待 Run，并用最近一次 Run 草稿自动新建 Run；第 3 次倒计时结束前若收到后续消息、非 retry 状态或 `run.*` 终态，以后续事件为准；若倒计时结束后仍没有新状态，前端本地把对话收敛为失败并展示最近一次 retry message。
 - 后端 `run.succeeded/run.failed/run.cancelled` 仍是持久 Run 终态事实源；前端 retry 失败兜底只用于避免浏览器一直停留在运行中。
+
+## `session.updated`
+
+`session.updated` 是既有的 opencode session 更新 RunEvent。runtime 仅在事件已被 `RunSessionScopeRouter` 确认为当前 Run 的 root session、且远端 root session ID 与对应平台 Session 绑定一致时，提取有效标题并回写该平台 Session。标题优先读取 `payload.info.title`；为兼容 OpenCode raw/sync 包装，也读取 `payload.rawPayload.properties.info.title`。标题去除首尾空白后为空时不回写。
+
+child session、未知归属事件、远端 root ID 与平台绑定不一致的事件，以及空标题都不得改变平台 Session 标题。标题回写属于展示增强：仓储持久化失败只记录告警，不得阻断原始 `session.updated` RunEvent 的既有持久化或 SSE 发布。
+
+前端按既有 wire name `session.updated` 订阅。只有该事件所属的订阅 Run 绑定的平台 Session 仍是当前会话，且事件不是 child session、标题有效时，才更新当前会话及已加载历史会话中的标题，并失效 sessions cache；切换历史会话后到达的旧订阅事件不得覆盖新当前会话标题。
+
+兼容性说明：本行为不新增 API、DTO、事件 wire name、数据库/Flyway migration 或 SDK 变更。旧客户端可以忽略这个既有事件；不识别标题同步语义时仍保持原有标题展示。
 
 ## SSE 续传
 
