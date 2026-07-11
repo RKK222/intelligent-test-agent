@@ -28,7 +28,7 @@ class TerminalProcessFactoryTest {
     @EnabledOnOs({OS.LINUX, OS.MAC})
     void startedShellReadsCommandsFromStandardInput() {
         TerminalProcessSession session = new TerminalProcessFactory(16 * 1024, 1024 * 1024)
-                .start(ticket("/bin/zsh"));
+                .start(ticket("/bin/sh"));
 
         session.input("printf 'terminal-factory-marker\\n'\nexit\n").block(Duration.ofSeconds(2));
         String output = session.output()
