@@ -24,6 +24,7 @@ export type PartUiContract = {
   semantic: string;
   interaction: "copy" | "expand" | "open-diff" | "subagent-navigation" | "none";
   interactionLocator?: string;
+  interactionRequirement: "always" | "child-mapping" | "diff-available" | "never";
   mustBeVisible: true;
   forbiddenLocator: ".oc-unknown-part";
 };
@@ -31,6 +32,7 @@ export type PartUiContract = {
 export type PartSpec = {
   kind: PartKind;
   requiredFields: readonly string[];
+  projectionFields: readonly string[];
   ui: { current: PartUiContract; history: PartUiContract };
 };
 
@@ -41,26 +43,28 @@ const common = ["id", "sessionID", "messageID", "type"] as const;
  * 元素必须可见；`.oc-unknown-part` 即使存在于 DOM 也不能算通过。
  */
 export const PART_SPECS: readonly PartSpec[] = [
-  spec("text", ["text"], [".oc-text-part"], "最终文本可见", "copy", "button[aria-label='复制']"),
-  spec("subtask", ["prompt", "description", "agent"], [".oc-subagent-card", "[data-part-type='subtask']"], "子任务 description 与 agent 可见", "subagent-navigation", ".oc-subagent-card.is-clickable"),
-  spec("reasoning", ["text", "time.start"], [".oc-reasoning-part"], "思考状态可展开且正文可见", "expand", ".oc-reasoning-part .oc-disclosure__trigger"),
-  spec("file", ["mime", "url"], [".oc-file-part .oc-file-path", ".oc-file-part"], "文件名或路径可见", "none"),
-  spec("tool", ["callID", "tool", "state.status", "state.input"], ["[data-testid='oc-tool-group']", ".oc-tool"], "工具名称、状态与输出可展开", "expand", "[data-testid='oc-tool-group'] .oc-tool-group__trigger"),
-  spec("step-start", [], [".oc-step-start-marker", "[data-part-type='step-start']"], "步骤边界以低噪可见标记呈现", "none"),
-  spec("step-finish", ["reason", "cost", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], [".oc-step-finish-marker", "[data-part-type='step-finish']"], "完成原因与 token 摘要可见", "none"),
-  spec("snapshot", ["snapshot"], [".oc-snapshot-part", "[data-part-type='snapshot']"], "snapshot 标记可见", "none"),
-  spec("patch", ["hash", "files"], [".oc-patch-part", "[data-part-type='patch']"], "hash 与文件摘要可见", "open-diff", ".oc-patch-part button"),
-  spec("agent", ["name"], [".oc-agent-part", "[data-part-type='agent']"], "Agent 名称可见", "none"),
-  spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], [".oc-retry-row"], "重试次数与错误可见", "none"),
-  spec("compaction", ["auto"], [".oc-compaction-part", "[data-part-type='compaction']"], "上下文压缩标记可见", "none")
+  spec("text", ["text"], ["text", "synthetic", "ignored", "time.start", "time.end", "metadata"], [".oc-text-part"], "最终文本可见", "copy", "always", "button[aria-label='复制']"),
+  spec("subtask", ["prompt", "description", "agent"], ["prompt", "description", "agent", "model.providerID", "model.modelID", "command"], [".oc-subagent-card", "[data-part-type='subtask']"], "子任务 description 与 agent 可见", "subagent-navigation", "child-mapping", ".oc-subagent-card.is-clickable"),
+  spec("reasoning", ["text", "time.start"], ["text", "metadata", "time.start", "time.end"], [".oc-reasoning-part"], "思考状态可展开且正文可见", "expand", "always", ".oc-reasoning-part .oc-disclosure__trigger"),
+  spec("file", ["mime", "url"], ["mime", "filename", "url", "source.type", "source.text.value", "source.text.start", "source.text.end", "source.path", "source.range.start.line", "source.range.start.character", "source.range.end.line", "source.range.end.character", "source.name", "source.kind", "source.clientName", "source.uri"], [".oc-file-part .oc-file-path", ".oc-file-part"], "文件名或路径可见", "none", "never"),
+  spec("tool", ["callID", "tool", "state.status", "state.input"], ["callID", "tool", "state.status", "state.input", "state.raw", "state.title", "state.output", "state.error", "state.metadata", "state.time.start", "state.time.end", "state.time.compacted", "state.attachments", "metadata"], ["[data-testid='oc-tool-group']", ".oc-tool"], "工具名称、状态与输出可展开", "expand", "always", "[data-testid='oc-tool-group'] .oc-tool-group__trigger"),
+  spec("step-start", [], ["snapshot"], [".oc-step-start-marker", "[data-part-type='step-start']"], "步骤边界以低噪可见标记呈现", "none", "never"),
+  spec("step-finish", ["reason", "cost", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], ["reason", "snapshot", "cost", "tokens.total", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], [".oc-step-finish-marker", "[data-part-type='step-finish']"], "完成原因与 token 摘要可见", "none", "never"),
+  spec("snapshot", ["snapshot"], ["snapshot"], [".oc-snapshot-part", "[data-part-type='snapshot']"], "snapshot 标记可见", "none", "never"),
+  spec("patch", ["hash", "files"], ["hash", "files"], [".oc-patch-part", "[data-part-type='patch']"], "hash 与文件摘要可见", "open-diff", "diff-available", ".oc-patch-part button"),
+  spec("agent", ["name"], ["name", "source.value", "source.start", "source.end"], [".oc-agent-part", "[data-part-type='agent']"], "Agent 名称可见", "none", "never"),
+  spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], ["attempt", "error.name", "error.data.message", "error.data.statusCode", "error.data.isRetryable", "error.data.responseHeaders", "error.data.responseBody", "error.data.metadata", "time.created"], [".oc-retry-row"], "重试次数与错误可见", "none", "never"),
+  spec("compaction", ["auto"], ["auto", "overflow", "tail_start_id"], [".oc-compaction-part", "[data-part-type='compaction']"], "上下文压缩标记可见", "none", "never")
 ];
 
 function spec(
   kind: PartKind,
-  fields: readonly string[],
+  requiredFields: readonly string[],
+  projectionFields: readonly string[],
   locators: readonly string[],
   semantic: string,
   interaction: PartUiContract["interaction"],
+  interactionRequirement: PartUiContract["interactionRequirement"],
   interactionLocator?: string
 ): PartSpec {
   const contract: PartUiContract = {
@@ -68,10 +72,27 @@ function spec(
     semantic,
     interaction,
     interactionLocator,
+    interactionRequirement,
     mustBeVisible: true,
     forbiddenLocator: ".oc-unknown-part"
   };
-  return { kind, requiredFields: [...common, ...fields], ui: { current: contract, history: { ...contract } } };
+  return {
+    kind,
+    requiredFields: [...common, ...requiredFields],
+    projectionFields: [...common, ...projectionFields],
+    ui: { current: contract, history: { ...contract } }
+  };
+}
+
+/** 根据真实资源上下文判定条件交互；缺 child/diff 时明确记为 N/A，而不是伪造失败。 */
+export function interactionExpectation(
+  contract: PartUiContract,
+  context: { childMapping?: boolean; diffAvailable?: boolean }
+): "required" | "n/a" {
+  if (contract.interactionRequirement === "always") return "required";
+  if (contract.interactionRequirement === "child-mapping") return context.childMapping ? "required" : "n/a";
+  if (contract.interactionRequirement === "diff-available") return context.diffAvailable ? "required" : "n/a";
+  return "n/a";
 }
 
 /** 从 OpenCode `/session/{id}/message` 的 envelope 数组中按原生 part id 定位。 */
@@ -123,13 +144,47 @@ export function selectPartFields(kind: PartKind, part: unknown): JsonRecord {
   const partType = source.type;
   if (partType !== kind) throw new Error(`${kind} part type mismatch: ${String(partType)}`);
   const requiredFields = getSpec(kind).requiredFields;
+  validateVariant(kind, source);
   const result: JsonRecord = {};
   for (const field of requiredFields) {
     const value = readPath(source, field);
     if (value === undefined || value === null) throw new Error(`${kind} part missing required field ${field}`);
     writePath(result, field, value);
   }
+  for (const field of getSpec(kind).projectionFields) {
+    const value = readPath(source, field);
+    if (value !== undefined) writePath(result, field, value);
+  }
   return result;
+}
+
+function validateVariant(kind: PartKind, source: JsonRecord): void {
+  if (kind === "text" && source.time !== undefined) requirePaths(kind, source, ["time.start"]);
+  if (kind === "subtask" && source.model !== undefined) requirePaths(kind, source, ["model.providerID", "model.modelID"]);
+  if (kind === "file" && source.source !== undefined) {
+    requirePaths(kind, source, ["source.type", "source.text.value", "source.text.start", "source.text.end"]);
+    const sourceType = readPath(source, "source.type");
+    if (sourceType === "file") requirePaths(kind, source, ["source.path"]);
+    else if (sourceType === "symbol") requirePaths(kind, source, ["source.path", "source.range.start.line", "source.range.start.character", "source.range.end.line", "source.range.end.character", "source.name", "source.kind"]);
+    else if (sourceType === "resource") requirePaths(kind, source, ["source.clientName", "source.uri"]);
+    else throw new Error(`${kind} part has unknown source.type ${String(sourceType)}`);
+  }
+  if (kind === "tool") {
+    const status = readPath(source, "state.status");
+    if (status === "pending") requirePaths(kind, source, ["state.raw"]);
+    else if (status === "running") requirePaths(kind, source, ["state.time.start"]);
+    else if (status === "completed") requirePaths(kind, source, ["state.output", "state.title", "state.metadata", "state.time.start", "state.time.end"]);
+    else if (status === "error") requirePaths(kind, source, ["state.error", "state.time.start", "state.time.end"]);
+    else throw new Error(`${kind} part has unknown state.status ${String(status)}`);
+  }
+  if (kind === "agent" && source.source !== undefined) requirePaths(kind, source, ["source.value", "source.start", "source.end"]);
+}
+
+function requirePaths(kind: PartKind, source: JsonRecord, fields: readonly string[]): void {
+  for (const field of fields) {
+    const value = readPath(source, field);
+    if (value === undefined || value === null) throw new Error(`${kind} part missing required field ${field}`);
+  }
 }
 
 /** 分别验证 raw→平台 messages 与 raw→平台 tree，禁止一个来源替另一个来源兜底。 */
