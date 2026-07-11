@@ -16,6 +16,7 @@ import ReasoningPartView from "../parts/ReasoningPartView.vue";
 import ToolPartView from "../parts/ToolPartView.vue";
 import FilePartView from "../parts/FilePartView.vue";
 import UnknownPartView from "../parts/UnknownPartView.vue";
+import CompactionMarker from "../../../CompactionMarker.vue";
 
 defineProps<AssistantPartRowProps>();
 const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
@@ -41,6 +42,7 @@ const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
     <FilePartView v-else-if="part.type === 'file'" :part="part" />
+    <CompactionMarker v-else-if="part.type === 'compaction'" :part="part" />
     <UnknownPartView v-else :part="part" />
   </div>
 </template>

@@ -3072,6 +3072,22 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("需要分析");
   });
 
+  it("renders the native compaction Part as a low-noise timeline separator", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [{
+          id: "a-compaction", messageId: "a-compaction", role: "assistant", text: "",
+          parts: [{ partId: "prt-compaction", type: "compaction", auto: true, overflow: false, tailStartId: "msg-tail" }],
+          createdAt: "2026-07-11T09:00:00.000Z"
+        }],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    await showFullTimeline(wrapper);
+    expect(wrapper.get('[data-testid="compaction-part-prt-compaction"]').text()).toContain("上下文已压缩");
+  });
+
   it("shows the latest reasoning as running until the whole response finishes", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
