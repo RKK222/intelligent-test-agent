@@ -29,6 +29,7 @@ let monacoLib: typeof monaco | null = null;
 let currentModel: monaco.editor.ITextModel | null = null;
 let incomingModel: monaco.editor.ITextModel | null = null;
 let resultModel: monaco.editor.ITextModel | null = null;
+let disposed = false;
 
 const resultDeleted = ref(false);
 const resultTouched = ref(false);
@@ -69,8 +70,17 @@ function editorOptions(readOnly: boolean): monaco.editor.IStandaloneEditorConstr
 
 async function initializeEditors() {
   if (!currentEl.value || !incomingEl.value || !resultEl.value || currentEditor.value) return;
-  const module = await import("./monaco-env");
-  monacoLib = await module.loadMonaco();
+  try {
+    const module = await import("./monaco-env");
+    if (disposed || !currentEl.value || !incomingEl.value || !resultEl.value) return;
+    const loadedMonaco = await module.loadMonaco();
+    if (disposed || !currentEl.value || !incomingEl.value || !resultEl.value) return;
+    monacoLib = loadedMonaco;
+  } catch (error) {
+    // 组件卸载会使尚未完成的动态 chunk 加载失去消费者；此时只需停止初始化。
+    if (disposed) return;
+    throw error;
+  }
   monacoLib.editor.defineTheme("ta-merge-light", {
     base: "vs",
     inherit: true,
@@ -168,7 +178,10 @@ watch(
   { immediate: true }
 );
 
-onBeforeUnmount(disposeEditors);
+onBeforeUnmount(() => {
+  disposed = true;
+  disposeEditors();
+});
 </script>
 
 <template>

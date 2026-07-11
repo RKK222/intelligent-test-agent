@@ -9,9 +9,14 @@ const models = vi.hoisted(() => [] as Array<{
   onDidChangeContent: (listener: Listener) => { dispose: () => void };
   dispose: () => void;
 }>);
+const editorCreates = vi.hoisted(() => vi.fn());
+const monacoLoad = vi.hoisted(() => ({
+  gate: null as Promise<void> | null,
+  calls: vi.fn()
+}));
 
-vi.mock("../src/monaco-env", () => ({
-  loadMonaco: async () => ({
+vi.mock("../src/monaco-env", () => {
+  const monaco = {
     editor: {
       defineTheme: () => {},
       setModelLanguage: () => {},
@@ -33,13 +38,20 @@ vi.mock("../src/monaco-env", () => ({
         models.push(model);
         return model;
       },
-      create: () => ({
+      create: editorCreates.mockImplementation(() => ({
         setModel: () => {},
         dispose: () => {}
-      })
+      }))
     }
-  })
-}));
+  };
+  return {
+    loadMonaco: async () => {
+      monacoLoad.calls();
+      if (monacoLoad.gate) await monacoLoad.gate;
+      return monaco;
+    }
+  };
+});
 
 import MergeConflictEditor from "../src/MergeConflictEditor.vue";
 
@@ -55,6 +67,9 @@ const conflict = {
 describe("MergeConflictEditor", () => {
   beforeEach(() => {
     models.length = 0;
+    editorCreates.mockClear();
+    monacoLoad.calls.mockClear();
+    monacoLoad.gate = null;
   });
 
   it.each([
@@ -73,5 +88,21 @@ describe("MergeConflictEditor", () => {
       resolution: "MANUAL",
       content: expected
     }]]);
+  });
+
+  it("does not finish asynchronous Monaco initialization after unmount", async () => {
+    let releaseLoad!: () => void;
+    monacoLoad.gate = new Promise<void>((resolve) => {
+      releaseLoad = resolve;
+    });
+    const view = render(MergeConflictEditor, { props: { conflict } });
+    await waitFor(() => expect(monacoLoad.calls).toHaveBeenCalledOnce());
+
+    view.unmount();
+    releaseLoad();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(editorCreates).not.toHaveBeenCalled();
   });
 });
