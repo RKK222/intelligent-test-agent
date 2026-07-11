@@ -2,6 +2,7 @@ import { posix as path } from "node:path";
 import { dirname, join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
+import { spawn } from "node:child_process";
 
 export const PART_KINDS = [
   "text",
@@ -38,6 +39,35 @@ export type NaturalAttemptOptions = {
   skipReason?: string;
   sleep?: (delayMs: number) => Promise<void>;
   now?: () => number;
+};
+
+export type NativeFixtureManifest = {
+  marker: string;
+  kind: PartKind;
+  remoteSessionId: string;
+  messageId: string;
+  partId: string;
+  directory: string;
+  title: string;
+};
+
+export type NativePartFixture = {
+  manifest: NativeFixtureManifest;
+  session: { id: string; projectId: string; slug: string; directory: string; title: string; version: string; timeCreated: number; timeUpdated: number };
+  message: { id: string; sessionId: string; timeCreated: number; timeUpdated: number; data: JsonRecord };
+  part: JsonRecord;
+};
+
+export type NativeFixtureControllerOptions = {
+  executeSql: (sql: string) => Promise<void>;
+  probe: (manifest: NativeFixtureManifest) => Promise<boolean>;
+  remove: (manifest: NativeFixtureManifest) => Promise<void>;
+  persistManifest: (manifest: NativeFixtureManifest) => Promise<void>;
+  clearManifest: (manifest: NativeFixtureManifest) => Promise<void>;
+  sleep?: (delayMs: number) => Promise<void>;
+  now?: () => number;
+  probeTimeoutMs?: number;
+  probeIntervalMs?: number;
 };
 
 export type PartUiContract = {
@@ -79,6 +109,206 @@ export const PART_SPECS: readonly PartSpec[] = [
   spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], ["attempt", "error.name", "error.data.message", "error.data.statusCode", "error.data.isRetryable", "error.data.responseHeaders", "error.data.responseBody", "error.data.metadata", "time.created"], "not-rendered", "原生 assistant timeline 无 RetryPart renderer", "none", "never"),
   spec("compaction", ["auto"], ["auto", "overflow", "tail_start_id"], "visible", "上下文压缩显示为原生分隔线", "none", "never")
 ];
+
+/**
+ * 构造仅属于本轮测试的 OpenCode 原生记录。数据库 JSON 与 OpenCode hydrate 规则一致：
+ * message/part 的主键和外键放表列，data 只保存 schema 自身字段。
+ */
+export function buildNativePartFixture(input: {
+  kind: PartKind;
+  marker: string;
+  remoteSessionId: string;
+  projectId: string;
+  directory: string;
+  title: string;
+  now?: number;
+}): NativePartFixture {
+  assertFixtureOwnership(input);
+  const now = input.now ?? Date.now();
+  const suffix = input.kind.replaceAll("-", "_");
+  const messageId = `msg_${input.marker}_${suffix}`;
+  const partId = `prt_${input.marker}_${suffix}`;
+  const parentId = `msg_${input.marker}_parent`;
+  const base = { id: partId, sessionID: input.remoteSessionId, messageID: messageId, type: input.kind };
+  const part = nativePartPayload(input.kind, base, input.marker, now);
+  // 该 assistant 已显式完成，避免测试 fixture 被 OpenCode 当作待续写工作。
+  const messageData: JsonRecord = {
+    role: "assistant",
+    time: { created: now, completed: now },
+    parentID: parentId,
+    modelID: "e2e-fixture-model",
+    providerID: "e2e-fixture-provider",
+    mode: "build",
+    agent: "build",
+    path: { cwd: input.directory, root: input.directory },
+    cost: 0,
+    tokens: { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    finish: "stop"
+  };
+  return {
+    manifest: { marker: input.marker, kind: input.kind, remoteSessionId: input.remoteSessionId, messageId, partId, directory: input.directory, title: input.title },
+    session: {
+      id: input.remoteSessionId,
+      projectId: input.projectId,
+      slug: input.marker,
+      directory: input.directory,
+      title: input.title,
+      version: "1.17.7",
+      timeCreated: now,
+      timeUpdated: now
+    },
+    message: { id: messageId, sessionId: input.remoteSessionId, timeCreated: now, timeUpdated: now, data: messageData },
+    part
+  };
+}
+
+/** 生成由 sqlite3 CLI 原子执行的脚本；任一句失败时 CLI 会在连接关闭时回滚未提交事务。 */
+export function buildNativeFixtureSql(fixture: NativePartFixture): string {
+  assertFixtureManifest(fixture);
+  const partData = { ...fixture.part };
+  delete partData.id;
+  delete partData.sessionID;
+  delete partData.messageID;
+  return [
+    ".timeout 5000",
+    "PRAGMA foreign_keys=ON;",
+    "BEGIN IMMEDIATE;",
+    `INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES (${sql(fixture.session.id)}, ${sql(fixture.session.projectId)}, ${sql(fixture.session.slug)}, ${sql(fixture.session.directory)}, ${sql(fixture.session.title)}, ${sql(fixture.session.version)}, ${fixture.session.timeCreated}, ${fixture.session.timeUpdated});`,
+    `INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (${sql(fixture.message.id)}, ${sql(fixture.message.sessionId)}, ${fixture.message.timeCreated}, ${fixture.message.timeUpdated}, ${sql(JSON.stringify(fixture.message.data))});`,
+    `INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (${sql(fixture.manifest.partId)}, ${sql(fixture.manifest.messageId)}, ${sql(fixture.manifest.remoteSessionId)}, ${fixture.message.timeCreated}, ${fixture.message.timeUpdated}, ${sql(JSON.stringify(partData))});`,
+    "COMMIT;"
+  ].join("\n");
+}
+
+/** 通过 argv 调用 sqlite3，不经过 shell；SQL 中所有动态文本均由 buildNativeFixtureSql 转义。 */
+export async function executeNativeFixtureSql(databasePath: string, fixture: NativePartFixture): Promise<void> {
+  if (!databasePath.endsWith(`${path.sep}opencode${path.sep}opencode.db`)) {
+    throw new Error("native fixture database must be the owned opencode/opencode.db");
+  }
+  // dot-command 作为 argv 会吞掉后续换行 SQL，必须通过 stdin；spawn 仍是无 shell argv 调用。
+  await runSqliteScript(databasePath, buildNativeFixtureSql(fixture));
+}
+
+/** 中断恢复只按 manifest 的唯一主键删除；Session 外键级联会同时清除 message/part。 */
+export function buildNativeFixtureCleanupSql(manifest: NativeFixtureManifest): string {
+  assertFixtureOwnership(manifest);
+  return [
+    ".timeout 5000",
+    "PRAGMA foreign_keys=ON;",
+    "BEGIN IMMEDIATE;",
+    `DELETE FROM session WHERE id=${sql(manifest.remoteSessionId)} AND title=${sql(manifest.title)} AND directory=${sql(manifest.directory)};`,
+    "COMMIT;"
+  ].join("\n");
+}
+
+/** 对已通过 manager 归属校验的数据库执行 manifest 三重匹配清理。 */
+export async function executeNativeFixtureCleanupSql(databasePath: string, manifest: NativeFixtureManifest): Promise<void> {
+  if (!databasePath.endsWith(`${path.sep}opencode${path.sep}opencode.db`)) {
+    throw new Error("native fixture database must be the owned opencode/opencode.db");
+  }
+  await runSqliteScript(databasePath, buildNativeFixtureCleanupSql(manifest));
+}
+
+/**
+ * 管理 fixture 的所有权移交和中断恢复。manifest 必须先落盘，进程在 SQL 后中断时，
+ * 下一次运行才能依据唯一 ID 执行同一清理程序。
+ */
+export function createNativeFixtureController(options: NativeFixtureControllerOptions) {
+  const sleep = options.sleep ?? ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+  const now = options.now ?? Date.now;
+  const probeTimeoutMs = options.probeTimeoutMs ?? 5_000;
+  const probeIntervalMs = options.probeIntervalMs ?? 100;
+  async function cleanup(manifest: NativeFixtureManifest): Promise<void> {
+    await options.remove(manifest);
+    await options.clearManifest(manifest);
+  }
+  return {
+    async insert(fixture: NativePartFixture): Promise<{ fixture: NativePartFixture; cleanup: () => Promise<void> }> {
+      assertFixtureManifest(fixture);
+      await options.persistManifest(fixture.manifest);
+      try {
+        await options.executeSql(buildNativeFixtureSql(fixture));
+        const deadline = now() + probeTimeoutMs;
+        while (now() <= deadline) {
+          if (await options.probe(fixture.manifest)) {
+            let cleaned = false;
+            return {
+              fixture,
+              cleanup: async () => {
+                if (cleaned) return;
+                await cleanup(fixture.manifest);
+                cleaned = true;
+              }
+            };
+          }
+          await sleep(probeIntervalMs);
+        }
+        throw new Error(`native fixture HTTP probe timed out for ${fixture.manifest.kind}`);
+      } catch (error) {
+        try {
+          await cleanup(fixture.manifest);
+        } catch (cleanupError) {
+          throw new AggregateError([error, cleanupError], "native fixture insertion failed and cleanup also failed");
+        }
+        throw error;
+      }
+    },
+    recover: cleanup
+  };
+}
+
+function nativePartPayload(kind: PartKind, base: JsonRecord, marker: string, now: number): JsonRecord {
+  const variants: Record<PartKind, JsonRecord> = {
+    text: { ...base, text: `NATIVE_TEXT_${marker}`, synthetic: false, ignored: false, time: { start: now, end: now }, metadata: { fixture: marker } },
+    subtask: { ...base, prompt: `NATIVE_SUBTASK_${marker}`, description: "fixture subtask", agent: "build", model: { providerID: "e2e-fixture-provider", modelID: "e2e-fixture-model" }, command: "fixture" },
+    reasoning: { ...base, text: `NATIVE_REASONING_${marker}`, metadata: { fixture: marker }, time: { start: now, end: now } },
+    file: { ...base, mime: "text/plain", filename: `${marker}.txt`, url: `data:text/plain,${marker}`, source: { type: "file", path: `${marker}.txt`, text: { value: `@${marker}.txt`, start: 0, end: marker.length + 5 } } },
+    tool: { ...base, callID: `call_${marker}`, tool: "read", state: { status: "completed", input: { filePath: `${marker}.txt` }, output: marker, title: "Read fixture", metadata: { fixture: marker }, time: { start: now, end: now, compacted: now }, attachments: [] }, metadata: { fixture: marker } },
+    "step-start": { ...base, snapshot: `snapshot-start-${marker}` },
+    "step-finish": { ...base, reason: "stop", snapshot: `snapshot-end-${marker}`, cost: 0, tokens: { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    snapshot: { ...base, snapshot: `snapshot-${marker}` },
+    patch: { ...base, hash: `hash-${marker}`, files: [`${marker}.txt`] },
+    agent: { ...base, name: "build", source: { value: "@build", start: 0, end: 6 } },
+    retry: { ...base, attempt: 1, error: { name: "APIError", data: { message: `retry-${marker}`, statusCode: 429, isRetryable: true, responseHeaders: { "retry-after": "1" }, responseBody: "fixture busy", metadata: { fixture: marker } } }, time: { created: now } },
+    compaction: { ...base, auto: true, overflow: false, tail_start_id: `msg_${marker}_tail` }
+  };
+  return variants[kind];
+}
+
+function assertFixtureOwnership(input: { marker: string; remoteSessionId: string; directory: string; title: string }): void {
+  if (!/^e2e_part_[a-z0-9_]+$/.test(input.marker)) throw new Error("fixture marker is not owned by the E2E namespace");
+  // remote Session ID 由 OpenCode 生成时不携带 marker；只校验官方前缀，所有权由独立目录段和唯一标题绑定。
+  const titleOwnsMarker = input.title.includes(input.marker) || input.title.includes(input.marker.replaceAll("_", "-"));
+  if (!/^ses[A-Za-z0-9_-]+$/.test(input.remoteSessionId) || !input.directory.split(/[\\/]/).includes(input.marker) || !titleOwnsMarker) {
+    throw new Error("fixture manifest resources do not share the unique marker");
+  }
+}
+
+function assertFixtureManifest(fixture: NativePartFixture): void {
+  assertFixtureOwnership({ marker: fixture.manifest.marker, remoteSessionId: fixture.manifest.remoteSessionId, directory: fixture.manifest.directory, title: fixture.manifest.title });
+  if (fixture.session.id !== fixture.manifest.remoteSessionId || fixture.message.id !== fixture.manifest.messageId || fixture.part.id !== fixture.manifest.partId) {
+    throw new Error("fixture records do not match manifest ownership");
+  }
+}
+
+function sql(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function runSqliteScript(databasePath: string, script: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("sqlite3", ["-bail", databasePath], { stdio: ["pipe", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`sqlite3 fixture transaction failed (${code ?? "signal"}): ${stderr.trim()}`));
+    });
+    child.stdin.end(script);
+  });
+}
 
 function partLocator(kind: PartKind): string {
   return `[data-part-id='{partId}'][data-part-type='${kind}']`;
