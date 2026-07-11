@@ -42,17 +42,27 @@ function setViewport(width: number, height: number) {
   Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
 }
 
-// 原生 Timeline 的细节交互属于“完整过程”模式；专注阅读默认隐藏这些行。
+// 原生 Timeline 始终完整展示；保留此 helper 只为让相关断言等待一次 Vue 更新。
 async function showFullTimeline(wrapper: any) {
-  const toggle = wrapper.get('[data-testid="chat-timeline-mode-toggle"]');
-  if (toggle.attributes("aria-label") === "完整过程") {
-    await toggle.trigger("click");
-  }
+  await wrapper.vm.$nextTick();
 }
 
 describe("FigmaChatPanel", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("uses the native timeline without a mode toggle or activity overlay", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+      } as any,
+    });
+
+    expect(wrapper.find('[data-testid="chat-timeline-mode-toggle"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="chat-activity-trigger"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
   });
 
   it("keeps a READY card inline without a saved drag and only uses floating mode after a drag", async () => {
@@ -597,13 +607,10 @@ describe("FigmaChatPanel", () => {
       const cardElement = card.element as HTMLElement;
       expect(cardElement.style.left).toBe("700px");
       expect(cardElement.style.top).toBe("600px");
-      const processCardObserver = resizeObservers.find((observer) =>
-        observer.observe.mock.calls.some(([target]) => target === cardElement)
-      );
-      expect(processCardObserver).toBeDefined();
+      expect(resizeObservers).toHaveLength(1);
 
       cardSize = { width: 300, height: 120 };
-      processCardObserver!.callback([], processCardObserver! as unknown as ResizeObserver);
+      resizeObservers[0].callback([], resizeObservers[0] as unknown as ResizeObserver);
       await nextTick();
 
       expect(cardElement.style.left).toBe("684px");
@@ -1175,7 +1182,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("reply-question")).toEqual([["ques_1", [["预发环境"]]]]);
   });
 
-  it("renders a pending permission and keeps every native reply decision available", async () => {
+  it("renders a pending permission and emits every native permission decision", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -2592,6 +2599,44 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("任务完成");
   });
 
+  it.each([
+    ["SUCCEEDED", "任务完成"],
+    ["FAILED", "任务失败"],
+    ["CANCELLED", "已手动终止"]
+  ])("restores the composer and removes running UI after %s", async (runtimeStatus, terminalLabel) => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: `u-${runtimeStatus}`,
+            messageId: `u-${runtimeStatus}`,
+            role: "user",
+            text: "验证终态恢复",
+            createdAt: "2026-07-11T09:00:00.000Z"
+          }
+        ],
+        running: false,
+        runtimeStatus,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.text()).toContain(terminalLabel);
+    expect(wrapper.find('[aria-label="停止执行"]').exists()).toBe(false);
+    expect(wrapper.find(".figma-chat-running-assistant").exists()).toBe(false);
+    expect(wrapper.find(".oc-working-status").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("思考中...");
+    expect(wrapper.text()).not.toContain("正在工作");
+    expect(wrapper.text()).not.toContain("生成中");
+    expect(wrapper.text()).not.toContain("进行中");
+
+    const textarea = wrapper.get("textarea");
+    expect(textarea.attributes("disabled")).toBeUndefined();
+    await textarea.setValue("继续下一轮");
+    expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
+  });
+
   it("clears the manual stopped marker when a new run starts and succeeds", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -2775,94 +2820,6 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
     expect(wrapper.find(".oc-tool").exists()).toBe(true);
     expect(wrapper.find(".figma-chat-task-panel").exists()).toBe(false);
-  });
-
-  it("keeps every native message type in focused reading and changes presentation only", async () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [
-          {
-            id: "focus-user",
-            messageId: "focus-user",
-            role: "user",
-            text: "帮我检查登录流程",
-            createdAt: "2026-07-10T09:00:00.000Z"
-          },
-          {
-            id: "focus-assistant",
-            messageId: "focus-assistant",
-            role: "assistant",
-            text: "登录流程检查完成。",
-            parts: [
-              { partId: "focus-reasoning", type: "reasoning", text: "先分析现有代码", status: "completed" },
-              { partId: "focus-read", type: "tool", toolName: "read", status: "completed", input: { filePath: "Login.vue" } },
-              { partId: "focus-file", type: "file", path: "Login.vue", name: "Login.vue" },
-              {
-                partId: "focus-bash",
-                type: "tool",
-                toolName: "bash",
-                status: "completed",
-                input: { command: "pnpm test" },
-                output: "passed"
-              },
-              {
-                partId: "focus-task",
-                type: "tool",
-                toolName: "task",
-                status: "completed",
-                input: { description: "检查登录表单" }
-              },
-              { partId: "focus-text", type: "text", text: "登录流程检查完成。", status: "completed" }
-            ],
-            createdAt: "2026-07-10T09:00:01.000Z"
-          }
-        ],
-        subagentsBySessionId: {
-          focus_child: { sessionId: "focus_child", title: "登录表单检查", taskPartId: "focus-task" }
-        },
-        subagentByTaskPartId: { "focus-task": "focus_child" },
-        processStatus: { status: "READY", initializable: false, message: "ready" }
-      } as any,
-      global: { stubs: { MarkdownView: markdownViewStub } }
-    });
-
-    const modeToggle = wrapper.get('[data-testid="chat-timeline-mode-toggle"]');
-    expect(modeToggle.attributes("aria-label")).toBe("完整过程");
-    expect(wrapper.text()).toContain("登录流程检查完成。");
-    expect(wrapper.find(".oc-context-group").exists()).toBe(true);
-    expect(wrapper.find(".oc-reasoning-part").exists()).toBe(true);
-    expect(wrapper.find(".oc-tool").exists()).toBe(true);
-    expect(wrapper.find(".oc-subagent-card").exists()).toBe(true);
-    expect(wrapper.get(".figma-chat-root").classes()).toContain("is-focused-reading");
-
-    await modeToggle.trigger("click");
-
-    expect(wrapper.get('[data-testid="chat-timeline-mode-toggle"]').attributes("aria-label")).toBe("专注阅读");
-    expect(wrapper.get(".figma-chat-root").classes()).not.toContain("is-focused-reading");
-    expect(wrapper.find(".oc-context-group").exists()).toBe(true);
-    expect(wrapper.find(".oc-reasoning-part").exists()).toBe(true);
-    expect(wrapper.find(".oc-subagent-card").exists()).toBe(true);
-  });
-
-  it("keeps the copy action and final-output marker on the last completed assistant text", () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [
-          { id: "final-user", role: "user", text: "给出结论", createdAt: "2026-07-10T09:00:00.000Z" },
-          {
-            id: "final-assistant",
-            role: "assistant",
-            text: "这是最终结论。",
-            parts: [{ partId: "final-text", type: "text", text: "这是最终结论。", status: "completed" }],
-            createdAt: "2026-07-10T09:00:01.000Z"
-          }
-        ]
-      } as any,
-      global: { stubs: { MarkdownView: markdownViewStub } }
-    });
-
-    expect(wrapper.get(".oc-text-part").classes()).toContain("oc-summary");
-    expect(wrapper.get('[aria-label="复制"]')).toBeTruthy();
   });
 
   it("opens a frontend-only attachment dialog from the composer action", async () => {
@@ -3686,187 +3643,5 @@ describe("FigmaChatPanel", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("opens and closes the read-only activity panel without replacing Timeline or moving the question dock", async () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [],
-        currentSessionId: "ses-root",
-        currentRunId: "run-current",
-        currentRunStatus: "RUNNING",
-        todos: [{ id: "todo-1", text: "检查日志", status: "in_progress" }],
-        questions: [{
-          requestId: "ask-1",
-          sessionId: "ses-root",
-          createdAt: "2026-07-10T00:00:00Z",
-          questions: [{ questionId: "q-1", text: "继续吗？", kind: "text" }]
-        }]
-      } as any
-    });
-
-    try {
-      const trigger = wrapper.get('[data-testid="chat-activity-trigger"]');
-      expect(trigger.attributes("aria-expanded")).toBe("false");
-
-      await trigger.trigger("click");
-      expect(wrapper.get('[data-testid="chat-activity-panel"]').isVisible()).toBe(true);
-      expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
-      expect(wrapper.get(".figma-chat-question-dock").isVisible()).toBe(true);
-      expect(wrapper.find('[data-testid="chat-activity-panel"] button.figma-chat-question-submit').exists()).toBe(false);
-
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-      await nextTick();
-      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
-    } finally {
-      wrapper.unmount();
-    }
-  });
-
-  it("uses the chat container width to show a non-modal activity popover at 720px and closes it on outside click or Escape", async () => {
-    const resizeObservers: Array<{ callback: ResizeObserverCallback; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
-    class TestResizeObserver {
-      observe = vi.fn();
-      disconnect = vi.fn();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        resizeObservers.push(this);
-      }
-    }
-    vi.stubGlobal("ResizeObserver", TestResizeObserver);
-    const wrapper = mount(FigmaChatPanel, {
-      attachTo: document.body,
-      props: {
-        messages: [],
-        currentSessionId: "ses-root",
-        currentRunId: "run-current",
-        currentRunStatus: "RUNNING",
-        todos: [{ id: "todo-1", text: "检查日志", status: "in_progress" }],
-      } as any,
-    });
-
-    try {
-      const root = wrapper.get('.figma-chat-root').element;
-      const activityObserver = resizeObservers.find((observer) =>
-        observer.observe.mock.calls.some(([target]) => target === root)
-      )!;
-      activityObserver.callback(
-        [{ target: root, contentRect: { width: 720 } } as ResizeObserverEntry],
-        activityObserver as unknown as ResizeObserver,
-      );
-      await nextTick();
-
-      const trigger = wrapper.get('[data-testid="chat-activity-trigger"]');
-      await trigger.trigger("click");
-      const panel = wrapper.get('[data-testid="chat-activity-panel"]');
-      expect(panel.attributes("role")).toBe("region");
-      expect(panel.attributes("aria-modal")).toBeUndefined();
-      expect(trigger.attributes("aria-controls")).toBe(panel.attributes("id"));
-
-      document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
-      await nextTick();
-      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
-
-      await trigger.trigger("click");
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-      await nextTick();
-      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
-    } finally {
-      wrapper.unmount();
-    }
-  });
-
-  it("uses a focus-trapped modal activity drawer below 720px and restores focus to its trigger", async () => {
-    const resizeObservers: Array<{ callback: ResizeObserverCallback; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
-    class TestResizeObserver {
-      observe = vi.fn();
-      disconnect = vi.fn();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        resizeObservers.push(this);
-      }
-    }
-    vi.stubGlobal("ResizeObserver", TestResizeObserver);
-    const wrapper = mount(FigmaChatPanel, {
-      attachTo: document.body,
-      props: {
-        messages: [],
-        currentSessionId: "ses-root",
-        currentRunId: "run-current",
-        currentRunStatus: "RUNNING",
-        todos: [{ id: "todo-1", text: "检查日志", status: "in_progress" }],
-      } as any,
-    });
-
-    try {
-      const root = wrapper.get('.figma-chat-root').element;
-      const activityObserver = resizeObservers.find((observer) =>
-        observer.observe.mock.calls.some(([target]) => target === root)
-      )!;
-      activityObserver.callback(
-        [{ target: root, contentRect: { width: 719 } } as ResizeObserverEntry],
-        activityObserver as unknown as ResizeObserver,
-      );
-      await nextTick();
-
-      const trigger = wrapper.get('[data-testid="chat-activity-trigger"]');
-      await trigger.trigger("click");
-      await nextTick();
-      const drawer = wrapper.get('[data-testid="chat-activity-panel"]');
-      expect(drawer.attributes("role")).toBe("dialog");
-      expect(drawer.attributes("aria-modal")).toBe("true");
-      expect(document.activeElement).toBe(wrapper.get('[aria-label="关闭本轮活动"]').element);
-
-      const closeButton = wrapper.get('[aria-label="关闭本轮活动"]');
-      await closeButton.trigger("keydown", { key: "Tab" });
-      expect(document.activeElement).toBe(closeButton.element);
-
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-      await nextTick();
-      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
-      expect(document.activeElement).toBe(trigger.element);
-    } finally {
-      wrapper.unmount();
-    }
-  });
-
-  it("does not open the activity drawer while another existing overlay is active", async () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [],
-        currentSessionId: "ses-root",
-        currentRunId: "run-current",
-        currentRunStatus: "RUNNING",
-        todos: [{ id: "todo-1", text: "检查日志", status: "in_progress" }],
-      } as any,
-    });
-
-    try {
-      await wrapper.get('[aria-label="上传附件"]').trigger("click");
-      const trigger = wrapper.get('[data-testid="chat-activity-trigger"]');
-      expect((trigger.element as HTMLButtonElement).disabled).toBe(true);
-      await trigger.trigger("click");
-      expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
-    } finally {
-      wrapper.unmount();
-    }
-  });
-
-  it("keeps dialogs, popovers, and the question dock on the restrained overlay visual system", () => {
-    const componentSource = readFileSync(
-      resolve(process.cwd(), "apps/agent-web/src/components/FigmaChatPanel.vue"),
-      "utf8"
-    );
-
-    expect(componentSource).toContain("/* ---- Restrained overlay visual system ----");
-    expect(componentSource).toContain("--figma-chat-overlay-radius: 10px;");
-    expect(componentSource).toContain("var(--figma-chat-overlay-border)");
-    expect(componentSource).toContain(".figma-chat-question-dock,");
-    expect(componentSource).toContain(".figma-chat-attachment-dialog,");
-    expect(componentSource).toContain(".figma-chat-agent-dropdown,");
-    expect(componentSource).toContain(":global(.figma-chat-feedback-dialog)");
-    expect(componentSource).toContain("不隐藏或重建任何 OpenCode message part");
-    expect(componentSource).toContain(":deep(.oc-text-part__copy)");
-    expect(componentSource).toContain(":deep(.oc-text-part.oc-summary)");
   });
 });

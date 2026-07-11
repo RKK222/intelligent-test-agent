@@ -8,6 +8,9 @@ import com.icbc.testagent.agent.runtime.AgentCancelCommand;
 import com.icbc.testagent.agent.runtime.AgentPromptPart;
 import com.icbc.testagent.agent.runtime.AgentRuntime;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.agent.runtime.AgentSessionMessage;
+import com.icbc.testagent.agent.runtime.AgentSessionMessagesCommand;
+import com.icbc.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.icbc.testagent.agent.runtime.AgentStartRunCommand;
 import com.icbc.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
@@ -80,6 +83,7 @@ public class RunApplicationService {
     private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
     private static final Duration TRANSPORT_ERROR_TERMINAL_GRACE = Duration.ofMillis(300);
     private static final Duration TITLE_WAIT_RECONNECT_DELAY = Duration.ofSeconds(1);
+    private static final int INTERACTION_RECONCILE_ATTEMPTS = 30;
     private static final Set<RunEventType> OUTPUT_ACTIVITY_TYPES = Set.of(
             RunEventType.ASSISTANT_MESSAGE_DELTA,
             RunEventType.MESSAGE_UPDATED,
@@ -885,6 +889,145 @@ public class RunApplicationService {
     public Optional<Run> findActiveRun(SessionId sessionId) {
         findSession(sessionId);
         return runRepository.findLatestActiveBySessionId(sessionId);
+    }
+
+    /**
+     * question/permission 回复成功后兜底观察远端最终 assistant 消息。
+     * 部分 OpenCode 版本不会把 ask 恢复后的 message/idle 推送到既有事件订阅；这里只在最新消息明确
+     * {@code finish=stop} 且平台 Run 仍非终态时补写成功事实，避免仅凭 HTTP 回复成功误判 Run 完成。
+     */
+    public void reconcileAfterInteractionReply(SessionId sessionId, String agentId, String traceId) {
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        Optional<Run> activeRun = runRepository.findLatestActiveBySessionId(sessionId);
+        if (activeRun.isEmpty()) {
+            return;
+        }
+        Session session = findSession(sessionId);
+        Optional<AgentSessionBinding> binding = runtimeTargetResolver.findAgentBinding(resolvedAgentId, session, traceId);
+        if (binding.isEmpty()) {
+            return;
+        }
+        Optional<ExecutionNode> node = executionNodeRepository.findById(binding.get().executionNodeId());
+        if (node.isEmpty()) {
+            return;
+        }
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+        Mono.delay(TITLE_WAIT_RECONNECT_DELAY)
+                .repeat(INTERACTION_RECONCILE_ATTEMPTS - 1L)
+                .publishOn(Schedulers.boundedElastic())
+                .concatMap(ignored -> Mono.fromCallable(() -> latestFinishedAssistant(
+                                runtime,
+                                node.get(),
+                                binding.get().remoteSessionId(),
+                                traceId))
+                        .onErrorReturn(Optional.empty()))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .next()
+                .subscribe(
+                        finalMessage -> completeActiveRunAfterInteraction(
+                                sessionId,
+                                binding.get().remoteSessionId(),
+                                resolvedAgentId,
+                                finalMessage,
+                                traceId),
+                        error -> LOGGER.warn(
+                                "Failed to reconcile Run after interaction reply, sessionId={}, traceId={}",
+                                sessionId.value(),
+                                traceId,
+                                error));
+    }
+
+    private Optional<AgentSessionMessage> latestFinishedAssistant(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String remoteSessionId,
+            String traceId) {
+        AgentSessionMessagesResult result = runtime.sessionMessages(new AgentSessionMessagesCommand(
+                        node,
+                        remoteSessionId,
+                        1,
+                        "desc",
+                        null,
+                        traceId))
+                .block();
+        if (result == null || result.messages().isEmpty()) {
+            return Optional.empty();
+        }
+        AgentSessionMessage latest = result.messages().getFirst();
+        if (!"assistant".equals(textValue(latest.message().get("role")).orElse(null))
+                || !"stop".equals(textValue(latest.message().get("finish")).orElse(null))) {
+            return Optional.empty();
+        }
+        return Optional.of(latest);
+    }
+
+    private void completeActiveRunAfterInteraction(
+            SessionId sessionId,
+            String remoteSessionId,
+            String agentId,
+            AgentSessionMessage finalMessage,
+            String traceId) {
+        runRepository.findLatestActiveBySessionId(sessionId).ifPresent(current -> {
+            Instant occurredAt = Instant.now();
+            Run succeeded = current.succeed(occurredAt);
+            saveRunIfStatus(succeeded, current.status(), traceId, "interaction_reply_reconcile")
+                    .ifPresent(saved -> {
+                        publishRecoveredFinalMessage(saved, remoteSessionId, finalMessage, traceId, occurredAt);
+                        append(
+                                saved.runId(),
+                                RunEventType.RUN_SUCCEEDED,
+                                traceId,
+                                occurredAt,
+                                Map.of(
+                                        "status", RunStatus.SUCCEEDED.name(),
+                                        "source", "interaction_reply_reconcile",
+                                        "sessionID", remoteSessionId));
+                        snapshotService.persistRunSnapshot(agentId, saved, traceId);
+                    });
+        });
+    }
+
+    /** ask 恢复后的最终消息可能未经过原 SSE，先补发同形态瞬态消息事件，再发布 Run 终态。 */
+    private void publishRecoveredFinalMessage(
+            Run run,
+            String remoteSessionId,
+            AgentSessionMessage finalMessage,
+            String traceId,
+            Instant occurredAt) {
+        LinkedHashMap<String, Object> message = new LinkedHashMap<>(finalMessage.message());
+        String messageId = textValue(message.get("id")).orElse(null);
+        if (messageId != null) {
+            message.putIfAbsent("messageID", messageId);
+            message.putIfAbsent("messageId", messageId);
+        }
+        Map<String, Object> scope = Map.of(
+                "rootSessionId", remoteSessionId,
+                "sessionId", remoteSessionId,
+                "isChildSession", false);
+        LinkedHashMap<String, Object> messagePayload = new LinkedHashMap<>(scope);
+        messagePayload.put("message", Map.copyOf(message));
+        runEventLiveBus.publishTransient(new RunEventDraft(
+                run.runId(), RunEventType.MESSAGE_UPDATED, traceId, occurredAt, Map.copyOf(messagePayload)));
+        for (Map<String, Object> originalPart : finalMessage.parts()) {
+            LinkedHashMap<String, Object> part = new LinkedHashMap<>(originalPart);
+            if (messageId != null) {
+                part.putIfAbsent("messageID", messageId);
+                part.putIfAbsent("messageId", messageId);
+            }
+            textValue(part.get("id")).ifPresent(partId -> {
+                part.putIfAbsent("partID", partId);
+                part.putIfAbsent("partId", partId);
+            });
+            LinkedHashMap<String, Object> partPayload = new LinkedHashMap<>(scope);
+            partPayload.put("part", Map.copyOf(part));
+            if (messageId != null) {
+                partPayload.put("messageID", messageId);
+                partPayload.put("messageId", messageId);
+            }
+            runEventLiveBus.publishTransient(new RunEventDraft(
+                    run.runId(), RunEventType.MESSAGE_PART_UPDATED, traceId, occurredAt, Map.copyOf(partPayload)));
+        }
     }
 
     /**

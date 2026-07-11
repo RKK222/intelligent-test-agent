@@ -1565,6 +1565,62 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void serviceReconcilesActiveRunWhenInteractionReplyProducesFinalAssistantMessage() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                        command.runId(),
+                        RunEventType.QUESTION_ASKED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of("requestId", "question_1")))
+                .concatWith(Flux.never());
+        facade.sessionMessagesResult = new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of(
+                                "id", "msg_final_1234567890abcdef",
+                                "role", "assistant",
+                                "finish", "stop"),
+                        List.of(Map.of(
+                                "id", "part_final_1234567890abcdef",
+                                "type", "text",
+                                "text", "A")))),
+                null,
+                null);
+        RecordingRunEventLiveBus liveBus = new RecordingRunEventLiveBus();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                liveBus,
+                new RunEventPersistencePolicy());
+        Run run = service.startRun(
+                new SessionId("ses_1234567890abcdef"),
+                "ask before finishing",
+                "trace_1234567890abcdef");
+
+        service.reconcileAfterInteractionReply(
+                new SessionId("ses_1234567890abcdef"),
+                "opencode",
+                "trace_1234567890abcdef");
+
+        awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        assertThat(events.events).extracting(RunEvent::type)
+                .contains(RunEventType.RUN_SUCCEEDED);
+        assertThat(liveBus.transientPayloads).extracting(RunEventSsePayload::type)
+                .containsExactly("message.updated", "message.part.updated");
+        assertThat(liveBus.transientPayloads.get(1).payload())
+                .containsEntry("messageID", "msg_final_1234567890abcdef");
+    }
+
+    @Test
     void servicePersistsLiveDiffFromCompletedEditToolPart() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();

@@ -117,7 +117,6 @@ export type TimelineRow =
       partId: string;
       previousAssistantPart: boolean;
       showAssistantHeader: boolean;
-      isFinalSummary?: boolean;
     }
   | {
       type: "working-status";

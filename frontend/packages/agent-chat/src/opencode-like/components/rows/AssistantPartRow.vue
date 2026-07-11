@@ -7,7 +7,6 @@ export type AssistantPartRowProps = {
   previousAssistantPart?: boolean;
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
-  isFinalSummary?: boolean;
 };
 </script>
 
@@ -18,9 +17,7 @@ import ToolPartView from "../parts/ToolPartView.vue";
 import FilePartView from "../parts/FilePartView.vue";
 import UnknownPartView from "../parts/UnknownPartView.vue";
 
-withDefaults(defineProps<AssistantPartRowProps>(), {
-  isFinalSummary: false
-});
+defineProps<AssistantPartRowProps>();
 const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 </script>
 
@@ -30,7 +27,6 @@ const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
       v-if="part.type === 'text'"
       :part="part"
       :streaming-text-by-part-id="streamingTextByPartId"
-      :is-final-summary="isFinalSummary"
     />
     <ReasoningPartView
       v-else-if="part.type === 'reasoning'"

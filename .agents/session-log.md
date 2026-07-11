@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-11 - 回退对话视觉改造并恢复历史 Ask 继续链路
+
+- Why:
+  - 对话视觉改造偏离既定稿并破坏了复制、Question/Permission 弹框、原生 Timeline 事件和 Run 终态判断；历史 ask 还可能拿已失效的 requestId 提交。
+- What:
+  - 仅反向回退基线 `976a798211` 之后的对话专属改造，保留宠物旁路问答、进程状态卡、文件树等无关能力；历史切换改为以 OpenCode 当前 permission/question pending 列表覆盖事件快照。针对 OpenCode 1.17.7 在 ask 回复后不再向既有订阅推送最终正文/idle 的情况，只有远端最新 assistant 明确 `finish=stop` 时才补发原生消息投影并收敛 Run 成功。
+- How:
+  - 复用现有 runtime session messages、RunEventLiveBus、Run 快照和 permission/question API，不改 generated SDK、API 路径、事件 wire name 或数据库；补充最终消息补发和终态回归测试，同步 runtime README 与 agent-web PACKAGE 文档。
+- Result:
+  - 后端 runtime reactor 325 项通过；前端对话定向 196 项通过、1 项跳过，typecheck/lint/build 通过。真实 UI 验证 Question 与 Permission 均可“触发 → 新建对话 → 历史恢复 → 提交 → 显示最终正文 → SUCCEEDED”，复制按钮可见。前端全量仍有 1 个既有无关失败：`DirectoryRows.test.ts` 期望 1 个删除按钮，当前已有 2 个。
+
 ### 2026-07-11 - 修复宠物旁路问答只显示工具协议而不返回最终答案
 
 - Why:

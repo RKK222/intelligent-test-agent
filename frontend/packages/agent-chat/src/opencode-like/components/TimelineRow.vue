@@ -117,7 +117,6 @@ const toolGroupParts = computed(() => {
     :message="assistantMessage"
     :continuation="row.previousAssistantPart"
     :show-header="row.showAssistantHeader"
-    :is-final-summary="row.isFinalSummary"
   >
     <AssistantPartRow
       :part="assistantPart"
@@ -125,7 +124,6 @@ const toolGroupParts = computed(() => {
       :previous-assistant-part="row.previousAssistantPart"
       :subagents-by-session-id="state.subagentsBySessionId"
       :subagent-by-task-part-id="state.subagentByTaskPartId"
-      :is-final-summary="row.isFinalSummary"
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
   </AssistantMessageFrame>

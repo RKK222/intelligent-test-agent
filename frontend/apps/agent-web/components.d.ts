@@ -15,7 +15,6 @@ declare module 'vue' {
     AgentConfigTreeNode: typeof import('./src/components/AgentConfigTreeNode.vue')['default']
     AgentWorkbench: typeof import('./src/components/AgentWorkbench.vue')['default']
     AnalyticsManagementPanel: typeof import('./src/components/system/AnalyticsManagementPanel.vue')['default']
-    ChatActivityPanel: typeof import('./src/components/ChatActivityPanel.vue')['default']
     ChatContextAttachmentCard: typeof import('./src/components/ChatContextAttachmentCard.vue')['default']
     ChatContextAttachmentList: typeof import('./src/components/ChatContextAttachmentList.vue')['default']
     ChatContextPreviewDrawer: typeof import('./src/components/ChatContextPreviewDrawer.vue')['default']

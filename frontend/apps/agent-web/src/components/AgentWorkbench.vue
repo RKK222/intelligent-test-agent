@@ -3948,9 +3948,11 @@ async function switchSession(sessionId: string) {
   nowTick.value = Date.now();
   clearAutoRetryState();
   try {
-    const [treeSnapshot, page] = await Promise.all([
+    const [treeSnapshot, page, livePermissions, liveQuestions] = await Promise.all([
       api.getSessionTreeMessages(sessionId).catch(() => null),
-      api.listSessionMessages(sessionId, 1, 100, { refresh: false })
+      api.listSessionMessages(sessionId, 1, 100, { refresh: false }),
+      api.listSessionPermissions(sessionId).catch(() => null),
+      api.listSessionQuestions(sessionId).catch(() => null)
     ]);
     if (switchSeq !== historySwitchSeq) {
       return;
@@ -3962,6 +3964,19 @@ async function switchSession(sessionId: string) {
       chatState.value = restoredState;
     } else {
       dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
+    }
+    // 历史事件树可能保留已经失效的 ask；以 OpenCode 当前 pending 列表覆盖交互请求，
+    // 避免展示无法提交的旧 requestId，同时保留接口暂时不可用时的历史降级展示。
+    if (livePermissions !== null || liveQuestions !== null) {
+      chatState.value = {
+        ...chatState.value,
+        permissions: livePermissions === null
+          ? chatState.value.permissions
+          : livePermissions.filter((item) => item.sessionId === sessionId),
+        questions: liveQuestions === null
+          ? chatState.value.questions
+          : liveQuestions.filter((item) => item.sessionId === sessionId)
+      };
     }
     historyLoadingSessionId.value = null;
     // 正文是历史切换的首要结果；反馈状态随后补齐，不阻塞用户阅读。
@@ -4386,9 +4401,6 @@ async function handleLogout() {
           :subagents-by-session-id="chatState.subagentsBySessionId"
           :subagent-by-task-part-id="chatState.subagentByTaskPartId"
           :running="runtimeBusy"
-          :current-session-id="session?.sessionId"
-          :current-run-id="run?.runId"
-          :current-run-status="run?.status"
           :runtime-status="chatState.status ?? run?.status"
           :timeline-runtime-status="timelineRuntimeStatusForPanel"
           :title="chatTitle"

@@ -9,9 +9,11 @@ import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -45,22 +47,36 @@ public class OpencodeRuntimeApplicationService {
     private final AgentRuntimeTargetResolver targetResolver;
     private final ObjectMapper objectMapper;
     private final ModelCatalogApplicationService modelCatalogService;
+    private final RunApplicationService runApplicationService;
     private final ThreadLocal<String> agentContext = new ThreadLocal<>();
     private final ThreadLocal<UserId> userContext = new ThreadLocal<>();
 
     /**
-     * 创建生产用 opencode runtime 编排服务，Controller 只通过本服务访问 agent runtime。
+     * 兼容旧测试和手工装配；生产环境使用下方注入 Run 服务的构造器。
+     */
+    public OpencodeRuntimeApplicationService(
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentRuntimeTargetResolver targetResolver,
+            ObjectMapper objectMapper,
+            ModelCatalogApplicationService modelCatalogService) {
+        this(agentRuntimeRegistry, targetResolver, objectMapper, modelCatalogService, null);
+    }
+
+    /**
+     * 生产装配额外注入 Run 服务，用于 ask 回复后在远端最终消息明确完成时收敛平台 Run。
      */
     @Autowired
     public OpencodeRuntimeApplicationService(
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentRuntimeTargetResolver targetResolver,
             ObjectMapper objectMapper,
-            ModelCatalogApplicationService modelCatalogService) {
+            ModelCatalogApplicationService modelCatalogService,
+            RunApplicationService runApplicationService) {
         this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
         this.targetResolver = Objects.requireNonNull(targetResolver, "targetResolver must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.modelCatalogService = modelCatalogService;
+        this.runApplicationService = runApplicationService;
     }
 
     /**
@@ -566,11 +582,13 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object replyPermission(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return post(
+        Object result = post(
                 location,
                 "/permission/" + encodePath(requestId) + "/reply",
                 permissionReplyBody(body),
                 traceId);
+        reconcileAfterInteractionReply(sessionId, location, traceId);
+        return result;
     }
 
     /**
@@ -586,11 +604,13 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object replyQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return post(
+        Object result = post(
                 location,
                 "/question/" + encodePath(requestId) + "/reply",
                 questionReplyBody(body),
                 traceId);
+        reconcileAfterInteractionReply(sessionId, location, traceId);
+        return result;
     }
 
     /**
@@ -598,10 +618,25 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object rejectQuestion(String sessionId, String requestId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return post(
+        Object result = post(
                 location,
                 "/question/" + encodePath(requestId) + "/reject",
                 Map.of(),
+                traceId);
+        reconcileAfterInteractionReply(sessionId, location, traceId);
+        return result;
+    }
+
+    private void reconcileAfterInteractionReply(
+            String sessionId,
+            AgentRuntimeTargetResolver.SessionRuntimeTarget location,
+            String traceId) {
+        if (runApplicationService == null) {
+            return;
+        }
+        runApplicationService.reconcileAfterInteractionReply(
+                new SessionId(sessionId),
+                location.runtime().agentId(),
                 traceId);
     }
 
