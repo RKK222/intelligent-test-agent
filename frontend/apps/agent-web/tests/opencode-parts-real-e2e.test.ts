@@ -11,7 +11,9 @@ import {
   selectPartFields,
   interactionExpectation,
   runNaturalAttempt,
-  writePartEvidence
+  writePartEvidence,
+  detectSafeRetryProvider,
+  buildCompactionPreparation
 } from "./opencode-parts-real-e2e";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -99,6 +101,18 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     });
     expect(trigger).not.toHaveBeenCalled();
     expect(result).toMatchObject({ classification: "native-fixture-required", reason: "unsafe-provider-injection" });
+  });
+
+  it("只把显式声明测试隔离且可控429/503的provider视为安全retry能力", () => {
+    expect(detectSafeRetryProvider([{ id: "normal" }, { id: "e2e", metadata: { testIsolated: true, controllableStatusCodes: [429, 503] } }])).toEqual({ providerId: "e2e", statusCode: 429 });
+    expect(detectSafeRetryProvider([{ id: "normal", metadata: { controllableStatusCodes: [429] } }])).toBeUndefined();
+  });
+
+  it("compaction准备最多50条且总字符不超过48000", () => {
+    const prepared = buildCompactionPreparation(Array.from({ length: 60 }, (_, index) => `message-${index}-${"x".repeat(1_000)}`));
+    expect(prepared.length).toBeLessThanOrEqual(50);
+    expect(prepared.reduce((sum, item) => sum + item.length, 0)).toBeLessThanOrEqual(48_000);
+    expect(prepared.at(-1)).toContain("message-59");
   });
 
   it("按 run/kind 隔离写入已脱敏且非空的证据", async () => {

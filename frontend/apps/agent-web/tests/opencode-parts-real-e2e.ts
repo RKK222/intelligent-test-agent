@@ -311,6 +311,35 @@ export async function writePartEvidence(options: {
   return target;
 }
 
+/** 只读 provider 目录中只有显式测试隔离、且声明可控 429/503 的能力才允许 retry 自然探测。 */
+export function detectSafeRetryProvider(providers: unknown): { providerId: string; statusCode: 429 | 503 } | undefined {
+  for (const value of arrayValue(providers)) {
+    const provider = recordValue(value);
+    const metadata = recordValue(provider?.metadata);
+    const codes = arrayValue(metadata?.controllableStatusCodes);
+    const providerId = stringValue(provider?.id) ?? stringValue(provider?.providerID);
+    if (providerId && metadata?.testIsolated === true) {
+      if (codes.includes(429)) return { providerId, statusCode: 429 };
+      if (codes.includes(503)) return { providerId, statusCode: 503 };
+    }
+  }
+  return undefined;
+}
+
+/** 保留最近上下文，并同时满足 OpenCode compact 探测的 50 条/48000 字符硬上限。 */
+export function buildCompactionPreparation(messages: readonly string[]): string[] {
+  const result: string[] = [];
+  let characters = 0;
+  for (let index = messages.length - 1; index >= 0 && result.length < 50; index -= 1) {
+    const remaining = 48_000 - characters;
+    if (remaining <= 0) break;
+    const message = messages[index]!.slice(0, remaining);
+    result.unshift(message);
+    characters += message.length;
+  }
+  return result;
+}
+
 function getSpec(kind: PartKind): PartSpec {
   const found = PART_SPECS.find((item) => item.kind === kind);
   if (!found) throw new Error(`unknown Part kind: ${String(kind)}`);

@@ -1,10 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
 
 import {
   PART_KINDS,
   assertPartProjection,
+  detectSafeRetryProvider,
   runNaturalAttempt,
   sanitizeEvidence,
   writePartEvidence,
@@ -14,7 +17,10 @@ import {
   apiDelete,
   apiGet,
   apiPost,
+  assertNativeSessionAbsentInSqlite,
   authHeaders,
+  createCleanupScope,
+  resolveOwnedOpenCodeDatabase,
   resolveOwnedCleanupPath,
   resolveRemoteSessionIdFromSources,
   runCleanupStages,
@@ -30,31 +36,50 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
   test.skip(!enabled, "Set TEST_AGENT_RUN_PART_E2E=1 and TEST_AGENT_PART_PHASE=natural to run natural Part E2E.");
 
   for (const kind of PART_KINDS) {
-    test(`${kind}: exactly one natural trigger`, async ({ page }) => {
+    test(`${kind}: exactly one natural trigger`, async ({ page, context }) => {
       test.setTimeout(180_000);
       const fixture = await createWorkspace(kind);
+      await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
       const title = `e2e-part-${kind}-${fixture.marker}`;
-      const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
-        workspaceId: fixture.workspaceId,
-        title
-      });
+      let sessionId: string | undefined;
       let runId: string | undefined;
       let remoteSessionId: string | undefined;
       let opencodeBaseUrl: string | undefined;
+      let openCodeDatabasePath: string | undefined;
       let sse: SseCapture | undefined;
       let primaryError: unknown;
+      let evidenceSummary: Record<string, unknown> | undefined;
+      let evidenceRunId: string | undefined;
       try {
-        const process = await apiGet<{ baseUrl?: string }>("/api/internal/agent/opencode/processes/me");
-        if (!process.baseUrl) throw new Error("OpenCode process response has no baseUrl");
-        opencodeBaseUrl = stripTrailingSlash(process.baseUrl);
+        const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
+          workspaceId: fixture.workspaceId,
+          title
+        });
+        sessionId = session.sessionId;
+        const processInfo = await apiGet<{ port?: number; baseUrl?: string }>("/api/internal/agent/opencode/processes/me");
+        if (!processInfo.baseUrl) throw new Error("OpenCode process response has no baseUrl");
+        opencodeBaseUrl = stripTrailingSlash(processInfo.baseUrl);
+        openCodeDatabasePath = (
+          await resolveOwnedOpenCodeDatabase(processInfo, { projectRoot: path.resolve(process.cwd(), "..") })
+        ).databasePath;
         const prompt = promptFor(kind, fixture.marker);
+        const retryCapability = kind === "retry"
+          ? detectSafeRetryProvider(await apiGet(`/api/internal/platform/opencode-runtime/providers?workspaceId=${encodeURIComponent(fixture.workspaceId)}`))
+          : undefined;
         const result = await runNaturalAttempt({
           kind,
           timeoutMs: 45_000,
           pollIntervalMs: 500,
-          skipReason: kind === "retry" ? "unsafe-provider-injection" : undefined,
+          skipReason: kind === "retry" && !retryCapability
+            ? "unsafe-provider-injection"
+            : kind === "compaction"
+              ? "invalid-natural-strategy-consumed-requires-fixture-compact"
+              : undefined,
           trigger: async () => {
-            const run = await apiPost<{ runId: string }>("/api/internal/agent/opencode/runs", runPayload(kind, session.sessionId, prompt));
+            const run = await apiPost<{ runId: string }>(
+              "/api/internal/agent/opencode/runs",
+              runPayload(kind, session.sessionId, prompt, retryCapability)
+            );
             runId = run.runId;
             sse = captureRunSse(run.runId, kind);
             return run;
@@ -67,9 +92,10 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
           }
         });
         runId ??= result.runId;
-        const evidenceRunId = runId ?? `skip_${fixture.marker}`;
+        evidenceRunId = runId ?? `skip_${fixture.marker}`;
         await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "opencode-raw.json", value: result.rawSnapshot ?? [] });
-        await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: result });
+        evidenceSummary = { ...result, projection: "unverified", ui: "unverified", cleanup: "pending" };
+        await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: evidenceSummary });
         if (sse) {
           await sse.stop();
           await writeSseEvidence(evidenceRunId, kind, sse.events);
@@ -88,23 +114,43 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
           await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "platform-messages.json", value: platformMessages });
           await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "platform-tree.json", value: tree });
           assertPartProjection(kind, rawPart, platformMessages, tree);
+          evidenceSummary.projection = "pass";
           if (!sse?.containsPart(kind, String((rawPart as { id?: unknown }).id ?? ""))) {
             throw new Error(`${kind} was observed in raw HTTP but not in natural RunEvent SSE`);
           }
           await verifyUi(page, title, kind, String((rawPart as { id?: unknown }).id ?? ""), evidenceRunId, "current-ui.png");
           await page.getByRole("button", { name: /新建对话/ }).first().click();
           await verifyUi(page, title, kind, String((rawPart as { id?: unknown }).id ?? ""), evidenceRunId, "history-ui.png");
+          evidenceSummary.ui = "pass";
+          await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: evidenceSummary });
         }
       } catch (error) {
         primaryError = error;
       } finally {
         await sse?.stop().catch(() => undefined);
         try {
-          await cleanupFixture({ fixture, sessionId: session.sessionId, runId, remoteSessionId, opencodeBaseUrl, title });
+          await cleanupFixture({ fixture, sessionId, runId, remoteSessionId, opencodeBaseUrl, openCodeDatabasePath, title });
+          if (evidenceSummary && evidenceRunId) {
+            evidenceSummary.cleanup = "pass";
+            await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: evidenceSummary });
+          }
         } catch (cleanupError) {
+          if (evidenceSummary && evidenceRunId) {
+            evidenceSummary.cleanup = "failed";
+            await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: evidenceSummary }).catch(() => undefined);
+          }
           primaryError = primaryError
             ? new AggregateError([primaryError, cleanupError], `${kind} verification and cleanup both failed`)
             : cleanupError;
+        }
+        const traceRunId = runId ?? `skip_${fixture.marker}`;
+        const tracePath = path.join(evidenceRoot, traceRunId, kind, "trace.zip");
+        await mkdir(path.dirname(tracePath), { recursive: true });
+        try {
+          await context.tracing.stop({ path: tracePath });
+          await sanitizeTraceArchive(tracePath, process.env.TEST_AGENT_API_TOKEN);
+        } catch (traceError) {
+          primaryError ??= traceError;
         }
       }
       if (primaryError) throw primaryError;
@@ -130,12 +176,23 @@ function promptFor(kind: PartKind, marker: string): string {
   return prompts[kind];
 }
 
-function runPayload(kind: PartKind, sessionId: string, prompt: string): Record<string, unknown> {
+function runPayload(
+  kind: PartKind,
+  sessionId: string,
+  prompt: string,
+  retryCapability?: { providerId: string; statusCode: 429 | 503 }
+): Record<string, unknown> {
   const parts: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
   if (kind === "file") {
     parts.push({ type: "file", mime: "text/plain", filename: "natural-marker.txt", url: `data:text/plain,${encodeURIComponent(prompt)}` });
   }
-  return { sessionId, prompt, parts, ...(kind === "agent" ? { agent: "build" } : {}) };
+  return {
+    sessionId,
+    prompt,
+    parts,
+    ...(kind === "agent" ? { agent: "build" } : {}),
+    ...(retryCapability ? { provider: retryCapability.providerId, e2eFailureStatus: retryCapability.statusCode } : {})
+  };
 }
 
 async function tryResolveRemoteSessionId(sessionId: string): Promise<string | undefined> {
@@ -230,8 +287,8 @@ async function verifyUi(page: Page, title: string, kind: PartKind, partId: strin
 
 type Fixture = { marker: string; appId: string; applicationWorkspaceId: string; workspaceId: string; workspaceRootPath: string };
 async function createWorkspace(kind: PartKind): Promise<Fixture> {
-  const process = await apiGet<{ status?: string; initializable?: boolean }>("/api/internal/agent/opencode/processes/me");
-  if (process.status !== "READY" && process.initializable) {
+  const processInfo = await apiGet<{ status?: string; initializable?: boolean }>("/api/internal/agent/opencode/processes/me");
+  if (processInfo.status !== "READY" && processInfo.initializable) {
     await apiPost("/api/internal/agent/opencode/processes/me/initialize", {});
   }
   const deadline = Date.now() + 30_000;
@@ -259,57 +316,126 @@ async function createWorkspace(kind: PartKind): Promise<Fixture> {
     )?.branch ?? branches[0];
     if (!branch) continue;
     const operationId = `wco_${marker}`;
-    await apiPost(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces`, {
-      repositoryId: repository.repositoryId, branch, directoryPath: marker, workspaceName: marker,
-      directoryNew: true, version: dateStamp(), operationId
-    });
-    let operation: WorkspaceCreateOperation;
+    const creationScope = createCleanupScope();
     try {
-      operation = await waitForWorkspaceOperation(operationId, {
+      await apiPost(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces`, {
+        repositoryId: repository.repositoryId, branch, directoryPath: marker, workspaceName: marker,
+        directoryNew: true, version: dateStamp(), operationId
+      });
+      // POST 接受后 operation 即拥有清理责任，即便后续轮询、version 或 Session 创建失败也能回收记录。
+      creationScope.defer(async () => {
+        const owned = await apiGet<{ workspaceId?: string | null }>(
+          `/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(operationId)}`
+        );
+        if (owned.workspaceId) {
+          await apiDelete(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces/${encodeURIComponent(owned.workspaceId)}`);
+        }
+      });
+      const operation: WorkspaceCreateOperation = await waitForWorkspaceOperation(operationId, {
         getOperation: (id) => apiGet(`/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(id)}`)
       });
-    } catch (error) {
-      const failed = await apiGet<{ workspaceId?: string | null }>(
-        `/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(operationId)}`
+      if (!operation.workspaceId || !operation.versionId) throw new Error(`Workspace ${operationId} has no ids`);
+      const versions = await apiGet<Array<{ versionId: string; workspaceRootPath: string; runtimeWorkspace?: { workspaceId?: string } }>>(
+        `/api/internal/platform/workspace-management/applications/${encodeURIComponent(application.appId)}/workspace-templates/${encodeURIComponent(operation.workspaceId)}/versions`
       );
-      if (failed.workspaceId) {
-        await apiDelete(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces/${encodeURIComponent(failed.workspaceId)}`);
+      const version = versions.find((item) => item.versionId === operation.versionId);
+      if (!version?.runtimeWorkspace?.workspaceId || !version.workspaceRootPath) throw new Error(`Workspace ${operationId} has no runtime workspace`);
+      creationScope.defer(async () => {
+        const ownedRoot = path.resolve(process.cwd(), "../.testagent/agent-opencode/workspace");
+        const safe = await resolveOwnedCleanupPath(version.workspaceRootPath, ownedRoot, marker);
+        await rm(safe, { recursive: true, force: true });
+      });
+      if (kind === "snapshot" || kind === "patch") await writeFile(path.join(version.workspaceRootPath, `e2e-${marker}.txt`), "before\n", "utf8");
+      creationScope.release();
+      return { marker, appId: application.appId, applicationWorkspaceId: operation.workspaceId, workspaceId: version.runtimeWorkspace.workspaceId, workspaceRootPath: version.workspaceRootPath };
+    } catch (error) {
+      try {
+        await creationScope.cleanup();
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `Workspace fixture ${operationId} failed and cleanup also failed`);
       }
       throw error;
     }
-    if (!operation.workspaceId || !operation.versionId) throw new Error(`Workspace ${operationId} has no ids`);
-    const versions = await apiGet<Array<{ versionId: string; workspaceRootPath: string; runtimeWorkspace?: { workspaceId?: string } }>>(
-      `/api/internal/platform/workspace-management/applications/${encodeURIComponent(application.appId)}/workspace-templates/${encodeURIComponent(operation.workspaceId)}/versions`
-    );
-    const version = versions.find((item) => item.versionId === operation.versionId);
-    if (!version?.runtimeWorkspace?.workspaceId || !version.workspaceRootPath) throw new Error(`Workspace ${operationId} has no runtime workspace`);
-    if (kind === "snapshot" || kind === "patch") await writeFile(path.join(version.workspaceRootPath, `e2e-${marker}.txt`), "before\n", "utf8");
-    return { marker, appId: application.appId, applicationWorkspaceId: operation.workspaceId, workspaceId: version.runtimeWorkspace.workspaceId, workspaceRootPath: version.workspaceRootPath };
   }
   throw new Error("No enabled application repository is available for natural Part E2E");
 }
 
-async function cleanupFixture(input: { fixture: Fixture; sessionId: string; runId?: string; remoteSessionId?: string; opencodeBaseUrl?: string; title: string }): Promise<void> {
+async function cleanupFixture(input: {
+  fixture: Fixture;
+  sessionId?: string;
+  runId?: string;
+  remoteSessionId?: string;
+  opencodeBaseUrl?: string;
+  openCodeDatabasePath?: string;
+  title: string;
+}): Promise<void> {
   await runCleanupStages([
     async () => { if (input.runId) await apiPost(`/api/internal/agent/opencode/runs/${encodeURIComponent(input.runId)}/cancel`, {}).catch(() => undefined); },
     async () => {
       if (!input.remoteSessionId || !input.opencodeBaseUrl) return;
-      const response = await fetch(`${input.opencodeBaseUrl}/session/${encodeURIComponent(input.remoteSessionId)}?directory=${encodeURIComponent(input.fixture.workspaceRootPath)}`, { method: "DELETE" });
+      const nativeUrl = `${input.opencodeBaseUrl}/session/${encodeURIComponent(input.remoteSessionId)}?directory=${encodeURIComponent(input.fixture.workspaceRootPath)}`;
+      const response = await fetch(nativeUrl, { method: "DELETE" });
       if (!response.ok && response.status !== 404) throw new Error(`OpenCode session delete failed: ${response.status}`);
+      const probe = await fetch(nativeUrl);
+      if (probe.status !== 404) throw new Error(`OpenCode session still accessible after delete: ${probe.status}`);
+      if (!input.openCodeDatabasePath) throw new Error("owned OpenCode SQLite path was not resolved before cleanup");
+      await assertNativeSessionAbsentInSqlite(input.openCodeDatabasePath, input.remoteSessionId);
     },
     async () => {
-      await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(input.sessionId)}`);
+      if (input.sessionId) {
+        await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(input.sessionId)}`);
+        await expect(apiGet(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(input.sessionId)}`)).rejects.toThrow();
+      }
       const history = await apiGet<{ items?: Array<{ title?: string }> }>(`/api/internal/platform/opencode-runtime/workspaces/${encodeURIComponent(input.fixture.workspaceId)}/sessions?page=1&size=100`);
       if (history.items?.some((item) => item.title === input.title)) throw new Error(`platform history still contains ${input.title}`);
     },
-    async () => apiDelete(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(input.fixture.appId)}/workspaces/${encodeURIComponent(input.fixture.applicationWorkspaceId)}`),
+    async () => {
+      await apiDelete(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(input.fixture.appId)}/workspaces/${encodeURIComponent(input.fixture.applicationWorkspaceId)}`);
+      const workspaces = await apiGet<Array<{ workspaceId?: string }>>(
+        `/api/internal/platform/configuration-management/applications/${encodeURIComponent(input.fixture.appId)}/workspaces`
+      );
+      if (workspaces.some((item) => item.workspaceId === input.fixture.applicationWorkspaceId)) {
+        throw new Error(`configuration workspace still exists: ${input.fixture.applicationWorkspaceId}`);
+      }
+    },
     async () => {
       const ownedRoot = path.resolve(process.cwd(), "../.testagent/agent-opencode/workspace");
       const safe = await resolveOwnedCleanupPath(input.fixture.workspaceRootPath, ownedRoot, input.fixture.marker);
       await rm(safe, { recursive: true, force: true });
+      await expect(access(safe)).rejects.toThrow();
     }
   ]);
 }
 
 function dateStamp(): string { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`; }
 function stripTrailingSlash(value: string): string { return value.replace(/\/+$/, ""); }
+
+/** Playwright trace 会记录请求头；解包后逐文件替换本轮 token，再重建归档。 */
+async function sanitizeTraceArchive(tracePath: string, token?: string): Promise<void> {
+  if (!token) return;
+  const exec = promisify(execFile);
+  const directory = await mkdtemp(path.join(path.dirname(tracePath), ".trace-sanitize-"));
+  try {
+    await exec("unzip", ["-q", tracePath, "-d", directory]);
+    const files = await listFiles(directory);
+    for (const file of files) {
+      const content = await readFile(file);
+      const replaced = Buffer.from(content.toString("latin1").split(token).join("[REDACTED]"), "latin1");
+      if (!content.equals(replaced)) await writeFile(file, replaced);
+    }
+    await rm(tracePath, { force: true });
+    await exec("zip", ["-q", "-r", tracePath, "."], { cwd: directory });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function listFiles(directory: string): Promise<string[]> {
+  const result: string[] = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const candidate = path.join(directory, entry.name);
+    if (entry.isDirectory()) result.push(...await listFiles(candidate));
+    else if (entry.isFile()) result.push(candidate);
+  }
+  return result;
+}
