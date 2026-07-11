@@ -1,8 +1,16 @@
 import { posix as path } from "node:path";
 import { dirname, join } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import os from "node:os";
+import { resolveOwnedOpenCodeDatabase, type MyOpenCodeProcess, type OpenCodeDatabaseLocationOptions } from "./real-e2e-api";
+
+const verifiedDatabases = new WeakSet<object>();
+const databaseHandleBrand = Symbol("verified-native-database");
+
+export type VerifiedNativeDatabase = Readonly<{ databasePath: string; sessionPath: string; [databaseHandleBrand]: true }>;
 
 export const PART_KINDS = [
   "text",
@@ -71,6 +79,13 @@ export type NativeFixtureControllerOptions = {
   probeIntervalMs?: number;
 };
 
+export type NativeFixtureManifestStore = {
+  path: string;
+  write: (manifest: NativeFixtureManifest) => Promise<void>;
+  read: () => Promise<NativeFixtureManifest | undefined>;
+  clear: (expected?: NativeFixtureManifest) => Promise<void>;
+};
+
 export type PartUiContract = {
   locators: readonly string[];
   semantic: string;
@@ -125,9 +140,9 @@ export function buildNativePartFixture(input: {
 }): NativePartFixture {
   assertFixtureOwnership(input);
   const now = input.now ?? Date.now();
-  const parentId = openCodeId("msg", now, 1, input.marker);
-  const messageId = openCodeId("msg", now, 2, input.marker);
-  const partId = openCodeId("prt", now, 3, input.marker);
+  const parentId = openCodeId("msg", now, 1);
+  const messageId = openCodeId("msg", now, 2);
+  const partId = openCodeId("prt", now, 3);
   const base = { id: partId, sessionID: input.remoteSessionId, messageID: messageId, type: input.kind };
   const part = nativePartPayload(input.kind, base, input.marker, now, parentId);
   // 该 assistant 已显式完成，避免测试 fixture 被 OpenCode 当作待续写工作。
@@ -179,10 +194,8 @@ export function buildNativeFixtureSql(fixture: NativePartFixture): string {
 }
 
 /** 通过 argv 调用 sqlite3，不经过 shell；SQL 中所有动态文本均由 buildNativeFixtureSql 转义。 */
-export async function executeNativeFixtureSql(databasePath: string, fixture: NativePartFixture): Promise<void> {
-  if (!databasePath.endsWith(`${path.sep}opencode${path.sep}opencode.db`)) {
-    throw new Error("native fixture database must be the owned opencode/opencode.db");
-  }
+export async function executeNativeFixtureSql(database: VerifiedNativeDatabase, fixture: NativePartFixture): Promise<void> {
+  const databasePath = verifiedDatabasePath(database);
   // dot-command 作为 argv 会吞掉后续换行 SQL，必须通过 stdin；spawn 仍是无 shell argv 调用。
   await runSqliteScript(databasePath, buildNativeFixtureSql(fixture));
 }
@@ -205,11 +218,84 @@ export function buildNativeFixtureCleanupSql(manifest: NativeFixtureManifest): s
 }
 
 /** 对已通过 manager 归属校验的数据库执行 manifest 三重匹配清理。 */
-export async function executeNativeFixtureCleanupSql(databasePath: string, manifest: NativeFixtureManifest): Promise<void> {
-  if (!databasePath.endsWith(`${path.sep}opencode${path.sep}opencode.db`)) {
-    throw new Error("native fixture database must be the owned opencode/opencode.db");
-  }
+export async function executeNativeFixtureCleanupSql(database: VerifiedNativeDatabase, manifest: NativeFixtureManifest): Promise<void> {
+  const databasePath = verifiedDatabasePath(database);
   await runSqliteScript(databasePath, buildNativeFixtureCleanupSql(manifest));
+}
+
+/** 生产真实 E2E 只能通过 Task2 的 manager state/PID/realpath 全链路校验获得句柄。 */
+export async function resolveVerifiedNativeDatabase(
+  process: MyOpenCodeProcess,
+  options: OpenCodeDatabaseLocationOptions
+): Promise<VerifiedNativeDatabase> {
+  const resolved = await resolveOwnedOpenCodeDatabase(process, options);
+  return registerVerifiedDatabase(resolved.databasePath, resolved.sessionPath);
+}
+
+/** 仅供单元测试：限定系统临时根、真实 opencode/opencode.db 且逐段拒绝符号链接。 */
+export async function createTestVerifiedNativeDatabase(tempRoot: string, databasePath: string): Promise<VerifiedNativeDatabase> {
+  const canonicalTmp = await realpath(os.tmpdir());
+  const canonicalRoot = await realpath(tempRoot);
+  if (!isChildPath(canonicalTmp, canonicalRoot)) throw new Error("test database root must be owned by the system temp directory");
+  await assertNoSymlinkPath(tempRoot, databasePath);
+  const canonicalDatabase = await realpath(databasePath);
+  if (!isChildPath(canonicalRoot, canonicalDatabase) || !canonicalDatabase.endsWith(`${path.sep}opencode${path.sep}opencode.db`)) {
+    throw new Error("test database must be an owned opencode/opencode.db");
+  }
+  return registerVerifiedDatabase(canonicalDatabase, canonicalRoot);
+}
+
+/** durable manifest 使用同目录临时文件、file/dir fsync 与 tombstone 恢复窗口。 */
+export function createNativeFixtureManifestStore(database: VerifiedNativeDatabase, name: string): NativeFixtureManifestStore {
+  const databasePath = verifiedDatabasePath(database);
+  if (!/^[A-Za-z0-9._-]+\.json$/.test(name) || name === ".json") throw new Error("unsafe native fixture manifest name");
+  const directory = join(dirname(databasePath), ".e2e-manifests");
+  const target = join(directory, name);
+  const temporary = `${target}.tmp`;
+  const clearing = `${target}.clearing`;
+  return {
+    path: target,
+    async write(manifest) {
+      validateManifest(manifest);
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await chmod(directory, 0o700);
+      await assertManifestPathsSafe(directory, [target, temporary, clearing]);
+      if (await readManifestIfPresent(target) || await readManifestIfPresent(clearing)) {
+        throw new Error("native fixture manifest already owns an unfinished cleanup");
+      }
+      await unlink(temporary).catch(ignoreMissing);
+      const file = await open(temporary, "wx", 0o600);
+      try {
+        await file.writeFile(`${JSON.stringify(manifest)}\n`, "utf8");
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+      await rename(temporary, target);
+      await chmod(target, 0o600);
+      await fsyncDirectory(directory);
+    },
+    async read() {
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await assertManifestPathsSafe(directory, [target, temporary, clearing]);
+      const main = await readManifestIfPresent(target);
+      const tombstone = await readManifestIfPresent(clearing);
+      if (main && tombstone) throw new Error("native fixture manifest has ambiguous crash state");
+      return main ?? tombstone;
+    },
+    async clear(expected) {
+      await assertManifestPathsSafe(directory, [target, temporary, clearing]);
+      const current = await this.read();
+      if (!current) return;
+      if (expected && !isDeepStrictEqual(current, expected)) throw new Error("native fixture manifest does not match cleanup owner");
+      if (await exists(target)) {
+        await rename(target, clearing);
+        await fsyncDirectory(directory);
+      }
+      await unlink(clearing).catch(ignoreMissing);
+      await fsyncDirectory(directory);
+    }
+  };
 }
 
 /**
@@ -299,17 +385,11 @@ function assertFixtureManifest(fixture: NativePartFixture): void {
   }
 }
 
-/** 与 OpenCode Identifier.create 的 ascending 编码布局一致；测试 fixture 使用确定尾部便于恢复。 */
-function openCodeId(prefix: "msg" | "prt", timestamp: number, sequence: number, entropy: string): string {
+/** 与 OpenCode Identifier.create 一致：ascending 时间段加 14 个独立加密随机字节映射 Base62。 */
+function openCodeId(prefix: "msg" | "prt", timestamp: number, sequence: number): string {
   const encoded = (BigInt(timestamp) * 0x1000n + BigInt(sequence)).toString(16).padStart(12, "0").slice(-12);
   const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  let seed = 0;
-  for (const char of `${prefix}:${timestamp}:${sequence}:${entropy}`) seed = (seed * 33 + char.charCodeAt(0)) >>> 0;
-  let tail = "";
-  for (let index = 0; index < 14; index += 1) {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    tail += alphabet[seed % alphabet.length];
-  }
+  const tail = [...randomBytes(14)].map((value) => alphabet[value % alphabet.length]).join("");
   return `${prefix}_${encoded}${tail}`;
 }
 
@@ -330,6 +410,89 @@ function runSqliteScript(databasePath: string, script: string): Promise<void> {
     });
     child.stdin.end(script);
   });
+}
+
+function registerVerifiedDatabase(databasePath: string, sessionPath: string): VerifiedNativeDatabase {
+  const handle = Object.freeze({ databasePath, sessionPath, [databaseHandleBrand]: true as const });
+  verifiedDatabases.add(handle);
+  return handle;
+}
+
+function verifiedDatabasePath(handle: VerifiedNativeDatabase): string {
+  if (!handle || typeof handle !== "object" || !verifiedDatabases.has(handle) || handle[databaseHandleBrand] !== true) {
+    throw new Error("native database handle was not produced by an ownership-verifying factory");
+  }
+  return handle.databasePath;
+}
+
+function isChildPath(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return Boolean(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+async function assertNoSymlinkPath(root: string, candidate: string): Promise<void> {
+  const relative = path.relative(root, candidate);
+  if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("test database escapes owned root");
+  let cursor = root;
+  for (const segment of relative.split(path.sep)) {
+    cursor = join(cursor, segment);
+    if ((await lstat(cursor)).isSymbolicLink()) throw new Error("test database path contains a symbolic link");
+  }
+}
+
+async function assertManifestPathsSafe(directory: string, files: string[]): Promise<void> {
+  if ((await lstat(directory)).isSymbolicLink()) throw new Error("native fixture manifest directory is a symbolic link");
+  for (const file of files) {
+    try {
+      if ((await lstat(file)).isSymbolicLink()) throw new Error("native fixture manifest path is a symbolic link");
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+  }
+}
+
+async function fsyncDirectory(directory: string): Promise<void> {
+  const handle = await open(directory, "r");
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function readManifestIfPresent(file: string): Promise<NativeFixtureManifest | undefined> {
+  let raw: string;
+  try { raw = await readFile(file, "utf8"); } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { throw new Error(`native fixture manifest is corrupted: ${file}`); }
+  validateManifest(value);
+  return value;
+}
+
+function validateManifest(value: unknown): asserts value is NativeFixtureManifest {
+  if (!value || typeof value !== "object") throw new Error("native fixture manifest must be an object");
+  const manifest = value as Partial<NativeFixtureManifest>;
+  if (!PART_KINDS.includes(manifest.kind as PartKind)
+    || typeof manifest.marker !== "string" || typeof manifest.remoteSessionId !== "string"
+    || typeof manifest.messageId !== "string" || typeof manifest.parentMessageId !== "string" || typeof manifest.partId !== "string"
+    || typeof manifest.directory !== "string" || typeof manifest.title !== "string") {
+    throw new Error("native fixture manifest schema is invalid");
+  }
+  assertFixtureOwnership(manifest as NativeFixtureManifest);
+  if (!/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(manifest.messageId)
+    || !/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(manifest.parentMessageId)
+    || !/^prt_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(manifest.partId)) throw new Error("native fixture manifest IDs are invalid");
+}
+
+async function exists(file: string): Promise<boolean> {
+  try { await lstat(file); return true; } catch (error) { if (isMissing(error)) return false; throw error; }
+}
+
+function ignoreMissing(error: unknown): void {
+  if (!isMissing(error)) throw error;
+}
+
+function isMissing(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "ENOENT");
 }
 
 function partLocator(kind: PartKind): string {

@@ -22,9 +22,11 @@ import {
   createNativeFixtureController,
   executeNativeFixtureSql,
   buildNativeFixtureCleanupSql,
-  executeNativeFixtureCleanupSql
+  executeNativeFixtureCleanupSql,
+  createTestVerifiedNativeDatabase,
+  createNativeFixtureManifestStore
 } from "./opencode-parts-real-e2e";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
@@ -441,6 +443,7 @@ describe("OpenCode 原生 SQLite fixture", () => {
       "CREATE TRIGGER reject_fixture_part BEFORE INSERT ON part BEGIN SELECT RAISE(ABORT, 'fixture rejection'); END;"
     ].join("\n");
     await exec("sqlite3", [database, schema]);
+    const verifiedDatabase = await createTestVerifiedNativeDatabase(root, database);
     const trigger = await exec("sqlite3", [database, "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name='reject_fixture_part';"]);
     expect(trigger.stdout.trim()).toBe("1");
     const fixture = buildNativePartFixture({
@@ -448,7 +451,7 @@ describe("OpenCode 原生 SQLite fixture", () => {
       directory: "/owned/e2e_part_fixture_rollback", title: "e2e-part-fixture-rollback", now: 1
     });
     try {
-      await expect(executeNativeFixtureSql(database, fixture)).rejects.toThrow();
+      await expect(executeNativeFixtureSql(verifiedDatabase, fixture)).rejects.toThrow();
       const { stdout } = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
       expect(stdout.trim()).toBe("1|0|0");
       const cleanupSql = buildNativeFixtureCleanupSql(fixture.manifest);
@@ -456,13 +459,13 @@ describe("OpenCode 原生 SQLite fixture", () => {
       expect(cleanupSql).toContain(`title='${fixture.manifest.title}'`);
       expect(cleanupSql).toContain(`directory='${fixture.manifest.directory}'`);
       await exec("sqlite3", [database, "DROP TRIGGER reject_fixture_part;"]);
-      await executeNativeFixtureSql(database, fixture);
+      await executeNativeFixtureSql(verifiedDatabase, fixture);
       const inserted = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
       expect(inserted.stdout.trim()).toBe("1|2|1");
       // 模拟写入后进程崩溃：manifest 保留；若 Session 所有权谓词被篡改，恢复必须失败且不能清 manifest。
       const clearManifest = vi.fn().mockResolvedValue(undefined);
       const recovery = createNativeFixtureController({
-        executeSql: vi.fn(), probe: vi.fn(), remove: (manifest) => executeNativeFixtureCleanupSql(database, manifest),
+        executeSql: vi.fn(), probe: vi.fn(), remove: (manifest) => executeNativeFixtureCleanupSql(verifiedDatabase, manifest),
         persistManifest: vi.fn(), clearManifest
       });
       await exec("sqlite3", [database, `UPDATE session SET title='predicate-mismatch' WHERE id='${fixture.manifest.remoteSessionId}';`]);
@@ -476,9 +479,71 @@ describe("OpenCode 原生 SQLite fixture", () => {
       const cleaned = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
       expect(cleaned.stdout.trim()).toBe("1|0|0");
       await exec("sqlite3", [database, `DELETE FROM session WHERE id='${fixture.manifest.remoteSessionId}';`]);
-      await expect(executeNativeFixtureSql(database, fixture)).rejects.toThrow(/CHECK constraint|transaction failed/);
+      await expect(executeNativeFixtureSql(verifiedDatabase, fixture)).rejects.toThrow(/CHECK constraint|transaction failed/);
       const refused = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
       expect(refused.stdout.trim()).toBe("0|0|0");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("拒绝伪造database handle并生成大量官方格式唯一ID", async () => {
+    const fixtureIds = new Set<string>();
+    for (let index = 0; index < 1_000; index += 1) {
+      const fixture = buildNativePartFixture({
+        kind: "text", marker: "e2e_part_fixture_unique", remoteSessionId: ownedNativeSessionId,
+        directory: "/owned/e2e_part_fixture_unique", title: "e2e-part-fixture-unique", now: 1_700_000_000_000
+      });
+      fixtureIds.add(fixture.parentMessage.id);
+      fixtureIds.add(fixture.message.id);
+      fixtureIds.add(fixture.manifest.partId);
+      expect(fixture.parentMessage.id < fixture.message.id).toBe(true);
+    }
+    expect(fixtureIds.size).toBe(3_000);
+    const fixture = buildNativePartFixture({
+      kind: "text", marker: "e2e_part_fixture_forged", remoteSessionId: ownedNativeSessionId,
+      directory: "/owned/e2e_part_fixture_forged", title: "e2e-part-fixture-forged", now: 1
+    });
+    await expect(executeNativeFixtureSql({ databasePath: "/tmp/opencode/opencode.db" } as never, fixture)).rejects.toThrow(/verifying factory/);
+    const root = await mkdtemp(path.join(os.tmpdir(), "native-handle-symlink-"));
+    const outside = await mkdtemp(path.join(os.tmpdir(), "native-handle-outside-"));
+    try {
+      await mkdir(path.join(outside, "opencode"), { recursive: true });
+      await writeFile(path.join(outside, "opencode", "opencode.db"), "");
+      await symlink(path.join(outside, "opencode"), path.join(root, "opencode"));
+      await expect(createTestVerifiedNativeDatabase(root, path.join(root, "opencode", "opencode.db"))).rejects.toThrow(/symbolic link/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("durable manifest支持损坏fail-closed、半写忽略与启动恢复窗口", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "native-manifest-"));
+    const database = path.join(root, "opencode", "opencode.db");
+    await mkdir(path.dirname(database), { recursive: true });
+    await writeFile(database, "");
+    const handle = await createTestVerifiedNativeDatabase(root, database);
+    const store = createNativeFixtureManifestStore(handle, "recovery.json");
+    const fixture = buildNativePartFixture({
+      kind: "retry", marker: "e2e_part_fixture_manifest", remoteSessionId: ownedNativeSessionId,
+      directory: "/owned/e2e_part_fixture_manifest", title: "e2e-part-fixture-manifest", now: 1
+    });
+    try {
+      await store.write(fixture.manifest);
+      expect(await store.read()).toEqual(fixture.manifest);
+      expect((await stat(store.path)).mode & 0o777).toBe(0o600);
+      await writeFile(`${store.path}.tmp`, "{half", "utf8");
+      expect(await store.read()).toEqual(fixture.manifest);
+      await rename(store.path, `${store.path}.clearing`);
+      expect(await store.read()).toEqual(fixture.manifest);
+      await store.clear(fixture.manifest);
+      expect(await store.read()).toBeUndefined();
+      await store.clear(fixture.manifest);
+      await writeFile(store.path, "{corrupt", { mode: 0o600 });
+      await expect(store.read()).rejects.toThrow(/corrupted/);
+      await expect(store.clear()).rejects.toThrow(/corrupted/);
+      expect(await readFile(store.path, "utf8")).toBe("{corrupt");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
