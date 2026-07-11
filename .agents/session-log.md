@@ -9,7 +9,7 @@
 - How:
   - 冲突处统一保留 `run.snapshot.reset`、`side_question.*` 和 runtime-state fence；旁路会话切换只清理自身展示，不绕过主 Run 的 runtime-state 恢复策略。测试 fixture 与 Playwright mock 保留各类历史对话及其 API 回包，可直接构造回放场景。
 - Result:
-  - `mvn -pl test-agent-opencode-runtime -am test -DskipITs` 通过（487 tests）；前端定向 Vitest 312 passed、1 skipped，workspace typecheck 通过，Playwright 覆盖旁路流/重试、历史投影及历史 question 弹框回复通过。历史 question 夹具的旧“历史”按钮选择器已更新为当前“消息列表”入口；合并后缺失的 `@vue-flow/core` 已由 frozen-lockfile 安装恢复。完整 `test` 启动还发现 scheduler 有测试双构造器但缺少 `@Autowired`，已显式标注生产构造器后等待重启复验；未改环境文件。
+  - `mvn -pl test-agent-opencode-runtime -am test -DskipITs` 通过（487 tests）；前端定向 Vitest 312 passed、1 skipped，workspace typecheck 通过，Playwright 覆盖旁路流/重试、历史投影及历史 question 弹框回复通过。历史 question 夹具的旧“历史”按钮选择器已更新为当前“消息列表”入口；合并后缺失的 `@vue-flow/core` 已由 frozen-lockfile 安装恢复。完整 `test` 启动还发现 scheduler 有测试双构造器但缺少 `@Autowired`，已显式标注生产构造器并复验：backend liveness/readiness 为 UP、frontend 3000 为 200、登录 CORS 预检通过，manager 已连接并发送心跳；未改环境文件。
 
 ### 2026-07-11 - 恢复 OpenCode todowrite 实时与历史待办面板
 
