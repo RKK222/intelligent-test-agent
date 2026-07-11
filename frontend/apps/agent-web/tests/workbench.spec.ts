@@ -1809,6 +1809,71 @@ test("switching history restores a pending native permission dock and allows rep
   await expect.poll(() => permissionReplies).toEqual([{ decision: "once" }]);
 });
 
+test("history pending interaction stays scoped to its own session", async ({ page }) => {
+  const sessionMessageRequests: string[] = [];
+  await mockBackendApi(page, {
+    sessions: [
+      {
+        sessionId: "ses_history_question_a",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "A 会话有提问",
+        status: "ACTIVE",
+        createdAt: "2026-07-11T08:00:00Z",
+        updatedAt: "2026-07-11T08:01:00Z"
+      },
+      {
+        sessionId: "ses_history_question_b",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "B 会话无提问",
+        status: "ACTIVE",
+        createdAt: "2026-07-11T08:02:00Z",
+        updatedAt: "2026-07-11T08:03:00Z"
+      }
+    ],
+    sessionMessagesBySessionId: {
+      ses_history_question_a: [],
+      ses_history_question_b: []
+    },
+    sessionMessageRequests,
+    sessionTreeMessagesBySessionId: {
+      ses_history_question_a: {
+        sessionId: "ses_history_question_a",
+        sessions: [{ rootSessionId: "ses_history_question_a", sessionId: "ses_history_question_a", childSession: false }],
+        messagesBySessionId: {},
+        childSessionIdByTaskPartId: {},
+        events: []
+      },
+      ses_history_question_b: {
+        sessionId: "ses_history_question_b",
+        sessions: [{ rootSessionId: "ses_history_question_b", sessionId: "ses_history_question_b", childSession: false }],
+        messagesBySessionId: {},
+        childSessionIdByTaskPartId: {},
+        events: []
+      }
+    },
+    sessionQuestionsById: {
+      ses_history_question_a: [{
+        id: "que_history_question_a",
+        sessionID: "ses_history_question_a",
+        questions: [{ question: "只属于 A 的问题", header: "范围", options: [{ label: "A" }], multiple: false }]
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: /A 会话有提问/ }).click();
+  await expect(page.locator(".figma-chat-question-dock")).toContainText("只属于 A 的问题");
+  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "收起进程状态" }).click();
+  await page.getByRole("button", { name: /B 会话无提问/ }).click({ force: true });
+  await expect.poll(() => sessionMessageRequests).toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_history_question_b/messages?page=1&size=100&refresh=false"
+  );
+  await expect(page.locator(".figma-chat-question-dock")).toHaveCount(0);
+  await expect(page.getByText("只属于 A 的问题")).toHaveCount(0);
+});
+
 test("switching to a running history maps its remote question event and allows reply", async ({ page }) => {
   const questionReplies: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
@@ -1893,7 +1958,7 @@ test("switching to a running history maps its remote question event and allows r
   await expect.poll(() => questionReplies).toEqual([{ answers: [["继续"]] }]);
 });
 
-test("switching history resumes the runtime-state run without active-run lookup", async ({ page }) => {
+test("switching history resumes the runtime-state run and reconciles active-run in background", async ({ page }) => {
   const activeRunRequests: string[] = [];
   const runEventRequests: string[] = [];
   const runContextRequests: string[] = [];
@@ -1969,7 +2034,7 @@ test("switching history resumes the runtime-state run without active-run lookup"
   await page.getByRole("button", { name: /generate-cases-orthogonal/ }).click();
 
   await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
-  expect(activeRunRequests).toEqual([]);
+  expect(activeRunRequests).toEqual(["/api/internal/platform/opencode-runtime/sessions/ses_history/active-run"]);
   expect(runContextRequests).toEqual(["ses_history"]);
   await expect(page.getByText("正交表实时输出")).toBeVisible();
 });
@@ -2740,10 +2805,10 @@ test("history loading shows immediately and does not wait for message feedback",
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: "消息列表" }).click();
   await page.getByRole("button", { name: /历史加载测试/ }).click();
 
-  await expect(page.getByText("正在加载历史对话…")).toBeVisible();
+  await expect(page.getByText("正在加载消息列表…")).toBeVisible();
 
   releaseSessionMessages();
   await expect(page.getByText("历史正文已加载")).toHaveCount(1);
@@ -2752,7 +2817,7 @@ test("history loading shows immediately and does not wait for message feedback",
   await expect.poll(() => feedbackRequests).toEqual([
     "/api/internal/platform/opencode-runtime/messages/msg_1234567890abcdef1234567890abcdef/feedback/me"
   ]);
-  await expect(page.getByText("正在加载历史对话…")).toHaveCount(0);
+  await expect(page.getByText("正在加载消息列表…")).toHaveCount(0);
 
   releaseMessageFeedback();
 });
@@ -2822,7 +2887,7 @@ test("switching history changes to the session application and workspace", async
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: "消息列表" }).click();
   await expect(page.getByText("F-COSS · COSS 主干 · 20260708")).toBeVisible();
   await page.getByRole("button", { name: /COSS 历史会话/ }).click();
 
@@ -2896,7 +2961,7 @@ test("history switch failure keeps current context and makes the session readonl
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: "消息列表" }).click();
   await page.getByRole("button", { name: /失效应用历史/ }).click();
 
   await expect.poll(() => markRecentRequests).toContain("wrk_forbidden_coss");

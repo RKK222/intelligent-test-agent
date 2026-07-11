@@ -2314,9 +2314,9 @@ Session 运行态接口：
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/shell` | 执行 shell command，P1/P2 前端以输出卡片展示。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/share` | 创建 opencode session share。 |
 | `DELETE` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/share` | 取消 opencode session share。 |
-| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions` | 读取 pending permission。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions` | 读取当前 Session 的 pending permission；OpenCode 原生列表是进程级结果，后端按绑定的 remote session 过滤，不能把其它 Session 的请求返回给当前会话。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions/{requestId}/reply` | 回复 permission，body 支持 `{ "decision": "once|always|reject" }`。 |
-| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions` | 读取 pending question。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions` | 读取当前 Session 的 pending question；OpenCode 原生列表是进程级结果，后端按绑定的 remote session 过滤，不能把其它 Session 的请求返回给当前会话。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [[...], ...] }`；`answers` 为 `List<List<String>>`，外层按子问题顺序排列，内层是该问题的选中 label，一次回复覆盖同一请求下的全部子问题。平台也兼容扁平 `string[]`，按单问题整体包成单个内层数组。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reject` | 拒绝 question。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state` | 查询当前登录用户历史会话运行态摘要，用于历史入口运行计数和 ask 提醒。 |
@@ -2381,7 +2381,9 @@ Session 运行态接口：
 
 `REDIS_SUMMARY` 的 `run.created` 事件还会携带 `assistantSummaryMessageId`，格式为稳定的 `msg_` + 32 位十六进制；终态 ASSISTANT 摘要复用同一 ID。新前端直接把最终 root assistant 绑定到该平台 ID，不再轮询 Session 消息列表寻找反馈目标；旧模式继续使用原有终态消息兼容查询。
 
-`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供 runtime-state 流不可用时做一次恢复 fallback。用户已有 Redis 运行态 marker 时只读取 `active:session` 索引并回读 manifest 校验用户/Session/状态，即使索引为空也不回查 PostgreSQL；legacy 用户继续使用最近非终态 Run 查询。没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
+`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供 runtime-state 流不可用时做一次恢复 fallback；历史会话切换后若摘要标记为运行中，前端也会在正文展示后后台调用一次该接口校准终态，不阻塞历史首屏。查询 legacy active Run 时会读取远端最新 assistant 消息，只有本 Run 创建之后且明确 `finish=stop` 才补写 `RUN_SUCCEEDED`。用户已有 Redis 运行态 marker 时只读取 `active:session` 索引并回读 manifest 校验用户/Session/状态，即使索引为空也不回查 PostgreSQL；legacy 用户继续使用最近非终态 Run 查询。没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
+
+Java 重启后恢复调度器会立即扫描当前服务器的 `LEGACY_FULL` active Run，并低频重试远端终态补偿；OpenCode 子进程尚未恢复或远端不可达时只保守保留 `RUNNING`，不会把未确认的慢模型误判为成功，也不会重新发送 prompt。进程恢复后，后台扫描或历史 `active-run` 查询会再次收敛已完成 Run。
 
 所有带 `{runId}` 的详情、取消、Diff、RunEvent SSE 和 Run 级 session-tree 接口都要求当前认证用户拥有该 Run，并在读取详情或执行副作用前完成校验。`REDIS_SUMMARY` manifest 存在时只比较 manifest `userId`，鉴权阶段为 0 次 PostgreSQL；legacy 或 manifest 已过期时才回查 Run 与 Session 归属。归属缺失、不一致或属于其他用户统一返回 `403 FORBIDDEN`，跨 Java 转发到目标节点后仍执行同一校验。
 

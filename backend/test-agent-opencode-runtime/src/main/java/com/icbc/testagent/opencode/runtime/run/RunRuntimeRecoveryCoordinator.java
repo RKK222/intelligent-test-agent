@@ -36,6 +36,7 @@ public class RunRuntimeRecoveryCoordinator {
     private final RunDispatchAcceptanceProbe acceptanceProbe;
     private final RunRecoveryTakeoverExecutor takeoverExecutor;
     private final RunRepository runRepository;
+    private final RunApplicationService runApplicationService;
     private final Clock clock;
     private RunOwnerLeaseSupervisor leaseSupervisor;
 
@@ -47,7 +48,8 @@ public class RunRuntimeRecoveryCoordinator {
             ObjectProvider<RunDispatchAcceptanceProbe> acceptanceProbes,
             ObjectProvider<RunRecoveryTakeoverExecutor> takeoverExecutors,
             RunOwnerLeaseSupervisor leaseSupervisor,
-            RunRepository runRepository) {
+            RunRepository runRepository,
+            RunApplicationService runApplicationService) {
         this(
                 runtimeStore,
                 routeResolver,
@@ -56,7 +58,8 @@ public class RunRuntimeRecoveryCoordinator {
                 takeoverExecutors.orderedStream().findFirst()
                         .orElse((manifest, lease, traceId) -> false),
                 runRepository,
-                Clock.systemUTC());
+                Clock.systemUTC(),
+                runApplicationService);
         this.leaseSupervisor = Objects.requireNonNull(leaseSupervisor, "leaseSupervisor must not be null");
     }
 
@@ -66,7 +69,7 @@ public class RunRuntimeRecoveryCoordinator {
             BackendJavaRouteResolver routeResolver,
             RunDispatchAcceptanceProbe acceptanceProbe,
             RunRecoveryTakeoverExecutor takeoverExecutor) {
-        this(runtimeStore, routeResolver, acceptanceProbe, takeoverExecutor, null, Clock.systemUTC());
+        this(runtimeStore, routeResolver, acceptanceProbe, takeoverExecutor, null, Clock.systemUTC(), null);
     }
 
     /** 测试构造允许固定数据库锚点与时钟，覆盖进程退出窗口。 */
@@ -77,11 +80,24 @@ public class RunRuntimeRecoveryCoordinator {
             RunRecoveryTakeoverExecutor takeoverExecutor,
             RunRepository runRepository,
             Clock clock) {
+        this(runtimeStore, routeResolver, acceptanceProbe, takeoverExecutor, runRepository, clock, null);
+    }
+
+    /** 测试构造允许注入历史终态补偿服务，验证重启后不会盲目恢复已完成 Run。 */
+    RunRuntimeRecoveryCoordinator(
+            RunRuntimeStore runtimeStore,
+            BackendJavaRouteResolver routeResolver,
+            RunDispatchAcceptanceProbe acceptanceProbe,
+            RunRecoveryTakeoverExecutor takeoverExecutor,
+            RunRepository runRepository,
+            Clock clock,
+            RunApplicationService runApplicationService) {
         this.runtimeStore = Objects.requireNonNull(runtimeStore, "runtimeStore must not be null");
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
         this.acceptanceProbe = Objects.requireNonNull(acceptanceProbe, "acceptanceProbe must not be null");
         this.takeoverExecutor = Objects.requireNonNull(takeoverExecutor, "takeoverExecutor must not be null");
         this.runRepository = runRepository;
+        this.runApplicationService = runApplicationService;
         this.clock = clock == null ? Clock.systemUTC() : clock;
         this.leaseSupervisor = null;
     }
@@ -142,6 +158,9 @@ public class RunRuntimeRecoveryCoordinator {
             if (reconcileDatabaseAnchor(manifest, recoveryOwnerId, traceId, counter)) {
                 return;
             }
+            if (reconcileRemoteFinalMessage(manifest, traceId, counter)) {
+                return;
+            }
             Optional<RunDispatchProbeRequest> request = probeRequest(manifest, traceId);
             if (request.isEmpty()) {
                 counter.unknownSkippedCount++;
@@ -194,6 +213,31 @@ public class RunRuntimeRecoveryCoordinator {
                     manifest.runId().value(), traceId, exception.getClass().getSimpleName());
         }
         releaseBestEffort(lease, traceId);
+    }
+
+    /**
+     * Redis manifest 仍是 active 时，先读远端最新 assistant 终态；重启前已完成的 Run 不应重新等待 SSE 或人工终止。
+     */
+    private boolean reconcileRemoteFinalMessage(
+            RunRuntimeManifest manifest,
+            String traceId,
+            Counter counter) {
+        if (runApplicationService == null) {
+            return false;
+        }
+        try {
+            if (runApplicationService.findActiveRun(manifest.sessionId()).isEmpty()) {
+                counter.databaseTerminalConvergedCount++;
+                return true;
+            }
+        } catch (RuntimeException exception) {
+            LOGGER.debug(
+                    "历史 Run 终态补偿探测失败，继续执行安全接管探针，runId={}, traceId={}, exceptionType={}",
+                    manifest.runId().value(),
+                    traceId,
+                    exception.getClass().getSimpleName());
+        }
+        return false;
     }
 
     /**

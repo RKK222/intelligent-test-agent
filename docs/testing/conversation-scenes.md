@@ -32,4 +32,4 @@ corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
   --grep 'direct run projects|running history maps|pending native question|pending native permission|pet side-question'
 ```
 
-每个入口内都包含可直接复用的 prompt、RunEvent、远端消息/Part、Todo、pending question/permission、子 Agent 树和旁路 SSE 回包；这些 fixture 是“可重复造数模板”，不会污染生产数据库。需要验证真实 OpenCode pending request 时，应在服务重启后重新发起对应 prompt；OpenCode 的 question/permission request 属于进程内存态，重启前 requestId 不能继续回复。历史回放只展示当前远端仍 pending 的交互，已经失效的旧事件会被过滤。
+每个入口内都包含可直接复用的 prompt、RunEvent、远端消息/Part、Todo、pending question/permission、子 Agent 树和旁路 SSE 回包；这些 fixture 是“可重复造数模板”，不会污染生产数据库。需要验证真实 OpenCode pending request 时，应在服务重启后重新发起对应 prompt；OpenCode 的 question/permission request 属于进程内存态，重启前 requestId 不能继续回复。历史回放只展示当前远端仍 pending 的交互，已经失效的旧事件会被过滤；permission/question 列表按绑定的 remote session 过滤，不会把 A Session 的 ask 泄漏到 B Session。历史切换先渲染分页正文，树快照、Todo、工作区目录和 active-run 终态校准在后台增强。

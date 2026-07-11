@@ -490,6 +490,38 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void listQuestionsFiltersProcessWidePendingRequestsByBoundRemoteSession() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(List.of(
+                        Map.of("id", "question_current", "sessionID", "ses_remote1234567890abcdef"),
+                        Map.of("id", "question_other", "sessionID", "ses_other1234567890abcdef"))))));
+
+        Object result = fixture.service.listQuestions("ses_1234567890abcdef", "trace_1234567890abcdef");
+
+        assertThat(result).isEqualTo(List.of(Map.of(
+                "id", "question_current",
+                "sessionID", "ses_remote1234567890abcdef")));
+        assertThat(fixture.captureCommand().path()).isEqualTo("/question");
+    }
+
+    @Test
+    void listPermissionsFiltersEnvelopeItemsByBoundRemoteSession() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("data", List.of(
+                        Map.of("id", "permission_current", "sessionID", "ses_remote1234567890abcdef"),
+                        Map.of("id", "permission_other", "sessionID", "ses_other1234567890abcdef")))))));
+
+        Object result = fixture.service.listPermissions("ses_1234567890abcdef", "trace_1234567890abcdef");
+
+        assertThat(result).isEqualTo(Map.of("data", List.of(Map.of(
+                "id", "permission_current",
+                "sessionID", "ses_remote1234567890abcdef"))));
+        assertThat(fixture.captureCommand().path()).isEqualTo("/permission");
+    }
+
+    @Test
     void replyPermissionUsesRemoteSessionIdAndRequestBody() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(

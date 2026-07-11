@@ -197,6 +197,46 @@ class RunRuntimeRecoveryCoordinatorTest {
         verifyNoInteractions(probe, executor);
     }
 
+    @Test
+    void remoteFinalMessageStopsRedisManifestBeforeRecoverySubscription() {
+        RunRuntimeStore store = mock(RunRuntimeStore.class);
+        BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
+        RunDispatchAcceptanceProbe probe = mock(RunDispatchAcceptanceProbe.class);
+        RunRecoveryTakeoverExecutor executor = mock(RunRecoveryTakeoverExecutor.class);
+        RunRepository repository = mock(RunRepository.class);
+        RunApplicationService runApplicationService = mock(RunApplicationService.class);
+        RunRuntimeManifest manifest = manifest("server-a");
+        Run persisted = new Run(
+                RUN_ID,
+                manifest.sessionId(),
+                manifest.workspaceId(),
+                RunStatus.RUNNING,
+                manifest.createdAt(),
+                NOW,
+                "trace_recovery");
+        when(routeResolver.currentLinuxServerIdValue()).thenReturn("server-a");
+        when(routeResolver.currentBackendProcessIdValue()).thenReturn("bjp_current");
+        when(routeResolver.remoteTarget("server-a")).thenReturn(Optional.empty());
+        when(store.findActiveByServer("server-a")).thenReturn(List.of(manifest));
+        when(repository.findById(RUN_ID)).thenReturn(Optional.of(persisted));
+        when(runApplicationService.findActiveRun(manifest.sessionId())).thenReturn(Optional.empty());
+        RunRuntimeRecoveryCoordinator coordinator = new RunRuntimeRecoveryCoordinator(
+                store,
+                routeResolver,
+                probe,
+                executor,
+                repository,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                runApplicationService);
+
+        RunRuntimeRecoveryCoordinator.Result result = coordinator.recoverCurrentServer(
+                "trace_recovery", () -> false);
+
+        assertThat(result.databaseTerminalConvergedCount()).isEqualTo(1);
+        verify(runApplicationService).findActiveRun(manifest.sessionId());
+        verifyNoInteractions(probe, executor);
+    }
+
     private Fixture fixture(RunDispatchAcceptance acceptance) {
         RunRuntimeStore store = mock(RunRuntimeStore.class);
         BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);

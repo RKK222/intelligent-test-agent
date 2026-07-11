@@ -10,6 +10,19 @@
   - 先用 `range-diff` 与稳定 patch-id 确认 `772ac3bd20` 和 `2c70e06b9` 的 `docs/superpowers`、`frontend` 代码补丁完全一致，再用 `git merge-tree` 分析冲突来源；最终采用保留当前 `main` tree 的双父合并，并校验合并前后 tree hash 相同、目标提交已成为主线祖先。
 - Result:
   - Mermaid 定向 Vitest 43/43、workspace typecheck、lint、生产构建通过；Playwright 桌面端与移动端 2/2 通过。全量前端基线为 728 passed、1 skipped、1 个既有 `DirectoryRows.test.ts` 失败，原因是当前主线同时提供文件与目录删除按钮，本次未扩大范围修改。
+### 2026-07-11 - 历史首屏、Session 交互隔离与重启终态校准
+
+- Why:
+  - 历史切换被工作区目录/大树快照串行请求拖慢，进程级 OpenCode pending ask 还可能泄漏到其它 Session；重启后 runtime-state 摘要也可能保留旧 RUNNING。
+- What:
+  - 历史先渲染分页正文和当前 Session 的 permission/question 快照，树/Todo/目录/active-run 作为后台增强；切换已校验工作区后立即清空上一 Session dock。历史运行中摘要后台复查 active-run，后端启动扫描 legacy active Run，仅以本 Run 之后的 assistant `finish=stop` 收敛成功，并保留 pending ask 防误判。
+  - 后端 permission/question 列表按绑定 remote session 过滤；补充跨 Session、历史首屏、重启恢复与 runtime coordinator 回归，更新 HTTP/SSE/场景 fixture 文档。
+- Pitfalls:
+  - 重启脚本会停止 manager 管理的用户 opencode 子进程；服务健康不等于用户进程已 READY，需通过页面初始化/公共 initialize API 恢复 4096 进程。
+- Resolved: Partial - 代码和定向 fixture 已验证；真实旧 Run 只有远端最新消息明确 `finish=stop` 才会自动成功，远端无终态或进程未恢复时仍保守保持 RUNNING，避免误判慢模型。
+- Verification: 后端定向 93 项通过；前端 typecheck 通过；Playwright 9 项核心对话场景通过；`.env.test`/`test` profile 重启后 backend health UP、frontend 3000 返回 200，manager WebSocket 连接，初始化用户进程后 4096 health healthy。
+- Next: None
+
 ### 2026-07-11 - 收敛历史终态并过滤重启后失效交互
 
 - Why:

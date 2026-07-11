@@ -74,6 +74,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -2024,11 +2025,41 @@ public class RunApplicationService {
     }
 
     /**
+     * 服务重启后扫描 legacy active Run，主动补偿已经完成但原 SSE 终态丢失的会话；只读远端消息，不会重新发送 prompt。
+     */
+    public int reconcileLegacyActiveRuns(String traceId, BooleanSupplier stopRequested) {
+        BooleanSupplier shouldStop = stopRequested == null ? () -> false : stopRequested;
+        int reconciled = 0;
+        // findStaleActiveRuns 的 SQL 只筛 LEGACY_FULL；未来时间上界等价于“当前所有 active legacy Run”。
+        Instant upperBound = Instant.now().plusSeconds(1);
+        for (Run candidate : runRepository.findStaleActiveRuns(upperBound, 200)) {
+            if (shouldStop.getAsBoolean()) {
+                break;
+            }
+            Optional<Run> current = runRepository.findById(candidate.runId());
+            if (current.isEmpty() || current.get().status().isTerminal()) {
+                continue;
+            }
+            reconcileActiveRunFromRemoteFinalMessage(current.get());
+            if (runRepository.findById(candidate.runId())
+                    .map(run -> run.status().isTerminal())
+                    .orElse(false)) {
+                reconciled++;
+            }
+        }
+        return reconciled;
+    }
+
+    /**
      * 用远端最终 assistant 消息补偿丢失的终态事件，避免实际已完成的历史 Run 永久停在运行中。
      */
     private void reconcileActiveRunFromRemoteFinalMessage(Run activeRun) {
-        String resolvedAgentId = runtimeAgentIdForRun(activeRun);
         try {
+            if (runActivityStateStore.hasPendingAsk(activeRun.runId())) {
+                // ask 尚未回复时，远端可能已经有一条 finish=stop 的中间 assistant 消息；必须保留 RUNNING。
+                return;
+            }
+            String resolvedAgentId = runtimeAgentIdForRun(activeRun);
             Session session = findSession(activeRun.sessionId());
             Optional<AgentSessionBinding> binding = runtimeTargetResolver.findAgentBinding(
                     resolvedAgentId, session, activeRun.traceId());
@@ -2054,8 +2085,8 @@ public class RunApplicationService {
                             activeRun.traceId()));
         } catch (RuntimeException exception) {
             // active-run fallback 不能因补偿探测失败而阻断历史会话打开；下一次读取仍会重试。
-            LOGGER.warn(
-                    "Failed to reconcile active Run from remote final message, runId={}, traceId={}, errorType={}",
+            LOGGER.debug(
+                    "Active Run remote final message is not available yet, runId={}, traceId={}, errorType={}",
                     activeRun.runId().value(),
                     activeRun.traceId(),
                     exception.getClass().getSimpleName());
@@ -2068,15 +2099,11 @@ public class RunApplicationService {
      */
     private String runtimeAgentIdForRun(Run run) {
         String candidate = agentRuntimeRegistry.normalize(run.agentId());
-        try {
-            agentRuntimeRegistry.require(candidate);
-            return candidate;
-        } catch (PlatformException exception) {
-            if (exception.errorCode() != ErrorCode.NOT_FOUND) {
-                throw exception;
-            }
-            return agentRuntimeRegistry.defaultAgentId();
-        }
+        // Run.agentId 可能是 OpenCode 内置 build/plan 角色，而平台只注册 opencode runtime；
+        // 不再用 require(candidate) 探测未知角色，避免每轮重启补偿扫描制造 NOT_FOUND 错误日志。
+        return agentRuntimeRegistry.defaultAgentId().equals(candidate)
+                ? candidate
+                : agentRuntimeRegistry.defaultAgentId();
     }
 
     /**

@@ -566,7 +566,9 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object listPermissions(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, "/permission", Map.of(), traceId);
+        return filterSessionInteractions(
+                get(location, "/permission", Map.of(), traceId),
+                location.remoteSessionId());
     }
 
     /**
@@ -593,7 +595,9 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object listQuestions(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, "/question", Map.of(), traceId);
+        return filterSessionInteractions(
+                get(location, "/question", Map.of(), traceId),
+                location.remoteSessionId());
     }
 
     /**
@@ -764,6 +768,58 @@ public class OpencodeRuntimeApplicationService {
                         traceId))
                 .block();
         return objectMapper.convertValue(result.body(), Object.class);
+    }
+
+    /**
+     * OpenCode 的 permission/question 列表是进程级列表，不按 session 路径过滤；平台接口必须按当前 binding
+     * 的 remoteSessionId 再过滤一次，否则打开任意历史会话都会把其它会话的 ask 弹出来。
+     */
+    private Object filterSessionInteractions(Object response, String remoteSessionId) {
+        if (remoteSessionId == null || remoteSessionId.isBlank()) {
+            return List.of();
+        }
+        if (response instanceof List<?> list) {
+            return list.stream()
+                    .filter(item -> interactionBelongsToSession(item, remoteSessionId))
+                    .toList();
+        }
+        if (!(response instanceof Map<?, ?> raw)) {
+            return response;
+        }
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        raw.forEach((key, value) -> {
+            if (key instanceof String stringKey) {
+                envelope.put(stringKey, value);
+            }
+        });
+        for (String key : List.of("data", "items", "permissions", "questions")) {
+            Object value = envelope.get(key);
+            if (value instanceof List<?> list) {
+                envelope.put(key, list.stream()
+                        .filter(item -> interactionBelongsToSession(item, remoteSessionId))
+                        .toList());
+                return envelope;
+            }
+        }
+        return interactionBelongsToSession(envelope, remoteSessionId) ? envelope : List.of();
+    }
+
+    private boolean interactionBelongsToSession(Object item, String remoteSessionId) {
+        if (!(item instanceof Map<?, ?> raw)) {
+            return false;
+        }
+        for (String key : List.of("sessionID", "sessionId", "session_id")) {
+            Object value = raw.get(key);
+            if (value instanceof String session && !session.isBlank()) {
+                return remoteSessionId.equals(session);
+            }
+        }
+        for (String key : List.of("info", "request", "data")) {
+            if (interactionBelongsToSession(raw.get(key), remoteSessionId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String extractSessionId(Object response) {

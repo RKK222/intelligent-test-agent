@@ -2589,7 +2589,7 @@ function selectedServerWorkspaceServer() {
 
 async function switchWorkspace(
   workspace: Workspace,
-  options: { preserveConversationInteraction?: boolean } = {}
+  options: { preserveConversationInteraction?: boolean; awaitDirectory?: boolean } = {}
 ) {
   if (!options.preserveConversationInteraction) {
     invalidateConversationInteraction();
@@ -2603,7 +2603,13 @@ async function switchWorkspace(
   void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime"] });
-  await loadDirectory("", workspace.workspaceId);
+  const directoryLoad = loadDirectory("", workspace.workspaceId);
+  if (options.awaitDirectory !== false) {
+    await directoryLoad;
+  } else {
+    // 历史正文不应被工作区文件树阻塞；目录仍使用同一 generation 后台加载。
+    void directoryLoad.catch(() => undefined);
+  }
 }
 
 // 根据当前选中的 workspace 匹配出对应的应用版本（用于两级菜单高亮）。
@@ -4236,12 +4242,28 @@ async function switchSession(sessionId: string) {
       return;
     }
   }
+  // 历史消息和当前交互快照先取；大树快照/Todo 作为增强，避免历史记录首屏被串行请求拖慢。
+  const historyMessagesPromise = api.listSessionMessages(sessionId, 1, 100, { refresh: false });
+  const historyInteractionsPromise = Promise.all([
+    api.listSessionPermissions(sessionId).catch(() => null),
+    api.listSessionQuestions(sessionId).catch(() => null)
+  ]);
+  const historyEnrichmentPromise = Promise.all([
+    api.getSessionTreeMessages(sessionId).catch(() => null),
+    api.getSessionTodo(sessionId).catch(() => null)
+  ]);
+  // 工作区切换失败/被新会话取消时仍消费拒绝，避免后台请求产生 unhandled rejection。
+  void historyMessagesPromise.catch(() => undefined);
+  void historyInteractionsPromise.catch(() => undefined);
+  void historyEnrichmentPromise.catch(() => undefined);
   const readonlyReason = await switchToHistorySessionWorkspace(selected, switchIsCurrent);
   if (!switchIsCurrent() || readonlyReason === null) {
     return;
   }
   session.value = selected;
   readonlySessionReason.value = readonlyReason;
+  // 工作区校验已通过后立即清理上一 Session 的交互 dock；新 Session 的 pending 快照随后再填充。
+  dispatchChat({ type: "reset" });
   if (!readonlyReason) {
     // 历史会话切到可交互工作区后预取一次；立即发送会复用同一个 in-flight Promise。
     void conversationRunContexts.get(sessionId).catch((error) => {
@@ -4249,6 +4271,11 @@ async function switchSession(sessionId: string) {
     });
   }
   const adoptedRuntimeRun = adoptRuntimeStateForCurrentSession(sessionRuntimeState.value, "switch-session");
+  // 只有 runtime-state 标记为运行中时才做后台终态校准，避免每个已结束历史会话都增加一次请求。
+  const activeRunPromise = adoptedRuntimeRun
+    ? api.getActiveRun(sessionId).catch(() => undefined)
+    : Promise.resolve(undefined);
+  void activeRunPromise.catch(() => undefined);
   if (!adoptedRuntimeRun) {
     fallbackActiveRunOnce("switch-session-stream-unavailable");
   }
@@ -4261,28 +4288,20 @@ async function switchSession(sessionId: string) {
   nowTick.value = Date.now();
   clearAutoRetryState();
   try {
-    const [treeSnapshot, page, livePermissions, liveQuestions, liveTodos] = await Promise.all([
-      api.getSessionTreeMessages(sessionId).catch(() => null),
-      api.listSessionMessages(sessionId, 1, 100, { refresh: false }),
-      api.listSessionPermissions(sessionId).catch(() => null),
-      api.listSessionQuestions(sessionId).catch(() => null),
-      // 历史会话的原生 todo.updated 可能已不在事件回放窗口，始终以 session todo 快照校准。
-      api.getSessionTodo(sessionId).catch(() => null)
+    const [page, [livePermissions, liveQuestions]] = await Promise.all([
+      historyMessagesPromise,
+      historyInteractionsPromise
     ]);
     if (!switchIsCurrent()) {
       return;
     }
     const persistedMessages = dedupeSessionMessages(page.items);
     rememberPersistedMessageIdentities(persistedMessages);
-    const restoredState = treeSnapshot ? chatStateFromSessionTreeSnapshot(treeSnapshot, persistedMessages) : null;
-    if (restoredState && restoredState.messages.length > 0) {
-      chatState.value = restoredState;
-    } else {
-      dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
-    }
+    // 先以分页消息渲染正文，树快照和 Todo 作为后续增强；避免大历史树把首屏卡住。
+    dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
     // 历史事件树可能保留已经失效的 ask；以 OpenCode 当前 pending 列表覆盖交互请求，
     // 避免展示无法提交的旧 requestId，同时保留接口暂时不可用时的历史降级展示。
-    if (livePermissions !== null || liveQuestions !== null || liveTodos !== null) {
+    if (livePermissions !== null || liveQuestions !== null) {
       chatState.value = {
         ...chatState.value,
         permissions: livePermissions === null
@@ -4291,8 +4310,6 @@ async function switchSession(sessionId: string) {
         questions: liveQuestions === null
           ? chatState.value.questions
           : liveQuestions.filter((item) => item.sessionId === sessionId),
-        // 空数组也是明确的远端快照，必须覆盖工具 part 回放得到的旧任务。
-        todos: liveTodos === null ? chatState.value.todos : liveTodos
       };
     }
     if (livePermissions !== null || liveQuestions !== null) {
@@ -4305,6 +4322,30 @@ async function switchSession(sessionId: string) {
           ? undefined
           : new Set(liveQuestions.map((item) => item.requestId))
       });
+    }
+    // 正文和当前交互快照已可展示；后续树/待办/Run 详情不得继续挡住历史首屏。
+    historyLoadingSessionId.value = null;
+    const [treeSnapshot, liveTodos] = await historyEnrichmentPromise;
+    if (!switchIsCurrent()) {
+      return;
+    }
+    const restoredState = treeSnapshot ? chatStateFromSessionTreeSnapshot(treeSnapshot, persistedMessages) : null;
+    if (restoredState && restoredState.messages.length > 0) {
+      chatState.value = restoredState;
+      if (livePermissions !== null || liveQuestions !== null || liveTodos !== null) {
+        chatState.value = {
+          ...chatState.value,
+          permissions: livePermissions === null
+            ? chatState.value.permissions
+            : livePermissions.filter((item) => item.sessionId === sessionId),
+          questions: liveQuestions === null
+            ? chatState.value.questions
+            : liveQuestions.filter((item) => item.sessionId === sessionId),
+          todos: liveTodos === null ? chatState.value.todos : liveTodos
+        };
+      }
+    } else if (liveTodos !== null) {
+      chatState.value = { ...chatState.value, todos: liveTodos };
     }
     // 正文可以先展示，但发送锁必须保留到关联 Run/Diff 投影完成，避免迟到历史详情覆盖新 Run。
     // 反馈状态独立异步补齐，不延长这把锁。
@@ -4350,6 +4391,20 @@ async function switchSession(sessionId: string) {
     if (!restoredRuntimeRun) {
       fallbackActiveRunOnce("switch-session-loaded-stream-unavailable");
     }
+    // runtime-state 是摘要，不是终态事实；历史打开后再读一次 active-run，避免旧摘要把已结束 Run 复活。
+    void activeRunPromise.then((activeRun) => {
+      if (!switchIsCurrent() || activeRun === undefined) {
+        return;
+      }
+      if (activeRun && isRunBusyStatus(activeRun.status)) {
+        run.value = activeRun;
+        rememberRunSession(activeRun);
+        return;
+      }
+      if (session.value?.sessionId === sessionId) {
+        run.value = null;
+      }
+    }).catch(() => undefined);
 
     feedback.value = { kind: "info", title: "已切换 Session", description: selected.title };
   } catch (error) {
@@ -4401,7 +4456,7 @@ async function switchToHistorySessionWorkspace(
       if (!interactionIsCurrent()) {
         return null;
       }
-      await switchWorkspace(workspace, { preserveConversationInteraction: true });
+      await switchWorkspace(workspace, { preserveConversationInteraction: true, awaitDirectory: false });
       if (!interactionIsCurrent()) {
         return null;
       }
