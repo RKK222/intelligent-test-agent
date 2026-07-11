@@ -5474,5 +5474,5 @@ bash /tmp/test-api-after-restart.sh
   - 将 7 个本地提交无 force 地 rebase 到远端 `e641e5f8b`，逐处合并而不是选择整侧覆盖；通过冲突标记扫描、`git diff --check`、后端编译、运行时/接口/目标持久层测试、前端 typecheck 与 Vitest 校验合并结果。
 - Result:
   - Phase 3 目标测试：后端 125 项、前端 112 项通过；Phase 4 全运行时 444 项、API 256 项通过。持久层本次相关 MyBatis 摘要、Run locator、storage mode、migration、容量与 lease 单测通过；真实 Redis 集成测试在未提供测试端口时按约定跳过。
-  - 最终后端全量 `mvn -DskipTests package`、前端全量 typecheck 和生产 build 通过；持久层 42 项目标测试串行复测通过。前端全量 Vitest 为 518 passed、1 skipped、1 failed，唯一失败是远端已有 `DirectoryRows.test.ts` 仍断言只有一个“删除”按钮，而当前组件会暴露两个；未在本次 Redis 改造中修改该无关行为。
+  - 最终后端全量 `mvn -DskipTests package`、前端全量 typecheck 和生产 build 通过；持久层 42 项目标测试串行复测通过。前端全量 Vitest 为 517 passed、1 skipped、1 failed，唯一失败是远端已有 `DirectoryRows.test.ts` 仍断言只有一个“删除”按钮，而当前组件会暴露两个；未在本次 Redis 改造中修改该无关行为。
   - 后端全 reactor 联跑仍被远端已有的 9 个 H2 持久层问题阻断：`JdbcOpencodeProcessManagementRepository` 使用 H2 2.4 不支持的 PostgreSQL `ON CONFLICT`、Agent worktree fixture 缺 `usr_test_dev` 外键用户，以及两项旧 migration seed 断言；与本次 Redis Run 改造文件无交集，未在冲突处理中顺带改写。
