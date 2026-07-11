@@ -14,6 +14,22 @@ export type RequestEnvelopeOptions = RealE2eApiOptions & {
   body?: unknown;
 };
 
+export type WorkspaceCreateOperation = {
+  status: string;
+  currentStep?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  workspaceId?: string | null;
+  versionId?: string | null;
+};
+
+export type WaitForWorkspaceOperationOptions = {
+  getOperation: (operationId: string) => Promise<WorkspaceCreateOperation>;
+  intervalMs?: number;
+  timeoutMs?: number;
+  sleep?: (delayMs: number) => Promise<void>;
+};
+
 /**
  * 调用真实 E2E 使用的平台信封接口，并统一处理鉴权、trace 与错误脱敏。
  * 该客户端只访问平台 API，不允许用它绕过平台直连 OpenCode 服务。
@@ -61,6 +77,33 @@ export function apiDelete<T = unknown>(pathname: string, options: RealE2eApiOpti
 /** Bearer token 为空时不发送 Authorization，便于兼容本地免鉴权环境。 */
 export function authHeaders(token = process.env.TEST_AGENT_API_TOKEN): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/**
+ * 等待配置管理的异步 Workspace 创建结束；失败和超时都保留 operation/step，
+ * 让真实 E2E 能直接定位 Git、运行态 Workspace 等具体阶段。
+ */
+export async function waitForWorkspaceOperation(
+  operationId: string,
+  options: WaitForWorkspaceOperationOptions
+): Promise<WorkspaceCreateOperation> {
+  const intervalMs = options.intervalMs ?? 1_000;
+  const timeoutMs = options.timeoutMs ?? 90_000;
+  const sleep = options.sleep ?? ((delayMs) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const operation = await options.getOperation(operationId);
+    if (operation.status === "SUCCEEDED") {
+      return operation;
+    }
+    if (operation.status === "FAILED") {
+      throw new Error(
+        `Workspace operation ${operationId} failed at ${operation.currentStep ?? "UNKNOWN"}: ${operation.errorCode ?? "WORKSPACE_CREATE_FAILED"} ${operation.errorMessage ?? "unknown error"}`
+      );
+    }
+    await sleep(intervalMs);
+  }
+  throw new Error(`Workspace operation ${operationId} timed out after ${timeoutMs}ms`);
 }
 
 function stripTrailingSlash(value: string): string {

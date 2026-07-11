@@ -31,7 +31,9 @@ public class TerminalProcessFactory {
      */
     public TerminalProcessSession start(TerminalTicket ticket) {
         try {
-            Process process = new ProcessBuilder(List.of(ticket.shell(), "-i"))
+            // 终端当前以受控 stdin/stdout 管道承载交互；-s 明确要求 shell 从 stdin 读取命令，
+            // 避免 zsh 等交互 shell 在没有原生 TTY 时只完成启动脚本却不继续消费输入。
+            Process process = new ProcessBuilder(shellCommand(ticket.shell()))
                     .directory(ticket.cwd().toFile())
                     .redirectErrorStream(true)
                     .start();
@@ -45,5 +47,9 @@ public class TerminalProcessFactory {
                     Map.of("sessionId", ticket.sessionId().value()),
                     exception);
         }
+    }
+
+    static List<String> shellCommand(String shell) {
+        return List.of(shell, "-i", "-s");
     }
 }

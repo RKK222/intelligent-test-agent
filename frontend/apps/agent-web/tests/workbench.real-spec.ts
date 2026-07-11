@@ -1,9 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { rm } from "node:fs/promises";
 
-import { apiPost } from "./real-e2e-api";
+import { apiDelete, apiGet, apiPost, waitForWorkspaceOperation, type WorkspaceCreateOperation } from "./real-e2e-api";
 
 const runRealE2e = process.env.TEST_AGENT_RUN_REAL_E2E === "1";
 const backendBaseUrl = stripTrailingSlash(process.env.TEST_AGENT_BASE_URL ?? "http://127.0.0.1:8080");
@@ -12,16 +10,14 @@ test.describe("phase 11 real service integration", () => {
   test.skip(!runRealE2e, "Set TEST_AGENT_RUN_REAL_E2E=1 to run the real frontend/backend/opencode integration suite.");
 
   test("creates a real opencode-backed session and opens a PTY terminal websocket", async ({ page }) => {
-    const workspaceRoot = await createWorkspaceFixture();
+    const workspace = await createManagedWorkspaceFixture();
+    let sessionId: string | undefined;
     try {
-      const workspace = await apiPost<{ workspaceId: string }>("/api/internal/platform/workspace-management/workspaces", {
-        name: `phase11-real-${Date.now()}`,
-        rootPath: workspaceRoot
-      });
       const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
         workspaceId: workspace.workspaceId,
         title: "Phase 11 real E2E"
       });
+      sessionId = session.sessionId;
 
       const mappingTicket = await establishOpencodeMapping(session.sessionId);
       const ticket =
@@ -32,7 +28,9 @@ test.describe("phase 11 real service integration", () => {
           rows: 32
         }));
 
-      await page.goto("/");
+      // PTY probe 只需要稳定的同源浏览器上下文；未注入登录态时根路由会异步跳转并销毁 evaluate。
+      await page.goto("/login");
+      await page.waitForLoadState("networkidle");
       const terminalResult = await connectTerminalAndEcho(page, ticket.webSocketUrl, "phase11-real-e2e");
 
       expect(terminalResult.output).toContain("phase11-real-e2e");
@@ -41,16 +39,124 @@ test.describe("phase 11 real service integration", () => {
       const reusedTicketResult = await connectTerminalAndEcho(page, ticket.webSocketUrl, "phase11-ticket-reuse");
       expect(reusedTicketResult.error?.code).toBeTruthy();
     } finally {
-      await rm(workspaceRoot, { recursive: true, force: true });
+      if (sessionId) {
+        await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}`);
+      }
+      await apiDelete(
+        `/api/internal/platform/configuration-management/applications/${encodeURIComponent(workspace.appId)}/workspaces/${encodeURIComponent(workspace.applicationWorkspaceId)}`
+      );
+      if (workspace.workspaceRootPath.includes(workspace.marker)) {
+        await rm(workspace.workspaceRootPath, { recursive: true, force: true });
+      }
     }
   });
 });
 
-async function createWorkspaceFixture() {
-  const root = await mkdtemp(path.join(os.tmpdir(), "phase11-real-e2e-"));
-  await writeFile(path.join(root, "README.md"), "# Phase 11 real E2E\n", "utf8");
-  return root;
+async function createManagedWorkspaceFixture(): Promise<ManagedWorkspaceFixture> {
+  const initialProcess = await apiGet<{ status?: string; initializable?: boolean }>("/api/internal/agent/opencode/processes/me");
+  if (initialProcess.status !== "READY" && initialProcess.initializable) {
+    await apiPost("/api/internal/agent/opencode/processes/me/initialize", {});
+  }
+  await expect
+    .poll(
+      async () => {
+        const process = await apiGet<{ status?: string }>("/api/internal/agent/opencode/processes/me");
+        return process.status;
+      },
+      { timeout: 30_000, intervals: [500, 1_000, 2_000], message: "current user's OpenCode process should become READY" }
+    )
+    .toBe("READY");
+  const marker = `phase11_real_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const applications = await apiGet<Application[]>("/api/internal/platform/configuration-management/applications?enabled=true");
+  for (const application of applications) {
+    const repositories = await apiGet<Repository[]>(
+      `/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/repositories`
+    );
+    const repository = repositories.find((candidate) => Boolean(candidate.englishName) && !candidate.standard);
+    if (!repository) {
+      continue;
+    }
+    const branches = await apiGet<string[]>(
+      `/api/internal/platform/configuration-management/repositories/${encodeURIComponent(repository.repositoryId)}/branches`
+    );
+    // 同一日期的 repoRoot 会被多个 Workspace 复用，优先沿用该代码库已有模板分支，
+    // 避免异步准备阶段因强行切换共享 checkout 而报冲突。
+    const configuredWorkspaces = await apiGet<Array<{ repositoryId: string; branch: string }>>(
+      `/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces`
+    );
+    const configuredBranch = configuredWorkspaces.find(
+      (candidate) => candidate.repositoryId === repository.repositoryId && branches.includes(candidate.branch)
+    )?.branch;
+    const branch = configuredBranch ?? branches[0];
+    if (!branch) {
+      continue;
+    }
+
+    const operationId = `wco_${marker}`;
+    await apiPost(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces`, {
+      repositoryId: repository.repositoryId,
+      branch,
+      directoryPath: marker,
+      workspaceName: marker,
+      directoryNew: true,
+      version: formatDate(new Date()),
+      operationId
+    });
+    let operation: WorkspaceCreateOperation;
+    try {
+      operation = await waitForWorkspaceOperation(operationId, {
+        getOperation: (id) =>
+          apiGet(`/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(id)}`)
+      });
+    } catch (error) {
+      const failedOperation = await apiGet<{ workspaceId?: string | null }>(
+        `/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(operationId)}`
+      );
+      if (failedOperation.workspaceId) {
+        await apiDelete(
+          `/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces/${encodeURIComponent(failedOperation.workspaceId)}`
+        );
+      }
+      throw error;
+    }
+    if (!operation.workspaceId || !operation.versionId) {
+      throw new Error(`Workspace operation ${operationId} succeeded without workspaceId/versionId`);
+    }
+    const versions = await apiGet<WorkspaceVersion[]>(
+      `/api/internal/platform/workspace-management/applications/${encodeURIComponent(application.appId)}/workspace-templates/${encodeURIComponent(operation.workspaceId)}/versions`
+    );
+    const version = versions.find((candidate) => candidate.versionId === operation.versionId);
+    if (!version?.runtimeWorkspace?.workspaceId || !version.workspaceRootPath) {
+      throw new Error(`Workspace operation ${operationId} version ${operation.versionId} has no runtime workspace`);
+    }
+    return {
+      marker,
+      appId: application.appId,
+      applicationWorkspaceId: operation.workspaceId,
+      workspaceId: version.runtimeWorkspace.workspaceId,
+      workspaceRootPath: version.workspaceRootPath
+    };
+  }
+  throw new Error("No enabled application has a linked non-standard repository with a usable branch");
 }
+
+function formatDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
+}
+
+type Application = { appId: string; appName: string };
+type Repository = { repositoryId: string; englishName?: string | null; standard: boolean };
+type WorkspaceVersion = { versionId: string; workspaceRootPath: string; runtimeWorkspace?: { workspaceId?: string } | null };
+type ManagedWorkspaceFixture = {
+  marker: string;
+  appId: string;
+  applicationWorkspaceId: string;
+  workspaceId: string;
+  workspaceRootPath: string;
+};
 
 async function establishOpencodeMapping(sessionId: string): Promise<{ webSocketUrl: string } | null> {
   try {
@@ -95,6 +201,8 @@ async function connectTerminalAndEcho(page: Page, webSocketUrl: string, marker: 
         const socket = new WebSocket(url.toString());
         let output = "";
         let settled = false;
+        let inputSent = false;
+        let inputTimer: number | undefined;
         const timer = window.setTimeout(() => finish(), 10_000);
 
         function finish(error?: { code: string; message: string }) {
@@ -103,6 +211,9 @@ async function connectTerminalAndEcho(page: Page, webSocketUrl: string, marker: 
           }
           settled = true;
           window.clearTimeout(timer);
+          if (inputTimer !== undefined) {
+            window.clearTimeout(inputTimer);
+          }
           try {
             socket.close();
           } catch {
@@ -111,14 +222,25 @@ async function connectTerminalAndEcho(page: Page, webSocketUrl: string, marker: 
           resolve(error ? { output, error } : { output });
         }
 
-        socket.onopen = () => {
+        function sendInput() {
+          if (inputSent || socket.readyState !== WebSocket.OPEN) {
+            return;
+          }
+          inputSent = true;
           socket.send(JSON.stringify({ type: "input", data: `printf '${marker}\\n'\n` }));
+        }
+
+        socket.onopen = () => {
+          // 后端先完成 PTY spawn 再开始消费浏览器输入；启动输出到达即表示消费链路就绪。
+          // 对没有 shell 启动输出的环境保留短延迟兜底，且两条路径只发送一次。
+          inputTimer = window.setTimeout(sendInput, 500);
         };
         socket.onerror = () => finish({ code: "PTY_SOCKET_ERROR", message: "terminal socket error" });
         socket.onclose = () => finish();
         socket.onmessage = (event) => {
           const message = JSON.parse(String(event.data)) as Record<string, unknown>;
           if (message.type === "output") {
+            sendInput();
             output += typeof message.data === "string" ? message.data : "";
             if (output.includes(marker)) {
               socket.send(JSON.stringify({ type: "close", reason: "e2e" }));

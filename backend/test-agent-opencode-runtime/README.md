@@ -55,7 +55,7 @@
 - agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
 - Model/Provider 目录编排：前端对话框始终通过 runtime 代理 opencode 原生 `/api/model`、`/api/provider`，不再从 `ai_model_configs` 或 `ModelCatalogApplicationService` 返回托管目录；Run 启动前不再 `PATCH /global/config` 同步 provider。
 - 内部模型代理：按 `X-ICBC-Model-Provider` 查 JVM 内存中的内部供应商地址，向上游注入数据库保存的全局 `ICBC_OPENAI_AUTH_TOKEN` 和 `ucid`，并把流式 `<think>...</think>` 转换为 `reasoning_content`。
-- PTY terminal ticket、限流、active session registry、进程适配和审计。
+- PTY terminal ticket、限流、active session registry、进程适配和审计；受控交互 shell 使用 `-i -s`，在保留交互模式的同时显式从 WebSocket 转发的 stdin 读取命令。
 
 ## Model 目录配置
 
@@ -94,7 +94,7 @@
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
 - `InternalModelThinkStreamConverterTest` 覆盖企业内部模型流式 `<think>` 标签跨 chunk 转换为 `reasoning_content`；模型目录接口和 Run 选择测试以 opencode 原生目录透传为准。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
-- `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码和本地进程适配。
+- `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码、本地进程适配，以及交互 shell 显式读取 stdin 的启动参数和真实命令回显。
 
 ## 允许依赖
 

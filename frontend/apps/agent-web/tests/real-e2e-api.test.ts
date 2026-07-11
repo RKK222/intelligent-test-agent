@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { apiDelete, apiGet, apiPost, authHeaders, requestEnvelope } from "./real-e2e-api";
+import { apiDelete, apiGet, apiPost, authHeaders, requestEnvelope, waitForWorkspaceOperation } from "./real-e2e-api";
 
 describe("real E2E API client", () => {
   it("sends GET with the configured base URL, trace header and bearer token", async () => {
@@ -77,6 +77,35 @@ describe("real E2E API client", () => {
     expect(authHeaders("secret-token")).toEqual({ Authorization: "Bearer secret-token" });
     expect(authHeaders("")).toEqual({});
     expect(authHeaders(undefined)).toEqual({});
+  });
+
+  it("polls an asynchronous workspace operation until it succeeds", async () => {
+    const getOperation = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "RUNNING", currentStep: "PREPARING_REPOSITORY" })
+      .mockResolvedValueOnce({ status: "SUCCEEDED", workspaceId: "awp-one", versionId: "awv-one" });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(waitForWorkspaceOperation("wco-one", { getOperation, intervalMs: 1, timeoutMs: 100, sleep })).resolves.toMatchObject({
+      status: "SUCCEEDED",
+      workspaceId: "awp-one",
+      versionId: "awv-one"
+    });
+    expect(getOperation).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledOnce();
+  });
+
+  it("reports the asynchronous workspace failure step", async () => {
+    const getOperation = vi.fn().mockResolvedValue({
+      status: "FAILED",
+      currentStep: "PREPARING_REPOSITORY",
+      errorCode: "GIT_FAILURE",
+      errorMessage: "clone rejected"
+    });
+
+    await expect(waitForWorkspaceOperation("wco-one", { getOperation, sleep: vi.fn() })).rejects.toThrow(
+      "Workspace operation wco-one failed at PREPARING_REPOSITORY: GIT_FAILURE clone rejected"
+    );
   });
 });
 
