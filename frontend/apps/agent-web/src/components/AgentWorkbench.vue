@@ -116,6 +116,7 @@ import {
   retryCountdownSeconds,
   retryExpirationDecision,
   projectRootInteractionSession,
+  isSupersededInteractionAsk,
   runEventMatchesRun,
   runEventProjection,
   runtimeResources,
@@ -253,6 +254,12 @@ const sessionSearch = ref("");
 const sessionHistoryPage = ref(1);
 const sessionHistoryItems = ref<Session[]>([]);
 const sessionRuntimeState = shallowRef<SessionRuntimeStateSummary | null>(null);
+// 历史会话的 pending 快照比 durable ask 回放更新；仅屏蔽快照之前已经失效的 requestId。
+const interactionSnapshotBySessionId = new Map<string, {
+  synchronizedAtMs: number;
+  permissionRequestIds?: Set<string>;
+  questionRequestIds?: Set<string>;
+}>();
 const runtimeStateOutages = createRuntimeStateOutageTracker(RUNTIME_STATE_RECOVERY_STABLE_MS);
 let conversationInteractionGeneration = 0;
 // 必须早于认证 token 的 immediate watch 初始化，统一 interaction 失效时才能安全释放历史切换锁。
@@ -2340,7 +2347,12 @@ const replyPermissionMutation = useMutation({
     return api.replySessionPermission(session.value.sessionId, payload.requestId, { decision: payload.decision });
   },
   onSuccess: (_result, payload) => dispatchChat({ type: "permission.replied", requestId: payload.requestId }),
-  onError: (error) => {
+  onError: (error, payload) => {
+    if (error instanceof BackendApiError && error.code === "CONFLICT") {
+      dispatchChat({ type: "permission.replied", requestId: payload.requestId });
+      feedback.value = { kind: "info", title: "权限请求已失效", description: error.message };
+      return;
+    }
     feedback.value = errorFeedback("权限回复失败", error);
   }
 });
@@ -2353,7 +2365,12 @@ const replyQuestionMutation = useMutation({
     return api.replySessionQuestion(session.value.sessionId, payload.requestId, { answers: payload.answers });
   },
   onSuccess: (_result, payload) => dispatchChat({ type: "question.replied", requestId: payload.requestId }),
-  onError: (error) => {
+  onError: (error, payload) => {
+    if (error instanceof BackendApiError && error.code === "CONFLICT") {
+      dispatchChat({ type: "question.replied", requestId: payload.requestId });
+      feedback.value = { kind: "info", title: "提问请求已失效", description: error.message };
+      return;
+    }
     feedback.value = errorFeedback("提问回复失败", error);
   }
 });
@@ -2366,7 +2383,12 @@ const rejectQuestionMutation = useMutation({
     return api.rejectSessionQuestion(session.value.sessionId, requestId);
   },
   onSuccess: (_result, requestId) => dispatchChat({ type: "question.replied", requestId }),
-  onError: (error) => {
+  onError: (error, requestId) => {
+    if (error instanceof BackendApiError && error.code === "CONFLICT") {
+      dispatchChat({ type: "question.replied", requestId });
+      feedback.value = { kind: "info", title: "提问请求已失效", description: error.message };
+      return;
+    }
     feedback.value = errorFeedback("拒绝提问失败", error);
   }
 });
@@ -3459,6 +3481,10 @@ function handleRetryRun() {
 function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
   const projectedEvent = projectRootInteractionSession(event, subscribedSessionId);
   logs.value = [...logs.value.slice(-200), `[${projectedEvent.seq}] ${projectedEvent.type}`];
+  if (isInteractionAskSupersededBySnapshot(projectedEvent)) {
+    logs.value = [...logs.value.slice(-200), `[${projectedEvent.seq}] ignored stale interaction replay`];
+    return;
+  }
   dispatchChat({ type: "event", event: projectedEvent });
   const projection = runEventProjection(projectedEvent);
   if (projection.reset) {
@@ -3475,6 +3501,22 @@ function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
     return;
   }
   applyRunEventWorkbenchProjection(projectedEvent, true, subscribedSessionId);
+}
+
+function isInteractionAskSupersededBySnapshot(event: RunEvent): boolean {
+  if (event.type !== "permission.asked" && event.type !== "question.asked") {
+    return false;
+  }
+  const eventSessionId = text(event.payload.sessionId) ?? text(event.payload.sessionID);
+  if (!eventSessionId) {
+    return false;
+  }
+  const snapshot = interactionSnapshotBySessionId.get(eventSessionId);
+  return isSupersededInteractionAsk(
+    event,
+    snapshot?.synchronizedAtMs,
+    event.type === "permission.asked" ? snapshot?.permissionRequestIds : snapshot?.questionRequestIds
+  );
 }
 
 /** 将单条业务事件投影到 reducer 之外的 Workbench 状态。 */
@@ -4252,6 +4294,17 @@ async function switchSession(sessionId: string) {
         // 空数组也是明确的远端快照，必须覆盖工具 part 回放得到的旧任务。
         todos: liveTodos === null ? chatState.value.todos : liveTodos
       };
+    }
+    if (livePermissions !== null || liveQuestions !== null) {
+      interactionSnapshotBySessionId.set(sessionId, {
+        synchronizedAtMs: Date.now(),
+        permissionRequestIds: livePermissions === null
+          ? undefined
+          : new Set(livePermissions.map((item) => item.requestId)),
+        questionRequestIds: liveQuestions === null
+          ? undefined
+          : new Set(liveQuestions.map((item) => item.requestId))
+      });
     }
     // 正文可以先展示，但发送锁必须保留到关联 Run/Diff 投影完成，避免迟到历史详情覆盖新 Run。
     // 反馈状态独立异步补齐，不延长这把锁。

@@ -2365,6 +2365,8 @@ Session 运行态接口：
 
 - `OpencodeRuntimeFacadeTest`：验证 facade runtime 调用不泄漏 generated DTO。
 - `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、用户进程节点路由、固定节点 fallback、远端 session id、binding mismatch 自动重建、permission reply body、MCP resources/tools、config/provider OAuth/worktree/share/MCP auth 映射。
+
+交互请求若因 OpenCode 重启而不再存在，question/permission reply 会返回 `CONFLICT`（`reason=REMOTE_INTERACTION_EXPIRED`），前端清理旧弹框并提示重新发起；仍在 OpenCode pending 列表中的 request 继续按原接口回复。
 - `PlatformOpencodeRuntimeControllerTest`：验证平台路径统一响应、MCP tools 查询、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest`：验证 `/api/internal/agent/opencode/...` agent path 统一响应、agentId 选择、traceId 和可选用户主体透传。
 - `RuntimeControllerTest`：验证 `/api/internal/agent/opencode/runs` 与内部平台 Run URL 的 DTO、错误格式和 service 实现；`LegacyApiGoneWebFilterTest` 覆盖旧 Run URL 返回 `410 API_GONE`。

@@ -5,6 +5,8 @@ import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.icbc.testagent.agent.runtime.AgentRuntimeResult;
 import com.icbc.testagent.agent.runtime.AgentSessionMessagesCommand;
 import com.icbc.testagent.agent.runtime.AgentSessionMessagesResult;
+import com.icbc.testagent.common.error.ErrorCode;
+import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.session.SessionRepository;
@@ -572,11 +574,16 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object replyPermission(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        Object result = post(
-                location,
-                "/permission/" + encodePath(requestId) + "/reply",
-                permissionReplyBody(body),
-                traceId);
+        Object result;
+        try {
+            result = post(
+                    location,
+                    "/permission/" + encodePath(requestId) + "/reply",
+                    permissionReplyBody(body),
+                    traceId);
+        } catch (PlatformException exception) {
+            throw translateExpiredInteraction(exception, "permission", requestId, traceId);
+        }
         reconcileAfterInteractionReply(sessionId, location, traceId);
         return result;
     }
@@ -594,11 +601,16 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object replyQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        Object result = post(
-                location,
-                "/question/" + encodePath(requestId) + "/reply",
-                questionReplyBody(body),
-                traceId);
+        Object result;
+        try {
+            result = post(
+                    location,
+                    "/question/" + encodePath(requestId) + "/reply",
+                    questionReplyBody(body),
+                    traceId);
+        } catch (PlatformException exception) {
+            throw translateExpiredInteraction(exception, "question", requestId, traceId);
+        }
         reconcileAfterInteractionReply(sessionId, location, traceId);
         return result;
     }
@@ -608,13 +620,41 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object rejectQuestion(String sessionId, String requestId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        Object result = post(
-                location,
-                "/question/" + encodePath(requestId) + "/reject",
-                Map.of(),
-                traceId);
+        Object result;
+        try {
+            result = post(
+                    location,
+                    "/question/" + encodePath(requestId) + "/reject",
+                    Map.of(),
+                    traceId);
+        } catch (PlatformException exception) {
+            throw translateExpiredInteraction(exception, "question", requestId, traceId);
+        }
         reconcileAfterInteractionReply(sessionId, location, traceId);
         return result;
+    }
+
+    /**
+     * OpenCode 重启会清掉内存中的 pending ask；远端 404 只对交互请求转换为可恢复冲突，避免误报 502。
+     */
+    private PlatformException translateExpiredInteraction(
+            PlatformException exception,
+            String interactionType,
+            String requestId,
+            String traceId) {
+        Object status = exception.details().get("status");
+        if (!Integer.valueOf(404).equals(status)) {
+            return exception;
+        }
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                "" + interactionType + "请求已失效，请重新发起对话",
+                Map.of(
+                        "interactionType", interactionType,
+                        "requestId", requestId,
+                        "reason", "REMOTE_INTERACTION_EXPIRED",
+                        "traceId", traceId),
+                exception);
     }
 
     private void reconcileAfterInteractionReply(

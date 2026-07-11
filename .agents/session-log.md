@@ -10,6 +10,17 @@
   - 先用 `range-diff` 与稳定 patch-id 确认 `772ac3bd20` 和 `2c70e06b9` 的 `docs/superpowers`、`frontend` 代码补丁完全一致，再用 `git merge-tree` 分析冲突来源；最终采用保留当前 `main` tree 的双父合并，并校验合并前后 tree hash 相同、目标提交已成为主线祖先。
 - Result:
   - Mermaid 定向 Vitest 43/43、workspace typecheck、lint、生产构建通过；Playwright 桌面端与移动端 2/2 通过。全量前端基线为 728 passed、1 skipped、1 个既有 `DirectoryRows.test.ts` 失败，原因是当前主线同时提供文件与目录删除按钮，本次未扩大范围修改。
+### 2026-07-11 - 收敛历史终态并过滤重启后失效交互
+
+- Why:
+  - OpenCode 用户进程与平台 binding 仍然一致，4097 不是旧端口；真正问题是 OpenCode 重启丢失内存中的 question/permission request，平台重放旧事件后产生不可回复弹框，同时部分 RunEvent SSE 终态漏收导致远端已 `finish=stop` 的 Run 一直显示 RUNNING。
+- What:
+  - 历史 active Run 查询读取远端最新 assistant 消息，仅当消息带 `finish=stop` 且时间不早于本 Run 才补写 `RUN_SUCCEEDED`；前端以切换会话时的当前 pending 快照过滤已失效的旧 ask/permission 回放。远端交互 404 统一返回可恢复 `CONFLICT/REMOTE_INTERACTION_EXPIRED`，前端清理旧弹框并提示重新发起。
+  - 新增 `docs/testing/conversation-scenes.md`，集中列出直接对话、历史运行中/已结束、Todo、ask、permission、subagent、历史 subagent、宠物旁路成功/失败等可重复 fixture 入口和命令。
+- How:
+  - 复用现有 Run、AgentRuntime、binding、session message、RunEvent 和 reducer 链路；未修改 generated SDK、环境文件、数据库结构或 Flyway。新增后端终态/失效交互回归，前端快照过滤回归，并修正历史运行 fixture 使当前 pending 快照与旧事件同时存在。
+- Result:
+  - 后端 `OpencodeRuntimeApplicationServiceTest,RunApplicationServiceTest` 81 项通过；前端五组核心 fixture（FigmaChatPanel、runtime-reducer、opencode-timeline、side-question、workbench-utils）247 项通过、1 项跳过；定向 Playwright 6 项通过（含历史 permission）；`.env.test`/`test` profile 重启命令成功，backend liveness/readiness 为 UP、frontend 3000 为 200，manager WebSocket 已连接。仍有既有 `DirectoryRows.vue` 嵌套 button、CSS import 顺序和大 chunk 警告，未纳入本次范围。
 
 ### 2026-07-11 - 修复根会话交互事件的 remote Session 投影
 

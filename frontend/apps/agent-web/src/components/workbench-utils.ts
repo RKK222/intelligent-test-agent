@@ -121,6 +121,32 @@ export function projectRootInteractionSession(event: RunEvent, platformSessionId
   };
 }
 
+/**
+ * 历史切换已从 OpenCode 读取到 pending 交互快照时，忽略早于该快照且不在快照中的旧 ask 回放。
+ * 这样不会吞掉快照之后刚产生的真实提问或权限请求。
+ */
+export function isSupersededInteractionAsk(
+  event: RunEvent,
+  synchronizedAtMs: number | undefined,
+  pendingRequestIds: ReadonlySet<string> | undefined
+): boolean {
+  if (
+    (event.type !== "permission.asked" && event.type !== "question.asked")
+    || synchronizedAtMs === undefined
+    || !pendingRequestIds
+  ) {
+    return false;
+  }
+  const requestId = text(event.payload.requestId) ?? text(event.payload.requestID) ?? text(event.payload.id);
+  const occurredAtMs = Date.parse(event.occurredAt);
+  return Boolean(
+    requestId
+    && Number.isFinite(occurredAtMs)
+    && occurredAtMs <= synchronizedAtMs
+    && !pendingRequestIds.has(requestId)
+  );
+}
+
 /** 新模式在 run.created 中下发稳定反馈 ID；只接受平台 msg UUID 形状，避免误用远端 message id。 */
 export function assistantSummaryMessageId(payload: Record<string, unknown>): string | undefined {
   const candidate = payload.assistantSummaryMessageId;

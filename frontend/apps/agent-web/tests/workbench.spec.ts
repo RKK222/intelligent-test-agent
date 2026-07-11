@@ -1767,6 +1767,48 @@ test("switching history restores a pending native question dock instead of only 
   await expect.poll(() => questionReplies).toEqual([{ answers: [["接口测试"]] }]);
 });
 
+test("switching history restores a pending native permission dock and allows reply", async ({ page }) => {
+  const permissionReplies: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    permissionReplies,
+    sessions: [{
+      sessionId: "ses_history_permission",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "历史权限会话",
+      status: "ACTIVE",
+      createdAt: "2026-07-11T08:00:00Z",
+      updatedAt: "2026-07-11T08:01:00Z"
+    }],
+    sessionMessagesBySessionId: { ses_history_permission: [] },
+    sessionTreeMessagesBySessionId: {
+      ses_history_permission: {
+        sessionId: "ses_history_permission",
+        sessions: [{ rootSessionId: "ses_history_permission", sessionId: "ses_history_permission", childSession: false }],
+        messagesBySessionId: {},
+        childSessionIdByTaskPartId: {},
+        events: []
+      }
+    },
+    sessionPermissionsById: {
+      ses_history_permission: [{
+        id: "perm_history_permission",
+        sessionID: "ses_remote_permission",
+        permission: "edit",
+        title: "允许修改测试文件",
+        pattern: "tests/**"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: /历史权限会话/ }).click();
+  const dock = page.locator(".figma-chat-question-dock");
+  await expect(dock).toContainText("允许修改测试文件");
+  await page.getByRole("button", { name: "一次" }).click();
+  await expect.poll(() => permissionReplies).toEqual([{ decision: "once" }]);
+});
+
 test("switching to a running history maps its remote question event and allows reply", async ({ page }) => {
   const questionReplies: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
@@ -1799,7 +1841,14 @@ test("switching to a running history maps its remote question event and allows r
         events: []
       }
     },
-    sessionQuestionsById: { ses_history_running: [] },
+    // 历史运行中的交互必须同时存在于当前 OpenCode pending 快照；旧 Event 单独回放不再伪造可回复弹框。
+    sessionQuestionsById: {
+      ses_history_running: [{
+        id: "que_history_running",
+        sessionID: "ses_remote_history",
+        questions: [{ question: "历史运行中：选择继续方式", options: [{ label: "继续" }, { label: "停止" }] }]
+      }]
+    },
     runtimeStateSummary: {
       runningCount: 1,
       questionCount: 1,
@@ -3412,6 +3461,8 @@ async function mockBackendApi(
     sessionMessagesBySessionId?: Record<string, Array<Record<string, unknown>>>;
     /** 指定历史会话的 pending native question，键为 sessionId。 */
     sessionQuestionsById?: Record<string, Array<Record<string, unknown>>>;
+    /** 指定历史会话的 pending native permission，键为 sessionId。 */
+    sessionPermissionsById?: Record<string, Array<Record<string, unknown>>>;
     sessionMessageRequests?: string[];
     sessionMessagesGate?: Promise<void>;
     messageFeedbackGate?: Promise<void>;
@@ -3963,6 +4014,11 @@ async function mockBackendApi(
       await route.fulfill(json(capture.sessionQuestionsById?.[sessionId] ?? []));
       return;
     }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/permissions$/.test(url.pathname)) {
+      const sessionId = url.pathname.match(/\/sessions\/([^/]+)\/permissions$/)?.[1] ?? "";
+      await route.fulfill(json(capture.sessionPermissionsById?.[sessionId] ?? []));
+      return;
+    }
     if (method === "POST" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/questions\/[^/]+\/reply$/.test(url.pathname)) {
       capture.questionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
@@ -4114,6 +4170,11 @@ async function mockBackendApi(
       return;
     }
     if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions/ses_1/permissions/perm_1/reply") {
+      capture.permissionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      await route.fulfill(json({ accepted: true }));
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/permissions\/[^/]+\/reply$/.test(url.pathname)) {
       capture.permissionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
       return;

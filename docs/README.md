@@ -30,6 +30,10 @@
 - `docs/api/http-api.md`：HTTP API 路径、方法、请求/响应、错误码、traceId。
 - `docs/api/event-stream.md`：RunEvent SSE 事件类型、字段、续传规则（单一事实源）。
 
+## 对话场景造数
+
+- `docs/testing/conversation-scenes.md`：直接对话、历史运行中、Todo、ask、permission、subagent、宠物旁路成功/失败等可重复 fixture 入口。
+
 ## 部署与数据库
 
 - `docs/deployment/backend.md`：后端 Java 进程容器部署。

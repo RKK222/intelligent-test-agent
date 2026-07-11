@@ -2257,6 +2257,112 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void activeRunLookupConvergesWhenRemoteFinalMessageWasMissedByEventStream() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
+        facade.streamEvents = ignored -> Flux.never();
+        facade.sessionMessagesResult = new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of(
+                                "id", "msg_final_lookup_1234567890",
+                                "role", "assistant",
+                                "finish", "stop",
+                                "time", Map.of("created", NOW.plusSeconds(1).toEpochMilli(), "completed", NOW.plusSeconds(2).toEpochMilli())),
+                        List.of(Map.of(
+                                "id", "part_final_lookup_1234567890",
+                                "type", "text",
+                                "text", "已完成")))),
+                null,
+                null);
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                bindings);
+        Run run = new Run(
+                new RunId("run_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                RunStatus.RUNNING,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef").withRuntimeSelection("build", null);
+        runs.save(run);
+        bindings.save(new AgentSessionBinding(
+                run.sessionId(),
+                "opencode",
+                REMOTE_SESSION_ID,
+                node().executionNodeId(),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef"));
+
+        Optional<Run> activeRun = service.findActiveRun(run.sessionId());
+        assertThat(facade.sessionMessagesCommands).extracting(OpencodeSessionMessagesCommand::order)
+                .contains("desc", "asc");
+        assertThat(runs.saved).extracting(Run::status).contains(RunStatus.SUCCEEDED);
+        assertThat(activeRun).isEmpty();
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(events.events).extracting(RunEvent::type).containsExactly(RunEventType.RUN_SUCCEEDED);
+    }
+
+    @Test
+    void activeRunLookupDoesNotConvergeFromAssistantMessageBeforeRun() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
+        facade.sessionMessagesResult = new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of(
+                                "id", "msg_previous_1234567890",
+                                "role", "assistant",
+                                "finish", "stop",
+                                "time", Map.of("created", NOW.minusSeconds(2).toEpochMilli())),
+                        List.of())),
+                null,
+                null);
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                bindings);
+        Run run = new Run(
+                new RunId("run_previous_guard_123456"),
+                new SessionId("ses_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                RunStatus.RUNNING,
+                NOW,
+                NOW,
+                "trace_previous_guard_123").withRuntimeSelection("build", null);
+        runs.save(run);
+        bindings.save(new AgentSessionBinding(
+                run.sessionId(),
+                "opencode",
+                REMOTE_SESSION_ID,
+                node().executionNodeId(),
+                NOW,
+                NOW,
+                "trace_previous_guard_123"));
+
+        assertThat(service.findActiveRun(run.sessionId())).contains(run);
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(events.events).isEmpty();
+    }
+
+    @Test
     void servicePersistsLiveDiffFromCompletedEditToolPart() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
@@ -2858,21 +2964,23 @@ class RunApplicationServiceTest {
 
     private static class FakeRunRepository implements RunRepository {
         private final List<Run> saved = new CopyOnWriteArrayList<>();
+        private final Map<RunId, Run> currentByRunId = new LinkedHashMap<>();
 
         @Override
         public Run save(Run run) {
+            currentByRunId.put(run.runId(), run);
             saved.add(run);
             return run;
         }
 
         @Override
         public Optional<Run> findById(RunId runId) {
-            return saved.stream().filter(run -> run.runId().equals(runId)).reduce((first, second) -> second);
+            return Optional.ofNullable(currentByRunId.get(runId));
         }
 
         @Override
         public Optional<Run> findLatestActiveBySessionId(SessionId sessionId) {
-            return saved.stream()
+            return currentByRunId.values().stream()
                     .filter(run -> run.sessionId().equals(sessionId))
                     .filter(run -> !run.status().isTerminal())
                     .reduce((first, second) -> second);

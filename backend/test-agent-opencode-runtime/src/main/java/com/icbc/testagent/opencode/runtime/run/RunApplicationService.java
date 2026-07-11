@@ -2016,7 +2016,67 @@ public class RunApplicationService {
      */
     public Optional<Run> findActiveRun(SessionId sessionId) {
         findSession(sessionId);
+        Optional<Run> activeRun = runRepository.findLatestActiveBySessionId(sessionId);
+        // 历史会话重新打开时，OpenCode 全局事件流可能已错过 root session.idle；只在远端最新消息已明确
+        // finish=stop 时补写成功终态，不能仅因页面刷新或远端 session 存在就结束 Run。
+        activeRun.ifPresent(this::reconcileActiveRunFromRemoteFinalMessage);
         return runRepository.findLatestActiveBySessionId(sessionId);
+    }
+
+    /**
+     * 用远端最终 assistant 消息补偿丢失的终态事件，避免实际已完成的历史 Run 永久停在运行中。
+     */
+    private void reconcileActiveRunFromRemoteFinalMessage(Run activeRun) {
+        String resolvedAgentId = runtimeAgentIdForRun(activeRun);
+        try {
+            Session session = findSession(activeRun.sessionId());
+            Optional<AgentSessionBinding> binding = runtimeTargetResolver.findAgentBinding(
+                    resolvedAgentId, session, activeRun.traceId());
+            if (binding.isEmpty()) {
+                return;
+            }
+            Optional<ExecutionNode> node = executionNodeRepository.findById(binding.get().executionNodeId());
+            if (node.isEmpty()) {
+                return;
+            }
+            AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+            latestFinishedAssistant(
+                            runtime,
+                            node.get(),
+                            binding.get().remoteSessionId(),
+                            activeRun.traceId(),
+                            activeRun.createdAt())
+                    .ifPresent(finalMessage -> completeActiveRunAfterInteraction(
+                            activeRun.sessionId(),
+                            binding.get().remoteSessionId(),
+                            resolvedAgentId,
+                            finalMessage,
+                            activeRun.traceId()));
+        } catch (RuntimeException exception) {
+            // active-run fallback 不能因补偿探测失败而阻断历史会话打开；下一次读取仍会重试。
+            LOGGER.warn(
+                    "Failed to reconcile active Run from remote final message, runId={}, traceId={}, errorType={}",
+                    activeRun.runId().value(),
+                    activeRun.traceId(),
+                    exception.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Run.agentId 在旧数据中保存的是 OpenCode 内部 build/plan 角色，而非平台 AgentRuntime ID；
+     * 查询历史 Run 的远端消息时必须回退到默认 opencode runtime，不能把 build 当作注册 runtime。
+     */
+    private String runtimeAgentIdForRun(Run run) {
+        String candidate = agentRuntimeRegistry.normalize(run.agentId());
+        try {
+            agentRuntimeRegistry.require(candidate);
+            return candidate;
+        } catch (PlatformException exception) {
+            if (exception.errorCode() != ErrorCode.NOT_FOUND) {
+                throw exception;
+            }
+            return agentRuntimeRegistry.defaultAgentId();
+        }
     }
 
     /**
@@ -2071,6 +2131,18 @@ public class RunApplicationService {
             ExecutionNode node,
             String remoteSessionId,
             String traceId) {
+        return latestFinishedAssistant(runtime, node, remoteSessionId, traceId, null);
+    }
+
+    /**
+     * 只用本 Run 之后产生的最终消息收敛历史 Run，避免把上一轮 assistant 的 finish=stop 误当成本轮结果。
+     */
+    private Optional<AgentSessionMessage> latestFinishedAssistant(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String remoteSessionId,
+            String traceId,
+            Instant notBefore) {
         AgentSessionMessagesResult result = runtime.sessionMessages(new AgentSessionMessagesCommand(
                         node,
                         remoteSessionId,
@@ -2087,7 +2159,38 @@ public class RunApplicationService {
                 || !"stop".equals(textValue(latest.message().get("finish")).orElse(null))) {
             return Optional.empty();
         }
+        if (notBefore != null) {
+            Optional<Instant> messageCreatedAt = messageCreatedAt(latest.message());
+            // OpenCode 消息时间以毫秒保存，Run.createdAt 可能带纳秒；允许 1 秒精度误差但不接受无时间的旧快照。
+            if (messageCreatedAt.isEmpty()
+                    || messageCreatedAt.get().toEpochMilli() < notBefore.minusSeconds(1).toEpochMilli()) {
+                return Optional.empty();
+            }
+        }
         return Optional.of(latest);
+    }
+
+    private Optional<Instant> messageCreatedAt(Map<String, Object> message) {
+        Map<String, Object> time = mapValue(message.get("time")).orElse(Map.of());
+        return epochMillisValue(time.get("completed"))
+                .or(() -> epochMillisValue(time.get("created")))
+                .or(() -> epochMillisValue(message.get("completedAt")))
+                .or(() -> epochMillisValue(message.get("createdAt")))
+                .map(Instant::ofEpochMilli);
+    }
+
+    private Optional<Long> epochMillisValue(Object value) {
+        if (value instanceof Number number) {
+            return Optional.of(number.longValue());
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Optional.of(Long.parseLong(text));
+            } catch (NumberFormatException ignored) {
+                return Optional.empty();
+            }
+        }
+        return Optional.empty();
     }
 
     private void completeActiveRunAfterInteraction(

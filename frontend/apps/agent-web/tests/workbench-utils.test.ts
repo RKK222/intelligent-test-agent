@@ -30,6 +30,7 @@ import {
   sessionTitleEventMatchesCurrentSession,
   platformSessionTitleFromSynchronizedEventPayload,
   projectRootInteractionSession,
+  isSupersededInteractionAsk,
   runEventProjection,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
@@ -136,6 +137,24 @@ describe("projectRootInteractionSession", () => {
     } as RunEvent;
 
     expect(projectRootInteractionSession(event, "ses_platform_root")).toBe(event);
+  });
+});
+
+describe("isSupersededInteractionAsk", () => {
+  const staleQuestion = {
+    eventId: "evt_stale_question",
+    runId: "run_1",
+    seq: 7,
+    type: "question.asked",
+    traceId: "trace_1",
+    occurredAt: "2026-07-11T08:40:50Z",
+    payload: { requestId: "que_stale" }
+  } as RunEvent;
+
+  it("ignores only a replayed ask absent from the newer remote pending snapshot", () => {
+    expect(isSupersededInteractionAsk(staleQuestion, Date.parse("2026-07-11T08:41:00Z"), new Set())).toBe(true);
+    expect(isSupersededInteractionAsk(staleQuestion, Date.parse("2026-07-11T08:41:00Z"), new Set(["que_stale"]))).toBe(false);
+    expect(isSupersededInteractionAsk({ ...staleQuestion, occurredAt: "2026-07-11T08:41:01Z" }, Date.parse("2026-07-11T08:41:00Z"), new Set())).toBe(false);
   });
 });
 

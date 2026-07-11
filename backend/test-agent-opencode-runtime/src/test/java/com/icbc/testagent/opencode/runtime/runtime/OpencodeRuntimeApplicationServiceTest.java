@@ -562,6 +562,26 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("沙箱"), List.of("两个"))));
     }
 
+    @Test
+    void replyQuestionMapsRemoteMissingRequestToRecoverableConflict() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.error(new PlatformException(
+                ErrorCode.OPENCODE_BAD_GATEWAY,
+                "TestAgent 服务响应异常",
+                Map.of("status", 404))));
+
+        assertThatThrownBy(() -> fixture.service.replyQuestion(
+                        "ses_1234567890abcdef",
+                        "que_expired1234567890",
+                        Map.of("answers", List.of("A")),
+                        "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("请求已失效");
+                    assertThat(exception.details()).containsEntry("reason", "REMOTE_INTERACTION_EXPIRED");
+                });
+    }
+
     private static final class Fixture {
         private final WorkspaceRepository workspaceRepository = org.mockito.Mockito.mock(WorkspaceRepository.class);
         private final SessionRepository sessionRepository = org.mockito.Mockito.mock(SessionRepository.class);
