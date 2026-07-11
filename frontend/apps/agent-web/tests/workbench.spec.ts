@@ -1720,7 +1720,7 @@ test("switching history restores a pending native question dock instead of only 
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: "消息列表" }).click();
   await page.getByRole("button", { name: /历史提问会话/ }).click();
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("请选择验证范围");

@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-11 - 合并主线并复核对话回放能力
+
+- Why:
+  - 主工作树处于 `main` rebase 中，远程运行态快照改造与本地任务清单、旁路 ask、历史 question/permission 和子 Agent 回放提交存在重叠，需合并而不能互相覆盖。
+- What:
+  - 将远程 `origin/main` 合入后保留 `todo.updated`/todowrite 历史回放、历史 question 弹框与回复、permission 恢复、任务子 Agent 跳转、全部 Part fixture 和宠物旁路 SSE；修正 Redis 摘要 Run 启动时 `AgentStartRunCommand` 漏传 `system` 形参导致的后端编译失败。
+- How:
+  - 冲突处统一保留 `run.snapshot.reset`、`side_question.*` 和 runtime-state fence；旁路会话切换只清理自身展示，不绕过主 Run 的 runtime-state 恢复策略。测试 fixture 与 Playwright mock 保留各类历史对话及其 API 回包，可直接构造回放场景。
+- Result:
+  - `mvn -pl test-agent-opencode-runtime -am test -DskipITs` 通过（487 tests）；前端定向 Vitest 312 passed、1 skipped，workspace typecheck 通过，Playwright 覆盖旁路流/重试、历史投影及历史 question 弹框回复通过。历史 question 夹具的旧“历史”按钮选择器已更新为当前“消息列表”入口；合并后缺失的 `@vue-flow/core` 已由 frozen-lockfile 安装恢复；未改环境文件。
+
 ### 2026-07-11 - 恢复 OpenCode todowrite 实时与历史待办面板
 
 - Why:
