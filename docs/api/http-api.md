@@ -2306,7 +2306,7 @@ Session 运行态接口：
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/abort` | 中止当前 session 执行。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/fork` | fork session。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question` | 旁路问答：从指定消息边界创建临时 fork，必要时只在临时 fork 上调用 summarize/compact，再使用 `plan` agent 的只读权限发送问题，等待工具执行后的自然语言最终回答并删除临时会话；问题和回答不写入主会话历史。body 为 `{ question, messageId?, agent?, model? }`，`question` 最长 4000 字；上下文超过 40 条消息或约 48000 字符时必须提供 `provider/model` 格式的 `model`。响应为 `{ answer, compacted }`。 |
-| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question/runs` | 启动流式旁路问答。body 为 `{ question, messageId?, model? }`，服务端固定使用 `plan` 只读策略，立即返回 `{ runId }`；客户端随后通过既有 RunEvent SSE 订阅该 Run。平台创建从一开始即为 `ARCHIVED` 的内部 Session 和 `SIDE_QUESTION` Run，问题与答案不进入主 Session 消息历史。旧同步 `side-question` 路径继续保留兼容。 |
+| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question/runs` | 启动流式旁路问答。body 为 `{ question, messageId?, model? }`，服务端固定使用 `build` agent，并以系统提示限制为只读，立即返回 `{ runId }`；客户端随后通过既有 RunEvent SSE 订阅该 Run。平台创建从一开始即为 `ARCHIVED` 的内部 Session 和 `SIDE_QUESTION` Run，问题与答案不进入主 Session 消息历史。旧同步 `side-question` 路径继续保留兼容。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/compact` | 调用 opencode summarize/compact。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/revert` | revert 指定 message。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/unrevert` | 取消 revert。 |

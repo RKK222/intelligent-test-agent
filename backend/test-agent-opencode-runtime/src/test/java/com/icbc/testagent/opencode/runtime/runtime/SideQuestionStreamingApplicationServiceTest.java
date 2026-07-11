@@ -100,7 +100,7 @@ class SideQuestionStreamingApplicationServiceTest {
         assertThat(pending.sourceType()).isEqualTo(ConversationSourceType.SIDE_QUESTION);
         assertThat(pending.sourceRefId()).isEqualTo(MAIN_SESSION_ID.value());
         assertThat(pending.triggeredByUserId()).isEqualTo(USER_ID);
-        assertThat(pending.agentId()).isEqualTo("plan");
+        assertThat(pending.agentId()).isEqualTo("build");
         ArgumentCaptor<RoutingDecision> routingCaptor = ArgumentCaptor.forClass(RoutingDecision.class);
         verify(fixture.routingDecisions).save(routingCaptor.capture());
         assertThat(routingCaptor.getValue().runId()).isEqualTo(result.runId());
@@ -149,7 +149,7 @@ class SideQuestionStreamingApplicationServiceTest {
         verify(fixture.liveBus).publishTransient(any(RunEventDraft.class));
         ArgumentCaptor<AgentStartRunCommand> startCaptor = ArgumentCaptor.forClass(AgentStartRunCommand.class);
         verify(fixture.runtime).startRun(startCaptor.capture());
-        assertThat(startCaptor.getValue().agent()).isEqualTo("plan");
+        assertThat(startCaptor.getValue().agent()).isEqualTo("build");
         assertThat(startCaptor.getValue().system()).isEqualTo(SideQuestionPolicy.SYSTEM_PROMPT);
         assertThat(startCaptor.getValue().messageId()).isNull();
         ArgumentCaptor<AgentRuntimeCommand> runtimeCaptor = ArgumentCaptor.forClass(AgentRuntimeCommand.class);

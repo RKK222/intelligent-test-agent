@@ -79,7 +79,7 @@ public class SideQuestionOrphanCleanupService {
 
         AgentRuntimeTargetResolver.SessionRuntimeTarget target;
         try {
-            // 旁路能力当前固定由 opencode 承载；远端 plan 只属于 prompt agent，不是 runtime agentId。
+            // 旁路能力当前固定由 opencode 承载；远端 build 只属于 prompt agent，不是 runtime agentId。
             target = targetResolver.mappedSideQuestionSessionTarget(
                     AgentRuntimeRegistry.DEFAULT_AGENT_ID,
                     current.sessionId(),

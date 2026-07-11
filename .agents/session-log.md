@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-11 - 宠物旁路问答改用 build agent 以缩短回答等待
+
+- Why:
+  - 用户反馈宠物浮层长期停留在“正在执行只读检查”，并明确要求直接使用 `build` agent。
+- What:
+  - 流式旁路 Run 的固定 prompt agent 从 `plan` 改为 `build`，保留系统提示的只读、禁止编辑和禁止破坏性操作约束；同步 Run 持久化选择、模块/API/前端文档和运行时断言。真实 E2E 的 durable 生命周期断言改按服务端 `seq` 排序，避免 live bus 与历史回放并发到达造成误报。
+- How:
+  - 复用已有 `SideQuestionPolicy` 作为唯一 agent 选择点，不新增 API、事件、数据库、环境变量或 generated SDK 改动；临时 fork、compact、SSE 投影与清理链路保持不变。
+- Result:
+  - `SideQuestionPolicyTest` 与 `SideQuestionStreamingApplicationServiceTest` 共 16 项通过；test 三服务重启后 liveness/readiness 为 UP、前端 200、CORS 预检通过。真实宠物旁路 E2E 通过（14.3 秒），验证最终答案、主会话隔离与 fork 删除。
+
 ### 2026-07-11 - 修复跨节点 RunEvent SSE 鉴权并保留对话回放 fixture
 
 - Why:

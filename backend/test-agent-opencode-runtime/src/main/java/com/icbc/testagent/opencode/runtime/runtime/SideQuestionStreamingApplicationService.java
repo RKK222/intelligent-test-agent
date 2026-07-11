@@ -190,7 +190,7 @@ public class SideQuestionStreamingApplicationService {
                         now,
                         traceId)
                 .withSource(ConversationSourceType.SIDE_QUESTION, mainSessionId.value(), userId)
-                .withRuntimeSelection(SideQuestionPolicy.PLAN_AGENT, normalizedModel);
+                .withRuntimeSelection(SideQuestionPolicy.BUILD_AGENT, normalizedModel);
         pending = runRepository.save(pending);
         routingDecisionRepository.save(new RoutingDecision(
                 pending.runId(),
@@ -388,7 +388,7 @@ public class SideQuestionStreamingApplicationService {
                             question,
                             List.of(AgentPromptPart.text(question)),
                             null,
-                            SideQuestionPolicy.PLAN_AGENT,
+                            SideQuestionPolicy.BUILD_AGENT,
                             SideQuestionPolicy.SYSTEM_PROMPT,
                             selection == null ? null : selection.providerId(),
                             selection == null ? null : selection.modelId(),

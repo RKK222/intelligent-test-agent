@@ -158,7 +158,10 @@ test.describe("phase 11 real service integration", () => {
       const events = await capture.finished;
       const nativeSessionsAfterTerminal = await listNativeSessionIds(openCodeDatabasePath);
       observedForkIds = observedForkIds.filter((id) => !nativeSessionsAfterTerminal.includes(id));
-      const durable = events.filter((event) => typeof event.seq === "number" && event.seq > 0);
+      // live bus 与历史回放可并发抵达；durable 顺序以服务端分配的 seq 为唯一事实源。
+      const durable = events
+        .filter((event) => typeof event.seq === "number" && event.seq > 0)
+        .sort((left, right) => left.seq - right.seq);
       expect(durable.map((event) => event.type).slice(0, 3)).toEqual([
         "run.created",
         "run.started",

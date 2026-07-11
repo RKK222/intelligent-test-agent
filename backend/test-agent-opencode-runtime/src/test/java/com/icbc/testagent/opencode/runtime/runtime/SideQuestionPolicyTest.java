@@ -31,7 +31,7 @@ class SideQuestionPolicyTest {
                 .contains("read-only")
                 .contains("never edit files")
                 .contains("Do not stop after a tool call");
-        assertThat(SideQuestionPolicy.PLAN_AGENT).isEqualTo("plan");
+        assertThat(SideQuestionPolicy.BUILD_AGENT).isEqualTo("build");
         assertThat(SideQuestionPolicy.TASK_TIMEOUT).isEqualTo(Duration.ofSeconds(120));
     }
 
