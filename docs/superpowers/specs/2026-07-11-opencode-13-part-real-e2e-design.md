@@ -1,78 +1,104 @@
-# OpenCode 13 种 Part 真实 E2E 设计
+# OpenCode 1.17.7 全部 Part 真实 E2E 设计
 
-## 背景
+## 背景与官方口径
 
-项目当前使用 OpenCode 1.17.7。官方 `Part` 联合类型包含 13 种：`text`、`subtask`、`reasoning`、`file`、`tool`、`step-start`、`step-finish`、`snapshot`、`patch`、`agent`、`retry`、`compaction`。现有单元测试已经覆盖类型归一化，但不能证明真实 OpenCode、平台后端、历史恢复和浏览器展示的完整链路都无损。
+项目当前使用 OpenCode 1.17.7。经官方 `v1.17.7` tag 的 `packages/sdk/js/src/gen/types.gen.ts` 复核，`Part` 联合类型实际包含 **12 种**：`text`、`subtask`、`reasoning`、`file`、`tool`、`step-start`、`step-finish`、`snapshot`、`patch`、`agent`、`retry`、`compaction`。此前“13 种 Part”是错误计数；Question/Permission 是独立交互协议，不属于 Part。
 
-本设计建立可重复的真实 E2E 矩阵，并在发现问题时按项目规范直接修复。不得用前端 mock、伪造平台 RunEvent 或只跑组件测试替代真实链路。
+现有单元测试已经覆盖类型归一化，但不能证明真实 OpenCode、平台后端、历史恢复和浏览器展示的完整链路都无损。本设计建立 12 种官方 Part 的可重复真实 E2E 矩阵，并把 Question/Permission 作为额外强制回归门禁。不得用前端 mock、伪造平台 RunEvent 或只跑组件测试替代真实链路。
 
 ## 验收口径
 
-每一种 Part 必须同时具备以下证据：
+每一种 Part 必须具备以下证据：
 
-1. OpenCode 1.17.7 原生会话消息接口返回目标 Part，保留真实 `sessionID/messageID/partID`。
+1. OpenCode 1.17.7 原生 `/session/{id}/message` 返回目标 Part，保留真实 `sessionID/messageID/partID`。
 2. 平台通过既有 runtime 路由读取同一远端会话，Session messages/tree 投影包含目标 Part。
-3. 当前会话通过真实 RunEvent SSE 或消息恢复链路接收目标 Part。
-4. 浏览器真实工作台展示目标 Part 对应的 Timeline 行、正文、工具卡或原生 fallback，不能静默丢弃。
+3. 自然触发的类型必须通过真实 RunEvent SSE 接收目标 Part；原生构造的类型明确只验证 OpenCode HTTP、平台 recovery/history，不得声称实时 SSE 已通过。
+4. 浏览器真实工作台展示对应 Timeline 行、正文、工具卡或原生 fallback，不能静默丢弃。
 5. 切换到新对话后再从历史打开，目标 Part 仍可恢复。
-6. 不适用交互允许标记 N/A，但必须说明原因；适用的展开、复制或子 Agent 跳转需要验证。
+6. 适用的展开、复制或子 Agent 跳转需要验证；不适用交互可标记 N/A，但必须说明原因。
 
-只有 13 行矩阵全部有上述证据，且发现的缺陷已经回归验证，任务才算完成。
+只有 12 行官方 Part 矩阵和额外 Question/Permission 门禁全部有证据，且发现的缺陷已经回归验证，任务才算完成。
 
 ## 触发策略
 
-采用“方案 2 + 方案 1”的顺序。
+采用用户确认的“方案 2 + 方案 1”：先真实模型自然触发，第一次无法触发时立即改用 OpenCode 原生会话构造。
 
 ### 第一优先级：真实模型自然触发
 
-每种 Part 先执行一次明确、可审计的真实模型场景：
+自然触发每项最多等待 45 秒、最多消耗一轮模型请求；目标 Part 未出现在 OpenCode 原始消息响应时立即判定未命中，不重复碰运气。`retry` 最多允许上游重试一次；`compaction` 的上下文准备上限为 50 条短消息或 48,000 字符。
 
-| Part | 首次自然触发场景 |
-| --- | --- |
-| `text` | 要求只返回固定标记文本 |
-| `reasoning` | 使用支持 reasoning 的当前模型完成简单分析 |
-| `file` | 发送真实文本或图片附件 |
-| `tool` | 调用 `read` 读取工作区文件 |
-| `subtask` | 调用 task/subagent 并等待子会话结果 |
-| `step-start` / `step-finish` | 完成一轮包含模型步骤和工具调用的任务 |
-| `snapshot` / `patch` | 要求编辑受控临时工作区文件并检查 OpenCode 产生的原生变更 Part |
-| `agent` | 显式使用 Agent 选择或原生 agent Part 场景 |
-| `retry` | 使用可控的临时失败场景观察 provider retry |
-| `compaction` | 构造超过上下文阈值的临时会话并调用原生 compact/summarize |
-
-每种类型只进行一次自然触发尝试。未出现目标 Part 时记录“自然触发未命中”和原始消息证据，不重复消耗模型进行碰运气。
+| Part | 首次自然触发操作 | 目标消息和命中判定 |
+| --- | --- | --- |
+| `text` | 要求只返回唯一标记 `E2E_TEXT_<id>` | root assistant 最新消息含 `type=text` 和唯一标记 |
+| `reasoning` | 使用当前支持 reasoning 的模型分析两个固定数字并返回标记 | root assistant 消息含非空 `type=reasoning` |
+| `file` | 通过既有 Run prompt parts 上传临时 `e2e-part.txt` | root user 消息含 `type=file`，保留 mime/url/source |
+| `tool` | 要求 `read` 读取临时工作区 `README.md` | root assistant 消息含 `type=tool`、`tool=read`、完成态 state |
+| `subtask` | 要求 build agent 调用 task/subagent 执行固定只读检查 | 先确认 root task tool；只有 OpenCode API 中真实出现 `type=subtask` 的父消息才算命中，task tool 不能代替 |
+| `step-start` | 执行上述 read 工具任务 | 同一 root assistant 步骤消息含 `type=step-start` |
+| `step-finish` | 等待上述 read 工具任务完成 | 同一 root assistant 步骤消息含 `type=step-finish` 和 tokens/cost |
+| `snapshot` | 要求模型编辑临时工作区文件一次 | 编辑所在 root assistant 消息含 `type=snapshot`；未出现则构造 |
+| `patch` | 同一受控编辑任务 | 编辑所在 root assistant 消息含 `type=patch`；未出现则构造 |
+| `agent` | prompt part 选择真实可用 Agent，并要求它返回固定标记 | root user/assistant 消息含 `type=agent` 和 name；选择器本身不算命中 |
+| `retry` | 测试专属 Provider 仅允许一次可控 429/503 后恢复 | root assistant 消息含 `type=retry`；环境不能安全注入 Provider 时直接构造 |
+| `compaction` | 在测试临时会话准备受限上下文后调用既有 summarize/compact API | compact 产生的 user 消息含 `type=compaction`；API 未生成则构造 |
 
 ### 第二优先级：OpenCode 原生会话构造
 
-首次自然触发未命中的类型，使用与当前 OpenCode 1.17.7 存储结构一致的测试夹具写入专用临时会话，再通过 OpenCode 自身 HTTP message API读取。构造只允许发生在测试创建的 OpenCode 数据目录和测试会话内，禁止改用户历史、生产配置或项目 generated SDK。
+首次自然触发未命中的类型，使用与 OpenCode 1.17.7 SQLite 结构一致的测试夹具写入专用临时会话，再通过 OpenCode 自身 HTTP message API读取。
 
-这条路径仍必须经过真实 OpenCode 服务、平台后端 runtime 路由、消息恢复、浏览器工作台和历史恢复；不得直接向平台数据库、RunEvent SSE 或前端状态注入 Part。
+本地 manager 已把每个进程的数据物理隔离在 `.tmp/dev-services/opencode-manager-session/{port}/opencode/opencode.db`。测试先通过平台创建带唯一 `e2e_part_<runId>` 标题的 Session 和真实远端 mapping，再从 manager state JSON 校验该用户进程的 port/PID，并只打开该 port 对应数据库。数据库路径必须位于项目 `.tmp/dev-services/opencode-manager-session/`；路径不满足时拒绝运行。
 
-如果 OpenCode 当前存储不支持安全、隔离地构造，则改用测试专属 OpenCode 插件/进程启动目录生成原生 Part，不能退化成平台 mock。
+夹具复用远端 Session 已有 `project_id/directory/version`，在单个 SQLite transaction 中新增唯一 message/part 行。写入后轮询同一端口的 OpenCode `/session/{remoteId}/message`，只有 HTTP 返回完全相同的 message/part ID 和字段才算构造成功。先以一个探针 Part 验证运行中 SQLite 写入可见；5 秒内 HTTP 不可见时测试失败并保留证据，不直接重启或绕过 manager 修改进程状态。
 
-## 测试架构
+finally 按顺序通过 OpenCode API删除远端测试 Session、删除平台测试 Session，并查询 SQLite/HTTP确认唯一 `e2e_part_` message/part ID 均为零。构造只允许改测试 Session，禁止改用户历史、用户配置、平台数据库、RunEvent SSE 或 generated SDK。
 
-扩展现有 `frontend/apps/agent-web/tests/workbench.real-spec.ts` 和 `playwright.real.config.ts`，复用：
+## 字段级无损矩阵
 
-- `.env.test` / Spring `test` profile 的真实后端；
-- opencode-manager 管理的用户专属 OpenCode 1.17.7 进程；
-- 既有平台 Workspace、Session、Run、runtime message/tree API；
-- Playwright 真实浏览器与工作台登录态；
-- 临时工作区和 finally 清理机制。
+各层不能只断言 `type`。必须比较以下关键字段；`id/sessionID/messageID` 对全部类型通用。
 
-新增测试辅助能力只负责创建隔离资源、轮询真实状态、采集三层证据和清理，不新增生产 API。测试报告输出每个 Part 的触发方式（model/native-fixture）、OpenCode 原始类型、平台投影类型、当前 UI、历史 UI和结果。
+| Part | 必须逐层一致的关键字段 |
+| --- | --- |
+| `text` | `text`、`synthetic`、`ignored`、`time`、`metadata` |
+| `subtask` | `prompt`、`description`、`agent` |
+| `reasoning` | `text`、`time.start/end`、`metadata` |
+| `file` | `mime`、`filename`、`url`、`source.type/path/text/range/name/kind`（按 source 变体） |
+| `tool` | `callID`、`tool`、`state.status/input/raw/title/output/error/metadata/time/attachments`（按 state 变体） |
+| `step-start` | `snapshot` |
+| `step-finish` | `reason`、`snapshot`、`cost`、`tokens.input/output/reasoning/cache.read/write` |
+| `snapshot` | `snapshot` |
+| `patch` | `hash`、`files` |
+| `agent` | `name`、`source.value/start/end` |
+| `retry` | `attempt`、`error.name/data`、`time.created` |
+| `compaction` | `auto` |
+
+OpenCode 原始值、Java/平台投影值、当前浏览器恢复状态和历史浏览器恢复状态必须使用相同测试标记关联；平台模型确实没有承载的字段必须先判定为缺陷，不能静默从断言中删除。
+
+## 测试架构与证据产物
+
+扩展现有 `frontend/apps/agent-web/tests/workbench.real-spec.ts` 和 `playwright.real.config.ts`，复用 `.env.test` / Spring `test` profile、opencode-manager 用户进程、平台 Workspace/Session/Run/runtime API、Playwright 登录态和临时工作区清理。
+
+每次运行写入 `.tmp/e2e/opencode-parts/<runId>/`：
+
+- `manifest.json`：测试时间、OpenCode 版本、git commit、触发方式、自然触发超时原因、port、PID、session/message/part ID；
+- `opencode-raw.json`：OpenCode 原始消息响应；
+- `platform-messages.json` 和 `platform-tree.json`：平台响应；
+- `run-events.ndjson`：自然触发类型的真实 SSE；
+- `current-ui.png`、`history-ui.png` 和 Playwright trace；
+- `matrix.json`：12 种 Part 与 Question/Permission 的逐项状态和证据路径。
+
+证据目录保留用于审计，但不得包含 Authorization、Cookie、模型密钥或用户非测试会话内容。
 
 ## 数据流
 
 ```text
 真实模型自然触发
-  或测试专属 OpenCode 原生会话构造
+  或测试 Session 内 OpenCode SQLite 原生构造
         ↓
-OpenCode 1.17.7 原生消息存储与 HTTP API
+OpenCode 1.17.7 HTTP message API
         ↓
 现有 Java runtime facade / session message recovery
         ↓
-现有平台 Session messages/tree 与 RunEvent SSE
+现有平台 Session messages/tree（自然触发另验 RunEvent SSE）
         ↓
 真实浏览器当前会话 Timeline
         ↓
@@ -81,22 +107,23 @@ OpenCode 1.17.7 原生消息存储与 HTTP API
 
 ## 缺陷处理
 
-发现缺陷时按层定位：
-
-1. OpenCode 原始消息不存在：记录自然触发未命中，按约定进入原生构造；不修改模型提示路由。
+1. OpenCode 原始消息不存在：记录自然触发未命中，进入原生构造；不修改模型提示路由。
 2. OpenCode 有、Java 映射丢失：先给 `OpencodeRunEventMapper` 或 session message facade 增加失败测试，再最小修复。
-3. Java 有、平台快照或历史丢失：先给 recovery/snapshot 服务增加失败测试，再修复现有投影路径。
+3. Java 有、平台快照或历史丢失：先给 recovery/snapshot 服务增加失败测试，再修复既有投影路径。
 4. 平台有、前端 reducer 丢失：先给 `runtime-reducer` 增加失败测试，再修复归一化。
-5. reducer 有、Timeline 不展示：先给 `FigmaChatPanel` / `OpencodeTimeline` 增加失败测试，再修复现有原生 fallback 或对应视图。
+5. reducer 有、Timeline 不展示：先给 `FigmaChatPanel` / `OpencodeTimeline` 增加失败测试，再修复既有原生 fallback 或对应视图。
 
-所有生产修改遵守 TDD：先复现 RED，再最小实现 GREEN，最后回归。禁止借此重做聊天视觉、改变原生 Timeline 结构或顺手重构。
+所有生产修改遵守 TDD：先复现 RED，再最小实现 GREEN，最后回归。禁止重做聊天视觉、改变原生 Timeline 结构或顺手重构。
+
+## Question/Permission 额外门禁
+
+虽然 Question/Permission 不是 Part，最终仍必须真实验证：当前弹框、切换新对话、历史恢复、Question 提交与忽略、Permission once/always/reject 中至少一次允许和一次拒绝、最终正文显示、Run 终态收敛。Part 映射修复不得破坏这些路径。
 
 ## 安全与兼容性
 
 - 不修改 `.env.local`、`.env.test` 或用户 OpenCode 配置。
-- 不修改 generated SDK。
-- 不新增或改变 HTTP API、RunEvent wire name、DTO 或数据库结构。
-- 原生构造仅使用测试临时目录和测试会话，测试结束清理。
+- 不修改 generated SDK，不新增生产 API、RunEvent wire name、DTO 或数据库结构。
+- 原生构造仅使用 manager 隔离数据目录中的测试 Session，测试结束清理并验证。
 - 保持未知 Part fallback，新增类型不能导致既有类型被过滤。
 - 保留 Huangzhenren 的 Timeline、ask/reasoning/tool/subagent 和终态逻辑。
 
@@ -104,11 +131,11 @@ OpenCode 1.17.7 原生消息存储与 HTTP API
 
 最终至少执行：
 
-1. 13 种 Part 的真实 Playwright E2E 矩阵。
+1. 12 种官方 Part 的真实 Playwright E2E 矩阵和 Question/Permission 门禁。
 2. 所有受影响模块的定向 RED/GREEN 回归测试。
 3. 前端对话测试、typecheck、lint、生产 build。
 4. 后端受影响 reactor 测试。
 5. `.env.test` / `test` profile 重启，health/readiness/frontend 检查。
 6. `git diff --check`、冲突标记、generated SDK 未变、原生 Timeline 基线审计。
 
-交付报告逐项列出 13 种 Part 的触发方式和证据；任何未命中、未展示或未完成的清理都必须明确列为未完成，不能用总体测试通过替代。
+交付报告逐项列出 12 种 Part 的触发方式、字段断言和证据路径；任何未命中、未展示或未完成的清理都必须明确列为未完成，不能用总体测试通过替代。
