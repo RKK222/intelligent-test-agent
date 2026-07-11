@@ -111,7 +111,7 @@ class MyBatisRunRepositoryIntegrationTest {
     }
 
     @Test
-    void findStaleActiveRunsReturnsOnlyOldNonTerminalRunsInStableOrder() {
+    void findStaleActiveRunsReturnsOnlyOldLegacyNonTerminalRunsInStableOrder() {
         Run stalePending = run("run_stale_pending123456", RunStatus.PENDING, NOW.plusSeconds(1));
         Run staleRunning = run("run_stale_running123456", RunStatus.RUNNING, NOW.plusSeconds(2));
         Run staleCancelling = run("run_stale_cancel1234567", RunStatus.CANCELLING, NOW.plusSeconds(3));
@@ -122,12 +122,15 @@ class MyBatisRunRepositoryIntegrationTest {
         repository.save(staleCancelling);
         repository.save(terminal);
         repository.save(stalePending);
+        jdbcClient.sql("update runs set storage_mode = 'REDIS_SUMMARY' where run_id = :runId")
+                .param("runId", staleCancelling.runId().value())
+                .update();
 
         List<Run> firstPage = repository.findStaleActiveRuns(NOW.plusSeconds(10), 2);
         List<Run> fullPage = repository.findStaleActiveRuns(NOW.plusSeconds(10), 10);
 
         assertThat(firstPage).containsExactly(stalePending, staleRunning);
-        assertThat(fullPage).containsExactly(stalePending, staleRunning, staleCancelling);
+        assertThat(fullPage).containsExactly(stalePending, staleRunning);
     }
 
     private Run run(String runId, RunStatus status, Instant updatedAt) {

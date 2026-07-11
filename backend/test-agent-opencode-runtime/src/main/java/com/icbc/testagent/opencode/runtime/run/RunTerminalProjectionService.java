@@ -12,13 +12,17 @@ import com.icbc.testagent.domain.run.RunRuntimeReplay;
 import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.run.RunSummaryPersistencePort;
 import com.icbc.testagent.domain.run.RunTerminalProjection;
+import com.icbc.testagent.domain.run.RunTerminalProjectionPending;
 import com.icbc.testagent.domain.run.RunTerminalProjectionResult;
+import com.icbc.testagent.domain.run.RunTerminalRetry;
+import com.icbc.testagent.domain.run.RunTerminalRetryStore;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.opencode.runtime.run.summary.RunConversationSummarizer;
 import com.icbc.testagent.opencode.runtime.run.summary.RunMessageSummary;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -27,6 +31,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 把 Redis 终态运行态投影为 PostgreSQL 控制面锚点和 USER/ASSISTANT 双摘要。
@@ -34,6 +41,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class RunTerminalProjectionService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(RunTerminalProjectionService.class);
 
     /**
      * REDIS_SUMMARY 的锚点在 RUN_STARTED 事件之后写入，因此关系型状态版本固定为 1。
@@ -44,14 +53,30 @@ public class RunTerminalProjectionService {
     private final RunRuntimeStore runtimeStore;
     private final RunSummaryPersistencePort persistencePort;
     private final RunConversationSummarizer summarizer;
+    private final RunTerminalRetryStore retryStore;
+    private final Clock clock;
 
+    /** 保留给既有单元测试的兼容构造；生产装配始终注入 Redis 重试端口。 */
     public RunTerminalProjectionService(
             RunRuntimeStore runtimeStore,
             RunSummaryPersistencePort persistencePort,
             RunConversationSummarizer summarizer) {
+        this(runtimeStore, persistencePort, summarizer, null, Clock.systemUTC());
+    }
+
+    /** 注入 Redis 运行态、关系型终态事务、安全重试端口和统一 UTC 时钟。 */
+    @Autowired
+    public RunTerminalProjectionService(
+            RunRuntimeStore runtimeStore,
+            RunSummaryPersistencePort persistencePort,
+            RunConversationSummarizer summarizer,
+            RunTerminalRetryStore retryStore,
+            Clock clock) {
         this.runtimeStore = Objects.requireNonNull(runtimeStore, "runtimeStore must not be null");
         this.persistencePort = Objects.requireNonNull(persistencePort, "persistencePort must not be null");
         this.summarizer = Objects.requireNonNull(summarizer, "summarizer must not be null");
+        this.retryStore = retryStore;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     /** 终态事件已先写 Redis；关系型 CAS 始终针对启动时写入的固定锚点版本。 */
@@ -63,6 +88,42 @@ public class RunTerminalProjectionService {
             String safeErrorMessage,
             boolean remoteStopConfirmed,
             String traceId) {
+        Optional<RunTerminalProjectionPending> pending = runtimeStore.findTerminalProjectionPending(runId);
+        long terminalProjectionVersion = pending.map(RunTerminalProjectionPending::version).orElse(0L);
+        return projectInternal(
+                runId,
+                terminalStatus,
+                terminalSource,
+                terminalReasonCode,
+                safeErrorMessage,
+                remoteStopConfirmed,
+                traceId,
+                terminalProjectionVersion);
+    }
+
+    /** 恢复路径完全使用终态 Lua 原子保存的 outbox 元数据，成功或版本冲突后确认同一 version。 */
+    public RunTerminalProjectionResult project(RunTerminalProjectionPending pending) {
+        Objects.requireNonNull(pending, "pending must not be null");
+        return projectInternal(
+                pending.runId(),
+                pending.status(),
+                pending.terminalSource(),
+                pending.terminalReasonCode(),
+                pending.safeErrorMessage(),
+                pending.remoteStopConfirmed(),
+                pending.traceId(),
+                pending.version());
+    }
+
+    private RunTerminalProjectionResult projectInternal(
+            RunId runId,
+            RunStatus terminalStatus,
+            String terminalSource,
+            String terminalReasonCode,
+            String safeErrorMessage,
+            boolean remoteStopConfirmed,
+            String traceId,
+            long terminalProjectionVersion) {
         if (terminalStatus == null || !terminalStatus.isTerminal()) {
             throw new IllegalArgumentException("terminalStatus must be terminal");
         }
@@ -100,7 +161,27 @@ public class RunTerminalProjectionService {
                 null,
                 manifest.userId(),
                 summaries);
-        return persistencePort.persistTerminal(projection);
+        try {
+            RunTerminalProjectionResult result = persistencePort.persistTerminal(projection);
+            if ((result == RunTerminalProjectionResult.APPLIED
+                    || result == RunTerminalProjectionResult.VERSION_CONFLICT)
+                    && terminalProjectionVersion > 0) {
+                runtimeStore.ackTerminalProjection(runId, terminalProjectionVersion);
+            }
+            return result;
+        } catch (RuntimeException databaseFailure) {
+            if (retryStore == null) {
+                throw databaseFailure;
+            }
+            // 只保存已经过摘要器清洗的投影；数据库异常正文不进入 Redis、日志或后续 PostgreSQL。
+            retryStore.save(RunTerminalRetry.pending(
+                    projection, clock.instant(), terminalProjectionVersion));
+            LOGGER.warn(
+                    "Run terminal projection pending database retry, runId={}, errorType={}",
+                    runId.value(),
+                    databaseFailure.getClass().getSimpleName());
+            return RunTerminalProjectionResult.TERMINAL_PENDING_DB;
+        }
     }
 
     /** safe_error_message 也必须经过与双摘要相同的敏感信息清洗，且遵守关系型字段长度预算。 */

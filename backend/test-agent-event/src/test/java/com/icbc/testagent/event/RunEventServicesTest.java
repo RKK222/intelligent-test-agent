@@ -17,6 +17,7 @@ import com.icbc.testagent.domain.event.RunEventId;
 import com.icbc.testagent.domain.event.RunEventRepository;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunOwnerLease;
 import com.icbc.testagent.domain.run.RunRuntimeAppendResult;
 import com.icbc.testagent.domain.run.RunRuntimeManifest;
 import com.icbc.testagent.domain.run.RunRuntimeReplay;
@@ -167,6 +168,30 @@ class RunEventServicesTest {
 
         verify(repository, never()).append(draft);
         verify(runtimeStore).appendDurable(draft);
+    }
+
+    @Test
+    void redisSummaryAppenderPassesFencingLeaseToAtomicRuntimeMutation() {
+        RunEventRepository repository = mock(RunEventRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunId runId = new RunId("run_redis_fenced_event");
+        RunOwnerLease lease = new RunOwnerLease(runId, "backend-a", 9L, NOW.plusSeconds(15));
+        RunEventDraft durable = new RunEventDraft(
+                runId, RunEventType.RUN_STARTED, "trace_fenced", NOW, Map.of("status", "RUNNING"));
+        RunEventDraft transientDraft = new RunEventDraft(
+                runId, RunEventType.MESSAGE_PART_DELTA, "trace_fenced", NOW, Map.of("delta", "hello"));
+        RunEvent redisEvent = event(durable, 3L);
+        when(runtimeStore.appendDurable(durable, lease))
+                .thenReturn(new RunRuntimeAppendResult(redisEvent, false, 0L, 1L));
+        when(runtimeStore.projectTransient(transientDraft, lease)).thenReturn(true);
+        RunEventAppender appender = new RunEventAppender(repository, new RunEventLiveBus(), runtimeStore);
+
+        assertThat(appender.append(durable, RunStorageMode.REDIS_SUMMARY, lease)).isEqualTo(redisEvent);
+        assertThat(appender.publishTransient(transientDraft, RunStorageMode.REDIS_SUMMARY, lease)).isTrue();
+
+        verify(runtimeStore).appendDurable(durable, lease);
+        verify(runtimeStore).projectTransient(transientDraft, lease);
+        verify(repository, never()).append(any());
     }
 
     @Test

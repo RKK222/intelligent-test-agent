@@ -8,6 +8,7 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.agent.runtime.AgentRuntime;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.icbc.testagent.agent.runtime.OpencodeAgentRuntime;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
@@ -29,6 +30,7 @@ import com.icbc.testagent.domain.routing.RoutingDecisionRepository;
 import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunDetailsLocator;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunOwnerLease;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.run.RunStorageMode;
@@ -421,15 +423,45 @@ class RunApplicationServiceTest {
         org.mockito.Mockito.when(identity.backendProcessId()).thenReturn("bjp_summary_backend");
         RunTerminalProjectionService terminalProjectionService =
                 org.mockito.Mockito.mock(RunTerminalProjectionService.class);
+        RunOwnerLeaseSupervisor ownerSupervisor = org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.class);
+        RunOwnerLeaseSupervisor.OwnershipHandle ownership =
+                org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.OwnershipHandle.class);
+        AtomicReference<RunOwnerLease> adoptedLease = new AtomicReference<>();
         FakeRunRepository runs = new FakeRunRepository();
         FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         FakeRoutingDecisionRepository routing = new FakeRoutingDecisionRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        AtomicReference<String> serverDispatchMessageId = new AtomicReference<>();
         org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
             assertThat(facade.createSessionCommands).isEmpty();
             assertThat(facade.startRunCommands).isEmpty();
+            com.icbc.testagent.domain.run.RunPersistenceAnchor anchor = invocation.getArgument(0);
+            serverDispatchMessageId.set(anchor.dispatchMessageId());
             return true;
         });
+        org.mockito.Mockito.when(runtimeStore.claimOwnerLease(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("bjp_summary_backend")))
+                .thenAnswer(invocation -> Optional.of(new RunOwnerLease(
+                        invocation.getArgument(0),
+                        "bjp_summary_backend",
+                        1L,
+                        NOW.plusSeconds(15))));
+        org.mockito.Mockito.when(runtimeStore.claimOwnerLeaseIfUnchanged(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("bjp_summary_backend")))
+                .thenAnswer(invocation -> {
+                    RunRuntimeManifest expected = invocation.getArgument(0);
+                    return Optional.of(new RunOwnerLease(
+                            expected.runId(), "bjp_summary_backend", 2L, NOW.plusSeconds(15)));
+                });
+        org.mockito.Mockito.when(ownerSupervisor.adopt(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    adoptedLease.set(invocation.getArgument(0));
+                    return Optional.of(ownership);
+                });
+        org.mockito.Mockito.when(ownership.lease()).thenAnswer(ignored -> adoptedLease.get());
+        org.mockito.Mockito.when(ownership.lost()).thenReturn(Mono.never());
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 new FakeSessionRepository(session()),
@@ -454,7 +486,8 @@ class RunApplicationServiceTest {
                 selector,
                 summaryPort,
                 terminalProjectionService,
-                identity);
+                identity,
+                ownerSupervisor);
 
         Run run = service.startRun(userId, "opencode", input, "trace_redis_summary");
 
@@ -465,8 +498,11 @@ class RunApplicationServiceTest {
         org.mockito.Mockito.verify(summaryPort).insertAnchor(org.mockito.ArgumentMatchers.argThat(anchor ->
                 anchor.storageMode() == RunStorageMode.REDIS_SUMMARY
                         && anchor.clientRequestId().equals("request-summary-123")
-                        && anchor.dispatchMessageId().equals("msg_user_summary")
+                        && anchor.dispatchMessageId().startsWith("msg_")
+                        && !anchor.dispatchMessageId().equals("msg_user_summary")
                         && anchor.rootRemoteSessionId().equals(REMOTE_SESSION_ID)));
+        org.mockito.Mockito.verify(runtimeStore).confirmClientRequest(
+                sessionSnapshot.sessionId(), "request-summary-123", run.runId());
         org.mockito.Mockito.verify(runtimeStore, org.mockito.Mockito.atLeastOnce())
                 .appendDurable(org.mockito.ArgumentMatchers.argThat(draft ->
                         draft.type() == RunEventType.RUN_CREATED
@@ -474,11 +510,12 @@ class RunApplicationServiceTest {
                                 && messageId.startsWith("msg_")));
         assertThat(facade.createSessionCommands).isEmpty();
         assertThat(facade.startRunCommands).singleElement().satisfies(command -> {
-            assertThat(command.messageId()).isEqualTo("msg_user_summary");
+            assertThat(command.messageId()).isEqualTo(serverDispatchMessageId.get());
             assertThat(command.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         });
         assertThat(runtimeManifest.get().status()).isEqualTo(RunStatus.RUNNING);
         assertThat(service.eventStorageMode(run.runId())).isEqualTo(RunStorageMode.REDIS_SUMMARY);
+        org.mockito.Mockito.verify(ownerSupervisor, org.mockito.Mockito.atLeast(4)).requireOwned(ownership);
         org.mockito.Mockito.verify(summaryPort, org.mockito.Mockito.never())
                 .findDetailsLocator(run.runId());
 
@@ -490,6 +527,13 @@ class RunApplicationServiceTest {
         assertThat(routing.saved).isEmpty();
         assertThat(facade.cancelSessionCommands).singleElement().satisfies(command ->
                 assertThat(command.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID));
+        org.mockito.Mockito.verify(runtimeStore).claimOwnerLeaseIfUnchanged(
+                org.mockito.ArgumentMatchers.argThat(candidate ->
+                        candidate.runId().equals(run.runId()) && candidate.status() == RunStatus.RUNNING),
+                org.mockito.ArgumentMatchers.eq("bjp_summary_backend"));
+        org.mockito.Mockito.verify(runtimeStore).appendDurable(
+                org.mockito.ArgumentMatchers.argThat(draft -> draft.type() == RunEventType.RUN_CANCELLED),
+                org.mockito.ArgumentMatchers.argThat(lease -> lease.fencingToken() == 2L));
         org.mockito.Mockito.verify(terminalProjectionService).project(
                 org.mockito.ArgumentMatchers.eq(run.runId()),
                 org.mockito.ArgumentMatchers.eq(RunStatus.CANCELLED),
@@ -512,6 +556,357 @@ class RunApplicationServiceTest {
         assertThatThrownBy(() -> service.eventStorageMode(run.runId()))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.RUN_DETAILS_EXPIRED));
+    }
+
+    @Test
+    void redisSummaryStartupRedisFailureAfterAnchorSchedulesLossConvergence() {
+        UserId userId = new UserId("usr_startup_redis_loss");
+        Workspace workspaceSnapshot = workspace().withLinuxServerId("server-a", "trace_startup_loss", NOW);
+        ExecutionNode nodeSnapshot = userProcessNode("node_startup_redis_loss", "http://10.8.0.12:4096");
+        Session sessionSnapshot = session().attachOpencodeSession(
+                REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(), NOW, "trace_startup_loss");
+        AgentSessionBinding bindingSnapshot = new AgentSessionBinding(
+                sessionSnapshot.sessionId(), "opencode", REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(),
+                NOW, NOW, "trace_startup_loss");
+        ConversationRunContext context = new ConversationRunContext(
+                userId, "opencode", "startup_redis_loss", "server-a",
+                sessionSnapshot, workspaceSnapshot, nodeSnapshot, bindingSnapshot, 1, NOW.plusSeconds(3600));
+        StartRunInput input = new StartRunInput(
+                sessionSnapshot.sessionId(), "run the tests", List.of(), "msg_startup_redis_loss",
+                null, null, null, null, null, null, "ctx_startup_redis_loss", "request-startup-redis-loss");
+        ConversationRunContextResolver contextResolver = org.mockito.Mockito.mock(ConversationRunContextResolver.class);
+        org.mockito.Mockito.when(contextResolver.resolve(userId, "opencode", input, "trace_startup_redis_loss"))
+                .thenReturn(Optional.of(context));
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, context)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        AtomicReference<RunRuntimeManifest> runtimeManifest = new AtomicReference<>();
+        RunRuntimeStore runtimeStore = mockRuntimeStoreForStart(runtimeManifest);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        org.mockito.Mockito.when(identity.backendProcessId()).thenReturn("bjp_startup_redis_loss");
+        org.mockito.Mockito.when(runtimeStore.claimOwnerLease(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("bjp_startup_redis_loss")))
+                .thenThrow(new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "redis unavailable"));
+        RunTerminalProjectionService projection = org.mockito.Mockito.mock(RunTerminalProjectionService.class);
+        RunOwnerLeaseSupervisor supervisor = org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.class);
+        RunRuntimeLossConvergenceScheduler lossScheduler =
+                org.mockito.Mockito.mock(RunRuntimeLossConvergenceScheduler.class);
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), new FakeRunRepository(),
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository(), new RunEventLiveBus(), runtimeStore),
+                runtimeRegistry(facade), new FakeAgentSessionBindingRepository(), new RunEventLiveBus(),
+                new RunEventPersistencePolicy(), null,
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class),
+                null, null, null, contextResolver, runtimeStore, selector, summaryPort,
+                projection, identity, supervisor);
+        service.configureRuntimeLossScheduler(lossScheduler);
+
+        assertThatThrownBy(() -> service.startRun(userId, "opencode", input, "trace_startup_redis_loss"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.RUNTIME_STATE_UNAVAILABLE));
+
+        org.mockito.Mockito.verify(lossScheduler).schedule(
+                org.mockito.ArgumentMatchers.<RunRuntimeLossRequest>argThat(request ->
+                        request.userId().equals(userId)
+                                && request.remoteSessionId().equals(REMOTE_SESSION_ID)
+                                && request.dispatchMessageId().startsWith("msg_")),
+                org.mockito.ArgumentMatchers.any(AgentRuntime.class),
+                org.mockito.ArgumentMatchers.eq(nodeSnapshot),
+                org.mockito.ArgumentMatchers.any(Runnable.class));
+        org.mockito.Mockito.verifyNoInteractions(projection);
+        assertThat(facade.startRunCommands).isEmpty();
+    }
+
+    @Test
+    void redisSummaryLeaseRenewalRedisFailureSchedulesLossConvergence() {
+        UserId userId = new UserId("usr_lease_renewal_loss");
+        Workspace workspaceSnapshot = workspace().withLinuxServerId("server-a", "trace_lease_renewal_loss", NOW);
+        ExecutionNode nodeSnapshot = userProcessNode(
+                "node_lease_renewal_loss", "http://10.8.0.12:4096");
+        Session sessionSnapshot = session().attachOpencodeSession(
+                REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(), NOW, "trace_lease_renewal_loss");
+        AgentSessionBinding bindingSnapshot = new AgentSessionBinding(
+                sessionSnapshot.sessionId(), "opencode", REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(),
+                NOW, NOW, "trace_lease_renewal_loss");
+        ConversationRunContext context = new ConversationRunContext(
+                userId, "opencode", "lease_renewal_loss", "server-a",
+                sessionSnapshot, workspaceSnapshot, nodeSnapshot, bindingSnapshot, 1, NOW.plusSeconds(3600));
+        StartRunInput input = new StartRunInput(
+                sessionSnapshot.sessionId(), "run the tests", List.of(), "msg_lease_renewal_loss",
+                null, null, null, null, null, null, "ctx_lease_renewal_loss", "request-lease-renewal-loss");
+        ConversationRunContextResolver contextResolver = org.mockito.Mockito.mock(ConversationRunContextResolver.class);
+        org.mockito.Mockito.when(contextResolver.resolve(userId, "opencode", input, "trace_lease_renewal_loss"))
+                .thenReturn(Optional.of(context));
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, context)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        AtomicReference<RunRuntimeManifest> runtimeManifest = new AtomicReference<>();
+        RunRuntimeStore runtimeStore = mockRuntimeStoreForStart(runtimeManifest);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        org.mockito.Mockito.when(identity.backendProcessId()).thenReturn("bjp_lease_renewal_loss");
+        AtomicReference<RunOwnerLease> claimedLease = new AtomicReference<>();
+        org.mockito.Mockito.when(runtimeStore.claimOwnerLease(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("bjp_lease_renewal_loss")))
+                .thenAnswer(invocation -> {
+                    RunOwnerLease lease = new RunOwnerLease(
+                            invocation.getArgument(0), "bjp_lease_renewal_loss", 7L, NOW.plusSeconds(15));
+                    claimedLease.set(lease);
+                    return Optional.of(lease);
+                });
+        java.util.concurrent.atomic.AtomicInteger renewals = new java.util.concurrent.atomic.AtomicInteger();
+        org.mockito.Mockito.when(runtimeStore.renewOwnerLease(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    if (renewals.incrementAndGet() == 1) {
+                        return Optional.of(invocation.getArgument(0));
+                    }
+                    throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "redis unavailable");
+                });
+        RunOwnerLeaseSupervisor supervisor = new RunOwnerLeaseSupervisor(
+                runtimeStore, java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC));
+        RunRuntimeLossConvergenceScheduler lossScheduler =
+                org.mockito.Mockito.mock(RunRuntimeLossConvergenceScheduler.class);
+        RunTerminalProjectionService projection = org.mockito.Mockito.mock(RunTerminalProjectionService.class);
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = ignored -> Flux.never();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), new FakeRunRepository(),
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository(), new RunEventLiveBus(), runtimeStore),
+                runtimeRegistry(facade), new FakeAgentSessionBindingRepository(), new RunEventLiveBus(),
+                new RunEventPersistencePolicy(), null,
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class),
+                null, null, null, contextResolver, runtimeStore, selector, summaryPort,
+                projection, identity, supervisor);
+        service.configureRuntimeLossScheduler(lossScheduler);
+
+        Run run = service.startRun(userId, "opencode", input, "trace_lease_renewal_loss");
+        supervisor.renewOwnedLeases();
+
+        org.mockito.Mockito.verify(lossScheduler, org.mockito.Mockito.timeout(2_000)).schedule(
+                org.mockito.ArgumentMatchers.<RunRuntimeLossRequest>argThat(request ->
+                        request.runId().equals(run.runId())
+                                && request.remoteSessionId().equals(REMOTE_SESSION_ID)
+                                && request.userId().equals(userId)),
+                org.mockito.ArgumentMatchers.any(AgentRuntime.class),
+                org.mockito.ArgumentMatchers.eq(nodeSnapshot));
+        org.mockito.Mockito.verifyNoInteractions(projection);
+        assertThat(supervisor.isOwned(run.runId())).isFalse();
+        assertThat(claimedLease.get()).isNotNull();
+    }
+
+    @Test
+    void redisSummaryOwnershipLossDoesNotWriteFailedTerminal() {
+        UserId userId = new UserId("usr_owner_loss");
+        Workspace workspaceSnapshot = workspace().withLinuxServerId("server-a", "trace_owner_loss", NOW);
+        ExecutionNode nodeSnapshot = userProcessNode("node_owner_loss", "http://10.8.0.12:4096");
+        Session sessionSnapshot = session().attachOpencodeSession(
+                REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(), NOW, "trace_owner_loss");
+        AgentSessionBinding bindingSnapshot = new AgentSessionBinding(
+                sessionSnapshot.sessionId(), "opencode", REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(),
+                NOW, NOW, "trace_owner_loss");
+        ConversationRunContext context = new ConversationRunContext(
+                userId, "opencode", "owner_loss", "server-a",
+                sessionSnapshot, workspaceSnapshot, nodeSnapshot, bindingSnapshot, 1, NOW.plusSeconds(3600));
+        StartRunInput input = new StartRunInput(
+                sessionSnapshot.sessionId(), "run the tests", List.of(), "msg_owner_loss",
+                null, null, null, null, null, null, "ctx_owner_loss", "request-owner-loss");
+        ConversationRunContextResolver contextResolver = org.mockito.Mockito.mock(ConversationRunContextResolver.class);
+        org.mockito.Mockito.when(contextResolver.resolve(userId, "opencode", input, "trace_owner_loss"))
+                .thenReturn(Optional.of(context));
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, context)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        AtomicReference<RunRuntimeManifest> runtimeManifest = new AtomicReference<>();
+        RunRuntimeStore runtimeStore = mockRuntimeStoreForStart(runtimeManifest);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        RunTerminalProjectionService projection = org.mockito.Mockito.mock(RunTerminalProjectionService.class);
+        com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        org.mockito.Mockito.when(identity.backendProcessId()).thenReturn("bjp_owner_loss");
+        RunOwnerLeaseSupervisor supervisor = org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.class);
+        RunOwnerLeaseSupervisor.OwnershipHandle handle =
+                org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.OwnershipHandle.class);
+        org.mockito.Mockito.when(runtimeStore.claimOwnerLease(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("bjp_owner_loss")))
+                .thenAnswer(invocation -> Optional.of(new RunOwnerLease(
+                        invocation.getArgument(0), "bjp_owner_loss", 3L, NOW.plusSeconds(15))));
+        org.mockito.Mockito.when(supervisor.adopt(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.of(handle));
+        org.mockito.Mockito.doThrow(new RunOwnershipLostException("lost"))
+                .when(supervisor).requireOwned(handle);
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), new FakeRunRepository(),
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository(), new RunEventLiveBus(), runtimeStore),
+                runtimeRegistry(facade), new FakeAgentSessionBindingRepository(), new RunEventLiveBus(),
+                new RunEventPersistencePolicy(), null,
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class),
+                null, null, null, contextResolver, runtimeStore, selector, summaryPort,
+                projection, identity, supervisor);
+
+        assertThatThrownBy(() -> service.startRun(userId, "opencode", input, "trace_owner_loss"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+
+        org.mockito.Mockito.verify(projection, org.mockito.Mockito.never()).project(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(runtimeStore, org.mockito.Mockito.never())
+                .appendDurable(org.mockito.ArgumentMatchers.argThat(draft ->
+                        draft.type() == RunEventType.RUN_FAILED));
+        assertThat(facade.startRunCommands).isEmpty();
+    }
+
+    @Test
+    void redisSummaryRechecksOwnershipAfterRemoteSessionCreationBeforeBindingWrite() {
+        UserId userId = new UserId("usr_binding_fence");
+        Workspace workspaceSnapshot = workspace().withLinuxServerId("server-a", "trace_binding_fence", NOW);
+        ExecutionNode nodeSnapshot = userProcessNode("node_binding_fence", "http://10.8.0.12:4096");
+        Session sessionSnapshot = session();
+        ConversationRunContext context = new ConversationRunContext(
+                userId, "opencode", "binding_fence", "server-a",
+                sessionSnapshot, workspaceSnapshot, nodeSnapshot, null, 1, NOW.plusSeconds(3600));
+        StartRunInput input = new StartRunInput(
+                sessionSnapshot.sessionId(), "run the tests", List.of(), "msg_binding_fence",
+                null, null, null, null, null, null, "ctx_binding_fence", "request-binding-fence");
+        ConversationRunContextResolver contextResolver = org.mockito.Mockito.mock(ConversationRunContextResolver.class);
+        org.mockito.Mockito.when(contextResolver.resolve(userId, "opencode", input, "trace_binding_fence"))
+                .thenReturn(Optional.of(context));
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, context)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        AtomicReference<RunRuntimeManifest> runtimeManifest = new AtomicReference<>();
+        RunRuntimeStore runtimeStore = mockRuntimeStoreForStart(runtimeManifest);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        org.mockito.Mockito.when(identity.backendProcessId()).thenReturn("bjp_binding_fence");
+        RunOwnerLeaseSupervisor supervisor = org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.class);
+        RunOwnerLeaseSupervisor.OwnershipHandle handle =
+                org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.OwnershipHandle.class);
+        RunOwnerLease lease = new RunOwnerLease(
+                new RunId("run_binding_placeholder"), "bjp_binding_fence", 4L, NOW.plusSeconds(15));
+        org.mockito.Mockito.when(runtimeStore.claimOwnerLease(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("bjp_binding_fence")))
+                .thenAnswer(invocation -> Optional.of(new RunOwnerLease(
+                        invocation.getArgument(0), lease.ownerBackendProcessId(), lease.fencingToken(), lease.expiresAt())));
+        org.mockito.Mockito.when(supervisor.adopt(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.of(handle));
+        java.util.concurrent.atomic.AtomicInteger checks = new java.util.concurrent.atomic.AtomicInteger();
+        org.mockito.Mockito.doAnswer(ignored -> {
+            if (checks.incrementAndGet() == 2) {
+                throw new RunOwnershipLostException("lost after create");
+            }
+            return null;
+        }).when(supervisor).requireOwned(handle);
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), new FakeRunRepository(),
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository(), new RunEventLiveBus(), runtimeStore),
+                runtimeRegistry(facade), new FakeAgentSessionBindingRepository(), new RunEventLiveBus(),
+                new RunEventPersistencePolicy(), null,
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class),
+                null, null, null, contextResolver, runtimeStore, selector, summaryPort,
+                org.mockito.Mockito.mock(RunTerminalProjectionService.class), identity, supervisor);
+
+        assertThatThrownBy(() -> service.startRun(userId, "opencode", input, "trace_binding_fence"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+
+        assertThat(facade.createSessionCommands).hasSize(1);
+        assertThat(facade.startRunCommands).isEmpty();
+        org.mockito.Mockito.verify(summaryPort, org.mockito.Mockito.never())
+                .persistInitialAgentBinding(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void redisSummaryAnchorConflictDiscardsUnanchoredRuntimeBeforeReturningExistingRun() {
+        UserId userId = new UserId("usr_anchor_conflict");
+        Workspace workspaceSnapshot = workspace().withLinuxServerId("server-a", "trace_anchor_conflict", NOW);
+        ExecutionNode nodeSnapshot = userProcessNode(
+                "node_ocp_anchor_conflict", "http://10.8.0.12:4096");
+        Session sessionSnapshot = session().attachOpencodeSession(
+                REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(), NOW, "trace_anchor_conflict");
+        AgentSessionBinding bindingSnapshot = new AgentSessionBinding(
+                sessionSnapshot.sessionId(), "opencode", REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(),
+                NOW, NOW, "trace_anchor_conflict");
+        ConversationRunContext context = new ConversationRunContext(
+                userId, "opencode", "ocp_anchor_conflict", "server-a",
+                sessionSnapshot, workspaceSnapshot, nodeSnapshot, bindingSnapshot, 1, NOW.plusSeconds(3600));
+        StartRunInput input = new StartRunInput(
+                sessionSnapshot.sessionId(), "run the tests", List.of(), "msg_anchor_conflict",
+                null, null, null, null, null, null, "ctx_anchor_conflict", "request-anchor-conflict");
+        ConversationRunContextResolver contextResolver = org.mockito.Mockito.mock(ConversationRunContextResolver.class);
+        org.mockito.Mockito.when(contextResolver.resolve(userId, "opencode", input, "trace_anchor_conflict"))
+                .thenReturn(Optional.of(context));
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, context)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        AtomicReference<RunRuntimeManifest> runtimeManifest = new AtomicReference<>();
+        RunRuntimeStore runtimeStore = mockRuntimeStoreForStart(runtimeManifest);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        AtomicReference<com.icbc.testagent.domain.run.RunPersistenceAnchor> attemptedAnchor = new AtomicReference<>();
+        org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            attemptedAnchor.set(invocation.getArgument(0));
+            return false;
+        });
+        org.mockito.Mockito.when(summaryPort.findBySessionAndClientRequestId(
+                        sessionSnapshot.sessionId(), "request-anchor-conflict"))
+                .thenAnswer(ignored -> Optional.of(attemptedAnchor.get()));
+        com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        org.mockito.Mockito.when(identity.backendProcessId()).thenReturn("bjp_summary_backend");
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), new FakeRunRepository(),
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository(), new RunEventLiveBus(), runtimeStore),
+                runtimeRegistry(facade), new FakeAgentSessionBindingRepository(), new RunEventLiveBus(),
+                new RunEventPersistencePolicy(), null,
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class),
+                null, null, null, contextResolver, runtimeStore, selector, summaryPort,
+                org.mockito.Mockito.mock(RunTerminalProjectionService.class), identity,
+                org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.class));
+
+        Run result = service.startRun(userId, "opencode", input, "trace_anchor_conflict");
+
+        assertThat(result.runId()).isEqualTo(attemptedAnchor.get().runId());
+        org.mockito.Mockito.verify(runtimeStore).discardBeforeDispatch(attemptedAnchor.get().runId());
+        org.mockito.Mockito.verify(runtimeStore).confirmClientRequest(
+                sessionSnapshot.sessionId(), "request-anchor-conflict", attemptedAnchor.get().runId());
+        assertThat(facade.createSessionCommands).isEmpty();
+        assertThat(facade.startRunCommands).isEmpty();
     }
 
     @Test
@@ -2326,6 +2721,11 @@ class RunApplicationServiceTest {
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.any()))
                 .thenReturn(true);
+        org.mockito.Mockito.when(store.confirmClientRequest(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(true);
         org.mockito.Mockito.doAnswer(invocation -> {
             state.set(invocation.getArgument(0));
             return null;
@@ -2333,8 +2733,7 @@ class RunApplicationServiceTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
         org.mockito.Mockito.when(store.findManifest(org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> Optional.ofNullable(state.get()));
-        org.mockito.Mockito.when(store.appendDurable(org.mockito.ArgumentMatchers.any()))
-                .thenAnswer(invocation -> {
+        org.mockito.stubbing.Answer<RunRuntimeAppendResult> appendAnswer = invocation -> {
                     RunEventDraft draft = invocation.getArgument(0);
                     RunRuntimeManifest current = state.get();
                     RunStatus nextStatus = switch (draft.type()) {
@@ -2367,8 +2766,18 @@ class RunApplicationServiceTest {
                             draft.payload(),
                             draft.scopeContext());
                     return new RunRuntimeAppendResult(event, false, 0L, 1L);
-                });
+                };
+        org.mockito.Mockito.when(store.appendDurable(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(appendAnswer);
+        org.mockito.Mockito.when(store.appendDurable(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(RunOwnerLease.class)))
+                .thenAnswer(appendAnswer);
         org.mockito.Mockito.when(store.projectTransient(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        org.mockito.Mockito.when(store.projectTransient(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(RunOwnerLease.class)))
+                .thenReturn(true);
         return store;
     }
 

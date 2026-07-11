@@ -4,6 +4,7 @@ import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventRepository;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunOwnerLease;
 import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.run.RunStorageMode;
 import java.util.Objects;
@@ -59,10 +60,23 @@ public class RunEventAppender {
 
     /** 按 Run 启动时已经固定的 storageMode 追加，避免每条事件再次探测 Redis 来猜测分流。 */
     public RunEvent append(RunEventDraft draft, RunStorageMode storageMode) {
+        return append(draft, storageMode, null);
+    }
+
+    /**
+     * 使用 owner fencing 追加新模式事件；Redis 会在同一 Lua 中拒绝已失效 token。
+     * legacy 与 bootstrap 调用可继续传空租约，避免改变既有事件链路。
+     */
+    public RunEvent append(
+            RunEventDraft draft,
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
         Objects.requireNonNull(draft, "draft must not be null");
         Objects.requireNonNull(storageMode, "storageMode must not be null");
         if (storageMode == RunStorageMode.REDIS_SUMMARY) {
-            var result = requireRuntimeStore().appendDurable(draft);
+            var result = ownerLease == null
+                    ? requireRuntimeStore().appendDurable(draft)
+                    : requireRuntimeStore().appendDurable(draft, ownerLease);
             RunEvent event = result.event();
             if (result.visible() && liveBus != null) {
                 liveBus.publishDurable(event);
@@ -87,11 +101,21 @@ public class RunEventAppender {
 
     /** 按固定 storageMode 投影 transient；新模式 Redis 失败必须向上返回 503，禁止写入数据库。 */
     public boolean publishTransient(RunEventDraft draft, RunStorageMode storageMode) {
+        return publishTransient(draft, storageMode, null);
+    }
+
+    /** 使用 owner fencing 投影 transient 事件，旧 owner 不会更新物化快照或进入 live bus。 */
+    public boolean publishTransient(
+            RunEventDraft draft,
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
         Objects.requireNonNull(draft, "draft must not be null");
         Objects.requireNonNull(storageMode, "storageMode must not be null");
         boolean visible = true;
         if (storageMode == RunStorageMode.REDIS_SUMMARY) {
-            visible = requireRuntimeStore().projectTransient(draft);
+            visible = ownerLease == null
+                    ? requireRuntimeStore().projectTransient(draft)
+                    : requireRuntimeStore().projectTransient(draft, ownerLease);
         } else if (runRuntimeStore != null) {
             try {
                 if (runRuntimeStore.findManifest(draft.runId()).isPresent()) {

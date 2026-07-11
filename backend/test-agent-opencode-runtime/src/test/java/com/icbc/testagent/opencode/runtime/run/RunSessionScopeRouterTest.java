@@ -13,6 +13,7 @@ import com.icbc.testagent.domain.event.RunSessionScope;
 import com.icbc.testagent.domain.event.RunSessionScopeRepository;
 import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunOwnerLease;
 import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.run.RunStorageMode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -404,20 +405,23 @@ class RunSessionScopeRouterTest {
     }
 
     @Test
-    void redisSummaryScopeUsesSubscriptionStateWithoutDatabaseReadsOrWrites() {
+    void redisSummaryScopeUsesFencedSubscriptionStateWithoutDatabaseReadsOrWrites() {
         RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunOwnerLease lease = new RunOwnerLease(RUN_ID, "backend-a", 7L, NOW.plusSeconds(15));
         when(runtimeStore.findScopeSession(any(), any())).thenReturn(Optional.empty());
-        when(runtimeStore.claimRawEvent(any(), any(), any())).thenReturn(true);
-        when(runtimeStore.drainPending(any(), any())).thenReturn(List.of());
+        when(runtimeStore.claimRawEvent(any(), any(), any(), any(RunOwnerLease.class))).thenReturn(true);
+        when(runtimeStore.drainPending(any(), any(), any(RunOwnerLease.class))).thenReturn(List.of());
         when(runtimeStore.scopeVersion(RUN_ID)).thenReturn(11L);
         RunSessionScopeRouter redisRouter = new RunSessionScopeRouter(repository, cache, runtimeStore);
         RunEventDraft childCreated = childSessionCreatedDraft(CHILD_SESSION_ID, "Explore Redis (@explore subagent)");
 
-        List<RunEventDraft> discovered = redisRouter.route(rootScope(), childCreated, RunStorageMode.REDIS_SUMMARY);
+        List<RunEventDraft> discovered = redisRouter.route(
+                rootScope(), childCreated, RunStorageMode.REDIS_SUMMARY, lease);
         List<RunEventDraft> childStatus = redisRouter.route(
                 rootScope(),
                 childScopedDraft(RunEventType.SESSION_STATUS, "session.status"),
-                RunStorageMode.REDIS_SUMMARY);
+                RunStorageMode.REDIS_SUMMARY,
+                lease);
 
         assertThat(discovered).extracting(RunEventDraft::type)
                 .containsExactly(
@@ -430,7 +434,8 @@ class RunSessionScopeRouterTest {
         });
         assertThat(repository.totalCalls()).isZero();
         assertThat(repository.sessions).isEmpty();
-        verify(runtimeStore).saveScope(any(RunSessionScope.class), any(RunSessionScopeSession.class));
+        verify(runtimeStore).saveScope(
+                any(RunSessionScope.class), any(RunSessionScopeSession.class), any(RunOwnerLease.class));
     }
 
     private List<RunEventDraft> route(RunEventDraft... drafts) {

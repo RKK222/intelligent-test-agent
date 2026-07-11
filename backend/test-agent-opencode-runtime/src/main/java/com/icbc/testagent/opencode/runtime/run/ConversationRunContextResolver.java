@@ -22,15 +22,31 @@ public class ConversationRunContextResolver {
     private final ConversationContextApplicationService contextService;
     private final ConversationContextProperties properties;
     private final OpencodeProcessStatusQueryService statusQueryService;
+    private final LegacyRunCompatibilityMetrics compatibilityMetrics;
 
     @Autowired
     public ConversationRunContextResolver(
             ConversationContextApplicationService contextService,
             ConversationContextProperties properties,
-            OpencodeProcessStatusQueryService statusQueryService) {
+            OpencodeProcessStatusQueryService statusQueryService,
+            LegacyRunCompatibilityMetrics compatibilityMetrics) {
         this.contextService = Objects.requireNonNull(contextService, "contextService must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.statusQueryService = Objects.requireNonNull(statusQueryService, "statusQueryService must not be null");
+        this.compatibilityMetrics = Objects.requireNonNull(
+                compatibilityMetrics, "compatibilityMetrics must not be null");
+    }
+
+    /** 兼容既有测试构造器；生产始终注入兼容计数器。 */
+    public ConversationRunContextResolver(
+            ConversationContextApplicationService contextService,
+            ConversationContextProperties properties,
+            OpencodeProcessStatusQueryService statusQueryService) {
+        this(
+                contextService,
+                properties,
+                statusQueryService,
+                new LegacyRunCompatibilityMetrics(Optional.empty()));
     }
 
     /**
@@ -42,6 +58,7 @@ public class ConversationRunContextResolver {
         this.contextService = Objects.requireNonNull(contextService, "contextService must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.statusQueryService = null;
+        this.compatibilityMetrics = new LegacyRunCompatibilityMetrics(Optional.empty());
     }
 
     /**
@@ -63,6 +80,7 @@ public class ConversationRunContextResolver {
         Objects.requireNonNull(input, "input must not be null");
         if (input.contextToken() == null) {
             if (properties.isLegacyRunWithoutContextEnabled()) {
+                compatibilityMetrics.recordAcceptedLegacyRun();
                 return Optional.empty();
             }
             throw new PlatformException(ErrorCode.CONVERSATION_CONTEXT_REQUIRED);

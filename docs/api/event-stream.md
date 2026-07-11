@@ -87,7 +87,7 @@
 
 ## `run.snapshot.reset`
 
-`run.snapshot.reset` 只用于 Redis 运行数据面恢复。新模式每次 SSE 建连首帧都发送当前完整物化 snapshot；snapshot 从 Redis input 生成本轮 USER 消息，并包含后续最终可见投影，因此不依赖浏览器仍保留乐观输入。建连后以 `snapshot.runtimeVersion` 为 Redis 内部尾流游标；最短 5 秒的 Redis 安全扫描和 live bus 只唤醒按 `runtimeVersion` 分页读取 `runtime-events`，live 事件仍即时唤醒。若连接期间容量换代使游标早于 `earliestRuntimeVersion`，服务端再次发送完整 reset，而不静默跳过事件。本事件是 transient：payload `seq=0`，SSE 不设置 `id`，不能写回或替代 durable 游标。Run 已终态后晚到的 `run.created/run.started/run.cancelling` 会在 Lua 入口被丢弃，不进入 runtime Stream、run-status snapshot 或 live bus，避免在线与重连视图回退为运行中。
+`run.snapshot.reset` 只用于 Redis 运行数据面恢复。新模式每次 SSE 建连首帧都发送当前完整物化 snapshot；snapshot 从 Redis input 的专用保护投影生成本轮 USER 消息，并包含后续最终可见投影，因此不依赖浏览器仍保留乐观输入。建连后以 `snapshot.runtimeVersion` 为 Redis 内部尾流游标；最短 5 秒的 Redis 安全扫描和 live bus 只唤醒按 `runtimeVersion` 分页读取 `runtime-events`，live 事件仍即时唤醒。若连接期间容量换代使游标早于 `earliestRuntimeVersion`，服务端再次发送完整 reset，而不静默跳过事件；容量裁剪至少保留 USER 输入、JSON role 为 assistant 的最新 message、与其 messageId 对应的最新可见 text part（delta 仅 `field=text`，full part 缺 type 时保守保留）和 run-status，tool/reasoning 或非 assistant 投影不得替代这些关键状态。本事件是 transient：payload `seq=0`，SSE 不设置 `id`，不能写回或替代 durable 游标。Run 已终态后晚到的 `run.created/run.started/run.cancelling` 会在 Lua 入口被丢弃，不进入 runtime Stream、run-status snapshot 或 live bus，避免在线与重连视图回退为运行中。
 
 payload 字段：
 
@@ -252,7 +252,7 @@ data 字段：
 
 ## stale active `run.failed`
 
-当 `StaleActiveRunReconcileTaskHandler` 扫描到超过 2 小时仍处于 `PENDING/RUNNING/CANCELLING` 的 Run 时，服务端会先检查 Redis 运行态：
+本节只适用于 `LEGACY_FULL`。`StaleActiveRunReconcileTaskHandler` 的 MyBatis 查询会排除 `REDIS_SUMMARY`；当它扫描到超过 2 小时仍处于 `PENDING/RUNNING/CANCELLING` 的 legacy Run 时，服务端会先检查 Redis 运行态：
 
 - `test-agent:run-output-activity:{runId}`：30 分钟 TTL，存在代表最近仍有用户可见输出。
 - `test-agent:run-pending-ask:{runId}`：无固定 TTL，存在代表最新状态仍停在未处理 ask；当前 ask 类事件包括 `permission.asked` 和 `question.asked`，收到 `permission.replied/question.replied/question.rejected` 或 Run 终态后清理。
@@ -271,6 +271,8 @@ payload 字段：
 | `recentOutputWindowSeconds` | number | 默认 1800。 |
 
 兼容性说明：这是已有 `run.failed` 事件的新增 payload 来源，前端继续按失败终态展示即可；旧客户端会忽略新增的 `reason/activeTimeoutSeconds/recentOutputWindowSeconds` 字段。
+
+`REDIS_SUMMARY` 不写上述数据库事件。无 attention 且 Redis manifest 两小时无活动时，服务端启动时及每 30 秒扫描本服务器 active 索引，由公共后端路由和 owner lease/fencing 程序 best-effort cancel 远端，并把 `reason=STALE_ACTIVE_RUN_TIMEOUT` 的 `run.failed` 终态写入 Redis Stream；随后只持久化安全双摘要和 Run 控制面终态。
 
 ## `session.status`
 
@@ -359,7 +361,7 @@ scope 发现与缓存规则：
 - `session.scope.updated` 是 durable 事件，当前用于 `SESSION_ADDED`，紧随 `session.child.discovered` 输出，便于前端或历史投影更新 session tree 索引。
 - `RunSessionScopeRouter` 为每个订阅保存 known sessions 和 `scopeVersion`；已知 root/child 的稳定事件只命中订阅态，不反查数据库。终态或启动失败后释放该本机状态。
 - `LEGACY_FULL` 的旧 scope cache 继续使用 `test-agent:run-scope:{runId}:...` 30 分钟 key，并只在 cache miss 或发现新 child 时兼容访问 `run_session_scopes`；Redis cache 不可用时数据库仍是 legacy 恢复事实源。
-- `REDIS_SUMMARY` 禁止查询或写入 `run_session_scopes`。Run 运行数据面的 scope、dedup 和 pending 能力由 `RunRuntimeStore` 端口定义，单 Run key 必须使用 `test-agent:run:{runId}:...` hash tag；Redis 不可用时返回 `RUNTIME_STATE_UNAVAILABLE`，不得降级 DB-only。
+- `REDIS_SUMMARY` 禁止查询或写入 `run_session_scopes`。Run 运行数据面的 scope、dedup 和 pending 能力由 `RunRuntimeStore` 端口定义，单 Run key 必须使用 `test-agent:run:{runId}:...` hash tag；执行订阅携带 owner fencing token，scope/dedup/pending 和事件投影都在 Redis Lua 的首个副作用前校验 token，旧 owner 返回冲突且不会进入 live bus。pending append/drain 同时原子维护统一详情字节预算与更新时间。跨 slot active/history 索引在初始化 Lua 前按“所有运行态中最长物理 TTL 的两倍”保守登记，覆盖上次已经处于最长 TTL 的刷新与下一次最长 TTL 事件后的完整窗口；服务器/用户恢复读取会修复全部索引，普通读路径回读 manifest 清理悬空成员。Redis 不可用时返回 `RUNTIME_STATE_UNAVAILABLE`，不得降级 DB-only。
 - opencode raw event id 缺失时 payload 不应包含 `rawEventId`，数据库 `run_events.raw_event_id` 保持 `NULL`。由 root session 事件派生的 `run.succeeded/run.failed` 不复用原始 `rawEventId`，避免与对应 `session.status/session.error` 误去重；派生事件 payload 会带 `derived=true`、`derivedFromRawType`，有原始事件 ID 时还带 `derivedFromRawEventId`。
 - payload 对常见 opencode 大写 ID 字段保留原字段并补充 lower camel alias：`sessionID -> sessionId`、`messageID -> messageId`、`partID -> partId`、`callID -> callId`、`requestID -> requestId`。前端必须允许两种字段并存。
 - `heartbeat`、`server.heartbeat`、`tui.*`、`pty.*`、`workspace.*`、`worktree.*`、`installation.*`、`plugin.*`、`catalog.*` 等不带 session 归属的全局 opencode unknown 事件默认不进入 Run 对话事件流；已知 root/child session 的未知事件仍以 `opencode.event.unknown` 保留。
@@ -387,7 +389,7 @@ scope 发现与缓存规则：
 
 ## Runtime SSE
 
-`GET /api/internal/agent/{agentId}/runs/{runId}/events` 是 agent-scoped RunEvent 实时入口，前端默认使用 `agentId=opencode`。`GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 是内部平台入口。旧 `GET /api/runs/{runId}/events` 已作废，返回 `410 API_GONE`。有效入口返回 `text/event-stream`，共享同一续传、traceId、错误格式和事件模型，payload 格式不随 agentId 改变。
+`GET /api/internal/agent/{agentId}/runs/{runId}/events` 是 agent-scoped RunEvent 实时入口，前端默认使用 `agentId=opencode`。`GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 是内部平台入口。旧 `GET /api/runs/{runId}/events` 已作废，返回 `410 API_GONE`。有效入口返回 `text/event-stream`，共享同一续传、traceId、错误格式和事件模型，payload 格式不随 agentId 改变。目标 Java 在发出首帧前校验认证用户拥有该 Run；新模式直接比较 Redis manifest `userId` 且不查询 PostgreSQL，legacy/详情过期才回查 Run 与 Session，越权返回 `403 FORBIDDEN` 且不进入 snapshot/replay/live 流。
 
 应用配置管理、版本库部署模式配置和个人 SSH key 管理不产生 RunEvent，也不新增 SSE 事件类型。`/api/internal/platform/configuration-management/**` 的版本库创建/编辑/列表、部署模式选项查询和个人 SSH key 维护均通过 HTTP 同步返回；设置页创建应用工作空间接口虽然会触发初始版本工作区 clone/checkout 和运行态 Workspace 创建，但进度写入 `workspace_create_operations` 并由 `GET /api/internal/platform/configuration-management/workspace-create-operations/{operationId}` HTTP 轮询读取；不通过 RunEvent SSE 发布“校验、保存配置、解析版本、下载代码、创建运行态工作区、完成/失败”等步骤。
 

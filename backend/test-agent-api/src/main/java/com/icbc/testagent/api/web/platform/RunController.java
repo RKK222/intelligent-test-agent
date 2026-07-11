@@ -106,7 +106,10 @@ public class RunController {
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
-        return blockingResponse(exchange, ignored -> toRunResponse(runService.getRun(new RunId(runId))));
+        return blockingResponse(exchange, ignored -> {
+            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            return toRunResponse(runService.getRun(authorizedRunId));
+        });
     }
 
     /**
@@ -120,10 +123,12 @@ public class RunController {
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
-        return blockingResponse(exchange, traceId ->
-                toRunResponse(hasAgentId(agentId)
-                        ? runService.cancelRun(agentId, new RunId(runId), traceId)
-                        : runService.cancelRun(new RunId(runId), traceId)));
+        return blockingResponse(exchange, traceId -> {
+            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            return toRunResponse(hasAgentId(agentId)
+                    ? runService.cancelRun(agentId, authorizedRunId, traceId)
+                    : runService.cancelRun(authorizedRunId, traceId));
+        });
     }
 
     private RuntimeDtos.RunResponse toRunResponse(com.icbc.testagent.domain.run.Run run) {
@@ -147,10 +152,12 @@ public class RunController {
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
-        return blockingResponse(exchange, traceId ->
-                RuntimeDtos.RunDiffResponse.from(hasAgentId(agentId)
-                        ? runDiffService.getDiff(agentId, new RunId(runId), traceId)
-                        : runDiffService.getDiff(new RunId(runId), traceId)));
+        return blockingResponse(exchange, traceId -> {
+            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            return RuntimeDtos.RunDiffResponse.from(hasAgentId(agentId)
+                    ? runDiffService.getDiff(agentId, authorizedRunId, traceId)
+                    : runDiffService.getDiff(authorizedRunId, traceId));
+        });
     }
 
     /**
@@ -164,10 +171,12 @@ public class RunController {
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
-        return blockingResponse(exchange, traceId ->
-                RuntimeDtos.RunDiffActionResponse.from(hasAgentId(agentId)
-                        ? runDiffService.acceptDiff(agentId, new RunId(runId), traceId)
-                        : runDiffService.acceptDiff(new RunId(runId), traceId)));
+        return blockingResponse(exchange, traceId -> {
+            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            return RuntimeDtos.RunDiffActionResponse.from(hasAgentId(agentId)
+                    ? runDiffService.acceptDiff(agentId, authorizedRunId, traceId)
+                    : runDiffService.acceptDiff(authorizedRunId, traceId));
+        });
     }
 
     /**
@@ -181,10 +190,12 @@ public class RunController {
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
-        return blockingResponse(exchange, traceId ->
-                RuntimeDtos.RunDiffActionResponse.from(hasAgentId(agentId)
-                        ? runDiffService.rejectDiff(agentId, new RunId(runId), traceId)
-                        : runDiffService.rejectDiff(new RunId(runId), traceId)));
+        return blockingResponse(exchange, traceId -> {
+            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            return RuntimeDtos.RunDiffActionResponse.from(hasAgentId(agentId)
+                    ? runDiffService.rejectDiff(agentId, authorizedRunId, traceId)
+                    : runDiffService.rejectDiff(authorizedRunId, traceId));
+        });
     }
 
     /**
@@ -206,19 +217,26 @@ public class RunController {
         String resumeEventId = lastEventId != null ? lastEventId : lastEventIdQuery;
         RunId currentRunId = new RunId(runId);
         String traceId = RuntimeApiSupport.traceId(exchange);
-        boolean redisSummary = runService.eventStorageMode(currentRunId) == RunStorageMode.REDIS_SUMMARY;
-        Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = messageRecoveryService == null || redisSummary
-                ? Flux.empty()
-                : (hasAgentId(agentId)
-                        ? messageRecoveryService.recover(agentId, currentRunId, traceId)
-                        : messageRecoveryService.recover(currentRunId, traceId))
-                        .map(sseMapper::toTransientSse);
-        return eventStreamService.streamAfterWithSnapshot(
-                currentRunId,
-                resumeEventId,
-                DEFAULT_POLL_INTERVAL,
-                DEFAULT_BATCH_LIMIT,
-                snapshotEvents);
+        // Redis/legacy 归属读取属于阻塞调用；延迟到 boundedElastic 执行，且仍严格先于首帧与任何恢复读取。
+        return Flux.defer(() -> {
+                    runService.requireRunAccess(
+                            AuthWebSupport.getAuthPrincipal(exchange).userId(),
+                            currentRunId);
+                    boolean redisSummary = runService.eventStorageMode(currentRunId) == RunStorageMode.REDIS_SUMMARY;
+                    Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = messageRecoveryService == null || redisSummary
+                            ? Flux.empty()
+                            : (hasAgentId(agentId)
+                                    ? messageRecoveryService.recover(agentId, currentRunId, traceId)
+                                    : messageRecoveryService.recover(currentRunId, traceId))
+                                    .map(sseMapper::toTransientSse);
+                    return eventStreamService.streamAfterWithSnapshot(
+                            currentRunId,
+                            resumeEventId,
+                            DEFAULT_POLL_INTERVAL,
+                            DEFAULT_BATCH_LIMIT,
+                            snapshotEvents);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     /**
@@ -235,6 +253,9 @@ public class RunController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         RunId currentRunId = new RunId(runId);
         return Mono.fromCallable(() -> {
+                    runService.requireRunAccess(
+                            AuthWebSupport.getAuthPrincipal(exchange).userId(),
+                            currentRunId);
                     RunHistoryRecoveryResult recovery = messageRecoveryService == null
                             ? RunHistoryRecoveryResult.full(
                                     List.of(), null, RunHistoryRecoverySource.OPENCODE)
@@ -276,6 +297,14 @@ public class RunController {
         // Run/Diff 编排当前包含阻塞式持久化和 opencode 调用，必须脱离 WebFlux event-loop 执行。
         return Mono.fromCallable(() -> ApiResponse.ok(action.apply(traceId), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /** 所有 runId 入口在读取详情或执行副作用前统一校验认证用户归属。 */
+    private RunId requireRunAccess(ServerWebExchange exchange, String runId) {
+        RunId currentRunId = new RunId(runId);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        runService.requireRunAccess(userId, currentRunId);
+        return currentRunId;
     }
 
     private boolean hasAgentId(String agentId) {

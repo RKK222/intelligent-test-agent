@@ -201,6 +201,90 @@ class RedisRunRuntimeStoreIntegrationTest {
     }
 
     @Test
+    void capacityResetRetainsUserInputLatestAssistantPartAndRunStatus() {
+        String configuredPort = System.getProperty("test.redis.port");
+        Assumptions.assumeTrue(configuredPort != null && !configuredPort.isBlank());
+        RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(
+                "127.0.0.1", Integer.parseInt(configuredPort));
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(configuration);
+        connectionFactory.afterPropertiesSet();
+        connectionFactory.start();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+        RedisRunRuntimeStore store = new RedisRunRuntimeStore(
+                redis,
+                new ObjectMapper().registerModule(new JavaTimeModule()),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofMinutes(5),
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(30),
+                100,
+                1024 * 1024,
+                4);
+        RunRuntimeManifest manifest = manifest("run_redis_critical_capacity", RunStatus.RUNNING);
+        try {
+            store.initialize(manifest, input(manifest.runId()));
+            store.appendDurable(message(manifest.runId(), "msg_old", "old answer", 1));
+            store.appendDurable(message(manifest.runId(), "msg_final", "final answer", 2));
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.MESSAGE_PART_UPDATED, "trace_capacity", NOW.plusMillis(3),
+                    Map.of("part", Map.of(
+                            "id", "part_final",
+                            "messageID", "msg_final",
+                            "sessionID", manifest.rootRemoteSessionId(),
+                            "type", "text",
+                            "text", "final visible part"))));
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.MESSAGE_PART_UPDATED, "trace_capacity", NOW.plusMillis(4),
+                    Map.of("part", Map.of(
+                            "id", "part_reasoning",
+                            "messageID", "msg_final",
+                            "sessionID", manifest.rootRemoteSessionId(),
+                            "type", "reasoning",
+                            "text", "internal reasoning must not replace visible part"))));
+            store.appendDurable(message(manifest.runId(), "msg_echo", "later non-assistant message", 5, "user"));
+            RunRuntimeAppendResult terminal = store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.RUN_SUCCEEDED, "trace_capacity", NOW.plusMillis(6),
+                    Map.of("status", RunStatus.SUCCEEDED.name())));
+
+            assertThat(terminal.truncatedNow()).isTrue();
+            var replay = store.replayAfter(manifest.runId(), 0, 100);
+            assertThat(replay.cursorResetRequired()).isTrue();
+            assertThat(replay.snapshot().events())
+                    .anySatisfy(event -> assertThat(event.payload())
+                            .containsEntry("role", "user")
+                            .containsEntry("text", "完整 prompt 不得进数据库"))
+                    .anySatisfy(event -> assertThat(event.payload().get("message"))
+                            .isEqualTo(Map.of(
+                                    "id", "msg_final",
+                                    "role", "assistant",
+                                    "sessionID", manifest.rootRemoteSessionId(),
+                                    "text", "final answer")))
+                    .anySatisfy(event -> assertThat(event.payload().get("part"))
+                            .isEqualTo(Map.of(
+                                    "id", "part_final",
+                                    "messageID", "msg_final",
+                                    "sessionID", manifest.rootRemoteSessionId(),
+                                    "type", "text",
+                                    "text", "final visible part")))
+                    .anySatisfy(event -> assertThat(event.type()).isEqualTo(RunEventType.RUN_SUCCEEDED));
+            assertThat(replay.snapshot().events())
+                    .noneMatch(event -> "msg_old".equals(String.valueOf(
+                            ((Map<?, ?>) event.payload().getOrDefault("message", Map.of())).get("id"))));
+            assertThat(replay.snapshot().events())
+                    .noneMatch(event -> "msg_echo".equals(String.valueOf(
+                            ((Map<?, ?>) event.payload().getOrDefault("message", Map.of())).get("id")))
+                            || "part_reasoning".equals(String.valueOf(
+                            ((Map<?, ?>) event.payload().getOrDefault("part", Map.of())).get("id"))));
+            assertThat(replay.manifest().detailBytes()).isLessThanOrEqualTo(1024 * 1024L);
+        } finally {
+            redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
     void normalizesOversizedSnapshotAndDoesNotEnterPerEventResetLoop() {
         String configuredPort = System.getProperty("test.redis.port");
         Assumptions.assumeTrue(configuredPort != null && !configuredPort.isBlank());
@@ -306,6 +390,17 @@ class RedisRunRuntimeStoreIntegrationTest {
             assertThat(current.attentionAt()).isEqualTo(NOW);
             assertThat(redis.getExpire("test-agent:run:runtime-user:{" + manifest.userId().value() + "}"))
                     .isGreaterThan(Duration.ofMinutes(10).toSeconds());
+            String activeUserIndex = "test-agent:run:active:user:{" + manifest.userId().value() + "}";
+            String activeServerIndex = "test-agent:run:active:server:{server-a}";
+            String historyIndex = "test-agent:run:history:session:{" + manifest.sessionId().value() + "}";
+            long pendingUserTtl = redis.getExpire(activeUserIndex);
+            long pendingServerTtl = redis.getExpire(activeServerIndex);
+            long pendingHistoryTtl = redis.getExpire(historyIndex);
+            RunRuntimeManifest regular = manifest("run_redis_shared_regular", RunStatus.RUNNING);
+            store.initialize(regular, input(regular.runId()));
+            assertThat(redis.getExpire(activeUserIndex)).isGreaterThanOrEqualTo(pendingUserTtl - 2L);
+            assertThat(redis.getExpire(activeServerIndex)).isGreaterThanOrEqualTo(pendingServerTtl - 2L);
+            assertThat(redis.getExpire(historyIndex)).isGreaterThanOrEqualTo(pendingHistoryTtl - 2L);
             store.projectTransient(new RunEventDraft(
                     manifest.runId(), RunEventType.QUESTION_ASKED, "trace_redis_runtime", NOW.plusSeconds(1),
                     Map.of("sessionId", "remote-session-redis-runtime", "requestId", "question_2")));
@@ -316,6 +411,14 @@ class RedisRunRuntimeStoreIntegrationTest {
             assertThat(afterOldReply.attention()).isEqualTo("QUESTION");
             assertThat(afterOldReply.attentionEventId()).isEqualTo(
                     "evt_runtime_" + manifest.runId().value() + "_5");
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.RUN_CANCELLED, "trace_redis_runtime", NOW.plusSeconds(3),
+                    Map.of("status", RunStatus.CANCELLED.name(), "reason", "PENDING_ASK_EXPIRED")));
+            RunRuntimeManifest terminal = store.findManifest(manifest.runId()).orElseThrow();
+            assertThat(terminal.status()).isEqualTo(RunStatus.CANCELLED);
+            assertThat(terminal.attention()).isNull();
+            assertThat(terminal.attentionEventId()).isNull();
+            assertThat(terminal.attentionAt()).isNull();
             assertThat(redis.getExpire("test-agent:run:{" + manifest.runId().value() + "}:input"))
                     .isPositive();
             assertThat(redis.getExpire("test-agent:run:active:session:{" + manifest.sessionId().value() + "}"))
@@ -355,8 +458,18 @@ class RedisRunRuntimeStoreIntegrationTest {
             assertThat(store.claimRawEvent(manifest.runId(), manifest.rootRemoteSessionId(), "raw_1")).isFalse();
 
             RunEventDraft pending = delta(manifest.runId(), "pending", 1);
-            store.appendPending("child_1", pending);
+            long detailBytesBeforePending = store.findManifest(manifest.runId()).orElseThrow().detailBytes();
+            RedisRunRuntimeStore laterStore = new RedisRunRuntimeStore(
+                    redis,
+                    new ObjectMapper().registerModule(new JavaTimeModule()),
+                    Clock.fixed(NOW.plusSeconds(30), ZoneOffset.UTC));
+            laterStore.appendPending("child_1", pending);
+            RunRuntimeManifest withPending = store.findManifest(manifest.runId()).orElseThrow();
+            assertThat(withPending.detailBytes()).isGreaterThan(detailBytesBeforePending);
+            assertThat(withPending.updatedAt()).isEqualTo(NOW.plusSeconds(30));
             assertThat(store.drainPending(manifest.runId(), "child_1")).containsExactly(pending);
+            assertThat(store.findManifest(manifest.runId()).orElseThrow().detailBytes())
+                    .isEqualTo(detailBytesBeforePending);
             assertThat(store.drainPending(manifest.runId(), "child_1")).isEmpty();
 
             var config = redis.getConnectionFactory().getConnection().serverCommands();
@@ -380,6 +493,10 @@ class RedisRunRuntimeStoreIntegrationTest {
                     false, "CHILD", null, null, null, "trace_scope", NOW, NOW,
                     Map.of("payload", "x".repeat(4096)));
             assertThatThrownBy(() -> capacityLimitedStore.saveScope(scope, oversized))
+                    .isInstanceOfSatisfying(PlatformException.class, exception ->
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+            RunEventDraft oversizedPending = delta(manifest.runId(), "x".repeat(4096), 2);
+            assertThatThrownBy(() -> capacityLimitedStore.appendPending("child_oversized", oversizedPending))
                     .isInstanceOfSatisfying(PlatformException.class, exception ->
                             assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
         } finally {
@@ -522,6 +639,23 @@ class RedisRunRuntimeStoreIntegrationTest {
                 "trace_redis_runtime",
                 NOW.plusMillis(index),
                 Map.of("messageId", "msg_assistant", "partId", "part_text", "text", "delta-" + index));
+    }
+
+    private RunEventDraft message(RunId runId, String messageId, String text, int index) {
+        return message(runId, messageId, text, index, "assistant");
+    }
+
+    private RunEventDraft message(RunId runId, String messageId, String text, int index, String role) {
+        return new RunEventDraft(
+                runId,
+                RunEventType.MESSAGE_UPDATED,
+                "trace_redis_runtime",
+                NOW.plusMillis(index),
+                Map.of("message", Map.of(
+                        "id", messageId,
+                        "role", role,
+                        "sessionID", "remote-session-redis-runtime",
+                        "text", text)));
     }
 
     private RunEventDraft delta(RunId runId, String delta, int index) {

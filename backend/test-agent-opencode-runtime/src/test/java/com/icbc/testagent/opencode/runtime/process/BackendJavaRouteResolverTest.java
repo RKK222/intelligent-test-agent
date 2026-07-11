@@ -48,6 +48,7 @@ class BackendJavaRouteResolverTest {
 
         assertThat(remote.listenUrl()).isEqualTo("http://10.8.0.22:18080");
         assertThat(current.listenUrl()).isEqualTo("http://10.8.0.21:8080");
+        assertThat(resolver.currentBackendProcessIdValue()).isEqualTo("bjp_current_backend");
     }
 
     @Test

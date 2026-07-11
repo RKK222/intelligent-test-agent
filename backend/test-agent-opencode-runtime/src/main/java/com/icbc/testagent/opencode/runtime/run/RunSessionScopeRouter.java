@@ -7,6 +7,7 @@ import com.icbc.testagent.domain.event.RunSessionScope;
 import com.icbc.testagent.domain.event.RunSessionScopeRepository;
 import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunOwnerLease;
 import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.run.RunStorageMode;
 import java.time.Instant;
@@ -68,14 +69,24 @@ class RunSessionScopeRouter {
             RunEventScopeContext rootScope,
             RunEventDraft draft,
             RunStorageMode storageMode) {
-        return route(rootScope, draft, storageMode, true);
+        return route(rootScope, draft, storageMode, null);
+    }
+
+    /** REDIS_SUMMARY 执行订阅必须携带 owner lease，所有 scope 写入由 Redis Lua 原子校验 fencing。 */
+    List<RunEventDraft> route(
+            RunEventScopeContext rootScope,
+            RunEventDraft draft,
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
+        return route(rootScope, draft, storageMode, true, ownerLease);
     }
 
     private List<RunEventDraft> route(
             RunEventScopeContext rootScope,
             RunEventDraft draft,
             RunStorageMode storageMode,
-            boolean useRuntimeCache) {
+            boolean useRuntimeCache,
+            RunOwnerLease ownerLease) {
         Objects.requireNonNull(rootScope, "rootScope must not be null");
         Objects.requireNonNull(draft, "draft must not be null");
         Objects.requireNonNull(storageMode, "storageMode must not be null");
@@ -90,7 +101,7 @@ class RunSessionScopeRouter {
         String dedupSessionId = eventSessionId == null ? rootScope.rootSessionId() : eventSessionId;
         if (useRuntimeCache && rawEventId(draft.payload())
                 .filter(rawEventId -> !claimRawEvent(
-                        rootScope.runId(), dedupSessionId, rawEventId, storageMode))
+                        rootScope.runId(), dedupSessionId, rawEventId, storageMode, ownerLease))
                 .isPresent()) {
             return List.of();
         }
@@ -98,15 +109,16 @@ class RunSessionScopeRouter {
             recordPendingTaskCandidate(rootScope, draft, eventSessionId, storageMode);
         }
 
-        routed.addAll(discoverBootstrapChildren(rootScope, draft, storageMode));
+        routed.addAll(discoverBootstrapChildren(rootScope, draft, storageMode, ownerLease));
         if (eventSessionId == null && shouldDropGlobalNonRunEvent(draft)) {
             return List.copyOf(routed);
         }
 
         if (taskCandidate.isPresent()) {
-            ChildRoute child = discoverChild(rootScope, draft, taskCandidate.get().toDiscovery(), storageMode);
+            ChildRoute child = discoverChild(
+                    rootScope, draft, taskCandidate.get().toDiscovery(), storageMode, ownerLease);
             routed.addAll(child.discoveryEvents());
-            routed.addAll(drainPending(rootScope, child, storageMode));
+            routed.addAll(drainPending(rootScope, child, storageMode, ownerLease));
             // task part 是 root assistant 的导航入口；child discovery 只建立子会话索引，不能把 root part 改成 child scope。
             routed.add(recontextualize(draft, rootContext(rootScope, draft)));
             return List.copyOf(routed);
@@ -148,12 +160,12 @@ class RunSessionScopeRouter {
                     pendingTask == null ? null : pendingTask.messageId(),
                     pendingTask == null ? null : pendingTask.partId(),
                     pendingTask == null ? null : pendingTask.callId(),
-                    Map.copyOf(metadata)), storageMode);
+                    Map.copyOf(metadata)), storageMode, ownerLease);
             if (isRunTerminal(draft)) {
                 return List.copyOf(routed);
             }
             routed.addAll(child.discoveryEvents());
-            routed.addAll(drainPending(rootScope, child, storageMode));
+            routed.addAll(drainPending(rootScope, child, storageMode, ownerLease));
             routed.add(recontextualize(draft, child.scopeContext()));
             return List.copyOf(routed);
         }
@@ -162,7 +174,11 @@ class RunSessionScopeRouter {
         if (isRunTerminal(draft) || explicitSessionEvent(draft.payload())) {
             if (useRuntimeCache && eventSessionId != null && !isRunTerminal(draft)) {
                 if (storageMode == RunStorageMode.REDIS_SUMMARY) {
-                    requireRuntimeStore().appendPending(eventSessionId, draft);
+                    if (ownerLease == null) {
+                        requireRuntimeStore().appendPending(eventSessionId, draft);
+                    } else {
+                        requireRuntimeStore().appendPending(eventSessionId, draft, ownerLease);
+                    }
                 } else {
                     runtimeCache.appendPending(eventSessionId, draft);
                 }
@@ -176,7 +192,8 @@ class RunSessionScopeRouter {
     private List<RunEventDraft> discoverBootstrapChildren(
             RunEventScopeContext rootScope,
             RunEventDraft draft,
-            RunStorageMode storageMode) {
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
         if (!"session.children".equals(valueAsText(draft.payload().get("rawType")).orElse(null))) {
             return List.of();
         }
@@ -198,9 +215,9 @@ class RunSessionScopeRouter {
                                     null,
                                     Map.of("rawType", "session.children"))))
                     .ifPresent(discovery -> {
-                        ChildRoute child = discoverChild(rootScope, draft, discovery, storageMode);
+                        ChildRoute child = discoverChild(rootScope, draft, discovery, storageMode, ownerLease);
                         discoveryEvents.addAll(child.discoveryEvents());
-                        discoveryEvents.addAll(drainPending(rootScope, child, storageMode));
+                        discoveryEvents.addAll(drainPending(rootScope, child, storageMode, ownerLease));
                     });
         }
         return List.copyOf(discoveryEvents);
@@ -210,7 +227,8 @@ class RunSessionScopeRouter {
             RunEventScopeContext rootScope,
             RunEventDraft draft,
             ChildDiscovery discovery,
-            RunStorageMode storageMode) {
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
         Optional<RunSessionScopeSession> existing = findSession(rootScope, discovery.sessionId(), storageMode);
         SubscriptionScopeState state = state(rootScope);
         long version = state.nextVersionForNewSession();
@@ -258,7 +276,11 @@ class RunSessionScopeRouter {
                 discovery.metadata());
         state.record(scopeSession, version);
         if (storageMode == RunStorageMode.REDIS_SUMMARY) {
-            requireRuntimeStore().saveScope(scope, scopeSession);
+            if (ownerLease == null) {
+                requireRuntimeStore().saveScope(scope, scopeSession);
+            } else {
+                requireRuntimeStore().saveScope(scope, scopeSession, ownerLease);
+            }
         } else {
             runtimeCache.recordScopeSession(scope, scopeSession);
         }
@@ -297,19 +319,26 @@ class RunSessionScopeRouter {
     private List<RunEventDraft> drainPending(
             RunEventScopeContext rootScope,
             ChildRoute child,
-            RunStorageMode storageMode) {
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
         if (child.discoveryEvents().isEmpty()) {
             return List.of();
         }
-        List<RunEventDraft> pending = storageMode == RunStorageMode.REDIS_SUMMARY
-                ? requireRuntimeStore().drainPending(rootScope.runId(), child.scopeContext().sessionId())
-                : runtimeCache.drainPending(rootScope.runId(), child.scopeContext().sessionId());
+        List<RunEventDraft> pending;
+        if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+            pending = ownerLease == null
+                    ? requireRuntimeStore().drainPending(rootScope.runId(), child.scopeContext().sessionId())
+                    : requireRuntimeStore().drainPending(
+                            rootScope.runId(), child.scopeContext().sessionId(), ownerLease);
+        } else {
+            pending = runtimeCache.drainPending(rootScope.runId(), child.scopeContext().sessionId());
+        }
         if (pending.isEmpty()) {
             return List.of();
         }
         List<RunEventDraft> drained = new ArrayList<>();
         for (RunEventDraft pendingDraft : pending) {
-            drained.addAll(route(rootScope, pendingDraft, storageMode, false));
+            drained.addAll(route(rootScope, pendingDraft, storageMode, false, ownerLease));
         }
         return List.copyOf(drained);
     }
@@ -541,10 +570,14 @@ class RunSessionScopeRouter {
             RunId runId,
             String sessionId,
             String rawEventId,
-            RunStorageMode storageMode) {
-        return storageMode == RunStorageMode.REDIS_SUMMARY
-                ? requireRuntimeStore().claimRawEvent(runId, sessionId, rawEventId)
-                : runtimeCache.claimRawEvent(runId, sessionId, rawEventId);
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
+        if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+            return ownerLease == null
+                    ? requireRuntimeStore().claimRawEvent(runId, sessionId, rawEventId)
+                    : requireRuntimeStore().claimRawEvent(runId, sessionId, rawEventId, ownerLease);
+        }
+        return runtimeCache.claimRawEvent(runId, sessionId, rawEventId);
     }
 
     private RunRuntimeStore requireRuntimeStore() {

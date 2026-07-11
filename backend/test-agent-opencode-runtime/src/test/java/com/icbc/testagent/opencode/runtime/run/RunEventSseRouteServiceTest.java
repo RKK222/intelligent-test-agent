@@ -96,6 +96,45 @@ class RunEventSseRouteServiceTest {
     }
 
     @Test
+    void strictRoutingPropagatesUnavailableTargetForWriteOperations() {
+        RoutingDecisionRepository routingDecisions = mock(RoutingDecisionRepository.class);
+        OpencodeProcessManagementRepository processes = mock(OpencodeProcessManagementRepository.class);
+        BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
+        when(routingDecisions.findByRunId(RUN_ID))
+                .thenReturn(Optional.of(decision("node_" + PROCESS_ID.value())));
+        when(processes.findOpencodeServerProcessById(PROCESS_ID))
+                .thenReturn(Optional.of(process(PROCESS_ID, SERVER_B)));
+        when(routeResolver.remoteTarget(SERVER_B)).thenReturn(Optional.of(SERVER_B));
+        when(routeResolver.requireBackend(SERVER_B)).thenThrow(new PlatformException(
+                ErrorCode.OPENCODE_UNAVAILABLE,
+                "目标服务器后端不可用",
+                Map.of("linuxServerId", SERVER_B.value())));
+
+        RunEventSseRouteService service = new RunEventSseRouteService(routingDecisions, processes, routeResolver);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.forwardTargetStrict(RUN_ID))
+                .isInstanceOf(PlatformException.class)
+                .extracting(exception -> ((PlatformException) exception).errorCode())
+                .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+    }
+
+    @Test
+    void strictRoutingRejectsMissingRunOwnerInsteadOfExecutingWriteLocally() {
+        RoutingDecisionRepository routingDecisions = mock(RoutingDecisionRepository.class);
+        OpencodeProcessManagementRepository processes = mock(OpencodeProcessManagementRepository.class);
+        BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
+        when(routingDecisions.findByRunId(RUN_ID)).thenReturn(Optional.empty());
+
+        RunEventSseRouteService service = new RunEventSseRouteService(routingDecisions, processes, routeResolver);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.forwardTargetStrict(RUN_ID))
+                .isInstanceOf(PlatformException.class)
+                .extracting(exception -> ((PlatformException) exception).errorCode())
+                .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+        verifyNoInteractions(processes, routeResolver);
+    }
+
+    @Test
     void ignoresLegacyExecutionNodeThatCannotBeMappedToOpencodeProcess() {
         RoutingDecisionRepository routingDecisions = mock(RoutingDecisionRepository.class);
         OpencodeProcessManagementRepository processes = mock(OpencodeProcessManagementRepository.class);

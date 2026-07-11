@@ -193,6 +193,10 @@
         where session_id = #{binding.sessionId.value}
     </update>
 
+    <!--
+        expected+1 只容纳一次较高事件序号的晚到纠正：同状态可刷新摘要；
+        跨状态仅允许临时 TRANSPORT_ERROR/FAILED 被可信 root 终态替换，禁止任意终态翻转。
+    -->
     <update id="updateTerminalIfVersion">
         update runs
         set status = #{row.status},
@@ -229,8 +233,15 @@
               status_version = #{row.expectedStatusVersion}
               or (
                   status_version = #{row.expectedStatusVersion} + 1
-                  and status = #{row.status}
                   and last_event_seq &lt; #{row.lastEventSeq}
+                  and (
+                      status = #{row.status}
+                      or (
+                          status = 'FAILED'
+                          and terminal_source = 'TRANSPORT_ERROR'
+                          and #{row.terminalSource} in ('REMOTE_ROOT', 'RECOVERY_REMOTE_ROOT')
+                      )
+                  )
               )
           )
     </update>

@@ -25,7 +25,7 @@
 - `ServerBroadcastPublisher` / `NoopServerBroadcastPublisher` / `RedisServerBroadcastPublisher`：通用服务器广播端口的 event 模块实现，当前用于应用版本工作区副本同步；默认关闭，开启 `test-agent.server-broadcast.enabled=true` 后走 Redis channel `test-agent:server-broadcast`。
 - `RunEventReplayService`：解析 `Last-Event-ID`；legacy 按 `runId + seq` 从 Repository 增量回放；新模式读取 manifest、当前物化 snapshot 与 durable 保留起点以判定初始 reset reason，并提供按 `runtimeVersion` 分页读取 durable + transient 有序尾部的能力；Session 历史树的旧数据继续按 root session 读取数据库 durable 状态事件。
 - `RunEventSseMapper`：将 durable RunEvent 映射为带 `id=seq` 的 SSE，将 transient live output 映射为不带 SSE `id` 的 SSE。
-- `RunEventSseStreamService`：legacy 合并 Repository durable polling replay 和 `RunEventLiveBus`；新模式首帧总发送完整物化 `run.snapshot.reset`，以 snapshot `runtimeVersion` 为游标，随后由最短 5 秒的 Redis 安全扫描与本机 live bus 共同唤醒、按 runtimeVersion 从 Redis 分页读取 durable + transient 尾部。live 事件仍即时唤醒，但帧本身不直接输出；慢订阅、回放并发和 live 丢帧都由 Redis 顺序补偿，容量换代导致游标落后时再次发送 reset。整个新模式不创建 PostgreSQL 轮询，也不触发兼容远端消息 snapshot Flux。
+- `RunEventSseStreamService`：legacy 合并 Repository durable polling replay 和 `RunEventLiveBus`；新模式首帧总发送完整物化 `run.snapshot.reset`，以 snapshot `runtimeVersion` 为游标，随后由最短 5 秒的 Redis 安全扫描与本机 live bus 共同唤醒、按 runtimeVersion 从 Redis 分页读取 durable + transient 尾部。live 事件仍即时唤醒，但帧本身不直接输出；慢订阅、回放并发和 live 丢帧都由 Redis 顺序补偿，容量换代导致游标落后时再次发送 reset，reset 关键状态至少包含 USER 输入、最新 assistant message、对应可见 text part 和 run-status。整个新模式不创建 PostgreSQL 轮询，也不触发兼容远端消息 snapshot Flux。
 
 ## 允许依赖
 

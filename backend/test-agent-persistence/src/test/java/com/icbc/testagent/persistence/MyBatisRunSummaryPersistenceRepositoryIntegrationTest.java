@@ -272,6 +272,85 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
     }
 
     @Test
+    void correctsProvisionalTransportFailureToOneLaterRootTerminalOnly() {
+        RunPersistenceAnchor anchor = anchor("run_summary_transport_correction", "request-transport-correction");
+        repository.insertAnchor(anchor);
+        RunTerminalProjection provisional = projection(
+                anchor,
+                RunStatus.FAILED,
+                "TRANSPORT_ERROR",
+                42L,
+                "临时用户概要",
+                "临时失败概要");
+        assertThat(repository.persistTerminal(provisional)).isEqualTo(RunTerminalProjectionResult.APPLIED);
+
+        RunTerminalProjection rootTerminal = projection(
+                anchor,
+                RunStatus.SUCCEEDED,
+                "REMOTE_ROOT",
+                43L,
+                "最终用户概要",
+                "最终助手概要");
+        assertThat(repository.persistTerminal(rootTerminal)).isEqualTo(RunTerminalProjectionResult.APPLIED);
+        assertThat(jdbcClient.sql("""
+                        select status, status_version, terminal_source, last_event_seq
+                        from runs where run_id = :runId
+                        """)
+                .param("runId", anchor.runId().value())
+                .query((rs, rowNum) -> Map.of(
+                        "status", rs.getString("status"),
+                        "statusVersion", rs.getLong("status_version"),
+                        "terminalSource", rs.getString("terminal_source"),
+                        "lastEventSeq", rs.getLong("last_event_seq")))
+                .single())
+                .containsEntry("status", "SUCCEEDED")
+                .containsEntry("statusVersion", 3L)
+                .containsEntry("terminalSource", "REMOTE_ROOT")
+                .containsEntry("lastEventSeq", 43L);
+        assertThat(jdbcClient.sql("select content from session_messages where run_id = :runId order by role")
+                .param("runId", anchor.runId().value())
+                .query(String.class)
+                .list()).containsExactlyInAnyOrder("最终用户概要", "最终助手概要");
+
+        RunTerminalProjection secondCorrection = projection(
+                anchor,
+                RunStatus.FAILED,
+                "REMOTE_ROOT",
+                44L,
+                "不应再次写入",
+                "不应再次写入");
+        assertThat(repository.persistTerminal(secondCorrection))
+                .isEqualTo(RunTerminalProjectionResult.VERSION_CONFLICT);
+    }
+
+    @Test
+    void rejectsTerminalStatusFlipWhenExistingSourceIsNotTransportError() {
+        RunPersistenceAnchor anchor = anchor("run_summary_terminal_flip", "request-terminal-flip");
+        repository.insertAnchor(anchor);
+        assertThat(repository.persistTerminal(projection(
+                        anchor,
+                        RunStatus.FAILED,
+                        "LOCAL_START",
+                        42L,
+                        "失败用户概要",
+                        "失败助手概要")))
+                .isEqualTo(RunTerminalProjectionResult.APPLIED);
+
+        assertThat(repository.persistTerminal(projection(
+                        anchor,
+                        RunStatus.SUCCEEDED,
+                        "REMOTE_ROOT",
+                        43L,
+                        "不应写入",
+                        "不应写入")))
+                .isEqualTo(RunTerminalProjectionResult.VERSION_CONFLICT);
+        assertThat(jdbcClient.sql("select status from runs where run_id = :runId")
+                .param("runId", anchor.runId().value())
+                .query(String.class)
+                .single()).isEqualTo("FAILED");
+    }
+
+    @Test
     void terminalProjectionRejectsMoreThanTwoSummariesBeforeSql() {
         RunPersistenceAnchor anchor = anchor("run_summary_too_many", "request-too-many");
         RunTerminalProjection valid = projection(anchor, 1L, "用户概要", "助手概要");
@@ -386,6 +465,42 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
                                 RunSummaryStatus.COMPLETE,
                                 NOW.plusSeconds(1),
                                 "remote-message-final")));
+    }
+
+    /** 构造不同终态事实来源，专门验证晚到 root 纠正边界。 */
+    private RunTerminalProjection projection(
+            RunPersistenceAnchor anchor,
+            RunStatus status,
+            String terminalSource,
+            long lastEventSeq,
+            String userContent,
+            String assistantContent) {
+        RunTerminalProjection base = projection(
+                anchor, 1L, lastEventSeq, userContent, assistantContent);
+        return new RunTerminalProjection(
+                base.runId(),
+                base.sessionId(),
+                status,
+                base.expectedStatusVersion(),
+                terminalSource,
+                status.name(),
+                base.safeErrorMessage(),
+                base.remoteStopConfirmed(),
+                base.lastEventSeq(),
+                base.detailsExpiresAt(),
+                base.rootRemoteSessionId(),
+                base.diffCounts(),
+                base.lastRemoteMessageId(),
+                base.lastRemotePartId(),
+                base.tokenUsage(),
+                base.costUsd(),
+                base.traceId(),
+                base.updatedAt(),
+                base.agentId(),
+                base.sourceType(),
+                base.sourceRefId(),
+                base.senderUserId(),
+                base.summaries());
     }
 
     private void seedWorkspaceSessionAndUser() {

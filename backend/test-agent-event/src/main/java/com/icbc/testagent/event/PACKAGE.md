@@ -17,7 +17,7 @@
 - `RunEventLiveBus`、`RunEventLiveEvent`：当前进程内按 runId 广播 durable/transient 实时事件；背压溢出时按 best-effort 丢弃当前 live 帧，保持全局通道可继续发布。
 - `RunEventReplayService`：处理 Last-Event-ID；legacy 按 Repository 增量回放，新模式读取 Redis manifest/物化 snapshot 并判定初始 reset reason，同时按 `runtimeVersion` 提供 durable/transient 分页有序 tail；旧 Session 历史状态仍可按 root session 从 Repository 读取。
 - `RunEventSseMapper`：将 durable RunEvent 映射为带 `id=seq` 的 `ServerSentEvent`，将 transient payload 映射为不带 SSE `id` 的 `ServerSentEvent`。
-- `RunEventSseStreamService`：legacy 合并 durable polling replay 和本机 live bus；新模式首帧总发送完整物化 `run.snapshot.reset`，之后最短 5 秒的安全扫描/live 即时唤醒只按 runtimeVersion 分页读取 Redis tail，容量换代时再次 reset；不执行数据库轮询，snapshot events 不推进 durable `Last-Event-ID`。
+- `RunEventSseStreamService`：legacy 合并 durable polling replay 和本机 live bus；新模式首帧总发送完整物化 `run.snapshot.reset`，之后最短 5 秒的安全扫描/live 即时唤醒只按 runtimeVersion 分页读取 Redis tail，容量换代时再次 reset，并重放运行数据面保留的 USER、最新 assistant/可见 text part 和 run-status；不执行数据库轮询，snapshot events 不推进 durable `Last-Event-ID`。
 - `RunEventSsePayload`：SSE body 的稳定平台事件载荷。
 - `ServerBroadcastPublisher`、`NoopServerBroadcastPublisher`、`RedisServerBroadcastPublisher`：后端实例间通用广播端口、默认空实现和 Redis pub/sub 实现，供应用版本工作区副本同步等内部业务使用。
 - 单 Run 跨 Java 实时 SSE 由 API 层按 Run 生产 Java 流式转发，本包只负责目标 Java 内的事件回放和本机实时推送。

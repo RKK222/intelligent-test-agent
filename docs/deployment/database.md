@@ -119,7 +119,8 @@
 
 - 历史 Run 和消息分别默认 `LEGACY_FULL`、`RAW_LEGACY`；迁移不清理、不改写既有原文。
 - 新模式启动只 INSERT 一条不含 prompt/回答/parts/事件的 Run 锚点；已有远端 Session 的正常启动不执行关系型 SELECT。
-- 终态事务最多三条 SQL：按 `status_version` CAS 更新 Run、批量 MERGE USER/ASSISTANT 最多两条摘要、更新 Session 时间。摘要 `parts_json` 必须为 `NULL`。
+- 终态事务最多三条 SQL：按 `status_version` CAS 更新 Run、批量 MERGE USER/ASSISTANT 最多两条摘要、更新 Session 时间。较高 `last_event_seq` 只允许一次晚到刷新；跨终态状态仅允许已落库的 `FAILED + TRANSPORT_ERROR` 被 `REMOTE_ROOT/RECOVERY_REMOTE_ROOT` 事实纠正，禁止其它来源任意翻转。摘要 `parts_json` 必须为 `NULL`。
+- 终态事务异常时 PostgreSQL 不承担重试队列；Redis 只保存已清洗 `RunTerminalProjection`，状态为 `TERMINAL_PENDING_DB`。record 与 due ZSET 固定使用 `{terminal-retry}` 同一 hash slot；保存 Lua 按 `terminalProjectionVersion → lastEventSeq → failedAttempts/nextAttemptAt` 单调覆盖，删除 Lua 仅在完整白名单 JSON 仍匹配当前 worker 所处理记录时执行，防止旧重试覆盖或删除晚到纠正版。按 5 秒、15 秒、30 秒、1 分钟、2 分钟、5 分钟后封顶 5 分钟重试；成功/版本冲突后 compare-delete。未来的 `details_expires_at` 是更早上限；Redis 运行态已经丢失或详情已到期时，安全控制面投影仍可独立保留最多 24 小时，且不包含 prompt、回答、parts 或原始事件。
 - USER 摘要最多 512、ASSISTANT 最多 2000 个 Unicode 字符；完整 prompt、回答、reasoning、工具输入输出、附件正文和原始事件不得写入 PostgreSQL。
 - 接受/拒绝 Diff 是显式低频动作，各允许一条 MyBatis XML UPDATE 更新 `runs.diff_*_count`；不写 `run_events`。终态 CAS 使用单调最大值，避免并发动作计数被旧投影覆盖。
 - Analytics 按 `storage_mode` 双读：legacy 读取旧消息/事件，新模式读取摘要消息和 Run Diff 计数；即使灰度验证残留 shadow 事件也不得双计数。

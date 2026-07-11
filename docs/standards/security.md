@@ -47,11 +47,12 @@ Token 校验流程：
 2. 单 Run 的 manifest、input、durable/runtime 双 Stream、snapshot Hash + order ZSET、动态 key registry、scope、dedup 和 pending key 必须使用同一个 `{runId}` hash tag，active 用户/Session/服务器索引只能保存 Run ID 与过期时间。读取 active 索引后必须回读 manifest 校验认证用户、Session、服务器和非终态状态，禁止仅凭可猜测的索引成员跨用户返回运行态。
 3. Run durable seq、全事件 runtimeVersion 分配，双 Stream 追加，Hash/ZSET snapshot 投影，manifest 容量计数和动态 key TTL 刷新必须由同 slot Lua 原子执行；durable Stream ID 固定为 `${seq}-0`，runtime Stream ID 固定为 `${runtimeVersion}-0`。脚本、JSON、连接或 manifest 异常统一返回安全的 `RUNTIME_STATE_UNAVAILABLE` / `RUN_DETAILS_EXPIRED`，错误详情和日志不得包含 Redis value、prompt、消息、工具内容、附件或内部连接凭据。
 4. 生产 Redis 必须使用 `noeviction` 和 AOF `everysec`，并对容量、AOF、复制、命令延迟、拒绝连接及 `evicted_keys` 告警。单 Run durable/runtime 事件或 snapshot 投影项超过 20,000，或 input + scope + 双 Stream + snapshot 详情超过 32 MiB 时，只允许应用 Lua 显式删除旧 Stream、规范化过大 payload、优先移除低价值投影、保留当前关键物化状态并生成 `run.snapshot.reset`；禁止依赖 LRU/LFU/随机淘汰、Stream 静默裁剪或跨租户 key 清理。
-5. `run.snapshot.reset` 只允许携带当前 Run 的物化状态和安全元数据，不设置 SSE `id`，不作为鉴权或续传凭据。Redis 新模式 SSE 首帧和容量换代后的 reset 都必须经过同一用户/Run 归属校验；前端只清空当前订阅 Run 的 reducer，再按顺序应用 snapshot；未知/空 snapshot 必须安全兼容，不能借 reset 读取其它 Run 或覆盖当前认证/Workspace 上下文。
+5. `run.snapshot.reset` 只允许携带当前 Run 的物化状态和安全元数据，不设置 SSE `id`，不作为鉴权或续传凭据。Run 详情、取消、Diff、RunEvent SSE 和 Run 级 session-tree 在任何读取或副作用前都必须校验认证用户归属：`REDIS_SUMMARY` manifest 存在时只比较其中的 `userId`，不得为鉴权回查 PostgreSQL；legacy 或 manifest 已过期时才读取 Run 与 Session，并要求所有已记录的 `triggeredByUserId/createdByUserId` 都属于当前用户，归属缺失或不一致一律返回 `FORBIDDEN`。跨 Java 转发后的目标 Controller 必须再次执行同一校验。Redis 新模式 SSE 首帧和容量换代后的 reset 都必须经过该用户/Run 归属校验；前端只清空当前订阅 Run 的 reducer，再按顺序应用 snapshot；未知/空 snapshot 必须安全兼容，不能借 reset 读取其它 Run 或覆盖当前认证/Workspace 上下文。
 6. Redis 运行态不可用时新模式必须 fail-closed，禁止把完整输入输出、reasoning、工具内容或原始事件降级写入 PostgreSQL/JVM 内存，也禁止切换活动 Run 的 storageMode。legacy/旧 Run 仅按其创建时模式使用既有数据库恢复，不得通过请求参数伪造模式。
 7. `REDIS_SUMMARY` 只允许携带已校验 `contextToken + clientRequestId` 的新请求按 userId 稳定灰度进入；开关默认关闭、rollout 为 0。活动 Run 不得切换模式，回滚只把后续新 Run 比例调为 0。
 8. 新模式 PostgreSQL 只允许保存无原文 Run 锚点和终态 USER/ASSISTANT 双摘要。摘要生成必须确定性删除 `<context>`、reasoning、工具输入输出、附件正文、data URL、控制字符、私钥、Bearer/JWT/常见云密钥和 secret 赋值；USER/ASSISTANT 分别限制 512/2000 Unicode 字符，失败只写固定 `FALLBACK`，不得把原文当降级内容。
 9. `safe_error_message` 必须经过同一敏感模式清洗并限制长度；任何数据库异常、终态重试或 Redis 故障不得把 prompt、回答、parts、原始事件、Redis value 或第三方响应正文写入 PostgreSQL/日志。稳定 `assistantSummaryMessageId` 只作为平台消息业务 ID，不是鉴权凭据。
+10. Run 恢复必须先经过公共后端路由选择并取得 15 秒 owner lease；续租、释放和终态投影必须校验同一 fencing token。dispatch 探测只能使用 Redis 中的可信节点快照查询 OpenCode，会话查询失败或未穷尽统一视为 UNKNOWN，禁止盲目重发 prompt；恢复日志不得记录第三方响应、异常 message 或堆栈中的原始内容。
 
 ## 限流
 

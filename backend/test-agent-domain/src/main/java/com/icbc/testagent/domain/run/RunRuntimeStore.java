@@ -17,6 +17,9 @@ public interface RunRuntimeStore {
     Duration ACTIVE_TTL = Duration.ofHours(3);
     Duration TERMINAL_DETAILS_TTL = Duration.ofHours(24);
     Duration PENDING_ASK_TTL = Duration.ofDays(7);
+    Duration PENDING_ASK_RECOVERY_BUFFER = Duration.ofMinutes(5);
+    Duration OWNER_LEASE_TTL = Duration.ofSeconds(15);
+    Duration OWNER_RENEW_INTERVAL = Duration.ofSeconds(5);
     int MAX_DURABLE_EVENTS = 20_000;
     long MAX_DETAIL_BYTES = 32L * 1024L * 1024L;
 
@@ -25,9 +28,37 @@ public interface RunRuntimeStore {
     /** 在 Redis 中声明 session + clientRequestId；false 表示同一请求已由其它 Run 接管。 */
     boolean claimClientRequest(SessionId sessionId, String clientRequestId, RunId runId);
 
+    /** Run 锚点已持久化后确认幂等映射并延长保留期；false 表示映射已被其它 Run 占用。 */
+    boolean confirmClientRequest(SessionId sessionId, String clientRequestId, RunId runId);
+
     Optional<RunId> findByClientRequest(SessionId sessionId, String clientRequestId);
 
     void releaseClientRequest(SessionId sessionId, String clientRequestId, RunId runId);
+
+    /**
+     * 竞争 Run owner 租约；已有其它 owner 时返回空，同一 owner 重入返回原 fencing token 并续期。
+     */
+    Optional<RunOwnerLease> claimOwnerLease(RunId runId, String ownerBackendProcessId);
+
+    /**
+     * 仅当 manifest 仍为活跃状态且与扫描快照一致时接管 owner；成功后总是提升 fencing token。
+     * 调用方使用本方法把“二次确认 + 抢占”收敛为一个 Redis 原子操作。
+     */
+    Optional<RunOwnerLease> claimOwnerLeaseIfUnchanged(
+            RunRuntimeManifest expectedManifest,
+            String ownerBackendProcessId);
+
+    /** 仅 owner 与 fencing token 都匹配时续租，返回带新过期时间的租约。 */
+    Optional<RunOwnerLease> renewOwnerLease(RunOwnerLease lease);
+
+    /** 仅 owner 与 fencing token 都匹配时释放，避免旧执行者删除新 owner 的租约。 */
+    boolean releaseOwnerLease(RunOwnerLease lease);
+
+    /**
+     * 清理由当前请求创建、但尚未成功写入 PostgreSQL 锚点的 Redis 详情和外部索引。
+     * 该方法只能在确认没有发生远端副作用时调用。
+     */
+    void discardBeforeDispatch(RunId runId);
 
     Optional<RunRuntimeManifest> findManifest(RunId runId);
 
@@ -40,16 +71,25 @@ public interface RunRuntimeStore {
     /** 首次创建远端 session 后回填 manifest；不触发关系库写入。 */
     void bindRemoteSession(RunId runId, String remoteSessionId);
 
+    /** 带 owner fencing 的远端 session 回填；实现必须在同一原子操作内校验租约。 */
+    void bindRemoteSession(RunId runId, String remoteSessionId, RunOwnerLease lease);
+
     default RunStorageMode storageMode(RunId runId) {
         return findManifest(runId).map(RunRuntimeManifest::storageMode).orElse(RunStorageMode.LEGACY_FULL);
     }
 
     RunRuntimeAppendResult appendDurable(RunEventDraft draft);
 
+    /** 带 owner fencing 的 durable append；实现必须在写事件前原子校验租约。 */
+    RunRuntimeAppendResult appendDurable(RunEventDraft draft, RunOwnerLease lease);
+
     /**
      * 投影 transient 事件；返回 false 表示该事件会导致终态回退，已被运行数据面原子丢弃。
      */
     boolean projectTransient(RunEventDraft draft);
+
+    /** 带 owner fencing 的 transient 投影；实现必须在写事件前原子校验租约。 */
+    boolean projectTransient(RunEventDraft draft, RunOwnerLease lease);
 
     void saveSnapshot(RunRuntimeSnapshot snapshot);
 
@@ -60,15 +100,31 @@ public interface RunRuntimeStore {
 
     void saveScope(RunSessionScope scope, RunSessionScopeSession session);
 
+    /** 带 owner fencing 的 scope 保存；实现必须在写入前原子校验租约。 */
+    void saveScope(RunSessionScope scope, RunSessionScopeSession session, RunOwnerLease lease);
+
     Optional<RunSessionScopeSession> findScopeSession(RunId runId, String sessionId);
 
     long scopeVersion(RunId runId);
 
     boolean claimRawEvent(RunId runId, String sessionId, String rawEventId);
 
+    /** 带 owner fencing 的 raw event 去重声明；实现必须在声明前原子校验租约。 */
+    boolean claimRawEvent(
+            RunId runId,
+            String sessionId,
+            String rawEventId,
+            RunOwnerLease lease);
+
     void appendPending(String sessionId, RunEventDraft draft);
 
+    /** 带 owner fencing 的 pending append；实现必须在追加前原子校验租约。 */
+    void appendPending(String sessionId, RunEventDraft draft, RunOwnerLease lease);
+
     List<RunEventDraft> drainPending(RunId runId, String sessionId);
+
+    /** 带 owner fencing 的 pending drain；实现必须在删除队列前原子校验租约。 */
+    List<RunEventDraft> drainPending(RunId runId, String sessionId, RunOwnerLease lease);
 
     Optional<RunRuntimeManifest> findActiveBySession(SessionId sessionId);
 
@@ -81,6 +137,17 @@ public interface RunRuntimeStore {
     boolean hasUserRuntimeState(UserId userId);
 
     List<RunRuntimeManifest> findActiveByServer(String linuxServerId);
+
+    /** 查询同服务器恢复索引中尚未完成 PostgreSQL CAS 的终态 outbox；单次最多返回 limit 条。 */
+    List<RunTerminalProjectionPending> findTerminalProjectionPendingByServer(
+            String linuxServerId,
+            int limit);
+
+    /** 查询单 Run 当前待投影终态，供正常终态路径和数据库重试关联 outbox version。 */
+    Optional<RunTerminalProjectionPending> findTerminalProjectionPending(RunId runId);
+
+    /** 仅 version 仍匹配时确认终态投影；false 表示已确认或已有晚到终态覆盖。 */
+    boolean ackTerminalProjection(RunId runId, long expectedVersion);
 
     void updateStatus(RunId runId, RunStatus status, long expectedStatusVersion, String attention);
 

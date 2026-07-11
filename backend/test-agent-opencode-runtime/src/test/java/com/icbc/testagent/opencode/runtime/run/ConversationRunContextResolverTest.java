@@ -34,6 +34,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 class ConversationRunContextResolverTest {
@@ -192,6 +193,24 @@ class ConversationRunContextResolverTest {
 
         assertThat(resolved).isEmpty();
         verifyNoInteractions(contextService);
+    }
+
+    @Test
+    void legacyCompatibilityPublishesMetricUsedToCloseTheFallback() {
+        ConversationContextApplicationService contextService = mock(ConversationContextApplicationService.class);
+        ConversationContextProperties properties = new ConversationContextProperties();
+        properties.setLegacyRunWithoutContextEnabled(true);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        LegacyRunCompatibilityMetrics metrics = new LegacyRunCompatibilityMetrics(Optional.of(registry));
+        ConversationRunContextResolver resolver = new ConversationRunContextResolver(
+                contextService,
+                properties,
+                mock(OpencodeProcessStatusQueryService.class),
+                metrics);
+
+        resolver.resolve(USER_ID, "opencode", StartRunInput.ofPrompt(SESSION_ID, "run tests"));
+
+        assertThat(registry.get(LegacyRunCompatibilityMetrics.METER_NAME).counter().count()).isEqualTo(1D);
     }
 
     private static ConversationRunContext context() {

@@ -2046,7 +2046,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 
 - 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
 - `contextToken`、`clientRequestId`、`parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段；新前端必须传入前两项，旧客户端在 `test-agent.redis-summary.legacy-run-without-context-enabled=true` 的兼容窗口内仍可省略。
-- `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。
+- `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。服务端只以已成功写入 PostgreSQL 的唯一 Run 锚点确认幂等成功；Redis 中已声明但尚无锚点的 crash-window manifest 不会作为成功响应返回，短保护期后由恢复扫描清理。
 - 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
 - file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType` 是可选前端来源元数据，当前用于工作区选区附件展示，旧客户端和旧后端可忽略。
@@ -2056,7 +2056,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 有效 `contextToken` 的启动流程复用完整进程、执行节点和可空 binding 快照；公共 `querySnapshot` 复用统一 manager health 映射，但不先查询进程 Repository。稳定 `RUNNING` 只刷新 Redis heartbeat，状态、PID 或服务地址变化时最多写一次；`STALE` 拒绝本次 Run 但不删除 token，`NOT_STARTED` 才失效该进程关联的上下文。未携带 token 的兼容路径仍先校验当前认证用户是否已有 `READY` opencode 进程，未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run；其余 binding 兼容与匿名固定节点路由保持不变。
 Run 进入成功、失败或取消终态后，后端会尝试分页拉取 agent 标准 session messages，将 assistant 可见 text、完整 parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。
 
-当前 Run 创建仍固定为 `LEGACY_FULL`。Redis manifest/Stream/snapshot/active 索引和 `run.snapshot.reset` 恢复契约已经可供验证，但 `test-agent.redis-summary.enabled=false`、rollout `0` 是稳定默认；在无原文 Run 锚点和终态摘要链路发布前，部署方不得把开关改为生产启用状态。
+`test-agent.redis-summary.enabled=false`、rollout `0` 是稳定默认。部署方完成 Redis 持久化、安全、容量与故障恢复验收后，可按 userId 稳定哈希逐步提高比例；只有携带有效 `contextToken + clientRequestId` 的新 Run 可进入 `REDIS_SUMMARY`，活动 Run 固定创建时模式，回滚只影响后续新 Run。旧客户端兼容调用会递增 `legacy_run_without_context_total`；该指标连续 7 天为 0 后再关闭 `legacy-run-without-context-enabled`，关闭后缺 token 返回 `409 CONVERSATION_CONTEXT_REQUIRED`，不会自动查询数据库。
 
 ### system-management 用户管理 API
 
@@ -2380,7 +2380,9 @@ Session 运行态接口：
 
 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供 runtime-state 流不可用时做一次恢复 fallback。用户已有 Redis 运行态 marker 时只读取 `active:session` 索引并回读 manifest 校验用户/Session/状态，即使索引为空也不回查 PostgreSQL；legacy 用户继续使用最近非终态 Run 查询。没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
 
-`POST /api/internal/agent/{agentId}/runs/{runId}/cancel` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会在存在 agent binding 时通过当前 `AgentRuntime.cancel` 取消远端执行，并追加 `run.cancelling`、`run.cancelled`；取消完成后也会触发一次消息快照持久化。
+所有带 `{runId}` 的详情、取消、Diff、RunEvent SSE 和 Run 级 session-tree 接口都要求当前认证用户拥有该 Run，并在读取详情或执行副作用前完成校验。`REDIS_SUMMARY` manifest 存在时只比较 manifest `userId`，鉴权阶段为 0 次 PostgreSQL；legacy 或 manifest 已过期时才回查 Run 与 Session 归属。归属缺失、不一致或属于其他用户统一返回 `403 FORBIDDEN`，跨 Java 转发到目标节点后仍执行同一校验。
+
+`POST /api/internal/agent/{agentId}/runs/{runId}/cancel` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。入口 Java 先按 Redis manifest 的 `producerLinuxServerId` 定位生产 Java，manifest 缺失的 legacy/旧 Run 才兼容读取固定 routing decision 和生产 opencode 进程；目标不是当前 Java 时通过统一 `BackendHttpForwarder` 透传 Authorization、traceId、query/body，并设置统一防循环头。cancel 属于写操作：归属缺失、节点无法映射、目标后端不可用或转发失败时返回统一 `OPENCODE_UNAVAILABLE`，不得降级到入口 Java 执行。非终态 Run 只在生产 Java 上通过当前 `AgentRuntime.cancel` 取消远端执行，并追加 `run.cancelling`、`run.cancelled`；取消完成后也会触发一次消息快照持久化。
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/events` 返回 `text/event-stream`；旧 `GET /api/runs/{runId}/events` 返回 `410 API_GONE`。`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output（含 `run.snapshot.reset`）不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `?lastEventId={seq}`，后端 header 优先、query 兜底。
 

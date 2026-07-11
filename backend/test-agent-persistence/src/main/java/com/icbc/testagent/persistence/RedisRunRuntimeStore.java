@@ -13,6 +13,7 @@ import com.icbc.testagent.domain.event.RunSessionScope;
 import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunDiffCounts;
+import com.icbc.testagent.domain.run.RunOwnerLease;
 import com.icbc.testagent.domain.run.RunRuntimeAppendResult;
 import com.icbc.testagent.domain.run.RunRuntimeInput;
 import com.icbc.testagent.domain.run.RunRuntimeManifest;
@@ -22,6 +23,7 @@ import com.icbc.testagent.domain.run.RunRuntimeStore;
 import com.icbc.testagent.domain.run.RunRuntimeStreamEvent;
 import com.icbc.testagent.domain.run.RunRuntimeTail;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.RunTerminalProjectionPending;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
@@ -50,6 +52,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     private static final String PREFIX = "test-agent:run:";
     private static final int DEFAULT_SNAPSHOT_EVENT_LIMIT = MAX_DURABLE_EVENTS;
+    private static final long MAX_CRITICAL_SNAPSHOT_RESERVE_BYTES = 4L * 1024L * 1024L;
+    private static final long MAX_SNAPSHOT_ENTRY_BYTES = 1024L * 1024L;
+    private static final Duration CLIENT_REQUEST_CLAIM_TTL = Duration.ofSeconds(30);
 
     private static final DefaultRedisScript<Long> INITIALIZE_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
@@ -59,14 +64,20 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               'earliestRuntimeVersion', '1', 'resetGeneration', '0',
               'detailsTruncated', '0', 'durableEventCount', '0', 'runtimeEventCount', '0',
               'diffProposedCount', '0', 'diffAcceptedCount', '0', 'diffRejectedCount', '0',
-              'inputBytes', ARGV[8], 'scopeBytes', '0', 'streamBytes', '0',
+              'inputBytes', ARGV[8], 'scopeBytes', '0', 'pendingBytes', '0', 'streamBytes', '0',
               'snapshotBytes', tostring(string.len(ARGV[9])),
               'detailBytes', tostring(tonumber(ARGV[8]) + string.len(ARGV[9])),
               'attention', '', 'attentionRequestId', '', 'attentionEventId', '', 'attentionAt', '',
-              'detailsExpiresAt', ARGV[4], 'updatedAt', ARGV[5])
+              'terminalProjectionPending', '0', 'terminalProjectionVersion', '0',
+              'rootRemoteSessionId', ARGV[13], 'detailsExpiresAt', ARGV[4], 'updatedAt', ARGV[5])
             redis.call('SET', KEYS[2], ARGV[6], 'PX', ARGV[7])
             redis.call('HSET', KEYS[6], ARGV[10], ARGV[9])
             redis.call('ZADD', KEYS[7], 0, ARGV[10])
+            if ARGV[11] ~= '' then
+              local ownerToken = redis.call('HINCRBY', KEYS[1], 'ownerFencingToken', 1)
+              redis.call('HSET', KEYS[8], 'owner', ARGV[11], 'token', tostring(ownerToken))
+              redis.call('PEXPIRE', KEYS[8], ARGV[12])
+            end
             redis.call('PEXPIRE', KEYS[1], ARGV[7])
             redis.call('SADD', KEYS[3], KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6], KEYS[7])
             redis.call('PEXPIRE', KEYS[3], ARGV[7])
@@ -80,8 +91,116 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             return 0
             """, Long.class);
 
+    private static final DefaultRedisScript<Long> CONFIRM_CLIENT_REQUEST_SCRIPT = new DefaultRedisScript<>("""
+            local current = redis.call('GET', KEYS[1])
+            if not current then
+              redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+              return 1
+            end
+            if current ~= ARGV[1] then return 0 end
+            redis.call('PEXPIRE', KEYS[1], ARGV[2])
+            return 1
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> CLAIM_OWNER_LEASE_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+            local status = redis.call('HGET', KEYS[1], 'status') or ''
+            if status ~= 'PENDING' and status ~= 'RUNNING' and status ~= 'CANCELLING' then return 0 end
+            if redis.call('EXISTS', KEYS[2]) == 1 then
+              if redis.call('HGET', KEYS[2], 'owner') ~= ARGV[1] then return 0 end
+              local token = tonumber(redis.call('HGET', KEYS[2], 'token') or '0')
+              redis.call('PEXPIRE', KEYS[2], ARGV[2])
+              return token
+            end
+            local token = redis.call('HINCRBY', KEYS[1], 'ownerFencingToken', 1)
+            redis.call('HSET', KEYS[2], 'owner', ARGV[1], 'token', tostring(token))
+            redis.call('PEXPIRE', KEYS[2], ARGV[2])
+            return token
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> CLAIM_OWNER_LEASE_IF_UNCHANGED_SCRIPT =
+            new DefaultRedisScript<>("""
+                    if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+                    local status = redis.call('HGET', KEYS[1], 'status') or ''
+                    if status ~= 'PENDING' and status ~= 'RUNNING' and status ~= 'CANCELLING' then return 0 end
+                    local function unchanged(field, expected)
+                      return (redis.call('HGET', KEYS[1], field) or '') == expected
+                    end
+                    if not unchanged('status', ARGV[3])
+                        or not unchanged('statusVersion', ARGV[4])
+                        or not unchanged('lastSeq', ARGV[5])
+                        or not unchanged('earliestSeq', ARGV[6])
+                        or not unchanged('resetGeneration', ARGV[7])
+                        or not unchanged('detailsTruncated', ARGV[8])
+                        or not unchanged('durableEventCount', ARGV[9])
+                        or not unchanged('detailBytes', ARGV[10])
+                        or not unchanged('attention', ARGV[11])
+                        or not unchanged('attentionEventId', ARGV[12])
+                        or not unchanged('attentionAt', ARGV[13])
+                        or not unchanged('detailsExpiresAt', ARGV[14])
+                        or not unchanged('updatedAt', ARGV[15])
+                        or not unchanged('rootRemoteSessionId', ARGV[16]) then
+                      return 0
+                    end
+                    if redis.call('EXISTS', KEYS[2]) == 1
+                        and redis.call('HGET', KEYS[2], 'owner') ~= ARGV[1] then
+                      return 0
+                    end
+                    -- 条件接管即使 owner 未变化也必须提升 token，使扫描前的旧执行者立即失效。
+                    local token = redis.call('HINCRBY', KEYS[1], 'ownerFencingToken', 1)
+                    redis.call('HSET', KEYS[2], 'owner', ARGV[1], 'token', tostring(token))
+                    redis.call('PEXPIRE', KEYS[2], ARGV[2])
+                    return token
+                    """, Long.class);
+
+    private static final DefaultRedisScript<Long> RENEW_OWNER_LEASE_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[1] then return 0 end
+            if redis.call('HGET', KEYS[1], 'token') ~= ARGV[2] then return 0 end
+            redis.call('PEXPIRE', KEYS[1], ARGV[3])
+            return 1
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> RELEASE_OWNER_LEASE_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[1] then return 0 end
+            if redis.call('HGET', KEYS[1], 'token') ~= ARGV[2] then return 0 end
+            return redis.call('DEL', KEYS[1])
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> ACK_TERMINAL_PROJECTION_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('HGET', KEYS[1], 'terminalProjectionPending') ~= '1' then return 0 end
+            if redis.call('HGET', KEYS[1], 'terminalProjectionVersion') ~= ARGV[1] then return -1 end
+            redis.call('HSET', KEYS[1], 'terminalProjectionPending', '0')
+            redis.call('HDEL', KEYS[1],
+              'terminalProjectionStatus', 'terminalProjectionSource', 'terminalProjectionReasonCode',
+              'terminalProjectionSafeErrorMessage', 'terminalProjectionRemoteStopConfirmed',
+              'terminalProjectionTraceId', 'terminalProjectionOccurredAt')
+            return 1
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> DISCARD_BEFORE_DISPATCH_SCRIPT = new DefaultRedisScript<>("""
+            local runtimeKeys = redis.call('SMEMBERS', KEYS[1])
+            local deleted = 0
+            for _, key in ipairs(runtimeKeys) do
+              deleted = deleted + redis.call('DEL', key)
+            end
+            deleted = deleted + redis.call('DEL', KEYS[1])
+            deleted = deleted + redis.call('DEL', KEYS[2])
+            return deleted
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> EXTEND_TTL_SCRIPT = new DefaultRedisScript<>("""
+            local current = redis.call('PTTL', KEYS[1])
+            local requested = tonumber(ARGV[1])
+            if current == -1 or (current >= 0 and current < requested) then
+              return redis.call('PEXPIRE', KEYS[1], requested)
+            end
+            return 0
+            """, Long.class);
+
     private static final DefaultRedisScript<Long> BIND_REMOTE_SESSION_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+            if ARGV[4] == '1' and (redis.call('HGET', KEYS[3], 'owner') ~= ARGV[5]
+                or redis.call('HGET', KEYS[3], 'token') ~= ARGV[6]) then return -2 end
             redis.call('HSET', KEYS[1], 'rootRemoteSessionId', ARGV[1], 'updatedAt', ARGV[2])
             for _, key in ipairs(redis.call('SMEMBERS', KEYS[2])) do redis.call('PEXPIRE', key, ARGV[3]) end
             redis.call('PEXPIRE', KEYS[2], ARGV[3])
@@ -90,6 +209,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     private static final DefaultRedisScript<String> APPEND_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[1]) == 0 then return '__MISSING__' end
+            if ARGV[26] == '1' and (redis.call('HGET', KEYS[8], 'owner') ~= ARGV[27]
+                or redis.call('HGET', KEYS[8], 'token') ~= ARGV[28]) then return '__FENCE__' end
             local currentStatus = redis.call('HGET', KEYS[1], 'status') or ''
             local nextStatus = ARGV[16]
             if nextStatus ~= '' then
@@ -163,26 +284,100 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               current['payload'] = currentPayload
               projected = cjson.encode(current)
             end
+            local projectionCompacted = 0
+            if string.len(projected) > tonumber(ARGV[35]) then
+              -- 累积 delta 超过单条物化预算时保留当前规范化片段，并通过 reset 显式通知客户端重建。
+              projected = ARGV[24]
+              projectionCompacted = 1
+            end
             redis.call('HSET', KEYS[4], projectionKey, projected)
             if ARGV[5] == '1' or not redis.call('ZSCORE', KEYS[5], projectionKey) then
               redis.call('ZADD', KEYS[5], runtimeVersion, projectionKey)
             end
             snapshotBytes = snapshotBytes + string.len(projected) - (previous and string.len(previous) or 0)
 
-            local evicted = 0
+            local evicted = projectionCompacted
+            local function hasPrefix(key, prefix)
+              return string.sub(key, 1, string.len(prefix)) == prefix
+            end
+            local function decodedPayload(key)
+              local value = redis.call('HGET', KEYS[4], key)
+              if not value then return {} end
+              local ok, draft = pcall(cjson.decode, value)
+              if not ok or type(draft) ~= 'table' or type(draft['payload']) ~= 'table' then return {} end
+              return draft['payload']
+            end
+            local function nested(payload, key)
+              local value = payload[key]
+              if type(value) == 'table' then return value end
+              return {}
+            end
+            local function text(value)
+              if value == nil or value == cjson.null then return '' end
+              return tostring(value)
+            end
+            local function messageMetadata(payload)
+              local message = nested(payload, 'message')
+              local info = nested(payload, 'info')
+              local role = string.lower(text(payload['role'] or message['role'] or info['role']))
+              local messageId = text(payload['messageId'] or payload['messageID']
+                or message['id'] or message['messageId'] or message['messageID']
+                or info['id'] or info['messageId'] or info['messageID'])
+              return role, messageId
+            end
+            local function partMetadata(payload)
+              local part = nested(payload, 'part')
+              local field = string.lower(text(payload['field']))
+              local partType = string.lower(text(part['type'] or payload['type']))
+              local messageId = text(payload['messageId'] or payload['messageID']
+                or part['messageId'] or part['messageID'])
+              return field, partType, messageId
+            end
+            local function protectedSnapshotEntry(key, latestAssistantMessage, latestVisiblePart)
+              return hasPrefix(key, 'p:user-input:') or hasPrefix(key, 'p:run-status:')
+                or key == latestAssistantMessage or key == latestVisiblePart
+            end
             local function evictSnapshotEntry()
               local ordered = redis.call('ZRANGE', KEYS[5], 0, -1)
+              local latestAssistantMessage = nil
+              local latestAssistantMessageId = ''
+              for _, key in ipairs(ordered) do
+                if hasPrefix(key, 'p:assistant-delta:') then
+                  latestAssistantMessage = key
+                  local _, messageId = messageMetadata(decodedPayload(key))
+                  latestAssistantMessageId = messageId
+                elseif hasPrefix(key, 'p:message:') then
+                  local role, messageId = messageMetadata(decodedPayload(key))
+                  if role == 'assistant' then
+                    latestAssistantMessage = key
+                    latestAssistantMessageId = messageId
+                  end
+                end
+              end
+              local latestVisiblePart = nil
+              for _, key in ipairs(ordered) do
+                if hasPrefix(key, 'p:part:') or hasPrefix(key, 'p:part-delta:') then
+                  local field, partType, messageId = partMetadata(decodedPayload(key))
+                  local visible = (hasPrefix(key, 'p:part-delta:') and field == 'text')
+                    or (hasPrefix(key, 'p:part:') and (partType == '' or partType == 'text'))
+                  if visible and (latestAssistantMessageId == '' or messageId == ''
+                      or messageId == latestAssistantMessageId) then latestVisiblePart = key end
+                end
+              end
               local victim = nil
               for _, key in ipairs(ordered) do
-                if string.sub(key, 1, 9) == 'p:latest:' or string.sub(key, 1, 7) == 'p:tool:'
-                    or string.sub(key, 1, 7) == 'p:diff:' or string.sub(key, 1, 17) == 'p:session-status:'
-                    or string.sub(key, 1, 8) == 'p:child:' or string.sub(key, 1, 8) == 'p:scope:' then
+                if not protectedSnapshotEntry(key, latestAssistantMessage, latestVisiblePart)
+                    and (hasPrefix(key, 'p:latest:') or hasPrefix(key, 'p:tool:')
+                    or hasPrefix(key, 'p:diff:') or hasPrefix(key, 'p:session-status:')
+                    or hasPrefix(key, 'p:child:') or hasPrefix(key, 'p:scope:')) then
                   victim = key; break
                 end
               end
               if not victim then
                 for _, key in ipairs(ordered) do
-                  if string.sub(key, 1, 13) ~= 'p:run-status:' then victim = key; break end
+                  if not protectedSnapshotEntry(key, latestAssistantMessage, latestVisiblePart) then
+                    victim = key; break
+                  end
                 end
               end
               if not victim then return false end
@@ -198,12 +393,15 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             end
             local baseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[1], 'scopeBytes') or '0')
-            while snapshotBytes > math.max(0, tonumber(ARGV[9]) - baseBytes)
-                and redis.call('ZCARD', KEYS[5]) > 1 do
+              + tonumber(redis.call('HGET', KEYS[1], 'pendingBytes') or '0')
+            while snapshotBytes > math.max(0, tonumber(ARGV[9]) - baseBytes) do
               if not evictSnapshotEntry() then break end
             end
 
-            if ARGV[13] ~= '' then
+            if ARGV[17] == '1' then
+              redis.call('HSET', KEYS[1], 'attention', '', 'attentionRequestId', '',
+                'attentionEventId', '', 'attentionAt', '')
+            elseif ARGV[13] ~= '' then
               redis.call('HSET', KEYS[1], 'attention', ARGV[13],
                 'attentionRequestId', ARGV[14], 'attentionEventId', ARGV[22] .. tostring(seq), 'attentionAt', ARGV[23])
             elseif ARGV[15] == '1' and (redis.call('HGET', KEYS[1], 'attentionRequestId') or '') == ARGV[14] then
@@ -221,6 +419,18 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             local currentStatus = redis.call('HGET', KEYS[1], 'status') or ''
             local terminal = ARGV[17] == '1' or currentStatus == 'SUCCEEDED'
               or currentStatus == 'FAILED' or currentStatus == 'CANCELLED'
+            if ARGV[17] == '1' then
+              local projectionVersion = redis.call('HINCRBY', KEYS[1], 'terminalProjectionVersion', 1)
+              redis.call('HSET', KEYS[1],
+                'terminalProjectionPending', '1',
+                'terminalProjectionStatus', currentStatus,
+                'terminalProjectionSource', ARGV[29],
+                'terminalProjectionReasonCode', ARGV[30],
+                'terminalProjectionSafeErrorMessage', ARGV[31],
+                'terminalProjectionRemoteStopConfirmed', ARGV[32],
+                'terminalProjectionTraceId', ARGV[33],
+                'terminalProjectionOccurredAt', ARGV[34])
+            end
             local ttl = tonumber(ARGV[10])
             local expiresAt = ARGV[11]
             if attention ~= '' and not terminal then ttl = tonumber(ARGV[18]); expiresAt = ARGV[19] end
@@ -257,6 +467,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     private static final DefaultRedisScript<String> PROJECT_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[1]) == 0 then return '__MISSING__' end
+            if ARGV[26] == '1' and (redis.call('HGET', KEYS[8], 'owner') ~= ARGV[27]
+                or redis.call('HGET', KEYS[8], 'token') ~= ARGV[28]) then return '__FENCE__' end
             local currentStatus = redis.call('HGET', KEYS[1], 'status') or ''
             local nextStatus = ARGV[16]
             if nextStatus ~= '' then
@@ -317,25 +529,99 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               current['payload'] = currentPayload
               projected = cjson.encode(current)
             end
+            local projectionCompacted = 0
+            if string.len(projected) > tonumber(ARGV[35]) then
+              -- 累积 delta 超过单条物化预算时保留当前规范化片段，并通过 reset 显式通知客户端重建。
+              projected = ARGV[24]
+              projectionCompacted = 1
+            end
             redis.call('HSET', KEYS[3], projectionKey, projected)
             if ARGV[5] == '1' or not redis.call('ZSCORE', KEYS[4], projectionKey) then
               redis.call('ZADD', KEYS[4], runtimeVersion, projectionKey)
             end
             snapshotBytes = snapshotBytes + string.len(projected) - (previous and string.len(previous) or 0)
-            local evicted = 0
+            local evicted = projectionCompacted
+            local function hasPrefix(key, prefix)
+              return string.sub(key, 1, string.len(prefix)) == prefix
+            end
+            local function decodedPayload(key)
+              local value = redis.call('HGET', KEYS[3], key)
+              if not value then return {} end
+              local ok, draft = pcall(cjson.decode, value)
+              if not ok or type(draft) ~= 'table' or type(draft['payload']) ~= 'table' then return {} end
+              return draft['payload']
+            end
+            local function nested(payload, key)
+              local value = payload[key]
+              if type(value) == 'table' then return value end
+              return {}
+            end
+            local function text(value)
+              if value == nil or value == cjson.null then return '' end
+              return tostring(value)
+            end
+            local function messageMetadata(payload)
+              local message = nested(payload, 'message')
+              local info = nested(payload, 'info')
+              local role = string.lower(text(payload['role'] or message['role'] or info['role']))
+              local messageId = text(payload['messageId'] or payload['messageID']
+                or message['id'] or message['messageId'] or message['messageID']
+                or info['id'] or info['messageId'] or info['messageID'])
+              return role, messageId
+            end
+            local function partMetadata(payload)
+              local part = nested(payload, 'part')
+              local field = string.lower(text(payload['field']))
+              local partType = string.lower(text(part['type'] or payload['type']))
+              local messageId = text(payload['messageId'] or payload['messageID']
+                or part['messageId'] or part['messageID'])
+              return field, partType, messageId
+            end
+            local function protectedSnapshotEntry(key, latestAssistantMessage, latestVisiblePart)
+              return hasPrefix(key, 'p:user-input:') or hasPrefix(key, 'p:run-status:')
+                or key == latestAssistantMessage or key == latestVisiblePart
+            end
             local function evictSnapshotEntry()
               local ordered = redis.call('ZRANGE', KEYS[4], 0, -1)
+              local latestAssistantMessage = nil
+              local latestAssistantMessageId = ''
+              for _, key in ipairs(ordered) do
+                if hasPrefix(key, 'p:assistant-delta:') then
+                  latestAssistantMessage = key
+                  local _, messageId = messageMetadata(decodedPayload(key))
+                  latestAssistantMessageId = messageId
+                elseif hasPrefix(key, 'p:message:') then
+                  local role, messageId = messageMetadata(decodedPayload(key))
+                  if role == 'assistant' then
+                    latestAssistantMessage = key
+                    latestAssistantMessageId = messageId
+                  end
+                end
+              end
+              local latestVisiblePart = nil
+              for _, key in ipairs(ordered) do
+                if hasPrefix(key, 'p:part:') or hasPrefix(key, 'p:part-delta:') then
+                  local field, partType, messageId = partMetadata(decodedPayload(key))
+                  local visible = (hasPrefix(key, 'p:part-delta:') and field == 'text')
+                    or (hasPrefix(key, 'p:part:') and (partType == '' or partType == 'text'))
+                  if visible and (latestAssistantMessageId == '' or messageId == ''
+                      or messageId == latestAssistantMessageId) then latestVisiblePart = key end
+                end
+              end
               local victim = nil
               for _, key in ipairs(ordered) do
-                if string.sub(key, 1, 9) == 'p:latest:' or string.sub(key, 1, 7) == 'p:tool:'
-                    or string.sub(key, 1, 7) == 'p:diff:' or string.sub(key, 1, 17) == 'p:session-status:'
-                    or string.sub(key, 1, 8) == 'p:child:' or string.sub(key, 1, 8) == 'p:scope:' then
+                if not protectedSnapshotEntry(key, latestAssistantMessage, latestVisiblePart)
+                    and (hasPrefix(key, 'p:latest:') or hasPrefix(key, 'p:tool:')
+                    or hasPrefix(key, 'p:diff:') or hasPrefix(key, 'p:session-status:')
+                    or hasPrefix(key, 'p:child:') or hasPrefix(key, 'p:scope:')) then
                   victim = key; break
                 end
               end
               if not victim then
                 for _, key in ipairs(ordered) do
-                  if string.sub(key, 1, 13) ~= 'p:run-status:' then victim = key; break end
+                  if not protectedSnapshotEntry(key, latestAssistantMessage, latestVisiblePart) then
+                    victim = key; break
+                  end
                 end
               end
               if not victim then return false end
@@ -351,11 +637,14 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             end
             local baseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[1], 'scopeBytes') or '0')
-            while snapshotBytes > math.max(0, tonumber(ARGV[9]) - baseBytes)
-                and redis.call('ZCARD', KEYS[4]) > 1 do
+              + tonumber(redis.call('HGET', KEYS[1], 'pendingBytes') or '0')
+            while snapshotBytes > math.max(0, tonumber(ARGV[9]) - baseBytes) do
               if not evictSnapshotEntry() then break end
             end
-            if ARGV[13] ~= '' then
+            if ARGV[17] == '1' then
+              redis.call('HSET', KEYS[1], 'attention', '', 'attentionRequestId', '',
+                'attentionEventId', '', 'attentionAt', '')
+            elseif ARGV[13] ~= '' then
               redis.call('HSET', KEYS[1], 'attention', ARGV[13],
                 'attentionRequestId', ARGV[14], 'attentionEventId', ARGV[22] .. tostring(runtimeVersion),
                 'attentionAt', ARGV[23])
@@ -373,6 +662,18 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             local currentStatus = redis.call('HGET', KEYS[1], 'status') or ''
             local terminal = ARGV[17] == '1' or currentStatus == 'SUCCEEDED'
               or currentStatus == 'FAILED' or currentStatus == 'CANCELLED'
+            if ARGV[17] == '1' then
+              local projectionVersion = redis.call('HINCRBY', KEYS[1], 'terminalProjectionVersion', 1)
+              redis.call('HSET', KEYS[1],
+                'terminalProjectionPending', '1',
+                'terminalProjectionStatus', currentStatus,
+                'terminalProjectionSource', ARGV[29],
+                'terminalProjectionReasonCode', ARGV[30],
+                'terminalProjectionSafeErrorMessage', ARGV[31],
+                'terminalProjectionRemoteStopConfirmed', ARGV[32],
+                'terminalProjectionTraceId', ARGV[33],
+                'terminalProjectionOccurredAt', ARGV[34])
+            end
             local ttl = tonumber(ARGV[10])
             local expiresAt = ARGV[11]
             if attention ~= '' and not terminal then ttl = tonumber(ARGV[18]); expiresAt = ARGV[19] end
@@ -482,6 +783,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             end
             local baseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[1], 'scopeBytes') or '0')
+              + tonumber(redis.call('HGET', KEYS[1], 'pendingBytes') or '0')
             redis.call('HSET', KEYS[1], 'snapshotBytes', tostring(bytes),
               'detailBytes', tostring(baseBytes + bytes + tonumber(redis.call('HGET', KEYS[1], 'streamBytes') or '0')))
             redis.call('SADD', KEYS[4], KEYS[1], KEYS[2], KEYS[3], KEYS[4])
@@ -491,14 +793,28 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             """, Long.class);
 
     private static final DefaultRedisScript<String> DRAIN_PENDING_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('EXISTS', KEYS[2]) == 0 then return '__MISSING__' end
+            if ARGV[1] == '1' and (redis.call('HGET', KEYS[3], 'owner') ~= ARGV[2]
+                or redis.call('HGET', KEYS[3], 'token') ~= ARGV[3]) then return '__FENCE__' end
             local values = redis.call('LRANGE', KEYS[1], 0, -1)
+            local releasedBytes = 0
+            for _, value in ipairs(values) do releasedBytes = releasedBytes + string.len(value) end
+            local pendingBytes = math.max(0,
+              tonumber(redis.call('HGET', KEYS[2], 'pendingBytes') or '0') - releasedBytes)
+            local detailBytes = math.max(0,
+              tonumber(redis.call('HGET', KEYS[2], 'detailBytes') or '0') - releasedBytes)
+            redis.call('HSET', KEYS[2], 'pendingBytes', tostring(pendingBytes),
+              'detailBytes', tostring(detailBytes))
             redis.call('DEL', KEYS[1])
+            redis.call('SREM', KEYS[4], KEYS[1])
             if #values == 0 then values = cjson.empty_array end
             return cjson.encode(values)
             """, String.class);
 
     private static final DefaultRedisScript<Long> CLAIM_RAW_EVENT_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+            if ARGV[3] == '1' and (redis.call('HGET', KEYS[4], 'owner') ~= ARGV[4]
+                or redis.call('HGET', KEYS[4], 'token') ~= ARGV[5]) then return -2 end
             local claimed = redis.call('HSETNX', KEYS[2], ARGV[1], '1')
             redis.call('PEXPIRE', KEYS[2], ARGV[2])
             redis.call('SADD', KEYS[3], KEYS[1], KEYS[2], KEYS[3])
@@ -508,15 +824,25 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     private static final DefaultRedisScript<Long> APPEND_PENDING_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+            if ARGV[3] == '1' and (redis.call('HGET', KEYS[4], 'owner') ~= ARGV[4]
+                or redis.call('HGET', KEYS[4], 'token') ~= ARGV[5]) then return -2 end
+            local addedBytes = string.len(ARGV[1])
+            local nextDetailBytes = tonumber(redis.call('HGET', KEYS[1], 'detailBytes') or '0') + addedBytes
+            if nextDetailBytes > tonumber(ARGV[6]) then return -3 end
             redis.call('RPUSH', KEYS[2], ARGV[1])
-            redis.call('PEXPIRE', KEYS[2], ARGV[2])
+            redis.call('HINCRBY', KEYS[1], 'pendingBytes', addedBytes)
+            redis.call('HSET', KEYS[1], 'detailBytes', tostring(nextDetailBytes),
+              'updatedAt', ARGV[7], 'detailsExpiresAt', ARGV[8])
             redis.call('SADD', KEYS[3], KEYS[1], KEYS[2], KEYS[3])
+            for _, key in ipairs(redis.call('SMEMBERS', KEYS[3])) do redis.call('PEXPIRE', key, ARGV[2]) end
             redis.call('PEXPIRE', KEYS[3], ARGV[2])
             return 1
             """, Long.class);
 
     private static final DefaultRedisScript<Long> SAVE_SCOPE_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[6]) == 0 then return -1 end
+            if ARGV[7] == '1' and (redis.call('HGET', KEYS[7], 'owner') ~= ARGV[8]
+                or redis.call('HGET', KEYS[7], 'token') ~= ARGV[9]) then return -3 end
             local previousScope = redis.call('GET', KEYS[1])
             local previousSession = redis.call('GET', KEYS[2])
             local previousBytes = (previousScope and string.len(previousScope) or 0)
@@ -524,6 +850,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             local scopeBytes = tonumber(redis.call('HGET', KEYS[6], 'scopeBytes') or '0')
               + string.len(ARGV[1]) + string.len(ARGV[2]) - previousBytes
             local detailBytes = tonumber(redis.call('HGET', KEYS[6], 'inputBytes') or '0') + scopeBytes
+              + tonumber(redis.call('HGET', KEYS[6], 'pendingBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[6], 'streamBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[6], 'snapshotBytes') or '0')
             if detailBytes > tonumber(ARGV[6]) then return -2 end
@@ -633,9 +960,14 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             RunEventDraft inputSnapshot = inputSnapshot(manifest, input);
             String serializedInputSnapshot = snapshotJson(inputSnapshot);
             long inputSnapshotBytes = serializedInputSnapshot.getBytes(StandardCharsets.UTF_8).length;
-            if (inputBytes + inputSnapshotBytes > maxDetailBytes) {
+            long initialDetailBudget = nonSnapshotDetailBudgetBytes();
+            if (inputBytes + inputSnapshotBytes > initialDetailBudget) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Run 输入超过 Redis 详情容量上限");
             }
+            // 外部索引与单 Run key 分属不同 Redis Cluster slot，无法放入同一 Lua。
+            // 先以最大物理保留期登记保守索引：即使 Java 在 Run Lua 成功后立刻崩溃，恢复扫描仍能找到该 Run；
+            // 若 Lua 随后失败，读路径会根据缺失 manifest 清理这些无害的悬空索引。
+            reserveRuntimeIndexes(manifest);
             Long created = redisTemplate.execute(
                     INITIALIZE_SCRIPT,
                     List.of(
@@ -645,7 +977,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                             streamKey(manifest.runId()),
                             runtimeStreamKey(manifest.runId()),
                             snapshotKey(manifest.runId()),
-                            snapshotOrderKey(manifest.runId())),
+                            snapshotOrderKey(manifest.runId()),
+                            ownerLeaseKey(manifest.runId())),
                     write(manifest),
                     manifest.status().name(),
                     Long.toString(manifest.statusVersion()),
@@ -655,15 +988,13 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                     Long.toString(activeTtl.toMillis()),
                     Long.toString(inputBytes),
                     serializedInputSnapshot,
-                    projection(inputSnapshot).key());
+                    inputSnapshotKey(input),
+                    manifest.backendProcessId() == null ? "" : manifest.backendProcessId(),
+                    Long.toString(OWNER_LEASE_TTL.toMillis()),
+                    nullable(manifest.rootRemoteSessionId()));
             if (created == null) {
                 throw new IllegalStateException("Redis Run initialize returned no result");
             }
-            if (manifest.userId() != null) {
-                redisTemplate.opsForValue().set(userRuntimeMarkerKey(manifest.userId()), "1", terminalTtl);
-            }
-            indexActive(manifest);
-            indexHistory(manifest);
         } catch (RuntimeException exception) {
             if (exception instanceof PlatformException platformException) {
                 throw platformException;
@@ -681,7 +1012,26 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         }
         try {
             return Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(
-                    clientRequestKey(sessionId, clientRequestId), runId.value(), pendingTtl));
+                    clientRequestKey(sessionId, clientRequestId), runId.value(), CLIENT_REQUEST_CLAIM_TTL));
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public boolean confirmClientRequest(SessionId sessionId, String clientRequestId, RunId runId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        Objects.requireNonNull(runId, "runId must not be null");
+        if (clientRequestId == null || clientRequestId.isBlank()) {
+            throw new IllegalArgumentException("clientRequestId must not be blank");
+        }
+        try {
+            Long confirmed = redisTemplate.execute(
+                    CONFIRM_CLIENT_REQUEST_SCRIPT,
+                    List.of(clientRequestKey(sessionId, clientRequestId)),
+                    runId.value(),
+                    Long.toString(pendingTtl.toMillis()));
+            return confirmed != null && confirmed == 1L;
         } catch (RuntimeException exception) {
             throw unavailable(exception);
         }
@@ -714,6 +1064,147 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                     List.of(clientRequestKey(sessionId, clientRequestId)),
                     runId.value());
         } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public Optional<RunOwnerLease> claimOwnerLease(RunId runId, String ownerBackendProcessId) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        if (ownerBackendProcessId == null || ownerBackendProcessId.isBlank()) {
+            throw new IllegalArgumentException("ownerBackendProcessId must not be blank");
+        }
+        String owner = ownerBackendProcessId.trim();
+        Instant requestedAt = clock.instant();
+        try {
+            Long token = redisTemplate.execute(
+                    CLAIM_OWNER_LEASE_SCRIPT,
+                    List.of(manifestKey(runId), ownerLeaseKey(runId)),
+                    owner,
+                    Long.toString(OWNER_LEASE_TTL.toMillis()));
+            if (token == null || token == 0L) {
+                return Optional.empty();
+            }
+            if (token < 0L) {
+                throw new PlatformException(ErrorCode.RUN_DETAILS_EXPIRED, "Run 详情已过期");
+            }
+            return Optional.of(new RunOwnerLease(
+                    runId, owner, token, requestedAt.plus(OWNER_LEASE_TTL)));
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public Optional<RunOwnerLease> claimOwnerLeaseIfUnchanged(
+            RunRuntimeManifest expectedManifest,
+            String ownerBackendProcessId) {
+        Objects.requireNonNull(expectedManifest, "expectedManifest must not be null");
+        if (ownerBackendProcessId == null || ownerBackendProcessId.isBlank()) {
+            throw new IllegalArgumentException("ownerBackendProcessId must not be blank");
+        }
+        String owner = ownerBackendProcessId.trim();
+        Instant requestedAt = clock.instant();
+        try {
+            Long token = redisTemplate.execute(
+                    CLAIM_OWNER_LEASE_IF_UNCHANGED_SCRIPT,
+                    List.of(
+                            manifestKey(expectedManifest.runId()),
+                            ownerLeaseKey(expectedManifest.runId())),
+                    owner,
+                    Long.toString(OWNER_LEASE_TTL.toMillis()),
+                    expectedManifest.status().name(),
+                    Long.toString(expectedManifest.statusVersion()),
+                    Long.toString(expectedManifest.lastSeq()),
+                    Long.toString(expectedManifest.earliestSeq()),
+                    Long.toString(expectedManifest.resetGeneration()),
+                    expectedManifest.detailsTruncated() ? "1" : "0",
+                    Long.toString(expectedManifest.durableEventCount()),
+                    Long.toString(expectedManifest.detailBytes()),
+                    nullable(expectedManifest.attention()),
+                    nullable(expectedManifest.attentionEventId()),
+                    instant(expectedManifest.attentionAt()),
+                    expectedManifest.detailsExpiresAt().toString(),
+                    expectedManifest.updatedAt().toString(),
+                    nullable(expectedManifest.rootRemoteSessionId()));
+            if (token == null || token == 0L) {
+                return Optional.empty();
+            }
+            if (token < 0L) {
+                throw new PlatformException(ErrorCode.RUN_DETAILS_EXPIRED, "Run 详情已过期");
+            }
+            return Optional.of(new RunOwnerLease(
+                    expectedManifest.runId(), owner, token, requestedAt.plus(OWNER_LEASE_TTL)));
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public Optional<RunOwnerLease> renewOwnerLease(RunOwnerLease lease) {
+        Objects.requireNonNull(lease, "lease must not be null");
+        Instant requestedAt = clock.instant();
+        try {
+            Long renewed = redisTemplate.execute(
+                    RENEW_OWNER_LEASE_SCRIPT,
+                    List.of(ownerLeaseKey(lease.runId())),
+                    lease.ownerBackendProcessId(),
+                    Long.toString(lease.fencingToken()),
+                    Long.toString(OWNER_LEASE_TTL.toMillis()));
+            if (renewed == null || renewed == 0L) {
+                return Optional.empty();
+            }
+            return Optional.of(new RunOwnerLease(
+                    lease.runId(),
+                    lease.ownerBackendProcessId(),
+                    lease.fencingToken(),
+                    requestedAt.plus(OWNER_LEASE_TTL)));
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public boolean releaseOwnerLease(RunOwnerLease lease) {
+        Objects.requireNonNull(lease, "lease must not be null");
+        try {
+            Long released = redisTemplate.execute(
+                    RELEASE_OWNER_LEASE_SCRIPT,
+                    List.of(ownerLeaseKey(lease.runId())),
+                    lease.ownerBackendProcessId(),
+                    Long.toString(lease.fencingToken()));
+            return released != null && released == 1L;
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public void discardBeforeDispatch(RunId runId) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        Optional<RunRuntimeManifest> found = findManifest(runId);
+        if (found.isEmpty()) {
+            return;
+        }
+        RunRuntimeManifest manifest = found.orElseThrow();
+        try {
+            // 外部索引使用不同 Redis Cluster hash slot，只能逐个幂等 compare-delete；读路径仍会自清理残留项。
+            releaseClientRequest(manifest.sessionId(), manifest.clientRequestId(), runId);
+            removeActive(manifest);
+            redisTemplate.opsForZSet().remove(historySessionKey(manifest.sessionId()), runId.value());
+            redisTemplate.execute(
+                    DISCARD_BEFORE_DISPATCH_SCRIPT,
+                    List.of(registryKey(runId), ownerLeaseKey(runId)));
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
             throw unavailable(exception);
         }
     }
@@ -777,20 +1268,32 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     @Override
     public void bindRemoteSession(RunId runId, String remoteSessionId) {
+        bindRemoteSession(runId, remoteSessionId, null);
+    }
+
+    @Override
+    public void bindRemoteSession(RunId runId, String remoteSessionId, RunOwnerLease lease) {
         Objects.requireNonNull(runId, "runId must not be null");
         if (remoteSessionId == null || remoteSessionId.isBlank()) {
             throw new IllegalArgumentException("remoteSessionId must not be blank");
         }
+        validateLease(runId, lease);
         try {
             Duration ttl = ttlFor(runId);
             Long updated = redisTemplate.execute(
                     BIND_REMOTE_SESSION_SCRIPT,
-                    List.of(manifestKey(runId), registryKey(runId)),
+                    List.of(manifestKey(runId), registryKey(runId), ownerLeaseKey(runId)),
                     remoteSessionId,
                     clock.instant().toString(),
-                    Long.toString(ttl.toMillis()));
+                    Long.toString(ttl.toMillis()),
+                    fenced(lease),
+                    owner(lease),
+                    token(lease));
             if (updated == null || updated == 0L) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
+            }
+            if (updated == -2L) {
+                throw fenceRejected();
             }
         } catch (RuntimeException exception) {
             if (exception instanceof PlatformException platformException) {
@@ -802,16 +1305,25 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     @Override
     public RunRuntimeAppendResult appendDurable(RunEventDraft draft) {
+        return appendDurable(draft, null);
+    }
+
+    @Override
+    public RunRuntimeAppendResult appendDurable(RunEventDraft draft, RunOwnerLease lease) {
         Objects.requireNonNull(draft, "draft must not be null");
+        validateLease(draft.runId(), lease);
         try {
             Instant now = clock.instant();
             SnapshotProjection projection = projection(draft);
             String result = redisTemplate.execute(
                     APPEND_SCRIPT,
                     operationKeys(draft.runId()),
-                    operationArguments(draft, projection, now, true));
+                    operationArguments(draft, projection, now, true, lease));
             if (result == null || "__MISSING__".equals(result)) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
+            }
+            if ("__FENCE__".equals(result)) {
+                throw fenceRejected();
             }
             AppendScriptResult appended = objectMapper.readValue(result, AppendScriptResult.class);
             refreshRuntimeIndexes(draft.runId());
@@ -834,7 +1346,13 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     @Override
     public boolean projectTransient(RunEventDraft draft) {
+        return projectTransient(draft, null);
+    }
+
+    @Override
+    public boolean projectTransient(RunEventDraft draft, RunOwnerLease lease) {
         Objects.requireNonNull(draft, "draft must not be null");
+        validateLease(draft.runId(), lease);
         try {
             Instant now = clock.instant();
             SnapshotProjection projection = projection(draft);
@@ -847,10 +1365,14 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                             snapshotOrderKey(draft.runId()),
                             registryKey(draft.runId()),
                             inputKey(draft.runId()),
-                            streamKey(draft.runId())),
-                    operationArguments(draft, projection, now, false));
+                            streamKey(draft.runId()),
+                            ownerLeaseKey(draft.runId())),
+                    operationArguments(draft, projection, now, false, lease));
             if (projected == null || "__MISSING__".equals(projected)) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
+            }
+            if ("__FENCE__".equals(projected)) {
+                throw fenceRejected();
             }
             ProjectScriptResult result = objectMapper.readValue(projected, ProjectScriptResult.class);
             refreshRuntimeIndexes(draft.runId());
@@ -1005,11 +1527,17 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     @Override
     public void saveScope(RunSessionScope scope, RunSessionScopeSession session) {
+        saveScope(scope, session, null);
+    }
+
+    @Override
+    public void saveScope(RunSessionScope scope, RunSessionScopeSession session, RunOwnerLease lease) {
         Objects.requireNonNull(scope, "scope must not be null");
         Objects.requireNonNull(session, "session must not be null");
         if (!scope.runId().equals(session.runId())) {
             throw new IllegalArgumentException("scope and session runId must match");
         }
+        validateLease(scope.runId(), lease);
         try {
             Duration ttl = ttlFor(scope.runId());
             String serializedScope = write(scope);
@@ -1022,18 +1550,25 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                             scopeSessionsKey(scope.runId()),
                             scopeVersionKey(scope.runId()),
                             registryKey(scope.runId()),
-                            manifestKey(scope.runId())),
+                            manifestKey(scope.runId()),
+                            ownerLeaseKey(scope.runId())),
                     serializedScope,
                     serializedSession,
                     Long.toString(ttl.toMillis()),
                     session.sessionId(),
                     Long.toString(scope.scopeVersion()),
-                    Long.toString(maxDetailBytes));
+                    Long.toString(nonSnapshotDetailBudgetBytes()),
+                    fenced(lease),
+                    owner(lease),
+                    token(lease));
             if (saved == null || saved == -1L) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
             }
             if (saved == -2L) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Run scope 超过 Redis 详情容量上限");
+            }
+            if (saved == -3L) {
+                throw fenceRejected();
             }
         } catch (RuntimeException exception) {
             if (exception instanceof PlatformException platformException) {
@@ -1071,6 +1606,17 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     @Override
     public boolean claimRawEvent(RunId runId, String sessionId, String rawEventId) {
+        return claimRawEvent(runId, sessionId, rawEventId, null);
+    }
+
+    @Override
+    public boolean claimRawEvent(
+            RunId runId,
+            String sessionId,
+            String rawEventId,
+            RunOwnerLease lease) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        validateLease(runId, lease);
         if (rawEventId == null || rawEventId.isBlank()) {
             return true;
         }
@@ -1078,41 +1624,96 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             String key = dedupKey(runId);
             Long claimed = redisTemplate.execute(
                     CLAIM_RAW_EVENT_SCRIPT,
-                    List.of(manifestKey(runId), key, registryKey(runId)),
+                    List.of(manifestKey(runId), key, registryKey(runId), ownerLeaseKey(runId)),
                     digest((sessionId == null ? "" : sessionId) + '\u0000' + rawEventId),
-                    Long.toString(activeTtl.toMillis()));
+                    Long.toString(activeTtl.toMillis()),
+                    fenced(lease),
+                    owner(lease),
+                    token(lease));
             if (claimed == null || claimed == -1L) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
             }
+            if (claimed == -2L) {
+                throw fenceRejected();
+            }
             return claimed == 1L;
         } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
             throw unavailable(exception);
         }
     }
 
     @Override
     public void appendPending(String sessionId, RunEventDraft draft) {
+        appendPending(sessionId, draft, null);
+    }
+
+    @Override
+    public void appendPending(String sessionId, RunEventDraft draft, RunOwnerLease lease) {
         Objects.requireNonNull(draft, "draft must not be null");
+        validateLease(draft.runId(), lease);
         try {
             String key = pendingKey(draft.runId(), sessionId);
+            Duration ttl = ttlFor(draft.runId());
+            Instant now = clock.instant();
             Long appended = redisTemplate.execute(
                     APPEND_PENDING_SCRIPT,
-                    List.of(manifestKey(draft.runId()), key, registryKey(draft.runId())),
+                    List.of(
+                            manifestKey(draft.runId()),
+                            key,
+                            registryKey(draft.runId()),
+                            ownerLeaseKey(draft.runId())),
                     write(draft),
-                    Long.toString(pendingTtl.toMillis()));
+                    Long.toString(ttl.toMillis()),
+                    fenced(lease),
+                    owner(lease),
+                    token(lease),
+                    Long.toString(nonSnapshotDetailBudgetBytes()),
+                    now.toString(),
+                    now.plus(ttl).toString());
             if (appended == null || appended == 0L) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
             }
+            if (appended == -2L) {
+                throw fenceRejected();
+            }
+            if (appended == -3L) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Run pending 超过 Redis 详情容量上限");
+            }
+            refreshRuntimeIndexes(draft.runId());
         } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
             throw unavailable(exception);
         }
     }
 
     @Override
     public List<RunEventDraft> drainPending(RunId runId, String sessionId) {
+        return drainPending(runId, sessionId, null);
+    }
+
+    @Override
+    public List<RunEventDraft> drainPending(RunId runId, String sessionId, RunOwnerLease lease) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        validateLease(runId, lease);
         try {
             String key = pendingKey(runId, sessionId);
-            String json = redisTemplate.execute(DRAIN_PENDING_SCRIPT, List.of(key));
+            String json = redisTemplate.execute(
+                    DRAIN_PENDING_SCRIPT,
+                    List.of(key, manifestKey(runId), ownerLeaseKey(runId), registryKey(runId)),
+                    fenced(lease),
+                    owner(lease),
+                    token(lease));
+            if ("__MISSING__".equals(json)) {
+                throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
+            }
+            if ("__FENCE__".equals(json)) {
+                throw fenceRejected();
+            }
             List<String> values = json == null
                     ? List.of()
                     : objectMapper.readValue(json, new TypeReference<List<String>>() { });
@@ -1120,6 +1721,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         } catch (JsonProcessingException exception) {
             throw unavailable(exception);
         } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) {
+                throw platformException;
+            }
             throw unavailable(exception);
         }
     }
@@ -1194,9 +1798,112 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (linuxServerId == null || linuxServerId.isBlank()) {
             return List.of();
         }
-        return findActiveFromIndex(
-                activeServerKey(linuxServerId),
-                manifest -> linuxServerId.equals(manifest.producerLinuxServerId()));
+        return findActiveFromServerRecoveryIndex(linuxServerId);
+    }
+
+    @Override
+    public List<RunTerminalProjectionPending> findTerminalProjectionPendingByServer(
+            String linuxServerId,
+            int limit) {
+        if (linuxServerId == null || linuxServerId.isBlank()) {
+            return List.of();
+        }
+        if (limit < 1 || limit > 1_000) {
+            throw new IllegalArgumentException("limit must be between 1 and 1000");
+        }
+        String key = activeServerKey(linuxServerId);
+        try {
+            long now = clock.millis();
+            Set<String> members = redisTemplate.opsForZSet().rangeByScore(key, now, Double.POSITIVE_INFINITY);
+            redisTemplate.opsForZSet().removeRangeByScore(key, Double.NEGATIVE_INFINITY, now - 1D);
+            if (members == null || members.isEmpty()) {
+                return List.of();
+            }
+            List<RunTerminalProjectionPending> pending = new ArrayList<>();
+            for (String member : members) {
+                RunId runId;
+                try {
+                    runId = new RunId(member);
+                } catch (IllegalArgumentException exception) {
+                    redisTemplate.opsForZSet().remove(key, member);
+                    continue;
+                }
+                Optional<RunRuntimeManifest> manifest = findManifest(runId);
+                if (manifest.isEmpty()
+                        || !linuxServerId.equals(manifest.orElseThrow().producerLinuxServerId())) {
+                    redisTemplate.opsForZSet().remove(key, member);
+                    continue;
+                }
+                Optional<RunTerminalProjectionPending> candidate = findTerminalProjectionPending(runId);
+                if (candidate.isPresent()) {
+                    pending.add(candidate.orElseThrow());
+                    if (pending.size() >= limit) {
+                        break;
+                    }
+                } else if (!manifest.orElseThrow().active()) {
+                    // ack 后 Java 若在跨 slot ZREM 前退出，下一轮通过 manifest 自愈悬空索引。
+                    redisTemplate.opsForZSet().remove(key, member);
+                }
+            }
+            return List.copyOf(pending);
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) throw platformException;
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public Optional<RunTerminalProjectionPending> findTerminalProjectionPending(RunId runId) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        try {
+            Map<Object, Object> fields = redisTemplate.opsForHash().entries(manifestKey(runId));
+            if (fields == null || fields.isEmpty()
+                    || !"1".equals(optionalText(fields, "terminalProjectionPending"))) {
+                return Optional.empty();
+            }
+            RunRuntimeManifest base = objectMapper.readValue(text(fields, "base"), RunRuntimeManifest.class);
+            RunStatus status = RunStatus.valueOf(text(fields, "terminalProjectionStatus"));
+            return Optional.of(new RunTerminalProjectionPending(
+                    runId,
+                    base.producerLinuxServerId(),
+                    number(fields, "terminalProjectionVersion"),
+                    status,
+                    text(fields, "terminalProjectionSource"),
+                    text(fields, "terminalProjectionReasonCode"),
+                    optionalText(fields, "terminalProjectionSafeErrorMessage"),
+                    "1".equals(optionalText(fields, "terminalProjectionRemoteStopConfirmed")),
+                    text(fields, "terminalProjectionTraceId"),
+                    Instant.parse(text(fields, "terminalProjectionOccurredAt"))));
+        } catch (JsonProcessingException exception) {
+            throw unavailable(exception);
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) throw platformException;
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public boolean ackTerminalProjection(RunId runId, long expectedVersion) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        if (expectedVersion < 1) {
+            throw new IllegalArgumentException("expectedVersion must be positive");
+        }
+        try {
+            Long acknowledged = redisTemplate.execute(
+                    ACK_TERMINAL_PROJECTION_SCRIPT,
+                    List.of(manifestKey(runId)),
+                    Long.toString(expectedVersion));
+            if (acknowledged == null || acknowledged != 1L) {
+                return false;
+            }
+            findManifest(runId)
+                    .filter(manifest -> !manifest.active())
+                    .ifPresent(this::removeServerRecoveryIndex);
+            return true;
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) throw platformException;
+            throw unavailable(exception);
+        }
     }
 
     @Override
@@ -1206,7 +1913,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 .orElseThrow(() -> new PlatformException(ErrorCode.RUN_DETAILS_EXPIRED, "Run 详情已过期"));
         Duration ttl = status.isTerminal()
                 ? terminalTtl
-                : (attention == null || attention.isBlank() ? activeTtl : pendingTtl);
+                : (attention == null || attention.isBlank() ? activeTtl : pendingPhysicalTtl());
         Instant now = clock.instant();
         Instant expiresAt = now.plus(ttl);
         try {
@@ -1272,8 +1979,47 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             for (String member : members) {
                 Optional<RunRuntimeManifest> manifest = findManifest(new RunId(member));
                 if (manifest.filter(RunRuntimeManifest::active).filter(ownerCheck).isPresent()) {
-                    active.add(manifest.orElseThrow());
+                    RunRuntimeManifest current = manifest.orElseThrow();
+                    // server/user 恢复读取本身也是跨 slot 修复点，避免连续进程退出不断消耗预留安全窗。
+                    reserveRuntimeIndexes(current);
+                    active.add(current);
                 } else {
+                    redisTemplate.opsForZSet().remove(key, member);
+                }
+            }
+            return List.copyOf(active);
+        } catch (RuntimeException exception) {
+            if (exception instanceof PlatformException platformException) throw platformException;
+            throw unavailable(exception);
+        }
+    }
+
+    /** server 索引同时承担终态 outbox 恢复；active 查询不能删除仍待关系型投影的终态成员。 */
+    private List<RunRuntimeManifest> findActiveFromServerRecoveryIndex(String linuxServerId) {
+        String key = activeServerKey(linuxServerId);
+        try {
+            long now = clock.millis();
+            Set<String> members = redisTemplate.opsForZSet().rangeByScore(key, now, Double.POSITIVE_INFINITY);
+            redisTemplate.opsForZSet().removeRangeByScore(key, Double.NEGATIVE_INFINITY, now - 1D);
+            if (members == null || members.isEmpty()) {
+                return List.of();
+            }
+            List<RunRuntimeManifest> active = new ArrayList<>();
+            for (String member : members) {
+                RunId runId;
+                try {
+                    runId = new RunId(member);
+                } catch (IllegalArgumentException exception) {
+                    redisTemplate.opsForZSet().remove(key, member);
+                    continue;
+                }
+                Optional<RunRuntimeManifest> manifest = findManifest(runId)
+                        .filter(item -> linuxServerId.equals(item.producerLinuxServerId()));
+                if (manifest.filter(RunRuntimeManifest::active).isPresent()) {
+                    RunRuntimeManifest current = manifest.orElseThrow();
+                    reserveRuntimeIndexes(current);
+                    active.add(current);
+                } else if (manifest.isEmpty() || findTerminalProjectionPending(runId).isEmpty()) {
                     redisTemplate.opsForZSet().remove(key, member);
                 }
             }
@@ -1288,19 +2034,22 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (!manifest.active()) {
             return;
         }
-        Duration ttl = runtimeTtl(manifest);
+        Duration ttl = indexRetentionTtl();
         long expiresAt = clock.instant().plus(ttl).toEpochMilli();
         if (manifest.userId() != null) {
             redisTemplate.opsForZSet().add(activeUserKey(manifest.userId()), manifest.runId().value(), expiresAt);
-            redisTemplate.expire(activeUserKey(manifest.userId()), ttl);
+            extendTtl(activeUserKey(manifest.userId()), ttl);
         }
         redisTemplate.opsForValue().set(activeSessionKey(manifest.sessionId()), manifest.runId().value(), ttl);
-        redisTemplate.opsForZSet().add(
-                activeServerKey(manifest.producerLinuxServerId()), manifest.runId().value(), expiresAt);
-        redisTemplate.expire(activeServerKey(manifest.producerLinuxServerId()), ttl);
+        indexServerRecovery(manifest, ttl, expiresAt);
     }
 
     private void removeActive(RunRuntimeManifest manifest) {
+        removeUserAndSessionActive(manifest);
+        removeServerRecoveryIndex(manifest);
+    }
+
+    private void removeUserAndSessionActive(RunRuntimeManifest manifest) {
         if (manifest.userId() != null) {
             redisTemplate.opsForZSet().remove(activeUserKey(manifest.userId()), manifest.runId().value());
         }
@@ -1308,15 +2057,47 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (manifest.runId().value().equals(sessionRun)) {
             redisTemplate.delete(activeSessionKey(manifest.sessionId()));
         }
+    }
+
+    private void removeServerRecoveryIndex(RunRuntimeManifest manifest) {
         redisTemplate.opsForZSet().remove(
                 activeServerKey(manifest.producerLinuxServerId()), manifest.runId().value());
     }
 
+    private void indexServerRecovery(RunRuntimeManifest manifest, Duration ttl, long expiresAt) {
+        redisTemplate.opsForZSet().add(
+                activeServerKey(manifest.producerLinuxServerId()), manifest.runId().value(), expiresAt);
+        extendTtl(activeServerKey(manifest.producerLinuxServerId()), ttl);
+    }
+
     private void indexHistory(RunRuntimeManifest manifest) {
-        Duration ttl = runtimeTtl(manifest);
+        Duration ttl = indexRetentionTtl();
         String key = historySessionKey(manifest.sessionId());
         redisTemplate.opsForZSet().add(key, manifest.runId().value(), manifest.updatedAt().toEpochMilli());
-        redisTemplate.expire(key, ttl);
+        extendTtl(key, ttl);
+    }
+
+    /**
+     * 跨 slot 索引统一使用所有运行态中的最大物理窗口。事件 Lua 已提交而 Java 尚未刷新索引时，旧索引也不会
+     * 早于 pending/terminal 详情过期；普通 Run 的悬空成员由读取和恢复扫描回读 manifest 后清理。
+     */
+    private Duration indexRetentionTtl() {
+        // 跨 slot 刷新可能在单 Run Lua 已提交后因 Java crash 丢失。上次成功刷新时 Run 也可能已在
+        // 7 天 pending 窗口内，因此安全窗必须覆盖“最长当前 TTL + 最长下一状态 TTL”。恢复读会再次修复索引。
+        Duration longest = activeTtl.compareTo(terminalTtl) >= 0 ? activeTtl : terminalTtl;
+        Duration pending = pendingPhysicalTtl();
+        if (pending.compareTo(longest) > 0) {
+            longest = pending;
+        }
+        return longest.plus(longest);
+    }
+
+    /** 共享 ZSET 的 key TTL 只能增长，避免较短 Run 截断同索引中仍需恢复的 Run。 */
+    private void extendTtl(String key, Duration ttl) {
+        redisTemplate.execute(
+                EXTEND_TTL_SCRIPT,
+                List.of(key),
+                Long.toString(ttl.toMillis()));
     }
 
     private RunRuntimeManifest overlay(RunRuntimeManifest base, Map<Object, Object> fields) {
@@ -1373,7 +2154,14 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (manifest.status().isTerminal()) {
             return terminalTtl;
         }
-        return manifest.attention() == null || manifest.attention().isBlank() ? activeTtl : pendingTtl;
+        return manifest.attention() == null || manifest.attention().isBlank()
+                ? activeTtl
+                : pendingPhysicalTtl();
+    }
+
+    /** 业务截止仍以 attentionAt + 7 天判断，物理 key 多留 5 分钟供终态扫描接管。 */
+    private Duration pendingPhysicalTtl() {
+        return pendingTtl.plus(PENDING_ASK_RECOVERY_BUFFER);
     }
 
     private void refreshRuntimeIndexes(RunId runId) {
@@ -1382,13 +2170,30 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (manifest.active()) {
             indexActive(manifest);
         } else {
-            removeActive(manifest);
+            removeUserAndSessionActive(manifest);
+            if (findTerminalProjectionPending(runId).isPresent()) {
+                Duration ttl = indexRetentionTtl();
+                indexServerRecovery(manifest, ttl, clock.instant().plus(ttl).toEpochMilli());
+            } else {
+                removeServerRecoveryIndex(manifest);
+            }
         }
         indexHistory(manifest);
         if (manifest.userId() != null) {
-            Duration runtimeTtl = runtimeTtl(manifest);
-            Duration markerTtl = runtimeTtl.compareTo(terminalTtl) > 0 ? runtimeTtl : terminalTtl;
-            redisTemplate.opsForValue().set(userRuntimeMarkerKey(manifest.userId()), "1", markerTtl);
+            redisTemplate.opsForValue().set(
+                    userRuntimeMarkerKey(manifest.userId()), "1", indexRetentionTtl());
+        }
+    }
+
+    /** 初始化前登记跨 slot 的恢复索引，避免单 Run Lua 成功与 Java 进程退出之间形成不可恢复窗口。 */
+    private void reserveRuntimeIndexes(RunRuntimeManifest manifest) {
+        if (manifest.active()) {
+            indexActive(manifest);
+        }
+        indexHistory(manifest);
+        if (manifest.userId() != null) {
+            redisTemplate.opsForValue().set(
+                    userRuntimeMarkerKey(manifest.userId()), "1", indexRetentionTtl());
         }
     }
 
@@ -1400,17 +2205,21 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 snapshotKey(runId),
                 snapshotOrderKey(runId),
                 registryKey(runId),
-                inputKey(runId));
+                inputKey(runId),
+                ownerLeaseKey(runId));
     }
 
     private Object[] operationArguments(
             RunEventDraft draft,
             SnapshotProjection projection,
             Instant now,
-            boolean durable) {
+            boolean durable,
+            RunOwnerLease lease) {
+        validateLease(draft.runId(), lease);
         AttentionMutation attention = attentionMutation(draft);
         String status = statusFrom(draft.type()).map(Enum::name).orElse("");
         boolean terminal = statusFrom(draft.type()).map(RunStatus::isTerminal).orElse(false);
+        TerminalProjectionMetadata terminalProjection = terminalProjectionMetadata(draft);
         return new Object[] {
                 write(draft),
                 projection.key(),
@@ -1429,8 +2238,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 attention.clear() ? "1" : "0",
                 status,
                 terminal ? "1" : "0",
-                Long.toString(pendingTtl.toMillis()),
-                now.plus(pendingTtl).toString(),
+                Long.toString(pendingPhysicalTtl().toMillis()),
+                now.plus(pendingPhysicalTtl()).toString(),
                 Long.toString(terminalTtl.toMillis()),
                 now.plus(terminalTtl).toString(),
                 durable
@@ -1438,8 +2247,50 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                         : "evt_runtime_" + draft.runId().value() + "_",
                 draft.occurredAt().toString(),
                 snapshotJson(draft),
-                durable ? diffMutation(draft.type()) : ""
+                durable ? diffMutation(draft.type()) : "",
+                fenced(lease),
+                owner(lease),
+                token(lease),
+                terminalProjection.source(),
+                terminalProjection.reasonCode(),
+                terminalProjection.safeErrorMessage(),
+                terminalProjection.remoteStopConfirmed() ? "1" : "0",
+                terminalProjection.traceId(),
+                terminalProjection.occurredAt(),
+                Long.toString(snapshotEntryLimitBytes())
         };
+    }
+
+    /** 终态事件的恢复元数据只使用显式安全字段；旧调用方缺字段时按事件类型给出稳定默认值。 */
+    private TerminalProjectionMetadata terminalProjectionMetadata(RunEventDraft draft) {
+        Optional<RunStatus> status = statusFrom(draft.type()).filter(RunStatus::isTerminal);
+        if (status.isEmpty()) {
+            return TerminalProjectionMetadata.empty();
+        }
+        RunStatus terminalStatus = status.orElseThrow();
+        String source = firstText(draft.payload(), "terminalSource")
+                .orElse(terminalStatus == RunStatus.CANCELLED ? "SYSTEM_CANCEL" : "REMOTE_ROOT");
+        String reasonCode = firstText(draft.payload(), "terminalReasonCode", "reason", "errorCode")
+                .orElse(switch (terminalStatus) {
+                    case SUCCEEDED -> "COMPLETED";
+                    case FAILED -> "REMOTE_FAILED";
+                    case CANCELLED -> "CANCELLED";
+                    default -> throw new IllegalStateException("terminal status expected");
+                });
+        String safeErrorMessage = firstText(draft.payload(), "safeErrorMessage")
+                .or(() -> terminalStatus == RunStatus.FAILED
+                        ? firstText(draft.payload(), "message", "error")
+                        : Optional.empty())
+                .orElse("");
+        boolean remoteStopConfirmed = Boolean.TRUE.equals(draft.payload().get("remoteStopConfirmed"))
+                || "true".equalsIgnoreCase(String.valueOf(draft.payload().get("remoteStopConfirmed")));
+        return new TerminalProjectionMetadata(
+                source,
+                reasonCode,
+                safeErrorMessage,
+                remoteStopConfirmed,
+                draft.traceId(),
+                draft.occurredAt().toString());
     }
 
     private String diffMutation(RunEventType type) {
@@ -1479,16 +2330,52 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 Map.copyOf(payload));
     }
 
+    /** 用户输入使用独立 key，容量收敛时不会与后续 assistant message 竞争“最新消息”保留位。 */
+    private String inputSnapshotKey(RunRuntimeInput input) {
+        String messageId = input.messageId() == null || input.messageId().isBlank()
+                ? input.runId().value()
+                : input.messageId();
+        return "p:user-input:" + digest(messageId);
+    }
+
+    /**
+     * 为 reset 后仍可重建的 latest assistant message/part 和 run-status 预留固定空间。
+     * 生产 32 MiB 上限最多预留 4 MiB；小容量测试使用一半预算，避免改变正常输入的主容量口径。
+     */
+    private long criticalSnapshotReserveBytes() {
+        return Math.max(1L, Math.min(MAX_CRITICAL_SNAPSHOT_RESERVE_BYTES, maxDetailBytes / 2L));
+    }
+
+    /** input/scope/pending 只使用非快照预算，避免后续事件把关键 reset 快照空间挤占。 */
+    private long nonSnapshotDetailBudgetBytes() {
+        return Math.max(0L, maxDetailBytes - criticalSnapshotReserveBytes());
+    }
+
+    /** latest message、latest part、run-status 三个关键槽共享预留空间，生产单槽仍不超过 1 MiB。 */
+    private long snapshotEntryLimitBytes() {
+        return Math.max(1L, Math.min(MAX_SNAPSHOT_ENTRY_BYTES, criticalSnapshotReserveBytes() / 3L));
+    }
+
     private String snapshotJson(RunEventDraft draft) {
         String serialized = write(draft);
-        long perEntryBytes = Math.min(1024L * 1024L, Math.max(1024L, maxDetailBytes / 4L));
+        long perEntryBytes = snapshotEntryLimitBytes();
         if (serialized.getBytes(StandardCharsets.UTF_8).length <= perEntryBytes) {
             return serialized;
         }
-        SnapshotBudget budget = new SnapshotBudget(Math.max(256, (int) Math.min(Integer.MAX_VALUE, perEntryBytes / 4L)));
+        SnapshotBudget budget = new SnapshotBudget(Math.max(16, (int) Math.min(Integer.MAX_VALUE, perEntryBytes / 4L)));
         @SuppressWarnings("unchecked")
         Map<String, Object> normalizedPayload = (Map<String, Object>) normalizeSnapshotValue(draft.payload(), budget, 0);
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>(normalizedPayload);
+        firstText(draft.payload(), "role")
+                .or(() -> nestedText(draft.payload(), "message", "role"))
+                .or(() -> nestedText(draft.payload(), "info", "role"))
+                .ifPresent(role -> payload.put("role", role));
+        int visibleTextLimit = Math.max(8, (int) Math.min(4096L, perEntryBytes / 8L));
+        Object visibleText = minimalSnapshotPayload(draft.payload(), visibleTextLimit).get("text");
+        if (visibleText != null) {
+            // Map 遍历顺序不能决定 reset 是否保留可见正文；用户输入和 assistant 文本始终抢占有界保留位。
+            payload.put("text", visibleText);
+        }
         payload.put("snapshotTruncated", true);
         RunEventDraft normalized = new RunEventDraft(
                 draft.runId(), draft.type(), draft.traceId(), draft.occurredAt(), payload, draft.scopeContext());
@@ -1496,13 +2383,19 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (result.getBytes(StandardCharsets.UTF_8).length <= perEntryBytes) {
             return result;
         }
-        return write(new RunEventDraft(
+        String minimal = write(new RunEventDraft(
                 draft.runId(),
                 draft.type(),
                 draft.traceId(),
                 draft.occurredAt(),
-                minimalSnapshotPayload(draft.payload()),
+                minimalSnapshotPayload(
+                        draft.payload(),
+                        visibleTextLimit),
                 draft.scopeContext()));
+        if (minimal.getBytes(StandardCharsets.UTF_8).length > perEntryBytes) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Run 事件最小快照超过 Redis 详情容量上限");
+        }
+        return minimal;
     }
 
     private Object normalizeSnapshotValue(Object value, SnapshotBudget budget, int depth) {
@@ -1551,16 +2444,26 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         return value.toString();
     }
 
-    private Map<String, Object> minimalSnapshotPayload(Map<String, Object> payload) {
+    private Map<String, Object> minimalSnapshotPayload(Map<String, Object> payload, int textLimit) {
         LinkedHashMap<String, Object> minimal = new LinkedHashMap<>();
         for (String key : List.of(
                 "sessionId", "sessionID", "rootSessionId", "messageId", "messageID", "partId", "partID",
-                "callId", "callID", "requestId", "requestID", "status", "type", "field", "rawType")) {
+                "callId", "callID", "requestId", "requestID", "status", "type", "role", "field", "rawType")) {
             Object value = payload.get(key);
             if (value instanceof String || value instanceof Number || value instanceof Boolean) {
                 minimal.put(key, value);
             }
         }
+        firstText(payload, "role")
+                .or(() -> nestedText(payload, "message", "role"))
+                .or(() -> nestedText(payload, "info", "role"))
+                .ifPresent(role -> minimal.put("role", role));
+        firstText(payload, "text", "delta", "content")
+                .or(() -> nestedText(payload, "part", "text", "delta", "content"))
+                .or(() -> nestedText(payload, "message", "text", "content"))
+                .ifPresent(text -> minimal.put("text", text.length() <= textLimit
+                        ? text
+                        : text.substring(0, textLimit) + "…[truncated]"));
         minimal.put("snapshotTruncated", true);
         return Map.copyOf(minimal);
     }
@@ -1750,6 +2653,37 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         return value == null ? 0 : Integer.parseInt(value.toString());
     }
 
+    /** 带 fencing 的重载必须保证租约与目标 Run 一致，避免把其它 Run 的 token 误用于当前脚本。 */
+    private void validateLease(RunId runId, RunOwnerLease lease) {
+        if (lease != null && !runId.equals(lease.runId())) {
+            throw new IllegalArgumentException("lease and runtime mutation runId must match");
+        }
+    }
+
+    private String fenced(RunOwnerLease lease) {
+        return lease == null ? "0" : "1";
+    }
+
+    private String owner(RunOwnerLease lease) {
+        return lease == null ? "" : lease.ownerBackendProcessId();
+    }
+
+    private String token(RunOwnerLease lease) {
+        return lease == null ? "0" : Long.toString(lease.fencingToken());
+    }
+
+    private String nullable(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String instant(Instant value) {
+        return value == null ? "" : value.toString();
+    }
+
+    private PlatformException fenceRejected() {
+        return new PlatformException(ErrorCode.CONFLICT, "Run owner lease 已失效");
+    }
+
     private PlatformException unavailable(Throwable cause) {
         return new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis 运行态不可用", Map.of(), cause);
     }
@@ -1762,6 +2696,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     private String snapshotKey(RunId runId) { return runPrefix(runId) + "snapshot"; }
     private String snapshotOrderKey(RunId runId) { return runPrefix(runId) + "snapshot:order"; }
     private String registryKey(RunId runId) { return runPrefix(runId) + "keys"; }
+    private String ownerLeaseKey(RunId runId) { return runPrefix(runId) + "owner-lease"; }
     private String scopeKey(RunId runId) { return runPrefix(runId) + "scope"; }
     private String scopeSessionsKey(RunId runId) { return runPrefix(runId) + "scope:sessions"; }
     private String scopeVersionKey(RunId runId) { return runPrefix(runId) + "scope:version"; }
@@ -1788,6 +2723,18 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     private record SnapshotProjection(String key, String mode, String cleanupKey, boolean latestOrder) { }
     private record AttentionMutation(String value, String eventId, boolean clear) { }
+    private record TerminalProjectionMetadata(
+            String source,
+            String reasonCode,
+            String safeErrorMessage,
+            boolean remoteStopConfirmed,
+            String traceId,
+            String occurredAt) {
+
+        private static TerminalProjectionMetadata empty() {
+            return new TerminalProjectionMetadata("", "", "", false, "", "");
+        }
+    }
     private record AppendScriptResult(
             long seq,
             long runtimeVersion,

@@ -33,6 +33,7 @@ import com.icbc.testagent.domain.routing.RoutingReason;
 import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.ConversationRunContext;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunOwnerLease;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStorageMode;
 import com.icbc.testagent.domain.run.RunRuntimeManifest;
@@ -95,6 +96,7 @@ public class RunApplicationService {
     private static final Duration TRANSPORT_ERROR_TERMINAL_GRACE = Duration.ofMillis(300);
     private static final Duration TITLE_WAIT_RECONNECT_DELAY = Duration.ofSeconds(1);
     private static final int INTERACTION_RECONCILE_ATTEMPTS = 30;
+    private static final Duration REMOTE_CANCEL_TIMEOUT = Duration.ofSeconds(10);
     private static final Set<RunEventType> OUTPUT_ACTIVITY_TYPES = Set.of(
             RunEventType.ASSISTANT_MESSAGE_DELTA,
             RunEventType.MESSAGE_UPDATED,
@@ -165,6 +167,8 @@ public class RunApplicationService {
     private RunSummaryPersistencePort runSummaryPersistencePort;
     private RunTerminalProjectionService runTerminalProjectionService;
     private BackendInstanceIdentity backendInstanceIdentity;
+    private RunOwnerLeaseSupervisor ownerLeaseSupervisor;
+    private RunRuntimeLossConvergenceScheduler runtimeLossScheduler;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -518,10 +522,11 @@ public class RunApplicationService {
         this.runTerminalProjectionService = Objects.requireNonNull(
                 runTerminalProjectionService, "runTerminalProjectionService must not be null");
         this.backendInstanceIdentity = Objects.requireNonNull(backendInstanceIdentity, "backendInstanceIdentity must not be null");
+        this.ownerLeaseSupervisor = null;
+        this.runtimeLossScheduler = null;
     }
 
-    /** Spring 生产构造器完整接入上下文、标题监听、Redis Run 数据面和终态摘要投影。 */
-    @Autowired
+    /** 完整接入上下文、标题监听、Redis Run 数据面和终态摘要投影。 */
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
             com.icbc.testagent.domain.session.SessionRepository sessionRepository,
@@ -575,6 +580,92 @@ public class RunApplicationService {
         this.runTerminalProjectionService = Objects.requireNonNull(
                 runTerminalProjectionService, "runTerminalProjectionService must not be null");
         this.backendInstanceIdentity = Objects.requireNonNull(backendInstanceIdentity, "backendInstanceIdentity must not be null");
+        this.ownerLeaseSupervisor = null;
+        this.runtimeLossScheduler = null;
+    }
+
+    /** 兼容未注入标题监听的 owner lease 手工装配。 */
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            ConversationRunContextResolver conversationContextResolver,
+            RunRuntimeStore runRuntimeStore,
+            RunStorageModeSelector runStorageModeSelector,
+            RunSummaryPersistencePort runSummaryPersistencePort,
+            RunTerminalProjectionService runTerminalProjectionService,
+            BackendInstanceIdentity backendInstanceIdentity,
+            RunOwnerLeaseSupervisor ownerLeaseSupervisor) {
+        this(
+                workspaceRepository, sessionRepository, runRepository, sessionMessageRepository,
+                executionNodeRepository, routingDecisionRepository, runEventAppender, agentRuntimeRegistry,
+                agentSessionBindingRepository, runEventLiveBus, runEventPersistencePolicy, modelCatalogService,
+                userProcessAssignmentService, workspacePathResolver, snapshotService, runSessionScopeRepository,
+                runSessionScopeRuntimeCache, runActivityStateStore, conversationContextResolver, null, runRuntimeStore,
+                runStorageModeSelector, runSummaryPersistencePort, runTerminalProjectionService, backendInstanceIdentity);
+        this.ownerLeaseSupervisor = Objects.requireNonNull(ownerLeaseSupervisor, "ownerLeaseSupervisor must not be null");
+    }
+
+    /** Spring 生产构造器同时接入原生标题监听与 owner lease 监督器。 */
+    @Autowired
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache,
+            RunActivityStateStore runActivityStateStore,
+            ConversationRunContextResolver conversationContextResolver,
+            RunSessionTitleWatchService sessionTitleWatchService,
+            RunRuntimeStore runRuntimeStore,
+            RunStorageModeSelector runStorageModeSelector,
+            RunSummaryPersistencePort runSummaryPersistencePort,
+            RunTerminalProjectionService runTerminalProjectionService,
+            BackendInstanceIdentity backendInstanceIdentity,
+            RunOwnerLeaseSupervisor ownerLeaseSupervisor) {
+        this(
+                workspaceRepository, sessionRepository, runRepository, sessionMessageRepository,
+                executionNodeRepository, routingDecisionRepository, runEventAppender, agentRuntimeRegistry,
+                agentSessionBindingRepository, runEventLiveBus, runEventPersistencePolicy, modelCatalogService,
+                userProcessAssignmentService, workspacePathResolver, snapshotService, runSessionScopeRepository,
+                runSessionScopeRuntimeCache, runActivityStateStore, conversationContextResolver, sessionTitleWatchService,
+                runRuntimeStore, runStorageModeSelector, runSummaryPersistencePort, runTerminalProjectionService,
+                backendInstanceIdentity);
+        this.ownerLeaseSupervisor = Objects.requireNonNull(ownerLeaseSupervisor, "ownerLeaseSupervisor must not be null");
+    }
+
+    /** Redis 运行态持续丢失收敛采用方法注入，避免继续扩张已有兼容构造器参数。 */
+    @Autowired
+    void configureRuntimeLossScheduler(RunRuntimeLossConvergenceScheduler runtimeLossScheduler) {
+        this.runtimeLossScheduler = Objects.requireNonNull(
+                runtimeLossScheduler, "runtimeLossScheduler must not be null");
     }
 
     /**
@@ -898,9 +989,8 @@ public class RunApplicationService {
                             "clientRequestId 已被占用但 Run 运行态尚不可见"));
         }
 
-        String dispatchMessageId = input.messageId() != null && input.messageId().startsWith("msg_")
-                ? input.messageId()
-                : RuntimeIdGenerator.messageId();
+        // 恢复探针依赖该 ID 判断本 Run 是否已被 OpenCode 接收，必须由服务端为每个新 Run 唯一生成。
+        String dispatchMessageId = RuntimeIdGenerator.messageId();
         AgentRoutingTarget target = conversationContextTarget(context, pending.runId(), now, traceId);
         RunRuntimeManifest manifest = new RunRuntimeManifest(
                 pending.runId(),
@@ -939,7 +1029,9 @@ public class RunApplicationService {
                             prompt,
                             runtimeInputParts(input),
                             dispatchMessageId,
-                            now));
+                            now,
+                            workspaceRootPath(workspace),
+                            target.node().baseUrl()));
             append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
                     Map.of(
                             "status", RunStatus.PENDING.name(),
@@ -977,24 +1069,62 @@ public class RunApplicationService {
                     resolvedAgentId,
                     firstText(modelSelection.modelId(), input.model())));
             if (!inserted) {
-                runRuntimeStore.releaseClientRequest(session.sessionId(), input.clientRequestId(), running.runId());
-                return runSummaryPersistencePort
+                // 锚点幂等冲突意味着本轮绝不会派发，必须清掉刚初始化的 Redis active/history 详情。
+                runRuntimeStore.discardBeforeDispatch(running.runId());
+                RunPersistenceAnchor existingAnchor = runSummaryPersistencePort
                         .findBySessionAndClientRequestId(session.sessionId(), input.clientRequestId())
-                        .map(this::anchorRun)
                         .orElseThrow(() -> new PlatformException(
                                 ErrorCode.RUNTIME_STATE_UNAVAILABLE,
                                 "Run 幂等锚点冲突但既有记录不可见"));
+                // 短 claim 窗口内发生并发时，新 Run 的 compare-delete 可能刚移除临时映射；
+                // 用数据库唯一锚点的稳定 runId 重新确认，避免后续重试反复初始化再撞唯一索引。
+                runRuntimeStore.confirmClientRequest(
+                        session.sessionId(), input.clientRequestId(), existingAnchor.runId());
+                return anchorRun(existingAnchor);
             }
             anchorInserted = true;
 
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership = null;
+            boolean subscriptionHandedOff = false;
+            String remoteSessionIdForConvergence = context.remoteSessionId();
             try {
-                AgentSessionBinding binding = context.bindingSnapshot() != null
+                if (!runRuntimeStore.confirmClientRequest(
+                        session.sessionId(), input.clientRequestId(), running.runId())) {
+                    LOGGER.warn(
+                            "Run 锚点已写入但 clientRequestId 映射正由并发请求收敛，runId={}, traceId={}",
+                            running.runId().value(), traceId);
+                }
+                ownership = claimInitialOwnership(running.runId());
+                RunOwnerLeaseSupervisor.OwnershipHandle claimedOwnership = ownership;
+                requireOwnedIfPresent(claimedOwnership);
+                boolean initialBinding = context.bindingSnapshot() == null;
+                AgentSessionBinding binding = !initialBinding
                         ? context.bindingSnapshot()
                         : createInitialAgentSession(
-                                resolvedAgentId, runtime, session, workspace, target.node(), traceId);
+                                resolvedAgentId,
+                                runtime,
+                                session,
+                                workspace,
+                                target.node(),
+                                traceId,
+                                claimedOwnership);
+                remoteSessionIdForConvergence = binding.remoteSessionId();
+                requireOwnedIfPresent(claimedOwnership);
+                RunOwnerLease claimedLease = ownerLeaseIfPresent(claimedOwnership);
+                if (claimedLease == null) {
+                    runRuntimeStore.bindRemoteSession(running.runId(), binding.remoteSessionId());
+                } else {
+                    runRuntimeStore.bindRemoteSession(running.runId(), binding.remoteSessionId(), claimedLease);
+                }
+                requireOwnedIfPresent(claimedOwnership);
+                if (initialBinding) {
+                    // Redis 已记录可恢复的 remoteSessionId 后，再次校验 fencing 并执行首次控制面绑定写入。
+                    runSummaryPersistencePort.persistInitialAgentBinding(binding);
+                }
+                requireOwnedIfPresent(claimedOwnership);
                 RunSessionTitleWatchRegistry.TitleWatchToken titleWatchToken = registerFirstRunTitleWatch(
                         resolvedAgentId,
-                        context.bindingSnapshot() == null,
+                        initialBinding,
                         session,
                         running,
                         prompt,
@@ -1002,9 +1132,14 @@ public class RunApplicationService {
                         target.node(),
                         workspace,
                         binding.remoteSessionId());
-                runRuntimeStore.bindRemoteSession(running.runId(), binding.remoteSessionId());
                 recordRootSessionScope(
-                        resolvedAgentId, running, binding.remoteSessionId(), traceId, RunStorageMode.REDIS_SUMMARY);
+                        resolvedAgentId,
+                        running,
+                        binding.remoteSessionId(),
+                        traceId,
+                        RunStorageMode.REDIS_SUMMARY,
+                        ownerLeaseIfPresent(claimedOwnership));
+                requireOwnedIfPresent(claimedOwnership);
                 subscribeAgentEvents(
                         resolvedAgentId,
                         runtime,
@@ -1014,7 +1149,9 @@ public class RunApplicationService {
                         workspace,
                         RunStorageMode.REDIS_SUMMARY,
                         traceId,
-                        titleWatchToken);
+                        titleWatchToken,
+                        claimedOwnership,
+                        dispatchMessageId);
                 AgentStartRunCommand command = new AgentStartRunCommand(
                         target.node(),
                         binding.remoteSessionId(),
@@ -1030,30 +1167,139 @@ public class RunApplicationService {
                         input.command(),
                         input.arguments(),
                         traceId);
-                Mono.defer(() -> runtime.startRun(command))
+                Mono.defer(() -> {
+                            requireOwnedIfPresent(claimedOwnership);
+                            return runtime.startRun(command);
+                        })
                         .subscribe(
                                 ignored -> {
                                 },
-                                error -> failRunFromStream(
-                                        resolvedAgentId,
-                                        running,
-                                        RunStorageMode.REDIS_SUMMARY,
-                                        traceId,
-                                        error));
+                                error -> failRunFromStreamIfOwned(
+                                        resolvedAgentId, running, RunStorageMode.REDIS_SUMMARY,
+                                        traceId, error, claimedOwnership));
+                subscriptionHandedOff = true;
                 return running;
+            } catch (RunOwnershipLostException exception) {
+                // 旧 owner 失去 fencing 后不得把仍由新 owner 执行的 Run 误写为失败。
+                throw new PlatformException(ErrorCode.CONFLICT, "Run owner lease 已转移");
             } catch (PlatformException exception) {
-                failRedisSummaryRun(running, traceId, exception.errorCode().name(), exception.getMessage());
+                handleRedisSummaryStartupFailure(
+                        resolvedAgentId,
+                        runtime,
+                        running,
+                        remoteSessionIdForConvergence,
+                        target.node(),
+                        workspace,
+                        dispatchMessageId,
+                        traceId,
+                        exception.errorCode().name(),
+                        exception.getMessage(),
+                        ownership,
+                        exception);
                 throw exception;
             } catch (RuntimeException exception) {
-                failRedisSummaryRun(running, traceId, "START_FAILED", safeStreamErrorMessage(exception));
+                handleRedisSummaryStartupFailure(
+                        resolvedAgentId,
+                        runtime,
+                        running,
+                        remoteSessionIdForConvergence,
+                        target.node(),
+                        workspace,
+                        dispatchMessageId,
+                        traceId,
+                        "START_FAILED",
+                        safeStreamErrorMessage(exception),
+                        ownership,
+                        exception);
                 throw exception;
+            } finally {
+                if (ownership != null && !subscriptionHandedOff) {
+                    releaseOwnershipBestEffort(ownership, running.runId(), traceId);
+                }
             }
         } catch (RuntimeException exception) {
             // 锚点写入前失败时绝不触发远端副作用；request claim 释放后允许客户端安全重试。
             if (!anchorInserted) {
-                runRuntimeStore.releaseClientRequest(session.sessionId(), input.clientRequestId(), pending.runId());
+                discardBeforeDispatchBestEffort(
+                        pending.runId(), session.sessionId(), input.clientRequestId(), traceId);
             }
             throw exception;
+        }
+    }
+
+    private void releaseOwnershipBestEffort(
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership,
+            RunId runId,
+            String traceId) {
+        try {
+            ownerLeaseSupervisor.release(ownership);
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Run owner lease 释放失败，等待 TTL，runId={}, traceId={}, exceptionType={}",
+                    runId.value(), traceId, exception.getClass().getSimpleName());
+        }
+    }
+
+    private RunOwnerLeaseSupervisor.OwnershipHandle claimInitialOwnership(RunId runId) {
+        if (ownerLeaseSupervisor == null) {
+            return null;
+        }
+        com.icbc.testagent.domain.run.RunOwnerLease claimed = runRuntimeStore
+                .claimOwnerLease(runId, backendInstanceIdentity.backendProcessId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "Run 已由其它 Java 接管"));
+        return ownerLeaseSupervisor.adopt(claimed)
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "Run owner lease 已失效"));
+    }
+
+    private void requireOwnedIfPresent(RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
+        if (ownership != null) {
+            ownerLeaseSupervisor.requireOwned(ownership);
+        }
+    }
+
+    private RunOwnerLease ownerLeaseIfPresent(RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
+        return ownership == null ? null : ownership.lease();
+    }
+
+    private void failRunFromStreamIfOwned(
+            String agentId,
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            Throwable error,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
+        if (ownership != null) {
+            try {
+                ownerLeaseSupervisor.requireOwned(ownership);
+            } catch (RunOwnershipLostException ignored) {
+                return;
+            }
+        }
+        failRunFromStream(agentId, run, storageMode, traceId, error, ownership);
+        if (ownership != null) {
+            releaseOwnershipBestEffort(ownership, run.runId(), traceId);
+        }
+    }
+
+    private void discardBeforeDispatchBestEffort(
+            RunId runId,
+            SessionId sessionId,
+            String clientRequestId,
+            String traceId) {
+        try {
+            runRuntimeStore.discardBeforeDispatch(runId);
+        } catch (RuntimeException cleanupError) {
+            LOGGER.warn(
+                    "清理未派发 Redis Run 详情失败，等待 TTL/后续读路径自清理，runId={}, traceId={}, exceptionType={}",
+                    runId.value(), traceId, cleanupError.getClass().getSimpleName());
+        }
+        // initialize 失败时 manifest 可能尚不存在，保留 compare-delete 作为 client request 索引兜底。
+        try {
+            runRuntimeStore.releaseClientRequest(sessionId, clientRequestId, runId);
+        } catch (RuntimeException cleanupError) {
+            LOGGER.warn(
+                    "释放未派发 Run clientRequest 索引失败，runId={}, traceId={}, exceptionType={}",
+                    runId.value(), traceId, cleanupError.getClass().getSimpleName());
         }
     }
 
@@ -1062,7 +1308,8 @@ public class RunApplicationService {
                 || runRuntimeStore == null
                 || runSummaryPersistencePort == null
                 || runTerminalProjectionService == null
-                || backendInstanceIdentity == null) {
+                || backendInstanceIdentity == null
+                || ownerLeaseSupervisor == null) {
             throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Redis 摘要运行链路未完整配置");
         }
         if (!context.linuxServerId().equals(backendInstanceIdentity.linuxServerId())) {
@@ -1075,10 +1322,8 @@ public class RunApplicationService {
         if (runId.isEmpty()) {
             return Optional.empty();
         }
-        Optional<RunRuntimeManifest> manifest = runRuntimeStore.findManifest(runId.orElseThrow());
-        if (manifest.isPresent()) {
-            return manifest.map(this::runtimeRun);
-        }
+        // Redis manifest 可能已经初始化但 PostgreSQL 锚点尚未写入；只以关系型唯一锚点确认幂等成功，
+        // 禁止把 crash 窗口中的未派发 RUNNING manifest 直接返回给客户端。
         return runSummaryPersistencePort
                 .findBySessionAndClientRequestId(context.sessionId(), input.clientRequestId())
                 .map(this::anchorRun);
@@ -1118,7 +1363,8 @@ public class RunApplicationService {
             Session session,
             Workspace workspace,
             ExecutionNode node,
-            String traceId) {
+            String traceId,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         AgentCreateSessionResult created = runtime.createSession(new AgentCreateSessionCommand(
                         node,
                         workspaceRootPath(workspace),
@@ -1129,6 +1375,8 @@ public class RunApplicationService {
         if (created == null) {
             throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "agent 创建会话未返回结果");
         }
+        // createSession 是远端副作用；返回后必须再次确认 fencing，再写关系型 binding。
+        requireOwnedIfPresent(ownership);
         Instant now = Instant.now();
         AgentSessionBinding binding = new AgentSessionBinding(
                 session.sessionId(),
@@ -1138,15 +1386,164 @@ public class RunApplicationService {
                 now,
                 now,
                 traceId);
-        runSummaryPersistencePort.persistInitialAgentBinding(binding);
         return binding;
     }
 
-    private void failRedisSummaryRun(Run run, String traceId, String reasonCode, String safeMessage) {
+    private boolean failRedisSummaryRunIfOwned(
+            Run run,
+            String traceId,
+            String reasonCode,
+            String safeMessage,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
+        if (ownerLeaseSupervisor == null) {
+            // 兼容旧测试/手工装配；生产 REDIS_SUMMARY 始终注入 owner supervisor。
+            failRedisSummaryRun(run, traceId, reasonCode, safeMessage, null);
+            return true;
+        }
+        if (ownership == null) {
+            return false;
+        }
+        try {
+            ownerLeaseSupervisor.requireOwned(ownership);
+            failRedisSummaryRun(run, traceId, reasonCode, safeMessage, ownership);
+            return true;
+        } catch (RunOwnershipLostException ignored) {
+            // 新 owner 会继续恢复或收敛，本执行者不得写任何终态副作用。
+            return false;
+        }
+    }
+
+    /**
+     * 锚点已写入后的启动异常必须先尝试 fenced 终态；若 Redis 本身不可用，则进入固定 30 秒收敛，
+     * 不允许留下永久 RUNNING 锚点，也不把原始 prompt 降级写入 PostgreSQL。
+     */
+    private void handleRedisSummaryStartupFailure(
+            String agentId,
+            AgentRuntime runtime,
+            Run run,
+            String remoteSessionId,
+            ExecutionNode node,
+            Workspace workspace,
+            String dispatchMessageId,
+            String traceId,
+            String reasonCode,
+            String safeMessage,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership,
+            Throwable originalFailure) {
+        boolean runtimeLost = runtimeStateUnavailable(originalFailure);
+        try {
+            if (failRedisSummaryRunIfOwned(run, traceId, reasonCode, safeMessage, ownership)) {
+                return;
+            }
+        } catch (RuntimeException terminalFailure) {
+            if (!runtimeStateUnavailable(terminalFailure)) {
+                throw terminalFailure;
+            }
+            runtimeLost = true;
+        }
+        if (!runtimeLost) {
+            return;
+        }
+        scheduleStartupRuntimeLossConvergence(
+                agentId,
+                runtime,
+                run,
+                remoteSessionId,
+                node,
+                workspace,
+                dispatchMessageId,
+                traceId);
+    }
+
+    private void scheduleStartupRuntimeLossConvergence(
+            String agentId,
+            AgentRuntime runtime,
+            Run run,
+            String remoteSessionId,
+            ExecutionNode node,
+            Workspace workspace,
+            String dispatchMessageId,
+            String traceId) {
+        if (runtimeLossScheduler == null || run.triggeredByUserId() == null) {
+            LOGGER.warn(
+                    "Redis 摘要 Run 启动失败后无法调度运行态收敛，runId={}, traceId={}",
+                    run.runId().value(), traceId);
+            return;
+        }
+        RunRuntimeLossRequest request = new RunRuntimeLossRequest(
+                run.runId(),
+                run.sessionId(),
+                run.triggeredByUserId(),
+                agentId,
+                dispatchMessageId,
+                remoteSessionId,
+                workspaceRootPath(workspace),
+                run.sourceType(),
+                run.sourceRefId(),
+                traceId);
+        runtimeLossScheduler.schedule(
+                request,
+                runtime,
+                node,
+                () -> closeUndispatchedRunAfterRuntimeRecovery(run, traceId));
+    }
+
+    /** Redis 在 grace 内恢复时，该启动请求仍从未派发；用条件接管的新 token 关闭它，禁止误发 prompt。 */
+    private void closeUndispatchedRunAfterRuntimeRecovery(Run run, String traceId) {
+        RunOwnerLeaseSupervisor.OwnershipHandle ownership = null;
+        try {
+            RunRuntimeManifest manifest = runRuntimeStore.findManifest(run.runId()).orElse(null);
+            if (manifest == null || !manifest.active()) {
+                return;
+            }
+            RunOwnerLease lease = runRuntimeStore
+                    .claimOwnerLeaseIfUnchanged(manifest, backendInstanceIdentity.backendProcessId())
+                    .orElse(null);
+            if (lease == null) {
+                return;
+            }
+            ownership = ownerLeaseSupervisor.adopt(lease).orElse(null);
+            if (ownership == null) {
+                runRuntimeStore.releaseOwnerLease(lease);
+                return;
+            }
+            ownerLeaseSupervisor.requireOwned(ownership);
+            failRedisSummaryRun(
+                    run,
+                    traceId,
+                    "START_RUNTIME_STATE_LOST",
+                    "运行态不可用，Run 未派发并已终止",
+                    ownership);
+        } catch (RunOwnershipLostException ignored) {
+            // 条件接管后又发生竞争时由新 owner 负责恢复，本执行者不写终态。
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Redis 恢复后关闭未派发 Run 失败，runId={}, traceId={}, exceptionType={}",
+                    run.runId().value(), traceId, exception.getClass().getSimpleName());
+            throw exception;
+        } finally {
+            if (ownership != null) {
+                releaseOwnershipBestEffort(ownership, run.runId(), traceId);
+            }
+        }
+    }
+
+    private void failRedisSummaryRun(
+            Run run,
+            String traceId,
+            String reasonCode,
+            String safeMessage,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         Instant occurredAt = Instant.now();
         append(run.runId(), RunEventType.RUN_FAILED, traceId, occurredAt,
-                Map.of("errorCode", reasonCode, "message", safeMessage == null ? "Run 启动失败" : safeMessage),
-                RunStorageMode.REDIS_SUMMARY);
+                RunTerminalProjectionOutboxPayload.payload(
+                        Map.of("errorCode", reasonCode, "message", safeMessage == null ? "Run 启动失败" : safeMessage),
+                        "LOCAL_START",
+                        reasonCode,
+                        safeMessage,
+                        false),
+                RunStorageMode.REDIS_SUMMARY,
+                ownership);
         runTerminalProjectionService.project(
                 run.runId(),
                 RunStatus.FAILED,
@@ -1179,6 +1576,16 @@ public class RunApplicationService {
             String remoteSessionId,
             String traceId,
             RunStorageMode storageMode) {
+        recordRootSessionScope(agentId, run, remoteSessionId, traceId, storageMode, null);
+    }
+
+    private void recordRootSessionScope(
+            String agentId,
+            Run run,
+            String remoteSessionId,
+            String traceId,
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
         Instant now = Instant.now();
         RunSessionScope scope = new RunSessionScope(
                 run.runId(),
@@ -1206,7 +1613,11 @@ public class RunApplicationService {
             if (runRuntimeStore == null) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis 运行态未配置");
             }
-            runRuntimeStore.saveScope(scope, rootSession);
+            if (ownerLease == null) {
+                runRuntimeStore.saveScope(scope, rootSession);
+            } else {
+                runRuntimeStore.saveScope(scope, rootSession, ownerLease);
+            }
             return;
         }
         runSessionScopeRuntimeCache.recordScopeSession(scope, rootSession);
@@ -1520,6 +1931,48 @@ public class RunApplicationService {
     public Run getRun(RunId runId) {
         return runRepository.findById(runId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Run 不存在", Map.of("runId", runId.value())));
+    }
+
+    /**
+     * 校验认证用户是否拥有指定 Run。新模式只读取 Redis manifest，避免详情/SSE 建连重新访问 PostgreSQL；
+     * legacy 或 manifest 已过期时才回查 Run 与 Session，并对任一已记录的归属字段执行 fail-closed 校验。
+     */
+    public void requireRunAccess(UserId userId, RunId runId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(runId, "runId must not be null");
+        if (runRuntimeStore != null) {
+            Optional<RunRuntimeManifest> manifest = runRuntimeStore.findManifest(runId);
+            if (manifest.isPresent() && manifest.get().storageMode() == RunStorageMode.REDIS_SUMMARY) {
+                if (userId.equals(manifest.get().userId())) {
+                    return;
+                }
+                throw forbiddenRunAccess();
+            }
+        }
+
+        Run run = getRun(runId);
+        Session session = findSession(run.sessionId());
+        boolean ownerRecorded = false;
+        if (run.triggeredByUserId() != null) {
+            ownerRecorded = true;
+            if (!userId.equals(run.triggeredByUserId())) {
+                throw forbiddenRunAccess();
+            }
+        }
+        if (session.createdByUserId() != null) {
+            ownerRecorded = true;
+            if (!userId.equals(session.createdByUserId())) {
+                throw forbiddenRunAccess();
+            }
+        }
+        if (!ownerRecorded) {
+            throw forbiddenRunAccess();
+        }
+    }
+
+    /** 越权统一使用不携带 Run 元数据的安全错误，避免通过差异响应枚举归属。 */
+    private PlatformException forbiddenRunAccess() {
+        return new PlatformException(ErrorCode.FORBIDDEN, "无权访问该 Run");
     }
 
     /** 返回 Redis manifest 中的创建时固定模式和详情窗口；legacy/旧数据保持空。 */
@@ -1878,44 +2331,69 @@ public class RunApplicationService {
                     "Run 已结束，不能取消",
                     Map.of("runId", manifest.runId().value(), "status", manifest.status().name()));
         }
-        Instant now = Instant.now();
-        if (manifest.status() == RunStatus.RUNNING) {
+        RunOwnerLeaseSupervisor.OwnershipHandle ownership = null;
+        try {
+            if (ownerLeaseSupervisor != null) {
+                RunOwnerLease lease = runRuntimeStore.claimOwnerLeaseIfUnchanged(
+                                manifest, backendInstanceIdentity.backendProcessId())
+                        .orElseThrow(() -> new PlatformException(
+                                ErrorCode.CONFLICT,
+                                "Run 状态已变化或正由其它 Java 处理"));
+                ownership = ownerLeaseSupervisor.adopt(lease)
+                        .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "Run owner lease 已失效"));
+                ownerLeaseSupervisor.requireOwned(ownership);
+            }
+            Instant now = Instant.now();
+            if (manifest.status() == RunStatus.RUNNING) {
+                append(
+                        manifest.runId(),
+                        RunEventType.RUN_CANCELLING,
+                        traceId,
+                        now,
+                        Map.of("status", RunStatus.CANCELLING.name()),
+                        RunStorageMode.REDIS_SUMMARY,
+                        ownership);
+            }
+
+            boolean remoteStopConfirmed = cancelRedisSummaryRemoteBestEffort(runtime, manifest, traceId);
+            requireOwnedIfPresent(ownership);
+            Instant cancelledAt = Instant.now();
             append(
                     manifest.runId(),
-                    RunEventType.RUN_CANCELLING,
+                    RunEventType.RUN_CANCELLED,
                     traceId,
-                    now,
-                    Map.of("status", RunStatus.CANCELLING.name()),
-                    RunStorageMode.REDIS_SUMMARY);
+                    cancelledAt,
+                    RunTerminalProjectionOutboxPayload.payload(
+                            Map.of("status", RunStatus.CANCELLED.name()),
+                            "USER_CANCEL",
+                            "USER_REQUESTED",
+                            null,
+                            remoteStopConfirmed),
+                    RunStorageMode.REDIS_SUMMARY,
+                    ownership);
+            // terminal append 已原子封闭 owner 接管窗口，DB CAS 失败由终态重试队列收敛。
+            runTerminalProjectionService.project(
+                    manifest.runId(),
+                    RunStatus.CANCELLED,
+                    "USER_CANCEL",
+                    "USER_REQUESTED",
+                    null,
+                    remoteStopConfirmed,
+                    traceId);
+            runSessionScopeRouter.finishRun(manifest.runId());
+            RunRuntimeManifest terminal = runRuntimeStore.findManifest(manifest.runId())
+                    .orElseThrow(() -> new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run manifest 不存在"));
+            LOGGER.info(
+                    "Redis summary Run cancelled, runId={}, remoteStopConfirmed={}, traceId={}",
+                    manifest.runId().value(),
+                    remoteStopConfirmed,
+                    traceId);
+            return runtimeRun(terminal);
+        } finally {
+            if (ownership != null) {
+                releaseOwnershipBestEffort(ownership, manifest.runId(), traceId);
+            }
         }
-
-        boolean remoteStopConfirmed = cancelRedisSummaryRemoteBestEffort(
-                runtime, manifest, traceId);
-        Instant cancelledAt = Instant.now();
-        append(
-                manifest.runId(),
-                RunEventType.RUN_CANCELLED,
-                traceId,
-                cancelledAt,
-                Map.of("status", RunStatus.CANCELLED.name(), "remoteStopConfirmed", remoteStopConfirmed),
-                RunStorageMode.REDIS_SUMMARY);
-        runTerminalProjectionService.project(
-                manifest.runId(),
-                RunStatus.CANCELLED,
-                "USER_CANCEL",
-                "USER_REQUESTED",
-                null,
-                remoteStopConfirmed,
-                traceId);
-        runSessionScopeRouter.finishRun(manifest.runId());
-        RunRuntimeManifest terminal = runRuntimeStore.findManifest(manifest.runId())
-                .orElseThrow(() -> new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run manifest 不存在"));
-        LOGGER.info(
-                "Redis summary Run cancelled, runId={}, remoteStopConfirmed={}, traceId={}",
-                manifest.runId().value(),
-                remoteStopConfirmed,
-                traceId);
-        return runtimeRun(terminal);
     }
 
     private boolean cancelRedisSummaryRemoteBestEffort(
@@ -1939,14 +2417,14 @@ public class RunApplicationService {
                             workspaceRootPath(workspace),
                             null,
                             traceId))
-                    .block();
+                    .block(REMOTE_CANCEL_TIMEOUT);
             return result != null && result.cancelled();
         } catch (RuntimeException exception) {
             LOGGER.warn(
-                    "Best-effort remote cancellation failed, runId={}, traceId={}",
+                    "Best-effort remote cancellation failed, runId={}, traceId={}, exceptionType={}",
                     manifest.runId().value(),
                     traceId,
-                    exception);
+                    exception.getClass().getSimpleName());
             return false;
         }
     }
@@ -2129,9 +2607,20 @@ public class RunApplicationService {
             Instant occurredAt,
             Map<String, Object> payload,
             RunStorageMode storageMode) {
+        append(runId, type, traceId, occurredAt, payload, storageMode, null);
+    }
+
+    private void append(
+            RunId runId,
+            RunEventType type,
+            String traceId,
+            Instant occurredAt,
+            Map<String, Object> payload,
+            RunStorageMode storageMode,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         RunEventDraft draft = new RunEventDraft(runId, type, traceId, occurredAt, payload);
         recordRuntimeActivity(draft);
-        runEventAppender.append(draft, storageMode);
+        runEventAppender.append(draft, storageMode, ownerLeaseIfPresent(ownership));
     }
 
     /**
@@ -2147,6 +2636,23 @@ public class RunApplicationService {
             RunStorageMode storageMode,
             String traceId,
             RunSessionTitleWatchRegistry.TitleWatchToken titleWatchToken) {
+        subscribeAgentEvents(
+                agentId, runtime, run, remoteSessionId, node, workspace, storageMode, traceId,
+                titleWatchToken, null, null);
+    }
+
+    private void subscribeAgentEvents(
+            String agentId,
+            AgentRuntime runtime,
+            Run run,
+            String remoteSessionId,
+            ExecutionNode node,
+            Workspace workspace,
+            RunStorageMode storageMode,
+            String traceId,
+            RunSessionTitleWatchRegistry.TitleWatchToken titleWatchToken,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership,
+            String dispatchMessageId) {
         RunEventScopeContext rootScope = RunEventScopeContext.root(run.runId(), remoteSessionId);
         Flux<RunEventDraft> stream = Flux.defer(() -> runtime.streamRunEvents(new AgentStreamEventsCommand(
                         node,
@@ -2177,40 +2683,81 @@ public class RunApplicationService {
                 .filter(draft -> acceptsTitleWatchEvent(titleWatchToken, draft))
                 // title agent 完成消息不是平台对话正文；在 scope router 前读取最终 session 标题并转换为 root session.updated。
                 .concatMap(draft -> titleCompletionEvent(titleWatchToken, draft))
-                .concatMap(draft -> Mono.fromCallable(() -> runSessionScopeRouter.route(rootScope, draft, storageMode))
+                .concatMap(draft -> Mono.fromCallable(() -> {
+                            requireOwnedIfPresent(ownership);
+                            return runSessionScopeRouter.route(
+                                    rootScope,
+                                    draft,
+                                    storageMode,
+                                    ownerLeaseIfPresent(ownership));
+                        })
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(Flux::fromIterable)
                         .onErrorResume(error -> {
                             LOGGER.warn(
-                                    "Failed to route opencode stream event, runId={}, eventType={}, traceId={}",
+                                    "Failed to route opencode stream event, runId={}, eventType={}, traceId={}, exceptionType={}",
                                     run.runId().value(),
                                     draft.type().wireName(),
                                     traceId,
-                                    error);
+                                    error.getClass().getSimpleName());
                             return storageMode == RunStorageMode.REDIS_SUMMARY
                                     ? Flux.error(error)
                                     : Flux.empty();
                         }))
                 // 成功 root Run 会转入 TITLE_WAIT，直至原生标题或主动取消；失败仍按既有规则立即结束订阅。
                 .takeUntil(draft -> shouldCloseAgentEventStream(titleWatchToken, draft))
+                .takeUntilOther(ownership == null ? Mono.never() : ownership.lost())
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
                 .concatMap(draft -> Mono.fromRunnable(
-                                () -> appendStreamEvent(agentId, run, workspace, storageMode, draft))
+                                () -> {
+                                    if (ownership != null) {
+                                        ownerLeaseSupervisor.requireOwned(ownership);
+                                    }
+                                    appendStreamEvent(agentId, run, workspace, storageMode, draft, ownership);
+                                })
                         .subscribeOn(Schedulers.boundedElastic())
                         .onErrorResume(error -> {
                             LOGGER.warn(
-                                    "Failed to handle opencode stream event, runId={}, eventType={}, traceId={}",
+                                    "Failed to handle opencode stream event, runId={}, eventType={}, traceId={}, exceptionType={}",
                                     run.runId().value(),
                                     draft.type().wireName(),
                                     traceId,
-                                    error);
+                                    error.getClass().getSimpleName());
                             return storageMode == RunStorageMode.REDIS_SUMMARY
                                     ? Mono.error(error)
                                     : Mono.empty();
                         }))
-                .doOnError(error -> failRunFromStream(agentId, run, storageMode, traceId, error))
-                // 无标题等待时在 root 终态后结束；有标题等待时延至标题完成/取消，统一释放订阅级 scope。
-                .doFinally(ignored -> runSessionScopeRouter.finishRun(run.runId()))
+                .doOnError(error -> {
+                    if (!(error instanceof RunOwnershipLostException)) {
+                        boolean scheduled = scheduleRuntimeLossConvergence(
+                                agentId,
+                                runtime,
+                                run,
+                                remoteSessionId,
+                                node,
+                                workspace,
+                                storageMode,
+                                dispatchMessageId,
+                                traceId,
+                                error);
+                        if (!scheduled) {
+                            failRunFromStream(agentId, run, storageMode, traceId, error, ownership);
+                        }
+                    }
+                })
+                .doFinally(ignored -> {
+                    // 终态、owner 转移和 Redis 故障调度都必须释放本机 scope 状态，事实数据仍保留在 Redis。
+                    runSessionScopeRouter.finishRun(run.runId());
+                    if (ownership != null) {
+                        try {
+                            ownerLeaseSupervisor.release(ownership);
+                        } catch (RuntimeException releaseError) {
+                            LOGGER.warn(
+                                    "Run owner lease 释放失败，等待 TTL，runId={}, traceId={}, exceptionType={}",
+                                    run.runId().value(), traceId, releaseError.getClass().getSimpleName());
+                        }
+                    }
+                })
                 .subscribe(ignored -> {
                 }, ignored -> {
                     // 错误已在 doOnError 中落库，这里消费异常以避免 Reactor dropped error 日志。
@@ -2254,6 +2801,55 @@ public class RunApplicationService {
         return draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED;
     }
 
+    /** Redis 短暂抖动先等待 30 秒；延迟任务只捕获安全 ID、可信路径和节点快照。 */
+    private boolean scheduleRuntimeLossConvergence(
+            String agentId,
+            AgentRuntime runtime,
+            Run run,
+            String remoteSessionId,
+            ExecutionNode node,
+            Workspace workspace,
+            RunStorageMode storageMode,
+            String dispatchMessageId,
+            String traceId,
+            Throwable error) {
+        if (storageMode != RunStorageMode.REDIS_SUMMARY
+                || runtimeLossScheduler == null
+                || run.triggeredByUserId() == null
+                || dispatchMessageId == null
+                || !runtimeStateUnavailable(error)) {
+            return false;
+        }
+        runtimeLossScheduler.schedule(
+                new RunRuntimeLossRequest(
+                        run.runId(),
+                        run.sessionId(),
+                        run.triggeredByUserId(),
+                        agentId,
+                        dispatchMessageId,
+                        remoteSessionId,
+                        workspaceRootPath(workspace),
+                        run.sourceType(),
+                        run.sourceRefId(),
+                        traceId),
+                runtime,
+                node);
+        return true;
+    }
+
+    private boolean runtimeStateUnavailable(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof PlatformException platform
+                    && (platform.errorCode() == ErrorCode.RUNTIME_STATE_UNAVAILABLE
+                    || platform.errorCode() == ErrorCode.RUN_DETAILS_EXPIRED)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     /**
      * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
@@ -2262,7 +2858,8 @@ public class RunApplicationService {
             Run originalRun,
             Workspace workspace,
             RunStorageMode storageMode,
-            RunEventDraft draft) {
+            RunEventDraft draft,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         RunEventDraft eventDraft = synchronizeRootSessionTitle(originalRun, draft);
         if (eventDraft.type() == RunEventType.RUN_SUCCEEDED && isTitleWatchPending(originalRun.runId())) {
             eventDraft = withPendingPlatformSessionTitle(eventDraft);
@@ -2273,15 +2870,29 @@ public class RunApplicationService {
                     ? RunStatus.SUCCEEDED
                     : RunStatus.FAILED;
             if (storageMode == RunStorageMode.REDIS_SUMMARY) {
-                runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft), storageMode);
+                String terminalReasonCode = terminalStatus == RunStatus.SUCCEEDED
+                        ? "COMPLETED"
+                        : "REMOTE_FAILED";
+                String safeErrorMessage = terminalStatus == RunStatus.FAILED
+                        ? firstMapText(eventDraft.payload(), "message", "error").orElse(null)
+                        : null;
+                RunEventDraft terminalDraft = RunTerminalProjectionOutboxPayload.enrich(
+                        eventDraft,
+                        "REMOTE_ROOT",
+                        terminalReasonCode,
+                        safeErrorMessage,
+                        false);
+                runEventAppender.append(
+                        runEventPersistencePolicy.sanitizeForPersistence(terminalDraft),
+                        storageMode,
+                        ownerLeaseIfPresent(ownership));
+                // fenced terminal append 已把 manifest 原子推进终态，后续接管会被拒绝，可安全执行一次 DB CAS。
                 runTerminalProjectionService.project(
                         originalRun.runId(),
                         terminalStatus,
                         "REMOTE_ROOT",
-                        terminalStatus == RunStatus.SUCCEEDED ? "COMPLETED" : "REMOTE_FAILED",
-                        terminalStatus == RunStatus.FAILED
-                                ? firstMapText(eventDraft.payload(), "message", "error").orElse(null)
-                                : null,
+                        terminalReasonCode,
+                        safeErrorMessage,
                         false,
                         eventDraft.traceId());
                 return;
@@ -2295,13 +2906,21 @@ public class RunApplicationService {
             return;
         }
         if (eventDraft.type() == RunEventType.MESSAGE_PART_UPDATED) {
-            appendLiveDiffFromToolPart(originalRun, workspace, storageMode, eventDraft);
+            appendLiveDiffFromToolPart(originalRun, workspace, storageMode, eventDraft, ownership);
         }
         if (!runEventPersistencePolicy.shouldPersist(eventDraft)) {
-            publishTransient(eventDraft, storageMode);
+            RunEventDraft sanitized = runEventPersistencePolicy.sanitizeForPersistence(eventDraft);
+            if (!runEventAppender.publishTransient(
+                    sanitized, storageMode, ownerLeaseIfPresent(ownership))) {
+                // 兼容手工装配/旧测试构造器；生产 appender 与本服务注入同一个 live bus。
+                runEventLiveBus.publishTransient(sanitized);
+            }
             return;
         }
-        runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft), storageMode);
+        runEventAppender.append(
+                runEventPersistencePolicy.sanitizeForPersistence(eventDraft),
+                storageMode,
+                ownerLeaseIfPresent(ownership));
     }
 
     /**
@@ -2418,11 +3037,11 @@ public class RunApplicationService {
             }
         } catch (RuntimeException exception) {
             LOGGER.debug(
-                    "Run activity state update skipped, runId={}, eventType={}, traceId={}",
+                    "Run activity state update skipped, runId={}, eventType={}, traceId={}, exceptionType={}",
                     draft.runId().value(),
                     draft.type().wireName(),
                     draft.traceId(),
-                    exception);
+                    exception.getClass().getSimpleName());
         }
     }
 
@@ -2433,17 +3052,20 @@ public class RunApplicationService {
             Run originalRun,
             Workspace workspace,
             RunStorageMode storageMode,
-            RunEventDraft draft) {
+            RunEventDraft draft,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         try {
             liveDiffFromToolPart(originalRun, workspace, draft)
                     .ifPresent(diff -> runEventAppender.append(
-                            runEventPersistencePolicy.sanitizeForPersistence(diff), storageMode));
+                            runEventPersistencePolicy.sanitizeForPersistence(diff),
+                            storageMode,
+                            ownerLeaseIfPresent(ownership)));
         } catch (RuntimeException exception) {
             LOGGER.warn(
-                    "Failed to derive live diff from tool part, runId={}, traceId={}",
+                    "Failed to derive live diff from tool part, runId={}, traceId={}, exceptionType={}",
                     originalRun.runId().value(),
                     draft.traceId(),
-                    exception);
+                    exception.getClass().getSimpleName());
             if (storageMode == RunStorageMode.REDIS_SUMMARY) {
                 throw exception;
             }
@@ -2638,6 +3260,16 @@ public class RunApplicationService {
             RunStorageMode storageMode,
             String traceId,
             Throwable error) {
+        failRunFromStream(agentId, run, storageMode, traceId, error, null);
+    }
+
+    private void failRunFromStream(
+            String agentId,
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            Throwable error,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         if (isStreamingTransportError(error)) {
             LOGGER.info(
                     "Delay Run failure for transport error, runId={}, delayMs={}, traceId={}",
@@ -2647,15 +3279,52 @@ public class RunApplicationService {
             Mono.delay(TRANSPORT_ERROR_TERMINAL_GRACE)
                     .publishOn(Schedulers.boundedElastic())
                     .subscribe(
-                            ignored -> failRunFromStreamNow(agentId, run, storageMode, traceId, error),
+                            ignored -> failRunAfterTransportGrace(
+                                    agentId, run, storageMode, traceId, error),
                             delayedError -> LOGGER.warn(
-                                    "Failed to schedule delayed Run stream failure, runId={}, traceId={}",
+                                    "Failed to schedule delayed Run stream failure, runId={}, traceId={}, exceptionType={}",
                                     run.runId().value(),
                                     traceId,
-                                    delayedError));
+                                    delayedError.getClass().getSimpleName()));
             return;
         }
-        failRunFromStreamNow(agentId, run, storageMode, traceId, error);
+        failRunFromStreamNow(agentId, run, storageMode, traceId, error, ownership);
+    }
+
+    /** transport grace 到期后重新竞争 owner；其它 Java 已接管时旧执行者不得落终态。 */
+    private void failRunAfterTransportGrace(
+            String agentId,
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            Throwable error) {
+        if (storageMode != RunStorageMode.REDIS_SUMMARY || ownerLeaseSupervisor == null) {
+            failRunFromStreamNow(agentId, run, storageMode, traceId, error, null);
+            return;
+        }
+        RunOwnerLeaseSupervisor.OwnershipHandle ownership = null;
+        try {
+            RunRuntimeManifest expected = runRuntimeStore.findManifest(run.runId()).orElse(null);
+            if (expected == null || !expected.active()) {
+                return;
+            }
+            ownership = runRuntimeStore
+                    .claimOwnerLeaseIfUnchanged(expected, backendInstanceIdentity.backendProcessId())
+                    .flatMap(ownerLeaseSupervisor::adopt)
+                    .orElse(null);
+            if (ownership == null) {
+                return;
+            }
+            failRunFromStreamNow(agentId, run, storageMode, traceId, error, ownership);
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Delayed Run stream failure deferred to current owner, runId={}, traceId={}, exceptionType={}",
+                    run.runId().value(), traceId, exception.getClass().getSimpleName());
+        } finally {
+            if (ownership != null) {
+                releaseOwnershipBestEffort(ownership, run.runId(), traceId);
+            }
+        }
     }
 
     private void failRunFromStreamNow(
@@ -2663,7 +3332,8 @@ public class RunApplicationService {
             Run run,
             RunStorageMode storageMode,
             String traceId,
-            Throwable error) {
+            Throwable error,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         try {
             if (storageMode == RunStorageMode.REDIS_SUMMARY) {
                 RunRuntimeManifest manifest = runRuntimeStore.findManifest(run.runId()).orElse(null);
@@ -2672,13 +3342,23 @@ public class RunApplicationService {
                 }
                 Instant occurredAt = Instant.now();
                 String safeMessage = safeStreamErrorMessage(error);
+                if (ownership != null) {
+                    ownerLeaseSupervisor.requireOwned(ownership);
+                }
                 append(run.runId(), RunEventType.RUN_FAILED, traceId, occurredAt,
-                        Map.of(
-                                "error", Map.of(
-                                        "name", error.getClass().getSimpleName(),
+                        RunTerminalProjectionOutboxPayload.payload(
+                                Map.of(
+                                        "error", Map.of(
+                                                "name", error.getClass().getSimpleName(),
+                                                "message", safeMessage),
                                         "message", safeMessage),
-                                "message", safeMessage),
-                        RunStorageMode.REDIS_SUMMARY);
+                                "TRANSPORT_ERROR",
+                                "STREAM_ERROR",
+                                safeMessage,
+                                false),
+                        RunStorageMode.REDIS_SUMMARY,
+                        ownership);
+                // fenced terminal append 成功后 manifest 已终态，不再允许其它 owner 接管。
                 runTerminalProjectionService.project(
                         run.runId(),
                         RunStatus.FAILED,
@@ -2705,8 +3385,9 @@ public class RunApplicationService {
                         });
             }
         } catch (RuntimeException exception) {
-            LOGGER.warn("Failed to persist opencode stream failure, runId={}, traceId={}",
-                    run.runId().value(), traceId, exception);
+            LOGGER.warn(
+                    "Failed to persist opencode stream failure, runId={}, traceId={}, exceptionType={}",
+                    run.runId().value(), traceId, exception.getClass().getSimpleName());
         } finally {
             runSessionScopeRouter.finishRun(run.runId());
         }

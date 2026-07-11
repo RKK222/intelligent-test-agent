@@ -463,6 +463,7 @@ class RuntimeControllerTest {
                 .thenReturn(new RunDiffActionResponse("run_1234567890abcdef", "reject", "rejected", 1));
         WebTestClient client = WebTestClient.bindToController(new RunController(runService, diffService, null))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -506,6 +507,7 @@ class RuntimeControllerTest {
                 .thenReturn(Flux.empty());
         WebTestClient client = WebTestClient.bindToController(new RunController(runService, null, eventStreamService))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -534,6 +536,7 @@ class RuntimeControllerTest {
                 .thenReturn(Flux.empty());
         WebTestClient client = WebTestClient.bindToController(new RunController(runService, null, eventStreamService))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -590,6 +593,7 @@ class RuntimeControllerTest {
                         recoveryService,
                         new RunEventSseMapper()))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         List<RunEventSsePayload> payloads = client.get()
@@ -623,6 +627,7 @@ class RuntimeControllerTest {
                         recoveryService,
                         new RunEventSseMapper()))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -651,6 +656,7 @@ class RuntimeControllerTest {
                         new RunEventSseMapper()))
                 .controllerAdvice(new GlobalExceptionHandler())
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -711,6 +717,7 @@ class RuntimeControllerTest {
                         recoveryService,
                         new RunEventSseMapper()))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -750,6 +757,7 @@ class RuntimeControllerTest {
                         recoveryService,
                         new RunEventSseMapper()))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()

@@ -103,6 +103,7 @@
         <include refid="RunColumns"/>
         from runs
         where status in ('PENDING', 'RUNNING', 'CANCELLING')
+          and storage_mode = 'LEGACY_FULL'
           and updated_at &lt; #{updatedBefore}
         order by updated_at asc, id asc
         limit #{limit}

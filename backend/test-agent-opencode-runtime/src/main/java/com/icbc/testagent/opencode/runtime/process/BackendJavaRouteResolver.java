@@ -93,6 +93,20 @@ public class BackendJavaRouteResolver {
     }
 
     /**
+     * 返回当前 Java 的稳定进程身份，供 Run owner lease 区分同服务器上的多个 Java。
+     */
+    public BackendProcessId currentBackendProcessId() {
+        return currentBackendProcessId;
+    }
+
+    /**
+     * 返回当前 Java 的稳定进程身份字符串。
+     */
+    public String currentBackendProcessIdValue() {
+        return currentBackendProcessId.value();
+    }
+
+    /**
      * 判断目标服务器是否就是当前 Java。
      */
     public boolean isCurrent(LinuxServerId linuxServerId) {

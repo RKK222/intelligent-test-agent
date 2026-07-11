@@ -47,7 +47,7 @@
 - `application.yml`：`test-agent.scheduler.enabled` 默认 `false`，可通过 `TEST_AGENT_SCHEDULER_ENABLED` 显式启用。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
 - 用户进程运行管理和 manager 控制面在线状态强依赖 Redis；多服务器应用版本工作区副本实时同步也需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。
-- Run 运行数据面同样强依赖 Redis；`REDIS_SUMMARY` 的 manifest/input/Stream/snapshot/scope/active 索引不提供 PostgreSQL 或 JVM 内存降级。当前 Run 创建仍固定为 `LEGACY_FULL`，`test-agent.redis-summary.enabled=false`、rollout `0` 是无原文 Run 锚点和终态摘要链路发布前的部署边界。Redis `noeviction`、AOF `everysec`、ACL/TLS 和容量告警要求见 `docs/deployment/backend.md`。
+- Run 运行数据面同样强依赖 Redis；`REDIS_SUMMARY` 的 manifest/input/Stream/snapshot/scope/active 索引不提供 PostgreSQL 或 JVM 内存降级。默认 `test-agent.redis-summary.enabled=false`、rollout `0`，生产完成 Redis `noeviction`、AOF `everysec`、ACL/TLS、容量告警与故障演练后，可按 userId 稳定哈希逐步提高新 Run 比例；活动 Run 不切换模式，回滚只把后续新 Run 比例调回 `0`。部署要求见 `docs/deployment/backend.md`。
 - `com.h2database:h2` 仅以 test scope 存在，用于 Docker 不可用时的无持久化启动冒烟；正式 local profile 仍以 PostgreSQL/Flyway 为准。
 
 ## 测试覆盖
