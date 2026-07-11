@@ -67,16 +67,29 @@ describe("OpenCode 1.17.7 Part 契约", () => {
   });
 
   it("为适用交互提供确定 locator", () => {
-    expect(PART_SPECS.find((item) => item.kind === "text")?.ui.current.interactionLocator).toBe("button[aria-label='复制']");
+    expect(PART_SPECS.find((item) => item.kind === "text")?.ui.current.interactionLocator).toBe(":scope button[aria-label='复制']");
     for (const spec of PART_SPECS.filter((item) => item.ui.current.interaction !== "none")) {
       expect(spec.ui.current.interactionLocator).toBeTruthy();
+      expect(spec.ui.current.interactionLocator).toMatch(/^:scope(?:\b|\[|\s)/);
       expect(spec.ui.history.interactionLocator).toBe(spec.ui.current.interactionLocator);
     }
   });
 
+  it.each(PART_KINDS)("%s 主 locator 同时绑定目标 partId 与 type", (kind) => {
+    const primary = PART_SPECS.find((item) => item.kind === kind)!.ui.current.locators[0];
+    expect(primary).toContain("[data-part-id='{partId}']");
+    expect(primary).toContain(`[data-part-type='${kind}']`);
+  });
+
+  it.each(["text", "reasoning", "file", "tool"] as const)("%s locator/交互不跨目标容器", (kind) => {
+    const contract = PART_SPECS.find((item) => item.kind === kind)!.ui.current;
+    expect(contract.locators).toHaveLength(1);
+    if (contract.interaction !== "none") expect(contract.interactionLocator).toMatch(/^:scope(?:\b|\[|\s)/);
+  });
+
   it("subtask 跳转仅在 child mapping 存在时必测", () => {
     const contract = PART_SPECS.find((item) => item.kind === "subtask")!.ui.current;
-    expect(contract.locators).toEqual(["[data-part-type='subtask'][data-part-id='{partId}']"]);
+    expect(contract.locators).toEqual(["[data-part-id='{partId}'][data-part-type='subtask']"]);
     expect(contract.locators).not.toContain(".oc-subagent-card");
     expect(interactionExpectation(contract, { targetPartId: "part_1", childMappingPartId: "part_1" })).toBe("required");
     expect(interactionExpectation(contract, { targetPartId: "part_1", childMappingPartId: "part_other" })).toBe("n/a");
@@ -97,7 +110,7 @@ describe("OpenCode 1.17.7 Part 契约", () => {
 
   it("step-start 明确要求低噪可见标记", () => {
     const spec = PART_SPECS.find((item) => item.kind === "step-start")!;
-    expect(spec.ui.current.locators).toContain(".oc-step-start-marker[data-part-id='{partId}']");
+    expect(spec.ui.current.locators).toContain("[data-part-id='{partId}'][data-part-type='step-start']");
     expect(spec.ui.current.semantic).toContain("低噪");
   });
 

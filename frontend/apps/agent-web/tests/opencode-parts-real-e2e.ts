@@ -43,19 +43,23 @@ const common = ["id", "sessionID", "messageID", "type"] as const;
  * 元素必须可见；`.oc-unknown-part` 即使存在于 DOM 也不能算通过。
  */
 export const PART_SPECS: readonly PartSpec[] = [
-  spec("text", ["text"], ["text", "synthetic", "ignored", "time.start", "time.end", "metadata"], [".oc-text-part"], "最终文本可见", "copy", "always", "button[aria-label='复制']"),
-  spec("subtask", ["prompt", "description", "agent"], ["prompt", "description", "agent", "model.providerID", "model.modelID", "command"], ["[data-part-type='subtask'][data-part-id='{partId}']"], "目标原生子任务的 description 与 agent 可见", "subagent-navigation", "child-mapping", "[data-part-type='subtask'][data-part-id='{partId}'][data-child-session-id]"),
-  spec("reasoning", ["text", "time.start"], ["text", "metadata", "time.start", "time.end"], [".oc-reasoning-part"], "思考状态可展开且正文可见", "expand", "always", ".oc-reasoning-part .oc-disclosure__trigger"),
-  spec("file", ["mime", "url"], ["mime", "filename", "url", "source.type", "source.text.value", "source.text.start", "source.text.end", "source.path", "source.range.start.line", "source.range.start.character", "source.range.end.line", "source.range.end.character", "source.name", "source.kind", "source.clientName", "source.uri"], [".oc-file-part .oc-file-path", ".oc-file-part"], "文件名或路径可见", "none", "never"),
-  spec("tool", ["callID", "tool", "state.status", "state.input"], ["callID", "tool", "state.status", "state.input", "state.raw", "state.title", "state.output", "state.error", "state.metadata", "state.time.start", "state.time.end", "state.time.compacted", "state.attachments", "metadata"], ["[data-testid='oc-tool-group']", ".oc-tool"], "工具名称、状态与输出可展开", "expand", "always", "[data-testid='oc-tool-group'] .oc-tool-group__trigger"),
-  spec("step-start", [], ["snapshot"], [".oc-step-start-marker[data-part-id='{partId}']", "[data-part-type='step-start'][data-part-id='{partId}']"], "步骤边界以低噪可见标记呈现", "none", "never"),
-  spec("step-finish", ["reason", "cost", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], ["reason", "snapshot", "cost", "tokens.total", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], [".oc-step-finish-marker[data-part-id='{partId}']", "[data-part-type='step-finish'][data-part-id='{partId}']"], "完成原因与 token 摘要可见", "none", "never"),
-  spec("snapshot", ["snapshot"], ["snapshot"], [".oc-snapshot-part[data-part-id='{partId}']", "[data-part-type='snapshot'][data-part-id='{partId}']"], "snapshot 标记可见", "none", "never"),
-  spec("patch", ["hash", "files"], ["hash", "files"], [".oc-patch-part[data-part-id='{partId}']", "[data-part-type='patch'][data-part-id='{partId}']"], "hash 与文件摘要可见", "open-diff", "diff-available", "[data-part-type='patch'][data-part-id='{partId}'] button"),
-  spec("agent", ["name"], ["name", "source.value", "source.start", "source.end"], [".oc-agent-part[data-part-id='{partId}']", "[data-part-type='agent'][data-part-id='{partId}']"], "Agent 名称可见", "none", "never"),
-  spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], ["attempt", "error.name", "error.data.message", "error.data.statusCode", "error.data.isRetryable", "error.data.responseHeaders", "error.data.responseBody", "error.data.metadata", "time.created"], ["[data-part-type='retry'][data-part-id='{partId}']"], "目标原生 retry 的次数与错误可见", "none", "never"),
-  spec("compaction", ["auto"], ["auto", "overflow", "tail_start_id"], [".oc-compaction-part[data-part-id='{partId}']", "[data-part-type='compaction'][data-part-id='{partId}']"], "上下文压缩标记可见", "none", "never")
+  spec("text", ["text"], ["text", "synthetic", "ignored", "time.start", "time.end", "metadata"], [partLocator("text")], "最终文本可见", "copy", "always", ":scope button[aria-label='复制']"),
+  spec("subtask", ["prompt", "description", "agent"], ["prompt", "description", "agent", "model.providerID", "model.modelID", "command"], [partLocator("subtask")], "目标原生子任务的 description 与 agent 可见", "subagent-navigation", "child-mapping", ":scope [data-child-session-id]"),
+  spec("reasoning", ["text", "time.start"], ["text", "metadata", "time.start", "time.end"], [partLocator("reasoning")], "思考状态可展开且正文可见", "expand", "always", ":scope .oc-disclosure__trigger"),
+  spec("file", ["mime", "url"], ["mime", "filename", "url", "source.type", "source.text.value", "source.text.start", "source.text.end", "source.path", "source.range.start.line", "source.range.start.character", "source.range.end.line", "source.range.end.character", "source.name", "source.kind", "source.clientName", "source.uri"], [partLocator("file")], "文件名或路径可见", "none", "never"),
+  spec("tool", ["callID", "tool", "state.status", "state.input"], ["callID", "tool", "state.status", "state.input", "state.raw", "state.title", "state.output", "state.error", "state.metadata", "state.time.start", "state.time.end", "state.time.compacted", "state.attachments", "metadata"], [partLocator("tool")], "工具名称、状态与输出可展开", "expand", "always", ":scope .oc-tool-group__trigger, :scope .oc-disclosure__trigger"),
+  spec("step-start", [], ["snapshot"], [partLocator("step-start")], "步骤边界以低噪可见标记呈现", "none", "never"),
+  spec("step-finish", ["reason", "cost", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], ["reason", "snapshot", "cost", "tokens.total", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], [partLocator("step-finish")], "完成原因与 token 摘要可见", "none", "never"),
+  spec("snapshot", ["snapshot"], ["snapshot"], [partLocator("snapshot")], "snapshot 标记可见", "none", "never"),
+  spec("patch", ["hash", "files"], ["hash", "files"], [partLocator("patch")], "hash 与文件摘要可见", "open-diff", "diff-available", ":scope button"),
+  spec("agent", ["name"], ["name", "source.value", "source.start", "source.end"], [partLocator("agent")], "Agent 名称可见", "none", "never"),
+  spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], ["attempt", "error.name", "error.data.message", "error.data.statusCode", "error.data.isRetryable", "error.data.responseHeaders", "error.data.responseBody", "error.data.metadata", "time.created"], [partLocator("retry")], "目标原生 retry 的次数与错误可见", "none", "never"),
+  spec("compaction", ["auto"], ["auto", "overflow", "tail_start_id"], [partLocator("compaction")], "上下文压缩标记可见", "none", "never")
 ];
+
+function partLocator(kind: PartKind): string {
+  return `[data-part-id='{partId}'][data-part-type='${kind}']`;
+}
 
 function spec(
   kind: PartKind,
