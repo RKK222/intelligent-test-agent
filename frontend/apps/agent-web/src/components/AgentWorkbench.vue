@@ -115,6 +115,7 @@ import {
   resolveRetryDeadline,
   retryCountdownSeconds,
   retryExpirationDecision,
+  projectRootInteractionSession,
   runEventMatchesRun,
   runEventProjection,
   runtimeResources,
@@ -3456,9 +3457,10 @@ function handleRetryRun() {
 }
 
 function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
-  logs.value = [...logs.value.slice(-200), `[${event.seq}] ${event.type}`];
-  dispatchChat({ type: "event", event });
-  const projection = runEventProjection(event);
+  const projectedEvent = projectRootInteractionSession(event, subscribedSessionId);
+  logs.value = [...logs.value.slice(-200), `[${projectedEvent.seq}] ${projectedEvent.type}`];
+  dispatchChat({ type: "event", event: projectedEvent });
+  const projection = runEventProjection(projectedEvent);
   if (projection.reset) {
     // reducer 已经原子完成“清空 + 快照重放”；Workbench 还需清掉独立维护的 Diff/工具跟随状态，
     // 再按相同顺序应用快照事件的页面副作用。恢复快照不重复触发桌面通知。
@@ -3472,7 +3474,7 @@ function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
     }
     return;
   }
-  applyRunEventWorkbenchProjection(event, true, subscribedSessionId);
+  applyRunEventWorkbenchProjection(projectedEvent, true, subscribedSessionId);
 }
 
 /** 将单条业务事件投影到 reducer 之外的 Workbench 状态。 */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MessagePart, PromptPart, Run, RunDiffFile, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
+import type { MessagePart, PromptPart, Run, RunDiffFile, RunEvent, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import * as workbenchUtils from "../src/components/workbench-utils";
 import {
   assistantSummaryMessageId,
@@ -29,6 +29,7 @@ import {
   retryExpirationDecision,
   sessionTitleEventMatchesCurrentSession,
   platformSessionTitleFromSynchronizedEventPayload,
+  projectRootInteractionSession,
   runEventProjection,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
@@ -96,6 +97,45 @@ describe("sessionTitleEventMatchesCurrentSession", () => {
     expect(sessionTitleEventMatchesCurrentSession("ses_current", "ses_current")).toBe(true);
     expect(sessionTitleEventMatchesCurrentSession("ses_previous", "ses_current")).toBe(false);
     expect(sessionTitleEventMatchesCurrentSession("ses_current", undefined)).toBe(false);
+  });
+});
+
+describe("projectRootInteractionSession", () => {
+  it("maps root question and permission events from remote session to the subscribed platform session", () => {
+    const event = {
+      eventId: "evt_question",
+      runId: "run_1",
+      seq: 7,
+      type: "question.asked",
+      traceId: "trace_1",
+      occurredAt: "2026-07-11T08:40:50Z",
+      payload: {
+        sessionId: "ses_remote_root",
+        id: "que_1",
+        questions: [{ question: "请选择 A 或 B" }]
+      }
+    } as RunEvent;
+
+    expect(projectRootInteractionSession(event, "ses_platform_root")).toMatchObject({
+      payload: {
+        sessionId: "ses_platform_root",
+        remoteSessionId: "ses_remote_root"
+      }
+    });
+  });
+
+  it("does not remap child session interaction events", () => {
+    const event = {
+      eventId: "evt_child_question",
+      runId: "run_1",
+      seq: 8,
+      type: "question.asked",
+      traceId: "trace_1",
+      occurredAt: "2026-07-11T08:40:50Z",
+      payload: { sessionId: "ses_remote_child", isChildSession: true }
+    } as RunEvent;
+
+    expect(projectRootInteractionSession(event, "ses_platform_root")).toBe(event);
   });
 });
 

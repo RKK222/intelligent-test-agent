@@ -1038,6 +1038,43 @@ test("pet side-question keeps a failure editable and starts a fresh run on retry
   ]);
 });
 
+test("direct run projects remote question and permission to the platform session and replies", async ({ page }) => {
+  const permissionReplies: Array<Record<string, unknown>> = [];
+  const questionReplies: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    permissionReplies,
+    questionReplies,
+    runEvents: [
+      event(1, "permission.asked", {
+        requestId: "perm_1",
+        sessionId: "ses_remote_root",
+        title: "执行命令",
+        description: "是否允许只读检查？"
+      }),
+      event(2, "question.asked", {
+        requestId: "ques_1",
+        sessionId: "ses_remote_root",
+        questions: [{ question: "直接对话：请选择 A 或 B", options: [{ label: "A" }, { label: "B" }] }]
+      })
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("直接验证交互映射");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  const dock = page.locator(".figma-chat-question-dock");
+  await expect(dock).toContainText("执行命令");
+  await expect(dock).toContainText("直接对话：请选择 A 或 B");
+  await page.getByRole("button", { name: "一次" }).click();
+  await dock.getByRole("button", { name: "A", exact: true }).click();
+  await dock.getByRole("button", { name: "提交", exact: true }).click();
+
+  await expect.poll(() => permissionReplies).toEqual([{ decision: "once" }]);
+  await expect.poll(() => questionReplies).toEqual([{ answers: [["A"]] }]);
+});
+
 test("a title-pending run keeps its SSE open until the synchronized native title arrives", async ({ page }) => {
   await page.addInitScript(() => {
     type StreamProbe = { runId: string; closed: boolean };
@@ -1674,6 +1711,7 @@ test("history run projection keeps sending locked until stale details cannot ove
 test("switching history restores a pending native question dock instead of only its tool JSON", async ({ page }) => {
   const questionReplies: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
     questionReplies,
     sessions: [{
       sessionId: "ses_history_question",
@@ -1727,6 +1765,83 @@ test("switching history restores a pending native question dock instead of only 
   await page.getByRole("button", { name: "接口测试" }).click();
   await page.getByRole("button", { name: "提交" }).click();
   await expect.poll(() => questionReplies).toEqual([{ answers: [["接口测试"]] }]);
+});
+
+test("switching to a running history maps its remote question event and allows reply", async ({ page }) => {
+  const questionReplies: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    questionReplies,
+    sessions: [{
+      sessionId: "ses_history_running",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "运行中的历史提问",
+      status: "ACTIVE",
+      createdAt: "2026-07-11T08:00:00Z",
+      updatedAt: "2026-07-11T08:01:00Z"
+    }],
+    sessionMessagesBySessionId: {
+      ses_history_running: [{
+        messageId: "msg_history_running",
+        sessionId: "ses_history_running",
+        runId: "run_history",
+        role: "ASSISTANT",
+        content: "正在等待用户选择",
+        createdAt: "2026-07-11T08:01:00Z",
+        parts: []
+      }]
+    },
+    sessionTreeMessagesBySessionId: {
+      ses_history_running: {
+        sessionId: "ses_history_running",
+        sessions: [{ rootSessionId: "ses_history_running", sessionId: "ses_history_running", childSession: false }],
+        messagesBySessionId: {},
+        childSessionIdByTaskPartId: {},
+        events: []
+      }
+    },
+    sessionQuestionsById: { ses_history_running: [] },
+    runtimeStateSummary: {
+      runningCount: 1,
+      questionCount: 1,
+      sessions: [{
+        sessionId: "ses_history_running",
+        runId: "run_history",
+        runStatus: "RUNNING",
+        attention: "QUESTION",
+        attentionEventId: "evt_remote_question",
+        updatedAt: "2026-07-11T08:01:00Z"
+      }],
+      generatedAt: "2026-07-11T08:01:00Z"
+    },
+    historyRun: {
+      runId: "run_history",
+      sessionId: "ses_history_running",
+      workspaceId: "wrk_1234567890abcdef",
+      status: "RUNNING",
+      createdAt: "2026-07-11T08:00:00Z",
+      updatedAt: "2026-07-11T08:01:00Z"
+    },
+    runEventsByRunId: {
+      run_history: [{
+        ...event(1, "question.asked", {
+          requestId: "que_history_running",
+          sessionId: "ses_remote_history",
+          questions: [{ question: "历史运行中：选择继续方式", options: [{ label: "继续" }, { label: "停止" }] }]
+        }),
+        runId: "run_history"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "运行中的历史提问" }).click();
+
+  const dock = page.locator(".figma-chat-question-dock");
+  await expect(dock).toContainText("历史运行中：选择继续方式");
+  await dock.getByRole("button", { name: "继续", exact: true }).click();
+  await dock.getByRole("button", { name: "提交", exact: true }).click();
+  await expect.poll(() => questionReplies).toEqual([{ answers: [["继续"]] }]);
 });
 
 test("switching history resumes the runtime-state run without active-run lookup", async ({ page }) => {

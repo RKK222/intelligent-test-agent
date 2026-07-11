@@ -90,6 +90,37 @@ export function runEventProjection(event: RunEvent): { reset: boolean; events: R
   return { reset: true, events: snapshotEventsFromRunReset(event) };
 }
 
+/**
+ * 根 Run 的交互事件携带 OpenCode remote sessionId，而对话面板按平台 Session ID 分组。
+ * 已知当前订阅对应的平台 Session 时，在进入 reducer 前完成映射；子 Agent 事件保留 remote ID，
+ * 使子时间线仍只展示属于自己的 permission/question。
+ */
+export function projectRootInteractionSession(event: RunEvent, platformSessionId?: string): RunEvent {
+  if (
+    (event.type !== "permission.asked" && event.type !== "question.asked")
+    || !platformSessionId
+    || event.payload.isChildSession === true
+  ) {
+    return event;
+  }
+  const remoteSessionId = typeof event.payload.sessionId === "string"
+    ? event.payload.sessionId
+    : typeof event.payload.sessionID === "string"
+      ? event.payload.sessionID
+      : undefined;
+  if (!remoteSessionId || remoteSessionId === platformSessionId) {
+    return event;
+  }
+  return {
+    ...event,
+    payload: {
+      ...event.payload,
+      sessionId: platformSessionId,
+      remoteSessionId
+    }
+  };
+}
+
 /** 新模式在 run.created 中下发稳定反馈 ID；只接受平台 msg UUID 形状，避免误用远端 message id。 */
 export function assistantSummaryMessageId(payload: Record<string, unknown>): string | undefined {
   const candidate = payload.assistantSummaryMessageId;

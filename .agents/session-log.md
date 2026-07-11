@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-11 - 修复根会话交互事件的 remote Session 投影
+
+- Why:
+  - 真实 OpenCode `question.asked` 已通过认证 SSE 到达，但 payload 的 `sessionId` 是 remote root session；面板却用平台 Session ID 过滤 Question/Permission，导致当前 Run 和运行中的历史会话都只留下工具行/原始事件，无法展示可提交的交互 dock。
+- What:
+  - root `question.asked` / `permission.asked` 在进入聊天 reducer 前将 remote sessionId 映射为订阅时的平台 Session ID，并保留 `remoteSessionId`；child session 不改写，继续按自身时间线展示。新增浏览器 fixture 覆盖直接 Run 的 Permission+Question 提交，以及运行中的历史会话收到 remote Question 后继续提交。
+- How:
+  - 复用 `RunEvent` reducer、既有 `currentSessionId` 过滤和现有 question/permission reply API；只在已知 root 订阅平台 Session、且 `isChildSession !== true` 时映射，不新增 API、事件、数据库、迁移或环境配置。
+- Result:
+  - 定向 Vitest 覆盖 RunEvent、Question/Permission、Todo/Part、子 Agent 历史时间线和旁路问答：371 passed、1 skipped；Playwright 直接 Question/Permission、历史 pending Question、运行中历史切回、旁路重连/重试：6/6 通过。test 服务已按 `.env.test` / `test` profile 重启，backend liveness/readiness 为 UP、frontend 3000 为 200、manager 已连接并通过公共启动服务恢复用户进程。仍有既有 `DirectoryRows.vue` 嵌套 button Vite warning，未纳入本次范围。
+
 ### 2026-07-11 - 宠物旁路问答改用 build agent 以缩短回答等待
 
 - Why:
