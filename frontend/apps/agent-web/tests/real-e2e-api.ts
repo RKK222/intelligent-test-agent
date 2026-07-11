@@ -181,26 +181,47 @@ export function createCleanupScope(): CleanupScope {
 }
 
 /**
- * 按 tree root、tree 内原生 RunEvent、平台消息顺序恢复远端 Session ID。
+ * 按 Session tree（含其返回的原生事件快照）和平台消息两个独立来源恢复远端 Session ID。
  * ID 一经观察便先交给 cleanup owner，再执行其余投影校验，确保后续异常不丢失原生删除责任。
  */
 export async function resolveRemoteSessionIdFromSources(options: RemoteSessionSourceOptions): Promise<string> {
-  const tree = await options.loadTree();
-  const treeId = findTreeRootSessionId(tree) ?? findNativeSessionId(tree);
-  if (treeId) {
-    options.onObserved?.(treeId);
-    await options.validateTree?.(tree);
-    return treeId;
+  const failures: unknown[] = [];
+  let tree: unknown;
+  let treeLoaded = false;
+  try {
+    tree = await options.loadTree();
+    treeLoaded = true;
+  } catch (error) {
+    failures.push(error);
   }
-  await options.validateTree?.(tree);
+  if (treeLoaded) {
+    const treeId = findTreeRootSessionId(tree) ?? findNativeSessionId(tree);
+    if (treeId) {
+      options.onObserved?.(treeId);
+      // 已登记 cleanup ownership 后的投影失败必须原样暴露，不能被另一来源掩盖。
+      await options.validateTree?.(tree);
+      return treeId;
+    }
+    try {
+      await options.validateTree?.(tree);
+      failures.push(new Error("session tree contained no remote OpenCode session id"));
+    } catch (error) {
+      failures.push(error);
+    }
+  }
 
-  const messages = await options.loadPlatformMessages();
-  const messageId = findNativeSessionId(messages);
-  if (messageId) {
-    options.onObserved?.(messageId);
-    return messageId;
+  try {
+    const messages = await options.loadPlatformMessages();
+    const messageId = findNativeSessionId(messages);
+    if (messageId) {
+      options.onObserved?.(messageId);
+      return messageId;
+    }
+    failures.push(new Error("platform messages contained no remote OpenCode session id"));
+  } catch (error) {
+    failures.push(error);
   }
-  throw new Error("remote OpenCode session id was not found in session tree, RunEvent or platform messages");
+  throw new AggregateError(failures, "remote OpenCode session id was not found; session tree and platform messages both failed");
 }
 
 /**

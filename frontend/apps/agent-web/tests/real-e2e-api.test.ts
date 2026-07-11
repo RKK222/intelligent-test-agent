@@ -231,7 +231,7 @@ describe("real E2E API client", () => {
     expect(nativeDelete).toHaveBeenCalledWith("ses_tree");
   });
 
-  it("falls back to RunEvent and platform message sessionID fields", async () => {
+  it("finds sessionID in tree-carried native events and platform messages", async () => {
     const observed: string[] = [];
     await expect(
       resolveRemoteSessionIdFromSources({
@@ -248,6 +248,39 @@ describe("real E2E API client", () => {
         loadPlatformMessages: async () => ({ items: [{ parts: [{ type: "text", sessionID: "ses_message" }] }] })
       })
     ).resolves.toBe("ses_message");
+  });
+
+  it("continues with platform messages when the session tree request fails and still registers cleanup ownership", async () => {
+    const observed: string[] = [];
+    await expect(
+      resolveRemoteSessionIdFromSources({
+        loadTree: async () => {
+          throw new Error("tree HTTP 503");
+        },
+        loadPlatformMessages: async () => ({ items: [{ parts: [{ sessionID: "ses_message_after_tree_failure" }] }] }),
+        onObserved: (remoteId) => observed.push(remoteId)
+      })
+    ).resolves.toBe("ses_message_after_tree_failure");
+    expect(observed).toEqual(["ses_message_after_tree_failure"]);
+  });
+
+  it("aggregates diagnostics when both remote session sources fail", async () => {
+    const error = await captureError(() =>
+      resolveRemoteSessionIdFromSources({
+        loadTree: async () => {
+          throw new Error("tree HTTP 503");
+        },
+        loadPlatformMessages: async () => {
+          throw new Error("messages HTTP 502");
+        }
+      })
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error.message).toContain("session tree and platform messages");
+    expect((error as AggregateError).errors.map((failure) => String(failure))).toEqual([
+      "Error: tree HTTP 503",
+      "Error: messages HTTP 502"
+    ]);
   });
 
   it("resolves only the matching manager state and owned SQLite database", async () => {
