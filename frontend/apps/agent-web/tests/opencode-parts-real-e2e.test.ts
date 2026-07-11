@@ -31,6 +31,7 @@ import os from "node:os";
 import path from "node:path";
 
 const base = { id: "part_1", partID: "part_1", partId: "part_1", sessionID: "ses_1", messageID: "msg_1" };
+const ownedNativeSessionId = "ses_00000000000100000000000000";
 const ids = ["id", "sessionID", "messageID", "type"];
 const expectedProjectionFields = {
   text: [...ids, "text", "synthetic", "ignored", "time.start", "time.end", "metadata"],
@@ -349,29 +350,31 @@ describe("OpenCode 原生 SQLite fixture", () => {
     const fixture = buildNativePartFixture({
       kind,
       marker: "e2e_part_fixture_abc",
-      remoteSessionId: "ses_e2e_part_fixture_abc",
-      projectId: "project_fixture",
+      remoteSessionId: ownedNativeSessionId,
       directory: "/owned/e2e_part_fixture_abc",
       title: "e2e-part-fixture-abc",
       now: 1_700_000_000_000
     });
-    expect(fixture.manifest).toMatchObject({ marker: "e2e_part_fixture_abc", kind, remoteSessionId: "ses_e2e_part_fixture_abc" });
-    expect(fixture.message.id).toMatch(/^msg_e2e_part_fixture_abc_/);
-    expect(fixture.part.id).toMatch(/^prt_e2e_part_fixture_abc_/);
+    expect(fixture.manifest).toMatchObject({ marker: "e2e_part_fixture_abc", kind, remoteSessionId: ownedNativeSessionId });
+    expect(fixture.parentMessage.id).toMatch(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+    expect(fixture.message.id).toMatch(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+    expect(fixture.part.id).toMatch(/^prt_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+    expect(fixture.parentMessage.id < fixture.message.id).toBe(true);
     expect(selectPartFields(kind, fixture.part).type).toBe(kind);
     expect(fixture.message.data).toMatchObject({ role: "assistant", parentID: expect.stringMatching(/^msg_/), finish: "stop" });
   });
 
   it("生成带busy timeout、外键与立即事务的schema匹配SQL", () => {
     const fixture = buildNativePartFixture({
-      kind: "retry", marker: "e2e_part_fixture_sql", remoteSessionId: "ses_e2e_part_fixture_sql",
-      projectId: "project_fixture", directory: "/owned/e2e_part_fixture_sql", title: "e2e-part-fixture-sql", now: 1
+      kind: "retry", marker: "e2e_part_fixture_sql", remoteSessionId: ownedNativeSessionId,
+      directory: "/owned/e2e_part_fixture_sql", title: "e2e-part-fixture-sql", now: 1
     });
     const sql = buildNativeFixtureSql(fixture);
     expect(sql).toContain(".timeout 5000");
     expect(sql).toContain("PRAGMA foreign_keys=ON");
     expect(sql).toContain("BEGIN IMMEDIATE");
-    expect(sql).toContain("INSERT INTO session");
+    expect(sql).not.toContain("INSERT INTO session");
+    expect(sql).toContain("fixture_session_guard");
     expect(sql).toContain("INSERT INTO message");
     expect(sql).toContain("INSERT INTO part");
     expect(sql.trimEnd().endsWith("COMMIT;")).toBe(true);
@@ -379,7 +382,7 @@ describe("OpenCode 原生 SQLite fixture", () => {
 
   it.each(["bad", "e2e_part_other"])("拒绝不属于本轮manifest的marker %s", (marker) => {
     expect(() => buildNativePartFixture({
-      kind: "text", marker, remoteSessionId: "ses_e2e_part_fixture_safe", projectId: "project_fixture",
+      kind: "text", marker, remoteSessionId: ownedNativeSessionId,
       directory: "/owned/e2e_part_fixture_safe", title: "e2e-part-fixture-safe", now: 1
     })).toThrow(/marker|manifest/);
   });
@@ -392,8 +395,8 @@ describe("OpenCode 原生 SQLite fixture", () => {
     const clearManifest = vi.fn().mockResolvedValue(undefined);
     const controller = createNativeFixtureController({ executeSql, probe, remove, persistManifest, clearManifest, sleep: async () => undefined });
     const fixture = buildNativePartFixture({
-      kind: "compaction", marker: "e2e_part_fixture_recovery", remoteSessionId: "ses_e2e_part_fixture_recovery",
-      projectId: "project_fixture", directory: "/owned/e2e_part_fixture_recovery", title: "e2e-part-fixture-recovery", now: 1
+      kind: "compaction", marker: "e2e_part_fixture_recovery", remoteSessionId: ownedNativeSessionId,
+      directory: "/owned/e2e_part_fixture_recovery", title: "e2e-part-fixture-recovery", now: 1
     });
     const owned = await controller.insert(fixture);
     expect(executeSql).toHaveBeenCalledOnce();
@@ -410,8 +413,8 @@ describe("OpenCode 原生 SQLite fixture", () => {
   it("probe失败时自动清理并汇总原始错误", async () => {
     const remove = vi.fn().mockResolvedValue(undefined);
     const fixture = buildNativePartFixture({
-      kind: "text", marker: "e2e_part_fixture_probe", remoteSessionId: "ses_e2e_part_fixture_probe",
-      projectId: "project_fixture", directory: "/owned/e2e_part_fixture_probe", title: "e2e-part-fixture-probe", now: 1
+      kind: "text", marker: "e2e_part_fixture_probe", remoteSessionId: ownedNativeSessionId,
+      directory: "/owned/e2e_part_fixture_probe", title: "e2e-part-fixture-probe", now: 1
     });
     const controller = createNativeFixtureController({
       executeSql: vi.fn().mockResolvedValue(undefined), probe: vi.fn().mockResolvedValue(false), remove,
@@ -434,19 +437,20 @@ describe("OpenCode 原生 SQLite fixture", () => {
       "CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL, FOREIGN KEY(session_id) REFERENCES session(id) ON DELETE CASCADE);",
       "CREATE TABLE part (id text PRIMARY KEY, message_id text NOT NULL, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL, FOREIGN KEY(message_id) REFERENCES message(id) ON DELETE CASCADE);",
       "INSERT INTO project(id) VALUES ('project_fixture');",
+      `INSERT INTO session(id,project_id,slug,directory,title,version,time_created,time_updated) VALUES ('${ownedNativeSessionId}','project_fixture','owned','/owned/e2e_part_fixture_rollback','e2e-part-fixture-rollback','1.17.7',1,1);`,
       "CREATE TRIGGER reject_fixture_part BEFORE INSERT ON part BEGIN SELECT RAISE(ABORT, 'fixture rejection'); END;"
     ].join("\n");
     await exec("sqlite3", [database, schema]);
     const trigger = await exec("sqlite3", [database, "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name='reject_fixture_part';"]);
     expect(trigger.stdout.trim()).toBe("1");
     const fixture = buildNativePartFixture({
-      kind: "tool", marker: "e2e_part_fixture_rollback", remoteSessionId: "ses_e2e_part_fixture_rollback",
-      projectId: "project_fixture", directory: "/owned/e2e_part_fixture_rollback", title: "e2e-part-fixture-rollback", now: 1
+      kind: "tool", marker: "e2e_part_fixture_rollback", remoteSessionId: ownedNativeSessionId,
+      directory: "/owned/e2e_part_fixture_rollback", title: "e2e-part-fixture-rollback", now: 1
     });
     try {
       await expect(executeNativeFixtureSql(database, fixture)).rejects.toThrow();
       const { stdout } = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
-      expect(stdout.trim()).toBe("0|0|0");
+      expect(stdout.trim()).toBe("1|0|0");
       const cleanupSql = buildNativeFixtureCleanupSql(fixture.manifest);
       expect(cleanupSql).toContain(`id='${fixture.manifest.remoteSessionId}'`);
       expect(cleanupSql).toContain(`title='${fixture.manifest.title}'`);
@@ -454,10 +458,27 @@ describe("OpenCode 原生 SQLite fixture", () => {
       await exec("sqlite3", [database, "DROP TRIGGER reject_fixture_part;"]);
       await executeNativeFixtureSql(database, fixture);
       const inserted = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
-      expect(inserted.stdout.trim()).toBe("1|1|1");
-      await executeNativeFixtureCleanupSql(database, fixture.manifest);
+      expect(inserted.stdout.trim()).toBe("1|2|1");
+      // 模拟写入后进程崩溃：manifest 保留；若 Session 所有权谓词被篡改，恢复必须失败且不能清 manifest。
+      const clearManifest = vi.fn().mockResolvedValue(undefined);
+      const recovery = createNativeFixtureController({
+        executeSql: vi.fn(), probe: vi.fn(), remove: (manifest) => executeNativeFixtureCleanupSql(database, manifest),
+        persistManifest: vi.fn(), clearManifest
+      });
+      await exec("sqlite3", [database, `UPDATE session SET title='predicate-mismatch' WHERE id='${fixture.manifest.remoteSessionId}';`]);
+      await expect(recovery.recover(fixture.manifest)).rejects.toThrow(/CHECK constraint|transaction failed/);
+      expect(clearManifest).not.toHaveBeenCalled();
+      const retained = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
+      expect(retained.stdout.trim()).toBe("1|2|1");
+      await exec("sqlite3", [database, `UPDATE session SET title='${fixture.manifest.title}' WHERE id='${fixture.manifest.remoteSessionId}';`]);
+      await recovery.recover(fixture.manifest);
+      expect(clearManifest).toHaveBeenCalledOnce();
       const cleaned = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
-      expect(cleaned.stdout.trim()).toBe("0|0|0");
+      expect(cleaned.stdout.trim()).toBe("1|0|0");
+      await exec("sqlite3", [database, `DELETE FROM session WHERE id='${fixture.manifest.remoteSessionId}';`]);
+      await expect(executeNativeFixtureSql(database, fixture)).rejects.toThrow(/CHECK constraint|transaction failed/);
+      const refused = await exec("sqlite3", ["-separator", "|", database, "SELECT (SELECT count(*) FROM session),(SELECT count(*) FROM message),(SELECT count(*) FROM part);"]);
+      expect(refused.stdout.trim()).toBe("0|0|0");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

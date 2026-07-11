@@ -46,6 +46,7 @@ export type NativeFixtureManifest = {
   kind: PartKind;
   remoteSessionId: string;
   messageId: string;
+  parentMessageId: string;
   partId: string;
   directory: string;
   title: string;
@@ -53,7 +54,7 @@ export type NativeFixtureManifest = {
 
 export type NativePartFixture = {
   manifest: NativeFixtureManifest;
-  session: { id: string; projectId: string; slug: string; directory: string; title: string; version: string; timeCreated: number; timeUpdated: number };
+  parentMessage: { id: string; sessionId: string; timeCreated: number; timeUpdated: number; data: JsonRecord };
   message: { id: string; sessionId: string; timeCreated: number; timeUpdated: number; data: JsonRecord };
   part: JsonRecord;
 };
@@ -118,19 +119,17 @@ export function buildNativePartFixture(input: {
   kind: PartKind;
   marker: string;
   remoteSessionId: string;
-  projectId: string;
   directory: string;
   title: string;
   now?: number;
 }): NativePartFixture {
   assertFixtureOwnership(input);
   const now = input.now ?? Date.now();
-  const suffix = input.kind.replaceAll("-", "_");
-  const messageId = `msg_${input.marker}_${suffix}`;
-  const partId = `prt_${input.marker}_${suffix}`;
-  const parentId = `msg_${input.marker}_parent`;
+  const parentId = openCodeId("msg", now, 1, input.marker);
+  const messageId = openCodeId("msg", now, 2, input.marker);
+  const partId = openCodeId("prt", now, 3, input.marker);
   const base = { id: partId, sessionID: input.remoteSessionId, messageID: messageId, type: input.kind };
-  const part = nativePartPayload(input.kind, base, input.marker, now);
+  const part = nativePartPayload(input.kind, base, input.marker, now, parentId);
   // 该 assistant 已显式完成，避免测试 fixture 被 OpenCode 当作待续写工作。
   const messageData: JsonRecord = {
     role: "assistant",
@@ -146,16 +145,13 @@ export function buildNativePartFixture(input: {
     finish: "stop"
   };
   return {
-    manifest: { marker: input.marker, kind: input.kind, remoteSessionId: input.remoteSessionId, messageId, partId, directory: input.directory, title: input.title },
-    session: {
-      id: input.remoteSessionId,
-      projectId: input.projectId,
-      slug: input.marker,
-      directory: input.directory,
-      title: input.title,
-      version: "1.17.7",
+    manifest: { marker: input.marker, kind: input.kind, remoteSessionId: input.remoteSessionId, messageId, parentMessageId: parentId, partId, directory: input.directory, title: input.title },
+    parentMessage: {
+      id: parentId,
+      sessionId: input.remoteSessionId,
       timeCreated: now,
-      timeUpdated: now
+      timeUpdated: now,
+      data: { role: "user", time: { created: now }, agent: "build", model: { providerID: "e2e-fixture-provider", modelID: "e2e-fixture-model" } }
     },
     message: { id: messageId, sessionId: input.remoteSessionId, timeCreated: now, timeUpdated: now, data: messageData },
     part
@@ -173,7 +169,9 @@ export function buildNativeFixtureSql(fixture: NativePartFixture): string {
     ".timeout 5000",
     "PRAGMA foreign_keys=ON;",
     "BEGIN IMMEDIATE;",
-    `INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES (${sql(fixture.session.id)}, ${sql(fixture.session.projectId)}, ${sql(fixture.session.slug)}, ${sql(fixture.session.directory)}, ${sql(fixture.session.title)}, ${sql(fixture.session.version)}, ${fixture.session.timeCreated}, ${fixture.session.timeUpdated});`,
+    "CREATE TEMP TABLE fixture_session_guard (value INTEGER NOT NULL CHECK(value=1));",
+    `INSERT INTO fixture_session_guard SELECT count(*) FROM session WHERE id=${sql(fixture.manifest.remoteSessionId)} AND title=${sql(fixture.manifest.title)} AND directory=${sql(fixture.manifest.directory)};`,
+    `INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (${sql(fixture.parentMessage.id)}, ${sql(fixture.parentMessage.sessionId)}, ${fixture.parentMessage.timeCreated}, ${fixture.parentMessage.timeUpdated}, ${sql(JSON.stringify(fixture.parentMessage.data))});`,
     `INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (${sql(fixture.message.id)}, ${sql(fixture.message.sessionId)}, ${fixture.message.timeCreated}, ${fixture.message.timeUpdated}, ${sql(JSON.stringify(fixture.message.data))});`,
     `INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (${sql(fixture.manifest.partId)}, ${sql(fixture.manifest.messageId)}, ${sql(fixture.manifest.remoteSessionId)}, ${fixture.message.timeCreated}, ${fixture.message.timeUpdated}, ${sql(JSON.stringify(partData))});`,
     "COMMIT;"
@@ -189,14 +187,19 @@ export async function executeNativeFixtureSql(databasePath: string, fixture: Nat
   await runSqliteScript(databasePath, buildNativeFixtureSql(fixture));
 }
 
-/** 中断恢复只按 manifest 的唯一主键删除；Session 外键级联会同时清除 message/part。 */
+/** 中断恢复保留真实 Session，仅删除 manifest 拥有的 user/assistant/part，并在提交前证明残留为零。 */
 export function buildNativeFixtureCleanupSql(manifest: NativeFixtureManifest): string {
   assertFixtureOwnership(manifest);
   return [
     ".timeout 5000",
     "PRAGMA foreign_keys=ON;",
     "BEGIN IMMEDIATE;",
-    `DELETE FROM session WHERE id=${sql(manifest.remoteSessionId)} AND title=${sql(manifest.title)} AND directory=${sql(manifest.directory)};`,
+    "CREATE TEMP TABLE fixture_cleanup_guard (value INTEGER NOT NULL CHECK(value=1));",
+    `INSERT INTO fixture_cleanup_guard SELECT count(*) FROM session WHERE id=${sql(manifest.remoteSessionId)} AND title=${sql(manifest.title)} AND directory=${sql(manifest.directory)};`,
+    `DELETE FROM part WHERE id=${sql(manifest.partId)} AND message_id=${sql(manifest.messageId)} AND session_id=${sql(manifest.remoteSessionId)};`,
+    `DELETE FROM message WHERE id IN (${sql(manifest.messageId)}, ${sql(manifest.parentMessageId)}) AND session_id=${sql(manifest.remoteSessionId)};`,
+    "CREATE TEMP TABLE fixture_residue_guard (value INTEGER NOT NULL CHECK(value=0));",
+    `INSERT INTO fixture_residue_guard SELECT (SELECT count(*) FROM part WHERE id=${sql(manifest.partId)} OR (message_id=${sql(manifest.messageId)} AND session_id=${sql(manifest.remoteSessionId)})) + (SELECT count(*) FROM message WHERE id IN (${sql(manifest.messageId)}, ${sql(manifest.parentMessageId)}) AND session_id=${sql(manifest.remoteSessionId)});`,
     "COMMIT;"
   ].join("\n");
 }
@@ -257,7 +260,7 @@ export function createNativeFixtureController(options: NativeFixtureControllerOp
   };
 }
 
-function nativePartPayload(kind: PartKind, base: JsonRecord, marker: string, now: number): JsonRecord {
+function nativePartPayload(kind: PartKind, base: JsonRecord, marker: string, now: number, tailStartMessageId: string): JsonRecord {
   const variants: Record<PartKind, JsonRecord> = {
     text: { ...base, text: `NATIVE_TEXT_${marker}`, synthetic: false, ignored: false, time: { start: now, end: now }, metadata: { fixture: marker } },
     subtask: { ...base, prompt: `NATIVE_SUBTASK_${marker}`, description: "fixture subtask", agent: "build", model: { providerID: "e2e-fixture-provider", modelID: "e2e-fixture-model" }, command: "fixture" },
@@ -270,7 +273,7 @@ function nativePartPayload(kind: PartKind, base: JsonRecord, marker: string, now
     patch: { ...base, hash: `hash-${marker}`, files: [`${marker}.txt`] },
     agent: { ...base, name: "build", source: { value: "@build", start: 0, end: 6 } },
     retry: { ...base, attempt: 1, error: { name: "APIError", data: { message: `retry-${marker}`, statusCode: 429, isRetryable: true, responseHeaders: { "retry-after": "1" }, responseBody: "fixture busy", metadata: { fixture: marker } } }, time: { created: now } },
-    compaction: { ...base, auto: true, overflow: false, tail_start_id: `msg_${marker}_tail` }
+    compaction: { ...base, auto: true, overflow: false, tail_start_id: tailStartMessageId }
   };
   return variants[kind];
 }
@@ -279,16 +282,35 @@ function assertFixtureOwnership(input: { marker: string; remoteSessionId: string
   if (!/^e2e_part_[a-z0-9_]+$/.test(input.marker)) throw new Error("fixture marker is not owned by the E2E namespace");
   // remote Session ID 由 OpenCode 生成时不携带 marker；只校验官方前缀，所有权由独立目录段和唯一标题绑定。
   const titleOwnsMarker = input.title.includes(input.marker) || input.title.includes(input.marker.replaceAll("_", "-"));
-  if (!/^ses[A-Za-z0-9_-]+$/.test(input.remoteSessionId) || !input.directory.split(/[\\/]/).includes(input.marker) || !titleOwnsMarker) {
+  if (!/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(input.remoteSessionId) || !input.directory.split(/[\\/]/).includes(input.marker) || !titleOwnsMarker) {
     throw new Error("fixture manifest resources do not share the unique marker");
   }
 }
 
 function assertFixtureManifest(fixture: NativePartFixture): void {
   assertFixtureOwnership({ marker: fixture.manifest.marker, remoteSessionId: fixture.manifest.remoteSessionId, directory: fixture.manifest.directory, title: fixture.manifest.title });
-  if (fixture.session.id !== fixture.manifest.remoteSessionId || fixture.message.id !== fixture.manifest.messageId || fixture.part.id !== fixture.manifest.partId) {
+  if (fixture.parentMessage.id !== fixture.manifest.parentMessageId || fixture.message.id !== fixture.manifest.messageId || fixture.part.id !== fixture.manifest.partId
+    || fixture.parentMessage.sessionId !== fixture.manifest.remoteSessionId || fixture.message.sessionId !== fixture.manifest.remoteSessionId
+    || fixture.message.data.parentID !== fixture.manifest.parentMessageId) {
     throw new Error("fixture records do not match manifest ownership");
   }
+  for (const [prefix, value] of [["msg", fixture.manifest.parentMessageId], ["msg", fixture.manifest.messageId], ["prt", fixture.manifest.partId]] as const) {
+    if (!new RegExp(`^${prefix}_[0-9a-f]{12}[0-9A-Za-z]{14}$`).test(value)) throw new Error(`fixture ${prefix} ID does not match OpenCode format`);
+  }
+}
+
+/** 与 OpenCode Identifier.create 的 ascending 编码布局一致；测试 fixture 使用确定尾部便于恢复。 */
+function openCodeId(prefix: "msg" | "prt", timestamp: number, sequence: number, entropy: string): string {
+  const encoded = (BigInt(timestamp) * 0x1000n + BigInt(sequence)).toString(16).padStart(12, "0").slice(-12);
+  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  let seed = 0;
+  for (const char of `${prefix}:${timestamp}:${sequence}:${entropy}`) seed = (seed * 33 + char.charCodeAt(0)) >>> 0;
+  let tail = "";
+  for (let index = 0; index < 14; index += 1) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    tail += alphabet[seed % alphabet.length];
+  }
+  return `${prefix}_${encoded}${tail}`;
 }
 
 function sql(value: string): string {
