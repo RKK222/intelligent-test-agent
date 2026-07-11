@@ -19,7 +19,14 @@
 启动与健康检查命令：
 
 ```bash
-export JAVA_HOME=/Users/kaka/Library/Java/JavaVirtualMachines/openjdk-25.0.1/Contents/Home
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  [[ "$(uname -s)" == "Darwin" ]] || { echo "请先设置 JDK 25 的 JAVA_HOME" >&2; exit 1; }
+  export JAVA_HOME="$(/usr/libexec/java_home -v 25)"
+fi
+"$JAVA_HOME/bin/java" -version 2>&1 | head -1 | grep -Eq 'version "25([.]|")' || {
+  echo "JAVA_HOME 必须指向 JDK 25" >&2
+  exit 1
+}
 export PATH="$JAVA_HOME/bin:$PWD/.tmp/dev-bin:/opt/homebrew/opt/libpq/bin:$PATH"
 ./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build
 curl -fsS http://127.0.0.1:8080/actuator/health/readiness
