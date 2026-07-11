@@ -1169,12 +1169,14 @@ export function normalizeMessagePart(raw: Record<string, unknown>, fallbackPartI
   }
   if (partType === "retry") {
     const error = record(raw.error);
+    const errorData = record(error?.data);
     const time = record(raw.time);
     return {
       partId,
       type: "retry",
       attempt: number(raw.attempt) ?? 0,
-      error: { name: text(error?.name), message: text(error?.message) ?? text(error?.value) },
+      // OpenCode 原生 RetryPart 的可读错误正文位于 error.data.message，旧事件仍兼容顶层字段。
+      error: { name: text(error?.name), message: text(error?.message) ?? text(error?.value) ?? text(errorData?.message) },
       time: time ? { created: number(time.created) } : undefined
     };
   }

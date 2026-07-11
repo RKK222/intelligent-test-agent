@@ -11,8 +11,17 @@ export function isTextualPart(part: MessagePart): part is Extract<MessagePart, {
 }
 
 export function isRenderablePart(part: MessagePart, options: { showReasoningSummaries: boolean }): boolean {
-  // step-start 只是模型回合边界标记，本身没有可见内容；避免它抢占助手头像行。
-  if (part.type === "step-start") {
+  // 这些是 OpenCode 会话回放/输入引用的原生元数据，不是 assistant timeline 卡片。
+  // 数据仍完整保留在消息 state，供历史恢复、审计和 task 子会话索引使用；其中子 Agent
+  // 只通过已建立映射的 tool=task 卡片进入，不能把裸 SubtaskPart 渲染成未知 JSON。
+  if (
+    part.type === "subtask" ||
+    part.type === "step-start" ||
+    part.type === "step-finish" ||
+    part.type === "snapshot" ||
+    part.type === "patch" ||
+    part.type === "agent"
+  ) {
     return false;
   }
   if (part.type === "text") {

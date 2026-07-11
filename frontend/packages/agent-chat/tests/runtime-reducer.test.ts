@@ -1292,6 +1292,7 @@ describe("agent-chat runtime reducer", () => {
       { type: "patch", part: { id: "p_patch", type: "patch", hash: "abcdef1234", files: ["a.ts", "b.ts"] }, expect: { type: "patch", hash: "abcdef1234", files: ["a.ts", "b.ts"] } },
       { type: "agent", part: { id: "p_agent", type: "agent", name: "build", source: { value: "user", start: 0, end: 1 } }, expect: { type: "agent", name: "build", source: { value: "user", start: 0, end: 1 } } },
       { type: "retry", part: { id: "p_retry", type: "retry", attempt: 2, error: { name: "rate_limit", message: "slow down" }, time: { created: 123 } }, expect: { type: "retry", attempt: 2, error: { name: "rate_limit", message: "slow down" }, time: { created: 123 } } },
+      { type: "retry", part: { id: "p_retry_native", type: "retry", attempt: 1, error: { name: "APIError", data: { message: "native retry detail" } }, time: { created: 124 } }, expect: { type: "retry", attempt: 1, error: { name: "APIError", message: "native retry detail" }, time: { created: 124 } } },
       { type: "compaction", part: { id: "p_comp", type: "compaction", auto: true, overflow: false, tail_start_id: "t1" }, expect: { type: "compaction", auto: true, overflow: false, tailStartId: "t1" } }
     ] as const;
 

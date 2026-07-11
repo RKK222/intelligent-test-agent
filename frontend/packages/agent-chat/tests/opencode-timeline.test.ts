@@ -696,6 +696,49 @@ describe("OpencodeTimeline", () => {
     expect(getByText("思考状态")).toBeTruthy();
   });
 
+  it("keeps native internal Parts in state without rendering fallback JSON", () => {
+    const hiddenMarker = "E2E_NATIVE_INTERNAL_MARKER";
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_internal", "校验原生内部 Part"),
+        assistantMessage("msg_assistant_internal", [
+          { partId: "part_subtask", type: "subtask", prompt: hiddenMarker, description: hiddenMarker, agent: "build" },
+          { partId: "part_step_finish", type: "step-finish", reason: hiddenMarker },
+          { partId: "part_snapshot", type: "snapshot", snapshot: hiddenMarker },
+          { partId: "part_patch", type: "patch", hash: hiddenMarker, files: [`${hiddenMarker}.txt`] },
+          { partId: "part_agent", type: "agent", name: hiddenMarker },
+          { partId: "part_retry", type: "retry", attempt: 1, error: { message: "retry fallback is intentionally visible" } },
+          { partId: "part_file", type: "file", path: `${hiddenMarker}.txt`, name: `${hiddenMarker}.txt` }
+        ])
+      ]
+    });
+
+    const { container, queryByText } = render(OpencodeTimeline, { props: { state } });
+
+    // 数据仍在状态树中，用于恢复/审计；只是不作为原生 assistant timeline 卡片呈现。
+    expect(state.partsByMessageId.msg_assistant_internal).toHaveLength(7);
+    expect(queryByText(hiddenMarker, { exact: false })).toBeNull();
+    expect(container.querySelector(".oc-file-part")).toBeNull();
+    expect(container.querySelector(".oc-unknown-part")).toBeNull();
+  });
+
+  it("keeps the existing retry compatibility row visible without falling back to JSON", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_retry_part", "重试失败信息仍可见"),
+        assistantMessage("msg_assistant_retry_part", [
+          { partId: "part_retry_visible", type: "retry", attempt: 3, error: { message: "请求超时" } }
+        ])
+      ]
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("重试第 3 次")).toBeTruthy();
+    expect(getByText("请求超时")).toBeTruthy();
+    expect(container.querySelector(".oc-unknown-part")).toBeNull();
+  });
+
   it("merges repeated reasoning rows across split assistant messages in one turn", async () => {
     const state = createOpencodeLikeState({
       messages: [

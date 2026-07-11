@@ -24,7 +24,8 @@ import {
   buildNativeFixtureCleanupSql,
   executeNativeFixtureCleanupSql,
   createTestVerifiedNativeDatabase,
-  createNativeFixtureManifestStore
+  createNativeFixtureManifestStore,
+  fixtureUiProbe
 } from "./opencode-parts-real-e2e";
 import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -177,6 +178,18 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     expect(PART_SPECS.map((item) => item.kind)).toEqual(PART_KINDS);
   });
 
+  it.each(PART_KINDS)("%s 使用本类型 fixture 的唯一字段和实际 renderer selector", (kind) => {
+    const probe = fixtureUiProbe(kind, "e2e_part_ui_contract");
+    expect(probe.uniqueText).toBeTruthy();
+    expect(probe.timelineExpectation).toBe(PART_SPECS.find((item) => item.kind === kind)!.ui.current.timelineExpectation);
+    if (probe.timelineExpectation === "visible") {
+      expect(probe.rendererSelector).toBeTruthy();
+    } else {
+      expect(probe.rendererSelector).toBeUndefined();
+    }
+    expect(probe.unknownSelector).toBe(".oc-unknown-part");
+  });
+
   it.each(PART_KINDS)("%s 定义完整原生字段和 timeline 契约", (kind) => {
     const spec = PART_SPECS.find((item) => item.kind === kind)!;
     expect(spec.requiredFields).toContain("id");
@@ -190,9 +203,9 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     expect(spec.ui.history.timelineExpectation).toBe(spec.ui.current.timelineExpectation);
   });
 
-  it("只要求 OpenCode 原生 assistant timeline 实际映射的四类 Part 可见", () => {
+  it("保留四类原生 renderer 与既有 retry 兼容行", () => {
     const visible = PART_SPECS.filter((item) => item.ui.current.timelineExpectation === "visible").map((item) => item.kind);
-    expect(visible).toEqual(["text", "reasoning", "tool", "compaction"]);
+    expect(visible).toEqual(["text", "reasoning", "tool", "retry", "compaction"]);
     for (const spec of PART_SPECS) {
       expect(spec.ui.current.forbiddenLocator).toBe(spec.ui.current.timelineExpectation === "visible" ? ".oc-unknown-part" : undefined);
     }
@@ -237,7 +250,7 @@ describe("OpenCode 1.17.7 Part 契约", () => {
   it.each(["subtask", "step-start", "step-finish", "snapshot", "patch", "agent", "retry", "compaction"] as const)("%s 原生扩展 Part locator 均绑定目标 partId", (kind) => {
     const contract = PART_SPECS.find((item) => item.kind === kind)!.ui.current;
     expect(contract.locators.every((locator) => locator.includes("{partId}"))).toBe(true);
-    if (kind === "retry") expect(contract.locators).not.toContain(".oc-retry-row");
+    if (kind === "retry") expect(contract.timelineExpectation).toBe("visible");
   });
 
   it("step-start 对齐原生同步层，不额外制造可见标记", () => {

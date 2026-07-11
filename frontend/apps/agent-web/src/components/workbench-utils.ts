@@ -685,13 +685,24 @@ function replaySessionTreeMessagesBySessionId(
     for (const rawPayload of payloads) {
       const payload = record(rawPayload);
       const message = record(payload?.message) ?? record(payload?.info);
-      if (!payload || !message) {
+      const part = record(payload?.part);
+      if (!payload) {
         continue;
       }
-      next = reduceAgentChatRuntime(next, {
-        type: "event",
-        event: runEventFromSessionTreeMessage(snapshot, sessionId, payload, message, index)
-      });
+      if (message) {
+        next = reduceAgentChatRuntime(next, {
+          type: "event",
+          event: runEventFromSessionTreeMessage(snapshot, sessionId, payload, message, index)
+        });
+      } else if (part) {
+        // OpenCode tree 会把 child 输出拆成只含 part 的条目；跳过它会导致子 Agent 卡片可点却没有正文。
+        next = reduceAgentChatRuntime(next, {
+          type: "event",
+          event: runEventFromSessionTreePart(snapshot, sessionId, payload, part, index)
+        });
+      } else {
+        continue;
+      }
       index += 1;
     }
   }
@@ -720,6 +731,47 @@ function runEventFromSessionTreeMessage(
     type: "message.updated",
     traceId: text(payload.traceId) ?? "trace_session_tree",
     occurredAt,
+    payload: scopedPayload
+  };
+}
+
+/**
+ * 把 session-tree 中未携带 message wrapper 的原生 part 恢复为同一条实时更新事件。
+ * child session 常见此形态，必须保留其 root/task scope 才能在点击子 Agent 卡片后筛选出内容。
+ */
+function runEventFromSessionTreePart(
+  snapshot: SessionTreeMessagesResponse,
+  sessionId: string,
+  payload: Record<string, unknown>,
+  part: Record<string, unknown>,
+  index: number
+): RunEvent {
+  const messageId =
+    text(payload.messageId) ??
+    text(payload.messageID) ??
+    text(part.messageId) ??
+    text(part.messageID) ??
+    `message-part-${index + 1}`;
+  const partId = text(part.partId) ?? text(part.partID) ?? text(part.id) ?? `part-${index + 1}`;
+  const scopedPayload = {
+    ...payload,
+    sessionId: text(payload.sessionId) ?? text(payload.sessionID) ?? sessionId,
+    rootSessionId: text(payload.rootSessionId) ?? snapshot.sessionId,
+    messageId,
+    messageID: messageId,
+    part: {
+      ...part,
+      messageId: text(part.messageId) ?? text(part.messageID) ?? messageId,
+      messageID: text(part.messageID) ?? text(part.messageId) ?? messageId
+    }
+  };
+  return {
+    eventId: `session-tree-part:${snapshot.sessionId}:${sessionId}:${messageId}:${partId}:${index}`,
+    runId: text(payload.runId) ?? `session-tree:${snapshot.sessionId}`,
+    seq: 20_000 + index,
+    type: "message.part.updated",
+    traceId: text(payload.traceId) ?? "trace_session_tree",
+    occurredAt: text(payload.occurredAt) ?? new Date(0).toISOString(),
     payload: scopedPayload
   };
 }

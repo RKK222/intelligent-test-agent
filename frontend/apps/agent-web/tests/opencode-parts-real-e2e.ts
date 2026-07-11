@@ -104,12 +104,47 @@ export type PartSpec = {
   ui: { current: PartUiContract; history: PartUiContract };
 };
 
+/**
+ * 原生 SQLite fixture 在浏览器侧的精确验收锚点。不要使用虚构的统一 data-part-id：
+ * timeline 实际按各类 renderer 分组/折叠，必须用该类真实写入的唯一字段定位。
+ */
+export type FixtureUiProbe = Readonly<{
+  uniqueText: string;
+  /** 只有 OpenCode 原生 assistant timeline 真的绘制该 Part 时才有 renderer。 */
+  timelineExpectation: PartUiContract["timelineExpectation"];
+  rendererSelector?: string;
+  unknownSelector: ".oc-unknown-part";
+}>;
+
+export function fixtureUiProbe(kind: PartKind, marker: string): FixtureUiProbe {
+  const native = `NATIVE_${kind.replaceAll("-", "_").toUpperCase()}_${marker}`;
+  const probes: Record<PartKind, FixtureUiProbe> = {
+    text: { uniqueText: native, timelineExpectation: "visible", rendererSelector: ".oc-text-part", unknownSelector: ".oc-unknown-part" },
+    // SubtaskPart 本身不绘制；真实子 Agent 入口由同一轮的 tool=task 卡片单独验收。
+    subtask: { uniqueText: native, timelineExpectation: "not-rendered", unknownSelector: ".oc-unknown-part" },
+    reasoning: { uniqueText: native, timelineExpectation: "visible", rendererSelector: ".oc-reasoning-part", unknownSelector: ".oc-unknown-part" },
+    file: { uniqueText: `${marker}.txt`, timelineExpectation: "not-rendered", unknownSelector: ".oc-unknown-part" },
+    tool: { uniqueText: marker, timelineExpectation: "visible", rendererSelector: "[data-testid='oc-tool-group']", unknownSelector: ".oc-unknown-part" },
+    "step-start": { uniqueText: `snapshot-start-${marker}`, timelineExpectation: "not-rendered", unknownSelector: ".oc-unknown-part" },
+    "step-finish": { uniqueText: `snapshot-end-${marker}`, timelineExpectation: "not-rendered", unknownSelector: ".oc-unknown-part" },
+    snapshot: { uniqueText: `snapshot-${marker}`, timelineExpectation: "not-rendered", unknownSelector: ".oc-unknown-part" },
+    patch: { uniqueText: `hash-${marker}`, timelineExpectation: "not-rendered", unknownSelector: ".oc-unknown-part" },
+    agent: { uniqueText: native, timelineExpectation: "not-rendered", unknownSelector: ".oc-unknown-part" },
+    // 产品已有 retry 错误行是对 session.status.retry 的兼容展示，不能因为 OpenCode 原生 app
+    // 未单列 RetryPart renderer 而把既有失败信息藏掉。
+    retry: { uniqueText: `retry-${marker}`, timelineExpectation: "visible", rendererSelector: ".oc-retry-row", unknownSelector: ".oc-unknown-part" },
+    // compaction 的唯一 DOM 锚点由真实 Part ID 组成；uniqueText 保留其真实 tail 字段用于证据检查。
+    compaction: { uniqueText: "上下文已压缩", timelineExpectation: "visible", rendererSelector: "[data-testid='compaction-part-{partId}']", unknownSelector: ".oc-unknown-part" }
+  };
+  return probes[kind];
+}
+
 const common = ["id", "sessionID", "messageID", "type"] as const;
 
 /**
  * OpenCode 1.17.7 的 12 类 Part 验收矩阵。所有类型都必须在 raw/messages/tree 中无损；
- * assistant timeline 只对齐原生实际渲染的 text/reasoning/tool/compaction。其余 Part 是
- * 输入附件或内部过程数据，不应为了“类型齐全”额外制造可见卡片。
+ * assistant timeline 只对齐原生实际渲染的 text/reasoning/tool/compaction；retry 是本产品
+ * 已有的失败兼容行，须继续展示，其他 Part 不因“类型齐全”额外制造可见卡片。
  */
 export const PART_SPECS: readonly PartSpec[] = [
   spec("text", ["text"], ["text", "synthetic", "ignored", "time.start", "time.end", "metadata"], "visible", "最终文本可见", "copy", "always", ":scope button[aria-label='复制']"),
@@ -122,7 +157,7 @@ export const PART_SPECS: readonly PartSpec[] = [
   spec("snapshot", ["snapshot"], ["snapshot"], "not-rendered", "原生 assistant timeline 无 SnapshotPart renderer", "none", "never"),
   spec("patch", ["hash", "files"], ["hash", "files"], "not-rendered", "原生同步层跳过 PatchPart，diff 使用消息 summary", "none", "never"),
   spec("agent", ["name"], ["name", "source.value", "source.start", "source.end"], "not-rendered", "AgentPart 用于输入引用，不在 assistant timeline 单独渲染", "none", "never"),
-  spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], ["attempt", "error.name", "error.data.message", "error.data.statusCode", "error.data.isRetryable", "error.data.responseHeaders", "error.data.responseBody", "error.data.metadata", "time.created"], "not-rendered", "原生 assistant timeline 无 RetryPart renderer", "none", "never"),
+  spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], ["attempt", "error.name", "error.data.message", "error.data.statusCode", "error.data.isRetryable", "error.data.responseHeaders", "error.data.responseBody", "error.data.metadata", "time.created"], "visible", "保留平台已有 retry 错误行，避免隐藏可恢复失败信息", "none", "never"),
   spec("compaction", ["auto"], ["auto", "overflow", "tail_start_id"], "visible", "上下文压缩显示为原生分隔线", "none", "never")
 ];
 
@@ -357,7 +392,7 @@ function nativePartPayload(kind: PartKind, base: JsonRecord, marker: string, now
     "step-finish": { ...base, reason: "stop", snapshot: `snapshot-end-${marker}`, cost: 0, tokens: { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
     snapshot: { ...base, snapshot: `snapshot-${marker}` },
     patch: { ...base, hash: `hash-${marker}`, files: [`${marker}.txt`] },
-    agent: { ...base, name: "build", source: { value: "@build", start: 0, end: 6 } },
+    agent: { ...base, name: `NATIVE_AGENT_${marker}`, source: { value: "@build", start: 0, end: 6 } },
     retry: { ...base, attempt: 1, error: { name: "APIError", data: { message: `retry-${marker}`, statusCode: 429, isRetryable: true, responseHeaders: { "retry-after": "1" }, responseBody: "fixture busy", metadata: { fixture: marker } } }, time: { created: now } },
     compaction: { ...base, auto: true, overflow: false, tail_start_id: tailStartMessageId }
   };

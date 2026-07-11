@@ -13,6 +13,7 @@ import {
   detectSafeRetryProvider,
   executeNativeFixtureCleanupSql,
   executeNativeFixtureSql,
+  fixtureUiProbe,
   interactionExpectation,
   resolveVerifiedNativeDatabase,
   runNaturalAttempt,
@@ -148,9 +149,13 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
           if (!sse?.containsPart(kind, String((rawPart as { id?: unknown }).id ?? ""))) {
             throw new Error(`${kind} was observed in raw HTTP but not in natural RunEvent SSE`);
           }
-          await verifyUi(page, title, kind, String((rawPart as { id?: unknown }).id ?? ""), fixture.marker, evidenceRunId, "current-ui.png");
-          await page.getByRole("button", { name: /新建对话/ }).first().click();
-          await verifyUi(page, title, kind, String((rawPart as { id?: unknown }).id ?? ""), fixture.marker, evidenceRunId, "history-ui.png");
+          await openHistorySession(page, title);
+          await verifyUi(page, kind, String((rawPart as { id?: unknown }).id ?? ""), fixture.marker, evidenceRunId, "current-ui.png");
+          if (kind === "subtask") await verifySubagentNavigation(page, evidenceRunId, kind, "current-subagent.png");
+          await leaveSessionBeforeHistoryRecovery(page, title, kind, fixture.marker);
+          await openHistorySession(page, title);
+          await verifyUi(page, kind, String((rawPart as { id?: unknown }).id ?? ""), fixture.marker, evidenceRunId, "history-ui.png");
+          if (kind === "subtask") await verifySubagentNavigation(page, evidenceRunId, kind, "history-subagent.png");
           evidenceSummary.ui = "pass";
           await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: evidenceSummary });
         }
@@ -272,9 +277,11 @@ test.describe("OpenCode 12 Part native fixture recovery real E2E", () => {
           await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "platform-tree.json", value: tree });
           await writeSseEvidence(evidenceRunId, kind, [{ status: "not-claimed", reason: "native-sqlite-fixture-does-not-produce-sse" }]);
           assertPartProjection(kind, rawPart, platformMessages, tree);
-          await verifyUi(page, platformTitle, kind, fixture.manifest.partId, workspace.marker, evidenceRunId, "current-ui.png");
-          await page.getByRole("button", { name: /新建对话/ }).first().click();
-          await verifyUi(page, platformTitle, kind, fixture.manifest.partId, workspace.marker, evidenceRunId, "history-ui.png");
+          await openHistorySession(page, platformTitle);
+          await verifyUi(page, kind, fixture.manifest.partId, workspace.marker, evidenceRunId, "current-ui.png");
+          await leaveSessionBeforeHistoryRecovery(page, platformTitle, kind, workspace.marker);
+          await openHistorySession(page, platformTitle);
+          await verifyUi(page, kind, fixture.manifest.partId, workspace.marker, evidenceRunId, "history-ui.png");
           await writePartEvidence({
             root: evidenceRoot,
             runId: evidenceRunId,
@@ -528,7 +535,8 @@ async function writeSseEvidence(runId: string, kind: PartKind, events: unknown[]
   await writeFile(target, events.map((event) => JSON.stringify(sanitizeEvidence(event))).join("\n") + "\n", "utf8");
 }
 
-async function verifyUi(page: Page, title: string, kind: PartKind, partId: string, marker: string, runId: string, screenshot: string): Promise<void> {
+/** 打开历史会话；首次和离开后都走同一条真实历史列表恢复入口。 */
+async function openHistorySession(page: Page, title: string): Promise<void> {
   await page.addInitScript((token) => token && sessionStorage.setItem("test-agent.auth.token", token), process.env.TEST_AGENT_API_TOKEN ?? "");
   await page.goto("/", { timeout: 15_000, waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: /消息列表/ }).click({ timeout: 15_000 });
@@ -536,37 +544,71 @@ async function verifyUi(page: Page, title: string, kind: PartKind, partId: strin
   // 使用真实搜索输入改变 query key，确保刚创建的 Session 通过平台列表重新加载。
   await page.getByPlaceholder("搜索消息列表...").fill(title);
   await page.locator(`button[title='${title}']`).click({ timeout: 15_000 });
+}
+
+/**
+ * 先离开已恢复会话再重新从历史列表选择，防止页面内残留 state 伪造“历史恢复成功”。
+ */
+async function leaveSessionBeforeHistoryRecovery(page: Page, _title: string, kind: PartKind, marker: string): Promise<void> {
+  await page.getByRole("button", { name: /新建对话/ }).first().click({ timeout: 15_000 });
+  const probe = fixtureUiProbe(kind, marker);
+  // 新建会话后原 timeline 的目标标记不能仍可见；否则第二次检验只是复用了旧 DOM/state。
+  await expect(page.locator(".oc-timeline-root").getByText(probe.uniqueText, { exact: false })).toHaveCount(0);
+}
+
+/** 只验证原生子 Agent 的 tool=task 卡片与子会话内容；裸 SubtaskPart 不冒充此入口。 */
+async function verifySubagentNavigation(page: Page, runId: string, kind: PartKind, screenshot: string): Promise<void> {
+  const card = page.locator(".oc-subagent-card").first();
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  await expect(card).toBeEnabled({ timeout: 15_000 });
+  await card.click();
+  await expect(page.locator(".figma-chat-subagent-return")).toBeVisible({ timeout: 15_000 });
+  // 子 Agent 的最终输出可晚于 task 卡片到达；最多等待 45 秒，且必须是非空正文，
+  // 不能把空 row、加载壳或工具标题误判为已完成工作内容。
+  await expect.poll(
+    () => page.locator(".oc-timeline .oc-text-part").allTextContents().then((items) => items.some((item) => item.trim().length > 0)),
+    { timeout: 45_000 }
+  ).toBe(true);
+  const target = path.join(evidenceRoot, runId, kind, screenshot);
+  await mkdir(path.dirname(target), { recursive: true });
+  await page.screenshot({ path: target, fullPage: true });
+  await page.locator(".figma-chat-subagent-return").click();
+}
+
+async function verifyUi(page: Page, kind: PartKind, partId: string, marker: string, runId: string, screenshot: string): Promise<void> {
   const contract = PART_SPECS.find((item) => item.kind === kind)!.ui.current;
+  const probe = fixtureUiProbe(kind, marker);
+  if (probe.timelineExpectation !== contract.timelineExpectation) {
+    throw new Error(`${kind} fixture UI probe disagrees with Part contract`);
+  }
   if (contract.timelineExpectation === "not-rendered") {
-    // 不依赖不存在的通用 data-part-id：直接断言该 fixture 的唯一业务标记没有进入可见 timeline。
-    await expect(page.getByText(new RegExp(`NATIVE_${kind.replaceAll("-", "_").toUpperCase()}_${marker}`))).toHaveCount(0);
+    // 不能用假 data-part-id 判定隐藏：目标原生字段及未知 JSON fallback 都必须不存在。
+    await expect(page.locator(".oc-timeline-root").getByText(probe.uniqueText, { exact: false })).toHaveCount(0);
+    await expect(page.locator(probe.unknownSelector).filter({ hasText: probe.uniqueText })).toHaveCount(0);
     const target = path.join(evidenceRoot, runId, kind, screenshot);
     await mkdir(path.dirname(target), { recursive: true });
     await page.screenshot({ path: target, fullPage: true });
     return;
   }
-  const part = kind === "text"
-    ? page.locator(".oc-text-part").filter({ hasText: `NATIVE_TEXT_${marker}` })
-    : kind === "reasoning"
-      ? page.getByRole("button", { name: new RegExp(`思考状态.*${marker}`) })
-      : kind === "tool"
-        ? page.getByRole("button", { name: /探索.*读取/ })
-        : page.getByTestId(`compaction-part-${partId}`);
+  const selector = probe.rendererSelector?.replaceAll("{partId}", partId);
+  if (!selector) throw new Error(`${kind} visible Part has no renderer selector`);
+  const part = kind === "compaction"
+    ? page.locator(selector)
+    : page.locator(selector).filter({ hasText: probe.uniqueText });
   await expect(part).toBeVisible({ timeout: 15_000 });
   if (contract.forbiddenLocator) await expect(part.locator(contract.forbiddenLocator)).toHaveCount(0);
-  const childMapping = await part.locator("[data-child-session-id]").count() > 0;
-  const diffAvailable = await part.locator("button").count() > 0;
-  const interaction = interactionExpectation(contract, {
-    targetPartId: partId,
-    childMappingPartId: childMapping ? partId : undefined,
-    diffAvailable
-  });
-  if (interaction === "required" && contract.interactionLocator) {
-    const target = kind === "reasoning" || kind === "tool"
-      ? part
-      : part.locator(contract.interactionLocator.replaceAll(":scope ", "")).first();
-    await expect(target).toBeVisible();
-    await target.click();
+  if (contract.interaction === "copy") {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const copy = part.locator("button[aria-label='复制']");
+    await expect(copy).toBeVisible();
+    await copy.click();
+    await expect(part.locator("button[aria-label='已复制']")).toBeVisible();
+  } else if (contract.interaction === "expand") {
+    const trigger = part.locator(contract.interactionLocator?.replaceAll(":scope ", "") ?? "button").first();
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+    const expanded = kind === "reasoning" ? ".oc-disclosure__body" : ".oc-tool-group__body";
+    await expect(part.locator(expanded)).toBeVisible();
   }
   const target = path.join(evidenceRoot, runId, kind, screenshot);
   await mkdir(path.dirname(target), { recursive: true });
