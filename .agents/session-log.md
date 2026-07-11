@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-11 - 建立 Mermaid 可视化提交与 main 的正式合并关系
+
+- Why:
+  - `772ac3bd20` 的功能补丁此前已通过等价提交 `2c70e06b9` 进入 `main`，但目标提交本身尚不是主线祖先；直接三方合并会因分支基线相差 121/4 个提交而产生 60 余处与 Mermaid 无关的前后端冲突。
+- What:
+  - 新增双父合并提交，将 `772ac3bd20` 正式纳入 `main` 历史；保留当前主线完整文件树，不重复应用已存在的 Mermaid 补丁，也不回退后续对话、运行态、API 和文档改动。
+- How:
+  - 先用 `range-diff` 与稳定 patch-id 确认 `772ac3bd20` 和 `2c70e06b9` 的 `docs/superpowers`、`frontend` 代码补丁完全一致，再用 `git merge-tree` 分析冲突来源；最终采用保留当前 `main` tree 的双父合并，并校验合并前后 tree hash 相同、目标提交已成为主线祖先。
+- Result:
+  - Mermaid 定向 Vitest 43/43、workspace typecheck、lint、生产构建通过；Playwright 桌面端与移动端 2/2 通过。全量前端基线为 728 passed、1 skipped、1 个既有 `DirectoryRows.test.ts` 失败，原因是当前主线同时提供文件与目录删除按钮，本次未扩大范围修改。
+
 ### 2026-07-11 - 修复根会话交互事件的 remote Session 投影
 
 - Why:
