@@ -14,7 +14,9 @@ import {
   writePartEvidence,
   detectSafeRetryProvider,
   buildCompactionPreparation,
-  startOwnedTrace
+  startOwnedTrace,
+  sanitizeTraceText,
+  waitForCapturedPart
 } from "./opencode-parts-real-e2e";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -120,6 +122,26 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     const cleanup = vi.fn().mockResolvedValue(undefined);
     await expect(startOwnedTrace(async () => { throw new Error("trace start failed"); }, cleanup)).rejects.toThrow("trace start failed");
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("trace文本按结构和header模式删除全部敏感值", () => {
+    const source = [
+      JSON.stringify({ headers: { Authorization: "Bearer abc", Cookie: "sid=x", safe: "ok" }, nested: { token: "abc" } }),
+      "Set-Cookie: sid=x; HttpOnly",
+      "Proxy-Authorization=Basic xyz",
+      "secret: hidden"
+    ].join("\n");
+    const sanitized = sanitizeTraceText(source, "abc");
+    expect(sanitized).toContain("ok");
+    expect(sanitized).not.toMatch(/abc|sid=x|Basic xyz|hidden/);
+    expect(sanitized).not.toMatch(/Authorization|Cookie|token|secret/i);
+  });
+
+  it("raw命中后等待SSE目标part而不是立即abort", async () => {
+    const events: unknown[] = [];
+    const sleep = vi.fn().mockImplementation(async () => { events.push({ payload: { part: { id: "prt_1", type: "tool" } } }); });
+    await expect(waitForCapturedPart(events, "tool", "prt_1", { timeoutMs: 10, sleep, now: (() => { let n = 0; return () => ++n; })() })).resolves.toBeUndefined();
+    expect(sleep).toHaveBeenCalled();
   });
 
   it("按 run/kind 隔离写入已脱敏且非空的证据", async () => {

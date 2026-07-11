@@ -6,11 +6,15 @@ import path from "node:path";
 
 import {
   PART_KINDS,
+  PART_SPECS,
   assertPartProjection,
   detectSafeRetryProvider,
+  interactionExpectation,
   runNaturalAttempt,
   sanitizeEvidence,
+  sanitizeTraceText,
   startOwnedTrace,
+  waitForCapturedPart,
   writePartEvidence,
   type PartKind
 } from "./opencode-parts-real-e2e";
@@ -32,6 +36,9 @@ import {
 const enabled = process.env.TEST_AGENT_RUN_PART_E2E === "1" && process.env.TEST_AGENT_PART_PHASE === "natural";
 const backendBaseUrl = stripTrailingSlash(process.env.TEST_AGENT_BASE_URL ?? "http://127.0.0.1:8080");
 const evidenceRoot = path.resolve(process.cwd(), "../.tmp/e2e/opencode-parts");
+
+// 仅本 spec 关闭 runner trace，避免与逐 kind 手动、脱敏后的 trace.zip 双重 ownership。
+test.use({ trace: "off" });
 
 test.describe("OpenCode 12 Part natural real E2E", () => {
   test.skip(!enabled, "Set TEST_AGENT_RUN_PART_E2E=1 and TEST_AGENT_PART_PHASE=natural to run natural Part E2E.");
@@ -109,6 +116,10 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
         evidenceSummary = { ...result, projection: "unverified", ui: "unverified", cleanup: "pending" };
         await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: evidenceSummary });
         if (sse) {
+          if (result.classification === "natural-pass") {
+            const observedPart = findPartByKind(result.rawSnapshot, kind);
+            await sse.waitForPart(kind, String(observedPart?.id ?? ""), 5_000);
+          }
           await sse.stop();
           await writeSseEvidence(evidenceRunId, kind, sse.events);
         } else {
@@ -241,7 +252,12 @@ function findPartByKind(raw: unknown, kind: PartKind): Record<string, unknown> |
   return undefined;
 }
 
-type SseCapture = { events: unknown[]; stop: () => Promise<void>; containsPart: (kind: PartKind, partId: string) => boolean };
+type SseCapture = {
+  events: unknown[];
+  stop: () => Promise<void>;
+  containsPart: (kind: PartKind, partId: string) => boolean;
+  waitForPart: (kind: PartKind, partId: string, timeoutMs: number) => Promise<void>;
+};
 function captureRunSse(runId: string, targetKind: PartKind): SseCapture {
   const controller = new AbortController();
   const events: unknown[] = [];
@@ -279,6 +295,9 @@ function captureRunSse(runId: string, targetKind: PartKind): SseCapture {
     containsPart: (kind, partId) => {
       const serialized = JSON.stringify(events);
       return serialized.includes(`\"type\":\"${kind}\"`) && (!partId || serialized.includes(partId));
+    },
+    waitForPart: async (kind, partId, timeoutMs) => {
+      await waitForCapturedPart(events, kind, partId, { timeoutMs });
     }
   };
 }
@@ -297,6 +316,19 @@ async function verifyUi(page: Page, title: string, kind: PartKind, partId: strin
   const part = page.locator(`[data-part-id='${partId}'][data-part-type='${kind}']`);
   await expect(part).toBeVisible({ timeout: 15_000 });
   await expect(part.locator(".oc-unknown-part")).toHaveCount(0);
+  const contract = PART_SPECS.find((item) => item.kind === kind)!.ui.current;
+  const childMapping = await part.locator("[data-child-session-id]").count() > 0;
+  const diffAvailable = await part.locator("button").count() > 0;
+  const interaction = interactionExpectation(contract, {
+    targetPartId: partId,
+    childMappingPartId: childMapping ? partId : undefined,
+    diffAvailable
+  });
+  if (interaction === "required" && contract.interactionLocator) {
+    const target = part.locator(contract.interactionLocator.replaceAll(":scope ", "")).first();
+    await expect(target).toBeVisible();
+    await target.click();
+  }
   const target = path.join(evidenceRoot, runId, kind, screenshot);
   await mkdir(path.dirname(target), { recursive: true });
   await page.screenshot({ path: target, fullPage: true });
@@ -389,6 +421,18 @@ async function cleanupFixture(input: {
   await runCleanupStages([
     async () => { if (input.runId) await apiPost(`/api/internal/agent/opencode/runs/${encodeURIComponent(input.runId)}/cancel`, {}).catch(() => undefined); },
     async () => {
+      if (!input.sessionId || input.remoteSessionId) return;
+      try {
+        input.remoteSessionId = await resolveRemoteSessionIdFromSources({
+          loadTree: () => apiGet(`/api/internal/agent/opencode/sessions/${encodeURIComponent(input.sessionId!)}/session-tree/messages`),
+          loadPlatformMessages: () => apiGet(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(input.sessionId!)}/messages?page=1&size=100&refresh=true`)
+        });
+      } catch {
+        if (!input.openCodeDatabasePath) throw new Error("cannot prove native Session absence without owned SQLite path");
+        await assertNoNativeSessionForDirectory(input.openCodeDatabasePath, input.fixture.workspaceRootPath);
+      }
+    },
+    async () => {
       if (!input.remoteSessionId || !input.opencodeBaseUrl) return;
       const nativeUrl = `${input.opencodeBaseUrl}/session/${encodeURIComponent(input.remoteSessionId)}?directory=${encodeURIComponent(input.fixture.workspaceRootPath)}`;
       const response = await fetch(nativeUrl, { method: "DELETE" });
@@ -424,12 +468,19 @@ async function cleanupFixture(input: {
   ]);
 }
 
+async function assertNoNativeSessionForDirectory(databasePath: string, directory: string): Promise<void> {
+  const exec = promisify(execFile);
+  const escaped = directory.replaceAll("'", "''");
+  const { stdout } = await exec("sqlite3", ["-readonly", databasePath, `SELECT count(*) FROM session WHERE directory='${escaped}';`]);
+  const count = Number(stdout.trim());
+  if (!Number.isInteger(count) || count !== 0) throw new Error(`native SQLite still contains ${count} Session(s) for owned directory`);
+}
+
 function dateStamp(): string { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`; }
 function stripTrailingSlash(value: string): string { return value.replace(/\/+$/, ""); }
 
 /** Playwright trace 会记录请求头；解包后逐文件替换本轮 token，再重建归档。 */
 async function sanitizeTraceArchive(tracePath: string, token?: string): Promise<void> {
-  if (!token) return;
   const exec = promisify(execFile);
   const directory = await mkdtemp(path.join(path.dirname(tracePath), ".trace-sanitize-"));
   try {
@@ -437,14 +488,32 @@ async function sanitizeTraceArchive(tracePath: string, token?: string): Promise<
     const files = await listFiles(directory);
     for (const file of files) {
       const content = await readFile(file);
-      const replaced = Buffer.from(content.toString("latin1").split(token).join("[REDACTED]"), "latin1");
-      if (!content.equals(replaced)) await writeFile(file, replaced);
+      const text = content.toString("utf8");
+      const isText = Buffer.from(text, "utf8").equals(content);
+      if (isText) {
+        await writeFile(file, sanitizeTraceText(text, token), "utf8");
+      } else if (containsTraceSecret(content, token)) {
+        throw new Error(`binary trace attachment contains unverifiable sensitive data: ${path.basename(file)}`);
+      }
     }
     await rm(tracePath, { force: true });
     await exec("zip", ["-q", "-r", tracePath, "."], { cwd: directory });
+    for (const file of await listFiles(directory)) {
+      const content = await readFile(file);
+      if (containsTraceSecret(content, token)) throw new Error(`sanitized trace still contains sensitive data: ${path.basename(file)}`);
+    }
+  } catch (error) {
+    await rm(tracePath, { force: true });
+    throw error;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+function containsTraceSecret(content: Buffer, token?: string): boolean {
+  const text = content.toString("latin1");
+  if (token && text.includes(token)) return true;
+  return /(authorization|proxy-authorization|cookie|set-cookie|token|key|secret)\s*[:=]/i.test(text);
 }
 
 async function listFiles(directory: string): Promise<string[]> {

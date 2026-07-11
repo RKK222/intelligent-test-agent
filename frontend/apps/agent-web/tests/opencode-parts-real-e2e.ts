@@ -354,6 +354,43 @@ export async function startOwnedTrace(start: () => Promise<void>, cleanupOnFailu
   }
 }
 
+/** 对 trace 的 JSONL 与普通 header 文本同时脱敏；未知敏感字段整行删除而不是保留字段名。 */
+export function sanitizeTraceText(source: string, token?: string): string {
+  const sanitizedLines: string[] = [];
+  for (const line of source.split(/\r?\n/)) {
+    if (/^\s*(authorization|proxy-authorization|cookie|set-cookie|token|key|secret)\s*[:=]/i.test(line)) continue;
+    try {
+      sanitizedLines.push(JSON.stringify(sanitizeEvidence(JSON.parse(line))));
+    } catch {
+      sanitizedLines.push(line.replace(
+        /(["']?)(authorization|proxy-authorization|cookie|set-cookie|token|key|secret)\1\s*[:=]\s*[^,;\s}\]]+/gi,
+        "[REDACTED]"
+      ));
+    }
+  }
+  let result = sanitizedLines.join("\n");
+  if (token) result = result.split(token).join("[REDACTED]");
+  return result;
+}
+
+/** raw 已命中后给异步 SSE 投影一个有界追赶窗口，超时明确失败，禁止先 abort 再检查。 */
+export async function waitForCapturedPart(
+  events: readonly unknown[],
+  kind: PartKind,
+  partId: string,
+  options: { timeoutMs: number; sleep?: (delayMs: number) => Promise<void>; now?: () => number }
+): Promise<void> {
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+  const deadline = now() + options.timeoutMs;
+  while (now() <= deadline) {
+    const serialized = JSON.stringify(events);
+    if (serialized.includes(`\"type\":\"${kind}\"`) && (!partId || serialized.includes(partId))) return;
+    await sleep(100);
+  }
+  throw new Error(`${kind} target Part was not observed in RunEvent SSE within ${options.timeoutMs}ms`);
+}
+
 function getSpec(kind: PartKind): PartSpec {
   const found = PART_SPECS.find((item) => item.kind === kind);
   if (!found) throw new Error(`unknown Part kind: ${String(kind)}`);
