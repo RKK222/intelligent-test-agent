@@ -155,6 +155,50 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesSideQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
+        assertRequestIsForwarded(
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs");
+    }
+
+    @Test
+    void routesAgentScopedSideQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
+        assertRequestIsForwarded(
+                "/api/internal/agent/opencode/session/ses_1234567890abcdef/side-question/runs");
+    }
+
+    @Test
+    void routedSideQuestionRunStartHeaderSkipsSecondForward() {
+        assertRoutedSideQuestionRunStartSkipsSecondForward(
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs");
+    }
+
+    @Test
+    void routedAgentScopedSideQuestionRunStartHeaderSkipsSecondForward() {
+        assertRoutedSideQuestionRunStartSkipsSecondForward(
+                "/api/internal/agent/opencode/session/ses_1234567890abcdef/side-question/runs");
+    }
+
+    private static void assertRoutedSideQuestionRunStartSkipsSecondForward(String path) {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("server-b"), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post(path)
+                .header(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER, "true")
+                .body("{\"question\":\"what happened?\"}"));
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isTrue();
+        assertThat(httpClient.requests).isEmpty();
+        Mockito.verifyNoInteractions(assignmentService);
+    }
+
+    @Test
     void missingTargetBackendReturnsUnavailableWithoutCallingLocalController() {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))

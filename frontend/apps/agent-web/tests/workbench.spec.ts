@@ -947,6 +947,97 @@ test("the first sent message becomes the new session title", async ({ page }) =>
   });
 });
 
+test("pet side-question streams progress, survives outside clicks, and calibrates replayed deltas", async ({ page }) => {
+  const sideQuestionRequests: Array<Record<string, unknown>> = [];
+  await installPetSideQuestionEventSource(page, {
+    run_side_question_1: [
+      streamEvent("evt_side_started", "run.started", {}, 20),
+      streamEvent("evt_side_ready", "side_question.started", { sessionId: "ses_1" }, 30),
+      streamEvent("evt_side_progress", "side_question.progress", { stage: "preparing_context" }, 80, true),
+      // 模拟 Last-Event-ID 续传后 durable progress 与 transient delta 被重投。
+      streamEvent("evt_side_progress", "side_question.progress", { stage: "preparing_context" }, 160),
+      streamEvent("evt_side_delta_1", "side_question.delta", { delta: "增量片段" }, 2500),
+      streamEvent("evt_side_delta_1", "side_question.delta", { delta: "增量片段" }, 2600),
+      streamEvent("evt_side_delta_2", "side_question.delta", { delta: "（可能缺帧）" }, 2700),
+      streamEvent("evt_side_terminal", "run.succeeded", { answer: "最终完整答案" }, 3200),
+      streamEvent("evt_side_terminal", "run.succeeded", { answer: "最终完整答案" }, 3300)
+    ]
+  });
+  await mockBackendApi(page, {
+    sideQuestionRequests,
+    sideQuestionRunIds: ["run_side_question_1"],
+    recentWorkspaces: {
+      app_gcms: { ...workspace(), appId: "app_gcms", versionId: "awv_20260715", applicationWorkspaceId: "awp_1" }
+    },
+    personalWorkspaces: { awv_20260715: [defaultPersonalWorkspace("awv_20260715")] },
+    sessions: [session()],
+    sessionMessages: [petContextMessage()]
+  });
+  await gotoWorkbench(page);
+
+  await selectPetContextSession(page);
+  await openPetSideQuestion(page);
+  await page.getByTestId("robot-side-question-input").fill("这个对话干嘛了？");
+  await page.getByTestId("robot-side-question-submit").click();
+
+  await expect(page.getByTestId("robot-side-question-progress")).toHaveText("正在读取当前上下文");
+  await page.locator(".figma-panel-center").dispatchEvent("click");
+  await expect(page.getByTestId("robot-side-question")).toBeVisible();
+  await expect(page.getByTestId("robot-side-question-answer")).toContainText("增量片段");
+  await expect(page.getByTestId("robot-side-question-answer")).toHaveText("最终完整答案");
+  await page.waitForTimeout(120);
+  await expect(page.getByTestId("robot-side-question-answer")).toHaveText("最终完整答案");
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & { __petSideQuestionReconnects?: Array<{ runId: string; lastEventId: string }> }
+  ).__petSideQuestionReconnects)).toEqual([{ runId: "run_side_question_1", lastEventId: "evt_side_progress" }]);
+  expect(sideQuestionRequests).toEqual([{
+    question: "这个对话干嘛了？",
+    messageId: "msg_remote_pet_context",
+    model: "anthropic/sonnet"
+  }]);
+});
+
+test("pet side-question keeps a failure editable and starts a fresh run on retry", async ({ page }) => {
+  const sideQuestionRequests: Array<Record<string, unknown>> = [];
+  await installPetSideQuestionEventSource(page, {
+    run_side_question_failed: [
+      streamEvent("evt_failed_progress", "side_question.progress", { stage: "reading" }, 30),
+      streamEvent("evt_failed_terminal", "run.failed", { message: "旁路问答暂时失败" }, 80)
+    ],
+    run_side_question_retry: [
+      streamEvent("evt_retry_progress", "side_question.progress", { stage: "composing" }, 30),
+      streamEvent("evt_retry_terminal", "run.succeeded", { answer: "重试后的答案" }, 100)
+    ]
+  });
+  await mockBackendApi(page, {
+    sideQuestionRequests,
+    sideQuestionRunIds: ["run_side_question_failed", "run_side_question_retry"],
+    recentWorkspaces: {
+      app_gcms: { ...workspace(), appId: "app_gcms", versionId: "awv_20260715", applicationWorkspaceId: "awp_1" }
+    },
+    personalWorkspaces: { awv_20260715: [defaultPersonalWorkspace("awv_20260715")] },
+    sessions: [session()],
+    sessionMessages: [petContextMessage()]
+  });
+  await gotoWorkbench(page);
+
+  await selectPetContextSession(page);
+  await openPetSideQuestion(page);
+  const input = page.getByTestId("robot-side-question-input");
+  await input.fill("第一次问题");
+  await page.getByTestId("robot-side-question-submit").click();
+  await expect(page.locator(".figma-robot-side-question-error")).toHaveText("旁路问答暂时失败");
+  await expect(input).toBeEditable();
+
+  await input.fill("修改后重试");
+  await page.getByTestId("robot-side-question-submit").click();
+  await expect(page.getByTestId("robot-side-question-answer")).toHaveText("重试后的答案");
+  expect(sideQuestionRequests).toEqual([
+    { question: "第一次问题", messageId: "msg_remote_pet_context", model: "anthropic/sonnet" },
+    { question: "修改后重试", messageId: "msg_remote_pet_context", model: "anthropic/sonnet" }
+  ]);
+});
+
 test("a title-pending run keeps its SSE open until the synchronized native title arrives", async ({ page }) => {
   await page.addInitScript(() => {
     type StreamProbe = { runId: string; closed: boolean };
@@ -3000,6 +3091,103 @@ test("workspace cascade submenu shifts up when it would overflow the viewport bo
   expect(submenuBox!.y + submenuBox!.height).toBeLessThanOrEqual(viewport!.height);
 });
 
+type PetStreamEvent = {
+  eventId: string;
+  type: string;
+  payload: Record<string, unknown>;
+  delayMs: number;
+  disconnectAfter?: boolean;
+};
+
+function streamEvent(
+  eventId: string,
+  type: string,
+  payload: Record<string, unknown>,
+  delayMs: number,
+  disconnectAfter = false
+): PetStreamEvent {
+  return { eventId, type, payload, delayMs, disconnectAfter };
+}
+
+async function installPetSideQuestionEventSource(page: Page, scenarios: Record<string, PetStreamEvent[]>) {
+  await page.addInitScript(({ scenarios }) => {
+    const reconnects: Array<{ runId: string; lastEventId: string }> = [];
+    (window as Window & { __petSideQuestionReconnects?: typeof reconnects }).__petSideQuestionReconnects = reconnects;
+    class MockRunEventSource {
+      onopen: ((event: Event) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      private readonly listeners = new Map<string, Set<EventListener>>();
+      private closed = false;
+      private lastEventId = "";
+
+      constructor(readonly url: string) {
+        const runId = decodeURIComponent(url).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
+        window.setTimeout(() => this.onopen?.(new Event("open")), 0);
+        const events = scenarios[runId] ?? (runId === "run_1"
+          ? [{ eventId: "evt_main_terminal", type: "run.succeeded", payload: {}, delayMs: 10 }]
+          : []);
+        events.forEach((item, index) => {
+          window.setTimeout(() => this.emit(item, runId, index + 1), item.delayMs);
+        });
+      }
+
+      addEventListener(type: string, listener: EventListener) {
+        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      removeEventListener(type: string, listener: EventListener) {
+        this.listeners.get(type)?.delete(listener);
+      }
+
+      close() {
+        this.closed = true;
+      }
+
+      private emit(item: PetStreamEvent, runId: string, seq: number) {
+        if (this.closed) return;
+        const message = new MessageEvent(item.type, {
+          data: JSON.stringify({
+            eventId: item.eventId,
+            runId,
+            seq,
+            type: item.type,
+            traceId: "trace_pet_side_question",
+            occurredAt: "2026-07-11T00:00:00Z",
+            payload: item.payload
+          }),
+          lastEventId: item.eventId
+        });
+        this.lastEventId = item.eventId;
+        this.listeners.get(item.type)?.forEach((listener) => listener(message));
+        if (item.disconnectAfter && !this.closed) {
+          // 原生 EventSource 会在同一个 JS 实例内携带 Last-Event-ID 自动重连；fake 复现该生命周期。
+          reconnects.push({ runId, lastEventId: this.lastEventId });
+          this.onerror?.(new Event("error"));
+          window.setTimeout(() => {
+            if (!this.closed) this.onopen?.(new Event("open"));
+          }, 20);
+        }
+      }
+    }
+
+    (window as Window & { EventSource: typeof EventSource }).EventSource = MockRunEventSource as unknown as typeof EventSource;
+  }, { scenarios });
+}
+
+async function selectPetContextSession(page: Page) {
+  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: /E2E Session/ }).click();
+  await expect(page.locator(".figma-chat-title")).toHaveText("E2E Session");
+}
+
+async function openPetSideQuestion(page: Page) {
+  await page.getByTestId("robot-visibility-toggle").click();
+  await page.getByTestId("figma-robot").click();
+  await expect(page.getByTestId("robot-side-question")).toBeVisible();
+}
+
 async function mockBackendApi(
   page: Page,
   capture: {
@@ -3085,6 +3273,8 @@ async function mockBackendApi(
     runtimeStateEventRequests?: string[];
     skipInitialAuthToken?: boolean;
     loginRequests?: Array<{ username?: string; password?: string }>;
+    sideQuestionRequests?: Array<Record<string, unknown>>;
+    sideQuestionRunIds?: string[];
   } = {}
 ) {
   await page.exposeFunction("__taRecordWorkspaceFileRequest", (workspaceId: string, path: string) => {
@@ -3626,6 +3816,13 @@ async function mockBackendApi(
       await route.fulfill(json({ runId: "run_history", files: capture.historyDiffFiles ?? [] }));
       return;
     }
+    if (method === "POST" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/side-question\/runs$/.test(url.pathname)) {
+      capture.sideQuestionRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      const requestIndex = (capture.sideQuestionRequests?.length ?? 1) - 1;
+      const runId = capture.sideQuestionRunIds?.[requestIndex] ?? `run_side_question_${requestIndex + 1}`;
+      await route.fulfill(json({ runId }));
+      return;
+    }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/agents") {
       const workspaceId = url.searchParams.get("workspaceId") ?? "";
       capture.agentRequests?.push(`${method} ${url.pathname}${url.search}`);
@@ -3878,6 +4075,18 @@ function session() {
     status: "ACTIVE",
     createdAt: "2026-06-19T00:00:00Z",
     updatedAt: "2026-06-19T00:00:00Z"
+  };
+}
+
+function petContextMessage() {
+  return {
+    messageId: "msg_pet_context",
+    remoteMessageId: "msg_remote_pet_context",
+    sessionId: "ses_1",
+    role: "ASSISTANT",
+    content: "当前任务上下文已准备",
+    createdAt: "2026-06-19T00:00:00Z",
+    runId: "run_history"
   };
 }
 

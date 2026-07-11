@@ -42,6 +42,7 @@ const props = withDefaults(
     sideQuestionAnswer?: string | null;
     sideQuestionError?: string | null;
     sideQuestionLoading?: boolean;
+    sideQuestionProgress?: string | null;
     showLeftPanel?: boolean;
     showRightPanel?: boolean;
     runtimeInventory?: RuntimeInventorySummary;
@@ -137,7 +138,8 @@ function closeHeaderMenus() {
   closeAppMenu();
   closeUserMenu();
   closeRuntimeInventory();
-  closeRobotQuestion();
+  // 等待旁路答案时，工作台其它区域仍可正常操作，且不会误关掉结果承载浮层。
+  if (!props.sideQuestionLoading) closeRobotQuestion();
 }
 
 function logout() {
@@ -316,6 +318,7 @@ const robotX = ref(0);
 const robotY = ref(0);
 const robotQuestionOpen = ref(false);
 const robotQuestionDraft = ref("");
+const robotQuestionInput = ref<HTMLTextAreaElement | null>(null);
 const robotDirection = ref<"left" | "right" | "front">("front");
 const robotTransition = ref("none");
 const robotFixed = ref(false);
@@ -584,6 +587,12 @@ function getBirthPosition() {
 // Exit logic (interrupted or naturally)
 function triggerExit() {
   if (robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
+    return;
+  }
+
+  // 浮层打开后由用户决定何时关闭；自动出现的宠物也不能在等待或阅读答案时自行离场。
+  if (robotQuestionOpen.value) {
+    scheduleNaturalExit();
     return;
   }
 
@@ -1168,6 +1177,7 @@ function onRobotClick() {
     clickTimer = setTimeout(() => {
       clickTimer = null;
       robotQuestionOpen.value = true;
+      void nextTick(() => robotQuestionInput.value?.focus());
     }, 250);
   }
 }
@@ -1192,6 +1202,7 @@ function toggleRobotVisibility() {
     inactivityTimer = null;
     robotState.value = "sleeping";
     robotKeepVisible.value = false;
+    closeRobotQuestion();
     resetInactivityTimer();
     return;
   }
@@ -1708,15 +1719,17 @@ function submitJoinApp() {
       class="figma-robot-side-question"
       data-testid="robot-side-question"
       :style="robotQuestionStyle"
-      aria-label="宠物旁路问答"
+      role="dialog"
+      aria-labelledby="figma-robot-side-question-title"
       @pointerdown.stop
       @click.stop
     >
       <header class="figma-robot-side-question-header">
-        <span>问问小宠物</span>
+        <span id="figma-robot-side-question-title">问问小宠物</span>
         <button type="button" aria-label="关闭宠物旁路问答" @click="closeRobotQuestion">×</button>
       </header>
       <textarea
+        ref="robotQuestionInput"
         v-model="robotQuestionDraft"
         data-testid="robot-side-question-input"
         class="figma-robot-side-question-input"
@@ -1737,8 +1750,24 @@ function submitJoinApp() {
         </button>
       </div>
       <div v-if="sideQuestionError" class="figma-robot-side-question-error">{{ sideQuestionError }}</div>
-      <div v-else-if="sideQuestionAnswer" data-testid="robot-side-question-answer" class="figma-robot-side-question-answer">
+      <div
+        v-else-if="sideQuestionAnswer"
+        data-testid="robot-side-question-answer"
+        class="figma-robot-side-question-answer"
+        role="status"
+        aria-live="polite"
+      >
         {{ sideQuestionAnswer }}
+      </div>
+      <div
+        v-else-if="sideQuestionLoading"
+        class="figma-robot-side-question-progress"
+        data-testid="robot-side-question-progress"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="figma-robot-side-question-progress-dot" aria-hidden="true"></span>
+        {{ sideQuestionProgress || "正在准备回答" }}
       </div>
     </section>
   </div>
@@ -1978,7 +2007,8 @@ function submitJoinApp() {
 }
 
 .figma-robot-side-question-answer,
-.figma-robot-side-question-error {
+.figma-robot-side-question-error,
+.figma-robot-side-question-progress {
   max-height: 150px;
   margin-top: 9px;
   overflow: auto;
@@ -1997,6 +2027,22 @@ function submitJoinApp() {
 .figma-robot-side-question-error {
   background: #fff4f2;
   color: #b04b3a;
+}
+
+.figma-robot-side-question-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: #f3f8fb;
+  color: #526b80;
+}
+
+.figma-robot-side-question-progress-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #5aa9a6;
 }
 
 .figma-runtime-inventory-summary {

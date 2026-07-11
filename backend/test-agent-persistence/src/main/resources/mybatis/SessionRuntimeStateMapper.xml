@@ -20,6 +20,7 @@
             select s.session_id
             from sessions s
             where s.status = 'ACTIVE'
+              and s.source_type != 'SIDE_QUESTION'
               and (
                 s.created_by_user_id = #{userId}
                 or exists (

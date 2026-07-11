@@ -331,6 +331,17 @@ export type SideQuestionResponse = {
   compacted: boolean;
 };
 
+/** 流式旁路问答由服务端固定只读 agent，浏览器只提交问题和上下文边界。 */
+export type SideQuestionRunRequest = {
+  question: string;
+  messageId?: string;
+  model?: string;
+};
+
+export type SideQuestionRunResponse = {
+  runId: string;
+};
+
 export type RunSessionTreeSessionResponse = {
   rootSessionId?: string | null;
   sessionId: string;
@@ -1228,6 +1239,9 @@ export type RunEventType =
   | "run.failed"
   | "run.cancelled"
   | "run.snapshot.reset"
+  | "side_question.started"
+  | "side_question.progress"
+  | "side_question.delta"
   | "assistant.message.delta"
   | "message.updated"
   | "message.removed"

@@ -129,6 +129,13 @@ class DefaultOpencodeClientFacadeTest {
                 "/tmp/demo",
                 null,
                 "run the tests",
+                List.of(OpencodePromptPart.text("run the tests")),
+                null,
+                "plan",
+                "只做只读检查并输出最终答案",
+                null,
+                null,
+                null,
                 "trace_1234567890abcdef")).block();
 
         assertThat(result.accepted()).isTrue();
@@ -136,6 +143,7 @@ class DefaultOpencodeClientFacadeTest {
         assertThat(gateway.lastOpencodeSessionId).isEqualTo("ses_remote1234567890abcdef");
         assertThat(gateway.lastPrompt).isEqualTo("run the tests");
         assertThat(gateway.lastParts).extracting(OpencodePromptPart::type).containsExactly("text");
+        assertThat(gateway.lastSystem).isEqualTo("只做只读检查并输出最终答案");
         assertThat(gateway.lastWorkspace).isNull();
     }
 
@@ -184,6 +192,46 @@ class DefaultOpencodeClientFacadeTest {
         assertThat(draft.type()).isEqualTo(RunEventType.ASSISTANT_MESSAGE_DELTA);
         assertThat(draft.payload()).containsEntry("text", "hello");
         assertThat(draft.payload()).containsEntry("rawType", "session.next.text.delta");
+    }
+
+    @Test
+    void observableStreamHandshakeFailureIsMappedWithoutRetryingTheConnection() {
+        AtomicInteger subscriptions = new AtomicInteger();
+        FakeGateway gateway = new FakeGateway();
+        gateway.openedEventStream = new OpencodeEventStream(
+                Mono.defer(() -> {
+                    subscriptions.incrementAndGet();
+                    return Mono.error(remoteError(503));
+                }),
+                Flux.never());
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 1);
+
+        OpencodeRunEventStream opened = facade.openRunEventStream(streamCommand());
+
+        assertThatThrownBy(() -> opened.ready().block())
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+        assertThat(subscriptions).hasValue(1);
+    }
+
+    @Test
+    void observableStreamBodyFailureIsMappedWithoutResubscribingTheOpenedBody() {
+        AtomicInteger subscriptions = new AtomicInteger();
+        FakeGateway gateway = new FakeGateway();
+        gateway.openedEventStream = new OpencodeEventStream(
+                Mono.empty(),
+                Flux.defer(() -> {
+                    subscriptions.incrementAndGet();
+                    return Flux.error(remoteError(503));
+                }));
+        OpencodeClientFacade facade = facade(gateway, Duration.ofMillis(10), 1);
+
+        OpencodeRunEventStream opened = facade.openRunEventStream(streamCommand());
+
+        assertThatThrownBy(() -> opened.events().collectList().block())
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+        assertThat(subscriptions).hasValue(1);
     }
 
     @Test
@@ -383,6 +431,16 @@ class DefaultOpencodeClientFacadeTest {
                 "trace_1234567890abcdef");
     }
 
+    private static OpencodeStreamEventsCommand streamCommand() {
+        return new OpencodeStreamEventsCommand(
+                node(),
+                new RunId("run_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
+                "/tmp/demo",
+                null,
+                "trace_1234567890abcdef");
+    }
+
     private static WebClientResponseException remoteError(int status) {
         return WebClientResponseException.create(
                 status,
@@ -397,12 +455,14 @@ class DefaultOpencodeClientFacadeTest {
         private Mono<OpencodeHealthResult> health = Mono.just(new OpencodeHealthResult(true, node().baseUrl()));
         private java.util.function.Supplier<Mono<OpencodeHealthResult>> healthSupplier;
         private Flux<JsonNode> events = Flux.empty();
+        private OpencodeEventStream openedEventStream;
         private String lastTraceId;
         private String lastOpencodeSessionId;
         private String lastDirectory;
         private String lastWorkspace;
         private String lastTitle;
         private String lastMessageId;
+        private String lastSystem;
         private String lastCommand;
         private String lastArguments;
         private int lastLimit;
@@ -459,6 +519,7 @@ class DefaultOpencodeClientFacadeTest {
                 List<OpencodePromptPart> parts,
                 String messageId,
                 String agent,
+                String system,
                 String modelProviderId,
                 String modelId,
                 String variant,
@@ -470,6 +531,7 @@ class DefaultOpencodeClientFacadeTest {
             lastPrompt = prompt;
             lastParts = parts;
             lastMessageId = messageId;
+            lastSystem = system;
             return Mono.just(new OpencodeStartRunResult(true));
         }
 
@@ -505,6 +567,14 @@ class DefaultOpencodeClientFacadeTest {
             lastDirectory = directory;
             lastWorkspace = workspace;
             return events;
+        }
+
+        @Override
+        public OpencodeEventStream openEventStream(
+                ExecutionNode node, String directory, String workspace, String traceId) {
+            return openedEventStream == null
+                    ? new OpencodeEventStream(Mono.empty(), events)
+                    : openedEventStream;
         }
 
         @Override

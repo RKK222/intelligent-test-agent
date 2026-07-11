@@ -82,6 +82,7 @@ import {
   createConversationRunContextCache,
   startRunWithConversationContext
 } from "./conversation-run-context";
+import { useSideQuestionRun } from "./useSideQuestionRun";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy, type FollowUpDraft } from "./follow-up-queue";
 import {
   assistantSummaryMessageId,
@@ -313,9 +314,7 @@ let lastDuration: string | undefined;
 let lastTokens = 0;
 const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
-const robotSideQuestionAnswer = ref<string | null>(null);
-const robotSideQuestionError = ref<string | null>(null);
-const robotSideQuestionLoading = ref(false);
+const robotSideQuestion = useSideQuestionRun({ api, baseUrl: apiBaseUrl });
 const serverWorkspacePickerOpen = ref(false);
 const serverWorkspacePickerLoading = ref(false);
 const serverWorkspaceServers = shallowRef<WorkspaceBackendServer[]>([]);
@@ -1618,6 +1617,14 @@ watch([run, pendingSessionTitleRunId], ([r, pendingTitleRunId], _old, onCleanup)
   onCleanup(() => subscription.close());
 });
 
+// 切换会话时释放旁路问答展示；主 Run 的恢复仍统一由 runtime-state 流和带 fence 的 fallback 接管。
+watch(
+  () => session.value?.sessionId,
+  (sessionId) => {
+    robotSideQuestion.resetForSessionChange(sessionId);
+  },
+  { immediate: true }
+);
 // agent 写文件用的 opencode 工具名；这些工具的 input 带文件路径，完成时磁盘已写入。
 const LIVE_WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "str_replace", "multi_edit", "create_file", "delete"]);
 
@@ -3371,31 +3378,20 @@ function latestRemoteMessageId(): string | undefined {
 }
 
 async function handleRobotSideQuestion(question: string) {
-  robotSideQuestionAnswer.value = null;
-  robotSideQuestionError.value = null;
   if (!session.value?.sessionId) {
-    robotSideQuestionError.value = "当前还没有可复用的对话上下文";
+    robotSideQuestion.error.value = "当前还没有可复用的对话上下文";
     return;
   }
-  robotSideQuestionLoading.value = true;
-  try {
-    const result = await api.askSideQuestion(session.value.sessionId, {
-      question,
-      messageId: latestRemoteMessageId(),
-      agent: "plan",
-      model: selectedModel.value || undefined
-    });
-    robotSideQuestionAnswer.value = result.answer;
-  } catch (error) {
-    robotSideQuestionError.value = error instanceof BackendApiError ? error.message : "旁路问答暂时不可用";
-  } finally {
-    robotSideQuestionLoading.value = false;
-  }
+  await robotSideQuestion.submit({
+    sessionId: session.value.sessionId,
+    question,
+    messageId: latestRemoteMessageId(),
+    model: selectedModel.value || undefined
+  });
 }
 
 function handleCloseRobotSideQuestion() {
-  robotSideQuestionAnswer.value = null;
-  robotSideQuestionError.value = null;
+  robotSideQuestion.reset();
 }
 
 function summarizePromptParts(parts: PromptPart[]) {
@@ -4489,9 +4485,10 @@ async function handleLogout() {
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
-    :side-question-answer="robotSideQuestionAnswer"
-    :side-question-error="robotSideQuestionError"
-    :side-question-loading="robotSideQuestionLoading"
+    :side-question-answer="robotSideQuestion.answer.value"
+    :side-question-error="robotSideQuestion.error.value"
+    :side-question-loading="robotSideQuestion.loading.value"
+    :side-question-progress="robotSideQuestion.progress.value"
     :runtime-inventory="runtimeInventoryForShell"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"

@@ -35,13 +35,7 @@ import org.springframework.stereotype.Service;
 public class OpencodeRuntimeApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OpencodeRuntimeApplicationService.class);
-    private static final int SIDE_QUESTION_CONTEXT_MESSAGE_LIMIT = 40;
-    private static final int SIDE_QUESTION_CONTEXT_CHAR_LIMIT = 48_000;
-    private static final int SIDE_QUESTION_MAX_LENGTH = 4_000;
-    private static final String SIDE_QUESTION_SYSTEM_PROMPT = "You are a side-question answerer. "
-            + "You may use read-only inspection tools when needed to verify the answer, but never edit files, run destructive commands, or change state. "
-            + "After the read-only tools finish, return only a concise natural-language answer to the user's question. "
-            + "Do not stop after a tool call. If the context is insufficient, say so plainly.";
+    private static final SideQuestionAnswerExtractor SIDE_QUESTION_ANSWER_EXTRACTOR = new SideQuestionAnswerExtractor();
 
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentRuntimeTargetResolver targetResolver;
@@ -434,22 +428,18 @@ public class OpencodeRuntimeApplicationService {
      */
     public SideQuestionResult sideQuestion(String sessionId, SideQuestionInput input, String traceId) {
         Objects.requireNonNull(input, "input must not be null");
-        if (input.question().length() > SIDE_QUESTION_MAX_LENGTH) {
-            throw new IllegalArgumentException("question exceeds the maximum length");
-        }
+        String question = SideQuestionPolicy.requireQuestion(input.question());
 
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         AgentSessionMessagesResult context = location.runtime().sessionMessages(new AgentSessionMessagesCommand(
                         location.node(),
                         location.remoteSessionId(),
-                        SIDE_QUESTION_CONTEXT_MESSAGE_LIMIT + 1,
+                        SideQuestionPolicy.CONTEXT_MESSAGE_LIMIT + 1,
                         "desc",
                         null,
                         traceId))
                 .block();
-        boolean shouldCompact = context != null
-                && (context.messages().size() > SIDE_QUESTION_CONTEXT_MESSAGE_LIMIT
-                || estimateContextChars(context) > SIDE_QUESTION_CONTEXT_CHAR_LIMIT);
+        boolean shouldCompact = SideQuestionPolicy.shouldCompact(context);
 
         LinkedHashMap<String, Object> forkBody = new LinkedHashMap<>();
         if (input.messageId() != null) {
@@ -488,14 +478,14 @@ public class OpencodeRuntimeApplicationService {
                 messageBody.put("model", Map.of("providerID", model.providerId(), "modelID", model.modelId()));
             }
             // 使用 plan agent 的权限边界允许只读检查；不再用 tools=false，否则模型只能把工具调用协议写成文本而无法得到工具结果。
-            messageBody.put("system", SIDE_QUESTION_SYSTEM_PROMPT);
-            messageBody.put("parts", List.of(Map.of("type", "text", "text", input.question())));
+            messageBody.put("system", SideQuestionPolicy.SYSTEM_PROMPT);
+            messageBody.put("parts", List.of(Map.of("type", "text", "text", question)));
             Object answerResponse = post(
                     location,
                     "/session/" + encodePath(temporarySessionId) + "/message",
                     messageBody,
                     traceId);
-            String answer = extractAnswer(answerResponse);
+            String answer = SIDE_QUESTION_ANSWER_EXTRACTOR.extract(answerResponse);
             if (answer == null) {
                 throw new IllegalStateException("opencode side question response did not contain a natural-language answer");
             }
@@ -736,35 +726,6 @@ public class OpencodeRuntimeApplicationService {
         return objectMapper.convertValue(result.body(), Object.class);
     }
 
-    /**
-     * 估算 fork 上下文规模，只计算字符串内容并对递归结构做统一遍历；该值用于触发 compact，不作为精确 token 计费。
-     */
-    private int estimateContextChars(AgentSessionMessagesResult result) {
-        return result.messages().stream()
-                .mapToInt(message -> estimateValueChars(message.message()) + estimateValueChars(message.parts()))
-                .sum();
-    }
-
-    private int estimateValueChars(Object value) {
-        if (value instanceof String text) {
-            return text.length();
-        }
-        if (value instanceof Map<?, ?> map) {
-            return map.entrySet().stream().mapToInt(entry -> estimateValueChars(entry.getKey()) + estimateValueChars(entry.getValue())).sum();
-        }
-        if (value instanceof Iterable<?> iterable) {
-            int total = 0;
-            for (Object item : iterable) {
-                total += estimateValueChars(item);
-                if (total > SIDE_QUESTION_CONTEXT_CHAR_LIMIT) {
-                    return total;
-                }
-            }
-            return total;
-        }
-        return 0;
-    }
-
     private String extractSessionId(Object response) {
         if (!(response instanceof Map<?, ?> map)) {
             return null;
@@ -782,80 +743,6 @@ public class OpencodeRuntimeApplicationService {
             }
         }
         return null;
-    }
-
-    private String extractAnswer(Object response) {
-        if (!(response instanceof Map<?, ?> map)) {
-            return sanitizeSideQuestionText(text(response));
-        }
-        String partsText = extractPartsText(map.get("parts"));
-        if (partsText != null) {
-            return sanitizeSideQuestionText(partsText);
-        }
-        for (String key : List.of("answer", "content", "text")) {
-            String value = text(map.get(key));
-            if (value != null) {
-                return sanitizeSideQuestionText(value);
-            }
-        }
-        return extractAnswer(map.get("info"));
-    }
-
-    /**
-     * 过滤模型把工具调用协议伪装成普通文本的情况；只有自然语言片段可以进入宠物气泡。
-     */
-    private String sanitizeSideQuestionText(String value) {
-        if (value == null) {
-            return null;
-        }
-        String remaining = value;
-        StringBuilder result = new StringBuilder();
-        while (true) {
-            int start = remaining.indexOf("<tool_calls");
-            if (start < 0) {
-                result.append(remaining);
-                break;
-            }
-            result.append(remaining, 0, start);
-            int closingStart = remaining.indexOf("</tool_calls", start);
-            if (closingStart < 0) {
-                break;
-            }
-            int closingEnd = remaining.indexOf('>', closingStart);
-            if (closingEnd < 0) {
-                break;
-            }
-            remaining = remaining.substring(closingEnd + 1);
-        }
-        String normalized = result.toString().trim();
-        return normalized.isEmpty() || normalized.contains("<tool_call") ? null : normalized;
-    }
-
-    private String extractPartsText(Object value) {
-        if (!(value instanceof Iterable<?> iterable)) {
-            return null;
-        }
-        StringBuilder builder = new StringBuilder();
-        for (Object item : iterable) {
-            if (!(item instanceof Map<?, ?> part)) {
-                continue;
-            }
-            String type = text(part.get("type"));
-            if (type != null && !type.equals("text")) {
-                continue;
-            }
-            String text = text(part.get("text"));
-            if (text == null) {
-                text = text(part.get("content"));
-            }
-            if (text != null) {
-                if (!builder.isEmpty()) {
-                    builder.append('\n');
-                }
-                builder.append(text);
-            }
-        }
-        return builder.isEmpty() ? null : builder.toString();
     }
 
     private ModelSelection parseModel(String model) {
@@ -1028,9 +915,14 @@ public class OpencodeRuntimeApplicationService {
             if (!builder.isEmpty()) {
                 builder.append('/');
             }
-            builder.append(URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20"));
+            builder.append(encodePathSegment(segment));
         }
         return builder.toString();
+    }
+
+    /** 对单个远端 URL path segment 编码，供同包的受控 runtime 调用复用。 */
+    static String encodePathSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
 }

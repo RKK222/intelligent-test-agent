@@ -14,6 +14,8 @@ import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionRepository;
+import com.icbc.testagent.domain.session.ConversationSourceType;
+import com.icbc.testagent.domain.session.SessionStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
@@ -133,6 +135,38 @@ public class AgentRuntimeTargetResolver {
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
                         "会话绑定的 agent 执行节点不存在",
+                        Map.of("agentId", resolvedAgentId, "nodeId", binding.executionNodeId().value())));
+        return new SessionRuntimeTarget(runtime, node, workspaceRoot(workspace), binding.remoteSessionId());
+    }
+
+    /**
+     * 仅按平台 Session 已持久化的 agent 映射还原原执行目标，不读取当前用户进程 binding，
+     * 用于重启后的内部会话清理，避免把 DELETE 错发到用户后来迁移到的新节点。
+     */
+    public SessionRuntimeTarget mappedSideQuestionSessionTarget(String agentId, SessionId sessionId, String traceId) {
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+        Session session = findSession(sessionId);
+        if (session.status() != SessionStatus.ARCHIVED
+                || session.sourceType() != ConversationSourceType.SIDE_QUESTION) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "Session 不是已归档的旁路内部会话",
+                    Map.of("sessionId", sessionId.value()));
+        }
+        Workspace workspace = findWorkspace(session.workspaceId());
+        AgentSessionBinding binding = findAgentBinding(resolvedAgentId, session, traceId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "Session 尚未保存远端 agent 会话映射",
+                        Map.of(
+                                "sessionId", sessionId.value(),
+                                "agentId", resolvedAgentId,
+                                "reason", "REMOTE_SESSION_MAPPING_MISSING")));
+        ExecutionNode node = executionNodeRepository.findById(binding.executionNodeId())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "会话映射的 agent 执行节点不存在",
                         Map.of("agentId", resolvedAgentId, "nodeId", binding.executionNodeId().value())));
         return new SessionRuntimeTarget(runtime, node, workspaceRoot(workspace), binding.remoteSessionId());
     }

@@ -1,11 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { access, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
 
 import {
   apiDelete,
   apiGet,
   apiPost,
+  authHeaders,
   assertNativeSessionAbsentInSqlite,
   createCleanupScope,
   resolveOwnedOpenCodeDatabase,
@@ -107,6 +110,108 @@ test.describe("phase 11 real service integration", () => {
           const safePath = await resolveOwnedCleanupPath(workspace.workspaceRootPath, ownedRoot, workspace.marker);
           await rm(safePath, { recursive: true, force: true });
           await expectPathAbsent(safePath);
+        }
+      ]);
+    }
+  });
+
+  test("pet side-question streams an isolated answer and removes its temporary fork", async () => {
+    const workspace = await createManagedWorkspaceFixture();
+    let sessionId: string | undefined;
+    let mainRemoteSessionId: string | undefined;
+    let opencodeBaseUrl: string | undefined;
+    let openCodeDatabasePath: string | undefined;
+    let observedForkIds: string[] = [];
+    try {
+      const processInfo = await apiGet<{ port?: number; baseUrl?: string }>("/api/internal/agent/opencode/processes/me");
+      opencodeBaseUrl = processInfo.baseUrl;
+      openCodeDatabasePath = (
+        await resolveOwnedOpenCodeDatabase(processInfo, { projectRoot: path.resolve(process.cwd(), "..") })
+      ).databasePath;
+      const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
+        workspaceId: workspace.workspaceId,
+        title: "Pet side-question real E2E"
+      });
+      sessionId = session.sessionId;
+      const mainPrompt = "请只读检查当前工作区，并用简短自然语言说明可见的测试文件。不要修改文件。";
+      await apiPost("/api/internal/agent/opencode/runs", {
+        sessionId,
+        prompt: mainPrompt,
+        parts: [{ type: "text", text: mainPrompt }]
+      });
+      mainRemoteSessionId = await resolveRemoteSessionId(sessionId, () => undefined);
+      const beforeMessages = await apiGet<{ items?: unknown[] }>(
+        `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/messages?page=1&size=100&refresh=false`
+      );
+      const baselineNativeSessions = await listNativeSessionIds(openCodeDatabasePath);
+      const sideQuestion = "当前主对话正在做什么？只给简短结论。";
+      const started = await apiPost<{ runId: string }>(
+        `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/side-question/runs`,
+        { question: sideQuestion }
+      );
+      const capture = captureRunEventsUntilTerminal(started.runId);
+      observedForkIds = await observeNewNativeSessionIds(
+        openCodeDatabasePath,
+        baselineNativeSessions,
+        capture.finished
+      );
+      const events = await capture.finished;
+      const nativeSessionsAfterTerminal = await listNativeSessionIds(openCodeDatabasePath);
+      observedForkIds = observedForkIds.filter((id) => !nativeSessionsAfterTerminal.includes(id));
+      const durable = events.filter((event) => typeof event.seq === "number" && event.seq > 0);
+      expect(durable.map((event) => event.type).slice(0, 3)).toEqual([
+        "run.created",
+        "run.started",
+        "side_question.started"
+      ]);
+      expect(events.some((event) => event.type === "side_question.progress")).toBe(true);
+      const terminal = events.find((event) => event.type === "run.succeeded");
+      expect(typeof terminal?.payload?.answer).toBe("string");
+      expect(String(terminal?.payload?.answer)).not.toContain("<tool_calls");
+      expect(events.every((event) => event.type.startsWith("run.") || event.type.startsWith("side_question."))).toBe(true);
+      const afterMessages = await apiGet<{ items?: unknown[] }>(
+        `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/messages?page=1&size=100&refresh=false`
+      );
+      expect(JSON.stringify(afterMessages.items ?? [])).not.toContain(sideQuestion);
+      expect((afterMessages.items?.length ?? 0)).toBeGreaterThanOrEqual(beforeMessages.items?.length ?? 0);
+      expect(observedForkIds).not.toHaveLength(0);
+      await expect
+        .poll(() => listNativeSessionIds(openCodeDatabasePath!), { timeout: 20_000, intervals: [200, 500, 1_000] })
+        .not.toEqual(expect.arrayContaining(observedForkIds));
+    } finally {
+      const ownedSessionId = sessionId;
+      const ownedRemoteSessionId = mainRemoteSessionId;
+      const ownedOpencodeBaseUrl = opencodeBaseUrl;
+      const ownedDatabasePath = openCodeDatabasePath;
+      const ownedForkIds = observedForkIds;
+      await runCleanupStages([
+        async () => {
+          if (!ownedSessionId) return;
+          const activeRun = await apiGet<{ runId: string } | null>(
+            `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}/active-run`
+          );
+          if (activeRun?.runId) await apiPost(`/api/internal/agent/opencode/runs/${encodeURIComponent(activeRun.runId)}/cancel`, {});
+        },
+        async () => {
+          if (!ownedDatabasePath) return;
+          for (const forkId of ownedForkIds) await assertNativeSessionAbsentInSqlite(ownedDatabasePath, forkId);
+        },
+        async () => {
+          if (!ownedRemoteSessionId || !ownedOpencodeBaseUrl) return;
+          await deleteNativeSession(ownedOpencodeBaseUrl, ownedRemoteSessionId, workspace.workspaceRootPath);
+        },
+        async () => {
+          if (ownedSessionId) await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}`);
+        },
+        async () => {
+          await apiDelete(
+            `/api/internal/platform/configuration-management/applications/${encodeURIComponent(workspace.appId)}/workspaces/${encodeURIComponent(workspace.applicationWorkspaceId)}`
+          );
+        },
+        async () => {
+          const ownedRoot = path.resolve(process.cwd(), "../.testagent/agent-opencode/workspace");
+          const safePath = await resolveOwnedCleanupPath(workspace.workspaceRootPath, ownedRoot, workspace.marker);
+          await rm(safePath, { recursive: true, force: true });
         }
       ]);
     }
@@ -227,6 +332,86 @@ type ManagedWorkspaceFixture = {
   workspaceId: string;
   workspaceRootPath: string;
 };
+
+type CapturedRunEvent = { seq: number; type: string; payload: Record<string, unknown> };
+
+/** 真实 E2E 只通过平台 RunEvent SSE 收集旁路可见事件，不接触生产浏览器外的 OpenCode 事件流。 */
+function captureRunEventsUntilTerminal(runId: string): { finished: Promise<CapturedRunEvent[]> } {
+  const controller = new AbortController();
+  const finished = new Promise<CapturedRunEvent[]>(async (resolve, reject) => {
+    const timeout = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`side-question Run ${runId} did not reach a terminal event within 120 seconds`));
+    }, 120_000);
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/internal/agent/opencode/runs/${encodeURIComponent(runId)}/events`, {
+        headers: { ...authHeaders(), Accept: "text/event-stream" },
+        signal: controller.signal
+      });
+      if (!response.ok || !response.body) throw new Error(`RunEvent SSE failed: ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const events: CapturedRunEvent[] = [];
+      let buffer = "";
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        buffer += decoder.decode(next.value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const data = frame
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trim())
+            .join("\n");
+          if (!data) continue;
+          const parsed = JSON.parse(data) as CapturedRunEvent;
+          events.push(parsed);
+          if (parsed.type === "run.succeeded" || parsed.type === "run.failed" || parsed.type === "run.cancelled") {
+            clearTimeout(timeout);
+            controller.abort();
+            resolve(events);
+            return;
+          }
+        }
+      }
+      clearTimeout(timeout);
+      reject(new Error(`RunEvent SSE ended before terminal event for ${runId}`));
+    } catch (error) {
+      clearTimeout(timeout);
+      if (controller.signal.aborted) return;
+      reject(error);
+    }
+  });
+  return { finished };
+}
+
+/** 仅在真实 E2E 进程内读取测试用户自有 SQLite，记录 fork 曾出现的 ID 以验证清理。 */
+async function observeNewNativeSessionIds(
+  databasePath: string,
+  baseline: string[],
+  terminal: Promise<unknown>
+): Promise<string[]> {
+  const known = new Set(baseline);
+  const discovered = new Set<string>();
+  let terminalReached = false;
+  void terminal.finally(() => {
+    terminalReached = true;
+  });
+  while (!terminalReached) {
+    for (const id of await listNativeSessionIds(databasePath)) {
+      if (!known.has(id)) discovered.add(id);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+  return [...discovered];
+}
+
+async function listNativeSessionIds(databasePath: string): Promise<string[]> {
+  const { stdout } = await promisify(execFile)("sqlite3", ["-readonly", databasePath, "select id from session;"]);
+  return stdout.split("\n").map((value) => value.trim()).filter(Boolean);
+}
 
 async function establishOpencodeMapping(sessionId: string): Promise<{ webSocketUrl: string } | null> {
   try {

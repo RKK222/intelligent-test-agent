@@ -108,4 +108,15 @@
         order by updated_at asc, id asc
         limit #{limit}
     </select>
+
+    <select id="findStaleActiveSideQuestionRuns" resultMap="RunRowMap">
+        select
+        <include refid="RunColumns"/>
+        from runs
+        where source_type = 'SIDE_QUESTION'
+          and status in ('PENDING', 'RUNNING', 'CANCELLING')
+          and updated_at &lt; #{updatedBefore}
+        order by updated_at asc, id asc
+        limit #{limit}
+    </select>
 </mapper>

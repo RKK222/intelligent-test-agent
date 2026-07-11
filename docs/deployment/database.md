@@ -717,9 +717,9 @@ V10 种子数据对 F-COSS 的影响：
 
 | 表 | 字段 | 说明 |
 |---|---|---|
-| `sessions` | `source_type`、`source_ref_id`、`created_by_user_id` | 会话来源，默认 `MANUAL`；`SCHEDULED_TASK` 用于未来定时会话。 |
-| `runs` | `source_type`、`source_ref_id`、`triggered_by_user_id` | Run 来源，默认 `MANUAL`。 |
-| `session_messages` | `source_type`、`source_ref_id`、`sender_user_id` | 消息来源，默认 `MANUAL`。 |
+| `sessions` | `source_type`、`source_ref_id`、`created_by_user_id` | 会话来源，默认 `MANUAL`；支持 `SCHEDULED_TASK` 和内部 `SIDE_QUESTION`。 |
+| `runs` | `source_type`、`source_ref_id`、`triggered_by_user_id` | Run 来源，默认 `MANUAL`；宠物旁路 Run 使用 `SIDE_QUESTION`。 |
+| `session_messages` | `source_type`、`source_ref_id`、`sender_user_id` | 消息来源，默认 `MANUAL`；允许值注释包含 `SIDE_QUESTION`。 |
 
 兼容策略：
 
@@ -1057,3 +1057,7 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 - 状态、来源类型等枚举字段标注可选值，如：`ACTIVE/ARCHIVED`、`MANUAL/SCHEDULED_TASK`
 - JSON字段标注结构样例，如：`{"tools": ["git", "docker"]}`、`["text","image"]`
 - 已有中文注释的表（`common_parameters`、`workspace_create_operations`、`agent_config_worktrees`、`agent_config_operations`、`application_workspace_version_replicas`）不再重复添加
+
+## V20260711120000 旁路问答来源注释
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260711120000__document_side_question_run_source.sql` 只把 `sessions`、`runs`、`session_messages` 三个 `source_type` 字段的允许值注释扩展为 `MANUAL/SCHEDULED_TASK/SIDE_QUESTION`。该迁移不改变表结构、约束或索引，也不写入任何业务、测试或演示数据。

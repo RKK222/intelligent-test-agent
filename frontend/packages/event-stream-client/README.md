@@ -7,7 +7,7 @@
 ## 主要职责
 
 - 连接 `/api/internal/agent/{agentId}/runs/{runId}/events`，`agentId` 默认 `opencode`；旧 `/api/runs/{runId}/events` 已作废并返回 `410 API_GONE`。
-- 监听并按原样转发平台 RunEvent wire name，包括既有的 `session.updated`；标题等业务状态由上层应用按会话范围消费 `platformSessionTitleSynchronized/platformSessionTitle` 平台确认字段处理。
+- 监听并按原样转发平台 RunEvent wire name，包括 `side_question.started/progress/delta` 和既有 `session.updated`；旁路 delta 与其它 transient 事件一样按真实 `eventId` 去重，最终答案由上层以 `run.succeeded.payload.answer` 校准；标题等业务状态由上层应用按会话范围消费 `platformSessionTitleSynchronized/platformSessionTitle` 平台确认字段处理。
 - 将 `run.snapshot.reset` 作为已知 transient 事件投递给上层；该事件 `seq=0` 且没有 SSE `id`，client 不从 payload `seq/eventId` 推导或更新 `Last-Event-ID`，snapshot 的清空/重放由上层 reducer 负责。
 - 所有事件（包括 transient 文本增量）优先按 `eventId` 去重，兼容缺失 `eventId` 的旧事件时才回退 `runId + seq`；`seq=0` 且缺失 `eventId` 的旧增量不能按固定序号互相去重。
 - 订阅只投递与当前 `runId` 完全一致的事件；调用 `close()` 后，即使浏览器还有已排队的旧 listener 回调，也不会继续触发 `onEvent`。

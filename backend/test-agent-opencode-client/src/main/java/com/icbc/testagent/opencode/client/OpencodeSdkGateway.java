@@ -52,6 +52,7 @@ public interface OpencodeSdkGateway {
             java.util.List<OpencodePromptPart> parts,
             String messageId,
             String agent,
+            String system,
             String modelProviderId,
             String modelId,
             String variant,
@@ -79,6 +80,19 @@ public interface OpencodeSdkGateway {
      * 订阅远端事件 SSE，保持 JsonNode 原文供 facade 做平台事件映射。
      */
     Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId);
+
+    /**
+     * 打开可观测握手的 SSE；未实现时拒绝以空信号伪装连接成功。
+     */
+    default OpencodeEventStream openEventStream(
+            ExecutionNode node,
+            String directory,
+            String workspace,
+            String traceId) {
+        return new OpencodeEventStream(
+                Mono.error(new UnsupportedOperationException("observable event stream is not implemented")),
+                streamEvents(node, directory, workspace, traceId));
+    }
 
     /**
      * 调用远端 Diff API，并返回平台 Diff DTO。

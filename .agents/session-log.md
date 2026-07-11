@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-11 - 将宠物旁路问答升级为可回放的 SSE 流式任务
+
+- Why:
+  - 宠物提问此前只能同步等待，浮层会暴露工具协议或长时间无反馈；用户要求在不污染主会话的前提下持续显示真实进度与最终结果，并在临时 fork 异常遗留时自动收敛。
+- What:
+  - 新增 `SIDE_QUESTION` 内部归档 Session、流式启动 API、三类 `side_question.*` RunEvent、前端 `useSideQuestionRun` 组合式状态和真实三服务 E2E。旁路固定 `plan` 只读策略，支持预算超限时仅压缩临时 fork，终态以完整 answer 校准增量；临时 fork 成功、失败与进程中断后均会删除或由 5 分钟孤儿任务回收。补齐小宠物点击保持、会话切换清空、重连提示与可访问性回归；修正终端进程输出在 exit 竞争时可能早于 stdout 完成关闭的问题。
+- How:
+  - 复用既有 AgentRuntime 路由、Run/RunEvent 持久化与 SSE 订阅，不修改 generated SDK；所有新增关系查询走 MyBatis XML，Flyway 仅更新来源字段注释。SSE 只投影临时 session 的安全阶段和 assistant 文本，工具参数、主会话消息及临时 remote ID 都不会输出；终态写入通过独立事务 CAS 保证唯一。
+- Result:
+  - Chrome mock E2E 宠物流式问答 2/2 通过；真实 OpenCode 三服务 E2E 通过，验证 SSE 终态答案、主会话隔离和临时 fork 删除。test profile 三服务已重启并健康。后端全量 Maven 仍有 7 个既有 persistence H2 fixture 失败（PostgreSQL `on conflict` 与缺少用户外键数据）；前端全量仍有 1 个既有 `DirectoryRows` 嵌套删除按钮断言失败。本次相关定向测试、编译和真实链路均通过。
+
 ### 2026-07-11 - 回退对话视觉改造并恢复历史 Ask 继续链路
 
 - Why:

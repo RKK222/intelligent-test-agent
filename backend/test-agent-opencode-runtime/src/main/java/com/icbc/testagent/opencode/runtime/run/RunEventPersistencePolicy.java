@@ -20,7 +20,8 @@ public class RunEventPersistencePolicy {
             RunEventType.MESSAGE_REMOVED,
             RunEventType.MESSAGE_PART_UPDATED,
             RunEventType.MESSAGE_PART_REMOVED,
-            RunEventType.MESSAGE_PART_DELTA);
+            RunEventType.MESSAGE_PART_DELTA,
+            RunEventType.SIDE_QUESTION_DELTA);
 
     private static final Set<String> TOOL_SUMMARY_KEYS = Set.of(
             "tool",

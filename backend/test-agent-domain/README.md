@@ -27,7 +27,7 @@
 - Run 摘要控制面：`RunPersistenceAnchor`、`RunTerminalProjection`、`RunConversationSummary`、`RunDetailsLocator`、`RunDiffCounts`、`RunSummaryStatus`、`RunSummaryPersistencePort`；启动锚点与低频定位对象禁止包含 prompt、回答、parts 或原始事件，终态投影最多包含 USER/ASSISTANT 各一条定长摘要并以 statusVersion CAS 写入。`RunTerminalRetry`、`RunTerminalRetryState` 和 `RunTerminalRetryStore` 只表达已清洗终态投影的 Redis 待落库状态，并关联可空的终态 outbox version；重试 APPLIED/版本冲突后只确认同一 version，旧执行者不得删除晚到的新终态。退避固定为 5 秒、15 秒、30 秒、1 分钟、2 分钟、5 分钟后封顶 5 分钟；未来的 Run 详情期限是更早上限，原始详情已丢失时安全投影仍可独立保留最多 24 小时。
 - 会话运行上下文：`ConversationContextStore`、`ConversationContextIssueLease`、Session revoke 凭证及 user/workspace mutation 凭证定义签发 fence、生命周期撤销和跨 Redis/关系型写入窗口的 fail-closed gate；基础设施 key/Lua 不进入领域层。
 - ConversationRunContext：`ConversationRunContext` 保存认证用户、agent、完整用户进程、Linux 服务器，以及完整的 Session、Workspace、ExecutionNode 和可空 AgentSessionBinding 服务端快照；`ConversationContextStore` 定义签发租约、代次 CAS 保存、路由只读解析、校验后原子续期、Session revoke gate，以及按用户+Session、用户、Session、Workspace、进程和全局代次失效的领域端口，不暴露 Redis key、Lua 或序列化细节。`TrustedWorkspaceResolver` 负责在可访问真实路径的当前节点安全解析或回填历史 Workspace 服务器归属。
-- RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`、`RunEventScopeContext`；RunEventRepository 支持按 Run 回放和按 root session 回放历史状态事件。RunEventType 覆盖基础 `run.*`（含 transient `run.snapshot.reset`）、`tool.*`、`diff.*`、`session.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated`。
+- RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`、`RunEventScopeContext`；RunEventRepository 支持按 Run 回放和按 root session 回放历史状态事件。RunEventType 覆盖基础 `run.*`（含 transient `run.snapshot.reset`）、旁路 `side_question.*`、`tool.*`、`diff.*`、`session.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated`；`ConversationSourceType.SIDE_QUESTION` 用于归档内部 Session 和旁路 Run。
 - RunSessionScope：`RunSessionScope`、`RunSessionScopeSession`、`RunSessionScopeRepository`；表达当前 Run root/child opencode session scope。`LEGACY_FULL` 继续以数据库作为恢复事实源，`REDIS_SUMMARY` 只使用订阅级已知 session 状态和 `RunRuntimeStore`，不读写 scope 表。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
@@ -38,6 +38,7 @@
 - Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象；用户级计划仅作为后续定时会话能力预留。
 - Analytics：`AiMessageFeedback`、反馈评分/原因枚举、`AnalyticsModels` 和 `AnalyticsRepository`；满意率、Diff 采纳率、token 强度、p95 和 freshness 等查询模型不暴露 prompt/assistant 原文或 cost 字段。
 - Repository 端口：Workspace、Session、SessionTitleUpdate、AgentSessionBinding、SessionMessage、Run、RunEvent、RunSessionScope、ExecutionNode、RoutingDecision、OpencodeProcessManagement、ConfigurationManagement、CommonParameter、WorkspaceCreateOperation、ManagedWorkspace、ScheduledTask、AiMessageFeedback、Analytics 持久化端口。`SessionTitleUpdateRepository` 仅在当前标题与预期临时标题一致时更新，用于避免异步标题覆盖原生或人工标题；RunRepository 的条件保存端口要求成功时返回本次快照，条件不匹配时返回数据库当前 Run。
+- `RunRepository.findStaleActiveSideQuestionRuns` 只查询有上限的 stale active `SIDE_QUESTION` Run，供旁路临时会话孤儿回收，不影响普通 stale Run 收敛查询。
 
 ## Run 状态机
 

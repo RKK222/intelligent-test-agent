@@ -19,6 +19,8 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 
 ## 已有实现
 
+- `openRunEventStream` 为旁路编排提供同一 HTTP 连接的 ready + event body 视图：ready 只在响应头成功后完成，事件继续消费同一连接；该新路径不自动重试已建立的响应体，也不套用普通 30 秒单事件超时。
+
 - `OpencodeClientFacade` / `DefaultOpencodeClientFacade`：提供 health、createSession、sessionExists、startRun、startCommand、cancelSession、streamRunEvents、getDiff、rejectDiff 能力；`sessionExists` 调用远端 v2 session get，404 映射为 `false` 供上层重建历史绑定，其它错误仍按统一 opencode 错误码抛出；原生 command 由平台 Run 后台持有，不使用普通 30 秒超时或自动重试。
 - `GeneratedOpencodeSdkGateway`：唯一直接调用 generated SDK 的内部适配器；`prompt_async` 发送前后输出 `opencode_prompt_async_request_prepared` / `opencode_prompt_async_request_accepted` 摘要日志，用于和 opencode `/global/event` 的原生 `text/file/agent` parts 对照，日志只记录类型、文件名、mime、URL 类型、source 路径和字符数，不记录正文、data URL 原文或 token；读取 `/session/{sessionID}/message` 响应头 `X-Next-Cursor` 作为分页 cursor，并使用自定义 generated `ApiClient` WebClient 单页缓冲上限，避免大量 tool/read/write parts 让历史消息恢复退回全量大响应；远端 session 存在性校验使用 generated `SessionsApi.v2SessionGet`，不手改 generated SDK。
 - `OpencodeCreateSessionCommand`、`OpencodeCreateSessionResult`：创建远端 opencode session 并只返回远端 session id；标题可选，缺失或空白时请求体为 `{}`，保留 OpenCode 默认标题以触发内置 title agent，显式标题仍透传为 `title` 字段。

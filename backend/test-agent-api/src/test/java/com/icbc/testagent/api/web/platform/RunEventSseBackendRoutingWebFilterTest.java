@@ -7,16 +7,52 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.icbc.testagent.agent.runtime.AgentRuntime;
+import com.icbc.testagent.domain.node.ExecutionNode;
+import com.icbc.testagent.domain.node.ExecutionNodeId;
+import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
+import com.icbc.testagent.domain.routing.RoutingDecision;
+import com.icbc.testagent.domain.routing.RoutingDecisionRepository;
+import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.RunRepository;
+import com.icbc.testagent.domain.session.Session;
+import com.icbc.testagent.domain.session.SessionId;
+import com.icbc.testagent.domain.session.SessionRepository;
+import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.WorkspaceId;
+import com.icbc.testagent.event.RunEventAppender;
+import com.icbc.testagent.event.RunEventLiveBus;
 import com.icbc.testagent.observability.TraceConstants;
+import com.icbc.testagent.opencode.runtime.process.BackendJavaRouteResolver;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import com.icbc.testagent.opencode.runtime.run.RunEventSseRouteService;
+import com.icbc.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionRunStartResult;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionStreamingApplicationService;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionTerminalService;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -71,6 +107,79 @@ class RunEventSseBackendRoutingWebFilterTest {
         filter.filter(exchange, chain(exchange1 -> Mono.empty())).block(Duration.ofSeconds(2));
 
         verify(routeService).forwardTarget(new RunId(RUN_ID));
+        verify(forwarder).forward(exchange, target);
+    }
+
+    @Test
+    void forwardsStartedSideQuestionRunToTheJavaOwningItsPersistedProductionNode() {
+        InMemoryRoutingDecisionRepository routingDecisions = new InMemoryRoutingDecisionRepository();
+        SessionId mainSessionId = new SessionId("ses_1234567890abcdef");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        UserId userId = new UserId("usr_1234567890abcdef");
+        ExecutionNode productionNode = new ExecutionNode(
+                new ExecutionNodeId("node_ocp_1234567890abcdef"),
+                "http://server-b:4097",
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                NOW);
+        SessionRepository sessions = mock(SessionRepository.class);
+        RunRepository runs = mock(RunRepository.class);
+        AgentRuntimeTargetResolver targetResolver = mock(AgentRuntimeTargetResolver.class);
+        when(sessions.findById(mainSessionId)).thenReturn(Optional.of(new Session(
+                mainSessionId,
+                workspaceId,
+                "main",
+                NOW)));
+        when(sessions.save(org.mockito.ArgumentMatchers.any(Session.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(runs.save(org.mockito.ArgumentMatchers.any(Run.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(targetResolver.sessionTarget("opencode", userId, mainSessionId.value(), "trace_side_question"))
+                .thenReturn(new AgentRuntimeTargetResolver.SessionRuntimeTarget(
+                        mock(AgentRuntime.class),
+                        productionNode,
+                        "/workspace",
+                        "remote_main"));
+        SideQuestionStreamingApplicationService streamingService = new SideQuestionStreamingApplicationService(
+                sessions,
+                runs,
+                routingDecisions,
+                mock(RunEventAppender.class),
+                mock(RunEventLiveBus.class),
+                targetResolver,
+                mock(SideQuestionTerminalService.class));
+
+        SideQuestionRunStartResult started = streamingService.start(
+                userId,
+                "opencode",
+                mainSessionId,
+                "what happened?",
+                null,
+                null,
+                "trace_side_question");
+        assertThat(routingDecisions.findByRunId(started.runId()))
+                .get()
+                .extracting(decision -> decision.executionNodeId().value())
+                .isEqualTo("node_ocp_1234567890abcdef");
+
+        OpencodeProcessManagementRepository processes = mock(OpencodeProcessManagementRepository.class);
+        when(processes.findOpencodeServerProcessById(new OpencodeProcessId("ocp_1234567890abcdef")))
+                .thenReturn(Optional.of(process()));
+        BackendJavaProcess target = backend();
+        RunEventSseRouteService routeService = new RunEventSseRouteService(
+                routingDecisions,
+                processes,
+                routeResolver(target));
+        BackendSseForwarder forwarder = mock(BackendSseForwarder.class);
+        when(forwarder.forward(org.mockito.ArgumentMatchers.any(), eq(target))).thenReturn(Mono.empty());
+        RunEventSseBackendRoutingWebFilter filter = new RunEventSseBackendRoutingWebFilter(routeService, forwarder);
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                .get("/api/internal/agent/opencode/runs/" + started.runId().value() + "/events")
+                .build());
+
+        filter.filter(exchange, chain(exchange1 -> Mono.empty())).block(Duration.ofSeconds(2));
+
         verify(forwarder).forward(exchange, target);
     }
 
@@ -149,5 +258,69 @@ class RunEventSseBackendRoutingWebFilterTest {
                 NOW,
                 NOW,
                 "trace_backend");
+    }
+
+    private static OpencodeServerProcess process() {
+        return new OpencodeServerProcess(
+                new OpencodeProcessId("ocp_1234567890abcdef"),
+                new UserId("usr_1234567890abcdef"),
+                new LinuxServerId("server-b"),
+                new OpencodeContainerId("ctr_1234567890abcdef"),
+                4097,
+                12345L,
+                "http://server-b:4097",
+                OpencodeServerProcessStatus.RUNNING,
+                "/data/opencode/session/4097",
+                "/data/opencode/.config/opencode/",
+                NOW,
+                NOW,
+                "ok",
+                NOW,
+                NOW,
+                "trace_process");
+    }
+
+    /** 使用真实公共路由解析器读取目标服务器的最新 Java 心跳，不在测试里复制生产选择规则。 */
+    private static BackendJavaRouteResolver routeResolver(BackendJavaProcess target) {
+        OpencodeProcessHeartbeatStore heartbeatStore = mock(OpencodeProcessHeartbeatStore.class);
+        LinuxServer linuxServer = new LinuxServer(
+                target.linuxServerId(),
+                "Server B",
+                LinuxServerStatus.READY,
+                Map.of(),
+                NOW,
+                NOW,
+                NOW,
+                "trace_server");
+        when(heartbeatStore.liveBackendSnapshots())
+                .thenReturn(List.of(new BackendRuntimeSnapshot(linuxServer, target)));
+        return new BackendJavaRouteResolver(
+                heartbeatStore,
+                new ManagerControlSettings(
+                        "",
+                        "http://server-a:8080",
+                        new LinuxServerId("server-a"),
+                        Duration.ofSeconds(5),
+                        Duration.ofSeconds(10),
+                        Duration.ofSeconds(10),
+                        100),
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    /** 启动服务和 SSE 路由服务共享同一仓储实例，证明消费的是实际保存的生产归属。 */
+    private static final class InMemoryRoutingDecisionRepository implements RoutingDecisionRepository {
+
+        private final ConcurrentMap<RunId, RoutingDecision> decisions = new ConcurrentHashMap<>();
+
+        @Override
+        public RoutingDecision save(RoutingDecision routingDecision) {
+            decisions.put(routingDecision.runId(), routingDecision);
+            return routingDecision;
+        }
+
+        @Override
+        public Optional<RoutingDecision> findByRunId(RunId runId) {
+            return Optional.ofNullable(decisions.get(runId));
+        }
     }
 }

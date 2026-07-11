@@ -45,6 +45,15 @@ public interface OpencodeClientFacade {
     Flux<RunEventDraft> streamRunEvents(OpencodeStreamEventsCommand command);
 
     /**
+     * 打开带真实 SSE ready 信号的 RunEvent 流；未实现时拒绝以空信号伪装连接成功。
+     */
+    default OpencodeRunEventStream openRunEventStream(OpencodeStreamEventsCommand command) {
+        return new OpencodeRunEventStream(
+                Mono.error(new UnsupportedOperationException("observable event stream is not implemented")),
+                streamRunEvents(command));
+    }
+
+    /**
      * 查询远端 session Diff，结果不得包含 generated SDK DTO。
      */
     Mono<OpencodeDiffResult> getDiff(OpencodeDiffCommand command);

@@ -187,6 +187,51 @@ describe("event-stream-client", () => {
     expect(rawLastEventIds).toEqual(["7"]);
   });
 
+  it("subscribes to side-question events and deduplicates delta by event id", () => {
+    const source = new FakeEventSource();
+    const received: string[] = [];
+
+    subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_side_question",
+      eventSourceFactory: () => source,
+      onEvent: (event) => received.push(`${event.type}:${event.eventId}`)
+    });
+
+    source.emit("side_question.started", {
+      eventId: "evt_started",
+      runId: "run_side_question",
+      seq: 1,
+      type: "side_question.started",
+      payload: {}
+    });
+    source.emit("side_question.progress", {
+      eventId: "evt_progress",
+      runId: "run_side_question",
+      seq: 2,
+      type: "side_question.progress",
+      payload: { stage: "tool", toolName: "read" }
+    });
+    const delta = {
+      eventId: "evt_delta",
+      runId: "run_side_question",
+      seq: 0,
+      type: "side_question.delta",
+      payload: { delta: "正在检查" }
+    };
+    source.emit("side_question.delta", delta);
+    source.emit("side_question.delta", delta);
+
+    expect(source.listeners.get("side_question.started")).toHaveLength(1);
+    expect(source.listeners.get("side_question.progress")).toHaveLength(1);
+    expect(source.listeners.get("side_question.delta")).toHaveLength(1);
+    expect(received).toEqual([
+      "side_question.started:evt_started",
+      "side_question.progress:evt_progress",
+      "side_question.delta:evt_delta"
+    ]);
+  });
+
   it("ignores queued messages after close and events from other runs", () => {
     const source = new FakeEventSource();
     const received: string[] = [];

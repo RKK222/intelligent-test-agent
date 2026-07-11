@@ -128,6 +128,7 @@ class OpencodeRuntimeFacadeTest {
                 List<OpencodePromptPart> parts,
                 String messageId,
                 String agent,
+                String system,
                 String modelProviderId,
                 String modelId,
                 String variant,

@@ -87,6 +87,16 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
                 .doesNotContain("ses_runtime_terminal");
     }
 
+    @Test
+    void runtimeStateExcludesInternalSideQuestionSessionsAndRuns() {
+        var summary = repository.findUserRuntimeState(CURRENT_USER);
+
+        assertThat(summary.sessions())
+                .extracting(state -> state.sessionId().value())
+                .doesNotContain("ses_runtime_side_question", "ses_runtime_side_question_active");
+        assertThat(summary.runningCount()).isEqualTo(4);
+    }
+
     private void seedData() {
         seedUsersAndWorkspaces();
         seedSessions();
@@ -127,7 +137,11 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
                     ('ses_runtime_terminal', 'wrk_runtime', 'terminal run', 'ACTIVE', 'trace_runtime',
                      :now, :now5, 'usr_runtime_current'),
                     ('ses_runtime_other', 'wrk_runtime', 'other user', 'ACTIVE', 'trace_runtime',
-                     :now, :now6, 'usr_runtime_other')
+                     :now, :now6, 'usr_runtime_other'),
+                    ('ses_runtime_side_question', 'wrk_runtime', '宠物旁路问答（内部）', 'ARCHIVED', 'trace_runtime',
+                     :now, :now6, 'usr_runtime_current'),
+                    ('ses_runtime_side_question_active', 'wrk_runtime', '异常未归档旁路会话', 'ACTIVE', 'trace_runtime',
+                     :now, :now6, 'usr_runtime_current')
                 """)
                 .param("now", NOW)
                 .param("now1", NOW.plusSeconds(10))
@@ -136,6 +150,12 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
                 .param("now4", NOW.plusSeconds(40))
                 .param("now5", NOW.plusSeconds(50))
                 .param("now6", NOW.plusSeconds(60))
+                .update();
+        jdbcClient.sql("""
+                update sessions
+                set source_type = 'SIDE_QUESTION', source_ref_id = 'ses_runtime_run'
+                where session_id in ('ses_runtime_side_question', 'ses_runtime_side_question_active')
+                """)
                 .update();
     }
 
@@ -156,7 +176,11 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
                     ('run_runtime_terminal', 'ses_runtime_terminal', 'wrk_runtime', 'SUCCEEDED', 'trace_runtime',
                      :now, :terminalUpdated, 'usr_runtime_current'),
                     ('run_runtime_other', 'ses_runtime_other', 'wrk_runtime', 'RUNNING', 'trace_runtime',
-                     :now, :otherUpdated, 'usr_runtime_other')
+                     :now, :otherUpdated, 'usr_runtime_other'),
+                    ('run_runtime_side_question', 'ses_runtime_side_question', 'wrk_runtime', 'RUNNING', 'trace_runtime',
+                     :now, :otherUpdated, 'usr_runtime_current'),
+                    ('run_runtime_side_question_active', 'ses_runtime_side_question_active', 'wrk_runtime', 'RUNNING', 'trace_runtime',
+                     :now, :otherUpdated, 'usr_runtime_current')
                 """)
                 .param("now", NOW)
                 .param("old", NOW.plusSeconds(11))
@@ -166,6 +190,12 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
                 .param("resolvedUpdated", NOW.plusSeconds(42))
                 .param("terminalUpdated", NOW.plusSeconds(52))
                 .param("otherUpdated", NOW.plusSeconds(62))
+                .update();
+        jdbcClient.sql("""
+                update runs
+                set source_type = 'SIDE_QUESTION', source_ref_id = 'ses_runtime_run'
+                where run_id in ('run_runtime_side_question', 'run_runtime_side_question_active')
+                """)
                 .update();
     }
 

@@ -36,8 +36,8 @@ public class TerminalProcessSession {
         this.outputLimiter = Objects.requireNonNull(outputLimiter, "outputLimiter must not be null");
         this.stdin = process.getOutputStream();
         this.output = Sinks.many().replay().limit(1024);
-        startOutputPump(process.getInputStream());
-        startExitWatcher();
+        // exit envelope 不能抢在 stdout 泵完成前结束 sink；快速退出的命令仍必须把末尾输出交给客户端。
+        startExitWatcher(startOutputPump(process.getInputStream()));
     }
 
     /**
@@ -92,8 +92,8 @@ public class TerminalProcessSession {
     /**
      * 从进程 stdout/stderr 读取数据，按输出预算转换为服务端 envelope。
      */
-    private void startOutputPump(InputStream stream) {
-        Mono.fromRunnable(() -> {
+    private Mono<Void> startOutputPump(InputStream stream) {
+        return Mono.fromRunnable(() -> {
                     byte[] buffer = new byte[4096];
                     try {
                         int read;
@@ -109,16 +109,16 @@ public class TerminalProcessSession {
                     }
                 })
                 .subscribeOn(Schedulers.boundedElastic())
-                .subscribe();
+                .then();
     }
 
     /**
      * 监听进程退出并发送 exit envelope，监听失败时发送稳定错误 envelope。
      */
-    private void startExitWatcher() {
-        Mono.fromCallable(process::waitFor)
+    private void startExitWatcher(Mono<Void> outputPump) {
+        outputPump.then(Mono.fromCallable(process::waitFor)
                 .subscribeOn(Schedulers.boundedElastic())
-                .subscribe(code -> {
+        ).subscribe(code -> {
                     output.tryEmitNext(TerminalServerMessage.exit(code, seq.incrementAndGet()));
                     output.tryEmitComplete();
                 }, error -> {

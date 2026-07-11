@@ -985,6 +985,35 @@ describe("backend-api", () => {
     );
   });
 
+  it("starts a streaming side-question run without sending an agent override", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { runId: "run_1234567890abcdef" }
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.startSideQuestionRun("ses_1", {
+      question: "刚才做了什么？",
+      messageId: "msg_2",
+      model: "anthropic/claude-sonnet-4-5"
+    })).resolves.toEqual({ runId: "run_1234567890abcdef" });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/sessions/ses_1/side-question/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          question: "刚才做了什么？",
+          messageId: "msg_2",
+          model: "anthropic/claude-sonnet-4-5"
+        })
+      })
+    );
+  });
+
   it("maps configuration management APIs through platform URLs", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

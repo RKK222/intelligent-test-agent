@@ -17,6 +17,7 @@ public record OpencodeStartRunCommand(
         List<OpencodePromptPart> parts,
         String messageId,
         String agent,
+        String system,
         String modelProviderId,
         String modelId,
         String variant,
@@ -34,6 +35,7 @@ public record OpencodeStartRunCommand(
         parts = normalizeParts(parts, prompt);
         messageId = optionalText(messageId);
         agent = optionalText(agent);
+        system = optionalText(system);
         modelProviderId = optionalText(modelProviderId);
         modelId = optionalText(modelId);
         if ((modelProviderId == null) != (modelId == null)) {
@@ -54,7 +56,7 @@ public record OpencodeStartRunCommand(
             String prompt,
             String traceId) {
         this(node, opencodeSessionId, directory, workspace, prompt, List.of(OpencodePromptPart.text(prompt)),
-                null, null, null, null, null, traceId);
+                null, null, null, null, null, null, traceId);
     }
 
     /**

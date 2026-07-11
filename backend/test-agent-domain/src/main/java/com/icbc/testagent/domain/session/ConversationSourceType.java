@@ -5,5 +5,6 @@ package com.icbc.testagent.domain.session;
  */
 public enum ConversationSourceType {
     MANUAL,
-    SCHEDULED_TASK
+    SCHEDULED_TASK,
+    SIDE_QUESTION
 }

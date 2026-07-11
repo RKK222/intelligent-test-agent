@@ -9,11 +9,15 @@ import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.TraceIdWebFilter;
+import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
 import com.icbc.testagent.opencode.runtime.runtime.SideQuestionInput;
 import com.icbc.testagent.opencode.runtime.runtime.SideQuestionResult;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionRunStartResult;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionStreamingApplicationService;
+import com.icbc.testagent.domain.run.RunId;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -153,6 +157,74 @@ class PlatformOpencodeRuntimeControllerTest {
     }
 
     @Test
+    void runtimeControllerStartsAuthenticatedSideQuestionRunWithoutAcceptingAgentSelection() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SideQuestionStreamingApplicationService streamingService =
+                org.mockito.Mockito.mock(SideQuestionStreamingApplicationService.class);
+        UserId userId = new UserId("usr_1234567890abcdef");
+        when(streamingService.start(
+                        eq(userId),
+                        eq("opencode"),
+                        eq(new com.icbc.testagent.domain.session.SessionId("ses_1234567890abcdef")),
+                        eq("what did we decide?"),
+                        eq("msg_1"),
+                        eq("anthropic/claude-sonnet"),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new SideQuestionRunStartResult(new RunId("run_1234567890abcdef")));
+        WebTestClient client = client(service, streamingService, principal(userId));
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"question":"what did we decide?","messageId":"msg_1","model":"anthropic/claude-sonnet"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.runId").isEqualTo("run_1234567890abcdef");
+    }
+
+    @Test
+    void runtimeControllerRequiresAuthenticatedUserForStreamingSideQuestion() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SideQuestionStreamingApplicationService streamingService =
+                org.mockito.Mockito.mock(SideQuestionStreamingApplicationService.class);
+        WebTestClient client = client(service, streamingService, null);
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"question\":\"what did we decide?\"}")
+                .exchange()
+                .expectStatus().isUnauthorized();
+
+        org.mockito.Mockito.verifyNoInteractions(streamingService);
+    }
+
+    @Test
+    void runtimeControllerRejectsBlankStreamingSideQuestion() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SideQuestionStreamingApplicationService streamingService =
+                org.mockito.Mockito.mock(SideQuestionStreamingApplicationService.class);
+        WebTestClient client = client(
+                service,
+                streamingService,
+                principal(new UserId("usr_1234567890abcdef")));
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"question\":\"   \"}")
+                .exchange()
+                .expectStatus().isBadRequest();
+
+        org.mockito.Mockito.verifyNoInteractions(streamingService);
+    }
+
+    @Test
     void platformControllerPassesAuthenticatedUserToRuntimeContext() {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         UserId userId = new UserId("usr_1234567890abcdef");
@@ -195,7 +267,15 @@ class PlatformOpencodeRuntimeControllerTest {
     }
 
     private static WebTestClient client(OpencodeRuntimeApplicationService service, AuthPrincipal principal) {
-        return WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service))
+        return client(service, org.mockito.Mockito.mock(SideQuestionStreamingApplicationService.class), principal);
+    }
+
+    private static WebTestClient client(
+            OpencodeRuntimeApplicationService service,
+            SideQuestionStreamingApplicationService streamingService,
+            AuthPrincipal principal) {
+        return WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service, streamingService))
+                .controllerAdvice(new GlobalExceptionHandler())
                 .webFilter((exchange, chain) -> {
                     if (principal != null) {
                         exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);

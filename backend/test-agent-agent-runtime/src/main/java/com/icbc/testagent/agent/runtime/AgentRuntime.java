@@ -50,6 +50,13 @@ public interface AgentRuntime {
     }
 
     /**
+     * 打开带真实连接 ready 的事件流；未显式实现时拒绝启动，不能用空信号伪装握手完成。
+     */
+    default AgentEventStream openRunEventStream(AgentStreamEventsCommand command) {
+        return new AgentEventStream(Mono.error(unsupported("openRunEventStream")), streamRunEvents(command));
+    }
+
+    /**
      * 查询远端 Diff。
      */
     default Mono<AgentDiffResult> getDiff(AgentDiffCommand command) {

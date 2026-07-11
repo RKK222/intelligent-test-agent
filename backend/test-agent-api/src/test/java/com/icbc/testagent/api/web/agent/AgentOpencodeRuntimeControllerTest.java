@@ -11,6 +11,12 @@ import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionRunStartResult;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionStreamingApplicationService;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionInput;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionResult;
+import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.session.SessionId;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -103,13 +109,76 @@ class AgentOpencodeRuntimeControllerTest {
         verify(service).withAgent(eq("opencode"), eq(userId), any());
     }
 
+    @Test
+    void agentControllerStartsSideQuestionRunWithPathAgentAndAuthenticatedUser() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SideQuestionStreamingApplicationService streamingService =
+                org.mockito.Mockito.mock(SideQuestionStreamingApplicationService.class);
+        UserId userId = new UserId("usr_1234567890abcdef");
+        when(streamingService.start(
+                        eq(userId),
+                        eq("opencode"),
+                        eq(new SessionId("ses_1234567890abcdef")),
+                        eq("summarize the decision"),
+                        eq("msg_1"),
+                        eq("anthropic/claude-sonnet"),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new SideQuestionRunStartResult(new RunId("run_1234567890abcdef")));
+        WebTestClient client = client(service, streamingService, principal(userId));
+
+        client.post()
+                .uri("/api/internal/agent/opencode/session/ses_1234567890abcdef/side-question/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"question":"summarize the decision","messageId":"msg_1","model":"anthropic/claude-sonnet"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.runId").isEqualTo("run_1234567890abcdef");
+    }
+
+    @Test
+    void agentControllerKeepsLegacySynchronousSideQuestionRoute() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        when(service.sideQuestion(
+                        eq("ses_1234567890abcdef"),
+                        eq(new SideQuestionInput("what happened?", "msg_1", "plan", "anthropic/claude-sonnet")),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new SideQuestionResult("legacy answer", false));
+        stubWithAgent(service);
+        WebTestClient client = client(service, null);
+
+        client.post()
+                .uri("/api/internal/agent/opencode/session/ses_1234567890abcdef/side-question")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"question":"what happened?","messageId":"msg_1","agent":"plan","model":"anthropic/claude-sonnet"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.answer").isEqualTo("legacy answer")
+                .jsonPath("$.data.compacted").isEqualTo(false);
+    }
+
     private static void stubWithAgent(OpencodeRuntimeApplicationService service) {
         when(service.withAgent(eq("opencode"), nullable(UserId.class), any())).thenAnswer(invocation ->
                 ((Supplier<?>) invocation.getArgument(2)).get());
     }
 
     private static WebTestClient client(OpencodeRuntimeApplicationService service, AuthPrincipal principal) {
-        return WebTestClient.bindToController(new AgentOpencodeRuntimeController(service))
+        return client(service, org.mockito.Mockito.mock(SideQuestionStreamingApplicationService.class), principal);
+    }
+
+    private static WebTestClient client(
+            OpencodeRuntimeApplicationService service,
+            SideQuestionStreamingApplicationService streamingService,
+            AuthPrincipal principal) {
+        return WebTestClient.bindToController(new AgentOpencodeRuntimeController(service, streamingService))
                 .webFilter((exchange, chain) -> {
                     if (principal != null) {
                         exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);

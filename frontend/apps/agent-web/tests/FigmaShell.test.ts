@@ -333,6 +333,75 @@ describe("FigmaShell", () => {
     expect(wrapper.get('[data-testid="robot-side-question-answer"]').text()).toContain("当前上下文已经完成初始化");
   });
 
+  it("shows real side-question progress and keeps the dialog open on outside clicks while loading", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell({
+      props: {
+        sideQuestionLoading: true,
+        sideQuestionProgress: "正在读取当前上下文"
+      }
+    });
+    await summonRobot(wrapper);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(wrapper.get('[data-testid="robot-side-question-progress"]').text()).toBe("正在读取当前上下文");
+    await wrapper.get(".figma-app").trigger("click");
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
+
+    await wrapper.get('[aria-label="关闭宠物旁路问答"]').trigger("click");
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
+    expect(wrapper.emitted("close-robot-side-question")).toHaveLength(1);
+  });
+
+  it("closes the side-question subscription owner when the pet is hidden", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell({ props: { sideQuestionLoading: true } });
+    await summonRobot(wrapper);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="robot-visibility-toggle"]').trigger("click");
+
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
+    expect(wrapper.emitted("close-robot-side-question")).toHaveLength(1);
+  });
+
+  it("keeps an automatically appeared pet and its open dialog visible until the user closes it", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const wrapper = mountShell();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
+    expect(wrapper.emitted("close-robot-side-question")).toBeUndefined();
+  });
+
+  it("keeps a failed side question editable so the user can revise and retry", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell({ props: { sideQuestionError: "暂时无法回答" } });
+    await summonRobot(wrapper);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+
+    const input = wrapper.get('[data-testid="robot-side-question-input"]');
+    await input.setValue("修改后的问题");
+    expect(input.attributes("disabled")).toBeUndefined();
+    await wrapper.get('[data-testid="robot-side-question-submit"]').trigger("click");
+
+    expect(wrapper.emitted("robot-side-question")?.[0]).toEqual(["修改后的问题"]);
+    expect(wrapper.get(".figma-robot-side-question-error").text()).toBe("暂时无法回答");
+  });
+
   it("toggles the pet immediately and restores a saved manual position after a full idle minute", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);

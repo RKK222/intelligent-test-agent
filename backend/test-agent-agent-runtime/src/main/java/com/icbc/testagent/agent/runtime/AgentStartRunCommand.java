@@ -17,6 +17,7 @@ public record AgentStartRunCommand(
         List<AgentPromptPart> parts,
         String messageId,
         String agent,
+        String system,
         String modelProviderId,
         String modelId,
         String variant,
@@ -36,6 +37,7 @@ public record AgentStartRunCommand(
         parts = parts == null ? List.of() : List.copyOf(parts);
         messageId = optionalText(messageId);
         agent = optionalText(agent);
+        system = optionalText(system);
         modelProviderId = optionalText(modelProviderId);
         modelId = optionalText(modelId);
         variant = optionalText(variant);

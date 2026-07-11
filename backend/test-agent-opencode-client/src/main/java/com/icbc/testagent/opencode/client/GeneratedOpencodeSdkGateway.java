@@ -131,13 +131,14 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             List<OpencodePromptPart> parts,
             String messageId,
             String agent,
+            String system,
             String modelProviderId,
             String modelId,
             String variant,
             String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
         // prompt_async 的 parts 是 union schema；用稳定 JSON Map 避免 generated DTO 对 file/source 字段的类型遮蔽。
-        Map<String, Object> request = promptAsyncRequest(parts, messageId, agent, modelProviderId, modelId, variant, prompt);
+        Map<String, Object> request = promptAsyncRequest(parts, messageId, agent, system, modelProviderId, modelId, variant, prompt);
         logPromptAsyncRequestPrepared(
                 node,
                 opencodeSessionId,
@@ -265,6 +266,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             List<OpencodePromptPart> parts,
             String messageId,
             String agent,
+            String system,
             String modelProviderId,
             String modelId,
             String variant,
@@ -277,6 +279,10 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         String optionalAgent = optionalText(agent);
         if (optionalAgent != null) {
             request.put("agent", optionalAgent);
+        }
+        String optionalSystem = optionalText(system);
+        if (optionalSystem != null) {
+            request.put("system", optionalSystem);
         }
         String optionalModelProvider = optionalText(modelProviderId);
         String optionalModelId = optionalText(modelId);
@@ -469,6 +475,25 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         return new EventApi(apiClient)
                 .eventSubscribeWithResponseSpec(directory, optionalText(workspace))
                 .bodyToFlux(JsonNode.class);
+    }
+
+    /**
+     * 通过 toEntityFlux 把 HTTP 响应头与 SSE body 分开；response Mono 完成即代表服务端已接受订阅并返回流式响应。
+     */
+    @Override
+    public OpencodeEventStream openEventStream(
+            ExecutionNode node,
+            String directory,
+            String workspace,
+            String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        Mono<ResponseEntity<Flux<JsonNode>>> response = new EventApi(apiClient)
+                .eventSubscribeWithResponseSpec(directory, optionalText(workspace))
+                .toEntityFlux(JsonNode.class)
+                .cache();
+        return new OpencodeEventStream(
+                response.then(),
+                response.flatMapMany(ResponseEntity::getBody));
     }
 
     /**

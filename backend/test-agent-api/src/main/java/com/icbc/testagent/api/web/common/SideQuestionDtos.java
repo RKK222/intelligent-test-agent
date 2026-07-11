@@ -2,6 +2,7 @@ package com.icbc.testagent.api.web.common;
 
 import com.icbc.testagent.opencode.runtime.runtime.SideQuestionInput;
 import com.icbc.testagent.opencode.runtime.runtime.SideQuestionResult;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionRunStartResult;
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -33,6 +34,25 @@ public final class SideQuestionDtos {
 
         public static Response from(SideQuestionResult result) {
             return new Response(result.answer(), result.compacted());
+        }
+    }
+
+    /**
+     * 流式旁路问答启动请求；agent 由受信任的服务端路由决定，浏览器不能覆盖只读执行策略。
+     */
+    public record StreamRequest(
+            @NotBlank String question,
+            String messageId,
+            String model) {
+    }
+
+    /**
+     * 流式启动只返回可订阅的 Run ID，后续内容统一通过 RunEvent SSE 获取。
+     */
+    public record StreamResponse(String runId) {
+
+        public static StreamResponse from(SideQuestionRunStartResult result) {
+            return new StreamResponse(result.runId().value());
         }
     }
 }

@@ -207,8 +207,7 @@ class OpencodeRuntimeApplicationServiceTest {
                         && command.method().equals("POST")
                         && command.path().endsWith("/message")
                         && !((Map<?, ?>) command.body()).containsKey("tools")
-                        && String.valueOf(((Map<?, ?>) command.body()).get("system"))
-                                .contains("read-only inspection tools")));
+                        && SideQuestionPolicy.SYSTEM_PROMPT.equals(((Map<?, ?>) command.body()).get("system"))));
         verify(fixture.facade).runtime(org.mockito.ArgumentMatchers.argThat(command ->
                 command != null && command.method().equals("DELETE") && command.path().endsWith("ses_side1234567890abcdef")));
         verify(fixture.facade, never()).runtime(org.mockito.ArgumentMatchers.argThat(command -> command != null && command.path().endsWith("/summarize")));

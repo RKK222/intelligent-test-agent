@@ -79,15 +79,28 @@ public class MyBatisRunRepository implements RunRepository {
 
     @Override
     public List<Run> findStaleActiveRuns(Instant updatedBefore, int limit) {
+        validateStaleQuery(updatedBefore, limit);
+        return mapper.findStaleActiveRuns(updatedBefore, limit).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    /** 只查询过期且仍为 active 的 SIDE_QUESTION Run，避免孤儿任务误收敛普通对话。 */
+    @Override
+    public List<Run> findStaleActiveSideQuestionRuns(Instant updatedBefore, int limit) {
+        validateStaleQuery(updatedBefore, limit);
+        return mapper.findStaleActiveSideQuestionRuns(updatedBefore, limit).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    private void validateStaleQuery(Instant updatedBefore, int limit) {
         if (updatedBefore == null) {
             throw new IllegalArgumentException("updatedBefore must not be null");
         }
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be between 1 and 1000");
         }
-        return mapper.findStaleActiveRuns(updatedBefore, limit).stream()
-                .map(this::toDomain)
-                .toList();
     }
 
     private Run toDomain(RunRow row) {

@@ -3,8 +3,10 @@ package com.icbc.testagent.api.web.platform;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.api.web.common.SideQuestionDtos;
+import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionStreamingApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
 import java.util.Map;
 import java.util.function.Function;
@@ -27,12 +29,16 @@ import reactor.core.publisher.Mono;
 public class PlatformOpencodeRuntimeController {
 
     private final OpencodeRuntimeApplicationService runtimeService;
+    private final SideQuestionStreamingApplicationService sideQuestionStreamingService;
 
     /**
      * 注入运行态应用服务，所有 opencode 兼容路径均在应用层完成转发。
      */
-    public PlatformOpencodeRuntimeController(OpencodeRuntimeApplicationService runtimeService) {
+    public PlatformOpencodeRuntimeController(
+            OpencodeRuntimeApplicationService runtimeService,
+            SideQuestionStreamingApplicationService sideQuestionStreamingService) {
         this.runtimeService = runtimeService;
+        this.sideQuestionStreamingService = sideQuestionStreamingService;
     }
 
     /**
@@ -407,6 +413,27 @@ public class PlatformOpencodeRuntimeController {
             @jakarta.validation.Valid @RequestBody SideQuestionDtos.Request request,
             ServerWebExchange exchange) {
         return platformResponse(exchange, traceId -> SideQuestionDtos.Response.from(runtimeService.sideQuestion(sessionId, request.toInput(), traceId)));
+    }
+
+    /**
+     * 创建可通过既有 RunEvent SSE 订阅的旁路问答 Run；平台入口固定使用 opencode runtime。
+     */
+    @PostMapping("/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question/runs")
+    public Mono<ApiResponse<Object>> startSideQuestionRun(
+            @PathVariable String sessionId,
+            @jakarta.validation.Valid @RequestBody SideQuestionDtos.StreamRequest request,
+            ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return RuntimeApiSupport.blockingObjectResponse(
+                exchange,
+                traceId -> SideQuestionDtos.StreamResponse.from(sideQuestionStreamingService.start(
+                        userId,
+                        "opencode",
+                        new SessionId(sessionId),
+                        request.question(),
+                        request.messageId(),
+                        request.model(),
+                        traceId)));
     }
 
     /**

@@ -71,6 +71,28 @@ class RunTest {
     }
 
     @Test
+    void sideQuestionSourceSurvivesRunLifecycleTransitions() {
+        Run sideQuestion = new Run(
+                new RunId("run_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                RunStatus.PENDING,
+                CREATED_AT,
+                CREATED_AT,
+                "trace_123")
+                .withSource(
+                        ConversationSourceType.SIDE_QUESTION,
+                        "ses_main1234567890abcdef",
+                        new UserId("usr_1234567890abcdef"));
+
+        Run succeeded = sideQuestion.start(UPDATED_AT).succeed(UPDATED_AT.plusSeconds(1));
+
+        assertThat(succeeded.sourceType()).isEqualTo(ConversationSourceType.SIDE_QUESTION);
+        assertThat(succeeded.sourceRefId()).isEqualTo("ses_main1234567890abcdef");
+        assertThat(succeeded.triggeredByUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
+    }
+
+    @Test
     void terminalFactCanCorrectEarlierTerminalStatusWithoutMovingUpdatedAtBackward() {
         Run failed = new Run(
                 new RunId("run_1234567890abcdef"),

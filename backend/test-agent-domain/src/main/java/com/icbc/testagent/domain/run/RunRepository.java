@@ -43,4 +43,11 @@ public interface RunRepository {
     default List<Run> findStaleActiveRuns(Instant updatedBefore, int limit) {
         return List.of();
     }
+
+    /**
+     * 查询更新时间早于指定时间的非终态旁路问答 Run，供临时远端会话孤儿回收任务使用。
+     */
+    default List<Run> findStaleActiveSideQuestionRuns(Instant updatedBefore, int limit) {
+        return List.of();
+    }
 }

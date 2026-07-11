@@ -26,4 +26,8 @@ public interface RunMapper {
     List<RunRow> findStaleActiveRuns(
             @Param("updatedBefore") Instant updatedBefore,
             @Param("limit") int limit);
+
+    List<RunRow> findStaleActiveSideQuestionRuns(
+            @Param("updatedBefore") Instant updatedBefore,
+            @Param("limit") int limit);
 }

@@ -3,8 +3,10 @@ package com.icbc.testagent.api.web.agent;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.api.web.common.SideQuestionDtos;
+import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
+import com.icbc.testagent.opencode.runtime.runtime.SideQuestionStreamingApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
 import java.util.Map;
 import java.util.function.Function;
@@ -27,12 +29,16 @@ import reactor.core.publisher.Mono;
 public class AgentOpencodeRuntimeController {
 
     private final OpencodeRuntimeApplicationService runtimeService;
+    private final SideQuestionStreamingApplicationService sideQuestionStreamingService;
 
     /**
      * 注入运行态应用服务，所有 agent 兼容路径均在应用层完成转发。
      */
-    public AgentOpencodeRuntimeController(OpencodeRuntimeApplicationService runtimeService) {
+    public AgentOpencodeRuntimeController(
+            OpencodeRuntimeApplicationService runtimeService,
+            SideQuestionStreamingApplicationService sideQuestionStreamingService) {
         this.runtimeService = runtimeService;
+        this.sideQuestionStreamingService = sideQuestionStreamingService;
     }
 
     /**
@@ -408,6 +414,28 @@ public class AgentOpencodeRuntimeController {
             @jakarta.validation.Valid @RequestBody SideQuestionDtos.Request request,
             ServerWebExchange exchange) {
         return agentResponse(exchange, traceId -> SideQuestionDtos.Response.from(runtimeService.sideQuestion(sessionId, request.toInput(), traceId)));
+    }
+
+    /**
+     * 创建旁路问答 Run；agent 只取自受信任的 URL 路由，不接受请求体覆盖。
+     */
+    @PostMapping("/api/internal/agent/{agentId}/session/{sessionId}/side-question/runs")
+    public Mono<ApiResponse<Object>> startSideQuestionRun(
+            @PathVariable String agentId,
+            @PathVariable String sessionId,
+            @jakarta.validation.Valid @RequestBody SideQuestionDtos.StreamRequest request,
+            ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return RuntimeApiSupport.blockingObjectResponse(
+                exchange,
+                traceId -> SideQuestionDtos.StreamResponse.from(sideQuestionStreamingService.start(
+                        userId,
+                        agentId,
+                        new SessionId(sessionId),
+                        request.question(),
+                        request.messageId(),
+                        request.model(),
+                        traceId)));
     }
 
     /**

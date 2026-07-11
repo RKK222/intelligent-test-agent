@@ -99,6 +99,8 @@ import type {
   SessionMessage,
   SideQuestionRequest,
   SideQuestionResponse,
+  SideQuestionRunRequest,
+  SideQuestionRunResponse,
   SessionRuntimeStateSummary,
   SessionTreeMessagesResponse,
   SshKeyMetadata,
@@ -936,6 +938,14 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }),
     getRunContext: (sessionId: string) =>
       request<ConversationRunContext>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/run-context`), { method: "POST" }),
+    startSideQuestionRun: (sessionId: string, payload: SideQuestionRunRequest) =>
+      request<SideQuestionRunResponse>(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/side-question/runs`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload)
+        }
+      ),
     createSession: (workspaceId: string, title: string) =>
       request<Session>(`${opencodeRuntimeBase}/sessions`, { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
     startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>

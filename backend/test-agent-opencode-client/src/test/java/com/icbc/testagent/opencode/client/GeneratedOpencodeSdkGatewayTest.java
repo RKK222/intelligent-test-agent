@@ -22,6 +22,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class GeneratedOpencodeSdkGatewayTest {
@@ -29,6 +32,42 @@ class GeneratedOpencodeSdkGatewayTest {
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
     private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
     private static final String TRACE_ID = "trace_1234567890abcdef";
+
+    @Test
+    void observableEventStreamReadyCompletesAfterHeadersBeforeFirstBodyEvent() throws Exception {
+        CountDownLatch headersSent = new CountDownLatch(1);
+        CountDownLatch releaseBody = new CountDownLatch(1);
+        HttpServer server = startServer(exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().flush();
+            headersSent.countDown();
+            try {
+                releaseBody.await();
+                exchange.getResponseBody().write("data: {\"type\":\"server.connected\"}\n\n".getBytes(StandardCharsets.UTF_8));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+
+        try {
+            OpencodeEventStream opened = new GeneratedOpencodeSdkGateway()
+                    .openEventStream(node(server), "/tmp/demo", null, TRACE_ID);
+            CompletableFuture<JsonNode> firstEvent = opened.events().next().toFuture();
+
+            assertThat(headersSent.await(2, TimeUnit.SECONDS)).isTrue();
+            opened.ready().block(Duration.ofSeconds(2));
+            assertThat(firstEvent).isNotDone();
+
+            releaseBody.countDown();
+            assertThat(firstEvent.get(2, TimeUnit.SECONDS).path("type").asText()).isEqualTo("server.connected");
+        } finally {
+            releaseBody.countDown();
+            server.stop(0);
+        }
+    }
 
     @Test
     void gatewayCreatesSessionWithoutWorkspaceQueryAndPropagatesTraceId() throws Exception {
@@ -91,6 +130,7 @@ class GeneratedOpencodeSdkGatewayTest {
                             null,
                             "run the tests",
                             List.of(OpencodePromptPart.text("run the tests")),
+                            null,
                             null,
                             null,
                             null,
@@ -174,7 +214,8 @@ class GeneratedOpencodeSdkGatewayTest {
                                                     "text", Map.of("value", "export const a = 1", "start", 0, "end", 18))),
                                     OpencodePromptPart.agent("Build", Map.of("value", "@build", "start", 0, "end", 6))),
                             "msg_remote1234567890abcdef",
-                            "build",
+                            "plan",
+                            "只做只读检查并输出最终答案",
                             "anthropic",
                             "claude-sonnet-4-5",
                             "default",
@@ -184,7 +225,8 @@ class GeneratedOpencodeSdkGatewayTest {
             assertThat(result.accepted()).isTrue();
             assertThat(request.get().body()).contains(
                     "\"messageID\":\"msg_remote1234567890abcdef\"",
-                    "\"agent\":\"build\"",
+                    "\"agent\":\"plan\"",
+                    "\"system\":\"只做只读检查并输出最终答案\"",
                     "\"providerID\":\"anthropic\"",
                     "\"modelID\":\"claude-sonnet-4-5\"",
                     "\"variant\":\"default\"",
@@ -193,6 +235,38 @@ class GeneratedOpencodeSdkGatewayTest {
                     "\"url\":\"data:text/plain;base64,ZXhwb3J0IGNvbnN0IGEgPSAx\"",
                     "\"type\":\"agent\"",
                     "\"name\":\"Build\"");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void gatewayOmitsSystemFromPromptAsyncWhenAbsent() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respondNoContent(exchange);
+        });
+
+        try {
+            new GeneratedOpencodeSdkGateway()
+                    .startRun(
+                            node(server),
+                            REMOTE_SESSION_ID,
+                            "/tmp/demo",
+                            null,
+                            "run the tests",
+                            List.of(OpencodePromptPart.text("run the tests")),
+                            null,
+                            "plan",
+                            null,
+                            null,
+                            null,
+                            null,
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(request.get().body()).doesNotContain("\"system\"");
         } finally {
             server.stop(0);
         }

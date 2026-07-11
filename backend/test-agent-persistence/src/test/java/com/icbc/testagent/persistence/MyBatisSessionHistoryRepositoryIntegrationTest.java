@@ -102,6 +102,15 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 .containsExactly("ses_history_message");
     }
 
+    @Test
+    void userHistoryExcludesInternalSideQuestionSessions() {
+        PageResponse<SessionHistoryItem> page = repository.findUserHistory(CURRENT_USER, "", new PageRequest(1, 30));
+
+        assertThat(page.items())
+                .extracting(item -> item.session().sessionId().value())
+                .doesNotContain("ses_history_side_question", "ses_history_side_question_active");
+    }
+
     private void seedData() {
         seedUsers();
         seedWorkspaces();
@@ -212,7 +221,11 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                     ('ses_history_unknown', 'wrk_history_other', '无归因历史', 'ACTIVE', 'trace_history',
                      :now, :updatedOther, false, null),
                     ('ses_history_archived', 'wrk_history_other', '已归档历史', 'ARCHIVED', 'trace_history',
-                     :now, :updatedOther, false, 'usr_history_current')
+                     :now, :updatedOther, false, 'usr_history_current'),
+                    ('ses_history_side_question', 'wrk_history_other', '宠物旁路问答（内部）', 'ARCHIVED', 'trace_history',
+                     :now, :updatedCreated, false, 'usr_history_current'),
+                    ('ses_history_side_question_active', 'wrk_history_other', '异常未归档旁路会话', 'ACTIVE', 'trace_history',
+                     :now, :updatedCreated, false, 'usr_history_current')
                 """)
                 .param("now", NOW)
                 .param("updatedCreated", NOW.plusSeconds(50))
@@ -220,6 +233,12 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 .param("updatedMessage", NOW.plusSeconds(30))
                 .param("updatedEmpty", NOW.plusSeconds(20))
                 .param("updatedOther", NOW.plusSeconds(60))
+                .update();
+        jdbcClient.sql("""
+                update sessions
+                set source_type = 'SIDE_QUESTION', source_ref_id = 'ses_history_created'
+                where session_id in ('ses_history_side_question', 'ses_history_side_question_active')
+                """)
                 .update();
         jdbcClient.sql("""
                 insert into runs(run_id, session_id, workspace_id, status, trace_id, created_at, updated_at, triggered_by_user_id)

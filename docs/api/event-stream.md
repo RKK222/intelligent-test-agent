@@ -25,8 +25,9 @@
 7. generated SDK 事件必须在 `test-agent-event` 或 `test-agent-opencode-client` 映射为平台事件。
 8. root `run.succeeded/run.failed/run.cancelled` 是 Run 终态事实源；`Streaming response failed` 等 prompt_async 提交错误、SSE 订阅 transport error 或浏览器连接错误没有独立业务终态含义，先到时只可延迟收敛为失败，窗口内若收到 root 终态则不得补写旧 `run.failed`；若临时失败已经先落库，后到 root 终态仍可按最后 root 终态纠正 Run 状态和最终快照。
 9. stale active Run 后台收敛也会追加既有 `run.failed` 事件。该事件只表示平台侧长时间未收到有效运行输出且本地后台订阅可能失效，不代表后端主动取消或中止远端 opencode 会话。
-10. 前端 `onRawMessage` 捕获的 RunEvent SSE `MessageEvent.data` 只用于页面“原始输出”观察副本；它与 HTTP 原始报文共用预缓存安全处理，递归脱敏所有层级、大小写不敏感的 `contextToken` 后再截断和缓存。该处理不改写交给 RunEvent reducer 的实际事件，但禁止原始 SSE 数据绕过脱敏直接进入调试缓存。
-11. Run 的 `storageMode` 由创建时 manifest 固定，活动期间禁止切换。manifest 缺失表示 legacy/旧数据；Redis 新模式运行态缺失或不可用时返回 `RUN_DETAILS_EXPIRED` / `RUNTIME_STATE_UNAVAILABLE`，不得回退数据库或 JVM 内存读取原始详情。
+10. `SIDE_QUESTION` Run 使用同一 RunEvent SSE：`side_question.started/progress` 为 durable，`side_question.delta` 为 transient；最终完整答案只以 `run.succeeded.payload.answer` 为权威结果，供客户端校准断线期间遗漏的 delta。
+11. 前端 `onRawMessage` 捕获的 RunEvent SSE `MessageEvent.data` 只用于页面“原始输出”观察副本；它与 HTTP 原始报文共用预缓存安全处理，递归脱敏所有层级、大小写不敏感的 `contextToken` 后再截断和缓存。该处理不改写交给 RunEvent reducer 的实际事件，但禁止原始 SSE 数据绕过脱敏直接进入调试缓存。
+12. Run 的 `storageMode` 由创建时 manifest 固定，活动期间禁止切换。manifest 缺失表示 legacy/旧数据；Redis 新模式运行态缺失或不可用时返回 `RUN_DETAILS_EXPIRED` / `RUNTIME_STATE_UNAVAILABLE`，不得回退数据库或 JVM 内存读取原始详情。
 
 ## RunEvent 基础字段
 
@@ -51,6 +52,9 @@
 | `run.failed` | Run 失败结束，payload 可携带安全的 `message` 或 `error.message/name` 供前端失败卡片展示。 |
 | `run.cancelled` | Run 已取消。 |
 | `run.snapshot.reset` | Redis 新模式 SSE 首帧及容量换代后的 transient 物化快照重置；无 SSE `id`，不推进 `Last-Event-ID`。 |
+| `side_question.started` | 宠物旁路问答已开始，durable；payload 的 `sessionId` 指向主平台 Session，不暴露临时远端 Session。 |
+| `side_question.progress` | 宠物旁路问答真实阶段，durable；`stage` 可为 `preparing_context/forking/compacting/reading/tool/composing`，工具阶段只允许携带安全 `toolName`。 |
+| `side_question.delta` | 宠物旁路答案文本增量，transient，不写 `run_events`、不设置 SSE `id`。 |
 | `assistant.message.delta` | 助手消息增量，只实时发送，不写入 `run_events`。 |
 | `message.updated` | opencode Web App message projection 更新；实时发送，断线后由 opencode session messages snapshot 恢复。 |
 | `message.removed` | opencode Web App message projection 移除。 |
@@ -126,6 +130,14 @@ data: {"eventId":"evt_snapshot_reset_run_x_2_10520","runId":"run_x","seq":0,"typ
 1. 只清空该 Run 的 reducer 运行投影（消息/part、工具、Todo、Diff、permission/question、scope 索引和 transient 状态），保留当前订阅的 Run 身份。
 2. 按数组顺序应用 `snapshot.events`；数组缺失、为空或含未知事件时按空快照/默认忽略兼容。
 3. 再应用服务端随后发送的 durable/transient 尾流事件；只以带 SSE `id` 的 durable 事件更新 `Last-Event-ID`，不得把 reset、snapshot 内部事件或 transient 事件的 `seq=0` 写成游标。
+
+## 宠物旁路问答 RunEvent
+
+旁路 Run 的 durable 顺序为 `run.created → run.started → side_question.started → side_question.progress* → run.succeeded|run.failed`；`side_question.delta` 可穿插在阶段事件之间，但不参与 durable seq 或 `Last-Event-ID` 回放。`run.succeeded.payload` 至少包含 `sideQuestion:true`、完整 `answer`、`compacted`，答案因 64 KiB 上限截断时还包含 `truncated:true`；`run.failed.payload.message` 只携带安全错误说明。旁路 SSE 不输出原始 `message.*`、`tool.*`、`session.scope.*` 或临时 fork ID。
+
+前端断线重连后会回放 durable progress/terminal，按 `eventId` 去重；最终终态 answer 覆盖当前 delta 缓冲，避免 transient 丢帧或重投导致缺字、重复。关闭浮层只释放该旁路订阅，不取消主 Run，也不取消后端旁路任务。
+
+后台每 5 分钟扫描超过 10 分钟仍 active 的 `SIDE_QUESTION` Run，按内部 Session 持久化映射在原节点 best-effort 删除临时 fork，并复用终态事务 CAS 追加唯一 `run.failed`。若重启发生在映射持久化前，平台 Run 仍收敛失败并记录潜在远端泄漏审计事件；该极窄窗口不宣称跨系统强一致。
 
 ## `todo.updated`
 

@@ -55,6 +55,14 @@ final class ObservedAgentRuntime implements AgentRuntime {
     }
 
     @Override
+    public AgentEventStream openRunEventStream(AgentStreamEventsCommand command) {
+        AgentEventStream opened = delegate.openRunEventStream(command);
+        return new AgentEventStream(
+                observe("openRunEventStreamReady", command.traceId(), opened.ready()),
+                observe("openRunEventStream", command.traceId(), opened.events()));
+    }
+
+    @Override
     public Mono<AgentDiffResult> getDiff(AgentDiffCommand command) {
         return observe("getDiff", command.traceId(), delegate.getDiff(command));
     }

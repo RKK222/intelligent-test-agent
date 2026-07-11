@@ -932,6 +932,7 @@ public class RunApplicationService {
                     toAgentPromptParts(input, workspace),
                     input.messageId(),
                     opencodeAgent,
+                    null,
                     modelSelection.providerId(),
                     modelSelection.modelId(),
                     input.variant(),

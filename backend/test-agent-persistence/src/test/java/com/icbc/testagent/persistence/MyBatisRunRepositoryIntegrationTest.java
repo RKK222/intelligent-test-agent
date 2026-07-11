@@ -133,6 +133,28 @@ class MyBatisRunRepositoryIntegrationTest {
         assertThat(fullPage).containsExactly(stalePending, staleRunning);
     }
 
+    @Test
+    void findStaleActiveSideQuestionRunsFiltersSourceStatusAndCutoff() {
+        Run stalePending = run("run_side_stale_pending01", RunStatus.PENDING, NOW.plusSeconds(1))
+                .withSource(ConversationSourceType.SIDE_QUESTION, SESSION_ID.value(), USER_ID);
+        Run staleRunning = run("run_side_stale_running01", RunStatus.RUNNING, NOW.plusSeconds(2))
+                .withSource(ConversationSourceType.SIDE_QUESTION, SESSION_ID.value(), USER_ID);
+        Run terminal = run("run_side_stale_done000001", RunStatus.SUCCEEDED, NOW.plusSeconds(1))
+                .withSource(ConversationSourceType.SIDE_QUESTION, SESSION_ID.value(), USER_ID);
+        Run fresh = run("run_side_fresh_running01", RunStatus.RUNNING, NOW.plusSeconds(30))
+                .withSource(ConversationSourceType.SIDE_QUESTION, SESSION_ID.value(), USER_ID);
+        Run manual = run("run_manual_stale_running1", RunStatus.RUNNING, NOW.plusSeconds(1))
+                .withSource(ConversationSourceType.MANUAL, null, USER_ID);
+        repository.save(staleRunning);
+        repository.save(terminal);
+        repository.save(manual);
+        repository.save(fresh);
+        repository.save(stalePending);
+
+        assertThat(repository.findStaleActiveSideQuestionRuns(NOW.plusSeconds(10), 10))
+                .containsExactly(stalePending, staleRunning);
+    }
+
     private Run run(String runId, RunStatus status, Instant updatedAt) {
         return new Run(
                 new RunId(runId),

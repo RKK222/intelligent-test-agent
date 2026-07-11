@@ -94,6 +94,7 @@ public class OpencodeAgentRuntime implements AgentRuntime {
                         command.parts().stream().map(this::toOpencodePromptPart).toList(),
                         command.messageId(),
                         command.agent(),
+                        command.system(),
                         command.modelProviderId(),
                         command.modelId(),
                         command.variant(),
@@ -121,6 +122,20 @@ public class OpencodeAgentRuntime implements AgentRuntime {
                 command.directory(),
                 command.workspace(),
                 command.traceId()));
+    }
+
+    /** 把 OpenCode facade 的真实 HTTP/SSE 握手边界映射到通用 AgentRuntime。 */
+    @Override
+    public AgentEventStream openRunEventStream(AgentStreamEventsCommand command) {
+        com.icbc.testagent.opencode.client.OpencodeRunEventStream opened = opencodeClientFacade.openRunEventStream(
+                new OpencodeStreamEventsCommand(
+                        command.node(),
+                        command.runId(),
+                        command.remoteSessionId(),
+                        command.directory(),
+                        command.workspace(),
+                        command.traceId()));
+        return new AgentEventStream(opened.ready(), opened.events());
     }
 
     @Override

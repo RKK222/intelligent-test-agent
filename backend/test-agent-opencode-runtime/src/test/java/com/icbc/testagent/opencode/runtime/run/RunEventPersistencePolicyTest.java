@@ -24,7 +24,8 @@ class RunEventPersistencePolicyTest {
                 RunEventType.MESSAGE_REMOVED,
                 RunEventType.MESSAGE_PART_UPDATED,
                 RunEventType.MESSAGE_PART_REMOVED,
-                RunEventType.MESSAGE_PART_DELTA}) {
+                RunEventType.MESSAGE_PART_DELTA,
+                RunEventType.SIDE_QUESTION_DELTA}) {
             RunEventDraft draft = draft(type, Map.of("text", "hello"));
 
             assertThat(policy.shouldPersist(draft)).as(type.wireName()).isFalse();
@@ -36,6 +37,8 @@ class RunEventPersistencePolicyTest {
         for (RunEventType type : new RunEventType[]{
                 RunEventType.RUN_SUCCEEDED,
                 RunEventType.RUN_FAILED,
+                RunEventType.SIDE_QUESTION_STARTED,
+                RunEventType.SIDE_QUESTION_PROGRESS,
                 RunEventType.DIFF_PROPOSED,
                 RunEventType.PERMISSION_ASKED,
                 RunEventType.QUESTION_ASKED,

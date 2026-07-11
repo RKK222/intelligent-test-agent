@@ -94,4 +94,10 @@ class SessionTest {
         assertThat(scheduled.sourceRefId()).isEqualTo("str_1234567890abcdef");
         assertThat(scheduled.createdByUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
     }
+
+    @Test
+    void conversationSourceTypeIncludesSideQuestion() {
+        assertThat(ConversationSourceType.valueOf("SIDE_QUESTION"))
+                .isEqualTo(ConversationSourceType.SIDE_QUESTION);
+    }
 }

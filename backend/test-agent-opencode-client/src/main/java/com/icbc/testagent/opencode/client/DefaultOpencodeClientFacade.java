@@ -139,6 +139,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                         command.parts(),
                         command.messageId(),
                         command.agent(),
+                        command.system(),
                         command.modelProviderId(),
                         command.modelId(),
                         command.variant(),
@@ -196,6 +197,57 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                         command.runId(),
                         command.traceId(),
                         RunEventScopeContext.root(command.runId(), command.opencodeSessionId())));
+    }
+
+    /**
+     * 为旁路问答打开可观测握手流；旧 streamRunEvents 保持原重试链路，不改变主 Run 行为。
+     */
+    @Override
+    public OpencodeRunEventStream openRunEventStream(OpencodeStreamEventsCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        OpencodeEventStream opened = gateway.openEventStream(
+                command.node(),
+                command.directory(),
+                command.workspace(),
+                command.traceId());
+        Mono<Void> ready = applyObservableStreamReady(
+                opened.ready(), "openRunEventStreamReady", command.node());
+        Flux<RunEventDraft> events = applyObservableStreamEvents(
+                        opened.events(), "openRunEventStream", command.node())
+                .flatMapIterable(rawEvent -> eventMapper.toDrafts(
+                        rawEvent,
+                        command.runId(),
+                        command.traceId(),
+                        RunEventScopeContext.root(command.runId(), command.opencodeSessionId())));
+        return new OpencodeRunEventStream(ready, events);
+    }
+
+    /**
+     * 可观测 SSE 的握手只允许一次连接：保留响应头超时和统一错误映射，但禁止重试旧 response/body。
+     */
+    private Mono<Void> applyObservableStreamReady(
+            Mono<Void> source, String operation, ExecutionNode node) {
+        String nodeId = node.executionNodeId().value();
+        LOGGER.debug("Opencode stream handshake started, operation={}, nodeId={}, baseUrl={}",
+                operation, nodeId, node.baseUrl());
+        return source.timeout(timeout)
+                .doOnSuccess(ignored -> LOGGER.debug(
+                        "Opencode stream handshake completed, operation={}, nodeId={}", operation, nodeId))
+                .onErrorMap(error -> toPlatformException(error, operation, node));
+    }
+
+    /**
+     * 已打开 response 的 body 不能重订阅，也不使用逐事件 idle timeout；绝对时限由上层任务控制。
+     */
+    private <T> Flux<T> applyObservableStreamEvents(
+            Flux<T> source, String operation, ExecutionNode node) {
+        String nodeId = node.executionNodeId().value();
+        LOGGER.debug("Opencode observable stream started, operation={}, nodeId={}, baseUrl={}",
+                operation, nodeId, node.baseUrl());
+        return source
+                .doOnNext(event -> LOGGER.trace(
+                        "Opencode observable stream event, operation={}, nodeId={}", operation, nodeId))
+                .onErrorMap(error -> toPlatformException(error, operation, node));
     }
 
     /**
