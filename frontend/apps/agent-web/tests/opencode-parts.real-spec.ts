@@ -1,0 +1,315 @@
+import { expect, test, type Page } from "@playwright/test";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import {
+  PART_KINDS,
+  assertPartProjection,
+  runNaturalAttempt,
+  sanitizeEvidence,
+  writePartEvidence,
+  type PartKind
+} from "./opencode-parts-real-e2e";
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  authHeaders,
+  resolveOwnedCleanupPath,
+  resolveRemoteSessionIdFromSources,
+  runCleanupStages,
+  waitForWorkspaceOperation,
+  type WorkspaceCreateOperation
+} from "./real-e2e-api";
+
+const enabled = process.env.TEST_AGENT_RUN_PART_E2E === "1" && process.env.TEST_AGENT_PART_PHASE === "natural";
+const backendBaseUrl = stripTrailingSlash(process.env.TEST_AGENT_BASE_URL ?? "http://127.0.0.1:8080");
+const evidenceRoot = path.resolve(process.cwd(), "../.tmp/e2e/opencode-parts");
+
+test.describe("OpenCode 12 Part natural real E2E", () => {
+  test.skip(!enabled, "Set TEST_AGENT_RUN_PART_E2E=1 and TEST_AGENT_PART_PHASE=natural to run natural Part E2E.");
+
+  for (const kind of PART_KINDS) {
+    test(`${kind}: exactly one natural trigger`, async ({ page }) => {
+      test.setTimeout(180_000);
+      const fixture = await createWorkspace(kind);
+      const title = `e2e-part-${kind}-${fixture.marker}`;
+      const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
+        workspaceId: fixture.workspaceId,
+        title
+      });
+      let runId: string | undefined;
+      let remoteSessionId: string | undefined;
+      let opencodeBaseUrl: string | undefined;
+      let sse: SseCapture | undefined;
+      let primaryError: unknown;
+      try {
+        const process = await apiGet<{ baseUrl?: string }>("/api/internal/agent/opencode/processes/me");
+        if (!process.baseUrl) throw new Error("OpenCode process response has no baseUrl");
+        opencodeBaseUrl = stripTrailingSlash(process.baseUrl);
+        const prompt = promptFor(kind, fixture.marker);
+        const result = await runNaturalAttempt({
+          kind,
+          timeoutMs: 45_000,
+          pollIntervalMs: 500,
+          skipReason: kind === "retry" ? "unsafe-provider-injection" : undefined,
+          trigger: async () => {
+            const run = await apiPost<{ runId: string }>("/api/internal/agent/opencode/runs", runPayload(kind, session.sessionId, prompt));
+            runId = run.runId;
+            sse = captureRunSse(run.runId, kind);
+            return run;
+          },
+          observe: async () => {
+            remoteSessionId ??= await tryResolveRemoteSessionId(session.sessionId);
+            if (!remoteSessionId) return { observed: false };
+            const raw = await loadNativeMessages(opencodeBaseUrl!, remoteSessionId, fixture.workspaceRootPath);
+            return { observed: Boolean(findPartByKind(raw, kind)), rawSnapshot: raw };
+          }
+        });
+        runId ??= result.runId;
+        const evidenceRunId = runId ?? `skip_${fixture.marker}`;
+        await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "opencode-raw.json", value: result.rawSnapshot ?? [] });
+        await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: result });
+        if (sse) {
+          await sse.stop();
+          await writeSseEvidence(evidenceRunId, kind, sse.events);
+        } else {
+          await writeSseEvidence(evidenceRunId, kind, [{ status: "not-started", reason: result.reason }]);
+        }
+
+        if (result.classification === "natural-pass") {
+          if (!remoteSessionId) throw new Error(`${kind} natural-pass has no remote session id`);
+          const rawPart = findPartByKind(result.rawSnapshot, kind);
+          if (!rawPart) throw new Error(`${kind} target Part disappeared from raw snapshot`);
+          const platformMessages = await apiGet(
+            `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(session.sessionId)}/messages?page=1&size=100&refresh=true`
+          );
+          const tree = await apiGet(`/api/internal/agent/opencode/sessions/${encodeURIComponent(session.sessionId)}/session-tree/messages`);
+          await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "platform-messages.json", value: platformMessages });
+          await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "platform-tree.json", value: tree });
+          assertPartProjection(kind, rawPart, platformMessages, tree);
+          if (!sse?.containsPart(kind, String((rawPart as { id?: unknown }).id ?? ""))) {
+            throw new Error(`${kind} was observed in raw HTTP but not in natural RunEvent SSE`);
+          }
+          await verifyUi(page, title, kind, String((rawPart as { id?: unknown }).id ?? ""), evidenceRunId, "current-ui.png");
+          await page.getByRole("button", { name: /新建对话/ }).first().click();
+          await verifyUi(page, title, kind, String((rawPart as { id?: unknown }).id ?? ""), evidenceRunId, "history-ui.png");
+        }
+      } catch (error) {
+        primaryError = error;
+      } finally {
+        await sse?.stop().catch(() => undefined);
+        try {
+          await cleanupFixture({ fixture, sessionId: session.sessionId, runId, remoteSessionId, opencodeBaseUrl, title });
+        } catch (cleanupError) {
+          primaryError = primaryError
+            ? new AggregateError([primaryError, cleanupError], `${kind} verification and cleanup both failed`)
+            : cleanupError;
+        }
+      }
+      if (primaryError) throw primaryError;
+    });
+  }
+});
+
+function promptFor(kind: PartKind, marker: string): string {
+  const prompts: Record<PartKind, string> = {
+    text: `Reply with exactly NATURAL_TEXT_${marker}. Do not use tools.`,
+    reasoning: `Analyze whether 104729 is prime step by step, then answer NATURAL_REASONING_${marker}.`,
+    file: `Read the attached text and reply with its marker NATURAL_FILE_${marker}.`,
+    tool: `Use the read tool exactly once to read README.md, then reply NATURAL_TOOL_${marker}.`,
+    subtask: `Use the task/subagent tool exactly once for a read-only inspection of README.md, then reply NATURAL_SUBTASK_${marker}.`,
+    "step-start": `Use the read tool once on README.md, then reply NATURAL_STEP_START_${marker}.`,
+    "step-finish": `Use the read tool once on README.md, then reply NATURAL_STEP_FINISH_${marker}.`,
+    snapshot: `Edit e2e-${marker}.txt exactly once to contain NATURAL_SNAPSHOT_${marker}, then stop.`,
+    patch: `Edit e2e-${marker}.txt exactly once to contain NATURAL_PATCH_${marker}, then stop.`,
+    agent: `Reply with NATURAL_AGENT_${marker}. Do not use tools.`,
+    retry: "",
+    compaction: `Summarize the current test context and reply NATURAL_COMPACTION_${marker}.`
+  };
+  return prompts[kind];
+}
+
+function runPayload(kind: PartKind, sessionId: string, prompt: string): Record<string, unknown> {
+  const parts: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
+  if (kind === "file") {
+    parts.push({ type: "file", mime: "text/plain", filename: "natural-marker.txt", url: `data:text/plain,${encodeURIComponent(prompt)}` });
+  }
+  return { sessionId, prompt, parts, ...(kind === "agent" ? { agent: "build" } : {}) };
+}
+
+async function tryResolveRemoteSessionId(sessionId: string): Promise<string | undefined> {
+  try {
+    return await resolveRemoteSessionIdFromSources({
+      loadTree: () => apiGet(`/api/internal/agent/opencode/sessions/${encodeURIComponent(sessionId)}/session-tree/messages`),
+      loadPlatformMessages: () => apiGet(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/messages?page=1&size=100&refresh=true`)
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadNativeMessages(baseUrl: string, remoteSessionId: string, directory: string): Promise<unknown> {
+  const response = await fetch(`${baseUrl}/session/${encodeURIComponent(remoteSessionId)}/message?directory=${encodeURIComponent(directory)}`);
+  if (!response.ok) throw new Error(`OpenCode raw messages failed: ${response.status}`);
+  return response.json();
+}
+
+function findPartByKind(raw: unknown, kind: PartKind): Record<string, unknown> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  for (const message of raw) {
+    if (!message || typeof message !== "object") continue;
+    const parts = (message as { parts?: unknown }).parts;
+    if (!Array.isArray(parts)) continue;
+    const found = parts.find((part) => part && typeof part === "object" && (part as { type?: unknown }).type === kind);
+    if (found) return found as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+type SseCapture = { events: unknown[]; stop: () => Promise<void>; containsPart: (kind: PartKind, partId: string) => boolean };
+function captureRunSse(runId: string, targetKind: PartKind): SseCapture {
+  const controller = new AbortController();
+  const events: unknown[] = [];
+  const task = (async () => {
+    const response = await fetch(`${backendBaseUrl}/api/internal/agent/opencode/runs/${encodeURIComponent(runId)}/events`, {
+      headers: { ...authHeaders(), Accept: "text/event-stream" },
+      signal: controller.signal
+    });
+    if (!response.ok || !response.body) throw new Error(`RunEvent SSE failed: ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      buffer += decoder.decode(next.value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) {
+        const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+        if (!data) continue;
+        try { events.push(JSON.parse(data)); } catch { events.push({ raw: data }); }
+      }
+    }
+  })().catch((error) => {
+    if (!controller.signal.aborted) events.push({ sseError: error instanceof Error ? error.message : String(error) });
+  });
+  return {
+    events,
+    stop: async () => {
+      controller.abort();
+      // Node fetch 在个别 SSE 半关闭状态下不会及时兑现 abort；证据收集不能因此阻塞 finally 清理。
+      await Promise.race([task, new Promise<void>((resolve) => setTimeout(resolve, 1_000))]);
+    },
+    containsPart: (kind, partId) => {
+      const serialized = JSON.stringify(events);
+      return serialized.includes(`\"type\":\"${kind}\"`) && (!partId || serialized.includes(partId));
+    }
+  };
+}
+
+async function writeSseEvidence(runId: string, kind: PartKind, events: unknown[]): Promise<void> {
+  const target = path.join(evidenceRoot, runId, kind, "run-events.ndjson");
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, events.map((event) => JSON.stringify(sanitizeEvidence(event))).join("\n") + "\n", "utf8");
+}
+
+async function verifyUi(page: Page, title: string, kind: PartKind, partId: string, runId: string, screenshot: string): Promise<void> {
+  await page.addInitScript((token) => token && sessionStorage.setItem("test-agent.auth.token", token), process.env.TEST_AGENT_API_TOKEN ?? "");
+  await page.goto("/", { timeout: 15_000, waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: /查看消息列表/ }).click({ timeout: 15_000 });
+  await page.getByText(title, { exact: true }).click({ timeout: 15_000 });
+  const part = page.locator(`[data-part-id='${partId}'][data-part-type='${kind}']`);
+  await expect(part).toBeVisible({ timeout: 15_000 });
+  await expect(part.locator(".oc-unknown-part")).toHaveCount(0);
+  const target = path.join(evidenceRoot, runId, kind, screenshot);
+  await mkdir(path.dirname(target), { recursive: true });
+  await page.screenshot({ path: target, fullPage: true });
+}
+
+type Fixture = { marker: string; appId: string; applicationWorkspaceId: string; workspaceId: string; workspaceRootPath: string };
+async function createWorkspace(kind: PartKind): Promise<Fixture> {
+  const process = await apiGet<{ status?: string; initializable?: boolean }>("/api/internal/agent/opencode/processes/me");
+  if (process.status !== "READY" && process.initializable) {
+    await apiPost("/api/internal/agent/opencode/processes/me/initialize", {});
+  }
+  const deadline = Date.now() + 30_000;
+  while ((await apiGet<{ status?: string }>("/api/internal/agent/opencode/processes/me")).status !== "READY") {
+    if (Date.now() >= deadline) throw new Error("OpenCode process did not become READY within 30 seconds");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  const marker = `e2e_part_${kind.replace(/-/g, "_")}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const applications = await apiGet<Array<{ appId: string }>>("/api/internal/platform/configuration-management/applications?enabled=true");
+  for (const application of applications) {
+    const repositories = await apiGet<Array<{ repositoryId: string; englishName?: string; standard: boolean }>>(
+      `/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/repositories`
+    );
+    const repository = repositories.find((item) => item.englishName && !item.standard);
+    if (!repository) continue;
+    const branches = await apiGet<string[]>(`/api/internal/platform/configuration-management/repositories/${encodeURIComponent(repository.repositoryId)}/branches`);
+    const configuredWorkspaces = await apiGet<Array<{ repositoryId: string; branch: string }>>(
+      `/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces`
+    );
+    // 配置管理按日期复用 repository checkout，必须沿用该 checkout 已绑定的分支。
+    const branch = configuredWorkspaces.find(
+      (item) => item.repositoryId === repository.repositoryId
+        && branches.includes(item.branch)
+        && !(item as { workspaceName?: string }).workspaceName?.startsWith("e2e_part_")
+    )?.branch ?? branches[0];
+    if (!branch) continue;
+    const operationId = `wco_${marker}`;
+    await apiPost(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces`, {
+      repositoryId: repository.repositoryId, branch, directoryPath: marker, workspaceName: marker,
+      directoryNew: true, version: dateStamp(), operationId
+    });
+    let operation: WorkspaceCreateOperation;
+    try {
+      operation = await waitForWorkspaceOperation(operationId, {
+        getOperation: (id) => apiGet(`/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(id)}`)
+      });
+    } catch (error) {
+      const failed = await apiGet<{ workspaceId?: string | null }>(
+        `/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(operationId)}`
+      );
+      if (failed.workspaceId) {
+        await apiDelete(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces/${encodeURIComponent(failed.workspaceId)}`);
+      }
+      throw error;
+    }
+    if (!operation.workspaceId || !operation.versionId) throw new Error(`Workspace ${operationId} has no ids`);
+    const versions = await apiGet<Array<{ versionId: string; workspaceRootPath: string; runtimeWorkspace?: { workspaceId?: string } }>>(
+      `/api/internal/platform/workspace-management/applications/${encodeURIComponent(application.appId)}/workspace-templates/${encodeURIComponent(operation.workspaceId)}/versions`
+    );
+    const version = versions.find((item) => item.versionId === operation.versionId);
+    if (!version?.runtimeWorkspace?.workspaceId || !version.workspaceRootPath) throw new Error(`Workspace ${operationId} has no runtime workspace`);
+    if (kind === "snapshot" || kind === "patch") await writeFile(path.join(version.workspaceRootPath, `e2e-${marker}.txt`), "before\n", "utf8");
+    return { marker, appId: application.appId, applicationWorkspaceId: operation.workspaceId, workspaceId: version.runtimeWorkspace.workspaceId, workspaceRootPath: version.workspaceRootPath };
+  }
+  throw new Error("No enabled application repository is available for natural Part E2E");
+}
+
+async function cleanupFixture(input: { fixture: Fixture; sessionId: string; runId?: string; remoteSessionId?: string; opencodeBaseUrl?: string; title: string }): Promise<void> {
+  await runCleanupStages([
+    async () => { if (input.runId) await apiPost(`/api/internal/agent/opencode/runs/${encodeURIComponent(input.runId)}/cancel`, {}).catch(() => undefined); },
+    async () => {
+      if (!input.remoteSessionId || !input.opencodeBaseUrl) return;
+      const response = await fetch(`${input.opencodeBaseUrl}/session/${encodeURIComponent(input.remoteSessionId)}?directory=${encodeURIComponent(input.fixture.workspaceRootPath)}`, { method: "DELETE" });
+      if (!response.ok && response.status !== 404) throw new Error(`OpenCode session delete failed: ${response.status}`);
+    },
+    async () => {
+      await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(input.sessionId)}`);
+      const history = await apiGet<{ items?: Array<{ title?: string }> }>(`/api/internal/platform/opencode-runtime/workspaces/${encodeURIComponent(input.fixture.workspaceId)}/sessions?page=1&size=100`);
+      if (history.items?.some((item) => item.title === input.title)) throw new Error(`platform history still contains ${input.title}`);
+    },
+    async () => apiDelete(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(input.fixture.appId)}/workspaces/${encodeURIComponent(input.fixture.applicationWorkspaceId)}`),
+    async () => {
+      const ownedRoot = path.resolve(process.cwd(), "../.testagent/agent-opencode/workspace");
+      const safe = await resolveOwnedCleanupPath(input.fixture.workspaceRootPath, ownedRoot, input.fixture.marker);
+      await rm(safe, { recursive: true, force: true });
+    }
+  ]);
+}
+
+function dateStamp(): string { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`; }
+function stripTrailingSlash(value: string): string { return value.replace(/\/+$/, ""); }

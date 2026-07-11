@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   PART_KINDS,
   PART_SPECS,
@@ -9,8 +9,13 @@ import {
   findTreeMessagePart,
   sanitizeEvidence,
   selectPartFields,
-  interactionExpectation
+  interactionExpectation,
+  runNaturalAttempt,
+  writePartEvidence
 } from "./opencode-parts-real-e2e";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 const base = { id: "part_1", partID: "part_1", partId: "part_1", sessionID: "ses_1", messageID: "msg_1" };
 const ids = ["id", "sessionID", "messageID", "type"];
@@ -45,6 +50,73 @@ const samples = {
 } as const;
 
 describe("OpenCode 1.17.7 Part 契约", () => {
+  it("自然触发每类恰好发送一次请求，观察到目标后立即通过", async () => {
+    let polls = 0;
+    const trigger = vi.fn().mockResolvedValue({ runId: "run_once" });
+    const result = await runNaturalAttempt({
+      kind: "tool",
+      timeoutMs: 45_000,
+      pollIntervalMs: 1,
+      trigger,
+      observe: async () => ({ observed: ++polls === 2, rawSnapshot: { polls } }),
+      sleep: async () => undefined,
+      now: (() => { let value = 0; return () => value += 10; })()
+    });
+    expect(trigger).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ classification: "natural-pass", runId: "run_once", rawSnapshot: { polls: 2 } });
+  });
+
+  it("45秒内未观察到目标时不重试模型并保留最后原始快照", async () => {
+    const trigger = vi.fn().mockResolvedValue({ runId: "run_timeout" });
+    const result = await runNaturalAttempt({
+      kind: "subtask",
+      timeoutMs: 45,
+      pollIntervalMs: 1,
+      trigger,
+      observe: async () => ({ observed: false, rawSnapshot: { marker: "last" } }),
+      sleep: async () => undefined,
+      now: (() => { let value = 0; return () => value += 20; })()
+    });
+    expect(trigger).toHaveBeenCalledOnce();
+    expect(result).toEqual({
+      classification: "native-fixture-required",
+      kind: "subtask",
+      runId: "run_timeout",
+      reason: "not-observed-within-45ms",
+      rawSnapshot: { marker: "last" }
+    });
+  });
+
+  it("不安全的 retry provider 注入直接分类且不发送模型请求", async () => {
+    const trigger = vi.fn();
+    const result = await runNaturalAttempt({
+      kind: "retry",
+      timeoutMs: 45_000,
+      trigger,
+      skipReason: "unsafe-provider-injection",
+      observe: async () => ({ observed: false }),
+      sleep: async () => undefined
+    });
+    expect(trigger).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ classification: "native-fixture-required", reason: "unsafe-provider-injection" });
+  });
+
+  it("按 run/kind 隔离写入已脱敏且非空的证据", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "part-evidence-"));
+    try {
+      const file = await writePartEvidence({
+        root,
+        runId: "run_evidence",
+        kind: "text",
+        name: "opencode-raw.json",
+        value: { Authorization: "Bearer secret", nested: { token: "secret", text: "visible" } }
+      });
+      expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ nested: { text: "visible" } });
+      expect(file).toContain("run_evidence/text/opencode-raw.json");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("严格包含官方顺序的 12 种 Part", () => {
     expect(PART_KINDS).toEqual(["text", "subtask", "reasoning", "file", "tool", "step-start", "step-finish", "snapshot", "patch", "agent", "retry", "compaction"]);
     expect(PART_SPECS).toHaveLength(12);

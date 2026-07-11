@@ -1,4 +1,6 @@
 import { posix as path } from "node:path";
+import { dirname, join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 
 export const PART_KINDS = [
@@ -18,6 +20,25 @@ export const PART_KINDS = [
 
 export type PartKind = (typeof PART_KINDS)[number];
 type JsonRecord = Record<string, unknown>;
+
+export type NaturalAttemptResult = {
+  classification: "natural-pass" | "native-fixture-required";
+  kind: PartKind;
+  runId?: string;
+  reason?: string;
+  rawSnapshot?: unknown;
+};
+
+export type NaturalAttemptOptions = {
+  kind: PartKind;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  trigger: () => Promise<{ runId: string }>;
+  observe: (runId: string) => Promise<{ observed: boolean; rawSnapshot?: unknown }>;
+  skipReason?: string;
+  sleep?: (delayMs: number) => Promise<void>;
+  now?: () => number;
+};
 
 export type PartUiContract = {
   locators: readonly string[];
@@ -237,6 +258,57 @@ export function evidencePath(runId: string, kind: PartKind, name: string): strin
     }
   }
   return path.join(".tmp/e2e/opencode-parts", runId, kind, name);
+}
+
+/**
+ * 每类自然触发只允许调用模型一次。超时后返回 fixture 分类并保留最后一次原生快照，
+ * 调用方不得以继续对话的方式重试目标 Part。
+ */
+export async function runNaturalAttempt(options: NaturalAttemptOptions): Promise<NaturalAttemptResult> {
+  if (options.skipReason) {
+    return { classification: "native-fixture-required", kind: options.kind, reason: options.skipReason };
+  }
+  const timeoutMs = options.timeoutMs ?? 45_000;
+  const pollIntervalMs = options.pollIntervalMs ?? 500;
+  const sleep = options.sleep ?? ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+  const now = options.now ?? Date.now;
+  const startedAt = now();
+  const { runId } = await options.trigger();
+  let rawSnapshot: unknown;
+  while (now() - startedAt <= timeoutMs) {
+    const observation = await options.observe(runId);
+    rawSnapshot = observation.rawSnapshot;
+    if (observation.observed) {
+      return { classification: "natural-pass", kind: options.kind, runId, rawSnapshot };
+    }
+    await sleep(pollIntervalMs);
+  }
+  return {
+    classification: "native-fixture-required",
+    kind: options.kind,
+    runId,
+    reason: `not-observed-within-${timeoutMs}ms`,
+    rawSnapshot
+  };
+}
+
+/** 写入单类真实 E2E 证据；JSON 在落盘前递归脱敏，空内容不能伪装为证据。 */
+export async function writePartEvidence(options: {
+  root?: string;
+  runId: string;
+  kind: PartKind;
+  name: string;
+  value: unknown;
+}): Promise<string> {
+  const relative = evidencePath(options.runId, options.kind, options.name);
+  const target = options.root
+    ? join(options.root, options.runId, options.kind, options.name)
+    : relative;
+  const serialized = JSON.stringify(sanitizeEvidence(options.value), null, 2);
+  if (!serialized || serialized === "undefined") throw new Error("evidence must not be empty");
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, `${serialized}\n`, "utf8");
+  return target;
 }
 
 function getSpec(kind: PartKind): PartSpec {

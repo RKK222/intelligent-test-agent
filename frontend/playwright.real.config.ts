@@ -19,7 +19,7 @@ export default defineConfig({
   },
   use: {
     baseURL: frontendUrl,
-    trace: "retain-on-failure"
+    trace: process.env.TEST_AGENT_PART_PHASE === "natural" ? "on" : "retain-on-failure"
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }]
 });
