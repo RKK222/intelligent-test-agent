@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { apiPost } from "./real-e2e-api";
+
 const runRealE2e = process.env.TEST_AGENT_RUN_REAL_E2E === "1";
 const backendBaseUrl = stripTrailingSlash(process.env.TEST_AGENT_BASE_URL ?? "http://127.0.0.1:8080");
 
@@ -75,37 +77,9 @@ async function tryCreateTerminalTicket(sessionId: string) {
   }
 }
 
-async function apiPost<T = unknown>(pathname: string, body: unknown): Promise<T> {
-  const headers: Record<string, string> = {
-    ...authHeaders(),
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-    "X-Trace-Id": `trace_phase11_real_${Date.now()}`
-  };
-  const response = await fetch(`${backendBaseUrl}${pathname}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body)
-  });
-  const payload = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
-  if (!response.ok || !payload?.success) {
-    const failure = payload && "error" in payload ? payload.error : undefined;
-    throw new Error(`${response.status} ${failure?.code ?? "API_ERROR"} ${failure?.message ?? response.statusText}`);
-  }
-  return payload.data;
-}
-
-function authHeaders(): Record<string, string> {
-  return process.env.TEST_AGENT_API_TOKEN ? { Authorization: `Bearer ${process.env.TEST_AGENT_API_TOKEN}` } : {};
-}
-
 function stripTrailingSlash(value: string) {
   return value.replace(/\/$/, "");
 }
-
-type ApiEnvelope<T> =
-  | { success: true; traceId: string; data: T }
-  | { success: false; traceId: string; error: { code: string; message: string } };
 
 type TerminalProbeResult = {
   output: string;
