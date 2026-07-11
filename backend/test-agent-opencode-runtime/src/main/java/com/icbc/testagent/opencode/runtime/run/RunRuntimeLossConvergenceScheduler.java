@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
@@ -34,6 +35,8 @@ public class RunRuntimeLossConvergenceScheduler {
     private final Scheduler delayScheduler;
     private final Set<RunId> pending = ConcurrentHashMap.newKeySet();
 
+    /** 生产装配显式选择单依赖构造器，避免测试用双参构造器干扰 Spring 的构造器解析。 */
+    @Autowired
     public RunRuntimeLossConvergenceScheduler(RunRuntimeLossConvergenceService convergenceService) {
         this(convergenceService, Schedulers.parallel());
     }
