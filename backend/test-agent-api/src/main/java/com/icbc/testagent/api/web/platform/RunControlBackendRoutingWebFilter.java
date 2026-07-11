@@ -81,9 +81,11 @@ class RunControlBackendRoutingWebFilter implements WebFilter {
     }
 
     private Optional<RunId> runId(ServerWebExchange exchange) {
-        if (!HttpMethod.POST.equals(exchange.getRequest().getMethod()) || isRouted(exchange)) {
+        if (!HttpMethod.POST.equals(exchange.getRequest().getMethod())) {
             return Optional.empty();
         }
+        // ROUTED_HEADER 可由外部客户端伪造，cancel 写路径必须每跳重新解析生产 Java；
+        // 请求到达当前被选中的生产 Java 后，strict resolver 自然返回 empty，不依赖客户端头防循环。
         return runIdFromPath(exchange.getRequest().getURI().getRawPath())
                 .flatMap(this::parseRunId);
     }
@@ -125,8 +127,4 @@ class RunControlBackendRoutingWebFilter implements WebFilter {
         }
     }
 
-    private boolean isRouted(ServerWebExchange exchange) {
-        return "true".equalsIgnoreCase(
-                exchange.getRequest().getHeaders().getFirst(BackendHttpForwarder.ROUTED_HEADER));
-    }
 }

@@ -100,9 +100,10 @@ class RunControlBackendRoutingWebFilterTest {
     }
 
     @Test
-    void routedHeaderSkipsSecondRouting() {
+    void clientControlledRoutedHeaderCannotBypassStrictCancelRouting() {
         RunEventSseRouteService routeService = mock(RunEventSseRouteService.class);
         BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
+        when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenReturn(Optional.empty());
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
                 routeService, forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
@@ -117,7 +118,8 @@ class RunControlBackendRoutingWebFilterTest {
         })).block(Duration.ofSeconds(2));
 
         assertThat(chainCalled).isTrue();
-        verifyNoInteractions(routeService, forwarder);
+        verify(routeService).forwardTargetStrict(new RunId(RUN_ID));
+        verifyNoInteractions(forwarder);
     }
 
     @Test
