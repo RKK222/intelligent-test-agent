@@ -38,6 +38,26 @@ export type CleanupScope = {
   cleanup: () => Promise<void>;
 };
 
+export type RemoteSessionSourceOptions = {
+  loadTree: () => Promise<unknown>;
+  loadPlatformMessages: () => Promise<unknown>;
+  onObserved?: (remoteSessionId: string) => void;
+  validateTree?: (tree: unknown) => void | Promise<void>;
+};
+
+export type MyOpenCodeProcess = {
+  port?: number | null;
+  baseUrl?: string | null;
+};
+
+export type OpenCodeDatabaseLocationOptions = {
+  projectRoot: string;
+  stateRoot?: string;
+  findListenerPid?: (port: number) => Promise<number>;
+};
+
+export type NativeSessionCounts = { session: number; message: number; part: number };
+
 /**
  * 调用真实 E2E 使用的平台信封接口，并统一处理鉴权、trace 与错误脱敏。
  * 该客户端只访问平台 API，不允许用它绕过平台直连 OpenCode 服务。
@@ -160,6 +180,92 @@ export function createCleanupScope(): CleanupScope {
   };
 }
 
+/**
+ * 按 tree root、tree 内原生 RunEvent、平台消息顺序恢复远端 Session ID。
+ * ID 一经观察便先交给 cleanup owner，再执行其余投影校验，确保后续异常不丢失原生删除责任。
+ */
+export async function resolveRemoteSessionIdFromSources(options: RemoteSessionSourceOptions): Promise<string> {
+  const tree = await options.loadTree();
+  const treeId = findTreeRootSessionId(tree) ?? findNativeSessionId(tree);
+  if (treeId) {
+    options.onObserved?.(treeId);
+    await options.validateTree?.(tree);
+    return treeId;
+  }
+  await options.validateTree?.(tree);
+
+  const messages = await options.loadPlatformMessages();
+  const messageId = findNativeSessionId(messages);
+  if (messageId) {
+    options.onObserved?.(messageId);
+    return messageId;
+  }
+  throw new Error("remote OpenCode session id was not found in session tree, RunEvent or platform messages");
+}
+
+/**
+ * 从平台目标进程定位同端口 manager state，并只接受项目拥有用户 Session 根下的固定 SQLite 文件。
+ * state、Session 路径和数据库任一层包含符号链接、端口/baseUrl/PID 不匹配都会拒绝。
+ */
+export async function resolveOwnedOpenCodeDatabase(
+  process: MyOpenCodeProcess,
+  options: OpenCodeDatabaseLocationOptions
+): Promise<{ databasePath: string; sessionPath: string; pid: number; port: number }> {
+  const rawPort = process.port;
+  if (typeof rawPort !== "number" || !Number.isInteger(rawPort) || rawPort <= 0) {
+    throw new Error("platform OpenCode process has no valid port");
+  }
+  const port = rawPort;
+  const lexicalProjectRoot = path.resolve(options.projectRoot);
+  const projectRoot = await realpath(lexicalProjectRoot);
+  const configuredStateRoot = options.stateRoot ?? path.join(lexicalProjectRoot, ".tmp", "dev-services", "opencode-manager-state", "processes");
+  const stateRoot = rebaseProjectOwnedPath(configuredStateRoot, lexicalProjectRoot, projectRoot, "manager state");
+  const statePath = path.join(stateRoot, `${port}.json`);
+  await assertPathWithoutSymlink(projectRoot, statePath, "manager state");
+  const state = JSON.parse(await readFile(statePath, "utf8")) as {
+    port?: number;
+    pid?: number;
+    baseUrl?: string;
+    sessionPath?: string;
+  };
+  if (state.port !== port) throw new Error(`manager state port ${state.port ?? "missing"} does not match platform port ${port}`);
+  if (typeof state.pid !== "number" || !Number.isInteger(state.pid) || state.pid <= 0) throw new Error("manager state has no valid PID");
+  const statePid = state.pid;
+  if (urlPort(state.baseUrl) !== port || urlPort(process.baseUrl) !== port) {
+    throw new Error("manager state/platform baseUrl port does not match target process port");
+  }
+
+  const ownedSessionRoot = path.join(projectRoot, ".testagent", "agent-opencode", ".session", "users");
+  if (!state.sessionPath) throw new Error("manager state has no sessionPath");
+  const sessionPath = rebaseProjectOwnedPath(state.sessionPath, lexicalProjectRoot, projectRoot, "owned session root");
+  await assertPathWithoutSymlink(ownedSessionRoot, sessionPath, "owned session root");
+  const canonicalSessionPath = await realpath(sessionPath);
+  const databasePath = path.join(canonicalSessionPath, "opencode", "opencode.db");
+  await assertPathWithoutSymlink(ownedSessionRoot, databasePath, "OpenCode database");
+  const canonicalDatabasePath = await realpath(databasePath);
+
+  const listenerPid = await (options.findListenerPid ?? findListenerPid)(port);
+  if (listenerPid !== statePid) {
+    throw new Error(`manager state PID ${statePid} does not match listener PID ${listenerPid}`);
+  }
+  return { databasePath: canonicalDatabasePath, sessionPath: canonicalSessionPath, pid: statePid, port };
+}
+
+/** 只读查询指定测试 Session 的三张原生表，任何非零计数都作为资源泄漏失败。 */
+export async function assertNativeSessionAbsentInSqlite(
+  databasePath: string,
+  remoteSessionId: string,
+  options: { queryCounts?: (databasePath: string, remoteSessionId: string) => Promise<NativeSessionCounts> } = {}
+): Promise<NativeSessionCounts> {
+  const counts = await (options.queryCounts ?? queryNativeSessionCounts)(databasePath, remoteSessionId);
+  if (counts.session !== 0 || counts.message !== 0 || counts.part !== 0) {
+    throw new Error(
+      `native OpenCode SQLite residue for ${safeIdPrefix(remoteSessionId)}: session=${counts.session}, message=${counts.message}, part=${counts.part}`
+    );
+  }
+  return counts;
+}
+
 /** 对物理清理目标做 canonical、路径段和符号链接三重校验。 */
 export async function resolveOwnedCleanupPath(candidate: string, ownedRoot: string, marker: string): Promise<string> {
   const canonicalRoot = await realpath(ownedRoot);
@@ -188,6 +294,114 @@ export async function resolveOwnedCleanupPath(candidate: string, ownedRoot: stri
   return canonicalCandidate;
 }
 
+function findTreeRootSessionId(value: unknown): string | undefined {
+  if (!isRecord(value) || !Array.isArray(value.sessions)) return undefined;
+  for (const session of value.sessions) {
+    if (!isRecord(session) || session.childSession === true) continue;
+    if (isNativeSessionId(session.sessionId)) return session.sessionId;
+  }
+  return undefined;
+}
+
+function findNativeSessionId(value: unknown, seen = new Set<object>()): string | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNativeSessionId(item, seen);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isRecord(value) || seen.has(value)) return undefined;
+  seen.add(value);
+  for (const key of ["sessionID", "rootSessionId"] as const) {
+    if (isNativeSessionId(value[key])) return value[key];
+  }
+  for (const nested of Object.values(value)) {
+    const found = findNativeSessionId(nested, seen);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function isNativeSessionId(value: unknown): value is string {
+  return typeof value === "string" && /^ses[A-Za-z0-9_-]+$/.test(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function rebaseProjectOwnedPath(candidate: string, lexicalProjectRoot: string, canonicalProjectRoot: string, label: string): string {
+  const relative = path.relative(lexicalProjectRoot, path.resolve(candidate));
+  if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`${label} path is outside owned session root or equals it`);
+  }
+  return path.join(canonicalProjectRoot, relative);
+}
+
+async function assertPathWithoutSymlink(ownedRoot: string, candidate: string, label: string): Promise<void> {
+  const lexicalRoot = path.resolve(ownedRoot);
+  const lexicalCandidate = path.resolve(candidate);
+  const relative = path.relative(lexicalRoot, lexicalCandidate);
+  if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`${label} path is outside owned session root or equals it`);
+  }
+  const rootStat = await lstat(lexicalRoot);
+  if (rootStat.isSymbolicLink()) throw new Error(`${label} path contains a symbolic link`);
+  let cursor = lexicalRoot;
+  for (const segment of relative.split(path.sep)) {
+    cursor = path.join(cursor, segment);
+    if ((await lstat(cursor)).isSymbolicLink()) throw new Error(`${label} path contains a symbolic link`);
+  }
+  const canonicalRoot = await realpath(lexicalRoot);
+  const canonicalCandidate = await realpath(lexicalCandidate);
+  const canonicalRelative = path.relative(canonicalRoot, canonicalCandidate);
+  if (!canonicalRelative || canonicalRelative === ".." || canonicalRelative.startsWith(`..${path.sep}`) || path.isAbsolute(canonicalRelative)) {
+    throw new Error(`${label} canonical path is outside owned session root`);
+  }
+}
+
+async function findListenerPid(port: number): Promise<number> {
+  const { stdout } = await execFileAsync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" });
+  const pids = stdout.trim().split(/\s+/).filter(Boolean).map(Number);
+  if (pids.length !== 1 || !Number.isInteger(pids[0])) throw new Error(`expected one listener PID for port ${port}`);
+  return pids[0]!;
+}
+
+async function queryNativeSessionCounts(databasePath: string, remoteSessionId: string): Promise<NativeSessionCounts> {
+  const id = remoteSessionId.replaceAll("'", "''");
+  const sql = [
+    `SELECT 'session', COUNT(*) FROM session WHERE id='${id}'`,
+    `SELECT 'message', COUNT(*) FROM message WHERE session_id='${id}'`,
+    `SELECT 'part', COUNT(*) FROM part WHERE session_id='${id}'`
+  ].join(" UNION ALL ");
+  const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-separator", "\t", databasePath, sql], { encoding: "utf8" });
+  const counts: NativeSessionCounts = { session: -1, message: -1, part: -1 };
+  for (const line of stdout.trim().split("\n")) {
+    const [table, rawCount] = line.split("\t");
+    if (table === "session" || table === "message" || table === "part") counts[table] = Number(rawCount);
+  }
+  if (Object.values(counts).some((count) => !Number.isInteger(count) || count < 0)) {
+    throw new Error("SQLite residue query did not return all session/message/part counts");
+  }
+  return counts;
+}
+
+function safeIdPrefix(value: string): string {
+  return value.slice(0, 12);
+}
+
+function urlPort(value: string | null | undefined): number | undefined {
+  try {
+    const parsed = new URL(value ?? "");
+    const rawPort = parsed.port || (parsed.protocol === "https:" ? "443" : parsed.protocol === "http:" ? "80" : "");
+    const port = Number(rawPort);
+    return Number.isInteger(port) && port > 0 ? port : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
@@ -203,5 +417,9 @@ function createTraceId(): string {
 function redactSecret(message: string, token: string | undefined): string {
   return token ? message.split(token).join("[REDACTED]") : message;
 }
-import { lstat, realpath } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);

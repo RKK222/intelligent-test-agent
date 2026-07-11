@@ -1,13 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
-import { rm } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
   apiDelete,
   apiGet,
   apiPost,
+  assertNativeSessionAbsentInSqlite,
   createCleanupScope,
+  resolveOwnedOpenCodeDatabase,
   runCleanupStages,
+  resolveRemoteSessionIdFromSources,
   resolveOwnedCleanupPath,
   waitForWorkspaceOperation,
   type WorkspaceCreateOperation
@@ -24,7 +27,13 @@ test.describe("phase 11 real service integration", () => {
     let sessionId: string | undefined;
     let remoteSessionId: string | undefined;
     let opencodeBaseUrl: string | undefined;
+    let openCodeDatabasePath: string | undefined;
     try {
+      const processInfo = await apiGet<{ port?: number; baseUrl?: string }>("/api/internal/agent/opencode/processes/me");
+      opencodeBaseUrl = processInfo.baseUrl;
+      openCodeDatabasePath = (
+        await resolveOwnedOpenCodeDatabase(processInfo, { projectRoot: path.resolve(process.cwd(), "..") })
+      ).databasePath;
       const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
         workspaceId: workspace.workspaceId,
         title: "Phase 11 real E2E"
@@ -32,8 +41,10 @@ test.describe("phase 11 real service integration", () => {
       sessionId = session.sessionId;
 
       const mappingTicket = await establishOpencodeMapping(session.sessionId);
-      remoteSessionId = await resolveRemoteSessionId(session.sessionId);
-      opencodeBaseUrl = (await apiGet<{ baseUrl?: string }>("/api/internal/agent/opencode/processes/me")).baseUrl;
+      remoteSessionId = await resolveRemoteSessionId(session.sessionId, (observedRemoteSessionId) => {
+        // cleanup-owned ref 必须在任意后续 tree/投影异常之前取得远端 ID。
+        remoteSessionId ??= observedRemoteSessionId;
+      });
       const ticket =
         mappingTicket ??
         (await apiPost<{ webSocketUrl: string }>(`/api/internal/platform/opencode-runtime/sessions/${session.sessionId}/terminal/tickets`, {
@@ -56,6 +67,7 @@ test.describe("phase 11 real service integration", () => {
       const ownedSessionId = sessionId;
       const ownedRemoteSessionId = remoteSessionId;
       const ownedOpencodeBaseUrl = opencodeBaseUrl;
+      const ownedOpenCodeDatabasePath = openCodeDatabasePath;
       await runCleanupStages([
         async () => {
           if (!ownedSessionId) return;
@@ -69,21 +81,32 @@ test.describe("phase 11 real service integration", () => {
         async () => {
           if (!ownedRemoteSessionId || !ownedOpencodeBaseUrl) return;
           await deleteNativeSession(ownedOpencodeBaseUrl, ownedRemoteSessionId, workspace.workspaceRootPath);
+          if (!ownedOpenCodeDatabasePath) throw new Error("owned OpenCode SQLite path was not resolved before cleanup");
+          await assertNativeSessionAbsentInSqlite(ownedOpenCodeDatabasePath, ownedRemoteSessionId);
         },
         async () => {
           if (ownedSessionId) {
             await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}`);
+            const history = await apiGet<{ items?: Array<{ sessionId?: string }> }>(
+              `/api/internal/platform/opencode-runtime/workspaces/${encodeURIComponent(workspace.workspaceId)}/sessions?page=1&size=100`
+            );
+            expect(history.items?.some((item) => item.sessionId === ownedSessionId) ?? false).toBe(false);
           }
         },
         async () => {
           await apiDelete(
             `/api/internal/platform/configuration-management/applications/${encodeURIComponent(workspace.appId)}/workspaces/${encodeURIComponent(workspace.applicationWorkspaceId)}`
           );
+          const configuredWorkspaces = await apiGet<Array<{ workspaceId?: string }>>(
+            `/api/internal/platform/configuration-management/applications/${encodeURIComponent(workspace.appId)}/workspaces`
+          );
+          expect(configuredWorkspaces.some((item) => item.workspaceId === workspace.applicationWorkspaceId)).toBe(false);
         },
         async () => {
           const ownedRoot = path.resolve(process.cwd(), "../.testagent/agent-opencode/workspace");
           const safePath = await resolveOwnedCleanupPath(workspace.workspaceRootPath, ownedRoot, workspace.marker);
           await rm(safePath, { recursive: true, force: true });
+          await expectPathAbsent(safePath);
         }
       ]);
     }
@@ -222,21 +245,41 @@ async function establishOpencodeMapping(sessionId: string): Promise<{ webSocketU
   }
 }
 
-async function resolveRemoteSessionId(platformSessionId: string): Promise<string> {
+async function resolveRemoteSessionId(platformSessionId: string, onObserved: (remoteSessionId: string) => void): Promise<string> {
   let remoteSessionId: string | undefined;
   await expect
     .poll(
       async () => {
-        const tree = await apiGet<{ sessions?: Array<{ sessionId?: string; childSession?: boolean }> }>(
-          `/api/internal/agent/opencode/sessions/${encodeURIComponent(platformSessionId)}/session-tree/messages`
-        );
-        remoteSessionId = tree.sessions?.find((session) => !session.childSession)?.sessionId;
+        try {
+          remoteSessionId = await resolveRemoteSessionIdFromSources({
+            loadTree: () =>
+              apiGet(`/api/internal/agent/opencode/sessions/${encodeURIComponent(platformSessionId)}/session-tree/messages`),
+            loadPlatformMessages: () =>
+              apiGet(
+                `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(platformSessionId)}/messages?page=1&size=100&refresh=true`
+              ),
+            onObserved
+          });
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes("was not found")) throw error;
+          remoteSessionId = undefined;
+        }
         return remoteSessionId;
       },
       { timeout: 15_000, intervals: [200, 500, 1_000], message: "remote OpenCode session id should be recoverable" }
     )
     .toBeTruthy();
   return remoteSessionId!;
+}
+
+async function expectPathAbsent(candidate: string): Promise<void> {
+  try {
+    await access(candidate);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(`owned workspace directory still exists: ${path.basename(candidate)}`);
 }
 
 async function deleteNativeSession(baseUrl: string, remoteSessionId: string, workspaceRoot: string): Promise<void> {

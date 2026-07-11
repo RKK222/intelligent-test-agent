@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,7 +10,10 @@ import {
   authHeaders,
   createCleanupScope,
   requestEnvelope,
+  resolveOwnedOpenCodeDatabase,
+  resolveRemoteSessionIdFromSources,
   resolveOwnedCleanupPath,
+  assertNativeSessionAbsentInSqlite,
   runCleanupTasks,
   runCleanupStages,
   waitForWorkspaceOperation
@@ -200,6 +203,130 @@ describe("real E2E API client", () => {
       await rm(root, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("registers a tree remote id before later tree validation fails so finally can still clean it", async () => {
+    let cleanupOwnedRemoteId: string | undefined;
+    let resolutionError: Error | undefined;
+    const nativeDelete = vi.fn().mockResolvedValue(undefined);
+
+    try {
+      await resolveRemoteSessionIdFromSources({
+        loadTree: async () => ({ sessions: [{ sessionId: "ses_tree", childSession: false }] }),
+        loadPlatformMessages: async () => ({ items: [] }),
+        onObserved: (remoteId) => {
+          cleanupOwnedRemoteId ??= remoteId;
+        },
+        validateTree: () => {
+          throw new Error("tree projection failed after id observation");
+        }
+      });
+    } catch (error) {
+      resolutionError = error as Error;
+    } finally {
+      if (cleanupOwnedRemoteId) await nativeDelete(cleanupOwnedRemoteId);
+    }
+
+    expect(resolutionError?.message).toContain("tree projection failed");
+    expect(nativeDelete).toHaveBeenCalledWith("ses_tree");
+  });
+
+  it("falls back to RunEvent and platform message sessionID fields", async () => {
+    const observed: string[] = [];
+    await expect(
+      resolveRemoteSessionIdFromSources({
+        loadTree: async () => ({ sessions: [], events: [{ type: "message.updated", payload: { message: { sessionID: "ses_event" } } }] }),
+        loadPlatformMessages: async () => ({ items: [] }),
+        onObserved: (remoteId) => observed.push(remoteId)
+      })
+    ).resolves.toBe("ses_event");
+    expect(observed).toEqual(["ses_event"]);
+
+    await expect(
+      resolveRemoteSessionIdFromSources({
+        loadTree: async () => ({ sessions: [], events: [] }),
+        loadPlatformMessages: async () => ({ items: [{ parts: [{ type: "text", sessionID: "ses_message" }] }] })
+      })
+    ).resolves.toBe("ses_message");
+  });
+
+  it("resolves only the matching manager state and owned SQLite database", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "real-e2e-project-"));
+    const stateRoot = path.join(projectRoot, ".tmp", "dev-services", "opencode-manager-state", "processes");
+    const sessionPath = path.join(projectRoot, ".testagent", "agent-opencode", ".session", "users", "usr-test");
+    const databasePath = path.join(sessionPath, "opencode", "opencode.db");
+    const statePath = path.join(stateRoot, "43210.json");
+    try {
+      await mkdir(path.dirname(databasePath), { recursive: true });
+      await mkdir(stateRoot, { recursive: true });
+      await writeFile(databasePath, "sqlite-placeholder");
+      // manager 使用可供 Java 访问的 advertised host，平台给浏览器返回 loopback host；二者端口必须一致但主机可不同。
+      await writeFile(statePath, JSON.stringify({ port: 43210, pid: 24680, baseUrl: "http://manager.local:43210", sessionPath }));
+
+      await expect(
+        resolveOwnedOpenCodeDatabase(
+          { port: 43210, baseUrl: "http://127.0.0.1:43210" },
+          { projectRoot, stateRoot, findListenerPid: async () => 24680 }
+        )
+      ).resolves.toMatchObject({ databasePath: await import("node:fs/promises").then((fs) => fs.realpath(databasePath)), pid: 24680 });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects manager path escape, symlink segments and process mismatches", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "real-e2e-project-"));
+    const outside = await mkdtemp(path.join(os.tmpdir(), "real-e2e-manager-outside-"));
+    const stateRoot = path.join(projectRoot, ".tmp", "dev-services", "opencode-manager-state", "processes");
+    try {
+      await mkdir(stateRoot, { recursive: true });
+      await writeFile(
+        path.join(stateRoot, "43210.json"),
+        JSON.stringify({ port: 43210, pid: 24680, baseUrl: "http://127.0.0.1:43210", sessionPath: outside })
+      );
+      await expect(
+        resolveOwnedOpenCodeDatabase({ port: 43210, baseUrl: "http://127.0.0.1:43210" }, { projectRoot, stateRoot, findListenerPid: async () => 24680 })
+      ).rejects.toThrow(/owned session root/);
+
+      const ownedUsers = path.join(projectRoot, ".testagent", "agent-opencode", ".session", "users");
+      await mkdir(ownedUsers, { recursive: true });
+      const linkedSession = path.join(ownedUsers, "usr-linked");
+      await symlink(outside, linkedSession);
+      await writeFile(
+        path.join(stateRoot, "43210.json"),
+        JSON.stringify({ port: 43210, pid: 24680, baseUrl: "http://127.0.0.1:43210", sessionPath: linkedSession })
+      );
+      await expect(
+        resolveOwnedOpenCodeDatabase({ port: 43210, baseUrl: "http://127.0.0.1:43210" }, { projectRoot, stateRoot, findListenerPid: async () => 24680 })
+      ).rejects.toThrow(/symbolic link/);
+
+      const regularSession = path.join(ownedUsers, "usr-regular");
+      await mkdir(path.join(regularSession, "opencode"), { recursive: true });
+      await writeFile(path.join(regularSession, "opencode", "opencode.db"), "sqlite-placeholder");
+      await writeFile(
+        path.join(stateRoot, "43210.json"),
+        JSON.stringify({ port: 43210, pid: 24680, baseUrl: "http://127.0.0.1:43210", sessionPath: regularSession })
+      );
+      await expect(
+        resolveOwnedOpenCodeDatabase({ port: 43210, baseUrl: "http://127.0.0.1:43210" }, { projectRoot, stateRoot, findListenerPid: async () => 99999 })
+      ).rejects.toThrow(/listener PID/);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("requires native session, message and part SQLite counts to all be zero", async () => {
+    await expect(
+      assertNativeSessionAbsentInSqlite("/owned/opencode.db", "ses-clean", {
+        queryCounts: async () => ({ session: 0, message: 0, part: 0 })
+      })
+    ).resolves.toEqual({ session: 0, message: 0, part: 0 });
+    await expect(
+      assertNativeSessionAbsentInSqlite("/owned/opencode.db", "ses-leaked", {
+        queryCounts: async () => ({ session: 0, message: 1, part: 2 })
+      })
+    ).rejects.toThrow(/session=0, message=1, part=2/);
   });
 });
 
