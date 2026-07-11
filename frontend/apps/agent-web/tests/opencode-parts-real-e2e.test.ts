@@ -166,7 +166,7 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     expect(PART_SPECS.map((item) => item.kind)).toEqual(PART_KINDS);
   });
 
-  it.each(PART_KINDS)("%s 定义完整原生字段和可见 UI 契约", (kind) => {
+  it.each(PART_KINDS)("%s 定义完整原生字段和 timeline 契约", (kind) => {
     const spec = PART_SPECS.find((item) => item.kind === kind)!;
     expect(spec.requiredFields).toContain("id");
     expect(spec.requiredFields).toContain("sessionID");
@@ -176,9 +176,15 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     expect(spec.projectionFields).toEqual(expectedProjectionFields[kind]);
     expect(spec.ui.current.locators.length).toBeGreaterThan(0);
     expect(spec.ui.history.locators.length).toBeGreaterThan(0);
-    expect(spec.ui.current.mustBeVisible).toBe(true);
-    expect(spec.ui.history.mustBeVisible).toBe(true);
-    expect(spec.ui.current.forbiddenLocator).toBe(".oc-unknown-part");
+    expect(spec.ui.history.timelineExpectation).toBe(spec.ui.current.timelineExpectation);
+  });
+
+  it("只要求 OpenCode 原生 assistant timeline 实际映射的四类 Part 可见", () => {
+    const visible = PART_SPECS.filter((item) => item.ui.current.timelineExpectation === "visible").map((item) => item.kind);
+    expect(visible).toEqual(["text", "reasoning", "tool", "compaction"]);
+    for (const spec of PART_SPECS) {
+      expect(spec.ui.current.forbiddenLocator).toBe(spec.ui.current.timelineExpectation === "visible" ? ".oc-unknown-part" : undefined);
+    }
   });
 
   it("为适用交互提供确定 locator", () => {
@@ -202,18 +208,18 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     if (contract.interaction !== "none") expect(contract.interactionLocator).toMatch(/^:scope(?:\b|\[|\s)/);
   });
 
-  it("subtask 跳转仅在 child mapping 存在时必测", () => {
+  it("subtask 原生 Part 不借 task tool 卡片伪装成 timeline 展示", () => {
     const contract = PART_SPECS.find((item) => item.kind === "subtask")!.ui.current;
     expect(contract.locators).toEqual(["[data-part-id='{partId}'][data-part-type='subtask']"]);
     expect(contract.locators).not.toContain(".oc-subagent-card");
-    expect(interactionExpectation(contract, { targetPartId: "part_1", childMappingPartId: "part_1" })).toBe("required");
-    expect(interactionExpectation(contract, { targetPartId: "part_1", childMappingPartId: "part_other" })).toBe("n/a");
+    expect(contract.timelineExpectation).toBe("not-rendered");
     expect(interactionExpectation(contract, { targetPartId: "part_1" })).toBe("n/a");
   });
 
-  it("patch diff 仅在 diff 可用时必测", () => {
+  it("patch 原生 Part 不直接渲染，diff 由消息 summary 单独验收", () => {
     const contract = PART_SPECS.find((item) => item.kind === "patch")!.ui.current;
-    expect(interactionExpectation(contract, { diffAvailable: true })).toBe("required");
+    expect(contract.timelineExpectation).toBe("not-rendered");
+    expect(interactionExpectation(contract, { diffAvailable: true })).toBe("n/a");
     expect(interactionExpectation(contract, { diffAvailable: false })).toBe("n/a");
   });
 
@@ -223,10 +229,11 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     if (kind === "retry") expect(contract.locators).not.toContain(".oc-retry-row");
   });
 
-  it("step-start 明确要求低噪可见标记", () => {
+  it("step-start 对齐原生同步层，不额外制造可见标记", () => {
     const spec = PART_SPECS.find((item) => item.kind === "step-start")!;
     expect(spec.ui.current.locators).toContain("[data-part-id='{partId}'][data-part-type='step-start']");
-    expect(spec.ui.current.semantic).toContain("低噪");
+    expect(spec.ui.current.timelineExpectation).toBe("not-rendered");
+    expect(spec.ui.current.semantic).toContain("跳过");
   });
 
   it.each(PART_KINDS)("%s 按官方关键字段选择且缺字段失败", (kind) => {

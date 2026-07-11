@@ -46,8 +46,9 @@ export type PartUiContract = {
   interaction: "copy" | "expand" | "open-diff" | "subagent-navigation" | "none";
   interactionLocator?: string;
   interactionRequirement: "always" | "child-mapping" | "diff-available" | "never";
-  mustBeVisible: true;
-  forbiddenLocator: ".oc-unknown-part";
+  /** 与 OpenCode 原生 assistant timeline 对齐，而不是把所有数据 Part 都强制画成卡片。 */
+  timelineExpectation: "visible" | "not-rendered";
+  forbiddenLocator?: ".oc-unknown-part";
 };
 
 export type PartSpec = {
@@ -60,22 +61,23 @@ export type PartSpec = {
 const common = ["id", "sessionID", "messageID", "type"] as const;
 
 /**
- * OpenCode 1.17.7 的 12 类 Part 验收矩阵。locator 可以提供兼容候选，但最终命中的
- * 元素必须可见；`.oc-unknown-part` 即使存在于 DOM 也不能算通过。
+ * OpenCode 1.17.7 的 12 类 Part 验收矩阵。所有类型都必须在 raw/messages/tree 中无损；
+ * assistant timeline 只对齐原生实际渲染的 text/reasoning/tool/compaction。其余 Part 是
+ * 输入附件或内部过程数据，不应为了“类型齐全”额外制造可见卡片。
  */
 export const PART_SPECS: readonly PartSpec[] = [
-  spec("text", ["text"], ["text", "synthetic", "ignored", "time.start", "time.end", "metadata"], [partLocator("text")], "最终文本可见", "copy", "always", ":scope button[aria-label='复制']"),
-  spec("subtask", ["prompt", "description", "agent"], ["prompt", "description", "agent", "model.providerID", "model.modelID", "command"], [partLocator("subtask")], "目标原生子任务的 description 与 agent 可见", "subagent-navigation", "child-mapping", ":scope [data-child-session-id]"),
-  spec("reasoning", ["text", "time.start"], ["text", "metadata", "time.start", "time.end"], [partLocator("reasoning")], "思考状态可展开且正文可见", "expand", "always", ":scope .oc-disclosure__trigger"),
-  spec("file", ["mime", "url"], ["mime", "filename", "url", "source.type", "source.text.value", "source.text.start", "source.text.end", "source.path", "source.range.start.line", "source.range.start.character", "source.range.end.line", "source.range.end.character", "source.name", "source.kind", "source.clientName", "source.uri"], [partLocator("file")], "文件名或路径可见", "none", "never"),
-  spec("tool", ["callID", "tool", "state.status", "state.input"], ["callID", "tool", "state.status", "state.input", "state.raw", "state.title", "state.output", "state.error", "state.metadata", "state.time.start", "state.time.end", "state.time.compacted", "state.attachments", "metadata"], [partLocator("tool")], "工具名称、状态与输出可展开", "expand", "always", ":scope .oc-tool-group__trigger, :scope .oc-disclosure__trigger"),
-  spec("step-start", [], ["snapshot"], [partLocator("step-start")], "步骤边界以低噪可见标记呈现", "none", "never"),
-  spec("step-finish", ["reason", "cost", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], ["reason", "snapshot", "cost", "tokens.total", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], [partLocator("step-finish")], "完成原因与 token 摘要可见", "none", "never"),
-  spec("snapshot", ["snapshot"], ["snapshot"], [partLocator("snapshot")], "snapshot 标记可见", "none", "never"),
-  spec("patch", ["hash", "files"], ["hash", "files"], [partLocator("patch")], "hash 与文件摘要可见", "open-diff", "diff-available", ":scope button"),
-  spec("agent", ["name"], ["name", "source.value", "source.start", "source.end"], [partLocator("agent")], "Agent 名称可见", "none", "never"),
-  spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], ["attempt", "error.name", "error.data.message", "error.data.statusCode", "error.data.isRetryable", "error.data.responseHeaders", "error.data.responseBody", "error.data.metadata", "time.created"], [partLocator("retry")], "目标原生 retry 的次数与错误可见", "none", "never"),
-  spec("compaction", ["auto"], ["auto", "overflow", "tail_start_id"], [partLocator("compaction")], "上下文压缩标记可见", "none", "never")
+  spec("text", ["text"], ["text", "synthetic", "ignored", "time.start", "time.end", "metadata"], "visible", "最终文本可见", "copy", "always", ":scope button[aria-label='复制']"),
+  spec("subtask", ["prompt", "description", "agent"], ["prompt", "description", "agent", "model.providerID", "model.modelID", "command"], "not-rendered", "原生 assistant timeline 不直接渲染 SubtaskPart", "none", "never"),
+  spec("reasoning", ["text", "time.start"], ["text", "metadata", "time.start", "time.end"], "visible", "非空 reasoning 在启用摘要时可展开", "expand", "always", ":scope .oc-disclosure__trigger"),
+  spec("file", ["mime", "url"], ["mime", "filename", "url", "source.type", "source.text.value", "source.text.start", "source.text.end", "source.path", "source.range.start.line", "source.range.start.character", "source.range.end.line", "source.range.end.character", "source.name", "source.kind", "source.clientName", "source.uri"], "not-rendered", "FilePart 作为输入附件存在，不在 assistant timeline 单独渲染", "none", "never"),
+  spec("tool", ["callID", "tool", "state.status", "state.input"], ["callID", "tool", "state.status", "state.input", "state.raw", "state.title", "state.output", "state.error", "state.metadata", "state.time.start", "state.time.end", "state.time.compacted", "state.attachments", "metadata"], "visible", "非隐藏工具显示名称、状态与输出", "expand", "always", ":scope .oc-tool-group__trigger, :scope .oc-disclosure__trigger"),
+  spec("step-start", [], ["snapshot"], "not-rendered", "原生同步层跳过 step-start", "none", "never"),
+  spec("step-finish", ["reason", "cost", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], ["reason", "snapshot", "cost", "tokens.total", "tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"], "not-rendered", "原生同步层跳过 step-finish", "none", "never"),
+  spec("snapshot", ["snapshot"], ["snapshot"], "not-rendered", "原生 assistant timeline 无 SnapshotPart renderer", "none", "never"),
+  spec("patch", ["hash", "files"], ["hash", "files"], "not-rendered", "原生同步层跳过 PatchPart，diff 使用消息 summary", "none", "never"),
+  spec("agent", ["name"], ["name", "source.value", "source.start", "source.end"], "not-rendered", "AgentPart 用于输入引用，不在 assistant timeline 单独渲染", "none", "never"),
+  spec("retry", ["attempt", "error.name", "error.data.message", "error.data.isRetryable", "time.created"], ["attempt", "error.name", "error.data.message", "error.data.statusCode", "error.data.isRetryable", "error.data.responseHeaders", "error.data.responseBody", "error.data.metadata", "time.created"], "not-rendered", "原生 assistant timeline 无 RetryPart renderer", "none", "never"),
+  spec("compaction", ["auto"], ["auto", "overflow", "tail_start_id"], "visible", "上下文压缩显示为原生分隔线", "none", "never")
 ];
 
 function partLocator(kind: PartKind): string {
@@ -86,20 +88,20 @@ function spec(
   kind: PartKind,
   requiredFields: readonly string[],
   projectionFields: readonly string[],
-  locators: readonly string[],
+  timelineExpectation: PartUiContract["timelineExpectation"],
   semantic: string,
   interaction: PartUiContract["interaction"],
   interactionRequirement: PartUiContract["interactionRequirement"],
   interactionLocator?: string
 ): PartSpec {
   const contract: PartUiContract = {
-    locators,
+    locators: [partLocator(kind)],
     semantic,
     interaction,
     interactionLocator,
     interactionRequirement,
-    mustBeVisible: true,
-    forbiddenLocator: ".oc-unknown-part"
+    timelineExpectation,
+    forbiddenLocator: timelineExpectation === "visible" ? ".oc-unknown-part" : undefined
   };
   return {
     kind,

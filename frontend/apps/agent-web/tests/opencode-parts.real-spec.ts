@@ -314,9 +314,17 @@ async function verifyUi(page: Page, title: string, kind: PartKind, partId: strin
   await page.getByRole("button", { name: /查看消息列表/ }).click({ timeout: 15_000 });
   await page.getByText(title, { exact: true }).click({ timeout: 15_000 });
   const part = page.locator(`[data-part-id='${partId}'][data-part-type='${kind}']`);
-  await expect(part).toBeVisible({ timeout: 15_000 });
-  await expect(part.locator(".oc-unknown-part")).toHaveCount(0);
   const contract = PART_SPECS.find((item) => item.kind === kind)!.ui.current;
+  if (contract.timelineExpectation === "not-rendered") {
+    // OpenCode 原生 timeline 不展示过程/输入引用 Part；隐藏 fallback 也不能占据视觉空间。
+    await expect(part).toBeHidden({ timeout: 15_000 });
+    const target = path.join(evidenceRoot, runId, kind, screenshot);
+    await mkdir(path.dirname(target), { recursive: true });
+    await page.screenshot({ path: target, fullPage: true });
+    return;
+  }
+  await expect(part).toBeVisible({ timeout: 15_000 });
+  if (contract.forbiddenLocator) await expect(part.locator(contract.forbiddenLocator)).toHaveCount(0);
   const childMapping = await part.locator("[data-child-session-id]").count() > 0;
   const diffAvailable = await part.locator("button").count() > 0;
   const interaction = interactionExpectation(contract, {

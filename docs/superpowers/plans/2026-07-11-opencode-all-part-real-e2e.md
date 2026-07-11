@@ -150,18 +150,20 @@ assertPartProjection(kind, raw, platformMessages, platformTree)
 | --- | --- | --- |
 | text | `.oc-text-part` 包含唯一文本 | `button[aria-label=复制]` |
 | reasoning | `.oc-reasoning-part` 和“思考状态” | 点击展开后正文标记可见 |
-| file | `.oc-file-part .oc-file-path` 显示唯一文件名 | N/A，只读路径 |
+| file | 原生仅作为输入附件/引用，assistant timeline 不单独渲染 | N/A |
 | tool | `[data-testid=oc-tool-group]` 或具体 tool view 显示 read/标记 | 点击展开输出 |
-| subtask | 可见原生 fallback 必须包含 description/agent；如映射为子 Agent 卡则 `.oc-subagent-card` | 有 child mapping 时验证跳转，否则 N/A |
-| step-start | `.oc-step-start-marker` 或可见原生 fallback 包含唯一 snapshot/边界标记；当前实现隐藏时应先 RED 再增加低干扰边界行 | N/A，结构标记 |
-| step-finish | 可见原生 fallback 或既有完成行包含 reason/token 标记 | N/A |
-| snapshot | 可见原生 fallback 包含 snapshot 标记 | N/A |
-| patch | 可见原生 fallback 或 diff 行包含 hash/files 标记 | 能打开 diff 时验证，否则 N/A |
-| agent | 可见原生 fallback/Agent 标记包含 name | N/A |
-| retry | `.oc-retry-row` 包含 attempt/error 标记 | N/A |
-| compaction | 可见原生 fallback 包含 auto 标记 | N/A |
+| subtask | 原生 assistant timeline 无 Part renderer；task tool 卡片不能冒充 SubtaskPart | N/A |
+| step-start | 原生事件同步层跳过，不渲染 | N/A |
+| step-finish | 原生事件同步层跳过，不渲染 | N/A |
+| snapshot | 原生 assistant timeline 无 Part renderer | N/A |
+| patch | 原生事件同步层跳过；diff 由消息 summary 单独呈现 | N/A |
+| agent | 原生仅作为输入 Agent 引用，assistant timeline 不单独渲染 | N/A |
+| retry | 原生 assistant timeline 无 Part renderer | N/A |
+| compaction | 原生 `compaction-part` 分隔线可见 | N/A |
 
-当前 `.oc-unknown-part` 默认隐藏，因此上述扩展类型很可能先 RED；不得降低预期为“DOM 中有隐藏 JSON”。
+对照 OpenCode 1.17.8 原生 Web UI（与本项目运行时 1.17.7 Part schema 一致），assistant timeline
+只直接映射 `text/reasoning/tool/compaction`。其余类型仍必须在 raw/messages/tree 无损，但 UI 应验证
+不产生额外可见卡片；隐藏 fallback 不算“可见通过”，也不应为了类型齐全新增视觉噪音。
 
 - [ ] **Step 4: 深层脱敏与证据路径测试**
 

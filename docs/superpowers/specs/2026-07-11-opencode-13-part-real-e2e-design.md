@@ -73,6 +73,11 @@ finally 按顺序通过 OpenCode API删除远端测试 Session、删除平台测
 
 OpenCode 原始值、Java/平台投影值、当前浏览器恢复状态和历史浏览器恢复状态必须使用相同测试标记关联；平台模型确实没有承载的字段必须先判定为缺陷，不能静默从断言中删除。
 
+UI 验收不等于 12 类都展示。对照 OpenCode 原生 Web UI，assistant timeline 只直接渲染
+`text`、`reasoning`、`tool`、`compaction`；`patch/step-start/step-finish` 在同步层跳过，
+`subtask/file/snapshot/agent/retry` 没有 assistant timeline renderer。后八类仍需完成数据层无损验证，
+但 UI 应验证不额外产生可见卡片。`file/agent` 在用户输入附件场景的展示不视为 assistant Part 展示。
+
 ## 测试架构与证据产物
 
 扩展现有 `frontend/apps/agent-web/tests/workbench.real-spec.ts` 和 `playwright.real.config.ts`，复用 `.env.test` / Spring `test` profile、opencode-manager 用户进程、平台 Workspace/Session/Run/runtime API、Playwright 登录态和临时工作区清理。
