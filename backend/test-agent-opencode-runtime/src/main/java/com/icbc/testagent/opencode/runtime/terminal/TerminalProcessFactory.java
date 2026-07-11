@@ -2,6 +2,7 @@ package com.icbc.testagent.opencode.runtime.terminal;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,6 +51,10 @@ public class TerminalProcessFactory {
     }
 
     static List<String> shellCommand(String shell) {
+        String executable = Path.of(shell).getFileName().toString();
+        if (!List.of("sh", "bash", "zsh").contains(executable)) {
+            throw new IllegalArgumentException("unsupported shell: " + executable);
+        }
         return List.of(shell, "-i", "-s");
     }
 }

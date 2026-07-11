@@ -1,6 +1,7 @@
 package com.icbc.testagent.opencode.runtime.terminal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.session.SessionId;
@@ -22,6 +23,13 @@ class TerminalProcessFactoryTest {
     void interactiveShellExplicitlyReadsCommandsFromStandardInput() {
         assertThat(TerminalProcessFactory.shellCommand("/bin/zsh"))
                 .containsExactly("/bin/zsh", "-i", "-s");
+        assertThat(TerminalProcessFactory.shellCommand("/usr/local/bin/bash"))
+                .containsExactly("/usr/local/bin/bash", "-i", "-s");
+        assertThat(TerminalProcessFactory.shellCommand("/bin/sh"))
+                .containsExactly("/bin/sh", "-i", "-s");
+        assertThatThrownBy(() -> TerminalProcessFactory.shellCommand("/bin/fish"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported shell");
     }
 
     @Test

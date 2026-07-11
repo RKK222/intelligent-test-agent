@@ -123,6 +123,21 @@ export async function runCleanupTasks(tasks: CleanupTask[]): Promise<void> {
   }
 }
 
+/** 按依赖顺序执行清理阶段；单阶段失败会被记录，但不会阻断后续阶段。 */
+export async function runCleanupStages(stages: CleanupTask[]): Promise<void> {
+  const failures: unknown[] = [];
+  for (const stage of stages) {
+    try {
+      await stage();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, `${failures.length} cleanup stage(s) failed`);
+  }
+}
+
 /**
  * 持有尚未移交的资源清理责任；release 只能在完整 fixture 返回前调用。
  * 清理按登记逆序启动，并继承 runCleanupTasks 的全量执行与错误汇总语义。
@@ -145,6 +160,34 @@ export function createCleanupScope(): CleanupScope {
   };
 }
 
+/** 对物理清理目标做 canonical、路径段和符号链接三重校验。 */
+export async function resolveOwnedCleanupPath(candidate: string, ownedRoot: string, marker: string): Promise<string> {
+  const canonicalRoot = await realpath(ownedRoot);
+  const lexicalCandidate = path.resolve(candidate);
+  const lexicalRoot = path.resolve(ownedRoot);
+  const relative = path.relative(lexicalRoot, lexicalCandidate);
+  if (!relative || relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
+    throw new Error("cleanup path is outside owned root or equals owned root");
+  }
+  const segments = relative.split(path.sep);
+  if (!segments.includes(marker)) {
+    throw new Error("cleanup path does not contain the marker segment");
+  }
+  let cursor = lexicalRoot;
+  for (const segment of segments) {
+    cursor = path.join(cursor, segment);
+    if ((await lstat(cursor)).isSymbolicLink()) {
+      throw new Error("cleanup path contains a symbolic link");
+    }
+  }
+  const canonicalCandidate = await realpath(lexicalCandidate);
+  const canonicalRelative = path.relative(canonicalRoot, canonicalCandidate);
+  if (!canonicalRelative || canonicalRelative.startsWith(`..${path.sep}`) || canonicalRelative === ".." || path.isAbsolute(canonicalRelative)) {
+    throw new Error("canonical cleanup path is outside owned root");
+  }
+  return canonicalCandidate;
+}
+
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
@@ -160,3 +203,5 @@ function createTraceId(): string {
 function redactSecret(message: string, token: string | undefined): string {
   return token ? message.split(token).join("[REDACTED]") : message;
 }
+import { lstat, realpath } from "node:fs/promises";
+import path from "node:path";

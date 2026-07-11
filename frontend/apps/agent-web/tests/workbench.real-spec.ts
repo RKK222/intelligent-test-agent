@@ -1,14 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 import { rm } from "node:fs/promises";
+import path from "node:path";
 
 import {
   apiDelete,
   apiGet,
   apiPost,
   createCleanupScope,
-  runCleanupTasks,
+  runCleanupStages,
+  resolveOwnedCleanupPath,
   waitForWorkspaceOperation,
-  type CleanupTask,
   type WorkspaceCreateOperation
 } from "./real-e2e-api";
 
@@ -21,6 +22,8 @@ test.describe("phase 11 real service integration", () => {
   test("creates a real opencode-backed session and opens a PTY terminal websocket", async ({ page }) => {
     const workspace = await createManagedWorkspaceFixture();
     let sessionId: string | undefined;
+    let remoteSessionId: string | undefined;
+    let opencodeBaseUrl: string | undefined;
     try {
       const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
         workspaceId: workspace.workspaceId,
@@ -29,6 +32,8 @@ test.describe("phase 11 real service integration", () => {
       sessionId = session.sessionId;
 
       const mappingTicket = await establishOpencodeMapping(session.sessionId);
+      remoteSessionId = await resolveRemoteSessionId(session.sessionId);
+      opencodeBaseUrl = (await apiGet<{ baseUrl?: string }>("/api/internal/agent/opencode/processes/me")).baseUrl;
       const ticket =
         mappingTicket ??
         (await apiPost<{ webSocketUrl: string }>(`/api/internal/platform/opencode-runtime/sessions/${session.sessionId}/terminal/tickets`, {
@@ -48,24 +53,39 @@ test.describe("phase 11 real service integration", () => {
       const reusedTicketResult = await connectTerminalAndEcho(page, ticket.webSocketUrl, "phase11-ticket-reuse");
       expect(reusedTicketResult.error?.code).toBeTruthy();
     } finally {
-      const cleanupTasks: CleanupTask[] = [];
-      if (sessionId) {
-        const ownedSessionId = sessionId;
-        cleanupTasks.push(async () => {
-          await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}`);
-        });
-      }
-      cleanupTasks.push(async () => {
-        await apiDelete(
-          `/api/internal/platform/configuration-management/applications/${encodeURIComponent(workspace.appId)}/workspaces/${encodeURIComponent(workspace.applicationWorkspaceId)}`
-        );
-      });
-      if (workspace.workspaceRootPath.includes(workspace.marker)) {
-        cleanupTasks.push(async () => {
-          await rm(workspace.workspaceRootPath, { recursive: true, force: true });
-        });
-      }
-      await runCleanupTasks(cleanupTasks);
+      const ownedSessionId = sessionId;
+      const ownedRemoteSessionId = remoteSessionId;
+      const ownedOpencodeBaseUrl = opencodeBaseUrl;
+      await runCleanupStages([
+        async () => {
+          if (!ownedSessionId) return;
+          const activeRun = await apiGet<{ runId: string } | null>(
+            `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}/active-run`
+          );
+          if (activeRun?.runId) {
+            await apiPost(`/api/internal/agent/opencode/runs/${encodeURIComponent(activeRun.runId)}/cancel`, {});
+          }
+        },
+        async () => {
+          if (!ownedRemoteSessionId || !ownedOpencodeBaseUrl) return;
+          await deleteNativeSession(ownedOpencodeBaseUrl, ownedRemoteSessionId, workspace.workspaceRootPath);
+        },
+        async () => {
+          if (ownedSessionId) {
+            await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}`);
+          }
+        },
+        async () => {
+          await apiDelete(
+            `/api/internal/platform/configuration-management/applications/${encodeURIComponent(workspace.appId)}/workspaces/${encodeURIComponent(workspace.applicationWorkspaceId)}`
+          );
+        },
+        async () => {
+          const ownedRoot = path.resolve(process.cwd(), "../.testagent/agent-opencode/workspace");
+          const safePath = await resolveOwnedCleanupPath(workspace.workspaceRootPath, ownedRoot, workspace.marker);
+          await rm(safePath, { recursive: true, force: true });
+        }
+      ]);
     }
   });
 });
@@ -199,6 +219,36 @@ async function establishOpencodeMapping(sessionId: string): Promise<{ webSocketU
       return ticket;
     }
     throw error;
+  }
+}
+
+async function resolveRemoteSessionId(platformSessionId: string): Promise<string> {
+  let remoteSessionId: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        const tree = await apiGet<{ sessions?: Array<{ sessionId?: string; childSession?: boolean }> }>(
+          `/api/internal/agent/opencode/sessions/${encodeURIComponent(platformSessionId)}/session-tree/messages`
+        );
+        remoteSessionId = tree.sessions?.find((session) => !session.childSession)?.sessionId;
+        return remoteSessionId;
+      },
+      { timeout: 15_000, intervals: [200, 500, 1_000], message: "remote OpenCode session id should be recoverable" }
+    )
+    .toBeTruthy();
+  return remoteSessionId!;
+}
+
+async function deleteNativeSession(baseUrl: string, remoteSessionId: string, workspaceRoot: string): Promise<void> {
+  const url = new URL(`/session/${encodeURIComponent(remoteSessionId)}`, `${stripTrailingSlash(baseUrl)}/`);
+  url.searchParams.set("directory", workspaceRoot);
+  const deleted = await fetch(url, { method: "DELETE" });
+  if (!deleted.ok) {
+    throw new Error(`Native OpenCode session delete failed with HTTP ${deleted.status}`);
+  }
+  const probe = await fetch(url, { method: "GET" });
+  if (probe.status !== 404) {
+    throw new Error(`Native OpenCode session still exists after delete: HTTP ${probe.status}`);
   }
 }
 

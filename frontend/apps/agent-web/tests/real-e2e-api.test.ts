@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import {
   apiDelete,
@@ -7,7 +10,9 @@ import {
   authHeaders,
   createCleanupScope,
   requestEnvelope,
+  resolveOwnedCleanupPath,
   runCleanupTasks,
+  runCleanupStages,
   waitForWorkspaceOperation
 } from "./real-e2e-api";
 
@@ -141,6 +146,26 @@ describe("real E2E API client", () => {
     expect(error.message).toContain("2 cleanup task(s) failed");
   });
 
+  it("runs dependent cleanup stages in order after an earlier failure", async () => {
+    const completed: string[] = [];
+    const error = await captureError(() =>
+      runCleanupStages([
+        async () => {
+          completed.push("cancel");
+          throw new Error("cancel failed");
+        },
+        async () => {
+          completed.push("remote-delete");
+        },
+        async () => {
+          completed.push("platform-archive");
+        }
+      ])
+    );
+    expect(completed).toEqual(["cancel", "remote-delete", "platform-archive"]);
+    expect(error).toBeInstanceOf(AggregateError);
+  });
+
   it("keeps cleanup ownership until a fixture is explicitly handed off", async () => {
     const cleanup = vi.fn().mockResolvedValue(undefined);
     const owned = createCleanupScope();
@@ -154,6 +179,27 @@ describe("real E2E API client", () => {
     handedOff.release();
     await handedOff.cleanup();
     expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("allows only a real marker segment below the owned workspace root", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "real-e2e-owned-"));
+    const marker = "phase11_real_owned";
+    const owned = path.join(root, "versions", marker);
+    const outside = await mkdtemp(path.join(os.tmpdir(), "real-e2e-outside-"));
+    try {
+      await mkdir(owned, { recursive: true });
+      await expect(resolveOwnedCleanupPath(owned, root, marker)).resolves.toBe(await import("node:fs/promises").then((fs) => fs.realpath(owned)));
+      await expect(resolveOwnedCleanupPath(root, root, marker)).rejects.toThrow(/owned root/);
+      await expect(resolveOwnedCleanupPath(path.join(root, "versions", `${marker}-suffix`), root, marker)).rejects.toThrow(/marker segment/);
+      await expect(resolveOwnedCleanupPath(path.join(root, "..", path.basename(outside)), root, marker)).rejects.toThrow(/outside owned root/);
+
+      const link = path.join(root, marker);
+      await symlink(outside, link);
+      await expect(resolveOwnedCleanupPath(link, root, marker)).rejects.toThrow(/symbolic link/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 
