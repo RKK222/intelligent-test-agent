@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { apiDelete, apiGet, apiPost, authHeaders, requestEnvelope, waitForWorkspaceOperation } from "./real-e2e-api";
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  authHeaders,
+  createCleanupScope,
+  requestEnvelope,
+  runCleanupTasks,
+  waitForWorkspaceOperation
+} from "./real-e2e-api";
 
 describe("real E2E API client", () => {
   it("sends GET with the configured base URL, trace header and bearer token", async () => {
@@ -106,6 +115,45 @@ describe("real E2E API client", () => {
     await expect(waitForWorkspaceOperation("wco-one", { getOperation, sleep: vi.fn() })).rejects.toThrow(
       "Workspace operation wco-one failed at PREPARING_REPOSITORY: GIT_FAILURE clone rejected"
     );
+  });
+
+  it("runs every cleanup task and aggregates failures", async () => {
+    const completed: string[] = [];
+
+    const error = await captureError(() =>
+      runCleanupTasks([
+        async () => {
+          completed.push("session");
+          throw new Error("session cleanup failed");
+        },
+        async () => {
+          completed.push("workspace");
+        },
+        async () => {
+          completed.push("directory");
+          throw new Error("directory cleanup failed");
+        }
+      ])
+    );
+
+    expect(completed).toEqual(["session", "workspace", "directory"]);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error.message).toContain("2 cleanup task(s) failed");
+  });
+
+  it("keeps cleanup ownership until a fixture is explicitly handed off", async () => {
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    const owned = createCleanupScope();
+    owned.defer(cleanup);
+    await owned.cleanup();
+    expect(cleanup).toHaveBeenCalledOnce();
+
+    cleanup.mockClear();
+    const handedOff = createCleanupScope();
+    handedOff.defer(cleanup);
+    handedOff.release();
+    await handedOff.cleanup();
+    expect(cleanup).not.toHaveBeenCalled();
   });
 });
 

@@ -30,6 +30,14 @@ export type WaitForWorkspaceOperationOptions = {
   sleep?: (delayMs: number) => Promise<void>;
 };
 
+export type CleanupTask = () => void | Promise<void>;
+
+export type CleanupScope = {
+  defer: (task: CleanupTask) => void;
+  release: () => void;
+  cleanup: () => Promise<void>;
+};
+
 /**
  * 调用真实 E2E 使用的平台信封接口，并统一处理鉴权、trace 与错误脱敏。
  * 该客户端只访问平台 API，不允许用它绕过平台直连 OpenCode 服务。
@@ -104,6 +112,37 @@ export async function waitForWorkspaceOperation(
     await sleep(intervalMs);
   }
   throw new Error(`Workspace operation ${operationId} timed out after ${timeoutMs}ms`);
+}
+
+/** 独立执行全部清理动作，避免前一项失败阻断后续资源释放。 */
+export async function runCleanupTasks(tasks: CleanupTask[]): Promise<void> {
+  const results = await Promise.allSettled(tasks.map((task) => Promise.resolve().then(task)));
+  const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+  if (failures.length > 0) {
+    throw new AggregateError(failures, `${failures.length} cleanup task(s) failed`);
+  }
+}
+
+/**
+ * 持有尚未移交的资源清理责任；release 只能在完整 fixture 返回前调用。
+ * 清理按登记逆序启动，并继承 runCleanupTasks 的全量执行与错误汇总语义。
+ */
+export function createCleanupScope(): CleanupScope {
+  const tasks: CleanupTask[] = [];
+  let released = false;
+  return {
+    defer(task) {
+      tasks.push(task);
+    },
+    release() {
+      released = true;
+    },
+    async cleanup() {
+      if (!released) {
+        await runCleanupTasks([...tasks].reverse());
+      }
+    }
+  };
 }
 
 function stripTrailingSlash(value: string): string {

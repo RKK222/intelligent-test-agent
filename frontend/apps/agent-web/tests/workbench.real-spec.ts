@@ -1,7 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 import { rm } from "node:fs/promises";
 
-import { apiDelete, apiGet, apiPost, waitForWorkspaceOperation, type WorkspaceCreateOperation } from "./real-e2e-api";
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  createCleanupScope,
+  runCleanupTasks,
+  waitForWorkspaceOperation,
+  type CleanupTask,
+  type WorkspaceCreateOperation
+} from "./real-e2e-api";
 
 const runRealE2e = process.env.TEST_AGENT_RUN_REAL_E2E === "1";
 const backendBaseUrl = stripTrailingSlash(process.env.TEST_AGENT_BASE_URL ?? "http://127.0.0.1:8080");
@@ -39,15 +48,24 @@ test.describe("phase 11 real service integration", () => {
       const reusedTicketResult = await connectTerminalAndEcho(page, ticket.webSocketUrl, "phase11-ticket-reuse");
       expect(reusedTicketResult.error?.code).toBeTruthy();
     } finally {
+      const cleanupTasks: CleanupTask[] = [];
       if (sessionId) {
-        await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}`);
+        const ownedSessionId = sessionId;
+        cleanupTasks.push(async () => {
+          await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}`);
+        });
       }
-      await apiDelete(
-        `/api/internal/platform/configuration-management/applications/${encodeURIComponent(workspace.appId)}/workspaces/${encodeURIComponent(workspace.applicationWorkspaceId)}`
-      );
+      cleanupTasks.push(async () => {
+        await apiDelete(
+          `/api/internal/platform/configuration-management/applications/${encodeURIComponent(workspace.appId)}/workspaces/${encodeURIComponent(workspace.applicationWorkspaceId)}`
+        );
+      });
       if (workspace.workspaceRootPath.includes(workspace.marker)) {
-        await rm(workspace.workspaceRootPath, { recursive: true, force: true });
+        cleanupTasks.push(async () => {
+          await rm(workspace.workspaceRootPath, { recursive: true, force: true });
+        });
       }
+      await runCleanupTasks(cleanupTasks);
     }
   });
 });
@@ -93,49 +111,58 @@ async function createManagedWorkspaceFixture(): Promise<ManagedWorkspaceFixture>
     }
 
     const operationId = `wco_${marker}`;
-    await apiPost(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces`, {
-      repositoryId: repository.repositoryId,
-      branch,
-      directoryPath: marker,
-      workspaceName: marker,
-      directoryNew: true,
-      version: formatDate(new Date()),
-      operationId
-    });
-    let operation: WorkspaceCreateOperation;
+    const creationScope = createCleanupScope();
     try {
-      operation = await waitForWorkspaceOperation(operationId, {
+      await apiPost(`/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces`, {
+        repositoryId: repository.repositoryId,
+        branch,
+        directoryPath: marker,
+        workspaceName: marker,
+        directoryNew: true,
+        version: formatDate(new Date()),
+        operationId
+      });
+      creationScope.defer(async () => {
+        const ownedOperation = await apiGet<{ workspaceId?: string | null }>(
+          `/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(operationId)}`
+        );
+        if (ownedOperation.workspaceId) {
+          await apiDelete(
+            `/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces/${encodeURIComponent(ownedOperation.workspaceId)}`
+          );
+        }
+      });
+      const operation: WorkspaceCreateOperation = await waitForWorkspaceOperation(operationId, {
         getOperation: (id) =>
           apiGet(`/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(id)}`)
       });
-    } catch (error) {
-      const failedOperation = await apiGet<{ workspaceId?: string | null }>(
-        `/api/internal/platform/configuration-management/workspace-create-operations/${encodeURIComponent(operationId)}`
+      if (!operation.workspaceId || !operation.versionId) {
+        throw new Error(`Workspace operation ${operationId} succeeded without workspaceId/versionId`);
+      }
+      const versions = await apiGet<WorkspaceVersion[]>(
+        `/api/internal/platform/workspace-management/applications/${encodeURIComponent(application.appId)}/workspace-templates/${encodeURIComponent(operation.workspaceId)}/versions`
       );
-      if (failedOperation.workspaceId) {
-        await apiDelete(
-          `/api/internal/platform/configuration-management/applications/${encodeURIComponent(application.appId)}/workspaces/${encodeURIComponent(failedOperation.workspaceId)}`
-        );
+      const version = versions.find((candidate) => candidate.versionId === operation.versionId);
+      if (!version?.runtimeWorkspace?.workspaceId || !version.workspaceRootPath) {
+        throw new Error(`Workspace operation ${operationId} version ${operation.versionId} has no runtime workspace`);
+      }
+      const fixture = {
+        marker,
+        appId: application.appId,
+        applicationWorkspaceId: operation.workspaceId,
+        workspaceId: version.runtimeWorkspace.workspaceId,
+        workspaceRootPath: version.workspaceRootPath
+      };
+      creationScope.release();
+      return fixture;
+    } catch (error) {
+      try {
+        await creationScope.cleanup();
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `Workspace fixture ${operationId} failed and cleanup also failed`);
       }
       throw error;
     }
-    if (!operation.workspaceId || !operation.versionId) {
-      throw new Error(`Workspace operation ${operationId} succeeded without workspaceId/versionId`);
-    }
-    const versions = await apiGet<WorkspaceVersion[]>(
-      `/api/internal/platform/workspace-management/applications/${encodeURIComponent(application.appId)}/workspace-templates/${encodeURIComponent(operation.workspaceId)}/versions`
-    );
-    const version = versions.find((candidate) => candidate.versionId === operation.versionId);
-    if (!version?.runtimeWorkspace?.workspaceId || !version.workspaceRootPath) {
-      throw new Error(`Workspace operation ${operationId} version ${operation.versionId} has no runtime workspace`);
-    }
-    return {
-      marker,
-      appId: application.appId,
-      applicationWorkspaceId: operation.workspaceId,
-      workspaceId: version.runtimeWorkspace.workspaceId,
-      workspaceRootPath: version.workspaceRootPath
-    };
   }
   throw new Error("No enabled application has a linked non-standard repository with a usable branch");
 }
