@@ -17,7 +17,7 @@ import java.util.Objects;
 public final class ExecutionNodeRouter {
 
     /**
-     * 从候选节点中选出可接收 run 的节点；无可用节点时抛出 opencode 不可用错误。
+     * 从候选节点中选出可接收 run 的节点；无可用节点时抛出 TestAgent 不可用错误。
      */
     public RoutingDecision route(RunId runId, List<ExecutionNode> candidates, Instant decidedAt, String traceId) {
         Objects.requireNonNull(runId, "runId must not be null");
@@ -32,7 +32,7 @@ public final class ExecutionNodeRouter {
                         .thenComparing(ExecutionNode::updatedAt))
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
-                        "没有可用的 opencode 执行节点",
+                        "没有可用的 TestAgent 执行节点",
                         Map.of("runId", runId.value(), "candidateCount", candidates.size())));
 
         return new RoutingDecision(

@@ -48,7 +48,7 @@ public class ManagerConnectionRegistry {
     public void send(OpencodeContainerId containerId, ManagerControlMessage message) {
         ManagerConnection connection = connections.get(containerId);
         if (connection == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "opencode 管理进程未连接");
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "TestAgent 管理进程未连接");
         }
         connection.sender().send(message);
     }

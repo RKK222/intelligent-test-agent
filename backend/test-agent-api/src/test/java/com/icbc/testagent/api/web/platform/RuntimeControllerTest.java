@@ -419,7 +419,7 @@ class RuntimeControllerTest {
     void opencodeProcessControllerRequiresAuthenticationAndOpencodeAgent() {
         UserOpencodeProcessAssignmentService service = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
         OpencodeProcessStatusQueryService statusQueryService = org.mockito.Mockito.mock(OpencodeProcessStatusQueryService.class);
-        doThrow(new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 opencode 用户进程"))
+        doThrow(new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 TestAgent 用户进程"))
                 .when(service).status(any(), eq("otheragent"), eq("trace_1234567890abcdef"));
         WebTestClient unauthenticatedClient = WebTestClient.bindToController(new UserOpencodeProcessController(service, statusQueryService))
                 .webFilter(new TraceIdWebFilter())

@@ -111,7 +111,7 @@ public record Session(
             opencodeSessionId = DomainValidation.requireText(opencodeSessionId, "opencodeSessionId");
         }
         if ((opencodeSessionId == null) != (opencodeExecutionNodeId == null)) {
-            throw new IllegalArgumentException("opencode session mapping must be set together");
+            throw new IllegalArgumentException("TestAgent session mapping must be set together");
         }
         sourceType = sourceType == null ? ConversationSourceType.MANUAL : sourceType;
         if (sourceRefId != null) {

@@ -114,10 +114,10 @@ public class OpencodeProcessStopService {
                 request.port(),
                 request.traceId()));
         if (stopped == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程停止未返回结果");
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程停止未返回结果");
         }
         if (!"STOPPED".equals(stopped.status())) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程停止响应异常");
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程停止响应异常");
         }
         if (!request.tracked()) {
             return stopped;
@@ -127,7 +127,7 @@ public class OpencodeProcessStopService {
         if (probe.status() != OpencodeProcessProbeStatus.NOT_STARTED) {
             throw new PlatformException(
                     ErrorCode.OPENCODE_BAD_GATEWAY,
-                    "opencode 进程停止后仍未确认退出",
+                    "TestAgent 进程停止后仍未确认退出",
                     Map.of("processId", process.processId().value(), "port", process.port()));
         }
         OpencodeServerProcess stoppedProcess = probe.process().orElseGet(() -> refreshStoppedProcess(
@@ -153,12 +153,12 @@ public class OpencodeProcessStopService {
 
     private OpencodeServerProcess trackedProcess(OpencodeProcessStopRequest request) {
         if (repository == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 停止缺少进程仓储");
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 停止缺少进程仓储");
         }
         return repository.findOpencodeServerProcessById(request.processId())
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
-                        "opencode 进程不存在",
+                        "TestAgent 进程不存在",
                         Map.of("processId", request.processId().value(), "port", request.port())));
     }
 

@@ -26,7 +26,7 @@ class ErrorCodeTest {
         assertThat(ErrorCode.GIT_TIMEOUT.httpStatus()).isEqualTo(504);
 
         assertThat(ErrorCode.VALIDATION_ERROR.defaultMessage()).isEqualTo("请求参数无效");
-        assertThat(ErrorCode.OPENCODE_TIMEOUT.defaultMessage()).isEqualTo("opencode 服务超时");
+        assertThat(ErrorCode.OPENCODE_TIMEOUT.defaultMessage()).isEqualTo("TestAgent 服务超时");
         assertThat(ErrorCode.GIT_TIMEOUT.defaultMessage()).isEqualTo("Git 操作超时");
     }
 }

@@ -23,7 +23,7 @@ class PlatformExceptionTest {
     void platformExceptionUsesDefaultMessageWhenCustomMessageIsMissing() {
         PlatformException exception = new PlatformException(ErrorCode.OPENCODE_TIMEOUT);
 
-        assertThat(exception.getMessage()).isEqualTo("opencode 服务超时");
+        assertThat(exception.getMessage()).isEqualTo("TestAgent 服务超时");
         assertThat(exception.details()).isEmpty();
     }
 }

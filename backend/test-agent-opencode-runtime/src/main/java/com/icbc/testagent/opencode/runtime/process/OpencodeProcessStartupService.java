@@ -241,7 +241,7 @@ public class OpencodeProcessStartupService {
             resolvedProgress.step(OpencodeProcessStartOperationStep.STARTING_PROCESS);
             OpencodeProcessStartResult started = gateway.startProcess(startCommand(request));
             if (started == null) {
-                throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程启动未返回结果");
+                throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程启动未返回结果");
             }
             return markStartedAndVerify(request, started.pid(), started.message(), resolvedProgress);
         } catch (PlatformException exception) {
@@ -411,7 +411,7 @@ public class OpencodeProcessStartupService {
     }
 
     private String startupFailureMessage(OpencodeProcessStatusProbe probe) {
-        String message = probe.message() == null || probe.message().isBlank() ? "opencode 健康检测异常" : probe.message();
+        String message = probe.message() == null || probe.message().isBlank() ? "TestAgent 健康检测异常" : probe.message();
         if (shouldRetryStartupHealth(probe) && startupHealthTimeout.toMillis() > 0) {
             return "启动后 " + formatDuration(startupHealthTimeout) + "内未通过健康检查：" + message;
         }
@@ -488,7 +488,7 @@ public class OpencodeProcessStartupService {
             Thread.sleep(duration.toMillis());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "opencode 启动健康确认被中断", Map.of(), exception);
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "TestAgent 启动健康确认被中断", Map.of(), exception);
         }
     }
 }

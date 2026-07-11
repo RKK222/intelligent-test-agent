@@ -29,6 +29,6 @@ public class UnavailableOpencodeProcessManagerGateway implements OpencodeProcess
     }
 
     private PlatformException unavailable() {
-        return new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "opencode 管理进程尚未接入");
+        return new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "TestAgent 管理进程尚未接入");
     }
 }

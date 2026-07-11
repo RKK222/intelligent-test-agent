@@ -100,7 +100,7 @@ class WorkspaceFileSocketTicketService {
         if (process.status() != UserOpencodeProcessAvailability.READY || process.linuxServerId() == null) {
             throw new PlatformException(
                     ErrorCode.OPENCODE_UNAVAILABLE,
-                    "当前用户 opencode 进程不可用",
+                    "当前用户 TestAgent 进程不可用",
                     Map.of("workspaceId", workspaceId, "status", process.status().name()));
         }
         if (!currentLinuxServerId.equals(process.linuxServerId())) {

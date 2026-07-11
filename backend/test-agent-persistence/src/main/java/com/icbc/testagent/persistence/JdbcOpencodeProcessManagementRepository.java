@@ -908,7 +908,7 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
         try {
             return Map.copyOf(objectMapper.readValue(json, MAP_TYPE));
         } catch (Exception exception) {
-            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "opencode 进程管理 JSON 反序列化失败", Map.of(), exception);
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "TestAgent 进程管理 JSON 反序列化失败", Map.of(), exception);
         }
     }
 
@@ -919,7 +919,7 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
         try {
             return objectMapper.writeValueAsString(value == null ? Map.of() : value);
         } catch (Exception exception) {
-            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "opencode 进程管理 JSON 序列化失败", Map.of(), exception);
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "TestAgent 进程管理 JSON 序列化失败", Map.of(), exception);
         }
     }
 

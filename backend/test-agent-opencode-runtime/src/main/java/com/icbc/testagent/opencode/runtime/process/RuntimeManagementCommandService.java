@@ -82,7 +82,7 @@ public class RuntimeManagementCommandService {
     private OpencodeProcessControlResult restartUntrackedProcess(OpencodeContainerId containerId, int port, String traceId) {
         OpencodeProcessControlResult result = gateway.restartProcess(new OpencodeProcessControlCommand(containerId, port, traceId));
         if (result == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程重启未返回结果");
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程重启未返回结果");
         }
         return result;
     }

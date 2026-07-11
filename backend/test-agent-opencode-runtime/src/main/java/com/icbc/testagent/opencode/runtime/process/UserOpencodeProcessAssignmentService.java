@@ -44,7 +44,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * 用户 opencode 进程分配服务，负责状态检查、初始化和 Run 目标节点投影。
+ * 用户 TestAgent 进程分配服务，负责状态检查、初始化和 Run 目标节点投影。
  */
 @Service
 public class UserOpencodeProcessAssignmentService {
@@ -306,7 +306,7 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     /**
-     * 查询当前用户 opencode 进程状态；不自动启动进程。
+     * 查询当前用户 TestAgent 进程状态；不自动启动进程。
      */
     public UserOpencodeProcessStatusResponse status(UserId userId, String agentId, String traceId) {
         validateAgent(agentId);
@@ -416,14 +416,14 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     /**
-     * 初始化或重建当前用户 opencode 进程；真实启动由 gateway 完成。
+     * 初始化或重建当前用户 TestAgent 进程；真实启动由 gateway 完成。
      */
     public UserOpencodeProcessStatusResponse initialize(UserId userId, String agentId, String traceId) {
         return initialize(userId, agentId, traceId, null);
     }
 
     /**
-     * 初始化或重建当前用户 opencode 进程；operationId 存在时同步记录公共启动链路进度。
+     * 初始化或重建当前用户 TestAgent 进程；operationId 存在时同步记录公共启动链路进度。
      */
     public UserOpencodeProcessStatusResponse initialize(
             UserId userId,
@@ -530,9 +530,9 @@ public class UserOpencodeProcessAssignmentService {
         Instant now = Instant.now();
         UserOpencodeProcessBinding binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID)
                 .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE)
-                .orElseThrow(() -> unavailableException("请先初始化 opencode 进程"));
+                .orElseThrow(() -> unavailableException("请先初始化 TestAgent 进程"));
         OpencodeServerProcess process = repository.findOpencodeServerProcessById(binding.processId())
-                .orElseThrow(() -> unavailableException("请先初始化 opencode 进程"));
+                .orElseThrow(() -> unavailableException("请先初始化 TestAgent 进程"));
         OpencodeProcessStatusProbe probe = statusQueryService.query(process.processId(), traceId);
         if (probe.status() == OpencodeProcessProbeStatus.RUNNING) {
             OpencodeServerProcess refreshed = probe.process().orElse(process);
@@ -547,7 +547,7 @@ public class UserOpencodeProcessAssignmentService {
             executionNodeRepository.save(node);
             return new UserOpencodeProcessAssignment(node, process.linuxServerId().value(), process);
         }
-        throw unavailableException("opencode 进程不可用，请先初始化");
+        throw unavailableException("TestAgent 进程不可用，请先初始化");
     }
 
     private Optional<OpencodeServerProcess> activeProcess(UserOpencodeProcessBinding binding) {
@@ -599,7 +599,7 @@ public class UserOpencodeProcessAssignmentService {
                         .thenComparing(container -> container.containerId().value()))
                 .filter(container -> firstAvailablePort(container).isPresent())
                 .findFirst()
-                .orElseThrow(() -> unavailableException("没有可用的 opencode 容器或端口"));
+                .orElseThrow(() -> unavailableException("没有可用的 TestAgent 容器或端口"));
     }
 
     private OpencodeProcessStartCommand startCommand(
@@ -607,7 +607,7 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeContainer container,
             String traceId) {
         int port = firstAvailablePort(container)
-                .orElseThrow(() -> unavailableException("没有可用的 opencode 端口"));
+                .orElseThrow(() -> unavailableException("没有可用的 TestAgent 端口"));
         String baseUrl = addressResolver.baseUrl(port);
         return new OpencodeProcessStartCommand(
                 userId,
@@ -656,7 +656,7 @@ public class UserOpencodeProcessAssignmentService {
         if (userRepository == null) {
             throw new PlatformException(
                     ErrorCode.INTERNAL_ERROR,
-                    "用户仓储未注入，无法解析 opencode session 目录统一认证号",
+                    "用户仓储未注入，无法解析 TestAgent session 目录统一认证号",
                     Map.of("userId", userId.value()));
         }
         String segment = userRepository.findByUserId(userId)
@@ -664,7 +664,7 @@ public class UserOpencodeProcessAssignmentService {
                 .map(String::trim)
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.INTERNAL_ERROR,
-                        "用户统一认证号未配置，无法创建 opencode session 目录",
+                        "用户统一认证号未配置，无法创建 TestAgent session 目录",
                         Map.of("userId", userId.value())));
         // 统一认证号会进入服务端文件系统路径片段，必须先拒绝所有可能跳出 users 目录的形式。
         if (segment.isBlank()
@@ -673,7 +673,7 @@ public class UserOpencodeProcessAssignmentService {
                 || segment.contains("..")) {
             throw new PlatformException(
                     ErrorCode.INTERNAL_ERROR,
-                    "用户统一认证号不能作为 opencode session 路径片段",
+                    "用户统一认证号不能作为 TestAgent session 路径片段",
                     Map.of("userId", userId.value(), "field", "unifiedAuthId"));
         }
         return segment;
@@ -964,13 +964,13 @@ public class UserOpencodeProcessAssignmentService {
 
     private String statusFailureMessage(OpencodeProcessStatusProbe probe) {
         return probe.status() == OpencodeProcessProbeStatus.NOT_STARTED
-                ? "opencode 进程未启动，需要重新初始化"
-                : "opencode 进程健康检测失败，需要重新初始化";
+                ? "TestAgent 进程未启动，需要重新初始化"
+                : "TestAgent 进程健康检测失败，需要重新初始化";
     }
 
     private void validateAgent(String agentId) {
         if (agentId == null || !OPENCODE_AGENT_ID.equals(agentId.trim().toLowerCase())) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 opencode 用户进程");
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 TestAgent 用户进程");
         }
     }
 

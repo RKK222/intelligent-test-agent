@@ -41,7 +41,7 @@ public class StaleActiveRunReconcileTaskHandler implements ScheduledTaskHandler 
 
     @Override
     public String name() {
-        return "opencode 失联运行收敛";
+        return "TestAgent 失联运行收敛";
     }
 
     @Override

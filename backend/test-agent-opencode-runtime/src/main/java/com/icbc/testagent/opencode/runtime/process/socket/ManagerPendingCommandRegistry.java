@@ -59,14 +59,14 @@ public class ManagerPendingCommandRegistry {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {
             pending.remove(commandId, future);
-            throw new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "opencode 管理进程命令超时");
+            throw new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "TestAgent 管理进程命令超时");
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             pending.remove(commandId, future);
-            throw new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "opencode 管理进程命令中断");
+            throw new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "TestAgent 管理进程命令中断");
         } catch (Exception exception) {
             pending.remove(commandId, future);
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程响应异常");
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程响应异常");
         } finally {
             pending.remove(commandId, future);
         }

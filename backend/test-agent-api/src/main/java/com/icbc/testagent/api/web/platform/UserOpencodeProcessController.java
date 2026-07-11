@@ -22,7 +22,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * 当前登录用户的 opencode 进程状态与初始化入口。
+ * 当前登录用户的 TestAgent 进程状态与初始化入口。
  */
 @RestController
 public class UserOpencodeProcessController {
@@ -31,7 +31,7 @@ public class UserOpencodeProcessController {
     private final OpencodeProcessStatusQueryService statusQueryService;
 
     /**
-     * 注入用户 opencode 进程分配服务，Controller 只负责协议适配和鉴权。
+     * 注入用户 TestAgent 进程分配服务，Controller 只负责协议适配和鉴权。
      */
     public UserOpencodeProcessController(
             UserOpencodeProcessAssignmentService processAssignmentService,
@@ -41,7 +41,7 @@ public class UserOpencodeProcessController {
     }
 
     /**
-     * 查询当前用户 opencode 进程状态，不触发进程启动。
+     * 查询当前用户 TestAgent 进程状态，不触发进程启动。
      */
     @GetMapping("/api/internal/agent/{agentId}/processes/me")
     public Mono<ApiResponse<RuntimeDtos.UserOpencodeProcessResponse>> status(
@@ -53,7 +53,7 @@ public class UserOpencodeProcessController {
     }
 
     /**
-     * 前端周期弱健康检查，只根据 Redis 快照定位本机 opencode 进程并直接访问 /global/health。
+     * 前端周期弱健康检查，只根据 Redis 快照定位本机 TestAgent 进程并直接访问 /global/health。
      */
     @GetMapping("/api/internal/agent/{agentId}/processes/me/health")
     public Mono<ApiResponse<RuntimeDtos.UserOpencodeProcessHealthResponse>> health(
@@ -72,7 +72,7 @@ public class UserOpencodeProcessController {
     }
 
     /**
-     * 初始化或重建当前用户 opencode 进程；真实启动由后续管理进程 gateway 完成。
+     * 初始化或重建当前用户 TestAgent 进程；真实启动由后续管理进程 gateway 完成。
      */
     @PostMapping("/api/internal/agent/{agentId}/processes/me/initialize")
     public Mono<ApiResponse<RuntimeDtos.UserOpencodeProcessResponse>> initialize(
@@ -86,7 +86,7 @@ public class UserOpencodeProcessController {
     }
 
     /**
-     * 查询当前用户发起的 opencode 进程初始化进度，只读数据库快照。
+     * 查询当前用户发起的 TestAgent 进程初始化进度，只读数据库快照。
      */
     @GetMapping("/api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}")
     public Mono<ApiResponse<RuntimeDtos.OpencodeProcessStartOperationResponse>> initializeOperation(
@@ -96,7 +96,7 @@ public class UserOpencodeProcessController {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return blockingResponse(exchange, traceId -> RuntimeDtos.OpencodeProcessStartOperationResponse.from(
                 processAssignmentService.findStartOperation(userId, agentId, operationId)
-                        .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "opencode 进程初始化进度不存在"))));
+                        .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "TestAgent 进程初始化进度不存在"))));
     }
 
     private <T> Mono<ApiResponse<T>> blockingResponse(ServerWebExchange exchange, Function<String, T> action) {
@@ -107,7 +107,7 @@ public class UserOpencodeProcessController {
 
     private void validateOpencodeAgent(String agentId) {
         if (!"opencode".equals(agentId == null ? "" : agentId.trim().toLowerCase())) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 opencode 用户进程");
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 TestAgent 用户进程");
         }
     }
 }

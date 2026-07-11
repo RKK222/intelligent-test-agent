@@ -46,7 +46,7 @@ public class SocketOpencodeProcessManagerGateway implements OpencodeProcessManag
     @Override
     public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
         OpencodeServerProcess process = repository.findOpencodeServerProcessById(command.processId())
-                .orElseThrow(() -> new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "opencode 进程不存在"));
+                .orElseThrow(() -> new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "TestAgent 进程不存在"));
         ManagerControlMessage result = send(process.containerId(), ManagerControlMessage.command(
                 RuntimeIdGenerator.managerCommandId(),
                 "health",
@@ -59,7 +59,7 @@ public class SocketOpencodeProcessManagerGateway implements OpencodeProcessManag
         if ("UNHEALTHY".equals(result.status()) || "FAILED".equals(result.status())) {
             return OpencodeProcessHealthResult.unhealthy(result.message());
         }
-        throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程健康检测响应异常");
+        throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程健康检测响应异常");
     }
 
     @Override
@@ -76,21 +76,21 @@ public class SocketOpencodeProcessManagerGateway implements OpencodeProcessManag
             if (OPENCODE_UNAVAILABLE_ERROR_CODE.equals(result.errorCode())) {
                 throw new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
-                        safeMessage(result.message(), "opencode 服务不可用"));
+                        safeMessage(result.message(), "TestAgent 服务不可用"));
             }
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, safeMessage(result.message(), "opencode 管理进程启动失败"));
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, safeMessage(result.message(), "TestAgent 管理进程启动失败"));
         }
         return new OpencodeProcessStartResult(result.pid(), safeMessage(result.message(), "started"));
     }
 
     @Override
     public OpencodeProcessControlResult restartProcess(OpencodeProcessControlCommand command) {
-        return controlManagedProcess(command, "restart", "STARTED", "opencode 管理进程重启失败");
+        return controlManagedProcess(command, "restart", "STARTED", "TestAgent 管理进程重启失败");
     }
 
     @Override
     public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
-        return controlManagedProcess(command, "stop", "STOPPED", "opencode 管理进程停止失败");
+        return controlManagedProcess(command, "stop", "STOPPED", "TestAgent 管理进程停止失败");
     }
 
     private OpencodeProcessControlResult controlManagedProcess(
