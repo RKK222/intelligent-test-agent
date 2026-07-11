@@ -971,6 +971,60 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("replays child-only part entries so a historical subagent card does not open an empty timeline", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {
+        ses_child: [
+          {
+            rootSessionId: "ses_root",
+            sessionId: "ses_child",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskMessageId: "msg_root",
+            taskPartId: "prt_task",
+            taskCallId: "call_task",
+            part: {
+              id: "prt_child_text",
+              messageID: "msg_child",
+              type: "text",
+              text: "子 Agent 仅 part 回放的工作内容"
+            }
+          }
+        ]
+      },
+      childSessionIdByTaskPartId: { prt_task: "ses_child" },
+      events: []
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+    const childMessage = state.messages.find((message) => message.id === "msg_child");
+
+    expect(childMessage).toMatchObject({
+      role: "assistant",
+      text: "子 Agent 仅 part 回放的工作内容",
+      parts: [{ partId: "prt_child_text", type: "text", text: "子 Agent 仅 part 回放的工作内容" }]
+    });
+    expect(state.messageScopesById.msg_child).toMatchObject({
+      sessionId: "ses_child",
+      isChildSession: true,
+      taskPartId: "prt_task",
+      taskCallId: "call_task"
+    });
+  });
+
   it("keeps persisted user turns when session tree supplies assistant snapshots", () => {
     const persisted: SessionMessage[] = [
       {
