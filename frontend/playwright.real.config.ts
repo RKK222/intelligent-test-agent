@@ -19,7 +19,8 @@ export default defineConfig({
   },
   use: {
     baseURL: frontendUrl,
-    trace: "retain-on-failure"
+    // Part natural spec 由自身按 kind 保存并脱敏 trace；其他真实 spec 继续使用 runner trace。
+    trace: process.env.TEST_AGENT_PART_PHASE === "natural" ? "off" : "retain-on-failure"
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }]
 });

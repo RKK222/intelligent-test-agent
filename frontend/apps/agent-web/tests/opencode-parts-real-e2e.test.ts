@@ -13,7 +13,8 @@ import {
   runNaturalAttempt,
   writePartEvidence,
   detectSafeRetryProvider,
-  buildCompactionPreparation
+  buildCompactionPreparation,
+  startOwnedTrace
 } from "./opencode-parts-real-e2e";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -113,6 +114,12 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     expect(prepared.length).toBeLessThanOrEqual(50);
     expect(prepared.reduce((sum, item) => sum + item.length, 0)).toBeLessThanOrEqual(48_000);
     expect(prepared.at(-1)).toContain("message-59");
+  });
+
+  it("tracing启动失败时仍立即清理已移交的Workspace", async () => {
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    await expect(startOwnedTrace(async () => { throw new Error("trace start failed"); }, cleanup)).rejects.toThrow("trace start failed");
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it("按 run/kind 隔离写入已脱敏且非空的证据", async () => {

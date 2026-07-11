@@ -340,6 +340,20 @@ export function buildCompactionPreparation(messages: readonly string[]): string[
   return result;
 }
 
+/** tracing 尚未启动成功时没有 trace owner；失败必须先归还已经移交的资源所有权。 */
+export async function startOwnedTrace(start: () => Promise<void>, cleanupOnFailure: () => Promise<void>): Promise<void> {
+  try {
+    await start();
+  } catch (error) {
+    try {
+      await cleanupOnFailure();
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "trace start failed and owned resource cleanup also failed");
+    }
+    throw error;
+  }
+}
+
 function getSpec(kind: PartKind): PartSpec {
   const found = PART_SPECS.find((item) => item.kind === kind);
   if (!found) throw new Error(`unknown Part kind: ${String(kind)}`);

@@ -10,6 +10,7 @@ import {
   detectSafeRetryProvider,
   runNaturalAttempt,
   sanitizeEvidence,
+  startOwnedTrace,
   writePartEvidence,
   type PartKind
 } from "./opencode-parts-real-e2e";
@@ -39,7 +40,6 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
     test(`${kind}: exactly one natural trigger`, async ({ page, context }) => {
       test.setTimeout(180_000);
       const fixture = await createWorkspace(kind);
-      await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
       const title = `e2e-part-${kind}-${fixture.marker}`;
       let sessionId: string | undefined;
       let runId: string | undefined;
@@ -50,7 +50,19 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
       let primaryError: unknown;
       let evidenceSummary: Record<string, unknown> | undefined;
       let evidenceRunId: string | undefined;
+      let cleanupCompleted = false;
+      let tracingStarted = false;
       try {
+        await startOwnedTrace(
+          async () => {
+            await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+            tracingStarted = true;
+          },
+          async () => {
+            await cleanupFixture({ fixture, title });
+            cleanupCompleted = true;
+          }
+        );
         const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
           workspaceId: fixture.workspaceId,
           title
@@ -129,7 +141,10 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
       } finally {
         await sse?.stop().catch(() => undefined);
         try {
-          await cleanupFixture({ fixture, sessionId, runId, remoteSessionId, opencodeBaseUrl, openCodeDatabasePath, title });
+          if (!cleanupCompleted) {
+            await cleanupFixture({ fixture, sessionId, runId, remoteSessionId, opencodeBaseUrl, openCodeDatabasePath, title });
+            cleanupCompleted = true;
+          }
           if (evidenceSummary && evidenceRunId) {
             evidenceSummary.cleanup = "pass";
             await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: evidenceSummary });
@@ -146,11 +161,13 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
         const traceRunId = runId ?? `skip_${fixture.marker}`;
         const tracePath = path.join(evidenceRoot, traceRunId, kind, "trace.zip");
         await mkdir(path.dirname(tracePath), { recursive: true });
-        try {
-          await context.tracing.stop({ path: tracePath });
-          await sanitizeTraceArchive(tracePath, process.env.TEST_AGENT_API_TOKEN);
-        } catch (traceError) {
-          primaryError ??= traceError;
+        if (tracingStarted) {
+          try {
+            await context.tracing.stop({ path: tracePath });
+            await sanitizeTraceArchive(tracePath, process.env.TEST_AGENT_API_TOKEN);
+          } catch (traceError) {
+            primaryError ??= traceError;
+          }
         }
       }
       if (primaryError) throw primaryError;
