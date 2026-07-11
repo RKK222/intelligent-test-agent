@@ -30,7 +30,7 @@
 | `SideQuestionOrphanCleanupTaskHandler` | 周期扫描超时的 `SIDE_QUESTION` active Run，按内部 Session 保存的临时远端映射清理 fork，并用统一终态事件收敛。 |
 | 现有 `RunController` / `RunEventSseStreamService` | 原样提供 SSE 路径、持久化回放、本机 live bus 和跨后端路由，不新增第二套流服务。 |
 | `backend-api` / `event-stream-client` | `startSideQuestionRun` 调用新增启动入口；现有 `subscribeRunEvents` 识别新增事件类型。 |
-| `AgentWorkbench.vue` | 管理宠物旁路 Run 的订阅、阶段提示、答案增量、完成/失败和主动关闭清理。 |
+| `useSideQuestionRun.ts` / `AgentWorkbench.vue` | 聚焦 composable 管理宠物旁路 Run 的订阅、阶段提示、答案增量、完成/失败和主动关闭清理；Workbench 只提供当前 session/message/model 并把状态传给 Shell，不建立第二套聊天 runtime。 |
 | `FigmaShell.vue` | 展示阶段提示和增量答案；只在等待状态阻止工作台外部点击关闭，显式关闭按钮保持有效。 |
 
 ## HTTP 与事件契约
