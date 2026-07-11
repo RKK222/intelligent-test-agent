@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-11 - 修复跨节点 RunEvent SSE 鉴权并保留对话回放 fixture
+
+- Why:
+  - 合并远程运行态路由后，真实已登录浏览器访问 RunEvent SSE 会先按 Run 生产节点转发；旧前端使用原生 `EventSource`，无法携带存于 sessionStorage 的 Bearer Token，目标 Java 将请求识别为 anonymous，导致主 Run、历史切回后的继续订阅和宠物旁路在 1–4ms 内断流。
+- What:
+  - `@test-agent/event-stream-client` 在提供登录 token 时改用带 `Authorization` 的 fetch SSE，保留 SSE `id` 续传、去重和自动退避重连；未登录/显式注入 EventSource 的调用保持原兼容路径。工作台主 Run 与宠物旁路均传入当前 token；宠物 Playwright fixture 同步改为 fetch SSE mock，并覆盖断流、lastEventId 续传、重复增量、失败重试与历史 question dock。
+- How:
+  - token 只存在请求头，不进入 URL、浏览器历史、代理 query 或原始报文面板；不新增 API、事件、数据库、Flyway 或环境配置。真实浏览器从 sessionStorage 取 token 直接访问故障 RunEvent 端点，返回 `200 text/event-stream`，验证跨 Java 转发后的认证链路。
+- Result:
+  - 前端定向 Vitest 313 passed、1 skipped，workspace typecheck 通过；Playwright 宠物旁路流/失败重试与历史 native question 弹框共 3/3 通过。仍存在既有 `DirectoryRows.vue` 嵌套 button Vite warning，未纳入本次范围。
+
 ### 2026-07-11 - 合并主线并复核对话回放能力
 
 - Why:

@@ -21,6 +21,8 @@ export type SideQuestionRunInput = SideQuestionRunRequest & {
 export type UseSideQuestionRunOptions = {
   api: SideQuestionApi;
   baseUrl?: string;
+  /** 当前登录态 token 由调用方按订阅时刻提供，避免宠物旁路 SSE 退化为匿名 EventSource。 */
+  getAuthToken?: () => string | null;
   subscribe?: (options: RunEventSubscribeOptions) => RunEventSubscription;
 };
 
@@ -112,6 +114,7 @@ export function useSideQuestionRun(options: UseSideQuestionRunOptions) {
       const nextSubscription = subscribe({
         baseUrl: options.baseUrl,
         runId: started.runId,
+        token: options.getAuthToken?.() ?? null,
         onEvent: (event) => {
           handleEvent(event, currentGeneration);
           if (!loading.value && currentGeneration === generation) {

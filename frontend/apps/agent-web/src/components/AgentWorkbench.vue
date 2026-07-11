@@ -314,7 +314,11 @@ let lastDuration: string | undefined;
 let lastTokens = 0;
 const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
-const robotSideQuestion = useSideQuestionRun({ api, baseUrl: apiBaseUrl });
+const robotSideQuestion = useSideQuestionRun({
+  api,
+  baseUrl: apiBaseUrl,
+  getAuthToken: () => authStore.token
+});
 const serverWorkspacePickerOpen = ref(false);
 const serverWorkspacePickerLoading = ref(false);
 const serverWorkspaceServers = shallowRef<WorkspaceBackendServer[]>([]);
@@ -1582,13 +1586,14 @@ watch([() => selectedProvider.value, () => selectedModel.value, allModels], ([pr
 });
 
 // ===== RunEvent SSE 订阅：Run 运行中或等待 OpenCode 原生标题时建立 =====
-watch([run, pendingSessionTitleRunId], ([r, pendingTitleRunId], _old, onCleanup) => {
+watch([run, pendingSessionTitleRunId, () => authStore.token], ([r, pendingTitleRunId], _old, onCleanup) => {
   if (!r || (!isRunBusyStatus(r.status) && pendingTitleRunId !== r.runId)) {
     return;
   }
   const subscription = subscribeRunEvents({
     baseUrl: apiBaseUrl,
     runId: r.runId,
+    token: authStore.token,
     onRawMessage: (message) => observeRawRunEventMessage(message, r.sessionId),
     onEvent: (event) => {
       if (ignoredRunIds.value.has(event.runId)) {

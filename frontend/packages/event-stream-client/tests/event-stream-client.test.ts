@@ -136,6 +136,37 @@ describe("event-stream-client", () => {
     expect(received).toEqual(["message.part.delta"]);
   });
 
+  it("uses authenticated fetch for run events and keeps the server SSE id as reconnect cursor", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(sseResponse([
+      "id: evt_durable_7\n",
+      "event: question.asked\n",
+      'data: {"eventId":"evt_question_7","runId":"run_1","seq":7,"type":"question.asked","payload":{"question":"继续吗"}}\n\n'
+    ]));
+    const received: string[] = [];
+    const rawIds: Array<string | undefined> = [];
+    const subscription = subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_1",
+      token: "token_secret",
+      fetcher,
+      onEvent: (event) => received.push(event.type),
+      onRawMessage: (message) => rawIds.push(message.lastEventId)
+    });
+
+    await waitFor(() => received.length === 1);
+    subscription.close();
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/agent/opencode/runs/run_1/events",
+      expect.objectContaining({ headers: expect.any(Headers), signal: expect.any(AbortSignal) })
+    );
+    const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer token_secret");
+    expect(headers.get("Accept")).toBe("text/event-stream");
+    expect(received).toEqual(["question.asked"]);
+    expect(rawIds).toEqual(["evt_durable_7"]);
+  });
+
   it("subscribes to session.updated named SSE events", () => {
     const source = new FakeEventSource();
     const received: string[] = [];

@@ -16,6 +16,12 @@ export type RunEventSubscribeOptions = {
   baseUrl?: string;
   agentId?: string;
   lastEventId?: string;
+  /**
+   * 浏览器原生 EventSource 不能携带 Authorization；已登录页面传入 token 后改用 fetch 流式读取 SSE。
+   * token 仅放在请求头，绝不拼接到 URL，避免被浏览器历史、代理日志或原始报文面板记录。
+   */
+  token?: string | null;
+  fetcher?: typeof fetch;
   onEvent: (event: RunEvent) => void;
   onRawMessage?: (message: RunEventRawMessage) => void;
   onStatus?: (status: RunEventStreamStatus) => void;
@@ -51,6 +57,7 @@ export type SessionRuntimeStateSubscribeOptions = {
 };
 
 const SESSION_RUNTIME_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
+const RUN_EVENT_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 
 export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
   "run.created",
@@ -91,6 +98,10 @@ export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
 ];
 
 export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventSubscription {
+  // 测试/嵌入方显式提供 EventSource factory 时保留其传输契约；真实登录页面未提供 factory，必须走带鉴权的 fetch。
+  if (options.token?.trim() && !options.eventSourceFactory) {
+    return subscribeAuthenticatedRunEvents(options);
+  }
   const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
   const agentId = normalizeAgentId(options.agentId ?? "opencode");
   const factory = options.eventSourceFactory ?? ((url: string) => new EventSource(url));
@@ -120,22 +131,9 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
     if (parsed.runId !== options.runId) {
       return;
     }
-    // 如果 eventId 是 fallback 的 runId:seq，说明后端未提供显式 eventId
-    const isFallback = parsed.eventId === `${parsed.runId}:${parsed.seq}`;
-    // 所有带真实 eventId 的事件（包含 transient delta）都按 eventId 去重；
-    // 后端为每个增量生成独立 evt_live_ ID，同一 ID 重投必须丢弃，避免正文重复和空行。
-    if (!isFallback) {
-      const key = `event:${parsed.eventId}`;
-      if (seen.has(key)) {
-        return;
-      }
-      seen.add(key);
-    } else if (parsed.seq > 0) {
-      const key = `seq:${parsed.runId}:${parsed.seq}`;
-      if (seen.has(key)) {
-        return;
-      }
-      seen.add(key);
+    // EventSource 与带鉴权的 fetch SSE 必须采用同一去重规则，避免两条入口投影行为分叉。
+    if (!shouldDeliverRunEvent(parsed, seen)) {
+      return;
     }
     // durable 游标只由浏览器解析 SSE `id` 字段维护；不能从 payload.eventId 或 seq=0 的
     // run.snapshot.reset 推导 Last-Event-ID，否则重连会跳过快照后的 durable 事件。
@@ -161,6 +159,134 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
       options.onStatus?.("closed");
     }
   };
+}
+
+/**
+ * 使用 fetch 建立带 Bearer Token 的 RunEvent SSE，并在断流后按固定退避续传最后一个 durable event id。
+ */
+function subscribeAuthenticatedRunEvents(options: RunEventSubscribeOptions): RunEventSubscription {
+  const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const agentId = normalizeAgentId(options.agentId ?? "opencode");
+  const fetcher = options.fetcher ?? fetch;
+  const seen = new Set<string>();
+  let closed = false;
+  let controller: AbortController | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resolveRetryWait: (() => void) | null = null;
+  let resumeEventId = options.lastEventId;
+
+  const deliver = (message: ParsedSseMessage) => {
+    if (closed) {
+      return;
+    }
+    options.onRawMessage?.({
+      runId: options.runId,
+      eventName: message.eventName,
+      lastEventId: message.id,
+      data: message.data,
+      receivedAt: new Date().toISOString()
+    });
+    const parsed = parseRunEvent(message.data);
+    if (!parsed || parsed.runId !== options.runId) {
+      return;
+    }
+    // 续传游标只能使用 SSE id；seq=0 的 transient 事件不能推进 durable cursor。
+    if (message.id?.trim()) {
+      resumeEventId = message.id;
+    }
+    if (!shouldDeliverRunEvent(parsed, seen)) {
+      return;
+    }
+    options.onEvent(parsed);
+  };
+
+  void (async () => {
+    let failureCount = 0;
+    while (!closed) {
+      controller = new AbortController();
+      options.onStatus?.("connecting");
+      try {
+        const headers = new Headers();
+        headers.set("Accept", "text/event-stream");
+        headers.set("Authorization", `Bearer ${options.token!.trim()}`);
+        const response = await fetcher(runEventsUrl(baseUrl, agentId, options.runId, resumeEventId), {
+          headers,
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`run event stream failed: ${response.status}`);
+        }
+        if (!response.body) {
+          throw new Error("run event stream has no body");
+        }
+        if (closed) {
+          return;
+        }
+        options.onStatus?.("open");
+        await readSseStream(response.body, deliver);
+        if (closed) {
+          return;
+        }
+        throw new Error("run event stream closed");
+      } catch (error) {
+        if (closed || controller.signal.aborted) {
+          return;
+        }
+        options.onStatus?.("error");
+        options.onError?.(error instanceof Event ? error : new Event("error"));
+        const delay = RUN_EVENT_RECONNECT_DELAYS_MS[
+          Math.min(failureCount, RUN_EVENT_RECONNECT_DELAYS_MS.length - 1)
+        ];
+        failureCount += 1;
+        await new Promise<void>((resolve) => {
+          resolveRetryWait = resolve;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            resolveRetryWait = null;
+            resolve();
+          }, delay);
+        });
+      }
+    }
+  })();
+
+  return {
+    close: () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      controller?.abort();
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      resolveRetryWait?.();
+      resolveRetryWait = null;
+      options.onStatus?.("closed");
+    }
+  };
+}
+
+/** 按 eventId/seq 去重，确保 EventSource 与 fetch SSE 两条实现的投影语义完全一致。 */
+function shouldDeliverRunEvent(parsed: RunEvent, seen: Set<string>) {
+  const isFallback = parsed.eventId === `${parsed.runId}:${parsed.seq}`;
+  if (!isFallback) {
+    const key = `event:${parsed.eventId}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  }
+  if (parsed.seq > 0) {
+    const key = `seq:${parsed.runId}:${parsed.seq}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+  }
+  return true;
 }
 
 export function subscribeSessionRuntimeState(
@@ -300,6 +426,7 @@ export function parseRunEvent(data: string): RunEvent | null {
 type ParsedSseMessage = {
   eventName: string;
   data: string;
+  id?: string;
 };
 
 async function readSseStream(
@@ -355,6 +482,7 @@ function findSseDelimiter(value: string): { index: number; length: number } | nu
 
 function parseSseBlock(block: string): ParsedSseMessage | null {
   let eventName = "message";
+  let id: string | undefined;
   const dataLines: string[] = [];
   for (const line of block.replace(/\r\n/g, "\n").split("\n")) {
     if (line.startsWith(":")) {
@@ -364,6 +492,10 @@ function parseSseBlock(block: string): ParsedSseMessage | null {
       eventName = line.slice("event:".length).trim();
       continue;
     }
+    if (line.startsWith("id:")) {
+      id = line.slice("id:".length).trim();
+      continue;
+    }
     if (line.startsWith("data:")) {
       dataLines.push(line.slice("data:".length).trimStart());
     }
@@ -371,7 +503,7 @@ function parseSseBlock(block: string): ParsedSseMessage | null {
   if (dataLines.length === 0) {
     return null;
   }
-  return { eventName, data: dataLines.join("\n") };
+  return { eventName, data: dataLines.join("\n"), id };
 }
 
 function isSessionRuntimeStateEvent(eventName: string) {

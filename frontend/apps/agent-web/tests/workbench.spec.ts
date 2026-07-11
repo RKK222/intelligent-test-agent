@@ -949,7 +949,7 @@ test("the first sent message becomes the new session title", async ({ page }) =>
 
 test("pet side-question streams progress, survives outside clicks, and calibrates replayed deltas", async ({ page }) => {
   const sideQuestionRequests: Array<Record<string, unknown>> = [];
-  await installPetSideQuestionEventSource(page, {
+  await installPetSideQuestionRunEventStream(page, {
     run_side_question_1: [
       streamEvent("evt_side_started", "run.started", {}, 20),
       streamEvent("evt_side_ready", "side_question.started", { sessionId: "ses_1" }, 30),
@@ -999,7 +999,7 @@ test("pet side-question streams progress, survives outside clicks, and calibrate
 
 test("pet side-question keeps a failure editable and starts a fresh run on retry", async ({ page }) => {
   const sideQuestionRequests: Array<Record<string, unknown>> = [];
-  await installPetSideQuestionEventSource(page, {
+  await installPetSideQuestionRunEventStream(page, {
     run_side_question_failed: [
       streamEvent("evt_failed_progress", "side_question.progress", { stage: "reading" }, 30),
       streamEvent("evt_failed_terminal", "run.failed", { message: "旁路问答暂时失败" }, 80)
@@ -3167,70 +3167,59 @@ function streamEvent(
   return { eventId, type, payload, delayMs, disconnectAfter };
 }
 
-async function installPetSideQuestionEventSource(page: Page, scenarios: Record<string, PetStreamEvent[]>) {
+async function installPetSideQuestionRunEventStream(page: Page, scenarios: Record<string, PetStreamEvent[]>) {
   await page.addInitScript(({ scenarios }) => {
     const reconnects: Array<{ runId: string; lastEventId: string }> = [];
     (window as Window & { __petSideQuestionReconnects?: typeof reconnects }).__petSideQuestionReconnects = reconnects;
-    class MockRunEventSource {
-      onopen: ((event: Event) => void) | null = null;
-      onerror: ((event: Event) => void) | null = null;
-      private readonly listeners = new Map<string, Set<EventListener>>();
-      private closed = false;
-      private lastEventId = "";
-
-      constructor(readonly url: string) {
-        const runId = decodeURIComponent(url).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
-        window.setTimeout(() => this.onopen?.(new Event("open")), 0);
-        const events = scenarios[runId] ?? (runId === "run_1"
-          ? [{ eventId: "evt_main_terminal", type: "run.succeeded", payload: {}, delayMs: 10 }]
-          : []);
-        events.forEach((item, index) => {
-          window.setTimeout(() => this.emit(item, runId, index + 1), item.delayMs);
-        });
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const requestUrl = new URL(
+        typeof input === "string" ? input : input instanceof Request ? input.url : input.toString(),
+        window.location.origin
+      );
+      if (!requestUrl.pathname.includes("/runs/") || !requestUrl.pathname.endsWith("/events")) {
+        return nativeFetch(input, init);
       }
-
-      addEventListener(type: string, listener: EventListener) {
-        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
-        listeners.add(listener);
-        this.listeners.set(type, listeners);
+      const runId = decodeURIComponent(requestUrl.pathname).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
+      const events = scenarios[runId] ?? (runId === "run_1"
+        ? [{ eventId: "evt_main_terminal", type: "run.succeeded", payload: {}, delayMs: 10 }]
+        : []);
+      const lastEventId = requestUrl.searchParams.get("lastEventId") ?? "";
+      const resumeIndex = lastEventId ? events.findIndex((item) => item.eventId === lastEventId) + 1 : 0;
+      if (lastEventId) {
+        reconnects.push({ runId, lastEventId });
       }
-
-      removeEventListener(type: string, listener: EventListener) {
-        this.listeners.get(type)?.delete(listener);
-      }
-
-      close() {
-        this.closed = true;
-      }
-
-      private emit(item: PetStreamEvent, runId: string, seq: number) {
-        if (this.closed) return;
-        const message = new MessageEvent(item.type, {
-          data: JSON.stringify({
-            eventId: item.eventId,
-            runId,
-            seq,
-            type: item.type,
-            traceId: "trace_pet_side_question",
-            occurredAt: "2026-07-11T00:00:00Z",
-            payload: item.payload
-          }),
-          lastEventId: item.eventId
-        });
-        this.lastEventId = item.eventId;
-        this.listeners.get(item.type)?.forEach((listener) => listener(message));
-        if (item.disconnectAfter && !this.closed) {
-          // 原生 EventSource 会在同一个 JS 实例内携带 Last-Event-ID 自动重连；fake 复现该生命周期。
-          reconnects.push({ runId, lastEventId: this.lastEventId });
-          this.onerror?.(new Event("error"));
-          window.setTimeout(() => {
-            if (!this.closed) this.onopen?.(new Event("open"));
-          }, 20);
+      const selected = events.slice(Math.max(0, resumeIndex));
+      const disconnectIndex = lastEventId ? -1 : selected.findIndex((item) => item.disconnectAfter);
+      const batch = disconnectIndex < 0 ? selected : selected.slice(0, disconnectIndex + 1);
+      const encoder = new TextEncoder();
+      let timers: number[] = [];
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          batch.forEach((item, index) => {
+            timers.push(window.setTimeout(() => {
+              controller.enqueue(encoder.encode(
+                `id: ${item.eventId}\nevent: ${item.type}\ndata: ${JSON.stringify({
+                  eventId: item.eventId,
+                  runId,
+                  seq: resumeIndex + index + 1,
+                  type: item.type,
+                  traceId: "trace_pet_side_question",
+                  occurredAt: "2026-07-11T00:00:00Z",
+                  payload: item.payload
+                })}\n\n`
+              ));
+              if (item.disconnectAfter) controller.close();
+            }, item.delayMs));
+          });
+        },
+        cancel() {
+          timers.forEach((timer) => window.clearTimeout(timer));
+          timers = [];
         }
-      }
-    }
-
-    (window as Window & { EventSource: typeof EventSource }).EventSource = MockRunEventSource as unknown as typeof EventSource;
+      });
+      return new Response(body, { headers: { "content-type": "text/event-stream" } });
+    };
   }, { scenarios });
 }
 
