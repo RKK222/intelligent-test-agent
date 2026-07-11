@@ -713,6 +713,8 @@ const props =
     permissions?: PermissionRequest[]
     /** question.asked 投影出的待处理提问请求。 */
     questions?: QuestionRequest[]
+    /** 当前 root 会话；历史切换时用于退出上一次子 Agent 视图。 */
+    currentSessionId?: string
     /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
     messageScopesById?: Record<string, MessageScope>
     /** 当前运行期发现的子 Agent 会话索引。 */
@@ -1937,6 +1939,27 @@ const processStatusText = computed(() => {
 })
 
 const activeSubagentSessionId = ref<string | null>(null)
+
+// 主会话只展示自己的 ask；进入 child 后只展示 child 自己的 ask，避免把两个会话的请求混在一起。
+const interactionSessionId = computed(() => activeSubagentSessionId.value ?? props.currentSessionId)
+const visiblePermissions = computed(() => {
+  const sessionId = interactionSessionId.value
+  return sessionId ? props.permissions.filter((item) => item.sessionId === sessionId) : props.permissions
+})
+const visibleQuestions = computed(() => {
+  const sessionId = interactionSessionId.value
+  return sessionId ? props.questions.filter((item) => item.sessionId === sessionId) : props.questions
+})
+
+watch(
+  () => props.currentSessionId,
+  (sessionId, previousSessionId) => {
+    // 历史会话切换复用同一个面板实例；不能把上个会话的 child 选择带到新 root。
+    if (sessionId && previousSessionId && sessionId !== previousSessionId) {
+      activeSubagentSessionId.value = null
+    }
+  }
+)
 
 // 没有用户拖拽记录时沿用原对话顶部的内联状态卡；只有用户拖动后才进入可持久化的浮动模式。
 const processStatusCollapsed = ref(false)
@@ -4156,11 +4179,11 @@ function onCompositionEnd() {
 
     <!-- 作废说明：运行中旧任务面板已由 OpencodeTimeline 的工具/事件行取代，避免两套来源显示不一致。 -->
     <section
-      v-if="!activeSubagentSessionId && (permissions.length || questions.length)"
+      v-if="visiblePermissions.length || visibleQuestions.length"
       class="figma-chat-question-dock"
     >
       <div
-        v-for="permission in permissions"
+        v-for="permission in visiblePermissions"
         :key="permission.requestId"
         class="figma-chat-permission-card"
       >
@@ -4174,7 +4197,7 @@ function onCompositionEnd() {
           <button type="button" class="figma-chat-question-reject" @click="emit('reply-permission', permission.requestId, 'reject')">拒绝</button>
         </div>
       </div>
-      <template v-for="item in questions" :key="item.requestId">
+      <template v-for="item in visibleQuestions" :key="item.requestId">
         <div
           v-if="item.questions.length > 0"
           class="figma-chat-question-card"

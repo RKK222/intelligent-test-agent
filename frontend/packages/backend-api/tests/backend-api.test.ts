@@ -2,6 +2,53 @@ import { describe, expect, it, vi } from "vitest";
 import { BackendApiError, createBackendApiClient, type WorkspaceWebSocketFactory } from "../src";
 
 describe("backend-api", () => {
+  it("normalizes a pending native OpenCode question for a historical session", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: [
+            {
+              id: "que_history",
+              sessionID: "ses_history",
+              questions: [
+                {
+                  question: "请选择验证范围",
+                  header: "验证范围",
+                  options: [{ label: "接口测试", description: "只执行接口回归" }],
+                  multiple: true,
+                  custom: true
+                }
+              ]
+            }
+          ]
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listSessionQuestions("ses_history")).resolves.toEqual([
+      {
+        requestId: "que_history",
+        sessionId: "ses_history",
+        questions: [
+          {
+            questionId: "que_history:0",
+            text: "请选择验证范围",
+            header: "验证范围",
+            kind: "multiple",
+            options: [{ id: "接口测试", label: "接口测试", description: "只执行接口回归" }],
+            custom: true,
+            required: undefined
+          }
+        ],
+        createdAt: expect.any(String)
+      }
+    ]);
+  });
+
   it("sends trace id and unwraps successful responses", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({

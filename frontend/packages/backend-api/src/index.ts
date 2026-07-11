@@ -1606,11 +1606,8 @@ function toQuestionRequest(value: Record<string, unknown>, fallbackSessionId: st
     sessionId: text(value.sessionId) ?? text(value.sessionID) ?? fallbackSessionId,
     questions: questions
       .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-      .map((item, index) => ({
-        questionId: text(item.questionId) ?? text(item.questionID) ?? text(item.id) ?? `${requestId}:${index}`,
-        text: text(item.text) ?? text(item.prompt) ?? text(item.question) ?? "",
-        kind: text(item.kind) ?? text(item.type) ?? "text",
-        options: Array.isArray(item.options)
+      .map((item, index) => {
+        const options = Array.isArray(item.options)
           ? item.options
               .filter((option): option is Record<string, unknown> => typeof option === "object" && option !== null)
               .map((option) => ({
@@ -1618,9 +1615,21 @@ function toQuestionRequest(value: Record<string, unknown>, fallbackSessionId: st
                 label: text(option.label) ?? text(option.value) ?? text(option.id) ?? "option",
                 description: text(option.description)
               }))
-          : undefined,
-        required: typeof item.required === "boolean" ? item.required : undefined
-      })),
+          : undefined;
+        // /question 原生对象不提供 kind，必须由 multiple/options 恢复可交互的题型。
+        const kind = typeof item.multiple === "boolean"
+          ? item.multiple ? "multiple" : options?.length ? "single" : "text"
+          : text(item.kind) ?? text(item.type) ?? (options?.length ? "single" : "text");
+        return {
+          questionId: text(item.questionId) ?? text(item.questionID) ?? text(item.id) ?? `${requestId}:${index}`,
+          header: text(item.header),
+          text: text(item.text) ?? text(item.prompt) ?? text(item.question) ?? "",
+          kind,
+          options,
+          custom: typeof item.custom === "boolean" ? item.custom : undefined,
+          required: typeof item.required === "boolean" ? item.required : undefined
+        };
+      }),
     createdAt: text(value.createdAt) ?? text(record(value.time)?.created) ?? new Date(0).toISOString()
   };
 }

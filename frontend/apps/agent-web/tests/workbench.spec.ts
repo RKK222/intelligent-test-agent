@@ -1671,6 +1671,64 @@ test("history run projection keeps sending locked until stale details cannot ove
   expect(runRequests[0]).toMatchObject({ sessionId: "ses_history", prompt: "历史投影完成后发送" });
 });
 
+test("switching history restores a pending native question dock instead of only its tool JSON", async ({ page }) => {
+  const questionReplies: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    questionReplies,
+    sessions: [{
+      sessionId: "ses_history_question",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "历史提问会话",
+      status: "ACTIVE",
+      createdAt: "2026-07-11T08:00:00Z",
+      updatedAt: "2026-07-11T08:01:00Z"
+    }],
+    sessionMessages: [{
+      messageId: "msg_history_question",
+      sessionId: "ses_history_question",
+      role: "ASSISTANT",
+      content: "等待用户选择验证范围",
+      createdAt: "2026-07-11T08:01:00Z",
+      parts: [{
+        id: "part_question_tool",
+        messageID: "msg_history_question",
+        type: "tool",
+        tool: "question",
+        state: { status: "running", input: { question: "请选择验证范围" } }
+      }]
+    }],
+    sessionTreeMessages: {
+      sessionId: "ses_history_question",
+      sessions: [{ rootSessionId: "ses_history_question", sessionId: "ses_history_question", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: []
+    },
+    sessionQuestionsById: {
+      ses_history_question: [{
+        id: "que_history_question",
+        sessionID: "ses_history_question",
+        questions: [{
+          question: "请选择验证范围",
+          header: "验证范围",
+          options: [{ label: "接口测试", description: "执行接口回归" }],
+          multiple: false,
+          custom: true
+        }]
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: /历史提问会话/ }).click();
+  const dock = page.locator(".figma-chat-question-dock");
+  await expect(dock).toContainText("请选择验证范围");
+  await page.getByRole("button", { name: "接口测试" }).click();
+  await page.getByRole("button", { name: "提交" }).click();
+  await expect.poll(() => questionReplies).toEqual([{ answers: [["接口测试"]] }]);
+});
+
 test("switching history resumes the runtime-state run without active-run lookup", async ({ page }) => {
   const activeRunRequests: string[] = [];
   const runEventRequests: string[] = [];
@@ -3248,6 +3306,8 @@ async function mockBackendApi(
     sessionTreeRequests?: string[];
     sessionMessages?: Array<Record<string, unknown>>;
     sessionMessagesBySessionId?: Record<string, Array<Record<string, unknown>>>;
+    /** 指定历史会话的 pending native question，键为 sessionId。 */
+    sessionQuestionsById?: Record<string, Array<Record<string, unknown>>>;
     sessionMessageRequests?: string[];
     sessionMessagesGate?: Promise<void>;
     messageFeedbackGate?: Promise<void>;
@@ -3792,6 +3852,16 @@ async function mockBackendApi(
       await capture.sessionMessagesGate;
       const sessionId = url.pathname.match(/\/sessions\/([^/]+)\/messages$/)?.[1] ?? "ses_history";
       await route.fulfill(json(pageOf(capture.sessionMessagesBySessionId?.[sessionId] ?? capture.sessionMessages ?? [])));
+      return;
+    }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/questions$/.test(url.pathname)) {
+      const sessionId = url.pathname.match(/\/sessions\/([^/]+)\/questions$/)?.[1] ?? "";
+      await route.fulfill(json(capture.sessionQuestionsById?.[sessionId] ?? []));
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/questions\/[^/]+\/reply$/.test(url.pathname)) {
+      capture.questionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      await route.fulfill(json({ accepted: true }));
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/messages\/[^/]+\/feedback\/me$/.test(url.pathname)) {

@@ -1462,6 +1462,7 @@ describe("FigmaChatPanel", () => {
 
     const wrapper = mount(FigmaChatPanel, {
       props: {
+        currentSessionId: "ses_root",
         messages: [
           {
             id: "msg_user_root",
@@ -1538,6 +1539,21 @@ describe("FigmaChatPanel", () => {
           }
         },
         subagentByTaskPartId: { prt_task_frontend: "ses_child_frontend" },
+        questions: [
+          {
+            requestId: "ques_child_history",
+            sessionId: "ses_child_frontend",
+            createdAt: "2026-07-03T00:00:04Z",
+            questions: [
+              {
+                questionId: "q_child_history",
+                text: "子 Agent 是否继续读取目录？",
+                kind: "single",
+                options: [{ id: "continue", label: "继续" }]
+              }
+            ]
+          }
+        ],
         processStatus: { status: "READY", initializable: false, message: "ready" }
       } as any,
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -1567,6 +1583,8 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("子 Agent 已读取前端目录。");
     expect(wrapper.text()).toContain("子 Agent 不支持对话");
     expect(wrapper.find(".figma-chat-subagent-return").exists()).toBe(true);
+    // 原生 child session 也可能提出 Question；不能只留下时间线中的 question 工具 JSON。
+    expect(wrapper.get(".figma-chat-question-dock").text()).toContain("子 Agent 是否继续读取目录？");
     expect(expandedProcessCardObserver.disconnect).toHaveBeenCalledTimes(1);
 
     await wrapper.get(".figma-chat-subagent-return").trigger("click");
@@ -1577,6 +1595,13 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
     expect(processCardObservers()).toHaveLength(processObserverCountBeforeSubagent + 1);
     expect(processCardObservers().at(-1)!.observe).toHaveBeenCalledTimes(1);
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+    // 历史 root 切换后必须退出原 child 视图，不能继续把 ask 隐藏成 tool JSON。
+    await wrapper.setProps({ currentSessionId: "ses_history_root" });
+    await nextTick();
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-question-dock").exists()).toBe(false);
     wrapper.unmount();
     expect(processCardObservers().at(-1)!.disconnect).toHaveBeenCalledTimes(1);
   });
@@ -1833,6 +1858,21 @@ describe("FigmaChatPanel", () => {
         messageScopesById: state.messageScopesById,
         subagentsBySessionId: state.subagentsBySessionId,
         subagentByTaskPartId: state.subagentByTaskPartId,
+        questions: [
+          {
+            requestId: "ques_child_history",
+            sessionId: "ses_child",
+            createdAt: "2026-07-03T00:00:04Z",
+            questions: [
+              {
+                questionId: "q_child_history",
+                text: "历史子 Agent 是否继续？",
+                kind: "single",
+                options: [{ id: "continue", label: "继续" }]
+              }
+            ]
+          }
+        ],
         processStatus: { status: "READY", initializable: false, message: "ready" }
       } as any,
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -1847,6 +1887,100 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
     expect(wrapper.text()).toContain("子 Agent 输出");
+  });
+
+  it("opens a historical subagent with child-only tree part output", async () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { rootSessionId: "ses_root", sessionId: "ses_root", childSession: false },
+        {
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task"
+        }
+      ],
+      messagesBySessionId: {
+        ses_child: [{
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          isChildSession: true,
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task",
+          part: { id: "prt_child_text", messageID: "msg_child", type: "text", text: "child-only 工作内容" }
+        }]
+      },
+      childSessionIdByTaskPartId: { prt_task: "ses_child" },
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: { rootSessionId: "ses_root", sessionId: "ses_root", message: { id: "msg_root", role: "assistant" } }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "msg_root",
+            part: {
+              id: "prt_task",
+              messageID: "msg_root",
+              type: "tool",
+              tool: "task",
+              callID: "call_task",
+              state: { status: "completed", input: { description: "恢复子 Agent 工作", subagent_type: "explore" } }
+            }
+          }
+        }
+      ]
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: state.messages,
+        messageScopesById: state.messageScopesById,
+        subagentsBySessionId: state.subagentsBySessionId,
+        subagentByTaskPartId: state.subagentByTaskPartId,
+        questions: [
+          {
+            requestId: "ques_child_history_only_part",
+            sessionId: "ses_child",
+            createdAt: "2026-07-03T00:00:04Z",
+            questions: [
+              {
+                questionId: "q_child_history_only_part",
+                text: "历史子 Agent 是否继续？",
+                kind: "single",
+                options: [{ id: "continue", label: "继续" }]
+              }
+            ]
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    await showFullTimeline(wrapper);
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("child-only 工作内容");
+    expect(wrapper.get(".figma-chat-question-dock").text()).toContain("历史子 Agent 是否继续？");
+    await wrapper.get(".figma-chat-subagent-return").trigger("click");
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
   });
 
   it("keeps historical subagent cards clickable and named when snapshot ids differ from rendered task part ids", async () => {
