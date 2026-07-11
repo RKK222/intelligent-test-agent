@@ -258,7 +258,10 @@ function reduceEventOnly(
     if (taskSubagent) {
       next = rememberSubagent(next, taskSubagent);
     }
-    return next;
+    // OpenCode 1.17.7 的 todowrite 不保证发出 todo.updated；最新快照实际挂在 tool part 输入。
+    // 在同一 reducer 中归并，才能让实时 SSE 与历史 part 回放使用一致的任务面板数据源。
+    const todos = todoSnapshotFromToolPart(raw);
+    return todos === undefined ? next : { ...next, todos };
   }
   if (event.type === "message.part.removed") {
     return {
@@ -317,19 +320,7 @@ function reduceEventOnly(
     return requestId ? { ...state, questions: state.questions.filter((item) => item.requestId !== requestId) } : state;
   }
   if (event.type === "todo.updated") {
-    const raw = Array.isArray(event.payload.todos)
-      ? event.payload.todos
-      : Array.isArray(event.payload.todo)
-        ? event.payload.todo
-        : Array.isArray(event.payload.items)
-          ? event.payload.items
-          : [];
-    return {
-      ...state,
-      todos: raw
-        .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-        .map((item, index) => toTodoItem(item, index))
-    };
+    return { ...state, todos: todoSnapshotFromValue(event.payload) ?? [] };
   }
   if (event.type === "session.child.discovered" || event.type === "session.scope.updated") {
     const subagent = subagentFromScopeEvent(event, state);
@@ -1290,6 +1281,64 @@ function toTodoItem(value: Record<string, unknown>, index = 0): TodoItem {
     steps: Array.isArray(value.steps) ? value.steps.filter((item): item is string => typeof item === "string") : undefined,
     updatedAt: text(value.updatedAt)
   };
+}
+
+/**
+ * 从 OpenCode 工具 part 中提取任务清单。原生 todowrite 有时只同步 message.part.updated，
+ * 因而不能依赖单独的 todo.updated 事件；空数组也是有效快照，表示用户清空了待办。
+ */
+export function todoSnapshotFromToolPart(raw: Record<string, unknown>): TodoItem[] | undefined {
+  const part = normalizeMessagePart(raw);
+  if (part.type !== "tool" || part.toolName.toLowerCase() !== "todowrite") {
+    return undefined;
+  }
+  return todoSnapshotFromValue(part.input) ?? todoSnapshotFromValue(part.metadata);
+}
+
+/**
+ * 从按时间顺序的 assistant tool parts 恢复最近一次 todowrite 快照，供历史恢复兜底。
+ */
+export function todoSnapshotFromMessages(messages: AgentMessage[]): TodoItem[] | undefined {
+  let latest: TodoItem[] | undefined;
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const part of message.parts ?? []) {
+      if (part.type !== "tool") {
+        continue;
+      }
+      const snapshot = todoSnapshotFromToolPart(part as unknown as Record<string, unknown>);
+      if (snapshot !== undefined) {
+        latest = snapshot;
+      }
+    }
+  }
+  return latest;
+}
+
+function todoSnapshotFromValue(value: unknown): TodoItem[] | undefined {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+      .map((item, index) => toTodoItem(item, index));
+  }
+  const source = record(value);
+  if (!source) {
+    return undefined;
+  }
+  const raw = Array.isArray(source.todos)
+    ? source.todos
+    : Array.isArray(source.todo)
+      ? source.todo
+      : Array.isArray(source.items)
+        ? source.items
+        : undefined;
+  return raw === undefined
+    ? undefined
+    : raw
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+      .map((item, index) => toTodoItem(item, index));
 }
 
 function fallbackTodoId(index: number, content: string): string {

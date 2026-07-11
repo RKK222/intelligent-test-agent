@@ -1416,4 +1416,44 @@ describe("inferDiffFromToolPart", () => {
       { requestId: "perm_history", sessionId: "ses_root", type: "bash", title: "允许执行命令" }
     ]);
   });
+
+  it("restores historical todo panel data from an OpenCode todowrite part without todo.updated", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [{ sessionId: "ses_root", rootSessionId: "ses_root", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: []
+    };
+    const persisted: SessionMessage[] = [
+      {
+        messageId: "msg_todowrite_history",
+        sessionId: "ses_root",
+        role: "ASSISTANT",
+        content: "",
+        createdAt: "2026-07-11T05:54:32.473Z",
+        parts: [
+          {
+            partId: "part_todowrite_history",
+            type: "tool",
+            toolName: "todowrite",
+            status: "completed",
+            input: {
+              todos: [
+                { content: "历史任务一", status: "completed", priority: "high" },
+                { content: "历史任务二", status: "in_progress", priority: "medium" }
+              ]
+            }
+          }
+        ]
+      }
+    ];
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, persisted);
+
+    expect(state.todos).toEqual([
+      expect.objectContaining({ text: "历史任务一", status: "completed", priority: "high" }),
+      expect.objectContaining({ text: "历史任务二", status: "in_progress", priority: "medium" })
+    ]);
+  });
 });

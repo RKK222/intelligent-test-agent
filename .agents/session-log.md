@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-11 - 恢复 OpenCode todowrite 实时与历史待办面板
+
+- Why:
+  - 用户反馈任务清单无法展开；真实 OpenCode 1.17.7 会把待办列表放在 `message.part.updated` 的 `tool=todowrite`、`state.input.todos` 中，并不保证发出独立 `todo.updated`，原前端因此只显示工具过程行。
+- What:
+  - reducer 兼容从 todowrite 工具 part 投影最新 Todo 快照；历史 session tree/持久化 part 回放可恢复最近快照，切换历史会话再用已有 session todo API 的远端结果（含空数组）校准。
+- How:
+  - 未新增 API、事件、数据库或配置；保留既有 `todo.updated` 处理和 TodoPanel 点击交互，仅复用现有 `getSessionTodo` 与消息归一化链路。
+- Result:
+  - 真实浏览器抓到完整原生 todowrite payload，并在后续真实消息更新后观察到输入框上方“任务”面板出现；runtime reducer/history 回放定向测试 99 项通过，agent-chat typecheck 通过。全 app typecheck 暂由并行 Part E2E 未提交 helper 缺失阻塞，待其修复后复验。
+
 ### 2026-07-11 - 将宠物旁路问答升级为可回放的 SSE 流式任务
 
 - Why:

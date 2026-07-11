@@ -31,6 +31,7 @@ import {
   normalizeMessagePart,
   reduceAgentChatRuntime,
   snapshotEventsFromRunReset,
+  todoSnapshotFromMessages,
   type ComposerAttachment
 } from "@test-agent/agent-chat";
 import { buildEditorFilePromptPart } from "./prompt-context";
@@ -659,7 +660,12 @@ export function chatStateFromSessionTreeSnapshot(
       messages: state.messages.length > 0 ? mergeSessionTreeMessages(persistedAgentMessages, state.messages) : persistedAgentMessages
     };
   }
-  return hydrateSubagentOutputsFromTaskParts(state);
+  const hydrated = hydrateSubagentOutputsFromTaskParts(state);
+  // OpenCode 1.17.7 常把 todo 快照保存在 todowrite 工具 part，而非独立 todo.updated 事件。
+  // 仅在事件树没有显式 todo.updated 时回退，避免覆盖明确发送的空任务清单。
+  const hasExplicitTodoSnapshot = (snapshot.events ?? []).some((event) => event.type === "todo.updated");
+  const todos = hasExplicitTodoSnapshot ? undefined : todoSnapshotFromMessages(hydrated.messages);
+  return todos === undefined ? hydrated : { ...hydrated, todos };
 }
 
 export function messagesFromSessionTreeSnapshot(snapshot: SessionTreeMessagesResponse): AgentMessage[] {

@@ -4212,11 +4212,13 @@ async function switchSession(sessionId: string) {
   nowTick.value = Date.now();
   clearAutoRetryState();
   try {
-    const [treeSnapshot, page, livePermissions, liveQuestions] = await Promise.all([
+    const [treeSnapshot, page, livePermissions, liveQuestions, liveTodos] = await Promise.all([
       api.getSessionTreeMessages(sessionId).catch(() => null),
       api.listSessionMessages(sessionId, 1, 100, { refresh: false }),
       api.listSessionPermissions(sessionId).catch(() => null),
-      api.listSessionQuestions(sessionId).catch(() => null)
+      api.listSessionQuestions(sessionId).catch(() => null),
+      // 历史会话的原生 todo.updated 可能已不在事件回放窗口，始终以 session todo 快照校准。
+      api.getSessionTodo(sessionId).catch(() => null)
     ]);
     if (!switchIsCurrent()) {
       return;
@@ -4231,7 +4233,7 @@ async function switchSession(sessionId: string) {
     }
     // 历史事件树可能保留已经失效的 ask；以 OpenCode 当前 pending 列表覆盖交互请求，
     // 避免展示无法提交的旧 requestId，同时保留接口暂时不可用时的历史降级展示。
-    if (livePermissions !== null || liveQuestions !== null) {
+    if (livePermissions !== null || liveQuestions !== null || liveTodos !== null) {
       chatState.value = {
         ...chatState.value,
         permissions: livePermissions === null
@@ -4239,7 +4241,9 @@ async function switchSession(sessionId: string) {
           : livePermissions.filter((item) => item.sessionId === sessionId),
         questions: liveQuestions === null
           ? chatState.value.questions
-          : liveQuestions.filter((item) => item.sessionId === sessionId)
+          : liveQuestions.filter((item) => item.sessionId === sessionId),
+        // 空数组也是明确的远端快照，必须覆盖工具 part 回放得到的旧任务。
+        todos: liveTodos === null ? chatState.value.todos : liveTodos
       };
     }
     // 正文可以先展示，但发送锁必须保留到关联 Run/Diff 投影完成，避免迟到历史详情覆盖新 Run。

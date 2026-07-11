@@ -1150,6 +1150,37 @@ describe("agent-chat runtime reducer", () => {
     expect(state.todos.every((item) => item.id !== "todo" && item.id !== "unknown")).toBe(true);
   });
 
+  it("projects OpenCode todowrite tool updates into the todo panel when no todo.updated event is emitted", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_todowrite_1",
+        part: {
+          id: "part_todowrite_1",
+          messageID: "msg_todowrite_1",
+          type: "tool",
+          tool: "todowrite",
+          state: {
+            status: "completed",
+            // OpenCode 1.17.7 实际将 todo 快照放在工具输入，而非 todo.updated SSE。
+            input: {
+              todos: [
+                { content: "识别测试对象", status: "completed", priority: "high" },
+                { content: "编写案例", status: "in_progress", priority: "medium" }
+              ]
+            }
+          }
+        }
+      })
+    });
+
+    expect(state.todos).toEqual([
+      expect.objectContaining({ text: "识别测试对象", status: "completed", priority: "high" }),
+      expect.objectContaining({ text: "编写案例", status: "in_progress", priority: "medium" })
+    ]);
+    expect(new Set(state.todos.map((item) => item.id)).size).toBe(2);
+  });
+
   it("records terminal run status from run events", () => {
     const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",
