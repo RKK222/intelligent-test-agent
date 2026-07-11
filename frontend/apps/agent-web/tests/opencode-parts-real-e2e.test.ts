@@ -76,8 +76,11 @@ describe("OpenCode 1.17.7 Part 契约", () => {
 
   it("subtask 跳转仅在 child mapping 存在时必测", () => {
     const contract = PART_SPECS.find((item) => item.kind === "subtask")!.ui.current;
-    expect(interactionExpectation(contract, { childMapping: true })).toBe("required");
-    expect(interactionExpectation(contract, { childMapping: false })).toBe("n/a");
+    expect(contract.locators).toEqual(["[data-part-type='subtask'][data-part-id='{partId}']"]);
+    expect(contract.locators).not.toContain(".oc-subagent-card");
+    expect(interactionExpectation(contract, { targetPartId: "part_1", childMappingPartId: "part_1" })).toBe("required");
+    expect(interactionExpectation(contract, { targetPartId: "part_1", childMappingPartId: "part_other" })).toBe("n/a");
+    expect(interactionExpectation(contract, { targetPartId: "part_1" })).toBe("n/a");
   });
 
   it("patch diff 仅在 diff 可用时必测", () => {
@@ -86,9 +89,15 @@ describe("OpenCode 1.17.7 Part 契约", () => {
     expect(interactionExpectation(contract, { diffAvailable: false })).toBe("n/a");
   });
 
+  it.each(["subtask", "step-start", "step-finish", "snapshot", "patch", "agent", "retry", "compaction"] as const)("%s 原生扩展 Part locator 均绑定目标 partId", (kind) => {
+    const contract = PART_SPECS.find((item) => item.kind === kind)!.ui.current;
+    expect(contract.locators.every((locator) => locator.includes("{partId}"))).toBe(true);
+    if (kind === "retry") expect(contract.locators).not.toContain(".oc-retry-row");
+  });
+
   it("step-start 明确要求低噪可见标记", () => {
     const spec = PART_SPECS.find((item) => item.kind === "step-start")!;
-    expect(spec.ui.current.locators).toContain(".oc-step-start-marker");
+    expect(spec.ui.current.locators).toContain(".oc-step-start-marker[data-part-id='{partId}']");
     expect(spec.ui.current.semantic).toContain("低噪");
   });
 
@@ -168,10 +177,26 @@ describe("证据安全", () => {
     expect(sanitizeEvidence({ Authorization: "Bearer x", nested: [{ cookie: "c", token: "t", key: "k", secret: "s", safe: "ok" }] })).toEqual({ nested: [{ safe: "ok" }] });
   });
 
+  it("脱敏 retry responseHeaders 的代理鉴权、Set-Cookie 和大小写连字符变体", () => {
+    expect(sanitizeEvidence({
+      error: { data: { responseHeaders: { "Set-Cookie": "sid=x", "proxy-Authorization": "Basic x", "X-API-KEY": "key", "x-auth-token": "token", "Content-Type": "application/json" } } }
+    })).toEqual({ error: { data: { responseHeaders: { "Content-Type": "application/json" } } } });
+  });
+
+  it("不会因包含 key/token/cookie/secret 字样过度删除普通字段", () => {
+    const ordinary = { keyboardLayout: "us", monkeyCount: 2, tokenCount: 3, cookiePolicy: "strict", secretariat: "office", authorizationMode: "rbac" };
+    expect(sanitizeEvidence(ordinary)).toEqual(ordinary);
+  });
+
   it("生成逐 run/逐 kind 证据路径并拒绝目录穿越", () => {
     expect(evidencePath("run_1", "text", "raw.json")).toBe(".tmp/e2e/opencode-parts/run_1/text/raw.json");
     expect(() => evidencePath("../run", "text", "raw.json")).toThrow(/unsafe/);
     expect(() => evidencePath("run_1", "text", "../tool/raw.json")).toThrow(/unsafe/);
     expect(() => evidencePath("run_1", "unknown" as never, "raw.json")).toThrow(/kind/);
+  });
+
+  it.each(["line\nbreak", "tab\tname", "中文", "emoji😀", "space name", "a/b", "a\\b", ".", "..", ""])("证据路径拒绝非 ASCII allowlist 段 %j", (segment) => {
+    expect(() => evidencePath(segment, "text", "raw.json")).toThrow(/unsafe/);
+    expect(() => evidencePath("run_1", "text", segment)).toThrow(/unsafe/);
   });
 });
