@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BackendApiError, createBackendApiClient, type WorkspaceWebSocketFactory } from "../src";
 
 describe("backend-api", () => {
-  it("normalizes a pending native OpenCode question for a historical session", async () => {
+  it("normalizes a pending native OpenCode question for a historical platform session", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -11,7 +11,8 @@ describe("backend-api", () => {
           data: [
             {
               id: "que_history",
-              sessionID: "ses_history",
+              // OpenCode 返回的是远端 sessionID；前端请求和展示使用平台 sessionId，二者会不同。
+              sessionID: "ses_remote_history",
               questions: [
                 {
                   question: "请选择验证范围",
@@ -1527,6 +1528,24 @@ describe("backend-api", () => {
 
     await expect(client.getSessionTodo("ses_1234567890abcdef")).resolves.toEqual([
       { id: "todo_1", text: "Fix checkout test", status: "in_progress", priority: "high" }
+    ]);
+  });
+
+  it("keeps a pending native permission on its requested historical platform session", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: [{ id: "per_history", sessionID: "ses_remote_history", permission: "edit", pattern: "src/**" }]
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listSessionPermissions("ses_history")).resolves.toMatchObject([
+      { requestId: "per_history", sessionId: "ses_history", type: "edit", pattern: "src/**" }
     ]);
   });
 

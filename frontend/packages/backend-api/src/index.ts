@@ -1589,7 +1589,9 @@ function toPermissionRequest(value: Record<string, unknown>, fallbackSessionId: 
   const requestId = text(value.requestId) ?? text(value.requestID) ?? text(value.id) ?? "unknown";
   return compactObject({
     requestId,
-    sessionId: text(value.sessionId) ?? text(value.sessionID) ?? fallbackSessionId,
+    // permission 列表同样已经由平台 session 路由；远端 sessionID 只用于 OpenCode 内部，
+    // 不能让历史会话的 dock 按它筛选，否则待授权项会消失。
+    sessionId: fallbackSessionId,
     type: text(value.type) ?? text(value.permission) ?? text(value.action) ?? "permission",
     title: text(value.title),
     description: text(value.description) ?? text(value.pattern),
@@ -1603,7 +1605,9 @@ function toQuestionRequest(value: Record<string, unknown>, fallbackSessionId: st
   const questions = Array.isArray(value.questions) ? value.questions : Array.isArray(value.items) ? value.items : [value];
   return {
     requestId,
-    sessionId: text(value.sessionId) ?? text(value.sessionID) ?? fallbackSessionId,
+    // /sessions/{platformSessionId}/questions 已按平台会话路由；原生 payload 的 sessionID 是
+    // OpenCode 远端会话 ID，不能用于前端历史会话筛选，否则真实待答问题会被错误丢弃。
+    sessionId: fallbackSessionId,
     questions: questions
       .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
       .map((item, index) => {
