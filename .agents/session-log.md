@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-13 - 新增宠物小游戏并恢复主对话首条直发
+
+- Why:
+  - 主对话被错误要求先点击“新建对话”才可输入；同时用户希望小宠物提供俄罗斯方块和扫雷，但游戏入口应与宠物对话合并且保持低强调。
+- What:
+  - 主输入卡移除 Session 选择门禁，进程 ready 且工作区可用时可直接发送首条消息，并继续由既有链路延迟创建 Session；宠物旁路提问仍要求已有真实主 Session。
+  - 点击 ready 状态宠物后打开以对话为主体的统一浮层，标题栏小手柄按钮进入本地 10×16 俄罗斯方块或 8×8、10 雷扫雷，不新增活动栏按钮、后端接口或持久化状态。
+- How:
+  - 复用 `AgentWorkbench` 既有 Session 延迟创建、宠物旁路 Run 和进程状态分流；小游戏仅维护 Vue 页面内存状态，俄罗斯方块卸载时释放计时器。同步组件测试、桌面/移动 Playwright 用例、agent-web 稳定 README 和包说明。
+- Result:
+  - 前端全量 Vitest 54 文件通过，753 passed/1 skipped；agent-web typecheck、生产 build、桌面/移动目标 E2E 4/4 通过。按 `.env.test` / `test` profile 重启三服务成功，backend readiness 为 UP、frontend 3000 返回 200、manager WebSocket 正常；真实三服务 E2E 的 Session+PTY 与宠物旁路 fork 2/2 通过（其余 13 项按套件条件跳过），临时 OpenCode 4096 进程已自动清理。构建仍保留仓库既有 CSS `@import` 顺序和大 chunk 警告。
+
 ### 2026-07-13 - 统一测试产物业务化命名并准备企业模型验收素材
 
 - Why:

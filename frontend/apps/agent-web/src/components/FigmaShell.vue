@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
-import { ChevronDown, LogOut, ShieldCheck, UserRound, X, Pin, PinOff } from "lucide-vue-next";
+import { ChevronDown, Gamepad2, LogOut, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
+import PetMiniGames from "./PetMiniGames.vue";
 
 export type AppItem = {
   id: string;
@@ -398,6 +399,8 @@ const robotState = ref<RobotState>("sleeping");
 const robotX = ref(0);
 const robotY = ref(0);
 const robotQuestionOpen = ref(false);
+// 对话和游戏共用宠物浮层；true 仅表示当前切到游戏页，不再提供独立活动栏入口。
+const robotGameOpen = ref(false);
 // 进程状态气泡与宠物共用坐标，不再单独维护可拖动的状态点位置。
 const robotProcessStatusOpen = ref(false);
 // 首次未初始化提醒每次页面生命周期只自动展示一次，用户关闭后不被状态轮询反复打扰。
@@ -1233,23 +1236,43 @@ const robotStyle = computed(() => ({
 }));
 
 const robotQuestionStyle = computed<CSSProperties>(() => {
-  const width = 292;
-  const left = Math.min(Math.max(8, robotX.value + ROBOT_WIDTH + 10), Math.max(8, window.innerWidth - width - 8));
-  const top = Math.min(Math.max(8, robotY.value - 8), Math.max(8, window.innerHeight - 240));
-  return { left: `${left}px`, top: `${top}px` };
+  const width = 340;
+  const gap = 10;
+  const preferredLeft = robotX.value + ROBOT_WIDTH + gap;
+  const left = preferredLeft + width <= window.innerWidth - 8
+    ? preferredLeft
+    : robotX.value - width - gap;
+  const maxLeft = Math.max(8, window.innerWidth - width - 8);
+  const top = Math.min(Math.max(8, robotY.value - 8), Math.max(8, window.innerHeight - 470));
+  return {
+    left: `${Math.min(Math.max(8, left), maxLeft)}px`,
+    top: `${top}px`,
+  };
 });
 
 function closeRobotQuestion() {
   robotQuestionOpen.value = false;
+  robotGameOpen.value = false;
   robotQuestionDraft.value = "";
   emit("close-robot-side-question");
+}
+
+function openRobotGames() {
+  robotProcessStatusOpen.value = false;
+  robotQuestionOpen.value = true;
+  robotGameOpen.value = true;
+}
+
+function toggleRobotGameView() {
+  if (robotGameOpen.value) robotGameOpen.value = false;
+  else openRobotGames();
 }
 
 function toggleRobotProcessStatus() {
   robotProcessStatusOpen.value = !robotProcessStatusOpen.value;
   if (robotProcessStatusOpen.value) {
-    robotQuestionOpen.value = false;
-    robotQuestionDraft.value = "";
+    if (robotQuestionOpen.value) closeRobotQuestion();
+    else robotGameOpen.value = false;
   }
 }
 
@@ -1257,6 +1280,7 @@ function openRobotSideQuestionFromProcess() {
   if (!props.sideQuestionAvailable) return;
   robotProcessStatusOpen.value = false;
   robotQuestionOpen.value = true;
+  robotGameOpen.value = false;
   void nextTick(() => robotQuestionInput.value?.focus());
 }
 
@@ -1277,14 +1301,18 @@ function onRobotClick() {
     clickTimer = setTimeout(() => {
       clickTimer = null;
       if (processStatusInteractionEnabled.value) {
-        // 进程已就绪且存在主 Session 时，宠物的首要动作就是旁路提问，不再要求经过状态卡二次点击。
-        if (robotProcessTone.value === "ready" && props.sideQuestionAvailable) {
-          openRobotSideQuestionFromProcess();
+        // 进程就绪后始终打开统一宠物浮层；无主 Session 时只禁用对话页，游戏仍可直接进入。
+        if (robotProcessTone.value === "ready") {
+          robotProcessStatusOpen.value = false;
+          robotQuestionOpen.value = true;
+          robotGameOpen.value = false;
+          if (props.sideQuestionAvailable) void nextTick(() => robotQuestionInput.value?.focus());
         } else {
           toggleRobotProcessStatus();
         }
       } else {
         robotQuestionOpen.value = true;
+        robotGameOpen.value = false;
         void nextTick(() => robotQuestionInput.value?.focus());
       }
     }, 250);
@@ -1359,6 +1387,7 @@ watch(
     }
     robotQuestionOpen.value = false;
     robotQuestionDraft.value = "";
+    robotGameOpen.value = false;
     robotProcessStatusOpen.value = true;
   },
   { immediate: true }
@@ -1897,7 +1926,7 @@ function submitJoinApp() {
         class="figma-robot-process-question"
         data-testid="robot-side-question-open-from-process"
         :disabled="!sideQuestionAvailable"
-        :title="sideQuestionAvailable ? '问问宠物当前任务' : '请先选择或新建一个主对话并发送消息'"
+        :title="sideQuestionAvailable ? '问问宠物当前任务' : '请先在主对话发送一条消息'"
         @click="openRobotSideQuestionFromProcess"
       >
         问问宠物当前任务
@@ -1914,49 +1943,68 @@ function submitJoinApp() {
       @click.stop
     >
       <header class="figma-robot-side-question-header">
-        <span id="figma-robot-side-question-title">问问小宠物</span>
-        <button type="button" aria-label="关闭宠物旁路问答" @click="closeRobotQuestion">×</button>
+        <span id="figma-robot-side-question-title">{{ robotGameOpen ? "小游戏" : "问问小宠物" }}</span>
+        <div class="figma-robot-companion-actions">
+          <button
+            type="button"
+            class="figma-robot-companion-game-toggle"
+            :class="{ 'is-active': robotGameOpen }"
+            :aria-label="robotGameOpen ? '返回宠物对话' : '打开宠物小游戏'"
+            :title="robotGameOpen ? '返回对话' : '玩一会儿'"
+            :aria-pressed="robotGameOpen"
+            @click="toggleRobotGameView"
+          >
+            <Gamepad2 :size="13" aria-hidden="true" />
+          </button>
+          <button type="button" aria-label="关闭宠物旁路问答" @click="closeRobotQuestion">×</button>
+        </div>
       </header>
-      <textarea
-        ref="robotQuestionInput"
-        v-model="robotQuestionDraft"
-        data-testid="robot-side-question-input"
-        class="figma-robot-side-question-input"
-        rows="2"
-        maxlength="4000"
-        placeholder="问问当前任务，不会写入主对话"
-        @keydown.enter.exact.prevent="submitRobotQuestion"
-      />
-      <div class="figma-robot-side-question-footer">
-        <span>临时上下文 · 不改主历史</span>
-        <button
-          type="button"
-          data-testid="robot-side-question-submit"
-          :disabled="sideQuestionLoading || !robotQuestionDraft.trim()"
-          @click="submitRobotQuestion"
+      <template v-if="!robotGameOpen">
+        <textarea
+          ref="robotQuestionInput"
+          v-model="robotQuestionDraft"
+          data-testid="robot-side-question-input"
+          class="figma-robot-side-question-input"
+          rows="2"
+          maxlength="4000"
+          :disabled="!sideQuestionAvailable"
+          :placeholder="sideQuestionAvailable ? '问问当前任务，不会写入主对话' : '请先在主对话发送一条消息'"
+          @keydown.enter.exact.prevent="submitRobotQuestion"
+        />
+        <div class="figma-robot-side-question-footer">
+          <span>{{ sideQuestionAvailable ? "临时上下文 · 不改主历史" : "建立主对话后即可向宠物提问" }}</span>
+          <button
+            type="button"
+            data-testid="robot-side-question-submit"
+            :disabled="!sideQuestionAvailable || sideQuestionLoading || !robotQuestionDraft.trim()"
+            @click="submitRobotQuestion"
+          >
+            {{ sideQuestionLoading ? "思考中…" : "提问" }}
+          </button>
+        </div>
+        <div v-if="sideQuestionError" class="figma-robot-side-question-error">{{ sideQuestionError }}</div>
+        <div
+          v-else-if="sideQuestionAnswer"
+          data-testid="robot-side-question-answer"
+          class="figma-robot-side-question-answer"
+          role="status"
+          aria-live="polite"
         >
-          {{ sideQuestionLoading ? "思考中…" : "提问" }}
-        </button>
-      </div>
-      <div v-if="sideQuestionError" class="figma-robot-side-question-error">{{ sideQuestionError }}</div>
-      <div
-        v-else-if="sideQuestionAnswer"
-        data-testid="robot-side-question-answer"
-        class="figma-robot-side-question-answer"
-        role="status"
-        aria-live="polite"
-      >
-        {{ sideQuestionAnswer }}
-      </div>
-      <div
-        v-else-if="sideQuestionLoading"
-        class="figma-robot-side-question-progress"
-        data-testid="robot-side-question-progress"
-        role="status"
-        aria-live="polite"
-      >
-        <span class="figma-robot-side-question-progress-dot" aria-hidden="true"></span>
-        {{ sideQuestionProgress || "正在准备回答" }}
+          {{ sideQuestionAnswer }}
+        </div>
+        <div
+          v-else-if="sideQuestionLoading"
+          class="figma-robot-side-question-progress"
+          data-testid="robot-side-question-progress"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="figma-robot-side-question-progress-dot" aria-hidden="true"></span>
+          {{ sideQuestionProgress || "正在准备回答" }}
+        </div>
+      </template>
+      <div v-else class="figma-robot-companion-game">
+        <PetMiniGames embedded />
       </div>
     </section>
   </div>
@@ -2131,7 +2179,9 @@ function submitJoinApp() {
 .figma-robot-side-question {
   position: fixed;
   z-index: 10000;
-  width: 292px;
+  width: 340px;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
   box-sizing: border-box;
   padding: 10px;
   border: 1px solid #dbe3ec;
@@ -2154,6 +2204,31 @@ function submitJoinApp() {
   margin-bottom: 8px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.figma-robot-companion-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.figma-robot-side-question-header .figma-robot-companion-game-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #9aa3ad;
+}
+
+.figma-robot-side-question-header .figma-robot-companion-game-toggle:hover,
+.figma-robot-side-question-header .figma-robot-companion-game-toggle.is-active {
+  background: #eeeafd;
+  color: #6f5ca9;
+}
+
+.figma-robot-companion-game {
+  min-height: 166px;
 }
 
 .figma-robot-side-question-header button {
@@ -2190,6 +2265,13 @@ function submitJoinApp() {
 .figma-robot-side-question-input:focus {
   border-color: #7ca7c8;
   box-shadow: 0 0 0 2px rgba(124, 167, 200, 0.15);
+}
+
+.figma-robot-side-question-input:disabled {
+  border-color: #e2e6ea;
+  background: #f4f5f6;
+  color: #9aa3ad;
+  cursor: not-allowed;
 }
 
 .figma-robot-side-question-footer {

@@ -246,9 +246,6 @@ const workspaceRequirementCandidates = ref<WorkspaceRequirementReference[]>([]);
 const workspaceRequirementCandidatesLoading = ref(false);
 let workspaceRequirementLoadSeq = 0;
 const session = shallowRef<Session | null>(null);
-// 新对话先作为前端草稿被“选中”，首条消息仍沿用现有延迟创建 Session 的链路，避免空会话污染历史。
-const newConversationDraftSelected = ref(false);
-const chatConversationSelected = computed(() => Boolean(session.value) || newConversationDraftSelected.value);
 const run = shallowRef<Run | null>(null);
 // OpenCode 原生 title agent 会在 root Run 成功后异步发出 session.updated。
 // 该 Run 处于待命名状态时，保留既有 Run SSE，直到后端确认标题已持久化或显式关闭监听。
@@ -1923,7 +1920,6 @@ const startRunMutation = useMutation({
         activeSession = createdSession;
         activeSessionId = createdSession.sessionId;
         session.value = createdSession;
-        newConversationDraftSelected.value = false;
         void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       }
       activeSessionId = activeSession.sessionId;
@@ -2314,7 +2310,6 @@ const deleteSessionMutation = useMutation({
     if (session.value?.sessionId === deleted.sessionId) {
       pendingSessionTitleRunId.value = null;
       session.value = null;
-      newConversationDraftSelected.value = false;
       run.value = null;
       clearAutoRetryState();
       dispatchChat({ type: "reset" });
@@ -2492,7 +2487,6 @@ function resetWorkspaceState() {
   workspaceRequirementCandidatesLoading.value = false;
   workspaceRequirementLoadSeq++;
   session.value = null;
-  newConversationDraftSelected.value = false;
   run.value = null;
   pendingSessionTitleRunId.value = null;
   logs.value = [];
@@ -3561,14 +3555,6 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     };
     return;
   }
-  if (!session.value && !newConversationDraftSelected.value) {
-    feedback.value = {
-      kind: "info",
-      title: "未选择对话",
-      description: "请先从消息列表选择一个对话，或点击新建对话。"
-    };
-    return;
-  }
   if (!selectedWorkspace.value) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区，再发送任务。" };
     return;
@@ -4494,7 +4480,6 @@ async function switchSession(sessionId: string) {
     return;
   }
   session.value = selected;
-  newConversationDraftSelected.value = false;
   readonlySessionReason.value = readonlyReason;
   // 工作区校验已通过后立即清理上一 Session 的交互 dock；新 Session 的 pending 快照随后再填充。
   dispatchChat({ type: "reset" });
@@ -4762,7 +4747,6 @@ function handleNewConversation() {
   rememberCurrentRunAsBackgroundRuntimeState();
   pendingSessionTitleRunId.value = null;
   session.value = null;
-  newConversationDraftSelected.value = true;
   run.value = null;
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   clearAutoRetryState();
@@ -5093,7 +5077,6 @@ async function handleLogout() {
           :permissions="chatState.permissions"
           :questions="chatState.questions"
           :current-session-id="session?.sessionId"
-          :conversation-selected="chatConversationSelected"
           :todos="chatState.todos"
           :chat-contexts="chatContextStore.items"
           :chat-context-total-chars="chatContextStore.totalCharCount"

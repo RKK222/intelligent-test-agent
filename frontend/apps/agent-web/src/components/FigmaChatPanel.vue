@@ -727,8 +727,6 @@ const props =
     questions?: QuestionRequest[]
     /** 当前 root 会话；历史切换时用于退出上一次子 Agent 视图。 */
     currentSessionId?: string
-    /** 已选择历史会话或已进入新对话草稿；未选择时输入区保持灰显。 */
-    conversationSelected?: boolean
     /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
     messageScopesById?: Record<string, MessageScope>
     /** 当前运行期发现的子 Agent 会话索引。 */
@@ -738,7 +736,6 @@ const props =
   }>(), {
     processRefreshBlocksSubmit: true,
     processStatusPlacement: 'chat',
-    conversationSelected: true,
     commands: () => [],
     agents: () => [],
     workspaceFileCandidates: () => [],
@@ -1968,8 +1965,7 @@ const processReady = computed(() => {
   }
   return !props.processStatus || props.processStatus.status === 'READY'
 })
-const conversationBlocked = computed(() => props.conversationSelected === false)
-const composerInteractionBlocked = computed(() => !processReady.value || conversationBlocked.value)
+const composerInteractionBlocked = computed(() => !processReady.value)
 const agentPickerDisabled = computed(() => composerInteractionBlocked.value)
 const modelSelectionDisabled = computed(() => props.modelPickerDisabled === true || composerInteractionBlocked.value)
 const processSubmitBlocked = computed(
@@ -1992,21 +1988,18 @@ const contextSendBlockedReason = computed(() => {
 })
 const sendBlockedTitle = computed(() => {
   if (!processReady.value) return '请先初始化 TestAgent 进程'
-  if (conversationBlocked.value) return '请先选择或新建对话'
   return readonlyBlockedReason.value || contextSendBlockedReason.value || '发送'
 })
 const sendSubmitBlocked = computed(
   () => props.historyLoading === true
     || props.historySubmitBlocked === true
     || processSubmitBlocked.value
-    || conversationBlocked.value
     || readonlySubmitBlocked.value
     || contextSubmitBlocked.value
 )
 const composerPlaceholder = computed(() => {
   if (props.processLoading && !props.processStatus) return '正在检查 TestAgent 进程…'
   if (!processReady.value) return '请先初始化 TestAgent 进程'
-  if (conversationBlocked.value) return '请先从消息列表选择对话，或新建对话'
   return props.placeholder || 'Ask the AI agent...'
 })
 const processStatusVisible = computed(
@@ -7514,7 +7507,7 @@ function onCompositionEnd() {
   box-shadow: none;
 }
 
-/* 未初始化或尚未进入对话时，整张输入卡进入统一灰显态；新建对话按钮仍可作为进入草稿的入口。 */
+/* 进程不可用时整张输入卡进入统一灰显态；无 Session 时仍允许直接输入首条消息。 */
 .figma-chat-input-card.is-disabled {
   border-color: #dedfe2;
   background: #f3f4f6;

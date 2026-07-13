@@ -311,6 +311,26 @@ describe("FigmaShell", () => {
     expect(wrapper.get(".figma-user-avatar").classes()).toContain("figma-user-avatar--compact");
   });
 
+  it("opens games from the shared pet dialog without a separate activity button", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    expect(wrapper.find('[data-testid="robot-game-toggle"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+    await wrapper.get('[aria-label="打开宠物小游戏"]').trigger("click");
+
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("俄罗斯方块");
+    expect(wrapper.text()).toContain("扫雷");
+
+    await wrapper.get('[aria-label="关闭宠物旁路问答"]').trigger("click");
+    expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(false);
+  });
+
   it("opens a transient side-question bubble from the pet and emits the question", async () => {
     vi.useFakeTimers();
     const wrapper = mountShell({
@@ -333,7 +353,7 @@ describe("FigmaShell", () => {
     expect(wrapper.get('[data-testid="robot-side-question-answer"]').text()).toContain("当前上下文已经完成初始化");
   });
 
-  it("disables fork side questions until a main session exists", async () => {
+  it("keeps games available but disables pet conversation until a main session exists", async () => {
     vi.useFakeTimers();
     const wrapper = mountShell({
       props: {
@@ -352,12 +372,12 @@ describe("FigmaShell", () => {
     await wrapper.get('[data-testid="figma-robot"]').trigger("click");
     await vi.advanceTimersByTimeAsync(250);
 
-    const openButton = wrapper.get('[data-testid="robot-side-question-open-from-process"]');
-    expect(openButton.attributes("disabled")).toBeDefined();
-    expect(openButton.attributes("title")).toBe("请先选择或新建一个主对话并发送消息");
-    await openButton.trigger("click");
-
-    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="robot-side-question-input"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[data-testid="robot-side-question-input"]').attributes("placeholder")).toBe("请先在主对话发送一条消息");
+    await wrapper.get('[aria-label="打开宠物小游戏"]').trigger("click");
+    expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(true);
     expect(wrapper.emitted("robot-side-question")).toBeUndefined();
   });
 

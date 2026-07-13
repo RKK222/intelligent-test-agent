@@ -3062,30 +3062,58 @@ test("workbench does not create default personal workspace while opencode become
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
 });
 
-test("workbench disables chat until a conversation is selected", async ({ page }) => {
-  await mockBackendApi(page);
+test("workbench accepts the first prompt without requiring new conversation while pet fork waits for a session", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, { runRequests, ...runnableWorkspaceSetup() });
 
   await gotoWorkbench(page, { selectConversation: false });
 
   await page.getByRole("button", { name: "唤起小宠物" }).click();
   await page.getByTestId("figma-robot").click();
-  const forkButton = page.getByTestId("robot-side-question-open-from-process");
-  await expect(forkButton).toBeDisabled();
-  await expect(forkButton).toHaveAttribute("title", "请先选择或新建一个主对话并发送消息");
+  await expect(page.getByTestId("robot-side-question")).toBeVisible();
+  await expect(page.getByTestId("robot-side-question-input")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "打开宠物小游戏" })).toBeEnabled();
 
   const composer = page.locator(".figma-chat-input-card");
-  const textarea = page.getByPlaceholder("请先从消息列表选择对话，或新建对话");
-  await expect(composer).toHaveClass(/is-disabled/);
-  await expect(textarea).toBeDisabled();
+  const textarea = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await expect(composer).not.toHaveClass(/is-disabled/);
+  await expect(textarea).toBeEnabled();
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "新建对话" })).toBeEnabled();
 
-  await page.getByRole("button", { name: "新建对话" }).click();
+  await textarea.fill("直接开始第一轮测试");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]?.prompt).toBe("直接开始第一轮测试");
+});
 
-  await expect(composer).not.toHaveClass(/is-disabled/);
-  await expect(page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因")).toBeEnabled();
+test("pet mini games support tetris and minesweeper interactions", async ({ page }) => {
+  await mockBackendApi(page, runnableWorkspaceSetup());
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "唤起小宠物" }).click();
   await page.getByTestId("figma-robot").click();
-  await expect(forkButton).toBeDisabled();
+  await page.getByRole("button", { name: "打开宠物小游戏" }).click();
+  await expect(page.getByTestId("pet-mini-games")).toBeVisible();
+  await expect(page.getByTestId("figma-robot")).toBeVisible();
+
+  await page.getByTestId("pet-game-open-tetris").click();
+  await expect(page.getByTestId("pet-tetris").locator(".pet-tetris-cell")).toHaveCount(160);
+  await page.getByRole("button", { name: "右移" }).click();
+  await page.getByRole("button", { name: "旋转" }).click();
+  await page.getByRole("button", { name: "直接落下" }).click();
+  await expect(page.getByTestId("pet-tetris")).toContainText("分数");
+
+  await page.getByRole("button", { name: "扫雷", exact: true }).click();
+  const mineCells = page.getByTestId("pet-minesweeper").locator(".pet-mine-cell");
+  await expect(mineCells).toHaveCount(64);
+  await mineCells.nth(63).click({ button: "right" });
+  await expect(mineCells.nth(63)).toHaveAttribute("aria-label", /已插旗/);
+  await mineCells.first().click();
+  await expect(page.getByTestId("pet-minesweeper")).not.toContainText("踩雷了");
+
+  await page.getByRole("button", { name: "关闭宠物旁路问答" }).click();
+  await expect(page.getByTestId("pet-mini-games")).toHaveCount(0);
 });
 
 test("phase 11 runtime flow sends attachment parts and handles docks", async ({ page }) => {

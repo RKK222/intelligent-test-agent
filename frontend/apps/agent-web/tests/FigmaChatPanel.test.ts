@@ -106,7 +106,6 @@ describe("FigmaChatPanel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
-        conversationSelected: true,
         processRequired: true,
         processStatusPlacement: "pet",
         processStatus: {
@@ -126,24 +125,24 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.get('[aria-label="新建对话"]').attributes("disabled")).toBeDefined();
   });
 
-  it("greys the composer without a selected conversation but keeps new conversation available", async () => {
+  it("keeps the composer available before the first session is created", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
-        conversationSelected: false,
+        inputValue: "直接发送第一条消息",
         processRequired: true,
         processStatus: { status: "READY", initializable: false, message: "ready" }
       } as any
     });
 
-    expect(wrapper.get(".figma-chat-input-card").classes()).toContain("is-disabled");
-    expect(wrapper.get(".figma-chat-textarea").attributes("disabled")).toBeDefined();
-    expect(wrapper.get(".figma-chat-textarea").attributes("placeholder")).toContain("选择对话");
+    expect(wrapper.get(".figma-chat-input-card").classes()).not.toContain("is-disabled");
+    expect(wrapper.get(".figma-chat-textarea").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get(".figma-chat-textarea").attributes("placeholder")).toBe("Ask the AI agent...");
     const newConversationButton = wrapper.get('[aria-label="新建对话"]');
     expect(newConversationButton.attributes("disabled")).toBeUndefined();
 
-    await newConversationButton.trigger("click");
-    expect(wrapper.emitted("new-conversation")).toEqual([[]]);
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+    expect(wrapper.emitted("send")?.[0]).toEqual(["直接发送第一条消息"]);
   });
 
   it("keeps a READY card inline without a saved drag and only uses floating mode after a drag", async () => {
