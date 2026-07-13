@@ -245,11 +245,10 @@ cp deploy/internal/env.example /data/testagent/config/docker.env
 
 | 配置项 | 当前模板值 | 修改场景 |
 |---|---|---|
-| `TEST_AGENT_DB_URL` | `jdbc:postgresql://122.42.203.103:8000/testagent` | 数据库地址、端口或库名变化时修改；GaussDB gsjdbc4 兼容驱动仍使用该 URL 形式，不能省略 `//端口/数据库名`。 |
+| `TEST_AGENT_DB_URL` | `jdbc:postgresql://122.42.203.103:8000/testagent` | PostgreSQL 地址、端口或库名变化时修改，不能省略 `//端口/数据库名`。 |
 | `TEST_AGENT_DB_USERNAME` | `testagent` | PostgreSQL 用户名变化时修改。 |
 | `TEST_AGENT_DB_PASSWORD` | `testagent#123!` | PostgreSQL 密码变化时修改。 |
 | `TEST_AGENT_DB_DRIVER_CLASS_NAME` | `org.postgresql.Driver` | 可选 JDBC 驱动类；该类及其 jar 必须已在后端启动 classpath 中，修改后重启 Java。 |
-| `TEST_AGENT_FLYWAY_GAUSS_ROLE_RESTORE_COMPATIBILITY` | `true` | 使用本交付包内 GaussDB 驱动时保持为 `true`；Flyway 启动迁移结束时将 PostgreSQL 的 `SET ROLE` 恢复语句转换为 GaussDB 的 `RESET ROLE`。 |
 | `TEST_AGENT_API_TOKEN` | 空 | 需要启用额外平台 API Bearer token 时填写；登录态鉴权不依赖该值。 |
 | `TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `test-agent-manager-token-122-233-30-4` | 与 `docker.env` 必须完全一致；正式交付如要替换为随机长 token，两处一起改。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | `replace-with-random-internal-proxy-api-key` | Java 内部模型代理鉴权 key，正式部署必须替换为随机长 key；只配置在 `backend.env`，不要放到 `docker.env`。 |
@@ -357,7 +356,7 @@ TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_REDIS_PASSWORD=
 ```
 
-### `122.42.203.103:8000` GaussDB 兼容 PostgreSQL 协议数据库
+### `122.42.203.103:8000` PostgreSQL
 
 当前企业内部署的 PostgreSQL 已按以下值写入 `122.233.30.4` 上的 `/data/testagent/config/backend.env`：
 
@@ -366,10 +365,11 @@ TEST_AGENT_DB_URL=jdbc:postgresql://122.42.203.103:8000/testagent
 TEST_AGENT_DB_USERNAME=testagent
 TEST_AGENT_DB_PASSWORD=testagent#123!
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
-TEST_AGENT_FLYWAY_GAUSS_ROLE_RESTORE_COMPATIBILITY=true
 ```
 
-Java 后端启动时会执行 Flyway migration 初始化或校验库表结构。GaussDB 兼容驱动已放在 `backend/lib/`，不需要再放入 PostgreSQL 驱动；不要关闭 `spring.flyway.enabled`，也不要把测试、演示或个人开发数据写进生产 migration。
+Java 后端启动时会执行 Flyway migration 初始化或校验库表结构。发布包已在 `backend/lib/` 内包含 PostgreSQL 官方 JDBC 驱动；不要关闭 `spring.flyway.enabled`，也不要把测试、演示或个人开发数据写进生产 migration。
+
+如果目标机曾部署过 GaussDB 驱动版本，升级前从现有 `/data/testagent/config/backend.env` 删除 `TEST_AGENT_FLYWAY_GAUSS_ROLE_RESTORE_COMPATIBILITY`。一键部署脚本会整体备份并替换 `dist/backend/lib/`，升级后只应保留 `postgresql-*.jar`，不需要手工复制或删除 JDBC 驱动。
 
 ## 打包与分发路径
 
@@ -624,18 +624,9 @@ deploy/internal/dist/test-agent-internal-release.zip
 
 也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，实体 Nginx 直接托管 `dist/frontend`。
 第一版 `opencode-worker` 镜像里仍内置 `opencode-manager` 和 `opencode-ai` CLI；同时脚本会把这两个程序导出到 `dist/programs/`，纯 Docker worker 管理脚本默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。
-`test-agent-internal-release.zip` 是完整企业升级包，包含上述必要产物和 `deploy/internal/` 脚本目录；传到 `122.233.30.4:/data/0709/internal.zip` 后即可用 `deploy-internal-release.sh` 解压部署。
+`test-agent-internal-release.zip` 是完整企业升级包，包含上述必要产物和 `deploy/internal/` 脚本目录；传到 `122.233.30.4:/data/0709/internal.zip` 后即可用 `deploy-internal-release.sh` 解压部署。归档时会排除 `deploy/internal/dist`、历史 `dist-*` 和当前输出目录，避免旧交付物递归进入新包。
 
 发布脚本生成后端交付 jar 时只编译主代码和运行时依赖（使用 `-Dmaven.test.skip=true`），不会编译测试源码；企业包生成前应单独完成目标模块测试和脚本校验，避免无关的存量测试假实现阻断发布包生成。
-
-如果使用 GaussDB 兼容 JDBC 驱动，打包机不要手工删除 `lib` 中的 PostgreSQL 驱动，直接传入驱动 jar：
-
-```bash
-deploy/internal/package-release.sh \
-  --db-driver-jar /path/to/GaussDBV5-*.jar
-```
-
-脚本会把该 jar 复制到 `dist/backend/lib/`，并移除内置的 `postgresql-*.jar`。目标机的 `backend.env` 仍需设置实际驱动类名；使用 `gsjdbc4` 时通常为 `org.postgresql.Driver`，URL 必须是 `jdbc:postgresql://<host>:<port>/<database>`。
 
 只打某一类交付物：
 

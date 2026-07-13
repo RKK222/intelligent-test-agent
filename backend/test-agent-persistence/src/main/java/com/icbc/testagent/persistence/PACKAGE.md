@@ -65,9 +65,9 @@
 - `test-agent-common`。
 - `test-agent-domain`。
 - MyBatis Spring Boot starter。
-- Spring JDBC（仅存量 `Jdbc*Repository` 迁移窗口）；不引入 Spring Data JDBC Repository 自动配置，避免与 GaussDB PostgreSQL 兼容驱动的内部 API 冲突。
+- Spring Data JDBC（仅存量 `Jdbc*Repository` 迁移窗口）。
 - Flyway。
-- PostgreSQL 协议兼容 JDBC driver（默认 PostgreSQL，可由部署包替换为 GaussDB 驱动）。
+- PostgreSQL driver。
 - Druid Spring Boot starter。
 - Redis 客户端或 Spring Data Redis（系统必需依赖）。
 

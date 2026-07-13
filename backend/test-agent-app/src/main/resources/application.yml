@@ -58,8 +58,6 @@ management:
       enabled: true
 
 test-agent:
-  flyway:
-    gauss-role-restore-compatibility: ${TEST_AGENT_FLYWAY_GAUSS_ROLE_RESTORE_COMPATIBILITY:false}
   deployment:
     mode: ${TEST_AGENT_DEPLOYMENT_MODE:external}
   security:

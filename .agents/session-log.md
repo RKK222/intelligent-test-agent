@@ -1,5 +1,29 @@
 # Session Log
 
+### 2026-07-13 - 对话支持需求子条目与工作区文件引用
+
+- Why:
+  - COSS 使用特性分支和个人 worktree 管理真实应用工作区；对话输入需要从当前个人 worktree 识别 `需求项/01-需求/子条目`，并让 `@` 除 Agent 外也能选择工作区文件。
+- What:
+  - `workspace.search` 改为按工作区相对路径匹配，并允许空关键字在既有数量、深度和超时边界内返回文件候选；前端 `#` 按 `01-需求` 聚合子条目，选择后复用现有文件上下文链路添加其需求文件，`@` 面板同时展示 Agent 和文件。
+  - COSS `feature_testagent_20260618` 已同步远端；个人 worktree 清理后只保留 `120260624-0318-新增助商组合贷信鸽取证状态`，清理提交已合并到应用特性分支。
+- How:
+  - 文件目录、读取和搜索继续使用平台文件 WebSocket RPC；文件引用继续使用原有二进制、重复、单文件和总上下文容量校验，不新增文件 HTTP 代理。需求识别以当前真实目录层级为准，不引入 `default-version` 等虚构层级。
+- Result:
+  - workspace-management 定向测试 12/12、前端定向 Vitest 178 passed/1 skipped、agent-web 生产构建和三服务 test profile 重启通过；backend health/readiness 为 UP、frontend 3000 返回 200、manager WebSocket 已连接。应用内浏览器没有已打开标签页，未复用登录态执行真实页面点击；构建保留既有 CSS `@import` 顺序和大 chunk 警告。
+
+### 2026-07-13 - 企业部署统一回退到 PostgreSQL 镜像
+
+- Why:
+  - 用户确认后续企业环境统一使用 PostgreSQL 镜像，不再交付或维护 GaussDB JDBC 驱动及 Flyway 方言兼容路径。
+- What:
+  - 删除 GaussDB Flyway 数据源包装器、兼容开关和单测；恢复 persistence 的 Spring Data JDBC/PostgreSQL 依赖说明；移除发布脚本的外置数据库驱动替换参数，并同步 `backend.env` 模板、后端模块 README 和企业部署文档。
+- How:
+  - 复用原有 `DatabaseMigrationRunner`、PostgreSQL 官方驱动和 Flyway PostgreSQL database support；保留与数据库无关的企业包主代码构建及防递归归档修复。历史 GaussDB 条目仅作为追溯记录，当前部署以本条决策和稳定文档为准。
+- Result:
+  - JDK 25 全量主代码构建成功，Druid 定向测试通过；按 `.env.test` / `test` profile 在 PostgreSQL 16.14 镜像上重启三服务，Flyway 成功校验 49 个 migration，backend health/readiness、frontend 3000、登录 CORS 和 manager WebSocket 正常。
+  - 默认 PostgreSQL 企业完整包已重建并通过 `--validate-only`、`unzip -t`；包内仅有官方 `postgresql-42.7.11.jar`，无 GaussDB 驱动、Flyway 兼容类或旧 `dist-gauss` 递归内容。zip 为 416356194 bytes，SHA-256 `7a9cddfb1da8f68d04ecbd7ce4a1d755937febf5eade09a97042a9dc2574460a`。发布脚本额外排除历史 `dist-*` 输出目录，旧 GaussDB 构建目录已删除。
+
 ### 2026-07-13 - 修复 GaussDB Flyway 角色恢复失败
 
 - Why:

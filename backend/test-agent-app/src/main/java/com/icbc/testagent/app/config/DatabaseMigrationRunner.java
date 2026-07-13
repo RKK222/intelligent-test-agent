@@ -25,7 +25,6 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     private final DataSource dataSource;
     private final boolean enabled;
     private final String[] locations;
-    private final boolean gaussRoleRestoreCompatibility;
 
     /**
      * 注入迁移数据源和 Flyway 配置，locations 默认复用 persistence 模块 migration。
@@ -33,13 +32,10 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     public DatabaseMigrationRunner(
             DataSource dataSource,
             @Value("${spring.flyway.enabled:true}") boolean enabled,
-            @Value("${spring.flyway.locations:classpath:db/migration}") String[] locations,
-            @Value("${test-agent.flyway.gauss-role-restore-compatibility:false}")
-            boolean gaussRoleRestoreCompatibility) {
+            @Value("${spring.flyway.locations:classpath:db/migration}") String[] locations) {
         this.dataSource = dataSource;
         this.enabled = enabled;
         this.locations = locations;
-        this.gaussRoleRestoreCompatibility = gaussRoleRestoreCompatibility;
     }
 
     /**
@@ -57,12 +53,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                     dbAddress, extractHost(dbAddress), extractPort(dbAddress));
         }
         try {
-            // 高斯兼容开关只包裹 Flyway，业务侧仍使用原始连接池，避免改变正常 JDBC 行为。
-            DataSource flywayDataSource = gaussRoleRestoreCompatibility
-                    ? new GaussDbFlywayDataSource(dataSource)
-                    : dataSource;
             Flyway.configure()
-                    .dataSource(flywayDataSource)
+                    .dataSource(dataSource)
                     .locations(locations)
                     .outOfOrder(true)
                     .load()

@@ -8,8 +8,8 @@
 
 - Java 21
 - MyBatis XML mapper
-- Spring JDBC（仅存量 `Jdbc*Repository` 迁移窗口）
-- PostgreSQL 协议兼容数据库（默认 PostgreSQL，可通过外置 JDBC 驱动接入 GaussDB）
+- Spring Data JDBC（仅存量 `Jdbc*Repository` 迁移窗口）
+- PostgreSQL
 - Flyway Core + PostgreSQL database support
 - Druid JDBC 连接池
 - Redis required
@@ -134,7 +134,7 @@
 - `test-agent-common`。
 - `test-agent-domain`。
 - MyBatis Spring Boot starter。
-- Spring JDBC（仅存量 `Jdbc*Repository` 迁移窗口）；不引入 Spring Data JDBC Repository 自动配置，避免与 GaussDB PostgreSQL 兼容驱动的内部 API 冲突。
+- Spring Data JDBC（仅存量 `Jdbc*Repository` 迁移窗口）。
 - Flyway、Flyway PostgreSQL database support、PostgreSQL、Druid、Redis。
 
 ## 禁止依赖

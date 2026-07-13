@@ -22,14 +22,9 @@
             <groupId>com.icbc.testagent</groupId>
             <artifactId>test-agent-domain</artifactId>
         </dependency>
-        <!--
-            业务代码使用的是 JdbcClient/JdbcTemplate，不使用 Spring Data JDBC Repository。
-            不引入 starter-data-jdbc，避免其 PostgreSQL dialect 反射调用与 GaussDB 兼容驱动
-            的 org.postgresql.jdbc.TypeInfoCache API 不兼容。
-        -->
         <dependency>
-            <groupId>org.springframework</groupId>
-            <artifactId>spring-jdbc</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jdbc</artifactId>
         </dependency>
         <dependency>
             <groupId>com.alibaba</groupId>
