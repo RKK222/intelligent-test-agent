@@ -657,6 +657,8 @@ const props =
     historyLoadingMore?: boolean
     /** 正在切换历史会话；旧正文在此期间隐藏，避免误以为点击无响应。 */
     historyLoading?: boolean
+    /** 历史完整投影尚未完成；正文可见后仍阻止向未稳定的 Session 发送。 */
+    historySubmitBlocked?: boolean
     /** 当前历史会话只读原因；存在时禁止继续发送。 */
     readonlyReason?: string
     /** 当前选中的模型展示名 */
@@ -1893,6 +1895,7 @@ const contextSendBlockedReason = computed(() => {
 const sendBlockedTitle = computed(() => readonlyBlockedReason.value || contextSendBlockedReason.value || '发送')
 const sendSubmitBlocked = computed(
   () => props.historyLoading === true
+    || props.historySubmitBlocked === true
     || processSubmitBlocked.value
     || readonlySubmitBlocked.value
     || contextSubmitBlocked.value

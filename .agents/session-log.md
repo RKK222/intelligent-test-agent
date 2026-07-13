@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 修复历史消息首屏被 manager 健康检查阻塞
+
+- Why:
+  - 选择历史会话会并发读取正文、permission、question、Todo 和 session tree；多个运行态接口同时向同一 manager WebSocket sink 下发强健康检查时，unicast sink 的并发 `tryEmitNext` 失败结果被忽略，命令未到达 manager 但 Java pending command 等到 10 秒超时。前端又把正文 loading 与 permission/question 放在同一 `Promise.all`，因此偶发显示“正在加载消息列表…”数秒。
+- What:
+  - manager WebSocket 同一连接的全部出站消息改为连接级串行 emission，并检查 `EmitResult`；发送失败立即抛统一平台错误，让 gateway 取消 pending command。历史正文视觉 loading 与完整历史切换发送锁拆分：数据库消息返回后立即显示正文，permission/question、树、Todo 和 Run/Diff 后台增强，完整投影完成前仍禁止发送。
+- How:
+  - 后端增加 256 线程并发控制命令真实 handler 回归；前端增加 interaction gate，验证正文先显示、loading 先关闭、发送按钮继续锁定并在增强完成后恢复。未变更 API 路径/DTO、RunEvent、数据库、generated SDK 或环境配置。
+- Result:
+  - TDD RED 已分别复现 manager 控制消息丢失和交互快照阻塞正文；修复后 `ManagerControlWebSocketHandlerTest` 与 `SocketOpencodeProcessManagerGatewayTest` 共 11 项、历史首屏/发送隔离 Chromium 场景 4 项通过，`agent-web` typecheck 和生产 build、后端 `test-agent-app -am -DskipTests package` 通过。前端 build 仅保留既有 CSS `@import` 顺序和大 chunk 警告。额外扩大到 8 个历史 grep 场景时 7 项通过，另 1 项旧 DiffSummary 断言仍期待展开后出现完整路径，但当前组件只显示 basename；该断言与本次 loading/发送锁范围无关，未顺带修改 Diff 交互。
+
 ### 2026-07-13 - 隔离下一轮运行态与历史消息完成状态
 
 - Why:

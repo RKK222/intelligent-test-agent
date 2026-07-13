@@ -23,10 +23,17 @@ import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.reactivestreams.Publisher;
@@ -40,6 +47,7 @@ import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.Disposable;
 
 class ManagerControlWebSocketHandlerTest {
 
@@ -206,6 +214,87 @@ class ManagerControlWebSocketHandlerTest {
         verify(configSyncService).configUpdateMessage("trace_config");
     }
 
+    @Test
+    void sendsEveryManagerCommandWhenDifferentThreadsPublishConcurrently() throws Exception {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        ManagerConnectionRegistry connections = new ManagerConnectionRegistry();
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                1,
+                Map.of("health", true),
+                "trace_register");
+        when(controlService.register(register)).thenReturn(ManagerControlMessage.registered(
+                "bjp_1234567890abcdef",
+                "trace_register"));
+        FakeWebSocketSession session = FakeWebSocketSession.openWithToken(
+                "secret-token",
+                List.of(codec.encode(register)));
+        Disposable connection = handler(
+                controlService,
+                new ManagerPendingCommandRegistry(),
+                Mockito.mock(OpencodeManagerConfigSyncService.class),
+                connections)
+                .handle(session)
+                .subscribe();
+        try {
+            awaitCondition(() -> connections.isConnected(new com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId("ctr_01")));
+            int commandCount = 256;
+            CountDownLatch ready = new CountDownLatch(commandCount);
+            CountDownLatch start = new CountDownLatch(1);
+            try (var executor = Executors.newFixedThreadPool(commandCount)) {
+                List<CompletableFuture<Void>> sends = new ArrayList<>();
+                for (int index = 0; index < commandCount; index++) {
+                    int commandIndex = index;
+                    sends.add(CompletableFuture.runAsync(() -> {
+                        ready.countDown();
+                        try {
+                            start.await();
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(exception);
+                        }
+                        connections.send(
+                                new com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId("ctr_01"),
+                                ManagerControlMessage.command(
+                                        "mcmd_concurrent_" + commandIndex,
+                                        "health",
+                                        4096,
+                                        10_000,
+                                        "trace_concurrent_" + commandIndex));
+                    }, executor));
+                }
+                assertThat(ready.await(2, TimeUnit.SECONDS)).isTrue();
+                start.countDown();
+                CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new)).join();
+            }
+            awaitCondition(() -> session.sentText().size() >= commandCount + 1);
+            Set<String> commandIds = new HashSet<>();
+            for (String text : session.sentText()) {
+                ManagerControlMessage message = codec.decode(text);
+                if ("command".equals(message.type())) {
+                    commandIds.add(message.commandId());
+                }
+            }
+            assertThat(commandIds).hasSize(commandCount);
+        } finally {
+            connection.dispose();
+        }
+    }
+
+    private static void awaitCondition(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+        assertThat(condition.getAsBoolean()).isTrue();
+    }
+
     private ManagerControlWebSocketHandler handler(
             ManagerControlApplicationService controlService,
             ManagerPendingCommandRegistry pendingCommands) {
@@ -216,6 +305,14 @@ class ManagerControlWebSocketHandlerTest {
             ManagerControlApplicationService controlService,
             ManagerPendingCommandRegistry pendingCommands,
             OpencodeManagerConfigSyncService configSyncService) {
+        return handler(controlService, pendingCommands, configSyncService, new ManagerConnectionRegistry());
+    }
+
+    private ManagerControlWebSocketHandler handler(
+            ManagerControlApplicationService controlService,
+            ManagerPendingCommandRegistry pendingCommands,
+            OpencodeManagerConfigSyncService configSyncService,
+            ManagerConnectionRegistry connections) {
         BackendJavaProcessLifecycleService backendLifecycle = Mockito.mock(BackendJavaProcessLifecycleService.class);
         when(backendLifecycle.backendProcessId()).thenReturn(new BackendProcessId("bjp_1234567890abcdef"));
         return new ManagerControlWebSocketHandler(
@@ -223,7 +320,7 @@ class ManagerControlWebSocketHandlerTest {
                 codec,
                 controlService,
                 backendLifecycle,
-                new ManagerConnectionRegistry(),
+                connections,
                 pendingCommands,
                 configSyncService);
     }
@@ -243,10 +340,11 @@ class ManagerControlWebSocketHandlerTest {
         private final HandshakeInfo handshakeInfo;
         private final List<String> incoming;
         private final DataBufferFactory bufferFactory = DefaultDataBufferFactory.sharedInstance;
-        private final List<String> sentText = new ArrayList<>();
+        private final List<String> sentText = new CopyOnWriteArrayList<>();
+        private final boolean keepIncomingOpen;
         private boolean closed;
 
-        private FakeWebSocketSession(String token, List<String> incoming) {
+        private FakeWebSocketSession(String token, List<String> incoming, boolean keepIncomingOpen) {
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-Trace-Id", "trace_1234567890abcdef");
             if (token != null) {
@@ -258,10 +356,15 @@ class ManagerControlWebSocketHandlerTest {
                     Mono.<Principal>empty(),
                     null);
             this.incoming = List.copyOf(incoming);
+            this.keepIncomingOpen = keepIncomingOpen;
         }
 
         static FakeWebSocketSession withToken(String token, List<String> incoming) {
-            return new FakeWebSocketSession(token, incoming);
+            return new FakeWebSocketSession(token, incoming, false);
+        }
+
+        static FakeWebSocketSession openWithToken(String token, List<String> incoming) {
+            return new FakeWebSocketSession(token, incoming, true);
         }
 
         List<String> sentText() {
@@ -294,7 +397,8 @@ class ManagerControlWebSocketHandlerTest {
 
         @Override
         public Flux<WebSocketMessage> receive() {
-            return Flux.fromIterable(incoming).map(this::textMessage);
+            Flux<WebSocketMessage> messages = Flux.fromIterable(incoming).map(this::textMessage);
+            return keepIncomingOpen ? messages.concatWith(Flux.never()) : messages;
         }
 
         @Override

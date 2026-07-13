@@ -95,7 +95,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
                     if (managerId != null) {
                         controlService.disconnect(managerId, traceId);
                     }
-                    outbound.tryEmitComplete();
+                    completeOutbound(outbound);
                 })
                 .then();
         Mono<Void> outboundMono = session.send(outbound.asFlux()
@@ -110,7 +110,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             AtomicReference<OpencodeContainerId> containerRef,
             ManagerControlMessage message) {
         if (!ManagerControlProtocol.VERSION.equals(message.protocolVersion())) {
-            outbound.tryEmitNext(ManagerControlMessage.error("VALIDATION_ERROR", "manager 协议版本无效", message.traceId()));
+            emitOutbound(outbound, ManagerControlMessage.error("VALIDATION_ERROR", "manager 协议版本无效", message.traceId()));
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_REGISTER.equals(message.type())) {
@@ -119,8 +119,12 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             OpencodeContainerId containerId = new OpencodeContainerId(message.containerId());
             managerRef.set(managerId);
             containerRef.set(containerId);
-            connections.register(managerId, containerId, backendLifecycle.backendProcessId(), outboundMessage -> outbound.tryEmitNext(outboundMessage));
-            outbound.tryEmitNext(registered);
+            connections.register(
+                    managerId,
+                    containerId,
+                    backendLifecycle.backendProcessId(),
+                    outboundMessage -> emitOutbound(outbound, outboundMessage));
+            emitOutbound(outbound, registered);
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_HEARTBEAT.equals(message.type())) {
@@ -136,7 +140,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_CONFIG_REQUEST.equals(message.type())) {
-            outbound.tryEmitNext(configSyncService.configUpdateMessage(message.traceId())
+            emitOutbound(outbound, configSyncService.configUpdateMessage(message.traceId())
                     .orElseGet(() -> ManagerControlMessage.error(
                             "OPENCODE_UNAVAILABLE", "manager 运行公共参数未配置", message.traceId())));
             return Mono.empty();
@@ -147,8 +151,38 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             }
             return Mono.empty();
         }
-        outbound.tryEmitNext(ManagerControlMessage.error("VALIDATION_ERROR", "未知 manager 消息类型", message.traceId()));
+        emitOutbound(outbound, ManagerControlMessage.error("VALIDATION_ERROR", "未知 manager 消息类型", message.traceId()));
         return Mono.empty();
+    }
+
+    /**
+     * 同一 manager 连接可能同时收到多个 bounded-elastic 线程下发的控制命令。
+     * Reactor unicast sink 不允许并发 emission，因此必须在连接级锁内发送并检查结果，
+     * 避免 FAIL_NON_SERIALIZED 被忽略后让调用方一直等待 command timeout。
+     */
+    private void emitOutbound(Sinks.Many<ManagerControlMessage> outbound, ManagerControlMessage message) {
+        synchronized (outbound) {
+            Sinks.EmitResult result = outbound.tryEmitNext(message);
+            if (result == Sinks.EmitResult.OK) {
+                return;
+            }
+            LOGGER.warn(
+                    "manager_outbound_emit_failed traceId={} type={} result={}",
+                    message.traceId(),
+                    message.type(),
+                    result);
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程控制消息发送失败");
+        }
+    }
+
+    /** 连接结束与命令发送复用同一把锁，避免 complete 和 next 竞争。 */
+    private void completeOutbound(Sinks.Many<ManagerControlMessage> outbound) {
+        synchronized (outbound) {
+            Sinks.EmitResult result = outbound.tryEmitComplete();
+            if (result != Sinks.EmitResult.OK && result != Sinks.EmitResult.FAIL_TERMINATED) {
+                LOGGER.debug("manager_outbound_complete_failed result={}", result);
+            }
+        }
     }
 
     private Mono<Void> sendErrorAndClose(WebSocketSession session, String code, String message, String traceId) {

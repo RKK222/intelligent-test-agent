@@ -1691,7 +1691,8 @@ test("history run projection keeps sending locked until stale details cannot ove
   await page.getByRole("button", { name: /消息列表/ }).click();
   await page.getByRole("button", { name: "等待历史运行详情" }).click();
   await expect.poll(() => historyRunRequests).toContain("/api/internal/agent/opencode/runs/run_history");
-  await expect(page.getByRole("status")).toContainText("正在加载消息列表");
+  await expect(page.getByText("历史正文已就绪")).toBeVisible();
+  await expect(page.getByText("正在加载消息列表…")).toHaveCount(0);
 
   const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
   const sendButton = page.getByRole("button", { name: "发送" });
@@ -2715,14 +2716,18 @@ test("an ambiguous startRun failure does not fail a run recovered by runtime-sta
   await expect(page.getByText("启动确认超时")).toHaveCount(0);
 });
 
-test("history loading shows immediately and does not wait for message feedback", async ({ page }) => {
+test("history loading does not wait for interaction snapshot or message feedback", async ({ page }) => {
   let releaseSessionMessages!: () => void;
+  let releaseSessionInteractions!: () => void;
   let releaseMessageFeedback!: () => void;
   const sessionMessagesGate = new Promise<void>((resolve) => {
     releaseSessionMessages = resolve;
   });
   const messageFeedbackGate = new Promise<void>((resolve) => {
     releaseMessageFeedback = resolve;
+  });
+  const sessionInteractionsGate = new Promise<void>((resolve) => {
+    releaseSessionInteractions = resolve;
   });
   const feedbackRequests: string[] = [];
   const sessionTreeRequests: string[] = [];
@@ -2800,6 +2805,7 @@ test("history loading shows immediately and does not wait for message feedback",
       ]
     },
     sessionMessagesGate,
+    sessionInteractionsGate,
     messageFeedbackGate,
     feedbackRequests
   });
@@ -2812,12 +2818,18 @@ test("history loading shows immediately and does not wait for message feedback",
 
   releaseSessionMessages();
   await expect(page.getByText("历史正文已加载")).toHaveCount(1);
+  await expect(page.getByText("正在加载消息列表…")).toHaveCount(0);
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("等待历史交互快照完成后发送");
+  await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
+
+  releaseSessionInteractions();
   await expect.poll(() => sessionTreeRequests).toContain("/api/internal/agent/opencode/sessions/ses_history/session-tree/messages");
   await expect.poll(() => sessionMessageRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_history/messages?page=1&size=100&refresh=false");
   await expect.poll(() => feedbackRequests).toEqual([
     "/api/internal/platform/opencode-runtime/messages/msg_1234567890abcdef1234567890abcdef/feedback/me"
   ]);
-  await expect(page.getByText("正在加载消息列表…")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
 
   releaseMessageFeedback();
 });
@@ -3530,6 +3542,7 @@ async function mockBackendApi(
     sessionPermissionsById?: Record<string, Array<Record<string, unknown>>>;
     sessionMessageRequests?: string[];
     sessionMessagesGate?: Promise<void>;
+    sessionInteractionsGate?: Promise<void>;
     messageFeedbackGate?: Promise<void>;
     feedbackRequests?: string[];
     historyRun?: Record<string, unknown>;
@@ -4076,11 +4089,13 @@ async function mockBackendApi(
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/questions$/.test(url.pathname)) {
       const sessionId = url.pathname.match(/\/sessions\/([^/]+)\/questions$/)?.[1] ?? "";
+      await capture.sessionInteractionsGate;
       await route.fulfill(json(capture.sessionQuestionsById?.[sessionId] ?? []));
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/permissions$/.test(url.pathname)) {
       const sessionId = url.pathname.match(/\/sessions\/([^/]+)\/permissions$/)?.[1] ?? "";
+      await capture.sessionInteractionsGate;
       await route.fulfill(json(capture.sessionPermissionsById?.[sessionId] ?? []));
       return;
     }

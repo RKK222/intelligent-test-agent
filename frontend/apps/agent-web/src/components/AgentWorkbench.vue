@@ -264,6 +264,8 @@ const runtimeStateOutages = createRuntimeStateOutageTracker(RUNTIME_STATE_RECOVE
 let conversationInteractionGeneration = 0;
 // 必须早于认证 token 的 immediate watch 初始化，统一 interaction 失效时才能安全释放历史切换锁。
 const historyLoadingSessionId = ref<string | null>(null);
+// 正文首屏可以提前结束 loading，但完整历史投影完成前仍必须独立阻止发送。
+const historySwitchingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 let activeRunProbeSeq = 0;
 const followUpQueue = ref<FollowUpDraft[]>([]);
@@ -1810,6 +1812,7 @@ function invalidateConversationInteraction() {
   // 非历史交互会取消当前 switch；递增 owner 代次可确保旧 finally 无权清除后来启动的新 switch。
   historySwitchSeq += 1;
   historyLoadingSessionId.value = null;
+  historySwitchingSessionId.value = null;
 }
 
 function captureConversationInteraction(): ConversationInteractionGuard {
@@ -3307,7 +3310,7 @@ function toggleDirectory(path: string) {
 
 function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   // 历史切换完成前，当前 session 仍可能是上一会话；父层再次设防，避免绕过按钮状态误发 Run。
-  if (historyLoadingSessionId.value) {
+  if (historySwitchingSessionId.value) {
     return;
   }
   if (readonlySessionReason.value) {
@@ -4235,6 +4238,7 @@ async function switchSession(sessionId: string) {
   const switchIsCurrent = () => switchSeq === historySwitchSeq
     && historyInteractionGeneration === conversationInteractionGeneration;
   historyLoadingSessionId.value = sessionId;
+  historySwitchingSessionId.value = sessionId;
   let selected = sessionsItems.value.find((item) => item.sessionId === sessionId);
   if (!selected) {
     selected = await api.getSession(sessionId);
@@ -4288,10 +4292,7 @@ async function switchSession(sessionId: string) {
   nowTick.value = Date.now();
   clearAutoRetryState();
   try {
-    const [page, [livePermissions, liveQuestions]] = await Promise.all([
-      historyMessagesPromise,
-      historyInteractionsPromise
-    ]);
+    const page = await historyMessagesPromise;
     if (!switchIsCurrent()) {
       return;
     }
@@ -4299,6 +4300,12 @@ async function switchSession(sessionId: string) {
     rememberPersistedMessageIdentities(persistedMessages);
     // 先以分页消息渲染正文，树快照和 Todo 作为后续增强；避免大历史树把首屏卡住。
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
+    // 视觉 loading 只等待数据库正文；实时 interaction 校准继续后台完成，发送锁仍由 switching 状态持有。
+    historyLoadingSessionId.value = null;
+    const [livePermissions, liveQuestions] = await historyInteractionsPromise;
+    if (!switchIsCurrent()) {
+      return;
+    }
     // 历史事件树可能保留已经失效的 ask；以 OpenCode 当前 pending 列表覆盖交互请求，
     // 避免展示无法提交的旧 requestId，同时保留接口暂时不可用时的历史降级展示。
     if (livePermissions !== null || liveQuestions !== null) {
@@ -4323,8 +4330,7 @@ async function switchSession(sessionId: string) {
           : new Set(liveQuestions.map((item) => item.requestId))
       });
     }
-    // 正文和当前交互快照已可展示；后续树/待办/Run 详情不得继续挡住历史首屏。
-    historyLoadingSessionId.value = null;
+    // 当前交互快照已可用；后续树/待办/Run 详情只影响完整投影和发送锁，不再影响正文首屏。
     const [treeSnapshot, liveTodos] = await historyEnrichmentPromise;
     if (!switchIsCurrent()) {
       return;
@@ -4414,6 +4420,7 @@ async function switchSession(sessionId: string) {
   } finally {
     if (switchIsCurrent()) {
       historyLoadingSessionId.value = null;
+      historySwitchingSessionId.value = null;
     }
   }
 }
@@ -4836,6 +4843,7 @@ async function handleLogout() {
           :history-has-more="sessionHistoryHasMore"
           :history-loading-more="sessionHistoryLoadingMore"
           :history-loading="Boolean(historyLoadingSessionId)"
+          :history-submit-blocked="Boolean(historySwitchingSessionId)"
           :history-running-count="sessionRuntimeState?.runningCount ?? 0"
           :history-question-count="sessionRuntimeState?.questionCount ?? 0"
           :readonly-reason="readonlySessionReason"
