@@ -103,6 +103,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 class RunApplicationServiceTest {
 
@@ -1413,6 +1414,98 @@ class RunApplicationServiceTest {
                 .containsEntry("isChildSession", false)
                 .containsEntry("platformSessionTitleSynchronized", true)
                 .containsEntry("platformSessionTitle", "AI 生成的会话标题");
+    }
+
+    @Test
+    void serviceKeepsRoutingRunEventsAfterActiveTitleWatchCloses() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        Session initialTitleSession = session().updateTitleAndPinned(
+                OpencodeSessionTitlePolicy.initialPlatformTitle("run the tests"),
+                false,
+                NOW,
+                "trace_1234567890abcdef");
+        FakeSessionRepository sessions = new FakeSessionRepository(initialTitleSession);
+        RecordingRunEventLiveBus liveBus = new RecordingRunEventLiveBus();
+        Sinks.Many<RunEventDraft> remoteEvents = Sinks.many().unicast().onBackpressureBuffer();
+        facade.streamEvents = ignored -> remoteEvents.asFlux();
+        RunEventAppender appender = new RunEventAppender(events);
+        RunEventPersistencePolicy persistencePolicy = new RunEventPersistencePolicy();
+        RunSessionTitleWatchService titleWatchService = new RunSessionTitleWatchService(
+                new RunSessionTitleWatchRegistry(),
+                sessions,
+                appender,
+                persistencePolicy,
+                sessions);
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                appender,
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                liveBus,
+                persistencePolicy,
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                new FakeRunSessionScopeRepository(),
+                null,
+                null,
+                titleWatchService);
+
+        Run run = service.startRun(
+                new SessionId("ses_1234567890abcdef"),
+                "run the tests",
+                "trace_1234567890abcdef");
+
+        assertThat(remoteEvents.tryEmitNext(new RunEventDraft(
+                run.runId(),
+                RunEventType.SESSION_UPDATED,
+                run.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "session.updated",
+                        "sessionID", REMOTE_SESSION_ID,
+                        "info", Map.of("title", "AI 生成的会话标题")))))
+                .isEqualTo(Sinks.EmitResult.OK);
+        // 等标题事件完成路由和 CAS，确保后续事件进入过滤器时 token 已经是 CLOSED。
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.SESSION_UPDATED);
+        assertThat(sessions.current.title()).isEqualTo("AI 生成的会话标题");
+
+        assertThat(remoteEvents.tryEmitNext(new RunEventDraft(
+                run.runId(),
+                RunEventType.MESSAGE_UPDATED,
+                run.traceId(),
+                Instant.now(),
+                Map.of(
+                        "rawType", "message.updated",
+                        "sessionID", REMOTE_SESSION_ID,
+                        "message", Map.of("id", "msg_after_title", "role", "assistant")))))
+                .isEqualTo(Sinks.EmitResult.OK);
+        assertThat(remoteEvents.tryEmitNext(new RunEventDraft(
+                run.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                run.traceId(),
+                Instant.now(),
+                Map.of("rawType", "session.idle", "sessionID", REMOTE_SESSION_ID))))
+                .isEqualTo(Sinks.EmitResult.OK);
+
+        awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        awaitLiveEvents(liveBus, 1);
+        assertThat(liveBus.transientPayloads).extracting(RunEventSsePayload::type)
+                .containsExactly("message.updated");
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(
+                        RunEventType.RUN_CREATED,
+                        RunEventType.RUN_STARTED,
+                        RunEventType.SESSION_UPDATED,
+                        RunEventType.RUN_SUCCEEDED);
     }
 
     @Test
@@ -2957,7 +3050,9 @@ class RunApplicationServiceTest {
         }
     }
 
-    private static final class FakeSessionRepository implements com.icbc.testagent.domain.session.SessionRepository {
+    private static final class FakeSessionRepository implements
+            com.icbc.testagent.domain.session.SessionRepository,
+            com.icbc.testagent.domain.session.SessionTitleUpdateRepository {
         private Session current;
         private boolean failTitleUpdate;
         private String remoteSessionIdOverride;
@@ -3009,6 +3104,20 @@ class RunApplicationServiceTest {
                     updatedAt,
                     traceId);
             return Optional.of(current);
+        }
+
+        @Override
+        public boolean updateTitleIfCurrent(
+                SessionId sessionId,
+                String expectedTitle,
+                String title,
+                Instant updatedAt,
+                String traceId) {
+            if (!current.sessionId().equals(sessionId) || !current.title().equals(expectedTitle)) {
+                return false;
+            }
+            current = current.updateTitleAndPinned(title, current.pinned(), updatedAt, traceId);
+            return true;
         }
     }
 

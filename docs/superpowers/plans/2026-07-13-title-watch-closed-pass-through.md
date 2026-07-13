@@ -28,13 +28,13 @@
 - Consumes: `RunSessionTitleWatchRegistry.TitleWatchToken.state()` 和现有 `RunEventDraft` 流。
 - Produces: `acceptsTitleWatchEvent` 对 `ACTIVE/CLOSED` 全量放行、对 `TITLE_WAIT/TITLE_READING` 保持既有白名单。
 
-- [ ] **Step 1: 写出失败回归测试**
+- [x] **Step 1: 写出失败回归测试**
 
   在 `RunApplicationServiceTest` 构造按时间顺序到达的事件流：有效标题 `session.updated`、延迟的
   `message.updated`、延迟的 `run.succeeded`。断言标题已同步、message 已进入 `RecordingRunEventLiveBus`、
   Run 最终为 `SUCCEEDED`。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
   Run:
 
@@ -47,7 +47,10 @@
 
   Expected: FAIL，旧实现关闭标题 token 后过滤延迟的 message 与终态。
 
-- [ ] **Step 3: 写最小实现**
+  实际验证：主线既有 process 测试源码导致 Maven 全量 `testCompile` 失败；直接编译目标测试并运行
+  Surefire 后，旧实现稳定复现 Run 保持 `RUNNING`。
+
+- [x] **Step 3: 写最小实现**
 
   将全量放行条件改为：
 
@@ -59,13 +62,13 @@
   }
   ```
 
-- [ ] **Step 4: 运行目标测试并确认 GREEN**
+- [x] **Step 4: 运行目标测试并确认 GREEN**
 
   Run: 与步骤 2 相同。
 
   Expected: PASS。
 
-- [ ] **Step 5: 同步文档并执行回归**
+- [x] **Step 5: 同步文档并执行回归**
 
   Run:
 
@@ -79,11 +82,13 @@
 
   Expected: 测试和主代码构建均成功。
 
-- [ ] **Step 6: 复核并提交**
+  实际验证：直接编译并运行 `RunApplicationServiceTest`、`RunSessionTitleWatchRegistryTest` 共 62 项通过，
+  `-Dmaven.test.skip=true package` 成功；完整 test lifecycle 的既有 11 个 process 测试编译错误保持原状。
+
+- [x] **Step 6: 复核并提交**
 
   只暂存本计划列出的文件和设计/计划文档，执行 `git diff --check`，提交中文信息：
 
   ```bash
   git commit -m "修复标题同步后事件流被过滤"
   ```
-

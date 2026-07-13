@@ -2929,11 +2929,13 @@ public class RunApplicationService {
                 });
     }
 
-    /** TITLE_WAIT 只放行同一 root session 的 session.updated 或精确匹配的 title agent 完成消息。 */
+    /** 仅标题等待/读取态收窄事件；ACTIVE 或 CLOSED 都不得影响主 Run 事件流。 */
     private boolean acceptsTitleWatchEvent(
             RunSessionTitleWatchRegistry.TitleWatchToken token,
             RunEventDraft draft) {
-        if (token == null || token.state() == RunSessionTitleWatchRegistry.State.ACTIVE) {
+        if (token == null
+                || token.state() == RunSessionTitleWatchRegistry.State.ACTIVE
+                || token.state() == RunSessionTitleWatchRegistry.State.CLOSED) {
             return true;
         }
         if (draft.type() == RunEventType.SESSION_UPDATED) {

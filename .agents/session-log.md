@@ -24,17 +24,19 @@
 - Result:
   - 前端全量 Vitest 54 文件通过，753 passed/1 skipped；agent-web typecheck、生产 build、桌面/移动目标 E2E 4/4 通过。按 `.env.test` / `test` profile 重启三服务成功，backend readiness 为 UP、frontend 3000 返回 200、manager WebSocket 正常；真实三服务 E2E 的 Session+PTY 与宠物旁路 fork 2/2 通过（其余 13 项按套件条件跳过），临时 OpenCode 4096 进程已自动清理。构建仍保留仓库既有 CSS `@import` 顺序和大 chunk 警告。
 ### 2026-07-13 - 定位首轮标题同步后 RunEvent 被错误过滤
+### 2026-07-13 - 定位并修复首轮标题同步后 RunEvent 被错误过滤
 
 - Why:
   - 当前最后一个 Run 在 21:33:05 后原始输出和对话正文停止刷新，但浏览器 SSE 与 Java 到 OpenCode 的事件订阅均未断开；重新进入会话时又会从远端快照一次性补出后续消息。
 - What:
   - 根因位于首轮原生标题监听状态机：`session.updated` 成功同步平台标题后将 `TitleWatchToken` 从 `ACTIVE` 关闭为 `CLOSED`，而 `acceptsTitleWatchEvent` 只对 `ACTIVE` 全量放行，错误地把 `CLOSED` 也按 `TITLE_WAIT` 过滤，只允许 root `session.updated` 和标题 Agent 完成消息继续通过。
-  - 本次只完成日志、附件、远端 OpenCode 消息快照和代码链路分析，未修改业务代码；问题早于 `68b8b4bd9` 的 question 回复状态收敛修复，相关过滤逻辑由 `031efccfe` 引入。
+  - 最小修复将 `CLOSED` 与 `ACTIVE` 一并恢复为主 Run 事件全量放行，仅 `TITLE_WAIT/TITLE_READING` 保留标题事件白名单；问题早于 `68b8b4bd9` 的 question 回复状态收敛修复，相关过滤逻辑由 `031efccfe` 引入。
 - How:
   - 对齐 Run `run_c5b79573b05c44e9915250d54b8afd61` 的事件时间线：最后一批 message transient 在 21:33:05.548 发布，紧接着 seq=15 的 `session.updated` 带 `platformSessionTitleSynchronized=true`；此后仍有 seq=16/17/18 的 `session.updated`，但 OpenCode 权威快照中同期新增的三个 assistant 消息、parts 和 `question` 工具均未进入平台事件处理。
   - 核对历史切换链路确认 `session-tree/messages` 会重新读取 OpenCode projected messages 并重建前端状态，因此表现为重新进入后大量补刷。
+  - 新增带真实标题监听服务和延迟事件流的 Run 级回归：修复前标题 CAS 后 Run 保持 `RUNNING`，修复后 `message.updated` 进入实时总线且 `session.idle` 正常收敛为 `SUCCEEDED`；标题监听与 Run 服务两组测试整类通过。
 - Result:
-  - 已确认不是浏览器 SSE 断线、代理缓冲、提问回复未收敛或 OpenCode 停止产出；直接修复点应让 `CLOSED` token 恢复主 Run 事件全量放行，并补充“标题同步成功后仍继续接收 message/part/question/terminal”的 Run 级回归测试。修复前，首轮会话在模型提前生成非默认标题时仍可能永久漏掉后续实时事件。
+  - 已确认并修复该问题，不涉及 HTTP API、RunEvent wire name、数据库、SDK 或前端兼容性变更；生产模块打包成功。主线完整 Maven test lifecycle 仍被既有 11 个无关 process 测试源码错误阻断，因此本次通过直接编译目标测试并运行 Surefire 完成回归，阻断点仍是 FakeRepository 缺少 `findReadyBackendJavaProcessByLinuxServer` 和旧 DTO 构造器参数不匹配。
 
 ### 2026-07-13 - 统一测试产物业务化命名并准备企业模型验收素材
 
