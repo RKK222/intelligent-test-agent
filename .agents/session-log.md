@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-13 - 重构公共测试设计三阶段与应用工作区归档规则
+
+- Why:
+  - 测试设计公共区虽然已有分析、生成、审查三段式编排，但方法选择仍混在第一阶段，且默认输出目录没有体现应用工作区的需求项/子条目层级。
+- What:
+  - 公共配置仓库 `.testagent/agent-opencode/.config` 将第一阶段收敛为对象分析识别，第二阶段负责方法选择、等价类/边界表、判定表、路径/状态图、场景链路等中间产物及案例生成，第三阶段独立审查。
+  - 新增 `workspace-layout.md` 和 `method-artifacts.md`；统一应用工作区为 `I...-需求项/{01-需求,02-设计,03-编码,04-测试}/S...-子条目/`，设计产物写 `041-测试设计`，执行产物写 `042-测试执行`。
+- How:
+  - 复用现有 test-design 公共 skill、方法型 skills、Task result 交接和测试执行链路，只调整职责、模板、路径解析和质量门禁；缺少合法需求项/子条目上下文时返回 `INCOMPLETE`，不回退到工作区根目录。
+- Result:
+  - 公共配置 diff 校验通过；按项目 test profile 重启脚本完成，backend liveness/readiness、frontend 3000、登录 CORS 预检和 manager WebSocket 均正常。未涉及 API、事件、数据库、环境文件或 generated SDK。
+
 ### 2026-07-13 - 宠物就绪时直接进入旁路提问
 
 - Why:
