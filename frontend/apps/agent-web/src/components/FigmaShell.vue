@@ -39,6 +39,8 @@ const props = withDefaults(
     currentUserRoleLabels?: string[];
     opencodeProcessStatus?: UserOpencodeProcess | null;
     opencodeProcessLoading?: boolean;
+    opencodeProcessInitializing?: boolean;
+    showProcessStatusInPet?: boolean;
     sideQuestionAnswer?: string | null;
     sideQuestionError?: string | null;
     sideQuestionLoading?: boolean;
@@ -56,6 +58,7 @@ const props = withDefaults(
     ],
     joinableApps: () => [],
     selectedAppId: "fgcms-psn",
+    showProcessStatusInPet: false,
     showLeftPanel: true,
     showRightPanel: true
   }
@@ -92,6 +95,7 @@ const emit = defineEmits<{
   (e: "select-app", appId: string): void;
   (e: "logout"): void;
   (e: "refresh-opencode-process"): void;
+  (e: "initialize-process"): void;
   (e: "join-app", appId: string, callback: (success: boolean) => void): void;
   (e: "robot-side-question", question: string): void;
   (e: "close-robot-side-question"): void;
@@ -140,6 +144,7 @@ function closeHeaderMenus() {
   closeRuntimeInventory();
   // 等待旁路答案时，工作台其它区域仍可正常操作，且不会误关掉结果承载浮层。
   if (!props.sideQuestionLoading) closeRobotQuestion();
+  robotProcessStatusOpen.value = false;
 }
 
 function logout() {
@@ -244,6 +249,79 @@ const opencodeServiceDisplay = computed(() => {
   return { tone: "unassigned", text: "待分配专属进程" };
 });
 
+type RobotProcessTone = "ready" | "needs-initialization" | "checking" | "error";
+
+// 只有工作台显式开启时，宠物点击才承载进程状态；独立 Shell 继续保留旁路问答行为。
+const processStatusInteractionEnabled = computed(() => props.showProcessStatusInPet === true);
+const robotProcessTone = computed<RobotProcessTone>(() => {
+  if (!processStatusInteractionEnabled.value) return "ready";
+  if (props.opencodeProcessLoading && !props.opencodeProcessStatus) return "checking";
+  if (props.opencodeProcessStatus?.status === "READY") return "ready";
+  if (props.opencodeProcessStatus?.status === "NEEDS_INITIALIZATION") return "needs-initialization";
+  return "error";
+});
+
+function effectiveOpencodeServiceStatus(process?: UserOpencodeProcess | null) {
+  if (process?.serviceStatus) return process.serviceStatus;
+  if (process?.status === "READY") return "RUNNING";
+  return opencodeServiceTarget(process) ? "NOT_RUNNING" : "UNASSIGNED";
+}
+
+const robotProcessStatusTitle = computed(() => {
+  if (props.opencodeProcessLoading && !props.opencodeProcessStatus) return "正在检查 TestAgent 进程";
+  if (!props.opencodeProcessStatus) return "TestAgent 进程状态未知";
+  if (props.opencodeProcessStatus.status === "READY") return "TestAgent 进程可用";
+  if (props.opencodeProcessStatus.status === "NEEDS_INITIALIZATION") {
+    const serviceStatus = effectiveOpencodeServiceStatus(props.opencodeProcessStatus);
+    if (serviceStatus === "NOT_RUNNING") return "TestAgent 专属进程未运行";
+    if (serviceStatus === "UNASSIGNED") return "尚未分配 TestAgent 专属进程";
+    return "需要初始化 TestAgent 进程";
+  }
+  return "TestAgent 进程不可用";
+});
+
+const robotProcessStatusText = computed(() => {
+  if (props.opencodeProcessInitializing) return "我正在帮你准备进程，请稍等一下。";
+  if (props.opencodeProcessLoading && !props.opencodeProcessStatus) return "我正在看看当前用户可用的进程。";
+  if (!props.opencodeProcessStatus) return "请刷新进程状态后重试。";
+  if (props.opencodeProcessStatus.status === "NEEDS_INITIALIZATION") {
+    const serviceStatus = effectiveOpencodeServiceStatus(props.opencodeProcessStatus);
+    if (serviceStatus === "NOT_RUNNING") return "这个专属进程已经分配，但现在还没有运行。";
+    if (serviceStatus === "UNASSIGNED") return "还没有准备好专属进程。";
+  }
+  return opencodeServiceTarget(props.opencodeProcessStatus) || props.opencodeProcessStatus.message;
+});
+
+const robotProcessPrompt = computed(() => {
+  if (props.opencodeProcessInitializing) return "我已经开始准备了，完成后就可以继续对话。";
+  if (props.opencodeProcessStatus?.status === "NEEDS_INITIALIZATION") {
+    return "我还没有准备好运行进程，要现在帮你初始化吗？";
+  }
+  if (robotProcessTone.value === "checking") return "让我先看一下现在的进程状态。";
+  if (robotProcessTone.value === "ready") return "现在可以开始对话了。";
+  return "当前进程还不可用，我们一起检查一下吧。";
+});
+
+const robotProcessInitButtonLabel = computed(() => {
+  if (props.opencodeProcessInitializing) return "初始化中";
+  return effectiveOpencodeServiceStatus(props.opencodeProcessStatus) === "NOT_RUNNING" ? "启动进程" : "初始化进程";
+});
+
+const robotProcessCardStyle = computed<CSSProperties>(() => {
+  const width = 304;
+  const gap = 14;
+  const preferredLeft = robotX.value + ROBOT_WIDTH + gap;
+  const left = preferredLeft + width <= window.innerWidth - 12
+    ? preferredLeft
+    : robotX.value - width - gap;
+  const maxLeft = Math.max(12, window.innerWidth - width - 12);
+  const top = Math.min(Math.max(12, robotY.value - 12), Math.max(12, window.innerHeight - 220));
+  return {
+    left: `${Math.min(Math.max(12, left), maxLeft)}px`,
+    top: `${top}px`,
+  };
+});
+
 function onAppMenuBlur(event: FocusEvent) {
   const next = event.relatedTarget as Node | null;
   if (next && (event.currentTarget as Node).contains(next)) return;
@@ -317,6 +395,8 @@ const robotState = ref<RobotState>("sleeping");
 const robotX = ref(0);
 const robotY = ref(0);
 const robotQuestionOpen = ref(false);
+// 进程状态气泡与宠物共用坐标，不再单独维护可拖动的状态点位置。
+const robotProcessStatusOpen = ref(false);
 const robotQuestionDraft = ref("");
 const robotQuestionInput = ref<HTMLTextAreaElement | null>(null);
 const robotDirection = ref<"left" | "right" | "front">("front");
@@ -1160,6 +1240,20 @@ function closeRobotQuestion() {
   emit("close-robot-side-question");
 }
 
+function toggleRobotProcessStatus() {
+  robotProcessStatusOpen.value = !robotProcessStatusOpen.value;
+  if (robotProcessStatusOpen.value) {
+    robotQuestionOpen.value = false;
+    robotQuestionDraft.value = "";
+  }
+}
+
+function openRobotSideQuestionFromProcess() {
+  robotProcessStatusOpen.value = false;
+  robotQuestionOpen.value = true;
+  void nextTick(() => robotQuestionInput.value?.focus());
+}
+
 let clickTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onRobotClick() {
@@ -1176,8 +1270,12 @@ function onRobotClick() {
   } else {
     clickTimer = setTimeout(() => {
       clickTimer = null;
-      robotQuestionOpen.value = true;
-      void nextTick(() => robotQuestionInput.value?.focus());
+      if (processStatusInteractionEnabled.value) {
+        toggleRobotProcessStatus();
+      } else {
+        robotQuestionOpen.value = true;
+        void nextTick(() => robotQuestionInput.value?.focus());
+      }
     }, 250);
   }
 }
@@ -1203,6 +1301,7 @@ function toggleRobotVisibility() {
     robotState.value = "sleeping";
     robotKeepVisible.value = false;
     closeRobotQuestion();
+    robotProcessStatusOpen.value = false;
     resetInactivityTimer();
     return;
   }
@@ -1713,7 +1812,61 @@ function submitJoinApp() {
           </svg>
         </div>
       </div>
+      <span
+        class="robot-process-heart"
+        :class="`is-${robotProcessTone}`"
+        :title="robotProcessStatusTitle"
+        aria-hidden="true"
+        data-testid="robot-process-heart"
+      >♥</span>
     </div>
+    <section
+      v-if="robotProcessStatusOpen && robotState !== 'sleeping' && processStatusInteractionEnabled"
+      class="figma-robot-process-status"
+      :class="`is-${robotProcessTone}`"
+      data-testid="robot-process-status"
+      :style="robotProcessCardStyle"
+      role="dialog"
+      aria-labelledby="figma-robot-process-status-title"
+      @pointerdown.stop
+      @click.stop
+    >
+      <header class="figma-robot-process-header">
+        <div class="figma-robot-process-speaker">
+          <span class="figma-robot-process-avatar" aria-hidden="true">♥</span>
+          <div>
+            <strong id="figma-robot-process-status-title">小宠物</strong>
+            <span>TestAgent 进程</span>
+          </div>
+        </div>
+        <button type="button" aria-label="关闭宠物进程状态" @click="robotProcessStatusOpen = false">×</button>
+      </header>
+      <p class="figma-robot-process-prompt">{{ robotProcessPrompt }}</p>
+      <div class="figma-robot-process-detail">
+        <span class="figma-robot-process-status-dot" aria-hidden="true"></span>
+        <div>
+          <strong>{{ robotProcessStatusTitle }}</strong>
+          <span>{{ robotProcessStatusText }}</span>
+        </div>
+      </div>
+      <button
+        v-if="opencodeProcessStatus?.status === 'NEEDS_INITIALIZATION' && opencodeProcessStatus.initializable"
+        type="button"
+        class="figma-robot-process-init"
+        :disabled="Boolean(opencodeProcessInitializing || opencodeProcessLoading)"
+        @click="emit('initialize-process')"
+      >
+        {{ robotProcessInitButtonLabel }}
+      </button>
+      <button
+        type="button"
+        class="figma-robot-process-question"
+        data-testid="robot-side-question-open-from-process"
+        @click="openRobotSideQuestionFromProcess"
+      >
+        问问宠物当前任务
+      </button>
+    </section>
     <section
       v-if="robotQuestionOpen && robotState !== 'sleeping'"
       class="figma-robot-side-question"
@@ -2988,6 +3141,255 @@ function submitJoinApp() {
   cursor: grab;
   transform: translate3d(0, 0, 0);
   opacity: 0.85;
+}
+
+/* 心形是宠物本体的进程指示，不再额外渲染一个可拖动的绿点。 */
+.robot-process-heart {
+  position: absolute;
+  left: 50%;
+  top: 18px;
+  transform: translateX(-50%);
+  z-index: 1;
+  pointer-events: none;
+  font-family: Arial, sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 0 4px currentColor;
+}
+
+.robot-process-heart.is-ready {
+  color: #42d7a4;
+}
+
+.robot-process-heart.is-needs-initialization,
+.robot-process-heart.is-error {
+  color: #f06b63;
+}
+
+.robot-process-heart.is-checking {
+  color: #a8b0ba;
+}
+
+.figma-robot-process-status {
+  position: fixed;
+  width: 304px;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid #dfe4ea;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.97);
+  color: #27384b;
+  box-shadow: 0 14px 32px rgba(39, 56, 75, 0.16), 0 2px 8px rgba(39, 56, 75, 0.08);
+  z-index: 10002;
+  user-select: text;
+  touch-action: auto;
+}
+
+.figma-robot-process-status::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 20px;
+  width: 13px;
+  height: 13px;
+  border-left: 1px solid #dfe4ea;
+  border-bottom: 1px solid #dfe4ea;
+  background: #fff;
+  transform: rotate(45deg);
+}
+
+.figma-robot-process-status.is-needs-initialization,
+.figma-robot-process-status.is-error {
+  border-color: rgba(240, 107, 99, 0.44);
+}
+
+.figma-robot-process-status.is-checking {
+  border-color: rgba(168, 176, 186, 0.55);
+}
+
+.figma-robot-process-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.figma-robot-process-speaker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.figma-robot-process-speaker > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.figma-robot-process-speaker strong {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 650;
+}
+
+.figma-robot-process-speaker span:not(.figma-robot-process-avatar) {
+  color: #8a95a2;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.figma-robot-process-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 9px;
+  background: #edf8f4;
+  color: #31bc8d;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.figma-robot-process-header > button {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #9aa3ad;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 20px;
+}
+
+.figma-robot-process-header > button:hover,
+.figma-robot-process-header > button:focus-visible {
+  background: #f1f4f6;
+  color: #4a5663;
+  outline: none;
+}
+
+.figma-robot-process-prompt {
+  position: relative;
+  z-index: 1;
+  margin: 10px 0;
+  padding: 9px 10px;
+  border-radius: 10px 10px 10px 3px;
+  background: #f4f7f9;
+  color: #3d4c5a;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.figma-robot-process-detail {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid #edf0f2;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.figma-robot-process-detail > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.figma-robot-process-detail strong {
+  color: #344556;
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.figma-robot-process-detail span:not(.figma-robot-process-status-dot) {
+  overflow-wrap: anywhere;
+  color: #7e8994;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.figma-robot-process-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #42d7a4;
+  box-shadow: 0 0 0 4px rgba(66, 215, 164, 0.12);
+}
+
+.figma-robot-process-status.is-needs-initialization .figma-robot-process-status-dot,
+.figma-robot-process-status.is-error .figma-robot-process-status-dot {
+  background: #f06b63;
+  box-shadow: 0 0 0 4px rgba(240, 107, 99, 0.12);
+}
+
+.figma-robot-process-status.is-checking .figma-robot-process-status-dot {
+  background: #a8b0ba;
+  box-shadow: 0 0 0 4px rgba(168, 176, 186, 0.14);
+}
+
+.figma-robot-process-init {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #27384b;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 18px;
+  transition: background-color 0.14s ease, opacity 0.14s ease;
+}
+
+.figma-robot-process-init:hover:not(:disabled),
+.figma-robot-process-init:focus-visible:not(:disabled) {
+  background: #1e2d3d;
+  outline: none;
+}
+
+.figma-robot-process-init:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.figma-robot-process-question {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: #7c6bb5;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.figma-robot-process-question:hover,
+.figma-robot-process-question:focus-visible {
+  color: #5e4e9b;
+  text-decoration: underline;
+  outline: none;
 }
 
 .robot-pin-indicator {

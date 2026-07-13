@@ -534,6 +534,63 @@ describe("FigmaShell", () => {
     expect(wrapper.get(".figma-user-menu-service-text").text()).toBe("未运行(server-a / 192.168.100.171:82)");
   });
 
+  it("opens the current process status from the pet and keeps the ready heart green", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell({
+      props: {
+        opencodeProcessStatus: {
+          status: "READY",
+          initializable: false,
+          message: "TestAgent 进程已就绪",
+          serviceStatus: "RUNNING",
+          serviceAddress: "127.0.0.1:4096"
+        },
+        opencodeProcessLoading: false,
+        showProcessStatusInPet: true
+      }
+    });
+
+    await summonRobot(wrapper);
+    expect(wrapper.get('[data-testid="robot-process-heart"]').classes()).toContain("is-ready");
+
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('[data-testid="robot-process-status"]').text()).toContain("TestAgent 进程可用");
+    expect(wrapper.get('[data-testid="robot-process-status"]').text()).toContain("小宠物");
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
+  });
+
+  it("turns the pet heart red before initialization and asks whether to initialize", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell({
+      props: {
+        opencodeProcessStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          message: "TestAgent 进程不可用，需要重新初始化",
+          serviceStatus: "UNASSIGNED"
+        },
+        opencodeProcessLoading: false,
+        opencodeProcessInitializing: false,
+        showProcessStatusInPet: true
+      }
+    });
+
+    await summonRobot(wrapper);
+    expect(wrapper.get('[data-testid="robot-process-heart"]').classes()).toContain("is-needs-initialization");
+
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+
+    const card = wrapper.get('[data-testid="robot-process-status"]');
+    expect(card.text()).toContain("要现在帮你初始化吗");
+    await card.get(".figma-robot-process-init").trigger("click");
+    expect(wrapper.emitted("initialize-process")).toEqual([[]]);
+  });
+
   it("shows server name without inventing an address when service address is missing", async () => {
     const wrapper = mountShell({
       props: {

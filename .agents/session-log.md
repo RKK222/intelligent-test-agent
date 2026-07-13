@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 将 TestAgent 进程状态并入小宠物交互
+
+- Why:
+  - 用户希望宠物本体直接表达 opencode/TestAgent 进程状态，点击宠物从宠物旁弹出状态框；未初始化时使用红心，并由宠物发起初始化询问，取消聊天区独立绿点的可拖动入口。
+- What:
+  - `FigmaShell` 新增进程心形状态和不可拖动的进程状态对话气泡，复用现有 `UserOpencodeProcess`、初始化事件和启动操作；未初始化时展示“要现在帮你初始化吗？”及初始化按钮。工作台显式开启宠物进程承载模式，`FigmaChatPanel` 只保留 ready 发送拦截并隐藏旧状态点/卡片；气泡保留入口打开原宠物旁路问答。同步 agent-web README、包说明和 FigmaShell/FigmaChatPanel 回归测试。
+- How:
+  - 未新增 API、RunEvent、数据库或环境配置；使用 `showProcessStatusInPet` 避免 Vue Boolean prop 默认值影响独立 Shell 的原旁路问答测试，初始化继续由 `AgentWorkbench.beginInitializeOpencodeProcess()` 统一编排。
+- Result:
+  - 定向 Vitest 138 passed、1 skipped；workspace typecheck、lint、agent-web build 和 `git diff --check` 通过。按 `.env.test` / `test` profile 重启三服务，backend liveness/readiness、frontend 3000、CORS 和 manager WebSocket 均正常。浏览器标签因重启后登录态回到 `/login`，未代用户提交页面中的密码，真实页面交互人工验收受登录态限制。
+
 ### 2026-07-13 - 修复历史消息首屏被 manager 健康检查阻塞
 
 - Why:

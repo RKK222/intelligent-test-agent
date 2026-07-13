@@ -681,6 +681,8 @@ const props =
     stopDisabledReason?: string
     /** 当前用户 opencode 进程状态，控制是否允许发起对话 */
     processStatus?: OpencodeProcessState | null
+    /** 进程状态承载位置；工作台宠物模式下隐藏聊天区的旧状态点/卡片，但保留发送拦截。 */
+    processStatusPlacement?: 'chat' | 'pet'
     processRequired?: boolean
     processLoading?: boolean
     /** 已有状态下的后台健康探测中；不阻塞输入，但要阻止提交旧状态。 */
@@ -725,6 +727,7 @@ const props =
     subagentByTaskPartId?: Record<string, string>
   }>(), {
     processRefreshBlocksSubmit: true,
+    processStatusPlacement: 'chat',
     commands: () => [],
     agents: () => [],
     rawOutputEntries: () => [],
@@ -1902,7 +1905,8 @@ const sendSubmitBlocked = computed(
 )
 const processStatusVisible = computed(
   () =>
-    props.processRequired || props.processLoading || props.processStatus != null
+    props.processStatusPlacement !== 'pet' &&
+    (props.processRequired || props.processLoading || props.processStatus != null)
 )
 // 有效 serviceStatus：优先用后端返回值，缺失时按头像菜单同样规则回退推断
 // （READY→RUNNING；否则有地址→NOT_RUNNING；无地址→UNASSIGNED），保证两处展示一致
@@ -2448,6 +2452,7 @@ function handleProcessStatusCardClick() {
 }
 
 onMounted(() => {
+  if (props.processStatusPlacement === 'pet') return
   loadProcessDotPos()
   window.addEventListener('resize', onProcessStatusDotResize)
   if (processStatusCardVisible.value) {

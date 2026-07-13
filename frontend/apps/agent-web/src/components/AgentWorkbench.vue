@@ -4611,6 +4611,8 @@ async function handleLogout() {
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
+    :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
+    show-process-status-in-pet
     :side-question-answer="robotSideQuestion.answer.value"
     :side-question-error="robotSideQuestion.error.value"
     :side-question-loading="robotSideQuestion.loading.value"
@@ -4620,6 +4622,7 @@ async function handleLogout() {
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
     @refresh-opencode-process="refreshOpencodeProcessStatus"
+    @initialize-process="beginInitializeOpencodeProcess"
     @logout="handleLogout"
     @join-app="handleJoinApp"
     @robot-side-question="handleRobotSideQuestion"
@@ -4848,6 +4851,7 @@ async function handleLogout() {
           :history-question-count="sessionRuntimeState?.questionCount ?? 0"
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
+          process-status-placement="pet"
           process-required
           :process-loading="opencodeProcessInitialLoading"
           :process-refreshing="opencodeProcessRefreshing"

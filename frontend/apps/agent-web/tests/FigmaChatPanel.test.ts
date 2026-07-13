@@ -82,6 +82,26 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find('[data-testid="chat-activity-panel"]').exists()).toBe(false);
   });
 
+  it("hides the chat process dot and card when the pet owns process status", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processStatusPlacement: "pet",
+        processStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          message: "需要初始化"
+        }
+      } as any
+    });
+
+    await nextTick();
+
+    expect(wrapper.find(".figma-chat-process-status").exists()).toBe(false);
+    expect(wrapper.find(".figma-chat-process-status-dot").exists()).toBe(false);
+  });
+
   it("keeps a READY card inline without a saved drag and only uses floating mode after a drag", async () => {
     window.localStorage.removeItem("figma-chat-process-dot-pos");
     const wrapper = mount(FigmaChatPanel, {
