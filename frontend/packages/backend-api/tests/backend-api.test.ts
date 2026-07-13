@@ -1841,6 +1841,66 @@ describe("backend-api", () => {
     });
   });
 
+  it("reads and renames workspace files through the same target backend websocket", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              workspaceId: "wrk_1234567890abcdef",
+              linuxServerId: "10.8.0.12",
+              baseUrl: "http://10.8.0.12:8080",
+              webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+              sameServer: true
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              ticket: "wft_1234567890abcdef",
+              expiresAt: "2026-06-26T10:00:00Z",
+              webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_1234567890abcdef"
+            }
+          }),
+          { status: 200 }
+        )
+      );
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: fakeWorkspaceWebSocketFactory(sockets)
+    });
+
+    await expect(client.readFile("wrk_1234567890abcdef", "docs/design.md")).resolves.toMatchObject({
+      path: "docs/design.md",
+      content: "# 设计"
+    });
+    await client.renameWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "详细设计.md");
+
+    expect(sockets[0]?.sentMessages).toEqual([
+      expect.objectContaining({
+        op: "workspace.read",
+        params: { workspaceId: "wrk_1234567890abcdef", path: "docs/design.md" }
+      }),
+      expect.objectContaining({
+        op: "workspace.rename",
+        params: { workspaceId: "wrk_1234567890abcdef", path: "docs/design.md", name: "详细设计.md" }
+      })
+    ]);
+  });
+
   it("routes public agent config files through target backend websocket", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -2275,12 +2335,18 @@ class FakeWorkspaceWebSocket {
                     }
                   ]
                 : message.op === "agent-config.read"
-                  ? {
+              ? {
                       path: "review.md",
                       content: "agent content",
                       size: 13
                     }
-              : null
+                  : message.op === "workspace.read"
+                    ? {
+                        path: "docs/design.md",
+                        content: "# 设计",
+                        size: 8
+                      }
+                  : null
         })
       });
     });

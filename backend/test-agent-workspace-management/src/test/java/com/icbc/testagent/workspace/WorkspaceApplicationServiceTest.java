@@ -95,6 +95,23 @@ class WorkspaceApplicationServiceTest {
     }
 
     @Test
+    void serviceRenamesWorkspaceFileThroughRegisteredWorkspaceRoot() throws Exception {
+        FakeWorkspaceRepository repository = new FakeWorkspaceRepository();
+        Workspace workspace = repository.save(new Workspace(
+                new WorkspaceId("wrk_1234567890abcdef"),
+                "Demo",
+                root.toString(),
+                java.time.Instant.parse("2026-06-20T00:00:00Z")));
+        WorkspaceApplicationService service = new WorkspaceApplicationService(repository, new WorkspaceFileService());
+
+        service.writeFile(workspace.workspaceId(), "notes/todo.md", "# 内容");
+        service.renameFile(workspace.workspaceId(), "notes/todo.md", "design.md");
+
+        assertThat(service.readFile(workspace.workspaceId(), "notes/design.md").content()).isEqualTo("# 内容");
+        assertThat(service.fileStatus(workspace.workspaceId(), "notes/todo.md").exists()).isFalse();
+    }
+
+    @Test
     void historicalWorkspaceBindingUsesMutationGateAcrossDatabaseSave() {
         FakeWorkspaceRepository repository = new FakeWorkspaceRepository();
         WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");

@@ -530,6 +530,7 @@ AI 回复满意度反馈接口 `/api/internal/platform/opencode-runtime/messages
 | `workspace.search` | `workspaceId`, `query` | `FileSearchResultResponse[]`；递归搜索文件名（不区分大小写子串匹配），跳过黑名单目录，结果按文件名排序并限制数量 |
 | `workspace.read` | `workspaceId`, `path` | `FileContentResponse` |
 | `workspace.write` | `workspaceId`, `path`, `content` | `null` |
+| `workspace.rename` | `workspaceId`, `path`, `name` | `null`；仅支持同一父目录内重命名普通文件，目标已存在返回 `CONFLICT` |
 | `workspace.status` | `workspaceId`, `path` | `FileStatusResponse` |
 | `workspace.delete` | `workspaceId`, `path` | `null`；仅删除普通文件，目录删除返回统一错误 |
 | `agent-config.list` | `scope`, `workspaceId?`, `worktreeId?`, `path?` | `FileTreeEntryResponse[]`；用于公共级/工作空间级 Agent 配置文件 |

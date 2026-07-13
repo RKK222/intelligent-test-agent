@@ -247,6 +247,14 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     }
 
     /**
+     * 在工作区同一父目录内重命名普通文件，文件名校验和路径安全由文件服务统一处理。
+     */
+    public void renameFile(WorkspaceId workspaceId, String path, String name) {
+        Workspace workspace = getWorkspace(workspaceId);
+        fileService.renameFile(workspace.rootPath(), path, name);
+    }
+
+    /**
      * 删除工作区内普通文件；目录删除当前不开放，避免 Web 入口误删目录树。
      */
     public void deleteFile(WorkspaceId workspaceId, String path) {

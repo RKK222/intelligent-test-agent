@@ -14,7 +14,7 @@ let mermaidLoadPromise: Promise<void> | null = null;
 </script>
 
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import type { MermaidEditableDiagram } from "./mermaid/diagram";
 // github-markdown-css 提供 .markdown-body 基础排版样式，侧载一次即可
 import "github-markdown-css/github-markdown.css";
@@ -46,6 +46,8 @@ const html = ref("");
 const scrollEl = ref<HTMLElement | null>(null);
 // 首次加载 markdown-it/dompurify 之前给一个轻量占位
 const loading = ref(true);
+const renderError = ref<string | null>(null);
+const displayContent = computed(() => (typeof props.content === "string" ? props.content : ""));
 // 是否已发出过 ready（仅首次渲染完成时发一次）
 let readyEmitted = false;
 
@@ -268,13 +270,21 @@ async function applyVisualEditor(diagram: MermaidEditableDiagram) {
 
 // 实际渲染：markdown-it 转 HTML 后用 DOMPurify 消毒，防御本地 file 中的脚本/恶意链接
 async function render() {
-  await ensureLibs();
-  const raw = mdInstance?.render(props.content ?? "") ?? "";
-  html.value = purifyInstance?.sanitize(raw) ?? "";
-  loading.value = false;
-  if (!readyEmitted) {
-    readyEmitted = true;
-    emit("ready");
+  try {
+    await ensureLibs();
+    const raw = mdInstance?.render(displayContent.value) ?? "";
+    html.value = purifyInstance?.sanitize(raw) ?? "";
+    renderError.value = null;
+  } catch (error) {
+    // 依赖懒加载或单段 Markdown 解析失败时仍展示原文，避免后端已有内容在预览区变成白板。
+    html.value = "";
+    renderError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    loading.value = false;
+    if (!readyEmitted) {
+      readyEmitted = true;
+      emit("ready");
+    }
   }
 }
 
@@ -368,7 +378,11 @@ defineExpose({ scrollToSourceLine });
     @scroll="onScroll"
   >
     <div v-if="loading" class="text-[12px] text-[var(--ta-muted)]">正在准备预览…</div>
-    <div v-else-if="!content.trim()" class="text-[12px] text-[var(--ta-muted)]">无内容</div>
+    <div v-else-if="!displayContent.trim()" class="text-[12px] text-[var(--ta-muted)]">无内容</div>
+    <div v-else-if="renderError" class="md-preview-fallback">
+      <div class="mb-2 text-[12px] text-[var(--ta-muted)]">Markdown 预览暂不可用，已显示原文。</div>
+      <pre>{{ displayContent }}</pre>
+    </div>
     <!-- 经 DOMPurify 消毒后的 HTML，可安全注入；.markdown-body 提供基础排版 -->
     <div v-else v-html="html" class="markdown-body min-w-0" />
     <MermaidEditorDialog
@@ -391,6 +405,21 @@ defineExpose({ scrollToSourceLine });
   font-family: inherit;
   font-size: 13px;
   line-height: 1.7;
+}
+
+.md-preview-fallback {
+  min-width: 0;
+  color: var(--ta-text);
+  font-family: var(--ta-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md-preview-fallback pre {
+  margin: 0;
+  white-space: inherit;
 }
 
 .markdown-body :deep(h1),

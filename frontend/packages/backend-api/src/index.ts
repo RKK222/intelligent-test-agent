@@ -635,11 +635,21 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       })) satisfies FileTreeEntry[];
     },
     readFile: async (workspaceId: string, path: string) => {
-      const data = await request<{ type: string; content: string }>(`${agentBase}/file/content${query({ workspaceId, path })}`);
-      return { path, content: data.content, encoding: "utf-8", readonly: false } satisfies FileContent;
+      // 工作区文件读取与列表、写入保持同一条平台 WebSocket 路由，避免旧 OpenCode
+      // HTTP 代理在跨服务器或响应格式变化时把真实 Markdown 内容丢在前端之外。
+      const data = await workspaceFileRpc<BackendFileContent>(workspaceId, "workspace.read", { path });
+      return {
+        path: data.path || path,
+        content: typeof data.content === "string" ? data.content : "",
+        encoding: "utf-8",
+        size: data.size,
+        readonly: false
+      } satisfies FileContent;
     },
     writeFile: (workspaceId: string, path: string, content: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.write", { path, content }),
+    renameWorkspaceFile: (workspaceId: string, path: string, name: string) =>
+      workspaceFileRpc<void>(workspaceId, "workspace.rename", { path, name }),
     fileStatus: async (workspaceId: string, path: string) => {
       const status = await workspaceFileRpc<BackendFileStatus>(workspaceId, "workspace.status", { path });
       return {

@@ -115,6 +115,13 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     workspaceService.writeFile(workspaceId(ticket, params), requiredText(params, "path"), text(params, "content"));
                     yield null;
                 }
+                case "workspace.rename" -> {
+                    workspaceService.renameFile(
+                            workspaceId(ticket, params),
+                            requiredText(params, "path"),
+                            requiredText(params, "name"));
+                    yield null;
+                }
                 case "workspace.status" -> workspaceService.fileStatus(workspaceId(ticket, params), requiredText(params, "path"));
                 case "workspace.delete" -> {
                     workspaceService.deleteFile(workspaceId(ticket, params), requiredText(params, "path"));

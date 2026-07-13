@@ -152,6 +152,20 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     tabs.value = tabs.value.map((item) => (item.path === path ? { ...item, content } : item));
   }
 
+  /**
+   * 更新工作区文件重命名后的 tab 路径和标题，保留当前内容与 dirty 状态。
+   */
+  function renameTab(path: string, nextPath: string, title: string) {
+    tabs.value = tabs.value.map((item) =>
+      item.path === path
+        ? { ...item, id: item.id.startsWith("file:") ? `file:${nextPath}` : item.id, path: nextPath, title }
+        : item
+    );
+    if (activePath.value === path) {
+      activePath.value = nextPath;
+    }
+  }
+
   function markTabSaved(path: string, content: string) {
     tabs.value = tabs.value.map((item) =>
       item.path === path ? { ...item, content, savedContent: content } : item
@@ -181,6 +195,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     openTab,
     closeTab,
     updateTabContent,
+    renameTab,
     markTabSaved,
     resetWorkspaceView
   };

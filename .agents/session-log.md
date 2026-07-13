@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-13 - 修复 Markdown 预览并支持工作区文件重命名
+
+- Why:
+  - 工作区文件接口已有 Markdown 内容，但前端仍走旧 HTTP 读取路径，导致返回内容未进入预览；同时文件树缺少文件重命名入口。
+- What:
+  - 工作区文件读取统一改为平台文件 WebSocket RPC，并增加 `workspace.rename`，只允许同一父目录内重命名普通文件，前端支持双击行内改名并同步文件树、打开标签和 Git diff。
+  - Markdown 解析失败时回退显示原文，并增加异步 Monaco 过期模型保护，避免快速切换文件后内容被旧请求覆盖。
+- How:
+  - 复用既有 `workspaceFileRpc`、文件安全边界和 workbench tab 状态；补充前后端单测、事件流/安全文档和包说明，未修改数据库、SSE、generated SDK 或环境配置。
+- Result:
+  - 前端相关 Vitest 4 个文件 72/72 通过，backend workspace-management 测试通过，后端全量主代码构建和三服务重启通过；readiness 为 UP、frontend 3000 返回 200。聚合测试仍受仓库既有 opencode-runtime/API 测试源码与 DTO 不匹配问题影响。
+
 ### 2026-07-13 - 应用历史 Phase A/B 测试设计替换包
 
 - Why:

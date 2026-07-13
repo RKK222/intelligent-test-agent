@@ -3031,6 +3031,37 @@ async function handleCreateEntry(directory: string, name: string, type: "file" |
   }
 }
 
+async function handleRenameEntry(path: string, name: string) {
+  if (!selectedWorkspace.value) {
+    return;
+  }
+  const workspaceId = selectedWorkspace.value.workspaceId;
+  const lastSepIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const parentDir = lastSepIndex >= 0 ? path.slice(0, lastSepIndex) : "";
+  const separator = path.includes("\\") ? "\\" : "/";
+  const nextPath = parentDir ? `${parentDir}${separator}${name}` : name;
+
+  try {
+    await api.renameWorkspaceFile(workspaceId, path, name);
+
+    // 先更新内存树和已打开 tab，用户无需等待整棵工作区重新加载即可继续编辑。
+    const currentEntries = entriesByDirectory.value[parentDir] ?? [];
+    entriesByDirectory.value = {
+      ...entriesByDirectory.value,
+      [parentDir]: currentEntries.map((entry) =>
+        entry.path === path ? { ...entry, path: nextPath, name } : entry
+      )
+    };
+    workbench.renameTab(path, nextPath, name);
+
+    // 重命名会改变 Git diff 路径；刷新变更面板但不重新读取刚刚已经打开的文件内容。
+    void refreshWorkspaceGitDiff();
+    feedback.value = { kind: "success", title: "文件已重命名", description: nextPath };
+  } catch (error) {
+    feedback.value = errorFeedback("重命名文件失败", error);
+  }
+}
+
 async function handleDeleteEntry(path: string, type: "file" | "directory") {
   if (!selectedWorkspace.value) {
     return;
@@ -4732,6 +4763,7 @@ async function handleLogout() {
           @search="handleFileSearch"
           @create-entry="handleCreateEntry"
           @delete-entry="handleDeleteEntry"
+          @rename-entry="handleRenameEntry"
           @cache-and-navigate="handleCacheAndNavigate"
         />
       </div>

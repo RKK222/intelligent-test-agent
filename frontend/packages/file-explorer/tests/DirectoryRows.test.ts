@@ -29,4 +29,25 @@ describe("DirectoryRows", () => {
 
     expect(view.emitted("deleteEntry")).toEqual([["README.md", "file"]]);
   });
+
+  it("double-clicks a file to edit its name and emits the renamed filename", async () => {
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [{ type: "file", path: "README.md", name: "README.md" }]
+        },
+        expandedDirectories: new Set<string>()
+      }
+    });
+
+    await fireEvent.dblClick(view.getByRole("button", { name: /README\.md/ }));
+    const input = view.getByRole("textbox", { name: "重命名文件" }) as HTMLInputElement;
+    expect(input.value).toBe("README.md");
+
+    await fireEvent.update(input, "详细设计.md");
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(view.emitted("renameEntry")).toEqual([["README.md", "详细设计.md"]]);
+  });
 });

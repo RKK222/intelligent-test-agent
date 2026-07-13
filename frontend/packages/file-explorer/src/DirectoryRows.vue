@@ -14,7 +14,7 @@ export type DirectoryRowsProps = {
 </script>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { Plane, Plus, Trash2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileIcon from "./FileIcon.vue";
@@ -26,6 +26,7 @@ const emit = defineEmits<{
   addFileContext: [path: string];
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
+  renameEntry: [path: string, name: string];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
 
@@ -45,6 +46,19 @@ const createDialogName = ref("");
 const createDialogError = ref("");
 const showDeleteDialog = ref(false);
 const deleteDialogEntry = ref<{ path: string; name: string; type: "file" | "directory" } | null>(null);
+const renamingPath = ref<string | null>(null);
+const renameName = ref("");
+const renameOriginalName = ref("");
+const renameError = ref("");
+const renameInput = ref<HTMLInputElement | null>(null);
+
+function focusRenameInput() {
+  // ref 位于递归 v-for 行内，Vue 运行时可能返回元素数组；这里统一取当前编辑行。
+  const candidate = renameInput.value as HTMLInputElement | HTMLInputElement[] | null;
+  const input = Array.isArray(candidate) ? candidate[0] : candidate;
+  input?.focus();
+  input?.select();
+}
 
 function openFileContextMenu(event: MouseEvent, entry: FileTreeEntry) {
   if (entry.type !== "file") {
@@ -126,6 +140,48 @@ function submitDeleteDialog() {
   emit("deleteEntry", deleteDialogEntry.value.path, deleteDialogEntry.value.type);
   closeDeleteDialog();
 }
+
+function startRename(entry: FileTreeEntry) {
+  if (entry.type !== "file") {
+    return;
+  }
+  renamingPath.value = entry.path;
+  renameName.value = entry.name;
+  renameOriginalName.value = entry.name;
+  renameError.value = "";
+  void nextTick(focusRenameInput);
+}
+
+function cancelRename() {
+  renamingPath.value = null;
+  renameName.value = "";
+  renameOriginalName.value = "";
+  renameError.value = "";
+}
+
+function submitRename() {
+  const path = renamingPath.value;
+  if (!path) {
+    return;
+  }
+  const name = renameName.value.trim();
+  if (!name) {
+    renameError.value = "请输入文件名";
+    void nextTick(focusRenameInput);
+    return;
+  }
+  if (name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+    renameError.value = "文件名不能包含路径分隔符";
+    void nextTick(focusRenameInput);
+    return;
+  }
+  if (name === renameOriginalName.value) {
+    cancelRename();
+    return;
+  }
+  emit("renameEntry", path, name);
+  cancelRename();
+}
 </script>
 
 <template>
@@ -140,6 +196,7 @@ function submitDeleteDialog() {
         :style="{ paddingLeft: depth * 16 + 6 + 'px' }"
         @click="onRowClick(entry)"
         @contextmenu="openFileContextMenu($event, entry)"
+        @dblclick.stop="startRename(entry)"
       >
         <span
           v-for="i in depth"
@@ -159,7 +216,19 @@ function submitDeleteDialog() {
           <span class="ta-file-tree-file-spacer" />
           <FileIcon :entry="entry" />
         </template>
-        <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+        <span v-if="renamingPath !== entry.path" class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+        <input
+          v-else
+          ref="renameInput"
+          v-model="renameName"
+          type="text"
+          class="ta-file-tree-rename-input min-w-0 flex-1"
+          aria-label="重命名文件"
+          @click.stop
+          @keydown.enter.stop.prevent="submitRename"
+          @keydown.esc.stop.prevent="cancelRename"
+          @blur="submitRename"
+        />
         <template v-if="entry.type === 'file' && changeStats?.[entry.path]">
           <span class="ta-file-tree-badge is-added">+{{ changeStats[entry.path].additions }}</span>
           <span class="ta-file-tree-badge is-deleted">-{{ changeStats[entry.path].deletions }}</span>
@@ -176,6 +245,7 @@ function submitDeleteDialog() {
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
+          v-if="entry.type === 'file'"
           type="button"
           class="ta-file-tree-delete-btn"
           title="删除"
@@ -195,6 +265,9 @@ function submitDeleteDialog() {
           <Plane class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
       </button>
+      <div v-if="renamingPath === entry.path && renameError" class="ta-file-tree-rename-error">
+        {{ renameError }}
+      </div>
       <DirectoryRows
         v-if="entry.type === 'directory' && expandedDirectories.has(entry.path)"
         :directory="entry.path"
@@ -209,6 +282,7 @@ function submitDeleteDialog() {
         @add-file-context="emit('addFileContext', $event)"
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
+        @rename-entry="(path, name) => emit('renameEntry', path, name)"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
       />
     </div>
@@ -473,5 +547,23 @@ function submitDeleteDialog() {
 .ta-file-tree-plane-btn:hover {
   background: var(--ta-hover, #f1f5f9);
   color: var(--ta-accent, #3366ff);
+}
+
+.ta-file-tree-rename-input {
+  min-width: 0;
+  height: 20px;
+  border: 1px solid var(--ta-accent, #3366ff);
+  border-radius: 2px;
+  background: var(--ta-tree-bg, #fff);
+  padding: 0 4px;
+  color: var(--ta-tree-text, #3b3b3b);
+  font: inherit;
+  outline: none;
+}
+
+.ta-file-tree-rename-error {
+  padding: 2px 8px 3px;
+  color: var(--ta-danger, #b91c1c);
+  font-size: 11px;
 }
 </style>

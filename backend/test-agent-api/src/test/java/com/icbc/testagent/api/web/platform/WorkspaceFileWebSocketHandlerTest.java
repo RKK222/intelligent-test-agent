@@ -103,6 +103,38 @@ class WorkspaceFileWebSocketHandlerTest {
         verify(agentConfigService, never()).readPublicAgentFile("review.md", "agw_other");
     }
 
+    @Test
+    void renamesWorkspaceFileThroughWebSocketTicket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(workspaceTicket("wrk_1234567890abcdef"));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                agentConfigService,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_rename","op":"workspace.rename","params":{"workspaceId":"wrk_1234567890abcdef","path":"docs/old.md","name":"new.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).anySatisfy(message -> {
+            assertThat(message).contains("\"id\":\"req_rename\"");
+            assertThat(message).contains("\"type\":\"result\"");
+        });
+        verify(workspaceService).renameFile(
+                new com.icbc.testagent.domain.workspace.WorkspaceId("wrk_1234567890abcdef"),
+                "docs/old.md",
+                "new.md");
+    }
+
     private static WorkspaceFileWebSocketHandler handler(
             WorkspaceFileSocketTicketService ticketService,
             AgentConfigApplicationService agentConfigService) {
@@ -129,6 +161,20 @@ class WorkspaceFileWebSocketHandlerTest {
                 "agent-config",
                 scope,
                 worktreeId,
+                TRACE_ID,
+                NOW.plusSeconds(60));
+    }
+
+    private static WorkspaceFileSocketTicket workspaceTicket(String workspaceId) {
+        return new WorkspaceFileSocketTicket(
+                "wft_workspace",
+                workspaceId,
+                "linux-1",
+                workspaceId,
+                false,
+                "workspace",
+                null,
+                null,
                 TRACE_ID,
                 NOW.plusSeconds(60));
     }

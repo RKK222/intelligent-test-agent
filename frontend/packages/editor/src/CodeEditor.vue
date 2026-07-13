@@ -80,6 +80,7 @@ let monacoLib: typeof monaco | null = null;
 let syncing = false;
 
 let containerResizeObserver: ResizeObserver | null = null;
+let ensureEditorSequence = 0;
 
 function layoutEditor() {
   if (editor.value && typeof editor.value.layout === "function") {
@@ -122,12 +123,17 @@ function buildModel(path: string, content: string): monaco.editor.ITextModel {
 }
 
 async function ensureMonacoEditor(path: string) {
+  const sequence = ++ensureEditorSequence;
   if (!containerEl.value || !containerEl.value.parentNode) {
     return;
   }
   if (!monacoLib) {
     const mod = await import("./monaco-env");
     monacoLib = await mod.loadMonaco();
+  }
+  // Monaco 按需加载期间可能连续切换文件；旧调用完成后不能覆盖当前文件模型。
+  if (sequence !== ensureEditorSequence || props.path !== path) {
+    return;
   }
   if (!monacoLib) {
     console.error("Failed to load Monaco Editor");
@@ -274,6 +280,7 @@ function onSashUp() {
 }
 
 onBeforeUnmount(() => {
+  ensureEditorSequence += 1;
   if (containerResizeObserver) {
     containerResizeObserver.disconnect();
     containerResizeObserver = null;

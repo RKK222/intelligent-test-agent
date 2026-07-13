@@ -3,6 +3,7 @@ package com.icbc.testagent.workspace;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -116,6 +117,61 @@ public class WorkspaceFileService {
             Files.writeString(target, content == null ? "" : content, StandardCharsets.UTF_8);
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "写入文件失败", Map.of("path", safePath(relativePath)), exception);
+        }
+    }
+
+    /**
+     * 在同一父目录内重命名普通文件；新名称只允许是单个文件名，避免借此接口移动文件或穿越工作区。
+     */
+    public void renameFile(String rootPath, String relativePath, String newName) {
+        String normalizedName = newName == null ? "" : newName.trim();
+        if (normalizedName.isBlank()
+                || ".".equals(normalizedName)
+                || "..".equals(normalizedName)
+                || normalizedName.contains("/")
+                || normalizedName.contains("\\")) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "文件名无效",
+                    Map.of("path", safePath(relativePath), "name", normalizedName));
+        }
+
+        Path source = resolveInsideRoot(rootPath, relativePath);
+        if (!Files.exists(source)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在", Map.of("path", safePath(relativePath)));
+        }
+        if (!Files.isRegularFile(source)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "仅支持重命名普通文件", Map.of("path", safePath(relativePath)));
+        }
+        if (normalizedName.equals(source.getFileName().toString())) {
+            return;
+        }
+
+        Path root = rootRealPath(rootPath);
+        Path target = source.resolveSibling(normalizedName).normalize();
+        if (!target.startsWith(root)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "文件路径超出工作区根目录", Map.of("name", normalizedName));
+        }
+        if (Files.exists(target)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "目标文件已存在",
+                    Map.of("path", safePath(relativePath), "name", normalizedName));
+        }
+        try {
+            Files.move(source, target);
+        } catch (FileAlreadyExistsException exception) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "目标文件已存在",
+                    Map.of("path", safePath(relativePath), "name", normalizedName),
+                    exception);
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "重命名文件失败",
+                    Map.of("path", safePath(relativePath), "name", normalizedName),
+                    exception);
         }
     }
 
@@ -252,16 +308,13 @@ public class WorkspaceFileService {
     }
 
     /**
-     * 在 rootPath 下递归搜索文件名包含 query（不区分大小写）的文件。
-     * 忽略黑名单目录，结果按文件名排序，最多返回 maxSearchResults 条。
-     * 搜索有超时保护，超时后返回已收集的结果。
+     * 在 rootPath 下递归搜索相对路径包含 query（不区分大小写）的文件。
+     * 空关键字用于对话 @ 文件候选，仍受深度、数量和超时上限保护；忽略黑名单目录，
+     * 结果按文件名排序，最多返回 maxSearchResults 条。
      */
     public List<FileSearchResultResponse> searchFiles(String rootPath, String query) {
-        if (query == null || query.isBlank()) {
-            return List.of();
-        }
         Path root = rootRealPath(rootPath);
-        String normalizedQuery = query.trim().toLowerCase();
+        String normalizedQuery = query == null ? "" : query.trim().toLowerCase();
         List<FileSearchResultResponse> results = new ArrayList<>();
 
         // 使用 CompletableFuture 实现超时保护
@@ -311,8 +364,9 @@ public class WorkspaceFileService {
                     // 递归搜索子目录
                     searchDirectory(root, path, query, results, depth + 1);
                 } else if (Files.isRegularFile(path)) {
-                    // 文件名匹配（不区分大小写）
-                    if (name.toLowerCase().contains(query)) {
+                    // 匹配工作区相对路径，使对话 # 能按 01-需求/子条目结构检索真实文件。
+                    String relativePath = root.relativize(path).toString().replace('\\', '/');
+                    if (relativePath.toLowerCase().contains(query)) {
                         results.add(searchResultEntry(root, path));
                     }
                 }

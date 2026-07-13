@@ -43,6 +43,7 @@ const emit = defineEmits<{
   search: [keyword: string];
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
+  renameEntry: [path: string, name: string];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
 
@@ -164,6 +165,7 @@ function fileIconClass(name: string, path: string) {
         @add-file-context="emit('addFileContext', $event)"
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
+        @rename-entry="(path, name) => emit('renameEntry', path, name)"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
       />
     </div>

@@ -72,6 +72,36 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
+    void serviceRenamesRegularFileInsideWorkspaceAndRejectsExistingTarget() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs/old.md"), "# 内容");
+        Files.writeString(root.resolve("docs/existing.md"), "existing");
+
+        service.renameFile(root.toString(), "docs/old.md", "new.md");
+
+        assertThat(Files.exists(root.resolve("docs/old.md"))).isFalse();
+        assertThat(Files.readString(root.resolve("docs/new.md"))).isEqualTo("# 内容");
+        assertThatThrownBy(() -> service.renameFile(root.toString(), "docs/new.md", "existing.md"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
+    void serviceRejectsRenamingDirectoryOrUsingPathSeparatorsInNewName() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectory(root.resolve("directory"));
+        Files.writeString(root.resolve("note.txt"), "note");
+
+        assertThatThrownBy(() -> service.renameFile(root.toString(), "directory", "renamed"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+        assertThatThrownBy(() -> service.renameFile(root.toString(), "note.txt", "nested/name.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
     void serviceDeletesOnlyRegularFilesInsideWorkspaceRoot() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
         Files.writeString(root.resolve("remove.txt"), "delete me");
@@ -103,6 +133,24 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
+    void searchFilesMatchesRequirementPathAndListsFilesForBlankQuery() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Path requirementFile = root.resolve("120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt");
+        Files.createDirectories(requirementFile.getParent());
+        Files.writeString(requirementFile, "需求正文");
+        Files.writeString(root.resolve("README.md"), "说明");
+
+        assertThat(service.searchFiles(root.toString(), "/01-需求/"))
+                .extracting(FileSearchResultResponse::path)
+                .containsExactly("120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt");
+        assertThat(service.searchFiles(root.toString(), ""))
+                .extracting(FileSearchResultResponse::path)
+                .containsExactlyInAnyOrder(
+                        "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt",
+                        "README.md");
+    }
+
+    @Test
     void searchFilesSkipsBlacklistedDirectories() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
         Files.createDirectories(root.resolve("node_modules"));
@@ -116,10 +164,15 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
-    void searchFilesReturnsEmptyForBlankQuery() {
+    void searchFilesReturnsAllFilesForBlankQuery() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve("README.md"), "说明");
 
-        assertThat(service.searchFiles(root.toString(), "")).isEmpty();
-        assertThat(service.searchFiles(root.toString(), "   ")).isEmpty();
+        assertThat(service.searchFiles(root.toString(), ""))
+                .extracting(FileSearchResultResponse::path)
+                .containsExactly("README.md");
+        assertThat(service.searchFiles(root.toString(), "   "))
+                .extracting(FileSearchResultResponse::path)
+                .containsExactly("README.md");
     }
 }
