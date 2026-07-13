@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-13 - 生成 GaussDB 驱动企业完整交付包
+
+- Why:
+  - 用户提供真实 `GaussDBV5-503.1.0.SPC2000_23.12.12.jar`，需要基于当前已修复代码生成可供企业内网升级的最新完整包，并确认外置驱动替换路径。
+- What:
+  - 生成 `deploy/internal/dist-gauss/` 完整交付物：后端瘦 jar、外置依赖、前端静态包、外挂程序、linux/amd64 Worker 镜像 tar 和完整企业升级 zip。
+  - 外置驱动复制后 SHA-256 与用户提供的原 jar 一致；后端 `lib` 不含官方 `postgresql-*.jar`、`spring-data-jdbc` 和 `spring-boot-data-jdbc`，保留 `flyway-database-postgresql` 作为 Flyway 数据库支持模块。
+- How:
+  - 使用 `deploy/internal/package-release.sh --db-driver-jar ...` 构建；使用 `deploy-internal-release.sh --validate-only` 和 `unzip -t` 校验升级包结构和归档完整性。
+  - 用该包在本机 test profile 启动时确认实际加载的是 GaussDB 驱动；本机数据库为 PostgreSQL，驱动返回“Session 初始化失败”，因此没有把本机启动误判为 GaussDB 连接验证。
+- Result:
+  - 企业完整包已生成于 `deploy/internal/dist-gauss/test-agent-internal-release.zip`，约 1.0G；后端 manifest 使用 `/data/testagent/dist/backend/lib` 外置加载路径，包结构校验通过。
+  - 目标 GaussDB `122.42.203.103:8000` 的真实连接、Flyway migration 和 Worker 联动仍需在企业内网按部署手册执行验证。
+
 ### 2026-07-13 - 兼容 GaussDB 外置 JDBC 驱动部署
 
 - Why:
