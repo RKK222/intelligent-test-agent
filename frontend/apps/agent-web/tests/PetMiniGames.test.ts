@@ -33,19 +33,26 @@ describe("PetMiniGames", () => {
     wrapper.unmount();
   });
 
-  it("keeps the first minesweeper reveal safe and supports flags and restart", async () => {
+  it("keeps the first minesweeper reveal safe and chords around a matched flag", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const wrapper = mount(PetMiniGames);
     await wrapper.get('[data-testid="pet-game-open-minesweeper"]').trigger("click");
 
     const cells = wrapper.findAll('.pet-mine-cell');
     expect(cells).toHaveLength(64);
-    await cells[63]!.trigger("contextmenu");
-    expect(cells[63]!.attributes("aria-label")).toContain("已插旗");
-
     await cells[0]!.trigger("click");
     expect(wrapper.text()).not.toContain("踩雷了");
     expect(cells[0]!.attributes("aria-label")).not.toContain("地雷");
+
+    const revealedBeforeChord = wrapper.findAll('.pet-mine-cell.is-revealed').length;
+    await cells[1]!.trigger("dblclick");
+    expect(wrapper.findAll('.pet-mine-cell.is-revealed')).toHaveLength(revealedBeforeChord);
+
+    await cells[10]!.trigger("contextmenu");
+    expect(cells[10]!.attributes("aria-label")).toContain("已插旗");
+    await cells[1]!.trigger("dblclick");
+    expect(cells[2]!.classes()).toContain("is-revealed");
+    expect(wrapper.findAll('.pet-mine-cell.is-revealed').length).toBeGreaterThan(revealedBeforeChord);
 
     await wrapper.get('[aria-label="重开扫雷"]').trigger("click");
     expect(wrapper.text()).toContain("第一步安全");

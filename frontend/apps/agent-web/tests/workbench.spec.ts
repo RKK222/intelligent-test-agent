@@ -3088,6 +3088,9 @@ test("workbench accepts the first prompt without requiring new conversation whil
 });
 
 test("pet mini games support tetris, minesweeper, sudoku and snake interactions", async ({ page }) => {
+  await page.addInitScript(() => {
+    Math.random = () => 0;
+  });
   await mockBackendApi(page, runnableWorkspaceSetup());
   await gotoWorkbench(page, { selectConversation: false });
 
@@ -3107,10 +3110,15 @@ test("pet mini games support tetris, minesweeper, sudoku and snake interactions"
   await page.getByRole("button", { name: "扫雷", exact: true }).click();
   const mineCells = page.getByTestId("pet-minesweeper").locator(".pet-mine-cell");
   await expect(mineCells).toHaveCount(64);
-  await mineCells.nth(63).click({ button: "right" });
-  await expect(mineCells.nth(63)).toHaveAttribute("aria-label", /已插旗/);
   await mineCells.first().click();
   await expect(page.getByTestId("pet-minesweeper")).not.toContainText("踩雷了");
+  await expect(mineCells.nth(2)).not.toHaveClass(/is-revealed/);
+  await mineCells.nth(1).dblclick();
+  await expect(mineCells.nth(2)).not.toHaveClass(/is-revealed/);
+  await mineCells.nth(10).click({ button: "right" });
+  await expect(mineCells.nth(10)).toHaveAttribute("aria-label", /已插旗/);
+  await mineCells.nth(1).dblclick();
+  await expect(mineCells.nth(2)).toHaveClass(/is-revealed/);
 
   await page.getByRole("button", { name: "数独", exact: true }).click();
   const sudokuCells = page.getByTestId("pet-sudoku").locator(".pet-sudoku-cell");

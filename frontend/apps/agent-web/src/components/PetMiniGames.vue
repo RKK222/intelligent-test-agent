@@ -255,20 +255,7 @@ function initializeMines(firstIndex: number) {
   mineStatus.value = "playing";
 }
 
-function revealMineCell(index: number) {
-  if (mineStatus.value === "won" || mineStatus.value === "lost") return;
-  if (!minesInitialized.value) initializeMines(index);
-  const target = mineBoard.value[index];
-  if (!target || target.flagged || target.revealed) return;
-  if (target.mine) {
-    target.revealed = true;
-    mineBoard.value.forEach((cell) => {
-      if (cell.mine) cell.revealed = true;
-    });
-    mineStatus.value = "lost";
-    return;
-  }
-
+function revealSafeMineRegion(index: number) {
   // 空白区使用队列展开，避免递归深度随棋盘布局变化。
   const queue = [index];
   const visited = new Set<number>();
@@ -285,8 +272,52 @@ function revealMineCell(index: number) {
       });
     }
   }
+}
+
+function updateMineWinStatus() {
   const revealedSafeCells = mineBoard.value.filter((cell) => cell.revealed && !cell.mine).length;
   if (revealedSafeCells === MINE_ROWS * MINE_COLUMNS - MINE_COUNT) mineStatus.value = "won";
+}
+
+function revealAllMines() {
+  mineBoard.value.forEach((cell) => {
+    if (cell.mine) cell.revealed = true;
+  });
+  mineStatus.value = "lost";
+}
+
+function revealMineCell(index: number) {
+  if (mineStatus.value === "won" || mineStatus.value === "lost") return;
+  if (!minesInitialized.value) initializeMines(index);
+  const target = mineBoard.value[index];
+  if (!target || target.flagged || target.revealed) return;
+  if (target.mine) {
+    revealAllMines();
+    return;
+  }
+  revealSafeMineRegion(index);
+  updateMineWinStatus();
+}
+
+function chordMineCell(index: number) {
+  if (mineStatus.value === "won" || mineStatus.value === "lost" || !minesInitialized.value) return;
+  const target = mineBoard.value[index];
+  if (!target?.revealed || target.mine || target.nearby === 0) return;
+  const neighbors = mineNeighbors(index);
+  const flaggedCount = neighbors.filter((neighbor) => mineBoard.value[neighbor]!.flagged).length;
+  if (flaggedCount !== target.nearby) return;
+
+  // 数字与旗子数匹配时展开其余邻格；若旗子标错，保留经典扫雷仍会踩雷的规则。
+  const candidates = neighbors.filter((neighbor) => {
+    const cell = mineBoard.value[neighbor]!;
+    return !cell.flagged && !cell.revealed;
+  });
+  if (candidates.some((candidate) => mineBoard.value[candidate]!.mine)) {
+    revealAllMines();
+    return;
+  }
+  candidates.forEach(revealSafeMineRegion);
+  updateMineWinStatus();
 }
 
 function toggleMineFlag(index: number) {
@@ -315,7 +346,8 @@ function mineCellLabel(cell: MineCell, index: number): string {
   if (cell.flagged) return `第 ${row} 行第 ${column} 列，已插旗`;
   if (!cell.revealed) return `第 ${row} 行第 ${column} 列，未翻开`;
   if (cell.mine) return `第 ${row} 行第 ${column} 列，地雷`;
-  return `第 ${row} 行第 ${column} 列，周围 ${cell.nearby} 颗雷`;
+  const chordHint = cell.nearby > 0 ? "，双击可展开周围" : "";
+  return `第 ${row} 行第 ${column} 列，周围 ${cell.nearby} 颗雷${chordHint}`;
 }
 
 const SUDOKU_SOLUTION = [
@@ -660,6 +692,7 @@ onBeforeUnmount(() => {
             :aria-label="mineCellLabel(cell, index)"
             role="gridcell"
             @click="revealMineCell(index)"
+            @dblclick="chordMineCell(index)"
             @contextmenu.prevent="toggleMineFlag(index)"
           >
             <span v-if="cell.flagged">⚑</span>

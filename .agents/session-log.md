@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-13 - 增加扫雷数字格双击展开
+
+- Why:
+  - 用户希望扫雷在已经插旗后支持双击数字格，自动展开周围未插旗区域，减少逐格点击。
+- What:
+  - 复用原有广度优先安全区展开逻辑，增加经典扫雷 chord 操作：相邻旗子数与数字匹配时双击展开其余邻格，数量不匹配时不动作；若旗子插错但数量匹配，仍按经典规则可能踩雷。
+  - 数字格无障碍标签补充双击提示；未增加新按钮、后端接口或持久化状态。
+- How:
+  - 将单击展开中的安全区、胜利判定和踩雷展示拆为可复用函数，双击处理只负责校验数字格与相邻旗子后调用既有展开路径；组件测试和桌面/移动 Playwright E2E 都覆盖旗子不足不展开及匹配后展开。
+- Result:
+  - PetMiniGames 组件测试 5/5、定向桌面/移动 E2E 2/2、前端 typecheck、生产 build 和单 worker 全量 Vitest 54 文件（757 passed/1 skipped）通过；全量并行 Vitest 的既有 Mermaid 动态编辑器用例发生懒加载超时，单文件 11/11 及单 worker 全量复跑通过。按 `.env.test` / `test` profile 重启三服务成功，backend health/readiness 为 UP、frontend 3000 与登录 CORS 正常，manager WebSocket 已连接；保留既有 CSS `@import` 顺序和大 chunk 构建警告。
+
 ### 2026-07-13 - 简化宠物旁路问答并修复 fork 新答案误过滤
 
 - Why:
