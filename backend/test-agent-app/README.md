@@ -43,7 +43,7 @@
 - `application.yml` 是默认、本地和企业生产的唯一运行配置；所有差异由 dotenv 或系统环境变量提供，不再保留 `local`、`guo`、`prod` profile。
 - 根目录 `restart-dev-services.sh` 默认读取 `.env.test` 并以 `test` profile 一键重启；本地直接使用 `tools/dev-backend-run.sh --env-file .env.local`，不设置 Spring profile。
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
-- 企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖；JDBC 驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
+- 企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖；JDBC 驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。使用 GaussDB 兼容驱动时，发布脚本可通过 `--db-driver-jar <path>` 将该驱动放入 `lib` 并移除内置 PostgreSQL 驱动。
 - `application.yml`：`test-agent.scheduler.enabled` 默认 `false`，可通过 `TEST_AGENT_SCHEDULER_ENABLED` 显式启用。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
 - 用户进程运行管理和 manager 控制面在线状态强依赖 Redis；多服务器应用版本工作区副本实时同步也需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。

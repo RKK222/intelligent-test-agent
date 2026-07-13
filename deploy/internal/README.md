@@ -245,7 +245,7 @@ cp deploy/internal/env.example /data/testagent/config/docker.env
 
 | 配置项 | 当前模板值 | 修改场景 |
 |---|---|---|
-| `TEST_AGENT_DB_URL` | `jdbc:postgresql://122.42.203.103:8000/testagent` | PostgreSQL 地址、端口或库名变化时修改。 |
+| `TEST_AGENT_DB_URL` | `jdbc:postgresql://122.42.203.103:8000/testagent` | 数据库地址、端口或库名变化时修改；GaussDB gsjdbc4 兼容驱动仍使用该 URL 形式，不能省略 `//端口/数据库名`。 |
 | `TEST_AGENT_DB_USERNAME` | `testagent` | PostgreSQL 用户名变化时修改。 |
 | `TEST_AGENT_DB_PASSWORD` | `testagent#123!` | PostgreSQL 密码变化时修改。 |
 | `TEST_AGENT_DB_DRIVER_CLASS_NAME` | `org.postgresql.Driver` | 可选 JDBC 驱动类；该类及其 jar 必须已在后端启动 classpath 中，修改后重启 Java。 |
@@ -622,6 +622,15 @@ deploy/internal/dist/test-agent-internal-release.zip
 也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，实体 Nginx 直接托管 `dist/frontend`。
 第一版 `opencode-worker` 镜像里仍内置 `opencode-manager` 和 `opencode-ai` CLI；同时脚本会把这两个程序导出到 `dist/programs/`，纯 Docker worker 管理脚本默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。
 `test-agent-internal-release.zip` 是完整企业升级包，包含上述必要产物和 `deploy/internal/` 脚本目录；传到 `122.233.30.4:/data/0709/internal.zip` 后即可用 `deploy-internal-release.sh` 解压部署。
+
+如果使用 GaussDB 兼容 JDBC 驱动，打包机不要手工删除 `lib` 中的 PostgreSQL 驱动，直接传入驱动 jar：
+
+```bash
+deploy/internal/package-release.sh \
+  --db-driver-jar /path/to/GaussDBV5-*.jar
+```
+
+脚本会把该 jar 复制到 `dist/backend/lib/`，并移除内置的 `postgresql-*.jar`。目标机的 `backend.env` 仍需设置实际驱动类名；使用 `gsjdbc4` 时通常为 `org.postgresql.Driver`，URL 必须是 `jdbc:postgresql://<host>:<port>/<database>`。
 
 只打某一类交付物：
 

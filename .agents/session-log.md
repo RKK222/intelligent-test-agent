@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 兼容 GaussDB 外置 JDBC 驱动部署
+
+- Why:
+  - 企业部署使用 GaussDB PostgreSQL 兼容驱动替换外置 `lib` 中的 PostgreSQL 驱动后，Spring Data JDBC 4.1 的 PostgreSQL dialect 调用了 GaussDB 驱动缺失的 `TypeInfoCache` 方法，导致启动失败。
+- What:
+  - persistence 模块改为直接依赖 Spring JDBC，移除不必要的 Spring Data JDBC 自动配置；发布脚本新增 `--db-driver-jar`，自动移除 `postgresql-*.jar` 并复制外置驱动到后端 `lib`；同步 GaussDB JDBC URL、驱动类名和部署说明。
+- How:
+  - 保留既有 `JdbcClient`/MyBatis/Flyway 代码路径，不修改 generated SDK、API、事件或数据库 migration；按外置 driver jar 可替换、默认 PostgreSQL 仍可用的方式保持兼容。
+- Result:
+  - JDK 25 后端构建、Druid 定向测试、脚本语法校验、外置驱动打包检查和 test profile 三服务重启通过；backend liveness/readiness、frontend 3000、登录 CORS、manager WebSocket 均正常。目标 GaussDB 的实际 migration 与数据表状态仍需在部署机复验。
+
 ### 2026-07-13 - 重构公共测试设计三阶段与应用工作区归档规则
 
 - Why:

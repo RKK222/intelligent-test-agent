@@ -346,10 +346,11 @@ export TEST_AGENT_DB_POOL_TEST_ON_BORROW=true
 后端环境变量只用于部署期密钥、外部端点、进程身份、启动引导路径或资源容量。不要为了临时绕过配置或适配个人环境而随意新增 `TEST_AGENT_*` 环境变量；新增前必须优先评估 `common_parameters`、Spring 配置项、数据库配置和既有 dotenv 变量，并同步更新后端规范、README、部署文档、启动脚本或 dotenv 示例以及配置绑定测试。
 
 ```bash
-TEST_AGENT_DB_URL=jdbc:postgresql://<pg-host>:5432/<database>
+TEST_AGENT_DB_URL=jdbc:postgresql://<db-host>:<port>/<database>
 TEST_AGENT_DB_USERNAME=<username>
 TEST_AGENT_DB_PASSWORD=<password>
 # 可选，默认 org.postgresql.Driver；指定类必须随后端 jar 或启动 classpath 一起交付。
+# GaussDB gsjdbc4 兼容驱动通常仍使用 org.postgresql.Driver 和 jdbc:postgresql://...。
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 TEST_AGENT_API_TOKEN=<api-token>
 TEST_AGENT_CORS_ALLOWED_ORIGINS=https://<frontend-origin>

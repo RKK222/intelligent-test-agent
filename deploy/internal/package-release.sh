@@ -34,6 +34,7 @@ Options:
                           TEST_AGENT_IMAGE_OUTPUT_DIR is honored only when exported by the shell
                           or loaded from an explicit --env-file.
   --platform <platform>   Docker build platform for opencode-worker. Defaults to linux/amd64.
+  --db-driver-jar <path>   Replace the bundled PostgreSQL JDBC jar with an external GaussDB/JDBC jar.
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
@@ -57,6 +58,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --platform)
       PLATFORM="$2"
+      shift 2
+      ;;
+    --db-driver-jar)
+      [[ $# -ge 2 ]] || {
+        echo "--db-driver-jar requires a path." >&2
+        exit 2
+      }
+      DB_DRIVER_JAR="$2"
       shift 2
       ;;
     --backend-only)
@@ -207,7 +216,7 @@ tag_to_tar_name() {
 
 package_backend() {
   local backend_dir="${OUTPUT_DIR}/backend"
-  local extract_dir manifest_file
+  local extract_dir manifest_file driver_jar
   require_command unzip
   require_command zip
   require_command jar
@@ -228,6 +237,21 @@ package_backend() {
   unzip -q "${backend_dir}/test-agent-app.jar" 'BOOT-INF/lib/*' -d "${extract_dir}"
   mv "${extract_dir}/BOOT-INF/lib" "${backend_dir}/lib"
   rm -rf "${extract_dir}"
+  if [[ -n "${DB_DRIVER_JAR:-}" ]]; then
+    driver_jar="${DB_DRIVER_JAR}"
+    if [[ "${driver_jar}" != /* ]]; then
+      driver_jar="${ROOT_DIR}/${driver_jar}"
+    fi
+    [[ -f "${driver_jar}" ]] || {
+      echo "Database driver jar not found: ${driver_jar}" >&2
+      exit 1
+    }
+    # GaussDB 的 PostgreSQL 兼容驱动与官方 PostgreSQL 驱动不能同时进入同一 classpath，
+    # 否则 org.postgresql.* 类会按文件顺序随机加载，产生难以判断的 API 冲突。
+    rm -f "${backend_dir}/lib"/postgresql-*.jar
+    cp "${driver_jar}" "${backend_dir}/lib/$(basename "${driver_jar}")"
+    echo "Using external database driver: ${driver_jar}"
+  fi
   # 交付包只保留启动器和业务 classes，所有依赖由 PropertiesLauncher 从外置 lib 加载。
   zip -qd "${backend_dir}/test-agent-app.jar" 'BOOT-INF/lib/*' >/dev/null
   manifest_file="$(mktemp "${OUTPUT_DIR}/.backend-manifest.XXXXXX")"
