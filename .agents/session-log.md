@@ -5952,3 +5952,15 @@ bash /tmp/test-api-after-restart.sh
   - 仅扩展 `FigmaChatPanel` 现有候选行样式和组件测试，复用原 `workspaceFileCandidates`、`selectMentionFile` 与 `selectRequirementReference` 链路；未新增候选数据源或并行选择逻辑。
 - Result:
   - `FigmaChatPanel.test.ts` 与 `workbench-utils.test.ts` 共 180 passed、1 skipped；agent-web typecheck 和生产 build 通过，构建仅保留既有 CSS `@import` 顺序及大 chunk 警告。
+
+### 2026-07-13 - 测试设计生成与审核强制加载对象规约
+
+- Why:
+  - 用户要求案例设计和审核必须实际使用 `test-design/rules/` 中的规约；原生成阶段只直接读取方法与组装规则，对象规约主要经分析结果间接传递，审核阶段也只笼统声明加载质量门禁，弱模型存在跳过规约正文的风险。
+- What:
+  - 公共配置的分析、生成、审核和编排 Agent 统一增加 `ruleUsage` 内部契约；生成阶段按对象规约核对事实与风险后，再依次执行方法选择、Phase A、Phase B、追溯和质量门禁；审核阶段独立读取同一对象规约与生成规则，不复用生成自检代替审核。
+  - `test-design` skill 升级到 `3.5.0`，规定规约只能在成功读取正文后登记，缺失、不可读或应读未读时阶段必须 `INCOMPLETE`，且 `ruleUsage` 不进入三类正式交付。
+- How:
+  - 对象规约统一通过 `spec-index.md` 按实际 `objectType` 选择，避免加载全部无关规约；通过引用存在性、`quick_validate.py`、skill 打包、四个 Agent 的 `opencode debug agent` JSON 解析和 `git diff --check` 静态校验，没有调用任何模型。
+- Result:
+  - 公共配置已经形成“对象规约核对 → 方法规则 → Phase A → 案例组装规则 → 追溯/门禁 → 独立规约审核”的强制链路；三服务使用 `.env.test` 重启成功，后端 health/readiness 为 `UP`、前端 3000 返回 200、manager WebSocket 已连接。企业模型产物效果按用户要求留给用户使用应用工作区素材验证。
