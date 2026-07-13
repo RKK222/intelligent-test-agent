@@ -5676,3 +5676,17 @@ bash /tmp/test-api-after-restart.sh
   - 通过模板引用解析脚本、方法模板契约字段检查、旧标识扫描、文件归属检查、`git diff --check`、OpenCode skill 列表和 Agent 注册检查复核；应用区文档未写入，未创建应用 worktree。
 - Result:
   - 所有 Markdown 模板引用均解析到实际文件；7 个细化 skill 均有本地方法模板；旧 skill/Agent 标识和重复执行模板均清除。配置仓库改动待本批次复核后提交。
+
+### 2026-07-13 - 恢复多方法测试设计产物并完成 DeepSeek 真实链路验证
+
+- Why:
+  - 三阶段收敛后 `test-design-generation` 被误写为“选择一个方法入口”，导致不同方法 skill 的等价类表、判定表、路径图、场景图和联动映射可能被压缩为单一案例或三份 Agent 阶段文件。
+- What:
+  - 保留 `analysis → generation → review` 三阶段内部编排，增加 `methodArtifactPlan` / `methodArtifacts` / `artifactManifest`，明确同一对象可使用多个方法，每个方法都要保留图/表/矩阵本体、编号和到案例的映射；禁止生成固定的分析/生成/审查三文件。
+  - 分析阶段只输出紧凑方法路由清单，不再读取或展开各方法模板；生成阶段只加载计划中实际选中的细化 skill。
+- How:
+  - 通过平台 workspace route/ticket/WebSocket RPC 在用户绑定的应用工作区中构造企业转账限额需求和详细设计，没有直接写物理 worktree；重启三服务后使用 `opencode/deepseek-v4-flash-free` 跑通真实三阶段链路。
+  - 执行 frontmatter/模板引用解析、旧单方法契约扫描、`git diff --check`，并逐份通过 RPC 读取应用区产物校验方法结构和模板占位符。
+- Result:
+  - 应用区产出 9 份方法文件：接口 3、等价类 1、正交/判定表 1、路径法 1、场景法 1、直接理解 1、UI/API 联动 1；无三阶段固定文件、无未解析占位符，Mermaid、方法表格和案例映射均存在。
+  - 完整运行耗时约 17 分 03 秒：analysis 约 7:19、generation 约 4:41、review 约 2:26、编排交接约 2:37；DeepSeek 免费端出现过 socket 短暂断开并由运行时重试，后续优化应优先缩短 analysis 上下文和按方法分批，不应删除方法产物。
