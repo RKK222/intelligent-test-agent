@@ -1,11 +1,59 @@
 import { describe, expect, it } from "vitest";
 import {
   displayTextFromUserPrompt,
+  promptPartsForUserDisplay,
   workspaceContextAttachmentsFromPromptParts,
   workspaceContextAttachmentsFromUserPrompt
 } from "../src/user-message-display";
 
 describe("displayTextFromUserPrompt", () => {
+  it("keeps only user text and attachment metadata in optimistic timeline parts", () => {
+    const serializedSelection = [
+      "用户问题：",
+      "检查实现",
+      "",
+      "以下是用户添加的工作区上下文：",
+      "",
+      '<context type="selection" path="src/UserService.java" lines="20-35">',
+      "不应进入用户消息展示的选区原文",
+      "</context>"
+    ].join("\n");
+
+    expect(
+      promptPartsForUserDisplay([
+        { type: "text", text: serializedSelection },
+        {
+          type: "file",
+          path: "docs/api.md",
+          name: "api.md",
+          content: "不应进入用户消息展示的文件原文",
+          url: "data:text/plain;base64,Zm9v",
+          source: {
+            text: "不应进入用户消息展示的 source 原文",
+            start: 0,
+            end: 10,
+            contextType: "file"
+          }
+        }
+      ])
+    ).toEqual([
+      { type: "text", text: "检查实现" },
+      {
+        type: "file",
+        path: "src/UserService.java",
+        name: "UserService.java",
+        source: { contextType: "selection", startLine: 20, endLine: 35 }
+      },
+      {
+        type: "file",
+        path: "docs/api.md",
+        name: "api.md",
+        mimeType: undefined,
+        source: { start: 0, end: 10, startLine: undefined, endLine: undefined, contextType: "file" }
+      }
+    ]);
+  });
+
   it("hides serialized workspace context from user message display", () => {
     const text = [
       "用户问题：",

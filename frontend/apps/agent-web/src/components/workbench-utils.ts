@@ -776,6 +776,7 @@ function replaySessionTreeMessagesBySessionId(
     if (!Array.isArray(payloads)) {
       continue;
     }
+    const visibleUserTextByMessageId = sessionTreeVisibleUserTextByMessageId(payloads);
     for (const rawPayload of payloads) {
       const payload = record(rawPayload);
       const message = record(payload?.message) ?? record(payload?.info);
@@ -784,9 +785,10 @@ function replaySessionTreeMessagesBySessionId(
         continue;
       }
       if (message) {
+        const normalized = sessionTreeMessageWithVisibleUserText(payload, message, visibleUserTextByMessageId);
         next = reduceAgentChatRuntime(next, {
           type: "event",
-          event: runEventFromSessionTreeMessage(snapshot, sessionId, payload, message, index)
+          event: runEventFromSessionTreeMessage(snapshot, sessionId, normalized.payload, normalized.message, index)
         });
       } else if (part) {
         // OpenCode tree 会把 child 输出拆成只含 part 的条目；跳过它会导致子 Agent 卡片可点却没有正文。
@@ -801,6 +803,53 @@ function replaySessionTreeMessagesBySessionId(
     }
   }
   return next;
+}
+
+/**
+ * OpenCode 的 user message envelope 本身通常没有 content，正文由后续 text part 提供。
+ * 历史恢复时先按 messageId 找到首个非 synthetic 文本，避免 envelope 被延迟后 file part 误归到 assistant。
+ */
+function sessionTreeVisibleUserTextByMessageId(payloads: Record<string, unknown>[]): Map<string, string> {
+  const visibleTextByMessageId = new Map<string, string>();
+  for (const rawPayload of payloads) {
+    const payload = record(rawPayload);
+    const part = record(payload?.part);
+    if (!payload || !part || text(part.type) !== "text" || part.synthetic === true) {
+      continue;
+    }
+    const messageId =
+      text(payload.messageId) ??
+      text(payload.messageID) ??
+      text(part.messageId) ??
+      text(part.messageID);
+    const value = text(part.text) ?? text(part.content);
+    if (messageId && value && !visibleTextByMessageId.has(messageId)) {
+      visibleTextByMessageId.set(messageId, value);
+    }
+  }
+  return visibleTextByMessageId;
+}
+
+function sessionTreeMessageWithVisibleUserText(
+  payload: Record<string, unknown>,
+  message: Record<string, unknown>,
+  visibleUserTextByMessageId: Map<string, string>
+): { payload: Record<string, unknown>; message: Record<string, unknown> } {
+  if (text(message.role) !== "user" || text(message.text) || text(message.content)) {
+    return { payload, message };
+  }
+  const messageId = text(message.messageId) ?? text(message.messageID) ?? text(message.id);
+  const visibleText = messageId ? visibleUserTextByMessageId.get(messageId) : undefined;
+  if (!visibleText) {
+    return { payload, message };
+  }
+  const normalizedMessage = { ...message, content: visibleText };
+  return {
+    payload: record(payload.message)
+      ? { ...payload, message: normalizedMessage }
+      : { ...payload, info: normalizedMessage },
+    message: normalizedMessage
+  };
 }
 
 // 后端 snapshot 会把 message payload 同时按 session 分组；即使 events 被裁剪，也要按原 RunEvent reducer 口径恢复 scope。

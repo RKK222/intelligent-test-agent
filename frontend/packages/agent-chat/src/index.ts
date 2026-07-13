@@ -23,6 +23,7 @@ export {
 export type { AgentChatRuntimeState, AgentChatRuntimeAction } from "./runtime-reducer";
 export {
   displayTextFromUserPrompt,
+  promptPartsForUserDisplay,
   workspaceContextAttachmentsFromPromptParts,
   workspaceContextAttachmentsFromUserPrompt
 } from "./user-message-display";

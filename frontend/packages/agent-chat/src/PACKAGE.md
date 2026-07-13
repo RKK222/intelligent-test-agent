@@ -17,7 +17,7 @@
 - `chat-utils.ts`：斜杠/上下文查询、附件合并、流式指纹、卡片默认展开判定等纯函数。
 - `process-status.ts`：过程状态归一化、中文文案、状态色和 Skill tool 判定工具。
 - `prompt-parts.ts`：浏览器文件和图片到平台 `PromptPart` 的纯转换，供 composer 和单测复用。
-- `user-message-display.ts`：用户消息展示文案与工作区上下文 chip 派生工具；历史 `<context>` 文本只用于兼容解析，原生 file prompt parts 优先展示，并按 `type/path/lines` 去重，避免 optimistic user message 与 opencode 实时 user file part 重复显示同一附件。
+- `user-message-display.ts`：用户消息展示文案与工作区上下文 chip 派生工具；历史 `<context>` 文本只用于兼容解析，原生 file prompt parts 优先展示，并按 `type/path/lines` 去重。乐观 user message 会剥离 `content`、内联 URL 和 `source.text`，只保留用户原始问题与附件展示元数据；模型提交 parts 不经过该展示转换。
 - `runtime-reducer.ts`：纯 RunEvent reducer，归并旧 `assistant.message.delta` 和 `message.*`、permission/question、todo、diff/session status 事件。
 
 ## 允许依赖

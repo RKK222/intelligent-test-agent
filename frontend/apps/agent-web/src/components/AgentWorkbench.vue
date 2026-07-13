@@ -3,7 +3,14 @@ import { ElMessage } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
+import {
+  AgentChat,
+  buildComposerPromptParts,
+  createInitialAgentChatRuntimeState,
+  promptPartsForUserDisplay,
+  reduceAgentChatRuntime,
+  type ComposerAttachment
+} from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient, type RawHttpExchange } from "@test-agent/backend-api";
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
@@ -3596,7 +3603,8 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   }
   lastPrompt.value = submitPrompt;
   diffContextParts.value = [];
-  dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
+  // OpenCode 风格的 Timeline 只展示用户原始问题和附件标识；模型请求仍使用下方未裁剪的完整 parts。
+  dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts: promptPartsForUserDisplay(parts) });
   if (!submitPrompt) {
     return;
   }

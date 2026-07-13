@@ -5856,3 +5856,15 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 应用区产出 9 份方法文件：接口 3、等价类 1、正交/判定表 1、路径法 1、场景法 1、直接理解 1、UI/API 联动 1；无三阶段固定文件、无未解析占位符，Mermaid、方法表格和案例映射均存在。
   - 完整运行耗时约 17 分 03 秒：analysis 约 7:19、generation 约 4:41、review 约 2:26、编排交接约 2:37；DeepSeek 免费端出现过 socket 短暂断开并由运行时重试，后续优化应优先缩短 analysis 上下文和按方法分批，不应删除方法产物。
+
+### 2026-07-13 - 修复上下文文件原文重复显示为消息
+
+- Why:
+  - OpenCode 原生 user message 由空正文 envelope、普通 text part、synthetic Read text part 和 file part 组成；历史恢复会先跳过空 envelope，导致后续 part 被误归为 assistant，最终在 assistant 输出后又显示整份文件原文。
+- What:
+  - 乐观 user message 进入 Timeline 前仅保留用户输入和附件路径、文件名、选区等展示元数据，模型提交继续使用完整 parts。
+  - session-tree 历史适配按 messageId 查找首个非 synthetic text part，补齐空 user envelope 后再交给既有 RunEvent reducer，保持 OpenCode part 结构和 Timeline 顺序不变。
+- How:
+  - 新增附件展示 parts 转换及单测；新增与 8.23 真实会话相同顺序的 session-tree 回归夹具，并在本地页面打开原会话复验。
+- Result:
+  - 相关 5 个 Vitest 文件 256 passed、1 skipped；agent-web typecheck 和生产 build 通过。真实历史只显示一条用户问题、一个文件标签和原 assistant 输出，不再出现文件全文消息；构建仍有既有 CSS `@import` 顺序及大 chunk 警告。

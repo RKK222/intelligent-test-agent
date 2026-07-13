@@ -10,6 +10,45 @@ export type UserPromptWorkspaceContextAttachment = {
   lines?: string;
 };
 
+/**
+ * 将模型提交用 PromptPart 转换为用户消息展示用元数据。
+ * 文件正文、内联 URL 和 source.text 只供模型读取，不进入前端 transcript；路径、文件名和选区行号继续用于附件 chip。
+ */
+export function promptPartsForUserDisplay(parts: PromptPart[] | undefined): PromptPart[] {
+  const displayParts: PromptPart[] = [];
+  const seen = new Set<string>();
+  for (const part of parts ?? []) {
+    if (part.type === "text") {
+      const text = displayTextFromUserPrompt(part.text);
+      appendUniqueDisplayPart(displayParts, seen, { type: "text", text });
+      for (const attachment of workspaceContextAttachmentsFromUserPrompt(part.text)) {
+        appendUniqueDisplayPart(displayParts, seen, workspaceContextAttachmentPromptPart(attachment));
+      }
+      continue;
+    }
+    if (part.type === "file") {
+      appendUniqueDisplayPart(displayParts, seen, {
+        type: "file",
+        path: part.path,
+        name: part.name,
+        mimeType: part.mimeType,
+        source: part.source
+          ? {
+              start: part.source.start,
+              end: part.source.end,
+              startLine: part.source.startLine,
+              endLine: part.source.endLine,
+              contextType: part.source.contextType
+            }
+          : undefined
+      });
+      continue;
+    }
+    appendUniqueDisplayPart(displayParts, seen, part);
+  }
+  return displayParts;
+}
+
 // 后端持久化的 user prompt 可能包含前端拼接的工作区上下文；消息气泡只展示用户原始提问。
 export function displayTextFromUserPrompt(text: string): string {
   const normalized = text.replace(/\r\n/g, "\n");
@@ -97,6 +136,43 @@ function uniqueWorkspaceContextAttachments(
     seen.add(key);
     return true;
   });
+}
+
+function workspaceContextAttachmentPromptPart(
+  attachment: UserPromptWorkspaceContextAttachment
+): Extract<PromptPart, { type: "file" }> {
+  const [startLine, endLine] = (attachment.lines ?? "")
+    .split("-")
+    .map((value) => Number.parseInt(value, 10));
+  return {
+    type: "file",
+    path: attachment.path,
+    name: attachment.fileName,
+    source: {
+      contextType: attachment.type,
+      ...(Number.isFinite(startLine) ? { startLine } : {}),
+      ...(Number.isFinite(endLine) ? { endLine } : {})
+    }
+  };
+}
+
+function appendUniqueDisplayPart(parts: PromptPart[], seen: Set<string>, part: PromptPart) {
+  const key = displayPromptPartKey(part);
+  if (seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+  parts.push(part);
+}
+
+function displayPromptPartKey(part: PromptPart): string {
+  if (part.type === "file") {
+    return `file:${part.path ?? ""}:${part.name ?? ""}:${part.source?.contextType ?? ""}:${part.source?.startLine ?? ""}:${part.source?.endLine ?? ""}`;
+  }
+  if (part.type === "text") {
+    return `text:${part.text}`;
+  }
+  return JSON.stringify(part);
 }
 
 function contextAttributes(source: string): Record<string, string> {

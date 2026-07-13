@@ -795,6 +795,99 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("keeps OpenCode file source on the original user message instead of rendering it as a second message", () => {
+    const userMessage = {
+      rootSessionId: "ses_root",
+      sessionId: "ses_root",
+      message: { id: "msg_user", role: "user" }
+    };
+    const userText = {
+      rootSessionId: "ses_root",
+      sessionId: "ses_root",
+      messageId: "msg_user",
+      part: { id: "prt_text", messageID: "msg_user", type: "text", text: "这个子条目干了什么" }
+    };
+    const syntheticReadText = {
+      rootSessionId: "ses_root",
+      sessionId: "ses_root",
+      messageId: "msg_user",
+      part: {
+        id: "prt_synthetic",
+        messageID: "msg_user",
+        type: "text",
+        synthetic: true,
+        text: 'Called the Read tool with the following input: {"filePath":"详细设计说明书.md"}'
+      }
+    };
+    const userFile = {
+      rootSessionId: "ses_root",
+      sessionId: "ses_root",
+      messageId: "msg_user",
+      part: {
+        id: "prt_file",
+        messageID: "msg_user",
+        type: "file",
+        mime: "text/markdown",
+        filename: "详细设计说明书.md",
+        url: "file://详细设计说明书.md",
+        source: {
+          type: "file",
+          path: "02-设计/子条目/开发文档/详细设计说明书.md",
+          text: { value: "# 详细设计说明书\n这里是只供模型读取的完整原文。", start: 0, end: 26 }
+        }
+      }
+    };
+    const assistantMessage = {
+      rootSessionId: "ses_root",
+      sessionId: "ses_root",
+      message: { id: "msg_assistant", role: "assistant" }
+    };
+    const assistantText = {
+      rootSessionId: "ses_root",
+      sessionId: "ses_root",
+      messageId: "msg_assistant",
+      part: { id: "prt_answer", messageID: "msg_assistant", type: "text", text: "该子条目完成了详细设计。" }
+    };
+    const payloads = [userMessage, userText, syntheticReadText, userFile, assistantMessage, assistantText];
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_platform",
+      sessions: [{ rootSessionId: "ses_root", sessionId: "ses_root", childSession: false }],
+      messagesBySessionId: { ses_root: payloads },
+      childSessionIdByTaskPartId: {},
+      events: payloads.map((payload) => ({
+        type: "message" in payload ? "message.updated" : "message.part.updated",
+        rootSessionId: "ses_root",
+        sessionId: "ses_root",
+        childSession: false,
+        payload
+      }))
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]).toMatchObject({
+      id: "msg_user",
+      role: "user",
+      text: "这个子条目干了什么"
+    });
+    expect(state.messages[0]?.role === "user" ? state.messages[0].parts : []).toEqual([
+      { type: "text", text: "这个子条目干了什么" },
+      expect.objectContaining({
+        type: "file",
+        name: "详细设计说明书.md",
+        path: "02-设计/子条目/开发文档/详细设计说明书.md",
+        source: expect.objectContaining({ text: "# 详细设计说明书\n这里是只供模型读取的完整原文。" })
+      })
+    ]);
+    expect(state.messages[1]).toMatchObject({
+      id: "msg_assistant",
+      role: "assistant",
+      text: "该子条目完成了详细设计。"
+    });
+    expect(state.messages.some((message) => message.role === "user" && message.text.includes("完整原文"))).toBe(false);
+  });
+
   it("restores subagent indexes from snapshot sessions when discovery events are absent", () => {
     const snapshot: SessionTreeMessagesResponse = {
       sessionId: "ses_root",
