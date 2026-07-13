@@ -1222,8 +1222,8 @@ describe("FigmaChatPanel", () => {
         ],
         workspaceFileCandidates: [
           {
-            path: "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt",
-            name: "test.txt",
+            path: "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/S20260630-000038-助商组合贷新增信鸽取证状态需求说明书.md",
+            name: "S20260630-000038-助商组合贷新增信鸽取证状态需求说明书.md",
             directory: "120260624-0318-需求项/01-需求/S0001-子条目/需求文档",
             size: 1
           }
@@ -1235,13 +1235,19 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.get(".figma-chat-agent-panel").text()).toContain("Agent 与文件");
     expect(wrapper.get(".figma-chat-agent-panel").text()).toContain("Review");
-    expect(wrapper.get(".figma-chat-agent-panel").text()).toContain("test.txt");
+    expect(wrapper.get(".figma-chat-file-name-full").text()).toBe("S20260630-000038-助商组合贷新增信鸽取证状态需求说明书.md");
+    expect(wrapper.get(".figma-chat-file-name-full").attributes("title")).toBe(
+      "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/S20260630-000038-助商组合贷新增信鸽取证状态需求说明书.md"
+    );
+    expect(wrapper.get(".figma-chat-file-info .figma-chat-agent-desc").text()).toBe(
+      "120260624-0318-需求项/01-需求/S0001-子条目/需求文档"
+    );
     expect(wrapper.emitted("search-workspace-files")).toContainEqual([""]);
 
     await wrapper.get(".figma-chat-file-row").trigger("click");
 
     expect(wrapper.emitted("add-workspace-file-context")).toEqual([
-      ["120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt"]
+      ["120260624-0318-需求项/01-需求/S0001-子条目/需求文档/S20260630-000038-助商组合贷新增信鸽取证状态需求说明书.md"]
     ]);
     expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("请参考 ");
   });
@@ -1252,9 +1258,9 @@ describe("FigmaChatPanel", () => {
       requirementName: "120260624-0318-需求项",
       subitemName: "S0001-子条目",
       filePaths: [
-        "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt",
-        "120260624-0318-需求项/02-设计/S0001-子条目/详细设计.md",
-        "120260624-0318-需求项/03-编码/S0001-子条目/031-业务代码/test2.txt"
+        "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/S20260630-000038-助商组合贷新增信鸽取证状态需求说明书.md",
+        "120260624-0318-需求项/02-设计/S0001-子条目/S20260630-000038-助商组合贷新增信鸽取证状态详细设计说明书.md",
+        "120260624-0318-需求项/03-编码/S0001-子条目/031-业务代码/S20260630-000038-助商组合贷新增信鸽取证状态单元测试说明.md"
       ]
     };
     const wrapper = mount(FigmaChatPanel, {
@@ -1272,6 +1278,8 @@ describe("FigmaChatPanel", () => {
     expect(panel.text()).toContain("S0001-子条目");
     expect(panel.text()).toContain("120260624-0318-需求项");
     expect(panel.text()).toContain("3 个关联文件");
+    expect(wrapper.get(".figma-chat-reference-name-full").text()).toBe("S0001-子条目");
+    expect(wrapper.find(".figma-chat-reference-file-name").exists()).toBe(false);
     expect(wrapper.emitted("load-workspace-requirements")).toHaveLength(1);
 
     await wrapper.get("textarea").setValue("请分析 #S000");

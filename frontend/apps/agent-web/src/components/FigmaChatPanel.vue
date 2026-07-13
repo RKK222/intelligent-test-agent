@@ -4273,8 +4273,8 @@ function onCompositionEnd() {
           @click="selectRequirementReference(reference)"
         >
           <BookOpen :size="16" class="figma-chat-requirement-icon" />
-          <div class="figma-chat-agent-info">
-            <span class="figma-chat-agent-name">{{ reference.subitemName }}</span>
+          <div class="figma-chat-agent-info figma-chat-reference-info">
+            <span class="figma-chat-agent-name figma-chat-reference-name-full">{{ reference.subitemName }}</span>
             <span class="figma-chat-agent-desc">{{ reference.requirementName }} · {{ reference.filePaths.length }} 个关联文件</span>
           </div>
         </div>
@@ -4322,9 +4322,9 @@ function onCompositionEnd() {
           @click="selectMentionFile(file)"
         >
           <FileText :size="16" class="figma-chat-file-icon" />
-          <div class="figma-chat-agent-info">
-            <span class="figma-chat-agent-name">{{ file.name }}</span>
-            <span class="figma-chat-agent-desc">{{ file.directory || '工作区根目录' }}</span>
+          <div class="figma-chat-agent-info figma-chat-file-info">
+            <span class="figma-chat-agent-name figma-chat-file-name-full" :title="file.path">{{ file.name || getFileName(file.path) }}</span>
+            <span class="figma-chat-agent-desc" :title="file.path">{{ file.directory || '工作区根目录' }}</span>
           </div>
         </div>
         <div v-if="workspaceFileCandidatesLoading" class="figma-chat-agent-empty">正在搜索当前工作区文件…</div>
@@ -7113,6 +7113,73 @@ function onCompositionEnd() {
   align-items: center;
   flex: 1;
   min-width: 0;
+}
+
+/* # 需求候选不展开文件，但完整展示子条目与需求项，避免长名称撑出横向滚动。 */
+.figma-chat-reference-info {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.figma-chat-requirement-row {
+  align-items: flex-start;
+}
+
+.figma-chat-requirement-row .figma-chat-requirement-icon {
+  margin-top: 2px;
+}
+
+.figma-chat-reference-name-full,
+.figma-chat-reference-info .figma-chat-agent-desc {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.figma-chat-reference-info .figma-chat-agent-desc {
+  align-self: stretch;
+  margin-left: 0;
+  line-height: 1.4;
+}
+
+/* @ 文件候选同时完整展示文件名和相对路径，窄面板下自然换行而不省略。 */
+.figma-chat-file-info {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.figma-chat-file-row {
+  align-items: flex-start;
+}
+
+.figma-chat-file-row .figma-chat-file-icon {
+  margin-top: 2px;
+}
+
+.figma-chat-file-name-full {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.figma-chat-file-info .figma-chat-agent-desc {
+  align-self: stretch;
+  margin-left: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .figma-chat-agent-name {

@@ -5916,3 +5916,15 @@ bash /tmp/test-api-after-restart.sh
   - 新增附件展示 parts 转换及单测；新增与 8.23 真实会话相同顺序的 session-tree 回归夹具，并在本地页面打开原会话复验。
 - Result:
   - 相关 5 个 Vitest 文件 256 passed、1 skipped；agent-web typecheck 和生产 build 通过。真实历史只显示一条用户问题、一个文件标签和原 assistant 输出，不再出现文件全文消息；构建仍有既有 CSS `@import` 顺序及大 chunk 警告。
+
+### 2026-07-13 - 完整展示 @ 文件候选并保持 # 子条目选择语义
+
+- Why:
+  - 窄对话栏的 `@` 文件候选沿用单行 Agent 描述样式，长文件名和相对路径会显示省略号；`#` 候选应继续先选需求子条目，不能在候选阶段展开全部文件。
+- What:
+  - `@` 文件候选改为纵向展示完整文件名和完整相对目录，允许自然换行并显式关闭省略；文件名保持主信息，目录使用更轻的字号和颜色。
+  - `#` 保持原交互，只显示需求项、子条目和关联文件数量，并让长名称自然换行而不出现横向滚动；选中后仍通过既有事件一次加入全部相关文件。
+- How:
+  - 仅扩展 `FigmaChatPanel` 现有候选行样式和组件测试，复用原 `workspaceFileCandidates`、`selectMentionFile` 与 `selectRequirementReference` 链路；未新增候选数据源或并行选择逻辑。
+- Result:
+  - `FigmaChatPanel.test.ts` 与 `workbench-utils.test.ts` 共 180 passed、1 skipped；agent-web typecheck 和生产 build 通过，构建仅保留既有 CSS `@import` 顺序及大 chunk 警告。
