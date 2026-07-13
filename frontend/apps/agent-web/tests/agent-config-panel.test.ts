@@ -144,7 +144,7 @@ describe("AgentConfigPanel", () => {
 
   it("loads public conflict file names without fetching full public diff on startup", async () => {
     apiClientMock.getPublicAgentGitConflictFiles.mockResolvedValueOnce({
-      files: ["opencode/agents/test-design-agent.md"]
+      files: ["opencode/agents/test-design-orchestrator.md"]
     });
 
     const { view } = renderPanel();
@@ -152,7 +152,7 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.getPublicAgentGitConflictFiles).toHaveBeenCalledWith(undefined, "linux-1"));
     expect(apiClientMock.getPublicAgentDiff).not.toHaveBeenCalled();
     expect(await view.findByText("公共级存在 1 个冲突文件")).toBeTruthy();
-    expect(await view.findByText("opencode/agents/test-design-agent.md")).toBeTruthy();
+    expect(await view.findByText("opencode/agents/test-design-orchestrator.md")).toBeTruthy();
   });
 
   it("renders agent files with VS Code codicons and compact tree rows", async () => {
@@ -425,12 +425,12 @@ describe("AgentConfigPanel", () => {
     apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValueOnce({
       status: "FAILED",
       currentStep: "MERGING",
-      errorMessage: "合并冲突，请先处理 opencode/agents/test-design-agent.md 后重试"
+      errorMessage: "合并冲突，请先处理 opencode/agents/test-design-orchestrator.md 后重试"
     });
     apiClientMock.getPublicAgentDiff.mockResolvedValue({
       files: [
         {
-          path: "opencode/agents/test-design-agent.md",
+          path: "opencode/agents/test-design-orchestrator.md",
           status: "conflict",
           rawStatus: "UU",
           staged: false,
@@ -441,7 +441,7 @@ describe("AgentConfigPanel", () => {
       ]
     });
     apiClientMock.getPublicAgentGitConflict.mockResolvedValueOnce({
-      path: "opencode/agents/test-design-agent.md",
+        path: "opencode/agents/test-design-orchestrator.md",
       rawStatus: "UU",
       baseContent: "base",
       currentContent: "local",
@@ -456,12 +456,12 @@ describe("AgentConfigPanel", () => {
     await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: resolve conflict");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
-    expect(await view.findAllByText("opencode/agents/test-design-agent.md")).not.toHaveLength(0);
+    expect(await view.findAllByText("opencode/agents/test-design-orchestrator.md")).not.toHaveLength(0);
     const conflictButtons = await view.findAllByText("处理冲突");
     await fireEvent.click(conflictButtons[0]);
 
     await waitFor(() => expect(apiClientMock.getPublicAgentGitConflict).toHaveBeenCalledWith(
-      "opencode/agents/test-design-agent.md",
+      "opencode/agents/test-design-orchestrator.md",
       undefined,
       "linux-1"
     ));

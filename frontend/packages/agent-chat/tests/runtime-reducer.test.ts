@@ -643,7 +643,7 @@ describe("agent-chat runtime reducer", () => {
   it("keeps expanded slash command user parts out of the assistant response", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",
-      prompt: "/generate-cases-path 对车贷的开发文档，生成路径图",
+      prompt: "/test-design-path 对车贷的开发文档，生成路径图",
       createdAt: "2026-07-02T02:16:00Z"
     });
     const withRemoteUser = reduceAgentChatRuntime(submitted, {
@@ -678,7 +678,7 @@ describe("agent-chat runtime reducer", () => {
       {
         role: "user",
         messageId: "msg_user_command",
-        text: "/generate-cases-path 对车贷的开发文档，生成路径图"
+        text: "/test-design-path 对车贷的开发文档，生成路径图"
       }
     ]);
     expect(completed.messages).toHaveLength(1);
@@ -687,7 +687,7 @@ describe("agent-chat runtime reducer", () => {
   it("binds expanded slash command user parts when the user message snapshot is delayed", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",
-      prompt: "/generate-cases-path 对车贷的开发文档，生成路径图",
+      prompt: "/test-design-path 对车贷的开发文档，生成路径图",
       createdAt: "2026-07-02T05:44:30Z"
     });
     const completed = reduceAgentChatRuntime(submitted, {
@@ -709,7 +709,7 @@ describe("agent-chat runtime reducer", () => {
       {
         role: "user",
         messageId: "msg_f215b8020001M9BKwEZC6zAH3e",
-        text: "/generate-cases-path 对车贷的开发文档，生成路径图"
+        text: "/test-design-path 对车贷的开发文档，生成路径图"
       }
     ]);
     expect(completed.messages).toHaveLength(1);

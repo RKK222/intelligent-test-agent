@@ -209,9 +209,9 @@ class RuntimeControllerTest {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
                         eq(new UserId("usr_1234567890abcdef")),
-                        argThat(input -> "generate-cases-path".equals(input.command())
+                        argThat(input -> "test-design-path".equals(input.command())
                                 && "对车贷的开发文档，生成路径图".equals(input.arguments())
-                                && "/generate-cases-path 对车贷的开发文档，生成路径图".equals(input.effectivePrompt())),
+                                && "/test-design-path 对车贷的开发文档，生成路径图".equals(input.effectivePrompt())),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(run());
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
@@ -226,8 +226,8 @@ class RuntimeControllerTest {
                 .bodyValue("""
                         {
                           "sessionId":"ses_1234567890abcdef",
-                          "prompt":"/generate-cases-path 对车贷的开发文档，生成路径图",
-                          "command":"generate-cases-path",
+                          "prompt":"/test-design-path 对车贷的开发文档，生成路径图",
+                          "command":"test-design-path",
                           "arguments":"对车贷的开发文档，生成路径图"
                         }
                         """)

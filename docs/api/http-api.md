@@ -2035,7 +2035,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
   "model": "anthropic/claude-sonnet-4-5",
   "variant": "default",
   "mode": "build",
-  "command": "generate-cases-path",
+  "command": "test-design-path",
   "arguments": "对车贷的开发文档，生成路径图"
 }
 ```

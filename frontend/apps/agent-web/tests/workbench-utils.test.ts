@@ -911,7 +911,7 @@ describe("historical session restoration", () => {
             toolName: "task",
             callId: "call_task",
             status: "completed",
-            input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" },
+            input: { description: "分析 I2026000 测试设计对象", subagent_type: "test-design-analysis" },
             metadata: { sessionId: "ses_child" },
             output: "<task id=\"ses_child\" state=\"completed\"><task_result>\n## 子 Agent 工作内容\n识别完成。\n</task_result></task>"
           }
@@ -927,8 +927,8 @@ describe("historical session restoration", () => {
       taskMessageId: "msg_root",
       taskPartId: "prt_task",
       taskCallId: "call_task",
-      agentName: "Test-design-target-recognition",
-      title: "识别 I2026000 测试对象",
+      agentName: "Test-design-analysis",
+      title: "分析 I2026000 测试设计对象",
       status: "completed"
     });
     expect(state.subagentByTaskPartId.prt_task).toBe("ses_child");
@@ -1005,7 +1005,7 @@ describe("historical session restoration", () => {
               callID: "call_task",
               state: {
                 status: "completed",
-                input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" }
+                input: { description: "分析 I2026000 测试设计对象", subagent_type: "test-design-analysis" }
               }
             }
           }

@@ -1982,7 +1982,7 @@ test("switching history resumes the runtime-state run and reconciles active-run 
       {
         sessionId: "ses_history",
         workspaceId: "wrk_1234567890abcdef",
-        title: "/generate-cases-orthogonal 车贷",
+        title: "/test-design-orthogonal 车贷",
         status: "ACTIVE",
         pinned: false,
         createdAt: "2026-06-28T08:00:00Z",
@@ -1994,7 +1994,7 @@ test("switching history resumes the runtime-state run and reconciles active-run 
         messageId: "msg_user",
         sessionId: "ses_history",
         role: "USER",
-        content: "/generate-cases-orthogonal 车贷",
+        content: "/test-design-orthogonal 车贷",
         createdAt: "2026-06-28T08:00:00Z",
         runId: "run_history"
       }
@@ -2032,7 +2032,7 @@ test("switching history resumes the runtime-state run and reconciles active-run 
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /消息列表/ }).click();
-  await page.getByRole("button", { name: /generate-cases-orthogonal/ }).click();
+  await page.getByRole("button", { name: /test-design-orthogonal/ }).click();
 
   await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
   expect(activeRunRequests).toEqual(["/api/internal/platform/opencode-runtime/sessions/ses_history/active-run"]);
@@ -3151,14 +3151,14 @@ test("slash skill starts a recoverable run instead of a direct session command",
   await gotoWorkbench(page);
 
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因")
-    .fill("/generate-cases-path 对车贷的开发文档，生成路径图");
+    .fill("/test-design-path 对车贷的开发文档，生成路径图");
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect.poll(() => runRequests.length).toBe(1);
   expect(runRequests[0]).toMatchObject({
     sessionId: "ses_1",
-    prompt: "/generate-cases-path 对车贷的开发文档，生成路径图",
-    command: "generate-cases-path",
+    prompt: "/test-design-path 对车贷的开发文档，生成路径图",
+    command: "test-design-path",
     arguments: "对车贷的开发文档，生成路径图"
   });
   expect(commandRequests).toEqual([]);

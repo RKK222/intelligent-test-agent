@@ -1181,7 +1181,7 @@ describe("FigmaChatPanel", () => {
         messages: [],
         processStatus: { status: "READY", initializable: false, message: "ready" },
         commands: [
-          { commandId: "skill-1", name: "identify-test-objects", description: "识别测试对象", source: "skill" },
+          { commandId: "skill-1", name: "test-design", description: "测试设计公共能力", source: "skill" },
           { commandId: "command-1", name: "help", description: "帮助", source: "command" }
         ]
       }
@@ -1190,13 +1190,13 @@ describe("FigmaChatPanel", () => {
     await wrapper.get("textarea").setValue("/");
 
     expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(true);
-    expect(wrapper.text()).toContain("identify-test-objects");
+    expect(wrapper.text()).toContain("test-design");
     expect(wrapper.text()).not.toContain("帮助");
 
     await wrapper.get(".figma-chat-skill-row").trigger("click");
 
-    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("/identify-test-objects ");
-    expect(wrapper.emitted("update:inputValue")).toContainEqual(["/identify-test-objects "]);
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("/test-design ");
+    expect(wrapper.emitted("update:inputValue")).toContainEqual(["/test-design "]);
     expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(false);
   });
 
@@ -2188,7 +2188,7 @@ describe("FigmaChatPanel", () => {
             taskMessageId: "msg_root",
             taskPartId: "toolu_snapshot_task",
             taskCallId: "call_task",
-            agentName: "TEST-DESIGN-TARGET-RECOGNITION",
+            agentName: "TEST-DESIGN-ANALYSIS",
             title: "识别 I2026002 测试对象",
             status: "completed",
             updatedAt: "2026-07-03T00:00:00Z"
@@ -2202,7 +2202,7 @@ describe("FigmaChatPanel", () => {
 
     await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
-    expect(wrapper.text()).toContain("TEST-DESIGN-TARGET-RECOGNITION");
+    expect(wrapper.text()).toContain("TEST-DESIGN-ANALYSIS");
 
     await wrapper.get(".oc-subagent-card").trigger("click");
 
@@ -2232,7 +2232,7 @@ describe("FigmaChatPanel", () => {
             toolName: "task",
             callId: "call_task",
             status: "completed",
-            input: { description: "识别 I2026000 测试对象", subagent_type: "test-design-target-recognition" },
+            input: { description: "分析 I2026000 测试设计对象", subagent_type: "test-design-analysis" },
             metadata: { sessionId: "ses_child" },
             output: "<task id=\"ses_child\" state=\"completed\"><task_result>\n子智能体已识别测试对象详情\n</task_result></task>"
           }

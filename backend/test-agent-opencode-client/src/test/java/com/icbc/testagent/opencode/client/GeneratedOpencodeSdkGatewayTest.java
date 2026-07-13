@@ -166,7 +166,7 @@ class GeneratedOpencodeSdkGatewayTest {
                             REMOTE_SESSION_ID,
                             "/tmp/demo",
                             null,
-                            "generate-cases-path",
+                            "test-design-path",
                             "对车贷的开发文档，生成路径图",
                             List.of(),
                             null,
@@ -180,7 +180,7 @@ class GeneratedOpencodeSdkGatewayTest {
             assertThat(result.accepted()).isTrue();
             assertThat(request.get().path()).isEqualTo("/session/" + REMOTE_SESSION_ID + "/command");
             assertThat(request.get().body()).contains(
-                    "\"command\":\"generate-cases-path\"",
+                    "\"command\":\"test-design-path\"",
                     "\"arguments\":\"对车贷的开发文档，生成路径图\"",
                     "\"model\":\"opencode/north-mini-code-free\"");
         } finally {

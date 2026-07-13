@@ -193,20 +193,20 @@ class RunApplicationServiceTest {
 
         Run run = service.startRun(new StartRunInput(
                         new SessionId("ses_1234567890abcdef"),
-                        "/generate-cases-path 对车贷的开发文档，生成路径图",
-                        List.of(StartRunInput.PromptPart.text("/generate-cases-path 对车贷的开发文档，生成路径图")),
+                        "/test-design-path 对车贷的开发文档，生成路径图",
+                        List.of(StartRunInput.PromptPart.text("/test-design-path 对车贷的开发文档，生成路径图")),
                         null,
                         "build",
                         "opencode/north-mini-code-free",
                         null,
                         "build",
-                        "generate-cases-path",
+                        "test-design-path",
                         "对车贷的开发文档，生成路径图"),
                 "trace_1234567890abcdef");
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         assertThat(facade.startCommandCommands).singleElement().satisfies(command -> {
-            assertThat(command.command()).isEqualTo("generate-cases-path");
+            assertThat(command.command()).isEqualTo("test-design-path");
             assertThat(command.arguments()).isEqualTo("对车贷的开发文档，生成路径图");
         });
     }

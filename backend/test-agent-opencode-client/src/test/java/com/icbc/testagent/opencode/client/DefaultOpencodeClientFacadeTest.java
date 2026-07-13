@@ -157,7 +157,7 @@ class DefaultOpencodeClientFacadeTest {
                 "ses_remote1234567890abcdef",
                 "/tmp/demo",
                 null,
-                "generate-cases-path",
+                "test-design-path",
                 "对车贷的开发文档，生成路径图",
                 List.of(),
                 null,
@@ -168,7 +168,7 @@ class DefaultOpencodeClientFacadeTest {
                 "trace_1234567890abcdef")).block();
 
         assertThat(result.accepted()).isTrue();
-        assertThat(gateway.lastCommand).isEqualTo("generate-cases-path");
+        assertThat(gateway.lastCommand).isEqualTo("test-design-path");
         assertThat(gateway.lastArguments).isEqualTo("对车贷的开发文档，生成路径图");
     }
 
