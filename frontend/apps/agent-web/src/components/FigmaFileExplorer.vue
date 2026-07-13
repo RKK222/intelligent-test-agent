@@ -6,7 +6,7 @@ import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFoote
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
 import GitChangesPanel from "./GitChangesPanel.vue";
-import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe2, RefreshCw, Search } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe, RefreshCw, Search } from "lucide-vue-next";
 
 const props = defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -287,7 +287,7 @@ defineExpose({
                 :disabled="!workspaceId"
                 @click="openIframeDialog"
               >
-                <Globe2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+                <Globe class="h-3.5 w-3.5" :stroke-width="1.5" />
               </button>
                <button
                 v-if="tab === 'explorer'"
