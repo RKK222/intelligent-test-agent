@@ -186,8 +186,8 @@ function appendAssistantGroupRow(
 
   if (part?.type === "tool") {
     const toolKey = normalizeToolName(part);
-    // task 是子 Agent 导航入口，必须直接可见，不能并入普通工具折叠组。
-    if (toolKey === "task") {
+    // task 是子 Agent 导航入口，question 需要保留每次提问的时间线位置，二者都不能并入普通工具折叠组。
+    if (toolKey === "task" || toolKey === "question") {
       appendSingleAssistantPartRow(rows, accumulator, {
         userMessageId,
         messageId: assistantMessageId,

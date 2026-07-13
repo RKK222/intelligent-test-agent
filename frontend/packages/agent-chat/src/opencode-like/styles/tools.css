@@ -178,6 +178,65 @@
   gap: 10px;
 }
 
+.oc-question-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.oc-question-detail__item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.oc-question-detail__item + .oc-question-detail__item {
+  padding-top: 12px;
+  border-top: 1px solid var(--oc-border);
+}
+
+.oc-question-detail__header {
+  color: var(--oc-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+.oc-question-detail__prompt {
+  color: var(--oc-fg);
+  font-size: var(--oc-text-sm);
+  font-weight: 500;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.oc-question-detail__answers {
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.oc-question-detail__answer {
+  display: grid;
+  gap: 1px;
+  padding-left: 10px;
+  border-left: 2px solid var(--oc-border-strong);
+}
+
+.oc-question-detail__answer-label {
+  color: var(--oc-fg);
+  font-size: var(--oc-text-sm);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.oc-question-detail__answer-description,
+.oc-question-detail__pending {
+  color: var(--oc-subtle);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
 .oc-subagent-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;

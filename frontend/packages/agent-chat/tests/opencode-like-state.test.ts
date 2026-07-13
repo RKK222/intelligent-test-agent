@@ -431,6 +431,28 @@ describe("opencode-like conversation state", () => {
     ]);
   });
 
+  it("projects repeated question tool calls as independent timeline rows", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "确认发布参数"),
+        assistantMessage("msg_question_1", [
+          toolPart("prt_question_env", "question", { questions: [{ question: "选择环境" }] })
+        ]),
+        assistantMessage("msg_question_2", [
+          toolPart("prt_question_scope", "question", { questions: [{ question: "选择范围" }] })
+        ])
+      ]
+    });
+
+    const rows = createTimelineRows(state);
+
+    expect(rows.some((row) => row.type === "tool-group")).toBe(false);
+    expect(rows.filter((row) => row.type === "assistant-part").map((row) => (row as any).partId)).toEqual([
+      "prt_question_env",
+      "prt_question_scope"
+    ]);
+  });
+
   it("keeps raw-properties task part visible in the root projection after child output arrives", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",

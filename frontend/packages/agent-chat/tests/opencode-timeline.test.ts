@@ -800,6 +800,101 @@ describe("OpencodeTimeline", () => {
     expect(getByText("已找到相关文档。")).toBeTruthy();
   });
 
+  it("renders each question call separately with structured selected answers", async () => {
+    const answeredQuestion = {
+      ...toolPart("part_question_1", "question", {
+        questions: [
+          {
+            header: "部署环境",
+            question: "请选择部署环境",
+            options: [
+              { label: "测试环境", description: "仅部署到测试集群" },
+              { label: "生产环境", description: "部署到正式生产集群" }
+            ]
+          },
+          {
+            header: "验证范围",
+            question: "请选择验证范围",
+            multiple: true,
+            options: [
+              { label: "接口测试", description: "执行接口回归" },
+              { label: "页面测试", description: "执行页面回归" }
+            ]
+          },
+          {
+            header: "补充说明",
+            question: "请输入其他环境",
+            options: [{ label: "无", description: "不增加其他环境" }]
+          }
+        ]
+      }),
+      metadata: {
+        answers: [["测试环境"], ["接口测试", "页面测试"], ["预发布环境"]]
+      }
+    } satisfies Extract<MessagePart, { type: "tool" }>;
+    const pendingQuestion = {
+      ...toolPart("part_question_2", "question", {
+        questions: [{ header: "发布时间", question: "请选择发布时间", options: [] }]
+      }),
+      status: "running"
+    } satisfies Extract<MessagePart, { type: "tool" }>;
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "确认发布参数"),
+        assistantMessage("msg_question_1", [answeredQuestion]),
+        assistantMessage("msg_read", [toolPart("part_read", "read", { filePath: "README.md" })]),
+        assistantMessage("msg_question_2", [pendingQuestion])
+      ]
+    });
+
+    const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
+
+    const questionTools = container.querySelectorAll('[data-testid="oc-question-tool"]');
+    expect(questionTools).toHaveLength(2);
+    expect(questionTools[0]?.querySelector(".oc-tool__status")?.textContent).toBe("已回答");
+    expect(questionTools[1]?.querySelector(".oc-tool__status")?.textContent).toBe("进行中");
+    expect(container.querySelector(".oc-context-group__trigger .oc-tool__status")?.textContent).toBe("已读取");
+    expect(queryByText("预发布环境")).toBeNull();
+
+    await fireEvent.click(questionTools[0]?.querySelector(".oc-tool__trigger") as HTMLElement);
+
+    expect(getByText("部署环境")).toBeTruthy();
+    expect(getByText("请选择部署环境")).toBeTruthy();
+    expect(getByText("测试环境")).toBeTruthy();
+    expect(getByText("仅部署到测试集群")).toBeTruthy();
+    expect(getByText("接口测试")).toBeTruthy();
+    expect(getByText("执行接口回归")).toBeTruthy();
+    expect(getByText("页面测试")).toBeTruthy();
+    expect(getByText("执行页面回归")).toBeTruthy();
+    expect(getByText("预发布环境")).toBeTruthy();
+    expect(queryByText("不增加其他环境")).toBeNull();
+
+    await fireEvent.click(questionTools[1]?.querySelector(".oc-tool__trigger") as HTMLElement);
+    expect(within(questionTools[1] as HTMLElement).getAllByText("请选择发布时间")).toHaveLength(2);
+    expect(within(questionTools[1] as HTMLElement).getByText("等待回答")).toBeTruthy();
+  });
+
+  it("does not invent answer content when a completed question lacks answer metadata", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "恢复历史提问"),
+        assistantMessage("msg_question_1", [
+          toolPart("part_question_1", "question", {
+            questions: [{ header: "历史问题", question: "请选择历史答案", options: [{ label: "选项 A", description: "历史选项" }] }]
+          })
+        ])
+      ]
+    });
+
+    const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
+    const questionTool = container.querySelector('[data-testid="oc-question-tool"]') as HTMLElement;
+
+    expect(questionTool.querySelector(".oc-tool__status")?.textContent).toBe("已回答");
+    await fireEvent.click(questionTool.querySelector(".oc-tool__trigger") as HTMLElement);
+    expect(getByText("暂无回答详情")).toBeTruthy();
+    expect(queryByText("历史选项")).toBeNull();
+  });
+
   it("allows user to interrupt auto-scrolling by scrolling up", async () => {
     const initialMessages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),
