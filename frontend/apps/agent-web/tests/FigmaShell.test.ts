@@ -333,6 +333,34 @@ describe("FigmaShell", () => {
     expect(wrapper.get('[data-testid="robot-side-question-answer"]').text()).toContain("当前上下文已经完成初始化");
   });
 
+  it("disables fork side questions until a main session exists", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell({
+      props: {
+        showProcessStatusInPet: true,
+        sideQuestionAvailable: false,
+        opencodeProcessStatus: {
+          status: "READY",
+          initializable: false,
+          message: "TestAgent 进程已就绪",
+          serviceStatus: "RUNNING",
+          serviceAddress: "127.0.0.1:4096"
+        }
+      }
+    });
+    await summonRobot(wrapper);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+
+    const openButton = wrapper.get('[data-testid="robot-side-question-open-from-process"]');
+    expect(openButton.attributes("disabled")).toBeDefined();
+    expect(openButton.attributes("title")).toBe("请先选择或新建一个主对话并发送消息");
+    await openButton.trigger("click");
+
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
+    expect(wrapper.emitted("robot-side-question")).toBeUndefined();
+  });
+
   it("shows real side-question progress and keeps the dialog open on outside clicks while loading", async () => {
     vi.useFakeTimers();
     const wrapper = mountShell({

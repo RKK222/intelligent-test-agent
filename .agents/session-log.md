@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 禁止无主对话时创建宠物旁路 fork
+
+- Why:
+  - 宠物状态气泡在没有选中真实主对话时仍开放“问问宠物当前任务”，但旁路实现必须依赖主 Session 创建临时 fork。
+- What:
+  - `AgentWorkbench` 复用当前 `sessionId` 下发旁路可用性；`FigmaShell` 在无真实主 Session 时禁用入口并给出提示，打开与提交函数也同步防御。未发送首条消息的新对话草稿仍视为没有主 Session。
+- How:
+  - 保留 `handleRobotSideQuestion` 原有空 Session 拦截作为第二层保护；未新增 API、事件、后端分支或会话状态模型。同步 agent-web README、包说明、组件测试和桌面/移动 Playwright 场景。
+- Result:
+  - FigmaShell/FigmaChatPanel 定向 Vitest 141 passed、1 skipped；agent-web typecheck、生产 build、`git diff --check` 通过；相关 Playwright 桌面/移动 2/2 通过。按 `.env.test` / `test` profile 重启三服务，backend readiness 为 UP，frontend 3000 返回 200。构建仍保留既有 CSS `@import` 顺序和大 chunk 警告。
+
 ### 2026-07-13 - 完善首次初始化提醒与对话输入门禁
 
 - Why:

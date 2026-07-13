@@ -4633,6 +4633,7 @@ async function handleLogout() {
     :side-question-error="robotSideQuestion.error.value"
     :side-question-loading="robotSideQuestion.loading.value"
     :side-question-progress="robotSideQuestion.progress.value"
+    :side-question-available="Boolean(session?.sessionId)"
     :runtime-inventory="runtimeInventoryForShell"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"

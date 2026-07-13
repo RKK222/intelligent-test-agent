@@ -3067,6 +3067,12 @@ test("workbench disables chat until a conversation is selected", async ({ page }
 
   await gotoWorkbench(page, { selectConversation: false });
 
+  await page.getByRole("button", { name: "唤起小宠物" }).click();
+  await page.getByTestId("figma-robot").click();
+  const forkButton = page.getByTestId("robot-side-question-open-from-process");
+  await expect(forkButton).toBeDisabled();
+  await expect(forkButton).toHaveAttribute("title", "请先选择或新建一个主对话并发送消息");
+
   const composer = page.locator(".figma-chat-input-card");
   const textarea = page.getByPlaceholder("请先从消息列表选择对话，或新建对话");
   await expect(composer).toHaveClass(/is-disabled/);
@@ -3078,6 +3084,8 @@ test("workbench disables chat until a conversation is selected", async ({ page }
 
   await expect(composer).not.toHaveClass(/is-disabled/);
   await expect(page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因")).toBeEnabled();
+  await page.getByTestId("figma-robot").click();
+  await expect(forkButton).toBeDisabled();
 });
 
 test("phase 11 runtime flow sends attachment parts and handles docks", async ({ page }) => {

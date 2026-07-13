@@ -45,6 +45,8 @@ const props = withDefaults(
     sideQuestionError?: string | null;
     sideQuestionLoading?: boolean;
     sideQuestionProgress?: string | null;
+    /** 宠物旁路问答必须基于已存在的主 Session 创建 fork；新对话草稿不满足该条件。 */
+    sideQuestionAvailable?: boolean;
     showLeftPanel?: boolean;
     showRightPanel?: boolean;
     runtimeInventory?: RuntimeInventorySummary;
@@ -59,6 +61,7 @@ const props = withDefaults(
     joinableApps: () => [],
     selectedAppId: "fgcms-psn",
     showProcessStatusInPet: false,
+    sideQuestionAvailable: true,
     showLeftPanel: true,
     showRightPanel: true
   }
@@ -1251,6 +1254,7 @@ function toggleRobotProcessStatus() {
 }
 
 function openRobotSideQuestionFromProcess() {
+  if (!props.sideQuestionAvailable) return;
   robotProcessStatusOpen.value = false;
   robotQuestionOpen.value = true;
   void nextTick(() => robotQuestionInput.value?.focus());
@@ -1284,7 +1288,7 @@ function onRobotClick() {
 
 function submitRobotQuestion() {
   const question = robotQuestionDraft.value.trim();
-  if (!question || props.sideQuestionLoading) return;
+  if (!props.sideQuestionAvailable || !question || props.sideQuestionLoading) return;
   emit("robot-side-question", question);
 }
 
@@ -1887,6 +1891,8 @@ function submitJoinApp() {
         type="button"
         class="figma-robot-process-question"
         data-testid="robot-side-question-open-from-process"
+        :disabled="!sideQuestionAvailable"
+        :title="sideQuestionAvailable ? '问问宠物当前任务' : '请先选择或新建一个主对话并发送消息'"
         @click="openRobotSideQuestionFromProcess"
       >
         问问宠物当前任务
@@ -3452,6 +3458,12 @@ function submitJoinApp() {
   color: #5e4e9b;
   text-decoration: underline;
   outline: none;
+}
+
+.figma-robot-process-question:disabled {
+  color: #a8acb4;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 
 .robot-pin-indicator {
