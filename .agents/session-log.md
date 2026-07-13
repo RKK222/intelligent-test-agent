@@ -21,6 +21,16 @@
   - 复用既有 `isActiveTurn` 边界，在 context/reasoning/tool 分组投影处统一计算当前轮 `busy`；未修改 reducer、消息类型、RunEvent、后端 API 或持久化结构。
 - Result:
   - TDD 回归先稳定复现三个历史分组 `busy=true`，修复后状态投影 15/15、时间线组件 25/25、agent-chat 包和前端 workspace 类型检查通过；时间线测试仍输出既有 `DirectoryRows.vue` 嵌套 button warning，与本次无关。
+### 2026-07-13 - 恢复 test 本地数据库并固定 Docker 重启策略
+
+- Why:
+  - `.env.test` 使用的 PostgreSQL `test-agent-postgres:15432` 和 Redis `test-agent-redis:16379` 同时退出，导致本地 test profile 启动无法完成。
+- What:
+  - 重启两个容器并设置 Docker restart policy 为 `always`；未修改 `.env.test`，也未触碰不被 `.env.test` 使用的 `pg-local`。
+- How:
+  - 执行 `docker update --restart=always test-agent-postgres test-agent-redis` 和 `docker restart test-agent-postgres test-agent-redis`，随后按项目规范重新执行 `./restart-dev-services.sh --profile test --env-file .env.test`。
+- Result:
+  - 两个容器状态为 `healthy`，PostgreSQL 接受连接、Redis 返回 `PONG`；后端 liveness/readiness 为 `UP`，前端 `127.0.0.1:3000` 返回 `200`，登录 CORS 预检为 `200`，opencode-manager 已连接。
 
 ### 2026-07-11 - 建立 Mermaid 可视化提交与 main 的正式合并关系
 
