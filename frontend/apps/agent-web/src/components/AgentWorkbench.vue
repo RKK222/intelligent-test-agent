@@ -72,6 +72,7 @@ import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } f
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
+import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { type PreviewMode } from "./WorkbenchFooter.vue";
 import OpencodeProcessStartupDialog from "./OpencodeProcessStartupDialog.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
@@ -343,6 +344,8 @@ let lastDuration: string | undefined;
 let lastTokens = 0;
 const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
+const helpCenterOpen = ref(false);
+const helpCenterTopic = ref("getting-started");
 const robotSideQuestion = useSideQuestionRun({
   api,
   baseUrl: apiBaseUrl,
@@ -3646,6 +3649,14 @@ function handleCloseRobotSideQuestion() {
   robotSideQuestion.reset();
 }
 
+/**
+ * 顶部入口和具体功能按钮共用一个帮助中心，只通过 topic 决定初始章节。
+ */
+function openHelpCenter(topic = "getting-started") {
+  helpCenterTopic.value = topic;
+  helpCenterOpen.value = true;
+}
+
 function summarizePromptParts(parts: PromptPart[]) {
   return parts.map((part) => {
     if (part.type === "file") {
@@ -4843,6 +4854,7 @@ async function handleLogout() {
     @join-app="handleJoinApp"
     @robot-side-question="handleRobotSideQuestion"
     @close-robot-side-question="handleCloseRobotSideQuestion"
+    @open-help="openHelpCenter"
   >
     <template #activity>
       <nav class="figma-activity-nav" aria-label="工作台活动栏">
@@ -5111,6 +5123,7 @@ async function handleLogout() {
           @history-search-change="handleHistorySearchChange"
           @load-more-history="loadMoreHistory"
           @initialize-process="beginInitializeOpencodeProcess"
+          @open-help="openHelpCenter"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @open-file="openFile"
           @preview-context="handlePreviewContext"
@@ -5188,6 +5201,18 @@ async function handleLogout() {
   />
 
   <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" @close="settingsOpen = false" />
+
+  <HelpCenterDialog
+    :open="helpCenterOpen"
+    :initial-topic="helpCenterTopic"
+    :side-question-available="Boolean(session?.sessionId)"
+    :side-question-answer="robotSideQuestion.answer.value"
+    :side-question-error="robotSideQuestion.error.value"
+    :side-question-loading="robotSideQuestion.loading.value"
+    :side-question-progress="robotSideQuestion.progress.value"
+    @close="helpCenterOpen = false"
+    @ask-pet="handleRobotSideQuestion"
+  />
 
   <OpencodeProcessStartupDialog
     :open="processStartupDialogOpen"

@@ -38,6 +38,14 @@ describe("FigmaShell", () => {
     window.localStorage.removeItem("figma-shell-robot-fixed");
   });
 
+  it("opens the built-in manual from the global help entry", async () => {
+    const wrapper = mountShell();
+
+    await wrapper.get('[data-testid="help-center-open"]').trigger("click");
+
+    expect(wrapper.emitted("open-help")?.[0]).toEqual(["getting-started"]);
+  });
+
   it("restores a saved robot root position as the next natural start position", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 120, y: 180 }));
 

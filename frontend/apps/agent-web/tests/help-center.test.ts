@@ -1,0 +1,94 @@
+import { mount } from "@vue/test-utils";
+import { describe, expect, it } from "vitest";
+import HelpCenterDialog from "../src/components/HelpCenterDialog.vue";
+import {
+  buildManualQuestionPrompt,
+  helpDocumentUrl,
+  normalizeHelpTopic
+} from "../src/components/help-center";
+
+const dialogStub = {
+  props: ["modelValue"],
+  emits: ["update:modelValue"],
+  template: '<section v-if="modelValue"><slot name="header" /><slot /></section>'
+};
+
+const buttonStub = {
+  props: ["disabled", "loading"],
+  emits: ["click"],
+  template: '<button type="button" :disabled="disabled || loading" @click="$emit(\'click\')"><slot /></button>'
+};
+
+const inputStub = {
+  props: ["modelValue", "disabled"],
+  emits: ["update:modelValue"],
+  template: '<textarea :value="modelValue" :disabled="disabled" @input="$emit(\'update:modelValue\', $event.target.value)" />'
+};
+
+function mountHelpCenter(props: Record<string, unknown> = {}) {
+  return mount(HelpCenterDialog, {
+    props: {
+      open: true,
+      initialTopic: "getting-started",
+      sideQuestionAvailable: true,
+      ...props
+    },
+    global: {
+      stubs: {
+        "el-dialog": dialogStub,
+        "el-button": buttonStub,
+        "el-input": inputStub
+      }
+    }
+  });
+}
+
+describe("help center", () => {
+  it("keeps manual navigation under the same-origin help base and rejects unknown topics", () => {
+    expect(helpDocumentUrl("process-initialization")).toBe("/help/guide/process-initialization.html");
+    expect(normalizeHelpTopic("unknown")).toBe("getting-started");
+  });
+
+  it("opens the requested chapter and switches the embedded manual", async () => {
+    const wrapper = mountHelpCenter({ initialTopic: "process-initialization" });
+
+    expect(wrapper.get('[data-testid="help-center-frame"]').attributes("src"))
+      .toBe("/help/guide/process-initialization.html");
+
+    const workspaceTopic = wrapper.findAll(".ta-help-center-topic")
+      .find((button) => button.text().includes("应用与工作区"));
+    expect(workspaceTopic).toBeDefined();
+    await workspaceTopic!.trigger("click");
+
+    expect(wrapper.get('[data-testid="help-center-frame"]').attributes("src"))
+      .toBe("/help/guide/workspace.html");
+  });
+
+  it("grounds pet questions with the active manual chapter", async () => {
+    const wrapper = mountHelpCenter({ initialTopic: "process-initialization" });
+    const input = wrapper.get('[data-testid="help-center-question-input"]');
+    await input.setValue("为什么初始化按钮不能点击？");
+    await wrapper.get('[data-testid="help-center-question-submit"]').trigger("click");
+
+    const emittedPrompt = wrapper.emitted("ask-pet")?.[0]?.[0] as string;
+    expect(emittedPrompt).toContain("【当前章节】初始化进程");
+    expect(emittedPrompt).toContain("分配专属进程");
+    expect(emittedPrompt).toContain("为什么初始化按钮不能点击？");
+    expect(emittedPrompt.length).toBeLessThan(3_900);
+  });
+
+  it("keeps the manual available while pet Q&A is unavailable without a main session", () => {
+    const wrapper = mountHelpCenter({ sideQuestionAvailable: false });
+
+    expect(wrapper.find('[data-testid="help-center-frame"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="help-center-question-input"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("建立主对话后即可追问");
+  });
+
+  it("builds a bounded manual prompt from the single Markdown source", () => {
+    const prompt = buildManualQuestionPrompt("workspace", "个人工作区是什么？");
+    expect(prompt).toContain("应用版本与个人工作区");
+    expect(prompt).toContain("个人工作区是什么？");
+    expect(prompt.length).toBeLessThan(3_900);
+  });
+});

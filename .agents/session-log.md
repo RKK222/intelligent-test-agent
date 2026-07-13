@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-14 - 内置 VitePress 用户手册并接入宠物问答
+
+- Why:
+  - 用户希望在应用内直接查询按钮与功能的操作方式，尤其是 TestAgent 进程初始化，并希望评估可离线嵌入的开源 Wiki 方案以及宠物问答入口。
+- What:
+  - 新增 `apps/user-manual` VitePress 静态手册，覆盖快速开始、进程初始化、应用与工作区、对话上下文、Agent 配置和常见问题；顶部问号、初始化卡片与宠物进程气泡可按上下文打开对应章节。
+  - 帮助中心内嵌同源手册、本地全文搜索和“问小宠物”；宠物问答复用既有旁路 RunEvent 链路，只携带当前章节的有界 Markdown 上下文，没有真实主 Session 时继续提供手册与搜索。
+  - 对比 VitePress、Docsify、Wiki.js、BookStack 后选择 MIT 协议的 VitePress 1.6.4；对标分析报告输出到本次 Codex artifact 目录，不纳入仓库。
+- How:
+  - `agent-web` 的 `predev` / `prebuild` 自动构建手册到 `public/help/`，最终随主应用发布且无需独立服务或数据库；开发和 preview 中显式改写 `/help/`，避免被主应用 SPA fallback 接管。同步 frontend、agent-web、user-manual README、包说明和模块地图，新增帮助 URL、问答约束及两个入口组件测试。
+- Result:
+  - 前端全量 lint、typecheck、55 文件 Vitest（763 passed/1 skipped）和生产 build 通过；修正手册首页开发路由后再次通过 agent-web lint、typecheck 与 build。按 `.env.test` / `test` profile 重启三服务成功，backend health/readiness 为 UP，frontend、`/help/`、进程初始化章节和登录 CORS 正常，manager WebSocket 已连接。DOCX 结构校验与首屏渲染检查通过；本机未安装 LibreOffice，因此未做 DOCX 全页 PDF 分页预览。构建保留既有 CSS `@import` 顺序和大 chunk 警告。
+
 ### 2026-07-13 - 增加扫雷数字格双击展开
 
 - Why:

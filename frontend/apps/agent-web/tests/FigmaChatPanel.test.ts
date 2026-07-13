@@ -490,6 +490,10 @@ describe("FigmaChatPanel", () => {
       expect(wrapper.find(".figma-chat-process-status").exists()).toBe(true);
       await initButton.trigger("click");
       expect(wrapper.emitted("initialize-process")).toEqual([[]]);
+
+      await wrapper.get('[data-testid="chat-process-help"]').trigger("click");
+      expect(wrapper.find(".figma-chat-process-status").exists()).toBe(true);
+      expect(wrapper.emitted("open-help")?.[0]).toEqual(["process-initialization"]);
     } finally {
       wrapper.unmount();
     }

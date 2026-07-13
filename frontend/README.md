@@ -24,6 +24,7 @@
 
 ```text
 apps/agent-web
+apps/user-manual
 packages/backend-api
 packages/event-stream-client
 packages/workbench-shell
@@ -36,6 +37,8 @@ packages/test-runner
 packages/ui-kit
 packages/shared-types
 ```
+
+`apps/user-manual` 使用 VitePress 1.6 构建内置用户手册，输出到 `agent-web/public/help/` 并随主应用一起打包。手册使用浏览器本地全文索引，不依赖公网搜索、独立服务或数据库；`agent-web` 的 `dev` / `build` 会先自动构建手册。
 
 `packages/editor` 在 Markdown 预览中支持 Mermaid `flowchart`/`graph` 与 `sequenceDiagram` 可视化编辑。图模型、parser、serializer 与 Vue Flow 画布均留在 editor 包内；应用后只回写当前 Markdown fence，并继续复用工作台 dirty、Git Diff 与 workspace 文件保存链路。
 
@@ -119,7 +122,7 @@ corepack pnpm dev
 
 服务启动后可在仓库根目录执行：
 
-右侧主对话在 TestAgent 进程 ready 且工作区可用时允许直接输入首条消息，发送时才创建 Session，不要求先点击“新建对话”；宠物旁路问答仍要求已有真实主 Session。点击宠物后以对话为主体，标题栏的小手柄按钮可进入纯前端俄罗斯方块、扫雷、数独和贪吃蛇；四个入口使用紧凑 2×2 小卡片排布，不新增独立活动栏按钮、后端 API 或持久化状态。
+右侧主对话在 TestAgent 进程 ready 且工作区可用时允许直接输入首条消息，发送时才创建 Session，不要求先点击“新建对话”；宠物旁路问答仍要求已有真实主 Session。顶部问号打开同源嵌入的用户手册，初始化状态卡可直接定位到对应章节；帮助中心问宠物时复用既有旁路 Run，并把当前 Markdown 章节作为限定资料，不新增后端 API。点击宠物后以对话为主体，标题栏的小手柄按钮可进入纯前端俄罗斯方块、扫雷、数独和贪吃蛇；四个入口使用紧凑 2×2 小卡片排布，不新增独立活动栏按钮、后端 API 或持久化状态。
 
 ```bash
 tools/dev-runnable-loop-check.sh

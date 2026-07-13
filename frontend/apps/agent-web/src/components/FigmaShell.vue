@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
-import { ChevronDown, Gamepad2, LogOut, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { ChevronDown, CircleHelp, Gamepad2, LogOut, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
@@ -103,6 +103,7 @@ const emit = defineEmits<{
   (e: "join-app", appId: string, callback: (success: boolean) => void): void;
   (e: "robot-side-question", question: string): void;
   (e: "close-robot-side-question"): void;
+  (e: "open-help", topic?: string): void;
 }>();
 
 const appMenuOpen = ref(false);
@@ -1493,6 +1494,16 @@ function submitJoinApp() {
 
 
       <div class="figma-header-right">
+        <button
+          type="button"
+          class="figma-header-help"
+          data-testid="help-center-open"
+          aria-label="打开用户手册"
+          title="用户手册"
+          @click.stop="emit('open-help', 'getting-started')"
+        >
+          <CircleHelp :size="16" />
+        </button>
         <div class="figma-runtime-inventory-wrapper" @click.stop>
           <button
             type="button"
@@ -1924,6 +1935,14 @@ function submitJoinApp() {
       <button
         type="button"
         class="figma-robot-process-question"
+        data-testid="robot-process-help"
+        @click="emit('open-help', 'process-initialization')"
+      >
+        查看操作手册
+      </button>
+      <button
+        type="button"
+        class="figma-robot-process-question"
         data-testid="robot-side-question-open-from-process"
         :disabled="!sideQuestionAvailable"
         :title="sideQuestionAvailable ? '问问宠物当前任务' : '请先在主对话发送一条消息'"
@@ -2100,6 +2119,28 @@ function submitJoinApp() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.figma-header-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #fff;
+  color: #5f6b7a;
+  cursor: pointer;
+  padding: 0;
+}
+
+.figma-header-help:hover,
+.figma-header-help:focus-visible {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #27384b;
+  outline: none;
 }
 
 .figma-runtime-inventory-wrapper {

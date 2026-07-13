@@ -1,0 +1,28 @@
+:root {
+  --vp-c-brand-1: #315b75;
+  --vp-c-brand-2: #426f89;
+  --vp-c-brand-3: #507f98;
+  --vp-c-brand-soft: rgb(49 91 117 / 12%);
+  --vp-font-family-base: "Geist Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --vp-font-family-mono: "Geist Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.VPNavBarTitle .title {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.vp-doc h1 {
+  letter-spacing: -0.02em;
+}
+
+.vp-doc .custom-block {
+  border-radius: 10px;
+}
+
+.VPHomeHero .name {
+  background: linear-gradient(120deg, #27384b, #5aa9a6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

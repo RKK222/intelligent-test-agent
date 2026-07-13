@@ -49,6 +49,7 @@ declare module 'vue' {
     FigmaShell: typeof import('./src/components/FigmaShell.vue')['default']
     GeneralParamManagementPanel: typeof import('./src/components/system/GeneralParamManagementPanel.vue')['default']
     GitChangesPanel: typeof import('./src/components/GitChangesPanel.vue')['default']
+    HelpCenterDialog: typeof import('./src/components/HelpCenterDialog.vue')['default']
     InternalModelProviderPanel: typeof import('./src/components/system/InternalModelProviderPanel.vue')['default']
     OpencodeProcessStartupDialog: typeof import('./src/components/OpencodeProcessStartupDialog.vue')['default']
     OpencodePublicConfigManagementPanel: typeof import('./src/components/system/OpencodePublicConfigManagementPanel.vue')['default']

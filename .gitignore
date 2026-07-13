@@ -60,6 +60,7 @@ temp/
 
 # ===== 前端工具缓存 / 产物 =====
 .vite/
+frontend/apps/agent-web/public/help/
 .playwright-mcp/
 .claude/
 .superpowers/

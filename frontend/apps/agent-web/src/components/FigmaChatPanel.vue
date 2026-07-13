@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   Bell,
   BookOpen,
+  CircleHelp,
   CheckCircle,
   ChevronDown,
   ChevronUp,
@@ -767,6 +768,7 @@ const emit =
     (e: 'open-diff', path: string): void
     (e: 'open-file', path: string): void
     (e: 'initialize-process'): void
+    (e: 'open-help', topic?: string): void
     (e: 'select-model', model: any): void
     (e: 'change-agent', agentId: string): void
     (e: 'refresh-agents'): void
@@ -2535,7 +2537,7 @@ function onProcessStatusDotPointerDown(event: PointerEvent) {
 
 function onProcessStatusCardPointerDown(event: PointerEvent) {
   // 初始化按钮是独立操作，不能被卡片拖动逻辑截获。
-  if ((event.target as HTMLElement | null)?.closest('.figma-chat-process-init')) return
+  if ((event.target as HTMLElement | null)?.closest('.figma-chat-process-action')) return
   startProcessStatusDrag(event, true)
 }
 
@@ -4207,18 +4209,30 @@ function onCompositionEnd() {
           processStatusText
         }}</span>
       </div>
-      <button
-        v-if="processStatus?.status === 'NEEDS_INITIALIZATION'"
-        type="button"
-        class="figma-chat-process-init"
-        :disabled="
-          processInitializing || processLoading || !processStatus.initializable
-        "
-        @click.stop="emit('initialize-process')"
-        @keydown.stop
-      >
-        {{ processInitButtonLabel }}
-      </button>
+      <div v-if="processStatus?.status === 'NEEDS_INITIALIZATION'" class="figma-chat-process-actions">
+        <button
+          type="button"
+          class="figma-chat-process-action figma-chat-process-help"
+          data-testid="chat-process-help"
+          aria-label="查看 TestAgent 进程初始化手册"
+          title="查看初始化说明"
+          @click.stop="emit('open-help', 'process-initialization')"
+          @keydown.stop
+        >
+          <CircleHelp :size="15" />
+        </button>
+        <button
+          type="button"
+          class="figma-chat-process-action figma-chat-process-init"
+          :disabled="
+            processInitializing || processLoading || !processStatus.initializable
+          "
+          @click.stop="emit('initialize-process')"
+          @keydown.stop
+        >
+          {{ processInitButtonLabel }}
+        </button>
+      </div>
     </div>
 
     <!-- 技能面板：输入 / 触发 -->
@@ -7474,6 +7488,34 @@ function onCompositionEnd() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.figma-chat-process-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.figma-chat-process-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #b5b5b5;
+  border-radius: 8px;
+  background: #fff;
+  color: #526173;
+  cursor: pointer;
+}
+
+.figma-chat-process-help:hover,
+.figma-chat-process-help:focus-visible {
+  background: #f0f3f8;
+  color: #27384b;
+  outline: none;
 }
 
 .figma-chat-process-init:not(:disabled):hover {

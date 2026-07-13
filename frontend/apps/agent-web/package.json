@@ -2,7 +2,10 @@
   "name": "@test-agent/agent-web",
   "private": true,
   "scripts": {
+    "manual:build": "corepack pnpm --filter @test-agent/user-manual build",
+    "predev": "corepack pnpm manual:build",
     "dev": "vite --mode localhost",
+    "prebuild": "corepack pnpm manual:build",
     "build": "vue-tsc --noEmit --pretty false && vite build",
     "build:prod": "vue-tsc --noEmit --pretty false && vite build",
     "build:dev": "vue-tsc --noEmit --pretty false && vite build --mode development",
