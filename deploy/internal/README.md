@@ -623,6 +623,8 @@ deploy/internal/dist/test-agent-internal-release.zip
 第一版 `opencode-worker` 镜像里仍内置 `opencode-manager` 和 `opencode-ai` CLI；同时脚本会把这两个程序导出到 `dist/programs/`，纯 Docker worker 管理脚本默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。
 `test-agent-internal-release.zip` 是完整企业升级包，包含上述必要产物和 `deploy/internal/` 脚本目录；传到 `122.233.30.4:/data/0709/internal.zip` 后即可用 `deploy-internal-release.sh` 解压部署。
 
+发布脚本生成后端交付 jar 时只编译主代码和运行时依赖（使用 `-Dmaven.test.skip=true`），不会编译测试源码；企业包生成前应单独完成目标模块测试和脚本校验，避免无关的存量测试假实现阻断发布包生成。
+
 如果使用 GaussDB 兼容 JDBC 驱动，打包机不要手工删除 `lib` 中的 PostgreSQL 驱动，直接传入驱动 jar：
 
 ```bash

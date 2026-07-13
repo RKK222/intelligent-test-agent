@@ -222,7 +222,8 @@ package_backend() {
   require_command jar
   mkdir -p "${backend_dir}"
   echo "Building backend jar"
-  (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am -DskipTests package)
+  # 企业包只需要主代码和运行时依赖；跳过测试源码编译，避免无关的存量测试假实现阻断交付包生成。
+  (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am -Dmaven.test.skip=true package)
 
   local jar
   jar="$(find "${ROOT_DIR}/backend/test-agent-app/target" -maxdepth 1 -type f -name 'test-agent-app-*.jar' ! -name '*.original' | sort | tail -n 1)"
@@ -327,7 +328,10 @@ package_release_zip() {
   worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
   [[ -f "${worker_tar}" ]] && cp -a "${worker_tar}" "${staging_dir}/dist/"
 
-  rsync -a --exclude 'dist' --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
+  # 输出目录可能按版本命名为 dist-gauss 等；统一排除当前输出目录，避免把交付物自身递归打进 zip。
+  local output_dir_name
+  output_dir_name="$(basename "${OUTPUT_DIR}")"
+  rsync -a --exclude 'dist' --exclude "${output_dir_name}" --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
 
   rm -f "${zip_path}"
   (cd "${staging_dir}" && zip -qr "${zip_path}" .)
