@@ -397,6 +397,8 @@ const robotY = ref(0);
 const robotQuestionOpen = ref(false);
 // 进程状态气泡与宠物共用坐标，不再单独维护可拖动的状态点位置。
 const robotProcessStatusOpen = ref(false);
+// 首次未初始化提醒每次页面生命周期只自动展示一次，用户关闭后不被状态轮询反复打扰。
+const processInitializationPromptShown = ref(false);
 const robotQuestionDraft = ref("");
 const robotQuestionInput = ref<HTMLTextAreaElement | null>(null);
 const robotDirection = ref<"left" | "right" | "front">("front");
@@ -1333,6 +1335,26 @@ function toggleRobotVisibility() {
   }
 }
 
+watch(
+  [
+    processStatusInteractionEnabled,
+    () => props.opencodeProcessStatus?.status,
+    () => props.opencodeProcessLoading,
+  ],
+  ([enabled, status, loading]) => {
+    if (!enabled || loading || status !== "NEEDS_INITIALIZATION" || processInitializationPromptShown.value) return;
+    processInitializationPromptShown.value = true;
+    // 首次拿到未初始化状态时主动唤出宠物，并让状态气泡直接承担初始化确认。
+    if (robotState.value === "sleeping") {
+      toggleRobotVisibility();
+    }
+    robotQuestionOpen.value = false;
+    robotQuestionDraft.value = "";
+    robotProcessStatusOpen.value = true;
+  },
+  { immediate: true }
+);
+
 onMounted(() => {
   window.addEventListener("resize", handleWindowResize);
 
@@ -1692,7 +1714,10 @@ function submitJoinApp() {
         <div class="figma-robot-toggle-activity">
           <button
             type="button"
-            class="figma-robot-visibility-toggle figma-robot-visibility-toggle--activity"
+            :class="[
+              'figma-robot-visibility-toggle figma-robot-visibility-toggle--activity',
+              processStatusInteractionEnabled && robotProcessTone === 'needs-initialization' && 'is-process-alert',
+            ]"
             data-testid="robot-visibility-toggle"
             :aria-label="robotState === 'sleeping' ? '唤起小宠物' : '收起小宠物'"
             :aria-pressed="robotState !== 'sleeping'"
@@ -2070,6 +2095,26 @@ function submitJoinApp() {
 .figma-robot-visibility-toggle--activity[aria-pressed='true'] {
   border-color: transparent;
   background: #e8e8e8;
+}
+
+.figma-robot-visibility-toggle--activity.is-process-alert {
+  background: rgba(240, 107, 99, 0.08);
+  animation: robot-process-toggle-breath 1.7s ease-in-out infinite;
+}
+
+.figma-robot-visibility-toggle--activity.is-process-alert .robot-eye {
+  fill: #f06b63;
+  animation: robot-process-eye-breath 1.7s ease-in-out infinite;
+}
+
+@keyframes robot-process-toggle-breath {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(240, 107, 99, 0.08); }
+  50% { box-shadow: 0 0 0 7px rgba(240, 107, 99, 0.18); }
+}
+
+@keyframes robot-process-eye-breath {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 .figma-robot-side-question {
@@ -3165,6 +3210,23 @@ function submitJoinApp() {
 .robot-process-heart.is-needs-initialization,
 .robot-process-heart.is-error {
   color: #f06b63;
+}
+
+.robot-process-heart.is-needs-initialization {
+  animation: robot-process-heart-breath 1.7s ease-in-out infinite;
+}
+
+@keyframes robot-process-heart-breath {
+  0%, 100% { opacity: 0.58; text-shadow: 0 0 3px rgba(240, 107, 99, 0.42); }
+  50% { opacity: 1; text-shadow: 0 0 8px rgba(240, 107, 99, 0.95); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .figma-robot-visibility-toggle--activity.is-process-alert,
+  .figma-robot-visibility-toggle--activity.is-process-alert .robot-eye,
+  .robot-process-heart.is-needs-initialization {
+    animation: none;
+  }
 }
 
 .robot-process-heart.is-checking {

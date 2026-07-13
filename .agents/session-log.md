@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 完善首次初始化提醒与对话输入门禁
+
+- Why:
+  - 用户要求首次进入且进程未启动时以红色呼吸宠物主动询问是否初始化，并要求进程未就绪或未选择对话时禁止对话、统一灰显输入入口。
+- What:
+  - `FigmaShell` 在页面生命周期内首次收到 `NEEDS_INITIALIZATION` 时自动唤出宠物和初始化气泡，活动栏机器人与宠物红心显示红色呼吸效果；`AgentWorkbench` 增加新对话草稿选择态，`FigmaChatPanel` 在进程未 ready 或未选对话时灰显并禁用输入、附件、Agent、模型和发送，进程 ready 时保留“新建对话”入口。
+- How:
+  - 复用现有进程状态、初始化流程和首条发送时延迟创建 Session 的链路，不新增空历史会话；同步组件测试、桌面/移动 Playwright 场景、agent-web README 与包说明，未修改 API、RunEvent、数据库或环境配置。
+- Result:
+  - 定向 Vitest 140 passed、1 skipped；目标 Playwright 桌面/移动 8/8 通过；workspace typecheck/lint、agent-web build 与 `git diff --check` 通过。扩大执行完整 `workbench.spec.ts` 时，首个既有文件打开场景仍因找不到精确文本 `tests/checkout.spec.ts` 在桌面/移动失败，确认关闭本次新对话自动选择后仍可复现，未扩大范围修改文件编辑器断言。按 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend，backend readiness 为 UP，frontend 3000 返回 200。保留既有 `DirectoryRows.vue` 嵌套 button、CSS `@import` 顺序和大 chunk 构建警告。
+
 ### 2026-07-13 - 将 TestAgent 进程状态并入小宠物交互
 
 - Why:

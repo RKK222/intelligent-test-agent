@@ -15,7 +15,7 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
     }
   });
 
-  await gotoWorkbench(page);
+  await gotoWorkbench(page, { selectConversation: false });
 
   await expect(page.getByText("MIMO测试智能体")).toBeVisible();
   await expect(page.getByRole("button", { name: "关闭运行与终端" })).toBeVisible();
@@ -2988,14 +2988,15 @@ test("workbench disables chat until opencode process is initialized", async ({ p
   const processInitializations: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { processStatus: "NEEDS_INITIALIZATION", processInitializations });
 
-  await gotoWorkbench(page);
+  await gotoWorkbench(page, { selectConversation: false });
 
-  await expect(page.getByText("需要初始化 TestAgent 进程").first()).toBeVisible();
+  await expect(page.getByText("我还没有准备好运行进程，要现在帮你初始化吗？")).toBeVisible();
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
-  await page.getByRole("button", { name: "分配专属进程" }).click();
+  await page.getByRole("button", { name: "初始化进程" }).click();
 
   await expect.poll(() => processInitializations.length).toBe(1);
   await expect(page.getByText("TestAgent 进程可用").first()).toBeVisible();
+  await page.getByRole("button", { name: "新建对话" }).click();
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("run after init");
   await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
 });
@@ -3010,9 +3011,9 @@ test("workbench refetches opencode status when initialize returns a stale failur
     initializeFailureThenReady: true
   });
 
-  await gotoWorkbench(page);
+  await gotoWorkbench(page, { selectConversation: false });
 
-  await page.getByRole("button", { name: "分配专属进程" }).click();
+  await page.getByRole("button", { name: "初始化进程" }).click();
 
   await expect.poll(() => processInitializations.length).toBe(1);
   await expect.poll(() => processStatusRequests.length).toBeGreaterThanOrEqual(2);
@@ -3047,18 +3048,36 @@ test("workbench does not create default personal workspace while opencode become
     }
   });
 
-  await gotoWorkbench(page);
+  await gotoWorkbench(page, { selectConversation: false });
   await expect.poll(() => personalWorkspaceRequests).toEqual(["awv_20260715"]);
   expect(defaultPersonalRequests).toEqual([]);
   expect(fileRequests).toEqual([]);
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
 
-  await page.getByRole("button", { name: "分配专属进程" }).click();
+  await page.getByRole("button", { name: "初始化进程" }).click();
 
   await expect.poll(() => processInitializations.length).toBe(1);
   expect(defaultPersonalRequests).toEqual([]);
   expect(fileRequests).toEqual([]);
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
+});
+
+test("workbench disables chat until a conversation is selected", async ({ page }) => {
+  await mockBackendApi(page);
+
+  await gotoWorkbench(page, { selectConversation: false });
+
+  const composer = page.locator(".figma-chat-input-card");
+  const textarea = page.getByPlaceholder("请先从消息列表选择对话，或新建对话");
+  await expect(composer).toHaveClass(/is-disabled/);
+  await expect(textarea).toBeDisabled();
+  await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "新建对话" })).toBeEnabled();
+
+  await page.getByRole("button", { name: "新建对话" }).click();
+
+  await expect(composer).not.toHaveClass(/is-disabled/);
+  await expect(page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因")).toBeEnabled();
 });
 
 test("phase 11 runtime flow sends attachment parts and handles docks", async ({ page }) => {
@@ -4277,8 +4296,18 @@ async function mockBackendApi(
   });
 }
 
-async function gotoWorkbench(page: Page) {
+async function gotoWorkbench(page: Page, options: { selectConversation?: boolean } = {}) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  if (options.selectConversation === false) return;
+  const newConversationButton = page.getByRole("button", { name: "新建对话" });
+  // 部分用例会被路由到登录或只读页面；只有工作台实际渲染该入口时才进入新对话草稿。
+  const buttonVisible = await newConversationButton
+    .waitFor({ state: "visible", timeout: 1_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (buttonVisible && await newConversationButton.isEnabled()) {
+    await newConversationButton.click();
+  }
 }
 
 function json(data: unknown) {

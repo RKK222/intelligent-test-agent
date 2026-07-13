@@ -719,6 +719,8 @@ const props =
     questions?: QuestionRequest[]
     /** 当前 root 会话；历史切换时用于退出上一次子 Agent 视图。 */
     currentSessionId?: string
+    /** 已选择历史会话或已进入新对话草稿；未选择时输入区保持灰显。 */
+    conversationSelected?: boolean
     /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
     messageScopesById?: Record<string, MessageScope>
     /** 当前运行期发现的子 Agent 会话索引。 */
@@ -728,6 +730,7 @@ const props =
   }>(), {
     processRefreshBlocksSubmit: true,
     processStatusPlacement: 'chat',
+    conversationSelected: true,
     commands: () => [],
     agents: () => [],
     rawOutputEntries: () => [],
@@ -847,6 +850,7 @@ function stopComposerResize() {
 }
 
 function startComposerResize(event: PointerEvent) {
+  if (composerInteractionBlocked.value) return
   if (event.button !== 0 && event.pointerType === 'mouse') return
   isResizingComposer.value = true
   composerResizeStartY = event.clientY
@@ -860,6 +864,7 @@ function startComposerResize(event: PointerEvent) {
  * 点击输入框卡片空白区域时，自动聚焦到内部文本输入框（避开按钮、手柄和下拉框等子元素）
  */
 function onComposerCardClick(event: MouseEvent) {
+  if (composerInteractionBlocked.value) return
   const target = event.target as HTMLElement | null
   if (
     target?.closest('button') ||
@@ -1876,7 +1881,10 @@ const processReady = computed(() => {
   }
   return !props.processStatus || props.processStatus.status === 'READY'
 })
-const agentPickerDisabled = computed(() => props.processRequired === true && !processReady.value)
+const conversationBlocked = computed(() => props.conversationSelected === false)
+const composerInteractionBlocked = computed(() => !processReady.value || conversationBlocked.value)
+const agentPickerDisabled = computed(() => composerInteractionBlocked.value)
+const modelSelectionDisabled = computed(() => props.modelPickerDisabled === true || composerInteractionBlocked.value)
 const processSubmitBlocked = computed(
   () =>
     props.running ||
@@ -1895,14 +1903,25 @@ const contextSendBlockedReason = computed(() => {
   if (props.chatContextOverLimit) return '上下文超过限制，无法发送'
   return ''
 })
-const sendBlockedTitle = computed(() => readonlyBlockedReason.value || contextSendBlockedReason.value || '发送')
+const sendBlockedTitle = computed(() => {
+  if (!processReady.value) return '请先初始化 TestAgent 进程'
+  if (conversationBlocked.value) return '请先选择或新建对话'
+  return readonlyBlockedReason.value || contextSendBlockedReason.value || '发送'
+})
 const sendSubmitBlocked = computed(
   () => props.historyLoading === true
     || props.historySubmitBlocked === true
     || processSubmitBlocked.value
+    || conversationBlocked.value
     || readonlySubmitBlocked.value
     || contextSubmitBlocked.value
 )
+const composerPlaceholder = computed(() => {
+  if (props.processLoading && !props.processStatus) return '正在检查 TestAgent 进程…'
+  if (!processReady.value) return '请先初始化 TestAgent 进程'
+  if (conversationBlocked.value) return '请先从消息列表选择对话，或新建对话'
+  return props.placeholder || 'Ask the AI agent...'
+})
 const processStatusVisible = computed(
   () =>
     props.processStatusPlacement !== 'pet' &&
@@ -4320,7 +4339,10 @@ function onCompositionEnd() {
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
       <div
         class="figma-chat-input-card"
-        :class="{ 'is-resizing': isResizingComposer }"
+        :class="{
+          'is-resizing': isResizingComposer,
+          'is-disabled': composerInteractionBlocked,
+        }"
         @click="onComposerCardClick"
       >
         <div
@@ -4334,10 +4356,10 @@ function onCompositionEnd() {
           v-model="localInput"
           class="figma-chat-textarea"
           :style="composerTextareaStyle"
-          :placeholder="placeholder || 'Ask the AI agent...'"
+          :placeholder="composerPlaceholder"
           rows="1"
-          :disabled="running || !processReady || readonlySubmitBlocked"
-          :title="readonlyBlockedReason || undefined"
+          :disabled="running || composerInteractionBlocked || readonlySubmitBlocked"
+          :title="sendBlockedTitle"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
           @compositionend="onCompositionEnd"
@@ -4353,6 +4375,7 @@ function onCompositionEnd() {
               type="button"
               class="figma-chat-card-btn figma-chat-attachment-btn"
               aria-label="上传附件"
+              :disabled="composerInteractionBlocked"
               @click="openAttachmentDialog"
             >
               <Upload class="figma-chat-btn-icon" />
@@ -4432,12 +4455,12 @@ function onCompositionEnd() {
               :content="selectedModelLabel || '选择模型'"
               placement="top"
               :show-after="100"
-              :disabled="modelPickerDisabled"
+              :disabled="modelSelectionDisabled"
             >
               <button
                 type="button"
                 class="figma-chat-card-btn figma-chat-model-btn"
-                :disabled="modelPickerDisabled"
+                :disabled="modelSelectionDisabled"
                 aria-label="切换模型"
                 @click.stop="toggleDropdown"
               >
@@ -7332,6 +7355,36 @@ function onCompositionEnd() {
 .figma-chat-input-card:focus-within {
   border-color: #3366ff;
   box-shadow: none;
+}
+
+/* 未初始化或尚未进入对话时，整张输入卡进入统一灰显态；新建对话按钮仍可作为进入草稿的入口。 */
+.figma-chat-input-card.is-disabled {
+  border-color: #dedfe2;
+  background: #f3f4f6;
+  color: #9a9da3;
+  cursor: not-allowed;
+}
+
+.figma-chat-input-card.is-disabled:focus-within {
+  border-color: #dedfe2;
+}
+
+.figma-chat-input-card.is-disabled .figma-chat-composer-resize-handle {
+  pointer-events: none;
+}
+
+.figma-chat-input-card.is-disabled .figma-chat-composer-resize-handle::before {
+  background: rgba(107, 114, 128, 0.12);
+}
+
+.figma-chat-input-card.is-disabled .figma-chat-card-actions {
+  border-top-color: #e4e5e8;
+  background: #f3f4f6;
+}
+
+.figma-chat-input-card.is-disabled .figma-chat-textarea::placeholder {
+  color: #989ca3;
+  opacity: 1;
 }
 
 .figma-chat-textarea {

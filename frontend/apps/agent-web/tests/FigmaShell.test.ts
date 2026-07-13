@@ -562,7 +562,7 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
   });
 
-  it("turns the pet heart red before initialization and asks whether to initialize", async () => {
+  it("auto-opens the first initialization prompt with a red breathing pet", async () => {
     vi.useFakeTimers();
     const wrapper = mountShell({
       props: {
@@ -578,17 +578,20 @@ describe("FigmaShell", () => {
       }
     });
 
-    await summonRobot(wrapper);
-    expect(wrapper.get('[data-testid="robot-process-heart"]').classes()).toContain("is-needs-initialization");
-
-    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
-    await vi.advanceTimersByTimeAsync(250);
     await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="robot-visibility-toggle"]').classes()).toContain("is-process-alert");
+    expect(wrapper.get('[data-testid="robot-process-heart"]').classes()).toContain("is-needs-initialization");
 
     const card = wrapper.get('[data-testid="robot-process-status"]');
     expect(card.text()).toContain("要现在帮你初始化吗");
     await card.get(".figma-robot-process-init").trigger("click");
     expect(wrapper.emitted("initialize-process")).toEqual([[]]);
+
+    await card.get('[aria-label="关闭宠物进程状态"]').trigger("click");
+    await wrapper.setProps({ opencodeProcessLoading: true });
+    await wrapper.setProps({ opencodeProcessLoading: false });
+    expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(false);
   });
 
   it("shows server name without inventing an address when service address is missing", async () => {

@@ -102,6 +102,50 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-process-status-dot").exists()).toBe(false);
   });
 
+  it("greys the complete composer while the process is not initialized", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        conversationSelected: true,
+        processRequired: true,
+        processStatusPlacement: "pet",
+        processStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          message: "需要初始化"
+        }
+      } as any
+    });
+
+    expect(wrapper.get(".figma-chat-input-card").classes()).toContain("is-disabled");
+    expect(wrapper.get(".figma-chat-textarea").attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".figma-chat-textarea").attributes("placeholder")).toBe("请先初始化 TestAgent 进程");
+    expect(wrapper.get('[aria-label="上传附件"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="切换 Agent"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="切换模型"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="新建对话"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("greys the composer without a selected conversation but keeps new conversation available", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        conversationSelected: false,
+        processRequired: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    expect(wrapper.get(".figma-chat-input-card").classes()).toContain("is-disabled");
+    expect(wrapper.get(".figma-chat-textarea").attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".figma-chat-textarea").attributes("placeholder")).toContain("选择对话");
+    const newConversationButton = wrapper.get('[aria-label="新建对话"]');
+    expect(newConversationButton.attributes("disabled")).toBeUndefined();
+
+    await newConversationButton.trigger("click");
+    expect(wrapper.emitted("new-conversation")).toEqual([[]]);
+  });
+
   it("keeps a READY card inline without a saved drag and only uses floating mode after a drag", async () => {
     window.localStorage.removeItem("figma-chat-process-dot-pos");
     const wrapper = mount(FigmaChatPanel, {
