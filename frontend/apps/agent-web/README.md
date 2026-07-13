@@ -88,3 +88,5 @@ corepack pnpm --filter @test-agent/agent-web build
 ```
 
 真实三服务验收由仓库根目录 `tools/dev-phase11-real-e2e.sh --start-services` 触发，目前尚无最新通过记录；不能用该 README 的单包验证命令替代真实三服务 E2E 收口。
+
+- 工作区文件树中的文件和目录均支持双击行内改名；提交仍统一通过目标后端文件 WebSocket RPC，并同步树节点、已打开 Tab 和 Git diff 路径。
