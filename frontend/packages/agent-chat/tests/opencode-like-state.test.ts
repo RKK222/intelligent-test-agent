@@ -53,6 +53,33 @@ describe("opencode-like conversation state", () => {
     });
   });
 
+  it("keeps completed process groups idle when the next turn starts running", () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_1", "分析第一轮问题"),
+      assistantMessage("msg_assistant_1", [
+        toolPart("part_read", "read", { filePath: "README.md" }),
+        { partId: "part_reasoning", type: "reasoning", text: "第一轮分析完成", status: "completed" },
+        toolPart("part_bash_1", "bash", { command: "pwd" }),
+        toolPart("part_bash_2", "bash", { command: "git status --short" })
+      ]),
+      userMessage("msg_user_2", "继续下一轮")
+    ];
+
+    const rows = createTimelineRows(createOpencodeLikeState({ messages, running: true }));
+    const previousTurnGroups = rows.filter((row) =>
+      (row.type === "context-tool-group" || row.type === "reasoning-group" || row.type === "tool-group") &&
+      row.userMessageId === "msg_user_1"
+    );
+
+    expect(previousTurnGroups).toHaveLength(3);
+    expect(previousTurnGroups).toEqual([
+      expect.objectContaining({ type: "context-tool-group", busy: false }),
+      expect.objectContaining({ type: "reasoning-group", busy: false }),
+      expect.objectContaining({ type: "tool-group", busy: false })
+    ]);
+    expect(rows.at(-1)).toMatchObject({ type: "thinking", userMessageId: "msg_user_2" });
+  });
+
   it("keeps runtime failures as timeline error rows instead of card messages", () => {
     const state = createOpencodeLikeState({
       messages: [userMessage("msg_user_1", "运行测试")],

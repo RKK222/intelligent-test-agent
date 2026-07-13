@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 隔离下一轮运行态与历史消息完成状态
+
+- Why:
+  - 同一会话发送下一轮消息后，会话级 `running` 被时间线投影无差别应用到所有轮次，导致上一轮已完成的 context、reasoning 和同类 tool 分组立刻回退为“进行中”。
+- What:
+  - `agent-chat` 时间线仅允许最新用户轮次继承会话级运行态；历史轮次继续按各 part 自身状态展示。新增“上一轮完成、下一轮刚启动”的跨轮次投影回归，并同步包级 README。
+- How:
+  - 复用既有 `isActiveTurn` 边界，在 context/reasoning/tool 分组投影处统一计算当前轮 `busy`；未修改 reducer、消息类型、RunEvent、后端 API 或持久化结构。
+- Result:
+  - TDD 回归先稳定复现三个历史分组 `busy=true`，修复后状态投影 15/15、时间线组件 25/25、agent-chat 包和前端 workspace 类型检查通过；时间线测试仍输出既有 `DirectoryRows.vue` 嵌套 button warning，与本次无关。
+
 ### 2026-07-11 - 建立 Mermaid 可视化提交与 main 的正式合并关系
 
 - Why:

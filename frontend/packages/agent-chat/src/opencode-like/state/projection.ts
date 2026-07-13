@@ -128,6 +128,8 @@ function appendAssistantGroupRow(
   }
 ): void {
   const { group, assistantMessageId, userMessageId } = params;
+  // 会话级 running 只属于最新用户轮次，不能把已结束历史轮次重新投影为进行中。
+  const busy = isActiveTurn(userMessageId, state) && state.running;
   if (group.type === "context-tool-group") {
     const refs = group.refs.map((ref) => ({ messageId: assistantMessageId, partId: ref.partId }));
     if (typeof accumulator.contextGroupIndex === "number") {
@@ -144,7 +146,7 @@ function appendAssistantGroupRow(
       userMessageId,
       messageId: assistantMessageId,
       refs,
-      busy: state.running,
+      busy,
       previousAssistantPart: accumulator.partIndex > 0 || accumulator.hasAssistantHeader,
       showAssistantHeader
     });
@@ -173,7 +175,7 @@ function appendAssistantGroupRow(
       userMessageId,
       messageId: assistantMessageId,
       refs: [ref],
-      busy: state.running,
+      busy,
       previousAssistantPart: accumulator.partIndex > 0 || accumulator.hasAssistantHeader,
       showAssistantHeader
     });
@@ -215,7 +217,7 @@ function appendAssistantGroupRow(
           { messageId: firstRow.messageId, partId: firstRow.partId },
           ref
         ],
-        busy: state.running,
+        busy,
         previousAssistantPart: firstRow.previousAssistantPart,
         showAssistantHeader: firstRow.showAssistantHeader
       };
