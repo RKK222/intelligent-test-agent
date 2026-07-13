@@ -54,20 +54,23 @@ export function filterWorkspaceRootEntries(path: string, entries: FileTreeEntry[
   return entries.filter((entry) => entry.name !== ".opencode");
 }
 
+export const workspaceRequirementStageDirectories = ["01-需求", "02-设计", "03-编码", "04-测试"] as const;
+const workspaceRequirementStages = new Set<string>(workspaceRequirementStageDirectories);
+
 /**
- * 将当前个人 worktree 的文件搜索结果按“需求项/01-需求/子条目”聚合。
- * 子条目下可以直接放需求文件，也可以继续包含“需求文档”等目录；最终均作为同一条需求上下文。
+ * 将当前个人 worktree 的文件搜索结果按“需求项/阶段/子条目”聚合。
+ * 同名子条目可分布在需求、设计、编码、测试阶段；其下所有文件最终均作为同一条子条目上下文。
  */
 export function workspaceRequirementReferences(results: FileSearchResult[]): WorkspaceRequirementReference[] {
   const references = new Map<string, WorkspaceRequirementReference>();
   for (const result of results) {
     const parts = result.path.replace(/\\/g, "/").split("/").filter(Boolean);
-    const requirementStageIndex = parts.indexOf("01-需求");
-    if (requirementStageIndex !== 1 || parts.length <= requirementStageIndex + 2) {
+    const stageName = parts[1];
+    if (!stageName || !workspaceRequirementStages.has(stageName) || parts.length < 4) {
       continue;
     }
     const requirementName = parts[0];
-    const subitemName = parts[requirementStageIndex + 1];
+    const subitemName = parts[2];
     const id = `${requirementName}/01-需求/${subitemName}`;
     const current = references.get(id) ?? { id, requirementName, subitemName, filePaths: [] };
     if (!current.filePaths.includes(result.path)) {

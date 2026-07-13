@@ -672,7 +672,7 @@ const props =
     /** 当前个人 worktree 中与 @ 查询匹配的文件。 */
     workspaceFileCandidates?: FileSearchResult[]
     workspaceFileCandidatesLoading?: boolean
-    /** 当前个人 worktree 中按“需求项/01-需求/子条目”聚合的需求引用。 */
+    /** 当前个人 worktree 中按“需求项/阶段/子条目”跨需求、设计、编码、测试聚合的引用。 */
     workspaceRequirementReferences?: WorkspaceRequirementReference[]
     workspaceRequirementReferencesLoading?: boolean
     /** Agent 目录首次加载中。 */
@@ -1397,12 +1397,15 @@ function onAgentMentionInput(text: string) {
 function onRequirementInput(text: string): boolean {
   const query = currentRequirementQuery(text)
   if (query !== null && !props.running) {
+    const shouldLoadRequirements = !showRequirementPanel.value
     requirementFilterText.value = query
     showRequirementPanel.value = true
     showAgentPanel.value = false
     agentFilterText.value = ''
     emit('search-workspace-files', null)
-    emit('load-workspace-requirements')
+    if (shouldLoadRequirements) {
+      emit('load-workspace-requirements')
+    }
     return true
   }
   showRequirementPanel.value = false
@@ -4257,7 +4260,7 @@ function onCompositionEnd() {
       </div>
     </div>
 
-    <!-- # 需求候选：严格来自当前个人 worktree 的“需求项/01-需求/子条目”文件。 -->
+    <!-- # 子条目候选：聚合当前个人 worktree 同一子条目在需求、设计、编码、测试阶段的文件。 -->
     <div v-if="!activeSubagentSessionId && showRequirementPanel" class="figma-chat-agent-panel figma-chat-requirement-panel">
       <div class="figma-chat-choice-header">
         <div class="figma-chat-choice-question">需求子条目</div>
@@ -4279,7 +4282,7 @@ function onCompositionEnd() {
           <BookOpen :size="16" class="figma-chat-requirement-icon" />
           <div class="figma-chat-agent-info">
             <span class="figma-chat-agent-name">{{ reference.subitemName }}</span>
-            <span class="figma-chat-agent-desc">{{ reference.requirementName }} · {{ reference.filePaths.length }} 个需求文件</span>
+            <span class="figma-chat-agent-desc">{{ reference.requirementName }} · {{ reference.filePaths.length }} 个关联文件</span>
           </div>
         </div>
         <div v-if="workspaceRequirementReferencesLoading" class="figma-chat-agent-empty">正在读取当前工作区需求结构…</div>

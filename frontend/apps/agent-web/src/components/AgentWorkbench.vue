@@ -128,6 +128,7 @@ import {
   syntheticEvent,
   text,
   workspaceRequirementReferences,
+  workspaceRequirementStageDirectories,
   workspaceLoadIsCurrent,
   type AutoRetryRunDraft,
   type OpencodeAvailabilityState,
@@ -233,10 +234,9 @@ const workspaceFileCandidates = ref<FileSearchResult[]>([]);
 const workspaceFileCandidatesLoading = ref(false);
 let workspaceFileCandidateTimer: ReturnType<typeof setTimeout> | null = null;
 let workspaceFileCandidateSeq = 0;
-// # 需求候选按当前个人 worktree 的“需求项/01-需求/子条目”聚合，每个 Workspace 只加载一次。
+// # 候选按当前个人 worktree 的“需求项/阶段/同名子条目”聚合，每次重新打开面板时刷新。
 const workspaceRequirementCandidates = ref<WorkspaceRequirementReference[]>([]);
 const workspaceRequirementCandidatesLoading = ref(false);
-let workspaceRequirementLoadedFor = "";
 let workspaceRequirementLoadSeq = 0;
 const session = shallowRef<Session | null>(null);
 // 新对话先作为前端草稿被“选中”，首条消息仍沿用现有延迟创建 Session 的链路，避免空会话污染历史。
@@ -2479,7 +2479,6 @@ function resetWorkspaceState() {
   workspaceFileCandidateSeq++;
   workspaceRequirementCandidates.value = [];
   workspaceRequirementCandidatesLoading.value = false;
-  workspaceRequirementLoadedFor = "";
   workspaceRequirementLoadSeq++;
   session.value = null;
   newConversationDraftSelected.value = false;
@@ -3054,21 +3053,22 @@ function handleWorkspaceFileCandidateSearch(query: string | null) {
 }
 
 /**
- * 懒加载当前个人 worktree 的需求子条目。文件仍由平台 workspace.search 返回，
- * 前端只负责把真实路径聚合为可选择的业务子条目。
+ * 懒加载当前个人 worktree 的需求子条目。四个阶段目录继续分别通过平台 workspace.search 查询，
+ * 前端只负责把同一需求项下的同名子条目聚合为一个可选择的业务上下文。
  */
 async function loadWorkspaceRequirementCandidates() {
   const workspaceId = selectedWorkspace.value?.workspaceId;
-  if (!workspaceId || workspaceRequirementCandidatesLoading.value || workspaceRequirementLoadedFor === workspaceId) {
+  if (!workspaceId || workspaceRequirementCandidatesLoading.value) {
     return;
   }
   const seq = ++workspaceRequirementLoadSeq;
   workspaceRequirementCandidatesLoading.value = true;
   try {
-    const results = await api.searchFiles(workspaceId, "/01-需求/");
+    const results = (await Promise.all(
+      workspaceRequirementStageDirectories.map((stage) => api.searchFiles(workspaceId, `/${stage}/`))
+    )).flat();
     if (seq === workspaceRequirementLoadSeq && selectedWorkspace.value?.workspaceId === workspaceId) {
       workspaceRequirementCandidates.value = workspaceRequirementReferences(results);
-      workspaceRequirementLoadedFor = workspaceId;
     }
   } catch (error) {
     if (seq === workspaceRequirementLoadSeq && selectedWorkspace.value?.workspaceId === workspaceId) {
@@ -3467,7 +3467,7 @@ async function addWorkspaceFileToChatContext(path: string, silentSuccess = false
 }
 
 /**
- * # 子条目选中后，把 01-需求 下属于该子条目的全部需求文件逐个复用现有附件链路添加。
+ * # 子条目选中后，把 01-需求、02-设计、03-编码、04-测试下属于该子条目的全部文件逐个复用现有附件链路添加。
  * 单个文件仍沿用二进制、重复和容量校验，避免需求引用绕过对话上下文安全边界。
  */
 async function addWorkspaceRequirementToChatContext(reference: WorkspaceRequirementReference) {

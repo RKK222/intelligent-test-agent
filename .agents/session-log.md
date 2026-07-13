@@ -12,6 +12,17 @@
 - Result:
   - 8 个 test-design skills 校验及打包通过，OpenCode Agent 配置解析和 8 项目录契约检查通过；test profile 三服务重启成功，backend readiness、frontend 3000 和 manager WebSocket 正常。修正前真实模型运行已复现 S 根目录错误落盘；修正后因应用内浏览器无登录态、用户 OpenCode 进程未初始化，尚未完成真实模型落盘复验。
 
+### 2026-07-13 - 修复 # 跨阶段引用并收敛大量附件展示
+
+- Why:
+  - COSS 0318 的同一子条目已在 `01-需求、02-设计、03-编码、04-测试` 下形成多个关联文件，但原实现只搜索 `/01-需求/`；一次加入十几个文件时，附件又会全部平铺并显著挤压输入区。
+- What:
+  - `#` 改为按“需求项 + 同名子条目”聚合四个阶段的全部文件，关闭后重新打开会刷新候选；附件超过 3 个时默认只展示前 3 个，补充阶段数量摘要和“查看其余 N 个文件”，展开后在最高 220px 的滚动区预览、逐个删除或收起。
+- How:
+  - 继续复用平台 `workspace.search`、`addWorkspaceFileToChatContext`、现有附件卡片和 Pinia 上下文状态；折叠只影响展示，发送仍携带全部已加入文件，每个文件继续执行二进制、重复和容量校验。
+- Result:
+  - 当前 COSS 0318 实际识别到需求说明、详细设计、业务代码、单元测试和测试设计共 5 个文件；前端定向 Vitest 179 passed/1 skipped、agent-web typecheck 和生产构建通过，test profile 三服务重启成功，backend readiness 为 UP、frontend 3000 可访问。
+
 ### 2026-07-13 - 补齐 COSS 信鸽取证需求设计与领域参考实现
 
 - Why:

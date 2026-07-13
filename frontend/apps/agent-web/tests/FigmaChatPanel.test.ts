@@ -1038,6 +1038,44 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("remove-chat-context")).toEqual([["ctx_1"]]);
   });
 
+  it("collapses large context collections and summarizes files by workspace stage", async () => {
+    const paths = [
+      "0318-需求项/01-需求/S0001-子条目/需求说明书.md",
+      "0318-需求项/02-设计/S0001-子条目/详细设计说明书.md",
+      "0318-需求项/03-编码/S0001-子条目/service.ts",
+      "0318-需求项/04-测试/S0001-子条目/测试案例.md",
+      "README.md"
+    ];
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        chatContexts: paths.map((path, index) => ({
+          id: `ctx_${index}`,
+          type: "file",
+          source: "workspace",
+          path,
+          fileName: path.split("/").at(-1),
+          content: `内容 ${index}`,
+          charCount: 4,
+          lineCount: 1,
+          createdAt: index
+        })),
+        chatContextTotalChars: 20
+      } as any
+    });
+
+    expect(wrapper.findAll(".chat-context-card")).toHaveLength(3);
+    expect(wrapper.get(".chat-context-list-stage-summary").text()).toBe("需求 1 · 设计 1 · 编码 1 · 测试 1 · 其他 1");
+    expect(wrapper.get(".chat-context-list-more").text()).toContain("查看其余 2 个文件");
+
+    await wrapper.get(".chat-context-list-more").trigger("click");
+
+    expect(wrapper.findAll(".chat-context-card")).toHaveLength(5);
+    expect(wrapper.get(".chat-context-list-cards").classes()).toContain("is-expanded");
+    expect(wrapper.get(".chat-context-list-more").text()).toContain("收起附件列表");
+  });
+
   it("resizes the composer textarea by dragging the top edge", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -1216,7 +1254,8 @@ describe("FigmaChatPanel", () => {
       subitemName: "S0001-子条目",
       filePaths: [
         "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt",
-        "120260624-0318-需求项/01-需求/S0001-子条目/子条目需求.md"
+        "120260624-0318-需求项/02-设计/S0001-子条目/详细设计.md",
+        "120260624-0318-需求项/03-编码/S0001-子条目/031-业务代码/test2.txt"
       ]
     };
     const wrapper = mount(FigmaChatPanel, {
@@ -1233,7 +1272,10 @@ describe("FigmaChatPanel", () => {
     expect(panel.text()).toContain("需求子条目");
     expect(panel.text()).toContain("S0001-子条目");
     expect(panel.text()).toContain("120260624-0318-需求项");
-    expect(panel.text()).toContain("2 个需求文件");
+    expect(panel.text()).toContain("3 个关联文件");
+    expect(wrapper.emitted("load-workspace-requirements")).toHaveLength(1);
+
+    await wrapper.get("textarea").setValue("请分析 #S000");
     expect(wrapper.emitted("load-workspace-requirements")).toHaveLength(1);
 
     await wrapper.get(".figma-chat-requirement-row").trigger("click");
