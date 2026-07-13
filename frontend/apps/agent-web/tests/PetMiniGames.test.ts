@@ -15,6 +15,8 @@ describe("PetMiniGames", () => {
 
     expect(wrapper.text()).toContain("俄罗斯方块");
     expect(wrapper.text()).toContain("扫雷");
+    expect(wrapper.text()).toContain("数独");
+    expect(wrapper.text()).toContain("贪吃蛇");
     await wrapper.get('[data-testid="pet-game-open-tetris"]').trigger("click");
 
     expect(wrapper.find('[data-testid="pet-tetris"]').exists()).toBe(true);
@@ -48,6 +50,48 @@ describe("PetMiniGames", () => {
     await wrapper.get('[aria-label="重开扫雷"]').trigger("click");
     expect(wrapper.text()).toContain("第一步安全");
     expect(wrapper.findAll('.pet-mine-cell.is-revealed')).toHaveLength(0);
+  });
+
+  it("supports sudoku selection, keyboard input, error checking and restart", async () => {
+    const wrapper = mount(PetMiniGames);
+    await wrapper.get('[data-testid="pet-game-open-sudoku"]').trigger("click");
+
+    const cells = wrapper.findAll('.pet-sudoku-cell');
+    expect(cells).toHaveLength(81);
+    expect(cells.filter((cell) => cell.attributes("disabled") !== undefined).length).toBeGreaterThan(0);
+
+    await cells[2]!.trigger("click");
+    await wrapper.trigger("keydown", { key: "4" });
+    expect(wrapper.findAll('.pet-sudoku-cell')[2]!.text()).toBe("4");
+    expect(wrapper.findAll('.pet-sudoku-cell')[2]!.classes()).not.toContain("is-error");
+
+    await wrapper.get('[aria-label="填写数字 5"]').trigger("click");
+    expect(wrapper.findAll('.pet-sudoku-cell')[2]!.classes()).toContain("is-error");
+    expect(wrapper.text()).toContain("需要检查");
+
+    await wrapper.get('[aria-label="重开数独"]').trigger("click");
+    expect(wrapper.findAll('.pet-sudoku-cell')[2]!.text()).toBe("");
+    expect(wrapper.text()).toContain("选一格开始填写");
+  });
+
+  it("runs and pauses snake with keyboard and compact controls", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const wrapper = mount(PetMiniGames);
+    await wrapper.get('[data-testid="pet-game-open-snake"]').trigger("click");
+
+    expect(wrapper.findAll('.pet-snake-cell')).toHaveLength(144);
+    expect(wrapper.findAll('.pet-snake-cell.is-head')).toHaveLength(1);
+    expect(wrapper.findAll('.pet-snake-cell.is-body')).toHaveLength(2);
+    expect(wrapper.findAll('.pet-snake-cell.is-food')).toHaveLength(1);
+
+    await wrapper.trigger("keydown", { key: "ArrowUp" });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(wrapper.text()).toContain("得分 0");
+    await wrapper.get(".pet-snake-controls button:last-child").trigger("click");
+    expect(wrapper.text()).toContain("已暂停");
+
+    wrapper.unmount();
   });
 
   it("emits close from the game header", async () => {

@@ -3087,7 +3087,7 @@ test("workbench accepts the first prompt without requiring new conversation whil
   expect(runRequests[0]?.prompt).toBe("直接开始第一轮测试");
 });
 
-test("pet mini games support tetris and minesweeper interactions", async ({ page }) => {
+test("pet mini games support tetris, minesweeper, sudoku and snake interactions", async ({ page }) => {
   await mockBackendApi(page, runnableWorkspaceSetup());
   await gotoWorkbench(page, { selectConversation: false });
 
@@ -3111,6 +3111,20 @@ test("pet mini games support tetris and minesweeper interactions", async ({ page
   await expect(mineCells.nth(63)).toHaveAttribute("aria-label", /已插旗/);
   await mineCells.first().click();
   await expect(page.getByTestId("pet-minesweeper")).not.toContainText("踩雷了");
+
+  await page.getByRole("button", { name: "数独", exact: true }).click();
+  const sudokuCells = page.getByTestId("pet-sudoku").locator(".pet-sudoku-cell");
+  await expect(sudokuCells).toHaveCount(81);
+  await sudokuCells.nth(2).click();
+  await page.getByRole("button", { name: "填写数字 4" }).click();
+  await expect(sudokuCells.nth(2)).toHaveText("4");
+  await expect(sudokuCells.nth(2)).not.toHaveClass(/is-error/);
+
+  await page.getByRole("button", { name: "贪吃蛇", exact: true }).click();
+  await expect(page.getByTestId("pet-snake").locator(".pet-snake-cell")).toHaveCount(144);
+  await page.getByRole("button", { name: "贪吃蛇向上" }).click();
+  await page.getByTestId("pet-snake").getByRole("button", { name: "暂停" }).click();
+  await expect(page.getByTestId("pet-snake")).toContainText("已暂停");
 
   await page.getByRole("button", { name: "关闭宠物旁路问答" }).click();
   await expect(page.getByTestId("pet-mini-games")).toHaveCount(0);

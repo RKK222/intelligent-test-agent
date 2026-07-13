@@ -326,6 +326,8 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("俄罗斯方块");
     expect(wrapper.text()).toContain("扫雷");
+    expect(wrapper.text()).toContain("数独");
+    expect(wrapper.text()).toContain("贪吃蛇");
 
     await wrapper.get('[aria-label="关闭宠物旁路问答"]').trigger("click");
     expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(false);

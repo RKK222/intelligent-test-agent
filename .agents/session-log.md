@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-13 - 扩展宠物数独与贪吃蛇小游戏
+
+- Why:
+  - 用户希望宠物游乐区增加数独和贪吃蛇，并要求游戏图形入口缩小、紧凑排布，避免游戏选择界面喧宾夺主。
+- What:
+  - 复用 `PetMiniGames` 增加 9×9 数独和 12×12 贪吃蛇；数独支持选格、数字键盘/物理键盘填写、错误提示、清除和重开，贪吃蛇支持方向键/屏幕按钮、计分、暂停、碰撞结束和重开。
+  - 四个游戏入口调整为 2×2 小卡片，图形缩为 34px；切换游戏时暂停俄罗斯方块或贪吃蛇计时器，关闭浮层时统一释放。
+- How:
+  - 沿用既有单组件页面内存状态、宠物统一浮层和蓝灰/紫色视觉，不新增组件、API、持久化或外部依赖；补充组件测试和桌面/移动 Playwright E2E，并同步前端 README 与包说明。
+- Result:
+  - PetMiniGames/FigmaShell 38 条组件测试通过，前端全量 Vitest 54 文件、757 passed/1 skipped，agent-web typecheck、生产 build 和桌面/移动目标 E2E 2/2 通过。首次全量 Vitest 的既有 Mermaid 懒加载用例在并发下抖动一次，单文件 11/11 和随后全量复跑均通过。按 `.env.test` / `test` profile 重启三服务成功，backend health/readiness 为 UP、frontend 3000 与登录 CORS 正常，manager WebSocket 已连接；构建保留既有 CSS `@import` 顺序和大 chunk 警告。
+
 ### 2026-07-13 - 新增宠物小游戏并恢复主对话首条直发
 
 - Why:

@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { Bomb, Gamepad2, RotateCcw, X } from "lucide-vue-next";
 
-type GameKind = "tetris" | "minesweeper";
+type GameKind = "tetris" | "minesweeper" | "sudoku" | "snake";
 type TetrisCell = string | null;
 type TetrisPiece = {
   matrix: number[][];
@@ -16,6 +16,12 @@ type MineCell = {
   flagged: boolean;
   nearby: number;
 };
+type SudokuCell = {
+  value: number;
+  given: boolean;
+  error: boolean;
+};
+type SnakePoint = { x: number; y: number };
 
 const emit = defineEmits<{ (event: "close"): void }>();
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
@@ -312,13 +318,218 @@ function mineCellLabel(cell: MineCell, index: number): string {
   return `第 ${row} 行第 ${column} 列，周围 ${cell.nearby} 颗雷`;
 }
 
+const SUDOKU_SOLUTION = [
+  5, 3, 4, 6, 7, 8, 9, 1, 2,
+  6, 7, 2, 1, 9, 5, 3, 4, 8,
+  1, 9, 8, 3, 4, 2, 5, 6, 7,
+  8, 5, 9, 7, 6, 1, 4, 2, 3,
+  4, 2, 6, 8, 5, 3, 7, 9, 1,
+  7, 1, 3, 9, 2, 4, 8, 5, 6,
+  9, 6, 1, 5, 3, 7, 2, 8, 4,
+  2, 8, 7, 4, 1, 9, 6, 3, 5,
+  3, 4, 5, 2, 8, 6, 1, 7, 9,
+] as const;
+const SUDOKU_PUZZLE = [
+  5, 3, 0, 0, 7, 0, 0, 0, 0,
+  6, 0, 0, 1, 9, 5, 0, 0, 0,
+  0, 9, 8, 0, 0, 0, 0, 6, 0,
+  8, 0, 0, 0, 6, 0, 0, 0, 3,
+  4, 0, 0, 8, 0, 3, 0, 0, 1,
+  7, 0, 0, 0, 2, 0, 0, 0, 6,
+  0, 6, 0, 0, 0, 0, 2, 8, 0,
+  0, 0, 0, 4, 1, 9, 0, 0, 5,
+  0, 0, 0, 0, 8, 0, 0, 7, 9,
+] as const;
+
+function createSudokuBoard(): SudokuCell[] {
+  return SUDOKU_PUZZLE.map((value) => ({ value, given: value > 0, error: false }));
+}
+
+const sudokuBoard = ref<SudokuCell[]>(createSudokuBoard());
+const sudokuSelectedIndex = ref<number | null>(null);
+const sudokuStatus = ref<"ready" | "playing" | "won">("ready");
+const sudokuRemaining = computed(() => sudokuBoard.value.filter((cell) => cell.value === 0).length);
+const sudokuErrors = computed(() => sudokuBoard.value.filter((cell) => cell.error).length);
+const sudokuStatusText = computed(() => {
+  if (sudokuStatus.value === "won") return "九宫完成";
+  if (sudokuErrors.value > 0) return `有 ${sudokuErrors.value} 格需要检查`;
+  return sudokuStatus.value === "ready" ? "选一格开始填写" : "继续推理";
+});
+
+function selectSudokuCell(index: number) {
+  const cell = sudokuBoard.value[index];
+  if (!cell || cell.given || sudokuStatus.value === "won") return;
+  sudokuSelectedIndex.value = index;
+}
+
+function setSudokuValue(value: number) {
+  const index = sudokuSelectedIndex.value;
+  if (index === null || sudokuStatus.value === "won") return;
+  const cell = sudokuBoard.value[index];
+  if (!cell || cell.given) return;
+  cell.value = value;
+  cell.error = value > 0 && value !== SUDOKU_SOLUTION[index];
+  sudokuStatus.value = "playing";
+  // 只有全部填写且每格都与解一致时才结束，错误数字不会被静默覆盖。
+  if (sudokuBoard.value.every((candidate, cellIndex) => candidate.value === SUDOKU_SOLUTION[cellIndex])) {
+    sudokuStatus.value = "won";
+    sudokuSelectedIndex.value = null;
+  }
+}
+
+function resetSudoku() {
+  sudokuBoard.value = createSudokuBoard();
+  sudokuSelectedIndex.value = null;
+  sudokuStatus.value = "ready";
+}
+
+function sudokuCellLabel(cell: SudokuCell, index: number): string {
+  const row = Math.floor(index / 9) + 1;
+  const column = index % 9 + 1;
+  if (cell.given) return `第 ${row} 行第 ${column} 列，题目数字 ${cell.value}`;
+  if (cell.value === 0) return `第 ${row} 行第 ${column} 列，待填写`;
+  return `第 ${row} 行第 ${column} 列，填写数字 ${cell.value}${cell.error ? "，需要检查" : ""}`;
+}
+
+const SNAKE_SIZE = 12;
+const SNAKE_TICK_MS = 190;
+const snakeBody = ref<SnakePoint[]>([]);
+const snakeDirection = ref<SnakePoint>({ x: 1, y: 0 });
+const snakeQueuedDirection = ref<SnakePoint>({ x: 1, y: 0 });
+const snakeFood = ref<SnakePoint>({ x: 0, y: 0 });
+const snakeScore = ref(0);
+const snakeRunning = ref(false);
+const snakeGameOver = ref(false);
+let snakeTimer: ReturnType<typeof setInterval> | null = null;
+
+function clearSnakeTimer() {
+  if (snakeTimer) clearInterval(snakeTimer);
+  snakeTimer = null;
+}
+
+function nextSnakeFood(body: SnakePoint[]): SnakePoint {
+  const candidates = Array.from({ length: SNAKE_SIZE * SNAKE_SIZE }, (_, index) => ({
+    x: index % SNAKE_SIZE,
+    y: Math.floor(index / SNAKE_SIZE),
+  })).filter((candidate) => !body.some((part) => part.x === candidate.x && part.y === candidate.y));
+  return candidates[Math.floor(Math.random() * candidates.length)] ?? { x: -1, y: -1 };
+}
+
+function startSnakeTimer() {
+  clearSnakeTimer();
+  if (snakeRunning.value) snakeTimer = setInterval(stepSnake, SNAKE_TICK_MS);
+}
+
+function startSnake() {
+  const initialBody = [{ x: 5, y: 6 }, { x: 4, y: 6 }, { x: 3, y: 6 }];
+  snakeBody.value = initialBody;
+  snakeDirection.value = { x: 1, y: 0 };
+  snakeQueuedDirection.value = { x: 1, y: 0 };
+  snakeFood.value = nextSnakeFood(initialBody);
+  snakeScore.value = 0;
+  snakeGameOver.value = false;
+  snakeRunning.value = true;
+  startSnakeTimer();
+}
+
+function setSnakeDirection(x: number, y: number) {
+  if (!snakeRunning.value) return;
+  // 禁止直接反向，避免蛇头在同一 tick 内撞向第二节身体。
+  if (snakeDirection.value.x + x === 0 && snakeDirection.value.y + y === 0) return;
+  snakeQueuedDirection.value = { x, y };
+}
+
+function stepSnake() {
+  if (!snakeRunning.value || snakeBody.value.length === 0) return;
+  snakeDirection.value = snakeQueuedDirection.value;
+  const head = snakeBody.value[0]!;
+  const nextHead = { x: head.x + snakeDirection.value.x, y: head.y + snakeDirection.value.y };
+  const eating = nextHead.x === snakeFood.value.x && nextHead.y === snakeFood.value.y;
+  const collisionBody = eating ? snakeBody.value : snakeBody.value.slice(0, -1);
+  const hitWall = nextHead.x < 0 || nextHead.x >= SNAKE_SIZE || nextHead.y < 0 || nextHead.y >= SNAKE_SIZE;
+  const hitBody = collisionBody.some((part) => part.x === nextHead.x && part.y === nextHead.y);
+  if (hitWall || hitBody) {
+    snakeRunning.value = false;
+    snakeGameOver.value = true;
+    clearSnakeTimer();
+    return;
+  }
+  const nextBody = [nextHead, ...snakeBody.value];
+  if (eating) {
+    snakeScore.value += 1;
+    snakeFood.value = nextSnakeFood(nextBody);
+  } else {
+    nextBody.pop();
+  }
+  snakeBody.value = nextBody;
+}
+
+function toggleSnakePause() {
+  if (snakeGameOver.value || snakeBody.value.length === 0) {
+    startSnake();
+    return;
+  }
+  snakeRunning.value = !snakeRunning.value;
+  startSnakeTimer();
+}
+
+const visibleSnakeBoard = computed(() => {
+  const board = Array<"head" | "body" | "food" | null>(SNAKE_SIZE * SNAKE_SIZE).fill(null);
+  snakeBody.value.forEach((part, index) => {
+    board[part.y * SNAKE_SIZE + part.x] = index === 0 ? "head" : "body";
+  });
+  if (snakeFood.value.x >= 0) board[snakeFood.value.y * SNAKE_SIZE + snakeFood.value.x] = "food";
+  return board;
+});
+
+const snakeStatusText = computed(() => {
+  if (snakeGameOver.value) return "撞到了，再来一局";
+  return snakeRunning.value ? "正在觅食" : "已暂停";
+});
+
 function selectGame(game: GameKind) {
+  if (activeGame.value === "tetris" && game !== "tetris" && tetrisRunning.value) {
+    tetrisRunning.value = false;
+    clearTetrisTimer();
+  }
+  if (activeGame.value === "snake" && game !== "snake" && snakeRunning.value) {
+    snakeRunning.value = false;
+    clearSnakeTimer();
+  }
   activeGame.value = game;
   if (game === "tetris" && !tetrisPiece.value) startTetris();
+  if (game === "snake" && snakeBody.value.length === 0) startSnake();
   void nextTick(() => panel.value?.focus());
 }
 
 function onPanelKeydown(event: KeyboardEvent) {
+  if (activeGame.value === "snake") {
+    const directions: Record<string, SnakePoint> = {
+      ArrowLeft: { x: -1, y: 0 },
+      ArrowRight: { x: 1, y: 0 },
+      ArrowUp: { x: 0, y: -1 },
+      ArrowDown: { x: 0, y: 1 },
+    };
+    const direction = directions[event.key];
+    if (direction) {
+      event.preventDefault();
+      setSnakeDirection(direction.x, direction.y);
+    } else if (event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      toggleSnakePause();
+    }
+    return;
+  }
+  if (activeGame.value === "sudoku") {
+    if (/^[1-9]$/.test(event.key)) {
+      event.preventDefault();
+      setSudokuValue(Number(event.key));
+    } else if (event.key === "Backspace" || event.key === "Delete" || event.key === "0") {
+      event.preventDefault();
+      setSudokuValue(0);
+    }
+    return;
+  }
   if (activeGame.value !== "tetris") return;
   const handledKeys = ["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", " ", "p", "P"];
   if (!handledKeys.includes(event.key)) return;
@@ -333,10 +544,14 @@ function onPanelKeydown(event: KeyboardEvent) {
 
 function closePanel() {
   clearTetrisTimer();
+  clearSnakeTimer();
   emit("close");
 }
 
-onBeforeUnmount(clearTetrisTimer);
+onBeforeUnmount(() => {
+  clearTetrisTimer();
+  clearSnakeTimer();
+});
 </script>
 
 <template>
@@ -373,8 +588,20 @@ onBeforeUnmount(clearTetrisTimer);
         <span><strong>俄罗斯方块</strong><small>方向键移动 · 空格直落</small></span>
       </button>
       <button type="button" class="pet-game-choice is-mines" data-testid="pet-game-open-minesweeper" @click="selectGame('minesweeper')">
-        <span class="pet-game-choice-art mine-choice-art" aria-hidden="true"><Bomb :size="23" /></span>
+        <span class="pet-game-choice-art mine-choice-art" aria-hidden="true"><Bomb :size="15" /></span>
         <span><strong>扫雷</strong><small>左键翻开 · 右键插旗</small></span>
+      </button>
+      <button type="button" class="pet-game-choice is-sudoku" data-testid="pet-game-open-sudoku" @click="selectGame('sudoku')">
+        <span class="pet-game-choice-art sudoku-choice-art" aria-hidden="true">
+          <i v-for="index in 9" :key="index">{{ index === 2 || index === 5 || index === 7 ? index : "" }}</i>
+        </span>
+        <span><strong>数独</strong><small>选格填写 · 即时检查</small></span>
+      </button>
+      <button type="button" class="pet-game-choice is-snake" data-testid="pet-game-open-snake" @click="selectGame('snake')">
+        <span class="pet-game-choice-art snake-choice-art" aria-hidden="true">
+          <i v-for="index in 8" :key="index" :class="{ 'is-food': index === 8 }" />
+        </span>
+        <span><strong>贪吃蛇</strong><small>方向键移动 · 吃点得分</small></span>
       </button>
     </div>
 
@@ -382,6 +609,8 @@ onBeforeUnmount(clearTetrisTimer);
       <nav class="pet-game-tabs" aria-label="小游戏切换">
         <button type="button" :class="{ 'is-active': activeGame === 'tetris' }" @click="selectGame('tetris')">俄罗斯方块</button>
         <button type="button" :class="{ 'is-active': activeGame === 'minesweeper' }" @click="selectGame('minesweeper')">扫雷</button>
+        <button type="button" :class="{ 'is-active': activeGame === 'sudoku' }" @click="selectGame('sudoku')">数独</button>
+        <button type="button" :class="{ 'is-active': activeGame === 'snake' }" @click="selectGame('snake')">贪吃蛇</button>
       </nav>
 
       <div v-if="activeGame === 'tetris'" class="pet-tetris" data-testid="pet-tetris">
@@ -410,7 +639,7 @@ onBeforeUnmount(clearTetrisTimer);
         </div>
       </div>
 
-      <div v-else class="pet-mines" data-testid="pet-minesweeper">
+      <div v-else-if="activeGame === 'minesweeper'" class="pet-mines" data-testid="pet-minesweeper">
         <div class="pet-game-status-row">
           <span>{{ mineStatusText }}</span>
           <span>旗 {{ mineFlags }}/{{ MINE_COUNT }}</span>
@@ -437,6 +666,65 @@ onBeforeUnmount(clearTetrisTimer);
             <span v-else-if="cell.revealed && cell.mine">✹</span>
             <span v-else-if="cell.revealed && cell.nearby">{{ cell.nearby }}</span>
           </button>
+        </div>
+      </div>
+
+      <div v-else-if="activeGame === 'sudoku'" class="pet-sudoku" data-testid="pet-sudoku">
+        <div class="pet-game-status-row">
+          <span>{{ sudokuStatusText }}</span>
+          <span>剩余 {{ sudokuRemaining }} 格</span>
+          <button type="button" aria-label="重开数独" @click="resetSudoku"><RotateCcw :size="13" /></button>
+        </div>
+        <div class="pet-sudoku-board" role="grid" aria-label="数独棋盘">
+          <button
+            v-for="(cell, index) in sudokuBoard"
+            :key="index"
+            type="button"
+            class="pet-sudoku-cell"
+            :class="{
+              'is-given': cell.given,
+              'is-selected': sudokuSelectedIndex === index,
+              'is-error': cell.error,
+              'is-box-right': (index + 1) % 3 === 0 && (index + 1) % 9 !== 0,
+              'is-box-bottom': Math.floor(index / 9) === 2 || Math.floor(index / 9) === 5,
+            }"
+            :aria-label="sudokuCellLabel(cell, index)"
+            :disabled="cell.given || sudokuStatus === 'won'"
+            role="gridcell"
+            @click="selectSudokuCell(index)"
+          >
+            {{ cell.value || "" }}
+          </button>
+        </div>
+        <div class="pet-sudoku-numpad" aria-label="数独数字键盘">
+          <button v-for="number in 9" :key="number" type="button" :aria-label="`填写数字 ${number}`" @click="setSudokuValue(number)">
+            {{ number }}
+          </button>
+          <button type="button" class="is-clear" aria-label="清除数独格" @click="setSudokuValue(0)">清除</button>
+        </div>
+      </div>
+
+      <div v-else class="pet-snake" data-testid="pet-snake">
+        <div class="pet-game-status-row">
+          <span>{{ snakeStatusText }}</span>
+          <span>得分 {{ snakeScore }}</span>
+          <button type="button" aria-label="重开贪吃蛇" @click="startSnake"><RotateCcw :size="13" /></button>
+        </div>
+        <div class="pet-snake-board" role="grid" aria-label="贪吃蛇棋盘">
+          <span
+            v-for="(cell, index) in visibleSnakeBoard"
+            :key="index"
+            class="pet-snake-cell"
+            :class="cell && `is-${cell}`"
+            role="gridcell"
+          />
+        </div>
+        <div class="pet-snake-controls" aria-label="贪吃蛇操作">
+          <button type="button" aria-label="贪吃蛇向上" @click="setSnakeDirection(0, -1)">↑</button>
+          <button type="button" aria-label="贪吃蛇向左" @click="setSnakeDirection(-1, 0)">←</button>
+          <button type="button" aria-label="贪吃蛇向下" @click="setSnakeDirection(0, 1)">↓</button>
+          <button type="button" aria-label="贪吃蛇向右" @click="setSnakeDirection(1, 0)">→</button>
+          <button type="button" class="is-wide" @click="toggleSnakePause">{{ snakeRunning ? "暂停" : snakeGameOver ? "重开" : "继续" }}</button>
         </div>
       </div>
     </template>
@@ -547,17 +835,18 @@ onBeforeUnmount(clearTetrisTimer);
 
 .pet-game-picker {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
   margin-top: 12px;
 }
 
 .pet-game-choice {
   display: flex;
   min-width: 0;
-  flex-direction: column;
-  gap: 9px;
-  padding: 10px;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  padding: 7px;
   border: 1px solid #e0e6eb;
   border-radius: 12px;
   background: #fff;
@@ -591,14 +880,16 @@ onBeforeUnmount(clearTetrisTimer);
 }
 
 .pet-game-choice-art {
-  height: 48px;
-  border-radius: 9px;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 8px;
 }
 
 .tetris-choice-art {
   display: grid;
-  grid-template-columns: repeat(4, 11px);
-  grid-template-rows: repeat(3, 11px);
+  grid-template-columns: repeat(4, 6px);
+  grid-template-rows: repeat(3, 6px);
   align-content: center;
   justify-content: center;
   gap: 2px;
@@ -626,6 +917,55 @@ onBeforeUnmount(clearTetrisTimer);
   justify-content: center;
   background: #f3eff9;
   color: #7c6bb5;
+}
+
+.sudoku-choice-art {
+  display: grid;
+  grid-template-columns: repeat(3, 8px);
+  grid-template-rows: repeat(3, 8px);
+  align-content: center;
+  justify-content: center;
+  gap: 1px;
+  background: #f2f5f7;
+}
+
+.sudoku-choice-art i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c9d4dc;
+  background: #fff;
+  color: #536e91;
+  font-size: 6px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.snake-choice-art {
+  position: relative;
+  background: #edf7f4;
+}
+
+.snake-choice-art i {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 2px;
+  background: #5aa9a6;
+}
+
+.snake-choice-art i:nth-child(1) { left: 7px; top: 9px; }
+.snake-choice-art i:nth-child(2) { left: 12px; top: 9px; }
+.snake-choice-art i:nth-child(3) { left: 17px; top: 9px; }
+.snake-choice-art i:nth-child(4) { left: 17px; top: 14px; }
+.snake-choice-art i:nth-child(5) { left: 17px; top: 19px; }
+.snake-choice-art i:nth-child(6) { left: 22px; top: 19px; }
+.snake-choice-art i:nth-child(7) { left: 27px; top: 19px; }
+.snake-choice-art i.is-food {
+  left: 7px;
+  top: 23px;
+  border-radius: 50%;
+  background: #cf7684;
 }
 
 .pet-game-tabs {
@@ -785,6 +1125,151 @@ onBeforeUnmount(clearTetrisTimer);
 .pet-mine-cell[data-nearby="6"],
 .pet-mine-cell[data-nearby="7"],
 .pet-mine-cell[data-nearby="8"] { color: #725f99; }
+
+.pet-sudoku-board {
+  display: grid;
+  width: fit-content;
+  margin: 0 auto;
+  grid-template-columns: repeat(9, 25px);
+  grid-template-rows: repeat(9, 25px);
+  overflow: hidden;
+  border: 2px solid #536e91;
+  border-radius: 8px;
+  background: #536e91;
+}
+
+.pet-sudoku-cell {
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid #d7dfe5;
+  border-bottom: 1px solid #d7dfe5;
+  background: #fff;
+  color: #7461aa;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.pet-sudoku-cell.is-box-right { border-right: 2px solid #7f91a3; }
+.pet-sudoku-cell.is-box-bottom { border-bottom: 2px solid #7f91a3; }
+.pet-sudoku-cell.is-given {
+  background: #edf1f4;
+  color: #354d66;
+  cursor: default;
+  font-weight: 750;
+}
+.pet-sudoku-cell.is-selected {
+  outline: 2px solid #7c6bb5;
+  outline-offset: -2px;
+  background: #f3effb;
+}
+.pet-sudoku-cell.is-error {
+  background: #fff0ee;
+  color: #c45d57;
+}
+.pet-sudoku-cell:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid #5aa9a6;
+  outline-offset: -2px;
+}
+
+.pet-sudoku-numpad {
+  display: grid;
+  width: 225px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  margin: 8px auto 0;
+}
+
+.pet-sudoku-numpad button {
+  height: 26px;
+  padding: 0;
+  border: 1px solid #d8e0e6;
+  border-radius: 6px;
+  background: #fff;
+  color: #3d556b;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.pet-sudoku-numpad button:hover,
+.pet-sudoku-numpad button:focus-visible {
+  border-color: #8ea5b7;
+  outline: none;
+  background: #f3f7f9;
+}
+
+.pet-sudoku-numpad button.is-clear {
+  color: #7c6bb5;
+  font-size: 9px;
+}
+
+.pet-snake-board {
+  display: grid;
+  width: fit-content;
+  grid-template-columns: repeat(12, 16px);
+  grid-template-rows: repeat(12, 16px);
+  gap: 1px;
+  margin: 0 auto;
+  padding: 6px;
+  border: 1px solid #b9c8d1;
+  border-radius: 9px;
+  background: #e8eef1;
+}
+
+.pet-snake-cell {
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.pet-snake-cell.is-body,
+.pet-snake-cell.is-head {
+  background: #5aa9a6;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+}
+
+.pet-snake-cell.is-head {
+  background: #426f78;
+}
+
+.pet-snake-cell.is-food {
+  margin: 3px;
+  border-radius: 50%;
+  background: #cf7684;
+}
+
+.pet-snake-controls {
+  display: grid;
+  width: 190px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  margin: 8px auto 0;
+}
+
+.pet-snake-controls button {
+  height: 27px;
+  border: 1px solid #d8e0e6;
+  border-radius: 7px;
+  background: #fff;
+  color: #3d556b;
+  cursor: pointer;
+}
+
+.pet-snake-controls button.is-wide {
+  color: #7c6bb5;
+  font-size: 10px;
+}
+
+.pet-snake-controls button:hover,
+.pet-snake-controls button:focus-visible {
+  border-color: #8ea5b7;
+  outline: none;
+  background: #f3f7f9;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .pet-game-choice { transition: none; }
