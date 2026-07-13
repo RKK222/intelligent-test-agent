@@ -5663,3 +5663,16 @@ bash /tmp/test-api-after-restart.sh
   - Phase 3 目标测试：后端 125 项、前端 112 项通过；Phase 4 全运行时 444 项、API 256 项通过。持久层本次相关 MyBatis 摘要、Run locator、storage mode、migration、容量与 lease 单测通过；真实 Redis 集成测试在未提供测试端口时按约定跳过。
   - 最终后端全量 `mvn -DskipTests package`、前端全量 typecheck 和生产 build 通过；持久层 42 项目标测试串行复测通过。前端全量 Vitest 为 517 passed、1 skipped、1 failed，唯一失败是远端已有 `DirectoryRows.test.ts` 仍断言只有一个“删除”按钮，而当前组件会暴露两个；未在本次 Redis 改造中修改该无关行为。
   - 后端全 reactor 联跑仍被远端已有的 9 个 H2 持久层问题阻断：`JdbcOpencodeProcessManagementRepository` 使用 H2 2.4 不支持的 PostgreSQL `ON CONFLICT`、Agent worktree fixture 缺 `usr_test_dev` 外键用户，以及两项旧 migration seed 断言；与本次 Redis Run 改造文件无交集，未在冲突处理中顺带改写。
+
+### 2026-07-13 - 测试设计细化 skill 模板分层复核
+
+- Why:
+  - 用户指出细化测试设计 skill 仅引用 `test-design` 公共模板、自身没有可加载模板，且模板规则必须与具体方法和三阶段交接协议严格一致。
+- What:
+  - 在 `.testagent/agent-opencode/.config` 中将模板分为公共通用、方法专属和执行专属三层：`test-design` 保留通用分析/案例模板；7 个 `test-design-*` 细化 skill 各自新增方法模板；`api-execute-case/templates/api-script-template.md` 保持唯一执行模板。
+  - 方法模板补齐交易类型覆盖矩阵、案例六要素、方法中间产物、材料证据、`resolvedOutputTarget`、写入文件、缺口、问题和 `需确认`；接口模板恢复七个接口案例区块，并加入接口契约字段。
+  - 删除生成/校验 skill 中重复的 API 脚本模板副本，所有入口显式引用 `api-execute-case/templates/api-script-template.md`。
+- How:
+  - 通过模板引用解析脚本、方法模板契约字段检查、旧标识扫描、文件归属检查、`git diff --check`、OpenCode skill 列表和 Agent 注册检查复核；应用区文档未写入，未创建应用 worktree。
+- Result:
+  - 所有 Markdown 模板引用均解析到实际文件；7 个细化 skill 均有本地方法模板；旧 skill/Agent 标识和重复执行模板均清除。配置仓库改动待本批次复核后提交。
