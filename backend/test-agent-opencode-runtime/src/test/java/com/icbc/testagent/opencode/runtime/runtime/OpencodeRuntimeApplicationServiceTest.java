@@ -29,6 +29,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
 import com.icbc.testagent.opencode.client.OpencodeClientFacade;
 import com.icbc.testagent.opencode.client.OpencodeCreateSessionCommand;
 import com.icbc.testagent.opencode.client.OpencodeCreateSessionResult;
@@ -558,6 +559,12 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.path()).isEqualTo("/question/req_1/reply");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("confirm"))));
+        verify(fixture.runApplicationService).recordQuestionReplyAcknowledged(
+                new SessionId("ses_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
+                "req_1",
+                List.of(List.of("confirm")),
+                "trace_1234567890abcdef");
     }
 
     @Test
@@ -620,16 +627,13 @@ class OpencodeRuntimeApplicationServiceTest {
         private final ExecutionNodeRepository executionNodeRepository = org.mockito.Mockito.mock(ExecutionNodeRepository.class);
         private final AgentSessionBindingRepository bindingRepository = new FakeAgentSessionBindingRepository();
         private final OpencodeClientFacade facade = org.mockito.Mockito.mock(OpencodeClientFacade.class);
+        private final AgentRuntimeRegistry runtimeRegistry =
+                new AgentRuntimeRegistry(List.of(new OpencodeAgentRuntime(facade)));
         private final UserOpencodeProcessAssignmentService assignmentService =
                 org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
-        private final OpencodeRuntimeApplicationService service = new OpencodeRuntimeApplicationService(
-                workspaceRepository,
-                sessionRepository,
-                executionNodeRepository,
-                new AgentRuntimeRegistry(List.of(new OpencodeAgentRuntime(facade))),
-                bindingRepository,
-                new ObjectMapper(),
-                assignmentService);
+        private final RunApplicationService runApplicationService =
+                org.mockito.Mockito.mock(RunApplicationService.class);
+        private final OpencodeRuntimeApplicationService service;
 
         private Fixture() {
             when(workspaceRepository.findById(new WorkspaceId("wrk_1234567890abcdef"))).thenReturn(Optional.of(workspace()));
@@ -643,6 +647,18 @@ class OpencodeRuntimeApplicationServiceTest {
             when(executionNodeRepository.findRoutableNodes(1)).thenReturn(List.of(node()));
             when(executionNodeRepository.findById(new ExecutionNodeId("node_1234567890abcdef"))).thenReturn(Optional.of(node()));
             when(facade.sessionExists(any())).thenReturn(Mono.just(true));
+            service = new OpencodeRuntimeApplicationService(
+                    runtimeRegistry,
+                    new AgentRuntimeTargetResolver(
+                            workspaceRepository,
+                            sessionRepository,
+                            executionNodeRepository,
+                            runtimeRegistry,
+                            bindingRepository,
+                            assignmentService),
+                    new ObjectMapper(),
+                    null,
+                    runApplicationService);
         }
 
         private OpencodeRuntimeCommand captureCommand() {

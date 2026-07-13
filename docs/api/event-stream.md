@@ -214,6 +214,8 @@ payload 字段：
 
 `answers` 外层数组顺序必须与 `questions[]` 顺序一致，内层数组为该问题的一组答案文本。
 
+回复 HTTP 成功后，平台会立即追加既有 `question.replied` durable 事件，payload 携带 `requestID`、归一化后的 `answers` 和可选 `source="interaction_reply_ack"`。这是对部分 OpenCode 版本未向原订阅发送原生 `question.replied` 的兼容收敛，不新增事件类型。前端用 `question.asked.payload.tool.messageID/callID` 关联原 question tool part，把状态更新为 `completed` 并将答案写入 `metadata.answers`；模型随后真实生成的 assistant 文本仍按普通 `message.*` 展示，不应被该兼容事件删除或折叠。
+
 ## 用户会话运行态 fetch SSE
 
 `GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 是用户级历史运行状态提醒通道，用于前端派生历史按钮运行计数、旋转图标和 `question.asked` 铃铛；历史按钮数字只统计历史第一页 30 条会话中的未完成会话。该通道使用 fetch SSE，而不是浏览器原生 `EventSource`，因为请求必须携带当前用户的 `Authorization: Bearer ...`。

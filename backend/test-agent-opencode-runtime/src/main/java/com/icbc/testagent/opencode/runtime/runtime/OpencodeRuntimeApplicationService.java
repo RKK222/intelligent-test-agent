@@ -605,16 +605,18 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object replyQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
+        Map<String, Object> normalizedBody = questionReplyBody(body);
         Object result;
         try {
             result = post(
                     location,
                     "/question/" + encodePath(requestId) + "/reply",
-                    questionReplyBody(body),
+                    normalizedBody,
                     traceId);
         } catch (PlatformException exception) {
             throw translateExpiredInteraction(exception, "question", requestId, traceId);
         }
+        recordQuestionReplyAcknowledged(sessionId, location, requestId, normalizedBody, traceId);
         reconcileAfterInteractionReply(sessionId, location, traceId);
         return result;
     }
@@ -671,6 +673,27 @@ public class OpencodeRuntimeApplicationService {
         runApplicationService.reconcileAfterInteractionReply(
                 new SessionId(sessionId),
                 location.runtime().agentId(),
+                traceId);
+    }
+
+    /**
+     * 远端 HTTP 已接受 question 回复时立即记录平台事实，避免 OpenCode 既有事件订阅漏发
+     * {@code question.replied} 后，运行态提醒和前端工具卡一直停留在待回答状态。
+     */
+    private void recordQuestionReplyAcknowledged(
+            String sessionId,
+            AgentRuntimeTargetResolver.SessionRuntimeTarget location,
+            String requestId,
+            Map<String, Object> normalizedBody,
+            String traceId) {
+        if (runApplicationService == null) {
+            return;
+        }
+        runApplicationService.recordQuestionReplyAcknowledged(
+                new SessionId(sessionId),
+                location.remoteSessionId(),
+                requestId,
+                toQuestionAnswers(normalizedBody.get("answers")),
                 traceId);
     }
 

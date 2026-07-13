@@ -2317,7 +2317,7 @@ Session 运行态接口：
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions` | 读取当前 Session 的 pending permission；OpenCode 原生列表是进程级结果，后端按绑定的 remote session 过滤，不能把其它 Session 的请求返回给当前会话。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions/{requestId}/reply` | 回复 permission，body 支持 `{ "decision": "once|always|reject" }`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions` | 读取当前 Session 的 pending question；OpenCode 原生列表是进程级结果，后端按绑定的 remote session 过滤，不能把其它 Session 的请求返回给当前会话。 |
-| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [[...], ...] }`；`answers` 为 `List<List<String>>`，外层按子问题顺序排列，内层是该问题的选中 label，一次回复覆盖同一请求下的全部子问题。平台也兼容扁平 `string[]`，按单问题整体包成单个内层数组。 |
+| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [[...], ...] }`；`answers` 为 `List<List<String>>`，外层按子问题顺序排列，内层是该问题的选中 label，一次回复覆盖同一请求下的全部子问题。平台也兼容扁平 `string[]`，按单问题整体包成单个内层数组。远端接受成功后平台立即补记既有 `question.replied` RunEvent，确保待回答状态与原 question 工具卡收敛；模型真实生成的后续 assistant 回复仍保留在消息时间线。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reject` | 拒绝 question。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state` | 查询当前登录用户历史会话运行态摘要，用于历史入口运行计数和 ask 提醒。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/runtime-state/events` | fetch SSE 订阅当前登录用户历史会话运行态摘要变更，首帧 snapshot，后续 updated。 |

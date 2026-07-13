@@ -2153,6 +2153,39 @@ public class RunApplicationService {
                                 error));
     }
 
+    /**
+     * question 回复 HTTP 成功后补记既有 {@code question.replied} 事件。部分 OpenCode 版本会让
+     * ask 恢复后的事件脱离原订阅；平台不能因此继续把该请求判定为待回答。
+     */
+    public void recordQuestionReplyAcknowledged(
+            SessionId sessionId,
+            String remoteSessionId,
+            String requestId,
+            List<List<String>> answers,
+            String traceId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        Objects.requireNonNull(answers, "answers must not be null");
+        Optional<Run> activeRun = findLatestActiveRunForInteraction(sessionId);
+        if (activeRun.isEmpty()) {
+            return;
+        }
+        Run current = activeRun.orElseThrow();
+        RunStorageMode storageMode = runRuntimeStore == null
+                ? RunStorageMode.LEGACY_FULL
+                : runRuntimeStore.storageMode(current.runId());
+        append(
+                current.runId(),
+                RunEventType.QUESTION_REPLIED,
+                traceId,
+                Instant.now(),
+                Map.of(
+                        "sessionID", remoteSessionId,
+                        "requestID", requestId,
+                        "answers", answers,
+                        "source", "interaction_reply_ack"),
+                storageMode);
+    }
+
     private Optional<AgentSessionMessage> latestFinishedAssistant(
             AgentRuntime runtime,
             ExecutionNode node,

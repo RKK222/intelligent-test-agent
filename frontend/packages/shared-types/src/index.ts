@@ -1514,6 +1514,11 @@ export type PermissionRequest = {
 export type QuestionRequest = {
   requestId: string;
   sessionId: string;
+  /** OpenCode question 工具来源，用于回复成功后精确回填原工具卡片。 */
+  tool?: {
+    messageId?: string;
+    callId?: string;
+  };
   questions: Array<{
     questionId: string;
     header?: string;

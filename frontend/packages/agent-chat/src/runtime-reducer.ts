@@ -39,7 +39,7 @@ export type AgentChatRuntimeAction =
   | { type: "run.stream.error"; message?: string; runId?: string; occurredAt?: string }
   | { type: "user.submitted"; prompt: string; parts?: PromptPart[]; createdAt?: string }
   | { type: "permission.replied"; requestId: string }
-  | { type: "question.replied"; requestId: string }
+  | { type: "question.replied"; requestId: string; answers?: unknown[] }
   | { type: "reset"; messages?: AgentMessage[] };
 
 export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []): AgentChatRuntimeState {
@@ -102,7 +102,7 @@ export function reduceAgentChatRuntime(
     return { ...state, permissions: state.permissions.filter((item) => item.requestId !== action.requestId) };
   }
   if (action.type === "question.replied") {
-    return { ...state, questions: state.questions.filter((item) => item.requestId !== action.requestId) };
+    return resolveQuestionRequest(state, action.requestId, action.answers);
   }
   if (action.type === "user.submitted") {
     const now = action.createdAt ?? new Date().toISOString();
@@ -317,7 +317,12 @@ function reduceEventOnly(
   }
   if (event.type === "question.replied" || event.type === "question.rejected") {
     const requestId = text(event.payload.requestId) ?? text(event.payload.requestID) ?? text(event.payload.id);
-    return requestId ? { ...state, questions: state.questions.filter((item) => item.requestId !== requestId) } : state;
+    if (!requestId) {
+      return state;
+    }
+    return event.type === "question.replied"
+      ? resolveQuestionRequest(state, requestId, event.payload.answers)
+      : { ...state, questions: state.questions.filter((item) => item.requestId !== requestId) };
   }
   if (event.type === "todo.updated") {
     return { ...state, todos: todoSnapshotFromValue(event.payload) ?? [] };
@@ -1208,9 +1213,11 @@ function toPermissionRequest(payload: Record<string, unknown>, event: RunEvent):
 function toQuestionRequest(payload: Record<string, unknown>, event: RunEvent): QuestionRequest {
   const requestId = text(payload.requestId) ?? text(payload.requestID) ?? text(payload.id) ?? `question-${event.seq}`;
   const rawQuestions = Array.isArray(payload.questions) ? payload.questions : [payload];
+  const tool = questionToolLink(payload.tool);
   return {
     requestId,
     sessionId: text(payload.sessionId) ?? text(payload.sessionID) ?? "",
+    ...(tool ? { tool } : {}),
     questions: rawQuestions
       .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
       .map((item, index) => {
@@ -1227,6 +1234,82 @@ function toQuestionRequest(payload: Record<string, unknown>, event: RunEvent): Q
       }),
     createdAt: text(payload.createdAt) ?? event.occurredAt
   };
+}
+
+/**
+ * 回复 API 成功就是用户答案已被 OpenCode 接受的事实；即使远端事件订阅漏掉
+ * question.replied 或完成态 tool part，也要用 asked 事件携带的工具引用原地收敛卡片。
+ */
+function resolveQuestionRequest(
+  state: AgentChatRuntimeState,
+  requestId: string,
+  rawAnswers: unknown
+): AgentChatRuntimeState {
+  const request = state.questions.find((item) => item.requestId === requestId);
+  const answers = normalizeQuestionAnswers(rawAnswers);
+  return {
+    ...state,
+    messages: request?.tool && answers
+      ? completeQuestionTool(state.messages, request.tool, answers)
+      : state.messages,
+    questions: state.questions.filter((item) => item.requestId !== requestId)
+  };
+}
+
+function questionToolLink(value: unknown): QuestionRequest["tool"] | undefined {
+  const source = record(value);
+  if (!source) {
+    return undefined;
+  }
+  const messageId = text(source.messageId) ?? text(source.messageID);
+  const callId = text(source.callId) ?? text(source.callID);
+  return messageId || callId ? { messageId, callId } : undefined;
+}
+
+function normalizeQuestionAnswers(value: unknown): string[][] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.map((answer) => {
+    const values = Array.isArray(answer) ? answer : [answer];
+    return values.filter((item): item is string => typeof item === "string");
+  });
+}
+
+function completeQuestionTool(
+  messages: AgentMessage[],
+  tool: NonNullable<QuestionRequest["tool"]>,
+  answers: string[][]
+): AgentMessage[] {
+  let updated = false;
+  const next = messages.map((message) => {
+    if (message.role !== "assistant") {
+      return message;
+    }
+    const messageMatches = Boolean(
+      tool.messageId
+        && (message.messageId === tool.messageId || message.remoteMessageId === tool.messageId || message.id === tool.messageId)
+    );
+    let messageUpdated = false;
+    const parts = message.parts?.map((part) => {
+      if (part.type !== "tool" || part.toolName.toLowerCase() !== "question") {
+        return part;
+      }
+      const callMatches = Boolean(tool.callId && part.callId === tool.callId);
+      if (!callMatches && !(messageMatches && !tool.callId)) {
+        return part;
+      }
+      updated = true;
+      messageUpdated = true;
+      return {
+        ...part,
+        status: "completed",
+        metadata: { ...(part.metadata ?? {}), answers }
+      };
+    });
+    return messageUpdated ? { ...message, parts } : message;
+  });
+  return updated ? next : messages;
 }
 
 function normalizeQuestionOptions(value: unknown): Array<{ id: string; label: string; description?: string }> | undefined {

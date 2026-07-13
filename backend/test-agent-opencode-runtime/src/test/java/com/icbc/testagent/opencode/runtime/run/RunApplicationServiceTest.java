@@ -2257,6 +2257,56 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void serviceRecordsQuestionReplyWhenRemoteEventStreamMissesTheNativeEvent() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                        command.runId(),
+                        RunEventType.QUESTION_ASKED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of("requestID", "question_1")))
+                .concatWith(Flux.never());
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+        service.startRun(
+                new SessionId("ses_1234567890abcdef"),
+                "ask before finishing",
+                "trace_1234567890abcdef");
+        awaitEventTypes(
+                events,
+                RunEventType.RUN_CREATED,
+                RunEventType.RUN_STARTED,
+                RunEventType.QUESTION_ASKED);
+
+        service.recordQuestionReplyAcknowledged(
+                new SessionId("ses_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
+                "question_1",
+                List.of(List.of("B")),
+                "trace_1234567890abcdef");
+
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsSubsequence(RunEventType.QUESTION_ASKED, RunEventType.QUESTION_REPLIED);
+        RunEvent replied = events.events.stream()
+                .filter(event -> event.type() == RunEventType.QUESTION_REPLIED)
+                .findFirst()
+                .orElseThrow();
+        assertThat(replied.payload()).containsEntry("requestID", "question_1");
+        assertThat(replied.payload()).containsEntry("answers", List.of(List.of("B")));
+        assertThat(replied.payload()).containsEntry("source", "interaction_reply_ack");
+    }
+
+    @Test
     void activeRunLookupConvergesWhenRemoteFinalMessageWasMissedByEventStream() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();

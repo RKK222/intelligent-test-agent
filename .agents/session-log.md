@@ -34,6 +34,16 @@
   - 继续复用平台 `workspace.search`、`addWorkspaceFileToChatContext`、现有附件卡片和 Pinia 上下文状态；折叠只影响展示，发送仍携带全部已加入文件，每个文件继续执行二进制、重复和容量校验。
 - Result:
   - 当前 COSS 0318 实际识别到需求说明、详细设计、业务代码、单元测试和测试设计共 5 个文件；前端定向 Vitest 179 passed/1 skipped、agent-web typecheck 和生产构建通过，test profile 三服务重启成功，backend readiness 为 UP、frontend 3000 可访问。
+### 2026-07-13 - 修复 question 回复后状态未收敛
+
+- Why:
+  - OpenCode 1.17.8 的历史提问回复链路在 HTTP 接受答案后没有向既有订阅发送 `question.replied` 或 question tool 完成态，平台只补回最终 assistant 消息，导致提问卡持续显示“进行中 / 等待回答”。
+- What:
+  - question 回复 HTTP 成功后按当前 Run 存储模式补记既有 `question.replied` 事件；前端保留 `question.asked.tool` 的 message/call 关联，在本地提交成功或收到回复事件时把原工具 part 更新为 `completed` 并回填 `metadata.answers`，同时保留模型真实生成的底部 assistant 回复。
+- How:
+  - 沿用既有 API、`question.replied` wire name 和 RunEvent 存储链路，没有新增数据库或 SDK 契约；补充后端事件/接口回归与前端 reducer/时间线回归，并同步 HTTP API、事件流和模块 README。
+- Result:
+  - 前端相关测试 71/71、全 workspace typecheck/lint、agent-web 生产构建、后端生产模块构建及两条聚焦测试通过。全量后端 test-compile 仍被当前主线 11 个无关 process 测试源码错误阻断，主要是 FakeRepository 缺少 `findReadyBackendJavaProcessByLinuxServer` 和旧 DTO 构造器参数不匹配。
 
 ### 2026-07-13 - 补齐 COSS 信鸽取证需求设计与领域参考实现
 

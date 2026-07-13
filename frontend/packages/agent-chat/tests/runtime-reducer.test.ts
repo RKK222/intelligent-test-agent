@@ -999,6 +999,116 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("marks the linked question tool completed after a successful local reply", () => {
+    const withTool = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_question_1",
+        part: {
+          id: "part_question_1",
+          messageID: "msg_question_1",
+          type: "tool",
+          tool: "question",
+          callID: "call_question_1",
+          state: {
+            status: "running",
+            input: {
+              questions: [{ question: "请选择 A 或 B", options: [{ label: "A" }, { label: "B" }] }]
+            }
+          }
+        }
+      })
+    });
+    const asked = reduceAgentChatRuntime(withTool, {
+      type: "event",
+      event: event("question.asked", {
+        id: "question_1",
+        sessionID: "session_1",
+        questions: [{ question: "请选择 A 或 B", options: [{ label: "A" }, { label: "B" }] }],
+        tool: { messageID: "msg_question_1", callID: "call_question_1" }
+      })
+    });
+
+    const replied = reduceAgentChatRuntime(asked, {
+      type: "question.replied",
+      requestId: "question_1",
+      answers: [["B"]]
+    });
+
+    expect(replied.questions).toEqual([]);
+    expect(replied.messages).toMatchObject([
+      {
+        role: "assistant",
+        messageId: "msg_question_1",
+        parts: [{
+          partId: "part_question_1",
+          type: "tool",
+          toolName: "question",
+          callId: "call_question_1",
+          status: "completed",
+          metadata: { answers: [["B"]] }
+        }]
+      }
+    ]);
+  });
+
+  it("uses question.replied event answers to complete the linked tool without removing final assistant text", () => {
+    const withTool = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_question_1",
+        part: {
+          id: "part_question_1",
+          messageID: "msg_question_1",
+          type: "tool",
+          tool: "question",
+          callID: "call_question_1",
+          state: { status: "running", input: { questions: [{ question: "请选择 A 或 B" }] } }
+        }
+      })
+    });
+    const asked = reduceAgentChatRuntime(withTool, {
+      type: "event",
+      event: event("question.asked", {
+        id: "question_1",
+        sessionID: "session_1",
+        questions: [{ question: "请选择 A 或 B" }],
+        tool: { messageID: "msg_question_1", callID: "call_question_1" }
+      })
+    });
+
+    const replied = reduceAgentChatRuntime(asked, {
+      type: "event",
+      event: event("question.replied", {
+        requestID: "question_1",
+        answers: [["B"]]
+      })
+    });
+    const withFinalMessage = reduceAgentChatRuntime(replied, {
+      type: "event",
+      event: event("message.updated", {
+        message: { id: "msg_final_1", role: "assistant" }
+      })
+    });
+    const withFinalText = reduceAgentChatRuntime(withFinalMessage, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_final_1",
+        part: { id: "part_final_1", messageID: "msg_final_1", type: "text", text: "B" }
+      })
+    });
+
+    expect(withFinalText.questions).toEqual([]);
+    expect(withFinalText.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "assistant", messageId: "msg_final_1", text: "B" }),
+      expect.objectContaining({
+        role: "assistant",
+        messageId: "msg_question_1",
+        parts: [expect.objectContaining({ status: "completed", metadata: { answers: [["B"]] } })]
+      })
+    ]));
+  });
+
   it("normalizes multiple and text question variants", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

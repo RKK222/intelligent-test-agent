@@ -2397,7 +2397,11 @@ const replyQuestionMutation = useMutation({
     }
     return api.replySessionQuestion(session.value.sessionId, payload.requestId, { answers: payload.answers });
   },
-  onSuccess: (_result, payload) => dispatchChat({ type: "question.replied", requestId: payload.requestId }),
+  onSuccess: (_result, payload) => dispatchChat({
+    type: "question.replied",
+    requestId: payload.requestId,
+    answers: payload.answers
+  }),
   onError: (error, payload) => {
     if (error instanceof BackendApiError && error.code === "CONFLICT") {
       dispatchChat({ type: "question.replied", requestId: payload.requestId });
