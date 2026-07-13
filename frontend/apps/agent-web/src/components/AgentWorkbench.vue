@@ -4713,6 +4713,7 @@ async function handleLogout() {
           :search-keyword="searchKeyword"
           :file-tree-error="fileTreeError"
           :user-id="authStore.currentUser?.userId"
+          :backend-java-server-ip="opencodeProcessStatus?.backendJavaServerIp"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @add-file-context="addWorkspaceFileToChatContext"

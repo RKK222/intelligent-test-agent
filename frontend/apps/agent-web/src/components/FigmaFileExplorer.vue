@@ -44,6 +44,8 @@ const props = defineProps<FileExplorerProps & {
   fileTreeError?: string | null;
   /** 当前用户 ID，用于拼接 iframe URL */
   userId?: string;
+  /** 后端 Java 服务器 IP 地址，用于构建 iframe URL */
+  backendJavaServerIp?: string;
 }>();
 
 const emit = defineEmits<{
@@ -108,7 +110,10 @@ const iframeUrl = computed(() => {
     params.append("workspacePath", props.workspaceRootPath);
   }
 
-  const backendUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? null;
+  let backendUrl = props.backendJavaServerIp ?? null;
+  if (!backendUrl) {
+    backendUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? null;
+  }
   if(backendUrl){
     params.append("backendUrl", backendUrl);
   }

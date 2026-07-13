@@ -702,6 +702,15 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     private UserOpencodeProcessStatusResponse ready(OpencodeServerProcess process, String message, Instant checkedAt) {
+        String backendJavaServerIp = repository.findReadyBackendJavaProcessByLinuxServer(process.linuxServerId())
+                .map(backend -> {
+                    try {
+                        return new URI(backend.listenUrl()).getHost();
+                    } catch (Exception e) {
+                        return null;
+                    }
+                })
+                .orElse(null);
         return new UserOpencodeProcessStatusResponse(
                 UserOpencodeProcessAvailability.READY,
                 false,
@@ -713,7 +722,8 @@ public class UserOpencodeProcessAssignmentService {
                 process.baseUrl(),
                 checkedAt,
                 UserOpencodeServiceStatus.RUNNING,
-                serviceAddress(process));
+                serviceAddress(process),
+                backendJavaServerIp);
     }
 
     private UserOpencodeProcessFileRoutingAffinity readyAffinity(
@@ -744,6 +754,7 @@ public class UserOpencodeProcessAssignmentService {
                 null,
                 checkedAt,
                 UserOpencodeServiceStatus.UNASSIGNED,
+                null,
                 null);
     }
 
@@ -775,7 +786,8 @@ public class UserOpencodeProcessAssignmentService {
                 null,
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
-                serviceAddress(binding));
+                serviceAddress(binding),
+                null);
     }
 
     private UserOpencodeProcessFileRoutingAffinity needsInitializationAffinity(
@@ -809,7 +821,8 @@ public class UserOpencodeProcessAssignmentService {
                 process.baseUrl(),
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
-                serviceAddress(process));
+                serviceAddress(process),
+                null);
     }
 
     private UserOpencodeProcessStatusResponse unavailable(String message, Instant checkedAt) {
@@ -824,6 +837,7 @@ public class UserOpencodeProcessAssignmentService {
                 null,
                 checkedAt,
                 UserOpencodeServiceStatus.UNASSIGNED,
+                null,
                 null);
     }
 
@@ -855,7 +869,8 @@ public class UserOpencodeProcessAssignmentService {
                 null,
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
-                serviceAddress(binding));
+                serviceAddress(binding),
+                null);
     }
 
     private UserOpencodeProcessFileRoutingAffinity unavailableAffinity(
@@ -889,7 +904,8 @@ public class UserOpencodeProcessAssignmentService {
                 process.baseUrl(),
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
-                serviceAddress(process));
+                serviceAddress(process),
+                null);
     }
 
     private String serviceAddress(UserOpencodeProcessBinding binding) {

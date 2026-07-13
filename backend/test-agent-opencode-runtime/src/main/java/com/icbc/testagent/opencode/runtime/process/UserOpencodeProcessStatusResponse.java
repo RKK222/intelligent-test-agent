@@ -16,7 +16,8 @@ public record UserOpencodeProcessStatusResponse(
         String baseUrl,
         Instant checkedAt,
         UserOpencodeServiceStatus serviceStatus,
-        String serviceAddress) {
+        String serviceAddress,
+        String backendJavaServerIp) {
 
     /**
      * 兼容旧调用方构造器：未显式传头像菜单状态时，按进程可用性和地址字段推断。
@@ -42,12 +43,14 @@ public record UserOpencodeProcessStatusResponse(
                 baseUrl,
                 checkedAt,
                 defaultServiceStatus(status),
+                null,
                 null);
     }
 
     public UserOpencodeProcessStatusResponse {
         serviceStatus = serviceStatus == null ? defaultServiceStatus(status) : serviceStatus;
         serviceAddress = serviceAddress == null || serviceAddress.isBlank() ? null : serviceAddress.trim();
+        backendJavaServerIp = backendJavaServerIp == null || backendJavaServerIp.isBlank() ? null : backendJavaServerIp.trim();
     }
 
     private static UserOpencodeServiceStatus defaultServiceStatus(UserOpencodeProcessAvailability status) {

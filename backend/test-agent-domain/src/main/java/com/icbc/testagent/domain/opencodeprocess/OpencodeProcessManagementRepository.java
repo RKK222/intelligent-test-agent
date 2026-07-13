@@ -21,6 +21,8 @@ public interface OpencodeProcessManagementRepository {
 
     Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId);
 
+    Optional<BackendJavaProcess> findReadyBackendJavaProcessByLinuxServer(LinuxServerId linuxServerId);
+
     List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit);
 
     OpencodeContainer saveContainer(OpencodeContainer container);

@@ -653,6 +653,8 @@ export type UserOpencodeProcess = {
   port?: number;
   baseUrl?: string;
   checkedAt: string;
+  /** 后端 Java 服务器 IP 地址 */
+  backendJavaServerIp?: string;
 };
 
 export type UserOpencodeProcessHealthStatus =

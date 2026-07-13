@@ -674,7 +674,8 @@ final class RuntimeDtos {
             String baseUrl,
             Instant checkedAt,
             String serviceStatus,
-            String serviceAddress) {
+            String serviceAddress,
+            String backendJavaServerIp) {
 
         /**
          * 从应用层响应映射为 HTTP DTO，避免 Controller 泄露内部枚举对象。
@@ -691,7 +692,8 @@ final class RuntimeDtos {
                     response.baseUrl(),
                     response.checkedAt(),
                     response.serviceStatus().name(),
-                    response.serviceAddress());
+                    response.serviceAddress(),
+                    response.backendJavaServerIp());
         }
     }
 

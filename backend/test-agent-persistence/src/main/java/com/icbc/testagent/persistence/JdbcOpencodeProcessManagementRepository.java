@@ -256,6 +256,22 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
     }
 
     @Override
+    public Optional<BackendJavaProcess> findReadyBackendJavaProcessByLinuxServer(LinuxServerId linuxServerId) {
+        return jdbcClient.sql("""
+                        select backend_process_id, linux_server_id, listen_url, status,
+                               started_at, last_heartbeat_at, trace_id, created_at, updated_at
+                        from backend_java_processes
+                        where linux_server_id = :linuxServerId and status = :status
+                        order by last_heartbeat_at desc
+                        limit 1
+                        """)
+                .param("linuxServerId", linuxServerId.value())
+                .param("status", BackendJavaProcessStatus.READY.name())
+                .query(backendProcessRowMapper)
+                .optional();
+    }
+
+    @Override
     public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) {
         validateLimit(limit);
         return jdbcClient.sql("""
