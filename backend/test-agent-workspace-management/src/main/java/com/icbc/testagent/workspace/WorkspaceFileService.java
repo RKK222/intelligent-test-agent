@@ -121,7 +121,7 @@ public class WorkspaceFileService {
     }
 
     /**
-     * 在同一父目录内重命名普通文件；新名称只允许是单个文件名，避免借此接口移动文件或穿越工作区。
+     * 在同一父目录内重命名普通文件或目录；新名称只允许是单个名称，避免借此接口移动条目或穿越工作区。
      */
     public void renameFile(String rootPath, String relativePath, String newName) {
         String normalizedName = newName == null ? "" : newName.trim();
@@ -140,8 +140,8 @@ public class WorkspaceFileService {
         if (!Files.exists(source)) {
             throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在", Map.of("path", safePath(relativePath)));
         }
-        if (!Files.isRegularFile(source)) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "仅支持重命名普通文件", Map.of("path", safePath(relativePath)));
+        if (!Files.isRegularFile(source) && !Files.isDirectory(source)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "仅支持重命名普通文件或目录", Map.of("path", safePath(relativePath)));
         }
         if (normalizedName.equals(source.getFileName().toString())) {
             return;
@@ -155,7 +155,7 @@ public class WorkspaceFileService {
         if (Files.exists(target)) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "目标文件已存在",
+                    "目标文件或目录已存在",
                     Map.of("path", safePath(relativePath), "name", normalizedName));
         }
         try {
@@ -163,13 +163,13 @@ public class WorkspaceFileService {
         } catch (FileAlreadyExistsException exception) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "目标文件已存在",
+                    "目标文件或目录已存在",
                     Map.of("path", safePath(relativePath), "name", normalizedName),
                     exception);
         } catch (Exception exception) {
             throw new PlatformException(
                     ErrorCode.INTERNAL_ERROR,
-                    "重命名文件失败",
+                    "重命名文件或目录失败",
                     Map.of("path", safePath(relativePath), "name", normalizedName),
                     exception);
         }

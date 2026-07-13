@@ -73,7 +73,7 @@ const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   // 删除文件或文件夹
   deleteEntry: [path: string, type: "file" | "directory"];
-  // 双击文件后重命名
+  // 双击文件或目录后重命名
   renameEntry: [path: string, name: string];
   // 缓存并跳转
   cacheAndNavigate: [path: string, type: "file" | "directory"];

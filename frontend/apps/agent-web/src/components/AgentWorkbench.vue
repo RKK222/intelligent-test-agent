@@ -3031,6 +3031,60 @@ async function handleCreateEntry(directory: string, name: string, type: "file" |
   }
 }
 
+function renameWorkspacePath(path: string, oldPath: string, nextPath: string): string {
+  if (path === oldPath) {
+    return nextPath;
+  }
+  const separator = oldPath.includes("\\") ? "\\" : "/";
+  const prefix = `${oldPath}${separator}`;
+  if (path.startsWith(prefix)) {
+    return `${nextPath}${path.slice(oldPath.length)}`;
+  }
+  // 工作区相对路径通常使用 `/`；保留兼容 Windows 路径的归一化前缀判断。
+  const normalizedPath = path.replace(/\\/g, "/");
+  const normalizedOldPath = oldPath.replace(/\\/g, "/");
+  if (normalizedPath.startsWith(`${normalizedOldPath}/`)) {
+    return `${nextPath}${normalizedPath.slice(normalizedOldPath.length)}`;
+  }
+  return path;
+}
+
+function renameWorkspaceTreeEntry(path: string, nextPath: string) {
+  const nextEntriesByDirectory: Record<string, FileTreeEntry[]> = {};
+  for (const [directory, entries] of Object.entries(entriesByDirectory.value)) {
+    const nextDirectory = renameWorkspacePath(directory, path, nextPath);
+    nextEntriesByDirectory[nextDirectory] = entries.map((entry) => ({
+      ...entry,
+      path: renameWorkspacePath(entry.path, path, nextPath)
+    }));
+  }
+  entriesByDirectory.value = nextEntriesByDirectory;
+
+  expandedDirectories.value = new Set(
+    [...expandedDirectories.value].map((directory) => renameWorkspacePath(directory, path, nextPath))
+  );
+  loadingPath.value = new Set(
+    [...loadingPath.value].map((loading) => renameWorkspacePath(loading, path, nextPath))
+  );
+
+  const openTabs = [...workbench.tabs];
+  for (const tab of openTabs) {
+    const renamedTabPath = renameWorkspacePath(tab.path, path, nextPath);
+    if (renamedTabPath !== tab.path) {
+      const title = renamedTabPath.split(/[\\/]+/).filter(Boolean).at(-1) ?? renamedTabPath;
+      workbench.renameTab(tab.path, renamedTabPath, title);
+    }
+  }
+  const activePathAfterRename = workbench.activePath && renameWorkspacePath(workbench.activePath, path, nextPath);
+  if (activePathAfterRename && activePathAfterRename !== workbench.activePath) {
+    workbench.setActivePath(activePathAfterRename);
+  }
+  const selectedDiffPathAfterRename = workbench.selectedDiffPath && renameWorkspacePath(workbench.selectedDiffPath, path, nextPath);
+  if (selectedDiffPathAfterRename && selectedDiffPathAfterRename !== workbench.selectedDiffPath) {
+    workbench.setSelectedDiffPath(selectedDiffPathAfterRename);
+  }
+}
+
 async function handleRenameEntry(path: string, name: string) {
   if (!selectedWorkspace.value) {
     return;
@@ -3044,21 +3098,21 @@ async function handleRenameEntry(path: string, name: string) {
   try {
     await api.renameWorkspaceFile(workspaceId, path, name);
 
-    // 先更新内存树和已打开 tab，用户无需等待整棵工作区重新加载即可继续编辑。
+    // 先更新内存树和已打开 tab；目录重命名时同时迁移已加载子树，用户无需刷新整棵工作区。
+    renameWorkspaceTreeEntry(path, nextPath);
     const currentEntries = entriesByDirectory.value[parentDir] ?? [];
     entriesByDirectory.value = {
       ...entriesByDirectory.value,
       [parentDir]: currentEntries.map((entry) =>
-        entry.path === path ? { ...entry, path: nextPath, name } : entry
+        entry.path === nextPath ? { ...entry, name } : entry
       )
     };
-    workbench.renameTab(path, nextPath, name);
 
     // 重命名会改变 Git diff 路径；刷新变更面板但不重新读取刚刚已经打开的文件内容。
     void refreshWorkspaceGitDiff();
-    feedback.value = { kind: "success", title: "文件已重命名", description: nextPath };
+    feedback.value = { kind: "success", title: "工作区条目已重命名", description: nextPath };
   } catch (error) {
-    feedback.value = errorFeedback("重命名文件失败", error);
+    feedback.value = errorFeedback("重命名工作区条目失败", error);
   }
 }
 

@@ -72,7 +72,7 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
-    void serviceRenamesRegularFileInsideWorkspaceAndRejectsExistingTarget() throws Exception {
+    void serviceRenamesFileOrDirectoryInsideWorkspaceAndRejectsExistingTarget() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
         Files.createDirectories(root.resolve("docs"));
         Files.writeString(root.resolve("docs/old.md"), "# 内容");
@@ -85,17 +85,18 @@ class WorkspaceFileServiceTest {
         assertThatThrownBy(() -> service.renameFile(root.toString(), "docs/new.md", "existing.md"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+
+        Files.createDirectories(root.resolve("suite/cases"));
+        Files.writeString(root.resolve("suite/cases/case.md"), "case");
+        service.renameFile(root.toString(), "suite", "regression-suite");
+        assertThat(Files.readString(root.resolve("regression-suite/cases/case.md"))).isEqualTo("case");
     }
 
     @Test
-    void serviceRejectsRenamingDirectoryOrUsingPathSeparatorsInNewName() throws Exception {
+    void serviceRejectsUsingPathSeparatorsInNewName() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
-        Files.createDirectory(root.resolve("directory"));
         Files.writeString(root.resolve("note.txt"), "note");
 
-        assertThatThrownBy(() -> service.renameFile(root.toString(), "directory", "renamed"))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
         assertThatThrownBy(() -> service.renameFile(root.toString(), "note.txt", "nested/name.txt"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));

@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 扩展工作区目录双击重命名
+
+- Why:
+  - 用户补充要求应用工作空间中的目录也支持双击改名，原实现仅允许普通文件。
+- What:
+  - 后端 `workspace.rename` 允许同一父目录内重命名普通文件或目录；前端目录行复用行内编辑入口，并迁移已加载子树、展开/加载状态、打开 Tab、活动路径和 Git diff 路径。
+- How:
+  - 保留既有 WebSocket RPC、路径归一化和目标冲突校验，只扩展条目类型；补充目录前后端测试和文档，未修改数据库、SSE 或环境配置。
+- Result:
+  - 文件树/API 前端定向测试 55/55、file-explorer/backend-api/agent-web/editor 类型检查、workspace-management 18 项测试通过；全量后端主代码构建、三服务重启、backend readiness 和 frontend 3000 验证通过。
+
 ### 2026-07-13 - 对话支持需求子条目与工作区文件引用
 
 - Why:

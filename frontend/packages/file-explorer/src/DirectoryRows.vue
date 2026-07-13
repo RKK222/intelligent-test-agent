@@ -142,9 +142,6 @@ function submitDeleteDialog() {
 }
 
 function startRename(entry: FileTreeEntry) {
-  if (entry.type !== "file") {
-    return;
-  }
   renamingPath.value = entry.path;
   renameName.value = entry.name;
   renameOriginalName.value = entry.name;
@@ -166,12 +163,12 @@ function submitRename() {
   }
   const name = renameName.value.trim();
   if (!name) {
-    renameError.value = "请输入文件名";
+    renameError.value = "请输入名称";
     void nextTick(focusRenameInput);
     return;
   }
   if (name.includes("/") || name.includes("\\") || name === "." || name === "..") {
-    renameError.value = "文件名不能包含路径分隔符";
+    renameError.value = "名称不能包含路径分隔符";
     void nextTick(focusRenameInput);
     return;
   }
@@ -223,7 +220,7 @@ function submitRename() {
           v-model="renameName"
           type="text"
           class="ta-file-tree-rename-input min-w-0 flex-1"
-          aria-label="重命名文件"
+          aria-label="重命名工作区条目"
           @click.stop
           @keydown.enter.stop.prevent="submitRename"
           @keydown.esc.stop.prevent="cancelRename"

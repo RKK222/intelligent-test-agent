@@ -42,12 +42,33 @@ describe("DirectoryRows", () => {
     });
 
     await fireEvent.dblClick(view.getByRole("button", { name: /README\.md/ }));
-    const input = view.getByRole("textbox", { name: "重命名文件" }) as HTMLInputElement;
+    const input = view.getByRole("textbox", { name: "重命名工作区条目" }) as HTMLInputElement;
     expect(input.value).toBe("README.md");
 
     await fireEvent.update(input, "详细设计.md");
     await fireEvent.keyDown(input, { key: "Enter" });
 
     expect(view.emitted("renameEntry")).toEqual([["README.md", "详细设计.md"]]);
+  });
+
+  it("double-clicks a directory to edit its name and emits the renamed directory", async () => {
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [{ type: "directory", path: "tests", name: "tests" }]
+        },
+        expandedDirectories: new Set<string>()
+      }
+    });
+
+    await fireEvent.dblClick(view.getByRole("button", { name: /tests/ }));
+    const input = view.getByRole("textbox", { name: "重命名工作区条目" }) as HTMLInputElement;
+    expect(input.value).toBe("tests");
+
+    await fireEvent.update(input, "回归测试");
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(view.emitted("renameEntry")).toEqual([["tests", "回归测试"]]);
   });
 });

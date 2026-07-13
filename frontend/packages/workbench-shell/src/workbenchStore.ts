@@ -158,7 +158,16 @@ export const useWorkbenchStore = defineStore("workbench", () => {
   function renameTab(path: string, nextPath: string, title: string) {
     tabs.value = tabs.value.map((item) =>
       item.path === path
-        ? { ...item, id: item.id.startsWith("file:") ? `file:${nextPath}` : item.id, path: nextPath, title }
+        ? {
+            ...item,
+            id: item.id.startsWith("file:")
+              ? `file:${nextPath}`
+              : item.id.startsWith("live:")
+                ? `live:${nextPath}`
+                : item.id,
+            path: nextPath,
+            title
+          }
         : item
     );
     if (activePath.value === path) {

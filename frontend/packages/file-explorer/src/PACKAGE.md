@@ -7,7 +7,7 @@
 ## 主要程序清单
 
 - `FileExplorer.vue`：三 tab 文件面板、Changed Files 入口、VS Code 风格紧凑状态徽标和选择回调；搜索 tab 接收 app 层传入的服务端搜索结果并高亮关键字。
-- `DirectoryRows.vue`：递归渲染 22px 文件树行、目录展开状态、变更行数和加载状态；普通文件双击后提供行内改名并 emit `renameEntry`。
+- `DirectoryRows.vue`：递归渲染 22px 文件树行、目录展开状态、变更行数和加载状态；文件和目录双击后提供行内改名并 emit `renameEntry`。
 - `fileIcons.ts`：按文件类型返回 VS Code codicon class，包入口导出 `getVsCodeFileIconClass` 供应用侧 Agent 树复用。
 - `filterLoadedFiles.ts`：已加载文件名过滤，作为服务端搜索结果未提供时的本地回退。
 - `highlightKeyword.ts`：把文件名按关键字分段，供搜索结果高亮渲染。
