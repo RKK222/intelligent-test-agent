@@ -135,10 +135,12 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String modelProviderId,
             String modelId,
             String variant,
+            Map<String, Boolean> tools,
             String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
         // prompt_async 的 parts 是 union schema；用稳定 JSON Map 避免 generated DTO 对 file/source 字段的类型遮蔽。
-        Map<String, Object> request = promptAsyncRequest(parts, messageId, agent, system, modelProviderId, modelId, variant, prompt);
+        Map<String, Object> request = promptAsyncRequest(
+                parts, messageId, agent, system, modelProviderId, modelId, variant, tools, prompt);
         logPromptAsyncRequestPrepared(
                 node,
                 opencodeSessionId,
@@ -182,6 +184,38 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         traceId,
                         request))
                 .thenReturn(new OpencodeStartRunResult(true));
+    }
+
+    /** 兼容未声明工具开关的内部测试和旧调用点。 */
+    public Mono<OpencodeStartRunResult> startRun(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String prompt,
+            List<OpencodePromptPart> parts,
+            String messageId,
+            String agent,
+            String system,
+            String modelProviderId,
+            String modelId,
+            String variant,
+            String traceId) {
+        return startRun(
+                node,
+                opencodeSessionId,
+                directory,
+                workspace,
+                prompt,
+                parts,
+                messageId,
+                agent,
+                system,
+                modelProviderId,
+                modelId,
+                variant,
+                Map.of(),
+                traceId);
     }
 
     /**
@@ -270,6 +304,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String modelProviderId,
             String modelId,
             String variant,
+            Map<String, Boolean> tools,
             String prompt) {
         LinkedHashMap<String, Object> request = new LinkedHashMap<>();
         String optionalMessageId = optionalText(messageId);
@@ -292,6 +327,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         String optionalVariant = optionalText(variant);
         if (optionalVariant != null) {
             request.put("variant", optionalVariant);
+        }
+        if (tools != null && !tools.isEmpty()) {
+            request.put("tools", Map.copyOf(tools));
         }
         List<Map<String, Object>> requestParts = (parts == null || parts.isEmpty()
                 ? List.of(OpencodePromptPart.text(prompt))

@@ -64,7 +64,7 @@ describe("useSideQuestionRun", () => {
     fixture.getOptions().onEvent(event("side_question.progress", { stage: "compacting" }));
     expect(fixture.state.progress.value).toBe("正在压缩较长上下文");
     fixture.getOptions().onEvent(event("side_question.progress", { stage: "tool", toolName: "read" }));
-    expect(fixture.state.progress.value).toBe("正在执行只读检查");
+    expect(fixture.state.progress.value).toBe("正在生成回答");
     fixture.getOptions().onEvent(event("side_question.delta", { delta: "第一段" }));
     fixture.getOptions().onEvent(event("side_question.delta", { delta: "\n第二段" }));
 

@@ -143,6 +143,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                         command.modelProviderId(),
                         command.modelId(),
                         command.variant(),
+                        command.tools(),
                         command.traceId())),
                 "startRun",
                 command.node());

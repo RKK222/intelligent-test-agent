@@ -15,6 +15,8 @@ final class SideQuestionPolicy {
     static final int CONTEXT_CHARACTER_LIMIT = 48_000;
     static final int MAX_ANSWER_BYTES = 64 * 1024;
     static final Duration TASK_TIMEOUT = Duration.ofSeconds(120);
+    /** SSE 丢失终态时的低频消息快照补偿间隔；正常事件流完成时不会继续查询。 */
+    static final Duration MESSAGE_RECOVERY_INTERVAL = Duration.ofSeconds(3);
     /** 宠物问答需要直接产出答案，固定使用 build agent；系统提示仍约束为只读。 */
     static final String BUILD_AGENT = "build";
     static final String SYSTEM_PROMPT = "You are a side-question answerer. "

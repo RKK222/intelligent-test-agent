@@ -98,6 +98,7 @@ public class OpencodeAgentRuntime implements AgentRuntime {
                         command.modelProviderId(),
                         command.modelId(),
                         command.variant(),
+                        command.tools(),
                         command.traceId()))
                 .map(this::toStartRunResult);
     }

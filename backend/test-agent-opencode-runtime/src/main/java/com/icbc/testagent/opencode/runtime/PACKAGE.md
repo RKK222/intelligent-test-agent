@@ -33,7 +33,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunOwnerLeaseSupervisor`：统一维护本机 owner handle 的 5 秒续租信号；fencing 被其它 owner 取得时正常完成 `lost` 只停止旧订阅，Redis/运行态异常时以原错误终止 `lost`，让 Run 启动订阅和恢复订阅调度 30 秒安全收敛。
 - `run.RunMessageRecoveryService`：为 Run/Session HTTP 历史按 Redis → OpenCode → PostgreSQL 双摘要恢复，并携带完整度、可回放性和详情到期时间；legacy SSE 兼容方法继续保持 assistant-only 快照。
 - `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射。
-- `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run，投影安全阶段和答案增量，并以事务 CAS 写唯一终态。
+- `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run；临时 fork 仅接收用户问题并禁用工具，通过本轮 assistant 事件流输出增量，消息快照补偿漏失终态，最后以事务 CAS 写唯一终态。
 - `runtime.SideQuestionOrphanCleanupTaskHandler` / `runtime.SideQuestionOrphanCleanupService`：复用 scheduler 每 5 分钟回收超过 10 分钟的旁路 fork；按内部映射使用原节点，404 幂等，无映射时记录潜在泄漏窗口并收敛平台 Run。
 - `process.*`：当前用户 opencode 进程分配、公共状态查询、公共启动/停止健康确认、通用参数 session/config 路径读取、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。
 - `terminal.*`：PTY ticket、限流、WebSocket 背后的业务状态和本地进程适配。

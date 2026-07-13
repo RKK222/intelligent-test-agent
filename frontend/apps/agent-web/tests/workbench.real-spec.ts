@@ -168,6 +168,7 @@ test.describe("phase 11 real service integration", () => {
         "side_question.started"
       ]);
       expect(events.some((event) => event.type === "side_question.progress")).toBe(true);
+      expect(events.some((event) => event.type === "side_question.delta" && String(event.payload?.delta ?? "").length > 0)).toBe(true);
       const terminal = events.find((event) => event.type === "run.succeeded");
       expect(typeof terminal?.payload?.answer).toBe("string");
       expect(String(terminal?.payload?.answer)).not.toContain("<tool_calls");

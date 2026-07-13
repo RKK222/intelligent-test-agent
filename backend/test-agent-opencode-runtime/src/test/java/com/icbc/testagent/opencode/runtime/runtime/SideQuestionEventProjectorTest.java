@@ -8,6 +8,7 @@ import com.icbc.testagent.domain.run.RunId;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SideQuestionEventProjectorTest {
@@ -25,10 +26,7 @@ class SideQuestionEventProjectorTest {
                 Map.of("rawPayload", Map.of("properties", Map.of(
                         "sessionId", TEMPORARY_SESSION_ID,
                         "tool", "read"))))))
-                .singleElement()
-                .satisfies(event -> assertThat(event.payload()).containsOnly(
-                        Map.entry("stage", "tool"),
-                        Map.entry("toolName", "read")));
+                .isEmpty();
         assertThat(projector.project(draft(
                 RunEventType.TOOL_STARTED,
                 Map.of("sessionID", "ses_main1234567890abcdef", "tool", "bash"))))
@@ -113,29 +111,37 @@ class SideQuestionEventProjectorTest {
     }
 
     @Test
-    void toolStartedOnlyExposesSafeProgressFields() {
-        SideQuestionEventProjector projector = new SideQuestionEventProjector(TEMPORARY_SESSION_ID);
+    void correlatesAnswerByPostForkMessageBoundaryEvenWhenParentPointsToHistory() {
+        SideQuestionEventProjector projector =
+                new SideQuestionEventProjector(TEMPORARY_SESSION_ID, Set.of("msg_old_answer"));
 
-        RunEventDraft progress = projector.project(draft(
-                        RunEventType.TOOL_STARTED,
-                        Map.of(
-                                "sessionID", TEMPORARY_SESSION_ID,
-                                "tool", "bash",
-                                "command", "find /secret",
-                                "path", "/secret",
-                                "input", Map.of("token", "hidden"),
-                                "output", "hidden",
-                                "rawPayload", Map.of(
-                                        "properties", Map.of(
-                                                "sessionID", TEMPORARY_SESSION_ID,
-                                                "tool", "bash",
-                                                "secret", "hidden")))))
-                .getFirst();
+        projector.project(draft(RunEventType.MESSAGE_UPDATED, Map.of(
+                "rawPayload", Map.of("properties", Map.of("info", Map.of(
+                        "id", "msg_old_answer",
+                        "sessionID", TEMPORARY_SESSION_ID,
+                        "parentID", "msg_old_prompt",
+                        "role", "assistant"))))));
+        assertThat(projector.hasObservedAnswerMessage()).isFalse();
 
-        assertThat(progress.type()).isEqualTo(RunEventType.SIDE_QUESTION_PROGRESS);
-        assertThat(progress.payload()).containsOnly(
-                Map.entry("stage", "tool"),
-                Map.entry("toolName", "bash"));
+        // OpenCode 1.17.7 的真实 fork 会让新 assistant.parentID 指向 fork 前最后一条 assistant，
+        // 因此关联本轮答案必须看 fork 后的新 message ID，而不能要求 parentID 等于新 user message ID。
+        projector.project(draft(RunEventType.MESSAGE_UPDATED, Map.of(
+                "rawPayload", Map.of("properties", Map.of("info", Map.of(
+                        "id", "msg_answer",
+                        "sessionID", TEMPORARY_SESSION_ID,
+                        "parentID", "msg_old_answer",
+                        "role", "assistant"))))));
+        assertThat(projector.hasObservedAnswerMessage()).isTrue();
+        assertThat(projector.answerCompleted()).isFalse();
+
+        projector.project(draft(RunEventType.MESSAGE_UPDATED, Map.of(
+                "rawPayload", Map.of("properties", Map.of("info", Map.of(
+                        "id", "msg_answer",
+                        "sessionID", TEMPORARY_SESSION_ID,
+                        "parentID", "msg_old_answer",
+                        "role", "assistant",
+                        "finish", "stop"))))));
+        assertThat(projector.answerCompleted()).isTrue();
     }
 
     @Test

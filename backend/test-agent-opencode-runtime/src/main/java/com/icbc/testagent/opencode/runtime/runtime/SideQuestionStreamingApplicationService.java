@@ -34,11 +34,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +54,7 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * 宠物旁路问答流式编排：创建独立归档 Session/Run 后立即返回，并在后台完成临时 fork、只读提问和清理。
+ * 宠物旁路问答流式编排：创建独立归档 Session/Run 后立即返回，并在后台完成临时 fork、上下文提问和清理。
  */
 @Service
 public class SideQuestionStreamingApplicationService {
@@ -190,7 +193,7 @@ public class SideQuestionStreamingApplicationService {
                         now,
                         traceId)
                 .withSource(ConversationSourceType.SIDE_QUESTION, mainSessionId.value(), userId)
-                .withRuntimeSelection(SideQuestionPolicy.BUILD_AGENT, normalizedModel);
+                .withRuntimeSelection(null, normalizedModel);
         pending = runRepository.save(pending);
         routingDecisionRepository.save(new RoutingDecision(
                 pending.runId(),
@@ -247,18 +250,6 @@ public class SideQuestionStreamingApplicationService {
                     traceId,
                     Instant.now(),
                     Map.of("sessionId", mainSessionId.value()));
-            progress(running.runId(), "preparing_context", traceId, Map.of());
-
-            AgentSessionMessagesResult context = target.runtime().sessionMessages(new AgentSessionMessagesCommand(
-                            target.node(),
-                            target.remoteSessionId(),
-                            SideQuestionPolicy.CONTEXT_MESSAGE_LIMIT + 1,
-                            "desc",
-                            null,
-                            traceId))
-                    .block();
-            boolean shouldCompact = SideQuestionPolicy.shouldCompact(context);
-
             progress(running.runId(), "forking", traceId, Map.of());
             temporarySessionId = fork(target, messageId, traceId);
             String createdTemporarySessionId = temporarySessionId;
@@ -285,23 +276,16 @@ public class SideQuestionStreamingApplicationService {
                     target.node().executionNodeId().value(),
                     traceId);
 
-            ModelSelection selection = parseModel(model);
-            boolean compacted = false;
-            if (shouldCompact) {
-                if (selection == null) {
-                    throw new IllegalArgumentException("model is required when side-question context needs compaction");
-                }
-                progress(running.runId(), "compacting", traceId, Map.of());
-                compact(target, temporarySessionId, selection, traceId);
-                compacted = true;
-            }
-
+            String promptMessageId = RuntimeIdGenerator.messageId();
+            Set<String> baselineMessageIds = snapshotMessageIds(target, temporarySessionId, traceId);
             RunEventDraft terminal = promptAndAwaitTerminal(
                     running,
                     target,
                     temporarySessionId,
                     question,
-                    selection,
+                    parseModel(model),
+                    promptMessageId,
+                    baselineMessageIds,
                     traceId);
             if (terminal.type() == RunEventType.RUN_FAILED) {
                 throw new IllegalStateException("remote side-question run failed");
@@ -312,11 +296,11 @@ public class SideQuestionStreamingApplicationService {
                             target.node(),
                             temporarySessionId,
                             100,
-                            "asc",
+                            "desc",
                             null,
                             traceId))
                     .block();
-            String answer = extractFinalAnswer(finalMessages);
+            String answer = extractFinalAnswer(finalMessages, baselineMessageIds, true);
             if (answer == null) {
                 throw new IllegalStateException("side-question final answer was empty");
             }
@@ -324,7 +308,7 @@ public class SideQuestionStreamingApplicationService {
             LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
             payload.put("sideQuestion", true);
             payload.put("answer", bounded.answer());
-            payload.put("compacted", compacted);
+            payload.put("compacted", false);
             if (bounded.truncated()) {
                 payload.put("truncated", true);
             }
@@ -351,10 +335,12 @@ public class SideQuestionStreamingApplicationService {
             String temporarySessionId,
             String question,
             ModelSelection selection,
+            String promptMessageId,
+            Set<String> baselineMessageIds,
             String traceId) {
-        SideQuestionEventProjector projector = new SideQuestionEventProjector(temporarySessionId);
+        SideQuestionEventProjector projector = new SideQuestionEventProjector(temporarySessionId, baselineMessageIds);
         AtomicBoolean promptDispatched = new AtomicBoolean();
-        AtomicBoolean promptedRunStarted = new AtomicBoolean();
+        AtomicBoolean promptAccepted = new AtomicBoolean();
         AgentEventStream opened = target.runtime().openRunEventStream(new AgentStreamEventsCommand(
                 target.node(),
                 run.runId(),
@@ -364,13 +350,54 @@ public class SideQuestionStreamingApplicationService {
                 traceId));
         Mono<RunEventDraft> remoteTerminal = opened.events()
                 .filter(event -> belongsToTemporarySession(event, temporarySessionId))
-                .filter(event -> afterPromptBoundary(event, promptDispatched, promptedRunStarted))
+                .filter(event -> promptDispatched.get())
                 .doOnNext(event -> publishProjected(run.runId(), projector.project(event)))
-                .filter(event -> event.type() == RunEventType.RUN_SUCCEEDED || event.type() == RunEventType.RUN_FAILED)
+                .handle((event, sink) -> {
+                    if (event.type() == RunEventType.RUN_FAILED || event.type() == RunEventType.SESSION_ERROR) {
+                        sink.next(remoteTerminal(run, event, RunEventType.RUN_FAILED));
+                    } else if (projector.answerCompleted()
+                            || (event.type() == RunEventType.RUN_SUCCEEDED && projector.hasObservedAnswerMessage())) {
+                        sink.next(remoteTerminal(run, event, RunEventType.RUN_SUCCEEDED));
+                    }
+                })
+                .cast(RunEventDraft.class)
+                .next()
+                .onErrorResume(error -> {
+                    LOGGER.warn(
+                            "event=side_question_event_stream_failed runId={} error={} traceId={}",
+                            run.runId().value(),
+                            error.getClass().getSimpleName(),
+                            traceId);
+                    return Mono.empty();
+                });
+        Mono<RunEventDraft> recoveredTerminal = Flux.interval(
+                        SideQuestionPolicy.MESSAGE_RECOVERY_INTERVAL,
+                        SideQuestionPolicy.MESSAGE_RECOVERY_INTERVAL,
+                        timeoutScheduler)
+                .filter(ignored -> promptAccepted.get())
+                .concatMap(ignored -> completedAnswerSnapshot(target, temporarySessionId, baselineMessageIds, traceId)
+                        .onErrorResume(error -> {
+                            LOGGER.debug(
+                                    "event=side_question_message_recovery_failed runId={} error={} traceId={}",
+                                    run.runId().value(),
+                                    error.getClass().getSimpleName(),
+                                    traceId);
+                            return Mono.empty();
+                        }))
+                .filter(Boolean.TRUE::equals)
+                .map(ignored -> new RunEventDraft(
+                        run.runId(),
+                        RunEventType.RUN_SUCCEEDED,
+                        traceId,
+                        Instant.now(),
+                        Map.of("recoveredFrom", "session_messages")))
                 .next();
         Mono<RunEventDraft> deadline = Mono.delay(taskTimeout, timeoutScheduler)
                 .flatMap(ignored -> Mono.error(new IllegalStateException("side-question task timed out")));
-        Mono<RunEventDraft> terminal = Mono.firstWithSignal(remoteTerminal, deadline).cache();
+        Mono<RunEventDraft> terminal = Mono.firstWithSignal(
+                        Mono.firstWithValue(remoteTerminal, recoveredTerminal),
+                        deadline)
+                .cache();
         // 必须先建立订阅，再发送 prompt_async，避免极快终态在订阅前丢失。
         Disposable eagerSubscription = terminal.subscribe(ignored -> {
         }, ignored -> {
@@ -387,12 +414,13 @@ public class SideQuestionStreamingApplicationService {
                             null,
                             question,
                             List.of(AgentPromptPart.text(question)),
+                            promptMessageId,
                             null,
-                            SideQuestionPolicy.BUILD_AGENT,
-                            SideQuestionPolicy.SYSTEM_PROMPT,
+                            null,
                             selection == null ? null : selection.providerId(),
                             selection == null ? null : selection.modelId(),
                             null,
+                            Map.of("*", false),
                             null,
                             null,
                             traceId))
@@ -400,6 +428,7 @@ public class SideQuestionStreamingApplicationService {
             if (accepted == null || !accepted.accepted()) {
                 throw new IllegalStateException("side-question prompt was not accepted");
             }
+            promptAccepted.set(true);
             RunEventDraft result = terminal.block();
             if (result == null) {
                 throw new IllegalStateException("side-question event stream ended without terminal event");
@@ -410,49 +439,55 @@ public class SideQuestionStreamingApplicationService {
         }
     }
 
-    /** fork 建连时可能先收到旧 idle；只有本次 prompt 已发出且观察到 RUN_STARTED 后才放行事件。 */
-    private boolean afterPromptBoundary(
-            RunEventDraft event,
-            AtomicBoolean promptDispatched,
-            AtomicBoolean promptedRunStarted) {
-        if (promptedRunStarted.get()) {
-            return true;
-        }
-        return promptDispatched.get()
-                && opensPromptBoundary(event)
-                && promptedRunStarted.compareAndSet(false, true);
+    /** 把远端失败/成功信号换成当前旁路 Run，避免临时流携带占位 runId。 */
+    private RunEventDraft remoteTerminal(Run run, RunEventDraft source, RunEventType type) {
+        return new RunEventDraft(
+                run.runId(),
+                type,
+                source.traceId(),
+                source.occurredAt(),
+                source.payload(),
+                source.scopeContext());
     }
 
     /**
-     * 实验事件系统用 RUN_STARTED；默认 legacy 事件系统以当前 temp 的原始 status.type=busy 表示本次 prompt 开始。
+     * SSE 丢失 idle/finish 时按低频消息快照恢复终态；只有本次 prompt 的 assistant 已完成且有正文才放行。
      */
-    private boolean opensPromptBoundary(RunEventDraft event) {
-        if (event.type() == RunEventType.RUN_STARTED) {
-            return true;
-        }
-        return event.type() == RunEventType.SESSION_STATUS
-                && containsRawBusyStatus(event.payload().get("rawPayload"));
+    private Mono<Boolean> completedAnswerSnapshot(
+            AgentRuntimeTargetResolver.SessionRuntimeTarget target,
+            String temporarySessionId,
+            Set<String> baselineMessageIds,
+            String traceId) {
+        return target.runtime().sessionMessages(new AgentSessionMessagesCommand(
+                        target.node(),
+                        temporarySessionId,
+                        100,
+                        "desc",
+                        null,
+                        traceId))
+                .map(messages -> hasCompletedAnswer(messages, baselineMessageIds));
     }
 
-    /** 只检查 rawPayload 内真实 status 对象，不信任 mapper 补充的顶层 scope/status 别名。 */
-    private boolean containsRawBusyStatus(Object value) {
-        if (value instanceof Map<?, ?> map) {
-            Object statusValue = map.get("status");
-            if (statusValue instanceof Map<?, ?> status
-                    && status.get("type") instanceof String type
-                    && "busy".equals(type.trim())) {
+    private boolean hasCompletedAnswer(AgentSessionMessagesResult result, Set<String> baselineMessageIds) {
+        if (result == null) {
+            return false;
+        }
+        for (AgentSessionMessage message : result.messages()) {
+            Map<String, Object> info = message.message();
+            if (!"assistant".equals(text(info.get("role")))) {
+                continue;
+            }
+            String messageId = firstText(info, "messageID", "messageId", "id");
+            if (messageId == null || baselineMessageIds.contains(messageId)) {
+                continue;
+            }
+            if (firstText(info, "finish") != null
+                    && extractFinalAnswer(
+                                    new AgentSessionMessagesResult(List.of(message)),
+                                    baselineMessageIds,
+                                    false)
+                            != null) {
                 return true;
-            }
-            for (Object nested : map.values()) {
-                if (containsRawBusyStatus(nested)) {
-                    return true;
-                }
-            }
-        } else if (value instanceof Iterable<?> iterable) {
-            for (Object nested : iterable) {
-                if (containsRawBusyStatus(nested)) {
-                    return true;
-                }
             }
         }
         return false;
@@ -491,19 +526,6 @@ public class SideQuestionStreamingApplicationService {
             throw new IllegalStateException("side-question fork did not return a session id");
         }
         return sessionId;
-    }
-
-    private void compact(
-            AgentRuntimeTargetResolver.SessionRuntimeTarget target,
-            String temporarySessionId,
-            ModelSelection selection,
-            String traceId) {
-        runtimeCall(
-                target,
-                "POST",
-                "/session/" + temporarySessionId + "/summarize",
-                Map.of("providerID", selection.providerId(), "modelID", selection.modelId()),
-                traceId);
     }
 
     private AgentRuntimeResult runtimeCall(
@@ -557,15 +579,52 @@ public class SideQuestionStreamingApplicationService {
         appendDurable(runId, RunEventType.SIDE_QUESTION_PROGRESS, traceId, Instant.now(), Map.copyOf(payload));
     }
 
-    private String extractFinalAnswer(AgentSessionMessagesResult result) {
+    private String extractFinalAnswer(
+            AgentSessionMessagesResult result,
+            Set<String> baselineMessageIds,
+            boolean newestFirst) {
         if (result == null) {
             return null;
         }
         List<Map<String, Object>> messages = new ArrayList<>();
         for (AgentSessionMessage message : result.messages()) {
+            String messageId = firstText(message.message(), "messageID", "messageId", "id");
+            if (messageId == null || baselineMessageIds.contains(messageId)) {
+                continue;
+            }
             messages.add(Map.of("info", message.message(), "parts", message.parts()));
         }
+        // sessionMessages(desc) 返回新消息在前；提取器按时间正序取最后一条 assistant，故先反转。
+        if (newestFirst) {
+            Collections.reverse(messages);
+        }
         return answerExtractor.extract(messages);
+    }
+
+    /** 记录 fork 继承的消息边界，后续只接收新 message ID，避免依赖 OpenCode 的非标准 parentID。 */
+    private Set<String> snapshotMessageIds(
+            AgentRuntimeTargetResolver.SessionRuntimeTarget target,
+            String temporarySessionId,
+            String traceId) {
+        AgentSessionMessagesResult result = target.runtime().sessionMessages(new AgentSessionMessagesCommand(
+                        target.node(),
+                        temporarySessionId,
+                        100,
+                        "desc",
+                        null,
+                        traceId))
+                .block();
+        if (result == null) {
+            return Set.of();
+        }
+        Set<String> messageIds = new HashSet<>();
+        for (AgentSessionMessage message : result.messages()) {
+            String messageId = firstText(message.message(), "messageID", "messageId", "id");
+            if (messageId != null) {
+                messageIds.add(messageId);
+            }
+        }
+        return Set.copyOf(messageIds);
     }
 
     private TruncatedAnswer truncateAnswer(String answer) {
@@ -680,6 +739,24 @@ public class SideQuestionStreamingApplicationService {
 
     private String normalizeOptional(String value) {
         return Optional.ofNullable(value).map(String::trim).filter(text -> !text.isEmpty()).orElse(null);
+    }
+
+    private String firstText(Map<String, Object> values, String... keys) {
+        for (String key : keys) {
+            String candidate = text(values.get(key));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private String text(Object value) {
+        if (value == null || value instanceof Map<?, ?> || value instanceof Iterable<?>) {
+            return null;
+        }
+        String normalized = String.valueOf(value).trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private record ModelSelection(String providerId, String modelId) {

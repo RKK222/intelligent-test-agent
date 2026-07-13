@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-13 - 简化宠物旁路问答并修复 fork 新答案误过滤
+
+- Why:
+  - 宠物旁路问答长期停留在“正在执行只读检查”且看不到流式文本；用户希望对齐 Claude Code `/btw`，只把主会话上下文和问题交给临时 fork，并要求不得回归 `6f8833f5a2` 的标题同步后主 Run 事件放行修复。
+- What:
+  - 旁路 fork 不再读取/压缩主消息或启动 build agent/工具，prompt 只携带问题、可选模型和 `tools={"*":false}`；保留 RunEvent SSE、终态答案校准和临时 fork 清理。
+  - 真实请求发现 OpenCode 1.17.7 的新 assistant `parentID` 仍指向 fork 前最后一条 assistant，原精确 parent 校验会误过滤答案；现改为发送前快照 fork 继承的 message ID，发送后只接收新增 assistant，兼顾流式输出和历史隔离。
+- How:
+  - 将可选 tools 配置沿既有 agent-runtime/opencode-client 启动命令透传到 `prompt_async`；旁路投影只发布新 assistant 的 text delta，不再展示工具进度，3 秒消息快照仅作为漏失终态兜底。同步 runtime/client/agent-runtime README、包说明和事件流文档，并在真实 E2E 增加非空 `side_question.delta` 断言。
+- Result:
+  - 旁路与标题联合回归 86/86 通过，其中 `RunApplicationServiceTest` 56 条、`RunSessionTitleWatchRegistryTest` 6 条覆盖 `6f8833f5a2`；前端相关 Vitest 120/120、typecheck、build 通过。test profile 三服务重启后 health/readiness、frontend 3000 和登录 CORS 正常；认证后的真实宠物 fork E2E 单独串行运行 1/1 通过（约 9 秒，确认流式 delta、终态答案和 fork 清理）。完整真实套件并行运行时 PTY 1 条通过，宠物用例首次在创建测试工作区阶段因夹具资源竞争返回 503，未进入旁路代码，随后串行复跑通过。后端全量 test-compile 仍被既有 11 个无关 process 测试源码错误阻断。
+
 ### 2026-07-13 - 扩展宠物数独与贪吃蛇小游戏
 
 - Why:

@@ -7,8 +7,8 @@ const PROGRESS_COPY: Record<string, string> = {
   preparing_context: "正在读取当前上下文",
   forking: "正在准备临时上下文",
   compacting: "正在压缩较长上下文",
-  reading: "正在执行只读检查",
-  tool: "正在执行只读检查",
+  reading: "正在生成回答",
+  tool: "正在生成回答",
   composing: "正在整理答案"
 };
 

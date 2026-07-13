@@ -53,7 +53,7 @@
 | `run.cancelled` | Run 已取消。 |
 | `run.snapshot.reset` | Redis 新模式 SSE 首帧及容量换代后的 transient 物化快照重置；无 SSE `id`，不推进 `Last-Event-ID`。 |
 | `side_question.started` | 宠物旁路问答已开始，durable；payload 的 `sessionId` 指向主平台 Session，不暴露临时远端 Session。 |
-| `side_question.progress` | 宠物旁路问答真实阶段，durable；`stage` 可为 `preparing_context/forking/compacting/reading/tool/composing`，工具阶段只允许携带安全 `toolName`。 |
+| `side_question.progress` | 宠物旁路问答真实阶段，durable；当前流式入口使用 `forking/reading/composing`。旧客户端仍可兼容历史 `preparing_context/compacting/tool` 值，但新流程不会启动工具链。 |
 | `side_question.delta` | 宠物旁路答案文本增量，transient，不写 `run_events`、不设置 SSE `id`。 |
 | `assistant.message.delta` | 助手消息增量，只实时发送，不写入 `run_events`。 |
 | `message.updated` | opencode Web App message projection 更新；实时发送，断线后由 opencode session messages snapshot 恢复。 |
@@ -133,7 +133,7 @@ data: {"eventId":"evt_snapshot_reset_run_x_2_10520","runId":"run_x","seq":0,"typ
 
 ## 宠物旁路问答 RunEvent
 
-旁路 Run 的 durable 顺序为 `run.created → run.started → side_question.started → side_question.progress* → run.succeeded|run.failed`；`side_question.delta` 可穿插在阶段事件之间，但不参与 durable seq 或 `Last-Event-ID` 回放。`run.succeeded.payload` 至少包含 `sideQuestion:true`、完整 `answer`、`compacted`，答案因 64 KiB 上限截断时还包含 `truncated:true`；`run.failed.payload.message` 只携带安全错误说明。旁路 SSE 不输出原始 `message.*`、`tool.*`、`session.scope.*` 或临时 fork ID。
+旁路 Run 的 durable 顺序为 `run.created → run.started → side_question.started → side_question.progress* → run.succeeded|run.failed`；`side_question.delta` 可穿插在阶段事件之间，但不参与 durable seq 或 `Last-Event-ID` 回放。流式入口对主会话做临时 fork 后只提交本轮问题和可选模型，显式禁用工具；发送前记录 fork 继承的 message ID，发送后只接收新增 assistant，不能依赖 OpenCode fork 后可能仍指向历史 assistant 的 `parentID`。正常终态来自新增 assistant finish，漏失事件时以低频消息快照补偿。`run.succeeded.payload` 至少包含 `sideQuestion:true`、完整 `answer`、`compacted:false`，答案因 64 KiB 上限截断时还包含 `truncated:true`；`run.failed.payload.message` 只携带安全错误说明。旁路 SSE 不输出原始 `message.*`、`tool.*`、`session.scope.*` 或临时 fork ID。
 
 前端断线重连后会回放 durable progress/terminal，按 `eventId` 去重；最终终态 answer 覆盖当前 delta 缓冲，避免 transient 丢帧或重投导致缺字、重复。关闭浮层只释放该旁路订阅，不取消主 Run，也不取消后端旁路任务。
 

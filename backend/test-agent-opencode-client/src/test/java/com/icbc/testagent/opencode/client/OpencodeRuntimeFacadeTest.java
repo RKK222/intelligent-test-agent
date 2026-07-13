@@ -132,6 +132,7 @@ class OpencodeRuntimeFacadeTest {
                 String modelProviderId,
                 String modelId,
                 String variant,
+                java.util.Map<String, Boolean> tools,
                 String traceId) {
             return Mono.just(new OpencodeStartRunResult(true));
         }

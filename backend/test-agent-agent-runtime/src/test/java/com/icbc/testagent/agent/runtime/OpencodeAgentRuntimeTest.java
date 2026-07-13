@@ -14,6 +14,7 @@ import com.icbc.testagent.opencode.client.OpencodeStartRunCommand;
 import com.icbc.testagent.opencode.client.OpencodeStartRunResult;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
@@ -39,6 +40,7 @@ class OpencodeAgentRuntimeTest {
                         null,
                         null,
                         null,
+                        Map.of("*", false),
                         null,
                         null,
                         "trace_1234567890abcdef"))
@@ -48,6 +50,7 @@ class OpencodeAgentRuntimeTest {
         verify(facade).startRun(command.capture());
         assertThat(command.getValue().agent()).isEqualTo("plan");
         assertThat(command.getValue().system()).isEqualTo("只做只读检查并输出最终答案");
+        assertThat(command.getValue().tools()).containsExactly(Map.entry("*", false));
         assertThat(command.getValue().parts()).extracting("type").containsExactly("text");
     }
 

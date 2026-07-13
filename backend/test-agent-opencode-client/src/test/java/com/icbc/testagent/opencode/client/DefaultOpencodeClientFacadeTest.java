@@ -523,6 +523,7 @@ class DefaultOpencodeClientFacadeTest {
                 String modelProviderId,
                 String modelId,
                 String variant,
+                java.util.Map<String, Boolean> tools,
                 String traceId) {
             lastTraceId = traceId;
             lastOpencodeSessionId = opencodeSessionId;

@@ -3,6 +3,7 @@ package com.icbc.testagent.agent.runtime;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.support.DomainValidation;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -21,6 +22,7 @@ public record AgentStartRunCommand(
         String modelProviderId,
         String modelId,
         String variant,
+        Map<String, Boolean> tools,
         String command,
         String arguments,
         String traceId) {
@@ -41,9 +43,48 @@ public record AgentStartRunCommand(
         modelProviderId = optionalText(modelProviderId);
         modelId = optionalText(modelId);
         variant = optionalText(variant);
+        tools = tools == null ? Map.of() : Map.copyOf(tools);
         command = optionalText(command);
         arguments = optionalText(arguments);
         traceId = DomainValidation.requireText(traceId, "traceId");
+    }
+
+    /**
+     * 兼容尚未声明工具开关的运行入口；空映射表示沿用远端 agent 默认工具配置。
+     */
+    public AgentStartRunCommand(
+            ExecutionNode node,
+            String remoteSessionId,
+            String directory,
+            String workspace,
+            String prompt,
+            List<AgentPromptPart> parts,
+            String messageId,
+            String agent,
+            String system,
+            String modelProviderId,
+            String modelId,
+            String variant,
+            String command,
+            String arguments,
+            String traceId) {
+        this(
+                node,
+                remoteSessionId,
+                directory,
+                workspace,
+                prompt,
+                parts,
+                messageId,
+                agent,
+                system,
+                modelProviderId,
+                modelId,
+                variant,
+                Map.of(),
+                command,
+                arguments,
+                traceId);
     }
 
     private static String optionalText(String value) {

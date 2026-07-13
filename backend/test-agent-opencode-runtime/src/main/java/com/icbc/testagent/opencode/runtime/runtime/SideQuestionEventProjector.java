@@ -16,17 +16,28 @@ import java.util.function.Predicate;
 public final class SideQuestionEventProjector {
 
     private final String temporarySessionId;
+    private final Set<String> baselineMessageIds;
     private final Set<String> assistantMessageIds = new HashSet<>();
     private final Map<String, String> assistantTextPartOwners = new HashMap<>();
+    private boolean answerCompleted;
 
     /**
      * 每个临时 fork 使用独立投影器，避免不同旁路请求的 message/part 关联状态串扰。
      */
     public SideQuestionEventProjector(String temporarySessionId) {
+        this(temporarySessionId, Set.of());
+    }
+
+    /**
+     * 使用发送问题前的消息 ID 快照隔离 fork 历史消息；OpenCode fork 后新 assistant 的 parentID
+     * 仍可能指向 fork 前最后一条 assistant，不能把 parentID 当作本次问题的关联键。
+     */
+    public SideQuestionEventProjector(String temporarySessionId, Set<String> baselineMessageIds) {
         if (temporarySessionId == null || temporarySessionId.isBlank()) {
             throw new IllegalArgumentException("temporarySessionId must not be blank");
         }
         this.temporarySessionId = temporarySessionId.trim();
+        this.baselineMessageIds = baselineMessageIds == null ? Set.of() : Set.copyOf(baselineMessageIds);
     }
 
     /**
@@ -46,9 +57,18 @@ public final class SideQuestionEventProjector {
             case MESSAGE_UPDATED -> registerAssistantMessage(rawEvent);
             case MESSAGE_PART_UPDATED -> registerAssistantTextPart(rawEvent);
             case MESSAGE_PART_DELTA -> projectAssistantTextDelta(source, rawEvent);
-            case TOOL_STARTED -> projectToolProgress(source, rawEvent);
             default -> List.of();
         };
+    }
+
+    /** 当前订阅是否已经观察到属于本次问题的 assistant 消息。 */
+    public synchronized boolean hasObservedAnswerMessage() {
+        return !assistantMessageIds.isEmpty();
+    }
+
+    /** 当前订阅是否已经观察到本次 assistant 消息的 finish 字段。 */
+    public synchronized boolean answerCompleted() {
+        return answerCompleted;
     }
 
     private List<RunEventDraft> registerAssistantMessage(Object rawEvent) {
@@ -57,8 +77,11 @@ public final class SideQuestionEventProjector {
             return List.of();
         }
         String messageId = firstText(info, "messageID", "messageId", "id");
-        if (messageId != null && "assistant".equals(text(info.get("role")))) {
+        if (messageId != null
+                && "assistant".equals(text(info.get("role")))
+                && !baselineMessageIds.contains(messageId)) {
             assistantMessageIds.add(messageId);
+            answerCompleted = answerCompleted || text(info.get("finish")) != null;
         }
         return List.of();
     }
@@ -93,17 +116,6 @@ public final class SideQuestionEventProjector {
             return List.of();
         }
         return List.of(projected(source, RunEventType.SIDE_QUESTION_DELTA, Map.of("delta", delta)));
-    }
-
-    private List<RunEventDraft> projectToolProgress(RunEventDraft source, Object rawEvent) {
-        String toolName = firstText(rawEvent, "toolName", "tool");
-        if (toolName == null) {
-            return List.of();
-        }
-        // 进度事件仅保留工具名，不把 command/path/input/output/rawPayload 等敏感参数传给浏览器。
-        return List.of(projected(source, RunEventType.SIDE_QUESTION_PROGRESS, Map.of(
-                "stage", "tool",
-                "toolName", toolName)));
     }
 
     private RunEventDraft projected(RunEventDraft source, RunEventType type, Map<String, Object> payload) {

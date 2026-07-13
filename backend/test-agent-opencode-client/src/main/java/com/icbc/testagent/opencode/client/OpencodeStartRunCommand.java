@@ -3,6 +3,7 @@ package com.icbc.testagent.opencode.client;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.support.DomainValidation;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -21,6 +22,7 @@ public record OpencodeStartRunCommand(
         String modelProviderId,
         String modelId,
         String variant,
+        Map<String, Boolean> tools,
         String traceId) {
 
     /**
@@ -42,7 +44,40 @@ public record OpencodeStartRunCommand(
             throw new IllegalArgumentException("modelProviderId and modelId must be provided together");
         }
         variant = optionalText(variant);
+        tools = tools == null ? Map.of() : Map.copyOf(tools);
         traceId = DomainValidation.requireText(traceId, "traceId");
+    }
+
+    /** 兼容未声明工具开关的调用方，空映射表示不覆盖远端默认配置。 */
+    public OpencodeStartRunCommand(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String prompt,
+            List<OpencodePromptPart> parts,
+            String messageId,
+            String agent,
+            String system,
+            String modelProviderId,
+            String modelId,
+            String variant,
+            String traceId) {
+        this(
+                node,
+                opencodeSessionId,
+                directory,
+                workspace,
+                prompt,
+                parts,
+                messageId,
+                agent,
+                system,
+                modelProviderId,
+                modelId,
+                variant,
+                Map.of(),
+                traceId);
     }
 
     /**
@@ -56,7 +91,7 @@ public record OpencodeStartRunCommand(
             String prompt,
             String traceId) {
         this(node, opencodeSessionId, directory, workspace, prompt, List.of(OpencodePromptPart.text(prompt)),
-                null, null, null, null, null, null, traceId);
+                null, null, null, null, null, null, Map.of(), traceId);
     }
 
     /**

@@ -56,6 +56,7 @@ public interface OpencodeSdkGateway {
             String modelProviderId,
             String modelId,
             String variant,
+            java.util.Map<String, Boolean> tools,
             String traceId);
 
     /**

@@ -136,6 +136,7 @@ class GeneratedOpencodeSdkGatewayTest {
                             null,
                             null,
                             null,
+                            Map.of("*", false),
                             TRACE_ID)
                     .block(Duration.ofSeconds(5));
 
@@ -145,7 +146,10 @@ class GeneratedOpencodeSdkGatewayTest {
             assertThat(request.get().query()).containsEntry("directory", List.of("/tmp/demo"));
             assertThat(request.get().query()).doesNotContainKey("workspace");
             assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
-            assertThat(request.get().body()).contains("\"type\":\"text\"", "\"text\":\"run the tests\"");
+            assertThat(request.get().body()).contains(
+                    "\"type\":\"text\"",
+                    "\"text\":\"run the tests\"",
+                    "\"tools\":{\"*\":false}");
         } finally {
             server.stop(0);
         }

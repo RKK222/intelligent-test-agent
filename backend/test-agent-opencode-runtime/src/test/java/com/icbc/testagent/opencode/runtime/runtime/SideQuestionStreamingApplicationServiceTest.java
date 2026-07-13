@@ -40,6 +40,7 @@ import com.icbc.testagent.event.RunEventLiveBus;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -100,7 +101,7 @@ class SideQuestionStreamingApplicationServiceTest {
         assertThat(pending.sourceType()).isEqualTo(ConversationSourceType.SIDE_QUESTION);
         assertThat(pending.sourceRefId()).isEqualTo(MAIN_SESSION_ID.value());
         assertThat(pending.triggeredByUserId()).isEqualTo(USER_ID);
-        assertThat(pending.agentId()).isEqualTo("build");
+        assertThat(pending.agentId()).isNull();
         ArgumentCaptor<RoutingDecision> routingCaptor = ArgumentCaptor.forClass(RoutingDecision.class);
         verify(fixture.routingDecisions).save(routingCaptor.capture());
         assertThat(routingCaptor.getValue().runId()).isEqualTo(result.runId());
@@ -111,11 +112,10 @@ class SideQuestionStreamingApplicationServiceTest {
     }
 
     @Test
-    void workflowSubscribesBeforePlanPromptProjectsSafeEventsAndCleansFork() {
+    void workflowSubscribesBeforeContextOnlyPromptStreamsAnswerAndCleansFork() {
         List<String> order = new ArrayList<>();
         Fixture fixture = new Fixture(Runnable::run);
         fixture.order = order;
-        fixture.context = context(41, "历史");
         fixture.finalMessages = finalAnswer("最终答案");
         fixture.remoteEvents = Flux.fromIterable(remoteAnswerEvents());
         fixture.rewireRuntime();
@@ -130,14 +130,11 @@ class SideQuestionStreamingApplicationServiceTest {
                 TRACE_ID);
 
         assertThat(result.runId()).isNotNull();
-        assertThat(order).containsSubsequence("fork", "mapping", "compact", "subscribe", "prompt", "delete");
+        assertThat(order).containsSubsequence("fork", "mapping", "subscribe", "prompt", "delete");
         assertThat(fixture.durableEvents).extracting(RunEventDraft::type).containsExactly(
                 RunEventType.RUN_CREATED,
                 RunEventType.RUN_STARTED,
                 RunEventType.SIDE_QUESTION_STARTED,
-                RunEventType.SIDE_QUESTION_PROGRESS,
-                RunEventType.SIDE_QUESTION_PROGRESS,
-                RunEventType.SIDE_QUESTION_PROGRESS,
                 RunEventType.SIDE_QUESTION_PROGRESS,
                 RunEventType.SIDE_QUESTION_PROGRESS,
                 RunEventType.SIDE_QUESTION_PROGRESS);
@@ -149,9 +146,10 @@ class SideQuestionStreamingApplicationServiceTest {
         verify(fixture.liveBus).publishTransient(any(RunEventDraft.class));
         ArgumentCaptor<AgentStartRunCommand> startCaptor = ArgumentCaptor.forClass(AgentStartRunCommand.class);
         verify(fixture.runtime).startRun(startCaptor.capture());
-        assertThat(startCaptor.getValue().agent()).isEqualTo("build");
-        assertThat(startCaptor.getValue().system()).isEqualTo(SideQuestionPolicy.SYSTEM_PROMPT);
-        assertThat(startCaptor.getValue().messageId()).isNull();
+        assertThat(startCaptor.getValue().agent()).isNull();
+        assertThat(startCaptor.getValue().system()).isNull();
+        assertThat(startCaptor.getValue().messageId()).startsWith("msg_");
+        assertThat(startCaptor.getValue().tools()).containsExactly(Map.entry("*", false));
         ArgumentCaptor<AgentRuntimeCommand> runtimeCaptor = ArgumentCaptor.forClass(AgentRuntimeCommand.class);
         verify(fixture.runtime, atLeastOnce()).runtime(runtimeCaptor.capture());
         AgentRuntimeCommand forkCommand = runtimeCaptor.getAllValues().stream()
@@ -163,7 +161,7 @@ class SideQuestionStreamingApplicationServiceTest {
                 eq(result.runId()),
                 org.mockito.ArgumentMatchers.argThat((Map<String, Object> payload) -> Boolean.TRUE.equals(payload.get("sideQuestion"))
                         && "最终答案".equals(payload.get("answer"))
-                        && Boolean.TRUE.equals(payload.get("compacted"))),
+                        && Boolean.FALSE.equals(payload.get("compacted"))),
                 eq(TRACE_ID));
         assertThat(fixture.deleteCalls).hasValue(1);
     }
@@ -199,12 +197,14 @@ class SideQuestionStreamingApplicationServiceTest {
 
     @Test
     void everyRemoteExecutionFailureConvergesToOneSafeFailureAndCleansCreatedFork() {
-        for (FailurePoint failurePoint : FailurePoint.values()) {
+        for (FailurePoint failurePoint : List.of(
+                FailurePoint.FORK,
+                FailurePoint.PROMPT,
+                FailurePoint.FINAL_ANSWER,
+                FailurePoint.READY_FAILURE,
+                FailurePoint.PROMPT_REJECTED)) {
             Fixture fixture = new Fixture(Runnable::run);
             fixture.failurePoint = failurePoint;
-            fixture.context = failurePoint == FailurePoint.COMPACT
-                    ? context(41, "长上下文")
-                    : context(1, "短上下文");
             if (failurePoint == FailurePoint.FINAL_ANSWER) {
                 fixture.finalMessages = new AgentSessionMessagesResult(List.of());
             }
@@ -216,13 +216,13 @@ class SideQuestionStreamingApplicationServiceTest {
                     MAIN_SESSION_ID,
                     "问题",
                     null,
-                    failurePoint == FailurePoint.COMPACT ? "provider/model" : null,
+                    null,
                     TRACE_ID);
 
             verify(fixture.terminal).fail(any(), eq("旁路问答暂时失败"), eq(TRACE_ID));
             assertThat(fixture.deleteCalls.get())
                     .as(failurePoint.name())
-                    .isEqualTo(failurePoint == FailurePoint.FORK || failurePoint == FailurePoint.CONTEXT_READ ? 0 : 1);
+                    .isEqualTo(failurePoint == FailurePoint.FORK ? 0 : 1);
         }
     }
 
@@ -239,6 +239,7 @@ class SideQuestionStreamingApplicationServiceTest {
                     ready.asMono(),
                     events.asFlux().doOnSubscribe(ignored -> subscribed.countDown())));
             when(fixture.runtime.startRun(any())).thenAnswer(invocation -> {
+                fixture.promptMessageId.set(((AgentStartRunCommand) invocation.getArgument(0)).messageId());
                 promptStarted.countDown();
                 return Mono.just(new com.icbc.testagent.agent.runtime.AgentStartRunResult(true));
             });
@@ -249,6 +250,9 @@ class SideQuestionStreamingApplicationServiceTest {
             assertThat(promptStarted.getCount()).isEqualTo(1L);
             ready.tryEmitEmpty();
             assertThat(promptStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            events.tryEmitNext(remote(RunEventType.MESSAGE_UPDATED, Map.of(
+                    "sessionID", "remote_temp",
+                    "info", Map.of("id", "msg_answer", "role", "assistant"))));
             events.tryEmitNext(remote(RunEventType.RUN_SUCCEEDED, Map.of("sessionID", "remote_temp")));
             events.tryEmitComplete();
             assertThat(fixture.deleteCompleted.await(2, TimeUnit.SECONDS)).isTrue();
@@ -258,57 +262,61 @@ class SideQuestionStreamingApplicationServiceTest {
     }
 
     @Test
-    void startReturnsWhileBackgroundContextReadIsBlocked() throws Exception {
-        CountDownLatch contextReadEntered = new CountDownLatch(1);
-        CountDownLatch releaseContextRead = new CountDownLatch(1);
+    void startReturnsWhileBackgroundForkIsBlocked() throws Exception {
+        CountDownLatch forkEntered = new CountDownLatch(1);
+        CountDownLatch releaseFork = new CountDownLatch(1);
         ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
         try {
             Fixture fixture = new Fixture(executor);
             org.mockito.Mockito.doAnswer(invocation -> {
-                contextReadEntered.countDown();
-                releaseContextRead.await();
-                return Mono.just(fixture.context);
-            }).when(fixture.runtime).sessionMessages(any());
+                AgentRuntimeCommand command = invocation.getArgument(0);
+                if (command.path().endsWith("/fork")) {
+                    forkEntered.countDown();
+                    releaseFork.await();
+                    return Mono.just(new AgentRuntimeResult(JSON.valueToTree(Map.of("id", "remote_temp"))));
+                }
+                if ("DELETE".equals(command.method())) {
+                    fixture.deleteCalls.updateAndGet(value -> value + 1);
+                    fixture.deleteCompleted.countDown();
+                }
+                return Mono.just(new AgentRuntimeResult(JSON.valueToTree(Map.of("ok", true))));
+            }).when(fixture.runtime).runtime(any());
 
             SideQuestionRunStartResult result = fixture.service.start(
                     USER_ID, "opencode", MAIN_SESSION_ID, "问题", null, null, TRACE_ID);
 
             assertThat(result.runId()).isNotNull();
-            assertThat(contextReadEntered.await(2, TimeUnit.SECONDS)).isTrue();
-            releaseContextRead.countDown();
+            assertThat(forkEntered.await(2, TimeUnit.SECONDS)).isTrue();
+            releaseFork.countDown();
             assertThat(fixture.deleteCompleted.await(2, TimeUnit.SECONDS)).isTrue();
         } finally {
-            releaseContextRead.countDown();
+            releaseFork.countDown();
             executor.shutdownNow();
         }
     }
 
     @Test
-    void characterHeavyContextCompactsEvenWithAtMostFortyMessages() {
+    void forkedContextIsReusedWithoutReadingOrCompactingMainMessages() {
         Fixture fixture = new Fixture(Runnable::run);
-        fixture.context = context(1, "x".repeat(48_001));
         fixture.rewireRuntime();
 
         fixture.service.start(
                 USER_ID, "opencode", MAIN_SESSION_ID, "问题", null, "provider/model", TRACE_ID);
 
-        assertThat(fixture.order).contains("compact");
+        verify(fixture.runtime, never()).sessionMessages(org.mockito.ArgumentMatchers.argThat(
+                command -> "remote_main".equals(command.remoteSessionId())));
+        assertThat(fixture.order).doesNotContain("compact");
     }
 
     @Test
-    void contextReadRejectedPromptAndStreamWithoutTerminalAllFailSafely() {
-        for (FailurePoint failurePoint : List.of(
-                FailurePoint.CONTEXT_READ,
-                FailurePoint.PROMPT_REJECTED,
-                FailurePoint.STREAM_NO_TERMINAL)) {
-            Fixture fixture = new Fixture(Runnable::run);
-            fixture.failurePoint = failurePoint;
-            fixture.rewireRuntime();
+    void rejectedPromptFailsSafely() {
+        Fixture fixture = new Fixture(Runnable::run);
+        fixture.failurePoint = FailurePoint.PROMPT_REJECTED;
+        fixture.rewireRuntime();
 
-            fixture.service.start(USER_ID, "opencode", MAIN_SESSION_ID, "问题", null, null, TRACE_ID);
+        fixture.service.start(USER_ID, "opencode", MAIN_SESSION_ID, "问题", null, null, TRACE_ID);
 
-            verify(fixture.terminal).fail(any(), eq("旁路问答暂时失败"), eq(TRACE_ID));
-        }
+        verify(fixture.terminal).fail(any(), eq("旁路问答暂时失败"), eq(TRACE_ID));
     }
 
     @Test
@@ -341,6 +349,7 @@ class SideQuestionStreamingApplicationServiceTest {
                             .doOnSubscribe(ignored -> subscribed.countDown())
                             .doOnCancel(() -> cancelled.set(true))));
             when(fixture.runtime.startRun(any())).thenAnswer(invocation -> {
+                fixture.promptMessageId.set(((AgentStartRunCommand) invocation.getArgument(0)).messageId());
                 promptStarted.countDown();
                 return Mono.just(new com.icbc.testagent.agent.runtime.AgentStartRunResult(true));
             });
@@ -369,7 +378,7 @@ class SideQuestionStreamingApplicationServiceTest {
     }
 
     @Test
-    void ignoresOldForkTerminalUntilPromptedRunStarts() throws Exception {
+    void ignoresOldForkTerminalUntilTheNewAssistantAnswerAppears() throws Exception {
         ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
         CountDownLatch subscribed = new CountDownLatch(1);
         CountDownLatch promptStarted = new CountDownLatch(1);
@@ -383,6 +392,7 @@ class SideQuestionStreamingApplicationServiceTest {
                     ready.asMono(),
                     events.asFlux().doOnSubscribe(ignored -> subscribed.countDown())));
             when(fixture.runtime.startRun(any())).thenAnswer(invocation -> {
+                fixture.promptMessageId.set(((AgentStartRunCommand) invocation.getArgument(0)).messageId());
                 promptStarted.countDown();
                 return Mono.just(new com.icbc.testagent.agent.runtime.AgentStartRunResult(true));
             });
@@ -396,9 +406,6 @@ class SideQuestionStreamingApplicationServiceTest {
             assertThat(promptStarted.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(fixture.deleteCalls).hasValue(0);
 
-            assertThat(events.tryEmitNext(remote(
-                            RunEventType.RUN_STARTED, Map.of("sessionID", "remote_temp"))).isSuccess())
-                    .isTrue();
             assertThat(events.tryEmitNext(remote(RunEventType.MESSAGE_UPDATED, Map.of(
                     "sessionID", "remote_temp",
                     "info", Map.of("id", "msg_answer", "role", "assistant")))).isSuccess()).isTrue();
@@ -432,7 +439,7 @@ class SideQuestionStreamingApplicationServiceTest {
     }
 
     @Test
-    void legacyBusyStatusAfterPromptOpensBoundaryWithoutAcceptingOldIdleTerminal() throws Exception {
+    void newAssistantAnswerCompletesWithoutBusyOrRunStartedSignal() throws Exception {
         ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
         CountDownLatch subscribed = new CountDownLatch(1);
         CountDownLatch promptStarted = new CountDownLatch(1);
@@ -447,9 +454,7 @@ class SideQuestionStreamingApplicationServiceTest {
                     ready.asMono(),
                     events.asFlux().doOnSubscribe(ignored -> subscribed.countDown())));
             when(fixture.runtime.startRun(any())).thenAnswer(invocation -> {
-                events.tryEmitNext(remote(RunEventType.SESSION_STATUS, Map.of(
-                        "sessionID", "remote_temp",
-                        "status", Map.of("type", "busy"))));
+                fixture.promptMessageId.set(((AgentStartRunCommand) invocation.getArgument(0)).messageId());
                 promptStarted.countDown();
                 return Mono.just(new com.icbc.testagent.agent.runtime.AgentStartRunResult(true));
             });
@@ -501,6 +506,34 @@ class SideQuestionStreamingApplicationServiceTest {
             assertThat(fixture.deleteCalls).hasValue(1);
         } finally {
             executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void completedMessageSnapshotRecoversWhenEventStreamMissesTerminal() throws Exception {
+        VirtualTimeScheduler timeoutScheduler = VirtualTimeScheduler.create();
+        ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            Fixture fixture = new Fixture(executor, Duration.ofSeconds(10), timeoutScheduler);
+            fixture.failurePoint = FailurePoint.STREAM_NO_TERMINAL;
+            fixture.finalMessages = completedFinalAnswer("快照恢复答案");
+            fixture.rewireRuntime();
+
+            fixture.service.start(USER_ID, "opencode", MAIN_SESSION_ID, "问题", null, null, TRACE_ID);
+
+            verify(fixture.runtime, org.mockito.Mockito.timeout(2_000)).startRun(any());
+            timeoutScheduler.advanceTimeBy(SideQuestionPolicy.MESSAGE_RECOVERY_INTERVAL);
+
+            assertThat(fixture.deleteCompleted.await(2, TimeUnit.SECONDS)).isTrue();
+            verify(fixture.terminal).succeed(
+                    any(),
+                    org.mockito.ArgumentMatchers.argThat((Map<String, Object> payload) ->
+                            "快照恢复答案".equals(payload.get("answer"))),
+                    eq(TRACE_ID));
+            verify(fixture.terminal, never()).fail(any(), any(), any());
+        } finally {
+            executor.shutdownNow();
+            timeoutScheduler.dispose();
         }
     }
 
@@ -564,12 +597,21 @@ class SideQuestionStreamingApplicationServiceTest {
                 List.of(Map.of("type", "text", "text", answer)))));
     }
 
+    private static AgentSessionMessagesResult completedFinalAnswer(String answer) {
+        return new AgentSessionMessagesResult(List.of(new AgentSessionMessage(
+                Map.of("id", "msg_answer", "role", "assistant", "finish", "stop"),
+                List.of(Map.of("type", "text", "text", answer)))));
+    }
+
     private static List<RunEventDraft> remoteAnswerEvents() {
         return List.of(
                 remote(RunEventType.RUN_STARTED, Map.of("sessionID", "remote_temp")),
                 remote(RunEventType.MESSAGE_UPDATED, Map.of(
                         "sessionID", "remote_temp",
-                        "info", Map.of("id", "msg_answer", "role", "assistant"))),
+                        "info", Map.of(
+                                "id", "msg_answer",
+                                "parentID", "msg_old_answer",
+                                "role", "assistant"))),
                 remote(RunEventType.MESSAGE_PART_UPDATED, Map.of(
                         "sessionID", "remote_temp",
                         "part", Map.of("id", "part_answer", "messageID", "msg_answer", "type", "text"))),
@@ -591,11 +633,9 @@ class SideQuestionStreamingApplicationServiceTest {
 
     private enum FailurePoint {
         FORK,
-        COMPACT,
         PROMPT,
         STREAM,
         FINAL_ANSWER,
-        CONTEXT_READ,
         READY_FAILURE,
         PROMPT_REJECTED,
         STREAM_NO_TERMINAL
@@ -650,10 +690,15 @@ class SideQuestionStreamingApplicationServiceTest {
                 NOW);
         private final List<RunEventDraft> durableEvents = new ArrayList<>();
         private final AtomicReference<Integer> deleteCalls = new AtomicReference<>(0);
+        private final AtomicReference<String> promptMessageId = new AtomicReference<>();
         private final CountDownLatch deleteCompleted = new CountDownLatch(1);
         private SideQuestionStreamingApplicationService service;
         private List<String> order = new ArrayList<>();
         private AgentSessionMessagesResult context = context(1, "短上下文");
+        private AgentSessionMessagesResult forkBaselineMessages = new AgentSessionMessagesResult(List.of(
+                new AgentSessionMessage(
+                        Map.of("id", "msg_old_answer", "role", "assistant", "finish", "stop"),
+                        List.of(Map.of("type", "text", "text", "历史答案")))));
         private AgentSessionMessagesResult finalMessages = finalAnswer("答案");
         private Flux<RunEventDraft> remoteEvents = Flux.fromIterable(remoteAnswerEvents());
         private boolean failMapping;
@@ -736,10 +781,9 @@ class SideQuestionStreamingApplicationServiceTest {
             when(runtime.sessionMessages(any())).thenAnswer(invocation -> {
                 String remoteSessionId = ((com.icbc.testagent.agent.runtime.AgentSessionMessagesCommand) invocation.getArgument(0))
                         .remoteSessionId();
-                if (failurePoint == FailurePoint.CONTEXT_READ && "remote_main".equals(remoteSessionId)) {
-                    return Mono.error(new IllegalStateException("context read failed"));
-                }
-                return Mono.just("remote_main".equals(remoteSessionId) ? context : finalMessages);
+                return Mono.just("remote_main".equals(remoteSessionId)
+                        ? context
+                        : promptMessageId.get() == null ? forkBaselineMessages : finalMessages);
             });
             when(runtime.runtime(any())).thenAnswer(invocation -> {
                 AgentRuntimeCommand command = invocation.getArgument(0);
@@ -749,13 +793,6 @@ class SideQuestionStreamingApplicationServiceTest {
                         return Mono.error(new IllegalStateException("fork failed with /private/path"));
                     }
                     return Mono.just(new AgentRuntimeResult(JSON.valueToTree(Map.of("id", "remote_temp"))));
-                }
-                if (command.path().endsWith("/summarize")) {
-                    order.add("compact");
-                    if (failurePoint == FailurePoint.COMPACT) {
-                        return Mono.error(new IllegalStateException("compact failed"));
-                    }
-                    return Mono.just(new AgentRuntimeResult(JSON.valueToTree(Map.of("ok", true))));
                 }
                 if ("DELETE".equals(command.method())) {
                     order.add("delete");
@@ -775,6 +812,10 @@ class SideQuestionStreamingApplicationServiceTest {
             });
             when(runtime.startRun(any())).thenAnswer(invocation -> {
                 order.add("prompt");
+                AgentStartRunCommand command = invocation.getArgument(0);
+                if (command != null) {
+                    promptMessageId.set(command.messageId());
+                }
                 if (failurePoint == FailurePoint.PROMPT) {
                     return Mono.error(new IllegalStateException("prompt failed"));
                 }
