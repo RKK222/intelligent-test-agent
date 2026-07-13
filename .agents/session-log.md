@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-13 - 分离测试设计中间产物、最终案例与执行目录
+
+- Why:
+  - 公共测试设计虽然声明 `041-测试设计` 和 `042-测试执行`，但真实 Agent 运行只收到一个笼统输出目标，等价类表、路径图和案例实际落到了 S 子条目根目录；测试设计中间产物与最终案例也没有目录隔离。
+- What:
+  - 公共配置将 Phase A 中间产物固定到 `041-测试设计/测试设计文档/`，Phase B 最终案例和案例审核结果固定到 `041-测试设计/` 根目录，测试执行产物继续只写 `042-测试执行/`；执行 Agent 默认只从 `041` 根目录读取案例并忽略 `测试设计文档/`。
+  - 编排到生成阶段的单一 `outputTarget` 拆为 `designDocumentTarget` 和 `caseOutputTarget`，workspaceContext 增加对应根路径；Skill 相对资源统一按 `SKILL.md` 所在目录解析，避免业务工作区下的相对路径误读。
+- How:
+  - 复用现有三阶段 Agent、方法 skills 和执行链路，只修改公共配置、路径契约、质量门禁、交接模板和 eval 预期；未改业务代码、API、事件、数据库或环境文件。
+- Result:
+  - 8 个 test-design skills 校验及打包通过，OpenCode Agent 配置解析和 8 项目录契约检查通过；test profile 三服务重启成功，backend readiness、frontend 3000 和 manager WebSocket 正常。修正前真实模型运行已复现 S 根目录错误落盘；修正后因应用内浏览器无登录态、用户 OpenCode 进程未初始化，尚未完成真实模型落盘复验。
+
 ### 2026-07-13 - 补齐 COSS 信鸽取证需求设计与领域参考实现
 
 - Why:
