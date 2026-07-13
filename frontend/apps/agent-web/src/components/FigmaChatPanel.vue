@@ -35,6 +35,7 @@ import type {
   AiFeedbackReasonCode,
   AiFeedbackRating,
   AiMessageFeedback,
+  FileSearchResult,
   MessageScope,
   MessagePart,
   PermissionRequest,
@@ -51,6 +52,7 @@ import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
 import { Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
+import type { WorkspaceRequirementReference } from './workbench-utils'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -667,6 +669,12 @@ const props =
     modelPickerDisabled?: boolean
     /** 可作为主运行入口选择的 Agent 列表 */
     agents?: AgentInfo[]
+    /** 当前个人 worktree 中与 @ 查询匹配的文件。 */
+    workspaceFileCandidates?: FileSearchResult[]
+    workspaceFileCandidatesLoading?: boolean
+    /** 当前个人 worktree 中按“需求项/01-需求/子条目”聚合的需求引用。 */
+    workspaceRequirementReferences?: WorkspaceRequirementReference[]
+    workspaceRequirementReferencesLoading?: boolean
     /** Agent 目录首次加载中。 */
     agentsLoading?: boolean
     /** Agent 目录已有数据后的后台刷新中。 */
@@ -733,6 +741,8 @@ const props =
     conversationSelected: true,
     commands: () => [],
     agents: () => [],
+    workspaceFileCandidates: () => [],
+    workspaceRequirementReferences: () => [],
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
     todos: () => [],
@@ -763,6 +773,10 @@ const emit =
     (e: 'select-model', model: any): void
     (e: 'change-agent', agentId: string): void
     (e: 'refresh-agents'): void
+    (e: 'search-workspace-files', query: string | null): void
+    (e: 'load-workspace-requirements'): void
+    (e: 'add-workspace-file-context', path: string): void
+    (e: 'add-workspace-requirement-context', reference: WorkspaceRequirementReference): void
     (e: 'clear-raw-output'): void
     (e: 'remove-chat-context', id: string): void
     (e: 'clear-chat-contexts'): void
@@ -1299,6 +1313,8 @@ const showSkillPanel = ref(false)
 const skillFilterText = ref('')
 const showAgentPanel = ref(false)
 const agentFilterText = ref('')
+const showRequirementPanel = ref(false)
+const requirementFilterText = ref('')
 
 const filteredSkills = computed(() => {
   const q = skillFilterText.value.toLowerCase()
@@ -1315,6 +1331,16 @@ const filteredMentionAgents = computed(() => {
   return mentionAgentOptions.value.filter((agent) => agentMatches(agent, q))
 })
 
+const filteredMentionFiles = computed(() => props.workspaceFileCandidates)
+
+const filteredRequirementReferences = computed(() => {
+  const q = requirementFilterText.value.trim().toLowerCase()
+  if (!q) return props.workspaceRequirementReferences
+  return props.workspaceRequirementReferences.filter((reference) =>
+    `${reference.requirementName} ${reference.subitemName}`.toLowerCase().includes(q)
+  )
+})
+
 // 仅匹配输入末尾的 @query，和 opencode 原生 prompt autocomplete 一样不扫描全文。
 function currentAgentMentionQuery(text: string): string | null {
   const match = text.match(/(^|\s)@([^\s@]*)$/)
@@ -1323,6 +1349,16 @@ function currentAgentMentionQuery(text: string): string | null {
 
 function replaceAgentMentionQuery(text: string, label: string): string {
   return text.replace(/(^|\s)@([^\s@]*)$/, `$1@${label} `)
+}
+
+function currentRequirementQuery(text: string): string | null {
+  const match = text.match(/(^|\s)#([^\s#]*)$/)
+  return match ? match[2] : null
+}
+
+function removeCurrentReferenceQuery(text: string, marker: '@' | '#'): string {
+  const pattern = marker === '@' ? /(^|\s)@([^\s@]*)$/ : /(^|\s)#([^\s#]*)$/
+  return text.replace(pattern, '$1')
 }
 
 function onSkillInput(text: string) {
@@ -1334,6 +1370,9 @@ function onSkillInput(text: string) {
     showSkillPanel.value = true
     showAgentPanel.value = false
     agentFilterText.value = ''
+    showRequirementPanel.value = false
+    requirementFilterText.value = ''
+    emit('search-workspace-files', null)
   } else {
     showSkillPanel.value = false
     skillFilterText.value = ''
@@ -1342,18 +1381,41 @@ function onSkillInput(text: string) {
 
 function onAgentMentionInput(text: string) {
   const query = currentAgentMentionQuery(text)
-  if (query !== null && !props.running && mentionAgentOptions.value.length > 0) {
+  if (query !== null && !props.running) {
     agentFilterText.value = query
     showAgentPanel.value = true
+    showRequirementPanel.value = false
+    requirementFilterText.value = ''
+    emit('search-workspace-files', query)
   } else {
     showAgentPanel.value = false
     agentFilterText.value = ''
+    emit('search-workspace-files', null)
   }
+}
+
+function onRequirementInput(text: string): boolean {
+  const query = currentRequirementQuery(text)
+  if (query !== null && !props.running) {
+    requirementFilterText.value = query
+    showRequirementPanel.value = true
+    showAgentPanel.value = false
+    agentFilterText.value = ''
+    emit('search-workspace-files', null)
+    emit('load-workspace-requirements')
+    return true
+  }
+  showRequirementPanel.value = false
+  requirementFilterText.value = ''
+  return false
 }
 
 function onComposerInput(text: string) {
   onSkillInput(text)
   if (showSkillPanel.value) {
+    return
+  }
+  if (onRequirementInput(text)) {
     return
   }
   onAgentMentionInput(text)
@@ -1377,6 +1439,22 @@ function selectMentionAgent(agent: AgentInfo) {
   agentFilterText.value = ''
 }
 
+function selectMentionFile(file: FileSearchResult) {
+  const nextText = removeCurrentReferenceQuery(localInput.value, '@')
+  localInput.value = nextText
+  emit('update:inputValue', nextText)
+  emit('add-workspace-file-context', file.path)
+  dismissAgentPanel()
+}
+
+function selectRequirementReference(reference: WorkspaceRequirementReference) {
+  const nextText = removeCurrentReferenceQuery(localInput.value, '#')
+  localInput.value = nextText
+  emit('update:inputValue', nextText)
+  emit('add-workspace-requirement-context', reference)
+  dismissRequirementPanel()
+}
+
 function dismissSkillPanel() {
   showSkillPanel.value = false
   skillFilterText.value = ''
@@ -1385,6 +1463,12 @@ function dismissSkillPanel() {
 function dismissAgentPanel() {
   showAgentPanel.value = false
   agentFilterText.value = ''
+  emit('search-workspace-files', null)
+}
+
+function dismissRequirementPanel() {
+  showRequirementPanel.value = false
+  requirementFilterText.value = ''
 }
 
 // ===== 文件变更抽屉 =====
@@ -4173,10 +4257,45 @@ function onCompositionEnd() {
       </div>
     </div>
 
-    <!-- Agent @ 候选：遵循 opencode prompt autocomplete，只展示 subagent/all 且非 hidden 的 Agent。 -->
+    <!-- # 需求候选：严格来自当前个人 worktree 的“需求项/01-需求/子条目”文件。 -->
+    <div v-if="!activeSubagentSessionId && showRequirementPanel" class="figma-chat-agent-panel figma-chat-requirement-panel">
+      <div class="figma-chat-choice-header">
+        <div class="figma-chat-choice-question">需求子条目</div>
+        <button
+          type="button"
+          class="figma-chat-choice-close"
+          @click="dismissRequirementPanel"
+        >
+          <X :size="14" />
+        </button>
+      </div>
+      <div class="figma-chat-agent-list">
+        <div
+          v-for="reference in filteredRequirementReferences"
+          :key="reference.id"
+          class="figma-chat-agent-row figma-chat-requirement-row"
+          @click="selectRequirementReference(reference)"
+        >
+          <BookOpen :size="16" class="figma-chat-requirement-icon" />
+          <div class="figma-chat-agent-info">
+            <span class="figma-chat-agent-name">{{ reference.subitemName }}</span>
+            <span class="figma-chat-agent-desc">{{ reference.requirementName }} · {{ reference.filePaths.length }} 个需求文件</span>
+          </div>
+        </div>
+        <div v-if="workspaceRequirementReferencesLoading" class="figma-chat-agent-empty">正在读取当前工作区需求结构…</div>
+        <div
+          v-else-if="filteredRequirementReferences.length === 0"
+          class="figma-chat-agent-empty"
+        >
+          当前工作区没有匹配的需求子条目
+        </div>
+      </div>
+    </div>
+
+    <!-- @ 候选：保留可提及 Agent，并增加当前个人 worktree 文件。 -->
     <div v-if="!activeSubagentSessionId && showAgentPanel" class="figma-chat-agent-panel">
       <div class="figma-chat-choice-header">
-        <div class="figma-chat-choice-question">Agent</div>
+        <div class="figma-chat-choice-question">Agent 与文件</div>
         <button
           type="button"
           class="figma-chat-choice-close"
@@ -4186,6 +4305,7 @@ function onCompositionEnd() {
         </button>
       </div>
       <div class="figma-chat-agent-list">
+        <div v-if="filteredMentionAgents.length" class="figma-chat-suggestion-section">Agent</div>
         <div
           v-for="agent in filteredMentionAgents"
           :key="agentValue(agent)"
@@ -4198,8 +4318,25 @@ function onCompositionEnd() {
             <span v-if="agent.description" class="figma-chat-agent-desc">{{ agent.description }}</span>
           </div>
         </div>
-        <div v-if="filteredMentionAgents.length === 0" class="figma-chat-agent-empty">
-          无匹配 Agent
+        <div v-if="filteredMentionFiles.length" class="figma-chat-suggestion-section">文件</div>
+        <div
+          v-for="file in filteredMentionFiles"
+          :key="file.path"
+          class="figma-chat-agent-row figma-chat-file-row"
+          @click="selectMentionFile(file)"
+        >
+          <FileText :size="16" class="figma-chat-file-icon" />
+          <div class="figma-chat-agent-info">
+            <span class="figma-chat-agent-name">{{ file.name }}</span>
+            <span class="figma-chat-agent-desc">{{ file.directory || '工作区根目录' }}</span>
+          </div>
+        </div>
+        <div v-if="workspaceFileCandidatesLoading" class="figma-chat-agent-empty">正在搜索当前工作区文件…</div>
+        <div
+          v-else-if="filteredMentionAgents.length === 0 && filteredMentionFiles.length === 0"
+          class="figma-chat-agent-empty"
+        >
+          无匹配 Agent 或文件
         </div>
       </div>
     </div>
@@ -6938,6 +7075,13 @@ function onCompositionEnd() {
   overflow-y: auto;
 }
 
+.figma-chat-suggestion-section {
+  padding: 6px 12px 2px;
+  color: #8c8c8c;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .figma-chat-agent-row {
   display: flex;
   align-items: center;
@@ -6955,6 +7099,16 @@ function onCompositionEnd() {
 
 .figma-chat-agent-icon {
   color: #3366ff;
+  flex-shrink: 0;
+}
+
+.figma-chat-file-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.figma-chat-requirement-icon {
+  color: #7c3aed;
   flex-shrink: 0;
 }
 

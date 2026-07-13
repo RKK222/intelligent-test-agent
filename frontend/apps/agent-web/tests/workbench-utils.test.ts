@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MessagePart, PromptPart, Run, RunDiffFile, RunEvent, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
+import type { FileSearchResult, MessagePart, PromptPart, Run, RunDiffFile, RunEvent, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import * as workbenchUtils from "../src/components/workbench-utils";
 import {
   assistantSummaryMessageId,
@@ -34,6 +34,7 @@ import {
   runEventProjection,
   sessionTitleFromFirstMessage,
   shouldFailExhaustedRetry,
+  workspaceRequirementReferences,
   workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
 import type { FileTreeEntry } from "@test-agent/shared-types";
@@ -64,6 +65,43 @@ describe("filterWorkspaceRootEntries", () => {
       { path: "src", name: "src", type: "directory" }
     ]);
     expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
+
+describe("workspaceRequirementReferences", () => {
+  it("groups nested requirement documents by the current worktree requirement item and subitem", () => {
+    const results: FileSearchResult[] = [
+      {
+        path: "120260624-0318-新增助商组合贷信鸽取证状态/01-需求/S20260630-000038-子条目/需求文档/test.txt",
+        name: "test.txt",
+        directory: "120260624-0318-新增助商组合贷信鸽取证状态/01-需求/S20260630-000038-子条目/需求文档",
+        size: 1
+      },
+      {
+        path: "120260624-0318-新增助商组合贷信鸽取证状态/01-需求/S20260630-000038-子条目/子条目需求.md",
+        name: "子条目需求.md",
+        directory: "120260624-0318-新增助商组合贷信鸽取证状态/01-需求/S20260630-000038-子条目",
+        size: 10
+      },
+      {
+        path: "120260624-0318-新增助商组合贷信鸽取证状态/02-设计/S20260630-000038-子条目/详细设计.md",
+        name: "详细设计.md",
+        directory: "120260624-0318-新增助商组合贷信鸽取证状态/02-设计/S20260630-000038-子条目",
+        size: 10
+      }
+    ];
+
+    expect(workspaceRequirementReferences(results)).toEqual([
+      {
+        id: "120260624-0318-新增助商组合贷信鸽取证状态/01-需求/S20260630-000038-子条目",
+        requirementName: "120260624-0318-新增助商组合贷信鸽取证状态",
+        subitemName: "S20260630-000038-子条目",
+        filePaths: [
+          "120260624-0318-新增助商组合贷信鸽取证状态/01-需求/S20260630-000038-子条目/子条目需求.md",
+          "120260624-0318-新增助商组合贷信鸽取证状态/01-需求/S20260630-000038-子条目/需求文档/test.txt"
+        ]
+      }
+    ]);
   });
 });
 

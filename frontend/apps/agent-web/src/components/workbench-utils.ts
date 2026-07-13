@@ -1,6 +1,7 @@
 import { BackendApiError } from "@test-agent/backend-api";
 import type {
   AgentMessage,
+  FileSearchResult,
   FileTreeEntry,
   MessageScope,
   MessagePart,
@@ -36,6 +37,13 @@ import {
 } from "@test-agent/agent-chat";
 import { buildEditorFilePromptPart } from "./prompt-context";
 
+export type WorkspaceRequirementReference = {
+  id: string;
+  requirementName: string;
+  subitemName: string;
+  filePaths: string[];
+};
+
 /**
  * `.opencode` 已由下方 Agent 配置树专门管理，普通工作空间根目录不重复展示。
  */
@@ -44,6 +52,32 @@ export function filterWorkspaceRootEntries(path: string, entries: FileTreeEntry[
     return entries;
   }
   return entries.filter((entry) => entry.name !== ".opencode");
+}
+
+/**
+ * 将当前个人 worktree 的文件搜索结果按“需求项/01-需求/子条目”聚合。
+ * 子条目下可以直接放需求文件，也可以继续包含“需求文档”等目录；最终均作为同一条需求上下文。
+ */
+export function workspaceRequirementReferences(results: FileSearchResult[]): WorkspaceRequirementReference[] {
+  const references = new Map<string, WorkspaceRequirementReference>();
+  for (const result of results) {
+    const parts = result.path.replace(/\\/g, "/").split("/").filter(Boolean);
+    const requirementStageIndex = parts.indexOf("01-需求");
+    if (requirementStageIndex !== 1 || parts.length <= requirementStageIndex + 2) {
+      continue;
+    }
+    const requirementName = parts[0];
+    const subitemName = parts[requirementStageIndex + 1];
+    const id = `${requirementName}/01-需求/${subitemName}`;
+    const current = references.get(id) ?? { id, requirementName, subitemName, filePaths: [] };
+    if (!current.filePaths.includes(result.path)) {
+      current.filePaths.push(result.path);
+    }
+    references.set(id, current);
+  }
+  return Array.from(references.values())
+    .map((reference) => ({ ...reference, filePaths: reference.filePaths.sort() }))
+    .sort((left, right) => left.id.localeCompare(right.id, "zh-CN"));
 }
 
 /**

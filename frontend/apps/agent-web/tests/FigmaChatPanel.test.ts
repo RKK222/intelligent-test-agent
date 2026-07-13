@@ -1175,6 +1175,74 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-agent-panel").exists()).toBe(false);
   });
 
+  it("shows current worktree files with agents and reuses the file-context action when selected", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        agents: [
+          { agentId: "review", name: "Review", mode: "subagent", description: "评审实现" }
+        ],
+        workspaceFileCandidates: [
+          {
+            path: "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt",
+            name: "test.txt",
+            directory: "120260624-0318-需求项/01-需求/S0001-子条目/需求文档",
+            size: 1
+          }
+        ]
+      } as any
+    });
+
+    await wrapper.get("textarea").setValue("请参考 @");
+
+    expect(wrapper.get(".figma-chat-agent-panel").text()).toContain("Agent 与文件");
+    expect(wrapper.get(".figma-chat-agent-panel").text()).toContain("Review");
+    expect(wrapper.get(".figma-chat-agent-panel").text()).toContain("test.txt");
+    expect(wrapper.emitted("search-workspace-files")).toContainEqual([""]);
+
+    await wrapper.get(".figma-chat-file-row").trigger("click");
+
+    expect(wrapper.emitted("add-workspace-file-context")).toEqual([
+      ["120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt"]
+    ]);
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("请参考 ");
+  });
+
+  it("recognizes requirement subitems from the current worktree when the user types hash", async () => {
+    const reference = {
+      id: "120260624-0318-需求项/01-需求/S0001-子条目",
+      requirementName: "120260624-0318-需求项",
+      subitemName: "S0001-子条目",
+      filePaths: [
+        "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/test.txt",
+        "120260624-0318-需求项/01-需求/S0001-子条目/子条目需求.md"
+      ]
+    };
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        workspaceRequirementReferences: [reference]
+      } as any
+    });
+
+    await wrapper.get("textarea").setValue("请分析 #S0001");
+
+    const panel = wrapper.get(".figma-chat-requirement-panel");
+    expect(panel.text()).toContain("需求子条目");
+    expect(panel.text()).toContain("S0001-子条目");
+    expect(panel.text()).toContain("120260624-0318-需求项");
+    expect(panel.text()).toContain("2 个需求文件");
+    expect(wrapper.emitted("load-workspace-requirements")).toHaveLength(1);
+
+    await wrapper.get(".figma-chat-requirement-row").trigger("click");
+
+    expect(wrapper.emitted("add-workspace-requirement-context")).toEqual([[reference]]);
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("请分析 ");
+    expect(wrapper.find(".figma-chat-requirement-panel").exists()).toBe(false);
+  });
+
   it("lists native skill commands when the user types slash", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

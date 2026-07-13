@@ -527,7 +527,7 @@ AI 回复满意度反馈接口 `/api/internal/platform/opencode-runtime/messages
 | `op` | `params` | 响应 |
 |---|---|---|
 | `workspace.list` | `workspaceId`, `path?` | `FileTreeEntryResponse[]` |
-| `workspace.search` | `workspaceId`, `query` | `FileSearchResultResponse[]`；递归搜索文件名（不区分大小写子串匹配），跳过黑名单目录，结果按文件名排序并限制数量 |
+| `workspace.search` | `workspaceId`, `query` | `FileSearchResultResponse[]`；递归搜索工作区相对路径（不区分大小写子串匹配），空 query 返回受限文件目录；跳过黑名单目录，结果按文件名排序并限制数量 |
 | `workspace.read` | `workspaceId`, `path` | `FileContentResponse` |
 | `workspace.write` | `workspaceId`, `path`, `content` | `null` |
 | `workspace.rename` | `workspaceId`, `path`, `name` | `null`；仅支持同一父目录内重命名普通文件或目录，目标已存在返回 `CONFLICT` |

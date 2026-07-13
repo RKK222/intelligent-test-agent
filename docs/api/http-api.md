@@ -1060,7 +1060,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 服务器目录选择器只通过短期 ticket 建立的文件 WebSocket 使用；缺失、不可访问或非目录返回 `VALIDATION_ERROR`。创建服务器工作空间仍要求 `SUPER_ADMIN`，且目标服务器必须与当前 agent 服务器一致。
 
-文件 WebSocket RPC 的 `path` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层，不递归，默认最多 1000 项；文件读取和写入只支持 UTF-8 文本，默认上限 1MB，可通过 `test-agent.files.*` 配置。
+文件 WebSocket RPC 的 `path` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层、不递归，默认最多 1000 项；`workspace.search` 按工作区相对路径递归匹配，空 query 可返回受深度、数量和超时保护的文件目录，默认最多 200 项、20 层、5 秒，并跳过 `.git`、`node_modules` 等黑名单目录。文件读取和写入只支持 UTF-8 文本，默认上限 1MB，可通过 `test-agent.files.*` 配置。
 
 ### 应用版本工作区 API
 

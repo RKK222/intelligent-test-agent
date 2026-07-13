@@ -127,10 +127,12 @@ import {
   shouldFailExhaustedRetry,
   syntheticEvent,
   text,
+  workspaceRequirementReferences,
   workspaceLoadIsCurrent,
   type AutoRetryRunDraft,
   type OpencodeAvailabilityState,
-  type RetryDeadlineMap
+  type RetryDeadlineMap,
+  type WorkspaceRequirementReference
 } from "./workbench-utils";
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -226,6 +228,16 @@ let searchSeq = 0;
 const searchKeyword = ref("");
 const searchResults = ref<FileSearchResult[]>([]);
 const searchLoading = ref(false);
+// 对话 @ 文件候选独立于左侧文件搜索，避免输入提示覆盖文件树的搜索词和结果。
+const workspaceFileCandidates = ref<FileSearchResult[]>([]);
+const workspaceFileCandidatesLoading = ref(false);
+let workspaceFileCandidateTimer: ReturnType<typeof setTimeout> | null = null;
+let workspaceFileCandidateSeq = 0;
+// # 需求候选按当前个人 worktree 的“需求项/01-需求/子条目”聚合，每个 Workspace 只加载一次。
+const workspaceRequirementCandidates = ref<WorkspaceRequirementReference[]>([]);
+const workspaceRequirementCandidatesLoading = ref(false);
+let workspaceRequirementLoadedFor = "";
+let workspaceRequirementLoadSeq = 0;
 const session = shallowRef<Session | null>(null);
 // 新对话先作为前端草稿被“选中”，首条消息仍沿用现有延迟创建 Session 的链路，避免空会话污染历史。
 const newConversationDraftSelected = ref(false);
@@ -399,6 +411,12 @@ onBeforeUnmount(() => {
   invalidateConversationInteraction();
   window.removeEventListener("keydown", onWindowKeydown);
   clearFileTreeRetryTimers();
+  if (workspaceFileCandidateTimer) {
+    clearTimeout(workspaceFileCandidateTimer);
+    workspaceFileCandidateTimer = null;
+  }
+  workspaceFileCandidateSeq++;
+  workspaceRequirementLoadSeq++;
   runtimeStateOutages.reset();
   stopProcessStartupPolling();
 });
@@ -2452,6 +2470,17 @@ function resetWorkspaceState() {
     searchTimer = null;
   }
   searchSeq++;
+  workspaceFileCandidates.value = [];
+  workspaceFileCandidatesLoading.value = false;
+  if (workspaceFileCandidateTimer) {
+    clearTimeout(workspaceFileCandidateTimer);
+    workspaceFileCandidateTimer = null;
+  }
+  workspaceFileCandidateSeq++;
+  workspaceRequirementCandidates.value = [];
+  workspaceRequirementCandidatesLoading.value = false;
+  workspaceRequirementLoadedFor = "";
+  workspaceRequirementLoadSeq++;
   session.value = null;
   newConversationDraftSelected.value = false;
   run.value = null;
@@ -2986,6 +3015,73 @@ function handleFileSearch(keyword: string) {
   }, 250);
 }
 
+/**
+ * 为对话 @ 补全查询当前个人 worktree 文件。空关键字也交给后端受限搜索，
+ * 因此刚输入 @ 时即可展示文件，同时不会在浏览器递归扫描目录。
+ */
+function handleWorkspaceFileCandidateSearch(query: string | null) {
+  if (workspaceFileCandidateTimer) {
+    clearTimeout(workspaceFileCandidateTimer);
+    workspaceFileCandidateTimer = null;
+  }
+  const workspaceId = selectedWorkspace.value?.workspaceId;
+  const seq = ++workspaceFileCandidateSeq;
+  if (query === null || !workspaceId) {
+    workspaceFileCandidates.value = [];
+    workspaceFileCandidatesLoading.value = false;
+    return;
+  }
+  workspaceFileCandidates.value = [];
+  workspaceFileCandidatesLoading.value = true;
+  workspaceFileCandidateTimer = setTimeout(async () => {
+    workspaceFileCandidateTimer = null;
+    try {
+      const results = await api.searchFiles(workspaceId, query);
+      if (seq === workspaceFileCandidateSeq && selectedWorkspace.value?.workspaceId === workspaceId) {
+        workspaceFileCandidates.value = results;
+      }
+    } catch (error) {
+      if (seq === workspaceFileCandidateSeq && selectedWorkspace.value?.workspaceId === workspaceId) {
+        workspaceFileCandidates.value = [];
+        feedback.value = errorFeedback("搜索对话文件失败", error);
+      }
+    } finally {
+      if (seq === workspaceFileCandidateSeq && selectedWorkspace.value?.workspaceId === workspaceId) {
+        workspaceFileCandidatesLoading.value = false;
+      }
+    }
+  }, 180);
+}
+
+/**
+ * 懒加载当前个人 worktree 的需求子条目。文件仍由平台 workspace.search 返回，
+ * 前端只负责把真实路径聚合为可选择的业务子条目。
+ */
+async function loadWorkspaceRequirementCandidates() {
+  const workspaceId = selectedWorkspace.value?.workspaceId;
+  if (!workspaceId || workspaceRequirementCandidatesLoading.value || workspaceRequirementLoadedFor === workspaceId) {
+    return;
+  }
+  const seq = ++workspaceRequirementLoadSeq;
+  workspaceRequirementCandidatesLoading.value = true;
+  try {
+    const results = await api.searchFiles(workspaceId, "/01-需求/");
+    if (seq === workspaceRequirementLoadSeq && selectedWorkspace.value?.workspaceId === workspaceId) {
+      workspaceRequirementCandidates.value = workspaceRequirementReferences(results);
+      workspaceRequirementLoadedFor = workspaceId;
+    }
+  } catch (error) {
+    if (seq === workspaceRequirementLoadSeq && selectedWorkspace.value?.workspaceId === workspaceId) {
+      workspaceRequirementCandidates.value = [];
+      feedback.value = errorFeedback("读取需求子条目失败", error);
+    }
+  } finally {
+    if (seq === workspaceRequirementLoadSeq && selectedWorkspace.value?.workspaceId === workspaceId) {
+      workspaceRequirementCandidatesLoading.value = false;
+    }
+  }
+}
+
 async function openFile(path: string) {
   if (!selectedWorkspace.value) {
     return;
@@ -3336,16 +3432,16 @@ function looksBinaryContent(content: string): boolean {
   return sample.length > 0 && control / sample.length > 0.08;
 }
 
-async function addWorkspaceFileToChatContext(path: string) {
+async function addWorkspaceFileToChatContext(path: string, silentSuccess = false): Promise<boolean> {
   if (!selectedWorkspace.value) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到可用工作区。" };
-    return;
+    return false;
   }
   try {
     const file = await api.readFile(selectedWorkspace.value.workspaceId, path);
     if (looksBinaryContent(file.content)) {
       feedback.value = { kind: "info", title: "暂不支持添加二进制文件", description: path };
-      return;
+      return false;
     }
     const content = file.content;
     const lineCount = content.length === 0 ? 0 : content.split("\n").length;
@@ -3362,9 +3458,31 @@ async function addWorkspaceFileToChatContext(path: string) {
       sizeBytes: new Blob([content]).size,
       createdAt: Date.now()
     });
-    notifyChatContextValidation(result, "已添加文件上下文");
+    notifyChatContextValidation(result, silentSuccess ? undefined : "已添加文件上下文");
+    return result.ok;
   } catch (error) {
     feedback.value = errorFeedback("添加文件上下文失败", error);
+    return false;
+  }
+}
+
+/**
+ * # 子条目选中后，把 01-需求 下属于该子条目的全部需求文件逐个复用现有附件链路添加。
+ * 单个文件仍沿用二进制、重复和容量校验，避免需求引用绕过对话上下文安全边界。
+ */
+async function addWorkspaceRequirementToChatContext(reference: WorkspaceRequirementReference) {
+  let addedCount = 0;
+  for (const path of reference.filePaths) {
+    if (await addWorkspaceFileToChatContext(path, true)) {
+      addedCount += 1;
+    }
+  }
+  if (addedCount > 0) {
+    feedback.value = {
+      kind: "success",
+      title: "已添加需求子条目上下文",
+      description: `${reference.subitemName} · ${addedCount} 个文件`
+    };
   }
 }
 
@@ -4972,6 +5090,10 @@ async function handleLogout() {
           :selected-model-label="selectedModelLabel"
           :model-picker-disabled="false"
           :agents="agents"
+          :workspace-file-candidates="workspaceFileCandidates"
+          :workspace-file-candidates-loading="workspaceFileCandidatesLoading"
+          :workspace-requirement-references="workspaceRequirementCandidates"
+          :workspace-requirement-references-loading="workspaceRequirementCandidatesLoading"
           :agents-loading="agentsLoading"
           :agents-refreshing="agentsRefreshing"
           :agents-error="agentsError"
@@ -5003,6 +5125,10 @@ async function handleLogout() {
           @select-session="(id: string) => switchSession(id)"
           @change-agent="selectRuntimeAgent"
           @refresh-agents="refreshAgentsCatalog"
+          @search-workspace-files="handleWorkspaceFileCandidateSearch"
+          @load-workspace-requirements="loadWorkspaceRequirementCandidates"
+          @add-workspace-file-context="addWorkspaceFileToChatContext"
+          @add-workspace-requirement-context="addWorkspaceRequirementToChatContext"
           @select-model="(model) => selectRuntimeModel(model)"
           @submit-feedback="handleSubmitFeedback"
           @clear-raw-output="clearCurrentRawOutput"
