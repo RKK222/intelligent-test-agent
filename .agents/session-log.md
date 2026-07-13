@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 宠物就绪时直接进入旁路提问
+
+- Why:
+  - 进程 ready 且已有主对话时，单击宠物仍先展示进程状态卡，用户必须再次点击旁路入口才能提问。
+- What:
+  - `FigmaShell` 复用现有进程 tone 与 `sideQuestionAvailable` 分流单击动作：两者均就绪时直接打开并聚焦提问输入框；进程未就绪或无主 Session 时继续展示状态卡。
+- How:
+  - 复用 `openRobotSideQuestionFromProcess()`，未增加新状态、API、事件或后端逻辑；同步组件回归、agent-web README 与包说明。
+- Result:
+  - FigmaShell/FigmaChatPanel 定向 Vitest 141 passed、1 skipped；agent-web typecheck、生产 build 和 `git diff --check` 通过。按 `.env.test` / `test` profile 重启三服务，backend readiness 为 UP，frontend 3000 返回 200。保留既有 `DirectoryRows.vue` 嵌套 button、CSS `@import` 顺序和大 chunk 警告。
+
 ### 2026-07-13 - 禁止无主对话时创建宠物旁路 fork
 
 - Why:

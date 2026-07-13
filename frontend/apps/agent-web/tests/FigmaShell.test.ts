@@ -562,9 +562,10 @@ describe("FigmaShell", () => {
     expect(wrapper.get(".figma-user-menu-service-text").text()).toBe("未运行(server-a / 192.168.100.171:82)");
   });
 
-  it("opens the current process status from the pet and keeps the ready heart green", async () => {
+  it("opens the focused side-question input directly when the process and main session are ready", async () => {
     vi.useFakeTimers();
     const wrapper = mountShell({
+      attachTo: document.body,
       props: {
         opencodeProcessStatus: {
           status: "READY",
@@ -574,7 +575,8 @@ describe("FigmaShell", () => {
           serviceAddress: "127.0.0.1:4096"
         },
         opencodeProcessLoading: false,
-        showProcessStatusInPet: true
+        showProcessStatusInPet: true,
+        sideQuestionAvailable: true
       }
     });
 
@@ -585,9 +587,9 @@ describe("FigmaShell", () => {
     await vi.advanceTimersByTimeAsync(250);
     await wrapper.vm.$nextTick();
 
-    expect(wrapper.get('[data-testid="robot-process-status"]').text()).toContain("TestAgent 进程可用");
-    expect(wrapper.get('[data-testid="robot-process-status"]').text()).toContain("小宠物");
-    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
+    expect(document.activeElement).toBe(wrapper.get('[data-testid="robot-side-question-input"]').element);
   });
 
   it("auto-opens the first initialization prompt with a red breathing pet", async () => {

@@ -1277,7 +1277,12 @@ function onRobotClick() {
     clickTimer = setTimeout(() => {
       clickTimer = null;
       if (processStatusInteractionEnabled.value) {
-        toggleRobotProcessStatus();
+        // 进程已就绪且存在主 Session 时，宠物的首要动作就是旁路提问，不再要求经过状态卡二次点击。
+        if (robotProcessTone.value === "ready" && props.sideQuestionAvailable) {
+          openRobotSideQuestionFromProcess();
+        } else {
+          toggleRobotProcessStatus();
+        }
       } else {
         robotQuestionOpen.value = true;
         void nextTick(() => robotQuestionInput.value?.focus());
