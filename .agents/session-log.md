@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-13 - 应用历史 Phase A/B 测试设计替换包
+
+- Why:
+  - 需要以历史结果文件为准，恢复“中间产物先落盘并确认/冻结，再组装案例”的测试设计流程，避免组合模板把两个阶段混在一起。
+- What:
+  - 应用 `/Users/kaka/Downloads/opencode-test-design-refactor-history-aligned-files.zip` 的设计侧覆盖文件；测试设计默认目录为 `041-测试设计`，测试执行保持 `042-测试执行`。
+  - 删除包内列出的 12 个旧/组合式测试设计规则与模板；保留测试执行 Agent、执行 skills、脚本模板和格式校验链路。
+- How:
+  - `git apply --check` 因当前仓库与 patch 的原始工作区快照不一致而无法直接应用，按包内 `APPLY.md` 使用 zip overlay；应用前将原工作区保存为本地 stash 备份。
+- Result:
+  - zip 文件级比对、删除清单、目录映射和 `git diff --check` 通过；未启动真实 Agent 三阶段业务任务，未涉及后端 API、事件、数据库或环境配置。
+
 ### 2026-07-13 - 生成 GaussDB 驱动企业完整交付包
 
 - Why:
