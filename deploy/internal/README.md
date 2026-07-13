@@ -249,6 +249,7 @@ cp deploy/internal/env.example /data/testagent/config/docker.env
 | `TEST_AGENT_DB_USERNAME` | `testagent` | PostgreSQL 用户名变化时修改。 |
 | `TEST_AGENT_DB_PASSWORD` | `testagent#123!` | PostgreSQL 密码变化时修改。 |
 | `TEST_AGENT_DB_DRIVER_CLASS_NAME` | `org.postgresql.Driver` | 可选 JDBC 驱动类；该类及其 jar 必须已在后端启动 classpath 中，修改后重启 Java。 |
+| `TEST_AGENT_FLYWAY_GAUSS_ROLE_RESTORE_COMPATIBILITY` | `true` | 使用本交付包内 GaussDB 驱动时保持为 `true`；Flyway 启动迁移结束时将 PostgreSQL 的 `SET ROLE` 恢复语句转换为 GaussDB 的 `RESET ROLE`。 |
 | `TEST_AGENT_API_TOKEN` | 空 | 需要启用额外平台 API Bearer token 时填写；登录态鉴权不依赖该值。 |
 | `TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `test-agent-manager-token-122-233-30-4` | 与 `docker.env` 必须完全一致；正式交付如要替换为随机长 token，两处一起改。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | `replace-with-random-internal-proxy-api-key` | Java 内部模型代理鉴权 key，正式部署必须替换为随机长 key；只配置在 `backend.env`，不要放到 `docker.env`。 |
@@ -356,7 +357,7 @@ TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_REDIS_PASSWORD=
 ```
 
-### `122.42.203.103:8000` PostgreSQL
+### `122.42.203.103:8000` GaussDB 兼容 PostgreSQL 协议数据库
 
 当前企业内部署的 PostgreSQL 已按以下值写入 `122.233.30.4` 上的 `/data/testagent/config/backend.env`：
 
@@ -364,9 +365,11 @@ TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_DB_URL=jdbc:postgresql://122.42.203.103:8000/testagent
 TEST_AGENT_DB_USERNAME=testagent
 TEST_AGENT_DB_PASSWORD=testagent#123!
+TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
+TEST_AGENT_FLYWAY_GAUSS_ROLE_RESTORE_COMPATIBILITY=true
 ```
 
-Java 后端启动时会执行 Flyway migration 初始化或校验库表结构。不要把测试、演示或个人开发数据写进生产 migration。
+Java 后端启动时会执行 Flyway migration 初始化或校验库表结构。GaussDB 兼容驱动已放在 `backend/lib/`，不需要再放入 PostgreSQL 驱动；不要关闭 `spring.flyway.enabled`，也不要把测试、演示或个人开发数据写进生产 migration。
 
 ## 打包与分发路径
 

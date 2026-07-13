@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-13 - 修复 GaussDB Flyway 角色恢复失败
+
+- Why:
+  - 企业最新启动日志已证明 GaussDB 驱动和 Flyway 均已加载，但 Flyway 在迁移结束恢复 PostgreSQL 角色时执行 `SET ROLE 'testagent'`，被 GaussDB 拒绝并导致空库启动失败。
+- What:
+  - 新增仅供 Flyway 使用的 `GaussDbFlywayDataSource`，在显式开启 `TEST_AGENT_FLYWAY_GAUSS_ROLE_RESTORE_COMPATIBILITY=true` 时，将精确的 Flyway 角色恢复语句转换为 `RESET ROLE`；默认 PostgreSQL 行为不变。同步企业环境模板、后端/部署文档和兼容性单测。
+- How:
+  - 保留原始 Druid 数据源给业务代码，仅在 `DatabaseMigrationRunner` 配置 Flyway 时包裹数据源；不修改 migration、API、事件、generated SDK 或 `.env.local`。
+- Result:
+  - 主代码构建通过；新增单测源码可独立编译并通过反射执行两项断言。完整企业包已重建，`--validate-only` 和 `unzip -t` 通过；Maven 全量测试仍被仓库既有 opencode-runtime 假 Repository 与 DTO 构造器不匹配阻断，目标 GaussDB 的真实 Flyway 表初始化仍需内网部署后验证。
+
 ### 2026-07-13 - 修复 Markdown 预览并支持工作区文件重命名
 
 - Why:

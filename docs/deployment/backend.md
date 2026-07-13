@@ -352,6 +352,8 @@ TEST_AGENT_DB_PASSWORD=<password>
 # 可选，默认 org.postgresql.Driver；指定类必须随后端 jar 或启动 classpath 一起交付。
 # GaussDB gsjdbc4 兼容驱动通常仍使用 org.postgresql.Driver 和 jdbc:postgresql://...。
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
+# GaussDB 使用本项目提供的 Flyway 角色恢复兼容层时开启；PostgreSQL 环境保持 false 或不配置。
+TEST_AGENT_FLYWAY_GAUSS_ROLE_RESTORE_COMPATIBILITY=true
 TEST_AGENT_API_TOKEN=<api-token>
 TEST_AGENT_CORS_ALLOWED_ORIGINS=https://<frontend-origin>
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
