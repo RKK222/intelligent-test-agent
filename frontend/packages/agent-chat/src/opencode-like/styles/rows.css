@@ -1,7 +1,7 @@
 .oc-user-message {
   display: flex;
   justify-content: flex-end;
-  margin: 4px 0 var(--oc-space-3);
+  margin: 4px 0 6px;
   align-items: flex-start;
 }
 
@@ -18,7 +18,7 @@
   width: fit-content;
   max-width: 100%;
   border: 1px solid #e3e8f7;
-  background: var(--oc-surface-muted);
+  background: #ffffff;
   color: var(--oc-fg);
   font-size: var(--oc-text-md);
   border-radius: var(--oc-radius-md);

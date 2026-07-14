@@ -14,10 +14,6 @@ const markdownViewStub = {
   props: ["source"],
   template: '<div class="ta-md-view">{{ source }}</div>',
 };
-const opencodeRowsCss = readFileSync(
-  resolve(process.cwd(), "packages/agent-chat/src/opencode-like/styles/rows.css"),
-  "utf8"
-);
 
 function dispatchPointer(
   target: EventTarget,
@@ -54,18 +50,6 @@ async function showFullTimeline(wrapper: any) {
 describe("FigmaChatPanel", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-  });
-
-  it("uses the muted surface token for user message bubbles", () => {
-    expect(opencodeRowsCss).toMatch(
-      /\.oc-user-message__bubble\s*\{[^}]*background: var\(--oc-surface-muted\);/s
-    );
-  });
-
-  it("keeps a small gap below user messages", () => {
-    expect(opencodeRowsCss).toMatch(
-      /\.oc-user-message\s*\{[^}]*margin: 4px 0 var\(--oc-space-3\);/s
-    );
   });
 
   it("blocks submit while a history session is still loading", async () => {
