@@ -282,7 +282,7 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect((stageAllButton as HTMLButtonElement).disabled).toBe(true));
   });
 
-  it("unstages all staged application workspace files in one request", async () => {
+  it("rolls all staged application workspace files back to unstaged in one request", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
         files: [
@@ -310,17 +310,18 @@ describe("GitChangesPanel", () => {
       }
     });
 
-    const unstageAllButton = await view.findByRole("button", { name: "全部取消暂存应用工作空间变更" });
+    const unstageAllButton = await view.findByRole("button", { name: "全部回退到未暂存" });
     await fireEvent.click(unstageAllButton);
 
     await waitFor(() => expect(apiClientMock.unstageWorkspaceGitFiles).toHaveBeenCalledWith(
       "wrk_1234567890abcdef",
       ["src/first-staged.ts", "src/second-staged.ts"]
     ));
+    expect(apiClientMock.discardWorkspaceGitFiles).not.toHaveBeenCalled();
     await waitFor(() => expect((unstageAllButton as HTMLButtonElement).disabled).toBe(true));
   });
 
-  it("exposes the same discard-all action in staged and unstaged groups", async () => {
+  it("discards all staged and unstaged application workspace files only from the unstaged group", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
         files: [
@@ -344,11 +345,10 @@ describe("GitChangesPanel", () => {
       }
     });
 
-    const discardAllButtons = await view.findAllByRole("button", { name: "全部回退应用工作空间变更" });
-    expect(discardAllButtons).toHaveLength(2);
-    await fireEvent.click(discardAllButtons[1]!);
+    const discardAllButton = await view.findByRole("button", { name: "丢弃全部应用工作空间改动" });
+    await fireEvent.click(discardAllButton);
 
-    expect(confirm).toHaveBeenCalledWith("将回退应用工作空间的 2 个文件改动，此操作无法撤销，是否继续？");
+    expect(confirm).toHaveBeenCalledWith("将丢弃应用工作空间的 2 个文件改动，此操作无法撤销，是否继续？");
     await waitFor(() => expect(apiClientMock.discardWorkspaceGitFiles).toHaveBeenCalledWith(
       "wrk_1234567890abcdef",
       ["src/unstaged.ts", "src/staged.ts"]

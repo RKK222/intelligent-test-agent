@@ -601,7 +601,7 @@ async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") 
   }
 }
 
-// 批量回退与单文件回退共用后端多路径 API，并一次刷新文件树和 Diff 状态。
+// 批量丢弃与单文件回退共用后端多路径 API，并一次刷新文件树和 Diff 状态。
 async function discardWorkspaceFiles(paths: string[]) {
   if (!props.canWrite || !props.workspaceId || paths.length === 0) return;
   const pendingPaths = paths.filter((path) => !discardingWorkspacePaths.value.has(path));
@@ -641,7 +641,7 @@ async function discardAllWorkspaceChanges() {
   if (workspaceGitMutationPending.value || hasWorkspaceConflicts.value) return;
   const paths = [...workspaceUnstaged.value, ...workspaceStaged.value].map((file) => file.path);
   if (paths.length === 0) return;
-  if (!window.confirm(`将回退应用工作空间的 ${paths.length} 个文件改动，此操作无法撤销，是否继续？`)) return;
+  if (!window.confirm(`将丢弃应用工作空间的 ${paths.length} 个文件改动，此操作无法撤销，是否继续？`)) return;
   discardingAllWorkspaceFiles.value = true;
   try {
     await discardWorkspaceFiles(paths);
@@ -1024,8 +1024,8 @@ defineExpose({
                   size="icon"
                   variant="ghost"
                   class="git-bulk-action"
-                  aria-label="全部回退应用工作空间变更"
-                  :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '全部回退应用工作空间变更'"
+                  aria-label="丢弃全部应用工作空间改动"
+                  :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '丢弃全部应用工作空间改动'"
                   :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceDiffFiles.length === 0 || workspaceGitMutationPending"
                   @click.stop="discardAllWorkspaceChanges"
                 >
@@ -1208,25 +1208,13 @@ defineExpose({
                   size="icon"
                   variant="ghost"
                   class="git-bulk-action"
-                  aria-label="全部回退应用工作空间变更"
-                  :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '全部回退应用工作空间变更'"
-                  :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceDiffFiles.length === 0 || workspaceGitMutationPending"
-                  @click.stop="discardAllWorkspaceChanges"
-                >
-                  <Loader2 v-if="discardingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
-                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  class="git-bulk-action"
-                  aria-label="全部取消暂存应用工作空间变更"
-                  title="全部取消暂存应用工作空间变更"
+                  aria-label="全部回退到未暂存"
+                  title="全部回退到未暂存"
                   :disabled="!props.canWrite || workspaceStaged.length === 0 || workspaceGitMutationPending"
                   @click.stop="unstageAllWorkspaceChanges"
                 >
                   <Loader2 v-if="unstagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
-                  <Minus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </Button>
               </div>
             </div>
