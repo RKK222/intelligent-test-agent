@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vitepress docs --host 127.0.0.1 --port 3001",
+    "dev": "vitepress dev docs --host 127.0.0.1 --port 3001",
     "build": "vitepress build docs",
     "preview": "vitepress preview docs --host 127.0.0.1 --port 3001",
     "lint": "vitepress build docs",

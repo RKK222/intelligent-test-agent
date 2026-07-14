@@ -26,3 +26,10 @@
   background-clip: text;
   color: transparent;
 }
+
+/* 目录蓝图需要同时展示来源、目标、Git 和责任列，仅放宽这一章的桌面正文宽度。 */
+@media (min-width: 1280px) {
+  .directory-mapping-guide .VPDoc .content-container {
+    max-width: 1024px;
+  }
+}
