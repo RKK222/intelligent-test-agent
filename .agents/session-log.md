@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-14 - 修改用户发送消息的气泡底色为浅灰色
+
+- Why:
+  - 用户要求将发送消息的气泡底色改为浅灰色，且不修改智能体回答消息的颜色和字体等其他样式。
+- What:
+  - 仅修改前端聊天界面中用户发送的消息气泡的底色和边框样式，使用全局的 `--ta-chat-user-bg` 语义 Token。
+- How:
+  - 在 `frontend/packages/agent-chat/src/opencode-like/styles/tokens.css` 中定义局部变量 `--oc-user-bg: var(--ta-chat-user-bg, #f2f2f2);` 以关联全局用户消息背景色 Token。
+  - 修改 `frontend/packages/agent-chat/src/opencode-like/styles/rows.css` 中的 `.oc-user-message__bubble`：
+    - `background` 改为使用已定义好的浅灰语义 token `var(--oc-user-bg)`。
+    - `border` 改为使用语义 token `var(--oc-border)`，避免在样式中硬编码十六进制颜色值。
+- Result:
+  - 前端编译构建通过，`agent-chat` 的 Vitest 测试全量通过（106 passed），修改仅限于前端样式，不涉及后端 API 与业务逻辑。
+
 ### 2026-07-14 - 交付 Linux 4.19 可运行的 OpenCode Node 离线包
 
 - Why:

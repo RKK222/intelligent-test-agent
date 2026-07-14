@@ -4,6 +4,7 @@
   --oc-bg: var(--ta-chat-surface, #ffffff);
   --oc-surface: var(--ta-chat-surface, #ffffff);
   --oc-surface-muted: var(--ta-chat-message-bg, #f2f4f7);
+  --oc-user-bg: var(--ta-chat-user-bg, #f2f2f2);
   --oc-fg: var(--ta-chat-text, #25282d);
   --oc-muted: var(--ta-chat-muted, #6f747c);
   --oc-subtle: var(--ta-chat-subtle, #9aa3af);
