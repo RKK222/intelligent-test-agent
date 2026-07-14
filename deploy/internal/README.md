@@ -448,6 +448,7 @@ bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip --backend
 - 自动定位 `test-agent-frontend-dist.tar.gz`、`backend/test-agent-app.jar`、`test-agent-programs.tar.gz`、`test-agent-opencode-worker_internal-linux-amd64.tar` 和 `deploy/internal/`。
 - 未加 `--skip-frontend` 时，用 `scp` 把前端包和 `deploy/internal/` 复制到 `122.233.30.2:/data/testagent`，远程备份旧前端目录、解压新前端、执行 `nginx -t` 和 `systemctl reload nginx`。
 - 在本机备份旧 jar，替换 `/data/testagent/dist/backend/test-agent-app.jar`，解压外挂程序，`docker load` 新 worker 镜像。
+- 首次部署如果 `test-agent-backend.service` 尚未加载，自动按现有 `backend.env` 和当前 Java 绝对路径创建并 enable 标准 systemd unit；已有 unit 原样复用，不覆盖现场配置。
 - 按顺序 `systemctl restart` 等价地停启 `test-agent-backend`，等待 `/actuator/health` 和 `/actuator/health/readiness`，校验 `/data/testagent/data/.serverid` 和 `.serverhost`。
 - 重启 `opencode-worker`，等待日志出现 `manager config update applied`，最后验收前端和后端 HTTP。
 

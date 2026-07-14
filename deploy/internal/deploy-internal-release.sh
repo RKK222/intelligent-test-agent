@@ -20,6 +20,7 @@ SKIP_FRONTEND=0
 SKIP_WORKER=0
 KEEP_EXTRACT=0
 VALIDATE_ONLY=0
+SYSTEMD_UNIT_DIR="${TEST_AGENT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
 usage() {
   cat <<'USAGE'
@@ -178,6 +179,13 @@ ssh_target() {
 }
 
 configure_backend_defaults() {
+  if [[ "${BACKEND_SERVICE}" != *.service ]]; then
+    BACKEND_SERVICE="${BACKEND_SERVICE}.service"
+  fi
+  if [[ ! "${BACKEND_SERVICE}" =~ ^[A-Za-z0-9_.@-]+\.service$ ]]; then
+    echo "Invalid backend systemd service name: ${BACKEND_SERVICE}" >&2
+    exit 1
+  fi
   if [[ -z "${BACKEND_HEALTH_URL}" ]]; then
     BACKEND_HEALTH_URL="http://${BACKEND_HOST}:8080/actuator/health"
   fi
@@ -190,6 +198,50 @@ configure_backend_defaults() {
   if [[ -z "${EXPECTED_SERVER_ID}" ]]; then
     EXPECTED_SERVER_ID="$(server_id_from_host "${BACKEND_HOST}")"
   fi
+}
+
+ensure_backend_service() {
+  local backend_env="${INSTALL_ROOT}/config/backend.env"
+  local java_bin unit_path
+
+  # 升级已有环境时保留现场 unit；只有首次部署且 unit 缺失时才安装标准服务。
+  if systemctl cat "${BACKEND_SERVICE}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  require_file "${backend_env}"
+  java_bin="$(command -v java || true)"
+  if [[ -z "${java_bin}" || "${java_bin}" != /* ]]; then
+    echo "Java executable not found; install JDK 21 before creating ${BACKEND_SERVICE}" >&2
+    exit 1
+  fi
+
+  unit_path="${SYSTEMD_UNIT_DIR}/${BACKEND_SERVICE}"
+  log "Install missing backend systemd unit: ${unit_path}"
+  mkdir -p "${SYSTEMD_UNIT_DIR}"
+  {
+    printf '%s\n' \
+      '[Unit]' \
+      'Description=Test Agent Backend' \
+      'Wants=network-online.target' \
+      'After=network-online.target' \
+      '' \
+      '[Service]' \
+      'Type=simple' \
+      "WorkingDirectory=${INSTALL_ROOT}" \
+      "EnvironmentFile=${backend_env}" \
+      "ExecStart=${java_bin} -jar ${INSTALL_ROOT}/dist/backend/test-agent-app.jar" \
+      'Restart=always' \
+      'RestartSec=5' \
+      'TimeoutStopSec=60' \
+      'LimitNOFILE=65536' \
+      '' \
+      '[Install]' \
+      'WantedBy=multi-user.target'
+  } >"${unit_path}"
+  chmod 0644 "${unit_path}"
+  systemctl daemon-reload
+  systemctl enable "${BACKEND_SERVICE}"
 }
 
 find_first_file() {
@@ -404,6 +456,8 @@ if [[ -d "${INSTALL_ROOT}/deploy/internal" ]]; then
 fi
 mv "${INSTALL_ROOT}/deploy/internal.new" "${INSTALL_ROOT}/deploy/internal"
 chmod +x "${INSTALL_ROOT}/deploy/internal/opencode-worker-docker.sh" || true
+
+ensure_backend_service
 
 log "Stop backend service and replace jar"
 systemctl stop "${BACKEND_SERVICE}"

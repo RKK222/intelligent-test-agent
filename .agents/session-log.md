@@ -13,6 +13,17 @@
     - `border` 改为使用语义 token `var(--oc-border)`，避免在样式中硬编码十六进制颜色值。
 - Result:
   - 前端编译构建通过，`agent-chat` 的 Vitest 测试全量通过（106 passed），修改仅限于前端样式，不涉及后端 API 与业务逻辑。
+### 2026-07-14 - 修复后端首次部署缺少 systemd unit
+
+- Why:
+  - 企业服务器首次执行 `deploy-internal-release.sh` 时，命令和配置均正确，但脚本直接 `systemctl stop test-agent-backend`，因 unit 尚未安装而报 `unit test-agent-backend.service not loaded`。
+- What:
+  - 后端部署脚本现在规范化 service 名称并校验安全字符；已有 unit 原样复用，确实缺失时使用现有 `backend.env`、当前 Java 绝对路径和安装根目录生成标准 unit，随后 `daemon-reload`、enable，再进入原有停服替换和启动验收流程。
+  - 操作手册补充 Mac 到三台企业服务器的完整 zip/校验文件 SCP 命令，并明确脚本不会覆盖已有 systemd unit；新增最终 zip 内脚本的首次安装与二次升级模拟校验。
+- How:
+  - 复用现有 `deploy-internal-release.sh`、`backend.env`、systemctl 和健康/身份校验流程，没有新增第二套后台启动方式；测试用隔离 unit 目录和假的 systemctl/curl 完整执行安装分支。
+- Result:
+  - 最终 zip 内脚本的首次安装会创建并 enable `test-agent-backend.service`，二次升级保留已有 unit 且不重复 enable；两轮部署模拟、发布包 `--validate-only`、zip/SHA-256 完整性和 OpenCode worker 启停 smoke 均通过。
 
 ### 2026-07-14 - 交付 Linux 4.19 可运行的 OpenCode Node 离线包
 

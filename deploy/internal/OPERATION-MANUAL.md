@@ -44,7 +44,25 @@ deploy/internal/dist/backend/test-agent-app.jar
 deploy/internal/dist/test-agent-frontend-dist.tar.gz
 ```
 
-将完整 zip 和打包脚本同时生成的 `.sha256` 文件上传到三台服务器的 `/data/0709/`，在每台服务器校验：
+在 Mac 打包机执行以下命令，把完整 zip 和 `.sha256` 上传到三台服务器的 `/data/0709/`。如果某台服务器受堡垒机限制，改用企业允许的文件传输通道，但远端路径保持不变：
+
+```bash
+cd /Users/kaka/Desktop/intelligent-test-agent/deploy/internal/dist
+
+ssh root@122.233.30.4 'mkdir -p /data/0709'
+scp test-agent-internal-release.zip test-agent-internal-release.zip.sha256 \
+  root@122.233.30.4:/data/0709/
+
+ssh root@122.233.30.114 'mkdir -p /data/0709'
+scp test-agent-internal-release.zip test-agent-internal-release.zip.sha256 \
+  root@122.233.30.114:/data/0709/
+
+ssh root@122.233.30.2 'mkdir -p /data/0709'
+scp test-agent-internal-release.zip test-agent-internal-release.zip.sha256 \
+  root@122.233.30.2:/data/0709/
+```
+
+在每台服务器校验：
 
 ```bash
 cd /data/0709
@@ -69,6 +87,8 @@ SYS_DATA_ROOT_DIR=/data/testagent/data
 ```
 
 两台后端的 `backend.env` 与 `docker.env` 中 manager token 必须一致；`docker.env` 的 `TEST_AGENT_DATA_ROOT=/data/testagent/data`，端口池继续保持宿主机端口与容器端口一一对应。不要把 token、数据库密码或模型密钥写入交付 zip。
+
+部署脚本会检查 `test-agent-backend.service`：已有 unit 时直接复用；首次部署没有 unit 时，使用已配置的 `/data/testagent/config/backend.env` 和当前 `java` 绝对路径自动创建、执行 `daemon-reload` 并 enable。无需提前手工创建 service。
 
 升级前保留当前镜像回滚标签：
 
