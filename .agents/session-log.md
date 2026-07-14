@@ -6086,6 +6086,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 公共配置已经形成“对象规约核对 → 方法规则 → Phase A → 案例组装规则 → 追溯/门禁 → 独立规约审核”的强制链路；三服务使用 `.env.test` 重启成功，后端 health/readiness 为 `UP`、前端 3000 返回 200、manager WebSocket 已连接。企业模型产物效果按用户要求留给用户使用应用工作区素材验证。
 
+### 2026-07-14 - 公共 Agent 的 @ 候选收敛为测试设计和测试执行
+
+- Why:
+  - 用户要求依据最新 Help 手册重新整理 Agent 可见性，用户侧只能 `@` 测试设计和测试执行，内部分析、生成、审核与执行子 Agent 不应暴露。
+- What:
+  - `test-design-orchestrator`、`test-execution-agent` 改为 `mode: all`；四个业务子 Agent 保持 `subagent` 并统一 `hidden: true`；OpenCode 内置 `general`、`explore` 通过公共 `opencode.jsonc` 覆盖为隐藏。
+- How:
+  - 对照 OpenCode 1.17.8 Agents 手册与 `FigmaChatPanel` 的 `primary/all`、`subagent/all` 过滤规则，用 `opencode debug agent` 解析全部运行时 Agent 并计算实际候选；没有修改前端过滤逻辑或 Task 权限。
+- Result:
+  - 解析后的 `@` 候选只有 `test-design-orchestrator` 和 `test-execution-agent`；两个前端过滤定向测试通过。使用 `.env.test` 重启三服务后，后端 health/readiness 为 `UP`、前端 3000 返回 200、manager WebSocket 已连接；未运行模型任务。
+
 ### 2026-07-14 - 应用工作空间增加对称的批量 Git 操作
 
 - Why:
