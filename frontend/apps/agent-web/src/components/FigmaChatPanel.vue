@@ -971,8 +971,27 @@ function agentValue(agent: AgentInfo): string {
   return agent.agentId || agent.name
 }
 
+const BILINGUAL_DISPLAY_NAME_PATTERN = /^([A-Za-z][A-Za-z0-9 &+/-]*?)（([^）\n]+)）[。；]\s*/
+
+// 公共配置首句统一为“English（中文）”；界面以英文为主、中文为辅，运行时仍提交稳定技术 ID。
+function configuredDisplayName(name: string, description?: string): string {
+  return description?.match(BILINGUAL_DISPLAY_NAME_PATTERN)?.[1]?.trim() || name
+}
+
+function configuredDescription(description?: string): string {
+  if (!description) return ''
+  const match = description.match(BILINGUAL_DISPLAY_NAME_PATTERN)
+  if (!match) return description
+  const details = description.slice(match[0].length).trim()
+  return details ? `${match[2].trim()} · ${details}` : match[2].trim()
+}
+
 function agentLabel(agent: AgentInfo): string {
-  return agent.name || agent.agentId
+  return configuredDisplayName(agent.name || agent.agentId, agent.description)
+}
+
+function agentDescription(agent: AgentInfo): string {
+  return configuredDescription(agent.description)
 }
 
 function agentMatches(agent: AgentInfo, query: string): boolean {
@@ -1296,6 +1315,14 @@ function replyQuestion(item: QuestionRequest) {
 // 直接展示 OpenCode /command 返回的 source=skill 项；Agent 是否可调用由 OpenCode 原生 permission.skill 判定。
 type SkillItem = { name: string; description: string; commandId: string }
 
+function skillLabel(skill: SkillItem): string {
+  return configuredDisplayName(skill.name, skill.description)
+}
+
+function skillDescription(skill: SkillItem): string {
+  return configuredDescription(skill.description)
+}
+
 // 从 commands 中过滤出 source=skill 的命令作为技能列表
 const skills = computed<SkillItem[]>(() => {
   if (!props.commands || props.commands.length === 0) return []
@@ -1434,7 +1461,7 @@ function selectSkill(skill: SkillItem) {
 }
 
 function selectMentionAgent(agent: AgentInfo) {
-  const commandText = replaceAgentMentionQuery(localInput.value, agentLabel(agent))
+  const commandText = replaceAgentMentionQuery(localInput.value, agentValue(agent))
   localInput.value = commandText
   emit('update:inputValue', commandText)
   showAgentPanel.value = false
@@ -4256,9 +4283,9 @@ function onCompositionEnd() {
         >
           <BookOpen :size="16" class="figma-chat-skill-icon" />
           <div class="figma-chat-skill-info">
-            <span class="figma-chat-skill-name">{{ skill.name }}</span
+            <span class="figma-chat-skill-name">{{ skillLabel(skill) }}</span
             >&nbsp;&nbsp;
-            <span class="figma-chat-skill-desc"> {{ skill.description }}</span>
+            <span v-if="skillDescription(skill)" class="figma-chat-skill-desc"> {{ skillDescription(skill) }}</span>
           </div>
         </div>
         <div v-if="filteredSkills.length === 0" class="figma-chat-skill-empty">
@@ -4325,7 +4352,7 @@ function onCompositionEnd() {
           <User :size="16" class="figma-chat-agent-icon" />
           <div class="figma-chat-agent-info">
             <span class="figma-chat-agent-name">{{ agentLabel(agent) }}</span>
-            <span v-if="agent.description" class="figma-chat-agent-desc">{{ agent.description }}</span>
+            <span v-if="agentDescription(agent)" class="figma-chat-agent-desc">{{ agentDescription(agent) }}</span>
           </div>
         </div>
         <div v-if="filteredMentionFiles.length" class="figma-chat-suggestion-section">文件</div>
@@ -4584,7 +4611,7 @@ function onCompositionEnd() {
                       />
                       <span class="figma-chat-agent-option-text">
                         <span class="figma-chat-agent-option-name">{{ agentLabel(agent) }}</span>
-                        <span v-if="agent.description" class="figma-chat-agent-option-desc">{{ agent.description }}</span>
+                        <span v-if="agentDescription(agent)" class="figma-chat-agent-option-desc">{{ agentDescription(agent) }}</span>
                       </span>
                     </div>
                     <span v-if="isSelectedAgent(agent)" class="figma-chat-agent-option-checked">✓</span>

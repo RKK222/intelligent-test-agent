@@ -6108,3 +6108,18 @@ bash /tmp/test-api-after-restart.sh
   - 复用现有 `stageWorkspaceGitFiles`、`unstageWorkspaceGitFiles`、`discardWorkspaceGitFiles` 多文件请求和刷新通知链路，没有新增后端 API；单文件与批量操作共用组件内部方法，并同步前端 README、应用 README 和用户手册。
 - Result:
   - `git-changes-panel.test.ts` 19 项、前端全量 Vitest 775 项（另 1 项跳过）、agent-web typecheck 和生产 build 均通过；本地 backend health/readiness 为 `UP`，前端 `http://127.0.0.1:3000` 返回 200，Chromium 加载登录页无 page error。构建仅保留已有 CSS `@import/@charset` 顺序和大 chunk 警告。
+
+### 2026-07-14 - Agent 与 Skill 使用英文主名和中文副名
+
+- Why:
+  - 用户认为“统筹智能体”“正交与判定组合测试设计”等名称不直观，要求名称浅显易懂，并以英文为主、中文为辅。
+- What:
+  - 公共配置的 6 个 Agent 统一使用 `English（中文）。` 首句：用户入口为 `Test Design（测试设计）`、`Test Execution（测试执行）`，内部角色为 `Test Analysis（测试分析）`、案例生成、案例审核和接口执行。
+  - 12 个 Skill 同步补齐英文主名、中文副名和 `metadata.display-name/display-name-zh`；测试设计方法收敛为“接口法、等价类法、正交法、路径法、场景法、规则法、增补法”等短名称。
+  - `FigmaChatPanel` 从说明首句解析双语展示名，在 Agent 和 Skill 选择器中展示英文主标题及中文副说明，实际 Agent 选择、`@` 和 `/` 命令继续提交原技术 ID；同步 agent-web README 和公共配置命名表。
+- How:
+  - 使用 OpenCode 原生 `debug agent/debug skill` 和本地 Python 只读脚本验证 6 个 Agent、12 个 Skill 的解析、唯一性与元数据一致性；组件测试验证“展示双语名、提交技术 ID”，未调用模型。
+  - 使用 manager CLI 只重启 4097 用户进程，实际读取运行中 `/agent`、`/command` 端点确认新名称已加载；后端 health/readiness 和直接启动的 agent-web Vite 均可用。
+- Result:
+  - `FigmaChatPanel.test.ts` 112 项通过、1 项跳过，agent-web typecheck 通过；运行中 OpenCode 已返回新双语名称，前端 `http://127.0.0.1:3000` 返回 200。
+  - 标准 `predev/prebuild` 在本次最终命名修改后被并发出现、与本任务无关的 `frontend/apps/user-manual/docs/.vitepress/theme/components/DirectoryMapping.vue` 语法错误阻断；未修改或提交该文件及同批用户手册改动，改用直接 Vite 启动完成本次交互验证。

@@ -790,8 +790,8 @@ describe("FigmaChatPanel", () => {
         processStatus: { status: "READY", initializable: false, message: "ready" },
         selectedAgent: "build",
         agents: [
-          { agentId: "build", name: "Build", mode: "primary", description: "默认构建" },
-          { agentId: "all-rounder", name: "All Rounder", mode: "all", description: "可作为主 Agent" },
+          { agentId: "build", name: "build", mode: "primary", description: "Test Design（测试设计）。默认构建" },
+          { agentId: "all-rounder", name: "all-rounder", mode: "all", description: "Test Execution（测试执行）。可作为主 Agent" },
           { agentId: "review", name: "Review", mode: "subagent", description: "只能 @ 调用" },
           { agentId: "secret", name: "Secret", mode: "primary", hidden: true }
         ]
@@ -801,15 +801,17 @@ describe("FigmaChatPanel", () => {
     await wrapper.get('[aria-label="切换 Agent"]').trigger("click");
 
     expect(wrapper.find(".figma-chat-agent-dropdown").exists()).toBe(true);
-    expect(wrapper.text()).toContain("Build");
-    expect(wrapper.text()).toContain("All Rounder");
+    expect(wrapper.text()).toContain("Test Design");
+    expect(wrapper.text()).toContain("测试设计 · 默认构建");
+    expect(wrapper.text()).toContain("Test Execution");
+    expect(wrapper.text()).toContain("测试执行 · 可作为主 Agent");
     expect(wrapper.text()).not.toContain("Review");
     expect(wrapper.text()).not.toContain("Secret");
-    expect(wrapper.get(".figma-chat-agent-option-item.is-active").text()).toContain("Build");
+    expect(wrapper.get(".figma-chat-agent-option-item.is-active").text()).toContain("Test Design");
 
     const allRounder = wrapper
       .findAll(".figma-chat-agent-option-item")
-      .find((item) => item.text().includes("All Rounder"));
+      .find((item) => item.text().includes("Test Execution"));
     expect(allRounder).toBeTruthy();
     await allRounder!.trigger("click");
 
@@ -1179,8 +1181,8 @@ describe("FigmaChatPanel", () => {
         processStatus: { status: "READY", initializable: false, message: "ready" },
         agents: [
           { agentId: "build", name: "Build", mode: "primary", description: "默认构建" },
-          { agentId: "review", name: "Review", mode: "subagent", description: "评审实现" },
-          { agentId: "qa", name: "QA", mode: "all", description: "测试分析" },
+          { agentId: "review", name: "review", mode: "subagent", description: "Test Case Review（测试案例审核）。评审实现" },
+          { agentId: "qa", name: "qa", mode: "all", description: "Test Analysis（测试分析）。分析测试对象" },
           { agentId: "hidden-review", name: "Hidden Review", mode: "subagent", hidden: true }
         ]
       } as any
@@ -1190,8 +1192,10 @@ describe("FigmaChatPanel", () => {
 
     const panel = wrapper.find(".figma-chat-agent-panel");
     expect(panel.exists()).toBe(true);
-    expect(panel.text()).toContain("Review");
-    expect(panel.text()).toContain("QA");
+    expect(panel.text()).toContain("Test Case Review");
+    expect(panel.text()).toContain("测试案例审核 · 评审实现");
+    expect(panel.text()).toContain("Test Analysis");
+    expect(panel.text()).toContain("测试分析 · 分析测试对象");
     expect(panel.text()).not.toContain("Build");
     expect(panel.text()).not.toContain("Hidden Review");
   });
@@ -1202,7 +1206,7 @@ describe("FigmaChatPanel", () => {
         messages: [],
         processStatus: { status: "READY", initializable: false, message: "ready" },
         agents: [
-          { agentId: "review", name: "Review", mode: "subagent", description: "评审实现" },
+          { agentId: "review", name: "Review", mode: "subagent", description: "Test Case Review（测试案例审核）。评审实现" },
           { agentId: "qa", name: "QA", mode: "all", description: "测试分析" }
         ]
       } as any
@@ -1211,8 +1215,8 @@ describe("FigmaChatPanel", () => {
     await wrapper.get("textarea").setValue("请 @re");
     await wrapper.get(".figma-chat-agent-row").trigger("click");
 
-    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("请 @Review ");
-    expect(wrapper.emitted("update:inputValue")).toContainEqual(["请 @Review "]);
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("请 @review ");
+    expect(wrapper.emitted("update:inputValue")).toContainEqual(["请 @review "]);
     expect(wrapper.find(".figma-chat-agent-panel").exists()).toBe(false);
   });
 
@@ -1302,7 +1306,7 @@ describe("FigmaChatPanel", () => {
         messages: [],
         processStatus: { status: "READY", initializable: false, message: "ready" },
         commands: [
-          { commandId: "skill-1", name: "test-design", description: "测试设计公共能力", source: "skill" },
+          { commandId: "skill-1", name: "test-design", description: "Equivalence Partitioning（等价类法）。生成等价类表", source: "skill" },
           { commandId: "command-1", name: "help", description: "帮助", source: "command" }
         ]
       }
@@ -1311,7 +1315,8 @@ describe("FigmaChatPanel", () => {
     await wrapper.get("textarea").setValue("/");
 
     expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(true);
-    expect(wrapper.text()).toContain("test-design");
+    expect(wrapper.text()).toContain("Equivalence Partitioning");
+    expect(wrapper.text()).toContain("等价类法 · 生成等价类表");
     expect(wrapper.text()).not.toContain("帮助");
 
     await wrapper.get(".figma-chat-skill-row").trigger("click");
