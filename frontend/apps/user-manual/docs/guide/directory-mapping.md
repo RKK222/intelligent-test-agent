@@ -20,7 +20,7 @@ directoryMapping:
       name: "开发业务代码 Git"
       content: "业务代码、单元测试和工程文档。"
   agentPhysicalSummary: "agents/ = 开发 AI Git 的开发 Agent + 测试公共 AI Git 的公共测试 Agent/workagent + 测试 AI Git 的应用测试 Agent/workagent。"
-  skillStatusSummary: "Skill 实现状态以当前可核验配置为准：测试公共 AI Git 已存在的真实目录标记为“已实现”；尚无对应目录的规划项标记为“未实现”并灰显。"
+  implementationStatusSummary: "Agent / workagent / Skill 的实现状态以当前可核验配置为准：测试公共 AI Git 已存在的真实定义标记为“已实现”；尚无对应定义的规划项标记为“未实现”并灰显。"
   directoryTree:
     id: "root"
     name: "应用(服务群组)工作区/"
@@ -202,6 +202,7 @@ directoryMapping:
                     note: "用户可 @ 的测试设计入口"
                     role: "agent"
                     physical: "测试公共 AI Git + 测试 AI Git"
+                    implementation: "implemented"
                     children:
                       -
                         id: "test-design-agent-file"
@@ -212,8 +213,8 @@ directoryMapping:
                       -
                         id: "test-design-rules"
                         name: "rules/"
-                        scope: "shared"
-                        note: "公共规约与应用规约"
+                        scope: "testing"
+                        note: "测试公共规约与应用测试规约"
                         children:
                           -
                             id: "test-design-common-rules"
@@ -255,6 +256,7 @@ directoryMapping:
                         note: "供测试设计 Agent 调用"
                         role: "workagent"
                         physical: "测试公共 AI Git"
+                        implementation: "implemented"
                         children:
                           -
                             id: "test-analysis-workagent-file"
@@ -267,6 +269,7 @@ directoryMapping:
                         note: "供测试设计 Agent 调用"
                         role: "workagent"
                         physical: "测试公共 AI Git"
+                        implementation: "implemented"
                         children:
                           -
                             id: "test-generation-workagent-file"
@@ -279,6 +282,7 @@ directoryMapping:
                         note: "供测试设计 Agent 调用"
                         role: "workagent"
                         physical: "测试公共 AI Git"
+                        implementation: "implemented"
                         children:
                           -
                             id: "test-review-workagent-file"
@@ -291,6 +295,7 @@ directoryMapping:
                     note: "用户可 @ 的测试执行入口"
                     role: "agent"
                     physical: "测试公共 AI Git + 测试 AI Git"
+                    implementation: "implemented"
                     children:
                       -
                         id: "test-execution-agent-file"
@@ -301,8 +306,8 @@ directoryMapping:
                       -
                         id: "test-execution-rules"
                         name: "rules/"
-                        scope: "shared"
-                        note: "公共规约与应用规约"
+                        scope: "testing"
+                        note: "测试公共规约与应用测试规约"
                         children:
                           -
                             id: "test-execution-common-rules"
@@ -337,6 +342,7 @@ directoryMapping:
                         note: "供测试执行 Agent 调用"
                         role: "workagent"
                         physical: "测试公共 AI Git"
+                        implementation: "implemented"
                         children:
                           -
                             id: "api-execution-workagent-file"
@@ -349,6 +355,7 @@ directoryMapping:
                     note: "应用专属用户入口或上层编排占位"
                     role: "agent"
                     physical: "测试 AI Git"
+                    implementation: "planned"
                   -
                     id: "application-test-workagent"
                     name: "<应用专属测试 workagent>/"
@@ -356,6 +363,7 @@ directoryMapping:
                     note: "应用专属隐藏工作单元占位"
                     role: "workagent"
                     physical: "测试 AI Git"
+                    implementation: "planned"
           -
             id: "mcp"
             name: "mcp/"
@@ -398,6 +406,7 @@ directoryMapping:
                         id: "code-review-skill-file"
                         name: "SKILL.md"
                         scope: "development"
+                        implementation: "planned"
               -
                 id: "test-design-skill"
                 name: "test-design/"
@@ -554,6 +563,7 @@ directoryMapping:
                     id: "application-test-skill-file"
                     name: "SKILL.md"
                     scope: "testing"
+                    implementation: "planned"
       -
         id: "archive"
         name: "archive/"
@@ -1021,10 +1031,11 @@ directoryMapping:
 - 形态标签：用户入口和上层编排标为 `Agent`；对象分析、生成、审核、接口执行等独立工作单元标为 `workagent`。
 - 物理 Git：需求、设计、编码及其开发规约全部放开发 AI Git；测试公共规约放测试公共 AI Git；应用测试规约放测试 AI Git。
 
-- 当前测试公共 Config 中只有 Test Design（测试设计）和 Test Execution（测试执行）是用户可选择或 `@` 的 `Agent`，使用 `mode: all`；界面以英文名为主、中文名为辅，运行时仍使用原技术 ID。
-- 当前已确定的 `test-design-analysis.md`、`test-design-generation.md`、`test-design-review.md`、`test-execution-api.md` 都能独立完成一件工作，统一称为 `workagent`，放在测试公共 AI Git 的 `opencode/agents/*.md`。
+- 当前测试公共 Config 中只有 Test Design（测试设计）和 Test Execution（测试执行）是用户可选择或 `@` 的 `Agent`，使用 `mode: all`；界面以英文名为主、中文名为辅，运行时仍使用原技术 ID，目录页标记为“已实现”。
+- 当前已确定的 `test-design-analysis.md`、`test-design-generation.md`、`test-design-review.md`、`test-execution-api.md` 都能独立完成一件工作，统一称为 `workagent`，放在测试公共 AI Git 的 `opencode/agents/*.md`，目录页同样标记为“已实现”。
 - `workagent` 的 OpenCode 技术实现统一使用 `mode: subagent`、`hidden: true`，不进入用户的 `@` 补全，主要由测试设计或测试执行 Agent 编排调用；不建议用户绕过上层流程单独调用。
-- 应用专属测试 Agent/workagent 放在测试 AI Git 的 `.opencode/agents/*.md`，是否允许用户直接 `@` 由应用定义决定。
+- 应用专属测试 Agent/workagent 放在测试 AI Git 的 `.opencode/agents/*.md`，是否允许用户直接 `@` 由应用定义决定；尚无具体定义时以“未实现”灰显占位。
+- 测试 Agent 内的公共规约和应用规约都属于测试范围，统一使用“测试”标签；测试公共 AI Git 与测试 AI Git 的差异只由最右侧物理 Git 标签表达。
 - 开发 Skill 全部放开发 AI Git；当前 12 个 `test-design*`、接口执行、自动化文档、测试报文和格式校验公共 Skill 放测试公共 AI Git，应用测试知识和专属方法放测试 AI Git。
 - `rules`、`template`、`eval` 放进对应 Skill 资源目录，或由 `AGENTS.md` / `opencode.jsonc` 的 `instructions` 引用，不能作为普通 `.md` 混放在 `.opencode/agents/**`。
 

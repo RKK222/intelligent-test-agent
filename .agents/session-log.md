@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-14 - 修正目录树样式、规则范围与 Agent 状态
+
+- Why:
+  - 用户反馈物理 Git 标签被拉成长条、文件夹图标过重，测试设计规约被误标为“开发 + 测试”，同时现有 Agent/workagent 缺少实现状态，页面无法准确区分物理归属、内容范围和交付状态。
+- What:
+  - 将目录行改为显式网格列，物理 Git 标签固定按内容宽度靠右显示；文件夹统一改为透明底、1px 细边的空心图标。
+  - 测试设计与测试执行下的公共规约、应用规约统一归为“测试”，继续由物理 Git 标签区分测试公共 AI Git 和测试 AI Git。
+  - 依据公共 Config 的真实定义，为 2 个入口 Agent 和 4 个 workagent 标记“已实现”；应用专属 Agent/workagent 占位标记“未实现”并灰显。状态只作用于当前节点，避免父 Agent 把规则等子节点误标为已实现。
+- How:
+  - 复用 Markdown frontmatter 驱动的目录数据和既有 `implemented/planned` 状态渲染，不新增组件或依赖；Playwright 增加 Agent/workagent 状态、测试规约范围和 Git 标签最大宽度断言。
+- Result:
+  - 用户手册生产构建、Help Vitest 8/8、Chromium/Pixel 7 内嵌 Help E2E 2/2、agent-web 类型检查及生产构建均通过；桌面与移动端实页核验 Git 标签宽约 72px、文件夹透明底 1px 边框、18 个“已实现”和 6 个“未实现”状态章，控制台无错误。保留既有 CSS `@import` 和大 chunk 构建警告。
+
 ### 2026-07-14 - 标识公共 Skill 的实际实现状态
 
 - Why:

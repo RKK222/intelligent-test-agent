@@ -24,7 +24,7 @@ type DirectoryMappingData = {
   defaultExpanded: string[];
   repositorySummaries: Array<{ name: string; content: string }>;
   agentPhysicalSummary: string;
-  skillStatusSummary: string;
+  implementationStatusSummary: string;
   directoryTree: TreeNode;
   agentDesignSummary: string;
   agentDesignRows: AgentDesignRow[];
@@ -57,12 +57,11 @@ const scopeLabels: Record<TreeScope, string> = {
 
 const visibleDirectoryNodes = computed<VisibleTreeNode[]>(() => {
   const rows: VisibleTreeNode[] = [];
-  const visit = (node: TreeNode, depth: number, inheritedPhysical?: string, inheritedImplementation?: ImplementationStatus) => {
+  const visit = (node: TreeNode, depth: number, inheritedPhysical?: string) => {
     const physical = node.physical ?? inheritedPhysical;
-    const implementation = node.implementation ?? inheritedImplementation;
-    rows.push({ node, depth, physical, implementation });
+    rows.push({ node, depth, physical, implementation: node.implementation });
     if (!node.children?.length || !expandedNodeIds.value.has(node.id)) return;
-    node.children.forEach((child) => visit(child, depth + 1, physical, implementation));
+    node.children.forEach((child) => visit(child, depth + 1, physical));
   };
   visit(mappingData.value.directoryTree, 0);
   return rows;
@@ -128,7 +127,7 @@ const collapseToRoot = () => {
         <span v-for="repository in mappingData.repositorySummaries" :key="repository.name"><strong>{{ repository.name }}</strong>{{ repository.content }}</span>
       </p>
       <p class="agent-physical-note">{{ mappingData.agentPhysicalSummary }}</p>
-      <p class="skill-status-note">{{ mappingData.skillStatusSummary }}</p>
+      <p class="implementation-status-note">{{ mappingData.implementationStatusSummary }}</p>
       <div class="tree-box merged" role="tree" aria-label="开发与测试合并工程目录">
         <button
           v-for="row in visibleDirectoryNodes"
@@ -257,16 +256,16 @@ const collapseToRoot = () => {
 .agent-physical-note { background: var(--vp-c-bg-soft); border-radius: 5px; color: var(--muted); font-size: 9px; line-height: 1.55; margin: 0 0 12px; padding: 7px 10px; }
 .agent-physical-note code { color: var(--ink); font-size: 9px; font-weight: 700; }
 .agent-physical-note strong { color: var(--ink); }
-.skill-status-note { border-left: 2px solid var(--teal); color: var(--muted); font-size: 9px; line-height: 1.55; margin: -5px 0 12px; padding-left: 8px; }
+.implementation-status-note { border-left: 2px solid var(--teal); color: var(--muted); font-size: 9px; line-height: 1.55; margin: -5px 0 12px; padding-left: 8px; }
 
 .tree-box { background: var(--vp-c-bg-soft); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); overflow: hidden; padding: 9px 8px; }
 .tree-row { align-items: center; background: transparent; border: 0; border-radius: 5px; color: var(--ink); cursor: default; display: grid; font: inherit; gap: 6px; grid-template-columns: 1px 10px 13px minmax(130px, auto) auto minmax(0, 1fr) auto; min-height: 30px; padding: 3px 8px 3px calc(8px + var(--depth) * 18px); text-align: left; width: 100%; }
 .tree-row[aria-expanded] { cursor: pointer; }
 .tree-row:hover { background: var(--vp-c-default-soft); }
 .tree-row:focus-visible { background: var(--vp-c-brand-soft); outline: 1px solid currentColor; outline-offset: -1px; }
-.tree-row code { background: transparent; color: inherit; font-size: 11px; font-weight: 650; overflow-wrap: anywhere; padding: 0; }
-.tree-row em { color: var(--muted); font-size: 10px; font-style: normal; line-height: 1.45; }
-.tree-tags { display: flex; gap: 4px; white-space: nowrap; }
+.tree-row code { background: transparent; color: inherit; font-size: 11px; font-weight: 650; grid-column: 4; overflow-wrap: anywhere; padding: 0; }
+.tree-row em { color: var(--muted); font-size: 10px; font-style: normal; grid-column: 6; line-height: 1.45; }
+.tree-tags { display: flex; gap: 4px; grid-column: 5; white-space: nowrap; }
 .scope-badge,
 .role-badge,
 .implementation-badge { border-radius: 999px; font-size: 8px; font-weight: 700; line-height: 1.35; padding: 2px 6px; }
@@ -288,11 +287,11 @@ const collapseToRoot = () => {
 .tree-chevron { border-bottom: 1.5px solid currentColor; border-right: 1.5px solid currentColor; height: 5px; margin-left: 1px; transform: rotate(-45deg); transition: transform 140ms ease; width: 5px; }
 .tree-chevron.open { transform: rotate(45deg) translate(-1px, -1px); }
 .tree-chevron.leaf { border: 0; }
-.tree-kind { background: currentColor; border-radius: 2px; height: 9px; opacity: .85; position: relative; width: 12px; }
-.tree-kind::before { background: currentColor; border-radius: 2px 2px 0 0; content: ""; height: 3px; left: 1px; position: absolute; top: -2px; width: 6px; }
+.tree-kind { background: transparent; border: 1px solid currentColor; border-radius: 2px; box-sizing: border-box; height: 9px; opacity: .72; position: relative; width: 12px; }
+.tree-kind::before { background: transparent; border: 1px solid currentColor; border-bottom: 0; border-radius: 2px 2px 0 0; box-sizing: border-box; content: ""; height: 3px; left: 1px; position: absolute; top: -3px; width: 6px; }
 .tree-kind.file { background: transparent; border: 1px solid currentColor; border-radius: 1px; height: 12px; width: 9px; }
 .tree-kind.file::before { display: none; }
-.physical-badge { border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 8px; font-weight: 650; line-height: 1.4; max-width: 330px; overflow-wrap: anywhere; padding: 2px 7px; text-align: right; }
+.physical-badge { border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 8px; font-weight: 650; grid-column: 7; justify-self: end; line-height: 1.4; max-width: 330px; overflow-wrap: anywhere; padding: 2px 7px; text-align: right; width: max-content; }
 
 .agent-design { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
 .agent-design-summary { color: var(--muted); font-size: 11px; line-height: 1.6; margin: -5px 0 12px; }

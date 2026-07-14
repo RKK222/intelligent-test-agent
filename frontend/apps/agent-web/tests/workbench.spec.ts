@@ -98,8 +98,13 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   const testingAsset = manualFrame.getByRole("treeitem", { name: "测试概述.md" });
   const testDesignAgent = manualFrame.getByRole("treeitem", { name: /^01_测试设计\// });
   const testAnalysisWorkagent = manualFrame.getByRole("treeitem", { name: /^001 Test Analysis（测试分析）\// });
+  const testGenerationWorkagent = manualFrame.getByRole("treeitem", { name: /^002 Test Case Generation（测试案例生成）\// });
+  const testReviewWorkagent = manualFrame.getByRole("treeitem", { name: /^003 Test Case Review（测试案例审核）\// });
+  const testExecutionAgent = manualFrame.getByRole("treeitem", { name: /^02_测试执行\// });
+  const apiExecutionWorkagent = manualFrame.getByRole("treeitem", { name: /^001 API Test Execution（接口测试执行）\// });
   const applicationTestAgent = manualFrame.getByRole("treeitem", { name: /^<应用专属测试 Agent>\// });
   const applicationTestWorkagent = manualFrame.getByRole("treeitem", { name: /^<应用专属测试 workagent>\// });
+  const testingRuleGroups = manualFrame.locator(".tree-row.testing").filter({ hasText: "测试公共规约与应用测试规约" });
   const publicTestRule = manualFrame.getByRole("treeitem", { name: /^测试设计公共规约\// });
   const applicationTestRule = manualFrame.getByRole("treeitem", { name: "测试设计应用规约.md" });
   const developmentSkills = manualFrame.getByRole("treeitem", { name: /^coding\// });
@@ -114,12 +119,24 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(testingAsset.locator(".physical-badge")).toHaveText("测试 AI Git");
   await expect(testDesignAgent.locator(".role-badge")).toHaveText("Agent");
   await expect(testDesignAgent.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
+  await expect(testDesignAgent.locator(".implementation-badge")).toHaveText("已实现");
   await expect(testAnalysisWorkagent.locator(".role-badge")).toHaveText("workagent");
   await expect(testAnalysisWorkagent.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+  for (const implementedAgent of [testAnalysisWorkagent, testGenerationWorkagent, testReviewWorkagent, testExecutionAgent, apiExecutionWorkagent]) {
+    await expect(implementedAgent.locator(".implementation-badge")).toHaveText("已实现");
+  }
+  await expect(testingRuleGroups).toHaveCount(2);
+  for (let index = 0; index < 2; index += 1) {
+    await expect(testingRuleGroups.nth(index).locator(".scope-badge")).toHaveText("测试");
+  }
   await expect(applicationTestAgent.locator(".role-badge")).toHaveText("Agent");
   await expect(applicationTestAgent.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(applicationTestAgent.locator(".implementation-badge")).toHaveText("未实现");
+  await expect(applicationTestAgent).toHaveClass(/planned/);
   await expect(applicationTestWorkagent.locator(".role-badge")).toHaveText("workagent");
   await expect(applicationTestWorkagent.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(applicationTestWorkagent.locator(".implementation-badge")).toHaveText("未实现");
+  await expect(applicationTestWorkagent).toHaveClass(/planned/);
   await expect(publicTestRule.locator(".physical-badge")).toHaveText("测试公共 AI Git");
   await expect(applicationTestRule.locator(".physical-badge")).toHaveText("测试 AI Git");
   await expect(developmentSkills.locator(".physical-badge")).toHaveText("开发 AI Git");
@@ -128,6 +145,8 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(applicationTestSkills.locator(".physical-badge")).toHaveText("测试 AI Git");
   await expect(applicationTestSkills.locator(".implementation-badge")).toHaveText("未实现");
   await expect(applicationTestSkills).toHaveClass(/planned/);
+  const publicRuleGitBadge = manualFrame.getByRole("treeitem", { name: "接口测试设计规约.md" }).locator(".physical-badge");
+  await expect.poll(() => publicRuleGitBadge.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(340);
   for (const agentFile of [
     "test-design-orchestrator.md",
     "test-design-analysis.md",
