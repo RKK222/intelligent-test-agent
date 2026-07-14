@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 type ViewKey = "structure" | "ownership";
-type TreeTone = "baseline" | "new" | "local";
+type TreeTone = "baseline" | "new" | "shared" | "local";
 type TreeNode = {
   id: string;
   name: string;
@@ -22,6 +22,7 @@ const views: Array<{ key: ViewKey; index: string; label: string }> = [
 
 const baseline = (id: string, name: string, note?: string, children?: TreeNode[]): TreeNode => ({ id, name, note, children });
 const testing = (id: string, name: string, note?: string, children?: TreeNode[]): TreeNode => ({ id, name, note, tone: "new", children });
+const shared = (id: string, name: string, note?: string, children?: TreeNode[]): TreeNode => ({ id, name, note, tone: "shared", children });
 const local = (id: string, name: string, note?: string, children?: TreeNode[]): TreeNode => ({ id, name, note, tone: "local", children });
 const placed = (node: TreeNode, physical: string): TreeNode => ({ ...node, physical });
 
@@ -60,7 +61,7 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
         ])
       ]),
       baseline("coding-agent", "03_编码智能体/", "编码智能体"),
-      baseline("testing-agent", "04_测试智能体/", "开发基线已有入口，以下为测试扩展", [
+      testing("testing-agent", "04_测试智能体/", "测试智能体", [
         testing("test-design-agent", "01_测试设计/", "测试设计 subagent", [
           testing("test-design-agent-file", "agent.md", "子智能体定义（SOP）"),
           testing("test-design-rules", "rules/", "规约目录", [
@@ -73,9 +74,9 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
             ]),
             testing("test-design-app-rule", "测试设计应用规约.md", "应用规约")
           ]),
-          testing("test-object-agent", "001 测试对象识别/", "Skill / 编排步骤", [testing("test-object-agent-file", "SKILL.md")]),
-          testing("test-case-agent", "002 测试设计及案例生成/", "Skill / 编排步骤", [testing("test-case-agent-file", "SKILL.md")]),
-          testing("test-review-agent", "003 测试设计审核/", "独立审核 subagent", [testing("test-review-agent-file", "test-design-review.md")])
+          testing("test-object-agent", "001 测试对象识别/", "hidden subagent · 供上层 Agent 调用", [testing("test-object-agent-file", "test-object-identification.md")]),
+          testing("test-case-agent", "002 测试设计及案例生成/", "hidden subagent · 供上层 Agent 调用", [testing("test-case-agent-file", "test-case-generation.md")]),
+          testing("test-review-agent", "003 测试设计审核/", "hidden subagent · 供上层 Agent 调用", [testing("test-review-agent-file", "test-design-review.md")])
         ]),
         testing("test-execution-agent", "02_测试执行/", "测试执行 subagent", [
           testing("test-execution-agent-file", "agent.md", "子智能体定义（SOP）"),
@@ -87,16 +88,16 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
             ]),
             testing("test-execution-app-rule", "测试执行应用规约.md", "应用规约")
           ]),
-          testing("script-agent", "001 测试执行脚本构造/", "Skill / 编排步骤", [testing("script-agent-file", "SKILL.md")]),
-          testing("data-agent", "002 测试执行数据构造/", "Skill / 编排步骤", [testing("data-agent-file", "SKILL.md")]),
-          testing("assertion-agent", "003 测试执行断言构造/", "Skill / 编排步骤", [testing("assertion-agent-file", "SKILL.md")]),
-          testing("execution-review-agent", "004 测试执行审核/", "独立审核 subagent", [testing("execution-review-agent-file", "test-execution-review.md")])
+          testing("script-agent", "001 测试执行脚本构造/", "hidden subagent · 供上层 Agent 调用", [testing("script-agent-file", "test-script-builder.md")]),
+          testing("data-agent", "002 测试执行数据构造/", "hidden subagent · 供上层 Agent 调用", [testing("data-agent-file", "test-data-builder.md")]),
+          testing("assertion-agent", "003 测试执行断言构造/", "hidden subagent · 供上层 Agent 调用", [testing("assertion-agent-file", "test-assertion-builder.md")]),
+          testing("execution-review-agent", "004 测试执行审核/", "hidden subagent · 供上层 Agent 调用", [testing("execution-review-agent-file", "test-execution-review.md")])
         ]),
         testing("test-analysis-agent", "03_测试分析/", "测试分析 subagent", [testing("test-analysis-more", "...", "待按分析能力继续扩展")])
       ])
-    ]), "应用 AI Git worktree → .opencode/agents/*.md"),
-    placed(baseline("mcp", "mcp/", "MCP 逻辑定义"), "应用 AI Git → 由 opencode.jsonc 注册"),
-    placed(baseline("engineering-rules", "rules/", "工程规约逻辑目录", [baseline("engineering-rule", "工程规约.md")]), "应用 AI Git → 由 AGENTS.md / instructions 引用"),
+    ]), "应用 AI Git"),
+    placed(baseline("mcp", "mcp/", "MCP 逻辑定义"), "应用 AI Git"),
+    placed(baseline("engineering-rules", "rules/", "工程规约逻辑目录", [baseline("engineering-rule", "工程规约.md")]), "应用 AI Git"),
     placed(baseline("skills", "skills/", "Skill 技能目录", [
       baseline("coding-skills", "coding/", "开发已有 Skill", [
         baseline("code-review-skill", "code-review-skill/", undefined, [baseline("code-review-skill-file", "SKILL.md")])
@@ -106,11 +107,11 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
         testing("equivalence-skill", "test-design-equivalence/", undefined, [testing("equivalence-skill-file", "SKILL.md")]),
         testing("more-test-skills", "...", "继续扩展其他测试方法")
       ])
-    ]), "应用 AI Git worktree → .opencode/skills/<name>/SKILL.md")
+    ]), "应用 AI Git")
   ]),
-  placed(testing("archive", "archive/", "规格文档归档目录", [
-    testing("archive-period", "2601/", "归档年月", [testing("archive-item", "I000001/", "需求项编号")])
-  ]), "应用 AI Git · 共享发布 worktree · 发布分支"),
+  placed(shared("archive", "archive/", "开发与测试共用的评审归档", [
+    shared("archive-period", "2601/", "归档年月", [shared("archive-item", "I000001/", "需求项编号")])
+  ]), "应用 AI Git"),
   placed(local("spec", "spec/", "个人本地规格工作目录，只提交不推送", [
     local("spec-item", "I000001/", "需求项编号", [
       local("requirements-spec", "01-需求/", undefined, [local("requirements-use-case", "1_需求用例.md")]),
@@ -139,7 +140,7 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
         ])
       ])
     ])
-  ]), "应用 AI Git · 独立本地 worktree · local/spec/<用户>（无 upstream）"),
+  ]), "应用 AI Git · 仅本地提交"),
   placed(baseline("docs", "docs/", "开发知识与测试资产共用目录", [
     baseline("application-architecture", "应用架构.md", "应用关系、服务节点和功能模块清单"),
     baseline("technical-architecture", "技术架构/", "开发目录内补充测试资产", [
@@ -173,44 +174,22 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
     ]),
     baseline("business-knowledge", "业务知识/", "开发业务知识资产", [baseline("business-knowledge-more", "...", "领域术语、规则和业务说明")]),
     testing("deployment-architecture", "部署架构/", "测试新增架构资产", [testing("physical-deployment", "物理部署架构")])
-  ]), "应用 AI Git · 共享发布 worktree · 发布分支"),
+  ]), "应用 AI Git"),
   placed(baseline("business-repo-a", "git-repo-A/", "业务 Git 工程 A", [
     baseline("business-repo-a-docs", "docs/", undefined, [baseline("shared-methods", "公共方法/")])
-  ]), "业务 Git A · 当前用户 worktree · 当前业务分支"),
-  placed(baseline("business-repo-b", "git-repo-B/", "业务 Git 工程 B"), "业务 Git B · 当前用户 worktree · 当前业务分支")
-]), "组合挂载根目录（不是 Git 仓库）");
-
-const physicalLayers = [
-  {
-    label: "公共能力",
-    path: "${OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT}/<worktree>/opencode/{agents,skills}",
-    detail: "公共 AI Git · 管理员工作分支；发布后同步到 OPENCODE_PUBLIC_CONFIG_DIR"
-  },
-  {
-    label: "应用配置与资产",
-    path: "${OPENCODE_PERSONAL_WORKTREE_ROOT}/<版本>/<用户>/<应用AI库>/<分支>/{.opencode,docs,archive}",
-    detail: "应用 AI Git · 应用发布分支"
-  },
-  {
-    label: "本地规格",
-    path: "${OPENCODE_PERSONAL_WORKTREE_ROOT}/<版本>/<用户>/<应用AI库>/local-spec/spec",
-    detail: "应用 AI Git · 独立 worktree / 本地分支 · 不设置 upstream"
-  },
-  {
-    label: "业务工程",
-    path: "<业务库A/B个人worktree>",
-    detail: "各自业务 Git · 当前业务分支"
-  }
-];
+  ]), "业务 Git A"),
+  placed(baseline("business-repo-b", "git-repo-B/", "业务 Git 工程 B"), "业务 Git B")
+]), "多个 Git 的组合视图");
 
 const agentDesignRows = [
   ["测试设计 / 测试执行 / 测试分析", "可见 subagent", "放入 .opencode/agents/<name>.md；用户可用 @<name>，主 Agent 也可按 description 自动调用"],
-  ["对象识别 / 案例生成 / 脚本、数据、断言构造", "Skill + 编排步骤", "放入 .opencode/skills/<name>/SKILL.md；由上层 subagent 按流程加载，不占用 @ 列表"],
-  ["测试设计审核 / 测试执行审核", "独立审核 subagent", "需要独立上下文和只读权限；需人工直达时可见，否则 hidden: true，仅由上层调用"],
+  ["对象识别 / 案例生成 / 脚本、数据、断言构造 / 审核", "hidden subagent", "每个都是能独立完成任务的 Agent；不进入 @ 补全，由上层 Agent 调用，不建议用户单独调用"],
+  ["等价类 / 边界值等测试方法", "Skill", "只把可复用的方法知识放入 .opencode/skills/<name>/SKILL.md，由 Agent 按需加载"],
   ["rules / template / eval", "Skill 资源或 instructions", "不要放在 .opencode/agents/** 里作为普通 .md，避免被递归注册成 Agent"]
 ];
 
-const expandedNodeIds = ref<Set<string>>(new Set(["root"]));
+// 共用归档默认展开一层，让用户无需操作即可识别这是开发、测试共同沉淀的目录。
+const expandedNodeIds = ref<Set<string>>(new Set(["root", "archive"]));
 
 const visibleDirectoryNodes = computed<VisibleTreeNode[]>(() => {
   const rows: VisibleTreeNode[] = [];
@@ -243,7 +222,7 @@ const expandAllDirectories = () => {
 };
 
 const collapseToRoot = () => {
-  expandedNodeIds.value = new Set(["root"]);
+  expandedNodeIds.value = new Set(["root", "archive"]);
 };
 
 const ownershipRows = [
@@ -252,8 +231,8 @@ const ownershipRows = [
   ["应用 Agent / Skills", "应用测试设计、执行、分析智能体及方法", "测试组", "应用管理员及以上"],
   ["应用规约", "结合应用特点补充的测试设计与执行规约", "测试组", "应用管理员及以上"],
   ["docs/**", "开发已有资产与新增测试资产的应用级稳定沉淀", "测试组", "应用管理员审核发布"],
-  ["spec/<需求项>", "本次需求的四阶段工作事实", "当前用户与 Agent", "仅本地提交，禁止推送"],
-  ["archive/<年月>/<需求项>", "完成评审后的规格快照", "测试组", "应用管理员受控发布"],
+  ["spec/<需求项>", "具体研发阶段的输入输出产物（需求、设计、编码、测试）", "当前用户与 Agent", "仅本地提交，禁止推送"],
+  ["archive/<年月>/<需求项>", "开发与测试各阶段完成评审后的归档快照", "研发团队、测试组", "应用管理员受控发布"],
   ["git-repo-A · git-repo-B", "业务代码、单测和工程文档", "开发团队", "各业务 Git 负责人"]
 ];
 </script>
@@ -269,6 +248,7 @@ const ownershipRows = [
       <div class="legend" aria-label="目录图例">
         <span><i></i>开发基线</span>
         <span><i class="new"></i>测试新增</span>
+        <span><i class="shared"></i>开发测试共用</span>
         <span><i class="local"></i>个人本地</span>
       </div>
     </header>
@@ -288,20 +268,17 @@ const ownershipRows = [
 
     <div v-if="activeView === 'structure'" class="blueprint-panel">
       <div class="section-heading tree-heading">
-        <div><span>合并工程树</span><strong>测试目标整体目录</strong></div>
+        <div><span>合并工程树</span><strong>开发测试整体目录</strong></div>
         <div class="tree-actions">
           <button type="button" @click="expandAllDirectories">全部展开</button>
           <button type="button" @click="collapseToRoot">收起到一级</button>
         </div>
       </div>
       <p class="tree-instruction">点击带箭头的文件夹逐级展开。开发目录保持原位置，测试内容直接进入它所属的目录层级。</p>
-      <div class="physical-layers" aria-label="物理目录、Git 与分支映射">
-        <article v-for="layer in physicalLayers" :key="layer.label">
-          <strong>{{ layer.label }}</strong>
-          <code>{{ layer.path }}</code>
-          <span>{{ layer.detail }}</span>
-        </article>
-      </div>
+      <p class="git-scope-note">
+        <span><strong>公共 AI Git</strong>公共 Agent / Skills / 公共规约，运行时叠加到应用。</span>
+        <span><strong>应用 AI Git</strong>应用 Agent / Skills / 应用规约 / docs / archive / spec。</span>
+      </p>
       <div class="tree-box merged" role="tree" aria-label="开发与测试合并工程目录">
         <button
           v-for="row in visibleDirectoryNodes"
@@ -326,16 +303,17 @@ const ownershipRows = [
       </div>
       <div class="tree-reading-note">
         <p><i></i><span><strong>开发已有</strong>保留需求、设计、编码、知识文档和业务 Git 的原有位置。</span></p>
-        <p><i class="new"></i><span><strong>测试扩展</strong>在原目录中增加测试智能体、方法、归档和稳定资产。</span></p>
-        <p><i class="local"></i><span><strong>个人本地</strong><code>spec</code> 四阶段内容仅在个人 worktree 提交。</span></p>
+        <p><i class="new"></i><span><strong>测试扩展</strong>在原目录中增加测试智能体、测试方法和稳定资产。</span></p>
+        <p><i class="shared"></i><span><strong>开发测试共用</strong><code>archive</code> 保存各研发阶段评审确认后的归档快照。</span></p>
+        <p><i class="local"></i><span><strong>个人本地</strong><code>spec</code> 保存需求、设计、编码、测试阶段的输入输出产物。</span></p>
       </div>
       <section class="agent-design" aria-labelledby="agent-design-title">
         <div class="section-heading">
           <span>OpenCode 原生映射</span>
-          <strong id="agent-design-title">不保留 workagent 这一技术类型</strong>
+          <strong id="agent-design-title">工作 Agent 使用 hidden subagent</strong>
         </div>
         <p class="agent-design-summary">
-          业务上仍可称“工作步骤”，技术上只落为可 <code>@</code> 的 subagent、按需加载的 Skill，或普通规则资源。
+          工作 Agent 可以独立完成任务，但主要供上层 Agent 编排调用；设置 <code>mode: subagent</code>、<code>hidden: true</code>，不建议用户单独调用。
         </p>
         <div class="agent-design-grid">
           <article v-for="row in agentDesignRows" :key="row[0]">
@@ -375,6 +353,7 @@ const ownershipRows = [
   --line: var(--vp-c-divider);
   --teal: #00845a;
   --blue: #2557a7;
+  --shared: #6556b3;
   --amber: #b05a00;
   color: var(--ink);
   margin: 28px 0 38px;
@@ -414,6 +393,7 @@ const ownershipRows = [
 .legend span { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 8px; }
 .legend i { background: var(--blue); border-radius: 50%; height: 8px; width: 8px; }
 .legend i.new { background: var(--teal); }
+.legend i.shared { background: var(--shared); }
 .legend i.local { background: var(--amber); }
 
 .blueprint-tabs { border: 1px solid var(--line); border-top: 0; display: grid; grid-template-columns: repeat(2, 1fr); }
@@ -434,14 +414,9 @@ const ownershipRows = [
 .tree-actions button:hover { background: var(--vp-c-brand-soft); border-color: var(--vp-c-brand-2); color: var(--ink); }
 .tree-actions button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .tree-instruction { color: var(--muted); font-size: 11px; line-height: 1.6; margin: -2px 0 12px; }
-
-.physical-layers { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 0 14px; }
-.physical-layers article { background: var(--vp-c-bg-soft); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 7px; display: grid; gap: 3px; min-width: 0; padding: 9px 10px; }
-.physical-layers article:nth-child(3) { border-left-color: var(--amber); }
-.physical-layers strong { color: var(--ink); font-size: 10px; }
-.physical-layers code { background: transparent; color: var(--blue); font-size: 9px; line-height: 1.45; overflow-wrap: anywhere; padding: 0; }
-.physical-layers article:nth-child(3) code { color: var(--amber); }
-.physical-layers span { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.git-scope-note { border-left: 3px solid var(--shared); color: var(--muted); display: flex; flex-wrap: wrap; font-size: 9px; gap: 6px 18px; line-height: 1.5; margin: 0 0 12px; padding: 4px 0 4px 10px; }
+.git-scope-note span { display: inline-flex; gap: 5px; }
+.git-scope-note strong { color: var(--ink); }
 
 .tree-box { background: var(--vp-c-bg-soft); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); overflow: hidden; padding: 9px 8px; }
 .tree-row { align-items: center; background: transparent; border: 0; border-radius: 5px; color: var(--blue); cursor: default; display: grid; font: inherit; gap: 6px; grid-template-columns: 1px 10px 13px minmax(150px, auto) minmax(0, 1fr) auto; min-height: 30px; padding: 3px 8px 3px calc(8px + var(--depth) * 18px); text-align: left; width: 100%; }
@@ -449,10 +424,12 @@ const ownershipRows = [
 .tree-row:hover { background: var(--vp-c-default-soft); }
 .tree-row:focus-visible { background: var(--vp-c-brand-soft); outline: 1px solid currentColor; outline-offset: -1px; }
 .tree-row.new { background: color-mix(in srgb, var(--teal) 6%, transparent); color: var(--teal); }
+.tree-row.shared { background: color-mix(in srgb, var(--shared) 6%, transparent); color: var(--shared); }
 .tree-row.local { color: var(--amber); }
 .tree-row code { background: transparent; color: inherit; font-size: 11px; font-weight: 650; overflow-wrap: anywhere; padding: 0; }
 .tree-row em { color: var(--muted); font-size: 10px; font-style: normal; line-height: 1.45; }
 .tree-row.new em { color: #548f89; }
+.tree-row.shared em { color: #756daf; }
 .tree-row.local em { color: #9c7a49; }
 .tree-guide { background: var(--line); height: 100%; }
 .tree-row:first-child .tree-guide { opacity: 0; }
@@ -464,10 +441,11 @@ const ownershipRows = [
 .tree-kind.file { background: transparent; border: 1px solid currentColor; border-radius: 1px; height: 12px; width: 9px; }
 .tree-kind.file::before { display: none; }
 .physical-badge { border: 1px solid color-mix(in srgb, currentColor 48%, var(--line)); border-radius: 999px; color: inherit; font-size: 8px; font-weight: 650; line-height: 1.4; max-width: 330px; overflow-wrap: anywhere; padding: 2px 7px; text-align: right; }
-.tree-reading-note { border-top: 1px solid var(--line); display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); margin-top: 20px; padding-top: 18px; }
+.tree-reading-note { border-top: 1px solid var(--line); display: grid; gap: 16px; grid-template-columns: repeat(4, 1fr); margin-top: 20px; padding-top: 18px; }
 .tree-reading-note p { align-items: start; display: grid; gap: 8px; grid-template-columns: 8px 1fr; margin: 0; }
 .tree-reading-note i { background: var(--blue); border-radius: 50%; height: 8px; margin-top: 4px; width: 8px; }
 .tree-reading-note i.new { background: var(--teal); }
+.tree-reading-note i.shared { background: var(--shared); }
 .tree-reading-note i.local { background: var(--amber); }
 .tree-reading-note strong { color: var(--ink); display: block; font-size: 11px; }
 .tree-reading-note span { color: var(--muted); font-size: 10px; line-height: 1.55; }
@@ -504,7 +482,7 @@ const ownershipRows = [
   .blueprint-tabs button { font-size: 12px; padding: 13px 5px; }
   .blueprint-panel { padding: 22px 16px; }
   .tree-heading { align-items: start; flex-direction: column; }
-  .physical-layers { grid-template-columns: 1fr; }
+  .git-scope-note { display: grid; gap: 5px; }
   .tree-row { gap: 4px; grid-template-columns: 1px 9px 12px minmax(100px, auto); padding-left: calc(5px + var(--depth) * 14px); }
   .tree-row em { display: none; }
   .physical-badge { grid-column: 4; justify-self: start; margin: 2px 0 4px; max-width: min(260px, 70vw); text-align: left; }

@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-14 - 明确共享归档与 hidden 工作 Agent
+
+- Why:
+  - 用户要求把 `spec` 定义为研发阶段输入输出产物，保留 work agent 的独立 Agent 能力，修正测试智能体和 `archive` 的颜色，并简化难理解的物理路径展示。
+- What:
+  - `04_测试智能体` 整体改为绿色；`archive` 改为开发测试共用的紫色并默认展开一层，责任调整为研发团队与测试组共同形成。
+  - 对象识别、案例生成、脚本/数据/断言构造和审核均恢复为 `mode: subagent`、`hidden: true` 的工作 Agent，供上层 Agent 编排调用且不建议用户单独调用；只有等价类、边界值等方法知识使用 Skill。
+  - 删除四块参数化物理路径卡片，目录物理归属只展示公共 AI Git、应用 AI Git 和业务 Git；`spec` 文案统一为需求、设计、编码、测试阶段的输入输出产物。
+- How:
+  - 继续复用 `DirectoryMapping.vue` 的树、颜色 tone、Help Markdown 和既有测试，只新增共享 tone 与默认展开状态，不修改 Config 后端或 OpenCode 配置文件。
+- Result:
+  - 用户手册和 agent-web 生产构建、Help Vitest 7/7、Chromium/Pixel 7 首页内嵌 Help E2E 2/2 通过，桌面与移动完整页面截图检查正常；保留既有 CSS `@import` 和大 chunk 构建警告。
+
 ### 2026-07-14 - 将开发与测试目录合并为可展开工程树
 
 - Why:

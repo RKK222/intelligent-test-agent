@@ -70,22 +70,31 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   );
   const manualFrame = page.frameLocator('[data-testid="help-center-frame"]');
   await expect(manualFrame.getByRole("button", { name: "测试目录" })).toHaveCount(0);
-  await expect(manualFrame.getByText(/OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT/).first()).toBeVisible();
+  await expect(manualFrame.getByText("公共 AI Git", { exact: true }).first()).toBeVisible();
+  const sharedArchive = manualFrame.getByRole("treeitem", { name: /archive\// });
+  await expect(sharedArchive).toBeVisible();
+  await expect(manualFrame.getByRole("treeitem", { name: /2601\// })).toBeVisible();
+  await expect.poll(() => sharedArchive.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(101, 86, 179)");
   await manualFrame.getByRole("button", { name: "全部展开" }).click();
   const developmentAsset = manualFrame.getByRole("treeitem", { name: "工程概览_A.md" });
   const testingAsset = manualFrame.getByRole("treeitem", { name: "测试概述.md" });
+  const testingAgent = manualFrame.getByRole("treeitem", { name: /04_测试智能体\// });
   await expect(developmentAsset).toBeVisible();
   await expect(testingAsset).toBeVisible();
+  await expect(testingAgent).toBeVisible();
   await expect.poll(() => developmentAsset.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(37, 87, 167)");
   await expect.poll(() => testingAsset.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(0, 132, 90)");
+  await expect.poll(() => testingAgent.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(0, 132, 90)");
   await expect(manualFrame.getByRole("treeitem", { name: "流程测试设计.md" })).toBeVisible();
   await expect(manualFrame.getByRole("treeitem", { name: "S000001_测试案例.md" })).toBeVisible();
-  await expect(manualFrame.getByText("不保留 workagent 这一技术类型")).toBeVisible();
+  await expect(manualFrame.getByText("工作 Agent 使用 hidden subagent")).toBeVisible();
+  await expect(manualFrame.getByText(/供上层 Agent 编排调用/).first()).toBeVisible();
   await expect(manualFrame.getByText(/\.opencode\/skills\/<name>\/SKILL\.md/).first()).toBeVisible();
   await manualFrame.getByRole("button", { name: "内容与责任" }).click();
   await expect(manualFrame.getByRole("cell", { name: "效能组、测试管理组" })).toBeVisible();
   await expect(manualFrame.getByRole("cell", { name: "测试管理组", exact: true })).toBeVisible();
   await expect(manualFrame.getByRole("cell", { name: "docs/**", exact: true })).toBeVisible();
+  await expect(manualFrame.getByRole("cell", { name: "具体研发阶段的输入输出产物（需求、设计、编码、测试）" })).toBeVisible();
 });
 
 test("Markdown Mermaid Flowchart 和 Sequence 可视化编辑后复用保存链路", async ({ page }) => {
