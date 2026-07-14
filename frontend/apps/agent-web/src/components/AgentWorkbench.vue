@@ -1737,6 +1737,30 @@ watch(diffFiles, (files) => {
   }
 });
 
+/**
+ * Agent 与 Skill 定义会被 OpenCode 工作区实例缓存。只在目录定义文件保存后重载运行态，
+ * rules/templates 等普通资源仍按原保存链路处理，避免无关编辑打断当前实例。
+ */
+function isRuntimeCatalogDefinition(path: string): boolean {
+  const normalized = path.replaceAll("\\", "/");
+  return /(^|\/)agents\/.*\.md$/i.test(normalized)
+    || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized);
+}
+
+async function refreshRuntimeCatalogAfterAgentConfigSave(path: string): Promise<unknown | null> {
+  if (!isRuntimeCatalogDefinition(path) || !opencodeCatalogReady.value) {
+    return null;
+  }
+  try {
+    // 复用 OpenCode 原生 dispose：响应返回时旧实例已经释放，随后重拉即可读取最新磁盘配置。
+    await api.disposeGlobal();
+    await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
 // ===== Mutations =====
 const saveMutation = useMutation({
   mutationFn: async (tab: NonNullable<typeof activeTab.value>) => {
@@ -1758,9 +1782,14 @@ const saveMutation = useMutation({
     await api.writeFile(selectedWorkspace.value.workspaceId, tab.path, tab.content);
     return tab;
   },
-  onSuccess: (tab) => {
+  onSuccess: async (tab) => {
     workbench.markTabSaved(tab.path, tab.content);
-    feedback.value = { kind: "success", title: "文件已保存", description: tab.path };
+    const catalogRefreshError = isAgentFilePath(tab.path)
+      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentFileInfo(tab.path).path)
+      : null;
+    feedback.value = catalogRefreshError
+      ? errorFeedback("文件已保存，运行态目录刷新失败", catalogRefreshError)
+      : { kind: "success", title: "文件已保存", description: tab.path };
     if (!isAgentFilePath(tab.path)) {
       void refreshWorkspaceGitDiff();
     }
@@ -4481,7 +4510,12 @@ const saveDiffFileMutation = useMutation({
     if (tab) {
       workbench.markTabSaved(path, content);
     }
-    feedback.value = { kind: "success", title: "文件已保存", description: path };
+    const catalogRefreshError = isAgentFilePath(path)
+      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentFileInfo(path).path)
+      : null;
+    feedback.value = catalogRefreshError
+      ? errorFeedback("文件已保存，运行态目录刷新失败", catalogRefreshError)
+      : { kind: "success", title: "文件已保存", description: path };
     await loadDiffSource(diffSource.value);
   },
   onError: (error) => {

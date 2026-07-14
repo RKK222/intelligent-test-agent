@@ -1561,6 +1561,20 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("disposes the OpenCode runtime before reloading Agent and Skill catalogs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: true }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.disposeGlobal()).resolves.toBe(true);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/global/dispose",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("maps session todo items from opencode runtime payloads", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

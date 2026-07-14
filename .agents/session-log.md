@@ -6172,3 +6172,15 @@ bash /tmp/test-api-after-restart.sh
   - 仅修正文档文字，不修改 OpenCode 配置、原生能力或前端解析逻辑；重新执行用户手册构建和既有双语候选组件测试。
 - Result:
   - 用户手册、公共配置命名与前端既有交互约定保持一致。
+
+### 2026-07-14 - 保存 Agent 与 Skill 后自动刷新运行态目录
+
+- Why:
+  - 内置编辑器保存 `SKILL.md` 后只完成文件落盘，OpenCode 工作区实例仍缓存旧 Skill/Command，右侧技能列表不会随手工修改更新。
+- What:
+  - 保存 `agents/**/*.md` 或 `skills/**/SKILL.md` 后复用已有 `disposeGlobal()` 释放 OpenCode 缓存实例，并重新拉取 Agent 与 Command；普通 rules/templates 保存不触发重载。
+  - 文件落盘成功但运行态刷新失败时提示部分成功，避免把已保存文件误报为保存失败；用户手册和包说明同步补充该行为。
+- How:
+  - 沿用现有 Agent 配置文件 WebSocket 写入、backend-api 平台代理和 Vue Query 目录查询，没有修改 OpenCode 原生源码或新增 API。
+- Result:
+  - 定向 Vitest 167 passed、1 skipped，agent-web typecheck 与生产 build 通过；使用 `.env.test` 重启三服务后 health/readiness、前端、CORS 和 manager 连接均正常，未调用模型。

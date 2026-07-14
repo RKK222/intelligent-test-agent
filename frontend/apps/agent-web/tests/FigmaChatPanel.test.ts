@@ -1319,6 +1319,16 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("等价类法 · 生成等价类表");
     expect(wrapper.text()).not.toContain("帮助");
 
+    await wrapper.setProps({
+      commands: [
+        { commandId: "skill-1", name: "test-design", description: "API Testing（针对接口的案例设计）。使用最新接口模板", source: "skill" }
+      ]
+    });
+
+    expect(wrapper.text()).toContain("API Testing");
+    expect(wrapper.text()).toContain("针对接口的案例设计 · 使用最新接口模板");
+    expect(wrapper.text()).not.toContain("等价类法 · 生成等价类表");
+
     await wrapper.get(".figma-chat-skill-row").trigger("click");
 
     expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("/test-design ");
