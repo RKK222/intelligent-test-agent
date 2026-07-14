@@ -19,7 +19,7 @@ directoryMapping:
     -
       name: "开发业务代码 Git"
       content: "业务代码、单元测试和工程文档。"
-  agentPhysicalSummary: "agents/ = 开发 AI Git 的开发 Agent + 测试公共 AI Git 的公共测试 Agent/workagent + 测试 AI Git 的应用测试 Agent/workagent。"
+  agentPhysicalSummary: "agents/ = 开发 AI Git 的开发 Agent + 测试公共 AI Git 的公共测试 Agent/workagent + 测试 AI Git 中按具体测试活动归位的应用 Agent/workagent。"
   implementationStatusSummary: "Agent / workagent / Skill 的实现状态以当前可核验配置为准：测试公共 AI Git 已存在的真实定义标记为“已实现”；尚无对应定义的规划项标记为“未实现”并灰显。"
   directoryTree:
     id: "root"
@@ -211,6 +211,14 @@ directoryMapping:
                         note: "Test Design（测试设计）Agent 定义"
                         physical: "测试公共 AI Git"
                       -
+                        id: "application-test-design-agent"
+                        name: "<应用测试设计 Agent>.md"
+                        scope: "testing"
+                        note: "当前测试设计活动的应用专属入口占位"
+                        role: "agent"
+                        physical: "测试 AI Git"
+                        implementation: "planned"
+                      -
                         id: "test-design-rules"
                         name: "rules/"
                         scope: "testing"
@@ -244,11 +252,32 @@ directoryMapping:
                                 name: "其他测试设计规约.md"
                                 scope: "testing"
                           -
-                            id: "test-design-app-rule"
-                            name: "测试设计应用规约.md"
+                            id: "test-design-app-rules"
+                            name: "测试设计应用规约/"
                             scope: "testing"
-                            note: "应用规约"
+                            note: "按测试对象类型维护应用规约"
                             physical: "测试 AI Git"
+                            children:
+                              -
+                                id: "test-design-app-api-rule"
+                                name: "接口测试设计应用规约.md"
+                                scope: "testing"
+                              -
+                                id: "test-design-app-ui-rule"
+                                name: "UI测试设计应用规约.md"
+                                scope: "testing"
+                              -
+                                id: "test-design-app-async-rule"
+                                name: "异步任务测试设计应用规约.md"
+                                scope: "testing"
+                              -
+                                id: "test-design-app-batch-rule"
+                                name: "批量任务测试设计应用规约.md"
+                                scope: "testing"
+                              -
+                                id: "test-design-app-other-rule"
+                                name: "其他测试设计应用规约.md"
+                                scope: "testing"
                       -
                         id: "test-analysis-workagent"
                         name: "001 Test Analysis（测试分析）/"
@@ -288,6 +317,14 @@ directoryMapping:
                             id: "test-review-workagent-file"
                             name: "test-design-review.md"
                             scope: "testing"
+                      -
+                        id: "application-test-design-workagent"
+                        name: "<应用测试设计 workagent>.md"
+                        scope: "testing"
+                        note: "当前测试设计活动的应用专属工作单元占位"
+                        role: "workagent"
+                        physical: "测试 AI Git"
+                        implementation: "planned"
                   -
                     id: "test-execution-agent"
                     name: "02_测试执行/"
@@ -303,6 +340,14 @@ directoryMapping:
                         scope: "testing"
                         note: "Test Execution（测试执行）Agent 定义"
                         physical: "测试公共 AI Git"
+                      -
+                        id: "application-test-execution-agent"
+                        name: "<应用测试执行 Agent>.md"
+                        scope: "testing"
+                        note: "当前测试执行活动的应用专属入口占位"
+                        role: "agent"
+                        physical: "测试 AI Git"
+                        implementation: "planned"
                       -
                         id: "test-execution-rules"
                         name: "rules/"
@@ -348,22 +393,14 @@ directoryMapping:
                             id: "api-execution-workagent-file"
                             name: "test-execution-api.md"
                             scope: "testing"
-                  -
-                    id: "application-test-agent"
-                    name: "<应用专属测试 Agent>/"
-                    scope: "testing"
-                    note: "应用专属用户入口或上层编排占位"
-                    role: "agent"
-                    physical: "测试 AI Git"
-                    implementation: "planned"
-                  -
-                    id: "application-test-workagent"
-                    name: "<应用专属测试 workagent>/"
-                    scope: "testing"
-                    note: "应用专属隐藏工作单元占位"
-                    role: "workagent"
-                    physical: "测试 AI Git"
-                    implementation: "planned"
+                      -
+                        id: "application-test-execution-workagent"
+                        name: "<应用测试执行 workagent>.md"
+                        scope: "testing"
+                        note: "当前测试执行活动的应用专属工作单元占位"
+                        role: "workagent"
+                        physical: "测试 AI Git"
+                        implementation: "planned"
           -
             id: "mcp"
             name: "mcp/"
@@ -408,162 +445,169 @@ directoryMapping:
                         scope: "development"
                         implementation: "planned"
               -
-                id: "test-design-skill"
-                name: "test-design/"
+                id: "test-skills"
+                name: "test/"
                 scope: "testing"
-                note: "Test Design（测试设计）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
+                note: "测试公共与应用测试 Skill"
+                physical: "测试公共 AI Git + 测试 AI Git"
                 children:
                   -
-                    id: "test-design-skill-file"
-                    name: "SKILL.md"
+                    id: "test-design-skill"
+                    name: "test-design/"
                     scope: "testing"
-              -
-                id: "api-design-skill"
-                name: "test-design-api/"
-                scope: "testing"
-                note: "API Testing（接口法）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "Test Design（测试设计）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "test-design-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "api-design-skill-file"
-                    name: "SKILL.md"
+                    id: "api-design-skill"
+                    name: "test-design-api/"
                     scope: "testing"
-              -
-                id: "augment-design-skill"
-                name: "test-design-augment/"
-                scope: "testing"
-                note: "Case Augmentation（增补法）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "API Testing（接口法）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "api-design-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "augment-design-skill-file"
-                    name: "SKILL.md"
+                    id: "augment-design-skill"
+                    name: "test-design-augment/"
                     scope: "testing"
-              -
-                id: "direct-design-skill"
-                name: "test-design-direct/"
-                scope: "testing"
-                note: "Rule-based Testing（规则法）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "Case Augmentation（增补法）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "augment-design-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "direct-design-skill-file"
-                    name: "SKILL.md"
+                    id: "direct-design-skill"
+                    name: "test-design-direct/"
                     scope: "testing"
-              -
-                id: "equivalence-skill"
-                name: "test-design-equivalence/"
-                scope: "testing"
-                note: "Equivalence Partitioning（等价类法）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "Rule-based Testing（规则法）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "direct-design-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "equivalence-skill-file"
-                    name: "SKILL.md"
+                    id: "equivalence-skill"
+                    name: "test-design-equivalence/"
                     scope: "testing"
-              -
-                id: "orthogonal-design-skill"
-                name: "test-design-orthogonal/"
-                scope: "testing"
-                note: "Orthogonal Array（正交法）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "Equivalence Partitioning（等价类法）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "equivalence-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "orthogonal-design-skill-file"
-                    name: "SKILL.md"
+                    id: "orthogonal-design-skill"
+                    name: "test-design-orthogonal/"
                     scope: "testing"
-              -
-                id: "path-design-skill"
-                name: "test-design-path/"
-                scope: "testing"
-                note: "Path Testing（路径法）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "Orthogonal Array（正交法）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "orthogonal-design-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "path-design-skill-file"
-                    name: "SKILL.md"
+                    id: "path-design-skill"
+                    name: "test-design-path/"
                     scope: "testing"
-              -
-                id: "scenario-design-skill"
-                name: "test-design-scenario/"
-                scope: "testing"
-                note: "Scenario Testing（场景法）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "Path Testing（路径法）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "path-design-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "scenario-design-skill-file"
-                    name: "SKILL.md"
+                    id: "scenario-design-skill"
+                    name: "test-design-scenario/"
                     scope: "testing"
-              -
-                id: "api-case-execution-skill"
-                name: "api-execute-case/"
-                scope: "testing"
-                note: "API Case Execution（接口案例执行）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "Scenario Testing（场景法）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "scenario-design-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "api-case-execution-skill-file"
-                    name: "SKILL.md"
+                    id: "api-case-execution-skill"
+                    name: "api-execute-case/"
                     scope: "testing"
-              -
-                id: "api-automation-skill"
-                name: "generate-api-automation-markdown/"
-                scope: "testing"
-                note: "API Automation Script（接口自动化脚本）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "API Case Execution（接口案例执行）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "api-case-execution-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "api-automation-skill-file"
-                    name: "SKILL.md"
+                    id: "api-automation-skill"
+                    name: "generate-api-automation-markdown/"
                     scope: "testing"
-              -
-                id: "test-message-skill"
-                name: "generate-test-messages/"
-                scope: "testing"
-                note: "Test Message Generation（测试报文生成）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "API Automation Script（接口自动化脚本）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "api-automation-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "test-message-skill-file"
-                    name: "SKILL.md"
+                    id: "test-message-skill"
+                    name: "generate-test-messages/"
                     scope: "testing"
-              -
-                id: "automation-format-skill"
-                name: "validate-automation-script-format/"
-                scope: "testing"
-                note: "Automation Format Check（自动化格式检查）"
-                physical: "测试公共 AI Git"
-                implementation: "implemented"
-                children:
+                    note: "Test Message Generation（测试报文生成）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "test-message-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "automation-format-skill-file"
-                    name: "SKILL.md"
+                    id: "automation-format-skill"
+                    name: "validate-automation-script-format/"
                     scope: "testing"
-              -
-                id: "application-test-skills"
-                name: "<应用专属测试 Skill>/"
-                scope: "testing"
-                note: "应用测试方法或知识"
-                physical: "测试 AI Git"
-                implementation: "planned"
-                children:
+                    note: "Automation Format Check（自动化格式检查）"
+                    physical: "测试公共 AI Git"
+                    implementation: "implemented"
+                    children:
+                      -
+                        id: "automation-format-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
                   -
-                    id: "application-test-skill-file"
-                    name: "SKILL.md"
+                    id: "application-test-skills"
+                    name: "<应用专属测试 Skill>/"
                     scope: "testing"
+                    note: "应用测试方法或知识"
+                    physical: "测试 AI Git"
                     implementation: "planned"
+                    children:
+                      -
+                        id: "application-test-skill-file"
+                        name: "SKILL.md"
+                        scope: "testing"
+                        implementation: "planned"
       -
         id: "archive"
         name: "archive/"
@@ -1019,7 +1063,7 @@ directoryMapping:
 
 ### 保留一个完整工程视图
 
-研发和测试不是两棵互不相干的目录。测试目录沿用应用工程中的需求、设计、编码、业务 Git 和知识文档，再扩展测试智能体、四阶段 `spec`、测试资产及归档能力。
+研发和测试不是两棵互不相干的目录。测试目录沿用应用工程中的需求、设计、编码、业务 Git 和知识文档；开发已有资产与测试新增资产保留在同一工程层级，再扩展测试智能体、四阶段 `spec`、测试资产及归档能力。
 
 ### `ai-agent` 定义怎样工作
 
@@ -1034,9 +1078,10 @@ directoryMapping:
 - 当前测试公共 Config 中只有 Test Design（测试设计）和 Test Execution（测试执行）是用户可选择或 `@` 的 `Agent`，使用 `mode: all`；界面以英文名为主、中文名为辅，运行时仍使用原技术 ID，目录页标记为“已实现”。
 - 当前已确定的 `test-design-analysis.md`、`test-design-generation.md`、`test-design-review.md`、`test-execution-api.md` 都能独立完成一件工作，统一称为 `workagent`，放在测试公共 AI Git 的 `opencode/agents/*.md`，目录页同样标记为“已实现”。
 - `workagent` 的 OpenCode 技术实现统一使用 `mode: subagent`、`hidden: true`，不进入用户的 `@` 补全，主要由测试设计或测试执行 Agent 编排调用；不建议用户绕过上层流程单独调用。
-- 应用专属测试 Agent/workagent 放在测试 AI Git 的 `.opencode/agents/*.md`，是否允许用户直接 `@` 由应用定义决定；尚无具体定义时以“未实现”灰显占位。
+- 应用专属测试 Agent/workagent 必须放进测试设计、测试执行等具体活动目录，不能在 `04_测试智能体/` 下另建无业务环节的通用分类；物理文件放在测试 AI Git 的 `.opencode/agents/<活动>/*.md`，是否允许用户直接 `@` 由应用定义决定，尚无具体定义时以“未实现”灰显占位。
 - 测试 Agent 内的公共规约和应用规约都属于测试范围，统一使用“测试”标签；测试公共 AI Git 与测试 AI Git 的差异只由最右侧物理 Git 标签表达。
-- 开发 Skill 全部放开发 AI Git；当前 12 个 `test-design*`、接口执行、自动化文档、测试报文和格式校验公共 Skill 放测试公共 AI Git，应用测试知识和专属方法放测试 AI Git。
+- 测试设计应用规约以目录维护，并按接口、UI、异步任务、批量任务和其他测试对象类型拆分具体 Markdown；公共规约目录使用相同分类，便于逐类覆盖或补充。
+- `skills/` 下的 `coding/` 与 `test/` 分别收口开发和测试能力。开发 Skill 全部放开发 AI Git；当前 12 个 `test-design*`、接口执行、自动化文档、测试报文和格式校验公共 Skill 全部放入 `test/`，物理归属测试公共 AI Git，应用测试知识和专属方法也放入 `test/`，物理归属测试 AI Git。
 - `rules`、`template`、`eval` 放进对应 Skill 资源目录，或由 `AGENTS.md` / `opencode.jsonc` 的 `instructions` 引用，不能作为普通 `.md` 混放在 `.opencode/agents/**`。
 
 OpenCode 会递归读取 `agents/**/*.md`，文件相对路径会成为 Agent 名称；例如 `.opencode/agents/test/review.md` 对应 `@test/review`。`mode: subagent` 和 `mode: all` 可进入 `@` 候选，`hidden: true` 会隐藏候选。`workagent` 仍是 Agent，只是在 OpenCode 中以隐藏的 subagent 方式供上层 Agent 调用。

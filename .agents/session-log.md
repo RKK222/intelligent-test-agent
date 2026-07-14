@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-14 - 按测试活动归位应用 Agent、规约与 Skill
+
+- Why:
+  - 用户明确应用专属测试 Agent 不能脱离具体环节单独成类，测试设计应用规约需要按类型展开，同时所有测试 Skill 应在 `skills/` 下通过与 `coding/` 同级的 `test/` 统一收口。
+- What:
+  - 删除 `04_测试智能体/` 下通用的应用 Agent/workagent 占位，在测试设计和测试执行活动内分别增加应用 Agent/workagent 文件占位，继续标记“未实现”并归属测试 AI Git。
+  - 将 `测试设计应用规约.md` 改为目录，展开接口、UI、异步任务、批量任务和其他五类应用规约 Markdown。
+  - 在 `skills/` 下增加 `test/`，把 12 个现有测试公共 Skill 和应用专属测试 Skill 占位整体迁入，真实名称和实现状态保持不变；同步目录设计正文、前端 README 和内嵌 Help E2E。
+- How:
+  - 继续复用 `directory-mapping.md` frontmatter 数据树和现有通用渲染器，不新增 Vue 组件、依赖或物理仓库；Playwright 以 ARIA 层级断言活动内 Agent、应用规约子类型以及 `coding/`、`test/` 同级关系。
+- Result:
+  - 用户手册生产构建、Help Vitest 8/8、Chromium/Pixel 7 内嵌 Help E2E 2/2、agent-web 类型检查及生产构建均通过；桌面与移动端实页确认 `test/` 为第 4 层、测试 Skill 为第 5 层、应用 Agent 为活动内第 6 层、应用规约 5 个文件完整显示，旧通用 Agent 目录数量为 0，控制台无错误。保留既有 CSS `@import` 和大 chunk 构建警告。
+
 ### 2026-07-14 - 修复 manager 用户进程 baseUrl 并确认旧内核兼容边界
 
 - Why:
