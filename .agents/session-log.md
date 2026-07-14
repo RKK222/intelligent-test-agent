@@ -6220,3 +6220,17 @@ bash /tmp/test-api-after-restart.sh
   - 沿用现有 Agent 配置文件 WebSocket 写入、backend-api 平台代理和 Vue Query 目录查询，没有修改 OpenCode 原生源码或新增 API。
 - Result:
   - 定向 Vitest 167 passed、1 skipped，agent-web typecheck 与生产 build 通过；使用 `.env.test` 重启三服务后 health/readiness、前端、CORS 和 manager 连接均正常，未调用模型。
+
+### 2026-07-14 - 工作区 Git 变更按实际文件数展示
+
+- Why:
+  - 当前个人工作区新建目录内有 18 个未跟踪文件，但带工作区 pathspec 的 Git status 把目录压缩为一条，导致 Diff 面板只显示 1 个目录且数量角标错误。
+- What:
+  - `GitWorkspaceService.statusPorcelain(repoRoot, pathspec)` 补齐 `--untracked-files=all`，与全仓库 status 保持一致，逐个返回未跟踪目录内的文件。
+  - 增加命令级回归测试，并同步 common/workspace-management README 和用户手册中的文件级计数约定。
+- How:
+  - 复用现有 porcelain 解析、Diff 聚合、API DTO 和前端逐文件渲染链路，没有新增 API 或前端分支；用当前 `wrk_850cccb889474f4a84cf04fd90584134` 的真实数据验证接口与页面。
+- Result:
+  - `GitWorkspaceServiceTest` 23 项、`ManagedWorkspaceApplicationServiceTest` 45 项通过；后端生产代码使用 `mvn package -Dmaven.test.skip=true` 打包成功。
+  - `.env.test` 三服务重启后，真实 Git Diff API 返回 18 个未跟踪文件、0 个目录项；Chromium 中变更角标、UNSTAGED 数量和文件行数均为 18，页面无脚本错误，backend health/readiness 为 `UP`。
+  - 标准 `mvn clean package -DskipTests` 仍被本任务外的 opencode-runtime 测试源码编译错误阻断：多处 FakeRepository 未实现 `findReadyBackendJavaProcessByLinuxServer`，另有一处 `UserOpencodeProcessStatusResponse` 构造参数过期；本次未扩大范围修改这些并发主线问题。

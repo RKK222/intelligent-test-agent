@@ -572,11 +572,12 @@ public class GitWorkspaceService {
     }
 
     /**
-     * 返回指定 pathspec 下的 porcelain 状态，用于只扫描应用级 .opencode 配置目录。
+     * 返回指定 pathspec 下的 porcelain 状态，并展开未跟踪目录中的每个文件。
+     * 工作区 Diff 依赖文件级结果计算数量和执行定点 stage/discard，不能把目录压缩成一条状态。
      */
     public String statusPorcelain(Path repoRoot, String pathspec) {
         GitCommandResult result = executor.execute(
-                gitNoQuotedPath(repoRoot, "status", "--porcelain", "--", pathspec),
+                gitNoQuotedPath(repoRoot, "status", "--porcelain", "--untracked-files=all", "--", pathspec),
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText();

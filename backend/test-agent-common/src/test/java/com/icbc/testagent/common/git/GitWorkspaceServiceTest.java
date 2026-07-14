@@ -187,6 +187,27 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void statusWithPathspecExpandsUntrackedDirectoriesToIndividualFiles() {
+        RecordingExecutor executor = new RecordingExecutor("?? F-COSS/workspace/测试设计/案例一.md\n"
+                + "?? F-COSS/workspace/测试设计/案例二.md\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThat(service.statusPorcelain(tempDir, "F-COSS/workspace")).hasLineCount(2);
+
+        assertThat(executor.calls).containsExactly(new Call(List.of(
+                "git",
+                "-c",
+                "core.quotepath=false",
+                "-C",
+                tempDir.toString(),
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--",
+                "F-COSS/workspace"), null));
+    }
+
+    @Test
     void unquotesPorcelainPathsWithSpacesAndUtf8OctalEscapes() {
         GitWorkspaceService service = new GitWorkspaceService(new RecordingExecutor(""));
 
