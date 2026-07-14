@@ -103,6 +103,7 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   const publicTestRule = manualFrame.getByRole("treeitem", { name: /^测试设计公共规约\// });
   const applicationTestRule = manualFrame.getByRole("treeitem", { name: "测试设计应用规约.md" });
   const developmentSkills = manualFrame.getByRole("treeitem", { name: /^coding\// });
+  const plannedCodeReviewSkill = manualFrame.getByRole("treeitem", { name: /^code-review-skill\// });
   const applicationTestSkills = manualFrame.getByRole("treeitem", { name: /^<应用专属测试 Skill>\// });
   const sharedDocsNodes = ["技术架构/", "功能模块/", "数据架构/"].map((name) =>
     manualFrame.getByRole("treeitem", { name: new RegExp(`^${name}`) })
@@ -122,7 +123,11 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(publicTestRule.locator(".physical-badge")).toHaveText("测试公共 AI Git");
   await expect(applicationTestRule.locator(".physical-badge")).toHaveText("测试 AI Git");
   await expect(developmentSkills.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(plannedCodeReviewSkill.locator(".implementation-badge")).toHaveText("未实现");
+  await expect(plannedCodeReviewSkill).toHaveClass(/planned/);
   await expect(applicationTestSkills.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(applicationTestSkills.locator(".implementation-badge")).toHaveText("未实现");
+  await expect(applicationTestSkills).toHaveClass(/planned/);
   for (const agentFile of [
     "test-design-orchestrator.md",
     "test-design-analysis.md",
@@ -152,6 +157,8 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
     const row = manualFrame.getByRole("treeitem", { name: new RegExp(`^${skillDirectory}`) });
     await expect(row).toBeVisible();
     await expect(row.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+    await expect(row.locator(".implementation-badge")).toHaveText("已实现");
+    await expect(row).not.toHaveClass(/planned/);
   }
   for (const sharedNode of sharedDocsNodes) {
     await expect(sharedNode).toBeVisible();

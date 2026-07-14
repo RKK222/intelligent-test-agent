@@ -5,6 +5,7 @@ import { useData } from "vitepress";
 type ViewKey = "structure" | "ownership";
 type TreeScope = "structure" | "development" | "testing" | "shared" | "local";
 type AgentRole = "agent" | "workagent";
+type ImplementationStatus = "implemented" | "planned";
 type TreeNode = {
   id: string;
   name: string;
@@ -12,9 +13,10 @@ type TreeNode = {
   note?: string;
   physical?: string;
   role?: AgentRole;
+  implementation?: ImplementationStatus;
   children?: TreeNode[];
 };
-type VisibleTreeNode = { node: TreeNode; depth: number; physical?: string };
+type VisibleTreeNode = { node: TreeNode; depth: number; physical?: string; implementation?: ImplementationStatus };
 type AgentDesignRow = { scope: string; role: string; description: string };
 type OwnershipRow = { directory: string; content: string; builders: string; publisher: string };
 type ResponsibilityRule = { index: string; title: string; description: string };
@@ -22,6 +24,7 @@ type DirectoryMappingData = {
   defaultExpanded: string[];
   repositorySummaries: Array<{ name: string; content: string }>;
   agentPhysicalSummary: string;
+  skillStatusSummary: string;
   directoryTree: TreeNode;
   agentDesignSummary: string;
   agentDesignRows: AgentDesignRow[];
@@ -54,11 +57,12 @@ const scopeLabels: Record<TreeScope, string> = {
 
 const visibleDirectoryNodes = computed<VisibleTreeNode[]>(() => {
   const rows: VisibleTreeNode[] = [];
-  const visit = (node: TreeNode, depth: number, inheritedPhysical?: string) => {
+  const visit = (node: TreeNode, depth: number, inheritedPhysical?: string, inheritedImplementation?: ImplementationStatus) => {
     const physical = node.physical ?? inheritedPhysical;
-    rows.push({ node, depth, physical });
+    const implementation = node.implementation ?? inheritedImplementation;
+    rows.push({ node, depth, physical, implementation });
     if (!node.children?.length || !expandedNodeIds.value.has(node.id)) return;
-    node.children.forEach((child) => visit(child, depth + 1, physical));
+    node.children.forEach((child) => visit(child, depth + 1, physical, implementation));
   };
   visit(mappingData.value.directoryTree, 0);
   return rows;
@@ -119,18 +123,19 @@ const collapseToRoot = () => {
           <button type="button" @click="collapseToRoot">收起到一级</button>
         </div>
       </div>
-      <p class="tree-instruction">点击文件夹逐级展开。标签按“开发/测试范围 → Agent 形态 → 物理 Git”阅读，不再用整行颜色表达多个含义。</p>
+      <p class="tree-instruction">点击文件夹逐级展开。标签按“开发/测试范围 → Agent 形态 → 实现状态 → 物理 Git”阅读，不再用整行颜色表达多个含义。</p>
       <p class="git-scope-note">
         <span v-for="repository in mappingData.repositorySummaries" :key="repository.name"><strong>{{ repository.name }}</strong>{{ repository.content }}</span>
       </p>
       <p class="agent-physical-note">{{ mappingData.agentPhysicalSummary }}</p>
+      <p class="skill-status-note">{{ mappingData.skillStatusSummary }}</p>
       <div class="tree-box merged" role="tree" aria-label="开发与测试合并工程目录">
         <button
           v-for="row in visibleDirectoryNodes"
           :key="row.node.id"
           type="button"
           class="tree-row"
-          :class="row.node.scope"
+          :class="[row.node.scope, row.implementation]"
           :style="{ '--depth': row.depth }"
           :aria-expanded="row.node.children?.length ? expandedNodeIds.has(row.node.id) : undefined"
           :aria-level="row.depth + 1"
@@ -145,6 +150,7 @@ const collapseToRoot = () => {
           <span class="tree-tags">
             <small class="scope-badge" :class="row.node.scope">{{ scopeLabels[row.node.scope] }}</small>
             <small v-if="row.node.role" class="role-badge" :class="row.node.role">{{ row.node.role === "agent" ? "Agent" : "workagent" }}</small>
+            <small v-if="row.node.implementation" class="implementation-badge" :class="row.node.implementation">{{ row.node.implementation === "implemented" ? "已实现" : "未实现" }}</small>
           </span>
           <em v-if="row.node.note">{{ row.node.note }}</em>
           <small v-if="row.physical" class="physical-badge">{{ row.physical }}</small>
@@ -251,6 +257,7 @@ const collapseToRoot = () => {
 .agent-physical-note { background: var(--vp-c-bg-soft); border-radius: 5px; color: var(--muted); font-size: 9px; line-height: 1.55; margin: 0 0 12px; padding: 7px 10px; }
 .agent-physical-note code { color: var(--ink); font-size: 9px; font-weight: 700; }
 .agent-physical-note strong { color: var(--ink); }
+.skill-status-note { border-left: 2px solid var(--teal); color: var(--muted); font-size: 9px; line-height: 1.55; margin: -5px 0 12px; padding-left: 8px; }
 
 .tree-box { background: var(--vp-c-bg-soft); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); overflow: hidden; padding: 9px 8px; }
 .tree-row { align-items: center; background: transparent; border: 0; border-radius: 5px; color: var(--ink); cursor: default; display: grid; font: inherit; gap: 6px; grid-template-columns: 1px 10px 13px minmax(130px, auto) auto minmax(0, 1fr) auto; min-height: 30px; padding: 3px 8px 3px calc(8px + var(--depth) * 18px); text-align: left; width: 100%; }
@@ -261,7 +268,8 @@ const collapseToRoot = () => {
 .tree-row em { color: var(--muted); font-size: 10px; font-style: normal; line-height: 1.45; }
 .tree-tags { display: flex; gap: 4px; white-space: nowrap; }
 .scope-badge,
-.role-badge { border-radius: 999px; font-size: 8px; font-weight: 700; line-height: 1.35; padding: 2px 6px; }
+.role-badge,
+.implementation-badge { border-radius: 999px; font-size: 8px; font-weight: 700; line-height: 1.35; padding: 2px 6px; }
 .scope-badge.structure { background: color-mix(in srgb, var(--structure) 9%, transparent); color: var(--structure); }
 .scope-badge.development { background: color-mix(in srgb, var(--blue) 9%, transparent); color: var(--blue); }
 .scope-badge.testing { background: color-mix(in srgb, var(--teal) 9%, transparent); color: var(--teal); }
@@ -269,6 +277,12 @@ const collapseToRoot = () => {
 .scope-badge.local { background: color-mix(in srgb, var(--amber) 10%, transparent); color: var(--amber); }
 .role-badge { border: 1px solid var(--line); color: var(--ink); }
 .role-badge.workagent { border-color: color-mix(in srgb, var(--teal) 55%, var(--line)); border-style: dashed; color: var(--teal); }
+.implementation-badge.implemented { background: color-mix(in srgb, var(--teal) 11%, transparent); color: var(--teal); }
+.implementation-badge.planned { background: var(--vp-c-default-soft); color: var(--vp-c-text-3); }
+.tree-row.planned { color: var(--vp-c-text-3); }
+.tree-row.planned em,
+.tree-row.planned .physical-badge { color: var(--vp-c-text-3); opacity: .72; }
+.tree-row.planned .scope-badge { background: var(--vp-c-default-soft); color: var(--vp-c-text-3); }
 .tree-guide { background: var(--line); height: 100%; }
 .tree-row:first-child .tree-guide { opacity: 0; }
 .tree-chevron { border-bottom: 1.5px solid currentColor; border-right: 1.5px solid currentColor; height: 5px; margin-left: 1px; transform: rotate(-45deg); transition: transform 140ms ease; width: 5px; }

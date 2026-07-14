@@ -20,6 +20,7 @@ directoryMapping:
       name: "开发业务代码 Git"
       content: "业务代码、单元测试和工程文档。"
   agentPhysicalSummary: "agents/ = 开发 AI Git 的开发 Agent + 测试公共 AI Git 的公共测试 Agent/workagent + 测试 AI Git 的应用测试 Agent/workagent。"
+  skillStatusSummary: "Skill 实现状态以当前可核验配置为准：测试公共 AI Git 已存在的真实目录标记为“已实现”；尚无对应目录的规划项标记为“未实现”并灰显。"
   directoryTree:
     id: "root"
     name: "应用(服务群组)工作区/"
@@ -391,6 +392,7 @@ directoryMapping:
                     id: "code-review-skill"
                     name: "code-review-skill/"
                     scope: "development"
+                    implementation: "planned"
                     children:
                       -
                         id: "code-review-skill-file"
@@ -402,6 +404,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Test Design（测试设计）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "test-design-skill-file"
@@ -413,6 +416,7 @@ directoryMapping:
                 scope: "testing"
                 note: "API Testing（接口法）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "api-design-skill-file"
@@ -424,6 +428,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Case Augmentation（增补法）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "augment-design-skill-file"
@@ -435,6 +440,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Rule-based Testing（规则法）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "direct-design-skill-file"
@@ -446,6 +452,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Equivalence Partitioning（等价类法）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "equivalence-skill-file"
@@ -457,6 +464,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Orthogonal Array（正交法）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "orthogonal-design-skill-file"
@@ -468,6 +476,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Path Testing（路径法）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "path-design-skill-file"
@@ -479,6 +488,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Scenario Testing（场景法）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "scenario-design-skill-file"
@@ -490,6 +500,7 @@ directoryMapping:
                 scope: "testing"
                 note: "API Case Execution（接口案例执行）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "api-case-execution-skill-file"
@@ -501,6 +512,7 @@ directoryMapping:
                 scope: "testing"
                 note: "API Automation Script（接口自动化脚本）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "api-automation-skill-file"
@@ -512,6 +524,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Test Message Generation（测试报文生成）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "test-message-skill-file"
@@ -523,6 +536,7 @@ directoryMapping:
                 scope: "testing"
                 note: "Automation Format Check（自动化格式检查）"
                 physical: "测试公共 AI Git"
+                implementation: "implemented"
                 children:
                   -
                     id: "automation-format-skill-file"
@@ -534,6 +548,7 @@ directoryMapping:
                 scope: "testing"
                 note: "应用测试方法或知识"
                 physical: "测试 AI Git"
+                implementation: "planned"
                 children:
                   -
                     id: "application-test-skill-file"

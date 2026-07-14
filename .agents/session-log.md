@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-14 - 标识公共 Skill 的实际实现状态
+
+- Why:
+  - 用户要求目录页直接使用当前公共 Config 已有 Skill 的真实名称并标注“已实现”，尚无对应目录的规划 Skill 需要灰显，避免把目标设计和已交付能力混在一起。
+- What:
+  - 以 `.testagent/agent-opencode/.config/opencode/skills/*/SKILL.md` 为事实源，核对并保留 12 个真实 Skill 目录名及其英文/中文展示名，统一标记“已实现”。
+  - `coding/code-review-skill` 与应用专属测试 Skill 仍作为目标占位，标记“未实现”并让整棵规划子树降低对比度；状态数据继续维护在 `directory-mapping.md`，Vue 组件只复用通用状态渲染。
+- How:
+  - 扩展既有目录节点模型增加 `implemented/planned` 状态和继承式灰显，新增独立状态章，不改变开发/测试范围与物理 Git 标签；Playwright 对 12 个真实名称及状态逐项断言。
+- Result:
+  - 用户手册生产构建、Help Vitest 8/8、Chromium/Pixel 7 内嵌 Help E2E 2/2、agent-web 类型检查及生产构建均通过；真实页面统计 12 个“已实现”和 2 个“未实现”Skill 状态章，控制台无错误。保留既有 CSS `@import` 和大 chunk 构建警告。
+
 ### 2026-07-14 - 以 Markdown 数据驱动四类 Git 目录页
 
 - Why:
