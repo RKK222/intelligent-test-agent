@@ -111,12 +111,19 @@ export function helpDocumentUrl(topic?: string | null): string {
 }
 
 /**
+ * Markdown frontmatter 只服务于页面渲染，宠物问答应使用用户实际看到的正文，避免大段结构化数据挤占上下文。
+ */
+export function stripMarkdownFrontmatter(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
+}
+
+/**
  * 宠物旁路单次问题有长度边界，只携带当前章节的核心内容，避免整本手册挤占主 Session 上下文。
  */
 export function buildManualQuestionPrompt(topic: HelpTopicId, question: string): string {
   const currentTopic = helpTopicById(topic);
   const normalizedQuestion = question.trim().slice(0, 500);
-  const manualContext = currentTopic.content.trim().slice(0, 2_800);
+  const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, 2_800);
   return [
     "你正在回答 MIMO 测试智能体用户手册问题。请只依据下方内置手册资料作答；资料没有覆盖时直接说明，并建议用户联系平台管理员，不要编造按钮或操作路径。",
     `【当前章节】${currentTopic.label}`,

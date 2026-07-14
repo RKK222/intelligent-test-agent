@@ -4,7 +4,8 @@ import HelpCenterDialog from "../src/components/HelpCenterDialog.vue";
 import {
   buildManualQuestionPrompt,
   helpDocumentUrl,
-  normalizeHelpTopic
+  normalizeHelpTopic,
+  stripMarkdownFrontmatter
 } from "../src/components/help-center";
 
 const dialogStub = {
@@ -64,6 +65,12 @@ describe("help center", () => {
     expect(prompt).toContain("【当前章节】开发与测试目录");
     expect(prompt).toContain("workagent");
     expect(prompt).toContain("开发已有资产");
+    expect(prompt).not.toContain("directoryMapping:");
+  });
+
+  it("removes page frontmatter before building the pet manual context", () => {
+    expect(stripMarkdownFrontmatter("---\naside: false\ndata:\n  value: 1\n---\n# 正文")).toBe("# 正文");
+    expect(stripMarkdownFrontmatter("# 无 frontmatter")).toBe("# 无 frontmatter");
   });
 
   it("opens the requested chapter and switches the embedded manual", async () => {

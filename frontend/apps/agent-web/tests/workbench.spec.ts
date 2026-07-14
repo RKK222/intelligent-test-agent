@@ -70,56 +70,98 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   );
   const manualFrame = page.frameLocator('[data-testid="help-center-frame"]');
   await expect(manualFrame.getByRole("button", { name: "测试目录" })).toHaveCount(0);
-  await expect(manualFrame.getByText("公共 AI Git", { exact: true }).first()).toBeVisible();
+  await expect(manualFrame.getByText("开发 AI Git", { exact: true }).first()).toBeVisible();
+  await expect(manualFrame.getByText("测试公共 AI Git", { exact: true }).first()).toBeVisible();
+  await expect(manualFrame.getByText("测试 AI Git", { exact: true }).first()).toBeVisible();
+  await expect(manualFrame.getByText("开发业务代码 Git", { exact: true }).first()).toBeVisible();
   const sharedArchive = manualFrame.getByRole("treeitem", { name: /archive\// });
   const localSpec = manualFrame.getByRole("treeitem", { name: /^spec\// });
+  const agentsRoot = manualFrame.getByRole("treeitem", { name: /^agents\// });
+  const developmentAgent = manualFrame.getByRole("treeitem", { name: /01_需求智能体\// });
+  const testingAgent = manualFrame.getByRole("treeitem", { name: /04_测试智能体\// });
   await expect(sharedArchive).toBeVisible();
   await expect(localSpec).toBeVisible();
-  await expect(manualFrame.getByRole("treeitem", { name: /2601\// })).toBeVisible();
-  await expect.poll(() => sharedArchive.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(101, 86, 179)");
-  await expect.poll(() => localSpec.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(176, 90, 0)");
+  await expect(manualFrame.getByRole("treeitem", { name: /2601\// })).toHaveCount(0);
+  await expect(sharedArchive.locator(".scope-badge")).toHaveText("开发 + 测试");
+  await expect(sharedArchive.locator(".physical-badge")).toHaveText("开发 AI Git + 测试 AI Git");
+  await expect(localSpec.locator(".scope-badge")).toHaveText("个人本地");
+  await expect(localSpec.locator(".physical-badge")).toHaveText("测试 AI Git · 仅本地提交");
+  await expect(agentsRoot.locator(".scope-badge")).toHaveText("开发 + 测试");
+  await expect(agentsRoot.locator(".physical-badge")).toHaveText("开发 AI Git + 测试公共 AI Git + 测试 AI Git");
+  await expect(developmentAgent.locator(".scope-badge")).toHaveText("开发");
+  await expect(developmentAgent.locator(".role-badge")).toHaveText("Agent");
+  await expect(developmentAgent.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(testingAgent.locator(".scope-badge")).toHaveText("测试");
+  await expect(testingAgent.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
   await manualFrame.getByRole("button", { name: "全部展开" }).click();
   const developmentAsset = manualFrame.getByRole("treeitem", { name: "工程概览_A.md" });
   const testingAsset = manualFrame.getByRole("treeitem", { name: "测试概述.md" });
-  const developmentAgent = manualFrame.getByRole("treeitem", { name: /01_需求智能体\// });
-  const testingAgent = manualFrame.getByRole("treeitem", { name: /04_测试智能体\// });
-  const structureNodes = [
-    manualFrame.getByRole("treeitem", { name: /^应用\(服务群组\)工作区\// }),
-    manualFrame.getByRole("treeitem", { name: /^ai-agent\// }),
-    manualFrame.getByRole("treeitem", { name: /^agents\// }),
-    manualFrame.getByRole("treeitem").filter({ hasText: "应用资产目录骨架" })
-  ];
-  const sharedDocsNodes = [
-    manualFrame.getByRole("treeitem", { name: /^技术架构\// }),
-    manualFrame.getByRole("treeitem", { name: /^功能模块\// }),
-    manualFrame.getByRole("treeitem", { name: /^数据架构\// })
-  ];
-  const sharedAiNodes = [
-    manualFrame.getByRole("treeitem", { name: /^mcp\// }),
-    manualFrame.getByRole("treeitem", { name: /^skills\// }),
-    manualFrame.getByRole("treeitem").filter({ hasText: "开发测试共用工程规约目录" })
-  ];
+  const testDesignAgent = manualFrame.getByRole("treeitem", { name: /^01_测试设计\// });
+  const testAnalysisWorkagent = manualFrame.getByRole("treeitem", { name: /^001 Test Analysis（测试分析）\// });
+  const applicationTestAgent = manualFrame.getByRole("treeitem", { name: /^<应用专属测试 Agent>\// });
+  const applicationTestWorkagent = manualFrame.getByRole("treeitem", { name: /^<应用专属测试 workagent>\// });
+  const publicTestRule = manualFrame.getByRole("treeitem", { name: /^测试设计公共规约\// });
+  const applicationTestRule = manualFrame.getByRole("treeitem", { name: "测试设计应用规约.md" });
+  const developmentSkills = manualFrame.getByRole("treeitem", { name: /^coding\// });
+  const applicationTestSkills = manualFrame.getByRole("treeitem", { name: /^<应用专属测试 Skill>\// });
+  const sharedDocsNodes = ["技术架构/", "功能模块/", "数据架构/"].map((name) =>
+    manualFrame.getByRole("treeitem", { name: new RegExp(`^${name}`) })
+  );
   await expect(developmentAsset).toBeVisible();
   await expect(testingAsset).toBeVisible();
-  await expect(developmentAgent).toBeVisible();
-  await expect(testingAgent).toBeVisible();
-  await expect.poll(() => developmentAsset.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(37, 87, 167)");
-  await expect.poll(() => testingAsset.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(0, 132, 90)");
-  await expect.poll(() => developmentAgent.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(37, 87, 167)");
-  await expect.poll(() => testingAgent.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(0, 132, 90)");
-  for (const structureNode of structureNodes) {
-    await expect(structureNode).toBeVisible();
-    await expect.poll(() => structureNode.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(88, 98, 115)");
+  await expect(developmentAsset.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(testingAsset.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(testDesignAgent.locator(".role-badge")).toHaveText("Agent");
+  await expect(testDesignAgent.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
+  await expect(testAnalysisWorkagent.locator(".role-badge")).toHaveText("workagent");
+  await expect(testAnalysisWorkagent.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+  await expect(applicationTestAgent.locator(".role-badge")).toHaveText("Agent");
+  await expect(applicationTestAgent.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(applicationTestWorkagent.locator(".role-badge")).toHaveText("workagent");
+  await expect(applicationTestWorkagent.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(publicTestRule.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+  await expect(applicationTestRule.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(developmentSkills.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(applicationTestSkills.locator(".physical-badge")).toHaveText("测试 AI Git");
+  for (const agentFile of [
+    "test-design-orchestrator.md",
+    "test-design-analysis.md",
+    "test-design-generation.md",
+    "test-design-review.md",
+    "test-execution-agent.md",
+    "test-execution-api.md"
+  ]) {
+    const row = manualFrame.getByRole("treeitem", { name: agentFile });
+    await expect(row).toBeVisible();
+    await expect(row.locator(".physical-badge")).toHaveText("测试公共 AI Git");
   }
-  for (const sharedNode of [...sharedAiNodes, ...sharedDocsNodes]) {
+  for (const skillDirectory of [
+    "test-design/",
+    "test-design-api/",
+    "test-design-augment/",
+    "test-design-direct/",
+    "test-design-equivalence/",
+    "test-design-orthogonal/",
+    "test-design-path/",
+    "test-design-scenario/",
+    "api-execute-case/",
+    "generate-api-automation-markdown/",
+    "generate-test-messages/",
+    "validate-automation-script-format/"
+  ]) {
+    const row = manualFrame.getByRole("treeitem", { name: new RegExp(`^${skillDirectory}`) });
+    await expect(row).toBeVisible();
+    await expect(row.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+  }
+  for (const sharedNode of sharedDocsNodes) {
     await expect(sharedNode).toBeVisible();
-    await expect.poll(() => sharedNode.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(101, 86, 179)");
+    await expect(sharedNode.locator(".scope-badge")).toHaveText("开发 + 测试");
+    await expect(sharedNode.locator(".physical-badge")).toHaveText("开发 AI Git + 测试 AI Git");
   }
   await expect(manualFrame.getByRole("treeitem", { name: "流程测试设计.md" })).toBeVisible();
   await expect(manualFrame.getByRole("treeitem", { name: "S000001_测试案例.md" })).toBeVisible();
   await expect(manualFrame.getByText("工作 Agent 统一称为 workagent")).toBeVisible();
   await expect(manualFrame.getByText(/供上层 Agent 编排调用/).first()).toBeVisible();
-  await expect(manualFrame.getByText(/\.opencode\/skills\/<name>\/SKILL\.md/).first()).toBeVisible();
   await manualFrame.getByRole("button", { name: "内容与责任" }).click();
   await expect(manualFrame.getByRole("cell", { name: "效能组、测试管理组" })).toBeVisible();
   await expect(manualFrame.getByRole("cell", { name: "测试管理组", exact: true })).toBeVisible();

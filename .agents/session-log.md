@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-14 - 以 Markdown 数据驱动四类 Git 目录页
+
+- Why:
+  - 用户最终明确物理层固定为开发 AI Git、测试 AI Git、测试公共 AI Git、开发业务代码 Git，并要求把现有 workagent 与 Skill 真实名称放进对应目录；同时指出将具体目录数据写死在 Vue 中不便后续维护。
+- What:
+  - 目录页取消整行多色表达，统一使用中性目录名和“范围 / Agent 形态 / 物理 Git”小标签；`agents/`、`skills/`、`docs/` 作为多 Git 逻辑合并目录，子节点继承最近一级物理 Git 标记。
+  - 将 6 个现有 Agent/workagent 文件与 12 个现有公共 Skill 目录直接放入目录树，并分别增加应用专属 Agent、workagent、Skill 占位；测试公共能力归测试公共 AI Git，应用专属测试能力归测试 AI Git，开发能力归开发 AI Git。
+  - 将目录树、默认展开项、四类 Git 摘要、Agent 设计说明和职责表全部迁入 `directory-mapping.md` 的 `directoryMapping` frontmatter；`DirectoryMapping.vue` 只保留通用渲染和展开逻辑。宠物问答读取 Markdown 时剥离 frontmatter，避免目录 YAML 挤占正文上下文。
+- How:
+  - 复用 VitePress `useData()` 读取当前页 frontmatter，不新增运行依赖；Playwright 对真实 Agent/workagent 文件、全部公共 Skill、应用占位和四类 Git 归属逐项断言，Help 单测补充 frontmatter 剥离契约。
+- Result:
+  - 用户手册生产构建、Help Vitest 8/8、Chromium/Pixel 7 首页内嵌 Help E2E 2/2、agent-web 类型检查及生产构建均通过；桌面和 390px 移动端全展开均渲染 158 个节点且控制台无错误。根目录按包名构建仍会误匹配 `temp/workspace` 的同名无依赖包，切换到正式 `frontend` 工作区后构建通过；保留既有 CSS `@import` 和大 chunk 警告。
+
 ### 2026-07-14 - 统一整棵开发测试目录树的颜色语义
 
 - Why:
@@ -6123,3 +6136,14 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - `FigmaChatPanel.test.ts` 112 项通过、1 项跳过，agent-web typecheck 通过；运行中 OpenCode 已返回新双语名称，前端 `http://127.0.0.1:3000` 返回 200。
   - 标准 `predev/prebuild` 在本次最终命名修改后被并发出现、与本任务无关的 `frontend/apps/user-manual/docs/.vitepress/theme/components/DirectoryMapping.vue` 语法错误阻断；未修改或提交该文件及同批用户手册改动，改用直接 Vite 启动完成本次交互验证。
+
+### 2026-07-14 - 补齐 Agent 与 Skill 双语展示说明
+
+- Why:
+  - 用户手册仍保留“测试设计统筹、测试执行统筹”旧名称，会话说明也没有解释双语展示名与稳定技术 ID 的关系。
+- What:
+  - 目录映射页改用 `Test Design（测试设计）`、`Test Execution（测试执行）`；会话页补充 `@Agent` 和 `/Skill` 均展示英文主名、中文副名，但插入原技术 ID。
+- How:
+  - 仅修正文档文字，不修改 OpenCode 配置、原生能力或前端解析逻辑；重新执行用户手册构建和既有双语候选组件测试。
+- Result:
+  - 用户手册、公共配置命名与前端既有交互约定保持一致。
