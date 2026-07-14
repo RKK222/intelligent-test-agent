@@ -450,6 +450,7 @@ defineExpose({
       <div class="mt-2 text-[13px] text-slate-400 leading-relaxed">
         请从左侧文件树选择一个测试脚本或配置文件，或者直接在右侧向智能体发起提问。
       </div>
+      <slot name="empty-actions" />
     </div>
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { defineComponent } from "vue";
+import { defineComponent, h } from "vue";
 import { fireEvent, render } from "@testing-library/vue";
 
 const editorLayout = vi.fn();
@@ -66,6 +66,20 @@ import CodeEditor from "../src/CodeEditor.vue";
 const baseProps = { content: "# hi", dirty: false, readonly: false, saving: false };
 
 describe("CodeEditor Markdown 预览受控", () => {
+  it("无文件空态允许 app 层通过 slot 注入主页操作", async () => {
+    const openManual = vi.fn();
+    const { getByRole } = render(CodeEditor, {
+      props: baseProps,
+      slots: {
+        "empty-actions": () => h("button", { onClick: openManual }, "打开用户手册")
+      }
+    });
+
+    await fireEvent.click(getByRole("button", { name: "打开用户手册" }));
+
+    expect(openManual).toHaveBeenCalledOnce();
+  });
+
   // 预览开关在 WorkbenchFooter，CodeEditor 只负责受控渲染预览区。
   it("打开 .md 文件且 showPreview=false 时不渲染预览区", () => {
     const { queryByText } = render(CodeEditor, {

@@ -15,7 +15,7 @@ import { BackendApiError, createBackendApiClient, type RawHttpExchange } from "@
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
-import { Code2, MessageSquare, Monitor } from "lucide-vue-next";
+import { BookOpenText, Code2, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -5051,7 +5051,19 @@ async function handleLogout() {
             @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
             @add-selection-context="addCurrentSelectionToChatContext"
             @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
-          />
+          >
+            <template #empty-actions>
+              <button
+                type="button"
+                class="managed-editor-home-help"
+                data-testid="workbench-home-help"
+                @click="openHelpCenter('getting-started')"
+              >
+                <BookOpenText :size="15" />
+                打开用户手册
+              </button>
+            </template>
+          </CodeEditor>
         </FigmaEditorArea>
       </main>
     </template>
@@ -5344,6 +5356,30 @@ async function handleLogout() {
   background: #ffffff;
   border: 0.5px dashed var(--ta-border-strong);
   margin: 0;
+}
+
+.managed-editor-home-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  margin-top: 16px;
+  padding: 0 13px;
+  border: 1px solid var(--ta-border-strong, #cbd5e1);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ta-text, #27384b);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.managed-editor-home-help:hover,
+.managed-editor-home-help:focus-visible {
+  border-color: var(--ta-accent, #315b75);
+  color: var(--ta-accent, #315b75);
+  outline: none;
 }
 
 .ta-confirm-backdrop {

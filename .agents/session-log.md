@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-14 - 工作台主页增加用户手册入口
+
+- Why:
+  - 用户希望了解手册内宠物问答的接入方式，并要求在工作台主页增加一个直接可见的手册入口。
+- What:
+  - 在中间编辑器未打开文件时的“开始您的探索”主页空态增加“打开用户手册”按钮，点击复用既有 `openHelpCenter('getting-started')`，打开帮助中心的快速开始章节。
+  - 宠物手册问答保持原链路：当前章节 Markdown 经有界 prompt 后交给 `useSideQuestionRun`，由 `startSideQuestionRun` 启动临时旁路 Run，并继续通过 RunEvent SSE 展示答案，不新增 API、事件或第二套聊天运行时。
+- How:
+  - 扩展 `@test-agent/editor` 已有无文件空态，增加通用 `empty-actions` slot；具体手册按钮仍由 `agent-web` 注入，使 editor 包不依赖手册业务。补充 slot 组件测试和工作台桌面/移动 Playwright E2E，并同步 agent-web/editor README 与包说明。
+- Result:
+  - 前端全量 lint、串行 typecheck、55 文件 Vitest（764 passed/1 skipped）、生产 build，以及主页入口桌面/移动 E2E 2/2 通过。lint 与 typecheck 首次并发执行时两个 VitePress build 争用 `.vitepress/.temp` 导致一次临时模块缺失，改为按项目脚本串行复跑后通过。按 `.env.test` / `test` profile 重启三服务成功，backend health/readiness 为 UP，frontend、手册首页、快速开始章节、登录 CORS 和 manager WebSocket 正常；保留既有 CSS `@import` 顺序和大 chunk 构建警告。
+
 ### 2026-07-14 - 内置 VitePress 用户手册并接入宠物问答
 
 - Why:

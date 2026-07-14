@@ -32,6 +32,34 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
 });
 
+test("workbench home opens the embedded user manual", async ({ page }) => {
+  await mockBackendApi(page, {
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+
+  const manualEntry = page.getByTestId("workbench-home-help");
+  await expect(manualEntry).toBeVisible();
+  await manualEntry.click();
+
+  await expect(page.getByTestId("help-center-dialog")).toBeVisible();
+  await expect(page.getByTestId("help-center-frame")).toHaveAttribute(
+    "src",
+    /\/help\/guide\/getting-started\.html$/
+  );
+});
+
 test("Markdown Mermaid Flowchart 和 Sequence 可视化编辑后复用保存链路", async ({ page }) => {
   test.setTimeout(60_000);
   const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
