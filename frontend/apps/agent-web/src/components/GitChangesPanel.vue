@@ -274,6 +274,7 @@ const stagedWorkspacePaths = ref<Set<string>>(new Set());
 const discardingWorkspacePaths = ref<Set<string>>(new Set());
 const updatingWorkspaceIndexPaths = ref<Set<string>>(new Set());
 const stagingAllWorkspaceFiles = ref(false);
+const unstagingAllWorkspaceFiles = ref(false);
 const discardingAllWorkspaceFiles = ref(false);
 
 // Workspace diff computed lists
@@ -463,25 +464,44 @@ async function stageAllWorkspaceChanges() {
   }
 }
 
-async function unstageWorkspaceFile(path: string) {
-  if (!props.canWrite || !props.workspaceId || updatingWorkspaceIndexPaths.value.has(path)) return;
+// 单文件和批量取消暂存也复用同一 index 更新链路，确保两个分组的 all 操作完全对称。
+async function unstageWorkspaceFiles(paths: string[]) {
+  if (!props.canWrite || !props.workspaceId || paths.length === 0) return;
+  const pendingPaths = paths.filter((path) => !updatingWorkspaceIndexPaths.value.has(path));
+  if (pendingPaths.length === 0) return;
   errorMessage.value = "";
-  updatingWorkspaceIndexPaths.value = new Set([...updatingWorkspaceIndexPaths.value, path]);
+  updatingWorkspaceIndexPaths.value = new Set([...updatingWorkspaceIndexPaths.value, ...pendingPaths]);
   try {
     if (workbench.useMockTestData) {
       const next = new Set(stagedWorkspacePaths.value);
-      next.delete(path);
+      pendingPaths.forEach((path) => next.delete(path));
       stagedWorkspacePaths.value = next;
       return;
     }
-    await api.unstageWorkspaceGitFiles(props.workspaceId, [path]);
+    await api.unstageWorkspaceGitFiles(props.workspaceId, pendingPaths);
     await refreshChanges();
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "取消暂存工作区文件失败");
   } finally {
     const next = new Set(updatingWorkspaceIndexPaths.value);
-    next.delete(path);
+    pendingPaths.forEach((path) => next.delete(path));
     updatingWorkspaceIndexPaths.value = next;
+  }
+}
+
+async function unstageWorkspaceFile(path: string) {
+  await unstageWorkspaceFiles([path]);
+}
+
+async function unstageAllWorkspaceChanges() {
+  if (workspaceGitMutationPending.value) return;
+  const paths = workspaceStaged.value.map((file) => file.path);
+  if (paths.length === 0) return;
+  unstagingAllWorkspaceFiles.value = true;
+  try {
+    await unstageWorkspaceFiles(paths);
+  } finally {
+    unstagingAllWorkspaceFiles.value = false;
   }
 }
 
@@ -1183,6 +1203,32 @@ defineExpose({
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
               <span>应用工作空间</span>
               <span class="git-sub-badge ml-1">({{ workspaceStaged.length }})</span>
+              <div class="git-bulk-actions ml-auto">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  class="git-bulk-action"
+                  aria-label="全部回退应用工作空间变更"
+                  :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '全部回退应用工作空间变更'"
+                  :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceDiffFiles.length === 0 || workspaceGitMutationPending"
+                  @click.stop="discardAllWorkspaceChanges"
+                >
+                  <Loader2 v-if="discardingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  class="git-bulk-action"
+                  aria-label="全部取消暂存应用工作空间变更"
+                  title="全部取消暂存应用工作空间变更"
+                  :disabled="!props.canWrite || workspaceStaged.length === 0 || workspaceGitMutationPending"
+                  @click.stop="unstageAllWorkspaceChanges"
+                >
+                  <Loader2 v-if="unstagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Minus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </Button>
+              </div>
             </div>
             <div v-show="workspaceStagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
               <div v-if="hasWorkspaceConflicts && workspaceStaged.length > 0" class="git-conflict-note">

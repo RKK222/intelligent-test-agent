@@ -282,7 +282,45 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect((stageAllButton as HTMLButtonElement).disabled).toBe(true));
   });
 
-  it("discards all staged and unstaged application workspace files after confirmation", async () => {
+  it("unstages all staged application workspace files in one request", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "src/first-staged.ts", status: "modified", staged: true, patch: "first", additions: 1, deletions: 0 },
+          { path: "src/second-staged.ts", status: "added", staged: true, patch: "second", additions: 1, deletions: 0 },
+          { path: "src/already-unstaged.ts", status: "modified", staged: false, patch: "unstaged", additions: 1, deletions: 1 }
+        ]
+      })
+      .mockResolvedValueOnce({
+        files: [
+          { path: "src/first-staged.ts", status: "modified", staged: false, patch: "first", additions: 1, deletions: 0 },
+          { path: "src/second-staged.ts", status: "untracked", staged: false, patch: "second", additions: 1, deletions: 0 },
+          { path: "src/already-unstaged.ts", status: "modified", staged: false, patch: "unstaged", additions: 1, deletions: 1 }
+        ]
+      });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    const unstageAllButton = await view.findByRole("button", { name: "全部取消暂存应用工作空间变更" });
+    await fireEvent.click(unstageAllButton);
+
+    await waitFor(() => expect(apiClientMock.unstageWorkspaceGitFiles).toHaveBeenCalledWith(
+      "wrk_1234567890abcdef",
+      ["src/first-staged.ts", "src/second-staged.ts"]
+    ));
+    await waitFor(() => expect((unstageAllButton as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  it("exposes the same discard-all action in staged and unstaged groups", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
         files: [
@@ -306,8 +344,9 @@ describe("GitChangesPanel", () => {
       }
     });
 
-    const discardAllButton = await view.findByRole("button", { name: "全部回退应用工作空间变更" });
-    await fireEvent.click(discardAllButton);
+    const discardAllButtons = await view.findAllByRole("button", { name: "全部回退应用工作空间变更" });
+    expect(discardAllButtons).toHaveLength(2);
+    await fireEvent.click(discardAllButtons[1]!);
 
     expect(confirm).toHaveBeenCalledWith("将回退应用工作空间的 2 个文件改动，此操作无法撤销，是否继续？");
     await waitFor(() => expect(apiClientMock.discardWorkspaceGitFiles).toHaveBeenCalledWith(
