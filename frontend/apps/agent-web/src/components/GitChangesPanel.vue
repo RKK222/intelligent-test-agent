@@ -273,6 +273,8 @@ const workspaceDiffFiles = ref<WorkspacePanelDiffFile[]>([]);
 const stagedWorkspacePaths = ref<Set<string>>(new Set());
 const discardingWorkspacePaths = ref<Set<string>>(new Set());
 const updatingWorkspaceIndexPaths = ref<Set<string>>(new Set());
+const stagingAllWorkspaceFiles = ref(false);
+const discardingAllWorkspaceFiles = ref(false);
 
 // Workspace diff computed lists
 const workspaceUnstaged = computed(() =>
@@ -285,6 +287,9 @@ const workspaceConflicts = computed(() =>
   workspaceDiffFiles.value.filter((f) => isConflictFile(f))
 );
 const hasWorkspaceConflicts = computed(() => workspaceConflicts.value.length > 0);
+const workspaceGitMutationPending = computed(() =>
+  updatingWorkspaceIndexPaths.value.size > 0 || discardingWorkspacePaths.value.size > 0
+);
 
 // Agent diff lists (Public + Workspace)
 const publicAgentDiffs = ref<AgentConfigDiffFile[]>([]);
@@ -419,24 +424,42 @@ function normalizeWorkspaceAgentDiffPath(path: string): string | null {
   return value.startsWith("agents/") || value.startsWith("skills/") ? value : null;
 }
 
-// 工作区暂存必须落到真实 Git index，刷新后列表状态才不会回退。
-async function stageWorkspaceFile(path: string) {
-  if (!props.canWrite || !props.workspaceId || updatingWorkspaceIndexPaths.value.has(path)) return;
+// 单文件和批量暂存复用同一真实 Git index 链路，避免批量操作产生第二套状态语义。
+async function stageWorkspaceFiles(paths: string[]) {
+  if (!props.canWrite || !props.workspaceId || paths.length === 0) return;
+  const pendingPaths = paths.filter((path) => !updatingWorkspaceIndexPaths.value.has(path));
+  if (pendingPaths.length === 0) return;
   errorMessage.value = "";
-  updatingWorkspaceIndexPaths.value = new Set([...updatingWorkspaceIndexPaths.value, path]);
+  updatingWorkspaceIndexPaths.value = new Set([...updatingWorkspaceIndexPaths.value, ...pendingPaths]);
   try {
     if (workbench.useMockTestData) {
-      stagedWorkspacePaths.value = new Set([...stagedWorkspacePaths.value, path]);
+      stagedWorkspacePaths.value = new Set([...stagedWorkspacePaths.value, ...pendingPaths]);
       return;
     }
-    await api.stageWorkspaceGitFiles(props.workspaceId, [path]);
+    await api.stageWorkspaceGitFiles(props.workspaceId, pendingPaths);
     await refreshChanges();
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "暂存工作区文件失败");
   } finally {
     const next = new Set(updatingWorkspaceIndexPaths.value);
-    next.delete(path);
+    pendingPaths.forEach((path) => next.delete(path));
     updatingWorkspaceIndexPaths.value = next;
+  }
+}
+
+async function stageWorkspaceFile(path: string) {
+  await stageWorkspaceFiles([path]);
+}
+
+async function stageAllWorkspaceChanges() {
+  if (workspaceGitMutationPending.value || hasWorkspaceConflicts.value) return;
+  const paths = workspaceUnstaged.value.map((file) => file.path);
+  if (paths.length === 0) return;
+  stagingAllWorkspaceFiles.value = true;
+  try {
+    await stageWorkspaceFiles(paths);
+  } finally {
+    stagingAllWorkspaceFiles.value = false;
   }
 }
 
@@ -558,31 +581,52 @@ async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") 
   }
 }
 
-async function discardWorkspaceFile(path: string) {
-  if (!props.canWrite || !props.workspaceId || discardingWorkspacePaths.value.has(path)) return;
+// 批量回退与单文件回退共用后端多路径 API，并一次刷新文件树和 Diff 状态。
+async function discardWorkspaceFiles(paths: string[]) {
+  if (!props.canWrite || !props.workspaceId || paths.length === 0) return;
+  const pendingPaths = paths.filter((path) => !discardingWorkspacePaths.value.has(path));
+  if (pendingPaths.length === 0) return;
   errorMessage.value = "";
-  discardingWorkspacePaths.value = new Set([...discardingWorkspacePaths.value, path]);
+  discardingWorkspacePaths.value = new Set([...discardingWorkspacePaths.value, ...pendingPaths]);
   try {
     if (workbench.useMockTestData) {
-      workspaceDiffFiles.value = workspaceDiffFiles.value.filter((file) => file.path !== path);
+      const pendingPathSet = new Set(pendingPaths);
+      workspaceDiffFiles.value = workspaceDiffFiles.value.filter((file) => !pendingPathSet.has(file.path));
       const next = new Set(stagedWorkspacePaths.value);
-      next.delete(path);
+      pendingPaths.forEach((path) => next.delete(path));
       stagedWorkspacePaths.value = next;
-      notifyChangesRefreshed([path]);
+      notifyChangesRefreshed(pendingPaths);
       return;
     }
-    await api.discardWorkspaceGitFiles(props.workspaceId, [path]);
+    await api.discardWorkspaceGitFiles(props.workspaceId, pendingPaths);
     const next = new Set(stagedWorkspacePaths.value);
-    next.delete(path);
+    pendingPaths.forEach((path) => next.delete(path));
     stagedWorkspacePaths.value = next;
     await refreshChanges();
-    notifyChangesRefreshed([path]);
+    notifyChangesRefreshed(pendingPaths);
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "回退工作区文件失败");
   } finally {
     const next = new Set(discardingWorkspacePaths.value);
-    next.delete(path);
+    pendingPaths.forEach((path) => next.delete(path));
     discardingWorkspacePaths.value = next;
+  }
+}
+
+async function discardWorkspaceFile(path: string) {
+  await discardWorkspaceFiles([path]);
+}
+
+async function discardAllWorkspaceChanges() {
+  if (workspaceGitMutationPending.value || hasWorkspaceConflicts.value) return;
+  const paths = [...workspaceUnstaged.value, ...workspaceStaged.value].map((file) => file.path);
+  if (paths.length === 0) return;
+  if (!window.confirm(`将回退应用工作空间的 ${paths.length} 个文件改动，此操作无法撤销，是否继续？`)) return;
+  discardingAllWorkspaceFiles.value = true;
+  try {
+    await discardWorkspaceFiles(paths);
+  } finally {
+    discardingAllWorkspaceFiles.value = false;
   }
 }
 
@@ -955,6 +999,32 @@ defineExpose({
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
               <span>应用工作空间</span>
               <span class="git-sub-badge ml-1">({{ workspaceUnstaged.length + workspaceConflicts.length }})</span>
+              <div class="git-bulk-actions ml-auto">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  class="git-bulk-action"
+                  aria-label="全部回退应用工作空间变更"
+                  :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '全部回退应用工作空间变更'"
+                  :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceDiffFiles.length === 0 || workspaceGitMutationPending"
+                  @click.stop="discardAllWorkspaceChanges"
+                >
+                  <Loader2 v-if="discardingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  class="git-bulk-action"
+                  aria-label="全部暂存应用工作空间变更"
+                  :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '全部暂存应用工作空间变更'"
+                  :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceUnstaged.length === 0 || workspaceGitMutationPending"
+                  @click.stop="stageAllWorkspaceChanges"
+                >
+                  <Loader2 v-if="stagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </Button>
+              </div>
             </div>
             <div v-show="workspaceUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
               <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner">
@@ -1553,6 +1623,19 @@ defineExpose({
 .git-sub-badge {
   font-weight: 400;
   color: #a1a1aa;
+}
+
+.git-bulk-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.git-bulk-action {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
 }
 
 .git-empty-text {

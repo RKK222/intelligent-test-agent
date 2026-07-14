@@ -6015,3 +6015,15 @@ bash /tmp/test-api-after-restart.sh
   - 对象规约统一通过 `spec-index.md` 按实际 `objectType` 选择，避免加载全部无关规约；通过引用存在性、`quick_validate.py`、skill 打包、四个 Agent 的 `opencode debug agent` JSON 解析和 `git diff --check` 静态校验，没有调用任何模型。
 - Result:
   - 公共配置已经形成“对象规约核对 → 方法规则 → Phase A → 案例组装规则 → 追溯/门禁 → 独立规约审核”的强制链路；三服务使用 `.env.test` 重启成功，后端 health/readiness 为 `UP`、前端 3000 返回 200、manager WebSocket 已连接。企业模型产物效果按用户要求留给用户使用应用工作区素材验证。
+
+### 2026-07-14 - 应用工作空间增加全部暂存和全部回退
+
+- Why:
+  - Git 变更面板只能逐文件暂存或回退，工作空间存在多文件改动时操作成本较高；用户需要应用工作空间级的一键 stage all 和回退 all。
+- What:
+  - “应用工作空间”变更分组增加全部暂存和全部回退图标按钮；全部暂存只提交未暂存普通文件，全部回退经二次确认后一次处理已暂存与未暂存普通文件。
+  - merge 冲突期间禁用两个批量入口，继续复用既有逐文件处理、全部保留本地/远程和取消整次合并流程。
+- How:
+  - 复用现有 `stageWorkspaceGitFiles`、`discardWorkspaceGitFiles` 多文件请求和刷新通知链路，没有新增后端 API；单文件与批量操作共用组件内部方法，并同步前端 README、应用 README 和用户手册。
+- Result:
+  - `git-changes-panel.test.ts` 18 项、前端全量 Vitest 774 项（另 1 项跳过）、agent-web typecheck 和生产 build 均通过；本地 backend health/readiness 为 `UP`，前端 `http://127.0.0.1:3000` 返回 200，Chromium 加载登录页无 page error。构建仅保留已有 CSS `@import/@charset` 顺序和大 chunk 警告。

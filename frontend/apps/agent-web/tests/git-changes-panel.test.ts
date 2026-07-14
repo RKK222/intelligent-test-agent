@@ -244,6 +244,81 @@ describe("GitChangesPanel", () => {
     })));
   });
 
+  it("stages all unstaged application workspace files in one request", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "src/first.ts", status: "modified", staged: false, patch: "first", additions: 1, deletions: 0 },
+          { path: "src/second.ts", status: "untracked", staged: false, patch: "second", additions: 1, deletions: 0 },
+          { path: "src/already-staged.ts", status: "modified", staged: true, patch: "staged", additions: 1, deletions: 1 }
+        ]
+      })
+      .mockResolvedValueOnce({
+        files: [
+          { path: "src/first.ts", status: "modified", staged: true, patch: "first", additions: 1, deletions: 0 },
+          { path: "src/second.ts", status: "added", staged: true, patch: "second", additions: 1, deletions: 0 },
+          { path: "src/already-staged.ts", status: "modified", staged: true, patch: "staged", additions: 1, deletions: 1 }
+        ]
+      });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    const stageAllButton = await view.findByRole("button", { name: "全部暂存应用工作空间变更" });
+    await fireEvent.click(stageAllButton);
+
+    await waitFor(() => expect(apiClientMock.stageWorkspaceGitFiles).toHaveBeenCalledWith(
+      "wrk_1234567890abcdef",
+      ["src/first.ts", "src/second.ts"]
+    ));
+    await waitFor(() => expect((stageAllButton as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  it("discards all staged and unstaged application workspace files after confirmation", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "src/unstaged.ts", status: "modified", staged: false, patch: "unstaged", additions: 1, deletions: 1 },
+          { path: "src/staged.ts", status: "modified", staged: true, patch: "staged", additions: 1, deletions: 1 }
+        ]
+      })
+      .mockResolvedValueOnce({ files: [] });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const changesRefreshed = vi.fn();
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        "onChanges-refreshed": changesRefreshed
+      },
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    const discardAllButton = await view.findByRole("button", { name: "全部回退应用工作空间变更" });
+    await fireEvent.click(discardAllButton);
+
+    expect(confirm).toHaveBeenCalledWith("将回退应用工作空间的 2 个文件改动，此操作无法撤销，是否继续？");
+    await waitFor(() => expect(apiClientMock.discardWorkspaceGitFiles).toHaveBeenCalledWith(
+      "wrk_1234567890abcdef",
+      ["src/unstaged.ts", "src/staged.ts"]
+    ));
+    await waitFor(() => expect(changesRefreshed).toHaveBeenCalledWith(expect.objectContaining({
+      paths: ["src/unstaged.ts", "src/staged.ts"]
+    })));
+  });
+
   it("publishes only staged application workspace files", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({

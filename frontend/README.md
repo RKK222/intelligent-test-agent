@@ -68,7 +68,7 @@ tools/dev-frontend-check.sh
 
 工作台左侧 Agent 配置树展示公共级 `opencode/` 和工作空间级 `.opencode/` 配置根，包含 `agents/` 与 `skills/`；普通用户仍可只读查看根级 `agents/` 与 `skills/`，但隐藏 `.DS_Store`、`.gitignore`、`node_modules`、`package.json` 等配置仓库工程杂项；普通工作空间文件树隐藏根级 `.opencode`，避免重复展示。工作区文件树、搜索结果、变更列表和 Agent 配置树统一使用 VS Code Workbench 风格的局部文件浏览 token：背景 `#f8f8f8`、边框 `#e5e5e5`、13px 系统 UI 字体、22px 行高和 VS Code codicon 文件/目录图标。工作空间级 `+` 只初始化应用自己的技能包：`skills/<name>/SKILL.md`、`skills/<name>/rules/README.md` 和 `skills/<name>/templates/README.md`，其中 `SKILL.md` 使用当前 opencode skill 模板，`name` 只生成小写字母、数字和短横线，frontmatter 包含 `name`、`description`、`compatibility` 与 `metadata`。公共仓库有本地修改时仍可浏览，更新前必须明确勾选放弃已跟踪修改。Agent 配置 worktree 发布冲突时，前端读取 `BackendApiError.details.conflictFiles` 展示具体冲突文件。进入应用级 recent 且能反查 `versionId` 时，前端只读取该版本已有的 `workspaceName=default` 私人 worktree；没有 default 私人工作区记录时保持空态，不创建、不修复、不加载文件树。用户手动切换应用版本或新增版本时才显式确保并切到 default 私人 worktree，footer 按钮和版本子菜单会显示当前私人 worktree 分支；无应用历史或 recent 无 `versionId` 时只选择应用，不自动加载工作区，左侧切换入口仍保留。普通工作区保存后刷新平台 Git diff，不依赖 opencode `/vcs/diff`。左侧 Git 变更面板展示真实应用工作区 Git diff 和应用级 opencode `agents/*.md` / `skills/<skill>/SKILL.md` diff，不再提供 mock 测试数据入口；agents 分组只接收 `.opencode/agents` 与 `.opencode/skills` 变更，公共级文件和普通应用文件不会混入；应用工作区文件行提供真实 stage/unstage 与回退按钮，悬浮显示完整路径，点击直接复用已加载 patch。
 
-应用工作区暂存通过平台 API 操作真实 Git index，同时仍作为发布文件白名单；后端普通发布会隔离历史 index。冲突期间允许普通文件 stage/unstage，但按 Git 原生规则禁止提交，冲突文件可在 Monaco 三方合并编辑器中可靠选择结果、保存或取消整次 merge。前端只有在后端明确返回 `remotePushed=true` 时才展示提交并推送成功。
+应用工作区暂存通过平台 API 操作真实 Git index，同时仍作为发布文件白名单；变更分组支持一次暂存全部未暂存普通文件，以及经二次确认后一次回退全部已暂存和未暂存普通文件。后端普通发布会隔离历史 index。冲突期间批量暂存和批量回退入口禁用，普通文件仍允许逐个 stage/unstage，但按 Git 原生规则禁止提交；冲突文件可在 Monaco 三方合并编辑器中可靠选择结果、保存或取消整次 merge。前端只有在后端明确返回 `remotePushed=true` 时才展示提交并推送成功。
 
 ```bash
 ./restart-dev-services.sh
