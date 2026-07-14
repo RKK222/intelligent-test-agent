@@ -38,7 +38,7 @@ packages/ui-kit
 packages/shared-types
 ```
 
-`apps/user-manual` 使用 VitePress 1.6 构建内置用户手册，输出到 `agent-web/public/help/` 并随主应用一起打包。手册使用浏览器本地全文索引，不依赖公网搜索、独立服务或数据库；`agent-web` 的 `dev` / `build` 会先自动构建手册。目录映射章节同时展示研发目录、测试页面目录和实际 Git/worktree 的现状/目标关系，并定义应用 AI Git 中 `docs/业务、功能、架构` 的资产边界和建设责任。
+`apps/user-manual` 使用 VitePress 1.6 构建内置用户手册，输出到 `agent-web/public/help/` 并随主应用一起打包。手册使用浏览器本地全文索引，不依赖公网搜索、独立服务或数据库；`agent-web` 的 `dev` / `build` 会先自动构建手册。目录设计章节以标准工程目录为事实源，对照开发原版和测试目标工程树，并说明测试智能体、四阶段 `spec`、稳定测试资产、业务 Git 的页面映射和建设责任；应用内 Help 固定章节清单必须同步注册该 Markdown，保证首页入口、内嵌页面和宠物问答使用同一内容。
 
 `packages/editor` 在 Markdown 预览中支持 Mermaid `flowchart`/`graph` 与 `sequenceDiagram` 可视化编辑。图模型、parser、serializer 与 Vue Flow 画布均留在 editor 包内；应用后只回写当前 Markdown fence，并继续复用工作台 dirty、Git Diff 与 workspace 文件保存链路。
 

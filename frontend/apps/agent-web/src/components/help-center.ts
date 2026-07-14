@@ -1,5 +1,6 @@
 import agentConfigManual from "../../../user-manual/docs/guide/agent-config.md?raw";
 import conversationManual from "../../../user-manual/docs/guide/conversation.md?raw";
+import directoryMappingManual from "../../../user-manual/docs/guide/directory-mapping.md?raw";
 import faqManual from "../../../user-manual/docs/guide/faq.md?raw";
 import firstTimeSetupManual from "../../../user-manual/docs/guide/first-time-setup.md?raw";
 import gettingStartedManual from "../../../user-manual/docs/guide/getting-started.md?raw";
@@ -11,6 +12,7 @@ export type HelpTopicId =
   | "first-time-setup"
   | "process-initialization"
   | "workspace"
+  | "directory-mapping"
   | "conversation"
   | "agent-config"
   | "faq";
@@ -56,6 +58,13 @@ export const HELP_TOPICS: HelpTopic[] = [
     description: "版本、个人 worktree 与 Git",
     path: "guide/workspace.html",
     content: workspaceManual
+  },
+  {
+    id: "directory-mapping",
+    label: "开发与测试目录",
+    description: "工程结构、测试资产与建设责任",
+    path: "guide/directory-mapping.html",
+    content: directoryMappingManual
   },
   {
     id: "conversation",

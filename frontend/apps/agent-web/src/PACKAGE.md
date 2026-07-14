@@ -17,7 +17,7 @@
 - `REDIS_SUMMARY` 记录 `run.created.assistantSummaryMessageId`，终态把最后 root assistant 的 remote ID 直接绑定到稳定平台反馈 ID，不轮询 Session 消息表。
 - `components/useSideQuestionRun.ts`：只管理宠物旁路 Run 的单飞、RunEvent SSE、真实阶段、delta、终态校准、重连提示和订阅释放；不持有主 Run abort 能力，主 Session 切换时清理旧上下文展示。
 - `components/FigmaShell.vue`：工作台整体 shell 和顶部栏，应用切换左侧展示已加载 Agent、Skill、MCP、Plugin 数量摘要，点击后弹出只读详情面板；应用菜单、用户头像菜单、左右面板拖拽、宠物本体进程心形、宠物进程状态气泡，以及点击宠物后以对话为主体的统一浮层也在此组件内；小游戏只通过浮层标题栏的低强调手柄按钮进入，不提供独立活动栏入口。首次确认进程未初始化时，活动栏机器人与红心显示呼吸效果，并在当前页面生命周期内自动唤出一次宠物初始化询问；气泡中的初始化按钮复用工作台已有初始化流程，旁路加载或小游戏打开期间自然离场不会关闭浮层，显式关闭与收起宠物仍有效。
-- `components/HelpCenterDialog.vue` 与 `components/help-center.ts`：从工作台首页、顶部问号、初始化状态卡和宠物进程气泡打开 `/help/` 下的 VitePress 静态手册，维护稳定章节 ID、同源 URL 和有界上下文问答 prompt；问答使用当前章节 Markdown 作为单一事实源并复用 `useSideQuestionRun`，没有主 Session 时保持手册与本地全文搜索可用。
+- `components/HelpCenterDialog.vue` 与 `components/help-center.ts`：从工作台首页、顶部问号、初始化状态卡和宠物进程气泡打开 `/help/` 下的 VitePress 静态手册，维护稳定章节 ID、同源 URL 和有界上下文问答 prompt；新增手册章节必须同时注册到 `HELP_TOPICS`，保证首页 Help 导航、iframe 和宠物问答共同使用该 Markdown，当前包含“开发与测试目录”；问答复用 `useSideQuestionRun`，没有主 Session 时保持手册与本地全文搜索可用。
 - `components/PetMiniGames.vue`：嵌入宠物统一浮层的本地小游戏区域，以紧凑 2×2 小卡片提供可操作的 10×16 俄罗斯方块、8×8 扫雷、9×9 数独和 12×12 贪吃蛇；扫雷数字格支持在相邻旗子数匹配时双击展开其余邻格。组件只维护页面内存中的棋盘、分数、暂停和输赢状态，不访问后端、不持久化数据，切换或卸载时释放俄罗斯方块、贪吃蛇计时器。
 - 宠物旁路 fork 可用性由 `AgentWorkbench` 的真实主 `sessionId` 下发；没有历史主 Session 或仅有未发送的新对话草稿时，`FigmaShell` 禁用旁路入口，提交处理层继续保留空 Session 防御。
 - 宠物单击按进程状态分流：进程 ready 时打开统一浮层，默认进入对话页；有真实主 Session 时聚焦提问输入框，无 Session 时只禁用对话并允许切换游戏。进程未 ready 时保留状态气泡作为初始化或不可用说明入口。

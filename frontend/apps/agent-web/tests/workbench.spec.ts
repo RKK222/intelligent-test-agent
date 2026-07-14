@@ -46,6 +46,9 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
       }
     }
   });
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
 
   await gotoWorkbench(page, { selectConversation: false });
 
@@ -57,6 +60,13 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(page.getByTestId("help-center-frame")).toHaveAttribute(
     "src",
     /\/help\/guide\/getting-started\.html$/
+  );
+  const directoryTopic = page.getByRole("button", { name: /开发与测试目录/ });
+  await expect(directoryTopic).toBeVisible();
+  await directoryTopic.click();
+  await expect(page.getByTestId("help-center-frame")).toHaveAttribute(
+    "src",
+    /\/help\/guide\/directory-mapping\.html$/
   );
 });
 

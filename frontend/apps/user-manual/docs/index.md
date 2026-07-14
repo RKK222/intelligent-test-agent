@@ -12,12 +12,17 @@ hero:
     - theme: alt
       text: 初始化说明
       link: /guide/process-initialization
+    - theme: alt
+      text: 目录设计
+      link: /guide/directory-mapping
 
 features:
   - title: 初始化不再猜
     details: 区分专属进程、应用版本、个人工作区和 Agent 配置包，说明每一步应该由谁操作。
   - title: 操作路径可检索
     details: 使用右上角搜索框输入按钮文字、错误提示或功能名称，即可定位对应章节。
+  - title: 开发与测试目录对齐
+    details: 对照完整工程树，查看测试智能体、规格工作区、测试资产和业务代码分别放在哪里。
   - title: 小宠物辅助问答
     details: 有主对话时追问当前上下文；没有主对话时依据内置手册回答，不创建普通聊天记录。
 ---

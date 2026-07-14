@@ -20,6 +20,6 @@ corepack pnpm --filter @test-agent/user-manual build
 
 - `docs/guide/`：用户可见的稳定操作说明，也是帮助中心宠物问答的事实来源。
 - `docs/guide/first-time-setup.md`：首次使用的角色、SSH、应用、工作空间和进程准备顺序；操作入口必须与当前权限和页面文案一致。
-- `docs/guide/directory-mapping.md`：开发目录、测试页面目录和实际 Git/worktree 的现状与目标映射，并定义应用 AI Git 中 `docs/业务、功能、架构` 的内容和建设责任。
+- `docs/guide/directory-mapping.md`：以标准工程目录为事实源，对照开发原版和测试目标结构，并定义测试智能体、四阶段 `spec`、`docs` 测试资产、业务 Git 的页面映射和建设责任。
 - `docs/.vitepress/`：导航、搜索、主题和构建输出配置。
 - 产品行为发生变化时，应先同步对应章节，再调整上下文帮助入口。

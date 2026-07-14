@@ -46,7 +46,23 @@ function mountHelpCenter(props: Record<string, unknown> = {}) {
 describe("help center", () => {
   it("keeps manual navigation under the same-origin help base and rejects unknown topics", () => {
     expect(helpDocumentUrl("process-initialization")).toBe("/help/guide/process-initialization.html");
+    expect(helpDocumentUrl("directory-mapping")).toBe("/help/guide/directory-mapping.html");
     expect(normalizeHelpTopic("unknown")).toBe("getting-started");
+  });
+
+  it("keeps the directory chapter synchronized with the embedded Help navigation", async () => {
+    const wrapper = mountHelpCenter();
+    const directoryTopic = wrapper.findAll(".ta-help-center-topic")
+      .find((button) => button.text().includes("开发与测试目录"));
+
+    expect(directoryTopic).toBeDefined();
+    await directoryTopic!.trigger("click");
+
+    expect(wrapper.get('[data-testid="help-center-frame"]').attributes("src"))
+      .toBe("/help/guide/directory-mapping.html");
+    const prompt = buildManualQuestionPrompt("directory-mapping", "测试目录放什么？");
+    expect(prompt).toContain("【当前章节】开发与测试目录");
+    expect(prompt).toContain("应用（服务群组）Git");
   });
 
   it("opens the requested chapter and switches the embedded manual", async () => {
