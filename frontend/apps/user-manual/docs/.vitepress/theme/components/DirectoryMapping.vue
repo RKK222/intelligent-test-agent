@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 type ViewKey = "structure" | "ownership";
-type TreeTone = "baseline" | "new" | "shared" | "local";
+type TreeTone = "structure" | "baseline" | "new" | "shared" | "local";
 type TreeNode = {
   id: string;
   name: string;
@@ -20,6 +20,7 @@ const views: Array<{ key: ViewKey; index: string; label: string }> = [
   { key: "ownership", index: "02", label: "内容与责任" }
 ];
 
+const structure = (id: string, name: string, note?: string, children?: TreeNode[]): TreeNode => ({ id, name, note, tone: "structure", children });
 const baseline = (id: string, name: string, note?: string, children?: TreeNode[]): TreeNode => ({ id, name, note, children });
 const testing = (id: string, name: string, note?: string, children?: TreeNode[]): TreeNode => ({ id, name, note, tone: "new", children });
 const shared = (id: string, name: string, note?: string, children?: TreeNode[]): TreeNode => ({ id, name, note, tone: "shared", children });
@@ -27,9 +28,9 @@ const local = (id: string, name: string, note?: string, children?: TreeNode[]): 
 const placed = (node: TreeNode, physical: string): TreeNode => ({ ...node, physical });
 
 // 目录节点直接按用户提供的标准工程文件建模，页面只负责逐级展开，不再压缩或拆成两棵树。
-const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工作区/", "多 Git worktree 的组合视图", [
-  baseline("ai-agent", "ai-agent/", "智能研发根目录", [
-    placed(baseline("agents", "agents/", "智能体逻辑目录", [
+const directoryTree: TreeNode = placed(structure("root", "应用(服务群组)工作区/", "开发、测试与个人本地内容的组合视图", [
+  structure("ai-agent", "ai-agent/", "智能研发目录骨架", [
+    placed(structure("agents", "agents/", "智能体分类目录", [
       baseline("requirements-agent", "01_需求智能体/", "需求智能体"),
       baseline("design-agent", "02_设计智能体/", "设计智能体", [
         baseline("outline-design", "01_概要设计/", "概要设计智能体", [
@@ -74,9 +75,9 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
             ]),
             testing("test-design-app-rule", "测试设计应用规约.md", "应用规约")
           ]),
-          testing("test-object-agent", "001 测试对象识别/", "hidden subagent · 供上层 Agent 调用", [testing("test-object-agent-file", "test-object-identification.md")]),
-          testing("test-case-agent", "002 测试设计及案例生成/", "hidden subagent · 供上层 Agent 调用", [testing("test-case-agent-file", "test-case-generation.md")]),
-          testing("test-review-agent", "003 测试设计审核/", "hidden subagent · 供上层 Agent 调用", [testing("test-review-agent-file", "test-design-review.md")])
+          testing("test-object-agent", "001 测试对象识别/", "workagent · 供上层 Agent 调用", [testing("test-object-agent-file", "test-object-identification.md")]),
+          testing("test-case-agent", "002 测试设计及案例生成/", "workagent · 供上层 Agent 调用", [testing("test-case-agent-file", "test-case-generation.md")]),
+          testing("test-review-agent", "003 测试设计审核/", "workagent · 供上层 Agent 调用", [testing("test-review-agent-file", "test-design-review.md")])
         ]),
         testing("test-execution-agent", "02_测试执行/", "测试执行 subagent", [
           testing("test-execution-agent-file", "agent.md", "子智能体定义（SOP）"),
@@ -88,17 +89,17 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
             ]),
             testing("test-execution-app-rule", "测试执行应用规约.md", "应用规约")
           ]),
-          testing("script-agent", "001 测试执行脚本构造/", "hidden subagent · 供上层 Agent 调用", [testing("script-agent-file", "test-script-builder.md")]),
-          testing("data-agent", "002 测试执行数据构造/", "hidden subagent · 供上层 Agent 调用", [testing("data-agent-file", "test-data-builder.md")]),
-          testing("assertion-agent", "003 测试执行断言构造/", "hidden subagent · 供上层 Agent 调用", [testing("assertion-agent-file", "test-assertion-builder.md")]),
-          testing("execution-review-agent", "004 测试执行审核/", "hidden subagent · 供上层 Agent 调用", [testing("execution-review-agent-file", "test-execution-review.md")])
+          testing("script-agent", "001 测试执行脚本构造/", "workagent · 供上层 Agent 调用", [testing("script-agent-file", "test-script-builder.md")]),
+          testing("data-agent", "002 测试执行数据构造/", "workagent · 供上层 Agent 调用", [testing("data-agent-file", "test-data-builder.md")]),
+          testing("assertion-agent", "003 测试执行断言构造/", "workagent · 供上层 Agent 调用", [testing("assertion-agent-file", "test-assertion-builder.md")]),
+          testing("execution-review-agent", "004 测试执行审核/", "workagent · 供上层 Agent 调用", [testing("execution-review-agent-file", "test-execution-review.md")])
         ]),
         testing("test-analysis-agent", "03_测试分析/", "测试分析 subagent", [testing("test-analysis-more", "...", "待按分析能力继续扩展")])
       ])
     ]), "应用 AI Git"),
-    placed(baseline("mcp", "mcp/", "MCP 逻辑定义"), "应用 AI Git"),
-    placed(baseline("engineering-rules", "rules/", "工程规约逻辑目录", [baseline("engineering-rule", "工程规约.md")]), "应用 AI Git"),
-    placed(baseline("skills", "skills/", "Skill 技能目录", [
+    placed(shared("mcp", "mcp/", "开发测试共用 MCP 定义"), "应用 AI Git"),
+    placed(shared("engineering-rules", "rules/", "开发测试共用工程规约目录", [shared("engineering-rule", "工程规约.md", "开发测试共用规约")]), "应用 AI Git"),
+    placed(shared("skills", "skills/", "开发测试方法共用目录", [
       baseline("coding-skills", "coding/", "开发已有 Skill", [
         baseline("code-review-skill", "code-review-skill/", undefined, [baseline("code-review-skill-file", "SKILL.md")])
       ]),
@@ -141,9 +142,9 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
       ])
     ])
   ]), "应用 AI Git · 仅本地提交"),
-  placed(baseline("docs", "docs/", "开发知识与测试资产共用目录", [
+  placed(structure("docs", "docs/", "应用资产目录骨架，子项按归属着色", [
     baseline("application-architecture", "应用架构.md", "应用关系、服务节点和功能模块清单"),
-    baseline("technical-architecture", "技术架构/", "开发目录内补充测试资产", [
+    shared("technical-architecture", "技术架构/", "开发工程概览与测试场景资产共用目录", [
       baseline("engineering-overview-a", "工程概览_A.md", "技术栈、接口清单和应用关系"),
       baseline("engineering-overview-b", "工程概览_B.md", "技术栈、接口清单和应用关系"),
       baseline("engineering-overview-more", "...", "其他工程概览"),
@@ -152,7 +153,7 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
       testing("scenario-y", "场景测试说明书_YYY.md"),
       testing("scenario-more", "...", "其他场景测试说明书")
     ]),
-    baseline("functional-module", "功能模块/", "开发目录内补充测试设计与案例", [
+    shared("functional-module", "功能模块/", "开发功能说明与测试设计案例共用目录", [
       baseline("functional-module-x", "功能模块_XXX.md", "业务说明书"),
       baseline("functional-module-y", "功能模块_YYY.md", "业务说明书"),
       testing("functional-design-x1", "测试设计文档_X1.md", "等价类表、路径图等测试设计"),
@@ -166,7 +167,7 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
       baseline("functional-doc-x2", "功能文档_X2.md"),
       baseline("functional-doc-more", "...", "其他功能文档")
     ]),
-    baseline("data-architecture", "数据架构/", "开发目录内补充测试数据实体", [
+    shared("data-architecture", "数据架构/", "开发数据库结构与测试数据实体共用目录", [
       baseline("gauss-schema", "F-ABC_Gauss_1.yaml", "开发数据架构资产"),
       baseline("mysql-schema", "F-ABC_MySQL_1.yaml", "开发数据架构资产"),
       testing("data-entity-x1", "数据实体_X1.md"),
@@ -183,13 +184,13 @@ const directoryTree: TreeNode = placed(baseline("root", "应用(服务群组)工
 
 const agentDesignRows = [
   ["测试设计 / 测试执行 / 测试分析", "可见 subagent", "放入 .opencode/agents/<name>.md；用户可用 @<name>，主 Agent 也可按 description 自动调用"],
-  ["对象识别 / 案例生成 / 脚本、数据、断言构造 / 审核", "hidden subagent", "每个都是能独立完成任务的 Agent；不进入 @ 补全，由上层 Agent 调用，不建议用户单独调用"],
+  ["对象识别 / 案例生成 / 脚本、数据、断言构造 / 审核", "workagent", "每个都能独立完成任务；技术上使用 hidden subagent，不进入 @ 补全，由上层 Agent 调用，不建议用户单独调用"],
   ["等价类 / 边界值等测试方法", "Skill", "只把可复用的方法知识放入 .opencode/skills/<name>/SKILL.md，由 Agent 按需加载"],
   ["rules / template / eval", "Skill 资源或 instructions", "不要放在 .opencode/agents/** 里作为普通 .md，避免被递归注册成 Agent"]
 ];
 
-// 共用归档默认展开一层，让用户无需操作即可识别这是开发、测试共同沉淀的目录。
-const expandedNodeIds = ref<Set<string>>(new Set(["root", "archive"]));
+// 默认露出智能研发、资产和归档的下一层，让骨架色与整合紫色的关系无需操作即可看懂。
+const expandedNodeIds = ref<Set<string>>(new Set(["root", "ai-agent", "docs", "archive"]));
 
 const visibleDirectoryNodes = computed<VisibleTreeNode[]>(() => {
   const rows: VisibleTreeNode[] = [];
@@ -222,7 +223,7 @@ const expandAllDirectories = () => {
 };
 
 const collapseToRoot = () => {
-  expandedNodeIds.value = new Set(["root", "archive"]);
+  expandedNodeIds.value = new Set(["root"]);
 };
 
 const ownershipRows = [
@@ -243,9 +244,10 @@ const ownershipRows = [
       <div>
         <p class="eyebrow">目录说明</p>
         <h2>逐级查看完整工程目录</h2>
-        <p>开发已有结构与测试扩展合并展示，颜色区分来源，点击文件夹查看下一层真实目录。</p>
+        <p>中性目录展示工程骨架，蓝、绿、紫、橙分别标识开发、测试、整合共用与个人本地内容。</p>
       </div>
       <div class="legend" aria-label="目录图例">
+        <span><i class="structure"></i>目录骨架</span>
         <span><i></i>开发基线</span>
         <span><i class="new"></i>测试新增</span>
         <span><i class="shared"></i>开发测试共用</span>
@@ -302,18 +304,19 @@ const ownershipRows = [
         </button>
       </div>
       <div class="tree-reading-note">
+        <p><i class="structure"></i><span><strong>目录骨架</strong>工作区、<code>ai-agent</code>、<code>agents</code>、<code>docs</code> 只表达层级，不表达归属。</span></p>
         <p><i></i><span><strong>开发已有</strong>保留需求、设计、编码、知识文档和业务 Git 的原有位置。</span></p>
         <p><i class="new"></i><span><strong>测试扩展</strong>在原目录中增加测试智能体、测试方法和稳定资产。</span></p>
-        <p><i class="shared"></i><span><strong>开发测试共用</strong><code>archive</code> 保存各研发阶段评审确认后的归档快照。</span></p>
+        <p><i class="shared"></i><span><strong>整合共用</strong>紫色只用于确实融合开发与测试的能力或子目录，如 <code>mcp</code>、<code>rules</code>、<code>skills</code>、混合资产目录和 <code>archive</code>。</span></p>
         <p><i class="local"></i><span><strong>个人本地</strong><code>spec</code> 保存需求、设计、编码、测试阶段的输入输出产物。</span></p>
       </div>
       <section class="agent-design" aria-labelledby="agent-design-title">
         <div class="section-heading">
           <span>OpenCode 原生映射</span>
-          <strong id="agent-design-title">工作 Agent 使用 hidden subagent</strong>
+          <strong id="agent-design-title">工作 Agent 统一称为 workagent</strong>
         </div>
         <p class="agent-design-summary">
-          工作 Agent 可以独立完成任务，但主要供上层 Agent 编排调用；设置 <code>mode: subagent</code>、<code>hidden: true</code>，不建议用户单独调用。
+          workagent 可以独立完成任务，但主要供上层 Agent 编排调用；OpenCode 技术实现为 <code>mode: subagent</code>、<code>hidden: true</code>，不建议用户单独调用。
         </p>
         <div class="agent-design-grid">
           <article v-for="row in agentDesignRows" :key="row[0]">
@@ -353,6 +356,7 @@ const ownershipRows = [
   --line: var(--vp-c-divider);
   --teal: #00845a;
   --blue: #2557a7;
+  --structure: #586273;
   --shared: #6556b3;
   --amber: #b05a00;
   color: var(--ink);
@@ -392,6 +396,7 @@ const ownershipRows = [
 .legend { display: grid; gap: 7px; min-width: 110px; }
 .legend span { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 8px; }
 .legend i { background: var(--blue); border-radius: 50%; height: 8px; width: 8px; }
+.legend i.structure { background: var(--structure); }
 .legend i.new { background: var(--teal); }
 .legend i.shared { background: var(--shared); }
 .legend i.local { background: var(--amber); }
@@ -423,6 +428,7 @@ const ownershipRows = [
 .tree-row[aria-expanded] { cursor: pointer; }
 .tree-row:hover { background: var(--vp-c-default-soft); }
 .tree-row:focus-visible { background: var(--vp-c-brand-soft); outline: 1px solid currentColor; outline-offset: -1px; }
+.tree-row.structure { color: var(--structure); }
 .tree-row.new { background: color-mix(in srgb, var(--teal) 6%, transparent); color: var(--teal); }
 .tree-row.shared { background: color-mix(in srgb, var(--shared) 6%, transparent); color: var(--shared); }
 .tree-row.local { color: var(--amber); }
@@ -441,9 +447,10 @@ const ownershipRows = [
 .tree-kind.file { background: transparent; border: 1px solid currentColor; border-radius: 1px; height: 12px; width: 9px; }
 .tree-kind.file::before { display: none; }
 .physical-badge { border: 1px solid color-mix(in srgb, currentColor 48%, var(--line)); border-radius: 999px; color: inherit; font-size: 8px; font-weight: 650; line-height: 1.4; max-width: 330px; overflow-wrap: anywhere; padding: 2px 7px; text-align: right; }
-.tree-reading-note { border-top: 1px solid var(--line); display: grid; gap: 16px; grid-template-columns: repeat(4, 1fr); margin-top: 20px; padding-top: 18px; }
+.tree-reading-note { border-top: 1px solid var(--line); display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin-top: 20px; padding-top: 18px; }
 .tree-reading-note p { align-items: start; display: grid; gap: 8px; grid-template-columns: 8px 1fr; margin: 0; }
 .tree-reading-note i { background: var(--blue); border-radius: 50%; height: 8px; margin-top: 4px; width: 8px; }
+.tree-reading-note i.structure { background: var(--structure); }
 .tree-reading-note i.new { background: var(--teal); }
 .tree-reading-note i.shared { background: var(--shared); }
 .tree-reading-note i.local { background: var(--amber); }

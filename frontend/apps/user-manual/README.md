@@ -20,6 +20,6 @@ corepack pnpm --filter @test-agent/user-manual build
 
 - `docs/guide/`：用户可见的稳定操作说明，也是帮助中心宠物问答的事实来源。
 - `docs/guide/first-time-setup.md`：首次使用的角色、SSH、应用、工作空间和进程准备顺序；操作入口必须与当前权限和页面文案一致。
-- `docs/guide/directory-mapping.md`：以标准工程目录为事实源，将开发已有与测试扩展按真实层级合并为一棵可逐级展开、以蓝/绿/紫/橙区分开发、测试、共用和个人本地内容的工程树；物理归属只展示到公共 AI Git、应用 AI Git 和业务 Git，页面只保留整体目录与内容责任两个视图，并说明工作 Agent 使用 hidden subagent、测试方法使用 Skill。
+- `docs/guide/directory-mapping.md`：以标准工程目录为事实源，将开发已有与测试扩展按真实层级合并为一棵可逐级展开的工程树；工作区、`ai-agent`、`agents`、`docs` 使用中性骨架色，蓝/绿/紫/橙分别区分开发、测试、整合共用和个人本地内容。物理归属只展示到公共 AI Git、应用 AI Git 和业务 Git。页面只保留整体目录与内容责任两个视图，并说明 workagent 的 hidden subagent 实现和测试方法 Skill。
 - `docs/.vitepress/`：导航、搜索、主题和构建输出配置。
 - 产品行为发生变化时，应先同步对应章节，再调整上下文帮助入口。

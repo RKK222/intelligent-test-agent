@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-14 - 统一整棵开发测试目录树的颜色语义
+
+- Why:
+  - 用户要求继续复核 `docs` 和 `ai-agent` 的开发/测试共用关系，并指出把所有混合父目录直接涂成紫色会让整体层级显得混乱。
+- What:
+  - 新增中性“目录骨架”语义：工作区根、`ai-agent/`、`agents/`、`docs/` 只表示组织层级；开发内容为蓝色、测试内容为绿色、个人本地 `spec` 为橙色。
+  - 紫色收敛为真正整合或共用的节点：`mcp/`、工程 `rules/`、`skills/`、`archive/`，以及 `docs` 下混合开发和测试资产的技术架构、功能模块、数据架构；关键骨架与归档默认展开一层。
+  - 工作 Agent 的业务名称统一为 `workagent`，仍以 `mode: subagent`、`hidden: true` 的 OpenCode Agent 实现；物理归属继续只展示公共 AI Git、应用 AI Git 和业务 Git。
+- How:
+  - 复用目录树现有 tone 模型增加 structure tone，并在 Playwright 中同时断言骨架灰、开发蓝、测试绿、整合紫和本地橙；README 与目录设计正文同步颜色判断规则。
+- Result:
+  - 用户手册生产构建、agent-web 类型检查及生产构建、Help Vitest 7/7、Chromium/Pixel 7 首页内嵌 Help E2E 2/2 均通过；桌面完整页面截图确认默认展开层级与五类颜色清晰。保留既有 CSS `@import` 和大 chunk 构建警告。
+
 ### 2026-07-14 - 明确共享归档与 hidden 工作 Agent
 
 - Why:

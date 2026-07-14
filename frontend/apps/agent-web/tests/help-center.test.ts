@@ -62,7 +62,7 @@ describe("help center", () => {
       .toBe("/help/guide/directory-mapping.html");
     const prompt = buildManualQuestionPrompt("directory-mapping", "测试目录放什么？");
     expect(prompt).toContain("【当前章节】开发与测试目录");
-    expect(prompt).toContain("hidden subagent");
+    expect(prompt).toContain("workagent");
     expect(prompt).toContain("开发已有资产");
   });
 
