@@ -8,7 +8,7 @@ export type UserMessageRowProps = {
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { FileText, Scissors, User } from "lucide-vue-next";
+import { FileText, Scissors } from "lucide-vue-next";
 import {
   displayTextFromUserPrompt,
   workspaceContextAttachmentsFromPromptParts,
@@ -51,9 +51,6 @@ const workspaceContexts = computed(() => {
           <span v-if="context.lines" class="oc-user-message__context-lines">L{{ context.lines }}</span>
         </span>
       </div>
-    </div>
-    <div class="oc-user-message__avatar" aria-hidden="true">
-      <User class="oc-user-message__avatar-icon" />
     </div>
   </div>
 </template>

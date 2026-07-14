@@ -9,7 +9,7 @@ import AssistantThread from "../src/AssistantThread.vue";
 const waitMarkdown = () => new Promise((resolve) => setTimeout(resolve, 400));
 
 describe("OpencodeTimeline", () => {
-  it("shows the assistant avatar for the initial thinking state", () => {
+  it("does not render an assistant avatar for the initial thinking state", () => {
     const state = createOpencodeLikeState({
       messages: [],
       running: true
@@ -18,7 +18,7 @@ describe("OpencodeTimeline", () => {
     const { container, getByText } = render(OpencodeTimeline, { props: { state } });
 
     expect(getByText("思考中")).toBeTruthy();
-    expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
+    expect(container.querySelector(".oc-assistant-frame__avatar")).toBeNull();
     expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
   });
 
@@ -41,6 +41,8 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-timeline-root")).toBeTruthy();
     expect(container.querySelector(".oc-user-message")).toBeTruthy();
     expect(container.querySelector(".oc-assistant-frame")).toBeTruthy();
+    expect(container.querySelector(".oc-user-message__avatar")).toBeNull();
+    expect(container.querySelector(".oc-assistant-frame__avatar")).toBeNull();
     expect(container.querySelector(".oc-assistant-frame__meta")).toBeNull();
     expect(container.querySelector(".oc-context-group")).toBeTruthy();
     expect(container.querySelector(".oc-assistant-part")).toBeTruthy();
@@ -668,7 +670,7 @@ describe("OpencodeTimeline", () => {
     const { container, getByText } = render(OpencodeTimeline, { props: { state } });
     await waitMarkdown();
 
-    expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
+    expect(container.querySelector(".oc-assistant-frame__avatar")).toBeNull();
     expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
     expect(getByText("我是测试智能体。")).toBeTruthy();
   });
@@ -689,7 +691,7 @@ describe("OpencodeTimeline", () => {
 
     const frame = container.querySelector(".oc-assistant-frame.has-header");
     expect(frame).toBeTruthy();
-    expect(frame?.querySelector(".oc-assistant-frame__avatar")).toBeTruthy();
+    expect(frame?.querySelector(".oc-assistant-frame__avatar")).toBeNull();
     expect(frame?.textContent).toContain("思考状态");
     expect(container.querySelectorAll(".oc-assistant-frame")).toHaveLength(1);
     expect(container.querySelector(".oc-unknown-part")).toBeNull();
@@ -755,7 +757,7 @@ describe("OpencodeTimeline", () => {
     const { container, getByText } = render(OpencodeTimeline, { props: { state } });
     await waitMarkdown();
 
-    expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
+    expect(container.querySelector(".oc-assistant-frame__avatar")).toBeNull();
     expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
     expect(container.querySelectorAll(".oc-reasoning-part .oc-disclosure__trigger")).toHaveLength(1);
     expect(container.querySelector(".oc-reasoning-part .oc-tool__status")?.textContent).toBe("已完成");
