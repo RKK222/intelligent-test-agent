@@ -77,12 +77,20 @@ describe("help center", () => {
     expect(emittedPrompt.length).toBeLessThan(3_900);
   });
 
-  it("keeps the manual available while pet Q&A is unavailable without a main session", () => {
+  it("keeps the manual available when workspace runtime is not ready", () => {
     const wrapper = mountHelpCenter({ sideQuestionAvailable: false });
 
     expect(wrapper.find('[data-testid="help-center-frame"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="help-center-question-input"]').attributes("disabled")).toBeDefined();
-    expect(wrapper.text()).toContain("建立主对话后即可追问");
+    expect(wrapper.text()).toContain("无需建立主对话也能提问");
+  });
+
+  it("offers a replay entry for the first-login guide", async () => {
+    const wrapper = mountHelpCenter();
+
+    await wrapper.get('[data-testid="help-center-start-guide"]').trigger("click");
+
+    expect(wrapper.emitted("start-guide")).toHaveLength(1);
   });
 
   it("builds a bounded manual prompt from the single Markdown source", () => {

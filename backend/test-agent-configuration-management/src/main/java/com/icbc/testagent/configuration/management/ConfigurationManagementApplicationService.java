@@ -144,6 +144,29 @@ public class ConfigurationManagementApplicationService {
                 .toList();
     }
 
+    /** 超级管理员创建启用状态的应用；权限校验留在 API 入口，业务层负责唯一性和长度边界。 */
+    @Transactional
+    public ApplicationResponse createApplication(String appId, String appName) {
+        String normalizedId = requireText(appId, "应用 ID 不能为空", "appId");
+        String normalizedName = requireText(appName, "应用名称不能为空", "appName");
+        if (normalizedId.length() > 128) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "应用 ID 不能超过 128 个字符", Map.of("field", "appId"));
+        }
+        if (normalizedName.length() > 255) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "应用名称不能超过 255 个字符", Map.of("field", "appName"));
+        }
+        ApplicationId id = new ApplicationId(normalizedId);
+        configurationRepository.findApplication(id).ifPresent(existing -> {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "应用 ID 已存在",
+                    Map.of("appId", existing.appId().value()));
+        });
+        Instant now = Instant.now();
+        return applicationResponse(configurationRepository.saveApplication(
+                new ApplicationDefinition(id, normalizedName, true, now, now)));
+    }
+
     public List<ApplicationMemberResponse> listMembers(String appId) {
         ApplicationId id = existingEnabledApp(appId).appId();
         return configurationRepository.findActiveMembers(id).stream()

@@ -43,6 +43,17 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
     }
 
     @Override
+    public ApplicationDefinition saveApplication(ApplicationDefinition application) {
+        mapper.insertApplication(new ApplicationDefinitionRow(
+                application.appId().value(),
+                application.appName(),
+                application.enabled(),
+                application.createdAt(),
+                application.updatedAt()));
+        return application;
+    }
+
+    @Override
     public List<ApplicationDefinition> findApplicationsByMember(UserId userId) {
         return mapper.findApplicationsByMember(userId.value()).stream().map(this::toApplication).toList();
     }

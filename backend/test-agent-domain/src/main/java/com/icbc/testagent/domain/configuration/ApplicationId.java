@@ -1,7 +1,7 @@
 package com.icbc.testagent.domain.configuration;
 
 /**
- * 外部系统同步的应用 ID，不强制平台前缀，只要求非空。
+ * 应用 ID 不强制平台前缀，只要求非空；创建入口会额外限制数据库字段长度。
  */
 public record ApplicationId(String value) {
 

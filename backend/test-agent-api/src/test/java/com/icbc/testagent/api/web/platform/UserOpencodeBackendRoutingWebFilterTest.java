@@ -161,6 +161,12 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesManualQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
+        assertRequestIsForwarded(
+                "/api/internal/platform/opencode-runtime/manual-question/runs");
+    }
+
+    @Test
     void routesAgentScopedSideQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
         assertRequestIsForwarded(
                 "/api/internal/agent/opencode/session/ses_1234567890abcdef/side-question/runs");

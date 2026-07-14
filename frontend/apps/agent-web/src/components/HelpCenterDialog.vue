@@ -24,6 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "close"): void;
   (event: "ask-pet", question: string): void;
+  (event: "start-guide"): void;
 }>();
 
 const activeTopic = ref<HelpTopicId>(DEFAULT_HELP_TOPIC);
@@ -82,10 +83,13 @@ function openManualInNewTab() {
             <p>搜索操作说明，或让小宠物依据当前章节回答</p>
           </div>
         </div>
-        <el-button text class="ta-help-center-new-tab" title="在新标签页打开当前章节" @click="openManualInNewTab">
-          <ExternalLink :size="15" />
-          新窗口
-        </el-button>
+        <div class="ta-help-center-header-actions">
+          <el-button text data-testid="help-center-start-guide" @click="emit('start-guide')">重新查看新手指引</el-button>
+          <el-button text class="ta-help-center-new-tab" title="在新标签页打开当前章节" @click="openManualInNewTab">
+            <ExternalLink :size="15" />
+            新窗口
+          </el-button>
+        </div>
       </div>
     </template>
 
@@ -134,7 +138,7 @@ function openManualInNewTab() {
           resize="none"
           data-testid="help-center-question-input"
           :disabled="!sideQuestionAvailable"
-          :placeholder="sideQuestionAvailable ? '例如：为什么初始化按钮不能点击？' : '请先在主对话发送一条消息'"
+          :placeholder="sideQuestionAvailable ? '例如：为什么初始化按钮不能点击？' : '请先选择工作区并初始化服务'"
           @keydown.enter.exact.prevent="askPet"
         />
         <el-button
@@ -148,7 +152,7 @@ function openManualInNewTab() {
           向小宠物提问
         </el-button>
         <p v-if="!sideQuestionAvailable" class="ta-help-center-pet-unavailable">
-          手册和全文搜索仍可使用；建立主对话后即可追问。
+          手册和全文搜索仍可使用；选择工作区并初始化服务后，无需建立主对话也能提问。
         </p>
         <div v-else-if="sideQuestionError && questionSubmitted" class="ta-help-center-pet-error" role="alert">
           {{ sideQuestionError }}
@@ -182,6 +186,12 @@ function openManualInNewTab() {
   justify-content: space-between;
   gap: 16px;
   padding-right: 30px;
+}
+
+.ta-help-center-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .ta-help-center-heading {

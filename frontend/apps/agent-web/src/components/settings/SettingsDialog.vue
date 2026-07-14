@@ -23,7 +23,8 @@ provide("api", api);
 const activeKey = ref<MenuKey>("appWorkspace");
 const autoOpenCreate = ref(false);
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
-const defaultMenuKey = computed<MenuKey>(() => hasSuperAdmin.value ? "appWorkspace" : "personal");
+const hasAppAdmin = computed(() => hasSuperAdmin.value || props.currentUser?.roles?.includes("APP_ADMIN") === true);
+const defaultMenuKey = computed<MenuKey>(() => hasAppAdmin.value ? "appWorkspace" : "personal");
 
 watch(
   () => props.open,
@@ -38,8 +39,11 @@ watch(
 watch(
   () => props.currentUser?.roles,
   () => {
-    if (!hasSuperAdmin.value && activeKey.value !== "personal") {
+    if (!hasAppAdmin.value && activeKey.value !== "personal") {
       activeKey.value = "personal";
+      autoOpenCreate.value = false;
+    } else if (!hasSuperAdmin.value && activeKey.value === "userManagement") {
+      activeKey.value = "appWorkspace";
       autoOpenCreate.value = false;
     }
   }
@@ -50,7 +54,7 @@ function close() {
 }
 
 function handleSwitchMenu(key: string) {
-  if (!hasSuperAdmin.value && key !== "personal") {
+  if ((!hasAppAdmin.value && key !== "personal") || (!hasSuperAdmin.value && key === "userManagement")) {
     selectMenu("personal");
     return;
   }
@@ -61,7 +65,7 @@ function handleSwitchMenu(key: string) {
 }
 
 function selectMenu(key: MenuKey) {
-  if (!hasSuperAdmin.value && key !== "personal") {
+  if ((!hasAppAdmin.value && key !== "personal") || (!hasSuperAdmin.value && key === "userManagement")) {
     activeKey.value = "personal";
     autoOpenCreate.value = false;
     return;

@@ -3,6 +3,8 @@ package com.icbc.testagent.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.icbc.testagent.domain.configuration.CodeRepository;
+import com.icbc.testagent.domain.configuration.ApplicationDefinition;
+import com.icbc.testagent.domain.configuration.ApplicationId;
 import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.CodeRepositoryType;
@@ -118,6 +120,21 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                     assertThat(saved.deploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value());
                     assertThat(saved.standard()).isFalse();
                 });
+    }
+
+    @Test
+    void applicationsPersistThroughMyBatisXmlMapper() {
+        ApplicationDefinition application = new ApplicationDefinition(
+                new ApplicationId("F-MYBATIS"),
+                "MyBatis 新应用",
+                true,
+                NOW,
+                NOW);
+
+        repository.saveApplication(application);
+
+        assertThat(repository.findApplication(application.appId()))
+                .contains(application);
     }
 
     private void insertLegacyRepository(String repositoryId, String gitUrl, boolean standard) {

@@ -24,6 +24,7 @@ import type {
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   ApplicationDefinition,
+  CreateApplicationPayload,
   ApplicationMember,
   ApplicationWorkspaceConfig,
   ApiFailure,
@@ -101,6 +102,7 @@ import type {
   SideQuestionResponse,
   SideQuestionRunRequest,
   SideQuestionRunResponse,
+  ManualQuestionRunRequest,
   SessionRuntimeStateSummary,
   SessionTreeMessagesResponse,
   SshKeyMetadata,
@@ -956,6 +958,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           body: JSON.stringify(payload)
         }
       ),
+    startManualQuestionRun: (payload: ManualQuestionRunRequest) =>
+      request<SideQuestionRunResponse>(`${opencodeRuntimeBase}/manual-question/runs`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
     createSession: (workspaceId: string, title: string) =>
       request<Session>(`${opencodeRuntimeBase}/sessions`, { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
     startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>
@@ -1211,6 +1218,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
 
     listApplications: (enabled = true) =>
       request<ApplicationDefinition[]>(`${configurationBase}/applications${query({ enabled: String(enabled) })}`),
+    createApplication: (payload: CreateApplicationPayload) =>
+      request<ApplicationDefinition>(`${configurationBase}/applications`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
     listApplicationMembers: (appId: string) =>
       request<ApplicationMember[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/members`),
     addApplicationMember: (appId: string, userId: string) =>

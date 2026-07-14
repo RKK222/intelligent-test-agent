@@ -78,6 +78,40 @@ class ConfigurationManagementControllerTest {
     }
 
     @Test
+    void onlySuperAdminCanCreateApplication() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.createApplication("F-NEW", "新应用"))
+                .thenReturn(new ApplicationResponse("F-NEW", "新应用", true));
+        WebTestClient superAdmin = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        superAdmin.post()
+                .uri("/api/internal/platform/configuration-management/applications")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"appId":"F-NEW","appName":"新应用"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.appId").isEqualTo("F-NEW")
+                .jsonPath("$.data.enabled").isEqualTo(true);
+
+        WebTestClient appAdmin = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+        appAdmin.post()
+                .uri("/api/internal/platform/configuration-management/applications")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"appId":"F-OTHER","appName":"其他应用"}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        verify(service).createApplication("F-NEW", "新应用");
+        org.mockito.Mockito.verify(service, org.mockito.Mockito.never()).createApplication("F-OTHER", "其他应用");
+    }
+
+    @Test
     void nonAdminCanAccessApplicationManagement() {
         ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
         when(service.listApplications(true)).thenReturn(List.of(new ApplicationResponse("app_gcms", "F-GCMS", true)));

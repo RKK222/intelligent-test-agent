@@ -134,6 +134,10 @@ const selectedAppId = ref("");
 const currentRoles = computed(() => props.currentUser?.roles ?? []);
 const currentRoleLabel = computed(() => (currentRoles.value.length ? currentRoles.value.join(",") : "无角色"));
 const hasAppSettingsPermission = computed(() => currentRoles.value.includes("APP_ADMIN") || currentRoles.value.includes("SUPER_ADMIN"));
+const hasSuperAdmin = computed(() => currentRoles.value.includes("SUPER_ADMIN"));
+const createApplicationOpen = ref(false);
+const newApplicationId = ref("");
+const newApplicationName = ref("");
 const selectedApp = computed(() => applications.value.find((item) => item.appId === selectedAppId.value));
 const pendingDangerTitle = computed(() => {
   if (!pendingDangerAction.value) return "";
@@ -323,6 +327,25 @@ async function loadApplications() {
     if (selectedAppId.value) {
       await loadAppContext();
     }
+  });
+}
+
+function openCreateApplication() {
+  newApplicationId.value = "";
+  newApplicationName.value = "";
+  createApplicationOpen.value = true;
+}
+
+async function createApplication() {
+  if (!hasSuperAdmin.value || !newApplicationId.value.trim() || !newApplicationName.value.trim()) return;
+  await run(async () => {
+    const created = await api.createApplication({
+      appId: newApplicationId.value.trim(),
+      appName: newApplicationName.value.trim()
+    });
+    createApplicationOpen.value = false;
+    applications.value = await api.listApplications(true);
+    selectedAppId.value = created.appId;
   });
 }
 
@@ -762,11 +785,37 @@ onBeforeUnmount(() => {
 
     <template v-else>
       <!-- 应用选择 -->
-      <div class="ta-app-selector" v-if="applications.length">
+      <div class="ta-app-selector">
         <el-select v-model="selectedAppId" placeholder="选择应用" aria-label="应用选择" style="width: 320px">
           <el-option v-for="app in applications" :key="app.appId" :label="app.appName" :value="app.appId" />
         </el-select>
+        <el-button v-if="hasSuperAdmin" type="primary" data-testid="create-application-open" @click="openCreateApplication">
+          <el-icon><CirclePlus /></el-icon>
+          新建应用
+        </el-button>
       </div>
+
+      <el-dialog v-model="createApplicationOpen" title="新建应用" width="460px" append-to-body>
+        <el-form label-position="top">
+          <el-form-item label="应用 ID">
+            <el-input v-model="newApplicationId" maxlength="128" placeholder="例如 F-COSS" />
+          </el-form-item>
+          <el-form-item label="应用名称">
+            <el-input v-model="newApplicationName" maxlength="255" placeholder="请输入应用名称" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="createApplicationOpen = false">取消</el-button>
+          <el-button
+            type="primary"
+            data-testid="create-application-submit"
+            :disabled="loading || !newApplicationId.trim() || !newApplicationName.trim()"
+            @click="createApplication"
+          >
+            创建并启用
+          </el-button>
+        </template>
+      </el-dialog>
 
       <!-- 子选项卡 -->
       <div class="ta-sub-tabs" v-if="selectedAppId">

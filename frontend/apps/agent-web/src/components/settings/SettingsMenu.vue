@@ -18,7 +18,8 @@ type MenuItem = { key: MenuKey; label: string; icon: Component };
 
 const items = computed<MenuItem[]>(() => {
   const menuItems: MenuItem[] = [];
-  if (props.currentUser?.roles?.includes("SUPER_ADMIN")) {
+  const roles = props.currentUser?.roles ?? [];
+  if (roles.includes("SUPER_ADMIN") || roles.includes("APP_ADMIN")) {
     menuItems.push(
       { key: "appWorkspace", label: "应用管理", icon: Setting },
       { key: "repository", label: "版本库管理", icon: Folder }
@@ -26,7 +27,7 @@ const items = computed<MenuItem[]>(() => {
   }
   menuItems.push({ key: "personal", label: "个人设置", icon: User });
   // 用户管理仅超级管理员可见
-  if (props.currentUser?.roles?.includes("SUPER_ADMIN")) {
+  if (roles.includes("SUPER_ADMIN")) {
     menuItems.push({ key: "userManagement", label: "用户管理", icon: UserFilled });
   }
   return menuItems;

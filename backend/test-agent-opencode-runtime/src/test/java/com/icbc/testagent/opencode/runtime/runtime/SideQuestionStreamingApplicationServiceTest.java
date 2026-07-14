@@ -112,6 +112,44 @@ class SideQuestionStreamingApplicationServiceTest {
     }
 
     @Test
+    void manualQuestionCreatesArchivedInternalRunWithoutMainSession() {
+        Fixture fixture = new Fixture(command -> {
+            // 本测试只验证同步创建边界，后台任务不执行。
+        });
+        when(fixture.targetResolver.sessionTarget(
+                        eq("opencode"),
+                        eq(USER_ID),
+                        org.mockito.ArgumentMatchers.argThat(id -> !MAIN_SESSION_ID.value().equals(id)),
+                        eq(TRACE_ID)))
+                .thenReturn(new AgentRuntimeTargetResolver.SessionRuntimeTarget(
+                        fixture.runtime, fixture.node, "/workspace", "remote_manual"));
+
+        SideQuestionRunStartResult result = fixture.service.startManual(
+                USER_ID,
+                "opencode",
+                WORKSPACE_ID,
+                "怎样初始化工作区？",
+                "provider/model",
+                TRACE_ID);
+
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(fixture.sessions).save(sessionCaptor.capture());
+        Session internal = sessionCaptor.getValue();
+        assertThat(internal.title()).isEqualTo("手册问答（内部）");
+        assertThat(internal.status()).isEqualTo(SessionStatus.ARCHIVED);
+        assertThat(internal.sourceType()).isEqualTo(ConversationSourceType.SIDE_QUESTION);
+        assertThat(internal.sourceRefId()).isNull();
+        assertThat(internal.createdByUserId()).isEqualTo(USER_ID);
+
+        ArgumentCaptor<Run> runCaptor = ArgumentCaptor.forClass(Run.class);
+        verify(fixture.runs).save(runCaptor.capture());
+        assertThat(runCaptor.getValue().runId()).isEqualTo(result.runId());
+        assertThat(runCaptor.getValue().sessionId()).isEqualTo(internal.sessionId());
+        assertThat(runCaptor.getValue().sourceRefId()).isNull();
+        verify(fixture.runtime, never()).runtime(any());
+    }
+
+    @Test
     void workflowSubscribesBeforeContextOnlyPromptStreamsAnswerAndCleansFork() {
         List<String> order = new ArrayList<>();
         Fixture fixture = new Fixture(Runnable::run);

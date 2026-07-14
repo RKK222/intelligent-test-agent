@@ -155,8 +155,8 @@ describe("runtime management settings", () => {
         }
       }
     });
-    expect(appAdmin.queryByText("应用管理")).toBeNull();
-    expect(appAdmin.queryByText("版本库管理")).toBeNull();
+    expect(appAdmin.getByText("应用管理")).toBeTruthy();
+    expect(appAdmin.getByText("版本库管理")).toBeTruthy();
     expect(appAdmin.getByText("个人设置")).toBeTruthy();
     expect(appAdmin.queryByText("运行管理")).toBeNull();
   });
@@ -184,7 +184,7 @@ describe("runtime management settings", () => {
     expect(view.queryByText("应用与工作区")).toBeNull();
   });
 
-  it("falls back to personal settings when a non-super-admin receives a hidden settings key", () => {
+  it("lets an application admin open application settings but not user management", () => {
     const view = render(SettingsPanel, {
       props: {
         activeKey: "appWorkspace",
@@ -203,9 +203,9 @@ describe("runtime management settings", () => {
       }
     });
 
-    expect(view.getByText("个人设置")).toBeTruthy();
-    expect(view.getByText("personal panel")).toBeTruthy();
-    expect(view.queryByText("app workspace panel")).toBeNull();
+    expect(view.getByText("应用管理")).toBeTruthy();
+    expect(view.getByText("app workspace panel")).toBeTruthy();
+    expect(view.queryByText("personal panel")).toBeNull();
   });
 
   it("loads runtime management overview and renders empty state", async () => {

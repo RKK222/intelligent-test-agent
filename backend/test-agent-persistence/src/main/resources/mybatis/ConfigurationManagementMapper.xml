@@ -81,6 +81,11 @@
         where app_id = #{appId}
     </select>
 
+    <insert id="insertApplication">
+        insert into applications(app_id, app_name, enabled, created_at, updated_at)
+        values (#{appId}, #{appName}, #{enabled}, #{createdAt}, #{updatedAt})
+    </insert>
+
     <select id="findApplicationsByMember" resultMap="ApplicationDefinitionMap">
         select a.app_id, a.app_name, a.enabled, a.created_at, a.updated_at
         from applications a

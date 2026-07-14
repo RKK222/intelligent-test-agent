@@ -1,12 +1,14 @@
 import agentConfigManual from "../../../user-manual/docs/guide/agent-config.md?raw";
 import conversationManual from "../../../user-manual/docs/guide/conversation.md?raw";
 import faqManual from "../../../user-manual/docs/guide/faq.md?raw";
+import firstTimeSetupManual from "../../../user-manual/docs/guide/first-time-setup.md?raw";
 import gettingStartedManual from "../../../user-manual/docs/guide/getting-started.md?raw";
 import processInitializationManual from "../../../user-manual/docs/guide/process-initialization.md?raw";
 import workspaceManual from "../../../user-manual/docs/guide/workspace.md?raw";
 
 export type HelpTopicId =
   | "getting-started"
+  | "first-time-setup"
   | "process-initialization"
   | "workspace"
   | "conversation"
@@ -40,6 +42,13 @@ export const HELP_TOPICS: HelpTopic[] = [
     description: "分配、启动与失败处理",
     path: "guide/process-initialization.html",
     content: processInitializationManual
+  },
+  {
+    id: "first-time-setup",
+    label: "首次使用前准备",
+    description: "角色、SSH、应用与工作空间",
+    path: "guide/first-time-setup.html",
+    content: firstTimeSetupManual
   },
   {
     id: "workspace",

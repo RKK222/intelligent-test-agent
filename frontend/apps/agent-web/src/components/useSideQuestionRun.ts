@@ -1,7 +1,7 @@
 import { onScopeDispose, ref } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import { subscribeRunEvents, type RunEventSubscribeOptions, type RunEventSubscription } from "@test-agent/event-stream-client";
-import type { RunEvent, SideQuestionRunRequest } from "@test-agent/shared-types";
+import type { ManualQuestionRunRequest, RunEvent, SideQuestionRunRequest } from "@test-agent/shared-types";
 
 const PROGRESS_COPY: Record<string, string> = {
   preparing_context: "正在读取当前上下文",
@@ -12,11 +12,17 @@ const PROGRESS_COPY: Record<string, string> = {
   composing: "正在整理答案"
 };
 
-type SideQuestionApi = Pick<BackendApiClient, "startSideQuestionRun">;
+type SideQuestionApi = Pick<BackendApiClient, "startSideQuestionRun" | "startManualQuestionRun">;
 
-export type SideQuestionRunInput = SideQuestionRunRequest & {
-  sessionId: string;
-};
+export type SideQuestionRunInput =
+  | (SideQuestionRunRequest & { sessionId: string; workspaceId?: never })
+  | (Omit<ManualQuestionRunRequest, "workspaceId"> & { workspaceId: string; sessionId?: never });
+
+function usesMainSession(
+  input: SideQuestionRunInput
+): input is SideQuestionRunRequest & { sessionId: string; workspaceId?: never } {
+  return typeof input.sessionId === "string";
+}
 
 export type UseSideQuestionRunOptions = {
   api: SideQuestionApi;
@@ -94,9 +100,10 @@ export function useSideQuestionRun(options: UseSideQuestionRunOptions) {
   async function submit(input: SideQuestionRunInput) {
     if (loading.value) return;
 
+    const mainSession = usesMainSession(input);
     const currentGeneration = ++generation;
     loading.value = true;
-    displaySessionId.value = input.sessionId;
+    displaySessionId.value = mainSession ? input.sessionId : `manual:${input.workspaceId}`;
     progress.value = null;
     hasReceivedProgress = false;
     answer.value = null;
@@ -104,8 +111,17 @@ export function useSideQuestionRun(options: UseSideQuestionRunOptions) {
     runId.value = null;
 
     try {
-      const { sessionId, ...payload } = input;
-      const started = await options.api.startSideQuestionRun(sessionId, payload);
+      const started = mainSession
+        ? await options.api.startSideQuestionRun(input.sessionId, {
+            question: input.question,
+            messageId: input.messageId,
+            model: input.model
+          })
+        : await options.api.startManualQuestionRun({
+            workspaceId: input.workspaceId,
+            question: input.question,
+            model: input.model
+          });
       // 浮层可能在启动 HTTP 尚未返回时已关闭；此时不得再挂上迟到的 EventSource。
       if (currentGeneration !== generation) return;
       runId.value = started.runId;

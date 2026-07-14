@@ -15,6 +15,10 @@ public interface ConfigurationManagementRepository {
 
     Optional<ApplicationDefinition> findApplication(ApplicationId appId);
 
+    default ApplicationDefinition saveApplication(ApplicationDefinition application) {
+        throw new UnsupportedOperationException("saveApplication is not implemented");
+    }
+
     List<ApplicationDefinition> findApplicationsByMember(UserId userId);
 
     boolean isActiveMember(ApplicationId appId, UserId userId);

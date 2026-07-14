@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 外部系统同步的应用定义，本期仅只读消费。
+ * 平台应用定义；可由外部系统同步，也可由超级管理员在平台内创建。
  */
 public record ApplicationDefinition(
         ApplicationId appId,

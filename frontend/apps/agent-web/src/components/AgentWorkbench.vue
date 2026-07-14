@@ -69,10 +69,12 @@ import {
   type ChatContextItem
 } from "../stores/chatContextStore";
 import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } from "./FigmaShell.vue";
+import FirstLoginGuide from "./FirstLoginGuide.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
 import HelpCenterDialog from "./HelpCenterDialog.vue";
+import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
 import { type PreviewMode } from "./WorkbenchFooter.vue";
 import OpencodeProcessStartupDialog from "./OpencodeProcessStartupDialog.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
@@ -346,6 +348,7 @@ const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
 const helpCenterOpen = ref(false);
 const helpCenterTopic = ref("getting-started");
+const firstLoginGuideRef = ref<InstanceType<typeof FirstLoginGuide> | null>(null);
 const robotSideQuestion = useSideQuestionRun({
   api,
   baseUrl: apiBaseUrl,
@@ -942,6 +945,9 @@ const opencodeCatalogReady = computed(() => opencodeProcessReady.value && Boolea
 const runtimeReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
 // 5. Run 启动：需要 opencode 弱健康 READY + workspace 文件路由成功
 const runReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
+// 宠物问答不再要求先建立主对话：有对话时复用上下文，无对话时只要工作区和用户进程就绪即可查手册。
+const robotQuestionAvailable = computed(() => opencodeProcessReady.value
+  && Boolean(session.value?.sessionId || selectedWorkspaceIdRef.value));
 
 // 模型和 Provider 登录后立即加载
 const modelsQuery = useQuery({
@@ -3632,17 +3638,37 @@ function latestRemoteMessageId(): string | undefined {
   return undefined;
 }
 
-async function handleRobotSideQuestion(question: string) {
-  if (!session.value?.sessionId) {
-    robotSideQuestion.error.value = "当前还没有可复用的对话上下文";
+async function submitRobotQuestion(question: string) {
+  if (session.value?.sessionId) {
+    await robotSideQuestion.submit({
+      sessionId: session.value.sessionId,
+      question,
+      messageId: latestRemoteMessageId(),
+      model: selectedModel.value || undefined
+    });
+    return;
+  }
+  const workspaceId = selectedWorkspaceIdRef.value;
+  if (!workspaceId || !opencodeProcessReady.value) {
+    robotSideQuestion.error.value = "请先选择工作区并初始化 TestAgent 服务";
     return;
   }
   await robotSideQuestion.submit({
-    sessionId: session.value.sessionId,
+    workspaceId,
     question,
-    messageId: latestRemoteMessageId(),
     model: selectedModel.value || undefined
   });
+}
+
+async function handleRobotSideQuestion(question: string) {
+  const groundedQuestion = session.value?.sessionId
+    ? question
+    : buildManualQuestionPrompt(DEFAULT_HELP_TOPIC, question);
+  await submitRobotQuestion(groundedQuestion);
+}
+
+async function handleManualQuestion(question: string) {
+  await submitRobotQuestion(question);
 }
 
 function handleCloseRobotSideQuestion() {
@@ -3655,6 +3681,19 @@ function handleCloseRobotSideQuestion() {
 function openHelpCenter(topic = "getting-started") {
   helpCenterTopic.value = topic;
   helpCenterOpen.value = true;
+}
+
+function prepareFirstLoginGuide() {
+  leftPanelOpen.value = true;
+  rightPanelOpen.value = true;
+  centerMode.value = "editor";
+}
+
+async function restartFirstLoginGuide() {
+  helpCenterOpen.value = false;
+  prepareFirstLoginGuide();
+  await nextTick();
+  firstLoginGuideRef.value?.restart();
 }
 
 function summarizePromptParts(parts: PromptPart[]) {
@@ -4843,7 +4882,8 @@ async function handleLogout() {
     :side-question-error="robotSideQuestion.error.value"
     :side-question-loading="robotSideQuestion.loading.value"
     :side-question-progress="robotSideQuestion.progress.value"
-    :side-question-available="Boolean(session?.sessionId)"
+    :side-question-available="robotQuestionAvailable"
+    :side-question-manual-mode="!session?.sessionId"
     :runtime-inventory="runtimeInventoryForShell"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
@@ -5217,13 +5257,21 @@ async function handleLogout() {
   <HelpCenterDialog
     :open="helpCenterOpen"
     :initial-topic="helpCenterTopic"
-    :side-question-available="Boolean(session?.sessionId)"
+    :side-question-available="robotQuestionAvailable"
     :side-question-answer="robotSideQuestion.answer.value"
     :side-question-error="robotSideQuestion.error.value"
     :side-question-loading="robotSideQuestion.loading.value"
     :side-question-progress="robotSideQuestion.progress.value"
     @close="helpCenterOpen = false"
-    @ask-pet="handleRobotSideQuestion"
+    @ask-pet="handleManualQuestion"
+    @start-guide="restartFirstLoginGuide"
+  />
+
+  <FirstLoginGuide
+    ref="firstLoginGuideRef"
+    :user-id="authStore.currentUser?.userId"
+    @prepare="prepareFirstLoginGuide"
+    @finish="openHelpCenter('getting-started')"
   />
 
   <OpencodeProcessStartupDialog

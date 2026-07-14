@@ -47,6 +47,52 @@ class ConfigurationManagementApplicationServiceTest {
     private final SshKeyTestFixtures sshKeyFixtures = new SshKeyTestFixtures();
 
     @Test
+    void createApplicationNormalizesAndPersistsEnabledDefinition() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+        when(repository.findApplication(new ApplicationId("F-NEW"))).thenReturn(Optional.empty());
+        when(repository.saveApplication(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ConfigurationManagementResponses.ApplicationResponse response =
+                service.createApplication("  F-NEW  ", "  新应用  ");
+
+        assertThat(response.appId()).isEqualTo("F-NEW");
+        assertThat(response.appName()).isEqualTo("新应用");
+        assertThat(response.enabled()).isTrue();
+        verify(repository).saveApplication(argThat(application ->
+                application.enabled()
+                        && "F-NEW".equals(application.appId().value())
+                        && "新应用".equals(application.appName())));
+    }
+
+    @Test
+    void createApplicationRejectsDuplicateId() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+        when(repository.findApplication(new ApplicationId("F-OLD"))).thenReturn(Optional.of(
+                new ApplicationDefinition(new ApplicationId("F-OLD"), "已有应用", true, NOW, NOW)));
+
+        assertThatThrownBy(() -> service.createApplication("F-OLD", "重复应用"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .saveApplication(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void removeMemberInvalidatesUserContextsAfterRepositoryDeleteSucceeds() {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
         ConversationContextStore contextStore = org.mockito.Mockito.mock(ConversationContextStore.class);

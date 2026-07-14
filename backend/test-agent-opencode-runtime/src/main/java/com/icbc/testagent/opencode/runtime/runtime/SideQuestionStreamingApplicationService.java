@@ -28,6 +28,7 @@ import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.event.RunEventAppender;
 import com.icbc.testagent.event.RunEventLiveBus;
 import java.nio.charset.StandardCharsets;
@@ -61,6 +62,7 @@ public class SideQuestionStreamingApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SideQuestionStreamingApplicationService.class);
     private static final String INTERNAL_SESSION_TITLE = "宠物旁路问答（内部）";
+    private static final String MANUAL_SESSION_TITLE = "手册问答（内部）";
     private static final String SAFE_FAILURE_MESSAGE = "旁路问答暂时失败";
 
     private final SessionRepository sessionRepository;
@@ -213,6 +215,7 @@ public class SideQuestionStreamingApplicationService {
                         normalizedQuestion,
                         normalizedMessageId,
                         normalizedModel,
+                        true,
                         traceId))
                 .subscribeOn(backgroundScheduler)
                 .subscribe(
@@ -226,14 +229,94 @@ public class SideQuestionStreamingApplicationService {
         return new SideQuestionRunStartResult(pending.runId());
     }
 
+    /**
+     * 无主对话时为手册问答创建独立归档 Session/Run。
+     *
+     * <p>公共目标解析器会为该内部 Session 创建远端会话；后台回答完成后删除远端会话，
+     * 问题和答案均不进入普通会话列表或消息历史。
+     */
+    public SideQuestionRunStartResult startManual(
+            UserId userId,
+            String agentId,
+            WorkspaceId workspaceId,
+            String question,
+            String model,
+            String traceId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(workspaceId, "workspaceId must not be null");
+        String normalizedQuestion = SideQuestionPolicy.requireQuestion(question);
+        String normalizedModel = normalizeOptional(model);
+
+        Instant now = Instant.now();
+        Session internalSession = new Session(
+                        new SessionId(RuntimeIdGenerator.sessionId()),
+                        workspaceId,
+                        MANUAL_SESSION_TITLE,
+                        SessionStatus.ARCHIVED,
+                        now,
+                        now,
+                        traceId)
+                .withSource(ConversationSourceType.SIDE_QUESTION, null, userId);
+        internalSession = sessionRepository.save(internalSession);
+
+        // 复用公共 session 目标解析，统一完成用户进程节点选择、远端会话创建和映射持久化。
+        AgentRuntimeTargetResolver.SessionRuntimeTarget target = targetResolver.sessionTarget(
+                agentId,
+                userId,
+                internalSession.sessionId().value(),
+                traceId);
+        Run pending = new Run(
+                        new RunId(RuntimeIdGenerator.runId()),
+                        internalSession.sessionId(),
+                        workspaceId,
+                        RunStatus.PENDING,
+                        now,
+                        now,
+                        traceId)
+                .withSource(ConversationSourceType.SIDE_QUESTION, null, userId)
+                .withRuntimeSelection(null, normalizedModel);
+        pending = runRepository.save(pending);
+        routingDecisionRepository.save(new RoutingDecision(
+                pending.runId(),
+                target.node().executionNodeId(),
+                RoutingReason.MANUAL_OVERRIDE,
+                now,
+                traceId));
+        appendDurable(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
+
+        Run taskRun = pending;
+        Session taskSession = internalSession;
+        Mono.fromRunnable(() -> execute(
+                        taskRun,
+                        taskSession,
+                        null,
+                        target,
+                        normalizedQuestion,
+                        null,
+                        normalizedModel,
+                        false,
+                        traceId))
+                .subscribeOn(backgroundScheduler)
+                .subscribe(
+                        ignored -> {
+                        },
+                        error -> LOGGER.error(
+                                "event=manual_question_background_unhandled runId={} error={} traceId={}",
+                                taskRun.runId().value(),
+                                error.getClass().getSimpleName(),
+                                traceId));
+        return new SideQuestionRunStartResult(pending.runId());
+    }
+
     private void execute(
             Run pending,
             Session internalSession,
-            SessionId mainSessionId,
+            SessionId sourceSessionId,
             AgentRuntimeTargetResolver.SessionRuntimeTarget target,
             String question,
             String messageId,
             String model,
+            boolean forkSourceSession,
             String traceId) {
         SideQuestionTemporarySessionCleanup cleanup = null;
         String temporarySessionId = null;
@@ -249,32 +332,38 @@ public class SideQuestionStreamingApplicationService {
                     RunEventType.SIDE_QUESTION_STARTED,
                     traceId,
                     Instant.now(),
-                    Map.of("sessionId", mainSessionId.value()));
-            progress(running.runId(), "forking", traceId, Map.of());
-            temporarySessionId = fork(target, messageId, traceId);
+                    sourceSessionId == null
+                            ? Map.of("knowledgeBase", "user-manual")
+                            : Map.of("sessionId", sourceSessionId.value()));
+            progress(running.runId(), forkSourceSession ? "forking" : "preparing_context", traceId, Map.of());
+            temporarySessionId = forkSourceSession
+                    ? fork(target, messageId, traceId)
+                    : target.remoteSessionId();
             String createdTemporarySessionId = temporarySessionId;
             cleanup = new SideQuestionTemporarySessionCleanup(
                     () -> deleteTemporarySession(target, createdTemporarySessionId, traceId));
-            LOGGER.info(
-                    "event=side_question_fork_created_pending_mapping runId={} remoteSessionId={} nodeId={} traceId={}",
-                    running.runId().value(),
-                    temporarySessionId,
-                    target.node().executionNodeId().value(),
-                    traceId);
-            String mappedTemporarySessionId = temporarySessionId;
-            sessionRepository.attachOpencodeSession(
-                            internalSession.sessionId(),
-                            mappedTemporarySessionId,
-                            target.node().executionNodeId(),
-                            Instant.now(),
-                            traceId)
-                    .orElseThrow(() -> new IllegalStateException("side-question fork mapping could not be saved"));
-            LOGGER.info(
-                    "event=side_question_fork_mapping_saved runId={} remoteSessionId={} nodeId={} traceId={}",
-                    running.runId().value(),
-                    temporarySessionId,
-                    target.node().executionNodeId().value(),
-                    traceId);
+            if (forkSourceSession) {
+                LOGGER.info(
+                        "event=side_question_fork_created_pending_mapping runId={} remoteSessionId={} nodeId={} traceId={}",
+                        running.runId().value(),
+                        temporarySessionId,
+                        target.node().executionNodeId().value(),
+                        traceId);
+                String mappedTemporarySessionId = temporarySessionId;
+                sessionRepository.attachOpencodeSession(
+                                internalSession.sessionId(),
+                                mappedTemporarySessionId,
+                                target.node().executionNodeId(),
+                                Instant.now(),
+                                traceId)
+                        .orElseThrow(() -> new IllegalStateException("side-question fork mapping could not be saved"));
+                LOGGER.info(
+                        "event=side_question_fork_mapping_saved runId={} remoteSessionId={} nodeId={} traceId={}",
+                        running.runId().value(),
+                        temporarySessionId,
+                        target.node().executionNodeId().value(),
+                        traceId);
+            }
 
             String promptMessageId = RuntimeIdGenerator.messageId();
             Set<String> baselineMessageIds = snapshotMessageIds(target, temporarySessionId, traceId);

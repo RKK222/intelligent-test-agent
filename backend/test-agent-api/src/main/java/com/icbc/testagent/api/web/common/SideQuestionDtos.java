@@ -47,6 +47,15 @@ public final class SideQuestionDtos {
     }
 
     /**
+     * 无主对话时的手册问答请求；workspaceId 只用于解析用户专属运行目录，不创建普通聊天会话。
+     */
+    public record ManualStreamRequest(
+            @NotBlank String workspaceId,
+            @NotBlank String question,
+            String model) {
+    }
+
+    /**
      * 流式启动只返回可订阅的 Run ID，后续内容统一通过 RunEvent SSE 获取。
      */
     public record StreamResponse(String runId) {

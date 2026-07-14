@@ -19,5 +19,6 @@ corepack pnpm --filter @test-agent/user-manual build
 ## 内容边界
 
 - `docs/guide/`：用户可见的稳定操作说明，也是帮助中心宠物问答的事实来源。
+- `docs/guide/first-time-setup.md`：首次使用的角色、SSH、应用、工作空间和进程准备顺序；操作入口必须与当前权限和页面文案一致。
 - `docs/.vitepress/`：导航、搜索、主题和构建输出配置。
 - 产品行为发生变化时，应先同步对应章节，再调整上下文帮助入口。

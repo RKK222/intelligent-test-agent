@@ -43,6 +43,7 @@ export default defineConfig({
         text: "使用指南",
         items: [
           { text: "快速开始", link: "/guide/getting-started" },
+          { text: "首次使用前准备", link: "/guide/first-time-setup" },
           { text: "初始化 TestAgent 进程", link: "/guide/process-initialization" },
           { text: "应用版本与个人工作区", link: "/guide/workspace" },
           { text: "对话与上下文", link: "/guide/conversation" },

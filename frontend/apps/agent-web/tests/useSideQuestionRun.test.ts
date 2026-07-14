@@ -18,6 +18,7 @@ function event(type: string, payload: Record<string, unknown> = {}): RunEvent {
 
 function setup() {
   const startSideQuestionRun = vi.fn().mockResolvedValue({ runId: "run_side_1" });
+  const startManualQuestionRun = vi.fn().mockResolvedValue({ runId: "run_side_1" });
   const close = vi.fn();
   let options: RunEventSubscribeOptions | undefined;
   const subscribe = vi.fn((next: RunEventSubscribeOptions): RunEventSubscription => {
@@ -26,11 +27,11 @@ function setup() {
   });
   const scope = effectScope();
   const state = scope.run(() => useSideQuestionRun({
-    api: { startSideQuestionRun },
+    api: { startSideQuestionRun, startManualQuestionRun },
     baseUrl: "http://backend.test",
     subscribe
   }))!;
-  return { startSideQuestionRun, subscribe, close, getOptions: () => options!, scope, state };
+  return { startSideQuestionRun, startManualQuestionRun, subscribe, close, getOptions: () => options!, scope, state };
 }
 
 describe("useSideQuestionRun", () => {
@@ -55,6 +56,24 @@ describe("useSideQuestionRun", () => {
     expect(fixture.getOptions().runId).toBe("run_side_1");
     expect(fixture.getOptions().baseUrl).toBe("http://backend.test");
     expect(fixture.state.loading.value).toBe(true);
+  });
+
+  it("starts a manual-grounded run when there is no main session", async () => {
+    const fixture = setup();
+
+    await fixture.state.submit({
+      workspaceId: "wrk_manual",
+      question: "怎样初始化工作区？",
+      model: "provider/model"
+    });
+
+    expect(fixture.startSideQuestionRun).not.toHaveBeenCalled();
+    expect(fixture.startManualQuestionRun).toHaveBeenCalledWith({
+      workspaceId: "wrk_manual",
+      question: "怎样初始化工作区？",
+      model: "provider/model"
+    });
+    expect(fixture.subscribe).toHaveBeenCalledOnce();
   });
 
   it("renders only real progress stages and appends answer deltas", async () => {
@@ -148,7 +167,7 @@ describe("useSideQuestionRun", () => {
     const subscribe = vi.fn();
     const scope = effectScope();
     const state = scope.run(() => useSideQuestionRun({
-      api: { startSideQuestionRun },
+      api: { startSideQuestionRun, startManualQuestionRun: vi.fn() },
       subscribe
     }))!;
 

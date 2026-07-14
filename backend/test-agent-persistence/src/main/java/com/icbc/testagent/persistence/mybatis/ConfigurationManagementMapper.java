@@ -15,6 +15,8 @@ public interface ConfigurationManagementMapper {
 
     ApplicationDefinitionRow findApplication(@Param("appId") String appId);
 
+    int insertApplication(ApplicationDefinitionRow application);
+
     List<ApplicationDefinitionRow> findApplicationsByMember(@Param("userId") String userId);
 
     long countActiveMember(@Param("appId") String appId, @Param("userId") String userId);

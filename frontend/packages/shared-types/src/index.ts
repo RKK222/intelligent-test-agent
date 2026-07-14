@@ -338,6 +338,13 @@ export type SideQuestionRunRequest = {
   model?: string;
 };
 
+/** 无主对话的手册问答只需要当前工作区，问题正文由前端使用内置手册章节约束。 */
+export type ManualQuestionRunRequest = {
+  workspaceId: string;
+  question: string;
+  model?: string;
+};
+
 export type SideQuestionRunResponse = {
   runId: string;
 };
@@ -1713,6 +1720,11 @@ export type ApplicationDefinition = {
   appId: string;
   appName: string;
   enabled: boolean;
+};
+
+export type CreateApplicationPayload = {
+  appId: string;
+  appName: string;
 };
 
 export type PlatformUserSummary = {

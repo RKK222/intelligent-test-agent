@@ -11,6 +11,9 @@ final class ConfigurationManagementDtos {
     record AddMemberRequest(String userId) {
     }
 
+    record CreateApplicationRequest(String appId, String appName) {
+    }
+
     record CreateRepositoryRequest(String gitUrl, String name, String englishName, Boolean standard, String repositoryType, String deploymentMode) {
     }
 

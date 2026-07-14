@@ -5,6 +5,7 @@ import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.api.web.common.SideQuestionDtos;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
 import com.icbc.testagent.opencode.runtime.runtime.SideQuestionStreamingApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
@@ -432,6 +433,25 @@ public class PlatformOpencodeRuntimeController {
                         new SessionId(sessionId),
                         request.question(),
                         request.messageId(),
+                        request.model(),
+                        traceId)));
+    }
+
+    /**
+     * 创建不依赖主对话的手册问答 Run；内部 Session 从创建起即归档，回答仍通过 RunEvent SSE 输出。
+     */
+    @PostMapping("/api/internal/platform/opencode-runtime/manual-question/runs")
+    public Mono<ApiResponse<Object>> startManualQuestionRun(
+            @jakarta.validation.Valid @RequestBody SideQuestionDtos.ManualStreamRequest request,
+            ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return RuntimeApiSupport.blockingObjectResponse(
+                exchange,
+                traceId -> SideQuestionDtos.StreamResponse.from(sideQuestionStreamingService.startManual(
+                        userId,
+                        "opencode",
+                        new WorkspaceId(request.workspaceId()),
+                        request.question(),
                         request.model(),
                         traceId)));
     }

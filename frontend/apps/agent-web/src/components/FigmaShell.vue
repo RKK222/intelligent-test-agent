@@ -46,8 +46,9 @@ const props = withDefaults(
     sideQuestionError?: string | null;
     sideQuestionLoading?: boolean;
     sideQuestionProgress?: string | null;
-    /** 宠物旁路问答必须基于已存在的主 Session 创建 fork；新对话草稿不满足该条件。 */
+    /** 宠物问答可复用主对话；没有主对话时由工作台切换为用户手册知识上下文。 */
     sideQuestionAvailable?: boolean;
+    sideQuestionManualMode?: boolean;
     showLeftPanel?: boolean;
     showRightPanel?: boolean;
     runtimeInventory?: RuntimeInventorySummary;
@@ -63,6 +64,7 @@ const props = withDefaults(
     selectedAppId: "fgcms-psn",
     showProcessStatusInPet: false,
     sideQuestionAvailable: true,
+    sideQuestionManualMode: false,
     showLeftPanel: true,
     showRightPanel: true
   }
@@ -1302,7 +1304,7 @@ function onRobotClick() {
     clickTimer = setTimeout(() => {
       clickTimer = null;
       if (processStatusInteractionEnabled.value) {
-        // 进程就绪后始终打开统一宠物浮层；无主 Session 时只禁用对话页，游戏仍可直接进入。
+        // 进程就绪后始终打开统一宠物浮层；无主 Session 时由父层自动切换为用户手册问答。
         if (robotProcessTone.value === "ready") {
           robotProcessStatusOpen.value = false;
           robotQuestionOpen.value = true;
@@ -1498,6 +1500,7 @@ function submitJoinApp() {
           type="button"
           class="figma-header-help"
           data-testid="help-center-open"
+          data-onboarding="manual"
           aria-label="打开用户手册"
           title="用户手册"
           @click.stop="emit('open-help', 'getting-started')"
@@ -1604,6 +1607,7 @@ function submitJoinApp() {
           <button
             type="button"
             :class="['figma-app-menu-trigger', appMenuOpen && 'is-open']"
+            data-onboarding="application"
             aria-haspopup="listbox"
             :aria-expanded="appMenuOpen"
             @click="toggleAppMenu"
@@ -1787,7 +1791,7 @@ function submitJoinApp() {
       </aside>
 
       <div class="figma-panel-group">
-        <div class="figma-panel-left" :class="{ 'is-resizing': resizing === 'left' }" :style="leftPanelStyle">
+        <div class="figma-panel-left" data-onboarding="workspace" :class="{ 'is-resizing': resizing === 'left' }" :style="leftPanelStyle">
           <slot name="files" />
         </div>
         <div
@@ -1803,7 +1807,7 @@ function submitJoinApp() {
             <div class="figma-panel-center">
               <slot name="editor" />
             </div>
-            <div class="figma-chat-panel-wrapper" :class="{ 'is-resizing': resizing === 'right' }" :style="rightPanelStyle">
+            <div class="figma-chat-panel-wrapper" data-onboarding="chat" :class="{ 'is-resizing': resizing === 'right' }" :style="rightPanelStyle">
               <div
                 v-if="showRightPanel"
                 class="figma-chat-resize-handle"
@@ -1945,10 +1949,10 @@ function submitJoinApp() {
         class="figma-robot-process-question"
         data-testid="robot-side-question-open-from-process"
         :disabled="!sideQuestionAvailable"
-        :title="sideQuestionAvailable ? '问问宠物当前任务' : '请先在主对话发送一条消息'"
+        :title="sideQuestionAvailable ? (sideQuestionManualMode ? '问问宠物用户手册' : '问问宠物当前任务') : '请先选择工作区并初始化服务'"
         @click="openRobotSideQuestionFromProcess"
       >
-        问问宠物当前任务
+        {{ sideQuestionManualMode ? "问问宠物用户手册" : "问问宠物当前任务" }}
       </button>
     </section>
     <section
@@ -1987,11 +1991,11 @@ function submitJoinApp() {
           rows="2"
           maxlength="4000"
           :disabled="!sideQuestionAvailable"
-          :placeholder="sideQuestionAvailable ? '问问当前任务，不会写入主对话' : '请先在主对话发送一条消息'"
+          :placeholder="sideQuestionAvailable ? (sideQuestionManualMode ? '问操作方法，小宠物会查用户手册' : '问问当前任务，不会写入主对话') : '请先选择工作区并初始化服务'"
           @keydown.enter.exact.prevent="submitRobotQuestion"
         />
         <div class="figma-robot-side-question-footer">
-          <span>{{ sideQuestionAvailable ? "临时上下文 · 不改主历史" : "建立主对话后即可向宠物提问" }}</span>
+          <span>{{ sideQuestionAvailable ? (sideQuestionManualMode ? "用户手册 · 不创建主对话" : "临时上下文 · 不改主历史") : "工作区和服务就绪后即可提问" }}</span>
           <button
             type="button"
             data-testid="robot-side-question-submit"

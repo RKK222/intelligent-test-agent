@@ -33,6 +33,7 @@ import org.springframework.web.server.ServerWebExchange;
 public class ConfigurationManagementController {
 
     private static final String APP_ADMIN = "APP_ADMIN";
+    private static final String SUPER_ADMIN = "SUPER_ADMIN";
 
     private final ConfigurationManagementApplicationService service;
     private final ManagedWorkspaceApplicationService workspaceService;
@@ -64,6 +65,15 @@ public class ConfigurationManagementController {
             ServerWebExchange exchange) {
         AuthWebSupport.getAuthPrincipal(exchange);
         return ok(exchange, service.listApplications(enabled));
+    }
+
+    /** 应用属于平台级主数据，只有超级管理员可以在平台内新建。 */
+    @PostMapping("/applications")
+    public ApiResponse<Object> createApplication(
+            @RequestBody ConfigurationManagementDtos.CreateApplicationRequest request,
+            ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, SUPER_ADMIN);
+        return ok(exchange, service.createApplication(request.appId(), request.appName()));
     }
 
     @GetMapping("/applications/{appId}/members")

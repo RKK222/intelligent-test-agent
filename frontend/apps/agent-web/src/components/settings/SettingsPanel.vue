@@ -26,9 +26,11 @@ const panels: Record<string, PanelDef> = {
 };
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasAppAdmin = computed(() => hasSuperAdmin.value || props.currentUser?.roles?.includes("APP_ADMIN") === true);
 
 const effectiveKey = computed(() => {
-  if (hasSuperAdmin.value) {
+  if (hasAppAdmin.value) {
+    if (props.activeKey === "userManagement" && !hasSuperAdmin.value) return "appWorkspace";
     return panels[props.activeKey] ? props.activeKey : "appWorkspace";
   }
   return "personal";

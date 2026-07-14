@@ -1062,6 +1062,35 @@ describe("backend-api", () => {
     );
   });
 
+  it("starts a manual question run without a main session", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { runId: "run_manual1234567890" }
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.startManualQuestionRun({
+      workspaceId: "wrk_1",
+      question: "怎样初始化工作区？",
+      model: "anthropic/claude-sonnet-4-5"
+    })).resolves.toEqual({ runId: "run_manual1234567890" });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/manual-question/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          workspaceId: "wrk_1",
+          question: "怎样初始化工作区？",
+          model: "anthropic/claude-sonnet-4-5"
+        })
+      })
+    );
+  });
+
   it("maps configuration management APIs through platform URLs", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
@@ -1208,6 +1237,25 @@ describe("backend-api", () => {
     expect(fetcher).toHaveBeenCalledWith(
       "http://api/api/internal/platform/configuration-management/repository-types",
       expect.any(Object)
+    );
+  });
+
+  it("creates an enabled application through the configuration API", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: { appId: "F-NEW", appName: "新应用", enabled: true }
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.createApplication({ appId: "F-NEW", appName: "新应用" }))
+      .resolves.toEqual({ appId: "F-NEW", appName: "新应用", enabled: true });
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/configuration-management/applications",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ appId: "F-NEW", appName: "新应用" })
+      })
     );
   });
 

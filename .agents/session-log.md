@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-14 - 补齐首次登录指引、无主对话手册问答与初始化准备流程
+
+- Why:
+  - 用户希望首次登录通过 01-04 聚光步骤认识应用、工作区、对话和手册，并要求宠物在没有主对话时仍可依据内置手册回答；随后补充首次初始化前应明确 SSH、角色权限、新建应用和新建工作空间的操作顺序。
+- What:
+  - 工作台新增按用户和版本记忆的首次登录引导，最后一步打开用户手册，帮助中心可重新播放；主页与顶部手册入口复用既有帮助中心。
+  - 宠物问答保留已有主 Session 的临时 fork 模式，同时新增无主对话手册模式：按当前工作区创建从一开始即归档的内部 Session 和独立 `SIDE_QUESTION` Run，通过既有 RunEvent SSE 回答并删除远端临时会话，不创建普通主对话或污染主时间线。
+  - 超级管理员可在设置页新建并启用应用；应用管理员恢复可见应用管理和版本库管理，但不能新建应用或管理平台用户。新增“首次使用前准备”手册，覆盖角色、个人 SSH Key、安全边界、应用、版本库关联、应用工作空间、个人工作区和最后初始化 TestAgent 服务。
+- How:
+  - 新建应用沿 configuration-management 业务服务和 MyBatis XML mapper 写入既有 `applications` 表，不新增 JDBC SQL 或数据库 migration；API 入口校验 `SUPER_ADMIN`。无主对话问答复用公共运行目标解析、RunEvent、远端会话删除和前端 `useSideQuestionRun`，手册 Markdown 继续作为同一事实来源并受问题长度预算约束。同步 HTTP API、事件流、前后端模块 README 和用户手册。
+- Result:
+  - 前端 56 个 Vitest 文件通过（771 passed/1 skipped），agent-web typecheck、用户手册构建和生产 build 通过；后端全量主代码 Java 21 构建及 `.env.test` / `test` profile 三服务重启通过，health/readiness 为 UP，主页、首次准备手册、登录 CORS 和 manager WebSocket 正常。配置管理业务测试 20/20、MyBatis 持久化测试 3/3 通过；opencode-runtime/API 测试仍被会话日志已记录的 11 个无关旧测试源码错误阻断，生产代码已完成编译。真实浏览器验证手册导航和正文正确；登录后聚光层未提交页面预填凭据，交互由组件测试覆盖。保留既有 CSS `@import` 顺序和大 chunk 构建警告。
+
 ### 2026-07-14 - 工作台主页增加用户手册入口
 
 - Why:

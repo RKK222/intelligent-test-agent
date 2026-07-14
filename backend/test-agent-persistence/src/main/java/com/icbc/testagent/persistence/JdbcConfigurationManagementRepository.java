@@ -39,6 +39,11 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
             instant(rs, "updated_at"),
             instant(rs, "deleted_at"));
 
+    @Override
+    public ApplicationDefinition saveApplication(ApplicationDefinition application) {
+        throw new UnsupportedOperationException("新增应用只允许通过 MyBatis 配置管理仓储执行");
+    }
+
     private final RowMapper<CodeRepository> repositoryMapper = (rs, rowNum) -> new CodeRepository(
             new CodeRepositoryId(rs.getString("repository_id")),
             rs.getString("git_url"),

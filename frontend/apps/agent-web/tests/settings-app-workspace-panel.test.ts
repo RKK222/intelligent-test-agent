@@ -79,6 +79,7 @@ const repositoryTree: RepositoryTreeResponse = {
 function createApi(): Partial<BackendApiClient> {
   return {
     listApplications: vi.fn().mockResolvedValue([{ appId: "F-COSS", appName: "F-COSS", enabled: true }]),
+    createApplication: vi.fn().mockResolvedValue({ appId: "F-NEW", appName: "新应用", enabled: true }),
     listApplicationMembers: vi.fn().mockResolvedValue([]),
     listRepositories: vi.fn().mockResolvedValue({ items: repositories, page: 1, size: 100, total: repositories.length }),
     listRepositoryTypes: vi.fn().mockResolvedValue([
@@ -231,14 +232,14 @@ function getTreePathButton(container: ParentNode, path: string) {
   return getTreePathElement(container, path)!.closest("button") as HTMLButtonElement;
 }
 
-function renderPanel(api = createApi()) {
+function renderPanel(api = createApi(), roles = ["APP_ADMIN"]) {
   return render(SettingsAppWorkspacePanel, {
     props: {
       currentUser: {
         userId: "usr_admin",
         username: "admin",
         unifiedAuthId: "AUTH_ADMIN",
-        roles: ["APP_ADMIN"]
+        roles
       }
     },
     global: {
@@ -255,6 +256,13 @@ function renderPanel(api = createApi()) {
         },
         ElCheckbox: ElCheckboxStub,
         ElDatePicker: ElDatePickerStub,
+        ElDialog: {
+          props: ["modelValue"],
+          emits: ["update:modelValue"],
+          template: `<section v-if="modelValue"><slot /><slot name="footer" /></section>`
+        },
+        ElForm: { template: `<form><slot /></form>` },
+        ElFormItem: { template: `<label><slot /></label>` },
         ElIcon: {
           template: `<span><slot /></span>`
         },
@@ -277,6 +285,24 @@ function renderPanel(api = createApi()) {
     }
   });
 }
+
+it("lets only a super admin create an enabled application from settings", async () => {
+  const api = createApi();
+  vi.mocked(api.listApplications!).mockResolvedValueOnce([{ appId: "F-COSS", appName: "F-COSS", enabled: true }])
+    .mockResolvedValueOnce([
+      { appId: "F-COSS", appName: "F-COSS", enabled: true },
+      { appId: "F-NEW", appName: "新应用", enabled: true }
+    ]);
+  const view = renderPanel(api, ["SUPER_ADMIN"]);
+  await waitFor(() => expect(view.getByTestId("create-application-open")).toBeTruthy());
+
+  await fireEvent.click(view.getByTestId("create-application-open"));
+  await fireEvent.update(view.getByPlaceholderText("例如 F-COSS"), "F-NEW");
+  await fireEvent.update(view.getByPlaceholderText("请输入应用名称"), "新应用");
+  await fireEvent.click(view.getByTestId("create-application-submit"));
+
+  await waitFor(() => expect(api.createApplication).toHaveBeenCalledWith({ appId: "F-NEW", appName: "新应用" }));
+});
 
 describe("SettingsAppWorkspacePanel repository settings", () => {
   afterEach(() => {

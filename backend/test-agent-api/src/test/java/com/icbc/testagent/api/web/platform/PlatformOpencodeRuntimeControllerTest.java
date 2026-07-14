@@ -188,6 +188,36 @@ class PlatformOpencodeRuntimeControllerTest {
     }
 
     @Test
+    void runtimeControllerStartsManualQuestionRunWithoutMainSession() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SideQuestionStreamingApplicationService streamingService =
+                org.mockito.Mockito.mock(SideQuestionStreamingApplicationService.class);
+        UserId userId = new UserId("usr_1234567890abcdef");
+        when(streamingService.startManual(
+                        eq(userId),
+                        eq("opencode"),
+                        eq(new com.icbc.testagent.domain.workspace.WorkspaceId("wrk_1234567890abcdef")),
+                        eq("how do I initialize?"),
+                        eq("anthropic/claude-sonnet"),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new SideQuestionRunStartResult(new RunId("run_manual1234567890")));
+        WebTestClient client = client(service, streamingService, principal(userId));
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/manual-question/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"workspaceId":"wrk_1234567890abcdef","question":"how do I initialize?","model":"anthropic/claude-sonnet"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.runId").isEqualTo("run_manual1234567890");
+    }
+
+    @Test
     void runtimeControllerRequiresAuthenticatedUserForStreamingSideQuestion() {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         SideQuestionStreamingApplicationService streamingService =

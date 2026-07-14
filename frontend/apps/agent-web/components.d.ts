@@ -47,6 +47,7 @@ declare module 'vue' {
     FigmaEditorArea: typeof import('./src/components/FigmaEditorArea.vue')['default']
     FigmaFileExplorer: typeof import('./src/components/FigmaFileExplorer.vue')['default']
     FigmaShell: typeof import('./src/components/FigmaShell.vue')['default']
+    FirstLoginGuide: typeof import('./src/components/FirstLoginGuide.vue')['default']
     GeneralParamManagementPanel: typeof import('./src/components/system/GeneralParamManagementPanel.vue')['default']
     GitChangesPanel: typeof import('./src/components/GitChangesPanel.vue')['default']
     HelpCenterDialog: typeof import('./src/components/HelpCenterDialog.vue')['default']

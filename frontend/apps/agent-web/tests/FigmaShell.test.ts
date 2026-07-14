@@ -385,7 +385,7 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="robot-side-question-input"]').attributes("disabled")).toBeDefined();
-    expect(wrapper.get('[data-testid="robot-side-question-input"]').attributes("placeholder")).toBe("请先在主对话发送一条消息");
+    expect(wrapper.get('[data-testid="robot-side-question-input"]').attributes("placeholder")).toBe("请先选择工作区并初始化服务");
     await wrapper.get('[aria-label="打开宠物小游戏"]').trigger("click");
     expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(true);
     expect(wrapper.emitted("robot-side-question")).toBeUndefined();
