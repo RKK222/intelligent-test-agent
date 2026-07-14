@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-14 - 增强用户消息气泡与智能体内容的视觉分隔
+
+- Why:
+  - 用户通过浏览器批注要求用户消息增加浅灰底色，并在消息下方预留少量空白，避免与紧随其后的智能体过程或回答贴得过近。
+- What:
+  - opencode-like 主时间线用户气泡改用现有 `--oc-surface-muted` 语义 token，用户消息行下边距改为 `--oc-space-3`（12px）；用户消息继续右对齐，边框、复制、上下文 chip 和智能体布局不变。
+  - agent-chat README 同步记录浅灰气泡和 12px 分隔规则，agent-web 增加两条样式契约防止背景与间距回退。
+- How:
+  - 只修改 `rows.css` 两行样式并复用现有 token。测试定位过程中确认 `agent-chat` tsconfig 不解析 Node 类型，且当前 Vite 8/Vitest 配置对测试内直接导入 `.css?raw` 或 `.css?inline` 返回空字符串；需要读取 CSS 源码的样式契约应放在已有 Node 测试能力的 agent-web 测试边界，避免给浏览器包新增 Node 类型或依赖。
+- Result:
+  - 定向 FigmaChatPanel/opencode timeline 测试 141 passed / 1 skipped，两个目标包 typecheck 通过；前端全量 lint、typecheck、56 个 Vitest 文件（780 passed / 1 skipped）和生产 build 通过。构建保留既有 CSS `@import` 顺序和大 chunk 警告。
+
 ### 2026-07-14 - 交付 Linux 4.19 可运行的 OpenCode Node 离线包
 
 - Why:
