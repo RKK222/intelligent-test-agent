@@ -4902,6 +4902,7 @@ async function handleLogout() {
           <button
             type="button"
             :class="['figma-activity-btn', centerMode === 'editor' && 'figma-activity-btn--active']"
+            data-onboarding="editor-button"
             aria-label="打开编辑器"
             title="打开编辑器"
             @click="centerMode = 'editor'"
@@ -4926,6 +4927,7 @@ async function handleLogout() {
           <button
             type="button"
             :class="['figma-activity-btn', settingsOpen && 'figma-activity-btn--active']"
+            data-onboarding="settings"
             aria-label="系统设置"
             title="系统设置"
             @click="settingsOpen = true"

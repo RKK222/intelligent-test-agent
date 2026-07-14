@@ -1772,6 +1772,7 @@ function submitJoinApp() {
               processStatusInteractionEnabled && robotProcessTone === 'needs-initialization' && 'is-process-alert',
             ]"
             data-testid="robot-visibility-toggle"
+            data-onboarding="pet"
             :aria-label="robotState === 'sleeping' ? '唤起小宠物' : '收起小宠物'"
             :aria-pressed="robotState !== 'sleeping'"
             title="唤起或收起小宠物"

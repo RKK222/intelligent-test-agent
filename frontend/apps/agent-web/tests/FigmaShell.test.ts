@@ -46,6 +46,13 @@ describe("FigmaShell", () => {
     expect(wrapper.emitted("open-help")?.[0]).toEqual(["getting-started"]);
   });
 
+  it("exposes the pet button and manual as onboarding targets", () => {
+    const wrapper = mountShell();
+
+    expect(wrapper.get('[data-onboarding="pet"]').attributes("data-testid")).toBe("robot-visibility-toggle");
+    expect(wrapper.get('[data-onboarding="manual"]').attributes("aria-label")).toBe("打开用户手册");
+  });
+
   it("restores a saved robot root position as the next natural start position", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 120, y: 180 }));
 
