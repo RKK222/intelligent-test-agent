@@ -1,5 +1,17 @@
 # Session Log
 
+### 2026-07-14 - 交付 Linux 4.19 可运行的 OpenCode Node 离线包
+
+- Why:
+  - 企业服务器固定为 Linux 4.19、glibc 2.28 且完全离线，OpenCode 1.17.8 自带 Bun 1.3.14 二进制执行即触发 `SIGTRAP/133`；现场还要求 manager 能作为单文件独立升级，OpenCode 可按完整目录升级。
+- What:
+  - 从 OpenCode `v1.17.8` 固定 commit 构建 server-only Node bundle，以 Node 22 替代目标机运行时 Bun；最终 worker 镜像不携带 Bun，并将 manager 单文件与 `opencode/` 完整目录同时导出为 `test-agent-programs.tar.gz`。
+  - 发布脚本固定 Go/Bun/Node 基础镜像 digest、校验上游 commit、使用离线 models snapshot、自动生成完整 zip 的 SHA-256；新增镜像真实启动 smoke 脚本和三台服务器全量升级、manager-only、OpenCode-only、验收及回滚操作手册。
+- How:
+  - Bun 只在外网构建阶段编译上游 Node bundle；目标环境由 worker 镜像内 Node 22 加载 `server/` 与精确锁定的原生依赖，关闭自动更新、在线 models/LSP/remote skill/config dependency 安装入口。manager 继续通过既有 `OPENCODE_BIN` 调用兼容 launcher，不改变 Java-manager 公共路由和进程启动程序。
+- Result:
+  - 完整发布脚本运行通过，生成 212 MB zip 及 SHA-256；zip 完整性、后端/前端 `--validate-only`、镜像内真实 `/global/health`/`global/config`、外挂 `programs/opencode/` 启动与版本检查均通过。manager Linux config/process/control/cmd 定向测试通过；`go test ./...` 仍被已有 Windows 测试 `TestLoadFromEnvWindowsUsesMachineNameAsLinuxServerId` 与现实现优先读取 `.serverhost` 的断言冲突阻塞，未在本次 Linux 离线交付中扩大修改范围。
+
 ### 2026-07-14 - 将场景测试资产归入应用架构目录
 
 - Why:

@@ -1,0 +1,99 @@
+diff --git a/packages/core/src/flag/flag.ts b/packages/core/src/flag/flag.ts
+index a0eb78a..26cfd3d 100644
+--- a/packages/core/src/flag/flag.ts
++++ b/packages/core/src/flag/flag.ts
+@@ -27,6 +27,7 @@ export const Flag = {
+   OPENCODE_SHOW_TTFD: truthy("OPENCODE_SHOW_TTFD"),
+   OPENCODE_DISABLE_AUTOCOMPACT: truthy("OPENCODE_DISABLE_AUTOCOMPACT"),
+   OPENCODE_DISABLE_MODELS_FETCH: truthy("OPENCODE_DISABLE_MODELS_FETCH"),
++  OPENCODE_DISABLE_CONFIG_DEPENDENCY_INSTALL: truthy("OPENCODE_DISABLE_CONFIG_DEPENDENCY_INSTALL"),
+   OPENCODE_DISABLE_MOUSE: truthy("OPENCODE_DISABLE_MOUSE"),
+   OPENCODE_FAKE_VCS: process.env["OPENCODE_FAKE_VCS"],
+   OPENCODE_SERVER_PASSWORD: process.env["OPENCODE_SERVER_PASSWORD"],
+diff --git a/packages/core/src/skill/discovery.ts b/packages/core/src/skill/discovery.ts
+index 6402dd3..80a3a7e 100644
+--- a/packages/core/src/skill/discovery.ts
++++ b/packages/core/src/skill/discovery.ts
+@@ -1,6 +1,7 @@
+ export * as SkillDiscovery from "./discovery"
+
+ import path from "path"
++import { createHash } from "node:crypto"
+ import { Context, Effect, Layer, Schedule, Schema } from "effect"
+ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+ import { FSUtil } from "../fs-util"
+@@ -104,7 +105,8 @@ export const layer = Layer.effect(
+         )
+         if (!data) return []
+
+-        const sourceRoot = path.resolve(global.cache, "skills", Bun.hash(base).toString(16))
++        const sourceHash = createHash("sha256").update(base).digest("hex").slice(0, 16)
++        const sourceRoot = path.resolve(global.cache, "skills", sourceHash)
+         return yield* Effect.forEach(
+           data.skills.flatMap((skill) => {
+             if (!isSafeSegment(skill.name)) {
+diff --git a/packages/opencode/script/build-node.ts b/packages/opencode/script/build-node.ts
+index e6a4171..1428d89 100755
+--- a/packages/opencode/script/build-node.ts
++++ b/packages/opencode/script/build-node.ts
+@@ -20,6 +20,7 @@ await Bun.build({
+   sourcemap: "linked",
+   external: ["jsonc-parser", "@lydell/node-pty"],
+   define: {
++    OPENCODE_VERSION: `'${Script.version}'`,
+     OPENCODE_MODELS_DEV: generated.modelsData,
+     OPENCODE_CHANNEL: `'${Script.channel}'`,
+   },
+diff --git a/packages/opencode/src/config/config.ts b/packages/opencode/src/config/config.ts
+index 7f568f4..c717bb3 100644
+--- a/packages/opencode/src/config/config.ts
++++ b/packages/opencode/src/config/config.ts
+@@ -434,26 +434,28 @@ export const layer = Layer.effect(
+
+           yield* ensureGitignore(dir).pipe(Effect.orDie)
+
+-          const dep = yield* npmSvc
+-            .install(dir, {
+-              add: [
+-                {
+-                  name: "@opencode-ai/plugin",
+-                  version: InstallationLocal ? undefined : InstallationVersion,
+-                },
+-              ],
+-            })
+-            .pipe(
+-              Effect.exit,
+-              Effect.tap((exit) =>
+-                Exit.isFailure(exit)
+-                  ? Effect.logWarning("background dependency install failed", { dir, error: String(exit.cause) })
+-                  : Effect.void,
+-              ),
+-              Effect.asVoid,
+-              Effect.forkDetach,
+-            )
+-          deps.push(dep)
++          if (!Flag.OPENCODE_DISABLE_CONFIG_DEPENDENCY_INSTALL) {
++            const dep = yield* npmSvc
++              .install(dir, {
++                add: [
++                  {
++                    name: "@opencode-ai/plugin",
++                    version: InstallationLocal ? undefined : InstallationVersion,
++                  },
++                ],
++              })
++              .pipe(
++                Effect.exit,
++                Effect.tap((exit) =>
++                  Exit.isFailure(exit)
++                    ? Effect.logWarning("background dependency install failed", { dir, error: String(exit.cause) })
++                    : Effect.void,
++                ),
++                Effect.asVoid,
++                Effect.forkDetach,
++              )
++            deps.push(dep)
++          }
+
+           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
+           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))

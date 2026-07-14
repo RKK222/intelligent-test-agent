@@ -1,0 +1,10 @@
+{
+  "name": "test-agent-opencode-node-runtime",
+  "version": "1.17.8",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.12",
+    "jsonc-parser": "3.3.1"
+  }
+}

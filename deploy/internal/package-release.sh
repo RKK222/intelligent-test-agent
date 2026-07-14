@@ -268,7 +268,12 @@ build_opencode_worker_image() {
     --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
     --build-arg "DEBIAN_MIRROR=${DEBIAN_MIRROR}" \
     --build-arg "DEBIAN_SECURITY_MIRROR=${DEBIAN_SECURITY_MIRROR}" \
-    --build-arg "OPENCODE_AI_PACKAGE=${OPENCODE_AI_PACKAGE}" \
+    --build-arg "GO_IMAGE=${GO_IMAGE}" \
+    --build-arg "BUN_IMAGE=${BUN_IMAGE}" \
+    --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
+    --build-arg "OPENCODE_VERSION=${OPENCODE_VERSION}" \
+    --build-arg "OPENCODE_SOURCE_COMMIT=${OPENCODE_SOURCE_COMMIT}" \
+    --build-arg "OPENCODE_SOURCE_REPOSITORY=${OPENCODE_SOURCE_REPOSITORY}" \
     "${ROOT_DIR}"
   docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null
 
@@ -315,27 +320,42 @@ package_release_zip() {
   ls -lh "${zip_path}"
 }
 
+write_release_checksum() {
+  local zip_path="${OUTPUT_DIR}/test-agent-internal-release.zip"
+  local zip_name
+  zip_name="$(basename "${zip_path}")"
+
+  # 校验文件只记录包名，复制到企业服务器任意目录后仍可直接执行校验命令。
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${OUTPUT_DIR}" && sha256sum "${zip_name}" >"${zip_name}.sha256")
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${OUTPUT_DIR}" && shasum -a 256 "${zip_name}" >"${zip_name}.sha256")
+  else
+    echo "Neither sha256sum nor shasum is available; cannot create release checksum" >&2
+    exit 1
+  fi
+  cat "${zip_path}.sha256"
+}
+
 export_worker_programs() {
   local programs_dir="${OUTPUT_DIR}/programs"
   local container_id
   container_id="$(docker create --platform "${PLATFORM}" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" true)"
 
   rm -rf "${programs_dir}"
-  mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode/bin" "${programs_dir}/opencode/lib/node_modules"
+  mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode"
 
   if ! docker cp "${container_id}:/usr/local/bin/opencode-manager" "${programs_dir}/bin/opencode-manager" \
-    || ! docker cp "${container_id}:/usr/local/lib/node_modules/opencode-ai" "${programs_dir}/opencode/lib/node_modules/opencode-ai"; then
+    || ! docker cp "${container_id}:/usr/local/lib/opencode-node/." "${programs_dir}/opencode/"; then
     docker rm -f "${container_id}" >/dev/null 2>&1 || true
     return 1
   fi
   docker rm -f "${container_id}" >/dev/null
 
-  # npm 全局 bin 是跨目录符号链接，Docker Desktop 直接 docker cp 该链接到宿主机时可能失败；
-  # 先复制包目录，再在交付目录内创建相同相对链接，保证目标 Linux 机器解压后可执行。
-  ln -sfn "../lib/node_modules/opencode-ai/bin/opencode.exe" "${programs_dir}/opencode/bin/opencode"
   chmod +x "${programs_dir}/bin/opencode-manager" || true
   chmod +x "${programs_dir}/opencode/bin/opencode" || true
-  printf 'opencode package: %s\n' "${OPENCODE_AI_PACKAGE}" >"${programs_dir}/VERSION"
+  printf 'opencode node server: %s\nsource commit: %s\n' \
+    "${OPENCODE_VERSION}" "${OPENCODE_SOURCE_COMMIT}" >"${programs_dir}/VERSION"
   tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-programs.tar.gz" programs
   ls -lh "${OUTPUT_DIR}/test-agent-programs.tar.gz"
 }
@@ -356,6 +376,12 @@ GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}"
 OPENCODE_AI_PACKAGE="${OPENCODE_AI_PACKAGE:-opencode-ai@1.17.8}"
+OPENCODE_VERSION="${OPENCODE_VERSION:-${OPENCODE_AI_PACKAGE##*@}}"
+OPENCODE_SOURCE_COMMIT="${OPENCODE_SOURCE_COMMIT:-11e47f91496005aab4d7c5a2d0a7da5d2651b4ac}"
+OPENCODE_SOURCE_REPOSITORY="${OPENCODE_SOURCE_REPOSITORY:-https://github.com/anomalyco/opencode.git}"
+GO_IMAGE="${GO_IMAGE:-golang@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db}"
+BUN_IMAGE="${BUN_IMAGE:-oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f}"
+NODE_IMAGE="${NODE_IMAGE:-node@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3}"
 VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
 
 mkdir -p "${OUTPUT_DIR}"
@@ -382,6 +408,7 @@ fi
 
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   package_release_zip
+  write_release_checksum
 fi
 
 echo
@@ -403,4 +430,5 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
 fi
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  complete release zip: ${OUTPUT_DIR}/test-agent-internal-release.zip"
+  echo "  release checksum: ${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
 fi

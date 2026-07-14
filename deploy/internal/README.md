@@ -558,7 +558,14 @@ Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart
 
 每个 worker 容器内只有 1 个 `opencode-manager run` 常驻进程；manager 按端口池动态启动 0..N 个 `opencode serve` 子进程。
 
-当前 `test-agent-programs.tar.gz` 和 worker 镜像中的 Linux OpenCode CLI 是嵌入 Bun 运行时的原生可执行文件。企业服务器升级前必须先在与生产相同的宿主机内核上执行 `/usr/local/bin/opencode --version`；若返回 `Trace/breakpoint trap`、退出码 `133`，且 `dmesg` 出现 `opencode ... trap int3`，说明程序在监听端口前已经退出，不应通过延长 manager 健康检查超时重试。Docker 容器共享宿主机内核，换基础镜像或把同一个二进制移到容器外不能改变该结果；当前发布包也没有可直接切换的 Node server 交付物。
+当前 `test-agent-programs.tar.gz` 和 worker 镜像使用 OpenCode `1.17.8` 的 **Node server bundle**，不再运行 npm 包中嵌入 Bun 的 `opencode.exe`。联网打包阶段仍使用 Bun `1.3.14` 编译上游 TypeScript，但最终镜像只保留 Node 22、server bundle 和 linux/amd64 的 `node-pty`；因此宿主机内核 `4.19`、容器内 Node 可正常启动时，不受 Bun 要求 Linux 内核至少 `5.1` 的限制。Node 22 官方 Linux x64 运行基线是内核 `4.18+`、glibc `2.28+`，现场给出的 `4.19.90` 与 `glibc 2.28` 满足该基线；默认 Docker 路径实际使用容器内 glibc，仍需在同内核目标服务器做最终 smoke。现场已知 `Trace/breakpoint trap`、退出码 `133` 和 `dmesg ... trap int3` 是旧 Bun 可执行文件的启动失败特征，升级后应通过下面命令确认实际入口已经切换：
+
+```bash
+docker exec test-agent-opencode-worker /usr/local/bin/opencode --version
+docker exec test-agent-opencode-worker sh -lc 'readlink -f /usr/local/bin/opencode; node --version'
+```
+
+第一条必须输出 `1.17.8` 且退出码为 `0`，第二条的入口必须位于 `/usr/local/lib/opencode-node/`。`test-agent-programs.tar.gz` 中的 Node bundle 默认挂载回同一个 worker 容器，依赖镜像内的 Node 22；不把它作为无需 Node 的宿主机原生可执行文件使用。若必须脱离 Docker 单独运行，需要另外离线安装 Node 22，并在目标机验证其系统依赖，本项目默认交付和验收路径仍是 worker Docker 镜像。
 
 ## Java 直接部署前提
 
@@ -622,11 +629,12 @@ deploy/internal/dist/programs/
 deploy/internal/dist/test-agent-programs.tar.gz
 deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
 deploy/internal/dist/test-agent-internal-release.zip
+deploy/internal/dist/test-agent-internal-release.zip.sha256
 ```
 
 也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，实体 Nginx 直接托管 `dist/frontend`。
-第一版 `opencode-worker` 镜像里仍内置 `opencode-manager` 和 `opencode-ai` CLI；同时脚本会把这两个程序导出到 `dist/programs/`，纯 Docker worker 管理脚本默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。
-`test-agent-internal-release.zip` 是完整企业升级包，包含上述必要产物和 `deploy/internal/` 脚本目录；传到 `122.233.30.4:/data/0709/internal.zip` 后即可用 `deploy-internal-release.sh` 解压部署。归档时会排除 `deploy/internal/dist`、历史 `dist-*` 和当前输出目录，避免旧交付物递归进入新包。
+`opencode-worker` 镜像内置 `opencode-manager`、Node 22 和 OpenCode Node server bundle；脚本同时把 manager 与 Node bundle 导出到 `dist/programs/`。纯 Docker worker 管理脚本默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。外挂 bundle 不重复携带 Node，可直接复用 worker 镜像内 `/usr/local/bin/node`。
+`test-agent-internal-release.zip` 是完整企业升级包，包含上述必要产物、现场操作手册和 `deploy/internal/` 脚本目录；同目录的 `.sha256` 由发布脚本自动生成。传到 `122.233.30.4:/data/0709/test-agent-internal-release.zip` 后即可用 `deploy-internal-release.sh` 解压部署。归档时会排除 `deploy/internal/dist`、历史 `dist-*` 和当前输出目录，避免旧交付物递归进入新包。
 
 发布脚本生成后端交付 jar 时只编译主代码和运行时依赖（使用 `-Dmaven.test.skip=true`），不会编译测试源码；企业包生成前应单独完成目标模块测试和脚本校验，避免无关的存量测试假实现阻断发布包生成。
 
@@ -655,7 +663,15 @@ docker buildx build \
   .
 ```
 
-镜像构建允许使用 `https://` Debian 镜像源；Dockerfile 会先通过基础镜像默认源安装 `ca-certificates`，再切换到 `DEBIAN_MIRROR/DEBIAN_SECURITY_MIRROR`，避免 slim 基础镜像缺少 CA 根证书时 `apt-get update` 失败。
+镜像构建是唯一需要外网或联网镜像仓库的阶段：从 `OPENCODE_SOURCE_REPOSITORY` 拉取固定 tag，并校验 commit `11e47f91496005aab4d7c5a2d0a7da5d2651b4ac`；Bun 构建上游 Node bundle后，只把生成物复制到最终 Node 镜像。Go、Bun、Node 三个基础镜像默认固定到已验证 digest，依赖下载使用 `NPM_REGISTRY`、`GOPROXY`、`DEBIAN_MIRROR` 和 `DEBIAN_SECURITY_MIRROR`；也可以把 `OPENCODE_SOURCE_REPOSITORY`、`GO_IMAGE`、`BUN_IMAGE`、`NODE_IMAGE` 改成构建机可访问的企业镜像。目标服务器只执行 `docker load`、解压和启动，不执行 npm/bun 安装，也不访问 GitHub 或公共 npm registry。
+
+当前兼容补丁与 OpenCode `1.17.8` 的固定源码 commit 成对维护；升级 `OPENCODE_VERSION` 时必须同时更新 `OPENCODE_SOURCE_COMMIT`、`opencode-node-compat.patch`、运行依赖 lockfile并重新完成 HTTP、配置、session 和 PTY 回归，不能只改版本号。
+
+构建完成后在联网打包机执行真实镜像 smoke；该脚本确认版本、Node server health、公共配置接口、实际入口和最终镜像中不存在 Bun：
+
+```bash
+tools/verify-opencode-node-worker-image.sh test-agent-opencode-worker:internal
+```
 
 离线交付时导出 tar：
 
@@ -683,6 +699,26 @@ worker 容器启动时按以下优先级选择程序：
 ```text
 /usr/local/bin/opencode-manager
 /usr/local/bin/opencode
+```
+
+只升级 manager 时不需要替换 OpenCode 目录或重新导入 worker 镜像。先把新二进制写到同目录临时文件，再原子替换并重启 worker；容器重启后入口脚本会继续优先执行外挂 manager：
+
+```bash
+install -m 0755 /tmp/opencode-manager /data/testagent/programs/bin/opencode-manager.new
+mv -f /data/testagent/programs/bin/opencode-manager.new /data/testagent/programs/bin/opencode-manager
+docker restart test-agent-opencode-worker
+docker logs --tail 120 test-agent-opencode-worker
+```
+
+只升级 OpenCode 时必须整体替换 `/data/testagent/programs/opencode/`，不能只复制 `bin/opencode`；Node 兼容入口还依赖同目录的 `server/`、`node_modules/` 和 `VERSION`。替换前先停止 worker，使容器内 manager 及其全部用户 server 子进程退出，替换后再启动：
+
+```bash
+docker stop test-agent-opencode-worker
+mv /data/testagent/programs/opencode /data/testagent/programs/opencode.bak.$(date +%Y%m%d%H%M%S)
+mv /tmp/programs/opencode /data/testagent/programs/opencode
+docker start test-agent-opencode-worker
+docker exec test-agent-opencode-worker /data/testagent/programs/opencode/bin/opencode --version
+docker logs --tail 120 test-agent-opencode-worker
 ```
 
 目标机器首次部署可把交付包中的 `test-agent-programs.tar.gz` 解压到统一目录，例如：
@@ -808,4 +844,6 @@ tail -n 200 /data/testagent/data/agent-opencode/manager/worker/logs/4096.log
 
 ## 运行时外部依赖
 
-`opencode-worker` 镜像内已包含 `opencode-manager` 和 npm 安装的 `opencode-ai` CLI；外挂程序目录用于后续小版本更新。目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、Git/SSH 网络和 Java 后端所需密钥。`/data/testagent/data/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。
+`opencode-worker` 镜像内已包含 `opencode-manager`、Node 22 和 OpenCode Node server bundle；外挂程序目录用于后续小版本更新。构建时使用仓库内空的 `models.dev` 固定快照，不访问 `models.dev`，企业模型与供应商完全以公共 `opencode.jsonc` 为事实源。启动器默认关闭 OpenCode 自动更新、在线模型目录刷新、LSP 自动下载、远程 skill 下载、嵌入式 Web UI 和配置目录 npm 依赖安装，确保 server 启动与平台常用接口不依赖公网。企业公共配置应使用本地 agent/skill 和已打包能力；如果配置显式引用 npm 插件、远程 skill 或需要在线下载的 LSP，必须先将这些依赖做成企业内可访问镜像或纳入后续离线包，不能期待目标服务器访问公网。
+
+目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、业务需要的企业 Git/SSH 网络和 Java 后端所需密钥。`/data/testagent/data/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。

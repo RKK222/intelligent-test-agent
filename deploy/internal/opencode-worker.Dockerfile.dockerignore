@@ -4,3 +4,8 @@
 !deploy/
 !deploy/internal/
 !deploy/internal/opencode-worker-entrypoint.sh
+!deploy/internal/opencode-node-compat.patch
+!deploy/internal/opencode-node-launcher.mjs
+!deploy/internal/opencode-models.snapshot.json
+!deploy/internal/opencode-node-runtime.package.json
+!deploy/internal/opencode-node-runtime.package-lock.json

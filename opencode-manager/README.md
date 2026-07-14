@@ -20,6 +20,8 @@ OPENCODE_CONFIG_DIR={common_parameters.OPENCODE_PUBLIC_CONFIG_DIR} \
 opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 ```
 
+企业 Linux worker 中该兼容 CLI 由 Node 22 启动 OpenCode `1.17.8` server bundle，只实现 manager 实际依赖的 `--version` 与 `serve --hostname/--port/--cors/--print-logs` 接口，不使用上游 npm 包内嵌的 Bun 可执行文件。manager 的启动、健康探测、state 和停止语义保持不变。
+
 > Windows 平台上若 `OPENCODE_BIN` 指向 PowerShell 包装脚本（`*.ps1`），manager 会自动改写为
 > `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <ps1> serve --hostname 0.0.0.0 --port {port} --print-logs`，
 > 避免 `os/exec` 直接 fork `.ps1` 触发 `%1 is not a valid Win32 application`。该解析对扩展名大小写不敏感。
