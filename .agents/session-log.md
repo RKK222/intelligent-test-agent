@@ -13,6 +13,18 @@
     - `border` 改为使用语义 token `var(--oc-border)`，避免在样式中硬编码十六进制颜色值。
 - Result:
   - 前端编译构建通过，`agent-chat` 的 Vitest 测试全量通过（106 passed），修改仅限于前端样式，不涉及后端 API 与业务逻辑。
+### 2026-07-14 - 兼容 Docker 18.09 并默认启用 worker 特权模式
+
+- Why:
+  - 企业服务器固定为 Linux 4.19、Docker 18.09；外挂 OpenCode Node launcher 在宿主机可执行，但 worker 容器内 Node 22.23.1 创建运行时工作线程时触发 `uv_thread_create` 断言并 abort。现场 `/proc/self/status` 显示 seccomp filter 已启用，且用户确认该批服务器历史上需要 privileged 容器。
+- What:
+  - worker 的 Node 运行时从 Debian 12/bookworm（glibc 2.36）下调为固定 digest 的 Debian 11/bullseye（glibc 2.31），发布脚本和示例基线同步；纯 Docker 启动脚本按用户明确要求默认添加 `--privileged`。
+  - 镜像验证新增 glibc 2.31 精确断言和 Node `worker_threads` 运行检查；企业部署 README、后端部署排障文档和操作手册同步记录 Docker 18.09 兼容原因、默认特权模式及其安全边界。
+- How:
+  - 继续复用现有 worker 镜像、外挂 `programs/opencode/`、manager 和部署脚本，不修改企业现场已经可用的 `backend.env` / `docker.env`；特权容器只建议运行在受控专用服务器上。
+- Result:
+  - 本地完整构建生成最终 zip，ZIP/SHA-256/`--validate-only`、首次 systemd 安装与二次升级模拟均通过；从最终 tar 重新导入的镜像通过 glibc 2.31、Node 工作线程、OpenCode 1.17.8 真实 HTTP health/config 及优雅停止验证。使用正式 `opencode-worker-docker.sh` 创建的容器确认 `Privileged=true` 且 Node/OpenCode 可执行。企业目标机 Docker 18.09 上仍需导入本次新镜像并执行同样检查，未将本地验证冒充目标机验收。
+
 ### 2026-07-14 - 修复后端首次部署缺少 systemd unit
 
 - Why:

@@ -9,6 +9,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+glibc_version="$(docker run --rm --platform linux/amd64 --entrypoint getconf "${IMAGE}" GNU_LIBC_VERSION)"
+if [[ "${glibc_version}" != "glibc 2.31" ]]; then
+  echo "Unexpected glibc version: ${glibc_version}; Docker 18.09 compatibility requires bullseye/glibc 2.31" >&2
+  exit 1
+fi
+
+docker run --rm --platform linux/amd64 --entrypoint node "${IMAGE}" \
+  -e 'require("node:worker_threads"); console.log("node worker runtime ok")' >/dev/null
+
 version="$(docker run --rm --platform linux/amd64 --entrypoint /usr/local/bin/opencode "${IMAGE}" --version)"
 if [[ "${version}" != "1.17.8" ]]; then
   echo "Unexpected opencode version: ${version}" >&2
@@ -54,4 +63,4 @@ if [[ "${exit_code}" != "0" ]]; then
   exit 1
 fi
 
-echo "OpenCode Node worker image verified: image=${IMAGE} version=${version}"
+echo "OpenCode Node worker image verified: image=${IMAGE} version=${version} ${glibc_version}"

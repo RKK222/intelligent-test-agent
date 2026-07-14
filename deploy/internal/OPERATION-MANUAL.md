@@ -25,6 +25,8 @@
 
 OpenCode 入口仍是 `opencode/bin/opencode`，但它不是旧的 Bun 单文件程序；它通过 worker 镜像内的 Node 22 加载同目录 server bundle。manager 可以单独替换，OpenCode 必须整体替换 `opencode/` 目录。
 
+当前 worker 运行基线是 Debian 11 bullseye / glibc `2.31`，用于兼容现场 Docker `18.09`、Linux `4.19`。按企业现场要求，`opencode-worker-docker.sh` 默认以 `--privileged` 创建 worker 容器；该模式会放宽容器隔离边界，只应部署在受控的专用后端服务器。
+
 ## 2. 上线前检查
 
 在 Mac 打包机仓库根目录生成完整包：
@@ -165,7 +167,9 @@ cat /data/testagent/data/.serverid
 cat /data/testagent/data/.serverhost
 
 docker exec test-agent-opencode-worker sh -lc \
-  '"$OPENCODE_BIN" --version; readlink -f "$OPENCODE_BIN"; node --version; ! command -v bun'
+  '"$OPENCODE_BIN" --version; readlink -f "$OPENCODE_BIN"; node --version; getconf GNU_LIBC_VERSION; ! command -v bun'
+
+docker inspect test-agent-opencode-worker --format 'privileged={{.HostConfig.Privileged}}'
 
 docker logs --tail 200 test-agent-opencode-worker | \
   egrep 'config update applied|websocket|serverhost|serverid|OPENCODE_UNAVAILABLE'
@@ -176,6 +180,8 @@ docker logs --tail 200 test-agent-opencode-worker | \
 - readiness 返回 `UP`；
 - `.serverhost` 等于本机真实 IP；
 - `opencode --version` 输出 `1.17.8` 且退出码为 `0`；
+- `getconf GNU_LIBC_VERSION` 输出 `glibc 2.31`，不再出现 `uv_thread_create` assertion；
+- `docker inspect` 输出 `privileged=true`；
 - OpenCode 入口位于 `/usr/local/lib/opencode-node/` 或外挂 `/data/testagent/programs/opencode/`；
 - `command -v bun` 找不到 Bun；
 - manager 日志出现 `manager config update applied`，没有持续 WebSocket 重连错误。

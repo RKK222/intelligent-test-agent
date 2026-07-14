@@ -559,14 +559,14 @@ Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart
 
 每个 worker 容器内只有 1 个 `opencode-manager run` 常驻进程；manager 按端口池动态启动 0..N 个 `opencode serve` 子进程。
 
-当前 `test-agent-programs.tar.gz` 和 worker 镜像使用 OpenCode `1.17.8` 的 **Node server bundle**，不再运行 npm 包中嵌入 Bun 的 `opencode.exe`。联网打包阶段仍使用 Bun `1.3.14` 编译上游 TypeScript，但最终镜像只保留 Node 22、server bundle 和 linux/amd64 的 `node-pty`；因此宿主机内核 `4.19`、容器内 Node 可正常启动时，不受 Bun 要求 Linux 内核至少 `5.1` 的限制。Node 22 官方 Linux x64 运行基线是内核 `4.18+`、glibc `2.28+`，现场给出的 `4.19.90` 与 `glibc 2.28` 满足该基线；默认 Docker 路径实际使用容器内 glibc，仍需在同内核目标服务器做最终 smoke。现场已知 `Trace/breakpoint trap`、退出码 `133` 和 `dmesg ... trap int3` 是旧 Bun 可执行文件的启动失败特征，升级后应通过下面命令确认实际入口已经切换：
+当前 `test-agent-programs.tar.gz` 和 worker 镜像使用 OpenCode `1.17.8` 的 **Node server bundle**，不再运行 npm 包中嵌入 Bun 的 `opencode.exe`。联网打包阶段仍使用 Bun `1.3.14` 编译上游 TypeScript，但最终镜像只保留 Node 22、server bundle 和 linux/amd64 的 `node-pty`；因此宿主机内核 `4.19`、容器内 Node 可正常启动时，不受 Bun 要求 Linux 内核至少 `5.1` 的限制。Node 运行镜像固定为 Debian 11 bullseye / glibc `2.31`：它既满足 Node 22 的运行要求，又避开 Docker `18.09` 默认 seccomp 与 Debian 12/glibc `2.36` 的 `clone3` 线程创建冲突。按企业现场要求，纯 Docker worker 默认使用 `--privileged` 创建容器；这会放宽容器隔离边界，只应用于受控的专用后端服务器。现场已知 `Trace/breakpoint trap`、退出码 `133` 和 `dmesg ... trap int3` 是旧 Bun 可执行文件的启动失败特征，`uv_thread_create` assertion 则是旧 Docker 运行 glibc 2.36 镜像的失败特征。升级后应通过下面命令确认实际入口和运行基线已经切换：
 
 ```bash
 docker exec test-agent-opencode-worker /usr/local/bin/opencode --version
-docker exec test-agent-opencode-worker sh -lc 'readlink -f /usr/local/bin/opencode; node --version'
+docker exec test-agent-opencode-worker sh -lc 'readlink -f /usr/local/bin/opencode; node --version; getconf GNU_LIBC_VERSION'
 ```
 
-第一条必须输出 `1.17.8` 且退出码为 `0`，第二条的入口必须位于 `/usr/local/lib/opencode-node/`。`test-agent-programs.tar.gz` 中的 Node bundle 默认挂载回同一个 worker 容器，依赖镜像内的 Node 22；不把它作为无需 Node 的宿主机原生可执行文件使用。若必须脱离 Docker 单独运行，需要另外离线安装 Node 22，并在目标机验证其系统依赖，本项目默认交付和验收路径仍是 worker Docker 镜像。
+第一条必须输出 `1.17.8` 且退出码为 `0`，第二条的入口必须位于 `/usr/local/lib/opencode-node/`，glibc 必须输出 `2.31`。`test-agent-programs.tar.gz` 中的 Node bundle 默认挂载回同一个 worker 容器，依赖镜像内的 Node 22；不把它作为无需 Node 的宿主机原生可执行文件使用。若必须脱离 Docker 单独运行，需要另外离线安装 Node 22，并在目标机验证其系统依赖，本项目默认交付和验收路径仍是 worker Docker 镜像。
 
 ## Java 直接部署前提
 

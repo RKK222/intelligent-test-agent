@@ -101,7 +101,9 @@ start_container() {
   mkdir -p "${TEST_AGENT_DATA_ROOT}" "${TEST_AGENT_PROGRAM_ROOT}"
   stop_container
 
+  # 企业现场 Docker 18.09 的默认 seccomp 会阻断 Node 运行时创建线程，按部署要求使用特权容器。
   docker run -d \
+    --privileged \
     --name "${CONTAINER_NAME}" \
     --hostname "${CONTAINER_NAME}" \
     --restart unless-stopped \

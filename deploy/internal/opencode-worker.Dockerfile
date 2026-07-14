@@ -1,6 +1,6 @@
 ARG GO_IMAGE=golang@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
 ARG BUN_IMAGE=oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
-ARG NODE_IMAGE=node@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
+ARG NODE_IMAGE=node@sha256:e24976116684e0fd211cbdb3c40fc9cb997565d063fb7fe656d2e2b603c5bb0a
 ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
 
@@ -80,7 +80,7 @@ ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG OPENCODE_VERSION=1.17.8
 
-# node:bookworm-slim 初始层不保证包含 CA 根证书；先用默认 Debian 源安装证书，
+# node:bullseye-slim 初始层不保证包含 CA 根证书；先用默认 Debian 源安装证书，
 # 再切到可配置的 HTTPS 镜像源，避免 apt update 在证书校验阶段失败。
 RUN set -eux; \
     apt-get update; \
