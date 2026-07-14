@@ -113,9 +113,10 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   const testingSkills = manualFrame.getByRole("treeitem", { name: /^test\// });
   const plannedCodeReviewSkill = manualFrame.getByRole("treeitem", { name: /^code-review-skill\// });
   const applicationTestSkills = manualFrame.getByRole("treeitem", { name: /^<应用专属测试 Skill>\// });
-  const sharedDocsNodes = ["技术架构/", "功能模块/", "数据架构/"].map((name) =>
+  const sharedDocsNodes = ["应用架构/", "功能模块/", "数据架构/"].map((name) =>
     manualFrame.getByRole("treeitem", { name: new RegExp(`^${name}`) })
   );
+  const technicalArchitecture = manualFrame.getByRole("treeitem", { name: /^技术架构\// });
   await expect(developmentAsset).toBeVisible();
   await expect(testingAsset).toBeVisible();
   await expect(developmentAsset.locator(".physical-badge")).toHaveText("开发 AI Git");
@@ -210,6 +211,17 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
     await expect(sharedNode.locator(".scope-badge")).toHaveText("开发 + 测试");
     await expect(sharedNode.locator(".physical-badge")).toHaveText("开发 AI Git + 测试 AI Git");
   }
+  await expect(technicalArchitecture.locator(".scope-badge")).toHaveText("开发");
+  await expect(technicalArchitecture.locator(".physical-badge")).toHaveText("开发 AI Git");
+  for (const applicationScenario of ["应用场景说明书_XXX.md", "应用场景说明书_YYY.md"]) {
+    const row = manualFrame.getByRole("treeitem", { name: applicationScenario });
+    await expect(row).toBeVisible();
+    await expect(row.locator(".scope-badge")).toHaveText("测试");
+    await expect(row.locator(".physical-badge")).toHaveText("测试 AI Git");
+    await expect(row).toHaveAttribute("aria-level", "4");
+  }
+  await expect(manualFrame.getByRole("treeitem", { name: "测试概述.md" })).toHaveAttribute("aria-level", "4");
+  await expect(manualFrame.getByRole("treeitem", { name: /场景测试说明书_/ })).toHaveCount(0);
   await expect(manualFrame.getByRole("treeitem", { name: "流程测试设计.md" })).toBeVisible();
   await expect(manualFrame.getByRole("treeitem", { name: "S000001_测试案例.md" })).toBeVisible();
   await expect(manualFrame.getByText("工作 Agent 统一称为 workagent")).toBeVisible();
