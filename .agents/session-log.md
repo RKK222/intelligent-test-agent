@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-14 - 修复 manager 用户进程 baseUrl 并确认旧内核兼容边界
+
+- Why:
+  - 企业部署的 `.serverhost` 已正确写入服务器 IP，但 manager 心跳仍把稳定 `linuxServerId` 拼进用户进程 `baseUrl`；同时 OpenCode 1.17.8 在 Linux 4.19 上执行 `--version` 即以 `SIGTRAP/133` 退出。
+- What:
+  - `config.Config` 保留并校验现有 `.serverhost` 解析结果，`BuildStartSpec` 改用 `ServerHost + port` 生成 `baseUrl`，不再把 `.serverid` 当访问地址；同步 manager 与企业部署文档、回归测试。
+- How:
+  - 复用 `resolveServerIdentityAndHost` 和现有 `isValidServerHost`，未新增环境变量或控制旁路；检查交付 ELF 确认嵌入 Bun 1.3.14，并核对 OpenCode 1.17.8 上游另有桌面端 Node server bundle，但当前离线发布包尚未包含可替代的 Node 交付物。
+- Result:
+  - manager config/process/control/cmd 定向测试、`go build` 和本地 `list` 运行通过；`go test ./...` 仍被已有 Windows 测试与现实现“优先读取 `.serverhost`”的断言冲突阻塞。Linux 4.19 兼容包尚未实现，后续需先确认目标 glibc，再单独打包 Node Linux 运行时、server bundle、原生依赖并做 API/插件离线回归。
+
 ### 2026-07-14 - 修正目录树样式、规则范围与 Agent 状态
 
 - Why:

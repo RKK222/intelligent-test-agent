@@ -92,14 +92,16 @@ func (r configRuntime) withDefaults() configRuntime {
 type Config struct {
 	ContainerID   string
 	LinuxServerID string
-	PortStart     int
-	PortEnd       int
-	MaxProcesses  int
-	OpencodeBin   string
-	StateDir      string
-	SessionRoot   string
-	ConfigDir     string
-	AllowedCORS   []string
+	// ServerHost 是从 .serverhost 读取的可访问地址，只用于连接本机 Java 和生成用户进程 baseUrl。
+	ServerHost   string
+	PortStart    int
+	PortEnd      int
+	MaxProcesses int
+	OpencodeBin  string
+	StateDir     string
+	SessionRoot  string
+	ConfigDir    string
+	AllowedCORS  []string
 	// RuntimeConfigRequired 表示 run 模式必须先从 Java 公共参数拿到 session/config/max 后才能启动用户进程。
 	RuntimeConfigRequired bool
 }
@@ -137,7 +139,7 @@ func loadFromEnvWithRuntime(rt configRuntime) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	linuxServerID, _, err := resolveServerIdentityAndHost(rt)
+	linuxServerID, serverHost, err := resolveServerIdentityAndHost(rt)
 	if err != nil {
 		return Config{}, err
 	}
@@ -145,6 +147,7 @@ func loadFromEnvWithRuntime(rt configRuntime) (Config, error) {
 	cfg := Config{
 		ContainerID:   containerID,
 		LinuxServerID: linuxServerID,
+		ServerHost:    serverHost,
 		PortStart:     portStart,
 		PortEnd:       portEnd,
 		MaxProcesses:  maxProcesses,
@@ -187,6 +190,7 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 	base := Config{
 		ContainerID:           containerID,
 		LinuxServerID:         linuxServerID,
+		ServerHost:            serverHost,
 		PortStart:             portStart,
 		PortEnd:               portEnd,
 		MaxProcesses:          availablePorts,
@@ -220,6 +224,9 @@ func (c Config) Validate() error {
 	}
 	if !isStableServerID(c.LinuxServerID) {
 		return fmt.Errorf("linux server id must be 1-128 chars of letters, digits, dot, underscore or hyphen")
+	}
+	if !isValidServerHost(c.ServerHost) {
+		return fmt.Errorf("server host must be a host name or IPv4 literal without scheme or port")
 	}
 	if c.PortStart < 1 || c.PortEnd > 65535 || c.PortStart > c.PortEnd {
 		return fmt.Errorf("port range must be between 1 and 65535")
@@ -278,10 +285,11 @@ func (c ControlConfig) ValidateControl() error {
 // String 返回脱敏后的控制配置摘要，禁止暴露 manager token。
 func (c ControlConfig) String() string {
 	return fmt.Sprintf(
-		"managerId=%s containerId=%s linuxServerId=%s webSocketUrl=%s token=<redacted> heartbeatInterval=%s reconnectInterval=%s",
+		"managerId=%s containerId=%s linuxServerId=%s serverHost=%s webSocketUrl=%s token=<redacted> heartbeatInterval=%s reconnectInterval=%s",
 		c.ManagerID,
 		c.ContainerID,
 		c.LinuxServerID,
+		c.ServerHost,
 		c.BackendWebSocketURL,
 		c.HeartbeatInterval,
 		c.ReconnectInterval,

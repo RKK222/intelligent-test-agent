@@ -57,6 +57,8 @@ opencode-manager 不允许随意新增环境变量。新增前必须先确认该
 
 所有命令输出稳定 JSON，包含 `status`、`port`、`pid`、`baseUrl`、`sessionPath`、`configPath`、`message`、`traceId` 等字段。
 
+`baseUrl` 的 host 固定来自 `.serverhost`，不会使用 `.serverid` 对应的 `linuxServerId` 拼接；例如 `.serverid=test-agent-backend-10-8-0-12`、`.serverhost=10.8.0.12`、端口 `4096` 时，结果必须是 `http://10.8.0.12:4096`。该地址会写入本地 state、命令结果和 manager 心跳，供 Java 间用户进程路由使用。
+
 ```bash
 opencode-manager start --port 4096 --trace-id trace_1234567890abcdef
 opencode-manager health --port 4096 --trace-id trace_1234567890abcdef

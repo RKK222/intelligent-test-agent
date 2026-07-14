@@ -41,6 +41,9 @@ func TestLoadControlFromEnvDerivesWebSocketURLFromServerHostAndBackendPort(t *te
 	if cfg.LinuxServerID != "linux-prod-a" {
 		t.Fatalf("expected stable linux server id from .serverid, got %q", cfg.LinuxServerID)
 	}
+	if cfg.ServerHost != "backend.internal" {
+		t.Fatalf("expected server host from .serverhost, got %q", cfg.ServerHost)
+	}
 }
 
 func TestLoadControlFromEnvIgnoresLegacyDiscoveryURL(t *testing.T) {

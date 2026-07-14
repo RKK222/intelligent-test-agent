@@ -234,7 +234,7 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 		Env:          env,
 		LogPath:      cfg.LogPath(request.Port),
 		Port:         request.Port,
-		BaseURL:      fmt.Sprintf("http://%s:%d", cfg.LinuxServerID, request.Port),
+		BaseURL:      fmt.Sprintf("http://%s:%d", cfg.ServerHost, request.Port),
 		SessionPath:  sessionPath,
 		ConfigPath:   cfg.ConfigDir,
 		StartCommand: formatStartCommand(cfg.OpencodeBin, args, env),

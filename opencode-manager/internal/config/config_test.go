@@ -24,6 +24,9 @@ func TestLoadFromEnvReadsServerIdentityAndHostFilesFromSysDataRootOnLinux(t *tes
 	if cfg.LinuxServerID != "linux-prod-a" {
 		t.Fatalf("expected server identity from .serverid file, got %q", cfg.LinuxServerID)
 	}
+	if cfg.ServerHost != "10.8.0.12" {
+		t.Fatalf("expected server host from .serverhost file, got %q", cfg.ServerHost)
+	}
 	if cfg.ContainerID != "container-abc123" {
 		t.Fatalf("expected container id from /etc/hostname, got %q", cfg.ContainerID)
 	}
@@ -44,6 +47,9 @@ func TestLoadFromEnvUsesSysDataRootDirEnvOverride(t *testing.T) {
 
 	if cfg.LinuxServerID != "linux-prod-a" {
 		t.Fatalf("expected server identity from SYS_DATA_ROOT_DIR override, got %q", cfg.LinuxServerID)
+	}
+	if cfg.ServerHost != "10.8.0.12" {
+		t.Fatalf("expected server host from SYS_DATA_ROOT_DIR override, got %q", cfg.ServerHost)
 	}
 }
 

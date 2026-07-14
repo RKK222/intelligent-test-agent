@@ -548,7 +548,7 @@ docker logs --tail 120 test-agent-opencode-worker
 
 ## 端口约束
 
-Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart..portEnd` 里选择端口，并用 `TEST_AGENT_SERVER_ADVERTISED_HOST/.serverhost + port` 生成 `baseUrl`。当前协议没有独立的 `containerPort` 和 `publishedPort` 字段。
+Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart..portEnd` 里选择端口；manager 使用 Java 写入并挂载到容器内的 `.serverhost + port` 生成 `baseUrl`，不得使用 `.serverid`/`linuxServerId` 拼地址。当前协议没有独立的 `containerPort` 和 `publishedPort` 字段。
 
 因此 `opencode-worker` 的端口池必须就是宿主机发布端口：
 
@@ -557,6 +557,8 @@ Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart
 - 不要写 `14096:4096` 这类内外不一致映射，否则 Java 会生成错误的 `baseUrl`。
 
 每个 worker 容器内只有 1 个 `opencode-manager run` 常驻进程；manager 按端口池动态启动 0..N 个 `opencode serve` 子进程。
+
+当前 `test-agent-programs.tar.gz` 和 worker 镜像中的 Linux OpenCode CLI 是嵌入 Bun 运行时的原生可执行文件。企业服务器升级前必须先在与生产相同的宿主机内核上执行 `/usr/local/bin/opencode --version`；若返回 `Trace/breakpoint trap`、退出码 `133`，且 `dmesg` 出现 `opencode ... trap int3`，说明程序在监听端口前已经退出，不应通过延长 manager 健康检查超时重试。Docker 容器共享宿主机内核，换基础镜像或把同一个二进制移到容器外不能改变该结果；当前发布包也没有可直接切换的 Node server 交付物。
 
 ## Java 直接部署前提
 

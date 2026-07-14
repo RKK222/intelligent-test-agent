@@ -500,7 +500,8 @@ func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	cfg := config.Config{
 		ContainerID:   "ctr_01",
-		LinuxServerID: "10.8.0.12",
+		LinuxServerID: "test-agent-backend-10-8-0-12",
+		ServerHost:    "10.8.0.12",
 		PortStart:     4096,
 		PortEnd:       4100,
 		MaxProcesses:  4,
