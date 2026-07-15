@@ -18,6 +18,7 @@ import {
   type MermaidPosition
 } from "../model";
 import MermaidFlowNode from "./MermaidFlowNode.vue";
+import MermaidFlowEdge from "./MermaidFlowEdge.vue";
 import { findEdgePort, oppositePosition } from "./node-port-layout";
 import {
   useMermaidConnectionDrag,
@@ -26,6 +27,7 @@ import {
 import {
   appendMermaidEdge,
   applyVueFlowPositions,
+  updateMermaidEdge,
   type MermaidPortConnection,
   toVueFlowEdges,
   toVueFlowNodes
@@ -65,8 +67,15 @@ function commitConnection(connection: MermaidPortConnection) {
   if (next !== props.modelValue) emit("update:modelValue", next);
 }
 
+/** 拖动已存在连线的端点重连到新节点/端口后，更新该边的对应端。 */
+function commitReconnect(edgeId: string, end: "source" | "target", connection: MermaidPortConnection) {
+  const next = updateMermaidEdge(props.modelValue, edgeId, end, connection);
+  if (next !== props.modelValue) emit("update:modelValue", next);
+}
+
 const {
   isDragging,
+  isReconnecting,
   sourceNodeId,
   sourceHandleId,
   targetNodeId,
@@ -79,11 +88,40 @@ const {
 } = useMermaidConnectionDrag({
   getCanvasElement: () => canvasRef.value,
   getGraph: () => props.modelValue,
-  onConnect: commitConnection
+  onConnect: commitConnection,
+  onReconnect: commitReconnect
 });
 
 function onConnectionStart(start: MermaidConnectionStart) {
   startConnection(start);
+}
+
+/** 选中连线后拖动端点圆圈：测量固定端端口的屏幕坐标，再以该端为锚点启动重连拖拽。 */
+function onReconnectStart(payload: {
+  edgeId: string;
+  end: "source" | "target";
+  pointerId: number;
+  fixedNodeId: string;
+  fixedHandleId: string;
+  fixedPosition: Position;
+}) {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const handleEl = canvas.querySelector<HTMLElement>(
+    `[data-mermaid-node-id="${payload.fixedNodeId}"] [data-mermaid-handle="${payload.fixedHandleId}"]`
+  );
+  if (!handleEl) return;
+  const rect = handleEl.getBoundingClientRect();
+  startConnection(
+    {
+      pointerId: payload.pointerId,
+      nodeId: payload.fixedNodeId,
+      handleId: payload.fixedHandleId,
+      position: payload.fixedPosition,
+      point: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    },
+    { reconnect: { edgeId: payload.edgeId, end: payload.end } }
+  );
 }
 
 function onQuickConnect(payload: { portId: string; position: Position; shapeType: MermaidNodeType }) {
@@ -148,6 +186,11 @@ function onNodeClick(event: NodeMouseEvent) {
 
 /** 点击空白画布时取消选中，使半透明快捷箭头随选中态消失。 */
 function onPaneClick() {
+  selectedNodeId.value = undefined;
+}
+
+/** 选中连线时取消节点选中，避免节点边框与连线端点圆圈同时显示。 */
+function onEdgeClick() {
   selectedNodeId.value = undefined;
 }
 
@@ -295,6 +338,7 @@ function onEdgesChange(changes: EdgeChange[]) {
           @edges-change="onEdgesChange"
           @node-drag-stop="onNodeDragStop"
           @node-click="onNodeClick"
+          @edge-click="onEdgeClick"
           @pane-click="onPaneClick"
           @quick-connect-test="onQuickConnect"
         >
@@ -309,6 +353,9 @@ function onEdgesChange(changes: EdgeChange[]) {
               @connection-start="onConnectionStart"
               @quick-connect="onQuickConnect"
             />
+          </template>
+          <template #edge-mermaid-edge="edgeProps">
+            <MermaidFlowEdge v-bind="edgeProps" @reconnect-start="onReconnectStart" />
           </template>
         </VueFlow>
         <svg
@@ -326,8 +373,8 @@ function onEdgesChange(changes: EdgeChange[]) {
           </defs>
           <path
             :d="dragPath"
-            :class="['ta-mermaid-connection-preview__path', { 'is-invalid': targetStatus === 'invalid' }]"
-            :marker-end="targetStatus === 'invalid' ? 'url(#ta-mermaid-preview-arrow-invalid)' : 'url(#ta-mermaid-preview-arrow)'"
+            :class="['ta-mermaid-connection-preview__path', { 'is-invalid': targetStatus === 'invalid', 'is-reconnect': isReconnecting }]"
+            :marker-end="isReconnecting ? undefined : targetStatus === 'invalid' ? 'url(#ta-mermaid-preview-arrow-invalid)' : 'url(#ta-mermaid-preview-arrow)'"
           />
         </svg>
         <div
@@ -416,6 +463,7 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-connection-preview { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .ta-mermaid-connection-preview__path { fill: none; stroke: var(--primary, #4f46e5); stroke-width: 2.25; }
 .ta-mermaid-connection-preview__path.is-invalid { stroke: #d92d20; }
+.ta-mermaid-connection-preview__path.is-reconnect { stroke: #22c55e; stroke-dasharray: 5 4; }
 .ta-mermaid-connection-preview #ta-mermaid-preview-arrow path { fill: var(--primary, #4f46e5); }
 .ta-mermaid-connection-preview #ta-mermaid-preview-arrow-invalid path { fill: #d92d20; }
 .ta-mermaid-connection-tooltip {

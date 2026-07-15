@@ -110,12 +110,14 @@ function createControllerFixture(existingEdge = false) {
     preservedLines: []
   };
   const onConnect = vi.fn();
+  const onReconnect = vi.fn();
   const frames: FrameRequestCallback[] = [];
   const cancelAnimationFrame = vi.fn();
   const controller = createMermaidConnectionDragController({
     getCanvasElement: () => canvas,
     getGraph: () => graph,
     onConnect,
+    onReconnect,
     requestAnimationFrame: (callback) => {
       frames.push(callback);
       return frames.length;
@@ -126,7 +128,7 @@ function createControllerFixture(existingEdge = false) {
     configurable: true,
     value: vi.fn(() => [targetPort, targetNode, canvas])
   });
-  return { canvas, controller, frames, onConnect, cancelAnimationFrame };
+  return { canvas, controller, frames, onConnect, onReconnect, cancelAnimationFrame, sourceNode, sourcePort, targetNode, targetPort };
 }
 
 function pointerEvent(type: string, x: number, y: number): Event {
@@ -185,6 +187,53 @@ describe("Mermaid 拖线控制器", () => {
     expect(controller.targetStatus.value).toBe("invalid");
     window.dispatchEvent(pointerEvent("pointerup", 250, 60));
     expect(onConnect).not.toHaveBeenCalled();
+  });
+
+  it("拖动 target 端重连：松开时调用 onReconnect 且排除自身判重", () => {
+    const { controller, frames, onReconnect, onConnect } = createControllerFixture(true);
+    // 固定端是 source(A, source-0)，拖动 target 端到 B 的 target-1
+    controller.startConnection(
+      { pointerId: 7, nodeId: "A", handleId: "source-0", position: Position.Right, point: { x: 120, y: 60 } },
+      { reconnect: { edgeId: "edge-1", end: "target" } }
+    );
+    expect(controller.isReconnecting.value).toBe(true);
+
+    window.dispatchEvent(pointerEvent("pointermove", 250, 60));
+    frames[0]!(0);
+    // edge-1 已是 A->B，但重连排除自身后允许换端口，故有效
+    expect(controller.targetStatus.value).toBe("valid");
+
+    window.dispatchEvent(pointerEvent("pointerup", 250, 60));
+    expect(onReconnect).toHaveBeenCalledWith("edge-1", "target", {
+      source: "A", target: "B", sourceHandle: "source-0", targetHandle: "target-1"
+    });
+    expect(onConnect).not.toHaveBeenCalled();
+    expect(controller.isDragging.value).toBe(false);
+  });
+
+  it("拖动 source 端重连：固定端是 target，拖动端成为新 source（方向反转）", () => {
+    const { controller, frames, onReconnect, sourcePort, sourceNode, canvas } = createControllerFixture(true);
+    // 把命中目标改为 A，模拟把 source 端拖到 A
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: vi.fn(() => [sourcePort, sourceNode, canvas])
+    });
+    // 固定端是 target(B, target-1)，从 B 的 target 端口起拖
+    controller.startConnection(
+      { pointerId: 7, nodeId: "B", handleId: "target-1", position: Position.Left, point: { x: 250, y: 60 } },
+      { reconnect: { edgeId: "edge-1", end: "source" } }
+    );
+
+    window.dispatchEvent(pointerEvent("pointermove", 120, 60));
+    frames[0]!(0);
+    expect(controller.targetNodeId.value).toBe("A");
+    expect(controller.targetHandleId.value).toBe("source-0");
+    expect(controller.targetStatus.value).toBe("valid");
+
+    window.dispatchEvent(pointerEvent("pointerup", 120, 60));
+    expect(onReconnect).toHaveBeenCalledWith("edge-1", "source", {
+      source: "A", target: "B", sourceHandle: "source-0", targetHandle: "target-1"
+    });
   });
 
   it.each(["pointercancel", "blur"])("%s 取消拖线并清理待执行动画帧", (eventName) => {

@@ -2,11 +2,13 @@
 import { defineComponent, ref } from "vue";
 import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it, vi } from "vitest";
+import type { EdgeProps } from "@vue-flow/core";
 import type { MermaidGraph } from "../src/mermaid/model";
 import {
   appendMermaidEdge,
   applyVueFlowPositions,
   canAppendMermaidEdge,
+  updateMermaidEdge,
   toVueFlowEdges,
   toVueFlowNodes
 } from "../src/mermaid/visual-editor/vue-flow-adapter";
@@ -41,6 +43,11 @@ vi.mock("@vue-flow/core", () => ({
       :style="style"
     />`
   }),
+  BaseEdge: defineComponent({
+    name: "BaseEdge",
+    props: ["path", "style", "markerEnd", "markerStart", "interactionWidth"],
+    template: `<path :d="path" data-testid="base-edge" :style="style" />`
+  }),
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
   MarkerType: { ArrowClosed: "arrowclosed" },
   ConnectionMode: { Loose: "loose" },
@@ -49,6 +56,7 @@ vi.mock("@vue-flow/core", () => ({
 
 import MermaidVisualEditor from "../src/mermaid/visual-editor/MermaidVisualEditor.vue";
 import MermaidFlowNode from "../src/mermaid/visual-editor/MermaidFlowNode.vue";
+import MermaidFlowEdge from "../src/mermaid/visual-editor/MermaidFlowEdge.vue";
 import flowNodeSource from "../src/mermaid/visual-editor/MermaidFlowNode.vue?raw";
 import visualEditorSource from "../src/mermaid/visual-editor/MermaidVisualEditor.vue?raw";
 
@@ -153,6 +161,52 @@ describe("Mermaid Vue Flow 适配", () => {
       sourceHandle: "source-0",
       targetHandle: "target-0"
     })).toBe(true);
+  });
+
+  it("重连时排除自身后允许在同节点对上换端口", () => {
+    const base = graph(); // 已有 A->B edge-1
+    // 排除 edge-1 后，A->B 换端口不再判为重复
+    expect(canAppendMermaidEdge(base, {
+      source: "A",
+      target: "B",
+      sourceHandle: "source-0",
+      targetHandle: "target-0"
+    }, "edge-1")).toBe(true);
+    // 不排除时仍是重复
+    expect(canAppendMermaidEdge(base, {
+      source: "A",
+      target: "B",
+      sourceHandle: "source-0",
+      targetHandle: "target-0"
+    })).toBe(false);
+    // 排除自身后仍拒绝其它重复边
+    const dup = graph();
+    dup.edges.push({ id: "edge-2", source: "A", target: "B", label: "", relation: "arrow" });
+    expect(canAppendMermaidEdge(dup, {
+      source: "A",
+      target: "B",
+      sourceHandle: "source-0",
+      targetHandle: "target-0"
+    }, "edge-1")).toBe(false);
+  });
+
+  it("updateMermaidEdge 只更新被拖动的一端", () => {
+    const base = graph(); // edge-1: A -> B，无显式端口
+    const reconnectedTarget = updateMermaidEdge(base, "edge-1", "target", {
+      source: "A", target: "B", sourceHandle: "source-0", targetHandle: "target-2"
+    });
+    expect(reconnectedTarget.edges[0]).toMatchObject({ source: "A", target: "B", targetHandle: "target-2" });
+    // source 端保持不变（原边无 sourceHandle）
+    expect(reconnectedTarget.edges[0]?.sourceHandle).toBeUndefined();
+
+    const reconnectedSource = updateMermaidEdge(base, "edge-1", "source", {
+      source: "B", target: "B", sourceHandle: "source-1", targetHandle: "target-0"
+    });
+    expect(reconnectedSource.edges[0]).toMatchObject({ source: "B", sourceHandle: "source-1", target: "B" });
+    // target 端保持不变
+    expect(reconnectedSource.edges[0]?.targetHandle).toBeUndefined();
+    // 原图未被修改
+    expect(base.edges[0]?.targetHandle).toBeUndefined();
   });
 });
 
@@ -343,6 +397,62 @@ describe("MermaidFlowNode", () => {
     expect(container.querySelector(".is-connection-source")).toBeTruthy();
     expect(container.querySelector(".is-connection-target")).toBeTruthy();
     expect(container.querySelector(".is-snapped-invalid")).toBeTruthy();
+  });
+});
+
+describe("MermaidFlowEdge", () => {
+  const edgeProps = (selected = false) =>
+    ({
+      id: "edge-1",
+      source: "A",
+      target: "B",
+      sourceX: 10,
+      sourceY: 20,
+      sourcePosition: "right",
+      targetX: 100,
+      targetY: 20,
+      targetPosition: "left",
+      sourceHandleId: "source-0",
+      targetHandleId: "target-1",
+      markerEnd: "url(#ta-mermaid-preview-arrow)",
+      markerStart: "",
+      style: {},
+      data: {},
+      events: {},
+      selected
+    }) as unknown as EdgeProps;
+
+  it("未选中不显示端点圆圈，选中后显示两个", () => {
+    const idle = render(MermaidFlowEdge, { props: edgeProps(false) });
+    expect(idle.container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(0);
+
+    const active = render(MermaidFlowEdge, { props: edgeProps(true) });
+    expect(active.container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(2);
+  });
+
+  it("按下端点圆圈发出重连起点（带固定端信息）", async () => {
+    const { container, emitted } = render(MermaidFlowEdge, { props: edgeProps(true) });
+    const handles = container.querySelectorAll<HTMLElement>(".ta-mermaid-edge-handle");
+    // 第一个圆圈在 sourceX（source 端），第二个在 targetX（target 端）
+    await fireEvent.pointerDown(handles[1]!); // 拖动 target 端 -> 固定 source
+    let calls = emitted().reconnectStart as Array<[Record<string, unknown>]> | undefined;
+    expect(calls!.at(-1)![0]).toMatchObject({
+      edgeId: "edge-1",
+      end: "target",
+      fixedNodeId: "A",
+      fixedHandleId: "source-0",
+      fixedPosition: "right"
+    });
+
+    await fireEvent.pointerDown(handles[0]!); // 拖动 source 端 -> 固定 target
+    calls = emitted().reconnectStart as Array<[Record<string, unknown>]> | undefined;
+    expect(calls!.at(-1)![0]).toMatchObject({
+      edgeId: "edge-1",
+      end: "source",
+      fixedNodeId: "B",
+      fixedHandleId: "target-1",
+      fixedPosition: "left"
+    });
   });
 });
 

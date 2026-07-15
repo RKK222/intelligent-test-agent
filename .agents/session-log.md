@@ -6762,3 +6762,17 @@ bash /tmp/test-api-after-restart.sh
   - 改造既有“选中显示箭头”相关测试为悬浮驱动（`fireEvent.mouseEnter`/`mouseLeave`）；新增“点击快捷箭头不会误触发端口连线拖拽”回归测试，验证 pointerdown 被拦截、click 仍触发 quickConnect。在独立 worktree（基底本地 main + 前两次 mermaid 修复）中完成，与 codex 的 `codex/chat-work-status-summary` 检出隔离。
 - Result:
   - editor 全量 Vitest 9 文件 102 passed（含新增 1 项 pointerdown 拦截测试），前端 typecheck 通过。
+
+### 2026-07-15 - 连线可重连：选中后拖动端点圆圈改连到其它节点
+
+- Why:
+  - 之前连线创建后无法调整端点；用户希望选中连线后在收尾处出现绿色小圆圈，可拖动头部或尾部到其它图形并自动吸附。
+- What:
+  - 新增自定义边组件 `MermaidFlowEdge.vue`：用 Vue Flow `BaseEdge` 渲染 smoothstep 路径，选中时在 source/target 两端渲染绿色圆圈；按下圆圈发出 `reconnectStart`（带固定端 nodeId/handleId/position）。`toVueFlowEdges` 边类型由 `smoothstep` 改为 `mermaid-edge`，编辑器经 `#edge-mermaid-edge` 插槽挂载该组件。
+  - 扩展 `use-mermaid-connection-drag`：新增 `onReconnect` 回调、`buildConnection`（reconnect-source 时方向反转，固定端是 target、拖动端是新 source）、`startConnection(start, { reconnect })` 与 `isReconnecting` 态；松开时按模式调用 `onReconnect` 或 `onConnect`。
+  - `canAppendMermaidEdge`/`getMermaidConnectionInvalidReason` 增加 `excludeEdgeId`，重连判重时排除被更新的边本身，允许在同节点对上换端口；新增 `updateMermaidEdge` 按 end 更新对应端。
+  - 编辑器：`onReconnectStart` 测量固定端端口屏幕坐标后启动重连拖拽，`commitReconnect` 调 `updateMermaidEdge` 回写；`@edge-click` 选中连线时取消节点选中；重连预览用绿色虚线、不带箭头。
+- How:
+  - 新增控制器重连（target/source 两端）回归测试、`canAppendMermaidEdge` 排除自身、`updateMermaidEdge` 只更新被拖端、`MermaidFlowEdge` 圆圈与重连起点发出等测试；mock 补 `BaseEdge`。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 108 passed（+6），前端 typecheck 与 lint 通过。
