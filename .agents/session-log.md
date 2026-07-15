@@ -6856,3 +6856,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 前端全量 lint、typecheck、58 个 Vitest 文件（840 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
   - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；新增插槽和组件属性均为可选，既有调用保持兼容。
+
+### 2026-07-15 - 完成状态移至最后输出下方
+
+- Why:
+  - 最新工作状态原先只按“是否最新轮”投送到输入框 Dock，成功终态虽然收成图标，仍停留在输入框上方，没有紧跟本轮最后一个 assistant 输出。
+- What:
+  - `OpencodeTimeline` 只把非成功的最新工作状态投送到 Dock；成功完成摘要及满意/不满意入口留在时间线最后输出下方，点击图标仍在原位置展开完整详情。
+  - 文件修改块按产品选择继续固定在输入框上方；失败、停止、重试、历史状态、问答和子 Agent 展示保持原路径。
+- How:
+  - 通过 TDD 先复现完成摘要仍在 Dock，再收窄 Dock 行过滤谓词；补充运行到完成迁移、无 assistant 输出、`AssistantThread`、`FigmaChatPanel`、反馈位置和 Diff 固定位置回归。
+  - 真实页面验证桌面及 390px 窄屏的迁移、自动滚动、反馈同排、原位展开和无横向溢出，并同步既有设计、实施计划及 agent-chat/agent-web README/PACKAGE。
+- Result:
+  - 前端全量 lint、typecheck、58 个 Vitest 文件（842 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
+  - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；`workStatusDockTarget` 类型不变，仅收窄成功态的投送行为。

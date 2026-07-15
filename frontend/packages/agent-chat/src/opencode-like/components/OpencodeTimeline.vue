@@ -24,8 +24,10 @@ const resolvedDockTarget = computed(() => {
   if (!target || typeof document === "undefined") return null;
   return typeof target === "string" ? document.querySelector(target) : target;
 });
+// 运行过程固定在输入区便于持续观察；成功完成后状态回到该轮最后输出下方，Diff 仍留在输入区。
 const dockRows = computed(() => resolvedDockTarget.value
-  ? rows.value.filter((row) => row.type === "diff-summary" || (row.type === "work-status" && row.isLatest))
+  ? rows.value.filter((row) => row.type === "diff-summary"
+    || (row.type === "work-status" && row.isLatest && row.status !== "completed"))
   : []);
 const inlineRows = computed(() => resolvedDockTarget.value
   ? rows.value.filter((row) => !dockRows.value.includes(row))

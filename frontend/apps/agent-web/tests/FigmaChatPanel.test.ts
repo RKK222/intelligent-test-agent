@@ -2686,6 +2686,15 @@ describe("FigmaChatPanel", () => {
         ],
         running: false,
         runtimeStatus: "SUCCEEDED",
+        fileChanges: [
+          {
+            path: "src/main.ts",
+            patch: "@@\n-old\n+new",
+            additions: 1,
+            deletions: 1,
+            status: "modified"
+          }
+        ],
         messageFeedbacks: {
           [platformMessageId]: {
             feedbackId: "fb_123",
@@ -2703,12 +2712,20 @@ describe("FigmaChatPanel", () => {
       },
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
+    await nextTick();
 
     const summary = wrapper.get(".oc-work-status-completed-summary");
+    const timeline = wrapper.get(".oc-timeline");
+    const dock = wrapper.get("[data-testid='figma-work-status-dock']");
+    const answerRow = timeline.get(".oc-text-part").element;
     const buttons = summary.findAll(".figma-chat-feedback-btn");
     expect(buttons).toHaveLength(2);
     expect(buttons[0].classes()).toContain("is-selected");
     expect(summary.get('[aria-label="展开已完成工作状态"]').attributes("aria-expanded")).toBe("false");
+    expect(timeline.element.contains(summary.element)).toBe(true);
+    expect(dock.find(".oc-work-status-completed-summary").exists()).toBe(false);
+    expect(dock.find(".oc-diff-summary").exists()).toBe(true);
+    expect(answerRow.compareDocumentPosition(summary.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(wrapper.find(".figma-chat-timeline-actions").exists()).toBe(false);
 
     await buttons[0].trigger("click");

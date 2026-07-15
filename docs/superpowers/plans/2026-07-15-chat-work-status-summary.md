@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将主智能体当前轮状态、Todo 和文件修改固定到输入框上方，成功完成后把状态收为与反馈按钮并列的图标，并让事件行按真实事件按需出现。
+**Goal:** 将主智能体当前轮非成功状态、Todo 和文件修改固定到输入框上方，成功完成后把状态收为最后输出下方与反馈按钮并列的图标，并让事件行按真实事件按需出现。
 
-**Architecture:** `agent-chat` 投影层继续生成根会话专用 `work-status` 行，runtime reducer 维护按 user message ID 的 Todo 快照；`OpencodeTimeline` 把最新状态和 Diff 投送到输入框上方 Dock，并用通用 actions 插槽承载完成摘要旁的业务操作。`agent-web` 只通过该插槽迁移既有反馈按钮，不把反馈 DTO 或提交逻辑下沉到通用包；子智能体投影、问答卡片和网络契约保持不变。
+**Architecture:** `agent-chat` 投影层继续生成根会话专用 `work-status` 行，runtime reducer 维护按 user message ID 的 Todo 快照；`OpencodeTimeline` 把最新非成功状态和 Diff 投送到输入框上方 Dock，成功状态保留在最后 assistant 输出后的时间线，并用通用 actions 插槽承载完成摘要旁的业务操作。`agent-web` 只通过该插槽迁移既有反馈按钮，不把反馈 DTO 或提交逻辑下沉到通用包；子智能体投影、问答卡片和网络契约保持不变。
 
 **Tech Stack:** Vue 3、TypeScript 6、Vitest、Testing Library Vue、Tailwind CSS 4、lucide-vue-next、pnpm workspace。
 
@@ -398,3 +398,12 @@ git add .agents/session-log.md docs/superpowers/plans/2026-07-15-chat-work-statu
 git diff --cached --check
 git commit -m "前端：合并完成状态与反馈入口"
 ```
+
+### Task 9: 将成功完成状态移回最后输出下方
+
+- [x] 修改 `opencode-timeline.test.ts`，先断言运行态状态与 Diff 都在 Dock，完成后状态移到最后 assistant 输出之后且 Diff 留在 Dock，并确认旧实现 RED。
+- [x] 收窄 `OpencodeTimeline` 的 Dock 行分流：`diff-summary` 始终投送，最新 `work-status` 仅在 `status !== "completed"` 时投送。
+- [x] 补充无 assistant part、`AssistantThread` 和 `FigmaChatPanel` 回归，确认完成摘要、反馈、展开详情与 Diff 分别位于预期容器。
+- [x] 在桌面和 390px 窄屏真实页面验证运行到完成的迁移、自动滚动、反馈同排、详情原位展开和 Diff 固定位置。
+- [x] 同步设计、README/PACKAGE 和 `.agents/session-log.md`，执行全量 lint、typecheck、test、build 与 `git diff --check`。
+- [x] 回顾 `.agents/session-log.md` 和暂存范围，使用 `前端：将完成状态移至最后输出下方` 提交。

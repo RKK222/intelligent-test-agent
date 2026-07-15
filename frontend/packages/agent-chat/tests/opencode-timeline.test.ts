@@ -116,34 +116,78 @@ describe("OpencodeTimeline", () => {
     }
   });
 
-  it("collapses the latest completed status beside generic actions and expands before diff", async () => {
+  it("moves the latest completed status after the final assistant output while keeping diff in the dock", async () => {
     const dock = document.createElement("div");
     dock.id = "test-completed-work-status-dock";
     document.body.appendChild(dock);
     try {
-      const state = createOpencodeLikeState({
-        messages: [userMessage("msg_user_1", "完成任务")],
-        running: false,
+      const messages = [
+        userMessage("msg_user_1", "完成任务"),
+        assistantMessage("msg_assistant_1", [textPart("part_answer_1", "任务已经完成。")])
+      ];
+      const runningState = createOpencodeLikeState({
+        messages,
+        running: true,
         diffFiles: [{ path: "src/main.ts", patch: "", additions: 1, deletions: 0, status: "modified" }]
       });
 
-      const { container, getByRole } = render(OpencodeTimeline, {
-        props: { state, workStatusDockTarget: dock },
+      const { container, getByRole, rerender } = render(OpencodeTimeline, {
+        props: { state: runningState, workStatusDockTarget: dock },
         slots: { "completed-status-actions": "<button type='button'>满意</button>" }
       });
       await nextTick();
 
-      const completedRow = dock.querySelector(".oc-work-status-completed");
-      expect(container.querySelector(".oc-work-status")).toBeNull();
+      expect(dock.querySelector(".oc-work-status")).toBeTruthy();
+      expect(dock.querySelector(".oc-diff-summary")).toBeTruthy();
+
+      await rerender({
+        state: createOpencodeLikeState({
+          messages,
+          running: false,
+          diffFiles: [{ path: "src/main.ts", patch: "", additions: 1, deletions: 0, status: "modified" }]
+        }),
+        workStatusDockTarget: dock
+      });
+      await nextTick();
+
+      const completedRow = container.querySelector(".oc-work-status-completed");
+      const answerRow = container.querySelector(".oc-text-part") as HTMLElement;
+      expect(completedRow).toBeTruthy();
+      expect(dock.querySelector(".oc-work-status-completed")).toBeNull();
       expect(dock.querySelector(".oc-work-status")).toBeNull();
+      expect(dock.querySelector(".oc-diff-summary")).toBeTruthy();
       expect(completedRow?.querySelector(".oc-work-status-completed-summary")?.textContent).toContain("满意");
-      expect(completedRow?.nextElementSibling?.classList.contains("oc-diff-summary")).toBe(true);
+      expect(answerRow.compareDocumentPosition(completedRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
       await fireEvent.click(getByRole("button", { name: "展开已完成工作状态" }));
 
-      expect(dock.querySelector(".oc-work-status")).toBeTruthy();
+      expect(container.querySelector(".oc-work-status")).toBeTruthy();
+      expect(dock.querySelector(".oc-work-status")).toBeNull();
       expect(getByRole("button", { name: "收起已完成工作状态" })).toBeTruthy();
-      expect(completedRow?.nextElementSibling?.classList.contains("oc-diff-summary")).toBe(true);
+      expect(dock.querySelector(".oc-diff-summary")).toBeTruthy();
+    } finally {
+      dock.remove();
+    }
+  });
+
+  it("places a completed status after the user message when no assistant output exists", async () => {
+    const dock = document.createElement("div");
+    document.body.appendChild(dock);
+    try {
+      const state = createOpencodeLikeState({
+        messages: [userMessage("msg_user_1", "尚未收到输出")],
+        running: false
+      });
+      const { container } = render(OpencodeTimeline, {
+        props: { state, workStatusDockTarget: dock }
+      });
+      await nextTick();
+
+      const userRow = container.querySelector(".oc-user-message") as HTMLElement;
+      const completedRow = container.querySelector(".oc-work-status-completed") as HTMLElement;
+      expect(completedRow).toBeTruthy();
+      expect(userRow.compareDocumentPosition(completedRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(dock.querySelector(".oc-work-status-completed")).toBeNull();
     } finally {
       dock.remove();
     }
@@ -925,6 +969,30 @@ describe("OpencodeTimeline", () => {
     expect(getByText("分析 SSE 字段")).toBeTruthy();
     expect(getByText("未知状态兼容")).toBeTruthy();
     expect(getByText("blocked")).toBeTruthy();
+  });
+
+  it("shows a completed status after the final assistant output instead of the composer dock", async () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_1", "完成分析"),
+      assistantMessage("msg_assistant_1", [textPart("part_answer_1", "分析已经完成。")])
+    ];
+    const { container } = render(AssistantThread, {
+      props: {
+        messages,
+        commands: [],
+        resources: [],
+        running: false
+      }
+    });
+    await nextTick();
+
+    const viewport = container.querySelector("[data-testid='agent-thread-viewport']") as HTMLElement;
+    const dock = container.querySelector("[data-testid='assistant-work-status-dock']") as HTMLElement;
+    const answerRow = viewport.querySelector(".oc-text-part") as HTMLElement;
+    const completedRow = viewport.querySelector(".oc-work-status-completed") as HTMLElement;
+    expect(completedRow).toBeTruthy();
+    expect(dock.querySelector(".oc-work-status-completed")).toBeNull();
+    expect(answerRow.compareDocumentPosition(completedRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows one assistant header for split assistant messages in the same user turn", async () => {
