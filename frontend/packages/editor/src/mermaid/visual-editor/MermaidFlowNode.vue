@@ -563,8 +563,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
   position: absolute;
   left: 12px;
   width: 32px;
-  height: 24px;
-  top: 0;
+  height: 48px;
+  top: -12px;
   background: transparent;
   pointer-events: auto;
 }
@@ -574,8 +574,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
   position: absolute;
   right: 12px;
   width: 32px;
-  height: 24px;
-  top: 0;
+  height: 48px;
+  top: -12px;
   background: transparent;
   pointer-events: auto;
 }
@@ -584,9 +584,9 @@ function preventNodeDragFromPort(event: MouseEvent) {
   content: "";
   position: absolute;
   bottom: 12px;
-  width: 24px;
+  width: 48px;
   height: 32px;
-  left: 0;
+  left: -12px;
   background: transparent;
   pointer-events: auto;
 }
@@ -595,10 +595,45 @@ function preventNodeDragFromPort(event: MouseEvent) {
   content: "";
   position: absolute;
   top: 12px;
-  width: 24px;
+  width: 48px;
   height: 32px;
-  left: 0;
+  left: -12px;
   background: transparent;
   pointer-events: auto;
+}
+
+/* 为快捷菜单面板提供与大箭头之间的透明连接桥，防鼠标滑过 8px 物理间隙时 hover 中断 */
+.ta-mermaid-quick-menu::before {
+  content: "";
+  position: absolute;
+  background: transparent;
+}
+
+.ta-mermaid-quick-connector.is-right .ta-mermaid-quick-menu::before {
+  left: -12px;
+  top: 0;
+  width: 12px;
+  height: 100%;
+}
+
+.ta-mermaid-quick-connector.is-left .ta-mermaid-quick-menu::before {
+  right: -12px;
+  top: 0;
+  width: 12px;
+  height: 100%;
+}
+
+.ta-mermaid-quick-connector.is-top .ta-mermaid-quick-menu::before {
+  bottom: -12px;
+  left: 0;
+  height: 12px;
+  width: 100%;
+}
+
+.ta-mermaid-quick-connector.is-bottom .ta-mermaid-quick-menu::before {
+  top: -12px;
+  left: 0;
+  height: 12px;
+  width: 100%;
 }
 </style>
