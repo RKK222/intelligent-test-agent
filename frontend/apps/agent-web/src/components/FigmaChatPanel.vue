@@ -3485,7 +3485,6 @@ function onCompositionEnd() {
               @click="submitPositiveFeedback(lastFeedbackableMessage)"
             >
               <ThumbsUp :size="12" />
-              <span>满意</span>
             </button>
             <button
               type="button"
@@ -3499,7 +3498,6 @@ function onCompositionEnd() {
               @click="openNegativeFeedback(lastFeedbackableMessage)"
             >
               <ThumbsDown :size="12" />
-              <span>不满意</span>
             </button>
           </div>
         </template>
@@ -6130,6 +6128,29 @@ function onCompositionEnd() {
 
 .figma-chat-completed-feedback {
   margin-top: 0;
+}
+
+.figma-chat-completed-feedback .figma-chat-feedback-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+
+.figma-chat-completed-feedback .figma-chat-feedback-btn:hover:not(:disabled),
+.figma-chat-completed-feedback .figma-chat-feedback-btn.is-selected {
+  background: transparent;
+  border-color: transparent;
+  color: #1f5fbf;
+}
+
+.figma-chat-completed-feedback .figma-chat-feedback-btn--negative:hover:not(:disabled),
+.figma-chat-completed-feedback .figma-chat-feedback-btn--negative.is-selected {
+  background: transparent;
+  border-color: transparent;
+  color: #b94030;
 }
 
 .figma-chat-feedback-btn,

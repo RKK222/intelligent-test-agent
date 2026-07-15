@@ -40,18 +40,19 @@
 - Result:
   - 相关 Maven 测试共 113 项全部通过，完整后端打包成功；后端 health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 当前已连接。企业远端实际 push 未在本地凭据环境执行，仍需在企业公共区进行一次端到端验收；若服务器有提交邮箱域名限制，需要补充真实邮箱来源或可配置域名。
 ### 2026-07-15 - 修复反馈按钮在 flex 布局下收缩导致文字隐藏的 Bug
+### 2026-07-15 - 前端反馈按钮样式优化，改用无边框透明纯图标样式
 
 - Why:
-  - 成功完成态下的满意/不满意反馈按钮从独立的非压缩容器挪到了 `.oc-work-status-completed-summary` 这一 flex 容器中。当容器宽度受限时，由于反馈按钮和外层包裹容器缺少防收缩样式，按钮宽度被压缩，导致其内部的文字被完全隐藏。
+  - 根据用户的明确要求，对话时间线成功完成态下的满意/不满意反馈按钮不需要显示文字，且需要去除图标周围的边框，只保留图标本身。
 - What:
-  - 修复反馈按钮（满意/不满意）文字在界面上不可见、只显示按钮边框和图标的问题。
+  - 去除反馈按钮中的文字并隐藏边框与背景，使其成为纯图标按钮。
 - How:
-  - 在 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 的样式中：
-    - 给外层反馈布局 `.figma-chat-feedback` 添加 `flex-shrink: 0`。
-    - 给按钮 `.figma-chat-feedback-btn` 与 `.figma-chat-action-btn` 添加 `flex-shrink: 0` 与 `white-space: nowrap` 样式，保障它们在任何弹性容器下都不会被挤压，文字能够正常展示。
+  - 在 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 中：
+    - 在插槽模版中删除“满意”和“不满意”的 `<span>` 元素，只留下 `ThumbsUp` 和 `ThumbsDown` 图标。
+    - 针对 `.figma-chat-completed-feedback` 下的反馈按钮做样式覆盖：去除 border 和 background，padding 设为 0，大小固定为 20px x 20px；hover 和被选中时维持 transparent 边框与背景，仅修改图标文字颜色进行状态提示（满意变蓝 `#1f5fbf`，不满意变红 `#b94030`）。
 - Result:
-  - 前端全量 typecheck 和 `vitest` 测试（包括 `FigmaChatPanel.test.ts` 的 120 个用例、`opencode-timeline.test.ts` 的 38 个用例）全部成功通过。
-  - 前端生产构建 `corepack pnpm build` 成功完成。
+  - 运行 `vitest` 对 `FigmaChatPanel` 和 `opencode-timeline` 进行了验证，测试均 100% 成功通过。
+  - 前端全量 typecheck 与编译时因为其他无关文件（如 `AgentWorkbench.vue` 的 `AutoRetryRunDraft` 类型不兼容）导致编译报错，属于项目分支中的历史残留问题，不在本任务中扩大范围修改。
 
 ### 2026-07-15 - 清理前端字体 CSS `@import` 顺序告警
 
