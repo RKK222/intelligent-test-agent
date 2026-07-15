@@ -6296,3 +6296,16 @@ bash /tmp/test-api-after-restart.sh
   - `GitWorkspaceServiceTest` 23 项、`ManagedWorkspaceApplicationServiceTest` 45 项通过；后端生产代码使用 `mvn package -Dmaven.test.skip=true` 打包成功。
   - `.env.test` 三服务重启后，真实 Git Diff API 返回 18 个未跟踪文件、0 个目录项；Chromium 中变更角标、UNSTAGED 数量和文件行数均为 18，页面无脚本错误，backend health/readiness 为 `UP`。
   - 标准 `mvn clean package -DskipTests` 仍被本任务外的 opencode-runtime 测试源码编译错误阻断：多处 FakeRepository 未实现 `findReadyBackendJavaProcessByLinuxServer`，另有一处 `UserOpencodeProcessStatusResponse` 构造参数过期；本次未扩大范围修改这些并发主线问题。
+
+### 2026-07-15 - 修复多轮历史对话用户消息角色错乱
+
+- Why:
+  - 平台 messages 接口返回的三轮 `USER/ASSISTANT` 顺序和正文均正确；真实 session-tree payload 同时在 `events` 与 `messagesBySessionId` 中先返回无正文 user `message.updated` envelope，再返回独立 text part。events 首次回放跳过空 envelope 后，第二、第三轮 user text part 会被 reducer 回退合并到上一条 assistant。
+- What:
+  - 历史快照适配层预先按 `sessionId + messageId` 建立首个非 synthetic text 索引，仅补齐同 Session、缺少正文的 user envelope；events 与 `messagesBySessionId` 回放复用同一索引，不修改实时 SSE reducer、Timeline、后端或公共事件契约。
+  - 增加三轮真实结构回归夹具，覆盖空 user envelope、独立 user text part、assistant reasoning/text parts、重复快照来源和平台持久消息合并。
+- How:
+  - 测试驱动先确认第一、第二条 assistant 分别错误包含下一轮 `prt_user_text_2`、`prt_user_text_3`，再在 `workbench-utils.ts` 的历史边界前置归一化；不采用按文本删除 assistant part 的事后过滤。
+- Result:
+  - 三轮消息严格按 user/assistant 交替恢复，用户提问只保留在对应 user 消息，assistant reasoning、回答、远端 part 和平台 user messageId 均保留。
+  - `workbench-utils.test.ts` 69 项、前端全量 Vitest 790 项通过（另 1 项跳过），agent-web typecheck 通过。

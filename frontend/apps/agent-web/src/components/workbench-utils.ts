@@ -739,13 +739,15 @@ export function chatStateFromSessionTreeSnapshot(
   persistedMessages: SessionMessage[] = []
 ): AgentChatRuntimeState {
   let state = createInitialAgentChatRuntimeState();
+  const visibleUserTextBySessionId = sessionTreeVisibleUserTextBySessionId(snapshot);
   dedupeSessionTreeEvents(snapshot.events ?? []).forEach((event, index) => {
+    const normalizedEvent = sessionTreeEventWithVisibleUserText(event, visibleUserTextBySessionId);
     state = reduceAgentChatRuntime(state, {
       type: "event",
-      event: runEventFromSessionTreeEvent(snapshot, event, index)
+      event: runEventFromSessionTreeEvent(snapshot, normalizedEvent, index)
     });
   });
-  state = replaySessionTreeMessagesBySessionId(state, snapshot);
+  state = replaySessionTreeMessagesBySessionId(state, snapshot, visibleUserTextBySessionId);
   state = hydrateSubagentIndexesFromSessionTreeSnapshot(state, snapshot);
   const persistedAgentMessages = messagesFromSessionMessages(persistedMessages);
   if (persistedAgentMessages.length > 0) {
@@ -768,7 +770,8 @@ export function messagesFromSessionTreeSnapshot(snapshot: SessionTreeMessagesRes
 
 function replaySessionTreeMessagesBySessionId(
   state: AgentChatRuntimeState,
-  snapshot: SessionTreeMessagesResponse
+  snapshot: SessionTreeMessagesResponse,
+  visibleUserTextBySessionId: Map<string, Map<string, string>>
 ): AgentChatRuntimeState {
   let next = state;
   let index = 0;
@@ -776,7 +779,7 @@ function replaySessionTreeMessagesBySessionId(
     if (!Array.isArray(payloads)) {
       continue;
     }
-    const visibleUserTextByMessageId = sessionTreeVisibleUserTextByMessageId(payloads);
+    const visibleUserTextByMessageId = visibleUserTextBySessionId.get(sessionId) ?? new Map<string, string>();
     for (const rawPayload of payloads) {
       const payload = record(rawPayload);
       const message = record(payload?.message) ?? record(payload?.info);
@@ -803,6 +806,40 @@ function replaySessionTreeMessagesBySessionId(
     }
   }
   return next;
+}
+
+/**
+ * events 与 messagesBySessionId 会重复携带同一批历史消息；先按 Session 建索引，保证两次回放使用同一套 user 正文归一化规则。
+ */
+function sessionTreeVisibleUserTextBySessionId(
+  snapshot: SessionTreeMessagesResponse
+): Map<string, Map<string, string>> {
+  const visibleTextBySessionId = new Map<string, Map<string, string>>();
+  for (const [sessionId, payloads] of Object.entries(snapshot.messagesBySessionId ?? {})) {
+    if (!Array.isArray(payloads)) {
+      continue;
+    }
+    visibleTextBySessionId.set(sessionId, sessionTreeVisibleUserTextByMessageId(payloads));
+  }
+  return visibleTextBySessionId;
+}
+
+function sessionTreeEventWithVisibleUserText(
+  event: SessionTreeMessagesResponse["events"][number],
+  visibleUserTextBySessionId: Map<string, Map<string, string>>
+): SessionTreeMessagesResponse["events"][number] {
+  if (event.type !== "message.updated") {
+    return event;
+  }
+  const payload = record(event.payload);
+  const message = record(payload?.message) ?? record(payload?.info);
+  const sessionId = text(event.sessionId) ?? text(payload?.sessionId) ?? text(payload?.sessionID);
+  const visibleUserTextByMessageId = sessionId ? visibleUserTextBySessionId.get(sessionId) : undefined;
+  if (!payload || !message || !visibleUserTextByMessageId) {
+    return event;
+  }
+  const normalized = sessionTreeMessageWithVisibleUserText(payload, message, visibleUserTextByMessageId);
+  return normalized.payload === payload ? event : { ...event, payload: normalized.payload };
 }
 
 /**

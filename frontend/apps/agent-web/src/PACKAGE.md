@@ -39,7 +39,7 @@
 - `components/workbench-utils.ts`：Diff payload 解析、错误反馈、history/runtime status 派生、session-tree 历史快照恢复和子 Agent 索引兜底、opencode 弱健康 ready 规则、命令解析、跨需求/设计/编码/测试阶段的子条目路径聚合，以及普通工作空间根目录 `.opencode` 过滤等纯函数。
 - `styles/globals.css`：Tailwind 4 全局入口、theme token、dockview-vue/Monaco 视觉适配、滚动条、panel chrome 和工作台级动画。
 - `../vite.config.ts`：Vite 应用配置（Vue 插件、Tailwind 插件、workspace alias、dev server）。
-- `AgentWorkbench.handleSend` 继续把完整 text/file parts 交给 Run 请求；本地乐观 user message 只接收经 `promptPartsForUserDisplay` 收敛后的文本和附件元数据。历史 session-tree 恢复会用同 messageId 的首个非 synthetic text part 补齐无正文的 OpenCode user envelope，再复用原 reducer 归并 file part，避免文件正文成为独立消息且不改变 Timeline、事件投影和 OpenCode parts 协议。
+- `AgentWorkbench.handleSend` 继续把完整 text/file parts 交给 Run 请求；本地乐观 user message 只接收经 `promptPartsForUserDisplay` 收敛后的文本和附件元数据。历史 session-tree 恢复会预先按 `sessionId + messageId` 建立首个非 synthetic text 索引，仅补齐同 Session、无正文的 OpenCode user envelope；`events` 与 `messagesBySessionId` 两次回放复用该索引后再交给原 reducer 归并 file part，避免后续用户文本落入上一条 assistant，且不改变 Timeline、实时事件投影和 OpenCode parts 协议。
 
 ## 允许依赖
 

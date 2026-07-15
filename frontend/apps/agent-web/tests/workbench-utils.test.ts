@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FileSearchResult, MessagePart, PromptPart, Run, RunDiffFile, RunEvent, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
+import type { AgentMessage, FileSearchResult, MessagePart, PromptPart, Run, RunDiffFile, RunEvent, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import * as workbenchUtils from "../src/components/workbench-utils";
 import {
   assistantSummaryMessageId,
@@ -886,6 +886,170 @@ describe("historical session restoration", () => {
       text: "该子条目完成了详细设计。"
     });
     expect(state.messages.some((message) => message.role === "user" && message.text.includes("完整原文"))).toBe(false);
+  });
+
+  it("keeps multi-turn user text parts out of the previous assistant message", () => {
+    const remoteSessionId = "ses_opencode_root";
+    const turns = [
+      {
+        prompt: "第一次提问，不用调用任何技能，直接输入回答1",
+        answer: "1",
+        reasoning: "直接按要求回答 1。",
+        platformUserId: "msg_11111111111111111111111111111111",
+        platformAssistantId: "msg_22222222222222222222222222222222",
+        remoteUserId: "msg_remote_user_1",
+        remoteAssistantId: "msg_remote_assistant_1"
+      },
+      {
+        prompt: "第二次提问，不用调用任何技能，直接输出：回答2",
+        answer: "回答2",
+        reasoning: "直接按要求回答 2。",
+        platformUserId: "msg_33333333333333333333333333333333",
+        platformAssistantId: "msg_44444444444444444444444444444444",
+        remoteUserId: "msg_remote_user_2",
+        remoteAssistantId: "msg_remote_assistant_2"
+      },
+      {
+        prompt: "第三次提问，不用调用任何技能，直接输出：回答三",
+        answer: "回答三",
+        reasoning: "直接按要求回答三。",
+        platformUserId: "msg_55555555555555555555555555555555",
+        platformAssistantId: "msg_66666666666666666666666666666666",
+        remoteUserId: "msg_remote_user_3",
+        remoteAssistantId: "msg_remote_assistant_3"
+      }
+    ];
+    // 夹具保持真实 OpenCode 顺序：无正文 message envelope 后紧跟独立 text/reasoning part。
+    const payloads: Record<string, unknown>[] = turns.flatMap((turn, index) => [
+      {
+        rootSessionId: remoteSessionId,
+        sessionId: remoteSessionId,
+        message: {
+          id: turn.remoteUserId,
+          messageID: turn.remoteUserId,
+          sessionID: remoteSessionId,
+          role: "user"
+        }
+      },
+      {
+        rootSessionId: remoteSessionId,
+        sessionId: remoteSessionId,
+        messageId: turn.remoteUserId,
+        messageID: turn.remoteUserId,
+        part: {
+          id: `prt_user_text_${index + 1}`,
+          partID: `prt_user_text_${index + 1}`,
+          messageId: turn.remoteUserId,
+          messageID: turn.remoteUserId,
+          sessionID: remoteSessionId,
+          type: "text",
+          text: turn.prompt
+        }
+      },
+      {
+        rootSessionId: remoteSessionId,
+        sessionId: remoteSessionId,
+        message: {
+          id: turn.remoteAssistantId,
+          messageID: turn.remoteAssistantId,
+          sessionID: remoteSessionId,
+          role: "assistant"
+        }
+      },
+      {
+        rootSessionId: remoteSessionId,
+        sessionId: remoteSessionId,
+        messageId: turn.remoteAssistantId,
+        messageID: turn.remoteAssistantId,
+        part: {
+          id: `prt_reasoning_${index + 1}`,
+          partID: `prt_reasoning_${index + 1}`,
+          messageId: turn.remoteAssistantId,
+          messageID: turn.remoteAssistantId,
+          sessionID: remoteSessionId,
+          type: "reasoning",
+          text: turn.reasoning
+        }
+      },
+      {
+        rootSessionId: remoteSessionId,
+        sessionId: remoteSessionId,
+        messageId: turn.remoteAssistantId,
+        messageID: turn.remoteAssistantId,
+        part: {
+          id: `prt_answer_${index + 1}`,
+          partID: `prt_answer_${index + 1}`,
+          messageId: turn.remoteAssistantId,
+          messageID: turn.remoteAssistantId,
+          sessionID: remoteSessionId,
+          type: "text",
+          text: turn.answer
+        }
+      }
+    ]);
+    const persistedMessages: SessionMessage[] = turns.flatMap((turn, index) => [
+      {
+        messageId: turn.platformUserId,
+        sessionId: "ses_platform",
+        role: "USER",
+        content: turn.prompt,
+        createdAt: `2026-07-15T00:0${index * 2}:00Z`
+      },
+      {
+        messageId: turn.platformAssistantId,
+        remoteMessageId: turn.remoteAssistantId,
+        sessionId: "ses_platform",
+        role: "ASSISTANT",
+        content: turn.answer,
+        createdAt: `2026-07-15T00:0${index * 2 + 1}:00Z`
+      }
+    ]);
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_platform",
+      sessions: [{ rootSessionId: remoteSessionId, sessionId: remoteSessionId, childSession: false }],
+      messagesBySessionId: { [remoteSessionId]: payloads },
+      childSessionIdByTaskPartId: {},
+      events: payloads.map((payload) => ({
+        type: "message" in payload ? "message.updated" : "message.part.updated",
+        rootSessionId: remoteSessionId,
+        sessionId: remoteSessionId,
+        childSession: false,
+        payload
+      }))
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, persistedMessages);
+
+    expect(state.messages).toHaveLength(6);
+    const conversationMessages = state.messages.filter(
+      (message): message is Extract<AgentMessage, { role: "user" | "assistant" }> =>
+        message.role === "user" || message.role === "assistant"
+    );
+    expect(conversationMessages.map((message) => [message.role, message.text])).toEqual(
+      turns.flatMap((turn) => [["user", turn.prompt], ["assistant", turn.answer]])
+    );
+    const userMessages = conversationMessages.filter(
+      (message): message is Extract<AgentMessage, { role: "user" }> => message.role === "user"
+    );
+    expect(userMessages.map((message) => message.messageId)).toEqual(turns.map((turn) => turn.platformUserId));
+    expect(userMessages.map((message) => message.remoteMessageId)).toEqual(turns.map((turn) => turn.remoteUserId));
+
+    const assistantMessages = conversationMessages.filter(
+      (message): message is Extract<AgentMessage, { role: "assistant" }> => message.role === "assistant"
+    );
+    expect(assistantMessages.map((message) => message.remoteMessageId)).toEqual(turns.map((turn) => turn.remoteAssistantId));
+    expect(
+      assistantMessages.map((message) =>
+        (message.parts ?? []).filter((part) => part.type === "reasoning").map((part) => part.text)
+      )
+    ).toEqual(turns.map((turn) => [turn.reasoning]));
+    expect(
+      assistantMessages.map((message) => (message.parts ?? []).map((part) => part.partId))
+    ).toEqual(turns.map((_, index) => [`prt_reasoning_${index + 1}`, `prt_answer_${index + 1}`]));
+    const assistantPartTexts = assistantMessages.flatMap((message) =>
+      (message.parts ?? []).flatMap((part) => part.type === "text" || part.type === "reasoning" ? [part.text] : [])
+    );
+    turns.forEach((turn) => expect(assistantPartTexts).not.toContain(turn.prompt));
   });
 
   it("restores subagent indexes from snapshot sessions when discovery events are absent", () => {
