@@ -39,4 +39,6 @@
 
 - `docs/deployment/backend.md`：后端 Java 进程容器部署。
 - `docs/deployment/frontend.md`：前端 Vue + Vite 生产构建与部署。
+- `deploy/internal/SINGLE-BACKEND.md`：企业内单 Java 后台 + 单 worker 离线部署。
+- `deploy/internal/MULTI-BACKEND.md`：企业内两个或更多 Java/worker 节点部署与跨节点验收。
 - `docs/deployment/database.md`：Flyway migration、核心表与兼容策略。

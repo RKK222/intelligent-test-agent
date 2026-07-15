@@ -6596,3 +6596,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - runtime 全量 523 项、API 全量 282 项以及相关依赖模块测试通过；定向 converter 4 项、代理 8 项复跑通过；`mvn clean package -DskipTests` 和 `package-release.sh --backend-only --no-zip` 通过，产物包含代理与转换器类。
   - 尚未连接 114 执行生产 Qwen/DeepSeek 调用或前端端到端验收；现场发布与真实模型验证仍需按企业操作手册执行。
+
+### 2026-07-15 - 企业部署文档拆分单后台与多后台正式方案
+
+- Why:
+  - 当前代码已具备 Redis 后端快照、公共 Java 路由和 Java 间 HTTP/SSE 转发能力，但企业部署入口仍以 114 单后台为主，并把 `.4 + .114` 标记为历史方案，无法直接指导最新双后台上线。
+- What:
+  - 新增独立的单后台和多后台操作手册；入口 README 只保留模式选择、共同交付物和固定启动顺序，旧操作手册及旧双后台文件名改为兼容跳转。
+  - 多后台明确同版发布物、共享 PostgreSQL/Redis、每台服务器独立稳定身份/数据目录/worker/公共配置、Java 双向 8080、每台 Java 直连 9070，以及前端 Nginx 显式多节点 upstream；删除旧 RunEvent Redis bus 参数和“多后台仅历史方案”的表述。
+  - 同步 Java/worker 配置模板注释及前后端稳定部署文档；没有修改运行代码、API、事件、数据库结构或生产环境配置。
+- How:
+  - 依据 `BackendJavaRouteResolver`、`BackendHttpForwarder`、部署脚本和 Nginx 模板核对当前实现边界；文档统一按 Java → `.serverid/.serverhost` → 本机 worker 的启动顺序，并提供 `.4 + .114` 的逐节点配置、部署、验收和回滚命令。
+- Result:
+  - 部署脚本 Bash 语法、`--help` 参数、文档链接/过期模型与参数扫描、`git diff --check` 和 `tools/verify-ai-docs.sh` 通过。
+  - `BackendJavaRouteResolverTest` 6 项、`BackendHttpForwarderTest` 与 `RunEventSseBackendRoutingWebFilterTest` 共 9 项通过；未实际连接 `.2/.4/.114` 部署或执行生产双后台端到端验收。
