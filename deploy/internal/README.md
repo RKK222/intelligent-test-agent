@@ -1,11 +1,11 @@
 # 企业内部署文档入口
 
-当前代码支持单后台完整部署，也支持普通 HTTP、RunEvent SSE、用户 OpenCode 路由和内部模型代理的多后台部署。两种模式使用同一套 Mac 离线交付物、数据库结构、Redis 运行态、Java→manager 控制协议和内部模型代理；多后台的一次性 WebSocket ticket 仍有单 JVM 限制，启用 PTY、Workspace 文件和 Agent 配置进度 WebSocket 前必须阅读多后台文档中的边界说明。
+当前代码支持单后台和完整多后台部署。两种模式使用同一套 Mac 离线交付物、数据库结构、Redis 运行态、Java→manager 控制协议和内部模型代理；多后台的一次性 WebSocket ticket 继续保存在签发 JVM，但 PTY、文件和 Agent 配置进度都已把后续连接固定到签发 Java，不依赖 Nginx sticky。
 
 请选择对应文档：
 
 - [单后台部署](SINGLE-BACKEND.md)：一个 Java 后端和一个 `opencode-worker`，当前现场示例为 `122.233.30.114`。
-- [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 的核心对话/模型可执行示例和当前 WebSocket 限制。
+- [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 的完整部署和验收示例。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
@@ -51,6 +51,7 @@ deploy/internal/dist/frontend/
   config/
     backend.env
     docker.env
+    nginx.env        # 仅前端 Nginx 服务器
   data/
   deploy/internal/
   dist/
@@ -75,7 +76,7 @@ deploy/internal/dist/frontend/
 
 - Java：[backend.env.example](backend.env.example)
 - worker/构建：[env.example](env.example)
-- 单后台 Nginx：[nginx/gateway.conf.template](nginx/gateway.conf.template)
+- 前端 Nginx：[nginx.env.example](nginx.env.example)、[configure-nginx.sh](configure-nginx.sh)
 - 公共模型配置：[opencode.jsonc.example](opencode.jsonc.example)
 
 历史链接兼容：

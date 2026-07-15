@@ -9,6 +9,7 @@ import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
 import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
+import com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.workspace.AgentConfigApplicationService;
 import com.icbc.testagent.workspace.AgentConfigResponses.AgentConfigWorktreeOptionResponse;
@@ -333,7 +334,7 @@ class AgentConfigControllerTest {
                 null));
         WebTestClient client = client(
                 service,
-                new AgentConfigOperationTicketService(new AgentConfigOperationTicketStore()),
+                ticketService(new AgentConfigOperationTicketStore()),
                 org.mockito.Mockito.mock(AgentConfigBackendRoutingService.class),
                 fileRoutingService,
                 List.of(Dictionary.ROLE_SUPER_ADMIN));
@@ -362,7 +363,7 @@ class AgentConfigControllerTest {
         AgentConfigOperationTicketStore ticketStore = new AgentConfigOperationTicketStore(
                 Clock.fixed(Instant.parse("2026-06-26T00:00:00Z"), ZoneOffset.UTC),
                 () -> "agt_fixedticket");
-        WebTestClient client = client(service, new AgentConfigOperationTicketService(ticketStore), List.of(Dictionary.ROLE_SUPER_ADMIN));
+        WebTestClient client = client(service, ticketService(ticketStore), List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.post()
                 .uri("/api/internal/platform/workspace-management/agent-config/operations/aco_12345678/tickets")
@@ -372,11 +373,17 @@ class AgentConfigControllerTest {
                 .expectBody()
                 .jsonPath("$.data.ticket").isEqualTo("agt_fixedticket")
                 .jsonPath("$.data.webSocketUrl")
-                .isEqualTo("/api/internal/platform/workspace-management/agent-config/operations/aco_12345678/ws?ticket=agt_fixedticket");
+                .isEqualTo("ws://122.233.30.114:8080/api/internal/platform/workspace-management/agent-config/operations/aco_12345678/ws?ticket=agt_fixedticket");
     }
 
     private WebTestClient client(AgentConfigApplicationService service, List<String> roles) {
-        return client(service, new AgentConfigOperationTicketService(new AgentConfigOperationTicketStore()), roles);
+        return client(service, ticketService(new AgentConfigOperationTicketStore()), roles);
+    }
+
+    private AgentConfigOperationTicketService ticketService(AgentConfigOperationTicketStore ticketStore) {
+        BackendInstanceIdentity identity = org.mockito.Mockito.mock(BackendInstanceIdentity.class);
+        when(identity.listenUrl()).thenReturn("http://122.233.30.114:8080");
+        return new AgentConfigOperationTicketService(ticketStore, new CurrentBackendWebSocketUrlFactory(identity));
     }
 
     private WebTestClient client(

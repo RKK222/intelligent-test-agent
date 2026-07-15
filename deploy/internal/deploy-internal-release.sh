@@ -3,16 +3,19 @@ set -euo pipefail
 
 ARCHIVE="/data/0709/internal.zip"
 EXTRACT_DIR="/data/0709/test-agent-internal-release"
+EXTRACT_DIR_EXPLICIT=0
 INSTALL_ROOT="/data/testagent"
 BACKEND_HOST="122.233.30.114"
 FRONTEND_HOST="122.233.30.2"
 FRONTEND_USER=""
 FRONTEND_ROOT="/data/testagent"
 BACKEND_SERVICE="test-agent-backend"
+BACKEND_PORT=8080
 BACKEND_HEALTH_URL=""
 BACKEND_READINESS_URL=""
 FRONTEND_HEALTH_URL="http://122.233.30.2/health"
 FRONTEND_URL="http://122.233.30.2/"
+NGINX_ENV="/data/testagent/config/nginx.env"
 DOCKER_ENV="/data/testagent/config/docker.env"
 EXPECTED_SERVER_ID=""
 EXPECTED_SERVER_HOST=""
@@ -42,10 +45,12 @@ Options:
   --frontend-user <user>        SSH user for frontend host. Default: current ssh config user.
   --frontend-root <path>        Frontend install root. Default: /data/testagent.
   --backend-service <name>      systemd service name. Default: test-agent-backend.
+  --backend-port <port>         Backend listen port. Default: 8080.
   --backend-health-url <url>    Backend health URL.
   --backend-readiness-url <url> Backend readiness URL.
   --frontend-health-url <url>   Frontend health URL.
   --frontend-url <url>          Frontend page URL.
+  --nginx-env <path>            Frontend Nginx env path. Default: /data/testagent/config/nginx.env.
   --docker-env <path>           Worker docker.env path. Default: /data/testagent/config/docker.env.
   --expected-server-id <id>     Expected /data/testagent/data/.serverid value.
   --expected-server-host <host> Expected /data/testagent/data/.serverhost value.
@@ -65,6 +70,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --extract-dir)
       EXTRACT_DIR="$2"
+      EXTRACT_DIR_EXPLICIT=1
       shift 2
       ;;
     --install-root)
@@ -91,6 +97,10 @@ while [[ $# -gt 0 ]]; do
       BACKEND_SERVICE="$2"
       shift 2
       ;;
+    --backend-port)
+      BACKEND_PORT="$2"
+      shift 2
+      ;;
     --backend-health-url)
       BACKEND_HEALTH_URL="$2"
       shift 2
@@ -105,6 +115,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --frontend-url)
       FRONTEND_URL="$2"
+      shift 2
+      ;;
+    --nginx-env)
+      NGINX_ENV="$2"
       shift 2
       ;;
     --docker-env)
@@ -147,6 +161,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# 仅校验包时不应依赖生产机的 /data 目录，便于在 Mac 或 CI 上直接验证最终 ZIP。
+if [[ "${VALIDATE_ONLY}" -eq 1 && "${EXTRACT_DIR_EXPLICIT}" -eq 0 ]]; then
+  EXTRACT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-internal-release-validate.XXXXXX")"
+fi
+
+cleanup_validate_extract() {
+  if [[ "${VALIDATE_ONLY}" -eq 1 && "${KEEP_EXTRACT}" -eq 0 ]]; then
+    rm -rf "${EXTRACT_DIR}"
+  fi
+}
+trap cleanup_validate_extract EXIT
+
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
@@ -186,11 +212,15 @@ configure_backend_defaults() {
     echo "Invalid backend systemd service name: ${BACKEND_SERVICE}" >&2
     exit 1
   fi
+  if [[ ! "${BACKEND_PORT}" =~ ^[0-9]{1,5}$ ]] || (( BACKEND_PORT < 1 || BACKEND_PORT > 65535 )); then
+    echo "Invalid backend port: ${BACKEND_PORT}" >&2
+    exit 1
+  fi
   if [[ -z "${BACKEND_HEALTH_URL}" ]]; then
-    BACKEND_HEALTH_URL="http://${BACKEND_HOST}:8080/actuator/health"
+    BACKEND_HEALTH_URL="http://${BACKEND_HOST}:${BACKEND_PORT}/actuator/health"
   fi
   if [[ -z "${BACKEND_READINESS_URL}" ]]; then
-    BACKEND_READINESS_URL="http://${BACKEND_HOST}:8080/actuator/health/readiness"
+    BACKEND_READINESS_URL="http://${BACKEND_HOST}:${BACKEND_PORT}/actuator/health/readiness"
   fi
   if [[ -z "${EXPECTED_SERVER_HOST}" ]]; then
     EXPECTED_SERVER_HOST="${BACKEND_HOST}"
@@ -204,8 +234,9 @@ ensure_backend_service() {
   local backend_env="${INSTALL_ROOT}/config/backend.env"
   local java_bin unit_path
 
-  # 升级已有环境时保留现场 unit；只有首次部署且 unit 缺失时才安装标准服务。
+  # 升级已有环境时保留现场 unit，但必须确认它确实管理本次交付的 JAR 和 backend.env。
   if systemctl cat "${BACKEND_SERVICE}" >/dev/null 2>&1; then
+    validate_existing_backend_service "${backend_env}"
     return 0
   fi
 
@@ -242,6 +273,119 @@ ensure_backend_service() {
   chmod 0644 "${unit_path}"
   systemctl daemon-reload
   systemctl enable "${BACKEND_SERVICE}"
+}
+
+validate_existing_backend_service() {
+  local backend_env="$1"
+  local expected_jar="${INSTALL_ROOT}/dist/backend/test-agent-app.jar"
+  local exec_start environment_files
+
+  exec_start="$(systemctl show "${BACKEND_SERVICE}" --property=ExecStart --value 2>/dev/null || true)"
+  environment_files="$(systemctl show "${BACKEND_SERVICE}" --property=EnvironmentFiles --value 2>/dev/null || true)"
+  if [[ "${exec_start}" != *"${expected_jar}"* ]]; then
+    echo "Existing ${BACKEND_SERVICE} does not execute ${expected_jar}" >&2
+    echo "ExecStart: ${exec_start:-<empty>}" >&2
+    exit 1
+  fi
+  if [[ "${environment_files}" != *"${backend_env}"* ]]; then
+    echo "Existing ${BACKEND_SERVICE} does not load ${backend_env}" >&2
+    echo "EnvironmentFiles: ${environment_files:-<empty>}" >&2
+    exit 1
+  fi
+}
+
+listener_pids_on_backend_port() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -t -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN 2>/dev/null | sort -u || true
+    return
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntp "sport = :${BACKEND_PORT}" 2>/dev/null \
+      | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' \
+      | sort -u || true
+    return
+  fi
+  echo "Neither lsof nor ss is available; cannot verify backend port ${BACKEND_PORT}" >&2
+  return 1
+}
+
+backend_pid_cmdline() {
+  local pid="$1"
+  local proc_root="${TEST_AGENT_PROC_ROOT:-/proc}"
+  if [[ ! -r "${proc_root}/${pid}/cmdline" ]]; then
+    return 1
+  fi
+  tr '\0' ' ' <"${proc_root}/${pid}/cmdline"
+}
+
+stop_expected_backend_orphans() {
+  local expected_jar="${INSTALL_ROOT}/dist/backend/test-agent-app.jar"
+  local pids pid cmdline deadline remaining
+  local expected_pids=()
+  local foreign_pids=()
+
+  pids="$(listener_pids_on_backend_port)"
+  [[ -n "${pids}" ]] || return 0
+  while IFS= read -r pid; do
+    [[ "${pid}" =~ ^[0-9]+$ ]] || continue
+    cmdline="$(backend_pid_cmdline "${pid}" || true)"
+    if [[ "${cmdline}" == *"${expected_jar}"* ]]; then
+      expected_pids+=("${pid}")
+    else
+      foreign_pids+=("${pid}")
+      printf 'Port %s is owned by unexpected PID %s: %s\n' \
+        "${BACKEND_PORT}" "${pid}" "${cmdline:-<unreadable>}" >&2
+    fi
+  done <<<"${pids}"
+
+  if [[ "${#foreign_pids[@]}" -gt 0 ]]; then
+    echo "Refusing to kill an unrelated process on backend port ${BACKEND_PORT}" >&2
+    exit 1
+  fi
+
+  if [[ "${#expected_pids[@]}" -gt 0 ]]; then
+    log "Stop orphan backend process(es) on port ${BACKEND_PORT}: ${expected_pids[*]}"
+    kill -TERM "${expected_pids[@]}" 2>/dev/null || true
+    deadline=$((SECONDS + 20))
+    while (( SECONDS < deadline )); do
+      remaining="$(listener_pids_on_backend_port)"
+      [[ -z "${remaining}" ]] && return 0
+      sleep 1
+    done
+    # TERM 超时后只对仍然运行同一交付 JAR 的 PID 执行 KILL，避免 PID 复用误杀其他进程。
+    for pid in "${expected_pids[@]}"; do
+      cmdline="$(backend_pid_cmdline "${pid}" || true)"
+      if [[ "${cmdline}" == *"${expected_jar}"* ]]; then
+        kill -KILL "${pid}" 2>/dev/null || true
+      fi
+    done
+  fi
+
+  sleep 1
+  remaining="$(listener_pids_on_backend_port)"
+  if [[ -n "${remaining}" ]]; then
+    echo "Backend port ${BACKEND_PORT} is still occupied by PID(s): ${remaining//$'\n'/,}" >&2
+    exit 1
+  fi
+}
+
+verify_backend_service_owns_port() {
+  local main_pid listener_pids
+  if ! systemctl is-active --quiet "${BACKEND_SERVICE}"; then
+    echo "Backend service is not active: ${BACKEND_SERVICE}" >&2
+    exit 1
+  fi
+  main_pid="$(systemctl show "${BACKEND_SERVICE}" --property=MainPID --value 2>/dev/null || true)"
+  if [[ ! "${main_pid}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Backend service has no valid MainPID: ${main_pid:-<empty>}" >&2
+    exit 1
+  fi
+  listener_pids="$(listener_pids_on_backend_port)"
+  if [[ -z "${listener_pids}" ]] || ! grep -Fxq "${main_pid}" <<<"${listener_pids}"; then
+    echo "Backend health responded, but ${BACKEND_SERVICE} MainPID ${main_pid} does not own port ${BACKEND_PORT}" >&2
+    echo "Listener PID(s): ${listener_pids:-<none>}" >&2
+    exit 1
+  fi
 }
 
 find_first_file() {
@@ -304,7 +448,7 @@ copy the same release zip to the frontend server through the approved channel,
 then deploy the frontend on 122.233.30.2 itself:
 
   unzip -p ${ARCHIVE} deploy/internal/deploy-internal-frontend.sh > /tmp/deploy-internal-frontend.sh
-  bash /tmp/deploy-internal-frontend.sh --archive ${ARCHIVE}
+  bash /tmp/deploy-internal-frontend.sh --archive ${ARCHIVE} --nginx-env ${NGINX_ENV}
 
 Then deploy this backend node without touching the frontend:
 
@@ -323,7 +467,7 @@ EOF
 
   log "Update frontend files and reload nginx on ${frontend_target}"
   # 远程更新先备份旧目录，再解压新静态资源；nginx 校验失败会阻断 reload。
-  ssh "${frontend_target}" "FRONTEND_ROOT='${FRONTEND_ROOT}' FRONTEND_HEALTH_URL='${FRONTEND_HEALTH_URL}' FRONTEND_URL='${FRONTEND_URL}' bash -s" <<'REMOTE_FRONTEND'
+  ssh "${frontend_target}" "FRONTEND_ROOT='${FRONTEND_ROOT}' FRONTEND_HEALTH_URL='${FRONTEND_HEALTH_URL}' FRONTEND_URL='${FRONTEND_URL}' NGINX_ENV='${NGINX_ENV}' bash -s" <<'REMOTE_FRONTEND'
 set -euo pipefail
 timestamp="$(date +%Y%m%d%H%M%S)"
 mkdir -p "${FRONTEND_ROOT}/frontend" "${FRONTEND_ROOT}/dist" "${FRONTEND_ROOT}/deploy"
@@ -342,8 +486,7 @@ if [[ -d "${FRONTEND_ROOT}/frontend" ]]; then
 fi
 
 tar -C "${FRONTEND_ROOT}" -xzf "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
-nginx -t
-systemctl reload nginx
+bash "${FRONTEND_ROOT}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 curl -fsS "${FRONTEND_HEALTH_URL}" >/dev/null
 curl -fsS "${FRONTEND_URL}" >/dev/null
 REMOTE_FRONTEND
@@ -461,6 +604,7 @@ ensure_backend_service
 
 log "Stop backend service and replace jar"
 systemctl stop "${BACKEND_SERVICE}"
+stop_expected_backend_orphans
 if [[ -f "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" ]]; then
   cp -a "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.bak.${timestamp}"
 fi
@@ -484,6 +628,7 @@ systemctl start "${BACKEND_SERVICE}"
 journalctl -u "${BACKEND_SERVICE}" -n 120 --no-pager || true
 wait_http "${BACKEND_HEALTH_URL}" "backend health" 120
 wait_http "${BACKEND_READINESS_URL}" "backend readiness" 120
+verify_backend_service_owns_port
 assert_identity_file "${INSTALL_ROOT}/data/.serverid" "${EXPECTED_SERVER_ID}" "serverid"
 assert_identity_file "${INSTALL_ROOT}/data/.serverhost" "${EXPECTED_SERVER_HOST}" "serverhost"
 

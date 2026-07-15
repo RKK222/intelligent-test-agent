@@ -1,8 +1,6 @@
 # 企业内多后台部署
 
-当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由和内部模型代理支持两个或更多后台节点。任意入口 Java 收到这些请求后，会根据 Redis 中的服务器/manager 快照选择目标服务器；如果目标不在本机，使用公共 Java 路由转发到目标 Java，再由目标 Java 控制本机 manager。不得在业务入口实现本机降级或自行扫描 Redis。
-
-当前版本还不能把整个前端入口标记为“无亲和的完整多后台”：PTY、Workspace 文件和 Agent 配置进度的一次性 WebSocket ticket 保存在签发 Java 的 JVM 内存中，`least_conn` 无法保证后续 upgrade 回到同一 Java；Workspace/Agent 配置文件 WebSocket 还会让浏览器直连目标 Java 的 `listenUrl`。因此本手册可用于部署和验收核心对话/模型链路，启用上述 WebSocket 功能前必须完成第 6 节的限制处理或代码修复，不能仅靠 Nginx sticky 宣称问题已解决。
+当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。任意入口 Java 收到需要归属路由的请求后，会根据公共路由程序选择目标 Java，再由目标 Java 控制本机 manager。PTY 和 Agent 配置进度 ticket 响应返回签发 Java 的绝对 WebSocket 地址；Workspace/Agent 配置文件 route 原本就返回目标 Java 地址，因此一次性 ticket 的签发和消费不会跨 JVM，也不依赖 Nginx sticky。
 
 本文用两个后台举例：
 
@@ -47,7 +45,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | 来源 | 目标 | 用途 |
 |---|---|---|
 | `.2` | `.4:8080`、`.114:8080` | Nginx 负载均衡 |
-| 企业浏览器网段 | `.4:8080`、`.114:8080` | Workspace/Agent 配置文件 WebSocket 直连目标 Java；未完成统一网关修复前必须可达 |
+| 企业浏览器网段 | `.4:8080`、`.114:8080` | PTY、Workspace/Agent 文件和 Agent 配置进度 WebSocket 按 ticket 签发节点直连 |
 | `.4` | `.114:8080` | Java A 转发到 Java B |
 | `.114` | `.4:8080` | Java B 转发到 Java A |
 | 每台 worker 容器 | 本机 Java `:8080` | manager WebSocket、内部模型代理 |
@@ -159,8 +157,6 @@ TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-114
 
 ```dotenv
 TEST_AGENT_BASE_DIR=/data/testagent
-TEST_AGENT_NGINX_LISTEN_PORT=80
-TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
 
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=<与本机 backend.env 完全一致>
 TEST_AGENT_DATA_ROOT=/data/testagent/data
@@ -174,7 +170,7 @@ OPENCODE_WORKER_PORT_START=4096
 OPENCODE_WORKER_PORT_END=4105
 ```
 
-保留 [env.example](env.example) 中其余版本和镜像摘要。`TEST_AGENT_BACKEND` 只用于渲染单后台 Nginx 模板，worker 不读取它；多后台 Nginx 使用下一节的显式 upstream，因此该变量即使保留也不能作为负载均衡配置来源。
+保留 [env.example](env.example) 中其余版本和镜像摘要。Nginx 使用前端服务器独立的 `nginx.env`，不在每台 worker 的 `docker.env` 中维护 upstream。
 
 每台 Java 启动后，本机身份文件分别应为：
 
@@ -190,85 +186,25 @@ OPENCODE_WORKER_PORT_END=4105
 
 ## 6. 多后台 Nginx
 
-多后台不要直接渲染单节点 `gateway.conf.template`，在 `.2` 使用显式 upstream：
+在前端 `.2` 创建 `/data/testagent/config/nginx.env`：
 
-```nginx
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    '' close;
-}
-
-upstream test_agent_backend {
-    least_conn;
-    server 122.233.30.4:8080 max_fails=3 fail_timeout=10s;
-    server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;
-    keepalive 32;
-}
-
-server {
-    listen 80;
-    server_name _;
-    root /data/testagent/frontend;
-    index index.html;
-
-    location = /health {
-        access_log off;
-        add_header Content-Type text/plain;
-        return 200 "ok\n";
-    }
-
-    location = /api {
-        proxy_pass http://test_agent_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-        proxy_buffering off;
-        proxy_cache off;
-    }
-
-    location /api/ {
-        proxy_pass http://test_agent_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-        proxy_buffering off;
-        proxy_cache off;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
+```dotenv
+TEST_AGENT_NGINX_MODE=multi
+TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080
+TEST_AGENT_NGINX_LISTEN_PORT=80
+TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
+TEST_AGENT_NGINX_CONF_PATH=/etc/nginx/conf.d/test-agent-gateway.conf
 ```
 
-应用前执行：
+`TEST_AGENT_NGINX_CONF_PATH` 必须是当前 Nginx 主配置实际 include 的 `.conf` 文件。前端部署脚本统一调用 [configure-nginx.sh](configure-nginx.sh)，由同一个 [gateway.conf.template](nginx/gateway.conf.template) 生成 `least_conn` upstream、逐节点 `max_fails/fail_timeout`、WebSocket Upgrade、SSE 禁缓冲和长连接超时；配置失败自动恢复旧文件，不再手工维护另一份多节点 Nginx 配置。
 
-```bash
-nginx -t
-systemctl reload nginx
-```
+普通 HTTP、RunEvent SSE 和模型请求不依赖 sticky session：用户进程归属由数据库 binding 和 Redis 服务器快照决定，入口 Java 会转发到进程所属服务器；长连接建立后由 Nginx 保持当前上游。一次性 WebSocket ticket 仍是 JVM 内存状态，但路由已经闭合：
 
-普通 HTTP、RunEvent SSE 和模型请求的正确性不依赖 sticky session：用户进程归属由数据库 binding 和 Redis 服务器快照决定，入口 Java 会转发到进程所属服务器；长连接建立后由 Nginx 保持当前上游。
+- PTY ticket 请求按用户进程归属转发，响应返回实际签发 Java 的绝对 WebSocket 地址。
+- Workspace/Agent 配置文件 route 返回目标 Java `baseUrl`，浏览器在目标 Java 申请 ticket 并连接同一 Java。
+- Agent 配置进度 ticket 返回当前签发 Java 的绝对 WebSocket 地址；跨节点进度由既有服务器广播汇入。
 
-一次性 WebSocket ticket 是当前例外：
-
-- Workspace/Agent 配置文件 route 会返回目标 Java `listenUrl`，浏览器必须能够直接访问 `.4:8080` 和 `.114:8080`，并由两台 Java 的 CORS/Origin 白名单允许 `http://122.233.30.2`。
-- PTY ticket 可能由入口 Java 转发到用户进程所属 Java 签发，但返回的是入口域名下相对 WebSocket URL；`least_conn` 或简单 `ip_hash` 都不能保证 upgrade 回到实际持有 ticket 的 Java。
-- Agent 配置进度 ticket 与 upgrade 也可能被 Nginx 分配到不同 Java。
-
-在代码改为“返回目标 Java 绝对 WebSocket URL”、Java 间 WebSocket 转发或共享 ticket 之前，PTY 和 Agent 配置进度 WebSocket 不能作为完整多后台验收通过项。若生产必须立即使用这些功能，应继续使用单后台入口；不要把 Nginx sticky 当作正式修复。
+因此不需要 `ip_hash`、cookie sticky、共享 ticket 或 Java 间文件/WebSocket 代理。浏览器网段必须能访问 `.4:8080` 和 `.114:8080`，两台 Java 的 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 都必须包含 `http://122.233.30.2`；这是绝对 WebSocket 地址可用的网络前提。
 
 ## 7. 部署与启动顺序
 
@@ -327,6 +263,8 @@ bash /tmp/deploy-internal-release.sh \
 
 不得清理 `/data/testagent/data`，也不要把 A 的数据目录复制覆盖到 B。
 
+每台后台部署脚本都会校验已有 systemd unit 的 JAR/env 指向；`systemctl stop` 后若 `8080` 仍被同一路径的旧 `test-agent-app.jar` 占用，会安全终止该遗留进程，其他程序占用则拒绝误杀。新 Java health/readiness 通过后还会核对 systemd `MainPID` 正是 `8080` 监听者，避免滚动升级时误连旧手工进程。
+
 ## 8. 公共配置和模型
 
 超级管理员进入“系统管理 → 配置管理 → opencode 公共配置管理”，分别初始化：
@@ -379,16 +317,17 @@ docker logs --tail 200 test-agent-opencode-worker | \
 5. 让请求从另一个入口 Java 进入，已有会话仍能继续发送、停止、重启和读取状态，证明 Java 跨节点路由生效。
 6. 分别用 Qwen 和 DeepSeek 验证普通正文、think/reasoning、工具调用、持续 SSE 和 `[DONE]`。
 7. 两台后台都确认 9070 直连；正式链路中没有监听 19070 的 relay。
+8. 分别打开终端、Workspace/Agent 文件编辑和 Agent 配置 Git 进度，浏览器 WebSocket URL 应直连 ticket 响应中的 `.4:8080` 或 `.114:8080`，连接不出现 ticket 无效。
 
 模型验收不能只在其中一台执行。在 `.4` 和 `.114` 分别用本机 `127.0.0.1:8080` 执行 [单后台文档的两条 Java 代理 curl](SINGLE-BACKEND.md#8-验收)，分别验证 `qwen-prod + Qwen3.6-27B` 和 `deepseek-prod + DeepSeek-V4-Flash-W8A8`。两台都应持续返回单层 `data:`、正确的 `reasoning_content` 和单层 `[DONE]`；这样才能同时覆盖每台 Java 的内存快照、内部代理 key、UCID 转发和本机 9070 出站网络。
-
-当前只能把上述核心链路标记为多后台验收通过；PTY、Workspace 文件和 Agent 配置进度 WebSocket 按第 6 节单独记录为限制项，不能据此宣布全平台多后台完成。
 
 ## 10. 故障定位与回滚
 
 | 现象 | 排查顺序 |
 |---|---|
 | Nginx 只命中一台或出现 502 | `.2` 分别 curl 两个 health；检查 upstream、`nginx -t` 和后台防火墙。 |
+| WebSocket 报 ticket 无效或浏览器连接超时 | 检查 ticket 响应是否为目标 Java 的绝对 `ws://<后台>:8080/...`，再从浏览器网段检查两个 `:8080` 可达性和两台 Java 的 Origin 白名单；不增加 sticky。 |
+| 部署提示 systemd/8080 不匹配 | 执行 `systemctl show test-agent-backend -p ExecStart -p EnvironmentFiles -p MainPID` 和 `lsof -nP -iTCP:8080 -sTCP:LISTEN`；脚本只自动清理同一路径交付 JAR，其他进程必须人工确认。 |
 | 运行管理只显示一个服务器 | 检查两台是否共享同一 Redis、ID 是否唯一、heartbeat 日志和广播 channel 是否一致。 |
 | worker 连接到错误 Java | 检查本机 `.serverhost`、两份 env 的数据根目录和本机 manager token；禁止复制另一节点身份文件。 |
 | 跨节点请求失败 | 两台互相 curl `advertised-host:8080`；检查 Redis 快照、目标 Java health 和日志中的 traceId。 |

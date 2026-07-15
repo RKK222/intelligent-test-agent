@@ -415,7 +415,7 @@ scope 发现与缓存规则：
 
 应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。多服务器下应用版本工作区同步使用后端内部服务器广播，不暴露给浏览器 SSE。
 
-Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/agent-config/**` 的公共级/工作空间级 Git 更新、worktree、commit、publish 进度通过 ticket 保护的 WebSocket `/operations/{operationId}/ws?ticket=...` 推送 `snapshot`、`step`、`completed`、`failed`，也可通过 `GET /operations/{operationId}` 查询快照；公共 Git 仅 SUPER_ADMIN，应用级 Agent/Skill Git 由 APP_ADMIN（含 SUPER_ADMIN）执行。该进度不写入 `run_events`，不参与 RunEvent `Last-Event-ID` 续传。
+Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/agent-config/**` 的公共级/工作空间级 Git 更新、worktree、commit、publish 进度通过 ticket 保护的 WebSocket `/operations/{operationId}/ws?ticket=...` 推送 `snapshot`、`step`、`completed`、`failed`，也可通过 `GET /operations/{operationId}` 查询快照；公共 Git 仅 SUPER_ADMIN，应用级 Agent/Skill Git 由 APP_ADMIN（含 SUPER_ADMIN）执行。ticket 响应返回签发节点的绝对 `ws://`/`wss://` 地址，保证多后台下 upgrade 回到保存一次性 ticket 的同一 JVM；跨节点进度继续由既有服务器广播汇入该节点。该进度不写入 `run_events`，不参与 RunEvent `Last-Event-ID` 续传。
 
 当前用户 opencode 进程初始化进度不产生 RunEvent/SSE。`POST /api/internal/agent/{agentId}/processes/me/initialize` 传入 `operationId` 时，后端把校验、确认分配、选择容器、准备参数、进程启动、记录候选进程、检查进程、健康检查、写入绑定和完成/失败写入 `opencode_process_start_operations`；前端通过 `GET /api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}` HTTP 轮询读取。该只读查询不触发 manager health/start，不写 RunEvent，也不参与 `Last-Event-ID` 续传。
 
@@ -492,6 +492,8 @@ AI 回复满意度反馈接口 `/api/internal/platform/opencode-runtime/messages
 ```text
 /api/internal/platform/workspace-management/file/ws?ticket=wft_...
 ```
+
+route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。
 
 客户端请求 envelope：
 

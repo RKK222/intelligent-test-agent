@@ -17,7 +17,7 @@ corepack pnpm build
 
 每次构建会按 `Asia/Shanghai` 把构建时刻固化为 `VyyyyMMdd.HHmmss`，设置弹窗左侧导航底部可核对。该值不从 Nginx 或运行时环境读取，刷新页面、reload Nginx 不会变化；必须重新构建并替换静态产物才会更新。
 
-企业内当前部署不单独手工执行本节命令，统一使用 `deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env` 生成 `test-agent-frontend-dist.tar.gz` 和完整 `test-agent-internal-release.zip`。部署入口见 `deploy/internal/README.md`：单后台按 `deploy/internal/SINGLE-BACKEND.md`，多后台核心对话/模型链路按 `deploy/internal/MULTI-BACKEND.md`。两种模式都只在 `122.233.30.2:/data/testagent/frontend` 部署一份静态资源；多后台由实体 Nginx upstream 负载到全部 Java 节点。当前 Workspace/Agent 配置文件 WebSocket 会按目标 `backend.listenUrl` 由浏览器直连对应 Java，PTY 和 Agent 配置进度 ticket 又是单 JVM 内存；完整多后台入口必须先按手册处理这些限制。
+企业内当前部署不单独手工执行本节命令，统一使用 `deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env` 生成 `test-agent-frontend-dist.tar.gz` 和完整 `test-agent-internal-release.zip`。部署入口见 `deploy/internal/README.md`：单后台按 `deploy/internal/SINGLE-BACKEND.md`，多后台按 `deploy/internal/MULTI-BACKEND.md`。两种模式都只在 `122.233.30.2:/data/testagent/frontend` 部署一份静态资源；`/data/testagent/config/nginx.env` 分别声明单个或多个 Java endpoint，前端部署脚本自动渲染、校验和 reload 实体 Nginx。多后台的 PTY、文件和 Agent 配置进度 WebSocket 都使用 ticket 签发 Java 的绝对地址，浏览器网段必须能访问每台 Java `:8080`。
 
 如果后端服务器能免密直连前端服务器，可在后端执行 `/data/testagent/deploy/internal/deploy-internal-release.sh --archive /data/0709/internal.zip`，脚本会用 `scp` 分发前端包到 `122.233.30.2`。如果现场统一登录策略导致 `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`，把同一个 zip 放到 `122.233.30.2:/data/0709/internal.zip`，在前端机本地执行 `deploy/internal/deploy-internal-frontend.sh --archive /data/0709/internal.zip`，后端节点部署时统一加 `--skip-frontend`。
 

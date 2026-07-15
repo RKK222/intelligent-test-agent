@@ -120,9 +120,6 @@ TEST_AGENT_SCHEDULER_ENABLED=false
 
 ```dotenv
 TEST_AGENT_BASE_DIR=/data/testagent
-TEST_AGENT_NGINX_LISTEN_PORT=80
-TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
-TEST_AGENT_BACKEND=122.233.30.114:8080
 
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=<与 backend.env 完全一致>
 TEST_AGENT_DATA_ROOT=/data/testagent/data
@@ -140,15 +137,17 @@ OPENCODE_WORKER_PORT_END=4105
 
 ## 5. 配置前端 Nginx
 
-单后台可直接使用 [nginx/gateway.conf.template](nginx/gateway.conf.template)，渲染变量为：
+在前端 `.2` 创建 `/data/testagent/config/nginx.env`：
 
 ```dotenv
+TEST_AGENT_NGINX_MODE=single
+TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_LISTEN_PORT=80
 TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
-TEST_AGENT_BACKEND=122.233.30.114:8080
+TEST_AGENT_NGINX_CONF_PATH=/etc/nginx/conf.d/test-agent-gateway.conf
 ```
 
-确认 `/api`、SSE 和 WebSocket 都转发到 `.114:8080`，并保留 `proxy_buffering off`、`proxy_read_timeout 3600s` 和 Upgrade 头。
+`TEST_AGENT_NGINX_CONF_PATH` 必须是当前 Nginx 主配置实际 include 的 `.conf` 文件；如果现场配置目录不同，改成现场路径。前端部署脚本会调用 [configure-nginx.sh](configure-nginx.sh)，自动渲染 [nginx/gateway.conf.template](nginx/gateway.conf.template)、备份旧配置、执行 `nginx -t`、确认该文件已被 include，并 reload；失败会恢复旧配置。
 
 ## 6. 部署与重启
 
@@ -181,6 +180,8 @@ bash /tmp/deploy-internal-release.sh \
   --backend-host 122.233.30.114 \
   --skip-frontend
 ```
+
+后台部署脚本在替换 JAR 前会校验已有 systemd unit 的 `ExecStart` 和 `EnvironmentFile`，执行 `systemctl stop` 后检查 `8080`。若端口仍由同一路径的 `test-agent-app.jar` 占用，脚本会先 TERM、超时后仅对仍匹配该 JAR 的 PID 执行 KILL；若是其他程序占用则拒绝误杀。启动后还会确认 systemd `MainPID` 正是 `8080` 的监听进程，避免旧手工 Java 让 health 误通过。
 
 需要手工重启时执行：
 
@@ -300,6 +301,8 @@ ss -lntp | grep 19070
 | 现象 | 检查 |
 |---|---|
 | 前端 502/进不去 | `.2` 执行 `nginx -t`，再从 `.2` curl `.114:8080/actuator/health`。 |
+| 部署提示 systemd unit 不匹配 | 执行 `systemctl show test-agent-backend -p ExecStart -p EnvironmentFiles`；必须分别指向 `/data/testagent/dist/backend/test-agent-app.jar` 和 `/data/testagent/config/backend.env`，不要让脚本覆盖未知 unit。 |
+| 部署提示 8080 被其他进程占用 | 执行 `lsof -nP -iTCP:8080 -sTCP:LISTEN` 和 `tr '\0' ' ' </proc/<PID>/cmdline`；同一交付 JAR 的遗留进程会被部署脚本安全清理，其他进程需人工确认归属。 |
 | worker 一直断连 | 比对两份 env 的 manager token；检查 `.serverhost`、8080 和 worker 日志。 |
 | 模型不显示 | 检查本服务器公共配置是否初始化；`/api/provider` 必须出现 `icbc-qwen/icbc-deepseek`，`/api/model` 必须出现两个准确模型 ID；更新后必须重启该用户 OpenCode。 |
 | `内部模型供应商未启用或不存在` | 请求头必须为 `qwen-prod` / `deepseek-prod`，数据库同名 `provider_id` 必须启用；点击“刷新 Java 内存”后再查 refresh-status。 |

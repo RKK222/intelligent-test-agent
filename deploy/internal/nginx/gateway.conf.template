@@ -4,7 +4,9 @@ map $http_upgrade $connection_upgrade {
 }
 
 upstream test_agent_backend {
-    server ${TEST_AGENT_BACKEND};
+    least_conn;
+    ${TEST_AGENT_BACKEND_SERVERS}
+    keepalive 32;
 }
 
 server {

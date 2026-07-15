@@ -20,9 +20,13 @@ class AgentConfigOperationTicketService {
     private static final String WS_BASE = "/api/internal/platform/workspace-management/agent-config/operations/";
 
     private final AgentConfigOperationTicketStore ticketStore;
+    private final CurrentBackendWebSocketUrlFactory webSocketUrlFactory;
 
-    AgentConfigOperationTicketService(AgentConfigOperationTicketStore ticketStore) {
+    AgentConfigOperationTicketService(
+            AgentConfigOperationTicketStore ticketStore,
+            CurrentBackendWebSocketUrlFactory webSocketUrlFactory) {
         this.ticketStore = Objects.requireNonNull(ticketStore, "ticketStore must not be null");
+        this.webSocketUrlFactory = Objects.requireNonNull(webSocketUrlFactory, "webSocketUrlFactory must not be null");
     }
 
     AgentConfigDtos.TicketResponse createTicket(AuthPrincipal principal, String operationId, String traceId) {
@@ -35,7 +39,7 @@ class AgentConfigOperationTicketService {
         return new AgentConfigDtos.TicketResponse(
                 ticket.ticket(),
                 ticket.expiresAt(),
-                WS_BASE + normalizedOperationId + "/ws?ticket=" + ticket.ticket());
+                webSocketUrlFactory.absoluteUrl(WS_BASE + normalizedOperationId + "/ws?ticket=" + ticket.ticket()));
     }
 
     AgentConfigOperationTicket consume(String ticket, String origin) {
