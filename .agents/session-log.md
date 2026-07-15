@@ -39,6 +39,17 @@
   - 执行 common/workspace-management 定向测试、相关模块全量测试、后端完整打包和 `.env.test` 三服务启动健康检查。
 - Result:
   - 相关 Maven 测试共 113 项全部通过，完整后端打包成功；后端 health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 当前已连接。企业远端实际 push 未在本地凭据环境执行，仍需在企业公共区进行一次端到端验收；若服务器有提交邮箱域名限制，需要补充真实邮箱来源或可配置域名。
+### 2026-07-15 - 清理前端字体 CSS `@import` 顺序告警
+
+- Why:
+  - `agent-web` 生产构建在 Tailwind 展开全局 CSS 后，将 Google Fonts 的 CSS `@import` 识别为位于普通规则之后，持续产生 `@import rules must precede all rules` 告警。
+- What:
+  - 删除 `globals.css` 中与 `index.html` 重复的 Google Fonts `@import`，保留 HTML `<link>` 作为唯一字体加载入口，并补充中文注释说明原因。
+- How:
+  - 仅修改 `frontend/apps/agent-web/src/styles/globals.css`；字体族 token 和页面字体声明保持不变，不调整 Monaco 的独立大 chunk 策略。
+- Result:
+  - `corepack pnpm --filter @test-agent/agent-web build` 退出码为 0，字体 `@import` 顺序告警为 0；仍保留独立的 Monaco 大 chunk 提示，未通过提高阈值掩盖实际包体问题。未涉及 API、事件、数据库、安全或兼容性契约。
+
 ### 2026-07-15 - 实现流光分割线（Shimmer Divider）组件
 
 - Why:
