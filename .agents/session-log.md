@@ -53,6 +53,16 @@
   - 应用内浏览器完成桌面与窄屏布局、点击创建和属性编辑验证；当前浏览器控制层的坐标拖拽不会生成原生 HTML5 `DataTransfer`，因此拖放落点由组件级原生 drop 事件测试验证，验收草稿未应用到 Markdown。
 - Result:
   - 前端全量 lint、typecheck、56 个 Vitest 文件（789 passed / 1 skipped）和生产 build 通过；构建仅保留既有 Google Fonts `@import` 顺序与大 chunk 警告。未修改 API、事件、数据库、安全或兼容性契约。
+### 2026-07-15 - 基于最新 main 重打企业离线全包
+
+- Why:
+  - worker 已在企业 Linux 4.19 / Docker 18.09 服务器验证成功，随后主分支合并了新的前端代码，需要在不改变现场配置和 worker 兼容方案的前提下重新交付完整离线包。
+- What:
+  - 从与 `origin/main` 一致的 `9be8ed66` 全量重建后端 JAR、前端静态资源、manager/OpenCode programs、linux/amd64 worker 镜像和最终发布 ZIP；继续保留 Debian 11/glibc 2.31、OpenCode 1.17.8 与 worker 默认 `--privileged`。
+- How:
+  - 复用 `deploy/internal/package-release.sh` 既有完整发布流程，没有修改 `backend.env`、`docker.env`、部署脚本或应用实现；验证直接针对最终 ZIP 和最终镜像 tar，不复用旧压缩包结论。
+- Result:
+  - 最终 ZIP SHA-256 为 `d2d64d2692c4854081a2f2d966ee6d3345abdad682834565f50c46c6bf38e558`；ZIP 完整性、发布包 `--validate-only`、首次/二次 systemd 部署模拟，以及最终 worker tar 导入后的 Node/OpenCode HTTP smoke 均通过。前端构建仍只有既有 CSS `@import` 顺序与大 chunk 警告。
 
 ### 2026-07-14 - 修改用户发送消息的气泡底色为浅灰色
 
