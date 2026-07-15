@@ -2,6 +2,8 @@
 
 当前上线目标：前端 `122.233.30.2`，Java 后端和 `opencode-worker` 均在 `122.233.30.114`。完整配置、模型初始化和排障说明见 `deploy/internal/README.md`。
 
+正式模型链路：`OpenCode → 122.233.30.114:8080 → ai-code.sdc.icbc:9070`。保留 8080 和 4096-4105 端口池；9070 仅作为 Java 出站地址，不发布 19070 relay，不启用 host network。
+
 ## 1. Mac 打包
 
 ```bash
@@ -137,7 +139,7 @@ curl -fsS http://127.0.0.1:4096/api/provider
 curl -fsS http://127.0.0.1:4096/api/model
 ```
 
-供应商只应包含 `icbc-qwen`、`icbc-deepseek`；模型应包含 `Qwen3.6-35B-A3B`、`DeepSeek-R1`。再从前端分别选择两个模型发起真实对话。
+供应商只应包含 `icbc-qwen`、`icbc-deepseek`；模型应包含 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`。再从前端分别选择两个模型发起真实对话。
 
 ## 6. 回滚与注意事项
 

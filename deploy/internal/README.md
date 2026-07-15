@@ -21,6 +21,8 @@ flowchart LR
   Backend --> Model["企业模型服务"]
 ```
 
+内部模型的正式调用链路固定为：`OpenCode 容器 → 122.233.30.114:8080 Java 内部代理 → ai-code.sdc.icbc:9070 行内模型`。8080 继续同时服务前端和 OpenCode；4096-4105 继续作为用户 OpenCode 端口池并保持宿主机/容器端口一致；9070 只要求 Java 宿主机出站可达，不对外发布。正式部署不启用 `--network host`，不新增 19070 relay，也不修改 worker 网络模式。
+
 生产目录统一为：
 
 ```text
@@ -70,18 +72,18 @@ deploy/internal/package-release.sh --output-dir /data/testagent/dist
 
 | 产物 | 放到哪台 | 目标路径 |
 |---|---|---|
-| `test-agent-internal-release.zip` | `122.233.30.2`、`122.233.30.4`、`122.233.30.114` | `/data/0709/internal.zip`，推荐统一只传完整 zip，再由各服务器本地脚本解压部署。 |
+| `test-agent-internal-release.zip` | `122.233.30.2`、`122.233.30.114` | `/data/0709/internal.zip`，推荐统一只传完整 zip，再由各服务器本地脚本解压部署。 |
 | `test-agent-frontend-dist.tar.gz` | `122.233.30.2` | `/data/testagent/dist/test-agent-frontend-dist.tar.gz` |
-| `backend/test-agent-app.jar` | `122.233.30.4`、`122.233.30.114` | `/data/testagent/dist/backend/test-agent-app.jar` |
-| `test-agent-programs.tar.gz` | `122.233.30.4`、`122.233.30.114` | `/data/testagent/dist/test-agent-programs.tar.gz` |
-| `test-agent-opencode-worker_internal-linux-amd64.tar` | `122.233.30.4`、`122.233.30.114` | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` |
-| `deploy/internal/` | `122.233.30.2`、`122.233.30.4`、`122.233.30.114` | `/data/testagent/deploy/internal/`，前端用本地部署脚本和 Nginx 模板，后端用一键部署脚本和纯 Docker worker 管理脚本。 |
+| `backend/test-agent-app.jar` | `122.233.30.114` | `/data/testagent/dist/backend/test-agent-app.jar` |
+| `test-agent-programs.tar.gz` | `122.233.30.114` | `/data/testagent/dist/test-agent-programs.tar.gz` |
+| `test-agent-opencode-worker_internal-linux-amd64.tar` | `122.233.30.114` | `/data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar` |
+| `deploy/internal/` | `122.233.30.2`、`122.233.30.114` | `/data/testagent/deploy/internal/`，前端用本地部署脚本和 Nginx 模板，114 后端用一键部署脚本和纯 Docker worker 管理脚本。 |
 
 ## 升级最新代码操作
 
 从最新代码部署到企业内环境时，按“构建机打包 → 前端服务器替换静态资源 → 后端服务器替换 jar/程序/镜像 → 先重启 Java 再重启 worker”的顺序执行。不要清理 `/data/testagent/data`，该目录包含 Java 写给 manager 的 `.serverid/.serverhost`、公共配置、用户 session、应用工作区和 manager state。
 
-推荐把完整 zip 分别放到 `122.233.30.2`、`122.233.30.4` 和 `122.233.30.114` 的 `/data/0709/internal.zip`，然后按“前端机本地手工更新静态资源，两个后端节点各自一键部署 Java + worker”的方式执行。这个方式不依赖 `122.233.30.4` 免密 scp 到 `122.233.30.2`，适合统一登录或堡垒机限制直连的现场。
+推荐把完整 zip 放到 `122.233.30.2` 和 `122.233.30.114` 的 `/data/0709/internal.zip`，然后按“前端机本地更新静态资源，114 后端一键部署 Java + worker”的方式执行。该方式不依赖后端免密 scp 到前端，适合统一登录或堡垒机限制直连的现场。
 
 前端机 `122.233.30.2` 手工本地更新：
 
@@ -91,15 +93,7 @@ bash /tmp/deploy-internal-frontend.sh --archive /data/0709/internal.zip --valida
 bash /tmp/deploy-internal-frontend.sh --archive /data/0709/internal.zip
 ```
 
-后端/worker A `122.233.30.4` 一键部署：
-
-```bash
-unzip -p /data/0709/internal.zip deploy/internal/deploy-internal-release.sh > /tmp/deploy-internal-release.sh
-bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip --validate-only
-bash /tmp/deploy-internal-release.sh --archive /data/0709/internal.zip --backend-host 122.233.30.4 --skip-frontend
-```
-
-后端/worker B `122.233.30.114` 一键部署：
+后端/worker `122.233.30.114` 一键部署：
 
 ```bash
 unzip -p /data/0709/internal.zip deploy/internal/deploy-internal-release.sh > /tmp/deploy-internal-release.sh
@@ -153,10 +147,10 @@ deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env
 
 ```bash
 scp /data/testagent/dist/test-agent-frontend-dist.tar.gz 122.233.30.2:/data/testagent/dist/
-scp /data/testagent/dist/backend/test-agent-app.jar 122.233.30.4:/data/testagent/dist/backend/test-agent-app.jar.new
-scp /data/testagent/dist/test-agent-programs.tar.gz 122.233.30.4:/data/testagent/dist/
-scp /data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar 122.233.30.4:/data/testagent/dist/
-rsync -a --delete deploy/internal/ 122.233.30.4:/data/testagent/deploy/internal/
+scp /data/testagent/dist/backend/test-agent-app.jar 122.233.30.114:/data/testagent/dist/backend/test-agent-app.jar.new
+scp /data/testagent/dist/test-agent-programs.tar.gz 122.233.30.114:/data/testagent/dist/
+scp /data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar 122.233.30.114:/data/testagent/dist/
+rsync -a --delete deploy/internal/ 122.233.30.114:/data/testagent/deploy/internal/
 ```
 
 3. 在 `122.233.30.2` 更新前端：
@@ -171,7 +165,7 @@ curl -fsS http://122.233.30.2/health
 curl -fsS http://122.233.30.2/
 ```
 
-4. 在 `122.233.30.4` 更新 Java 与 worker 程序：
+4. 在 `122.233.30.114` 更新 Java 与 worker 程序：
 
 ```bash
 systemctl stop test-agent-backend
@@ -186,12 +180,12 @@ docker load -i /data/testagent/dist/test-agent-opencode-worker_internal-linux-am
 ```bash
 systemctl start test-agent-backend
 journalctl -u test-agent-backend -n 120 --no-pager
-curl -fsS http://122.233.30.4:8080/actuator/health
+curl -fsS http://122.233.30.114:8080/actuator/health
 cat /data/testagent/data/.serverid
 cat /data/testagent/data/.serverhost
 ```
 
-当前期望 `.serverid=test-agent-backend-122-233-30-4`，`.serverhost=122.233.30.4`。如果不一致，先修 `/data/testagent/config/backend.env` 中的 `TEST_AGENT_LINUX_SERVER_ID`、`TEST_AGENT_SERVER_ADVERTISED_HOST` 和 `SYS_DATA_ROOT_DIR`，不要急着重启 worker。
+当前期望 `.serverid=test-agent-backend-122-233-30-114`，`.serverhost=122.233.30.114`。如果不一致，先修 `/data/testagent/config/backend.env` 中的 `TEST_AGENT_LINUX_SERVER_ID`、`TEST_AGENT_SERVER_ADVERTISED_HOST` 和 `SYS_DATA_ROOT_DIR`，不要急着重启 worker。
 
 6. 重启 worker，让 manager 使用同一 `SYS_DATA_ROOT_DIR` 连接 Java：
 
@@ -207,12 +201,12 @@ docker logs --tail 120 test-agent-opencode-worker
 7. 验收：
 
 ```bash
-curl -fsS http://122.233.30.4:8080/actuator/health/readiness
+curl -fsS http://122.233.30.114:8080/actuator/health/readiness
 curl -fsS http://122.233.30.2/
 docker logs --tail 120 test-agent-opencode-worker
 ```
 
-超级管理员进入“系统管理 → 运行管理”确认 Java、manager、容器均在线，并确认 Java/manager 的非空版本都匹配 `VyyyyMMdd.HHmmss`；滚动升级期间旧进程显示 `-`。再进入“系统管理 → 配置管理 → opencode公共配置管理”确认 `122.233.30.4` 已初始化公共配置。前端包替换后打开设置弹窗，在左侧导航底部核对前端版本；浏览器刷新、Java/worker 普通重启不得改变对应版本，只有替换重新构建的产物才会变化。已有用户进程如需切到新 opencode/manager 版本，可在运行管理中重启对应用户进程；只替换外挂程序不会自动重启已存在的 `opencode serve` 子进程。
+超级管理员进入“系统管理 → 运行管理”确认 Java、manager、容器均在线，并确认 Java/manager 的非空版本都匹配 `VyyyyMMdd.HHmmss`；再进入“系统管理 → 配置管理 → opencode公共配置管理”确认 `122.233.30.114` 已初始化公共配置。前端包替换后打开设置弹窗，在左侧导航底部核对前端版本；浏览器刷新、Java/worker 普通重启不得改变对应版本，只有替换重新构建的产物才会变化。已有用户进程如需切到新 opencode/manager 版本，可在运行管理中重启对应用户进程；只替换外挂程序不会自动重启已存在的 `opencode serve` 子进程。
 
 ## 端口约束
 
@@ -237,28 +231,25 @@ docker exec test-agent-opencode-worker sh -lc 'readlink -f /usr/local/bin/openco
 
 ## Java 直接部署前提
 
-当前部署只启动 1 个 Java 后端，部署在 `122.233.30.4`，监听 `8080`；前端 Nginx 部署在 `122.233.30.2`，监听 `80`：
+当前部署只启动 1 个 Java 后端，部署在 `122.233.30.114`，监听 `8080`；前端 Nginx 部署在 `122.233.30.2`，监听 `80`：
 
 ```bash
 server.port=8080
 TEST_AGENT_DEPLOYMENT_MODE=internal
-TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.4
-TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-4
-TEST_AGENT_OPENCODE_MANAGER_TOKEN=test-agent-manager-token-122-233-30-4
+TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114
+TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-114
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=test-agent-manager-token-122-233-30-114
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
 SYS_DATA_ROOT_DIR=/data/testagent/data
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
+TEST_AGENT_INTERNAL_DEFAULT_MODEL=Qwen3.6-27B
 TEST_AGENT_INTERNAL_PROXY_API_KEY=replace-with-random-internal-proxy-api-key
-TEST_AGENT_INTERNAL_DEFAULT_MODEL=Qwen3.6-35B-A3B
-TEST_AGENT_ICBC_OPENAI_BASE_URL=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
-TEST_AGENT_ICBC_OPENAI_TOKEN_ENV=ICBC_OPENAI_AUTH_TOKEN
-ICBC_OPENAI_AUTH_TOKEN=eyJzdWIiOiJzbWFydHRlc3Q6dGVzdC1jYXNlLWdlbmVyYXRpb24ifQ.1qbws
-TEST_AGENT_ICBC_OPENAI_AUTH_MODE=bearer
-TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME=ucid
+# 企业模型供应商的 base URL、provider ID 和上游 token 在“内部模型供应商”页面维护。
+# Java 通过数据库快照访问 ai-code.sdc.icbc:9070，不在 backend.env 写入模型 token。
 ```
 
-当前多后端部署时，每台后端服务器都推荐把 Java 配置单独放到 `/data/testagent/config/backend.env`；`122.233.30.4` 可从仓库模板复制后改 PostgreSQL、token 和模型密钥，`122.233.30.114` 还必须把 `TEST_AGENT_SERVER_ADVERTISED_HOST` 和 `TEST_AGENT_LINUX_SERVER_ID` 改成本机值：
+Java 配置单独放到 `/data/testagent/config/backend.env`，从仓库模板复制后填写 PostgreSQL、Redis、manager 和内部代理 key；不要在该文件写企业模型上游 token：
 
 ```bash
 mkdir -p /data/testagent/config /data/testagent/data
@@ -438,7 +429,7 @@ from internal_model_proxy_settings;
 
 使用 `deploy/internal/opencode.jsonc.example` 的内容作为公共配置仓库 `opencode.jsonc`。该文件已固定：
 
-- 默认/小模型均为 `icbc-qwen/Qwen3.6-35B-A3B`；
+- 默认/小模型均为 `icbc-qwen/Qwen3.6-27B`；
 - 只启用 `icbc-qwen`、`icbc-deepseek`；
 - Qwen header 指向数据库 `qwen-prod`，DeepSeek 指向 `deepseek-prod`；
 - 代理地址、代理 key 和 UCID 全部引用 Java 启动时注入的环境变量；
@@ -529,7 +520,7 @@ curl -fsS http://127.0.0.1:4096/api/provider
 curl -fsS http://127.0.0.1:4096/api/model
 ```
 
-`/api/provider` 应只出现 `icbc-qwen`、`icbc-deepseek`，`/api/model` 应出现 `Qwen3.6-35B-A3B` 和 `DeepSeek-R1`。最后从前端发起一次对话，分别选择两个模型验证流式回答、reasoning 和工具调用。
+`/api/provider` 应只出现 `icbc-qwen`、`icbc-deepseek`，`/api/model` 应出现 `Qwen3.6-27B` 和 `DeepSeek-V4-Flash-W8A8`。最后从前端发起一次对话，分别选择两个模型验证流式回答、reasoning 和工具调用。
 
 前端机执行：
 

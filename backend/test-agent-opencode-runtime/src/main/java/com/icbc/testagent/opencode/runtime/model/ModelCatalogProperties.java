@@ -40,15 +40,10 @@ public class ModelCatalogProperties {
             "http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1",
             "ICBC_OPENAI_AUTH_TOKEN",
             "auth-token",
-            "DeepSeek-V4-Flash-W8A8",
+            "Qwen3.6-27B",
             new ArrayList<>(List.of(
-                    new Model("DeepSeek-V4-Flash-W8A8", "DeepSeek-V4-Flash-W8A8", List.of("text"), 131072, 16384, true, 10),
-                    new Model("Qwen3.6-27B", "Qwen3.6-27B", List.of("text"), 131072, 16384, false, 20),
-                    new Model("Qwen3.6-35B-A3B", "Qwen3.6-35B-A3B", List.of("text", "image"), 131072, 16384, false, 30),
-                    new Model("Qwen3.5-397B-A17B-W8A8", "Qwen3.5-397B-A17B-W8A8", List.of("text"), 131072, 16384, false, 40),
-                    new Model("Qwen3-32B-128K", "Qwen3-32B-128K", List.of("text"), 131072, 16384, false, 50),
-                    new Model("deepseekV3-0324-chat", "deepseekV3-0324-chat", List.of("text"), 131072, 16384, false, 60),
-                    new Model("glm-51", "glm-51", List.of("text"), 131072, 16384, false, 70))));
+                    new Model("Qwen3.6-27B", "Qwen3.6-27B", List.of("text"), 131072, 8192, true, 10),
+                    new Model("DeepSeek-V4-Flash-W8A8", "DeepSeek-V4-Flash-W8A8", List.of("text"), 65536, 8192, false, 20))));
 
     /**
      * 返回模型来源：opencode 保持原生代理，external 直连 OpenAI-compatible /models，internal 从数据库读取。

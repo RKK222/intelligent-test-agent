@@ -96,7 +96,7 @@ test-agent:
       api-key: ""
       ucid-header-name: ${TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME:ucid}
       auth-mode: ${TEST_AGENT_ICBC_OPENAI_AUTH_MODE:auth-token}
-      default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:DeepSeek-V4-Flash-W8A8}
+      default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:Qwen3.6-27B}
   scheduler:
     enabled: ${TEST_AGENT_SCHEDULER_ENABLED:true}
     scan-interval: ${TEST_AGENT_SCHEDULER_SCAN_INTERVAL:30s}

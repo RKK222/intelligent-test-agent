@@ -2,12 +2,10 @@ package com.icbc.testagent.api.web.platform;
 
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import java.util.Objects;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -23,7 +21,7 @@ public class InternalModelProxyController {
     }
 
     @RequestMapping("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/**")
-    public Mono<ResponseEntity<Flux<String>>> proxy(
+    public Mono<Void> proxy(
             @RequestBody(required = false) String body,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);

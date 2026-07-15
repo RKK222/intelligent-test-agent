@@ -10,21 +10,31 @@ import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProviderRe
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelThinkStreamConverter;
 import java.net.URI;
-import java.util.ArrayList;
+import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicReference;
+import io.netty.channel.ChannelOption;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.ResolvableType;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.http.codec.ServerSentEventHttpMessageWriter;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
+import reactor.netty.http.client.HttpClient;
 
 /**
  * 内部模型代理转发服务，封装鉴权、供应商选择、上游鉴权注入和 SSE 思考内容转换。
@@ -35,17 +45,28 @@ public class InternalModelProxyForwardingService {
     public static final String PROVIDER_HEADER = "X-ICBC-Model-Provider";
     public static final String UCID_HEADER = "ucid";
 
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration FIRST_EVENT_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration STREAM_IDLE_TIMEOUT = Duration.ofSeconds(120);
+
     private final InternalModelProviderRegistry registry;
     private final InternalModelProxyRuntimeSettings settings;
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final ServerSentEventHttpMessageWriter sseWriter = new ServerSentEventHttpMessageWriter();
+
+    private static final ParameterizedTypeReference<ServerSentEvent<String>> SSE_EVENT_TYPE =
+            new ParameterizedTypeReference<>() {};
+    private static final ResolvableType SSE_EVENT_RESOLVABLE_TYPE =
+            ResolvableType.forClassWithGenerics(ServerSentEvent.class, String.class);
 
     @Autowired
     public InternalModelProxyForwardingService(
             InternalModelProviderRegistry registry,
             InternalModelProxyRuntimeSettings settings,
             ObjectMapper objectMapper) {
-        this(registry, settings, WebClient.create(), objectMapper);
+        this(registry, settings, defaultWebClient(), objectMapper);
     }
 
     InternalModelProxyForwardingService(
@@ -59,21 +80,94 @@ public class InternalModelProxyForwardingService {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
     }
 
-    public Mono<ResponseEntity<Flux<String>>> forward(ServerWebExchange exchange, String body, String traceId) {
+    public Mono<Void> forward(ServerWebExchange exchange, String body, String traceId) {
         validateProxyAuth(exchange);
         String providerId = exchange.getRequest().getHeaders().getFirst(PROVIDER_HEADER);
         InternalModelProvider provider = registry.requireProvider(providerId);
         validateModel(body);
         String targetUrl = targetUrl(provider.baseUrl(), downstreamPath(exchange), exchange.getRequest().getURI().getRawQuery());
         InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
-        return webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
+        Sinks.One<Void> responseHeadersReady = Sinks.one();
+        Mono<Void> request = webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
                 .uri(URI.create(targetUrl))
                 .headers(headers -> applyForwardHeaders(headers, exchange, traceId))
                 .body(BodyInserters.fromValue(body == null ? "" : body))
-                .exchangeToMono(response -> Mono.just(ResponseEntity
-                        .status(response.statusCode())
-                        .headers(safeResponseHeaders(response.headers().asHttpHeaders()))
-                        .body(convertSse(response.bodyToFlux(String.class), converter))));
+                .exchangeToMono(response -> {
+                    responseHeadersReady.tryEmitEmpty();
+                    return writeResponse(exchange, response, converter);
+                });
+        Mono<Void> responseHeaderTimeout = responseHeadersReady.asMono()
+                .timeout(FIRST_RESPONSE_TIMEOUT)
+                .then(Mono.never());
+        return Mono.firstWithSignal(request, responseHeaderTimeout);
+    }
+
+    private Mono<Void> writeResponse(
+            ServerWebExchange exchange,
+            ClientResponse response,
+            InternalModelThinkStreamConverter converter) {
+        ServerHttpResponse targetResponse = exchange.getResponse();
+        targetResponse.setStatusCode(response.statusCode());
+        copyResponseHeaders(targetResponse.getHeaders(), response.headers().asHttpHeaders());
+
+        MediaType contentType = response.headers().contentType().orElse(null);
+        boolean transformSse = response.statusCode().is2xxSuccessful()
+                && contentType != null
+                && MediaType.TEXT_EVENT_STREAM.isCompatibleWith(contentType);
+        if (!transformSse) {
+            return targetResponse.writeWith(withStreamingTimeouts(response.bodyToFlux(DataBuffer.class)));
+        }
+
+        Flux<ServerSentEvent<String>> events = withStreamingTimeouts(response.bodyToFlux(SSE_EVENT_TYPE))
+                .map(event -> convertEvent(event, converter));
+        return sseWriter.write(
+                events,
+                SSE_EVENT_RESOLVABLE_TYPE,
+                contentType,
+                targetResponse,
+                Collections.emptyMap());
+    }
+
+    private static WebClient defaultWebClient() {
+        HttpClient httpClient = HttpClient.create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) CONNECT_TIMEOUT.toMillis())
+                // 连接建立后的网络空闲边界与 SSE 事件空闲边界一致；首个事件由响应 Flux 单独限制为 30 秒。
+                .responseTimeout(STREAM_IDLE_TIMEOUT);
+        return WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .build();
+    }
+
+    /**
+     * 连接建立后不限制整个 SSE 生命周期，只限制首个事件和相邻事件之间的空闲时间。
+     * timeout 的取消信号会沿响应 Flux 传回 WebClient，从而关闭上游连接。
+     */
+    private <T> Flux<T> withStreamingTimeouts(Flux<T> source) {
+        return source.timeout(
+                Mono.delay(FIRST_EVENT_TIMEOUT),
+                ignored -> Mono.delay(STREAM_IDLE_TIMEOUT));
+    }
+
+    private ServerSentEvent<String> convertEvent(
+            ServerSentEvent<String> event,
+            InternalModelThinkStreamConverter converter) {
+        ServerSentEvent.Builder<String> builder = ServerSentEvent.builder();
+        if (event.id() != null) {
+            builder.id(event.id());
+        }
+        if (event.event() != null) {
+            builder.event(event.event());
+        }
+        if (event.retry() != null) {
+            builder.retry(event.retry());
+        }
+        if (event.comment() != null) {
+            builder.comment(event.comment());
+        }
+        if (event.data() != null) {
+            builder.data(converter.convertData(event.data()));
+        }
+        return builder.build();
     }
 
     private void validateProxyAuth(ServerWebExchange exchange) {
@@ -108,27 +202,21 @@ public class InternalModelProxyForwardingService {
         }
     }
 
-    private HttpHeaders safeResponseHeaders(HttpHeaders source) {
-        HttpHeaders headers = new HttpHeaders();
+    private void copyResponseHeaders(HttpHeaders target, HttpHeaders source) {
         MediaType contentType = source.getContentType();
         if (contentType != null) {
-            headers.setContentType(contentType);
+            target.setContentType(contentType);
         }
-        return headers;
+        copyHeader(target, source, HttpHeaders.RETRY_AFTER);
+        copyHeader(target, source, TraceConstants.TRACE_ID_HEADER);
+        copyHeader(target, source, HttpHeaders.CACHE_CONTROL);
     }
 
-    private Flux<String> convertSse(Flux<String> chunks, InternalModelThinkStreamConverter converter) {
-        AtomicReference<String> carry = new AtomicReference<>("");
-        return chunks.concatMapIterable(chunk -> {
-            String text = carry.get() + (chunk == null ? "" : chunk);
-            String[] lines = text.split("\\r?\\n", -1);
-            carry.set(lines.length == 0 ? "" : lines[lines.length - 1]);
-            List<String> converted = new ArrayList<>();
-            for (int index = 0; index < lines.length - 1; index++) {
-                converted.add(converter.convertLine(lines[index]) + "\n");
-            }
-            return converted;
-        });
+    private void copyHeader(HttpHeaders target, HttpHeaders source, String headerName) {
+        List<String> values = source.get(headerName);
+        if (values != null && !values.isEmpty()) {
+            target.put(headerName, List.copyOf(values));
+        }
     }
 
     private String downstreamPath(ServerWebExchange exchange) {

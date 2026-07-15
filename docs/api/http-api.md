@@ -2269,15 +2269,15 @@ Model/Provider 目录兼容说明：
 |---|---|---|
 | `*` | `/api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` | 仅供 opencode 子进程调用的 OpenAI-compatible 代理，不给前端 SDK 暴露会话便捷方法。 |
 
-代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-ICBC-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ICBC_UCID` 注入。Java 从内存供应商快照找到 `baseUrl` 后转发到对应 OpenAI-compatible 路径，并向上游注入 `Authorization: Bearer <ICBC_OPENAI_AUTH_TOKEN>`、`ucid` 和 traceId。流式响应中 `delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`。
+代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-ICBC-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ICBC_UCID` 注入。Java 从内存供应商快照找到 `baseUrl` 后转发到对应 OpenAI-compatible 路径，并从 `internal_model_proxy_settings` 注入数据库维护的全局上游 token、`ucid` 和 traceId。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，已有 `reasoning_content` 不覆盖，普通正文仍保留在 `delta.content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、错误正文、Retry-After 与 trace header；连接/首个响应/首个事件/事件空闲边界分别为 10 秒/30 秒/30 秒/120 秒，不设置整体 SSE 生命周期超时，下游取消会取消上游订阅。
 
 opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "icbc-qwen/Qwen3.6-35B-A3B",
-  "small_model": "icbc-qwen/Qwen3.6-35B-A3B",
+  "model": "icbc-qwen/Qwen3.6-27B",
+  "small_model": "icbc-qwen/Qwen3.6-27B",
   "enabled_providers": ["icbc-qwen", "icbc-deepseek"],
   "provider": {
     "icbc-qwen": {
@@ -2297,9 +2297,9 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
         }
       },
       "models": {
-        "Qwen3.6-35B-A3B": {
-          "name": "Qwen3.6 35B A3B",
-          "id": "Qwen3.6-35B-A3B",
+        "Qwen3.6-27B": {
+          "name": "Qwen3.6 27B",
+          "id": "Qwen3.6-27B",
           "reasoning": true,
           "tool_call": true,
           "temperature": true,
@@ -2325,9 +2325,9 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
         }
       },
       "models": {
-        "DeepSeek-R1": {
-          "name": "DeepSeek R1",
-          "id": "DeepSeek-R1",
+        "DeepSeek-V4-Flash-W8A8": {
+          "name": "DeepSeek V4 Flash W8A8",
+          "id": "DeepSeek-V4-Flash-W8A8",
           "reasoning": true,
           "tool_call": true,
           "temperature": true,

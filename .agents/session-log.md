@@ -6554,3 +6554,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 宠物定向测试 47 项通过；前端全量单 worker 59 个文件、836 项通过（1 项跳过），生产 build 通过。标准并发全量运行会偶发一个既有 Mermaid 动态加载测试超时，该用例单独复跑和单 worker 全量均通过。
   - 本地 backend health/readiness 为 `UP`，前端 3000 返回 200，CORS 正常，manager health 持续为 `HEALTHY`；未修改 API、RunEvent、数据库、权限或 `.env` 配置。
+
+### 2026-07-15 - Java 内部模型 SSE 代理正式修复与企业模型切换
+
+- Why:
+  - Spring WebFlux 已将上游 SSE 解码为事件 data，旧代理又按原始 `data:` 行重复解析，造成事件延迟、重复前缀和 400/流式错误正文丢失；企业生产模型同时切换为 Qwen 27B 与 DeepSeek V4 Flash。
+- What:
+  - Controller 改为 `Mono<Void>` 直接写下游响应；仅 `2xx + text/event-stream` 使用 `ServerSentEvent` 语义转换和现有 think 转换器，非 2xx（含 4xx SSE）及非 SSE 通过 `DataBuffer` 原样转发，保留状态、Content-Type、Retry-After、trace，避免 hop-by-hop 头。
+  - 增加连接/首响应/首事件/事件空闲边界（10/30/30/120 秒）和下游取消传播；think 标签可跨事件，已有 `reasoning_content` 不覆盖，`[DONE]` 保持原样。
+  - 公共 opencode 配置、后端默认目录和企业部署文档统一为 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`，正式链路为 OpenCode → Java:8080 → 行内模型:9070，删除 19070 relay 方案描述。
+- How:
+  - 通过真实 `InternalModelProxyController` HTTP 出口测试 SSE 首帧提前到达、字段语义、错误透传、4xx SSE 原样透传和下游取消；同步 converter、模型目录和 API/event-stream 文档。数据库供应商/token 仍由现有内部模型供应商配置页维护，没有新增表或环境密钥。
+- Result:
+  - `InternalModelThinkStreamConverterTest`、`InternalModelProxyControllerTest`、`ModelCatalogApplicationServiceTest` 定向测试通过；`mvn -pl test-agent-opencode-runtime -am test`、`mvn -pl test-agent-api -am test` 和 `mvn clean package -DskipTests` 均通过。
+  - 未在本机执行 114 生产 Java/行内模型真实 curl 或 Mac 企业归档发布；现场仍需上传新 JAR、刷新 Java 内存、替换公共 opencode.jsonc、重启用户 OpenCode 并分别验收两个模型。

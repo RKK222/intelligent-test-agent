@@ -401,6 +401,12 @@ scope 发现与缓存规则：
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
 - 后端处理 root 终态时必须先读取当前 Run，并把 root 终态作为最终事实保存；后到 root 终态可以纠正先到的 transport error 临时失败并刷新终态快照。`Streaming response failed` 等 transport error 没有独立业务终态含义，应给 root 终态短暂到达窗口；窗口内没有 root 终态时才在 Run 仍非终态的前提下收敛为 `run.failed`，并在 payload 中保留单行、长度受限的安全错误说明，供前端解释为什么停止输出。
 
+## 内部模型代理 SSE
+
+`POST /api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` 仅供用户 OpenCode 进程调用，不是前端 RunEvent SSE。Java 只对 `2xx + text/event-stream` 响应使用 `ServerSentEvent` 语义转换：每个事件的 `id/event/retry/comment/data` 语义保留，`data` 中的 `<think>...</think>` 迁移为 `reasoning_content`，`[DONE]` 原样保留；不会手工追加 `data:`，因此下游不会出现 `data:data:`。已有 `reasoning_content` 不会被覆盖。
+
+所有非 `2xx` 响应（包括 `4xx + text/event-stream`）和非 SSE 响应按 `DataBuffer` 原样转发，保留状态码、`Content-Type`、错误正文、`Retry-After` 和 trace header。连接超时为 10 秒，首个响应和首个事件等待为 30 秒，后续事件空闲为 120 秒，不设置整个 SSE 生命周期超时；下游取消会取消到行内模型的上游订阅。
+
 ## Runtime SSE
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 是 agent-scoped RunEvent 实时入口，前端默认使用 `agentId=opencode`。`GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 是内部平台入口。旧 `GET /api/runs/{runId}/events` 已作废，返回 `410 API_GONE`。有效入口返回 `text/event-stream`，共享同一续传、traceId、错误格式和事件模型，payload 格式不随 agentId 改变。目标 Java 在发出首帧前校验认证用户拥有该 Run；新模式直接比较 Redis manifest `userId` 且不查询 PostgreSQL，legacy/详情过期才回查 Run 与 Session，越权返回 `403 FORBIDDEN` 且不进入 snapshot/replay/live 流。

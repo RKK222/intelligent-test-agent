@@ -42,6 +42,26 @@ class InternalModelThinkStreamConverterTest {
         assertThat(payload.at("/choices/0/delta/reasoning_content").asText()).isEqualTo("abc");
     }
 
+    @Test
+    void convertsDecodedDataAndPreservesExistingReasoningContent() throws Exception {
+        InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
+
+        JsonNode converted = objectMapper.readTree(converter.convertData(
+                "{\"choices\":[{\"delta\":{\"content\":\"<think>思考</think>回答\","
+                        + "\"reasoning_content\":\"已有\"}}]}"));
+
+        assertThat(converted.at("/choices/0/delta/reasoning_content").asText())
+                .isEqualTo("已有");
+        assertThat(converted.at("/choices/0/delta/content").asText()).isEqualTo("回答");
+    }
+
+    @Test
+    void preservesDonePayloadWhenDataWasAlreadyDecoded() {
+        InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
+
+        assertThat(converter.convertData("[DONE]")).isEqualTo("[DONE]");
+    }
+
     private JsonNode payload(String line) throws Exception {
         assertThat(line).startsWith("data:");
         return objectMapper.readTree(line.substring("data:".length()));

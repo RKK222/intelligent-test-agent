@@ -23,20 +23,16 @@ public class InternalModelThinkStreamConverter {
     }
 
     /**
-     * 转换单行 SSE 数据；无法解析为 OpenAI chunk 时保持原样，避免代理破坏上游非标准事件。
+     * 转换已经由 SSE 解码器提取出的 data 内容；无法解析为 OpenAI chunk 时保持原样。
      */
-    public String convertLine(String line) {
-        if (line == null || !line.startsWith(SSE_DATA_PREFIX)) {
-            return line;
-        }
-        String payload = line.substring(SSE_DATA_PREFIX.length());
-        if (payload.isBlank() || "[DONE]".equals(payload.trim())) {
-            return line;
+    public String convertData(String payload) {
+        if (payload == null || payload.isBlank() || "[DONE]".equals(payload.trim())) {
+            return payload;
         }
         try {
             JsonNode root = objectMapper.readTree(payload);
             if (!(root instanceof ObjectNode objectRoot) || !root.path("choices").isArray()) {
-                return line;
+                return payload;
             }
             for (JsonNode choice : root.path("choices")) {
                 JsonNode delta = choice.path("delta");
@@ -53,14 +49,27 @@ public class InternalModelThinkStreamConverter {
                 } else {
                     deltaObject.put("content", converted.content());
                 }
-                if (!converted.reasoningContent().isEmpty()) {
+                if (!converted.reasoningContent().isEmpty()
+                        && (deltaObject.get("reasoning_content") == null
+                        || !deltaObject.get("reasoning_content").isTextual())) {
                     deltaObject.put("reasoning_content", converted.reasoningContent());
                 }
             }
-            return SSE_DATA_PREFIX + objectMapper.writeValueAsString(objectRoot);
+            return objectMapper.writeValueAsString(objectRoot);
         } catch (Exception exception) {
+            return payload;
+        }
+    }
+
+    /**
+     * 兼容仍以原始 SSE data 行调用的测试和旧内部调用方。
+     */
+    public String convertLine(String line) {
+        if (line == null || !line.startsWith(SSE_DATA_PREFIX)) {
             return line;
         }
+        String payload = line.substring(SSE_DATA_PREFIX.length());
+        return SSE_DATA_PREFIX + convertData(payload);
     }
 
     private ConvertedText convertText(String text) {
