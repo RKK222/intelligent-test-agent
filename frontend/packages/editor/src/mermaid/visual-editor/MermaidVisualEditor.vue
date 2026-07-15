@@ -146,6 +146,11 @@ function onNodeClick(event: NodeMouseEvent) {
   selectedNodeId.value = event.node.id;
 }
 
+/** 点击空白画布时取消选中，使半透明快捷箭头随选中态消失。 */
+function onPaneClick() {
+  selectedNodeId.value = undefined;
+}
+
 function updateSelectedNode(patch: Partial<Pick<MermaidNode, "text" | "type">>) {
   if (!selectedNodeId.value) return;
   updateGraph((draft) => {
@@ -290,11 +295,13 @@ function onEdgesChange(changes: EdgeChange[]) {
           @edges-change="onEdgesChange"
           @node-drag-stop="onNodeDragStop"
           @node-click="onNodeClick"
+          @pane-click="onPaneClick"
           @quick-connect-test="onQuickConnect"
         >
           <template #node-mermaid="nodeProps">
             <MermaidFlowNode
               v-bind="nodeProps"
+              :selected="selectedNodeId === nodeProps.id"
               :connection-source-handle-id="sourceNodeId === nodeProps.id ? sourceHandleId : undefined"
               :is-connection-target="isDragging && targetNodeId === nodeProps.id"
               :snapped-handle-id="targetNodeId === nodeProps.id ? targetHandleId : undefined"

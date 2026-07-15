@@ -15,16 +15,18 @@ vi.mock("@vue-flow/core", () => ({
   VueFlow: defineComponent({
     name: "VueFlow",
     props: ["nodes", "edges", "nodesConnectable", "connectionMode", "connectOnClick"],
-    emits: ["nodeDragStop", "connect", "nodeClick", "quick-connect-test"],
+    emits: ["nodeDragStop", "connect", "nodeClick", "quick-connect-test", "paneClick"],
     setup(_, { expose }) {
       expose({
         screenToFlowCoordinate: ({ x, y }: { x: number; y: number }) => ({ x: x - 100, y: y - 50 })
       });
     },
     template: `<div data-testid="vue-flow-mock">
+      <slot name="node-mermaid" v-for="node in (nodes || [])" :key="node.id" :id="node.id" :data="node.data" />
       <button data-testid="mock-drag" @click="$emit('nodeDragStop', { node: { id: 'A', position: { x: 480, y: 260 } } })">drag</button>
       <button data-testid="mock-connect" @click="$emit('connect', { source: 'B', target: 'A' })">connect</button>
       <button data-testid="mock-select" @click="$emit('nodeClick', { node: { id: 'A' } })">select</button>
+      <button data-testid="mock-pane-click" @click="$emit('paneClick')">pane-click</button>
       <button data-testid="mock-quick-connect" @click="$emit('quick-connect-test', { portId: 'target-5', position: 'right', shapeType: 'diamond' })">quick-connect</button>
     </div>`
   }),
@@ -477,5 +479,41 @@ describe("MermaidVisualEditor", () => {
     // 起点端口随被选中节点形状取右侧中点端口；目标端口随新节点形状取左侧端口。
     expect(edge!.sourceHandle).toBe("target-5");
     expect(edge!.targetHandle).toBe("source-1");
+  });
+
+  it("快捷建连后起始节点取消选中、新节点选中，半透明箭头随之移动", async () => {
+    const EditorHost = defineComponent({
+      components: { MermaidVisualEditor },
+      setup() {
+        return { model: ref(graph()) };
+      },
+      template: `<MermaidVisualEditor v-model="model" />`
+    });
+    const { getByTestId, container } = render(EditorHost);
+    const arrowsOf = (nodeId: string) =>
+      container.querySelectorAll(`[data-mermaid-node-id="${nodeId}"] .ta-mermaid-quick-connector-wrapper`).length;
+
+    await fireEvent.click(getByTestId("mock-select"));
+    // 选中 A：四周出现 4 个半透明快捷箭头
+    expect(arrowsOf("A")).toBe(4);
+
+    await fireEvent.click(getByTestId("mock-quick-connect"));
+    // 建连后选中切到新节点 N3：A 的箭头消失，N3 出现 4 个箭头
+    expect(arrowsOf("A")).toBe(0);
+    expect(arrowsOf("N3")).toBe(4);
+  });
+
+  it("点击空白画布取消选中并隐藏快捷箭头", async () => {
+    const { getByTestId, container } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+    const arrowsOf = (nodeId: string) =>
+      container.querySelectorAll(`[data-mermaid-node-id="${nodeId}"] .ta-mermaid-quick-connector-wrapper`).length;
+
+    await fireEvent.click(getByTestId("mock-select"));
+    expect(arrowsOf("A")).toBe(4);
+
+    await fireEvent.click(getByTestId("mock-pane-click"));
+    expect(arrowsOf("A")).toBe(0);
   });
 });

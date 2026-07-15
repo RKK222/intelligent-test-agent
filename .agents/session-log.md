@@ -6738,3 +6738,15 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - editor 全量 Vitest 9 文件 99 passed（含新增 20 项），前端 typecheck 与 lint 通过。
   - 注意：`packages/editor/README.md` 与 `PACKAGE.md` 仍按旧“每边 3 个/六点”描述端口，为本任务外既有文档漂移，未在本任务扩大范围修改。
+
+### 2026-07-15 - 修复快捷建连后半透明箭头不消失
+
+- Why:
+  - 选中节点用四向快捷箭头新建图形后，起始节点的半透明快捷箭头仍停留在屏幕上。根因是 `MermaidFlowNode` 的 `selected` 来自 Vue Flow 的 `nodeProps.selected`，而 `onQuickConnect` 只更新编辑器自己的 `selectedNodeId`，Vue Flow 的选中态并不跟随，起始节点一直保持选中、箭头不消失。
+- What:
+  - `MermaidVisualEditor.vue` 模板把 `MermaidFlowNode` 的 `:selected` 改为 `selectedNodeId === nodeProps.id`（覆盖 `v-bind="nodeProps"` 的 selected），让选中态以 `selectedNodeId` 为唯一来源；快捷建连后选中切到新节点，起始节点箭头随之消失、新节点出现箭头。
+  - 新增 `@pane-click="onPaneClick"`，点击空白画布清空 `selectedNodeId`，保留并统一了原有的画布取消选中行为。
+- How:
+  - 测试 mock 的 `VueFlow` 增加 `node-mermaid` 具名插槽按节点渲染真实 `MermaidFlowNode`，并补 `paneClick` 事件与触发按钮；新增“快捷建连后起始节点取消选中、新节点选中”“点击空白画布取消选中”两条回归测试。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 101 passed（含新增 2 项），前端 typecheck 与 lint 通过。
