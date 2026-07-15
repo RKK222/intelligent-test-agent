@@ -17,7 +17,7 @@ vi.mock("@vue-flow/core", () => ({
   VueFlow: defineComponent({
     name: "VueFlow",
     props: ["nodes", "edges", "nodesConnectable", "connectionMode", "connectOnClick"],
-    emits: ["nodeDragStop", "connect", "nodeClick", "quick-connect-test", "paneClick"],
+    emits: ["nodeDragStop", "connect", "nodeClick", "edgeClick", "quick-connect-test", "paneClick"],
     setup(_, { expose }) {
       expose({
         screenToFlowCoordinate: ({ x, y }: { x: number; y: number }) => ({ x: x - 100, y: y - 50 })
@@ -28,6 +28,7 @@ vi.mock("@vue-flow/core", () => ({
       <button data-testid="mock-drag" @click="$emit('nodeDragStop', { node: { id: 'A', position: { x: 480, y: 260 } } })">drag</button>
       <button data-testid="mock-connect" @click="$emit('connect', { source: 'B', target: 'A' })">connect</button>
       <button data-testid="mock-select" @click="$emit('nodeClick', { node: { id: 'A' } })">select</button>
+      <button data-testid="mock-edge-click" @click="$emit('edgeClick', { edge: { id: 'edge-1' } })">edge-click</button>
       <button data-testid="mock-pane-click" @click="$emit('paneClick')">pane-click</button>
       <button data-testid="mock-quick-connect" @click="$emit('quick-connect-test', { portId: 'target-5', position: 'right', shapeType: 'diamond' })">quick-connect</button>
     </div>`
@@ -635,9 +636,30 @@ describe("MermaidVisualEditor", () => {
     });
 
     await fireEvent.click(getByTestId("mock-select")); // 选中 A，属性面板显示 A
-    expect(queryByText("选择画布中的节点后编辑。")).toBeNull();
+    expect(queryByText("选择画布中的节点或连线后编辑。")).toBeNull();
 
     await fireEvent.click(getByTestId("mock-pane-click")); // 点击空白画布取消选中
-    expect(queryByText("选择画布中的节点后编辑。")).toBeTruthy();
+    expect(queryByText("选择画布中的节点或连线后编辑。")).toBeTruthy();
+  });
+
+  it("选中连线后可新增、修改并删除连线文字", async () => {
+    const { getByTestId, getByLabelText, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+
+    // 选中 edge-1（A->B）
+    await fireEvent.click(getByTestId("mock-edge-click"));
+
+    // 新增文字
+    await fireEvent.update(getByLabelText("连线文字"), "是");
+    expect((emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges[0]?.label).toBe("是");
+
+    // 修改文字
+    await fireEvent.update(getByLabelText("连线文字"), "下一步");
+    expect((emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges[0]?.label).toBe("下一步");
+
+    // 删除文字（清空）
+    await fireEvent.update(getByLabelText("连线文字"), "");
+    expect((emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges[0]?.label).toBe("");
   });
 });

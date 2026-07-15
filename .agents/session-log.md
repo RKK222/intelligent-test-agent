@@ -6776,3 +6776,16 @@ bash /tmp/test-api-after-restart.sh
   - 新增控制器重连（target/source 两端）回归测试、`canAppendMermaidEdge` 排除自身、`updateMermaidEdge` 只更新被拖端、`MermaidFlowEdge` 圆圈与重连起点发出等测试；mock 补 `BaseEdge`。未修改 API、事件、数据库、环境配置或 generated SDK。
 - Result:
   - editor 全量 Vitest 9 文件 108 passed（+6），前端 typecheck 与 lint 通过。
+
+### 2026-07-15 - 连线文字新增/修改/删除
+
+- Why:
+  - 连线没有文字编辑入口；用户希望对连线新增、修改、删除文字（标签）。
+- What:
+  - `MermaidVisualEditor.vue` 新增 `selectedEdgeId` 与 `selectedEdge`；`@edge-click` 记录选中连线并取消节点选中，`@node-click`/`@pane-click` 同步清空连线选中；新增 `updateSelectedEdgeLabel`（输入即新增/修改，清空即删除）。
+  - 属性面板由单一“当前节点”改为 `v-if` 节点 / `v-else-if` 连线 / `v-else` 空态三段：连线段含“连线 ID”（只读）与“连线文字”输入框（placeholder 提示为空不显示）；空态文案改为“选择画布中的节点或连线后编辑”。
+  - `onNodesChange`/`onEdgesChange` 在所选连线随节点删除或自身被删时清空 `selectedEdgeId`。
+- How:
+  - 新增“选中连线后可新增、修改并删除连线文字”回归测试（mock 补 `edgeClick` 与 `mock-edge-click`）；同步更新画布取消选中测试的空态文案。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 109 passed（+1），前端 typecheck 通过。

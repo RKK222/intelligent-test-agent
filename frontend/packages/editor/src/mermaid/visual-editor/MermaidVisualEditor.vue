@@ -4,6 +4,7 @@ import {
   ConnectionMode,
   Position,
   VueFlow,
+  type EdgeMouseEvent,
   type NodeDragEvent,
   type NodeMouseEvent,
   type NodeChange,
@@ -47,10 +48,12 @@ const nodeDragMime = "application/x-test-agent-mermaid-node";
 const vueFlowRef = ref<{ screenToFlowCoordinate: (position: MermaidPosition) => MermaidPosition }>();
 const canvasRef = ref<HTMLElement>();
 const selectedNodeId = ref<string>();
+const selectedEdgeId = ref<string>();
 const isCanvasDragOver = ref(false);
 const flowNodes = computed(() => toVueFlowNodes(props.modelValue));
 const flowEdges = computed(() => toVueFlowEdges(props.modelValue));
 const selectedNode = computed(() => props.modelValue.nodes.find((node) => node.id === selectedNodeId.value));
+const selectedEdge = computed(() => props.modelValue.edges.find((edge) => edge.id === selectedEdgeId.value));
 
 function updateGraph(updater: (draft: MermaidGraph) => void) {
   const draft = cloneMermaidGraph(props.modelValue);
@@ -182,15 +185,18 @@ function onQuickConnect(payload: { portId: string; position: Position; shapeType
 
 function onNodeClick(event: NodeMouseEvent) {
   selectedNodeId.value = event.node.id;
+  selectedEdgeId.value = undefined;
 }
 
 /** 点击空白画布时取消选中，使半透明快捷箭头随选中态消失。 */
 function onPaneClick() {
   selectedNodeId.value = undefined;
+  selectedEdgeId.value = undefined;
 }
 
-/** 选中连线时取消节点选中，避免节点边框与连线端点圆圈同时显示。 */
-function onEdgeClick() {
+/** 选中连线时记录连线、取消节点选中，便于在属性面板编辑连线文字。 */
+function onEdgeClick(event: EdgeMouseEvent) {
+  selectedEdgeId.value = event.edge.id;
   selectedNodeId.value = undefined;
 }
 
@@ -199,6 +205,15 @@ function updateSelectedNode(patch: Partial<Pick<MermaidNode, "text" | "type">>) 
   updateGraph((draft) => {
     const node = draft.nodes.find((item) => item.id === selectedNodeId.value);
     if (node) Object.assign(node, patch);
+  });
+}
+
+/** 编辑选中连线的文字：输入即新增/修改，清空即删除文字（连线不再显示标签）。 */
+function updateSelectedEdgeLabel(text: string) {
+  if (!selectedEdgeId.value) return;
+  updateGraph((draft) => {
+    const edge = draft.edges.find((item) => item.id === selectedEdgeId.value);
+    if (edge) edge.label = text;
   });
 }
 
@@ -287,6 +302,12 @@ function onNodesChange(changes: NodeChange[]) {
   if (selectedNodeId.value && removeIds.has(selectedNodeId.value)) {
     selectedNodeId.value = undefined;
   }
+  if (selectedEdgeId.value) {
+    const edge = props.modelValue.edges.find((item) => item.id === selectedEdgeId.value);
+    if (edge && (removeIds.has(edge.source) || removeIds.has(edge.target))) {
+      selectedEdgeId.value = undefined;
+    }
+  }
 }
 
 function onEdgesChange(changes: EdgeChange[]) {
@@ -296,6 +317,9 @@ function onEdgesChange(changes: EdgeChange[]) {
   updateGraph((draft) => {
     draft.edges = draft.edges.filter((edge) => !removeIds.has(edge.id));
   });
+  if (selectedEdgeId.value && removeIds.has(selectedEdgeId.value)) {
+    selectedEdgeId.value = undefined;
+  }
 }
 </script>
 
@@ -410,9 +434,9 @@ function onEdgesChange(changes: EdgeChange[]) {
           </div>
         </section>
 
-        <section class="ta-mermaid-node-properties">
+        <section v-if="selectedNode" class="ta-mermaid-node-properties">
           <h3>当前节点</h3>
-          <div v-if="selectedNode" class="ta-mermaid-fields">
+          <div class="ta-mermaid-fields">
             <label>
               <span>节点 ID</span>
               <input :value="selectedNode.id" disabled />
@@ -433,8 +457,21 @@ function onEdgesChange(changes: EdgeChange[]) {
             </label>
             <button type="button" class="is-danger" @click="deleteSelectedNode">删除节点</button>
           </div>
-          <p v-else class="ta-mermaid-empty">选择画布中的节点后编辑。</p>
         </section>
+        <section v-else-if="selectedEdge" class="ta-mermaid-edge-properties">
+          <h3>当前连线</h3>
+          <div class="ta-mermaid-fields">
+            <label>
+              <span>连线 ID</span>
+              <input :value="selectedEdge.id" disabled />
+            </label>
+            <label>
+              <span>连线文字</span>
+              <input aria-label="连线文字" :value="selectedEdge.label" placeholder="为空则不显示文字" @input="updateSelectedEdgeLabel(($event.target as HTMLInputElement).value)" />
+            </label>
+          </div>
+        </section>
+        <p v-else class="ta-mermaid-empty">选择画布中的节点或连线后编辑。</p>
       </aside>
     </div>
   </div>
@@ -507,6 +544,7 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-palette__shape.is-diamond::after { inset: 1.5px; background: var(--ta-surface, #fff); }
 .ta-mermaid-palette__shape.is-circle { width: 38px; height: 38px; border-radius: 50%; }
 .ta-mermaid-node-properties { min-height: 132px; }
+.ta-mermaid-edge-properties { min-height: 132px; }
 .ta-mermaid-fields { display: grid; gap: 8px; }
 .ta-mermaid-fields label { display: grid; gap: 3px; color: var(--ta-muted, #64748b); font-size: 10px; }
 .ta-mermaid-fields input, .ta-mermaid-fields select { width: 100%; padding: 4px 7px; }
