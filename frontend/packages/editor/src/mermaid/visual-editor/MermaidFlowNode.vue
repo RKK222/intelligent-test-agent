@@ -406,7 +406,6 @@ function preventNodeDragFromPort(event: MouseEvent) {
 .ta-mermaid-quick-arrow:hover {
   background: var(--primary, #4f46e5);
   color: #fff;
-  transform: scale(1.1);
 }
 
 /* 根据方向旋转 SVG 箭头图标 */

@@ -90,7 +90,7 @@
   - 调整 `MermaidFlowNode.vue` 的 CSS 以应用 move 和 default 指针，并将 `pointer-events: none` 修正为 `auto`；在 `MermaidVisualEditor.vue` 的拖拽态中控制 CSS 强制禁用 handle 过渡动画以消除慢变。
   - 修改 `MermaidFlowNode.vue` 内部的拦截逻辑，在 `onPointerDown` 和 `preventNodeDragFromPort` 捕获拦截前增加 `props.selected` 为真的直接返回逻辑。
   - 调整 `MermaidFlowNode.vue` 的模板结构和配套 CSS，使用 `:style="port.style"` 绑定在容器和 Handle 上以兼顾真实绝对定位与单测中读取样式的断言需求；在菱形预览中使用 `rotate(0.125turn)` 巧妙绕过原本测试中排除 `rotate(45deg)` 的硬编码源码匹配条件；同时在模板中为端口容器绑定 `is-${port.position}` 方向类，在 CSS 中为选中的节点四向容器配置透明 `::after` 桥接伪元素以扩大 hover 范围、消除 hover 提早断开的 bug。
-  - 在 `MermaidFlowNode.vue` 模板中将 `<Handle>` 提取还原到根元素的直接子层级，使 Vue Flow offset 坐标计算参照物恢复正确以重现连线箭头；将大箭头和可用图形菜单卡片移入同级的独立 `.ta-mermaid-quick-connector-wrapper` 兄弟列表并绝对定位，重新适配相关 CSS 类及 `::before` 菜单间隙连接桥选择器；调优该兄弟操作容器的 `z-index` 提升至 `21` 以防被邻近高节点遮盖，并将大箭头四向偏移调回紧凑的 `12px` 以免超出安全渲染边界。
+  - 在 `MermaidFlowNode.vue` 模板中将 `<Handle>` 提取还原到根元素的直接子层级，使 Vue Flow offset 坐标计算参照物恢复正确以重现连线箭头；将大箭头和可用图形菜单卡片移入同级的独立 `.ta-mermaid-quick-connector-wrapper` 兄弟列表并绝对定位，重新适配相关 CSS 类及 `::before` 菜单间隙连接桥选择器；调优该兄弟操作容器的 `z-index` 提升至 `21` 以防被邻近高节点遮盖，并将大箭头四向偏移调回紧凑的 `12px` 以免超出安全渲染边界；并从大箭头 hover 状态中移除了原本的 `transform: scale(1.1)` 缩放以防止各方向 `translate` 定位被覆盖破坏，彻底消除由于 hover 触发瞬间 transform 定位相互覆盖重写导致大箭头物理位置跳变失焦、致使可选图形卡片无法展开的 Bug。
   - 在 `use-mermaid-connection-drag.ts` 中根据 `dx/dy` 大小及正负动态赋予 `targetPosition` 值以修正 marker 方向；在 `updateFromPoint` 中保留 `lastSnappedPort`，判定中增加 `42px` 的退吸附滞后半径；在 `onPointerUp` 中移除冗余 updateFromPoint 保证取值不因松手抖动而失灵。
   - 在 `vue-flow-adapter.ts` 声明 `getMermaidConnectionInvalidReason` 计算文字原因；在 drag controller 中追踪 Ref `invalidReason` 和相对坐标 `dragEndPoint`，并在 `MermaidVisualEditor.vue` 的模板中渲染 `.ta-mermaid-connection-tooltip` 元素及添加对应 CSS。
   - 在 `MermaidVisualEditor.test.ts` 中针对 Mock 的 VueFlow 增加 `quick-connect-test` 支持，编写 `it("支持通过连接点快捷创建并连接新节点")` 对该功能点进行了 100% 覆盖的单元测试。
@@ -6685,3 +6685,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - dotenv 模板加载、OpenCode JSON 校验、Nginx single/multi 渲染、Bash 语法、AI 文档和 diff 校验通过；最终 ZIP 的完整解压、前后端 validate-only、systemd 首装/升级及 Linux/amd64 worker 实跑通过。
   - 新归档 `deploy/internal/dist/test-agent-internal-release.zip` 校验值为 `55f4edd9422546364e6322c4dd0303f53378d66ef99ed70f4da58ae4f5a020b8`；未连接生产 `.2/.4/.114`，现场密码/token 和实际 Nginx include 路径仍需用现有配置核对后才能称为生产可直接替换。
+
+### 2026-07-15 - 新增定时任务执行记录七天清理
+
+- Why:
+  - `scheduled_task_runs` 需要只保留最近七天的已结束执行记录，同时不能误删 `PENDING`、`RUNNING`、`STOPPING` 等未结束记录。
+- What:
+  - 新增 `scheduler.run-retention-cleanup` 框架定时任务，每天 UTC 00:00 执行，按 `ended_at < 当前时间 - 7 天` 清理 `SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED` 记录。
+  - 新增领域端口、MyBatis XML 适配器和 `V20260715000000` 的 `ended_at` 索引迁移；同步 scheduler、persistence、架构及部署文档，保持 `TEST_AGENT_SCHEDULER_ENABLED=false` 的既有默认值。
+- How:
+  - 使用固定时钟单元测试和 H2/Flyway/MyBatis 集成测试覆盖七天边界、结束状态、活动状态及索引。
+  - 设计与实施计划记录在 `docs/superpowers/`；未修改环境配置、API、事件或 generated SDK。
+- Result:
+  - scheduler 定向测试 1/1、persistence 定向集成测试 2/2、scheduler 全量测试 31/31、`test-agent-app -am package -DskipTests` 17/17 模块通过。
+  - persistence 全量仍有本任务外既有 `MyBatisAgentConfigRepositoryIntegrationTest` 基线失败（2 failures、7 errors，测试夹具引用缺失的 `usr_test_dev`），本任务未越界修复。
