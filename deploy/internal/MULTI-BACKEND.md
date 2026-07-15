@@ -103,27 +103,38 @@ unzip -t test-agent-internal-release.zip
 
 ## 4. 每个后台的 backend.env
 
-两台后台的共同配置：
+以下两份都是可整文件替换的完整配置。IP、端口、路径、超时和安全默认值已经填好；两台机器必须把 3 个同名 `REPLACE_...` 替换为同一组现场值。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份原文件：
+
+```bash
+install -d -m 0755 /data/testagent/config
+cp -a /data/testagent/config/backend.env \
+  /data/testagent/config/backend.env.bak.$(date +%Y%m%d%H%M%S) 2>/dev/null || true
+```
+
+后台 A `.4` 的 `/data/testagent/config/backend.env` 全文：
 
 ```dotenv
 SPRING_PROFILES_ACTIVE=prod
 SERVER_PORT=8080
 TEST_AGENT_DEPLOYMENT_MODE=internal
+TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.4
+TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-4
 SYS_DATA_ROOT_DIR=/data/testagent/data
 
 TEST_AGENT_DB_URL=jdbc:postgresql://122.42.203.103:8000/testagent
 TEST_AGENT_DB_USERNAME=testagent
-TEST_AGENT_DB_PASSWORD=<同一个数据库密码>
+TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
 TEST_AGENT_REDIS_HOST=122.233.30.20
 TEST_AGENT_REDIS_PORT=6379
-TEST_AGENT_REDIS_PASSWORD=<同一个 Redis 密码；无密码留空>
+TEST_AGENT_REDIS_PASSWORD=
+TEST_AGENT_REDIS_TIMEOUT=1s
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
 TEST_AGENT_API_TOKEN=
-TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager 随机 token>
-TEST_AGENT_INTERNAL_PROXY_API_KEY=<Java 内部模型代理随机 key>
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
+TEST_AGENT_INTERNAL_PROXY_API_KEY=REPLACE_INTERNAL_PROXY_API_KEY
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
@@ -133,33 +144,99 @@ TEST_AGENT_DB_POOL_INITIAL_SIZE=1
 TEST_AGENT_DB_POOL_MIN_IDLE=1
 TEST_AGENT_DB_POOL_MAX_ACTIVE=10
 TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS=30000
+TEST_AGENT_DB_POOL_TEST_ON_BORROW=true
+
+TEST_AGENT_RATE_LIMIT_ENABLED=false
+TEST_AGENT_RATE_LIMIT_CAPACITY=120
+TEST_AGENT_RATE_LIMIT_WINDOW=1m
+TEST_AGENT_REDIS_SUMMARY_ENABLED=false
+TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE=0
+TEST_AGENT_LEGACY_RUN_WITHOUT_CONTEXT_ENABLED=true
+TEST_AGENT_MAX_FILE_BYTES=1048576
+TEST_AGENT_MAX_DIRECTORY_ENTRIES=1000
+
+TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL=5s
+TEST_AGENT_BACKEND_STALE_AFTER=10s
+TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT=10s
+TEST_AGENT_BACKEND_DISCOVERY_LIMIT=100
+
 TEST_AGENT_SCHEDULER_ENABLED=false
+TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
+TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT=50
+TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 ```
 
-后台 A 追加：
+后台 B `.114` 的 `/data/testagent/config/backend.env` 全文：
 
 ```dotenv
-TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.4
-TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-4
-```
-
-后台 B 追加：
-
-```dotenv
+SPRING_PROFILES_ACTIVE=prod
+SERVER_PORT=8080
+TEST_AGENT_DEPLOYMENT_MODE=internal
 TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114
 TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-114
+SYS_DATA_ROOT_DIR=/data/testagent/data
+
+TEST_AGENT_DB_URL=jdbc:postgresql://122.42.203.103:8000/testagent
+TEST_AGENT_DB_USERNAME=testagent
+TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
+TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
+
+TEST_AGENT_REDIS_HOST=122.233.30.20
+TEST_AGENT_REDIS_PORT=6379
+TEST_AGENT_REDIS_PASSWORD=
+TEST_AGENT_REDIS_TIMEOUT=1s
+
+TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
+TEST_AGENT_API_TOKEN=
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
+TEST_AGENT_INTERNAL_PROXY_API_KEY=REPLACE_INTERNAL_PROXY_API_KEY
+TEST_AGENT_MODEL_CATALOG_SOURCE=internal
+
+TEST_AGENT_SERVER_BROADCAST_ENABLED=true
+TEST_AGENT_SERVER_BROADCAST_CHANNEL=test-agent:server-broadcast
+
+TEST_AGENT_DB_POOL_INITIAL_SIZE=1
+TEST_AGENT_DB_POOL_MIN_IDLE=1
+TEST_AGENT_DB_POOL_MAX_ACTIVE=10
+TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS=30000
+TEST_AGENT_DB_POOL_TEST_ON_BORROW=true
+
+TEST_AGENT_RATE_LIMIT_ENABLED=false
+TEST_AGENT_RATE_LIMIT_CAPACITY=120
+TEST_AGENT_RATE_LIMIT_WINDOW=1m
+TEST_AGENT_REDIS_SUMMARY_ENABLED=false
+TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE=0
+TEST_AGENT_LEGACY_RUN_WITHOUT_CONTEXT_ENABLED=true
+TEST_AGENT_MAX_FILE_BYTES=1048576
+TEST_AGENT_MAX_DIRECTORY_ENTRIES=1000
+
+TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL=5s
+TEST_AGENT_BACKEND_STALE_AFTER=10s
+TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT=10s
+TEST_AGENT_BACKEND_DISCOVERY_LIMIT=100
+
+TEST_AGENT_SCHEDULER_ENABLED=false
+TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
+TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT=50
+TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 ```
 
-建议集群内 manager token 和内部代理 key 保持一致，降低滚动部署误配风险。无论是否相同，本机 `backend.env` 的 manager token 都必须与本机 `docker.env` 完全一致。
+保存后，两台都执行以下检查；命令必须无输出：
+
+```bash
+grep -n 'REPLACE_' /data/testagent/config/backend.env
+```
+
+集群内 manager token 和内部代理 key 使用同一组值，降低滚动部署误配风险；本机 `backend.env` 的 manager token 必须与本机 `docker.env` 完全一致。
 
 ## 5. 每个后台的 docker.env
 
-每台后台本机创建 `/data/testagent/config/docker.env`：
+`.4` 和 `.114` 都使用下面这份完整 `/data/testagent/config/docker.env`；只替换 `REPLACE_MANAGER_TOKEN`，并确保与本机 `backend.env` 完全相同：
 
 ```dotenv
 TEST_AGENT_BASE_DIR=/data/testagent
 
-TEST_AGENT_OPENCODE_MANAGER_TOKEN=<与本机 backend.env 完全一致>
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
@@ -169,9 +246,28 @@ VITE_TEST_AGENT_API_BASE_URL=http://122.233.30.2
 OPENCODE_WORKER_BACKEND_PORT=8080
 OPENCODE_WORKER_PORT_START=4096
 OPENCODE_WORKER_PORT_END=4105
+
+OPENCODE_ALLOWED_CORS=http://122.233.30.2
+OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
+OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
+
+OPENCODE_VERSION=1.17.8
+OPENCODE_SOURCE_COMMIT=11e47f91496005aab4d7c5a2d0a7da5d2651b4ac
+OPENCODE_SOURCE_REPOSITORY=https://github.com/anomalyco/opencode.git
+GO_IMAGE=golang@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
+BUN_IMAGE=oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
+NODE_IMAGE=node@sha256:e24976116684e0fd211cbdb3c40fc9cb997565d063fb7fe656d2e2b603c5bb0a
+
+NPM_REGISTRY=https://registry.npmmirror.com
+COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
+GOPROXY=https://goproxy.cn,direct
+DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
+DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+
+TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 ```
 
-保留 [env.example](env.example) 中其余版本和镜像摘要。Nginx 使用前端服务器独立的 `nginx.env`，不在每台 worker 的 `docker.env` 中维护 upstream。
+当前 worker 不读取旧的 `TEST_AGENT_BACKEND`，而是读取本机 Java 写出的 `.serverhost` 并结合 `OPENCODE_WORKER_BACKEND_PORT` 建立 manager WebSocket，所以不要恢复旧变量。Nginx 使用前端服务器独立的 `nginx.env`，不在每台 worker 的 `docker.env` 中维护 upstream。
 
 每台 Java 启动后，本机身份文件分别应为：
 
@@ -277,10 +373,28 @@ test-agent-backend-122-233-30-114
 
 两个服务器使用同一版本的 [opencode.jsonc.example](opencode.jsonc.example)，模型为：
 
+在任意一台已收到交付包的后台导出完整 JSONC，分别粘贴到两个 `linuxServerId` 的公共配置编辑器；两个节点内容必须一致：
+
+```bash
+unzip -p /data/0709/test-agent-internal-release.zip \
+  deploy/internal/opencode.jsonc.example \
+  >/tmp/opencode.jsonc
+sed -n '1,220p' /tmp/opencode.jsonc
+```
+
+JSONC 中三个 `{env:...}` 引用必须原样保留，由各用户所属 Java 动态注入，不要替换成固定 UCID 或固定代理地址。
+
 ```text
 icbc-qwen/Qwen3.6-27B                 -> qwen-prod
 icbc-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
 ```
+
+共享数据库的“内部模型供应商”页面完整填写如下；只需把两个 token 替换为现场已有值：
+
+| Provider ID | 名称 | Base URL | Token | 启用 | 排序 |
+|---|---|---|---|---|---:|
+| `qwen-prod` | `企业通义` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
+| `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
 
 公共配置必须包含 `includeUsage=false`，避免 OpenCode 1.17.8 默认添加行内接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
 

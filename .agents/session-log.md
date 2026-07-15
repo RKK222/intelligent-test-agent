@@ -6654,3 +6654,18 @@ bash /tmp/test-api-after-restart.sh
   - runtime 523 项、API 285 项、前端 backend-api/terminal 58 项通过；本地 `.env.test` 后端 health/readiness、前端 3000 和 manager 启动通过。Linux/amd64 worker 镜像实跑通过，OpenCode 1.17.8、glibc 2.31 正常。
   - 新企业归档 `deploy/internal/dist/test-agent-internal-release.zip` 已通过 SHA-256、完整解压、validate-only、systemd 首装/升级和 Nginx single/multi 校验，校验值为 `7fe02c3d6d38cfbe8949a9fc419de6e669cb6508a3c14cfcad408c0b55e84f59`。
   - 未连接生产 `.2/.4/.114`，未执行生产 9070、浏览器直连两个 Java WebSocket 或真实双节点滚动验收；这些仍需现场按多后台手册验证，不能以本地打包结果替代生产网络验收。
+
+### 2026-07-15 - 企业部署手册补齐整文件配置并重新打包
+
+- Why:
+  - 单/多后台手册仍要求读者从多个模板拼出剩余配置，现场无法直接整文件替换；重新打包前还需要明确确认远端主线最新状态。
+- What:
+  - 打包前两次执行 `git pull --ff-only origin main`，均确认 `origin/main` 已是最新，本地仅包含尚未推送的企业部署提交，没有 rebase 或冲突。
+  - 单后台手册给出 114 的完整 `backend.env`、`docker.env`、`nginx.env`；多后台手册分别给出 `.4`、`.114` 的完整 backend 配置和两节点共用的完整 worker 配置，不再要求参考其他文件补字段。
+  - 配置模板显式补齐连接借出校验、Redis/运行态安全默认值、Java/manager 超时、scheduler 参数、worker CORS/心跳/重连和固定镜像摘要；公共 OpenCode 配置改为从 ZIP 直接导出全文，模型供应商页面列出两个准确 provider、base URL 和 token 占位符。
+  - 明确当前 worker 通过 `.serverhost + 8080` 发现本机 Java，不读取旧 `TEST_AGENT_BACKEND`；动态 `{env:...}` 与每用户 UCID 必须保留，不能固化到公共 JSONC。
+- How:
+  - 复用现有 `backend.env.example`、`env.example`、`nginx.env.example`、`opencode.jsonc.example` 和现有单/多后台手册，没有新建并行配置体系；真实数据库/manager/代理/上游模型 token 仍只保留可识别占位符，等待现场现有配置确认。
+- Result:
+  - dotenv 模板加载、OpenCode JSON 校验、Nginx single/multi 渲染、Bash 语法、AI 文档和 diff 校验通过；最终 ZIP 的完整解压、前后端 validate-only、systemd 首装/升级及 Linux/amd64 worker 实跑通过。
+  - 新归档 `deploy/internal/dist/test-agent-internal-release.zip` 校验值为 `55f4edd9422546364e6322c4dd0303f53378d66ef99ed70f4da58ae4f5a020b8`；未连接生产 `.2/.4/.114`，现场密码/token 和实际 Nginx include 路径仍需用现有配置核对后才能称为生产可直接替换。
