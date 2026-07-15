@@ -15,7 +15,7 @@ vi.mock("@vue-flow/core", () => ({
   VueFlow: defineComponent({
     name: "VueFlow",
     props: ["nodes", "edges", "nodesConnectable", "connectionMode", "connectOnClick"],
-    emits: ["nodeDragStop", "connect", "nodeClick"],
+    emits: ["nodeDragStop", "connect", "nodeClick", "quick-connect-test"],
     setup(_, { expose }) {
       expose({
         screenToFlowCoordinate: ({ x, y }: { x: number; y: number }) => ({ x: x - 100, y: y - 50 })
@@ -25,6 +25,7 @@ vi.mock("@vue-flow/core", () => ({
       <button data-testid="mock-drag" @click="$emit('nodeDragStop', { node: { id: 'A', position: { x: 480, y: 260 } } })">drag</button>
       <button data-testid="mock-connect" @click="$emit('connect', { source: 'B', target: 'A' })">connect</button>
       <button data-testid="mock-select" @click="$emit('nodeClick', { node: { id: 'A' } })">select</button>
+      <button data-testid="mock-quick-connect" @click="$emit('quick-connect-test', { portId: 'source-1', position: 'right', shapeType: 'diamond' })">quick-connect</button>
     </div>`
   }),
   Handle: defineComponent({
@@ -384,5 +385,37 @@ describe("MermaidVisualEditor", () => {
     expect(updates.some(([value]) => value.nodes[0]?.type === "rounded")).toBe(true);
     expect(updates.at(-1)?.[0].nodes.map((node) => node.id)).toEqual(["B"]);
     expect(updates.at(-1)?.[0].edges).toEqual([]);
+  });
+
+  it("支持通过连接点快捷创建并连接新节点", async () => {
+    const { getByTestId, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+
+    // 选中节点 A
+    await fireEvent.click(getByTestId("mock-select"));
+
+    // 触发快捷连接，朝右侧新建一个 diamond 节点
+    await fireEvent.click(getByTestId("mock-quick-connect"));
+
+    const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
+    const lastUpdate = updates.at(-1)?.[0];
+    expect(lastUpdate).toBeTruthy();
+
+    // 校验新建的节点 N3 类型为 diamond，且坐标 x += 190
+    expect(lastUpdate!.nodes.at(-1)).toMatchObject({
+      id: "N3",
+      text: "新节点",
+      type: "diamond",
+      position: { x: 270, y: 70 } // A: x: 80, y: 70 => 80+190=270, 70
+    });
+
+    // 校验新建的边连接
+    expect(lastUpdate!.edges.at(-1)).toMatchObject({
+      source: "A",
+      target: "N3",
+      sourceHandle: "source-1",
+      targetHandle: "target-1"
+    });
   });
 });

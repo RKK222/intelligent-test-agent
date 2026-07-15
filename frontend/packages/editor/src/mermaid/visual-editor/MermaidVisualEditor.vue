@@ -2,9 +2,12 @@
 import { computed, ref } from "vue";
 import {
   ConnectionMode,
+  Position,
   VueFlow,
   type NodeDragEvent,
-  type NodeMouseEvent
+  type NodeMouseEvent,
+  type NodeChange,
+  type EdgeChange
 } from "@vue-flow/core";
 import { autoLayoutMermaidGraph } from "../layout";
 import {
@@ -80,6 +83,74 @@ const {
 
 function onConnectionStart(start: MermaidConnectionStart) {
   startConnection(start);
+}
+
+function onQuickConnect(payload: { portId: string; position: Position; shapeType: MermaidNodeType }) {
+  const { portId, position, shapeType } = payload;
+  const nodeId = selectedNodeId.value;
+  if (!nodeId) return;
+  const sourceNode = props.modelValue.nodes.find((n) => n.id === nodeId);
+  if (!sourceNode) return;
+
+  let dx = 0;
+  let dy = 0;
+  if (position === Position.Right) dx = 190;
+  else if (position === Position.Left) dx = -190;
+  else if (position === Position.Bottom) dy = 140;
+  else if (position === Position.Top) dy = -140;
+
+  const newPosition = {
+    x: sourceNode.position.x + dx,
+    y: sourceNode.position.y + dy
+  };
+
+  updateGraph((draft) => {
+    const used = new Set(draft.nodes.map((node) => node.id));
+    let sequence = draft.nodes.length + 1;
+    while (used.has(`N${sequence}`)) sequence += 1;
+    const newId = `N${sequence}`;
+
+    draft.nodes.push({
+      id: newId,
+      text: "新节点",
+      type: shapeType,
+      position: newPosition
+    });
+
+    let edgeSource: string;
+    let edgeTarget: string;
+    let edgeSourceHandle: string;
+    let edgeTargetHandle: string;
+
+    if (portId.startsWith("source")) {
+      edgeSource = nodeId;
+      edgeTarget = newId;
+      edgeSourceHandle = portId;
+      edgeTargetHandle = "target-1";
+    } else {
+      edgeSource = newId;
+      edgeTarget = nodeId;
+      edgeSourceHandle = "source-1";
+      edgeTargetHandle = portId;
+    }
+
+    const usedEdgeIds = new Set(draft.edges.map((e) => e.id));
+    let edgeSeq = draft.edges.length + 1;
+    while (usedEdgeIds.has(`edge-${edgeSeq}`)) edgeSeq += 1;
+    const edgeId = `edge-${edgeSeq}`;
+
+    draft.edges.push({
+      id: edgeId,
+      source: edgeSource,
+      target: edgeTarget,
+      sourceHandle: edgeSourceHandle,
+      targetHandle: edgeTargetHandle,
+      label: "",
+      relation: "arrow"
+    });
+
+    selectedNodeId.value = newId;
+  });
 }
 
 function onNodeClick(event: NodeMouseEvent) {
@@ -167,6 +238,28 @@ function updateDirection(event: Event) {
   const direction = (event.target as HTMLSelectElement).value as MermaidGraph["direction"];
   updateGraph((draft) => { draft.direction = direction; });
 }
+
+function onNodesChange(changes: NodeChange[]) {
+  const removes = changes.filter((change) => change.type === "remove");
+  if (removes.length === 0) return;
+  const removeIds = new Set(removes.map((change) => change.id));
+  updateGraph((draft) => {
+    draft.nodes = draft.nodes.filter((node) => !removeIds.has(node.id));
+    draft.edges = draft.edges.filter((edge) => !removeIds.has(edge.source) && !removeIds.has(edge.target));
+  });
+  if (selectedNodeId.value && removeIds.has(selectedNodeId.value)) {
+    selectedNodeId.value = undefined;
+  }
+}
+
+function onEdgesChange(changes: EdgeChange[]) {
+  const removes = changes.filter((change) => change.type === "remove");
+  if (removes.length === 0) return;
+  const removeIds = new Set(removes.map((change) => change.id));
+  updateGraph((draft) => {
+    draft.edges = draft.edges.filter((edge) => !removeIds.has(edge.id));
+  });
+}
 </script>
 
 <template>
@@ -204,8 +297,11 @@ function updateDirection(event: Event) {
           :nodes-connectable="false"
           :connect-on-click="false"
           :connection-mode="ConnectionMode.Loose"
+          @nodes-change="onNodesChange"
+          @edges-change="onEdgesChange"
           @node-drag-stop="onNodeDragStop"
           @node-click="onNodeClick"
+          @quick-connect-test="onQuickConnect"
         >
           <template #node-mermaid="nodeProps">
             <MermaidFlowNode
@@ -215,6 +311,7 @@ function updateDirection(event: Event) {
               :snapped-handle-id="targetNodeId === nodeProps.id ? targetHandleId : undefined"
               :connection-status="targetNodeId === nodeProps.id ? targetStatus : undefined"
               @connection-start="onConnectionStart"
+              @quick-connect="onQuickConnect"
             />
           </template>
         </VueFlow>

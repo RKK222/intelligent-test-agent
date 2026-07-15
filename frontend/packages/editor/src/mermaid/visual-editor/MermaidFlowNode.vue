@@ -10,6 +10,8 @@ import { getMermaidNodePortId, getMermaidNodePortLayout } from "./node-ports";
 import type { MermaidConnectionStart } from "./use-mermaid-connection-drag";
 import type { MermaidFlowNodeData } from "./vue-flow-adapter";
 
+import type { MermaidNodeType } from "../model";
+
 const props = defineProps<{
   id: string;
   data: MermaidFlowNodeData;
@@ -19,7 +21,18 @@ const props = defineProps<{
   snappedHandleId?: string;
   connectionStatus?: "valid" | "invalid";
 }>();
-const emit = defineEmits<{ connectionStart: [start: MermaidConnectionStart] }>();
+const emit = defineEmits<{
+  connectionStart: [start: MermaidConnectionStart];
+  quickConnect: [payload: { portId: string; position: Position; shapeType: MermaidNodeType }];
+}>();
+
+const quickShapes: ReadonlyArray<{ type: MermaidNodeType; label: string }> = [
+  { type: "rectangle", label: "矩形" },
+  { type: "rounded", label: "圆角" },
+  { type: "stadium", label: "胶囊" },
+  { type: "diamond", label: "判断" },
+  { type: "circle", label: "圆形" }
+];
 
 type FlowPort = {
   id: string;
@@ -125,32 +138,80 @@ function preventNodeDragFromPort(event: MouseEvent) {
     @pointerdown="onPointerDown"
     @mousedown.capture="preventNodeDragFromPort"
   >
-    <Handle
+    <div
       v-for="port in targetPorts"
-      :id="port.id"
       :key="port.id"
-      type="source"
-      :connectable="false"
-      :position="port.position"
+      class="ta-mermaid-port-container"
       :style="port.style"
-      :class="portClasses(port.id)"
-      :data-mermaid-handle="port.id"
-      :data-mermaid-position="port.position"
-    />
+    >
+      <Handle
+        :id="port.id"
+        type="source"
+        :connectable="false"
+        :position="port.position"
+        :style="port.style"
+        :class="portClasses(port.id)"
+        :data-mermaid-handle="port.id"
+        :data-mermaid-position="port.position"
+      />
+      <div v-if="selected" class="ta-mermaid-quick-connector" :class="`is-${port.position}`">
+        <div class="ta-mermaid-quick-arrow" aria-label="快捷建连">
+          <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">
+            <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          </svg>
+          <div class="ta-mermaid-quick-menu">
+            <button
+              v-for="shape in quickShapes"
+              :key="shape.type"
+              type="button"
+              :title="`在此方向添加${shape.label}`"
+              @click.stop="emit('quickConnect', { portId: port.id, position: port.position, shapeType: shape.type })"
+            >
+              <span :class="['ta-quick-menu-shape', `is-${shape.type}`]"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    
     <div class="ta-mermaid-flow-node__id">{{ id }}</div>
     <div class="ta-mermaid-flow-node__label">{{ data.text }}</div>
-    <Handle
+    
+    <div
       v-for="port in sourcePorts"
-      :id="port.id"
       :key="port.id"
-      type="source"
-      :connectable="false"
-      :position="port.position"
+      class="ta-mermaid-port-container"
       :style="port.style"
-      :class="portClasses(port.id)"
-      :data-mermaid-handle="port.id"
-      :data-mermaid-position="port.position"
-    />
+    >
+      <Handle
+        :id="port.id"
+        type="source"
+        :connectable="false"
+        :position="port.position"
+        :style="port.style"
+        :class="portClasses(port.id)"
+        :data-mermaid-handle="port.id"
+        :data-mermaid-position="port.position"
+      />
+      <div v-if="selected" class="ta-mermaid-quick-connector" :class="`is-${port.position}`">
+        <div class="ta-mermaid-quick-arrow" aria-label="快捷建连">
+          <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">
+            <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          </svg>
+          <div class="ta-mermaid-quick-menu">
+            <button
+              v-for="shape in quickShapes"
+              :key="shape.type"
+              type="button"
+              :title="`在此方向添加${shape.label}`"
+              @click.stop="emit('quickConnect', { portId: port.id, position: port.position, shapeType: shape.type })"
+            >
+              <span :class="['ta-quick-menu-shape', `is-${shape.type}`]"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -276,5 +337,223 @@ function preventNodeDragFromPort(event: MouseEvent) {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ta-mermaid-port-container :deep(.vue-flow__handle) {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  margin: 0 !important;
+}
+
+.ta-mermaid-port-container {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  margin-top: -12px;
+  display: grid;
+  place-items: center;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.ta-mermaid-port-container:hover :deep(.vue-flow__handle) {
+  opacity: 1;
+}
+
+/* 快捷连线容器 */
+.ta-mermaid-quick-connector {
+  position: absolute;
+  z-index: 20;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+/* 鼠标悬停在端口 wrapper 上时，显示引导大箭头 */
+.ta-mermaid-port-container:hover .ta-mermaid-quick-connector {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 根据端口位置决定大箭头的偏移方向和无缝 padding 桥接 */
+.ta-mermaid-quick-connector.is-right {
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding-left: 10px;
+}
+.ta-mermaid-quick-connector.is-left {
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding-right: 10px;
+}
+.ta-mermaid-quick-connector.is-top {
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding-bottom: 10px;
+}
+.ta-mermaid-quick-connector.is-bottom {
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding-top: 10px;
+}
+
+/* 大箭头按钮 */
+.ta-mermaid-quick-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--primary, #4f46e5) 15%, #fff);
+  color: var(--primary, #4f46e5);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+  position: relative;
+}
+.ta-mermaid-quick-arrow:hover {
+  background: var(--primary, #4f46e5);
+  color: #fff;
+  transform: scale(1.1);
+}
+
+/* 根据方向旋转 SVG 箭头图标 */
+.ta-mermaid-quick-connector.is-left .ta-quick-arrow-icon {
+  transform: rotate(180deg);
+}
+.ta-mermaid-quick-connector.is-top .ta-quick-arrow-icon {
+  transform: rotate(-90deg);
+}
+.ta-mermaid-quick-connector.is-bottom .ta-quick-arrow-icon {
+  transform: rotate(90deg);
+}
+
+/* 快捷可用形状面板 */
+.ta-mermaid-quick-menu {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--ta-border, #e2e8f0);
+  border-radius: 6px;
+  background: var(--ta-surface, #fff);
+  box-shadow: 0 10px 20px -3px rgba(15, 23, 42, 0.12), 0 4px 6px -2px rgba(15, 23, 42, 0.08);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+/* 根据位置决定图形面板的横纵排列以及偏移方向 */
+.ta-mermaid-quick-connector.is-right .ta-mermaid-quick-menu {
+  flex-direction: column;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%) scale(0.9);
+  margin-left: 8px;
+}
+.ta-mermaid-quick-connector.is-left .ta-mermaid-quick-menu {
+  flex-direction: column;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%) scale(0.9);
+  margin-right: 8px;
+}
+.ta-mermaid-quick-connector.is-top .ta-mermaid-quick-menu {
+  flex-direction: row;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) scale(0.9);
+  margin-bottom: 8px;
+}
+.ta-mermaid-quick-connector.is-bottom .ta-mermaid-quick-menu {
+  flex-direction: row;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%) scale(0.9);
+  margin-top: 8px;
+}
+
+/* 悬停在大箭头上时展开图形面板 */
+.ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ta-mermaid-quick-connector.is-right .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu,
+.ta-mermaid-quick-connector.is-left .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
+  transform: translateY(-50%) scale(1);
+}
+.ta-mermaid-quick-connector.is-top .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu,
+.ta-mermaid-quick-connector.is-bottom .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
+  transform: translateX(-50%) scale(1);
+}
+
+/* 图形选择按钮 */
+.ta-mermaid-quick-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--ta-border, #e2e8f0);
+  border-radius: 4px;
+  background: var(--ta-surface, #fff);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+  padding: 0;
+}
+.ta-mermaid-quick-menu button:hover {
+  border-color: var(--primary, #4f46e5);
+  background: color-mix(in srgb, var(--primary, #4f46e5) 8%, transparent);
+}
+
+/* 形状缩略预览图 */
+.ta-quick-menu-shape {
+  display: block;
+  width: 14px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 1px;
+  color: var(--ta-muted, #94a3b8);
+  box-sizing: border-box;
+}
+.ta-mermaid-quick-menu button:hover .ta-quick-menu-shape {
+  color: var(--primary, #4f46e5);
+}
+.ta-quick-menu-shape.is-rounded {
+  border-radius: 3px;
+}
+.ta-quick-menu-shape.is-stadium {
+  border-radius: 999px;
+}
+.ta-quick-menu-shape.is-circle {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.ta-quick-menu-shape.is-diamond {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  position: relative;
+}
+.ta-quick-menu-shape.is-diamond::before {
+  position: absolute;
+  content: "";
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  transform: translate(-50%, -50%) rotate(0.125turn);
+  box-sizing: border-box;
 }
 </style>
