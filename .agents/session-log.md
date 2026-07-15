@@ -6541,3 +6541,16 @@ bash /tmp/test-api-after-restart.sh
   - 复用现有 VitePress Markdown、`directoryMapping` frontmatter 和 `HELP_TOPICS`，同步用户手册 README、agent-web PACKAGE 及 Help 单元/E2E 断言；没有修改 Git、权限、API 或运行态实现。
 - Result:
   - 前端全量 Vitest 57 个文件通过（823 passed、1 skipped），用户手册与 agent-web 生产构建通过；精确 Chromium Help E2E 通过。新启动的 agent-web 位于 `http://127.0.0.1:3010`，Help 工作区与目录映射页面均返回 200，现有 `.env.test` 后端 health 为 `UP`。
+
+### 2026-07-15 - 小宠物升级为五角色每日伙伴
+
+- Why:
+  - 单一机器人形象无法覆盖测试 Agent 的漏洞嗅探、环境扫描、异常感知、持续守护和缺陷清理隐喻；用户要求支持一天一个、每日随机或自主选择，并在选择区只展示头像。
+- What:
+  - 在既有 `FigmaShell` 拖拽、进程状态、旁路问答和小游戏链路上扩展五种内联 SVG 伙伴，没有新建第二套浮层或后端能力；显示策略支持按本地自然日轮换、每天随机且当天稳定、固定选择，偏好只保存在浏览器 localStorage。
+  - 伙伴名册只显示五枚头像，角色名称仅保留为无障碍名称；通用爱心改为角色化状态灯，分别落在项圈、胸侧、机身侧面、额心和拉链扣，继续复用绿/红/灰进程三态。
+- How:
+  - 复用现有宠物可见性、坐标夹紧、自然动作、状态气泡和旁路问答事件；新增独立纯函数管理日期/随机/存储容错，组件测试覆盖选择持久化和状态灯锚点，Playwright 在 `.env.test` 真实页面验证五头像切换、布局边界和控制台错误。
+- Result:
+  - 宠物定向测试 40 项通过；前端全量单 worker 58 个文件、829 项通过（1 项跳过），生产 build 通过。标准并发全量运行会偶发一个既有 Mermaid 动态加载测试超时，该用例单独复跑和单 worker 全量均通过。
+  - 本地 backend health/readiness 为 `UP`，前端 3000 返回 200，CORS 正常，manager health 持续为 `HEALTHY`；未修改 API、RunEvent、数据库、权限或 `.env` 配置。

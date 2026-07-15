@@ -36,6 +36,7 @@ describe("FigmaShell", () => {
     Object.defineProperty(window, "innerHeight", originalInnerHeight!);
     window.localStorage.removeItem("figma-shell-robot-pos");
     window.localStorage.removeItem("figma-shell-robot-fixed");
+    window.localStorage.removeItem("test-agent.pet-companion.v1");
   });
 
   it("opens the built-in manual from the global help entry", async () => {
@@ -67,26 +68,37 @@ describe("FigmaShell", () => {
     expect(robot.find(".state-idle").exists()).toBe(true);
   });
 
-  it("reuses the pet head, antenna, and eye geometry in the visibility toggle", async () => {
+  it("reuses the same active companion artwork in the visibility toggle", async () => {
     const wrapper = mountShell();
     await summonRobot(wrapper);
     const petSvg = wrapper.get(".robot-svg");
     const toggleSvg = wrapper.get('[data-testid="robot-visibility-toggle"] svg');
 
-    expect(toggleSvg.attributes("width")).toBe("24");
-    expect(toggleSvg.attributes("height")).toBe("28");
-    expect(toggleSvg.attributes("viewBox")).toBe("5 0 14 16");
+    expect(toggleSvg.attributes("viewBox")).toBe("0 0 64 64");
+    expect(toggleSvg.attributes("aria-label")).toBe(petSvg.attributes("aria-label"));
+    expect(toggleSvg.classes().find((className) => className.startsWith("is-")))
+      .toBe(petSvg.classes().find((className) => className.startsWith("is-")));
+  });
 
-    for (const selector of [
-      ".robot-antenna-l",
-      ".robot-antenna-l-tip",
-      ".robot-antenna-r",
-      ".robot-antenna-r-tip",
-      ".robot-head",
-      ".robot-eye"
-    ]) {
-      expect(toggleSvg.get(selector).attributes()).toEqual(petSvg.get(selector).attributes());
-    }
+  it("lets the user choose a companion and persists the selected mode", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+    await wrapper.get('button[aria-label="选择小宠物"]').trigger("click");
+    await wrapper.get('button[aria-label="选择缺陷清理官"]').trigger("click");
+
+    expect(wrapper.get(".robot-svg").classes()).toContain("is-glitch");
+    expect(wrapper.get("#figma-robot-side-question-title").text()).toBe("问问小宠物");
+    expect(wrapper.get('[data-testid="robot-process-status-beacon"]').attributes()).toMatchObject({ cx: "54", cy: "45" });
+    expect(JSON.parse(window.localStorage.getItem("test-agent.pet-companion.v1")!)).toMatchObject({
+      mode: "selected",
+      selectedPetId: "glitch",
+    });
   });
 
   it("persists a pointer drag after crossing the movement threshold", async () => {
@@ -122,9 +134,9 @@ describe("FigmaShell", () => {
     await summonRobot(wrapper);
 
     const robot = wrapper.get('[data-testid="figma-robot"]');
-    expect(robot.attributes("style")).toContain("left: 288px");
-    expect(robot.attributes("style")).toContain("top: 200px");
-    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 288, y: 200 }));
+    expect(robot.attributes("style")).toContain("left: 268px");
+    expect(robot.attributes("style")).toContain("top: 184px");
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 268, y: 184 }));
   });
 
   it("does not overwrite the saved start position when natural motion is reclamped on resize", async () => {
@@ -144,7 +156,7 @@ describe("FigmaShell", () => {
     await wrapper.vm.$nextTick();
 
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify(savedPosition));
-    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("left: 168px");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("left: 148px");
   });
 
   it("ignores malformed robot positions and storage access failures", async () => {
@@ -639,7 +651,7 @@ describe("FigmaShell", () => {
     });
 
     await summonRobot(wrapper);
-    expect(wrapper.get('[data-testid="robot-process-heart"]').classes()).toContain("is-ready");
+    expect(wrapper.get('[data-testid="robot-process-status-beacon"]').classes()).toContain("is-ready");
 
     await wrapper.get('[data-testid="figma-robot"]').trigger("click");
     await vi.advanceTimersByTimeAsync(250);
@@ -669,7 +681,7 @@ describe("FigmaShell", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="robot-visibility-toggle"]').classes()).toContain("is-process-alert");
-    expect(wrapper.get('[data-testid="robot-process-heart"]').classes()).toContain("is-needs-initialization");
+    expect(wrapper.get('[data-testid="robot-process-status-beacon"]').classes()).toContain("is-needs-initialization");
 
     const card = wrapper.get('[data-testid="robot-process-status"]');
     expect(card.text()).toContain("要现在帮你初始化吗");
