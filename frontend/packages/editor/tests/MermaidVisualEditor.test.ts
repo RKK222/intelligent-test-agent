@@ -295,6 +295,10 @@ describe("MermaidFlowNode", () => {
     });
     // 鼠标悬浮节点才显示快捷箭头（与是否选中无关）
     await fireEvent.mouseEnter(container.querySelector("[data-mermaid-node-id]")!);
+        data: { text: "开始", nodeType: "rectangle", direction: "LR" },
+        selected: true
+      }
+    });
 
     // 矩形四条边都没有正好位于 50% 的端口，旧实现会退化到左上角 target-0；
     // 现在应取各边上最接近中点的端口，使起始点落在箭头所在边上。
