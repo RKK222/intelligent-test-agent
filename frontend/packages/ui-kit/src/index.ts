@@ -8,3 +8,5 @@ export type { TabItem } from "./Tabs.vue";
 export { default as FeedbackBanner } from "./Toast.vue";
 export type { Feedback } from "./Toast.vue";
 export { default as Spinner } from "./Spinner.vue";
+export { default as ShimmerDivider } from "./ShimmerDivider.vue";
+

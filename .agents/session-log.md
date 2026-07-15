@@ -39,6 +39,20 @@
   - 执行 common/workspace-management 定向测试、相关模块全量测试、后端完整打包和 `.env.test` 三服务启动健康检查。
 - Result:
   - 相关 Maven 测试共 113 项全部通过，完整后端打包成功；后端 health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 当前已连接。企业远端实际 push 未在本地凭据环境执行，仍需在企业公共区进行一次端到端验收；若服务器有提交邮箱域名限制，需要补充真实邮箱来源或可配置域名。
+### 2026-07-15 - 实现流光分割线（Shimmer Divider）组件
+
+- Why:
+  - 用户需要一个流光分割线组件，其流光从 `#4F7CFF → #8B5CF6 → #4F7CFF` 流动，且流光速度可以调整，用于展示在对话中某些消息的前面。
+- What:
+  - 在 `@test-agent/ui-kit` 通用基础组件包中，设计并实现了 `ShimmerDivider.vue` 基础 UI 组件。
+  - 组件支持 `speed` 属性（可传入数值秒或预设 `'fast' | 'normal' | 'slow'`），支持 `height` 属性（可传入数字或 CSS 高度），支持 `fade` 属性控制两端淡出渐隐遮罩效果。
+  - 将 `ShimmerDivider` 通过 `@test-agent/ui-kit` 导出，并同步更新了 `README.md` 与 `PACKAGE.md` 文档。
+- How:
+  - 使用 CSS 渐变动画及 `-webkit-mask-image` / `mask-image` 实现边缘平滑淡出，流光通过修改 `background-position` 的百分比来实现无限平滑滚动。
+  - 编写了 `ShimmerDivider.test.ts` 进行单元测试，全面验证了默认渲染、自定义速度（包括数值和预设）、自定义高度、可选 fade 遮罩等场景。
+- Result:
+  - `corepack pnpm test ShimmerDivider` 的 4 个 Vitest 用例全部 100% 成功通过。
+  - 前端 Lint 和 TypeScript 校验全量通过。未改动后端 API、事件、数据库、安全或向后兼容性契约。
 
 ### 2026-07-15 - 将 Go manager 身份改为服务器稳定哈希
 
