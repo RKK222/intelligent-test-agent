@@ -6800,3 +6800,14 @@ bash /tmp/test-api-after-restart.sh
   - 新增“有文字时在边中点渲染标签、无文字不渲染”测试。未修改 API、事件、数据库、环境配置或 generated SDK。
 - Result:
   - editor 全量 Vitest 9 文件 110 passed（+1），前端 typecheck 通过。
+
+### 2026-07-15 - 优化自动布局减少连线交叉
+
+- Why:
+  - 自动布局后连线混乱、存在线条交叉；原实现按拓扑层级排布但同层节点按插入顺序排列，未考虑边关系。
+- What:
+  - `layout.ts` 在层分配后引入 Sugiyama 重心法（barycenter）：前向 pass 让下层节点对齐前驱重心、后向 pass 让上层节点对齐后继重心，从而显著减少相邻层之间的边交叉；无邻居节点保持原序在后。
+- How:
+  - 保留既有层分配与方向映射（LR/RL/BT/TD）、固定间距与确定性输出；既有布局测试（A 早于 B、C；幂等）继续通过。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 110 passed，前端 typecheck 通过。
