@@ -118,8 +118,11 @@ const dimensionStyle = computed(() =>
     #4f7cff 100%
   );
   background-size: 200% 100%;
-  animation: ta-shimmer-anim linear infinite;
-  animation-duration: var(--ta-shimmer-duration, 2s);
+  /* 拆开书写 animation 属性，避免简写和单写属性混用在类合并时发生重置/覆盖 Bug */
+  animation-name: ta-shimmer-anim;
+  animation-duration: var(--ta-shimmer-duration, 2s); /* 保持与 computed 变量同步，且允许内部 fallback */
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
 }
 
 .ta-shimmer-track--vertical {
@@ -144,27 +147,28 @@ const dimensionStyle = computed(() =>
   -webkit-mask-image: linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%);
 }
 
+/* 针对高度通常较矮的纵向分割线，缩小淡出遮罩比例（从 15% 减为 8%），留出更多中间可见区域（84%） */
 .ta-shimmer-track--vertical.ta-fade-mask {
-  mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%);
 }
 
-/* 无限循环流光位移动画 */
+/* 无限循环流光位移动画：改用 0% 到 200% 非负数流动以确保跨浏览器（如 Chrome 108 基线）定位计算绝对稳定 */
 @keyframes ta-shimmer-anim {
   0% {
-    background-position: 100% 0;
+    background-position: 0% 0;
   }
   100% {
-    background-position: -100% 0;
+    background-position: -200% 0;
   }
 }
 
 @keyframes ta-shimmer-anim-vertical {
   0% {
-    background-position: 0 100%;
+    background-position: 0 0%;
   }
   100% {
-    background-position: 0 -100%;
+    background-position: 0 -200%;
   }
 }
 </style>

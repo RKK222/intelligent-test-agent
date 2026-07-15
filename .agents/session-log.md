@@ -50,20 +50,24 @@
 - Result:
   - `corepack pnpm --filter @test-agent/agent-web build` 退出码为 0，字体 `@import` 顺序告警为 0；仍保留独立的 Monaco 大 chunk 提示，未通过提高阈值掩盖实际包体问题。未涉及 API、事件、数据库、安全或兼容性契约。
 
-### 2026-07-15 - 实现流光分割线（Shimmer Divider）组件
+### 2026-07-15 - 实现并优化流光分割线（Shimmer Divider）组件
 
 - Why:
   - 用户需要一个流光分割线组件，其流光从 `#4F7CFF → #8B5CF6 → #4F7CFF` 流动，且流光速度可以调整，用于展示在对话中某些消息的前面。
+  - 修复纵向模式下（`orientation="vertical"`），组件在任务块中由于简写 CSS 属性重置、负百分比背景定位的浏览器兼容性、以及淡出遮罩比例过大导致流光不显示的 Bug。
 - What:
-  - 在 `@test-agent/ui-kit` 通用基础组件包中，设计并实现了 `ShimmerDivider.vue` 基础 UI 组件。
-  - 组件支持 `speed` 属性（可传入数值秒或预设 `'fast' | 'normal' | 'slow'`），支持 `height` 属性（可传入数字或 CSS 高度），支持 `fade` 属性控制两端淡出渐隐遮罩效果。
-  - 将 `ShimmerDivider` 通过 `@test-agent/ui-kit` 导出，并同步更新了 `README.md` 与 `PACKAGE.md` 文档。
+  - 在 `@test-agent/ui-kit` 通用基础组件包中，设计、实现并优化了 `ShimmerDivider.vue` 基础 UI 组件。
+  - 支持 `orientation`（横向/纵向）、`animated`（静态/动态）、`speed`（数值/预设）、`height`（粗细）以及 `fade`（两端渐隐遮罩）等属性。
+  - 同步更新了 `README.md` 与 `PACKAGE.md` 等包说明文件。
 - How:
-  - 使用 CSS 渐变动画及 `-webkit-mask-image` / `mask-image` 实现边缘平滑淡出，流光通过修改 `background-position` 的百分比来实现无限平滑滚动。
-  - 编写了 `ShimmerDivider.test.ts` 进行单元测试，全面验证了默认渲染、自定义速度（包括数值和预设）、自定义高度、可选 fade 遮罩等场景。
+  - 将 `.ta-shimmer-track` 中的简写 `animation` 属性拆开书写为 `animation-name` 等子属性，彻底消除类合并重写 `animation-name` 时的简写重置 Bug。
+  - 将动画关键帧位移从 `100% / -100%` 优化为无负数百分比的 `0% / -200%`，根除特定浏览器（如 Chrome 108 基线）在亚像素级渲染时由于负数百分比引发的动画失效。
+  - 针对短尺寸纵向分割线，将遮罩渐隐边缘从 15% 缩小为 8%，留出更多可见流光渲染面积，并修复了 CSS 变量名拼写错误。
+  - 编写并扩展了 `ShimmerDivider.test.ts` 单元测试，全面验证了默认渲染、不同速度与高度配置、纵向淡出和静态模式。
 - Result:
-  - `corepack pnpm test ShimmerDivider` 的 4 个 Vitest 用例全部 100% 成功通过。
-  - 前端 Lint 和 TypeScript 校验全量通过。未改动后端 API、事件、数据库、安全或向后兼容性契约。
+  - `corepack pnpm test ShimmerDivider` 包含的 6 个 Vitest 测试用例 100% 成功通过。
+  - 前端全量 Lint 和 TypeScript 类型检查通过。未改动后端 API、事件、数据库、安全或兼容性契约。
+
 
 ### 2026-07-15 - 将 Go manager 身份改为服务器稳定哈希
 
