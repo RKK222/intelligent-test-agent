@@ -7,7 +7,7 @@ import { formatModelLabel } from "../src/opencode-like/state/model-catalog";
 import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "../src/runtime-reducer";
 
 describe("opencode-like conversation state", () => {
-  it("projects user messages, context tool groups, assistant parts, thinking and diff rows", () => {
+  it("projects user messages, context tool groups, assistant parts and diff rows", () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),
       assistantMessage("msg_assistant_1", [
@@ -77,7 +77,7 @@ describe("opencode-like conversation state", () => {
       expect.objectContaining({ type: "reasoning-group", busy: false }),
       expect.objectContaining({ type: "tool-group", busy: false })
     ]);
-    expect(rows.at(-1)).toMatchObject({ type: "thinking", userMessageId: "msg_user_2" });
+    expect(rows.at(-1)).toMatchObject({ type: "user-message", userMessageId: "msg_user_2" });
   });
 
   it("keeps runtime failures as timeline error rows instead of card messages", () => {
@@ -93,7 +93,7 @@ describe("opencode-like conversation state", () => {
     });
   });
 
-  it("projects runtime retry status instead of a generic thinking row", () => {
+  it("projects runtime retry status for a running turn", () => {
     const state = createOpencodeLikeState({
       messages: [userMessage("msg_user_1", "完成车贷的接口案例设计")],
       running: true,
@@ -121,7 +121,7 @@ describe("opencode-like conversation state", () => {
     });
   });
 
-  it("does not project working status while retrying after tool activity", () => {
+  it("keeps retry as the last row after tool activity", () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "继续执行"),
@@ -138,8 +138,7 @@ describe("opencode-like conversation state", () => {
     });
     const rows = createTimelineRows(state);
 
-    expect(rows.some((row) => row.type === "thinking")).toBe(false);
-    expect(rows.some((row) => row.type === "working-status")).toBe(false);
+    expect(rows.map((row) => row.type)).toEqual(["user-message", "context-tool-group", "retry"]);
     expect(rows.at(-1)).toMatchObject({ type: "retry", retryAfterSeconds: 60 });
   });
 
@@ -352,7 +351,7 @@ describe("opencode-like conversation state", () => {
     expect(childRows.some((row) => row.type === "context-tool-group")).toBe(true);
   });
 
-  it("adds one working-status row for the latest running turn with process parts but no text output", () => {
+  it("does not add a synthetic working row when process parts have no text output", () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "读取项目结构"),
@@ -366,11 +365,10 @@ describe("opencode-like conversation state", () => {
 
     const rows = createTimelineRows(state);
 
-    expect(rows.map((row) => row.type)).toEqual(["user-message", "context-tool-group", "working-status"]);
-    expect(rows.filter((row) => row.type === "working-status")).toHaveLength(1);
+    expect(rows.map((row) => row.type)).toEqual(["user-message", "context-tool-group"]);
   });
 
-  it("does not add working-status for historical turns or turns with visible text output", () => {
+  it("keeps historical process rows and running text without a synthetic working row", () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "读取项目结构"),
@@ -383,7 +381,13 @@ describe("opencode-like conversation state", () => {
 
     const rows = createTimelineRows(state);
 
-    expect(rows.filter((row) => row.type === "working-status")).toHaveLength(0);
+    expect(rows.map((row) => row.type)).toEqual([
+      "user-message",
+      "context-tool-group",
+      "turn-gap",
+      "user-message",
+      "assistant-part"
+    ]);
     expect(rows.some((row) => row.type === "assistant-part" && row.messageId === "msg_assistant_2")).toBe(true);
   });
 

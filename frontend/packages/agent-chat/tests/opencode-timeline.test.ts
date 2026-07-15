@@ -9,17 +9,17 @@ import AssistantThread from "../src/AssistantThread.vue";
 const waitMarkdown = () => new Promise((resolve) => setTimeout(resolve, 400));
 
 describe("OpencodeTimeline", () => {
-  it("does not render an assistant avatar for the initial thinking state", () => {
+  it("does not render a synthetic assistant row before the first real event", () => {
     const state = createOpencodeLikeState({
       messages: [],
       running: true
     });
 
-    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    const { container, queryByText } = render(OpencodeTimeline, { props: { state } });
 
-    expect(getByText("思考中")).toBeTruthy();
+    expect(queryByText("思考中")).toBeNull();
+    expect(container.querySelector(".oc-thinking-row")).toBeNull();
     expect(container.querySelector(".oc-assistant-frame__avatar")).toBeNull();
-    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
   });
 
   it("renders user rows, context tool groups, assistant parts and diff summary with oc classes", async () => {
@@ -522,7 +522,7 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".markdown-body")).toBeNull();
   });
 
-  it("shows one lightweight working row in a running child timeline before text output starts", async () => {
+  it("does not add a synthetic working row in a running child timeline before text output starts", async () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_root", "分析前端结构"),
       assistantMessage("msg_root", [
@@ -573,7 +573,7 @@ describe("OpencodeTimeline", () => {
       }
     };
 
-    const { container, getByText, queryAllByText } = render(AssistantThread, {
+    const { container, getByText, queryByText } = render(AssistantThread, {
       props: {
         messages,
         commands: [],
@@ -587,10 +587,10 @@ describe("OpencodeTimeline", () => {
 
     await fireEvent.click(container.querySelector(".oc-subagent-card") as HTMLElement);
 
-    expect(getByText("正在工作")).toBeTruthy();
-    expect(getByText("等待后续输出")).toBeTruthy();
-    expect(queryAllByText("正在工作")).toHaveLength(1);
-    expect(container.querySelector(".oc-working-status")).toBeTruthy();
+    expect(getByText("探索")).toBeTruthy();
+    expect(queryByText("正在工作")).toBeNull();
+    expect(queryByText("等待后续输出")).toBeNull();
+    expect(container.querySelector(".oc-working-status")).toBeNull();
   });
 
   it("uses the opencode-like timeline as the AssistantThread main rendering path", async () => {
