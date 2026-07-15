@@ -40,6 +40,21 @@
 - Result:
   - 相关 Maven 测试共 113 项全部通过，完整后端打包成功；后端 health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 当前已连接。企业远端实际 push 未在本地凭据环境执行，仍需在企业公共区进行一次端到端验收；若服务器有提交邮箱域名限制，需要补充真实邮箱来源或可配置域名。
 ### 2026-07-15 - 修复反馈按钮在 flex 布局下收缩导致文字隐藏的 Bug
+### 2026-07-15 - 彻底隔离跨轮 Todo 状态
+
+- Why:
+  - 新一轮消息发送后，上一轮为等待标题同步仍保持 RunEvent SSE；在新 Run HTTP 响应返回前，旧 `todo.updated`、`todowrite` 或 `run.snapshot.reset` 可重新写入“当前 Todo”，而 reducer 仅按最后用户消息猜归属，导致状态块跨轮显示旧待办。
+- What:
+  - `AgentWorkbench` 增加 `conversation/title-only/ignore` 三态 RunEvent 门禁；新请求替代旧 Run 后只允许旧 `session.updated` 完成标题同步，其他旧事件不再进入对话 reducer。
+  - `agent-chat` 建立 Run—用户消息 Todo owner，显式保存 pending/current/superseded 状态；HTTP/runtime/active-run 接管只在匹配本页未决请求时立即绑定发起用户，外部 Run 在远端 user message 前保持未归属且不消费本页 pending。root Todo 只更新所属轮次，child Todo 不进入 root，远端 user ID 替换时迁移快照键和 Run 绑定，旧 Run snapshot reset 直接忽略。
+  - 历史恢复只读取可归属的分轮 `todo.updated/todowrite`，过滤 child message/user scope 并把远端 user 快照键迁移到平台 messageId；显式事件快照优先于持久化 part fallback，无轮次 session Todo 非空结果必须有最新 root 轮 owner 证据才校准。follow-up、手动重试与自动重试携带原用户消息 ID，Timeline 优先分轮快照并识别显式空快照。
+- How:
+  - 先用 reducer/工具/投影回归复现旧 Run 三类迟到事件、root/child 混入、历史旧 session 快照覆盖、远端乐观 ID 迁移、HTTP 接管早于 lifecycle、跨标签页外部 Run 与本页 pending 竞争，以及连续排队串轮，再实现纯 reducer 所有权与工作台入口门禁；Playwright 通过登录态 fetch SSE 挂起第二次 Run 响应，验证旧流断开不产生错误卡、旧标题仍同步、第一轮保留 4 项且第二轮只接收新 Run 的 9 项，并验证手动重试不新增重复 user 消息。
+  - 同步更新 agent-chat、agent-web README/PACKAGE、RunEvent 文档和对话场景测试说明；未修改 HTTP/RunEvent wire、共享后端 DTO、数据库、generated SDK、环境配置、安全或鉴权逻辑。
+- Result:
+  - 用户指定的 5 个定向测试文件 307 passed / 1 skipped，follow-up 队列 6 passed；全量 Vitest 59 个文件 880 passed / 1 skipped；Playwright 跨 Run 与手动重试场景在 Chromium + Mobile 共 4 passed；全量 lint、typecheck、生产 build 和 `git diff --check` 通过。
+  - 生产构建仅保留既有大 chunk 提示，无新增构建错误或告警类别。
+
 ### 2026-07-15 - 前端反馈按钮样式优化，改用无边框透明纯图标样式
 
 - Why:

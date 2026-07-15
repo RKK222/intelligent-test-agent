@@ -18,6 +18,7 @@ import type {
   SessionRuntimeState,
   SessionTreeMessagesResponse,
   SubagentSession,
+  TodoItem,
   UserOpencodeProcess,
   UserOpencodeProcessHealth,
   UserOpencodeProcessHealthRequest,
@@ -32,7 +33,6 @@ import {
   normalizeMessagePart,
   reduceAgentChatRuntime,
   snapshotEventsFromRunReset,
-  todoSnapshotFromMessages,
   todoSnapshotsFromMessagesByUserMessageId,
   type ComposerAttachment
 } from "@test-agent/agent-chat";
@@ -105,6 +105,27 @@ export function runEventMatchesRun(
   currentRun: Pick<Run, "runId"> | null | undefined
 ): boolean {
   return Boolean(event.runId && subscribedRunId && currentRun?.runId && event.runId === subscribedRunId && event.runId === currentRun.runId);
+}
+
+export type RunEventProjectionMode = "conversation" | "title-only" | "ignore";
+
+/**
+ * 新 Run 请求发出后，旧 Run 可能仍为标题同步保持 SSE 订阅。旧 Run 只允许 session.updated
+ * 继续更新标题，其余对话、Todo、快照与终态全部在进入 reducer 前截断。
+ */
+export function runEventProjectionMode(
+  event: Pick<RunEvent, "runId" | "type">,
+  subscribedRunId: string | undefined,
+  currentRun: Pick<Run, "runId"> | null | undefined,
+  supersededRunId: string | null | undefined
+): RunEventProjectionMode {
+  if (!runEventMatchesRun(event, subscribedRunId, currentRun)) {
+    return "ignore";
+  }
+  if (event.runId !== supersededRunId) {
+    return "conversation";
+  }
+  return event.type === "session.updated" ? "title-only" : "ignore";
 }
 
 /**
@@ -242,6 +263,7 @@ export type RetryExpirationDecision = "wait" | "retry" | "fail";
 export type AutoRetryRunDraft = {
   prompt: string;
   parts: PromptPart[];
+  userMessageId: string;
   title?: string;
   command?: { command: string; arguments: string };
 };
@@ -758,19 +780,100 @@ export function chatStateFromSessionTreeSnapshot(
     };
   }
   const hydrated = hydrateSubagentOutputsFromTaskParts(state);
-  const todoSnapshotsByUserMessageId = {
-    ...todoSnapshotsFromMessagesByUserMessageId(hydrated.messages),
-    ...hydrated.todoSnapshotsByUserMessageId
-  };
-  // OpenCode 1.17.7 常把 todo 快照保存在 todowrite 工具 part，而非独立 todo.updated 事件。
-  // 仅在事件树没有显式 todo.updated 时回退，避免覆盖明确发送的空任务清单。
-  const hasExplicitTodoSnapshot = (snapshot.events ?? []).some((event) => event.type === "todo.updated");
-  const todos = hasExplicitTodoSnapshot ? undefined : todoSnapshotFromMessages(hydrated.messages);
+  const rootMessages = hydrated.messages.filter((message) => !isChildScopedMessage(hydrated, message));
+  // 持久化 message part 只是历史 fallback；RunEvent reducer 恢复的显式快照优先级更高。
+  // 两组分别迁移 alias 后再合并，避免旧平台键抢先命中并删除较新的 remote 键。
+  const messageTodoSnapshots = canonicalizeTodoSnapshotUserMessageIds(
+    hydrated.messages,
+    todoSnapshotsFromMessagesByUserMessageId(rootMessages)
+  );
+  const eventTodoSnapshots = canonicalizeTodoSnapshotUserMessageIds(
+    hydrated.messages,
+    hydrated.todoSnapshotsByUserMessageId
+  );
+  const todoSnapshotsByUserMessageId = { ...messageTodoSnapshots, ...eventTodoSnapshots };
+  const latestUserMessageId = latestRootUserMessageId(hydrated);
+  // 历史恢复必须按用户轮次读取。全会话“最后一个 Todo”可能仍属于上一轮，不能覆盖最新轮。
+  const todos = latestUserMessageId && Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, latestUserMessageId)
+    ? [...todoSnapshotsByUserMessageId[latestUserMessageId]]
+    : [];
   return {
     ...hydrated,
     todoSnapshotsByUserMessageId,
-    ...(todos === undefined ? {} : { todos })
+    todos
   };
+}
+
+/**
+ * 平台历史会把 OpenCode user message 合并到稳定 messageId；同步迁移 todo.updated 仍使用的远端键。
+ * 对同一用户消息的全部 alias 只保留平台 canonical key，避免时间线读到两份互相矛盾的快照。
+ */
+function canonicalizeTodoSnapshotUserMessageIds(
+  messages: AgentMessage[],
+  snapshots: Record<string, TodoItem[]>
+): Record<string, TodoItem[]> {
+  const canonicalized = { ...snapshots };
+  for (const message of messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+    const canonicalId = message.messageId ?? message.id;
+    const aliases = [...new Set([message.id, message.messageId, message.remoteMessageId].filter(Boolean))] as string[];
+    const aliasedSnapshot = aliases.find((alias) => Object.prototype.hasOwnProperty.call(canonicalized, alias));
+    if (!Object.prototype.hasOwnProperty.call(canonicalized, canonicalId) && aliasedSnapshot) {
+      canonicalized[canonicalId] = canonicalized[aliasedSnapshot];
+    }
+    for (const alias of aliases) {
+      if (alias !== canonicalId) {
+        delete canonicalized[alias];
+      }
+    }
+  }
+  return canonicalized;
+}
+
+/**
+ * session Todo HTTP 只有会话维度，没有 Run/用户轮次信息。非空结果仅在最新轮已有显式 Todo
+ * 所有权证据时用于校准；空结果只清空当前轮，绝不删除更早轮次快照。
+ */
+export function reconcileCurrentTurnTodos(
+  state: AgentChatRuntimeState,
+  liveTodos: AgentChatRuntimeState["todos"]
+): AgentChatRuntimeState {
+  const latestUserMessageId = latestRootUserMessageId(state);
+  if (!latestUserMessageId) {
+    return liveTodos.length === 0 ? { ...state, todos: [] } : state;
+  }
+  const hasOwnershipEvidence = Object.prototype.hasOwnProperty.call(
+    state.todoSnapshotsByUserMessageId,
+    latestUserMessageId
+  ) || Object.values(state.todoUserMessageIdByRunId).includes(latestUserMessageId);
+  if (liveTodos.length > 0 && !hasOwnershipEvidence) {
+    return state;
+  }
+  return {
+    ...state,
+    todos: [...liveTodos],
+    todoSnapshotsByUserMessageId: hasOwnershipEvidence
+      ? { ...state.todoSnapshotsByUserMessageId, [latestUserMessageId]: [...liveTodos] }
+      : state.todoSnapshotsByUserMessageId
+  };
+}
+
+function latestRootUserMessageId(state: AgentChatRuntimeState): string | undefined {
+  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    const message = state.messages[index];
+    if (message.role === "user" && !isChildScopedMessage(state, message)) {
+      return message.messageId ?? message.id;
+    }
+  }
+  return undefined;
+}
+
+function isChildScopedMessage(state: AgentChatRuntimeState, message: AgentMessage): boolean {
+  const messageId = message.role === "card" ? message.id : message.messageId ?? message.id;
+  const scope = state.messageScopesById[messageId] ?? state.messageScopesById[message.id];
+  return scope?.isChildSession === true;
 }
 
 export function messagesFromSessionTreeSnapshot(snapshot: SessionTreeMessagesResponse): AgentMessage[] {

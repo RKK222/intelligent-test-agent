@@ -164,6 +164,8 @@ payload 字段：
 - 未知 `status` 保留原始字符串展示，并归入“其他”数量。
 - opencode 原生 Todo 没有稳定 `id` 字段，前端在缺少 `id/todoId/todoID` 时按数组位置和内容生成展示用 key。
 - 右侧对话面板在输入框上方显示 Todo 面板：收起态展示各状态数量和总数，展开态展示完整 Todo 列表。
+- RunEvent 外层 `runId` 是 Todo 归属用户轮次的必要边界；root `todo.updated` 与 root `todowrite` part 只更新该 Run 绑定的用户消息，child session Todo 不进入 root 状态块。新请求替代旧 Run 后，旧 Run 的 Todo 与 `run.snapshot.reset` 不得再投影到当前对话；等待标题同步期间仅 `session.updated` 可以继续被消费。
+- 历史恢复只使用可归属到具体 root 用户轮次的 `todo.updated/todowrite` 快照，child user 不参与最新轮判断；同轮显式 `todo.updated` 优先于持久化 `todowrite` fallback。session Todo HTTP 没有 Run/轮次字段，非空结果只能在最新 root 轮已有 Todo owner 证据时校准；无法确认时保持不展示，空结果只清空当前轮。runtime-state 接管若不对应本页显式未决请求，则必须等该 Run 的远端 user message 到达后再接受 Todo。
 
 ## `question.asked`
 

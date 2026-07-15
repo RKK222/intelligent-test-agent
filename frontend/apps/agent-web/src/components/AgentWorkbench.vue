@@ -126,8 +126,9 @@ import {
   retryCountdownSeconds,
   retryExpirationDecision,
   projectRootInteractionSession,
+  reconcileCurrentTurnTodos,
   isSupersededInteractionAsk,
-  runEventMatchesRun,
+  runEventProjectionMode,
   runEventProjection,
   runtimeResources,
   runtimeStatus,
@@ -256,11 +257,15 @@ const run = shallowRef<Run | null>(null);
 // OpenCode 原生 title agent 会在 root Run 成功后异步发出 session.updated。
 // 该 Run 处于待命名状态时，保留既有 Run SSE，直到后端确认标题已持久化或显式关闭监听。
 const pendingSessionTitleRunId = ref<string | null>(null);
+// 新 Run HTTP 响应返回前，旧 Run 可能仍因标题同步保持订阅；该 ID 用于截断其对话投影。
+const supersededConversationRunId = ref<string | null>(null);
 const rawEntriesBySessionId = ref<Record<string, RawOutputEntry[]>>({});
 const rawRunSessionMap = ref<Record<string, string>>({});
 const reportedRunEventStreamErrors = new Set<string>();
 const lastPrompt = ref("");
 const lastRunDraft = ref<AutoRetryRunDraft | null>(null);
+// 仅当前页面真实发出的未决启动请求可以为 runtime-state 接管提供 Todo owner；跨标签页 Run 不猜归属。
+const pendingRequestedRunUserMessageId = ref<string | null>(null);
 const selectedAgent = ref("");
 const storedRuntimePreference = readStoredRuntimePreference();
 const selectedProvider = ref(storedRuntimePreference.provider);
@@ -441,7 +446,35 @@ const feedbackSubmitting = ref<Record<string, boolean>>({});
 const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
 const assistantSummaryMessageIdsByRunId = ref<Record<string, string>>({});
 function dispatchChat(action: Parameters<typeof reduceAgentChatRuntime>[1]) {
-  chatState.value = reduceAgentChatRuntime(chatState.value, action);
+  const next = reduceAgentChatRuntime(chatState.value, action);
+  chatState.value = next;
+  return next;
+}
+
+function requestChatRun(userMessageId: string) {
+  const supersededRunId = run.value?.runId;
+  supersededConversationRunId.value = supersededRunId ?? null;
+  pendingRequestedRunUserMessageId.value = userMessageId;
+  dispatchChat({ type: "run.requested", userMessageId, supersededRunId });
+}
+
+function markConversationRunAdopted(runId: string, userMessageId?: string) {
+  const knownOwner = chatState.value.todoUserMessageIdByRunId[runId];
+  const pendingRequestOwner = supersededConversationRunId.value === runId
+    ? undefined
+    : pendingRequestedRunUserMessageId.value ?? undefined;
+  const ownerUserMessageId = knownOwner ?? userMessageId ?? pendingRequestOwner;
+  dispatchChat({ type: "run.adopted", runId, userMessageId: ownerUserMessageId });
+  if (
+    pendingRequestedRunUserMessageId.value
+    && ownerUserMessageId === pendingRequestedRunUserMessageId.value
+    && (userMessageId !== undefined || (!knownOwner && pendingRequestOwner !== undefined))
+  ) {
+    pendingRequestedRunUserMessageId.value = null;
+  }
+  if (supersededConversationRunId.value && supersededConversationRunId.value !== runId) {
+    supersededConversationRunId.value = null;
+  }
 }
 
 function clearAutoRetryState() {
@@ -450,6 +483,8 @@ function clearAutoRetryState() {
   retryActionInFlightKey.value = null;
   autoRetryStarting.value = false;
   ignoredRunIds.value = new Set();
+  supersededConversationRunId.value = null;
+  pendingRequestedRunUserMessageId.value = null;
 }
 
 function isPlatformSessionMessageId(id: string | undefined): id is string {
@@ -784,6 +819,7 @@ function adoptRuntimeStateForCurrentSession(summary: SessionRuntimeStateSummary 
       updatedAt: active.updatedAt
     };
     run.value = adopted;
+    markConversationRunAdopted(adopted.runId);
     rememberRunSession(adopted);
     logs.value = [...logs.value.slice(-200), `[run] recovered ${active.runId} ${active.runStatus} via ${reason}`];
   }
@@ -1521,6 +1557,7 @@ async function recoverActiveRunForSession(
       if (run.value?.runId !== activeRun.runId || run.value.status !== activeRun.status) {
         // 刷新、历史切换或启动请求仍未返回时，以后端 active-run 为准接管 SSE。
         run.value = activeRun;
+        markConversationRunAdopted(activeRun.runId);
         rememberRunSession(activeRun);
         logs.value = [...logs.value.slice(-200), `[run] recovered ${activeRun.runId} ${activeRun.status} via ${reason}`];
       }
@@ -1656,7 +1693,17 @@ watch([run, pendingSessionTitleRunId, () => authStore.token], ([r, pendingTitleR
       if (ignoredRunIds.value.has(event.runId)) {
         return;
       }
-      if (!runEventMatchesRun(event, r.runId, run.value)) {
+      const projectionMode = runEventProjectionMode(
+        event,
+        r.runId,
+        run.value,
+        supersededConversationRunId.value
+      );
+      if (projectionMode === "ignore") {
+        return;
+      }
+      if (projectionMode === "title-only") {
+        applyRunEventWorkbenchProjection(event, false, r.sessionId);
         return;
       }
       handleRunEvent(event, r.sessionId);
@@ -1665,6 +1712,10 @@ watch([run, pendingSessionTitleRunId, () => authStore.token], ([r, pendingTitleR
       logs.value = [...logs.value.slice(-200), `[sse] ${status}`];
     },
     onError: () => {
+      // 新请求尚未拿到 HTTP 响应时 run.value 仍可能指向旧 Run；旧订阅错误不能污染新轮。
+      if (supersededConversationRunId.value === r.runId) {
+        return;
+      }
       if (run.value?.runId === r.runId && isRunBusyStatus(run.value.status)) {
         const message = "浏览器事件流连接异常，前端会等待自动重连；如后端确认失败，会继续收到 run.failed。";
         feedback.value = { kind: "error", title: RUN_EVENT_SSE_ERROR_TITLE, description: message };
@@ -1845,6 +1896,7 @@ function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: 
 type StartRunDraft = {
   prompt: string;
   parts: PromptPart[];
+  userMessageId: string;
   title?: string;
   command?: { command: string; arguments: string };
 };
@@ -1996,12 +2048,12 @@ const startRunMutation = useMutation({
         }
       });
       assertCurrent();
-      return { started, guard, activeSessionId, clientRequestId };
+      return { started, guard, activeSessionId, clientRequestId, userMessageId: input.userMessageId };
     } catch (error) {
       throw new StartRunMutationError(error, guard, activeSessionId, clientRequestId);
     }
   },
-  onSuccess: ({ started, guard, activeSessionId, clientRequestId }) => {
+  onSuccess: ({ started, guard, activeSessionId, clientRequestId, userMessageId }) => {
     if (!conversationInteractionIsCurrent(guard, activeSessionId)) {
       return;
     }
@@ -2011,6 +2063,7 @@ const startRunMutation = useMutation({
       return;
     }
     run.value = started;
+    markConversationRunAdopted(started.runId, userMessageId);
     rememberRunSession(started);
     logs.value = [...logs.value, `[run] ${started.runId} ${started.status}`];
   },
@@ -2045,6 +2098,11 @@ const startRunMutation = useMutation({
       lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
       chatStartedAt.value = null;
       nowTick.value = Date.now();
+    }
+  },
+  onSettled: (_data, _error, request) => {
+    if (pendingRequestedRunUserMessageId.value === request.input.userMessageId) {
+      pendingRequestedRunUserMessageId.value = null;
     }
   }
 });
@@ -2308,9 +2366,16 @@ function handleAutoRetryRun() {
     run.value = prepared.localRun;
   }
   clearRunEventSseFeedback();
-  lastRunDraft.value = prepared.input;
-  dispatchChat({ type: "run.requested" });
-  startRunMutation.mutate({ input: prepared.input, guard: captureConversationInteraction() }, {
+  // 远端 user message 可能已替换乐观 ID；重试必须复用 reducer 迁移后的当前 Run owner。
+  const retryInput: AutoRetryRunDraft = {
+    ...prepared.input,
+    userMessageId: run.value?.runId
+      ? chatState.value.todoUserMessageIdByRunId[run.value.runId] ?? prepared.input.userMessageId
+      : prepared.input.userMessageId
+  };
+  lastRunDraft.value = retryInput;
+  requestChatRun(retryInput.userMessageId);
+  startRunMutation.mutate({ input: retryInput, guard: captureConversationInteraction() }, {
     onSettled: () => {
       autoRetryStarting.value = false;
     }
@@ -2333,9 +2398,14 @@ watch(
       return;
     }
     followUpQueue.value = queue;
-    const draft: AutoRetryRunDraft = { prompt: next.prompt, parts: next.parts, command: next.command };
+    const draft: AutoRetryRunDraft = {
+      prompt: next.prompt,
+      parts: next.parts,
+      userMessageId: next.userMessageId,
+      command: next.command
+    };
     lastRunDraft.value = draft;
-    dispatchChat({ type: "run.requested" });
+    requestChatRun(draft.userMessageId);
     startRunMutation.mutate({ input: draft, guard: captureConversationInteraction() });
   }
 );
@@ -3661,8 +3731,17 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   lastPrompt.value = submitPrompt;
   diffContextParts.value = [];
   // OpenCode 风格的 Timeline 只展示用户原始问题和附件标识；模型请求仍使用下方未裁剪的完整 parts。
-  dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts: promptPartsForUserDisplay(parts) });
+  const submittedState = dispatchChat({
+    type: "user.submitted",
+    prompt: displayPrompt,
+    parts: promptPartsForUserDisplay(parts)
+  });
+  const userMessageId = [...submittedState.messages].reverse().find((message) => message.role === "user")?.id;
   if (!submitPrompt) {
+    return;
+  }
+  if (!userMessageId) {
+    feedback.value = { kind: "error", title: "启动 Run 失败", description: "未能建立当前用户消息标识，请重新发送" };
     return;
   }
   // 启动计时 + 重置任务消耗累计（lastDuration/lastTokens 保留上一轮终态以供刷新对比）
@@ -3671,16 +3750,25 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   // 解析命令（包括 Skill Command，格式为 /skill-name）
   const command = parseCommand(prompt, promptMode.value);
   if (runtimeBusy.value) {
-    followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(submitPrompt, parts, undefined, command ?? undefined));
+    followUpQueue.value = enqueueFollowUp(
+      followUpQueue.value,
+      createFollowUpDraft(submitPrompt, parts, userMessageId, undefined, command ?? undefined)
+    );
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
     chatContextStore.clearContexts();
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
-  const runDraft: AutoRetryRunDraft = { prompt: submitPrompt, parts, title: displayPrompt, command: command ?? undefined };
+  const runDraft: AutoRetryRunDraft = {
+    prompt: submitPrompt,
+    parts,
+    userMessageId,
+    title: displayPrompt,
+    command: command ?? undefined
+  };
   lastRunDraft.value = runDraft;
   clearRunEventSseFeedback();
-  dispatchChat({ type: "run.requested" });
+  requestChatRun(userMessageId);
   chatContextStore.clearContexts();
   startRunMutation.mutate({ input: runDraft, guard: captureConversationInteraction() });
 }
@@ -3796,10 +3884,10 @@ function handleStopRun() {
   }
 }
 
-/** 失败后的所有重试入口统一复用最近一次 prompt，避免子组件事件无人接收。 */
+/** 失败后的所有重试入口复用原用户消息轮次，不追加第二条相同的乐观 user message。 */
 function handleRetryRun() {
-  const prompt = lastPrompt.value.trim();
-  if (!prompt) {
+  const previousDraft = lastRunDraft.value;
+  if (!previousDraft?.prompt.trim()) {
     feedback.value = {
       kind: "info",
       title: "无法重试",
@@ -3807,7 +3895,18 @@ function handleRetryRun() {
     };
     return;
   }
-  handleSend(prompt);
+  const retryDraft: AutoRetryRunDraft = {
+    ...previousDraft,
+    userMessageId: run.value?.runId
+      ? chatState.value.todoUserMessageIdByRunId[run.value.runId] ?? previousDraft.userMessageId
+      : previousDraft.userMessageId
+  };
+  lastRunDraft.value = retryDraft;
+  chatStartedAt.value = Date.now();
+  accumulatedTokens.value = 0;
+  clearRunEventSseFeedback();
+  requestChatRun(retryDraft.userMessageId);
+  startRunMutation.mutate({ input: retryDraft, guard: captureConversationInteraction() });
 }
 
 function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
@@ -4675,11 +4774,14 @@ async function switchSession(sessionId: string) {
           questions: liveQuestions === null
             ? chatState.value.questions
             : liveQuestions.filter((item) => item.sessionId === sessionId),
-          todos: liveTodos === null ? chatState.value.todos : liveTodos
+          todos: chatState.value.todos
         };
       }
+      if (liveTodos !== null) {
+        chatState.value = reconcileCurrentTurnTodos(chatState.value, liveTodos);
+      }
     } else if (liveTodos !== null) {
-      chatState.value = { ...chatState.value, todos: liveTodos };
+      chatState.value = reconcileCurrentTurnTodos(chatState.value, liveTodos);
     }
     // 正文可以先展示，但发送锁必须保留到关联 Run/Diff 投影完成，避免迟到历史详情覆盖新 Run。
     // 反馈状态独立异步补齐，不延长这把锁。
@@ -4732,6 +4834,7 @@ async function switchSession(sessionId: string) {
       }
       if (activeRun && isRunBusyStatus(activeRun.status)) {
         run.value = activeRun;
+        markConversationRunAdopted(activeRun.runId);
         rememberRunSession(activeRun);
         return;
       }

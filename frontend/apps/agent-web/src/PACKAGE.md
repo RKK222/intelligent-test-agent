@@ -13,6 +13,7 @@
 - `views/WorkbenchView.vue`：工作台首页入口。
 - `views/TranscriptView.vue`：只读 transcript 页面入口，复用平台 session/messages API。
 - `components/AgentWorkbench.vue`：组合 workspace、应用切换、用户头像退出、系统管理入口、应用版本/个人工作区切换与同步、文件树、编辑器、Agent、RunEvent SSE、用户级运行态 fetch SSE、Session History 搜索/置顶/删除、历史会话只读态、follow-up 队列、编辑器选区上下文、Diff 操作、底部 PTY terminal panel 和宠物旁路问答 API 编排；登录/刷新后查询一次 `/processes/me` 获取用户 opencode 进程归属，常态每 10 秒用弱健康接口驱动发送、目录和运行态 ready，弱健康不健康时复查 `/processes/me` 并以强状态结果覆盖；普通消息和 slash 技能统一创建平台 Run，先签发并复用页面内存 `contextToken`，`startRun` 携带稳定 `clientRequestId`，认证、Session、Workspace 或历史交互变化时通过 interaction fence 丢弃迟到的 Session/context/Run 结果，历史切换加载完成前由聊天面板和 `handleSend` 双层阻断发送；用户级 runtime-state fetch SSE 是启动 pending、页面刷新和历史切回的主恢复入口，`active-run` 仅在流不可用时按“每故障窗口、每 Session 一次”fallback，不做 1.5 秒轮询；切换历史会话时同时读取 OpenCode 当前 permission/question pending 列表并覆盖历史事件中的 ask 快照，避免拿已失效的 requestId 提交；运行中点击新建对话只清空当前视图并关闭当前 RunEvent SSE，不取消后端 Run，后台运行计数由用户级运行态摘要补齐但历史按钮 badge 只按历史第一页 30 条派生；RunEvent 只应用到当前订阅且仍为页面活动态的 Run，防止旧订阅晚到终态污染新一轮；将运行态 Agent 列表和当前 `selectedAgent` 下发给 `FigmaChatPanel`，切换后下一次 `startRun` 携带用户选择的 `agent`；模型/Provider 选择作为用户级偏好持久化，不随工作区切换清空；同时维护当前页面生命周期内的会话级原始报文内存缓存，只收集会话创建、Run 启动/取消、active-run、消息加载、permission/question 回复和 RunEvent SSE。
+- `AgentWorkbench` 每次 `run.requested` 记录用户消息 ID 和被替代 Run；旧 Run 因标题同步继续订阅时，`runEventProjectionMode` 只放行 `session.updated`，其余消息、Todo、snapshot、错误回调和终态不进入对话 reducer。HTTP 或 runtime-state 接管仅使用本页显式未决启动请求绑定用户消息，外部 Run 等远端 user message 后再归属；follow-up、手动重试和自动重试均携带原用户消息 ID。历史 session Todo HTTP 通过 `reconcileCurrentTurnTodos` 按最新 root 轮保守校准，无归属证据的非空结果不展示，显式事件快照优先于持久化 part fallback。
 - `AgentWorkbench` 保存 Agent 定义或 Skill 的 `SKILL.md` 后复用 backend-api 已有 `disposeGlobal()` 调用 OpenCode 原生 dispose，并重新拉取当前工作区 Agent/Command 目录；文件保存成功但运行态刷新失败时明确提示部分成功，不把已落盘文件误报为保存失败。
 - `run.snapshot.reset`：由 agent-chat reducer 原子清空并重放当前 Run，`AgentWorkbench` 同步清空独立 Diff/实时跟随状态后按快照原顺序重建，且不重复桌面通知、不推进 durable 游标。
 - `REDIS_SUMMARY` 记录 `run.created.assistantSummaryMessageId`，终态把最后 root assistant 的 remote ID 直接绑定到稳定平台反馈 ID，不轮询 Session 消息表。
@@ -36,7 +37,7 @@
 - `components/EditorPane.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。
-- `components/workbench-utils.ts`：Diff payload 解析、错误反馈、history/runtime status 派生、session-tree 历史快照恢复和子 Agent 索引兜底、opencode 弱健康 ready 规则、命令解析、跨需求/设计/编码/测试阶段的子条目路径聚合，以及普通工作空间根目录 `.opencode` 过滤等纯函数。
+- `components/workbench-utils.ts`：Diff payload 解析、RunEvent 三态投影门禁、session-tree 分轮 Todo 历史恢复、session Todo 保守校准、history/runtime status 派生、子 Agent 索引兜底、弱健康 ready、命令解析、跨阶段子条目路径聚合和工作空间根目录过滤等纯函数。
 - `styles/globals.css`：Tailwind 4 全局入口、theme token、dockview-vue/Monaco 视觉适配、滚动条、panel chrome 和工作台级动画。
 - `../vite.config.ts`：Vite 应用配置（Vue 插件、Tailwind 插件、workspace alias、dev server）。
 - `AgentWorkbench.handleSend` 继续把完整 text/file parts 交给 Run 请求；本地乐观 user message 只接收经 `promptPartsForUserDisplay` 收敛后的文本和附件元数据。历史 session-tree 恢复会预先按 `sessionId + messageId` 建立首个非 synthetic text 索引，仅补齐同 Session、无正文的 OpenCode user envelope；`events` 与 `messagesBySessionId` 两次回放复用该索引后再交给原 reducer 归并 file part，避免后续用户文本落入上一条 assistant，且不改变 Timeline、实时事件投影和 OpenCode parts 协议。

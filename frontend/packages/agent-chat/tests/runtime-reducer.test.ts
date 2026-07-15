@@ -25,7 +25,8 @@ describe("agent-chat runtime reducer", () => {
 
     expect(next.todos).toEqual([]);
     expect(next.todoSnapshotsByUserMessageId).toEqual({
-      msg_user_1: [{ id: "todo_1", text: "第一轮任务", status: "completed" }]
+      msg_user_1: [{ id: "todo_1", text: "第一轮任务", status: "completed" }],
+      [next.messages.at(-1)!.id]: []
     });
     expect(next.messages.at(-1)).toMatchObject({ role: "user", text: "开始第二轮" });
   });
@@ -49,6 +50,316 @@ describe("agent-chat runtime reducer", () => {
     expect(updated.todoSnapshotsByUserMessageId[currentUser!.id]).toEqual([
       expect.objectContaining({ id: "todo_current", text: "当前任务", status: "in_progress" })
     ]);
+  });
+
+  it("isolates late todo and snapshot events by run ownership across user turns", () => {
+    const firstSubmitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "生成 4 个待办",
+      createdAt: "2026-07-15T09:02:00Z"
+    });
+    const firstUserMessageId = firstSubmitted.messages.at(-1)!.id;
+    let state = reduceAgentChatRuntime(firstSubmitted, {
+      type: "run.requested",
+      userMessageId: firstUserMessageId
+    });
+    state = reduceAgentChatRuntime(state, { type: "event", event: runEvent("run.created", "run_first") });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_first", {
+        todos: Array.from({ length: 4 }, (_, index) => ({
+          id: `todo_first_${index}`,
+          content: `第一轮任务 ${index + 1}`,
+          status: "completed"
+        }))
+      })
+    });
+
+    const secondSubmitted = reduceAgentChatRuntime(state, {
+      type: "user.submitted",
+      prompt: "生成 9 个待办",
+      createdAt: "2026-07-15T09:03:00Z"
+    });
+    const secondUserMessageId = secondSubmitted.messages.at(-1)!.id;
+    state = reduceAgentChatRuntime(secondSubmitted, {
+      type: "run.requested",
+      userMessageId: secondUserMessageId,
+      supersededRunId: "run_first"
+    });
+
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_first", {
+        todos: Array.from({ length: 4 }, (_, index) => ({ content: `旧 Run 任务 ${index + 1}`, status: "completed" }))
+      })
+    });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("message.part.updated", "run_first", {
+        messageID: "msg_old_todowrite",
+        part: {
+          id: "part_old_todowrite",
+          messageID: "msg_old_todowrite",
+          type: "tool",
+          tool: "todowrite",
+          state: { status: "completed", input: { todos: [{ content: "旧 Run 工具回灌", status: "completed" }] } }
+        }
+      })
+    });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("run.snapshot.reset", "run_first", {
+        snapshot: {
+          events: [runEvent("todo.updated", "run_first", {
+            todos: [{ content: "旧 Run 快照回灌", status: "completed" }]
+          })]
+        }
+      })
+    });
+
+    expect(state.todos).toEqual([]);
+    expect(state.todoSnapshotsByUserMessageId[secondUserMessageId]).toEqual([]);
+    expect(state.todoSnapshotsByUserMessageId[firstUserMessageId]).toHaveLength(4);
+    expect(state.messages.some((message) => message.id === secondUserMessageId)).toBe(true);
+
+    state = reduceAgentChatRuntime(state, { type: "event", event: runEvent("run.started", "run_second") });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_second", {
+        todos: Array.from({ length: 9 }, (_, index) => ({
+          id: `todo_second_${index}`,
+          content: `第二轮任务 ${index + 1}`,
+          status: "pending"
+        }))
+      })
+    });
+
+    expect(state.todos).toHaveLength(9);
+    expect(state.todoSnapshotsByUserMessageId[secondUserMessageId]).toHaveLength(9);
+    expect(state.todoSnapshotsByUserMessageId[firstUserMessageId]).toHaveLength(4);
+  });
+
+  it("keeps child-session todos out of the root turn snapshot", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "执行根任务",
+      createdAt: "2026-07-15T09:04:00Z"
+    });
+    const userMessageId = submitted.messages.at(-1)!.id;
+    let state = reduceAgentChatRuntime(submitted, { type: "run.requested", userMessageId });
+    state = reduceAgentChatRuntime(state, { type: "event", event: runEvent("run.started", "run_root") });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_root", {
+        sessionId: "ses_root",
+        todos: [{ content: "根任务", status: "in_progress" }]
+      })
+    });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_root", {
+        sessionId: "ses_child",
+        isChildSession: true,
+        todos: [{ content: "子任务", status: "in_progress" }]
+      })
+    });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("message.part.updated", "run_root", {
+        sessionId: "ses_child",
+        isChildSession: true,
+        messageID: "msg_child_todo",
+        part: {
+          id: "part_child_todo",
+          messageID: "msg_child_todo",
+          type: "tool",
+          tool: "todowrite",
+          state: { status: "completed", input: { todos: [{ content: "子工具任务", status: "completed" }] } }
+        }
+      })
+    });
+
+    expect(state.todos).toEqual([expect.objectContaining({ text: "根任务" })]);
+    expect(state.todoSnapshotsByUserMessageId[userMessageId]).toEqual([expect.objectContaining({ text: "根任务" })]);
+  });
+
+  it("does not assign an active run todo to later queued user messages", () => {
+    const firstSubmitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "第一轮运行中",
+      createdAt: "2026-07-15T09:04:00Z"
+    });
+    const firstUserMessageId = firstSubmitted.messages.at(-1)!.id;
+    let state = reduceAgentChatRuntime(firstSubmitted, { type: "run.requested", userMessageId: firstUserMessageId });
+    state = reduceAgentChatRuntime(state, { type: "event", event: runEvent("run.started", "run_active") });
+    state = reduceAgentChatRuntime(state, {
+      type: "user.submitted",
+      prompt: "第二轮排队",
+      createdAt: "2026-07-15T09:05:00Z"
+    });
+    const secondUserMessageId = state.messages.at(-1)!.id;
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_active", {
+        todos: [{ content: "仍属于第一轮", status: "in_progress" }]
+      })
+    });
+    state = reduceAgentChatRuntime(state, {
+      type: "user.submitted",
+      prompt: "第三轮继续排队",
+      createdAt: "2026-07-15T09:06:00Z"
+    });
+
+    expect(state.todoSnapshotsByUserMessageId[firstUserMessageId]).toEqual([
+      expect.objectContaining({ text: "仍属于第一轮" })
+    ]);
+    expect(state.todoSnapshotsByUserMessageId[secondUserMessageId]).toEqual([]);
+    expect(state.todos).toEqual([]);
+  });
+
+  it("binds an HTTP-adopted run to its originating user before a queued prompt overwrites pending ownership", () => {
+    const firstSubmitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "第一轮启动中",
+      createdAt: "2026-07-15T09:04:00Z"
+    });
+    const firstUserMessageId = firstSubmitted.messages.at(-1)!.id;
+    let state = reduceAgentChatRuntime(firstSubmitted, { type: "run.requested", userMessageId: firstUserMessageId });
+    state = reduceAgentChatRuntime(state, {
+      type: "user.submitted",
+      prompt: "第二轮排队",
+      createdAt: "2026-07-15T09:05:00Z"
+    });
+    const secondUserMessageId = state.messages.at(-1)!.id;
+
+    // HTTP 响应可能早于 run.created/run.started；接管动作必须显式携带第一轮 owner。
+    state = reduceAgentChatRuntime(state, {
+      type: "run.adopted",
+      runId: "run_http_adopted",
+      userMessageId: firstUserMessageId
+    });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_http_adopted", {
+        todos: [{ content: "只属于第一轮", status: "in_progress" }]
+      })
+    });
+
+    expect(state.todoUserMessageIdByRunId.run_http_adopted).toBe(firstUserMessageId);
+    expect(state.todoSnapshotsByUserMessageId[firstUserMessageId]).toEqual([
+      expect.objectContaining({ text: "只属于第一轮" })
+    ]);
+    expect(state.todoSnapshotsByUserMessageId[secondUserMessageId]).toEqual([]);
+  });
+
+  it("keeps an externally adopted run unowned until its remote user message arrives", () => {
+    const initial = createInitialAgentChatRuntimeState([{
+      id: "msg_existing_user",
+      messageId: "msg_existing_user",
+      role: "user",
+      text: "当前页面旧轮次",
+      createdAt: "2026-07-15T09:04:00Z"
+    }]);
+    let state = reduceAgentChatRuntime(initial, { type: "run.adopted", runId: "run_external" });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_external", {
+        todos: [{ content: "外部 Run 提前到达的待办", status: "in_progress" }]
+      })
+    });
+
+    expect(state.todos).toEqual([]);
+    expect(state.todoSnapshotsByUserMessageId.msg_existing_user).toBeUndefined();
+
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("message.updated", "run_external", {
+        message: { id: "msg_external_user", role: "user", content: "另一标签页发起的新任务" }
+      })
+    });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_external", {
+        todos: [{ content: "外部 Run 已归属的待办", status: "in_progress" }]
+      })
+    });
+
+    expect(state.todoUserMessageIdByRunId.run_external).toBe("msg_external_user");
+    expect(state.todoSnapshotsByUserMessageId.msg_external_user).toEqual([
+      expect.objectContaining({ text: "外部 Run 已归属的待办" })
+    ]);
+  });
+
+  it("does not let an unowned external run consume another queued turn pending owner", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "本页排队任务 B",
+      createdAt: "2026-07-15T09:04:00Z"
+    });
+    const queuedUserMessageId = submitted.messages.at(-1)!.id;
+    let state = reduceAgentChatRuntime(submitted, { type: "run.adopted", runId: "run_external_c" });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: {
+        ...runEvent("run.snapshot.reset", "run_external_c", {
+          snapshot: {
+            events: [{
+              ...runEvent("todo.updated", "run_external_c", {
+                todos: [{ content: "外部快照提前待办", status: "in_progress" }]
+              }),
+              eventId: "evt_external_snapshot_todo"
+            }]
+          }
+        }),
+        eventId: "evt_external_snapshot_reset"
+      }
+    });
+
+    expect(state.pendingTodoUserMessageId).toBe(queuedUserMessageId);
+    expect(state.todoUserMessageIdByRunId.run_external_c).toBeUndefined();
+    expect(state.todoSnapshotsByUserMessageId[queuedUserMessageId]).toEqual([]);
+
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("message.updated", "run_external_c", {
+        message: { id: "msg_external_c_user", role: "user", content: "外部标签页任务 C" }
+      })
+    });
+
+    expect(state.pendingTodoUserMessageId).toBe(queuedUserMessageId);
+    expect(state.todoUserMessageIdByRunId.run_external_c).toBe("msg_external_c_user");
+    expect(state.todoSnapshotsByUserMessageId[queuedUserMessageId]).toEqual([]);
+    expect(state.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: queuedUserMessageId, text: "本页排队任务 B" }),
+      expect.objectContaining({ id: "msg_external_c_user", text: "外部标签页任务 C" })
+    ]));
+  });
+
+  it("migrates todo ownership when a remote user message replaces the optimistic id", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "执行任务",
+      createdAt: "2026-07-15T09:05:00Z"
+    });
+    const optimisticId = submitted.messages.at(-1)!.id;
+    let state = reduceAgentChatRuntime(submitted, { type: "run.requested", userMessageId: optimisticId });
+    state = reduceAgentChatRuntime(state, { type: "event", event: runEvent("run.created", "run_remote") });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("message.updated", "run_remote", {
+        message: { id: "msg_remote_user", role: "user", content: "执行任务", time: { created: 1784106300000 } }
+      })
+    });
+    state = reduceAgentChatRuntime(state, {
+      type: "event",
+      event: runEvent("todo.updated", "run_remote", {
+        todos: [{ content: "远端任务", status: "in_progress" }]
+      })
+    });
+
+    expect(state.todoUserMessageIdByRunId.run_remote).toBe("msg_remote_user");
+    expect(state.todoSnapshotsByUserMessageId[optimisticId]).toBeUndefined();
+    expect(state.todoSnapshotsByUserMessageId.msg_remote_user).toEqual([expect.objectContaining({ text: "远端任务" })]);
   });
 
   it("recovers per-turn todo snapshots from historical todowrite parts", () => {
@@ -1660,5 +1971,13 @@ function event(type: string, payload: Record<string, unknown>): RunEvent {
     traceId: "trace_1",
     occurredAt: "2026-06-19T00:00:00Z",
     payload
+  };
+}
+
+function runEvent(type: string, runId: string, payload: Record<string, unknown> = {}): RunEvent {
+  return {
+    ...event(type, payload),
+    eventId: `evt_${runId}_${type}_${JSON.stringify(payload).length}`,
+    runId
   };
 }

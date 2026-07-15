@@ -123,6 +123,26 @@ describe("opencode-like conversation state", () => {
     ]);
   });
 
+  it("prefers an explicit empty latest-turn snapshot over legacy current todos", () => {
+    const rows = createTimelineRows(createOpencodeLikeState({
+      messages: [userMessage("msg_user_1", "第一轮"), userMessage("msg_user_2", "第二轮")],
+      running: true,
+      todos: [{ id: "todo_legacy", text: "不应回灌", status: "completed" }],
+      todoSnapshotsByUserMessageId: {
+        msg_user_1: [{ id: "todo_first", text: "第一轮任务", status: "completed" }],
+        msg_user_2: []
+      }
+    }));
+    const workStatuses = rows.filter((row) => row.type === "work-status");
+
+    expect(workStatuses[0]).toMatchObject({
+      type: "work-status",
+      userMessageId: "msg_user_1",
+      todos: [{ id: "todo_first", text: "第一轮任务", status: "completed" }]
+    });
+    expect(workStatuses[1]).toMatchObject({ type: "work-status", userMessageId: "msg_user_2", todos: [] });
+  });
+
   it("keeps runtime failures as timeline error rows instead of card messages", () => {
     const state = createOpencodeLikeState({
       messages: [userMessage("msg_user_1", "运行测试")],

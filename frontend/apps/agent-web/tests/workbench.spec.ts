@@ -1515,8 +1515,199 @@ test("a title-pending SSE closes when the backend closes the title watch or a ne
   await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(true);
 });
 
+test("a superseded title-pending run cannot restore its todos into the next turn", async ({ page }) => {
+  let releaseSecondRun!: () => void;
+  const secondRunGate = new Promise<void>((resolve) => {
+    releaseSecondRun = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+    type StreamProbe = {
+      runId: string;
+      closed: boolean;
+      emit: (type: string, seq: number, payload: Record<string, unknown>) => void;
+      fail: () => void;
+    };
+    const probes: StreamProbe[] = [];
+    const seededRunIds = new Set<string>();
+    (window as Window & { __todoOwnershipRunStreams?: StreamProbe[] }).__todoOwnershipRunStreams = probes;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const requestUrl = new URL(
+        typeof input === "string" ? input : input instanceof Request ? input.url : input.toString(),
+        window.location.origin
+      );
+      const runId = decodeURIComponent(requestUrl.pathname).match(/\/runs\/([^/]+)\/events$/)?.[1];
+      if (!runId) {
+        return nativeFetch(input, init);
+      }
+      const encoder = new TextEncoder();
+      let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+      let closed = false;
+      const probe: StreamProbe = {
+        runId,
+        closed: false,
+        emit: (type, seq, payload) => {
+          if (closed || !controller) return;
+          controller.enqueue(encoder.encode(
+            `id: ${seq}\nevent: ${type}\ndata: ${JSON.stringify({
+              eventId: `evt_todo_owner_${runId}_${seq}_${type}`,
+              runId,
+              seq,
+              type,
+              traceId: "trace_e2e",
+              occurredAt: "2026-07-15T09:00:00Z",
+              payload
+            })}\n\n`
+          ));
+        },
+        fail: () => {
+          if (closed || !controller) return;
+          closed = true;
+          probe.closed = true;
+          controller.error(new Error("superseded stream failed"));
+        }
+      };
+      probes.push(probe);
+      const body = new ReadableStream<Uint8Array>({
+        start(streamController) {
+          controller = streamController;
+          if (runId === "run_1" && !seededRunIds.has(runId)) {
+            seededRunIds.add(runId);
+            window.setTimeout(() => probe.emit("todo.updated", 1, {
+              todos: Array.from({ length: 4 }, (_, index) => ({
+                id: `todo_first_${index}`,
+                content: `第一轮任务 ${index + 1}`,
+                status: "completed"
+              }))
+            }), 10);
+            window.setTimeout(() => probe.emit("run.succeeded", 2, {
+              platformSessionTitlePending: true
+            }), 20);
+          } else if (runId === "run_2" && !seededRunIds.has(runId)) {
+            seededRunIds.add(runId);
+            window.setTimeout(() => probe.emit("todo.updated", 1, {
+              todos: Array.from({ length: 9 }, (_, index) => ({
+                id: `todo_second_${index}`,
+                content: `第二轮任务 ${index + 1}`,
+                status: "pending"
+              }))
+            }), 10);
+          }
+        },
+        cancel() {
+          closed = true;
+          probe.closed = true;
+        }
+      });
+      init?.signal?.addEventListener("abort", () => {
+        closed = true;
+        probe.closed = true;
+        controller?.close();
+      }, { once: true });
+      return new Response(body, { headers: { "content-type": "text/event-stream" } });
+    };
+  });
+  await mockBackendApi(page, {
+    runRequests,
+    runIds: ["run_1", "run_2"],
+    runRequestGates: [Promise.resolve(), secondRunGate],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  });
+  await gotoWorkbench(page);
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("第一轮生成 4 个待办");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("任务完成")).toBeVisible();
+  await page.getByRole("button", { name: "展开已完成工作状态" }).click();
+  await expect(page.getByText("共 4")).toBeVisible();
+
+  await composer.fill("第二轮生成 9 个待办");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(2);
+  await expect(page.getByTestId("oc-work-status-dock").getByTestId("oc-todo-panel")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const probe = (window as Window & {
+      __todoOwnershipRunStreams?: Array<{ runId: string; closed: boolean; fail: () => void }>;
+    }).__todoOwnershipRunStreams?.find((item) => item.runId === "run_1" && !item.closed);
+    probe?.fail();
+  });
+  await expect(page.getByText("RunEvent SSE 连接异常", { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & {
+      __todoOwnershipRunStreams?: Array<{ runId: string; closed: boolean }>;
+    }).__todoOwnershipRunStreams?.filter((item) => item.runId === "run_1" && !item.closed).length ?? 0
+  ))).toBeGreaterThan(0);
+
+  await page.evaluate(() => {
+    const probe = (window as Window & {
+      __todoOwnershipRunStreams?: Array<{
+        runId: string;
+        closed: boolean;
+        emit: (type: string, seq: number, payload: Record<string, unknown>) => void;
+        fail: () => void;
+      }>;
+    }).__todoOwnershipRunStreams?.filter((item) => item.runId === "run_1" && !item.closed).at(-1);
+    probe?.emit("todo.updated", 3, { todos: [{ content: "旧 Run todo.updated 回灌", status: "completed" }] });
+    probe?.emit("message.part.updated", 4, {
+      messageID: "msg_old_todowrite",
+      part: {
+        id: "part_old_todowrite",
+        messageID: "msg_old_todowrite",
+        type: "tool",
+        tool: "todowrite",
+        state: { status: "completed", input: { todos: [{ content: "旧 Run todowrite 回灌", status: "completed" }] } }
+      }
+    });
+    probe?.emit("run.snapshot.reset", 5, {
+      snapshot: {
+        events: [{
+          eventId: "evt_old_snapshot_todo",
+          runId: "run_1",
+          seq: 1,
+          type: "todo.updated",
+          traceId: "trace_e2e",
+          occurredAt: "2026-07-15T09:00:00Z",
+          payload: { todos: [{ content: "旧 Run snapshot 回灌", status: "completed" }] }
+        }]
+      }
+    });
+    probe?.emit("session.updated", 6, {
+      platformSessionTitleSynchronized: true,
+      platformSessionTitle: "旧 Run 标题仍同步",
+      isChildSession: false
+    });
+  });
+
+  await expect(page.locator(".figma-chat-title")).toHaveText("旧 Run 标题仍同步");
+  await expect(page.getByTestId("oc-work-status-dock").getByTestId("oc-todo-panel")).toHaveCount(0);
+  await page.getByRole("button", { name: "展开历史工作状态" }).click();
+  await expect(page.getByText("共 4")).toBeVisible();
+  await expect(page.getByText(/旧 Run .*回灌/)).toHaveCount(0);
+
+  releaseSecondRun();
+  await expect(page.getByTestId("oc-work-status-dock").getByText("共 9")).toBeVisible();
+  await expect(page.getByTestId("oc-work-status-dock").getByText("共 4")).toHaveCount(0);
+});
+
 test("retrying a failed chat run sends the previous prompt again", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
   await mockBackendApi(page, {
     runRequests,
     runIds: ["run_1", "run_2"],
@@ -1553,6 +1744,7 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
 
   await expect.poll(() => runRequests.length).toBe(2);
   expect(runRequests[1]).toMatchObject({ prompt: "重试这条测试任务" });
+  await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
 });
 
@@ -3936,6 +4128,7 @@ async function mockBackendApi(
     runFailures?: string[];
     runFailureResponses?: Array<{ status: number; code: string; message: string }>;
     runRequestGate?: Promise<void>;
+    runRequestGates?: Array<Promise<void>>;
     runtimeStateHttpRequests?: string[];
     runtimeStateSummary?: Record<string, unknown>;
     runtimeStateEventGate?: Promise<void>;
@@ -4569,8 +4762,8 @@ async function mockBackendApi(
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/runs") {
       const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       capture.runRequests?.push(request);
-      await capture.runRequestGate;
       const requestIndex = (capture.runRequests?.length ?? 1) - 1;
+      await (capture.runRequestGates?.[requestIndex] ?? capture.runRequestGate);
       const failureResponse = capture.runFailureResponses?.shift();
       if (failureResponse) {
         await route.fulfill({

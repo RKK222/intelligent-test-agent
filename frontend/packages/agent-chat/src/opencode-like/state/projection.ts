@@ -94,9 +94,11 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
         userMessageId,
         reasoningRefs: accumulator.workStatus?.reasoningRefs ?? [],
         events: accumulator.workStatus?.events ?? [],
-        todos: isLatestTurn(userMessageId, state)
-          ? state.todos
-          : state.todoSnapshotsByUserMessageId[userMessageId] ?? [],
+        // 显式的分轮空快照同样是所有权证据；只有旧独立消费者完全未提供该键时，
+        // 最新轮才回退到兼容字段 todos。
+        todos: Object.prototype.hasOwnProperty.call(state.todoSnapshotsByUserMessageId, userMessageId)
+          ? state.todoSnapshotsByUserMessageId[userMessageId]
+          : isLatestTurn(userMessageId, state) ? state.todos : [],
         status: workStatusState(userMessageId, state),
         isLatest: isLatestTurn(userMessageId, state)
       };

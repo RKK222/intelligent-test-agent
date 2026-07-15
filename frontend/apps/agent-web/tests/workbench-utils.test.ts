@@ -16,6 +16,8 @@ import {
   filterWorkspaceRootEntries,
   inferDiffFromToolPart,
   historyItems,
+  reconcileCurrentTurnTodos,
+  runEventProjectionMode,
   runEventMatchesRun,
   mergeDiffFiles,
   messagesFromSessionMessages,
@@ -151,6 +153,29 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
+  });
+});
+
+describe("runEventProjectionMode", () => {
+  const current = {
+    runId: "run_old",
+    sessionId: "ses_1",
+    workspaceId: "wrk_1",
+    status: "SUCCEEDED",
+    createdAt: "2026-07-15T09:00:00Z",
+    updatedAt: "2026-07-15T09:00:00Z"
+  } as Run;
+
+  it("allows only title synchronization from a superseded run", () => {
+    expect(runEventProjectionMode({ runId: "run_old", type: "session.updated" }, "run_old", current, "run_old")).toBe("title-only");
+    expect(runEventProjectionMode({ runId: "run_old", type: "todo.updated" }, "run_old", current, "run_old")).toBe("ignore");
+    expect(runEventProjectionMode({ runId: "run_old", type: "run.snapshot.reset" }, "run_old", current, "run_old")).toBe("ignore");
+  });
+
+  it("restores normal projection after the new run becomes current", () => {
+    const next = { ...current, runId: "run_next", status: "RUNNING" } as Run;
+    expect(runEventProjectionMode({ runId: "run_next", type: "todo.updated" }, "run_next", next, "run_old")).toBe("conversation");
+    expect(runEventProjectionMode({ runId: "run_old", type: "session.updated" }, "run_old", next, "run_old")).toBe("ignore");
   });
 });
 
@@ -524,6 +549,7 @@ describe("auto retry run helpers", () => {
     const draft = {
       prompt: "继续执行",
       parts,
+      userMessageId: "msg_user_retry",
       title: "继续执行",
       command: { command: "skill", arguments: "frontend" }
     };
@@ -1896,6 +1922,267 @@ describe("inferDiffFromToolPart", () => {
     expect(state.todoSnapshotsByUserMessageId.msg_user_todowrite_history).toEqual([
       expect.objectContaining({ text: "历史任务一", status: "completed", priority: "high" }),
       expect.objectContaining({ text: "历史任务二", status: "in_progress", priority: "medium" })
+    ]);
+  });
+
+  it("does not project an earlier turn todowrite snapshot onto a newer turn", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [{ sessionId: "ses_root", rootSessionId: "ses_root", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: []
+    };
+    const persisted: SessionMessage[] = [
+      { messageId: "msg_user_first", sessionId: "ses_root", role: "USER", content: "第一轮", createdAt: "2026-07-15T09:00:00Z" },
+      {
+        messageId: "msg_assistant_first",
+        sessionId: "ses_root",
+        role: "ASSISTANT",
+        content: "",
+        createdAt: "2026-07-15T09:00:01Z",
+        parts: [{
+          partId: "part_first_todo",
+          type: "tool",
+          toolName: "todowrite",
+          status: "completed",
+          input: { todos: [{ content: "仅第一轮拥有", status: "completed" }] }
+        }]
+      },
+      { messageId: "msg_user_second", sessionId: "ses_root", role: "USER", content: "第二轮", createdAt: "2026-07-15T09:01:00Z" }
+    ];
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, persisted);
+
+    expect(state.todos).toEqual([]);
+    expect(state.todoSnapshotsByUserMessageId.msg_user_first).toEqual([
+      expect.objectContaining({ text: "仅第一轮拥有" })
+    ]);
+    expect(state.todoSnapshotsByUserMessageId.msg_user_second).toBeUndefined();
+  });
+
+  it("does not recover a child-session todowrite as the root turn todo snapshot", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { sessionId: "ses_root", rootSessionId: "ses_root", childSession: false },
+        { sessionId: "ses_child", rootSessionId: "ses_root", parentSessionId: "ses_root", childSession: true }
+      ],
+      messagesBySessionId: {
+        ses_child: [
+          {
+            message: { id: "msg_child_assistant", role: "assistant", createdAt: "2026-07-15T09:00:01Z" },
+            sessionId: "ses_child",
+            rootSessionId: "ses_root",
+            isChildSession: true
+          },
+          {
+            messageId: "msg_child_assistant",
+            sessionId: "ses_child",
+            rootSessionId: "ses_root",
+            isChildSession: true,
+            part: {
+              id: "part_child_todo",
+              messageID: "msg_child_assistant",
+              type: "tool",
+              tool: "todowrite",
+              state: {
+                status: "completed",
+                input: { todos: [{ content: "子 Agent 待办", status: "completed" }] }
+              }
+            }
+          }
+        ]
+      },
+      childSessionIdByTaskPartId: {},
+      events: []
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot, [
+      { messageId: "msg_root_user", sessionId: "ses_root", role: "USER", content: "执行根任务", createdAt: "2026-07-15T09:00:00Z" }
+    ]);
+
+    expect(state.todos).toEqual([]);
+    expect(state.todoSnapshotsByUserMessageId.msg_root_user).toBeUndefined();
+  });
+
+  it("migrates todo.updated history from a remote user id to the merged platform message id", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [{ sessionId: "ses_root", rootSessionId: "ses_root", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            message: { id: "msg_remote_user", role: "user", content: "历史任务", createdAt: "2026-07-15T09:00:00Z" }
+          }
+        },
+        {
+          type: "todo.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: { todos: [{ content: "远端快照任务", status: "completed" }] }
+        }
+      ]
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot, [{
+      messageId: "msg_11111111111111111111111111111111",
+      remoteMessageId: "msg_remote_user",
+      sessionId: "ses_root",
+      role: "USER",
+      content: "历史任务",
+      createdAt: "2026-07-15T09:00:00Z"
+    }]);
+
+    expect(state.todos).toEqual([expect.objectContaining({ text: "远端快照任务" })]);
+    expect(state.todoSnapshotsByUserMessageId.msg_11111111111111111111111111111111).toEqual([
+      expect.objectContaining({ text: "远端快照任务" })
+    ]);
+    expect(state.todoSnapshotsByUserMessageId.msg_remote_user).toBeUndefined();
+  });
+
+  it("keeps the latest root todo when a child user message is replayed later", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [
+        { sessionId: "ses_root", rootSessionId: "ses_root", childSession: false },
+        { sessionId: "ses_child", rootSessionId: "ses_root", parentSessionId: "ses_root", childSession: true }
+      ],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: { message: { id: "msg_root_user", role: "user", content: "根任务" } }
+        },
+        {
+          type: "todo.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: { todos: [{ content: "根任务待办", status: "in_progress" }] }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          childSession: true,
+          payload: { message: { id: "msg_child_user", role: "user", content: "子 Agent 输入" } }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot);
+    const reconciled = reconcileCurrentTurnTodos(state, [{ id: "todo_calibrated", text: "根任务校准", status: "completed" }]);
+
+    expect(state.todos).toEqual([expect.objectContaining({ text: "根任务待办" })]);
+    expect(reconciled.todoSnapshotsByUserMessageId.msg_root_user).toEqual([
+      expect.objectContaining({ text: "根任务校准" })
+    ]);
+    expect(reconciled.todoSnapshotsByUserMessageId.msg_child_user).toBeUndefined();
+  });
+
+  it("prefers a newer remote todo.updated over an older persisted todowrite fallback", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [{ sessionId: "ses_root", rootSessionId: "ses_root", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: { message: { id: "msg_remote_user_newer", role: "user", content: "历史任务" } }
+        },
+        {
+          type: "todo.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: { todos: [{ content: "较新的事件快照", status: "in_progress" }] }
+        }
+      ]
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot, [
+      {
+        messageId: "msg_22222222222222222222222222222222",
+        remoteMessageId: "msg_remote_user_newer",
+        sessionId: "ses_root",
+        role: "USER",
+        content: "历史任务",
+        createdAt: "2026-07-15T09:00:00Z"
+      },
+      {
+        messageId: "msg_old_todowrite",
+        sessionId: "ses_root",
+        role: "ASSISTANT",
+        content: "",
+        createdAt: "2026-07-15T09:00:01Z",
+        parts: [{
+          partId: "part_old_todo",
+          type: "tool",
+          toolName: "todowrite",
+          status: "completed",
+          input: { todos: [{ content: "较旧的持久化快照", status: "completed" }] }
+        }]
+      }
+    ]);
+
+    expect(state.todos).toEqual([expect.objectContaining({ text: "较新的事件快照" })]);
+    expect(state.todoSnapshotsByUserMessageId.msg_22222222222222222222222222222222).toEqual([
+      expect.objectContaining({ text: "较新的事件快照" })
+    ]);
+  });
+
+  it("reconciles session todo results only when the latest turn has ownership evidence", () => {
+    const withoutCurrentOwnership = chatStateFromSessionTreeSnapshot({
+      sessionId: "ses_root",
+      sessions: [{ sessionId: "ses_root", rootSessionId: "ses_root", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: []
+    }, [
+      { messageId: "msg_user_first", sessionId: "ses_root", role: "USER", content: "第一轮", createdAt: "2026-07-15T09:00:00Z" },
+      { messageId: "msg_user_second", sessionId: "ses_root", role: "USER", content: "第二轮", createdAt: "2026-07-15T09:01:00Z" }
+    ]);
+    const staleLiveTodos = [{ id: "todo_old", text: "旧会话快照", status: "completed" }];
+
+    const ignored = reconcileCurrentTurnTodos(withoutCurrentOwnership, staleLiveTodos);
+    expect(ignored.todos).toEqual([]);
+    expect(ignored.todoSnapshotsByUserMessageId.msg_user_second).toBeUndefined();
+
+    const withCurrentOwnership = {
+      ...withoutCurrentOwnership,
+      todoSnapshotsByUserMessageId: {
+        ...withoutCurrentOwnership.todoSnapshotsByUserMessageId,
+        msg_user_second: []
+      }
+    };
+    const reconciled = reconcileCurrentTurnTodos(withCurrentOwnership, staleLiveTodos);
+    expect(reconciled.todos).toEqual(staleLiveTodos);
+    expect(reconciled.todoSnapshotsByUserMessageId.msg_user_second).toEqual(staleLiveTodos);
+
+    const cleared = reconcileCurrentTurnTodos({
+      ...reconciled,
+      todoSnapshotsByUserMessageId: {
+        msg_user_first: [{ id: "todo_first", text: "第一轮任务", status: "completed" }],
+        msg_user_second: staleLiveTodos
+      }
+    }, []);
+    expect(cleared.todos).toEqual([]);
+    expect(cleared.todoSnapshotsByUserMessageId.msg_user_first).toEqual([
+      { id: "todo_first", text: "第一轮任务", status: "completed" }
     ]);
   });
 });
