@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-15 - 修复企业公共区 Git 提交身份缺失
+
+- Why:
+  - 企业内部公共配置 Git 在后端进程以 root 运行且未配置 `user.name/user.email`，公共区更新并推送在 `git commit` 阶段报 `Author identity unknown`，上层错误被归类为 `GIT_UNAVAILABLE`。
+- What:
+  - 公共 Git 服务新增单次命令级提交身份；公共配置、Agent/工作空间和个人工作区的 commit/merge 均使用当前平台用户身份，不写入共享仓库配置或后端进程全局 Git 配置。
+  - 由于平台 User 当前没有邮箱字段，身份邮箱使用统一认证号规范化后拼接保留域名 `@testagent.local`；同步补充 common/workspace/API 文档和真实 Git 回归测试。
+- How:
+  - 复用既有 `GitWorkspaceService` 与 `GitPublishWorkflow`，通过 `git -c user.name=... -c user.email=...` 注入命令级配置；身份由当前用户展示名和统一认证号生成，并拒绝换行字符。
+  - 执行 common/workspace-management 定向测试、相关模块全量测试、后端完整打包和 `.env.test` 三服务启动健康检查。
+- Result:
+  - 相关 Maven 测试共 113 项全部通过，完整后端打包成功；后端 health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 当前已连接。企业远端实际 push 未在本地凭据环境执行，仍需在企业公共区进行一次端到端验收；若服务器有提交邮箱域名限制，需要补充真实邮箱来源或可配置域名。
+
 ### 2026-07-15 - 将 Go manager 身份改为服务器稳定哈希
 
 - Why:

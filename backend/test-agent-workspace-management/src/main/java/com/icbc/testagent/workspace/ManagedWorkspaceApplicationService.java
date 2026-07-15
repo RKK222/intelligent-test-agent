@@ -2,6 +2,7 @@ package com.icbc.testagent.workspace;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.git.GitCommitIdentity;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
 import com.icbc.testagent.common.git.GitWorkspaceService.GitStatusEntry;
@@ -1584,6 +1585,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
         CodeRepository repository = existingRepository(version.repositoryId());
         String privateKey = privateKeyFor(repository, userId);
+        GitCommitIdentity commitIdentity = gitCommitIdentity(userId);
         Path personalRepoRoot = pathResolver.resolve(personal.repoRootPath());
         Path personalWorkspaceRoot = pathResolver.resolve(personal.workspaceRootPath());
         List<String> publishFiles = normalizePublishFiles(files);
@@ -1630,7 +1632,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             gitWorkspaceService.commitStaged(
                     prepared.repoRoot(),
                     requireText(commitMessage, "提交说明不能为空", "commitMessage"),
-                    privateKey);
+                    privateKey,
+                    commitIdentity);
         } catch (PlatformException exception) {
             if (!exception.getMessage().contains("nothing to commit")
                     && !exception.getMessage().contains("nothing added")) {
@@ -1669,6 +1672,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
         CodeRepository repository = existingRepository(version.repositoryId());
         String privateKey = privateKeyFor(repository, userId);
+        GitCommitIdentity commitIdentity = gitCommitIdentity(userId);
         Path repoRoot = pathResolver.resolve(personal.repoRootPath());
         List<String> gitFiles = repoRelativeFiles(
                 repoRoot,
@@ -1679,7 +1683,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
         gitWorkspaceService.resetIndexToHead(repoRoot, privateKey);
         gitWorkspaceService.stageFiles(repoRoot, gitFiles, privateKey);
-        gitWorkspaceService.commitStaged(repoRoot, requireText(commitMessage, "提交说明不能为空", "commitMessage"), privateKey);
+        gitWorkspaceService.commitStaged(
+                repoRoot,
+                requireText(commitMessage, "提交说明不能为空", "commitMessage"),
+                privateKey,
+                commitIdentity);
         String head = gitWorkspaceService.headCommit(repoRoot);
         return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                 "LOCAL_COMMITTED", personalWorkspaceId, version.versionId().value(), List.of(),
@@ -2897,6 +2905,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private User existingUser(UserId userId) {
         return userRepository.findByUserId(userId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "用户不存在", Map.of("userId", userId.value())));
+    }
+
+    /**
+     * 将当前平台用户转换为 Git 单次提交身份；身份不会写入共享仓库配置。
+     */
+    private GitCommitIdentity gitCommitIdentity(UserId userId) {
+        User user = existingUser(userId);
+        return GitCommitIdentity.forPlatformUser(user.username(), user.unifiedAuthId());
     }
 
     private String privateKeyFor(CodeRepository repository, UserId userId) {

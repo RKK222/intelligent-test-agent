@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.git.GitCommitIdentity;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
 import com.icbc.testagent.common.pagination.PageRequest;
@@ -1917,6 +1918,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private String statusPathspec;
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
+        private GitCommitIdentity committedStagedIdentity;
         private boolean commitStagedUpdatesHead;
         private Path materializedRepoRoot;
         private String materializedCommit;
@@ -2114,6 +2116,12 @@ class ManagedWorkspaceApplicationServiceTest {
             if (commitStagedUpdatesHead) {
                 this.nextHeadCommit = "commit_after_push";
             }
+        }
+
+        @Override
+        public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
+            this.committedStagedIdentity = identity;
+            commitStaged(repoRoot, message, privateKey);
         }
 
         @Override

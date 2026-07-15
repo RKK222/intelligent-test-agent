@@ -2,6 +2,7 @@ package com.icbc.testagent.workspace;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.git.GitCommitIdentity;
 import com.icbc.testagent.common.git.GitWorkspaceService;
 import java.nio.file.Path;
 import java.util.List;
@@ -39,11 +40,24 @@ public class GitPublishWorkflow {
             String sourceBranch,
             boolean force,
             String privateKey) {
+        return publishMergedBranch(repoRoot, targetBranch, sourceBranch, force, privateKey, null);
+    }
+
+    /**
+     * 合并并发布当前操作人的分支；merge 产生提交时使用传入的 Git 身份。
+     */
+    public PublishResult publishMergedBranch(
+            Path repoRoot,
+            String targetBranch,
+            String sourceBranch,
+            boolean force,
+            String privateKey,
+            GitCommitIdentity identity) {
         ensureClean(repoRoot);
         gitWorkspaceService.fetch(repoRoot, privateKey);
         gitWorkspaceService.pullFastForward(repoRoot, targetBranch, privateKey);
         try {
-            gitWorkspaceService.mergeBranch(repoRoot, sourceBranch, privateKey);
+            gitWorkspaceService.mergeBranch(repoRoot, sourceBranch, privateKey, identity);
         } catch (PlatformException mergeException) {
             return handleMergeFailure(repoRoot, mergeException);
         }
@@ -62,11 +76,26 @@ public class GitPublishWorkflow {
             boolean force,
             String privateKey,
             FileCopyAction fileCopy) {
+        return syncFilesThenPush(repoRoot, branch, files, message, force, privateKey, null, fileCopy);
+    }
+
+    /**
+     * 同步文件、提交并发布；提交使用当前操作人的 Git 身份。
+     */
+    public PublishResult syncFilesThenPush(
+            Path repoRoot,
+            String branch,
+            List<String> files,
+            String message,
+            boolean force,
+            String privateKey,
+            GitCommitIdentity identity,
+            FileCopyAction fileCopy) {
         ensureClean(repoRoot);
         gitWorkspaceService.fetch(repoRoot, privateKey);
         gitWorkspaceService.pullFastForward(repoRoot, branch, privateKey);
         fileCopy.copy();
-        gitWorkspaceService.commitFiles(repoRoot, files, message, privateKey);
+        gitWorkspaceService.commitFiles(repoRoot, files, message, privateKey, identity);
         gitWorkspaceService.push(repoRoot, branch, force, privateKey);
         return PublishResult.succeeded(gitWorkspaceService.headCommit(repoRoot));
     }

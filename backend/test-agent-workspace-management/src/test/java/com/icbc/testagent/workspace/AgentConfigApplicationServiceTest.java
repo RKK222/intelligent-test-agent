@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.error.ErrorCode;
+import com.icbc.testagent.common.git.GitCommitIdentity;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
 import com.icbc.testagent.common.error.PlatformException;
@@ -331,12 +332,16 @@ class AgentConfigApplicationServiceTest {
 
         assertThat(git.stagedAllCallCount).isEqualTo(1);
         assertThat(git.lastCommitMessage).isEqualTo("chore: sync public agent docs");
+        assertThat(git.lastCommitIdentity)
+                .isEqualTo(GitCommitIdentity.forPlatformUser("admin", "AUTH_ADMIN"));
         assertThat(git.pushedBranch).isEqualTo("main");
         assertThat(git.pushedForce).isFalse();
         assertThat(git.privateKeyUsed).isEqualTo(PRIVATE_KEY);
         assertThat(git.resetCommit).isNull();
         assertThat(git.fetchCallCount).isEqualTo(1);
         assertThat(git.mergedBranch).isEqualTo("origin/main");
+        assertThat(git.lastMergeIdentity)
+                .isEqualTo(GitCommitIdentity.forPlatformUser("admin", "AUTH_ADMIN"));
         assertThat(git.pulledBranch).isNull();
         assertThat(response.status()).isEqualTo("SUCCEEDED");
         assertThat(response.commitHash()).isEqualTo("commit_after_update_and_push");
@@ -1205,11 +1210,13 @@ class AgentConfigApplicationServiceTest {
         private final List<String> headHistory = new ArrayList<>();
         private int stagedAllCallCount;
         private String lastCommitMessage;
+        private GitCommitIdentity lastCommitIdentity;
         private String pushedBranch;
         private Boolean pushedForce;
         private String mergedBranch;
         private boolean mergeInProgress;
         private boolean failMergeWithConflict;
+        private GitCommitIdentity lastMergeIdentity;
         private List<String> conflictFiles = List.of();
         private Path abortedMergeRepoRoot;
         private final Map<String, String> statusByPathspec = new LinkedHashMap<>();
@@ -1273,6 +1280,12 @@ class AgentConfigApplicationServiceTest {
             if (failMergeWithConflict) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
             }
+        }
+
+        @Override
+        public void mergeBranch(Path repoRoot, String branch, String privateKey, GitCommitIdentity identity) {
+            this.lastMergeIdentity = identity;
+            mergeBranch(repoRoot, branch, privateKey);
         }
 
         @Override
@@ -1342,6 +1355,12 @@ class AgentConfigApplicationServiceTest {
             // 模拟 commit 后 commit 前进一格
             headHistory.add(currentHead);
             currentHead = "commit_after_update_and_push";
+        }
+
+        @Override
+        public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
+            this.lastCommitIdentity = identity;
+            commitStaged(repoRoot, message, privateKey);
         }
 
         @Override

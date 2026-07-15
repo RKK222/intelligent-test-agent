@@ -22,6 +22,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 通过 domain 广播端口发布/消费 `workspace.version.sync-requested`，并通过本机补偿器扫描缺失或落后的副本。
 - 与文件相关的 git 操作、差异比对、agent/skill 文件管理优先进入本模块。
 - 工作区 Git Diff 即使带工作区 pathspec，也使用 `git status --porcelain --untracked-files=all` 展开未跟踪目录中的每个文件，使接口文件数、前端数量角标和实际文件数一致；unmerged 状态保留 `rawStatus` 并返回 `status=conflict`。普通文件通过真实 stage/unstage API 操作 index；冲突支持逐文件处理、全部采用个人/远程版本和取消 merge。个人发布先预览个人/应用 HEAD 差异并校验 expected HEAD，要求白名单文件先在个人 worktree 本地提交，再投影到应用 feature worktree；应用 pull 后立即同步版本/副本 commit。发布遇到个人 merge 状态、未提交文件或应用副本脏工作树时直接返回冲突，不创建个人发布 merge。只有远端 push 完成才返回 `remotePushed=true`，响应和错误 details 会携带当前 Git 阶段与已执行命令；传入 `operationId` 时复用 Agent 配置进度端口，在每条实际 Git 命令启动前发布当前 `command`，不通过轮询或额外 Git 查询获取进度。
+- 所有平台用户触发的 Git commit 以及可能产生 commit 的 merge 都按当前用户注入命令级作者/提交者身份；身份不写入公共仓库或全局 Git 配置，平台没有邮箱字段时由 common Git 工具使用 `testagent.local` 保留域名生成稳定 email。
 
 ## 测试覆盖
 

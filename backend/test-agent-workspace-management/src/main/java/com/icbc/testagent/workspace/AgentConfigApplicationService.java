@@ -2,6 +2,7 @@ package com.icbc.testagent.workspace;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.git.GitCommitIdentity;
 import com.icbc.testagent.common.git.GitCommandExecutor;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
@@ -438,6 +439,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         try {
             PublicConfig config = requireEnabledPublicConfig(userId);
             String privateKey = decryptSingleSshKey(userId);
+            GitCommitIdentity commitIdentity = gitCommitIdentity(userId);
             Path repoRoot = config.gitRoot();
             if (!gitWorkspaceService.isGitRepository(repoRoot)) {
                 throw publicRepositoryUninitialized(repoRoot);
@@ -453,18 +455,18 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     throw publicMergeConflict(unresolved, "仍有未解决的公共 Agent 合并冲突");
                 }
                 progress.step(AgentConfigOperationStep.COMMITTING);
-                gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey);
+                gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey, commitIdentity);
             } else {
                 progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
                 gitWorkspaceService.fetch(repoRoot, privateKey);
                 progress.step(AgentConfigOperationStep.COMMITTING);
                 gitWorkspaceService.stageAll(repoRoot, privateKey);
                 if (!gitWorkspaceService.isWorktreeClean(repoRoot) || hasStagedChanges(repoRoot)) {
-                    gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey);
+                    gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey, commitIdentity);
                 }
                 progress.step(AgentConfigOperationStep.MERGING);
                 try {
-                    gitWorkspaceService.mergeBranch(repoRoot, "origin/" + normalizedBranch, privateKey);
+                    gitWorkspaceService.mergeBranch(repoRoot, "origin/" + normalizedBranch, privateKey, commitIdentity);
                 } catch (PlatformException mergeException) {
                     List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
                     if (!conflictFiles.isEmpty()) {
@@ -870,6 +872,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "publish", null, traceId);
         try {
             String privateKey = decryptSingleSshKey(userId);
+            GitCommitIdentity commitIdentity = gitCommitIdentity(userId);
             String commitHash;
             String branch;
             if (worktreeId == null || worktreeId.isBlank()) {
@@ -890,7 +893,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                         branch,
                         worktree.branch(),
                         false,
-                        privateKey);
+                        privateKey,
+                        commitIdentity);
                 throwIfConflicted(result, "公共 Agent 配置合并冲突");
                 progress.step(AgentConfigOperationStep.PUSHING);
                 commitHash = result.headCommit();
@@ -918,6 +922,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.WORKSPACE, workspace.workspaceId(), "publish", null, traceId);
         try {
             String privateKey = decryptSingleSshKey(userId);
+            GitCommitIdentity commitIdentity = gitCommitIdentity(userId);
             Path repoRoot = workspaceRoot(workspace);
             ensureExistingCleanRepository(repoRoot, (String) null);
             String branch = gitWorkspaceService.currentBranch(repoRoot);
@@ -931,7 +936,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                         branch,
                         worktree.branch(),
                         false,
-                        privateKey);
+                        privateKey,
+                        commitIdentity);
                 throwIfConflicted(result, "工作空间 Agent 配置合并冲突");
                 commitHash = result.headCommit();
                 agentConfigRepository.saveWorktree(worktree.markPublished(now()));
@@ -995,7 +1001,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         AgentConfigProgress progress = startProgress(operationId, scope, workspaceId, "commit", gitWorkspaceService.currentBranch(repoRoot), traceId);
         try {
             progress.step(AgentConfigOperationStep.COMMITTING);
-            gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, decryptSingleSshKey(userId));
+            gitWorkspaceService.commitStaged(
+                    repoRoot,
+                    normalizedMessage,
+                    decryptSingleSshKey(userId),
+                    gitCommitIdentity(userId));
             return progress.succeeded(gitWorkspaceService.headCommit(repoRoot));
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
@@ -1264,6 +1274,15 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return userRepository.findByUserId(userId)
                 .map(User::username)
                 .orElse(null);
+    }
+
+    /**
+     * 将当前平台用户转换为 Git 单次提交身份；平台用户表没有邮箱字段，因此使用保留域名生成稳定地址。
+     */
+    private GitCommitIdentity gitCommitIdentity(UserId userId) {
+        User user = userRepository.findByUserId(userId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "用户不存在", Map.of("userId", userId.value())));
+        return GitCommitIdentity.forPlatformUser(user.username(), user.unifiedAuthId());
     }
 
     private Path workspaceAgentRootForRead(String workspaceId, String worktreeId) {
