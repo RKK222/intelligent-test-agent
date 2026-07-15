@@ -363,45 +363,53 @@ function preventNodeDragFromPort(event: MouseEvent) {
   opacity: 1;
 }
 
-/* 快捷连线容器 */
-.ta-mermaid-quick-connector {
+.ta-mermaid-quick-connector-wrapper {
   position: absolute;
-  z-index: 20;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 150ms ease;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  margin-top: -12px;
+  display: grid;
+  place-items: center;
+  z-index: 10;
+  pointer-events: auto;
 }
 
-/* 鼠标悬停在端口 wrapper 上时，显示引导大箭头 */
-.ta-mermaid-port-container:hover .ta-mermaid-quick-connector {
+/* 引导大箭头容器默认不可见，悬停在 wrapper 上时显示 */
+.ta-mermaid-quick-connector-wrapper .ta-mermaid-quick-arrow {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+.ta-mermaid-quick-connector-wrapper:hover .ta-mermaid-quick-arrow {
   opacity: 1;
   pointer-events: auto;
 }
 
-/* 根据端口位置决定大箭头的偏移方向和无缝 padding 桥接 */
-.ta-mermaid-quick-connector.is-right {
-  left: 12px;
+/* 根据端口位置决定大箭头的偏移方向和定位 */
+.ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-arrow {
+  position: absolute !important;
+  left: 20px;
   top: 50%;
   transform: translateY(-50%);
-  padding-left: 10px;
 }
-.ta-mermaid-quick-connector.is-left {
-  right: 12px;
+.ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-arrow {
+  position: absolute !important;
+  right: 20px;
   top: 50%;
   transform: translateY(-50%);
-  padding-right: 10px;
 }
-.ta-mermaid-quick-connector.is-top {
-  bottom: 12px;
+.ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-arrow {
+  position: absolute !important;
+  bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  padding-bottom: 10px;
 }
-.ta-mermaid-quick-connector.is-bottom {
-  top: 12px;
+.ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-arrow {
+  position: absolute !important;
+  top: 20px;
   left: 50%;
   transform: translateX(-50%);
-  padding-top: 10px;
 }
 
 /* 大箭头按钮 */
@@ -416,8 +424,6 @@ function preventNodeDragFromPort(event: MouseEvent) {
   color: var(--primary, #4f46e5);
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
-  position: relative;
 }
 .ta-mermaid-quick-arrow:hover {
   background: var(--primary, #4f46e5);
@@ -426,13 +432,13 @@ function preventNodeDragFromPort(event: MouseEvent) {
 }
 
 /* 根据方向旋转 SVG 箭头图标 */
-.ta-mermaid-quick-connector.is-left .ta-quick-arrow-icon {
+.ta-mermaid-quick-connector-wrapper.is-left .ta-quick-arrow-icon {
   transform: rotate(180deg);
 }
-.ta-mermaid-quick-connector.is-top .ta-quick-arrow-icon {
+.ta-mermaid-quick-connector-wrapper.is-top .ta-quick-arrow-icon {
   transform: rotate(-90deg);
 }
-.ta-mermaid-quick-connector.is-bottom .ta-quick-arrow-icon {
+.ta-mermaid-quick-connector-wrapper.is-bottom .ta-quick-arrow-icon {
   transform: rotate(90deg);
 }
 
@@ -453,28 +459,28 @@ function preventNodeDragFromPort(event: MouseEvent) {
 }
 
 /* 根据位置决定图形面板的横纵排列以及偏移方向 */
-.ta-mermaid-quick-connector.is-right .ta-mermaid-quick-menu {
+.ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-menu {
   flex-direction: column;
   left: 100%;
   top: 50%;
   transform: translateY(-50%) scale(0.9);
   margin-left: 8px;
 }
-.ta-mermaid-quick-connector.is-left .ta-mermaid-quick-menu {
+.ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-menu {
   flex-direction: column;
   right: 100%;
   top: 50%;
   transform: translateY(-50%) scale(0.9);
   margin-right: 8px;
 }
-.ta-mermaid-quick-connector.is-top .ta-mermaid-quick-menu {
+.ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-menu {
   flex-direction: row;
   bottom: 100%;
   left: 50%;
   transform: translateX(-50%) scale(0.9);
   margin-bottom: 8px;
 }
-.ta-mermaid-quick-connector.is-bottom .ta-mermaid-quick-menu {
+.ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-menu {
   flex-direction: row;
   top: 100%;
   left: 50%;
@@ -487,12 +493,12 @@ function preventNodeDragFromPort(event: MouseEvent) {
   opacity: 1;
   pointer-events: auto;
 }
-.ta-mermaid-quick-connector.is-right .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu,
-.ta-mermaid-quick-connector.is-left .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
+.ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu,
+.ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
   transform: translateY(-50%) scale(1);
 }
-.ta-mermaid-quick-connector.is-top .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu,
-.ta-mermaid-quick-connector.is-bottom .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
+.ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu,
+.ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
   transform: translateX(-50%) scale(1);
 }
 
@@ -558,7 +564,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
 }
 
 /* 选中节点时，四向容器激活桥接伪元素扩大 hover 作用域 */
-.ta-mermaid-flow-node.is-selected .ta-mermaid-port-container.is-right::after {
+.ta-mermaid-quick-connector-wrapper.is-right::after {
   content: "";
   position: absolute;
   left: 12px;
@@ -569,7 +575,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   pointer-events: auto;
 }
 
-.ta-mermaid-flow-node.is-selected .ta-mermaid-port-container.is-left::after {
+.ta-mermaid-quick-connector-wrapper.is-left::after {
   content: "";
   position: absolute;
   right: 12px;
@@ -580,7 +586,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   pointer-events: auto;
 }
 
-.ta-mermaid-flow-node.is-selected .ta-mermaid-port-container.is-top::after {
+.ta-mermaid-quick-connector-wrapper.is-top::after {
   content: "";
   position: absolute;
   bottom: 12px;
@@ -591,7 +597,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   pointer-events: auto;
 }
 
-.ta-mermaid-flow-node.is-selected .ta-mermaid-port-container.is-bottom::after {
+.ta-mermaid-quick-connector-wrapper.is-bottom::after {
   content: "";
   position: absolute;
   top: 12px;
@@ -609,28 +615,28 @@ function preventNodeDragFromPort(event: MouseEvent) {
   background: transparent;
 }
 
-.ta-mermaid-quick-connector.is-right .ta-mermaid-quick-menu::before {
+.ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-menu::before {
   left: -12px;
   top: 0;
   width: 12px;
   height: 100%;
 }
 
-.ta-mermaid-quick-connector.is-left .ta-mermaid-quick-menu::before {
+.ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-menu::before {
   right: -12px;
   top: 0;
   width: 12px;
   height: 100%;
 }
 
-.ta-mermaid-quick-connector.is-top .ta-mermaid-quick-menu::before {
+.ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-menu::before {
   bottom: -12px;
   left: 0;
   height: 12px;
   width: 100%;
 }
 
-.ta-mermaid-quick-connector.is-bottom .ta-mermaid-quick-menu::before {
+.ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-menu::before {
   top: -12px;
   left: 0;
   height: 12px;
