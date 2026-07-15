@@ -4,7 +4,7 @@ import type { PetCompanionId } from "./pet-companions";
 
 type PetStatusTone = "ready" | "needs-initialization" | "checking" | "error";
 
-const props = withDefaults(defineProps<{
+withDefaults(defineProps<{
   petId: PetCompanionId;
   statusTone?: PetStatusTone;
   showStatus?: boolean;
@@ -16,20 +16,16 @@ const props = withDefaults(defineProps<{
 const uid = useId().replace(/:/g, "");
 const chameleonGradientId = computed(() => `pet-chameleon-${uid}`);
 const owlMetalGradientId = computed(() => `pet-owl-${uid}`);
-const statusBeacon = computed(() => ({
-  sniffer: { cx: 32, cy: 41.5 },
-  chameleon: { cx: 38, cy: 39 },
-  platypus: { cx: 46, cy: 37 },
-  owl: { cx: 32, cy: 15 },
-  glitch: { cx: 54, cy: 45 },
-}[props.petId]));
 </script>
 
 <template>
   <svg
     viewBox="0 0 64 64"
     class="pet-companion-svg"
-    :class="`is-${petId}`"
+    :class="[
+      `is-${petId}`,
+      showStatus ? `has-status status-${statusTone}` : null,
+    ]"
     role="img"
     :aria-label="petId"
   >
@@ -138,15 +134,6 @@ const statusBeacon = computed(() => ({
       <circle cx="43.5" cy="41" r=".7" fill="#17373a" />
     </g>
 
-    <circle
-      v-if="showStatus"
-      class="pet-status-beacon"
-      :class="`is-${statusTone}`"
-      data-testid="robot-process-status-beacon"
-      :cx="statusBeacon.cx"
-      :cy="statusBeacon.cy"
-      r="2.7"
-    />
   </svg>
 </template>
 
@@ -164,19 +151,27 @@ const statusBeacon = computed(() => ({
   animation: pet-sensor-breathe 2.6s ease-in-out infinite;
 }
 
-.pet-status-beacon {
-  fill: #9ca7b2;
-  stroke: rgba(255, 255, 255, 0.88);
-  stroke-width: 1.4;
-  filter: drop-shadow(0 0 2px currentColor);
+.pet-companion-svg.has-status.status-ready {
+  --pet-status-eye-color: #4fbac3;
 }
 
-.pet-status-beacon.is-ready { color: #42d7a4; fill: #42d7a4; }
-.pet-status-beacon.is-needs-initialization,
-.pet-status-beacon.is-error { color: #f06b63; fill: #f06b63; }
-.pet-status-beacon.is-checking { color: #a8b0ba; fill: #a8b0ba; }
+.pet-companion-svg.has-status.status-needs-initialization,
+.pet-companion-svg.has-status.status-error {
+  --pet-status-eye-color: #f06b63;
+}
 
-.pet-status-beacon.is-needs-initialization {
+.pet-companion-svg.has-status.status-checking {
+  --pet-status-eye-color: #97a8b6;
+}
+
+.pet-companion-svg.has-status .pet-eye {
+  stroke: var(--pet-status-eye-color);
+  stroke-width: 1.6;
+  paint-order: stroke fill;
+  filter: drop-shadow(0 0 1.2px var(--pet-status-eye-color));
+}
+
+.pet-companion-svg.has-status.status-needs-initialization .pet-eye {
   animation: pet-status-breathe 1.7s ease-in-out infinite;
 }
 
@@ -186,12 +181,11 @@ const statusBeacon = computed(() => ({
 }
 
 @keyframes pet-status-breathe {
-  0%, 100% { opacity: .55; }
-  50% { opacity: 1; }
+  0%, 100% { stroke-opacity: .38; }
+  50% { stroke-opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pet-eye,
-  .pet-status-beacon { animation: none; }
+  .pet-eye { animation: none; }
 }
 </style>

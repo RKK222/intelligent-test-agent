@@ -1872,6 +1872,7 @@ function submitJoinApp() {
               class="robot-toggle-svg"
               :pet-id="activePetId"
               :status-tone="robotProcessTone"
+              :show-status="processStatusInteractionEnabled"
               aria-hidden="true"
             />
           </button>
@@ -2536,19 +2537,6 @@ function submitJoinApp() {
   border-radius: 50%;
   background: color-mix(in srgb, var(--pet-accent, #5aa9a6) 10%, #fff);
 }
-
-.figma-pet-roster-avatar::after {
-  content: "";
-  position: absolute;
-  right: 1px;
-  bottom: 1px;
-  width: 7px;
-  height: 7px;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  background: var(--pet-accent, #5aa9a6);
-}
-
 
 .figma-robot-companion-game {
   min-height: 166px;

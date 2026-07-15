@@ -94,7 +94,9 @@ describe("FigmaShell", () => {
 
     expect(wrapper.get(".robot-svg").classes()).toContain("is-glitch");
     expect(wrapper.get("#figma-robot-side-question-title").text()).toBe("问问小宠物");
-    expect(wrapper.get('[data-testid="robot-process-status-beacon"]').attributes()).toMatchObject({ cx: "54", cy: "45" });
+    expect(wrapper.get(".robot-svg").classes()).toContain("has-status");
+    expect(wrapper.get(".robot-svg").findAll(".pet-eye")).toHaveLength(2);
+    expect(wrapper.find('[data-testid="robot-process-status-beacon"]').exists()).toBe(false);
     expect(JSON.parse(window.localStorage.getItem("test-agent.pet-companion.v1")!)).toMatchObject({
       mode: "selected",
       selectedPetId: "glitch",
@@ -651,7 +653,8 @@ describe("FigmaShell", () => {
     });
 
     await summonRobot(wrapper);
-    expect(wrapper.get('[data-testid="robot-process-status-beacon"]').classes()).toContain("is-ready");
+    expect(wrapper.get(".robot-svg").classes()).toContain("status-ready");
+    expect(wrapper.get('[data-testid="robot-visibility-toggle"] svg').classes()).toContain("status-ready");
 
     await wrapper.get('[data-testid="figma-robot"]').trigger("click");
     await vi.advanceTimersByTimeAsync(250);
@@ -681,7 +684,8 @@ describe("FigmaShell", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="robot-visibility-toggle"]').classes()).toContain("is-process-alert");
-    expect(wrapper.get('[data-testid="robot-process-status-beacon"]').classes()).toContain("is-needs-initialization");
+    expect(wrapper.get(".robot-svg").classes()).toContain("status-needs-initialization");
+    expect(wrapper.get('[data-testid="robot-visibility-toggle"] svg').classes()).toContain("status-needs-initialization");
 
     const card = wrapper.get('[data-testid="robot-process-status"]');
     expect(card.text()).toContain("要现在帮你初始化吗");
