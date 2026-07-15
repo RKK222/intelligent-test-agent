@@ -402,6 +402,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   color: var(--primary, #4f46e5);
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
   cursor: pointer;
+  z-index: 2;
 }
 .ta-mermaid-quick-arrow:hover {
   background: var(--primary, #4f46e5);
