@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.AiRunFeedbackMapper">
+    <resultMap id="AiRunFeedbackRowMap" type="com.icbc.testagent.persistence.mybatis.AiMessageFeedbackRow">
+        <constructor>
+            <arg column="feedback_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="message_id" javaType="java.lang.String"/>
+            <arg column="rating" javaType="java.lang.String"/>
+            <arg column="reason_code" javaType="java.lang.String"/>
+            <arg column="comment" javaType="java.lang.String"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="RunFeedbackColumns">
+        feedback_id, user_id, session_id, run_id, message_id, rating, reason_code, comment,
+        organization, rd_department, department, trace_id, created_at, updated_at
+    </sql>
+
+    <select id="findByUserIdAndRunId" resultMap="AiRunFeedbackRowMap">
+        select <include refid="RunFeedbackColumns"/>
+        from ai_message_feedbacks
+        where user_id = #{userId}
+          and run_id = #{runId}
+    </select>
+
+    <select id="findByUserIdAndRunIds" resultMap="AiRunFeedbackRowMap">
+        select <include refid="RunFeedbackColumns"/>
+        from ai_message_feedbacks
+        where user_id = #{userId}
+          and run_id in
+        <foreach collection="runIds" item="runId" open="(" separator="," close=")">
+            #{runId}
+        </foreach>
+    </select>
+
+    <select id="findByFeedbackId" resultMap="AiRunFeedbackRowMap">
+        select <include refid="RunFeedbackColumns"/>
+        from ai_message_feedbacks
+        where feedback_id = #{feedbackId}
+    </select>
+
+    <insert id="insert">
+        insert into ai_message_feedbacks(
+            feedback_id, user_id, session_id, run_id, message_id, rating, reason_code, comment,
+            organization, rd_department, department, trace_id, created_at, updated_at
+        ) values (
+            #{feedbackId}, #{userId}, #{sessionId}, #{runId}, null, #{rating}, #{reasonCode}, #{comment},
+            #{organization}, #{rdDepartment}, #{department}, #{traceId}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="update">
+        update ai_message_feedbacks
+        set rating = #{rating},
+            reason_code = #{reasonCode},
+            comment = #{comment},
+            trace_id = #{traceId},
+            updated_at = #{updatedAt}
+        where feedback_id = #{feedbackId}
+    </update>
+</mapper>

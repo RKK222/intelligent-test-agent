@@ -26,6 +26,7 @@ export type AssistantThreadProps = {
   mode?: string;
   todos?: TodoItem[];
   todoSnapshotsByUserMessageId?: Record<string, TodoItem[]>;
+  runStatusesByRunId?: Record<string, string>;
   streamingTextByPartId?: Record<string, string>;
   messageScopesById?: Record<string, MessageScope>;
   subagentsBySessionId?: Record<string, SubagentSession>;
@@ -81,6 +82,7 @@ const timelineState = computed(() =>
     models: props.models,
     todos: props.todos,
     todoSnapshotsByUserMessageId: props.todoSnapshotsByUserMessageId,
+    runStatusesByRunId: props.runStatusesByRunId,
     streamingTextByPartId: props.streamingTextByPartId,
     messageScopesById: props.messageScopesById,
     subagentsBySessionId: props.subagentsBySessionId,

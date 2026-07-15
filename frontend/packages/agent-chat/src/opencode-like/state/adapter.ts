@@ -72,7 +72,8 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     messageScopesById: input.messageScopesById ?? {},
     subagentsBySessionId: input.subagentsBySessionId ?? {},
     subagentByTaskPartId,
-    activeSubagentSessionId
+    activeSubagentSessionId,
+    runStatusesByRunId: input.runStatusesByRunId ?? {}
   };
 }
 

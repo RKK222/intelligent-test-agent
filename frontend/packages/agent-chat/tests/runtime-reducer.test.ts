@@ -1960,6 +1960,47 @@ describe("agent-chat runtime reducer", () => {
 
     expect(restored.messages).toEqual([persisted]);
   });
+
+  it("binds a root run to its user turn and keeps terminal status by run id", () => {
+    let state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "评价整轮回答",
+      createdAt: "2026-07-15T13:00:00Z"
+    });
+    const userId = state.messages.at(-1)!.id;
+    state = reduceAgentChatRuntime(state, { type: "run.requested", userMessageId: userId });
+    state = reduceAgentChatRuntime(state, { type: "event", event: runEvent("run.created", "run_feedback_1") });
+    state = reduceAgentChatRuntime(state, { type: "event", event: runEvent("run.succeeded", "run_feedback_1") });
+
+    expect(state.messages.find((message) => message.id === userId)).toMatchObject({ runId: "run_feedback_1" });
+    expect(state.runStatusesByRunId).toMatchObject({ run_feedback_1: "SUCCEEDED" });
+  });
+
+  it("loads historical run statuses without changing the current runtime status", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "run.statuses.loaded",
+      statuses: { run_history_ok: "SUCCEEDED", run_history_failed: "FAILED" }
+    });
+
+    expect(state.runStatusesByRunId).toEqual({ run_history_ok: "SUCCEEDED", run_history_failed: "FAILED" });
+    expect(state.status).toBeUndefined();
+  });
+
+  it("records a late terminal status for a superseded run without restoring its current todo state", () => {
+    const initial = {
+      ...createInitialAgentChatRuntimeState(),
+      supersededTodoRunIds: ["run_old"],
+      todos: [{ id: "todo_new", text: "新轮任务", status: "in_progress" as const }]
+    };
+
+    const state = reduceAgentChatRuntime(initial, {
+      type: "event",
+      event: runEvent("run.succeeded", "run_old")
+    });
+
+    expect(state.runStatusesByRunId.run_old).toBe("SUCCEEDED");
+    expect(state.todos).toEqual(initial.todos);
+  });
 });
 
 function event(type: string, payload: Record<string, unknown>): RunEvent {

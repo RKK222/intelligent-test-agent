@@ -53,6 +53,7 @@ export type OpencodeLikeConversationInput = {
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
   activeSubagentSessionId?: string | null;
+  runStatusesByRunId?: Record<string, string>;
 };
 
 export type OpencodeLikeConversationState = {
@@ -76,6 +77,7 @@ export type OpencodeLikeConversationState = {
   subagentsBySessionId: Record<string, SubagentSession>;
   subagentByTaskPartId: Record<string, string>;
   activeSubagentSessionId?: string | null;
+  runStatusesByRunId: Record<string, string>;
 };
 
 export type WorkStatusState = "running" | "retry" | "failed" | "cancelled" | "completed";
@@ -142,6 +144,8 @@ export type TimelineRow =
       todos: TodoItem[];
       status: WorkStatusState;
       isLatest: boolean;
+      runId?: string;
+      runStatus?: string;
     }
   | {
       type: "retry";

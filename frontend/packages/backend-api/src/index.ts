@@ -12,6 +12,10 @@ import type {
   AgentConfigWorktreePayload,
   AiMessageFeedback,
   AiMessageFeedbackPayload,
+  AiRunFeedback,
+  AiRunFeedbackPayload,
+  RunFeedbackQuery,
+  RunFeedbackState,
   AddSshKeyPayload,
   AnalyticsExceptionDetail,
   AnalyticsOrganizationUsageRow,
@@ -942,6 +946,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }),
     getMyMessageFeedback: (messageId: string) =>
       request<AiMessageFeedback | null>(`/api/internal/platform/opencode-runtime/messages/${encodeURIComponent(messageId)}/feedback/me`),
+    putRunFeedback: (runId: string, payload: AiRunFeedbackPayload) =>
+      request<AiRunFeedback>(`${opencodeRuntimeBase}/runs/${encodeURIComponent(runId)}/feedback`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      }),
+    getMyRunFeedback: (runId: string) =>
+      request<AiRunFeedback | null>(`${opencodeRuntimeBase}/runs/${encodeURIComponent(runId)}/feedback/me`),
+    queryMyRunFeedbacks: (payload: RunFeedbackQuery) =>
+      request<RunFeedbackState[]>(`${opencodeRuntimeBase}/run-feedbacks/me/query`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
     getActiveRun: (sessionId: string) => request<Run | null>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/active-run`),
     askSideQuestion: (sessionId: string, payload: SideQuestionRequest) =>
       request<SideQuestionResponse>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/side-question`, {

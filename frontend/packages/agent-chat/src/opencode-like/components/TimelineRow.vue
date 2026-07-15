@@ -38,7 +38,7 @@ const emit = defineEmits<{
 }>();
 
 defineSlots<{
-  "completed-status-actions"?: () => unknown;
+  "completed-status-actions"?: (props: { row: Extract<TimelineRow, { type: "work-status" }> }) => unknown;
 }>();
 
 const userMessage = computed(() => props.state.messageById[props.row.type === "error" ? "" : props.row.userMessageId]);
@@ -167,6 +167,7 @@ const toolGroupParts = computed(() => {
     >
       <Activity aria-hidden="true" />
     </OcIconButton>
+    <slot name="completed-status-actions" :row="row" />
   </div>
   <div
     v-else-if="row.type === 'work-status' && row.isLatest && row.status === 'completed'"
@@ -181,7 +182,7 @@ const toolGroupParts = computed(() => {
       >
         <Activity aria-hidden="true" />
       </OcIconButton>
-      <slot name="completed-status-actions" />
+      <slot name="completed-status-actions" :row="row" />
     </div>
     <WorkStatusRow
       v-if="completedWorkStatusExpanded"
@@ -208,6 +209,7 @@ const toolGroupParts = computed(() => {
     >
       <ChevronUp aria-hidden="true" />
     </OcIconButton>
+    <slot v-if="!row.isLatest && row.status === 'completed'" name="completed-status-actions" :row="row" />
   </div>
   <RetryRow
     v-else-if="row.type === 'retry'"

@@ -35,6 +35,7 @@ export type AgentChatRuntimeState = {
   messageScopesById: Record<string, MessageScope>;
   subagentsBySessionId: Record<string, SubagentSession>;
   subagentByTaskPartId: Record<string, string>;
+  runStatusesByRunId: Record<string, string>;
 };
 
 export type AgentChatRuntimeAction =
@@ -46,6 +47,7 @@ export type AgentChatRuntimeAction =
   | { type: "user.submitted"; prompt: string; parts?: PromptPart[]; createdAt?: string }
   | { type: "permission.replied"; requestId: string }
   | { type: "question.replied"; requestId: string; answers?: unknown[] }
+  | { type: "run.statuses.loaded"; statuses: Record<string, string> }
   | { type: "reset"; messages?: AgentMessage[] };
 
 export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []): AgentChatRuntimeState {
@@ -65,7 +67,8 @@ export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []
     streamingTextByPartId: {},
     messageScopesById: {},
     subagentsBySessionId: {},
-    subagentByTaskPartId: {}
+    subagentByTaskPartId: {},
+    runStatusesByRunId: {}
   };
 }
 
@@ -76,6 +79,9 @@ export function reduceAgentChatRuntime(
 ): AgentChatRuntimeState {
   if (action.type === "reset") {
     return createInitialAgentChatRuntimeState(action.messages ?? []);
+  }
+  if (action.type === "run.statuses.loaded") {
+    return { ...state, runStatusesByRunId: { ...state.runStatusesByRunId, ...action.statuses } };
   }
   if (action.type === "run.requested") {
     const userMessageId = action.userMessageId ?? state.pendingTodoUserMessageId ?? latestUserMessageId(state.messages);
@@ -222,7 +228,8 @@ function reduceSnapshotReset(state: AgentChatRuntimeState, event: RunEvent): Age
     todoUserMessageIdByRunId: { ...state.todoUserMessageIdByRunId },
     pendingTodoUserMessageId: state.pendingTodoUserMessageId,
     currentTodoRunId: state.currentTodoRunId,
-    supersededTodoRunIds: [...state.supersededTodoRunIds]
+    supersededTodoRunIds: [...state.supersededTodoRunIds],
+    runStatusesByRunId: { ...state.runStatusesByRunId }
   };
   // 旧独立消费者没有任何 Run owner 上下文时保留 todos 兼容回退；显式接管但尚未归属的
   // runtime Run 则维持“已接管、未归属”，snapshot Todo 要等远端 user message 后再投影。
@@ -439,7 +446,10 @@ function reduceEventOnly(
   }
   if (event.type === "run.started" || event.type === "run.created" || event.type === "run.cancelling" || event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
     if (state.supersededTodoRunIds.includes(event.runId)) {
-      return state;
+      // 新轮已开始时不再让旧 Run 写入当前 Todo/错误卡，但其终态仍是历史反馈资格的事实来源。
+      return event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled"
+        ? { ...state, runStatusesByRunId: { ...state.runStatusesByRunId, [event.runId]: runStatusFromEvent(event) } }
+        : state;
     }
     const runAlreadyAdoptedWithoutOwner = state.currentTodoRunId === event.runId
       && !state.todoUserMessageIdByRunId[event.runId];
@@ -458,7 +468,14 @@ function reduceEventOnly(
       // 后到成功/取消终态代表本 Run 最终没有失败，清理此前 transport error 产生的失败卡。
       messages = removeRunFailedCards(messages, event.runId);
     }
-    return { ...runState, status: runStatusFromEvent(event), runtimeStatus: runtimeStatusFromRunEvent(event), messages };
+    const runStatus = runStatusFromEvent(event);
+    return {
+      ...runState,
+      status: runStatus,
+      runtimeStatus: runtimeStatusFromRunEvent(event),
+      messages: bindRunIdToOwner(messages, runState.todoUserMessageIdByRunId[event.runId], event.runId),
+      runStatusesByRunId: { ...runState.runStatusesByRunId, [event.runId]: runStatus }
+    };
   }
   return state;
 }
@@ -565,13 +582,13 @@ function appendAssistantDelta(messages: AgentMessage[], delta: string, event: Ru
     const last = messages[lastAssistantIdx] as Extract<AgentMessage, { role: "assistant" }>;
     return [
       ...messages.slice(0, lastAssistantIdx),
-      { ...last, text: `${last.text}${delta}` },
+      { ...last, runId: last.runId ?? event.runId, text: `${last.text}${delta}` },
       ...messages.slice(lastAssistantIdx + 1),
     ];
   }
   return [
     ...messages,
-    { id: `assistant-${event.seq}`, role: "assistant", text: delta, createdAt: event.occurredAt }
+    { id: `assistant-${event.seq}`, role: "assistant", runId: event.runId, text: delta, createdAt: event.occurredAt }
   ] satisfies AgentMessage[];
 }
 
@@ -597,6 +614,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
         id: messageId,
         messageId,
         remoteMessageId: messageId,
+        runId: user.runId ?? event.runId,
         text: displayDelta,
         parts: appendPromptPart(user.parts, { type: "text", text: delta })
       });
@@ -613,7 +631,8 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
       messageId,
       text: "",
       createdAt: event.occurredAt,
-      parts: []
+      parts: [],
+      runId: event.runId
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
   const replaceIndex = exact.message ? exact.index : lastIdx;
 
@@ -628,6 +647,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
   }
   const nextAssistant = {
     ...assistant,
+    runId: assistant.runId ?? event.runId,
     messageId: assistant.messageId ?? messageId,
     remoteMessageId: assistant.remoteMessageId ?? messageId,
     text: nextPart.type === "text" ? `${assistant.text}${delta}` : assistant.text,
@@ -831,6 +851,7 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
     id: messageId,
     messageId,
     remoteMessageId: messageId,
+    runId: event.runId,
     text: role === "user" && incomingText ? displayTextFromUserPrompt(incomingText) : incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
     createdAt: text(raw.createdAt) ?? event.occurredAt,
   };
@@ -910,6 +931,22 @@ function replaceOrAppendMessage(messages: AgentMessage[], index: number, message
     return [...messages, message];
   }
   return [...messages.slice(0, index), message, ...messages.slice(index + 1)];
+}
+
+/** 把 Run 绑定到其根用户消息；没有 owner 时只给后续 assistant 事件自行携带 runId。 */
+function bindRunIdToOwner(messages: AgentMessage[], userMessageId: string | undefined, runId: string): AgentMessage[] {
+  if (!userMessageId) {
+    return messages;
+  }
+  return messages.map((message) => {
+    if (message.role === "card") {
+      return message;
+    }
+    const id = message.messageId ?? message.id;
+    return id === userMessageId || message.id === userMessageId
+      ? { ...message, runId }
+      : message;
+  });
 }
 
 function appendCard(

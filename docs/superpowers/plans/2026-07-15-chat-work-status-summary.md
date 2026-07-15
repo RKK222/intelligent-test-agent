@@ -1,5 +1,7 @@
 # 合并对话工作状态展示实施计划
 
+> 后续计划 `2026-07-15-run-feedback-scope.md` 已将反馈业务键从 assistant `messageId` 演进为 `runId`，并把完成 actions 插槽扩展到每个成功历史状态行；本文反馈 ID 相关步骤仅记录当时实现。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将主智能体当前轮非成功状态、Todo 和文件修改固定到输入框上方，成功完成后把状态收为最后输出下方与反馈按钮并列的图标，并让事件行按真实事件按需出现。

@@ -1674,6 +1674,32 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("keeps run ids on restored user and assistant messages", () => {
+    const mapped = messagesFromSessionMessages([
+      {
+        messageId: "msg_user_run",
+        sessionId: "ses_run",
+        runId: "run_restore",
+        role: "USER",
+        content: "整轮问题",
+        createdAt: "2026-07-15T10:00:00Z"
+      },
+      {
+        messageId: "msg_assistant_run",
+        sessionId: "ses_run",
+        runId: "run_restore",
+        role: "ASSISTANT",
+        content: "整轮回答",
+        createdAt: "2026-07-15T10:01:00Z"
+      }
+    ]);
+
+    expect(mapped).toEqual([
+      expect.objectContaining({ role: "user", runId: "run_restore" }),
+      expect.objectContaining({ role: "assistant", runId: "run_restore" })
+    ]);
+  });
+
   it("keeps platform and remote message ids when restoring assistant messages", () => {
     const mapped = messagesFromSessionMessages([
       {

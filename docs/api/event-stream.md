@@ -45,7 +45,7 @@
 
 | wire name | 说明 |
 |---|---|
-| `run.created` | Run 已创建；`REDIS_SUMMARY` 额外携带 `storageMode/clientRequestId/assistantSummaryMessageId`，其中稳定平台消息 ID 供终态反馈直接使用。 |
+| `run.created` | Run 已创建；前端据其 `runId` 绑定当前根用户消息。`REDIS_SUMMARY` 仍可额外携带 `storageMode/clientRequestId/assistantSummaryMessageId` 供摘要定位兼容。 |
 | `run.started` | Run 已开始执行。 |
 | `run.cancelling` | Run 正在取消。 |
 | `run.succeeded` | Run 成功结束。 |
@@ -123,7 +123,7 @@ data: {"eventId":"evt_snapshot_reset_run_x_2_10520","runId":"run_x","seq":0,"typ
 }
 ```
 
-`assistantSummaryMessageId` 在 Run 开始时确定，并与终态 PostgreSQL ASSISTANT 摘要行复用同一 ID；前端不得再通过轮询 Session 消息列表寻找反馈 ID。
+`assistantSummaryMessageId` 在 Run 开始时确定，并与终态 PostgreSQL ASSISTANT 摘要行复用同一 ID；反馈已改用 `runId`，该字段只用于摘要消息定位兼容。
 
 前端处理顺序固定为：
 
@@ -427,7 +427,7 @@ Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspa
 
 超级管理员定时任务管理页调用的 `/api/internal/platform/scheduler-management/**` 只维护 scheduler 任务定义和运行记录，不新增 SSE 事件类型，也不向 RunEvent 流发布任务状态变化；页面刷新通过 HTTP 查询完成。
 
-AI 回复满意度反馈接口 `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback` 只写入 `ai_message_feedbacks` 事实表，不产生 RunEvent，不通过 SSE 推送反馈状态；当前用户刷新或重新进入会话时通过 `GET .../feedback/me` 查询自己的反馈。运营分析页 `/api/internal/platform/analytics/**` 只读取 hourly/daily rollup、水位和明细查询接口，不订阅 RunEvent，也不新增 SSE 事件类型。反馈、Diff、Run 状态和 token 等运营指标由后台 rollup runner 定期从事实表聚合，主链路不在 RunEvent 里补发统计事件。
+AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId}/feedback` 只写入 `ai_message_feedbacks` 事实表，不产生 RunEvent，不通过 SSE 推送反馈状态；前端用既有 Run 终态事件绑定用户轮次，并通过 HTTP 批量接口恢复历史 Run 状态与当前用户反馈。旧消息反馈接口只作兼容。运营分析页 `/api/internal/platform/analytics/**` 只读取 hourly/daily rollup、水位和明细查询接口，不订阅 RunEvent，也不新增 SSE 事件类型。反馈、Diff、Run 状态和 token 等运营指标由后台 rollup runner 定期从事实表聚合，主链路不在 RunEvent 里补发统计事件。
 
 ## Internal Server Broadcast
 

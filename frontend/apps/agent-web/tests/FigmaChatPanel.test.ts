@@ -2665,12 +2665,14 @@ describe("FigmaChatPanel", () => {
 
   it("shows persisted feedback beside the collapsed status icon for a successful historical run", async () => {
     const platformMessageId = "msg_0123456789abcdef0123456789abcdef";
+    const runId = "run_feedback_history";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
           {
             id: "user-feedback-1",
             messageId: "user-feedback-1",
+            runId,
             role: "user",
             text: "请完成分析",
             createdAt: "2026-06-25T09:00:00.000Z"
@@ -2695,12 +2697,12 @@ describe("FigmaChatPanel", () => {
             status: "modified"
           }
         ],
-        messageFeedbacks: {
-          [platformMessageId]: {
+        runStatusesByRunId: { [runId]: "SUCCEEDED" },
+        runFeedbacks: {
+          [runId]: {
             feedbackId: "fb_123",
-            messageId: platformMessageId,
             sessionId: "ses_123",
-            runId: "run_123",
+            runId,
             rating: "POSITIVE",
             reasonCode: null,
             comment: null,
@@ -2731,19 +2733,21 @@ describe("FigmaChatPanel", () => {
     await buttons[0].trigger("click");
 
     expect(wrapper.emitted("submit-feedback")).toEqual([[{
-      messageId: platformMessageId,
+      runId,
       rating: "POSITIVE"
     }]]);
   });
 
-  it("emits persisted feedback id after merging a temporary assistant message", async () => {
+  it("emits the run id after merging temporary assistant messages", async () => {
     const platformMessageId = "msg_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const runId = "run_feedback_merged";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
           {
             id: "user-feedback-merge",
             messageId: "user-feedback-merge",
+            runId,
             role: "user",
             text: "继续分析",
             createdAt: "2026-06-25T08:59:00.000Z"
@@ -2765,9 +2769,8 @@ describe("FigmaChatPanel", () => {
         ],
         running: false,
         runtimeStatus: "SUCCEEDED",
-        messageFeedbacks: {
-          [platformMessageId]: null
-        },
+        runStatusesByRunId: { [runId]: "SUCCEEDED" },
+        runFeedbacks: { [runId]: null },
         processStatus: { status: "READY", initializable: false, message: "ready" }
       },
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -2779,7 +2782,7 @@ describe("FigmaChatPanel", () => {
     await buttons[0].trigger("click");
 
     expect(wrapper.emitted("submit-feedback")).toEqual([[{
-      messageId: platformMessageId,
+      runId,
       rating: "POSITIVE"
     }]]);
   });
@@ -2815,15 +2818,17 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(0);
   });
 
-  it("submits platform message id after a remote message is mapped to persistence", async () => {
+  it("submits the run id without depending on remote or platform assistant ids", async () => {
     const remoteMessageId = "msg_f2d478d96001861rLCyXjYqf75";
     const platformMessageId = "msg_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const runId = "run_feedback_remote";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
           {
             id: "user-feedback-mapped",
             messageId: "user-feedback-mapped",
+            runId,
             role: "user",
             text: "等待落库",
             createdAt: "2026-06-25T09:00:00.000Z"
@@ -2840,9 +2845,8 @@ describe("FigmaChatPanel", () => {
         ],
         running: false,
         runtimeStatus: "COMPLETED",
-        messageFeedbacks: {
-          [platformMessageId]: null
-        },
+        runStatusesByRunId: { [runId]: "COMPLETED" },
+        runFeedbacks: { [runId]: null },
         processStatus: { status: "READY", initializable: false, message: "ready" }
       },
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -2854,19 +2858,21 @@ describe("FigmaChatPanel", () => {
     await buttons[0].trigger("click");
 
     expect(wrapper.emitted("submit-feedback")).toEqual([[{
-      messageId: platformMessageId,
+      runId,
       rating: "POSITIVE"
     }]]);
   });
 
-  it("does not render assistant message feedback when the conversation is running", async () => {
+  it("does not render run feedback when the conversation is running", async () => {
     const platformMessageId = "msg_cccccccccccccccccccccccccccccccc";
+    const runId = "run_feedback_running";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
           {
             id: "user-feedback-running",
             messageId: "user-feedback-running",
+            runId,
             role: "user",
             text: "运行中的任务",
             createdAt: "2026-06-25T09:00:00.000Z"
@@ -2882,12 +2888,12 @@ describe("FigmaChatPanel", () => {
         ],
         running: true,
         runtimeStatus: "RUNNING",
-        messageFeedbacks: {
-          [platformMessageId]: {
+        runStatusesByRunId: { [runId]: "RUNNING" },
+        runFeedbacks: {
+          [runId]: {
             feedbackId: "fb_123",
-            messageId: platformMessageId,
             sessionId: "ses_123",
-            runId: "run_123",
+            runId,
             rating: "POSITIVE",
             reasonCode: null,
             comment: null,
@@ -2933,12 +2939,14 @@ describe("FigmaChatPanel", () => {
 
   it("hides successful root-run feedback while viewing a child-agent timeline", async () => {
     const platformMessageId = "msg_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const runId = "run_feedback_child_root";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
           {
             id: "user-feedback-child",
             messageId: "user-feedback-child",
+            runId,
             role: "user",
             text: "执行子任务"
           },
@@ -2961,6 +2969,7 @@ describe("FigmaChatPanel", () => {
         ],
         running: false,
         runtimeStatus: "SUCCEEDED",
+        runStatusesByRunId: { [runId]: "SUCCEEDED" },
         subagentsBySessionId: {
           ses_feedback_child: { sessionId: "ses_feedback_child", title: "子 Agent 输出" }
         },
@@ -2975,6 +2984,56 @@ describe("FigmaChatPanel", () => {
     await nextTick();
 
     expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(0);
+  });
+
+  it("shows run feedback after the user message when a successful run has no assistant part", async () => {
+    const runId = "run_feedback_without_assistant";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [{
+          id: "user-feedback-only",
+          messageId: "user-feedback-only",
+          runId,
+          role: "user",
+          text: "没有 assistant part 也要评价",
+          createdAt: "2026-07-15T13:00:00.000Z"
+        }],
+        running: false,
+        runtimeStatus: "SUCCEEDED",
+        runStatusesByRunId: { [runId]: "SUCCEEDED" },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+    await nextTick();
+
+    expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(2);
+    expect(wrapper.get(".oc-user-message").element.compareDocumentPosition(
+      wrapper.get(".oc-work-status-completed-summary").element
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps feedback actions for every successful historical run after a new run starts", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          { id: "u-run-1", role: "user", runId: "run_1", text: "第一轮", createdAt: "2026-07-15T10:00:00Z" },
+          { id: "a-run-1", role: "assistant", runId: "run_1", text: "第一轮完成", createdAt: "2026-07-15T10:01:00Z" },
+          { id: "u-run-2", role: "user", runId: "run_2", text: "第二轮", createdAt: "2026-07-15T10:02:00Z" },
+          { id: "a-run-2", role: "assistant", runId: "run_2", text: "第二轮完成", createdAt: "2026-07-15T10:03:00Z" },
+          { id: "u-run-3", role: "user", runId: "run_3", text: "第三轮", createdAt: "2026-07-15T10:04:00Z" }
+        ],
+        running: true,
+        runtimeStatus: "RUNNING",
+        runStatusesByRunId: { run_1: "SUCCEEDED", run_2: "COMPLETED", run_3: "RUNNING" },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+    await nextTick();
+
+    expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(4);
+    expect(wrapper.get("[data-testid='figma-work-status-dock']").find(".oc-work-status").exists()).toBe(true);
   });
 
   it.skip("renders historical generated files and opens the file changes drawer", async () => {

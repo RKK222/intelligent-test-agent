@@ -123,6 +123,20 @@ describe("opencode-like conversation state", () => {
     ]);
   });
 
+  it("projects each turn from its own run id and terminal status", () => {
+    const first = { ...userMessage("msg_user_1", "第一轮"), runId: "run_success" };
+    const second = { ...userMessage("msg_user_2", "第二轮"), runId: "run_failed" };
+    const rows = createTimelineRows(createOpencodeLikeState({
+      messages: [first, second],
+      runStatusesByRunId: { run_success: "SUCCEEDED", run_failed: "FAILED" }
+    }));
+
+    expect(rows.filter((row) => row.type === "work-status")).toEqual([
+      expect.objectContaining({ runId: "run_success", runStatus: "SUCCEEDED", status: "completed" }),
+      expect.objectContaining({ runId: "run_failed", runStatus: "FAILED", status: "failed" })
+    ]);
+  });
+
   it("prefers an explicit empty latest-turn snapshot over legacy current todos", () => {
     const rows = createTimelineRows(createOpencodeLikeState({
       messages: [userMessage("msg_user_1", "第一轮"), userMessage("msg_user_2", "第二轮")],

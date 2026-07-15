@@ -88,6 +88,8 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     }
 
     if (aggregateWorkStatus) {
+      const runId = turnRunId(userMessage, assistantMessages);
+      const runStatus = runId ? state.runStatusesByRunId[runId] : undefined;
       const workStatus: Extract<TimelineRow, { type: "work-status" }> = {
         type: "work-status",
         key: `work-status:${userMessageId}`,
@@ -99,8 +101,10 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
         todos: Object.prototype.hasOwnProperty.call(state.todoSnapshotsByUserMessageId, userMessageId)
           ? state.todoSnapshotsByUserMessageId[userMessageId]
           : isLatestTurn(userMessageId, state) ? state.todos : [],
-        status: workStatusState(userMessageId, state),
-        isLatest: isLatestTurn(userMessageId, state)
+        status: workStatusState(userMessageId, runStatus, state),
+        isLatest: isLatestTurn(userMessageId, state),
+        runId,
+        runStatus
       };
       if (workStatus.isLatest) {
         latestWorkStatus = workStatus;
@@ -296,7 +300,11 @@ function appendWorkStatusEvent(
   accumulator.events.push({ ...descriptor, refs: [ref] });
 }
 
-function workStatusState(userMessageId: string, state: OpencodeLikeConversationState): WorkStatusState {
+function workStatusState(userMessageId: string, runStatus: string | undefined, state: OpencodeLikeConversationState): WorkStatusState {
+  const normalizedRunStatus = runStatus?.toUpperCase();
+  if (normalizedRunStatus === "SUCCEEDED" || normalizedRunStatus === "COMPLETED") return "completed";
+  if (normalizedRunStatus === "FAILED") return "failed";
+  if (normalizedRunStatus === "CANCELLED" || normalizedRunStatus === "CANCELED") return "cancelled";
   if (!isLatestTurn(userMessageId, state)) return "completed";
   const runtimeType = state.runtimeStatus.type.toLowerCase();
   if (runtimeType === "retry") return "retry";
@@ -304,6 +312,13 @@ function workStatusState(userMessageId: string, state: OpencodeLikeConversationS
   if (runtimeType === "cancelled" || runtimeType === "canceled") return "cancelled";
   if (state.running || runtimeType === "busy" || runtimeType === "running") return "running";
   return "completed";
+}
+
+function turnRunId(
+  userMessage: Extract<OpencodeLikeConversationState["messages"][number], { role: "user" }>,
+  assistantMessages: Extract<OpencodeLikeConversationState["messages"][number], { role: "assistant" }>[]
+): string | undefined {
+  return userMessage.runId ?? assistantMessages.find((message) => Boolean(message.runId))?.runId;
 }
 
 function appendSingleAssistantPartRow(

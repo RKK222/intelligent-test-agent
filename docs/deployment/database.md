@@ -975,6 +975,10 @@ V18 及以前保留既有数字版本，已在本地或共享库执行过的 mig
 - 外键引用 `users`、`sessions`、`runs`、`session_messages`。
 - 时间、组织时间和 Run 维度索引用于反馈明细和负反馈分布查询。
 
+## V20260715213000 AI 反馈迁移为 Run 口径
+
+`V20260715213000__migrate_ai_feedback_to_run_scope.sql` 将可关联的历史消息反馈回填 `run_id`，同一用户同一 Run 的重复记录只保留最后更新的一条；`message_id` 改为可空的历史来源字段，并新增 `(user_id, run_id)` 唯一约束及 `run_id/message_id` 至少存在一个的检查约束。新反馈以 Run 为业务主键且 `message_id=null`；旧消息记录与 `(user_id, message_id)` 约束继续保留兼容。运营满意度统计以 Run 反馈事实计数，明细中的 `messageId` 允许为空。
+
 ### analytics_user_activity_hourly / analytics_user_activity_daily
 
 运营分析 API 只读 hourly/daily rollup 表，不在请求链路扫描原始事实宽表。

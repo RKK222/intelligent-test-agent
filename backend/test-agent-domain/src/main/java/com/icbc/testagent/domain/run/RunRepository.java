@@ -31,6 +31,13 @@ public interface RunRepository {
     Optional<Run> findById(RunId runId);
 
     /**
+     * 批量读取可见 Run，反馈历史查询等低频场景覆盖此方法以避免逐条数据库访问。
+     */
+    default List<Run> findByIds(List<RunId> runIds) {
+        return runIds.stream().map(this::findById).flatMap(Optional::stream).toList();
+    }
+
+    /**
      * 查询指定会话最近的非终态 Run，用于刷新后恢复运行中的 SSE 订阅。
      */
     default Optional<Run> findLatestActiveBySessionId(SessionId sessionId) {

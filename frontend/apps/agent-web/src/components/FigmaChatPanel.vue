@@ -35,7 +35,7 @@ import type {
   AgentMessage,
   AiFeedbackReasonCode,
   AiFeedbackRating,
-  AiMessageFeedback,
+  AiRunFeedback,
   FileSearchResult,
   MessageScope,
   MessagePart,
@@ -705,10 +705,11 @@ const props =
     providers?: any[]
     /** 当前选中的模型标识 */
     selectedModel?: string
-    /** 当前用户对 assistant 消息的反馈状态 */
-    messageFeedbacks?: Record<string, AiMessageFeedback | null>
+    /** 当前用户按 Run 保存的整轮评价。 */
+    runFeedbacks?: Record<string, AiRunFeedback | null>
     /** 正在提交反馈的消息 */
     feedbackSubmitting?: Record<string, boolean>
+    runStatusesByRunId?: Record<string, string>
     /** 可用命令列表（含 source=skill 的 Skill Command） */
     commands?: Array<{ commandId: string; name: string; description?: string; source?: string; arguments?: string }>
     /** 当前会话在前端内存中捕获的浏览器与平台后端原始报文 */
@@ -789,7 +790,7 @@ const emit =
     (
       e: 'submit-feedback',
       payload: {
-        messageId: string
+        runId: string
         rating: AiFeedbackRating
         reasonCode?: AiFeedbackReasonCode | null
         comment?: string | null
@@ -1044,7 +1045,7 @@ function retryAgentCatalog(event: Event) {
 }
 const inputComposing = ref(false)
 const negativeFeedbackOpen = ref(false)
-const negativeFeedbackMessageId = ref('')
+const negativeFeedbackRunId = ref('')
 const negativeFeedbackReason = ref<AiFeedbackReasonCode | ''>('')
 const negativeFeedbackComment = ref('')
 
@@ -1064,41 +1065,6 @@ function modelValue(model: { id: string; providerId?: string }) {
   return model.providerId ? `${model.providerId}/${model.id}` : model.id
 }
 
-function canFeedback(message: ChatMessage) {
-  return message.role === 'assistant' && !message._error && feedbackMessageId(message) !== undefined
-}
-
-function feedbackFor(message: ChatMessage) {
-  const id = feedbackMessageId(message)
-  return id ? props.messageFeedbacks?.[id] ?? null : null
-}
-
-function feedbackSubmitting(message: ChatMessage) {
-  const id = feedbackMessageId(message)
-  return id ? props.feedbackSubmitting?.[id] === true : false
-}
-
-function submitPositiveFeedback(message: ChatMessage) {
-  const id = feedbackMessageId(message)
-  if (!id) return
-  emit('submit-feedback', { messageId: id, rating: 'POSITIVE' })
-}
-
-function openNegativeFeedback(message: ChatMessage) {
-  const id = feedbackMessageId(message)
-  if (!id) return
-  const current = feedbackFor(message)
-  negativeFeedbackMessageId.value = id
-  negativeFeedbackReason.value = current?.rating === 'NEGATIVE' ? current.reasonCode ?? '' : ''
-  negativeFeedbackComment.value = current?.rating === 'NEGATIVE' ? current.comment ?? '' : ''
-  negativeFeedbackOpen.value = true
-}
-
-function feedbackMessageId(message: ChatMessage): string | undefined {
-  const id = message.feedbackMessageId ?? message.platformMessageId
-  return isPlatformMessageId(id) ? id : undefined
-}
-
 function isPlatformMessageId(id: string | undefined): id is string {
   return /^msg_[0-9a-f]{32}$/i.test(id ?? '')
 }
@@ -1108,14 +1074,42 @@ function isRemoteRuntimeMessageId(id: string | undefined): id is string {
 }
 
 function submitNegativeFeedback() {
-  if (!negativeFeedbackMessageId.value) return
+  if (!negativeFeedbackRunId.value) return
   emit('submit-feedback', {
-    messageId: negativeFeedbackMessageId.value,
+    runId: negativeFeedbackRunId.value,
     rating: 'NEGATIVE',
     reasonCode: negativeFeedbackReason.value || null,
     comment: negativeFeedbackComment.value.trim() || null,
   })
   negativeFeedbackOpen.value = false
+}
+
+function canFeedbackRun(row: { runId?: string; runStatus?: string }): row is { runId: string; runStatus?: string } {
+  const status = row.runStatus?.toUpperCase()
+  return !activeSubagentSessionId.value
+    && !props.historyLoading
+    && Boolean(row.runId)
+    && (status === 'SUCCEEDED' || status === 'COMPLETED')
+}
+
+function runFeedbackFor(runId: string) {
+  return props.runFeedbacks?.[runId] ?? null
+}
+
+function isRunFeedbackSubmitting(runId: string) {
+  return props.feedbackSubmitting?.[runId] === true
+}
+
+function submitPositiveRunFeedback(runId: string) {
+  emit('submit-feedback', { runId, rating: 'POSITIVE' })
+}
+
+function openNegativeRunFeedback(runId: string) {
+  const current = runFeedbackFor(runId)
+  negativeFeedbackRunId.value = runId
+  negativeFeedbackReason.value = current?.rating === 'NEGATIVE' ? current.reasonCode ?? '' : ''
+  negativeFeedbackComment.value = current?.rating === 'NEGATIVE' ? current.comment ?? '' : ''
+  negativeFeedbackOpen.value = true
 }
 const wasStopped = ref(false)
 const wasCompleted = ref(false)
@@ -3039,19 +3033,6 @@ const displayMessages = computed<ChatMessage[]>(() => {
   return merged
 })
 
-const lastFeedbackableMessage = computed(() => {
-  return [...displayMessages.value].reverse().find(canFeedback)
-})
-
-// 评价入口只认明确的成功终态，不能把“已经停止且没有错误”推断成成功；历史 Run 同样复用该规则。
-const showTimelineFeedback = computed(() =>
-  !activeSubagentSessionId.value
-  && !props.historyLoading
-  && !props.running
-  && isRuntimeSuccessStatus()
-  && Boolean(lastFeedbackableMessage.value)
-)
-
 const hasVisibleMessages = computed(() => displayMessages.value.length > 0)
 const showTaskFailed = computed(() =>
   !props.running && hasVisibleMessages.value && (wasFailed.value || isRuntimeFailureStatus())
@@ -3109,6 +3090,7 @@ const opencodeTimelineState = computed(() =>
     streamingTextByPartId: props.streamingTextByPartId,
     todos: props.todos,
     todoSnapshotsByUserMessageId: props.todoSnapshotsByUserMessageId,
+    runStatusesByRunId: props.runStatusesByRunId,
     messageScopesById: props.messageScopesById,
     subagentsBySessionId: props.subagentsBySessionId,
     subagentByTaskPartId: props.subagentByTaskPartId,
@@ -3469,20 +3451,21 @@ function onCompositionEnd() {
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
       >
-        <template #completed-status-actions>
+        <template #completed-status-actions="{ row }">
           <div
-            v-if="showTimelineFeedback && lastFeedbackableMessage"
+            v-if="canFeedbackRun(row)"
             class="figma-chat-feedback figma-chat-completed-feedback"
           >
             <button
               type="button"
               :class="[
                 'figma-chat-feedback-btn',
-                feedbackFor(lastFeedbackableMessage)?.rating === 'POSITIVE' && 'is-selected',
+                runFeedbackFor(row.runId)?.rating === 'POSITIVE' && 'is-selected',
               ]"
-              :disabled="feedbackSubmitting(lastFeedbackableMessage)"
+              :disabled="isRunFeedbackSubmitting(row.runId)"
               title="满意"
-              @click="submitPositiveFeedback(lastFeedbackableMessage)"
+              aria-label="满意"
+              @click="submitPositiveRunFeedback(row.runId)"
             >
               <ThumbsUp :size="12" />
             </button>
@@ -3491,11 +3474,12 @@ function onCompositionEnd() {
               :class="[
                 'figma-chat-feedback-btn',
                 'figma-chat-feedback-btn--negative',
-                feedbackFor(lastFeedbackableMessage)?.rating === 'NEGATIVE' && 'is-selected',
+                runFeedbackFor(row.runId)?.rating === 'NEGATIVE' && 'is-selected',
               ]"
-              :disabled="feedbackSubmitting(lastFeedbackableMessage)"
+              :disabled="isRunFeedbackSubmitting(row.runId)"
               title="不满意"
-              @click="openNegativeFeedback(lastFeedbackableMessage)"
+              aria-label="不满意"
+              @click="openNegativeRunFeedback(row.runId)"
             >
               <ThumbsDown :size="12" />
             </button>
@@ -4084,36 +4068,7 @@ function onCompositionEnd() {
                 </div>
               </div>
             </div>
-            <div v-if="canFeedback(message) || (message.content && message.content.trim())" class="figma-chat-feedback">
-              <button
-                v-if="canFeedback(message)"
-                type="button"
-                :class="[
-                  'figma-chat-feedback-btn',
-                  feedbackFor(message)?.rating === 'POSITIVE' && 'is-selected',
-                ]"
-                :disabled="feedbackSubmitting(message)"
-                title="满意"
-                @click="submitPositiveFeedback(message)"
-              >
-                <ThumbsUp :size="12" />
-                <span>满意</span>
-              </button>
-              <button
-                v-if="canFeedback(message)"
-                type="button"
-                :class="[
-                  'figma-chat-feedback-btn',
-                  'figma-chat-feedback-btn--negative',
-                  feedbackFor(message)?.rating === 'NEGATIVE' && 'is-selected',
-                ]"
-                :disabled="feedbackSubmitting(message)"
-                title="不满意"
-                @click="openNegativeFeedback(message)"
-              >
-                <ThumbsDown :size="12" />
-                <span>不满意</span>
-              </button>
+            <div v-if="message.content && message.content.trim()" class="figma-chat-feedback">
               <button
                 v-if="message.content && message.content.trim()"
                 type="button"

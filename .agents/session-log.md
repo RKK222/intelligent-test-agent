@@ -6926,3 +6926,17 @@ bash /tmp/test-api-after-restart.sh
   - 测试 mock 的 `VueFlow` 增加 `node-mermaid` 具名插槽按节点渲染真实 `MermaidFlowNode`，并补 `paneClick` 事件与触发按钮；新增“快捷建连后起始节点取消选中、新节点选中”“点击空白画布取消选中”两条回归测试。未修改 API、事件、数据库、环境配置或 generated SDK。
 - Result:
   - editor 全量 Vitest 9 文件 101 passed（含新增 2 项），前端 typecheck 与 lint 通过。
+
+### 2026-07-15 - 反馈改为按主智能体 Run 评价
+
+- Why:
+  - 一次主智能体回复可能包含多条或零条 assistant part，按 assistant 消息 ID 判断会让成功 Run 的反馈入口缺失，也不能准确表达用户评价的是整轮回复。
+- What:
+  - 新增 Run 反馈写入、单查和最多 100 条批查 API；只允许 Run 触发人或 Session 创建人评价 `SUCCEEDED` 主对话 Run，旧消息接口能关联 Run 时转入新逻辑。
+  - `ai_message_feedbacks` 回填并去重可关联历史数据，新增单用户单 Run 唯一约束；新反馈不写 `message_id`，该字段仅作可空历史来源。
+  - 前端按用户轮保存 `runId/runStatus`；成功历史 Run 永久保留状态图标和反馈入口，无 assistant part 时入口紧跟用户消息，失败、取消、状态未知和子 Agent 不展示。
+- How:
+  - 使用 MyBatis XML 完成 Run/反馈批查，历史会话按 100 个 Run 分批恢复状态和反馈；终态投影短暂冲突只做有限退避重试。同步 HTTP、事件流、数据库、模块 README 与设计/实施计划。
+- Result:
+  - 后端 Run 反馈相关领域/API/MyBatis/Flyway 定向测试全部通过，18 模块 `mvn -DskipTests package` 通过；前端全量 59 个测试文件为 887 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 通过。
+  - 后端全量 `mvn test` 在 persistence 模块被 9 个任务外基线问题阻断：5 个 H2 不支持存量 `ON CONFLICT`、2 个默认用户/旧拓扑迁移断言、2 个 `usr_test_dev` 夹具外键缺失；本次新增迁移及持久化测试均通过。未修改 RunEvent、generated SDK、环境配置或安全凭据。

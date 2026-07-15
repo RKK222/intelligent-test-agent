@@ -411,6 +411,31 @@ export type AiMessageFeedbackPayload = {
   comment?: string | null;
 };
 
+/** 用户对一次主智能体 Run 整体回复的评价。 */
+export type AiRunFeedback = {
+  feedbackId: string;
+  runId: string;
+  sessionId: string;
+  rating: AiFeedbackRating;
+  reasonCode?: AiFeedbackReasonCode | null;
+  comment?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AiRunFeedbackPayload = AiMessageFeedbackPayload;
+
+export type RunFeedbackState = {
+  runId: string;
+  sessionId: string;
+  runStatus: string;
+  feedback?: AiRunFeedback | null;
+};
+
+export type RunFeedbackQuery = {
+  runIds: string[];
+};
+
 export type AnalyticsGranularity = "hour" | "day" | "week" | "month";
 
 export type AnalyticsQueryParams = {
@@ -591,7 +616,7 @@ export type AnalyticsFeedbackDetail = {
   department?: string | null;
   sessionId: string;
   runId?: string | null;
-  messageId: string;
+  messageId?: string | null;
   rating: AiFeedbackRating;
   reasonCode?: AiFeedbackReasonCode | null;
   comment?: string | null;
@@ -1658,6 +1683,7 @@ export type AgentMessage =
       messageId?: string;
       platformMessageId?: string;
       remoteMessageId?: string;
+      runId?: string;
     }
   | {
       id: string;
@@ -1668,6 +1694,7 @@ export type AgentMessage =
       messageId?: string;
       platformMessageId?: string;
       remoteMessageId?: string;
+      runId?: string;
     }
   | {
       id: string;

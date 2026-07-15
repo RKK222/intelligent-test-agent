@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { OpencodeLikeConversationState } from "../state/types";
+import type { OpencodeLikeConversationState, TimelineRow as TimelineRowType } from "../state/types";
 
 export type OpencodeTimelineProps = {
   state: OpencodeLikeConversationState;
@@ -16,7 +16,7 @@ import { createTimelineRows } from "../state/projection";
 const props = defineProps<OpencodeTimelineProps>();
 const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagent: [sessionId: string] }>();
 defineSlots<{
-  "completed-status-actions"?: () => unknown;
+  "completed-status-actions"?: (props: { row: Extract<TimelineRowType, { type: "work-status" }> }) => unknown;
 }>();
 const rows = computed(() => createTimelineRows(props.state));
 const resolvedDockTarget = computed(() => {
@@ -109,8 +109,8 @@ watch(latestUserMessageKey, () => {
         @toggle-completed-work-status="toggleCompletedStatus(row.key)"
         @close-work-status-event="openWorkStatusDetail = null"
       >
-        <template #completed-status-actions>
-          <slot name="completed-status-actions" />
+        <template #completed-status-actions="slotProps">
+          <slot name="completed-status-actions" v-bind="slotProps" />
         </template>
       </TimelineRow>
     </div>
@@ -130,8 +130,8 @@ watch(latestUserMessageKey, () => {
           @toggle-completed-work-status="toggleCompletedStatus(row.key)"
           @close-work-status-event="openWorkStatusDetail = null"
         >
-          <template #completed-status-actions>
-            <slot name="completed-status-actions" />
+          <template #completed-status-actions="slotProps">
+            <slot name="completed-status-actions" v-bind="slotProps" />
           </template>
         </TimelineRow>
       </div>

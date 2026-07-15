@@ -19,8 +19,8 @@ import { BookOpenText, Code2, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
-  AiMessageFeedback,
-  AiMessageFeedbackPayload,
+  AiRunFeedback,
+  AiRunFeedbackPayload,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   FileContent,
@@ -441,7 +441,7 @@ onBeforeUnmount(() => {
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
-const messageFeedbacks = ref<Record<string, AiMessageFeedback | null>>({});
+const runFeedbacks = ref<Record<string, AiRunFeedback | null>>({});
 const feedbackSubmitting = ref<Record<string, boolean>>({});
 const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
 const assistantSummaryMessageIdsByRunId = ref<Record<string, string>>({});
@@ -2546,28 +2546,50 @@ const rejectQuestionMutation = useMutation({
   }
 });
 
-const submitMessageFeedbackMutation = useMutation({
-  mutationFn: async (payload: AiMessageFeedbackPayload & { messageId: string }) =>
-    api.putMessageFeedback(payload.messageId, {
+const submitRunFeedbackMutation = useMutation({
+  mutationFn: async (payload: AiRunFeedbackPayload & { runId: string }) =>
+    putRunFeedbackWithProjectionRetry(payload.runId, {
       rating: payload.rating,
       reasonCode: payload.reasonCode,
       comment: payload.comment
     }),
   onMutate: payload => {
-    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: true };
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.runId]: true };
   },
   onSuccess: (saved, payload) => {
-    messageFeedbacks.value = { ...messageFeedbacks.value, [payload.messageId]: saved };
+    runFeedbacks.value = { ...runFeedbacks.value, [payload.runId]: saved };
     feedback.value = { kind: "success", title: "反馈已提交", description: payload.rating === "POSITIVE" ? "满意" : "不满意" };
   },
   onError: (error, payload) => {
     feedback.value = errorFeedback("提交反馈失败", error);
-    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: false };
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.runId]: false };
   },
   onSettled: (_data, _error, payload) => {
-    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: false };
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.runId]: false };
   }
 });
+
+/** 终态 SSE 可能略早于 Run 终态落库；只对该冲突做三次短退避，不重试其他错误。 */
+async function putRunFeedbackWithProjectionRetry(runId: string, payload: AiRunFeedbackPayload): Promise<AiRunFeedback> {
+  const delays = [0, 250, 500];
+  let lastError: unknown;
+  for (const delay of delays) {
+    if (delay > 0) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    try {
+      return await api.putRunFeedback(runId, payload);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof BackendApiError)
+        || error.code !== "CONFLICT"
+        || String(error.details.runStatus ?? "").toUpperCase() === "SUCCEEDED") {
+        throw error;
+      }
+    }
+  }
+  throw lastError;
+}
 
 function createTerminalTicket() {
   if (!session.value) {
@@ -4080,11 +4102,7 @@ function applyRunEventWorkbenchProjection(
             ...platformMessageIdsByRemoteId.value,
             [remoteMessageId]: assistantSummaryMessageId
           };
-          void loadFeedbacksForMessages([{
-            messageId: assistantSummaryMessageId,
-            role: "ASSISTANT",
-            remoteMessageId
-          }], run.value.sessionId);
+          void loadFeedbacksForRunIds([event.runId], run.value.sessionId);
         }
       } else {
         // legacy 后端没有稳定摘要 ID，继续使用原有短期兼容查询。
@@ -4967,7 +4985,7 @@ function handleNewConversation() {
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   clearAutoRetryState();
   dispatchChat({ type: "reset" });
-  messageFeedbacks.value = {};
+  runFeedbacks.value = {};
   feedbackSubmitting.value = {};
   platformMessageIdsByRemoteId.value = {};
   assistantSummaryMessageIdsByRunId.value = {};
@@ -4984,30 +5002,43 @@ function handleNewConversation() {
 }
 
 async function loadFeedbacksForMessages(
-  messages: Array<Pick<SessionMessage, "messageId" | "role" | "remoteMessageId">>,
+  messages: Array<Pick<SessionMessage, "messageId" | "role" | "remoteMessageId" | "runId">>,
   expectedSessionId?: string,
   interactionIsCurrent: () => boolean = () => true
 ) {
   rememberPersistedMessageIdentities(messages);
-  const assistantMessageIds = messages
-    .filter(message => message.role === "ASSISTANT" && isPlatformSessionMessageId(message.messageId))
-    .map(message => message.messageId!)
-  const uniqueIds = [...new Set(assistantMessageIds)];
-  const loaded: Record<string, AiMessageFeedback | null> = {};
-  await Promise.all(uniqueIds.map(async messageId => {
-    try {
-      loaded[messageId] = await api.getMyMessageFeedback(messageId);
-    } catch {
-      loaded[messageId] = null;
+  const uniqueIds = [...new Set(messages.map(message => message.runId).filter((runId): runId is string => Boolean(runId)))];
+  await loadFeedbacksForRunIds(uniqueIds, expectedSessionId, interactionIsCurrent);
+}
+
+async function loadFeedbacksForRunIds(
+  runIds: string[],
+  expectedSessionId?: string,
+  interactionIsCurrent: () => boolean = () => true
+) {
+  const loaded: Record<string, AiRunFeedback | null> = {};
+  const statuses: Record<string, string> = {};
+  try {
+    for (let index = 0; index < runIds.length; index += 100) {
+      const states = await api.queryMyRunFeedbacks({ runIds: runIds.slice(index, index + 100) });
+      for (const state of states) {
+        loaded[state.runId] = state.feedback ?? null;
+        statuses[state.runId] = state.runStatus;
+      }
     }
-  }));
+  } catch {
+    // 历史反馈加载失败不隐藏入口；已由消息/RunEvent 恢复的成功状态继续用于展示。
+  }
   if (interactionIsCurrent() && (!expectedSessionId || session.value?.sessionId === expectedSessionId)) {
-    messageFeedbacks.value = loaded;
+    runFeedbacks.value = { ...runFeedbacks.value, ...loaded };
+    if (Object.keys(statuses).length > 0) {
+      dispatchChat({ type: "run.statuses.loaded", statuses });
+    }
   }
 }
 
-function handleSubmitFeedback(payload: AiMessageFeedbackPayload & { messageId: string }) {
-  submitMessageFeedbackMutation.mutate(payload);
+function handleSubmitFeedback(payload: AiRunFeedbackPayload & { runId: string }) {
+  submitRunFeedbackMutation.mutate(payload);
 }
 
 function onCurrentFileFeedback(action: "accept-current" | "reject-current", path: string) {
@@ -5334,8 +5365,9 @@ async function handleLogout() {
           :models="models"
           :providers="providers"
           :selected-model="selectedModel"
-          :message-feedbacks="messageFeedbacks"
+          :run-feedbacks="runFeedbacks"
           :feedback-submitting="feedbackSubmitting"
+          :run-statuses-by-run-id="chatState.runStatusesByRunId"
           :commands="commands"
           :raw-output-entries="currentRawOutputEntries"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"

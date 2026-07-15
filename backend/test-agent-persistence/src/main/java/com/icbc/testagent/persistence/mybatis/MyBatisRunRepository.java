@@ -71,6 +71,17 @@ public class MyBatisRunRepository implements RunRepository {
                 .map(this::toDomain);
     }
 
+    /** 批量恢复历史会话的 Run 状态，避免反馈面板逐条查询。 */
+    @Override
+    public List<Run> findByIds(List<RunId> runIds) {
+        if (runIds == null || runIds.isEmpty()) {
+            return List.of();
+        }
+        return mapper.findByIds(runIds.stream().map(RunId::value).distinct().toList()).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
     @Override
     public Optional<Run> findLatestActiveBySessionId(SessionId sessionId) {
         return Optional.ofNullable(mapper.findLatestActiveBySessionId(sessionId.value()))
