@@ -106,6 +106,7 @@ unzip -t test-agent-internal-release.zip
 两台后台的共同配置：
 
 ```dotenv
+SPRING_PROFILES_ACTIVE=prod
 SERVER_PORT=8080
 TEST_AGENT_DEPLOYMENT_MODE=internal
 SYS_DATA_ROOT_DIR=/data/testagent/data

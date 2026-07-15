@@ -6646,11 +6646,11 @@ bash /tmp/test-api-after-restart.sh
   - PTY 与 Agent 配置进度 ticket 改为返回签发 Java `listenUrl` 对应的绝对 `ws/wss` 地址；Workspace/Agent 文件继续复用既有 route 返回的目标 Java，三类一次性 ticket 均在同一 JVM 签发和消费。
   - 新增统一 `nginx.env + configure-nginx.sh`，按 single/multi 安全渲染同一模板、校验 include、执行 `nginx -t`、reload 并在失败时回滚；前端部署入口统一调用该脚本。
   - 后端升级脚本校验已有 systemd unit 的 JAR/env，停止服务后只清理命令行仍指向本次交付 JAR 的 8080 遗留进程，并在启动后确认 systemd MainPID 持有 8080；`--validate-only` 改用临时目录，可在 Mac/CI 不依赖 `/data` 验包。
-  - 单后台和多后台手册同步给出独立配置、网络、部署、模型和排障流程；模型保持 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`、`includeUsage=false` 与 Java:8080→9070 正式链路。
+  - 单后台和多后台手册同步给出独立配置、网络、部署、模型和排障流程，生产 `backend.env` 明确启用 `prod` profile；模型保持 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`、`includeUsage=false` 与 Java:8080→9070 正式链路。
 - How:
   - 复用 `BackendInstanceIdentity`、`BackendJavaRouteResolver`、`BackendHttpForwarder`、既有 Agent 配置进度广播和文件 route，没有新增共享 ticket、sticky session、Java 间 WebSocket/file 代理或 19070 relay；生产浏览器网段需能直达每台 Java `:8080`。
   - 增加绝对 URL 单元测试、最终 ZIP systemd 首装/升级模拟和单/多 Nginx 渲染/回滚脚本测试；从最终归档反向检查 API 业务类和两个准确模型配置。
 - Result:
   - runtime 523 项、API 285 项、前端 backend-api/terminal 58 项通过；本地 `.env.test` 后端 health/readiness、前端 3000 和 manager 启动通过。Linux/amd64 worker 镜像实跑通过，OpenCode 1.17.8、glibc 2.31 正常。
-  - 新企业归档 `deploy/internal/dist/test-agent-internal-release.zip` 已通过 SHA-256、完整解压、validate-only、systemd 首装/升级和 Nginx single/multi 校验，校验值为 `d8e0e7fc3b2c4fc8fb1afef70212c6e29da47e31fa25bc0f217a3832930aa1ec`。
+  - 新企业归档 `deploy/internal/dist/test-agent-internal-release.zip` 已通过 SHA-256、完整解压、validate-only、systemd 首装/升级和 Nginx single/multi 校验，校验值为 `7fe02c3d6d38cfbe8949a9fc419de6e669cb6508a3c14cfcad408c0b55e84f59`。
   - 未连接生产 `.2/.4/.114`，未执行生产 9070、浏览器直连两个 Java WebSocket 或真实双节点滚动验收；这些仍需现场按多后台手册验证，不能以本地打包结果替代生产网络验收。

@@ -76,6 +76,7 @@ unzip -t test-agent-internal-release.zip
 在 `.114` 创建 `/data/testagent/config/backend.env`。密码和 key 用现场真实值替换：
 
 ```dotenv
+SPRING_PROFILES_ACTIVE=prod
 SERVER_PORT=8080
 TEST_AGENT_DEPLOYMENT_MODE=internal
 TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114
