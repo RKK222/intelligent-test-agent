@@ -6789,3 +6789,14 @@ bash /tmp/test-api-after-restart.sh
   - 新增“选中连线后可新增、修改并删除连线文字”回归测试（mock 补 `edgeClick` 与 `mock-edge-click`）；同步更新画布取消选中测试的空态文案。未修改 API、事件、数据库、环境配置或 generated SDK。
 - Result:
   - editor 全量 Vitest 9 文件 109 passed（+1），前端 typecheck 通过。
+
+### 2026-07-15 - 自定义边渲染连线文字
+
+- Why:
+  - 上一条只把文字写入模型；但自定义边类型 `mermaid-edge` 不会从 Vue Flow 拿到 `labelX/labelY`，`BaseEdge` 不渲染标签，导致文字在画布上看不见。
+- What:
+  - `MermaidFlowEdge.vue` 取边中点 `((sourceX+targetX)/2, (sourceY+targetY)/2)` 渲染 `<text class="ta-mermaid-edge-label">`，用 `paint-order: stroke` 白色描边光晕保证压在连线上可读，`pointer-events:none` 不挡点击；有 `label` 才渲染。
+- How:
+  - 新增“有文字时在边中点渲染标签、无文字不渲染”测试。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 110 passed（+1），前端 typecheck 通过。

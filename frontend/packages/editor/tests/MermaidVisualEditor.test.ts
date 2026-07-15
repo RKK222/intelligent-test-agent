@@ -431,6 +431,18 @@ describe("MermaidFlowEdge", () => {
     expect(active.container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(2);
   });
 
+  it("有文字时在边中点渲染标签，无文字不渲染", () => {
+    const withLabel = render(MermaidFlowEdge, {
+      props: { ...edgeProps(true), label: "下一步" } as unknown as EdgeProps
+    });
+    const labelEl = withLabel.container.querySelector(".ta-mermaid-edge-label");
+    expect(labelEl).toBeTruthy();
+    expect(labelEl?.textContent).toContain("下一步");
+
+    const withoutLabel = render(MermaidFlowEdge, { props: edgeProps(true) });
+    expect(withoutLabel.container.querySelector(".ta-mermaid-edge-label")).toBeNull();
+  });
+
   it("按下端点圆圈发出重连起点（带固定端信息）", async () => {
     const { container, emitted } = render(MermaidFlowEdge, { props: edgeProps(true) });
     const handles = container.querySelectorAll<HTMLElement>(".ta-mermaid-edge-handle");

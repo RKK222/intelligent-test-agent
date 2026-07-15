@@ -27,6 +27,12 @@ const path = computed(() =>
   })[0]
 );
 
+/** 自定义边不会从 Vue Flow 拿到 labelX/labelY，这里取边中点放标签。 */
+const labelPos = computed(() => ({
+  x: (props.sourceX + props.targetX) / 2,
+  y: (props.sourceY + props.targetY) / 2
+}));
+
 /** 按下端点圆圈开始重连：被拖动端的另一端作为固定端。end='target' 时固定 source，end='source' 时固定 target。 */
 function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
   if (event.button !== 0) return;
@@ -49,6 +55,14 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
 
 <template>
   <BaseEdge :path="path" :style="props.style" :marker-end="props.markerEnd" :marker-start="props.markerStart" />
+  <text
+    v-if="props.label"
+    :x="labelPos.x"
+    :y="labelPos.y"
+    text-anchor="middle"
+    dominant-baseline="central"
+    class="ta-mermaid-edge-label"
+  >{{ props.label }}</text>
   <template v-if="props.selected">
     <circle
       :cx="props.sourceX"
@@ -70,6 +84,18 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
 </template>
 
 <style scoped>
+.ta-mermaid-edge-label {
+  fill: var(--ta-ink, #172033);
+  font-size: 11px;
+  font-weight: 600;
+  /* 白色描边光晕，保证文字压在连线上也可读 */
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 4;
+  stroke-linejoin: round;
+  pointer-events: none;
+  user-select: none;
+}
 .ta-mermaid-edge-handle {
   fill: #22c55e;
   stroke: #ffffff;
