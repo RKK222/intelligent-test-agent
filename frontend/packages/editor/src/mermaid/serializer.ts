@@ -1,4 +1,5 @@
 import { serializeMermaidLayout } from "./metadata";
+import { serializeMermaidEdgePorts } from "./edge-port-metadata";
 import type { MermaidEdgeRelation, MermaidGraph, MermaidNode, MermaidNodeType } from "./model";
 
 function escapeLabel(value: string): string {
@@ -27,7 +28,11 @@ function operatorForRelation(relation: MermaidEdgeRelation): string {
 
 /** 生成格式稳定、可由 Mermaid 官方 parser 接受的 DSL。 */
 export function serializeMermaidGraph(graph: MermaidGraph): string {
-  const lines = [`${graph.kind} ${graph.direction}`, ...serializeMermaidLayout(graph.nodes)];
+  const lines = [
+    `${graph.kind} ${graph.direction}`,
+    ...serializeMermaidLayout(graph.nodes),
+    ...serializeMermaidEdgePorts(graph.edges)
+  ];
   lines.push(...graph.nodes.map(serializeNode));
   const serializeEdge = (edge: MermaidGraph["edges"][number]) => {
     const rawLabel = edge.label.trim().replaceAll("|", "&#124;").replaceAll("\n", " ");

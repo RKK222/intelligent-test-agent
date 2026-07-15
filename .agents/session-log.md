@@ -6323,6 +6323,19 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 前端全量 lint、typecheck、56 个 Vitest 文件（801 passed、1 skipped）、生产 build 和 `git diff --check` 通过；浏览器页面无错误日志。构建仅保留既有 Google Fonts `@import` 顺序和大 chunk 警告。
 
+### 2026-07-15 - Mermaid 新建连线改用 draw.io 式固定端口交互
+
+- Why:
+  - 六个端口原来始终可见并依赖 Vue Flow 原生 connect，命中范围偏小；多端口只按边顺序重新分配，无法保留用户实际选择的起终点。
+- What:
+  - 节点空闲时隐藏六个 14px 通用端口，悬浮节点才显示；自研控制器以 18px 起线、24px 目标激活、28px 端口吸附的固定屏幕距离管理拖线、SmoothStep 临时路径、有效/无效反馈和窗口级取消生命周期。
+  - 新边保存 `sourceHandle/targetHandle`，并通过 Mermaid 可忽略的 `%% editor-edge-ports:` 注释往返；旧边继续自动均匀分配，损坏或歧义 metadata 原样保留，合法陈旧条目自动清理。
+- How:
+  - 关闭 Vue Flow 原生 connect，在 Loose 模式下把六个 Handle 作为通用端口；节点根元素完成扩大命中，并在端口附近捕获 `mousedown`，避免 Vue Flow 的 D3 节点拖拽抢先响应。
+  - TDD 覆盖几何边界、重叠优先级、固定端口适配、重复边与自环、成功和全部取消生命周期、metadata 兼容与组件状态；真实浏览器在最小缩放和约 0.63 倍缩放下完成反向拖线，验收草稿均已取消。
+- Result:
+  - 前端全量 lint、typecheck、142 个 Vitest 文件（819 passed、1 skipped、0 failed）、生产 build 和 `git diff --check` 通过；构建仍只有既有 Google Fonts `@import` 顺序和大 chunk 警告。
+
 ### 2026-07-15 - 运营分析汇总迁移统一定时任务
 
 - Why:

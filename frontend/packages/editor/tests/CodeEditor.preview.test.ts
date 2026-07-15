@@ -58,7 +58,9 @@ vi.mock("@vue-flow/core", () => ({
   Handle: defineComponent({ template: "<span />" }),
   BaseEdge: defineComponent({ template: "<path />" }),
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
-  MarkerType: { ArrowClosed: "arrowclosed", Arrow: "arrow" }
+  MarkerType: { ArrowClosed: "arrowclosed", Arrow: "arrow" },
+  ConnectionMode: { Loose: "loose" },
+  getSmoothStepPath: vi.fn(() => ["M0 0 L1 1"])
 }));
 
 import CodeEditor from "../src/CodeEditor.vue";

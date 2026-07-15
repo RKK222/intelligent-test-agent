@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import {
+  ConnectionMode,
   VueFlow,
-  type Connection,
   type NodeDragEvent,
   type NodeMouseEvent
 } from "@vue-flow/core";
@@ -16,8 +16,13 @@ import {
 } from "../model";
 import MermaidFlowNode from "./MermaidFlowNode.vue";
 import {
+  useMermaidConnectionDrag,
+  type MermaidConnectionStart
+} from "./use-mermaid-connection-drag";
+import {
   appendMermaidEdge,
   applyVueFlowPositions,
+  type MermaidPortConnection,
   toVueFlowEdges,
   toVueFlowNodes
 } from "./vue-flow-adapter";
@@ -51,9 +56,28 @@ function onNodeDragStop(event: NodeDragEvent) {
   emit("update:modelValue", applyVueFlowPositions(props.modelValue, [event.node]));
 }
 
-function onConnect(connection: Connection) {
+function commitConnection(connection: MermaidPortConnection) {
   const next = appendMermaidEdge(props.modelValue, connection);
   if (next !== props.modelValue) emit("update:modelValue", next);
+}
+
+const {
+  isDragging,
+  sourceNodeId,
+  sourceHandleId,
+  targetNodeId,
+  targetHandleId,
+  targetStatus,
+  dragPath,
+  startConnection
+} = useMermaidConnectionDrag({
+  getCanvasElement: () => canvasRef.value,
+  getGraph: () => props.modelValue,
+  onConnect: commitConnection
+});
+
+function onConnectionStart(start: MermaidConnectionStart) {
+  startConnection(start);
 }
 
 function onNodeClick(event: NodeMouseEvent) {
@@ -156,7 +180,7 @@ function updateDirection(event: Event) {
           <option value="RL">从右到左</option>
         </select>
       </label>
-      <span class="ta-mermaid-toolbar__hint">从右侧拖入节点；从节点边缘 Handle 拉出连线</span>
+      <span class="ta-mermaid-toolbar__hint">悬浮节点显示连接点；按住连接点拖到目标节点</span>
     </div>
 
     <div class="ta-mermaid-workspace">
@@ -175,15 +199,42 @@ function updateDirection(event: Event) {
           :min-zoom="0.35"
           :max-zoom="2"
           fit-view-on-init
-          :nodes-connectable="true"
+          :nodes-connectable="false"
+          :connect-on-click="false"
+          :connection-mode="ConnectionMode.Loose"
           @node-drag-stop="onNodeDragStop"
           @node-click="onNodeClick"
-          @connect="onConnect"
         >
           <template #node-mermaid="nodeProps">
-            <MermaidFlowNode v-bind="nodeProps" />
+            <MermaidFlowNode
+              v-bind="nodeProps"
+              :connection-source-handle-id="sourceNodeId === nodeProps.id ? sourceHandleId : undefined"
+              :is-connection-target="isDragging && targetNodeId === nodeProps.id"
+              :snapped-handle-id="targetNodeId === nodeProps.id ? targetHandleId : undefined"
+              :connection-status="targetNodeId === nodeProps.id ? targetStatus : undefined"
+              @connection-start="onConnectionStart"
+            />
           </template>
         </VueFlow>
+        <svg
+          v-if="isDragging"
+          class="ta-mermaid-connection-preview"
+          aria-hidden="true"
+        >
+          <defs>
+            <marker id="ta-mermaid-preview-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" />
+            </marker>
+            <marker id="ta-mermaid-preview-arrow-invalid" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" />
+            </marker>
+          </defs>
+          <path
+            :d="dragPath"
+            :class="['ta-mermaid-connection-preview__path', { 'is-invalid': targetStatus === 'invalid' }]"
+            :marker-end="targetStatus === 'invalid' ? 'url(#ta-mermaid-preview-arrow-invalid)' : 'url(#ta-mermaid-preview-arrow)'"
+          />
+        </svg>
       </div>
 
       <aside class="ta-mermaid-inspector" aria-label="图属性">
@@ -253,9 +304,14 @@ function updateDirection(event: Event) {
 .ta-mermaid-toolbar select { padding: 0 6px; }
 .ta-mermaid-toolbar__hint { margin-left: auto; color: var(--ta-muted, #64748b); font-size: 11px; }
 .ta-mermaid-workspace { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr) 280px; }
-.ta-mermaid-canvas { min-height: 420px; background-color: var(--ta-surface, #fff); background-image: radial-gradient(circle, color-mix(in srgb, var(--ta-border, #dbe2ea) 75%, transparent) 1px, transparent 1px); background-size: 18px 18px; transition: box-shadow 120ms ease; }
+.ta-mermaid-canvas { position: relative; min-height: 420px; background-color: var(--ta-surface, #fff); background-image: radial-gradient(circle, color-mix(in srgb, var(--ta-border, #dbe2ea) 75%, transparent) 1px, transparent 1px); background-size: 18px 18px; transition: box-shadow 120ms ease; }
 .ta-mermaid-canvas.is-drag-over { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary, #4f46e5) 65%, transparent); }
 .ta-mermaid-canvas :deep(.vue-flow) { height: 100%; min-height: 420px; }
+.ta-mermaid-connection-preview { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.ta-mermaid-connection-preview__path { fill: none; stroke: var(--primary, #4f46e5); stroke-width: 2.25; }
+.ta-mermaid-connection-preview__path.is-invalid { stroke: #d92d20; }
+.ta-mermaid-connection-preview #ta-mermaid-preview-arrow path { fill: var(--primary, #4f46e5); }
+.ta-mermaid-connection-preview #ta-mermaid-preview-arrow-invalid path { fill: #d92d20; }
 .ta-mermaid-inspector { min-height: 0; overflow: auto; border-left: 1px solid var(--ta-border, #e2e8f0); background: var(--ta-panel-2, #f8fafc); }
 .ta-mermaid-inspector section { padding: 13px; border-bottom: 1px solid var(--ta-border, #e2e8f0); }
 .ta-mermaid-inspector h3 { margin: 0 0 10px; color: var(--ta-ink, #172033); font-size: 12px; font-weight: 700; }

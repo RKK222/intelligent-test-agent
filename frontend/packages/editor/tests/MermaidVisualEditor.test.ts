@@ -6,6 +6,7 @@ import type { MermaidGraph } from "../src/mermaid/model";
 import {
   appendMermaidEdge,
   applyVueFlowPositions,
+  canAppendMermaidEdge,
   toVueFlowEdges,
   toVueFlowNodes
 } from "../src/mermaid/visual-editor/vue-flow-adapter";
@@ -13,7 +14,7 @@ import {
 vi.mock("@vue-flow/core", () => ({
   VueFlow: defineComponent({
     name: "VueFlow",
-    props: ["nodes", "edges"],
+    props: ["nodes", "edges", "nodesConnectable", "connectionMode", "connectOnClick"],
     emits: ["nodeDragStop", "connect", "nodeClick"],
     setup(_, { expose }) {
       expose({
@@ -27,17 +28,20 @@ vi.mock("@vue-flow/core", () => ({
     </div>`
   }),
   Handle: defineComponent({
-    props: ["id", "type", "position", "style"],
+    props: ["id", "type", "position", "style", "connectable"],
     template: `<span
       data-testid="handle"
       :data-handle-id="id"
       :data-handle-type="type"
       :data-position="position"
+      :data-connectable="String(connectable)"
       :style="style"
     />`
   }),
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
-  MarkerType: { ArrowClosed: "arrowclosed" }
+  MarkerType: { ArrowClosed: "arrowclosed" },
+  ConnectionMode: { Loose: "loose" },
+  getSmoothStepPath: vi.fn(() => ["M0 0 L1 1"])
 }));
 
 import MermaidVisualEditor from "../src/mermaid/visual-editor/MermaidVisualEditor.vue";
@@ -92,16 +96,60 @@ describe("Mermaid Vue Flow 适配", () => {
   });
 
   it("通过 Handle 连接创建不重复的领域边", () => {
-    const updated = appendMermaidEdge(graph(), { source: "B", target: "A" });
+    const updated = appendMermaidEdge(graph(), {
+      source: "B",
+      target: "A",
+      sourceHandle: "target-2",
+      targetHandle: "source-1"
+    });
 
     expect(updated.edges.at(-1)).toEqual({
       id: "edge-2",
       source: "B",
       target: "A",
+      sourceHandle: "target-2",
+      targetHandle: "source-1",
       label: "",
       relation: "arrow"
     });
-    expect(appendMermaidEdge(updated, { source: "B", target: "A" })).toEqual(updated);
+    expect(appendMermaidEdge(updated, {
+      source: "B",
+      target: "A",
+      sourceHandle: "source-0",
+      targetHandle: "target-0"
+    })).toEqual(updated);
+  });
+
+  it("固定端口优先于旧边的自动分配", () => {
+    const fixed = graph();
+    Object.assign(fixed.edges[0]!, { sourceHandle: "target-2", targetHandle: "source-1" });
+
+    expect(toVueFlowEdges(fixed)[0]).toMatchObject({
+      sourceHandle: "target-2",
+      targetHandle: "source-1"
+    });
+  });
+
+  it("拒绝重复有向边和同节点同端口，允许不同端口自环", () => {
+    const base = graph();
+    expect(canAppendMermaidEdge(base, {
+      source: "A",
+      target: "B",
+      sourceHandle: "source-0",
+      targetHandle: "target-0"
+    })).toBe(false);
+    expect(canAppendMermaidEdge(base, {
+      source: "A",
+      target: "A",
+      sourceHandle: "source-0",
+      targetHandle: "source-0"
+    })).toBe(false);
+    expect(canAppendMermaidEdge(base, {
+      source: "A",
+      target: "A",
+      sourceHandle: "source-0",
+      targetHandle: "target-0"
+    })).toBe(true);
   });
 });
 
@@ -121,8 +169,8 @@ describe("MermaidFlowNode", () => {
     });
 
     const handles = getAllByTestId("handle") as HTMLElement[];
-    const targetHandles = handles.filter((handle) => handle.dataset.handleType === "target");
-    const sourceHandles = handles.filter((handle) => handle.dataset.handleType === "source");
+    const targetHandles = handles.filter((handle) => handle.dataset.handleId?.startsWith("target-"));
+    const sourceHandles = handles.filter((handle) => handle.dataset.handleId?.startsWith("source-"));
 
     expect(targetHandles.map((handle) => handle.dataset.handleId)).toEqual(["target-0", "target-1", "target-2"]);
     expect(sourceHandles.map((handle) => handle.dataset.handleId)).toEqual(["source-0", "source-1", "source-2"]);
@@ -130,6 +178,8 @@ describe("MermaidFlowNode", () => {
     expect(sourceHandles.map((handle) => handle.dataset.position)).toEqual(Array(3).fill(sourcePosition));
     expect(targetHandles.map((handle) => handle.style.getPropertyValue(offsetProperty))).toEqual(["25%", "50%", "75%"]);
     expect(sourceHandles.map((handle) => handle.style.getPropertyValue(offsetProperty))).toEqual(["25%", "50%", "75%"]);
+    expect(handles.every((handle) => handle.dataset.handleType === "source")).toBe(true);
+    expect(handles.every((handle) => handle.dataset.connectable === "false")).toBe(true);
   });
 
   it.each([
@@ -146,8 +196,8 @@ describe("MermaidFlowNode", () => {
     });
 
     const handles = getAllByTestId("handle") as HTMLElement[];
-    const targetHandles = handles.filter((handle) => handle.dataset.handleType === "target");
-    const sourceHandles = handles.filter((handle) => handle.dataset.handleType === "source");
+    const targetHandles = handles.filter((handle) => handle.dataset.handleId?.startsWith("target-"));
+    const sourceHandles = handles.filter((handle) => handle.dataset.handleId?.startsWith("source-"));
 
     expect(targetHandles.map((handle) => handle.style.getPropertyValue(targetInsetProperty))).toEqual(["25%", "0%", "25%"]);
     expect(sourceHandles.map((handle) => handle.style.getPropertyValue(sourceInsetProperty))).toEqual(["25%", "0%", "25%"]);
@@ -164,6 +214,72 @@ describe("MermaidFlowNode", () => {
     expect(visualEditorSource).toContain("width: 72px");
     expect(visualEditorSource).toContain("height: 38px");
     expect(visualEditorSource).toContain("polygon(50% 0, 100% 50%, 50% 100%, 0 50%)");
+  });
+
+  it("六个 14px 通用端口默认隐藏并在节点悬浮时显示", () => {
+    expect(flowNodeSource).toContain("width: 14px");
+    expect(flowNodeSource).toContain("height: 14px");
+    expect(flowNodeSource).toContain("opacity: 0");
+    expect(flowNodeSource).toContain(".ta-mermaid-flow-node:hover");
+  });
+
+  it("节点根元素在 18px 内命中任一端口并发起拖线", () => {
+    const { container, getAllByTestId, emitted } = render(MermaidFlowNode, {
+      props: {
+        id: "A",
+        data: { text: "开始", nodeType: "rectangle", direction: "LR" }
+      }
+    });
+    const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
+    const handles = getAllByTestId("handle") as HTMLElement[];
+    handles.forEach((handle, index) => {
+      Object.defineProperty(handle, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ left: index * 30, top: 0, right: index * 30 + 14, bottom: 14, width: 14, height: 14 })
+      });
+      const event = new MouseEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: index * 30 + 7,
+        clientY: 7
+      });
+      Object.defineProperty(event, "pointerId", { value: index + 1 });
+      root.dispatchEvent(event);
+    });
+
+    expect(emitted().connectionStart).toHaveLength(6);
+    const starts = emitted().connectionStart as Array<[{ handleId: string }]>;
+    expect(starts.map(([start]) => start.handleId)).toEqual([
+      "target-0", "target-1", "target-2", "source-0", "source-1", "source-2"
+    ]);
+
+    const mouseDown = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      clientX: 7,
+      clientY: 7
+    });
+    root.dispatchEvent(mouseDown);
+    expect(mouseDown.defaultPrevented).toBe(true);
+  });
+
+  it("拖线时区分起点、当前目标和有效或无效吸附状态", () => {
+    const { container } = render(MermaidFlowNode, {
+      props: {
+        id: "B",
+        data: { text: "结束", nodeType: "rectangle", direction: "LR" },
+        connectionSourceHandleId: "source-0",
+        isConnectionTarget: true,
+        snappedHandleId: "target-1",
+        connectionStatus: "invalid"
+      }
+    });
+
+    expect(container.querySelector(".is-connection-source")).toBeTruthy();
+    expect(container.querySelector(".is-connection-target")).toBeTruthy();
+    expect(container.querySelector(".is-snapped-invalid")).toBeTruthy();
   });
 });
 
@@ -244,14 +360,13 @@ describe("MermaidVisualEditor", () => {
     expect(updates.at(-1)?.[0].nodes[0]?.position).toEqual({ x: 480, y: 260 });
   });
 
-  it("接收 Vue Flow connect 事件并新增连线", async () => {
-    const { getByTestId, emitted } = render(MermaidVisualEditor, { props: { modelValue: graph() } });
-
-    await fireEvent.click(getByTestId("mock-connect"));
-
-    const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
-    expect(updates.at(-1)?.[0].edges).toHaveLength(2);
-    expect(updates.at(-1)?.[0].edges.at(-1)).toMatchObject({ source: "B", target: "A" });
+  it("关闭 Vue Flow 原生连接并使用不拦截鼠标的临时 SVG", () => {
+    expect(visualEditorSource).toContain(":nodes-connectable=\"false\"");
+    expect(visualEditorSource).toContain(":connect-on-click=\"false\"");
+    expect(visualEditorSource).toContain(":connection-mode=\"ConnectionMode.Loose\"");
+    expect(visualEditorSource).not.toContain("@connect=\"onConnect\"");
+    expect(visualEditorSource).toContain("ta-mermaid-connection-preview");
+    expect(visualEditorSource).toContain("pointer-events: none");
   });
 
   it("可选择节点并修改名称、类型和删除关联边", async () => {

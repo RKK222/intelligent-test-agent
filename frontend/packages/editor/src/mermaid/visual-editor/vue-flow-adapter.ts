@@ -1,4 +1,5 @@
-import { MarkerType, type Connection, type Edge, type Node, type XYPosition } from "@vue-flow/core";
+import { MarkerType, type Edge, type Node, type XYPosition } from "@vue-flow/core";
+import { isMermaidPortHandle } from "../edge-port-metadata";
 import { cloneMermaidGraph, type MermaidGraph, type MermaidNodeType } from "../model";
 import { getMermaidNodePortId } from "./node-ports";
 
@@ -35,8 +36,8 @@ export function toVueFlowEdges(graph: MermaidGraph): MermaidFlowEdge[] {
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      sourceHandle: getMermaidNodePortId("source", sourceIndex),
-      targetHandle: getMermaidNodePortId("target", targetIndex),
+      sourceHandle: edge.sourceHandle ?? getMermaidNodePortId("source", sourceIndex),
+      targetHandle: edge.targetHandle ?? getMermaidNodePortId("target", targetIndex),
       label: edge.label || undefined,
       type: "smoothstep",
       markerEnd: edge.relation === "line" ? undefined : MarkerType.ArrowClosed,
@@ -66,20 +67,43 @@ export function applyVueFlowPositions(
   return next;
 }
 
-/** Vue Flow Handle 连接仅转换为当前支持的有向 Mermaid 边，重复连接保持幂等。 */
-export function appendMermaidEdge(graph: MermaidGraph, connection: Pick<Connection, "source" | "target">): MermaidGraph {
-  if (!connection.source || !connection.target) return graph;
+export type MermaidPortConnection = {
+  source: string | null;
+  target: string | null;
+  sourceHandle: string | null;
+  targetHandle: string | null;
+};
+
+/** 自研拖线控制器与写入层共用同一约束，避免视觉状态和最终落盘不一致。 */
+export function canAppendMermaidEdge(graph: MermaidGraph, connection: MermaidPortConnection): boolean {
+  if (
+    !connection.source ||
+    !connection.target ||
+    !isMermaidPortHandle(connection.sourceHandle) ||
+    !isMermaidPortHandle(connection.targetHandle)
+  ) return false;
   if (graph.edges.some((edge) => edge.source === connection.source && edge.target === connection.target)) {
-    return graph;
+    return false;
   }
+  return !(
+    connection.source === connection.target &&
+    connection.sourceHandle === connection.targetHandle
+  );
+}
+
+/** 只把带完整固定端口的有效拖线转换为 Mermaid 边。 */
+export function appendMermaidEdge(graph: MermaidGraph, connection: MermaidPortConnection): MermaidGraph {
+  if (!canAppendMermaidEdge(graph, connection)) return graph;
   const next = cloneMermaidGraph(graph);
   const usedIds = new Set(next.edges.map((edge) => edge.id));
   let sequence = next.edges.length + 1;
   while (usedIds.has(`edge-${sequence}`)) sequence += 1;
   next.edges.push({
     id: `edge-${sequence}`,
-    source: connection.source,
-    target: connection.target,
+    source: connection.source!,
+    target: connection.target!,
+    sourceHandle: connection.sourceHandle!,
+    targetHandle: connection.targetHandle!,
     label: "",
     relation: "arrow"
   });

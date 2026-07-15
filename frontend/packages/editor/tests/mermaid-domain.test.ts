@@ -63,6 +63,71 @@ classDef important fill:red`;
     expect(serializeMermaidGraph(roundTrip)).toBe(serialized);
   });
 
+  it("保存并恢复用户选择的固定端口 metadata", () => {
+    const graph = parseMermaidFlowchart(`flowchart LR
+%% editor-edge-ports:
+%% [
+%%   {
+%%     "source": "A",
+%%     "target": "B",
+%%     "sourceHandle": "target-2",
+%%     "targetHandle": "source-1"
+%%   }
+%% ]
+A --> B`);
+
+    expect(graph.edges[0]).toMatchObject({
+      source: "A",
+      target: "B",
+      sourceHandle: "target-2",
+      targetHandle: "source-1"
+    });
+    const serialized = serializeMermaidGraph(graph);
+    expect(serialized).toContain("%% editor-edge-ports:");
+    expect(parseMermaidFlowchart(serialized).edges[0]).toMatchObject({
+      sourceHandle: "target-2",
+      targetHandle: "source-1"
+    });
+  });
+
+  it("旧边保持无固定端口且合法陈旧 metadata 在保存时清理", () => {
+    const legacy = parseMermaidFlowchart("flowchart TD\nA --> B");
+    expect(legacy.edges[0]).not.toHaveProperty("sourceHandle");
+
+    const stale = parseMermaidFlowchart(`flowchart TD
+%% editor-edge-ports:
+%% [{"source":"X","target":"Y","sourceHandle":"source-0","targetHandle":"target-0"}]
+A --> B`);
+    expect(stale.preservedLines).not.toContain("%% editor-edge-ports:");
+    expect(serializeMermaidGraph(stale)).not.toContain("editor-edge-ports");
+  });
+
+  it("损坏或无法唯一匹配的端口 metadata 原样保留", () => {
+    const damaged = parseMermaidFlowchart(`flowchart TD
+%% editor-edge-ports:
+%% not-json
+A --> B`);
+    expect(serializeMermaidGraph(damaged)).toContain("%% editor-edge-ports:\n%% not-json");
+
+    const ambiguous = parseMermaidFlowchart(`flowchart TD
+%% editor-edge-ports:
+%% [{"source":"A","target":"B","sourceHandle":"source-0","targetHandle":"target-0"}]
+A --> B
+A --> B`);
+    expect(ambiguous.edges.every((edge) => !edge.sourceHandle && !edge.targetHandle)).toBe(true);
+    expect(serializeMermaidGraph(ambiguous)).toContain("%% editor-edge-ports:");
+  });
+
+  it("删除固定端口边后不再序列化对应 metadata", () => {
+    const graph = parseMermaidFlowchart(`flowchart TD
+%% editor-edge-ports:
+%% [{"source":"A","target":"B","sourceHandle":"source-0","targetHandle":"target-0"}]
+A --> B`);
+    graph.edges = [];
+
+    expect(serializeMermaidGraph(graph)).not.toContain("editor-edge-ports");
+  });
+
   it("只替换指定 Mermaid fence 内容并检测外部刷新冲突", () => {
     const markdown = `# 设计
 

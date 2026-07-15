@@ -1,4 +1,5 @@
 import { extractMermaidLayout } from "./metadata";
+import { extractMermaidEdgePorts } from "./edge-port-metadata";
 import type {
   MermaidDirection,
   MermaidEdgeRelation,
@@ -92,6 +93,7 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   const kind = (header[1]?.toLowerCase() ?? "flowchart") as MermaidGraphKind;
   const direction = (header[2]?.toUpperCase() ?? "TD") as MermaidDirection;
   const { layout, consumedLineIndexes } = extractMermaidLayout(lines);
+  const edgePortMetadata = extractMermaidEdgePorts(lines);
   const nodes = new Map<string, MermaidNode & { explicit: boolean }>();
   const edges: MermaidGraph["edges"] = [];
   const preservedLines: string[] = [];
@@ -120,7 +122,11 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   };
 
   lines.forEach((line, index) => {
-    if (index === headerIndex || consumedLineIndexes.has(index)) return;
+    if (
+      index === headerIndex ||
+      consumedLineIndexes.has(index) ||
+      edgePortMetadata.consumedLineIndexes.has(index)
+    ) return;
     const trimmed = line.trim();
     if (preservedBlockDepth > 0) {
       preserveLine(line);
@@ -154,6 +160,30 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
     }
     preserveLine(line);
   });
+
+  const edgeCounts = new Map<string, number>();
+  for (const edge of edges) {
+    const key = `${edge.source}\u0000${edge.target}`;
+    edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+  }
+  const ambiguousMetadata = edgePortMetadata.entries.some(
+    (entry) => (edgeCounts.get(`${entry.source}\u0000${entry.target}`) ?? 0) > 1
+  );
+  if (ambiguousMetadata) {
+    preservedLines.push(...edgePortMetadata.rawLines);
+    preservedSegments.unshift({ beforeEditableIndex: 0, lines: [...edgePortMetadata.rawLines] });
+  } else {
+    const metadataByEdge = new Map(
+      edgePortMetadata.entries.map((entry) => [`${entry.source}\u0000${entry.target}`, entry])
+    );
+    for (const edge of edges) {
+      const metadata = metadataByEdge.get(`${edge.source}\u0000${edge.target}`);
+      if (metadata) {
+        edge.sourceHandle = metadata.sourceHandle;
+        edge.targetHandle = metadata.targetHandle;
+      }
+    }
+  }
 
   return {
     kind,

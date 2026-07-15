@@ -1,14 +1,25 @@
 <script setup lang="ts">
 import { computed, type CSSProperties } from "vue";
 import { Handle, Position } from "@vue-flow/core";
+import {
+  MERMAID_SOURCE_HIT_RADIUS,
+  findNearestConnectionPort,
+  type MermaidConnectionPortGeometry
+} from "./mermaid-connection-geometry";
 import { getMermaidNodePortId, getMermaidNodePortLayout } from "./node-ports";
+import type { MermaidConnectionStart } from "./use-mermaid-connection-drag";
 import type { MermaidFlowNodeData } from "./vue-flow-adapter";
 
 const props = defineProps<{
   id: string;
   data: MermaidFlowNodeData;
   selected?: boolean;
+  connectionSourceHandleId?: string;
+  isConnectionTarget?: boolean;
+  snappedHandleId?: string;
+  connectionStatus?: "valid" | "invalid";
 }>();
+const emit = defineEmits<{ connectionStart: [start: MermaidConnectionStart] }>();
 
 type FlowPort = {
   id: string;
@@ -44,17 +55,85 @@ function createPorts(type: "target" | "source"): FlowPort[] {
 
 const targetPorts = computed(() => createPorts("target"));
 const sourcePorts = computed(() => createPorts("source"));
+
+function portClasses(portId: string) {
+  return {
+    "is-active-source": props.connectionSourceHandleId === portId,
+    "is-snapped-valid": props.snappedHandleId === portId && props.connectionStatus === "valid",
+    "is-snapped-invalid": props.snappedHandleId === portId && props.connectionStatus === "invalid"
+  };
+}
+
+function findPortAtPoint(nodeElement: HTMLElement, point: { x: number; y: number }) {
+  const ports: MermaidConnectionPortGeometry[] = Array.from(
+    nodeElement.querySelectorAll<HTMLElement>("[data-mermaid-handle]"),
+    (element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        nodeId: props.id,
+        handleId: element.dataset.mermaidHandle ?? "",
+        position: (element.dataset.mermaidPosition ?? Position.Bottom) as Position,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      };
+    }
+  );
+  return findNearestConnectionPort(point, ports, MERMAID_SOURCE_HIT_RADIUS);
+}
+
+/** Handle 本身不接管事件；节点根元素使用更大的 18px 屏幕半径完成易选中的起线命中。 */
+function onPointerDown(event: PointerEvent) {
+  if (event.button !== 0) return;
+  const nodeElement = event.currentTarget as HTMLElement;
+  const port = findPortAtPoint(nodeElement, { x: event.clientX, y: event.clientY });
+  if (!port) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("connectionStart", {
+    pointerId: event.pointerId,
+    nodeId: props.id,
+    handleId: port.handleId,
+    position: port.position,
+    point: { x: port.x, y: port.y }
+  });
+}
+
+/** Vue Flow 以 mousedown 启动节点拖拽，端口命中时需在根元素捕获阶段阻断该兼容鼠标事件。 */
+function preventNodeDragFromPort(event: MouseEvent) {
+  if (event.button !== 0) return;
+  const nodeElement = event.currentTarget as HTMLElement;
+  if (!findPortAtPoint(nodeElement, { x: event.clientX, y: event.clientY })) return;
+  event.preventDefault();
+  event.stopPropagation();
+}
 </script>
 
 <template>
-  <div :class="['ta-mermaid-flow-node', `is-${data.nodeType}`, { 'is-selected': selected }]">
+  <div
+    :data-mermaid-node-id="id"
+    :class="[
+      'ta-mermaid-flow-node',
+      `is-${data.nodeType}`,
+      {
+        'is-selected': selected,
+        'is-connection-source': connectionSourceHandleId,
+        'is-connection-target': isConnectionTarget
+      }
+    ]"
+    @pointerdown="onPointerDown"
+    @mousedown.capture="preventNodeDragFromPort"
+  >
     <Handle
       v-for="port in targetPorts"
       :id="port.id"
       :key="port.id"
-      type="target"
+      type="source"
+      :connectable="false"
       :position="port.position"
       :style="port.style"
+      :class="portClasses(port.id)"
+      :data-mermaid-handle="port.id"
+      :data-mermaid-position="port.position"
     />
     <div class="ta-mermaid-flow-node__id">{{ id }}</div>
     <div class="ta-mermaid-flow-node__label">{{ data.text }}</div>
@@ -63,8 +142,12 @@ const sourcePorts = computed(() => createPorts("source"));
       :id="port.id"
       :key="port.id"
       type="source"
+      :connectable="false"
       :position="port.position"
       :style="port.style"
+      :class="portClasses(port.id)"
+      :data-mermaid-handle="port.id"
+      :data-mermaid-position="port.position"
     />
   </div>
 </template>
@@ -142,10 +225,36 @@ const sourcePorts = computed(() => createPorts("source"));
 
 .ta-mermaid-flow-node :deep(.vue-flow__handle) {
   z-index: 3;
-  width: 8px;
-  height: 8px;
-  border: 1.5px solid var(--ta-surface, #fff);
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ta-surface, #fff);
   background: var(--ta-border-strong, #64748b);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease, background-color 100ms ease, transform 100ms ease;
+}
+
+.ta-mermaid-flow-node:hover :deep(.vue-flow__handle),
+.ta-mermaid-flow-node.is-connection-target :deep(.vue-flow__handle),
+.ta-mermaid-flow-node :deep(.vue-flow__handle.is-active-source) {
+  opacity: 1;
+}
+
+.ta-mermaid-flow-node.is-connection-source:not(.is-connection-target) :deep(.vue-flow__handle:not(.is-active-source)) {
+  opacity: 0;
+}
+
+.ta-mermaid-flow-node :deep(.vue-flow__handle.is-snapped-valid) {
+  background: var(--primary, #4f46e5);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary, #4f46e5) 24%, transparent);
+  transform: scale(1.16);
+}
+
+.ta-mermaid-flow-node :deep(.vue-flow__handle.is-snapped-invalid) {
+  background: #d92d20;
+  box-shadow: 0 0 0 4px rgba(217, 45, 32, 0.2);
+  transform: scale(1.16);
 }
 
 .ta-mermaid-flow-node__id {
