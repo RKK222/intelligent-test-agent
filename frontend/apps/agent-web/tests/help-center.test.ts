@@ -132,12 +132,13 @@ describe("help center", () => {
     expect(workspace).toContain("当前平台使用两套物理 Git");
     expect(workspace).toContain("只把允许发布且已进入个人 `HEAD` 的文件");
     expect(workspace).toContain("`spec/**`");
-    expect(workspace).toContain("只保留个人提交，不发布");
+    expect(workspace).toContain("只保留个人提交");
+    expect(workspace).toContain("超级管理员不受该限制");
     expect(workspace).toContain("`docs/**`");
     expect(agentConfig).toContain("只有超级管理员可以创建公共 worktree");
     expect(agentConfig).toContain("只有应用管理员与超级管理员可以创建应用 worktree");
     expect(agentConfig).toContain("`compatibility: opencode`");
     expect(agentConfig).toContain("公共配置推送成功后，平台会广播公共配置同步");
-    expect(agentConfig).toContain("应用配置当前以页面确认远端推送成功为完成标准");
+    expect(agentConfig).toContain("应用配置推送成功后也会更新对应应用版本 HEAD");
   });
 });

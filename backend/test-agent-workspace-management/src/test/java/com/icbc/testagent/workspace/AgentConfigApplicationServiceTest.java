@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.error.ErrorCode;
@@ -856,6 +857,37 @@ class AgentConfigApplicationServiceTest {
             assertThat(operation.status()).isEqualTo(AgentConfigOperationStatus.FAILED);
             assertThat(operation.errorCode()).isEqualTo(ErrorCode.CONFLICT.name());
         });
+    }
+
+    @Test
+    void workspacePublishUpdatesManagedFeatureHeadAndBroadcastsThroughSharedService() throws Exception {
+        Path workspaceRoot = root.resolve("project-feature");
+        Files.createDirectories(workspaceRoot.resolve(".git"));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_feature"),
+                        "feature",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+        ManagedWorkspaceApplicationService managedWorkspaceService = mock(ManagedWorkspaceApplicationService.class);
+        service.setManagedWorkspaceApplicationService(managedWorkspaceService);
+
+        service.workspacePublish("wrk_feature", null, "aco_workspace_publish", ADMIN, "trace_publish");
+
+        verify(managedWorkspaceService).recordFeatureWorkspacePublished(
+                "wrk_feature", git.currentHead, ADMIN, "trace_publish");
     }
 
     @Test

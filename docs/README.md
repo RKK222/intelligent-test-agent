@@ -33,6 +33,7 @@
 ## 对话场景造数
 
 - `docs/testing/conversation-scenes.md`：直接对话、历史运行中、Todo、ask、permission、subagent、宠物旁路成功/失败等可重复 fixture 入口。
+- `docs/testing/application-worktree-feature-cases.md`：应用 worktree、feature、角色写权限、发布投影和固定 UI 测试数据案例。
 
 ## 部署与数据库
 

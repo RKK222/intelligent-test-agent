@@ -655,6 +655,16 @@ const appTemplatesWithVersions = computed(() =>
 // 当前选中的版本 ID：默认从 selectedWorkspaceId 与 recent 偏好反查；切到版本后由 handleSelectVersion 更新。
 const currentVersionFromWorkspace = ref<string | undefined>(undefined);
 const selectedVersionId = computed(() => currentVersionFromWorkspace.value);
+const selectedAgentConfigWorkspaceId = computed(() => {
+  const versionId = selectedVersionId.value;
+  if (!versionId) return isSuperAdmin.value ? selectedWorkspace.value?.workspaceId : undefined;
+  for (const versions of Object.values(versionsByTemplateId.value)) {
+    const version = versions.find((item) => item.versionId === versionId);
+    if (version?.runtimeWorkspace?.workspaceId) return version.runtimeWorkspace.workspaceId;
+  }
+  // 版本详情尚未加载时保持配置空态，避免把应用配置误写到个人 worktree 分支。
+  return currentPersonalWorkspaceId.value ? undefined : selectedWorkspace.value?.workspaceId;
+});
 // 触发懒加载：被调用时把 templateId 加入 loadedTemplateIds，useQueries 派生数组自动同步并发起请求。
 // 重复调用幂等：Set 内部去重；已加载完成的模板（versions 不为 undefined）不会重复请求。
 function ensureAppVersionsLoaded(templateId: string) {
@@ -3134,7 +3144,11 @@ async function openFile(path: string) {
   }
   centerMode.value = "editor";
   try {
-    const file = await api.readFile(selectedWorkspace.value.workspaceId, path, !currentPersonalWorkspaceId.value);
+    const file = await api.readFile(
+      selectedWorkspace.value.workspaceId,
+      path,
+      !currentPersonalWorkspaceId.value
+    );
     workbench.openTab({
       id: `file:${path}`,
       path,
@@ -3150,6 +3164,10 @@ async function openFile(path: string) {
 
 async function handleCreateEntry(directory: string, name: string, type: "file" | "directory") {
   if (!selectedWorkspace.value) {
+    return;
+  }
+  if (!currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
     return;
   }
   const workspaceId = selectedWorkspace.value.workspaceId;
@@ -3231,6 +3249,10 @@ async function handleRenameEntry(path: string, name: string) {
   if (!selectedWorkspace.value) {
     return;
   }
+  if (!currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
+    return;
+  }
   const workspaceId = selectedWorkspace.value.workspaceId;
   const lastSepIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   const parentDir = lastSepIndex >= 0 ? path.slice(0, lastSepIndex) : "";
@@ -3260,6 +3282,10 @@ async function handleRenameEntry(path: string, name: string) {
 
 async function handleDeleteEntry(path: string, type: "file" | "directory") {
   if (!selectedWorkspace.value) {
+    return;
+  }
+  if (!currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
     return;
   }
   const workspaceId = selectedWorkspace.value.workspaceId;
@@ -4997,6 +5023,7 @@ async function handleLogout() {
           :can-manage-public-config="isSuperAdmin"
           :api-base-url="apiBaseUrl"
           :workspace-id="selectedWorkspace?.workspaceId"
+          :agent-config-workspace-id="selectedAgentConfigWorkspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"
           :personal-workspace-branch="currentPersonalWorkspaceBranch"
           :show-server-workspace-switch="isSuperAdmin"

@@ -107,6 +107,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private final Clock clock;
     private final AgentConfigProgressSink progressSink;
     private final CodeRepositoryDeploymentMode publicGitDeploymentMode;
+    private ManagedWorkspaceApplicationService managedWorkspaceApplicationService;
+
+    /** 应用配置发布复用托管 feature 版本的 HEAD 更新与广播链路。 */
+    @Autowired
+    void setManagedWorkspaceApplicationService(ManagedWorkspaceApplicationService service) {
+        this.managedWorkspaceApplicationService = Objects.requireNonNull(service, "service must not be null");
+    }
 
     /**
      * Spring 构造器：进度 Sink 由 API 模块提供，缺失时降级为 NOOP，便于模块级测试。
@@ -944,6 +951,14 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             } else {
                 progress.step(AgentConfigOperationStep.PUSHING);
                 commitHash = gitPublishWorkflow.publishDirectBranch(repoRoot, branch, false, privateKey).headCommit();
+            }
+            progress.step(AgentConfigOperationStep.BROADCASTING);
+            if (managedWorkspaceApplicationService != null) {
+                managedWorkspaceApplicationService.recordFeatureWorkspacePublished(
+                        workspaceId,
+                        commitHash,
+                        userId,
+                        traceId);
             }
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {

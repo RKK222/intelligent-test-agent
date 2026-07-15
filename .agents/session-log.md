@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-15 - 固化应用 worktree/feature 权限回归并补齐超管豁免
+
+- Why:
+  - 应用 Git 已采用个人 worktree 到 feature 的投影发布，但前端文件树和 Git 变更页仍混用普通文件、应用配置与公共配置写权限；应用配置也会随个人工作区 ID 切换，且推送后没有更新应用版本 HEAD 和广播。用户要求固化测试数据、执行 UI 验证，并明确超级管理员在应用 worktree/feature 发布范围内不受这些限制。
+- What:
+  - 文件树和 Git 变更页增加只读防线并拆分普通文件、应用 Agent/Skill、公共配置权限；应用配置固定路由到当前版本 feature 工作区。feature 普通文件作为统一发布副本对所有角色保持只读，避免形成第二套直提协议；应用管理员可独立提交/推送 feature 配置，公共 Git 仍仅超管可写。
+  - 普通成员和应用管理员继续只在个人分支保留 `spec/**`；超管发布入口显式放行 spec。应用配置推送成功后更新版本与本机副本 HEAD，并广播 `workspace.version.sync-requested`（`AGENT_CONFIG_PUBLISHED`）。同步 Help、HTTP/事件、模块 README 和测试设计文档。
+  - 新增稳定角色、工作区 ID、分支和路径 fixture，组件测试覆盖只读文件树、按权限统计可提交项、应用配置 feature 路由和超管 spec；Playwright 覆盖普通成员与超管 UI 入口差异。
+- How:
+  - 复用平台文件 WebSocket、既有 Agent 配置 Git 工作流和应用版本同步广播，不新增文件 HTTP 代理、RunEvent、数据库字段或 Git 分支；超管策略由 Controller 认证角色传入发布服务，默认内部调用仍维持 spec 限制。
+- Result:
+  - 前端组件测试 29 项、Help 测试 9 项、Playwright 桌面/移动端 2 项、agent-web typecheck、agent-web 与用户手册生产构建通过；后端相关 workspace/API 测试共 93 项通过，完整后端打包成功。
+  - 使用 `.env.test` / `test` profile 重启三服务后，backend health/readiness 和 frontend 均返回 200，登录 CORS 预检正常，manager WebSocket 已连接。未修改数据库、外部 HTTP DTO 或 RunEvent；内部版本广播新增既有事件的 reason 值并已同步文档。
+
 ### 2026-07-15 - 增加小游戏预览、动态难度与宠物悬浮冻结
 
 - Why:

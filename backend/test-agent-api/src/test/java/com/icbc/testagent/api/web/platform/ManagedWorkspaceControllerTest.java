@@ -298,6 +298,31 @@ class ManagedWorkspaceControllerTest {
         verify(service).unstageWorkspaceGitFiles("wks_123", List.of("src/Changed.java"), USER_ID);
     }
 
+    @Test
+    void superAdministratorPublishForwardsUnrestrictedPolicy() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+
+        client(service, readyAssignmentService("127.0.0.1"), List.of("SUPER_ADMIN")).post()
+                .uri("/api/internal/platform/workspace-management/personal-workspaces/psw_123/publish")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"commitMessage":"spec: 超管发布设计","files":["spec/design.md"]}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).publishPersonalWorkspace(
+                "psw_123",
+                "spec: 超管发布设计",
+                List.of("spec/design.md"),
+                null,
+                null,
+                USER_ID,
+                TRACE_ID,
+                true);
+    }
+
     private WebTestClient client(ManagedWorkspaceApplicationService service) {
         return client(service, readyAssignmentService("127.0.0.1"));
     }
@@ -305,12 +330,19 @@ class ManagedWorkspaceControllerTest {
     private WebTestClient client(
             ManagedWorkspaceApplicationService service,
             UserOpencodeProcessAssignmentService assignmentService) {
+        return client(service, assignmentService, List.of("USER"));
+    }
+
+    private WebTestClient client(
+            ManagedWorkspaceApplicationService service,
+            UserOpencodeProcessAssignmentService assignmentService,
+            List<String> roles) {
         AuthPrincipal principal = new AuthPrincipal(
                 "token",
                 USER_ID,
                 "888888888",
                 "888888888",
-                List.of("USER"),
+                roles,
                 Instant.parse("2026-06-23T00:00:00Z"),
                 Instant.parse("2026-06-24T00:00:00Z"));
         return WebTestClient.bindToController(new ManagedWorkspaceController(service, assignmentService))

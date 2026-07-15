@@ -1282,7 +1282,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 2. `publish` 校验个人 worktree 未处于 merge 状态，且 `files` 在个人 worktree 没有未提交变更；未先本地提交时返回 `CONFLICT`。
 3. 确保当前服务器的应用 feature worktree clean，`git fetch` + `git pull --ff-only {appVersionBranch}`，并校验可选 `expectedApplicationHead`。
 4. 读取个人仓库 `HEAD`，将 `files` 映射为 feature worktree 的仓库相对路径；存在的文件执行 checkout 投影，不存在的文件执行定点删除。
-5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push，服务端在准备 feature worktree 前强制拒绝 `spec/**`，其它未选文件也不会泄漏。
+5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push，服务端在准备 feature worktree 前对普通成员和应用管理员强制拒绝 `spec/**`，`SUPER_ADMIN` 不受该发布路径限制，其它未选文件仍不会泄漏。
 
 发布结果：
 

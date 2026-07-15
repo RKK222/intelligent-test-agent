@@ -1,6 +1,7 @@
 import { fireEvent, render, within } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
 import DirectoryRows from "../src/DirectoryRows.vue";
+import { applicationWorkspaceRestrictionsFixture } from "../../../tests/fixtures/application-workspace-restrictions";
 
 describe("DirectoryRows", () => {
   it("only exposes delete action for files", async () => {
@@ -70,5 +71,29 @@ describe("DirectoryRows", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
 
     expect(view.emitted("renameEntry")).toEqual([["tests", "回归测试"]]);
+  });
+
+  it("keeps a feature workspace browsable but hides every file mutation entry when readonly", async () => {
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": [...applicationWorkspaceRestrictionsFixture.tree.root] },
+        expandedDirectories: new Set<string>(),
+        canWrite: false
+      }
+    });
+
+    expect(view.queryByRole("button", { name: "新建文件或文件夹" })).toBeNull();
+    expect(view.queryByRole("button", { name: "删除" })).toBeNull();
+
+    const readme = view.getByRole("button", { name: /README\.md/ });
+    await fireEvent.dblClick(readme);
+    expect(view.queryByRole("textbox", { name: "重命名工作区条目" })).toBeNull();
+
+    await fireEvent.click(readme);
+    expect(view.emitted("openFile")).toEqual([["README.md"]]);
+    expect(view.emitted("createEntry")).toBeUndefined();
+    expect(view.emitted("deleteEntry")).toBeUndefined();
+    expect(view.emitted("renameEntry")).toBeUndefined();
   });
 });

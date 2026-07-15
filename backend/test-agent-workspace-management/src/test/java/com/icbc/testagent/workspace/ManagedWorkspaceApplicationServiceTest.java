@@ -341,6 +341,33 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void recordsApplicationAgentPublishAndBroadcastsUpdatedFeatureHead() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        publisher.events.clear();
+
+        service.recordFeatureWorkspacePublished(
+                version.runtimeWorkspace().workspaceId(),
+                "commit_agent_config",
+                new UserId("usr_1"),
+                "trace_agent_publish");
+
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_agent_config");
+        assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_agent_config");
+        assertThat(publisher.events).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo("workspace.version.sync-requested");
+            assertThat(event.payload()).containsEntry("reason", "AGENT_CONFIG_PUBLISHED");
+            assertThat(event.payload()).containsEntry("targetCommitHash", "commit_agent_config");
+        });
+    }
+
+    @Test
     void createsApplicationVersionWithYearMonthFormat() throws Exception {
         // 「+新增版本」场景：version 字段允许原样保留为 yyyy年M月（"2024年1月"），
         // 但派生出来的分支名 / 路径要走 sanitizeVersionForBranchAndPath 转 yyyy-MM。
@@ -1416,6 +1443,35 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.materializedFiles).isEmpty();
         assertThat(git.pushedBranch).isNull();
         assertThat(git.calls).isEmpty();
+    }
+
+    @Test
+    void superAdministratorCanPublishSpecFilesToFeatureBranch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextHeadCommit = "commit_super_spec";
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "spec: 超管发布设计",
+                List.of("spec/design.md"),
+                null,
+                null,
+                new UserId("usr_1"),
+                "trace_publish",
+                true);
+
+        assertThat(result.status()).isEqualTo("PUBLISHED");
+        assertThat(git.materializedFiles).containsExactly("F-GCMS/workspace/spec/design.md");
+        assertThat(git.pushedBranch).isEqualTo(version.branch());
     }
 
     @Test

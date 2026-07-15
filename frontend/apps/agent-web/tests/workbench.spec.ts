@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { applicationWorkspaceRestrictionsFixture as permissionFixture } from "../../../tests/fixtures/application-workspace-restrictions";
 
 test("workbench opens a workspace file with mocked backend api", async ({ page }) => {
   await mockBackendApi(page, {
@@ -30,6 +31,74 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await page.getByRole("button", { name: /checkout.spec.ts/ }).click();
   await expect(page.getByText("tests/checkout.spec.ts", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
+});
+
+test("application workspace mutation entries follow member and super administrator permissions", async ({ page, context }) => {
+  const managedWorkspaceSetup = {
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    },
+    workspaceTemplates: {
+      app_gcms: [{
+        workspaceId: "awp_1",
+        workspaceName: permissionFixture.application.appName,
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        defaultBranch: permissionFixture.application.featureBranch,
+        createdAt: "2026-07-15T00:00:00Z",
+        updatedAt: "2026-07-15T00:00:00Z"
+      }]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_1": [{
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: "20260715",
+        branch: permissionFixture.application.featureBranch,
+        repoRootPath: "/tmp/test-agent/appworkspace/20260715/repo_1",
+        workspaceRootPath: "/tmp/test-agent/appworkspace/20260715/repo_1/F-GCMS/workspace",
+        runtimeWorkspace: {
+          ...workspace(),
+          workspaceId: permissionFixture.application.featureWorkspaceId
+        },
+        status: "ACTIVE",
+        createdAt: "2026-07-15T00:00:00Z",
+        updatedAt: "2026-07-15T00:00:00Z"
+      }]
+    }
+  };
+
+  await mockBackendApi(page, { ...managedWorkspaceSetup, authRoles: [...permissionFixture.roles.member] });
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: /tests/ }).hover();
+  await expect(page.getByRole("button", { name: "新建文件或文件夹" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "创建应用 worktree" })).toHaveCount(0);
+
+  const superPage = await context.newPage();
+  await mockBackendApi(superPage, { ...managedWorkspaceSetup, authRoles: [...permissionFixture.roles.superAdmin] });
+  await superPage.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
+  await gotoWorkbench(superPage, { selectConversation: false });
+
+  await expect(superPage.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" })).toBeVisible();
+  await expect(superPage.getByRole("button", { name: "创建应用 worktree" })).toBeVisible();
+  await superPage.close();
 });
 
 test("workbench home opens the embedded user manual", async ({ page }) => {

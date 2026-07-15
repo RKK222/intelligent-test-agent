@@ -8,6 +8,8 @@ export type DirectoryRowsProps = {
   activePath?: string;
   loadingPath?: Set<string>;
   depth?: number;
+  /** 只读工作区隐藏并阻断所有文件系统写入口。 */
+  canWrite?: boolean;
   /** 文件路径 → 行变更统计，用于在文件名后展示 +N -N。 */
   changeStats?: Record<string, { additions: number; deletions: number }>;
 };
@@ -19,7 +21,7 @@ import { Plane, Plus, Trash2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileIcon from "./FileIcon.vue";
 
-const props = withDefaults(defineProps<DirectoryRowsProps>(), { depth: 0 });
+const props = withDefaults(defineProps<DirectoryRowsProps>(), { depth: 0, canWrite: true });
 const emit = defineEmits<{
   toggleDirectory: [path: string];
   openFile: [path: string];
@@ -97,6 +99,7 @@ function onRowClick(entry: FileTreeEntry) {
 }
 
 function openCreateDialog(directory: string) {
+  if (!props.canWrite) return;
   createDialogParentDirectory.value = directory;
   createDialogType.value = "file";
   createDialogName.value = "";
@@ -110,6 +113,7 @@ function closeCreateDialog() {
 }
 
 function submitCreateDialog() {
+  if (!props.canWrite) return;
   const name = createDialogName.value.trim();
   if (!name) {
     createDialogError.value = "请输入名称";
@@ -124,6 +128,7 @@ function submitCreateDialog() {
 }
 
 function openDeleteDialog(entry: FileTreeEntry) {
+  if (!props.canWrite) return;
   deleteDialogEntry.value = { path: entry.path, name: entry.name, type: entry.type };
   showDeleteDialog.value = true;
 }
@@ -134,6 +139,7 @@ function closeDeleteDialog() {
 }
 
 function submitDeleteDialog() {
+  if (!props.canWrite) return;
   if (!deleteDialogEntry.value) {
     return;
   }
@@ -142,6 +148,7 @@ function submitDeleteDialog() {
 }
 
 function startRename(entry: FileTreeEntry) {
+  if (!props.canWrite) return;
   renamingPath.value = entry.path;
   renameName.value = entry.name;
   renameOriginalName.value = entry.name;
@@ -157,6 +164,7 @@ function cancelRename() {
 }
 
 function submitRename() {
+  if (!props.canWrite) return;
   const path = renamingPath.value;
   if (!path) {
     return;
@@ -193,7 +201,7 @@ function submitRename() {
         :style="{ paddingLeft: depth * 16 + 6 + 'px' }"
         @click="onRowClick(entry)"
         @contextmenu="openFileContextMenu($event, entry)"
-        @dblclick.stop="startRename(entry)"
+        @dblclick.stop="canWrite && startRename(entry)"
       >
         <span
           v-for="i in depth"
@@ -232,7 +240,7 @@ function submitRename() {
         </template>
         <i v-if="loadingPath?.has(entry.path)" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
         <button
-          v-if="entry.type === 'directory'"
+          v-if="canWrite && entry.type === 'directory'"
           type="button"
           class="ta-file-tree-add-btn"
           title="新建文件或文件夹"
@@ -242,7 +250,7 @@ function submitRename() {
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
-          v-if="entry.type === 'file'"
+          v-if="canWrite && entry.type === 'file'"
           type="button"
           class="ta-file-tree-delete-btn"
           title="删除"
@@ -273,6 +281,7 @@ function submitRename() {
         :active-path="activePath"
         :loading-path="loadingPath"
         :change-stats="changeStats"
+        :can-write="canWrite"
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"
