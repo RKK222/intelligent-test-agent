@@ -6699,3 +6699,15 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - scheduler 定向测试 1/1、persistence 定向集成测试 2/2、scheduler 全量测试 31/31、`test-agent-app -am package -DskipTests` 17/17 模块通过。
   - persistence 全量仍有本任务外既有 `MyBatisAgentConfigRepositoryIntegrationTest` 基线失败（2 failures、7 errors，测试夹具引用缺失的 `usr_test_dev`），本任务未越界修复。
+
+### 2026-07-15 - 删除对话合成工作状态行
+
+- Why:
+  - 用户希望过程时间线只展示真实事件，不再出现前端兜底生成的“思考中”和“正在工作 / 等待后续输出”。
+- What:
+  - `agent-chat` 停止投影并删除 `thinking`、`working-status` 行及其组件和专用样式；真实 reasoning、探索/更新待办等工具、running 文本、重试、错误和 Diff 保持不变。
+- How:
+  - 通过投影、时间线组件和应用面板测试先复现旧占位行为，再删除对应联合类型与渲染分支；保留 running 文本仍使用的 `.oc-thinking-dot` 动画，并同步 `agent-chat`、`agent-web` README。未修改 reducer、HTTP API、RunEvent、后端、数据库或环境配置。
+- Result:
+  - 定向 `agent-chat` 测试 43/43、应用层新增契约测试 1/1、前端全量 Vitest 824 passed / 1 skipped、全量 typecheck 和生产 build 通过；构建仅保留既有字体 `@import` 顺序和大 chunk 警告。
+  - 最终复验期间工作区并发出现本任务外、未提交的 `MermaidFlowNode.vue` 端口重构，导致 Mermaid 存量 11 项测试仍按 6 个 14px 端口断言而失败；本任务未修改该文件。基于当前工作区重新执行对话相关 3 个测试文件为 162 passed / 1 skipped，全量 typecheck 和生产 build 仍通过。

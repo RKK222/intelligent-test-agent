@@ -3642,7 +3642,7 @@ describe("FigmaChatPanel", () => {
     expect(initial.find(".figma-chat-question-dock").exists()).toBe(false);
   });
 
-  it("shows the assistant avatar beside the running status", async () => {
+  it("does not show a synthetic assistant status before the first real event", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -3652,10 +3652,11 @@ describe("FigmaChatPanel", () => {
     });
 
     await showFullTimeline(wrapper);
-    expect(wrapper.find(".oc-thinking-row").exists()).toBe(true);
+    expect(wrapper.find(".oc-thinking-row").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("思考中");
   });
 
-  it("shows opencode retry status instead of leaving the run as thinking", async () => {
+  it("shows opencode retry status as a real runtime row", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
