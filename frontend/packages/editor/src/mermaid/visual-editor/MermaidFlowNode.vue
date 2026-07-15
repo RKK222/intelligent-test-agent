@@ -84,6 +84,7 @@ function findPortAtPoint(nodeElement: HTMLElement, point: { x: number; y: number
 /** Handle 本身不接管事件；节点根元素使用更大的 18px 屏幕半径完成易选中的起线命中。 */
 function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return;
+  if (props.selected) return;
   const nodeElement = event.currentTarget as HTMLElement;
   const port = findPortAtPoint(nodeElement, { x: event.clientX, y: event.clientY });
   if (!port) return;
@@ -101,6 +102,7 @@ function onPointerDown(event: PointerEvent) {
 /** Vue Flow 以 mousedown 启动节点拖拽，端口命中时需在根元素捕获阶段阻断该兼容鼠标事件。 */
 function preventNodeDragFromPort(event: MouseEvent) {
   if (event.button !== 0) return;
+  if (props.selected) return;
   const nodeElement = event.currentTarget as HTMLElement;
   if (!findPortAtPoint(nodeElement, { x: event.clientX, y: event.clientY })) return;
   event.preventDefault();

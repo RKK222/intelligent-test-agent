@@ -19,13 +19,16 @@
 
 - Why:
   - 用户反馈在 Mermaid 可视化编辑器中，节点与端口的鼠标光标形态不符、拖拽连线时尾部箭头无法跟随拖拽方向，以及在移近节点吸附时存在边缘闪烁抖动、且松手释放时偶发无法成功连接的问题。在此基础上，进一步要求在连线无效（显示红色箭头）时，在鼠标处动态展示无法连接的具体原因。
+  - 解决已选中节点进行拖拽时容易误触发端口连线起线的问题，屏蔽选中节点的连线触发，保证选中节点微调位置时的纯粹拖动体验。
 - What:
   - 修改节点和端口的 cursor 指示，节点移入改为 `move`，定位点移入改为 `default` 并可接收指针悬停。
   - preview 拖拽连线在未吸附端口时，改为根据鼠标移动相对位移动态计算终点切线方向，使箭头指向完全跟随拖拽方向。
   - 引入退吸附滞后半径机制（Hysteresis），并实现拖拽中局部禁用 transition 动画的 CSS 规则，以消除坐标测量上的跳变并根除吸附抖动；修改松手判定以直接使用内存中的最新合法连接缓存状态，保障连接可靠性。
   - 增加在红色无效连线箭头处，绝对定位渲染悬浮提示框（Tooltip），提示“节点间已存在相同方向的连线”或“不能在同一个端口上建立自环连接”的具体原因。
+  - 在 `MermaidFlowNode.vue` 中在选中状态下屏蔽连线起线，此时将事件和捕获直接放行，由 Vue Flow 原生的节点拖拽移动接管。
 - How:
   - 调整 `MermaidFlowNode.vue` 的 CSS 以应用 move 和 default 指针，并将 `pointer-events: none` 修正为 `auto`；在 `MermaidVisualEditor.vue` 的拖拽态中控制 CSS 强制禁用 handle 过渡动画以消除慢变。
+  - 修改 `MermaidFlowNode.vue` 内部的拦截逻辑，在 `onPointerDown` 和 `preventNodeDragFromPort` 捕获拦截前增加 `props.selected` 为真的直接返回逻辑。
   - 在 `use-mermaid-connection-drag.ts` 中根据 `dx/dy` 大小及正负动态赋予 `targetPosition` 值以修正 marker 方向；在 `updateFromPoint` 中保留 `lastSnappedPort`，判定中增加 `42px` 的退吸附滞后半径；在 `onPointerUp` 中移除冗余 updateFromPoint 保证取值不因松手抖动而失灵。
   - 在 `vue-flow-adapter.ts` 声明 `getMermaidConnectionInvalidReason` 计算文字原因；在 drag controller 中追踪 Ref `invalidReason` 和相对坐标 `dragEndPoint`，并在 `MermaidVisualEditor.vue` 的模板中渲染 `.ta-mermaid-connection-tooltip` 元素及添加对应 CSS。
 - Result:
@@ -6391,3 +6394,16 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - runtime 定向测试 58 项通过，runtime 与 API 全量测试通过（API 271 项），Redis heartbeat 测试 5 项通过，`mvn clean package -DskipTests` 完整打包通过；HTTP/DTO/SSE/数据库结构和 manager 协议均未变更。
   - persistence 全量仍有本任务外既有基线失败：H2 2.4.240 不支持存量 `ON CONFLICT` 测试 SQL、测试种子缺失及 AgentConfig 测试用户外键缺失；相关生产 SQL、迁移和夹具未在本任务中扩大范围修改。
+
+### 2026-07-15 - 前端、Java 与 Manager 展示构建版本
+
+- Why:
+  - 设置页和运行管理缺少可核对的产物版本，滚动升级时无法区分前端静态包、各 Java 实例和各 manager 二进制是否已经替换。
+- What:
+  - 三类产物统一在构建时按北京时间生成 `VyyyyMMdd.HHmmss`：前端由 Vite 固化只读常量，Java 从 Spring Boot build-info 读取，Go manager 由 linker flag 注入；设置导航底部、Java 列和 manager 列分别展示，缺失时显示 `-`。
+  - Java/manager 版本复用现有 WebSocket、Redis 心跳快照与 overview API 透传，旧构造器、旧 manager 消息和旧 Redis JSON 缺字段时保持兼容；未新增数据库字段、HTTP 端点、RunEvent、鉴权或跨服务器探测。
+- How:
+  - 本地 Bash、Windows PowerShell、企业 `package-release.sh` 和 worker Dockerfile 都在构建 manager 时注入 linker 版本；版本不是 `backend.env`、`docker.env` 或 `nginx.env` 配置项。同步 shared-types、API/模块 README 和前后端/企业部署文档。
+- Result:
+  - 前端 57 个测试文件 819 passed、1 skipped，typecheck 与生产 build 通过；后端相关 runtime/API/persistence 58 项通过，`test-agent-app -am -DskipTests package` 通过且 jar 含 `META-INF/build-info.properties`；Go 全量测试和开发脚本验证通过。
+  - 已从 Dockerfile `manager-build` 阶段实际构建并导出 linux/amd64 二进制，确认包含 `V20260715.113850`。Docker Desktop 对项目默认固定 Go 基础镜像 digest 存在本地 metadata size 校验损坏，故改用 `golang:1.25-bookworm` 覆盖 build arg 完成 linker 链路验证；未执行完整 worker 镜像/企业 zip 打包。当前机器无 `pwsh/powershell`，Windows 脚本仅完成静态校验。
