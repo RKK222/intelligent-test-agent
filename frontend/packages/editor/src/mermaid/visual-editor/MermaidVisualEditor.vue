@@ -200,6 +200,11 @@ function onEdgeClick(event: EdgeMouseEvent) {
   selectedNodeId.value = undefined;
 }
 
+/** 点击空白画布时取消选中，使半透明快捷箭头随选中态消失。 */
+function onPaneClick() {
+  selectedNodeId.value = undefined;
+}
+
 function updateSelectedNode(patch: Partial<Pick<MermaidNode, "text" | "type">>) {
   if (!selectedNodeId.value) return;
   updateGraph((draft) => {

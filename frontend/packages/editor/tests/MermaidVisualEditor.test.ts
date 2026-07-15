@@ -18,6 +18,7 @@ vi.mock("@vue-flow/core", () => ({
     name: "VueFlow",
     props: ["nodes", "edges", "nodesConnectable", "connectionMode", "connectOnClick"],
     emits: ["nodeDragStop", "connect", "nodeClick", "edgeClick", "quick-connect-test", "paneClick"],
+    emits: ["nodeDragStop", "connect", "nodeClick", "quick-connect-test", "paneClick"],
     setup(_, { expose }) {
       expose({
         screenToFlowCoordinate: ({ x, y }: { x: number; y: number }) => ({ x: x - 100, y: y - 50 })
@@ -628,6 +629,30 @@ describe("MermaidVisualEditor", () => {
 
   it("鼠标悬浮节点显示四向快捷箭头，离开后隐藏（与选中无关）", async () => {
     const { container } = render(MermaidVisualEditor, {
+  it("快捷建连后起始节点取消选中、新节点选中，半透明箭头随之移动", async () => {
+    const EditorHost = defineComponent({
+      components: { MermaidVisualEditor },
+      setup() {
+        return { model: ref(graph()) };
+      },
+      template: `<MermaidVisualEditor v-model="model" />`
+    });
+    const { getByTestId, container } = render(EditorHost);
+    const arrowsOf = (nodeId: string) =>
+      container.querySelectorAll(`[data-mermaid-node-id="${nodeId}"] .ta-mermaid-quick-connector-wrapper`).length;
+
+    await fireEvent.click(getByTestId("mock-select"));
+    // 选中 A：四周出现 4 个半透明快捷箭头
+    expect(arrowsOf("A")).toBe(4);
+
+    await fireEvent.click(getByTestId("mock-quick-connect"));
+    // 建连后选中切到新节点 N3：A 的箭头消失，N3 出现 4 个箭头
+    expect(arrowsOf("A")).toBe(0);
+    expect(arrowsOf("N3")).toBe(4);
+  });
+
+  it("点击空白画布取消选中并隐藏快捷箭头", async () => {
+    const { getByTestId, container } = render(MermaidVisualEditor, {
       props: { modelValue: graph() }
     });
     const arrowsOf = (nodeId: string) =>
@@ -677,5 +702,12 @@ describe("MermaidVisualEditor", () => {
     // 删除文字（清空）
     await fireEvent.update(getByLabelText("连线文字"), "");
     expect((emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges[0]?.label).toBe("");
+  });
+
+    await fireEvent.click(getByTestId("mock-select"));
+    expect(arrowsOf("A")).toBe(4);
+
+    await fireEvent.click(getByTestId("mock-pane-click"));
+    expect(arrowsOf("A")).toBe(0);
   });
 });

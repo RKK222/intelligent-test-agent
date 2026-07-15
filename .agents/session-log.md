@@ -6885,3 +6885,29 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 前端全量 lint、typecheck、58 个 Vitest 文件（842 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
   - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；`workStatusDockTarget` 类型不变，仅收窄成功态的投送行为。
+### 2026-07-15 - 修复 Mermaid 快捷建连连线方向与起始点端口
+
+- Why:
+  - Mermaid 可视化编辑器选中节点后用四向快捷箭头新建图形时，连线方向经常反向（新节点被当作起点，箭头指回原节点）；且矩形等形状因四条边没有正好位于 50% 的端口，`quickArrowDirs` 退化到左上角 `target-0`，起始点不在箭头所在边上。根因是 `onQuickConnect` 用 `portId.startsWith("source")` 决定方向，而该前缀由端口索引奇偶决定，与箭头方向无关。
+- What:
+  - 新增 `packages/editor/src/mermaid/visual-editor/node-port-layout.ts`，集中五种节点形状的端口坐标、句柄 ID 与 `findEdgePort`（取指定边上最接近中点的端口）/`oppositePosition`。
+  - `MermaidFlowNode.vue` 的 `allPorts` 和 `quickArrowDirs` 改用共享布局，四向箭头按方向取该边最接近中点的端口，起始点始终落在箭头所在边上。
+  - `MermaidVisualEditor.vue` 的 `onQuickConnect` 固定被选中节点为起点、新节点为目标，起点端口取箭头所在边端口（`portId`），目标端口取新节点上朝向起点的对边端口，使箭头始终朝外。
+  - `edge-port-metadata.ts` 端口校验正则由 `[0-2]` 放宽到 `[0-5]`，匹配 12/8 端口布局实际渲染的 `target/source-0~5`，避免快捷建连选中的边中点端口（如矩形右侧 `target-5`）被判非法而在序列化时丢失。
+- How:
+  - 新增 `node-port-layout.test.ts` 覆盖各形状端口数量、`oppositePosition` 与四向 `findEdgePort` 选点；`MermaidVisualEditor.test.ts` 增加快捷箭头按方向选端口与“方向始终朝外”回归测试，并更新既有快捷建连断言。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 99 passed（含新增 20 项），前端 typecheck 与 lint 通过。
+  - 注意：`packages/editor/README.md` 与 `PACKAGE.md` 仍按旧“每边 3 个/六点”描述端口，为本任务外既有文档漂移，未在本任务扩大范围修改。
+
+### 2026-07-15 - 修复快捷建连后半透明箭头不消失
+
+- Why:
+  - 选中节点用四向快捷箭头新建图形后，起始节点的半透明快捷箭头仍停留在屏幕上。根因是 `MermaidFlowNode` 的 `selected` 来自 Vue Flow 的 `nodeProps.selected`，而 `onQuickConnect` 只更新编辑器自己的 `selectedNodeId`，Vue Flow 的选中态并不跟随，起始节点一直保持选中、箭头不消失。
+- What:
+  - `MermaidVisualEditor.vue` 模板把 `MermaidFlowNode` 的 `:selected` 改为 `selectedNodeId === nodeProps.id`（覆盖 `v-bind="nodeProps"` 的 selected），让选中态以 `selectedNodeId` 为唯一来源；快捷建连后选中切到新节点，起始节点箭头随之消失、新节点出现箭头。
+  - 新增 `@pane-click="onPaneClick"`，点击空白画布清空 `selectedNodeId`，保留并统一了原有的画布取消选中行为。
+- How:
+  - 测试 mock 的 `VueFlow` 增加 `node-mermaid` 具名插槽按节点渲染真实 `MermaidFlowNode`，并补 `paneClick` 事件与触发按钮；新增“快捷建连后起始节点取消选中、新节点选中”“点击空白画布取消选中”两条回归测试。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 101 passed（含新增 2 项），前端 typecheck 与 lint 通过。
