@@ -273,20 +273,28 @@ git commit -m "前端：优化工作状态完成态与事件行"
 - Consumes: Task 7 的 `#completed-status-actions` 插槽以及既有 `showTimelineFeedback`、`lastFeedbackableMessage`、`submitPositiveFeedback()`、`openNegativeFeedback()`。
 - Produces: 成功完成态 Dock 横排中的反馈入口；`submit-feedback` 事件 payload、反馈 ID 选择和不满意弹窗保持原样。
 
-- [ ] **Step 1: 为反馈位置与既有行为写失败测试**
+- [x] **Step 1: 为反馈位置与既有行为写失败测试**
 
 ```ts
 it("renders successful feedback beside the collapsed status icon", async () => {
   const platformMessageId = "msg_0123456789abcdef0123456789abcdef";
   const wrapper = mount(FigmaChatPanel, {
     props: {
-      messages: [{
-        id: platformMessageId,
-        messageId: platformMessageId,
-        platformMessageId,
-        role: "assistant",
-        text: "已完成分析"
-      }],
+      messages: [
+        {
+          id: "user-feedback-1",
+          messageId: "user-feedback-1",
+          role: "user",
+          text: "请完成分析"
+        },
+        {
+          id: platformMessageId,
+          messageId: platformMessageId,
+          platformMessageId,
+          role: "assistant",
+          text: "已完成分析"
+        }
+      ],
       running: false,
       runtimeStatus: "SUCCEEDED",
       processStatus: { status: "READY", initializable: false, message: "ready" }
@@ -307,13 +315,13 @@ it("renders successful feedback beside the collapsed status icon", async () => {
 
 补充断言：点击“不满意”仍打开原原因弹窗；提交中和已选评价样式不变；运行中、失败、停止与子智能体视图没有反馈按钮。
 
-- [ ] **Step 2: 运行应用测试并确认 RED**
+- [x] **Step 2: 运行应用测试并确认 RED**
 
 Run: `cd frontend && corepack pnpm vitest run apps/agent-web/tests/FigmaChatPanel.test.ts -t "feedback"`
 
 Expected: 反馈仍位于 `.figma-chat-timeline-actions`，完成摘要内找不到按钮。
 
-- [ ] **Step 3: 通过通用插槽迁移反馈按钮**
+- [x] **Step 3: 通过通用插槽迁移反馈按钮**
 
 ```vue
 <OpencodeTimeline
@@ -357,7 +365,7 @@ Expected: 反馈仍位于 `.figma-chat-timeline-actions`，完成摘要内找不
 
 删除滚动时间线末尾的 `.figma-chat-timeline-actions` 结构和专用样式；保留 `.figma-chat-feedback`、按钮选中态、disabled 状态以及不满意弹窗逻辑。完成摘要使用 `flex-wrap: wrap`，保证窄屏按钮可换行且不造成页面横向溢出。
 
-- [ ] **Step 4: 运行应用和跨包回归并确认 GREEN**
+- [x] **Step 4: 运行应用和跨包回归并确认 GREEN**
 
 Run: `cd frontend && corepack pnpm vitest run apps/agent-web/tests/FigmaChatPanel.test.ts packages/agent-chat/tests/opencode-timeline.test.ts`
 
@@ -365,7 +373,7 @@ Run: `cd frontend && corepack pnpm --filter @test-agent/agent-web typecheck`
 
 Expected: 全部 PASS，反馈提交 payload 与既有测试一致。
 
-- [ ] **Step 5: 同步稳定文档并完成全量验证**
+- [x] **Step 5: 同步稳定文档并完成全量验证**
 
 更新 `agent-chat`、`agent-web` README/PACKAGE，说明初始单行、事件按需增加和完成摘要插槽；在 `.agents/session-log.md` 合并记录本轮 Why / What / How / Result。
 
@@ -381,12 +389,12 @@ Run: `git diff --check`
 
 Expected: 所有命令退出码为 0；在桌面和 260px 窄屏真实页面确认完成摘要横排、详情展开、Diff 顺序和反馈弹窗。
 
-- [ ] **Step 6: 回顾并提交最终变更**
+- [x] **Step 6: 回顾并提交最终变更**
 
 ```bash
 tail -n 160 .agents/session-log.md
 git status --short
-git add .agents/session-log.md docs/superpowers/specs/2026-07-15-chat-work-status-summary-design.md frontend/apps/agent-web/README.md frontend/apps/agent-web/src/PACKAGE.md frontend/apps/agent-web/src/components/FigmaChatPanel.vue frontend/apps/agent-web/tests/FigmaChatPanel.test.ts frontend/packages/agent-chat/README.md frontend/packages/agent-chat/src/PACKAGE.md
+git add .agents/session-log.md docs/superpowers/plans/2026-07-15-chat-work-status-summary.md frontend/apps/agent-web/README.md frontend/apps/agent-web/src/PACKAGE.md frontend/apps/agent-web/src/components/FigmaChatPanel.vue frontend/apps/agent-web/tests/FigmaChatPanel.test.ts frontend/packages/agent-chat/README.md frontend/packages/agent-chat/src/PACKAGE.md
 git diff --cached --check
 git commit -m "前端：合并完成状态与反馈入口"
 ```

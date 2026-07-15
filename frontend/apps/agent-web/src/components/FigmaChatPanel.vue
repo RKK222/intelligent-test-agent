@@ -3468,7 +3468,42 @@ function onCompositionEnd() {
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
-      />
+      >
+        <template #completed-status-actions>
+          <div
+            v-if="showTimelineFeedback && lastFeedbackableMessage"
+            class="figma-chat-feedback figma-chat-completed-feedback"
+          >
+            <button
+              type="button"
+              :class="[
+                'figma-chat-feedback-btn',
+                feedbackFor(lastFeedbackableMessage)?.rating === 'POSITIVE' && 'is-selected',
+              ]"
+              :disabled="feedbackSubmitting(lastFeedbackableMessage)"
+              title="满意"
+              @click="submitPositiveFeedback(lastFeedbackableMessage)"
+            >
+              <ThumbsUp :size="12" />
+              <span>满意</span>
+            </button>
+            <button
+              type="button"
+              :class="[
+                'figma-chat-feedback-btn',
+                'figma-chat-feedback-btn--negative',
+                feedbackFor(lastFeedbackableMessage)?.rating === 'NEGATIVE' && 'is-selected',
+              ]"
+              :disabled="feedbackSubmitting(lastFeedbackableMessage)"
+              title="不满意"
+              @click="openNegativeFeedback(lastFeedbackableMessage)"
+            >
+              <ThumbsDown :size="12" />
+              <span>不满意</span>
+            </button>
+          </div>
+        </template>
+      </OpencodeTimeline>
       <button
         v-if="hasNewContent"
         type="button"
@@ -3477,37 +3512,6 @@ function onCompositionEnd() {
       >
         查看新内容
       </button>
-      <div v-if="showTimelineFeedback && lastFeedbackableMessage" class="figma-chat-timeline-actions">
-        <div class="figma-chat-feedback">
-          <button
-            type="button"
-            :class="[
-              'figma-chat-feedback-btn',
-              feedbackFor(lastFeedbackableMessage)?.rating === 'POSITIVE' && 'is-selected',
-            ]"
-            :disabled="feedbackSubmitting(lastFeedbackableMessage)"
-            title="满意"
-            @click="submitPositiveFeedback(lastFeedbackableMessage)"
-          >
-            <ThumbsUp :size="12" />
-            <span>满意</span>
-          </button>
-          <button
-            type="button"
-            :class="[
-              'figma-chat-feedback-btn',
-              'figma-chat-feedback-btn--negative',
-              feedbackFor(lastFeedbackableMessage)?.rating === 'NEGATIVE' && 'is-selected',
-            ]"
-            :disabled="feedbackSubmitting(lastFeedbackableMessage)"
-            title="不满意"
-            @click="openNegativeFeedback(lastFeedbackableMessage)"
-          >
-            <ThumbsDown :size="12" />
-            <span>不满意</span>
-          </button>
-        </div>
-      </div>
       <!-- 作废说明：旧气泡消息循环已被 OpencodeTimeline 主路径取代；保留未激活代码仅便于短期比对，不再扩展。 -->
       <template v-if="false" v-for="message in displayMessages" :key="message.id">
         <!-- 用户消息气泡 (右对齐) -->
@@ -6123,19 +6127,7 @@ function onCompositionEnd() {
   margin-top: 6px;
 }
 
-.figma-chat-timeline-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  flex: 0 0 auto;
-  margin: 2px 0 0;
-  padding: 0 0 4px;
-  position: relative;
-  z-index: 0;
-}
-
-.figma-chat-timeline-actions .figma-chat-feedback {
+.figma-chat-completed-feedback {
   margin-top: 0;
 }
 

@@ -6842,3 +6842,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 前端全量 lint、typecheck、58 个 Vitest 文件（838 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
   - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；状态容器属性和 Todo 快照透传均为可选，未传入时保持时间线内渲染兼容。
+
+### 2026-07-15 - 完成态状态摘要合并反馈入口
+
+- Why:
+  - 成功完成后当前工作状态仍保持完整展开，满意/不满意入口又单独占据滚动时间线；无任何工具事件时状态块还会保留空事件行。
+- What:
+  - 最新轮明确成功后自动收为可展开的状态图标，并把既有满意/不满意按钮通过通用 actions 插槽放到同一摘要行；点击图标仍可在原位置恢复完整状态，文件修改块继续排在其下。
+  - 状态块初始只显示思考行，首个普通工具事件出现后才增加事件行；Todo 仍作为独立附加行保留，反馈提交、负反馈弹窗、问答和子 Agent 展示逻辑不变。
+- How:
+  - `agent-chat` 仅管理完成摘要、展开状态和插槽透传，`agent-web` 继续持有反馈 ID、提交与弹窗业务；通过 TDD 覆盖完成态自动收起、事件行按需渲染、反馈位置和原有提交行为。
+  - 在真实页面检查桌面与 390px 窄屏的摘要同排、展开顺序和横向溢出，并同步 `agent-chat`、`agent-web` README/PACKAGE 与既有设计、实施计划。
+- Result:
+  - 前端全量 lint、typecheck、58 个 Vitest 文件（840 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
+  - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；新增插槽和组件属性均为可选，既有调用保持兼容。

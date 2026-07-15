@@ -1628,6 +1628,8 @@ describe("FigmaChatPanel", () => {
             createdAt: "2026-07-15T09:00:00Z"
           }
         ],
+        running: true,
+        runtimeStatus: "RUNNING",
         processStatus: { status: "READY", initializable: false, message: "ready" },
         todos: [
           { id: "todo_1", text: "分析 SSE 字段", status: "pending", priority: "high" },
@@ -2661,11 +2663,18 @@ describe("FigmaChatPanel", () => {
     expect(text.indexOf("第二轮用户问题")).toBeLessThan(text.indexOf("第二轮助手回答"));
   });
 
-  it("shows persisted feedback once below the last output for a successful historical run", async () => {
+  it("shows persisted feedback beside the collapsed status icon for a successful historical run", async () => {
     const platformMessageId = "msg_0123456789abcdef0123456789abcdef";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-1",
+            messageId: "user-feedback-1",
+            role: "user",
+            text: "请完成分析",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
           {
             id: platformMessageId,
             messageId: platformMessageId,
@@ -2695,18 +2704,12 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
-    const buttons = wrapper.findAll(".figma-chat-feedback-btn");
+    const summary = wrapper.get(".oc-work-status-completed-summary");
+    const buttons = summary.findAll(".figma-chat-feedback-btn");
     expect(buttons).toHaveLength(2);
     expect(buttons[0].classes()).toContain("is-selected");
-    const timelineActions = wrapper.findAll(".figma-chat-timeline-actions");
-    expect(timelineActions).toHaveLength(1);
-    expect(timelineActions[0].element.previousElementSibling?.classList.contains("oc-timeline-root")).toBe(true);
-    const componentSource = readFileSync(
-      resolve(process.cwd(), "apps/agent-web/src/components/FigmaChatPanel.vue"),
-      "utf8"
-    );
-    expect(componentSource).toMatch(/\.figma-chat-timeline-actions\s*\{[^}]*margin:\s*2px 0 0;/s);
-    expect(componentSource).not.toContain("margin: 2px 0 0 46px;");
+    expect(summary.get('[aria-label="展开已完成工作状态"]').attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find(".figma-chat-timeline-actions").exists()).toBe(false);
 
     await buttons[0].trigger("click");
 
@@ -2721,6 +2724,13 @@ describe("FigmaChatPanel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-merge",
+            messageId: "user-feedback-merge",
+            role: "user",
+            text: "继续分析",
+            createdAt: "2026-06-25T08:59:00.000Z"
+          },
           {
             id: "assistant-run_123",
             role: "assistant",
@@ -2763,6 +2773,13 @@ describe("FigmaChatPanel", () => {
       props: {
         messages: [
           {
+            id: "user-feedback-remote",
+            messageId: "user-feedback-remote",
+            role: "user",
+            text: "检查远端消息",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
+          {
             id: remoteMessageId,
             messageId: remoteMessageId,
             remoteMessageId,
@@ -2787,6 +2804,13 @@ describe("FigmaChatPanel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-mapped",
+            messageId: "user-feedback-mapped",
+            role: "user",
+            text: "等待落库",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
           {
             id: remoteMessageId,
             messageId: remoteMessageId,
@@ -2823,6 +2847,13 @@ describe("FigmaChatPanel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-running",
+            messageId: "user-feedback-running",
+            role: "user",
+            text: "运行中的任务",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
           {
             id: platformMessageId,
             messageId: platformMessageId,
@@ -2888,6 +2919,12 @@ describe("FigmaChatPanel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-child",
+            messageId: "user-feedback-child",
+            role: "user",
+            text: "执行子任务"
+          },
           {
             id: platformMessageId,
             messageId: platformMessageId,
