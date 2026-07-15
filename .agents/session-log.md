@@ -53,6 +53,18 @@
   - 应用内浏览器完成桌面与窄屏布局、点击创建和属性编辑验证；当前浏览器控制层的坐标拖拽不会生成原生 HTML5 `DataTransfer`，因此拖放落点由组件级原生 drop 事件测试验证，验收草稿未应用到 Markdown。
 - Result:
   - 前端全量 lint、typecheck、56 个 Vitest 文件（789 passed / 1 skipped）和生产 build 通过；构建仅保留既有 Google Fonts `@import` 顺序与大 chunk 警告。未修改 API、事件、数据库、安全或兼容性契约。
+### 2026-07-15 - 收敛测试设计方法选择与路径法产物命名
+
+- Why:
+  - 用户指出“状态路径测试案例”不直观，且弱模型会给每个需求子条目机械生成所有测试设计方法的图表和案例；期望智能体自主选择少量适用方法，用户点名时再追加。
+- What:
+  - 公共 Config 将路径/状态迁移统一展示为“路径法”，Phase A 文件统一使用 `<业务名称>-路径图.md`；最终案例继续按业务对象合并为 `<业务名称>-测试案例.md`，禁止使用方法名拆分案例文件。
+  - 方法选择改为“一个主方法 + 有独立高风险覆盖价值的辅助方法”，增加 `requestedMethods`、选择来源、覆盖目标和停止条件；未选方法不加载 Skill、不生成产物，用户明确指定的方法必须纳入或记录材料缺口。同步生成、审核、质量门禁、方法 Skill 标题、公共 README 和 3 条静态评估素材。
+- How:
+  - 参考桌面 openclaw 既有主/辅助方法规则，只修改 `.testagent/agent-opencode/.config` 的 Agent、Skill、rules、template 和说明，不修改 OpenCode 原生源码、前端解析或模型逻辑；按用户要求未调用 GPT 或其他模型运行案例生成。
+- Result:
+  - 8 个相关 Skill 通过 `quick_validate.py` 并成功打包，OpenCode 原生 `debug skill/debug agent` 可解析目标 Skill 和 4 个测试设计 Agent；静态契约校验覆盖方法收敛、用户指定覆盖、业务化文件命名、引用存在性、双语元数据、评估素材和 Agent 可见性，`git diff --check` 通过。企业模型实际产物效果留给用户在应用工作区验证。
+
 ### 2026-07-15 - 基于最新 main 重打企业离线全包
 
 - Why:
