@@ -1127,7 +1127,6 @@ function Start-OpencodeManager {
 
     $portStart = [string](Get-OpencodeManagerPortStart)
     $portEnd = [string](Get-OpencodeManagerPortEnd)
-    $containerId = Get-EnvValue "OPENCODE_MANAGER_CONTAINER_ID" ([System.Environment]::MachineName)
     $managerStateDir = Get-OpencodeManagerStateDir
     $backendPort = Get-EnvValue "OPENCODE_MANAGER_BACKEND_PORT" (Get-UrlPort $script:BackendUrl)
     $version = ""
@@ -1141,7 +1140,6 @@ function Start-OpencodeManager {
 
     # 收集所有需要传递给子进程的环境变量
     $envVars = @{
-        "OPENCODE_MANAGER_CONTAINER_ID" = $containerId
         "OPENCODE_MANAGER_BACKEND_PORT" = $backendPort
         "OPENCODE_MANAGER_PORT_START" = $portStart
         "OPENCODE_MANAGER_PORT_END" = $portEnd
@@ -1155,7 +1153,7 @@ function Start-OpencodeManager {
     }
 
     $logPath = Join-Path $LogDir "opencode-manager.log"
-    Write-Host "Starting opencode-manager for $containerId ($version). Logs: $logPath"
+    Write-Host "Starting opencode-manager with identity derived from the Windows machine name ($version). Logs: $logPath"
     $wrapperProcessId = Start-BackgroundCommand -WorkingDirectory $RootDir -Command $managerBinary -Arguments @("run") -LogPath $logPath -Environment $envVars
     Write-PidFile (Join-Path $LogDir "opencode-manager.pid") @($wrapperProcessId)
     Start-Sleep -Seconds 3

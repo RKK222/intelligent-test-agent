@@ -310,7 +310,7 @@ func (s *Supervisor) topologyMessage(messageType string) Message {
 		ManagerID:               s.cfg.ManagerID,
 		ContainerID:             s.cfg.ContainerID,
 		LinuxServerID:           s.cfg.LinuxServerID,
-		ContainerName:           s.cfg.ContainerID,
+		ContainerName:           s.cfg.ContainerName,
 		PortStart:               s.cfg.PortStart,
 		PortEnd:                 s.cfg.PortEnd,
 		MaxProcesses:            s.manager.MaxProcesses(),

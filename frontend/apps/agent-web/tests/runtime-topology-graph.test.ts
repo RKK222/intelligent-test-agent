@@ -48,6 +48,23 @@ describe("runtime topology graph data", () => {
           traceId: "trace_backend"
         }
       ],
+      containers: [
+        {
+          containerId: "ctr_01",
+          linuxServerId: "10.8.0.12",
+          containerName: "test-agent-opencode-worker",
+          portStart: 4096,
+          portEnd: 4100,
+          maxProcesses: 4,
+          currentProcesses: 2,
+          availableCapacity: 2,
+          status: "READY",
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_container"
+        }
+      ],
       managers: [
         {
           managerId: "mgr_1234567890abcdef",
@@ -98,7 +115,7 @@ describe("runtime topology graph data", () => {
 
     expect(graph.nodes.map((node) => [node.id, node.kind, node.label])).toEqual([
       ["backend:bjp_1234567890abcdef", "backend", "10.8.0.12"],
-      ["manager:mgr_1234567890abcdef", "manager", "ctr_01"],
+      ["manager:mgr_1234567890abcdef", "manager", "test-agent-opencode-worker"],
       ["opencode:mgr_1234567890abcdef:4096:0", "opencode-bound", "4096"],
       ["opencode:mgr_1234567890abcdef:4097:1", "opencode-unbound", "4097"]
     ]);
@@ -109,6 +126,7 @@ describe("runtime topology graph data", () => {
     ]);
     expect(graph.nodes.find((node) => node.id === "opencode:mgr_1234567890abcdef:4096:0")?.subtitle).toBe("wr / RUNNING");
     expect(graph.nodes.find((node) => node.id === "opencode:mgr_1234567890abcdef:4097:1")?.subtitle).toBe("无主 / UNHEALTHY");
+    expect(graph.nodes.find((node) => node.id === "manager:mgr_1234567890abcdef")?.tooltip).toContain("容器 ID: ctr_01");
   });
 
   it("keeps manager nodes when old responses omit managedProcesses", () => {

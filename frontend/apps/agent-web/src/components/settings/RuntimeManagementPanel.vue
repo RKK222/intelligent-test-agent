@@ -899,7 +899,7 @@ function startResize(e: MouseEvent) {
                         <td class="is-expand">
                           <span :class="['ta-runtime-expand-icon', { 'is-expanded': isRuntimeRowExpanded(row) }]" aria-hidden="true"></span>
                         </td>
-                         <td class="is-compact" :title="row.container?.containerId ?? undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.container?.containerId) }}</td>
+                         <td class="is-compact" :title="row.container ? `${row.container.containerName || row.container.containerId} (${row.container.containerId})` : undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.container?.containerName || row.container?.containerId) }}</td>
                          <td class="is-compact" :title="row.manager?.managerId ?? undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.manager?.managerId) }}</td>
                          <td :title="row.linuxServerId ?? undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.linuxServerId) }}</td>
                          <td :title="containerManagerNetworkAddress(row)" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ containerManagerNetworkAddress(row) }}</td>

@@ -364,6 +364,7 @@ describe("runtime management settings", () => {
 
     expect(await findByText("服务器 / Java 进程")).toBeTruthy();
     expect(await findByText("容器 / 管理进程")).toBeTruthy();
+    expect(await findByText("opencode-a")).toBeTruthy();
     await findByText("服务器 / Java 进程");
     expect(getAllByText("linux-prod-a").length).toBeGreaterThanOrEqual(2);
     expect(getAllByText("IP地址").length).toBeGreaterThanOrEqual(2);
@@ -602,7 +603,7 @@ describe("runtime management settings", () => {
 
     expect(await findByText("mgr_1234567890abcdef")).toBeTruthy();
     expect(queryByText(startCommand)).toBeNull();
-    await fireEvent.click(await findByText("ctr_01"));
+    await fireEvent.click(await findByText("opencode-a"));
 
     expect(await findByText("有主进程")).toBeTruthy();
     expect(await findByText("无主进程")).toBeTruthy();

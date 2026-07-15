@@ -1,5 +1,20 @@
 # Session Log
 
+### 2026-07-15 - 将 Go manager 身份改为服务器稳定哈希
+
+- Why:
+  - 多台服务器上的 worker 容器可能使用相同 hostname，原先以容器名派生 `containerId/managerId` 会让共享数据库、Redis 和 manager 路由无法区分；部署尚未开始，因此可以直接收敛新身份语义而不迁移历史数据。
+- What:
+  - Go manager 改为从稳定 `linuxServerId` 计算版本化 SHA-256：`ctr_ + SHA256(container namespace + NUL + linuxServerId)`，再由该 `containerId` 派生 `mgr_ + SHA256(manager namespace + NUL + containerId)`；hostname 独立保存为 `containerName`，注册和心跳同时上报稳定 ID 与可读名称。
+  - Bash/PowerShell 启动脚本删除人工 container ID 注入并增加禁止回归检查；运行管理表格和拓扑图改为展示 `containerName`，筛选、指标和控制命令继续使用不透明 `containerId`。
+  - 稳定文档统一为“每个 `linuxServerId` 一个 worker”，同步 API 字段语义、数据库兼容说明与企业 Mac 打包、配置、启动和验收流程；未修改 WebSocket/HTTP 字段形状、Redis key 前缀、数据库结构或 Flyway migration。
+- How:
+  - 以 Go golden vector、同服务器重启/改名稳定性、不同服务器隔离、Windows/缺文件失败、supervisor register/heartbeat 和前端显示/路由回归测试锁定行为；完整执行 Go test/vet/build、前端定向测试/typecheck、开发脚本验证与 shell 语法检查。
+- Result:
+  - Go 全量测试、vet、build，前端 16 个定向测试与 typecheck，`tools/verify-dev-scripts.sh` 和三份 shell 语法检查均通过；JDK 21 后端生产模块编译安装通过。
+  - 后端 manager 定向测试被仓库既有测试基线阻断：多个 `FakeRepository` 未实现 `findReadyBackendJavaProcessByLinuxServer`，且若干 `UserOpencodeProcessStatusResponse` 测试仍使用旧构造参数，本次未扩大范围修改。
+  - Mac 完整打包已生成后端 jar 和前端 tar，但 Docker Desktop 配置的镜像加速器拉取固定 Node/Go/Bun digest 时返回 403/manifest size validation，导致 programs 包、worker 镜像 tar 和完整 zip 未生成；`--opencode-only` 重试可稳定复现，需修复镜像源后重新执行完整打包。
+
 ### 2026-07-15 - 优化 Mermaid 可视化编辑的交互体验
 
 - Why:

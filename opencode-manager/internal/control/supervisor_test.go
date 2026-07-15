@@ -36,6 +36,7 @@ func TestDispatchStartCommandPassesSessionPathToProcessManager(t *testing.T) {
 	manager := process.NewManager(
 		config.Config{
 			ContainerID:   "ctr_01",
+			ContainerName: "test-agent-opencode-worker",
 			LinuxServerID: "test-agent-backend-10-8-0-12",
 			ServerHost:    "10.8.0.12",
 			PortStart:     4096,
@@ -110,6 +111,9 @@ func TestSupervisorConnectsSeedWebSocketWithoutHTTPDiscovery(t *testing.T) {
 
 	if message.ManagerID != "mgr_ctr_01_opencode_manager" {
 		t.Fatalf("expected seed WebSocket register message, got %#v", message)
+	}
+	if message.ContainerID != "ctr_01" || message.ContainerName != "test-agent-opencode-worker" {
+		t.Fatalf("expected register to keep stable id and readable name separate, got %#v", message)
 	}
 }
 
@@ -229,6 +233,9 @@ func TestSupervisorSendsManagerHeartbeatThroughOneConnectedSocket(t *testing.T) 
 
 	heartbeat := receiveMessage(t, heartbeats, time.Second)
 
+	if heartbeat.ContainerID != "ctr_01" || heartbeat.ContainerName != "test-agent-opencode-worker" {
+		t.Fatalf("expected heartbeat to keep stable id and readable name separate, got %#v", heartbeat)
+	}
 	if len(heartbeat.ConnectedBackendProcessIDs) != 1 || heartbeat.ConnectedBackendProcessIDs[0] != "bjp_seed_1234567890" {
 		t.Fatalf("expected heartbeat to report connected backend id, got %#v", heartbeat.ConnectedBackendProcessIDs)
 	}
@@ -557,6 +564,7 @@ func supervisorTestConfig(webSocketURL string) config.ControlConfig {
 	return config.ControlConfig{
 		Config: config.Config{
 			ContainerID:   "ctr_01",
+			ContainerName: "test-agent-opencode-worker",
 			LinuxServerID: "test-agent-backend-10-8-0-12",
 			ServerHost:    "10.8.0.12",
 			PortStart:     4096,
@@ -620,6 +628,7 @@ func testProcessManager() *process.Manager {
 	return process.NewManager(
 		config.Config{
 			ContainerID:   "ctr_01",
+			ContainerName: "test-agent-opencode-worker",
 			LinuxServerID: "test-agent-backend-10-8-0-12",
 			ServerHost:    "10.8.0.12",
 			PortStart:     4096,

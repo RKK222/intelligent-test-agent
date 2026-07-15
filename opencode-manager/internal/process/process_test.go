@@ -500,6 +500,7 @@ func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	cfg := config.Config{
 		ContainerID:   "ctr_01",
+		ContainerName: "test-agent-opencode-worker",
 		LinuxServerID: "test-agent-backend-10-8-0-12",
 		ServerHost:    "10.8.0.12",
 		PortStart:     4096,

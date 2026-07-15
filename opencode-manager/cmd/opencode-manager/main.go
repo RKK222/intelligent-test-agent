@@ -67,9 +67,10 @@ func runSupervisor() int {
 		return 2
 	}
 	defer closeLogs()
-	log.Printf("event=manager_run_start managerId=%s containerId=%s linuxServerId=%s backendWebSocketUrl=%s stateDir=%s",
+	log.Printf("event=manager_run_start managerId=%s containerId=%s containerName=%s linuxServerId=%s backendWebSocketUrl=%s stateDir=%s",
 		cfg.ManagerID,
 		cfg.ContainerID,
+		cfg.ContainerName,
 		cfg.LinuxServerID,
 		cfg.BackendWebSocketURL,
 		cfg.StateDir)

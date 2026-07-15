@@ -154,7 +154,10 @@ if grep -q "OPENCODE_MANAGER_SERVER_IP_FILE" "${ROOT_DIR}/restart-dev-services.s
   fail "restart script should not inject manager server IP file path; manager derives SYS_DATA_ROOT_DIR/.serverip"
 fi
 if grep -q "OPENCODE_MANAGER_ID" "${ROOT_DIR}/restart-dev-services.sh"; then
-  fail "restart script should not inject OPENCODE_MANAGER_ID; manager derives it from container and process name"
+  fail "restart script should not inject OPENCODE_MANAGER_ID; manager derives it from the stable server identity"
+fi
+if grep -q "OPENCODE_MANAGER_CONTAINER_ID" "${ROOT_DIR}/restart-dev-services.sh" "${WINDOWS_RESTART_SCRIPT}"; then
+  fail "restart scripts should not inject OPENCODE_MANAGER_CONTAINER_ID; manager derives it from .serverid or the Windows machine identity"
 fi
 if grep -q "OPENCODE_MANAGER_BACKEND_DISCOVERY_URL" "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should not inject legacy HTTP discovery URL"

@@ -52,6 +52,7 @@ export function buildRuntimeTopologyGraph(overview?: OpencodeRuntimeManagementOv
 
   const backends = overview.backendProcesses ?? [];
   const managers = overview.managers ?? [];
+  const containersById = new Map((overview.containers ?? []).map((container) => [container.containerId, container]));
 
   // 1. 第一层：Java 进程 (Top, Y=60)，水平居中分布
   const backendCount = backends.length;
@@ -84,16 +85,19 @@ export function buildRuntimeTopologyGraph(overview?: OpencodeRuntimeManagementOv
 
   for (const [index, manager] of managers.entries()) {
     const x = managerStartX + index * X_GAP;
+    const container = containersById.get(manager.containerId);
+    const containerName = container?.containerName || manager.containerId || manager.managerId;
     managerXMap.set(manager.managerId, x);
     appendNode(nodes, nodeIds, {
       id: managerNodeId(manager.managerId),
       kind: "manager",
-      label: manager.containerId || manager.managerId,
+      label: containerName,
       subtitle: `${manager.containerId} / ${manager.connectionStatus}`,
       status: manager.connectionStatus,
       tooltip: [
         `管理进程: ${manager.managerId}`,
-        `容器: ${manager.containerId}`,
+        `容器名称: ${containerName}`,
+        `容器 ID: ${manager.containerId}`,
         `服务器: ${manager.linuxServerId}`,
         `状态: ${manager.connectionStatus}`,
         `协议: ${manager.protocolVersion}`,

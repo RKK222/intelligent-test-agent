@@ -108,7 +108,7 @@ OPENCODE_WORKER_PORT_END=4105
 VITE_TEST_AGENT_API_BASE_URL=http://122.233.30.2
 ```
 
-`4096-4105` 在两台不同服务器上可以重复，因为端口是在各自宿主机上发布；同一台服务器上如果以后跑多个 worker 容器，端口池才必须错开。
+`4096-4105` 在两台不同服务器上可以重复，因为端口是在各自宿主机上发布。每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不通过不同容器名在同一服务器并行启动多个 worker；容器名只用于展示，固定 `containerId/managerId` 均由 `.serverid` 自动哈希。
 
 `TEST_AGENT_BACKEND` 只用于单后端 Nginx 模板。双后端时不用依赖它生成配置，直接按下节手写 Nginx upstream。
 
@@ -299,8 +299,11 @@ docker exec test-agent-opencode-worker cat /data/testagent/data/.serverhost
 预期日志包含：
 
 ```text
+event=manager_run_start managerId=mgr_<64位小写十六进制> containerId=ctr_<64位小写十六进制> containerName=test-agent-opencode-worker
 manager config update applied
 ```
+
+两台服务器即使都使用容器名 `test-agent-opencode-worker`，日志中的 `containerId/managerId` 也必须不同；如果相同，先停止 worker，修正各自 `backend.env` 中重复的 `TEST_AGENT_LINUX_SERVER_ID`，重启 Java 并确认 `.serverid` 后再启动 worker。
 
 ### 平台页面
 

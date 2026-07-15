@@ -2,6 +2,8 @@
 
 本目录提供企业内部署文件。当前部署采用前端实体 Nginx 单独部署，后端 Java 与 `opencode-worker` 可在多台服务器横向部署；当前规划为 `122.233.30.4` 和 `122.233.30.114` 两台后端/worker 节点，Redis 独立部署，PostgreSQL 使用 `122.42.203.103:8000/testagent`。企业内 `opencode-worker` 统一用纯 Docker 命令管理，不使用 Docker Compose；前端、Nginx、Java、Redis 和 PostgreSQL 也不由 Docker 编排启动。
 
+每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只部署一个 worker。`backend.env` 为每台服务器配置全局唯一且长期稳定的 `TEST_AGENT_LINUX_SERVER_ID`、`TEST_AGENT_SERVER_ADVERTISED_HOST`、数据库、Redis 和 manager token；`docker.env` 只配置共享数据目录、程序/镜像、端口池及同一个 manager token，不配置 `containerId/managerId`。Go manager 从 Java 写入的 `.serverid` 自动派生固定哈希 ID，Docker `--name`/hostname 只影响 `containerName` 展示，改名或重建不会改变数据库、Redis 和路由身份。
+
 企业部署根目录统一使用 `/data/testagent`，建议目录规划如下：
 
 ```text
@@ -557,7 +559,7 @@ Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart
 - `docker run` 发布端口必须保持 `hostPort:containerPort` 数值一致，例如 `4096-4105:4096-4105`。
 - 不要写 `14096:4096` 这类内外不一致映射，否则 Java 会生成错误的 `baseUrl`。
 
-每个 worker 容器内只有 1 个 `opencode-manager run` 常驻进程；manager 按端口池动态启动 0..N 个 `opencode serve` 子进程。
+每台稳定服务器只运行 1 个 worker，worker 容器内只有 1 个 `opencode-manager run` 常驻进程；manager 按端口池动态启动 0..N 个 `opencode serve` 子进程。不要通过不同 `--name` 在同一服务器并行启动多个 worker；容器名称只是展示名称，两个进程仍会从同一 `.serverid` 派生相同 ID。
 
 当前 `test-agent-programs.tar.gz` 和 worker 镜像使用 OpenCode `1.17.8` 的 **Node server bundle**，不再运行 npm 包中嵌入 Bun 的 `opencode.exe`。联网打包阶段仍使用 Bun `1.3.14` 编译上游 TypeScript，但最终镜像只保留 Node 22、server bundle 和 linux/amd64 的 `node-pty`；因此宿主机内核 `4.19`、容器内 Node 可正常启动时，不受 Bun 要求 Linux 内核至少 `5.1` 的限制。Node 运行镜像固定为 Debian 11 bullseye / glibc `2.31`：它既满足 Node 22 的运行要求，又避开 Docker `18.09` 默认 seccomp 与 Debian 12/glibc `2.36` 的 `clone3` 线程创建冲突。按企业现场要求，纯 Docker worker 默认使用 `--privileged` 创建容器；这会放宽容器隔离边界，只应用于受控的专用后端服务器。现场已知 `Trace/breakpoint trap`、退出码 `133` 和 `dmesg ... trap int3` 是旧 Bun 可执行文件的启动失败特征，`uv_thread_create` assertion 则是旧 Docker 运行 glibc 2.36 镜像的失败特征。升级后应通过下面命令确认实际入口和运行基线已经切换：
 
@@ -794,7 +796,7 @@ cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
 
-脚本不依赖 Docker 20.10 的 `host-gateway` 特性，也不会要求额外创建自定义 Docker network。只要容器能访问 `.serverhost` 中记录的 Java 后端地址，并且宿主机发布端口池 `4096-4105` 可访问即可。
+脚本不依赖 Docker 20.10 的 `host-gateway` 特性，也不会要求额外创建自定义 Docker network。只要容器能访问 `.serverhost` 中记录的 Java 后端地址，并且宿主机发布端口池 `4096-4105` 可访问即可。启动顺序固定为先 Java、检查 `.serverid/.serverhost`，再加载镜像并启动该服务器唯一的 worker。
 
 检查：
 

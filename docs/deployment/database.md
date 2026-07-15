@@ -592,8 +592,8 @@ V10 种子数据对 F-COSS 的影响：
 |---|---|
 | `linux_servers` | Linux 服务器持久拓扑快照，`linux_server_id` 保存稳定服务器身份，记录状态、历史心跳字段和容量摘要 JSON；在线状态以 Redis Java 快照为准。 |
 | `backend_java_processes` | 后端 Java 实例持久拓扑，记录所属稳定服务器身份、实例直连地址、状态、启动时间和历史心跳字段；在线状态以 Redis Java 快照为准。首次心跳以进程启动时间写入 `created_at`，读取历史 `updated_at < created_at` 脏记录时按 `created_at` 归一化，避免阻断 manager 注册。 |
-| `opencode_containers` | opencode 容器，记录所属 Linux 服务器、容器名称、独立端口池、最大进程数、当前进程数和状态。 |
-| `opencode_container_managers` | 容器管理进程，每个容器最多一个 manager，记录协议版本、连接状态、能力 JSON 和历史心跳字段；在线状态以 Redis manager 快照为准。 |
+| `opencode_containers` | opencode worker 容器，记录所属 Linux 服务器、可读容器名称、独立端口池、最大进程数、当前进程数和状态；`container_id` 是由稳定 `linux_server_id` 自动派生的 68 字符 SHA-256 ID。 |
+| `opencode_container_managers` | 容器管理进程，每个容器最多一个 manager，`manager_id` 由 `container_id` 自动派生，记录协议版本、连接状态、能力 JSON 和历史心跳字段；在线状态以 Redis manager 快照为准。 |
 | `opencode_manager_backend_connections` | manager 与后端 Java 实例的持久 WebSocket 连接拓扑，按 `(manager_id, backend_process_id)` 唯一；在线连接视图以 Redis manager 快照中的连接列表为准。 |
 | `opencode_server_processes` | 用户专属 opencode server 进程，记录用户、Linux 服务器、容器、主机直通端口、PID、`base_url`、启动路径和健康状态。 |
 | `user_opencode_process_bindings` | 用户到 opencode 进程的当前绑定，按 `(user_id, agent_id)` 唯一，首期 `agent_id='opencode'`。 |
@@ -602,7 +602,8 @@ V10 种子数据对 F-COSS 的影响：
 关键约束：
 
 - `linux_servers.linux_server_id` 使用稳定服务器身份，允许字母、数字、`.`、`_`、`-`，长度 1-128；`opencode_server_processes.base_url` 使用 advertised host 拼接端口，不再要求 host 等于 `linux_server_id`。
-- `opencode_containers` 使用每容器独立端口范围，`max_processes` 不能超过端口数，`current_processes` 不能超过 `max_processes`。
+- 每个稳定 `linux_server_id` 只部署一个 worker；`opencode_containers.container_id = "ctr_" + SHA256("test-agent/opencode-container/v1\0" + linux_server_id)`，`opencode_container_managers.manager_id = "mgr_" + SHA256("test-agent/opencode-manager/v1\0" + container_id)`，SHA-256 为完整小写十六进制。现有 `varchar(128)` 和所有表约束无需变更。
+- `opencode_containers` 使用 worker 独立端口范围，`max_processes` 不能超过端口数，`current_processes` 不能超过 `max_processes`。
 - `opencode_container_managers.container_id` 唯一，保证每个容器只有一个管理进程。
 - `opencode_server_processes(linux_server_id, port)` 唯一，保证同一 Linux 服务器端口不会绑定多个 opencode 进程。
 - `user_opencode_process_bindings(user_id, agent_id)` 唯一，保证同一用户对同一 agent 只有一个当前绑定；`process_id` 同样唯一，避免一个进程被多个用户绑定。
@@ -614,6 +615,7 @@ V10 种子数据对 F-COSS 的影响：
 - 历史 `opencode_server_processes.updated_at` 可能早于 `created_at`；读取这类旧记录时由 persistence 映射层按 `created_at` 归一化，避免领域对象校验阻断用户进程状态查询和重新初始化。新写入数据仍必须保持 `updated_at >= created_at`。
 - 应用回滚时可保留这些新增表；如需完整回退 Web 用户对话到固定节点模式，应回滚后端和前端镜像，而不是删除 V10 表或清理 `/data/.testagent/agent-opencode/.session/{port}`。
 - 后端启动或拓扑变化时更新 `linux_servers`、`backend_java_processes`，Java 进程在线心跳写入 Redis 快照，TTL 为 10 秒；manager WebSocket 注册更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections` 的持久拓扑，`managerHeartbeat` 只写 Redis manager 快照，TTL 为 10 秒。
+- 本次只改变新注册记录的 ID 生成语义，不修改表结构、不新增 Flyway migration；当前系统尚未部署，不提供旧人工/hostname ID 的数据迁移。
 
 ## V20260702120000 opencode 进程初始化进度表
 

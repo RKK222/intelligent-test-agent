@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -24,7 +26,8 @@ const (
 	defaultWindowsSysDataRootDir = "D:/data/.testagent"
 	serverIDFileName             = ".serverid"
 	serverHostFileName           = ".serverhost"
-	managerProcessName           = "opencode-manager"
+	containerIdentityNamespace   = "test-agent/opencode-container/v1"
+	managerIdentityNamespace     = "test-agent/opencode-manager/v1"
 
 	defaultBackendPort          = 8080
 	defaultBackendWebSocketPath = "/api/internal/platform/opencode-runtime/manager/ws"
@@ -91,6 +94,7 @@ func (r configRuntime) withDefaults() configRuntime {
 // Config 描述单个容器内 opencode-manager 的静态运行边界。
 type Config struct {
 	ContainerID   string
+	ContainerName string
 	LinuxServerID string
 	// ServerHost 是从 .serverhost 读取的可访问地址，只用于连接本机 Java 和生成用户进程 baseUrl。
 	ServerHost   string
@@ -135,7 +139,7 @@ func loadFromEnvWithRuntime(rt configRuntime) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	containerID, err := resolveContainerID(rt)
+	containerName, err := resolveContainerName(rt)
 	if err != nil {
 		return Config{}, err
 	}
@@ -145,7 +149,8 @@ func loadFromEnvWithRuntime(rt configRuntime) (Config, error) {
 	}
 
 	cfg := Config{
-		ContainerID:   containerID,
+		ContainerID:   deriveContainerID(linuxServerID),
+		ContainerName: containerName,
 		LinuxServerID: linuxServerID,
 		ServerHost:    serverHost,
 		PortStart:     portStart,
@@ -178,7 +183,7 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 	if err != nil {
 		return ControlConfig{}, err
 	}
-	containerID, err := resolveContainerID(rt)
+	containerName, err := resolveContainerName(rt)
 	if err != nil {
 		return ControlConfig{}, err
 	}
@@ -188,7 +193,8 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 	}
 	availablePorts := portEnd - portStart + 1
 	base := Config{
-		ContainerID:           containerID,
+		ContainerID:           deriveContainerID(linuxServerID),
+		ContainerName:         containerName,
 		LinuxServerID:         linuxServerID,
 		ServerHost:            serverHost,
 		PortStart:             portStart,
@@ -205,7 +211,7 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 	}
 	cfg := ControlConfig{
 		Config:              base,
-		ManagerID:           deriveManagerID(containerID),
+		ManagerID:           deriveManagerID(base.ContainerID),
 		BackendWebSocketURL: webSocketURL,
 		Token:               strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_TOKEN")),
 		HeartbeatInterval:   durationDefault("OPENCODE_MANAGER_HEARTBEAT_INTERVAL", defaultHeartbeatInterval),
@@ -220,7 +226,10 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 // Validate 校验必填拓扑字段和端口池容量，避免管理进程启动在错误容器配置上。
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.ContainerID) == "" {
-		return fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required")
+		return fmt.Errorf("derived container id must not be blank")
+	}
+	if strings.TrimSpace(c.ContainerName) == "" {
+		return fmt.Errorf("container name must not be blank")
 	}
 	if !isStableServerID(c.LinuxServerID) {
 		return fmt.Errorf("linux server id must be 1-128 chars of letters, digits, dot, underscore or hyphen")
@@ -285,9 +294,10 @@ func (c ControlConfig) ValidateControl() error {
 // String 返回脱敏后的控制配置摘要，禁止暴露 manager token。
 func (c ControlConfig) String() string {
 	return fmt.Sprintf(
-		"managerId=%s containerId=%s linuxServerId=%s serverHost=%s webSocketUrl=%s token=<redacted> heartbeatInterval=%s reconnectInterval=%s",
+		"managerId=%s containerId=%s containerName=%s linuxServerId=%s serverHost=%s webSocketUrl=%s token=<redacted> heartbeatInterval=%s reconnectInterval=%s",
 		c.ManagerID,
 		c.ContainerID,
+		c.ContainerName,
 		c.LinuxServerID,
 		c.ServerHost,
 		c.BackendWebSocketURL,
@@ -437,7 +447,7 @@ func waitForRequiredFile(rt configRuntime, path string, label string) (string, e
 	return "", fmt.Errorf("%s was not available within %s", label, rt.serverIPWait)
 }
 
-func resolveContainerID(rt configRuntime) (string, error) {
+func resolveContainerName(rt configRuntime) (string, error) {
 	if strings.EqualFold(rt.goos, "windows") {
 		hostname, err := rt.hostname()
 		if err != nil {
@@ -458,10 +468,7 @@ func resolveContainerID(rt configRuntime) (string, error) {
 			return id, nil
 		}
 	}
-	if configured := normalizeIdentifier(os.Getenv("OPENCODE_MANAGER_CONTAINER_ID")); configured != "" {
-		return configured, nil
-	}
-	return "", fmt.Errorf("hostname, /etc/hostname or OPENCODE_MANAGER_CONTAINER_ID must contain a container id")
+	return "", fmt.Errorf("hostname or /etc/hostname must contain a container name")
 }
 
 func derivedBackendWebSocketURL(serverHost string) (string, error) {
@@ -575,31 +582,20 @@ func normalizeIdentifier(value string) string {
 	return strings.Join(fields, "-")
 }
 
-// deriveManagerID 使用容器名和固定管理进程逻辑名生成内部 managerId，避免多容器共享默认环境变量时互相覆盖 Redis 快照。
-func deriveManagerID(containerID string) string {
-	return "mgr_" + normalizeIDSegment(containerID) + "_" + normalizeIDSegment(managerProcessName)
+// deriveContainerID 仅使用稳定服务器身份派生容器业务 ID，保证 worker 改名或重建后路由身份不变。
+func deriveContainerID(linuxServerID string) string {
+	return deriveStableID("ctr_", containerIdentityNamespace, linuxServerID)
 }
 
-// normalizeIDSegment 保留 ASCII 字母数字并用下划线折叠其他字符，使派生 ID 稳定满足现有 mgr_ 前缀和标识符约束。
-func normalizeIDSegment(value string) string {
-	var builder strings.Builder
-	lastUnderscore := false
-	for _, r := range strings.TrimSpace(value) {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			builder.WriteRune(r)
-			lastUnderscore = false
-			continue
-		}
-		if !lastUnderscore && builder.Len() > 0 {
-			builder.WriteByte('_')
-			lastUnderscore = true
-		}
-	}
-	result := strings.Trim(builder.String(), "_")
-	if result == "" {
-		return "unknown"
-	}
-	return result
+// deriveManagerID 使用容器业务 ID 派生稳定 managerId，不依赖进程 PID 或人工环境变量。
+func deriveManagerID(containerID string) string {
+	return deriveStableID("mgr_", managerIdentityNamespace, containerID)
+}
+
+// deriveStableID 通过版本化 namespace 和 NUL 分隔的值计算完整 SHA-256，防止不同身份类型共享哈希空间。
+func deriveStableID(prefix string, namespace string, value string) string {
+	digest := sha256.Sum256([]byte(namespace + "\x00" + value))
+	return prefix + hex.EncodeToString(digest[:])
 }
 
 func requiredInt(name string) (int, error) {

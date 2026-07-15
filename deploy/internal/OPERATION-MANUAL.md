@@ -88,7 +88,7 @@ TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-114
 SYS_DATA_ROOT_DIR=/data/testagent/data
 ```
 
-两台后端的 `backend.env` 与 `docker.env` 中 manager token 必须一致；`docker.env` 的 `TEST_AGENT_DATA_ROOT=/data/testagent/data`，端口池继续保持宿主机端口与容器端口一一对应。不要把 token、数据库密码或模型密钥写入交付 zip。
+两台后端的 `backend.env` 与 `docker.env` 中 manager token 必须一致；`docker.env` 的 `TEST_AGENT_DATA_ROOT=/data/testagent/data`，端口池继续保持宿主机端口与容器端口一一对应。每台服务器的 `TEST_AGENT_LINUX_SERVER_ID` 必须全局唯一且长期稳定，每个该 ID 只启动一个 worker；无需且不得配置人工 `containerId/managerId`。不要把 token、数据库密码或模型密钥写入交付 zip。
 
 部署脚本会检查 `test-agent-backend.service`：已有 unit 时直接复用；首次部署没有 unit 时，使用已配置的 `/data/testagent/config/backend.env` 和当前 `java` 绝对路径自动创建、执行 `daemon-reload` 并 enable。无需提前手工创建 service。
 

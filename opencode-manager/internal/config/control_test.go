@@ -8,7 +8,6 @@ import (
 
 func TestLoadControlFromEnvRequiresManagerSocketSettings(t *testing.T) {
 	setBaseManagerEnv(t)
-	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 
 	_, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
 		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
@@ -22,7 +21,6 @@ func TestLoadControlFromEnvRequiresManagerSocketSettings(t *testing.T) {
 
 func TestLoadControlFromEnvDerivesWebSocketURLFromServerHostAndBackendPort(t *testing.T) {
 	setBaseManagerEnv(t)
-	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 	t.Setenv("OPENCODE_MANAGER_BACKEND_PORT", "18080")
 
@@ -48,7 +46,6 @@ func TestLoadControlFromEnvDerivesWebSocketURLFromServerHostAndBackendPort(t *te
 
 func TestLoadControlFromEnvIgnoresLegacyDiscoveryURL(t *testing.T) {
 	setBaseManagerEnv(t)
-	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 	t.Setenv("OPENCODE_MANAGER_BACKEND_DISCOVERY_URL", "http://backend.internal:8080/api/custom/discovery")
 	t.Setenv("OPENCODE_MANAGER_BACKEND_PORT", "18080")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
@@ -68,7 +65,6 @@ func TestLoadControlFromEnvIgnoresLegacyDiscoveryURL(t *testing.T) {
 
 func TestLoadControlFromEnvAppliesIntervalsAndHidesToken(t *testing.T) {
 	setBaseManagerEnv(t)
-	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 	t.Setenv("OPENCODE_MANAGER_HEARTBEAT_INTERVAL", "4s")
 	t.Setenv("OPENCODE_MANAGER_RECONNECT_INTERVAL", "5s")
@@ -81,7 +77,7 @@ func TestLoadControlFromEnvAppliesIntervalsAndHidesToken(t *testing.T) {
 		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
 	}
 
-	if cfg.ManagerID != "mgr_ctr_01_opencode_manager" {
+	if cfg.ManagerID != deriveManagerID(deriveContainerID("linux-prod-a")) {
 		t.Fatalf("unexpected manager id %q", cfg.ManagerID)
 	}
 	if cfg.HeartbeatInterval != 4*time.Second || cfg.ReconnectInterval != 5*time.Second {
@@ -94,7 +90,6 @@ func TestLoadControlFromEnvAppliesIntervalsAndHidesToken(t *testing.T) {
 
 func TestLoadControlFromEnvUsesFiveSecondHeartbeatAndTenSecondReconnectDefaults(t *testing.T) {
 	setBaseManagerEnv(t)
-	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 
 	cfg, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
@@ -113,32 +108,70 @@ func TestLoadControlFromEnvUsesFiveSecondHeartbeatAndTenSecondReconnectDefaults(
 	}
 }
 
-func TestLoadControlFromEnvDerivesManagerIDFromHostnameAndProcessName(t *testing.T) {
+func TestLoadControlFromEnvKeepsIdentityStableWhenContainerNameChanges(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_ID", "mgr_should_be_ignored")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
-	rt := testRuntime("linux", map[string]string{
+	files := map[string]string{
 		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
 		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
-		"/etc/hostname":                     "ctr_file\n",
-	})
-	rt.hostname = func() (string, error) {
-		return "kakadeMacBook-Pro.local", nil
 	}
+	firstRuntime := testRuntime("linux", files)
+	firstRuntime.hostname = func() (string, error) { return "worker-before", nil }
+	secondRuntime := testRuntime("linux", files)
+	secondRuntime.hostname = func() (string, error) { return "worker-after", nil }
 
-	cfg, err := loadControlFromEnvWithRuntime(rt)
+	first, err := loadControlFromEnvWithRuntime(firstRuntime)
 	if err != nil {
 		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
 	}
+	second, err := loadControlFromEnvWithRuntime(secondRuntime)
+	if err != nil {
+		t.Fatalf("second loadControlFromEnvWithRuntime returned error: %v", err)
+	}
 
-	if cfg.ManagerID != "mgr_kakadeMacBook_Pro_local_opencode_manager" {
-		t.Fatalf("unexpected manager id %q", cfg.ManagerID)
+	if first.ContainerID != second.ContainerID || first.ManagerID != second.ManagerID {
+		t.Fatalf("container rename changed stable identity: first=%#v second=%#v", first, second)
+	}
+	if first.ContainerName != "worker-before" || second.ContainerName != "worker-after" {
+		t.Fatalf("expected readable container names to be preserved: first=%q second=%q", first.ContainerName, second.ContainerName)
+	}
+	if first.ManagerID != deriveManagerID(deriveContainerID("linux-prod-a")) {
+		t.Fatalf("unexpected manager id %q", first.ManagerID)
+	}
+}
+
+func TestLoadControlFromEnvSeparatesServersWithTheSameContainerName(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
+	firstRuntime := testRuntime("linux", map[string]string{
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
+	})
+	secondRuntime := testRuntime("linux", map[string]string{
+		defaultLinuxServerIDFileForTest():   "linux-prod-b\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.13\n",
+	})
+
+	first, err := loadControlFromEnvWithRuntime(firstRuntime)
+	if err != nil {
+		t.Fatalf("first loadControlFromEnvWithRuntime returned error: %v", err)
+	}
+	second, err := loadControlFromEnvWithRuntime(secondRuntime)
+	if err != nil {
+		t.Fatalf("second loadControlFromEnvWithRuntime returned error: %v", err)
+	}
+
+	if first.ContainerName != second.ContainerName {
+		t.Fatalf("test setup must use the same readable container name: %q != %q", first.ContainerName, second.ContainerName)
+	}
+	if first.ContainerID == second.ContainerID || first.ManagerID == second.ManagerID {
+		t.Fatalf("different linux server ids must produce different runtime identities: first=%#v second=%#v", first, second)
 	}
 }
 
 func TestLoadControlFromEnvDerivesManagerIDFromEtcHostnameWhenHostnameBlank(t *testing.T) {
 	setBaseManagerEnv(t)
-	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 	rt := testRuntime("linux", map[string]string{
 		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
@@ -154,12 +187,15 @@ func TestLoadControlFromEnvDerivesManagerIDFromEtcHostnameWhenHostnameBlank(t *t
 		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
 	}
 
-	if cfg.ManagerID != "mgr_ctr_file_01_opencode_manager" {
+	if cfg.ManagerID != deriveManagerID(deriveContainerID("linux-prod-a")) {
 		t.Fatalf("unexpected manager id %q", cfg.ManagerID)
+	}
+	if cfg.ContainerName != "ctr-file-01" {
+		t.Fatalf("unexpected container name %q", cfg.ContainerName)
 	}
 }
 
-func TestLoadControlFromEnvDerivesManagerIDFromContainerIDEnvFallback(t *testing.T) {
+func TestLoadControlFromEnvDoesNotUseContainerIDEnvFallback(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr-env-01")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
@@ -172,12 +208,8 @@ func TestLoadControlFromEnvDerivesManagerIDFromContainerIDEnvFallback(t *testing
 		return " ", nil
 	}
 
-	cfg, err := loadControlFromEnvWithRuntime(rt)
-	if err != nil {
-		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
-	}
-
-	if cfg.ManagerID != "mgr_ctr_env_01_opencode_manager" {
-		t.Fatalf("unexpected manager id %q", cfg.ManagerID)
+	_, err := loadControlFromEnvWithRuntime(rt)
+	if err == nil || !strings.Contains(err.Error(), "hostname or /etc/hostname") {
+		t.Fatalf("expected missing container name error without environment fallback, got %v", err)
 	}
 }

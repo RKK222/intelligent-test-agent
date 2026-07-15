@@ -1550,7 +1550,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 控制面只供容器内 `opencode-manager` 使用，不复用用户 JWT 或普通 API token。后端通过 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 配置独立 manager token；manager 建立 WebSocket upgrade 时必须携带 `Authorization: Bearer <token>`。token 缺失或错误返回统一 `UNAUTHENTICATED`。Go manager 运行路径不得通过 HTTP 与 Java 交互，旧 `manager-backends` 诊断 HTTP 入口已作废并返回 `410 API_GONE`。每个 manager 只连接 `.serverhost + OPENCODE_MANAGER_BACKEND_PORT` 推导出的本服务器 Java；多 Java 后端之间的用户请求转发由 Java API 层完成，manager 不再连接其他服务器 Java。
 
-后端 Java 启动时会把稳定服务器身份写入通用参数 `SYS_DATA_ROOT_DIR` 派生的 `SYS_DATA_ROOT_DIR/.serverid`，把可访问主机地址写入 `SYS_DATA_ROOT_DIR/.serverhost`。Go manager 在非 Windows 环境启动时按同一系统参数的平台默认根目录读取这两个文件（Linux `/data/.testagent/.serverid`、`/data/.testagent/.serverhost`，macOS `$HOME/.testagent/.serverid`、`$HOME/.testagent/.serverhost`），最多等待 30 秒；因此 WebSocket `register` / `heartbeat` 中的 `linuxServerId` 表示稳定服务器身份，不表示容器网卡 IP，也不要求是 IP。`containerId` 继续表示容器身份，非 Windows 先读系统 hostname，再读 `/etc/hostname`，最后才读 `OPENCODE_MANAGER_CONTAINER_ID` 兜底；Windows 本机开发态直接使用机器名。
+后端 Java 启动时会把稳定服务器身份写入通用参数 `SYS_DATA_ROOT_DIR` 派生的 `SYS_DATA_ROOT_DIR/.serverid`，把可访问主机地址写入 `SYS_DATA_ROOT_DIR/.serverhost`。Go manager 在非 Windows 环境启动时按同一系统参数的平台默认根目录读取这两个文件（Linux `/data/.testagent/.serverid`、`/data/.testagent/.serverhost`，macOS `$HOME/.testagent/.serverid`、`$HOME/.testagent/.serverhost`），最多等待 30 秒；因此 WebSocket `register` / `managerHeartbeat` 中的 `linuxServerId` 表示稳定服务器身份，不表示容器网卡 IP，也不要求是 IP。`containerId` 固定为 `"ctr_" + SHA256("test-agent/opencode-container/v1\0" + linuxServerId)`，`managerId` 固定为 `"mgr_" + SHA256("test-agent/opencode-manager/v1\0" + containerId)`，SHA-256 使用完整小写十六进制；二者都是 68 字符的不透明 ID。`containerName` 才是可读展示名称，非 Windows 依次取系统 hostname、`/etc/hostname`，Windows 取机器名；解析失败时 manager 启动失败，不接受人工 ID 兜底。每个稳定 `linuxServerId` 只部署一个 worker，容器改名或重建不会改变 ID。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -1595,7 +1595,7 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 | `size` | opencode server 进程分页大小，默认 `20`，上限沿用平台 `PageRequest` 的 `200`。 |
 | `status` | 可选进程状态；当前活进程视图只返回 `RUNNING` opencode server 进程，非 `RUNNING` 状态会返回空进程页。 |
 | `linuxServerId` | 可选 Linux 服务器稳定身份，来自 `TEST_AGENT_LINUX_SERVER_ID` 或 Java 主机名。 |
-| `containerId` | 可选容器 ID；Windows 本机开发态为机器名。 |
+| `containerId` | 可选容器 ID；由稳定 `linuxServerId` 自动哈希，客户端必须作为不透明字符串处理。 |
 | `username` | 可选用户名，运行管理页按用户名筛选和展示。 |
 | `userId` | 可选用户 ID，保留给旧客户端兼容；新客户端应使用 `username`。 |
 
