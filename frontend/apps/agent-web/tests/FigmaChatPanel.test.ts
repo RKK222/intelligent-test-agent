@@ -2648,7 +2648,7 @@ describe("FigmaChatPanel", () => {
     expect(text.indexOf("第二轮用户问题")).toBeLessThan(text.indexOf("第二轮助手回答"));
   });
 
-  it("emits assistant message feedback from persisted assistant messages", async () => {
+  it("shows persisted feedback once below the last output for a successful historical run", async () => {
     const platformMessageId = "msg_0123456789abcdef0123456789abcdef";
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -2662,6 +2662,8 @@ describe("FigmaChatPanel", () => {
             createdAt: "2026-06-25T09:01:00.000Z"
           }
         ],
+        running: false,
+        runtimeStatus: "SUCCEEDED",
         messageFeedbacks: {
           [platformMessageId]: {
             feedbackId: "fb_123",
@@ -2683,6 +2685,15 @@ describe("FigmaChatPanel", () => {
     const buttons = wrapper.findAll(".figma-chat-feedback-btn");
     expect(buttons).toHaveLength(2);
     expect(buttons[0].classes()).toContain("is-selected");
+    const timelineActions = wrapper.findAll(".figma-chat-timeline-actions");
+    expect(timelineActions).toHaveLength(1);
+    expect(timelineActions[0].element.previousElementSibling?.classList.contains("oc-timeline-root")).toBe(true);
+    const componentSource = readFileSync(
+      resolve(process.cwd(), "apps/agent-web/src/components/FigmaChatPanel.vue"),
+      "utf8"
+    );
+    expect(componentSource).toMatch(/\.figma-chat-timeline-actions\s*\{[^}]*margin:\s*2px 0 0;/s);
+    expect(componentSource).not.toContain("margin: 2px 0 0 46px;");
 
     await buttons[0].trigger("click");
 
@@ -2712,6 +2723,8 @@ describe("FigmaChatPanel", () => {
             createdAt: "2026-06-25T09:01:00.000Z"
           }
         ],
+        running: false,
+        runtimeStatus: "SUCCEEDED",
         messageFeedbacks: {
           [platformMessageId]: null
         },
@@ -2745,6 +2758,8 @@ describe("FigmaChatPanel", () => {
             createdAt: "2026-06-25T09:01:00.000Z"
           }
         ],
+        running: false,
+        runtimeStatus: "SUCCEEDED",
         processStatus: { status: "READY", initializable: false, message: "ready" }
       },
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -2769,6 +2784,8 @@ describe("FigmaChatPanel", () => {
             createdAt: "2026-06-25T09:01:00.000Z"
           }
         ],
+        running: false,
+        runtimeStatus: "COMPLETED",
         messageFeedbacks: {
           [platformMessageId]: null
         },
@@ -2803,6 +2820,7 @@ describe("FigmaChatPanel", () => {
           }
         ],
         running: true,
+        runtimeStatus: "RUNNING",
         messageFeedbacks: {
           [platformMessageId]: {
             feedbackId: "fb_123",
@@ -2823,6 +2841,73 @@ describe("FigmaChatPanel", () => {
 
     const buttons = wrapper.findAll(".figma-chat-feedback-btn");
     expect(buttons).toHaveLength(0);
+  });
+
+  it.each(["FAILED", "CANCELLED", "STOPPED", "RETRY", "PENDING", undefined])(
+    "does not render assistant feedback when the visible run status is %s",
+    (runtimeStatus) => {
+      const platformMessageId = "msg_dddddddddddddddddddddddddddddddd";
+      const wrapper = mount(FigmaChatPanel, {
+        props: {
+          messages: [
+            {
+              id: platformMessageId,
+              messageId: platformMessageId,
+              platformMessageId,
+              role: "assistant",
+              text: "这条输出已有稳定平台消息 ID",
+              createdAt: "2026-06-25T09:01:00.000Z"
+            }
+          ],
+          running: false,
+          runtimeStatus,
+          processStatus: { status: "READY", initializable: false, message: "ready" }
+        } as any,
+        global: { stubs: { MarkdownView: markdownViewStub } }
+      });
+
+      expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(0);
+    }
+  );
+
+  it("hides successful root-run feedback while viewing a child-agent timeline", async () => {
+    const platformMessageId = "msg_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: platformMessageId,
+            messageId: platformMessageId,
+            platformMessageId,
+            role: "assistant",
+            text: "主 Agent 已完成",
+            parts: [
+              {
+                partId: "task-feedback-child",
+                type: "tool",
+                toolName: "task",
+                status: "completed",
+                input: { description: "查看子 Agent 输出" }
+              }
+            ]
+          }
+        ],
+        running: false,
+        runtimeStatus: "SUCCEEDED",
+        subagentsBySessionId: {
+          ses_feedback_child: { sessionId: "ses_feedback_child", title: "子 Agent 输出" }
+        },
+        subagentByTaskPartId: { "task-feedback-child": "ses_feedback_child" },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(2);
+    await wrapper.get(".oc-subagent-card").trigger("click");
+    await nextTick();
+
+    expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(0);
   });
 
   it.skip("renders historical generated files and opens the file changes drawer", async () => {

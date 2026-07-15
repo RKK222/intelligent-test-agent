@@ -3040,6 +3040,15 @@ const lastFeedbackableMessage = computed(() => {
   return [...displayMessages.value].reverse().find(canFeedback)
 })
 
+// 评价入口只认明确的成功终态，不能把“已经停止且没有错误”推断成成功；历史 Run 同样复用该规则。
+const showTimelineFeedback = computed(() =>
+  !activeSubagentSessionId.value
+  && !props.historyLoading
+  && !props.running
+  && isRuntimeSuccessStatus()
+  && Boolean(lastFeedbackableMessage.value)
+)
+
 const hasVisibleMessages = computed(() => displayMessages.value.length > 0)
 const showTaskFailed = computed(() =>
   !props.running && hasVisibleMessages.value && (wasFailed.value || isRuntimeFailureStatus())
@@ -3461,7 +3470,7 @@ function onCompositionEnd() {
       >
         查看新内容
       </button>
-      <div v-if="!activeSubagentSessionId && !historyLoading && !props.running && lastFeedbackableMessage" class="figma-chat-timeline-actions">
+      <div v-if="showTimelineFeedback && lastFeedbackableMessage" class="figma-chat-timeline-actions">
         <div class="figma-chat-feedback">
           <button
             type="button"
@@ -6109,7 +6118,7 @@ function onCompositionEnd() {
   align-items: flex-start;
   gap: 6px;
   flex: 0 0 auto;
-  margin: 2px 0 0 46px;
+  margin: 2px 0 0;
   padding: 0 0 4px;
   position: relative;
   z-index: 0;
