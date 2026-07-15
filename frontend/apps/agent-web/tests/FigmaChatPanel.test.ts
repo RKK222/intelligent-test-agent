@@ -1616,10 +1616,18 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("reject-question")).toEqual([["ques_reject"]]);
   });
 
-  it("renders todos above the composer and expands the task list on demand", async () => {
+  it("renders the current status with Todo in the dock above the composer", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
-        messages: [],
+        messages: [
+          {
+            id: "msg_user_todo",
+            messageId: "msg_user_todo",
+            role: "user",
+            text: "实现 Todo 展示",
+            createdAt: "2026-07-15T09:00:00Z"
+          }
+        ],
         processStatus: { status: "READY", initializable: false, message: "ready" },
         todos: [
           { id: "todo_1", text: "分析 SSE 字段", status: "pending", priority: "high" },
@@ -1629,12 +1637,17 @@ describe("FigmaChatPanel", () => {
         ]
       } as any
     });
+    await nextTick();
 
+    const dock = wrapper.find("[data-testid='figma-work-status-dock']");
     const todoPanel = wrapper.find(".oc-todo-panel");
     const composer = wrapper.find(".figma-chat-composer");
+    expect(dock.exists()).toBe(true);
     expect(todoPanel.exists()).toBe(true);
     expect(composer.exists()).toBe(true);
-    expect(todoPanel.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dock.element.contains(todoPanel.element)).toBe(true);
+    expect(wrapper.findAll(".oc-todo-panel")).toHaveLength(1);
+    expect(dock.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(wrapper.text()).toContain("待处理 1");
     expect(wrapper.text()).toContain("进行中 1");
     expect(wrapper.text()).toContain("已完成 1");
@@ -3254,9 +3267,13 @@ describe("FigmaChatPanel", () => {
 
     await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
+    expect(wrapper.findAll(".oc-work-status")).toHaveLength(1);
+    expect(wrapper.findAll(".oc-work-status-history-trigger")).toHaveLength(1);
+    expect(wrapper.find("[data-testid='oc-work-status-event-shell']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='oc-work-status-event-explore']").exists()).toBe(true);
+    await wrapper.get(".oc-work-status-history-trigger").trigger("click");
     expect(wrapper.findAll(".oc-work-status")).toHaveLength(2);
     expect(wrapper.find("[data-testid='oc-work-status-event-shell']").exists()).toBe(true);
-    expect(wrapper.find("[data-testid='oc-work-status-event-explore']").exists()).toBe(true);
     expect(wrapper.find(".figma-chat-task-panel").exists()).toBe(false);
   });
 
@@ -3578,6 +3595,11 @@ describe("FigmaChatPanel", () => {
     });
 
     await showFullTimeline(wrapper);
+    expect(wrapper.findAll(".oc-reasoning-part")).toHaveLength(1);
+    expect(wrapper.findAll(".oc-work-status")).toHaveLength(1);
+    expect(wrapper.findAll("[data-testid='oc-work-status-event-shell']")).toHaveLength(1);
+    expect(wrapper.findAll(".oc-work-status-history-trigger")).toHaveLength(1);
+    await wrapper.get(".oc-work-status-history-trigger").trigger("click");
     expect(wrapper.findAll(".oc-reasoning-part")).toHaveLength(2);
     expect(wrapper.findAll(".oc-work-status")).toHaveLength(2);
     expect(wrapper.findAll("[data-testid='oc-work-status-event-shell']")).toHaveLength(2);

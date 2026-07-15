@@ -29,6 +29,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
   const rows: TimelineRow[] = [];
   const aggregateWorkStatus = !state.activeSubagentSessionId;
   let latestWorkStatus: Extract<TimelineRow, { type: "work-status" }> | undefined;
+  let latestDiffSummary: Extract<TimelineRow, { type: "diff-summary" }> | undefined;
 
   const orphanAccumulator: AssistantRowAccumulator = {
     hasAssistantHeader: false,
@@ -83,7 +84,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     }
 
     if (isLatestTurn(userMessageId, state) && state.diffFiles.length > 0) {
-      rows.push({ type: "diff-summary", key: `diff:${userMessageId}`, userMessageId, files: state.diffFiles });
+      latestDiffSummary = { type: "diff-summary", key: `diff:${userMessageId}`, userMessageId, files: state.diffFiles };
     }
 
     if (aggregateWorkStatus) {
@@ -93,6 +94,9 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
         userMessageId,
         reasoningRefs: accumulator.workStatus?.reasoningRefs ?? [],
         events: accumulator.workStatus?.events ?? [],
+        todos: isLatestTurn(userMessageId, state)
+          ? state.todos
+          : state.todoSnapshotsByUserMessageId[userMessageId] ?? [],
         status: workStatusState(userMessageId, state),
         isLatest: isLatestTurn(userMessageId, state)
       };
@@ -121,6 +125,9 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
   }
   if (latestWorkStatus) {
     rows.push(latestWorkStatus);
+  }
+  if (latestDiffSummary) {
+    rows.push(latestDiffSummary);
   }
 
   return rows;

@@ -26,6 +26,7 @@ import {
 import { ShimmerDivider } from "@test-agent/ui-kit";
 import ReasoningPartGroup from "../parts/ReasoningPartGroup.vue";
 import ToolPartView from "../parts/ToolPartView.vue";
+import TodoPanel from "../TodoPanel.vue";
 
 const props = defineProps<WorkStatusRowProps>();
 const emit = defineEmits<{
@@ -161,6 +162,10 @@ onBeforeUnmount(() => {
           <span v-if="event.refs.length > 1" class="oc-work-status__event-count">{{ event.refs.length }}</span>
         </button>
       </div>
+    </div>
+
+    <div v-if="row.todos.length" class="oc-work-status__line oc-work-status__todo-line">
+      <TodoPanel :todos="row.todos" embedded />
     </div>
 
     <div

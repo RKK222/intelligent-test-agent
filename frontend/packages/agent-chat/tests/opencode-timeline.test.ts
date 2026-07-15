@@ -40,6 +40,90 @@ describe("OpencodeTimeline", () => {
     expect(status.querySelector(".ta-shimmer-track--static")).toBeNull();
   });
 
+  it("renders Todo as the third work-status line and preserves its expandable details", async () => {
+    const state = createOpencodeLikeState({
+      messages: [userMessage("msg_user_1", "实现功能")],
+      todos: [
+        {
+          id: "todo_1",
+          text: "补充组件测试",
+          status: "in_progress",
+          priority: "high",
+          description: "覆盖三行状态块",
+          steps: ["写失败测试", "实现组件"]
+        }
+      ]
+    });
+
+    const { container, getByRole, getByText } = render(OpencodeTimeline, { props: { state } });
+    const status = container.querySelector(".oc-work-status") as HTMLElement;
+
+    expect(status.querySelectorAll(":scope > .oc-work-status__line")).toHaveLength(3);
+    expect(status.querySelector(".oc-work-status__todo-line .oc-todo-panel.is-embedded")).toBeTruthy();
+    expect(getByText("任务")).toBeTruthy();
+    expect(getByText("进行中 1")).toBeTruthy();
+
+    await fireEvent.click(getByRole("button", { name: /任务/ }));
+    expect(getByText("补充组件测试")).toBeTruthy();
+    expect(getByText("覆盖三行状态块")).toBeTruthy();
+    expect(getByText("写失败测试")).toBeTruthy();
+  });
+
+  it("teleports the latest status and diff to the composer dock in status-first order", async () => {
+    const dock = document.createElement("div");
+    dock.id = "test-work-status-dock";
+    document.body.appendChild(dock);
+    try {
+      const state = createOpencodeLikeState({
+        messages: [userMessage("msg_user_1", "修改文件")],
+        todos: [{ id: "todo_1", text: "修改文件", status: "in_progress" }],
+        diffFiles: [{ path: "src/main.ts", patch: "", additions: 1, deletions: 0, status: "modified" }]
+      });
+
+      const { container } = render(OpencodeTimeline, {
+        props: { state, workStatusDockTarget: "#test-work-status-dock" }
+      });
+      await nextTick();
+
+      expect(container.querySelector(".oc-work-status")).toBeNull();
+      expect(container.querySelector(".oc-diff-summary")).toBeNull();
+      expect(dock.querySelectorAll(".oc-work-status-dock > .oc-row")).toHaveLength(2);
+      expect(dock.querySelector(".oc-work-status-dock > .oc-row:first-child .oc-work-status")).toBeTruthy();
+      expect(dock.querySelector(".oc-work-status-dock > .oc-row:last-child")?.classList.contains("oc-diff-summary")).toBe(true);
+    } finally {
+      dock.remove();
+    }
+  });
+
+  it("collapses historical work status to one icon and allows only one inline expansion", async () => {
+    const firstTwoTurns = [
+      userMessage("msg_user_1", "第一轮"),
+      assistantMessage("msg_assistant_1", [reasoningPart("part_reasoning_1", "第一轮思考")]),
+      userMessage("msg_user_2", "第二轮")
+    ];
+    const { container, getByRole, rerender } = render(OpencodeTimeline, {
+      props: { state: createOpencodeLikeState({ messages: firstTwoTurns, running: true }) }
+    });
+
+    expect(container.querySelectorAll(".oc-work-status-history-trigger")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(1);
+
+    await fireEvent.click(getByRole("button", { name: "展开历史工作状态" }));
+    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(2);
+    expect(getByRole("button", { name: "收起历史工作状态" })).toBeTruthy();
+
+    await rerender({
+      state: createOpencodeLikeState({
+        messages: [...firstTwoTurns, assistantMessage("msg_assistant_2", [textPart("part_answer_2", "第二轮完成")]), userMessage("msg_user_3", "第三轮")],
+        running: true
+      })
+    });
+    await nextTick();
+
+    expect(container.querySelectorAll(".oc-work-status-history-trigger")).toHaveLength(2);
+    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(1);
+  });
+
   it("renders root events as icons after assistant text and diff output", async () => {
     const state = createOpencodeLikeState({
       messages: [
@@ -151,10 +235,11 @@ describe("OpencodeTimeline", () => {
     });
     await nextTick();
 
-    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(2);
+    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-work-status-history-trigger")).toHaveLength(1);
     expect(container.querySelector(".oc-reasoning-part__plain")).toBeNull();
     expect(container.querySelector("[data-testid='oc-work-status-popover']")).toBeNull();
-    expect(container.querySelectorAll(".ta-shimmer-track--static")).toHaveLength(1);
+    expect(container.querySelectorAll(".ta-shimmer-track--static")).toHaveLength(0);
   });
 
   it("collapses reasoning opened from an older historical turn when another turn starts", async () => {
@@ -168,6 +253,7 @@ describe("OpencodeTimeline", () => {
       props: { state: createOpencodeLikeState({ messages: firstTwoTurns }) }
     });
 
+    await fireEvent.click(container.querySelector(".oc-work-status-history-trigger") as HTMLElement);
     const firstHistoricalTrigger = container.querySelectorAll(".oc-reasoning-part .oc-disclosure__trigger")[0] as HTMLElement;
     await fireEvent.click(firstHistoricalTrigger);
     expect(container.querySelector(".oc-reasoning-part__plain")?.textContent).toContain("第一轮详细思考");
@@ -738,7 +824,7 @@ describe("OpencodeTimeline", () => {
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
   });
 
-  it("shows a collapsible todo panel above the composer", async () => {
+  it("shows the current status with collapsible Todo in the dock above the composer", async () => {
     const messages: AgentMessage[] = [userMessage("msg_user_1", "实现 Todo 展示")];
     const { container, getByText, queryByText } = render(AssistantThread, {
       props: {
@@ -755,14 +841,18 @@ describe("OpencodeTimeline", () => {
         ]
       }
     });
+    await nextTick();
 
     const thread = container.querySelector(".ta-assistant-thread");
+    const dock = container.querySelector("[data-testid='assistant-work-status-dock']");
     const todoPanel = container.querySelector(".oc-todo-panel");
     const composer = container.querySelector(".ta-composer-form");
+    expect(dock).toBeTruthy();
     expect(todoPanel).toBeTruthy();
     expect(composer).toBeTruthy();
-    expect(todoPanel?.parentElement).toBe(thread);
-    expect(Array.from(thread?.children ?? []).indexOf(todoPanel as Element)).toBeLessThan(
+    expect(dock?.contains(todoPanel)).toBe(true);
+    expect(container.querySelectorAll(".oc-todo-panel")).toHaveLength(1);
+    expect(Array.from(thread?.children ?? []).indexOf(dock as Element)).toBeLessThan(
       Array.from(thread?.children ?? []).indexOf(composer as Element)
     );
     expect(getByText("待处理 1")).toBeTruthy();

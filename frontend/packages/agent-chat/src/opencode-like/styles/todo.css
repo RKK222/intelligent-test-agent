@@ -8,6 +8,23 @@
   overflow: hidden;
 }
 
+.oc-todo-panel.is-embedded {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.oc-todo-panel.is-embedded .oc-todo-panel__header {
+  min-height: 30px;
+  padding: 4px 7px;
+}
+
+.oc-todo-panel.is-embedded .oc-todo-panel__list {
+  padding: 2px 7px 8px;
+}
+
 .oc-todo-panel__header {
   display: flex;
   width: 100%;

@@ -1858,6 +1858,13 @@ describe("inferDiffFromToolPart", () => {
     };
     const persisted: SessionMessage[] = [
       {
+        messageId: "msg_user_todowrite_history",
+        sessionId: "ses_root",
+        role: "USER",
+        content: "执行历史任务",
+        createdAt: "2026-07-11T05:54:30.000Z"
+      },
+      {
         messageId: "msg_todowrite_history",
         sessionId: "ses_root",
         role: "ASSISTANT",
@@ -1883,6 +1890,10 @@ describe("inferDiffFromToolPart", () => {
     const state = chatStateFromSessionTreeSnapshot(snapshot, persisted);
 
     expect(state.todos).toEqual([
+      expect.objectContaining({ text: "历史任务一", status: "completed", priority: "high" }),
+      expect.objectContaining({ text: "历史任务二", status: "in_progress", priority: "medium" })
+    ]);
+    expect(state.todoSnapshotsByUserMessageId.msg_user_todowrite_history).toEqual([
       expect.objectContaining({ text: "历史任务一", status: "completed", priority: "high" }),
       expect.objectContaining({ text: "历史任务二", status: "in_progress", priority: "medium" })
     ]);

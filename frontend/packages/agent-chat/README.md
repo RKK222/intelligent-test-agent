@@ -14,13 +14,12 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 展示 message part timeline（text、reasoning、tool、file、retry 以及未知 part fallback）。旧 `card` 消息中的 Diff payload 会被收敛为 `diff-summary` 行；存量 `AgentCard`/`TimelineCard` 仅保留兼容，不作为主对话路径。
 - `reasoning`、最终 `text`、工具调用和文件引用分块展示，避免把思考、工具日志和最终答复混入同一个气泡；同一用户回合内被多个 assistant message 拆开的真实思考状态会合并为一个过程行，默认折叠但在折叠头中保留一行实时摘要。
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的同类型工具会合并成一个默认折叠的工具组，但 task 与 question 始终按原始调用独立保留时间线位置。question 完成态显示“已回答”，展开后按问题顺序展示问题和回答；预置答案展示 label 与 description，单选、多选和自定义文本均按 OpenCode `metadata.answers` 配对，自定义答案直接以答案原文作为 label。读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
-- `diff-summary` 文件修改行默认折叠，折叠态在标题右侧展示全部文件的新增/删除行数汇总；点击标题展开文件列表，文件条目仍负责触发打开对应文件。
 - `diff-summary` 文件修改行默认折叠，折叠态在标题右侧展示全部文件的新增/删除行数汇总；汇总数字随文件变化刷新并短暂跳动反馈，点击标题展开文件列表，文件条目仍负责触发打开对应文件。
-- 主 Agent 每个用户回合把真实 `reasoning` 与除 `task`、`question` 外的普通工具调用聚合为一个两行工作状态块，并固定放在该轮正文、Diff、retry/失败等最新输出之后；第一行保持“思考状态”摘要与展开，第二行按事件类别显示图标，单次不显示数字、多次显示计数。`task` 子 Agent 卡片、`question` 问答卡片和进入后的子 Agent 时间线继续使用既有展示方式。
+- 主 Agent 每个用户回合把真实 `reasoning` 与除 `task`、`question` 外的普通工具调用聚合为工作状态；最新轮固定投送到原 Todo 面板位置、输入框上方，第一行保持“思考状态”，第二行显示事件图标，存在 Todo 时第三行复用任务统计和展开列表。文件修改块紧随状态块；`task` 子 Agent 卡片、`question` 问答卡片和进入后的子 Agent 时间线继续使用既有展示方式。
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的普通同类型工具会合并成一个默认折叠的工具组，展开后仍渲染每条原始工具详情；task 子 Agent 卡片与 question 提问卡片始终独立展示，不进入工具组折叠；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
 - 工具视图统一使用 `.oc-*` primitives 和轻量折叠壳，工具详情默认折叠，过程行的标题、摘要、状态和展开箭头使用固定列对齐；最终文本直接以轻量气泡展示，不额外加“最终输出”标题，并保留复制按钮；工作区内长绝对路径在列表中展示为面向用户的短路径，完整路径只保留在悬浮提示中，避免 `.testagent`/personal worktree 前缀撑开对话区域。
-- 用户消息已经进入时间线但尚无 assistant part 时，最新轮也会显示空事件的工作状态块；状态依次使用“思考中 / 重试中 / 失败 / 已停止 / 已完成”。状态块按轮保留，新用户轮次出现时自动关闭旧轮 reasoning 与工具气泡；只有最新运行或重试轮播放竖向 `ShimmerDivider`，完成与历史轮保留静态渐变线。事件图标详情使用与对话内容区等宽的悬浮气泡，全时间线同时只打开一个，支持再次点击、外部点击和 Esc 关闭。
-- 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和输入框上方 `TodoPanel`；question dock 只能由 RunEvent `question.asked` 归并出的 `QuestionRequest` 驱动，分页展示单选/多选/文本题、选项说明和自定义答案输入，提交时使用选项 label 或自定义文本；Todo 收起态展示待处理/进行中/已完成/已取消/其他和总数，展开态展示任务列表、状态和优先级。模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
+- 用户消息已经进入时间线但尚无 assistant part 时，最新轮也会显示空事件状态；状态依次使用“思考中 / 重试中 / 失败 / 已停止 / 已完成”。发送新消息后，上一轮在其最后一个 assistant 输出下方收为单图标，点击原位展开且同时只允许展开一个；新轮会关闭旧 reasoning、历史展开和工具气泡。最新运行或重试轮播放竖向 `ShimmerDivider`，完成轮显示静态渐变线。
+- 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和嵌入工作状态的 `TodoPanel`；question dock 只能由 RunEvent `question.asked` 归并出的 `QuestionRequest` 驱动。Todo 收起态展示各状态和总数，展开态展示任务、优先级与步骤；reducer 按用户轮次归档 Todo，历史 `todowrite` part 可恢复对应快照。
 - Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端展示为 Skill 调用块，展示 Skill 名称、用途、状态和折叠详情。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
 - History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用和历史正文加载态由 app 层完成，正文展示不等待消息反馈等附属请求。

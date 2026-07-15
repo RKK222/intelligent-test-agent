@@ -34,8 +34,8 @@ describe("opencode-like conversation state", () => {
     expect(rows.map((row) => row.type)).toEqual([
       "user-message",
       "assistant-part",
-      "diff-summary",
-      "work-status"
+      "work-status",
+      "diff-summary"
     ]);
     expect(rows[1]).toMatchObject({
       type: "assistant-part",
@@ -43,7 +43,7 @@ describe("opencode-like conversation state", () => {
       partId: "part_answer",
       previousAssistantPart: false
     });
-    expect(rows.at(-1)).toMatchObject({
+    expect(rows.at(-2)).toMatchObject({
       type: "work-status",
       status: "running",
       isLatest: true,
@@ -59,6 +59,7 @@ describe("opencode-like conversation state", () => {
         }
       ]
     });
+    expect(rows.at(-1)).toMatchObject({ type: "diff-summary", userMessageId: "msg_user_1" });
   });
 
   it("retains the previous work status and appends an empty running status for the next turn", () => {
@@ -73,7 +74,14 @@ describe("opencode-like conversation state", () => {
       userMessage("msg_user_2", "继续下一轮")
     ];
 
-    const rows = createTimelineRows(createOpencodeLikeState({ messages, running: true }));
+    const rows = createTimelineRows(createOpencodeLikeState({
+      messages,
+      running: true,
+      todos: [{ id: "todo_2", text: "第二轮任务", status: "in_progress" }],
+      todoSnapshotsByUserMessageId: {
+        msg_user_1: [{ id: "todo_1", text: "第一轮任务", status: "completed" }]
+      }
+    }));
     const workStatuses = rows.filter((row) => row.type === "work-status");
 
     expect(workStatuses).toHaveLength(2);
@@ -82,6 +90,7 @@ describe("opencode-like conversation state", () => {
       userMessageId: "msg_user_1",
       status: "completed",
       isLatest: false,
+      todos: [{ id: "todo_1", text: "第一轮任务", status: "completed" }],
       reasoningRefs: [{ messageId: "msg_assistant_1", partId: "part_reasoning" }],
       events: [
         expect.objectContaining({ key: "explore", refs: [expect.objectContaining({ partId: "part_read" })] }),
@@ -93,6 +102,7 @@ describe("opencode-like conversation state", () => {
       userMessageId: "msg_user_2",
       status: "running",
       isLatest: true,
+      todos: [{ id: "todo_2", text: "第二轮任务", status: "in_progress" }],
       reasoningRefs: [],
       events: []
     });

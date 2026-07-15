@@ -5210,6 +5210,7 @@ async function handleLogout() {
           :questions="chatState.questions"
           :current-session-id="session?.sessionId"
           :todos="chatState.todos"
+          :todo-snapshots-by-user-message-id="chatState.todoSnapshotsByUserMessageId"
           :chat-contexts="chatContextStore.items"
           :chat-context-total-chars="chatContextStore.totalCharCount"
           :chat-context-over-limit="chatContextStore.isOverLimit"

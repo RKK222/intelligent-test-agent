@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将主智能体 reasoning 与普通工具事件聚合为每轮一个两行工作状态块，并始终显示在该轮最新输出之后。
+**Goal:** 将主智能体当前轮状态、Todo 和文件修改固定到输入框上方，并把历史轮状态收为最后一个 assistant 输出下方的单图标。
 
-**Architecture:** 在 `agent-chat` 时间线投影层生成根会话专用 `work-status` 行，组件层负责状态摘要、事件图标和全宽悬浮详情；子智能体投影、问答卡片、消息 reducer 和网络契约保持不变。通用 `ShimmerDivider` 只增加向后兼容的纵向与静态展示能力。
+**Architecture:** `agent-chat` 投影层继续生成根会话专用 `work-status` 行，runtime reducer 额外维护按 user message ID 的 Todo 快照；`OpencodeTimeline` 把最新状态和 Diff 投送到输入框上方 Dock，并将历史状态渲染为可原位展开的图标。子智能体投影、问答卡片和网络契约保持不变。
 
 **Tech Stack:** Vue 3、TypeScript 6、Vitest、Testing Library Vue、Tailwind CSS 4、lucide-vue-next、pnpm workspace。
 
@@ -45,3 +45,16 @@
 - [x] 运行 `corepack pnpm typecheck`、`corepack pnpm test`、`corepack pnpm build` 与 `git diff --check`。
 - [x] 在桌面与窄屏真实页面验证流式排序、单行图标、气泡定位和历史收起。
 - [x] 回顾 `.agents/session-log.md`，检查暂存范围并使用中文 commit 提交。
+
+### Task 5: 合并 Todo 并移动当前状态与文件修改
+
+- [x] 为分轮 Todo 归档、历史恢复、状态在 Diff 前补充失败测试并确认 RED。
+- [x] 扩展 runtime/state 输入和 `TimelineRow.work-status`，按 user message ID 保存 Todo 快照。
+- [x] 为两行/三行状态、Dock 投送和文件修改顺序补充失败测试并确认 RED。
+- [x] 在 `AssistantThread` 与 `FigmaChatPanel` 原 Todo 位置建立 Dock，把 Todo 作为状态第三行，文件修改紧随状态块。
+
+### Task 6: 历史状态单图标与回归
+
+- [x] 为历史单图标、原位展开、单项互斥和新轮自动收起补充失败测试并确认 RED。
+- [x] 在时间线根统一管理历史展开与事件气泡，保留 question、task 和子智能体视图原路径。
+- [x] 更新历史恢复适配和稳定文档，执行定向测试、全量 typecheck/test/build 与真实页面检查。

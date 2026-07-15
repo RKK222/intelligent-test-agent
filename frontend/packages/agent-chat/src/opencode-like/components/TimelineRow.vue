@@ -6,11 +6,13 @@ export type TimelineRowProps = {
   row: TimelineRow;
   state: OpencodeLikeConversationState;
   openWorkStatusEventKey?: string;
+  historicalWorkStatusExpanded?: boolean;
 };
 </script>
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { Activity, ChevronUp } from "lucide-vue-next";
 import UserMessageRow from "./rows/UserMessageRow.vue";
 import AssistantPartRow from "./rows/AssistantPartRow.vue";
 import RetryRow from "./rows/RetryRow.vue";
@@ -21,6 +23,7 @@ import ReasoningPartGroup from "./parts/ReasoningPartGroup.vue";
 import ContextToolGroup from "./tools/ContextToolGroup.vue";
 import ToolPartGroup from "./tools/ToolPartGroup.vue";
 import WorkStatusRow from "./rows/WorkStatusRow.vue";
+import OcIconButton from "./primitives/OcIconButton.vue";
 
 const props = defineProps<TimelineRowProps>();
 const emit = defineEmits<{
@@ -28,6 +31,7 @@ const emit = defineEmits<{
   openFile: [path: string];
   selectSubagent: [sessionId: string];
   toggleWorkStatusEvent: [eventKey: string];
+  toggleHistoricalWorkStatus: [];
   closeWorkStatusEvent: [];
 }>();
 
@@ -146,15 +150,35 @@ const toolGroupParts = computed(() => {
       :streaming-text-by-part-id="state.streamingTextByPartId"
     />
   </AssistantMessageFrame>
-  <WorkStatusRow
-    v-else-if="row.type === 'work-status'"
-    class="oc-row"
-    :row="row"
-    :state="state"
-    :open-event-key="openWorkStatusEventKey"
-    @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
-    @close-event="emit('closeWorkStatusEvent')"
-  />
+  <div
+    v-else-if="row.type === 'work-status' && !row.isLatest && !historicalWorkStatusExpanded"
+    class="oc-row oc-work-status-history"
+  >
+    <OcIconButton
+      class="oc-work-status-history-trigger"
+      label="展开历史工作状态"
+      @click="emit('toggleHistoricalWorkStatus')"
+    >
+      <Activity aria-hidden="true" />
+    </OcIconButton>
+  </div>
+  <div v-else-if="row.type === 'work-status'" class="oc-row oc-work-status-container">
+    <WorkStatusRow
+      :row="row"
+      :state="state"
+      :open-event-key="openWorkStatusEventKey"
+      @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
+      @close-event="emit('closeWorkStatusEvent')"
+    />
+    <OcIconButton
+      v-if="!row.isLatest"
+      class="oc-work-status-history-collapse"
+      label="收起历史工作状态"
+      @click="emit('toggleHistoricalWorkStatus')"
+    >
+      <ChevronUp aria-hidden="true" />
+    </OcIconButton>
+  </div>
   <RetryRow
     v-else-if="row.type === 'retry'"
     class="oc-row"

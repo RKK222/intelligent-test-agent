@@ -25,6 +25,7 @@ export {
   normalizeMessagePart,
   snapshotEventsFromRunReset,
   todoSnapshotFromMessages,
+  todoSnapshotsFromMessagesByUserMessageId,
   todoSnapshotFromToolPart
 } from "./runtime-reducer";
 export type { AgentChatRuntimeState, AgentChatRuntimeAction } from "./runtime-reducer";

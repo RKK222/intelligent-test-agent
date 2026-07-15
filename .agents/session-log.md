@@ -6823,3 +6823,18 @@ bash /tmp/test-api-after-restart.sh
   - 使用 TDD 覆盖投影聚合、计数、未知工具、空 assistant、排序、多轮、retry/error、问答/子 Agent 隔离、气泡互斥/关闭、ARIA、竖线动画和默认兼容；真实 Chromium 在桌面与 240px 极窄视口检查宽度、上下定位、横向滚动、流式状态和新轮收起。
 - Result:
   - 相关 3 个测试文件 55 passed，`FigmaChatPanel` 119 passed / 1 skipped；前端全量 lint、typecheck、58 个 Vitest 文件 832 passed / 1 skipped、生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。
+
+### 2026-07-15 - 当前工作状态移至输入区并合并 Todo
+
+- Why:
+  - 最新工作状态仍占用滚动时间线，独立 Todo 面板会在新消息进入后短暂沿用上一轮任务；用户需要把当前工作状态固定到原 Todo 位置，并将历史状态压缩为轻量入口。
+- What:
+  - 最新轮工作状态投送到输入框上方，Todo 作为可展开第三行嵌入状态块，文件修改块固定紧随状态块；没有 Todo 时仍保持两行。
+  - Todo 按用户消息 ID 保存每轮快照，新消息进入时先归档上一轮并清空当前轮；历史轮状态在最后一个 assistant part 后默认收为单个图标，点击原位展开且同时只允许展开一项。
+  - 问答面板、子 Agent 任务卡片和子 Agent 内部时间线保持原展示路径；同步 `agent-chat`、`agent-web` 包文档及既有设计、实施计划。
+- How:
+  - reducer 同时从实时 `todo.updated`、`todowrite` part 和历史消息恢复快照；投影把最新状态与 Diff 延后并按“状态 → 文件修改”排序，Timeline 通过可选挂载目标把两行内容投送到输入区，未提供目标时维持内联兼容。
+  - 使用 TDD 覆盖快照归档/恢复、投影排序、两行/三行状态、历史图标互斥展开与新轮收起，并在真实浏览器桌面和 260px 窄屏检查气泡宽度、事件横向滚动、Todo 与文件修改顺序。
+- Result:
+  - 前端全量 lint、typecheck、58 个 Vitest 文件（838 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
+  - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；状态容器属性和 Todo 快照透传均为可选，未传入时保持时间线内渲染兼容。

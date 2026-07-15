@@ -48,7 +48,7 @@ import type {
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
-import { MarkdownView, OpencodeTimeline, TodoPanel, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
+import { MarkdownView, OpencodeTimeline, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
 import { Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
@@ -715,8 +715,10 @@ const props =
     rawOutputEntries?: RawOutputEntry[]
     /** message.part.delta 的流式 overlay，避免 text/reasoning 闪烁或重复。 */
     streamingTextByPartId?: Record<string, string>
-    /** opencode todo.updated 投影出的任务列表，固定展示在输入框上方。 */
+    /** opencode Todo 当前快照，作为工作状态第三行展示。 */
     todos?: TodoItem[]
+    /** 各用户轮次的 Todo 快照，历史工作状态展开时只展示该轮任务。 */
+    todoSnapshotsByUserMessageId?: Record<string, TodoItem[]>
     /** 用户从工作区添加到本轮对话的选区/文件上下文附件。 */
     chatContexts?: ChatContextItem[]
     chatContextTotalChars?: number
@@ -744,6 +746,7 @@ const props =
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
     todos: () => [],
+    todoSnapshotsByUserMessageId: () => ({}),
     chatContexts: () => [],
     permissions: () => [],
     questions: () => [],
@@ -3105,12 +3108,15 @@ const opencodeTimelineState = computed(() =>
     diffFiles: timelineDiffFiles.value,
     streamingTextByPartId: props.streamingTextByPartId,
     todos: props.todos,
+    todoSnapshotsByUserMessageId: props.todoSnapshotsByUserMessageId,
     messageScopesById: props.messageScopesById,
     subagentsBySessionId: props.subagentsBySessionId,
     subagentByTaskPartId: props.subagentByTaskPartId,
     activeSubagentSessionId: activeSubagentSessionId.value,
   })
 )
+
+const workStatusDockRef = ref<HTMLElement | null>(null)
 
 function openTimelineDiff() {
   emit('open-diff', props.fileChanges?.at(-1)?.path ?? '')
@@ -3458,6 +3464,7 @@ function onCompositionEnd() {
       <OpencodeTimeline
         v-else
         :state="opencodeTimelineState"
+        :work-status-dock-target="activeSubagentSessionId ? undefined : workStatusDockRef"
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
@@ -4507,7 +4514,11 @@ function onCompositionEnd() {
         </div>
       </template>
     </section>
-    <TodoPanel v-if="!activeSubagentSessionId" :todos="todos" />
+    <div
+      v-if="!activeSubagentSessionId"
+      ref="workStatusDockRef"
+      data-testid="figma-work-status-dock"
+    />
     <ChatContextAttachmentList
       v-if="!activeSubagentSessionId"
       :items="chatContexts"

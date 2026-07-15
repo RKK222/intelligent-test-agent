@@ -41,6 +41,7 @@ export type OpencodeLikeConversationInput = {
   permissions?: PermissionRequest[];
   questions?: QuestionRequest[];
   todos?: TodoItem[];
+  todoSnapshotsByUserMessageId?: Record<string, TodoItem[]>;
   diff?: SessionDiff;
   diffFiles?: RunDiffFile[];
   running?: boolean;
@@ -68,6 +69,7 @@ export type OpencodeLikeConversationState = {
   permissions: PermissionRequest[];
   questions: QuestionRequest[];
   todos: TodoItem[];
+  todoSnapshotsByUserMessageId: Record<string, TodoItem[]>;
   running: boolean;
   showReasoningSummaries: boolean;
   messageScopesById: Record<string, MessageScope>;
@@ -137,6 +139,7 @@ export type TimelineRow =
       userMessageId: string;
       reasoningRefs: WorkStatusPartRef[];
       events: WorkStatusEventGroup[];
+      todos: TodoItem[];
       status: WorkStatusState;
       isLatest: boolean;
     }

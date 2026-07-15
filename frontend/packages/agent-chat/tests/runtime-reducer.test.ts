@@ -3,6 +3,87 @@ import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "../s
 import type { RunEvent } from "@test-agent/shared-types";
 
 describe("agent-chat runtime reducer", () => {
+  it("archives the previous turn todos and clears them as soon as a new user message is submitted", () => {
+    const previous = {
+      ...createInitialAgentChatRuntimeState([
+        {
+          id: "msg_user_1",
+          messageId: "msg_user_1",
+          role: "user" as const,
+          text: "完成第一轮",
+          createdAt: "2026-07-15T09:00:00Z"
+        }
+      ]),
+      todos: [{ id: "todo_1", text: "第一轮任务", status: "completed" }]
+    };
+
+    const next = reduceAgentChatRuntime(previous, {
+      type: "user.submitted",
+      prompt: "开始第二轮",
+      createdAt: "2026-07-15T09:01:00Z"
+    });
+
+    expect(next.todos).toEqual([]);
+    expect(next.todoSnapshotsByUserMessageId).toEqual({
+      msg_user_1: [{ id: "todo_1", text: "第一轮任务", status: "completed" }]
+    });
+    expect(next.messages.at(-1)).toMatchObject({ role: "user", text: "开始第二轮" });
+  });
+
+  it("keeps todo.updated snapshots associated with the current user turn", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "执行当前任务",
+      createdAt: "2026-07-15T09:02:00Z"
+    });
+    const currentUser = submitted.messages.at(-1);
+
+    const updated = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("todo.updated", {
+        todos: [{ id: "todo_current", content: "当前任务", status: "in_progress" }]
+      })
+    });
+
+    expect(currentUser?.role).toBe("user");
+    expect(updated.todoSnapshotsByUserMessageId[currentUser!.id]).toEqual([
+      expect.objectContaining({ id: "todo_current", text: "当前任务", status: "in_progress" })
+    ]);
+  });
+
+  it("recovers per-turn todo snapshots from historical todowrite parts", () => {
+    const state = createInitialAgentChatRuntimeState([
+      {
+        id: "msg_user_1",
+        messageId: "msg_user_1",
+        role: "user",
+        text: "第一轮",
+        createdAt: "2026-07-15T09:00:00Z"
+      },
+      {
+        id: "msg_assistant_1",
+        messageId: "msg_assistant_1",
+        role: "assistant",
+        text: "",
+        createdAt: "2026-07-15T09:00:10Z",
+        parts: [
+          {
+            partId: "part_todo_1",
+            type: "tool",
+            toolName: "todowrite",
+            status: "completed",
+            input: { todos: [{ content: "历史任务", status: "completed" }] }
+          }
+        ]
+      }
+    ]);
+
+    expect(state.todos).toEqual([expect.objectContaining({ text: "历史任务", status: "completed" })]);
+    expect(state.todoSnapshotsByUserMessageId.msg_user_1).toEqual([
+      expect.objectContaining({ text: "历史任务", status: "completed" })
+    ]);
+  });
+
   it("starts a new run without clearing the existing conversation but clears stale todos", () => {
     const previous = {
       ...createInitialAgentChatRuntimeState([

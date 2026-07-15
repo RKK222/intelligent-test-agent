@@ -22,6 +22,7 @@ export type AgentChatRuntimeState = {
   permissions: PermissionRequest[];
   questions: QuestionRequest[];
   todos: TodoItem[];
+  todoSnapshotsByUserMessageId: Record<string, TodoItem[]>;
   diff?: SessionDiff;
   status?: string;
   runtimeStatus?: OpencodeLikeRuntimeStatus;
@@ -43,11 +44,16 @@ export type AgentChatRuntimeAction =
   | { type: "reset"; messages?: AgentMessage[] };
 
 export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []): AgentChatRuntimeState {
+  const todoSnapshotsByUserMessageId = todoSnapshotsFromMessagesByUserMessageId(messages);
+  const currentUserMessageId = latestUserMessageId(messages);
   return {
     messages,
     permissions: [],
     questions: [],
-    todos: [],
+    todos: currentUserMessageId
+      ? [...(todoSnapshotsByUserMessageId[currentUserMessageId] ?? [])]
+      : [...(todoSnapshotFromMessages(messages) ?? [])],
+    todoSnapshotsByUserMessageId,
     seenEventIds: [],
     streamingTextByPartId: {},
     messageScopesById: {},
@@ -106,9 +112,15 @@ export function reduceAgentChatRuntime(
   }
   if (action.type === "user.submitted") {
     const now = action.createdAt ?? new Date().toISOString();
+    const previousUserMessageId = latestUserMessageId(state.messages);
+    const todoSnapshotsByUserMessageId = previousUserMessageId
+      ? { ...state.todoSnapshotsByUserMessageId, [previousUserMessageId]: [...state.todos] }
+      : state.todoSnapshotsByUserMessageId;
     return {
       ...state,
-      messages: [...state.messages, { id: `user-${Date.now()}`, role: "user", text: action.prompt, parts: action.parts, createdAt: now }]
+      messages: [...state.messages, { id: `user-${Date.now()}`, role: "user", text: action.prompt, parts: action.parts, createdAt: now }],
+      todos: [],
+      todoSnapshotsByUserMessageId
     };
   }
 
@@ -153,7 +165,7 @@ function reduceSnapshotReset(state: AgentChatRuntimeState, event: RunEvent): Age
   const persistedMessages = state.messages.filter(
     (message) => message.role !== "card" && Boolean(message.platformMessageId)
   );
-  let restored = createInitialAgentChatRuntimeState(persistedMessages);
+  let restored: AgentChatRuntimeState = { ...createInitialAgentChatRuntimeState(persistedMessages), todos: [] };
   for (const snapshotEvent of snapshotEventsFromRunReset(event)) {
     restored = reduceAgentChatRuntime(restored, { type: "event", event: snapshotEvent });
   }
@@ -261,7 +273,7 @@ function reduceEventOnly(
     // OpenCode 1.17.7 的 todowrite 不保证发出 todo.updated；最新快照实际挂在 tool part 输入。
     // 在同一 reducer 中归并，才能让实时 SSE 与历史 part 回放使用一致的任务面板数据源。
     const todos = todoSnapshotFromToolPart(raw);
-    return todos === undefined ? next : { ...next, todos };
+    return todos === undefined ? next : withCurrentTodoSnapshot(next, todos);
   }
   if (event.type === "message.part.removed") {
     return {
@@ -325,7 +337,7 @@ function reduceEventOnly(
       : { ...state, questions: state.questions.filter((item) => item.requestId !== requestId) };
   }
   if (event.type === "todo.updated") {
-    return { ...state, todos: todoSnapshotFromValue(event.payload) ?? [] };
+    return withCurrentTodoSnapshot(state, todoSnapshotFromValue(event.payload) ?? []);
   }
   if (event.type === "session.child.discovered" || event.type === "session.scope.updated") {
     const subagent = subagentFromScopeEvent(event, state);
@@ -1400,6 +1412,55 @@ export function todoSnapshotFromMessages(messages: AgentMessage[]): TodoItem[] |
     }
   }
   return latest;
+}
+
+/**
+ * 历史消息没有独立的 Todo 实体，需要按 user turn 扫描 todowrite part 保存最后一次快照。
+ * 空数组同样写入映射，表示该轮明确清空过任务，不能回退到更早一轮。
+ */
+export function todoSnapshotsFromMessagesByUserMessageId(messages: AgentMessage[]): Record<string, TodoItem[]> {
+  const snapshots: Record<string, TodoItem[]> = {};
+  let currentUserMessageId: string | undefined;
+  for (const message of messages) {
+    if (message.role === "user") {
+      currentUserMessageId = message.messageId ?? message.id;
+      continue;
+    }
+    if (message.role !== "assistant" || !currentUserMessageId) {
+      continue;
+    }
+    for (const part of message.parts ?? []) {
+      if (part.type !== "tool") {
+        continue;
+      }
+      const snapshot = todoSnapshotFromToolPart(part as unknown as Record<string, unknown>);
+      if (snapshot !== undefined) {
+        snapshots[currentUserMessageId] = snapshot;
+      }
+    }
+  }
+  return snapshots;
+}
+
+function latestUserMessageId(messages: AgentMessage[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      return message.messageId ?? message.id;
+    }
+  }
+  return undefined;
+}
+
+function withCurrentTodoSnapshot(state: AgentChatRuntimeState, todos: TodoItem[]): AgentChatRuntimeState {
+  const userMessageId = latestUserMessageId(state.messages);
+  return {
+    ...state,
+    todos,
+    todoSnapshotsByUserMessageId: userMessageId
+      ? { ...state.todoSnapshotsByUserMessageId, [userMessageId]: [...todos] }
+      : state.todoSnapshotsByUserMessageId
+  };
 }
 
 function todoSnapshotFromValue(value: unknown): TodoItem[] | undefined {
