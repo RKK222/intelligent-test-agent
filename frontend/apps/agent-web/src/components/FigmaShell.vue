@@ -425,6 +425,8 @@ const robotHasSavedPosition = ref(false);
 // 手动唤起后保持可见；用户拖动或键盘定位后才恢复自然宠物的离场规则。
 const robotKeepVisible = ref(false);
 const robotDragging = ref(false);
+// 鼠标悬浮时冻结当前视觉位置，避免用户准备点击宠物时它继续跳跃。
+const robotHovering = ref(false);
 
 const ROBOT_WIDTH = 24;
 const ROBOT_HEIGHT = 32;
@@ -520,6 +522,7 @@ function scheduleNaturalExit() {
 
 function resumeNaturalRobotBehavior() {
   if (robotState.value === "sleeping") return;
+  if (robotHovering.value || robotDragging.value) return;
   if (robotFixed.value) return;
   if (robotKeepVisible.value) {
     if (naturalExitTimer) clearTimeout(naturalExitTimer);
@@ -604,7 +607,8 @@ function onRobotPointerMove(event: PointerEvent) {
 
 function finishRobotDrag(pointerId?: number) {
   if (robotDragPointerId === null || (pointerId !== undefined && pointerId !== robotDragPointerId)) return;
-  if (robotDragWasEffective) {
+  const wasEffective = robotDragWasEffective;
+  if (wasEffective) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
     robotX.value = position.x;
     robotY.value = position.y;
@@ -615,9 +619,9 @@ function finishRobotDrag(pointerId?: number) {
     window.setTimeout(() => {
       robotSuppressClick = false;
     }, 0);
-    resumeNaturalRobotBehavior();
   }
   cleanupRobotDrag();
+  if (wasEffective) resumeNaturalRobotBehavior();
 }
 
 function finishRobotPointerDrag(event: PointerEvent) {
@@ -684,6 +688,7 @@ function triggerExit() {
   if (robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
     return;
   }
+  if (robotHovering.value) return;
 
   // 浮层打开后由用户决定何时关闭；自动出现的宠物也不能在等待或阅读答案时自行离场。
   if (robotQuestionOpen.value) {
@@ -842,12 +847,12 @@ function spawnRobot() {
 
 // Action selection
 function scheduleNextAction() {
-  if (robotFixed.value) return;
+  if (robotFixed.value || robotHovering.value) return;
   if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
 
   if (behaviorTimer) clearTimeout(behaviorTimer);
   behaviorTimer = setTimeout(() => {
-    if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
+    if (robotHovering.value || (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging")) return;
 
     if (robotCurrentLevel.value === "top") {
       // At top: restrict upward jumps to prevent going off-screen
@@ -1199,6 +1204,32 @@ function executeBigJump() {
   }
 }
 
+function onRobotPointerEnter(event: PointerEvent) {
+  if (event.pointerType && event.pointerType !== "mouse") return;
+  robotHovering.value = true;
+  if (robotState.value === "sleeping" || robotDragging.value) return;
+
+  // 读取当前渲染位置后再关掉 transition，悬浮到跳跃中的宠物时也不会瞬移到终点。
+  const target = event.currentTarget as HTMLElement | null;
+  const rect = target?.getBoundingClientRect();
+  if (rect && Number.isFinite(rect.left) && Number.isFinite(rect.top)) {
+    const position = clampRobotPosition({ x: rect.left, y: rect.top });
+    robotX.value = position.x;
+    robotY.value = position.y;
+  }
+  clearAllRobotTimers();
+  robotTransition.value = "none";
+  robotState.value = "idle";
+  robotDirection.value = "front";
+}
+
+function onRobotPointerLeave(event: PointerEvent) {
+  if (event.pointerType && event.pointerType !== "mouse") return;
+  robotHovering.value = false;
+  if (robotState.value === "sleeping" || robotDragging.value) return;
+  resumeNaturalRobotBehavior();
+}
+
 // User activity listener
 function handleUserActivity(event?: Event) {
   // 宠物自身的拖动和唤起/收起按钮都不应被全局空闲逻辑当成离场信号。
@@ -1341,6 +1372,7 @@ function toggleRobotVisibility() {
   if (robotState.value !== "sleeping") {
     // 收起后清理全部动作/离场计时，再重新开始完整的一分钟无操作等待。
     finishRobotDrag();
+    robotHovering.value = false;
     clearAllRobotTimers();
     if (inactivityTimer) clearTimeout(inactivityTimer);
     inactivityTimer = null;
@@ -1849,6 +1881,8 @@ function submitJoinApp() {
       aria-describedby="figma-robot-instructions"
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       @pointerdown="onRobotPointerDown"
+      @pointerenter="onRobotPointerEnter"
+      @pointerleave="onRobotPointerLeave"
       @keydown="onRobotKeydown"
       @click.stop="onRobotClick"
     >

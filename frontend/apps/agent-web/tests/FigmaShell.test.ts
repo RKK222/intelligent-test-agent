@@ -268,6 +268,27 @@ describe("FigmaShell", () => {
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(savedPosition);
   });
 
+  it("pauses natural pet motion while the mouse hovers over it", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    dispatchPointer(robot.element, "pointerenter", 14, 100, 100, "mouse");
+    await vi.advanceTimersByTimeAsync(3_000);
+    await wrapper.vm.$nextTick();
+    expect(robot.find(".state-idle").exists()).toBe(true);
+    expect(robot.find(".state-walking").exists()).toBe(false);
+
+    dispatchPointer(robot.element, "pointerleave", 14, 100, 100, "mouse");
+    await vi.advanceTimersByTimeAsync(1_100);
+    await wrapper.vm.$nextTick();
+    expect(robot.find(".state-walking").exists()).toBe(true);
+  });
+
   it("can enter the added shake and celebration actions", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);

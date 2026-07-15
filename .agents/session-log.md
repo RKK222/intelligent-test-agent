@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-15 - 增加小游戏预览、动态难度与宠物悬浮冻结
+
+- Why:
+  - 用户要求俄罗斯方块展示下一个方块、各小游戏按进度提升挑战，以及鼠标悬浮宠物时停止跳跃；随后明确扫雷和数独改为随机难度，避免连续失败重开后线性变难。
+- What:
+  - 俄罗斯方块增加下一个方块预览，并按消行缩短下落 tick；贪吃蛇按得分缩短 tick；扫雷和数独每局从 1–5 级随机抽取难度。
+  - 宠物 pointerenter 时读取当前视觉坐标、清理自然动作计时并保持 idle，pointerleave 后恢复自然动作；拖动结束先清理拖动状态再恢复计时，避免悬浮冻结逻辑阻断原有拖动恢复。
+  - 同步更新 PetMiniGames/FigmaShell 单测、工作台桌面/移动端 E2E 覆盖和 agent-web 包说明。
+- How:
+  - 复用 `PetMiniGames.vue` 现有俄罗斯方块/贪吃蛇计时器、棋盘状态和 FigmaShell 宠物自然动作调度，不新增后端 API、事件或持久化数据。
+- Result:
+  - 相关 Vitest 42/42、工作台 Playwright 桌面/移动端 4/4、前端全量 typecheck 和 production build 通过；按 `.env.test` 重启后端、manager、前端，health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 已连接。
+
 ### 2026-07-15 - 修复企业公共区 Git 提交身份缺失
 
 - Why:
