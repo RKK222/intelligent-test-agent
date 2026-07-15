@@ -1,7 +1,10 @@
 import type { MermaidEdge } from "./model";
 
 const EDGE_PORTS_MARKER = "%% editor-edge-ports:";
-const PORT_HANDLE_PATTERN = /^(?:source|target)-[0-2]$/;
+// 端口 ID 形如 source-0 ~ source-5 / target-0 ~ target-5：矩形与菱形每边可渲染到 6 个端口，
+// 圆角/胶囊/圆形渲染到 4 个。允许到 5 才能覆盖全部可视化端口，否则快捷建连选中的边中点端口
+// （如矩形右侧的 target-5）会被判为非法而在序列化时丢失。
+const PORT_HANDLE_PATTERN = /^(?:source|target)-[0-5]$/;
 
 export type MermaidEdgePortMetadataEntry = Required<
   Pick<MermaidEdge, "source" | "target" | "sourceHandle" | "targetHandle">

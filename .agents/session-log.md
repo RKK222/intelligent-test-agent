@@ -6723,3 +6723,18 @@ bash /tmp/test-api-after-restart.sh
   - 定向 `agent-chat` 测试 43/43、应用层新增契约测试 1/1、前端全量 Vitest 824 passed / 1 skipped、全量 typecheck 和生产 build 通过；构建仅保留既有字体 `@import` 顺序和大 chunk 警告。
   - 最终复验期间工作区并发出现本任务外、未提交的 `MermaidFlowNode.vue` 端口重构，导致 Mermaid 存量 11 项测试仍按 6 个 14px 端口断言而失败；本任务未修改该文件。基于当前工作区重新执行对话相关 3 个测试文件为 162 passed / 1 skipped，全量 typecheck 和生产 build 仍通过。
   - 并发 Mermaid 工作补齐其测试后再次执行前端全量 Vitest，最终 58 个测试文件为 824 passed / 1 skipped；该外部改动继续保持未暂存，未纳入本任务提交。
+
+### 2026-07-15 - 修复 Mermaid 快捷建连连线方向与起始点端口
+
+- Why:
+  - Mermaid 可视化编辑器选中节点后用四向快捷箭头新建图形时，连线方向经常反向（新节点被当作起点，箭头指回原节点）；且矩形等形状因四条边没有正好位于 50% 的端口，`quickArrowDirs` 退化到左上角 `target-0`，起始点不在箭头所在边上。根因是 `onQuickConnect` 用 `portId.startsWith("source")` 决定方向，而该前缀由端口索引奇偶决定，与箭头方向无关。
+- What:
+  - 新增 `packages/editor/src/mermaid/visual-editor/node-port-layout.ts`，集中五种节点形状的端口坐标、句柄 ID 与 `findEdgePort`（取指定边上最接近中点的端口）/`oppositePosition`。
+  - `MermaidFlowNode.vue` 的 `allPorts` 和 `quickArrowDirs` 改用共享布局，四向箭头按方向取该边最接近中点的端口，起始点始终落在箭头所在边上。
+  - `MermaidVisualEditor.vue` 的 `onQuickConnect` 固定被选中节点为起点、新节点为目标，起点端口取箭头所在边端口（`portId`），目标端口取新节点上朝向起点的对边端口，使箭头始终朝外。
+  - `edge-port-metadata.ts` 端口校验正则由 `[0-2]` 放宽到 `[0-5]`，匹配 12/8 端口布局实际渲染的 `target/source-0~5`，避免快捷建连选中的边中点端口（如矩形右侧 `target-5`）被判非法而在序列化时丢失。
+- How:
+  - 新增 `node-port-layout.test.ts` 覆盖各形状端口数量、`oppositePosition` 与四向 `findEdgePort` 选点；`MermaidVisualEditor.test.ts` 增加快捷箭头按方向选端口与“方向始终朝外”回归测试，并更新既有快捷建连断言。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 99 passed（含新增 20 项），前端 typecheck 与 lint 通过。
+  - 注意：`packages/editor/README.md` 与 `PACKAGE.md` 仍按旧“每边 3 个/六点”描述端口，为本任务外既有文档漂移，未在本任务扩大范围修改。

@@ -25,7 +25,7 @@ vi.mock("@vue-flow/core", () => ({
       <button data-testid="mock-drag" @click="$emit('nodeDragStop', { node: { id: 'A', position: { x: 480, y: 260 } } })">drag</button>
       <button data-testid="mock-connect" @click="$emit('connect', { source: 'B', target: 'A' })">connect</button>
       <button data-testid="mock-select" @click="$emit('nodeClick', { node: { id: 'A' } })">select</button>
-      <button data-testid="mock-quick-connect" @click="$emit('quick-connect-test', { portId: 'source-1', position: 'right', shapeType: 'diamond' })">quick-connect</button>
+      <button data-testid="mock-quick-connect" @click="$emit('quick-connect-test', { portId: 'target-5', position: 'right', shapeType: 'diamond' })">quick-connect</button>
     </div>`
   }),
   Handle: defineComponent({
@@ -229,6 +229,42 @@ describe("MermaidFlowNode", () => {
     expect(flowNodeSource).toContain(".ta-mermaid-flow-node:hover");
   });
 
+  it("快捷箭头按方向选中该边上的连接点作为起始点", async () => {
+    const { container, emitted } = render(MermaidFlowNode, {
+      props: {
+        id: "A",
+        data: { text: "开始", nodeType: "rectangle", direction: "LR" },
+        selected: true
+      }
+    });
+
+    // 矩形四条边都没有正好位于 50% 的端口，旧实现会退化到左上角 target-0；
+    // 现在应取各边上最接近中点的端口，使起始点落在箭头所在边上。
+    const cases = [
+      { cls: "is-top", dir: "top", expectedPort: "target-2" },
+      { cls: "is-bottom", dir: "bottom", expectedPort: "target-3" },
+      { cls: "is-left", dir: "left", expectedPort: "target-4" },
+      { cls: "is-right", dir: "right", expectedPort: "target-5" }
+    ];
+    for (const item of cases) {
+      const button = container.querySelector<HTMLElement>(
+        `.ta-mermaid-quick-connector-wrapper.${item.cls} .ta-mermaid-quick-menu button`
+      );
+      expect(button).toBeTruthy();
+      await fireEvent.click(button!);
+    }
+
+    const payloads = emitted().quickConnect as Array<
+      [{ portId: string; position: string; shapeType: string }]
+    >;
+    expect(payloads).toHaveLength(4);
+    const portByDir = new Map(payloads.map(([payload]) => [payload.position, payload.portId]));
+    expect(portByDir.get("top")).toBe("target-2");
+    expect(portByDir.get("bottom")).toBe("target-3");
+    expect(portByDir.get("left")).toBe("target-4");
+    expect(portByDir.get("right")).toBe("target-5");
+  });
+
   it("节点根元素在 18px 内命中任一端口并发起拖线", () => {
     const { container, getAllByTestId, emitted } = render(MermaidFlowNode, {
       props: {
@@ -416,12 +452,30 @@ describe("MermaidVisualEditor", () => {
       position: { x: 270, y: 70 } // A: x: 80, y: 70 => 80+190=270, 70
     });
 
-    // 校验新建的边连接
+    // 校验新建的边连接：起始点固定为被选中节点 A（即使传入的 portId 为 target-* 也朝外），
+    // 起点端口落在矩形右侧（target-5），目标端口落在新建 diamond 朝向起点的左侧（source-1）。
     expect(lastUpdate!.edges.at(-1)).toMatchObject({
       source: "A",
       target: "N3",
-      sourceHandle: "source-1",
-      targetHandle: "target-1"
+      sourceHandle: "target-5",
+      targetHandle: "source-1"
     });
+  });
+
+  it("快捷建连的箭头方向始终从被选中节点指向新节点", async () => {
+    // 即便快捷箭头选中的端口是 target-*，起始点也必须是被选中节点，箭头朝外指向新节点。
+    const { getByTestId, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+
+    await fireEvent.click(getByTestId("mock-select"));
+    await fireEvent.click(getByTestId("mock-quick-connect"));
+
+    const lastUpdate = (emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0];
+    const edge = lastUpdate!.edges.at(-1);
+    expect(edge).toMatchObject({ source: "A", target: "N3" });
+    // 起点端口随被选中节点形状取右侧中点端口；目标端口随新节点形状取左侧端口。
+    expect(edge!.sourceHandle).toBe("target-5");
+    expect(edge!.targetHandle).toBe("source-1");
   });
 });

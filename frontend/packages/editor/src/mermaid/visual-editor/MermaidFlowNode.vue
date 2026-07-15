@@ -6,7 +6,7 @@ import {
   findNearestConnectionPort,
   type MermaidConnectionPortGeometry
 } from "./mermaid-connection-geometry";
-import { getMermaidNodePortId, getMermaidNodePortLayout } from "./node-ports";
+import { findEdgePort, getMermaidNodePorts } from "./node-port-layout";
 import type { MermaidConnectionStart } from "./use-mermaid-connection-drag";
 import type { MermaidFlowNodeData } from "./vue-flow-adapter";
 
@@ -40,101 +40,26 @@ type FlowPort = {
   style: CSSProperties;
 };
 
-const allPorts = computed<FlowPort[]>(() => {
-  const nodeType = props.data.nodeType;
-  let rawPorts: Array<{ x: number; y: number; pos: Position }> = [];
-
-  if (nodeType === "diamond") {
-    // 菱形/判断：每个顶点1个，每条边上2个。共12个点
-    rawPorts = [
-      // 顶点 (4个)
-      { x: 50, y: 0, pos: Position.Top },     // 上
-      { x: 100, y: 50, pos: Position.Right }, // 右
-      { x: 50, y: 100, pos: Position.Bottom },// 下
-      { x: 0, y: 50, pos: Position.Left },    // 左
-      // 斜边上的点 (8个)
-      { x: 16.7, y: 16.7, pos: Position.Top },
-      { x: 33.3, y: 33.3, pos: Position.Top },
-      { x: 83.3, y: 16.7, pos: Position.Top },
-      { x: 66.7, y: 33.3, pos: Position.Top },
-      { x: 16.7, y: 83.3, pos: Position.Bottom },
-      { x: 33.3, y: 66.7, pos: Position.Bottom },
-      { x: 83.3, y: 83.3, pos: Position.Bottom },
-      { x: 66.7, y: 66.7, pos: Position.Bottom }
-    ];
-  } else if (nodeType === "circle") {
-    // 圆形：均匀分布8个点
-    rawPorts = [
-      { x: 100, y: 50, pos: Position.Right },   // 0度 (右)
-      { x: 85.4, y: 85.4, pos: Position.Bottom }, // 45度 (右下)
-      { x: 50, y: 100, pos: Position.Bottom },  // 90度 (下)
-      { x: 14.6, y: 85.4, pos: Position.Bottom }, // 135度 (左下)
-      { x: 0, y: 50, pos: Position.Left },      // 180度 (左)
-      { x: 14.6, y: 14.6, pos: Position.Top },   // 225度 (左上)
-      { x: 50, y: 0, pos: Position.Top },       // 270度 (上)
-      { x: 85.4, y: 14.6, pos: Position.Top }    // 315度 (右上)
-    ];
-  } else if (nodeType === "rectangle") {
-    // 矩形：顶点4个，每边上2个。共12个点
-    rawPorts = [
-      // 顶点 (4个)
-      { x: 0, y: 0, pos: Position.Top },
-      { x: 100, y: 0, pos: Position.Top },
-      { x: 0, y: 100, pos: Position.Bottom },
-      { x: 100, y: 100, pos: Position.Bottom },
-      // 边上的点 (8个)
-      { x: 33.3, y: 0, pos: Position.Top },
-      { x: 66.7, y: 0, pos: Position.Top },
-      { x: 33.3, y: 100, pos: Position.Bottom },
-      { x: 66.7, y: 100, pos: Position.Bottom },
-      { x: 0, y: 33.3, pos: Position.Left },
-      { x: 0, y: 66.7, pos: Position.Left },
-      { x: 100, y: 33.3, pos: Position.Right },
-      { x: 100, y: 66.7, pos: Position.Right }
-    ];
-  } else {
-    // 圆角 rounded, 胶囊 stadium：左右各1个，上下各3个。共8个点
-    // 外侧两点用 35%/65% 而非 25%/75%，确保落在直线边上而非弯角弧内
-    rawPorts = [
-      { x: 0, y: 50, pos: Position.Left },
-      { x: 100, y: 50, pos: Position.Right },
-      { x: 35, y: 0, pos: Position.Top },
-      { x: 50, y: 0, pos: Position.Top },
-      { x: 65, y: 0, pos: Position.Top },
-      { x: 35, y: 100, pos: Position.Bottom },
-      { x: 50, y: 100, pos: Position.Bottom },
-      { x: 65, y: 100, pos: Position.Bottom }
-    ];
-  }
-
-  // 映射为包含向后兼容 ID 的 FlowPort 数组
-  return rawPorts.map((port, index) => {
-    const k = Math.floor(index / 2);
-    const id = index % 2 === 0 ? `target-${k}` : `source-${k}`;
-    return {
-      id,
-      position: port.pos,
-      style: { left: `${port.x}%`, top: `${port.y}%` }
-    };
-  });
-});
+const allPorts = computed<FlowPort[]>(() =>
+  // 端口坐标与句柄 ID 统一由 node-port-layout 提供，保证序列化与可视化端口一致。
+  getMermaidNodePorts(props.data.nodeType).map((port) => ({
+    id: port.handleId,
+    position: port.position,
+    style: { left: `${port.x}%`, top: `${port.y}%` }
+  }))
+);
 
 const quickArrowDirs = computed(() => {
-  const all = allPorts.value;
-  // 顶端口：寻找 left 约为 50% 且 top 约为 0% 的端口
-  const topPort = all.find(p => Math.abs(parseFloat(p.style.left as string) - 50) < 5 && parseFloat(p.style.top as string) === 0) || all[0];
-  // 底端口：寻找 left 约为 50% 且 top 约为 100% 的端口
-  const bottomPort = all.find(p => Math.abs(parseFloat(p.style.left as string) - 50) < 5 && parseFloat(p.style.top as string) === 100) || all[0];
-  // 左端口：寻找 left 约为 0% 且 top 约为 50% 的端口
-  const leftPort = all.find(p => parseFloat(p.style.left as string) === 0 && Math.abs(parseFloat(p.style.top as string) - 50) < 5) || all[0];
-  // 右端口：寻找 left 约为 100% 且 top 约为 50% 的端口
-  const rightPort = all.find(p => parseFloat(p.style.left as string) === 100 && Math.abs(parseFloat(p.style.top as string) - 50) < 5) || all[0];
-
+  const nodeType = props.data.nodeType;
+  // 引导大箭头固定落在边中点，连接起始点取该边上最接近中点的端口，
+  // 使起始点始终落在箭头所在边上，而不是退化到某个角落端口。
+  const fallback = allPorts.value[0]?.id ?? "";
+  const portOnEdge = (edge: Position) => findEdgePort(nodeType, edge)?.handleId ?? fallback;
   return [
-    { dir: Position.Top, portId: topPort.id, style: { left: "50%", top: "0%" } },
-    { dir: Position.Bottom, portId: bottomPort.id, style: { left: "50%", top: "100%" } },
-    { dir: Position.Left, portId: leftPort.id, style: { left: "0%", top: "50%" } },
-    { dir: Position.Right, portId: rightPort.id, style: { left: "100%", top: "50%" } }
+    { dir: Position.Top, portId: portOnEdge(Position.Top), style: { left: "50%", top: "0%" } },
+    { dir: Position.Bottom, portId: portOnEdge(Position.Bottom), style: { left: "50%", top: "100%" } },
+    { dir: Position.Left, portId: portOnEdge(Position.Left), style: { left: "0%", top: "50%" } },
+    { dir: Position.Right, portId: portOnEdge(Position.Right), style: { left: "100%", top: "50%" } }
   ];
 });
 

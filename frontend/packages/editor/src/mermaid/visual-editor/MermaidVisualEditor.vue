@@ -18,6 +18,7 @@ import {
   type MermaidPosition
 } from "../model";
 import MermaidFlowNode from "./MermaidFlowNode.vue";
+import { findEdgePort, oppositePosition } from "./node-port-layout";
 import {
   useMermaidConnectionDrag,
   type MermaidConnectionStart
@@ -117,22 +118,10 @@ function onQuickConnect(payload: { portId: string; position: Position; shapeType
       position: newPosition
     });
 
-    let edgeSource: string;
-    let edgeTarget: string;
-    let edgeSourceHandle: string;
-    let edgeTargetHandle: string;
-
-    if (portId.startsWith("source")) {
-      edgeSource = nodeId;
-      edgeTarget = newId;
-      edgeSourceHandle = portId;
-      edgeTargetHandle = "target-1";
-    } else {
-      edgeSource = newId;
-      edgeTarget = nodeId;
-      edgeSourceHandle = "source-1";
-      edgeTargetHandle = portId;
-    }
+    // 起始点固定为被选中节点（箭头所在边的端口），新节点为目标，使箭头方向朝外、
+    // 与快捷箭头指向一致。目标端口取新节点上朝向起点的对边端口，连线从起点边直达对边。
+    const sourceHandle = portId || findEdgePort(sourceNode.type, position)?.handleId || "source-0";
+    const targetHandle = findEdgePort(shapeType, oppositePosition(position))?.handleId ?? "target-0";
 
     const usedEdgeIds = new Set(draft.edges.map((e) => e.id));
     let edgeSeq = draft.edges.length + 1;
@@ -141,10 +130,10 @@ function onQuickConnect(payload: { portId: string; position: Position; shapeType
 
     draft.edges.push({
       id: edgeId,
-      source: edgeSource,
-      target: edgeTarget,
-      sourceHandle: edgeSourceHandle,
-      targetHandle: edgeTargetHandle,
+      source: nodeId,
+      target: newId,
+      sourceHandle,
+      targetHandle,
       label: "",
       relation: "arrow"
     });
