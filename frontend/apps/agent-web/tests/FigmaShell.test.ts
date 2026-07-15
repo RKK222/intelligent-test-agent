@@ -17,7 +17,7 @@ async function summonRobot(wrapper: ReturnType<typeof mountShell>) {
   await wrapper.vm.$nextTick();
 }
 
-function dispatchPointer(element: Element, type: string, pointerId: number, clientX: number, clientY: number, pointerType: string) {
+function dispatchPointer(element: EventTarget, type: string, pointerId: number, clientX: number, clientY: number, pointerType: string) {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
   Object.defineProperties(event, {
     pointerId: { value: pointerId },
@@ -97,13 +97,13 @@ describe("FigmaShell", () => {
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
     dispatchPointer(robot.element, "pointerdown", 7, 110, 110, "mouse");
-    dispatchPointer(robot.element, "pointermove", 7, 112, 112, "mouse");
-    dispatchPointer(robot.element, "pointerup", 7, 112, 112, "mouse");
+    dispatchPointer(window, "pointermove", 7, 112, 112, "mouse");
+    dispatchPointer(window, "pointerup", 7, 112, 112, "mouse");
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 100, y: 100 }));
 
     dispatchPointer(robot.element, "pointerdown", 8, 110, 110, "touch");
-    dispatchPointer(robot.element, "pointermove", 8, 170, 160, "touch");
-    dispatchPointer(robot.element, "pointerup", 8, 170, 160, "touch");
+    dispatchPointer(window, "pointermove", 8, 170, 160, "touch");
+    dispatchPointer(window, "pointerup", 8, 170, 160, "touch");
     await wrapper.vm.$nextTick();
 
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 160, y: 150 }));
@@ -171,8 +171,8 @@ describe("FigmaShell", () => {
     const robot = wrapper.get('[data-testid="figma-robot"]');
     expect(() => {
       dispatchPointer(robot.element, "pointerdown", 9, 100, 100, "mouse");
-      dispatchPointer(robot.element, "pointermove", 9, 140, 140, "mouse");
-      dispatchPointer(robot.element, "pointerup", 9, 140, 140, "mouse");
+      dispatchPointer(window, "pointermove", 9, 140, 140, "mouse");
+      dispatchPointer(window, "pointerup", 9, 140, 140, "mouse");
     }).not.toThrow();
     await wrapper.vm.$nextTick();
     expect(setItem).toHaveBeenCalled();
@@ -188,8 +188,8 @@ describe("FigmaShell", () => {
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
     dispatchPointer(robot.element, "pointerdown", 10, 100, 100, "pen");
-    dispatchPointer(robot.element, "pointermove", 10, 125, 135, "pen");
-    dispatchPointer(robot.element, "pointerup", 10, 125, 135, "pen");
+    dispatchPointer(window, "pointermove", 10, 125, 135, "pen");
+    dispatchPointer(window, "pointerup", 10, 125, 135, "pen");
     await wrapper.vm.$nextTick();
 
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 125, y: 135 }));
@@ -210,7 +210,7 @@ describe("FigmaShell", () => {
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 108, y: 108 }));
   });
 
-  it("cleans up an interrupted drag after lost pointer capture and window blur", async () => {
+  it("cleans up an interrupted drag after pointer cancel and window blur", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
@@ -218,8 +218,8 @@ describe("FigmaShell", () => {
     const robot = wrapper.get('[data-testid="figma-robot"]');
 
     dispatchPointer(robot.element, "pointerdown", 11, 100, 100, "mouse");
-    dispatchPointer(robot.element, "pointermove", 11, 140, 130, "mouse");
-    dispatchPointer(robot.element, "lostpointercapture", 11, 140, 130, "mouse");
+    dispatchPointer(window, "pointermove", 11, 140, 130, "mouse");
+    dispatchPointer(window, "pointercancel", 11, 140, 130, "mouse");
     await wrapper.vm.$nextTick();
 
     expect(document.body.style.cursor).toBe("");
@@ -227,7 +227,7 @@ describe("FigmaShell", () => {
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 140, y: 130 }));
 
     dispatchPointer(robot.element, "pointerdown", 12, 140, 130, "touch");
-    dispatchPointer(robot.element, "pointermove", 12, 160, 160, "touch");
+    dispatchPointer(window, "pointermove", 12, 160, 160, "touch");
     window.dispatchEvent(new Event("blur"));
     window.dispatchEvent(new Event("blur"));
     await wrapper.vm.$nextTick();
@@ -249,8 +249,8 @@ describe("FigmaShell", () => {
     const initialX = Number.parseInt(robotElement.style.left, 10);
     const initialY = Number.parseInt(robotElement.style.top, 10);
     dispatchPointer(robotElement, "pointerdown", 13, initialX, initialY, "mouse");
-    dispatchPointer(robotElement, "pointermove", 13, initialX + 20, initialY + 30, "mouse");
-    dispatchPointer(robotElement, "pointerup", 13, initialX + 20, initialY + 30, "mouse");
+    dispatchPointer(window, "pointermove", 13, initialX + 20, initialY + 30, "mouse");
+    dispatchPointer(window, "pointerup", 13, initialX + 20, initialY + 30, "mouse");
     await wrapper.vm.$nextTick();
 
     const savedPosition = window.localStorage.getItem("figma-shell-robot-pos");

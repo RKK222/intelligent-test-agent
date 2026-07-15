@@ -53,6 +53,18 @@
   - 应用内浏览器完成桌面与窄屏布局、点击创建和属性编辑验证；当前浏览器控制层的坐标拖拽不会生成原生 HTML5 `DataTransfer`，因此拖放落点由组件级原生 drop 事件测试验证，验收草稿未应用到 Markdown。
 - Result:
   - 前端全量 lint、typecheck、56 个 Vitest 文件（789 passed / 1 skipped）和生产 build 通过；构建仅保留既有 Google Fonts `@import` 顺序与大 chunk 警告。未修改 API、事件、数据库、安全或兼容性契约。
+### 2026-07-15 - 修复企业内 Chromium 108 宠物拖动兼容性
+
+- Why:
+  - 企业内部署使用文档记录的 Chromium 108 基线，宠物拖动依赖小尺寸元素上的 pointer capture，指针离开命中区域后可能不再持续派发移动事件。
+- What:
+  - 宠物在 pointerdown 后改由 window 级 pointermove/up/cancel 监听完成拖动生命周期，保留 pointer capture 作为辅助，不再因 lostpointercapture 提前结束；增加鼠标左键判断。
+  - 同步更新 FigmaShell 单测、桌面/移动端拖出命中区域的 Playwright 验收用例，以及 agent-web 包说明。
+- How:
+  - 复用 FigmaChatPanel 现有的 window 级拖动事件模式，未新增后端 API、事件或依赖。
+- Result:
+  - FigmaShell/FigmaChatPanel 测试 147 通过、1 跳过；宠物拖动和小游戏 Playwright 验收桌面/移动端 4/4；全量 typecheck、生产构建和本地服务重启健康检查通过。
+
 ### 2026-07-15 - 按测试设计方法拆分案例文件命名
 
 - Why:

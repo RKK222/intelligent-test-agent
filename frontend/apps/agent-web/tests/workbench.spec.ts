@@ -3265,6 +3265,9 @@ test("workbench does not create default personal workspace while opencode become
 
 test("workbench accepts the first prompt without requiring new conversation while pet fork waits for a session", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
   await mockBackendApi(page, { runRequests, ...runnableWorkspaceSetup() });
 
   await gotoWorkbench(page, { selectConversation: false });
@@ -3288,7 +3291,36 @@ test("workbench accepts the first prompt without requiring new conversation whil
   expect(runRequests[0]?.prompt).toBe("直接开始第一轮测试");
 });
 
+test("pet drag continues after the pointer leaves the robot hit area", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
+  await mockBackendApi(page, runnableWorkspaceSetup());
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "唤起小宠物" }).click({ force: true });
+  const robot = page.getByTestId("figma-robot");
+  await expect(robot).toBeVisible();
+  const box = await robot.boundingBox();
+  expect(box).not.toBeNull();
+  const start = await robot.evaluate((element) => ({
+    x: Number.parseFloat((element as HTMLElement).style.left),
+    y: Number.parseFloat((element as HTMLElement).style.top)
+  }));
+
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2 + 100, box!.y + box!.height / 2 + 80, { steps: 3 });
+  await page.mouse.up();
+
+  await expect.poll(async () => robot.evaluate((element) => Number.parseFloat((element as HTMLElement).style.left))).toBeGreaterThan(start.x);
+  await expect.poll(async () => robot.evaluate((element) => Number.parseFloat((element as HTMLElement).style.top))).toBeGreaterThan(start.y);
+});
+
 test("pet mini games support tetris, minesweeper, sudoku and snake interactions", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
   await page.addInitScript(() => {
     Math.random = () => 0;
   });

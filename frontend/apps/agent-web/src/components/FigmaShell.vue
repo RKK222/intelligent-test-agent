@@ -554,6 +554,9 @@ function cleanupRobotDrag() {
   robotDragging.value = false;
   robotDragPointerId = null;
   robotDragTarget = null;
+  window.removeEventListener("pointermove", onRobotPointerMove);
+  window.removeEventListener("pointerup", finishRobotPointerDrag);
+  window.removeEventListener("pointercancel", finishRobotPointerDrag);
   document.body.style.cursor = robotDragPreviousCursor;
   document.body.style.userSelect = robotDragPreviousUserSelect;
   if (target && pointerId !== null && target.hasPointerCapture?.(pointerId)) {
@@ -563,6 +566,7 @@ function cleanupRobotDrag() {
 
 function onRobotPointerDown(event: PointerEvent) {
   if (event.isPrimary === false || robotDragPointerId !== null) return;
+  if (event.button !== 0 && event.pointerType === "mouse") return;
   robotDragPointerId = event.pointerId;
   robotDragStartClientX = event.clientX;
   robotDragStartClientY = event.clientY;
@@ -576,6 +580,10 @@ function onRobotPointerDown(event: PointerEvent) {
   robotDragPreviousUserSelect = document.body.style.userSelect;
   document.body.style.cursor = "grabbing";
   document.body.style.userSelect = "none";
+  // Chromium 108 企业内核的 pointer capture 兼容性不稳定，拖动期间改由 window 接收全局事件。
+  window.addEventListener("pointermove", onRobotPointerMove);
+  window.addEventListener("pointerup", finishRobotPointerDrag);
+  window.addEventListener("pointercancel", finishRobotPointerDrag);
 }
 
 function onRobotPointerMove(event: PointerEvent) {
@@ -613,10 +621,6 @@ function finishRobotDrag(pointerId?: number) {
 }
 
 function finishRobotPointerDrag(event: PointerEvent) {
-  finishRobotDrag(event.pointerId);
-}
-
-function onRobotLostPointerCapture(event: PointerEvent) {
   finishRobotDrag(event.pointerId);
 }
 
@@ -1845,10 +1849,6 @@ function submitJoinApp() {
       aria-describedby="figma-robot-instructions"
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       @pointerdown="onRobotPointerDown"
-      @pointermove="onRobotPointerMove"
-      @pointerup="finishRobotPointerDrag"
-      @pointercancel="finishRobotPointerDrag"
-      @lostpointercapture="onRobotLostPointerCapture"
       @keydown="onRobotKeydown"
       @click.stop="onRobotClick"
     >
