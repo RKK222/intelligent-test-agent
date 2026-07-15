@@ -235,10 +235,11 @@ describe("MermaidFlowNode", () => {
     const { container, emitted } = render(MermaidFlowNode, {
       props: {
         id: "A",
-        data: { text: "开始", nodeType: "rectangle", direction: "LR" },
-        selected: true
+        data: { text: "开始", nodeType: "rectangle", direction: "LR" }
       }
     });
+    // 鼠标悬浮节点才显示快捷箭头（与是否选中无关）
+    await fireEvent.mouseEnter(container.querySelector("[data-mermaid-node-id]")!);
 
     // 矩形四条边都没有正好位于 50% 的端口，旧实现会退化到左上角 target-0；
     // 现在应取各边上最接近中点的端口，使起始点落在箭头所在边上。
@@ -265,6 +266,23 @@ describe("MermaidFlowNode", () => {
     expect(portByDir.get("bottom")).toBe("target-3");
     expect(portByDir.get("left")).toBe("target-4");
     expect(portByDir.get("right")).toBe("target-5");
+  });
+
+  it("点击快捷箭头不会误触发端口连线拖拽", async () => {
+    const { container, emitted } = render(MermaidFlowNode, {
+      props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
+    });
+    const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
+    await fireEvent.mouseEnter(root);
+
+    const button = container.querySelector<HTMLElement>(".ta-mermaid-quick-menu button")!;
+    // pointerdown 冒泡到箭头时被 @pointerdown.stop 拦截，不会发起端口连线拖拽
+    await fireEvent.pointerDown(button);
+    expect(emitted().connectionStart ?? []).toHaveLength(0);
+
+    // click 仍能正常触发快捷建连
+    await fireEvent.click(button);
+    expect(emitted().quickConnect).toHaveLength(1);
   });
 
   it("节点根元素在 18px 内命中任一端口并发起拖线", () => {
@@ -481,39 +499,35 @@ describe("MermaidVisualEditor", () => {
     expect(edge!.targetHandle).toBe("source-1");
   });
 
-  it("快捷建连后起始节点取消选中、新节点选中，半透明箭头随之移动", async () => {
-    const EditorHost = defineComponent({
-      components: { MermaidVisualEditor },
-      setup() {
-        return { model: ref(graph()) };
-      },
-      template: `<MermaidVisualEditor v-model="model" />`
-    });
-    const { getByTestId, container } = render(EditorHost);
-    const arrowsOf = (nodeId: string) =>
-      container.querySelectorAll(`[data-mermaid-node-id="${nodeId}"] .ta-mermaid-quick-connector-wrapper`).length;
-
-    await fireEvent.click(getByTestId("mock-select"));
-    // 选中 A：四周出现 4 个半透明快捷箭头
-    expect(arrowsOf("A")).toBe(4);
-
-    await fireEvent.click(getByTestId("mock-quick-connect"));
-    // 建连后选中切到新节点 N3：A 的箭头消失，N3 出现 4 个箭头
-    expect(arrowsOf("A")).toBe(0);
-    expect(arrowsOf("N3")).toBe(4);
-  });
-
-  it("点击空白画布取消选中并隐藏快捷箭头", async () => {
-    const { getByTestId, container } = render(MermaidVisualEditor, {
+  it("鼠标悬浮节点显示四向快捷箭头，离开后隐藏（与选中无关）", async () => {
+    const { container } = render(MermaidVisualEditor, {
       props: { modelValue: graph() }
     });
     const arrowsOf = (nodeId: string) =>
       container.querySelectorAll(`[data-mermaid-node-id="${nodeId}"] .ta-mermaid-quick-connector-wrapper`).length;
+    const node = (id: string) => container.querySelector<HTMLElement>(`[data-mermaid-node-id="${id}"]`)!;
 
-    await fireEvent.click(getByTestId("mock-select"));
+    // 未悬浮、也未选中：不显示箭头
+    expect(arrowsOf("A")).toBe(0);
+
+    // 悬浮 A：四周出现 4 个半透明快捷箭头
+    await fireEvent.mouseEnter(node("A"));
     expect(arrowsOf("A")).toBe(4);
 
-    await fireEvent.click(getByTestId("mock-pane-click"));
+    // 离开 A：箭头隐藏
+    await fireEvent.mouseLeave(node("A"));
     expect(arrowsOf("A")).toBe(0);
+  });
+
+  it("点击空白画布取消选中节点", async () => {
+    const { getByTestId, queryByText } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+
+    await fireEvent.click(getByTestId("mock-select")); // 选中 A，属性面板显示 A
+    expect(queryByText("选择画布中的节点后编辑。")).toBeNull();
+
+    await fireEvent.click(getByTestId("mock-pane-click")); // 点击空白画布取消选中
+    expect(queryByText("选择画布中的节点后编辑。")).toBeTruthy();
   });
 });

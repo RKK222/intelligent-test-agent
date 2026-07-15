@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, type CSSProperties } from "vue";
+import { computed, ref, type CSSProperties } from "vue";
 import { Handle, Position } from "@vue-flow/core";
 import {
   MERMAID_SOURCE_HIT_RADIUS,
@@ -33,6 +33,9 @@ const quickShapes: ReadonlyArray<{ type: MermaidNodeType; label: string }> = [
   { type: "diamond", label: "判断" },
   { type: "circle", label: "圆形" }
 ];
+
+/** 鼠标悬浮在节点上时才显示四向快捷箭头，与是否选中无关；离开后隐藏。 */
+const hovered = ref(false);
 
 type FlowPort = {
   id: string;
@@ -131,6 +134,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
     ]"
     @pointerdown="onPointerDown"
     @mousedown.capture="preventNodeDragFromPort"
+    @mouseenter="hovered = true"
+    @mouseleave="hovered = false"
   >
     <Handle
       v-for="port in allPorts"
@@ -148,8 +153,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
     <div class="ta-mermaid-flow-node__id">{{ id }}</div>
     <div class="ta-mermaid-flow-node__label">{{ data.text }}</div>
 
-    <!-- 快捷四向连接器，仅在选中状态下渲染 -->
-    <template v-if="selected">
+    <!-- 快捷四向连接器：鼠标悬浮节点时显示（半透明），离开后隐藏，与是否选中无关 -->
+    <template v-if="hovered">
       <div
         v-for="arrow in quickArrowDirs"
         :key="'quick-' + arrow.dir"
@@ -157,7 +162,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
         :class="[`is-${arrow.dir}`]"
         :style="arrow.style"
       >
-        <div class="ta-mermaid-quick-arrow" aria-label="快捷建连">
+        <!-- 阻止 pointerdown 冒泡到根元素，避免点击箭头/菜单时误触发端口连线拖拽（其 preventDefault 会吞掉 click） -->
+        <div class="ta-mermaid-quick-arrow" aria-label="快捷建连" @pointerdown.stop>
           <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">
             <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
           </svg>

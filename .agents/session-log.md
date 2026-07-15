@@ -6750,3 +6750,15 @@ bash /tmp/test-api-after-restart.sh
   - 测试 mock 的 `VueFlow` 增加 `node-mermaid` 具名插槽按节点渲染真实 `MermaidFlowNode`，并补 `paneClick` 事件与触发按钮；新增“快捷建连后起始节点取消选中、新节点选中”“点击空白画布取消选中”两条回归测试。未修改 API、事件、数据库、环境配置或 generated SDK。
 - Result:
   - editor 全量 Vitest 9 文件 101 passed（含新增 2 项），前端 typecheck 与 lint 通过。
+
+### 2026-07-15 - 快捷箭头改为悬浮显示（独立 worktree claude/mermaid-edit）
+
+- Why:
+  - 用户希望图形四周的快捷箭头改为鼠标悬浮节点时显示（半透明），离开后隐藏，且与是否选中无关；原来只在选中时显示。
+- What:
+  - `MermaidFlowNode.vue` 新增 `hovered` ref 与根元素 `@mouseenter`/`@mouseleave`，快捷四向箭头渲染条件由 `v-if="selected"` 改为 `v-if="hovered"`；半透明度仍由既有 `.ta-mermaid-quick-arrow { opacity: 0.4 }` 与 `:hover { opacity: 1 }` 提供。
+  - 在 `.ta-mermaid-quick-arrow` 上加 `@pointerdown.stop`，阻止点击箭头/菜单时 pointerdown 冒泡到根元素触发 `onPointerDown`（其 `preventDefault` 会吞掉后续 click，导致快捷建连无法触发）；中心端口下半区与非中心端口的连线拖拽不受影响。
+- How:
+  - 改造既有“选中显示箭头”相关测试为悬浮驱动（`fireEvent.mouseEnter`/`mouseLeave`）；新增“点击快捷箭头不会误触发端口连线拖拽”回归测试，验证 pointerdown 被拦截、click 仍触发 quickConnect。在独立 worktree（基底本地 main + 前两次 mermaid 修复）中完成，与 codex 的 `codex/chat-work-status-summary` 检出隔离。
+- Result:
+  - editor 全量 Vitest 9 文件 102 passed（含新增 1 项 pointerdown 拦截测试），前端 typecheck 通过。
