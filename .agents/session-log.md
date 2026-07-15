@@ -6610,3 +6610,16 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 部署脚本 Bash 语法、`--help` 参数、文档链接/过期模型与参数扫描、`git diff --check` 和 `tools/verify-ai-docs.sh` 通过。
   - `BackendJavaRouteResolverTest` 6 项、`BackendHttpForwarderTest` 与 `RunEventSseBackendRoutingWebFilterTest` 共 9 项通过；未实际连接 `.2/.4/.114` 部署或执行生产双后台端到端验收。
+
+### 2026-07-15 - 复查多后台部署的 WebSocket ticket 边界
+
+- Why:
+  - 多后台手册宣称无需 sticky session 即可完整工作，需要继续对照终端、文件和 Agent 配置进度 WebSocket 的 ticket 签发/消费位置确认，而不能只依据 HTTP 与 RunEvent SSE 路由测试下结论。
+- What:
+  - 本次只做审查，没有修改运行代码或部署文档；确认普通 HTTP、RunEvent SSE、Java 间转发和文件 WebSocket 目标发现已有跨服务器路径。
+  - 发现 PTY、Workspace 文件和 Agent 配置进度 ticket store 仍是单 JVM 内存；Workspace/Agent 配置文件前端会使用目标 `backend.listenUrl` 直连同一 Java，因此多后台部署必须允许浏览器访问每台 Java `:8080`。PTY ticket 请求可被转发到用户归属 Java，但响应仍是入口域名下的相对 WebSocket URL；`least_conn` Nginx 无法保证 upgrade 回到持有 ticket 的 Java。Agent 配置进度 ticket 与 upgrade 也可能落到不同 Java。
+- How:
+  - 逐项核对 `BackendJavaRouteResolver`、`UserOpencodeBackendRoutingService`、三个 ticket store、Terminal Controller、前端 backend-api 目标 URL 组装和企业 Nginx 配置；复跑路由与 ticket 定向测试。
+- Result:
+  - 核心对话/模型链路可按多后台继续验证，但当前不能把整个平台标记为“无需亲和的完整多后台正式方案”。后续需要先确定 WebSocket 正式路由方案（目标 Java 绝对 URL或 Java WebSocket 转发/共享 ticket），补真实双 Java 握手测试，再修正文档；仅调整 Nginx sticky 无法可靠解决已被入口 Java 转发到远端签发的 PTY ticket。
+  - `BackendJavaRouteResolverTest` 6 项与 `TerminalTicketStoreTest` 3 项通过；部署脚本语法、AI 文档校验和工作区 diff 校验通过，未连接生产 `.2/.4/.114`。
