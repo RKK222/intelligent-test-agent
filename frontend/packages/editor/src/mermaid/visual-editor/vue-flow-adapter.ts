@@ -1,5 +1,6 @@
 import { MarkerType, type Connection, type Edge, type Node, type XYPosition } from "@vue-flow/core";
 import { cloneMermaidGraph, type MermaidGraph, type MermaidNodeType } from "../model";
+import { getMermaidNodePortId } from "./node-ports";
 
 export type MermaidFlowNodeData = {
   text: string;
@@ -21,22 +22,34 @@ export function toVueFlowNodes(graph: MermaidGraph): MermaidFlowNode[] {
 }
 
 export function toVueFlowEdges(graph: MermaidGraph): MermaidFlowEdge[] {
-  return graph.edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.label || undefined,
-    type: "smoothstep",
-    markerEnd: edge.relation === "line" ? undefined : MarkerType.ArrowClosed,
-    animated: false,
-    style:
-      edge.relation === "dotted"
-        ? { strokeDasharray: "5 4" }
-        : edge.relation === "thick"
-          ? { strokeWidth: 2.5 }
-          : undefined,
-    ariaLabel: `${edge.source} 到 ${edge.target}${edge.label ? `：${edge.label}` : ""}`
-  }));
+  const sourceCounts = new Map<string, number>();
+  const targetCounts = new Map<string, number>();
+
+  return graph.edges.map((edge) => {
+    const sourceIndex = sourceCounts.get(edge.source) ?? 0;
+    const targetIndex = targetCounts.get(edge.target) ?? 0;
+    sourceCounts.set(edge.source, sourceIndex + 1);
+    targetCounts.set(edge.target, targetIndex + 1);
+
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: getMermaidNodePortId("source", sourceIndex),
+      targetHandle: getMermaidNodePortId("target", targetIndex),
+      label: edge.label || undefined,
+      type: "smoothstep",
+      markerEnd: edge.relation === "line" ? undefined : MarkerType.ArrowClosed,
+      animated: false,
+      style:
+        edge.relation === "dotted"
+          ? { strokeDasharray: "5 4" }
+          : edge.relation === "thick"
+            ? { strokeWidth: 2.5 }
+            : undefined,
+      ariaLabel: `${edge.source} 到 ${edge.target}${edge.label ? `：${edge.label}` : ""}`
+    };
+  });
 }
 
 /** 把 Vue Flow 产生的位置变化隔离回领域模型副本。 */

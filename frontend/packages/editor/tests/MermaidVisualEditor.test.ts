@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { defineComponent, ref } from "vue";
 import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it, vi } from "vitest";
@@ -25,12 +26,24 @@ vi.mock("@vue-flow/core", () => ({
       <button data-testid="mock-select" @click="$emit('nodeClick', { node: { id: 'A' } })">select</button>
     </div>`
   }),
-  Handle: defineComponent({ template: "<span />" }),
+  Handle: defineComponent({
+    props: ["id", "type", "position", "style"],
+    template: `<span
+      data-testid="handle"
+      :data-handle-id="id"
+      :data-handle-type="type"
+      :data-position="position"
+      :style="style"
+    />`
+  }),
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
   MarkerType: { ArrowClosed: "arrowclosed" }
 }));
 
 import MermaidVisualEditor from "../src/mermaid/visual-editor/MermaidVisualEditor.vue";
+import MermaidFlowNode from "../src/mermaid/visual-editor/MermaidFlowNode.vue";
+import flowNodeSource from "../src/mermaid/visual-editor/MermaidFlowNode.vue?raw";
+import visualEditorSource from "../src/mermaid/visual-editor/MermaidVisualEditor.vue?raw";
 
 const graph = (): MermaidGraph => ({
   kind: "flowchart",
@@ -54,6 +67,22 @@ describe("Mermaid Vue Flow 适配", () => {
     ]);
   });
 
+  it("把同一节点的多条入边和出边依次分配到三个端口", () => {
+    const multiEdgeGraph = graph();
+    multiEdgeGraph.edges = Array.from({ length: 4 }, (_, index) => ({
+      id: `edge-${index + 1}`,
+      source: "A",
+      target: "B",
+      label: "",
+      relation: "arrow" as const
+    }));
+
+    const edges = toVueFlowEdges(multiEdgeGraph);
+
+    expect(edges.map((edge) => edge.sourceHandle)).toEqual(["source-0", "source-1", "source-2", "source-0"]);
+    expect(edges.map((edge) => edge.targetHandle)).toEqual(["target-0", "target-1", "target-2", "target-0"]);
+  });
+
   it("只把 Vue Flow 拖拽坐标回写到领域模型副本", () => {
     const original = graph();
     const updated = applyVueFlowPositions(original, [{ id: "A", position: { x: 480, y: 260 } }]);
@@ -73,6 +102,68 @@ describe("Mermaid Vue Flow 适配", () => {
       relation: "arrow"
     });
     expect(appendMermaidEdge(updated, { source: "B", target: "A" })).toEqual(updated);
+  });
+});
+
+describe("MermaidFlowNode", () => {
+  it.each([
+    ["TD", "top", "bottom", "left"],
+    ["TB", "top", "bottom", "left"],
+    ["BT", "bottom", "top", "left"],
+    ["LR", "left", "right", "top"],
+    ["RL", "right", "left", "top"]
+  ] as const)("在 %s 方向渲染三入三出端口", (direction, targetPosition, sourcePosition, offsetProperty) => {
+    const { getAllByTestId } = render(MermaidFlowNode, {
+      props: {
+        id: "A",
+        data: { text: "开始", nodeType: "rectangle", direction }
+      }
+    });
+
+    const handles = getAllByTestId("handle") as HTMLElement[];
+    const targetHandles = handles.filter((handle) => handle.dataset.handleType === "target");
+    const sourceHandles = handles.filter((handle) => handle.dataset.handleType === "source");
+
+    expect(targetHandles.map((handle) => handle.dataset.handleId)).toEqual(["target-0", "target-1", "target-2"]);
+    expect(sourceHandles.map((handle) => handle.dataset.handleId)).toEqual(["source-0", "source-1", "source-2"]);
+    expect(targetHandles.map((handle) => handle.dataset.position)).toEqual(Array(3).fill(targetPosition));
+    expect(sourceHandles.map((handle) => handle.dataset.position)).toEqual(Array(3).fill(sourcePosition));
+    expect(targetHandles.map((handle) => handle.style.getPropertyValue(offsetProperty))).toEqual(["25%", "50%", "75%"]);
+    expect(sourceHandles.map((handle) => handle.style.getPropertyValue(offsetProperty))).toEqual(["25%", "50%", "75%"]);
+  });
+
+  it.each([
+    ["TD", "top", "bottom"],
+    ["BT", "bottom", "top"],
+    ["LR", "left", "right"],
+    ["RL", "right", "left"]
+  ] as const)("让 %s 方向判断节点的端口贴合菱形轮廓", (direction, targetInsetProperty, sourceInsetProperty) => {
+    const { getAllByTestId } = render(MermaidFlowNode, {
+      props: {
+        id: "D",
+        data: { text: "判断", nodeType: "diamond", direction }
+      }
+    });
+
+    const handles = getAllByTestId("handle") as HTMLElement[];
+    const targetHandles = handles.filter((handle) => handle.dataset.handleType === "target");
+    const sourceHandles = handles.filter((handle) => handle.dataset.handleType === "source");
+
+    expect(targetHandles.map((handle) => handle.style.getPropertyValue(targetInsetProperty))).toEqual(["25%", "0%", "25%"]);
+    expect(sourceHandles.map((handle) => handle.style.getPropertyValue(sourceInsetProperty))).toEqual(["25%", "0%", "25%"]);
+  });
+
+  it("用水平多边形绘制判断节点和图形库预览", () => {
+    expect(flowNodeSource).not.toContain("rotate(45deg)");
+    expect(flowNodeSource).not.toContain("rotate(-45deg)");
+    expect(flowNodeSource).toContain("width: 150px");
+    expect(flowNodeSource).toContain("height: 88px");
+    expect(flowNodeSource).toContain("polygon(50% 0, 100% 50%, 50% 100%, 0 50%)");
+
+    expect(visualEditorSource).not.toContain("rotate(45deg)");
+    expect(visualEditorSource).toContain("width: 72px");
+    expect(visualEditorSource).toContain("height: 38px");
+    expect(visualEditorSource).toContain("polygon(50% 0, 100% 50%, 50% 100%, 0 50%)");
   });
 });
 

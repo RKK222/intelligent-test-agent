@@ -6309,3 +6309,16 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 三轮消息严格按 user/assistant 交替恢复，用户提问只保留在对应 user 消息，assistant reasoning、回答、远端 part 和平台 user messageId 均保留。
   - `workbench-utils.test.ts` 69 项、前端全量 Vitest 790 项通过（另 1 项跳过），agent-web typecheck 通过。
+
+### 2026-07-15 - Mermaid 判断节点改用真菱形并支持多端口
+
+- Why:
+  - Flowchart 判断节点原来通过旋转正方形模拟菱形，文字需要反向旋转；每个节点又只有一个入口和一个出口，多条连线会集中在同一点。
+- What:
+  - 判断节点和右侧图形库预览改用水平 `polygon` 真菱形，节点根元素与文字保持水平；菱形端口中点落在尖端、两侧点落在相邻斜边。
+  - 每个节点按 TD/TB、BT、LR、RL 图方向提供 3 个入口和 3 个出口；Vue Flow 投影按每个起点的出边顺序和每个终点的入边顺序分配端口，超过三个后循环复用。
+- How:
+  - 端口方向、偏移和稳定 ID 集中在纯函数模块中，节点组件只负责渲染六个 Handle，适配层只给 Vue Flow edge 增加 `sourceHandle/targetHandle`；Mermaid 领域模型、parser、serializer 和 Markdown 文本不保存端口信息。
+  - 使用 TDD 覆盖端口循环分配、五种方向值、菱形轮廓贴合和无旋转 CSS，并在本地真实流程图中检查 computed style、Handle 属性和四种方向切换。
+- Result:
+  - 前端全量 lint、typecheck、56 个 Vitest 文件（801 passed、1 skipped）、生产 build 和 `git diff --check` 通过；浏览器页面无错误日志。构建仅保留既有 Google Fonts `@import` 顺序和大 chunk 警告。

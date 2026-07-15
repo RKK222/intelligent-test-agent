@@ -266,7 +266,21 @@ function updateDirection(event: Event) {
 .ta-mermaid-palette__shape { display: block; width: 72px; height: 30px; border: 1.5px solid currentColor; border-radius: 2px; background: var(--ta-surface, #fff); color: var(--ta-border-strong, #94a3b8); pointer-events: none; }
 .ta-mermaid-palette__shape.is-rounded { border-radius: 10px; }
 .ta-mermaid-palette__shape.is-stadium { width: 80px; border-radius: 999px; }
-.ta-mermaid-palette__shape.is-diamond { width: 31px; height: 31px; border-radius: 2px; transform: rotate(45deg); }
+.ta-mermaid-palette__shape.is-diamond {
+  position: relative;
+  width: 72px;
+  height: 38px;
+  border: 0;
+  background: transparent;
+}
+.ta-mermaid-palette__shape.is-diamond::before,
+.ta-mermaid-palette__shape.is-diamond::after {
+  position: absolute;
+  content: "";
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+.ta-mermaid-palette__shape.is-diamond::before { inset: 0; background: currentColor; }
+.ta-mermaid-palette__shape.is-diamond::after { inset: 1.5px; background: var(--ta-surface, #fff); }
 .ta-mermaid-palette__shape.is-circle { width: 38px; height: 38px; border-radius: 50%; }
 .ta-mermaid-node-properties { min-height: 132px; }
 .ta-mermaid-fields { display: grid; gap: 8px; }

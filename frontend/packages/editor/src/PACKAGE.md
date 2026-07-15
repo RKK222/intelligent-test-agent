@@ -10,7 +10,7 @@
 - `MarkdownPreview.vue`：Markdown 安全渲染、Mermaid 脚本/图表切换和可视化编辑流程编排；只定位当前 fence、调用官方 parser、懒加载编辑对话框，并将完整 Markdown 通过 `change` 交回 `CodeEditor`；渲染依赖失败时展示原文纯文本，避免已读取的文件内容变成空白。
 - `mermaid/model.ts`、`parser.ts`、`serializer.ts`、`metadata.ts`、`layout.ts`：Flowchart/graph 强类型模型、双向转换、unknown line 保留与稳定布局 metadata。
 - `mermaid/sequence/`：Sequence diagram 的 participant/actor、有序 message 模型、parser、serializer、布局和 Vue Flow 适配；复杂控制语句暂不编辑但必须保留。
-- `mermaid/visual-editor/`：通用可视化对话框和 Flowchart Vue Flow 画布；右侧节点图形库负责拖放或点击创建五种节点，选中节点属性显示在图形库下方，连线只通过画布 Handle 创建。Sequence 画布位于 `mermaid/sequence/visual-editor/`，消息使用按顺序错层的自定义边避免重叠。
+- `mermaid/visual-editor/`：通用可视化对话框和 Flowchart Vue Flow 画布；右侧节点图形库负责拖放或点击创建五种节点，判断节点使用水平真菱形，选中节点属性显示在图形库下方。每个节点按图方向提供 3 个入口 Handle 和 3 个出口 Handle，Vue Flow 适配层按入边、出边顺序确定性分配端口且不改变 Mermaid 文本。Sequence 画布位于 `mermaid/sequence/visual-editor/`，消息使用按顺序错层的自定义边避免重叠。
 - `monaco-env.ts`：Monaco Web Worker 配置（懒加载）。
 - `language.ts`：路径到 Monaco language 映射。
 
