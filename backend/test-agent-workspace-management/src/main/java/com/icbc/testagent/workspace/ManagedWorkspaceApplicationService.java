@@ -1007,9 +1007,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private void ensurePersonalWorktreeRoot(Path applicationRepoRoot, Path repoRoot, String branch, String privateKey) {
         if (Files.exists(repoRoot)) {
             if (gitWorkspaceService.isGitRepository(repoRoot) && branch.equals(gitWorkspaceService.currentBranch(repoRoot))) {
-                // 已有同路径同分支的有效 worktree，同步远程最新代码后复用。
-                gitWorkspaceService.fetch(repoRoot, privateKey);
-                gitWorkspaceService.pullFastForward(repoRoot, branch, privateKey);
+                // 个人分支只在个人 worktree 内维护；应用 feature 分支的更新通过显式同步完成，
+                // 不能在打开工作区时 fetch/pull 个人分支，避免覆盖本地生成结果。
                 return;
             }
             if (isEmptyDirectory(repoRoot)) {
@@ -1132,7 +1131,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     public void discardWorkspaceGitFiles(String workspaceId, List<String> files, UserId userId) {
-        WorkspaceGitContext context = workspaceGitContext(workspaceId, userId);
+        PersonalGitContext personal = personalGitContext(workspaceId, userId);
+        WorkspaceGitContext context = workspaceGitContext(personal.repoRoot(), personal.workspaceRoot(), personal.privateKey());
         Path repoRoot = context.repoRoot();
         Path workspaceRoot = context.workspaceRoot();
         List<String> gitFiles = repoRelativeFiles(repoRoot, workspaceRoot, normalizeFiles(files));
@@ -1187,7 +1187,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             List<String> files,
             UserId userId,
             boolean stage) {
-        WorkspaceGitContext context = workspaceGitContext(workspaceId, userId);
+        // 应用版本副本是发布端只读输入，普通 Git index 操作只能发生在个人 worktree。
+        PersonalGitContext personal = personalGitContext(workspaceId, userId);
+        WorkspaceGitContext context = workspaceGitContext(personal.repoRoot(), personal.workspaceRoot(), personal.privateKey());
         List<String> displayFiles = normalizeFiles(files);
         List<String> gitFiles = repoRelativeFiles(context.repoRoot(), context.workspaceRoot(), displayFiles);
         Set<String> conflicts = gitWorkspaceService.parseStatusPorcelain(
@@ -1476,10 +1478,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 个人工作区"提交并推送"：将个人 worktree 上的变更合并回应用版本特性分支并推送。
-     * 流程: 在个人 worktree 上 stage+commit → 切到应用版本副本（特性分支）→ fetch/pull 远端特性分支 →
-     * 将最新特性分支 merge 进个人分支 → 将个人分支本地 merge 回特性分支 → 只推送特性分支。
-     * 合并冲突: 冲突保留在当前个人 worktree，返回 CONFLICT 及冲突文件列表，便于用户直接解决。
+     * 预览个人 HEAD 与应用 feature 分支的差异。
+     *
+     * <p>预览不会把个人提交合并到应用分支；正式发布时只按白名单把个人 HEAD 的文件投影到
+     * 应用 feature worktree。个人分支中的 spec 或其它未选文件不会进入应用分支。
      */
     public ManagedWorkspaceResponses.PersonalWorkspacePublishPreviewResponse previewPersonalWorkspacePublish(
             String personalWorkspaceId,
@@ -1585,26 +1587,18 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Path personalWorkspaceRoot = pathResolver.resolve(personal.workspaceRootPath());
         List<String> gitFiles = repoRelativeFiles(personalRepoRoot, personalWorkspaceRoot, normalizeFiles(files));
 
-        // 1. 先同步应用分支并校验预览 HEAD；校验必须早于个人提交，避免确认后远端变化仍污染个人历史。
-        boolean mergeInProgress = gitWorkspaceService.isMergeInProgress(personalRepoRoot);
-        if (mergeInProgress) {
-            List<String> unresolved = gitWorkspaceService.conflictPaths(personalRepoRoot);
-            if (!unresolved.isEmpty()) {
-                progress.step("MERGE_PERSONAL");
-                return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
-                        "CONFLICT", personalWorkspaceId, version.versionId().value(), unresolved,
-                        "仍有未解决的合并冲突", false, null)
-                        .withExecution(List.of(), progress.currentStep());
-            }
+        // 发布只读取个人分支 HEAD。个人工作树中的未提交内容（包括 spec 生成中的临时结果）
+        // 不得进入 feature 分支；若选择文件仍有未提交状态，要求先走“本地提交”。
+        if (gitWorkspaceService.isMergeInProgress(personalRepoRoot)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "个人工作区存在未完成合并，请先结束合并后再发布",
+                    Map.of("personalWorkspaceId", personalWorkspaceId));
         }
-        PreparedApplicationBranch prepared;
-        if (mergeInProgress) {
-            prepared = currentPreparedApplicationBranch(version, personal, traceId);
-        } else {
-            progress.step("PREPARE_REMOTE");
-            prepared = prepareApplicationBranch(
-                    version, repository, userId, traceId);
-        }
+        ensureSelectedFilesClean(personalRepoRoot, gitFiles);
+        progress.step("PREPARE_REMOTE");
+        PreparedApplicationBranch prepared = prepareApplicationBranch(
+                version, repository, userId, traceId);
         if (expectedApplicationHead != null
                 && !expectedApplicationHead.isBlank()
                 && !expectedApplicationHead.equals(prepared.headCommit())) {
@@ -1616,66 +1610,38 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                             "actualApplicationHead", prepared.headCommit()));
         }
 
-        // 2. 普通发布清空索引后只暂存白名单；merge 重试保留已解决冲突的完整 index。
-        progress.step("COMMIT_LOCAL");
-        if (!mergeInProgress) {
-            gitWorkspaceService.resetIndexToHead(personalRepoRoot, privateKey);
-            gitWorkspaceService.stageFiles(personalRepoRoot, gitFiles, privateKey);
-        }
+        // 从个人 HEAD 投影白名单文件到 feature worktree，再在 feature worktree 提交、推送。
+        // 这里不使用 merge，因此 spec 等未被选择的个人提交不会泄漏到应用分支。
+        progress.step("PROJECT_HEAD");
+        String personalHead = gitWorkspaceService.headCommit(personalRepoRoot);
+        List<String> applicationFiles = repoRelativeFiles(
+                prepared.repoRoot(),
+                pathResolver.resolve(prepared.replica().workspaceRootPath()),
+                normalizeFiles(files));
+        gitWorkspaceService.materializeCommitFiles(
+                prepared.repoRoot(),
+                personalHead,
+                applicationFiles,
+                privateKey);
+        progress.step("COMMIT_FEATURE");
         try {
-            gitWorkspaceService.commitStaged(personalRepoRoot, requireText(commitMessage, "提交说明不能为空", "commitMessage"), privateKey);
-        } catch (PlatformException e) {
-            if (!e.getMessage().contains("nothing to commit") && !e.getMessage().contains("nothing added")) {
-                throw e;
+            gitWorkspaceService.commitStaged(
+                    prepared.repoRoot(),
+                    requireText(commitMessage, "提交说明不能为空", "commitMessage"),
+                    privateKey);
+        } catch (PlatformException exception) {
+            if (!exception.getMessage().contains("nothing to commit")
+                    && !exception.getMessage().contains("nothing added")) {
+                throw exception;
             }
         }
 
-        // 3. 把已确认的最新特性分支合入个人 worktree。
-        //    如果这里冲突，冲突文件会留在用户当前可编辑的个人工作区，由用户解决后再次发布。
-        Path applicationRepoRoot = prepared.repoRoot();
-        String applicationBranch = version.branch();
-        if (!mergeInProgress) {
-            progress.step("MERGE_PERSONAL");
-            try {
-                gitWorkspaceService.mergeBranch(personalRepoRoot, applicationBranch, privateKey);
-            } catch (PlatformException mergeException) {
-                List<String> conflictFiles = List.of();
-                try {
-                    conflictFiles = gitWorkspaceService.conflictPaths(personalRepoRoot);
-                } catch (Exception ignored) {
-                }
-                if (conflictFiles.isEmpty()) {
-                    throw mergeException;
-                }
-                return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
-                        "CONFLICT", personalWorkspaceId, version.versionId().value(), conflictFiles,
-                        "合并冲突，请在个人工作区中解决冲突后重新提交并推送", false, null)
-                        .withExecution(List.of(), progress.currentStep());
-            }
-        }
-
-        // 4. 个人分支已包含最新特性分支后，再在应用版本副本上本地合并个人分支。
-        progress.step("MERGE_APPLICATION");
-        try {
-            gitWorkspaceService.mergeBranch(applicationRepoRoot, personal.branch(), privateKey);
-        } catch (PlatformException mergeException) {
-            List<String> conflictFiles = List.of();
-            try {
-                conflictFiles = gitWorkspaceService.conflictPaths(applicationRepoRoot);
-            } catch (Exception ignored) {
-            }
-            if (conflictFiles.isEmpty()) {
-                throw mergeException;
-            }
-            abortMergeQuietly(applicationRepoRoot, privateKey);
-            throw mergeException;
-        }
-
-        // 5. 合并成功：只推送应用版本特性分支，更新版本 targetCommitHash 和副本 commit。
+        // 只推送应用版本 feature 分支，并广播给其它服务器在线用户。
         progress.step("PUSH_REMOTE");
-        gitWorkspaceService.push(applicationRepoRoot, applicationBranch, false, privateKey);
+        String applicationBranch = version.branch();
+        gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
         Instant now = Instant.now();
-        String headCommit = gitWorkspaceService.headCommit(applicationRepoRoot);
+        String headCommit = gitWorkspaceService.headCommit(prepared.repoRoot());
         ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
         Optional<ApplicationWorkspaceVersionReplica> currentReplica = managedWorkspaceRepository.findVersionReplica(
                 version.versionId(), serverIdentity.linuxServerId());
@@ -1685,8 +1651,51 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         publishVersionSync(updatedVersion, userId, "PERSONAL_PUBLISHED", traceId, Map.of());
         progress.step("COMPLETED");
         return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
-                "MERGED", personalWorkspaceId, version.versionId().value(), List.of(),
-                "合并成功: " + headCommit, true, headCommit);
+                "PUBLISHED", personalWorkspaceId, version.versionId().value(), List.of(),
+                "已从个人 HEAD 投影并推送 feature 分支: " + headCommit, true, headCommit);
+    }
+
+    /** 本地提交只改变个人 worktree，不触发远端推送或广播。 */
+    public ManagedWorkspaceResponses.PersonalWorkspacePublishResponse commitPersonalWorkspace(
+            String personalWorkspaceId,
+            String commitMessage,
+            List<String> files,
+            UserId userId,
+            String traceId) {
+        PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
+        ensurePersonalOwner(personal, userId);
+        ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
+        CodeRepository repository = existingRepository(version.repositoryId());
+        String privateKey = privateKeyFor(repository, userId);
+        Path repoRoot = pathResolver.resolve(personal.repoRootPath());
+        List<String> gitFiles = repoRelativeFiles(
+                repoRoot,
+                pathResolver.resolve(personal.workspaceRootPath()),
+                normalizeFiles(files));
+        if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "个人工作区存在未完成合并，不能提交", Map.of());
+        }
+        gitWorkspaceService.resetIndexToHead(repoRoot, privateKey);
+        gitWorkspaceService.stageFiles(repoRoot, gitFiles, privateKey);
+        gitWorkspaceService.commitStaged(repoRoot, requireText(commitMessage, "提交说明不能为空", "commitMessage"), privateKey);
+        String head = gitWorkspaceService.headCommit(repoRoot);
+        return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
+                "LOCAL_COMMITTED", personalWorkspaceId, version.versionId().value(), List.of(),
+                "个人 worktree 已提交: " + head, false, head);
+    }
+
+    private void ensureSelectedFilesClean(Path repoRoot, List<String> gitFiles) {
+        Set<String> changed = gitWorkspaceService.parseStatusPorcelain(
+                        gitWorkspaceService.statusPorcelain(repoRoot)).stream()
+                .map(GitStatusEntry::path)
+                .collect(java.util.stream.Collectors.toSet());
+        List<String> dirty = gitFiles.stream().filter(changed::contains).toList();
+        if (!dirty.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "发布文件存在未提交变更，请先提交个人 worktree",
+                    Map.of("files", dirty));
+        }
     }
 
     private PlatformException withPublishProgressDetails(
@@ -1874,25 +1883,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         List<String> normalizedFiles = normalizeFiles(files);
         WorkspaceSyncRecordId syncId = new WorkspaceSyncRecordId(RuntimeIdGenerator.workspaceSyncRecordId());
         try {
-            Path applicationRepoRoot = pathResolver.resolve(applicationReplica.repoRootPath());
-            Path applicationWorkspaceRoot = pathResolver.resolve(applicationReplica.workspaceRootPath());
-            CodeRepository repository = existingRepository(version.repositoryId());
-            String privateKey = privateKeyFor(repository, userId);
-            GitPublishWorkflow.PublishResult publishResult = gitPublishWorkflow.syncFilesThenPush(
-                    applicationRepoRoot,
-                    version.branch(),
-                    repoRelativeFiles(applicationRepoRoot, applicationWorkspaceRoot, normalizedFiles),
+            // 保留旧同步接口的审计记录，但复用统一发布路径：只读取个人 HEAD，
+            // 不再把个人工作树的未提交内容直接复制到 feature 分支。force 仅作为兼容字段记录，
+            // 不绕过个人提交、应用副本干净和远端 feature 分支保护。
+            ManagedWorkspaceResponses.PersonalWorkspacePublishResponse published = publishPersonalWorkspace(
+                    personalWorkspaceId,
                     "test-agent sync " + syncId.value(),
-                    force,
-                    privateKey,
-                    () -> copyFiles(pathResolver.resolve(personal.workspaceRootPath()), applicationWorkspaceRoot, normalizedFiles));
-            Instant now = Instant.now();
-            String headCommit = publishResult.headCommit();
-            ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
-            ApplicationWorkspaceVersionReplica updatedReplica = managedWorkspaceRepository.saveVersionReplica(applicationReplica.ready(headCommit, now, traceId));
-            publishVersionSync(updatedVersion, userId, "SYNC_TO_APPLICATION", traceId, Map.of());
-            saveSync(syncId, userId, personal.runtimeWorkspaceId(), updatedReplica.runtimeWorkspaceId(), WorkspaceSyncDirection.PERSONAL_TO_APPLICATION, normalizedFiles, force, WorkspaceSyncStatus.SUCCEEDED, traceId);
-            return new ManagedWorkspaceResponses.WorkspaceSyncResponse(syncId.value(), WorkspaceSyncStatus.SUCCEEDED.name(), normalizedFiles, force);
+                    normalizedFiles,
+                    userId,
+                    traceId);
+            saveSync(syncId, userId, personal.runtimeWorkspaceId(), applicationReplica.runtimeWorkspaceId(), WorkspaceSyncDirection.PERSONAL_TO_APPLICATION, normalizedFiles, force, WorkspaceSyncStatus.SUCCEEDED, traceId);
+            return new ManagedWorkspaceResponses.WorkspaceSyncResponse(syncId.value(), published.status(), normalizedFiles, force);
         } catch (RuntimeException exception) {
             saveSync(syncId, userId, personal.runtimeWorkspaceId(), applicationReplica.runtimeWorkspaceId(), WorkspaceSyncDirection.PERSONAL_TO_APPLICATION, normalizedFiles, force, WorkspaceSyncStatus.FAILED, traceId);
             throw exception;

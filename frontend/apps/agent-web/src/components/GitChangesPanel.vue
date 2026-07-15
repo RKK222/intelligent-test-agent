@@ -41,7 +41,7 @@ type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
 
 const props = defineProps<{
   workspaceId?: string;
-  /** 当前默认个人工作区 ID，用于提交并推送（合并回应用版本分支） */
+  /** 当前默认个人 worktree ID，用于本地提交和 feature 发布 */
   personalWorkspaceId?: string;
   apiBaseUrl?: string;
   canWrite: boolean;
@@ -130,9 +130,8 @@ const mergeResolutionCompleted = ref(false);
 
 type PublishGitStep =
   | "PREPARE_REMOTE"
-  | "COMMIT_LOCAL"
-  | "MERGE_PERSONAL"
-  | "MERGE_APPLICATION"
+  | "PROJECT_HEAD"
+  | "COMMIT_FEATURE"
   | "PUSH_REMOTE"
   | "COMPLETED";
 
@@ -140,7 +139,7 @@ function getCommitStepClass(stepNum: number) {
   if (errorMessage.value && commitStep.value === stepNum) {
     return "is-failed";
   }
-  if (commitStep.value > stepNum) {
+  if (commitStep.value > stepNum || (stepNum === 5 && commitStep.value === 5)) {
     return "is-succeeded";
   }
   if (commitStep.value === stepNum) {
@@ -153,7 +152,7 @@ function getCommitStepIcon(stepNum: number) {
   if (errorMessage.value && commitStep.value === stepNum) {
     return XCircle;
   }
-  if (commitStep.value > stepNum) {
+  if (commitStep.value > stepNum || (stepNum === 5 && commitStep.value === 5)) {
     return CheckCircle2;
   }
   if (commitStep.value === stepNum) {
@@ -166,7 +165,7 @@ function getCommitStepStatusText(stepNum: number) {
   if (errorMessage.value && commitStep.value === stepNum) {
     return "FAILED";
   }
-  if (commitStep.value > stepNum) {
+  if (commitStep.value > stepNum || (stepNum === 5 && commitStep.value === 5)) {
     return "SUCCEEDED";
   }
   if (commitStep.value === stepNum) {
@@ -177,11 +176,9 @@ function getCommitStepStatusText(stepNum: number) {
 
 function commitStepNumber(step?: string | null): number {
   switch (step) {
-    case "COMMIT_LOCAL":
-      return 2;
-    case "MERGE_PERSONAL":
-    case "MERGE_APPLICATION":
+    case "PROJECT_HEAD":
       return 3;
+    case "COMMIT_FEATURE":
     case "PUSH_REMOTE":
       return 4;
     case "COMPLETED":
@@ -200,13 +197,10 @@ function commandsForStep(commands: string[] | undefined, step?: string | null): 
     switch (step as PublishGitStep) {
       case "PREPARE_REMOTE":
         return normalized.includes(" fetch ") || normalized.includes(" pull ");
-      case "COMMIT_LOCAL":
-        return normalized.includes(" reset ")
-          || normalized.includes(" add ")
-          || normalized.includes(" commit ");
-      case "MERGE_PERSONAL":
-      case "MERGE_APPLICATION":
-        return normalized.includes(" merge ");
+      case "PROJECT_HEAD":
+        return normalized.includes(" checkout ") || normalized.includes(" rm ");
+      case "COMMIT_FEATURE":
+        return normalized.includes(" commit ");
       case "PUSH_REMOTE":
         return normalized.includes(" push ");
       default:
@@ -741,6 +735,7 @@ async function handleCommit(push = false) {
   publishResultConfirmed.value = false;
   showCommitProgressDialog.value = false;
   commitStep.value = 0;
+  let publishAttempted = false;
 
   try {
     if (workbench.useMockTestData) {
@@ -781,71 +776,65 @@ async function handleCommit(push = false) {
       return;
     }
 
-    // 1. 应用工作空间提交并推送（通过个人工作区合并回应用版本分支）
-    if (push && workspaceStaged.value.length > 0) {
+    // 1. 应用工作空间先提交个人 worktree；推送时再从个人 HEAD 投影到 feature worktree。
+    if (workspaceStaged.value.length > 0) {
       if (!props.personalWorkspaceId) {
-        errorMessage.value = "当前未进入个人 worktree，无法合并推送到应用版本分支。请重新进入应用版本工作区后再试。";
+        errorMessage.value = "当前不是个人 worktree，不能提交或发布应用变更。";
         progressMessage.value = "";
         committing.value = false;
         return;
       }
       const personalWorkspaceId = props.personalWorkspaceId;
-      progressMessage.value = "正在合并推送到应用版本分支...";
+      progressMessage.value = "正在提交个人 worktree...";
       showCommitProgressDialog.value = true;
-      commitStep.value = mergeResolutionCompleted.value ? 2 : 1;
-      const publishOperationId = newOperationId();
-      let publishProgressSocket: { close: () => void } | null = null;
-      try {
-        publishProgressSocket = await api.connectAgentConfigProgress(publishOperationId, applyPublishProgressEvent);
-      } catch {
-        publishProgressSocket = null;
-      }
-      const payload: {
-        commitMessage: string;
-        files: string[];
-        operationId?: string;
-      } = {
+      commitStep.value = 2;
+      const files = workspaceStaged.value.map((file) => file.path);
+      await api.commitPersonalWorkspace(personalWorkspaceId, {
         commitMessage: msg,
-        files: workspaceStaged.value.map((file) => file.path),
-        operationId: publishOperationId
-      };
-      const result = await (async () => {
+        files,
+        operationId: newOperationId()
+      });
+      if (push) {
+        publishAttempted = true;
+        progressMessage.value = "正在从个人 HEAD 投影并推送 feature 分支...";
+        commitStep.value = 3;
+        const publishOperationId = newOperationId();
+        let publishProgressSocket: { close: () => void } | null = null;
         try {
-          return await api.publishPersonalWorkspace(personalWorkspaceId, payload);
-        } finally {
-          setTimeout(() => publishProgressSocket?.close(), 1000);
+          publishProgressSocket = await api.connectAgentConfigProgress(publishOperationId, applyPublishProgressEvent);
+        } catch {
+          publishProgressSocket = null;
         }
-      })();
-      if (!hasLivePublishCommand.value) {
-        applyPublishExecution(result.currentStep, result.executedCommands);
-      } else if (result.currentStep) {
-        commitStep.value = commitStepNumber(result.currentStep);
+        const result = await (async () => {
+          try {
+            return await api.publishPersonalWorkspace(personalWorkspaceId, {
+              commitMessage: msg,
+              files,
+              operationId: publishOperationId
+            });
+          } finally {
+            setTimeout(() => publishProgressSocket?.close(), 1000);
+          }
+        })();
+        if (!hasLivePublishCommand.value) {
+          applyPublishExecution(result.currentStep, result.executedCommands);
+        } else if (result.currentStep) {
+          commitStep.value = commitStepNumber(result.currentStep);
+        }
+        if (result.status !== "PUBLISHED" || result.remotePushed !== true) {
+          throw new Error("feature 分支推送结果未确认，请刷新变更列表后重试。");
+        }
+        publishResultConfirmed.value = true;
+        commitStep.value = 5;
+        progressMessage.value = "已从个人 HEAD 投影并推送到应用 feature 分支！";
+      } else {
+        // 仅本地提交时，应用 feature 投影和远端推送保持未执行，进度只到本地提交。
+        commitStep.value = 2;
+        progressMessage.value = "个人 worktree 提交成功（尚未推送）。";
       }
-      if (result.status === "CONFLICT") {
-        const conflictMessage = `合并产生 ${result.conflictFiles.length} 个冲突文件。可全部保留个人版本、全部采用远程版本，或逐个处理。`;
-        errorMessage.value = conflictMessage;
-        progressMessage.value = "";
-        commitStep.value = commitStepNumber(result.currentStep ?? "MERGE_PERSONAL");
-        mergeResolutionCompleted.value = false;
-        await refreshChanges({ preserveError: true });
-        errorMessage.value = conflictMessage;
-        committing.value = false;
-        return;
-      }
-      if (result.status !== "MERGED" || result.remotePushed !== true) {
-        throw new Error("远端推送结果未确认，请刷新变更列表并检查远程分支后重试。");
-      }
-      publishResultConfirmed.value = true;
-      commitStep.value = 5; // Success
-      // 推送成功：清除暂存状态
       stagedWorkspacePaths.value.clear();
       mergeResolutionCompleted.value = false;
-      progressMessage.value = "已提交并推送到应用版本！";
       await new Promise((resolve) => setTimeout(resolve, 500));
-    } else if (!push && workspaceStaged.value.length > 0) {
-      // 仅提交（不推送）：用户应使用「提交并推送」完成整个发布流程
-      progressMessage.value = "请点击右侧「提交并推送」按钮完成合并与发布。";
-      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
     // 2. Commit Agent PUBLIC changes
@@ -899,7 +888,16 @@ async function handleCommit(push = false) {
   } catch (error) {
     publishErrorExecution(error);
     progressMessage.value = "";
-    errorMessage.value = errorMessageFor(error, "提交失败");
+    const publishError = errorMessageFor(error, "提交失败");
+    if (publishAttempted) {
+      try {
+        // 发布失败时重新读取个人 worktree 的 Git 状态，让冲突/未暂存文件立即可见。
+        await refreshChanges();
+      } catch {
+        // 保留原始发布错误，刷新失败不覆盖用户可操作的错误信息。
+      }
+    }
+    errorMessage.value = publishError;
   } finally {
     committing.value = false;
   }
@@ -1369,15 +1367,22 @@ defineExpose({
           <li :class="['ta-process-startup-step', getCommitStepClass(3)]">
             <component :is="getCommitStepIcon(3)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>合并远程分支代码</span>
+              <span>从个人 HEAD 投影白名单文件</span>
               <small>{{ getCommitStepStatusText(3) }}</small>
             </div>
           </li>
           <li :class="['ta-process-startup-step', getCommitStepClass(4)]">
             <component :is="getCommitStepIcon(4)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>推送合并结果到远程仓库</span>
+              <span>提交并推送 feature 分支</span>
               <small>{{ getCommitStepStatusText(4) }}</small>
+            </div>
+          </li>
+          <li :class="['ta-process-startup-step', getCommitStepClass(5)]">
+            <component :is="getCommitStepIcon(5)" :size="18" class="ta-process-startup-step-icon" />
+            <div class="ta-process-startup-step-copy">
+              <span>完成并广播版本更新</span>
+              <small>{{ getCommitStepStatusText(5) }}</small>
             </div>
           </li>
         </ol>

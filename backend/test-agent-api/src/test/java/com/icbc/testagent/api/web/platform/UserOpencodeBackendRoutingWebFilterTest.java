@@ -155,6 +155,18 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesPersonalWorkspaceGitReadAndPublishBecauseWorktreeIsOnUserOpencodeServer() {
+        assertRequestIsForwardedGet("/api/internal/platform/workspace-management/personal-workspaces/pws_1/diff");
+        assertRequestIsForwarded("/api/internal/platform/workspace-management/personal-workspaces/pws_1/publish");
+    }
+
+    @Test
+    void routesWorkspaceAgentConfigMutationButKeepsPublicConfigAggregatorLocal() {
+        assertRequestIsForwarded("/api/internal/platform/workspace-management/agent-config/workspaces/wks_1/commit");
+        assertRequestIsNotForwarded("/api/internal/platform/workspace-management/agent-config/public/repositories");
+    }
+
+    @Test
     void routesSideQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
         assertRequestIsForwarded(
                 "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs");
@@ -567,6 +579,48 @@ class UserOpencodeBackendRoutingWebFilterTest {
             assertThat(request.uri().toString()).isEqualTo("http://10.8.0.22:8080" + path);
             assertThat(request.headers().firstValue(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER)).contains("true");
         });
+    }
+
+    private static void assertRequestIsForwardedGet(String path) {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.of("10.8.0.22"));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.22"), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .get(path)
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .header(org.springframework.http.HttpHeaders.AUTHORIZATION, "Bearer user-token")
+                .build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).singleElement().satisfies(request -> {
+            assertThat(request.method()).isEqualTo("GET");
+            assertThat(request.uri().toString()).isEqualTo("http://10.8.0.22:8080" + path);
+        });
+    }
+
+    private static void assertRequestIsNotForwarded(String path) {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("server-b"), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest.get(path).build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isTrue();
+        assertThat(httpClient.requests).isEmpty();
+        Mockito.verifyNoInteractions(assignmentService);
     }
 
     private static UserOpencodeBackendRoutingWebFilter filter(

@@ -289,7 +289,7 @@ TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=<redis-password>
 TEST_AGENT_OPENCODE_BASE_URL=http://127.0.0.1:4096
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
-ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
+TEST_AGENT_INTERNAL_PROXY_API_KEY=<internal-proxy-api-key>
 ```
 
 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 要求 `Authorization: Bearer <token>`；未配置时本地默认放行。
@@ -309,7 +309,7 @@ export TEST_AGENT_TEST_DB_USERNAME=<username>
 export TEST_AGENT_TEST_DB_PASSWORD=<password>
 export TEST_AGENT_OPENCODE_BASE_URL=http://<opencode-host>:4096
 export TEST_AGENT_MODEL_CATALOG_SOURCE=internal
-export ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
+export TEST_AGENT_INTERNAL_PROXY_API_KEY=<internal-proxy-api-key>
 export TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-control-token>
 ```
 
@@ -356,7 +356,7 @@ TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 TEST_AGENT_API_TOKEN=<api-token>
 TEST_AGENT_CORS_ALLOWED_ORIGINS=https://<frontend-origin>
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
-ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
+TEST_AGENT_INTERNAL_PROXY_API_KEY=<internal-proxy-api-key>
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-control-token>
 ```
 
@@ -371,8 +371,6 @@ TEST_AGENT_DB_POOL_INITIAL_SIZE=1
 TEST_AGENT_DB_POOL_MIN_IDLE=1
 TEST_AGENT_DB_POOL_MAX_ACTIVE=10
 TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS=30000
-TEST_AGENT_INTERNAL_DEFAULT_MODEL=DeepSeek-V4-Flash-W8A8
-TEST_AGENT_ICBC_OPENAI_BASE_URL=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
 ```
 
 Redis 是系统必需依赖，生产部署必须提供外部地址：
@@ -420,7 +418,7 @@ docker run --rm -p 8080:8080 \
   -e TEST_AGENT_API_TOKEN=change-me \
   -e TEST_AGENT_CORS_ALLOWED_ORIGINS=https://agent.example.com \
   -e TEST_AGENT_MODEL_CATALOG_SOURCE=internal \
-  -e ICBC_OPENAI_AUTH_TOKEN=change-me \
+  -e TEST_AGENT_INTERNAL_PROXY_API_KEY=change-me-internal-proxy-key \
   -e TEST_AGENT_OPENCODE_MANAGER_TOKEN=change-me-manager-token \
   test-agent-backend:local
 ```
@@ -433,6 +431,8 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。启用 `TEST_AGENT_MODEL_CATALOG_SOURCE=internal` 时，`ModelCatalogApplicationService` 会把企业内模型清单 seed 到 `ai_model_configs`，后续可通过改表控制模型显示、启停和默认值。
 应用启动时，`ScheduledTaskRegistry` 会同步代码注册任务，包括 `opencode-runtime.analytics-rollup`；启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRunner` 后台线程才会扫描 due task 和管理员手动触发 pending run。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；scheduler 未启用时手工启动返回冲突错误，不会写入新的 pending run。停止请求会先写入 `STOPPING`，运营分析汇总会在获取兼容数据库锁前以及 hourly、daily、水位更新等主要阶段间检查动态停止信号，最终由 runner 保存 `MANUALLY_STOPPED`。
+`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。`TEST_AGENT_MODEL_CATALOG_SOURCE` 仅保留历史兼容，前端模型和供应商目录始终来自用户 opencode server 的公共配置。
+应用启动时，`ScheduledTaskRegistry` 会同步代码注册任务；启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRunner` 后台线程才会扫描 due task 和管理员手动触发 pending run。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；scheduler 未启用时手工启动返回冲突错误，不会写入新的 pending run。停止请求会先写入 `STOPPING`，具体 handler 需在长循环或外部调用间隙检查 `ScheduledTaskContext.stopRequested()` / `throwIfStopRequested()` 后退出，最终由 runner 保存 `MANUALLY_STOPPED`。
 
 ## 内部模型代理与模型目录配置
 
@@ -446,7 +446,7 @@ TEST_AGENT_INTERNAL_PROXY_BASE_URL=http://<same-node-java>/api/internal/platform
 ICBC_UCID=<current-user-unified-auth-id>
 ```
 
-`ICBC_OPENAI_AUTH_TOKEN` 不再要求通过 Java 环境变量提供；超级管理员在前端“系统管理 → 内部模型供应商”维护内部供应商 `providerId/name/baseUrl/enabled/sortOrder` 和全局 token，token 明文保存在 `internal_model_proxy_settings`，前端只展示已配置/未配置。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 配置样例”。
+`ICBC_OPENAI_AUTH_TOKEN` 不再通过 Java 环境变量提供；超级管理员在前端“系统管理 → 配置管理 → 内部模型供应商”维护内部供应商 `providerId/name/baseUrl/enabled/sortOrder` 和全局 token，token 明文保存在 `internal_model_proxy_settings`，前端只展示已配置/未配置。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 公共配置样例”；114 单后端可直接使用 `deploy/internal/opencode.jsonc.example`。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -459,10 +459,4 @@ ICBC_UCID=<current-user-unified-auth-id>
 | `TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL` | 空 | 外部模式同步给 opencode 的默认模型，例如 `deepseek-v4-pro`。旧 `TEST_AGENT_BAILIAN_DEFAULT_MODEL` 仍作为兼容兜底。 |
 | `MODELSTUDIO_API_KEY` | 空 | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置的 `modelstudio` provider、`https://coding.dashscope.aliyuncs.com/v1` base URL 和 `qwen3.5-plus` 默认模型。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | 空 | 内部模型代理鉴权 apikey，Java 校验 opencode 子进程请求并注入用户 opencode server 环境；敏感，不得写入日志或 startCommand 明文。 |
-| `TEST_AGENT_ICBC_OPENAI_BASE_URL` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | 企业内 OpenAI-compatible base URL，与 openclaw 企业 patch 保持一致。 |
-| `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` | `ICBC_OPENAI_AUTH_TOKEN` | 历史兼容项。新实现从数据库 `internal_model_proxy_settings` 读取全局 token。 |
-| `test-agent.model-catalog.internal.api-key` | 空 | 企业内 token 的 yml 直配值；未配置时回退到 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 指向的环境变量。 |
-| `TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME` | `ucid` | 企业内 API 接收当前登录人统一认证号的 header 名；`internal` 模式 Run 前会把当前 `User.unifiedAuthId` 写入用户专属 opencode 进程的 provider headers，避免共用进程串号。 |
-| `TEST_AGENT_ICBC_OPENAI_AUTH_MODE` | `auth-token` | 企业内调用鉴权头模式，默认写入 `Auth-Token`。 |
-| `TEST_AGENT_INTERNAL_DEFAULT_MODEL` | `DeepSeek-V4-Flash-W8A8` | 企业内默认模型，前端模型切换会优先选中该模型。 |
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒按 `linuxServerId` 写入 Redis Java 快照、服务器资源指标历史和 JVM 指标历史；`backendProcessId` 仅表示当前 Java 实例和拓扑连接字段，不再作为 Java 心跳或 JVM 历史的唯一键；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。

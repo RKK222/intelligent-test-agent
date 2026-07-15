@@ -428,9 +428,6 @@ class UserOpencodeBackendRoutingService {
     }
 
     private boolean isManagedWorkspacePath(String path, HttpMethod method) {
-        if (!HttpMethod.POST.equals(method)) {
-            return false;
-        }
         if (path.startsWith(CONFIGURATION_WORKSPACE_PREFIX) && path.endsWith("/workspaces")) {
             return true;
         }
@@ -438,8 +435,26 @@ class UserOpencodeBackendRoutingService {
             return false;
         }
         String suffix = path.substring(WORKSPACE_MANAGEMENT_PREFIX.length());
-        return (suffix.startsWith("applications/") && suffix.contains("/workspace-templates/") && suffix.endsWith("/versions"))
-                || (suffix.startsWith("workspace-versions/") && suffix.endsWith("/git-pull"));
+        // 这些入口会解析个人 worktree/应用副本的本地文件或 Git，必须路由到用户
+        // opencode 绑定所在的 Java；目标 Java 再按本机 manager/文件系统执行。
+        if (suffix.startsWith("agent-config/public/")
+                || suffix.startsWith("agent-config/operations/")
+                || suffix.equals("agent-config/public")
+                || suffix.startsWith("backend-servers")
+                || suffix.startsWith("file-ws")) {
+            return false;
+        }
+        if (suffix.startsWith("agent-config/workspaces/")) {
+            return true;
+        }
+        if (suffix.startsWith("personal-workspaces/")
+                || suffix.startsWith("workspaces/")
+                || suffix.startsWith("workspace-versions/")) {
+            return HttpMethod.GET.equals(method) || HttpMethod.POST.equals(method);
+        }
+        return suffix.startsWith("applications/")
+                && (suffix.contains("/workspace-templates/") || suffix.contains("/workspaces/"))
+                && (HttpMethod.GET.equals(method) || HttpMethod.POST.equals(method));
     }
 
     private boolean isReadOnlyProcessStatusRequest(ServerWebExchange exchange) {

@@ -37,7 +37,10 @@ import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 const props = defineProps<{
   baseUrl: string;
   workspaceId?: string;
+  /** 公共配置 Git 写权限，仅超级管理员可用。 */
   canWrite: boolean;
+  /** 应用级 Agent/Skill/Rules/Templates 写权限，仅应用管理员可用。 */
+  canManageWorkspaceConfig?: boolean;
   hideHeader?: boolean;
   hideGitOps?: boolean;
   activePath?: string;
@@ -49,6 +52,7 @@ const emit = defineEmits<{
 
 const workbench = useWorkbenchStore();
 const api = createBackendApiClient({ baseUrl: props.baseUrl });
+const workspaceCanWrite = computed(() => props.canManageWorkspaceConfig ?? props.canWrite);
 
 type Scope = "PUBLIC" | "WORKSPACE";
 
@@ -217,11 +221,15 @@ function isRootActive(scope: Scope) {
 
 function visibleEntries(scope: Scope, path: string) {
   const entries = entriesByScope.value[scope][path] ?? [];
-  if (props.canWrite || path !== "") {
+  if (canWriteScope(scope) || path !== "") {
     return entries;
   }
   // 普通用户只看 opencode 有效的 agents/skills 根目录，隐藏配置仓库工程杂项。
   return entries.filter((entry) => entry.path === "agents" || entry.path === "skills");
+}
+
+function canWriteScope(scope: Scope) {
+  return scope === "PUBLIC" ? props.canWrite : workspaceCanWrite.value;
 }
 
 async function loadDirectory(scope: Scope, path: string, force = false) {
@@ -298,7 +306,7 @@ async function openFile(scope: Scope, path: string) {
       ? await api.readPublicAgentFile(path, worktreeId(scope), linuxServerId)
       : await api.readWorkspaceAgentFile(props.workspaceId!, path, worktreeId(scope));
     activeFileByScope.value = { ...activeFileByScope.value, [scope]: path };
-    emit("openFile", { scope, path, content: file, readonly: scope === "PUBLIC" ? !props.canWrite : false, worktreeId: worktreeId(scope), linuxServerId });
+    emit("openFile", { scope, path, content: file, readonly: !canWriteScope(scope), worktreeId: worktreeId(scope), linuxServerId });
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "读取 Agent 文件失败");
   }
@@ -691,7 +699,7 @@ const createModalTitle = computed(() => {
  */
 async function createWorktree(scope: Scope) {
   if (scope === "PUBLIC" && !props.canWrite) return;
-  if (scope === "WORKSPACE" && !props.workspaceId) return;
+  if (scope === "WORKSPACE" && (!props.workspaceId || !workspaceCanWrite.value)) return;
   createWorktreeScope.value = scope;
   newWorktreeName.value = "change-agent-md";
   createWorktreeOptionsError.value = "";
@@ -860,7 +868,7 @@ function worktreeOptionLabel(worktree: AgentConfigWorktreeOption) {
 }
 
 function openCreateWorkspacePackageModal() {
-  if (!props.workspaceId || busy.value) return;
+  if (!props.workspaceId || !workspaceCanWrite.value || busy.value) return;
   workspacePackageName.value = "";
   workspacePackageError.value = "";
   showCreateWorkspacePackageModal.value = true;
@@ -872,7 +880,7 @@ function closeCreateWorkspacePackageModal() {
 }
 
 async function submitCreateWorkspacePackage() {
-  if (!props.workspaceId || busy.value) return;
+  if (!props.workspaceId || !workspaceCanWrite.value || busy.value) return;
   const displayName = workspacePackageName.value.trim();
   const packageName = slugifyPackageName(displayName);
   if (!displayName || !packageName) {
@@ -883,20 +891,38 @@ async function submitCreateWorkspacePackage() {
   busy.value = true;
   errorMessage.value = "";
   try {
+    await api.writeWorkspaceAgentFile(props.workspaceId, `agents/${packageName}.md`, workspaceAgentTemplate(displayName, packageName), worktreeId("WORKSPACE"));
     await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/SKILL.md`, workspaceSkillTemplate(displayName, packageName), worktreeId("WORKSPACE"));
     await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/rules/README.md`, workspaceRulesTemplate(displayName), worktreeId("WORKSPACE"));
     await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/templates/README.md`, workspaceTemplatesTemplate(displayName), worktreeId("WORKSPACE"));
     rootExpanded.value = new Set([...rootExpanded.value, "WORKSPACE"]);
     entriesByScope.value = { ...entriesByScope.value, WORKSPACE: {} };
-    expandedByScope.value = { ...expandedByScope.value, WORKSPACE: new Set(["skills", `skills/${packageName}`]) };
+    expandedByScope.value = { ...expandedByScope.value, WORKSPACE: new Set(["agents", "skills", `skills/${packageName}`]) };
     await loadDirectory("WORKSPACE", "");
+    await loadDirectory("WORKSPACE", "agents");
     await loadDirectory("WORKSPACE", "skills");
     await loadDirectory("WORKSPACE", `skills/${packageName}`);
   } catch (error) {
-    errorMessage.value = formatAgentConfigError(error, "初始化应用配置包失败");
+    errorMessage.value = formatAgentConfigError(error, "初始化应用 Agent/Skill 配置包失败");
   } finally {
     busy.value = false;
   }
+}
+
+function workspaceAgentTemplate(displayName: string, packageName: string) {
+  return `---
+name: ${packageName}
+description: ${displayName} application workspace agent
+mode: primary
+hidden: false
+---
+
+# ${displayName}
+
+You are the ${displayName} application agent. Follow the workspace skill at \`skills/${packageName}/SKILL.md\` when it applies.
+
+Return verifiable results and keep changes scoped to the current personal worktree.
+`;
 }
 
 function workspaceSkillTemplate(displayName: string, packageName: string) {
@@ -1059,7 +1085,7 @@ async function loadDiff(scope = activeScope.value) {
 async function stage(file: AgentConfigDiffFile) {
   const scope = activeScope.value;
   if (!scope) return;
-  if (scope === "PUBLIC" && !props.canWrite) return;
+  if (!canWriteScope(scope)) return;
   busy.value = true;
   try {
     if (scope === "PUBLIC") {
@@ -1078,7 +1104,7 @@ async function stage(file: AgentConfigDiffFile) {
 async function commit() {
   const scope = activeScope.value;
   if (!scope) return;
-  if (scope === "PUBLIC" && !props.canWrite) return;
+  if (!canWriteScope(scope)) return;
   if (!commitMessage.value.trim()) return;
   const message = commitMessage.value.trim();
   const operationId = newOperationId();
@@ -1097,7 +1123,7 @@ async function commit() {
 async function publish() {
   const scope = activeScope.value;
   if (!scope) return;
-  if (scope === "PUBLIC" && !props.canWrite) return;
+  if (!canWriteScope(scope)) return;
   const operationId = newOperationId();
   await runOperation(
     () =>
@@ -1290,16 +1316,18 @@ defineExpose({
           </button>
         </el-tooltip>
         <button
+          v-if="workspaceCanWrite"
           type="button"
           class="agent-icon-btn"
-          title="初始化应用配置包"
-          aria-label="初始化应用配置包"
+          title="初始化应用 Agent/Skill 配置包"
+          aria-label="初始化应用 Agent/Skill 配置包"
           :disabled="busy || !workspaceId"
           @click="openCreateWorkspacePackageModal"
         >
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
+          v-if="workspaceCanWrite"
           type="button"
           class="agent-icon-btn"
           title="创建应用 worktree"
@@ -1335,7 +1363,7 @@ defineExpose({
           <GitCompare class="h-3.5 w-3.5" :stroke-width="1.5" />
           Diff
         </button>
-        <button type="button" class="agent-action-btn" :disabled="busy" @click="publish">
+        <button v-if="activeScope === 'PUBLIC' ? canWrite : workspaceCanWrite" type="button" class="agent-action-btn" :disabled="busy" @click="publish">
           <Upload class="h-3.5 w-3.5" :stroke-width="1.5" />
           发布
         </button>
@@ -1656,11 +1684,11 @@ defineExpose({
         <section
           role="dialog"
           aria-modal="true"
-          aria-label="初始化应用配置包"
+          aria-label="初始化应用 Agent/Skill 配置包"
           class="flex w-[min(420px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
         >
           <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
-            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">初始化应用配置包</h2>
+            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">初始化应用 Agent/Skill 配置包</h2>
           </header>
 
           <div class="flex flex-col gap-3">

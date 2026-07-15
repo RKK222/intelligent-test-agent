@@ -11,9 +11,26 @@ record WorkspaceFileSocketTicket(
         String linuxServerId,
         String agentLinuxServerId,
         boolean superAdmin,
+        boolean appAdmin,
+        String userId,
         String mode,
         String scope,
         String worktreeId,
         String traceId,
         Instant expiresAt) {
+
+    WorkspaceFileSocketTicket(
+            String ticket,
+            String workspaceId,
+            String linuxServerId,
+            String agentLinuxServerId,
+            boolean superAdmin,
+            String mode,
+            String scope,
+            String worktreeId,
+            String traceId,
+            Instant expiresAt) {
+        this(ticket, workspaceId, linuxServerId, agentLinuxServerId, superAdmin, superAdmin,
+                null, mode, scope, worktreeId, traceId, expiresAt);
+    }
 }

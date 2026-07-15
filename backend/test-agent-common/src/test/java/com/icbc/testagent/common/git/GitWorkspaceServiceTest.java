@@ -412,6 +412,34 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void materializesExistingCommitFilesIntoFeatureWorktree() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.materializeCommitFiles(tempDir, "personal_head", List.of("src/App.java", "README.md"), "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-C", tempDir.toString(), "cat-file", "-e", "personal_head:src/App.java"), null),
+                new Call(List.of("git", "-C", tempDir.toString(), "cat-file", "-e", "personal_head:README.md"), null),
+                new Call(List.of("git", "-C", tempDir.toString(), "checkout", "personal_head", "--", "src/App.java", "README.md"), "PRIVATE KEY"));
+    }
+
+    @Test
+    void materializesMissingCommitFilesAsTargetDeletes() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        executor.failCalls.add(1);
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.materializeCommitFiles(tempDir, "personal_head", List.of("src/Removed.java", "README.md"), "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-C", tempDir.toString(), "cat-file", "-e", "personal_head:src/Removed.java"), null),
+                new Call(List.of("git", "-C", tempDir.toString(), "cat-file", "-e", "personal_head:README.md"), null),
+                new Call(List.of("git", "-C", tempDir.toString(), "checkout", "personal_head", "--", "README.md"), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", tempDir.toString(), "rm", "-f", "--", "src/Removed.java"), "PRIVATE KEY"));
+    }
+
+    @Test
     void readsAvailableConflictStagesAndSelectedBlob() {
         RecordingExecutor executor = new RecordingExecutor(
                 "100644 aaa 1\tsrc/Login.java\n100644 bbb 2\tsrc/Login.java\n100644 ccc 3\tsrc/Login.java\n");

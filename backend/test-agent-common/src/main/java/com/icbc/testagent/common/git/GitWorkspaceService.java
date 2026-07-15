@@ -868,6 +868,66 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 从指定提交把白名单文件投影到目标 worktree 的工作树和索引。
+     *
+     * <p>发布流程使用个人 worktree 的不可变 HEAD 作为 sourceCommit，目标只能是应用
+     * feature worktree；这里不合并个人分支，也不读取个人工作树上的未提交内容。</p>
+     */
+    public void materializeCommitFiles(
+            Path targetRepoRoot,
+            String sourceCommit,
+            List<String> files,
+            String privateKey) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        List<String> existing = new ArrayList<>();
+        List<String> deleted = new ArrayList<>();
+        for (String file : files) {
+            if (pathExistsAtCommit(targetRepoRoot, sourceCommit, file)) {
+                existing.add(file);
+            } else {
+                deleted.add(file);
+            }
+        }
+        if (!existing.isEmpty()) {
+            ArrayList<String> command = new ArrayList<>();
+            command.add("git");
+            command.add("-C");
+            command.add(targetRepoRoot.toString());
+            command.add("checkout");
+            command.add(sourceCommit);
+            command.add("--");
+            command.addAll(existing);
+            executor.execute(List.copyOf(command), privateKey, DEFAULT_TIMEOUT);
+        }
+        if (!deleted.isEmpty()) {
+            ArrayList<String> command = new ArrayList<>();
+            command.add("git");
+            command.add("-C");
+            command.add(targetRepoRoot.toString());
+            command.add("rm");
+            command.add("-f");
+            command.add("--");
+            command.addAll(deleted);
+            executor.execute(List.copyOf(command), privateKey, DEFAULT_TIMEOUT);
+        }
+    }
+
+    /** 判断提交中是否包含指定路径，供投影流程区分更新和删除。 */
+    public boolean pathExistsAtCommit(Path repoRoot, String commit, String file) {
+        try {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "cat-file", "-e", commit + ":" + file),
+                    null,
+                    DEFAULT_TIMEOUT);
+            return true;
+        } catch (PlatformException exception) {
+            return false;
+        }
+    }
+
+    /**
      * 删除 worktree 目录并清理 Git worktree 元数据。
      */
     public void removeWorktree(Path repoRoot, Path worktreeRoot, String privateKey) {

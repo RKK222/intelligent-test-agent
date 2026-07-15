@@ -196,6 +196,9 @@ type RawOutputEntry = {
 };
 
 const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const isAppAdmin = computed(() =>
+  isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true
+);
 
 function readStoredRuntimePreference() {
   return {
@@ -3131,7 +3134,7 @@ async function openFile(path: string) {
   }
   centerMode.value = "editor";
   try {
-    const file = await api.readFile(selectedWorkspace.value.workspaceId, path);
+    const file = await api.readFile(selectedWorkspace.value.workspaceId, path, !currentPersonalWorkspaceId.value);
     workbench.openTab({
       id: `file:${path}`,
       path,
@@ -4367,7 +4370,7 @@ async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
   const previousActivePath = activePath.value;
   for (const tab of workspaceTabs) {
     try {
-      const file = await api.readFile(workspaceId, tab.path);
+      const file = await api.readFile(workspaceId, tab.path, !currentPersonalWorkspaceId.value);
       workbench.openTab({
         ...tab,
         content: file.content,
@@ -4989,7 +4992,9 @@ async function handleLogout() {
           :loading-app-templates="loadingAppTemplates"
           :loading-app-versions="loadingAppVersions"
           :creating-version="creatingVersion"
-          :can-write="isSuperAdmin"
+          :can-write="!!currentPersonalWorkspaceId"
+          :can-manage-agent-config="isAppAdmin"
+          :can-manage-public-config="isSuperAdmin"
           :api-base-url="apiBaseUrl"
           :workspace-id="selectedWorkspace?.workspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"

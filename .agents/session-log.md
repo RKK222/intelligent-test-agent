@@ -6460,3 +6460,32 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 前端 57 个测试文件 819 passed、1 skipped，typecheck 与生产 build 通过；后端相关 runtime/API/persistence 58 项通过，`test-agent-app -am -DskipTests package` 通过且 jar 含 `META-INF/build-info.properties`；Go 全量测试和开发脚本验证通过。
   - 已从 Dockerfile `manager-build` 阶段实际构建并导出 linux/amd64 二进制，确认包含 `V20260715.113850`。Docker Desktop 对项目默认固定 Go 基础镜像 digest 存在本地 metadata size 校验损坏，故改用 `golang:1.25-bookworm` 覆盖 build arg 完成 linker 链路验证；未执行完整 worker 镜像/企业 zip 打包。当前机器无 `pwsh/powershell`，Windows 脚本仅完成静态校验。
+### 2026-07-15 - 企业部署收敛为 114 单后端并补齐内部模型公共配置
+
+- Why:
+  - 现场当前只使用 `122.233.30.114` 作为 Java 后端和 worker 节点，但部署模板、默认脚本和操作手册仍混用 `.4 + .114` 双后端方案；模板还残留旧的模型 token 环境变量和敏感示例值，与数据库供应商/全局 token + Java 内部代理的新链路不一致。
+- What:
+  - `backend.env.example`、`env.example` 和 `deploy-internal-release.sh` 默认切换到 114 单后端，所有数据库、manager、内部代理密钥改为占位符；worker 配置不再携带模型 token。
+  - 新增 `deploy/internal/opencode.jsonc.example`，只启用 `icbc-qwen`、`icbc-deepseek`，分别通过 `qwen-prod`、`deepseek-prod` 路由 Java 内部代理，并引用 Java 注入的代理地址、代理 key 和用户 UCID。
+  - 企业部署 README、操作手册、后端部署文档和 HTTP API 配置样例同步为数据库维护供应商地址/上游 token、公共配置维护模型目录的当前事实；历史双后端文档明确标记为追溯材料。
+- How:
+  - 复用既有 `InternalModelProviderRegistry`、`InternalModelProxyRuntimeSettings` 与 `OpencodeProcessStartupService` 注入链路，没有新增后端接口、SQL、migration 或并行代理实现；未修改 `.env.local/.env.test`，也未写生产数据库或 114 文件。
+  - 使用 Linux amd64 worker 镜像中的 OpenCode 1.17.8 实际启动公共配置并读取 `/api/provider`、`/api/model`；用合并后的临时完整归档执行 `deploy-internal-release.sh --validate-only` 和 `tools/verify-internal-deploy-systemd.sh`。
+- Result:
+  - OpenCode runtime 返回 provider `icbc-deepseek,icbc-qwen`，模型 `DeepSeek-R1,Qwen3.6-35B-A3B`；部署脚本语法、归档校验、首次 systemd 安装和二次升级分支通过。
+  - `InternalModelThinkStreamConverterTest` 2 项、`MyBatisInternalModelProviderRepositoryIntegrationTest` 1 项通过。生产 `.2/.114` HTTP、114 SSH banner 和生产 PostgreSQL 均受当前网络/ACL 阻断，无法远程确认生产表；本地 test 库对应两张表为空。全 opencode-runtime testCompile 仍被上一条记录中的并发接口改动阻断，本次未修改无关测试桩。
+
+### 2026-07-15 - 应用 Git 个人 worktree 与 feature 投影权限收敛
+
+- Why:
+  - 按应用 Git / 公共 Git 的职责边界收敛个人工作区、应用 feature 分支和前端读写权限，避免 spec、公共配置或普通成员写操作越过授权范围。
+- What:
+  - 个人 worktree 增加本地提交接口；发布只从个人 `HEAD` 按选中文件白名单投影到应用 feature worktree，提交、推送并广播版本同步，不 merge 个人分支，因此未选的 `spec/**` 不会泄漏。
+  - 应用版本副本对普通成员只读；个人 worktree 只允许 owner 写入；`.opencode/agents/**`、`.opencode/skills/**` 及其 rules/templates 写入受 APP_ADMIN 保护；公共 Agent Git 保持 SUPER_ADMIN 写权限。
+  - 补齐跨服务器 Git / 文件 WebSocket 路由、OpenCode Agent/Skill 默认四文件模板（含 rules/templates）、前端本地提交/feature 发布进度和公共/应用配置分离的读写状态。
+- How:
+  - 复用现有 workspace 文件 WebSocket ticket/RPC、Git workspace service、后端 Java 路由和版本广播机制；新增 projection 回归测试、工作区服务测试、WebSocket 保护路径测试及前端定向测试。
+- Result:
+  - `mvn clean package -Dmaven.test.skip=true` 构建成功；`ManagedWorkspaceApplicationServiceTest` 45 项、`GitWorkspaceServiceTest`、前端 AgentConfig/GitChanges 35 项和 agent-web `vue-tsc` 均通过。
+  - `.env.test` 三服务重启成功，backend readiness `UP`、前端 3000 返回 200、manager WebSocket 已连接；完整 API 定向测试仍被本任务外的 opencode-runtime 旧测试桩编译错误阻断，未修改该并发问题。
+  - OpenCode 原生工具层未改造为平台权限感知；实际写入入口仍必须经过平台文件 WebSocket / Agent 配置 API，后续如开放原生工具直写需补同等路径策略。

@@ -1026,7 +1026,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 ]
 ```
 
-`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 要求当前用户 opencode 进程服务器归属、workspace 和目标后端同服务器。签发优先使用轻量归属快照；当快照未 READY 时会复查当前用户 opencode 强状态，避免文件树与进程状态卡可用性不一致，但不会触发 `start` 命令；`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录；`mode=agent-config` 绑定 Agent 配置 scope/workspace/worktree，读取允许登录用户，写入由 WebSocket handler 再校验 `SUPER_ADMIN`。
+`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 要求当前用户 opencode 进程服务器归属、workspace 和目标后端同服务器。签发优先使用轻量归属快照；当快照未 READY 时会复查当前用户 opencode 强状态，避免文件树与进程状态卡可用性不一致，但不会触发 `start` 命令；`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录；`mode=agent-config` 绑定 Agent 配置 scope/workspace/worktree，读取允许登录用户，公共 Git 写入仅 `SUPER_ADMIN`，应用级配置写入由 WebSocket handler 校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。普通用户写应用版本副本会返回只读错误；个人 worktree 普通文件仍可写，`.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）仅 APP_ADMIN 可写。
 
 请求体：
 
@@ -1092,7 +1092,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/applications/{appId}/workspaces/{workspaceId}/branch-preference` | 记录当前用户在 (appId, workspaceId) 维度下最近一次选择的 VCS 分支。 |
 | `GET` | `/applications/{appId}/workspaces/{workspaceId}/branch-preference` | 查询当前用户在 (appId, workspaceId) 维度下最近一次选择的 VCS 分支；未设置返回 `null`。 |
 | `GET` | `/personal-workspaces/{personalWorkspaceId}/diff` | 查询个人工作区与应用版本工作区目录差异。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 将所选个人工作区文件同步到应用版本工作区；目标副本必须 clean，后端先 fetch/pull --ff-only，再复制文件、提交并 push。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 兼容同步入口；只读取个人 `HEAD` 的白名单文件，复用 feature 投影发布，不把未提交工作树内容复制到应用分支。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 将所选应用版本工作区文件同步到个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 显式确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取应用版本工作区或个人 worktree 的变更文件列表，返回 `{ files: [{ path, rawStatus, status, staged, patch, additions, deletions }] }`；Git unmerged 状态会返回 `status=conflict`。 |
@@ -1104,7 +1104,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/workspaces/{workspaceId}/git-conflict/resolve-all` | 使用 Git index 原生 ours/theirs 批量解决全部冲突；只支持 `CURRENT/INCOMING`。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/abort` | 在个人 worktree 中执行 `merge --abort`，取消整次未完成合并。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish-preview` | 发布前预检应用分支 HEAD、待合入提交数、A/M/D/R 汇总和样例路径；不修改个人 worktree。若个人 worktree 已处于未完成 merge，只返回已记录的应用 HEAD，不重复拉取远程。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 先校验可选 `expectedApplicationHead`，再只提交 `files` 白名单、合并并推送；冲突返回 `CONFLICT`，推送失败不会返回成功。响应包含 `currentStep/executedCommands` 供前端展示真实 Git 阶段。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/commit` | 仅在个人 worktree stage 并提交 `files` 白名单；不推送、不广播。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 要求 `files` 已在个人 worktree 本地提交，再从个人 `HEAD` 按白名单投影到应用 feature worktree，提交并推送；不 merge 整个个人分支。响应包含 `currentStep/executedCommands`。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 
@@ -1180,7 +1181,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`sync-to-application.force=true` 时使用 `--force-with-lease` 覆盖远端；失败、冲突或认证问题使用统一 Git/冲突错误码返回，并记录同步审计。复制个人文件前，目标应用版本副本必须是 clean 状态，后端会先 `git fetch origin` 和 `git pull --ff-only {branch}`；目标副本脏或无法快进时不复制文件、不提交。同步成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
+`sync-to-application` 保留 `force` 字段用于兼容审计，但不再绕过权限和提交约束：后端要求所选文件在个人 worktree 已提交，读取个人 `HEAD`，再按白名单投影到应用 feature worktree，提交并推送。个人工作树中未提交的 `spec/**` 或其它未选文件不会进入 feature 分支。成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并广播 `workspace.version.sync-requested`；其它在线用户只收到手动刷新/同步提示，不自动覆盖脏工作树。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
 
 ### 默认个人工作区显式创建/修复
 
@@ -1260,9 +1261,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `resolution` 支持 `CURRENT`、`INCOMING`、`BOTH`、`MANUAL`、`DELETE`。非冲突路径返回 `CONFLICT`。批量接口请求体为 `{"resolution":"CURRENT"}` 或 `{"resolution":"INCOMING"}`，分别将全部冲突采用个人侧 stage 2 或远程侧 stage 3；目标侧不存在的文件按删除处理，不要求逐个解决。`POST /workspaces/{workspaceId}/git-conflict/abort` 无请求体，仅在存在未完成 merge 时成功。
 
-### 个人工作区提交并推送
+### 个人工作区本地提交与 feature 发布
 
-`POST /personal-workspaces/{personalWorkspaceId}/publish` 请求体：
+先调用 `POST /personal-workspaces/{personalWorkspaceId}/commit` 完成个人 worktree 本地提交；需要发布时再调用 `POST /personal-workspaces/{personalWorkspaceId}/publish`。两个请求体均可使用：
 
 ```json
 {
@@ -1273,35 +1274,35 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-提交前调用 `POST /personal-workspaces/{personalWorkspaceId}/publish-preview`。预览返回 `applicationHead/personalHead/incomingCommitCount/changedFileCount/addedCount/modifiedCount/deletedCount/renamedCount/samplePaths`。前端只把 `applicationHead` 原样传给 publish 作为并发保护，不因待合入提交数弹二次确认；真正的冲突由后续 Git merge 保留原生冲突现场并返回 `CONFLICT`。若 preview 后应用 HEAD 再次变化，publish 会在修改个人 index 或创建提交前返回 `CONFLICT`。`operationId` 可选，格式与 Agent 配置长操作一致；前端传入时可先连接 `/agent-config/operations/{operationId}/ws`，再调用 publish，并通过 `command` 事件实时展示当前正在执行的 Git 命令。应用分支 pull 成功后会立即同步版本 target commit 和本机副本 commit，即使随后个人 merge 冲突也不保留陈旧元数据。若个人 worktree 已经处于 Git 原生 merge 状态，预览和继续发布都不再重复拉取远程；用户解决全部 unmerged 文件后，重新发布只完成 merge commit、把个人分支合回应用副本并 push。
+发布前可调用 `publish-preview` 查看当前应用 HEAD 和个人 HEAD，但预览不执行 merge。`operationId` 可选，前端可连接 `/agent-config/operations/{operationId}/ws` 展示 `PREPARE_REMOTE/PROJECT_HEAD/COMMIT_FEATURE/PUSH_REMOTE/COMPLETED` 阶段及安全 Git 命令。发布不会提交个人未提交内容，也不会把个人分支整体合入 feature。
 
 后端执行流程：
 
-1. 将 `files` 映射为仓库相对路径。普通发布先把 index 恢复到 `HEAD`，再只 stage 并提交这些文件；未选择文件保留在工作树。merge 重试则保留完整 merge index，在所有冲突解决后提交 Git 自动合并项和解决结果。
-2. 确保当前服务器应用版本副本可用：副本路径不存在、不是当前机器路径或历史运行态 Workspace 根目录仍指向旧系统路径时，按当前 `OPENCODE_APP_WORKSPACE_ROOT` 重新准备本机副本并更新副本/Workspace 记录。
-3. 普通发布切到应用版本副本（checkout 在应用版本特性分支）：`git fetch origin` + `git pull --ff-only {appVersionBranch}`，先把远端特性分支拉到本地。若个人 worktree 已有未完成 merge 且冲突已解决，则复用已有 READY 应用副本，不再 fetch/pull。
-4. 普通发布在个人 worktree 中 `git merge --no-ff {appVersionBranch}`，把最新特性分支合入个人分支；如发生冲突，冲突文件保留在当前个人 worktree。merge 重试时跳过该步骤，直接提交用户已解决的 merge index。
-5. 在应用版本副本中 `git merge --no-ff {personalBranch}`，把已包含最新特性分支的本地个人分支合回特性分支（合并方向为「特性分支 ← 个人分支」）。
-6. `git push origin {appVersionBranch}` 推送应用版本特性分支；个人分支不推送远端。
+1. `commit` 在个人 worktree 隔离 index，只 stage `files` 白名单并提交；不推送、不广播。
+2. `publish` 校验个人 worktree 未处于 merge 状态，且 `files` 在个人 worktree 没有未提交变更；未先本地提交时返回 `CONFLICT`。
+3. 确保当前服务器的应用 feature worktree clean，`git fetch` + `git pull --ff-only {appVersionBranch}`，并校验可选 `expectedApplicationHead`。
+4. 读取个人仓库 `HEAD`，将 `files` 映射为 feature worktree 的仓库相对路径；存在的文件执行 checkout 投影，不存在的文件执行定点删除。
+5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push，个人 `spec/**` 或未选文件不会泄漏。
 
-合并结果：
+发布结果：
 
-- **成功（MERGED）**：更新应用版本 `targetCommitHash` 和当前服务器 replica commit，广播其他服务器同步。
-- **冲突（CONFLICT）**：返回冲突文件列表，不推送特性分支；如果冲突发生在个人 worktree 合入特性分支阶段，后端不会 abort，冲突文件保留在当前个人 worktree。用户在当前个人 worktree 中解决冲突并保存后，重新点击提交并推送完成 merge commit 和特性分支推送。前端必须保留 `CONFLICT` 提示，并通过 `git-diff` 中的 `status=conflict/rawStatus` 把 unmerged 文件单独展示为待解决冲突，不能作为普通 staged 删除展示；冲突未解决期间普通非冲突文件仍可真实 stage/unstage，但提交按钮必须禁用，直到所有 unmerged 文件解决。应用版本副本合并阶段如出现冲突，后端会 abort 应用版本副本上的 merge 且不推送。
+- **成功（LOCAL_COMMITTED）**：只更新个人分支 HEAD，不推送、不广播。
+- **成功（PUBLISHED）**：更新应用版本 `targetCommitHash` 和当前服务器 replica commit，广播其他服务器同步。
+- **冲突（CONFLICT）**：个人存在 merge 状态、选中文件未提交、应用 feature worktree 脏或 HEAD 并发保护失败时返回冲突，不推送 feature 分支；不会在个人 worktree 中创建发布 merge。
 
 响应 `PersonalWorkspacePublishResponse`：
 
 ```json
 // 成功
 {
-  "status": "MERGED",
+  "status": "PUBLISHED",
   "personalWorkspaceId": "psw_...",
   "versionId": "awv_...",
   "conflictFiles": [],
-  "message": "合并成功: abc123...",
+  "message": "已从个人 HEAD 投影并推送 feature 分支: abc123...",
   "remotePushed": true,
   "headCommit": "abc123...",
-  "executedCommands": ["git fetch", "git merge", "git push"],
+  "executedCommands": ["git fetch", "git checkout", "git commit", "git push"],
   "currentStep": "COMPLETED"
 }
 
@@ -1311,13 +1312,13 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "personalWorkspaceId": "psw_...",
   "versionId": "awv_...",
   "conflictFiles": ["src/App.java", "src/Config.java"],
-  "message": "合并冲突，请在个人工作区中解决冲突后重新提交并推送",
-  "executedCommands": ["git fetch", "git merge"],
-  "currentStep": "MERGE_PERSONAL"
+  "message": "发布文件存在未提交变更，请先提交个人 worktree",
+  "executedCommands": ["git status --porcelain"],
+  "currentStep": "PROJECT_HEAD"
 }
 ```
 
-`currentStep` 取值为 `PREPARE_REMOTE`、`COMMIT_LOCAL`、`MERGE_PERSONAL`、`MERGE_APPLICATION`、`PUSH_REMOTE`、`COMPLETED`。`remotePushed` 只有在应用版本分支 `git push` 成功并读取发布后的 HEAD 后才为 `true`；前端未收到 `remotePushed=true` 时不得展示推送成功。发布接口抛出统一错误时，`details.failedStep` 和 `details.executedCommands` 会尽量返回失败前已进入的 Git 阶段和已执行命令，前端命令日志应按失败步骤过滤展示，不展示预检或后续步骤的命令。处理中的弹窗应优先展示 WebSocket `command` 中的当前命令；接口最终返回后可回填完整 `executedCommands`。
+`currentStep` 取值为 `PREPARE_REMOTE`、`PROJECT_HEAD`、`COMMIT_FEATURE`、`PUSH_REMOTE`、`COMPLETED`。本地提交响应的 `status=LOCAL_COMMITTED`、`remotePushed=false`；发布响应只有 feature 分支 `git push` 成功并读取发布后的 HEAD 后才返回 `status=PUBLISHED`、`remotePushed=true`。前端未收到 `remotePushed=true` 时不得展示推送成功。发布接口抛出统一错误时，`details.failedStep` 和 `details.executedCommands` 会尽量返回失败前已进入的 Git 阶段和已执行命令。
 
 前端两级菜单（应用工作空间→版本）使用说明：
 
@@ -1489,6 +1490,8 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 | `POST` | `/api/internal/agent/{agentId}/runs/{runId}/diff/reject` |
 
 ### 用户 opencode 进程 API
+
+工作区个人 Git、应用级 Agent 配置 Git 和版本工作区文件操作同样按当前用户 ACTIVE opencode binding 路由到目标 Java；公共配置聚合与服务器列表留在当前 Java，避免把跨服务器操作落到错误磁盘。
 
 用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`，并保留绑定的 `linuxServerId/port`；若能解析到目标服务器当前在线 Java 的可访问 host，则返回 `serviceAddress={currentHost}:{端口}`，否则 `serviceAddress=null`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或 `STALE`；健康成功和明确未启动才更新稳定状态，瞬时 HTTP/manager 异常保留数据库最近状态。已有 RUNNING 进程仅在最近成功健康检查后的 60 秒内允许沿用 READY，超过宽限期后状态查询和未携带有效会话运行上下文的兼容 Run 前置校验都会拒绝旧绿灯。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID、`/global/health` 和 `/global/config` 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
 
@@ -2268,39 +2271,76 @@ Model/Provider 目录兼容说明：
 
 代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-ICBC-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ICBC_UCID` 注入。Java 从内存供应商快照找到 `baseUrl` 后转发到对应 OpenAI-compatible 路径，并向上游注入 `Authorization: Bearer <ICBC_OPENAI_AUTH_TOKEN>`、`ucid` 和 traceId。流式响应中 `delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`。
 
-opencode 配置样例：
+opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "icbc-qwen/Qwen3.6-35B-A3B",
+  "small_model": "icbc-qwen/Qwen3.6-35B-A3B",
+  "enabled_providers": ["icbc-qwen", "icbc-deepseek"],
   "provider": {
     "icbc-qwen": {
-      "name": "ICBC Qwen",
+      "name": "企业通义",
       "npm": "@ai-sdk/openai-compatible",
       "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
       "env": ["TEST_AGENT_INTERNAL_PROXY_API_KEY", "TEST_AGENT_INTERNAL_PROXY_BASE_URL", "ICBC_UCID"],
       "options": {
         "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+        "timeout": false,
+        "headerTimeout": 30000,
+        "chunkTimeout": 120000,
         "headers": {
-          "X-ICBC-Model-Provider": "icbc-qwen",
+          "X-ICBC-Model-Provider": "qwen-prod",
           "ucid": "{env:ICBC_UCID}"
         }
       },
       "models": {
         "Qwen3.6-35B-A3B": {
-          "name": "Qwen3.6-35B-A3B",
+          "name": "Qwen3.6 35B A3B",
+          "id": "Qwen3.6-35B-A3B",
+          "reasoning": true,
           "tool_call": true,
+          "temperature": true,
           "interleaved": { "field": "reasoning_content" },
-          "modalities": { "input": ["text"], "output": ["text"] },
-          "limit": { "context": 131072, "output": 16384 }
+          "limit": { "context": 131072, "output": 8192 }
+        }
+      }
+    },
+    "icbc-deepseek": {
+      "name": "企业 DeepSeek",
+      "npm": "@ai-sdk/openai-compatible",
+      "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+      "env": ["TEST_AGENT_INTERNAL_PROXY_API_KEY", "TEST_AGENT_INTERNAL_PROXY_BASE_URL", "ICBC_UCID"],
+      "options": {
+        "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
+        "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+        "timeout": false,
+        "headerTimeout": 30000,
+        "chunkTimeout": 120000,
+        "headers": {
+          "X-ICBC-Model-Provider": "deepseek-prod",
+          "ucid": "{env:ICBC_UCID}"
+        }
+      },
+      "models": {
+        "DeepSeek-R1": {
+          "name": "DeepSeek R1",
+          "id": "DeepSeek-R1",
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "interleaved": { "field": "reasoning_content" },
+          "limit": { "context": 65536, "output": 8192 }
         }
       }
     }
   }
 }
 ```
+
+`provider` 下的 `icbc-qwen` / `icbc-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-ICBC-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。上游 token 只保存在 `internal_model_proxy_settings`，不得写入 opencode 配置、`backend.env` 或 `docker.env`。
 
 Session 运行态接口：
 

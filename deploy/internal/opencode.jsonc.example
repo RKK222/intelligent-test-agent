@@ -1,0 +1,78 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "icbc-qwen/Qwen3.6-35B-A3B",
+  "small_model": "icbc-qwen/Qwen3.6-35B-A3B",
+  "enabled_providers": ["icbc-qwen", "icbc-deepseek"],
+  "provider": {
+    "icbc-qwen": {
+      "name": "企业通义",
+      "npm": "@ai-sdk/openai-compatible",
+      "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+      "env": [
+        "TEST_AGENT_INTERNAL_PROXY_API_KEY",
+        "TEST_AGENT_INTERNAL_PROXY_BASE_URL",
+        "ICBC_UCID"
+      ],
+      "options": {
+        "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+        "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
+        "timeout": false,
+        "headerTimeout": 30000,
+        "chunkTimeout": 120000,
+        "headers": {
+          "X-ICBC-Model-Provider": "qwen-prod",
+          "ucid": "{env:ICBC_UCID}"
+        }
+      },
+      "models": {
+        "Qwen3.6-35B-A3B": {
+          "name": "Qwen3.6 35B A3B",
+          "id": "Qwen3.6-35B-A3B",
+          "reasoning": true,
+          "interleaved": { "field": "reasoning_content" },
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 131072,
+            "output": 8192
+          }
+        }
+      }
+    },
+    "icbc-deepseek": {
+      "name": "企业 DeepSeek",
+      "npm": "@ai-sdk/openai-compatible",
+      "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+      "env": [
+        "TEST_AGENT_INTERNAL_PROXY_API_KEY",
+        "TEST_AGENT_INTERNAL_PROXY_BASE_URL",
+        "ICBC_UCID"
+      ],
+      "options": {
+        "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+        "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
+        "timeout": false,
+        "headerTimeout": 30000,
+        "chunkTimeout": 120000,
+        "headers": {
+          "X-ICBC-Model-Provider": "deepseek-prod",
+          "ucid": "{env:ICBC_UCID}"
+        }
+      },
+      "models": {
+        "DeepSeek-R1": {
+          "name": "DeepSeek R1",
+          "id": "DeepSeek-R1",
+          "reasoning": true,
+          "interleaved": { "field": "reasoning_content" },
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 65536,
+            "output": 8192
+          }
+        }
+      }
+    }
+  }
+}

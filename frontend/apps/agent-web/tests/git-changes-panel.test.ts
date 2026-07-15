@@ -21,6 +21,7 @@ const apiClientMock = vi.hoisted(() => ({
   unstageWorkspaceAgentFiles: vi.fn(),
   commitPublicAgentConfig: vi.fn(),
   commitWorkspaceAgentConfig: vi.fn(),
+  commitPersonalWorkspace: vi.fn(),
   publishPublicAgentConfig: vi.fn(),
   publishWorkspaceAgentConfig: vi.fn(),
   publishPersonalWorkspace: vi.fn(),
@@ -74,12 +75,21 @@ describe("GitChangesPanel", () => {
     apiClientMock.unstageWorkspaceGitFiles.mockResolvedValue(undefined);
     apiClientMock.getPublicAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({ files: [] });
-    apiClientMock.publishPersonalWorkspace.mockResolvedValue({
-      status: "MERGED",
+    apiClientMock.commitPersonalWorkspace.mockResolvedValue({
+      status: "LOCAL_COMMITTED",
       personalWorkspaceId: "psw_default",
       versionId: "awv_1",
       conflictFiles: [],
-      message: "合并成功",
+      message: "个人 worktree 已提交",
+      remotePushed: false,
+      headCommit: "personal_head"
+    });
+    apiClientMock.publishPersonalWorkspace.mockResolvedValue({
+      status: "PUBLISHED",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: [],
+      message: "已从个人 HEAD 投影并推送 feature 分支",
       remotePushed: true,
       headCommit: "commit_merged"
     });
@@ -533,7 +543,7 @@ describe("GitChangesPanel", () => {
     })));
     expect(apiClientMock.publishPersonalWorkspace.mock.calls[0][1]).not.toHaveProperty("expectedApplicationHead");
     expect(apiClientMock.previewPersonalWorkspacePublish).not.toHaveBeenCalled();
-    expect(await view.findByText(/合并产生 1 个冲突文件/)).toBeTruthy();
+    expect(await view.findByText(/feature 分支推送结果未确认/)).toBeTruthy();
     expect(await view.findByText("CONFLICT")).toBeTruthy();
     expect(await view.findByText("AU")).toBeTruthy();
     expect(await view.findByText("auto-merged-delete.md")).toBeTruthy();
@@ -553,7 +563,7 @@ describe("GitChangesPanel", () => {
       })
       .mockResolvedValue({ files: [] });
     apiClientMock.publishPersonalWorkspace.mockResolvedValueOnce({
-      status: "MERGED",
+      status: "PUBLISHED",
       personalWorkspaceId: "psw_default",
       versionId: "awv_1",
       conflictFiles: [],
@@ -573,7 +583,7 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: push");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
-    expect(await view.findByText(/远端推送结果未确认/)).toBeTruthy();
+    expect(await view.findByText(/feature 分支推送结果未确认/)).toBeTruthy();
     expect(view.queryByText("提交并推送成功！")).toBeNull();
   });
 
@@ -663,7 +673,7 @@ describe("GitChangesPanel", () => {
 
     await waitFor(() => expect(apiClientMock.connectAgentConfigProgress).toHaveBeenCalled());
     progressHandler?.({
-      currentStep: "COMMIT_LOCAL",
+      currentStep: "COMMIT_FEATURE",
       command: "git -C /repo commit -m fix: remote",
       status: "RUNNING"
     });
@@ -698,7 +708,7 @@ describe("GitChangesPanel", () => {
 
     await waitFor(() => expect(apiClientMock.connectAgentConfigProgress).toHaveBeenCalled());
     progressHandler?.({
-      currentStep: "COMMIT_LOCAL",
+      currentStep: "COMMIT_FEATURE",
       command: "git -C /repo commit -m fix: remote",
       status: "RUNNING"
     });
@@ -708,7 +718,7 @@ describe("GitChangesPanel", () => {
       status: "RUNNING"
     });
     resolvePublish?.({
-      status: "MERGED",
+      status: "PUBLISHED",
       personalWorkspaceId: "psw_default",
       versionId: "awv_1",
       conflictFiles: [],
@@ -764,7 +774,7 @@ describe("GitChangesPanel", () => {
     });
 
     resolvePublish?.({
-      status: "MERGED",
+      status: "PUBLISHED",
       personalWorkspaceId: "psw_default",
       versionId: "awv_1",
       conflictFiles: [],
@@ -774,7 +784,7 @@ describe("GitChangesPanel", () => {
       executedCommands: ["git -C /repo push origin feature_test"],
       headCommit: "commit_merged"
     });
-    await waitFor(() => expect(view.getAllByText("SUCCEEDED")).toHaveLength(4));
+    await waitFor(() => expect(view.getAllByText("SUCCEEDED")).toHaveLength(5));
 
     progressHandler?.({
       currentStep: "PUSH_REMOTE",
@@ -782,7 +792,7 @@ describe("GitChangesPanel", () => {
       status: "RUNNING"
     });
 
-    await waitFor(() => expect(view.getAllByText("SUCCEEDED")).toHaveLength(4));
+    await waitFor(() => expect(view.getAllByText("SUCCEEDED")).toHaveLength(5));
     expect(view.queryByText("RUNNING")).toBeNull();
     expect(view.queryByText("git -C /repo rev-parse HEAD")).toBeNull();
   });

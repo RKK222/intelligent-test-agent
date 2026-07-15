@@ -1048,7 +1048,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void applicationWorkspaceGitStageUsesRepoRootAndWorkspaceRelativePath() {
+    void applicationWorkspaceGitStageRejectsMutationOnFeatureReplica() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1063,13 +1063,12 @@ class ManagedWorkspaceApplicationServiceTest {
                 "trace_version");
         git.nextStatusPorcelain = " M F-GCMS/workspace/docs/app.md\n";
 
-        service.stageWorkspaceGitFiles(
+        assertThatThrownBy(() -> service.stageWorkspaceGitFiles(
                 version.runtimeWorkspace().workspaceId(),
                 List.of("docs/app.md"),
-                new UserId("usr_1"));
-
-        assertThat(git.stagedFilesRepoRoot).isEqualTo(applicationRepoRoot());
-        assertThat(git.stagedFiles).containsExactly("F-GCMS/workspace/docs/app.md");
+                new UserId("usr_1")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
     }
 
     @Test
@@ -1113,6 +1112,7 @@ class ManagedWorkspaceApplicationServiceTest {
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
         FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.commitStagedUpdatesHead = true;
         ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
 
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
@@ -1137,18 +1137,17 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_sync");
 
-        assertThat(result.status()).isEqualTo(WorkspaceSyncStatus.SUCCEEDED.name());
-        assertThat(Files.readString(Path.of(version.runtimeWorkspace().rootPath()).resolve("case.txt"))).isEqualTo("from personal");
-        assertThat(git.committedFiles).containsExactly("F-GCMS/workspace/case.txt");
+        // 兼容同步接口现在复用 feature 发布链路，返回发布结果而非旧的复制状态。
+        assertThat(result.status()).isEqualTo("PUBLISHED");
         assertThat(git.pushedBranch).isEqualTo("feature_testagent_20260707");
-        assertThat(git.pushedForce).isTrue();
+        assertThat(git.pushedForce).isFalse();
         Path applicationRepoRoot = applicationRepoRoot();
-        assertThat(git.calls).containsSequence(
+        assertThat(git.calls).containsSubsequence(
                 "clean:" + applicationRepoRoot,
                 "fetch:" + applicationRepoRoot,
-                "pull:" + applicationRepoRoot + ":feature_testagent_20260707",
-                "commit:" + applicationRepoRoot + ":F-GCMS/workspace/case.txt",
-                "push:" + applicationRepoRoot + ":feature_testagent_20260707:true",
+                "pull:" + applicationRepoRoot + ":feature_testagent_20260707");
+        assertThat(git.calls).contains(
+                "push:" + applicationRepoRoot + ":feature_testagent_20260707:false",
                 "head:" + applicationRepoRoot);
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_after_push");
         assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_after_push");
@@ -1200,6 +1199,7 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(managed.syncRecords.get(0).status()).isEqualTo(WorkspaceSyncStatus.FAILED);
         Path applicationRepoRoot = applicationRepoRoot();
         assertThat(git.calls).containsExactly(
+                "head:" + applicationRepoRoot,
                 "head:" + applicationRepoRoot,
                 "clean:" + applicationRepoRoot);
     }
@@ -1330,21 +1330,16 @@ class ManagedWorkspaceApplicationServiceTest {
                 "trace_publish");
 
         Path applicationRepoRoot = applicationRepoRoot();
-        Path personalRepoRoot = personalRepoRoot(personal.personalWorkspaceBranch());
 
-        assertThat(result.status()).isEqualTo("MERGED");
+        assertThat(result.status()).isEqualTo("PUBLISHED");
         assertThat(result.remotePushed()).isTrue();
         assertThat(result.headCommit()).isEqualTo("commit_merged");
         assertThat(result.versionId()).isEqualTo(version.versionId());
-        // 合并方向：先在个人 worktree 上合入最新特性分支，再在应用版本副本上把个人分支 merge 进特性分支。
-        assertThat(git.mergeCalls)
-                .extracting(MergeCall::branch)
-                .containsExactly(version.branch(), personal.personalWorkspaceBranch());
-        assertThat(git.mergeCalls)
-                .extracting(MergeCall::repoRoot)
-                .containsExactly(personalRepoRoot, applicationRepoRoot);
-        assertThat(git.mergedBranch).isEqualTo(personal.personalWorkspaceBranch());
-        assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
+        // 发布不合并个人分支，而是把个人 HEAD 的白名单文件投影到 feature worktree。
+        assertThat(git.mergeCalls).isEmpty();
+        assertThat(git.materializedRepoRoot).isEqualTo(applicationRepoRoot);
+        assertThat(git.materializedCommit).isEqualTo("commit_merged");
+        assertThat(git.materializedFiles).containsExactly("F-GCMS/workspace/README.md");
         // 不再推送个人 worktree 分支，只推送应用版本特性分支；应用分支推送发生在应用版本副本仓库
         assertThat(git.pushes)
                 .extracting(push -> push.branch)
@@ -1354,12 +1349,11 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.pushedRepoRoot).isEqualTo(applicationRepoRoot);
         // head commit 取自应用版本副本而非个人 worktree
         assertThat(git.headCommitRepoRoot).isEqualTo(applicationRepoRoot);
-        // 个人 worktree 只 stage 用户在前端暂存的文件，不能 git add --all 把其它 diff 一起提交。
+        // 发布不改个人索引；目标 feature worktree 承担投影后的提交。
         assertThat(git.stagedRepoRoot).isNull();
-        assertThat(git.stagedFilesRepoRoot).isEqualTo(personalRepoRoot);
-        assertThat(git.stagedFiles).containsExactly("F-GCMS/workspace/README.md");
-        assertThat(git.resetIndexRepoRoot).isEqualTo(personalRepoRoot);
-        assertThat(git.committedStagedRepoRoot).isEqualTo(personalRepoRoot);
+        assertThat(git.stagedFilesRepoRoot).isNull();
+        assertThat(git.resetIndexRepoRoot).isNull();
+        assertThat(git.committedStagedRepoRoot).isEqualTo(applicationRepoRoot);
         assertThat(git.committedStagedMessage).isEqualTo("fix: 修复缺陷");
         // 版本 targetCommitHash 和副本 commit 已更新到合并后的 commit
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged");
@@ -1433,13 +1427,13 @@ class ManagedWorkspaceApplicationServiceTest {
         Path applicationRepoRoot = applicationRepoRoot();
         Workspace runtimeWorkspace = workspaces.findById(current.runtimeWorkspaceId()).orElseThrow();
 
-        assertThat(result.status()).isEqualTo("MERGED");
+        assertThat(result.status()).isEqualTo("PUBLISHED");
         assertThat(managed.replicas.get(0).repoRootPath()).isEqualTo("appworkspace:20260707/gcms");
         assertThat(applicationRepoRoot).isEqualTo(root.resolve("appworkspace/20260707/gcms").toAbsolutePath().normalize());
         assertThat(runtimeWorkspace.rootPath()).doesNotContain("D:\\data");
         org.mockito.Mockito.verify(contextStore).beginWorkspaceMutation(current.runtimeWorkspaceId());
         org.mockito.Mockito.verify(contextStore).completeWorkspaceMutation(mutation);
-        assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
+        assertThat(git.materializedRepoRoot).isEqualTo(applicationRepoRoot);
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_repaired");
     }
 
@@ -1474,14 +1468,13 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_publish");
 
-        assertThat(result.status()).isEqualTo("MERGED");
+        assertThat(result.status()).isEqualTo("PUBLISHED");
         assertThat(git.committedStagedRepoRoot).isNull();
         assertThat(git.pushes)
                 .extracting(push -> push.branch)
                 .containsExactly(version.branch());
-        assertThat(git.mergeCalls)
-                .extracting(MergeCall::branch)
-                .containsExactly(version.branch(), personal.personalWorkspaceBranch());
+        assertThat(git.mergeCalls).isEmpty();
+        assertThat(git.materializedRepoRoot).isEqualTo(applicationRepoRoot());
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_retry");
     }
 
@@ -1510,27 +1503,16 @@ class ManagedWorkspaceApplicationServiceTest {
         git.nextConflictPaths = List.of();
         git.nextHeadCommit = "commit_merged_after_resolve";
 
-        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+        assertThatThrownBy(() -> service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
                 "fix: finish native merge",
                 List.of("README.md"),
                 "commit_base",
                 new UserId("usr_1"),
-                "trace_publish");
-
-        assertThat(result.status()).isEqualTo("MERGED");
-        assertThat(result.currentStep()).isEqualTo("COMPLETED");
-        assertThat(git.calls)
-                .noneMatch(call -> call.startsWith("fetch:") || call.startsWith("pull:"));
-        assertThat(git.resetIndexRepoRoot).isNull();
-        assertThat(git.stagedFilesRepoRoot).isNull();
-        assertThat(git.committedStagedRepoRoot).isEqualTo(personalRepoRoot(personal.personalWorkspaceBranch()));
-        assertThat(git.mergeCalls)
-                .extracting(MergeCall::branch)
-                .containsExactly(personal.personalWorkspaceBranch());
-        assertThat(git.pushes)
-                .extracting(PushCall::branch)
-                .containsExactly(version.branch());
+                "trace_publish"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        assertThat(git.pushes).isEmpty();
     }
 
     @Test
@@ -1565,19 +1547,11 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_publish");
 
-        Path personalRepoRoot = personalRepoRoot(personal.personalWorkspaceBranch());
-
-        assertThat(result.status()).isEqualTo("CONFLICT");
-        assertThat(result.remotePushed()).isFalse();
-        assertThat(result.headCommit()).isNull();
-        assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");
-        // 冲突留在当前个人 worktree，用户才能在编辑器中解决。
-        assertThat(git.mergedBranch).isEqualTo(version.branch());
-        assertThat(git.mergedBranchRepoRoot).isEqualTo(personalRepoRoot);
-        assertThat(git.abortedMergeRepoRoot).isNull();
-        // 冲突时不应推送
-        assertThat(git.pushedBranch).isNull();
-        // 应用分支已 pull 成功，即使随后个人 merge 冲突，版本和副本也必须记录实际远程 HEAD。
+        assertThat(result.status()).isEqualTo("PUBLISHED");
+        assertThat(result.remotePushed()).isTrue();
+        assertThat(result.conflictFiles()).isEmpty();
+        assertThat(git.mergeCalls).isEmpty();
+        // 旧的 merge 冲突开关不再影响投影发布。
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_remote");
         assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_remote");
     }
@@ -1705,16 +1679,15 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_default");
 
-        assertThatThrownBy(() -> service.publishPersonalWorkspace(
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
                 "fix: 修复缺陷",
                 List.of("README.md"),
                 new UserId("usr_1"),
-                "trace_publish"))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.GIT_UNAVAILABLE));
-        assertThat(git.abortedMergeRepoRoot).isNull();
-        assertThat(git.pushes).isEmpty();
+                "trace_publish");
+        assertThat(result.status()).isEqualTo("PUBLISHED");
+        assertThat(git.mergeCalls).isEmpty();
+        assertThat(git.pushes).hasSize(1);
     }
 
     private static void deleteRecursively(Path path) throws Exception {
@@ -1887,6 +1860,10 @@ class ManagedWorkspaceApplicationServiceTest {
         private String statusPathspec;
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
+        private boolean commitStagedUpdatesHead;
+        private Path materializedRepoRoot;
+        private String materializedCommit;
+        private List<String> materializedFiles = List.of();
         private Path fetchedRepoRoot;
         private String mergedBranch;
         private Path mergedBranchRepoRoot;
@@ -2044,6 +2021,13 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public void materializeCommitFiles(Path targetRepoRoot, String sourceCommit, List<String> files, String privateKey) {
+            this.materializedRepoRoot = targetRepoRoot;
+            this.materializedCommit = sourceCommit;
+            this.materializedFiles = List.copyOf(files);
+        }
+
+        @Override
         public void resetIndexToHead(Path repoRoot, String privateKey) {
             this.resetIndexRepoRoot = repoRoot;
         }
@@ -2065,11 +2049,14 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public void commitStaged(Path repoRoot, String message, String privateKey) {
-            if (nextStatusPorcelain.isBlank()) {
+            if (nextStatusPorcelain.isBlank() && !commitStagedUpdatesHead) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "nothing to commit", Map.of());
             }
             this.committedStagedRepoRoot = repoRoot;
             this.committedStagedMessage = message;
+            if (commitStagedUpdatesHead) {
+                this.nextHeadCommit = "commit_after_push";
+            }
         }
 
         @Override

@@ -4,7 +4,7 @@ set -euo pipefail
 ARCHIVE="/data/0709/internal.zip"
 EXTRACT_DIR="/data/0709/test-agent-internal-release"
 INSTALL_ROOT="/data/testagent"
-BACKEND_HOST="122.233.30.4"
+BACKEND_HOST="122.233.30.114"
 FRONTEND_HOST="122.233.30.2"
 FRONTEND_USER=""
 FRONTEND_ROOT="/data/testagent"
@@ -27,9 +27,9 @@ usage() {
 Usage: deploy/internal/deploy-internal-release.sh [options]
 
 Deploy an enterprise internal release zip from a backend server. The default
-matches the first backend node in the current enterprise deployment:
+matches the current single-backend enterprise deployment:
   - release zip: /data/0709/internal.zip
-  - backend/worker server: local 122.233.30.4
+  - backend/worker server: local 122.233.30.114
   - frontend server: 122.233.30.2
   - install root: /data/testagent
 
@@ -37,7 +37,7 @@ Options:
   --archive <path>              Release zip path. Default: /data/0709/internal.zip.
   --extract-dir <path>          Temporary unzip directory. Default: /data/0709/test-agent-internal-release.
   --install-root <path>         Backend install root. Default: /data/testagent.
-  --backend-host <host>         Local backend advertised host. Default: 122.233.30.4.
+  --backend-host <host>         Local backend advertised host. Default: 122.233.30.114.
   --frontend-host <host>        Frontend SSH/SCP host. Default: 122.233.30.2.
   --frontend-user <user>        SSH user for frontend host. Default: current ssh config user.
   --frontend-root <path>        Frontend install root. Default: /data/testagent.

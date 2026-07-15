@@ -38,6 +38,8 @@ class WorkspaceFileSocketTicketStore {
             String linuxServerId,
             String agentLinuxServerId,
             boolean superAdmin,
+            boolean appAdmin,
+            String userId,
             String mode,
             String scope,
             String worktreeId,
@@ -48,6 +50,8 @@ class WorkspaceFileSocketTicketStore {
                 linuxServerId,
                 agentLinuxServerId,
                 superAdmin,
+                appAdmin,
+                userId,
                 mode,
                 scope,
                 worktreeId,
@@ -55,6 +59,19 @@ class WorkspaceFileSocketTicketStore {
                 clock.instant().plus(DEFAULT_TTL));
         tickets.put(ticket.ticket(), ticket);
         return ticket;
+    }
+
+    WorkspaceFileSocketTicket issue(
+            String workspaceId,
+            String linuxServerId,
+            String agentLinuxServerId,
+            boolean superAdmin,
+            String mode,
+            String scope,
+            String worktreeId,
+            String traceId) {
+        return issue(workspaceId, linuxServerId, agentLinuxServerId, superAdmin, superAdmin, null,
+                mode, scope, worktreeId, traceId);
     }
 
     WorkspaceFileSocketTicket consume(String ticketValue, String origin) {

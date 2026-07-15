@@ -112,23 +112,35 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 case "workspace.search" -> workspaceService.searchFiles(workspaceId(ticket, params), text(params, "query"));
                 case "workspace.read" -> workspaceService.readFile(workspaceId(ticket, params), requiredText(params, "path"));
                 case "workspace.write" -> {
-                    workspaceService.writeFile(workspaceId(ticket, params), requiredText(params, "path"), text(params, "content"));
+                    WorkspaceId workspaceId = workspaceId(ticket, params);
+                    String path = requiredText(params, "path");
+                    requireWorkspaceWrite(ticket, workspaceId, path);
+                    workspaceService.writeFile(workspaceId, path, text(params, "content"));
                     yield null;
                 }
                 case "workspace.rename" -> {
+                    WorkspaceId workspaceId = workspaceId(ticket, params);
+                    String path = requiredText(params, "path");
+                    requireWorkspaceWrite(ticket, workspaceId, path);
                     workspaceService.renameFile(
-                            workspaceId(ticket, params),
-                            requiredText(params, "path"),
+                            workspaceId,
+                            path,
                             requiredText(params, "name"));
                     yield null;
                 }
                 case "workspace.status" -> workspaceService.fileStatus(workspaceId(ticket, params), requiredText(params, "path"));
                 case "workspace.delete" -> {
-                    workspaceService.deleteFile(workspaceId(ticket, params), requiredText(params, "path"));
+                    WorkspaceId workspaceId = workspaceId(ticket, params);
+                    String path = requiredText(params, "path");
+                    requireWorkspaceWrite(ticket, workspaceId, path);
+                    workspaceService.deleteFile(workspaceId, path);
                     yield null;
                 }
                 case "workspace.mkdir" -> {
-                    workspaceService.createDirectory(workspaceId(ticket, params), requiredText(params, "path"));
+                    WorkspaceId workspaceId = workspaceId(ticket, params);
+                    String path = requiredText(params, "path");
+                    requireWorkspaceWrite(ticket, workspaceId, path);
+                    workspaceService.createDirectory(workspaceId, path);
                     yield null;
                 }
                 case "agent-config.list" -> agentConfigList(ticket, params);
@@ -147,6 +159,26 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         } catch (Exception exception) {
             return error(id, ErrorCode.VALIDATION_ERROR.name(), "文件 WebSocket 消息无效", traceId, Map.of());
         }
+    }
+
+    private void requireWorkspaceWrite(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId, String path) {
+        if (ticket.userId() != null) {
+            workspaceService.requireWorkspaceWriteAccess(
+                    workspaceId,
+                    new com.icbc.testagent.domain.user.UserId(ticket.userId()),
+                    ticket.appAdmin());
+        }
+        if (protectedConfigPath(path) && !ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "Agent、Skill、Rules 和 Templates 仅应用管理员可编辑");
+        }
+    }
+
+    private boolean protectedConfigPath(String path) {
+        String normalized = path == null ? "" : path.trim().replace('\\', '/');
+        return normalized.equals(".opencode/agents")
+                || normalized.startsWith(".opencode/agents/")
+                || normalized.equals(".opencode/skills")
+                || normalized.startsWith(".opencode/skills/");
     }
 
     private Object directoryList(WorkspaceFileSocketTicket ticket, JsonNode params) {
@@ -204,6 +236,9 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             String worktreeId = agentConfigWorktreeId(ticket, params);
             agentConfigService.writePublicAgentFile(requiredText(params, "path"), text(params, "content"), worktreeId);
             return;
+        }
+        if (!ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用 Agent 配置仅应用管理员可编辑");
         }
         String worktreeId = agentConfigWorktreeId(ticket, params);
         agentConfigService.writeWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), text(params, "content"), worktreeId);

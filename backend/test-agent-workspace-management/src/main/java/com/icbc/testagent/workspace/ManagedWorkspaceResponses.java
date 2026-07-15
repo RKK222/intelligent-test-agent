@@ -356,11 +356,12 @@ public final class ManagedWorkspaceResponses {
     }
 
     /**
-     * 个人工作区发布（合并到应用版本分支）的响应。
-     * status 为 MERGED 表示合并成功并已更新版本 commit；CONFLICT 时 conflictFiles 列出冲突文件路径。
+     * 个人工作区本地提交或发布响应。
+     * status 为 LOCAL_COMMITTED 表示仅更新个人 worktree；PUBLISHED 表示已从个人 HEAD
+     * 按白名单投影到应用 feature 分支并推送；CONFLICT 时 conflictFiles 列出冲突文件路径。
      */
     public record PersonalWorkspacePublishResponse(
-            String status,              // "MERGED" / "CONFLICT"
+            String status,              // "LOCAL_COMMITTED" / "PUBLISHED" / "CONFLICT"
             String personalWorkspaceId,
             String versionId,
             List<String> conflictFiles,

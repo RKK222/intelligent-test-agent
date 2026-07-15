@@ -266,8 +266,8 @@ public class ManagedWorkspaceController {
     }
 
     /**
-     * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
-     * 合并成功: 更新版本 commit；冲突: 返回 CONFLICT + 冲突文件列表。
+     * 个人工作区"提交并推送"：先读取个人 HEAD，再把白名单文件投影到应用 feature worktree，提交并推送。
+     * 未选中的 spec 或其它个人文件不会随个人分支合并进入应用版本。
      */
     @PostMapping("/personal-workspaces/{personalWorkspaceId}/publish")
     public ApiResponse<Object> publishPersonalWorkspace(
@@ -280,6 +280,20 @@ public class ManagedWorkspaceController {
                 request.files(),
                 request.expectedApplicationHead(),
                 request.operationId(),
+                userId(exchange),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /** 仅提交当前个人 worktree；推送必须由后续发布接口从个人 HEAD 投影到 feature worktree。 */
+    @PostMapping("/personal-workspaces/{personalWorkspaceId}/commit")
+    public ApiResponse<Object> commitPersonalWorkspace(
+            @PathVariable String personalWorkspaceId,
+            @RequestBody ManagedWorkspaceDtos.PublishPersonalWorkspaceRequest request,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.commitPersonalWorkspace(
+                personalWorkspaceId,
+                request.commitMessage(),
+                request.files(),
                 userId(exchange),
                 RuntimeApiSupport.traceId(exchange)));
     }

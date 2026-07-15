@@ -1995,7 +1995,7 @@ export type PublishPersonalWorkspacePayload = {
 
 /** 个人工作区发布结果 */
 export type PublishPersonalWorkspaceResult = {
-  status: "MERGED" | "CONFLICT";
+  status: "LOCAL_COMMITTED" | "PUBLISHED" | "MERGED" | "CONFLICT";
   personalWorkspaceId: string;
   versionId: string;
   conflictFiles: string[];
@@ -2003,7 +2003,8 @@ export type PublishPersonalWorkspaceResult = {
   remotePushed?: boolean;
   headCommit?: string | null;
   executedCommands?: string[];
-  currentStep?: "PREPARE_REMOTE" | "COMMIT_LOCAL" | "MERGE_PERSONAL" | "MERGE_APPLICATION" | "PUSH_REMOTE" | "COMPLETED" | string | null;
+  currentStep?: "PREPARE_REMOTE" | "PROJECT_HEAD" | "COMMIT_FEATURE" | "PUSH_REMOTE" | "COMPLETED"
+    | "COMMIT_LOCAL" | "MERGE_PERSONAL" | "MERGE_APPLICATION" | string | null;
 };
 
 export type PublishPersonalWorkspacePreview = {

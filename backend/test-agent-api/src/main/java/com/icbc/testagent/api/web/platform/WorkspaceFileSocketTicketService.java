@@ -47,6 +47,7 @@ class WorkspaceFileSocketTicketService {
             String traceId) {
         String mode = mode(request);
         boolean superAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN);
+        boolean appAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN);
         String currentLinuxServerId = workspaceService.currentLinuxServerId();
         if (request.linuxServerId() != null && !request.linuxServerId().isBlank()
                 && !currentLinuxServerId.equals(request.linuxServerId().trim())) {
@@ -61,6 +62,8 @@ class WorkspaceFileSocketTicketService {
                     currentLinuxServerId,
                     null,
                     superAdmin,
+                    appAdmin,
+                    principal.userId().value(),
                     mode,
                     agentConfigScope(request),
                     normalizeOptional(request.worktreeId()),
@@ -72,7 +75,8 @@ class WorkspaceFileSocketTicketService {
             String workspaceId = requiredWorkspaceId(request);
             requireReadyAgentOnCurrentServer(process, currentLinuxServerId, workspaceId);
             workspaceService.requireWorkspaceOnCurrentServer(new WorkspaceId(workspaceId), traceId);
-            return response(ticketStore.issue(workspaceId, currentLinuxServerId, agentLinuxServerId, superAdmin, mode, null, null, traceId));
+            return response(ticketStore.issue(workspaceId, currentLinuxServerId, agentLinuxServerId, superAdmin, appAdmin,
+                    principal.userId().value(), mode, null, null, traceId));
         }
         if (!MODE_DIRECTORY_PICKER.equals(mode)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "文件 WebSocket ticket 模式无效", Map.of("mode", mode));

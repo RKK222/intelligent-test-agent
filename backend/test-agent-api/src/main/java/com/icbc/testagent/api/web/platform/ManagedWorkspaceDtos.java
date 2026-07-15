@@ -35,8 +35,8 @@ final class ManagedWorkspaceDtos {
     }
 
     /**
-     * 个人工作区"提交并推送"（合并回应用版本分支）的请求体。
-     * files 使用工作区 Git diff 返回的相对路径，只发布前端暂存的文件。
+     * 个人 worktree 本地提交或发布请求体。files 使用工作区 Git diff 返回的相对路径；
+     * 发布阶段只从个人 HEAD 投影这些文件，不合并个人分支。
      */
     record PublishPersonalWorkspaceRequest(
             String commitMessage,

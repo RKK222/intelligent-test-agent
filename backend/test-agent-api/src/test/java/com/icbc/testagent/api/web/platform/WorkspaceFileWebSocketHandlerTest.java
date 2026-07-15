@@ -104,6 +104,46 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void rejectsProtectedWorkspaceConfigWriteForOrdinaryUser() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_workspace", "http://localhost:3000")).thenReturn(new WorkspaceFileSocketTicket(
+                "wft_workspace",
+                "wrk_1234567890abcdef",
+                "linux-1",
+                "linux-1",
+                false,
+                false,
+                "usr_1234567890abcdef",
+                "workspace",
+                null,
+                null,
+                TRACE_ID,
+                NOW.plusSeconds(60)));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                agentConfigService,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_write","op":"workspace.write","params":{"workspaceId":"wrk_1234567890abcdef","path":".opencode/skills/pay/SKILL.md","content":"changed"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).anySatisfy(message -> {
+            assertThat(message).contains("\"type\":\"error\"");
+            assertThat(message).contains("\"code\":\"FORBIDDEN\"");
+        });
+        verify(workspaceService, never()).writeFile(Mockito.any(), Mockito.anyString(), Mockito.anyString());
+    }
+
+    @Test
     void renamesWorkspaceFileThroughWebSocketTicket() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);

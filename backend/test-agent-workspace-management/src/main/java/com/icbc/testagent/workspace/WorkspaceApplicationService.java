@@ -12,6 +12,9 @@ import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import com.icbc.testagent.domain.workspace.TrustedWorkspaceResolver;
 import com.icbc.testagent.domain.workspace.TrustedWorkspaceResolution;
+import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.run.ConversationContextStore;
 import com.icbc.testagent.domain.run.ConversationContextWorkspaceMutation;
 import java.nio.file.Files;
@@ -38,6 +41,7 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     private final WorkspaceServerIdentity serverIdentity;
     private final ManagedWorkspacePathResolver pathResolver;
     private final ConversationContextStore conversationContextStore;
+    private final ManagedWorkspaceRepository managedWorkspaceRepository;
 
     /**
      * 构造 Workspace 应用服务，注入领域 Repository 端口和文件服务，避免 Controller 直接访问底层资源。
@@ -48,7 +52,8 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
             WorkspaceFileService fileService,
             WorkspaceServerIdentity serverIdentity,
             ManagedWorkspacePathResolver pathResolver,
-            ConversationContextStore conversationContextStore) {
+            ConversationContextStore conversationContextStore,
+            ManagedWorkspaceRepository managedWorkspaceRepository) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
@@ -56,6 +61,9 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         this.conversationContextStore = Objects.requireNonNull(
                 conversationContextStore,
                 "conversationContextStore must not be null");
+        this.managedWorkspaceRepository = Objects.requireNonNull(
+                managedWorkspaceRepository,
+                "managedWorkspaceRepository must not be null");
     }
 
     public WorkspaceApplicationService(
@@ -68,6 +76,22 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.conversationContextStore = null;
+        this.managedWorkspaceRepository = null;
+    }
+
+    /** 兼容带会话上下文的测试/嵌入式构造路径。 */
+    public WorkspaceApplicationService(
+            WorkspaceRepository workspaceRepository,
+            WorkspaceFileService fileService,
+            WorkspaceServerIdentity serverIdentity,
+            ManagedWorkspacePathResolver pathResolver,
+            ConversationContextStore conversationContextStore) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
+        this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+        this.conversationContextStore = conversationContextStore;
+        this.managedWorkspaceRepository = null;
     }
 
     /**
@@ -85,6 +109,37 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
             WorkspaceFileService fileService,
             WorkspaceServerIdentity serverIdentity) {
         this(workspaceRepository, fileService, serverIdentity, ManagedWorkspacePathResolver.legacyOnly());
+    }
+
+    /**
+     * 校验文件 WebSocket 是否可以写入托管工作区。个人 worktree 只允许 owner 写入；
+     * 应用版本副本是发布端只读输入，仅应用管理员可通过显式管理流程修改。
+     */
+    public void requireWorkspaceWriteAccess(WorkspaceId workspaceId, UserId userId, boolean appAdmin) {
+        if (managedWorkspaceRepository == null) {
+            return;
+        }
+        PersonalWorkspace personalWorkspace = managedWorkspaceRepository
+                .findPersonalWorkspaceByRuntimeWorkspace(workspaceId)
+                .orElse(null);
+        if (personalWorkspace != null) {
+            if (!personalWorkspace.userId().equals(userId)) {
+                throw new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "个人工作区只允许拥有者编辑",
+                        Map.of("workspaceId", workspaceId.value()));
+            }
+            return;
+        }
+        if (managedWorkspaceRepository.findVersionReplicaByRuntimeWorkspace(workspaceId).isPresent()
+                || managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspaceId).isPresent()) {
+            if (!appAdmin) {
+                throw new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "应用版本副本为只读，请在个人工作区中编辑",
+                        Map.of("workspaceId", workspaceId.value()));
+            }
+        }
     }
 
     /**

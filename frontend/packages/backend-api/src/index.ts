@@ -610,12 +610,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/abort`,
         { method: "POST" }
       ),
-    /**
-     * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
-     * @param personalWorkspaceId 个人工作区 ID
-     * @param payload.commitMessage 提交说明
-     * @param payload.files 工作区 Git diff 返回的相对路径，只发布前端暂存的文件
-     */
+    /** 仅提交个人 worktree，不推送远端。 */
+    commitPersonalWorkspace: (personalWorkspaceId: string, payload: PublishPersonalWorkspacePayload) =>
+      request<PublishPersonalWorkspaceResult>(
+        `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/commit`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
+    /** 从个人 HEAD 按白名单投影到应用 feature worktree，提交并推送。 */
     publishPersonalWorkspace: (personalWorkspaceId: string, payload: PublishPersonalWorkspacePayload) =>
       request<PublishPersonalWorkspaceResult>(
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/publish`,
@@ -636,7 +637,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         modifiedAt: entry.lastModifiedAt
       })) satisfies FileTreeEntry[];
     },
-    readFile: async (workspaceId: string, path: string) => {
+    readFile: async (workspaceId: string, path: string, readonly = false) => {
       // 工作区文件读取与列表、写入保持同一条平台 WebSocket 路由，避免旧 OpenCode
       // HTTP 代理在跨服务器或响应格式变化时把真实 Markdown 内容丢在前端之外。
       const data = await workspaceFileRpc<BackendFileContent>(workspaceId, "workspace.read", { path });
@@ -645,7 +646,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         content: typeof data.content === "string" ? data.content : "",
         encoding: "utf-8",
         size: data.size,
-        readonly: false
+        readonly
       } satisfies FileContent;
     },
     writeFile: (workspaceId: string, path: string, content: string) =>

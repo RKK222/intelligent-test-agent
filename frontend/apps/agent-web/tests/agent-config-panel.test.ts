@@ -255,21 +255,26 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenLastCalledWith("", undefined, "linux-1"));
   });
 
-  it("initializes only a workspace skill package from the workspace plus action", async () => {
+  it("initializes an OpenCode-compatible workspace agent and skill package", async () => {
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByRole("button", { name: "初始化应用配置包" }));
+    await fireEvent.click(view.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" }));
     await fireEvent.update(await view.findByLabelText("配置包名称"), "支付测试技能");
     await fireEvent.click(view.getByRole("button", { name: "创建" }));
 
-    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(4));
     expect(apiClientMock.writeWorkspaceAgentFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
+      ["wrk_1234567890abcdef", "agents/zhi-fu-ce-shi-ji-neng.md"],
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/SKILL.md"],
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/rules/README.md"],
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/templates/README.md"]
     ]);
-    const skillContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
+    const agentContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
+    expect(agentContent).toContain("name: zhi-fu-ce-shi-ji-neng");
+    expect(agentContent).toContain("mode: primary");
+    expect(agentContent).toContain("skills/zhi-fu-ce-shi-ji-neng/SKILL.md");
+    const skillContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[1]?.[2]);
     expect(skillContent).toContain("name: zhi-fu-ce-shi-ji-neng");
     expect(skillContent).toContain("description: 支付测试技能 application workspace skill");
     expect(skillContent).toContain("compatibility: opencode");
@@ -501,6 +506,7 @@ function renderPanel(setup?: (workbench: WorkbenchStoreMock) => void, options?: 
       baseUrl: "http://api",
       workspaceId: "wrk_1234567890abcdef",
       canWrite: options?.canWrite ?? true,
+      canManageWorkspaceConfig: options?.canWrite ?? true,
       hideHeader: true
     },
     global: {

@@ -22,8 +22,12 @@ const props = defineProps<FileExplorerProps & {
   loadingAppVersions?: boolean;
   /** 「+新增版本」提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
   creatingVersion?: boolean;
-  /** 是否允许执行侧栏内的写操作（仅 SUPER_ADMIN 传 true） */
+  /** 是否允许当前个人工作区执行普通文件写操作 */
   canWrite?: boolean;
+  /** 是否允许编辑应用级 Agent/Skill/Rules/Templates 配置 */
+  canManageAgentConfig?: boolean;
+  /** 是否允许编辑公共 Git 中的 Agent/Skill 配置（仅超级管理员） */
+  canManagePublicConfig?: boolean;
   /** 后端 base url，透传给 AgentConfigPanel/GitChangesPanel */
   apiBaseUrl?: string;
   /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
@@ -386,7 +390,8 @@ defineExpose({
               ref="agentConfigPanelRef"
               :base-url="apiBaseUrl ?? ''"
               :workspace-id="workspaceId"
-              :can-write="!!canWrite"
+              :can-write="canManagePublicConfig ?? !!canWrite"
+              :can-manage-workspace-config="canManageAgentConfig ?? !!canWrite"
               :hide-header="true"
               :hide-git-ops="true"
               :active-path="activePath"

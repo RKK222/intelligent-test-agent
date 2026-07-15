@@ -375,7 +375,7 @@ public class AgentConfigController {
             @PathVariable String workspaceId,
             @RequestBody AgentConfigDtos.WorktreeRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
         return ok(exchange, service.createWorkspaceWorktree(
                 workspaceId,
                 request.baseName(),
@@ -390,6 +390,7 @@ public class AgentConfigController {
             @PathVariable String workspaceId,
             @RequestParam(required = false) String worktreeId,
             ServerWebExchange exchange) {
+        // 差异读取对应用成员开放；提交、推送等写操作仍由 APP_ADMIN 校验。
         AuthWebSupport.getAuthPrincipal(exchange);
         return ok(exchange, service.workspaceDiff(workspaceId, worktreeId));
     }
@@ -399,7 +400,7 @@ public class AgentConfigController {
             @PathVariable String workspaceId,
             @RequestBody AgentConfigDtos.StageRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
         service.workspaceStage(workspaceId, request.files(), request.worktreeId(), principal.userId());
         return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
     }
@@ -409,7 +410,7 @@ public class AgentConfigController {
             @PathVariable String workspaceId,
             @RequestBody AgentConfigDtos.StageRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
         service.workspaceUnstage(workspaceId, request.files(), request.worktreeId(), principal.userId());
         return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
     }
@@ -419,7 +420,7 @@ public class AgentConfigController {
             @PathVariable String workspaceId,
             @RequestBody AgentConfigDtos.CommitRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
         return ok(exchange, service.workspaceCommit(
                 workspaceId,
                 request.message(),
@@ -434,7 +435,7 @@ public class AgentConfigController {
             @PathVariable String workspaceId,
             @RequestBody AgentConfigDtos.PublishRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
         return ok(exchange, service.workspacePublish(
                 workspaceId,
                 request.worktreeId(),
