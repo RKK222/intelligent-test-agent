@@ -165,6 +165,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   color: var(--ta-ink, #172033);
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
   text-align: center;
+  cursor: move;
 }
 
 .ta-mermaid-flow-node.is-selected {
@@ -231,7 +232,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
   background: var(--ta-border-strong, #64748b);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
   opacity: 0;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: default;
   transition: opacity 100ms ease, background-color 100ms ease, transform 100ms ease;
 }
 

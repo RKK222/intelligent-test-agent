@@ -59,6 +59,7 @@ export function createMermaidConnectionDragController(options: ControllerOptions
   let source: MermaidConnectionStart | undefined;
   let pendingPoint: MermaidScreenPoint | undefined;
   let frameId: number | undefined;
+  let lastSnappedPort: { nodeId: string; handleId: string } | undefined;
 
   function measureNodes(canvas: HTMLElement): MermaidConnectionNodeGeometry[] {
     return Array.from(canvas.querySelectorAll<HTMLElement>("[data-mermaid-node-id]"), (element) => {
@@ -93,13 +94,27 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     const canvasRect = options.getCanvasElement()?.getBoundingClientRect();
     if (!canvasRect) return;
     const endpoint = targetPort ?? point;
+    
+    let targetPosition: Position;
+    if (targetPort) {
+      targetPosition = targetPort.position;
+    } else {
+      const dx = endpoint.x - source.point.x;
+      const dy = endpoint.y - source.point.y;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        targetPosition = dx > 0 ? Position.Left : Position.Right;
+      } else {
+        targetPosition = dy > 0 ? Position.Top : Position.Bottom;
+      }
+    }
+
     dragPath.value = getSmoothStepPath({
       sourceX: source.point.x - canvasRect.left,
       sourceY: source.point.y - canvasRect.top,
       sourcePosition: source.position,
       targetX: endpoint.x - canvasRect.left,
       targetY: endpoint.y - canvasRect.top,
-      targetPosition: targetPort?.position ?? oppositePosition(source.position)
+      targetPosition
     })[0];
   }
 
@@ -116,9 +131,24 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     if (targetNode) {
       const nodeElement = Array.from(canvas.querySelectorAll<HTMLElement>("[data-mermaid-node-id]"))
         .find((element) => element.dataset.mermaidNodeId === targetNode.nodeId);
-      if (nodeElement) targetPort = findNearestConnectionPort(point, measurePorts(nodeElement));
+      if (nodeElement) {
+        const ports = measurePorts(nodeElement);
+        if (lastSnappedPort && lastSnappedPort.nodeId === targetNode.nodeId) {
+          const matchedPort = ports.find(p => p.handleId === lastSnappedPort?.handleId);
+          if (matchedPort) {
+            const dist = Math.hypot(point.x - matchedPort.x, point.y - matchedPort.y);
+            if (dist <= 42) {
+              targetPort = matchedPort;
+            }
+          }
+        }
+        if (!targetPort) {
+          targetPort = findNearestConnectionPort(point, ports);
+        }
+      }
     }
     if (targetPort) {
+      lastSnappedPort = { nodeId: targetPort.nodeId, handleId: targetPort.handleId };
       targetHandleId.value = targetPort.handleId;
       const connection: MermaidPortConnection = {
         source: source.nodeId,
@@ -127,6 +157,8 @@ export function createMermaidConnectionDragController(options: ControllerOptions
         targetHandle: targetPort.handleId
       };
       targetStatus.value = canAppendMermaidEdge(options.getGraph(), connection) ? "valid" : "invalid";
+    } else {
+      lastSnappedPort = undefined;
     }
     updatePath(point, targetPort);
   }
@@ -165,6 +197,7 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     targetHandleId.value = undefined;
     targetStatus.value = undefined;
     dragPath.value = "";
+    lastSnappedPort = undefined;
     removeListeners();
   }
 
@@ -173,7 +206,6 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     if (frameId !== undefined) cancelFrame(frameId);
     frameId = undefined;
     pendingPoint = undefined;
-    updateFromPoint({ x: event.clientX, y: event.clientY });
     const connection: MermaidPortConnection = {
       source: source.nodeId,
       target: targetNodeId.value ?? null,

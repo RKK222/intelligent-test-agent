@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-15 - 优化 Mermaid 可视化编辑的交互体验
+
+- Why:
+  - 用户反馈在 Mermaid 可视化编辑器中，节点与端口的鼠标光标形态不符、拖拽连线时尾部箭头无法跟随拖拽方向，以及在移近节点吸附时存在边缘闪烁抖动、且松手释放时偶发无法成功连接的问题。
+- What:
+  - 修改节点和端口的 cursor 指示，节点移入改为 `move`，定位点移入改为 `default` 并可接收指针悬停。
+  - preview 拖拽连线在未吸附端口时，改为根据鼠标移动相对位移动态计算终点切线方向，使箭头指向完全跟随拖拽方向。
+  - 引入退吸附滞后半径机制（Hysteresis），并实现拖拽中局部禁用 transition 动画的 CSS 规则，以消除坐标测量上的跳变并根除吸附抖动；修改松手判定以直接使用内存中的最新合法连接缓存状态，保障连接可靠性。
+- How:
+  - 调整 `MermaidFlowNode.vue` 的 CSS 以应用 move 和 default 指针，并将 `pointer-events: none` 修正为 `auto`；在 `MermaidVisualEditor.vue` 的拖拽态中控制 CSS 强制禁用 handle 过渡动画以消除慢变。
+  - 在 `use-mermaid-connection-drag.ts` 中根据 `dx/dy` 大小及正负动态赋予 `targetPosition` 值以修正 marker 方向；在 `updateFromPoint` 中保留 `lastSnappedPort`，判定中增加 `42px` 的退吸附滞后半径；在 `onPointerUp` 中移除冗余 updateFromPoint 保证取值不因松手抖动而失灵。
+- Result:
+  - 前端 Lint、TypeScript 类型校验全量通过；MermaidConnectionController 与 MermaidVisualEditor 两个测试类的 35 个 Vitest 用例全量 100% 成功通过。未改动后端 API、事件、数据库、安全或向后兼容性契约。
+
 ### 2026-07-15 - 将 Mermaid 节点创建改为可拖放图形库
 
 - Why:

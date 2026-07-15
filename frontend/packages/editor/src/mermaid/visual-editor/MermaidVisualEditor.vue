@@ -186,7 +186,7 @@ function updateDirection(event: Event) {
     <div class="ta-mermaid-workspace">
       <div
         ref="canvasRef"
-        :class="['ta-mermaid-canvas', { 'is-drag-over': isCanvasDragOver }]"
+        :class="['ta-mermaid-canvas', { 'is-drag-over': isCanvasDragOver, 'is-connection-dragging': isDragging }]"
         aria-label="Mermaid 可视化画布"
         @dragover="onCanvasDragOver"
         @dragleave="onCanvasDragLeave"
@@ -306,6 +306,7 @@ function updateDirection(event: Event) {
 .ta-mermaid-workspace { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr) 280px; }
 .ta-mermaid-canvas { position: relative; min-height: 420px; background-color: var(--ta-surface, #fff); background-image: radial-gradient(circle, color-mix(in srgb, var(--ta-border, #dbe2ea) 75%, transparent) 1px, transparent 1px); background-size: 18px 18px; transition: box-shadow 120ms ease; }
 .ta-mermaid-canvas.is-drag-over { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary, #4f46e5) 65%, transparent); }
+.ta-mermaid-canvas.is-connection-dragging :deep(.vue-flow__handle) { transition: none !important; }
 .ta-mermaid-canvas :deep(.vue-flow) { height: 100%; min-height: 420px; }
 .ta-mermaid-connection-preview { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .ta-mermaid-connection-preview__path { fill: none; stroke: var(--primary, #4f46e5); stroke-width: 2.25; }
