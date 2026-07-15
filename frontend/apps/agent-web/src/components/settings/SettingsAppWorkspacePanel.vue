@@ -786,7 +786,7 @@ onBeforeUnmount(() => {
     <template v-else>
       <!-- 应用选择 -->
       <div class="ta-app-selector">
-        <el-select v-model="selectedAppId" placeholder="选择应用" aria-label="应用选择" style="width: 320px">
+        <el-select v-model="selectedAppId" placeholder="选择应用" aria-label="应用选择" style="width: 320px" filterable>
           <el-option v-for="app in applications" :key="app.appId" :label="app.appName" :value="app.appId" />
         </el-select>
         <el-button v-if="hasSuperAdmin" type="primary" data-testid="create-application-open" @click="openCreateApplication">
@@ -887,7 +887,7 @@ onBeforeUnmount(() => {
             <span v-if="selectedApp" class="ta-section-title-app">{{ selectedApp.appName }}</span>
           </div>
           <div class="ta-inline-form">
-            <el-select v-model="linkRepositoryId" placeholder="选择版本库" style="width: 360px" @change="handleLinkRepositoryChange">
+            <el-select v-model="linkRepositoryId" placeholder="选择版本库" style="width: 360px" filterable @change="handleLinkRepositoryChange">
               <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
               <el-option :label="'添加版本库'" :value="ADD_REPOSITORY_OPTION_VALUE" />
             </el-select>
@@ -918,7 +918,7 @@ onBeforeUnmount(() => {
             <div class="ta-workspace-form-grid">
               <label class="ta-form-field">
                 <span class="ta-form-label">已关联版本库</span>
-                <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: 100%" @change="loadBranches">
+                <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: 100%" filterable @change="loadBranches">
                   <el-option v-for="repo in appRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
                 </el-select>
               </label>

@@ -430,10 +430,10 @@ function formatError(error: unknown) {
           <span>第 {{ runPage }} / {{ runTotalPages }} 页</span>
         </header>
         <div class="ta-scheduler-filters">
-          <el-select v-model="draftRunFilters.status" size="small" clearable placeholder="执行状态" class="ta-scheduler-filter">
+          <el-select v-model="draftRunFilters.status" size="small" clearable filterable placeholder="执行状态" class="ta-scheduler-filter">
             <el-option v-for="status in runStatusOptions" :key="status.value" :label="status.label" :value="status.value" />
           </el-select>
-          <el-select v-model="draftRunFilters.triggerType" size="small" clearable placeholder="触发方式" class="ta-scheduler-filter">
+          <el-select v-model="draftRunFilters.triggerType" size="small" clearable filterable placeholder="触发方式" class="ta-scheduler-filter">
             <el-option v-for="trigger in triggerTypeOptions" :key="trigger.value" :label="trigger.label" :value="trigger.value" />
           </el-select>
           <el-button size="small" type="primary" :icon="Search" @click="applyRunFilters">查询</el-button>

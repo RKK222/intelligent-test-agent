@@ -1664,7 +1664,7 @@ function submitJoinApp() {
               </div>
               <div class="figma-add-app-section">
                 <label class="figma-add-app-label">选择要加入的应用</label>
-                <el-select v-model="selectedAppToJoin" placeholder="请选择应用" class="figma-add-app-select" size="default">
+                <el-select v-model="selectedAppToJoin" placeholder="请选择应用" class="figma-add-app-select" size="default" filterable>
                   <el-option
                     v-for="app in joinableApps"
                     :key="app.appId"

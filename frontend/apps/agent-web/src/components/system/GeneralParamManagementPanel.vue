@@ -316,7 +316,7 @@ function formatError(error: unknown) {
       <div class="ta-common-param-toolbar">
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
         <div class="ta-common-param-filter">
-          <el-select v-model="draftPlatform" placeholder="平台" size="small" clearable style="width: 140px" @change="applyFilter">
+          <el-select v-model="draftPlatform" placeholder="平台" size="small" clearable filterable style="width: 140px" @change="applyFilter">
             <el-option label="全部" value="" />
             <el-option label="linux" value="linux" />
             <el-option label="windows" value="windows" />
@@ -416,6 +416,7 @@ function formatError(error: unknown) {
               :model-value="editPublicAgentGitDeploymentMode"
               aria-label="公共 Git 部署模式"
               style="width: 160px"
+              filterable
               @update:model-value="handleEditPublicAgentGitDeploymentModeChange"
             >
               <el-option

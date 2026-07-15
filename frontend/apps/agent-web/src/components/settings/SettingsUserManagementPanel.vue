@@ -321,7 +321,7 @@ onMounted(() => {
               <el-input v-model="form.username" placeholder="必填" style="width: 240px" />
             </el-form-item>
             <el-form-item label="角色">
-              <el-select v-model="form.role" placeholder="选择角色" style="width: 200px">
+              <el-select v-model="form.role" placeholder="选择角色" filterable style="width: 200px">
                 <el-option
                   v-for="role in roles"
                   :key="role.roleCode"

@@ -677,6 +677,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
           v-model="createVersionBranch"
           :loading="createVersionLoadingBranches"
           placeholder="请先选择分支"
+          filterable
           style="width: 100%"
         >
           <el-option

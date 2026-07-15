@@ -342,7 +342,7 @@ function focusEditNameInput() {
           <el-form label-width="120px">
             <el-form-item label="部署模式">
               <div class="ta-deployment-mode-field">
-                <el-select v-model="repoDeploymentMode" aria-label="部署模式" style="width: 160px">
+                <el-select v-model="repoDeploymentMode" aria-label="部署模式" style="width: 160px" filterable>
                   <el-option v-for="option in repositoryDeploymentOptions.options" :key="option.mode" :label="option.label" :value="option.mode" />
                 </el-select>
                 <el-alert
@@ -370,7 +370,7 @@ function focusEditNameInput() {
             </el-form-item>
             <el-form-item label="版本库类型">
               <div style="display: flex; align-items: center; gap: 8px;">
-                <el-select v-model="repoType" aria-label="版本库类型" placeholder="选择版本库类型" style="width: 160px">
+                <el-select v-model="repoType" aria-label="版本库类型" placeholder="选择版本库类型" style="width: 160px" filterable>
                   <el-option v-for="type in repositoryTypes" :key="type.typeCode" :label="type.typeLabel" :value="type.typeCode" />
                 </el-select>
                 <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">

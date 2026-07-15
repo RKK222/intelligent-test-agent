@@ -671,7 +671,7 @@ function startResize(e: MouseEvent) {
     <div v-if="!hasSuperAdmin" class="ta-runtime-placeholder">当前账号无运行管理权限</div>
     <template v-else>
       <div class="ta-runtime-toolbar">
-        <el-select v-model="draftFilters.status" size="small" clearable placeholder="进程状态" class="ta-runtime-filter">
+        <el-select v-model="draftFilters.status" size="small" clearable filterable placeholder="进程状态" class="ta-runtime-filter">
           <el-option v-for="status in processStatusOptions" :key="status" :label="status" :value="status" />
         </el-select>
         <el-input v-model="draftFilters.linuxServerId" size="small" clearable placeholder="服务器ID" class="ta-runtime-filter" />
