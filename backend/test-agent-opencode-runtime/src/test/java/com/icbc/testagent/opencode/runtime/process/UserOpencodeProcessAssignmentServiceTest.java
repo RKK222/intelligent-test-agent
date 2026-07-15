@@ -41,6 +41,8 @@ import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerCommandNotDispatchedException;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerConnectionRegistry;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -82,6 +84,21 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void statusDoesNotAllocateFromDatabaseWhenRedisHasNoManagerHeartbeat() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_db_only", container("ctr_db_only", "10.8.0.12", 4096, 4100, 4, 0));
+        UserOpencodeProcessAssignmentService service = serviceWithLiveContainers(
+                repository,
+                new RecordingGateway(),
+                List.of());
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
+        assertThat(response.initializable()).isFalse();
+    }
+
+    @org.junit.jupiter.api.Test
     void initializeStartsProcessOnLeastLoadedContainerAndProjectsExecutionNode() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_busy", container("ctr_busy", "10.8.0.12", 4096, 4100, 4, 3));
@@ -103,6 +120,24 @@ class UserOpencodeProcessAssignmentServiceTest {
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
         assertThat(repository.savedNodes).hasSize(1);
         assertThat(repository.savedNodes.getFirst().baseUrl()).isEqualTo("http://10.8.0.21:4200");
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeUsesRedisRealtimeLoadInsteadOfDatabaseCurrentProcesses() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_a", container("ctr_a", "10.8.0.12", 4096, 4100, 4, 0));
+        repository.containers.put("ctr_b", container("ctr_b", "10.8.0.13", 4200, 4205, 4, 3));
+        List<OpencodeContainer> liveContainers = List.of(
+                container("ctr_a", "10.8.0.12", 4096, 4100, 4, 3),
+                container("ctr_b", "10.8.0.13", 4200, 4205, 4, 0));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = serviceWithLiveContainers(repository, gateway, liveContainers);
+
+        service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(gateway.startCommands).singleElement()
+                .extracting(OpencodeProcessStartCommand::containerId)
+                .isEqualTo(new OpencodeContainerId("ctr_b"));
     }
 
     @org.junit.jupiter.api.Test
@@ -306,6 +341,26 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void initializeSkipsCandidateWithoutDatabaseFreePort() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_a", container("ctr_a", "10.8.0.12", 4096, 4097, 2, 0));
+        repository.containers.put("ctr_b", container("ctr_b", "10.8.0.13", 4200, 4201, 2, 1));
+        repository.processes.put("ocp_used_4096", process(
+                "ocp_used_4096", new UserId("usr_used_4096"), "10.8.0.12", "ctr_old", 4096,
+                OpencodeServerProcessStatus.STOPPED));
+        repository.processes.put("ocp_used_4097", process(
+                "ocp_used_4097", new UserId("usr_used_4097"), "10.8.0.12", "ctr_old", 4097,
+                OpencodeServerProcessStatus.UNHEALTHY));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.containerId()).isEqualTo("ctr_b");
+        assertThat(response.port()).isEqualTo(4200);
+    }
+
+    @org.junit.jupiter.api.Test
     void initializeSkipsDirtyPortsOnSameLinuxServer() {
         // 端口唯一约束按 linux_server_id 生效；同服务器其它容器和非运行态历史脏行也要避让。
         FakeRepository repository = new FakeRepository();
@@ -489,6 +544,7 @@ class UserOpencodeProcessAssignmentServiceTest {
                 null,
                 NOW,
                 UserOpencodeServiceStatus.NOT_RUNNING,
+                null,
                 null);
 
         assertThat(response.serviceAddress()).isNull();
@@ -518,7 +574,6 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.serviceAddress()).isNull();
         assertThat(response.message()).contains("已分配");
         assertThat(gateway.healthCommands).isEmpty();
-        assertThat(repository.findContainerCalls).isZero();
     }
 
     @org.junit.jupiter.api.Test
@@ -613,6 +668,59 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void initializeTriesNextCandidateOnlyWhenManagerCommandWasNotDispatched() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_a", container("ctr_a", "10.8.0.12", 4096, 4100, 4, 0));
+        repository.containers.put("ctr_b", container("ctr_b", "10.8.0.13", 4200, 4205, 4, 1));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startFailures.add(new ManagerCommandNotDispatchedException(new OpencodeContainerId("ctr_a")));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.containerId()).isEqualTo("ctr_b");
+        assertThat(gateway.startAttempts).extracting(command -> command.containerId().value())
+                .containsExactly("ctr_a", "ctr_b");
+        assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
+                .extracting(UserOpencodeProcessBinding::linuxServerId)
+                .isEqualTo(new LinuxServerId("10.8.0.13"));
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeDoesNotSwitchCandidateAfterManagerTimeout() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_a", container("ctr_a", "10.8.0.12", 4096, 4100, 4, 0));
+        repository.containers.put("ctr_b", container("ctr_b", "10.8.0.13", 4200, 4205, 4, 1));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startFailures.add(new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "manager command timeout"));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_TIMEOUT));
+
+        assertThat(gateway.startAttempts).extracting(command -> command.containerId().value())
+                .containsExactly("ctr_a");
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeDoesNotSwitchCandidateWhenConnectionDropsDuringPostStartHealthCheck() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_a", container("ctr_a", "10.8.0.12", 4096, 4100, 4, 0));
+        repository.containers.put("ctr_b", container("ctr_b", "10.8.0.13", 4200, 4205, 4, 1));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthFailure = new ManagerCommandNotDispatchedException(new OpencodeContainerId("ctr_a"));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        assertThat(gateway.startAttempts).extracting(command -> command.containerId().value())
+                .containsExactly("ctr_a");
+    }
+
+    @org.junit.jupiter.api.Test
     void initializeDoesNotReturnReadyWhenStartedProcessFailsHealth() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 0));
@@ -681,11 +789,25 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(affinity.initializable()).isTrue();
         assertThat(affinity.linuxServerId()).isNull();
         assertThat(gateway.healthCommands).isEmpty();
-        assertThat(repository.findContainerCalls).isEqualTo(1);
     }
 
     private static UserOpencodeProcessAssignmentService service(FakeRepository repository, RecordingGateway gateway) {
         return service(repository, gateway, "10.8.0.21", "10.8.0.21");
+    }
+
+    private static UserOpencodeProcessAssignmentService serviceWithLiveContainers(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            List<OpencodeContainer> liveContainers) {
+        return serviceWithPublicConfigDir(
+                repository,
+                gateway,
+                Path.of(CONFIG_DIR),
+                "10.8.0.21",
+                "10.8.0.21",
+                disabledHeartbeatStore(),
+                null,
+                liveContainers);
     }
 
     private static UserOpencodeProcessAssignmentService service(
@@ -756,23 +878,60 @@ class UserOpencodeProcessAssignmentServiceTest {
             String advertisedHost,
             OpencodeProcessHeartbeatStore heartbeatStore,
             OpencodeProcessStartOperationRepository operationRepository) {
+        return serviceWithPublicConfigDir(
+                repository,
+                gateway,
+                publicConfigDir,
+                linuxServerId,
+                advertisedHost,
+                heartbeatStore,
+                operationRepository,
+                new ArrayList<>(repository.containers.values()));
+    }
+
+    private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            Path publicConfigDir,
+            String linuxServerId,
+            String advertisedHost,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessStartOperationRepository operationRepository,
+            List<OpencodeContainer> liveContainers) {
+        BackendJavaProcessLifecycleService backendLifecycle = new BackendJavaProcessLifecycleService(
+                repository,
+                new ManagerControlSettings(
+                        "secret-token",
+                        "http://" + advertisedHost + ":8080",
+                        new LinuxServerId(linuxServerId),
+                        advertisedHost,
+                        Duration.ofSeconds(10),
+                        Duration.ofSeconds(30),
+                        Duration.ofSeconds(5),
+                        100));
+        ManagerConnectionRegistry connectionRegistry = new ManagerConnectionRegistry();
+        List<ManagerRuntimeSnapshot> managerSnapshots = liveContainers.stream()
+                .map(container -> managerSnapshot(container, backendLifecycle.backendProcessId()))
+                .toList();
+        for (ManagerRuntimeSnapshot snapshot : managerSnapshots) {
+            connectionRegistry.register(
+                    snapshot.manager().managerId(),
+                    snapshot.container().containerId(),
+                    backendLifecycle.backendProcessId(),
+                    message -> { });
+        }
+        LiveOpencodeContainerCandidateResolver candidateResolver = new LiveOpencodeContainerCandidateResolver(
+                heartbeatStoreWithManagerSnapshots(heartbeatStore, managerSnapshots),
+                backendLifecycle,
+                connectionRegistry);
         return new UserOpencodeProcessAssignmentService(
                 repository,
                 commonParameters(publicConfigDir),
                 repository,
                 gateway,
-                new BackendJavaProcessLifecycleService(
-                        repository,
-                        new ManagerControlSettings(
-                                "secret-token",
-                                "http://" + advertisedHost + ":8080",
-                                new LinuxServerId(linuxServerId),
-                                advertisedHost,
-                                Duration.ofSeconds(10),
-                                Duration.ofSeconds(30),
-                                Duration.ofSeconds(5),
-                                100)),
+                backendLifecycle,
                 heartbeatStore,
+                candidateResolver,
                 null,
                 null,
                 null,
@@ -953,6 +1112,66 @@ class UserOpencodeProcessAssignmentServiceTest {
                         TRACE_ID));
     }
 
+    private static ManagerRuntimeSnapshot managerSnapshot(
+            OpencodeContainer container,
+            BackendProcessId backendProcessId) {
+        ContainerManagerId managerId = new ContainerManagerId("mgr_" + container.containerId().value());
+        OpencodeContainerManager manager = new OpencodeContainerManager(
+                managerId,
+                container.containerId(),
+                container.linuxServerId(),
+                "1.0",
+                ManagerConnectionStatus.CONNECTED,
+                Map.of(),
+                container.lastHeartbeatAt(),
+                container.createdAt(),
+                container.updatedAt(),
+                TRACE_ID);
+        OpencodeManagerBackendConnection connection = new OpencodeManagerBackendConnection(
+                managerId,
+                backendProcessId,
+                ManagerConnectionStatus.CONNECTED,
+                container.createdAt(),
+                container.lastHeartbeatAt(),
+                container.updatedAt(),
+                TRACE_ID);
+        return new ManagerRuntimeSnapshot(container, manager, List.of(connection));
+    }
+
+    private static OpencodeProcessHeartbeatStore heartbeatStoreWithManagerSnapshots(
+            OpencodeProcessHeartbeatStore delegate,
+            List<ManagerRuntimeSnapshot> managerSnapshots) {
+        return new OpencodeProcessHeartbeatStore() {
+            @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) {
+                delegate.recordBackendHeartbeat(linuxServerId, heartbeatAt);
+            }
+            @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {
+                delegate.recordBackendSnapshot(snapshot);
+            }
+            @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) {
+                delegate.recordManagerSnapshot(snapshot);
+            }
+            @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) {
+                delegate.recordOpencodeHeartbeat(processId, heartbeatAt);
+            }
+            @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() {
+                return delegate.liveBackendSnapshots();
+            }
+            @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() {
+                return managerSnapshots;
+            }
+            @Override public Set<LinuxServerId> liveBackendServerIds() {
+                return delegate.liveBackendServerIds();
+            }
+            @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() {
+                return delegate.liveOpencodeProcessIds();
+            }
+            @Override public void cleanupExpiredHeartbeats() {
+                delegate.cleanupExpiredHeartbeats();
+            }
+        };
+    }
+
     private static OpencodeProcessHeartbeatStore heartbeatStore(List<BackendRuntimeSnapshot> backendSnapshots) {
         return new OpencodeProcessHeartbeatStore() {
             @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
@@ -973,8 +1192,10 @@ class UserOpencodeProcessAssignmentServiceTest {
 
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
+        private final List<OpencodeProcessStartCommand> startAttempts = new ArrayList<>();
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
         private final Queue<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
+        private final Queue<RuntimeException> startFailures = new ArrayDeque<>();
         private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
         private PlatformException healthFailure;
         private PlatformException startFailure;
@@ -990,6 +1211,10 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         @Override
         public OpencodeProcessStartResult startProcess(OpencodeProcessStartCommand command) {
+            startAttempts.add(command);
+            if (!startFailures.isEmpty()) {
+                throw startFailures.remove();
+            }
             if (startFailure != null) {
                 throw startFailure;
             }
@@ -1123,7 +1348,6 @@ class UserOpencodeProcessAssignmentServiceTest {
         private final Map<String, User> users = new LinkedHashMap<>();
         private final List<ExecutionNode> savedNodes = new ArrayList<>();
         int findUserBindingCalls;
-        int findContainerCalls;
 
         FakeRepository() {
             users.put(USER_ID.value(), User.createNew(
@@ -1151,21 +1375,6 @@ class UserOpencodeProcessAssignmentServiceTest {
                     .filter(OpencodeContainer::canAcceptProcess)
                     .limit(limit)
                     .toList();
-        }
-
-        @Override
-        public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) {
-            findContainerCalls++;
-            return findHealthyContainers(limit);
-        }
-
-        @Override
-        public List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(
-                BackendProcessId backendProcessId,
-                LinuxServerId linuxServerId,
-                int limit) {
-            findContainerCalls++;
-            return findHealthyContainersByLinuxServer(linuxServerId, limit);
         }
 
         @Override
@@ -1260,6 +1469,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         @Override public Optional<LinuxServer> findLinuxServerById(LinuxServerId linuxServerId) { return Optional.empty(); }
         @Override public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) { return backendJavaProcess; }
         @Override public Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId) { return Optional.empty(); }
+        @Override public Optional<BackendJavaProcess> findReadyBackendJavaProcessByLinuxServer(LinuxServerId linuxServerId) { return Optional.empty(); }
         @Override public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) { return List.of(); }
         @Override public OpencodeContainer saveContainer(OpencodeContainer container) { containers.put(container.containerId().value(), container); return container; }
         @Override public Optional<OpencodeContainer> findContainerById(OpencodeContainerId containerId) { return Optional.ofNullable(containers.get(containerId.value())); }

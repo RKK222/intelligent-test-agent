@@ -152,8 +152,8 @@ public class BackendJavaProcessLifecycleService {
      * <p>除写入本实例的 Redis 运行快照外，还会在拓扑首次落库或状态变化时为同服务器下所有
      * {@code connection_status = CONNECTED} 的容器管理进程补齐到本实例的连接行，
      * 让本地开发环境在迁移中预置了 manager 但还没有 manager WebSocket 注册时，
-     * 仍能通过 {@code findHealthyContainersConnectedToBackend*} 查询到本机容器，
-     * 前端用户进程状态从 {@code UNAVAILABLE} 升级为 {@code READY}。
+     * 仍保留完整的 manager/backend 拓扑历史；用户进程实时候选只读取 Redis manager 快照，
+     * 不再把这些数据库连接行当作在线或可调度依据。
      *
      * <p>该自举仅在数据库中确实不存在 (manager, backend) 连接行时才插入，
      * 已有行只更新 {@code last_heartbeat_at} 和 {@code status}；管理进程 WebSocket

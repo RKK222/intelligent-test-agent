@@ -6375,3 +6375,17 @@ bash /tmp/test-api-after-restart.sh
   - Handler 复用 scheduler Redis 锁、续租、运行记录和停止上下文；应用服务在获取兼容锁前以及 hourly、daily、水位更新等主要阶段间检查动态停止请求，只返回低敏窗口和执行状态。锁冲突返回 `executed=false`，异常继续写 `FAILED` freshness 并上抛。本次未修改指标口径、API、事件、数据库结构或环境配置文件。
 - Result:
   - 设计与实施计划已落在 `docs/superpowers/`；新增服务/handler 测试共 8 个并通过，主代码 Reactor 跳过测试打包通过。仓库基线仍有 opencode runtime 无关测试与当前接口不匹配，导致该模块全量 testCompile 失败，未在本任务中越界修复。
+
+### 2026-07-15 - 用户 opencode 进程改用 Redis 实时候选
+
+- Why:
+  - PostgreSQL 中的 manager/container 状态和 `current_processes` 可能滞后于真实运行态，停止 Java 所在机器仍可能因数据库负载较低而进入新用户候选。
+- What:
+  - 新用户初始化、状态可初始化判断、文件路由亲和性和原服务器重建统一读取 TTL 10 秒的 Redis manager 快照，并以当前 Java 内存中的 manager WebSocket 连接做最终校验；数据库只继续承担持久拓扑、binding、进程记录和同服务器全局端口避让。
+  - manager 命令在查找本地连接阶段尚未发送时允许尝试下一候选；命令超时、发送后失败和启动后健康检查失败均立即终止。已删除领域/JDBC Repository 的两个数据库候选查询入口。
+- How:
+  - 新增 `LiveOpencodeContainerCandidateResolver`，按最新容器心跳去重，过滤 manager/container/当前 backend/容量/本地连接并按实时负载和容器 ID 排序；Redis 异常统一映射 `RUNTIME_STATE_UNAVAILABLE`，不提供数据库回退。
+  - 使用 TDD 覆盖实时过滤、同服务器限制、数据库端口避让、安全切换边界和健康检查后写 binding，并补齐既有 FakeRepository 与 API 测试中的接口/DTO 编译基线。
+- Result:
+  - runtime 定向测试 58 项通过，runtime 与 API 全量测试通过（API 271 项），Redis heartbeat 测试 5 项通过，`mvn clean package -DskipTests` 完整打包通过；HTTP/DTO/SSE/数据库结构和 manager 协议均未变更。
+  - persistence 全量仍有本任务外既有基线失败：H2 2.4.240 不支持存量 `ON CONFLICT` 测试 SQL、测试种子缺失及 AgentConfig 测试用户外键缺失；相关生产 SQL、迁移和夹具未在本任务中扩大范围修改。

@@ -19,6 +19,7 @@ import com.icbc.testagent.domain.run.ConversationContextStore;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerCommandNotDispatchedException;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.time.Clock;
 import java.time.Duration;
@@ -244,6 +245,9 @@ public class OpencodeProcessStartupService {
                 throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程启动未返回结果");
             }
             return markStartedAndVerify(request, started.pid(), started.message(), resolvedProgress);
+        } catch (ManagerCommandNotDispatchedException exception) {
+            // 命令尚未写入任何 manager 连接，候选选择层可安全尝试下一个容器。
+            throw exception;
         } catch (PlatformException exception) {
             resolvedProgress.failed(exception);
             throw exception;

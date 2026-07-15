@@ -889,13 +889,12 @@ class RuntimeManagementQueryServiceTest {
         @Override public Optional<LinuxServer> findLinuxServerById(LinuxServerId linuxServerId) { return Optional.ofNullable(linuxServers.get(linuxServerId)); }
         @Override public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) { backendProcesses.put(backendJavaProcess.backendProcessId(), backendJavaProcess); return backendJavaProcess; }
         @Override public Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId) { return Optional.ofNullable(backendProcesses.get(backendProcessId)); }
+        @Override public Optional<BackendJavaProcess> findReadyBackendJavaProcessByLinuxServer(LinuxServerId linuxServerId) { return Optional.empty(); }
         @Override public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) { return List.of(); }
         @Override public OpencodeContainer saveContainer(OpencodeContainer container) { containers.put(container.containerId(), container); return container; }
         @Override public Optional<OpencodeContainer> findContainerById(OpencodeContainerId containerId) { return Optional.ofNullable(containers.get(containerId)); }
         @Override public List<OpencodeContainer> findHealthyContainers(int limit) { return List.of(); }
         @Override public List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit) { return List.of(); }
-        @Override public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) { return List.of(); }
-        @Override public List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(BackendProcessId backendProcessId, LinuxServerId linuxServerId, int limit) { return List.of(); }
         @Override public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) { managers.put(manager.managerId(), manager); return manager; }
         @Override public Optional<OpencodeContainerManager> findContainerManagerById(ContainerManagerId managerId) { return Optional.ofNullable(managers.get(managerId)); }
         @Override public OpencodeManagerBackendConnection saveManagerBackendConnection(OpencodeManagerBackendConnection connection) { connections.add(connection); return connection; }

@@ -330,13 +330,12 @@ class ManagerControlApplicationServiceTest {
             }
             return Optional.of(backend);
         }
+        @Override public Optional<BackendJavaProcess> findReadyBackendJavaProcessByLinuxServer(LinuxServerId linuxServerId) { return Optional.empty(); }
         @Override public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) { return List.of(); }
         @Override public OpencodeContainer saveContainer(OpencodeContainer container) { savedContainers.add(container); return container; }
         @Override public Optional<OpencodeContainer> findContainerById(OpencodeContainerId containerId) { return Optional.empty(); }
         @Override public List<OpencodeContainer> findHealthyContainers(int limit) { return List.of(); }
         @Override public List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit) { return List.of(); }
-        @Override public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) { return List.of(); }
-        @Override public List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(BackendProcessId backendProcessId, LinuxServerId linuxServerId, int limit) { return List.of(); }
         @Override public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) {
             if (failSavingManagerWithDuplicateKey) {
                 throw new DuplicateKeyException("duplicate container_id");

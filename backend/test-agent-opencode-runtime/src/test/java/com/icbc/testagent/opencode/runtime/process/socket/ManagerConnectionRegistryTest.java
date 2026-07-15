@@ -39,7 +39,7 @@ class ManagerConnectionRegistryTest {
         registry.disconnect(containerId);
 
         assertThatThrownBy(() -> registry.send(containerId, sent.getFirst()))
-                .isInstanceOf(PlatformException.class)
+                .isInstanceOf(ManagerCommandNotDispatchedException.class)
                 .extracting(error -> ((PlatformException) error).errorCode())
                 .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
     }

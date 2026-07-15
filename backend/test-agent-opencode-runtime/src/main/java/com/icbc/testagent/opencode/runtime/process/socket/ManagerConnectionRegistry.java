@@ -1,7 +1,5 @@
 package com.icbc.testagent.opencode.runtime.process.socket;
 
-import com.icbc.testagent.common.error.ErrorCode;
-import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
 import com.icbc.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
@@ -48,7 +46,7 @@ public class ManagerConnectionRegistry {
     public void send(OpencodeContainerId containerId, ManagerControlMessage message) {
         ManagerConnection connection = connections.get(containerId);
         if (connection == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "TestAgent 管理进程未连接");
+            throw new ManagerCommandNotDispatchedException(containerId);
         }
         connection.sender().send(message);
     }

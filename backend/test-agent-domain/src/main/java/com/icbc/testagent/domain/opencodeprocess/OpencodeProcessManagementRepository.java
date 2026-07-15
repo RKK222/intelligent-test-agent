@@ -33,13 +33,6 @@ public interface OpencodeProcessManagementRepository {
 
     List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit);
 
-    List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit);
-
-    List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(
-            BackendProcessId backendProcessId,
-            LinuxServerId linuxServerId,
-            int limit);
-
     OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager);
 
     Optional<OpencodeContainerManager> findContainerManagerById(ContainerManagerId managerId);

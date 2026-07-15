@@ -537,6 +537,7 @@ class UserOpencodeBackendRoutingWebFilterTest {
                 null,
                 NOW,
                 UserOpencodeServiceStatus.NOT_RUNNING,
+                null,
                 null);
     }
 

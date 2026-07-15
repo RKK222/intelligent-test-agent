@@ -305,7 +305,8 @@ class RuntimeControllerTest {
                 "http://10.8.0.12:4096",
                 NOW,
                 UserOpencodeServiceStatus.RUNNING,
-                "10.8.0.12:4096");
+                "10.8.0.12:4096",
+                null);
         when(service.status(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("trace_1234567890abcdef")))
                 .thenReturn(ready);
         when(service.initialize(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("trace_1234567890abcdef")))

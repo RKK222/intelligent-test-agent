@@ -24,6 +24,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnectio
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
@@ -31,6 +32,7 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.run.ConversationContextStore;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerCommandNotDispatchedException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -199,6 +201,32 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
+    void startAndVerifyLeavesOperationOpenWhenManagerCommandWasNotDispatched() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startFailure = new ManagerCommandNotDispatchedException(CONTAINER_ID);
+        OpencodeProcessStartOperationRepository operationRepository = Mockito.mock(OpencodeProcessStartOperationRepository.class);
+        OpencodeProcessStartProgress progress = OpencodeProcessStartProgress.start(
+                operationRepository,
+                "opi_1234567890abcdef",
+                USER_ID,
+                "opencode",
+                TRACE_ID,
+                () -> NOW);
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(null, null, null), progress))
+                .isInstanceOf(ManagerCommandNotDispatchedException.class);
+
+        Mockito.verify(operationRepository, Mockito.never()).markFailed(
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.anyString(),
+                Mockito.any());
+    }
+
+    @Test
     void startAndVerifyMapsNotRunningHealthToStopped() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
@@ -251,6 +279,7 @@ class OpencodeProcessStartupServiceTest {
         private final Deque<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
         private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
         private RuntimeException healthFailure;
+        private RuntimeException startFailure;
 
         @Override
         public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
@@ -266,6 +295,9 @@ class OpencodeProcessStartupServiceTest {
 
         @Override
         public OpencodeProcessStartResult startProcess(OpencodeProcessStartCommand command) {
+            if (startFailure != null) {
+                throw startFailure;
+            }
             startCommands.add(command);
             return new OpencodeProcessStartResult(12345L, "started");
         }
@@ -320,13 +352,12 @@ class OpencodeProcessStartupServiceTest {
         @Override public Optional<LinuxServer> findLinuxServerById(LinuxServerId linuxServerId) { return Optional.empty(); }
         @Override public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) { return backendJavaProcess; }
         @Override public Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId) { return Optional.empty(); }
+        @Override public Optional<BackendJavaProcess> findReadyBackendJavaProcessByLinuxServer(LinuxServerId linuxServerId) { return Optional.empty(); }
         @Override public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) { return List.of(); }
         @Override public OpencodeContainer saveContainer(OpencodeContainer container) { return container; }
         @Override public Optional<OpencodeContainer> findContainerById(OpencodeContainerId containerId) { return Optional.empty(); }
         @Override public List<OpencodeContainer> findHealthyContainers(int limit) { return List.of(); }
         @Override public List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit) { return List.of(); }
-        @Override public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) { return List.of(); }
-        @Override public List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(BackendProcessId backendProcessId, LinuxServerId linuxServerId, int limit) { return List.of(); }
         @Override public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) { return manager; }
         @Override public Optional<OpencodeContainerManager> findContainerManagerById(ContainerManagerId managerId) { return Optional.empty(); }
         @Override public OpencodeManagerBackendConnection saveManagerBackendConnection(OpencodeManagerBackendConnection connection) { return connection; }

@@ -385,63 +385,6 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
     }
 
     @Override
-    public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) {
-        validateLimit(limit);
-        return jdbcClient.sql("""
-                        select c.container_id, c.linux_server_id, c.container_name, c.port_start, c.port_end,
-                               c.max_processes, c.current_processes, c.status, c.last_heartbeat_at,
-                               c.trace_id, c.created_at, c.updated_at
-                        from opencode_containers c
-                        join opencode_container_managers m on m.container_id = c.container_id
-                        join opencode_manager_backend_connections mbc on mbc.manager_id = m.manager_id
-                        where mbc.backend_process_id = :backendProcessId
-                          and mbc.status = :connectionStatus
-                          and m.connection_status = :connectionStatus
-                          and c.status = :containerStatus
-                          and c.current_processes < c.max_processes
-                        order by c.current_processes asc, c.updated_at asc, c.container_id asc
-                        limit :limit
-                        """)
-                .param("backendProcessId", backendProcessId.value())
-                .param("connectionStatus", ManagerConnectionStatus.CONNECTED.name())
-                .param("containerStatus", OpencodeContainerStatus.READY.name())
-                .param("limit", limit)
-                .query(containerRowMapper)
-                .list();
-    }
-
-    @Override
-    public List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(
-            BackendProcessId backendProcessId,
-            LinuxServerId linuxServerId,
-            int limit) {
-        validateLimit(limit);
-        return jdbcClient.sql("""
-                        select c.container_id, c.linux_server_id, c.container_name, c.port_start, c.port_end,
-                               c.max_processes, c.current_processes, c.status, c.last_heartbeat_at,
-                               c.trace_id, c.created_at, c.updated_at
-                        from opencode_containers c
-                        join opencode_container_managers m on m.container_id = c.container_id
-                        join opencode_manager_backend_connections mbc on mbc.manager_id = m.manager_id
-                        where mbc.backend_process_id = :backendProcessId
-                          and c.linux_server_id = :linuxServerId
-                          and mbc.status = :connectionStatus
-                          and m.connection_status = :connectionStatus
-                          and c.status = :containerStatus
-                          and c.current_processes < c.max_processes
-                        order by c.current_processes asc, c.updated_at asc, c.container_id asc
-                        limit :limit
-                        """)
-                .param("backendProcessId", backendProcessId.value())
-                .param("linuxServerId", linuxServerId.value())
-                .param("connectionStatus", ManagerConnectionStatus.CONNECTED.name())
-                .param("containerStatus", OpencodeContainerStatus.READY.name())
-                .param("limit", limit)
-                .query(containerRowMapper)
-                .list();
-    }
-
-    @Override
     public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) {
         // 使用 INSERT ... ON CONFLICT DO UPDATE 替代 check-then-act，避免并发竞态。
         jdbcClient.sql("""
