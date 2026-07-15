@@ -998,8 +998,8 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 ### analytics_rollup_watermarks / analytics_rollup_job_runs / analytics_job_locks
 
 - `analytics_rollup_watermarks` 保存 rollup 水位、最近生成时间、`FRESH|STALE|FAILED` 状态和消息；API 通过 `freshness` 返回最近成功数据状态。
-- `analytics_rollup_job_runs` 预留 rollup 任务运行审计。
-- `analytics_job_locks` 提供数据库互斥锁，保证多实例下同一 rollup runner 不并发刷新同一窗口。
+- `analytics_rollup_job_runs` 是历史预留的 rollup 任务运行审计表；当前统一定时任务审计写入 `scheduled_task_runs`，本表不再作为运行记录来源。
+- `analytics_job_locks` 暂时提供业务数据库互斥，保证新版本 `opencode-runtime.analytics-rollup` handler 与滚动部署期间旧版本 `@Scheduled` 实例不并发刷新同一窗口；scheduler 框架自身的多实例互斥仍只使用 Redis 锁。
 
 兼容策略：
 

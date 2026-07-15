@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -41,19 +42,34 @@ public class AnalyticsRollupApplicationService {
     /**
      * 默认重算最近 2 小时 hourly，并从 hourly 修正最近 7 天 daily。
      */
-    public void rollupRecent(String traceId) {
+    public Result rollupRecent(String traceId, BooleanSupplier stopRequested) {
+        BooleanSupplier effectiveStopRequested = Objects.requireNonNull(
+                stopRequested,
+                "stopRequested must not be null");
         Instant now = Instant.now();
         Instant windowStart = now.minus(2, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
         Instant windowEnd = now.plus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
+        LocalDate dailyStart = now.minus(7, ChronoUnit.DAYS).atZone(ZoneOffset.UTC).toLocalDate();
+        LocalDate dailyEnd = now.atZone(ZoneOffset.UTC).toLocalDate();
+        if (effectiveStopRequested.getAsBoolean()) {
+            return new Result(false, true, windowStart, windowEnd, dailyStart, dailyEnd);
+        }
         if (!repository.tryAcquireLock(JOB_NAME, ownerId, now.plusSeconds(240), now)) {
             LOGGER.debug("Analytics rollup skipped because another owner holds the DB lock, ownerId={}, traceId={}", ownerId, traceId);
-            return;
+            return new Result(false, false, windowStart, windowEnd, dailyStart, dailyEnd);
         }
         try {
+            if (effectiveStopRequested.getAsBoolean()) {
+                return new Result(false, true, windowStart, windowEnd, dailyStart, dailyEnd);
+            }
             rebuildHourly(windowStart, windowEnd, traceId);
-            LocalDate dailyStart = now.minus(7, ChronoUnit.DAYS).atZone(ZoneOffset.UTC).toLocalDate();
-            LocalDate dailyEnd = now.atZone(ZoneOffset.UTC).toLocalDate();
+            if (effectiveStopRequested.getAsBoolean()) {
+                return new Result(true, true, windowStart, windowEnd, dailyStart, dailyEnd);
+            }
             rebuildDailyFromHourly(dailyStart, dailyEnd, traceId);
+            if (effectiveStopRequested.getAsBoolean()) {
+                return new Result(true, true, windowStart, windowEnd, dailyStart, dailyEnd);
+            }
             repository.updateWatermark(
                     JOB_NAME,
                     windowEnd,
@@ -61,6 +77,7 @@ public class AnalyticsRollupApplicationService {
                     "统计已更新",
                     traceId,
                     Instant.now());
+            return new Result(true, false, windowStart, windowEnd, dailyStart, dailyEnd);
         } catch (RuntimeException exception) {
             repository.updateWatermark(
                     JOB_NAME,
@@ -171,6 +188,29 @@ public class AnalyticsRollupApplicationService {
             return InetAddress.getLocalHost().getHostName() + "-" + ProcessHandle.current().pid();
         } catch (Exception exception) {
             return "analytics-rollup-" + ProcessHandle.current().pid();
+        }
+    }
+
+    /**
+     * 汇总执行摘要仅记录任务状态和时间窗口，避免把运营明细写入统一任务运行记录。
+     */
+    public record Result(
+            boolean executed,
+            boolean stopped,
+            Instant hourlyWindowStart,
+            Instant hourlyWindowEnd,
+            LocalDate dailyStart,
+            LocalDate dailyEnd) {
+
+        public Map<String, Object> toMap() {
+            LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+            result.put("executed", executed);
+            result.put("stopped", stopped);
+            result.put("hourlyWindowStart", hourlyWindowStart.toString());
+            result.put("hourlyWindowEnd", hourlyWindowEnd.toString());
+            result.put("dailyStart", dailyStart.toString());
+            result.put("dailyEnd", dailyEnd.toString());
+            return result;
         }
     }
 

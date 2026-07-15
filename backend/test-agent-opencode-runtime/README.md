@@ -18,7 +18,7 @@
 - `REDIS_SUMMARY` 普通无活动 Run 由 `RunInactiveExpiryScheduler` 在 Java 启动完成后立即扫描，并每 30 秒扫描本服务器 active 索引；无 attention 且 `updatedAt` 达到两小时边界后，通过公共 Java 路由、owner lease/fencing、best-effort 远端取消与终态摘要投影收敛，不写 `run_events`。
 - 新模式 Run 锚点写入后若 Redis 在远端 prompt 派发前中断，不立即把原文降级写库：启动链路先尝试 fenced 失败终态；仍不可用时由 `RunRuntimeLossConvergenceScheduler` 等待 30 秒。Redis 仍不可用则使用启动期安全控制面快照取消已创建的远端 Session（尚未创建则跳过）并写 `RUNTIME_STATE_LOST` fallback 双摘要；Redis 已恢复则以条件接管产生的新 fencing token 关闭这个从未派发的 Run，避免锚点永久停在 `RUNNING`。
 - AI 回复满意度反馈归属校验和 upsert：只允许登录用户对自己会话或自己触发 Run 的 `ASSISTANT` 消息提交 `POSITIVE/NEGATIVE` 反馈，评论最多 300 字。
-- 运营分析 rollup 与查询：主链路只写事实，后台 runner 通过数据库锁默认刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图；查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
+- 运营分析 rollup 与查询：主链路只写事实，`AnalyticsRollupTaskHandler` 以任务 key `opencode-runtime.analytics-rollup` 注册到统一 scheduler，默认 cron `0 */5 * * * *`、锁 TTL 5 分钟，刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图。scheduler 负责 Redis 分布式锁、续租、运行记录、手工触发和协作式停止；业务数据库锁暂时保留，供新旧 Java 滚动部署期间共同互斥，锁冲突只记录为本次未执行。查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
 - `BackendJavaProcessLifecycleService` 首次保存后端实例时以进程启动时间作为 `createdAt`，心跳时间作为 `updatedAt`，避免启动阶段 manager 注册与周期心跳并发导致时间逆序、阻断 manager WebSocket 注册。
 - `BackendJavaRouteResolver` 统一解析当前 Java 所属稳定 `linuxServerId`、Redis 中按 `backendProcessId` 保留的 Java 快照、以及 `containerId` 对应 manager 所属服务器；同一服务器多 Java 时优先选择与目标服务器 manager 已连接的 Java，其次选择同服务器最新心跳 Java，最后才使用当前 Java 兜底。所有用户进程、运行管理、Agent 配置和文件 WebSocket 路由都必须复用它做目标选择。新增 opencode-manager 路由或 Java->manager 控制入口时，不得在其它 service 中重新扫描 Redis 快照、复制 `linuxServerId/containerId` 解析、直接控制远端 manager 或绕过目标 Java。
@@ -72,6 +72,7 @@
 - `ConversationContextApplicationServiceTest` 覆盖签发租约先于权威读取、历史 Workspace 安全回填后的有界重签、会话/工作区/完整用户进程/agent binding 快照、代次 CAS、`peek/touch` 两段校验和绑定校验；`ConversationContextInvalidationListenerTest` 覆盖可信路径参数全局失效过滤；`ConversationRunContextResolverTest` 覆盖缺 token 兼容、缓存进程健康探测、明确停止失效以及 `STALE` 不失效。
 - `StaleActiveRunReconcileServiceTest` 覆盖 legacy Run 超过 2 小时且无近期输出/未处理 ask 时标记 `FAILED` 并追加 `run.failed`、Redis 近期输出存在时跳过、Redis pending ask 存在时跳过、Run 已刷新或终态时跳过、CAS 失败不追加事件、Redis 读取异常保守跳过；持久化集成测试验证候选 SQL 排除 `REDIS_SUMMARY`。
 - `StaleActiveRunReconcileTaskHandlerTest` 覆盖业务任务 key、5 分钟 cron、5 分钟锁 TTL、启动 catch-up 不扫描和手动触发仍扫描。
+- `AnalyticsRollupApplicationServiceTest` / `AnalyticsRollupTaskHandlerTest` 覆盖兼容数据库锁冲突、阶段间停止、成功/失败水位、低敏运行结果、统一任务元数据和协作式人工停止。
 - `BackendJavaRouteResolverTest` 覆盖同服务器多 Java 快照保留、manager 连接优先于最新心跳、当前服务器本地兜底、远端目标判断、`containerId` 按最新 manager 快照解析所属服务器，以及目标 Java 不可用时统一 `OPENCODE_UNAVAILABLE`。
 - `OpencodeProcessStatusQueryServiceTest` 覆盖公共状态查询服务的进程记录缺失、health healthy、not-running 映射 STOPPED、普通不健康和 manager 异常返回 STALE、缓存快照稳定健康 0 次 Repository find/0 次 save、状态变化 0 次 find/1 次 save、heartbeat 刷新，以及弱健康只读 Redis 快照的行为。
 - `OpencodeProcessStartupServiceTest` 覆盖公共启动服务的 start、候选进程保存、启动后公共状态查询、短暂 HTTP health 不可达时等待恢复、manager 控制错误立即失败、持续健康失败超时、失败候选状态收敛、进程上下文失效、RUNNING/binding/heartbeat/ExecutionNode 回写和旧进程/绑定时间复用。
@@ -116,7 +117,7 @@
 
 新增与会话、运行、事件、Diff、permission/question、runtime catalog、terminal 相关业务编排时改这里；新增 agent 适配器应放在 `test-agent-agent-runtime`。Controller 和 URL 映射必须放在 `test-agent-api`。
 `LEGACY_FULL` 下高频文本 delta、message projection 和大段 tool/bash 输出不应写入 `run_events`；消息内容刷新恢复优先从 agent 标准 session messages 分页拉取并 upsert 到 `session_messages`，兼容消息列表接口的远端刷新必须在 bounded-elastic 线程执行，agent 不可用时回退数据库快照。`REDIS_SUMMARY` 下所有运行中 mapped/transient/durable 事件都进入 Redis，不写 `run_events` 或 `run_session_scopes`；durable 使用 seq Stream，所有事实帧使用 runtimeVersion Stream，消息/part/entity 当前状态使用 Hash/ZSET 物化，SSE 首帧 reset 后从 runtimeVersion tail 顺序恢复。不得为了 Redis 故障把原始详情降级写数据库。child idle/error 只能产生 session 事件，root idle/error 才能派生 `run.succeeded/run.failed`。
-运营分析新增指标时优先扩展 `AnalyticsModels`、`AnalyticsRepository`、rollup runner 和查询服务；API 查询不得绕过 rollup 直接扫原始事实表，导出字段不得包含 prompt/assistant 原文、密钥或费用字段。
+运营分析新增指标时优先扩展 `AnalyticsModels`、`AnalyticsRepository`、`AnalyticsRollupApplicationService` 和查询服务；调度入口必须继续使用 `AnalyticsRollupTaskHandler`，不得重新增加业务 `@Scheduled`。API 查询不得绕过 rollup 直接扫原始事实表，导出字段不得包含 prompt/assistant 原文、密钥或费用字段。
 生产 `OpencodeProcessManagerGateway` 通过 manager WebSocket 控制面下发 `start`/`health`/`restart`/`stop` 命令；无连接、超时或异常必须转换为平台 opencode 错误码。测试仍可使用 fake gateway 固定初始化、健康检查或运行管理命令结果。
 所有 opencode server 启动入口必须调用 `OpencodeProcessStartupService`，由公共服务统一完成启动、候选进程快照、启动后 health 和最终状态回写；不要在新增业务编排中直接调用 `gateway.startProcess()` 并自行写进程、binding、heartbeat 或 `ExecutionNode`。
 所有 opencode server 停止入口必须调用 `OpencodeProcessStopService`，由公共服务统一完成 manager stop、停止后 health 失败确认和最终状态回写；不要在新增业务编排中直接调用 `gateway.stopProcess()` 并自行写 `STOPPED`。

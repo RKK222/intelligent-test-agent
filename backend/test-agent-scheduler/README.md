@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-分布式定时任务框架模块，负责通用任务注册、Cron 计算、Redis 分布式锁、后台扫描执行、统一运行记录和管理服务。本模块只提供框架，不包含任何具体业务定时任务；具体业务任务在所属业务模块实现 `ScheduledTaskHandler` Bean，例如 opencode runtime 的 stale active Run 收敛任务。
+分布式定时任务框架模块，负责通用任务注册、Cron 计算、Redis 分布式锁、后台扫描执行、统一运行记录和管理服务。本模块只提供框架，不包含任何具体业务定时任务；具体业务任务在所属业务模块实现 `ScheduledTaskHandler` Bean，例如 opencode runtime 的 stale active Run 收敛和运营分析汇总任务。
 
 ## 技术栈
 
@@ -59,6 +59,7 @@
 - 业务模块可以依赖 `test-agent-scheduler` 并提供 `ScheduledTaskHandler` Bean，由本模块统一完成任务注册、Redis 锁、运行记录、cron 调整、手动触发和停止信号传递。
 - 长循环业务任务必须读取 `ScheduledTaskContext.stopRequested()` 或调用 `throwIfStopRequested()`，不要自行实现分布式锁或运行记录。
 - 业务模块自己的扫描阈值、Redis key、数据库查询和事件副作用必须在业务模块 README 与测试中说明；本模块不保存这些业务语义。
+- 当前代码注册示例包括 `opencode-runtime.stale-active-run-reconcile` 和 `opencode-runtime.analytics-rollup`；后者默认每 5 分钟执行，并在主要数据库阶段间检查停止信号。其业务数据库锁仅用于滚动部署期间兼容仍在运行的旧 `@Scheduled` 实例，不是 scheduler 框架的锁降级实现。
 
 ## 测试覆盖
 
