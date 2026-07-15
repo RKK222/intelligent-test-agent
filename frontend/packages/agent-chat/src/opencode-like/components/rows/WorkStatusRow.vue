@@ -143,7 +143,11 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div class="oc-work-status__line oc-work-status__event-line" aria-label="工作事件">
+    <div
+      v-if="row.events.length > 0"
+      class="oc-work-status__line oc-work-status__event-line"
+      aria-label="工作事件"
+    >
       <div class="oc-work-status__event-strip">
         <button
           v-for="event in row.events"

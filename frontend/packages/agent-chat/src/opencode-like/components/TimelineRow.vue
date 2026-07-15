@@ -7,6 +7,7 @@ export type TimelineRowProps = {
   state: OpencodeLikeConversationState;
   openWorkStatusEventKey?: string;
   historicalWorkStatusExpanded?: boolean;
+  completedWorkStatusExpanded?: boolean;
 };
 </script>
 
@@ -32,7 +33,12 @@ const emit = defineEmits<{
   selectSubagent: [sessionId: string];
   toggleWorkStatusEvent: [eventKey: string];
   toggleHistoricalWorkStatus: [];
+  toggleCompletedWorkStatus: [];
   closeWorkStatusEvent: [];
+}>();
+
+defineSlots<{
+  "completed-status-actions"?: () => unknown;
 }>();
 
 const userMessage = computed(() => props.state.messageById[props.row.type === "error" ? "" : props.row.userMessageId]);
@@ -161,6 +167,30 @@ const toolGroupParts = computed(() => {
     >
       <Activity aria-hidden="true" />
     </OcIconButton>
+  </div>
+  <div
+    v-else-if="row.type === 'work-status' && row.isLatest && row.status === 'completed'"
+    class="oc-row oc-work-status-completed"
+  >
+    <div class="oc-work-status-completed-summary">
+      <OcIconButton
+        class="oc-work-status-completed-trigger"
+        :label="completedWorkStatusExpanded ? '收起已完成工作状态' : '展开已完成工作状态'"
+        :aria-expanded="completedWorkStatusExpanded"
+        @click="emit('toggleCompletedWorkStatus')"
+      >
+        <Activity aria-hidden="true" />
+      </OcIconButton>
+      <slot name="completed-status-actions" />
+    </div>
+    <WorkStatusRow
+      v-if="completedWorkStatusExpanded"
+      :row="row"
+      :state="state"
+      :open-event-key="openWorkStatusEventKey"
+      @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
+      @close-event="emit('closeWorkStatusEvent')"
+    />
   </div>
   <div v-else-if="row.type === 'work-status'" class="oc-row oc-work-status-container">
     <WorkStatusRow

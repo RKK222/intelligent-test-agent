@@ -40,6 +40,32 @@
   position: relative;
 }
 
+.oc-work-status-completed {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.oc-work-status-completed-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.oc-work-status-completed-trigger {
+  width: 28px;
+  height: 28px;
+  color: var(--oc-muted);
+}
+
+.oc-work-status-completed-trigger svg {
+  width: 15px;
+  height: 15px;
+}
+
 .oc-work-status-history {
   display: flex;
   align-items: center;
