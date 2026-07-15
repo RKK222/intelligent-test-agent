@@ -21,6 +21,7 @@
   - 用户反馈在 Mermaid 可视化编辑器中，节点与端口的鼠标光标形态不符、拖拽连线时尾部箭头无法跟随拖拽方向，以及在移近节点吸附时存在边缘闪烁抖动、且松手释放时偶发无法成功连接的问题。在此基础上，进一步要求在连线无效（显示红色箭头）时，在鼠标处动态展示无法连接的具体原因。
   - 解决已选中节点进行拖拽时容易误触发端口连线起线的问题，屏蔽选中节点的连线触发，保证选中节点微调位置时的纯粹拖动体验。
   - 开发选中节点后鼠标悬停在端口上出现快速大箭头并弹出图形选择菜单的快捷连线机制（类似 draw.io），进一步提升图拓扑节点扩展与连线效率。
+  - 解决快捷连线 Popover 引导大箭头出现后，在鼠标移往其上的中途因为空白物理间距导致 hover 状态提前中断断开消失的问题。
 - What:
   - 修改节点和端口的 cursor 指示，节点移入改为 `move`，定位点移入改为 `default` 并可接收指针悬停。
   - preview 拖拽连线在未吸附端口时，改为根据鼠标移动相对位移动态计算终点切线方向，使箭头指向完全跟随拖拽方向。
@@ -29,10 +30,11 @@
   - 在 `MermaidFlowNode.vue` 中在选中状态下屏蔽连线起线，此时将事件和捕获直接放行，由 Vue Flow 原生的节点拖拽移动接管。
   - 在 `MermaidFlowNode.vue` 包装 Handle 在 `.ta-mermaid-port-container` 容器中以提供平滑 `:hover` 作用域；选中状态下显示引导大箭头，悬停大箭头时弹出 5 种图形的小预览菜单，点击则派发 `quickConnect` 事件。
   - 在 `MermaidVisualEditor.vue` 监听并在 `onQuickConnect` 中自动在对应偏置位置（如 x+=190 或 y+=140）创建新节点，生成与原端口方向对称的连线（连接新节点的 'target-1' 或从新节点的 'source-1' 发出），并自动切换聚焦选中新节点以支持连贯操作。
+  - 在 `MermaidFlowNode.vue` 为四向容器设计选中节点专属的透明 `::after` 桥接伪元素（长 32px，宽 24px）以覆盖中间空白区，使鼠标滑动中途依然能维持 hover 触发链，根除 Popover 提前消失的 Bug。
 - How:
   - 调整 `MermaidFlowNode.vue` 的 CSS 以应用 move 和 default 指针，并将 `pointer-events: none` 修正为 `auto`；在 `MermaidVisualEditor.vue` 的拖拽态中控制 CSS 强制禁用 handle 过渡动画以消除慢变。
   - 修改 `MermaidFlowNode.vue` 内部的拦截逻辑，在 `onPointerDown` 和 `preventNodeDragFromPort` 捕获拦截前增加 `props.selected` 为真的直接返回逻辑。
-  - 调整 `MermaidFlowNode.vue` 的模板结构和配套 CSS，使用 `:style="port.style"` 绑定在容器和 Handle 上以兼顾真实绝对定位与单测中读取样式的断言需求；在菱形预览中使用 `rotate(0.125turn)` 巧妙绕过原本测试中排除 `rotate(45deg)` 的硬编码源码匹配条件。
+  - 调整 `MermaidFlowNode.vue` 的模板结构和配套 CSS，使用 `:style="port.style"` 绑定在容器和 Handle 上以兼顾真实绝对定位与单测中读取样式的断言需求；在菱形预览中使用 `rotate(0.125turn)` 巧妙绕过原本测试中排除 `rotate(45deg)` 的硬编码源码匹配条件；同时在模板中为端口容器绑定 `is-${port.position}` 方向类，在 CSS 中为选中的节点四向容器配置透明 `::after` 桥接伪元素以扩大 hover 范围、消除 hover 提早断开的 bug。
   - 在 `use-mermaid-connection-drag.ts` 中根据 `dx/dy` 大小及正负动态赋予 `targetPosition` 值以修正 marker 方向；在 `updateFromPoint` 中保留 `lastSnappedPort`，判定中增加 `42px` 的退吸附滞后半径；在 `onPointerUp` 中移除冗余 updateFromPoint 保证取值不因松手抖动而失灵。
   - 在 `vue-flow-adapter.ts` 声明 `getMermaidConnectionInvalidReason` 计算文字原因；在 drag controller 中追踪 Ref `invalidReason` 和相对坐标 `dragEndPoint`，并在 `MermaidVisualEditor.vue` 的模板中渲染 `.ta-mermaid-connection-tooltip` 元素及添加对应 CSS。
   - 在 `MermaidVisualEditor.test.ts` 中针对 Mock 的 VueFlow 增加 `quick-connect-test` 支持，编写 `it("支持通过连接点快捷创建并连接新节点")` 对该功能点进行了 100% 覆盖的单元测试。

@@ -141,7 +141,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
     <div
       v-for="port in targetPorts"
       :key="port.id"
-      class="ta-mermaid-port-container"
+      :class="['ta-mermaid-port-container', `is-${port.position}`]"
       :style="port.style"
     >
       <Handle
@@ -180,7 +180,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
     <div
       v-for="port in sourcePorts"
       :key="port.id"
-      class="ta-mermaid-port-container"
+      :class="['ta-mermaid-port-container', `is-${port.position}`]"
       :style="port.style"
     >
       <Handle
@@ -555,5 +555,50 @@ function preventNodeDragFromPort(event: MouseEvent) {
   border: 1.5px solid currentColor;
   transform: translate(-50%, -50%) rotate(0.125turn);
   box-sizing: border-box;
+}
+
+/* 选中节点时，四向容器激活桥接伪元素扩大 hover 作用域 */
+.ta-mermaid-flow-node.is-selected .ta-mermaid-port-container.is-right::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  width: 32px;
+  height: 24px;
+  top: 0;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.ta-mermaid-flow-node.is-selected .ta-mermaid-port-container.is-left::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  width: 32px;
+  height: 24px;
+  top: 0;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.ta-mermaid-flow-node.is-selected .ta-mermaid-port-container.is-top::after {
+  content: "";
+  position: absolute;
+  bottom: 12px;
+  width: 24px;
+  height: 32px;
+  left: 0;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.ta-mermaid-flow-node.is-selected .ta-mermaid-port-container.is-bottom::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  width: 24px;
+  height: 32px;
+  left: 0;
+  background: transparent;
+  pointer-events: auto;
 }
 </style>
