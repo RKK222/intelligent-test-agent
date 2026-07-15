@@ -6322,3 +6322,14 @@ bash /tmp/test-api-after-restart.sh
   - 使用 TDD 覆盖端口循环分配、五种方向值、菱形轮廓贴合和无旋转 CSS，并在本地真实流程图中检查 computed style、Handle 属性和四种方向切换。
 - Result:
   - 前端全量 lint、typecheck、56 个 Vitest 文件（801 passed、1 skipped）、生产 build 和 `git diff --check` 通过；浏览器页面无错误日志。构建仅保留既有 Google Fonts `@import` 顺序和大 chunk 警告。
+
+### 2026-07-15 - 运营分析汇总迁移统一定时任务
+
+- Why:
+  - 运营分析汇总当前由每个 Java 的 `@Scheduled` 触发并竞争数据库锁，无法通过统一任务管理查看完整运行记录、调整 Cron、手工补跑或协作式停止。
+- What:
+  - 已确认将汇总迁移为 `opencode-runtime.analytics-rollup` 业务 `ScheduledTaskHandler`，默认每五分钟执行；删除旧 Spring 调度入口和专用调度配置，保留数据库锁作为滚动发布期间的新旧实例共同互斥保护。
+- How:
+  - 设计要求 Handler 复用 scheduler Redis 锁、续租、运行记录和停止上下文；应用服务在主要阶段间检查停止请求，并只返回低敏窗口和执行状态。本次不修改指标口径、API、事件、数据库结构或环境配置文件。
+- Result:
+  - 设计文档已落在 `docs/superpowers/specs/2026-07-15-analytics-rollup-scheduler-migration-design.md`；待书面设计确认后生成实施计划并按 TDD 编码、验证和更新本条结果。
