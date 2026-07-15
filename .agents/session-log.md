@@ -6502,3 +6502,16 @@ bash /tmp/test-api-after-restart.sh
   - `mvn clean package -Dmaven.test.skip=true` 构建成功；`ManagedWorkspaceApplicationServiceTest` 45 项、`GitWorkspaceServiceTest`、前端 AgentConfig/GitChanges 35 项和 agent-web `vue-tsc` 均通过。
   - `.env.test` 三服务重启成功，backend readiness `UP`、前端 3000 返回 200、manager WebSocket 已连接；完整 API 定向测试仍被本任务外的 opencode-runtime 旧测试桩编译错误阻断，未修改该并发问题。
   - OpenCode 原生工具层未改造为平台权限感知；实际写入入口仍必须经过平台文件 WebSocket / Agent 配置 API，后续如开放原生工具直写需补同等路径策略。
+
+### 2026-07-15 - 内置 Help 对齐双 Git 与当前发布权限
+
+- Why:
+  - 内置用户手册仍把目录归属描述为开发 AI、测试公共 AI、测试 AI、开发业务代码四套 Git，工作区章节也只写通用提交/推送，和当前“公共 Git + 应用 Git”、个人 HEAD 投影以及 `spec/**` 禁止发布的实现不一致。
+- What:
+  - Help 的目录映射、工作区、Agent 配置、首次准备、快速开始和 FAQ 统一改为两套物理 Git；明确公共配置仅超级管理员可写，应用 Agent/Skill/rules/templates 仅应用管理员及以上可写，无权限时 Agents 配置树与编辑器只读且后端继续校验。
+  - 明确所有应用成员可维护并发布 `docs/**`，`spec/**` 只能提交到个人 worktree；“提交并推送”先形成个人 `HEAD`，再按仓库相对路径只投影允许发布的文件到应用 feature worktree，不 merge 或 push 整个个人分支。
+  - 说明 OpenCode、编辑器和终端始终读取固定在用户所属服务器磁盘上的同一个个人 worktree；应用 feature worktree 绝对路径不同，但投影保持仓库相对文件名。公共配置发布会广播公共同步，应用配置独立发布当前只以远端 push 确认为完成，不虚构同等广播行为。
+- How:
+  - 复用现有 VitePress Markdown、`directoryMapping` frontmatter 和 `HELP_TOPICS`，同步用户手册 README、agent-web PACKAGE 及 Help 单元/E2E 断言；没有修改 Git、权限、API 或运行态实现。
+- Result:
+  - 前端全量 Vitest 57 个文件通过（823 passed、1 skipped），用户手册与 agent-web 生产构建通过；精确 Chromium Help E2E 通过。新启动的 agent-web 位于 `http://127.0.0.1:3010`，Help 工作区与目录映射页面均返回 200，现有 `.env.test` 后端 health 为 `UP`。

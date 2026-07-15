@@ -46,7 +46,7 @@ export default defineConfig({
           { text: "首次使用前准备", link: "/guide/first-time-setup" },
           { text: "初始化 TestAgent 进程", link: "/guide/process-initialization" },
           { text: "应用版本与个人工作区", link: "/guide/workspace" },
-          { text: "开发与测试目录设计", link: "/guide/directory-mapping" },
+          { text: "开发与测试目录", link: "/guide/directory-mapping" },
           { text: "对话与上下文", link: "/guide/conversation" },
           { text: "Agent 与 Skill 配置", link: "/guide/agent-config" },
           { text: "常见问题", link: "/guide/faq" }

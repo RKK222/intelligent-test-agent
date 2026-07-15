@@ -70,10 +70,8 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   );
   const manualFrame = page.frameLocator('[data-testid="help-center-frame"]');
   await expect(manualFrame.getByRole("button", { name: "测试目录" })).toHaveCount(0);
-  await expect(manualFrame.getByText("开发 AI Git", { exact: true }).first()).toBeVisible();
-  await expect(manualFrame.getByText("测试公共 AI Git", { exact: true }).first()).toBeVisible();
-  await expect(manualFrame.getByText("测试 AI Git", { exact: true }).first()).toBeVisible();
-  await expect(manualFrame.getByText("开发业务代码 Git", { exact: true }).first()).toBeVisible();
+  await expect(manualFrame.getByText("公共 Git", { exact: true }).first()).toBeVisible();
+  await expect(manualFrame.getByText("应用 Git", { exact: true }).first()).toBeVisible();
   const sharedArchive = manualFrame.getByRole("treeitem", { name: /archive\// });
   const localSpec = manualFrame.getByRole("treeitem", { name: /^spec\// });
   const agentsRoot = manualFrame.getByRole("treeitem", { name: /^agents\// });
@@ -83,16 +81,16 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(localSpec).toBeVisible();
   await expect(manualFrame.getByRole("treeitem", { name: /2601\// })).toHaveCount(0);
   await expect(sharedArchive.locator(".scope-badge")).toHaveText("开发 + 测试");
-  await expect(sharedArchive.locator(".physical-badge")).toHaveText("开发 AI Git + 测试 AI Git");
+  await expect(sharedArchive.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(localSpec.locator(".scope-badge")).toHaveText("个人本地");
-  await expect(localSpec.locator(".physical-badge")).toHaveText("测试 AI Git · 仅本地提交");
+  await expect(localSpec.locator(".physical-badge")).toHaveText("应用 Git 个人分支 · 仅本地提交");
   await expect(agentsRoot.locator(".scope-badge")).toHaveText("开发 + 测试");
-  await expect(agentsRoot.locator(".physical-badge")).toHaveText("开发 AI Git + 测试公共 AI Git + 测试 AI Git");
+  await expect(agentsRoot.locator(".physical-badge")).toHaveText("公共 Git + 应用 Git");
   await expect(developmentAgent.locator(".scope-badge")).toHaveText("开发");
   await expect(developmentAgent.locator(".role-badge")).toHaveText("Agent");
-  await expect(developmentAgent.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(developmentAgent.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(testingAgent.locator(".scope-badge")).toHaveText("测试");
-  await expect(testingAgent.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
+  await expect(testingAgent.locator(".physical-badge")).toHaveText("公共 Git + 应用 Git");
   await manualFrame.getByRole("button", { name: "全部展开" }).click();
   const developmentAsset = manualFrame.getByRole("treeitem", { name: "工程概览_A.md" });
   const testingAsset = manualFrame.getByRole("treeitem", { name: "测试概述.md" });
@@ -119,13 +117,13 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   const technicalArchitecture = manualFrame.getByRole("treeitem", { name: /^技术架构\// });
   await expect(developmentAsset).toBeVisible();
   await expect(testingAsset).toBeVisible();
-  await expect(developmentAsset.locator(".physical-badge")).toHaveText("开发 AI Git");
-  await expect(testingAsset.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(developmentAsset.locator(".physical-badge")).toHaveText("应用 Git");
+  await expect(testingAsset.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(testDesignAgent.locator(".role-badge")).toHaveText("Agent");
-  await expect(testDesignAgent.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
+  await expect(testDesignAgent.locator(".physical-badge")).toHaveText("公共 Git + 应用 Git");
   await expect(testDesignAgent.locator(".implementation-badge")).toHaveText("已实现");
   await expect(testAnalysisWorkagent.locator(".role-badge")).toHaveText("workagent");
-  await expect(testAnalysisWorkagent.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+  await expect(testAnalysisWorkagent.locator(".physical-badge")).toHaveText("公共 Git");
   for (const implementedAgent of [testAnalysisWorkagent, testGenerationWorkagent, testReviewWorkagent, testExecutionAgent, apiExecutionWorkagent]) {
     await expect(implementedAgent.locator(".implementation-badge")).toHaveText("已实现");
   }
@@ -140,15 +138,15 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
     [applicationTestExecutionWorkagent, "workagent"]
   ] as const) {
     await expect(applicationAgent.locator(".role-badge")).toHaveText(role);
-    await expect(applicationAgent.locator(".physical-badge")).toHaveText("测试 AI Git");
+    await expect(applicationAgent.locator(".physical-badge")).toHaveText("应用 Git");
     await expect(applicationAgent.locator(".implementation-badge")).toHaveText("未实现");
     await expect(applicationAgent).toHaveClass(/planned/);
     await expect(applicationAgent).toHaveAttribute("aria-level", "6");
   }
   await expect(manualFrame.getByRole("treeitem", { name: /^<应用专属测试 Agent>\// })).toHaveCount(0);
   await expect(manualFrame.getByRole("treeitem", { name: /^<应用专属测试 workagent>\// })).toHaveCount(0);
-  await expect(publicTestRule.locator(".physical-badge")).toHaveText("测试公共 AI Git");
-  await expect(applicationTestRules.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(publicTestRule.locator(".physical-badge")).toHaveText("公共 Git");
+  await expect(applicationTestRules.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(applicationTestRules).toHaveAttribute("aria-expanded", "true");
   for (const applicationRule of [
     "接口测试设计应用规约.md",
@@ -159,16 +157,16 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   ]) {
     const row = manualFrame.getByRole("treeitem", { name: applicationRule });
     await expect(row).toBeVisible();
-    await expect(row.locator(".physical-badge")).toHaveText("测试 AI Git");
+    await expect(row.locator(".physical-badge")).toHaveText("应用 Git");
     await expect(row).toHaveAttribute("aria-level", "8");
   }
-  await expect(developmentSkills.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(developmentSkills.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(developmentSkills).toHaveAttribute("aria-level", "4");
-  await expect(testingSkills.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
+  await expect(testingSkills.locator(".physical-badge")).toHaveText("公共 Git + 应用 Git");
   await expect(testingSkills).toHaveAttribute("aria-level", "4");
   await expect(plannedCodeReviewSkill.locator(".implementation-badge")).toHaveText("未实现");
   await expect(plannedCodeReviewSkill).toHaveClass(/planned/);
-  await expect(applicationTestSkills.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(applicationTestSkills.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(applicationTestSkills.locator(".implementation-badge")).toHaveText("未实现");
   await expect(applicationTestSkills).toHaveClass(/planned/);
   const publicRuleGitBadge = manualFrame.getByRole("treeitem", { name: "接口测试设计规约.md" }).locator(".physical-badge");
@@ -183,7 +181,7 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   ]) {
     const row = manualFrame.getByRole("treeitem", { name: agentFile });
     await expect(row).toBeVisible();
-    await expect(row.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+    await expect(row.locator(".physical-badge")).toHaveText("公共 Git");
   }
   for (const skillDirectory of [
     "test-design/",
@@ -201,7 +199,7 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   ]) {
     const row = manualFrame.getByRole("treeitem", { name: new RegExp(`^${skillDirectory}`) });
     await expect(row).toBeVisible();
-    await expect(row.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+    await expect(row.locator(".physical-badge")).toHaveText("公共 Git");
     await expect(row.locator(".implementation-badge")).toHaveText("已实现");
     await expect(row).not.toHaveClass(/planned/);
     await expect(row).toHaveAttribute("aria-level", "5");
@@ -209,15 +207,15 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   for (const sharedNode of sharedDocsNodes) {
     await expect(sharedNode).toBeVisible();
     await expect(sharedNode.locator(".scope-badge")).toHaveText("开发 + 测试");
-    await expect(sharedNode.locator(".physical-badge")).toHaveText("开发 AI Git + 测试 AI Git");
+    await expect(sharedNode.locator(".physical-badge")).toHaveText("应用 Git");
   }
   await expect(technicalArchitecture.locator(".scope-badge")).toHaveText("开发");
-  await expect(technicalArchitecture.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(technicalArchitecture.locator(".physical-badge")).toHaveText("应用 Git");
   for (const applicationScenario of ["应用场景说明书_XXX.md", "应用场景说明书_YYY.md"]) {
     const row = manualFrame.getByRole("treeitem", { name: applicationScenario });
     await expect(row).toBeVisible();
     await expect(row.locator(".scope-badge")).toHaveText("测试");
-    await expect(row.locator(".physical-badge")).toHaveText("测试 AI Git");
+    await expect(row.locator(".physical-badge")).toHaveText("应用 Git");
     await expect(row).toHaveAttribute("aria-level", "4");
   }
   await expect(manualFrame.getByRole("treeitem", { name: "测试概述.md" })).toHaveAttribute("aria-level", "4");
@@ -227,10 +225,10 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(manualFrame.getByText("工作 Agent 统一称为 workagent")).toBeVisible();
   await expect(manualFrame.getByText(/供上层 Agent 编排调用/).first()).toBeVisible();
   await manualFrame.getByRole("button", { name: "内容与责任" }).click();
-  await expect(manualFrame.getByRole("cell", { name: "效能组、测试管理组" })).toBeVisible();
-  await expect(manualFrame.getByRole("cell", { name: "测试管理组", exact: true })).toBeVisible();
+  await expect(manualFrame.getByRole("cell", { name: "公共能力建设团队" })).toBeVisible();
+  await expect(manualFrame.getByRole("cell", { name: "仅个人 worktree 本地提交，禁止发布", exact: true })).toBeVisible();
   await expect(manualFrame.getByRole("cell", { name: "docs/**", exact: true })).toBeVisible();
-  await expect(manualFrame.getByRole("cell", { name: "具体研发阶段的输入输出产物（需求、设计、编码、测试）" })).toBeVisible();
+  await expect(manualFrame.getByRole("cell", { name: "具体研发阶段的个人输入输出产物" })).toBeVisible();
 });
 
 test("Markdown Mermaid Flowchart 和 Sequence 可视化编辑后复用保存链路", async ({ page }) => {

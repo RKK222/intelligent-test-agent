@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import HelpCenterDialog from "../src/components/HelpCenterDialog.vue";
 import {
   buildManualQuestionPrompt,
+  helpTopicById,
   helpDocumentUrl,
   normalizeHelpTopic,
   stripMarkdownFrontmatter
@@ -63,8 +64,8 @@ describe("help center", () => {
       .toBe("/help/guide/directory-mapping.html");
     const prompt = buildManualQuestionPrompt("directory-mapping", "测试目录放什么？");
     expect(prompt).toContain("【当前章节】开发与测试目录");
-    expect(prompt).toContain("workagent");
-    expect(prompt).toContain("开发已有资产");
+    expect(prompt).toContain("公共 Git 与应用 Git");
+    expect(prompt).toContain("个人 worktree");
     expect(prompt).not.toContain("directoryMapping:");
   });
 
@@ -122,5 +123,21 @@ describe("help center", () => {
     expect(prompt).toContain("应用版本与个人工作区");
     expect(prompt).toContain("个人工作区是什么？");
     expect(prompt.length).toBeLessThan(3_900);
+  });
+
+  it("documents the implemented two-git permissions and personal HEAD publish flow", () => {
+    const workspace = helpTopicById("workspace").content;
+    const agentConfig = helpTopicById("agent-config").content;
+
+    expect(workspace).toContain("当前平台使用两套物理 Git");
+    expect(workspace).toContain("只把允许发布且已进入个人 `HEAD` 的文件");
+    expect(workspace).toContain("`spec/**`");
+    expect(workspace).toContain("只保留个人提交，不发布");
+    expect(workspace).toContain("`docs/**`");
+    expect(agentConfig).toContain("只有超级管理员可以创建公共 worktree");
+    expect(agentConfig).toContain("只有应用管理员与超级管理员可以创建应用 worktree");
+    expect(agentConfig).toContain("`compatibility: opencode`");
+    expect(agentConfig).toContain("公共配置推送成功后，平台会广播公共配置同步");
+    expect(agentConfig).toContain("应用配置当前以页面确认远端推送成功为完成标准");
   });
 });
