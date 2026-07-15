@@ -32,9 +32,38 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Properties;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.info.BuildProperties;
 
 class BackendJavaProcessLifecycleServiceTest {
+
+    @Test
+    void heartbeatWritesBuildVersionFromBuildMetadata() {
+        FakeRepository repository = new FakeRepository();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        Properties properties = new Properties();
+        properties.setProperty("time", "2026-07-15T01:02:03Z");
+        BackendJavaProcessLifecycleService service = new BackendJavaProcessLifecycleService(
+                repository,
+                heartbeatStore,
+                new ManagerControlSettings(
+                        "secret-token",
+                        "http://10.8.0.21:8080",
+                        new LinuxServerId("10.8.0.21"),
+                        Duration.ofSeconds(10),
+                        Duration.ofSeconds(30),
+                        Duration.ofSeconds(5),
+                        100),
+                Clock.fixed(Instant.parse("2026-06-24T00:00:00Z"), ZoneOffset.UTC),
+                new BackendRuntimeMetricsCollector(),
+                new BackendBuildVersionProvider(new BuildProperties(properties)));
+
+        service.registerHeartbeat("trace_build_version");
+
+        assertThat(heartbeatStore.backendSnapshots).singleElement().satisfies(snapshot ->
+                assertThat(snapshot.buildVersion()).isEqualTo("V20260715.090203"));
+    }
 
     @Test
     void usesProcessStartTimeAsCreatedAtOnFirstHeartbeat() {

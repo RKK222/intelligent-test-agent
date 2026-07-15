@@ -9,6 +9,9 @@ import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
 const pkgSrc = (name: string): URL => new URL(`./packages/${name}/src`, import.meta.url);
 
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_TEST_AGENT_BUILD_VERSION": JSON.stringify("V20260715.101112")
+  },
   plugins: [
     vue(),
     AutoImport({

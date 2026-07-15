@@ -164,7 +164,8 @@ public class RuntimeManagementQueryService {
         }
         var linuxServers = linuxServersById.values().stream().toList();
         var backendProcesses = backendSnapshots.stream()
-                .map(snapshot -> new RuntimeManagementBackendProcess(snapshot.backendProcess(), snapshot.metrics()))
+                .map(snapshot -> new RuntimeManagementBackendProcess(
+                        snapshot.backendProcess(), snapshot.metrics(), snapshot.buildVersion()))
                 .toList();
         var containers = managerSnapshots.stream()
                 .map(snapshot -> new RuntimeManagementContainer(snapshot.container(), snapshot.metrics()))
@@ -450,7 +451,8 @@ public class RuntimeManagementQueryService {
         return managerSnapshots.stream()
                 .map(snapshot -> new RuntimeManagementManager(
                         snapshot.manager(),
-                        enrichManagedProcesses(snapshot, candidatesByKey, bindings)))
+                        enrichManagedProcesses(snapshot, candidatesByKey, bindings),
+                        snapshot.buildVersion()))
                 .toList();
     }
 

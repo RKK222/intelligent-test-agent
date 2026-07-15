@@ -9,7 +9,17 @@ import java.util.Objects;
  */
 public record RuntimeManagementManager(
         OpencodeContainerManager manager,
-        List<RuntimeManagementManagedProcess> managedProcesses) {
+        List<RuntimeManagementManagedProcess> managedProcesses,
+        String buildVersion) {
+
+    /**
+     * 兼容旧构造调用，旧 manager 未上报构建版本时保持为空。
+     */
+    public RuntimeManagementManager(
+            OpencodeContainerManager manager,
+            List<RuntimeManagementManagedProcess> managedProcesses) {
+        this(manager, managedProcesses, null);
+    }
 
     /**
      * 复制下属进程列表，兼容旧 Redis 快照中 managedProcesses 缺失的情况。

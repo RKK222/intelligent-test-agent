@@ -7,6 +7,7 @@ ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
 FROM ${GO_IMAGE} AS manager-build
 
 ARG GOPROXY=https://goproxy.cn,direct
+ARG MANAGER_BUILD_VERSION
 ENV GOPROXY=${GOPROXY}
 ENV CGO_ENABLED=0
 ENV GOOS=linux
@@ -18,7 +19,10 @@ COPY opencode-manager/go.mod opencode-manager/go.sum ./
 RUN go mod download
 
 COPY opencode-manager/ ./
-RUN go build -trimpath -ldflags="-s -w" -o /out/opencode-manager ./cmd/opencode-manager
+RUN printf '%s' "${MANAGER_BUILD_VERSION}" | grep -Eq '^V[0-9]{8}\.[0-9]{6}$' \
+    && go build -trimpath \
+      -ldflags="-s -w -X github.com/icbc/test-agent/opencode-manager/internal/control.buildVersion=${MANAGER_BUILD_VERSION}" \
+      -o /out/opencode-manager ./cmd/opencode-manager
 
 FROM --platform=$BUILDPLATFORM ${BUN_IMAGE} AS opencode-node-build
 

@@ -126,6 +126,7 @@ final class RuntimeManagementDtos {
 
     record BackendProcessResponse(
             String backendProcessId,
+            String buildVersion,
             String linuxServerId,
             String listenUrl,
             String status,
@@ -193,6 +194,7 @@ final class RuntimeManagementDtos {
             BackendRuntimeMetrics metrics = row.metrics();
             return new BackendProcessResponse(
                     process.backendProcessId().value(),
+                    row.buildVersion(),
                     process.linuxServerId().value(),
                     process.listenUrl(),
                     process.status().name(),
@@ -308,6 +310,7 @@ final class RuntimeManagementDtos {
 
     record ManagerResponse(
             String managerId,
+            String buildVersion,
             String containerId,
             String linuxServerId,
             String protocolVersion,
@@ -323,6 +326,7 @@ final class RuntimeManagementDtos {
             OpencodeContainerManager manager = row.manager();
             return new ManagerResponse(
                     manager.managerId().value(),
+                    row.buildVersion(),
                     manager.containerId().value(),
                     manager.linuxServerId().value(),
                     manager.protocolVersion(),

@@ -8,7 +8,18 @@ import java.util.Objects;
 public record BackendRuntimeSnapshot(
         LinuxServer linuxServer,
         BackendJavaProcess backendProcess,
-        BackendRuntimeMetrics metrics) {
+        BackendRuntimeMetrics metrics,
+        String buildVersion) {
+
+    /**
+     * 兼容旧调用方，新增构建版本由 Java 生命周期心跳提供。
+     */
+    public BackendRuntimeSnapshot(
+            LinuxServer linuxServer,
+            BackendJavaProcess backendProcess,
+            BackendRuntimeMetrics metrics) {
+        this(linuxServer, backendProcess, metrics, null);
+    }
 
     /**
      * 兼容旧调用方，未采集资源指标时只保存后端拓扑快照。
@@ -16,7 +27,7 @@ public record BackendRuntimeSnapshot(
     public BackendRuntimeSnapshot(
             LinuxServer linuxServer,
             BackendJavaProcess backendProcess) {
-        this(linuxServer, backendProcess, null);
+        this(linuxServer, backendProcess, null, null);
     }
 
     /**

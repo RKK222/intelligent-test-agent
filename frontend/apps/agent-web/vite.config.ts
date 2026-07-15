@@ -13,6 +13,24 @@ const pkgSrc = (name: string): string =>
 const devServerHost = process.env.HOST ?? "127.0.0.1";
 
 /**
+ * 前端版本只在 Vite 启动构建时生成一次，统一使用北京时间，避免部署机器时区造成版本口径不一致。
+ */
+const buildVersion = (() => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `V${values.year}${values.month}${values.day}.${values.hour}${values.minute}${values.second}`;
+})();
+
+/**
  * Vite 的 SPA fallback 会优先接管目录 URL；显式改写手册首页，保证开发与预览环境点击手册 Logo 后仍留在手册内。
  */
 const manualIndexRoute = (): Plugin => ({
@@ -36,6 +54,9 @@ const manualIndexRoute = (): Plugin => ({
 });
 
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_TEST_AGENT_BUILD_VERSION": JSON.stringify(buildVersion)
+  },
   plugins: [
     manualIndexRoute(),
     vue(),

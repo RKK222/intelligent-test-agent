@@ -130,7 +130,7 @@ cp .env.local.example .env.local
 
 Run 运行数据面通过 domain `RunRuntimeStore` 与 persistence `RedisRunRuntimeStore` 隔离：单 Run manifest/input/双 Stream/snapshot/scope key 使用 `{runId}` hash tag，durable `events` Stream ID 为 `${seq}-0`，durable/transient 全事件 `runtime-events` Stream ID 为 `${runtimeVersion}-0`，snapshot 使用 Hash + order ZSET 保留当前物化状态。`REDIS_SUMMARY` 下每条事件不访问 PostgreSQL；终态事件 Lua 同时发布 versioned 关系型投影 outbox，启动和 5 秒恢复扫描在 ack 前复用服务器恢复索引补做幂等终态事务，覆盖 Java 在 Redis terminal append 与 PostgreSQL project 之间退出的窗口。SSE 首帧总是发送完整 `run.snapshot.reset`，然后由最短 5 秒的 Redis 安全扫描和本机 live bus 只唤醒按 `runtimeVersion` 分页读 Redis 尾流，live 事件仍即时唤醒但帧本身不直接输出；容量换代导致游标过旧时再次发送 reset。legacy 仍以 PostgreSQL 为事实源并保留旧轮询恢复。生产 Redis 的持久化、安全和容量要求见 `docs/deployment/backend.md`。
 
-运行管理中的 Java 后端快照按 `backendProcessId` 写入 Redis，并按 `linuxServerId` 分组选择目标 Java；`linuxServerId` 表示稳定服务器身份，不再要求是 IP。超级管理员在运行管理页重启/停止 opencode server 时，入口 Java 会先按统一 resolver 定位 `containerId` 所属服务器，目标不是当前 Java 或同服务器选中 Java 时转发到目标 Java，再由目标 Java 控制本服务器 manager；已有平台进程记录的重启先走公共停止服务，再用进程记录里的 `sessionPath` 走公共启动服务，无平台记录的无主端口才保留 manager `restart` fallback。公共配置管理页同样按稳定 `linuxServerId` 合并服务器视图。
+运行管理中的 Java 后端快照按 `backendProcessId` 写入 Redis，并按 `linuxServerId` 分组选择目标 Java；`linuxServerId` 表示稳定服务器身份，不再要求是 IP。Java 快照携带 Spring Boot build-info 构建时刻格式化的 `buildVersion`，manager 快照携带 Go linker 注入的同名字段，均使用北京时间 `VyyyyMMdd.HHmmss`；旧快照缺字段时为空，不使用启动时间补值。超级管理员在运行管理页重启/停止 opencode server 时，入口 Java 会先按统一 resolver 定位 `containerId` 所属服务器，目标不是当前 Java 或同服务器选中 Java 时转发到目标 Java，再由目标 Java 控制本服务器 manager；已有平台进程记录的重启先走公共停止服务，再用进程记录里的 `sessionPath` 走公共启动服务，无平台记录的无主端口才保留 manager `restart` fallback。公共配置管理页同样按稳定 `linuxServerId` 合并服务器视图。
 
 验证后端启动成功：
 ```bash

@@ -758,7 +758,11 @@ build_opencode_manager() {
   fi
   require_command go
   echo "Building opencode-manager: go build"
-  (cd "${ROOT_DIR}/opencode-manager" && go build -o bin/opencode-manager ./cmd/opencode-manager)
+  local manager_build_version
+  manager_build_version="$(TZ=Asia/Shanghai date '+V%Y%m%d.%H%M%S')"
+  (cd "${ROOT_DIR}/opencode-manager" && go build \
+    -ldflags "-X github.com/icbc/test-agent/opencode-manager/internal/control.buildVersion=${manager_build_version}" \
+    -o bin/opencode-manager ./cmd/opencode-manager)
 }
 
 start_backend() {

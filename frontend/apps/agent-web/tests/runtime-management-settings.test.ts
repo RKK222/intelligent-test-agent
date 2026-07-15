@@ -142,6 +142,8 @@ describe("runtime management settings", () => {
     expect(superAdmin.queryByText("用户管理（测试）")).toBeNull();
     expect(superAdmin.queryByText("应用与工作区")).toBeNull();
     expect(superAdmin.queryByText("运行管理")).toBeNull();
+    expect(superAdmin.getByText("前端版本")).toBeTruthy();
+    expect(superAdmin.getByText("V20260715.101112")).toBeTruthy();
     superAdmin.unmount();
 
     const appAdmin = render(SettingsMenu, {
@@ -273,7 +275,9 @@ describe("runtime management settings", () => {
     const { findAllByText, findByText, queryByText, queryClient } = renderRuntimePanel(api);
 
     expect(await findByText("服务器 / Java 进程")).toBeTruthy();
-    expect(await findByText("bjp_1234567890abcdef")).toBeTruthy();
+    const backendProcessIdCell = await findByText("bjp_1234567890abcdef");
+    expect(backendProcessIdCell).toBeTruthy();
+    expect(backendProcessIdCell.closest("tr")?.children.item(3)?.textContent).toBe("-");
     expect((await findAllByText("10.8.0.12")).length).toBeGreaterThanOrEqual(2);
     expect(await findByText("整机 12.5% / -核")).toBeTruthy();
     expect(await findByText((_content, element) =>
@@ -314,6 +318,7 @@ describe("runtime management settings", () => {
       backendProcesses: [
         {
           backendProcessId: "bjp_1234567890abcdef",
+          buildVersion: "V20260715.091011",
           linuxServerId: "linux-prod-a",
           listenUrl: "http://10.8.0.21:8080",
           status: "READY",
@@ -344,6 +349,7 @@ describe("runtime management settings", () => {
       managers: [
         {
           managerId: "mgr_1234567890abcdef",
+          buildVersion: "V20260715.092012",
           containerId: "ctr_01",
           linuxServerId: "linux-prod-a",
           protocolVersion: "opencode-manager.v1",
@@ -369,6 +375,8 @@ describe("runtime management settings", () => {
     expect(getAllByText("linux-prod-a").length).toBeGreaterThanOrEqual(2);
     expect(getAllByText("IP地址").length).toBeGreaterThanOrEqual(2);
     expect(getAllByText("10.8.0.21").length).toBeGreaterThanOrEqual(2);
+    expect(await findByText("V20260715.091011")).toBeTruthy();
+    expect(await findByText("V20260715.092012")).toBeTruthy();
 
     queryClient.clear();
   });

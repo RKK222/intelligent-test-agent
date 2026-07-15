@@ -96,6 +96,21 @@ class ManagerControlMessageCodecTest {
     }
 
     @Test
+    void decodesOptionalManagerBuildVersionAndKeepsOldPayloadCompatible() {
+        ManagerControlMessageCodec codec = new ManagerControlMessageCodec(new ObjectMapper());
+
+        ManagerControlMessage versioned = codec.decode("""
+                {"type":"managerHeartbeat","protocolVersion":"opencode-manager.v1","buildVersion":"V20260715.090203"}
+                """);
+        ManagerControlMessage legacy = codec.decode("""
+                {"type":"managerHeartbeat","protocolVersion":"opencode-manager.v1"}
+                """);
+
+        assertThat(versioned.buildVersion()).isEqualTo("V20260715.090203");
+        assertThat(legacy.buildVersion()).isNull();
+    }
+
+    @Test
     void decodesManagerHeartbeatManagedProcessStartCommand() {
         ManagerControlMessageCodec codec = new ManagerControlMessageCodec(new ObjectMapper());
 

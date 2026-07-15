@@ -547,7 +547,7 @@ curl -fsS http://122.233.30.2/
 docker logs --tail 120 test-agent-opencode-worker
 ```
 
-超级管理员进入“系统管理 → 运行管理”确认 Java、manager、容器均在线；进入“系统管理 → 配置管理 → opencode公共配置管理”确认 `122.233.30.4` 已初始化公共配置。已有用户进程如需切到新 opencode/manager 版本，可在运行管理中重启对应用户进程；只替换外挂程序不会自动重启已存在的 `opencode serve` 子进程。
+超级管理员进入“系统管理 → 运行管理”确认 Java、manager、容器均在线，并确认 Java/manager 的非空版本都匹配 `VyyyyMMdd.HHmmss`；滚动升级期间旧进程显示 `-`。再进入“系统管理 → 配置管理 → opencode公共配置管理”确认 `122.233.30.4` 已初始化公共配置。前端包替换后打开设置弹窗，在左侧导航底部核对前端版本；浏览器刷新、Java/worker 普通重启不得改变对应版本，只有替换重新构建的产物才会变化。已有用户进程如需切到新 opencode/manager 版本，可在运行管理中重启对应用户进程；只替换外挂程序不会自动重启已存在的 `opencode serve` 子进程。
 
 ## 端口约束
 
@@ -623,6 +623,8 @@ deploy/internal/package-release.sh
 ```
 
 脚本默认读取 `deploy/internal/.env`；如果该文件不存在，则读取 `deploy/internal/env.example`。本地直接执行时产物默认写入 `deploy/internal/dist/`。当前企业 Linux 构建机如需写入 `/data/testagent/dist`，应显式传入外置 `/data/testagent/config/docker.env` 或 `--output-dir /data/testagent/dist`。它会产出：
+
+打包时前端、Java、manager 分别按自身实际构建时刻生成北京时间 `VyyyyMMdd.HHmmss`。前端由 Vite 固化到 bundle，Java 由 Spring Boot build-info 固化到 jar，manager 由 `MANAGER_BUILD_VERSION` Docker build arg 传入 linker flag；该 build arg 只在脚本内部生成，不加入 `backend.env`、`docker.env` 或 `nginx.env`。
 
 ```text
 deploy/internal/dist/backend/test-agent-app.jar

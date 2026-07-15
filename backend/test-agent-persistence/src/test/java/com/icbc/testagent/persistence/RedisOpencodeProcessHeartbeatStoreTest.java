@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
@@ -32,6 +33,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -100,6 +102,46 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                 contains("\"startCommand\":\"XDG_DATA_HOME=/data/opencode/session/4096"),
                 eq(Duration.ofSeconds(10)));
         verify(fixture.sets).add("test-agent:runtime-snapshot:index:manager", "mgr_1234567890abcdef");
+    }
+
+    @Test
+    void recordsBuildVersionsAndReadsLegacySnapshotsWithoutVersion() throws Exception {
+        RedisFixture fixture = RedisFixture.create();
+        RedisOpencodeProcessHeartbeatStore store = new RedisOpencodeProcessHeartbeatStore(fixture.redisTemplate);
+        BackendRuntimeSnapshot backend = backendSnapshot();
+        ManagerRuntimeSnapshot manager = managerSnapshot();
+
+        store.recordBackendSnapshot(new BackendRuntimeSnapshot(
+                backend.linuxServer(), backend.backendProcess(), backend.metrics(), "V20260715.090203"));
+        store.recordManagerSnapshot(new ManagerRuntimeSnapshot(
+                manager.container(), manager.manager(), manager.connections(), manager.metrics(),
+                manager.managedProcesses(), "V20260715.090304"));
+
+        verify(fixture.values).set(
+                eq("test-agent:runtime-snapshot:backend:bjp_1234567890abcdef"),
+                contains("\"buildVersion\":\"V20260715.090203\""),
+                eq(Duration.ofSeconds(10)));
+        verify(fixture.values).set(
+                eq("test-agent:runtime-snapshot:manager:mgr_1234567890abcdef"),
+                contains("\"buildVersion\":\"V20260715.090304\""),
+                eq(Duration.ofSeconds(10)));
+
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        String legacyBackendJson = objectMapper.writeValueAsString(backend).replace(",\"buildVersion\":null", "");
+        String legacyManagerJson = objectMapper.writeValueAsString(manager).replace(",\"buildVersion\":null", "");
+        when(fixture.sets.members("test-agent:runtime-snapshot:index:backend"))
+                .thenReturn(Set.of("bjp_1234567890abcdef"));
+        when(fixture.values.get("test-agent:runtime-snapshot:backend:bjp_1234567890abcdef"))
+                .thenReturn(legacyBackendJson);
+        when(fixture.sets.members("test-agent:runtime-snapshot:index:manager"))
+                .thenReturn(Set.of("mgr_1234567890abcdef"));
+        when(fixture.values.get("test-agent:runtime-snapshot:manager:mgr_1234567890abcdef"))
+                .thenReturn(legacyManagerJson);
+
+        org.assertj.core.api.Assertions.assertThat(store.liveBackendSnapshots())
+                .singleElement().extracting(BackendRuntimeSnapshot::buildVersion).isNull();
+        org.assertj.core.api.Assertions.assertThat(store.liveManagerSnapshots())
+                .singleElement().extracting(ManagerRuntimeSnapshot::buildVersion).isNull();
     }
 
     @Test

@@ -11,7 +11,20 @@ public record ManagerRuntimeSnapshot(
         OpencodeContainerManager manager,
         List<OpencodeManagerBackendConnection> connections,
         ContainerRuntimeMetrics metrics,
-        List<ManagedOpencodeProcessSnapshot> managedProcesses) {
+        List<ManagedOpencodeProcessSnapshot> managedProcesses,
+        String buildVersion) {
+
+    /**
+     * 兼容旧调用方和旧 Redis JSON，新增构建版本缺失时保持为空。
+     */
+    public ManagerRuntimeSnapshot(
+            OpencodeContainer container,
+            OpencodeContainerManager manager,
+            List<OpencodeManagerBackendConnection> connections,
+            ContainerRuntimeMetrics metrics,
+            List<ManagedOpencodeProcessSnapshot> managedProcesses) {
+        this(container, manager, connections, metrics, managedProcesses, null);
+    }
 
     /**
      * 兼容旧调用方，未上报资源指标时只保存拓扑和连接。
@@ -20,7 +33,7 @@ public record ManagerRuntimeSnapshot(
             OpencodeContainer container,
             OpencodeContainerManager manager,
             List<OpencodeManagerBackendConnection> connections) {
-        this(container, manager, connections, null, List.of());
+        this(container, manager, connections, null, List.of(), null);
     }
 
     /**

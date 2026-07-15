@@ -761,6 +761,7 @@ export type OpencodeRuntimeLinuxServer = {
 
 export type OpencodeRuntimeBackendProcess = {
   backendProcessId: string;
+  buildVersion?: string | null;
   linuxServerId: string;
   listenUrl: string;
   status: string;
@@ -882,6 +883,7 @@ export type OpencodeRuntimeManagedProcessCommandResult = {
 
 export type OpencodeRuntimeManager = {
   managerId: string;
+  buildVersion?: string | null;
   containerId: string;
   linuxServerId: string;
   protocolVersion: string;

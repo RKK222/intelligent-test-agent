@@ -18,6 +18,9 @@ const (
 	messageTypeConfigUpdate        = "configUpdate"
 )
 
+// buildVersion 由构建脚本通过 -ldflags -X 注入，普通 go test/go run 保持为空以兼容开发流程。
+var buildVersion string
+
 // BackendEndpoint 是后端通过 WebSocket 返回的单个可直连 Java 实例。
 type BackendEndpoint struct {
 	BackendProcessID string    `json:"backendProcessId"`
@@ -43,6 +46,7 @@ type ManagedProcess struct {
 type Message struct {
 	Type                       string            `json:"type"`
 	ProtocolVersion            string            `json:"protocolVersion"`
+	BuildVersion               string            `json:"buildVersion,omitempty"`
 	TraceID                    string            `json:"traceId,omitempty"`
 	ManagerID                  string            `json:"managerId,omitempty"`
 	ContainerID                string            `json:"containerId,omitempty"`

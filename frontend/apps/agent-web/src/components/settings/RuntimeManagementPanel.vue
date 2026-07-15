@@ -710,6 +710,7 @@ function startResize(e: MouseEvent) {
                       <th style="width: 120px; position: relative;">服务器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 120px; position: relative;">IP地址<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 120px; position: relative;">Java 进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 140px; position: relative;">版本<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 90px; position: relative;">服务器状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 90px; position: relative;">Java 状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 130px; position: relative;">CPU<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
@@ -722,7 +723,7 @@ function startResize(e: MouseEvent) {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-if="!serverBackendRows.length"><td colspan="12" class="is-empty">暂无服务器 / Java 进程</td></tr>
+                    <tr v-if="!serverBackendRows.length"><td colspan="13" class="is-empty">暂无服务器 / Java 进程</td></tr>
                     <tr
                       v-for="row in serverBackendRows"
                       :key="row.key"
@@ -734,6 +735,7 @@ function startResize(e: MouseEvent) {
                       <td :title="row.linuxServerId ?? undefined">{{ formatNullable(row.linuxServerId) }}</td>
                       <td :title="backendNetworkAddress(row)">{{ backendNetworkAddress(row) }}</td>
                       <td class="is-compact" :title="row.backend?.backendProcessId ?? undefined">{{ formatNullable(row.backend?.backendProcessId) }}</td>
+                      <td class="is-compact">{{ formatNullable(row.backend?.buildVersion) }}</td>
                       <td>
                         <span v-if="row.server" :class="['ta-status', statusClass(row.server.status)]">{{ row.server.status }}</span>
                         <span v-else>-</span>
@@ -871,6 +873,7 @@ function startResize(e: MouseEvent) {
                       <th class="is-expand" style="width: 32px;"></th>
                       <th style="width: 120px; position: relative;">容器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 120px; position: relative;">管理进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 140px; position: relative;">版本<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 120px; position: relative;">服务器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 120px; position: relative;">IP地址<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 90px; position: relative;">容器状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
@@ -887,7 +890,7 @@ function startResize(e: MouseEvent) {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-if="!containerManagerRows.length"><td colspan="16" class="is-empty">暂无容器 / 管理进程</td></tr>
+                    <tr v-if="!containerManagerRows.length"><td colspan="17" class="is-empty">暂无容器 / 管理进程</td></tr>
                     <template v-for="row in containerManagerRows" :key="row.key">
                       <tr
                         :class="[row.container ? activeRowClass('container', row.container.containerId) : '', { 'is-expanded': isRuntimeRowExpanded(row) }]"
@@ -901,6 +904,7 @@ function startResize(e: MouseEvent) {
                         </td>
                          <td class="is-compact" :title="row.container ? `${row.container.containerName || row.container.containerId} (${row.container.containerId})` : undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.container?.containerName || row.container?.containerId) }}</td>
                          <td class="is-compact" :title="row.manager?.managerId ?? undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.manager?.managerId) }}</td>
+                         <td class="is-compact">{{ formatNullable(row.manager?.buildVersion) }}</td>
                          <td :title="row.linuxServerId ?? undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.linuxServerId) }}</td>
                          <td :title="containerManagerNetworkAddress(row)" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ containerManagerNetworkAddress(row) }}</td>
                         <td>
@@ -939,7 +943,7 @@ function startResize(e: MouseEvent) {
                         </td>
                       </tr>
                       <tr v-if="isRuntimeRowExpanded(row)" class="ta-runtime-managed-detail">
-                        <td colspan="16">
+                        <td colspan="17">
                           <div class="ta-runtime-managed-processes">
                             <div v-if="hasManagedProcessCountMismatch(row)" class="ta-runtime-managed-warning">
                               容量计数来自 manager state，明细来自 manager 上报数组；旧快照或旧 manager 可能缺失明细。

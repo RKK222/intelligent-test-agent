@@ -46,7 +46,8 @@ public record ManagerControlMessage(
         String metricsSource,
         String sessionRoot,
         String configDir,
-        Map<String, String> environment) {
+        Map<String, String> environment,
+        String buildVersion) {
 
     /**
      * 规整可扩展能力字段，避免调用方持有可变 Map。
@@ -57,6 +58,52 @@ public record ManagerControlMessage(
         connectedBackendProcessIds = connectedBackendProcessIds == null ? List.of() : List.copyOf(connectedBackendProcessIds);
         backendEndpoints = backendEndpoints == null ? List.of() : List.copyOf(backendEndpoints);
         environment = environment == null ? Map.of() : Map.copyOf(environment);
+    }
+
+    /**
+     * 复制消息并附加 manager 构建版本，供兼容工厂方法保留旧参数列表。
+     */
+    private ManagerControlMessage withBuildVersion(String version) {
+        return new ManagerControlMessage(
+                type,
+                protocolVersion,
+                traceId,
+                managerId,
+                containerId,
+                linuxServerId,
+                containerName,
+                portStart,
+                portEnd,
+                maxProcesses,
+                currentProcesses,
+                cpuUsagePercent,
+                memoryMaxBytes,
+                memoryUsedBytes,
+                memoryUsagePercent,
+                diskReadBytesPerSecond,
+                diskWriteBytesPerSecond,
+                managedProcesses,
+                capabilities,
+                backendProcessId,
+                commandId,
+                command,
+                port,
+                timeoutMillis,
+                status,
+                pid,
+                baseUrl,
+                sessionPath,
+                configPath,
+                healthy,
+                message,
+                errorCode,
+                connectedBackendProcessIds,
+                backendEndpoints,
+                metricsSource,
+                sessionRoot,
+                configDir,
+                environment,
+                version);
     }
 
     /**
@@ -133,6 +180,7 @@ public record ManagerControlMessage(
                 errorCode,
                 connectedBackendProcessIds,
                 backendEndpoints,
+                null,
                 null,
                 null,
                 null,
@@ -214,6 +262,7 @@ public record ManagerControlMessage(
                 connectedBackendProcessIds,
                 backendEndpoints,
                 metricsSource,
+                null,
                 null,
                 null,
                 null);
@@ -320,6 +369,36 @@ public record ManagerControlMessage(
                 null,
                 connectedBackendProcessIds,
                 null);
+    }
+
+    /**
+     * 构造带 manager 二进制构建版本的全局心跳消息。
+     */
+    public static ManagerControlMessage managerHeartbeat(
+            String managerId,
+            String containerId,
+            String linuxServerId,
+            String containerName,
+            int portStart,
+            int portEnd,
+            int maxProcesses,
+            int currentProcesses,
+            Map<String, Object> capabilities,
+            List<String> connectedBackendProcessIds,
+            String traceId,
+            String buildVersion) {
+        return managerHeartbeat(
+                managerId,
+                containerId,
+                linuxServerId,
+                containerName,
+                portStart,
+                portEnd,
+                maxProcesses,
+                currentProcesses,
+                capabilities,
+                connectedBackendProcessIds,
+                traceId).withBuildVersion(buildVersion);
     }
 
     /**
@@ -560,7 +639,8 @@ public record ManagerControlMessage(
                 null,
                 null,
                 null,
-                environment);
+                environment,
+                null);
     }
 
     /**
@@ -696,6 +776,7 @@ public record ManagerControlMessage(
                 null,
                 sessionRoot,
                 configDir,
+                null,
                 null);
     }
 

@@ -63,7 +63,8 @@ class ManagerControlApplicationServiceTest {
                 2,
                 Map.of("commands", List.of("start", "health")),
                 List.of("bjp_1234567890abcdef", "bjp_2234567890abcdef"),
-                "trace_1234567890abcdef");
+                "trace_1234567890abcdef",
+                "V20260715.090203");
 
         service.managerHeartbeat(heartbeat);
 
@@ -75,6 +76,7 @@ class ManagerControlApplicationServiceTest {
             assertThat(snapshot.manager().managerId().value()).isEqualTo("mgr_1234567890abcdef");
             assertThat(snapshot.connections()).extracting(connection -> connection.backendProcessId().value())
                     .containsExactly("bjp_1234567890abcdef", "bjp_2234567890abcdef");
+            assertThat(snapshot.buildVersion()).isEqualTo("V20260715.090203");
         });
     }
 

@@ -116,6 +116,25 @@ class RuntimeManagementQueryServiceTest {
     }
 
     @Test
+    void overviewPassesThroughBackendAndManagerBuildVersions() {
+        FakeRepository repository = new FakeRepository();
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        heartbeatStore.backendSnapshots.add(new BackendRuntimeSnapshot(
+                linuxServer(), backendProcess(), null, "V20260715.090203"));
+        heartbeatStore.managerSnapshots.add(new ManagerRuntimeSnapshot(
+                container(), manager(), List.of(connection()), null, List.of(), "V20260715.090304"));
+        RuntimeManagementQueryService service = service(repository, heartbeatStore);
+
+        RuntimeManagementOverview overview = service.overview(
+                OpencodeServerProcessFilter.empty(), new PageRequest(1, 20), TRACE_ID);
+
+        assertThat(overview.backendProcesses()).singleElement().satisfies(row ->
+                assertThat(row.buildVersion()).isEqualTo("V20260715.090203"));
+        assertThat(overview.managers()).singleElement().satisfies(row ->
+                assertThat(row.buildVersion()).isEqualTo("V20260715.090304"));
+    }
+
+    @Test
     void userProcessesReturnsStoppedProcessWithoutHeartbeatAndMarksRestartable() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess stopped = process(

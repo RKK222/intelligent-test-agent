@@ -944,7 +944,12 @@ function Build-OpencodeManager {
         $previousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $buildOutput = & go build -o "bin/opencode-manager.exe" ./cmd/opencode-manager 2>&1
+            # Windows 使用 China Standard Time 生成北京时间构建版本，进程重启不会改变该值。
+            $chinaTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("China Standard Time")
+            $chinaBuildTime = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $chinaTimeZone)
+            $buildVersion = "V" + $chinaBuildTime.ToString("yyyyMMdd.HHmmss", [System.Globalization.CultureInfo]::InvariantCulture)
+            $linkerFlags = "-X github.com/icbc/test-agent/opencode-manager/internal/control.buildVersion=$buildVersion"
+            $buildOutput = & go build -ldflags $linkerFlags -o "bin/opencode-manager.exe" ./cmd/opencode-manager 2>&1
             $buildExitCode = $LASTEXITCODE
         } catch {
             $buildOutput = @($buildOutput) + @($_.ToString())

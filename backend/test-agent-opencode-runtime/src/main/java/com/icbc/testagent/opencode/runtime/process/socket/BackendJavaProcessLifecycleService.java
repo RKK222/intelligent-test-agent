@@ -38,6 +38,7 @@ public class BackendJavaProcessLifecycleService {
     private final ManagerControlSettings settings;
     private final Clock clock;
     private final BackendRuntimeMetricsCollector metricsCollector;
+    private final BackendBuildVersionProvider buildVersionProvider;
     private final BackendProcessId backendProcessId;
     private final Instant startedAt;
 
@@ -49,8 +50,15 @@ public class BackendJavaProcessLifecycleService {
             OpencodeProcessManagementRepository repository,
             OpencodeProcessHeartbeatStore heartbeatStore,
             ManagerControlSettings settings,
-            CommonParameterValues commonParameterValues) {
-        this(repository, heartbeatStore, settings, Clock.systemUTC(), new BackendRuntimeMetricsCollector(metricsDiskPath(commonParameterValues)));
+            CommonParameterValues commonParameterValues,
+            BackendBuildVersionProvider buildVersionProvider) {
+        this(
+                repository,
+                heartbeatStore,
+                settings,
+                Clock.systemUTC(),
+                new BackendRuntimeMetricsCollector(metricsDiskPath(commonParameterValues)),
+                buildVersionProvider);
     }
 
     /**
@@ -80,7 +88,7 @@ public class BackendJavaProcessLifecycleService {
             OpencodeProcessHeartbeatStore heartbeatStore,
             ManagerControlSettings settings,
             Clock clock) {
-        this(repository, heartbeatStore, settings, clock, new BackendRuntimeMetricsCollector());
+        this(repository, heartbeatStore, settings, clock, new BackendRuntimeMetricsCollector(), emptyBuildVersionProvider());
     }
 
     /**
@@ -92,11 +100,25 @@ public class BackendJavaProcessLifecycleService {
             ManagerControlSettings settings,
             Clock clock,
             BackendRuntimeMetricsCollector metricsCollector) {
+        this(repository, heartbeatStore, settings, clock, metricsCollector, emptyBuildVersionProvider());
+    }
+
+    /**
+     * 完整构造器允许测试同时注入指标采集器和固定构建版本。
+     */
+    public BackendJavaProcessLifecycleService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ManagerControlSettings settings,
+            Clock clock,
+            BackendRuntimeMetricsCollector metricsCollector,
+            BackendBuildVersionProvider buildVersionProvider) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.metricsCollector = Objects.requireNonNull(metricsCollector, "metricsCollector must not be null");
+        this.buildVersionProvider = Objects.requireNonNull(buildVersionProvider, "buildVersionProvider must not be null");
         this.backendProcessId = new BackendProcessId(RuntimeIdGenerator.backendProcessId());
         this.startedAt = Instant.now(clock);
     }
@@ -116,6 +138,13 @@ public class BackendJavaProcessLifecycleService {
             }
         }
         return Path.of("").toAbsolutePath().normalize();
+    }
+
+    /**
+     * 兼容单元测试和旧手工装配路径；这些路径没有构建元数据，版本保持为空。
+     */
+    private static BackendBuildVersionProvider emptyBuildVersionProvider() {
+        return new BackendBuildVersionProvider((org.springframework.boot.info.BuildProperties) null);
     }
 
     /**
@@ -189,7 +218,8 @@ public class BackendJavaProcessLifecycleService {
                 now,
                 traceId);
         BackendRuntimeMetrics metrics = metricsCollector.sample();
-        heartbeatStore.recordBackendSnapshot(new BackendRuntimeSnapshot(linuxServer, backendProcess, metrics));
+        heartbeatStore.recordBackendSnapshot(new BackendRuntimeSnapshot(
+                linuxServer, backendProcess, metrics, buildVersionProvider.buildVersion()));
         if (shouldPersistServer(existingServer, linuxServer)) {
             repository.saveLinuxServer(linuxServer);
         }

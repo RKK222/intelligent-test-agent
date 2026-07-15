@@ -24,6 +24,20 @@ func TestRestartStopTimeoutReservesHalfOfCommandBudgetForStartup(t *testing.T) {
 	}
 }
 
+func TestTopologyMessagesIncludeLinkerBuildVersion(t *testing.T) {
+	previousBuildVersion := buildVersion
+	buildVersion = "V20260715.090203"
+	t.Cleanup(func() { buildVersion = previousBuildVersion })
+	supervisor := NewSupervisor(supervisorTestConfig("ws://127.0.0.1:1"), testProcessManager())
+
+	for _, messageType := range []string{messageTypeRegister, messageTypeManagerHeartbeat} {
+		message := supervisor.topologyMessage(messageType)
+		if message.BuildVersion != "V20260715.090203" {
+			t.Fatalf("expected %s message buildVersion, got %#v", messageType, message)
+		}
+	}
+}
+
 func TestDispatchStartCommandPassesSessionPathToProcessManager(t *testing.T) {
 	configDir := filepath.Join(t.TempDir(), "opencode-config")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {

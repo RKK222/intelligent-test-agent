@@ -84,8 +84,10 @@ class RuntimeManagementControllerTest {
                 .jsonPath("$.data.summary.runningOpencodeProcesses").isEqualTo(1)
                 .jsonPath("$.data.linuxServers[0].linuxServerId").isEqualTo("10.8.0.12")
                 .jsonPath("$.data.backendProcesses[0].backendProcessId").isEqualTo("bjp_1234567890abcdef")
+                .jsonPath("$.data.backendProcesses[0].buildVersion").isEqualTo("V20260715.090203")
                 .jsonPath("$.data.containers[0].currentProcesses").isEqualTo(1)
                 .jsonPath("$.data.managers[0].connectionStatus").isEqualTo("CONNECTED")
+                .jsonPath("$.data.managers[0].buildVersion").isEqualTo("V20260715.090304")
                 .jsonPath("$.data.managers[0].managedProcesses[0].port").isEqualTo(4096)
                 .jsonPath("$.data.managers[0].managedProcesses[0].ownership").isEqualTo("BOUND")
                 .jsonPath("$.data.managers[0].managedProcesses[0].processId").isEqualTo("ocp_1234567890abcdef")
@@ -636,7 +638,7 @@ class RuntimeManagementControllerTest {
                 NOW,
                 new RuntimeManagementSummary(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
                 List.of(linuxServer),
-                List.of(new RuntimeManagementBackendProcess(backendProcess, null)),
+                List.of(new RuntimeManagementBackendProcess(backendProcess, null, "V20260715.090203")),
                 List.of(new RuntimeManagementContainer(container, null)),
                 List.of(new RuntimeManagementManager(
                         manager,
@@ -657,7 +659,8 @@ class RuntimeManagementControllerTest {
                                 Optional.of("process-user"),
                                 binding.agentId(),
                                 binding.status(),
-                                binding.updatedAt())))),
+                                binding.updatedAt())),
+                        "V20260715.090304")),
                 List.of(connection),
                 new PageResponse<>(List.of(new RuntimeManagementOpencodeProcess(process, Optional.of(binding), Optional.of("process-user"))), 1, 20, 1));
     }

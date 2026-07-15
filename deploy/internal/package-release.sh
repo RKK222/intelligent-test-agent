@@ -258,6 +258,8 @@ package_frontend() {
 }
 
 build_opencode_worker_image() {
+  local manager_build_version
+  manager_build_version="$(TZ=Asia/Shanghai date '+V%Y%m%d.%H%M%S')"
   echo "Building ${TEST_AGENT_OPENCODE_WORKER_IMAGE} for ${PLATFORM}"
   docker buildx build \
     --platform "${PLATFORM}" \
@@ -269,6 +271,7 @@ build_opencode_worker_image() {
     --build-arg "DEBIAN_MIRROR=${DEBIAN_MIRROR}" \
     --build-arg "DEBIAN_SECURITY_MIRROR=${DEBIAN_SECURITY_MIRROR}" \
     --build-arg "GO_IMAGE=${GO_IMAGE}" \
+    --build-arg "MANAGER_BUILD_VERSION=${manager_build_version}" \
     --build-arg "BUN_IMAGE=${BUN_IMAGE}" \
     --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
     --build-arg "OPENCODE_VERSION=${OPENCODE_VERSION}" \

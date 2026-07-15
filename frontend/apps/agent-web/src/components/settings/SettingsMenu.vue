@@ -15,6 +15,7 @@ const emit = defineEmits<{
 }>();
 
 type MenuItem = { key: MenuKey; label: string; icon: Component };
+const frontendBuildVersion = import.meta.env.VITE_TEST_AGENT_BUILD_VERSION || "-";
 
 const items = computed<MenuItem[]>(() => {
   const menuItems: MenuItem[] = [];
@@ -53,11 +54,17 @@ const items = computed<MenuItem[]>(() => {
         <span class="ta-settings-menu-label">{{ item.label }}</span>
       </li>
     </ul>
+    <div class="ta-settings-version" aria-label="前端版本">
+      <span>前端版本</span>
+      <strong>{{ frontendBuildVersion }}</strong>
+    </div>
   </nav>
 </template>
 
 <style scoped>
 .ta-settings-menu {
+  display: flex;
+  flex-direction: column;
   width: 200px;
   flex-shrink: 0;
   height: 100%;
@@ -71,12 +78,30 @@ const items = computed<MenuItem[]>(() => {
   overflow-y: auto;
 }
 .ta-settings-menu-list {
+  flex: 1;
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.ta-settings-version {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 12px 8px 0;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+  color: #909399;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.ta-settings-version strong {
+  color: #606266;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
 }
 .ta-settings-menu-item {
   display: flex;

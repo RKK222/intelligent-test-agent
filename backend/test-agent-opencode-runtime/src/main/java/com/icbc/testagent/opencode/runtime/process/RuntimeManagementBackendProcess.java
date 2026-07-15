@@ -9,7 +9,15 @@ import java.util.Objects;
  */
 public record RuntimeManagementBackendProcess(
         BackendJavaProcess process,
-        BackendRuntimeMetrics metrics) {
+        BackendRuntimeMetrics metrics,
+        String buildVersion) {
+
+    /**
+     * 兼容旧构造调用，旧快照没有构建版本时保持为空。
+     */
+    public RuntimeManagementBackendProcess(BackendJavaProcess process, BackendRuntimeMetrics metrics) {
+        this(process, metrics, null);
+    }
 
     public RuntimeManagementBackendProcess {
         process = Objects.requireNonNull(process, "process must not be null");

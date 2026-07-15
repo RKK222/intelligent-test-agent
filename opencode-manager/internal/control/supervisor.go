@@ -306,6 +306,7 @@ func (s *Supervisor) topologyMessage(messageType string) Message {
 	return Message{
 		Type:                    messageType,
 		ProtocolVersion:         protocolVersion,
+		BuildVersion:            buildVersion,
 		TraceID:                 id,
 		ManagerID:               s.cfg.ManagerID,
 		ContainerID:             s.cfg.ContainerID,
