@@ -40,34 +40,102 @@ type FlowPort = {
   style: CSSProperties;
 };
 
-const portLayout = computed(() => getMermaidNodePortLayout(props.data.direction));
+const allPorts = computed<FlowPort[]>(() => {
+  const nodeType = props.data.nodeType;
+  let rawPorts: Array<{ x: number; y: number; pos: Position }> = [];
 
-function createPortStyle(position: Position, offset: number, index: number): CSSProperties {
-  const axisStyle: CSSProperties =
-    position === Position.Top || position === Position.Bottom
-      ? { left: `${offset}%` }
-      : { top: `${offset}%` };
-  if (props.data.nodeType !== "diamond") return axisStyle;
+  if (nodeType === "diamond") {
+    // 菱形/判断：每个顶点1个，每条边上2个。共12个点
+    rawPorts = [
+      // 顶点 (4个)
+      { x: 50, y: 0, pos: Position.Top },     // 上
+      { x: 100, y: 50, pos: Position.Right }, // 右
+      { x: 50, y: 100, pos: Position.Bottom },// 下
+      { x: 0, y: 50, pos: Position.Left },    // 左
+      // 斜边上的点 (8个)
+      { x: 16.7, y: 16.7, pos: Position.Top },
+      { x: 33.3, y: 33.3, pos: Position.Top },
+      { x: 83.3, y: 16.7, pos: Position.Top },
+      { x: 66.7, y: 33.3, pos: Position.Top },
+      { x: 16.7, y: 83.3, pos: Position.Bottom },
+      { x: 33.3, y: 66.7, pos: Position.Bottom },
+      { x: 83.3, y: 83.3, pos: Position.Bottom },
+      { x: 66.7, y: 66.7, pos: Position.Bottom }
+    ];
+  } else if (nodeType === "circle") {
+    // 圆形：均匀分布8个点
+    rawPorts = [
+      { x: 100, y: 50, pos: Position.Right },   // 0度 (右)
+      { x: 85.4, y: 85.4, pos: Position.Bottom }, // 45度 (右下)
+      { x: 50, y: 100, pos: Position.Bottom },  // 90度 (下)
+      { x: 14.6, y: 85.4, pos: Position.Bottom }, // 135度 (左下)
+      { x: 0, y: 50, pos: Position.Left },      // 180度 (左)
+      { x: 14.6, y: 14.6, pos: Position.Top },   // 225度 (左上)
+      { x: 50, y: 0, pos: Position.Top },       // 270度 (上)
+      { x: 85.4, y: 14.6, pos: Position.Top }    // 315度 (右上)
+    ];
+  } else if (nodeType === "rectangle") {
+    // 矩形：顶点4个，每边上2个。共12个点
+    rawPorts = [
+      // 顶点 (4个)
+      { x: 0, y: 0, pos: Position.Top },
+      { x: 100, y: 0, pos: Position.Top },
+      { x: 0, y: 100, pos: Position.Bottom },
+      { x: 100, y: 100, pos: Position.Bottom },
+      // 边上的点 (8个)
+      { x: 33.3, y: 0, pos: Position.Top },
+      { x: 66.7, y: 0, pos: Position.Top },
+      { x: 33.3, y: 100, pos: Position.Bottom },
+      { x: 66.7, y: 100, pos: Position.Bottom },
+      { x: 0, y: 33.3, pos: Position.Left },
+      { x: 0, y: 66.7, pos: Position.Left },
+      { x: 100, y: 33.3, pos: Position.Right },
+      { x: 100, y: 66.7, pos: Position.Right }
+    ];
+  } else {
+    // 圆角 rounded, 胶囊 stadium：左右各1个，上下各3个。共8个点
+    rawPorts = [
+      { x: 0, y: 50, pos: Position.Left },
+      { x: 100, y: 50, pos: Position.Right },
+      { x: 25, y: 0, pos: Position.Top },
+      { x: 50, y: 0, pos: Position.Top },
+      { x: 75, y: 0, pos: Position.Top },
+      { x: 25, y: 100, pos: Position.Bottom },
+      { x: 50, y: 100, pos: Position.Bottom },
+      { x: 75, y: 100, pos: Position.Bottom }
+    ];
+  }
 
-  // 菱形没有平直边：中间端口位于尖端，两侧端口向内 25% 后落在对应斜边上。
-  return {
-    ...axisStyle,
-    [position]: index === 1 ? "0%" : "25%"
-  };
-}
+  // 映射为包含向后兼容 ID 的 FlowPort 数组
+  return rawPorts.map((port, index) => {
+    const k = Math.floor(index / 2);
+    const id = index % 2 === 0 ? `target-${k}` : `source-${k}`;
+    return {
+      id,
+      position: port.pos,
+      style: { left: `${port.x}%`, top: `${port.y}%` }
+    };
+  });
+});
 
-/** 三个端口沿入口边或出口边均匀分布，方向切换时只改变所在边和偏移轴。 */
-function createPorts(type: "target" | "source"): FlowPort[] {
-  const position = portLayout.value[type];
-  return portLayout.value.offsets.map((offset, index) => ({
-    id: getMermaidNodePortId(type, index),
-    position,
-    style: createPortStyle(position, offset, index)
-  }));
-}
+const quickArrowDirs = computed(() => {
+  const all = allPorts.value;
+  // 顶端口：寻找 left 约为 50% 且 top 约为 0% 的端口
+  const topPort = all.find(p => Math.abs(parseFloat(p.style.left as string) - 50) < 5 && parseFloat(p.style.top as string) === 0) || all[0];
+  // 底端口：寻找 left 约为 50% 且 top 约为 100% 的端口
+  const bottomPort = all.find(p => Math.abs(parseFloat(p.style.left as string) - 50) < 5 && parseFloat(p.style.top as string) === 100) || all[0];
+  // 左端口：寻找 left 约为 0% 且 top 约为 50% 的端口
+  const leftPort = all.find(p => parseFloat(p.style.left as string) === 0 && Math.abs(parseFloat(p.style.top as string) - 50) < 5) || all[0];
+  // 右端口：寻找 left 约为 100% 且 top 约为 50% 的端口
+  const rightPort = all.find(p => parseFloat(p.style.left as string) === 100 && Math.abs(parseFloat(p.style.top as string) - 50) < 5) || all[0];
 
-const targetPorts = computed(() => createPorts("target"));
-const sourcePorts = computed(() => createPorts("source"));
+  return [
+    { dir: Position.Top, portId: topPort.id, style: { left: "50%", top: "0%" } },
+    { dir: Position.Bottom, portId: bottomPort.id, style: { left: "50%", top: "100%" } },
+    { dir: Position.Left, portId: leftPort.id, style: { left: "0%", top: "50%" } },
+    { dir: Position.Right, portId: rightPort.id, style: { left: "100%", top: "50%" } }
+  ];
+});
 
 function portClasses(portId: string) {
   return {
@@ -139,7 +207,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
     @mousedown.capture="preventNodeDragFromPort"
   >
     <Handle
-      v-for="port in targetPorts"
+      v-for="port in allPorts"
       :id="port.id"
       :key="port.id"
       type="source"
@@ -153,28 +221,15 @@ function preventNodeDragFromPort(event: MouseEvent) {
     
     <div class="ta-mermaid-flow-node__id">{{ id }}</div>
     <div class="ta-mermaid-flow-node__label">{{ data.text }}</div>
-    
-    <Handle
-      v-for="port in sourcePorts"
-      :id="port.id"
-      :key="port.id"
-      type="source"
-      :connectable="false"
-      :position="port.position"
-      :style="port.style"
-      :class="portClasses(port.id)"
-      :data-mermaid-handle="port.id"
-      :data-mermaid-position="port.position"
-    />
 
-    <!-- 快捷连接器 wrapper，仅在选中状态下渲染 -->
+    <!-- 快捷四向连接器，仅在选中状态下渲染 -->
     <template v-if="selected">
       <div
-        v-for="port in [...targetPorts, ...sourcePorts]"
-        :key="'quick-' + port.id"
+        v-for="arrow in quickArrowDirs"
+        :key="'quick-' + arrow.dir"
         class="ta-mermaid-quick-connector-wrapper"
-        :class="[`is-${port.position}`]"
-        :style="port.style"
+        :class="[`is-${arrow.dir}`]"
+        :style="arrow.style"
       >
         <div class="ta-mermaid-quick-arrow" aria-label="快捷建连">
           <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">
@@ -186,7 +241,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
               :key="shape.type"
               type="button"
               :title="`在此方向添加${shape.label}`"
-              @click.stop="emit('quickConnect', { portId: port.id, position: port.position, shapeType: shape.type })"
+              @click.stop="emit('quickConnect', { portId: arrow.portId, position: arrow.dir, shapeType: shape.type })"
             >
               <span :class="['ta-quick-menu-shape', `is-${shape.type}`]"></span>
             </button>
@@ -271,15 +326,28 @@ function preventNodeDragFromPort(event: MouseEvent) {
 
 .ta-mermaid-flow-node :deep(.vue-flow__handle) {
   z-index: 3;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--ta-surface, #fff);
-  background: var(--ta-border-strong, #64748b);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
+  width: 16px;
+  height: 16px;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
   opacity: 0;
   pointer-events: auto;
   cursor: default;
-  transition: opacity 100ms ease, background-color 100ms ease, transform 100ms ease;
+  transition: opacity 100ms ease;
+}
+
+/* 渲染紫色小 x */
+.ta-mermaid-flow-node :deep(.vue-flow__handle::after) {
+  content: "×";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: #8b5cf6; /* 紫色 */
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 1;
 }
 
 .ta-mermaid-flow-node:hover :deep(.vue-flow__handle),
@@ -292,16 +360,14 @@ function preventNodeDragFromPort(event: MouseEvent) {
   opacity: 0;
 }
 
-.ta-mermaid-flow-node :deep(.vue-flow__handle.is-snapped-valid) {
-  background: var(--primary, #4f46e5);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary, #4f46e5) 24%, transparent);
-  transform: scale(1.16);
+.ta-mermaid-flow-node :deep(.vue-flow__handle.is-snapped-valid::after) {
+  color: #7c3aed; /* 吸附有效时用更饱满的深紫色 */
+  transform: translate(-50%, -50%) scale(1.3);
 }
 
-.ta-mermaid-flow-node :deep(.vue-flow__handle.is-snapped-invalid) {
-  background: #d92d20;
-  box-shadow: 0 0 0 4px rgba(217, 45, 32, 0.2);
-  transform: scale(1.16);
+.ta-mermaid-flow-node :deep(.vue-flow__handle.is-snapped-invalid::after) {
+  color: #d92d20; /* 无效自环时为红色小 x */
+  transform: translate(-50%, -50%) scale(1.3);
 }
 
 .ta-mermaid-flow-node__id {
@@ -353,15 +419,11 @@ function preventNodeDragFromPort(event: MouseEvent) {
   pointer-events: auto;
 }
 
-/* 引导大箭头容器默认不可见，悬停在 wrapper 上时显示 */
+/* 引导大箭头默认半透明，悬停时变不透明并滑出面板 */
 .ta-mermaid-quick-connector-wrapper .ta-mermaid-quick-arrow {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 150ms ease, transform 150ms ease;
-}
-.ta-mermaid-quick-connector-wrapper:hover .ta-mermaid-quick-arrow {
-  opacity: 1;
+  opacity: 0.4;
   pointer-events: auto;
+  transition: opacity 150ms ease, background-color 150ms ease;
 }
 
 /* 根据端口位置决定大箭头的偏移方向和定位 */
@@ -405,6 +467,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   z-index: 2;
 }
 .ta-mermaid-quick-arrow:hover {
+  opacity: 1;
   background: var(--primary, #4f46e5);
   color: #fff;
 }

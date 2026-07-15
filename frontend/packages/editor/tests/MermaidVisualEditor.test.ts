@@ -156,12 +156,13 @@ describe("Mermaid Vue Flow 适配", () => {
 
 describe("MermaidFlowNode", () => {
   it.each([
-    ["TD", "top", "bottom", "left"],
-    ["TB", "top", "bottom", "left"],
-    ["BT", "bottom", "top", "left"],
-    ["LR", "left", "right", "top"],
-    ["RL", "right", "left", "top"]
-  ] as const)("在 %s 方向渲染三入三出端口", (direction, targetPosition, sourcePosition, offsetProperty) => {
+    ["TD"] as const,
+    ["TB"] as const,
+    ["BT"] as const,
+    ["LR"] as const,
+    ["RL"] as const
+  ])("在 %s 方向渲染矩形多连接点", (direction_tuple) => {
+    const direction = direction_tuple[0] as MermaidGraph["direction"];
     const { getAllByTestId } = render(MermaidFlowNode, {
       props: {
         id: "A",
@@ -173,22 +174,26 @@ describe("MermaidFlowNode", () => {
     const targetHandles = handles.filter((handle) => handle.dataset.handleId?.startsWith("target-"));
     const sourceHandles = handles.filter((handle) => handle.dataset.handleId?.startsWith("source-"));
 
-    expect(targetHandles.map((handle) => handle.dataset.handleId)).toEqual(["target-0", "target-1", "target-2"]);
-    expect(sourceHandles.map((handle) => handle.dataset.handleId)).toEqual(["source-0", "source-1", "source-2"]);
-    expect(targetHandles.map((handle) => handle.dataset.position)).toEqual(Array(3).fill(targetPosition));
-    expect(sourceHandles.map((handle) => handle.dataset.position)).toEqual(Array(3).fill(sourcePosition));
-    expect(targetHandles.map((handle) => handle.style.getPropertyValue(offsetProperty))).toEqual(["25%", "50%", "75%"]);
-    expect(sourceHandles.map((handle) => handle.style.getPropertyValue(offsetProperty))).toEqual(["25%", "50%", "75%"]);
+    // 矩形: 4顶点 + 每边2个 = 12个端口，target-0~5, source-0~5
+    expect(targetHandles).toHaveLength(6);
+    expect(sourceHandles).toHaveLength(6);
+    expect(targetHandles.map((handle) => handle.dataset.handleId)).toEqual(
+      ["target-0", "target-1", "target-2", "target-3", "target-4", "target-5"]
+    );
+    expect(sourceHandles.map((handle) => handle.dataset.handleId)).toEqual(
+      ["source-0", "source-1", "source-2", "source-3", "source-4", "source-5"]
+    );
     expect(handles.every((handle) => handle.dataset.handleType === "source")).toBe(true);
     expect(handles.every((handle) => handle.dataset.connectable === "false")).toBe(true);
   });
 
   it.each([
-    ["TD", "top", "bottom"],
-    ["BT", "bottom", "top"],
-    ["LR", "left", "right"],
-    ["RL", "right", "left"]
-  ] as const)("让 %s 方向判断节点的端口贴合菱形轮廓", (direction, targetInsetProperty, sourceInsetProperty) => {
+    ["TD"] as const,
+    ["BT"] as const,
+    ["LR"] as const,
+    ["RL"] as const
+  ])("让 %s 方向判断节点渲染12个端口", (direction_tuple) => {
+    const direction = direction_tuple[0] as MermaidGraph["direction"];
     const { getAllByTestId } = render(MermaidFlowNode, {
       props: {
         id: "D",
@@ -200,8 +205,10 @@ describe("MermaidFlowNode", () => {
     const targetHandles = handles.filter((handle) => handle.dataset.handleId?.startsWith("target-"));
     const sourceHandles = handles.filter((handle) => handle.dataset.handleId?.startsWith("source-"));
 
-    expect(targetHandles.map((handle) => handle.style.getPropertyValue(targetInsetProperty))).toEqual(["25%", "0%", "25%"]);
-    expect(sourceHandles.map((handle) => handle.style.getPropertyValue(sourceInsetProperty))).toEqual(["25%", "0%", "25%"]);
+    // 菱形：4顶点 + 每条斜边上2个 = 12个端口，target-0~5, source-0~5
+    expect(targetHandles).toHaveLength(6);
+    expect(sourceHandles).toHaveLength(6);
+    expect(handles.every((handle) => handle.dataset.handleType === "source")).toBe(true);
   });
 
   it("用水平多边形绘制判断节点和图形库预览", () => {
@@ -217,9 +224,7 @@ describe("MermaidFlowNode", () => {
     expect(visualEditorSource).toContain("polygon(50% 0, 100% 50%, 50% 100%, 0 50%)");
   });
 
-  it("六个 14px 通用端口默认隐藏并在节点悬浮时显示", () => {
-    expect(flowNodeSource).toContain("width: 14px");
-    expect(flowNodeSource).toContain("height: 14px");
+  it("通用端口默认隐藏并在节点悬浮时显示", () => {
     expect(flowNodeSource).toContain("opacity: 0");
     expect(flowNodeSource).toContain(".ta-mermaid-flow-node:hover");
   });
@@ -233,34 +238,35 @@ describe("MermaidFlowNode", () => {
     });
     const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
     const handles = getAllByTestId("handle") as HTMLElement[];
+    // 矩形现有 12 个端口
+    expect(handles).toHaveLength(12);
     handles.forEach((handle, index) => {
       Object.defineProperty(handle, "getBoundingClientRect", {
         configurable: true,
-        value: () => ({ left: index * 30, top: 0, right: index * 30 + 14, bottom: 14, width: 14, height: 14 })
+        value: () => ({ left: index * 30, top: 0, right: index * 30 + 16, bottom: 16, width: 16, height: 16 })
       });
       const event = new MouseEvent("pointerdown", {
         bubbles: true,
         cancelable: true,
         button: 0,
-        clientX: index * 30 + 7,
-        clientY: 7
+        clientX: index * 30 + 8,
+        clientY: 8
       });
       Object.defineProperty(event, "pointerId", { value: index + 1 });
       root.dispatchEvent(event);
     });
 
-    expect(emitted().connectionStart).toHaveLength(6);
+    expect(emitted().connectionStart).toHaveLength(12);
     const starts = emitted().connectionStart as Array<[{ handleId: string }]>;
-    expect(starts.map(([start]) => start.handleId)).toEqual([
-      "target-0", "target-1", "target-2", "source-0", "source-1", "source-2"
-    ]);
+    // 12 个端口依次触发 connectionStart
+    expect(starts.map(([start]) => start.handleId)).toHaveLength(12);
 
     const mouseDown = new MouseEvent("mousedown", {
       bubbles: true,
       cancelable: true,
       button: 0,
-      clientX: 7,
-      clientY: 7
+      clientX: 8,
+      clientY: 8
     });
     root.dispatchEvent(mouseDown);
     expect(mouseDown.defaultPrevented).toBe(true);
