@@ -6711,3 +6711,4 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 定向 `agent-chat` 测试 43/43、应用层新增契约测试 1/1、前端全量 Vitest 824 passed / 1 skipped、全量 typecheck 和生产 build 通过；构建仅保留既有字体 `@import` 顺序和大 chunk 警告。
   - 最终复验期间工作区并发出现本任务外、未提交的 `MermaidFlowNode.vue` 端口重构，导致 Mermaid 存量 11 项测试仍按 6 个 14px 端口断言而失败；本任务未修改该文件。基于当前工作区重新执行对话相关 3 个测试文件为 162 passed / 1 skipped，全量 typecheck 和生产 build 仍通过。
+  - 并发 Mermaid 工作补齐其测试后再次执行前端全量 Vitest，最终 58 个测试文件为 824 passed / 1 skipped；该外部改动继续保持未暂存，未纳入本任务提交。
