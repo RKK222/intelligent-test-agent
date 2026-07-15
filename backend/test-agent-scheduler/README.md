@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-分布式定时任务框架模块，负责通用任务注册、Cron 计算、Redis 分布式锁、后台扫描执行、统一运行记录和管理服务。本模块只提供框架，不包含任何具体业务定时任务；具体业务任务在所属业务模块实现 `ScheduledTaskHandler` Bean，例如 opencode runtime 的 stale active Run 收敛和运营分析汇总任务。
+分布式定时任务框架模块，负责通用任务注册、Cron 计算、Redis 分布式锁、后台扫描执行、统一运行记录和管理服务。本模块包含框架自身的运行记录保留维护任务；其它具体业务任务在所属业务模块实现 `ScheduledTaskHandler` Bean，例如 opencode runtime 的 stale active Run 收敛和运营分析汇总任务。
 
 ## 技术栈
 
@@ -22,9 +22,14 @@
 - 提供只读诊断能力，展示当前进程 scheduler 生效配置、扫描线程状态、任务 active/pending 运行和 Redis 锁 TTL，用于判断任务为何无法执行。
 - `ScheduledTaskContext` 提供 `stopRequested()` 和 `throwIfStopRequested()`；未来具体业务任务在长循环或外部调用间隙必须主动检查停止请求，退出后由 runner 记录 `MANUALLY_STOPPED`。
 
+## 框架维护任务
+
+- `scheduler.run-retention-cleanup` 默认每天 UTC 00:00 执行一次，清理 `scheduled_task_runs` 中 `ended_at` 超过 7 天的 `SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED` 记录；`PENDING`、`RUNNING`、`STOPPING` 始终保留。
+- 清理通过 domain 端口调用 persistence 的 MyBatis XML，不在 scheduler 模块直接访问数据库；任务结果保存本次删除数量和截止时间。
+
 ## 不负责
 
-- 不实现具体业务定时任务。
+- 不实现具体业务定时任务；框架自身的运行记录保留维护任务除外。
 - 不创建或模拟定时会话、Run 或后台用户消息发送。
 - 不暴露 HTTP API，HTTP 入口属于 `test-agent-api`。
 - 不直接访问 JDBC 实现，持久化只通过 domain Repository 端口。
@@ -59,13 +64,14 @@
 - 业务模块可以依赖 `test-agent-scheduler` 并提供 `ScheduledTaskHandler` Bean，由本模块统一完成任务注册、Redis 锁、运行记录、cron 调整、手动触发和停止信号传递。
 - 长循环业务任务必须读取 `ScheduledTaskContext.stopRequested()` 或调用 `throwIfStopRequested()`，不要自行实现分布式锁或运行记录。
 - 业务模块自己的扫描阈值、Redis key、数据库查询和事件副作用必须在业务模块 README 与测试中说明；本模块不保存这些业务语义。
-- 当前代码注册示例包括 `opencode-runtime.stale-active-run-reconcile` 和 `opencode-runtime.analytics-rollup`；后者默认每 5 分钟执行，并在主要数据库阶段间检查停止信号。其业务数据库锁仅用于滚动部署期间兼容仍在运行的旧 `@Scheduled` 实例，不是 scheduler 框架的锁降级实现。
+- 当前代码注册示例包括 `scheduler.run-retention-cleanup`、`opencode-runtime.stale-active-run-reconcile` 和 `opencode-runtime.analytics-rollup`；清理任务默认每天 UTC 00:00 执行，运营分析汇总默认每 5 分钟执行，并在主要数据库阶段间检查停止信号。运营分析的业务数据库锁仅用于滚动部署期间兼容仍在运行的旧 `@Scheduled` 实例，不是 scheduler 框架的锁降级实现。
 
 ## 测试覆盖
 
 - `CronScheduleCalculatorTest` 覆盖 Cron 下次触发和非法 Cron 统一错误。
 - `ScheduledTaskRegistryTest` 覆盖任务注册同步、nextFireAt 计算和管理员覆盖值保留。
 - `ScheduledTaskRunnerTest` 覆盖 Cron 成功执行、重叠触发 `SKIPPED`、Redis 锁失败、handler 异常 `FAILED`、手动 pending run 执行和停止请求最终记录 `MANUALLY_STOPPED`。
+- `ScheduledTaskRunRetentionTaskHandlerTest` 覆盖七天截止时间、删除结果和每日 Cron/锁 TTL 元数据。
 - `RedisScheduledTaskLockTest` 覆盖 Redis `SET NX` 获取锁、token Lua 续租/释放和锁 TTL 只读检查。
 - `SchedulerManagementServiceTest` 覆盖管理端 patch、非法 Cron、scheduler 关闭时拒绝手动触发、手动触发 active 冲突、只允许停止 `RUNNING` 和诊断阻塞原因。
 - `SchedulerStartupValidatorTest` 覆盖默认关闭、空字符串启用值按关闭绑定、启用时 Redis 必需。

@@ -698,7 +698,7 @@ V10 种子数据对 F-COSS 的影响：
 
 ## V20260625184300 scheduler 框架表与来源预留字段
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260625184300__create_scheduler_framework_tables.sql` 创建通用定时任务框架表，并给会话、Run、消息增加来源预留字段。本次只提供框架和管理 API，不新增具体业务任务，也不开放普通用户创建 Cron 计划 API。该版本使用 14 位时间戳，避免与既有 `V15__add_opencode_process_id_check_constraints.sql`、`V17__seed_local_opencode_machine_for_default_user.sql` 或其他并行分支的数字版本冲突。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260625184300__create_scheduler_framework_tables.sql` 创建通用定时任务框架表，并给会话、Run、消息增加来源预留字段。框架内置运行记录保留清理任务，其它具体业务任务仍由所属业务模块提供；不开放普通用户创建 Cron 计划 API。该版本使用 14 位时间戳，避免与既有 `V15__add_opencode_process_id_check_constraints.sql`、`V17__seed_local_opencode_machine_for_default_user.sql` 或其他并行分支的数字版本冲突。
 
 | 表 | 说明 |
 |---|---|
@@ -715,6 +715,7 @@ V10 种子数据对 F-COSS 的影响：
 - `scheduled_task_runs.status` 当前支持 `PENDING`、`RUNNING`、`STOPPING`、`SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED`。
 - `scheduled_task_runs.skip_reason` 保存同一 `taskKey` 已有未结束运行或 Redis 锁竞争失败时的跳过原因。
 - `scheduled_task_runs.stop_requested_at`、`stop_requested_by_user_id`、`stop_reason` 记录超级管理员发起协作式停止的时间、操作者和原因。
+- `V20260715000000__add_scheduler_run_retention_index.sql` 为 `scheduled_task_runs.ended_at` 创建 `idx_scheduled_task_runs_ended_at` 索引。`scheduler.run-retention-cleanup` 每天 UTC 00:00 删除 `ended_at` 早于当前时间 7 天且状态为 `SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED` 的记录；`PENDING`、`RUNNING`、`STOPPING` 始终保留。
 
 新增来源字段：
 

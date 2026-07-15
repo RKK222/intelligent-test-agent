@@ -2,11 +2,11 @@
 
 ## 职责
 
-定时任务框架包，承载任务处理器契约、Cron 计算、代码注册同步、Redis 分布式锁、后台 runner 和管理服务。
+定时任务框架包，承载任务处理器契约、Cron 计算、代码注册同步、Redis 分布式锁、后台 runner、管理服务和框架运行记录保留维护任务。
 
 ## 不负责
 
-- 不包含具体业务定时任务。
+- 不包含具体业务定时任务；框架自身的运行记录保留维护任务除外。
 - 不暴露 HTTP Controller。
 - 不直接访问 JDBC Repository 实现。
 - 不实现本机锁、数据库锁或 Redis 不可用降级。
@@ -20,6 +20,7 @@
 - `ScheduledTaskRunner`：应用启动时先同步代码注册任务；启用 scheduler 后后台线程扫描 due task 和 pending manual run，统一记录运行状态。
 - `SchedulerManagementService`、`ScheduledTaskUpdateCommand`：管理 API 使用的应用服务与命令对象。
 - `SchedulerProperties`、`SchedulerStartupValidator`：配置绑定与启用 Redis 必需校验。
+- `ScheduledTaskRunRetentionTaskHandler`：每天 UTC 00:00 清理超过 7 天的已结束 scheduler 运行记录，活动状态由持久层条件保护。
 
 ## 允许依赖
 
