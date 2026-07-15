@@ -39,6 +39,20 @@
   - 执行 common/workspace-management 定向测试、相关模块全量测试、后端完整打包和 `.env.test` 三服务启动健康检查。
 - Result:
   - 相关 Maven 测试共 113 项全部通过，完整后端打包成功；后端 health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 当前已连接。企业远端实际 push 未在本地凭据环境执行，仍需在企业公共区进行一次端到端验收；若服务器有提交邮箱域名限制，需要补充真实邮箱来源或可配置域名。
+### 2026-07-15 - 修复反馈按钮在 flex 布局下收缩导致文字隐藏的 Bug
+
+- Why:
+  - 成功完成态下的满意/不满意反馈按钮从独立的非压缩容器挪到了 `.oc-work-status-completed-summary` 这一 flex 容器中。当容器宽度受限时，由于反馈按钮和外层包裹容器缺少防收缩样式，按钮宽度被压缩，导致其内部的文字被完全隐藏。
+- What:
+  - 修复反馈按钮（满意/不满意）文字在界面上不可见、只显示按钮边框和图标的问题。
+- How:
+  - 在 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 的样式中：
+    - 给外层反馈布局 `.figma-chat-feedback` 添加 `flex-shrink: 0`。
+    - 给按钮 `.figma-chat-feedback-btn` 与 `.figma-chat-action-btn` 添加 `flex-shrink: 0` 与 `white-space: nowrap` 样式，保障它们在任何弹性容器下都不会被挤压，文字能够正常展示。
+- Result:
+  - 前端全量 typecheck 和 `vitest` 测试（包括 `FigmaChatPanel.test.ts` 的 120 个用例、`opencode-timeline.test.ts` 的 38 个用例）全部成功通过。
+  - 前端生产构建 `corepack pnpm build` 成功完成。
+
 ### 2026-07-15 - 清理前端字体 CSS `@import` 顺序告警
 
 - Why:

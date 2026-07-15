@@ -6125,6 +6125,7 @@ function onCompositionEnd() {
   gap: 6px;
   min-height: 28px;
   margin-top: 6px;
+  flex-shrink: 0;
 }
 
 .figma-chat-completed-feedback {
@@ -6146,6 +6147,8 @@ function onCompositionEnd() {
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .figma-chat-feedback-btn:hover:not(:disabled),
