@@ -69,6 +69,8 @@ const {
   targetHandleId,
   targetStatus,
   dragPath,
+  invalidReason,
+  dragEndPoint,
   startConnection
 } = useMermaidConnectionDrag({
   getCanvasElement: () => canvasRef.value,
@@ -235,6 +237,16 @@ function updateDirection(event: Event) {
             :marker-end="targetStatus === 'invalid' ? 'url(#ta-mermaid-preview-arrow-invalid)' : 'url(#ta-mermaid-preview-arrow)'"
           />
         </svg>
+        <div
+          v-if="isDragging && targetStatus === 'invalid' && invalidReason && dragEndPoint"
+          class="ta-mermaid-connection-tooltip"
+          :style="{
+            left: `${dragEndPoint.x + 12}px`,
+            top: `${dragEndPoint.y + 12}px`
+          }"
+        >
+          {{ invalidReason }}
+        </div>
       </div>
 
       <aside class="ta-mermaid-inspector" aria-label="图属性">
@@ -313,6 +325,20 @@ function updateDirection(event: Event) {
 .ta-mermaid-connection-preview__path.is-invalid { stroke: #d92d20; }
 .ta-mermaid-connection-preview #ta-mermaid-preview-arrow path { fill: var(--primary, #4f46e5); }
 .ta-mermaid-connection-preview #ta-mermaid-preview-arrow-invalid path { fill: #d92d20; }
+.ta-mermaid-connection-tooltip {
+  position: absolute;
+  z-index: 5;
+  padding: 4px 8px;
+  border: 1px solid #fda29b;
+  border-radius: 4px;
+  background: #fef3f2;
+  color: #b42318;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+}
 .ta-mermaid-inspector { min-height: 0; overflow: auto; border-left: 1px solid var(--ta-border, #e2e8f0); background: var(--ta-panel-2, #f8fafc); }
 .ta-mermaid-inspector section { padding: 13px; border-bottom: 1px solid var(--ta-border, #e2e8f0); }
 .ta-mermaid-inspector h3 { margin: 0 0 10px; color: var(--ta-ink, #172033); font-size: 12px; font-weight: 700; }

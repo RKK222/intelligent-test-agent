@@ -8,7 +8,7 @@ import {
   type MermaidConnectionPortGeometry,
   type MermaidScreenPoint
 } from "./mermaid-connection-geometry";
-import { canAppendMermaidEdge, type MermaidPortConnection } from "./vue-flow-adapter";
+import { canAppendMermaidEdge, getMermaidConnectionInvalidReason, type MermaidPortConnection } from "./vue-flow-adapter";
 
 export type MermaidConnectionStart = {
   pointerId: number;
@@ -56,6 +56,8 @@ export function createMermaidConnectionDragController(options: ControllerOptions
   const targetHandleId = ref<string>();
   const targetStatus = ref<"valid" | "invalid">();
   const dragPath = ref("");
+  const invalidReason = ref<string>();
+  const dragEndPoint = ref<{ x: number; y: number }>();
   let source: MermaidConnectionStart | undefined;
   let pendingPoint: MermaidScreenPoint | undefined;
   let frameId: number | undefined;
@@ -94,6 +96,11 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     const canvasRect = options.getCanvasElement()?.getBoundingClientRect();
     if (!canvasRect) return;
     const endpoint = targetPort ?? point;
+    
+    dragEndPoint.value = {
+      x: endpoint.x - canvasRect.left,
+      y: endpoint.y - canvasRect.top
+    };
     
     let targetPosition: Position;
     if (targetPort) {
@@ -156,9 +163,17 @@ export function createMermaidConnectionDragController(options: ControllerOptions
         sourceHandle: source.handleId,
         targetHandle: targetPort.handleId
       };
-      targetStatus.value = canAppendMermaidEdge(options.getGraph(), connection) ? "valid" : "invalid";
+      const graph = options.getGraph();
+      if (canAppendMermaidEdge(graph, connection)) {
+        targetStatus.value = "valid";
+        invalidReason.value = undefined;
+      } else {
+        targetStatus.value = "invalid";
+        invalidReason.value = getMermaidConnectionInvalidReason(graph, connection);
+      }
     } else {
       lastSnappedPort = undefined;
+      invalidReason.value = undefined;
     }
     updatePath(point, targetPort);
   }
@@ -197,6 +212,8 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     targetHandleId.value = undefined;
     targetStatus.value = undefined;
     dragPath.value = "";
+    invalidReason.value = undefined;
+    dragEndPoint.value = undefined;
     lastSnappedPort = undefined;
     removeListeners();
   }
@@ -247,6 +264,8 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     targetHandleId,
     targetStatus,
     dragPath,
+    invalidReason,
+    dragEndPoint,
     startConnection,
     cancelConnection,
     dispose: clearState

@@ -91,6 +91,23 @@ export function canAppendMermaidEdge(graph: MermaidGraph, connection: MermaidPor
   );
 }
 
+/** 获取连接被拒绝的具体文字原因。 */
+export function getMermaidConnectionInvalidReason(graph: MermaidGraph, connection: MermaidPortConnection): string | undefined {
+  if (!connection.source || !connection.target) {
+    return undefined;
+  }
+  if (!isMermaidPortHandle(connection.sourceHandle) || !isMermaidPortHandle(connection.targetHandle)) {
+    return "连接点无效，请对齐连接端口";
+  }
+  if (graph.edges.some((edge) => edge.source === connection.source && edge.target === connection.target)) {
+    return "节点间已存在相同方向的连线";
+  }
+  if (connection.source === connection.target && connection.sourceHandle === connection.targetHandle) {
+    return "不能在同一个端口上建立自环连接";
+  }
+  return undefined;
+}
+
 /** 只把带完整固定端口的有效拖线转换为 Mermaid 边。 */
 export function appendMermaidEdge(graph: MermaidGraph, connection: MermaidPortConnection): MermaidGraph {
   if (!canAppendMermaidEdge(graph, connection)) return graph;

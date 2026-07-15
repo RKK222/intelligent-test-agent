@@ -18,14 +18,16 @@
 ### 2026-07-15 - 优化 Mermaid 可视化编辑的交互体验
 
 - Why:
-  - 用户反馈在 Mermaid 可视化编辑器中，节点与端口的鼠标光标形态不符、拖拽连线时尾部箭头无法跟随拖拽方向，以及在移近节点吸附时存在边缘闪烁抖动、且松手释放时偶发无法成功连接的问题。
+  - 用户反馈在 Mermaid 可视化编辑器中，节点与端口的鼠标光标形态不符、拖拽连线时尾部箭头无法跟随拖拽方向，以及在移近节点吸附时存在边缘闪烁抖动、且松手释放时偶发无法成功连接的问题。在此基础上，进一步要求在连线无效（显示红色箭头）时，在鼠标处动态展示无法连接的具体原因。
 - What:
   - 修改节点和端口的 cursor 指示，节点移入改为 `move`，定位点移入改为 `default` 并可接收指针悬停。
   - preview 拖拽连线在未吸附端口时，改为根据鼠标移动相对位移动态计算终点切线方向，使箭头指向完全跟随拖拽方向。
   - 引入退吸附滞后半径机制（Hysteresis），并实现拖拽中局部禁用 transition 动画的 CSS 规则，以消除坐标测量上的跳变并根除吸附抖动；修改松手判定以直接使用内存中的最新合法连接缓存状态，保障连接可靠性。
+  - 增加在红色无效连线箭头处，绝对定位渲染悬浮提示框（Tooltip），提示“节点间已存在相同方向的连线”或“不能在同一个端口上建立自环连接”的具体原因。
 - How:
   - 调整 `MermaidFlowNode.vue` 的 CSS 以应用 move 和 default 指针，并将 `pointer-events: none` 修正为 `auto`；在 `MermaidVisualEditor.vue` 的拖拽态中控制 CSS 强制禁用 handle 过渡动画以消除慢变。
   - 在 `use-mermaid-connection-drag.ts` 中根据 `dx/dy` 大小及正负动态赋予 `targetPosition` 值以修正 marker 方向；在 `updateFromPoint` 中保留 `lastSnappedPort`，判定中增加 `42px` 的退吸附滞后半径；在 `onPointerUp` 中移除冗余 updateFromPoint 保证取值不因松手抖动而失灵。
+  - 在 `vue-flow-adapter.ts` 声明 `getMermaidConnectionInvalidReason` 计算文字原因；在 drag controller 中追踪 Ref `invalidReason` 和相对坐标 `dragEndPoint`，并在 `MermaidVisualEditor.vue` 的模板中渲染 `.ta-mermaid-connection-tooltip` 元素及添加对应 CSS。
 - Result:
   - 前端 Lint、TypeScript 类型校验全量通过；MermaidConnectionController 与 MermaidVisualEditor 两个测试类的 35 个 Vitest 用例全量 100% 成功通过。未改动后端 API、事件、数据库、安全或向后兼容性契约。
 
