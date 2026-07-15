@@ -76,13 +76,12 @@ const allPorts = computed<FlowPort[]>(() => {
     ];
   } else if (nodeType === "rectangle") {
     // 矩形：顶点4个，每边上2个。共12个点
-    // 角点内移 2% 避免超出 5px border-radius 的可见边界
     rawPorts = [
-      // 顶点 (4个，略微内移防止超出圆角)
-      { x: 2, y: 0, pos: Position.Top },
-      { x: 98, y: 0, pos: Position.Top },
-      { x: 2, y: 100, pos: Position.Bottom },
-      { x: 98, y: 100, pos: Position.Bottom },
+      // 顶点 (4个)
+      { x: 0, y: 0, pos: Position.Top },
+      { x: 100, y: 0, pos: Position.Top },
+      { x: 0, y: 100, pos: Position.Bottom },
+      { x: 100, y: 100, pos: Position.Bottom },
       // 边上的点 (8个)
       { x: 33.3, y: 0, pos: Position.Top },
       { x: 66.7, y: 0, pos: Position.Top },
@@ -327,16 +326,20 @@ function preventNodeDragFromPort(event: MouseEvent) {
 }
 
 .ta-mermaid-flow-node :deep(.vue-flow__handle) {
+  position: absolute !important;
   z-index: 3;
   width: 16px;
   height: 16px;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+  border-radius: 0 !important;
   opacity: 0;
   pointer-events: auto;
   cursor: default;
   transition: opacity 100ms ease;
+  /* 覆盖 Vue Flow 的单轴 translateX/Y，确保 Handle 中心点精确落在 style 中指定的 left/top 坐标上 */
+  transform: translate(-50%, -50%) !important;
 }
 
 /* 渲染紫色小 x */
