@@ -53,6 +53,19 @@
   - 应用内浏览器完成桌面与窄屏布局、点击创建和属性编辑验证；当前浏览器控制层的坐标拖拽不会生成原生 HTML5 `DataTransfer`，因此拖放落点由组件级原生 drop 事件测试验证，验收草稿未应用到 Markdown。
 - Result:
   - 前端全量 lint、typecheck、56 个 Vitest 文件（789 passed / 1 skipped）和生产 build 通过；构建仅保留既有 Google Fonts `@import` 顺序与大 chunk 警告。未修改 API、事件、数据库、安全或兼容性契约。
+### 2026-07-15 - 强制阻断个人 spec 发布到应用分支
+
+- Why:
+  - 个人工作区发布接口此前只按用户选择的白名单投影文件，已提交的 `spec/**` 一旦被选中仍可能进入应用 feature 分支，不符合“spec 仅本地提交、任何角色都不能推送”的权限边界。
+- What:
+  - 发布服务在准备 feature worktree 前按文件系统语义规范化路径，发现 `spec/**`、`./spec/**` 等路径即返回 `FORBIDDEN`；旧 `sync-to-application` 的 `force` 也不能绕过。
+  - 前端“提交并推送”仍把全部暂存文件提交到个人 HEAD，但只把非 `spec/**` 文件发送给发布接口；仅选择 spec 时只做本地提交，混合选择时发布其它文件，并在进度弹窗明确展示 spec 未推送。
+  - 同步更新工作区模块 README、前端 README 和 HTTP API 文档。
+- How:
+  - 复用 `ManagedWorkspaceApplicationService` 现有文件归一化与个人 HEAD 投影链路，没有新增 API、模块或 Git 分支；新增后端直接发布/旧同步负向测试和前端纯 spec/混合文件测试。
+- Result:
+  - `ManagedWorkspaceApplicationServiceTest`、GitChangesPanel 21 个用例和 agent-web typecheck 通过；test profile 后端全量打包成功，后端 readiness/health、前端 3000、登录 CORS 和 manager WebSocket 连接检查通过，三项服务已用 `.env.test` 重启。
+
 ### 2026-07-15 - 修复企业内 Chromium 108 宠物拖动兼容性
 
 - Why:

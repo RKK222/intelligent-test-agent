@@ -50,6 +50,7 @@ import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -1585,10 +1586,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String privateKey = privateKeyFor(repository, userId);
         Path personalRepoRoot = pathResolver.resolve(personal.repoRootPath());
         Path personalWorkspaceRoot = pathResolver.resolve(personal.workspaceRootPath());
-        List<String> gitFiles = repoRelativeFiles(personalRepoRoot, personalWorkspaceRoot, normalizeFiles(files));
+        List<String> publishFiles = normalizePublishFiles(files);
+        List<String> gitFiles = repoRelativeFiles(personalRepoRoot, personalWorkspaceRoot, publishFiles);
 
-        // 发布只读取个人分支 HEAD。个人工作树中的未提交内容（包括 spec 生成中的临时结果）
-        // 不得进入 feature 分支；若选择文件仍有未提交状态，要求先走“本地提交”。
+        // 发布只读取个人分支 HEAD。spec 无论是否已提交都禁止进入 feature 分支；
+        // 其它选择文件若仍有未提交状态，要求先走“本地提交”。
         if (gitWorkspaceService.isMergeInProgress(personalRepoRoot)) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
@@ -1617,7 +1619,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         List<String> applicationFiles = repoRelativeFiles(
                 prepared.repoRoot(),
                 pathResolver.resolve(prepared.replica().workspaceRootPath()),
-                normalizeFiles(files));
+                publishFiles);
         gitWorkspaceService.materializeCommitFiles(
                 prepared.repoRoot(),
                 personalHead,
@@ -3057,6 +3059,37 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "同步文件不能为空");
         }
         return files.stream().map(file -> normalizeRelativePath(file, "path")).distinct().toList();
+    }
+
+    /**
+     * 发布入口的服务端强制策略：spec 是个人研发过程资产，只能留在个人分支本地提交。
+     * 先按文件系统语义归一化再判断，避免通过 ./spec 或重复分隔符绕过目录边界。
+     */
+    private List<String> normalizePublishFiles(List<String> files) {
+        List<String> normalizedFiles = normalizeFiles(files);
+        List<String> localOnlyFiles = normalizedFiles.stream()
+                .filter(this::isLocalOnlySpecPath)
+                .toList();
+        if (!localOnlyFiles.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "spec/** 只能在个人 worktree 本地提交，禁止发布到应用 feature 分支",
+                    Map.of("files", localOnlyFiles));
+        }
+        return normalizedFiles;
+    }
+
+    private boolean isLocalOnlySpecPath(String file) {
+        try {
+            String canonicalPath = Path.of(file).normalize().toString().replace('\\', '/');
+            return canonicalPath.equals("spec") || canonicalPath.startsWith("spec/");
+        } catch (InvalidPathException exception) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "路径无效",
+                    Map.of("path", file),
+                    exception);
+        }
     }
 
     private String normalizeDirectoryPath(String directoryPath) {

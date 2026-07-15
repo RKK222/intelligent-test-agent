@@ -1181,7 +1181,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`sync-to-application` 保留 `force` 字段用于兼容审计，但不再绕过权限和提交约束：后端要求所选文件在个人 worktree 已提交，读取个人 `HEAD`，再按白名单投影到应用 feature worktree，提交并推送。个人工作树中未提交的 `spec/**` 或其它未选文件不会进入 feature 分支。成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并广播 `workspace.version.sync-requested`；其它在线用户只收到手动刷新/同步提示，不自动覆盖脏工作树。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
+`sync-to-application` 保留 `force` 字段用于兼容审计，但不再绕过权限和提交约束：后端要求所选文件在个人 worktree 已提交，读取个人 `HEAD`，再按白名单投影到应用 feature worktree，提交并推送。`spec/**` 是个人本地资产，任何角色都不能发布；请求只要包含规范化后位于 `spec/**` 的路径（包括 `./spec/**` 等别名）即返回 `FORBIDDEN`，`force` 不能绕过。其它未选文件也不会进入 feature 分支。成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并广播 `workspace.version.sync-requested`；其它在线用户只收到手动刷新/同步提示，不自动覆盖脏工作树。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
 
 ### 默认个人工作区显式创建/修复
 
@@ -1282,7 +1282,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 2. `publish` 校验个人 worktree 未处于 merge 状态，且 `files` 在个人 worktree 没有未提交变更；未先本地提交时返回 `CONFLICT`。
 3. 确保当前服务器的应用 feature worktree clean，`git fetch` + `git pull --ff-only {appVersionBranch}`，并校验可选 `expectedApplicationHead`。
 4. 读取个人仓库 `HEAD`，将 `files` 映射为 feature worktree 的仓库相对路径；存在的文件执行 checkout 投影，不存在的文件执行定点删除。
-5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push，个人 `spec/**` 或未选文件不会泄漏。
+5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push，服务端在准备 feature worktree 前强制拒绝 `spec/**`，其它未选文件也不会泄漏。
 
 发布结果：
 

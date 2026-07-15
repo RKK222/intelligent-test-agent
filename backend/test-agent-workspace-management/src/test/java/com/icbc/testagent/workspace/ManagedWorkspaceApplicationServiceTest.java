@@ -1157,6 +1157,33 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void syncPersonalToApplicationCannotForcePublishSpecFiles() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(), "我的空间", new UserId("usr_1"), "trace_personal");
+
+        assertThatThrownBy(() -> service.syncPersonalToApplication(
+                personal.personalWorkspaceId(),
+                List.of("./spec/design.md"),
+                true,
+                new UserId("usr_1"),
+                "trace_sync"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        assertThat(git.pushedBranch).isNull();
+        assertThat(managed.syncRecords).hasSize(1);
+        assertThat(managed.syncRecords.get(0).status()).isEqualTo(WorkspaceSyncStatus.FAILED);
+    }
+
+    @Test
     void syncPersonalToApplicationRejectsDirtyApplicationReplicaBeforeCopyingFiles() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -1358,6 +1385,36 @@ class ManagedWorkspaceApplicationServiceTest {
         // 版本 targetCommitHash 和副本 commit 已更新到合并后的 commit
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged");
         assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_merged");
+    }
+
+    @Test
+    void publishPersonalWorkspaceRejectsSpecFilesBeforePreparingApplicationBranch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.calls.clear();
+
+        assertThatThrownBy(() -> service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "test: 不得发布 spec",
+                List.of("docs/allowed.md", ".//spec/design.md"),
+                new UserId("usr_1"),
+                "trace_publish"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+                    assertThat(exception.details()).containsEntry("files", List.of(".//spec/design.md"));
+                });
+
+        assertThat(git.materializedFiles).isEmpty();
+        assertThat(git.pushedBranch).isNull();
+        assertThat(git.calls).isEmpty();
     }
 
     @Test

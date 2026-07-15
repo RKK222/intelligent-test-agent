@@ -72,7 +72,7 @@ tools/dev-frontend-check.sh
 
 应用工作区暂存通过平台 API 操作真实 Git index，同时仍作为发布文件白名单；未暂存区可一次暂存全部普通文件，或经二次确认后丢弃全部已暂存和未暂存普通文件；已暂存区的一键回退只调用 unstage all，把全部已暂存普通文件移回未暂存区，不丢弃文件内容。后端普通发布会隔离历史 index。冲突期间批量暂存和丢弃全部改动入口禁用，已暂存区一键回退及普通文件逐个 stage/unstage 仍可使用，但按 Git 原生规则禁止提交；冲突文件可在 Monaco 三方合并编辑器中可靠选择结果、保存或取消整次 merge。前端只有在后端明确返回 `remotePushed=true` 时才展示提交并推送成功。
 
-当前权限口径补充：公共 Git 只有 `SUPER_ADMIN` 可写；应用级 `.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）由 `APP_ADMIN` 管理，普通成员只读。应用版本副本对普通成员只读，个人 worktree 普通文件可写；“本地提交”只提交个人 worktree，“提交并推送”只从个人 `HEAD` 投影白名单文件到 feature worktree，`spec/**` 等未选文件不进入 feature 分支。工作空间级“初始化应用 Agent/Skill 配置包”会同时生成 OpenCode 可识别的 Agent、Skill、rules 和 templates 文件。
+当前权限口径补充：公共 Git 只有 `SUPER_ADMIN` 可写；应用级 `.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）由 `APP_ADMIN` 管理，普通成员只读。应用版本副本对普通成员只读，个人 worktree 普通文件可写；“本地提交”只提交个人 worktree，“提交并推送”先把选中文件提交到个人 `HEAD`，再只投影非 `spec/**` 文件到 feature worktree。`spec/**` 即使被选择也只做本地提交，前端不会发送发布请求，后端也会拒绝直接 API 发布和路径别名绕过。工作空间级“初始化应用 Agent/Skill 配置包”会同时生成 OpenCode 可识别的 Agent、Skill、rules 和 templates 文件。
 
 ```bash
 ./restart-dev-services.sh

@@ -456,6 +456,69 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText("unselected.ts")).toBeTruthy();
   });
 
+  it("commits spec locally but excludes it from a mixed feature publish", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "spec/payment/design.md", status: "added", rawStatus: "A ", staged: true, patch: "", additions: 1, deletions: 0 },
+          { path: "docs/payment.md", status: "added", rawStatus: "A ", staged: true, patch: "", additions: 1, deletions: 0 }
+        ]
+      })
+      .mockResolvedValue({ files: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("design.md")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "docs: 更新支付说明");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
+      files: ["spec/payment/design.md", "docs/payment.md"]
+    })));
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
+      files: ["docs/payment.md"]
+    }));
+    expect(await view.findByText("可发布文件已推送；1 个 spec 文件仅提交到个人 worktree。")).toBeTruthy();
+  });
+
+  it("only commits when all selected workspace files are under spec", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "spec/payment/design.md", status: "added", rawStatus: "A ", staged: true, patch: "", additions: 1, deletions: 0 }
+        ]
+      })
+      .mockResolvedValue({ files: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("design.md")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 保存本地设计");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
+      files: ["spec/payment/design.md"]
+    })));
+    expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
+    expect(await view.findByText("1 个 spec 文件已提交到个人 worktree，未推送。")).toBeTruthy();
+  });
+
   it("keeps conflict prompt after publish refresh and separates unmerged files from staged files", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({

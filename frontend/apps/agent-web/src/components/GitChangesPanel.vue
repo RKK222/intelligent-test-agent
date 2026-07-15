@@ -278,6 +278,12 @@ const workspaceUnstaged = computed(() =>
 const workspaceStaged = computed(() =>
   workspaceDiffFiles.value.filter((f) => stagedWorkspacePaths.value.has(f.path) && !isConflictFile(f))
 );
+
+// spec 是个人研发过程资产：允许随个人 HEAD 本地提交，但永远不进入 feature 发布文件集合。
+function isLocalOnlySpecPath(path: string): boolean {
+  const segments = path.replace(/\\/g, "/").split("/").filter((segment) => segment && segment !== ".");
+  return segments[0] === "spec";
+}
 const workspaceConflicts = computed(() =>
   workspaceDiffFiles.value.filter((f) => isConflictFile(f))
 );
@@ -736,6 +742,8 @@ async function handleCommit(push = false) {
   showCommitProgressDialog.value = false;
   commitStep.value = 0;
   let publishAttempted = false;
+  let remotePublishCompleted = false;
+  let localOnlySpecFileCount = 0;
 
   try {
     if (workbench.useMockTestData) {
@@ -789,12 +797,14 @@ async function handleCommit(push = false) {
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
       const files = workspaceStaged.value.map((file) => file.path);
+      const publishableFiles = files.filter((file) => !isLocalOnlySpecPath(file));
+      localOnlySpecFileCount = files.length - publishableFiles.length;
       await api.commitPersonalWorkspace(personalWorkspaceId, {
         commitMessage: msg,
         files,
         operationId: newOperationId()
       });
-      if (push) {
+      if (push && publishableFiles.length > 0) {
         publishAttempted = true;
         progressMessage.value = "正在从个人 HEAD 投影并推送 feature 分支...";
         commitStep.value = 3;
@@ -809,7 +819,7 @@ async function handleCommit(push = false) {
           try {
             return await api.publishPersonalWorkspace(personalWorkspaceId, {
               commitMessage: msg,
-              files,
+              files: publishableFiles,
               operationId: publishOperationId
             });
           } finally {
@@ -825,8 +835,12 @@ async function handleCommit(push = false) {
           throw new Error("feature 分支推送结果未确认，请刷新变更列表后重试。");
         }
         publishResultConfirmed.value = true;
+        remotePublishCompleted = true;
         commitStep.value = 5;
         progressMessage.value = "已从个人 HEAD 投影并推送到应用 feature 分支！";
+      } else if (push && localOnlySpecFileCount > 0) {
+        commitStep.value = 2;
+        progressMessage.value = "spec 文件已提交到个人 worktree，按权限规则不推送。";
       } else {
         // 仅本地提交时，应用 feature 投影和远端推送保持未执行，进度只到本地提交。
         commitStep.value = 2;
@@ -855,6 +869,7 @@ async function handleCommit(push = false) {
           "发布公共 Agent 配置",
           pushOpId
         );
+        remotePublishCompleted = true;
       }
     }
 
@@ -876,11 +891,18 @@ async function handleCommit(push = false) {
           "发布工作空间 Agent 配置",
           pushOpId
         );
+        remotePublishCompleted = true;
       }
     }
 
     commitMessage.value = "";
-    progressMessage.value = push ? "提交并推送成功！" : "提交成功！";
+    if (push && localOnlySpecFileCount > 0) {
+      progressMessage.value = remotePublishCompleted
+        ? `可发布文件已推送；${localOnlySpecFileCount} 个 spec 文件仅提交到个人 worktree。`
+        : `${localOnlySpecFileCount} 个 spec 文件已提交到个人 worktree，未推送。`;
+    } else {
+      progressMessage.value = push ? "提交并推送成功！" : "提交成功！";
+    }
     await refreshChanges();
     setTimeout(() => {
       progressMessage.value = "";
@@ -1402,6 +1424,9 @@ defineExpose({
         <div v-if="errorMessage" class="ta-process-startup-error mx-4 my-3 text-left">
           <strong class="text-xs">错误说明</strong>
           <p class="text-xs leading-normal mt-1">{{ errorMessage }}</p>
+        </div>
+        <div v-else-if="progressMessage && !committing" class="mx-4 my-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-left text-xs text-green-700">
+          {{ progressMessage }}
         </div>
 
         <footer class="ta-process-startup-footer">
