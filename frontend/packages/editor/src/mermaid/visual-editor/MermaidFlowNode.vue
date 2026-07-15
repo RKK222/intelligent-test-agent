@@ -76,12 +76,13 @@ const allPorts = computed<FlowPort[]>(() => {
     ];
   } else if (nodeType === "rectangle") {
     // 矩形：顶点4个，每边上2个。共12个点
+    // 角点内移 2% 避免超出 5px border-radius 的可见边界
     rawPorts = [
-      // 顶点 (4个)
-      { x: 0, y: 0, pos: Position.Top },
-      { x: 100, y: 0, pos: Position.Top },
-      { x: 0, y: 100, pos: Position.Bottom },
-      { x: 100, y: 100, pos: Position.Bottom },
+      // 顶点 (4个，略微内移防止超出圆角)
+      { x: 2, y: 0, pos: Position.Top },
+      { x: 98, y: 0, pos: Position.Top },
+      { x: 2, y: 100, pos: Position.Bottom },
+      { x: 98, y: 100, pos: Position.Bottom },
       // 边上的点 (8个)
       { x: 33.3, y: 0, pos: Position.Top },
       { x: 66.7, y: 0, pos: Position.Top },
@@ -94,15 +95,16 @@ const allPorts = computed<FlowPort[]>(() => {
     ];
   } else {
     // 圆角 rounded, 胶囊 stadium：左右各1个，上下各3个。共8个点
+    // 外侧两点用 35%/65% 而非 25%/75%，确保落在直线边上而非弯角弧内
     rawPorts = [
       { x: 0, y: 50, pos: Position.Left },
       { x: 100, y: 50, pos: Position.Right },
-      { x: 25, y: 0, pos: Position.Top },
+      { x: 35, y: 0, pos: Position.Top },
       { x: 50, y: 0, pos: Position.Top },
-      { x: 75, y: 0, pos: Position.Top },
-      { x: 25, y: 100, pos: Position.Bottom },
+      { x: 65, y: 0, pos: Position.Top },
+      { x: 35, y: 100, pos: Position.Bottom },
       { x: 50, y: 100, pos: Position.Bottom },
-      { x: 75, y: 100, pos: Position.Bottom }
+      { x: 65, y: 100, pos: Position.Bottom }
     ];
   }
 
