@@ -7,7 +7,13 @@ import {
   type NodeMouseEvent
 } from "@vue-flow/core";
 import { autoLayoutMermaidGraph } from "../layout";
-import { cloneMermaidGraph, type MermaidEdge, type MermaidGraph, type MermaidNode, type MermaidNodeType } from "../model";
+import {
+  cloneMermaidGraph,
+  type MermaidGraph,
+  type MermaidNode,
+  type MermaidNodeType,
+  type MermaidPosition
+} from "../model";
 import MermaidFlowNode from "./MermaidFlowNode.vue";
 import {
   appendMermaidEdge,
@@ -19,7 +25,18 @@ import {
 const props = defineProps<{ modelValue: MermaidGraph }>();
 const emit = defineEmits<{ "update:modelValue": [graph: MermaidGraph] }>();
 
+const nodeTypes: ReadonlyArray<{ type: MermaidNodeType; label: string }> = [
+  { type: "rectangle", label: "矩形" },
+  { type: "rounded", label: "圆角" },
+  { type: "stadium", label: "胶囊" },
+  { type: "diamond", label: "判断" },
+  { type: "circle", label: "圆形" }
+];
+const nodeDragMime = "application/x-test-agent-mermaid-node";
+const vueFlowRef = ref<{ screenToFlowCoordinate: (position: MermaidPosition) => MermaidPosition }>();
+const canvasRef = ref<HTMLElement>();
 const selectedNodeId = ref<string>();
+const isCanvasDragOver = ref(false);
 const flowNodes = computed(() => toVueFlowNodes(props.modelValue));
 const flowEdges = computed(() => toVueFlowEdges(props.modelValue));
 const selectedNode = computed(() => props.modelValue.nodes.find((node) => node.id === selectedNodeId.value));
@@ -61,39 +78,59 @@ function deleteSelectedNode() {
   selectedNodeId.value = undefined;
 }
 
-function addNode() {
+/** 在当前可见画布中心提供键盘和点击创建的确定性落点。 */
+function getDefaultNodePosition(): MermaidPosition {
+  const bounds = canvasRef.value?.getBoundingClientRect();
+  if (!bounds?.width || !bounds.height) return { x: 80, y: 70 };
+  return vueFlowRef.value?.screenToFlowCoordinate({
+    x: bounds.left + bounds.width / 2,
+    y: bounds.top + bounds.height / 2
+  }) ?? { x: 80, y: 70 };
+}
+
+/** 统一创建图形库节点，确保 ID 唯一且新增后立即进入属性编辑态。 */
+function createNode(type: MermaidNodeType, position = getDefaultNodePosition()) {
   updateGraph((draft) => {
     const used = new Set(draft.nodes.map((node) => node.id));
     let sequence = draft.nodes.length + 1;
     while (used.has(`N${sequence}`)) sequence += 1;
     const id = `N${sequence}`;
-    draft.nodes.push({ id, text: "新节点", type: "rectangle", position: { x: 80, y: 70 } });
+    draft.nodes.push({ id, text: "新节点", type, position });
     selectedNodeId.value = id;
   });
 }
 
-function addEdge() {
-  const [source, target] = props.modelValue.nodes;
-  if (!source || !target) return;
-  const next = appendMermaidEdge(props.modelValue, { source: source.id, target: target.id });
-  if (next !== props.modelValue) emit("update:modelValue", next);
+function isMermaidNodeType(value: string): value is MermaidNodeType {
+  return nodeTypes.some((item) => item.type === value);
 }
 
-function updateEdge(edgeId: string, patch: Partial<Omit<MermaidEdge, "id">>) {
-  updateGraph((draft) => {
-    const edge = draft.edges.find((item) => item.id === edgeId);
-    if (edge) Object.assign(edge, patch);
-  });
+function onPaletteDragStart(event: DragEvent, type: MermaidNodeType) {
+  if (!event.dataTransfer) return;
+  event.dataTransfer.effectAllowed = "copy";
+  event.dataTransfer.setData(nodeDragMime, type);
+  event.dataTransfer.setData("text/plain", type);
 }
 
-function swapEdge(edge: MermaidEdge) {
-  updateEdge(edge.id, { source: edge.target, target: edge.source });
+function onCanvasDragOver(event: DragEvent) {
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  isCanvasDragOver.value = true;
 }
 
-function deleteEdge(edgeId: string) {
-  updateGraph((draft) => {
-    draft.edges = draft.edges.filter((edge) => edge.id !== edgeId);
-  });
+function onCanvasDragLeave(event: DragEvent) {
+  const canvas = event.currentTarget as HTMLElement;
+  if (event.relatedTarget instanceof Node && canvas.contains(event.relatedTarget)) return;
+  isCanvasDragOver.value = false;
+}
+
+/** 只接受图形库声明的节点类型，其他页面拖放内容不会污染 Mermaid 草稿。 */
+function onCanvasDrop(event: DragEvent) {
+  event.preventDefault();
+  isCanvasDragOver.value = false;
+  const type = event.dataTransfer?.getData(nodeDragMime) || event.dataTransfer?.getData("text/plain") || "";
+  if (!isMermaidNodeType(type)) return;
+  const position = vueFlowRef.value?.screenToFlowCoordinate({ x: event.clientX, y: event.clientY });
+  if (position) createNode(type, position);
 }
 
 function applyAutoLayout() {
@@ -109,8 +146,6 @@ function updateDirection(event: Event) {
 <template>
   <div class="ta-mermaid-visual-editor">
     <div class="ta-mermaid-toolbar">
-      <button type="button" @click="addNode">新增节点</button>
-      <button type="button" :disabled="modelValue.nodes.length < 2" @click="addEdge">新增连线</button>
       <button type="button" @click="applyAutoLayout">自动布局</button>
       <label>
         <span>图方向</span>
@@ -121,12 +156,20 @@ function updateDirection(event: Event) {
           <option value="RL">从右到左</option>
         </select>
       </label>
-      <span class="ta-mermaid-toolbar__hint">拖动节点；从节点边缘 Handle 拉出连线</span>
+      <span class="ta-mermaid-toolbar__hint">从右侧拖入节点；从节点边缘 Handle 拉出连线</span>
     </div>
 
     <div class="ta-mermaid-workspace">
-      <div class="ta-mermaid-canvas" aria-label="Mermaid 可视化画布">
+      <div
+        ref="canvasRef"
+        :class="['ta-mermaid-canvas', { 'is-drag-over': isCanvasDragOver }]"
+        aria-label="Mermaid 可视化画布"
+        @dragover="onCanvasDragOver"
+        @dragleave="onCanvasDragLeave"
+        @drop="onCanvasDrop"
+      >
         <VueFlow
+          ref="vueFlowRef"
           :nodes="flowNodes"
           :edges="flowEdges"
           :min-zoom="0.35"
@@ -144,8 +187,28 @@ function updateDirection(event: Event) {
       </div>
 
       <aside class="ta-mermaid-inspector" aria-label="图属性">
-        <section>
-          <h3>节点</h3>
+        <section class="ta-mermaid-palette">
+          <h3>节点类型</h3>
+          <p class="ta-mermaid-palette__hint">拖到画布创建节点，也可点击添加。</p>
+          <div class="ta-mermaid-palette__grid">
+            <button
+              v-for="item in nodeTypes"
+              :key="item.type"
+              type="button"
+              class="ta-mermaid-palette__item"
+              :aria-label="`添加${item.label}节点`"
+              draggable="true"
+              @dragstart="onPaletteDragStart($event, item.type)"
+              @click="createNode(item.type)"
+            >
+              <span :class="['ta-mermaid-palette__shape', `is-${item.type}`]" aria-hidden="true"></span>
+              <span>{{ item.label }}</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="ta-mermaid-node-properties">
+          <h3>当前节点</h3>
           <div v-if="selectedNode" class="ta-mermaid-fields">
             <label>
               <span>节点 ID</span>
@@ -169,27 +232,6 @@ function updateDirection(event: Event) {
           </div>
           <p v-else class="ta-mermaid-empty">选择画布中的节点后编辑。</p>
         </section>
-
-        <section>
-          <div class="ta-mermaid-section-title"><h3>连线</h3><span>{{ modelValue.edges.length }}</span></div>
-          <div v-if="modelValue.edges.length" class="ta-mermaid-edge-list">
-            <article v-for="edge in modelValue.edges" :key="edge.id" class="ta-mermaid-edge-card">
-              <div class="ta-mermaid-edge-route"><code>{{ edge.source }}</code><span>→</span><code>{{ edge.target }}</code></div>
-              <label><span>标签</span><input :value="edge.label" @input="updateEdge(edge.id, { label: ($event.target as HTMLInputElement).value })" /></label>
-              <label>
-                <span>类型</span>
-                <select :value="edge.relation" @change="updateEdge(edge.id, { relation: ($event.target as HTMLSelectElement).value as MermaidEdge['relation'] })">
-                  <option value="arrow">箭头</option><option value="line">直线</option><option value="dotted">虚线箭头</option><option value="thick">粗箭头</option>
-                </select>
-              </label>
-              <div class="ta-mermaid-edge-actions">
-                <button type="button" @click="swapEdge(edge)">交换方向</button>
-                <button type="button" class="is-danger" @click="deleteEdge(edge.id)">删除</button>
-              </div>
-            </article>
-          </div>
-          <p v-else class="ta-mermaid-empty">从节点 Handle 拉出连线，或使用顶部新增连线。</p>
-        </section>
       </aside>
     </div>
   </div>
@@ -211,21 +253,25 @@ function updateDirection(event: Event) {
 .ta-mermaid-toolbar select { padding: 0 6px; }
 .ta-mermaid-toolbar__hint { margin-left: auto; color: var(--ta-muted, #64748b); font-size: 11px; }
 .ta-mermaid-workspace { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr) 280px; }
-.ta-mermaid-canvas { min-height: 420px; background-color: var(--ta-surface, #fff); background-image: radial-gradient(circle, color-mix(in srgb, var(--ta-border, #dbe2ea) 75%, transparent) 1px, transparent 1px); background-size: 18px 18px; }
+.ta-mermaid-canvas { min-height: 420px; background-color: var(--ta-surface, #fff); background-image: radial-gradient(circle, color-mix(in srgb, var(--ta-border, #dbe2ea) 75%, transparent) 1px, transparent 1px); background-size: 18px 18px; transition: box-shadow 120ms ease; }
+.ta-mermaid-canvas.is-drag-over { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary, #4f46e5) 65%, transparent); }
 .ta-mermaid-canvas :deep(.vue-flow) { height: 100%; min-height: 420px; }
 .ta-mermaid-inspector { min-height: 0; overflow: auto; border-left: 1px solid var(--ta-border, #e2e8f0); background: var(--ta-panel-2, #f8fafc); }
 .ta-mermaid-inspector section { padding: 13px; border-bottom: 1px solid var(--ta-border, #e2e8f0); }
 .ta-mermaid-inspector h3 { margin: 0 0 10px; color: var(--ta-ink, #172033); font-size: 12px; font-weight: 700; }
-.ta-mermaid-fields, .ta-mermaid-edge-card { display: grid; gap: 8px; }
-.ta-mermaid-fields label, .ta-mermaid-edge-card label { display: grid; gap: 3px; color: var(--ta-muted, #64748b); font-size: 10px; }
-.ta-mermaid-fields input, .ta-mermaid-fields select, .ta-mermaid-edge-card input, .ta-mermaid-edge-card select { width: 100%; padding: 4px 7px; }
-.ta-mermaid-section-title { display: flex; align-items: center; justify-content: space-between; }
-.ta-mermaid-section-title span { color: var(--ta-muted, #64748b); font-family: Menlo, Monaco, Consolas, monospace; font-size: 10px; }
-.ta-mermaid-edge-list { display: grid; gap: 9px; }
-.ta-mermaid-edge-card { border: 1px solid var(--ta-border, #e2e8f0); border-radius: 6px; padding: 9px; background: var(--ta-surface, #fff); }
-.ta-mermaid-edge-route { display: flex; align-items: center; gap: 6px; font-size: 11px; }
-.ta-mermaid-edge-route code { color: var(--primary, #4f46e5); }
-.ta-mermaid-edge-actions { display: flex; justify-content: flex-end; gap: 5px; }
+.ta-mermaid-palette__hint { margin: -4px 0 10px; color: var(--ta-muted, #64748b); font-size: 10px; line-height: 1.45; }
+.ta-mermaid-palette__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.ta-mermaid-inspector button.ta-mermaid-palette__item { display: grid; min-height: 76px; place-items: center; align-content: center; gap: 7px; padding: 8px 5px; color: var(--ta-muted, #64748b); }
+.ta-mermaid-inspector button.ta-mermaid-palette__item:hover { color: var(--ta-ink, #172033); }
+.ta-mermaid-palette__shape { display: block; width: 72px; height: 30px; border: 1.5px solid currentColor; border-radius: 2px; background: var(--ta-surface, #fff); color: var(--ta-border-strong, #94a3b8); pointer-events: none; }
+.ta-mermaid-palette__shape.is-rounded { border-radius: 10px; }
+.ta-mermaid-palette__shape.is-stadium { width: 80px; border-radius: 999px; }
+.ta-mermaid-palette__shape.is-diamond { width: 31px; height: 31px; border-radius: 2px; transform: rotate(45deg); }
+.ta-mermaid-palette__shape.is-circle { width: 38px; height: 38px; border-radius: 50%; }
+.ta-mermaid-node-properties { min-height: 132px; }
+.ta-mermaid-fields { display: grid; gap: 8px; }
+.ta-mermaid-fields label { display: grid; gap: 3px; color: var(--ta-muted, #64748b); font-size: 10px; }
+.ta-mermaid-fields input, .ta-mermaid-fields select { width: 100%; padding: 4px 7px; }
 .ta-mermaid-inspector button.is-danger { color: #b42318; }
 .ta-mermaid-empty { margin: 0; color: var(--ta-muted, #64748b); font-size: 11px; line-height: 1.5; }
 @media (max-width: 820px) { .ta-mermaid-workspace { grid-template-columns: 1fr; grid-template-rows: minmax(360px, 1fr) 240px; } .ta-mermaid-inspector { border-top: 1px solid var(--ta-border, #e2e8f0); border-left: 0; } .ta-mermaid-toolbar__hint { display: none; } }

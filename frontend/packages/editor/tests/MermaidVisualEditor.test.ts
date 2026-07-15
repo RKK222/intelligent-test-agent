@@ -1,4 +1,4 @@
-import { defineComponent } from "vue";
+import { defineComponent, ref } from "vue";
 import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it, vi } from "vitest";
 import type { MermaidGraph } from "../src/mermaid/model";
@@ -14,6 +14,11 @@ vi.mock("@vue-flow/core", () => ({
     name: "VueFlow",
     props: ["nodes", "edges"],
     emits: ["nodeDragStop", "connect", "nodeClick"],
+    setup(_, { expose }) {
+      expose({
+        screenToFlowCoordinate: ({ x, y }: { x: number; y: number }) => ({ x: x - 100, y: y - 50 })
+      });
+    },
     template: `<div data-testid="vue-flow-mock">
       <button data-testid="mock-drag" @click="$emit('nodeDragStop', { node: { id: 'A', position: { x: 480, y: 260 } } })">drag</button>
       <button data-testid="mock-connect" @click="$emit('connect', { source: 'B', target: 'A' })">connect</button>
@@ -72,6 +77,73 @@ describe("Mermaid Vue Flow 适配", () => {
 });
 
 describe("MermaidVisualEditor", () => {
+  it("用五种节点图形库替代顶部新增按钮和连线面板", () => {
+    const { getByRole, queryByRole } = render(MermaidVisualEditor, { props: { modelValue: graph() } });
+
+    for (const label of ["矩形", "圆角", "胶囊", "判断", "圆形"]) {
+      expect(getByRole("button", { name: `添加${label}节点` })).toBeTruthy();
+    }
+    expect(queryByRole("button", { name: "新增节点" })).toBeNull();
+    expect(queryByRole("button", { name: "新增连线" })).toBeNull();
+    expect(queryByRole("heading", { name: "连线" })).toBeNull();
+  });
+
+  it("点击图形库按钮创建对应类型节点", async () => {
+    const { getByRole, emitted } = render(MermaidVisualEditor, { props: { modelValue: graph() } });
+
+    await fireEvent.click(getByRole("button", { name: "添加判断节点" }));
+
+    const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
+    expect(updates.at(-1)?.[0].nodes.at(-1)).toMatchObject({
+      id: "N3",
+      text: "新节点",
+      type: "diamond"
+    });
+  });
+
+  it("创建节点后在图形库下方立即显示当前节点属性", async () => {
+    const EditorHost = defineComponent({
+      components: { MermaidVisualEditor },
+      setup() {
+        return { model: ref(graph()) };
+      },
+      template: `<MermaidVisualEditor v-model="model" />`
+    });
+    const { getByLabelText, getByRole } = render(EditorHost);
+
+    await fireEvent.click(getByRole("button", { name: "添加圆角节点" }));
+
+    expect((getByLabelText("节点 ID") as HTMLInputElement).value).toBe("N3");
+    expect((getByLabelText("节点名称") as HTMLInputElement).value).toBe("新节点");
+    expect((getByLabelText("节点类型") as HTMLSelectElement).value).toBe("rounded");
+  });
+
+  it("把节点类型拖到画布落点后创建节点", async () => {
+    const { getByLabelText, emitted } = render(MermaidVisualEditor, { props: { modelValue: graph() } });
+    const dataTransfer = {
+      dropEffect: "none",
+      effectAllowed: "all",
+      getData: vi.fn(() => "circle"),
+      setData: vi.fn()
+    };
+
+    const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(dropEvent, {
+      clientX: { value: 420 },
+      clientY: { value: 260 },
+      dataTransfer: { value: dataTransfer }
+    });
+    fireEvent(getByLabelText("Mermaid 可视化画布"), dropEvent);
+
+    const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
+    expect(updates.at(-1)?.[0].nodes.at(-1)).toMatchObject({
+      id: "N3",
+      text: "新节点",
+      type: "circle",
+      position: { x: 320, y: 210 }
+    });
+  });
+
   it("接收 Vue Flow 拖拽结束事件并上报新坐标", async () => {
     const { getByTestId, emitted } = render(MermaidVisualEditor, { props: { modelValue: graph() } });
 

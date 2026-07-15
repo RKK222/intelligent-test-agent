@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-15 - 将 Mermaid 节点创建改为可拖放图形库
+
+- Why:
+  - 用户要求把 Flowchart/Graph 可视化编辑器右栏改为节点类型的图形化展示，支持拖到画布创建；同时删除顶部新增节点/连线按钮和整块连线属性面板，并在图形库下方保留选中节点属性。
+- What:
+  - 右栏固定展示矩形、圆角、胶囊、判断和圆形五种真实轮廓，支持拖放落点与点击/键盘创建；新节点自动选中，属性区继续提供 ID、名称、类型和删除操作。
+  - 连线仅保留 Vue Flow Handle 创建入口，现有 parser、serializer、Markdown 回写和 Sequence Diagram 行为不变。
+- How:
+  - 复用 Vue Flow `screenToFlowCoordinate` 将浏览器坐标转换为图坐标，仍通过 `cloneMermaidGraph` 和 `update:modelValue` 更新草稿；组件测试覆盖按钮/面板移除、五种类型、点击创建、拖放坐标、自动选中和既有 Handle 连线回归。
+  - 应用内浏览器完成桌面与窄屏布局、点击创建和属性编辑验证；当前浏览器控制层的坐标拖拽不会生成原生 HTML5 `DataTransfer`，因此拖放落点由组件级原生 drop 事件测试验证，验收草稿未应用到 Markdown。
+- Result:
+  - 前端全量 lint、typecheck、56 个 Vitest 文件（789 passed / 1 skipped）和生产 build 通过；构建仅保留既有 Google Fonts `@import` 顺序与大 chunk 警告。未修改 API、事件、数据库、安全或兼容性契约。
+
 ### 2026-07-14 - 修改用户发送消息的气泡底色为浅灰色
 
 - Why:
