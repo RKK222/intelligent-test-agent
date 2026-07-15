@@ -16,6 +16,7 @@
       "options": {
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
         "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
+        "includeUsage": false,
         "timeout": false,
         "headerTimeout": 30000,
         "chunkTimeout": 120000,
@@ -51,6 +52,7 @@
       "options": {
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
         "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
+        "includeUsage": false,
         "timeout": false,
         "headerTimeout": 30000,
         "chunkTimeout": 120000,

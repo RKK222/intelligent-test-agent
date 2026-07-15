@@ -221,7 +221,17 @@ qwen-prod
 deepseek-prod
 ```
 
-更新公共配置后，要在运行管理中重启已有用户 OpenCode 进程；新进程会直接读取新配置。
+三层配置必须同时正确：
+
+| 配置层 | 正确内容 | 生效方式 |
+|---|---|---|
+| 本服务器公共 `opencode.jsonc` | `icbc-qwen/Qwen3.6-27B`、`icbc-deepseek/DeepSeek-V4-Flash-W8A8`，并包含 `includeUsage=false` | 重启已有用户 OpenCode 进程；新进程直接读取 |
+| 共享数据库内部供应商 | `qwen-prod`、`deepseek-prod` 均启用，`baseUrl=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1`，全局 token 已配置 | 保存或点击“刷新 Java 内存”；不需要重启用户进程 |
+| 用户进程环境 | Java 启动进程时注入内部代理 key、同节点 Java 代理地址和该用户的 `ICBC_UCID` | 停止并通过运行管理重新启动用户进程 |
+
+`icbc-qwen` / `icbc-deepseek` 只用于 OpenCode 模型目录；`qwen-prod` / `deepseek-prod` 只用于 Java 路由，二者不能互换。上游模型 token 由 Java 作为 `Authorization: Bearer <token>` 注入，不在 `backend.env`、`docker.env` 或 `opencode.jsonc` 中再配 `Auth-Token`。每个用户的 UCID 来自用户表，由 Java 逐进程注入，不需要也不能为所有用户共用一个 env 文件。
+
+更新公共配置后，要在运行管理中重启已有用户 OpenCode 进程；只重启 Java 不会让已运行的 OpenCode 重新读取公共配置。供应商地址、启用状态或 token 变化后先点击“刷新 Java 内存”；单后台广播异常时可直接重启 Java 重新加载数据库快照。
 
 ## 8. 验收
 
@@ -252,6 +262,30 @@ curl -fsS http://127.0.0.1:<实际端口>/api/model
 
 最后从前端分别新建 Qwen 和 DeepSeek 会话，验证普通回答、think/reasoning、工具调用、持续 SSE 和 `[DONE]`。
 
+如果前端仍报 400，先在 `.114` 绕过 OpenCode、直接调用 Java 代理；将 key 和 UCID 替换为现场值：
+
+```bash
+curl -iN --max-time 180 \
+  http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -H 'Authorization: Bearer <backend.env 中的 TEST_AGENT_INTERNAL_PROXY_API_KEY>' \
+  -H 'X-ICBC-Model-Provider: qwen-prod' \
+  -H 'ucid: <现场用户 UCID>' \
+  --data '{"model":"Qwen3.6-27B","messages":[{"role":"user","content":"你好"}],"stream":true}'
+
+curl -iN --max-time 180 \
+  http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -H 'Authorization: Bearer <backend.env 中的 TEST_AGENT_INTERNAL_PROXY_API_KEY>' \
+  -H 'X-ICBC-Model-Provider: deepseek-prod' \
+  -H 'ucid: <现场用户 UCID>' \
+  --data '{"model":"DeepSeek-V4-Flash-W8A8","messages":[{"role":"user","content":"你好"}],"stream":true}'
+```
+
+Java 代理正常时应持续收到单层 `data:`，思考内容位于 `reasoning_content`，最后收到单层 `data: [DONE]`。不要把测试地址改成 `9070`：该步骤就是验证 `OpenCode -> Java:8080 -> 9070` 的正式链路。
+
 正式链路验证通过后确认临时 relay 已删除：
 
 ```bash
@@ -267,9 +301,12 @@ ss -lntp | grep 19070
 |---|---|
 | 前端 502/进不去 | `.2` 执行 `nginx -t`，再从 `.2` curl `.114:8080/actuator/health`。 |
 | worker 一直断连 | 比对两份 env 的 manager token；检查 `.serverhost`、8080 和 worker 日志。 |
-| 模型不显示 | 检查本服务器公共配置是否初始化、用户进程是否重启、`/api/provider` 和 `/api/model`。 |
-| 模型 400 | 核对 provider header 与数据库 `provider_id`，确认供应商启用、模型 ID 和 token。 |
-| 模型连接超时 | 必须从 Java 宿主机检查 `ai-code.sdc.icbc:9070`，不能用服务器上其他容器的 curl 代替。 |
+| 模型不显示 | 检查本服务器公共配置是否初始化；`/api/provider` 必须出现 `icbc-qwen/icbc-deepseek`，`/api/model` 必须出现两个准确模型 ID；更新后必须重启该用户 OpenCode。 |
+| `内部模型供应商未启用或不存在` | 请求头必须为 `qwen-prod` / `deepseek-prod`，数据库同名 `provider_id` 必须启用；点击“刷新 Java 内存”后再查 refresh-status。 |
+| Java 代理 400 | 读取响应正文，依次核对准确模型 ID、数据库 token、UCID、供应商 base URL；公共配置必须保留 `includeUsage=false`。当前 Java 会原样返回上游 4xx 正文，不应只剩空响应。 |
+| 前端 400、Java 代理 curl 正常 | 用户 OpenCode 仍在使用旧配置或旧环境；在运行管理停止并重启该用户进程，再检查其 `/api/model`。 |
+| 模型连接超时 | 必须从 Java 宿主机检查 `ai-code.sdc.icbc:9070`；OpenCode 的 `baseURL` 应是同节点 Java `:8080`，不能直接写 9070，也不能用其他容器的 curl 代替 Java 宿主机检查。 |
+| Java 调用卡住或原生输出为空 | 确认部署的是包含 SSE 修复的新 JAR；日志中不应出现重复 `data:data:`，首事件最长 30 秒、相邻事件空闲最长 120 秒。直接绕过 Java 能通不能证明 Java SSE 代理正常。 |
 | 用户初始化失败 | 在运行管理检查 Java、manager、容器连接和端口池；查看用户端口日志。 |
 
 回滚时恢复旧 JAR、`backend/lib/`、programs 和 worker 镜像，再按“Java → 身份文件 → worker”重启。不要删除 `/data/testagent/data`。

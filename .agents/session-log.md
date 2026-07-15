@@ -6623,3 +6623,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 核心对话/模型链路可按多后台继续验证，但当前不能把整个平台标记为“无需亲和的完整多后台正式方案”。后续需要先确定 WebSocket 正式路由方案（目标 Java 绝对 URL或 Java WebSocket 转发/共享 ticket），补真实双 Java 握手测试，再修正文档；仅调整 Nginx sticky 无法可靠解决已被入口 Java 转发到远端签发的 PTY ticket。
   - `BackendJavaRouteResolverTest` 6 项与 `TerminalTicketStoreTest` 3 项通过；部署脚本语法、AI 文档校验和工作区 diff 校验通过，未连接生产 `.2/.4/.114`。
+
+### 2026-07-15 - 补齐企业模型排障并收敛多后台交付口径
+
+- Why:
+  - 单/多后台部署文档只概括了模型不显示、400 和 9070 超时，未覆盖现场已经出现过的 provider key 混用、Java 内存快照未刷新、旧用户进程配置、逐用户 UCID、OpenCode 默认 usage 参数和 SSE 空流等问题；多后台手册同时仍把单 JVM WebSocket ticket 限制误写成无需亲和的完整支持。
+- What:
+  - Qwen 与 DeepSeek 公共配置恢复 `includeUsage=false`，模型继续固定为 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`；单/多后台手册补齐三层模型配置、生效/重启规则、每节点 Java 代理 curl 和分层故障检查。
+  - 数据库文档明确 `provider_id` 是 `qwen-prod/deepseek-prod` Java 路由键，不是 `icbc-qwen/icbc-deepseek` OpenCode provider key；上游 token 继续只从数据库读取并由 Java 以 Authorization Bearer 注入，UCID 继续由所属 Java 按用户进程注入。
+  - 多后台交付口径改为普通 HTTP、RunEvent SSE、用户 OpenCode 路由和模型代理可多节点；PTY、Workspace 文件和 Agent 配置进度的一次性 WebSocket ticket 仍受单 JVM 限制，文档明确浏览器直连目标 Java 的网络要求和当前不能用 sticky 代替正式修复。
+- How:
+  - 对照 OpenCode 1.17.8 openai-compatible 默认选项、内部模型 Registry/广播、用户进程环境注入、Java SSE 代理和三类 WebSocket ticket 实现复核；未修改运行代码、数据库结构、生产 env 或现场服务器。
+- Result:
+  - think 转换 4 项、Java 代理 8 项、用户进程启动 9 项、内部供应商 MyBatis 集成 1 项全部通过；公共配置 JSON 校验、企业脚本 Bash 语法、AI 文档校验、过期模型扫描和 `git diff --check` 通过。
+  - 未重新打企业 zip，也未连接 `.2/.4/.114` 或行内 9070 做生产验收；核心模型链路可按文档逐节点验证，完整多后台 WebSocket 能力仍需后续代码修复。

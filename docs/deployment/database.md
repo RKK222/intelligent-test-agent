@@ -801,7 +801,7 @@ V10 种子数据对 F-COSS 的影响：
 
 `V20260708100000__create_internal_model_provider_tables.sql` 创建内部模型代理配置表：
 
-- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 保存内部供应商地址；`provider_id` 对应 opencode 配置中的 provider key 和代理请求头 `X-ICBC-Model-Provider`。
+- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 保存内部供应商地址；`provider_id` 对应代理请求头 `X-ICBC-Model-Provider` 的路由键（当前为 `qwen-prod` / `deepseek-prod`），不是 opencode 配置中的 `icbc-qwen` / `icbc-deepseek` provider key。
 - `internal_model_proxy_settings(setting_id='default', icbc_openai_auth_token, created_at, updated_at)` 保存全局 `ICBC_OPENAI_AUTH_TOKEN`，按需求明文保存，不回显到前端。
 - Java 启动时把启用供应商和 token 加载到内存；管理端保存后发布 `internal-model-provider.refresh-requested` 广播，各 Java 从数据库重新加载内存快照。
 

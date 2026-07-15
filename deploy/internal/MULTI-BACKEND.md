@@ -1,6 +1,8 @@
 # 企业内多后台部署
 
-当前代码正式支持两个或更多后台节点。任意入口 Java 收到请求后，会根据 Redis 中的服务器/manager 快照选择目标服务器；如果目标不在本机，使用公共 Java 路由转发到目标 Java，再由目标 Java 控制本机 manager。无需让 Nginx 固定用户到某个后台，也不得在业务入口实现本机降级或自行扫描 Redis。
+当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由和内部模型代理支持两个或更多后台节点。任意入口 Java 收到这些请求后，会根据 Redis 中的服务器/manager 快照选择目标服务器；如果目标不在本机，使用公共 Java 路由转发到目标 Java，再由目标 Java 控制本机 manager。不得在业务入口实现本机降级或自行扫描 Redis。
+
+当前版本还不能把整个前端入口标记为“无亲和的完整多后台”：PTY、Workspace 文件和 Agent 配置进度的一次性 WebSocket ticket 保存在签发 Java 的 JVM 内存中，`least_conn` 无法保证后续 upgrade 回到同一 Java；Workspace/Agent 配置文件 WebSocket 还会让浏览器直连目标 Java 的 `listenUrl`。因此本手册可用于部署和验收核心对话/模型链路，启用上述 WebSocket 功能前必须完成第 6 节的限制处理或代码修复，不能仅靠 Nginx sticky 宣称问题已解决。
 
 本文用两个后台举例：
 
@@ -45,6 +47,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | 来源 | 目标 | 用途 |
 |---|---|---|
 | `.2` | `.4:8080`、`.114:8080` | Nginx 负载均衡 |
+| 企业浏览器网段 | `.4:8080`、`.114:8080` | Workspace/Agent 配置文件 WebSocket 直连目标 Java；未完成统一网关修复前必须可达 |
 | `.4` | `.114:8080` | Java A 转发到 Java B |
 | `.114` | `.4:8080` | Java B 转发到 Java A |
 | 每台 worker 容器 | 本机 Java `:8080` | manager WebSocket、内部模型代理 |
@@ -257,7 +260,15 @@ nginx -t
 systemctl reload nginx
 ```
 
-正确性不依赖 sticky session：用户进程归属由数据库 binding 和 Redis 服务器快照决定，入口 Java 会转发到进程所属服务器。SSE 和 WebSocket 连接建立后由 Nginx 保持当前上游长连接。
+普通 HTTP、RunEvent SSE 和模型请求的正确性不依赖 sticky session：用户进程归属由数据库 binding 和 Redis 服务器快照决定，入口 Java 会转发到进程所属服务器；长连接建立后由 Nginx 保持当前上游。
+
+一次性 WebSocket ticket 是当前例外：
+
+- Workspace/Agent 配置文件 route 会返回目标 Java `listenUrl`，浏览器必须能够直接访问 `.4:8080` 和 `.114:8080`，并由两台 Java 的 CORS/Origin 白名单允许 `http://122.233.30.2`。
+- PTY ticket 可能由入口 Java 转发到用户进程所属 Java 签发，但返回的是入口域名下相对 WebSocket URL；`least_conn` 或简单 `ip_hash` 都不能保证 upgrade 回到实际持有 ticket 的 Java。
+- Agent 配置进度 ticket 与 upgrade 也可能被 Nginx 分配到不同 Java。
+
+在代码改为“返回目标 Java 绝对 WebSocket URL”、Java 间 WebSocket 转发或共享 ticket 之前，PTY 和 Agent 配置进度 WebSocket 不能作为完整多后台验收通过项。若生产必须立即使用这些功能，应继续使用单后台入口；不要把 Nginx sticky 当作正式修复。
 
 ## 7. 部署与启动顺序
 
@@ -332,7 +343,16 @@ icbc-qwen/Qwen3.6-27B                 -> qwen-prod
 icbc-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
 ```
 
-供应商地址、启用状态和上游 token 来自共享数据库。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。更新后重启对应服务器上的已有用户 OpenCode 进程。
+公共配置必须包含 `includeUsage=false`，避免 OpenCode 1.17.8 默认添加行内接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
+
+`icbc-qwen` / `icbc-deepseek` 是 OpenCode provider key；`qwen-prod` / `deepseek-prod` 是数据库和 `X-ICBC-Model-Provider` 使用的 Java 路由键，不能混用。上游 token 只在共享数据库维护，由 Java 以 `Authorization: Bearer <token>` 注入。用户 UCID 由拥有该用户进程的 Java 从用户表读取并逐进程注入，不使用全局 UCID env 文件。
+
+变更生效规则：
+
+1. 修改某台服务器公共 `opencode.jsonc` 后，只重启该服务器上已有的用户 OpenCode 进程；新进程直接读取。
+2. 修改共享数据库供应商或 token 后点击“刷新 Java 内存”；广播启用时所有 Java 会分别重载同一数据库快照。
+3. 在两台后台分别查询 refresh-status，必须都包含 `qwen-prod`、`deepseek-prod` 且 `tokenConfigured=true`；广播失败时逐台重启 Java 重新加载。
+4. 只重启 Java 不会让已经运行的用户 OpenCode 重新读取公共配置或重新注入 UCID，涉及进程配置时仍要重启对应用户进程。
 
 ## 9. 集群验收
 
@@ -360,6 +380,10 @@ docker logs --tail 200 test-agent-opencode-worker | \
 6. 分别用 Qwen 和 DeepSeek 验证普通正文、think/reasoning、工具调用、持续 SSE 和 `[DONE]`。
 7. 两台后台都确认 9070 直连；正式链路中没有监听 19070 的 relay。
 
+模型验收不能只在其中一台执行。在 `.4` 和 `.114` 分别用本机 `127.0.0.1:8080` 执行 [单后台文档的两条 Java 代理 curl](SINGLE-BACKEND.md#8-验收)，分别验证 `qwen-prod + Qwen3.6-27B` 和 `deepseek-prod + DeepSeek-V4-Flash-W8A8`。两台都应持续返回单层 `data:`、正确的 `reasoning_content` 和单层 `[DONE]`；这样才能同时覆盖每台 Java 的内存快照、内部代理 key、UCID 转发和本机 9070 出站网络。
+
+当前只能把上述核心链路标记为多后台验收通过；PTY、Workspace 文件和 Agent 配置进度 WebSocket 按第 6 节单独记录为限制项，不能据此宣布全平台多后台完成。
+
 ## 10. 故障定位与回滚
 
 | 现象 | 排查顺序 |
@@ -368,8 +392,11 @@ docker logs --tail 200 test-agent-opencode-worker | \
 | 运行管理只显示一个服务器 | 检查两台是否共享同一 Redis、ID 是否唯一、heartbeat 日志和广播 channel 是否一致。 |
 | worker 连接到错误 Java | 检查本机 `.serverhost`、两份 env 的数据根目录和本机 manager token；禁止复制另一节点身份文件。 |
 | 跨节点请求失败 | 两台互相 curl `advertised-host:8080`；检查 Redis 快照、目标 Java health 和日志中的 traceId。 |
-| 某一台模型不通 | 在故障 Java 宿主机检查 9070；共享数据库配置不能替代每台宿主机的网络可达性。 |
-| 某一台模型不显示 | 初始化该 `linuxServerId` 的公共配置并重启该服务器上的用户 OpenCode 进程。 |
+| 某一台模型不通 | 先在故障节点直接调用本机 Java 代理并读取 4xx 正文，再在该 Java 宿主机检查 9070；共享数据库配置不能替代每台宿主机的内存刷新和网络可达性。 |
+| 某一台报“供应商未启用或不存在” | 对比两台 refresh-status；确认广播开启且 channel 相同，必要时在故障节点重启 Java 重载数据库。 |
+| 某一台模型不显示 | 初始化该 `linuxServerId` 的公共配置，确认包含 `includeUsage=false`，并重启该服务器上的用户 OpenCode 进程。共享数据库不会复制本机公共配置工作树。 |
+| 只有某些旧用户 400 | 重启这些用户所属节点上的 OpenCode 进程，让其重新读取公共配置并由所属 Java 重新注入内部代理地址、key 和 UCID。 |
+| 两台都连接 9070 超时 | 确认 OpenCode `baseURL` 指向同节点 Java `:8080`；只允许 Java 宿主机出站访问 9070，不恢复 19070 relay、host network 或 OpenCode 直连 9070。 |
 | 后台下线后已有用户不可用 | 用户 binding 不会自动迁移；恢复所属服务器，或按正式迁移流程停止并重新分配，不能由入口 Java 本机降级。 |
 
 滚动回滚时一次只回滚一台，恢复该节点旧 JAR、`backend/lib/`、programs 和 worker 镜像，并按“Java → 身份文件 → worker”启动。不要删除共享数据库/Redis数据，也不要清空任一节点 `/data/testagent/data`。

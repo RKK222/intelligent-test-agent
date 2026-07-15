@@ -2288,6 +2288,7 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
       "options": {
         "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+        "includeUsage": false,
         "timeout": false,
         "headerTimeout": 30000,
         "chunkTimeout": 120000,
@@ -2316,6 +2317,7 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
       "options": {
         "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+        "includeUsage": false,
         "timeout": false,
         "headerTimeout": 30000,
         "chunkTimeout": 120000,
@@ -2340,7 +2342,7 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
 }
 ```
 
-`provider` 下的 `icbc-qwen` / `icbc-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-ICBC-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。上游 token 只保存在 `internal_model_proxy_settings`，不得写入 opencode 配置、`backend.env` 或 `docker.env`。
+`provider` 下的 `icbc-qwen` / `icbc-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-ICBC-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。`includeUsage=false` 用于避免 opencode 1.17.8 默认向不支持 `stream_options.include_usage` 的行内接口追加该参数。上游 token 只保存在 `internal_model_proxy_settings`，不得写入 opencode 配置、`backend.env` 或 `docker.env`。
 
 Session 运行态接口：
 

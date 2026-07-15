@@ -1,11 +1,11 @@
 # 企业内部署文档入口
 
-当前代码同时支持单后台和多后台部署。两种模式使用同一套 Mac 离线交付物、数据库结构、Redis 运行态、Java→manager 控制协议和内部模型代理；区别主要在后端节点数量、Nginx upstream、服务器身份和跨 Java 网络。
+当前代码支持单后台完整部署，也支持普通 HTTP、RunEvent SSE、用户 OpenCode 路由和内部模型代理的多后台部署。两种模式使用同一套 Mac 离线交付物、数据库结构、Redis 运行态、Java→manager 控制协议和内部模型代理；多后台的一次性 WebSocket ticket 仍有单 JVM 限制，启用 PTY、Workspace 文件和 Agent 配置进度 WebSocket 前必须阅读多后台文档中的边界说明。
 
 请选择对应文档：
 
 - [单后台部署](SINGLE-BACKEND.md)：一个 Java 后端和一个 `opencode-worker`，当前现场示例为 `122.233.30.114`。
-- [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 的可执行示例。
+- [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 的核心对话/模型可执行示例和当前 WebSocket 限制。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
