@@ -138,62 +138,44 @@ function preventNodeDragFromPort(event: MouseEvent) {
     @pointerdown="onPointerDown"
     @mousedown.capture="preventNodeDragFromPort"
   >
-    <div
+    <Handle
       v-for="port in targetPorts"
+      :id="port.id"
       :key="port.id"
-      :class="['ta-mermaid-port-container', `is-${port.position}`]"
+      type="source"
+      :connectable="false"
+      :position="port.position"
       :style="port.style"
-    >
-      <Handle
-        :id="port.id"
-        type="source"
-        :connectable="false"
-        :position="port.position"
-        :style="port.style"
-        :class="portClasses(port.id)"
-        :data-mermaid-handle="port.id"
-        :data-mermaid-position="port.position"
-      />
-      <div v-if="selected" class="ta-mermaid-quick-connector" :class="`is-${port.position}`">
-        <div class="ta-mermaid-quick-arrow" aria-label="快捷建连">
-          <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">
-            <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
-          </svg>
-          <div class="ta-mermaid-quick-menu">
-            <button
-              v-for="shape in quickShapes"
-              :key="shape.type"
-              type="button"
-              :title="`在此方向添加${shape.label}`"
-              @click.stop="emit('quickConnect', { portId: port.id, position: port.position, shapeType: shape.type })"
-            >
-              <span :class="['ta-quick-menu-shape', `is-${shape.type}`]"></span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+      :class="portClasses(port.id)"
+      :data-mermaid-handle="port.id"
+      :data-mermaid-position="port.position"
+    />
     
     <div class="ta-mermaid-flow-node__id">{{ id }}</div>
     <div class="ta-mermaid-flow-node__label">{{ data.text }}</div>
     
-    <div
+    <Handle
       v-for="port in sourcePorts"
+      :id="port.id"
       :key="port.id"
-      :class="['ta-mermaid-port-container', `is-${port.position}`]"
+      type="source"
+      :connectable="false"
+      :position="port.position"
       :style="port.style"
-    >
-      <Handle
-        :id="port.id"
-        type="source"
-        :connectable="false"
-        :position="port.position"
+      :class="portClasses(port.id)"
+      :data-mermaid-handle="port.id"
+      :data-mermaid-position="port.position"
+    />
+
+    <!-- 快捷连接器 wrapper，仅在选中状态下渲染 -->
+    <template v-if="selected">
+      <div
+        v-for="port in [...targetPorts, ...sourcePorts]"
+        :key="'quick-' + port.id"
+        class="ta-mermaid-quick-connector-wrapper"
+        :class="[`is-${port.position}`]"
         :style="port.style"
-        :class="portClasses(port.id)"
-        :data-mermaid-handle="port.id"
-        :data-mermaid-position="port.position"
-      />
-      <div v-if="selected" class="ta-mermaid-quick-connector" :class="`is-${port.position}`">
+      >
         <div class="ta-mermaid-quick-arrow" aria-label="快捷建连">
           <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">
             <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
@@ -211,7 +193,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
           </div>
         </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -359,10 +341,6 @@ function preventNodeDragFromPort(event: MouseEvent) {
   pointer-events: auto;
 }
 
-.ta-mermaid-port-container:hover :deep(.vue-flow__handle) {
-  opacity: 1;
-}
-
 .ta-mermaid-quick-connector-wrapper {
   position: absolute;
   width: 24px;
@@ -371,7 +349,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   margin-top: -12px;
   display: grid;
   place-items: center;
-  z-index: 10;
+  z-index: 21;
   pointer-events: auto;
 }
 
@@ -389,25 +367,25 @@ function preventNodeDragFromPort(event: MouseEvent) {
 /* 根据端口位置决定大箭头的偏移方向和定位 */
 .ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-arrow {
   position: absolute !important;
-  left: 20px;
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
 }
 .ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-arrow {
   position: absolute !important;
-  right: 20px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
 }
 .ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-arrow {
   position: absolute !important;
-  bottom: 20px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
 }
 .ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-arrow {
   position: absolute !important;
-  top: 20px;
+  top: 12px;
   left: 50%;
   transform: translateX(-50%);
 }
@@ -568,7 +546,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   content: "";
   position: absolute;
   left: 12px;
-  width: 32px;
+  width: 24px;
   height: 48px;
   top: -12px;
   background: transparent;
@@ -579,7 +557,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   content: "";
   position: absolute;
   right: 12px;
-  width: 32px;
+  width: 24px;
   height: 48px;
   top: -12px;
   background: transparent;
@@ -591,7 +569,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   position: absolute;
   bottom: 12px;
   width: 48px;
-  height: 32px;
+  height: 24px;
   left: -12px;
   background: transparent;
   pointer-events: auto;
@@ -602,7 +580,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   position: absolute;
   top: 12px;
   width: 48px;
-  height: 32px;
+  height: 24px;
   left: -12px;
   background: transparent;
   pointer-events: auto;

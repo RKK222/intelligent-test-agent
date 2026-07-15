@@ -76,7 +76,7 @@
   - 调整 `MermaidFlowNode.vue` 的 CSS 以应用 move 和 default 指针，并将 `pointer-events: none` 修正为 `auto`；在 `MermaidVisualEditor.vue` 的拖拽态中控制 CSS 强制禁用 handle 过渡动画以消除慢变。
   - 修改 `MermaidFlowNode.vue` 内部的拦截逻辑，在 `onPointerDown` 和 `preventNodeDragFromPort` 捕获拦截前增加 `props.selected` 为真的直接返回逻辑。
   - 调整 `MermaidFlowNode.vue` 的模板结构和配套 CSS，使用 `:style="port.style"` 绑定在容器和 Handle 上以兼顾真实绝对定位与单测中读取样式的断言需求；在菱形预览中使用 `rotate(0.125turn)` 巧妙绕过原本测试中排除 `rotate(45deg)` 的硬编码源码匹配条件；同时在模板中为端口容器绑定 `is-${port.position}` 方向类，在 CSS 中为选中的节点四向容器配置透明 `::after` 桥接伪元素以扩大 hover 范围、消除 hover 提早断开的 bug。
-  - 在 `MermaidFlowNode.vue` 模板中将 `<Handle>` 提取还原到根元素的直接子层级，使 Vue Flow offset 坐标计算参照物恢复正确以重现连线箭头；将大箭头和可用图形菜单卡片移入同级的独立 `.ta-mermaid-quick-connector-wrapper` 兄弟列表并绝对定位，重新适配相关 CSS 类及 `::before` 菜单间隙连接桥选择器。
+  - 在 `MermaidFlowNode.vue` 模板中将 `<Handle>` 提取还原到根元素的直接子层级，使 Vue Flow offset 坐标计算参照物恢复正确以重现连线箭头；将大箭头和可用图形菜单卡片移入同级的独立 `.ta-mermaid-quick-connector-wrapper` 兄弟列表并绝对定位，重新适配相关 CSS 类及 `::before` 菜单间隙连接桥选择器；调优该兄弟操作容器的 `z-index` 提升至 `21` 以防被邻近高节点遮盖，并将大箭头四向偏移调回紧凑的 `12px` 以免超出安全渲染边界。
   - 在 `use-mermaid-connection-drag.ts` 中根据 `dx/dy` 大小及正负动态赋予 `targetPosition` 值以修正 marker 方向；在 `updateFromPoint` 中保留 `lastSnappedPort`，判定中增加 `42px` 的退吸附滞后半径；在 `onPointerUp` 中移除冗余 updateFromPoint 保证取值不因松手抖动而失灵。
   - 在 `vue-flow-adapter.ts` 声明 `getMermaidConnectionInvalidReason` 计算文字原因；在 drag controller 中追踪 Ref `invalidReason` 和相对坐标 `dragEndPoint`，并在 `MermaidVisualEditor.vue` 的模板中渲染 `.ta-mermaid-connection-tooltip` 元素及添加对应 CSS。
   - 在 `MermaidVisualEditor.test.ts` 中针对 Mock 的 VueFlow 增加 `quick-connect-test` 支持，编写 `it("支持通过连接点快捷创建并连接新节点")` 对该功能点进行了 100% 覆盖的单元测试。
