@@ -6811,3 +6811,15 @@ bash /tmp/test-api-after-restart.sh
   - 保留既有层分配与方向映射（LR/RL/BT/TD）、固定间距与确定性输出；既有布局测试（A 早于 B、C；幂等）继续通过。未修改 API、事件、数据库、环境配置或 generated SDK。
 - Result:
   - editor 全量 Vitest 9 文件 110 passed，前端 typecheck 通过。
+### 2026-07-15 - 合并主 Agent 每轮工作状态展示
+
+- Why:
+  - reasoning、技能、命令、编辑和写入等过程事件原本分散占用时间线，且用户消息刚进入但尚无 assistant part 时没有当前工作状态；需要在不改变问答、子 Agent 卡片和子 Agent 内部时间线的前提下，提供稳定的每轮状态摘要。
+- What:
+  - 主 Agent 投影新增永久保留的 `work-status` 行，把 reasoning 与除 `task/question` 外的普通工具按探索、技能、命令行、编辑、写入、补丁、网页、待办及未知工具名聚合；最新状态始终延后到正文、Diff、重试和错误之后，无 assistant part 的运行轮也立即展示。
+  - 两行状态块复用现有思考展开内容，事件按首次出现顺序显示图标和多次计数；点击后打开全宽、自动上下定位且内部滚动的互斥气泡，新轮会关闭旧详情。`ShimmerDivider` 增加纵向和静态模式，最新运行轮播放流光、历史轮显示静态渐变。
+  - 同步 `agent-chat`、`agent-web`、`ui-kit` README/PACKAGE，以及 `docs/superpowers/` 设计和实施计划；未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置。
+- How:
+  - 使用 TDD 覆盖投影聚合、计数、未知工具、空 assistant、排序、多轮、retry/error、问答/子 Agent 隔离、气泡互斥/关闭、ARIA、竖线动画和默认兼容；真实 Chromium 在桌面与 240px 极窄视口检查宽度、上下定位、横向滚动、流式状态和新轮收起。
+- Result:
+  - 相关 3 个测试文件 55 passed，`FigmaChatPanel` 119 passed / 1 skipped；前端全量 lint、typecheck、58 个 Vitest 文件 832 passed / 1 skipped、生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。

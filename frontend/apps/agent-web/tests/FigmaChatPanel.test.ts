@@ -3254,7 +3254,9 @@ describe("FigmaChatPanel", () => {
 
     await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
-    expect(wrapper.find(".oc-tool").exists()).toBe(true);
+    expect(wrapper.findAll(".oc-work-status")).toHaveLength(2);
+    expect(wrapper.find("[data-testid='oc-work-status-event-shell']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='oc-work-status-event-explore']").exists()).toBe(true);
     expect(wrapper.find(".figma-chat-task-panel").exists()).toBe(false);
   });
 
@@ -3577,8 +3579,10 @@ describe("FigmaChatPanel", () => {
 
     await showFullTimeline(wrapper);
     expect(wrapper.findAll(".oc-reasoning-part")).toHaveLength(2);
-    expect(wrapper.findAll(".oc-tool")).toHaveLength(2);
-    expect(wrapper.findAll(".oc-tool__body")).toHaveLength(0);
+    expect(wrapper.findAll(".oc-work-status")).toHaveLength(2);
+    expect(wrapper.findAll("[data-testid='oc-work-status-event-shell']")).toHaveLength(2);
+    expect(wrapper.findAll(".oc-reasoning-part__plain")).toHaveLength(0);
+    expect(wrapper.find("[data-testid='oc-work-status-popover']").exists()).toBe(false);
   });
 
   it("does not infer event questions from historical assistant option text", async () => {

@@ -6,7 +6,7 @@
 
 ## 主要程序清单
 
-- `Button.vue`、`Badge.vue`、`Input.vue`、`Textarea.vue`、`Tabs.vue`、`Toast.vue`、`ShimmerDivider.vue`：消费全局 theme token，提供紧凑、可聚焦、可禁用的基础控件外观。
+- `Button.vue`、`Badge.vue`、`Input.vue`、`Textarea.vue`、`Tabs.vue`、`Toast.vue`、`ShimmerDivider.vue`：消费全局 theme token，提供紧凑、可聚焦、可禁用的基础控件外观；流光分割线支持横向/纵向和动画/静态模式，默认横向动画接口保持兼容。
 - `lib.ts`：样式合并工具。
 
 ## 允许依赖

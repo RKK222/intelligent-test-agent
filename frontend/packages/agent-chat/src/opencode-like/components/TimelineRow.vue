@@ -5,6 +5,7 @@ import type { OpencodeLikeConversationState, TimelineRow } from "../state/types"
 export type TimelineRowProps = {
   row: TimelineRow;
   state: OpencodeLikeConversationState;
+  openWorkStatusEventKey?: string;
 };
 </script>
 
@@ -19,9 +20,16 @@ import AssistantMessageFrame from "./rows/AssistantMessageFrame.vue";
 import ReasoningPartGroup from "./parts/ReasoningPartGroup.vue";
 import ContextToolGroup from "./tools/ContextToolGroup.vue";
 import ToolPartGroup from "./tools/ToolPartGroup.vue";
+import WorkStatusRow from "./rows/WorkStatusRow.vue";
 
 const props = defineProps<TimelineRowProps>();
-const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagent: [sessionId: string] }>();
+const emit = defineEmits<{
+  openDiff: [];
+  openFile: [path: string];
+  selectSubagent: [sessionId: string];
+  toggleWorkStatusEvent: [eventKey: string];
+  closeWorkStatusEvent: [];
+}>();
 
 const userMessage = computed(() => props.state.messageById[props.row.type === "error" ? "" : props.row.userMessageId]);
 
@@ -138,6 +146,15 @@ const toolGroupParts = computed(() => {
       :streaming-text-by-part-id="state.streamingTextByPartId"
     />
   </AssistantMessageFrame>
+  <WorkStatusRow
+    v-else-if="row.type === 'work-status'"
+    class="oc-row"
+    :row="row"
+    :state="state"
+    :open-event-key="openWorkStatusEventKey"
+    @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
+    @close-event="emit('closeWorkStatusEvent')"
+  />
   <RetryRow
     v-else-if="row.type === 'retry'"
     class="oc-row"

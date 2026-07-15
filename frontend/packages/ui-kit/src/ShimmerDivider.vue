@@ -9,6 +9,18 @@ defineOptions({
 // 定义组件的属性接口
 interface ShimmerDividerProps {
   /**
+   * 分割线方向。纵向模式会让分割线填满父容器高度，并把 height 作为线宽。
+   * @default "horizontal"
+   */
+  orientation?: "horizontal" | "vertical";
+
+  /**
+   * 是否播放流光动画。关闭后仍保留渐变，用于已经完成的静态状态。
+   * @default true
+   */
+  animated?: boolean;
+
+  /**
    * 流光动画的播放速度/持续时间（秒）。
    * 支持预设：
    * - 'fast': 1.0 秒，流光速度较快，适用于紧急、高优先级或轻量提示。
@@ -20,7 +32,7 @@ interface ShimmerDividerProps {
   speed?: number | "fast" | "normal" | "slow";
 
   /**
-   * 分割线的高度。
+   * 分割线的粗细。横向模式对应高度，纵向模式对应宽度。
    * 支持 CSS 长度单位（如 '1px', '2px', '0.5rem'）或纯数字（表示像素）。
    * @default "1px"
    */
@@ -35,6 +47,8 @@ interface ShimmerDividerProps {
 }
 
 const props = withDefaults(defineProps<ShimmerDividerProps>(), {
+  orientation: "horizontal",
+  animated: true,
   speed: "normal",
   height: "1px",
   fade: true
@@ -56,28 +70,39 @@ const duration = computed(() => {
   }
 });
 
-// 计算容器的高度样式
-const heightStyle = computed(() => {
+// height 在横向模式表示线高，在纵向模式表示线宽，保证旧调用保持兼容。
+const thicknessStyle = computed(() => {
   if (typeof props.height === "number") {
     return `${props.height}px`;
   }
   return props.height;
 });
+
+const dimensionStyle = computed(() =>
+  props.orientation === "vertical"
+    ? { width: thicknessStyle.value, height: "100%" }
+    : { width: "100%", height: thicknessStyle.value }
+);
 </script>
 
 <template>
   <!-- 外层容器，接收外部传入的 class 和 style 属性进行布局，隐藏溢出部分 -->
   <div
-    :class="cn('relative w-full overflow-hidden my-4 shrink-0', $attrs.class as string)"
+    :data-orientation="orientation"
+    :class="cn('relative overflow-hidden shrink-0', orientation === 'horizontal' ? 'my-4' : '', $attrs.class as string)"
     :style="[
-      { height: heightStyle },
+      dimensionStyle,
       $attrs.style as Record<string, any>
     ]"
   >
     <!-- 内层流光轨迹，应用无限循环流光动画和边缘淡出遮罩 -->
     <div
       class="ta-shimmer-track absolute inset-0 w-full h-full"
-      :class="{ 'ta-fade-mask': fade }"
+      :class="{
+        'ta-fade-mask': fade,
+        'ta-shimmer-track--vertical': orientation === 'vertical',
+        'ta-shimmer-track--static': !animated
+      }"
       :style="{ '--ta-shimmer-duration': duration }"
     />
   </div>
@@ -97,10 +122,31 @@ const heightStyle = computed(() => {
   animation-duration: var(--ta-shimmer-duration, 2s);
 }
 
+.ta-shimmer-track--vertical {
+  background: linear-gradient(
+    180deg,
+    #4f7cff 0%,
+    #8b5cf6 50%,
+    #4f7cff 100%
+  );
+  background-size: 100% 200%;
+  animation-name: ta-shimmer-anim-vertical;
+}
+
+.ta-shimmer-track--static {
+  animation: none;
+  background-position: 50% 50%;
+}
+
 /* 左右两端淡出遮罩，使分割线过渡更加 premium 和高级 */
 .ta-fade-mask {
   mask-image: linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%);
   -webkit-mask-image: linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%);
+}
+
+.ta-shimmer-track--vertical.ta-fade-mask {
+  mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
 }
 
 /* 无限循环流光位移动画 */
@@ -110,6 +156,15 @@ const heightStyle = computed(() => {
   }
   100% {
     background-position: -100% 0;
+  }
+}
+
+@keyframes ta-shimmer-anim-vertical {
+  0% {
+    background-position: 0 100%;
+  }
+  100% {
+    background-position: 0 -100%;
   }
 }
 </style>

@@ -9,13 +9,38 @@ describe("ShimmerDivider Component", () => {
     // 检查最外层容器是否渲染，且默认高度为 1px
     const divider = container.firstElementChild as HTMLElement;
     expect(divider).toBeTruthy();
+    expect(divider.dataset.orientation).toBe("horizontal");
+    expect(divider.style.width).toBe("100%");
     expect(divider.style.height).toBe("1px");
 
     // 检查内部流光轨迹是否应用了淡出效果和默认 2s 的持续时间
     const shimmerTrack = container.querySelector(".ta-shimmer-track") as HTMLElement;
     expect(shimmerTrack).toBeTruthy();
     expect(shimmerTrack.classList.contains("ta-fade-mask")).toBe(true);
+    expect(shimmerTrack.classList.contains("ta-shimmer-track--static")).toBe(false);
     expect(shimmerTrack.style.getPropertyValue("--ta-shimmer-duration")).toBe("2s");
+  });
+
+  it("支持纵向布局并把 height 作为线宽", () => {
+    const { container } = render(ShimmerDivider, {
+      props: { orientation: "vertical", height: 2 }
+    });
+
+    const divider = container.firstElementChild as HTMLElement;
+    const shimmerTrack = container.querySelector(".ta-shimmer-track") as HTMLElement;
+    expect(divider.dataset.orientation).toBe("vertical");
+    expect(divider.style.width).toBe("2px");
+    expect(divider.style.height).toBe("100%");
+    expect(shimmerTrack.classList.contains("ta-shimmer-track--vertical")).toBe(true);
+  });
+
+  it("支持保留渐变但停止动画", () => {
+    const { container } = render(ShimmerDivider, {
+      props: { animated: false }
+    });
+
+    const shimmerTrack = container.querySelector(".ta-shimmer-track") as HTMLElement;
+    expect(shimmerTrack.classList.contains("ta-shimmer-track--static")).toBe(true);
   });
 
   it("当提供不同的 speed 属性时应该正确计算动画持续时间", () => {

@@ -16,10 +16,10 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的同类型工具会合并成一个默认折叠的工具组，但 task 与 question 始终按原始调用独立保留时间线位置。question 完成态显示“已回答”，展开后按问题顺序展示问题和回答；预置答案展示 label 与 description，单选、多选和自定义文本均按 OpenCode `metadata.answers` 配对，自定义答案直接以答案原文作为 label。读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
 - `diff-summary` 文件修改行默认折叠，折叠态在标题右侧展示全部文件的新增/删除行数汇总；点击标题展开文件列表，文件条目仍负责触发打开对应文件。
 - `diff-summary` 文件修改行默认折叠，折叠态在标题右侧展示全部文件的新增/删除行数汇总；汇总数字随文件变化刷新并短暂跳动反馈，点击标题展开文件列表，文件条目仍负责触发打开对应文件。
-- `reasoning`、最终 `text`、工具调用和文件引用分块展示，避免把思考、工具日志和最终答复混入同一个气泡；同一用户回合内被多个 assistant message 拆开的真实思考状态会合并为一个过程行，只有工具或思考、尚无正文时不追加合成工作状态行。
+- 主 Agent 每个用户回合把真实 `reasoning` 与除 `task`、`question` 外的普通工具调用聚合为一个两行工作状态块，并固定放在该轮正文、Diff、retry/失败等最新输出之后；第一行保持“思考状态”摘要与展开，第二行按事件类别显示图标，单次不显示数字、多次显示计数。`task` 子 Agent 卡片、`question` 问答卡片和进入后的子 Agent 时间线继续使用既有展示方式。
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的普通同类型工具会合并成一个默认折叠的工具组，展开后仍渲染每条原始工具详情；task 子 Agent 卡片与 question 提问卡片始终独立展示，不进入工具组折叠；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
 - 工具视图统一使用 `.oc-*` primitives 和轻量折叠壳，工具详情默认折叠，过程行的标题、摘要、状态和展开箭头使用固定列对齐；最终文本直接以轻量气泡展示，不额外加“最终输出”标题，并保留复制按钮；工作区内长绝对路径在列表中展示为面向用户的短路径，完整路径只保留在悬浮提示中，避免 `.testagent`/personal worktree 前缀撑开对话区域。
-- 运行中状态只展示已经收到的真实 reasoning、工具状态和 running 文本 live preview；不为尚无 assistant part 的轮次追加“思考中”，也不在只有过程 part、尚无正文时追加“正在工作”兜底行。会话级 `running` 只覆盖最新用户轮次，历史轮次的 context/reasoning/tool 分组始终保留各 part 已收敛的完成或失败状态，发送下一轮消息不会把上一轮重新标记为进行中；`runtimeStatus.type=retry` 时展示 retry 行和倒计时文案，retry 行展示原始错误内容、可选 action 链接和“重试中 N 秒后 - 第 X 次 / 共 3 次”，失败运行追加统一错误行。
+- 用户消息已经进入时间线但尚无 assistant part 时，最新轮也会显示空事件的工作状态块；状态依次使用“思考中 / 重试中 / 失败 / 已停止 / 已完成”。状态块按轮保留，新用户轮次出现时自动关闭旧轮 reasoning 与工具气泡；只有最新运行或重试轮播放竖向 `ShimmerDivider`，完成与历史轮保留静态渐变线。事件图标详情使用与对话内容区等宽的悬浮气泡，全时间线同时只打开一个，支持再次点击、外部点击和 Esc 关闭。
 - 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和输入框上方 `TodoPanel`；question dock 只能由 RunEvent `question.asked` 归并出的 `QuestionRequest` 驱动，分页展示单选/多选/文本题、选项说明和自定义答案输入，提交时使用选项 label 或自定义文本；Todo 收起态展示待处理/进行中/已完成/已取消/其他和总数，展开态展示任务列表、状态和优先级。模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
 - Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端展示为 Skill 调用块，展示 Skill 名称、用途、状态和折叠详情。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
@@ -42,7 +42,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 旧气泡消息 part 路径 `MessageParts.vue` 及其子组件（`AnswerPart.vue`、`PlainAnswer.vue`、`ReasoningPartBlock.vue`、`ToolPartBlock.vue`、`ToolDetail.vue`、`FilePartBlock.vue`、`SubtaskPartBlock.vue`、`PatchBlock.vue`、`SnapshotBlock.vue`、`StepMarker.vue`、`StepFinishMarker.vue`、`AgentChip.vue`、`RetryBlock.vue`、`CompactionMarker.vue`、`PartMarker.vue`）已作废，仅为历史兼容和短期比对保留；新 message part 展示必须在 `opencode-like/` 下扩展。
 - 旧结构化卡片路径 `AgentCard.vue`、`TimelineCard.vue`、`ToolPayloadBlock.vue` 已作废；旧 `card` 消息中的 Diff payload 由 `opencode-like/state` 收敛为 `diff-summary` 行展示。
 - `FigmaChatPanel.vue` 中旧 `.figma-chat-*` 气泡消息循环已从主路径禁用，不再作为新交互或新样式的修改入口。
-- `FigmaChatPanel.vue` 中旧底部实时任务面板已作废并停止渲染；运行中工具/事件只由 `OpencodeTimeline` 展示，避免任务列表与时间线事件来自不同聚合逻辑。
+- `FigmaChatPanel.vue` 中旧底部实时任务面板已作废并停止渲染；运行中工具/事件只由 `OpencodeTimeline` 的工作状态块展示，避免任务列表与时间线事件来自不同聚合逻辑。
 - `FigmaChatPanel.vue` 中旧本地文本启发式选择题面板已作废；提问 UI 只能由 RunEvent `question.asked` 归并出的 `QuestionRequest` 驱动，普通 assistant 编号列表和 `message.part.updated` 的 question 工具过程必须按正文/过程展示，不得弹出提问面板。
 - `ProcessDisclosure.vue` 仍被 `TaskBreakdown.vue` 等存量局部视图复用，不整体标废；但不要用它恢复旧对话主路径或新的 Todo 展示，新 Todo 展示必须使用 `opencode-like/components/TodoPanel.vue`。
 

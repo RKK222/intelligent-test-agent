@@ -9,7 +9,14 @@ export { default as AgentCard } from "./AgentCard.vue";
 export { default as OpencodeTimeline } from "./opencode-like/components/OpencodeTimeline.vue";
 export { default as TodoPanel } from "./opencode-like/components/TodoPanel.vue";
 export { createOpencodeLikeState, createTimelineRows } from "./opencode-like";
-export type { OpencodeLikeConversationState, OpencodeLikeRuntimeStatus, TimelineRow } from "./opencode-like";
+export type {
+  OpencodeLikeConversationState,
+  OpencodeLikeRuntimeStatus,
+  TimelineRow,
+  WorkStatusEventGroup,
+  WorkStatusPartRef,
+  WorkStatusState
+} from "./opencode-like";
 export { buildComposerPromptParts, fileToPromptAttachment } from "./prompt-parts";
 export type { ComposerAttachment } from "./prompt-parts";
 export {

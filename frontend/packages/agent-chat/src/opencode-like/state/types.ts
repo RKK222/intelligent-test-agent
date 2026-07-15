@@ -76,6 +76,19 @@ export type OpencodeLikeConversationState = {
   activeSubagentSessionId?: string | null;
 };
 
+export type WorkStatusState = "running" | "retry" | "failed" | "cancelled" | "completed";
+
+export type WorkStatusPartRef = {
+  messageId: string;
+  partId: string;
+};
+
+export type WorkStatusEventGroup = {
+  key: string;
+  label: string;
+  refs: WorkStatusPartRef[];
+};
+
 export type TimelineRow =
   | { type: "turn-gap"; key: string; userMessageId: string }
   | { type: "user-message"; key: string; userMessageId: string }
@@ -117,6 +130,15 @@ export type TimelineRow =
       partId: string;
       previousAssistantPart: boolean;
       showAssistantHeader: boolean;
+    }
+  | {
+      type: "work-status";
+      key: string;
+      userMessageId: string;
+      reasoningRefs: WorkStatusPartRef[];
+      events: WorkStatusEventGroup[];
+      status: WorkStatusState;
+      isLatest: boolean;
     }
   | {
       type: "retry";
