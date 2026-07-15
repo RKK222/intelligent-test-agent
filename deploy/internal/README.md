@@ -522,6 +522,15 @@ curl -fsS http://127.0.0.1:4096/api/model
 
 `/api/provider` 应只出现 `icbc-qwen`、`icbc-deepseek`，`/api/model` 应出现 `Qwen3.6-27B` 和 `DeepSeek-V4-Flash-W8A8`。最后从前端发起一次对话，分别选择两个模型验证流式回答、reasoning 和工具调用。
 
+两个模型都通过 Java 代理验收后，删除现场临时 relay，并确认 19070 已释放：
+
+```bash
+docker rm -f test-agent-model-relay 2>/dev/null || true
+ss -lntp | grep 19070
+```
+
+第二条命令必须无输出；正式链路只保留 `OpenCode → Java:8080 → 行内模型:9070`。
+
 前端机执行：
 
 ```bash

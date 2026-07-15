@@ -6568,3 +6568,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - `InternalModelThinkStreamConverterTest`、`InternalModelProxyControllerTest`、`ModelCatalogApplicationServiceTest` 定向测试通过；`mvn -pl test-agent-opencode-runtime -am test`、`mvn -pl test-agent-api -am test` 和 `mvn clean package -DskipTests` 均通过。
   - 未在本机执行 114 生产 Java/行内模型真实 curl 或 Mac 企业归档发布；现场仍需上传新 JAR、刷新 Java 内存、替换公共 opencode.jsonc、重启用户 OpenCode 并分别验收两个模型。
+
+### 2026-07-15 - 补齐内部模型思考透传与代理回归边界
+
+- Why:
+  - 首轮修复仍会在已有 textual `reasoning_content` 时解析同一 delta 的 `content`，且缺少真实 TCP Controller、超时重置、DeepSeek 工具调用和错误内容编码的完整回归证据；部署文档也未给出临时 19070 relay 的实际清理命令。
+- What:
+  - 上游已有 textual `reasoning_content` 时整个 delta 原样保留并清空残留 think 状态；补齐 `<think>`、`</think>` 跨事件、中文、原生 reasoning、工具调用和 `[DONE]` 测试。
+  - Controller 测试改为实际监听端口，覆盖首帧提前 flush、SSE 字段、400/4xx SSE 原样透传、`Content-Encoding`、DeepSeek V4 和下游取消；服务测试覆盖首响应、首事件和相邻事件空闲边界。
+  - 企业 README/操作手册增加 `test-agent-model-relay` 删除与 19070 无监听验收；本机被忽略的企业 `.env` 清除了旧直连供应商/token 变量，未提交任何密钥。
+- How:
+  - 复用现有 `ServerSentEventHttpMessageWriter`、`InternalModelThinkStreamConverter` 和固定 10/30/30/120 秒边界；非 SSE/错误正文继续按 `DataBuffer` 转发，只有该分支保留上游 `Content-Encoding`。
+- Result:
+  - runtime 全量 523 项、API 全量 282 项以及相关依赖模块测试通过；定向 converter 4 项、代理 8 项复跑通过；`mvn clean package -DskipTests` 和 `package-release.sh --backend-only --no-zip` 通过，产物包含代理与转换器类。
+  - 尚未连接 114 执行生产 Qwen/DeepSeek 调用或前端端到端验收；现场发布与真实模型验证仍需按企业操作手册执行。

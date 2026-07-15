@@ -9,12 +9,12 @@ import com.icbc.testagent.observability.TraceConstants;
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelThinkStreamConverter;
+import io.netty.channel.ChannelOption;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import io.netty.channel.ChannelOption;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.ResolvableType;
@@ -54,6 +54,9 @@ public class InternalModelProxyForwardingService {
     private final InternalModelProxyRuntimeSettings settings;
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final Duration firstResponseTimeout;
+    private final Duration firstEventTimeout;
+    private final Duration streamIdleTimeout;
     private final ServerSentEventHttpMessageWriter sseWriter = new ServerSentEventHttpMessageWriter();
 
     private static final ParameterizedTypeReference<ServerSentEvent<String>> SSE_EVENT_TYPE =
@@ -74,10 +77,34 @@ public class InternalModelProxyForwardingService {
             InternalModelProxyRuntimeSettings settings,
             WebClient webClient,
             ObjectMapper objectMapper) {
+        this(
+                registry,
+                settings,
+                webClient,
+                objectMapper,
+                FIRST_RESPONSE_TIMEOUT,
+                FIRST_EVENT_TIMEOUT,
+                STREAM_IDLE_TIMEOUT);
+    }
+
+    /**
+     * 测试构造器允许缩短响应与事件等待时间，生产构造始终使用固定的 30/30/120 秒边界。
+     */
+    InternalModelProxyForwardingService(
+            InternalModelProviderRegistry registry,
+            InternalModelProxyRuntimeSettings settings,
+            WebClient webClient,
+            ObjectMapper objectMapper,
+            Duration firstResponseTimeout,
+            Duration firstEventTimeout,
+            Duration streamIdleTimeout) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.webClient = Objects.requireNonNull(webClient, "webClient must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.firstResponseTimeout = requirePositive(firstResponseTimeout, "firstResponseTimeout");
+        this.firstEventTimeout = requirePositive(firstEventTimeout, "firstEventTimeout");
+        this.streamIdleTimeout = requirePositive(streamIdleTimeout, "streamIdleTimeout");
     }
 
     public Mono<Void> forward(ServerWebExchange exchange, String body, String traceId) {
@@ -97,7 +124,7 @@ public class InternalModelProxyForwardingService {
                     return writeResponse(exchange, response, converter);
                 });
         Mono<Void> responseHeaderTimeout = responseHeadersReady.asMono()
-                .timeout(FIRST_RESPONSE_TIMEOUT)
+                .timeout(firstResponseTimeout)
                 .then(Mono.never());
         return Mono.firstWithSignal(request, responseHeaderTimeout);
     }
@@ -108,12 +135,12 @@ public class InternalModelProxyForwardingService {
             InternalModelThinkStreamConverter converter) {
         ServerHttpResponse targetResponse = exchange.getResponse();
         targetResponse.setStatusCode(response.statusCode());
-        copyResponseHeaders(targetResponse.getHeaders(), response.headers().asHttpHeaders());
 
         MediaType contentType = response.headers().contentType().orElse(null);
         boolean transformSse = response.statusCode().is2xxSuccessful()
                 && contentType != null
                 && MediaType.TEXT_EVENT_STREAM.isCompatibleWith(contentType);
+        copyResponseHeaders(targetResponse.getHeaders(), response.headers().asHttpHeaders(), transformSse);
         if (!transformSse) {
             return targetResponse.writeWith(withStreamingTimeouts(response.bodyToFlux(DataBuffer.class)));
         }
@@ -142,10 +169,18 @@ public class InternalModelProxyForwardingService {
      * 连接建立后不限制整个 SSE 生命周期，只限制首个事件和相邻事件之间的空闲时间。
      * timeout 的取消信号会沿响应 Flux 传回 WebClient，从而关闭上游连接。
      */
-    private <T> Flux<T> withStreamingTimeouts(Flux<T> source) {
+    <T> Flux<T> withStreamingTimeouts(Flux<T> source) {
         return source.timeout(
-                Mono.delay(FIRST_EVENT_TIMEOUT),
-                ignored -> Mono.delay(STREAM_IDLE_TIMEOUT));
+                Mono.delay(firstEventTimeout),
+                ignored -> Mono.delay(streamIdleTimeout));
+    }
+
+    private static Duration requirePositive(Duration value, String name) {
+        Duration duration = Objects.requireNonNull(value, name + " must not be null");
+        if (duration.isZero() || duration.isNegative()) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return duration;
     }
 
     private ServerSentEvent<String> convertEvent(
@@ -202,10 +237,14 @@ public class InternalModelProxyForwardingService {
         }
     }
 
-    private void copyResponseHeaders(HttpHeaders target, HttpHeaders source) {
+    private void copyResponseHeaders(HttpHeaders target, HttpHeaders source, boolean transformSse) {
         MediaType contentType = source.getContentType();
         if (contentType != null) {
             target.setContentType(contentType);
+        }
+        // 非 SSE 分支按字节转发正文，必须同步保留内容编码；SSE 解码重编码后不能沿用上游编码。
+        if (!transformSse) {
+            copyHeader(target, source, HttpHeaders.CONTENT_ENCODING);
         }
         copyHeader(target, source, HttpHeaders.RETRY_AFTER);
         copyHeader(target, source, TraceConstants.TRACE_ID_HEADER);

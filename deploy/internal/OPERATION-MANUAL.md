@@ -53,7 +53,7 @@ SYS_DATA_ROOT_DIR=/data/testagent/data
 TEST_AGENT_INTERNAL_PROXY_API_KEY=<随机内部代理 key>
 ```
 
-两台后端的 `backend.env` 与 `docker.env` 中 manager token 必须一致；`docker.env` 的 `TEST_AGENT_DATA_ROOT=/data/testagent/data`，端口池继续保持宿主机端口与容器端口一一对应。每台服务器的 `TEST_AGENT_LINUX_SERVER_ID` 必须全局唯一且长期稳定，每个该 ID 只启动一个 worker；无需且不得配置人工 `containerId/managerId`。不要把 token、数据库密码或模型密钥写入交付 zip。
+114 的 `backend.env` 与 `docker.env` 中 manager token 必须一致；`docker.env` 的 `TEST_AGENT_DATA_ROOT=/data/testagent/data`，端口池继续保持宿主机端口与容器端口一一对应。`TEST_AGENT_LINUX_SERVER_ID` 必须全局唯一且长期稳定，该 ID 只启动一个 worker；无需且不得配置人工 `containerId/managerId`。不要把 token、数据库密码或模型密钥写入交付 zip。
 同时确认：
 
 - `backend.env` 与 `docker.env` 的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 完全一致；
@@ -140,6 +140,15 @@ curl -fsS http://127.0.0.1:4096/api/model
 ```
 
 供应商只应包含 `icbc-qwen`、`icbc-deepseek`；模型应包含 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`。再从前端分别选择两个模型发起真实对话。
+
+两个模型都通过 Java 代理验收后，删除临时 relay 并确认 19070 不再监听：
+
+```bash
+docker rm -f test-agent-model-relay 2>/dev/null || true
+ss -lntp | grep 19070
+```
+
+第二条命令必须无输出。
 
 ## 6. 回滚与注意事项
 

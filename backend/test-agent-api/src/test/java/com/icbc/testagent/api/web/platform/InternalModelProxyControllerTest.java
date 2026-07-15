@@ -10,6 +10,7 @@ import com.icbc.testagent.domain.configuration.InternalModelProviderRepository;
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.icbc.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -23,14 +24,18 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.server.reactive.ReactorHttpHandlerAdapter;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.config.EnableWebFlux;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.server.adapter.WebHttpHandlerBuilder;
+import reactor.netty.DisposableServer;
 import reactor.test.StepVerifier;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 
 class InternalModelProxyControllerTest {
 
@@ -41,6 +46,8 @@ class InternalModelProxyControllerTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private HttpServer upstream;
+    private DisposableServer downstream;
+    private AnnotationConfigApplicationContext downstreamContext;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -49,6 +56,12 @@ class InternalModelProxyControllerTest {
 
     @AfterEach
     void tearDown() {
+        if (downstream != null) {
+            downstream.disposeNow();
+        }
+        if (downstreamContext != null) {
+            downstreamContext.close();
+        }
         if (upstream != null) {
             upstream.stop(0);
         }
@@ -112,6 +125,7 @@ class InternalModelProxyControllerTest {
     void forwardsNonSseErrorBodyAndStatusWithoutTryingToDecodeSse() {
         upstream.createContext("/icbc/jdt/model/api/openai/v1/chat/completions", exchange -> {
             exchange.getResponseHeaders().set(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN_VALUE);
+            exchange.getResponseHeaders().set(HttpHeaders.CONTENT_ENCODING, "identity");
             exchange.getResponseHeaders().set(HttpHeaders.RETRY_AFTER, "5");
             exchange.getResponseHeaders().set("X-Trace-Id", "upstream-trace");
             byte[] body = "model rejected".getBytes(StandardCharsets.UTF_8);
@@ -131,6 +145,7 @@ class InternalModelProxyControllerTest {
                 .bodyValue("{\"model\":\"Qwen3.6-27B\"}")
                 .exchange()
                 .expectStatus().isEqualTo(HttpStatus.BAD_REQUEST)
+                .expectHeader().valueEquals(HttpHeaders.CONTENT_ENCODING, "identity")
                 .expectHeader().valueEquals(HttpHeaders.RETRY_AFTER, "5")
                 .expectHeader().valueEquals("X-Trace-Id", "upstream-trace")
                 .expectBody(String.class)
@@ -160,6 +175,44 @@ class InternalModelProxyControllerTest {
                 .expectStatus().isEqualTo(HttpStatus.BAD_REQUEST)
                 .expectBody(String.class)
                 .isEqualTo("data: upstream rejected\n\n");
+    }
+
+    @Test
+    void preservesDeepSeekNativeReasoningToolCallsAndComment() {
+        upstream.createContext("/icbc/jdt/model/api/openai/v1/chat/completions", exchange -> {
+            exchange.getResponseHeaders().set(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE);
+            exchange.sendResponseHeaders(200, 0);
+            String response = """
+                    : source-comment
+                    event: delta
+                    data: {"choices":[{"delta":{"reasoning_content":"已有思考","content":"<think>不要转换</think>最终回答","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"a.txt\\"}"}}]}}]}
+
+                    data: [DONE]
+
+                    """;
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(response.getBytes(StandardCharsets.UTF_8));
+                output.flush();
+            }
+        });
+        upstream.start();
+
+        clientForProvider(upstreamBaseUrl(), "deepseek-prod").post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
+                .header(InternalModelProxyForwardingService.PROVIDER_HEADER, "deepseek-prod")
+                .header(InternalModelProxyForwardingService.UCID_HEADER, UCID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"model\":\"DeepSeek-V4-Flash-W8A8\",\"stream\":true}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class)
+                .consumeWith(result -> assertThat(result.getResponseBody())
+                        .contains("source-comment")
+                        .contains("\"reasoning_content\":\"已有思考\"")
+                        .contains("\"content\":\"<think>不要转换</think>最终回答\"")
+                        .contains("\"name\":\"read_file\"")
+                        .contains("[DONE]"));
     }
 
     @Test
@@ -210,10 +263,14 @@ class InternalModelProxyControllerTest {
     }
 
     private WebTestClient clientForProvider(String baseUrl) {
+        return clientForProvider(baseUrl, PROVIDER_ID);
+    }
+
+    private WebTestClient clientForProvider(String baseUrl, String providerId) {
         InternalModelProviderRepository repository = mock(InternalModelProviderRepository.class);
         InternalModelProvider provider = new InternalModelProvider(
-                PROVIDER_ID,
-                "Qwen",
+                providerId,
+                providerId,
                 baseUrl + "/icbc/jdt/model/api/openai/v1",
                 true,
                 1,
@@ -232,10 +289,32 @@ class InternalModelProxyControllerTest {
                 settings,
                 WebClient.create(),
                 OBJECT_MAPPER);
-        return WebTestClient.bindToController(new InternalModelProxyController(service)).build();
+        downstreamContext = new AnnotationConfigApplicationContext();
+        downstreamContext.register(ControllerTestConfiguration.class);
+        downstreamContext.registerBean(
+                InternalModelProxyController.class,
+                () -> new InternalModelProxyController(service));
+        downstreamContext.refresh();
+
+        ReactorHttpHandlerAdapter adapter = new ReactorHttpHandlerAdapter(
+                WebHttpHandlerBuilder.applicationContext(downstreamContext).build());
+        downstream = reactor.netty.http.server.HttpServer.create()
+                .host("127.0.0.1")
+                .port(0)
+                .handle(adapter)
+                .bindNow();
+        return WebTestClient.bindToServer()
+                .baseUrl("http://127.0.0.1:" + downstream.port())
+                .responseTimeout(Duration.ofSeconds(5))
+                .build();
     }
 
     private String upstreamBaseUrl() {
         return "http://127.0.0.1:" + upstream.getAddress().getPort();
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebFlux
+    static class ControllerTestConfiguration {
     }
 }

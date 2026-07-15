@@ -39,6 +39,13 @@ public class InternalModelThinkStreamConverter {
                 if (!(delta instanceof ObjectNode deltaObject)) {
                     continue;
                 }
+                // 上游已经按标准字段拆出思考内容时，整个 delta 保持原样，避免再次解析 content 并污染跨事件状态。
+                JsonNode existingReasoning = deltaObject.get("reasoning_content");
+                if (existingReasoning != null && existingReasoning.isTextual()) {
+                    inThink = false;
+                    pendingTagPrefix = "";
+                    continue;
+                }
                 JsonNode content = deltaObject.get("content");
                 if (content == null || !content.isTextual()) {
                     continue;
@@ -49,9 +56,7 @@ public class InternalModelThinkStreamConverter {
                 } else {
                     deltaObject.put("content", converted.content());
                 }
-                if (!converted.reasoningContent().isEmpty()
-                        && (deltaObject.get("reasoning_content") == null
-                        || !deltaObject.get("reasoning_content").isTextual())) {
+                if (!converted.reasoningContent().isEmpty()) {
                     deltaObject.put("reasoning_content", converted.reasoningContent());
                 }
             }

@@ -2269,7 +2269,7 @@ Model/Provider 目录兼容说明：
 |---|---|---|
 | `*` | `/api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` | 仅供 opencode 子进程调用的 OpenAI-compatible 代理，不给前端 SDK 暴露会话便捷方法。 |
 
-代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-ICBC-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ICBC_UCID` 注入。Java 从内存供应商快照找到 `baseUrl` 后转发到对应 OpenAI-compatible 路径，并从 `internal_model_proxy_settings` 注入数据库维护的全局上游 token、`ucid` 和 traceId。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，已有 `reasoning_content` 不覆盖，普通正文仍保留在 `delta.content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、错误正文、Retry-After 与 trace header；连接/首个响应/首个事件/事件空闲边界分别为 10 秒/30 秒/30 秒/120 秒，不设置整体 SSE 生命周期超时，下游取消会取消上游订阅。
+代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-ICBC-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ICBC_UCID` 注入。Java 从内存供应商快照找到 `baseUrl` 后转发到对应 OpenAI-compatible 路径，并从 `internal_model_proxy_settings` 注入数据库维护的全局上游 token、`ucid` 和 traceId。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留；没有 `reasoning_content` 时，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`；已有 textual `reasoning_content` 时整个 delta 原样保留，不再解析 `content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、Content-Encoding、错误正文、Retry-After 与 trace header；连接/首个响应/首个事件/事件空闲边界分别为 10 秒/30 秒/30 秒/120 秒，不设置整体 SSE 生命周期超时，下游取消会取消上游订阅。
 
 opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
 
