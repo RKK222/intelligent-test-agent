@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-16 - 合并远程主干并重建企业离线包
+
+- Why:
+  - 用户要求依据现场 `backend.env` 检查配置、合并最新远程代码并交付最新企业内网包；现场配置缺少最新版后端必需的持久化 RSA 私钥路径。
+- What:
+  - 将 `origin/main@3ed4351d` 合并到本地主干，保留远端绝对路径复制交互，并复用本地 Chromium 108 剪贴板回退；重新构建完整企业离线 ZIP。
+  - 明确现场应补充 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key` 并预先创建 0600 权限的 PKCS#8 RSA 私钥；`SERVER_ADDRESS=0.0.0.0` 可显式保留，但此前 `*:8080` 已证明它不是连接超时根因。
+- How:
+  - 定向前端测试 49/49、全量前端测试 979 通过且 1 跳过；标准打包、checksum、ZIP/tar 完整性、两个 `--validate-only` 入口和 Linux/amd64 worker 内 OpenCode 1.17.8 校验均通过。
+  - 使用 `.env.test` / `test` profile 重启 backend、manager、frontend；health/readiness 为 `UP`、前端和 CORS 为 200、manager WebSocket 已连接，宠物拖动 Chromium E2E 1/1 通过。
+- Result:
+  - 最新包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 `277e2699e9adaa7370dc0983f892b176d6bd0e8d5381c57168d4266d5554aac8`；包内不含实际环境文件、凭据或 SSH 私钥。
+  - 本次冲突处理不涉及 API、RunEvent 或数据库变更；现场仍需先确认 Java readiness，再从 worker 容器验证 `122.233.30.114:8080`，以区分服务启动失败和 Docker bridge 防火墙问题。
+
 ### 2026-07-16 - 修复工作台事件拦截导致的宠物拖动中断
 
 - Why:
