@@ -36,6 +36,8 @@ import com.icbc.testagent.domain.run.RunSummaryStatus;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessageId;
+import com.icbc.testagent.domain.session.SessionMessage;
+import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.session.SessionStatus;
 import com.icbc.testagent.domain.user.UserId;
@@ -260,9 +262,24 @@ class RunMessageRecoveryServiceTest {
     void recoveryLoadsOpencodeProjectedMessagesAsTransientSnapshotEvents() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         facade.result = new OpencodeSessionMessagesResult(
-                List.of(new OpencodeSessionMessage(
-                        Map.of("id", "msg_1", "type", "assistant", "role", "assistant"),
-                        List.of(Map.of("id", "part_1", "messageID", "msg_1", "type", "text", "text", "hello")))),
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_user_1",
+                                        "role", "user",
+                                        "time", Map.of("created", NOW.toEpochMilli())),
+                                List.of()),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_1",
+                                        "parentID", "msg_user_1",
+                                        "type", "assistant",
+                                        "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_1",
+                                        "messageID", "msg_1",
+                                        "type", "text",
+                                        "text", "hello")))),
                 null,
                 null);
         RunMessageRecoveryService service = new RunMessageRecoveryService(
@@ -294,12 +311,266 @@ class RunMessageRecoveryServiceTest {
     }
 
     @Test
+    void recoveryOnlyProjectsAssistantMessagesOwnedByCurrentRunDispatchUser() {
+        String previousUserId = "msg_previous_user";
+        String currentUserId = "msg_current_user";
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.result = new OpencodeSessionMessagesResult(
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of("id", previousUserId, "role", "user"),
+                                List.of(Map.of(
+                                        "id", "part_previous_user",
+                                        "messageID", previousUserId,
+                                        "type", "text",
+                                        "text", "生成一条待办，然后执行"))),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_previous_assistant",
+                                        "parentID", previousUserId,
+                                        "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_previous_todo",
+                                        "messageID", "msg_previous_assistant",
+                                        "type", "tool",
+                                        "tool", "todowrite",
+                                        "metadata", Map.of("sessionID", "ses_previous_child1234567890"),
+                                        "state", Map.of(
+                                                "status", "completed",
+                                                "input", Map.of("todos", List.of(Map.of(
+                                                        "content", "探索工作区结构",
+                                                        "status", "completed",
+                                                        "priority", "high"))))))),
+                        new OpencodeSessionMessage(
+                                Map.of("id", currentUserId, "role", "user"),
+                                List.of(Map.of(
+                                        "id", "part_current_user",
+                                        "messageID", currentUserId,
+                                        "type", "text",
+                                        "text", "1+1=？"))),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_current_assistant",
+                                        "parentID", currentUserId,
+                                        "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_current_answer",
+                                        "messageID", "msg_current_assistant",
+                                        "type", "text",
+                                        "text", "2")))),
+                null,
+                null);
+        facade.resultsBySession.put("ses_previous_child1234567890", new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of("id", "msg_previous_child", "role", "assistant"),
+                        List.of(Map.of(
+                                "id", "part_previous_child_todo",
+                                "messageID", "msg_previous_child",
+                                "type", "tool",
+                                "tool", "todowrite")))),
+                null,
+                null));
+        RunSessionScopeSession rootScope = new RunSessionScopeSession(
+                RUN_ID,
+                REMOTE_SESSION_ID,
+                REMOTE_SESSION_ID,
+                null,
+                false,
+                "ROOT",
+                null,
+                null,
+                null,
+                "trace_1234567890abcdef",
+                NOW,
+                NOW,
+                Map.of("agentId", "opencode", "dispatchMessageId", currentUserId));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new FakeRunSessionScopeRepository(List.of(rootScope)));
+
+        List<RunEventSsePayload> payloads = service.recover(RUN_ID, "trace_1234567890abcdef")
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(payloads).extracting(RunEventSsePayload::type)
+                .containsExactly("message.updated", "message.part.updated");
+        assertThat(payloads).allSatisfy(payload -> {
+            assertThat(payload.runId()).isEqualTo(RUN_ID.value());
+            assertThat(payload.payload().toString())
+                    .contains("msg_current_assistant")
+                    .doesNotContain("msg_previous_assistant")
+                    .doesNotContain("part_previous_todo")
+                    .doesNotContain("todowrite");
+        });
+        assertThat(facade.requestedSessionIds).containsExactly(REMOTE_SESSION_ID);
+    }
+
+    @Test
+    void recoveryRejectsConflictingScopeAndPlatformDispatchAnchors() {
+        String scopeDispatchMessageId = "msg_scope_dispatch";
+        SessionMessageRepository messages = mock(SessionMessageRepository.class);
+        SessionMessage conflictingUser = new SessionMessage(
+                new SessionMessageId("msg_platform_user"),
+                SESSION_ID,
+                SessionMessageRole.USER,
+                "1+1=？",
+                NOW,
+                "trace_1234567890abcdef",
+                RUN_ID,
+                null,
+                "msg_platform_dispatch",
+                null,
+                null,
+                null,
+                NOW);
+        when(messages.findBySessionId(
+                        org.mockito.ArgumentMatchers.eq(SESSION_ID),
+                        org.mockito.ArgumentMatchers.any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(conflictingUser), 1, 200, 1));
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new FakeRunSessionScopeRepository(List.of(
+                        rootScope(scopeDispatchMessageId),
+                        scopeSession("ses_conflicting_child1234567890", REMOTE_SESSION_ID, true))),
+                null,
+                null,
+                messages);
+
+        List<RunEventSsePayload> payloads = service.recover(RUN_ID, "trace_1234567890abcdef")
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(payloads).isEmpty();
+        assertThat(facade.requestedSessionIds).isEmpty();
+    }
+
+    @Test
+    void recoveryFindsCurrentRunDispatchUserOnOlderMessagePage() {
+        String currentUserId = "msg_current_user";
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.resultsBySessionAndCursor.put(
+                pageKey(REMOTE_SESSION_ID, null),
+                new OpencodeSessionMessagesResult(
+                        List.of(new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_current_assistant",
+                                        "parentID", currentUserId,
+                                        "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_current_answer",
+                                        "messageID", "msg_current_assistant",
+                                        "type", "text",
+                                        "text", "2")))),
+                        null,
+                        "cursor_older"));
+        facade.resultsBySessionAndCursor.put(
+                pageKey(REMOTE_SESSION_ID, "cursor_older"),
+                new OpencodeSessionMessagesResult(
+                        List.of(
+                                new OpencodeSessionMessage(
+                                        Map.of("id", "msg_previous_user", "role", "user"),
+                                        List.of()),
+                                new OpencodeSessionMessage(
+                                        Map.of(
+                                                "id", "msg_previous_assistant",
+                                                "parentID", "msg_previous_user",
+                                                "role", "assistant"),
+                                        List.of(Map.of(
+                                                "id", "part_previous_todo",
+                                                "messageID", "msg_previous_assistant",
+                                                "type", "tool",
+                                                "tool", "todowrite"))),
+                                new OpencodeSessionMessage(
+                                        Map.of("id", currentUserId, "role", "user"),
+                                        List.of())),
+                        null,
+                        null));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new FakeRunSessionScopeRepository(List.of(rootScope(currentUserId))));
+
+        List<RunEventSsePayload> payloads = service.recover(RUN_ID, "trace_1234567890abcdef")
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(facade.requestedCursors).containsExactly(null, "cursor_older");
+        assertThat(payloads).extracting(RunEventSsePayload::type)
+                .containsExactly("message.updated", "message.part.updated");
+        assertThat(payloads).allSatisfy(payload -> assertThat(payload.payload().toString())
+                .contains("msg_current_assistant")
+                .doesNotContain("msg_previous_assistant")
+                .doesNotContain("todowrite"));
+    }
+
+    @Test
+    void recoveryReturnsEmptyProjectionWhenOlderMessageCursorRepeatsBeforeAnchor() {
+        String currentUserId = "msg_current_user";
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.resultsBySessionAndCursor.put(
+                pageKey(REMOTE_SESSION_ID, null),
+                new OpencodeSessionMessagesResult(List.of(), null, "cursor_older"));
+        facade.resultsBySessionAndCursor.put(
+                pageKey(REMOTE_SESSION_ID, "cursor_older"),
+                new OpencodeSessionMessagesResult(
+                        List.of(new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_previous_assistant",
+                                        "parentID", "msg_previous_user",
+                                        "role", "assistant"),
+                                List.of())),
+                        null,
+                        "cursor_older"));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new FakeRunSessionScopeRepository(List.of(rootScope(currentUserId))));
+
+        List<RunEventSsePayload> payloads = service.recover(RUN_ID, "trace_1234567890abcdef")
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(facade.requestedCursors).containsExactly(null, "cursor_older");
+        assertThat(payloads).isEmpty();
+    }
+
+    @Test
     void recoveryLoadsRootAndChildMessagesWhenRunScopeExists() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         facade.resultsBySession.put(REMOTE_SESSION_ID, new OpencodeSessionMessagesResult(
-                List.of(new OpencodeSessionMessage(
-                        Map.of("id", "msg_root", "type", "assistant", "role", "assistant"),
-                        List.of(Map.of("id", "part_root", "messageID", "msg_root", "type", "text", "text", "root")))),
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_root_user",
+                                        "role", "user",
+                                        "time", Map.of("created", NOW.toEpochMilli())),
+                                List.of()),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_root",
+                                        "parentID", "msg_root_user",
+                                        "type", "assistant",
+                                        "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_root",
+                                        "messageID", "msg_root",
+                                        "type", "text",
+                                        "text", "root")))),
                 null,
                 null));
         facade.resultsBySession.put("ses_child1234567890abcdef", new OpencodeSessionMessagesResult(
@@ -384,17 +655,88 @@ class RunMessageRecoveryServiceTest {
     }
 
     @Test
+    void sessionHistoryKeepsAllUserTurnsWhileRunRecoveryIsCausallyTrimmed() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.result = new OpencodeSessionMessagesResult(
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of("id", "msg_user_one", "role", "user"),
+                                List.of(Map.of(
+                                        "id", "part_user_one",
+                                        "messageID", "msg_user_one",
+                                        "type", "text",
+                                        "text", "第一轮"))),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_assistant_one",
+                                        "parentID", "msg_user_one",
+                                        "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_assistant_one",
+                                        "messageID", "msg_assistant_one",
+                                        "type", "text",
+                                        "text", "第一轮回答"))),
+                        new OpencodeSessionMessage(
+                                Map.of("id", "msg_user_two", "role", "user"),
+                                List.of(Map.of(
+                                        "id", "part_user_two",
+                                        "messageID", "msg_user_two",
+                                        "type", "text",
+                                        "text", "第二轮"))),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_assistant_two",
+                                        "parentID", "msg_user_two",
+                                        "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_assistant_two",
+                                        "messageID", "msg_assistant_two",
+                                        "type", "text",
+                                        "text", "第二轮回答")))),
+                null,
+                null);
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        RunHistoryRecoveryResult result = service
+                .recoverSessionTreeHistory(SESSION_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.events()).extracting(event -> event.payload().toString())
+                .anyMatch(payload -> payload.contains("msg_user_one"))
+                .anyMatch(payload -> payload.contains("msg_assistant_one"))
+                .anyMatch(payload -> payload.contains("msg_user_two"))
+                .anyMatch(payload -> payload.contains("msg_assistant_two"));
+    }
+
+    @Test
     void recoveryDiscoversChildFromRootTaskPartMetadataWhenScopeIsMissing() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         facade.resultsBySession.put(REMOTE_SESSION_ID, new OpencodeSessionMessagesResult(
-                List.of(new OpencodeSessionMessage(
-                        Map.of("id", "msg_root", "type", "assistant", "role", "assistant"),
-                        List.of(Map.of(
-                                "id", "part_task",
-                                "messageID", "msg_root",
-                                "callID", "call_task",
-                                "type", "tool",
-                                "metadata", Map.of("sessionID", "ses_child1234567890abcdef"))))),
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_root_user",
+                                        "role", "user",
+                                        "time", Map.of("created", NOW.toEpochMilli())),
+                                List.of()),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_root",
+                                        "parentID", "msg_root_user",
+                                        "type", "assistant",
+                                        "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_task",
+                                        "messageID", "msg_root",
+                                        "callID", "call_task",
+                                        "type", "tool",
+                                        "metadata", Map.of("sessionID", "ses_child1234567890abcdef"))))),
                 null,
                 null));
         facade.resultsBySession.put("ses_child1234567890abcdef", new OpencodeSessionMessagesResult(
@@ -439,14 +781,20 @@ class RunMessageRecoveryServiceTest {
         facade.result = new OpencodeSessionMessagesResult(
                 List.of(
                         new OpencodeSessionMessage(
-                                Map.of("id", "msg_user_1", "role", "user"),
+                                Map.of(
+                                        "id", "msg_user_1",
+                                        "role", "user",
+                                        "time", Map.of("created", NOW.toEpochMilli())),
                                 List.of(Map.of(
                                         "id", "part_user_1",
                                         "messageID", "msg_user_1",
                                         "type", "text",
                                         "text", "用户提示词"))),
                         new OpencodeSessionMessage(
-                                Map.of("id", "msg_assistant_1", "role", "assistant"),
+                                Map.of(
+                                        "id", "msg_assistant_1",
+                                        "parentID", "msg_user_1",
+                                        "role", "assistant"),
                                 List.of(Map.of(
                                         "id", "part_assistant_1",
                                         "messageID", "msg_assistant_1",
@@ -486,7 +834,10 @@ class RunMessageRecoveryServiceTest {
                                         "type", "text",
                                         "text", "完整用户输入"))),
                         new OpencodeSessionMessage(
-                                Map.of("id", "msg_assistant_history", "role", "assistant"),
+                                Map.of(
+                                        "id", "msg_assistant_history",
+                                        "parentID", "msg_user_history",
+                                        "role", "assistant"),
                                 List.of(Map.of(
                                         "id", "part_assistant_history",
                                         "messageID", "msg_assistant_history",
@@ -505,6 +856,7 @@ class RunMessageRecoveryServiceTest {
                 RUN_ID,
                 RunStorageMode.REDIS_SUMMARY,
                 REMOTE_SESSION_ID,
+                "msg_user_history",
                 node().executionNodeId().value(),
                 "msg_remote",
                 "part_remote",
@@ -713,6 +1065,27 @@ class RunMessageRecoveryServiceTest {
                 Map.of());
     }
 
+    private static RunSessionScopeSession rootScope(String dispatchMessageId) {
+        return new RunSessionScopeSession(
+                RUN_ID,
+                REMOTE_SESSION_ID,
+                REMOTE_SESSION_ID,
+                null,
+                false,
+                "ROOT",
+                null,
+                null,
+                null,
+                "trace_1234567890abcdef",
+                NOW,
+                NOW,
+                Map.of("agentId", "opencode", "dispatchMessageId", dispatchMessageId));
+    }
+
+    private static String pageKey(String sessionId, String cursor) {
+        return sessionId + "|" + (cursor == null ? "<latest>" : cursor);
+    }
+
     private record FakeRunRepository(Run run) implements RunRepository {
         @Override
         public Run save(Run run) {
@@ -839,9 +1212,11 @@ class RunMessageRecoveryServiceTest {
     private static final class FakeOpencodeFacade implements OpencodeClientFacade {
         private OpencodeSessionMessagesResult result = new OpencodeSessionMessagesResult(List.of(), null, null);
         private final Map<String, OpencodeSessionMessagesResult> resultsBySession = new LinkedHashMap<>();
+        private final Map<String, OpencodeSessionMessagesResult> resultsBySessionAndCursor = new LinkedHashMap<>();
         private RuntimeException error;
         private OpencodeSessionMessagesCommand lastCommand;
         private final List<String> requestedSessionIds = new java.util.ArrayList<>();
+        private final List<String> requestedCursors = new java.util.ArrayList<>();
 
         @Override
         public Mono<OpencodeHealthResult> health(OpencodeHealthCommand command) {
@@ -897,8 +1272,14 @@ class RunMessageRecoveryServiceTest {
         public Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command) {
             lastCommand = command;
             requestedSessionIds.add(command.opencodeSessionId());
+            requestedCursors.add(command.cursor());
             if (error != null) {
                 return Mono.error(error);
+            }
+            OpencodeSessionMessagesResult paged = resultsBySessionAndCursor.get(
+                    pageKey(command.opencodeSessionId(), command.cursor()));
+            if (paged != null) {
+                return Mono.just(paged);
             }
             return Mono.just(resultsBySession.getOrDefault(command.opencodeSessionId(), result));
         }

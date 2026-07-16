@@ -550,6 +550,7 @@ class RunApplicationServiceTest {
                         run.runId(),
                         RunStorageMode.REDIS_SUMMARY,
                         REMOTE_SESSION_ID,
+                        "msg_dispatch_summary",
                         nodeSnapshot.executionNodeId().value(),
                         "msg_remote_summary",
                         "part_remote_summary",
@@ -1108,11 +1109,54 @@ class RunApplicationServiceTest {
         assertThat(messages.saved).hasSize(1);
         assertThat(messages.saved.getFirst()).satisfies(userMessage -> {
             assertThat(userMessage.role()).isEqualTo(com.icbc.testagent.domain.session.SessionMessageRole.USER);
+            assertThat(userMessage.remoteMessageId()).isEqualTo("msg_remote1234567890abcdef");
             assertThat(userMessage.partsJson()).contains("\"type\":\"file\"");
             assertThat(userMessage.partsJson()).contains("\"path\":\"src/App.tsx\"");
             assertThat(userMessage.partsJson()).contains("\"contextType\":\"selection\"");
             assertThat(userMessage.partsJson()).contains("\"startLine\":20");
             assertThat(userMessage.partsJson()).contains("\"endLine\":35");
+        });
+    }
+
+    @Test
+    void legacyRunGeneratesOneDispatchMessageIdForRemoteUserAndRootScope() {
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        FakeRunSessionScopeRepository scopes = new FakeRunSessionScopeRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                messages,
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                scopes,
+                null);
+
+        Run run = service.startRun(
+                StartRunInput.ofPrompt(new SessionId("ses_1234567890abcdef"), "1+1=？"),
+                "trace_1234567890abcdef");
+
+        assertThat(facade.startRunCommands).singleElement().satisfies(command -> {
+            String dispatchMessageId = command.messageId();
+            assertThat(dispatchMessageId).startsWith("msg_");
+            assertThat(messages.saved).singleElement().satisfies(userMessage -> {
+                assertThat(userMessage.runId()).isEqualTo(run.runId());
+                assertThat(userMessage.remoteMessageId()).isEqualTo(dispatchMessageId);
+            });
+            assertThat(scopes.findSession(run.runId(), REMOTE_SESSION_ID))
+                    .get()
+                    .satisfies(rootScope -> assertThat(rootScope.metadata())
+                            .containsEntry("dispatchMessageId", dispatchMessageId));
         });
     }
 
@@ -1956,45 +2000,53 @@ class RunApplicationServiceTest {
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
-        facade.sessionMessagesResult = new OpencodeSessionMessagesResult(
-                List.of(
-                        new OpencodeSessionMessage(
-                                Map.of(
-                                        "id", "msg_remote_tools_1234567890abcdef",
-                                        "type", "assistant",
-                                        "role", "assistant"),
-                                List.of(
-                                        Map.of(
-                                                "id", "part_reasoning",
-                                                "messageID", "msg_remote_tools_1234567890abcdef",
-                                                "type", "reasoning",
-                                                "text", "内部推理不应进入回答"),
-                                        Map.of(
-                                                "id", "part_tool",
-                                                "messageID", "msg_remote_tools_1234567890abcdef",
-                                                "type", "tool",
-                                                "tool", "bash",
-                                                "state", Map.of(
-                                                        "status", "completed",
-                                                        "output", "line 1\n\n\nline 2")))),
-                        new OpencodeSessionMessage(
-                                Map.of(
-                                        "id", "msg_remote_1234567890abcdef",
-                                        "type", "assistant",
-                                        "role", "assistant",
-                                        "cost", new BigDecimal("0.25000000"),
-                                        "tokens", Map.of(
-                                                "input", 11,
-                                                "output", 12,
-                                                "reasoning", 3,
-                                                "cache", Map.of("read", 4, "write", 5))),
-                                List.of(Map.of(
-                                        "id", "part_1",
-                                        "messageID", "msg_remote_1234567890abcdef",
-                                        "type", "text",
-                                        "text", "assistant answer")))),
-                null,
-                null);
+        facade.sessionMessages = ignored -> {
+            String dispatchMessageId = facade.startRunCommands.getFirst().messageId();
+            return Mono.just(new OpencodeSessionMessagesResult(
+                    List.of(
+                            new OpencodeSessionMessage(
+                                    Map.of("id", dispatchMessageId, "role", "user"),
+                                    List.of()),
+                            new OpencodeSessionMessage(
+                                    Map.of(
+                                            "id", "msg_remote_tools_1234567890abcdef",
+                                            "parentID", dispatchMessageId,
+                                            "type", "assistant",
+                                            "role", "assistant"),
+                                    List.of(
+                                            Map.of(
+                                                    "id", "part_reasoning",
+                                                    "messageID", "msg_remote_tools_1234567890abcdef",
+                                                    "type", "reasoning",
+                                                    "text", "内部推理不应进入回答"),
+                                            Map.of(
+                                                    "id", "part_tool",
+                                                    "messageID", "msg_remote_tools_1234567890abcdef",
+                                                    "type", "tool",
+                                                    "tool", "bash",
+                                                    "state", Map.of(
+                                                            "status", "completed",
+                                                            "output", "line 1\n\n\nline 2")))),
+                            new OpencodeSessionMessage(
+                                    Map.of(
+                                            "id", "msg_remote_1234567890abcdef",
+                                            "parentID", dispatchMessageId,
+                                            "type", "assistant",
+                                            "role", "assistant",
+                                            "cost", new BigDecimal("0.25000000"),
+                                            "tokens", Map.of(
+                                                    "input", 11,
+                                                    "output", 12,
+                                                    "reasoning", 3,
+                                                    "cache", Map.of("read", 4, "write", 5))),
+                                    List.of(Map.of(
+                                            "id", "part_1",
+                                            "messageID", "msg_remote_1234567890abcdef",
+                                            "type", "text",
+                                            "text", "assistant answer")))),
+                    null,
+                    null));
+        };
         facade.streamEvents = command -> Flux.just(new RunEventDraft(
                 command.runId(),
                 RunEventType.RUN_SUCCEEDED,
@@ -2048,11 +2100,13 @@ class RunApplicationServiceTest {
         FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         facade.sessionMessages = command -> {
+            String dispatchMessageId = facade.startRunCommands.getFirst().messageId();
             if (command.cursor() == null) {
                 return Mono.just(new OpencodeSessionMessagesResult(
                         List.of(new OpencodeSessionMessage(
                                 Map.of(
                                         "id", "msg_page_one_1234567890abcdef",
+                                        "parentID", dispatchMessageId,
                                         "type", "assistant",
                                         "role", "assistant",
                                         "time", Map.of("created", 1781846402000L),
@@ -2067,19 +2121,24 @@ class RunApplicationServiceTest {
                         "cursor_page_two"));
             }
             return Mono.just(new OpencodeSessionMessagesResult(
-                    List.of(new OpencodeSessionMessage(
-                            Map.of(
-                                    "id", "msg_page_two_1234567890abcdef",
-                                    "type", "assistant",
-                                    "role", "assistant",
-                                    "time", Map.of("created", 1781846401000L),
-                                    "tokens", Map.of("output", 10),
-                                    "cost", new BigDecimal("1.00000000")),
-                            List.of(Map.of(
-                                    "id", "part_page_two",
-                                    "messageID", "msg_page_two_1234567890abcdef",
-                                    "type", "text",
-                                    "text", "第二页")))),
+                    List.of(
+                            new OpencodeSessionMessage(
+                                    Map.of("id", dispatchMessageId, "role", "user"),
+                                    List.of()),
+                            new OpencodeSessionMessage(
+                                    Map.of(
+                                            "id", "msg_page_two_1234567890abcdef",
+                                            "parentID", dispatchMessageId,
+                                            "type", "assistant",
+                                            "role", "assistant",
+                                            "time", Map.of("created", 1781846401000L),
+                                            "tokens", Map.of("output", 10),
+                                            "cost", new BigDecimal("1.00000000")),
+                                    List.of(Map.of(
+                                            "id", "part_page_two",
+                                            "messageID", "msg_page_two_1234567890abcdef",
+                                            "type", "text",
+                                            "text", "第二页")))),
                     null,
                     null));
         };
@@ -2105,9 +2164,9 @@ class RunApplicationServiceTest {
         awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
         awaitMessageCount(messages, 3);
         assertThat(facade.sessionMessagesCommands).hasSize(2);
-        assertThat(facade.sessionMessagesCommands.get(0).limit()).isEqualTo(50);
+        assertThat(facade.sessionMessagesCommands.get(0).limit()).isEqualTo(100);
         assertThat(facade.sessionMessagesCommands.get(0).cursor()).isNull();
-        assertThat(facade.sessionMessagesCommands.get(1).limit()).isEqualTo(50);
+        assertThat(facade.sessionMessagesCommands.get(1).limit()).isEqualTo(100);
         assertThat(facade.sessionMessagesCommands.get(1).cursor()).isEqualTo("cursor_page_two");
         assertThat(messages.saved).extracting(SessionMessage::content).contains("第一页", "第二页");
         assertThat(messages.saved).filteredOn(message -> "第一页".equals(message.content()))

@@ -1428,7 +1428,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 是分页接口，查询参数为 `page`、`size` 和可选 `refresh`。`refresh` 默认 `true`，会在存在 agent binding 时从 bounded-elastic 线程分页读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；`refresh=false` 只读数据库快照，用于前端反馈 messageId 映射、只读 transcript 或过渡只读场景，避免触发远端快照刷新。如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
+`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 是分页接口，查询参数为 `page`、`size` 和可选 `refresh`。`refresh` 默认 `true`，会在存在 agent binding 时从 bounded-elastic 线程分页读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；这是 Session 级全量同步，只保留已存在消息的 `runId`，新发现的远端历史 assistant 写空 `runId`，不得把整个 Session 重新归给最新 Run。`refresh=false` 只读数据库快照，用于前端反馈 messageId 映射、只读 transcript 或过渡只读场景，避免触发远端快照刷新。如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
 
 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 是前端工作台历史恢复的主接口，返回 Session root 下全量历史消息树快照；内部平台入口 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` 保留，旧 `/api/sessions/{sessionId}/session-tree/messages` 返回 `410 API_GONE`。完整历史按 Redis 24 小时详情、OpenCode 完整会话、PostgreSQL 终态摘要的顺序读取。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`，并增加以下可选兼容字段：
 
@@ -2061,6 +2061,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 
 - 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
 - `contextToken`、`clientRequestId`、`parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段；新前端必须传入前两项，旧客户端在 `test-agent.redis-summary.legacy-run-without-context-enabled=true` 的兼容窗口内仍可省略。
+- `messageId` 同时是本轮远端 USER dispatch 锚点。`LEGACY_FULL` 优先沿用显式值，缺失时由服务端生成稳定 `msg_...`；同一值传给 agent command、写入平台 USER `remoteMessageId` 并记录到 root scope metadata。`REDIS_SUMMARY` 继续使用其既有 dispatch ID；锚点来源不一致时 Run 级投影 fail-closed，不按“最后一条 user”猜测。
 - `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。服务端只以已成功写入 PostgreSQL 的唯一 Run 锚点确认幂等成功；Redis 中已声明但尚无锚点的 crash-window manifest 不会作为成功响应返回，短保护期后由恢复扫描清理。
 - 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
@@ -2069,7 +2070,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
 有效 `contextToken` 的启动流程复用完整进程、执行节点和可空 binding 快照；公共 `querySnapshot` 复用统一 manager health 映射，但不先查询进程 Repository。稳定 `RUNNING` 只刷新 Redis heartbeat，状态、PID 或服务地址变化时最多写一次；`STALE` 拒绝本次 Run 但不删除 token，`NOT_STARTED` 才失效该进程关联的上下文。未携带 token 的兼容路径仍先校验当前认证用户是否已有 `READY` opencode 进程，未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run；其余 binding 兼容与匿名固定节点路由保持不变。
-Run 进入成功、失败或取消终态后，后端会尝试分页拉取 agent 标准 session messages，将 assistant 可见 text、完整 parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。
+Run 进入成功、失败或取消终态后，后端会从 agent 标准 session messages 的最新页沿 `before` cursor 向前查找本轮稳定 USER 锚点，单页 100、最多 20 页，只把该 user 以及 `parentID/parentId` 直接指向它的 assistant 纳入当前 Run。锚点未到达、来源冲突、重复 cursor、页数超限或旧 Run 时间窗内不唯一时不写任何消息；不得边分页边把当前 `runId` 赋给全会话。选择成功后只 upsert 本轮 assistant 可见 text、完整 parts，并把本轮最后一条 assistant 的 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。已经错误归属的历史消息不在读取或刷新时修复。
 
 `test-agent.redis-summary.enabled=false`、rollout `0` 是稳定默认。部署方完成 Redis 持久化、安全、容量与故障恢复验收后，可按 userId 稳定哈希逐步提高比例；只有携带有效 `contextToken + clientRequestId` 的新 Run 可进入 `REDIS_SUMMARY`，活动 Run 固定创建时模式，回滚只影响后续新 Run。旧客户端兼容调用会递增 `legacy_run_without_context_total`；该指标连续 7 天为 0 后再关闭 `legacy-run-without-context-enabled`，关闭后缺 token 返回 `409 CONVERSATION_CONTEXT_REQUIRED`，不会自动查询数据库。
 
@@ -2452,9 +2453,9 @@ RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding
 
 目标 Java 按 manifest 的 `storageMode` 固定分流：`LEGACY_FULL` 继续执行消息 snapshot、DB durable polling replay 和本机 live bus；`REDIS_SUMMARY` 首帧总发送完整 Redis 物化 `run.snapshot.reset`，再以 `snapshot.runtimeVersion` 为起点，由最短 5 秒的 Redis 安全扫描和本机 live bus 只唤醒、分页读取 `${runtimeVersion}-0` 的 durable/transient 尾流，live 事件仍即时唤醒但帧本身不直接输出，活跃 SSE 连接不轮询 PostgreSQL。初始 reset 的 reason 为 `TRANSIENT_SNAPSHOT_RECOVERY`，旧 durable 游标需重置时为 `CURSOR_BEFORE_EARLIEST_OR_DETAILS_TRUNCATED`，连接期间容量换代为 `RUNTIME_STREAM_TRUNCATED`。payload 包含 `reason/resetGeneration/earliestSeq/detailsAvailableUntil/snapshot.barrierSeq/snapshot.runtimeVersion/snapshot.events`；前端先清空该 Run reducer 并按顺序应用 snapshot，再只用随后 durable SSE id 推进 `Last-Event-ID`。Redis manifest/详情缺失返回 `410 RUN_DETAILS_EXPIRED`，Redis 不可用返回 `503 RUNTIME_STATE_UNAVAILABLE`，不得回退 PostgreSQL 原始事件。
 
-`LEGACY_FULL` SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取标准 session messages，并仅把 assistant 消息转换为 transient `message.updated` / `message.part.updated` 发给前端；user 消息已在 Run 启动前由平台保存，不重复回放其 text part，避免被前端误拼进 assistant 正文。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。`REDIS_SUMMARY` 不触发该兼容远端 snapshot，而是完全使用 Redis 物化 snapshot 与 `runtime-events` Stream 恢复当前 Run 详情。
+`LEGACY_FULL` SSE 建连时，后端会从当前 Run 绑定的 agent remote session 最新消息页沿 `before` cursor 向前查找稳定 USER dispatch 锚点，并只把 `parentID/parentId` 直接指向它的 assistant 转换为 transient `message.updated` / `message.part.updated` 发给前端；因此同一 Session 旧轮的 `todowrite` part 不会被包装成当前 `runId`。user 消息已在 Run 启动前由平台保存，不重复回放其 text part。单页 100、最多 20 页；明确锚点尚未到达、平台 USER/root scope 锚点冲突、重复 cursor、超限或兼容时间窗歧义时返回空消息投影，不回退“最后一条 user”。已记录的 child scope 仍可独立恢复，但只有选中的 root 消息能发现新 child。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。`REDIS_SUMMARY` 不触发该兼容远端 snapshot，而是完全使用 Redis 物化 snapshot 与 `runtime-events` Stream 恢复当前 Run 详情。
 
-`GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照；旧 `/api/runs/{runId}/session-tree/messages` 返回 `410 API_GONE`。读取顺序固定为 Redis 24 小时物化详情 → OpenCode 完整会话 → PostgreSQL 终态双摘要：Redis 命中时不查询 Run、Session、binding、scope 或 `run_events`；Redis 缺失或不可用时才读取 OpenCode，历史接口会保留完整 user/assistant 消息；OpenCode 也不可用时把最多两条摘要映射成既有 `message.updated` / `message.part.updated` reducer 事件，事件同时带 `contentKind=SUMMARY`、`summaryStatus` 和 `summaryVersion`。只有命中 legacy OpenCode 来源时才补读旧 durable RunEvent；`messagesBySessionId` 仍只包含 `message.*` payload，不混入状态事件。响应 `data`：
+`GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照；旧 `/api/runs/{runId}/session-tree/messages` 返回 `410 API_GONE`。读取顺序固定为 Redis 24 小时物化详情 → OpenCode 当前用户轮次 → PostgreSQL 终态双摘要：Redis 命中时不查询 Run、Session、binding、scope 或 `run_events`；Redis 缺失或不可用时才读取 OpenCode，并按同一 dispatch user 规则做因果裁剪，绝不返回 root Session 的其它轮次；OpenCode 也不可用时把最多两条摘要映射成既有 `message.updated` / `message.part.updated` reducer 事件，事件同时带 `contentKind=SUMMARY`、`summaryStatus` 和 `summaryVersion`。只有命中 legacy OpenCode 来源时才补读旧 durable RunEvent；`messagesBySessionId` 仍只包含 `message.*` payload，不混入状态事件。响应 `data`：
 
 ```json
 {
@@ -2486,7 +2487,7 @@ RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding
 }
 ```
 
-三个历史元数据字段与 Session 级接口语义一致，均保持可选以兼容旧客户端；Redis 来源的 `detailsAvailableUntil` 取 manifest 到期时间，OpenCode 完整来源可为 `null`，PostgreSQL 摘要来源固定返回 `historyRepresentation=SUMMARY`、`replayAvailable=false`。该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回当前 Run scope 子树；root session 下全量历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。Session 级命中 legacy OpenCode 来源时仍按消息 snapshot 中的远端 `rootSessionId` 补读 `run_events.root_session_id` 下的 durable 状态事件；Redis 和摘要来源禁止回查旧事件表。
+三个历史元数据字段与 Session 级接口语义一致，均保持可选以兼容旧客户端；Redis 来源的 `detailsAvailableUntil` 取 manifest 到期时间，OpenCode 完整来源可为 `null`，PostgreSQL 摘要来源固定返回 `historyRepresentation=SUMMARY`、`replayAvailable=false`。该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回因果裁剪后的当前 Run scope 子树；root session 下全量多轮历史及全部历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。Session 级命中 legacy OpenCode 来源时仍按消息 snapshot 中的远端 `rootSessionId` 补读 `run_events.root_session_id` 下的 durable 状态事件；Redis 和摘要来源禁止回查旧事件表。
 
 PTY WebSocket 不在上述默认 HTTP/SSE 契约内，已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 

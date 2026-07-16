@@ -40,6 +40,21 @@
 - Result:
   - 相关 Maven 测试共 113 项全部通过，完整后端打包成功；后端 health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 当前已连接。企业远端实际 push 未在本地凭据环境执行，仍需在企业公共区进行一次端到端验收；若服务器有提交邮箱域名限制，需要补充真实邮箱来源或可配置域名。
 ### 2026-07-15 - 修复反馈按钮在 flex 布局下收缩导致文字隐藏的 Bug
+### 2026-07-16 - 后端按用户轮次隔离 Run 消息回放与快照
+
+- Why:
+  - Run 级恢复与终态快照此前会遍历整个 OpenCode Session，再把旧轮 `todowrite` 和 assistant 统一包装或写成当前 `runId`，导致新一轮状态块显示上一轮已完成待办，并污染后续消息归属。
+- What:
+  - 为新 Run 统一建立 `dispatchMessageId` 用户消息锚点，并在 OpenCode command、平台 USER `remoteMessageId`、root scope metadata 与 Redis 过期后的 `RunDetailsLocator` 中复用；来源冲突时拒绝投影。
+  - 增加 Run 轮次选择器：明确锚点只选择该 user 及直接关联 assistant/parts；旧 Run 无锚点时仅允许时间窗内唯一 user 的安全兼容；分页游标重复、超限、缺锚点或歧义均 fail closed。
+  - Run SSE 恢复和终态快照只投影目标轮次，token/cost 只取本轮末条 assistant；Session 历史继续全量刷新，但不重新分配既有 assistant 的 `runId`。按用户决策不修复已污染历史数据，且未改变 HTTP/SSE wire、数据库结构或 generated SDK。
+- How:
+  - 以两轮消息、跨页锚点、游标异常、root/child、Redis 详情过期、legacy ID 生成与 MyBatis locator 映射等回归测试先复现后实现；同步 runtime/domain/persistence README/PACKAGE、HTTP/事件文档和对话场景说明。
+  - 新会话实测第一轮生成并完成一条 Todo、第二轮询问 `1+1=？`：第二轮 SSE 无第一轮 message/todowrite，第二轮状态块及展开内容均无旧 Todo，第一轮展开仍保留 Todo。
+- Result:
+  - 后端定向 91 tests passed；排除在基线 `baec63654d` 原样复现的 3 个故障测试类后，18 个 Maven 模块全量测试 `BUILD SUCCESS`。原始全量仍受既有 H2 持久化测试（2 failures / 7 errors）和默认配置断言（2 failures）阻断。
+  - 前端全量 Vitest 887 passed / 1 skipped，typecheck 与生产 build 通过；后端生产 package、`git diff --check` 通过。主工作区与开发服务已恢复，未修改环境配置。
+
 ### 2026-07-15 - 彻底隔离跨轮 Todo 状态
 
 - Why:

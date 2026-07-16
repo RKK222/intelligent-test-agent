@@ -20,9 +20,9 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.StaleActiveRunReconcileTaskHandler` / `run.StaleActiveRunReconcileService`：只服务 `LEGACY_FULL`，复用 scheduler 框架每 5 分钟扫描超过 2 小时的 active Run；无近期输出且无 pending ask 时 CAS 标记 `FAILED` 并追加数据库 `run.failed`，不处理 `REDIS_SUMMARY`。
 - `run.RunDiffApplicationService`：Run 级 Diff 查询、接受和拒绝；新模式先读 Redis snapshot，远端 ID 必要时读非原文 Run 锚点，过期返回 410，动作成功后以单 SQL 更新 Run 计数。
 - `run.RunEventPersistencePolicy`：区分 durable RunEvent 与 transient live output，并清洗 tool 大字段。
-- `run.RunMessageRecoveryService`：SSE 建连时从 agent projected messages 生成 transient message snapshot；存在 Run scope 时按 root + child session 恢复当前 Run 子树。
+- `run.RunMessageRecoveryService` / `run.RunTurnMessageSelector`：SSE 建连时按稳定 dispatch user 锚点从 agent projected messages 生成当前 Run 的 transient message snapshot；只选择该 user 的直接 assistant，锚点冲突、缺失或分页歧义时 fail-closed，已记录 child scope 可恢复但新 child 只能由选中 root 发现。
 - `run.RunEventSseRouteService`：优先按 Redis Run manifest 的 `producerLinuxServerId` 解析目标 Java，manifest 缺失的 legacy/旧 Run 才按 routing decision 和生产 opencode 进程兼容解析；分别提供 SSE 可回退读取和 cancel 写操作严格路由语义。
-- `run.RunSessionMessageSnapshotService`：Run 终态/取消后持久化 assistant 快照、parts、token/cost，并支持消息列表刷新 fallback。
+- `run.RunSessionMessageSnapshotService`：Run 终态/取消后先按稳定 USER 锚点裁剪，再持久化本轮 assistant 快照、parts 和最后一条 assistant 的 token/cost；消息列表刷新 fallback 保留既有 Run 归属，新消息不猜测 `runId`。
 - `run.summary.RunConversationSummarizer`：为新存储模式生成确定性 USER/ASSISTANT 双摘要，负责敏感内容清洗、Unicode code-point 截断和安全 fallback；不读取数据库、不调用外部模型，也不把原文作为失败降级结果。
 - `run.RunStorageModeSelector` / `run.RunTerminalProjectionService` / `run.RunTerminalProjectionRecoveryCoordinator`：前者按已校验上下文和 userId 稳定哈希为新 Run 固定存储模式；终态服务从 Redis 物化状态生成双摘要、usage、Diff 与远端定位投影，并通过领域端口执行三语句关系型事务；恢复协调器在启动和 5 秒周期中只由公共路由选中的同服务器 Java消费 terminal Lua 原子发布的 versioned outbox，APPLIED/版本冲突后 ack，数据库失败保留 `TERMINAL_PENDING_DB`。
 - `run.RunTerminalProjectionRetryService` / `run.RunTerminalProjectionRetryTaskHandler`：按绝对 due 时间批量重试安全终态投影，使用 scheduler 全局锁防止多 Java 重复执行，严格执行六档退避、5 分钟封顶和 24 小时清理；成功或版本冲突后确认关联的 terminal outbox version。
@@ -31,7 +31,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunInactiveExpiryCoordinator` / `run.RunInactiveExpiryScheduler`：启动时和每 30 秒扫描本服务器 Redis active manifest；无 attention 且两小时无活动的新模式 Run 复用 fencing-safe 远端取消与终态摘要程序，整个运行态收敛不写 `run_events`。
 - `run.RunRuntimeSchedulingConfiguration`：owner lease 续租独占单线程调度器，其余恢复/到期/重试任务使用独立 4 线程维护调度器，避免阻塞 Boot 默认调度线程或饿死 5 秒续租。
 - `run.RunOwnerLeaseSupervisor`：统一维护本机 owner handle 的 5 秒续租信号；fencing 被其它 owner 取得时正常完成 `lost` 只停止旧订阅，Redis/运行态异常时以原错误终止 `lost`，让 Run 启动订阅和恢复订阅调度 30 秒安全收敛。
-- `run.RunMessageRecoveryService`：为 Run/Session HTTP 历史按 Redis → OpenCode → PostgreSQL 双摘要恢复，并携带完整度、可回放性和详情到期时间；legacy SSE 兼容方法继续保持 assistant-only 快照。
+- `run.RunMessageRecoveryService`：为 Run/Session HTTP 历史按 Redis → OpenCode → PostgreSQL 双摘要恢复，并携带完整度、可回放性和详情到期时间；Run 级 OpenCode 来源因果裁剪到目标轮，Session 级来源保持全量多轮，legacy SSE 兼容方法只输出目标轮 assistant。
 - `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射。
 - `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run；临时 fork 仅接收用户问题并禁用工具，通过本轮 assistant 事件流输出增量，消息快照补偿漏失终态，最后以事务 CAS 写唯一终态。
 - `runtime.SideQuestionOrphanCleanupTaskHandler` / `runtime.SideQuestionOrphanCleanupService`：复用 scheduler 每 5 分钟回收超过 10 分钟的旁路 fork；按内部映射使用原节点，404 幂等，无映射时记录潜在泄漏窗口并收敛平台 Run。
@@ -55,7 +55,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 ## 测试位置
 
 - `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime`。
-- `run.*` 测试必须覆盖 Run 创建、通用 agent binding 保存/复用、远端 session 懒创建/复用、事件持久化策略、Redis manifest 优先的 RunEvent SSE 生产 Java 路由、Run 用户归属与新模式鉴权零 PostgreSQL、new/legacy scope 数据库访问边界和新模式 root/scope/dedup/pending 统一端口、终态快照/token 回写、确定性双摘要的净化/Unicode 截断/fallback、Redis active-run、Redis 连续故障 30 秒后的无原文收敛、待交互 7 天与普通无活动 2 小时精确边界/同服务器 Java 路由/owner lease、Diff fallback、消息恢复，以及 legacy stale active Run 收敛任务。
+- `run.*` 测试必须覆盖 Run 创建、通用 agent binding 保存/复用、远端 session 懒创建/复用、事件持久化策略、Redis manifest 优先的 RunEvent SSE 生产 Java 路由、Run 用户归属与新模式鉴权零 PostgreSQL、new/legacy scope 数据库访问边界和新模式 root/scope/dedup/pending 统一端口、终态快照/token 回写、确定性双摘要的净化/Unicode 截断/fallback、Redis active-run、Redis 连续故障 30 秒后的无原文收敛、待交互 7 天与普通无活动 2 小时精确边界/同服务器 Java 路由/owner lease、Diff fallback、按 dispatch user 的跨 Run 消息/Todo 隔离、Session 全量历史，以及 legacy stale active Run 收敛任务。
 - `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新、消息追加默认 role 和消息列表数据库 fallback。
 - `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤、permission/question body 兼容、旁路事件隔离、终态竞态和孤儿清理。
 - `process.*` 测试必须覆盖用户进程分配、公共状态查询、公共启动/停止健康确认、通用参数路径读取、manager 控制面命令路由、后端心跳注册和运行管理快照聚合。

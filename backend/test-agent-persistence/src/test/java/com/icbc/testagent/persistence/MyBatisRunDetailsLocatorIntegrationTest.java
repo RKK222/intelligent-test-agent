@@ -16,6 +16,7 @@ import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.persistence.mybatis.MyBatisRunSummaryPersistenceRepository;
 import com.icbc.testagent.persistence.mybatis.RunSummaryMapper;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
@@ -85,15 +86,19 @@ class MyBatisRunDetailsLocatorIntegrationTest {
 
     @Test
     void readsOnlyStableRemoteLocatorFromRunAnchor() {
-        assertThat(repository.findDetailsLocator(new RunId("run_details_locator")))
+        Optional<RunDetailsLocator> locator = repository.findDetailsLocator(new RunId("run_details_locator"));
+
+        assertThat(locator)
                 .contains(new RunDetailsLocator(
                         new RunId("run_details_locator"),
                         RunStorageMode.REDIS_SUMMARY,
                         "remote-session-locator",
+                        "dispatch-locator",
                         "node-locator",
                         "remote-message-locator",
                         "remote-part-locator",
                         NOW.plusSeconds(86_400)));
+        assertThat(locator.orElseThrow().dispatchMessageId()).isEqualTo("dispatch-locator");
     }
 
     @Test

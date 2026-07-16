@@ -412,6 +412,7 @@ class RunDiffApplicationServiceTest {
                 run().runId(),
                 RunStorageMode.REDIS_SUMMARY,
                 "ses_remote1234567890abcdef",
+                "msg_dispatch1234567890abcdef",
                 node().executionNodeId().value(),
                 "msg_remote1234567890abcdef",
                 "prt_remote1234567890abcdef",

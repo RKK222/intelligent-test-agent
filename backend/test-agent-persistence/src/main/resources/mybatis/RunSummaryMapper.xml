@@ -57,6 +57,7 @@
             <arg column="run_id" javaType="java.lang.String"/>
             <arg column="storage_mode" javaType="java.lang.String"/>
             <arg column="root_remote_session_id" javaType="java.lang.String"/>
+            <arg column="dispatch_message_id" javaType="java.lang.String"/>
             <arg column="execution_node_id_snapshot" javaType="java.lang.String"/>
             <arg column="last_remote_message_id" javaType="java.lang.String"/>
             <arg column="last_remote_part_id" javaType="java.lang.String"/>
@@ -132,7 +133,7 @@
     </select>
 
     <select id="findDetailsLocator" resultMap="RunDetailsLocatorRowMap">
-        select run_id, storage_mode, root_remote_session_id, execution_node_id_snapshot,
+        select run_id, storage_mode, root_remote_session_id, dispatch_message_id, execution_node_id_snapshot,
                last_remote_message_id, last_remote_part_id, details_expires_at
         from runs
         where run_id = #{runId}

@@ -26,12 +26,14 @@ import com.icbc.testagent.domain.run.RunStorageMode;
 import com.icbc.testagent.domain.run.RunSummaryPersistencePort;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
+import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.event.RunEventSsePayload;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +58,7 @@ public class RunMessageRecoveryService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RunMessageRecoveryService.class);
     private static final int RECOVERY_MESSAGE_LIMIT = 100;
+    private static final int RECOVERY_MAX_PAGES = 20;
     private static final int RECENT_RUN_LIMIT = 100;
     private static final String RECOVERY_ORDER = "asc";
 
@@ -67,9 +70,10 @@ public class RunMessageRecoveryService {
     private final RunSessionScopeRepository runSessionScopeRepository;
     private final RunRuntimeStore runRuntimeStore;
     private final RunSummaryPersistencePort runSummaryPersistencePort;
+    private final SessionMessageRepository sessionMessageRepository;
 
     /**
-     * 创建消息恢复服务，恢复过程只依赖领域仓储和 agent runtime registry。
+     * 创建消息恢复服务，平台 USER 锚点与 scope/locator 锚点会交叉校验后再投影。
      */
     @Autowired
     public RunMessageRecoveryService(
@@ -80,7 +84,8 @@ public class RunMessageRecoveryService {
             AgentSessionBindingRepository agentSessionBindingRepository,
             RunSessionScopeRepository runSessionScopeRepository,
             RunRuntimeStore runRuntimeStore,
-            RunSummaryPersistencePort runSummaryPersistencePort) {
+            RunSummaryPersistencePort runSummaryPersistencePort,
+            SessionMessageRepository sessionMessageRepository) {
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
@@ -89,6 +94,29 @@ public class RunMessageRecoveryService {
         this.runSessionScopeRepository = runSessionScopeRepository;
         this.runRuntimeStore = runRuntimeStore;
         this.runSummaryPersistencePort = runSummaryPersistencePort;
+        this.sessionMessageRepository = sessionMessageRepository;
+    }
+
+    /** 兼容既有装配路径；新增 USER 锚点仓储缺失时仅允许旧 Run 的严格时间窗恢复。 */
+    public RunMessageRecoveryService(
+            RunRepository runRepository,
+            SessionRepository sessionRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunRuntimeStore runRuntimeStore,
+            RunSummaryPersistencePort runSummaryPersistencePort) {
+        this(
+                runRepository,
+                sessionRepository,
+                executionNodeRepository,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runSessionScopeRepository,
+                runRuntimeStore,
+                runSummaryPersistencePort,
+                null);
     }
 
     /**
@@ -109,6 +137,7 @@ public class RunMessageRecoveryService {
                 agentSessionBindingRepository,
                 runSessionScopeRepository,
                 null,
+                null,
                 null);
     }
 
@@ -127,6 +156,7 @@ public class RunMessageRecoveryService {
                 executionNodeRepository,
                 agentRuntimeRegistry,
                 agentSessionBindingRepository,
+                null,
                 null,
                 null,
                 null);
@@ -467,7 +497,7 @@ public class RunMessageRecoveryService {
         }
     }
 
-    /** 新模式 Redis 过期后直接使用无原文锚点定位 OpenCode，避免重读 Run/Session/binding/scope。 */
+    /** 新模式 Redis 过期后直接使用稳定的无原文 dispatch 锚点定位 OpenCode，避免重读 Run/Session/binding/scope。 */
     private Optional<List<RunEventSsePayload>> recoverOpenCodeRunFromLocator(
             String agentId,
             RunId runId,
@@ -489,7 +519,8 @@ public class RunMessageRecoveryService {
                 runId.value(),
                 traceId,
                 List.of(SnapshotSessionScope.root(locator.rootRemoteSessionId())),
-                true));
+                true,
+                RunTurnContext.anchored(locator.dispatchMessageId(), null, null)));
     }
 
     /**
@@ -517,13 +548,16 @@ public class RunMessageRecoveryService {
             return Optional.empty();
         }
         AgentRuntime runtime = agentRuntimeRegistry.require(agentId);
+        RunDispatchMessageAnchorResolver.Anchor platformAnchor = RunDispatchMessageAnchorResolver.resolve(
+                sessionMessageRepository, run.sessionId(), run.runId());
         return Optional.of(recoverScopes(
                 runtime,
                 node,
                 runId.value(),
                 traceId,
                 runScopes(runId, binding.remoteSessionId()),
-                includeUser));
+                includeUser,
+                RunTurnContext.fromPlatformAnchor(platformAnchor, run.createdAt(), run.updatedAt())));
     }
 
     private Optional<List<RunEventSsePayload>> recoverOpenCodeSession(
@@ -564,7 +598,8 @@ public class RunMessageRecoveryService {
                 "session_snapshot:" + sessionId.value(),
                 traceId,
                 historyScopes(binding.remoteSessionId()),
-                includeUser));
+                includeUser,
+                null));
     }
 
     private RunHistoryRecoveryResult recoverRunSummaries(RunId runId, String traceId) {
@@ -705,7 +740,11 @@ public class RunMessageRecoveryService {
             String snapshotRunId,
             String traceId,
             List<SnapshotSessionScope> scopes,
-            boolean includeUser) {
+            boolean includeUser,
+            RunTurnContext runTurnContext) {
+        if (runTurnContext != null && runTurnContext.conflicted()) {
+            return List.of();
+        }
         List<RunEventSsePayload> events = new ArrayList<>();
         LinkedHashMap<String, SnapshotSessionScope> scopesBySessionId = new LinkedHashMap<>();
         List<SnapshotSessionScope> orderedScopes = new ArrayList<>();
@@ -717,16 +756,30 @@ public class RunMessageRecoveryService {
         }
         for (int index = 0; index < orderedScopes.size(); index++) {
             SnapshotSessionScope scopedSession = orderedScopes.get(index);
-            AgentSessionMessagesResult result = loadMessages(runtime, node, scopedSession.sessionId(), traceId);
-            if (result != null) {
-                List<AgentSessionMessage> messages = result.messages() == null ? List.of() : result.messages();
-                events.addAll(toSnapshotEvents(
-                        snapshotRunId, traceId, messages, scopedSession, includeUser));
-                for (SnapshotSessionScope discovered : discoverChildScopesFromMessages(scopedSession, messages)) {
-                    if (!scopesBySessionId.containsKey(discovered.sessionId())) {
-                        scopesBySessionId.put(discovered.sessionId(), discovered);
-                        orderedScopes.add(discovered);
-                    }
+            List<AgentSessionMessage> messages;
+            if (!scopedSession.childSession() && runTurnContext != null) {
+                RunTurnContext ownership = runTurnContext.withScopeDispatch(scopedSession.dispatchMessageId());
+                if (ownership.conflicted()) {
+                    return List.of();
+                }
+                messages = loadRunTurnMessages(
+                        runtime,
+                        node,
+                        scopedSession.sessionId(),
+                        traceId,
+                        ownership)
+                        .messages();
+            } else {
+                AgentSessionMessagesResult result = loadMessages(
+                        runtime, node, scopedSession.sessionId(), null, traceId);
+                messages = result == null || result.messages() == null ? List.of() : result.messages();
+            }
+            events.addAll(toSnapshotEvents(
+                    snapshotRunId, traceId, messages, scopedSession, includeUser));
+            for (SnapshotSessionScope discovered : discoverChildScopesFromMessages(scopedSession, messages)) {
+                if (!scopesBySessionId.containsKey(discovered.sessionId())) {
+                    scopesBySessionId.put(discovered.sessionId(), discovered);
+                    orderedScopes.add(discovered);
                 }
             }
         }
@@ -754,7 +807,11 @@ public class RunMessageRecoveryService {
         scopesBySessionId.put(rootSessionId, SnapshotSessionScope.root(rootSessionId));
         for (RunSessionScopeSession scopedSession : scopedSessions) {
             SnapshotSessionScope snapshotScope = SnapshotSessionScope.from(scopedSession);
-            scopesBySessionId.putIfAbsent(snapshotScope.sessionId(), snapshotScope);
+            if (snapshotScope.sessionId().equals(rootSessionId)) {
+                scopesBySessionId.put(rootSessionId, snapshotScope);
+            } else {
+                scopesBySessionId.putIfAbsent(snapshotScope.sessionId(), snapshotScope);
+            }
         }
         return List.copyOf(scopesBySessionId.values());
     }
@@ -763,15 +820,62 @@ public class RunMessageRecoveryService {
             AgentRuntime runtime,
             ExecutionNode node,
             String remoteSessionId,
+            String cursor,
             String traceId) {
         return runtime.sessionMessages(new AgentSessionMessagesCommand(
                         node,
                         remoteSessionId,
                         RECOVERY_MESSAGE_LIMIT,
                         RECOVERY_ORDER,
-                        null,
+                        cursor,
                         traceId))
                 .block();
+    }
+
+    /**
+     * 从最新页沿 before cursor 向前寻找当前 Run；游标异常、页数超限或轮次歧义都返回空投影。
+     */
+    private RunTurnMessageSelector.Selection loadRunTurnMessages(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String remoteSessionId,
+            String traceId,
+            RunTurnContext ownership) {
+        List<AgentSessionMessage> collected = new ArrayList<>();
+        Set<String> seenCursors = new HashSet<>();
+        String cursor = null;
+        for (int page = 0; page < RECOVERY_MAX_PAGES; page++) {
+            AgentSessionMessagesResult result = loadMessages(runtime, node, remoteSessionId, cursor, traceId);
+            if (result == null) {
+                return RunTurnMessageSelector.Selection.unresolved();
+            }
+            List<AgentSessionMessage> pageMessages = result.messages() == null
+                    ? List.of()
+                    : result.messages();
+            if (!pageMessages.isEmpty()) {
+                List<AgentSessionMessage> combined = new ArrayList<>(pageMessages.size() + collected.size());
+                combined.addAll(pageMessages);
+                combined.addAll(collected);
+                collected = combined;
+            }
+            RunTurnMessageSelector.Selection selection = RunTurnMessageSelector.select(
+                    collected,
+                    ownership.dispatchMessageId(),
+                    ownership.runCreatedAt(),
+                    ownership.runUpdatedAt());
+            if (selection.resolved() && ownership.dispatchMessageId() != null) {
+                return selection;
+            }
+            String nextCursor = result.nextCursor();
+            if (nextCursor == null) {
+                return selection;
+            }
+            if (!seenCursors.add(nextCursor)) {
+                return RunTurnMessageSelector.Selection.unresolved();
+            }
+            cursor = nextCursor;
+        }
+        return RunTurnMessageSelector.Selection.unresolved();
     }
 
     /**
@@ -948,7 +1052,8 @@ public class RunMessageRecoveryService {
                                         true,
                                         firstText(partPayload, "messageID", "messageId").orElse(messageId),
                                         firstText(partPayload, "partID", "partId", "id").orElse(null),
-                                        firstText(partPayload, "callID", "callId").orElse(null))));
+                                        firstText(partPayload, "callID", "callId").orElse(null),
+                                        null)));
             }
         }
         return List.copyOf(discoveredBySessionId.values());
@@ -1004,10 +1109,11 @@ public class RunMessageRecoveryService {
             boolean childSession,
             String taskMessageId,
             String taskPartId,
-            String taskCallId) {
+            String taskCallId,
+            String dispatchMessageId) {
 
         private static SnapshotSessionScope root(String rootSessionId) {
-            return new SnapshotSessionScope(rootSessionId, rootSessionId, null, false, null, null, null);
+            return new SnapshotSessionScope(rootSessionId, rootSessionId, null, false, null, null, null, null);
         }
 
         private static SnapshotSessionScope from(RunSessionScopeSession session) {
@@ -1018,7 +1124,52 @@ public class RunMessageRecoveryService {
                     session.childSession(),
                     session.taskMessageId(),
                     session.taskPartId(),
-                    session.taskCallId());
+                    session.taskCallId(),
+                    textMetadata(session.metadata(), "dispatchMessageId"));
+        }
+
+        private static String textMetadata(Map<String, Object> metadata, String key) {
+            Object value = metadata == null ? null : metadata.get(key);
+            return value instanceof String string && !string.isBlank() ? string : null;
+        }
+    }
+
+    private record RunTurnContext(
+            String dispatchMessageId,
+            Instant runCreatedAt,
+            Instant runUpdatedAt,
+            boolean conflicted) {
+
+        private static RunTurnContext unanchored(Instant runCreatedAt, Instant runUpdatedAt) {
+            return new RunTurnContext(null, runCreatedAt, runUpdatedAt, false);
+        }
+
+        private static RunTurnContext anchored(
+                String dispatchMessageId,
+                Instant runCreatedAt,
+                Instant runUpdatedAt) {
+            return new RunTurnContext(dispatchMessageId, runCreatedAt, runUpdatedAt, false);
+        }
+
+        private static RunTurnContext fromPlatformAnchor(
+                RunDispatchMessageAnchorResolver.Anchor anchor,
+                Instant runCreatedAt,
+                Instant runUpdatedAt) {
+            return new RunTurnContext(
+                    anchor.dispatchMessageId(),
+                    runCreatedAt,
+                    runUpdatedAt,
+                    anchor.conflicted());
+        }
+
+        private RunTurnContext withScopeDispatch(String scopeDispatchMessageId) {
+            if (scopeDispatchMessageId == null) {
+                return this;
+            }
+            if (dispatchMessageId != null && !dispatchMessageId.equals(scopeDispatchMessageId)) {
+                return new RunTurnContext(dispatchMessageId, runCreatedAt, runUpdatedAt, true);
+            }
+            return new RunTurnContext(scopeDispatchMessageId, runCreatedAt, runUpdatedAt, false);
         }
     }
 }
