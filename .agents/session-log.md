@@ -6955,3 +6955,14 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 后端 Run 反馈相关领域/API/MyBatis/Flyway 定向测试全部通过，18 模块 `mvn -DskipTests package` 通过；前端全量 59 个测试文件为 887 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 通过。
   - 后端全量 `mvn test` 在 persistence 模块被 9 个任务外基线问题阻断：5 个 H2 不支持存量 `ON CONFLICT`、2 个默认用户/旧拓扑迁移断言、2 个 `usr_test_dev` 夹具外键缺失；本次新增迁移及持久化测试均通过。未修改 RunEvent、generated SDK、环境配置或安全凭据。
+
+### 2026-07-16 - 统一 scheduler 默认开启文档
+
+- Why:
+  - `application.yml` 已把 `TEST_AGENT_SCHEDULER_ENABLED` 的默认值设为 `true`，但后端总览、scheduler/app 模块说明和部署文档仍描述为默认关闭，导致部署认知与实际配置不一致。
+- What:
+  - 稳定文档统一说明 scheduler 在应用中默认开启，显式设置 `TEST_AGENT_SCHEDULER_ENABLED=false` 或传入空值时关闭；关闭后的任务注册、手动触发冲突和 pending run 处理语义保持不变。
+- How:
+  - 同步后端总 README、scheduler/app README、app PACKAGE 和后端部署文档，并把生产配置示例更新为 `TEST_AGENT_SCHEDULER_ENABLED=true`；未修改运行代码、环境文件、API、事件或数据库。
+- Result:
+  - 文档默认值与 `backend/test-agent-app/src/main/resources/application.yml` 一致；历史 session log 与 `SchedulerProperties` 裸实例的安全 fallback 保持原样。

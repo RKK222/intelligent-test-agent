@@ -52,7 +52,7 @@
 
 ## 配置
 
-- `test-agent.scheduler.enabled` / `TEST_AGENT_SCHEDULER_ENABLED`：默认 `false`，关闭后台扫描和 pending run 执行；环境变量存在但值为空时按 `false` 处理，避免启动绑定失败。代码注册任务仍会在应用启动时同步到 `scheduled_tasks`，管理页可正常展示。关闭时管理端手动触发会直接返回冲突错误，避免写入无法执行的 `PENDING` 运行记录。
+- `test-agent.scheduler.enabled` / `TEST_AGENT_SCHEDULER_ENABLED`：应用默认 `true`，启动后台扫描并执行 pending run；显式设为 `false` 可关闭，环境变量存在但值为空时也按 `false` 处理，避免启动绑定失败。代码注册任务无论是否启用都会在应用启动时同步到 `scheduled_tasks`，管理页可正常展示。关闭时管理端手动触发会直接返回冲突错误，避免写入无法执行的 `PENDING` 运行记录。
 - `test-agent.scheduler.scan-interval` / `TEST_AGENT_SCHEDULER_SCAN_INTERVAL`：扫描间隔，默认 `30s`。
 - `test-agent.scheduler.due-task-limit` / `TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT`：单轮扫描 due task 上限，默认 `50`。
 - `test-agent.scheduler.manual-run-limit` / `TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT`：单轮扫描手动 pending run 上限，默认 `50`。
@@ -74,7 +74,7 @@
 - `ScheduledTaskRunRetentionTaskHandlerTest` 覆盖七天截止时间、删除结果和每日 Cron/锁 TTL 元数据。
 - `RedisScheduledTaskLockTest` 覆盖 Redis `SET NX` 获取锁、token Lua 续租/释放和锁 TTL 只读检查。
 - `SchedulerManagementServiceTest` 覆盖管理端 patch、非法 Cron、scheduler 关闭时拒绝手动触发、手动触发 active 冲突、只允许停止 `RUNNING` 和诊断阻塞原因。
-- `SchedulerStartupValidatorTest` 覆盖默认关闭、空字符串启用值按关闭绑定、启用时 Redis 必需。
+- `SchedulerStartupValidatorTest` 覆盖关闭状态、空字符串启用值按关闭绑定、启用时 Redis 必需。
 
 ## 后续 AI 编码指引
 
