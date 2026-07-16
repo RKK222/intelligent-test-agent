@@ -433,8 +433,9 @@ function onEdgesChange(changes: EdgeChange[]) {
               @dragstart="onPaletteDragStart($event, item.type)"
               @click="createNode(item.type)"
             >
-              <span :class="['ta-mermaid-palette__shape', `is-${item.type}`]" aria-hidden="true"></span>
-              <span>{{ item.label }}</span>
+              <span :class="['ta-mermaid-palette__shape', `is-${item.type}`]" aria-hidden="true">
+                <span class="ta-mermaid-palette__label">{{ item.label }}</span>
+              </span>
             </button>
           </div>
         </section>
@@ -527,15 +528,15 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-inspector h3 { margin: 0 0 10px; color: var(--ta-ink, #172033); font-size: 12px; font-weight: 700; }
 .ta-mermaid-palette__hint { margin: -4px 0 10px; color: var(--ta-muted, #64748b); font-size: 10px; line-height: 1.45; }
 .ta-mermaid-palette__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.ta-mermaid-inspector button.ta-mermaid-palette__item { display: grid; min-height: 76px; place-items: center; align-content: center; gap: 7px; padding: 8px 5px; color: var(--ta-muted, #64748b); }
+.ta-mermaid-inspector button.ta-mermaid-palette__item { display: flex; align-items: center; justify-content: center; min-height: 52px; padding: 4px; color: var(--ta-border-strong, #94a3b8); }
 .ta-mermaid-inspector button.ta-mermaid-palette__item:hover { color: var(--ta-ink, #172033); }
-.ta-mermaid-palette__shape { display: block; width: 72px; height: 30px; border: 1.5px solid currentColor; border-radius: 2px; background: var(--ta-surface, #fff); color: var(--ta-border-strong, #94a3b8); pointer-events: none; }
-.ta-mermaid-palette__shape.is-rounded { border-radius: 10px; }
-.ta-mermaid-palette__shape.is-stadium { width: 80px; border-radius: 999px; }
+.ta-mermaid-palette__shape { display: inline-flex; align-items: center; justify-content: center; width: 88px; height: 32px; border: 1.5px solid currentColor; border-radius: 2px; background: var(--ta-surface, #fff); font-size: 11px; pointer-events: none; }
+.ta-mermaid-palette__shape.is-rounded { border-radius: 8px; }
+.ta-mermaid-palette__shape.is-stadium { border-radius: 999px; }
 .ta-mermaid-palette__shape.is-diamond {
   position: relative;
-  width: 72px;
-  height: 38px;
+  width: 88px;
+  height: 44px;
   border: 0;
   background: transparent;
 }
@@ -547,7 +548,10 @@ function onEdgesChange(changes: EdgeChange[]) {
 }
 .ta-mermaid-palette__shape.is-diamond::before { inset: 0; background: currentColor; }
 .ta-mermaid-palette__shape.is-diamond::after { inset: 1.5px; background: var(--ta-surface, #fff); }
-.ta-mermaid-palette__shape.is-circle { width: 38px; height: 38px; border-radius: 50%; }
+.ta-mermaid-palette__shape.is-diamond .ta-mermaid-palette__label { position: relative; z-index: 1; }
+.ta-mermaid-palette__shape.is-circle { width: 44px; height: 44px; border-radius: 50%; }
+.ta-mermaid-palette__label { color: var(--ta-muted, #64748b); transition: color 0.15s ease; }
+.ta-mermaid-inspector button.ta-mermaid-palette__item:hover .ta-mermaid-palette__label { color: var(--ta-ink, #172033); }
 .ta-mermaid-node-properties { min-height: 132px; }
 .ta-mermaid-edge-properties { min-height: 132px; }
 .ta-mermaid-fields { display: grid; gap: 8px; }

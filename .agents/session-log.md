@@ -81,19 +81,21 @@
 - Result:
   - FigmaShell 单测 39/39 通过；agent-web typecheck 通过；工作台定向 E2E 6/6 通过（普通角色隐藏、超管小游戏交互、首次输入流程）；后端打包和本地服务重启成功，health/readiness 为 `UP`，前端返回 `200`，manager WebSocket 已连接。
 ### 2026-07-16 - 修复本地开发下 Mermaid 动态导入渲染与三方依赖加载错误
+### 2026-07-16 - 修复本地开发下 Mermaid 动态加载与优化可视化编辑侧栏形状布局
 
 - Why:
-  - 在本地开发环境下（http://127.0.0.1:3000/），渲染 Mermaid 时遇到 `Failed to fetch dynamically imported module: .../node_modules/.vite/deps/render-*.js` 报错。
-  - 这是因为 Vite 的依赖预构建机制（optimizeDeps）默认会将动态导入的 `mermaid` 及其关联模块（如 layout/render 部分）预编译为 `.vite/deps` 下的动态 chunk 文件，但在 Vite 再次触发依赖重写或热更新时，这些 chunk 文件的 hash 发生变化或旧文件被删除，导致浏览器动态加载时遇到 404 / 抓取失败。
-  - 随后，由于 `mermaid` 被排除预构建，其内部调用的 CommonJS 依赖包 `@braintree/sanitize-url` 在 Vite dev 模式下未能成功转换为 ESM，进而报错 `does not provide an export named 'sanitizeUrl'`。
+  - 在本地开发环境下（http://127.0.0.1:3000/），渲染 Mermaid 时遇到 `Failed to fetch dynamically imported module: .../node_modules/.vite/deps/render-*.js` 报错与 CommonJS 依赖包 `@braintree/sanitize-url` 翻译失败的问题。
+  - 用户反馈可视化编辑器的右侧节点类型列表（图形库）高度太高、占用太多垂直空间，希望能让高度变矮、将文字放入到图形轮廓的内部进行展示，以提升面板的视觉紧凑感与空间利用率。
 - What:
-  - 将 `mermaid` 和 `@mermaid-js/layout-elk` 排除在 Vite 的依赖预构建（optimizeDeps.exclude）之外，使其作为原生 ES 模块（ESM）在开发阶段直接由 Vite 开发服务器提供给浏览器，从而确保依赖文件路径和 hash 始终保持稳定。
-  - 同时，在 `vite.config.ts` 的 `resolve.alias` 中，将 `mermaid` 映射指向其官方自带的、自包含全部依赖的单文件 ESM 压缩版 `mermaid/dist/mermaid.esm.min.mjs`，从源头避免其 CommonJS 依赖（如 `@braintree/sanitize-url`）在 Vite 中转换失败的问题。
+  - 将 `mermaid` 和 `@mermaid-js/layout-elk` 排除在 Vite 的依赖预构建（optimizeDeps.exclude）之外，同时在 `resolve.alias` 中将 `mermaid` 映射指向自包含全部依赖的 ESM 压缩版 `mermaid/dist/mermaid.esm.min.mjs`。
+  - 调整 `MermaidVisualEditor.vue` 右侧图形库的 DOM 结构，把文字标签放入图形容器内部；将网格按钮项 `ta-mermaid-palette__item` 的 `min-height` 限制由 `76px` 降低为 `52px` 以节省垂直空间；图形宽度由 `72px` 统一增加为 `88px` 以确保内部 2 字的中文文本不会溢出；判断（菱形）节点预览尺寸修改为 `88px * 44px`；圆形节点调整为 `44px`；并实现 hover 状态时边框与内部文字的联动变色。
 - How:
-  - 在 `frontend/apps/agent-web/vite.config.ts` 中配置 `optimizeDeps.exclude: ["mermaid", "@mermaid-js/layout-elk"]`，并在 `resolve.alias` 中配置 `"mermaid": "mermaid/dist/mermaid.esm.min.mjs"`。
-  - 运行 `corepack pnpm run build` 和 `corepack pnpm test`，全量 954 个测试均 100% 绿灯通过，确认没有对现有的前端打包和测试流程造成任何负面影响。
+  - 在 `frontend/apps/agent-web/vite.config.ts` 中配置 `exclude: ["mermaid", "@mermaid-js/layout-elk"]` 并建立别名。
+  - 修改 `MermaidVisualEditor.vue` 模板节点及 style 部分的 CSS 布局。
+  - 同步修改 `MermaidVisualEditor.test.ts` 中对应的 `visualEditorSource` 测试断言（更新为 88px * 44px 的新断言值）。
+  - 运行 `corepack pnpm test` 全量前端测试，共 969 项测试 100% 绿灯通过，确保逻辑与打包流程无异常。
 - Result:
-  - 彻底解决了本地开发环境下动态导入 Mermaid 引起的图表解析模块加载与三方 CommonJS 依赖项翻译失败问题。不涉及任何后端代码、API 契约、事件流或数据库配置变更。
+  - 彻底解决了本地开发环境下的动态加载与三方依赖翻译问题。同时让节点图形库更加紧凑高级，有效节省了屏幕显示空间。不涉及任何后端代码、API 契约、事件流或数据库配置变更。
 
 ### 2026-07-16 - 优化 Mermaid 编辑中的快捷连接箭头样式
 

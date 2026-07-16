@@ -312,8 +312,8 @@ describe("MermaidFlowNode", () => {
     expect(flowNodeSource).toContain("polygon(50% 0, 100% 50%, 50% 100%, 0 50%)");
 
     expect(visualEditorSource).not.toContain("rotate(45deg)");
-    expect(visualEditorSource).toContain("width: 72px");
-    expect(visualEditorSource).toContain("height: 38px");
+    expect(visualEditorSource).toContain("width: 88px");
+    expect(visualEditorSource).toContain("height: 44px");
     expect(visualEditorSource).toContain("polygon(50% 0, 100% 50%, 50% 100%, 0 50%)");
   });
 
