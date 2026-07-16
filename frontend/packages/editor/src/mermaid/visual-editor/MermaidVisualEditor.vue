@@ -127,9 +127,10 @@ function onReconnectStart(payload: {
   );
 }
 
-function onQuickConnect(payload: { portId: string; position: Position; shapeType: MermaidNodeType }) {
-  const { portId, position, shapeType } = payload;
-  const nodeId = selectedNodeId.value;
+function onQuickConnect(payload: { nodeId?: string; portId: string; position: Position; shapeType: MermaidNodeType }) {
+  const { nodeId: payloadNodeId, portId, position, shapeType } = payload;
+  // nodeId 来自 MermaidFlowNode（被悬浮的节点）；mock 路径不带 nodeId 时回退到 selectedNodeId
+  const nodeId = payloadNodeId ?? selectedNodeId.value;
   if (!nodeId) return;
   const sourceNode = props.modelValue.nodes.find((n) => n.id === nodeId);
   if (!sourceNode) return;

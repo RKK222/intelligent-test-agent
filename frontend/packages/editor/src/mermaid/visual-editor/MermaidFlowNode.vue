@@ -23,7 +23,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   connectionStart: [start: MermaidConnectionStart];
-  quickConnect: [payload: { portId: string; position: Position; shapeType: MermaidNodeType }];
+  quickConnect: [payload: { nodeId: string; portId: string; position: Position; shapeType: MermaidNodeType }];
 }>();
 
 const quickShapes: ReadonlyArray<{ type: MermaidNodeType; label: string }> = [
@@ -173,7 +173,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
               :key="shape.type"
               type="button"
               :title="`在此方向添加${shape.label}`"
-              @click.stop="emit('quickConnect', { portId: arrow.portId, position: arrow.dir, shapeType: shape.type })"
+              @click.stop="emit('quickConnect', { nodeId: props.id, portId: arrow.portId, position: arrow.dir, shapeType: shape.type })"
             >
               <span :class="['ta-quick-menu-shape', `is-${shape.type}`]"></span>
             </button>

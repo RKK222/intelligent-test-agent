@@ -687,4 +687,24 @@ describe("MermaidVisualEditor", () => {
     expect(queryByLabelText("连线文字")).toBeNull();
     expect(queryByText("选择画布中的节点或连线后编辑。")).toBeTruthy();
   });
+
+  it("快捷图形从被悬浮节点（而非被选中节点）发出连线", async () => {
+    const { getByTestId, container, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+
+    // 选中 A，但悬浮 B
+    await fireEvent.click(getByTestId("mock-select")); // selectedNodeId = A
+
+    // 悬浮 B → B 的快捷箭头显示
+    await fireEvent.mouseEnter(container.querySelector<HTMLElement>('[data-mermaid-node-id="B"]')!);
+
+    // 点击 B 的第一个快捷形状按钮（矩形）
+    const bBtn = container.querySelector<HTMLElement>('[data-mermaid-node-id="B"] .ta-mermaid-quick-menu button')!;
+    await fireEvent.click(bBtn);
+
+    // 新节点 N3 应该连接到 B，而不是 A
+    const lastEdge = (emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges.at(-1);
+    expect(lastEdge).toMatchObject({ source: "B", target: "N3" });
+  });
 });
