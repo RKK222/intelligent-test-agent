@@ -165,7 +165,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
         <!-- 阻止 pointerdown 冒泡到根元素，避免点击箭头/菜单时误触发端口连线拖拽（其 preventDefault 会吞掉 click） -->
         <div class="ta-mermaid-quick-arrow" aria-label="快捷建连" @pointerdown.stop>
           <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">
-            <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none" />
           </svg>
           <div class="ta-mermaid-quick-menu">
             <button
@@ -388,7 +388,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   transform: translateX(-50%);
 }
 
-/* 大箭头按钮 */
+/* 快捷建连大箭头按钮（改为粗的蓝色箭头） */
 .ta-mermaid-quick-arrow {
   display: flex;
   align-items: center;
@@ -396,15 +396,15 @@ function preventNodeDragFromPort(event: MouseEvent) {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--primary, #4f46e5) 15%, #fff);
-  color: var(--primary, #4f46e5);
+  background: color-mix(in srgb, #2563eb 15%, #fff);
+  color: #2563eb;
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
   cursor: pointer;
   z-index: 2;
 }
 .ta-mermaid-quick-arrow:hover {
   opacity: 1;
-  background: var(--primary, #4f46e5);
+  background: #2563eb;
   color: #fff;
 }
 

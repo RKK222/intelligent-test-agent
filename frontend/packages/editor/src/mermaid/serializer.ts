@@ -1,5 +1,4 @@
-import { serializeMermaidLayout } from "./metadata";
-import { serializeMermaidEdgePorts } from "./edge-port-metadata";
+import { serializeMermaidCompactFlow } from "./compact-metadata";
 import type { MermaidEdgeRelation, MermaidGraph, MermaidNode, MermaidNodeType } from "./model";
 
 function escapeLabel(value: string): string {
@@ -30,8 +29,7 @@ function operatorForRelation(relation: MermaidEdgeRelation): string {
 export function serializeMermaidGraph(graph: MermaidGraph): string {
   const lines = [
     `${graph.kind} ${graph.direction}`,
-    ...serializeMermaidLayout(graph.nodes),
-    ...serializeMermaidEdgePorts(graph.edges)
+    ...serializeMermaidCompactFlow(graph)
   ];
   lines.push(...graph.nodes.map(serializeNode));
   const serializeEdge = (edge: MermaidGraph["edges"][number]) => {

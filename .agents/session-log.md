@@ -55,6 +55,33 @@
   - 执行 FigmaShell 单测、agent-web 类型检查、工作台桌面/移动端定向 E2E，并重启 test profile 本地服务后检查 health/readiness、前端 HTTP 和 manager WebSocket 日志。
 - Result:
   - FigmaShell 单测 39/39 通过；agent-web typecheck 通过；工作台定向 E2E 6/6 通过（普通角色隐藏、超管小游戏交互、首次输入流程）；后端打包和本地服务重启成功，health/readiness 为 `UP`，前端返回 `200`，manager WebSocket 已连接。
+### 2026-07-16 - 修复本地开发下 Mermaid 动态导入渲染与三方依赖加载错误
+
+- Why:
+  - 在本地开发环境下（http://127.0.0.1:3000/），渲染 Mermaid 时遇到 `Failed to fetch dynamically imported module: .../node_modules/.vite/deps/render-*.js` 报错。
+  - 这是因为 Vite 的依赖预构建机制（optimizeDeps）默认会将动态导入的 `mermaid` 及其关联模块（如 layout/render 部分）预编译为 `.vite/deps` 下的动态 chunk 文件，但在 Vite 再次触发依赖重写或热更新时，这些 chunk 文件的 hash 发生变化或旧文件被删除，导致浏览器动态加载时遇到 404 / 抓取失败。
+  - 随后，由于 `mermaid` 被排除预构建，其内部调用的 CommonJS 依赖包 `@braintree/sanitize-url` 在 Vite dev 模式下未能成功转换为 ESM，进而报错 `does not provide an export named 'sanitizeUrl'`。
+- What:
+  - 将 `mermaid` 和 `@mermaid-js/layout-elk` 排除在 Vite 的依赖预构建（optimizeDeps.exclude）之外，使其作为原生 ES 模块（ESM）在开发阶段直接由 Vite 开发服务器提供给浏览器，从而确保依赖文件路径和 hash 始终保持稳定。
+  - 同时，在 `vite.config.ts` 的 `resolve.alias` 中，将 `mermaid` 映射指向其官方自带的、自包含全部依赖的单文件 ESM 压缩版 `mermaid/dist/mermaid.esm.min.mjs`，从源头避免其 CommonJS 依赖（如 `@braintree/sanitize-url`）在 Vite 中转换失败的问题。
+- How:
+  - 在 `frontend/apps/agent-web/vite.config.ts` 中配置 `optimizeDeps.exclude: ["mermaid", "@mermaid-js/layout-elk"]`，并在 `resolve.alias` 中配置 `"mermaid": "mermaid/dist/mermaid.esm.min.mjs"`。
+  - 运行 `corepack pnpm run build` 和 `corepack pnpm test`，全量 954 个测试均 100% 绿灯通过，确认没有对现有的前端打包和测试流程造成任何负面影响。
+- Result:
+  - 彻底解决了本地开发环境下动态导入 Mermaid 引起的图表解析模块加载与三方 CommonJS 依赖项翻译失败问题。不涉及任何后端代码、API 契约、事件流或数据库配置变更。
+
+### 2026-07-16 - 优化 Mermaid 编辑中的快捷连接箭头样式
+
+- Why:
+  - 用户要求将 Mermaid 可视化编辑器节点悬浮时显示的 4 个快捷连接箭头改为更显眼的粗蓝色箭头，以提升可视化连线时的指引性和交互视觉体验。
+- What:
+  - 在 `frontend/packages/editor/src/mermaid/visual-editor/MermaidFlowNode.vue` 中，将快捷连接箭头的 SVG 图标线条粗细（`stroke-width`）从 `2.5` 增加为 `4`。
+  - 将快捷连接箭头按钮的配色由原先的紫色/靛蓝色主题（依赖 `--primary`）替换为醒目的蓝色主题（使用 `#2563eb`），并将普通状态背景调整为 `color-mix(in srgb, #2563eb 15%, #fff)`，hover 状态下背景为 `#2563eb`。
+- How:
+  - 修改 `MermaidFlowNode.vue` 模板中的 SVG path 属性，以及 style 块中 `.ta-mermaid-quick-arrow` 的配色和 hover 样式。
+  - 运行 `corepack pnpm test` 全量通过前端 954 项测试，确保可视化编辑器核心与连线相关的测试没有受到影响。
+- Result:
+  - Mermaid 节点上的 4 向快捷连接箭头成功呈现为加粗 of 蓝色箭头，且 hover 配色也相应对齐为蓝色系列。未改动后端代码、API 契约、事件流或数据库配置。
 
 ### 2026-07-16 - 修复 Mermaid ELK 自动布局前端构建回归
 
@@ -7172,3 +7199,47 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 使用 `.env.test` / `test` profile / JDK 25 重启 backend、opencode-manager 和 frontend 成功，health/readiness 为 UP，前端 3000 返回 200，登录 CORS 与 manager WebSocket/config update 正常。
   - 未改变 HTTP DTO、RunEvent、数据库结构或 generated SDK；属于 Git 认证路由、浏览器兼容和 SSH 密钥安全配置变更。企业首次应用持久 RSA 文件后，历史由临时密钥加密且已无法解密的用户需要重新保存一次 SSH 私钥。
+### 2026-07-16 - 原始输出浮层增加下载按钮
+
+- Why:
+  - 前端调试用“原始输出”浮层此前只能在线查看会话级 HTTP 请求/响应正文与 RunEvent SSE `data`，排查问题时需逐条复制报文到外部工具，缺少一键导出能力。
+- What:
+  - `FigmaChatPanel.vue` 原始输出浮层操作区新增“下载”按钮，把当前过滤结果（受类型筛选+关键词搜索影响，与浮层顶部计数一致）导出为本地 `.txt` 文件；无可见报文时按钮禁用，避免导出空文件。
+  - 下载走代码库既有 `Blob`+`createObjectURL`+`<a>.click()`+`revokeObjectURL` 标准模式（同 `AnalyticsManagementPanel.exportCsv`）；导出内容沿用进入页面缓存前已递归脱敏 `contextToken` 并截断后的可见副本，不绕过 `prepareRawOutputBody` 安全边界。
+- How:
+  - 复用现有 `rawOutputKindLabel`/`rawOutputTime`/`rawOutputBody` 组装文本，新增 `downloadRawOutput`/`formatRawOutputStamp`；按钮复用既有 `.figma-chat-raw-action` 类并补 `gap` 与 `:disabled` 样式，新增 `Download` 图标导入。
+  - `FigmaChatPanel.test.ts` 新增下载用例（mock `createObjectURL`/`revokeObjectURL` 与 `HTMLAnchorElement.prototype.click`，用 `try/finally` 还原避免泄漏，校验 Blob 文本含两条正文与“请求/SSE”标签、过滤后只导出命中条目）；空状态用例补“无报文时下载按钮禁用”断言。
+  - `frontend/apps/agent-web/README.md` 同步补充下载能力与脱敏边界说明。运行 agent-web typecheck 与 FigmaChatPanel、raw-output 定向测试。
+- Result:
+  - agent-web typecheck 通过；`FigmaChatPanel.test.ts` 122 passed / 1 skipped、`raw-output.test.ts` 3 passed。仅前端调试 UI 改动，不涉及 API、事件、数据库、环境配置或安全凭据。
+
+### 2026-07-16 - Mermaid 使用 ELK 正交避障与单行紧凑元数据
+
+- Why:
+  - Mermaid Flowchart 自动布局原先只采用 ELK 节点坐标，连线仍由 Vue Flow 独立生成 SmoothStep，分支/汇合图会出现交叉和穿越节点；坐标、固定端口和路由若分别使用展开 JSON 注释，又会显著挤占 Markdown 与 AI 上下文。
+- What:
+  - 自动布局改为消费 ELK 完整 edge sections，按真实节点包围盒和沿边顺序稳定映射 8/12 个 Handle，保存正交 route；自定义边渲染 6px 圆角轨道、按路径中点放标签，DOM 尺寸偏差通过正交适配段连接，缺 route 时回退 SmoothStep。
+  - 新增 `%%@<base64url>` 单行 codec，统一保存 Flow 节点坐标/端口/路由和 Sequence 参与者坐标；内部使用版本 flags、0.1px 增量 ZigZag/LEB128、端口 nibble、轴向路由和拓扑绑定的 FNV-1a。旧 `editor-layout` / `editor-edge-ports` 保持只读迁移兼容，损坏或重复新 marker 及损坏旧注释原样保留。
+  - 节点拖动、改名/改形、方向切换、增删、重连及同步预布局统一清除派生 route；只修改边标签保留。同步 editor README/PACKAGE 和当前设计/实施计划。
+- How:
+  - codec 不增加依赖，限制解码 1 MiB、单边 4096 点、单个 LEB128 5 bytes，并在完整校验 magic、类型、数量、拓扑、EOF、端口、坐标和正交路径后原子应用。TDD 固定 Flow/Sequence golden vector，覆盖截断、非法 Base64URL、hash/拓扑变化、重复 marker、超限、旧格式回退、官方 Mermaid parser 和代表图紧凑度。
+  - 几何回归覆盖 TD/BT/LR/RL、非端点节点避障、分支汇合图 proper crossing 为 0、ELK 缺 section、DOM 端点偏差和 SmoothStep 回退；代表图私有注释由约 5,175 字符/314 行压缩到约 203 字符/1 行。
+- Result:
+  - editor 全量 11 个 Vitest 文件 145 passed；前端全量 63 个文件 954 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。
+  - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。
+
+### 2026-07-16 - 修复 Mermaid 自动布局箭头倒置
+
+- Why:
+  - ELK 保存的路由方向正确，但普通节点实际 Vue Flow Handle 与估算边界存在约 1–8px 偏差；旧渲染逻辑先接到节点边界，再短距离折返实际 Handle，使 `markerEnd` 按反向末段旋转，源端也可能先向节点内部折返。
+- What:
+  - `edge-path.ts` 新增端点重接程序：从存储路由选择源端外侧的第一个、目标端外侧的最后一个安全引导点，在节点外轨道完成坐标校正，并以 0.5px 容差验证首段向外、末段向内。
+  - `MermaidFlowEdge.vue` 改用重接后的最终正交路径；没有安全内部轨道、路由非法或只有两个端点时回退 SmoothStep，现有 `markerEnd`、标签中点和端点重连圆圈不变。
+  - 同步 editor README/PACKAGE 与正交路由设计/实施计划；ELK 路由、Sequence、compact metadata、parser/serializer 均未修改。
+- How:
+  - TDD 先用截图坐标锁定旧路径末段 `dy=-7.5`，再覆盖 Top/Bottom/Left/Right 四种源端与目标端方向、0.1–8px 偏差、0.5px 容差、圆角/路径中点和 SmoothStep 回退。
+  - 代表图集成测试真实调用 ELK，再按普通节点 118px 实际宽度和 Top Handle 外移 8px 重接，确认 N4/N5/N6/N7 的末段均从上方进入节点。本地浏览器因未选择可用工作区版本，未完成截图对应 Markdown 的页面级复核。
+- Result:
+  - editor 全量 12 个 Vitest 文件 160 passed；前端全量 64 个文件 969 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。
+  - 全量 Vitest 与 lint 首次并行运行时，一个既有 `MarkdownPreview` 异步对话框用例超过 1 秒超时；该用例独占运行及全量 Vitest 独占复跑均通过，确认是资源争用而非代码回归，未修改任务外超时。
+  - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。

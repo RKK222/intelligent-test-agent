@@ -5,30 +5,269 @@ import {
   type MermaidEdge,
   type MermaidGraph,
   type MermaidNode,
-  type MermaidNodeType
+  type MermaidNodeType,
+  type MermaidPosition
 } from "./model";
 import { getMermaidNodePorts, type MermaidNodePort } from "./visual-editor/node-port-layout";
 
 const elk = new ELK();
+const CANVAS_OFFSET = { x: 80, y: 70 } as const;
+
+type MermaidNodeSize = { width: number; height: number };
+type ElkRouteSection = {
+  startPoint: MermaidPosition;
+  endPoint: MermaidPosition;
+  bendPoints?: MermaidPosition[];
+};
+type ElkLayoutEdge = { id?: string; sections?: ElkRouteSection[] };
+
+function roundLayoutCoordinate(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/** 统一 ELK 包围盒与画布 CSS 的节点尺寸，避免路由把判断节点仍当成 52px 高矩形。 */
+function getMermaidNodeSize(node: MermaidNode): MermaidNodeSize {
+  if (node.type === "circle") return { width: 92, height: 92 };
+  if (node.type === "diamond") return { width: 150, height: 88 };
+  const horizontalPadding = node.type === "stadium" ? 48 : 40;
+  const textLen = node.text ? node.text.length : 0;
+  return {
+    width: Math.max(120, Math.min(190, textLen * 12 + horizontalPadding)),
+    height: 52
+  };
+}
 
 /**
  * 获取节点的物理中心坐标（基于估算出的节点宽高）。
  */
 function getNodeCenter(node: MermaidNode): { x: number; y: number } {
-  let width = 150;
-  let height = 52;
-  if (node.type === "circle") {
-    width = 92;
-    height = 92;
-  } else {
-    const textLen = node.text ? node.text.length : 0;
-    width = Math.max(120, Math.min(190, textLen * 12 + 40));
-    height = 52;
-  }
+  const { width, height } = getMermaidNodeSize(node);
   return {
     x: node.position.x + width / 2,
     y: node.position.y + height / 2,
   };
+}
+
+function samePoint(left: MermaidPosition, right: MermaidPosition): boolean {
+  return left.x === right.x && left.y === right.y;
+}
+
+/** 去掉重复点和共线中间点，保证后续圆角 path 不产生零长度拐角。 */
+function normalizeOrthogonalPoints(points: MermaidPosition[]): MermaidPosition[] {
+  const unique = points.filter((point, index) => index === 0 || !samePoint(point, points[index - 1]!));
+  const normalized: MermaidPosition[] = [];
+  for (const point of unique) {
+    const previous = normalized.at(-1);
+    const beforePrevious = normalized.at(-2);
+    if (
+      previous &&
+      beforePrevious &&
+      ((beforePrevious.x === previous.x && previous.x === point.x) ||
+        (beforePrevious.y === previous.y && previous.y === point.y))
+    ) {
+      normalized[normalized.length - 1] = point;
+    } else {
+      normalized.push(point);
+    }
+  }
+  return normalized;
+}
+
+function getAbsolutePortPoint(node: MermaidNode, port: MermaidNodePort): MermaidPosition {
+  const size = getMermaidNodeSize(node);
+  return {
+    x: roundLayoutCoordinate(node.position.x + size.width * port.x / 100),
+    y: roundLayoutCoordinate(node.position.y + size.height * port.y / 100)
+  };
+}
+
+function inferEndpointSide(node: MermaidNode, point: MermaidPosition): Position {
+  const size = getMermaidNodeSize(node);
+  const distances: Array<{ side: Position; distance: number }> = [
+    { side: Position.Top, distance: Math.abs(point.y - node.position.y) },
+    { side: Position.Right, distance: Math.abs(point.x - (node.position.x + size.width)) },
+    { side: Position.Bottom, distance: Math.abs(point.y - (node.position.y + size.height)) },
+    { side: Position.Left, distance: Math.abs(point.x - node.position.x) }
+  ];
+  return distances.reduce((best, candidate) => candidate.distance < best.distance ? candidate : best).side;
+}
+
+type EdgeEndpointRequest = {
+  edge: MermaidEdge;
+  end: "source" | "target";
+  node: MermaidNode;
+  side: Position;
+  elkPoint: MermaidPosition;
+};
+
+type EdgeEndpointAssignment = {
+  port: MermaidNodePort;
+  point: MermaidPosition;
+};
+
+function coordinateAlongSide(point: MermaidPosition, side: Position): number {
+  return side === Position.Top || side === Position.Bottom ? point.x : point.y;
+}
+
+/**
+ * 请求数不超过端口数时用顺序保持的最小位移匹配选择端口子集；高出度节点端口不足时
+ * 按沿边比例稳定复用。两种路径都保持 ELK 已决定的边顺序，避免端点再次互换造成交叉。
+ */
+function matchRequestsToPorts(
+  requests: EdgeEndpointRequest[],
+  ports: MermaidNodePort[]
+): Array<{ request: EdgeEndpointRequest; port: MermaidNodePort }> {
+  if (!requests.length || !ports.length) return [];
+  const side = requests[0]!.side;
+  const sortedRequests = [...requests].sort((left, right) => {
+    const delta = coordinateAlongSide(left.elkPoint, side) - coordinateAlongSide(right.elkPoint, side);
+    return delta || left.edge.id.localeCompare(right.edge.id) || left.end.localeCompare(right.end);
+  });
+  const sortedPorts = [...ports].sort((left, right) => {
+    const leftPoint = getAbsolutePortPoint(sortedRequests[0]!.node, left);
+    const rightPoint = getAbsolutePortPoint(sortedRequests[0]!.node, right);
+    return coordinateAlongSide(leftPoint, side) - coordinateAlongSide(rightPoint, side);
+  });
+
+  if (sortedRequests.length > sortedPorts.length) {
+    return sortedRequests.map((request, index) => ({
+      request,
+      port: sortedPorts[
+        sortedRequests.length === 1
+          ? 0
+          : Math.round(index * (sortedPorts.length - 1) / (sortedRequests.length - 1))
+      ]!
+    }));
+  }
+
+  const requestCount = sortedRequests.length;
+  const portCount = sortedPorts.length;
+  const costs = Array.from({ length: requestCount + 1 }, () => Array(portCount + 1).fill(Number.POSITIVE_INFINITY));
+  const takes = Array.from({ length: requestCount + 1 }, () => Array(portCount + 1).fill(false));
+  for (let portIndex = 0; portIndex <= portCount; portIndex += 1) costs[0]![portIndex] = 0;
+  for (let requestIndex = 1; requestIndex <= requestCount; requestIndex += 1) {
+    for (let portIndex = 1; portIndex <= portCount; portIndex += 1) {
+      const skipCost = costs[requestIndex]![portIndex - 1]!;
+      const request = sortedRequests[requestIndex - 1]!;
+      const portPoint = getAbsolutePortPoint(request.node, sortedPorts[portIndex - 1]!);
+      const takeCost = costs[requestIndex - 1]![portIndex - 1]!
+        + Math.abs(coordinateAlongSide(request.elkPoint, side) - coordinateAlongSide(portPoint, side));
+      if (takeCost <= skipCost) {
+        costs[requestIndex]![portIndex] = takeCost;
+        takes[requestIndex]![portIndex] = true;
+      } else {
+        costs[requestIndex]![portIndex] = skipCost;
+      }
+    }
+  }
+
+  const matches: Array<{ request: EdgeEndpointRequest; port: MermaidNodePort }> = [];
+  let requestIndex = requestCount;
+  let portIndex = portCount;
+  while (requestIndex > 0 && portIndex > 0) {
+    if (takes[requestIndex]![portIndex]) {
+      matches.push({
+        request: sortedRequests[requestIndex - 1]!,
+        port: sortedPorts[portIndex - 1]!
+      });
+      requestIndex -= 1;
+    }
+    portIndex -= 1;
+  }
+  return matches.reverse();
+}
+
+function endpointKey(edge: MermaidEdge, end: "source" | "target"): string {
+  return `${edge.id}\u0000${end}`;
+}
+
+function buildPortAdapter(
+  assignment: EdgeEndpointAssignment,
+  elkPoint: MermaidPosition
+): MermaidPosition {
+  return assignment.port.position === Position.Top || assignment.port.position === Position.Bottom
+    ? { x: assignment.point.x, y: elkPoint.y }
+    : { x: elkPoint.x, y: assignment.point.y };
+}
+
+/** 把 ELK 的端点顺序映射到真实 Handle，并把完整正交 section 写入领域边。 */
+function applyElkEdgeRoutes(graph: MermaidGraph, layoutEdges: ElkLayoutEdge[]): void {
+  const edgeById = new Map(graph.edges.map((edge) => [edge.id, edge]));
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const routeByEdgeId = new Map<string, MermaidPosition[]>();
+  const requestGroups = new Map<string, EdgeEndpointRequest[]>();
+
+  const addRequest = (request: EdgeEndpointRequest) => {
+    const key = `${request.node.id}\u0000${request.side}`;
+    const group = requestGroups.get(key) ?? [];
+    group.push(request);
+    requestGroups.set(key, group);
+  };
+
+  for (const layoutEdge of layoutEdges) {
+    if (!layoutEdge.id) continue;
+    const edge = edgeById.get(layoutEdge.id);
+    const section = layoutEdge.sections?.[0];
+    if (!edge || !section) continue;
+    const rawPoints = normalizeOrthogonalPoints([
+      section.startPoint,
+      ...(section.bendPoints ?? []),
+      section.endPoint
+    ].map((point) => ({
+      x: roundLayoutCoordinate(point.x + CANVAS_OFFSET.x),
+      y: roundLayoutCoordinate(point.y + CANVAS_OFFSET.y)
+    })));
+    if (rawPoints.length < 2) continue;
+    const sourceNode = nodeById.get(edge.source);
+    const targetNode = nodeById.get(edge.target);
+    if (!sourceNode || !targetNode) continue;
+    routeByEdgeId.set(edge.id, rawPoints);
+    addRequest({
+      edge,
+      end: "source",
+      node: sourceNode,
+      side: inferEndpointSide(sourceNode, rawPoints[0]!),
+      elkPoint: rawPoints[0]!
+    });
+    addRequest({
+      edge,
+      end: "target",
+      node: targetNode,
+      side: inferEndpointSide(targetNode, rawPoints.at(-1)!),
+      elkPoint: rawPoints.at(-1)!
+    });
+  }
+
+  const assignments = new Map<string, EdgeEndpointAssignment>();
+  for (const requests of requestGroups.values()) {
+    const first = requests[0];
+    if (!first) continue;
+    const ports = getMermaidNodePorts(first.node.type).filter((port) => port.position === first.side);
+    for (const { request, port } of matchRequestsToPorts(requests, ports)) {
+      const assignment = { port, point: getAbsolutePortPoint(request.node, port) };
+      assignments.set(endpointKey(request.edge, request.end), assignment);
+      if (request.end === "source") request.edge.sourceHandle = port.handleId;
+      else request.edge.targetHandle = port.handleId;
+    }
+  }
+
+  for (const edge of graph.edges) {
+    const rawPoints = routeByEdgeId.get(edge.id);
+    const sourceAssignment = assignments.get(endpointKey(edge, "source"));
+    const targetAssignment = assignments.get(endpointKey(edge, "target"));
+    if (!rawPoints || !sourceAssignment || !targetAssignment) continue;
+    const rawStart = rawPoints[0]!;
+    const rawEnd = rawPoints.at(-1)!;
+    edge.route = {
+      points: normalizeOrthogonalPoints([
+        sourceAssignment.point,
+        buildPortAdapter(sourceAssignment, rawStart),
+        ...rawPoints,
+        buildPortAdapter(targetAssignment, rawEnd),
+        targetAssignment.point
+      ])
+    };
+  }
 }
 
 /**
@@ -176,6 +415,8 @@ function redistributeEdgePorts(graph: MermaidGraph): void {
  */
 export async function autoLayoutMermaidGraph(graph: MermaidGraph): Promise<MermaidGraph> {
   const result = cloneMermaidGraph(graph);
+  // 新一轮布局必须从无派生路径状态开始；ELK 缺 section 或失败时由渲染层安全回退 SmoothStep。
+  for (const edge of result.edges) delete edge.route;
   if (result.nodes.length === 0) return result;
 
   // Mermaid 布局方向转换为 ELK 方向（TD/TB -> DOWN, BT -> UP, LR -> RIGHT, RL -> LEFT）
@@ -190,19 +431,9 @@ export async function autoLayoutMermaidGraph(graph: MermaidGraph): Promise<Merma
     elkDirection = "LEFT";
   }
 
-  // 构造 ELK 的节点列表并估算宽高
+  // 构造 ELK 节点时使用与实际 Vue 节点一致的包围盒，边路由才能可靠避障。
   const children = result.nodes.map((node) => {
-    let width = 150;
-    let height = 52;
-    if (node.type === "circle") {
-      width = 92;
-      height = 92;
-    } else {
-      // 按照文本长度计算合适宽度，避免文字溢出或节点过窄
-      const textLen = node.text ? node.text.length : 0;
-      width = Math.max(120, Math.min(190, textLen * 12 + 40));
-      height = 52;
-    }
+    const { width, height } = getMermaidNodeSize(node);
 
     return {
       id: node.id,
@@ -224,11 +455,15 @@ export async function autoLayoutMermaidGraph(graph: MermaidGraph): Promise<Merma
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": elkDirection,
-      // 布局间距优化
-      "elk.layered.spacing.nodeNodeBetweenLayers": "80", // 层与层间距
-      "elk.spacing.nodeNode": "60", // 同层节点间距
-      // 节点放置算法，BRANDES_KOEPF 能生成更对称和居中的布局
+      "elk.edgeRouting": "ORTHOGONAL",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+      "elk.layered.nodePlacement.favorStraightEdges": "true",
+      "elk.layered.unnecessaryBendpoints": "true",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "96",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "28",
+      "elk.layered.spacing.edgeEdgeBetweenLayers": "16",
+      "elk.spacing.nodeNode": "64"
     },
     children,
     edges,
@@ -247,15 +482,14 @@ export async function autoLayoutMermaidGraph(graph: MermaidGraph): Promise<Merma
     for (const node of result.nodes) {
       const pos = posMap.get(node.id);
       if (pos) {
-        node.position = { x: 80 + pos.x, y: 70 + pos.y };
+        node.position = { x: CANVAS_OFFSET.x + pos.x, y: CANVAS_OFFSET.y + pos.y };
       }
     }
+    applyElkEdgeRoutes(result, (layouted.edges ?? []) as ElkLayoutEdge[]);
   } catch (err) {
     console.error("ELK layout execution failed, keeping original layout:", err);
+    redistributeEdgePorts(result);
   }
-
-  // 重新分布各节点的边连接，防交叉
-  redistributeEdgePorts(result);
 
   return result;
 }
@@ -269,6 +503,7 @@ export async function autoLayoutMermaidGraph(graph: MermaidGraph): Promise<Merma
  */
 export function syncAutoLayoutMermaidGraph(graph: MermaidGraph): MermaidGraph {
   const result = cloneMermaidGraph(graph);
+  for (const edge of result.edges) delete edge.route;
   if (result.nodes.length === 0) return result;
   const nodeOrder = new Map(result.nodes.map((node, index) => [node.id, index]));
   const indegree = new Map(result.nodes.map((node) => [node.id, 0]));

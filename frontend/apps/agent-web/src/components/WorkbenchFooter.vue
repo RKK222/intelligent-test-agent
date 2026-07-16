@@ -19,6 +19,8 @@ export type AppWorkspaceVersion = ApplicationWorkspaceVersion;
 const props = defineProps<{
   /** 写入路径（编辑器模式显示） */
   writePath?: string;
+  /** 当前工作区绝对根目录，用于生成可复制的文件绝对路径 */
+  workspaceRootPath?: string;
   /** 最近一次更新时间（秒或 ISO 字符串均可） */
   updatedAt?: string | number;
   /** 是否存在未保存改动 */
@@ -90,9 +92,31 @@ const displayFilename = computed(() => {
   return props.writePath.split("/").pop() || props.writePath;
 });
 
-async function copyPath() {
-  if (!props.writePath) return;
-  if (await copyTextToClipboard(props.writePath)) {
+const absoluteWritePath = computed(() => {
+  if (!props.workspaceRootPath || !props.writePath) return "";
+  const normalizedRoot = props.workspaceRootPath.replace(/\\/g, "/");
+  const normalizedPath = props.writePath.replace(/\\/g, "/");
+  // 文件路径本身已是绝对路径时直接复用，避免重复拼接工作区根目录。
+  if (normalizedPath.startsWith("/") || /^[A-Za-z]:\//.test(normalizedPath)) {
+    return normalizedPath;
+  }
+  const rootWithoutTrailingSlash = normalizedRoot.replace(/\/+$/, "");
+  const pathWithoutLeadingSlash = normalizedPath.replace(/^\/+/, "");
+  return rootWithoutTrailingSlash
+    ? `${rootWithoutTrailingSlash}/${pathWithoutLeadingSlash}`
+    : `/${pathWithoutLeadingSlash}`;
+});
+
+const copyPathText = computed(() => {
+  if (!props.writePath) return "";
+  return absoluteWritePath.value
+    ? `${props.writePath}\n${absoluteWritePath.value}`
+    : props.writePath;
+});
+
+async function copyPath(textToCopy: string) {
+  if (!textToCopy) return;
+  if (await copyTextToClipboard(textToCopy)) {
     ElMessage.success("路径已复制到剪贴板");
   } else {
     ElMessage.error("复制路径失败，请手动复制");
@@ -564,11 +588,11 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
       <template v-else-if="showSave">
         <span class="ta-workbench-footer-path">
           <button
-            v-if="writePath"
+            v-if="copyPathText"
             type="button"
             class="ta-workbench-footer-copy-path"
-            :title="writePath"
-            @click="copyPath"
+            :title="copyPathText"
+            @click="copyPath(copyPathText)"
           >
             复制路径
           </button>

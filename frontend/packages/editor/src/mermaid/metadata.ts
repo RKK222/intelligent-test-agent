@@ -45,12 +45,3 @@ export function extractMermaidLayout(lines: string[]): MermaidLayoutExtraction {
   }
   return { layout: {}, consumedLineIndexes: new Set() };
 }
-
-/** 生成稳定、可读且可被 Mermaid 忽略的坐标 metadata。 */
-export function serializeMermaidLayout(nodes: ReadonlyArray<{ id: string; position: MermaidPosition }>): string[] {
-  if (!nodes.length) return [];
-  const layout = Object.fromEntries(
-    nodes.map((node) => [node.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) }])
-  );
-  return [LAYOUT_MARKER, ...JSON.stringify(layout, null, 2).split("\n").map((line) => `%% ${line}`)];
-}

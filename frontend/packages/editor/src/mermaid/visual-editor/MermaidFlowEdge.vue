@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { BaseEdge, getSmoothStepPath, Position, type EdgeProps } from "@vue-flow/core";
+import { buildRoundedOrthogonalPath, getPolylineMidpoint, reattachMermaidEdgeRoutePoints } from "./edge-path";
+import type { MermaidFlowEdgeData } from "./vue-flow-adapter";
 
-const props = defineProps<EdgeProps>();
+const props = defineProps<EdgeProps<MermaidFlowEdgeData>>();
 const emit = defineEmits<{
   reconnectStart: [
     payload: {
@@ -16,19 +18,32 @@ const emit = defineEmits<{
   ];
 }>();
 
-const path = computed(() =>
-  getSmoothStepPath({
+const routePoints = computed(() => {
+  const stored = props.data?.routePoints;
+  if (!stored || stored.length < 2) return [];
+  return reattachMermaidEdgeRoutePoints(stored, {
+    source: { x: props.sourceX, y: props.sourceY },
+    sourcePosition: props.sourcePosition,
+    target: { x: props.targetX, y: props.targetY },
+    targetPosition: props.targetPosition
+  });
+});
+
+const path = computed(() => {
+  const routed = buildRoundedOrthogonalPath(routePoints.value);
+  if (routed) return routed;
+  return getSmoothStepPath({
     sourceX: props.sourceX,
     sourceY: props.sourceY,
     sourcePosition: props.sourcePosition,
     targetX: props.targetX,
     targetY: props.targetY,
     targetPosition: props.targetPosition
-  })[0]
-);
+  })[0];
+});
 
-/** 自定义边不会从 Vue Flow 拿到 labelX/labelY，这里取边中点放标签。 */
-const labelPos = computed(() => ({
+/** 有 ELK 轨道时按折线路程取中点；兼容旧边时仍取起终点几何中点。 */
+const labelPos = computed(() => getPolylineMidpoint(routePoints.value) ?? ({
   x: (props.sourceX + props.targetX) / 2,
   y: (props.sourceY + props.targetY) / 2
 }));

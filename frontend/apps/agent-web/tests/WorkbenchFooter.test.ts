@@ -180,7 +180,7 @@ describe("WorkbenchFooter", () => {
     expect(wrapper2.emitted("update:markdownPreviewMode")).toEqual([["off"]]);
   });
 
-  it("copies path and sets title on copy-path click", async () => {
+  it("copies relative and absolute paths as two lines from one button", async () => {
     // mock window.isSecureContext and navigator.clipboard
     Object.defineProperty(window, "isSecureContext", {
       value: true,
@@ -199,16 +199,49 @@ describe("WorkbenchFooter", () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {
         showSave: true,
-        writePath: "src/components/WorkbenchFooter.vue"
+        writePath: "src/components/WorkbenchFooter.vue",
+        workspaceRootPath: "/workspace/project/"
       }
     });
 
-    // 点击复制路径按钮，此时按钮上应有完整的 writePath 悬浮提示
-    const copyBtn = wrapper.find(".ta-workbench-footer-copy-path");
-    expect(copyBtn.exists()).toBe(true);
-    expect(copyBtn.attributes("title")).toBe("src/components/WorkbenchFooter.vue");
-    await copyBtn.trigger("click");
-    expect(mockWriteText).toHaveBeenCalledWith("src/components/WorkbenchFooter.vue");
+    const copyButtons = wrapper.findAll(".ta-workbench-footer-copy-path");
+
+    expect(copyButtons).toHaveLength(1);
+    expect(copyButtons[0].text()).toBe("复制路径");
+    expect(copyButtons[0].attributes("title"))
+      .toBe("src/components/WorkbenchFooter.vue\n/workspace/project/src/components/WorkbenchFooter.vue");
+
+    await copyButtons[0].trigger("click");
+    expect(mockWriteText).toHaveBeenCalledOnce();
+    expect(mockWriteText)
+      .toHaveBeenCalledWith("src/components/WorkbenchFooter.vue\n/workspace/project/src/components/WorkbenchFooter.vue");
+  });
+
+  it("normalizes Windows separators when copying an absolute path", async () => {
+    Object.defineProperty(window, "isSecureContext", {
+      value: true,
+      writable: true,
+      configurable: true
+    });
+    const mockWriteText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: mockWriteText },
+      writable: true,
+      configurable: true
+    });
+
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        writePath: "src\\components\\WorkbenchFooter.vue",
+        workspaceRootPath: "C:\\workspace\\project\\"
+      }
+    });
+
+    await wrapper.find(".ta-workbench-footer-copy-path").trigger("click");
+
+    expect(mockWriteText)
+      .toHaveBeenCalledWith("src\\components\\WorkbenchFooter.vue\nC:/workspace/project/src/components/WorkbenchFooter.vue");
   });
 
   it("renders locate button when writePath is defined, and emits locate on click", async () => {
