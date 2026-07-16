@@ -1,5 +1,20 @@
 # Session Log
 
+### 2026-07-16 - 修复本地开发下 Mermaid 动态导入渲染与三方依赖加载错误
+
+- Why:
+  - 在本地开发环境下（http://127.0.0.1:3000/），渲染 Mermaid 时遇到 `Failed to fetch dynamically imported module: .../node_modules/.vite/deps/render-*.js` 报错。
+  - 这是因为 Vite 的依赖预构建机制（optimizeDeps）默认会将动态导入的 `mermaid` 及其关联模块（如 layout/render 部分）预编译为 `.vite/deps` 下的动态 chunk 文件，但在 Vite 再次触发依赖重写或热更新时，这些 chunk 文件的 hash 发生变化或旧文件被删除，导致浏览器动态加载时遇到 404 / 抓取失败。
+  - 随后，由于 `mermaid` 被排除预构建，其内部调用的 CommonJS 依赖包 `@braintree/sanitize-url` 在 Vite dev 模式下未能成功转换为 ESM，进而报错 `does not provide an export named 'sanitizeUrl'`。
+- What:
+  - 将 `mermaid` 和 `@mermaid-js/layout-elk` 排除在 Vite 的依赖预构建（optimizeDeps.exclude）之外，使其作为原生 ES 模块（ESM）在开发阶段直接由 Vite 开发服务器提供给浏览器，从而确保依赖文件路径和 hash 始终保持稳定。
+  - 同时，在 `vite.config.ts` 的 `resolve.alias` 中，将 `mermaid` 映射指向其官方自带的、自包含全部依赖的单文件 ESM 压缩版 `mermaid/dist/mermaid.esm.min.mjs`，从源头避免其 CommonJS 依赖（如 `@braintree/sanitize-url`）在 Vite 中转换失败的问题。
+- How:
+  - 在 `frontend/apps/agent-web/vite.config.ts` 中配置 `optimizeDeps.exclude: ["mermaid", "@mermaid-js/layout-elk"]`，并在 `resolve.alias` 中配置 `"mermaid": "mermaid/dist/mermaid.esm.min.mjs"`。
+  - 运行 `corepack pnpm run build` 和 `corepack pnpm test`，全量 954 个测试均 100% 绿灯通过，确认没有对现有的前端打包和测试流程造成任何负面影响。
+- Result:
+  - 彻底解决了本地开发环境下动态导入 Mermaid 引起的图表解析模块加载与三方 CommonJS 依赖项翻译失败问题。不涉及任何后端代码、API 契约、事件流或数据库配置变更。
+
 ### 2026-07-16 - 优化 Mermaid 编辑中的快捷连接箭头样式
 
 - Why:
