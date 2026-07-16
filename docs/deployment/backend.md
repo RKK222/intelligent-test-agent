@@ -430,12 +430,11 @@ docker run --rm -p 8080:8080 \
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
-`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。启用 `TEST_AGENT_MODEL_CATALOG_SOURCE=internal` 时，`ModelCatalogApplicationService` 会把企业内模型清单 seed 到 `ai_model_configs`，后续可通过改表控制模型显示、启停和默认值。
-应用启动时，`ScheduledTaskRegistry` 会同步代码注册任务，包括 `opencode-runtime.analytics-rollup`；启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRunner` 后台线程才会扫描 due task 和管理员手动触发 pending run。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；scheduler 未启用时手工启动返回冲突错误，不会写入新的 pending run。停止请求会先写入 `STOPPING`，运营分析汇总会在获取兼容数据库锁前以及 hourly、daily、水位更新等主要阶段间检查动态停止信号，最终由 runner 保存 `MANUALLY_STOPPED`。
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。`TEST_AGENT_MODEL_CATALOG_SOURCE` 仅保留历史兼容，前端模型和供应商目录始终来自用户 opencode server 的公共配置。
-应用启动时，`ScheduledTaskRegistry` 会同步代码注册任务；启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRunner` 后台线程才会扫描 due task 和管理员手动触发 pending run。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；scheduler 未启用时手工启动返回冲突错误，不会写入新的 pending run。停止请求会先写入 `STOPPING`，具体 handler 需在长循环或外部调用间隙检查 `ScheduledTaskContext.stopRequested()` / `throwIfStopRequested()` 后退出，最终由 runner 保存 `MANUALLY_STOPPED`。
-应用启动时，`ScheduledTaskRegistry` 会同步代码注册任务，包括 `scheduler.run-retention-cleanup` 和 `opencode-runtime.analytics-rollup`；启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRunner` 后台线程才会扫描 due task 和管理员手动触发 pending run。内置清理任务每天 UTC 00:00 删除超过 7 天的已结束 scheduler 运行记录，活动记录不删除。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；scheduler 未启用时手工启动返回冲突错误，不会写入新的 pending run。停止请求会先写入 `STOPPING`，运营分析汇总会在获取兼容数据库锁前以及 hourly、daily、水位更新等主要阶段间检查动态停止信号，最终由 runner 保存 `MANUALLY_STOPPED`。
-应用启动时，`ScheduledTaskRegistry` 会同步代码注册任务，包括 `scheduler.run-retention-cleanup` 和 `opencode-runtime.analytics-rollup`；scheduler 默认启用，`ScheduledTaskRunner` 后台线程会扫描 due task 和管理员手动触发 pending run。内置清理任务每天 UTC 00:00 删除超过 7 天的已结束 scheduler 运行记录，活动记录不删除。超级管理员可在系统管理的定时任务管理页查看任务状态、历史运行记录、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 运行记录发起协作式停止；显式关闭 scheduler 后手工启动返回冲突错误，不会写入新的 pending run。停止请求会先写入 `STOPPING`，运营分析汇总会在获取兼容数据库锁前以及 hourly、daily、水位更新等主要阶段间检查动态停止信号，最终由 runner 保存 `MANUALLY_STOPPED`。
+
+应用启动时，`ScheduledTaskRegistry` 会同步 `scheduler.run-retention-cleanup`、`opencode-runtime.stale-active-run-reconcile` 和 `opencode-runtime.analytics-rollup` 三项代码注册任务。scheduler 默认启用，`ScheduledTaskRunner` 后台线程会扫描 due task 和管理员手动触发的 pending run；显式关闭 scheduler 后，手工启动会返回冲突错误且不会写入新的 pending run。
+
+运行记录清理任务每天 UTC 00:00 删除超过 7 天的已结束记录，并保留所有活动记录。超级管理员可在定时任务管理页查看任务状态和运行历史、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 记录发起协作式停止。停止请求会先写入 `STOPPING`；需要协作式停止的 handler 在长循环或外部调用间隙检查 `ScheduledTaskContext.stopRequested()` / `throwIfStopRequested()`，最终由 runner 保存 `MANUALLY_STOPPED`。
 
 ## 内部模型代理与模型目录配置
 

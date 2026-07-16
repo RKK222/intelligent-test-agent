@@ -6,10 +6,13 @@
   - `main` 执行 `pull --rebase` 时停在 ShimmerDivider 双新增冲突，队列同时包含远端已吸收的旧补丁和一个夹带 214 个文件的误聚合提交；直接逐项取任一侧会重复文档、回退增强实现或覆盖主干功能。
 - What:
   - 保留远端已经增强的 ShimmerDivider、定时任务清理和字体修复，移除对应重复补丁及误聚合提交；只在最新远端 `main` 上重放“快捷图形从悬浮节点发起连线”和“菱形端口贴边”两项本地独立功能。
+  - 清理 `docs/deployment/backend.md` 中 rebase 串行保留的两版模型目录说明和四版 scheduler 说明，收敛为与当前代码一致的单一部署口径。
 - How:
   - 通过 reflog、rebase todo、提交父子关系和 `origin/main..main` 树差异确认最终本地树相对远端仅有 5 个预期文件；冲突测试同时保留空白画布取消连线选择和悬浮节点快捷连线两个场景，全程未使用强推。
+  - 以 application.yml、scheduler README 和三个 `ScheduledTaskHandler` 实现为事实源，保留默认启用、三项代码注册任务、七天清理及协作式停止语义，删除过时的内部模型 seed 和显式启用 scheduler 说明。
 - Result:
   - Mermaid 定向测试 2 个文件共 58 项通过，前端 13 个 workspace 项目全量 typecheck 通过；`main` 已按线性历史推送到 Gitee，未丢失远端功能，未修改 API、事件、数据库、环境配置、安全或兼容性契约。
+  - 后端部署文档不再包含互相矛盾的模型目录或 scheduler 启用说明；本次文档清理未修改运行代码、API、事件、数据库或环境配置。
 
 ### 2026-07-16 - 修复判断（菱形）节点连接点未贴合边框的 Bug
 
