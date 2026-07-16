@@ -451,6 +451,9 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             if (!gitWorkspaceService.isGitRepository(repoRoot)) {
                 throw publicRepositoryUninitialized(repoRoot);
             }
+            // 内部部署的 origin 含当前管理员统一认证号；共享仓库可能由其他管理员初始化，
+            // 每次联网操作前都必须刷新为本次操作人，避免“私钥正确但登录用户名仍是上一位管理员”。
+            ensurePublicRepositoryOriginReady(repoRoot, config);
             // 可选：放弃受控仓库中的已跟踪修改（不删除未跟踪文件）。
             if (discardLocalChanges && !gitWorkspaceService.isWorktreeClean(repoRoot)) {
                 gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
@@ -1141,7 +1144,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             if (!originMatched) {
                 message = "Git origin 与配置不一致";
             } else if (!clean) {
-                message = "Git 工作树存在未提交变更";
+                message = dirtyPublicRepositoryMessage(config.gitRoot());
             } else if (!configReady) {
                 status = "UNINITIALIZED";
                 message = "公共配置目录未初始化";
@@ -1230,15 +1233,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             // 消息带上具体目录，便于前端直接定位问题路径
             throw new PlatformException(ErrorCode.CONFLICT, "目录不是 Git 仓库：" + repoRoot, Map.of("path", repoRoot.toString()));
         }
-        String origin = gitWorkspaceService.originUrl(repoRoot);
-        boolean originMismatch = config != null
-                ? !config.matchesOrigin(origin)
-                : expectedOrigin != null && !expectedOrigin.isBlank() && !Objects.equals(origin, expectedOrigin);
-        if (originMismatch) {
-            throw new PlatformException(ErrorCode.CONFLICT, "Git origin 与配置不一致", Map.of("path", repoRoot.toString()));
-        }
-        if (config != null && config.internalDeployment()) {
-            gitWorkspaceService.setOriginUrl(repoRoot, config.gitUrl(), null);
+        if (config != null) {
+            ensurePublicRepositoryOriginReady(repoRoot, config);
+        } else {
+            String origin = gitWorkspaceService.originUrl(repoRoot);
+            if (expectedOrigin != null && !expectedOrigin.isBlank() && !Objects.equals(origin, expectedOrigin)) {
+                throw new PlatformException(ErrorCode.CONFLICT, "Git origin 与配置不一致", Map.of("path", repoRoot.toString()));
+            }
         }
         if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
             if (!discardLocalChanges) {
@@ -1247,6 +1248,37 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             // 只恢复 Git 已跟踪内容；未跟踪文件不删除，避免“更新”扩大为不可逆清理。
             gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
         }
+    }
+
+    /**
+     * 校验公共仓库来源，并在内部部署中把 origin 的 SSH 用户刷新为当前操作人。
+     */
+    private void ensurePublicRepositoryOriginReady(Path repoRoot, PublicConfig config) {
+        String origin = gitWorkspaceService.originUrl(repoRoot);
+        if (!config.matchesOrigin(origin)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Git origin 与配置不一致", Map.of("path", repoRoot.toString()));
+        }
+        if (config.internalDeployment()) {
+            gitWorkspaceService.setOriginUrl(repoRoot, config.gitUrl(), null);
+        }
+    }
+
+    /**
+     * 公共仓库脏状态最多展示五个真实 Git 路径，帮助管理员区分“目录未初始化”和“文件待提交”。
+     */
+    private String dirtyPublicRepositoryMessage(Path repoRoot) {
+        List<String> paths = gitWorkspaceService.parseStatusPorcelain(gitWorkspaceService.statusPorcelain(repoRoot)).stream()
+                .map(GitStatusEntry::path)
+                .filter(path -> path != null && !path.isBlank())
+                .distinct()
+                .limit(6)
+                .toList();
+        if (paths.isEmpty()) {
+            return "Git 工作树存在未提交变更";
+        }
+        boolean truncated = paths.size() > 5;
+        List<String> visiblePaths = truncated ? paths.subList(0, 5) : paths;
+        return "Git 工作树存在未提交变更：" + String.join("、", visiblePaths) + (truncated ? " 等" : "");
     }
 
     private String decryptSingleSshKey(UserId userId) {

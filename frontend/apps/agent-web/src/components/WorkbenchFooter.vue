@@ -4,6 +4,7 @@ import { ArrowLeftRight, Eye, EyeOff, Plus, Save, ServerCog, Target } from "luci
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
+import { copyTextToClipboard } from "@test-agent/ui-kit";
 
 export type PreviewMode = "off" | "full" | "split";
 
@@ -89,40 +90,11 @@ const displayFilename = computed(() => {
   return props.writePath.split("/").pop() || props.writePath;
 });
 
-function copyPath() {
+async function copyPath() {
   if (!props.writePath) return;
-  const textToCopy = props.writePath;
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(textToCopy)
-      .then(() => {
-        ElMessage.success("路径已复制到剪贴板");
-      })
-      .catch(() => {
-        fallbackCopyText(textToCopy);
-      });
+  if (await copyTextToClipboard(props.writePath)) {
+    ElMessage.success("路径已复制到剪贴板");
   } else {
-    fallbackCopyText(textToCopy);
-  }
-}
-
-function fallbackCopyText(text: string) {
-  try {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.style.position = "fixed";
-    textArea.style.left = "-999999px";
-    textArea.style.top = "-999999px";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    const successful = document.execCommand("copy");
-    document.body.removeChild(textArea);
-    if (successful) {
-      ElMessage.success("路径已复制到剪贴板");
-    } else {
-      ElMessage.error("复制路径失败，请手动复制");
-    }
-  } catch (err) {
     ElMessage.error("复制路径失败，请手动复制");
   }
 }

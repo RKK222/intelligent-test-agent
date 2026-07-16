@@ -230,6 +230,7 @@ class AgentConfigApplicationServiceTest {
         Files.writeString(root.resolve(".config/opencode/agents/review.md"), "review");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         git.worktreeClean = false;
+        git.stagedAfterAdd = " M opencode/agents/review.md";
         AgentConfigApplicationService service = service(
                 Map.of(
                         "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
@@ -244,7 +245,7 @@ class AgentConfigApplicationServiceTest {
         assertThat(status.status()).isEqualTo("CONFLICT");
         assertThat(status.initialized()).isTrue();
         assertThat(status.initializationAllowed()).isTrue();
-        assertThat(status.message()).isEqualTo("Git 工作树存在未提交变更");
+        assertThat(status.message()).isEqualTo("Git 工作树存在未提交变更：opencode/agents/review.md");
         assertThat(service.listPublicAgentFiles("agents", null))
                 .extracting(FileTreeEntryResponse::name)
                 .containsExactly("review.md");
@@ -351,6 +352,38 @@ class AgentConfigApplicationServiceTest {
         assertThat(publisher.events.get(0).payload())
                 .containsEntry("branch", "main")
                 .containsEntry("commitHash", "commit_after_update_and_push");
+    }
+
+    @Test
+    void internalPublicUpdateAndPushRefreshesOriginToCurrentAdministratorBeforeFetch() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.originUrl = "ssh://OTHER_USER@scm.example.com:29418/team/agent-config.git";
+        git.stagedAfterAdd = "";
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "scm.example.com:29418/team/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.empty(),
+                "internal");
+
+        service.updatePublicConfigAndPush(
+                "main",
+                "chore: sync",
+                "aco_internal_origin_refresh",
+                false,
+                ADMIN,
+                "trace_internal_origin_refresh");
+
+        assertThat(git.originUrl).isEqualTo("ssh://AUTH_ADMIN@scm.example.com:29418/team/agent-config.git");
+        assertThat(git.originRefreshOrder).isPositive();
+        assertThat(git.fetchOrder).isGreaterThan(git.originRefreshOrder);
     }
 
     @Test
@@ -1232,6 +1265,9 @@ class AgentConfigApplicationServiceTest {
         private Path worktreeRoot;
         private boolean worktreeClean = true;
         private String originUrl = "git@gitee.com:test/agent-config.git";
+        private int commandOrder;
+        private int originRefreshOrder;
+        private int fetchOrder;
         private String resetCommit;
         private String pulledBranch;
         private int fetchCallCount;
@@ -1278,6 +1314,12 @@ class AgentConfigApplicationServiceTest {
         }
 
         @Override
+        public void setOriginUrl(Path repoRoot, String gitUrl, String privateKey) {
+            this.originUrl = gitUrl;
+            this.originRefreshOrder = ++commandOrder;
+        }
+
+        @Override
         public String currentBranch(Path repoRoot) {
             return "main";
         }
@@ -1295,6 +1337,7 @@ class AgentConfigApplicationServiceTest {
         @Override
         public void fetch(Path repoRoot, String privateKey) {
             this.fetchCallCount += 1;
+            this.fetchOrder = ++commandOrder;
         }
 
         @Override

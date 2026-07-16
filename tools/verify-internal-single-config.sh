@@ -37,6 +37,7 @@ grep -Fxq 'TEST_AGENT_REDIS_PASSWORD=current-redis-password' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_API_TOKEN=current-api-token' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=current-manager-token' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_INTERNAL_PROXY_API_KEY=current-proxy-key' "${BACKEND_ENV}"
+grep -Fxq 'TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres' "${BACKEND_ENV}"
 test "$(grep -c '^TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT=' "${BACKEND_ENV}")" = 1
 grep -Fxq 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=current-manager-token' "${DOCKER_ENV}"

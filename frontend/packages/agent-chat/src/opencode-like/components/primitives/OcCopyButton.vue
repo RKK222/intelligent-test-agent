@@ -7,19 +7,19 @@ export type OcCopyButtonProps = {
 <script setup lang="ts">
 import { ref } from "vue";
 import { Check, Copy } from "lucide-vue-next";
+import { copyTextToClipboard } from "@test-agent/ui-kit";
 import OcIconButton from "./OcIconButton.vue";
 
 const props = defineProps<OcCopyButtonProps>();
 const copied = ref(false);
 
 async function copyValue() {
-  try {
-    await navigator.clipboard.writeText(props.value);
+  if (await copyTextToClipboard(props.value)) {
     copied.value = true;
     setTimeout(() => {
       copied.value = false;
     }, 1200);
-  } catch {
+  } else {
     copied.value = false;
   }
 }

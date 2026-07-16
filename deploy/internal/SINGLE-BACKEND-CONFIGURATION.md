@@ -1,11 +1,12 @@
 # 单后台配置脚本执行单
 
-本文只解决当前单后台现场的三个配置文件生成和生效问题：
+本文只解决当前单后台现场的三个环境文件和一份持久 RSA 私钥的生成、生效与保留问题：
 
 | 服务器 | 配置文件 | 生成方式 |
 |---|---|---|
 | `122.233.30.114` | `/data/testagent/config/backend.env` | `configure-single-deployment.sh backend` |
 | `122.233.30.114` | `/data/testagent/config/docker.env` | 同上，一次同时生成 |
+| `122.233.30.114` | `/data/testagent/config/ssh-rsa-private.key` | 首次部署时用 OpenSSL 生成，后续升级永久保留 |
 | `122.233.30.2` | `/data/testagent/config/nginx.env` | `configure-single-deployment.sh frontend` |
 
 完整部署、模型配置和验收仍见 [SINGLE-BACKEND.md](SINGLE-BACKEND.md)。
@@ -30,6 +31,18 @@ unzip -q /data/0709/test-agent-internal-release.zip \
 
 ## 2. `.114` 生成 backend.env 和 docker.env
 
+先确保持久 RSA 私钥存在；已有文件绝不能覆盖：
+
+```bash
+umask 077
+if [ ! -s /data/testagent/config/ssh-rsa-private.key ]; then
+  openssl genpkey -algorithm RSA \
+    -pkeyopt rsa_keygen_bits:3072 \
+    -out /data/testagent/config/ssh-rsa-private.key
+fi
+chmod 0600 /data/testagent/config/ssh-rsa-private.key
+```
+
 ```bash
 bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.sh \
   backend
@@ -41,6 +54,8 @@ bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.
 - Redis 密码和平台 API token（包括空值）。
 - Java/worker 共用的 manager token。
 - Java 内部模型代理 key。
+
+脚本会把 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key` 写入 `backend.env`，但不会创建、覆盖或回显该私钥。
 
 其余值按当前现场固定为：
 

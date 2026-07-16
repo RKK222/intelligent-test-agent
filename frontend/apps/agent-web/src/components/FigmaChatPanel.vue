@@ -50,7 +50,7 @@ import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
 import { MarkdownView, OpencodeTimeline, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
-import { Spinner } from '@test-agent/ui-kit'
+import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
 import type { WorkspaceRequirementReference } from './workbench-utils'
@@ -385,12 +385,12 @@ function copyText(text: string, id: string) {
 }
 
 function copyTextWithClipboard(text: string, onSuccess: () => void) {
-  if (!navigator.clipboard || !window.isSecureContext) {
-    console.warn('Clipboard API is unavailable in this browser context')
-    return
-  }
-  navigator.clipboard.writeText(text).then(onSuccess).catch((err) => {
-    console.error('Failed to copy: ', err)
+  void copyTextToClipboard(text).then((copied) => {
+    if (copied) {
+      onSuccess()
+      return
+    }
+    console.warn('Clipboard copy is unavailable in this browser context')
   })
 }
 

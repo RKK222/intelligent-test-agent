@@ -509,7 +509,6 @@ let robotDragStartClientY = 0;
 let robotDragStartX = 0;
 let robotDragStartY = 0;
 let robotDragWasEffective = false;
-let robotDragTarget: HTMLElement | null = null;
 let robotDragPreviousCursor = "";
 let robotDragPreviousUserSelect = "";
 let robotSuppressClick = false;
@@ -600,21 +599,15 @@ function toggleRobotFixed() {
 }
 
 function cleanupRobotDrag() {
-  const target = robotDragTarget;
-  const pointerId = robotDragPointerId;
-  if (!robotDragging.value && !target && pointerId === null) return;
+  if (!robotDragging.value && robotDragPointerId === null) return;
 
   robotDragging.value = false;
   robotDragPointerId = null;
-  robotDragTarget = null;
   window.removeEventListener("pointermove", onRobotPointerMove);
   window.removeEventListener("pointerup", finishRobotPointerDrag);
   window.removeEventListener("pointercancel", finishRobotPointerDrag);
   document.body.style.cursor = robotDragPreviousCursor;
   document.body.style.userSelect = robotDragPreviousUserSelect;
-  if (target && pointerId !== null && target.hasPointerCapture?.(pointerId)) {
-    target.releasePointerCapture?.(pointerId);
-  }
 }
 
 function onRobotPointerDown(event: PointerEvent) {
@@ -626,14 +619,12 @@ function onRobotPointerDown(event: PointerEvent) {
   robotDragStartX = robotX.value;
   robotDragStartY = robotY.value;
   robotDragWasEffective = false;
-  robotDragTarget = event.currentTarget as HTMLElement;
-  robotDragTarget.setPointerCapture?.(event.pointerId);
   robotDragging.value = true;
   robotDragPreviousCursor = document.body.style.cursor;
   robotDragPreviousUserSelect = document.body.style.userSelect;
   document.body.style.cursor = "grabbing";
   document.body.style.userSelect = "none";
-  // Chromium 108 企业内核的 pointer capture 兼容性不稳定，拖动期间改由 window 接收全局事件。
+  // Chromium 108 企业内核不依赖 pointer capture；拖动期间统一由 window 接收全局事件。
   window.addEventListener("pointermove", onRobotPointerMove);
   window.addEventListener("pointerup", finishRobotPointerDrag);
   window.addEventListener("pointercancel", finishRobotPointerDrag);
@@ -1933,6 +1924,7 @@ function submitJoinApp() {
       aria-describedby="figma-robot-instructions"
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       @pointerdown="onRobotPointerDown"
+      @dragstart.prevent
       @pointerenter="onRobotPointerEnter"
       @pointerleave="onRobotPointerLeave"
       @keydown="onRobotKeydown"

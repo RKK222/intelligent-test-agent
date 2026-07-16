@@ -2,6 +2,8 @@ package com.enterprise.testagent.app.config;
 
 import com.enterprise.testagent.common.git.RsaKeyService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
+import java.nio.file.Path;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,8 +17,11 @@ import org.springframework.context.annotation.Configuration;
 public class SshKeyConfig {
 
     @Bean
-    public RsaKeyService rsaKeyService() {
-        return new RsaKeyService();
+    public RsaKeyService rsaKeyService(
+            @Value("${test-agent.security.ssh-rsa-private-key-path:}") String privateKeyPath) {
+        return privateKeyPath == null || privateKeyPath.isBlank()
+                ? new RsaKeyService()
+                : new RsaKeyService(Path.of(privateKeyPath.trim()));
     }
 
     @Bean

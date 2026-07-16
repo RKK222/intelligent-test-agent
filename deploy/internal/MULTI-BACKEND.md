@@ -111,6 +111,19 @@ cp -a /data/testagent/config/backend.env \
   /data/testagent/config/backend.env.bak.$(date +%Y%m%d%H%M%S) 2>/dev/null || true
 ```
 
+两台 Java 共享数据库，必须使用同一份持久 RSA 私钥。只在受控服务器生成一次，再通过安全介质复制到 `.4` 和 `.114` 的同一路径，禁止两台分别生成：
+
+```bash
+umask 077
+openssl genpkey -algorithm RSA \
+  -pkeyopt rsa_keygen_bits:3072 \
+  -out /data/testagent/config/ssh-rsa-private.key
+chmod 0600 /data/testagent/config/ssh-rsa-private.key
+openssl pkey -in /data/testagent/config/ssh-rsa-private.key -check -noout
+```
+
+复制后两台分别执行 `sha256sum /data/testagent/config/ssh-rsa-private.key`，摘要必须完全相同。旧版本曾使用临时 RSA key 时，首次切换后现有用户需删除并重新添加一次 SSH key；后续升级永久保留该文件。
+
 后台 A `.4` 的 `/data/testagent/config/backend.env` 全文：
 
 ```dotenv
@@ -133,6 +146,7 @@ TEST_AGENT_REDIS_TIMEOUT=1s
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
 TEST_AGENT_API_TOKEN=
+TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_INTERNAL_PROXY_API_KEY=REPLACE_INTERNAL_PROXY_API_KEY
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
@@ -188,6 +202,7 @@ TEST_AGENT_REDIS_TIMEOUT=1s
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
 TEST_AGENT_API_TOKEN=
+TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_INTERNAL_PROXY_API_KEY=REPLACE_INTERNAL_PROXY_API_KEY
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal

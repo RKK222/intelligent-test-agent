@@ -125,6 +125,29 @@ describe("FigmaShell", () => {
     expect(robot.attributes("style")).toContain("top: 150px");
   });
 
+  it("drags without invoking pointer capture in the Chromium 108 compatibility path", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+    const setPointerCapture = vi.fn(() => {
+      throw new DOMException("pointer capture unavailable", "NotFoundError");
+    });
+    Object.defineProperty(robot.element, "setPointerCapture", {
+      configurable: true,
+      value: setPointerCapture,
+    });
+
+    dispatchPointer(robot.element, "pointerdown", 81, 100, 100, "mouse");
+    dispatchPointer(window, "pointermove", 81, 145, 135, "mouse");
+    dispatchPointer(window, "pointerup", 81, 145, 135, "mouse");
+    await wrapper.vm.$nextTick();
+
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 145, y: 135 }));
+  });
+
   it("clamps and persists a manually positioned robot when the viewport shrinks", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 900, y: 700 }));
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });

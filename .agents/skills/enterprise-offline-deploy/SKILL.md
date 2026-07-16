@@ -14,6 +14,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 - 企业内不使用 Docker Compose；`opencode-worker` 用 `deploy/internal/opencode-worker-docker.sh` 纯 Docker 命令管理。
 - 企业内不要使用根目录 `.env.local`、`.env.test` 作为生产配置。
 - Java 后端读取 `/data/testagent/config/backend.env`。
+- Java 的持久 SSH 混合加密私钥读取 `/data/testagent/config/ssh-rsa-private.key`，由 `backend.env` 的 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 指向；文件权限 0600，禁止打入交付包，多后台必须内容一致。
 - worker/打包配置读取 `/data/testagent/config/docker.env`，模板来自 `deploy/internal/env.example`。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与 worker 的 `TEST_AGENT_DATA_ROOT` 指向同一个宿主机目录，默认 `/data/testagent/data`。
 - 新版不再配置 `OPENCODE_MANAGER_ID`、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_LINUX_SERVER_ID`。
@@ -41,6 +42,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
     backend.env
     docker.env
     nginx.env
+    ssh-rsa-private.key
   data/
   deploy/internal/
   dist/
@@ -107,12 +109,15 @@ TEST_AGENT_REDIS_PASSWORD=
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://<前端入口>
 TEST_AGENT_API_TOKEN=
+TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-token>
 TEST_AGENT_INTERNAL_PROXY_API_KEY=<random-internal-proxy-api-key>
 
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 ```
+
+首次部署用 `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072` 生成 PKCS8 PEM，并 `chmod 0600`；已有文件升级时不得覆盖。共享数据库的所有 Java 必须使用同一份私钥。旧版本若使用过启动时临时 RSA key，首次切换到持久文件后用户需要重新添加一次个人 SSH key。
 
 ### `/data/testagent/config/docker.env`
 

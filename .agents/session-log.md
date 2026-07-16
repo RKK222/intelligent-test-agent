@@ -7100,3 +7100,19 @@ bash /tmp/test-api-after-restart.sh
   - Mermaid 定向 3 文件 67 项测试、editor typecheck、agent-web 生产构建通过；重新执行 `deploy/internal/package-release.sh --output-dir deploy/internal/dist`，并通过 SHA-256、ZIP 完整性、后端 systemd 首装/升级、前后端部署预检、单/多后台 Nginx 以及 Linux/amd64 worker 真实 OpenCode health 校验。
 - Result:
   - 新包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 `ce75096b029100ed0c4960206d683d7d4a11a70bbcf7a9d51a93cf49a795698d`；包含 Qwen3.6-27B、DeepSeek-V4-Flash-W8A8、最新 API 类及两条 2026-07-15 Flyway migration。未修改 API、事件、数据库结构、环境配置或安全凭据；生产部署前需按数据库升级规范备份数据库。
+
+### 2026-07-16 - 修复企业公共区认证与 Chromium 108 交互兼容
+
+- Why:
+  - 企业共享公共配置仓库由不同管理员操作时，内部 SSH origin 会保留上一位管理员的统一认证号，导致当前管理员即使私钥正确也在 `fetch origin` 报 `Permission denied (publickey)`；公共区状态只提示工作树脏，无法从页面定位实际文件。
+  - 企业入口使用 HTTP + Chromium 108，异步 Clipboard API 不可用；宠物拖动仍先调用不稳定的 pointer capture。另确认生产未配置持久 RSA 私钥时，Java 重启会使数据库内已有 SSH 密钥密文无法解密。
+- What:
+  - 公共配置所有远端操作前统一校验仓库来源，并在内部部署中把 origin SSH 用户刷新为当前管理员；脏状态消息最多列出五个真实 Git 路径。
+  - `ui-kit` 新增共享剪贴板函数，在 HTTP 或 Clipboard API 拒绝时回退到受控 textarea + `execCommand("copy")`；对话、路径及相关复制入口统一复用。宠物拖动只依赖 window 级 pointer 事件，不再调用 pointer capture。
+  - 企业后端新增 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`，配置后强制从持久 PKCS8 PEM 文件加载并检查 POSIX 私钥权限；单后台、多后台和安全文档补齐首次生成、升级保留及共享数据库节点使用同一密钥的要求。
+- How:
+  - 增加公共仓库 origin 刷新/脏路径、RSA 重启后跨实例解密、HTTP 复制降级和无 pointer capture 拖动回归测试；同步 workspace/common/app、前端包、HTTP API、安全及企业部署文档和单机配置脚本校验。
+  - 后端相关模块 34 + 3 项测试、三个前端包 typecheck、前端全量 923 passed / 1 skipped、agent-web 生产构建和企业单机配置生成校验通过；后端原始全量继续命中已记录的 persistence 基线 2 failures / 7 errors，`mvn clean package -Dmaven.test.skip=true` 成功。
+- Result:
+  - 使用 `.env.test` / `test` profile / JDK 25 重启 backend、opencode-manager 和 frontend 成功，health/readiness 为 UP，前端 3000 返回 200，登录 CORS 与 manager WebSocket/config update 正常。
+  - 未改变 HTTP DTO、RunEvent、数据库结构或 generated SDK；属于 Git 认证路由、浏览器兼容和 SSH 密钥安全配置变更。企业首次应用持久 RSA 文件后，历史由临时密钥加密且已无法解密的用户需要重新保存一次 SSH 私钥。

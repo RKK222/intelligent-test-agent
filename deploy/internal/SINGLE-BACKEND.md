@@ -81,6 +81,21 @@ cp -a /data/testagent/config/backend.env \
   /data/testagent/config/backend.env.bak.$(date +%Y%m%d%H%M%S) 2>/dev/null || true
 ```
 
+首次升级到持久 SSH 加密密钥时，在 `.114` 生成一次并永久备份；已有文件绝不能覆盖：
+
+```bash
+umask 077
+if [ ! -s /data/testagent/config/ssh-rsa-private.key ]; then
+  openssl genpkey -algorithm RSA \
+    -pkeyopt rsa_keygen_bits:3072 \
+    -out /data/testagent/config/ssh-rsa-private.key
+fi
+chmod 0600 /data/testagent/config/ssh-rsa-private.key
+openssl pkey -in /data/testagent/config/ssh-rsa-private.key -check -noout
+```
+
+旧版本曾使用启动时临时 RSA key；部署持久文件并重启后，旧密文无法迁移，现有用户需要在“个人设置 → SSH key”删除并重新添加一次。此后升级必须一直保留同一私钥文件。
+
 ```dotenv
 SPRING_PROFILES_ACTIVE=prod
 SERVER_PORT=8080
@@ -101,6 +116,7 @@ TEST_AGENT_REDIS_TIMEOUT=1s
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
 TEST_AGENT_API_TOKEN=
+TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_INTERNAL_PROXY_API_KEY=REPLACE_INTERNAL_PROXY_API_KEY
@@ -139,6 +155,7 @@ TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 
 - `TEST_AGENT_SERVER_ADVERTISED_HOST` 必须是 worker 和其他服务器可访问的真实地址，不能写 `127.0.0.1`。
 - `TEST_AGENT_LINUX_SERVER_ID` 是服务器长期稳定身份，升级时不得改变。
+- `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 指向权限 0600 的持久文件，升级 JAR 时不得删除、覆盖或重新生成。
 - 企业模型供应商地址和上游 token 在“内部模型供应商”页面维护，不写入 `backend.env` 或 `docker.env`。
 
 保存后先确认没有遗留占位符：
@@ -384,5 +401,7 @@ ss -lntp | grep 19070
 | 模型连接超时 | 必须从 Java 宿主机检查 `ai-code.sdc.enterprise:9070`；OpenCode 的 `baseURL` 应是同节点 Java `:8080`，不能直接写 9070，也不能用其他容器的 curl 代替 Java 宿主机检查。 |
 | Java 调用卡住或原生输出为空 | 确认部署的是包含 SSE 修复的新 JAR；日志中不应出现重复 `data:data:`，首事件最长 30 秒、相邻事件空闲最长 120 秒。直接绕过 Java 能通不能证明 Java SSE 代理正常。 |
 | 用户初始化失败 | 在运行管理检查 Java、manager、容器连接和端口池；查看用户端口日志。 |
+| 公共区显示 `initialized=true/status=CONFLICT` | 这表示目录已经初始化但 Git 有未提交内容，不是磁盘文件缺失；先执行 `git -C /data/testagent/data/agent-opencode/.config status --short`，新版状态 message 会直接列出最多五个待提交路径。 |
+| 公共区 fetch/push 报 `Permission denied (publickey)` | 先确认当前登录管理员配置的唯一 SSH key 与其统一认证号在远端匹配。新版会在 fetch 前把共享仓库 origin 刷新为当前管理员；升级前可用 `git -C /data/testagent/data/agent-opencode/.config remote -v` 检查是否仍是上一位管理员用户名，不要改用服务器默认 SSH key。 |
 
 回滚时恢复旧 JAR、`backend/lib/`、programs 和 worker 镜像，再按“Java → 身份文件 → worker”重启。不要删除 `/data/testagent/data`。
