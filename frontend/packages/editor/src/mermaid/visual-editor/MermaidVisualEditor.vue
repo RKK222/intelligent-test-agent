@@ -18,9 +18,11 @@ import {
   type MermaidNodeType,
   type MermaidPosition
 } from "../model";
+import { MERMAID_NODE_SHAPES } from "../node-shapes";
 import MermaidFlowNode from "./MermaidFlowNode.vue";
 import MermaidFlowEdge from "./MermaidFlowEdge.vue";
-import { findEdgePort, oppositePosition } from "./node-port-layout";
+import MermaidNodeShape from "./MermaidNodeShape.vue";
+import { findEdgePort, oppositePosition, remapMermaidNodeEdgePorts } from "./node-port-layout";
 import {
   useMermaidConnectionDrag,
   type MermaidConnectionStart
@@ -37,13 +39,11 @@ import {
 const props = defineProps<{ modelValue: MermaidGraph }>();
 const emit = defineEmits<{ "update:modelValue": [graph: MermaidGraph] }>();
 
-const nodeTypes: ReadonlyArray<{ type: MermaidNodeType; label: string }> = [
-  { type: "rectangle", label: "矩形" },
-  { type: "rounded", label: "圆角" },
-  { type: "stadium", label: "胶囊" },
-  { type: "diamond", label: "判断" },
-  { type: "circle", label: "圆形" }
-];
+const nodeTypes = MERMAID_NODE_SHAPES;
+const nodeGroups = [
+  { key: "flowchart", label: "流程图", items: nodeTypes.filter((item) => item.group === "flowchart") },
+  { key: "document", label: "文档与显示", items: nodeTypes.filter((item) => item.group === "document") }
+] as const;
 const nodeDragMime = "application/x-test-agent-mermaid-node";
 const vueFlowRef = ref<{ screenToFlowCoordinate: (position: MermaidPosition) => MermaidPosition }>();
 const canvasRef = ref<HTMLElement>();
@@ -208,7 +208,11 @@ function updateSelectedNode(patch: Partial<Pick<MermaidNode, "text" | "type">>) 
   if (!selectedNodeId.value) return;
   updateGraph((draft) => {
     const node = draft.nodes.find((item) => item.id === selectedNodeId.value);
-    if (node) Object.assign(node, patch);
+    if (!node) return;
+    if (patch.type && patch.type !== node.type) {
+      remapMermaidNodeEdgePorts(draft, node.id, node.type, patch.type);
+    }
+    Object.assign(node, patch);
   });
 }
 
@@ -255,6 +259,10 @@ function createNode(type: MermaidNodeType, position = getDefaultNodePosition()) 
 
 function isMermaidNodeType(value: string): value is MermaidNodeType {
   return nodeTypes.some((item) => item.type === value);
+}
+
+function getAddNodeAriaLabel(label: string): string {
+  return `添加${label}${label.endsWith("节点") ? "" : "节点"}`;
 }
 
 function onPaletteDragStart(event: DragEvent, type: MermaidNodeType) {
@@ -422,21 +430,25 @@ function onEdgesChange(changes: EdgeChange[]) {
         <section class="ta-mermaid-palette">
           <h3>节点类型</h3>
           <p class="ta-mermaid-palette__hint">拖到画布创建节点，也可点击添加。</p>
-          <div class="ta-mermaid-palette__grid">
-            <button
-              v-for="item in nodeTypes"
-              :key="item.type"
-              type="button"
-              class="ta-mermaid-palette__item"
-              :aria-label="`添加${item.label}节点`"
-              draggable="true"
-              @dragstart="onPaletteDragStart($event, item.type)"
-              @click="createNode(item.type)"
-            >
-              <span :class="['ta-mermaid-palette__shape', `is-${item.type}`]" aria-hidden="true">
-                <span class="ta-mermaid-palette__label">{{ item.label }}</span>
-              </span>
-            </button>
+          <div v-for="group in nodeGroups" :key="group.key" class="ta-mermaid-palette__group">
+            <h4>{{ group.label }}</h4>
+            <div class="ta-mermaid-palette__grid">
+              <button
+                v-for="item in group.items"
+                :key="item.type"
+                type="button"
+                class="ta-mermaid-palette__item"
+                :aria-label="getAddNodeAriaLabel(item.label)"
+                draggable="true"
+                @dragstart="onPaletteDragStart($event, item.type)"
+                @click="createNode(item.type)"
+              >
+                <span class="ta-mermaid-palette__preview">
+                  <MermaidNodeShape class="ta-mermaid-palette__shape" :type="item.type" />
+                  <span class="ta-mermaid-palette__label">{{ item.label }}</span>
+                </span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -454,11 +466,7 @@ function onEdgesChange(changes: EdgeChange[]) {
             <label>
               <span>节点类型</span>
               <select aria-label="节点类型" :value="selectedNode.type" @change="updateSelectedNode({ type: ($event.target as HTMLSelectElement).value as MermaidNodeType })">
-                <option value="rectangle">矩形</option>
-                <option value="rounded">圆角</option>
-                <option value="stadium">胶囊</option>
-                <option value="diamond">判断</option>
-                <option value="circle">圆形</option>
+                <option v-for="item in nodeTypes" :key="item.type" :value="item.type">{{ item.label }}</option>
               </select>
             </label>
             <button type="button" class="is-danger" @click="deleteSelectedNode">删除节点</button>
@@ -527,30 +535,23 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-inspector section { padding: 13px; border-bottom: 1px solid var(--ta-border, #e2e8f0); }
 .ta-mermaid-inspector h3 { margin: 0 0 10px; color: var(--ta-ink, #172033); font-size: 12px; font-weight: 700; }
 .ta-mermaid-palette__hint { margin: -4px 0 10px; color: var(--ta-muted, #64748b); font-size: 10px; line-height: 1.45; }
+.ta-mermaid-palette__group + .ta-mermaid-palette__group { margin-top: 12px; }
+.ta-mermaid-palette__group h4 { margin: 0 0 6px; color: var(--ta-muted, #64748b); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; }
 .ta-mermaid-palette__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.ta-mermaid-inspector button.ta-mermaid-palette__item { display: flex; align-items: center; justify-content: center; min-height: 52px; padding: 4px; color: var(--ta-border-strong, #94a3b8); }
+.ta-mermaid-inspector button.ta-mermaid-palette__item { display: flex; min-width: 0; min-height: 52px; padding: 4px; align-items: center; justify-content: center; color: var(--ta-border-strong, #94a3b8); }
 .ta-mermaid-inspector button.ta-mermaid-palette__item:hover { color: var(--ta-ink, #172033); }
-.ta-mermaid-palette__shape { display: inline-flex; align-items: center; justify-content: center; width: 88px; height: 32px; border: 1.5px solid currentColor; border-radius: 2px; background: var(--ta-surface, #fff); font-size: 11px; pointer-events: none; }
-.ta-mermaid-palette__shape.is-rounded { border-radius: 8px; }
-.ta-mermaid-palette__shape.is-stadium { border-radius: 999px; }
-.ta-mermaid-palette__shape.is-diamond {
-  position: relative;
-  width: 88px;
-  height: 44px;
-  border: 0;
-  background: transparent;
-}
-.ta-mermaid-palette__shape.is-diamond::before,
-.ta-mermaid-palette__shape.is-diamond::after {
-  position: absolute;
-  content: "";
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-}
-.ta-mermaid-palette__shape.is-diamond::before { inset: 0; background: currentColor; }
-.ta-mermaid-palette__shape.is-diamond::after { inset: 1.5px; background: var(--ta-surface, #fff); }
-.ta-mermaid-palette__shape.is-diamond .ta-mermaid-palette__label { position: relative; z-index: 1; }
-.ta-mermaid-palette__shape.is-circle { width: 44px; height: 44px; border-radius: 50%; }
-.ta-mermaid-palette__label { color: var(--ta-muted, #64748b); transition: color 0.15s ease; }
+.ta-mermaid-palette__preview { position: relative; display: grid; width: 88px; height: 44px; place-items: center; pointer-events: none; }
+.ta-mermaid-palette__shape { position: absolute; left: 0; top: 6px; width: 88px; height: 32px; color: currentColor; }
+.ta-mermaid-palette__shape[data-mermaid-shape="database"],
+.ta-mermaid-palette__shape[data-mermaid-shape="doc"],
+.ta-mermaid-palette__shape[data-mermaid-shape="docs"] { top: 2px; height: 40px; }
+.ta-mermaid-palette__shape[data-mermaid-shape="diamond"],
+.ta-mermaid-palette__shape[data-mermaid-shape="hexagon"],
+.ta-mermaid-palette__shape[data-mermaid-shape="parallelogram"],
+.ta-mermaid-palette__shape[data-mermaid-shape="trapezoid"] { top: 0; height: 44px; }
+.ta-mermaid-palette__shape[data-mermaid-shape="circle"],
+.ta-mermaid-palette__shape[data-mermaid-shape="double-circle"] { left: 22px; top: 0; width: 44px; height: 44px; }
+.ta-mermaid-palette__label { position: relative; z-index: 1; overflow: hidden; max-width: 78px; color: var(--ta-muted, #64748b); font-size: 10px; line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; transition: color 0.15s ease; }
 .ta-mermaid-inspector button.ta-mermaid-palette__item:hover .ta-mermaid-palette__label { color: var(--ta-ink, #172033); }
 .ta-mermaid-node-properties { min-height: 132px; }
 .ta-mermaid-edge-properties { min-height: 132px; }

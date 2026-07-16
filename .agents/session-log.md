@@ -136,6 +136,20 @@
 - Result:
   - 最新 `test-agent-internal-release.zip` 为 207 MB，SHA-256 `f61c9760de34dd4b949b2c4d88c17f9b57b8b9a6923b9a5c2d6e51988bf85a47`；后端 health/readiness 为 `UP`，前端/CORS 为 200，manager WebSocket/config update 正常，日志确认从 classpath 加载 RSA 私钥。
   - 企业更新时 Java 必须重启；前端必须替换静态文件但只需 reload Nginx；worker 与既有用户 OpenCode 无需重启，可在后台部署时使用 `--skip-worker`。
+### 2026-07-16 - 扩展 Mermaid Flowchart 十四类节点
+
+- Why:
+  - 用户要求按指定中文名称补齐 14 类 Flowchart 节点，采用轮廓分配端口与 B 型双列快捷建连菜单，并将可视化应用结果统一为 Mermaid 现代节点语法。
+- What:
+  - 新增唯一节点目录和共享 SVG 轮廓，统一类型、分组、现代短名、尺寸与 8/12 个端口；画布、图形库、快捷菜单和 ELK 复用同一配置。
+  - Parser 兼容 11 类旧语法及 14 类现代语法，保守保留未知形状、额外属性、损坏语句和无法无损接管的 YAML 标量；serializer 稳定输出 `ID@{ shape: <短名>, label: "<文本>" }`。
+  - 换形时按轮廓最近位置迁移端口并维持自环两端不同；快捷菜单改为屏幕空间 Teleport 浮层，支持视口翻转、低缩放可读、悬浮关闭时序和键盘四向入口。
+- How:
+  - TDD 覆盖 14 类解析/序列化、官方 Mermaid 11.16 parser、标签转义与 YAML 边界、未知语句隔离、SVG/尺寸/分组、端口轮廓、换形、自环、ELK 路由、1 MiB 紧凑 metadata 线性扫描及快捷菜单交互。
+  - 定向 Vitest 7 个文件 207 项通过；全量 `lint`、`typecheck`、`test`（1086 passed / 1 skipped）和 `build` 均通过，构建仅保留既有大 chunk 警告；只读复审无 Critical、Important 或 Minor 问题。
+- Result:
+  - Flowchart 编辑器完整支持约定的 14 类节点并保持旧内容兼容、未知内容无损和现代语法稳定往返；editor 包 README、包说明与前端总览已同步。
+  - 不涉及后端 API、RunEvent、数据库、依赖、环境配置或安全契约；1 MiB 扫描性能保持线性，未发现未完成事项。
 
 ### 2026-07-16 - 恢复企业内部域名原始标识
 

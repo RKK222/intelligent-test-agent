@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, type CSSProperties } from "vue";
+import { computed, onBeforeUnmount, ref, type CSSProperties } from "vue";
 import { Handle, Position } from "@vue-flow/core";
 import {
   MERMAID_SOURCE_HIT_RADIUS,
@@ -7,10 +7,12 @@ import {
   type MermaidConnectionPortGeometry
 } from "./mermaid-connection-geometry";
 import { findEdgePort, getMermaidNodePorts } from "./node-port-layout";
+import MermaidNodeShape from "./MermaidNodeShape.vue";
 import type { MermaidConnectionStart } from "./use-mermaid-connection-drag";
 import type { MermaidFlowNodeData } from "./vue-flow-adapter";
 
 import type { MermaidNodeType } from "../model";
+import { getMermaidNodeSize, MERMAID_NODE_SHAPES } from "../node-shapes";
 
 const props = defineProps<{
   id: string;
@@ -26,16 +28,27 @@ const emit = defineEmits<{
   quickConnect: [payload: { nodeId: string; portId: string; position: Position; shapeType: MermaidNodeType }];
 }>();
 
-const quickShapes: ReadonlyArray<{ type: MermaidNodeType; label: string }> = [
-  { type: "rectangle", label: "矩形" },
-  { type: "rounded", label: "圆角" },
-  { type: "stadium", label: "胶囊" },
-  { type: "diamond", label: "判断" },
-  { type: "circle", label: "圆形" }
-];
+const quickShapes = MERMAID_NODE_SHAPES;
+
+/** 节点真实尺寸直接使用领域目录，与 ELK 的包围盒计算保持一致。 */
+const nodeStyle = computed<CSSProperties>(() => {
+  const size = getMermaidNodeSize({ type: props.data.nodeType, text: props.data.text });
+  return { width: `${size.width}px`, height: `${size.height}px` };
+});
 
 /** 鼠标悬浮在节点上时才显示四向快捷箭头，与是否选中无关；离开后隐藏。 */
 const hovered = ref(false);
+const nodeHovered = ref(false);
+const nodeFocused = ref(false);
+const activeQuickArrow = ref<{ dir: Position; portId: string }>();
+const quickMenuPlacement = ref<Position>(Position.Bottom);
+const quickMenuStyle = ref<CSSProperties>({ position: "fixed" });
+let quickMenuCloseTimer: ReturnType<typeof setTimeout> | undefined;
+
+const QUICK_MENU_WIDTH = 248;
+const QUICK_MENU_HEIGHT = 276;
+const QUICK_MENU_GAP = 8;
+const QUICK_MENU_VIEWPORT_MARGIN = 8;
 
 type FlowPort = {
   id: string;
@@ -59,12 +72,122 @@ const quickArrowDirs = computed(() => {
   const fallback = allPorts.value[0]?.id ?? "";
   const portOnEdge = (edge: Position) => findEdgePort(nodeType, edge)?.handleId ?? fallback;
   return [
-    { dir: Position.Top, portId: portOnEdge(Position.Top), style: { left: "50%", top: "0%" } },
-    { dir: Position.Bottom, portId: portOnEdge(Position.Bottom), style: { left: "50%", top: "100%" } },
-    { dir: Position.Left, portId: portOnEdge(Position.Left), style: { left: "0%", top: "50%" } },
-    { dir: Position.Right, portId: portOnEdge(Position.Right), style: { left: "100%", top: "50%" } }
+    { dir: Position.Top, portId: portOnEdge(Position.Top), ariaLabel: "上方快捷建连", style: { left: "50%", top: "0%" } },
+    { dir: Position.Bottom, portId: portOnEdge(Position.Bottom), ariaLabel: "下方快捷建连", style: { left: "50%", top: "100%" } },
+    { dir: Position.Left, portId: portOnEdge(Position.Left), ariaLabel: "左侧快捷建连", style: { left: "0%", top: "50%" } },
+    { dir: Position.Right, portId: portOnEdge(Position.Right), ariaLabel: "右侧快捷建连", style: { left: "100%", top: "50%" } }
   ];
 });
+
+function clearQuickMenuCloseTimer() {
+  if (quickMenuCloseTimer !== undefined) {
+    clearTimeout(quickMenuCloseTimer);
+    quickMenuCloseTimer = undefined;
+  }
+}
+
+function keepQuickConnectorsOpen() {
+  clearQuickMenuCloseTimer();
+  hovered.value = true;
+}
+
+function onNodeMouseEnter() {
+  nodeHovered.value = true;
+  keepQuickConnectorsOpen();
+}
+
+function onNodeMouseLeave() {
+  nodeHovered.value = false;
+  scheduleQuickConnectorsClose();
+}
+
+function onNodeFocusIn() {
+  nodeFocused.value = true;
+  keepQuickConnectorsOpen();
+}
+
+function onNodeFocusOut(event: FocusEvent) {
+  const root = event.currentTarget as HTMLElement;
+  if (event.relatedTarget instanceof Node && root.contains(event.relatedTarget)) return;
+  nodeFocused.value = false;
+  scheduleQuickConnectorsClose();
+}
+
+/** 延迟关闭为 Teleport 浮层与箭头之间预留鼠标跨越间隙。 */
+function scheduleQuickConnectorsClose() {
+  clearQuickMenuCloseTimer();
+  if (!activeQuickArrow.value) {
+    if (!nodeHovered.value && !nodeFocused.value) hovered.value = false;
+    return;
+  }
+  quickMenuCloseTimer = setTimeout(() => {
+    activeQuickArrow.value = undefined;
+    if (!nodeHovered.value && !nodeFocused.value) hovered.value = false;
+    quickMenuCloseTimer = undefined;
+  }, 160);
+}
+
+function oppositeQuickMenuPlacement(position: Position): Position {
+  if (position === Position.Top) return Position.Bottom;
+  if (position === Position.Bottom) return Position.Top;
+  if (position === Position.Left) return Position.Right;
+  return Position.Left;
+}
+
+/**
+ * 菜单挂到 body 并使用屏幕坐标定位，使其不受 Vue Flow 缩放影响；首选箭头方向，
+ * 空间不足时翻到对侧，最后夹在视口安全边距内，避免四周节点的选项被裁剪。
+ */
+function positionQuickMenu(anchor: DOMRect, preferred: Position) {
+  const viewportWidth = Math.max(window.innerWidth, QUICK_MENU_VIEWPORT_MARGIN * 2 + 1);
+  const viewportHeight = Math.max(window.innerHeight, QUICK_MENU_VIEWPORT_MARGIN * 2 + 1);
+  const menuWidth = Math.min(QUICK_MENU_WIDTH, viewportWidth - QUICK_MENU_VIEWPORT_MARGIN * 2);
+  const menuHeight = Math.min(QUICK_MENU_HEIGHT, viewportHeight - QUICK_MENU_VIEWPORT_MARGIN * 2);
+  const fits = (placement: Position) => {
+    if (placement === Position.Top) {
+      return anchor.top - QUICK_MENU_GAP - menuHeight >= QUICK_MENU_VIEWPORT_MARGIN;
+    }
+    if (placement === Position.Bottom) {
+      return anchor.bottom + QUICK_MENU_GAP + menuHeight <= viewportHeight - QUICK_MENU_VIEWPORT_MARGIN;
+    }
+    if (placement === Position.Left) {
+      return anchor.left - QUICK_MENU_GAP - menuWidth >= QUICK_MENU_VIEWPORT_MARGIN;
+    }
+    return anchor.right + QUICK_MENU_GAP + menuWidth <= viewportWidth - QUICK_MENU_VIEWPORT_MARGIN;
+  };
+
+  const opposite = oppositeQuickMenuPlacement(preferred);
+  const placement = fits(preferred) || !fits(opposite) ? preferred : opposite;
+  let left = anchor.left + anchor.width / 2 - menuWidth / 2;
+  let top = anchor.top + anchor.height / 2 - menuHeight / 2;
+  if (placement === Position.Top) top = anchor.top - QUICK_MENU_GAP - menuHeight;
+  if (placement === Position.Bottom) top = anchor.bottom + QUICK_MENU_GAP;
+  if (placement === Position.Left) left = anchor.left - QUICK_MENU_GAP - menuWidth;
+  if (placement === Position.Right) left = anchor.right + QUICK_MENU_GAP;
+  left = Math.min(Math.max(left, QUICK_MENU_VIEWPORT_MARGIN), viewportWidth - menuWidth - QUICK_MENU_VIEWPORT_MARGIN);
+  top = Math.min(Math.max(top, QUICK_MENU_VIEWPORT_MARGIN), viewportHeight - menuHeight - QUICK_MENU_VIEWPORT_MARGIN);
+
+  quickMenuPlacement.value = placement;
+  quickMenuStyle.value = {
+    position: "fixed",
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`
+  };
+}
+
+function openQuickMenu(event: MouseEvent | FocusEvent, arrow: { dir: Position; portId: string }) {
+  keepQuickConnectorsOpen();
+  activeQuickArrow.value = arrow;
+  positionQuickMenu((event.currentTarget as HTMLElement).getBoundingClientRect(), arrow.dir);
+}
+
+function emitQuickConnect(shapeType: MermaidNodeType) {
+  const arrow = activeQuickArrow.value;
+  if (!arrow) return;
+  emit("quickConnect", { nodeId: props.id, portId: arrow.portId, position: arrow.dir, shapeType });
+}
+
+onBeforeUnmount(clearQuickMenuCloseTimer);
 
 function portClasses(portId: string) {
   return {
@@ -123,6 +246,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
 <template>
   <div
     :data-mermaid-node-id="id"
+    :aria-label="`${id}：${data.text}`"
+    tabindex="0"
     :class="[
       'ta-mermaid-flow-node',
       `is-${data.nodeType}`,
@@ -132,11 +257,21 @@ function preventNodeDragFromPort(event: MouseEvent) {
         'is-connection-target': isConnectionTarget
       }
     ]"
+    :style="nodeStyle"
     @pointerdown="onPointerDown"
     @mousedown.capture="preventNodeDragFromPort"
-    @mouseenter="hovered = true"
-    @mouseleave="hovered = false"
+    @mouseenter="onNodeMouseEnter"
+    @mouseleave="onNodeMouseLeave"
+    @focus="onNodeFocusIn"
+    @blur="onNodeFocusOut"
+    @focusin="onNodeFocusIn"
+    @focusout="onNodeFocusOut"
   >
+    <MermaidNodeShape
+      class="ta-mermaid-flow-node__shape"
+      :type="data.nodeType"
+      :selected="selected"
+    />
     <Handle
       v-for="port in allPorts"
       :id="port.id"
@@ -163,24 +298,47 @@ function preventNodeDragFromPort(event: MouseEvent) {
         :style="arrow.style"
       >
         <!-- 阻止 pointerdown 冒泡到根元素，避免点击箭头/菜单时误触发端口连线拖拽（其 preventDefault 会吞掉 click） -->
-        <div class="ta-mermaid-quick-arrow" aria-label="快捷建连" @pointerdown.stop>
+        <button
+          type="button"
+          class="ta-mermaid-quick-arrow"
+          :aria-label="arrow.ariaLabel"
+          @mouseenter="openQuickMenu($event, arrow)"
+          @mouseleave="scheduleQuickConnectorsClose"
+          @focus="openQuickMenu($event, arrow)"
+          @blur="scheduleQuickConnectorsClose"
+          @pointerdown.stop
+        >
           <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">
             <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none" />
           </svg>
-          <div class="ta-mermaid-quick-menu">
-            <button
-              v-for="shape in quickShapes"
-              :key="shape.type"
-              type="button"
-              :title="`在此方向添加${shape.label}`"
-              @click.stop="emit('quickConnect', { nodeId: props.id, portId: arrow.portId, position: arrow.dir, shapeType: shape.type })"
-            >
-              <span :class="['ta-quick-menu-shape', `is-${shape.type}`]"></span>
-            </button>
-          </div>
-        </div>
+        </button>
       </div>
     </template>
+
+    <Teleport to="body">
+      <div
+        v-if="activeQuickArrow"
+        class="ta-mermaid-quick-menu is-two-column is-screen-overlay"
+        :class="`is-placement-${quickMenuPlacement}`"
+        :style="quickMenuStyle"
+        @mouseenter="keepQuickConnectorsOpen"
+        @mouseleave="scheduleQuickConnectorsClose"
+        @focusin="keepQuickConnectorsOpen"
+        @focusout="scheduleQuickConnectorsClose"
+        @pointerdown.stop
+      >
+        <button
+          v-for="shape in quickShapes"
+          :key="shape.type"
+          type="button"
+          :title="`在此方向添加${shape.label}`"
+          @click.stop="emitQuickConnect(shape.type)"
+        >
+          <MermaidNodeShape class="ta-quick-menu-shape" :type="shape.type" thumbnail />
+          <span class="ta-quick-menu-label">{{ shape.label }}</span>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -188,73 +346,38 @@ function preventNodeDragFromPort(event: MouseEvent) {
 .ta-mermaid-flow-node {
   position: relative;
   box-sizing: border-box;
-  min-width: 118px;
-  max-width: 190px;
-  padding: 10px 14px;
-  border: 1px solid var(--ta-border-strong, #94a3b8);
-  border-radius: 5px;
-  background: var(--ta-surface, #fff);
+  display: flex;
+  min-width: 0;
+  padding: 9px 14px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  border: 0;
+  background: transparent;
   color: var(--ta-ink, #172033);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
   text-align: center;
   cursor: move;
 }
 
-.ta-mermaid-flow-node.is-selected {
-  border-color: var(--primary, #4f46e5);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #4f46e5) 20%, transparent);
-}
-
-.ta-mermaid-flow-node.is-rounded { border-radius: 999px; }
-.ta-mermaid-flow-node.is-stadium { border-radius: 999px; padding-inline: 24px; }
-.ta-mermaid-flow-node.is-circle { min-width: 92px; min-height: 92px; border-radius: 999px; display: grid; place-content: center; }
-.ta-mermaid-flow-node.is-diamond {
-  display: flex;
-  width: 150px;
-  height: 88px;
-  min-width: 150px;
-  min-height: 88px;
-  padding: 20px 38px;
-  flex-direction: column;
-  justify-content: center;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  isolation: isolate;
-}
-
-/* 根元素保持水平，两层多边形分别承担边框和背景，避免文字与端口随菱形旋转。 */
-.ta-mermaid-flow-node.is-diamond::before,
-.ta-mermaid-flow-node.is-diamond::after {
+.ta-mermaid-flow-node__shape {
   position: absolute;
-  content: "";
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  pointer-events: none;
-}
-
-.ta-mermaid-flow-node.is-diamond::before {
-  z-index: -2;
+  z-index: 0;
   inset: 0;
-  background: var(--ta-border-strong, #94a3b8);
-  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.12));
+  width: 100%;
+  height: 100%;
 }
 
-.ta-mermaid-flow-node.is-diamond::after {
-  z-index: -1;
-  inset: 1.5px;
-  background: var(--ta-surface, #fff);
-}
-
-.ta-mermaid-flow-node.is-diamond.is-selected {
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.ta-mermaid-flow-node.is-diamond.is-selected::before {
-  background: var(--primary, #4f46e5);
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary, #4f46e5) 30%, transparent));
-}
+.ta-mermaid-flow-node.is-stadium,
+.ta-mermaid-flow-node.is-subroutine,
+.ta-mermaid-flow-node.is-database,
+.ta-mermaid-flow-node.is-doc,
+.ta-mermaid-flow-node.is-docs { padding-inline: 24px; }
+.ta-mermaid-flow-node.is-diamond,
+.ta-mermaid-flow-node.is-hexagon,
+.ta-mermaid-flow-node.is-parallelogram,
+.ta-mermaid-flow-node.is-trapezoid { padding-inline: 36px; }
+.ta-mermaid-flow-node.is-circle,
+.ta-mermaid-flow-node.is-double-circle { padding-inline: 15px; }
 
 .ta-mermaid-flow-node :deep(.vue-flow__handle) {
   position: absolute !important;
@@ -307,6 +430,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
 }
 
 .ta-mermaid-flow-node__id {
+  position: relative;
+  z-index: 1;
   margin-bottom: 3px;
   color: var(--ta-muted, #64748b);
   font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -315,6 +440,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
 }
 
 .ta-mermaid-flow-node__label {
+  position: relative;
+  z-index: 1;
   overflow: hidden;
   font-size: 12px;
   font-weight: 600;
@@ -395,6 +522,8 @@ function preventNodeDragFromPort(event: MouseEvent) {
   justify-content: center;
   width: 20px;
   height: 20px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
   background: color-mix(in srgb, #2563eb 15%, #fff);
   color: #2563eb;
@@ -421,123 +550,66 @@ function preventNodeDragFromPort(event: MouseEvent) {
 
 /* 快捷可用形状面板 */
 .ta-mermaid-quick-menu {
-  position: absolute;
-  z-index: 30;
-  display: flex;
-  gap: 5px;
-  padding: 5px;
+  z-index: 2000;
+  box-sizing: border-box;
+  display: grid;
+  width: min(248px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 6px;
   border: 1px solid var(--ta-border, #e2e8f0);
   border-radius: 6px;
   background: var(--ta-surface, #fff);
   box-shadow: 0 10px 20px -3px rgba(15, 23, 42, 0.12), 0 4px 6px -2px rgba(15, 23, 42, 0.08);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 150ms ease, transform 150ms ease;
-}
-
-/* 根据位置决定图形面板的横纵排列以及偏移方向 */
-.ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-menu {
-  flex-direction: column;
-  left: 100%;
-  top: 50%;
-  transform: translateY(-50%) scale(0.9);
-  margin-left: 8px;
-}
-.ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-menu {
-  flex-direction: column;
-  right: 100%;
-  top: 50%;
-  transform: translateY(-50%) scale(0.9);
-  margin-right: 8px;
-}
-.ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-menu {
-  flex-direction: row;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%) scale(0.9);
-  margin-bottom: 8px;
-}
-.ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-menu {
-  flex-direction: row;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%) scale(0.9);
-  margin-top: 8px;
-}
-
-/* 悬停在大箭头上时展开图形面板 */
-.ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
-  opacity: 1;
+  overflow-y: auto;
   pointer-events: auto;
-}
-.ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu,
-.ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
-  transform: translateY(-50%) scale(1);
-}
-.ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu,
-.ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-arrow:hover .ta-mermaid-quick-menu {
-  transform: translateX(-50%) scale(1);
 }
 
 /* 图形选择按钮 */
 .ta-mermaid-quick-menu button {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
+  min-width: 0;
+  height: 34px;
+  gap: 7px;
+  justify-content: flex-start;
   border: 1px solid var(--ta-border, #e2e8f0);
   border-radius: 4px;
   background: var(--ta-surface, #fff);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
-  padding: 0;
+  padding: 4px 7px;
+  color: var(--ta-ink, #172033);
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 .ta-mermaid-quick-menu button:hover {
   border-color: var(--primary, #4f46e5);
   background: color-mix(in srgb, var(--primary, #4f46e5) 8%, transparent);
 }
 
-/* 形状缩略预览图 */
 .ta-quick-menu-shape {
-  display: block;
-  width: 14px;
-  height: 8px;
-  border: 1.5px solid currentColor;
-  border-radius: 1px;
+  width: 28px;
+  height: 18px;
+  flex: 0 0 28px;
   color: var(--ta-muted, #94a3b8);
-  box-sizing: border-box;
+}
+.ta-quick-menu-shape[data-mermaid-shape="circle"],
+.ta-quick-menu-shape[data-mermaid-shape="double-circle"] {
+  width: 18px;
+  height: 18px;
+  margin-inline: 5px;
+  flex-basis: 18px;
 }
 .ta-mermaid-quick-menu button:hover .ta-quick-menu-shape {
   color: var(--primary, #4f46e5);
 }
-.ta-quick-menu-shape.is-rounded {
-  border-radius: 3px;
-}
-.ta-quick-menu-shape.is-stadium {
-  border-radius: 999px;
-}
-.ta-quick-menu-shape.is-circle {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-.ta-quick-menu-shape.is-diamond {
-  width: 10px;
-  height: 10px;
-  border: 0;
-  position: relative;
-}
-.ta-quick-menu-shape.is-diamond::before {
-  position: absolute;
-  content: "";
-  left: 50%;
-  top: 50%;
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid currentColor;
-  transform: translate(-50%, -50%) rotate(0.125turn);
-  box-sizing: border-box;
+
+.ta-quick-menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 选中节点时，四向容器激活桥接伪元素扩大 hover 作用域 */
@@ -585,38 +657,4 @@ function preventNodeDragFromPort(event: MouseEvent) {
   pointer-events: auto;
 }
 
-/* 为快捷菜单面板提供与大箭头之间的透明连接桥，防鼠标滑过 8px 物理间隙时 hover 中断 */
-.ta-mermaid-quick-menu::before {
-  content: "";
-  position: absolute;
-  background: transparent;
-}
-
-.ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-menu::before {
-  left: -12px;
-  top: 0;
-  width: 12px;
-  height: 100%;
-}
-
-.ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-menu::before {
-  right: -12px;
-  top: 0;
-  width: 12px;
-  height: 100%;
-}
-
-.ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-menu::before {
-  bottom: -12px;
-  left: 0;
-  height: 12px;
-  width: 100%;
-}
-
-.ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-menu::before {
-  top: -12px;
-  left: 0;
-  height: 12px;
-  width: 100%;
-}
 </style>

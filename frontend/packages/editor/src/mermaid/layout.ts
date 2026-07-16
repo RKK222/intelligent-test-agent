@@ -8,12 +8,12 @@ import {
   type MermaidNodeType,
   type MermaidPosition
 } from "./model";
+import { getMermaidNodeSize } from "./node-shapes";
 import { getMermaidNodePorts, type MermaidNodePort } from "./visual-editor/node-port-layout";
 
 const elk = new ELK();
 const CANVAS_OFFSET = { x: 80, y: 70 } as const;
 
-type MermaidNodeSize = { width: number; height: number };
 type ElkRouteSection = {
   startPoint: MermaidPosition;
   endPoint: MermaidPosition;
@@ -23,18 +23,6 @@ type ElkLayoutEdge = { id?: string; sections?: ElkRouteSection[] };
 
 function roundLayoutCoordinate(value: number): number {
   return Math.round(value * 10) / 10;
-}
-
-/** 统一 ELK 包围盒与画布 CSS 的节点尺寸，避免路由把判断节点仍当成 52px 高矩形。 */
-function getMermaidNodeSize(node: MermaidNode): MermaidNodeSize {
-  if (node.type === "circle") return { width: 92, height: 92 };
-  if (node.type === "diamond") return { width: 150, height: 88 };
-  const horizontalPadding = node.type === "stadium" ? 48 : 40;
-  const textLen = node.text ? node.text.length : 0;
-  return {
-    width: Math.max(120, Math.min(190, textLen * 12 + horizontalPadding)),
-    height: 52
-  };
 }
 
 /**
@@ -50,6 +38,10 @@ function getNodeCenter(node: MermaidNode): { x: number; y: number } {
 
 function samePoint(left: MermaidPosition, right: MermaidPosition): boolean {
   return left.x === right.x && left.y === right.y;
+}
+
+function pointDistanceSquared(left: MermaidPosition, right: MermaidPosition): number {
+  return (left.x - right.x) ** 2 + (left.y - right.y) ** 2;
 }
 
 /** 去掉重复点和共线中间点，保证后续圆角 path 不产生零长度拐角。 */
@@ -249,6 +241,29 @@ function applyElkEdgeRoutes(graph: MermaidGraph, layoutEdges: ElkLayoutEdge[]): 
       if (request.end === "source") request.edge.sourceHandle = port.handleId;
       else request.edge.targetHandle = port.handleId;
     }
+  }
+
+  // 同一侧只有一个可用端口时，ELK 会让自环两端复用它；目标端改取整个轮廓上
+  // 距离 ELK 终点最近的其他端口，保持编辑器不允许“同节点同端口自环”的不变量。
+  for (const edge of graph.edges) {
+    if (edge.source !== edge.target || edge.sourceHandle !== edge.targetHandle) continue;
+    const node = nodeById.get(edge.source);
+    const rawEnd = routeByEdgeId.get(edge.id)?.at(-1);
+    const sourceAssignment = assignments.get(endpointKey(edge, "source"));
+    if (!node || !rawEnd || !sourceAssignment) continue;
+    const alternatePort = getMermaidNodePorts(node.type)
+      .filter((port) => port.handleId !== sourceAssignment.port.handleId)
+      .reduce<MermaidNodePort | undefined>((nearest, port) => {
+        if (!nearest) return port;
+        return pointDistanceSquared(getAbsolutePortPoint(node, port), rawEnd)
+          < pointDistanceSquared(getAbsolutePortPoint(node, nearest), rawEnd)
+          ? port
+          : nearest;
+      }, undefined);
+    if (!alternatePort) continue;
+    const targetAssignment = { port: alternatePort, point: getAbsolutePortPoint(node, alternatePort) };
+    assignments.set(endpointKey(edge, "target"), targetAssignment);
+    edge.targetHandle = alternatePort.handleId;
   }
 
   for (const edge of graph.edges) {

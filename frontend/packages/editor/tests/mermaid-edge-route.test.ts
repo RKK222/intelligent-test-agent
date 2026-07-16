@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MermaidEdge, MermaidGraph, MermaidPosition } from "../src/mermaid/model";
+import type { MermaidEdge, MermaidGraph, MermaidNodeType, MermaidPosition } from "../src/mermaid/model";
 import { cloneMermaidGraph } from "../src/mermaid/model";
 import { autoLayoutMermaidGraph, syncAutoLayoutMermaidGraph } from "../src/mermaid/layout";
+import { getMermaidNodeSize } from "../src/mermaid/node-shapes";
 import { parseMermaidFlowchart } from "../src/mermaid/parser";
 import { serializeMermaidGraph } from "../src/mermaid/serializer";
+import { getMermaidNodePorts } from "../src/mermaid/visual-editor/node-port-layout";
 
 type EdgeWithRoute = MermaidEdge & { route?: { points: MermaidPosition[] } };
 
@@ -67,12 +69,7 @@ function segmentEntersUnrelatedNode(
   end: MermaidPosition,
   node: MermaidGraph["nodes"][number]
 ): boolean {
-  const width = node.type === "circle"
-    ? 92
-    : node.type === "diamond"
-      ? 150
-      : Math.max(120, Math.min(190, node.text.length * 12 + (node.type === "stadium" ? 48 : 40)));
-  const height = node.type === "circle" ? 92 : node.type === "diamond" ? 88 : 52;
+  const { width, height } = getMermaidNodeSize(node);
   const left = node.position.x;
   const right = left + width;
   const top = node.position.y;
@@ -152,6 +149,82 @@ describe("Mermaid ELK orthogonal routing", () => {
     const b = laidOut.nodes.find((node) => node.id === "B")!;
 
     expect(b.position.y - a.position.y).toBeGreaterThanOrEqual(180);
+  });
+
+  it("十四类节点均使用共享包围盒生成贴合端口的正交路由", async () => {
+    const types: MermaidNodeType[] = [
+      "stadium", "rectangle", "rounded", "subroutine", "database", "circle", "diamond",
+      "hexagon", "parallelogram", "trapezoid", "double-circle", "text", "doc", "docs"
+    ];
+    const graph: MermaidGraph = {
+      kind: "flowchart",
+      direction: "LR",
+      nodes: types.map((type, index) => ({
+        id: `N${index + 1}`,
+        text: `节点${index + 1}`,
+        type,
+        position: { x: 0, y: 0 }
+      })),
+      edges: types.slice(1).map((_, index) => ({
+        id: `edge-${index + 1}`,
+        source: `N${index + 1}`,
+        target: `N${index + 2}`,
+        label: "",
+        relation: "arrow"
+      })),
+      preservedLines: []
+    };
+
+    const laidOut = await autoLayoutMermaidGraph(graph);
+    const nodes = new Map(laidOut.nodes.map((node) => [node.id, node]));
+    for (const edge of laidOut.edges) {
+      const source = nodes.get(edge.source)!;
+      const target = nodes.get(edge.target)!;
+      const sourcePort = getMermaidNodePorts(source.type).find((port) => port.handleId === edge.sourceHandle)!;
+      const targetPort = getMermaidNodePorts(target.type).find((port) => port.handleId === edge.targetHandle)!;
+      const sourceSize = getMermaidNodeSize(source);
+      const targetSize = getMermaidNodeSize(target);
+      const expectedSource = {
+        x: Math.round((source.position.x + sourceSize.width * sourcePort.x / 100) * 10) / 10,
+        y: Math.round((source.position.y + sourceSize.height * sourcePort.y / 100) * 10) / 10
+      };
+      const expectedTarget = {
+        x: Math.round((target.position.x + targetSize.width * targetPort.x / 100) * 10) / 10,
+        y: Math.round((target.position.y + targetSize.height * targetPort.y / 100) * 10) / 10
+      };
+
+      expect(edge.route?.points[0]).toEqual(expectedSource);
+      expect(edge.route?.points.at(-1)).toEqual(expectedTarget);
+      expect(isOrthogonal(edge.route?.points ?? [])).toBe(true);
+    }
+  });
+
+  it.each([
+    "stadium", "rectangle", "rounded", "subroutine", "database", "circle", "diamond",
+    "hexagon", "parallelogram", "trapezoid", "double-circle", "text", "doc", "docs"
+  ] as MermaidNodeType[])("%s 自环自动布局后仍使用两个不同端口", async (type) => {
+    const graph: MermaidGraph = {
+      kind: "flowchart",
+      direction: "LR",
+      nodes: [{ id: "A", text: "自环", type, position: { x: 0, y: 0 } }],
+      edges: [{
+        id: "edge-1",
+        source: "A",
+        target: "A",
+        sourceHandle: "source-0",
+        targetHandle: "target-0",
+        label: "",
+        relation: "arrow"
+      }],
+      preservedLines: []
+    };
+
+    const laidOut = await autoLayoutMermaidGraph(graph);
+    const edge = laidOut.edges[0]!;
+
+    expect(edge.sourceHandle).toBeTruthy();
+    expect(edge.targetHandle).toBeTruthy();
+    expect(edge.sourceHandle).not.toBe(edge.targetHandle);
   });
 
   it("在分支汇合与跨层连线图中不产生非相邻边十字交叉", async () => {

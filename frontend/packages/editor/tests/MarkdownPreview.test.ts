@@ -151,7 +151,7 @@ classDef important fill:red
     await vi.waitFor(() => expect(emitted().change).toBeTruthy());
     const changes = emitted().change as Array<[string]>;
     expect(changes).toHaveLength(1);
-    expect(changes[0]?.[0]).toContain('A["准备"]');
+    expect(changes[0]?.[0]).toContain('A@{ shape: rect, label: "准备" }');
     expect(changes[0]?.[0]).toContain("classDef important fill:red");
     expect(changes[0]?.[0]).toContain("# 设计");
     expect(changes[0]?.[0]).toContain("正文");
