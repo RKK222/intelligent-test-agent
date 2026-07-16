@@ -85,6 +85,17 @@ const routedGraph = (): MermaidGraph => {
   return value;
 };
 
+function terminalPathDelta(path: string): { x: number; y: number } {
+  const values = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  const points = Array.from({ length: Math.floor(values.length / 2) }, (_, index) => ({
+    x: values[index * 2]!,
+    y: values[index * 2 + 1]!
+  }));
+  const previous = points.at(-2)!;
+  const last = points.at(-1)!;
+  return { x: last.x - previous.x, y: last.y - previous.y };
+}
+
 describe("Mermaid Vue Flow 适配", () => {
   it("把领域节点和边映射为 Vue Flow 元素", () => {
     expect(toVueFlowNodes(graph())).toMatchObject([
@@ -514,8 +525,45 @@ describe("MermaidFlowEdge", () => {
     expect(path).not.toBe("M0 0 L1 1");
   });
 
+  it("顶部目标 Handle 与 ELK 端点偏移时，箭头末段仍向下进入节点", () => {
+    const { getByTestId } = render(MermaidFlowEdge, {
+      props: {
+        ...edgeProps(),
+        sourceX: 507.6,
+        sourceY: 303.3,
+        sourcePosition: "bottom",
+        targetX: 519,
+        targetY: 406,
+        targetPosition: "top",
+        data: {
+          routePoints: [
+            { x: 507.6, y: 303.3 },
+            { x: 507.6, y: 318 },
+            { x: 520, y: 318 },
+            { x: 520, y: 414 }
+          ]
+        }
+      } as unknown as EdgeProps
+    });
+
+    const path = getByTestId("base-edge").getAttribute("d") ?? "";
+    expect(terminalPathDelta(path)).toEqual({ x: 0, y: expect.any(Number) });
+    expect(terminalPathDelta(path).y).toBeGreaterThan(0);
+  });
+
   it("没有有效路由时保留 SmoothStep 兼容回退", () => {
     const { getByTestId } = render(MermaidFlowEdge, { props: edgeProps() });
+    expect(getByTestId("base-edge").getAttribute("d")).toBe("M0 0 L1 1");
+  });
+
+  it("两点直线路由没有安全内部轨道时回退 SmoothStep", () => {
+    const { getByTestId } = render(MermaidFlowEdge, {
+      props: {
+        ...edgeProps(),
+        data: { routePoints: [{ x: 10, y: 20 }, { x: 100, y: 20 }] }
+      } as unknown as EdgeProps
+    });
+
     expect(getByTestId("base-edge").getAttribute("d")).toBe("M0 0 L1 1");
   });
 

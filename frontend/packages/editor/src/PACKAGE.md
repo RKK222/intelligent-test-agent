@@ -11,7 +11,7 @@
 - `mermaid/model.ts`、`parser.ts`、`serializer.ts`、`layout.ts`：Flowchart/graph 强类型模型、双向转换、unknown line 保留，以及 ELK 节点/端口/正交边路由的一体化布局。派生路由随模型深拷贝；几何或拓扑变化必须清除，边标签变化可保留。
 - `mermaid/compact-metadata.ts`：Flowchart 节点坐标/端口/路由与 Sequence 参与者坐标的统一单行 codec。格式固定为 `%%@<base64url>`，内部使用版本/flags、unsigned LEB128、ZigZag、端口 nibble、正交轴向增量和 little-endian FNV-1a 32-bit；解码绑定规范化拓扑签名，并限制 1 MiB、单边 4096 点和单个 LEB128 5 字节。`metadata.ts`、`edge-port-metadata.ts` 只承担旧格式读取迁移；损坏或重复的新 marker 必须原样保留并阻止写入第二个 marker。
 - `mermaid/sequence/`：Sequence diagram 的 participant/actor、有序 message 模型、parser、serializer、布局和 Vue Flow 适配；复杂控制语句暂不编辑但必须保留，参与者坐标与 Flow 私有信息共用紧凑 codec。
-- `mermaid/visual-editor/`：通用可视化对话框和 Flowchart Vue Flow 画布；右侧节点图形库负责拖放或点击创建五种节点，判断节点使用水平真菱形，选中节点属性显示在图形库下方。各形状使用共享的 8/12 Handle 布局；独立拖线控制器使用固定屏幕半径处理起线、目标激活、近点吸附、SmoothStep 临时路径和窗口级取消生命周期，Vue Flow 原生 connect 关闭。自动布局边优先按 ELK 路由绘制 6px 圆角正交 path；实际 DOM 尺寸与 ELK 估算存在微小差异时插入正交适配段，无合法路由时回退 SmoothStep。Sequence 画布位于 `mermaid/sequence/visual-editor/`，消息使用按顺序错层的自定义边避免重叠。
+- `mermaid/visual-editor/`：通用可视化对话框和 Flowchart Vue Flow 画布；右侧节点图形库负责拖放或点击创建五种节点，判断节点使用水平真菱形，选中节点属性显示在图形库下方。各形状使用共享的 8/12 Handle 布局；独立拖线控制器使用固定屏幕半径处理起线、目标激活、近点吸附、SmoothStep 临时路径和窗口级取消生命周期，Vue Flow 原生 connect 关闭。自动布局边优先按 ELK 路由绘制 6px 圆角正交 path；实际 DOM 尺寸与 ELK 估算存在微小差异时，`edge-path.ts` 丢弃贴边折返段，在节点外安全轨道重接实际 Handle，并校验源端向外、目标端向内。没有安全内部轨道、路由非法或只有两个端点时回退 SmoothStep。Sequence 画布位于 `mermaid/sequence/visual-editor/`，消息使用按顺序错层的自定义边避免重叠。
 - `monaco-env.ts`：Monaco Web Worker 配置（懒加载）。
 - `language.ts`：路径到 Monaco language 映射。
 

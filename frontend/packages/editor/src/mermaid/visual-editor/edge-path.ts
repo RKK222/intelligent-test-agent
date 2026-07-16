@@ -1,4 +1,7 @@
+import { Position } from "@vue-flow/core";
 import type { MermaidPosition } from "../model";
+
+const ENDPOINT_DIRECTION_EPSILON = 0.5;
 
 function isFinitePoint(point: MermaidPosition | undefined): point is MermaidPosition {
   return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
@@ -6,6 +9,47 @@ function isFinitePoint(point: MermaidPosition | undefined): point is MermaidPosi
 
 function samePoint(left: MermaidPosition, right: MermaidPosition): boolean {
   return left.x === right.x && left.y === right.y;
+}
+
+function isOutsideEndpoint(
+  point: MermaidPosition,
+  endpoint: MermaidPosition,
+  position: Position
+): boolean {
+  if (position === Position.Top) return point.y < endpoint.y - ENDPOINT_DIRECTION_EPSILON;
+  if (position === Position.Bottom) return point.y > endpoint.y + ENDPOINT_DIRECTION_EPSILON;
+  if (position === Position.Left) return point.x < endpoint.x - ENDPOINT_DIRECTION_EPSILON;
+  return point.x > endpoint.x + ENDPOINT_DIRECTION_EPSILON;
+}
+
+function endpointBridge(
+  endpoint: MermaidPosition,
+  guide: MermaidPosition,
+  position: Position
+): MermaidPosition {
+  return position === Position.Top || position === Position.Bottom
+    ? { x: endpoint.x, y: guide.y }
+    : { x: guide.x, y: endpoint.y };
+}
+
+function leavesSourceOutward(points: MermaidPosition[], position: Position): boolean {
+  const source = points[0];
+  const next = points[1];
+  if (!source || !next) return false;
+  if (position === Position.Top) return next.x === source.x && next.y < source.y - ENDPOINT_DIRECTION_EPSILON;
+  if (position === Position.Bottom) return next.x === source.x && next.y > source.y + ENDPOINT_DIRECTION_EPSILON;
+  if (position === Position.Left) return next.y === source.y && next.x < source.x - ENDPOINT_DIRECTION_EPSILON;
+  return next.y === source.y && next.x > source.x + ENDPOINT_DIRECTION_EPSILON;
+}
+
+function entersTargetInward(points: MermaidPosition[], position: Position): boolean {
+  const previous = points.at(-2);
+  const target = points.at(-1);
+  if (!previous || !target) return false;
+  if (position === Position.Top) return previous.x === target.x && previous.y < target.y - ENDPOINT_DIRECTION_EPSILON;
+  if (position === Position.Bottom) return previous.x === target.x && previous.y > target.y + ENDPOINT_DIRECTION_EPSILON;
+  if (position === Position.Left) return previous.y === target.y && previous.x < target.x - ENDPOINT_DIRECTION_EPSILON;
+  return previous.y === target.y && previous.x > target.x + ENDPOINT_DIRECTION_EPSILON;
 }
 
 /** 清理重复点与共线折点，并拒绝任何对角线段，确保自定义 path 始终是正交轨道。 */
@@ -29,6 +73,54 @@ export function normalizeMermaidEdgeRoutePoints(points: ReadonlyArray<MermaidPos
     }
   }
   return normalized.length >= 2 ? normalized : [];
+}
+
+/**
+ * 把 ELK 节点边界端点重接到 Vue Flow 实际 Handle。坐标校正在节点外侧轨道完成，避免
+ * “先到边界、再折返到 Handle”让 markerEnd 沿最后一小段反向；无法证明首尾方向安全时回退。
+ */
+export function reattachMermaidEdgeRoutePoints(
+  storedPoints: ReadonlyArray<MermaidPosition>,
+  endpoints: {
+    source: MermaidPosition;
+    sourcePosition: Position;
+    target: MermaidPosition;
+    targetPosition: Position;
+  }
+): MermaidPosition[] {
+  const stored = normalizeMermaidEdgeRoutePoints(storedPoints);
+  if (stored.length < 3) return [];
+
+  let sourceGuideIndex = -1;
+  for (let index = 1; index < stored.length - 1; index += 1) {
+    if (isOutsideEndpoint(stored[index]!, endpoints.source, endpoints.sourcePosition)) {
+      sourceGuideIndex = index;
+      break;
+    }
+  }
+  let targetGuideIndex = -1;
+  for (let index = stored.length - 2; index > 0; index -= 1) {
+    if (isOutsideEndpoint(stored[index]!, endpoints.target, endpoints.targetPosition)) {
+      targetGuideIndex = index;
+      break;
+    }
+  }
+  if (sourceGuideIndex < 0 || targetGuideIndex < sourceGuideIndex) return [];
+
+  const corridor = stored.slice(sourceGuideIndex, targetGuideIndex + 1);
+  const sourceBridge = endpointBridge(endpoints.source, corridor[0]!, endpoints.sourcePosition);
+  const targetBridge = endpointBridge(endpoints.target, corridor.at(-1)!, endpoints.targetPosition);
+  const attached = normalizeMermaidEdgeRoutePoints([
+    endpoints.source,
+    sourceBridge,
+    ...corridor,
+    targetBridge,
+    endpoints.target
+  ]);
+  return leavesSourceOutward(attached, endpoints.sourcePosition)
+    && entersTargetInward(attached, endpoints.targetPosition)
+    ? attached
+    : [];
 }
 
 function moveToward(from: MermaidPosition, to: MermaidPosition, distance: number): MermaidPosition {

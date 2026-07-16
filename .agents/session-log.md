@@ -7157,3 +7157,19 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - editor 全量 11 个 Vitest 文件 145 passed；前端全量 63 个文件 954 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。
   - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。
+
+### 2026-07-16 - 修复 Mermaid 自动布局箭头倒置
+
+- Why:
+  - ELK 保存的路由方向正确，但普通节点实际 Vue Flow Handle 与估算边界存在约 1–8px 偏差；旧渲染逻辑先接到节点边界，再短距离折返实际 Handle，使 `markerEnd` 按反向末段旋转，源端也可能先向节点内部折返。
+- What:
+  - `edge-path.ts` 新增端点重接程序：从存储路由选择源端外侧的第一个、目标端外侧的最后一个安全引导点，在节点外轨道完成坐标校正，并以 0.5px 容差验证首段向外、末段向内。
+  - `MermaidFlowEdge.vue` 改用重接后的最终正交路径；没有安全内部轨道、路由非法或只有两个端点时回退 SmoothStep，现有 `markerEnd`、标签中点和端点重连圆圈不变。
+  - 同步 editor README/PACKAGE 与正交路由设计/实施计划；ELK 路由、Sequence、compact metadata、parser/serializer 均未修改。
+- How:
+  - TDD 先用截图坐标锁定旧路径末段 `dy=-7.5`，再覆盖 Top/Bottom/Left/Right 四种源端与目标端方向、0.1–8px 偏差、0.5px 容差、圆角/路径中点和 SmoothStep 回退。
+  - 代表图集成测试真实调用 ELK，再按普通节点 118px 实际宽度和 Top Handle 外移 8px 重接，确认 N4/N5/N6/N7 的末段均从上方进入节点。本地浏览器因未选择可用工作区版本，未完成截图对应 Markdown 的页面级复核。
+- Result:
+  - editor 全量 12 个 Vitest 文件 160 passed；前端全量 64 个文件 969 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。
+  - 全量 Vitest 与 lint 首次并行运行时，一个既有 `MarkdownPreview` 异步对话框用例超过 1 秒超时；该用例独占运行及全量 Vitest 独占复跑均通过，确认是资源争用而非代码回归，未修改任务外超时。
+  - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。

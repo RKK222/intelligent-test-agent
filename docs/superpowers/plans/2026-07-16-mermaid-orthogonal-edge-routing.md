@@ -57,11 +57,12 @@
 - Create: `frontend/packages/editor/src/mermaid/visual-editor/edge-path.ts`
 - Modify: `vue-flow-adapter.ts`、`MermaidFlowEdge.vue`、`MermaidVisualEditor.vue`
 - Modify: `frontend/packages/editor/tests/MermaidVisualEditor.test.ts`
+- Create: `frontend/packages/editor/tests/mermaid-edge-path.test.ts`
 
 - [x] adapter 深拷贝 route points 到边 data；合法正交点生成 6px `L/Q` path，标签按折线路程中点定位。
-- [x] 实际 DOM 端点与 ELK 估算点有偏差时插入正交适配段；非法或缺失 route 调用 `getSmoothStepPath()`。
+- [x] 实际 DOM 端点与 ELK 估算点有偏差时，从节点外安全引导轨道重接实际 Handle，并以 0.5px 容差校验源端向外、目标端向内；非法、两点或无安全轨道的 route 调用 `getSmoothStepPath()`。
 - [x] 节点拖动、改名/改形、方向切换、节点/边增删和重连清除 route；只修改边标签保留。
-- [x] 覆盖 route data、圆角 path、DOM 偏差、路径中点、SmoothStep、模型不变及全部失效边界。
+- [x] 覆盖 route data、圆角 path、路径中点、截图同构倒置用例、四种源/目标端方向、0.1–8px DOM 偏差、0.5px 容差、SmoothStep、模型不变及全部失效边界。
 
 ## Task 5：文档、验证和提交
 
