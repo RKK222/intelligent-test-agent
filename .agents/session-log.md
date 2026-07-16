@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-16 - 交付并发布应用测试资产库初始化骨架
+
+- Why:
+  - 用户要求按项目工作目录边界整理仅属于应用 Git 的测试资产初始化包，排除公共 Git，并把同一目录补到当前本地 F-COSS 测试仓库后通过系统功能推送远程。
+- What:
+  - 生成 `artifacts/应用测试资产库初始化包-20260716.zip`：包含应用专属 `.opencode` Agent/workagent/Skill 架子、应用测试规约与模板，以及 `docs/应用架构`、`docs/功能模块`、`docs/数据架构`、`docs/部署架构` 示例和 `archive` 说明；不含公共配置、`.git`、依赖、缓存、真实凭据或个人 `spec`。
+  - 将 F-COSS 专属 `.opencode` 发布到 `workspace-test.git` 的 `feature_testagent_20260618`，再从 `usr_test_dev` 个人工作区按白名单投影 `README/docs/archive/.gitignore`，没有选中个人工作区原有的 11 份未跟踪测试材料。
+- How:
+  - 复用系统应用配置 `stage/commit/publish` 与个人工作区 `commit/publish` API，而非命令行 Git 提交推送；系统最终记录 `targetCommitHash == replicaCommitHash == cbc4d22638c5c79f562f8009acefa407394ccffc`，应用配置和 feature 工作区 diff 均为 0。
+  - ZIP 使用 JDK `jar --no-manifest` 生成，执行完整性、排除项、实际解压目录逐文件比对和 SHA-256 校验；同时确认本地后端 readiness 与前端 HTTP 可用。
+- Result:
+  - 应用配置提交为 `d896a2a557b30a502ae2669d1f95d3de51a000de`，最终远端 feature 提交为 `cbc4d22638c5c79f562f8009acefa407394ccffc`；ZIP 共 26 个文件、约 20 KB，SHA-256 为 `65714a5ad14fc58c51a09ff4532b56af61b60ab6001acabdfd1c75d408ffc293`。
+  - 不涉及主项目 API、事件、数据库、性能、安全或兼容性代码变更；仅新增交付物与会话记录。
+
 ### 2026-07-16 - 统一企业离线包上传目录与文件名
 
 - Why:
