@@ -3574,6 +3574,11 @@ test("pet drag continues after the pointer leaves the robot hit area", async ({ 
   await page.getByRole("button", { name: "唤起小宠物" }).click({ force: true });
   const robot = page.getByTestId("figma-robot");
   await expect(robot).toBeVisible();
+  await page.evaluate(() => {
+    // 模拟 Monaco 等工作台子组件拦截 Pointer Events，验证 window 捕获监听仍能完成拖动。
+    document.addEventListener("pointermove", (event) => event.stopPropagation());
+    document.addEventListener("pointerup", (event) => event.stopPropagation());
+  });
   const box = await robot.boundingBox();
   expect(box).not.toBeNull();
   const start = await robot.evaluate((element) => ({

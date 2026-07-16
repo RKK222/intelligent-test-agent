@@ -37,6 +37,7 @@ describe("FigmaShell", () => {
     window.localStorage.removeItem("figma-shell-robot-pos");
     window.localStorage.removeItem("figma-shell-robot-fixed");
     window.localStorage.removeItem("test-agent.pet-companion.v1");
+    document.querySelector('[data-testid="pointer-event-blocker"]')?.remove();
   });
 
   it("opens the built-in manual from the global help entry", async () => {
@@ -146,6 +147,28 @@ describe("FigmaShell", () => {
 
     expect(setPointerCapture).not.toHaveBeenCalled();
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 145, y: 135 }));
+  });
+
+  it("keeps dragging when a workbench child stops pointer event propagation", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+    const eventBlocker = document.createElement("div");
+    eventBlocker.dataset.testid = "pointer-event-blocker";
+    eventBlocker.addEventListener("pointermove", (event) => event.stopPropagation());
+    eventBlocker.addEventListener("pointerup", (event) => event.stopPropagation());
+    document.body.appendChild(eventBlocker);
+
+    dispatchPointer(robot.element, "pointerdown", 82, 100, 100, "mouse");
+    dispatchPointer(eventBlocker, "pointermove", 82, 150, 140, "mouse");
+    dispatchPointer(eventBlocker, "pointerup", 82, 150, 140, "mouse");
+    await wrapper.vm.$nextTick();
+
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 150, y: 140 }));
+    expect(document.body.style.cursor).toBe("");
+    expect(document.body.style.userSelect).toBe("");
   });
 
   it("clamps and persists a manually positioned robot when the viewport shrinks", async () => {

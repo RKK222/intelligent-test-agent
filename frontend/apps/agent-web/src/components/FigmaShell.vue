@@ -606,9 +606,9 @@ function cleanupRobotDrag() {
 
   robotDragging.value = false;
   robotDragPointerId = null;
-  window.removeEventListener("pointermove", onRobotPointerMove);
-  window.removeEventListener("pointerup", finishRobotPointerDrag);
-  window.removeEventListener("pointercancel", finishRobotPointerDrag);
+  window.removeEventListener("pointermove", onRobotPointerMove, true);
+  window.removeEventListener("pointerup", finishRobotPointerDrag, true);
+  window.removeEventListener("pointercancel", finishRobotPointerDrag, true);
   document.body.style.cursor = robotDragPreviousCursor;
   document.body.style.userSelect = robotDragPreviousUserSelect;
 }
@@ -627,10 +627,10 @@ function onRobotPointerDown(event: PointerEvent) {
   robotDragPreviousUserSelect = document.body.style.userSelect;
   document.body.style.cursor = "grabbing";
   document.body.style.userSelect = "none";
-  // Chromium 108 企业内核不依赖 pointer capture；拖动期间统一由 window 接收全局事件。
-  window.addEventListener("pointermove", onRobotPointerMove);
-  window.addEventListener("pointerup", finishRobotPointerDrag);
-  window.addEventListener("pointercancel", finishRobotPointerDrag);
+  // Chromium 108 企业内核不依赖 pointer capture；捕获阶段先于编辑器等组件的 stopPropagation 接收拖动事件。
+  window.addEventListener("pointermove", onRobotPointerMove, true);
+  window.addEventListener("pointerup", finishRobotPointerDrag, true);
+  window.addEventListener("pointercancel", finishRobotPointerDrag, true);
 }
 
 function onRobotPointerMove(event: PointerEvent) {

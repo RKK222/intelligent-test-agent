@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-16 - 修复工作台事件拦截导致的宠物拖动中断
+
+- Why:
+  - 企业内 Chromium 108 页面中复制回退已正常，但小宠物仍无法稳定拖动；现有单测直接向 `window` 派发 Pointer Events，没有覆盖编辑器或工作台子组件调用 `stopPropagation()` 的真实事件链。
+  - 企业服务器现场记录同时显示 Java 原先已监听 `*:8080` 且宿主机访问 `122.233.30.114:8080` 为 200，手工修改 `backend.env` 并重启后才变为拒绝连接，因此应先检查 systemd 启动失败或环境变量格式，而不是继续修改公共 Agent JSONC。
+- What:
+  - 宠物拖动的 `window` 级 `pointermove/up/cancel` 改为捕获阶段监听和对称清理，保持不依赖 pointer capture，也不修改现有复制逻辑。
+  - 新增单元与 Chromium E2E 回归，主动让中间子组件停止 Pointer Events 冒泡，验证宠物仍可移动、保存坐标并恢复文档样式；同步 frontend、agent-web 与包级 README。
+- How:
+  - 复用现有拖动状态、阈值、位置夹紧和 localStorage 保存路径，只调整全局监听阶段；运行 FigmaShell 40 项单测、定向 Chromium E2E、agent-web 生产构建，并使用 `.env.test` / `test` profile 重启本地 backend、manager 和 frontend。
+- Result:
+  - FigmaShell 40/40、Chromium E2E 1/1 和生产构建通过；本地 health/readiness 为 `UP`，前端 3000 返回 200，登录 CORS 与 manager WebSocket/config update 正常。
+  - 不涉及 API、RunEvent、数据库、后端、安全配置或公共 Agent JSONC；企业现场仍需依据 `systemctl status`、`journalctl` 和 8080 监听结果恢复 Java，再判断 Docker bridge 防火墙。
+
 ### 2026-07-16 - 拉取最新代码并重建企业与公共配置全量包
 
 - Why:
