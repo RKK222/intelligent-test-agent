@@ -106,6 +106,13 @@ const absoluteWritePath = computed(() => {
     : `/${pathWithoutLeadingSlash}`;
 });
 
+const copyPathText = computed(() => {
+  if (!props.writePath) return "";
+  return absoluteWritePath.value
+    ? `${props.writePath}\n${absoluteWritePath.value}`
+    : props.writePath;
+});
+
 function copyPath(textToCopy: string) {
   if (!textToCopy) return;
   if (navigator.clipboard && window.isSecureContext) {
@@ -606,24 +613,15 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         <ServerCog class="ta-workbench-footer-icon" />
       </button>
       <template v-else-if="showSave">
-        <span class="ta-workbench-footer-path ta-workbench-footer-copy-paths">
+        <span class="ta-workbench-footer-path">
           <button
-            v-if="writePath"
+            v-if="copyPathText"
             type="button"
-            class="ta-workbench-footer-copy-path ta-workbench-footer-copy-relative-path"
-            :title="writePath"
-            @click="copyPath(writePath)"
+            class="ta-workbench-footer-copy-path"
+            :title="copyPathText"
+            @click="copyPath(copyPathText)"
           >
-            复制相对路径
-          </button>
-          <button
-            v-if="absoluteWritePath"
-            type="button"
-            class="ta-workbench-footer-copy-path ta-workbench-footer-copy-absolute-path"
-            :title="absoluteWritePath"
-            @click="copyPath(absoluteWritePath)"
-          >
-            复制绝对路径
+            复制路径
           </button>
         </span>
       </template>
@@ -966,18 +964,6 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   font-family: inherit;
   cursor: pointer;
   transition: color 0.12s ease;
-}
-
-.ta-workbench-footer-copy-paths {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 0;
-}
-
-.ta-workbench-footer-copy-paths .ta-workbench-footer-copy-path {
-  line-height: 12px;
 }
 
 .ta-workbench-footer-copy-path:hover {

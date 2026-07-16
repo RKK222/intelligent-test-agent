@@ -180,7 +180,7 @@ describe("WorkbenchFooter", () => {
     expect(wrapper2.emitted("update:markdownPreviewMode")).toEqual([["off"]]);
   });
 
-  it("copies relative and absolute paths from separate rows", async () => {
+  it("copies relative and absolute paths as two lines from one button", async () => {
     // mock window.isSecureContext and navigator.clipboard
     Object.defineProperty(window, "isSecureContext", {
       value: true,
@@ -204,19 +204,17 @@ describe("WorkbenchFooter", () => {
       }
     });
 
-    const relativeButton = wrapper.find(".ta-workbench-footer-copy-relative-path");
-    const absoluteButton = wrapper.find(".ta-workbench-footer-copy-absolute-path");
+    const copyButtons = wrapper.findAll(".ta-workbench-footer-copy-path");
 
-    expect(relativeButton.text()).toBe("复制相对路径");
-    expect(relativeButton.attributes("title")).toBe("src/components/WorkbenchFooter.vue");
-    expect(absoluteButton.text()).toBe("复制绝对路径");
-    expect(absoluteButton.attributes("title")).toBe("/workspace/project/src/components/WorkbenchFooter.vue");
+    expect(copyButtons).toHaveLength(1);
+    expect(copyButtons[0].text()).toBe("复制路径");
+    expect(copyButtons[0].attributes("title"))
+      .toBe("src/components/WorkbenchFooter.vue\n/workspace/project/src/components/WorkbenchFooter.vue");
 
-    await relativeButton.trigger("click");
-    expect(mockWriteText).toHaveBeenLastCalledWith("src/components/WorkbenchFooter.vue");
-
-    await absoluteButton.trigger("click");
-    expect(mockWriteText).toHaveBeenLastCalledWith("/workspace/project/src/components/WorkbenchFooter.vue");
+    await copyButtons[0].trigger("click");
+    expect(mockWriteText).toHaveBeenCalledOnce();
+    expect(mockWriteText)
+      .toHaveBeenCalledWith("src/components/WorkbenchFooter.vue\n/workspace/project/src/components/WorkbenchFooter.vue");
   });
 
   it("normalizes Windows separators when copying an absolute path", async () => {
@@ -240,9 +238,10 @@ describe("WorkbenchFooter", () => {
       }
     });
 
-    await wrapper.find(".ta-workbench-footer-copy-absolute-path").trigger("click");
+    await wrapper.find(".ta-workbench-footer-copy-path").trigger("click");
 
-    expect(mockWriteText).toHaveBeenCalledWith("C:/workspace/project/src/components/WorkbenchFooter.vue");
+    expect(mockWriteText)
+      .toHaveBeenCalledWith("src\\components\\WorkbenchFooter.vue\nC:/workspace/project/src/components/WorkbenchFooter.vue");
   });
 
   it("renders locate button when writePath is defined, and emits locate on click", async () => {
