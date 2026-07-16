@@ -123,9 +123,23 @@ const iframeUrl = computed(() => {
   if(backendUrl){
     params.append("backendUrl", backendUrl);
   }
-  const url = new URL(baseUrl);
-  url.search = params.toString();
-  return url.toString();
+  
+  const paramsStr = params.toString();
+  if (!paramsStr) return baseUrl;
+  
+  const hashIndex = baseUrl.indexOf("#");
+  if (hashIndex === -1) {
+    const url = new URL(baseUrl);
+    url.search = paramsStr;
+    return url.toString();
+  }
+  
+  const baseWithoutHash = baseUrl.substring(0, hashIndex);
+  let hash = baseUrl.substring(hashIndex);
+  const trimmedHash = hash.replace(/\?$/, "");
+  const hashHasQuery = trimmedHash.includes("?");
+  const separator = hashHasQuery ? "&" : "?";
+  return `${baseWithoutHash}${trimmedHash}${separator}${paramsStr}`;
 });
 
 function openIframeDialog() {
