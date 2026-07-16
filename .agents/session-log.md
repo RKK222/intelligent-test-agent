@@ -1,5 +1,21 @@
 # Session Log
 
+### 2026-07-16 - 修复公共 Agent 配置来源不透明与刷新残留
+
+- Why:
+  - 企业部署后，公共区没有说明实际读取的服务器目录；磁盘中已删除的 `agents`、`skills` 或 `.bak` 文件仍可能因前端目录缓存继续显示，磁盘文件变化也不会同步到已打开编辑器。
+- What:
+  - 公共区新增“直接目录 / worktree”、目标服务器和物理路径展示；刷新改为失效整个目录缓存并恢复仍存在的展开目录，同时刷新当前打开且未修改的文件，删除后的活动文件会关闭，未保存内容不会被覆盖。
+  - 补充直接目录、worktree、陈旧 `.bak` 清理、干净编辑器刷新和脏编辑器保护测试，并同步更新 frontend、agent-web 与包级 README。
+  - 以当前公共配置仓库新建并推送 `enterprise` 分支，企业模型配置改用内网代理环境变量，保留现有 agents/skills；提交为 `1ad3d20`。
+- How:
+  - 复用后端已有 `PublicAgentRepositoryStatus.configDirPath`、worktree 状态和平台文件 WebSocket 读取，不新增文件代理或后端接口；用目录 generation 阻止刷新前的异步旧响应回写缓存。
+  - 执行 agent-web 定向测试、全量前端测试、全量 lint/typecheck/build，并按 test profile 重启本地后端、manager 和前端检查实际运行状态。
+- Result:
+  - 定向测试 21/21、全量前端测试 929 通过且 1 跳过，lint/typecheck/build 通过；后端 readiness 为 `UP`、前端返回 `200`、manager WebSocket 已连接。
+  - 标准企业离线打包脚本生成 `deploy/internal/dist/test-agent-internal-release.zip`（207 MB），ZIP 完整性和 checksum 校验通过，SHA-256 为 `56bb69ccd5d07e2feb20495ead2a8213084eae347ee9d1d218eae9de51b6b392`。
+  - 不涉及 API、事件、数据库或安全契约变更；公共配置展示与刷新行为向后兼容，用户未保存内容受到保护。
+
 ### 2026-07-16 - 限制宠物小游戏仅超管可见
 
 - Why:

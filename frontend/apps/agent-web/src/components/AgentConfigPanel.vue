@@ -14,7 +14,7 @@ import {
   Upload,
   MoreHorizontal
 } from "lucide-vue-next";
-import { createBackendApiClient } from "@test-agent/backend-api";
+import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
 import { MergeConflictEditor } from "@test-agent/diff-viewer";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { Button, Input } from "@test-agent/ui-kit";
@@ -31,7 +31,7 @@ import type {
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { formatAgentConfigError } from "./agentConfigErrors";
-import { notifyError, notifySuccess } from "./notify";
+import { notifyError, notifyInfo, notifySuccess } from "./notify";
 import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 
 const props = defineProps<{
@@ -61,6 +61,7 @@ const entriesByScope = ref<Record<Scope, Record<string, FileTreeEntry[]>>>({ PUB
 const rootExpanded = ref<Set<Scope>>(new Set(["PUBLIC"]));
 const expandedByScope = ref<Record<Scope, Set<string>>>({ PUBLIC: new Set(), WORKSPACE: new Set() });
 const loadingByScope = ref<Record<Scope, Set<string>>>({ PUBLIC: new Set(), WORKSPACE: new Set() });
+const directoryGeneration = ref<Record<Scope, number>>({ PUBLIC: 0, WORKSPACE: 0 });
 const errorMessage = ref("");
 const activeScope = ref<Scope | null>(null);
 const activeFileByScope = ref<Record<Scope, string | null>>({ PUBLIC: null, WORKSPACE: null });
@@ -103,19 +104,21 @@ const publicConflictPathSet = computed(() => new Set(publicConflictFiles.value.m
 const firstPublicConflictFile = computed(() => publicConflictFiles.value[0] ?? null);
 const activeAgentFile = computed(() => {
   if (props.activePath) {
-    return activeAgentFileFromEditorPath(props.activePath);
+    const editorFile = activeAgentFileFromEditorPath(props.activePath);
+    return editorFile && isCurrentAgentFileContext(editorFile) ? editorFile : null;
   }
   return activeAgentFileFromLocalSelection();
 });
 
 let refreshAllToken = 0;
 const refreshing = ref(false);
-void refreshAll();
+const panelBusy = computed(() => busy.value || refreshing.value);
+void refreshAll(false);
 
 watch(
   () => props.workspaceId,
   () => {
-    entriesByScope.value = { PUBLIC: entriesByScope.value.PUBLIC, WORKSPACE: {} };
+    invalidateDirectoryCache("WORKSPACE", true);
     if (workbench.workspaceWorktree) {
       workbench.workspaceWorktree = null;
     }
@@ -126,12 +129,17 @@ watch(
   }
 );
 
-async function refreshAll() {
+async function refreshAll(notifySkippedFile = true) {
   const token = ++refreshAllToken;
   refreshing.value = true;
   errorMessage.value = "";
-  // 手动刷新必须能打断旧的根目录 loading 状态，避免某次公共配置请求卡住后 UI 永远转圈。
-  loadingByScope.value = { PUBLIC: new Set(), WORKSPACE: new Set() };
+  const expandedSnapshot: Record<Scope, Set<string>> = {
+    PUBLIC: new Set(expandedByScope.value.PUBLIC),
+    WORKSPACE: new Set(expandedByScope.value.WORKSPACE)
+  };
+  // 刷新代次会让旧请求结果失效，避免切换 worktree 或磁盘内容变化后迟到响应重新写回旧树。
+  invalidateDirectoryCache("PUBLIC");
+  invalidateDirectoryCache("WORKSPACE");
   try {
     await refreshStatus();
     if (token !== refreshAllToken) return;
@@ -140,6 +148,12 @@ async function refreshAll() {
     if (props.workspaceId) tasks.push(loadDirectory("WORKSPACE", "", true));
     await Promise.allSettled(tasks);
     if (token !== refreshAllToken) return;
+    await Promise.all([
+      reloadExpandedDirectories("PUBLIC", expandedSnapshot.PUBLIC),
+      reloadExpandedDirectories("WORKSPACE", expandedSnapshot.WORKSPACE)
+    ]);
+    if (token !== refreshAllToken) return;
+    await refreshActiveEditorFile(undefined, notifySkippedFile);
     if (props.canWrite && status.value.PUBLIC?.enabled !== false) {
       await loadPublicConflictFiles();
     }
@@ -206,12 +220,31 @@ function activeAgentFileFromEditorPath(path?: string) {
   const rest = path.slice(prefix.length);
   const firstSeparator = rest.indexOf(":");
   const secondSeparator = firstSeparator >= 0 ? rest.indexOf(":", firstSeparator + 1) : -1;
+  const rawWorktree = firstSeparator >= 0 ? rest.slice(0, firstSeparator) : "";
+  const rawLinuxServer = secondSeparator >= 0 ? rest.slice(firstSeparator + 1, secondSeparator) : "";
   const rawPath = secondSeparator >= 0
     ? rest.slice(secondSeparator + 1)
     : firstSeparator >= 0
       ? rest.slice(firstSeparator + 1)
       : rest;
-  return { scope, path: decodeURIComponent(rawPath) };
+  return {
+    scope,
+    path: decodeURIComponent(rawPath),
+    worktreeId: rawWorktree ? decodeURIComponent(rawWorktree) : undefined,
+    linuxServerId: rawLinuxServer ? decodeURIComponent(rawLinuxServer) : undefined
+  };
+}
+
+function isCurrentAgentFileContext(file: { scope: Scope; worktreeId?: string; linuxServerId?: string }) {
+  const currentWorktreeId = worktreeId(file.scope) ?? "";
+  if ((file.worktreeId ?? "") !== currentWorktreeId) {
+    return false;
+  }
+  if (file.scope === "PUBLIC") {
+    const currentLinuxServerId = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value ?? "";
+    return (file.linuxServerId ?? "") === currentLinuxServerId;
+  }
+  return true;
 }
 
 function isRootActive(scope: Scope) {
@@ -236,6 +269,7 @@ async function loadDirectory(scope: Scope, path: string, force = false) {
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
   if (!force && (entriesByScope.value[scope][path] !== undefined || loadingByScope.value[scope].has(path))) return;
+  const generation = directoryGeneration.value[scope];
   loadingByScope.value = { ...loadingByScope.value, [scope]: new Set([...loadingByScope.value[scope], path]) };
   errorMessage.value = "";
   try {
@@ -245,20 +279,65 @@ async function loadDirectory(scope: Scope, path: string, force = false) {
         ? api.listPublicAgentFiles(path, worktreeId(scope), linuxServerId)
         : api.listWorkspaceAgentFiles(props.workspaceId!, path, worktreeId(scope));
     })(), "加载 Agent 文件超时");
+    if (directoryGeneration.value[scope] !== generation) return;
     entriesByScope.value = {
       ...entriesByScope.value,
       [scope]: { ...entriesByScope.value[scope], [path]: entries }
     };
   } catch (error) {
+    if (directoryGeneration.value[scope] !== generation) return;
     errorMessage.value = formatAgentConfigError(error, "加载 Agent 文件失败");
     const nextExpanded = new Set(expandedByScope.value[scope]);
     nextExpanded.delete(path);
     expandedByScope.value = { ...expandedByScope.value, [scope]: nextExpanded };
   } finally {
+    if (directoryGeneration.value[scope] !== generation) return;
     const next = new Set(loadingByScope.value[scope]);
     next.delete(path);
     loadingByScope.value = { ...loadingByScope.value, [scope]: next };
   }
+}
+
+function invalidateDirectoryCache(scope: Scope, clearExpanded = false) {
+  directoryGeneration.value = {
+    ...directoryGeneration.value,
+    [scope]: directoryGeneration.value[scope] + 1
+  };
+  entriesByScope.value = { ...entriesByScope.value, [scope]: {} };
+  loadingByScope.value = { ...loadingByScope.value, [scope]: new Set() };
+  if (clearExpanded) {
+    expandedByScope.value = { ...expandedByScope.value, [scope]: new Set() };
+  }
+}
+
+/**
+ * 按目录深度恢复刷新前已经展开的节点；父目录已不存在时直接折叠，避免把旧 `.bak` 等条目重新写回树。
+ */
+async function reloadExpandedDirectories(scope: Scope, expanded: Set<string>) {
+  if (scope === "WORKSPACE" && !props.workspaceId) return;
+  if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
+  const paths = [...expanded].sort((left, right) => pathDepth(left) - pathDepth(right));
+  for (const path of paths) {
+    const parent = parentDirectory(path);
+    const stillExists = (entriesByScope.value[scope][parent] ?? [])
+      .some((entry) => entry.type === "directory" && entry.path === path);
+    if (!stillExists) {
+      const next = new Set(expandedByScope.value[scope]);
+      next.delete(path);
+      expandedByScope.value = { ...expandedByScope.value, [scope]: next };
+      continue;
+    }
+    await loadDirectory(scope, path, true);
+  }
+}
+
+function parentDirectory(path: string) {
+  const separator = path.lastIndexOf("/");
+  return separator < 0 ? "" : path.slice(0, separator);
+}
+
+function pathDepth(path: string) {
+  return path.split("/").filter(Boolean).length;
 }
 
 function withTimeout<T>(promise: Promise<T>, message: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
@@ -301,10 +380,7 @@ function toggleDirectory(scope: Scope, path: string) {
 async function openFile(scope: Scope, path: string) {
   activeScope.value = scope;
   try {
-    const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
-    const file = scope === "PUBLIC"
-      ? await api.readPublicAgentFile(path, worktreeId(scope), linuxServerId)
-      : await api.readWorkspaceAgentFile(props.workspaceId!, path, worktreeId(scope));
+    const { file, linuxServerId } = await readAgentFile(scope, path);
     activeFileByScope.value = { ...activeFileByScope.value, [scope]: path };
     emit("openFile", { scope, path, content: file, readonly: !canWriteScope(scope), worktreeId: worktreeId(scope), linuxServerId });
   } catch (error) {
@@ -312,11 +388,60 @@ async function openFile(scope: Scope, path: string) {
   }
 }
 
+async function readAgentFile(scope: Scope, path: string) {
+  const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
+  const file = scope === "PUBLIC"
+    ? await api.readPublicAgentFile(path, worktreeId(scope), linuxServerId)
+    : await api.readWorkspaceAgentFile(props.workspaceId!, path, worktreeId(scope));
+  return { file, linuxServerId };
+}
+
+/**
+ * 刷新磁盘内容时只覆盖没有未保存修改的活动 Agent 文件；文件已删除则关闭旧标签，避免继续显示不存在的 `.bak`。
+ */
+async function refreshActiveEditorFile(scope?: Scope, notifySkippedFile = true) {
+  const tabPath = props.activePath;
+  const activeFile = activeAgentFileFromEditorPath(tabPath);
+  if (!tabPath || !activeFile || (scope && activeFile.scope !== scope) || !isCurrentAgentFileContext(activeFile)) return;
+  const tab = workbench.tabs.find((item) => item.path === tabPath);
+  if (tab && !tab.livePreview && tab.content !== tab.savedContent) {
+    if (notifySkippedFile) {
+      notifyInfo("未覆盖未保存的 Agent 文件", activeFile.path);
+    }
+    return;
+  }
+  try {
+    const { file, linuxServerId } = await readAgentFile(activeFile.scope, activeFile.path);
+    activeFileByScope.value = { ...activeFileByScope.value, [activeFile.scope]: activeFile.path };
+    emit("openFile", {
+      scope: activeFile.scope,
+      path: activeFile.path,
+      content: file,
+      readonly: !canWriteScope(activeFile.scope),
+      worktreeId: worktreeId(activeFile.scope),
+      linuxServerId
+    });
+  } catch (error) {
+    if (error instanceof BackendApiError && error.code === "NOT_FOUND") {
+      workbench.closeTab(tabPath);
+      activeFileByScope.value = { ...activeFileByScope.value, [activeFile.scope]: null };
+      if (notifySkippedFile) {
+        notifyInfo("Agent 文件已不存在", `已关闭 ${activeFile.path}`);
+      }
+      return;
+    }
+    errorMessage.value = formatAgentConfigError(error, "刷新 Agent 文件失败");
+  }
+}
+
 async function refreshScope(scope: Scope) {
-  entriesByScope.value = { ...entriesByScope.value, [scope]: {} };
+  const expandedSnapshot = new Set(expandedByScope.value[scope]);
+  invalidateDirectoryCache(scope);
   await refreshStatus();
   if (scope !== "PUBLIC" || status.value.PUBLIC?.enabled !== false) {
-    await loadDirectory(scope, "");
+    await loadDirectory(scope, "", true);
+    await reloadExpandedDirectories(scope, expandedSnapshot);
+    await refreshActiveEditorFile(scope);
   }
 }
 
@@ -628,17 +753,6 @@ const initializedPublicRepositories = computed(() =>
   publicRepositories.value.filter((repository) => repository.initialized)
 );
 
-const publicRootBadge = computed(() => {
-  if (publicWorktree.value) {
-    return publicWorktree.value.worktreeName;
-  }
-  const serverId = publicConfigLinuxServerId.value;
-  if (!serverId) {
-    return "";
-  }
-  return publicRepositories.value.find((repository) => repository.linuxServerId === serverId)?.serverName ?? serverId;
-});
-
 // 获取当前作用域下的 Git 库分支名称
 const currentRepoBranch = computed(() => {
   if (!createWorktreeScope.value) return "main";
@@ -656,6 +770,44 @@ const activePublicRepository = computed(() => {
     ?? initializedPublicRepositories.value[0]
     ?? null;
 });
+
+const publicSource = computed(() => {
+  const repository = activePublicRepository.value;
+  const serverId = publicWorktree.value?.linuxServerId
+    ?? publicConfigLinuxServerId.value
+    ?? repository?.linuxServerId
+    ?? "";
+  const serverName = repository?.serverName || serverId;
+  if (publicWorktree.value) {
+    return {
+      mode: "worktree",
+      name: publicWorktree.value.worktreeName,
+      serverName,
+      serverId,
+      path: joinLinuxPath(publicWorktree.value.rootPath, "opencode")
+    };
+  }
+  return {
+    mode: "直接目录",
+    name: "",
+    serverName,
+    serverId,
+    path: repository?.configDirPath
+      ?? (repository?.gitRootPath ? joinLinuxPath(repository.gitRootPath, "opencode") : "")
+  };
+});
+
+const publicRootBadge = computed(() => {
+  const source = publicSource.value;
+  if (!source.serverName && !source.name) return "";
+  return source.mode === "worktree"
+    ? `worktree · ${source.name}`
+    : `直接 · ${source.serverName}`;
+});
+
+function joinLinuxPath(root: string, child: string) {
+  return `${root.replace(/\/+$/, "")}/${child}`;
+}
 
 const publicUpdateConflictMessage = computed(() =>
   activePublicRepository.value?.status === "CONFLICT"
@@ -851,9 +1003,7 @@ async function submitSwitchWorktree() {
 }
 
 function resetPublicFileTree() {
-  entriesByScope.value = { ...entriesByScope.value, PUBLIC: {} };
-  expandedByScope.value = { ...expandedByScope.value, PUBLIC: new Set() };
-  loadingByScope.value = { ...loadingByScope.value, PUBLIC: new Set() };
+  invalidateDirectoryCache("PUBLIC", true);
   if (activeScope.value === "PUBLIC") {
     diffFiles.value = [];
     selectedDiffPath.value = "";
@@ -1182,7 +1332,7 @@ function newOperationId() {
 
 defineExpose({
   refreshAll,
-  busy
+  busy: panelBusy
 });
 </script>
 
@@ -1199,7 +1349,7 @@ defineExpose({
     </div>
     <div v-if="!hideHeader" class="agent-config-header">
       <span>Agent</span>
-      <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" :disabled="refreshing" @click="refreshAll">
+      <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" :disabled="refreshing" @click="refreshAll()">
         <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': refreshing }" :stroke-width="1.5" />
       </button>
     </div>
@@ -1210,7 +1360,7 @@ defineExpose({
 
     <div class="agent-tree">
       <div class="agent-root-row" :class="{ active: isRootActive('PUBLIC') }">
-        <el-tooltip content="公共级 agents 及skills" placement="top-start" :show-after="50">
+        <el-tooltip content="公共 Agent 配置；展开后可查看当前服务器、模式和物理路径" placement="top-start" :show-after="50">
           <button type="button" class="agent-root-main" @click="toggleRoot('PUBLIC')">
             <i :class="['codicon codicon-chevron-right ta-file-tree-twistie', rootExpanded.has('PUBLIC') && 'is-open']" aria-hidden="true" />
             <span class="agent-root-title">公共级</span>
@@ -1262,6 +1412,17 @@ defineExpose({
         </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
+        <div
+          v-if="publicSource.path"
+          class="agent-public-source"
+          :title="`${publicSource.mode} · ${publicSource.serverName || publicSource.serverId}\n${publicSource.path}`"
+        >
+          <div class="agent-public-source-meta">
+            <span class="agent-public-source-mode">{{ publicSource.mode }}</span>
+            <span>{{ publicSource.serverName || publicSource.serverId }}</span>
+          </div>
+          <code>{{ publicSource.path }}</code>
+        </div>
         <div v-if="publicConflictFiles.length > 0" class="agent-public-conflict-panel">
           <div class="agent-public-conflict-heading">
             <AlertTriangle class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -2112,6 +2273,41 @@ defineExpose({
 }
 .agent-node-list {
   padding-left: 0;
+}
+.agent-public-source {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 6px 5px 22px;
+  border-left: 2px solid var(--ta-tree-border, #e5e5e5);
+  padding: 2px 0 3px 7px;
+  color: var(--ta-tree-muted, #8b949e);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.agent-public-source-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+.agent-public-source-meta span:last-child,
+.agent-public-source code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-public-source-mode {
+  flex-shrink: 0;
+  color: var(--ta-tree-text, #3b3b3b);
+  font-weight: 600;
+}
+.agent-public-source code {
+  display: block;
+  font-family: var(--ta-font-mono, "SFMono-Regular", Consolas, monospace);
+  color: var(--ta-tree-muted, #8b949e);
 }
 .agent-loading {
   display: flex;

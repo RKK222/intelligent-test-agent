@@ -56,11 +56,21 @@ vi.mock("@test-agent/backend-api", () => ({
 
 vi.mock("@test-agent/workbench-shell", async () => {
   const vue = await vi.importActual<typeof import("vue")>("vue");
-  workbenchMock.store = vue.reactive({
+  const store = vue.reactive({
     publicWorktree: null,
     workspaceWorktree: null,
-    publicConfigLinuxServerId: null
+    publicConfigLinuxServerId: null,
+    tabs: [],
+    activePath: undefined,
+    closeTab: (_path: string) => undefined
   }) as WorkbenchStoreMock;
+  store.closeTab = vi.fn((path: string) => {
+    store.tabs = store.tabs.filter((tab) => tab.path !== path);
+    if (store.activePath === path) {
+      store.activePath = store.tabs.at(-1)?.path;
+    }
+  });
+  workbenchMock.store = store;
   return {
     useWorkbenchStore: () => workbenchMock.store
   };
@@ -72,6 +82,8 @@ describe("AgentConfigPanel", () => {
     workbench.publicWorktree = null;
     workbench.workspaceWorktree = null;
     workbench.publicConfigLinuxServerId = null;
+    workbench.tabs = [];
+    workbench.activePath = undefined;
     apiClientMock.getPublicAgentConfigStatus.mockResolvedValue(publicStatus());
     apiClientMock.getWorkspaceAgentConfigStatus.mockResolvedValue(publicStatus("WORKSPACE"));
     apiClientMock.listPublicAgentFiles.mockResolvedValue([]);
@@ -172,6 +184,108 @@ describe("AgentConfigPanel", () => {
     expect(view.container.querySelector("use")?.getAttribute("href")).toContain("#Readme");
   });
 
+  it("shows the direct public server and physical config directory", async () => {
+    const { view } = renderPanel();
+
+    expect(await view.findByText("直接目录")).toBeTruthy();
+    expect(view.getByText("直接 · 测试服务器")).toBeTruthy();
+    expect(view.getByText("/data/opencode-public-config/opencode")).toBeTruthy();
+  });
+
+  it("shows the selected public worktree server and physical config directory", async () => {
+    const { view } = renderPanel((store) => {
+      store.publicWorktree = publicWorktreeOption();
+      store.publicConfigLinuxServerId = "linux-1";
+    });
+
+    expect(await view.findByText("worktree")).toBeTruthy();
+    expect(view.getByText("worktree · change-agent-md")).toBeTruthy();
+    expect(view.getByText("/data/opencode-public-worktrees/change-agent-md/opencode")).toBeTruthy();
+  });
+
+  it("clears stale expanded entries and reloads the current disk tree", async () => {
+    let diskChanged = false;
+    apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => {
+      if (path === "") {
+        return diskChanged
+          ? [{ path: "opencode.jsonc", name: "opencode.jsonc", type: "file" }]
+          : [{ path: "agents", name: "agents", type: "directory" }];
+      }
+      if (path === "agents") {
+        return [{ path: "agents/legacy.bak", name: "legacy.bak", type: "file" }];
+      }
+      return [];
+    });
+
+    const { view } = renderPanel(undefined, { hideHeader: false });
+    await fireEvent.click(await view.findByText("agents"));
+    expect(await view.findByText("legacy.bak")).toBeTruthy();
+
+    diskChanged = true;
+    await fireEvent.click(view.getByRole("button", { name: "刷新" }));
+
+    expect(await view.findByText("opencode.jsonc")).toBeTruthy();
+    await waitFor(() => expect(view.queryByText("legacy.bak")).toBeNull());
+  });
+
+  it("reloads a clean active Agent editor from disk on refresh", async () => {
+    const activePath = "agent-public::linux-1:agents/review.md";
+    apiClientMock.readPublicAgentFile.mockResolvedValue({
+      path: "agents/review.md",
+      content: "old content",
+      encoding: "utf-8"
+    });
+    const { view } = renderPanel((store) => {
+      store.tabs = [{
+        id: "public-agent",
+        path: activePath,
+        title: "review.md",
+        content: "old content",
+        savedContent: "old content"
+      }];
+      store.activePath = activePath;
+    }, { hideHeader: false, activePath });
+    await waitFor(() => expect(apiClientMock.readPublicAgentFile).toHaveBeenCalledWith("agents/review.md", undefined, "linux-1"));
+
+    apiClientMock.readPublicAgentFile.mockResolvedValue({
+      path: "agents/review.md",
+      content: "new content from disk",
+      encoding: "utf-8"
+    });
+    await fireEvent.click(view.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => {
+      const events = (view.emitted("openFile") ?? []) as unknown[][];
+      expect(events.at(-1)?.[0]).toMatchObject({
+        scope: "PUBLIC",
+        path: "agents/review.md",
+        content: { content: "new content from disk" }
+      });
+    });
+  });
+
+  it("does not overwrite an active Agent editor with unsaved changes", async () => {
+    const activePath = "agent-public::linux-1:agents/review.md";
+    const { view } = renderPanel((store) => {
+      store.tabs = [{
+        id: "public-agent",
+        path: activePath,
+        title: "review.md",
+        content: "unsaved draft",
+        savedContent: "old content"
+      }];
+      store.activePath = activePath;
+    }, { hideHeader: false, activePath });
+
+    await fireEvent.click(view.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => expect(notifyMock.notifyInfo).toHaveBeenCalledWith(
+      "未覆盖未保存的 Agent 文件",
+      "agents/review.md"
+    ));
+    expect(apiClientMock.readPublicAgentFile).not.toHaveBeenCalled();
+  });
+
   it("keeps agents and skills visible for normal users while hiding repository root noise", async () => {
     apiClientMock.listPublicAgentFiles.mockResolvedValue([
       { path: ".DS_Store", name: ".DS_Store", type: "file" },
@@ -214,8 +328,10 @@ describe("AgentConfigPanel", () => {
     await fireEvent.click(await view.findByText(".gitignore"));
 
     await waitFor(() => expect(apiClientMock.readPublicAgentFile).toHaveBeenCalledWith(".gitignore", undefined, "linux-1"));
-    const fileRow = view.getByText(".gitignore").closest("button");
-    expect(fileRow?.classList.contains("is-active")).toBe(true);
+    await waitFor(() => {
+      const fileRow = view.getByText(".gitignore").closest("button");
+      expect(fileRow?.classList.contains("is-active")).toBe(true);
+    });
     expect(view.container.querySelector(".agent-root-row.active")).toBeNull();
   });
 
@@ -495,9 +611,23 @@ type WorkbenchStoreMock = {
   publicWorktree: PublicWorktree | null;
   workspaceWorktree: PublicWorktree | null;
   publicConfigLinuxServerId: string | null;
+  tabs: Array<{
+    id: string;
+    path: string;
+    title: string;
+    content: string;
+    savedContent: string;
+    readonly?: boolean;
+    livePreview?: boolean;
+  }>;
+  activePath?: string;
+  closeTab: (path: string) => void;
 };
 
-function renderPanel(setup?: (workbench: WorkbenchStoreMock) => void, options?: { canWrite?: boolean }) {
+function renderPanel(
+  setup?: (workbench: WorkbenchStoreMock) => void,
+  options?: { canWrite?: boolean; hideHeader?: boolean; activePath?: string }
+) {
   const pinia = createPinia();
   const workbench = currentWorkbenchStore();
   setup?.(workbench);
@@ -507,7 +637,8 @@ function renderPanel(setup?: (workbench: WorkbenchStoreMock) => void, options?: 
       workspaceId: "wrk_1234567890abcdef",
       canWrite: options?.canWrite ?? true,
       canManageWorkspaceConfig: options?.canWrite ?? true,
-      hideHeader: true
+      hideHeader: options?.hideHeader ?? true,
+      activePath: options?.activePath
     },
     global: {
       plugins: [pinia]
