@@ -22,14 +22,14 @@ const DIAMOND_PORTS: RawPort[] = [
   { x: 100, y: 50, pos: Position.Right },
   { x: 50, y: 100, pos: Position.Bottom },
   { x: 0, y: 50, pos: Position.Left },
-  { x: 16.7, y: 16.7, pos: Position.Top },
-  { x: 33.3, y: 33.3, pos: Position.Top },
-  { x: 83.3, y: 16.7, pos: Position.Top },
-  { x: 66.7, y: 33.3, pos: Position.Top },
-  { x: 16.7, y: 83.3, pos: Position.Bottom },
-  { x: 33.3, y: 66.7, pos: Position.Bottom },
-  { x: 83.3, y: 83.3, pos: Position.Bottom },
-  { x: 66.7, y: 66.7, pos: Position.Bottom }
+  { x: 16.7, y: 33.3, pos: Position.Top },
+  { x: 33.3, y: 16.7, pos: Position.Top },
+  { x: 83.3, y: 33.3, pos: Position.Top },
+  { x: 66.7, y: 16.7, pos: Position.Top },
+  { x: 16.7, y: 66.7, pos: Position.Bottom },
+  { x: 33.3, y: 83.3, pos: Position.Bottom },
+  { x: 83.3, y: 66.7, pos: Position.Bottom },
+  { x: 66.7, y: 83.3, pos: Position.Bottom }
 ];
 
 /** 圆形：均匀分布 8 个端口。 */
