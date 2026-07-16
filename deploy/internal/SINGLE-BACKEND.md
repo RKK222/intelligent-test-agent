@@ -7,7 +7,7 @@
 | 前端实体 Nginx | `122.233.30.2` |
 | Java 后台 + worker | `122.233.30.114` |
 | Redis | `122.233.30.20:6379` |
-| PostgreSQL | `122.42.203.103:8000/testagent` |
+| PostgreSQL | `122.233.30.147:5432/postgres` |
 | 行内模型 | `ai-code.sdc.icbc:9070` |
 
 ## 1. 拓扑与端口
@@ -89,8 +89,8 @@ TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114
 TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-114
 SYS_DATA_ROOT_DIR=/data/testagent/data
 
-TEST_AGENT_DB_URL=jdbc:postgresql://122.42.203.103:8000/testagent
-TEST_AGENT_DB_USERNAME=testagent
+TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres
+TEST_AGENT_DB_USERNAME=postgres
 TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 

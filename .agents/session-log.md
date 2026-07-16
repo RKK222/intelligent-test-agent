@@ -22,6 +22,19 @@
   - 本地运行了全量 vitest 单元测试，其中 `node-port-layout.test.ts` 无任何回归，测试 100% 通过。
 - Result:
   - 菱形判断节点的所有紫色连接点完美贴合其边框倾斜线。未修改 API、事件、数据库、环境配置。
+### 2026-07-16 - 按现网数据库配置重打单后台企业离线包
+
+- Why:
+  - 用户要求以单后台 `.114` 和前端 `.2` 为目标，拉取最新主干后重新打包，并根据 0716 现网配置提供可直接执行的升级与验收命令；附件显示公共 OpenCode 配置仍残留 19070 relay、DeepSeek-R1 和直写模型 token 的旧方案。
+- What:
+  - 快进到 `origin/main` 与 `github/main` 共同最新提交 `4c5c87c8`；把企业 PostgreSQL 示例和单/多后台手册同步为现网 `122.233.30.147:5432/postgres`、用户 `postgres`，生产密码继续只保留在服务器 `backend.env`，不进入仓库或公共交付包。
+  - 正式公共模型配置继续使用 Java 内部代理环境变量、`qwen-prod/deepseek-prod`，模型固定为 `Qwen3.6-27B` 和 `DeepSeek-V4-Flash-W8A8`；不保留 19070 relay 或 JSONC 内的上游 token。
+- How:
+  - 复用既有 `package-release.sh`、后端/前端部署脚本、worker 启动脚本和单后台手册，没有新增并行部署入口；首次完整构建被 `goproxy.cn` EOF 中断后，以 shell 覆盖 `GOPROXY=https://proxy.golang.org,direct` 重跑完整流程。
+  - 执行最新后端定向测试、Mermaid 合并回归、Go manager 全量测试、ZIP checksum/完整性、发布包双 validate-only、systemd 首装/升级模拟、Nginx 单/多模式验证，并从最终 worker tar 重新导入镜像完成 Node/OpenCode/模型目录真实 HTTP smoke。
+- Result:
+  - 最终完整包 `deploy/internal/dist/test-agent-internal-release.zip` SHA-256 为 `2696e55f05786b7f368e9a34dbc3a31a0196697e915baa861f096f311b9f1820`；Linux amd64 worker 为 OpenCode 1.17.8、glibc 2.31，Qwen/DeepSeek 两套模型目录与 Provider 路由验证通过。
+  - 本地无法代替企业服务器验证真实 PostgreSQL/Redis/9070、现网 token 和浏览器会话；目标机仍须按单后台手册完成 Java→身份文件→worker→公共配置→模型代理 curl→前端会话验收。
 
 ### 2026-07-16 - 修复 OpenCode 多轮会话后续无回复
 
