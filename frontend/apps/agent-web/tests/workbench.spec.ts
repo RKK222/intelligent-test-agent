@@ -3522,20 +3522,20 @@ test("workbench does not create default personal workspace while opencode become
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
 });
 
-test("workbench accepts the first prompt without requiring new conversation while pet fork waits for a session", async ({ page }) => {
+test("workbench accepts the first prompt without requiring new conversation while pet manual help remains available", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
   });
-  await mockBackendApi(page, { runRequests, ...runnableWorkspaceSetup() });
+  await mockBackendApi(page, { runRequests, ...runnableWorkspaceSetup(), authRoles: ["APP_ADMIN"] });
 
   await gotoWorkbench(page, { selectConversation: false });
 
   await page.getByRole("button", { name: "唤起小宠物" }).click();
   await page.getByTestId("figma-robot").click();
   await expect(page.getByTestId("robot-side-question")).toBeVisible();
-  await expect(page.getByTestId("robot-side-question-input")).toBeDisabled();
-  await expect(page.getByRole("button", { name: "打开宠物小游戏" })).toBeEnabled();
+  await expect(page.getByTestId("robot-side-question-input")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "打开宠物小游戏" })).toHaveCount(0);
 
   const composer = page.locator(".figma-chat-input-card");
   const textarea = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
@@ -3550,11 +3550,25 @@ test("workbench accepts the first prompt without requiring new conversation whil
   expect(runRequests[0]?.prompt).toBe("直接开始第一轮测试");
 });
 
+test("pet mini games are hidden from non-super administrators", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
+  await mockBackendApi(page, { ...runnableWorkspaceSetup(), authRoles: ["APP_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "唤起小宠物" }).click();
+  await page.getByTestId("figma-robot").click();
+  await expect(page.getByTestId("robot-side-question")).toBeVisible();
+  await expect(page.getByRole("button", { name: "打开宠物小游戏" })).toHaveCount(0);
+  await expect(page.getByTestId("pet-mini-games")).toHaveCount(0);
+});
+
 test("pet drag continues after the pointer leaves the robot hit area", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
   });
-  await mockBackendApi(page, runnableWorkspaceSetup());
+  await mockBackendApi(page, { ...runnableWorkspaceSetup(), authRoles: ["SUPER_ADMIN"] });
   await gotoWorkbench(page, { selectConversation: false });
 
   await page.getByRole("button", { name: "唤起小宠物" }).click({ force: true });
@@ -3583,7 +3597,7 @@ test("pet mini games support tetris, minesweeper, sudoku and snake interactions"
   await page.addInitScript(() => {
     Math.random = () => 0;
   });
-  await mockBackendApi(page, runnableWorkspaceSetup());
+  await mockBackendApi(page, { ...runnableWorkspaceSetup(), authRoles: ["SUPER_ADMIN"] });
   await gotoWorkbench(page, { selectConversation: false });
 
   await page.getByRole("button", { name: "唤起小宠物" }).click();

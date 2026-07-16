@@ -5071,6 +5071,7 @@ async function handleLogout() {
     :selected-app-id="selectedAppId"
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
+    :can-play-pet-games="isSuperAdmin"
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"

@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-16 - 限制宠物小游戏仅超管可见
+
+- Why:
+  - 用户要求宠物小游戏只向 `SUPER_ADMIN` 开放，其余角色不可见。
+- What:
+  - `AgentWorkbench` 复用现有 `isSuperAdmin` 角色判断传递 `canPlayPetGames`；`FigmaShell` 默认关闭、隐藏游戏入口、拒绝未授权打开，并在权限撤销时关闭已打开的游戏状态。
+  - 新增普通角色隐藏入口的 FigmaShell 单测和工作台 E2E，调整原有首次输入 E2E 以反映普通角色不再显示小游戏入口；同步更新 agent-web 包权限说明。
+- How:
+  - 复用已有宠物浮层和角色上下文，不新增 API、事件、后端权限接口、数据库字段或持久化。
+  - 执行 FigmaShell 单测、agent-web 类型检查、工作台桌面/移动端定向 E2E，并重启 test profile 本地服务后检查 health/readiness、前端 HTTP 和 manager WebSocket 日志。
+- Result:
+  - FigmaShell 单测 39/39 通过；agent-web typecheck 通过；工作台定向 E2E 6/6 通过（普通角色隐藏、超管小游戏交互、首次输入流程）；后端打包和本地服务重启成功，health/readiness 为 `UP`，前端返回 `200`，manager WebSocket 已连接。
+
 ### 2026-07-16 - 修复 Mermaid ELK 自动布局前端构建回归
 
 - Why:

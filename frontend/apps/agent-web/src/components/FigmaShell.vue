@@ -59,6 +59,8 @@ const props = withDefaults(
     /** 宠物问答可复用主对话；没有主对话时由工作台切换为用户手册知识上下文。 */
     sideQuestionAvailable?: boolean;
     sideQuestionManualMode?: boolean;
+    /** 仅 SUPER_ADMIN 可以打开宠物小游戏；默认关闭以避免独立挂载时泄露入口。 */
+    canPlayPetGames?: boolean;
     showLeftPanel?: boolean;
     showRightPanel?: boolean;
     runtimeInventory?: RuntimeInventorySummary;
@@ -75,6 +77,7 @@ const props = withDefaults(
     showProcessStatusInPet: false,
     sideQuestionAvailable: true,
     sideQuestionManualMode: false,
+    canPlayPetGames: false,
     showLeftPanel: true,
     showRightPanel: true
   }
@@ -1339,6 +1342,7 @@ function closeRobotQuestion() {
 }
 
 function openRobotGames() {
+  if (!props.canPlayPetGames) return;
   robotProcessStatusOpen.value = false;
   robotQuestionOpen.value = true;
   robotGameOpen.value = true;
@@ -1346,6 +1350,7 @@ function openRobotGames() {
 }
 
 function toggleRobotGameView() {
+  if (!props.canPlayPetGames) return;
   if (robotGameOpen.value) robotGameOpen.value = false;
   else openRobotGames();
 }
@@ -1455,6 +1460,10 @@ function toggleRobotVisibility() {
     resumeNaturalRobotBehavior();
   }
 }
+
+watch(() => props.canPlayPetGames, (allowed) => {
+  if (!allowed) robotGameOpen.value = false;
+});
 
 watch(
   [
@@ -2038,6 +2047,7 @@ function submitJoinApp() {
             <PawPrint :size="13" aria-hidden="true" />
           </button>
           <button
+            v-if="props.canPlayPetGames"
             type="button"
             class="figma-robot-companion-game-toggle"
             :class="{ 'is-active': robotGameOpen }"
@@ -2100,7 +2110,7 @@ function submitJoinApp() {
           </button>
         </div>
       </section>
-      <template v-if="!robotGameOpen && !petSettingsOpen">
+      <template v-if="(!robotGameOpen || !props.canPlayPetGames) && !petSettingsOpen">
         <textarea
           ref="robotQuestionInput"
           v-model="robotQuestionDraft"
@@ -2144,7 +2154,7 @@ function submitJoinApp() {
           {{ sideQuestionProgress || "正在准备回答" }}
         </div>
       </template>
-      <div v-else-if="robotGameOpen" class="figma-robot-companion-game">
+      <div v-else-if="robotGameOpen && props.canPlayPetGames" class="figma-robot-companion-game">
         <PetMiniGames embedded />
       </div>
     </section>

@@ -386,7 +386,7 @@ describe("FigmaShell", () => {
 
   it("opens games from the shared pet dialog without a separate activity button", async () => {
     vi.useFakeTimers();
-    const wrapper = mountShell();
+    const wrapper = mountShell({ props: { canPlayPetGames: true } });
     await summonRobot(wrapper);
 
     expect(wrapper.find('[data-testid="robot-game-toggle"]').exists()).toBe(false);
@@ -403,6 +403,19 @@ describe("FigmaShell", () => {
     expect(wrapper.text()).toContain("贪吃蛇");
 
     await wrapper.get('[aria-label="关闭宠物旁路问答"]').trigger("click");
+    expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(false);
+  });
+
+  it("hides the pet game entry for non-super administrators", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[aria-label="打开宠物小游戏"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(false);
   });
 
@@ -432,6 +445,7 @@ describe("FigmaShell", () => {
     vi.useFakeTimers();
     const wrapper = mountShell({
       props: {
+        canPlayPetGames: true,
         showProcessStatusInPet: true,
         sideQuestionAvailable: false,
         opencodeProcessStatus: {
