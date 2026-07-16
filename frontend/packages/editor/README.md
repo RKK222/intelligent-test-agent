@@ -10,6 +10,7 @@ Monaco 文件编辑器包。
 - 展示当前文件内容、脏状态、只读状态和保存按钮。
 - 编辑器 tab、文件工具栏和 Monaco 容器使用 Figma Web IDE 风格的浅灰/白底紧凑 chrome，代码区默认 14px 字号、20px 行高并按可视宽度自动换行；无文件空态使用细边框图标，不使用投影，并通过 `empty-actions` slot 允许 app 层注入主页操作，但 editor 包不感知具体业务。
 - 从空状态首次打开文件时按需初始化 Monaco，并在后续文件切换时复用 editor 实例切换 model。
+- 外部 `path/content` 同 tick 变化时，内容同步必须先校验当前 Monaco model URI 与目标路径一致；异步模型切换完成前不得把新文件内容写入旧模型。
 - 上报 Monaco 当前文本选区给 app 层，用于构造 Prompt file context。
 - Monaco 右键菜单提供“添加选中内容到对话” action，只 emit 当前选区添加事件；具体上下文类型、大小校验和提示由 app 层处理。
 - 保存动作通过回调交给 app 层调用 `backend-api`。

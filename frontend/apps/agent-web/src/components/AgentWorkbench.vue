@@ -232,6 +232,8 @@ const expandedDirectories = ref<Set<string>>(new Set());
 // 文件树面板内错误状态，不覆盖全局顶部反馈
 const fileTreeError = ref<string | null>(null);
 let workspaceLoadGeneration = 0;
+let workspaceFileReadSequence = 0;
+const latestWorkspaceFileReadByPath = new Map<string, number>();
 const fileTreeRetryTimers = new Set<ReturnType<typeof setTimeout>>();
 // 多个目录可能同时在加载（用户连续点开多个折叠项，或 expandPathToFile 一次性
 // 展开多层）。使用 Set<string> 而非单值 ref，避免后到的加载把前者的 loading 状态覆盖，
@@ -541,6 +543,9 @@ const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
+const activeTabInitialLoading = computed(() =>
+  activeTab.value?.loadState === "loading" && activeTab.value.hasLoadedSnapshot === false
+);
 const codeEditorRef = ref<any>(null);
 const breadcrumbDisplay = computed(() => {
   if (!activePath.value) return "";
@@ -2614,6 +2619,7 @@ function createTerminalTicket() {
 function resetWorkspaceState() {
   // Workspace 切换后必须清掉旧根目录绑定的文件树、编辑器、Diff 与运行态，避免误操作旧路径。
   workspaceLoadGeneration++;
+  latestWorkspaceFileReadByPath.clear();
   clearFileTreeRetryTimers();
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
@@ -3239,28 +3245,169 @@ async function loadWorkspaceRequirementCandidates() {
   }
 }
 
+type WorkspaceFileLoadOptions = {
+  activate?: boolean;
+  closeOnNotFound?: boolean;
+  expectedContext?: WorkspaceFileLoadContext;
+};
+
+type WorkspaceFileLoadContext = {
+  workspaceId: string;
+  workspaceGeneration: number;
+};
+
+function workspaceFileLoadContextIsCurrent(context: WorkspaceFileLoadContext): boolean {
+  return selectedWorkspaceIdRef.value === context.workspaceId
+    && workspaceLoadGeneration === context.workspaceGeneration;
+}
+
+function workspaceFileReadIsCurrent(
+  workspaceId: string,
+  path: string,
+  workspaceGeneration: number,
+  requestGeneration: number
+): boolean {
+  return selectedWorkspaceIdRef.value === workspaceId
+    && workspaceLoadGeneration === workspaceGeneration
+    && latestWorkspaceFileReadByPath.get(path) === requestGeneration
+    && workbench.tabs.some((tab: EditorTab) => tab.path === path);
+}
+
+function editorTabIsDirty(tab: EditorTab | undefined): boolean {
+  return Boolean(tab && !tab.livePreview && tab.content !== tab.savedContent);
+}
+
+async function loadWorkspaceFile(path: string, options: WorkspaceFileLoadOptions = {}) {
+  const workspace = selectedWorkspace.value;
+  const context = options.expectedContext ?? (workspace
+    ? { workspaceId: workspace.workspaceId, workspaceGeneration: workspaceLoadGeneration }
+    : undefined);
+  if (!workspace || !context || workspace.workspaceId !== context.workspaceId
+    || !workspaceFileLoadContextIsCurrent(context)) {
+    return;
+  }
+  const activate = options.activate !== false;
+  const existing = workbench.tabs.find((tab: EditorTab) => tab.path === path);
+  if (editorTabIsDirty(existing)) {
+    // 未保存内容始终优先：重复打开只激活，不发起可能覆盖编辑内容的磁盘读取。
+    if (activate) {
+      centerMode.value = "editor";
+      workbench.setActivePath(path);
+    }
+    return;
+  }
+
+  const workspaceId = context.workspaceId;
+  // Workspace 代次与同路径请求代次共同隔离迟到响应，切换根目录或再次读取后旧结果直接作废。
+  const workspaceGeneration = context.workspaceGeneration;
+  const requestGeneration = ++workspaceFileReadSequence;
+  latestWorkspaceFileReadByPath.set(path, requestGeneration);
+  const hadLoadedCache = workbench.tabHasLoadedSnapshot(existing);
+  const contentRevisionAtStart = existing?.contentRevision ?? 0;
+  const loadingPatch = {
+    loadState: "loading" as const,
+    loadError: undefined,
+    // 将 legacy loaded 身份固化到 tab，后续重叠刷新不能被瞬时 loading 状态抹掉。
+    hasLoadedSnapshot: hadLoadedCache
+  };
+  if (activate) {
+    centerMode.value = "editor";
+    workbench.openTab({
+      id: existing && !existing.livePreview ? existing.id : `file:${path}`,
+      path,
+      title: existing?.title ?? (path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path),
+      content: existing?.content ?? "",
+      savedContent: existing?.savedContent ?? "",
+      // 首次读取尚不知道最终权限，先按只读挂载；有缓存的后台刷新保持原编辑能力。
+      readonly: hadLoadedCache ? existing?.readonly : true,
+      livePreview: false,
+      ...loadingPatch
+    });
+  } else if (existing) {
+    workbench.updateTab(path, loadingPatch);
+  } else {
+    return;
+  }
+
+  try {
+    const file = await api.readFile(workspaceId, path, !currentPersonalWorkspaceId.value);
+    if (!workspaceFileReadIsCurrent(workspaceId, path, workspaceGeneration, requestGeneration)) {
+      return;
+    }
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === path);
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart || editorTabIsDirty(current)) {
+      // dirty 可能在读取完成前已被保存/回退为 clean；修订代次确保任何期间编辑都会让旧响应失效。
+      workbench.updateTab(path, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      return;
+    }
+    workbench.updateTab(path, {
+      content: file.content,
+      savedContent: file.content,
+      readonly: file.readonly,
+      loadState: "loaded",
+      loadError: undefined,
+      hasLoadedSnapshot: true
+    });
+  } catch (error) {
+    if (!workspaceFileReadIsCurrent(workspaceId, path, workspaceGeneration, requestGeneration)) {
+      return;
+    }
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === path);
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart) {
+      // 读取期间发生过编辑时，错误响应也已失去意义；结束 loading 并保留当前正文与保存基线。
+      workbench.updateTab(path, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      return;
+    }
+    if (options.closeOnNotFound
+      && error instanceof BackendApiError
+      && error.code === "NOT_FOUND"
+      && !editorTabIsDirty(current)) {
+      workbench.closeTab(path);
+      return;
+    }
+    const failure = errorFeedback("读取文件失败", error);
+    if (hadLoadedCache || editorTabIsDirty(current)) {
+      // 已有可用正文的刷新失败只提示错误，继续保留缓存与 savedContent。
+      workbench.updateTab(path, {
+        loadState: "loaded",
+        loadError: failure.description,
+        hasLoadedSnapshot: true
+      });
+      feedback.value = failure;
+      return;
+    }
+    workbench.updateTab(path, {
+      loadState: "error",
+      loadError: failure.description,
+      hasLoadedSnapshot: false
+    });
+  }
+}
+
 async function openFile(path: string) {
-  if (!selectedWorkspace.value) {
+  await loadWorkspaceFile(path, { activate: true });
+}
+
+function activateEditorTab(path: string) {
+  const tab = workbench.tabs.find((item: EditorTab) => item.path === path);
+  if (!tab) {
     return;
   }
   centerMode.value = "editor";
-  try {
-    const file = await api.readFile(
-      selectedWorkspace.value.workspaceId,
-      path,
-      !currentPersonalWorkspaceId.value
-    );
-    workbench.openTab({
-      id: `file:${path}`,
-      path,
-      title: path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path,
-      content: file.content,
-      savedContent: file.content,
-      readonly: file.readonly
-    });
-  } catch (error) {
-    feedback.value = errorFeedback("读取文件失败", error);
+  if (tab.loadState === "error") {
+    void loadWorkspaceFile(path, { activate: true });
+    return;
   }
+  // loading 不重复请求；loaded 与旧 tab（undefined）直接使用内存缓存。
+  workbench.setActivePath(path);
 }
 
 async function handleCreateEntry(directory: string, name: string, type: "file" | "directory") {
@@ -4682,10 +4829,14 @@ async function loadWorkspaceGitDiffFiles(): Promise<RunDiffFile[]> {
 }
 
 async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
-  if (!selectedWorkspace.value) {
+  const workspace = selectedWorkspace.value;
+  if (!workspace) {
     return;
   }
-  const workspaceId = selectedWorkspace.value.workspaceId;
+  const context: WorkspaceFileLoadContext = {
+    workspaceId: workspace.workspaceId,
+    workspaceGeneration: workspaceLoadGeneration
+  };
   const pathFilter = paths && paths.length > 0 ? new Set(paths) : null;
   const workspaceTabs = workbench.tabs.filter(
     (tab: EditorTab) =>
@@ -4693,24 +4844,19 @@ async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
       !isAgentFilePath(tab.path) &&
       (!pathFilter || pathFilter.has(tab.path))
   );
-  const previousActivePath = activePath.value;
   for (const tab of workspaceTabs) {
-    try {
-      const file = await api.readFile(workspaceId, tab.path, !currentPersonalWorkspaceId.value);
-      workbench.openTab({
-        ...tab,
-        content: file.content,
-        savedContent: file.content,
-        readonly: file.readonly
-      });
-    } catch (error) {
-      if (error instanceof BackendApiError && error.code === "NOT_FOUND") {
-        workbench.closeTab(tab.path);
-      }
+    // 批量刷新跨越 await；每轮前后都核对起始 Workspace，切换后立即终止旧循环。
+    if (!workspaceFileLoadContextIsCurrent(context)) {
+      break;
     }
-  }
-  if (previousActivePath && workbench.tabs.some((tab: EditorTab) => tab.path === previousActivePath)) {
-    workbench.setActivePath(previousActivePath);
+    await loadWorkspaceFile(tab.path, {
+      activate: false,
+      closeOnNotFound: true,
+      expectedContext: context
+    });
+    if (!workspaceFileLoadContextIsCurrent(context)) {
+      break;
+    }
   }
 }
 
@@ -5456,7 +5602,7 @@ async function handleLogout() {
           :show-server-workspace-switch="isSuperAdmin"
           :markdown-preview="markdownPreview"
           :markdown-preview-mode="markdownPreviewMode"
-          @activate="(path: string) => workbench.setActivePath(path)"
+          @activate="activateEditorTab"
           @locate-file="handleLocateFile"
           @close="handleCloseTab"
           @close-many="handleCloseTabs"
@@ -5471,32 +5617,68 @@ async function handleLogout() {
           @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
           @cache-and-navigate="(path: string) => handleCacheAndNavigate(path, 'file')"
         >
-          <CodeEditor
-            ref="codeEditorRef"
-            :path="activeTab?.path"
-            :content="activeTab?.content"
-            :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
-            :readonly="activeTab?.readonly"
-            :saving="saveMutation.isPending.value"
-            :show-preview="markdownPreview"
-            :preview-mode="markdownPreviewMode"
-            @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
-            @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
-            @add-selection-context="addCurrentSelectionToChatContext"
-            @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
+          <div
+            class="relative h-full min-h-0"
+            data-testid="file-load-state"
+            :data-state="activeTab?.loadState ?? (activeTab ? 'loaded' : 'idle')"
           >
-            <template #empty-actions>
+            <CodeEditor
+              v-if="!activeTabInitialLoading"
+              ref="codeEditorRef"
+              :path="activeTab?.path"
+              :content="activeTab?.content"
+              :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
+              :readonly="activeTab?.readonly"
+              :saving="saveMutation.isPending.value"
+              :show-preview="markdownPreview"
+              :preview-mode="markdownPreviewMode"
+              @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
+              @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+              @add-selection-context="addCurrentSelectionToChatContext"
+              @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
+            >
+              <template #empty-actions>
+                <button
+                  type="button"
+                  class="managed-editor-home-help"
+                  data-testid="workbench-home-help"
+                  @click="openHelpCenter('getting-started')"
+                >
+                  <BookOpenText :size="15" />
+                  打开用户手册
+                </button>
+              </template>
+            </CodeEditor>
+            <div
+              v-if="activeTab?.loadState === 'loading'"
+              class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-white/85 text-sm text-slate-500"
+              role="status"
+            >
+              正在读取文件…
+            </div>
+            <div
+              v-else-if="activeTab?.loadState === 'error'"
+              class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white text-sm text-slate-500"
+            >
+              <div class="font-medium text-slate-700">读取文件失败</div>
+              <div class="max-w-[520px] px-6 text-center text-xs text-slate-400">{{ activeTab.loadError }}</div>
               <button
                 type="button"
-                class="managed-editor-home-help"
-                data-testid="workbench-home-help"
-                @click="openHelpCenter('getting-started')"
+                class="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                aria-label="重试读取文件"
+                @click="openFile(activeTab.path)"
               >
-                <BookOpenText :size="15" />
-                打开用户手册
+                重试
               </button>
-            </template>
-          </CodeEditor>
+            </div>
+            <div
+              v-else-if="activeTab?.loadError"
+              class="pointer-events-none absolute inset-x-3 top-3 z-10 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+              role="status"
+            >
+              刷新文件失败，已保留上次内容：{{ activeTab.loadError }}
+            </div>
+          </div>
         </FigmaEditorArea>
       </main>
     </template>

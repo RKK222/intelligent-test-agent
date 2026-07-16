@@ -136,6 +136,21 @@
 - Result:
   - 最新 `test-agent-internal-release.zip` 为 207 MB，SHA-256 `f61c9760de34dd4b949b2c4d88c17f9b57b8b9a6923b9a5c2d6e51988bf85a47`；后端 health/readiness 为 `UP`，前端/CORS 为 200，manager WebSocket/config update 正常，日志确认从 classpath 加载 RSA 私钥。
   - 企业更新时 Java 必须重启；前端必须替换静态文件但只需 reload Nginx；worker 与既有用户 OpenCode 无需重启，可在后台部署时使用 `--skip-worker`。
+### 2026-07-16 - 修复文件打开偶发空白与读取竞态
+
+- Why:
+  - 普通工作区文件实际通过 WebSocket `workspace.read` 读取，浏览器 Fetch/XHR 无请求是正常现象；偶发空白来自文件连接并发建连/旧连接回调竞态、tab 缺少显式加载状态，以及路径与正文同 tick 切换时 Monaco 新内容可能写入旧模型。
+- What:
+  - `backend-api` 为 workspace 与 Agent 配置文件连接增加按路由键隔离的 single-flight，连接/error/close/send 只清理自身缓存和 pending；只有 `workspace.read`、`agent-config.read` 遇到明确传输失败时重连重试一次，业务错误、超时和写操作不重试。
+  - 工作台 tab 增加 loading/loaded/error、错误、稳定磁盘快照身份和用户内容修订代次；文件树、搜索、对话文件卡片和顶部 tab 统一使用带 workspace/同路径请求代次的加载器，迟到响应只更新仍存在且修订未变化的所属 tab，首次失败可重试，合法空文件正常 loaded，刷新失败和读取期间编辑后保存/回退 clean 的内容均保留。
+  - 首次无缓存 loading 不挂载 Monaco；`CodeEditor` 仅在 model URI 与当前路径一致时同步外部正文。批量磁盘刷新固定起始 workspace 上下文，不能跨 await 进入新 workspace。
+- How:
+  - TDD 先复现并发 route/ticket 重复、open 前 close 永久等待、旧 close 驱逐新连接、read 不重试、同步 send 残留 pending，以及 A→B 同 tick 时 B 正文污染 A model；两轮 reviewer 继续发现并补齐首次 loading 可编辑、重叠刷新丢失缓存身份、旧 workspace 刷新循环、send 失败遗留底层 socket，以及读取期间编辑并保存后被旧响应覆盖的边界。
+  - backend-api 定向 69/69；工作台/store/Monaco 聚焦 12/12；工作台文件加载 Chromium/Mobile 22/22（只读用例使用真实应用 workspace 调用上下文，不伪造 WebSocket readonly 字段）；前端全量 68 个测试文件为 1089 passed / 1 skipped，typecheck、lint、build、`git diff --check` 均通过。test profile 三服务重启成功，后端 Maven 与前端生产构建通过。
+- Result:
+  - 使用测试超管账号启动其本地 TestAgent 进程后，真实工作区 `docs/OpenCode自我介绍.md` 显示 32 行非空正文；与 `login-flow.md` 连续快速切换 6 次后活动 tab 和 Monaco 内容仍一致，后端只建立一次 workspace route/ticket，后续读取复用同一 WebSocket。
+  - 不变更 HTTP API、文件 WebSocket wire、`FileContent` DTO、RunEvent、数据库、鉴权、安全策略或 generated SDK；single-flight 减少并发建连开销，兼容旧 tab。仅保留既有构建大 chunk 警告和 Element Plus Tour 非 props 浏览器 warning，无本任务未完成事项。
+
 ### 2026-07-16 - 扩展 Mermaid Flowchart 十四类节点
 
 - Why:

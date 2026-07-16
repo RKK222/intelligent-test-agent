@@ -380,11 +380,27 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
 
   const agentPath = (path: string) => `${agentBase}${path}`;
   const workspaceFileSockets = new Map<string, WorkspaceFileSocketClient>();
+  const workspaceFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   const agentConfigFileSockets = new Map<string, WorkspaceFileSocketClient>();
+  const agentConfigFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
 
-  async function workspaceFileRpc<T>(workspaceId: string, op: string, params: Record<string, unknown>): Promise<T> {
-    const client = await ensureWorkspaceFileClient(workspaceId);
-    return client.request<T>(op, { workspaceId, ...params });
+  async function workspaceFileRpc<T>(
+    workspaceId: string,
+    op: string,
+    params: Record<string, unknown>,
+    retryTransportOnce = false
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const client = await ensureWorkspaceFileClient(workspaceId);
+        return await client.request<T>(op, { workspaceId, ...params });
+      } catch (error) {
+        // 只有读操作显式开启一次传输重试；业务错误、超时与写操作原样返回。
+        if (!retryTransportOnce || attempt > 0 || !(error instanceof WorkspaceFileTransportError)) {
+          throw error;
+        }
+      }
+    }
   }
 
   async function ensureWorkspaceFileClient(workspaceId: string): Promise<WorkspaceFileSocketClient> {
@@ -392,31 +408,52 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     if (existing?.open) {
       return existing;
     }
+    const connecting = workspaceFileConnections.get(workspaceId);
+    if (connecting) {
+      return connecting;
+    }
     existing?.close();
-    const route = await request<WorkspaceFileRoute>(
-      `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/file-ws-route`,
-      { method: "POST" }
-    );
-    const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
-      route.baseUrl.replace(/\/$/, ""),
-      "/api/internal/platform/workspace-management/file-ws/tickets",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          workspaceId,
-          linuxServerId: route.linuxServerId,
-          mode: "workspace"
-        } satisfies WorkspaceFileSocketTicketRequest)
+    // route、ticket 和 socket 创建必须作为一个整体复用，避免并发打开文件时重复建连。
+    const connection = (async () => {
+      const route = await request<WorkspaceFileRoute>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/file-ws-route`,
+        { method: "POST" }
+      );
+      const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+        route.baseUrl.replace(/\/$/, ""),
+        "/api/internal/platform/workspace-management/file-ws/tickets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            workspaceId,
+            linuxServerId: route.linuxServerId,
+            mode: "workspace"
+          } satisfies WorkspaceFileSocketTicketRequest)
+        }
+      );
+      let client!: WorkspaceFileSocketClient;
+      client = new WorkspaceFileSocketClient(
+        toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
+        webSocketFactory,
+        () => {
+          // 旧连接的迟到 close 只能清理自身，不能驱逐已经替换它的新连接。
+          if (workspaceFileSockets.get(workspaceId) === client) {
+            workspaceFileSockets.delete(workspaceId);
+          }
+        }
+      );
+      workspaceFileSockets.set(workspaceId, client);
+      await client.ready();
+      return client;
+    })();
+    workspaceFileConnections.set(workspaceId, connection);
+    try {
+      return await connection;
+    } finally {
+      if (workspaceFileConnections.get(workspaceId) === connection) {
+        workspaceFileConnections.delete(workspaceId);
       }
-    );
-    const client = new WorkspaceFileSocketClient(
-      toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
-      webSocketFactory,
-      () => workspaceFileSockets.delete(workspaceId)
-    );
-    workspaceFileSockets.set(workspaceId, client);
-    await client.ready();
-    return client;
+    }
   }
 
   async function createDirectoryPickerClient(server: WorkspaceBackendServer): Promise<WorkspaceFileSocketClient> {
@@ -444,15 +481,24 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     scope: "PUBLIC" | "WORKSPACE",
     op: string,
     params: Record<string, unknown>,
-    routeContext: { workspaceId?: string; worktreeId?: string | null; linuxServerId?: string | null } = {}
+    routeContext: { workspaceId?: string; worktreeId?: string | null; linuxServerId?: string | null } = {},
+    retryTransportOnce = false
   ): Promise<T> {
-    const client = await ensureAgentConfigFileClient(scope, routeContext);
-    return client.request<T>(op, {
-      scope,
-      workspaceId: routeContext.workspaceId,
-      worktreeId: routeContext.worktreeId ?? undefined,
-      ...params
-    });
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const client = await ensureAgentConfigFileClient(scope, routeContext);
+        return await client.request<T>(op, {
+          scope,
+          workspaceId: routeContext.workspaceId,
+          worktreeId: routeContext.worktreeId ?? undefined,
+          ...params
+        });
+      } catch (error) {
+        if (!retryTransportOnce || attempt > 0 || !(error instanceof WorkspaceFileTransportError)) {
+          throw error;
+        }
+      }
+    }
   }
 
   async function ensureAgentConfigFileClient(
@@ -464,39 +510,59 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     if (existing?.open) {
       return existing;
     }
+    const connecting = agentConfigFileConnections.get(cacheKey);
+    if (connecting) {
+      return connecting;
+    }
     existing?.close();
-    const routePayload = {
-      scope,
-      workspaceId: context.workspaceId,
-      worktreeId: context.worktreeId ?? undefined,
-      linuxServerId: context.linuxServerId ?? undefined
-    };
-    const route = await request<AgentConfigFileRoute>(`${agentConfigBase}/file-ws-route`, {
-      method: "POST",
-      body: JSON.stringify(routePayload)
-    });
-    const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
-      route.baseUrl.replace(/\/$/, ""),
-      "/api/internal/platform/workspace-management/file-ws/tickets",
-      {
+    // Agent 配置按 scope 与路由上下文隔离，同一键的并发调用只允许创建一条连接。
+    const connection = (async () => {
+      const routePayload = {
+        scope,
+        workspaceId: context.workspaceId,
+        worktreeId: context.worktreeId ?? undefined,
+        linuxServerId: context.linuxServerId ?? undefined
+      };
+      const route = await request<AgentConfigFileRoute>(`${agentConfigBase}/file-ws-route`, {
         method: "POST",
-        body: JSON.stringify({
-          workspaceId: scope === "WORKSPACE" ? context.workspaceId : undefined,
-          linuxServerId: route.linuxServerId,
-          mode: "agent-config",
-          scope,
-          worktreeId: context.worktreeId ?? undefined
-        } satisfies WorkspaceFileSocketTicketRequest)
+        body: JSON.stringify(routePayload)
+      });
+      const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+        route.baseUrl.replace(/\/$/, ""),
+        "/api/internal/platform/workspace-management/file-ws/tickets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            workspaceId: scope === "WORKSPACE" ? context.workspaceId : undefined,
+            linuxServerId: route.linuxServerId,
+            mode: "agent-config",
+            scope,
+            worktreeId: context.worktreeId ?? undefined
+          } satisfies WorkspaceFileSocketTicketRequest)
+        }
+      );
+      let client!: WorkspaceFileSocketClient;
+      client = new WorkspaceFileSocketClient(
+        toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
+        webSocketFactory,
+        () => {
+          if (agentConfigFileSockets.get(cacheKey) === client) {
+            agentConfigFileSockets.delete(cacheKey);
+          }
+        }
+      );
+      agentConfigFileSockets.set(cacheKey, client);
+      await client.ready();
+      return client;
+    })();
+    agentConfigFileConnections.set(cacheKey, connection);
+    try {
+      return await connection;
+    } finally {
+      if (agentConfigFileConnections.get(cacheKey) === connection) {
+        agentConfigFileConnections.delete(cacheKey);
       }
-    );
-    const client = new WorkspaceFileSocketClient(
-      toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
-      webSocketFactory,
-      () => agentConfigFileSockets.delete(cacheKey)
-    );
-    agentConfigFileSockets.set(cacheKey, client);
-    await client.ready();
-    return client;
+    }
   }
 
   function agentConfigSocketKey(
@@ -644,7 +710,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     readFile: async (workspaceId: string, path: string, readonly = false) => {
       // 工作区文件读取与列表、写入保持同一条平台 WebSocket 路由，避免旧 OpenCode
       // HTTP 代理在跨服务器或响应格式变化时把真实 Markdown 内容丢在前端之外。
-      const data = await workspaceFileRpc<BackendFileContent>(workspaceId, "workspace.read", { path });
+      const data = await workspaceFileRpc<BackendFileContent>(workspaceId, "workspace.read", { path }, true);
       return {
         path: data.path || path,
         content: typeof data.content === "string" ? data.content : "",
@@ -792,7 +858,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         "PUBLIC",
         "agent-config.read",
         { path },
-        { worktreeId, linuxServerId }
+        { worktreeId, linuxServerId },
+        true
       );
       return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
@@ -835,7 +902,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         "WORKSPACE",
         "agent-config.read",
         { path },
-        { workspaceId, worktreeId }
+        { workspaceId, worktreeId },
+        true
       );
       return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
@@ -1399,6 +1467,13 @@ function toFileTreeEntry(entry: BackendFileTreeEntry): FileTreeEntry {
   };
 }
 
+class WorkspaceFileTransportError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = "WorkspaceFileTransportError";
+  }
+}
+
 class WorkspaceFileSocketClient {
   private readonly socket: WorkspaceWebSocketLike;
   private readonly pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: unknown) => void; timeoutId: ReturnType<typeof setTimeout> }>();
@@ -1413,12 +1488,19 @@ class WorkspaceFileSocketClient {
         this.open = true;
         resolve();
       };
-      this.socket.onerror = () => {
-        reject(new Error("工作空间文件 WebSocket 连接失败"));
+      this.socket.onerror = (event) => {
+        const error = new WorkspaceFileTransportError("工作空间文件 WebSocket 连接失败", event);
+        this.open = false;
+        reject(error);
+        this.rejectAll(error);
+        this.onClose();
       };
       this.socket.onclose = () => {
+        const error = new WorkspaceFileTransportError("工作空间文件 WebSocket 已关闭");
         this.open = false;
-        this.rejectAll(new Error("工作空间文件 WebSocket 已关闭"));
+        // open 前关闭也必须结算 ready()，否则所有复用此 single-flight 的调用都会永久等待。
+        reject(error);
+        this.rejectAll(error);
         this.onClose();
       };
       this.socket.onmessage = (event) => this.handleMessage(event.data);
@@ -1431,7 +1513,7 @@ class WorkspaceFileSocketClient {
 
   request<T>(op: string, params: Record<string, unknown>): Promise<T> {
     if (!this.open) {
-      return Promise.reject(new Error("工作空间文件 WebSocket 尚未连接"));
+      return Promise.reject(new WorkspaceFileTransportError("工作空间文件 WebSocket 尚未连接"));
     }
     const id = `wfr_${Date.now()}_${++this.sequence}`;
     return new Promise<T>((resolve, reject) => {
@@ -1447,7 +1529,25 @@ class WorkspaceFileSocketClient {
         }));
       }, 30000);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timeoutId });
-      this.socket.send(JSON.stringify({ id, op, params }));
+      try {
+        this.socket.send(JSON.stringify({ id, op, params }));
+      } catch (cause) {
+        const detail = cause instanceof Error ? `: ${cause.message}` : "";
+        const error = new WorkspaceFileTransportError(`工作空间文件 WebSocket 发送失败${detail}`, cause);
+        // send() 可能同步抛错；必须先移除当前 pending 与定时器，避免随后再次拒绝或泄漏。
+        this.pending.delete(id);
+        clearTimeout(timeoutId);
+        this.open = false;
+        reject(error);
+        this.rejectAll(error);
+        this.onClose();
+        try {
+          // 先完成原错误与缓存清理再关闭；同步 onclose 可幂等执行，close 异常不得覆盖 send 错误。
+          this.socket.close();
+        } catch {
+          // 连接已从缓存移除且所有 pending 已拒绝，无需用关闭异常替换原始发送失败。
+        }
+      }
     });
   }
 
