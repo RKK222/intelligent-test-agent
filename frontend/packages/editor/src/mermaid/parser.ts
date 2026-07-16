@@ -96,6 +96,10 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   const { layout, consumedLineIndexes } = extractMermaidLayout(lines);
   const edgePortMetadata = extractMermaidEdgePorts(lines);
   const compactMetadata = extractMermaidCompactMarker(lines);
+  const compactMarkerIndexes = [...compactMetadata.markerLineIndexes].sort((left, right) => left - right);
+  const interruptedCompactContinuations = new Set(compactMarkerIndexes.filter((index, position) =>
+    position > 0 && lines[index]?.startsWith("%%@+") && compactMarkerIndexes[position - 1] !== index - 1
+  ));
   const nodes = new Map<string, MermaidNode & { explicit: boolean }>();
   const edges: MermaidGraph["edges"] = [];
   // 私有注释先带源码索引按普通行保留，只有整个新/旧 metadata 验证成功后才统一消费。
@@ -121,6 +125,8 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
 
   lines.forEach((line, index) => {
     if (index === headerIndex) return;
+    // 节点声明或空行不会进入 preservedLines；用空占位保住原中断，避免保存后把坏续行重新拼成有效 marker。
+    if (interruptedCompactContinuations.has(index)) preserveLine("", index - 0.5);
     const trimmed = line.trim();
     if (preservedBlockDepth > 0) {
       preserveLine(line, index);

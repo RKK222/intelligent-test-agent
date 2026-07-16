@@ -9,6 +9,11 @@ const FLAG_SEQUENCE = 1 << 3;
 const KNOWN_FLAGS = FLAG_COORDINATES | FLAG_PORTS | FLAG_ROUTES | FLAG_SEQUENCE;
 const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const MAX_DECODED_BYTES = 1024 * 1024;
+const MAX_ENCODED_CHARS = Math.ceil(MAX_DECODED_BYTES * 4 / 3);
+const COMPACT_MARKER_PREFIX = "%%@";
+const COMPACT_CONTINUATION_PREFIX = "%%@+";
+const COMPACT_LINE_PAYLOAD_LENGTH = 240;
+const MAX_COMPACT_MARKER_LINES = Math.ceil(MAX_ENCODED_CHARS / COMPACT_LINE_PAYLOAD_LENGTH);
 const MAX_ROUTE_POINTS = 4096;
 const MAX_LEB128_BYTES = 5;
 const MAX_UNSIGNED_32 = 0xffff_ffff;
@@ -136,7 +141,7 @@ function encodeBase64Url(bytes: Uint8Array): string {
 }
 
 function decodeBase64Url(value: string): Uint8Array {
-  if (!value || value.length % 4 === 1 || value.length > Math.ceil(MAX_DECODED_BYTES * 4 / 3)) {
+  if (!value || value.length % 4 === 1 || value.length > MAX_ENCODED_CHARS) {
     throw new Error("Base64URL 长度非法");
   }
   const output = new Uint8Array(Math.floor(value.length * 3 / 4));
@@ -166,6 +171,17 @@ function decodeBase64Url(value: string): Uint8Array {
     throw new Error("Base64URL 解码长度非法");
   }
   return output;
+}
+
+/** 短数据保持原单行格式；长数据只增加显式续行前缀，不改变 Base64URL 本体。 */
+function formatCompactMarker(encoded: string): string[] {
+  const chunks: string[] = [];
+  for (let offset = 0; offset < encoded.length; offset += COMPACT_LINE_PAYLOAD_LENGTH) {
+    chunks.push(encoded.slice(offset, offset + COMPACT_LINE_PAYLOAD_LENGTH));
+  }
+  return chunks.map((chunk, index) =>
+    `${index === 0 ? COMPACT_MARKER_PREFIX : COMPACT_CONTINUATION_PREFIX}${chunk}`
+  );
 }
 
 function writeUnsigned(output: number[], value: number): void {
@@ -333,12 +349,69 @@ function verifyEnvelope(encoded: string, signature: string): Uint8Array {
   return body;
 }
 
-/** 只把严格以 `%%@` 开头的行视为新协议；重复 marker 不消费，交由 parser 原样保留。 */
+/**
+ * 提取至多一个逻辑 marker：首行后只拼接紧邻的 `%%@+` 续行。多个首行、孤立续行或
+ * 累计超限都视为冲突并原样保留，避免损坏数据覆盖 Markdown。
+ */
 export function extractMermaidCompactMarker(lines: readonly string[]): CompactMarkerExtraction {
-  const candidates = lines.flatMap((line, index) => line.startsWith("%%@") ? [{ encoded: line.slice(3), index }] : []);
+  const markerLineIndexes = new Set<number>();
+  let startCount = 0;
+  let encodedCandidate: string | null = null;
+  let hasOrphanContinuation = false;
+  let hasInvalidChunk = false;
+  // 冲突 marker 无需记录无限索引；合法单块最多只有该上限，超出后源码行仍会由 parser 普通保留。
+  const trackMarkerLine = (index: number) => {
+    if (markerLineIndexes.size < MAX_COMPACT_MARKER_LINES) markerLineIndexes.add(index);
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (line.startsWith(COMPACT_CONTINUATION_PREFIX)) {
+      trackMarkerLine(index);
+      hasOrphanContinuation = true;
+      encodedCandidate = null;
+      continue;
+    }
+    if (!line.startsWith(COMPACT_MARKER_PREFIX)) continue;
+
+    trackMarkerLine(index);
+    startCount += 1;
+    // 第二个首行已经足以判定冲突，后续只做长度扫描，不再复制或拼接潜在的超大 payload。
+    if (startCount > 1) encodedCandidate = null;
+    const firstChunkLength = line.length - COMPACT_MARKER_PREFIX.length;
+    let chunkCount = 1;
+    let encodedLength = firstChunkLength;
+    let hasContinuation = false;
+    let invalidCandidate = firstChunkLength === 0 || encodedLength > MAX_ENCODED_CHARS;
+    const shouldCollect = startCount === 1 && !hasOrphanContinuation && !hasInvalidChunk && !invalidCandidate;
+    const chunks = shouldCollect ? [line.slice(COMPACT_MARKER_PREFIX.length)] : [];
+    while (lines[index + 1]?.startsWith(COMPACT_CONTINUATION_PREFIX)) {
+      index += 1;
+      trackMarkerLine(index);
+      hasContinuation = true;
+      const chunkLine = lines[index]!;
+      const chunkLength = chunkLine.length - COMPACT_CONTINUATION_PREFIX.length;
+      chunkCount += 1;
+      encodedLength += chunkLength;
+      if (
+        chunkLength === 0 ||
+        firstChunkLength > COMPACT_LINE_PAYLOAD_LENGTH ||
+        chunkLength > COMPACT_LINE_PAYLOAD_LENGTH ||
+        chunkCount > MAX_COMPACT_MARKER_LINES ||
+        encodedLength > MAX_ENCODED_CHARS
+      ) invalidCandidate = true;
+      if (shouldCollect && !invalidCandidate) chunks.push(chunkLine.slice(COMPACT_CONTINUATION_PREFIX.length));
+    }
+    if (hasContinuation && firstChunkLength > COMPACT_LINE_PAYLOAD_LENGTH) invalidCandidate = true;
+    if (invalidCandidate) {
+      hasInvalidChunk = true;
+      encodedCandidate = null;
+      continue;
+    }
+    if (shouldCollect) encodedCandidate = chunks.join("");
+  }
   return {
-    encoded: candidates.length === 1 ? candidates[0]!.encoded : null,
-    markerLineIndexes: new Set(candidates.map((candidate) => candidate.index))
+    encoded: startCount === 1 && !hasOrphanContinuation && !hasInvalidChunk ? encodedCandidate : null,
+    markerLineIndexes
   };
 }
 
@@ -382,7 +455,7 @@ export function serializeMermaidCompactFlow(graph: MermaidGraph): string[] {
   if (hasPorts) body.push(...portBytes);
   if (hasRoutes) encodeRoutes(body, encodableRoutes, routeSources);
   const bytes = appendChecksum(body, topologySignatureForFlow(graph));
-  return bytes.length <= MAX_DECODED_BYTES ? [`%%@${encodeBase64Url(bytes)}`] : [];
+  return bytes.length <= MAX_DECODED_BYTES ? formatCompactMarker(encodeBase64Url(bytes)) : [];
 }
 
 /** 完整校验后原子应用 Flow 私有状态；任一字段异常都返回 false 且不修改图模型。 */
@@ -463,7 +536,7 @@ export function serializeMermaidCompactSequence(diagram: MermaidSequenceDiagram)
   writeUnsigned(body, 0);
   encodeCoordinates(body, positions as ScaledPosition[]);
   const bytes = appendChecksum(body, topologySignatureForSequence(diagram));
-  return bytes.length <= MAX_DECODED_BYTES ? [`%%@${encodeBase64Url(bytes)}`] : [];
+  return bytes.length <= MAX_DECODED_BYTES ? formatCompactMarker(encodeBase64Url(bytes)) : [];
 }
 
 /** 校验并原子应用 Sequence 参与者坐标；消息不属于布局拓扑签名。 */

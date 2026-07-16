@@ -7270,3 +7270,18 @@ bash /tmp/test-api-after-restart.sh
   - editor 全量 12 个 Vitest 文件 160 passed；前端全量 64 个文件 969 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。
   - 全量 Vitest 与 lint 首次并行运行时，一个既有 `MarkdownPreview` 异步对话框用例超过 1 秒超时；该用例独占运行及全量 Vitest 独占复跑均通过，确认是资源争用而非代码回归，未修改任务外超时。
   - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。
+
+### 2026-07-16 - Mermaid 紧凑元数据按 240 字符分行
+
+- Why:
+  - 大型 Mermaid 图的 Base64URL 布局注释仍可能形成很长的单行，影响 Markdown 阅读和编辑；需要在不过度增加行数的前提下稳定分行，并保持现有二进制协议、拓扑 hash 和短图输出不变。
+- What:
+  - Flow/Sequence serializer 在完整编码后按每段 240 个 payload 字符切分：首行使用 `%%@`，续行使用紧邻的 `%%@+`；240 字符仍保持单行，约 972 字符稳定保存为 5 行。
+  - parser 把一个首行及其连续续行作为单个逻辑 envelope，兼容既有短/长单行；多个首行、孤立/中断/空白/超长续段、缺失/重复/乱序、非法字符、hash/拓扑错误及累计超限都保留 marker 内容并回退旧布局，且阻止 serializer 写入第二个 marker。
+  - 同步 editor README/PACKAGE 及当前正交路由设计/实施说明；旧版 reader 对多行格式只能保留并回退，不能应用其中布局，已在文档明确兼容边界。
+- How:
+  - 保持 `0xA1`、flags、Base64URL、LEB128、ZigZag、FNV-1a 和领域接口不变；拼接前限制累计编码长度、最多 5826 个物理行，并在发现第二首行或其他全局冲突后停止复制/拼接候选，最多额外持有一个完整 payload。
+  - TDD 覆盖 Flow/Sequence 单行与多行 round trip、240/241 边界、短续段规范化、官方 Mermaid parser、编辑器预览、失败安全、旧格式迁移和代表图单行紧凑度。
+- Result:
+  - editor 全量 12 个 Vitest 文件 172 passed；前端全量 64 个文件 981 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，build 仅保留既有大 chunk 提示。
+  - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。

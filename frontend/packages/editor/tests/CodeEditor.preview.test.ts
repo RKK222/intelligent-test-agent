@@ -150,6 +150,7 @@ describe("CodeEditor Markdown 预览受控", () => {
     await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }));
 
     await vi.waitFor(() => expect(emitted().change).toBeTruthy());
-    expect((emitted().change as Array<[string]>)[0]?.[0]).toMatch(/^```mermaid\nflowchart TD\n%%@[A-Za-z0-9_-]+$/m);
+    expect((emitted().change as Array<[string]>)[0]?.[0])
+      .toMatch(/^```mermaid\nflowchart TD\n%%@[A-Za-z0-9_-]+(?:\n%%@\+[A-Za-z0-9_-]+)*$/m);
   });
 });

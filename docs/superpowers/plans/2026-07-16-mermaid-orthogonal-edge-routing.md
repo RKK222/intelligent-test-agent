@@ -1,6 +1,6 @@
 # Mermaid 正交避障与紧凑元数据 Implementation Plan
 
-**Goal:** 由 ELK 完整计算并保存 Flowchart 正交避障路由，同时把 Flow/Sequence 私有编辑信息压缩为单行 `%%@<base64url>`。
+**Goal:** 由 ELK 完整计算并保存 Flowchart 正交避障路由，同时把 Flow/Sequence 私有编辑信息压缩为一个短数据单行、长数据有限分行的紧凑 envelope。
 
 **Architecture:** `layout.ts` 消费 ELK node positions 与 edge sections，稳定映射现有 Handle；领域边持有可失效的派生 route，自定义边负责圆角 path 和 SmoothStep 回退。`compact-metadata.ts` 独立实现 Base64URL、LEB128、ZigZag、FNV-1a、拓扑校验和解码上限；Flow/Sequence parser 保留旧格式读取，serializer 只写新格式。
 
@@ -14,11 +14,11 @@
 - Create: `frontend/packages/editor/tests/mermaid-compact-metadata.test.ts`
 - Modify: Flow/Sequence parser 与 serializer
 
-- [x] 先添加 Flow/Sequence 单行 marker、0.1px round trip、旧布局/端口迁移、无数据不输出、代表图小于展开 JSON 10% 的失败测试。
+- [x] 先添加 Flow/Sequence 紧凑 marker、0.1px round trip、旧布局/端口迁移、无数据不输出、代表图小于展开 JSON 10% 的失败测试。
 - [x] 手写无 padding Base64URL、unsigned LEB128、ZigZag 和 FNV-1a，不引入依赖。
 - [x] 实现 `0xA1`、flags、entity/edge counts、坐标增量、端口 nibble、正交路由轴向增量及 little-endian checksum。
 - [x] 使用规范化 Flow/Sequence 拓扑签名校验陈旧数据；边标签不进入签名。
-- [x] Flow/Sequence serializer 只写 `%%@...`；没有非零坐标、端口或路由时不写 marker。
+- [x] Flow/Sequence serializer 以 `%%@...` 写首行，payload 超过 240 字符时以紧邻的 `%%@+...` 续行；没有非零坐标、端口或路由时不写 marker。
 
 ## Task 2：失败安全与旧格式兼容
 
@@ -30,9 +30,10 @@
 
 - [x] 唯一有效新 marker 优先，成功后消费有效旧数据；有效旧数据在无新 marker 时应用并在保存时迁移。
 - [x] 损坏或重复新 marker 原样保留并回退旧格式；同时保留有效旧注释并禁止写第二个新 marker。
+- [x] 多行 extractor 拼接一个首行及紧邻续行；孤立/空白/中断/超长、缺失/重复/乱序分段均保留并回退，短续段下次保存规范化。
 - [x] 损坏旧注释无论新格式是否有效都原样保留。
-- [x] 解码限制 1 MiB、单边 4096 点、单个 LEB128 5 bytes、绝对坐标 10,000,000px；拒绝非法 Base64URL、非最短 LEB128、类型/数量/端口/hash/EOF/路由异常。
-- [x] 固定 Flow 与 Sequence golden vector，并覆盖截断、hash、拓扑变化、重复 marker、非法类型/端口、超限和尾随数据。
+- [x] 解码限制 1 MiB、累计编码长度、最多 5826 个物理行、单边 4096 点、单个 LEB128 5 bytes、绝对坐标 10,000,000px；拒绝非法 Base64URL、非最短 LEB128、类型/数量/端口/hash/EOF/路由异常。
+- [x] 固定 Flow 与 Sequence golden vector，并覆盖 240 字符边界、确定性分段、官方 Mermaid parser、截断、hash、拓扑变化、重复 marker、非法类型/端口、超限和尾随数据。
 - [x] 删除尚未发布的展开式 `edge-route-metadata.ts` 实现，不把它定义为兼容协议。
 
 ## Task 3：ELK 完整正交布局

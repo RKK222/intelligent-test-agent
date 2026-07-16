@@ -83,7 +83,7 @@ A --> B`);
       targetHandle: "source-1"
     });
     const serialized = serializeMermaidGraph(graph);
-    expect(serialized.split("\n").filter((line) => line.startsWith("%%@"))).toHaveLength(1);
+    expect(serialized.split("\n").filter((line) => /^%%@(?!\+)/.test(line))).toHaveLength(1);
     expect(serialized).not.toContain("editor-edge-ports");
     expect(parseMermaidFlowchart(serialized).edges[0]).toMatchObject({
       sourceHandle: "target-2",

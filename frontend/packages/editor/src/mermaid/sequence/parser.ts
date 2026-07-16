@@ -27,6 +27,10 @@ export function parseMermaidSequence(source: string): MermaidSequenceDiagram {
 
   const { layout, consumedLineIndexes } = extractMermaidLayout(lines);
   const compactMetadata = extractMermaidCompactMarker(lines);
+  const compactMarkerIndexes = [...compactMetadata.markerLineIndexes].sort((left, right) => left - right);
+  const interruptedCompactContinuations = new Set(compactMarkerIndexes.filter((index, position) =>
+    position > 0 && lines[index]?.startsWith("%%@+") && compactMarkerIndexes[position - 1] !== index - 1
+  ));
   const participants = new Map<string, MermaidSequenceParticipant & { explicit: boolean }>();
   const messages: MermaidSequenceDiagram["messages"] = [];
   // 与 Flow 一致先保留元数据原文，避免新 marker 损坏时误吞可用于回退的旧坐标。
@@ -57,6 +61,8 @@ export function parseMermaidSequence(source: string): MermaidSequenceDiagram {
 
   lines.forEach((line, index) => {
     if (index === headerIndex) return;
+    // 参与者声明或空行不会进入 preservedLines；保留一个空占位，阻止坏续行在保存时意外相邻。
+    if (interruptedCompactContinuations.has(index)) preserveLine("", index - 0.5);
     const trimmed = line.trim();
     const startsComplexBlock = /^(?:loop|alt|opt|par|critical|break|rect|box)\b/i.test(trimmed);
     if (preservedBlockDepth > 0) {

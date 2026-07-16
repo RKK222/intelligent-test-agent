@@ -99,7 +99,7 @@ describe("Mermaid edge route metadata", () => {
     const serialized = serializeMermaidGraph(graphWithRoute());
     const reparsed = parseMermaidFlowchart(serialized);
 
-    expect(serialized.split("\n").filter((line) => line.startsWith("%%@"))).toHaveLength(1);
+    expect(serialized.split("\n").filter((line) => /^%%@(?!\+)/.test(line))).toHaveLength(1);
     expect(serialized).not.toContain("editor-edge-routes");
     expect((reparsed.edges[0] as EdgeWithRoute | undefined)?.route?.points).toEqual([
       { x: 120, y: 80 },
