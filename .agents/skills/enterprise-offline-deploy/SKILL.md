@@ -17,6 +17,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 - worker/打包配置读取 `/data/testagent/config/docker.env`，模板来自 `deploy/internal/env.example`。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与 worker 的 `TEST_AGENT_DATA_ROOT` 指向同一个宿主机目录，默认 `/data/testagent/data`。
 - 新版不再配置 `OPENCODE_MANAGER_ID`、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_LINUX_SERVER_ID`。
+- 当前前端实体 Nginx 安装在 `/data/apps/nginx`；单后台现场先运行 `configure-single-deployment.sh frontend` 生成 `nginx.env`，不要用 PATH 中可能读取 `/root/conf/nginx.conf` 的其他 `nginx`。
 
 ## 每次回答必须包含
 
@@ -133,6 +134,20 @@ TEST_AGENT_BACKEND=<后端服务器IP或域名>:8080
 
 端口池必须是宿主机可访问端口，Docker 映射保持 `4096-4105:4096-4105` 这种内外一致形式，不要做 `14096:4096`。
 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 是 Java 内部模型代理鉴权 key，只配置在 `backend.env`，不要放到 `docker.env`；Java 会在启动用户 opencode server 时通过 manager command 注入给子进程。
+
+### 单后台配置脚本
+
+交付 ZIP 内的 `deploy/internal/configure-single-deployment.sh` 用于当前 `.2 + .114` 单后台现场：
+
+```bash
+# 122.233.30.114：保留当前数据库密码及 token，重建 backend.env/docker.env
+bash deploy/internal/configure-single-deployment.sh backend
+
+# 122.233.30.2：探测 /data/apps/nginx 实际 include 目录并重建 nginx.env
+bash deploy/internal/configure-single-deployment.sh frontend --nginx-home /data/apps/nginx
+```
+
+后台角色要求现有 `backend.env` 中已有数据库密码和内部代理 key，且两份 env 的 manager token 一致；任一条件不满足时必须在写文件前失败。前端角色生成的 `nginx.env` 明确设置 `/data/apps/nginx/sbin/nginx`、prefix、主配置和 binary reload；`configure-nginx.sh` 仍保留 PATH nginx + systemd 作为其他标准安装环境的兼容兜底。
 
 ## 标准部署顺序
 

@@ -18,9 +18,11 @@ mkdir -p "${FAKE_BIN}"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -euo pipefail' \
-  'if [[ "$1" == "-T" ]]; then' \
-  '  printf "# configuration file %s:\n" "${TEST_AGENT_NGINX_CONF_PATH}"' \
-  'fi' \
+  'for arg in "$@"; do' \
+  '  if [[ "${arg}" == "-T" ]]; then' \
+  '    printf "# configuration file %s:\n" "${TEST_AGENT_NGINX_CONF_PATH}"' \
+  '  fi' \
+  'done' \
   'exit 0' >"${FAKE_BIN}/nginx"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
@@ -58,6 +60,40 @@ grep -Fq 'server 122.233.30.4:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
 test "$(grep -Fxc 'reload nginx' "${CALL_LOG}")" = 2
+
+CUSTOM_ROOT="${TMP_ROOT}/custom-nginx"
+CUSTOM_CONF_PATH="${CUSTOM_ROOT}/conf/conf.d/test-agent-gateway.conf"
+CUSTOM_MAIN_CONF="${CUSTOM_ROOT}/conf/nginx.conf"
+CUSTOM_CALL_LOG="${TMP_ROOT}/custom-nginx-calls.log"
+mkdir -p "${CUSTOM_ROOT}/sbin" "$(dirname "${CUSTOM_CONF_PATH}")"
+printf 'events {}\nhttp { include conf/conf.d/*.conf; }\n' >"${CUSTOM_MAIN_CONF}"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'printf "%s\n" "$*" >>"${TEST_AGENT_NGINX_TEST_CALL_LOG}"' \
+  'for arg in "$@"; do' \
+  '  if [[ "${arg}" == "-T" ]]; then' \
+  '    printf "# configuration file %s:\n" "${TEST_AGENT_NGINX_CONF_PATH}"' \
+  '  fi' \
+  'done' \
+  'exit 0' >"${CUSTOM_ROOT}/sbin/nginx"
+chmod +x "${CUSTOM_ROOT}/sbin/nginx"
+{
+  printf 'TEST_AGENT_NGINX_MODE=single\n'
+  printf 'TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080\n'
+  printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
+  printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
+  printf 'TEST_AGENT_NGINX_CONF_PATH=%s\n' "${CUSTOM_CONF_PATH}"
+  printf 'TEST_AGENT_NGINX_BIN=%s\n' "${CUSTOM_ROOT}/sbin/nginx"
+  printf 'TEST_AGENT_NGINX_PREFIX=%s\n' "${CUSTOM_ROOT}"
+  printf 'TEST_AGENT_NGINX_MAIN_CONF=%s\n' "${CUSTOM_MAIN_CONF}"
+  printf 'TEST_AGENT_NGINX_RELOAD_MODE=binary\n'
+} >"${ENV_FILE}"
+TEST_AGENT_NGINX_TEST_CALL_LOG="${CUSTOM_CALL_LOG}" \
+  bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${ENV_FILE}"
+grep -Fq -- "-p ${CUSTOM_ROOT}/ -c ${CUSTOM_MAIN_CONF} -t" "${CUSTOM_CALL_LOG}"
+grep -Fq -- "-p ${CUSTOM_ROOT}/ -c ${CUSTOM_MAIN_CONF} -T" "${CUSTOM_CALL_LOG}"
+grep -Fq -- "-p ${CUSTOM_ROOT}/ -c ${CUSTOM_MAIN_CONF} -s reload" "${CUSTOM_CALL_LOG}"
 
 write_env single '122.233.30.4:8080,122.233.30.114:8080'
 if PATH="${FAKE_BIN}:${PATH}" bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${ENV_FILE}" --validate-only; then

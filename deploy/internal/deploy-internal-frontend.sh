@@ -123,8 +123,6 @@ require_file "${ARCHIVE}"
 
 if [[ "${VALIDATE_ONLY}" -eq 0 ]]; then
   require_command curl
-  require_command nginx
-  require_command systemctl
 fi
 
 log "Extract release archive"

@@ -53,6 +53,18 @@ require_command() {
   fi
 }
 
+require_executable() {
+  local executable="$1"
+  if [[ "${executable}" == */* ]]; then
+    if [[ ! -x "${executable}" ]]; then
+      echo "Required executable not found: ${executable}" >&2
+      exit 1
+    fi
+  else
+    require_command "${executable}"
+  fi
+}
+
 require_file() {
   if [[ ! -f "$1" ]]; then
     echo "Required file not found: $1" >&2
@@ -102,6 +114,11 @@ NGINX_LISTEN_PORT="${TEST_AGENT_NGINX_LISTEN_PORT:-80}"
 FRONTEND_ROOT="${TEST_AGENT_FRONTEND_ROOT:-/data/testagent/frontend}"
 NGINX_BACKENDS="${TEST_AGENT_NGINX_BACKENDS:-}"
 NGINX_CONF_PATH="${TEST_AGENT_NGINX_CONF_PATH:-/etc/nginx/conf.d/test-agent-gateway.conf}"
+NGINX_BIN="${TEST_AGENT_NGINX_BIN:-nginx}"
+NGINX_PREFIX="${TEST_AGENT_NGINX_PREFIX:-}"
+NGINX_MAIN_CONF="${TEST_AGENT_NGINX_MAIN_CONF:-}"
+NGINX_RELOAD_MODE="${TEST_AGENT_NGINX_RELOAD_MODE:-systemd}"
+NGINX_SYSTEMD_SERVICE="${TEST_AGENT_NGINX_SYSTEMD_SERVICE:-nginx}"
 
 [[ "${NGINX_MODE}" == "single" || "${NGINX_MODE}" == "multi" ]] || {
   echo "TEST_AGENT_NGINX_MODE must be single or multi" >&2
@@ -118,6 +135,34 @@ NGINX_CONF_PATH="${TEST_AGENT_NGINX_CONF_PATH:-/etc/nginx/conf.d/test-agent-gate
 [[ "${NGINX_CONF_PATH}" =~ ^/[A-Za-z0-9._/-]+\.conf$ ]] || {
   echo "Invalid TEST_AGENT_NGINX_CONF_PATH: ${NGINX_CONF_PATH}" >&2
   exit 1
+}
+[[ -z "${NGINX_PREFIX}" || "${NGINX_PREFIX}" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
+  echo "Invalid TEST_AGENT_NGINX_PREFIX: ${NGINX_PREFIX}" >&2
+  exit 1
+}
+[[ -z "${NGINX_MAIN_CONF}" || "${NGINX_MAIN_CONF}" =~ ^/[A-Za-z0-9._/-]+\.conf$ ]] || {
+  echo "Invalid TEST_AGENT_NGINX_MAIN_CONF: ${NGINX_MAIN_CONF}" >&2
+  exit 1
+}
+[[ "${NGINX_RELOAD_MODE}" == "systemd" || "${NGINX_RELOAD_MODE}" == "binary" ]] || {
+  echo "TEST_AGENT_NGINX_RELOAD_MODE must be systemd or binary" >&2
+  exit 1
+}
+[[ "${NGINX_SYSTEMD_SERVICE}" =~ ^[A-Za-z0-9_.@-]+$ ]] || {
+  echo "Invalid TEST_AGENT_NGINX_SYSTEMD_SERVICE: ${NGINX_SYSTEMD_SERVICE}" >&2
+  exit 1
+}
+
+nginx_command=("${NGINX_BIN}")
+if [[ -n "${NGINX_PREFIX}" ]]; then
+  nginx_command+=("-p" "${NGINX_PREFIX%/}/")
+fi
+if [[ -n "${NGINX_MAIN_CONF}" ]]; then
+  nginx_command+=("-c" "${NGINX_MAIN_CONF}")
+fi
+
+run_nginx() {
+  "${nginx_command[@]}" "$@"
 }
 
 IFS=',' read -r -a raw_backends <<<"${NGINX_BACKENDS}"
@@ -181,8 +226,10 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   exit 0
 fi
 
-require_command nginx
-require_command systemctl
+require_executable "${NGINX_BIN}"
+if [[ "${NGINX_RELOAD_MODE}" == "systemd" ]]; then
+  require_command systemctl
+fi
 mkdir -p "$(dirname "${NGINX_CONF_PATH}")"
 if [[ -f "${NGINX_CONF_PATH}" ]]; then
   backup="${NGINX_CONF_PATH}.bak.$(date +%Y%m%d%H%M%S)"
@@ -200,22 +247,31 @@ rollback() {
   fi
 }
 
-if ! nginx -t; then
+if ! run_nginx -t; then
   rollback
-  nginx -t || true
+  run_nginx -t || true
   echo "Nginx validation failed; previous gateway configuration restored" >&2
   exit 1
 fi
-if ! nginx -T 2>&1 | grep -F "# configuration file ${NGINX_CONF_PATH}:" >/dev/null; then
+if ! run_nginx -T 2>&1 | grep -F "# configuration file ${NGINX_CONF_PATH}:" >/dev/null; then
   rollback
-  nginx -t || true
+  run_nginx -t || true
   echo "Nginx does not include ${NGINX_CONF_PATH}; set TEST_AGENT_NGINX_CONF_PATH to an included .conf file" >&2
   exit 1
 fi
-if ! systemctl reload nginx; then
+if [[ "${NGINX_RELOAD_MODE}" == "systemd" ]]; then
+  reload_nginx() {
+    systemctl reload "${NGINX_SYSTEMD_SERVICE}"
+  }
+else
+  reload_nginx() {
+    run_nginx -s reload
+  }
+fi
+if ! reload_nginx; then
   rollback
-  nginx -t || true
-  systemctl reload nginx || true
+  run_nginx -t || true
+  reload_nginx || true
   echo "Nginx reload failed; previous gateway configuration restored" >&2
   exit 1
 fi
