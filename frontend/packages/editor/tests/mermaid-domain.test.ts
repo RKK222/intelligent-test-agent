@@ -156,9 +156,9 @@ X --> Y
     );
   });
 
-  it("自动布局按图方向生成确定性坐标且不改变输入模型", () => {
+  it("自动布局按图方向生成确定性坐标且不改变输入模型", async () => {
     const graph = parseMermaidFlowchart("flowchart LR\nA --> B\nA --> C\nC --> D");
-    const laidOut = autoLayoutMermaidGraph(graph);
+    const laidOut = await autoLayoutMermaidGraph(graph);
 
     expect(laidOut).not.toBe(graph);
     expect(laidOut.nodes.find((node) => node.id === "A")?.position.x).toBeLessThan(
@@ -168,7 +168,7 @@ X --> Y
       laidOut.nodes.find((node) => node.id === "C")?.position.x ?? 0
     );
     expect(graph.nodes.every((node) => node.position.x === 0 && node.position.y === 0)).toBe(true);
-    expect(autoLayoutMermaidGraph(graph)).toEqual(laidOut);
+    expect(await autoLayoutMermaidGraph(graph)).toEqual(laidOut);
   });
 
   it("拒绝非 flowchart/graph 和缺少图头的内容", () => {

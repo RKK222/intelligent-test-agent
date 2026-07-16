@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { cloneMermaidDiagram, type MermaidEditableDiagram } from "../diagram";
-import { autoLayoutMermaidGraph } from "../layout";
+import { autoLayoutMermaidGraph, syncAutoLayoutMermaidGraph } from "../layout";
 import type { MermaidGraph } from "../model";
 import { autoLayoutMermaidSequence } from "../sequence/layout";
 import type { MermaidSequenceDiagram } from "../sequence/model";
@@ -19,9 +19,12 @@ const emit = defineEmits<{
 
 const draft = ref<MermaidEditableDiagram>();
 
+let lastWatchModel: any = null;
+
 watch(
   () => props.model,
-  (model) => {
+  async (model) => {
+    lastWatchModel = model;
     if (!model) {
       draft.value = undefined;
       return;
@@ -29,10 +32,27 @@ watch(
     const cloned = cloneMermaidDiagram(model);
     if (cloned.kind === "sequenceDiagram") {
       const hasStoredLayout = cloned.participants.some((participant) => participant.position.x !== 0 || participant.position.y !== 0);
-      draft.value = hasStoredLayout ? cloned : autoLayoutMermaidSequence(cloned);
+      if (lastWatchModel === model) {
+        draft.value = hasStoredLayout ? cloned : autoLayoutMermaidSequence(cloned);
+      }
     } else {
       const hasStoredLayout = cloned.nodes.some((node) => node.position.x !== 0 || node.position.y !== 0);
-      draft.value = hasStoredLayout ? cloned : autoLayoutMermaidGraph(cloned);
+      if (hasStoredLayout) {
+        if (lastWatchModel === model) {
+          draft.value = cloned;
+        }
+      } else {
+        // 先同步做一次旧的重心布局，给 draft.value 赋初值，保证同步挂载和单元测试能立刻正常交互
+        const tempLaidOut = syncAutoLayoutMermaidGraph(cloned);
+        if (lastWatchModel === model) {
+          draft.value = tempLaidOut;
+        }
+        // 然后异步去算更精细的 ELK 布局，并在计算好后更新坐标
+        const laidOut = await autoLayoutMermaidGraph(cloned);
+        if (lastWatchModel === model) {
+          draft.value = laidOut;
+        }
+      }
     }
   },
   { immediate: true }

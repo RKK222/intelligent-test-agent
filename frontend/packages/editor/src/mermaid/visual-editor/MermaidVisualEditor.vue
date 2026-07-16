@@ -283,8 +283,9 @@ function onCanvasDrop(event: DragEvent) {
   if (position) createNode(type, position);
 }
 
-function applyAutoLayout() {
-  emit("update:modelValue", autoLayoutMermaidGraph(props.modelValue));
+async function applyAutoLayout() {
+  const nextGraph = await autoLayoutMermaidGraph(props.modelValue);
+  emit("update:modelValue", nextGraph);
 }
 
 function updateDirection(event: Event) {

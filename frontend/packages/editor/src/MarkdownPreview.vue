@@ -59,13 +59,21 @@ async function ensureLibs(needMermaid = false) {
   if (needMermaid && !mermaidInstance) {
     if (!mermaidLoadPromise) {
       mermaidLoadPromise = (async () => {
-        const mermaidMod = (await import("mermaid")) as any;
-        const instance = mermaidMod.default ?? mermaidMod;
+        const [mermaidMod, elkLayouts] = await Promise.all([
+          import("mermaid"),
+          import("@mermaid-js/layout-elk")
+        ]);
+        const instance = (mermaidMod as any).default ?? mermaidMod;
         mermaidInstance = (instance.initialize && instance.render) ? instance : (instance.default ?? instance);
+        const loaders = (elkLayouts as any).default ?? elkLayouts;
+        if (mermaidInstance.registerLayoutLoaders && loaders) {
+          mermaidInstance.registerLayoutLoaders(loaders);
+        }
         mermaidInstance.initialize({
           startOnLoad: false,
           theme: "neutral",
-          securityLevel: "loose"
+          securityLevel: "loose",
+          layout: "elk",
         });
       })();
     }

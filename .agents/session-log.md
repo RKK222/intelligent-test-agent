@@ -1,5 +1,23 @@
 # Session Log
 
+### 2026-07-16 - 优化 Mermaid 流程图与可视化编辑器的自动布局 (ELK Layered)
+
+- Why:
+  - Mermaid v11+ 将其默认的 `dagre` 布局算法剥离，并且官方推荐使用 `@mermaid-js/layout-elk` 插件进行复杂的有向图布局。
+  - 目前可视化编辑器中的自动布局算法比较简陋，容易导致节点重叠或过于贴近，需要使用工业级的 ELK Layered 算法提升布局 of 对称性和美观度。
+  - 自动布局改变节点坐标后，若端口（Handles）仍连接在旧位置容易导致连线出现交叉、拉斜线或绕路等几何对齐问题。
+- What:
+  - 渲染端（`MarkdownView.vue` 和 `MarkdownPreview.vue`）：引入 `@mermaid-js/layout-elk` 插件，将其注册到 Mermaid 并配置默认布局为 `elk`。
+  - 编辑器自动布局：利用 `elkjs` 异步布局计算有向图的最佳坐标；同时保留了原有的 Sugiyama 同步计算算法做渐进式初版渲染和单元测试兼容。
+  - 边端口重新分布与偏好对齐：在自动布局（同步与异步）输出前，根据起终点中心的相对位置计算出边/入边的几何极角，并将其与节点上可用连接点相对中心的物理极角进行环形排序对齐。引入偏好启发式惩罚函数（判断节点优先连 4 个顶点，普通节点优先连边中点并朝两侧对称分发），通过最小偏差与偏好惩罚之和的最优分配为各连线分发 `sourceHandle` 和 `targetHandle`，从而在所有节点形状上从根本上彻底杜绝线条交叉与折弯，优化对齐质量。
+- How:
+  - 更新 `@test-agent/agent-chat` 和 `@test-agent/editor` 的 `package.json`，安装 `@mermaid-js/layout-elk` 和 `elkjs` 依赖并运行 `pnpm install`。
+  - 重构 `packages/editor/src/mermaid/layout.ts`，导出异步的 `autoLayoutMermaidGraph` 坐标计算方法 and 同步的 `syncAutoLayoutMermaidGraph` 降级初始化方法，并开发了通用的、支持偏好惩罚的 `redistributeEdgePorts` 极角分配对齐算法。
+  - 重构 `MermaidEditorDialog.vue` 的 watcher，在挂载时同步赋以初版布局确保 UI 立即挂载并能供单元测试即时交互，随后再异步替换为 ELK 布局；将 `MermaidVisualEditor.vue` and `mermaid-domain.test.ts` 适配为异步调用。
+  - 更新 `packages/agent-chat/README.md` 与 `packages/editor/README.md`，同步记录 ELK 自动布局升级。
+- Result:
+  - 全量运行前端 61 个测试文件（共 919 个测试用例）100% 成功通过，彻底消除了异步微任务延迟造成的测试挂载失败问题。未涉及后端代码、API、事件、数据库、环境配置。
+
 ### 2026-07-16 - 修复 main 重复 rebase 冲突并保留 Mermaid 功能
 
 - Why:
