@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-16 - 拉取最新代码并重建企业与公共配置全量包
+
+- Why:
+  - 用户要求打包前先拉取最新代码，并额外交付可在完全离线内网直接替换的公共 Agent 全量配置包。
+- What:
+  - 主项目 `main` 执行 `git pull --rebase origin main`，公共配置仓库 `enterprise` 执行 fetch 与 ff-only pull，两个远端均无新增提交；随后重新执行标准企业离线打包。
+  - 从公共配置 `enterprise@1ad3d20` 通过 `git archive` 生成 `opencode-public-config-enterprise-1ad3d20-full.zip`，完整包含 `opencode.jsonc`、6 个 agents 和 12 个 skills，不包含 `.git`、`node_modules` 或 `.bak`。
+- How:
+  - 企业包继续由 `deploy/internal/package-release.sh` 构建；两个 ZIP 均执行 checksum、解压完整性检查，公共 JSONC 额外通过 `jq` 解析，并确认企业包未包含实际 `.env`、`backend.env` 或 `docker.env`。
+- Result:
+  - 企业包 SHA-256 为 `2676c24521351789a79baf93517fab9af077f3d190304a031de0939a5998e588`；公共配置全量包 SHA-256 为 `f26fbc569b8336de78fc5fb8552a71e82030a71a58840c2707d80a559299d5e9`，两者校验通过。
+  - 企业包内公共 JSONC 的三个 `{env:...}` 值必须原样保留；文件替换后需重启已有用户 OpenCode 进程，多后台要逐节点替换本机公共配置目录。
+
 ### 2026-07-16 - 修复公共 Agent 配置来源不透明与刷新残留
 
 - Why:
