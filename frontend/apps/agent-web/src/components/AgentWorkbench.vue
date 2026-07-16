@@ -5220,6 +5220,7 @@ async function handleLogout() {
           </div>
           <WorkbenchFooter
             :write-path="selectedDiffPath"
+            :workspace-root-path="selectedWorkspace?.rootPath"
             :dirty="isDiffDirty"
             :saving="saveDiffFileMutation.isPending.value"
             :app-name="selectedManagedApplication?.appName"
@@ -5251,6 +5252,7 @@ async function handleLogout() {
           :active-path="activePath"
           :breadcrumb-path="breadcrumbDisplay"
           :write-path="activeTab?.path"
+          :workspace-root-path="selectedWorkspace?.rootPath"
           :updated-at="activeTab ? Date.now() / 1000 : undefined"
           :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
           :readonly="!!activeTab?.readonly"

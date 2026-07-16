@@ -18,6 +18,8 @@ export type AppWorkspaceVersion = ApplicationWorkspaceVersion;
 const props = defineProps<{
   /** 写入路径（编辑器模式显示） */
   writePath?: string;
+  /** 当前工作区绝对根目录，用于生成可复制的文件绝对路径 */
+  workspaceRootPath?: string;
   /** 最近一次更新时间（秒或 ISO 字符串均可） */
   updatedAt?: string | number;
   /** 是否存在未保存改动 */
@@ -89,9 +91,23 @@ const displayFilename = computed(() => {
   return props.writePath.split("/").pop() || props.writePath;
 });
 
-function copyPath() {
-  if (!props.writePath) return;
-  const textToCopy = props.writePath;
+const absoluteWritePath = computed(() => {
+  if (!props.workspaceRootPath || !props.writePath) return "";
+  const normalizedRoot = props.workspaceRootPath.replace(/\\/g, "/");
+  const normalizedPath = props.writePath.replace(/\\/g, "/");
+  // 文件路径本身已是绝对路径时直接复用，避免重复拼接工作区根目录。
+  if (normalizedPath.startsWith("/") || /^[A-Za-z]:\//.test(normalizedPath)) {
+    return normalizedPath;
+  }
+  const rootWithoutTrailingSlash = normalizedRoot.replace(/\/+$/, "");
+  const pathWithoutLeadingSlash = normalizedPath.replace(/^\/+/, "");
+  return rootWithoutTrailingSlash
+    ? `${rootWithoutTrailingSlash}/${pathWithoutLeadingSlash}`
+    : `/${pathWithoutLeadingSlash}`;
+});
+
+function copyPath(textToCopy: string) {
+  if (!textToCopy) return;
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(textToCopy)
       .then(() => {
@@ -590,15 +606,24 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         <ServerCog class="ta-workbench-footer-icon" />
       </button>
       <template v-else-if="showSave">
-        <span class="ta-workbench-footer-path">
+        <span class="ta-workbench-footer-path ta-workbench-footer-copy-paths">
           <button
             v-if="writePath"
             type="button"
-            class="ta-workbench-footer-copy-path"
+            class="ta-workbench-footer-copy-path ta-workbench-footer-copy-relative-path"
             :title="writePath"
-            @click="copyPath"
+            @click="copyPath(writePath)"
           >
-            复制路径
+            复制相对路径
+          </button>
+          <button
+            v-if="absoluteWritePath"
+            type="button"
+            class="ta-workbench-footer-copy-path ta-workbench-footer-copy-absolute-path"
+            :title="absoluteWritePath"
+            @click="copyPath(absoluteWritePath)"
+          >
+            复制绝对路径
           </button>
         </span>
       </template>
@@ -941,6 +966,18 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   font-family: inherit;
   cursor: pointer;
   transition: color 0.12s ease;
+}
+
+.ta-workbench-footer-copy-paths {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+}
+
+.ta-workbench-footer-copy-paths .ta-workbench-footer-copy-path {
+  line-height: 12px;
 }
 
 .ta-workbench-footer-copy-path:hover {
