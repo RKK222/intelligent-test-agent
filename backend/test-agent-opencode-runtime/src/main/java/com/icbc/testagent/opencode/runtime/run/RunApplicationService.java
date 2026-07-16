@@ -870,7 +870,7 @@ public class RunApplicationService {
         }
         // legacy 也必须具备服务端稳定 dispatch ID，供远端 user、平台消息和 Run scope 建立同一因果锚点。
         String dispatchMessageId = input.messageId() == null
-                ? RuntimeIdGenerator.messageId()
+                ? runtime.createDispatchMessageId()
                 : input.messageId();
         runRepository.save(pending);
         saveUserMessage(
@@ -1005,7 +1005,7 @@ public class RunApplicationService {
         }
 
         // 恢复探针依赖该 ID 判断本 Run 是否已被 OpenCode 接收，必须由服务端为每个新 Run 唯一生成。
-        String dispatchMessageId = RuntimeIdGenerator.messageId();
+        String dispatchMessageId = runtime.createDispatchMessageId();
         AgentRoutingTarget target = conversationContextTarget(context, pending.runId(), now, traceId);
         RunRuntimeManifest manifest = new RunRuntimeManifest(
                 pending.runId(),

@@ -2061,7 +2061,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 
 - 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
 - `contextToken`、`clientRequestId`、`parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段；新前端必须传入前两项，旧客户端在 `test-agent.redis-summary.legacy-run-without-context-enabled=true` 的兼容窗口内仍可省略。
-- `messageId` 同时是本轮远端 USER dispatch 锚点。`LEGACY_FULL` 优先沿用显式值，缺失时由服务端生成稳定 `msg_...`；同一值传给 agent command、写入平台 USER `remoteMessageId` 并记录到 root scope metadata。`REDIS_SUMMARY` 继续使用其既有 dispatch ID；锚点来源不一致时 Run 级投影 fail-closed，不按“最后一条 user”猜测。
+- `messageId` 同时是本轮远端 USER dispatch 锚点。`LEGACY_FULL` 优先沿用显式旧值并原样透传，缺失时由当前 agent runtime 生成；`REDIS_SUMMARY` 始终由 runtime 为新 Run 自动生成。opencode 自动 ID 固定为与 1.17.8 `MessageID.ascending()` 字典序兼容的 `msg_[0-9a-f]{12}[0-9A-Za-z]{14}`，不能使用随机 UUID，否则后续 user ID 可能小于上一轮 assistant 并被远端误判为已经回复。同一生成值传给 agent command、写入平台 USER `remoteMessageId`，并复用于 root scope、Redis manifest 和持久化锚点；锚点来源不一致时 Run 级投影 fail-closed，不按“最后一条 user”猜测。其它 agent 未覆盖 runtime 工厂时仍保持原有 `msg_` + 32 位十六进制 UUID。
 - `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。服务端只以已成功写入 PostgreSQL 的唯一 Run 锚点确认幂等成功；Redis 中已声明但尚无锚点的 crash-window manifest 不会作为成功响应返回，短保护期后由恢复扫描清理。
 - 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。

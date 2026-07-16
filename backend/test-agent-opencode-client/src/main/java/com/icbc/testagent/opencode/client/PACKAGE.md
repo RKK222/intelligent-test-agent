@@ -15,6 +15,7 @@
 - `package-info.java`：说明本包是 generated opencode SDK 之上的稳定 facade。
 - `OpencodeClientFacade`、`DefaultOpencodeClientFacade`：业务门面和默认实现。
 - `OpencodeSdkGateway`、`GeneratedOpencodeSdkGateway`：内部 gateway 端口与唯一 generated SDK 适配器。
+- `OpencodeMessageIdGenerator`：生成与 OpenCode `MessageID.ascending()` 字典序兼容的时序消息 ID；同毫秒并发和 JVM 时钟回退时保持单调。
 - `OpencodeCreateSessionCommand`、`OpencodeCreateSessionResult`：创建远端 opencode session。
 - `OpencodeStartRunCommand`、`OpencodePromptPart`、`OpencodeStartRunResult`：使用远端 opencode session id 调用 `prompt_async`，以稳定 facade 模型承载 text/file/agent parts 和可选工具启停映射。
 - `OpencodeCancelCommand`、`OpencodeCancelResult`：使用远端 opencode session id 调用 abort。
@@ -53,7 +54,7 @@
 ## 测试位置
 
 - opencode-client 模块单元测试和 gateway 级 HTTP 测试。
-- facade 测试覆盖 traceId、错误映射、超时重试、create/start/cancel/event/diff/revert/runtime/session messages。
+- facade 测试覆盖 traceId、错误映射、超时重试、create/start/cancel/event/diff/revert/runtime/session messages；消息 ID 测试覆盖格式、单调性、并发唯一性和真实跨轮故障样本。
 
 ## 修改时必须同步更新
 

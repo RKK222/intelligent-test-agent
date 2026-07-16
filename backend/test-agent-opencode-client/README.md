@@ -14,11 +14,13 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 ## 主要职责
 
 - 提供 `OpencodeClientFacade`。
+- 提供与 OpenCode 原生字典序兼容的消息 ID 生成能力，供上层在主动指定 `messageID` 时保持多轮消息顺序。
 - 统一 opencode SDK 调用、错误转换、事件转换、超时、重试和 trace。
 - 隔离 generated DTO，避免其进入 domain 或前端 API。
 
 ## 已有实现
 
+- `OpencodeMessageIdGenerator`：按 OpenCode 1.17.8 `MessageID.ascending()` 规则生成 `msg_[0-9a-f]{12}[0-9A-Za-z]{14}`；时间序为毫秒时间乘 4096 后叠加单调计数并编码低 48 位，同毫秒并发和 JVM 时钟回退时仍保持生成器内严格递增。
 - `openRunEventStream` 为旁路编排提供同一 HTTP 连接的 ready + event body 视图：ready 只在响应头成功后完成，事件继续消费同一连接；该新路径不自动重试已建立的响应体，也不套用普通 30 秒单事件超时。
 
 - `OpencodeClientFacade` / `DefaultOpencodeClientFacade`：提供 health、createSession、sessionExists、startRun、startCommand、cancelSession、streamRunEvents、getDiff、rejectDiff 能力；`sessionExists` 调用远端 v2 session get，404 映射为 `false` 供上层重建历史绑定，其它错误仍按统一 opencode 错误码抛出；原生 command 由平台 Run 后台持有，不使用普通 30 秒超时或自动重试。
@@ -34,6 +36,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 
 ## 测试覆盖
 
+- `OpencodeMessageIdGeneratorTest` 覆盖格式、同毫秒单调递增、时钟回退、并发唯一性，以及随机 UUID 小于上一轮 assistant 而原生时序 ID 大于它的真实故障样本。
 - `DefaultOpencodeClientFacadeTest` 覆盖 traceId 透传、health/create/sessionExists/start/cancel/event/diff/reject/messages facade 编排，以及超时、远端 404/503 和有限重试映射。
 - `OpencodeRunEventMapperTest` 覆盖旧版 `session.next.*` 事件、opencode 1.17.8 `session.status`/`session.idle` 终态、message/permission/question/todo/vcs/lsp/mcp/reference/file 等运行态事件、公共 ID alias、派生终态来源字段和未知事件透传。
 - `GeneratedOpencodeSdkGatewayTest` 使用本地 HTTP server 覆盖 create/start/cancel/event/messages/diff/revert/runtime 的真实请求路径、query、请求体和 `X-Trace-Id` header，确保 generated SDK DTO 不外泄。
@@ -56,6 +59,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 ## 后续 AI 编码指引
 
 新增 opencode server 调用、错误映射、事件映射时改这里。除本模块外，不要让其他业务模块直接 import `com.example.opencode.sdk.*`。
+平台主动传入 OpenCode `messageID` 时必须使用 `OpencodeMessageIdGenerator` 的原生时序格式，不能用随机 UUID；OpenCode 会按消息 ID 字典序判断最新 user 是否已经有后续 assistant，随机 ID 可能让后续轮次在没有输出时直接进入 idle。
 opencode 1.17.8 的 Run 成功终态只由 root `session.status` 的 `idle` 状态或 root `session.idle` 派生；`session.next.step.ended` 只保留为兼容未知事件，不能再直接映射为 `run.succeeded`。child session idle/error 只产生 session 级事件，不改变 Run 终态。
 opencode raw event 缺失 `id` 时 payload 不写 `rawEventId`，不能补 `"unknown"`；由 root session 事件派生的 `run.succeeded/run.failed` 不复用原 raw event id，避免持久化层把派生终态与 session 事件误去重。
 Web App 复刻新增识别 `message.updated`、`message.part.updated`、`message.part.delta`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated` 等 opencode App 运行态事件，同时保留旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容事件。

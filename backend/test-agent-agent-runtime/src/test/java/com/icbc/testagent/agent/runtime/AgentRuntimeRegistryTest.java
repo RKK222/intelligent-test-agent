@@ -30,6 +30,28 @@ class AgentRuntimeRegistryTest {
                 });
     }
 
+    @Test
+    void keepsUuidDispatchMessageIdAsDefaultForOtherAgents() {
+        AgentRuntime runtime = new FakeAgentRuntime("other");
+
+        assertThat(runtime.createDispatchMessageId()).matches("msg_[0-9a-f]{32}");
+    }
+
+    @Test
+    void observedRuntimeDelegatesDispatchMessageIdGeneration() {
+        AgentRuntimeRegistry registry = new AgentRuntimeRegistry(List.of(new DispatchIdAgentRuntime("opencode")));
+
+        assertThat(registry.require("opencode").createDispatchMessageId()).isEqualTo("msg_delegate_dispatch");
+    }
+
     private record FakeAgentRuntime(String agentId) implements AgentRuntime {
+    }
+
+    private record DispatchIdAgentRuntime(String agentId) implements AgentRuntime {
+
+        @Override
+        public String createDispatchMessageId() {
+            return "msg_delegate_dispatch";
+        }
     }
 }

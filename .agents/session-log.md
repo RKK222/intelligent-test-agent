@@ -1,5 +1,20 @@
 # Session Log
 
+### 2026-07-16 - 修复 OpenCode 多轮会话后续无回复
+
+- Why:
+  - 平台自动生成的随机 `msg_<UUID>` 会直接传给 OpenCode 1.17.8；OpenCode 按消息 ID 字典序寻找最新 user，第二轮随机 ID 一旦小于上一轮 assistant，就会把该 user 误判为已经回复并立即产生真实的 `busy → idle → run.succeeded`，页面因而没有 assistant 输出。
+- What:
+  - `test-agent-opencode-client` 新增线程安全的 OpenCode 时序消息 ID 生成器，格式为 `msg_[0-9a-f]{12}[0-9A-Za-z]{14}`，按毫秒时间乘 4096、单调计数和低 48 位编码；同毫秒并发及 JVM 时钟回退时仍单调。
+  - `AgentRuntime` 新增默认 dispatch ID 工厂，其他 agent 保持原 UUID；`OpencodeAgentRuntime` 使用时序生成器，`ObservedAgentRuntime` 透传委托。Legacy 缺省 ID 与 Redis Summary 自动 ID 均改从当前 runtime 取得，并继续在远端 command、平台 USER、root scope、manifest 和持久化锚点间复用；Legacy 显式旧 `messageId` 原样透传。
+  - 同步 opencode-client、agent-runtime、opencode-runtime README/PACKAGE，以及 HTTP、RunEvent 和对话场景测试说明；不修改 root idle 终态映射，不迁移既有空回复 Run。
+- How:
+  - TDD 覆盖附件真实故障样本（随机 `msg_e04e… < msg_f68f…`、时序 `msg_f68fa021f001… > msg_f68f…`）、格式、同毫秒递增、时钟回退、并发唯一性、runtime 观测委托、Legacy/Redis 锚点复用和显式 ID 兼容。
+  - 使用 `.env.test` / `test` profile 经公共重启脚本恢复后端、manager 和前端，再通过平台进程初始化 API 拉起测试用户 OpenCode；未绕过 manager、未修改环境文件。
+- Result:
+  - 三个相关后端模块及依赖共 831 tests passed，`test-agent-app -am` 生产 package 成功。真实新会话 `ses_d7b4eb57bfc541349436bd20b836bbb1` 连续三轮均成功：USER ID 依次为 `msg_f69274881001…`、`msg_f6928400d001…`、`msg_f6928e674001…`，第二、三轮均大于前一轮最终 assistant；可见回复分别早于各自 `run.succeeded`，Todo 仅包含本轮内容。
+  - Session 树和分页消息接口恢复了全部三轮 USER/ASSISTANT，并确认平台 USER `remoteMessageId` 与远端 dispatch 锚点一致。未修改前端代码、HTTP/SSE wire、数据库、鉴权、安全配置、generated SDK 或环境配置。
+
 ### 2026-07-16 - 修复 rebase 重放导致 Mermaid 重复声明
 
 - Why:

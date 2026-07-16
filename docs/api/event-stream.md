@@ -377,7 +377,7 @@ scope 发现与缓存规则：
 - `session.scope.updated` 是 durable 事件，当前用于 `SESSION_ADDED`，紧随 `session.child.discovered` 输出，便于前端或历史投影更新 session tree 索引。
 - `RunSessionScopeRouter` 为每个订阅保存 known sessions 和 `scopeVersion`；已知 root/child 的稳定事件只命中订阅态，不反查数据库。终态或启动失败后释放该本机状态。
 - `LEGACY_FULL` 的旧 scope cache 继续使用 `test-agent:run-scope:{runId}:...` 30 分钟 key，并只在 cache miss 或发现新 child 时兼容访问 `run_session_scopes`；Redis cache 不可用时数据库仍是 legacy 恢复事实源。
-- 新 Run 的 root scope metadata 保存与 agent command、平台 USER `remoteMessageId` 一致的 `dispatchMessageId`；Run 消息恢复和终态快照必须与其它锚点来源交叉校验。已记录的 child scope 可以独立恢复，但只有当前 Run 已选择的 root 消息允许发现新的 child，旧轮 task part 不能扩张新 Run 子树。
+- 新 Run 的 root scope metadata 保存与 agent command、平台 USER `remoteMessageId` 一致的 `dispatchMessageId`；自动值由当前 `AgentRuntime` 生成，opencode 使用与原生消息字典序兼容的 `msg_[0-9a-f]{12}[0-9A-Za-z]{14}`，避免后续 user 被排到上一轮 assistant 之前。Run 消息恢复和终态快照必须与其它锚点来源交叉校验。已记录的 child scope 可以独立恢复，但只有当前 Run 已选择的 root 消息允许发现新的 child，旧轮 task part 不能扩张新 Run 子树。
 - `REDIS_SUMMARY` 禁止查询或写入 `run_session_scopes`。Run 运行数据面的 scope、dedup 和 pending 能力由 `RunRuntimeStore` 端口定义，单 Run key 必须使用 `test-agent:run:{runId}:...` hash tag；执行订阅携带 owner fencing token，scope/dedup/pending 和事件投影都在 Redis Lua 的首个副作用前校验 token，旧 owner 返回冲突且不会进入 live bus。pending append/drain 同时原子维护统一详情字节预算与更新时间。跨 slot active/history 索引在初始化 Lua 前按“所有运行态中最长物理 TTL 的两倍”保守登记，覆盖上次已经处于最长 TTL 的刷新与下一次最长 TTL 事件后的完整窗口；服务器/用户恢复读取会修复全部索引，普通读路径回读 manifest 清理悬空成员。Redis 不可用时返回 `RUNTIME_STATE_UNAVAILABLE`，不得降级 DB-only。
 - opencode raw event id 缺失时 payload 不应包含 `rawEventId`，数据库 `run_events.raw_event_id` 保持 `NULL`。由 root session 事件派生的 `run.succeeded/run.failed` 不复用原始 `rawEventId`，避免与对应 `session.status/session.error` 误去重；派生事件 payload 会带 `derived=true`、`derivedFromRawType`，有原始事件 ID 时还带 `derivedFromRawEventId`。
 - payload 对常见 opencode 大写 ID 字段保留原字段并补充 lower camel alias：`sessionID -> sessionId`、`messageID -> messageId`、`partID -> partId`、`callID -> callId`、`requestID -> requestId`。前端必须允许两种字段并存。
@@ -399,7 +399,7 @@ scope 发现与缓存规则：
 
 - `session.status` 的 `status.type=idle` 和 `session.idle` 均规范化为 `session.status`。
 - `session.status` 的 `status.type=retry` 不派生 `run.failed` 或 `run.succeeded`，也不更新 Run 终态；它表示上游仍在等待重试或需要用户处理限额/订阅等 action，前端应作为非终态运行状态展示。前端不使用 opencode 原生 `next` 作为展示时间，第 1/2 次本地 60 秒倒计时结束后可 best-effort 取消当前等待 Run 并用同一请求草稿新建 Run；第 3 次倒计时结束仍无后续事件时，本地收敛为失败以避免页面永久运行中。
-- root session idle 额外派生 `run.succeeded`；child session idle 只发送 `session.status`。
+- root session idle 额外派生 `run.succeeded`；child session idle 只发送 `session.status`。不得用“idle 前尚无 assistant 输出”过滤真实远端终态；平台通过正确的 OpenCode 时序 dispatch ID 防止消息排序错误导致的无输出 idle。
 - root `session.error` 额外派生 `run.failed`；child `session.error` 只发送 `session.error`。
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
 - 后端处理 root 终态时必须先读取当前 Run，并把 root 终态作为最终事实保存；后到 root 终态可以纠正先到的 transport error 临时失败并刷新终态快照。`Streaming response failed` 等 transport error 没有独立业务终态含义，应给 root 终态短暂到达窗口；窗口内没有 root 终态时才在 Run 仍非终态的前提下收敛为 `run.failed`，并在 payload 中保留单行、长度受限的安全错误说明，供前端解释为什么停止输出。

@@ -7,6 +7,7 @@
 ## 主要职责
 
 - 定义 `AgentRuntime` 通用 Java 接口。
+- `AgentRuntime.createDispatchMessageId()` 为远端 USER 派发锚点提供 agent 专属 ID；默认保持平台 UUID，观测包装必须委托真实 runtime，opencode 实现使用原生时序 ID。
 - 提供 `AgentRuntimeRegistry`，按 URL 中的 agentId 查找运行时，未知或未注册 agent 统一返回平台 `NOT_FOUND` 错误。
 - 提供 `OpencodeAgentRuntime`，把普通 prompt 与 slash 原生命令统一适配到 `OpencodeClientFacade` 的可恢复 Run 调用；普通 prompt 可通过 `AgentStartRunCommand.tools` 显式覆盖远端工具开关，空映射保持原有默认行为。
 - `AgentCreateSessionCommand.title` 为可选值；根会话创建不传标题时保留 OpenCode 默认标题，使其内置 title agent 能在首条用户消息后生成会话名。
@@ -16,7 +17,8 @@
 
 ## 测试覆盖
 
-- `AgentRuntimeRegistryTest` 覆盖默认 `opencode` 命中、agentId 规范化和未知 agent 统一错误。
+- `AgentRuntimeRegistryTest` 覆盖默认 `opencode` 命中、agentId 规范化、未知 agent 统一错误、默认 UUID dispatch ID 和观测包装委托。
+- `OpencodeAgentRuntimeTest` 覆盖 OpenCode 时序 dispatch ID 与普通 prompt 参数映射。
 
 ## 允许依赖
 

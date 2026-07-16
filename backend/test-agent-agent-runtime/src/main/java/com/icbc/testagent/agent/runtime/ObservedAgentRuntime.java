@@ -30,6 +30,11 @@ final class ObservedAgentRuntime implements AgentRuntime {
     }
 
     @Override
+    public String createDispatchMessageId() {
+        return delegate.createDispatchMessageId();
+    }
+
+    @Override
     public Mono<AgentCreateSessionResult> createSession(AgentCreateSessionCommand command) {
         return observe("createSession", command.traceId(), delegate.createSession(command));
     }

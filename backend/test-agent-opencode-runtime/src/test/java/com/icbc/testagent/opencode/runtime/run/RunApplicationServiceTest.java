@@ -107,6 +107,8 @@ import reactor.core.publisher.Sinks;
 
 class RunApplicationServiceTest {
 
+    private static final String RUNTIME_DISPATCH_MESSAGE_ID = "msg_f68fa021f00100000000000000";
+
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
     private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
 
@@ -471,7 +473,7 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 routing,
                 new RunEventAppender(new FakeRunEventRepository(), new RunEventLiveBus(), runtimeStore),
-                runtimeRegistry(facade),
+                runtimeRegistry(facade, RUNTIME_DISPATCH_MESSAGE_ID),
                 new FakeAgentSessionBindingRepository(),
                 new RunEventLiveBus(),
                 new RunEventPersistencePolicy(),
@@ -493,6 +495,7 @@ class RunApplicationServiceTest {
         Run run = service.startRun(userId, "opencode", input, "trace_redis_summary");
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(serverDispatchMessageId.get()).isEqualTo(RUNTIME_DISPATCH_MESSAGE_ID);
         assertThat(runs.saved).isEmpty();
         assertThat(messages.saved).isEmpty();
         assertThat(routing.saved).isEmpty();
@@ -514,6 +517,7 @@ class RunApplicationServiceTest {
             assertThat(command.messageId()).isEqualTo(serverDispatchMessageId.get());
             assertThat(command.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         });
+        assertThat(runtimeManifest.get().dispatchMessageId()).isEqualTo(serverDispatchMessageId.get());
         assertThat(runtimeManifest.get().status()).isEqualTo(RunStatus.RUNNING);
         assertThat(service.eventStorageMode(run.runId())).isEqualTo(RunStorageMode.REDIS_SUMMARY);
         org.mockito.Mockito.verify(ownerSupervisor, org.mockito.Mockito.atLeast(4)).requireOwned(ownership);
@@ -1131,7 +1135,7 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(new FakeRunEventRepository()),
-                runtimeRegistry(facade),
+                runtimeRegistry(facade, RUNTIME_DISPATCH_MESSAGE_ID),
                 new FakeAgentSessionBindingRepository(),
                 new RunEventLiveBus(),
                 new RunEventPersistencePolicy(),
@@ -1148,7 +1152,7 @@ class RunApplicationServiceTest {
 
         assertThat(facade.startRunCommands).singleElement().satisfies(command -> {
             String dispatchMessageId = command.messageId();
-            assertThat(dispatchMessageId).startsWith("msg_");
+            assertThat(dispatchMessageId).isEqualTo(RUNTIME_DISPATCH_MESSAGE_ID);
             assertThat(messages.saved).singleElement().satisfies(userMessage -> {
                 assertThat(userMessage.runId()).isEqualTo(run.runId());
                 assertThat(userMessage.remoteMessageId()).isEqualTo(dispatchMessageId);
@@ -3449,6 +3453,16 @@ class RunApplicationServiceTest {
 
     private static AgentRuntimeRegistry runtimeRegistry(FakeOpencodeFacade facade) {
         return new AgentRuntimeRegistry(List.of(new OpencodeAgentRuntime(facade)));
+    }
+
+    private static AgentRuntimeRegistry runtimeRegistry(FakeOpencodeFacade facade, String dispatchMessageId) {
+        OpencodeAgentRuntime runtime = new OpencodeAgentRuntime(facade) {
+            @Override
+            public String createDispatchMessageId() {
+                return dispatchMessageId;
+            }
+        };
+        return new AgentRuntimeRegistry(List.of(runtime));
     }
 
     private static final class FakeAgentSessionBindingRepository implements AgentSessionBindingRepository {

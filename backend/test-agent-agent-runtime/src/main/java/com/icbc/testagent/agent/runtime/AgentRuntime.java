@@ -1,5 +1,6 @@
 package com.icbc.testagent.agent.runtime;
 
+import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -13,6 +14,13 @@ public interface AgentRuntime {
      * 返回 URL 中使用的稳定 agent 标志，例如 {@code opencode}。
      */
     String agentId();
+
+    /**
+     * 生成远端用户消息的稳定派发锚点；未适配的 agent 保持平台原有 UUID 格式。
+     */
+    default String createDispatchMessageId() {
+        return RuntimeIdGenerator.messageId();
+    }
 
     /**
      * 创建远端 agent 会话，并返回远端会话 ID。

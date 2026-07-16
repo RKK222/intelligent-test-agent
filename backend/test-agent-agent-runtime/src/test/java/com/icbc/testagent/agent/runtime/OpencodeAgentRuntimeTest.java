@@ -22,6 +22,13 @@ import reactor.core.publisher.Mono;
 class OpencodeAgentRuntimeTest {
 
     @Test
+    void createsOpencodeCompatibleDispatchMessageId() {
+        OpencodeAgentRuntime runtime = new OpencodeAgentRuntime(mock(OpencodeClientFacade.class));
+
+        assertThat(runtime.createDispatchMessageId()).matches("msg_[0-9a-f]{12}[0-9A-Za-z]{14}");
+    }
+
+    @Test
     void startRunPropagatesOptionalSystemPrompt() {
         OpencodeClientFacade facade = mock(OpencodeClientFacade.class);
         when(facade.startRun(any())).thenReturn(Mono.just(new OpencodeStartRunResult(true)));

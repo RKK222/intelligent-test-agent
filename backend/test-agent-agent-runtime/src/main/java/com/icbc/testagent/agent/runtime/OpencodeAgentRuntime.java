@@ -9,6 +9,7 @@ import com.icbc.testagent.opencode.client.OpencodeCreateSessionResult;
 import com.icbc.testagent.opencode.client.OpencodeDiffCommand;
 import com.icbc.testagent.opencode.client.OpencodeDiffFile;
 import com.icbc.testagent.opencode.client.OpencodeDiffResult;
+import com.icbc.testagent.opencode.client.OpencodeMessageIdGenerator;
 import com.icbc.testagent.opencode.client.OpencodePromptPart;
 import com.icbc.testagent.opencode.client.OpencodeRejectDiffCommand;
 import com.icbc.testagent.opencode.client.OpencodeRejectDiffResult;
@@ -34,6 +35,7 @@ import reactor.core.publisher.Mono;
 public class OpencodeAgentRuntime implements AgentRuntime {
 
     private final OpencodeClientFacade opencodeClientFacade;
+    private final OpencodeMessageIdGenerator messageIdGenerator = new OpencodeMessageIdGenerator();
 
     /**
      * 注入 opencode facade；generated SDK 仍只在 opencode-client 模块内部使用。
@@ -45,6 +47,11 @@ public class OpencodeAgentRuntime implements AgentRuntime {
     @Override
     public String agentId() {
         return AgentRuntimeRegistry.DEFAULT_AGENT_ID;
+    }
+
+    @Override
+    public String createDispatchMessageId() {
+        return messageIdGenerator.nextId();
     }
 
     @Override
