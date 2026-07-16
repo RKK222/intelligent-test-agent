@@ -6966,3 +6966,14 @@ bash /tmp/test-api-after-restart.sh
   - 同步后端总 README、scheduler/app README、app PACKAGE 和后端部署文档，并把生产配置示例更新为 `TEST_AGENT_SCHEDULER_ENABLED=true`；未修改运行代码、环境文件、API、事件或数据库。
 - Result:
   - 文档默认值与 `backend/test-agent-app/src/main/resources/application.yml` 一致；历史 session log 与 `SchedulerProperties` 裸实例的安全 fallback 保持原样。
+
+### 2026-07-16 - 修复最新主干合并残留并重打企业离线包
+
+- Why:
+  - 打包前将主干快进到 `8a3d566e` 后，企业打包被 Mermaid 编辑器中的重复函数定义阻断；定向测试又暴露同一批合并带入的重复 mock 字段和悬空测试片段。
+- What:
+  - 复用已能同时清空节点和连线选中态的 `onPaneClick`，删除旧的重复实现；清理 `MermaidVisualEditor.test.ts` 中重复 `emits`、悬空 props/测试体和已被“悬浮显示快捷箭头”行为替代的旧选中态片段，不改变现有产品行为。
+- How:
+  - Mermaid 定向 3 文件 67 项测试、editor typecheck、agent-web 生产构建通过；重新执行 `deploy/internal/package-release.sh --output-dir deploy/internal/dist`，并通过 SHA-256、ZIP 完整性、后端 systemd 首装/升级、前后端部署预检、单/多后台 Nginx 以及 Linux/amd64 worker 真实 OpenCode health 校验。
+- Result:
+  - 新包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 `ce75096b029100ed0c4960206d683d7d4a11a70bbcf7a9d51a93cf49a795698d`；包含 Qwen3.6-27B、DeepSeek-V4-Flash-W8A8、最新 API 类及两条 2026-07-15 Flyway migration。未修改 API、事件、数据库结构、环境配置或安全凭据；生产部署前需按数据库升级规范备份数据库。
