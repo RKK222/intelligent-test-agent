@@ -1,6 +1,12 @@
-import ELK from "elkjs";
+import ELK from "elkjs/lib/elk.bundled.js";
 import { Position } from "@vue-flow/core";
-import { cloneMermaidGraph, type MermaidGraph, type MermaidNode, type MermaidNodeType } from "./model";
+import {
+  cloneMermaidGraph,
+  type MermaidEdge,
+  type MermaidGraph,
+  type MermaidNode,
+  type MermaidNodeType
+} from "./model";
 import { getMermaidNodePorts, type MermaidNodePort } from "./visual-editor/node-port-layout";
 
 const elk = new ELK();
@@ -32,12 +38,12 @@ function getNodeCenter(node: MermaidNode): { x: number; y: number } {
  * 通过最小偏差角与偏好惩罚之和最优来完成分配。
  */
 function allocatePorts(
-  edges: typeof graph.edges,
+  edges: MermaidEdge[],
   availablePorts: MermaidNodePort[],
-  getNeighborCenter: (edge: typeof graph.edges[0]) => { x: number; y: number } | null,
+  getNeighborCenter: (edge: MermaidEdge) => { x: number; y: number } | null,
   nodeCenter: { x: number; y: number },
   nodeType: MermaidNodeType,
-  applyHandle: (edge: typeof graph.edges[0], handleId: string) => void
+  applyHandle: (edge: MermaidEdge, handleId: string) => void
 ): void {
   if (edges.length === 0 || availablePorts.length === 0) return;
 
@@ -49,7 +55,7 @@ function allocatePorts(
       const angle = Math.atan2(neighborCenter.y - nodeCenter.y, neighborCenter.x - nodeCenter.x);
       return { edge, angle };
     })
-    .filter((item): item is { edge: typeof graph.edges[0]; angle: number } => item !== null);
+    .filter((item): item is { edge: MermaidEdge; angle: number } => item !== null);
 
   if (edgesWithAngle.length === 0) return;
 

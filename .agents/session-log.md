@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-16 - 修复 Mermaid ELK 自动布局前端构建回归
+
+- Why:
+  - ELK 自动布局新增的模块级端口分配函数使用了不在作用域内的 `typeof graph.edges` 类型引用，导致 `graph` 未定义及回调参数隐式 `any` 的 TypeScript 编译错误；修复类型后，Vite 8/Rolldown 又暴露出 `elkjs` 默认 Node 入口解析可选 `web-worker` 失败。
+- What:
+  - `layout.ts` 改为直接复用领域模型导出的 `MermaidEdge` 类型，恢复端口分配函数和过滤类型谓词的完整静态类型推导。
+  - ELK 改从官方 TypeScript 浏览器入口 `elkjs/lib/elk.bundled.js` 导入，避免把 Node 入口及其可选 worker 依赖带入前端构建；同步在 editor README 固化该入口约束。
+- How:
+  - 先用 editor 单包 typecheck 复现 8 个 TypeScript 错误，再用 agent-web production build 复现 `web-worker` 解析错误；分别对照 `MermaidEdge` 领域模型和 `elkjs@0.9.3` 包内 README/入口实现后做最小修复。
+  - 运行 Mermaid 领域与端口布局定向测试、editor typecheck 和 agent-web 完整生产构建验证。
+- Result:
+  - Mermaid 定向测试 2 个文件共 30 项通过，editor typecheck 与 agent-web 生产构建通过；构建只保留既有大 chunk 警告。未修改布局算法行为，也不涉及 API、事件、数据库、环境配置、安全或兼容性契约。
+
 ### 2026-07-16 - 优化 Mermaid 自动布局重排时的连接点分配
 
 - Why:
