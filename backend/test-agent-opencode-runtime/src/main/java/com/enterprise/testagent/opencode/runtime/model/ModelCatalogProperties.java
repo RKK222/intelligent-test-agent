@@ -37,7 +37,7 @@ public class ModelCatalogProperties {
     private final Provider internal = new Provider(
             "enterprise-openai",
             "Enterprise OpenAI",
-            "http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1",
+            "http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1",
             "ENTERPRISE_OPENAI_AUTH_TOKEN",
             "auth-token",
             "Qwen3.6-27B",

@@ -92,7 +92,7 @@ test-agent:
     internal:
       provider-id: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_ID:enterprise-openai}
       name: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_NAME:Enterprise OpenAI}
-      base-url: ${TEST_AGENT_ENTERPRISE_OPENAI_BASE_URL:http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1}
+      base-url: ${TEST_AGENT_ENTERPRISE_OPENAI_BASE_URL:http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1}
       api-key-env: ${TEST_AGENT_ENTERPRISE_OPENAI_TOKEN_ENV:ENTERPRISE_OPENAI_AUTH_TOKEN}
       api-key: ""
       ucid-header-name: ${TEST_AGENT_ENTERPRISE_OPENAI_UCID_HEADER_NAME:ucid}

@@ -5,7 +5,7 @@ import { useAuthStore } from "./stores/authStore";
 const TOKEN_KEY = "test-agent.auth.token";
 const UNIFIED_AUTH_ID_KEY = "test-agent.auth.unifiedAuthId";
 
-const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.enterprise/aam/login/";
+const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
 
 /**
  * 当前环境标识：localhost 表示本地开发模式，其他值走 AAM 统一认证。

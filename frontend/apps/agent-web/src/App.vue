@@ -6,7 +6,7 @@ import { watch, onMounted } from "vue";
 import { RouterView, useRouter } from "vue-router";
 import { jumpAam } from "./utils/aamLogin";
 
-const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.enterprise/aam/login2//";
+const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login2//";
 const APP_ENV = import.meta.env.VITE_ENV ?? "";
 const IS_LOCAL_ENV = APP_ENV === "localhost";
 

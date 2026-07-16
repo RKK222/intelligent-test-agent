@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-16 - 恢复企业内部域名原始标识
+
+- Why:
+  - 用户明确补充：企业中性化只针对文案和技术命名，既有内部域名标签不得改写。
+- What:
+  - 将模型地址主机恢复为 `ai-code.sdc.icbc`，将 AAM 与嵌入页面主机恢复为 `zfw.sdc.cs.icbc`、`mimo.sdc.cs.icbc`；URL 路径、环境变量、Java/Go 包名和 provider key 继续保持企业中性命名。
+- How:
+  - 对照企业中性化提交逐项筛选 URL host，确认受控文件中的 21 处旧缩写全部属于上述三个域名；运行后端 17 模块打包、前端全量 typecheck/build，并以 `.env.test` 重启三服务。
+- Result:
+  - 后端 health/readiness、前端、登录 CORS 与 manager WebSocket/config update 均通过；不涉及 API、RunEvent、数据库、安全或性能行为变更。
+
 ### 2026-07-16 - 合并远程主干并重建企业离线包
 
 - Why:

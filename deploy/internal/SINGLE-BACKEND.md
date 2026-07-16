@@ -309,15 +309,15 @@ deepseek-prod
 
 | Provider ID | 名称 | Base URL | Token | 启用 | 排序 |
 |---|---|---|---|---|---:|
-| `qwen-prod` | `企业通义` | `http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
-| `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
+| `qwen-prod` | `企业通义` | `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
+| `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
 
 三层配置必须同时正确：
 
 | 配置层 | 正确内容 | 生效方式 |
 |---|---|---|
 | 本服务器公共 `opencode.jsonc` | `enterprise-qwen/Qwen3.6-27B`、`enterprise-deepseek/DeepSeek-V4-Flash-W8A8`，并包含 `includeUsage=false` | 重启已有用户 OpenCode 进程；新进程直接读取 |
-| 共享数据库内部供应商 | `qwen-prod`、`deepseek-prod` 均启用，`baseUrl=http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1`，全局 token 已配置 | 保存或点击“刷新 Java 内存”；不需要重启用户进程 |
+| 共享数据库内部供应商 | `qwen-prod`、`deepseek-prod` 均启用，`baseUrl=http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`，全局 token 已配置 | 保存或点击“刷新 Java 内存”；不需要重启用户进程 |
 | 用户进程环境 | Java 启动进程时注入内部代理 key、同节点 Java 代理地址和该用户的 `ENTERPRISE_UCID` | 停止并通过运行管理重新启动用户进程 |
 
 `enterprise-qwen` / `enterprise-deepseek` 只用于 OpenCode 模型目录；`qwen-prod` / `deepseek-prod` 只用于 Java 路由，二者不能互换。上游模型 token 由 Java 作为 `Authorization: Bearer <token>` 注入，不在 `backend.env`、`docker.env` 或 `opencode.jsonc` 中再配 `Auth-Token`。每个用户的 UCID 来自用户表，由 Java 逐进程注入，不需要也不能为所有用户共用一个 env 文件。
