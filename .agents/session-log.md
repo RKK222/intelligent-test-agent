@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-16 - 修复 rebase 重放导致 Mermaid 重复声明
+
+- Why:
+  - `main` 在一次外部 rebase 中串行重放了两条 Mermaid 历史线，旧版 `onPaneClick` 与已有完整实现同时保留，测试文件也混入重复 `emits`、游离 props 和嵌套测试残片，导致 agent-web 构建报 `TS2393 Duplicate function implementation`。
+- What:
+  - 删除只清除节点选择的旧 `onPaneClick`，保留同时清除节点与连线选择的完整实现；清理测试文件中所有错误重放片段，并新增空白画布取消连线选择的行为回归。
+- How:
+  - 通过 reflog/blame 追溯到 rebase 重放，逐段对比 rebase 前已验证提交 `79b315a17`；先确认构建和测试解析失败，再修复测试、观察生产重复声明继续使测试失败，最后删除旧实现并完成绿灯验证。
+- Result:
+  - Mermaid 定向测试 39 passed；前端全量 61 个测试文件为 918 passed / 1 skipped，typecheck 与用户原始 agent-web 生产构建命令通过。未修改 API、事件、数据库、环境配置或 Mermaid 产品行为。
+
 ### 2026-07-15 - 固化应用 worktree/feature 权限回归并补齐超管豁免
 
 - Why:

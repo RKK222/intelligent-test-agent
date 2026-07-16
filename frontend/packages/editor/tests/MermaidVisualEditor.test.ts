@@ -674,4 +674,17 @@ describe("MermaidVisualEditor", () => {
     await fireEvent.update(getByLabelText("连线文字"), "");
     expect((emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges[0]?.label).toBe("");
   });
+
+  it("点击空白画布同时取消选中的连线", async () => {
+    const { getByTestId, queryByLabelText, queryByText } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+
+    await fireEvent.click(getByTestId("mock-edge-click"));
+    expect(queryByLabelText("连线文字")).toBeTruthy();
+
+    await fireEvent.click(getByTestId("mock-pane-click"));
+    expect(queryByLabelText("连线文字")).toBeNull();
+    expect(queryByText("选择画布中的节点或连线后编辑。")).toBeTruthy();
+  });
 });
