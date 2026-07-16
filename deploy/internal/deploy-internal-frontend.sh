@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ARCHIVE="/data/0709/internal.zip"
+ARCHIVE="/data/0709/test-agent-internal-release.zip"
 EXTRACT_DIR="/data/0709/test-agent-internal-frontend"
 EXTRACT_DIR_EXPLICIT=0
 FRONTEND_ROOT="/data/testagent"
@@ -20,7 +20,7 @@ when the backend server cannot ssh/scp to the frontend server because unified
 login or bastion policy blocks direct key-based access.
 
 Options:
-  --archive <path>             Release zip path. Default: /data/0709/internal.zip.
+  --archive <path>             Release zip path. Default: /data/0709/test-agent-internal-release.zip.
   --extract-dir <path>         Temporary unzip directory. Default: /data/0709/test-agent-internal-frontend.
   --frontend-root <path>       Frontend install root. Default: /data/testagent.
   --frontend-health-url <url>  Frontend health URL. Default: http://122.233.30.2/health.

@@ -45,6 +45,25 @@ deploy/internal/dist/frontend/
 
 完整 zip 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档。企业服务器只执行校验、解压、`docker load` 和服务启停，不执行 Maven、pnpm、Docker build 或联网下载。
 
+## 统一上传目录
+
+企业内所有目标服务器统一把完整 ZIP 和 SHA-256 校验文件上传到 `/data/0709/`，文件名保持不变：
+
+```text
+/data/0709/test-agent-internal-release.zip
+/data/0709/test-agent-internal-release.zip.sha256
+```
+
+单后台时上传到前端 `.2` 和后台 `.114`；多后台时上传到前端及每个后台节点。每台服务器开始部署前都先执行：
+
+```bash
+cd /data/0709
+sha256sum -c test-agent-internal-release.zip.sha256
+unzip -t test-agent-internal-release.zip
+```
+
+`/data/0709/` 只作为离线交付物上传和校验目录；部署脚本仍把运行文件安装到 `/data/testagent/`，两者不要混用。
+
 ## 标准目录
 
 ```text

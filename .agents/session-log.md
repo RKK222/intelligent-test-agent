@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-16 - 统一企业离线包上传目录与文件名
+
+- Why:
+  - 用户确认 ZIP 和 SHA 文件统一上传到内网服务器 `/data/0709/`，要求将该约定写入相关稳定文档，同时保持当前已校验企业包不重建。
+- What:
+  - 企业部署总入口新增“上传目录与安装目录分离”说明，前端部署文档清除旧 `internal.zip` 文件名；后端和前端部署脚本默认归档统一为 `/data/0709/test-agent-internal-release.zip`。
+- How:
+  - 全文检查部署文档和脚本不再残留 `/data/0709/internal.zip`，运行两个脚本 `bash -n`、帮助文本断言、后端/前端 `--validate-only`，并复核现有 ZIP checksum 与完整性。
+- Result:
+  - 文档和后续构建默认值已统一；当前 `f61c9760...` 企业包无需因纯路径文档调整重建，现场继续显式传 `--archive /data/0709/test-agent-internal-release.zip` 即可，下一次打包会自动包含新文档与默认值。
+
 ### 2026-07-16 - 按内置 RSA 密钥模式重建企业离线包
 
 - Why:
