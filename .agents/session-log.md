@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-16 - 按内置 RSA 密钥模式重建企业离线包
+
+- Why:
+  - 用户确认当前单后台现场不启用外置 RSA 私钥，要求基于最新远端重新打包并明确前后端重启边界。
+- What:
+  - 两个远端 `main` 均确认到 `51aa6f81`，未修改业务代码；重新生成完整企业 ZIP，并确认部署入口允许现有 `backend.env` 不配置 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`，JAR 继续读取内置 `rsa-private.key`。
+  - 明确不要运行会按新模板重写后端 env 的 `configure-single-deployment.sh backend`；本次差异同时包含 Java 与前端代码，但不包含 worker 源码或公共 Agent 配置变更。
+- How:
+  - 执行标准企业打包、checksum/ZIP/tar、后端和前端 `--validate-only`、Linux/amd64 镜像架构及 OpenCode 1.17.8 校验；用 `.env.test` 重启本地 backend、manager、frontend。
+- Result:
+  - 最新 `test-agent-internal-release.zip` 为 207 MB，SHA-256 `f61c9760de34dd4b949b2c4d88c17f9b57b8b9a6923b9a5c2d6e51988bf85a47`；后端 health/readiness 为 `UP`，前端/CORS 为 200，manager WebSocket/config update 正常，日志确认从 classpath 加载 RSA 私钥。
+  - 企业更新时 Java 必须重启；前端必须替换静态文件但只需 reload Nginx；worker 与既有用户 OpenCode 无需重启，可在后台部署时使用 `--skip-worker`。
+
 ### 2026-07-16 - 恢复企业内部域名原始标识
 
 - Why:
