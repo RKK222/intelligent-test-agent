@@ -7100,3 +7100,17 @@ bash /tmp/test-api-after-restart.sh
   - Mermaid 定向 3 文件 67 项测试、editor typecheck、agent-web 生产构建通过；重新执行 `deploy/internal/package-release.sh --output-dir deploy/internal/dist`，并通过 SHA-256、ZIP 完整性、后端 systemd 首装/升级、前后端部署预检、单/多后台 Nginx 以及 Linux/amd64 worker 真实 OpenCode health 校验。
 - Result:
   - 新包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 `ce75096b029100ed0c4960206d683d7d4a11a70bbcf7a9d51a93cf49a795698d`；包含 Qwen3.6-27B、DeepSeek-V4-Flash-W8A8、最新 API 类及两条 2026-07-15 Flyway migration。未修改 API、事件、数据库结构、环境配置或安全凭据；生产部署前需按数据库升级规范备份数据库。
+
+### 2026-07-16 - 原始输出浮层增加下载按钮
+
+- Why:
+  - 前端调试用“原始输出”浮层此前只能在线查看会话级 HTTP 请求/响应正文与 RunEvent SSE `data`，排查问题时需逐条复制报文到外部工具，缺少一键导出能力。
+- What:
+  - `FigmaChatPanel.vue` 原始输出浮层操作区新增“下载”按钮，把当前过滤结果（受类型筛选+关键词搜索影响，与浮层顶部计数一致）导出为本地 `.txt` 文件；无可见报文时按钮禁用，避免导出空文件。
+  - 下载走代码库既有 `Blob`+`createObjectURL`+`<a>.click()`+`revokeObjectURL` 标准模式（同 `AnalyticsManagementPanel.exportCsv`）；导出内容沿用进入页面缓存前已递归脱敏 `contextToken` 并截断后的可见副本，不绕过 `prepareRawOutputBody` 安全边界。
+- How:
+  - 复用现有 `rawOutputKindLabel`/`rawOutputTime`/`rawOutputBody` 组装文本，新增 `downloadRawOutput`/`formatRawOutputStamp`；按钮复用既有 `.figma-chat-raw-action` 类并补 `gap` 与 `:disabled` 样式，新增 `Download` 图标导入。
+  - `FigmaChatPanel.test.ts` 新增下载用例（mock `createObjectURL`/`revokeObjectURL` 与 `HTMLAnchorElement.prototype.click`，用 `try/finally` 还原避免泄漏，校验 Blob 文本含两条正文与“请求/SSE”标签、过滤后只导出命中条目）；空状态用例补“无报文时下载按钮禁用”断言。
+  - `frontend/apps/agent-web/README.md` 同步补充下载能力与脱敏边界说明。运行 agent-web typecheck 与 FigmaChatPanel、raw-output 定向测试。
+- Result:
+  - agent-web typecheck 通过；`FigmaChatPanel.test.ts` 122 passed / 1 skipped、`raw-output.test.ts` 3 passed。仅前端调试 UI 改动，不涉及 API、事件、数据库、环境配置或安全凭据。
