@@ -66,28 +66,3 @@ export function extractMermaidEdgePorts(lines: string[]): MermaidEdgePortExtract
   }
   return { entries: [], consumedLineIndexes: new Set(), rawLines: [] };
 }
-
-/** 只为可唯一匹配且同时具有两个合法固定端口的边生成私有注释。 */
-export function serializeMermaidEdgePorts(edges: ReadonlyArray<MermaidEdge>): string[] {
-  const counts = new Map<string, number>();
-  for (const edge of edges) {
-    const key = `${edge.source}\u0000${edge.target}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  const entries: MermaidEdgePortMetadataEntry[] = edges.flatMap((edge) => {
-    const key = `${edge.source}\u0000${edge.target}`;
-    if (
-      counts.get(key) !== 1 ||
-      !isMermaidPortHandle(edge.sourceHandle) ||
-      !isMermaidPortHandle(edge.targetHandle)
-    ) return [];
-    return [{
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle
-    }];
-  });
-  if (!entries.length) return [];
-  return [EDGE_PORTS_MARKER, ...JSON.stringify(entries, null, 2).split("\n").map((line) => `%% ${line}`)];
-}

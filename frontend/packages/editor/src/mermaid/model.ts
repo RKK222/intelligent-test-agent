@@ -8,6 +8,11 @@ export type MermaidPosition = {
   y: number;
 };
 
+/** 自动布局派生的边路由；坐标与节点 position 使用同一 Vue Flow 画布坐标系。 */
+export type MermaidEdgeRoute = {
+  points: MermaidPosition[];
+};
+
 export type MermaidNode = {
   id: string;
   text: string;
@@ -21,6 +26,7 @@ export type MermaidEdge = {
   target: string;
   sourceHandle?: string;
   targetHandle?: string;
+  route?: MermaidEdgeRoute;
   label: string;
   relation: MermaidEdgeRelation;
 };
@@ -53,11 +59,21 @@ export function cloneMermaidGraph(graph: MermaidGraph): MermaidGraph {
   return {
     ...graph,
     nodes: graph.nodes.map((node) => ({ ...node, position: { ...node.position } })),
-    edges: graph.edges.map((edge) => ({ ...edge })),
+    edges: graph.edges.map((edge) => ({
+      ...edge,
+      route: edge.route ? { points: edge.route.points.map((point) => ({ ...point })) } : undefined
+    })),
     preservedLines: [...graph.preservedLines],
     preservedSegments: graph.preservedSegments?.map((segment) => ({
       beforeEditableIndex: segment.beforeEditableIndex,
       lines: [...segment.lines]
     }))
   };
+}
+
+/** 几何或拓扑变化后清除全部派生路径，避免继续渲染已经不再贴合节点的旧轨道。 */
+export function clearMermaidEdgeRoutes(graph: MermaidGraph): MermaidGraph {
+  const next = cloneMermaidGraph(graph);
+  for (const edge of next.edges) delete edge.route;
+  return next;
 }

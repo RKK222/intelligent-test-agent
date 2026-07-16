@@ -55,9 +55,12 @@ const flowEdges = computed(() => toVueFlowEdges(props.modelValue));
 const selectedNode = computed(() => props.modelValue.nodes.find((node) => node.id === selectedNodeId.value));
 const selectedEdge = computed(() => props.modelValue.edges.find((edge) => edge.id === selectedEdgeId.value));
 
-function updateGraph(updater: (draft: MermaidGraph) => void) {
+function updateGraph(updater: (draft: MermaidGraph) => void, options?: { preserveRoutes?: boolean }) {
   const draft = cloneMermaidGraph(props.modelValue);
   updater(draft);
+  if (!options?.preserveRoutes) {
+    for (const edge of draft.edges) delete edge.route;
+  }
   emit("update:modelValue", draft);
 }
 
@@ -215,7 +218,7 @@ function updateSelectedEdgeLabel(text: string) {
   updateGraph((draft) => {
     const edge = draft.edges.find((item) => item.id === selectedEdgeId.value);
     if (edge) edge.label = text;
-  });
+  }, { preserveRoutes: true });
 }
 
 function deleteSelectedNode() {

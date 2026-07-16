@@ -72,6 +72,19 @@ const graph = (): MermaidGraph => ({
   preservedLines: ["classDef important fill:red"]
 });
 
+const routedGraph = (): MermaidGraph => {
+  const value = graph();
+  value.edges[0]!.route = {
+    points: [
+      { x: 140, y: 96 },
+      { x: 220, y: 96 },
+      { x: 220, y: 120 },
+      { x: 300, y: 120 }
+    ]
+  };
+  return value;
+};
+
 describe("Mermaid Vue Flow 适配", () => {
   it("把领域节点和边映射为 Vue Flow 元素", () => {
     expect(toVueFlowNodes(graph())).toMatchObject([
@@ -81,6 +94,14 @@ describe("Mermaid Vue Flow 适配", () => {
     expect(toVueFlowEdges(graph())).toMatchObject([
       { id: "edge-1", source: "A", target: "B", label: "下一步", markerEnd: "arrowclosed" }
     ]);
+  });
+
+  it("把自动布局路由深拷贝到自定义边 data", () => {
+    const original = routedGraph();
+    const edge = toVueFlowEdges(original)[0]!;
+
+    expect(edge.data).toEqual({ routePoints: original.edges[0]!.route!.points });
+    expect(edge.data?.routePoints).not.toBe(original.edges[0]!.route!.points);
   });
 
   it("把同一节点的多条入边和出边依次分配到三个端口", () => {
@@ -100,10 +121,12 @@ describe("Mermaid Vue Flow 适配", () => {
   });
 
   it("只把 Vue Flow 拖拽坐标回写到领域模型副本", () => {
-    const original = graph();
+    const original = routedGraph();
     const updated = applyVueFlowPositions(original, [{ id: "A", position: { x: 480, y: 260 } }]);
 
     expect(updated.nodes[0]?.position).toEqual({ x: 480, y: 260 });
+    expect(updated.edges[0]?.route).toBeUndefined();
+    expect(original.edges[0]?.route).toBeDefined();
     expect(original.nodes[0]?.position).toEqual({ x: 80, y: 70 });
   });
 
@@ -192,11 +215,12 @@ describe("Mermaid Vue Flow 适配", () => {
   });
 
   it("updateMermaidEdge 只更新被拖动的一端", () => {
-    const base = graph(); // edge-1: A -> B，无显式端口
+    const base = routedGraph(); // edge-1: A -> B，带自动布局派生路由
     const reconnectedTarget = updateMermaidEdge(base, "edge-1", "target", {
       source: "A", target: "B", sourceHandle: "source-0", targetHandle: "target-2"
     });
     expect(reconnectedTarget.edges[0]).toMatchObject({ source: "A", target: "B", targetHandle: "target-2" });
+    expect(reconnectedTarget.edges[0]?.route).toBeUndefined();
     // source 端保持不变（原边无 sourceHandle）
     expect(reconnectedTarget.edges[0]?.sourceHandle).toBeUndefined();
 
@@ -204,6 +228,7 @@ describe("Mermaid Vue Flow 适配", () => {
       source: "B", target: "B", sourceHandle: "source-1", targetHandle: "target-0"
     });
     expect(reconnectedSource.edges[0]).toMatchObject({ source: "B", sourceHandle: "source-1", target: "B" });
+    expect(reconnectedSource.edges[0]?.route).toBeUndefined();
     // target 端保持不变
     expect(reconnectedSource.edges[0]?.targetHandle).toBeUndefined();
     // 原图未被修改
@@ -443,6 +468,57 @@ describe("MermaidFlowEdge", () => {
     expect(withoutLabel.container.querySelector(".ta-mermaid-edge-label")).toBeNull();
   });
 
+  it("优先按自动布局路由绘制圆角正交 path，并按路径长度定位标签", () => {
+    const { getByTestId, container } = render(MermaidFlowEdge, {
+      props: {
+        ...edgeProps(),
+        targetY: 80,
+        label: "路径标签",
+        data: {
+          routePoints: [
+            { x: 10, y: 20 },
+            { x: 50, y: 20 },
+            { x: 50, y: 80 },
+            { x: 100, y: 80 }
+          ]
+        }
+      } as unknown as EdgeProps
+    });
+
+    expect(getByTestId("base-edge").getAttribute("d")).toContain("Q");
+    const label = container.querySelector(".ta-mermaid-edge-label");
+    expect(label?.getAttribute("x")).toBe("50");
+    expect(label?.getAttribute("y")).toBe("55");
+  });
+
+  it("节点实际尺寸与 ELK 估算有轻微偏差时仍用正交适配段连接端口", () => {
+    const { getByTestId } = render(MermaidFlowEdge, {
+      props: {
+        ...edgeProps(),
+        sourceY: 20,
+        targetX: 100,
+        targetY: 80,
+        data: {
+          routePoints: [
+            { x: 12, y: 22 },
+            { x: 50, y: 22 },
+            { x: 50, y: 78 },
+            { x: 98, y: 78 }
+          ]
+        }
+      } as unknown as EdgeProps
+    });
+
+    const path = getByTestId("base-edge").getAttribute("d");
+    expect(path).toContain("Q");
+    expect(path).not.toBe("M0 0 L1 1");
+  });
+
+  it("没有有效路由时保留 SmoothStep 兼容回退", () => {
+    const { getByTestId } = render(MermaidFlowEdge, { props: edgeProps() });
+    expect(getByTestId("base-edge").getAttribute("d")).toBe("M0 0 L1 1");
+  });
+
   it("按下端点圆圈发出重连起点（带固定端信息）", async () => {
     const { container, emitted } = render(MermaidFlowEdge, { props: edgeProps(true) });
     const handles = container.querySelectorAll<HTMLElement>(".ta-mermaid-edge-handle");
@@ -538,12 +614,38 @@ describe("MermaidVisualEditor", () => {
   });
 
   it("接收 Vue Flow 拖拽结束事件并上报新坐标", async () => {
-    const { getByTestId, emitted } = render(MermaidVisualEditor, { props: { modelValue: graph() } });
+    const { getByTestId, emitted } = render(MermaidVisualEditor, { props: { modelValue: routedGraph() } });
 
     await fireEvent.click(getByTestId("mock-drag"));
 
     const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
     expect(updates.at(-1)?.[0].nodes[0]?.position).toEqual({ x: 480, y: 260 });
+    expect(updates.at(-1)?.[0].edges[0]?.route).toBeUndefined();
+  });
+
+  it("修改节点几何或图方向时清除陈旧路由", async () => {
+    const { getByTestId, getByLabelText, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: routedGraph() }
+    });
+
+    await fireEvent.click(getByTestId("mock-select"));
+    await fireEvent.update(getByLabelText("节点名称"), "更宽的节点名称");
+    await fireEvent.update(getByLabelText("图方向"), "TD");
+
+    const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
+    expect(updates.every(([value]) => value.edges[0]?.route === undefined)).toBe(true);
+  });
+
+  it("只修改连线文字时保留自动布局路由", async () => {
+    const { getByTestId, getByLabelText, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: routedGraph() }
+    });
+
+    await fireEvent.click(getByTestId("mock-edge-click"));
+    await fireEvent.update(getByLabelText("连线文字"), "保留轨道");
+
+    const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
+    expect(updates.at(-1)?.[0].edges[0]?.route?.points).toEqual(routedGraph().edges[0]!.route!.points);
   });
 
   it("关闭 Vue Flow 原生连接并使用不拦截鼠标的临时 SVG", () => {

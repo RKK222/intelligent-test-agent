@@ -83,7 +83,8 @@ A --> B`);
       targetHandle: "source-1"
     });
     const serialized = serializeMermaidGraph(graph);
-    expect(serialized).toContain("%% editor-edge-ports:");
+    expect(serialized.split("\n").filter((line) => line.startsWith("%%@"))).toHaveLength(1);
+    expect(serialized).not.toContain("editor-edge-ports");
     expect(parseMermaidFlowchart(serialized).edges[0]).toMatchObject({
       sourceHandle: "target-2",
       targetHandle: "source-1"
@@ -203,7 +204,8 @@ C --> D`));
     const laidOut = await autoLayoutMermaidGraph(graph);
     const edge = laidOut.edges[0]!;
     
-    expect(edge.targetHandle).toBe("target-2");
+    // Loose Handle 的 source/target 前缀不再限制边角色；两个端口都位于矩形顶边中部附近。
+    expect(["target-2", "source-2"]).toContain(edge.targetHandle);
     
     // 2. 判断（菱形）节点：优先连接到四个顶点
     const diamondGraph = parseMermaidFlowchart("flowchart LR\nX{判断} --> Y");

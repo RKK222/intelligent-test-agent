@@ -1,3 +1,4 @@
+import { applyMermaidCompactSequence, extractMermaidCompactMarker } from "../compact-metadata";
 import { extractMermaidLayout } from "../metadata";
 import type {
   MermaidSequenceDiagram,
@@ -25,18 +26,15 @@ export function parseMermaidSequence(source: string): MermaidSequenceDiagram {
   if (headerIndex < 0) throw new Error("缺少 sequenceDiagram 图头");
 
   const { layout, consumedLineIndexes } = extractMermaidLayout(lines);
+  const compactMetadata = extractMermaidCompactMarker(lines);
   const participants = new Map<string, MermaidSequenceParticipant & { explicit: boolean }>();
   const messages: MermaidSequenceDiagram["messages"] = [];
-  const preservedLines: string[] = [];
-  const preservedSegments: NonNullable<MermaidSequenceDiagram["preservedSegments"]> = [];
+  // 与 Flow 一致先保留元数据原文，避免新 marker 损坏时误吞可用于回退的旧坐标。
+  const preservedRecords: Array<{ sourceIndex: number; beforeEditableIndex: number; line: string }> = [];
   let preservedBlockDepth = 0;
 
-  const preserveLine = (line: string) => {
-    preservedLines.push(line);
-    const anchor = messages.length;
-    const current = preservedSegments.at(-1);
-    if (current?.beforeEditableIndex === anchor) current.lines.push(line);
-    else preservedSegments.push({ beforeEditableIndex: anchor, lines: [line] });
+  const preserveLine = (line: string, sourceIndex: number) => {
+    preservedRecords.push({ sourceIndex, beforeEditableIndex: messages.length, line });
   };
 
   const upsertParticipant = (
@@ -58,11 +56,11 @@ export function parseMermaidSequence(source: string): MermaidSequenceDiagram {
   };
 
   lines.forEach((line, index) => {
-    if (index === headerIndex || consumedLineIndexes.has(index)) return;
+    if (index === headerIndex) return;
     const trimmed = line.trim();
     const startsComplexBlock = /^(?:loop|alt|opt|par|critical|break|rect|box)\b/i.test(trimmed);
     if (preservedBlockDepth > 0) {
-      preserveLine(line);
+      preserveLine(line, index);
       if (startsComplexBlock) preservedBlockDepth += 1;
       if (/^end\s*$/i.test(trimmed)) preservedBlockDepth -= 1;
       return;
@@ -70,7 +68,7 @@ export function parseMermaidSequence(source: string): MermaidSequenceDiagram {
     if (!trimmed) return;
     if (startsComplexBlock) {
       preservedBlockDepth = 1;
-      preserveLine(line);
+      preserveLine(line, index);
       return;
     }
     const participant = line.match(PARTICIPANT_PATTERN);
@@ -99,14 +97,33 @@ export function parseMermaidSequence(source: string): MermaidSequenceDiagram {
       });
       return;
     }
-    preserveLine(line);
+    preserveLine(line, index);
   });
 
-  return {
+  const diagram: MermaidSequenceDiagram = {
     kind: "sequenceDiagram",
     participants: Array.from(participants.values(), ({ explicit: _explicit, ...participant }) => participant),
     messages,
-    preservedLines,
-    preservedSegments
+    preservedLines: preservedRecords.map((record) => record.line),
+    preservedSegments: []
   };
+  const compactApplied = compactMetadata.encoded !== null
+    ? applyMermaidCompactSequence(diagram, compactMetadata.encoded)
+    : false;
+  const compactConflict = compactMetadata.markerLineIndexes.size > 0 && !compactApplied;
+  const removedIndexes = new Set<number>();
+  if (!compactConflict) {
+    for (const index of consumedLineIndexes) removedIndexes.add(index);
+  }
+  if (compactApplied) {
+    for (const index of compactMetadata.markerLineIndexes) removedIndexes.add(index);
+  }
+  const remainingRecords = preservedRecords.filter((record) => !removedIndexes.has(record.sourceIndex));
+  diagram.preservedLines = remainingRecords.map((record) => record.line);
+  for (const record of remainingRecords) {
+    const current = diagram.preservedSegments!.at(-1);
+    if (current?.beforeEditableIndex === record.beforeEditableIndex) current.lines.push(record.line);
+    else diagram.preservedSegments!.push({ beforeEditableIndex: record.beforeEditableIndex, lines: [record.line] });
+  }
+  return diagram;
 }

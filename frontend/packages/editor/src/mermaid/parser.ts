@@ -1,3 +1,4 @@
+import { applyMermaidCompactFlow, extractMermaidCompactMarker } from "./compact-metadata";
 import { extractMermaidLayout } from "./metadata";
 import { extractMermaidEdgePorts } from "./edge-port-metadata";
 import type {
@@ -94,18 +95,15 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   const direction = (header[2]?.toUpperCase() ?? "TD") as MermaidDirection;
   const { layout, consumedLineIndexes } = extractMermaidLayout(lines);
   const edgePortMetadata = extractMermaidEdgePorts(lines);
+  const compactMetadata = extractMermaidCompactMarker(lines);
   const nodes = new Map<string, MermaidNode & { explicit: boolean }>();
   const edges: MermaidGraph["edges"] = [];
-  const preservedLines: string[] = [];
-  const preservedSegments: NonNullable<MermaidGraph["preservedSegments"]> = [];
+  // 私有注释先带源码索引按普通行保留，只有整个新/旧 metadata 验证成功后才统一消费。
+  const preservedRecords: Array<{ sourceIndex: number; beforeEditableIndex: number; line: string }> = [];
   let preservedBlockDepth = 0;
 
-  const preserveLine = (line: string) => {
-    preservedLines.push(line);
-    const anchor = edges.length;
-    const current = preservedSegments.at(-1);
-    if (current?.beforeEditableIndex === anchor) current.lines.push(line);
-    else preservedSegments.push({ beforeEditableIndex: anchor, lines: [line] });
+  const preserveLine = (line: string, sourceIndex: number) => {
+    preservedRecords.push({ sourceIndex, beforeEditableIndex: edges.length, line });
   };
 
   const upsertNode = (parsed: ParsedNode) => {
@@ -122,14 +120,10 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   };
 
   lines.forEach((line, index) => {
-    if (
-      index === headerIndex ||
-      consumedLineIndexes.has(index) ||
-      edgePortMetadata.consumedLineIndexes.has(index)
-    ) return;
+    if (index === headerIndex) return;
     const trimmed = line.trim();
     if (preservedBlockDepth > 0) {
-      preserveLine(line);
+      preserveLine(line, index);
       if (/^subgraph\b/i.test(trimmed)) preservedBlockDepth += 1;
       if (/^end\s*;?$/i.test(trimmed)) preservedBlockDepth -= 1;
       return;
@@ -137,7 +131,7 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
     if (!trimmed) return;
     if (/^subgraph\b/i.test(trimmed)) {
       preservedBlockDepth = 1;
-      preserveLine(line);
+      preserveLine(line, index);
       return;
     }
     const edge = parseEdgeLine(line);
@@ -158,7 +152,7 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
       upsertNode(node);
       return;
     }
-    preserveLine(line);
+    preserveLine(line, index);
   });
 
   const edgeCounts = new Map<string, number>();
@@ -169,10 +163,7 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   const ambiguousMetadata = edgePortMetadata.entries.some(
     (entry) => (edgeCounts.get(`${entry.source}\u0000${entry.target}`) ?? 0) > 1
   );
-  if (ambiguousMetadata) {
-    preservedLines.push(...edgePortMetadata.rawLines);
-    preservedSegments.unshift({ beforeEditableIndex: 0, lines: [...edgePortMetadata.rawLines] });
-  } else {
+  if (!ambiguousMetadata) {
     const metadataByEdge = new Map(
       edgePortMetadata.entries.map((entry) => [`${entry.source}\u0000${entry.target}`, entry])
     );
@@ -185,12 +176,35 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
     }
   }
 
-  return {
+  const graph: MermaidGraph = {
     kind,
     direction,
     nodes: Array.from(nodes.values(), ({ explicit: _explicit, ...node }) => node),
     edges,
-    preservedLines,
-    preservedSegments
+    preservedLines: preservedRecords.map((record) => record.line),
+    preservedSegments: []
   };
+  const compactApplied = compactMetadata.encoded !== null
+    ? applyMermaidCompactFlow(graph, compactMetadata.encoded)
+    : false;
+  const compactConflict = compactMetadata.markerLineIndexes.size > 0 && !compactApplied;
+  const removedIndexes = new Set<number>();
+  if (!compactConflict) {
+    for (const index of consumedLineIndexes) removedIndexes.add(index);
+    if (!ambiguousMetadata) {
+      for (const index of edgePortMetadata.consumedLineIndexes) removedIndexes.add(index);
+    }
+  }
+  if (compactApplied) {
+    for (const index of compactMetadata.markerLineIndexes) removedIndexes.add(index);
+  }
+
+  const remainingRecords = preservedRecords.filter((record) => !removedIndexes.has(record.sourceIndex));
+  graph.preservedLines = remainingRecords.map((record) => record.line);
+  for (const record of remainingRecords) {
+    const current = graph.preservedSegments!.at(-1);
+    if (current?.beforeEditableIndex === record.beforeEditableIndex) current.lines.push(record.line);
+    else graph.preservedSegments!.push({ beforeEditableIndex: record.beforeEditableIndex, lines: [record.line] });
+  }
+  return graph;
 }

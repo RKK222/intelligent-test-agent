@@ -7114,3 +7114,18 @@ bash /tmp/test-api-after-restart.sh
   - `frontend/apps/agent-web/README.md` 同步补充下载能力与脱敏边界说明。运行 agent-web typecheck 与 FigmaChatPanel、raw-output 定向测试。
 - Result:
   - agent-web typecheck 通过；`FigmaChatPanel.test.ts` 122 passed / 1 skipped、`raw-output.test.ts` 3 passed。仅前端调试 UI 改动，不涉及 API、事件、数据库、环境配置或安全凭据。
+
+### 2026-07-16 - Mermaid 使用 ELK 正交避障与单行紧凑元数据
+
+- Why:
+  - Mermaid Flowchart 自动布局原先只采用 ELK 节点坐标，连线仍由 Vue Flow 独立生成 SmoothStep，分支/汇合图会出现交叉和穿越节点；坐标、固定端口和路由若分别使用展开 JSON 注释，又会显著挤占 Markdown 与 AI 上下文。
+- What:
+  - 自动布局改为消费 ELK 完整 edge sections，按真实节点包围盒和沿边顺序稳定映射 8/12 个 Handle，保存正交 route；自定义边渲染 6px 圆角轨道、按路径中点放标签，DOM 尺寸偏差通过正交适配段连接，缺 route 时回退 SmoothStep。
+  - 新增 `%%@<base64url>` 单行 codec，统一保存 Flow 节点坐标/端口/路由和 Sequence 参与者坐标；内部使用版本 flags、0.1px 增量 ZigZag/LEB128、端口 nibble、轴向路由和拓扑绑定的 FNV-1a。旧 `editor-layout` / `editor-edge-ports` 保持只读迁移兼容，损坏或重复新 marker 及损坏旧注释原样保留。
+  - 节点拖动、改名/改形、方向切换、增删、重连及同步预布局统一清除派生 route；只修改边标签保留。同步 editor README/PACKAGE 和当前设计/实施计划。
+- How:
+  - codec 不增加依赖，限制解码 1 MiB、单边 4096 点、单个 LEB128 5 bytes，并在完整校验 magic、类型、数量、拓扑、EOF、端口、坐标和正交路径后原子应用。TDD 固定 Flow/Sequence golden vector，覆盖截断、非法 Base64URL、hash/拓扑变化、重复 marker、超限、旧格式回退、官方 Mermaid parser 和代表图紧凑度。
+  - 几何回归覆盖 TD/BT/LR/RL、非端点节点避障、分支汇合图 proper crossing 为 0、ELK 缺 section、DOM 端点偏差和 SmoothStep 回退；代表图私有注释由约 5,175 字符/314 行压缩到约 203 字符/1 行。
+- Result:
+  - editor 全量 11 个 Vitest 文件 145 passed；前端全量 63 个文件 954 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。
+  - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。
