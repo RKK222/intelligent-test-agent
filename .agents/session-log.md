@@ -1,5 +1,18 @@
 # Session Log
 
+### 2026-07-16 - 优化 Mermaid 编辑中的快捷连接箭头样式
+
+- Why:
+  - 用户要求将 Mermaid 可视化编辑器节点悬浮时显示的 4 个快捷连接箭头改为更显眼的粗蓝色箭头，以提升可视化连线时的指引性和交互视觉体验。
+- What:
+  - 在 `frontend/packages/editor/src/mermaid/visual-editor/MermaidFlowNode.vue` 中，将快捷连接箭头的 SVG 图标线条粗细（`stroke-width`）从 `2.5` 增加为 `4`。
+  - 将快捷连接箭头按钮的配色由原先的紫色/靛蓝色主题（依赖 `--primary`）替换为醒目的蓝色主题（使用 `#2563eb`），并将普通状态背景调整为 `color-mix(in srgb, #2563eb 15%, #fff)`，hover 状态下背景为 `#2563eb`。
+- How:
+  - 修改 `MermaidFlowNode.vue` 模板中的 SVG path 属性，以及 style 块中 `.ta-mermaid-quick-arrow` 的配色和 hover 样式。
+  - 运行 `corepack pnpm test` 全量通过前端 954 项测试，确保可视化编辑器核心与连线相关的测试没有受到影响。
+- Result:
+  - Mermaid 节点上的 4 向快捷连接箭头成功呈现为加粗 of 蓝色箭头，且 hover 配色也相应对齐为蓝色系列。未改动后端代码、API 契约、事件流或数据库配置。
+
 ### 2026-07-16 - 修复 Mermaid ELK 自动布局前端构建回归
 
 - Why:
