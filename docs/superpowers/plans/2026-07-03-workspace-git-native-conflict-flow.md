@@ -15,8 +15,8 @@
 ### Task 1: 中文冲突路径与原生批量解决
 
 **Files:**
-- Modify: `backend/test-agent-common/src/main/java/com/icbc/testagent/common/git/GitWorkspaceService.java`
-- Modify: `backend/test-agent-common/src/test/java/com/icbc/testagent/common/git/GitWorkspaceServiceTest.java`
+- Modify: `backend/test-agent-common/src/main/java/com/enterprise/testagent/common/git/GitWorkspaceService.java`
+- Modify: `backend/test-agent-common/src/test/java/com/enterprise/testagent/common/git/GitWorkspaceServiceTest.java`
 - Modify: `backend/test-agent-common/README.md`
 
 - [ ] **Step 1: 写中文路径红测**
@@ -56,9 +56,9 @@ mvn -pl test-agent-common -Dtest=GitWorkspaceServiceTest test
 ### Task 2: 工作区服务发布预览与批量 API
 
 **Files:**
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationService.java`
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/ManagedWorkspaceResponses.java`
-- Modify: `backend/test-agent-workspace-management/src/test/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationServiceTest.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/ManagedWorkspaceApplicationService.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/ManagedWorkspaceResponses.java`
+- Modify: `backend/test-agent-workspace-management/src/test/java/com/enterprise/testagent/workspace/ManagedWorkspaceApplicationServiceTest.java`
 - Modify: `backend/test-agent-workspace-management/README.md`
 
 - [ ] **Step 1: 写服务红测**
@@ -95,9 +95,9 @@ mvn -pl test-agent-workspace-management -am \
 ### Task 3: Controller、DTO 和 HTTP 文档
 
 **Files:**
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/ManagedWorkspaceController.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/ManagedWorkspaceDtos.java`
-- Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/ManagedWorkspaceControllerTest.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/ManagedWorkspaceController.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/ManagedWorkspaceDtos.java`
+- Modify: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/ManagedWorkspaceControllerTest.java`
 - Modify: `backend/test-agent-api/README.md`
 - Modify: `docs/api/http-api.md`
 - Modify: `docs/architecture/module-map.md`

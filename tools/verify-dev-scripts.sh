@@ -143,7 +143,7 @@ if [[ "${restart_local_ip_output}" != *"Starting opencode-manager"* ]]; then
   echo "${restart_local_ip_output}" >&2
   fail "restart script should auto-start opencode-manager for the detected local IPv4"
 fi
-if ! grep -Eq -- '-ldflags -X github\.com/icbc/test-agent/opencode-manager/internal/control\.buildVersion=V[0-9]{8}\.[0-9]{6}' "${tmp_dir}/go.calls"; then
+if ! grep -Eq -- '-ldflags -X github\.com/enterprise/test-agent/opencode-manager/internal/control\.buildVersion=V[0-9]{8}\.[0-9]{6}' "${tmp_dir}/go.calls"; then
   cat "${tmp_dir}/go.calls" >&2 || true
   fail "restart script should inject an Asia/Shanghai manager build version"
 fi

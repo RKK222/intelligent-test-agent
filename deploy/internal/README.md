@@ -18,7 +18,7 @@
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与本机 worker 的 `TEST_AGENT_DATA_ROOT` 一致。
 - 每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不配置人工 `containerId/managerId`。
 - 企业模型供应商地址和上游 token 由数据库及管理页面维护，不写入 `docker.env`。
-- 正式模型链路为 `OpenCode → 本机 Java:8080 → 行内模型:9070`，不使用 19070 relay 或 host network。
+- 正式模型链路为 `OpenCode → 本机 Java:8080 → 企业内部模型:9070`，不使用 19070 relay 或 host network。
 
 ## Mac 打包
 

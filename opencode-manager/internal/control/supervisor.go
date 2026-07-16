@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/icbc/test-agent/opencode-manager/internal/config"
-	"github.com/icbc/test-agent/opencode-manager/internal/process"
+	"github.com/enterprise/test-agent/opencode-manager/internal/config"
+	"github.com/enterprise/test-agent/opencode-manager/internal/process"
 	"nhooyr.io/websocket"
 )
 

@@ -13,10 +13,10 @@
 ### Task 1: 状态和启动收敛
 
 **Files:**
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/UserOpencodeProcessAssignmentService.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/OpencodeProcessStartupService.java`
-- Test: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/process/UserOpencodeProcessAssignmentServiceTest.java`
-- Test: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/process/OpencodeProcessStartupServiceTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/process/UserOpencodeProcessAssignmentService.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/process/OpencodeProcessStartupService.java`
+- Test: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/process/UserOpencodeProcessAssignmentServiceTest.java`
+- Test: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/process/OpencodeProcessStartupServiceTest.java`
 
 - [ ] 新增失败测试：STALE 只在最后成功探测后的短暂窗口内放行。
 - [ ] 新增失败测试：Manager 控制面异常不进入启动轮询。

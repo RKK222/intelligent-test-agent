@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="TestAgentApplication guo" type="Application" factoryName="Application">
-    <option name="MAIN_CLASS_NAME" value="com.icbc.testagent.app.TestAgentApplication" />
+    <option name="MAIN_CLASS_NAME" value="com.enterprise.testagent.app.TestAgentApplication" />
     <module name="test-agent-app" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/backend" />
     <option name="VM_PARAMETERS" value="-Dspring.profiles.active=guo" />

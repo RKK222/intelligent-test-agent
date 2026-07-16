@@ -2,8 +2,8 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.AgentConfigMapper">
-    <resultMap id="AgentConfigOperationRowMap" type="com.icbc.testagent.persistence.mybatis.AgentConfigOperationRow">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.AgentConfigMapper">
+    <resultMap id="AgentConfigOperationRowMap" type="com.enterprise.testagent.persistence.mybatis.AgentConfigOperationRow">
         <constructor>
             <arg column="operation_id" javaType="java.lang.String"/>
             <arg column="scope" javaType="java.lang.String"/>
@@ -21,7 +21,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="AgentConfigWorktreeRowMap" type="com.icbc.testagent.persistence.mybatis.AgentConfigWorktreeRow">
+    <resultMap id="AgentConfigWorktreeRowMap" type="com.enterprise.testagent.persistence.mybatis.AgentConfigWorktreeRow">
         <constructor>
             <arg column="worktree_id" javaType="java.lang.String"/>
             <arg column="scope" javaType="java.lang.String"/>

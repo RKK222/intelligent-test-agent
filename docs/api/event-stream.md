@@ -408,7 +408,7 @@ scope 发现与缓存规则：
 
 `POST /api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` 仅供用户 OpenCode 进程调用，不是前端 RunEvent SSE。Java 只对 `2xx + text/event-stream` 响应使用 `ServerSentEvent` 语义转换：每个事件的 `id/event/retry/comment/data` 语义保留；没有 `reasoning_content` 时把 `data` 中的 `<think>...</think>` 迁移为 `reasoning_content`，已有 textual `reasoning_content` 时整个 delta 原样保留；`[DONE]` 原样保留。代理不会手工追加 `data:`，因此下游不会出现 `data:data:`。
 
-所有非 `2xx` 响应（包括 `4xx + text/event-stream`）和非 SSE 响应按 `DataBuffer` 原样转发，保留状态码、`Content-Type`、`Content-Encoding`、错误正文、`Retry-After` 和 trace header。连接超时为 10 秒，首个响应和首个事件等待为 30 秒，后续事件空闲为 120 秒，不设置整个 SSE 生命周期超时；下游取消会取消到行内模型的上游订阅。
+所有非 `2xx` 响应（包括 `4xx + text/event-stream`）和非 SSE 响应按 `DataBuffer` 原样转发，保留状态码、`Content-Type`、`Content-Encoding`、错误正文、`Retry-After` 和 trace header。连接超时为 10 秒，首个响应和首个事件等待为 30 秒，后续事件空闲为 120 秒，不设置整个 SSE 生命周期超时；下游取消会取消到企业内部模型的上游订阅。
 
 ## Runtime SSE
 
@@ -635,4 +635,4 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 
 ## manager 控制面补充
 
-manager WebSocket `command` 帧支持可选 `environment` 字段。Java 启动用户 opencode server 时通过该字段注入 `TEST_AGENT_INTERNAL_PROXY_API_KEY`、`TEST_AGENT_INTERNAL_PROXY_BASE_URL` 和 `ICBC_UCID`；manager 生成的 `startCommand` 只允许展示代理 base URL 和 UCID，`TEST_AGENT_INTERNAL_PROXY_API_KEY` 必须显示为 `<redacted>`。
+manager WebSocket `command` 帧支持可选 `environment` 字段。Java 启动用户 opencode server 时通过该字段注入 `TEST_AGENT_INTERNAL_PROXY_API_KEY`、`TEST_AGENT_INTERNAL_PROXY_BASE_URL` 和 `ENTERPRISE_UCID`；manager 生成的 `startCommand` 只允许展示代理 base URL 和 UCID，`TEST_AGENT_INTERNAL_PROXY_API_KEY` 必须显示为 `<redacted>`。

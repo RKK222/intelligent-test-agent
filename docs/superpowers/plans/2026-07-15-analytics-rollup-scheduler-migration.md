@@ -22,8 +22,8 @@
 
 **Files:**
 
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/analytics/AnalyticsRollupApplicationServiceTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/analytics/AnalyticsRollupApplicationService.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsRollupApplicationServiceTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsRollupApplicationService.java`
 
 - [x] **Step 1: 写失败测试，覆盖锁冲突、阶段间停止、成功结果和异常水位**
 
@@ -55,9 +55,9 @@ Expected: PASS
 
 **Files:**
 
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/analytics/AnalyticsRollupTaskHandlerTest.java`
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/analytics/AnalyticsRollupTaskHandler.java`
-- Delete: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/analytics/AnalyticsRollupScheduler.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsRollupTaskHandlerTest.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsRollupTaskHandler.java`
+- Delete: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsRollupScheduler.java`
 - Modify: `backend/test-agent-app/src/main/resources/application.yml`
 
 - [x] **Step 1: 写失败测试，覆盖任务元数据、上下文透传和人工停止**

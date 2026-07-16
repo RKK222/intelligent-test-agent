@@ -1,0 +1,449 @@
+package com.enterprise.testagent.api.web.platform;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
+import com.enterprise.testagent.domain.opencodeprocess.ContainerManagerId;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import com.enterprise.testagent.opencode.runtime.process.socket.ManagerConnectionRegistry;
+import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlApplicationService;
+import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlMessage;
+import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlMessageCodec;
+import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import com.enterprise.testagent.opencode.runtime.process.socket.ManagerPendingCommandRegistry;
+import com.enterprise.testagent.opencode.runtime.process.socket.OpencodeManagerConfigSyncService;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.Principal;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.reactivestreams.Publisher;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferFactory;
+import org.springframework.core.io.buffer.DefaultDataBufferFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.web.reactive.socket.CloseStatus;
+import org.springframework.web.reactive.socket.HandshakeInfo;
+import org.springframework.web.reactive.socket.WebSocketMessage;
+import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.Disposable;
+
+class ManagerControlWebSocketHandlerTest {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ManagerControlMessageCodec codec = new ManagerControlMessageCodec(objectMapper);
+
+    @Test
+    void rejectsMissingManagerTokenAndClosesSession() throws Exception {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        FakeWebSocketSession session = FakeWebSocketSession.withToken(null, List.of());
+
+        handler(controlService, new ManagerPendingCommandRegistry()).handle(session).block(Duration.ofSeconds(1));
+
+        JsonNode error = objectMapper.readTree(session.sentText().getFirst());
+        assertThat(error.get("type").asText()).isEqualTo("error");
+        assertThat(error.get("errorCode").asText()).isEqualTo("UNAUTHENTICATED");
+        assertThat(session.closed()).isTrue();
+        verify(controlService, never()).register(Mockito.any());
+    }
+
+    @Test
+    void handlesRegisterHeartbeatCommandResultAndDisconnect() {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        ManagerPendingCommandRegistry pendingCommands = new ManagerPendingCommandRegistry();
+        CompletableFuture<ManagerControlMessage> pending = pendingCommands.create("mcmd_1234567890abcdef");
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                1,
+                Map.of("start", true),
+                "trace_1234567890abcdef");
+        ManagerControlMessage heartbeat = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                1,
+                Map.of("health", true),
+                "trace_1234567890abcdef");
+        heartbeat = new ManagerControlMessage(
+                "heartbeat",
+                heartbeat.protocolVersion(),
+                heartbeat.traceId(),
+                heartbeat.managerId(),
+                heartbeat.containerId(),
+                heartbeat.linuxServerId(),
+                heartbeat.containerName(),
+                heartbeat.portStart(),
+                heartbeat.portEnd(),
+                heartbeat.maxProcesses(),
+                heartbeat.currentProcesses(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                heartbeat.capabilities(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+        ManagerControlMessage result = ManagerControlMessage.commandResult(
+                "mcmd_1234567890abcdef",
+                "health",
+                "HEALTHY",
+                4096,
+                12345L,
+                "http://10.8.0.12:4096",
+                "/data/opencode/session/4096",
+                "/data/opencode/.config/opencode/",
+                true,
+                "ok",
+                "trace_1234567890abcdef");
+        when(controlService.register(register)).thenReturn(ManagerControlMessage.registered(
+                "bjp_1234567890abcdef",
+                "trace_1234567890abcdef"));
+
+        FakeWebSocketSession session = FakeWebSocketSession.withToken(
+                "secret-token",
+                List.of(codec.encode(register), codec.encode(heartbeat), codec.encode(result)));
+
+        handler(controlService, pendingCommands).handle(session).block(Duration.ofSeconds(1));
+
+        assertThat(codec.decode(session.sentText().getFirst()).type()).isEqualTo("registered");
+        assertThat(pendingCommands.await("mcmd_1234567890abcdef", pending, Duration.ofSeconds(1)).status())
+                .isEqualTo("HEALTHY");
+        verify(controlService).register(register);
+        verify(controlService).heartbeat(heartbeat);
+        verify(controlService).disconnect(new ContainerManagerId("mgr_1234567890abcdef"), "trace_1234567890abcdef");
+    }
+
+    @Test
+    void handlesManagerHeartbeatAndIgnoresBackendListRequest() {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                1,
+                Map.of("health", true),
+                List.of("bjp_1234567890abcdef"),
+                "trace_1234567890abcdef");
+        ManagerControlMessage request = ManagerControlMessage.backendListRequest("trace_1234567890abcdef");
+        FakeWebSocketSession session = FakeWebSocketSession.withToken(
+                "secret-token",
+                List.of(codec.encode(heartbeat), codec.encode(request)));
+
+        handler(controlService, new ManagerPendingCommandRegistry()).handle(session).block(Duration.ofSeconds(1));
+
+        assertThat(session.sentText()).isEmpty();
+        verify(controlService).managerHeartbeat(heartbeat);
+        verify(controlService, never()).backendListResponse("trace_1234567890abcdef");
+    }
+
+    @Test
+    void handlesConfigRequestWithCurrentRuntimeConfig() {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        OpencodeManagerConfigSyncService configSyncService = Mockito.mock(OpencodeManagerConfigSyncService.class);
+        when(configSyncService.configUpdateMessage("trace_config")).thenReturn(Optional.of(
+                ManagerControlMessage.configUpdate(
+                        8,
+                        "/data/.testagent/agent-opencode/.session/",
+                        "/data/.testagent/agent-opencode/.config/opencode/",
+                        "trace_config")));
+        ManagerControlMessage request = ManagerControlMessage.configRequest("trace_config");
+        FakeWebSocketSession session = FakeWebSocketSession.withToken(
+                "secret-token",
+                List.of(codec.encode(request)));
+
+        handler(controlService, new ManagerPendingCommandRegistry(), configSyncService)
+                .handle(session)
+                .block(Duration.ofSeconds(1));
+
+        ManagerControlMessage response = codec.decode(session.sentText().getFirst());
+        assertThat(response.type()).isEqualTo(com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlProtocol.TYPE_CONFIG_UPDATE);
+        assertThat(response.maxProcesses()).isEqualTo(8);
+        assertThat(response.sessionRoot()).isEqualTo("/data/.testagent/agent-opencode/.session/");
+        assertThat(response.configDir()).isEqualTo("/data/.testagent/agent-opencode/.config/opencode/");
+        verify(configSyncService).configUpdateMessage("trace_config");
+    }
+
+    @Test
+    void sendsEveryManagerCommandWhenDifferentThreadsPublishConcurrently() throws Exception {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        ManagerConnectionRegistry connections = new ManagerConnectionRegistry();
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                1,
+                Map.of("health", true),
+                "trace_register");
+        when(controlService.register(register)).thenReturn(ManagerControlMessage.registered(
+                "bjp_1234567890abcdef",
+                "trace_register"));
+        FakeWebSocketSession session = FakeWebSocketSession.openWithToken(
+                "secret-token",
+                List.of(codec.encode(register)));
+        Disposable connection = handler(
+                controlService,
+                new ManagerPendingCommandRegistry(),
+                Mockito.mock(OpencodeManagerConfigSyncService.class),
+                connections)
+                .handle(session)
+                .subscribe();
+        try {
+            awaitCondition(() -> connections.isConnected(new com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId("ctr_01")));
+            int commandCount = 256;
+            CountDownLatch ready = new CountDownLatch(commandCount);
+            CountDownLatch start = new CountDownLatch(1);
+            try (var executor = Executors.newFixedThreadPool(commandCount)) {
+                List<CompletableFuture<Void>> sends = new ArrayList<>();
+                for (int index = 0; index < commandCount; index++) {
+                    int commandIndex = index;
+                    sends.add(CompletableFuture.runAsync(() -> {
+                        ready.countDown();
+                        try {
+                            start.await();
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(exception);
+                        }
+                        connections.send(
+                                new com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId("ctr_01"),
+                                ManagerControlMessage.command(
+                                        "mcmd_concurrent_" + commandIndex,
+                                        "health",
+                                        4096,
+                                        10_000,
+                                        "trace_concurrent_" + commandIndex));
+                    }, executor));
+                }
+                assertThat(ready.await(2, TimeUnit.SECONDS)).isTrue();
+                start.countDown();
+                CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new)).join();
+            }
+            awaitCondition(() -> session.sentText().size() >= commandCount + 1);
+            Set<String> commandIds = new HashSet<>();
+            for (String text : session.sentText()) {
+                ManagerControlMessage message = codec.decode(text);
+                if ("command".equals(message.type())) {
+                    commandIds.add(message.commandId());
+                }
+            }
+            assertThat(commandIds).hasSize(commandCount);
+        } finally {
+            connection.dispose();
+        }
+    }
+
+    private static void awaitCondition(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+        assertThat(condition.getAsBoolean()).isTrue();
+    }
+
+    private ManagerControlWebSocketHandler handler(
+            ManagerControlApplicationService controlService,
+            ManagerPendingCommandRegistry pendingCommands) {
+        return handler(controlService, pendingCommands, Mockito.mock(OpencodeManagerConfigSyncService.class));
+    }
+
+    private ManagerControlWebSocketHandler handler(
+            ManagerControlApplicationService controlService,
+            ManagerPendingCommandRegistry pendingCommands,
+            OpencodeManagerConfigSyncService configSyncService) {
+        return handler(controlService, pendingCommands, configSyncService, new ManagerConnectionRegistry());
+    }
+
+    private ManagerControlWebSocketHandler handler(
+            ManagerControlApplicationService controlService,
+            ManagerPendingCommandRegistry pendingCommands,
+            OpencodeManagerConfigSyncService configSyncService,
+            ManagerConnectionRegistry connections) {
+        BackendJavaProcessLifecycleService backendLifecycle = Mockito.mock(BackendJavaProcessLifecycleService.class);
+        when(backendLifecycle.backendProcessId()).thenReturn(new BackendProcessId("bjp_1234567890abcdef"));
+        return new ManagerControlWebSocketHandler(
+                settings(),
+                codec,
+                controlService,
+                backendLifecycle,
+                connections,
+                pendingCommands,
+                configSyncService);
+    }
+
+    private static ManagerControlSettings settings() {
+        return new ManagerControlSettings(
+                "secret-token",
+                "http://10.8.0.21:8080",
+                new LinuxServerId("10.8.0.21"),
+                Duration.ofSeconds(10),
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(1),
+                100);
+    }
+
+    private static final class FakeWebSocketSession implements WebSocketSession {
+        private final HandshakeInfo handshakeInfo;
+        private final List<String> incoming;
+        private final DataBufferFactory bufferFactory = DefaultDataBufferFactory.sharedInstance;
+        private final List<String> sentText = new CopyOnWriteArrayList<>();
+        private final boolean keepIncomingOpen;
+        private boolean closed;
+
+        private FakeWebSocketSession(String token, List<String> incoming, boolean keepIncomingOpen) {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Trace-Id", "trace_1234567890abcdef");
+            if (token != null) {
+                headers.setBearerAuth(token);
+            }
+            this.handshakeInfo = new HandshakeInfo(
+                    URI.create("ws://127.0.0.1:8080/api/internal/platform/opencode-runtime/manager/ws"),
+                    headers,
+                    Mono.<Principal>empty(),
+                    null);
+            this.incoming = List.copyOf(incoming);
+            this.keepIncomingOpen = keepIncomingOpen;
+        }
+
+        static FakeWebSocketSession withToken(String token, List<String> incoming) {
+            return new FakeWebSocketSession(token, incoming, false);
+        }
+
+        static FakeWebSocketSession openWithToken(String token, List<String> incoming) {
+            return new FakeWebSocketSession(token, incoming, true);
+        }
+
+        List<String> sentText() {
+            return sentText;
+        }
+
+        boolean closed() {
+            return closed;
+        }
+
+        @Override
+        public String getId() {
+            return "ws_manager_test";
+        }
+
+        @Override
+        public HandshakeInfo getHandshakeInfo() {
+            return handshakeInfo;
+        }
+
+        @Override
+        public DataBufferFactory bufferFactory() {
+            return bufferFactory;
+        }
+
+        @Override
+        public Map<String, Object> getAttributes() {
+            return Map.of();
+        }
+
+        @Override
+        public Flux<WebSocketMessage> receive() {
+            Flux<WebSocketMessage> messages = Flux.fromIterable(incoming).map(this::textMessage);
+            return keepIncomingOpen ? messages.concatWith(Flux.never()) : messages;
+        }
+
+        @Override
+        public Mono<Void> send(Publisher<WebSocketMessage> messages) {
+            return Flux.from(messages)
+                    .doOnNext(message -> sentText.add(message.getPayloadAsText()))
+                    .then();
+        }
+
+        @Override
+        public boolean isOpen() {
+            return !closed;
+        }
+
+        @Override
+        public Mono<Void> close(CloseStatus status) {
+            closed = true;
+            return Mono.empty();
+        }
+
+        @Override
+        public Mono<CloseStatus> closeStatus() {
+            return Mono.just(CloseStatus.NORMAL);
+        }
+
+        @Override
+        public WebSocketMessage textMessage(String payload) {
+            return new WebSocketMessage(
+                    WebSocketMessage.Type.TEXT,
+                    bufferFactory.wrap(payload.getBytes(StandardCharsets.UTF_8)));
+        }
+
+        @Override
+        public WebSocketMessage binaryMessage(java.util.function.Function<DataBufferFactory, DataBuffer> payloadFactory) {
+            return new WebSocketMessage(WebSocketMessage.Type.BINARY, payloadFactory.apply(bufferFactory));
+        }
+
+        @Override
+        public WebSocketMessage pingMessage(java.util.function.Function<DataBufferFactory, DataBuffer> payloadFactory) {
+            return new WebSocketMessage(WebSocketMessage.Type.PING, payloadFactory.apply(bufferFactory));
+        }
+
+        @Override
+        public WebSocketMessage pongMessage(java.util.function.Function<DataBufferFactory, DataBuffer> payloadFactory) {
+            return new WebSocketMessage(WebSocketMessage.Type.PONG, payloadFactory.apply(bufferFactory));
+        }
+    }
+}

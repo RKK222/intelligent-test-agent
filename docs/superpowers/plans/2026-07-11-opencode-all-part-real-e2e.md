@@ -19,8 +19,8 @@
 - Read: `frontend/apps/agent-web/tests/workbench.real-spec.ts`
 - Read: `frontend/playwright.real.config.ts`
 - Read: `frontend/packages/backend-api/src/index.ts`
-- Read: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/PlatformOpencodeRuntimeController.java`
-- Read: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/agent/AgentOpencodeRuntimeController.java`
+- Read: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/PlatformOpencodeRuntimeController.java`
+- Read: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/agent/AgentOpencodeRuntimeController.java`
 
 - [ ] **Step 1: 启动 test 环境并确认版本**
 
@@ -305,10 +305,10 @@ Expected: 所有自然未命中项 raw/messages/tree/current/history/cleanup PAS
 ### Task 7: 对每个失败 Part 执行严格 RED/GREEN
 
 **Conditional Files:**
-- `backend/test-agent-opencode-client/src/main/java/com/icbc/testagent/opencode/client/OpencodeRunEventMapper.java`
-- `backend/test-agent-opencode-client/src/test/java/com/icbc/testagent/opencode/client/OpencodeRunEventMapperTest.java`
-- `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunMessageRecoveryService.java`
-- `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunMessageRecoveryServiceTest.java`
+- `backend/test-agent-opencode-client/src/main/java/com/enterprise/testagent/opencode/client/OpencodeRunEventMapper.java`
+- `backend/test-agent-opencode-client/src/test/java/com/enterprise/testagent/opencode/client/OpencodeRunEventMapperTest.java`
+- `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunMessageRecoveryService.java`
+- `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunMessageRecoveryServiceTest.java`
 - `frontend/packages/agent-chat/src/runtime-reducer.ts`
 - `frontend/packages/agent-chat/tests/runtime-reducer.test.ts`
 - `frontend/packages/agent-chat/src/opencode-like/**`

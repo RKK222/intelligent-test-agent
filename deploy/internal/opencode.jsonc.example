@@ -1,17 +1,17 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "icbc-qwen/Qwen3.6-27B",
-  "small_model": "icbc-qwen/Qwen3.6-27B",
-  "enabled_providers": ["icbc-qwen", "icbc-deepseek"],
+  "model": "enterprise-qwen/Qwen3.6-27B",
+  "small_model": "enterprise-qwen/Qwen3.6-27B",
+  "enabled_providers": ["enterprise-qwen", "enterprise-deepseek"],
   "provider": {
-    "icbc-qwen": {
+    "enterprise-qwen": {
       "name": "企业通义",
       "npm": "@ai-sdk/openai-compatible",
       "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
       "env": [
         "TEST_AGENT_INTERNAL_PROXY_API_KEY",
         "TEST_AGENT_INTERNAL_PROXY_BASE_URL",
-        "ICBC_UCID"
+        "ENTERPRISE_UCID"
       ],
       "options": {
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
@@ -21,8 +21,8 @@
         "headerTimeout": 30000,
         "chunkTimeout": 120000,
         "headers": {
-          "X-ICBC-Model-Provider": "qwen-prod",
-          "ucid": "{env:ICBC_UCID}"
+          "X-Enterprise-Model-Provider": "qwen-prod",
+          "ucid": "{env:ENTERPRISE_UCID}"
         }
       },
       "models": {
@@ -40,14 +40,14 @@
         }
       }
     },
-    "icbc-deepseek": {
+    "enterprise-deepseek": {
       "name": "企业 DeepSeek",
       "npm": "@ai-sdk/openai-compatible",
       "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
       "env": [
         "TEST_AGENT_INTERNAL_PROXY_API_KEY",
         "TEST_AGENT_INTERNAL_PROXY_BASE_URL",
-        "ICBC_UCID"
+        "ENTERPRISE_UCID"
       ],
       "options": {
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
@@ -57,8 +57,8 @@
         "headerTimeout": 30000,
         "chunkTimeout": 120000,
         "headers": {
-          "X-ICBC-Model-Provider": "deepseek-prod",
-          "ucid": "{env:ICBC_UCID}"
+          "X-Enterprise-Model-Provider": "deepseek-prod",
+          "ucid": "{env:ENTERPRISE_UCID}"
         }
       },
       "models": {

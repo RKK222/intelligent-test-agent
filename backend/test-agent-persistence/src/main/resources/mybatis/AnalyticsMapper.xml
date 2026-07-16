@@ -2,8 +2,8 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.AnalyticsMapper">
-    <resultMap id="ActivityRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsActivityRow">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.AnalyticsMapper">
+    <resultMap id="ActivityRowMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsActivityRow">
         <constructor>
             <arg column="bucket_start" javaType="java.time.Instant"/>
             <arg column="activity_date" javaType="java.time.LocalDate"/>
@@ -44,7 +44,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="DurationFactRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsDurationFactRow">
+    <resultMap id="DurationFactRowMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsDurationFactRow">
         <constructor>
             <arg column="bucket_start" javaType="java.time.Instant"/>
             <arg column="user_id" javaType="java.lang.String"/>
@@ -60,7 +60,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="DurationHistogramRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsDurationHistogramRow">
+    <resultMap id="DurationHistogramRowMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsDurationHistogramRow">
         <constructor>
             <arg column="bucket_start" javaType="java.time.Instant"/>
             <arg column="organization" javaType="java.lang.String"/>
@@ -74,7 +74,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="FreshnessRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsFreshnessRow">
+    <resultMap id="FreshnessRowMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsFreshnessRow">
         <constructor>
             <arg column="job_name" javaType="java.lang.String"/>
             <arg column="watermark_at" javaType="java.time.Instant"/>
@@ -84,7 +84,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="FeedbackDetailRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsFeedbackDetailRow">
+    <resultMap id="FeedbackDetailRowMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsFeedbackDetailRow">
         <constructor>
             <arg column="feedback_id" javaType="java.lang.String"/>
             <arg column="user_id" javaType="java.lang.String"/>
@@ -103,7 +103,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="ExceptionDetailRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsExceptionDetailRow">
+    <resultMap id="ExceptionDetailRowMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsExceptionDetailRow">
         <constructor>
             <arg column="run_id" javaType="java.lang.String"/>
             <arg column="user_id" javaType="java.lang.String"/>
@@ -120,7 +120,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="OrganizationUserCountRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsOrganizationUserCountRow">
+    <resultMap id="OrganizationUserCountRowMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsOrganizationUserCountRow">
         <constructor>
             <arg column="name" javaType="java.lang.String"/>
             <arg column="registered_users" javaType="_long"/>

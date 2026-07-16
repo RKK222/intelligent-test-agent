@@ -8,7 +8,7 @@
 | Java 后台 + worker | `122.233.30.114` |
 | Redis | `122.233.30.20:6379` |
 | PostgreSQL | `122.233.30.147:5432/postgres` |
-| 行内模型 | `ai-code.sdc.icbc:9070` |
+| 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
 ## 1. 拓扑与端口
 
@@ -22,14 +22,14 @@
   <-> 122.233.30.114:8080 Java manager WebSocket
   -> 4096-4105 用户 OpenCode 进程
   -> 122.233.30.114:8080 Java 内部模型代理
-       -> ai-code.sdc.icbc:9070
+       -> ai-code.sdc.enterprise:9070
 ```
 
 网络要求：
 
 - `.2` 能访问 `.114:8080`。
 - worker 容器能访问 `.114:8080`。
-- `.114` 能访问 PostgreSQL、Redis 和 `ai-code.sdc.icbc:9070`。
+- `.114` 能访问 PostgreSQL、Redis 和 `ai-code.sdc.enterprise:9070`。
 - `4096-4105` 的宿主机端口与容器端口必须同号映射。
 - `9070` 只需要 Java 宿主机出站可达，不对外发布。
 - 不启用 `--network host`，不部署 `19070` relay，不修改 worker 网络模式。
@@ -274,11 +274,11 @@ unzip -p /data/0709/test-agent-internal-release.zip \
 sed -n '1,220p' /tmp/opencode.jsonc
 ```
 
-其中 `{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}`、`{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}`、`{env:ICBC_UCID}` 必须原样保留，它们不是待替换占位符，而是 Java 在启动每个用户 OpenCode 进程时动态注入的逐进程环境变量。
+其中 `{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}`、`{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}`、`{env:ENTERPRISE_UCID}` 必须原样保留，它们不是待替换占位符，而是 Java 在启动每个用户 OpenCode 进程时动态注入的逐进程环境变量。
 
 ```text
-icbc-qwen/Qwen3.6-27B
-icbc-deepseek/DeepSeek-V4-Flash-W8A8
+enterprise-qwen/Qwen3.6-27B
+enterprise-deepseek/DeepSeek-V4-Flash-W8A8
 ```
 
 数据库供应商路由固定为：
@@ -292,18 +292,18 @@ deepseek-prod
 
 | Provider ID | 名称 | Base URL | Token | 启用 | 排序 |
 |---|---|---|---|---|---:|
-| `qwen-prod` | `企业通义` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
-| `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
+| `qwen-prod` | `企业通义` | `http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
+| `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
 
 三层配置必须同时正确：
 
 | 配置层 | 正确内容 | 生效方式 |
 |---|---|---|
-| 本服务器公共 `opencode.jsonc` | `icbc-qwen/Qwen3.6-27B`、`icbc-deepseek/DeepSeek-V4-Flash-W8A8`，并包含 `includeUsage=false` | 重启已有用户 OpenCode 进程；新进程直接读取 |
-| 共享数据库内部供应商 | `qwen-prod`、`deepseek-prod` 均启用，`baseUrl=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1`，全局 token 已配置 | 保存或点击“刷新 Java 内存”；不需要重启用户进程 |
-| 用户进程环境 | Java 启动进程时注入内部代理 key、同节点 Java 代理地址和该用户的 `ICBC_UCID` | 停止并通过运行管理重新启动用户进程 |
+| 本服务器公共 `opencode.jsonc` | `enterprise-qwen/Qwen3.6-27B`、`enterprise-deepseek/DeepSeek-V4-Flash-W8A8`，并包含 `includeUsage=false` | 重启已有用户 OpenCode 进程；新进程直接读取 |
+| 共享数据库内部供应商 | `qwen-prod`、`deepseek-prod` 均启用，`baseUrl=http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1`，全局 token 已配置 | 保存或点击“刷新 Java 内存”；不需要重启用户进程 |
+| 用户进程环境 | Java 启动进程时注入内部代理 key、同节点 Java 代理地址和该用户的 `ENTERPRISE_UCID` | 停止并通过运行管理重新启动用户进程 |
 
-`icbc-qwen` / `icbc-deepseek` 只用于 OpenCode 模型目录；`qwen-prod` / `deepseek-prod` 只用于 Java 路由，二者不能互换。上游模型 token 由 Java 作为 `Authorization: Bearer <token>` 注入，不在 `backend.env`、`docker.env` 或 `opencode.jsonc` 中再配 `Auth-Token`。每个用户的 UCID 来自用户表，由 Java 逐进程注入，不需要也不能为所有用户共用一个 env 文件。
+`enterprise-qwen` / `enterprise-deepseek` 只用于 OpenCode 模型目录；`qwen-prod` / `deepseek-prod` 只用于 Java 路由，二者不能互换。上游模型 token 由 Java 作为 `Authorization: Bearer <token>` 注入，不在 `backend.env`、`docker.env` 或 `opencode.jsonc` 中再配 `Auth-Token`。每个用户的 UCID 来自用户表，由 Java 逐进程注入，不需要也不能为所有用户共用一个 env 文件。
 
 更新公共配置后，要在运行管理中重启已有用户 OpenCode 进程；只重启 Java 不会让已运行的 OpenCode 重新读取公共配置。供应商地址、启用状态或 token 变化后先点击“刷新 Java 内存”；单后台广播异常时可直接重启 Java 重新加载数据库快照。
 
@@ -323,7 +323,7 @@ cd /data/testagent/deploy/internal
 docker logs --tail 200 test-agent-opencode-worker | \
   egrep 'config update applied|websocket|serverhost|serverid|OPENCODE_UNAVAILABLE'
 
-nc -vz ai-code.sdc.icbc 9070
+nc -vz ai-code.sdc.enterprise 9070
 ```
 
 预期 worker 日志出现 `manager config update applied`。再在管理页面确认一个 Java、一个 manager、一个容器均在线；初始化一个用户 OpenCode 进程后，用其实际动态端口检查：
@@ -344,7 +344,7 @@ curl -iN --max-time 180 \
   -H 'Content-Type: application/json' \
   -H 'Accept: text/event-stream' \
   -H 'Authorization: Bearer <backend.env 中的 TEST_AGENT_INTERNAL_PROXY_API_KEY>' \
-  -H 'X-ICBC-Model-Provider: qwen-prod' \
+  -H 'X-Enterprise-Model-Provider: qwen-prod' \
   -H 'ucid: <现场用户 UCID>' \
   --data '{"model":"Qwen3.6-27B","messages":[{"role":"user","content":"你好"}],"stream":true}'
 
@@ -353,7 +353,7 @@ curl -iN --max-time 180 \
   -H 'Content-Type: application/json' \
   -H 'Accept: text/event-stream' \
   -H 'Authorization: Bearer <backend.env 中的 TEST_AGENT_INTERNAL_PROXY_API_KEY>' \
-  -H 'X-ICBC-Model-Provider: deepseek-prod' \
+  -H 'X-Enterprise-Model-Provider: deepseek-prod' \
   -H 'ucid: <现场用户 UCID>' \
   --data '{"model":"DeepSeek-V4-Flash-W8A8","messages":[{"role":"user","content":"你好"}],"stream":true}'
 ```
@@ -377,11 +377,11 @@ ss -lntp | grep 19070
 | 部署提示 systemd unit 不匹配 | 执行 `systemctl show test-agent-backend -p ExecStart -p EnvironmentFiles`；必须分别指向 `/data/testagent/dist/backend/test-agent-app.jar` 和 `/data/testagent/config/backend.env`，不要让脚本覆盖未知 unit。 |
 | 部署提示 8080 被其他进程占用 | 执行 `lsof -nP -iTCP:8080 -sTCP:LISTEN` 和 `tr '\0' ' ' </proc/<PID>/cmdline`；同一交付 JAR 的遗留进程会被部署脚本安全清理，其他进程需人工确认归属。 |
 | worker 一直断连 | 比对两份 env 的 manager token；检查 `.serverhost`、8080 和 worker 日志。 |
-| 模型不显示 | 检查本服务器公共配置是否初始化；`/api/provider` 必须出现 `icbc-qwen/icbc-deepseek`，`/api/model` 必须出现两个准确模型 ID；更新后必须重启该用户 OpenCode。 |
+| 模型不显示 | 检查本服务器公共配置是否初始化；`/api/provider` 必须出现 `enterprise-qwen/enterprise-deepseek`，`/api/model` 必须出现两个准确模型 ID；更新后必须重启该用户 OpenCode。 |
 | `内部模型供应商未启用或不存在` | 请求头必须为 `qwen-prod` / `deepseek-prod`，数据库同名 `provider_id` 必须启用；点击“刷新 Java 内存”后再查 refresh-status。 |
 | Java 代理 400 | 读取响应正文，依次核对准确模型 ID、数据库 token、UCID、供应商 base URL；公共配置必须保留 `includeUsage=false`。当前 Java 会原样返回上游 4xx 正文，不应只剩空响应。 |
 | 前端 400、Java 代理 curl 正常 | 用户 OpenCode 仍在使用旧配置或旧环境；在运行管理停止并重启该用户进程，再检查其 `/api/model`。 |
-| 模型连接超时 | 必须从 Java 宿主机检查 `ai-code.sdc.icbc:9070`；OpenCode 的 `baseURL` 应是同节点 Java `:8080`，不能直接写 9070，也不能用其他容器的 curl 代替 Java 宿主机检查。 |
+| 模型连接超时 | 必须从 Java 宿主机检查 `ai-code.sdc.enterprise:9070`；OpenCode 的 `baseURL` 应是同节点 Java `:8080`，不能直接写 9070，也不能用其他容器的 curl 代替 Java 宿主机检查。 |
 | Java 调用卡住或原生输出为空 | 确认部署的是包含 SSE 修复的新 JAR；日志中不应出现重复 `data:data:`，首事件最长 30 秒、相邻事件空闲最长 120 秒。直接绕过 Java 能通不能证明 Java SSE 代理正常。 |
 | 用户初始化失败 | 在运行管理检查 Java、manager、容器连接和端口池；查看用户端口日志。 |
 

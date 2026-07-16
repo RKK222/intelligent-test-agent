@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/icbc/test-agent/opencode-manager/internal/state"
+	"github.com/enterprise/test-agent/opencode-manager/internal/state"
 )
 
 func TestCheckerReportsHealthyWhenPIDAliveAndGlobalHealthSucceeds(t *testing.T) {

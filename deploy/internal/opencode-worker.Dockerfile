@@ -21,7 +21,7 @@ RUN go mod download
 COPY opencode-manager/ ./
 RUN printf '%s' "${MANAGER_BUILD_VERSION}" | grep -Eq '^V[0-9]{8}\.[0-9]{6}$' \
     && go build -trimpath \
-      -ldflags="-s -w -X github.com/icbc/test-agent/opencode-manager/internal/control.buildVersion=${MANAGER_BUILD_VERSION}" \
+      -ldflags="-s -w -X github.com/enterprise/test-agent/opencode-manager/internal/control.buildVersion=${MANAGER_BUILD_VERSION}" \
       -o /out/opencode-manager ./cmd/opencode-manager
 
 FROM --platform=$BUILDPLATFORM ${BUN_IMAGE} AS opencode-node-build

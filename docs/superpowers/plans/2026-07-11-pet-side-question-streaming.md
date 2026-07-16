@@ -17,10 +17,10 @@
 ### Task 1: 定义旁路 Run 来源和事件契约
 
 **Files:**
-- Modify: `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/session/ConversationSourceType.java`
-- Modify: `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/event/RunEventType.java`
-- Modify: `backend/test-agent-domain/src/test/java/com/icbc/testagent/domain/event/RunEventTypeTest.java`
-- Modify: `backend/test-agent-domain/src/test/java/com/icbc/testagent/domain/run/RunTest.java`
+- Modify: `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/session/ConversationSourceType.java`
+- Modify: `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/event/RunEventType.java`
+- Modify: `backend/test-agent-domain/src/test/java/com/enterprise/testagent/domain/event/RunEventTypeTest.java`
+- Modify: `backend/test-agent-domain/src/test/java/com/enterprise/testagent/domain/run/RunTest.java`
 - Modify: `frontend/packages/shared-types/src/index.ts`
 - Modify: `frontend/packages/event-stream-client/src/index.ts`
 - Modify: `frontend/packages/event-stream-client/tests/event-stream-client.test.ts`
@@ -68,14 +68,14 @@ SIDE_QUESTION_DELTA("side_question.delta")
 ### Task 2: 为 prompt_async 增加后端受控 system 字段
 
 **Files:**
-- Modify: `backend/test-agent-agent-runtime/src/main/java/com/icbc/testagent/agent/runtime/AgentStartRunCommand.java`
-- Modify: `backend/test-agent-agent-runtime/src/main/java/com/icbc/testagent/agent/runtime/OpencodeAgentRuntime.java`
-- Modify: `backend/test-agent-opencode-client/src/main/java/com/icbc/testagent/opencode/client/OpencodeStartRunCommand.java`
-- Modify: `backend/test-agent-opencode-client/src/main/java/com/icbc/testagent/opencode/client/OpencodeSdkGateway.java`
-- Modify: `backend/test-agent-opencode-client/src/main/java/com/icbc/testagent/opencode/client/GeneratedOpencodeSdkGateway.java`
-- Modify: `backend/test-agent-opencode-client/src/main/java/com/icbc/testagent/opencode/client/DefaultOpencodeClientFacade.java`
-- Modify: `backend/test-agent-opencode-client/src/test/java/com/icbc/testagent/opencode/client/GeneratedOpencodeSdkGatewayTest.java`
-- Modify: `backend/test-agent-agent-runtime/src/test/java/com/icbc/testagent/agent/runtime/OpencodeAgentRuntimeTest.java`
+- Modify: `backend/test-agent-agent-runtime/src/main/java/com/enterprise/testagent/agent/runtime/AgentStartRunCommand.java`
+- Modify: `backend/test-agent-agent-runtime/src/main/java/com/enterprise/testagent/agent/runtime/OpencodeAgentRuntime.java`
+- Modify: `backend/test-agent-opencode-client/src/main/java/com/enterprise/testagent/opencode/client/OpencodeStartRunCommand.java`
+- Modify: `backend/test-agent-opencode-client/src/main/java/com/enterprise/testagent/opencode/client/OpencodeSdkGateway.java`
+- Modify: `backend/test-agent-opencode-client/src/main/java/com/enterprise/testagent/opencode/client/GeneratedOpencodeSdkGateway.java`
+- Modify: `backend/test-agent-opencode-client/src/main/java/com/enterprise/testagent/opencode/client/DefaultOpencodeClientFacade.java`
+- Modify: `backend/test-agent-opencode-client/src/test/java/com/enterprise/testagent/opencode/client/GeneratedOpencodeSdkGatewayTest.java`
+- Modify: `backend/test-agent-agent-runtime/src/test/java/com/enterprise/testagent/agent/runtime/OpencodeAgentRuntimeTest.java`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -110,12 +110,12 @@ Expected: FAIL，命令和 gateway 尚无 system 字段。
 ### Task 3: 提取共享答案过滤器和旁路事件投影器
 
 **Files:**
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionAnswerExtractor.java`
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionEventProjector.java`
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionAnswerExtractorTest.java`
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionEventProjectorTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationService.java`
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationServiceTest.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionAnswerExtractor.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionEventProjector.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionAnswerExtractorTest.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionEventProjectorTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationService.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationServiceTest.java`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -151,14 +151,14 @@ Expected: FAIL，新类不存在。
 ### Task 4: 以归档内部 Session 启动异步旁路 Run
 
 **Files:**
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionRunStartResult.java`
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionStreamingApplicationService.java`
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionTerminalService.java`
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionStreamingApplicationServiceTest.java`
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionTerminalServiceTest.java`
-- Create: `backend/test-agent-app/src/test/java/com/icbc/testagent/app/SideQuestionTerminalTransactionIntegrationTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunEventPersistencePolicy.java`
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunEventPersistencePolicyTest.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionRunStartResult.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionStreamingApplicationService.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionTerminalService.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionStreamingApplicationServiceTest.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionTerminalServiceTest.java`
+- Create: `backend/test-agent-app/src/test/java/com/enterprise/testagent/app/SideQuestionTerminalTransactionIntegrationTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunEventPersistencePolicy.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunEventPersistencePolicyTest.java`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -195,12 +195,12 @@ Expected: FAIL，流式服务和事件策略尚不存在。
 ### Task 5: 新增兼容的流式启动 HTTP 入口
 
 **Files:**
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/common/SideQuestionDtos.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/PlatformOpencodeRuntimeController.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/agent/AgentOpencodeRuntimeController.java`
-- Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/RuntimeControllerTest.java`
-- Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/UserOpencodeBackendRoutingWebFilterTest.java`
-- Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/RunEventSseBackendRoutingWebFilterTest.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/common/SideQuestionDtos.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/PlatformOpencodeRuntimeController.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/agent/AgentOpencodeRuntimeController.java`
+- Modify: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/RuntimeControllerTest.java`
+- Modify: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/UserOpencodeBackendRoutingWebFilterTest.java`
+- Modify: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/RunEventSseBackendRoutingWebFilterTest.java`
 - Modify: `frontend/packages/shared-types/src/index.ts`
 - Modify: `frontend/packages/backend-api/src/index.ts`
 - Modify: `frontend/packages/backend-api/tests/backend-api.test.ts`
@@ -319,17 +319,17 @@ Expected: FAIL，页面尚未使用流式入口。
 ### Task 8: 回收重启后遗留的旁路 fork
 
 **Files:**
-- Modify: `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/run/RunRepository.java`
-- Modify: `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/RunMapper.java`
-- Modify: `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/MyBatisRunRepository.java`
+- Modify: `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/run/RunRepository.java`
+- Modify: `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/RunMapper.java`
+- Modify: `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/MyBatisRunRepository.java`
 - Modify: `backend/test-agent-persistence/src/main/resources/mybatis/RunMapper.xml`
-- Modify: `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisRunRepositoryIntegrationTest.java`
-- Modify: `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisSessionHistoryRepositoryIntegrationTest.java`
-- Modify: `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisSessionRuntimeStateRepositoryIntegrationTest.java`
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionOrphanCleanupService.java`
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionOrphanCleanupTaskHandler.java`
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionOrphanCleanupServiceTest.java`
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/SideQuestionOrphanCleanupTaskHandlerTest.java`
+- Modify: `backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/MyBatisRunRepositoryIntegrationTest.java`
+- Modify: `backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/MyBatisSessionHistoryRepositoryIntegrationTest.java`
+- Modify: `backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/MyBatisSessionRuntimeStateRepositoryIntegrationTest.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionOrphanCleanupService.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionOrphanCleanupTaskHandler.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionOrphanCleanupServiceTest.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/SideQuestionOrphanCleanupTaskHandlerTest.java`
 - Create: `backend/test-agent-persistence/src/main/resources/db/migration/V20260711120000__document_side_question_run_source.sql`
 
 - [ ] **Step 1: 写失败测试**

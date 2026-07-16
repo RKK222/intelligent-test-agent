@@ -2,7 +2,7 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.DatabaseIdentityMapper">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.DatabaseIdentityMapper">
 
     <!--
         查询一张表的 identity 序列当前值与 max(id)。

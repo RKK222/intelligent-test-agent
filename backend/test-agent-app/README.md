@@ -12,7 +12,7 @@
 
 ## 主要职责
 
-- 启动 `TestAgentApplication`，扫描 `com.icbc.testagent` 下的后端组件。
+- 启动 `TestAgentApplication`，扫描 `com.enterprise.testagent` 下的后端组件。
 - 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口、opencode execution node seed、Spring Scheduling，以及 Java/opencode 运行心跳和统一定时任务装配。
 - 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包；persistence 装配 Redis 唯一 `RunRuntimeStore`，负责 manifest、durable/runtime 双 Stream、Hash/ZSET 物化 snapshot 和 active 索引，event/runtime 只依赖领域端口；多服务器部署时由 event 模块装配 Redis 服务器广播，workspace-management 模块执行应用版本工作区副本补偿。
 - Maven package 通过 Spring Boot `build-info` 把产物构建时刻写入 jar；运行时按北京时间格式化为 `VyyyyMMdd.HHmmss` 并随 Java Redis 心跳快照上报。IDE 直接启动或旧 jar 缺少构建元数据时版本为空，不使用启动时间替代。

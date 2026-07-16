@@ -15,8 +15,8 @@
 ### Task 1: macOS 后端筛选契约
 
 **Files:**
-- Modify: `backend/test-agent-configuration-management/src/test/java/com/icbc/testagent/configuration/management/CommonParameterManagementApplicationServiceTest.java`
-- Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/CommonParameterManagementControllerTest.java`
+- Modify: `backend/test-agent-configuration-management/src/test/java/com/enterprise/testagent/configuration/management/CommonParameterManagementApplicationServiceTest.java`
+- Modify: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/CommonParameterManagementControllerTest.java`
 
 - [x] 把现有 `macos` 非法值用例改为未知值，新增 `macos` 可解析和可查询断言。
 - [x] 运行定向测试，确认旧断言先失败且新契约随后通过。

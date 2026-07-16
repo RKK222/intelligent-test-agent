@@ -1171,13 +1171,13 @@ test("workbench clears stale persisted model and sends catalog default", async (
     models: [
       {
         id: "DeepSeek-V4-Flash-W8A8",
-        providerId: "icbc-openai",
+        providerId: "enterprise-openai",
         name: "DeepSeek-V4-Flash-W8A8",
         defaultModel: true
       },
-      { id: "Qwen3.6-27B", providerId: "icbc-openai", name: "Qwen3.6-27B" }
+      { id: "Qwen3.6-27B", providerId: "enterprise-openai", name: "Qwen3.6-27B" }
     ],
-    providers: [{ id: "icbc-openai", providerId: "icbc-openai", name: "ICBC OpenAI", status: "ready" }]
+    providers: [{ id: "enterprise-openai", providerId: "enterprise-openai", name: "Enterprise OpenAI", status: "ready" }]
   });
   await page.addInitScript(() => {
     localStorage.setItem("ta_selected_provider", "opencode-zen");
@@ -1187,7 +1187,7 @@ test("workbench clears stale persisted model and sends catalog default", async (
   await gotoWorkbench(page);
 
   await expect(page.getByRole("button", { name: "切换模型" })).toContainText("DeepSeek-V4-Flash-W8A8");
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("ta_selected_model"))).toBe("icbc-openai/DeepSeek-V4-Flash-W8A8");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("ta_selected_model"))).toBe("enterprise-openai/DeepSeek-V4-Flash-W8A8");
 
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("use catalog default model");
   await page.getByRole("button", { name: "发送" }).click();
@@ -1195,7 +1195,7 @@ test("workbench clears stale persisted model and sends catalog default", async (
   await expect.poll(() => runRequests.length).toBe(1);
   expect(runRequests[0]).toMatchObject({
     prompt: "use catalog default model",
-    model: "icbc-openai/DeepSeek-V4-Flash-W8A8"
+    model: "enterprise-openai/DeepSeek-V4-Flash-W8A8"
   });
 });
 

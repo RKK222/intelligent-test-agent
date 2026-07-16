@@ -2,8 +2,8 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.CommonParameterChangeLogMapper">
-    <resultMap id="CommonParameterChangeLogRowMap" type="com.icbc.testagent.persistence.mybatis.CommonParameterChangeLogRow">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.CommonParameterChangeLogMapper">
+    <resultMap id="CommonParameterChangeLogRowMap" type="com.enterprise.testagent.persistence.mybatis.CommonParameterChangeLogRow">
         <constructor>
             <arg column="log_id" javaType="java.lang.String"/>
             <arg column="parameter_id" javaType="java.lang.String"/>

@@ -156,7 +156,7 @@ function formatError(error: unknown) {
           size="small"
           type="password"
           show-password
-          placeholder="写入新的 ICBC_OPENAI_AUTH_TOKEN；留空则不修改"
+          placeholder="写入新的 ENTERPRISE_OPENAI_AUTH_TOKEN；留空则不修改"
         />
       </div>
 
@@ -176,8 +176,8 @@ function formatError(error: unknown) {
           </thead>
           <tbody>
             <tr v-for="(row, index) in rows" :key="`${row.providerId}-${index}`">
-              <td><el-input v-model="row.providerId" size="small" placeholder="icbc-qwen" /></td>
-              <td><el-input v-model="row.name" size="small" placeholder="ICBC Qwen" /></td>
+              <td><el-input v-model="row.providerId" size="small" placeholder="enterprise-qwen" /></td>
+              <td><el-input v-model="row.name" size="small" placeholder="ENTERPRISE Qwen" /></td>
               <td><el-input v-model="row.baseUrl" size="small" placeholder="http://provider.example/v1" /></td>
               <td><el-switch v-model="row.enabled" size="small" /></td>
               <td><el-input-number v-model="row.sortOrder" size="small" :min="0" :max="9999" controls-position="right" /></td>

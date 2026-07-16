@@ -295,7 +295,7 @@ comment on column user_workspace_branch_preferences.updated_at is '更新时间'
 -- AI模型配置表：ai_model_configs
 comment on table ai_model_configs is 'AI模型配置表，用于企业内模型目录接口读取和默认模型控制';
 comment on column ai_model_configs.id is '数据库自增主键';
-comment on column ai_model_configs.provider_id is '模型所属provider，如：icbc-openai';
+comment on column ai_model_configs.provider_id is '模型所属provider，如：enterprise-openai';
 comment on column ai_model_configs.model_id is '模型标识，如：DeepSeek-V4-Flash-W8A8';
 comment on column ai_model_configs.name is '前端展示名称';
 comment on column ai_model_configs.enabled is '是否在模型目录中展示';
@@ -460,3 +460,4 @@ comment on column scheduled_task_runs.updated_at is '更新时间';
 comment on column scheduled_task_runs.stop_requested_at is '停止请求时间';
 comment on column scheduled_task_runs.stop_requested_by_user_id is '请求停止的用户ID';
 comment on column scheduled_task_runs.stop_reason is '停止原因';
+-- migration checksum compatibility pad: fpbalE

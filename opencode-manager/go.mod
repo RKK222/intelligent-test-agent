@@ -1,4 +1,4 @@
-module github.com/icbc/test-agent/opencode-manager
+module github.com/enterprise/test-agent/opencode-manager
 
 go 1.23.0
 

@@ -69,19 +69,19 @@ for file in "${required_files[@]}"; do
 done
 
 package_docs=(
-  "backend/test-agent-api/src/main/java/com/icbc/testagent/api/PACKAGE.md"
-  "backend/test-agent-app/src/main/java/com/icbc/testagent/app/PACKAGE.md"
-  "backend/test-agent-common/src/main/java/com/icbc/testagent/common/PACKAGE.md"
-  "backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/PACKAGE.md"
-  "backend/test-agent-event/src/main/java/com/icbc/testagent/event/PACKAGE.md"
-  "backend/test-agent-integration/src/main/java/com/icbc/testagent/integration/PACKAGE.md"
-  "backend/test-agent-observability/src/main/java/com/icbc/testagent/observability/PACKAGE.md"
-  "backend/test-agent-opencode-client/src/main/java/com/icbc/testagent/opencode/client/PACKAGE.md"
-  "backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/PACKAGE.md"
-  "backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/PACKAGE.md"
-  "backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/PACKAGE.md"
-  "backend/test-agent-test-support/src/main/java/com/icbc/testagent/testsupport/PACKAGE.md"
-  "backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/PACKAGE.md"
+  "backend/test-agent-api/src/main/java/com/enterprise/testagent/api/PACKAGE.md"
+  "backend/test-agent-app/src/main/java/com/enterprise/testagent/app/PACKAGE.md"
+  "backend/test-agent-common/src/main/java/com/enterprise/testagent/common/PACKAGE.md"
+  "backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/PACKAGE.md"
+  "backend/test-agent-event/src/main/java/com/enterprise/testagent/event/PACKAGE.md"
+  "backend/test-agent-integration/src/main/java/com/enterprise/testagent/integration/PACKAGE.md"
+  "backend/test-agent-observability/src/main/java/com/enterprise/testagent/observability/PACKAGE.md"
+  "backend/test-agent-opencode-client/src/main/java/com/enterprise/testagent/opencode/client/PACKAGE.md"
+  "backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/PACKAGE.md"
+  "backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/PACKAGE.md"
+  "backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/PACKAGE.md"
+  "backend/test-agent-test-support/src/main/java/com/enterprise/testagent/testsupport/PACKAGE.md"
+  "backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/PACKAGE.md"
 )
 
 for file in "${package_docs[@]}"; do

@@ -1,8 +1,8 @@
-export function getAamUrl(url, baseURL = "http://zfw.sdc.cs.icbc/aam/login/") {
+export function getAamUrl(url, baseURL = "http://zfw.sdc.cs.enterprise/aam/login/") {
   const baseStr = encodeToUrl(url);
   return baseURL + baseStr;
 }
-export function jumpAam(url, baseURL = "http://zfw.sdc.cs.icbc/aam/login/") {
+export function jumpAam(url, baseURL = "http://zfw.sdc.cs.enterprise/aam/login/") {
   const aamUrl = baseURL;
   window.location.href = aamUrl + encodeToUrl(url);
 }

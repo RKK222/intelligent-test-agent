@@ -2,8 +2,8 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.RunEventMapper">
-    <resultMap id="RunEventRowMap" type="com.icbc.testagent.persistence.mybatis.RunEventRow">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.RunEventMapper">
+    <resultMap id="RunEventRowMap" type="com.enterprise.testagent.persistence.mybatis.RunEventRow">
         <constructor>
             <arg column="event_id" javaType="java.lang.String"/>
             <arg column="run_id" javaType="java.lang.String"/>

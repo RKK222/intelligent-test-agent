@@ -445,10 +445,10 @@ Java 进程需要配置 `TEST_AGENT_INTERNAL_PROXY_API_KEY`，用于校验 openc
 ```bash
 TEST_AGENT_INTERNAL_PROXY_API_KEY=<proxy-api-key>
 TEST_AGENT_INTERNAL_PROXY_BASE_URL=http://<same-node-java>/api/internal/platform/opencode-runtime/internal-model-proxy/v1
-ICBC_UCID=<current-user-unified-auth-id>
+ENTERPRISE_UCID=<current-user-unified-auth-id>
 ```
 
-`ICBC_OPENAI_AUTH_TOKEN` 不再通过 Java 环境变量提供；超级管理员在前端“系统管理 → 配置管理 → 内部模型供应商”维护内部供应商 `providerId/name/baseUrl/enabled/sortOrder` 和全局 token，token 明文保存在 `internal_model_proxy_settings`，前端只展示已配置/未配置。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 公共配置样例”；114 单后端可直接使用 `deploy/internal/opencode.jsonc.example`。
+`ENTERPRISE_OPENAI_AUTH_TOKEN` 不再通过 Java 环境变量提供；超级管理员在前端“系统管理 → 配置管理 → 内部模型供应商”维护内部供应商 `providerId/name/baseUrl/enabled/sortOrder` 和全局 token，token 明文保存在 `internal_model_proxy_settings`，前端只展示已配置/未配置。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 公共配置样例”；114 单后端可直接使用 `deploy/internal/opencode.jsonc.example`。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|

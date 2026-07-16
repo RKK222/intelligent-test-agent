@@ -2,8 +2,8 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.RunSummaryMapper">
-    <resultMap id="RunPersistenceAnchorRowMap" type="com.icbc.testagent.persistence.mybatis.RunPersistenceAnchorRow">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.RunSummaryMapper">
+    <resultMap id="RunPersistenceAnchorRowMap" type="com.enterprise.testagent.persistence.mybatis.RunPersistenceAnchorRow">
         <constructor>
             <arg column="run_id" javaType="java.lang.String"/>
             <arg column="session_id" javaType="java.lang.String"/>
@@ -30,7 +30,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="RunSummaryRowMap" type="com.icbc.testagent.persistence.mybatis.RunSummaryRow">
+    <resultMap id="RunSummaryRowMap" type="com.enterprise.testagent.persistence.mybatis.RunSummaryRow">
         <constructor>
             <arg column="message_id" javaType="java.lang.String"/>
             <arg column="session_id" javaType="java.lang.String"/>
@@ -52,7 +52,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="RunDetailsLocatorRowMap" type="com.icbc.testagent.persistence.mybatis.RunDetailsLocatorRow">
+    <resultMap id="RunDetailsLocatorRowMap" type="com.enterprise.testagent.persistence.mybatis.RunDetailsLocatorRow">
         <constructor>
             <arg column="run_id" javaType="java.lang.String"/>
             <arg column="storage_mode" javaType="java.lang.String"/>

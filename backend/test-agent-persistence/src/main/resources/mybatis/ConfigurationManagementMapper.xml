@@ -2,9 +2,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.ConfigurationManagementMapper">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.ConfigurationManagementMapper">
 
-    <resultMap id="ApplicationDefinitionMap" type="com.icbc.testagent.persistence.mybatis.ApplicationDefinitionRow">
+    <resultMap id="ApplicationDefinitionMap" type="com.enterprise.testagent.persistence.mybatis.ApplicationDefinitionRow">
         <constructor>
             <arg column="app_id" javaType="java.lang.String"/>
             <arg column="app_name" javaType="java.lang.String"/>
@@ -14,7 +14,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="ApplicationMemberMap" type="com.icbc.testagent.persistence.mybatis.ApplicationMemberRow">
+    <resultMap id="ApplicationMemberMap" type="com.enterprise.testagent.persistence.mybatis.ApplicationMemberRow">
         <constructor>
             <arg column="app_id" javaType="java.lang.String"/>
             <arg column="user_id" javaType="java.lang.String"/>
@@ -24,7 +24,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="CodeRepositoryMap" type="com.icbc.testagent.persistence.mybatis.CodeRepositoryRow">
+    <resultMap id="CodeRepositoryMap" type="com.enterprise.testagent.persistence.mybatis.CodeRepositoryRow">
         <constructor>
             <arg column="repository_id" javaType="java.lang.String"/>
             <arg column="git_url" javaType="java.lang.String"/>
@@ -38,7 +38,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="ApplicationWorkspaceMap" type="com.icbc.testagent.persistence.mybatis.ApplicationWorkspaceRow">
+    <resultMap id="ApplicationWorkspaceMap" type="com.enterprise.testagent.persistence.mybatis.ApplicationWorkspaceRow">
         <constructor>
             <arg column="workspace_id" javaType="java.lang.String"/>
             <arg column="app_id" javaType="java.lang.String"/>
@@ -51,7 +51,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="UserSshKeyMap" type="com.icbc.testagent.persistence.mybatis.UserSshKeyRow">
+    <resultMap id="UserSshKeyMap" type="com.enterprise.testagent.persistence.mybatis.UserSshKeyRow">
         <constructor>
             <arg column="ssh_key_id" javaType="java.lang.String"/>
             <arg column="user_id" javaType="java.lang.String"/>
@@ -168,7 +168,7 @@
         where english_name = #{englishName}
     </select>
 
-    <insert id="insertRepository" parameterType="com.icbc.testagent.persistence.mybatis.CodeRepositoryRow">
+    <insert id="insertRepository" parameterType="com.enterprise.testagent.persistence.mybatis.CodeRepositoryRow">
         insert into code_repositories(
             repository_id, git_url, name, english_name, repository_type, deployment_mode, standard, created_at, updated_at
         )
@@ -177,7 +177,7 @@
         )
     </insert>
 
-    <update id="updateRepositoryMetadata" parameterType="com.icbc.testagent.persistence.mybatis.CodeRepositoryRow">
+    <update id="updateRepositoryMetadata" parameterType="com.enterprise.testagent.persistence.mybatis.CodeRepositoryRow">
         update code_repositories
         set name = #{name},
             english_name = #{englishName},
@@ -252,7 +252,7 @@
         limit 1
     </select>
 
-    <insert id="insertWorkspace" parameterType="com.icbc.testagent.persistence.mybatis.ApplicationWorkspaceRow">
+    <insert id="insertWorkspace" parameterType="com.enterprise.testagent.persistence.mybatis.ApplicationWorkspaceRow">
         insert into application_workspaces(
             workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
         )
@@ -261,7 +261,7 @@
         )
     </insert>
 
-    <update id="updateWorkspace" parameterType="com.icbc.testagent.persistence.mybatis.ApplicationWorkspaceRow">
+    <update id="updateWorkspace" parameterType="com.enterprise.testagent.persistence.mybatis.ApplicationWorkspaceRow">
         update application_workspaces
         set workspace_name = #{workspaceName}, updated_at = #{updatedAt}
         where workspace_id = #{workspaceId}
@@ -286,7 +286,7 @@
           and ssh_key_id = #{sshKeyId}
     </select>
 
-    <insert id="insertSshKey" parameterType="com.icbc.testagent.persistence.mybatis.UserSshKeyRow">
+    <insert id="insertSshKey" parameterType="com.enterprise.testagent.persistence.mybatis.UserSshKeyRow">
         insert into user_ssh_keys(
             ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encrypted_aes_key, encryption_nonce, created_at
         )

@@ -89,13 +89,13 @@ test-agent:
       auth-mode: bearer
       default-model: ${TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL:${TEST_AGENT_BAILIAN_DEFAULT_MODEL:}}
     internal:
-      provider-id: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_ID:icbc-openai}
-      name: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_NAME:ICBC OpenAI}
-      base-url: ${TEST_AGENT_ICBC_OPENAI_BASE_URL:http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1}
-      api-key-env: ${TEST_AGENT_ICBC_OPENAI_TOKEN_ENV:ICBC_OPENAI_AUTH_TOKEN}
+      provider-id: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_ID:enterprise-openai}
+      name: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_NAME:Enterprise OpenAI}
+      base-url: ${TEST_AGENT_ENTERPRISE_OPENAI_BASE_URL:http://ai-code.sdc.enterprise:9070/enterprise/jdt/model/api/openai/v1}
+      api-key-env: ${TEST_AGENT_ENTERPRISE_OPENAI_TOKEN_ENV:ENTERPRISE_OPENAI_AUTH_TOKEN}
       api-key: ""
-      ucid-header-name: ${TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME:ucid}
-      auth-mode: ${TEST_AGENT_ICBC_OPENAI_AUTH_MODE:auth-token}
+      ucid-header-name: ${TEST_AGENT_ENTERPRISE_OPENAI_UCID_HEADER_NAME:ucid}
+      auth-mode: ${TEST_AGENT_ENTERPRISE_OPENAI_AUTH_MODE:auth-token}
       default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:Qwen3.6-27B}
   scheduler:
     enabled: ${TEST_AGENT_SCHEDULER_ENABLED:true}

@@ -761,7 +761,7 @@ build_opencode_manager() {
   local manager_build_version
   manager_build_version="$(TZ=Asia/Shanghai date '+V%Y%m%d.%H%M%S')"
   (cd "${ROOT_DIR}/opencode-manager" && go build \
-    -ldflags "-X github.com/icbc/test-agent/opencode-manager/internal/control.buildVersion=${manager_build_version}" \
+    -ldflags "-X github.com/enterprise/test-agent/opencode-manager/internal/control.buildVersion=${manager_build_version}" \
     -o bin/opencode-manager ./cmd/opencode-manager)
 }
 

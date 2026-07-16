@@ -358,7 +358,7 @@ function focusEditNameInput() {
             <el-form-item label="版本库地址">
               <div v-if="currentCreateInternal" class="ta-git-url-input-group">
                 <span class="ta-git-url-prefix">{{ internalSshPrefix }}</span>
-                <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="scm-share.sdc.cs.icbc:29418/group/repository" />
+                <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="scm-share.sdc.cs.enterprise:29418/group/repository" />
               </div>
               <el-input v-else ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="Git URL" />
             </el-form-item>

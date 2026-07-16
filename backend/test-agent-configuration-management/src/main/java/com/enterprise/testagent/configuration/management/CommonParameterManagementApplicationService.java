@@ -1,0 +1,190 @@
+package com.enterprise.testagent.configuration.management;
+
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.pagination.PageRequest;
+import com.enterprise.testagent.common.pagination.PageResponse;
+import com.enterprise.testagent.configuration.management.CommonParameterManagementResponses.ChangeLogResponse;
+import com.enterprise.testagent.configuration.management.CommonParameterManagementResponses.CommonParameterResponse;
+import com.enterprise.testagent.domain.configuration.CommonParameter;
+import com.enterprise.testagent.domain.configuration.CommonParameterChangeLog;
+import com.enterprise.testagent.domain.configuration.CommonParameterChangeLogRepository;
+import com.enterprise.testagent.domain.configuration.CommonParameterRepository;
+import com.enterprise.testagent.domain.configuration.CommonParameterUpdatedEvent;
+import com.enterprise.testagent.domain.configuration.ParameterPlatform;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
+
+/**
+ * 通用参数管理应用服务，编排通用参数的列表查询与「仅修改 value」更新；
+ * 不提供新增/删除能力，保持通用参数集合稳定。
+ */
+@Service
+public class CommonParameterManagementApplicationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CommonParameterManagementApplicationService.class);
+    private static final int CHANGE_LOG_LIMIT = 50;
+
+    private final CommonParameterRepository repository;
+    private final CommonParameterChangeLogRepository changeLogRepository;
+    private final ApplicationEventPublisher eventPublisher;
+    private final Clock clock;
+
+    /**
+     * 注入通用参数领域端口和修改日志端口；使用系统默认时钟记录更新时间。
+     */
+    @Autowired
+    public CommonParameterManagementApplicationService(
+            CommonParameterRepository repository,
+            CommonParameterChangeLogRepository changeLogRepository,
+            ApplicationEventPublisher eventPublisher) {
+        this(repository, changeLogRepository, eventPublisher, Clock.systemUTC());
+    }
+
+    /**
+     * 测试可注入可控时钟，便于断言更新时间。
+     */
+    CommonParameterManagementApplicationService(
+            CommonParameterRepository repository,
+            CommonParameterChangeLogRepository changeLogRepository,
+            ApplicationEventPublisher eventPublisher,
+            Clock clock) {
+        this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.changeLogRepository = Objects.requireNonNull(changeLogRepository, "changeLogRepository must not be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
+    }
+
+    /**
+     * 列出通用参数，支持按平台过滤与分页；通用参数表为有界配置表，先全量读取再内存过滤分页。
+     */
+    public PageResponse<CommonParameterResponse> find(CommonParameterFilter filter, PageRequest pageRequest) {
+        Objects.requireNonNull(filter, "filter must not be null");
+        Objects.requireNonNull(pageRequest, "pageRequest must not be null");
+        List<CommonParameter> filtered = repository.findAll().stream()
+                .filter(parameter -> filter.platform() == null || parameter.platform() == filter.platform())
+                .toList();
+        long total = filtered.size();
+        int from = (int) Math.min(pageRequest.offset(), total);
+        int to = (int) Math.min((long) from + pageRequest.size(), total);
+        List<CommonParameterResponse> items = filtered.subList(from, to).stream()
+                .map(CommonParameterResponse::from)
+                .toList();
+        return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
+    }
+
+    /**
+     * 仅更新指定通用参数的 value；参数不存在抛 {@link ErrorCode#NOT_FOUND}，
+     * 新值为空抛 {@link ErrorCode#VALIDATION_ERROR}。只读参数（editable=false）抛
+     * {@link ErrorCode#VALIDATION_ERROR}，避免误改部署/初始化参数影响系统正常运行。更新成功后记录修改日志。
+     *
+     * @param parameterId 参数业务 ID
+     * @param newValue 新值
+     * @param traceId 链路追踪 ID
+     * @param changedByUserId 修改用户 ID（可为空，兼容 static token）
+     * @param changedByUsername 修改用户名（可为空，兼容 static token）
+     * @return 更新后的参数响应
+     */
+    public CommonParameterResponse updateValue(
+            String parameterId,
+            String newValue,
+            String traceId,
+            String changedByUserId,
+            String changedByUsername) {
+        String normalizedParameterId = normalize(parameterId, "parameterId");
+        CommonParameter existing = repository.findByParameterId(normalizedParameterId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND, "通用参数不存在", Map.of("parameterId", normalizedParameterId)));
+        if (!existing.editable()) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "该通用参数为只读参数，修改后将影响系统正常运行",
+                    Map.of("parameterId", normalizedParameterId, "englishName", existing.englishName()));
+        }
+        String oldValue = existing.parameterValue();
+        Instant updatedAt = clock.instant();
+        CommonParameter updated;
+        try {
+            updated = existing.withValue(newValue, updatedAt);
+        } catch (IllegalArgumentException exception) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR, "参数值不能为空", Map.of("parameterId", normalizedParameterId), exception);
+        }
+        int affected = repository.updateValue(normalizedParameterId, updated.parameterValue(), updatedAt);
+        if (affected == 0) {
+            throw new PlatformException(
+                    ErrorCode.NOT_FOUND, "通用参数不存在", Map.of("parameterId", normalizedParameterId));
+        }
+        // 记录修改日志
+        CommonParameterChangeLog changeLog = CommonParameterChangeLog.create(
+                "log_" + UUID.randomUUID().toString().replace("-", ""),
+                normalizedParameterId,
+                oldValue,
+                updated.parameterValue(),
+                changedByUserId,
+                changedByUsername,
+                traceId,
+                updatedAt);
+        changeLogRepository.save(changeLog);
+
+        CommonParameterResponse response = repository.findByParameterId(normalizedParameterId)
+                .map(CommonParameterResponse::from)
+                .orElse(CommonParameterResponse.from(updated));
+        LOGGER.info("通用参数 value 已更新 traceId={} parameterId={} changedBy={}",
+                traceId, normalizedParameterId, changedByUsername);
+        // 事务提交后发布事件，供下游模块（如向 opencode manager 下发运行时配置）监听联动。
+        eventPublisher.publishEvent(new CommonParameterUpdatedEvent(
+                existing.englishName(), existing.platform(), updated.parameterValue(), normalizedParameterId, traceId));
+        return response;
+    }
+
+    /**
+     * 查询指定参数的修改历史记录，按修改时间倒序排列。
+     *
+     * @param parameterId 参数业务 ID
+     * @return 修改日志响应列表
+     */
+    public List<ChangeLogResponse> findChangeLogs(String parameterId) {
+        String normalizedParameterId = normalize(parameterId, "parameterId");
+        return changeLogRepository.findByParameterId(normalizedParameterId, CHANGE_LOG_LIMIT).stream()
+                .map(ChangeLogResponse::from)
+                .toList();
+    }
+
+    private static String normalize(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 不能为空", Map.of(field, ""));
+        }
+        return value.trim();
+    }
+
+    /**
+     * 通用参数列表过滤条件；platform 为 null 表示不按平台过滤。
+     */
+    public record CommonParameterFilter(ParameterPlatform platform) {
+
+        /**
+         * 解析平台过滤字符串；null/空白返回不过滤，非法值抛 {@link ErrorCode#VALIDATION_ERROR}。
+         */
+        public static CommonParameterFilter parse(String rawPlatform) {
+            if (rawPlatform == null || rawPlatform.isBlank()) {
+                return new CommonParameterFilter(null);
+            }
+            try {
+                return new CommonParameterFilter(ParameterPlatform.fromValue(rawPlatform));
+            } catch (IllegalArgumentException exception) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR, "平台参数无效", Map.of("platform", rawPlatform), exception);
+            }
+        }
+    }
+}

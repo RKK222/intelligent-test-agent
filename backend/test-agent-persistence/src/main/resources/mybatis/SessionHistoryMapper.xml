@@ -2,8 +2,8 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.SessionHistoryMapper">
-    <resultMap id="SessionHistoryRowMap" type="com.icbc.testagent.persistence.mybatis.SessionHistoryRow">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.SessionHistoryMapper">
+    <resultMap id="SessionHistoryRowMap" type="com.enterprise.testagent.persistence.mybatis.SessionHistoryRow">
         <constructor>
             <arg column="session_id" javaType="java.lang.String"/>
             <arg column="workspace_id" javaType="java.lang.String"/>

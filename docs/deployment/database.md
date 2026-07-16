@@ -456,7 +456,7 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 兼容策略：
 
 - 存量版本库统一按 `EXTERNAL` 处理，`git_url` 仍表示完整 Git 地址。
-- `INTERNAL` 版本库只在 `git_url` 保存 `host[:port]/path`，例如 `scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform`；运行 Git 操作时按当前操作人统一认证号动态拼接 `ssh://{unifiedAuthId}@{git_url}`。
+- `INTERNAL` 版本库只在 `git_url` 保存 `host[:port]/path`，例如 `scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform`；运行 Git 操作时按当前操作人统一认证号动态拼接 `ssh://{unifiedAuthId}@{git_url}`。
 - 列表查询和应用关联查询只返回数据库保存的 `git_url`，不拼接统一认证号。
 
 ## V20260626180000 删除废弃参数 OPENCODE_WORKSPACE_ROOT
@@ -778,7 +778,7 @@ V10 种子数据对 F-COSS 的影响：
 | 字段 | 说明 |
 |---|---|
 | `id` | 数据库自增 surrogate PK，不对 API 暴露。 |
-| `provider_id` | 模型所属 provider，企业内默认 `icbc-openai`。 |
+| `provider_id` | 模型所属 provider，企业内默认 `enterprise-openai`。 |
 | `model_id` | 模型标识，例如 `DeepSeek-V4-Flash-W8A8`。 |
 | `name` | 前端展示名称。 |
 | `enabled` | 是否在模型目录中展示。 |
@@ -802,9 +802,10 @@ V10 种子数据对 F-COSS 的影响：
 
 `V20260708100000__create_internal_model_provider_tables.sql` 创建内部模型代理配置表：
 
-- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 保存内部供应商地址；`provider_id` 对应代理请求头 `X-ICBC-Model-Provider` 的路由键（当前为 `qwen-prod` / `deepseek-prod`），不是 opencode 配置中的 `icbc-qwen` / `icbc-deepseek` provider key。
-- `internal_model_proxy_settings(setting_id='default', icbc_openai_auth_token, created_at, updated_at)` 保存全局 `ICBC_OPENAI_AUTH_TOKEN`，按需求明文保存，不回显到前端。
+- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 保存内部供应商地址；`provider_id` 对应代理请求头 `X-Enterprise-Model-Provider` 的路由键（当前为 `qwen-prod` / `deepseek-prod`），不是 opencode 配置中的 `enterprise-qwen` / `enterprise-deepseek` provider key。
+- `internal_model_proxy_settings(setting_id='default', enterprise_openai_auth_token, created_at, updated_at)` 保存全局 `ENTERPRISE_OPENAI_AUTH_TOKEN`，按需求明文保存，不回显到前端。
 - Java 启动时把启用供应商和 token 加载到内存；管理端保存后发布 `internal-model-provider.refresh-requested` 广播，各 Java 从数据库重新加载内存快照。
+- `V20260716143000__rename_internal_model_auth_token_column` Java migration 按第二列识别并重命名既有环境的历史鉴权列；新建数据库已使用目标列名时幂等跳过。两条因去机构标识而调整的历史 SQL migration 通过兼容注释保持原 Flyway checksum，升级不需要执行 `repair`。
 
 ## V20260708200000 用户级历史会话索引
 
@@ -875,7 +876,7 @@ V10 种子数据对 F-COSS 的影响：
 - `opencode_server_processes.base_url` 满足 V15 校验 `= 'http://' || linux_server_id || ':' || port`。
 - `process_id` 以 `ocp_` 开头（V15 校验），`manager_id` 以 `mgr_` 开头（V15 校验）。
 - `OpencodeManagerBackendConnection` 的 `backend_process_id` 形如 `bjp_xxx`，由后端 `BackendJavaProcessLifecycleService.registerHeartbeat` 在启动时为本实例补齐，因此 migration 不预置该行。
-- 补齐逻辑详见 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/socket/BackendJavaProcessLifecycleService.java#bootstrapLocalManagerConnections`，仅在 (manager, backend) 组合不存在连接行时插入；已有行只更新兼容字段 `last_heartbeat_at` / `status`。真实 manager 连上后由 `ManagerControlApplicationService.register` 维护持久连接行，在线连接状态由 Redis manager 快照表达。
+- 补齐逻辑详见 `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/process/socket/BackendJavaProcessLifecycleService.java#bootstrapLocalManagerConnections`，仅在 (manager, backend) 组合不存在连接行时插入；已有行只更新兼容字段 `last_heartbeat_at` / `status`。真实 manager 连上后由 `ManagerControlApplicationService.register` 维护持久连接行，在线连接状态由 Redis manager 快照表达。
 - 后续完整迁移会执行 `V20260627000000__cleanup_loopback_linux_server_seed.sql` 清理这些 `127.0.0.1` 行；本地开发不再依赖 V17 数据，必须通过真实 manager/backend 心跳注册获得运行态拓扑。
 
 兼容策略：

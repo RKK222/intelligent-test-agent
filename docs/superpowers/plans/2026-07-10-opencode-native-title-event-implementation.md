@@ -15,12 +15,12 @@
 ### Task 1: 令牌状态与标题 CAS 测试
 
 **Files:**
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunSessionTitleWatchRegistry.java`
-- Create: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunSessionTitleWatchService.java`
-- Create: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunSessionTitleWatchRegistryTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/session/SessionApplicationService.java`
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/session/SessionApplicationServiceTest.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunSessionTitleWatchRegistry.java`
+- Create: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunSessionTitleWatchService.java`
+- Create: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunSessionTitleWatchRegistryTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/session/SessionApplicationService.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/session/SessionApplicationServiceTest.java`
 
 - [ ] **Step 1: 写出失败测试**
   - 覆盖首轮 token 注册、仅 `TITLE_WAIT` 可由下一轮注销、过期 token 不接受标题、原生标题到达后关闭 token。
@@ -48,10 +48,10 @@
 ### Task 2: 断线后的远端标题读取
 
 **Files:**
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationService.java`
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationServiceTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationService.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationServiceTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationService.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
 
 - [ ] **Step 1: 写出失败测试**
   - `findRemoteSessionTitle(titleWatchToken, traceId)` 从 OpenCode `GET /session/{remoteSessionId}` 的 top-level `title` 或 `info.title` 提取有效文本；直接用 token 内实际 runtime/node/directory/workspace/sessionId 构造调用，禁止 `workspaceLocation`、`sessionLocation`、`withAgent` 和任何可能重建 binding 的 resolver。
@@ -105,11 +105,11 @@
 ### Task 4: 删除超时兜底、同步文档并验证运行态
 
 **Files:**
-- Delete: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunSessionTitleFallbackService.java`
-- Delete: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/OpencodeSessionTitleProperties.java`
-- Delete: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunSessionTitleFallbackServiceTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationService.java`（删除 `generateNativeSessionTitle` 及其测试）
+- Delete: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunSessionTitleFallbackService.java`
+- Delete: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/OpencodeSessionTitleProperties.java`
+- Delete: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunSessionTitleFallbackServiceTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationService.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationService.java`（删除 `generateNativeSessionTitle` 及其测试）
 - Modify: `backend/test-agent-app/src/main/resources/application.yml`
 - Modify: `backend/README.md`
 - Modify: `backend/test-agent-opencode-runtime/README.md`
