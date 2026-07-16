@@ -190,4 +190,31 @@ C --> D`));
     expect(parseMermaidFlowchart(serialized).edges).toHaveLength(1);
     expect(parseMermaidFlowchart(serialized).edges[0]).toMatchObject({ source: "C", target: "D" });
   });
+
+  it("自动布局时，重排后的连接点优先连到一般节点的中间，且优先连到判断（菱形）节点的四个顶点", async () => {
+    // 1. 一般节点：优先连接到边的中间
+    // 构造两个矩形节点，其连线偏向左上方，验证增加了中点偏好惩罚后，
+    // 它依然会选择较靠近中部的端口（如 target-2），而不是因为偏角极小而选择角落端口（如 target-0）。
+    const graph = parseMermaidFlowchart("flowchart TD\nA --> B");
+    
+    graph.nodes[0]!.position = { x: 10, y: 70 };
+    graph.nodes[1]!.position = { x: 150, y: 210 };
+    
+    const laidOut = await autoLayoutMermaidGraph(graph);
+    const edge = laidOut.edges[0]!;
+    
+    expect(edge.targetHandle).toBe("target-2");
+    
+    // 2. 判断（菱形）节点：优先连接到四个顶点
+    const diamondGraph = parseMermaidFlowchart("flowchart LR\nX{判断} --> Y");
+    // X 是判断节点，其出边即使倾斜也应该优先连到右顶点 source-0，而不是斜边端口
+    diamondGraph.nodes[0]!.type = "diamond";
+    diamondGraph.nodes[0]!.position = { x: 80, y: 70 };
+    diamondGraph.nodes[1]!.position = { x: 300, y: 210 };
+    
+    const laidOutDiamond = await autoLayoutMermaidGraph(diamondGraph);
+    const diamondEdge = laidOutDiamond.edges[0]!;
+    
+    expect(diamondEdge.sourceHandle).toBe("source-0");
+  });
 });

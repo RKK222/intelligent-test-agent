@@ -1,5 +1,21 @@
 # Session Log
 
+### 2026-07-16 - 优化 Mermaid 自动布局重排时的连接点分配
+
+- Why:
+  - 自动布局后重排的连接点（Connection Ports）倾向于连接到极角最贴近的端口。这导致一般节点（如矩形）的连线在略有倾斜时容易被拉到角落的端口（如 `target-0`），影响整体美观；而对于判断节点（菱形），我们也希望其单条/少数连线能够强力地优先连接到四个主顶点上，而非斜边上的端口。
+- What:
+  - 调整了 `packages/editor/src/mermaid/layout.ts` 中偏好惩罚评分函数 `getPortPenalty` 的权重参数。
+  - 对于判断节点 (`nodeType === "diamond"`)，将斜边端口的惩罚值由 `0.5` 极大提升到 `10`，以绝对保证非并发重排连线时优先使用顶、底、左、右四个主顶点。
+  - 对于一般节点，将偏离中心端口的偏好惩罚系数由原来的 `distFromCenter / 150` 提高至 `distFromCenter / 10`。此举可有效对抗连线倾斜带来的极角角度差权重，确保除非有多条线需要分流，否则单条倾斜连线始终紧贴边线的中点。
+  - 在 `mermaid-domain.test.ts` 中新增了针对一般节点和判断节点倾斜连线的端口重分配偏好单元测试。
+- How:
+  - 修改 `frontend/packages/editor/src/mermaid/layout.ts` 中偏好惩罚逻辑并添加中文注释说明设计意图。
+  - 在 `frontend/packages/editor/tests/mermaid-domain.test.ts` 底部追加单元测试用例，通过构造人工斜向放置节点及对应连线，断言 `autoLayoutMermaidGraph` 输出的最佳端口分配符合优化预期。
+  - 运行全量 `corepack pnpm exec vitest run packages/editor/tests` 确认所有测试完美绿灯。
+- Result:
+  - 完美解决自动布局连线极角倾向导致的角落拉线与斜边偏离现象，实现一般节点居中贴合及判断节点顶点对接。前端 113 个测试通过，不涉及后端、API、事件、数据库或环境配置。
+
 ### 2026-07-16 - 优化 Mermaid 流程图与可视化编辑器的自动布局 (ELK Layered)
 
 - Why:

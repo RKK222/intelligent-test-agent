@@ -80,11 +80,12 @@ function allocatePorts(
     const distFromCenter = isVerticalEdge ? Math.abs(port.x - 50) : Math.abs(port.y - 50);
 
     if (nodeType === "diamond") {
-      // 判断节点：优先连四个顶点（即距离中心为 0 的主端口），其它斜边端口给予中等度数惩罚（0.5 弧度）
-      return distFromCenter === 0 ? 0 : 0.5;
+      // 判断节点：优先连四个顶点（即距离中心为 0 的主端口），其它斜边端口给予极大惩罚，确保优先连顶点
+      return distFromCenter === 0 ? 0 : 10;
     } else {
-      // 一般节点：优先连接到边的中间。离中点越近，惩罚值越低。
-      return distFromCenter / 150;
+      // 一般节点：优先连接到边的中间。让偏好惩罚足够大，从而抑制因连线微小倾斜而拉到角端口的现象。
+      // 例如使用 distFromCenter / 10，则中点附近惩罚为 0，而偏离 16.7% 时惩罚 1.67，偏离 50%（角点）时惩罚 5.0（大于最大偏角 pi）
+      return distFromCenter / 10;
     }
   };
 
