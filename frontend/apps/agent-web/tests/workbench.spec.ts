@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { applicationWorkspaceRestrictionsFixture as permissionFixture } from "../../../tests/fixtures/application-workspace-restrictions";
 
 test("workbench opens a workspace file with mocked backend api", async ({ page }) => {
   await mockBackendApi(page, {
@@ -30,6 +31,74 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await page.getByRole("button", { name: /checkout.spec.ts/ }).click();
   await expect(page.getByText("tests/checkout.spec.ts", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
+});
+
+test("application workspace mutation entries follow member and super administrator permissions", async ({ page, context }) => {
+  const managedWorkspaceSetup = {
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    },
+    workspaceTemplates: {
+      app_gcms: [{
+        workspaceId: "awp_1",
+        workspaceName: permissionFixture.application.appName,
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        defaultBranch: permissionFixture.application.featureBranch,
+        createdAt: "2026-07-15T00:00:00Z",
+        updatedAt: "2026-07-15T00:00:00Z"
+      }]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_1": [{
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: "20260715",
+        branch: permissionFixture.application.featureBranch,
+        repoRootPath: "/tmp/test-agent/appworkspace/20260715/repo_1",
+        workspaceRootPath: "/tmp/test-agent/appworkspace/20260715/repo_1/F-GCMS/workspace",
+        runtimeWorkspace: {
+          ...workspace(),
+          workspaceId: permissionFixture.application.featureWorkspaceId
+        },
+        status: "ACTIVE",
+        createdAt: "2026-07-15T00:00:00Z",
+        updatedAt: "2026-07-15T00:00:00Z"
+      }]
+    }
+  };
+
+  await mockBackendApi(page, { ...managedWorkspaceSetup, authRoles: [...permissionFixture.roles.member] });
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: /tests/ }).hover();
+  await expect(page.getByRole("button", { name: "新建文件或文件夹" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "创建应用 worktree" })).toHaveCount(0);
+
+  const superPage = await context.newPage();
+  await mockBackendApi(superPage, { ...managedWorkspaceSetup, authRoles: [...permissionFixture.roles.superAdmin] });
+  await superPage.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
+  await gotoWorkbench(superPage, { selectConversation: false });
+
+  await expect(superPage.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" })).toBeVisible();
+  await expect(superPage.getByRole("button", { name: "创建应用 worktree" })).toBeVisible();
+  await superPage.close();
 });
 
 test("workbench home opens the embedded user manual", async ({ page }) => {
@@ -70,10 +139,8 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   );
   const manualFrame = page.frameLocator('[data-testid="help-center-frame"]');
   await expect(manualFrame.getByRole("button", { name: "测试目录" })).toHaveCount(0);
-  await expect(manualFrame.getByText("开发 AI Git", { exact: true }).first()).toBeVisible();
-  await expect(manualFrame.getByText("测试公共 AI Git", { exact: true }).first()).toBeVisible();
-  await expect(manualFrame.getByText("测试 AI Git", { exact: true }).first()).toBeVisible();
-  await expect(manualFrame.getByText("开发业务代码 Git", { exact: true }).first()).toBeVisible();
+  await expect(manualFrame.getByText("公共 Git", { exact: true }).first()).toBeVisible();
+  await expect(manualFrame.getByText("应用 Git", { exact: true }).first()).toBeVisible();
   const sharedArchive = manualFrame.getByRole("treeitem", { name: /archive\// });
   const localSpec = manualFrame.getByRole("treeitem", { name: /^spec\// });
   const agentsRoot = manualFrame.getByRole("treeitem", { name: /^agents\// });
@@ -83,16 +150,16 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(localSpec).toBeVisible();
   await expect(manualFrame.getByRole("treeitem", { name: /2601\// })).toHaveCount(0);
   await expect(sharedArchive.locator(".scope-badge")).toHaveText("开发 + 测试");
-  await expect(sharedArchive.locator(".physical-badge")).toHaveText("开发 AI Git + 测试 AI Git");
+  await expect(sharedArchive.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(localSpec.locator(".scope-badge")).toHaveText("个人本地");
-  await expect(localSpec.locator(".physical-badge")).toHaveText("测试 AI Git · 仅本地提交");
+  await expect(localSpec.locator(".physical-badge")).toHaveText("应用 Git 个人分支 · 仅本地提交");
   await expect(agentsRoot.locator(".scope-badge")).toHaveText("开发 + 测试");
-  await expect(agentsRoot.locator(".physical-badge")).toHaveText("开发 AI Git + 测试公共 AI Git + 测试 AI Git");
+  await expect(agentsRoot.locator(".physical-badge")).toHaveText("公共 Git + 应用 Git");
   await expect(developmentAgent.locator(".scope-badge")).toHaveText("开发");
   await expect(developmentAgent.locator(".role-badge")).toHaveText("Agent");
-  await expect(developmentAgent.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(developmentAgent.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(testingAgent.locator(".scope-badge")).toHaveText("测试");
-  await expect(testingAgent.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
+  await expect(testingAgent.locator(".physical-badge")).toHaveText("公共 Git + 应用 Git");
   await manualFrame.getByRole("button", { name: "全部展开" }).click();
   const developmentAsset = manualFrame.getByRole("treeitem", { name: "工程概览_A.md" });
   const testingAsset = manualFrame.getByRole("treeitem", { name: "测试概述.md" });
@@ -119,13 +186,13 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   const technicalArchitecture = manualFrame.getByRole("treeitem", { name: /^技术架构\// });
   await expect(developmentAsset).toBeVisible();
   await expect(testingAsset).toBeVisible();
-  await expect(developmentAsset.locator(".physical-badge")).toHaveText("开发 AI Git");
-  await expect(testingAsset.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(developmentAsset.locator(".physical-badge")).toHaveText("应用 Git");
+  await expect(testingAsset.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(testDesignAgent.locator(".role-badge")).toHaveText("Agent");
-  await expect(testDesignAgent.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
+  await expect(testDesignAgent.locator(".physical-badge")).toHaveText("公共 Git + 应用 Git");
   await expect(testDesignAgent.locator(".implementation-badge")).toHaveText("已实现");
   await expect(testAnalysisWorkagent.locator(".role-badge")).toHaveText("workagent");
-  await expect(testAnalysisWorkagent.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+  await expect(testAnalysisWorkagent.locator(".physical-badge")).toHaveText("公共 Git");
   for (const implementedAgent of [testAnalysisWorkagent, testGenerationWorkagent, testReviewWorkagent, testExecutionAgent, apiExecutionWorkagent]) {
     await expect(implementedAgent.locator(".implementation-badge")).toHaveText("已实现");
   }
@@ -140,15 +207,15 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
     [applicationTestExecutionWorkagent, "workagent"]
   ] as const) {
     await expect(applicationAgent.locator(".role-badge")).toHaveText(role);
-    await expect(applicationAgent.locator(".physical-badge")).toHaveText("测试 AI Git");
+    await expect(applicationAgent.locator(".physical-badge")).toHaveText("应用 Git");
     await expect(applicationAgent.locator(".implementation-badge")).toHaveText("未实现");
     await expect(applicationAgent).toHaveClass(/planned/);
     await expect(applicationAgent).toHaveAttribute("aria-level", "6");
   }
   await expect(manualFrame.getByRole("treeitem", { name: /^<应用专属测试 Agent>\// })).toHaveCount(0);
   await expect(manualFrame.getByRole("treeitem", { name: /^<应用专属测试 workagent>\// })).toHaveCount(0);
-  await expect(publicTestRule.locator(".physical-badge")).toHaveText("测试公共 AI Git");
-  await expect(applicationTestRules.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(publicTestRule.locator(".physical-badge")).toHaveText("公共 Git");
+  await expect(applicationTestRules.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(applicationTestRules).toHaveAttribute("aria-expanded", "true");
   for (const applicationRule of [
     "接口测试设计应用规约.md",
@@ -159,16 +226,16 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   ]) {
     const row = manualFrame.getByRole("treeitem", { name: applicationRule });
     await expect(row).toBeVisible();
-    await expect(row.locator(".physical-badge")).toHaveText("测试 AI Git");
+    await expect(row.locator(".physical-badge")).toHaveText("应用 Git");
     await expect(row).toHaveAttribute("aria-level", "8");
   }
-  await expect(developmentSkills.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(developmentSkills.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(developmentSkills).toHaveAttribute("aria-level", "4");
-  await expect(testingSkills.locator(".physical-badge")).toHaveText("测试公共 AI Git + 测试 AI Git");
+  await expect(testingSkills.locator(".physical-badge")).toHaveText("公共 Git + 应用 Git");
   await expect(testingSkills).toHaveAttribute("aria-level", "4");
   await expect(plannedCodeReviewSkill.locator(".implementation-badge")).toHaveText("未实现");
   await expect(plannedCodeReviewSkill).toHaveClass(/planned/);
-  await expect(applicationTestSkills.locator(".physical-badge")).toHaveText("测试 AI Git");
+  await expect(applicationTestSkills.locator(".physical-badge")).toHaveText("应用 Git");
   await expect(applicationTestSkills.locator(".implementation-badge")).toHaveText("未实现");
   await expect(applicationTestSkills).toHaveClass(/planned/);
   const publicRuleGitBadge = manualFrame.getByRole("treeitem", { name: "接口测试设计规约.md" }).locator(".physical-badge");
@@ -183,7 +250,7 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   ]) {
     const row = manualFrame.getByRole("treeitem", { name: agentFile });
     await expect(row).toBeVisible();
-    await expect(row.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+    await expect(row.locator(".physical-badge")).toHaveText("公共 Git");
   }
   for (const skillDirectory of [
     "test-design/",
@@ -201,7 +268,7 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   ]) {
     const row = manualFrame.getByRole("treeitem", { name: new RegExp(`^${skillDirectory}`) });
     await expect(row).toBeVisible();
-    await expect(row.locator(".physical-badge")).toHaveText("测试公共 AI Git");
+    await expect(row.locator(".physical-badge")).toHaveText("公共 Git");
     await expect(row.locator(".implementation-badge")).toHaveText("已实现");
     await expect(row).not.toHaveClass(/planned/);
     await expect(row).toHaveAttribute("aria-level", "5");
@@ -209,15 +276,15 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   for (const sharedNode of sharedDocsNodes) {
     await expect(sharedNode).toBeVisible();
     await expect(sharedNode.locator(".scope-badge")).toHaveText("开发 + 测试");
-    await expect(sharedNode.locator(".physical-badge")).toHaveText("开发 AI Git + 测试 AI Git");
+    await expect(sharedNode.locator(".physical-badge")).toHaveText("应用 Git");
   }
   await expect(technicalArchitecture.locator(".scope-badge")).toHaveText("开发");
-  await expect(technicalArchitecture.locator(".physical-badge")).toHaveText("开发 AI Git");
+  await expect(technicalArchitecture.locator(".physical-badge")).toHaveText("应用 Git");
   for (const applicationScenario of ["应用场景说明书_XXX.md", "应用场景说明书_YYY.md"]) {
     const row = manualFrame.getByRole("treeitem", { name: applicationScenario });
     await expect(row).toBeVisible();
     await expect(row.locator(".scope-badge")).toHaveText("测试");
-    await expect(row.locator(".physical-badge")).toHaveText("测试 AI Git");
+    await expect(row.locator(".physical-badge")).toHaveText("应用 Git");
     await expect(row).toHaveAttribute("aria-level", "4");
   }
   await expect(manualFrame.getByRole("treeitem", { name: "测试概述.md" })).toHaveAttribute("aria-level", "4");
@@ -227,10 +294,10 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(manualFrame.getByText("工作 Agent 统一称为 workagent")).toBeVisible();
   await expect(manualFrame.getByText(/供上层 Agent 编排调用/).first()).toBeVisible();
   await manualFrame.getByRole("button", { name: "内容与责任" }).click();
-  await expect(manualFrame.getByRole("cell", { name: "效能组、测试管理组" })).toBeVisible();
-  await expect(manualFrame.getByRole("cell", { name: "测试管理组", exact: true })).toBeVisible();
+  await expect(manualFrame.getByRole("cell", { name: "公共能力建设团队" })).toBeVisible();
+  await expect(manualFrame.getByRole("cell", { name: "仅个人 worktree 本地提交，禁止发布", exact: true })).toBeVisible();
   await expect(manualFrame.getByRole("cell", { name: "docs/**", exact: true })).toBeVisible();
-  await expect(manualFrame.getByRole("cell", { name: "具体研发阶段的输入输出产物（需求、设计、编码、测试）" })).toBeVisible();
+  await expect(manualFrame.getByRole("cell", { name: "具体研发阶段的个人输入输出产物" })).toBeVisible();
 });
 
 test("Markdown Mermaid Flowchart 和 Sequence 可视化编辑后复用保存链路", async ({ page }) => {
@@ -1448,8 +1515,199 @@ test("a title-pending SSE closes when the backend closes the title watch or a ne
   await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(true);
 });
 
+test("a superseded title-pending run cannot restore its todos into the next turn", async ({ page }) => {
+  let releaseSecondRun!: () => void;
+  const secondRunGate = new Promise<void>((resolve) => {
+    releaseSecondRun = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+    type StreamProbe = {
+      runId: string;
+      closed: boolean;
+      emit: (type: string, seq: number, payload: Record<string, unknown>) => void;
+      fail: () => void;
+    };
+    const probes: StreamProbe[] = [];
+    const seededRunIds = new Set<string>();
+    (window as Window & { __todoOwnershipRunStreams?: StreamProbe[] }).__todoOwnershipRunStreams = probes;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const requestUrl = new URL(
+        typeof input === "string" ? input : input instanceof Request ? input.url : input.toString(),
+        window.location.origin
+      );
+      const runId = decodeURIComponent(requestUrl.pathname).match(/\/runs\/([^/]+)\/events$/)?.[1];
+      if (!runId) {
+        return nativeFetch(input, init);
+      }
+      const encoder = new TextEncoder();
+      let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+      let closed = false;
+      const probe: StreamProbe = {
+        runId,
+        closed: false,
+        emit: (type, seq, payload) => {
+          if (closed || !controller) return;
+          controller.enqueue(encoder.encode(
+            `id: ${seq}\nevent: ${type}\ndata: ${JSON.stringify({
+              eventId: `evt_todo_owner_${runId}_${seq}_${type}`,
+              runId,
+              seq,
+              type,
+              traceId: "trace_e2e",
+              occurredAt: "2026-07-15T09:00:00Z",
+              payload
+            })}\n\n`
+          ));
+        },
+        fail: () => {
+          if (closed || !controller) return;
+          closed = true;
+          probe.closed = true;
+          controller.error(new Error("superseded stream failed"));
+        }
+      };
+      probes.push(probe);
+      const body = new ReadableStream<Uint8Array>({
+        start(streamController) {
+          controller = streamController;
+          if (runId === "run_1" && !seededRunIds.has(runId)) {
+            seededRunIds.add(runId);
+            window.setTimeout(() => probe.emit("todo.updated", 1, {
+              todos: Array.from({ length: 4 }, (_, index) => ({
+                id: `todo_first_${index}`,
+                content: `第一轮任务 ${index + 1}`,
+                status: "completed"
+              }))
+            }), 10);
+            window.setTimeout(() => probe.emit("run.succeeded", 2, {
+              platformSessionTitlePending: true
+            }), 20);
+          } else if (runId === "run_2" && !seededRunIds.has(runId)) {
+            seededRunIds.add(runId);
+            window.setTimeout(() => probe.emit("todo.updated", 1, {
+              todos: Array.from({ length: 9 }, (_, index) => ({
+                id: `todo_second_${index}`,
+                content: `第二轮任务 ${index + 1}`,
+                status: "pending"
+              }))
+            }), 10);
+          }
+        },
+        cancel() {
+          closed = true;
+          probe.closed = true;
+        }
+      });
+      init?.signal?.addEventListener("abort", () => {
+        closed = true;
+        probe.closed = true;
+        controller?.close();
+      }, { once: true });
+      return new Response(body, { headers: { "content-type": "text/event-stream" } });
+    };
+  });
+  await mockBackendApi(page, {
+    runRequests,
+    runIds: ["run_1", "run_2"],
+    runRequestGates: [Promise.resolve(), secondRunGate],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  });
+  await gotoWorkbench(page);
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("第一轮生成 4 个待办");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("任务完成")).toBeVisible();
+  await page.getByRole("button", { name: "展开已完成工作状态" }).click();
+  await expect(page.getByText("共 4")).toBeVisible();
+
+  await composer.fill("第二轮生成 9 个待办");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(2);
+  await expect(page.getByTestId("oc-work-status-dock").getByTestId("oc-todo-panel")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const probe = (window as Window & {
+      __todoOwnershipRunStreams?: Array<{ runId: string; closed: boolean; fail: () => void }>;
+    }).__todoOwnershipRunStreams?.find((item) => item.runId === "run_1" && !item.closed);
+    probe?.fail();
+  });
+  await expect(page.getByText("RunEvent SSE 连接异常", { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & {
+      __todoOwnershipRunStreams?: Array<{ runId: string; closed: boolean }>;
+    }).__todoOwnershipRunStreams?.filter((item) => item.runId === "run_1" && !item.closed).length ?? 0
+  ))).toBeGreaterThan(0);
+
+  await page.evaluate(() => {
+    const probe = (window as Window & {
+      __todoOwnershipRunStreams?: Array<{
+        runId: string;
+        closed: boolean;
+        emit: (type: string, seq: number, payload: Record<string, unknown>) => void;
+        fail: () => void;
+      }>;
+    }).__todoOwnershipRunStreams?.filter((item) => item.runId === "run_1" && !item.closed).at(-1);
+    probe?.emit("todo.updated", 3, { todos: [{ content: "旧 Run todo.updated 回灌", status: "completed" }] });
+    probe?.emit("message.part.updated", 4, {
+      messageID: "msg_old_todowrite",
+      part: {
+        id: "part_old_todowrite",
+        messageID: "msg_old_todowrite",
+        type: "tool",
+        tool: "todowrite",
+        state: { status: "completed", input: { todos: [{ content: "旧 Run todowrite 回灌", status: "completed" }] } }
+      }
+    });
+    probe?.emit("run.snapshot.reset", 5, {
+      snapshot: {
+        events: [{
+          eventId: "evt_old_snapshot_todo",
+          runId: "run_1",
+          seq: 1,
+          type: "todo.updated",
+          traceId: "trace_e2e",
+          occurredAt: "2026-07-15T09:00:00Z",
+          payload: { todos: [{ content: "旧 Run snapshot 回灌", status: "completed" }] }
+        }]
+      }
+    });
+    probe?.emit("session.updated", 6, {
+      platformSessionTitleSynchronized: true,
+      platformSessionTitle: "旧 Run 标题仍同步",
+      isChildSession: false
+    });
+  });
+
+  await expect(page.locator(".figma-chat-title")).toHaveText("旧 Run 标题仍同步");
+  await expect(page.getByTestId("oc-work-status-dock").getByTestId("oc-todo-panel")).toHaveCount(0);
+  await page.getByRole("button", { name: "展开历史工作状态" }).click();
+  await expect(page.getByText("共 4")).toBeVisible();
+  await expect(page.getByText(/旧 Run .*回灌/)).toHaveCount(0);
+
+  releaseSecondRun();
+  await expect(page.getByTestId("oc-work-status-dock").getByText("共 9")).toBeVisible();
+  await expect(page.getByTestId("oc-work-status-dock").getByText("共 4")).toHaveCount(0);
+});
+
 test("retrying a failed chat run sends the previous prompt again", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+  });
   await mockBackendApi(page, {
     runRequests,
     runIds: ["run_1", "run_2"],
@@ -1486,6 +1744,7 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
 
   await expect.poll(() => runRequests.length).toBe(2);
   expect(runRequests[1]).toMatchObject({ prompt: "重试这条测试任务" });
+  await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
 });
 
@@ -3869,6 +4128,7 @@ async function mockBackendApi(
     runFailures?: string[];
     runFailureResponses?: Array<{ status: number; code: string; message: string }>;
     runRequestGate?: Promise<void>;
+    runRequestGates?: Array<Promise<void>>;
     runtimeStateHttpRequests?: string[];
     runtimeStateSummary?: Record<string, unknown>;
     runtimeStateEventGate?: Promise<void>;
@@ -4502,8 +4762,8 @@ async function mockBackendApi(
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/runs") {
       const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       capture.runRequests?.push(request);
-      await capture.runRequestGate;
       const requestIndex = (capture.runRequests?.length ?? 1) - 1;
+      await (capture.runRequestGates?.[requestIndex] ?? capture.runRequestGate);
       const failureResponse = capture.runFailureResponses?.shift();
       if (failureResponse) {
         await route.fulfill({

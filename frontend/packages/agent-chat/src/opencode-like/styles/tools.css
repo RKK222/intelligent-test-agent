@@ -33,6 +33,14 @@
   background: var(--oc-surface-muted);
 }
 
+.oc-disclosure__trigger--static {
+  cursor: default;
+}
+
+.oc-disclosure__trigger--static:hover {
+  background: transparent;
+}
+
 .oc-disclosure__trigger .oc-tool__title,
 .oc-context-group__trigger .oc-tool__title,
 .oc-tool-group__trigger .oc-tool__title {

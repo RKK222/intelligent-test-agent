@@ -6,6 +6,7 @@
 @import "./locator.css" layer(oc-components);
 @import "./parts.css" layer(oc-components);
 @import "./tools.css" layer(oc-components);
+@import "./work-status.css" layer(oc-components);
 @import "./todo.css" layer(oc-components);
 @import "./markdown.css" layer(oc-components);
 @import "./diff.css" layer(oc-components);

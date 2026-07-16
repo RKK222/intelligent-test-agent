@@ -15,14 +15,15 @@ describe("follow-up queue", () => {
   });
 
   it("keeps follow-up drafts in FIFO order", () => {
-    const first = createFollowUpDraft("first", parts, "2026-06-19T00:00:00Z");
-    const second = createFollowUpDraft("second", parts, "2026-06-19T00:00:01Z");
+    const first = createFollowUpDraft("first", parts, "msg_user_first", "2026-06-19T00:00:00Z");
+    const second = createFollowUpDraft("second", parts, "msg_user_second", "2026-06-19T00:00:01Z");
     const queue = enqueueFollowUp(enqueueFollowUp([], first), second);
 
     const one = dequeueFollowUp(queue);
     const two = dequeueFollowUp(one.queue);
 
     expect(one.next?.prompt).toBe("first");
+    expect(one.next?.userMessageId).toBe("msg_user_first");
     expect(two.next?.prompt).toBe("second");
     expect(two.queue).toHaveLength(0);
   });

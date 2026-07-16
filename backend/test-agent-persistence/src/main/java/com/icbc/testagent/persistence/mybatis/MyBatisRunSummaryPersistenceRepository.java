@@ -60,6 +60,7 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                         new com.icbc.testagent.domain.run.RunId(row.runId()),
                         RunStorageMode.valueOf(row.storageMode()),
                         row.rootRemoteSessionId(),
+                        row.dispatchMessageId(),
                         row.executionNodeId(),
                         row.lastRemoteMessageId(),
                         row.lastRemotePartId(),

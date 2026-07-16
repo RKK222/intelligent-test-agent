@@ -7,7 +7,7 @@ import { formatModelLabel } from "../src/opencode-like/state/model-catalog";
 import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "../src/runtime-reducer";
 
 describe("opencode-like conversation state", () => {
-  it("projects user messages, context tool groups, assistant parts, thinking and diff rows", () => {
+  it("projects root process events into a work status row after text and diff output", () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),
       assistantMessage("msg_assistant_1", [
@@ -33,27 +33,36 @@ describe("opencode-like conversation state", () => {
     ]);
     expect(rows.map((row) => row.type)).toEqual([
       "user-message",
-      "context-tool-group",
       "assistant-part",
+      "work-status",
       "diff-summary"
     ]);
     expect(rows[1]).toMatchObject({
-      type: "context-tool-group",
-      refs: [
-        { messageId: "msg_assistant_1", partId: "part_read" },
-        { messageId: "msg_assistant_1", partId: "part_list" }
-      ],
-      busy: true
-    });
-    expect(rows[2]).toMatchObject({
       type: "assistant-part",
       messageId: "msg_assistant_1",
       partId: "part_answer",
-      previousAssistantPart: true
+      previousAssistantPart: false
     });
+    expect(rows.at(-2)).toMatchObject({
+      type: "work-status",
+      status: "running",
+      isLatest: true,
+      reasoningRefs: [],
+      events: [
+        {
+          key: "explore",
+          label: "探索",
+          refs: [
+            { messageId: "msg_assistant_1", partId: "part_read" },
+            { messageId: "msg_assistant_1", partId: "part_list" }
+          ]
+        }
+      ]
+    });
+    expect(rows.at(-1)).toMatchObject({ type: "diff-summary", userMessageId: "msg_user_1" });
   });
 
-  it("keeps completed process groups idle when the next turn starts running", () => {
+  it("retains the previous work status and appends an empty running status for the next turn", () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析第一轮问题"),
       assistantMessage("msg_assistant_1", [
@@ -65,19 +74,87 @@ describe("opencode-like conversation state", () => {
       userMessage("msg_user_2", "继续下一轮")
     ];
 
-    const rows = createTimelineRows(createOpencodeLikeState({ messages, running: true }));
-    const previousTurnGroups = rows.filter((row) =>
-      (row.type === "context-tool-group" || row.type === "reasoning-group" || row.type === "tool-group") &&
-      row.userMessageId === "msg_user_1"
-    );
+    const rows = createTimelineRows(createOpencodeLikeState({
+      messages,
+      running: true,
+      todos: [{ id: "todo_2", text: "第二轮任务", status: "in_progress" }],
+      todoSnapshotsByUserMessageId: {
+        msg_user_1: [{ id: "todo_1", text: "第一轮任务", status: "completed" }]
+      }
+    }));
+    const workStatuses = rows.filter((row) => row.type === "work-status");
 
-    expect(previousTurnGroups).toHaveLength(3);
-    expect(previousTurnGroups).toEqual([
-      expect.objectContaining({ type: "context-tool-group", busy: false }),
-      expect.objectContaining({ type: "reasoning-group", busy: false }),
-      expect.objectContaining({ type: "tool-group", busy: false })
+    expect(workStatuses).toHaveLength(2);
+    expect(workStatuses[0]).toMatchObject({
+      type: "work-status",
+      userMessageId: "msg_user_1",
+      status: "completed",
+      isLatest: false,
+      todos: [{ id: "todo_1", text: "第一轮任务", status: "completed" }],
+      reasoningRefs: [{ messageId: "msg_assistant_1", partId: "part_reasoning" }],
+      events: [
+        expect.objectContaining({ key: "explore", refs: [expect.objectContaining({ partId: "part_read" })] }),
+        expect.objectContaining({ key: "shell", refs: [expect.anything(), expect.anything()] })
+      ]
+    });
+    expect(rows.at(-1)).toMatchObject({
+      type: "work-status",
+      userMessageId: "msg_user_2",
+      status: "running",
+      isLatest: true,
+      todos: [{ id: "todo_2", text: "第二轮任务", status: "in_progress" }],
+      reasoningRefs: [],
+      events: []
+    });
+  });
+
+  it("retains a historical work status even when that turn never received an assistant message", () => {
+    const rows = createTimelineRows(createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "第一轮尚未收到输出"),
+        userMessage("msg_user_2", "开始第二轮")
+      ],
+      running: true
+    }));
+
+    expect(rows.filter((row) => row.type === "work-status")).toEqual([
+      expect.objectContaining({ userMessageId: "msg_user_1", status: "completed", isLatest: false }),
+      expect.objectContaining({ userMessageId: "msg_user_2", status: "running", isLatest: true })
     ]);
-    expect(rows.at(-1)).toMatchObject({ type: "thinking", userMessageId: "msg_user_2" });
+  });
+
+  it("projects each turn from its own run id and terminal status", () => {
+    const first = { ...userMessage("msg_user_1", "第一轮"), runId: "run_success" };
+    const second = { ...userMessage("msg_user_2", "第二轮"), runId: "run_failed" };
+    const rows = createTimelineRows(createOpencodeLikeState({
+      messages: [first, second],
+      runStatusesByRunId: { run_success: "SUCCEEDED", run_failed: "FAILED" }
+    }));
+
+    expect(rows.filter((row) => row.type === "work-status")).toEqual([
+      expect.objectContaining({ runId: "run_success", runStatus: "SUCCEEDED", status: "completed" }),
+      expect.objectContaining({ runId: "run_failed", runStatus: "FAILED", status: "failed" })
+    ]);
+  });
+
+  it("prefers an explicit empty latest-turn snapshot over legacy current todos", () => {
+    const rows = createTimelineRows(createOpencodeLikeState({
+      messages: [userMessage("msg_user_1", "第一轮"), userMessage("msg_user_2", "第二轮")],
+      running: true,
+      todos: [{ id: "todo_legacy", text: "不应回灌", status: "completed" }],
+      todoSnapshotsByUserMessageId: {
+        msg_user_1: [{ id: "todo_first", text: "第一轮任务", status: "completed" }],
+        msg_user_2: []
+      }
+    }));
+    const workStatuses = rows.filter((row) => row.type === "work-status");
+
+    expect(workStatuses[0]).toMatchObject({
+      type: "work-status",
+      userMessageId: "msg_user_1",
+      todos: [{ id: "todo_first", text: "第一轮任务", status: "completed" }]
+    });
+    expect(workStatuses[1]).toMatchObject({ type: "work-status", userMessageId: "msg_user_2", todos: [] });
   });
 
   it("keeps runtime failures as timeline error rows instead of card messages", () => {
@@ -86,14 +163,18 @@ describe("opencode-like conversation state", () => {
       runtimeStatus: { type: "failed", message: "工具调用失败" }
     });
 
-    expect(createTimelineRows(state).at(-1)).toEqual({
+    const rows = createTimelineRows(state);
+
+    expect(rows.map((row) => row.type)).toEqual(["user-message", "error", "work-status"]);
+    expect(rows[1]).toEqual({
       type: "error",
       key: "runtime:error",
       message: "工具调用失败"
     });
+    expect(rows.at(-1)).toMatchObject({ type: "work-status", status: "failed" });
   });
 
-  it("projects runtime retry status instead of a generic thinking row", () => {
+  it("projects runtime retry status for a running turn", () => {
     const state = createOpencodeLikeState({
       messages: [userMessage("msg_user_1", "完成车贷的接口案例设计")],
       running: true,
@@ -110,8 +191,8 @@ describe("opencode-like conversation state", () => {
 
     const rows = createTimelineRows(state);
 
-    expect(rows.map((row) => row.type)).toEqual(["user-message", "retry"]);
-    expect(rows.at(-1)).toMatchObject({
+    expect(rows.map((row) => row.type)).toEqual(["user-message", "retry", "work-status"]);
+    expect(rows[1]).toMatchObject({
       type: "retry",
       attempt: 1,
       maxAttempts: 3,
@@ -119,9 +200,10 @@ describe("opencode-like conversation state", () => {
       retryAfterSeconds: 60,
       action: { label: "subscribe", link: "https://opencode.ai/go" }
     });
+    expect(rows.at(-1)).toMatchObject({ type: "work-status", status: "retry" });
   });
 
-  it("does not project working status while retrying after tool activity", () => {
+  it("keeps retry as the last row after tool activity", () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "继续执行"),
@@ -138,9 +220,59 @@ describe("opencode-like conversation state", () => {
     });
     const rows = createTimelineRows(state);
 
-    expect(rows.some((row) => row.type === "thinking")).toBe(false);
-    expect(rows.some((row) => row.type === "working-status")).toBe(false);
-    expect(rows.at(-1)).toMatchObject({ type: "retry", retryAfterSeconds: 60 });
+    expect(rows.map((row) => row.type)).toEqual(["user-message", "retry", "work-status"]);
+    expect(rows[1]).toMatchObject({ type: "retry", retryAfterSeconds: 60 });
+    expect(rows.at(-1)).toMatchObject({
+      type: "work-status",
+      status: "retry",
+      events: [expect.objectContaining({ key: "explore" })]
+    });
+  });
+
+  it("groups every ordinary tool by semantic event while keeping task and question independent", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "执行完整流程"),
+        assistantMessage("msg_assistant_1", [
+          { partId: "part_reasoning", type: "reasoning", text: "先检查再修改", status: "completed" },
+          toolPart("part_read", "read", { filePath: "README.md" }),
+          toolPart("part_skill", "skill", { name: "frontend-design" }),
+          toolPart("part_bash_1", "bash", { command: "pwd" }),
+          toolPart("part_bash_2", "bash", { command: "git status --short" }),
+          toolPart("part_edit", "edit", { filePath: "src/a.ts" }),
+          toolPart("part_write", "write", { filePath: "src/b.ts" }),
+          toolPart("part_patch", "apply_patch", { filePath: "src/c.ts" }),
+          toolPart("part_web", "websearch", { query: "Vue" }),
+          toolPart("part_todo", "todowrite", { todos: [] }),
+          toolPart("part_lsp", "lsp", { filePath: "src/a.ts" }),
+          toolPart("part_task", "task", { description: "子任务" }),
+          toolPart("part_question", "question", { questions: [{ question: "继续吗" }] })
+        ])
+      ]
+    });
+
+    const rows = createTimelineRows(state);
+    const workStatus = rows.find((row) => row.type === "work-status");
+
+    expect(rows.filter((row) => row.type === "assistant-part").map((row) => (row as any).partId)).toEqual([
+      "part_task",
+      "part_question"
+    ]);
+    expect(workStatus).toMatchObject({
+      type: "work-status",
+      reasoningRefs: [{ messageId: "msg_assistant_1", partId: "part_reasoning" }]
+    });
+    expect(workStatus?.type === "work-status" ? workStatus.events.map((event) => [event.key, event.refs.length]) : []).toEqual([
+      ["explore", 1],
+      ["skill", 1],
+      ["shell", 2],
+      ["edit", 1],
+      ["write", 1],
+      ["patch", 1],
+      ["web", 1],
+      ["todo", 1],
+      ["other:lsp", 1]
+    ]);
   });
 
   it("formats provider and model labels from the catalog", () => {
@@ -338,9 +470,12 @@ describe("opencode-like conversation state", () => {
     const childAssistantPartIds = childRows
       .filter((row) => row.type === "assistant-part")
       .map((row) => (row as { partId: string }).partId);
-    const rootContextRow = rootRows.find((row) => row.type === "context-tool-group") as { refs: unknown[] } | undefined;
+    const rootWorkStatus = rootRows.find((row) => row.type === "work-status");
+    const rootExploreEvent = rootWorkStatus?.type === "work-status"
+      ? rootWorkStatus.events.find((event) => event.key === "explore")
+      : undefined;
 
-    expect(rootContextRow?.refs).toHaveLength(88);
+    expect(rootExploreEvent?.refs).toHaveLength(88);
     expect(rootAssistantPartIds).toContain("prt_task_frontend");
     expect(rootAssistantPartIds).not.toContain("prt_empty_root_1");
     expect(rootAssistantPartIds).not.toContain("prt_empty_root_2");
@@ -352,7 +487,7 @@ describe("opencode-like conversation state", () => {
     expect(childRows.some((row) => row.type === "context-tool-group")).toBe(true);
   });
 
-  it("adds one working-status row for the latest running turn with process parts but no text output", () => {
+  it("adds a work status row when process parts have no text output", () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "读取项目结构"),
@@ -366,11 +501,15 @@ describe("opencode-like conversation state", () => {
 
     const rows = createTimelineRows(state);
 
-    expect(rows.map((row) => row.type)).toEqual(["user-message", "context-tool-group", "working-status"]);
-    expect(rows.filter((row) => row.type === "working-status")).toHaveLength(1);
+    expect(rows.map((row) => row.type)).toEqual(["user-message", "work-status"]);
+    expect(rows.at(-1)).toMatchObject({
+      type: "work-status",
+      status: "running",
+      events: [expect.objectContaining({ key: "explore", refs: [expect.anything(), expect.anything()] })]
+    });
   });
 
-  it("does not add working-status for historical turns or turns with visible text output", () => {
+  it("keeps historical work status rows and places the current status after running text", () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "读取项目结构"),
@@ -383,8 +522,16 @@ describe("opencode-like conversation state", () => {
 
     const rows = createTimelineRows(state);
 
-    expect(rows.filter((row) => row.type === "working-status")).toHaveLength(0);
+    expect(rows.map((row) => row.type)).toEqual([
+      "user-message",
+      "work-status",
+      "turn-gap",
+      "user-message",
+      "assistant-part",
+      "work-status"
+    ]);
     expect(rows.some((row) => row.type === "assistant-part" && row.messageId === "msg_assistant_2")).toBe(true);
+    expect(rows.at(-1)).toMatchObject({ type: "work-status", userMessageId: "msg_user_2", status: "running" });
   });
 
   it("projects task tool parts as independent rows instead of a folded tool group", () => {

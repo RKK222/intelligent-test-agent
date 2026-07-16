@@ -698,7 +698,7 @@ V10 种子数据对 F-COSS 的影响：
 
 ## V20260625184300 scheduler 框架表与来源预留字段
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260625184300__create_scheduler_framework_tables.sql` 创建通用定时任务框架表，并给会话、Run、消息增加来源预留字段。本次只提供框架和管理 API，不新增具体业务任务，也不开放普通用户创建 Cron 计划 API。该版本使用 14 位时间戳，避免与既有 `V15__add_opencode_process_id_check_constraints.sql`、`V17__seed_local_opencode_machine_for_default_user.sql` 或其他并行分支的数字版本冲突。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260625184300__create_scheduler_framework_tables.sql` 创建通用定时任务框架表，并给会话、Run、消息增加来源预留字段。框架内置运行记录保留清理任务，其它具体业务任务仍由所属业务模块提供；不开放普通用户创建 Cron 计划 API。该版本使用 14 位时间戳，避免与既有 `V15__add_opencode_process_id_check_constraints.sql`、`V17__seed_local_opencode_machine_for_default_user.sql` 或其他并行分支的数字版本冲突。
 
 | 表 | 说明 |
 |---|---|
@@ -715,6 +715,7 @@ V10 种子数据对 F-COSS 的影响：
 - `scheduled_task_runs.status` 当前支持 `PENDING`、`RUNNING`、`STOPPING`、`SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED`。
 - `scheduled_task_runs.skip_reason` 保存同一 `taskKey` 已有未结束运行或 Redis 锁竞争失败时的跳过原因。
 - `scheduled_task_runs.stop_requested_at`、`stop_requested_by_user_id`、`stop_reason` 记录超级管理员发起协作式停止的时间、操作者和原因。
+- `V20260715000000__add_scheduler_run_retention_index.sql` 为 `scheduled_task_runs.ended_at` 创建 `idx_scheduled_task_runs_ended_at` 索引。`scheduler.run-retention-cleanup` 每天 UTC 00:00 删除 `ended_at` 早于当前时间 7 天且状态为 `SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED` 的记录；`PENDING`、`RUNNING`、`STOPPING` 始终保留。
 
 新增来源字段：
 
@@ -801,7 +802,7 @@ V10 种子数据对 F-COSS 的影响：
 
 `V20260708100000__create_internal_model_provider_tables.sql` 创建内部模型代理配置表：
 
-- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 保存内部供应商地址；`provider_id` 对应 opencode 配置中的 provider key 和代理请求头 `X-ICBC-Model-Provider`。
+- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 保存内部供应商地址；`provider_id` 对应代理请求头 `X-ICBC-Model-Provider` 的路由键（当前为 `qwen-prod` / `deepseek-prod`），不是 opencode 配置中的 `icbc-qwen` / `icbc-deepseek` provider key。
 - `internal_model_proxy_settings(setting_id='default', icbc_openai_auth_token, created_at, updated_at)` 保存全局 `ICBC_OPENAI_AUTH_TOKEN`，按需求明文保存，不回显到前端。
 - Java 启动时把启用供应商和 token 加载到内存；管理端保存后发布 `internal-model-provider.refresh-requested` 广播，各 Java 从数据库重新加载内存快照。
 
@@ -973,6 +974,10 @@ V18 及以前保留既有数字版本，已在本地或共享库执行过的 mig
 - `(user_id, message_id)` 唯一，表示同一用户对同一消息只能有一条反馈，后续提交为更新。
 - 外键引用 `users`、`sessions`、`runs`、`session_messages`。
 - 时间、组织时间和 Run 维度索引用于反馈明细和负反馈分布查询。
+
+## V20260715213000 AI 反馈迁移为 Run 口径
+
+`V20260715213000__migrate_ai_feedback_to_run_scope.sql` 将可关联的历史消息反馈回填 `run_id`，同一用户同一 Run 的重复记录只保留最后更新的一条；`message_id` 改为可空的历史来源字段，并新增 `(user_id, run_id)` 唯一约束及 `run_id/message_id` 至少存在一个的检查约束。新反馈以 Run 为业务主键且 `message_id=null`；旧消息记录与 `(user_id, message_id)` 约束继续保留兼容。运营满意度统计以 Run 反馈事实计数，明细中的 `messageId` 允许为空。
 
 ### analytics_user_activity_hourly / analytics_user_activity_daily
 

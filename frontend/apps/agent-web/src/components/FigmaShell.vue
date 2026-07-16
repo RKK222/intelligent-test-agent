@@ -1,10 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
-import { ChevronDown, CircleHelp, Gamepad2, LogOut, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { CalendarDays, ChevronDown, CircleHelp, Dices, Gamepad2, LogOut, MousePointer2, PawPrint, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import PetMiniGames from "./PetMiniGames.vue";
+import PetCompanionAvatar from "./PetCompanionAvatar.vue";
+import {
+  PET_COMPANIONS,
+  getPetCompanion,
+  loadPetPreference,
+  resolvePetPreference,
+  savePetPreference,
+  type PetCompanionId,
+  type PetDisplayMode,
+} from "./pet-companions";
 
 export type AppItem = {
   id: string;
@@ -404,6 +414,8 @@ const robotY = ref(0);
 const robotQuestionOpen = ref(false);
 // 对话和游戏共用宠物浮层；true 仅表示当前切到游戏页，不再提供独立活动栏入口。
 const robotGameOpen = ref(false);
+// 伙伴选择与问答共用浮层，避免新增独立设置入口占用活动栏。
+const petSettingsOpen = ref(false);
 // 进程状态气泡与宠物共用坐标，不再单独维护可拖动的状态点位置。
 const robotProcessStatusOpen = ref(false);
 // 首次未初始化提醒每次页面生命周期只自动展示一次，用户关闭后不被状态轮询反复打扰。
@@ -425,14 +437,54 @@ const robotHasSavedPosition = ref(false);
 // 手动唤起后保持可见；用户拖动或键盘定位后才恢复自然宠物的离场规则。
 const robotKeepVisible = ref(false);
 const robotDragging = ref(false);
+// 鼠标悬浮时冻结当前视觉位置，避免用户准备点击宠物时它继续跳跃。
+const robotHovering = ref(false);
 
-const ROBOT_WIDTH = 24;
-const ROBOT_HEIGHT = 32;
+const ROBOT_WIDTH = 44;
+const ROBOT_HEIGHT = 48;
 const ROBOT_VIEWPORT_MARGIN = 8;
 const ROBOT_DRAG_THRESHOLD = 4;
 const ROBOT_KEYBOARD_STEP = 8;
 const ROBOT_POSITION_STORAGE_KEY = "figma-shell-robot-pos";
 const ROBOT_FIXED_STORAGE_KEY = "figma-shell-robot-fixed";
+
+const petPreference = ref(loadPetPreference(typeof window === "undefined" ? undefined : window.localStorage));
+const activePetId = ref<PetCompanionId>("sniffer");
+const activePet = computed(() => getPetCompanion(activePetId.value));
+const activePetModeLabel = computed(() => {
+  if (petPreference.value.mode === "daily") return "每日轮换";
+  if (petPreference.value.mode === "random") return "今日随机";
+  return "自主选择";
+});
+
+/** 根据本地日期刷新当前值班伙伴，并把随机模式的新日期结果持久化。 */
+function refreshActivePet() {
+  const resolved = resolvePetPreference(petPreference.value, new Date());
+  petPreference.value = resolved.preference;
+  activePetId.value = resolved.petId;
+  savePetPreference(typeof window === "undefined" ? undefined : window.localStorage, resolved.preference);
+}
+
+function setPetDisplayMode(mode: PetDisplayMode) {
+  petPreference.value = { ...petPreference.value, mode };
+  refreshActivePet();
+}
+
+function selectPetCompanion(petId: PetCompanionId) {
+  petPreference.value = {
+    ...petPreference.value,
+    mode: "selected",
+    selectedPetId: petId,
+  };
+  refreshActivePet();
+}
+
+function togglePetSettings() {
+  petSettingsOpen.value = !petSettingsOpen.value;
+  if (petSettingsOpen.value) robotGameOpen.value = false;
+}
+
+refreshActivePet();
 
 function loadRobotFixed(): boolean {
   try {
@@ -520,6 +572,7 @@ function scheduleNaturalExit() {
 
 function resumeNaturalRobotBehavior() {
   if (robotState.value === "sleeping") return;
+  if (robotHovering.value || robotDragging.value) return;
   if (robotFixed.value) return;
   if (robotKeepVisible.value) {
     if (naturalExitTimer) clearTimeout(naturalExitTimer);
@@ -604,7 +657,8 @@ function onRobotPointerMove(event: PointerEvent) {
 
 function finishRobotDrag(pointerId?: number) {
   if (robotDragPointerId === null || (pointerId !== undefined && pointerId !== robotDragPointerId)) return;
-  if (robotDragWasEffective) {
+  const wasEffective = robotDragWasEffective;
+  if (wasEffective) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
     robotX.value = position.x;
     robotY.value = position.y;
@@ -615,9 +669,9 @@ function finishRobotDrag(pointerId?: number) {
     window.setTimeout(() => {
       robotSuppressClick = false;
     }, 0);
-    resumeNaturalRobotBehavior();
   }
   cleanupRobotDrag();
+  if (wasEffective) resumeNaturalRobotBehavior();
 }
 
 function finishRobotPointerDrag(event: PointerEvent) {
@@ -684,6 +738,7 @@ function triggerExit() {
   if (robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
     return;
   }
+  if (robotHovering.value) return;
 
   // 浮层打开后由用户决定何时关闭；自动出现的宠物也不能在等待或阅读答案时自行离场。
   if (robotQuestionOpen.value) {
@@ -772,6 +827,7 @@ function spawnRobot() {
   }
 
   clearAllRobotTimers();
+  refreshActivePet();
   if (inactivityTimer) clearTimeout(inactivityTimer);
 
   const savedPosition = loadSavedRobotPosition();
@@ -842,12 +898,12 @@ function spawnRobot() {
 
 // Action selection
 function scheduleNextAction() {
-  if (robotFixed.value) return;
+  if (robotFixed.value || robotHovering.value) return;
   if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
 
   if (behaviorTimer) clearTimeout(behaviorTimer);
   behaviorTimer = setTimeout(() => {
-    if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
+    if (robotHovering.value || (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging")) return;
 
     if (robotCurrentLevel.value === "top") {
       // At top: restrict upward jumps to prevent going off-screen
@@ -1199,6 +1255,32 @@ function executeBigJump() {
   }
 }
 
+function onRobotPointerEnter(event: PointerEvent) {
+  if (event.pointerType && event.pointerType !== "mouse") return;
+  robotHovering.value = true;
+  if (robotState.value === "sleeping" || robotDragging.value) return;
+
+  // 读取当前渲染位置后再关掉 transition，悬浮到跳跃中的宠物时也不会瞬移到终点。
+  const target = event.currentTarget as HTMLElement | null;
+  const rect = target?.getBoundingClientRect();
+  if (rect && Number.isFinite(rect.left) && Number.isFinite(rect.top)) {
+    const position = clampRobotPosition({ x: rect.left, y: rect.top });
+    robotX.value = position.x;
+    robotY.value = position.y;
+  }
+  clearAllRobotTimers();
+  robotTransition.value = "none";
+  robotState.value = "idle";
+  robotDirection.value = "front";
+}
+
+function onRobotPointerLeave(event: PointerEvent) {
+  if (event.pointerType && event.pointerType !== "mouse") return;
+  robotHovering.value = false;
+  if (robotState.value === "sleeping" || robotDragging.value) return;
+  resumeNaturalRobotBehavior();
+}
+
 // User activity listener
 function handleUserActivity(event?: Event) {
   // 宠物自身的拖动和唤起/收起按钮都不应被全局空闲逻辑当成离场信号。
@@ -1239,18 +1321,18 @@ const robotStyle = computed(() => ({
   zIndex: 9999,
   pointerEvents: "auto" as const,
   transition: robotTransition.value,
-  opacity: 0.85
+  opacity: 1
 }));
 
 const robotQuestionStyle = computed<CSSProperties>(() => {
-  const width = 340;
+  const width = 390;
   const gap = 10;
   const preferredLeft = robotX.value + ROBOT_WIDTH + gap;
   const left = preferredLeft + width <= window.innerWidth - 8
     ? preferredLeft
     : robotX.value - width - gap;
   const maxLeft = Math.max(8, window.innerWidth - width - 8);
-  const top = Math.min(Math.max(8, robotY.value - 8), Math.max(8, window.innerHeight - 470));
+  const top = Math.min(Math.max(8, robotY.value - 8), Math.max(8, window.innerHeight - 540));
   return {
     left: `${Math.min(Math.max(8, left), maxLeft)}px`,
     top: `${top}px`,
@@ -1260,6 +1342,7 @@ const robotQuestionStyle = computed<CSSProperties>(() => {
 function closeRobotQuestion() {
   robotQuestionOpen.value = false;
   robotGameOpen.value = false;
+  petSettingsOpen.value = false;
   robotQuestionDraft.value = "";
   emit("close-robot-side-question");
 }
@@ -1268,6 +1351,7 @@ function openRobotGames() {
   robotProcessStatusOpen.value = false;
   robotQuestionOpen.value = true;
   robotGameOpen.value = true;
+  petSettingsOpen.value = false;
 }
 
 function toggleRobotGameView() {
@@ -1341,6 +1425,7 @@ function toggleRobotVisibility() {
   if (robotState.value !== "sleeping") {
     // 收起后清理全部动作/离场计时，再重新开始完整的一分钟无操作等待。
     finishRobotDrag();
+    robotHovering.value = false;
     clearAllRobotTimers();
     if (inactivityTimer) clearTimeout(inactivityTimer);
     inactivityTimer = null;
@@ -1353,6 +1438,7 @@ function toggleRobotVisibility() {
   }
 
   // 手动唤起从保存坐标开始
+  refreshActivePet();
   const saved = loadSavedRobotPosition();
   const position = saved ?? clampRobotPosition(getBirthPosition());
   robotX.value = position.x;
@@ -1782,15 +1868,13 @@ function submitJoinApp() {
             title="唤起或收起小宠物"
             @click.stop="toggleRobotVisibility"
           >
-            <svg viewBox="5 0 14 16" class="robot-toggle-svg" width="24" height="28" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-              <!-- 开关复用宠物相同的天线、脑袋和眼睛几何，避免出现两个不同机器人图标。 -->
-              <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
-              <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#7c6bb5" />
-              <path class="robot-antenna-r" d="M16,4 L18,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
-              <circle class="robot-antenna-r-tip" cx="18" cy="1.5" r="0.8" fill="#5aa9a6" />
-              <rect class="robot-head" x="6" y="4" width="12" height="10" rx="2.5" fill="#27384b" />
-              <circle class="robot-eye" cx="12" cy="9" r="1.2" fill="#7cd5d0" />
-            </svg>
+            <PetCompanionAvatar
+              class="robot-toggle-svg"
+              :pet-id="activePetId"
+              :status-tone="robotProcessTone"
+              :show-status="processStatusInteractionEnabled"
+              aria-hidden="true"
+            />
           </button>
         </div>
       </aside>
@@ -1845,10 +1929,12 @@ function submitJoinApp() {
       data-testid="figma-robot"
       role="group"
       tabindex="0"
-      aria-label="可拖动的 MIMO 小宠物，可使用方向键移动"
+      :aria-label="`可拖动的${activePet.name}，可使用方向键移动`"
       aria-describedby="figma-robot-instructions"
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       @pointerdown="onRobotPointerDown"
+      @pointerenter="onRobotPointerEnter"
+      @pointerleave="onRobotPointerLeave"
       @keydown="onRobotKeydown"
       @click.stop="onRobotClick"
     >
@@ -1861,43 +1947,14 @@ function submitJoinApp() {
 
       <div class="robot-dir-wrap" :class="[`facing-${robotDirection}`]">
         <div class="robot-squash-wrap" :class="[`state-${robotState}`]">
-          <svg viewBox="0 0 24 32" class="robot-svg" width="24" height="32">
-            <!-- Antennas -->
-            <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
-            <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#7c6bb5" />
-
-            <path class="robot-antenna-r" d="M16,4 L18,2" stroke="#42617a" stroke-width="1.2" stroke-linecap="round" />
-            <circle class="robot-antenna-r-tip" cx="18" cy="1.5" r="0.8" fill="#5aa9a6" />
-
-            <!-- Head -->
-            <rect class="robot-head" x="6" y="4" width="12" height="10" rx="2.5" fill="#27384b" />
-            <!-- Facial sensor (glowing/breath) -->
-            <circle class="robot-eye" cx="12" cy="9" r="1.2" fill="#7cd5d0" />
-
-            <!-- Body -->
-            <rect class="robot-body" x="5" y="15.5" width="14" height="10" rx="4" fill="#354d66" />
-
-            <!-- Left Arm -->
-            <rect class="robot-arm-l" x="2.5" y="16" width="2" height="6.5" rx="1" fill="#42617a" />
-
-            <!-- Right Arm -->
-            <rect class="robot-arm-r" x="19.5" y="16" width="2" height="6.5" rx="1" fill="#42617a" />
-
-            <!-- Left Leg -->
-            <rect class="robot-leg-l" x="9" y="26.5" width="2.5" height="5" rx="1.25" fill="#42617a" />
-
-            <!-- Right Leg -->
-            <rect class="robot-leg-r" x="12.5" y="26.5" width="2.5" height="5" rx="1.25" fill="#42617a" />
-          </svg>
+          <PetCompanionAvatar
+            class="robot-svg"
+            :pet-id="activePetId"
+            :status-tone="robotProcessTone"
+            show-status
+          />
         </div>
       </div>
-      <span
-        class="robot-process-heart"
-        :class="`is-${robotProcessTone}`"
-        :title="robotProcessStatusTitle"
-        aria-hidden="true"
-        data-testid="robot-process-heart"
-      >♥</span>
     </div>
     <section
       v-if="robotProcessStatusOpen && robotState !== 'sleeping' && processStatusInteractionEnabled"
@@ -1912,7 +1969,9 @@ function submitJoinApp() {
     >
       <header class="figma-robot-process-header">
         <div class="figma-robot-process-speaker">
-          <span class="figma-robot-process-avatar" aria-hidden="true">♥</span>
+          <span class="figma-robot-process-avatar" aria-hidden="true">
+            <PetCompanionAvatar :pet-id="activePetId" :status-tone="robotProcessTone" />
+          </span>
           <div>
             <strong id="figma-robot-process-status-title">小宠物</strong>
             <span>TestAgent 进程</span>
@@ -1967,8 +2026,25 @@ function submitJoinApp() {
       @click.stop
     >
       <header class="figma-robot-side-question-header">
-        <span id="figma-robot-side-question-title">{{ robotGameOpen ? "小游戏" : "问问小宠物" }}</span>
+        <div class="figma-robot-companion-heading">
+          <PetCompanionAvatar :pet-id="activePetId" :status-tone="robotProcessTone" aria-hidden="true" />
+          <span>
+            <strong id="figma-robot-side-question-title">{{ robotGameOpen ? "小游戏" : "问问小宠物" }}</strong>
+            <small>{{ activePetModeLabel }}</small>
+          </span>
+        </div>
         <div class="figma-robot-companion-actions">
+          <button
+            type="button"
+            class="figma-robot-companion-picker-toggle"
+            :class="{ 'is-active': petSettingsOpen }"
+            aria-label="选择小宠物"
+            title="选择今日伙伴"
+            :aria-expanded="petSettingsOpen"
+            @click="togglePetSettings"
+          >
+            <PawPrint :size="13" aria-hidden="true" />
+          </button>
           <button
             type="button"
             class="figma-robot-companion-game-toggle"
@@ -1983,7 +2059,56 @@ function submitJoinApp() {
           <button type="button" aria-label="关闭宠物旁路问答" @click="closeRobotQuestion">×</button>
         </div>
       </header>
-      <template v-if="!robotGameOpen">
+      <section v-if="petSettingsOpen" class="figma-pet-roster" data-testid="pet-companion-settings" aria-label="小宠物显示方式">
+        <div class="figma-pet-mode-tabs" role="group" aria-label="显示方式">
+          <button
+            type="button"
+            :class="{ 'is-active': petPreference.mode === 'daily' }"
+            :aria-pressed="petPreference.mode === 'daily'"
+            @click="setPetDisplayMode('daily')"
+          >
+            <CalendarDays :size="13" aria-hidden="true" />
+            每日轮换
+          </button>
+          <button
+            type="button"
+            :class="{ 'is-active': petPreference.mode === 'random' }"
+            :aria-pressed="petPreference.mode === 'random'"
+            @click="setPetDisplayMode('random')"
+          >
+            <Dices :size="13" aria-hidden="true" />
+            每天随机
+          </button>
+          <button
+            type="button"
+            :class="{ 'is-active': petPreference.mode === 'selected' }"
+            :aria-pressed="petPreference.mode === 'selected'"
+            @click="setPetDisplayMode('selected')"
+          >
+            <MousePointer2 :size="13" aria-hidden="true" />
+            自主选择
+          </button>
+        </div>
+        <p>今日值班伙伴</p>
+        <div class="figma-pet-roster-list">
+          <button
+            v-for="pet in PET_COMPANIONS"
+            :key="pet.id"
+            type="button"
+            class="figma-pet-roster-item"
+            :class="{ 'is-active': activePetId === pet.id }"
+            :style="{ '--pet-accent': pet.accent }"
+            :aria-label="`选择${pet.name}`"
+            :aria-pressed="activePetId === pet.id"
+            @click="selectPetCompanion(pet.id)"
+          >
+            <span class="figma-pet-roster-avatar">
+              <PetCompanionAvatar :pet-id="pet.id" />
+            </span>
+          </button>
+        </div>
+      </section>
+      <template v-if="!robotGameOpen && !petSettingsOpen">
         <textarea
           ref="robotQuestionInput"
           v-model="robotQuestionDraft"
@@ -2027,7 +2152,7 @@ function submitJoinApp() {
           {{ sideQuestionProgress || "正在准备回答" }}
         </div>
       </template>
-      <div v-else class="figma-robot-companion-game">
+      <div v-else-if="robotGameOpen" class="figma-robot-companion-game">
         <PetMiniGames embedded />
       </div>
     </section>
@@ -2207,8 +2332,8 @@ function submitJoinApp() {
   animation: robot-process-toggle-breath 1.7s ease-in-out infinite;
 }
 
-.figma-robot-visibility-toggle--activity.is-process-alert .robot-eye {
-  fill: #f06b63;
+.figma-robot-visibility-toggle--activity.is-process-alert .robot-toggle-svg {
+  filter: drop-shadow(0 0 4px rgba(240, 107, 99, .7));
   animation: robot-process-eye-breath 1.7s ease-in-out infinite;
 }
 
@@ -2225,7 +2350,7 @@ function submitJoinApp() {
 .figma-robot-side-question {
   position: fixed;
   z-index: 10000;
-  width: 340px;
+  width: 390px;
   max-height: calc(100vh - 16px);
   overflow: auto;
   box-sizing: border-box;
@@ -2252,13 +2377,53 @@ function submitJoinApp() {
   font-weight: 600;
 }
 
+.figma-robot-companion-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.figma-robot-companion-heading > svg {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
+.figma-robot-companion-heading > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.figma-robot-companion-heading strong {
+  overflow: hidden;
+  color: #27384b;
+  font-size: 13px;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-robot-companion-heading small {
+  overflow: hidden;
+  color: #8795a5;
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .figma-robot-companion-actions {
   display: flex;
   align-items: center;
   gap: 2px;
 }
 
-.figma-robot-side-question-header .figma-robot-companion-game-toggle {
+.figma-robot-side-question-header .figma-robot-companion-game-toggle,
+.figma-robot-side-question-header .figma-robot-companion-picker-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2268,9 +2433,109 @@ function submitJoinApp() {
 }
 
 .figma-robot-side-question-header .figma-robot-companion-game-toggle:hover,
-.figma-robot-side-question-header .figma-robot-companion-game-toggle.is-active {
+.figma-robot-side-question-header .figma-robot-companion-game-toggle.is-active,
+.figma-robot-side-question-header .figma-robot-companion-picker-toggle:hover,
+.figma-robot-side-question-header .figma-robot-companion-picker-toggle.is-active {
   background: #eeeafd;
   color: #6f5ca9;
+}
+
+.figma-pet-roster {
+  padding: 9px;
+  border: 1px solid #dce4ec;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #f8fafc 0%, #f3f5fb 100%);
+}
+
+.figma-pet-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.figma-pet-mode-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #6e7b89;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.figma-pet-mode-tabs button:hover,
+.figma-pet-mode-tabs button:focus-visible {
+  border-color: #ccd7e2;
+  background: #fff;
+  color: #34495e;
+  outline: none;
+}
+
+.figma-pet-mode-tabs button.is-active {
+  border-color: #9db6ca;
+  background: #edf4f8;
+  color: #294c65;
+  box-shadow: 0 1px 2px rgba(39, 56, 75, 0.08);
+}
+
+.figma-pet-roster > p {
+  margin: 10px 1px 6px;
+  color: #8795a5;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+
+.figma-pet-roster-list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.figma-pet-roster-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 2px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #526273;
+  cursor: pointer;
+  font: inherit;
+}
+
+.figma-pet-roster-item:hover,
+.figma-pet-roster-item:focus-visible {
+  border-color: #d2dce5;
+  background: rgba(255, 255, 255, .82);
+  outline: none;
+}
+
+.figma-pet-roster-item.is-active {
+  border-color: color-mix(in srgb, var(--pet-accent, #5aa9a6) 44%, #d5dde5);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(40, 57, 73, .09);
+}
+
+.figma-pet-roster-avatar {
+  position: relative;
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--pet-accent, #5aa9a6) 10%, #fff);
 }
 
 .figma-robot-companion-game {
@@ -3324,52 +3589,13 @@ function submitJoinApp() {
   touch-action: none;
   cursor: grab;
   transform: translate3d(0, 0, 0);
-  opacity: 0.85;
-}
-
-/* 心形是宠物本体的进程指示，不再额外渲染一个可拖动的绿点。 */
-.robot-process-heart {
-  position: absolute;
-  left: 50%;
-  top: 18px;
-  transform: translateX(-50%);
-  z-index: 1;
-  pointer-events: none;
-  font-family: Arial, sans-serif;
-  font-size: 8px;
-  font-weight: 700;
-  line-height: 1;
-  text-shadow: 0 0 4px currentColor;
-}
-
-.robot-process-heart.is-ready {
-  color: #42d7a4;
-}
-
-.robot-process-heart.is-needs-initialization,
-.robot-process-heart.is-error {
-  color: #f06b63;
-}
-
-.robot-process-heart.is-needs-initialization {
-  animation: robot-process-heart-breath 1.7s ease-in-out infinite;
-}
-
-@keyframes robot-process-heart-breath {
-  0%, 100% { opacity: 0.58; text-shadow: 0 0 3px rgba(240, 107, 99, 0.42); }
-  50% { opacity: 1; text-shadow: 0 0 8px rgba(240, 107, 99, 0.95); }
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .figma-robot-visibility-toggle--activity.is-process-alert,
-  .figma-robot-visibility-toggle--activity.is-process-alert .robot-eye,
-  .robot-process-heart.is-needs-initialization {
+  .figma-robot-visibility-toggle--activity.is-process-alert {
     animation: none;
   }
-}
-
-.robot-process-heart.is-checking {
-  color: #a8b0ba;
 }
 
 .figma-robot-process-status {
@@ -3448,14 +3674,11 @@ function submitJoinApp() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  border-radius: 9px;
-  background: #edf8f4;
-  color: #31bc8d;
-  font-size: 13px;
-  line-height: 1;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 11px;
+  background: #edf4f7;
 }
 
 .figma-robot-process-header > button {
@@ -3713,119 +3936,31 @@ function submitJoinApp() {
 
 .robot-toggle-svg {
   display: block;
-  width: 24px;
-  height: 28px;
+  width: 29px;
+  height: 29px;
 }
 
-/* Eye glowing/breathing animation */
-.robot-eye {
-  animation: robot-eye-glow 2s infinite ease-in-out;
+/* 五种轮廓共享同一组整体彩蛋动作，避免依赖某一种动物的腿、耳或尾巴结构。 */
+.state-waving .robot-svg {
+  animation: pet-greeting 0.48s infinite ease-in-out alternate;
 }
 
-@keyframes robot-eye-glow {
-  0%, 100% {
-    opacity: 0.5;
-  }
-  50% {
-    opacity: 1;
-  }
+.state-walking .robot-svg {
+  animation: pet-trot 0.4s infinite ease-in-out;
 }
 
-/* Limbs styling & transitions */
-.robot-arm-r {
-  transform-origin: 20.5px 17px;
-  transition: transform 0.2s ease;
+.state-sitting .robot-svg {
+  transform: translateY(4px) scale(1.04, .92);
 }
 
-.robot-arm-l {
-  transform-origin: 3.5px 17px;
-  transition: transform 0.2s ease;
+@keyframes pet-greeting {
+  from { transform: rotate(-4deg) translateY(0); }
+  to { transform: rotate(4deg) translateY(-1px); }
 }
 
-.robot-leg-l {
-  transform-origin: 10.25px 26.5px;
-  transition: transform 0.2s ease;
-}
-
-.robot-leg-r {
-  transform-origin: 13.75px 26.5px;
-  transition: transform 0.2s ease;
-}
-
-.robot-head,
-.robot-body {
-  transition: transform 0.2s ease;
-}
-
-/* Waving state */
-.state-waving .robot-arm-r {
-  animation: robot-wave 0.15s infinite ease-in-out;
-}
-
-@keyframes robot-wave {
-  0%, 100% {
-    transform: rotate(-140deg);
-  }
-  50% {
-    transform: rotate(-180deg);
-  }
-}
-
-/* Walking state walk-cycle */
-.state-walking .robot-leg-l {
-  animation: robot-walk-leg 0.4s infinite ease-in-out;
-}
-
-.state-walking .robot-leg-r {
-  animation: robot-walk-leg 0.4s infinite ease-in-out reverse;
-}
-
-.state-walking .robot-arm-l {
-  animation: robot-walk-arm 0.4s infinite ease-in-out;
-}
-
-.state-walking .robot-arm-r {
-  animation: robot-walk-arm 0.4s infinite ease-in-out reverse;
-}
-
-@keyframes robot-walk-leg {
-  0%, 100% {
-    transform: rotate(-25deg);
-  }
-  50% {
-    transform: rotate(25deg);
-  }
-}
-
-@keyframes robot-walk-arm {
-  0%, 100% {
-    transform: rotate(20deg);
-  }
-  50% {
-    transform: rotate(-20deg);
-  }
-}
-
-/* Sitting state */
-.state-sitting .robot-head,
-.state-sitting .robot-body {
-  transform: translateY(3px);
-}
-
-.state-sitting .robot-leg-l {
-  transform: translate(-1.5px, -2px) rotate(80deg);
-}
-
-.state-sitting .robot-leg-r {
-  transform: translate(1.5px, -2px) rotate(-80deg);
-}
-
-.state-sitting .robot-arm-l {
-  transform: rotate(20deg);
-}
-
-.state-sitting .robot-arm-r {
-  transform: rotate(-20deg);
+@keyframes pet-trot {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-2px) rotate(1deg); }
 }
 
 /* Flipping (Backflip) state */

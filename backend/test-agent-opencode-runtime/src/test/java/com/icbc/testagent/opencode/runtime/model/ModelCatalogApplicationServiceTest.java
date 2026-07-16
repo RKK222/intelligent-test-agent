@@ -31,7 +31,7 @@ class ModelCatalogApplicationServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void internalSourceSeedsEnterpriseModelsWithDsv4FlashAsDefault() {
+    void internalSourceSeedsEnterpriseModelsWithQwen27BAsDefault() {
         ModelCatalogProperties properties = new ModelCatalogProperties();
         properties.setSource("internal");
         FakeModelRepository repository = new FakeModelRepository();
@@ -43,10 +43,10 @@ class ModelCatalogApplicationServiceTest {
         assertThat(models).isNotEmpty();
         assertThat(models.getFirst())
                 .containsEntry("providerId", "icbc-openai")
-                .containsEntry("id", "DeepSeek-V4-Flash-W8A8")
+                .containsEntry("id", "Qwen3.6-27B")
                 .containsEntry("defaultModel", true);
         assertThat(models).extracting(item -> item.get("id"))
-                .contains("Qwen3.6-27B", "Qwen3.6-35B-A3B", "Qwen3-32B-128K", "deepseekV3-0324-chat", "glm-51");
+                .containsExactly("Qwen3.6-27B", "DeepSeek-V4-Flash-W8A8");
     }
 
     @Test

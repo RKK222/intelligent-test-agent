@@ -3,6 +3,7 @@ import type { TodoItem } from "@test-agent/shared-types";
 
 export type TodoPanelProps = {
   todos: TodoItem[];
+  embedded?: boolean;
 };
 </script>
 
@@ -87,7 +88,12 @@ function todoDetail(item: TodoItem): string | undefined {
 </script>
 
 <template>
-  <section v-if="todos.length" class="oc-todo-panel" data-testid="oc-todo-panel">
+  <section
+    v-if="todos.length"
+    class="oc-todo-panel"
+    :class="{ 'is-embedded': embedded }"
+    data-testid="oc-todo-panel"
+  >
     <button
       type="button"
       class="oc-todo-panel__header"

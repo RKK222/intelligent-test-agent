@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 定时任务框架配置。默认关闭扫描，避免模块接入后在未配置 Redis 的环境误执行任务。
+ * 定时任务框架配置。字段安全回退为关闭，应用入口通过 application.yml 将部署默认值绑定为开启。
  */
 @Component
 @ConfigurationProperties(prefix = "test-agent.scheduler")

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.git.GitCommitIdentity;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
 import com.icbc.testagent.common.pagination.PageRequest;
@@ -337,6 +338,33 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(publisher.events.get(0).originLinuxServerId()).isEqualTo("127.0.0.1");
         assertThat(publisher.events.get(0).payload()).containsEntry("versionId", response.versionId());
         assertThat(publisher.events.get(0).payload()).containsEntry("targetCommitHash", "commit_base");
+    }
+
+    @Test
+    void recordsApplicationAgentPublishAndBroadcastsUpdatedFeatureHead() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        publisher.events.clear();
+
+        service.recordFeatureWorkspacePublished(
+                version.runtimeWorkspace().workspaceId(),
+                "commit_agent_config",
+                new UserId("usr_1"),
+                "trace_agent_publish");
+
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_agent_config");
+        assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_agent_config");
+        assertThat(publisher.events).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo("workspace.version.sync-requested");
+            assertThat(event.payload()).containsEntry("reason", "AGENT_CONFIG_PUBLISHED");
+            assertThat(event.payload()).containsEntry("targetCommitHash", "commit_agent_config");
+        });
     }
 
     @Test
@@ -1418,6 +1446,35 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void superAdministratorCanPublishSpecFilesToFeatureBranch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextHeadCommit = "commit_super_spec";
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "spec: 超管发布设计",
+                List.of("spec/design.md"),
+                null,
+                null,
+                new UserId("usr_1"),
+                "trace_publish",
+                true);
+
+        assertThat(result.status()).isEqualTo("PUBLISHED");
+        assertThat(git.materializedFiles).containsExactly("F-GCMS/workspace/spec/design.md");
+        assertThat(git.pushedBranch).isEqualTo(version.branch());
+    }
+
+    @Test
     void publishPersonalWorkspaceRepairsStaleApplicationReplicaPath() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -1917,6 +1974,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private String statusPathspec;
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
+        private GitCommitIdentity committedStagedIdentity;
         private boolean commitStagedUpdatesHead;
         private Path materializedRepoRoot;
         private String materializedCommit;
@@ -2114,6 +2172,12 @@ class ManagedWorkspaceApplicationServiceTest {
             if (commitStagedUpdatesHead) {
                 this.nextHeadCommit = "commit_after_push";
             }
+        }
+
+        @Override
+        public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
+            this.committedStagedIdentity = identity;
+            commitStaged(repoRoot, message, privateKey);
         }
 
         @Override

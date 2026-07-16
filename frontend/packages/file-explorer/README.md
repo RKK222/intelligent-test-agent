@@ -8,6 +8,7 @@
 
 - 展示单层加载的目录树。
 - 文件树中的文件和目录支持双击进入行内改名；改名请求由 app 层提交，本包不直接访问后端。
+- `canWrite=false` 时保留展开、读取、搜索和“添加文件到对话”，隐藏并在组件内部阻断新增、删除和双击重命名入口，避免只读 feature 副本出现伪写操作。
 - 使用 VS Code Workbench 风格的 30px icon tabbar 承载文件树、搜索和变更视图，文件浏览列表行保持 22px 高、13px 字号。
 - 文件/目录、chevron 和 loading 图标使用 `@vscode/codicons`；`getVsCodeFileIconClass(entry)` 从包入口导出，供 `agent-web` 的 Agent 配置树复用。
 - 展开目录时通过回调交给 app 调用后端。

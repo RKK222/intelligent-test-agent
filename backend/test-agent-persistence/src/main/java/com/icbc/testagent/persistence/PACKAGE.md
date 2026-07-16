@@ -24,7 +24,9 @@
 - `mybatis.MyBatisRunEventRepository`：RunEvent 领域端口的生产 Bean，保留 `(run_id, seq)` 冲突重试、`runId + lastSeq` 增量读取和 root session 历史状态读取。
 - `mybatis.RunSessionScopeMapper` / `mybatis/RunSessionScopeMapper.xml`：Run session scope MyBatis SQL，包含按 Run 和按 root session 查询；`MERGE ... USING (VALUES ...)` 写入时间参数时显式 cast 为 `timestamp`，兼容 PostgreSQL 参数类型推断。
 - `mybatis.MyBatisRunSessionScopeRepository`：RunSessionScope 领域端口的生产 Bean。
-- `mybatis.RunSummaryMapper` / `mybatis.MyBatisRunSummaryPersistenceRepository`：新模式启动执行单条无原文锚点 INSERT；终态事务执行 Run statusVersion CAS、最多两条摘要批量 MERGE、Session 时间更新三条 SQL；较高事件序号只允许一次晚到刷新，跨终态状态仅允许 `FAILED + TRANSPORT_ERROR` 被可信 root 事实纠正；低频 Diff 定位和 accepted/rejected 计数同样只走 XML SQL，不写 `run_events`。
+- `mybatis.RunSummaryMapper` / `mybatis.MyBatisRunSummaryPersistenceRepository`：新模式启动执行单条无原文锚点 INSERT；终态事务执行 Run statusVersion CAS、最多两条摘要批量 MERGE、Session 时间更新三条 SQL；较高事件序号只允许一次晚到刷新，跨终态状态仅允许 `FAILED + TRANSPORT_ERROR` 被可信 root 事实纠正；详情 locator 从既有 `dispatch_message_id` 映射目标用户轮次，低频 Run 恢复、Diff 定位和 accepted/rejected 计数都只走 XML SQL，不写 `run_events`。
+- `mybatis.ScheduledTaskRunRetentionMapper` / `mybatis/ScheduledTaskRunRetentionMapper.xml`：按 `ended_at` 和终态 status 清理超过 7 天的 scheduler 运行记录，显式排除活动状态。
+- `mybatis.MyBatisScheduledTaskRunRetentionRepository`：实现 scheduler 运行记录保留策略 domain 端口，供 scheduler 框架维护任务调用。
 - `RedisRunRuntimeStore` / `RunRuntimeStoreConfig`：Run 运行数据面领域端口的 Redis 唯一生产实现和装配；单 Run key 使用 `{runId}` hash tag，durable `events` Stream 使用 `${seq}-0`，durable/transient `runtime-events` Stream 使用 `${runtimeVersion}-0`，snapshot 使用 Hash + order ZSET 物化当前实体状态，外部 snapshot 同时 CAS seq/runtimeVersion，动态 key registry 统一滑动 TTL；跨 slot active/history 索引在单 Run Lua 前按“active TTL + pending TTL”安全窗保守登记并由读路径清脏，避免任一事件 Lua 提交后 Java 退出造成恢复失联；owner 条件接管原子校验活跃 manifest 快照并提升 token，事件、远端 Session 绑定和 scope/dedup/pending Lua 在副作用前校验 owner + token，pending 同时原子计入/扣减统一详情字节预算；生产 32 MiB 中为关键快照固定预留 4 MiB，durable/runtime 事件或 snapshot 投影项超过 20,000 或总详情超限时显式截断旧 Stream、递增 reset generation，并保留专用 USER 输入、JSON role 为 assistant 的最新 message、对应最新可见 text part 和 run-status，tool/reasoning/非 assistant 实体只作为可淘汰投影。
 - `RedisRunTerminalRetryStore` / `RunTerminalRetryStoreConfig`：终态关系型事务故障后的独立 Redis 安全重试实现和装配；record/due 固定使用 `{terminal-retry}` hash tag，保存 Lua 按终态 outbox generation、事件序号和重试代次单调覆盖，删除 Lua 对完整白名单 JSON 执行 compare-and-delete，防止旧 worker 覆盖或删除晚到纠正版；悬空 due 自愈只在 record 仍不存在时移除索引；due ZSET 只含 runId/时间，记录 TTL 不超过 24 小时。
 - `JdbcWorkspaceRepository`：实现 Workspace 持久化端口。
@@ -57,6 +59,7 @@
 - `db/migration/V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`：为 `user_ssh_keys` 增加 `encrypted_aes_key` 列，禁止复用已落库的 V10。
 - `db/migration/V20260627020000__seed_opencode_manager_max_processes_param.sql`：初始化 `OPENCODE_MANAGER_MAX_PROCESSES` 通用参数，供 manager 运行时最大进程数配置使用。
 - `db/migration/V20260703141000__create_run_session_scopes.sql`：创建 Run session scope 表并为 `run_events` 预留 scope/raw event id 列。
+- `db/migration/V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加运行记录保留清理索引。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现；Run 运行数据面不得新增 PostgreSQL 或 JVM 内存降级实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。
 

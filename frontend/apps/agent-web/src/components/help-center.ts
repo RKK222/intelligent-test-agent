@@ -62,7 +62,7 @@ export const HELP_TOPICS: HelpTopic[] = [
   {
     id: "directory-mapping",
     label: "开发与测试目录",
-    description: "工程结构、测试资产与建设责任",
+    description: "双 Git、目录权限与发布边界",
     path: "guide/directory-mapping.html",
     content: directoryMappingManual
   },

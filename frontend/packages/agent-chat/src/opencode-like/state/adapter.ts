@@ -66,12 +66,14 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     permissions: input.permissions ?? [],
     questions: input.questions ?? [],
     todos: input.todos ?? [],
+    todoSnapshotsByUserMessageId: input.todoSnapshotsByUserMessageId ?? {},
     running: input.running ?? (runtimeStatus.type === "busy" || runtimeStatus.type === "retry"),
     showReasoningSummaries: input.showReasoningSummaries ?? true,
     messageScopesById: input.messageScopesById ?? {},
     subagentsBySessionId: input.subagentsBySessionId ?? {},
     subagentByTaskPartId,
-    activeSubagentSessionId
+    activeSubagentSessionId,
+    runStatusesByRunId: input.runStatusesByRunId ?? {}
   };
 }
 

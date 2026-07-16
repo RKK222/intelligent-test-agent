@@ -39,7 +39,7 @@ export function toVueFlowEdges(graph: MermaidGraph): MermaidFlowEdge[] {
       sourceHandle: edge.sourceHandle ?? getMermaidNodePortId("source", sourceIndex),
       targetHandle: edge.targetHandle ?? getMermaidNodePortId("target", targetIndex),
       label: edge.label || undefined,
-      type: "smoothstep",
+      type: "mermaid-edge",
       markerEnd: edge.relation === "line" ? undefined : MarkerType.ArrowClosed,
       animated: false,
       style:
@@ -74,15 +74,20 @@ export type MermaidPortConnection = {
   targetHandle: string | null;
 };
 
-/** 自研拖线控制器与写入层共用同一约束，避免视觉状态和最终落盘不一致。 */
-export function canAppendMermaidEdge(graph: MermaidGraph, connection: MermaidPortConnection): boolean {
+/** 自研拖线控制器与写入层共用同一约束，避免视觉状态和最终落盘不一致。
+ *  excludeEdgeId 用于重连：判重时排除被更新的边本身，允许在同一节点对上更换端口。 */
+export function canAppendMermaidEdge(
+  graph: MermaidGraph,
+  connection: MermaidPortConnection,
+  excludeEdgeId?: string
+): boolean {
   if (
     !connection.source ||
     !connection.target ||
     !isMermaidPortHandle(connection.sourceHandle) ||
     !isMermaidPortHandle(connection.targetHandle)
   ) return false;
-  if (graph.edges.some((edge) => edge.source === connection.source && edge.target === connection.target)) {
+  if (graph.edges.some((edge) => edge.id !== excludeEdgeId && edge.source === connection.source && edge.target === connection.target)) {
     return false;
   }
   return !(
@@ -92,14 +97,18 @@ export function canAppendMermaidEdge(graph: MermaidGraph, connection: MermaidPor
 }
 
 /** 获取连接被拒绝的具体文字原因。 */
-export function getMermaidConnectionInvalidReason(graph: MermaidGraph, connection: MermaidPortConnection): string | undefined {
+export function getMermaidConnectionInvalidReason(
+  graph: MermaidGraph,
+  connection: MermaidPortConnection,
+  excludeEdgeId?: string
+): string | undefined {
   if (!connection.source || !connection.target) {
     return undefined;
   }
   if (!isMermaidPortHandle(connection.sourceHandle) || !isMermaidPortHandle(connection.targetHandle)) {
     return "连接点无效，请对齐连接端口";
   }
-  if (graph.edges.some((edge) => edge.source === connection.source && edge.target === connection.target)) {
+  if (graph.edges.some((edge) => edge.id !== excludeEdgeId && edge.source === connection.source && edge.target === connection.target)) {
     return "节点间已存在相同方向的连线";
   }
   if (connection.source === connection.target && connection.sourceHandle === connection.targetHandle) {
@@ -124,5 +133,25 @@ export function appendMermaidEdge(graph: MermaidGraph, connection: MermaidPortCo
     label: "",
     relation: "arrow"
   });
+  return next;
+}
+
+/** 把已有边的一端重连到新节点/端口：end='target' 更新目标端，end='source' 更新起点端。 */
+export function updateMermaidEdge(
+  graph: MermaidGraph,
+  edgeId: string,
+  end: "source" | "target",
+  connection: MermaidPortConnection
+): MermaidGraph {
+  const next = cloneMermaidGraph(graph);
+  const edge = next.edges.find((item) => item.id === edgeId);
+  if (!edge) return graph;
+  if (end === "target") {
+    edge.target = connection.target ?? edge.target;
+    edge.targetHandle = connection.targetHandle ?? edge.targetHandle;
+  } else {
+    edge.source = connection.source ?? edge.source;
+    edge.sourceHandle = connection.sourceHandle ?? edge.sourceHandle;
+  }
   return next;
 }

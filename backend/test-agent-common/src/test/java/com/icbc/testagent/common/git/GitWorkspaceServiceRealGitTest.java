@@ -40,6 +40,25 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void commitStagedUsesExplicitIdentityWhenRepositoryHasNoConfiguredIdentity() throws Exception {
+        Path repo = initializeRepository();
+        git(repo, "config", "--unset-all", "user.name");
+        git(repo, "config", "--unset-all", "user.email");
+        write(repo, "identity.txt", "committed by current user\n");
+        git(repo, "add", "--all");
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        service.commitStaged(
+                repo,
+                "identity commit",
+                null,
+                GitCommitIdentity.forPlatformUser("alice", "AUTH_ALICE"));
+
+        assertThat(git(repo, "show", "-s", "--format=%an <%ae>", "HEAD").stdoutText().trim())
+                .isEqualTo("alice <AUTH_ALICE@testagent.local>");
+    }
+
+    @Test
     void exposesBaseCurrentAndIncomingForRealMergeConflict() throws Exception {
         Path repo = initializeRepository();
         write(repo, "conflict.txt", "base\n");

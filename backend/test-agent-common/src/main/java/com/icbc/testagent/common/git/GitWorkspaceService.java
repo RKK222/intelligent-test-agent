@@ -246,6 +246,29 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 暂存指定文件并使用当前操作人的身份提交；身份仅对本次 commit 命令生效。
+     */
+    public void commitFiles(
+            Path repoRoot,
+            List<String> files,
+            String message,
+            String privateKey,
+            GitCommitIdentity identity) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        if (identity == null) {
+            commitFiles(repoRoot, files, message, privateKey);
+            return;
+        }
+        executor.execute(addCommand(repoRoot, files), privateKey, DEFAULT_TIMEOUT);
+        executor.execute(
+                withCommitIdentity(List.of("git", "-C", repoRoot.toString(), "commit", "-m", message), identity),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
      * 将当前分支推送到 origin；force=true 时使用 --force-with-lease，避免无保护地覆盖远端未知提交。
      */
     public void push(Path repoRoot, String branch, boolean force, String privateKey) {
@@ -278,6 +301,20 @@ public class GitWorkspaceService {
     public void mergeBranch(Path repoRoot, String branch, String privateKey) {
         executor.execute(
                 List.of("git", "-C", repoRoot.toString(), "merge", "--no-ff", branch),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 合并分支并为可能产生的 merge commit 注入当前操作人身份。
+     */
+    public void mergeBranch(Path repoRoot, String branch, String privateKey, GitCommitIdentity identity) {
+        if (identity == null) {
+            mergeBranch(repoRoot, branch, privateKey);
+            return;
+        }
+        executor.execute(
+                withCommitIdentity(List.of("git", "-C", repoRoot.toString(), "merge", "--no-ff", branch), identity),
                 privateKey,
                 DEFAULT_TIMEOUT);
     }
@@ -868,6 +905,20 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 使用当前操作人的身份提交暂存区；身份仅对本次命令生效，不污染共享仓库配置。
+     */
+    public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
+        if (identity == null) {
+            commitStaged(repoRoot, message, privateKey);
+            return;
+        }
+        executor.execute(
+                withCommitIdentity(List.of("git", "-C", repoRoot.toString(), "commit", "-m", message), identity),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
      * 从指定提交把白名单文件投影到目标 worktree 的工作树和索引。
      *
      * <p>发布流程使用个人 worktree 的不可变 HEAD 作为 sourceCommit，目标只能是应用
@@ -1062,6 +1113,26 @@ public class GitWorkspaceService {
         command.add(repoRoot.toString());
         command.addAll(List.of(args));
         return List.copyOf(command);
+    }
+
+    /**
+     * 将提交身份转换为 Git 命令级配置，避免修改共享仓库的 config 文件或后端进程全局环境。
+     */
+    private List<String> withCommitIdentity(List<String> command, GitCommitIdentity identity) {
+        if (identity == null) {
+            return List.copyOf(command);
+        }
+        if (command.isEmpty() || !"git".equals(command.get(0))) {
+            throw new IllegalArgumentException("Git command must start with git");
+        }
+        ArrayList<String> configured = new ArrayList<>(command.size() + 4);
+        configured.add("git");
+        configured.add("-c");
+        configured.add("user.name=" + identity.name());
+        configured.add("-c");
+        configured.add("user.email=" + identity.email());
+        configured.addAll(command.subList(1, command.size()));
+        return List.copyOf(configured);
     }
 
     private List<String> addCommand(Path repoRoot, List<String> files) {

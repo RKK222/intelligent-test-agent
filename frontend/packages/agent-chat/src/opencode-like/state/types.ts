@@ -41,6 +41,7 @@ export type OpencodeLikeConversationInput = {
   permissions?: PermissionRequest[];
   questions?: QuestionRequest[];
   todos?: TodoItem[];
+  todoSnapshotsByUserMessageId?: Record<string, TodoItem[]>;
   diff?: SessionDiff;
   diffFiles?: RunDiffFile[];
   running?: boolean;
@@ -52,6 +53,7 @@ export type OpencodeLikeConversationInput = {
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
   activeSubagentSessionId?: string | null;
+  runStatusesByRunId?: Record<string, string>;
 };
 
 export type OpencodeLikeConversationState = {
@@ -68,12 +70,27 @@ export type OpencodeLikeConversationState = {
   permissions: PermissionRequest[];
   questions: QuestionRequest[];
   todos: TodoItem[];
+  todoSnapshotsByUserMessageId: Record<string, TodoItem[]>;
   running: boolean;
   showReasoningSummaries: boolean;
   messageScopesById: Record<string, MessageScope>;
   subagentsBySessionId: Record<string, SubagentSession>;
   subagentByTaskPartId: Record<string, string>;
   activeSubagentSessionId?: string | null;
+  runStatusesByRunId: Record<string, string>;
+};
+
+export type WorkStatusState = "running" | "retry" | "failed" | "cancelled" | "completed";
+
+export type WorkStatusPartRef = {
+  messageId: string;
+  partId: string;
+};
+
+export type WorkStatusEventGroup = {
+  key: string;
+  label: string;
+  refs: WorkStatusPartRef[];
 };
 
 export type TimelineRow =
@@ -119,13 +136,17 @@ export type TimelineRow =
       showAssistantHeader: boolean;
     }
   | {
-      type: "working-status";
+      type: "work-status";
       key: string;
       userMessageId: string;
-      previousAssistantPart: boolean;
-      showAssistantHeader: boolean;
+      reasoningRefs: WorkStatusPartRef[];
+      events: WorkStatusEventGroup[];
+      todos: TodoItem[];
+      status: WorkStatusState;
+      isLatest: boolean;
+      runId?: string;
+      runStatus?: string;
     }
-  | { type: "thinking"; key: string; userMessageId: string }
   | {
       type: "retry";
       key: string;

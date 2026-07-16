@@ -54,6 +54,7 @@ declare module 'vue' {
     InternalModelProviderPanel: typeof import('./src/components/system/InternalModelProviderPanel.vue')['default']
     OpencodeProcessStartupDialog: typeof import('./src/components/OpencodeProcessStartupDialog.vue')['default']
     OpencodePublicConfigManagementPanel: typeof import('./src/components/system/OpencodePublicConfigManagementPanel.vue')['default']
+    PetCompanionAvatar: typeof import('./src/components/PetCompanionAvatar.vue')['default']
     PetMiniGames: typeof import('./src/components/PetMiniGames.vue')['default']
     ReadonlyTranscript: typeof import('./src/components/ReadonlyTranscript.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']

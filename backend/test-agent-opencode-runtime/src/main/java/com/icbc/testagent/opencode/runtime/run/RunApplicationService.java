@@ -449,6 +449,7 @@ public class RunApplicationService {
                         executionNodeRepository,
                         agentRuntimeRegistry,
                         agentSessionBindingRepository,
+                        runSessionScopeRepository,
                         new ObjectMapper())
                 : snapshotService;
         this.runSessionScopeRepository = runSessionScopeRepository;
@@ -867,8 +868,14 @@ public class RunApplicationService {
                     prompt,
                     now);
         }
+        // legacy 也必须具备服务端稳定 dispatch ID，供远端 user、平台消息和 Run scope 建立同一因果锚点。
+        String dispatchMessageId = input.messageId() == null
+                ? RuntimeIdGenerator.messageId()
+                : input.messageId();
         runRepository.save(pending);
-        saveUserMessage(session.sessionId(), pending.runId(), prompt, input.parts(), userId, traceId, now);
+        saveUserMessage(
+                session.sessionId(), pending.runId(), prompt, input.parts(), userId,
+                dispatchMessageId, traceId, now);
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
                 Map.of("status", RunStatus.PENDING.name()), storageMode);
 
@@ -907,7 +914,13 @@ public class RunApplicationService {
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(),
                     Map.of("status", RunStatus.RUNNING.name()), storageMode);
-            recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId, storageMode);
+            recordRootSessionScope(
+                    resolvedAgentId,
+                    running,
+                    binding.remoteSessionId(),
+                    dispatchMessageId,
+                    traceId,
+                    storageMode);
             LOGGER.info("Run started, runId={}, nodeId={}, remoteSessionId={}, traceId={}",
                     running.runId().value(),
                     target.node().executionNodeId().value(),
@@ -931,7 +944,7 @@ public class RunApplicationService {
                     null,
                     prompt,
                     toAgentPromptParts(input, workspace),
-                    input.messageId(),
+                    dispatchMessageId,
                     opencodeAgent,
                     null,
                     modelSelection.providerId(),
@@ -1138,6 +1151,7 @@ public class RunApplicationService {
                         resolvedAgentId,
                         running,
                         binding.remoteSessionId(),
+                        dispatchMessageId,
                         traceId,
                         RunStorageMode.REDIS_SUMMARY,
                         ownerLeaseIfPresent(claimedOwnership));
@@ -1577,19 +1591,24 @@ public class RunApplicationService {
             String agentId,
             Run run,
             String remoteSessionId,
+            String dispatchMessageId,
             String traceId,
             RunStorageMode storageMode) {
-        recordRootSessionScope(agentId, run, remoteSessionId, traceId, storageMode, null);
+        recordRootSessionScope(agentId, run, remoteSessionId, dispatchMessageId, traceId, storageMode, null);
     }
 
     private void recordRootSessionScope(
             String agentId,
             Run run,
             String remoteSessionId,
+            String dispatchMessageId,
             String traceId,
             RunStorageMode storageMode,
             RunOwnerLease ownerLease) {
         Instant now = Instant.now();
+        Map<String, Object> metadata = Map.of(
+                "agentId", agentId,
+                "dispatchMessageId", dispatchMessageId);
         RunSessionScope scope = new RunSessionScope(
                 run.runId(),
                 remoteSessionId,
@@ -1597,7 +1616,7 @@ public class RunApplicationService {
                 traceId,
                 now,
                 now,
-                Map.of("agentId", agentId));
+                metadata);
         RunSessionScopeSession rootSession = new RunSessionScopeSession(
                 run.runId(),
                 remoteSessionId,
@@ -1611,7 +1630,7 @@ public class RunApplicationService {
                 traceId,
                 now,
                 now,
-                Map.of("agentId", agentId));
+                metadata);
         if (storageMode == RunStorageMode.REDIS_SUMMARY) {
             if (runRuntimeStore == null) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis 运行态未配置");
@@ -2603,6 +2622,7 @@ public class RunApplicationService {
             String prompt,
             List<StartRunInput.PromptPart> parts,
             UserId userId,
+            String remoteMessageId,
             String traceId,
             Instant createdAt) {
         SessionMessage message = new SessionMessage(
@@ -2614,7 +2634,7 @@ public class RunApplicationService {
                 traceId,
                 runId,
                 null,
-                null,
+                remoteMessageId,
                 userPromptPartsJson(parts, traceId).orElse(null),
                 null,
                 null,

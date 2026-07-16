@@ -333,7 +333,7 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
         </span>
       </div>
       <table class="ta-table">
-        <thead><tr><th>时间</th><th>用户</th><th>组织</th><th>会话</th><th>Run</th><th>消息</th><th>反馈</th><th>原因</th><th>备注</th></tr></thead>
+        <thead><tr><th>时间</th><th>用户</th><th>组织</th><th>会话</th><th>Run</th><th>历史消息</th><th>反馈</th><th>原因</th><th>备注</th></tr></thead>
         <tbody>
           <tr v-for="row in satisfactionQuery.data.value?.feedbackDetails.items ?? []" :key="row.feedbackId">
             <td>{{ new Date(row.createdAt).toLocaleString('zh-CN') }}</td>
@@ -341,7 +341,7 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
             <td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td>
             <td>{{ row.sessionId }}</td>
             <td>{{ row.runId || '-' }}</td>
-            <td>{{ row.messageId }}</td>
+            <td>{{ row.messageId || '-' }}</td>
             <td>{{ row.rating === 'POSITIVE' ? '满意' : '不满意' }}</td>
             <td>{{ row.reasonCode || '-' }}</td>
             <td>{{ row.comment || '-' }}</td>

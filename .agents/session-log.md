@@ -1,5 +1,119 @@
 # Session Log
 
+### 2026-07-15 - 固化应用 worktree/feature 权限回归并补齐超管豁免
+
+- Why:
+  - 应用 Git 已采用个人 worktree 到 feature 的投影发布，但前端文件树和 Git 变更页仍混用普通文件、应用配置与公共配置写权限；应用配置也会随个人工作区 ID 切换，且推送后没有更新应用版本 HEAD 和广播。用户要求固化测试数据、执行 UI 验证，并明确超级管理员在应用 worktree/feature 发布范围内不受这些限制。
+- What:
+  - 文件树和 Git 变更页增加只读防线并拆分普通文件、应用 Agent/Skill、公共配置权限；应用配置固定路由到当前版本 feature 工作区。feature 普通文件作为统一发布副本对所有角色保持只读，避免形成第二套直提协议；应用管理员可独立提交/推送 feature 配置，公共 Git 仍仅超管可写。
+  - 普通成员和应用管理员继续只在个人分支保留 `spec/**`；超管发布入口显式放行 spec。应用配置推送成功后更新版本与本机副本 HEAD，并广播 `workspace.version.sync-requested`（`AGENT_CONFIG_PUBLISHED`）。同步 Help、HTTP/事件、模块 README 和测试设计文档。
+  - 新增稳定角色、工作区 ID、分支和路径 fixture，组件测试覆盖只读文件树、按权限统计可提交项、应用配置 feature 路由和超管 spec；Playwright 覆盖普通成员与超管 UI 入口差异。
+- How:
+  - 复用平台文件 WebSocket、既有 Agent 配置 Git 工作流和应用版本同步广播，不新增文件 HTTP 代理、RunEvent、数据库字段或 Git 分支；超管策略由 Controller 认证角色传入发布服务，默认内部调用仍维持 spec 限制。
+- Result:
+  - 前端组件测试 29 项、Help 测试 9 项、Playwright 桌面/移动端 2 项、agent-web typecheck、agent-web 与用户手册生产构建通过；后端相关 workspace/API 测试共 93 项通过，完整后端打包成功。
+  - 使用 `.env.test` / `test` profile 重启三服务后，backend health/readiness 和 frontend 均返回 200，登录 CORS 预检正常，manager WebSocket 已连接。未修改数据库、外部 HTTP DTO 或 RunEvent；内部版本广播新增既有事件的 reason 值并已同步文档。
+
+### 2026-07-15 - 增加小游戏预览、动态难度与宠物悬浮冻结
+
+- Why:
+  - 用户要求俄罗斯方块展示下一个方块、各小游戏按进度提升挑战，以及鼠标悬浮宠物时停止跳跃；随后明确扫雷和数独改为随机难度，避免连续失败重开后线性变难。
+- What:
+  - 俄罗斯方块增加下一个方块预览，并按消行缩短下落 tick；贪吃蛇按得分缩短 tick；扫雷和数独每局从 1–5 级随机抽取难度。
+  - 宠物 pointerenter 时读取当前视觉坐标、清理自然动作计时并保持 idle，pointerleave 后恢复自然动作；拖动结束先清理拖动状态再恢复计时，避免悬浮冻结逻辑阻断原有拖动恢复。
+  - 同步更新 PetMiniGames/FigmaShell 单测、工作台桌面/移动端 E2E 覆盖和 agent-web 包说明。
+- How:
+  - 复用 `PetMiniGames.vue` 现有俄罗斯方块/贪吃蛇计时器、棋盘状态和 FigmaShell 宠物自然动作调度，不新增后端 API、事件或持久化数据。
+- Result:
+  - 相关 Vitest 42/42、工作台 Playwright 桌面/移动端 4/4、前端全量 typecheck 和 production build 通过；按 `.env.test` 重启后端、manager、前端，health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 已连接。
+
+### 2026-07-15 - 修复企业公共区 Git 提交身份缺失
+
+- Why:
+  - 企业内部公共配置 Git 在后端进程以 root 运行且未配置 `user.name/user.email`，公共区更新并推送在 `git commit` 阶段报 `Author identity unknown`，上层错误被归类为 `GIT_UNAVAILABLE`。
+- What:
+  - 公共 Git 服务新增单次命令级提交身份；公共配置、Agent/工作空间和个人工作区的 commit/merge 均使用当前平台用户身份，不写入共享仓库配置或后端进程全局 Git 配置。
+  - 由于平台 User 当前没有邮箱字段，身份邮箱使用统一认证号规范化后拼接保留域名 `@testagent.local`；同步补充 common/workspace/API 文档和真实 Git 回归测试。
+- How:
+  - 复用既有 `GitWorkspaceService` 与 `GitPublishWorkflow`，通过 `git -c user.name=... -c user.email=...` 注入命令级配置；身份由当前用户展示名和统一认证号生成，并拒绝换行字符。
+  - 执行 common/workspace-management 定向测试、相关模块全量测试、后端完整打包和 `.env.test` 三服务启动健康检查。
+- Result:
+  - 相关 Maven 测试共 113 项全部通过，完整后端打包成功；后端 health/readiness 为 UP，前端 3000 返回 200，manager WebSocket 当前已连接。企业远端实际 push 未在本地凭据环境执行，仍需在企业公共区进行一次端到端验收；若服务器有提交邮箱域名限制，需要补充真实邮箱来源或可配置域名。
+### 2026-07-15 - 修复反馈按钮在 flex 布局下收缩导致文字隐藏的 Bug
+### 2026-07-16 - 后端按用户轮次隔离 Run 消息回放与快照
+
+- Why:
+  - Run 级恢复与终态快照此前会遍历整个 OpenCode Session，再把旧轮 `todowrite` 和 assistant 统一包装或写成当前 `runId`，导致新一轮状态块显示上一轮已完成待办，并污染后续消息归属。
+- What:
+  - 为新 Run 统一建立 `dispatchMessageId` 用户消息锚点，并在 OpenCode command、平台 USER `remoteMessageId`、root scope metadata 与 Redis 过期后的 `RunDetailsLocator` 中复用；来源冲突时拒绝投影。
+  - 增加 Run 轮次选择器：明确锚点只选择该 user 及直接关联 assistant/parts；旧 Run 无锚点时仅允许时间窗内唯一 user 的安全兼容；分页游标重复、超限、缺锚点或歧义均 fail closed。
+  - Run SSE 恢复和终态快照只投影目标轮次，token/cost 只取本轮末条 assistant；Session 历史继续全量刷新，但不重新分配既有 assistant 的 `runId`。按用户决策不修复已污染历史数据，且未改变 HTTP/SSE wire、数据库结构或 generated SDK。
+- How:
+  - 以两轮消息、跨页锚点、游标异常、root/child、Redis 详情过期、legacy ID 生成与 MyBatis locator 映射等回归测试先复现后实现；同步 runtime/domain/persistence README/PACKAGE、HTTP/事件文档和对话场景说明。
+  - 新会话实测第一轮生成并完成一条 Todo、第二轮询问 `1+1=？`：第二轮 SSE 无第一轮 message/todowrite，第二轮状态块及展开内容均无旧 Todo，第一轮展开仍保留 Todo。
+- Result:
+  - 后端定向 91 tests passed；排除在基线 `baec63654d` 原样复现的 3 个故障测试类后，18 个 Maven 模块全量测试 `BUILD SUCCESS`。原始全量仍受既有 H2 持久化测试（2 failures / 7 errors）和默认配置断言（2 failures）阻断。
+  - 前端全量 Vitest 887 passed / 1 skipped，typecheck 与生产 build 通过；后端生产 package、`git diff --check` 通过。主工作区与开发服务已恢复，未修改环境配置。
+
+### 2026-07-15 - 彻底隔离跨轮 Todo 状态
+
+- Why:
+  - 新一轮消息发送后，上一轮为等待标题同步仍保持 RunEvent SSE；在新 Run HTTP 响应返回前，旧 `todo.updated`、`todowrite` 或 `run.snapshot.reset` 可重新写入“当前 Todo”，而 reducer 仅按最后用户消息猜归属，导致状态块跨轮显示旧待办。
+- What:
+  - `AgentWorkbench` 增加 `conversation/title-only/ignore` 三态 RunEvent 门禁；新请求替代旧 Run 后只允许旧 `session.updated` 完成标题同步，其他旧事件不再进入对话 reducer。
+  - `agent-chat` 建立 Run—用户消息 Todo owner，显式保存 pending/current/superseded 状态；HTTP/runtime/active-run 接管只在匹配本页未决请求时立即绑定发起用户，外部 Run 在远端 user message 前保持未归属且不消费本页 pending。root Todo 只更新所属轮次，child Todo 不进入 root，远端 user ID 替换时迁移快照键和 Run 绑定，旧 Run snapshot reset 直接忽略。
+  - 历史恢复只读取可归属的分轮 `todo.updated/todowrite`，过滤 child message/user scope 并把远端 user 快照键迁移到平台 messageId；显式事件快照优先于持久化 part fallback，无轮次 session Todo 非空结果必须有最新 root 轮 owner 证据才校准。follow-up、手动重试与自动重试携带原用户消息 ID，Timeline 优先分轮快照并识别显式空快照。
+- How:
+  - 先用 reducer/工具/投影回归复现旧 Run 三类迟到事件、root/child 混入、历史旧 session 快照覆盖、远端乐观 ID 迁移、HTTP 接管早于 lifecycle、跨标签页外部 Run 与本页 pending 竞争，以及连续排队串轮，再实现纯 reducer 所有权与工作台入口门禁；Playwright 通过登录态 fetch SSE 挂起第二次 Run 响应，验证旧流断开不产生错误卡、旧标题仍同步、第一轮保留 4 项且第二轮只接收新 Run 的 9 项，并验证手动重试不新增重复 user 消息。
+  - 同步更新 agent-chat、agent-web README/PACKAGE、RunEvent 文档和对话场景测试说明；未修改 HTTP/RunEvent wire、共享后端 DTO、数据库、generated SDK、环境配置、安全或鉴权逻辑。
+- Result:
+  - 用户指定的 5 个定向测试文件 307 passed / 1 skipped，follow-up 队列 6 passed；全量 Vitest 59 个文件 880 passed / 1 skipped；Playwright 跨 Run 与手动重试场景在 Chromium + Mobile 共 4 passed；全量 lint、typecheck、生产 build 和 `git diff --check` 通过。
+  - 生产构建仅保留既有大 chunk 提示，无新增构建错误或告警类别。
+
+### 2026-07-15 - 前端反馈按钮样式优化，改用无边框透明纯图标样式
+
+- Why:
+  - 根据用户的明确要求，对话时间线成功完成态下的满意/不满意反馈按钮不需要显示文字，且需要去除图标周围的边框，只保留图标本身。
+- What:
+  - 去除反馈按钮中的文字并隐藏边框与背景，使其成为纯图标按钮。
+- How:
+  - 在 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 中：
+    - 在插槽模版中删除“满意”和“不满意”的 `<span>` 元素，只留下 `ThumbsUp` 和 `ThumbsDown` 图标。
+    - 针对 `.figma-chat-completed-feedback` 下的反馈按钮做样式覆盖：去除 border 和 background，padding 设为 0，大小固定为 20px x 20px；hover 和被选中时维持 transparent 边框与背景，仅修改图标文字颜色进行状态提示（满意变蓝 `#1f5fbf`，不满意变红 `#b94030`）。
+- Result:
+  - 运行 `vitest` 对 `FigmaChatPanel` 和 `opencode-timeline` 进行了验证，测试均 100% 成功通过。
+  - 前端全量 typecheck 与编译时因为其他无关文件（如 `AgentWorkbench.vue` 的 `AutoRetryRunDraft` 类型不兼容）导致编译报错，属于项目分支中的历史残留问题，不在本任务中扩大范围修改。
+
+### 2026-07-15 - 清理前端字体 CSS `@import` 顺序告警
+
+- Why:
+  - `agent-web` 生产构建在 Tailwind 展开全局 CSS 后，将 Google Fonts 的 CSS `@import` 识别为位于普通规则之后，持续产生 `@import rules must precede all rules` 告警。
+- What:
+  - 删除 `globals.css` 中与 `index.html` 重复的 Google Fonts `@import`，保留 HTML `<link>` 作为唯一字体加载入口，并补充中文注释说明原因。
+- How:
+  - 仅修改 `frontend/apps/agent-web/src/styles/globals.css`；字体族 token 和页面字体声明保持不变，不调整 Monaco 的独立大 chunk 策略。
+- Result:
+  - `corepack pnpm --filter @test-agent/agent-web build` 退出码为 0，字体 `@import` 顺序告警为 0；仍保留独立的 Monaco 大 chunk 提示，未通过提高阈值掩盖实际包体问题。未涉及 API、事件、数据库、安全或兼容性契约。
+
+### 2026-07-15 - 实现并优化流光分割线（Shimmer Divider）组件
+
+- Why:
+  - 用户需要一个流光分割线组件，其流光从 `#4F7CFF → #8B5CF6 → #4F7CFF` 流动，且流光速度可以调整，用于展示在对话中某些消息的前面。
+  - 修复纵向模式下（`orientation="vertical"`），组件在任务块中由于简写 CSS 属性重置、负百分比背景定位的浏览器兼容性、以及淡出遮罩比例过大导致流光不显示的 Bug。
+- What:
+  - 在 `@test-agent/ui-kit` 通用基础组件包中，设计、实现并优化了 `ShimmerDivider.vue` 基础 UI 组件。
+  - 支持 `orientation`（横向/纵向）、`animated`（静态/动态）、`speed`（数值/预设）、`height`（粗细）以及 `fade`（两端渐隐遮罩）等属性。
+  - 同步更新了 `README.md` 与 `PACKAGE.md` 等包说明文件。
+- How:
+  - 将 `.ta-shimmer-track` 中的简写 `animation` 属性拆开书写为 `animation-name` 等子属性，彻底消除类合并重写 `animation-name` 时的简写重置 Bug。
+  - 将动画关键帧位移从 `100% / -100%` 优化为无负数百分比的 `0% / -200%`，根除特定浏览器（如 Chrome 108 基线）在亚像素级渲染时由于负数百分比引发的动画失效。
+  - 针对短尺寸纵向分割线，将遮罩渐隐边缘从 15% 缩小为 8%，留出更多可见流光渲染面积，并修复了 CSS 变量名拼写错误。
+  - 编写并扩展了 `ShimmerDivider.test.ts` 单元测试，全面验证了默认渲染、不同速度与高度配置、纵向淡出和静态模式。
+- Result:
+  - `corepack pnpm test ShimmerDivider` 包含的 6 个 Vitest 测试用例 100% 成功通过。
+  - 前端全量 Lint 和 TypeScript 类型检查通过。未改动后端 API、事件、数据库、安全或兼容性契约。
+
+
 ### 2026-07-15 - 将 Go manager 身份改为服务器稳定哈希
 
 - Why:
@@ -31,10 +145,12 @@
   - 在 `MermaidFlowNode.vue` 包装 Handle 在 `.ta-mermaid-port-container` 容器中以提供平滑 `:hover` 作用域；选中状态下显示引导大箭头，悬停大箭头时弹出 5 种图形的小预览菜单，点击则派发 `quickConnect` 事件。
   - 在 `MermaidVisualEditor.vue` 监听并在 `onQuickConnect` 中自动在对应偏置位置（如 x+=190 或 y+=140）创建新节点，生成与原端口方向对称的连线（连接新节点的 'target-1' 或从新节点的 'source-1' 发出），并自动切换聚焦选中新节点以支持连贯操作。
   - 在 `MermaidFlowNode.vue` 为四向容器设计选中节点专属的透明 `::after` 桥接伪元素（长 32px，宽 24px）以覆盖中间空白区，使鼠标滑动中途依然能维持 hover 触发链，根除 Popover 提前消失的 Bug。
+  - 将 `<Handle>` 挂载层级重新还原为节点的直接子元素，解除其原本的容器包裹，确保 Vue Flow offset 计算绝对正确、箭头重回可见状态；将大引导箭头与可用图形面板重构为同级的 `.ta-mermaid-quick-connector-wrapper` 兄弟节点利用 `port.style` 绝对定位覆盖其上。
 - How:
   - 调整 `MermaidFlowNode.vue` 的 CSS 以应用 move 和 default 指针，并将 `pointer-events: none` 修正为 `auto`；在 `MermaidVisualEditor.vue` 的拖拽态中控制 CSS 强制禁用 handle 过渡动画以消除慢变。
   - 修改 `MermaidFlowNode.vue` 内部的拦截逻辑，在 `onPointerDown` 和 `preventNodeDragFromPort` 捕获拦截前增加 `props.selected` 为真的直接返回逻辑。
   - 调整 `MermaidFlowNode.vue` 的模板结构和配套 CSS，使用 `:style="port.style"` 绑定在容器和 Handle 上以兼顾真实绝对定位与单测中读取样式的断言需求；在菱形预览中使用 `rotate(0.125turn)` 巧妙绕过原本测试中排除 `rotate(45deg)` 的硬编码源码匹配条件；同时在模板中为端口容器绑定 `is-${port.position}` 方向类，在 CSS 中为选中的节点四向容器配置透明 `::after` 桥接伪元素以扩大 hover 范围、消除 hover 提早断开的 bug。
+  - 在 `MermaidFlowNode.vue` 模板中将 `<Handle>` 提取还原到根元素的直接子层级，使 Vue Flow offset 坐标计算参照物恢复正确以重现连线箭头；将大箭头和可用图形菜单卡片移入同级的独立 `.ta-mermaid-quick-connector-wrapper` 兄弟列表并绝对定位，重新适配相关 CSS 类及 `::before` 菜单间隙连接桥选择器；调优该兄弟操作容器的 `z-index` 提升至 `21` 以防被邻近高节点遮盖，并将大箭头四向偏移调回紧凑的 `12px` 以免超出安全渲染边界；并从大箭头 hover 状态中移除了原本的 `transform: scale(1.1)` 缩放以防止各方向 `translate` 定位被覆盖破坏，彻底消除由于 hover 触发瞬间 transform 定位相互覆盖重写导致大箭头物理位置跳变失焦、致使可选图形卡片无法展开的 Bug；以及为大箭头本身配置了 `z-index: 2` 层级，防止其被同级且覆盖大箭头区域的透明 `::after` 桥接防抖伪元素盖住拦截鼠标事件，保障大箭头能正常被指针 hover 触碰以滑出快捷可选图形面板。
   - 在 `use-mermaid-connection-drag.ts` 中根据 `dx/dy` 大小及正负动态赋予 `targetPosition` 值以修正 marker 方向；在 `updateFromPoint` 中保留 `lastSnappedPort`，判定中增加 `42px` 的退吸附滞后半径；在 `onPointerUp` 中移除冗余 updateFromPoint 保证取值不因松手抖动而失灵。
   - 在 `vue-flow-adapter.ts` 声明 `getMermaidConnectionInvalidReason` 计算文字原因；在 drag controller 中追踪 Ref `invalidReason` 和相对坐标 `dragEndPoint`，并在 `MermaidVisualEditor.vue` 的模板中渲染 `.ta-mermaid-connection-tooltip` 元素及添加对应 CSS。
   - 在 `MermaidVisualEditor.test.ts` 中针对 Mock 的 VueFlow 增加 `quick-connect-test` 支持，编写 `it("支持通过连接点快捷创建并连接新节点")` 对该功能点进行了 100% 覆盖的单元测试。
@@ -6502,3 +6618,351 @@ bash /tmp/test-api-after-restart.sh
   - `mvn clean package -Dmaven.test.skip=true` 构建成功；`ManagedWorkspaceApplicationServiceTest` 45 项、`GitWorkspaceServiceTest`、前端 AgentConfig/GitChanges 35 项和 agent-web `vue-tsc` 均通过。
   - `.env.test` 三服务重启成功，backend readiness `UP`、前端 3000 返回 200、manager WebSocket 已连接；完整 API 定向测试仍被本任务外的 opencode-runtime 旧测试桩编译错误阻断，未修改该并发问题。
   - OpenCode 原生工具层未改造为平台权限感知；实际写入入口仍必须经过平台文件 WebSocket / Agent 配置 API，后续如开放原生工具直写需补同等路径策略。
+
+### 2026-07-15 - 内置 Help 对齐双 Git 与当前发布权限
+
+- Why:
+  - 内置用户手册仍把目录归属描述为开发 AI、测试公共 AI、测试 AI、开发业务代码四套 Git，工作区章节也只写通用提交/推送，和当前“公共 Git + 应用 Git”、个人 HEAD 投影以及 `spec/**` 禁止发布的实现不一致。
+- What:
+  - Help 的目录映射、工作区、Agent 配置、首次准备、快速开始和 FAQ 统一改为两套物理 Git；明确公共配置仅超级管理员可写，应用 Agent/Skill/rules/templates 仅应用管理员及以上可写，无权限时 Agents 配置树与编辑器只读且后端继续校验。
+  - 明确所有应用成员可维护并发布 `docs/**`，`spec/**` 只能提交到个人 worktree；“提交并推送”先形成个人 `HEAD`，再按仓库相对路径只投影允许发布的文件到应用 feature worktree，不 merge 或 push 整个个人分支。
+  - 说明 OpenCode、编辑器和终端始终读取固定在用户所属服务器磁盘上的同一个个人 worktree；应用 feature worktree 绝对路径不同，但投影保持仓库相对文件名。公共配置发布会广播公共同步，应用配置独立发布当前只以远端 push 确认为完成，不虚构同等广播行为。
+- How:
+  - 复用现有 VitePress Markdown、`directoryMapping` frontmatter 和 `HELP_TOPICS`，同步用户手册 README、agent-web PACKAGE 及 Help 单元/E2E 断言；没有修改 Git、权限、API 或运行态实现。
+- Result:
+  - 前端全量 Vitest 57 个文件通过（823 passed、1 skipped），用户手册与 agent-web 生产构建通过；精确 Chromium Help E2E 通过。新启动的 agent-web 位于 `http://127.0.0.1:3010`，Help 工作区与目录映射页面均返回 200，现有 `.env.test` 后端 health 为 `UP`。
+
+### 2026-07-15 - 小宠物升级为五角色每日伙伴
+
+- Why:
+  - 单一机器人形象无法覆盖测试 Agent 的漏洞嗅探、环境扫描、异常感知、持续守护和缺陷清理隐喻；用户要求支持一天一个、每日随机或自主选择，并在选择区只展示头像。
+- What:
+  - 在既有 `FigmaShell` 拖拽、进程状态、旁路问答和小游戏链路上扩展五种内联 SVG 伙伴，没有新建第二套浮层或后端能力；显示策略支持按本地自然日轮换、每天随机且当天稳定、固定选择，偏好只保存在浏览器 localStorage。
+  - 伙伴名册只显示五枚头像，角色名称仅保留为无障碍名称；通用爱心、独立状态点和名册角色色点被移除，五种角色都由双眼虹膜环承载青蓝/暖红/银蓝进程三态，保留原始虹膜、瞳孔和高光，名册纯头像保持原色。
+- How:
+  - 复用现有宠物可见性、坐标夹紧、自然动作、状态气泡和旁路问答事件；新增独立纯函数管理日期/随机/存储容错，组件测试覆盖选择持久化、五角色双眼状态和名册原色隔离，Playwright 在 `.env.test` 真实页面验证五头像切换、布局边界和控制台错误。
+- Result:
+  - 宠物定向测试 47 项通过；前端全量单 worker 59 个文件、836 项通过（1 项跳过），生产 build 通过。标准并发全量运行会偶发一个既有 Mermaid 动态加载测试超时，该用例单独复跑和单 worker 全量均通过。
+  - 本地 backend health/readiness 为 `UP`，前端 3000 返回 200，CORS 正常，manager health 持续为 `HEALTHY`；未修改 API、RunEvent、数据库、权限或 `.env` 配置。
+
+### 2026-07-15 - Java 内部模型 SSE 代理正式修复与企业模型切换
+
+- Why:
+  - Spring WebFlux 已将上游 SSE 解码为事件 data，旧代理又按原始 `data:` 行重复解析，造成事件延迟、重复前缀和 400/流式错误正文丢失；企业生产模型同时切换为 Qwen 27B 与 DeepSeek V4 Flash。
+- What:
+  - Controller 改为 `Mono<Void>` 直接写下游响应；仅 `2xx + text/event-stream` 使用 `ServerSentEvent` 语义转换和现有 think 转换器，非 2xx（含 4xx SSE）及非 SSE 通过 `DataBuffer` 原样转发，保留状态、Content-Type、Retry-After、trace，避免 hop-by-hop 头。
+  - 增加连接/首响应/首事件/事件空闲边界（10/30/30/120 秒）和下游取消传播；think 标签可跨事件，已有 `reasoning_content` 不覆盖，`[DONE]` 保持原样。
+  - 公共 opencode 配置、后端默认目录和企业部署文档统一为 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`，正式链路为 OpenCode → Java:8080 → 行内模型:9070，删除 19070 relay 方案描述。
+- How:
+  - 通过真实 `InternalModelProxyController` HTTP 出口测试 SSE 首帧提前到达、字段语义、错误透传、4xx SSE 原样透传和下游取消；同步 converter、模型目录和 API/event-stream 文档。数据库供应商/token 仍由现有内部模型供应商配置页维护，没有新增表或环境密钥。
+- Result:
+  - `InternalModelThinkStreamConverterTest`、`InternalModelProxyControllerTest`、`ModelCatalogApplicationServiceTest` 定向测试通过；`mvn -pl test-agent-opencode-runtime -am test`、`mvn -pl test-agent-api -am test` 和 `mvn clean package -DskipTests` 均通过。
+  - 未在本机执行 114 生产 Java/行内模型真实 curl 或 Mac 企业归档发布；现场仍需上传新 JAR、刷新 Java 内存、替换公共 opencode.jsonc、重启用户 OpenCode 并分别验收两个模型。
+
+### 2026-07-15 - 补齐内部模型思考透传与代理回归边界
+
+- Why:
+  - 首轮修复仍会在已有 textual `reasoning_content` 时解析同一 delta 的 `content`，且缺少真实 TCP Controller、超时重置、DeepSeek 工具调用和错误内容编码的完整回归证据；部署文档也未给出临时 19070 relay 的实际清理命令。
+- What:
+  - 上游已有 textual `reasoning_content` 时整个 delta 原样保留并清空残留 think 状态；补齐 `<think>`、`</think>` 跨事件、中文、原生 reasoning、工具调用和 `[DONE]` 测试。
+  - Controller 测试改为实际监听端口，覆盖首帧提前 flush、SSE 字段、400/4xx SSE 原样透传、`Content-Encoding`、DeepSeek V4 和下游取消；服务测试覆盖首响应、首事件和相邻事件空闲边界。
+  - 企业 README/操作手册增加 `test-agent-model-relay` 删除与 19070 无监听验收；本机被忽略的企业 `.env` 清除了旧直连供应商/token 变量，未提交任何密钥。
+- How:
+  - 复用现有 `ServerSentEventHttpMessageWriter`、`InternalModelThinkStreamConverter` 和固定 10/30/30/120 秒边界；非 SSE/错误正文继续按 `DataBuffer` 转发，只有该分支保留上游 `Content-Encoding`。
+- Result:
+  - runtime 全量 523 项、API 全量 282 项以及相关依赖模块测试通过；定向 converter 4 项、代理 8 项复跑通过；`mvn clean package -DskipTests` 和 `package-release.sh --backend-only --no-zip` 通过，产物包含代理与转换器类。
+  - 尚未连接 114 执行生产 Qwen/DeepSeek 调用或前端端到端验收；现场发布与真实模型验证仍需按企业操作手册执行。
+
+### 2026-07-15 - 企业部署文档拆分单后台与多后台正式方案
+
+- Why:
+  - 当前代码已具备 Redis 后端快照、公共 Java 路由和 Java 间 HTTP/SSE 转发能力，但企业部署入口仍以 114 单后台为主，并把 `.4 + .114` 标记为历史方案，无法直接指导最新双后台上线。
+- What:
+  - 新增独立的单后台和多后台操作手册；入口 README 只保留模式选择、共同交付物和固定启动顺序，旧操作手册及旧双后台文件名改为兼容跳转。
+  - 多后台明确同版发布物、共享 PostgreSQL/Redis、每台服务器独立稳定身份/数据目录/worker/公共配置、Java 双向 8080、每台 Java 直连 9070，以及前端 Nginx 显式多节点 upstream；删除旧 RunEvent Redis bus 参数和“多后台仅历史方案”的表述。
+  - 同步 Java/worker 配置模板注释及前后端稳定部署文档；没有修改运行代码、API、事件、数据库结构或生产环境配置。
+- How:
+  - 依据 `BackendJavaRouteResolver`、`BackendHttpForwarder`、部署脚本和 Nginx 模板核对当前实现边界；文档统一按 Java → `.serverid/.serverhost` → 本机 worker 的启动顺序，并提供 `.4 + .114` 的逐节点配置、部署、验收和回滚命令。
+- Result:
+  - 部署脚本 Bash 语法、`--help` 参数、文档链接/过期模型与参数扫描、`git diff --check` 和 `tools/verify-ai-docs.sh` 通过。
+  - `BackendJavaRouteResolverTest` 6 项、`BackendHttpForwarderTest` 与 `RunEventSseBackendRoutingWebFilterTest` 共 9 项通过；未实际连接 `.2/.4/.114` 部署或执行生产双后台端到端验收。
+
+### 2026-07-15 - 复查多后台部署的 WebSocket ticket 边界
+
+- Why:
+  - 多后台手册宣称无需 sticky session 即可完整工作，需要继续对照终端、文件和 Agent 配置进度 WebSocket 的 ticket 签发/消费位置确认，而不能只依据 HTTP 与 RunEvent SSE 路由测试下结论。
+- What:
+  - 本次只做审查，没有修改运行代码或部署文档；确认普通 HTTP、RunEvent SSE、Java 间转发和文件 WebSocket 目标发现已有跨服务器路径。
+  - 发现 PTY、Workspace 文件和 Agent 配置进度 ticket store 仍是单 JVM 内存；Workspace/Agent 配置文件前端会使用目标 `backend.listenUrl` 直连同一 Java，因此多后台部署必须允许浏览器访问每台 Java `:8080`。PTY ticket 请求可被转发到用户归属 Java，但响应仍是入口域名下的相对 WebSocket URL；`least_conn` Nginx 无法保证 upgrade 回到持有 ticket 的 Java。Agent 配置进度 ticket 与 upgrade 也可能落到不同 Java。
+- How:
+  - 逐项核对 `BackendJavaRouteResolver`、`UserOpencodeBackendRoutingService`、三个 ticket store、Terminal Controller、前端 backend-api 目标 URL 组装和企业 Nginx 配置；复跑路由与 ticket 定向测试。
+- Result:
+  - 核心对话/模型链路可按多后台继续验证，但当前不能把整个平台标记为“无需亲和的完整多后台正式方案”。后续需要先确定 WebSocket 正式路由方案（目标 Java 绝对 URL或 Java WebSocket 转发/共享 ticket），补真实双 Java 握手测试，再修正文档；仅调整 Nginx sticky 无法可靠解决已被入口 Java 转发到远端签发的 PTY ticket。
+  - `BackendJavaRouteResolverTest` 6 项与 `TerminalTicketStoreTest` 3 项通过；部署脚本语法、AI 文档校验和工作区 diff 校验通过，未连接生产 `.2/.4/.114`。
+
+### 2026-07-15 - 补齐企业模型排障并收敛多后台交付口径
+
+- Why:
+  - 单/多后台部署文档只概括了模型不显示、400 和 9070 超时，未覆盖现场已经出现过的 provider key 混用、Java 内存快照未刷新、旧用户进程配置、逐用户 UCID、OpenCode 默认 usage 参数和 SSE 空流等问题；多后台手册同时仍把单 JVM WebSocket ticket 限制误写成无需亲和的完整支持。
+- What:
+  - Qwen 与 DeepSeek 公共配置恢复 `includeUsage=false`，模型继续固定为 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`；单/多后台手册补齐三层模型配置、生效/重启规则、每节点 Java 代理 curl 和分层故障检查。
+  - 数据库文档明确 `provider_id` 是 `qwen-prod/deepseek-prod` Java 路由键，不是 `icbc-qwen/icbc-deepseek` OpenCode provider key；上游 token 继续只从数据库读取并由 Java 以 Authorization Bearer 注入，UCID 继续由所属 Java 按用户进程注入。
+  - 多后台交付口径改为普通 HTTP、RunEvent SSE、用户 OpenCode 路由和模型代理可多节点；PTY、Workspace 文件和 Agent 配置进度的一次性 WebSocket ticket 仍受单 JVM 限制，文档明确浏览器直连目标 Java 的网络要求和当前不能用 sticky 代替正式修复。
+- How:
+  - 对照 OpenCode 1.17.8 openai-compatible 默认选项、内部模型 Registry/广播、用户进程环境注入、Java SSE 代理和三类 WebSocket ticket 实现复核；未修改运行代码、数据库结构、生产 env 或现场服务器。
+- Result:
+  - think 转换 4 项、Java 代理 8 项、用户进程启动 9 项、内部供应商 MyBatis 集成 1 项全部通过；公共配置 JSON 校验、企业脚本 Bash 语法、AI 文档校验、过期模型扫描和 `git diff --check` 通过。
+  - 未重新打企业 zip，也未连接 `.2/.4/.114` 或行内 9070 做生产验收；核心模型链路可按文档逐节点验证，完整多后台 WebSocket 能力仍需后续代码修复。
+
+### 2026-07-15 - 企业单/多后台正式部署与 WebSocket ticket 路由收口
+
+- Why:
+  - 多后台的 PTY 与 Agent 配置进度 ticket 保存在签发 JVM 内存，旧相对 WebSocket URL 经过 `least_conn` 可能升级到另一台 Java；企业升级脚本也可能被旧手工 Java 的 health 假通过，Nginx 单/多节点配置仍依赖人工改模板。
+- What:
+  - PTY 与 Agent 配置进度 ticket 改为返回签发 Java `listenUrl` 对应的绝对 `ws/wss` 地址；Workspace/Agent 文件继续复用既有 route 返回的目标 Java，三类一次性 ticket 均在同一 JVM 签发和消费。
+  - 新增统一 `nginx.env + configure-nginx.sh`，按 single/multi 安全渲染同一模板、校验 include、执行 `nginx -t`、reload 并在失败时回滚；前端部署入口统一调用该脚本。
+  - 后端升级脚本校验已有 systemd unit 的 JAR/env，停止服务后只清理命令行仍指向本次交付 JAR 的 8080 遗留进程，并在启动后确认 systemd MainPID 持有 8080；`--validate-only` 改用临时目录，可在 Mac/CI 不依赖 `/data` 验包。
+  - 单后台和多后台手册同步给出独立配置、网络、部署、模型和排障流程，生产 `backend.env` 明确启用 `prod` profile；模型保持 `Qwen3.6-27B`、`DeepSeek-V4-Flash-W8A8`、`includeUsage=false` 与 Java:8080→9070 正式链路。
+- How:
+  - 复用 `BackendInstanceIdentity`、`BackendJavaRouteResolver`、`BackendHttpForwarder`、既有 Agent 配置进度广播和文件 route，没有新增共享 ticket、sticky session、Java 间 WebSocket/file 代理或 19070 relay；生产浏览器网段需能直达每台 Java `:8080`。
+  - 增加绝对 URL 单元测试、最终 ZIP systemd 首装/升级模拟和单/多 Nginx 渲染/回滚脚本测试；从最终归档反向检查 API 业务类和两个准确模型配置。
+- Result:
+  - runtime 523 项、API 285 项、前端 backend-api/terminal 58 项通过；本地 `.env.test` 后端 health/readiness、前端 3000 和 manager 启动通过。Linux/amd64 worker 镜像实跑通过，OpenCode 1.17.8、glibc 2.31 正常。
+  - 新企业归档 `deploy/internal/dist/test-agent-internal-release.zip` 已通过 SHA-256、完整解压、validate-only、systemd 首装/升级和 Nginx single/multi 校验，校验值为 `7fe02c3d6d38cfbe8949a9fc419de6e669cb6508a3c14cfcad408c0b55e84f59`。
+  - 未连接生产 `.2/.4/.114`，未执行生产 9070、浏览器直连两个 Java WebSocket 或真实双节点滚动验收；这些仍需现场按多后台手册验证，不能以本地打包结果替代生产网络验收。
+
+### 2026-07-15 - 企业部署手册补齐整文件配置并重新打包
+
+- Why:
+  - 单/多后台手册仍要求读者从多个模板拼出剩余配置，现场无法直接整文件替换；重新打包前还需要明确确认远端主线最新状态。
+- What:
+  - 打包前两次执行 `git pull --ff-only origin main`，均确认 `origin/main` 已是最新，本地仅包含尚未推送的企业部署提交，没有 rebase 或冲突。
+  - 单后台手册给出 114 的完整 `backend.env`、`docker.env`、`nginx.env`；多后台手册分别给出 `.4`、`.114` 的完整 backend 配置和两节点共用的完整 worker 配置，不再要求参考其他文件补字段。
+  - 配置模板显式补齐连接借出校验、Redis/运行态安全默认值、Java/manager 超时、scheduler 参数、worker CORS/心跳/重连和固定镜像摘要；公共 OpenCode 配置改为从 ZIP 直接导出全文，模型供应商页面列出两个准确 provider、base URL 和 token 占位符。
+  - 明确当前 worker 通过 `.serverhost + 8080` 发现本机 Java，不读取旧 `TEST_AGENT_BACKEND`；动态 `{env:...}` 与每用户 UCID 必须保留，不能固化到公共 JSONC。
+- How:
+  - 复用现有 `backend.env.example`、`env.example`、`nginx.env.example`、`opencode.jsonc.example` 和现有单/多后台手册，没有新建并行配置体系；真实数据库/manager/代理/上游模型 token 仍只保留可识别占位符，等待现场现有配置确认。
+- Result:
+  - dotenv 模板加载、OpenCode JSON 校验、Nginx single/multi 渲染、Bash 语法、AI 文档和 diff 校验通过；最终 ZIP 的完整解压、前后端 validate-only、systemd 首装/升级及 Linux/amd64 worker 实跑通过。
+  - 新归档 `deploy/internal/dist/test-agent-internal-release.zip` 校验值为 `55f4edd9422546364e6322c4dd0303f53378d66ef99ed70f4da58ae4f5a020b8`；未连接生产 `.2/.4/.114`，现场密码/token 和实际 Nginx include 路径仍需用现有配置核对后才能称为生产可直接替换。
+
+### 2026-07-15 - 新增定时任务执行记录七天清理
+
+- Why:
+  - `scheduled_task_runs` 需要只保留最近七天的已结束执行记录，同时不能误删 `PENDING`、`RUNNING`、`STOPPING` 等未结束记录。
+- What:
+  - 新增 `scheduler.run-retention-cleanup` 框架定时任务，每天 UTC 00:00 执行，按 `ended_at < 当前时间 - 7 天` 清理 `SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED` 记录。
+  - 新增领域端口、MyBatis XML 适配器和 `V20260715000000` 的 `ended_at` 索引迁移；同步 scheduler、persistence、架构及部署文档，保持 `TEST_AGENT_SCHEDULER_ENABLED=false` 的既有默认值。
+- How:
+  - 使用固定时钟单元测试和 H2/Flyway/MyBatis 集成测试覆盖七天边界、结束状态、活动状态及索引。
+  - 设计与实施计划记录在 `docs/superpowers/`；未修改环境配置、API、事件或 generated SDK。
+- Result:
+  - scheduler 定向测试 1/1、persistence 定向集成测试 2/2、scheduler 全量测试 31/31、`test-agent-app -am package -DskipTests` 17/17 模块通过。
+  - persistence 全量仍有本任务外既有 `MyBatisAgentConfigRepositoryIntegrationTest` 基线失败（2 failures、7 errors，测试夹具引用缺失的 `usr_test_dev`），本任务未越界修复。
+
+### 2026-07-15 - 删除对话合成工作状态行
+
+- Why:
+  - 用户希望过程时间线只展示真实事件，不再出现前端兜底生成的“思考中”和“正在工作 / 等待后续输出”。
+- What:
+  - `agent-chat` 停止投影并删除 `thinking`、`working-status` 行及其组件和专用样式；真实 reasoning、探索/更新待办等工具、running 文本、重试、错误和 Diff 保持不变。
+- How:
+  - 通过投影、时间线组件和应用面板测试先复现旧占位行为，再删除对应联合类型与渲染分支；保留 running 文本仍使用的 `.oc-thinking-dot` 动画，并同步 `agent-chat`、`agent-web` README。未修改 reducer、HTTP API、RunEvent、后端、数据库或环境配置。
+- Result:
+  - 定向 `agent-chat` 测试 43/43、应用层新增契约测试 1/1、前端全量 Vitest 824 passed / 1 skipped、全量 typecheck 和生产 build 通过；构建仅保留既有字体 `@import` 顺序和大 chunk 警告。
+  - 最终复验期间工作区并发出现本任务外、未提交的 `MermaidFlowNode.vue` 端口重构，导致 Mermaid 存量 11 项测试仍按 6 个 14px 端口断言而失败；本任务未修改该文件。基于当前工作区重新执行对话相关 3 个测试文件为 162 passed / 1 skipped，全量 typecheck 和生产 build 仍通过。
+  - 并发 Mermaid 工作补齐其测试后再次执行前端全量 Vitest，最终 58 个测试文件为 824 passed / 1 skipped；该外部改动继续保持未暂存，未纳入本任务提交。
+
+### 2026-07-15 - 修复 Mermaid 快捷建连连线方向与起始点端口
+
+- Why:
+  - Mermaid 可视化编辑器选中节点后用四向快捷箭头新建图形时，连线方向经常反向（新节点被当作起点，箭头指回原节点）；且矩形等形状因四条边没有正好位于 50% 的端口，`quickArrowDirs` 退化到左上角 `target-0`，起始点不在箭头所在边上。根因是 `onQuickConnect` 用 `portId.startsWith("source")` 决定方向，而该前缀由端口索引奇偶决定，与箭头方向无关。
+- What:
+  - 新增 `packages/editor/src/mermaid/visual-editor/node-port-layout.ts`，集中五种节点形状的端口坐标、句柄 ID 与 `findEdgePort`（取指定边上最接近中点的端口）/`oppositePosition`。
+  - `MermaidFlowNode.vue` 的 `allPorts` 和 `quickArrowDirs` 改用共享布局，四向箭头按方向取该边最接近中点的端口，起始点始终落在箭头所在边上。
+  - `MermaidVisualEditor.vue` 的 `onQuickConnect` 固定被选中节点为起点、新节点为目标，起点端口取箭头所在边端口（`portId`），目标端口取新节点上朝向起点的对边端口，使箭头始终朝外。
+  - `edge-port-metadata.ts` 端口校验正则由 `[0-2]` 放宽到 `[0-5]`，匹配 12/8 端口布局实际渲染的 `target/source-0~5`，避免快捷建连选中的边中点端口（如矩形右侧 `target-5`）被判非法而在序列化时丢失。
+- How:
+  - 新增 `node-port-layout.test.ts` 覆盖各形状端口数量、`oppositePosition` 与四向 `findEdgePort` 选点；`MermaidVisualEditor.test.ts` 增加快捷箭头按方向选端口与“方向始终朝外”回归测试，并更新既有快捷建连断言。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 99 passed（含新增 20 项），前端 typecheck 与 lint 通过。
+  - 注意：`packages/editor/README.md` 与 `PACKAGE.md` 仍按旧“每边 3 个/六点”描述端口，为本任务外既有文档漂移，未在本任务扩大范围修改。
+
+### 2026-07-15 - 修复快捷建连后半透明箭头不消失
+
+- Why:
+  - 选中节点用四向快捷箭头新建图形后，起始节点的半透明快捷箭头仍停留在屏幕上。根因是 `MermaidFlowNode` 的 `selected` 来自 Vue Flow 的 `nodeProps.selected`，而 `onQuickConnect` 只更新编辑器自己的 `selectedNodeId`，Vue Flow 的选中态并不跟随，起始节点一直保持选中、箭头不消失。
+- What:
+  - `MermaidVisualEditor.vue` 模板把 `MermaidFlowNode` 的 `:selected` 改为 `selectedNodeId === nodeProps.id`（覆盖 `v-bind="nodeProps"` 的 selected），让选中态以 `selectedNodeId` 为唯一来源；快捷建连后选中切到新节点，起始节点箭头随之消失、新节点出现箭头。
+  - 新增 `@pane-click="onPaneClick"`，点击空白画布清空 `selectedNodeId`，保留并统一了原有的画布取消选中行为。
+- How:
+  - 测试 mock 的 `VueFlow` 增加 `node-mermaid` 具名插槽按节点渲染真实 `MermaidFlowNode`，并补 `paneClick` 事件与触发按钮；新增“快捷建连后起始节点取消选中、新节点选中”“点击空白画布取消选中”两条回归测试。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 101 passed（含新增 2 项），前端 typecheck 与 lint 通过。
+
+### 2026-07-15 - 快捷箭头改为悬浮显示（独立 worktree claude/mermaid-edit）
+
+- Why:
+  - 用户希望图形四周的快捷箭头改为鼠标悬浮节点时显示（半透明），离开后隐藏，且与是否选中无关；原来只在选中时显示。
+- What:
+  - `MermaidFlowNode.vue` 新增 `hovered` ref 与根元素 `@mouseenter`/`@mouseleave`，快捷四向箭头渲染条件由 `v-if="selected"` 改为 `v-if="hovered"`；半透明度仍由既有 `.ta-mermaid-quick-arrow { opacity: 0.4 }` 与 `:hover { opacity: 1 }` 提供。
+  - 在 `.ta-mermaid-quick-arrow` 上加 `@pointerdown.stop`，阻止点击箭头/菜单时 pointerdown 冒泡到根元素触发 `onPointerDown`（其 `preventDefault` 会吞掉后续 click，导致快捷建连无法触发）；中心端口下半区与非中心端口的连线拖拽不受影响。
+- How:
+  - 改造既有“选中显示箭头”相关测试为悬浮驱动（`fireEvent.mouseEnter`/`mouseLeave`）；新增“点击快捷箭头不会误触发端口连线拖拽”回归测试，验证 pointerdown 被拦截、click 仍触发 quickConnect。在独立 worktree（基底本地 main + 前两次 mermaid 修复）中完成，与 codex 的 `codex/chat-work-status-summary` 检出隔离。
+- Result:
+  - editor 全量 Vitest 9 文件 102 passed（含新增 1 项 pointerdown 拦截测试），前端 typecheck 通过。
+
+### 2026-07-15 - 连线可重连：选中后拖动端点圆圈改连到其它节点
+
+- Why:
+  - 之前连线创建后无法调整端点；用户希望选中连线后在收尾处出现绿色小圆圈，可拖动头部或尾部到其它图形并自动吸附。
+- What:
+  - 新增自定义边组件 `MermaidFlowEdge.vue`：用 Vue Flow `BaseEdge` 渲染 smoothstep 路径，选中时在 source/target 两端渲染绿色圆圈；按下圆圈发出 `reconnectStart`（带固定端 nodeId/handleId/position）。`toVueFlowEdges` 边类型由 `smoothstep` 改为 `mermaid-edge`，编辑器经 `#edge-mermaid-edge` 插槽挂载该组件。
+  - 扩展 `use-mermaid-connection-drag`：新增 `onReconnect` 回调、`buildConnection`（reconnect-source 时方向反转，固定端是 target、拖动端是新 source）、`startConnection(start, { reconnect })` 与 `isReconnecting` 态；松开时按模式调用 `onReconnect` 或 `onConnect`。
+  - `canAppendMermaidEdge`/`getMermaidConnectionInvalidReason` 增加 `excludeEdgeId`，重连判重时排除被更新的边本身，允许在同节点对上换端口；新增 `updateMermaidEdge` 按 end 更新对应端。
+  - 编辑器：`onReconnectStart` 测量固定端端口屏幕坐标后启动重连拖拽，`commitReconnect` 调 `updateMermaidEdge` 回写；`@edge-click` 选中连线时取消节点选中；重连预览用绿色虚线、不带箭头。
+- How:
+  - 新增控制器重连（target/source 两端）回归测试、`canAppendMermaidEdge` 排除自身、`updateMermaidEdge` 只更新被拖端、`MermaidFlowEdge` 圆圈与重连起点发出等测试；mock 补 `BaseEdge`。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 108 passed（+6），前端 typecheck 与 lint 通过。
+
+### 2026-07-15 - 连线文字新增/修改/删除
+
+- Why:
+  - 连线没有文字编辑入口；用户希望对连线新增、修改、删除文字（标签）。
+- What:
+  - `MermaidVisualEditor.vue` 新增 `selectedEdgeId` 与 `selectedEdge`；`@edge-click` 记录选中连线并取消节点选中，`@node-click`/`@pane-click` 同步清空连线选中；新增 `updateSelectedEdgeLabel`（输入即新增/修改，清空即删除）。
+  - 属性面板由单一“当前节点”改为 `v-if` 节点 / `v-else-if` 连线 / `v-else` 空态三段：连线段含“连线 ID”（只读）与“连线文字”输入框（placeholder 提示为空不显示）；空态文案改为“选择画布中的节点或连线后编辑”。
+  - `onNodesChange`/`onEdgesChange` 在所选连线随节点删除或自身被删时清空 `selectedEdgeId`。
+- How:
+  - 新增“选中连线后可新增、修改并删除连线文字”回归测试（mock 补 `edgeClick` 与 `mock-edge-click`）；同步更新画布取消选中测试的空态文案。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 109 passed（+1），前端 typecheck 通过。
+
+### 2026-07-15 - 自定义边渲染连线文字
+
+- Why:
+  - 上一条只把文字写入模型；但自定义边类型 `mermaid-edge` 不会从 Vue Flow 拿到 `labelX/labelY`，`BaseEdge` 不渲染标签，导致文字在画布上看不见。
+- What:
+  - `MermaidFlowEdge.vue` 取边中点 `((sourceX+targetX)/2, (sourceY+targetY)/2)` 渲染 `<text class="ta-mermaid-edge-label">`，用 `paint-order: stroke` 白色描边光晕保证压在连线上可读，`pointer-events:none` 不挡点击；有 `label` 才渲染。
+- How:
+  - 新增“有文字时在边中点渲染标签、无文字不渲染”测试。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 110 passed（+1），前端 typecheck 通过。
+
+### 2026-07-15 - 优化自动布局减少连线交叉
+
+- Why:
+  - 自动布局后连线混乱、存在线条交叉；原实现按拓扑层级排布但同层节点按插入顺序排列，未考虑边关系。
+- What:
+  - `layout.ts` 在层分配后引入 Sugiyama 重心法（barycenter）：前向 pass 让下层节点对齐前驱重心、后向 pass 让上层节点对齐后继重心，从而显著减少相邻层之间的边交叉；无邻居节点保持原序在后。
+- How:
+  - 保留既有层分配与方向映射（LR/RL/BT/TD）、固定间距与确定性输出；既有布局测试（A 早于 B、C；幂等）继续通过。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 110 passed，前端 typecheck 通过。
+### 2026-07-15 - 合并主 Agent 每轮工作状态展示
+
+- Why:
+  - reasoning、技能、命令、编辑和写入等过程事件原本分散占用时间线，且用户消息刚进入但尚无 assistant part 时没有当前工作状态；需要在不改变问答、子 Agent 卡片和子 Agent 内部时间线的前提下，提供稳定的每轮状态摘要。
+- What:
+  - 主 Agent 投影新增永久保留的 `work-status` 行，把 reasoning 与除 `task/question` 外的普通工具按探索、技能、命令行、编辑、写入、补丁、网页、待办及未知工具名聚合；最新状态始终延后到正文、Diff、重试和错误之后，无 assistant part 的运行轮也立即展示。
+  - 两行状态块复用现有思考展开内容，事件按首次出现顺序显示图标和多次计数；点击后打开全宽、自动上下定位且内部滚动的互斥气泡，新轮会关闭旧详情。`ShimmerDivider` 增加纵向和静态模式，最新运行轮播放流光、历史轮显示静态渐变。
+  - 同步 `agent-chat`、`agent-web`、`ui-kit` README/PACKAGE，以及 `docs/superpowers/` 设计和实施计划；未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置。
+- How:
+  - 使用 TDD 覆盖投影聚合、计数、未知工具、空 assistant、排序、多轮、retry/error、问答/子 Agent 隔离、气泡互斥/关闭、ARIA、竖线动画和默认兼容；真实 Chromium 在桌面与 240px 极窄视口检查宽度、上下定位、横向滚动、流式状态和新轮收起。
+- Result:
+  - 相关 3 个测试文件 55 passed，`FigmaChatPanel` 119 passed / 1 skipped；前端全量 lint、typecheck、58 个 Vitest 文件 832 passed / 1 skipped、生产 build 和 `git diff --check` 通过，构建仅保留既有大 chunk 警告。
+
+### 2026-07-15 - 当前工作状态移至输入区并合并 Todo
+
+- Why:
+  - 最新工作状态仍占用滚动时间线，独立 Todo 面板会在新消息进入后短暂沿用上一轮任务；用户需要把当前工作状态固定到原 Todo 位置，并将历史状态压缩为轻量入口。
+- What:
+  - 最新轮工作状态投送到输入框上方，Todo 作为可展开第三行嵌入状态块，文件修改块固定紧随状态块；没有 Todo 时仍保持两行。
+  - Todo 按用户消息 ID 保存每轮快照，新消息进入时先归档上一轮并清空当前轮；历史轮状态在最后一个 assistant part 后默认收为单个图标，点击原位展开且同时只允许展开一项。
+  - 问答面板、子 Agent 任务卡片和子 Agent 内部时间线保持原展示路径；同步 `agent-chat`、`agent-web` 包文档及既有设计、实施计划。
+- How:
+  - reducer 同时从实时 `todo.updated`、`todowrite` part 和历史消息恢复快照；投影把最新状态与 Diff 延后并按“状态 → 文件修改”排序，Timeline 通过可选挂载目标把两行内容投送到输入区，未提供目标时维持内联兼容。
+  - 使用 TDD 覆盖快照归档/恢复、投影排序、两行/三行状态、历史图标互斥展开与新轮收起，并在真实浏览器桌面和 260px 窄屏检查气泡宽度、事件横向滚动、Todo 与文件修改顺序。
+- Result:
+  - 前端全量 lint、typecheck、58 个 Vitest 文件（838 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
+  - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；状态容器属性和 Todo 快照透传均为可选，未传入时保持时间线内渲染兼容。
+
+### 2026-07-15 - 完成态状态摘要合并反馈入口
+
+- Why:
+  - 成功完成后当前工作状态仍保持完整展开，满意/不满意入口又单独占据滚动时间线；无任何工具事件时状态块还会保留空事件行。
+- What:
+  - 最新轮明确成功后自动收为可展开的状态图标，并把既有满意/不满意按钮通过通用 actions 插槽放到同一摘要行；点击图标仍可在原位置恢复完整状态，文件修改块继续排在其下。
+  - 状态块初始只显示思考行，首个普通工具事件出现后才增加事件行；Todo 仍作为独立附加行保留，反馈提交、负反馈弹窗、问答和子 Agent 展示逻辑不变。
+- How:
+  - `agent-chat` 仅管理完成摘要、展开状态和插槽透传，`agent-web` 继续持有反馈 ID、提交与弹窗业务；通过 TDD 覆盖完成态自动收起、事件行按需渲染、反馈位置和原有提交行为。
+  - 在真实页面检查桌面与 390px 窄屏的摘要同排、展开顺序和横向溢出，并同步 `agent-chat`、`agent-web` README/PACKAGE 与既有设计、实施计划。
+- Result:
+  - 前端全量 lint、typecheck、58 个 Vitest 文件（840 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
+  - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；新增插槽和组件属性均为可选，既有调用保持兼容。
+
+### 2026-07-15 - 完成状态移至最后输出下方
+
+- Why:
+  - 最新工作状态原先只按“是否最新轮”投送到输入框 Dock，成功终态虽然收成图标，仍停留在输入框上方，没有紧跟本轮最后一个 assistant 输出。
+- What:
+  - `OpencodeTimeline` 只把非成功的最新工作状态投送到 Dock；成功完成摘要及满意/不满意入口留在时间线最后输出下方，点击图标仍在原位置展开完整详情。
+  - 文件修改块按产品选择继续固定在输入框上方；失败、停止、重试、历史状态、问答和子 Agent 展示保持原路径。
+- How:
+  - 通过 TDD 先复现完成摘要仍在 Dock，再收窄 Dock 行过滤谓词；补充运行到完成迁移、无 assistant 输出、`AssistantThread`、`FigmaChatPanel`、反馈位置和 Diff 固定位置回归。
+  - 真实页面验证桌面及 390px 窄屏的迁移、自动滚动、反馈同排、原位展开和无横向溢出，并同步既有设计、实施计划及 agent-chat/agent-web README/PACKAGE。
+- Result:
+  - 前端全量 lint、typecheck、58 个 Vitest 文件（842 passed、1 skipped）、生产 build 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
+  - 未修改 API、RunEvent、网络 DTO、数据库、后端、安全或环境配置；`workStatusDockTarget` 类型不变，仅收窄成功态的投送行为。
+### 2026-07-15 - 修复 Mermaid 快捷建连连线方向与起始点端口
+
+- Why:
+  - Mermaid 可视化编辑器选中节点后用四向快捷箭头新建图形时，连线方向经常反向（新节点被当作起点，箭头指回原节点）；且矩形等形状因四条边没有正好位于 50% 的端口，`quickArrowDirs` 退化到左上角 `target-0`，起始点不在箭头所在边上。根因是 `onQuickConnect` 用 `portId.startsWith("source")` 决定方向，而该前缀由端口索引奇偶决定，与箭头方向无关。
+- What:
+  - 新增 `packages/editor/src/mermaid/visual-editor/node-port-layout.ts`，集中五种节点形状的端口坐标、句柄 ID 与 `findEdgePort`（取指定边上最接近中点的端口）/`oppositePosition`。
+  - `MermaidFlowNode.vue` 的 `allPorts` 和 `quickArrowDirs` 改用共享布局，四向箭头按方向取该边最接近中点的端口，起始点始终落在箭头所在边上。
+  - `MermaidVisualEditor.vue` 的 `onQuickConnect` 固定被选中节点为起点、新节点为目标，起点端口取箭头所在边端口（`portId`），目标端口取新节点上朝向起点的对边端口，使箭头始终朝外。
+  - `edge-port-metadata.ts` 端口校验正则由 `[0-2]` 放宽到 `[0-5]`，匹配 12/8 端口布局实际渲染的 `target/source-0~5`，避免快捷建连选中的边中点端口（如矩形右侧 `target-5`）被判非法而在序列化时丢失。
+- How:
+  - 新增 `node-port-layout.test.ts` 覆盖各形状端口数量、`oppositePosition` 与四向 `findEdgePort` 选点；`MermaidVisualEditor.test.ts` 增加快捷箭头按方向选端口与“方向始终朝外”回归测试，并更新既有快捷建连断言。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 99 passed（含新增 20 项），前端 typecheck 与 lint 通过。
+  - 注意：`packages/editor/README.md` 与 `PACKAGE.md` 仍按旧“每边 3 个/六点”描述端口，为本任务外既有文档漂移，未在本任务扩大范围修改。
+
+### 2026-07-15 - 修复快捷建连后半透明箭头不消失
+
+- Why:
+  - 选中节点用四向快捷箭头新建图形后，起始节点的半透明快捷箭头仍停留在屏幕上。根因是 `MermaidFlowNode` 的 `selected` 来自 Vue Flow 的 `nodeProps.selected`，而 `onQuickConnect` 只更新编辑器自己的 `selectedNodeId`，Vue Flow 的选中态并不跟随，起始节点一直保持选中、箭头不消失。
+- What:
+  - `MermaidVisualEditor.vue` 模板把 `MermaidFlowNode` 的 `:selected` 改为 `selectedNodeId === nodeProps.id`（覆盖 `v-bind="nodeProps"` 的 selected），让选中态以 `selectedNodeId` 为唯一来源；快捷建连后选中切到新节点，起始节点箭头随之消失、新节点出现箭头。
+  - 新增 `@pane-click="onPaneClick"`，点击空白画布清空 `selectedNodeId`，保留并统一了原有的画布取消选中行为。
+- How:
+  - 测试 mock 的 `VueFlow` 增加 `node-mermaid` 具名插槽按节点渲染真实 `MermaidFlowNode`，并补 `paneClick` 事件与触发按钮；新增“快捷建连后起始节点取消选中、新节点选中”“点击空白画布取消选中”两条回归测试。未修改 API、事件、数据库、环境配置或 generated SDK。
+- Result:
+  - editor 全量 Vitest 9 文件 101 passed（含新增 2 项），前端 typecheck 与 lint 通过。
+
+### 2026-07-15 - 反馈改为按主智能体 Run 评价
+
+- Why:
+  - 一次主智能体回复可能包含多条或零条 assistant part，按 assistant 消息 ID 判断会让成功 Run 的反馈入口缺失，也不能准确表达用户评价的是整轮回复。
+- What:
+  - 新增 Run 反馈写入、单查和最多 100 条批查 API；只允许 Run 触发人或 Session 创建人评价 `SUCCEEDED` 主对话 Run，旧消息接口能关联 Run 时转入新逻辑。
+  - `ai_message_feedbacks` 回填并去重可关联历史数据，新增单用户单 Run 唯一约束；新反馈不写 `message_id`，该字段仅作可空历史来源。
+  - 前端按用户轮保存 `runId/runStatus`；成功历史 Run 永久保留状态图标和反馈入口，无 assistant part 时入口紧跟用户消息，失败、取消、状态未知和子 Agent 不展示。
+- How:
+  - 使用 MyBatis XML 完成 Run/反馈批查，历史会话按 100 个 Run 分批恢复状态和反馈；终态投影短暂冲突只做有限退避重试。同步 HTTP、事件流、数据库、模块 README 与设计/实施计划。
+- Result:
+  - 后端 Run 反馈相关领域/API/MyBatis/Flyway 定向测试全部通过，18 模块 `mvn -DskipTests package` 通过；前端全量 59 个测试文件为 887 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 通过。
+  - 后端全量 `mvn test` 在 persistence 模块被 9 个任务外基线问题阻断：5 个 H2 不支持存量 `ON CONFLICT`、2 个默认用户/旧拓扑迁移断言、2 个 `usr_test_dev` 夹具外键缺失；本次新增迁移及持久化测试均通过。未修改 RunEvent、generated SDK、环境配置或安全凭据。
+
+### 2026-07-16 - 统一 scheduler 默认开启文档
+
+- Why:
+  - `application.yml` 已把 `TEST_AGENT_SCHEDULER_ENABLED` 的默认值设为 `true`，但后端总览、scheduler/app 模块说明和部署文档仍描述为默认关闭，导致部署认知与实际配置不一致。
+- What:
+  - 稳定文档统一说明 scheduler 在应用中默认开启，显式设置 `TEST_AGENT_SCHEDULER_ENABLED=false` 或传入空值时关闭；关闭后的任务注册、手动触发冲突和 pending run 处理语义保持不变。
+- How:
+  - 同步后端总 README、scheduler/app README、app PACKAGE 和后端部署文档，并把生产配置示例更新为 `TEST_AGENT_SCHEDULER_ENABLED=true`；未修改运行代码、环境文件、API、事件或数据库。
+- Result:
+  - 文档默认值与 `backend/test-agent-app/src/main/resources/application.yml` 一致；历史 session log 与 `SchedulerProperties` 裸实例的安全 fallback 保持原样。

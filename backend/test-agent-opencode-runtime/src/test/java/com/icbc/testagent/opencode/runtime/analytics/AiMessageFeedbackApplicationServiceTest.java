@@ -2,6 +2,9 @@ package com.icbc.testagent.opencode.runtime.analytics;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
@@ -11,6 +14,8 @@ import com.icbc.testagent.domain.analytics.AiMessageFeedback;
 import com.icbc.testagent.domain.analytics.AiMessageFeedbackRating;
 import com.icbc.testagent.domain.analytics.AiMessageFeedbackReasonCode;
 import com.icbc.testagent.domain.analytics.AiMessageFeedbackRepository;
+import com.icbc.testagent.domain.analytics.AiMessageFeedbackId;
+import com.icbc.testagent.domain.analytics.AiRunFeedback;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
@@ -124,6 +129,33 @@ class AiMessageFeedbackApplicationServiceTest {
                         "trace_feedback123456"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void runBackedLegacyMessageRequestDelegatesToRunFeedback() {
+        AiRunFeedbackApplicationService runFeedbackService = mock(AiRunFeedbackApplicationService.class);
+        AiRunFeedback runFeedback = new AiRunFeedback(
+                new AiMessageFeedbackId("fb_legacy_delegate"), OWNER, SESSION_ID, RUN_ID,
+                AiMessageFeedbackRating.POSITIVE, null, null, "总行", "研发一部", "效能平台",
+                "trace_feedback_delegate", NOW, NOW);
+        when(runFeedbackService.submitOrUpdate(
+                OWNER, RUN_ID, "POSITIVE", null, null, "trace_feedback_delegate"))
+                .thenReturn(runFeedback);
+        AiMessageFeedbackApplicationService service = new AiMessageFeedbackApplicationService(
+                new FakeFeedbackRepository(),
+                new FakeMessageRepository(Map.of(ASSISTANT_MESSAGE_ID, assistantMessage())),
+                new FakeSessionRepository(session(OWNER)),
+                new FakeRunRepository(run(OWNER)),
+                new FakeUserRepository(users()),
+                runFeedbackService);
+
+        AiMessageFeedback result = service.submitOrUpdate(
+                OWNER, ASSISTANT_MESSAGE_ID, "POSITIVE", null, null, "trace_feedback_delegate");
+
+        assertThat(result.messageId()).isEqualTo(ASSISTANT_MESSAGE_ID);
+        assertThat(result.runId()).isEqualTo(RUN_ID);
+        verify(runFeedbackService).submitOrUpdate(
+                OWNER, RUN_ID, "POSITIVE", null, null, "trace_feedback_delegate");
     }
 
     private static AiMessageFeedbackApplicationService service(

@@ -4,6 +4,7 @@ import {
   ConnectionMode,
   Position,
   VueFlow,
+  type EdgeMouseEvent,
   type NodeDragEvent,
   type NodeMouseEvent,
   type NodeChange,
@@ -18,6 +19,8 @@ import {
   type MermaidPosition
 } from "../model";
 import MermaidFlowNode from "./MermaidFlowNode.vue";
+import MermaidFlowEdge from "./MermaidFlowEdge.vue";
+import { findEdgePort, oppositePosition } from "./node-port-layout";
 import {
   useMermaidConnectionDrag,
   type MermaidConnectionStart
@@ -25,6 +28,7 @@ import {
 import {
   appendMermaidEdge,
   applyVueFlowPositions,
+  updateMermaidEdge,
   type MermaidPortConnection,
   toVueFlowEdges,
   toVueFlowNodes
@@ -44,10 +48,12 @@ const nodeDragMime = "application/x-test-agent-mermaid-node";
 const vueFlowRef = ref<{ screenToFlowCoordinate: (position: MermaidPosition) => MermaidPosition }>();
 const canvasRef = ref<HTMLElement>();
 const selectedNodeId = ref<string>();
+const selectedEdgeId = ref<string>();
 const isCanvasDragOver = ref(false);
 const flowNodes = computed(() => toVueFlowNodes(props.modelValue));
 const flowEdges = computed(() => toVueFlowEdges(props.modelValue));
 const selectedNode = computed(() => props.modelValue.nodes.find((node) => node.id === selectedNodeId.value));
+const selectedEdge = computed(() => props.modelValue.edges.find((edge) => edge.id === selectedEdgeId.value));
 
 function updateGraph(updater: (draft: MermaidGraph) => void) {
   const draft = cloneMermaidGraph(props.modelValue);
@@ -64,8 +70,15 @@ function commitConnection(connection: MermaidPortConnection) {
   if (next !== props.modelValue) emit("update:modelValue", next);
 }
 
+/** 拖动已存在连线的端点重连到新节点/端口后，更新该边的对应端。 */
+function commitReconnect(edgeId: string, end: "source" | "target", connection: MermaidPortConnection) {
+  const next = updateMermaidEdge(props.modelValue, edgeId, end, connection);
+  if (next !== props.modelValue) emit("update:modelValue", next);
+}
+
 const {
   isDragging,
+  isReconnecting,
   sourceNodeId,
   sourceHandleId,
   targetNodeId,
@@ -78,11 +91,40 @@ const {
 } = useMermaidConnectionDrag({
   getCanvasElement: () => canvasRef.value,
   getGraph: () => props.modelValue,
-  onConnect: commitConnection
+  onConnect: commitConnection,
+  onReconnect: commitReconnect
 });
 
 function onConnectionStart(start: MermaidConnectionStart) {
   startConnection(start);
+}
+
+/** 选中连线后拖动端点圆圈：测量固定端端口的屏幕坐标，再以该端为锚点启动重连拖拽。 */
+function onReconnectStart(payload: {
+  edgeId: string;
+  end: "source" | "target";
+  pointerId: number;
+  fixedNodeId: string;
+  fixedHandleId: string;
+  fixedPosition: Position;
+}) {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const handleEl = canvas.querySelector<HTMLElement>(
+    `[data-mermaid-node-id="${payload.fixedNodeId}"] [data-mermaid-handle="${payload.fixedHandleId}"]`
+  );
+  if (!handleEl) return;
+  const rect = handleEl.getBoundingClientRect();
+  startConnection(
+    {
+      pointerId: payload.pointerId,
+      nodeId: payload.fixedNodeId,
+      handleId: payload.fixedHandleId,
+      position: payload.fixedPosition,
+      point: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    },
+    { reconnect: { edgeId: payload.edgeId, end: payload.end } }
+  );
 }
 
 function onQuickConnect(payload: { portId: string; position: Position; shapeType: MermaidNodeType }) {
@@ -117,22 +159,10 @@ function onQuickConnect(payload: { portId: string; position: Position; shapeType
       position: newPosition
     });
 
-    let edgeSource: string;
-    let edgeTarget: string;
-    let edgeSourceHandle: string;
-    let edgeTargetHandle: string;
-
-    if (portId.startsWith("source")) {
-      edgeSource = nodeId;
-      edgeTarget = newId;
-      edgeSourceHandle = portId;
-      edgeTargetHandle = "target-1";
-    } else {
-      edgeSource = newId;
-      edgeTarget = nodeId;
-      edgeSourceHandle = "source-1";
-      edgeTargetHandle = portId;
-    }
+    // 起始点固定为被选中节点（箭头所在边的端口），新节点为目标，使箭头方向朝外、
+    // 与快捷箭头指向一致。目标端口取新节点上朝向起点的对边端口，连线从起点边直达对边。
+    const sourceHandle = portId || findEdgePort(sourceNode.type, position)?.handleId || "source-0";
+    const targetHandle = findEdgePort(shapeType, oppositePosition(position))?.handleId ?? "target-0";
 
     const usedEdgeIds = new Set(draft.edges.map((e) => e.id));
     let edgeSeq = draft.edges.length + 1;
@@ -141,10 +171,10 @@ function onQuickConnect(payload: { portId: string; position: Position; shapeType
 
     draft.edges.push({
       id: edgeId,
-      source: edgeSource,
-      target: edgeTarget,
-      sourceHandle: edgeSourceHandle,
-      targetHandle: edgeTargetHandle,
+      source: nodeId,
+      target: newId,
+      sourceHandle,
+      targetHandle,
       label: "",
       relation: "arrow"
     });
@@ -155,6 +185,24 @@ function onQuickConnect(payload: { portId: string; position: Position; shapeType
 
 function onNodeClick(event: NodeMouseEvent) {
   selectedNodeId.value = event.node.id;
+  selectedEdgeId.value = undefined;
+}
+
+/** 点击空白画布时取消选中，使半透明快捷箭头随选中态消失。 */
+function onPaneClick() {
+  selectedNodeId.value = undefined;
+  selectedEdgeId.value = undefined;
+}
+
+/** 选中连线时记录连线、取消节点选中，便于在属性面板编辑连线文字。 */
+function onEdgeClick(event: EdgeMouseEvent) {
+  selectedEdgeId.value = event.edge.id;
+  selectedNodeId.value = undefined;
+}
+
+/** 点击空白画布时取消选中，使半透明快捷箭头随选中态消失。 */
+function onPaneClick() {
+  selectedNodeId.value = undefined;
 }
 
 function updateSelectedNode(patch: Partial<Pick<MermaidNode, "text" | "type">>) {
@@ -162,6 +210,15 @@ function updateSelectedNode(patch: Partial<Pick<MermaidNode, "text" | "type">>) 
   updateGraph((draft) => {
     const node = draft.nodes.find((item) => item.id === selectedNodeId.value);
     if (node) Object.assign(node, patch);
+  });
+}
+
+/** 编辑选中连线的文字：输入即新增/修改，清空即删除文字（连线不再显示标签）。 */
+function updateSelectedEdgeLabel(text: string) {
+  if (!selectedEdgeId.value) return;
+  updateGraph((draft) => {
+    const edge = draft.edges.find((item) => item.id === selectedEdgeId.value);
+    if (edge) edge.label = text;
   });
 }
 
@@ -250,6 +307,12 @@ function onNodesChange(changes: NodeChange[]) {
   if (selectedNodeId.value && removeIds.has(selectedNodeId.value)) {
     selectedNodeId.value = undefined;
   }
+  if (selectedEdgeId.value) {
+    const edge = props.modelValue.edges.find((item) => item.id === selectedEdgeId.value);
+    if (edge && (removeIds.has(edge.source) || removeIds.has(edge.target))) {
+      selectedEdgeId.value = undefined;
+    }
+  }
 }
 
 function onEdgesChange(changes: EdgeChange[]) {
@@ -259,6 +322,9 @@ function onEdgesChange(changes: EdgeChange[]) {
   updateGraph((draft) => {
     draft.edges = draft.edges.filter((edge) => !removeIds.has(edge.id));
   });
+  if (selectedEdgeId.value && removeIds.has(selectedEdgeId.value)) {
+    selectedEdgeId.value = undefined;
+  }
 }
 </script>
 
@@ -301,11 +367,14 @@ function onEdgesChange(changes: EdgeChange[]) {
           @edges-change="onEdgesChange"
           @node-drag-stop="onNodeDragStop"
           @node-click="onNodeClick"
+          @edge-click="onEdgeClick"
+          @pane-click="onPaneClick"
           @quick-connect-test="onQuickConnect"
         >
           <template #node-mermaid="nodeProps">
             <MermaidFlowNode
               v-bind="nodeProps"
+              :selected="selectedNodeId === nodeProps.id"
               :connection-source-handle-id="sourceNodeId === nodeProps.id ? sourceHandleId : undefined"
               :is-connection-target="isDragging && targetNodeId === nodeProps.id"
               :snapped-handle-id="targetNodeId === nodeProps.id ? targetHandleId : undefined"
@@ -313,6 +382,9 @@ function onEdgesChange(changes: EdgeChange[]) {
               @connection-start="onConnectionStart"
               @quick-connect="onQuickConnect"
             />
+          </template>
+          <template #edge-mermaid-edge="edgeProps">
+            <MermaidFlowEdge v-bind="edgeProps" @reconnect-start="onReconnectStart" />
           </template>
         </VueFlow>
         <svg
@@ -330,8 +402,8 @@ function onEdgesChange(changes: EdgeChange[]) {
           </defs>
           <path
             :d="dragPath"
-            :class="['ta-mermaid-connection-preview__path', { 'is-invalid': targetStatus === 'invalid' }]"
-            :marker-end="targetStatus === 'invalid' ? 'url(#ta-mermaid-preview-arrow-invalid)' : 'url(#ta-mermaid-preview-arrow)'"
+            :class="['ta-mermaid-connection-preview__path', { 'is-invalid': targetStatus === 'invalid', 'is-reconnect': isReconnecting }]"
+            :marker-end="isReconnecting ? undefined : targetStatus === 'invalid' ? 'url(#ta-mermaid-preview-arrow-invalid)' : 'url(#ta-mermaid-preview-arrow)'"
           />
         </svg>
         <div
@@ -367,9 +439,9 @@ function onEdgesChange(changes: EdgeChange[]) {
           </div>
         </section>
 
-        <section class="ta-mermaid-node-properties">
+        <section v-if="selectedNode" class="ta-mermaid-node-properties">
           <h3>当前节点</h3>
-          <div v-if="selectedNode" class="ta-mermaid-fields">
+          <div class="ta-mermaid-fields">
             <label>
               <span>节点 ID</span>
               <input :value="selectedNode.id" disabled />
@@ -390,8 +462,21 @@ function onEdgesChange(changes: EdgeChange[]) {
             </label>
             <button type="button" class="is-danger" @click="deleteSelectedNode">删除节点</button>
           </div>
-          <p v-else class="ta-mermaid-empty">选择画布中的节点后编辑。</p>
         </section>
+        <section v-else-if="selectedEdge" class="ta-mermaid-edge-properties">
+          <h3>当前连线</h3>
+          <div class="ta-mermaid-fields">
+            <label>
+              <span>连线 ID</span>
+              <input :value="selectedEdge.id" disabled />
+            </label>
+            <label>
+              <span>连线文字</span>
+              <input aria-label="连线文字" :value="selectedEdge.label" placeholder="为空则不显示文字" @input="updateSelectedEdgeLabel(($event.target as HTMLInputElement).value)" />
+            </label>
+          </div>
+        </section>
+        <p v-else class="ta-mermaid-empty">选择画布中的节点或连线后编辑。</p>
       </aside>
     </div>
   </div>
@@ -420,6 +505,7 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-connection-preview { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .ta-mermaid-connection-preview__path { fill: none; stroke: var(--primary, #4f46e5); stroke-width: 2.25; }
 .ta-mermaid-connection-preview__path.is-invalid { stroke: #d92d20; }
+.ta-mermaid-connection-preview__path.is-reconnect { stroke: #22c55e; stroke-dasharray: 5 4; }
 .ta-mermaid-connection-preview #ta-mermaid-preview-arrow path { fill: var(--primary, #4f46e5); }
 .ta-mermaid-connection-preview #ta-mermaid-preview-arrow-invalid path { fill: #d92d20; }
 .ta-mermaid-connection-tooltip {
@@ -463,6 +549,7 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-palette__shape.is-diamond::after { inset: 1.5px; background: var(--ta-surface, #fff); }
 .ta-mermaid-palette__shape.is-circle { width: 38px; height: 38px; border-radius: 50%; }
 .ta-mermaid-node-properties { min-height: 132px; }
+.ta-mermaid-edge-properties { min-height: 132px; }
 .ta-mermaid-fields { display: grid; gap: 8px; }
 .ta-mermaid-fields label { display: grid; gap: 3px; color: var(--ta-muted, #64748b); font-size: 10px; }
 .ta-mermaid-fields input, .ta-mermaid-fields select { width: 100%; padding: 4px 7px; }

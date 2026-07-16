@@ -22,6 +22,11 @@ export type AgentChatRuntimeState = {
   permissions: PermissionRequest[];
   questions: QuestionRequest[];
   todos: TodoItem[];
+  todoSnapshotsByUserMessageId: Record<string, TodoItem[]>;
+  todoUserMessageIdByRunId: Record<string, string>;
+  pendingTodoUserMessageId?: string;
+  currentTodoRunId?: string;
+  supersededTodoRunIds: string[];
   diff?: SessionDiff;
   status?: string;
   runtimeStatus?: OpencodeLikeRuntimeStatus;
@@ -30,29 +35,40 @@ export type AgentChatRuntimeState = {
   messageScopesById: Record<string, MessageScope>;
   subagentsBySessionId: Record<string, SubagentSession>;
   subagentByTaskPartId: Record<string, string>;
+  runStatusesByRunId: Record<string, string>;
 };
 
 export type AgentChatRuntimeAction =
   | { type: "event"; event: RunEvent }
-  | { type: "run.requested" }
+  | { type: "run.requested"; userMessageId?: string; supersededRunId?: string }
+  | { type: "run.adopted"; runId: string; userMessageId?: string }
   | { type: "run.request.failed"; message?: string }
   | { type: "run.stream.error"; message?: string; runId?: string; occurredAt?: string }
   | { type: "user.submitted"; prompt: string; parts?: PromptPart[]; createdAt?: string }
   | { type: "permission.replied"; requestId: string }
   | { type: "question.replied"; requestId: string; answers?: unknown[] }
+  | { type: "run.statuses.loaded"; statuses: Record<string, string> }
   | { type: "reset"; messages?: AgentMessage[] };
 
 export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []): AgentChatRuntimeState {
+  const todoSnapshotsByUserMessageId = todoSnapshotsFromMessagesByUserMessageId(messages);
+  const currentUserMessageId = latestUserMessageId(messages);
   return {
     messages,
     permissions: [],
     questions: [],
-    todos: [],
+    todos: currentUserMessageId
+      ? [...(todoSnapshotsByUserMessageId[currentUserMessageId] ?? [])]
+      : [...(todoSnapshotFromMessages(messages) ?? [])],
+    todoSnapshotsByUserMessageId,
+    todoUserMessageIdByRunId: {},
+    supersededTodoRunIds: [],
     seenEventIds: [],
     streamingTextByPartId: {},
     messageScopesById: {},
     subagentsBySessionId: {},
-    subagentByTaskPartId: {}
+    subagentByTaskPartId: {},
+    runStatusesByRunId: {}
   };
 }
 
@@ -64,9 +80,35 @@ export function reduceAgentChatRuntime(
   if (action.type === "reset") {
     return createInitialAgentChatRuntimeState(action.messages ?? []);
   }
+  if (action.type === "run.statuses.loaded") {
+    return { ...state, runStatusesByRunId: { ...state.runStatusesByRunId, ...action.statuses } };
+  }
   if (action.type === "run.requested") {
-    // 新一轮沿用当前 transcript，但必须清掉上一轮终态、失败卡和 Todo，避免旧状态压住新 Run。
-    return { ...state, status: "PENDING", runtimeStatus: { type: "busy" }, messages: removeRunFailedCards(state.messages), todos: [], streamingTextByPartId: {} };
+    const userMessageId = action.userMessageId ?? state.pendingTodoUserMessageId ?? latestUserMessageId(state.messages);
+    const supersededTodoRunIds = action.supersededRunId
+      ? [...new Set([...state.supersededTodoRunIds, action.supersededRunId])].slice(-100)
+      : state.supersededTodoRunIds;
+    // 请求开始到新 Run HTTP 响应之间仍可能收到旧 SSE。此处保留旧 Run 归属，
+    // 同时把当前 Todo Run 置空并标记 superseded，使旧事件不能重新占据当前状态块。
+    return {
+      ...state,
+      status: "PENDING",
+      runtimeStatus: { type: "busy" },
+      messages: removeRunFailedCards(state.messages),
+      todos: [],
+      todoSnapshotsByUserMessageId: userMessageId && !Object.prototype.hasOwnProperty.call(state.todoSnapshotsByUserMessageId, userMessageId)
+        ? { ...state.todoSnapshotsByUserMessageId, [userMessageId]: [] }
+        : state.todoSnapshotsByUserMessageId,
+      pendingTodoUserMessageId: userMessageId,
+      currentTodoRunId: undefined,
+      supersededTodoRunIds,
+      streamingTextByPartId: {}
+    };
+  }
+  if (action.type === "run.adopted") {
+    // runtime-state 也可能来自另一标签页；没有当前请求的显式 owner 时只记录接管 Run，
+    // 等该 Run 的远端 user message 到达后再建立归属，不能拿页面最后一轮猜测。
+    return bindTodoRun(state, action.runId, action.userMessageId, false);
   }
   if (action.type === "run.request.failed") {
     // 本地启动阶段失败时不会有后端 RunEvent 终态，必须在 reducer 内收敛运行态。
@@ -106,9 +148,23 @@ export function reduceAgentChatRuntime(
   }
   if (action.type === "user.submitted") {
     const now = action.createdAt ?? new Date().toISOString();
+    const previousUserMessageId = latestUserMessageId(state.messages);
+    // 同一毫秒内连续排队 follow-up 时也必须生成不同的乐观消息 ID，否则 Todo owner 会串轮。
+    const userMessageId = `user-${Date.now()}-${state.messages.length}`;
+    const previousTodos = previousUserMessageId
+      && Object.prototype.hasOwnProperty.call(state.todoSnapshotsByUserMessageId, previousUserMessageId)
+      ? state.todoSnapshotsByUserMessageId[previousUserMessageId]
+      : state.todos;
+    const todoSnapshotsByUserMessageId = previousUserMessageId
+      ? { ...state.todoSnapshotsByUserMessageId, [previousUserMessageId]: [...previousTodos] }
+      : state.todoSnapshotsByUserMessageId;
     return {
       ...state,
-      messages: [...state.messages, { id: `user-${Date.now()}`, role: "user", text: action.prompt, parts: action.parts, createdAt: now }]
+      messages: [...state.messages, { id: userMessageId, role: "user", text: action.prompt, parts: action.parts, createdAt: now }],
+      todos: [],
+      todoSnapshotsByUserMessageId: { ...todoSnapshotsByUserMessageId, [userMessageId]: [] },
+      pendingTodoUserMessageId: userMessageId,
+      currentTodoRunId: undefined
     };
   }
 
@@ -143,6 +199,9 @@ export function reduceAgentChatRuntime(
  * snapshot 缺失或为空仍执行清空，避免继续展示已被 Redis 截断的旧增量。
  */
 function reduceSnapshotReset(state: AgentChatRuntimeState, event: RunEvent): AgentChatRuntimeState {
+  if (state.supersededTodoRunIds.includes(event.runId)) {
+    return state;
+  }
   const seen = state.seenEventIds ?? [];
   const isMockEventId = event.eventId === `evt_${event.type}`;
   if (!isMockEventId && seen.includes(event.eventId)) {
@@ -151,9 +210,36 @@ function reduceSnapshotReset(state: AgentChatRuntimeState, event: RunEvent): Age
   // 平台历史消息不属于当前 Run 的 Redis 运行态，必须保留；没有 platformMessageId 的
   // 实时消息、工具卡和增量 parts 会由物化快照重新构建。
   const persistedMessages = state.messages.filter(
-    (message) => message.role !== "card" && Boolean(message.platformMessageId)
+    (message) => message.role !== "card" && (
+      Boolean(message.platformMessageId)
+      || (message.role === "user" && !message.messageId)
+      || message.id === state.pendingTodoUserMessageId
+      || message.id === state.todoUserMessageIdByRunId[event.runId]
+    )
   );
-  let restored = createInitialAgentChatRuntimeState(persistedMessages);
+  const initial = createInitialAgentChatRuntimeState(persistedMessages);
+  const resetBase: AgentChatRuntimeState = {
+    ...initial,
+    todos: [],
+    todoSnapshotsByUserMessageId: {
+      ...state.todoSnapshotsByUserMessageId,
+      ...initial.todoSnapshotsByUserMessageId
+    },
+    todoUserMessageIdByRunId: { ...state.todoUserMessageIdByRunId },
+    pendingTodoUserMessageId: state.pendingTodoUserMessageId,
+    currentTodoRunId: state.currentTodoRunId,
+    supersededTodoRunIds: [...state.supersededTodoRunIds],
+    runStatusesByRunId: { ...state.runStatusesByRunId }
+  };
+  // 旧独立消费者没有任何 Run owner 上下文时保留 todos 兼容回退；显式接管但尚未归属的
+  // runtime Run 则维持“已接管、未归属”，snapshot Todo 要等远端 user message 后再投影。
+  const adoptedWithoutOwner = state.currentTodoRunId === event.runId
+    && !state.todoUserMessageIdByRunId[event.runId];
+  let restored: AgentChatRuntimeState = adoptedWithoutOwner
+    ? bindTodoRun(resetBase, event.runId, undefined, false)
+    : state.todoUserMessageIdByRunId[event.runId] || state.pendingTodoUserMessageId
+      ? bindTodoRun(resetBase, event.runId)
+      : resetBase;
   for (const snapshotEvent of snapshotEventsFromRunReset(event)) {
     restored = reduceAgentChatRuntime(restored, { type: "event", event: snapshotEvent });
   }
@@ -208,11 +294,22 @@ function reduceEventOnly(
   if (event.type === "message.updated") {
     const scope = scopeFromPayload(event.payload);
     const messageId = messageIdFromMessagePayload(event.payload, event);
-    return rememberMessageScope(
-      { ...state, messages: upsertMessage(state.messages, event.payload, event, scope?.isChildSession === true) },
+    const adoptedWithoutOwner = state.currentTodoRunId === event.runId
+      && !state.todoUserMessageIdByRunId[event.runId];
+    const next = rememberMessageScope(
+      {
+        ...state,
+        messages: upsertMessage(
+          state.messages,
+          event.payload,
+          event,
+          scope?.isChildSession === true || adoptedWithoutOwner
+        )
+      },
       messageId,
       scope
     );
+    return scope?.isChildSession === true ? next : bindTodoOwnerFromUserMessage(next, state, event);
   }
   if (event.type === "message.removed") {
     const messageId = text(event.payload.messageId) ?? text(event.payload.messageID) ?? text(event.payload.id);
@@ -248,6 +345,10 @@ function reduceEventOnly(
   if (event.type === "message.part.updated") {
     const raw = record(event.payload.part) ?? record(event.payload.message) ?? event.payload;
     const scope = scopeForPartUpdated(event, raw);
+    const todos = todoSnapshotFromToolPart(raw);
+    if (todos !== undefined && state.supersededTodoRunIds.includes(event.runId)) {
+      return withTodoSnapshotForRun(state, event, todos, scope?.isChildSession === true);
+    }
     const messageId = messageIdFromPartEvent(event);
     let next = rememberMessageScope({
       ...state,
@@ -260,8 +361,7 @@ function reduceEventOnly(
     }
     // OpenCode 1.17.7 的 todowrite 不保证发出 todo.updated；最新快照实际挂在 tool part 输入。
     // 在同一 reducer 中归并，才能让实时 SSE 与历史 part 回放使用一致的任务面板数据源。
-    const todos = todoSnapshotFromToolPart(raw);
-    return todos === undefined ? next : { ...next, todos };
+    return todos === undefined ? next : withTodoSnapshotForRun(next, event, todos, scope?.isChildSession === true);
   }
   if (event.type === "message.part.removed") {
     return {
@@ -325,7 +425,12 @@ function reduceEventOnly(
       : { ...state, questions: state.questions.filter((item) => item.requestId !== requestId) };
   }
   if (event.type === "todo.updated") {
-    return { ...state, todos: todoSnapshotFromValue(event.payload) ?? [] };
+    return withTodoSnapshotForRun(
+      state,
+      event,
+      todoSnapshotFromValue(event.payload) ?? [],
+      scopeFromPayload(event.payload)?.isChildSession === true
+    );
   }
   if (event.type === "session.child.discovered" || event.type === "session.scope.updated") {
     const subagent = subagentFromScopeEvent(event, state);
@@ -340,7 +445,18 @@ function reduceEventOnly(
     };
   }
   if (event.type === "run.started" || event.type === "run.created" || event.type === "run.cancelling" || event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
-    let messages = state.messages;
+    if (state.supersededTodoRunIds.includes(event.runId)) {
+      // 新轮已开始时不再让旧 Run 写入当前 Todo/错误卡，但其终态仍是历史反馈资格的事实来源。
+      return event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled"
+        ? { ...state, runStatusesByRunId: { ...state.runStatusesByRunId, [event.runId]: runStatusFromEvent(event) } }
+        : state;
+    }
+    const runAlreadyAdoptedWithoutOwner = state.currentTodoRunId === event.runId
+      && !state.todoUserMessageIdByRunId[event.runId];
+    const runState = event.type === "run.started" || event.type === "run.created"
+      ? runAlreadyAdoptedWithoutOwner ? state : bindTodoRun(state, event.runId)
+      : state;
+    let messages = runState.messages;
     // run.failed 时追加错误卡片，并清理最近的空 assistant 消息
     if (event.type === "run.failed") {
       const errorInfo = extractErrorInfo(event.payload);
@@ -352,7 +468,14 @@ function reduceEventOnly(
       // 后到成功/取消终态代表本 Run 最终没有失败，清理此前 transport error 产生的失败卡。
       messages = removeRunFailedCards(messages, event.runId);
     }
-    return { ...state, status: runStatusFromEvent(event), runtimeStatus: runtimeStatusFromRunEvent(event), messages };
+    const runStatus = runStatusFromEvent(event);
+    return {
+      ...runState,
+      status: runStatus,
+      runtimeStatus: runtimeStatusFromRunEvent(event),
+      messages: bindRunIdToOwner(messages, runState.todoUserMessageIdByRunId[event.runId], event.runId),
+      runStatusesByRunId: { ...runState.runStatusesByRunId, [event.runId]: runStatus }
+    };
   }
   return state;
 }
@@ -459,13 +582,13 @@ function appendAssistantDelta(messages: AgentMessage[], delta: string, event: Ru
     const last = messages[lastAssistantIdx] as Extract<AgentMessage, { role: "assistant" }>;
     return [
       ...messages.slice(0, lastAssistantIdx),
-      { ...last, text: `${last.text}${delta}` },
+      { ...last, runId: last.runId ?? event.runId, text: `${last.text}${delta}` },
       ...messages.slice(lastAssistantIdx + 1),
     ];
   }
   return [
     ...messages,
-    { id: `assistant-${event.seq}`, role: "assistant", text: delta, createdAt: event.occurredAt }
+    { id: `assistant-${event.seq}`, role: "assistant", runId: event.runId, text: delta, createdAt: event.occurredAt }
   ] satisfies AgentMessage[];
 }
 
@@ -491,6 +614,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
         id: messageId,
         messageId,
         remoteMessageId: messageId,
+        runId: user.runId ?? event.runId,
         text: displayDelta,
         parts: appendPromptPart(user.parts, { type: "text", text: delta })
       });
@@ -507,7 +631,8 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
       messageId,
       text: "",
       createdAt: event.occurredAt,
-      parts: []
+      parts: [],
+      runId: event.runId
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
   const replaceIndex = exact.message ? exact.index : lastIdx;
 
@@ -522,6 +647,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
   }
   const nextAssistant = {
     ...assistant,
+    runId: assistant.runId ?? event.runId,
     messageId: assistant.messageId ?? messageId,
     remoteMessageId: assistant.remoteMessageId ?? messageId,
     text: nextPart.type === "text" ? `${assistant.text}${delta}` : assistant.text,
@@ -725,6 +851,7 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
     id: messageId,
     messageId,
     remoteMessageId: messageId,
+    runId: event.runId,
     text: role === "user" && incomingText ? displayTextFromUserPrompt(incomingText) : incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
     createdAt: text(raw.createdAt) ?? event.occurredAt,
   };
@@ -804,6 +931,22 @@ function replaceOrAppendMessage(messages: AgentMessage[], index: number, message
     return [...messages, message];
   }
   return [...messages.slice(0, index), message, ...messages.slice(index + 1)];
+}
+
+/** 把 Run 绑定到其根用户消息；没有 owner 时只给后续 assistant 事件自行携带 runId。 */
+function bindRunIdToOwner(messages: AgentMessage[], userMessageId: string | undefined, runId: string): AgentMessage[] {
+  if (!userMessageId) {
+    return messages;
+  }
+  return messages.map((message) => {
+    if (message.role === "card") {
+      return message;
+    }
+    const id = message.messageId ?? message.id;
+    return id === userMessageId || message.id === userMessageId
+      ? { ...message, runId }
+      : message;
+  });
 }
 
 function appendCard(
@@ -1400,6 +1543,175 @@ export function todoSnapshotFromMessages(messages: AgentMessage[]): TodoItem[] |
     }
   }
   return latest;
+}
+
+/**
+ * 历史消息没有独立的 Todo 实体，需要按 user turn 扫描 todowrite part 保存最后一次快照。
+ * 空数组同样写入映射，表示该轮明确清空过任务，不能回退到更早一轮。
+ */
+export function todoSnapshotsFromMessagesByUserMessageId(messages: AgentMessage[]): Record<string, TodoItem[]> {
+  const snapshots: Record<string, TodoItem[]> = {};
+  let currentUserMessageId: string | undefined;
+  for (const message of messages) {
+    if (message.role === "user") {
+      currentUserMessageId = message.messageId ?? message.id;
+      continue;
+    }
+    if (message.role !== "assistant" || !currentUserMessageId) {
+      continue;
+    }
+    for (const part of message.parts ?? []) {
+      if (part.type !== "tool") {
+        continue;
+      }
+      const snapshot = todoSnapshotFromToolPart(part as unknown as Record<string, unknown>);
+      if (snapshot !== undefined) {
+        snapshots[currentUserMessageId] = snapshot;
+      }
+    }
+  }
+  return snapshots;
+}
+
+function latestUserMessageId(messages: AgentMessage[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      return message.messageId ?? message.id;
+    }
+  }
+  return undefined;
+}
+
+function withCurrentTodoSnapshot(state: AgentChatRuntimeState, todos: TodoItem[]): AgentChatRuntimeState {
+  const userMessageId = latestUserMessageId(state.messages);
+  return {
+    ...state,
+    todos,
+    todoSnapshotsByUserMessageId: userMessageId
+      ? { ...state.todoSnapshotsByUserMessageId, [userMessageId]: [...todos] }
+      : state.todoSnapshotsByUserMessageId
+  };
+}
+
+/**
+ * 将平台 Run 绑定到提交该 Run 的用户消息。绑定只读取 run.requested 留下的显式 pending owner，
+ * 不用“最后一条用户消息”猜测，从而避免旧 Run 晚到事件跨轮写入。
+ */
+function bindTodoRun(
+  state: AgentChatRuntimeState,
+  runId: string,
+  preferredUserMessageId?: string,
+  allowPendingOwner = true
+): AgentChatRuntimeState {
+  if (!runId || state.supersededTodoRunIds.includes(runId)) {
+    return state;
+  }
+  const userMessageId = state.todoUserMessageIdByRunId[runId]
+    ?? preferredUserMessageId
+    ?? (allowPendingOwner ? state.pendingTodoUserMessageId : undefined);
+  return {
+    ...state,
+    currentTodoRunId: runId,
+    todoUserMessageIdByRunId: userMessageId
+      ? { ...state.todoUserMessageIdByRunId, [runId]: userMessageId }
+      : state.todoUserMessageIdByRunId,
+    pendingTodoUserMessageId: userMessageId && state.pendingTodoUserMessageId === userMessageId
+      ? undefined
+      : state.pendingTodoUserMessageId
+  };
+}
+
+/**
+ * Todo 只写入事件所属 Run 的用户轮次；仅当前 Run 可同步更新兼容字段 todos。
+ * 没有任何轮次/Run 上下文时保留旧独立消费者行为，但一旦存在 pending owner 就先建立显式绑定。
+ */
+function withTodoSnapshotForRun(
+  state: AgentChatRuntimeState,
+  event: RunEvent,
+  todos: TodoItem[],
+  isChildSession: boolean
+): AgentChatRuntimeState {
+  if (isChildSession) {
+    return state;
+  }
+  if (state.supersededTodoRunIds.includes(event.runId)) {
+    return state;
+  }
+  const bound = !state.todoUserMessageIdByRunId[event.runId]
+    && state.pendingTodoUserMessageId
+    && state.currentTodoRunId !== event.runId
+    && !state.supersededTodoRunIds.includes(event.runId)
+    ? bindTodoRun(state, event.runId)
+    : state;
+  const userMessageId = bound.todoUserMessageIdByRunId[event.runId];
+  if (!userMessageId) {
+    return bound.supersededTodoRunIds.includes(event.runId) || bound.currentTodoRunId === event.runId
+      ? bound
+      : withCurrentTodoSnapshot(bound, todos);
+  }
+  return {
+    ...bound,
+    // 当前平台 Run 仍可能对应较早轮次（后续 prompt 已排队）；兼容字段只投影最新用户轮次。
+    todos: bound.currentTodoRunId === event.runId && userMessageId === latestUserMessageId(bound.messages)
+      ? todos
+      : bound.todos,
+    todoSnapshotsByUserMessageId: {
+      ...bound.todoSnapshotsByUserMessageId,
+      [userMessageId]: [...todos]
+    }
+  };
+}
+
+/**
+ * OpenCode 会用远端 messageId 替换本地乐观 user id。Todo 快照键与所有 Run owner 必须原子迁移，
+ * 否则后续同一 Run 的 Todo 会落到已经不存在的乐观消息上。
+ */
+function bindTodoOwnerFromUserMessage(
+  state: AgentChatRuntimeState,
+  previousState: AgentChatRuntimeState,
+  event: RunEvent
+): AgentChatRuntimeState {
+  const raw = record(event.payload.message) ?? record(event.payload.info) ?? event.payload;
+  if (text(raw.role) !== "user") {
+    return state;
+  }
+  const remoteUserMessageId = text(raw.messageId) ?? text(raw.messageID) ?? text(raw.id);
+  if (!remoteUserMessageId || previousState.supersededTodoRunIds.includes(event.runId)) {
+    return state;
+  }
+  const adoptedWithoutOwner = previousState.currentTodoRunId === event.runId
+    && !previousState.todoUserMessageIdByRunId[event.runId];
+  const previousOwner = adoptedWithoutOwner
+    ? undefined
+    : previousState.todoUserMessageIdByRunId[event.runId] ?? previousState.pendingTodoUserMessageId;
+  const previousOwnerMessage = previousOwner
+    ? previousState.messages.find((message) => message.role === "user" && message.id === previousOwner)
+    : undefined;
+  const replacesOptimisticUser = previousOwnerMessage?.role === "user" && !previousOwnerMessage.messageId;
+  const todoSnapshotsByUserMessageId = { ...state.todoSnapshotsByUserMessageId };
+  if (replacesOptimisticUser && previousOwner && previousOwner !== remoteUserMessageId) {
+    if (Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, previousOwner)) {
+      todoSnapshotsByUserMessageId[remoteUserMessageId] = todoSnapshotsByUserMessageId[previousOwner];
+      delete todoSnapshotsByUserMessageId[previousOwner];
+    }
+  }
+  const todoUserMessageIdByRunId = Object.fromEntries(
+    Object.entries(state.todoUserMessageIdByRunId).map(([runId, userMessageId]) => [
+      runId,
+      replacesOptimisticUser && userMessageId === previousOwner ? remoteUserMessageId : userMessageId
+    ])
+  );
+  todoUserMessageIdByRunId[event.runId] = remoteUserMessageId;
+  return {
+    ...state,
+    todoSnapshotsByUserMessageId,
+    todoUserMessageIdByRunId,
+    pendingTodoUserMessageId: previousOwner && state.pendingTodoUserMessageId === previousOwner
+      ? remoteUserMessageId
+      : state.pendingTodoUserMessageId,
+    currentTodoRunId: event.runId
+  };
 }
 
 function todoSnapshotFromValue(value: unknown): TodoItem[] | undefined {

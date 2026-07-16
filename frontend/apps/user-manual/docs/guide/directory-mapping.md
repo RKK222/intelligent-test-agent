@@ -8,39 +8,33 @@ directoryMapping:
     - "agents"
   repositorySummaries:
     -
-      name: "开发 AI Git"
-      content: "全部开发 Agent / Skills / 规约 / docs 资产。"
+      name: "公共 Git"
+      content: "跨应用公共 Agent、workagent、Skills、公共规约以及 OpenCode 公共配置；仅超级管理员可维护和发布。"
     -
-      name: "测试公共 AI Git"
-      content: "跨应用测试 Agent / workagent / Skills / 公共规约。"
-    -
-      name: "测试 AI Git"
-      content: "应用测试 Agent / Skills / 应用规约 / docs 测试资产 / archive / spec。"
-    -
-      name: "开发业务代码 Git"
-      content: "业务代码、单元测试和工程文档。"
-  agentPhysicalSummary: "agents/ = 开发 AI Git 的开发 Agent + 测试公共 AI Git 的公共测试 Agent/workagent + 测试 AI Git 中按具体测试活动归位的应用 Agent/workagent。"
-  implementationStatusSummary: "Agent / workagent / Skill 的实现状态以当前可核验配置为准：测试公共 AI Git 已存在的真实定义标记为“已实现”；尚无对应定义的规划项标记为“未实现”并灰显。"
+      name: "应用 Git"
+      content: "业务代码、docs、应用 Agent/Skills/规约、archive，以及只在个人分支本地提交的 spec。"
+  agentPhysicalSummary: "agents/ = 公共 Git 中的跨应用 Agent/workagent + 应用 Git .opencode/agents 中的应用专属 Agent；页面只做逻辑合并，不产生第三个仓库。"
+  implementationStatusSummary: "Agent / workagent / Skill 的实现状态以当前可核验配置为准：已有真实定义标记为“已实现”；尚无对应定义的规划项标记为“未实现”并灰显。"
   directoryTree:
     id: "root"
     name: "应用(服务群组)工作区/"
     scope: "structure"
     note: "开发、测试与个人本地内容的组合视图"
-    physical: "4 个 Git 的组合视图"
+    physical: "2 个 Git 的组合视图"
     children:
       -
         id: "ai-agent"
         name: "ai-agent/"
         scope: "structure"
         note: "公共与应用 AI 配置的逻辑视图"
-        physical: "开发 AI Git + 测试公共 AI Git + 测试 AI Git"
+        physical: "公共 Git + 应用 Git"
         children:
           -
             id: "agents"
             name: "agents/"
             scope: "shared"
             note: "公共基础 Agent/workagent 与应用专属 Agent 的合并目录"
-            physical: "开发 AI Git + 测试公共 AI Git + 测试 AI Git"
+            physical: "公共 Git + 应用 Git"
             children:
               -
                 id: "requirements-agent"
@@ -48,14 +42,14 @@ directoryMapping:
                 scope: "development"
                 note: "需求 Agent"
                 role: "agent"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "design-agent"
                 name: "02_设计智能体/"
                 scope: "development"
                 note: "设计 Agent"
                 role: "agent"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
                 children:
                   -
                     id: "outline-design"
@@ -63,27 +57,27 @@ directoryMapping:
                     scope: "development"
                     note: "概要设计 Agent"
                     role: "agent"
-                    physical: "开发 AI Git"
+                    physical: "应用 Git"
                     children:
                       -
                         id: "outline-rules"
                         name: "rules/"
                         scope: "shared"
                         note: "公共规约与应用规约"
-                        physical: "开发 AI Git"
+                        physical: "应用 Git"
                         children:
                           -
                             id: "outline-common-rule"
                             name: "概要设计公共规约.md"
                             scope: "development"
                             note: "开发公共规约"
-                            physical: "开发 AI Git"
+                            physical: "应用 Git"
                           -
                             id: "outline-app-rule"
                             name: "概要设计应用规约.md"
                             scope: "development"
                             note: "开发应用规约"
-                            physical: "开发 AI Git"
+                            physical: "应用 Git"
                       -
                         id: "outline-template"
                         name: "template/"
@@ -105,7 +99,7 @@ directoryMapping:
                     scope: "development"
                     note: "详细设计 Agent"
                     role: "agent"
-                    physical: "开发 AI Git"
+                    physical: "应用 Git"
                     children:
                       -
                         id: "detail-rules"
@@ -118,13 +112,13 @@ directoryMapping:
                             name: "详细设计公共规约.md"
                             scope: "development"
                             note: "开发公共规约"
-                            physical: "开发 AI Git"
+                            physical: "应用 Git"
                           -
                             id: "detail-app-rule"
                             name: "详细设计应用规约.md"
                             scope: "development"
                             note: "开发应用规约"
-                            physical: "开发 AI Git"
+                            physical: "应用 Git"
                       -
                         id: "detail-template"
                         name: "template/"
@@ -146,7 +140,7 @@ directoryMapping:
                     scope: "development"
                     note: "程序设计 Agent"
                     role: "agent"
-                    physical: "开发 AI Git"
+                    physical: "应用 Git"
                     children:
                       -
                         id: "program-rules"
@@ -159,13 +153,13 @@ directoryMapping:
                             name: "程序设计公共规约.md"
                             scope: "development"
                             note: "开发公共规约"
-                            physical: "开发 AI Git"
+                            physical: "应用 Git"
                           -
                             id: "program-app-rule"
                             name: "程序设计应用规约.md"
                             scope: "development"
                             note: "开发应用规约"
-                            physical: "开发 AI Git"
+                            physical: "应用 Git"
                       -
                         id: "program-template"
                         name: "template/"
@@ -187,13 +181,13 @@ directoryMapping:
                 scope: "development"
                 note: "编码 Agent"
                 role: "agent"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "testing-agent"
                 name: "04_测试智能体/"
                 scope: "testing"
                 note: "测试 Agent 与 workagent 分类"
-                physical: "测试公共 AI Git + 测试 AI Git"
+                physical: "公共 Git + 应用 Git"
                 children:
                   -
                     id: "test-design-agent"
@@ -201,7 +195,7 @@ directoryMapping:
                     scope: "testing"
                     note: "用户可 @ 的测试设计入口"
                     role: "agent"
-                    physical: "测试公共 AI Git + 测试 AI Git"
+                    physical: "公共 Git + 应用 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -209,14 +203,14 @@ directoryMapping:
                         name: "test-design-orchestrator.md"
                         scope: "testing"
                         note: "Test Design（测试设计）Agent 定义"
-                        physical: "测试公共 AI Git"
+                        physical: "公共 Git"
                       -
                         id: "application-test-design-agent"
                         name: "<应用测试设计 Agent>.md"
                         scope: "testing"
                         note: "当前测试设计活动的应用专属入口占位"
                         role: "agent"
-                        physical: "测试 AI Git"
+                        physical: "应用 Git"
                         implementation: "planned"
                       -
                         id: "test-design-rules"
@@ -229,7 +223,7 @@ directoryMapping:
                             name: "测试设计公共规约/"
                             scope: "testing"
                             note: "公共规约"
-                            physical: "测试公共 AI Git"
+                            physical: "公共 Git"
                             children:
                               -
                                 id: "test-design-api-rule"
@@ -256,7 +250,7 @@ directoryMapping:
                             name: "测试设计应用规约/"
                             scope: "testing"
                             note: "按测试对象类型维护应用规约"
-                            physical: "测试 AI Git"
+                            physical: "应用 Git"
                             children:
                               -
                                 id: "test-design-app-api-rule"
@@ -284,7 +278,7 @@ directoryMapping:
                         scope: "testing"
                         note: "供测试设计 Agent 调用"
                         role: "workagent"
-                        physical: "测试公共 AI Git"
+                        physical: "公共 Git"
                         implementation: "implemented"
                         children:
                           -
@@ -297,7 +291,7 @@ directoryMapping:
                         scope: "testing"
                         note: "供测试设计 Agent 调用"
                         role: "workagent"
-                        physical: "测试公共 AI Git"
+                        physical: "公共 Git"
                         implementation: "implemented"
                         children:
                           -
@@ -310,7 +304,7 @@ directoryMapping:
                         scope: "testing"
                         note: "供测试设计 Agent 调用"
                         role: "workagent"
-                        physical: "测试公共 AI Git"
+                        physical: "公共 Git"
                         implementation: "implemented"
                         children:
                           -
@@ -323,7 +317,7 @@ directoryMapping:
                         scope: "testing"
                         note: "当前测试设计活动的应用专属工作单元占位"
                         role: "workagent"
-                        physical: "测试 AI Git"
+                        physical: "应用 Git"
                         implementation: "planned"
                   -
                     id: "test-execution-agent"
@@ -331,7 +325,7 @@ directoryMapping:
                     scope: "testing"
                     note: "用户可 @ 的测试执行入口"
                     role: "agent"
-                    physical: "测试公共 AI Git + 测试 AI Git"
+                    physical: "公共 Git + 应用 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -339,14 +333,14 @@ directoryMapping:
                         name: "test-execution-agent.md"
                         scope: "testing"
                         note: "Test Execution（测试执行）Agent 定义"
-                        physical: "测试公共 AI Git"
+                        physical: "公共 Git"
                       -
                         id: "application-test-execution-agent"
                         name: "<应用测试执行 Agent>.md"
                         scope: "testing"
                         note: "当前测试执行活动的应用专属入口占位"
                         role: "agent"
-                        physical: "测试 AI Git"
+                        physical: "应用 Git"
                         implementation: "planned"
                       -
                         id: "test-execution-rules"
@@ -359,7 +353,7 @@ directoryMapping:
                             name: "测试执行公共规约/"
                             scope: "testing"
                             note: "公共规约"
-                            physical: "测试公共 AI Git"
+                            physical: "公共 Git"
                             children:
                               -
                                 id: "test-execution-api-rule"
@@ -379,14 +373,14 @@ directoryMapping:
                             name: "测试执行应用规约.md"
                             scope: "testing"
                             note: "应用规约"
-                            physical: "测试 AI Git"
+                            physical: "应用 Git"
                       -
                         id: "api-execution-workagent"
                         name: "001 API Test Execution（接口测试执行）/"
                         scope: "testing"
                         note: "供测试执行 Agent 调用"
                         role: "workagent"
-                        physical: "测试公共 AI Git"
+                        physical: "公共 Git"
                         implementation: "implemented"
                         children:
                           -
@@ -399,20 +393,20 @@ directoryMapping:
                         scope: "testing"
                         note: "当前测试执行活动的应用专属工作单元占位"
                         role: "workagent"
-                        physical: "测试 AI Git"
+                        physical: "应用 Git"
                         implementation: "planned"
           -
             id: "mcp"
             name: "mcp/"
             scope: "shared"
             note: "开发与测试运行配置"
-            physical: "开发 AI Git + 测试公共 AI Git + 测试 AI Git"
+            physical: "公共 Git + 应用 Git"
           -
             id: "engineering-rules"
             name: "rules/"
             scope: "shared"
             note: "开发规约、测试公共规约与应用测试规约"
-            physical: "开发 AI Git + 测试公共 AI Git + 测试 AI Git"
+            physical: "公共 Git + 应用 Git"
             children:
               -
                 id: "engineering-rule"
@@ -424,14 +418,14 @@ directoryMapping:
             name: "skills/"
             scope: "shared"
             note: "开发、测试公共与应用测试 Skill 的逻辑合并目录"
-            physical: "开发 AI Git + 测试公共 AI Git + 测试 AI Git"
+            physical: "公共 Git + 应用 Git"
             children:
               -
                 id: "coding-skills"
                 name: "coding/"
                 scope: "development"
                 note: "开发 Skill"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
                 children:
                   -
                     id: "code-review-skill"
@@ -449,14 +443,14 @@ directoryMapping:
                 name: "test/"
                 scope: "testing"
                 note: "测试公共与应用测试 Skill"
-                physical: "测试公共 AI Git + 测试 AI Git"
+                physical: "公共 Git + 应用 Git"
                 children:
                   -
                     id: "test-design-skill"
                     name: "test-design/"
                     scope: "testing"
                     note: "Test Design（测试设计）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -468,7 +462,7 @@ directoryMapping:
                     name: "test-design-api/"
                     scope: "testing"
                     note: "API Testing（接口法）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -480,7 +474,7 @@ directoryMapping:
                     name: "test-design-augment/"
                     scope: "testing"
                     note: "Case Augmentation（增补法）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -492,7 +486,7 @@ directoryMapping:
                     name: "test-design-direct/"
                     scope: "testing"
                     note: "Rule-based Testing（规则法）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -504,7 +498,7 @@ directoryMapping:
                     name: "test-design-equivalence/"
                     scope: "testing"
                     note: "Equivalence Partitioning（等价类法）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -516,7 +510,7 @@ directoryMapping:
                     name: "test-design-orthogonal/"
                     scope: "testing"
                     note: "Orthogonal Array（正交法）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -528,7 +522,7 @@ directoryMapping:
                     name: "test-design-path/"
                     scope: "testing"
                     note: "Path Testing（路径法）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -540,7 +534,7 @@ directoryMapping:
                     name: "test-design-scenario/"
                     scope: "testing"
                     note: "Scenario Testing（场景法）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -552,7 +546,7 @@ directoryMapping:
                     name: "api-execute-case/"
                     scope: "testing"
                     note: "API Case Execution（接口案例执行）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -564,7 +558,7 @@ directoryMapping:
                     name: "generate-api-automation-markdown/"
                     scope: "testing"
                     note: "API Automation Script（接口自动化脚本）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -576,7 +570,7 @@ directoryMapping:
                     name: "generate-test-messages/"
                     scope: "testing"
                     note: "Test Message Generation（测试报文生成）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -588,7 +582,7 @@ directoryMapping:
                     name: "validate-automation-script-format/"
                     scope: "testing"
                     note: "Automation Format Check（自动化格式检查）"
-                    physical: "测试公共 AI Git"
+                    physical: "公共 Git"
                     implementation: "implemented"
                     children:
                       -
@@ -600,7 +594,7 @@ directoryMapping:
                     name: "<应用专属测试 Skill>/"
                     scope: "testing"
                     note: "应用测试方法或知识"
-                    physical: "测试 AI Git"
+                    physical: "应用 Git"
                     implementation: "planned"
                     children:
                       -
@@ -613,7 +607,7 @@ directoryMapping:
         name: "archive/"
         scope: "shared"
         note: "开发与测试共用的评审归档"
-        physical: "开发 AI Git + 测试 AI Git"
+        physical: "应用 Git"
         children:
           -
             id: "archive-period"
@@ -631,7 +625,7 @@ directoryMapping:
         name: "spec/"
         scope: "local"
         note: "个人本地规格工作目录，只提交不推送"
-        physical: "测试 AI Git · 仅本地提交"
+        physical: "应用 Git 个人分支 · 仅本地提交"
         children:
           -
             id: "spec-item"
@@ -776,121 +770,121 @@ directoryMapping:
         name: "docs/"
         scope: "shared"
         note: "开发资产与测试资产的应用级合并目录"
-        physical: "开发 AI Git + 测试 AI Git"
+        physical: "应用 Git"
         children:
           -
             id: "application-architecture"
             name: "应用架构/"
             scope: "shared"
             note: "开发应用关系与场景测试资产共用目录"
-            physical: "开发 AI Git + 测试 AI Git"
+            physical: "应用 Git"
             children:
               -
                 id: "application-architecture-file"
                 name: "应用架构.md"
                 scope: "development"
                 note: "应用关系、服务节点和功能模块清单"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "test-overview"
                 name: "测试概述.md"
                 scope: "testing"
                 note: "目录索引、非功能要求、公共案例和环境"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
               -
                 id: "application-scenario-x"
                 name: "应用场景说明书_XXX.md"
                 scope: "testing"
                 note: "场景图、业务规则、核心要素和测试关注点"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
               -
                 id: "application-scenario-y"
                 name: "应用场景说明书_YYY.md"
                 scope: "testing"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
               -
                 id: "application-scenario-more"
                 name: "..."
                 scope: "testing"
                 note: "其他应用场景说明书"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
           -
             id: "technical-architecture"
             name: "技术架构/"
             scope: "development"
             note: "开发工程与技术栈概览"
-            physical: "开发 AI Git"
+            physical: "应用 Git"
             children:
               -
                 id: "engineering-overview-a"
                 name: "工程概览_A.md"
                 scope: "development"
                 note: "技术栈、接口清单和应用关系"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "engineering-overview-b"
                 name: "工程概览_B.md"
                 scope: "development"
                 note: "技术栈、接口清单和应用关系"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "engineering-overview-more"
                 name: "..."
                 scope: "development"
                 note: "其他工程概览"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
           -
             id: "functional-module"
             name: "功能模块/"
             scope: "shared"
             note: "开发功能说明与测试设计案例共用目录"
-            physical: "开发 AI Git + 测试 AI Git"
+            physical: "应用 Git"
             children:
               -
                 id: "functional-module-x"
                 name: "功能模块_XXX.md"
                 scope: "development"
                 note: "业务说明书"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "functional-module-y"
                 name: "功能模块_YYY.md"
                 scope: "development"
                 note: "业务说明书"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "functional-design-x1"
                 name: "测试设计文档_X1.md"
                 scope: "testing"
                 note: "等价类表、路径图等测试设计"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
               -
                 id: "functional-design-x2"
                 name: "测试设计文档_X2.md"
                 scope: "testing"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
               -
                 id: "functional-case-x1"
                 name: "测试案例_X1.md"
                 scope: "testing"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
               -
                 id: "functional-case-x2"
                 name: "测试案例_X2.md"
                 scope: "testing"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
               -
                 id: "functional-more"
                 name: "..."
                 scope: "testing"
                 note: "其他功能测试资产"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
           -
             id: "functional-docs"
             name: "功能文档/"
             scope: "development"
             note: "开发功能文档"
-            physical: "开发 AI Git"
+            physical: "应用 Git"
             children:
               -
                 id: "functional-doc-x1"
@@ -910,36 +904,36 @@ directoryMapping:
             name: "数据架构/"
             scope: "shared"
             note: "开发数据库结构与测试数据实体共用目录"
-            physical: "开发 AI Git + 测试 AI Git"
+            physical: "应用 Git"
             children:
               -
                 id: "gauss-schema"
                 name: "F-ABC_Gauss_1.yaml"
                 scope: "development"
                 note: "开发数据架构资产"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "mysql-schema"
                 name: "F-ABC_MySQL_1.yaml"
                 scope: "development"
                 note: "开发数据架构资产"
-                physical: "开发 AI Git"
+                physical: "应用 Git"
               -
                 id: "data-entity-x1"
                 name: "数据实体_X1.md"
                 scope: "testing"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
               -
                 id: "data-entity-x2"
                 name: "数据实体_X2.md"
                 scope: "testing"
-                physical: "测试 AI Git"
+                physical: "应用 Git"
           -
             id: "business-knowledge"
             name: "业务知识/"
             scope: "development"
             note: "开发业务知识资产"
-            physical: "开发 AI Git"
+            physical: "应用 Git"
             children:
               -
                 id: "business-knowledge-more"
@@ -951,7 +945,7 @@ directoryMapping:
             name: "部署架构/"
             scope: "testing"
             note: "测试新增架构资产"
-            physical: "测试 AI Git"
+            physical: "应用 Git"
             children:
               -
                 id: "physical-deployment"
@@ -962,7 +956,7 @@ directoryMapping:
         name: "git-repo-A/"
         scope: "development"
         note: "业务 Git 工程 A"
-        physical: "开发业务代码 Git"
+        physical: "应用 Git"
         children:
           -
             id: "business-repo-a-docs"
@@ -978,145 +972,102 @@ directoryMapping:
         name: "git-repo-B/"
         scope: "development"
         note: "业务 Git 工程 B"
-        physical: "开发业务代码 Git"
+        physical: "应用 Git"
   agentDesignSummary: "workagent 可以独立完成任务，但主要供上层 Agent 编排调用；OpenCode 技术实现为 mode: subagent、hidden: true，不建议用户单独调用。"
   agentDesignRows:
     -
-      scope: "需求 / 设计 / 编码"
-      role: "开发 Agent"
-      description: "全部放在开发 AI Git；开发规约、模板和评估资源也不拆到测试 Git。"
+      scope: "跨应用公共能力"
+      role: "Agent / workagent / Skill"
+      description: "物理文件位于公共 Git；只有超级管理员可以创建 worktree、修改、提交和推送。"
     -
-      scope: "测试设计 / 测试执行"
-      role: "测试 Agent"
-      description: "跨应用基础放测试公共 AI Git，应用专属编排和扩展放测试 AI Git。"
+      scope: "应用专属能力"
+      role: "Agent / Skill / rules / templates"
+      description: "物理文件位于应用 Git 的 .opencode/；只有应用管理员和超级管理员可以维护和发布。"
     -
-      scope: "测试分析 / 案例生成 / 案例审核 / 接口执行"
-      role: "workagent"
-      description: "跨应用工作单元放测试公共 AI Git；技术上是 hidden subagent，只由上层测试 Agent 调用。"
+      scope: "应用稳定文档"
+      role: "docs/**"
+      description: "物理文件位于应用 Git；所有应用成员都可在个人 worktree 中维护，并按 feature 投影流程发布。"
     -
-      scope: "测试方法与应用知识"
-      role: "Skill"
-      description: "通用测试方法放测试公共 AI Git，应用专属 Skill 放测试 AI Git；开发 Skill 全部放开发 AI Git。"
+      scope: "个人过程资产"
+      role: "spec/**"
+      description: "物理文件位于应用 Git 的个人分支；所有应用成员都可本地提交，普通成员和应用管理员不能发布，超级管理员可发布。"
   ownershipRows:
     -
-      directory: "测试公共 Agent / Skills"
-      content: "跨应用通用测试智能体、workagent 和测试方法"
-      builders: "效能组、测试管理组"
+      directory: "公共 Agent / workagent / Skills / 规约"
+      content: "跨应用通用智能体、工作单元、方法和统一质量要求"
+      builders: "公共能力建设团队"
       publisher: "平台超级管理员"
     -
-      directory: "测试公共规约"
-      content: "跨应用统一质量要求和公共测试规约"
-      builders: "测试管理组"
-      publisher: "平台超级管理员"
-    -
-      directory: "测试 Agent / Skills"
-      content: "应用测试设计、执行、分析智能体及方法"
-      builders: "测试组"
+      directory: "应用 Agent / Skills / rules / templates"
+      content: "结合应用特点维护的智能体、技能、规约和模板"
+      builders: "应用团队"
       publisher: "应用管理员及以上"
-    -
-      directory: "测试应用规约"
-      content: "结合应用特点补充的测试设计与执行规约"
-      builders: "测试组"
-      publisher: "应用管理员及以上"
-    -
-      directory: "开发 Agent / Skills / 规约"
-      content: "需求、设计、编码智能体及全部开发配置"
-      builders: "研发团队"
-      publisher: "开发 AI Git 负责人"
     -
       directory: "docs/**"
-      content: "开发已有资产与新增测试资产的应用级稳定沉淀"
-      builders: "测试组"
-      publisher: "应用管理员审核发布"
+      content: "开发与测试稳定资产的应用级沉淀"
+      builders: "所有应用成员"
+      publisher: "所有应用成员可按个人 HEAD 投影发布"
     -
       directory: "spec/<需求项>"
-      content: "具体研发阶段的输入输出产物（需求、设计、编码、测试）"
+      content: "具体研发阶段的个人输入输出产物"
       builders: "当前用户与 Agent"
-      publisher: "仅本地提交，禁止推送"
+      publisher: "普通成员和应用管理员仅本地提交；超级管理员可发布"
     -
-      directory: "archive/<年月>/<需求项>"
-      content: "开发与测试各阶段完成评审后的归档快照"
-      builders: "研发团队、测试组"
-      publisher: "应用管理员受控发布"
-    -
-      directory: "git-repo-A · git-repo-B"
-      content: "业务代码、单测和工程文档"
-      builders: "开发团队"
-      publisher: "开发业务代码 Git 负责人"
+      directory: "archive/** 与其它应用文件"
+      content: "应用业务代码、单测、归档和工程文件"
+      builders: "所有应用成员"
+      publisher: "按个人 HEAD 白名单投影到 feature 分支"
   responsibilityRules:
     -
       index: "01"
-      title: "测试公共能力共同建设"
-      description: "测试公共 Agent / Skills 由效能组和测试管理组建设。"
+      title: "公共 Git 超级管理员负责"
+      description: "非超级管理员前端只读，后端同样拒绝公共 Git 写操作。"
     -
       index: "02"
-      title: "规约分层负责"
-      description: "测试管理组维护测试公共规约，测试组维护测试应用规约。"
+      title: "应用配置由应用管理员负责"
+      description: "应用 Agent、Skill、rules 和 templates 对普通成员只读。"
     -
       index: "03"
-      title: "应用资产归测试组"
-      description: "docs/** 内容由测试组统一建设并受控发布。"
+      title: "docs 可发布，spec 仅本地"
+      description: "所有应用成员均可发布 docs；spec 可以本地提交，普通成员和应用管理员不能推送，超级管理员可推送。"
 ---
 
-# 开发与测试目录设计
+# 开发与测试目录
 
-本页以标准工程目录文件为准，将开发已有目录与测试扩展合并为一棵可逐级展开的应用（服务群组）工程树。目录名统一使用中性色，小标签分别说明开发/测试范围、Agent/workagent 形态和物理 Git；工程根是多个 worktree 的组合视图，不是一个新的 Git 仓库。
+本页按当前已经落地的工作区和权限实现说明目录归属。页面把公共能力、应用能力和个人过程资产组合成一棵工程树，但物理上只有公共 Git 与应用 Git，不会为逻辑目录再创建第三套仓库。
 
 > 后续调整目录、Agent/workagent/Skill 名称、Git 归属或建设职责时，只修改本文件顶部的 `directoryMapping` 数据；`DirectoryMapping.vue` 仅负责通用展示和展开交互。
 
 <DirectoryMapping />
 
-## 目录设计原则
+## 两套 Git 的物理边界
 
-### 保留一个完整工程视图
+| 物理 Git | 当前内容 | 写入与发布权限 |
+| --- | --- | --- |
+| 公共 Git | `opencode/agents/**`、`opencode/skills/**`、公共规约和公共 OpenCode 配置 | 仅超级管理员；其他角色只读 |
+| 应用 Git | 业务文件、`docs/**`、`archive/**`、`.opencode/**`，以及个人分支中的 `spec/**` | 普通文件和 `docs/**` 所有应用成员可维护；应用配置仅应用管理员及以上；普通成员和应用管理员禁止发布 `spec/**`，超级管理员可发布 |
 
-研发和测试不是两棵互不相干的目录。测试目录沿用应用工程中的需求、设计、编码、业务 Git 和知识文档；开发已有资产与测试新增资产保留在同一工程层级，再扩展测试智能体、四阶段 `spec`、测试资产及归档能力。
+没有对应权限时，左侧 Agents 配置树不提供创建或发布入口，Agent/Skill 文件以只读编辑器打开；后端文件通道与 Git API 仍会校验所有写入、暂存和发布请求，不能通过直接请求绕过。
 
-### `ai-agent` 定义怎样工作
+## 个人 worktree 与 OpenCode
 
-`ai-agent` 是面向建设者的逻辑分类，不应原样复制到 OpenCode 原生目录。目标物理层固定为四类 Git：开发 AI Git、测试公共 AI Git、测试 AI Git、开发业务代码 Git。当前 Config 区域的公共配置根 `opencode/{agents,skills}` 对应测试公共 AI Git，工作空间配置根 `.opencode/{agents,skills}` 对应测试 AI Git；开发 AI Git 和开发业务代码 Git 作为另外两个 worktree 来源组合进页面工程树。
+每位用户在应用版本下都有独立的个人 worktree，固定保存在该用户 TestAgent 进程所属服务器的磁盘中。OpenCode、文件树、编辑器和终端始终读取这个个人 worktree，所以同一会话看到的是同一套绝对路径与文件名。
 
-`agents/` 在页面上是一棵逻辑合并树，物理上没有新的 `agents` 仓库：开发 Agent 来自开发 AI Git，跨应用测试 Agent/workagent 来自测试公共 AI Git，应用测试 Agent/workagent 来自测试 AI Git。树中每行按三个互不混用的维度表达：
+应用 feature worktree 是同一个应用 Git 的另一个物理 worktree。发布时平台根据个人工作区记录定位个人仓库，从个人 `HEAD` 按仓库相对路径读取已提交文件，再把允许发布的文件投影到 feature worktree；两个 worktree 绝对路径不同，但仓库相对文件名一致。
 
-- 范围标签：需求、设计、编码为开发，测试智能体为测试，`agents/` 表示同时包含开发与测试。
-- 形态标签：用户入口和上层编排标为 `Agent`；对象分析、生成、审核、接口执行等独立工作单元标为 `workagent`。
-- 物理 Git：需求、设计、编码及其开发规约全部放开发 AI Git；测试公共规约放测试公共 AI Git；应用测试规约放测试 AI Git。
+## 目录与发布规则
 
-- 当前测试公共 Config 中只有 Test Design（测试设计）和 Test Execution（测试执行）是用户可选择或 `@` 的 `Agent`，使用 `mode: all`；界面以英文名为主、中文名为辅，运行时仍使用原技术 ID，目录页标记为“已实现”。
-- 当前已确定的 `test-design-analysis.md`、`test-design-generation.md`、`test-design-review.md`、`test-execution-api.md` 都能独立完成一件工作，统一称为 `workagent`，放在测试公共 AI Git 的 `opencode/agents/*.md`，目录页同样标记为“已实现”。
-- `workagent` 的 OpenCode 技术实现统一使用 `mode: subagent`、`hidden: true`，不进入用户的 `@` 补全，主要由测试设计或测试执行 Agent 编排调用；不建议用户绕过上层流程单独调用。
-- 应用专属测试 Agent/workagent 必须放进测试设计、测试执行等具体活动目录，不能在 `04_测试智能体/` 下另建无业务环节的通用分类；物理文件放在测试 AI Git 的 `.opencode/agents/<活动>/*.md`，是否允许用户直接 `@` 由应用定义决定，尚无具体定义时以“未实现”灰显占位。
-- 测试 Agent 内的公共规约和应用规约都属于测试范围，统一使用“测试”标签；测试公共 AI Git 与测试 AI Git 的差异只由最右侧物理 Git 标签表达。
-- 测试设计应用规约以目录维护，并按接口、UI、异步任务、批量任务和其他测试对象类型拆分具体 Markdown；公共规约目录使用相同分类，便于逐类覆盖或补充。
-- `skills/` 下的 `coding/` 与 `test/` 分别收口开发和测试能力。开发 Skill 全部放开发 AI Git；当前 12 个 `test-design*`、接口执行、自动化文档、测试报文和格式校验公共 Skill 全部放入 `test/`，物理归属测试公共 AI Git，应用测试知识和专属方法也放入 `test/`，物理归属测试 AI Git。
-- `rules`、`template`、`eval` 放进对应 Skill 资源目录，或由 `AGENTS.md` / `opencode.jsonc` 的 `instructions` 引用，不能作为普通 `.md` 混放在 `.opencode/agents/**`。
+- `.opencode/agents/**` 与 `.opencode/skills/**`（包括 `rules/`、`templates/`）由应用管理员或超级管理员维护。创建应用配置包会生成 OpenCode 可识别的 Agent、`SKILL.md`、rules 和 templates 模板。
+- `docs/**` 是应用 Git 中的共享稳定文档，所有应用成员都可以编辑、本地提交并通过 feature 投影发布。
+- `spec/**` 是个人过程资产，可以编辑、暂存和提交到个人分支；普通成员和应用管理员不能发布，超级管理员不受该限制。生成结果按平台现有流程另行同步到系统。
+- `archive/**`、业务代码、单元测试和其它普通应用文件沿用个人 worktree 的提交与 feature 投影流程。
 
-OpenCode 会递归读取 `agents/**/*.md`，文件相对路径会成为 Agent 名称；例如 `.opencode/agents/test/review.md` 对应 `@test/review`。`mode: subagent` 和 `mode: all` 可进入 `@` 候选，`hidden: true` 会隐藏候选。`workagent` 仍是 Agent，只是在 OpenCode 中以隐藏的 subagent 方式供上层 Agent 调用。
+## 从个人 HEAD 发布到 feature
 
-### `spec` 保存研发阶段输入输出产物
+1. 用户在个人 worktree 中编辑并暂存所需文件。
+2. “提交”或“提交并推送”先把选中文件提交到个人 `HEAD`。
+3. 选择推送时，后端只读取已提交且允许发布的白名单路径，不 merge 或 push 整个个人分支。
+4. 后端把这些相对路径投影到应用 feature worktree，在 feature 分支提交并推送。
+5. 推送成功后平台广播版本同步通知；其他在线用户手动刷新或同步，系统不会自动覆盖脏工作树。
 
-`spec/<需求项>/` 保存具体研发阶段的输入输出产物，固定分为 `01-需求`、`02-设计`、`03-编码`、`04-测试`。测试阶段再分测试设计和测试执行，并同时支持流程测试与需求子条目。`spec` 使用测试 AI Git 派生的个人本地 worktree，只允许本地提交，不直接推送远端。
-
-### `docs` 保存可复用测试资产
-
-`docs` 是页面合并目录，不是单一物理仓库：开发资产放开发 AI Git，测试资产放测试 AI Git。它保留文件给出的真实技术目录：应用架构、技术架构、功能模块、数据架构和部署架构；页面可按业务、功能、架构三个视角组织，但不改变磁盘目录名。
-
-`docs/`、`应用架构/`、`功能模块/`、`数据架构/` 使用“开发 + 测试”范围标签；其中应用架构、工程概览、功能说明和数据库 YAML 等文件标为开发，测试概述、应用场景说明书、测试设计、测试案例和数据实体标为测试。`技术架构/`、`功能文档/`、`业务知识/` 当前只有开发资产，`部署架构/` 当前只有测试资产。
-
-- 开发已有资产：工程概览、功能模块业务说明、功能文档、数据库 YAML 和业务知识。
-- 测试新增资产：测试概述、应用场景说明书、测试设计文档、测试案例、数据实体和部署架构。
-- 业务视角：应用场景说明书中的业务规则、场景图、核心要素和测试关注点。
-- 功能视角：功能模块下的测试设计文档、测试案例和功能验证基线。
-- 架构视角：应用架构、测试概述、数据实体、部署结构和非功能要求。
-
-### `archive` 保存开发测试共用归档
-
-需求、设计、编码和测试各阶段完成评审的产物，由受控流程复制到各自 AI Git 的 `archive/<年月>/<需求项>/`，页面合并显示为开发、测试共用的共享快照。它不是把本地 `spec` 分支直接推送远端，也不替代开发业务代码 Git 的正式交付。
-
-## Git 与发布边界
-
-1. 开发 AI Git 保存全部开发 Agent / Skills / 规约 / docs 开发资产，由研发体系按开发发布规则维护。
-2. 测试公共 AI Git 保存跨应用测试 Agent / workagent / Skills / 公共规约，由效能组、测试管理组建设，平台超级管理员发布。
-3. 测试 AI Git 保存应用测试 Agent / Skills / 应用规约、docs 测试资产和归档；`spec` 使用其派生的本地个人分支，只允许本地提交，不设置远端跟踪。
-4. `git-repo-A`、`git-repo-B` 等开发业务代码 Git 由开发团队建设，测试工作区只组合对应个人 worktree，不复制整库到 `spec` 或 `docs`。
-5. 页面展示可以合并多个来源，但每个目录仍保留自己的 Git、分支、权限和发布规则。
+普通成员或应用管理员一次选择同时包含 `spec/**` 和可发布文件时，`spec/**` 只进入个人提交，其它文件继续发布；如果只选择 `spec/**`，流程停在个人提交。后端会拒绝这两类角色通过直接 API 或 `./spec/**` 路径别名发布 spec；旧同步接口仍对所有角色维持禁止。超级管理员通过当前发布入口时不受 spec 路径限制。

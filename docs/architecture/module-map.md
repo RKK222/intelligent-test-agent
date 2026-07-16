@@ -47,7 +47,7 @@ Browser
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、用户级会话运行态摘要/状态流、stale active Run 收敛业务任务、当前用户 opencode 进程强状态/弱健康/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理查询、创建测试用户和单角色调整。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器和参数更新跨实例广播。 |
-| `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、Cron 调整、手动触发和协作式停止管理服务；具体业务任务放回所属业务模块。 |
+| `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、运行记录保留清理、Cron 调整、手动触发和协作式停止管理服务；其它具体业务任务放回所属业务模块。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、RunEvent SSE 按生产 Java 流式转发入口、用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（workspace 与 Agent 配置文件）、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史和定时任务管理入口、trace Web 入口。 |
 | `test-agent-persistence` | 数据库、MyBatis XML mapper、Flyway、Repository 和 Redis 必需适配，包括 Run manifest/input/durable 与 runtime 双 Stream/Hash + order ZSET 物化 snapshot/scope/active 索引、会话上下文、workspace 服务器归属、用户级会话运行态只读查询、通用参数表、工作空间创建进度表、应用版本副本表、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
@@ -61,7 +61,7 @@ Browser
 
 | 包 | 职责 |
 |---|---|
-| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、后台运行会话历史计数/铃铛提醒（历史按钮数字只统计第一页 30 条中的未完成会话）、会话级前端原始报文内存查看器、点击小宠物发起一次性旁路问答、设置模态（含版本库英文名、版本库类型、工作空间创建进度和用户管理页签，用户管理支持查询、创建测试用户和超管直接调角色）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
+| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、后台运行会话历史计数/铃铛提醒（历史按钮数字只统计第一页 30 条中的未完成会话）、会话级前端原始报文内存查看器、五种 SVG 宠物的本地轮换/随机/固定选择和一次性旁路问答、设置模态（含版本库英文名、版本库类型、工作空间创建进度和用户管理页签，用户管理支持查询、创建测试用户和超管直接调角色）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
 | `apps/user-manual` | VitePress 内置用户手册，负责稳定 Markdown 操作说明、本地全文搜索和 `/help/` 静态构建；不访问后端 API、不保存用户数据，构建结果由 `agent-web` 同源嵌入。 |
 | `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、可选安全原始 HTTP 交换 observer、超级管理员服务器目录选择、平台文件 WebSocket route/ticket/RPC（workspace 与 Agent 配置文件）、工作区 Git diff/stage/unstage/冲突 API、用户 opencode 进程状态/初始化、用户级会话运行态摘要、运行管理 overview 与指标历史、定时任务管理、配置管理、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询、兼容同步 `askSideQuestion`、流式 `startSideQuestionRun` 和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE 和用户级运行态 fetch SSE client，负责按默认 `opencode` agent URL 连接 RunEvent、携带 Bearer Token 连接 runtime-state、自动重连、识别 `run.snapshot.reset`、解析前原始 `MessageEvent.data` 回调、事件解析、去重和取消订阅。 |

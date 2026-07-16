@@ -10,6 +10,8 @@ import com.icbc.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
+import com.icbc.testagent.domain.event.RunSessionScopeRepository;
+import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.run.Run;
@@ -38,6 +40,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -49,6 +52,8 @@ public class RunSessionMessageSnapshotService {
     private static final Logger LOGGER = LoggerFactory.getLogger(RunSessionMessageSnapshotService.class);
     private static final int SNAPSHOT_PAGE_LIMIT = 50;
     private static final int SNAPSHOT_MAX_MESSAGES = 200;
+    private static final int RUN_SNAPSHOT_PAGE_LIMIT = 100;
+    private static final int RUN_SNAPSHOT_MAX_PAGES = 20;
 
     private final RunRepository runRepository;
     private final SessionRepository sessionRepository;
@@ -56,11 +61,33 @@ public class RunSessionMessageSnapshotService {
     private final ExecutionNodeRepository executionNodeRepository;
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentSessionBindingRepository agentSessionBindingRepository;
+    private final RunSessionScopeRepository runSessionScopeRepository;
     private final ObjectMapper objectMapper;
 
     /**
      * 注入快照刷新所需端口。该服务只使用 agent facade 投影，不直接依赖 generated SDK。
      */
+    @Autowired
+    public RunSessionMessageSnapshotService(
+            RunRepository runRepository,
+            SessionRepository sessionRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunSessionScopeRepository runSessionScopeRepository,
+            ObjectMapper objectMapper) {
+        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
+        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
+        this.runSessionScopeRepository = runSessionScopeRepository;
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+    }
+
+    /** 兼容不需要 scope 交叉校验的独立测试和旧装配。 */
     public RunSessionMessageSnapshotService(
             RunRepository runRepository,
             SessionRepository sessionRepository,
@@ -69,13 +96,15 @@ public class RunSessionMessageSnapshotService {
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentSessionBindingRepository agentSessionBindingRepository,
             ObjectMapper objectMapper) {
-        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
-        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
-        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this(
+                runRepository,
+                sessionRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                null,
+                objectMapper);
     }
 
     /**
@@ -144,8 +173,11 @@ public class RunSessionMessageSnapshotService {
             Session session,
             Run run,
             String traceId) {
-        SnapshotUsage runUsage = SnapshotUsage.empty();
-        Instant runUsageAt = null;
+        if (run != null) {
+            return refreshRunSnapshotPages(
+                    runtime, node, remoteSessionId, agentId, session, run, traceId);
+        }
+        List<AgentSessionMessage> projectedMessages = new ArrayList<>();
         Set<String> seenCursors = new HashSet<>();
         String cursor = null;
         int loaded = 0;
@@ -163,15 +195,7 @@ public class RunSessionMessageSnapshotService {
                 return null;
             }
             loaded += result.messages().size();
-            for (AgentSessionMessage message : result.messages()) {
-                Optional<SnapshotUsage> usage = upsertAssistantMessage(agentId, session.sessionId(), run, message, traceId);
-                Instant messageCreatedAt = projectedCreatedAt(message).orElse(Instant.now());
-                if (usage.isPresent() && usage.get().hasValue()
-                        && (runUsageAt == null || messageCreatedAt.isAfter(runUsageAt))) {
-                    runUsage = usage.get();
-                    runUsageAt = messageCreatedAt;
-                }
-            }
+            projectedMessages.addAll(result.messages());
             String nextCursor = result.nextCursor();
             if (nextCursor == null || result.messages().isEmpty()) {
                 break;
@@ -186,6 +210,114 @@ public class RunSessionMessageSnapshotService {
                 break;
             }
             cursor = nextCursor;
+        }
+        return upsertAssistantMessages(agentId, session.sessionId(), null, projectedMessages, traceId);
+    }
+
+    /** Run 终态快照只投影本轮消息；无法证明归属时保留既有数据库状态。 */
+    private SnapshotUsage refreshRunSnapshotPages(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String remoteSessionId,
+            String agentId,
+            Session session,
+            Run run,
+            String traceId) {
+        RunDispatchMessageAnchorResolver.Anchor anchor = RunDispatchMessageAnchorResolver.resolve(
+                sessionMessageRepository, session.sessionId(), run.runId());
+        if (runSessionScopeRepository != null) {
+            String scopeDispatchMessageId = runSessionScopeRepository
+                    .findSession(run.runId(), remoteSessionId)
+                    .filter(scope -> !scope.childSession())
+                    .map(RunSessionScopeSession::metadata)
+                    .map(metadata -> metadata.get("dispatchMessageId"))
+                    .filter(String.class::isInstance)
+                    .map(String.class::cast)
+                    .orElse(null);
+            anchor = RunDispatchMessageAnchorResolver.merge(anchor, scopeDispatchMessageId);
+        }
+        if (anchor.conflicted()) {
+            return SnapshotUsage.empty();
+        }
+        RunTurnMessageSelector.Selection selection = loadRunTurnMessages(
+                runtime,
+                node,
+                remoteSessionId,
+                run,
+                anchor.dispatchMessageId(),
+                traceId);
+        if (selection == null) {
+            return null;
+        }
+        return upsertAssistantMessages(agentId, session.sessionId(), run, selection.messages(), traceId);
+    }
+
+    /** 从最新页向前查找 Run user 锚点，重复 cursor、超限和歧义一律返回未解析。 */
+    private RunTurnMessageSelector.Selection loadRunTurnMessages(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String remoteSessionId,
+            Run run,
+            String dispatchMessageId,
+            String traceId) {
+        List<AgentSessionMessage> collected = new ArrayList<>();
+        Set<String> seenCursors = new HashSet<>();
+        String cursor = null;
+        for (int page = 0; page < RUN_SNAPSHOT_MAX_PAGES; page++) {
+            AgentSessionMessagesResult result = runtime.sessionMessages(new AgentSessionMessagesCommand(
+                            node,
+                            remoteSessionId,
+                            RUN_SNAPSHOT_PAGE_LIMIT,
+                            "asc",
+                            cursor,
+                            traceId))
+                    .block();
+            if (result == null) {
+                return null;
+            }
+            if (!result.messages().isEmpty()) {
+                List<AgentSessionMessage> combined = new ArrayList<>(
+                        result.messages().size() + collected.size());
+                combined.addAll(result.messages());
+                combined.addAll(collected);
+                collected = combined;
+            }
+            RunTurnMessageSelector.Selection selection = RunTurnMessageSelector.select(
+                    collected,
+                    dispatchMessageId,
+                    run.createdAt(),
+                    run.updatedAt());
+            if (selection.resolved() && dispatchMessageId != null) {
+                return selection;
+            }
+            String nextCursor = result.nextCursor();
+            if (nextCursor == null) {
+                return selection;
+            }
+            if (!seenCursors.add(nextCursor)) {
+                return RunTurnMessageSelector.Selection.unresolved();
+            }
+            cursor = nextCursor;
+        }
+        return RunTurnMessageSelector.Selection.unresolved();
+    }
+
+    private SnapshotUsage upsertAssistantMessages(
+            String agentId,
+            SessionId sessionId,
+            Run run,
+            List<AgentSessionMessage> projectedMessages,
+            String traceId) {
+        SnapshotUsage runUsage = SnapshotUsage.empty();
+        Instant runUsageAt = null;
+        for (AgentSessionMessage message : projectedMessages) {
+            Optional<SnapshotUsage> usage = upsertAssistantMessage(agentId, sessionId, run, message, traceId);
+            Instant messageCreatedAt = projectedCreatedAt(message).orElse(Instant.now());
+            if (usage.isPresent() && usage.get().hasValue()
+                    && (runUsageAt == null || messageCreatedAt.isAfter(runUsageAt))) {
+                runUsage = usage.get();
+                runUsageAt = messageCreatedAt;
+            }
         }
         return runUsage;
     }

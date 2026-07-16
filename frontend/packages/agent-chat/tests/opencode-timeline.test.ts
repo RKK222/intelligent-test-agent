@@ -9,20 +9,220 @@ import AssistantThread from "../src/AssistantThread.vue";
 const waitMarkdown = () => new Promise((resolve) => setTimeout(resolve, 400));
 
 describe("OpencodeTimeline", () => {
-  it("does not render an assistant avatar for the initial thinking state", () => {
+  it("does not render a synthetic assistant row before the first real event", () => {
     const state = createOpencodeLikeState({
       messages: [],
       running: true
     });
 
-    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    const { container, queryByText } = render(OpencodeTimeline, { props: { state } });
 
-    expect(getByText("思考中")).toBeTruthy();
+    expect(queryByText("思考中")).toBeNull();
+    expect(container.querySelector(".oc-thinking-row")).toBeNull();
     expect(container.querySelector(".oc-assistant-frame__avatar")).toBeNull();
-    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
   });
 
-  it("renders user rows, context tool groups, assistant parts and diff summary with oc classes", async () => {
+  it("renders only the reasoning line before any work event", () => {
+    const state = createOpencodeLikeState({
+      messages: [userMessage("msg_user_1", "开始分析")],
+      running: true
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    const status = container.querySelector(".oc-work-status") as HTMLElement;
+
+    expect(status).toBeTruthy();
+    expect(status.querySelectorAll(".oc-work-status__line")).toHaveLength(1);
+    expect(getByText("思考状态")).toBeTruthy();
+    expect(getByText("思考中")).toBeTruthy();
+    expect(status.querySelector(".oc-work-status__event-line")).toBeNull();
+    expect(status.querySelector(".oc-work-status__event-button")).toBeNull();
+    expect(status.querySelector("[data-orientation='vertical']")).toBeTruthy();
+    expect(status.querySelector(".ta-shimmer-track--static")).toBeNull();
+  });
+
+  it("renders Todo after the reasoning line without an empty event row", async () => {
+    const state = createOpencodeLikeState({
+      messages: [userMessage("msg_user_1", "实现功能")],
+      running: true,
+      todos: [
+        {
+          id: "todo_1",
+          text: "补充组件测试",
+          status: "in_progress",
+          priority: "high",
+          description: "覆盖三行状态块",
+          steps: ["写失败测试", "实现组件"]
+        }
+      ]
+    });
+
+    const { container, getByRole, getByText } = render(OpencodeTimeline, { props: { state } });
+    const status = container.querySelector(".oc-work-status") as HTMLElement;
+
+    expect(status.querySelectorAll(":scope > .oc-work-status__line")).toHaveLength(2);
+    expect(status.querySelector(".oc-work-status__event-line")).toBeNull();
+    expect(status.querySelector(".oc-work-status__todo-line .oc-todo-panel.is-embedded")).toBeTruthy();
+    expect(getByText("任务")).toBeTruthy();
+    expect(getByText("进行中 1")).toBeTruthy();
+
+    await fireEvent.click(getByRole("button", { name: /任务/ }));
+    expect(getByText("补充组件测试")).toBeTruthy();
+    expect(getByText("覆盖三行状态块")).toBeTruthy();
+    expect(getByText("写失败测试")).toBeTruthy();
+  });
+
+  it("adds the event line after the first tool event", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "开始分析"),
+        assistantMessage("msg_assistant_1", [toolPart("part_read", "read", { filePath: "README.md" })])
+      ],
+      running: true
+    });
+
+    const { container } = render(OpencodeTimeline, { props: { state } });
+    const status = container.querySelector(".oc-work-status") as HTMLElement;
+
+    expect(status.querySelectorAll(":scope > .oc-work-status__line")).toHaveLength(2);
+    expect(status.querySelector(".oc-work-status__event-line")).toBeTruthy();
+    expect(status.querySelector("[data-testid='oc-work-status-event-explore']")).toBeTruthy();
+  });
+
+  it("teleports the latest status and diff to the composer dock in status-first order", async () => {
+    const dock = document.createElement("div");
+    dock.id = "test-work-status-dock";
+    document.body.appendChild(dock);
+    try {
+      const state = createOpencodeLikeState({
+        messages: [userMessage("msg_user_1", "修改文件")],
+        running: true,
+        todos: [{ id: "todo_1", text: "修改文件", status: "in_progress" }],
+        diffFiles: [{ path: "src/main.ts", patch: "", additions: 1, deletions: 0, status: "modified" }]
+      });
+
+      const { container } = render(OpencodeTimeline, {
+        props: { state, workStatusDockTarget: "#test-work-status-dock" }
+      });
+      await nextTick();
+
+      expect(container.querySelector(".oc-work-status")).toBeNull();
+      expect(container.querySelector(".oc-diff-summary")).toBeNull();
+      expect(dock.querySelectorAll(".oc-work-status-dock > .oc-row")).toHaveLength(2);
+      expect(dock.querySelector(".oc-work-status-dock > .oc-row:first-child .oc-work-status")).toBeTruthy();
+      expect(dock.querySelector(".oc-work-status-dock > .oc-row:last-child")?.classList.contains("oc-diff-summary")).toBe(true);
+    } finally {
+      dock.remove();
+    }
+  });
+
+  it("moves the latest completed status after the final assistant output while keeping diff in the dock", async () => {
+    const dock = document.createElement("div");
+    dock.id = "test-completed-work-status-dock";
+    document.body.appendChild(dock);
+    try {
+      const messages = [
+        userMessage("msg_user_1", "完成任务"),
+        assistantMessage("msg_assistant_1", [textPart("part_answer_1", "任务已经完成。")])
+      ];
+      const runningState = createOpencodeLikeState({
+        messages,
+        running: true,
+        diffFiles: [{ path: "src/main.ts", patch: "", additions: 1, deletions: 0, status: "modified" }]
+      });
+
+      const { container, getByRole, rerender } = render(OpencodeTimeline, {
+        props: { state: runningState, workStatusDockTarget: dock },
+        slots: { "completed-status-actions": "<button type='button'>满意</button>" }
+      });
+      await nextTick();
+
+      expect(dock.querySelector(".oc-work-status")).toBeTruthy();
+      expect(dock.querySelector(".oc-diff-summary")).toBeTruthy();
+
+      await rerender({
+        state: createOpencodeLikeState({
+          messages,
+          running: false,
+          diffFiles: [{ path: "src/main.ts", patch: "", additions: 1, deletions: 0, status: "modified" }]
+        }),
+        workStatusDockTarget: dock
+      });
+      await nextTick();
+
+      const completedRow = container.querySelector(".oc-work-status-completed");
+      const answerRow = container.querySelector(".oc-text-part") as HTMLElement;
+      expect(completedRow).toBeTruthy();
+      expect(dock.querySelector(".oc-work-status-completed")).toBeNull();
+      expect(dock.querySelector(".oc-work-status")).toBeNull();
+      expect(dock.querySelector(".oc-diff-summary")).toBeTruthy();
+      expect(completedRow?.querySelector(".oc-work-status-completed-summary")?.textContent).toContain("满意");
+      expect(answerRow.compareDocumentPosition(completedRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      await fireEvent.click(getByRole("button", { name: "展开已完成工作状态" }));
+
+      expect(container.querySelector(".oc-work-status")).toBeTruthy();
+      expect(dock.querySelector(".oc-work-status")).toBeNull();
+      expect(getByRole("button", { name: "收起已完成工作状态" })).toBeTruthy();
+      expect(dock.querySelector(".oc-diff-summary")).toBeTruthy();
+    } finally {
+      dock.remove();
+    }
+  });
+
+  it("places a completed status after the user message when no assistant output exists", async () => {
+    const dock = document.createElement("div");
+    document.body.appendChild(dock);
+    try {
+      const state = createOpencodeLikeState({
+        messages: [userMessage("msg_user_1", "尚未收到输出")],
+        running: false
+      });
+      const { container } = render(OpencodeTimeline, {
+        props: { state, workStatusDockTarget: dock }
+      });
+      await nextTick();
+
+      const userRow = container.querySelector(".oc-user-message") as HTMLElement;
+      const completedRow = container.querySelector(".oc-work-status-completed") as HTMLElement;
+      expect(completedRow).toBeTruthy();
+      expect(userRow.compareDocumentPosition(completedRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(dock.querySelector(".oc-work-status-completed")).toBeNull();
+    } finally {
+      dock.remove();
+    }
+  });
+
+  it("collapses historical work status to one icon and allows only one inline expansion", async () => {
+    const firstTwoTurns = [
+      userMessage("msg_user_1", "第一轮"),
+      assistantMessage("msg_assistant_1", [reasoningPart("part_reasoning_1", "第一轮思考")]),
+      userMessage("msg_user_2", "第二轮")
+    ];
+    const { container, getByRole, rerender } = render(OpencodeTimeline, {
+      props: { state: createOpencodeLikeState({ messages: firstTwoTurns, running: true }) }
+    });
+
+    expect(container.querySelectorAll(".oc-work-status-history-trigger")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(1);
+
+    await fireEvent.click(getByRole("button", { name: "展开历史工作状态" }));
+    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(2);
+    expect(getByRole("button", { name: "收起历史工作状态" })).toBeTruthy();
+
+    await rerender({
+      state: createOpencodeLikeState({
+        messages: [...firstTwoTurns, assistantMessage("msg_assistant_2", [textPart("part_answer_2", "第二轮完成")]), userMessage("msg_user_3", "第三轮")],
+        running: true
+      })
+    });
+    await nextTick();
+
+    expect(container.querySelectorAll(".oc-work-status-history-trigger")).toHaveLength(2);
+    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(1);
+  });
+
+  it("renders root events as icons after assistant text and diff output", async () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "分析 checkout 失败"),
@@ -32,6 +232,7 @@ describe("OpencodeTimeline", () => {
           textPart("part_answer", "定位到 checkout 表单校验失败。")
         ])
       ],
+      running: true,
       diffFiles: [{ path: "src/checkout.ts", patch: "@@\n-old\n+new", additions: 1, deletions: 1, status: "modified" }]
     });
 
@@ -44,21 +245,128 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-user-message__avatar")).toBeNull();
     expect(container.querySelector(".oc-assistant-frame__avatar")).toBeNull();
     expect(container.querySelector(".oc-assistant-frame__meta")).toBeNull();
-    expect(container.querySelector(".oc-context-group")).toBeTruthy();
     expect(container.querySelector(".oc-assistant-part")).toBeTruthy();
     expect(container.querySelector(".oc-diff-summary")).toBeTruthy();
+    expect(container.querySelector(".oc-work-status")).toBeTruthy();
     expect(getByText("文件修改 1")).toBeTruthy();
     expect(getByText("分析 checkout 失败")).toBeTruthy();
-    expect(getByText("探索")).toBeTruthy();
-    expect(getByText("读取 2 次")).toBeTruthy();
-    expect(container.querySelector(".oc-context-group__trigger .oc-tool__status")?.textContent).toBe("已读取");
-    await fireEvent.click(container.querySelector(".oc-context-group__trigger") as HTMLElement);
-    expect(getByText("README.md")).toBeTruthy();
+    const exploreButton = container.querySelector("[data-testid='oc-work-status-event-explore']") as HTMLElement;
+    expect(exploreButton).toBeTruthy();
+    expect(exploreButton.querySelector(".oc-work-status__event-count")?.textContent).toBe("2");
     expect(container.querySelector(".oc-text-part")).toBeTruthy();
     expect(container.querySelector(".oc-text-part .oc-icon-button")).toBeTruthy();
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
     await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
     expect(getByText("checkout.ts")).toBeTruthy();
+
+    const textRow = container.querySelector(".oc-text-part") as HTMLElement;
+    const statusRow = container.querySelector(".oc-work-status") as HTMLElement;
+    expect(textRow.compareDocumentPosition(statusRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("opens one full-width event popover and closes it by toggle, outside click or Escape", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "执行工具"),
+        assistantMessage("msg_assistant_1", [
+          toolPart("part_read", "read", { filePath: "README.md" }),
+          toolPart("part_bash_1", "bash", { command: "pwd" }),
+          toolPart("part_bash_2", "bash", { command: "git status --short" }),
+          toolPart("part_edit", "edit", { filePath: "src/main.ts" })
+        ])
+      ],
+      running: true
+    });
+
+    const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
+    const shellButton = container.querySelector("[data-testid='oc-work-status-event-shell']") as HTMLElement;
+    const exploreButton = container.querySelector("[data-testid='oc-work-status-event-explore']") as HTMLElement;
+    const editButton = container.querySelector("[data-testid='oc-work-status-event-edit']") as HTMLElement;
+
+    expect(exploreButton.querySelector(".oc-work-status__event-count")).toBeNull();
+    expect(shellButton.querySelector(".oc-work-status__event-count")?.textContent).toBe("2");
+    expect(editButton.querySelector(".oc-work-status__event-count")).toBeNull();
+
+    await fireEvent.click(shellButton);
+    expect(container.querySelectorAll("[data-testid='oc-work-status-popover']")).toHaveLength(1);
+    expect(container.querySelector("[data-testid='oc-work-status-popover']")?.getAttribute("aria-label")).toBe("命令行详情");
+    expect(getByText("git status --short")).toBeTruthy();
+
+    await fireEvent.click(exploreButton);
+    expect(container.querySelectorAll("[data-testid='oc-work-status-popover']")).toHaveLength(1);
+    expect(getByText("探索详情")).toBeTruthy();
+    expect(queryByText("命令行详情")).toBeNull();
+
+    await fireEvent.keyDown(document, { key: "Escape" });
+    expect(container.querySelector("[data-testid='oc-work-status-popover']")).toBeNull();
+
+    await fireEvent.click(editButton);
+    expect(container.querySelector("[data-testid='oc-work-status-popover']")).toBeTruthy();
+    await fireEvent.pointerDown(document.body);
+    expect(container.querySelector("[data-testid='oc-work-status-popover']")).toBeNull();
+
+    await fireEvent.click(shellButton);
+    await fireEvent.click(shellButton);
+    expect(container.querySelector("[data-testid='oc-work-status-popover']")).toBeNull();
+  });
+
+  it("collapses previous reasoning and event details when a new turn starts", async () => {
+    const firstTurn = [
+      userMessage("msg_user_1", "分析第一轮"),
+      assistantMessage("msg_assistant_1", [
+        reasoningPart("part_reasoning", "第一轮详细思考"),
+        toolPart("part_bash", "bash", { command: "pwd" })
+      ])
+    ];
+    const { container, rerender } = render(OpencodeTimeline, {
+      props: { state: createOpencodeLikeState({ messages: firstTurn, running: true }) }
+    });
+
+    await fireEvent.click(container.querySelector(".oc-reasoning-part .oc-disclosure__trigger") as HTMLElement);
+    await fireEvent.click(container.querySelector("[data-testid='oc-work-status-event-shell']") as HTMLElement);
+    expect(container.querySelector(".oc-reasoning-part__plain")).toBeTruthy();
+    expect(container.querySelector("[data-testid='oc-work-status-popover']")).toBeTruthy();
+
+    await rerender({
+      state: createOpencodeLikeState({
+        messages: [...firstTurn, userMessage("msg_user_2", "开始第二轮")],
+        running: true
+      })
+    });
+    await nextTick();
+
+    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-work-status-history-trigger")).toHaveLength(1);
+    expect(container.querySelector(".oc-reasoning-part__plain")).toBeNull();
+    expect(container.querySelector("[data-testid='oc-work-status-popover']")).toBeNull();
+    expect(container.querySelectorAll(".ta-shimmer-track--static")).toHaveLength(0);
+  });
+
+  it("collapses reasoning opened from an older historical turn when another turn starts", async () => {
+    const firstTwoTurns = [
+      userMessage("msg_user_1", "分析第一轮"),
+      assistantMessage("msg_assistant_1", [reasoningPart("part_reasoning_1", "第一轮详细思考")]),
+      userMessage("msg_user_2", "分析第二轮"),
+      assistantMessage("msg_assistant_2", [reasoningPart("part_reasoning_2", "第二轮详细思考")])
+    ];
+    const { container, rerender } = render(OpencodeTimeline, {
+      props: { state: createOpencodeLikeState({ messages: firstTwoTurns }) }
+    });
+
+    await fireEvent.click(container.querySelector(".oc-work-status-history-trigger") as HTMLElement);
+    const firstHistoricalTrigger = container.querySelectorAll(".oc-reasoning-part .oc-disclosure__trigger")[0] as HTMLElement;
+    await fireEvent.click(firstHistoricalTrigger);
+    expect(container.querySelector(".oc-reasoning-part__plain")?.textContent).toContain("第一轮详细思考");
+
+    await rerender({
+      state: createOpencodeLikeState({
+        messages: [...firstTwoTurns, userMessage("msg_user_3", "开始第三轮")],
+        running: true
+      })
+    });
+    await nextTick();
+
+    expect(container.querySelector(".oc-reasoning-part__plain")).toBeNull();
   });
 
   it("renders only the original question for serialized workspace context prompts", () => {
@@ -137,7 +445,8 @@ describe("OpencodeTimeline", () => {
             ["第一步：读取上下文", "", "- 保留原始换行", "- 不触发 Markdown 渲染器"].join("\n")
           )
         ])
-      ]
+      ],
+      running: true
     });
 
     const { container, getByText, queryByTestId } = render(OpencodeTimeline, { props: { state } });
@@ -487,19 +796,20 @@ describe("OpencodeTimeline", () => {
       }
     });
 
-    expect(getByText("读取 88 次")).toBeTruthy();
+    const rootExploreButton = () => container.querySelector("[data-testid='oc-work-status-event-explore']") as HTMLElement | null;
+    expect(rootExploreButton()?.querySelector(".oc-work-status__event-count")?.textContent).toBe("88");
     expect(queryByText("子 Agent 已读取前端目录。")).toBeNull();
 
     await fireEvent.click(container.querySelector(".oc-subagent-card") as HTMLElement);
     await waitMarkdown();
 
     expect(getByText("子 Agent 已读取前端目录。")).toBeTruthy();
-    expect(queryByText("读取 88 次")).toBeNull();
+    expect(rootExploreButton()).toBeNull();
 
     await fireEvent.click(getByText("切换到主 Agent"));
     await waitMarkdown();
 
-    expect(getByText("读取 88 次")).toBeTruthy();
+    expect(rootExploreButton()?.querySelector(".oc-work-status__event-count")?.textContent).toBe("88");
     expect(queryByText("子 Agent 已读取前端目录。")).toBeNull();
     expect(queryAllByText("准备输出…")).toHaveLength(0);
     expect(queryByText("无内容")).toBeNull();
@@ -522,7 +832,7 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".markdown-body")).toBeNull();
   });
 
-  it("shows one lightweight working row in a running child timeline before text output starts", async () => {
+  it("does not add a synthetic working row in a running child timeline before text output starts", async () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_root", "分析前端结构"),
       assistantMessage("msg_root", [
@@ -573,7 +883,7 @@ describe("OpencodeTimeline", () => {
       }
     };
 
-    const { container, getByText, queryAllByText } = render(AssistantThread, {
+    const { container, getByText, queryByText } = render(AssistantThread, {
       props: {
         messages,
         commands: [],
@@ -587,10 +897,10 @@ describe("OpencodeTimeline", () => {
 
     await fireEvent.click(container.querySelector(".oc-subagent-card") as HTMLElement);
 
-    expect(getByText("正在工作")).toBeTruthy();
-    expect(getByText("等待后续输出")).toBeTruthy();
-    expect(queryAllByText("正在工作")).toHaveLength(1);
-    expect(container.querySelector(".oc-working-status")).toBeTruthy();
+    expect(getByText("探索")).toBeTruthy();
+    expect(queryByText("正在工作")).toBeNull();
+    expect(queryByText("等待后续输出")).toBeNull();
+    expect(container.querySelector(".oc-working-status")).toBeNull();
   });
 
   it("uses the opencode-like timeline as the AssistantThread main rendering path", async () => {
@@ -615,14 +925,14 @@ describe("OpencodeTimeline", () => {
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
   });
 
-  it("shows a collapsible todo panel above the composer", async () => {
+  it("shows the current status with collapsible Todo in the dock above the composer", async () => {
     const messages: AgentMessage[] = [userMessage("msg_user_1", "实现 Todo 展示")];
     const { container, getByText, queryByText } = render(AssistantThread, {
       props: {
         messages,
         commands: [],
         resources: [],
-        running: false,
+        running: true,
         todos: [
           { id: "todo_1", text: "分析 SSE 字段", status: "pending", priority: "high" },
           { id: "todo_2", text: "实现面板", status: "in_progress", priority: "medium" },
@@ -632,14 +942,18 @@ describe("OpencodeTimeline", () => {
         ]
       }
     });
+    await nextTick();
 
     const thread = container.querySelector(".ta-assistant-thread");
+    const dock = container.querySelector("[data-testid='assistant-work-status-dock']");
     const todoPanel = container.querySelector(".oc-todo-panel");
     const composer = container.querySelector(".ta-composer-form");
+    expect(dock).toBeTruthy();
     expect(todoPanel).toBeTruthy();
     expect(composer).toBeTruthy();
-    expect(todoPanel?.parentElement).toBe(thread);
-    expect(Array.from(thread?.children ?? []).indexOf(todoPanel as Element)).toBeLessThan(
+    expect(dock?.contains(todoPanel)).toBe(true);
+    expect(container.querySelectorAll(".oc-todo-panel")).toHaveLength(1);
+    expect(Array.from(thread?.children ?? []).indexOf(dock as Element)).toBeLessThan(
       Array.from(thread?.children ?? []).indexOf(composer as Element)
     );
     expect(getByText("待处理 1")).toBeTruthy();
@@ -655,6 +969,30 @@ describe("OpencodeTimeline", () => {
     expect(getByText("分析 SSE 字段")).toBeTruthy();
     expect(getByText("未知状态兼容")).toBeTruthy();
     expect(getByText("blocked")).toBeTruthy();
+  });
+
+  it("shows a completed status after the final assistant output instead of the composer dock", async () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_1", "完成分析"),
+      assistantMessage("msg_assistant_1", [textPart("part_answer_1", "分析已经完成。")])
+    ];
+    const { container } = render(AssistantThread, {
+      props: {
+        messages,
+        commands: [],
+        resources: [],
+        running: false
+      }
+    });
+    await nextTick();
+
+    const viewport = container.querySelector("[data-testid='agent-thread-viewport']") as HTMLElement;
+    const dock = container.querySelector("[data-testid='assistant-work-status-dock']") as HTMLElement;
+    const answerRow = viewport.querySelector(".oc-text-part") as HTMLElement;
+    const completedRow = viewport.querySelector(".oc-work-status-completed") as HTMLElement;
+    expect(completedRow).toBeTruthy();
+    expect(dock.querySelector(".oc-work-status-completed")).toBeNull();
+    expect(answerRow.compareDocumentPosition(completedRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows one assistant header for split assistant messages in the same user turn", async () => {
@@ -675,7 +1013,7 @@ describe("OpencodeTimeline", () => {
     expect(getByText("我是测试智能体。")).toBeTruthy();
   });
 
-  it("keeps step-start metadata on the same assistant line as reasoning", async () => {
+  it("keeps step-start metadata hidden while reasoning remains in the work status", async () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "这个文件里有什么内容"),
@@ -683,17 +1021,17 @@ describe("OpencodeTimeline", () => {
           { partId: "part_step_start", type: "step-start", snapshot: "start" },
           reasoningPart("part_reasoning", "先读取文件内容。")
         ])
-      ]
+      ],
+      running: true
     });
 
     const { container, getByText } = render(OpencodeTimeline, { props: { state } });
     await waitMarkdown();
 
-    const frame = container.querySelector(".oc-assistant-frame.has-header");
-    expect(frame).toBeTruthy();
-    expect(frame?.querySelector(".oc-assistant-frame__avatar")).toBeNull();
-    expect(frame?.textContent).toContain("思考状态");
-    expect(container.querySelectorAll(".oc-assistant-frame")).toHaveLength(1);
+    const status = container.querySelector(".oc-work-status");
+    expect(status).toBeTruthy();
+    expect(status?.textContent).toContain("思考状态");
+    expect(container.querySelectorAll(".oc-assistant-frame")).toHaveLength(0);
     expect(container.querySelector(".oc-unknown-part")).toBeNull();
     expect(getByText("思考状态")).toBeTruthy();
   });
@@ -754,7 +1092,8 @@ describe("OpencodeTimeline", () => {
       ]
     });
 
-    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    const { container, getByRole, getByText } = render(OpencodeTimeline, { props: { state } });
+    await fireEvent.click(getByRole("button", { name: "展开已完成工作状态" }));
     await waitMarkdown();
 
     expect(container.querySelector(".oc-assistant-frame__avatar")).toBeNull();
@@ -771,7 +1110,7 @@ describe("OpencodeTimeline", () => {
     expect(plain?.textContent).toContain("最后组织回答。");
   });
 
-  it("merges repeated tool rows by tool type in one user turn", async () => {
+  it("merges repeated tool rows into counted event icons in one user turn", async () => {
     const state = createOpencodeLikeState({
       messages: [
         userMessage("msg_user_1", "查找需求文档"),
@@ -786,19 +1125,23 @@ describe("OpencodeTimeline", () => {
           { ...toolPart("part_read_2", "read", { filePath: "/very/long/path/b.md" }), status: "failed" }
         ]),
         assistantMessage("msg_answer", [textPart("part_answer", "已找到相关文档。")])
-      ]
+      ],
+      running: true
     });
 
     const { container, getByText } = render(OpencodeTimeline, { props: { state } });
     await waitMarkdown();
 
-    expect(container.querySelectorAll('[data-testid="oc-tool-group"]')).toHaveLength(3);
-    expect(container.querySelectorAll(".oc-tool-group__trigger")).toHaveLength(3);
-    expect(getByText("命令行")).toBeTruthy();
-    expect(getByText("技能")).toBeTruthy();
-    expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__subtitle")[0]?.textContent).toBe("2 次");
-    expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__status")[0]?.textContent).toBe("已读取");
-    expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__status")[1]?.textContent).toBe("失败");
+    const shellButton = container.querySelector("[data-testid='oc-work-status-event-shell']") as HTMLElement;
+    const exploreButton = container.querySelector("[data-testid='oc-work-status-event-explore']") as HTMLElement;
+    const skillButton = container.querySelector("[data-testid='oc-work-status-event-skill']") as HTMLElement;
+    expect(container.querySelectorAll(".oc-work-status__event-button")).toHaveLength(3);
+    expect(shellButton.querySelector(".oc-work-status__event-count")?.textContent).toBe("2");
+    expect(exploreButton.querySelector(".oc-work-status__event-count")?.textContent).toBe("2");
+    expect(skillButton.querySelector(".oc-work-status__event-count")?.textContent).toBe("2");
+    await fireEvent.click(shellButton);
+    expect(getByText("命令行详情")).toBeTruthy();
+    expect(getByText("ls -la")).toBeTruthy();
     expect(getByText("已找到相关文档。")).toBeTruthy();
   });
 
@@ -846,7 +1189,8 @@ describe("OpencodeTimeline", () => {
         assistantMessage("msg_question_1", [answeredQuestion]),
         assistantMessage("msg_read", [toolPart("part_read", "read", { filePath: "README.md" })]),
         assistantMessage("msg_question_2", [pendingQuestion])
-      ]
+      ],
+      running: true
     });
 
     const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
@@ -855,7 +1199,7 @@ describe("OpencodeTimeline", () => {
     expect(questionTools).toHaveLength(2);
     expect(questionTools[0]?.querySelector(".oc-tool__status")?.textContent).toBe("已回答");
     expect(questionTools[1]?.querySelector(".oc-tool__status")?.textContent).toBe("进行中");
-    expect(container.querySelector(".oc-context-group__trigger .oc-tool__status")?.textContent).toBe("已读取");
+    expect(container.querySelector("[data-testid='oc-work-status-event-explore']")).toBeTruthy();
     expect(queryByText("预发布环境")).toBeNull();
 
     await fireEvent.click(questionTools[0]?.querySelector(".oc-tool__trigger") as HTMLElement);

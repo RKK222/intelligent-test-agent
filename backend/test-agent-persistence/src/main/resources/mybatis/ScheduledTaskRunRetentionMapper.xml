@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.ScheduledTaskRunRetentionMapper">
+
+    <delete id="deleteEndedBefore">
+        delete from scheduled_task_runs
+        where ended_at is not null
+          and ended_at &lt; #{cutoff}
+          and status in ('SUCCEEDED', 'FAILED', 'SKIPPED', 'MANUALLY_STOPPED')
+    </delete>
+
+</mapper>

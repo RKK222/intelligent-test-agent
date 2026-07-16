@@ -111,6 +111,20 @@ class MyBatisRunRepositoryIntegrationTest {
     }
 
     @Test
+    void findByIdsReturnsOnlyExistingRunsInRequestedBatch() {
+        Run first = run("run_mybatis_batch_first01", RunStatus.SUCCEEDED, NOW.plusSeconds(1));
+        Run second = run("run_mybatis_batch_second1", RunStatus.FAILED, NOW.plusSeconds(2));
+        repository.save(first);
+        repository.save(second);
+
+        assertThat(repository.findByIds(List.of(
+                        first.runId(),
+                        new RunId("run_mybatis_batch_missing"),
+                        second.runId())))
+                .containsExactlyInAnyOrder(first, second);
+    }
+
+    @Test
     void findStaleActiveRunsReturnsOnlyOldLegacyNonTerminalRunsInStableOrder() {
         Run stalePending = run("run_stale_pending123456", RunStatus.PENDING, NOW.plusSeconds(1));
         Run staleRunning = run("run_stale_running123456", RunStatus.RUNNING, NOW.plusSeconds(2));

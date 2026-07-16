@@ -4,6 +4,7 @@ export type FollowUpDraft = {
   id: string;
   prompt: string;
   parts: PromptPart[];
+  userMessageId: string;
   createdAt: string;
   command?: { command: string; arguments: string };
 };
@@ -11,6 +12,7 @@ export type FollowUpDraft = {
 export function createFollowUpDraft(
   prompt: string,
   parts: PromptPart[],
+  userMessageId: string,
   createdAt = new Date().toISOString(),
   command?: { command: string; arguments: string }
 ): FollowUpDraft {
@@ -18,6 +20,7 @@ export function createFollowUpDraft(
     id: `${createdAt}:${prompt}:${parts.length}`,
     prompt,
     parts,
+    userMessageId,
     createdAt,
     command
   };

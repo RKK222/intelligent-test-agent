@@ -9,5 +9,8 @@ export type {
   OpencodeLikeConversationState,
   OpencodeLikeRuntimeStatus,
   RenderablePartGroup,
-  TimelineRow
+  TimelineRow,
+  WorkStatusEventGroup,
+  WorkStatusPartRef,
+  WorkStatusState
 } from "./state/types";

@@ -20,7 +20,7 @@
 2. durable RunEvent 在每个 runId 内 seq 单调递增。`LEGACY_FULL` 写入 `run_events`；`REDIS_SUMMARY` 把 durable 事件同时写入 `${seq}-0` 的 `events` Stream、`${runtimeVersion}-0` 的 `runtime-events` Stream 和物化 snapshot，不写 `run_events`。
 3. transient live output 不写入 `run_events` 或 Redis durable `events` Stream，payload `seq=0`，SSE 不设置 `id`；新模式会把 transient 事件写入 `${runtimeVersion}-0` 的 `runtime-events` Stream 并更新物化 snapshot，本机 live bus 只作为 SSE 低延迟唤醒信号。
 4. durable SSE event id 使用 seq；transient event 不参与 `Last-Event-ID` 恢复。
-5. 前端断线后通过 Last-Event-ID 续传 durable RunEvent。legacy 从数据库事件和 opencode projected messages 恢复；新模式首先用 Redis 物化 snapshot reset 恢复当前可见状态，再按 `runtimeVersion` 从 `runtime-events` Stream 连续读取 durable/transient 尾流，不触发兼容远端消息 snapshot。
+5. 前端断线后通过 Last-Event-ID 续传 durable RunEvent。legacy 从数据库事件和按稳定 dispatch user 因果裁剪后的 opencode projected messages 恢复；新模式首先用 Redis 物化 snapshot reset 恢复当前可见状态，再按 `runtimeVersion` 从 `runtime-events` Stream 连续读取 durable/transient 尾流，不触发兼容远端消息 snapshot。
 6. 不把 opencode raw event 原样透传给前端，也不把大段日志、bash/tool output 或高频文本 delta 作为平台持久化事件保存。
 7. generated SDK 事件必须在 `test-agent-event` 或 `test-agent-opencode-client` 映射为平台事件。
 8. root `run.succeeded/run.failed/run.cancelled` 是 Run 终态事实源；`Streaming response failed` 等 prompt_async 提交错误、SSE 订阅 transport error 或浏览器连接错误没有独立业务终态含义，先到时只可延迟收敛为失败，窗口内若收到 root 终态则不得补写旧 `run.failed`；若临时失败已经先落库，后到 root 终态仍可按最后 root 终态纠正 Run 状态和最终快照。
@@ -45,7 +45,7 @@
 
 | wire name | 说明 |
 |---|---|
-| `run.created` | Run 已创建；`REDIS_SUMMARY` 额外携带 `storageMode/clientRequestId/assistantSummaryMessageId`，其中稳定平台消息 ID 供终态反馈直接使用。 |
+| `run.created` | Run 已创建；前端据其 `runId` 绑定当前根用户消息。`REDIS_SUMMARY` 仍可额外携带 `storageMode/clientRequestId/assistantSummaryMessageId` 供摘要定位兼容。 |
 | `run.started` | Run 已开始执行。 |
 | `run.cancelling` | Run 正在取消。 |
 | `run.succeeded` | Run 成功结束。 |
@@ -123,7 +123,7 @@ data: {"eventId":"evt_snapshot_reset_run_x_2_10520","runId":"run_x","seq":0,"typ
 }
 ```
 
-`assistantSummaryMessageId` 在 Run 开始时确定，并与终态 PostgreSQL ASSISTANT 摘要行复用同一 ID；前端不得再通过轮询 Session 消息列表寻找反馈 ID。
+`assistantSummaryMessageId` 在 Run 开始时确定，并与终态 PostgreSQL ASSISTANT 摘要行复用同一 ID；反馈已改用 `runId`，该字段只用于摘要消息定位兼容。
 
 前端处理顺序固定为：
 
@@ -164,6 +164,8 @@ payload 字段：
 - 未知 `status` 保留原始字符串展示，并归入“其他”数量。
 - opencode 原生 Todo 没有稳定 `id` 字段，前端在缺少 `id/todoId/todoID` 时按数组位置和内容生成展示用 key。
 - 右侧对话面板在输入框上方显示 Todo 面板：收起态展示各状态数量和总数，展开态展示完整 Todo 列表。
+- RunEvent 外层 `runId` 是 Todo 归属用户轮次的必要边界；root `todo.updated` 与 root `todowrite` part 只更新该 Run 绑定的用户消息，child session Todo 不进入 root 状态块。新请求替代旧 Run 后，旧 Run 的 Todo 与 `run.snapshot.reset` 不得再投影到当前对话；等待标题同步期间仅 `session.updated` 可以继续被消费。
+- 历史恢复只使用可归属到具体 root 用户轮次的 `todo.updated/todowrite` 快照，child user 不参与最新轮判断；同轮显式 `todo.updated` 优先于持久化 `todowrite` fallback。session Todo HTTP 没有 Run/轮次字段，非空结果只能在最新 root 轮已有 Todo owner 证据时校准；无法确认时保持不展示，空结果只清空当前轮。runtime-state 接管若不对应本页显式未决请求，则必须等该 Run 的远端 user message 到达后再接受 Todo。
 
 ## `question.asked`
 
@@ -346,7 +348,7 @@ retry 字段：
 - 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传优先使用 `GET /api/internal/agent/{agentId}/runs/{runId}/events?lastEventId={seq}`，默认 `agentId=opencode`。内部平台入口 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}` 继续有效；旧 `GET /api/runs/{runId}/events?lastEventId={seq}` 已作废，返回 `410 API_GONE`。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
-- `LEGACY_FULL` 的消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。快照恢复与 durable replay、本机 live bus 并发订阅。`REDIS_SUMMARY` 不订阅该兼容远端 snapshot Flux；每次建连先发完整 Redis 物化 reset，再按 `runtimeVersion` 读取 durable/transient 尾流，容量换代时按上节再次重置 reducer。opencode workspace 级事件流由 opencode-client 保留 raw/mapped DTO 边界，事件是否属于当前 Run 的 root/child scope 由 runtime `RunSessionScopeRouter` 判定；显式属于未知 session 的事件不会按 root 处理。当前 Run 收到 root 成功/失败终态后结束远端订阅，避免同一会话后续轮次串流。
+- `LEGACY_FULL` 的消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 从最新页沿 `before` cursor 查找本 Run 的稳定 USER dispatch ID，只把该 user 的直接 assistant 转换为 transient `message.updated` / `message.part.updated` snapshot 事件。平台 USER、root scope 与 locator 锚点不一致，明确锚点尚未到达，重复 cursor、20 页超限或旧 Run 时间窗内 user 不唯一时都返回空消息投影，不回退“最后一轮”；因此旧轮 `todowrite` 不会被重新标成当前 Run。快照恢复与 durable replay、本机 live bus 并发订阅。`REDIS_SUMMARY` 不订阅该兼容远端 snapshot Flux；每次建连先发完整 Redis 物化 reset，再按 `runtimeVersion` 读取 durable/transient 尾流，容量换代时按上节再次重置 reducer。opencode workspace 级事件流由 opencode-client 保留 raw/mapped DTO 边界，事件是否属于当前 Run 的 root/child scope 由 runtime `RunSessionScopeRouter` 判定；显式属于未知 session 的事件不会按 root 处理。当前 Run 收到 root 成功/失败终态后结束远端订阅，避免同一会话后续轮次串流。
 
 ## Run Session Scope
 
@@ -375,6 +377,7 @@ scope 发现与缓存规则：
 - `session.scope.updated` 是 durable 事件，当前用于 `SESSION_ADDED`，紧随 `session.child.discovered` 输出，便于前端或历史投影更新 session tree 索引。
 - `RunSessionScopeRouter` 为每个订阅保存 known sessions 和 `scopeVersion`；已知 root/child 的稳定事件只命中订阅态，不反查数据库。终态或启动失败后释放该本机状态。
 - `LEGACY_FULL` 的旧 scope cache 继续使用 `test-agent:run-scope:{runId}:...` 30 分钟 key，并只在 cache miss 或发现新 child 时兼容访问 `run_session_scopes`；Redis cache 不可用时数据库仍是 legacy 恢复事实源。
+- 新 Run 的 root scope metadata 保存与 agent command、平台 USER `remoteMessageId` 一致的 `dispatchMessageId`；Run 消息恢复和终态快照必须与其它锚点来源交叉校验。已记录的 child scope 可以独立恢复，但只有当前 Run 已选择的 root 消息允许发现新的 child，旧轮 task part 不能扩张新 Run 子树。
 - `REDIS_SUMMARY` 禁止查询或写入 `run_session_scopes`。Run 运行数据面的 scope、dedup 和 pending 能力由 `RunRuntimeStore` 端口定义，单 Run key 必须使用 `test-agent:run:{runId}:...` hash tag；执行订阅携带 owner fencing token，scope/dedup/pending 和事件投影都在 Redis Lua 的首个副作用前校验 token，旧 owner 返回冲突且不会进入 live bus。pending append/drain 同时原子维护统一详情字节预算与更新时间。跨 slot active/history 索引在初始化 Lua 前按“所有运行态中最长物理 TTL 的两倍”保守登记，覆盖上次已经处于最长 TTL 的刷新与下一次最长 TTL 事件后的完整窗口；服务器/用户恢复读取会修复全部索引，普通读路径回读 manifest 清理悬空成员。Redis 不可用时返回 `RUNTIME_STATE_UNAVAILABLE`，不得降级 DB-only。
 - opencode raw event id 缺失时 payload 不应包含 `rawEventId`，数据库 `run_events.raw_event_id` 保持 `NULL`。由 root session 事件派生的 `run.succeeded/run.failed` 不复用原始 `rawEventId`，避免与对应 `session.status/session.error` 误去重；派生事件 payload 会带 `derived=true`、`derivedFromRawType`，有原始事件 ID 时还带 `derivedFromRawEventId`。
 - payload 对常见 opencode 大写 ID 字段保留原字段并补充 lower camel alias：`sessionID -> sessionId`、`messageID -> messageId`、`partID -> partId`、`callID -> callId`、`requestID -> requestId`。前端必须允许两种字段并存。
@@ -401,6 +404,12 @@ scope 发现与缓存规则：
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
 - 后端处理 root 终态时必须先读取当前 Run，并把 root 终态作为最终事实保存；后到 root 终态可以纠正先到的 transport error 临时失败并刷新终态快照。`Streaming response failed` 等 transport error 没有独立业务终态含义，应给 root 终态短暂到达窗口；窗口内没有 root 终态时才在 Run 仍非终态的前提下收敛为 `run.failed`，并在 payload 中保留单行、长度受限的安全错误说明，供前端解释为什么停止输出。
 
+## 内部模型代理 SSE
+
+`POST /api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` 仅供用户 OpenCode 进程调用，不是前端 RunEvent SSE。Java 只对 `2xx + text/event-stream` 响应使用 `ServerSentEvent` 语义转换：每个事件的 `id/event/retry/comment/data` 语义保留；没有 `reasoning_content` 时把 `data` 中的 `<think>...</think>` 迁移为 `reasoning_content`，已有 textual `reasoning_content` 时整个 delta 原样保留；`[DONE]` 原样保留。代理不会手工追加 `data:`，因此下游不会出现 `data:data:`。
+
+所有非 `2xx` 响应（包括 `4xx + text/event-stream`）和非 SSE 响应按 `DataBuffer` 原样转发，保留状态码、`Content-Type`、`Content-Encoding`、错误正文、`Retry-After` 和 trace header。连接超时为 10 秒，首个响应和首个事件等待为 30 秒，后续事件空闲为 120 秒，不设置整个 SSE 生命周期超时；下游取消会取消到行内模型的上游订阅。
+
 ## Runtime SSE
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 是 agent-scoped RunEvent 实时入口，前端默认使用 `agentId=opencode`。`GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 是内部平台入口。旧 `GET /api/runs/{runId}/events` 已作废，返回 `410 API_GONE`。有效入口返回 `text/event-stream`，共享同一续传、traceId、错误格式和事件模型，payload 格式不随 agentId 改变。目标 Java 在发出首帧前校验认证用户拥有该 Run；新模式直接比较 Redis manifest `userId` 且不查询 PostgreSQL，legacy/详情过期才回查 Run 与 Session，越权返回 `403 FORBIDDEN` 且不进入 snapshot/replay/live 流。
@@ -409,7 +418,7 @@ scope 发现与缓存规则：
 
 应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。多服务器下应用版本工作区同步使用后端内部服务器广播，不暴露给浏览器 SSE。
 
-Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/agent-config/**` 的公共级/工作空间级 Git 更新、worktree、commit、publish 进度通过 ticket 保护的 WebSocket `/operations/{operationId}/ws?ticket=...` 推送 `snapshot`、`step`、`completed`、`failed`，也可通过 `GET /operations/{operationId}` 查询快照；公共 Git 仅 SUPER_ADMIN，应用级 Agent/Skill Git 由 APP_ADMIN（含 SUPER_ADMIN）执行。该进度不写入 `run_events`，不参与 RunEvent `Last-Event-ID` 续传。
+Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/agent-config/**` 的公共级/工作空间级 Git 更新、worktree、commit、publish 进度通过 ticket 保护的 WebSocket `/operations/{operationId}/ws?ticket=...` 推送 `snapshot`、`step`、`completed`、`failed`，也可通过 `GET /operations/{operationId}` 查询快照；公共 Git 仅 SUPER_ADMIN，应用级 Agent/Skill Git 由 APP_ADMIN（含 SUPER_ADMIN）执行。ticket 响应返回签发节点的绝对 `ws://`/`wss://` 地址，保证多后台下 upgrade 回到保存一次性 ticket 的同一 JVM；跨节点进度继续由既有服务器广播汇入该节点。该进度不写入 `run_events`，不参与 RunEvent `Last-Event-ID` 续传。
 
 当前用户 opencode 进程初始化进度不产生 RunEvent/SSE。`POST /api/internal/agent/{agentId}/processes/me/initialize` 传入 `operationId` 时，后端把校验、确认分配、选择容器、准备参数、进程启动、记录候选进程、检查进程、健康检查、写入绑定和完成/失败写入 `opencode_process_start_operations`；前端通过 `GET /api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}` HTTP 轮询读取。该只读查询不触发 manager health/start，不写 RunEvent，也不参与 `Last-Event-ID` 续传。
 
@@ -419,7 +428,7 @@ Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspa
 
 超级管理员定时任务管理页调用的 `/api/internal/platform/scheduler-management/**` 只维护 scheduler 任务定义和运行记录，不新增 SSE 事件类型，也不向 RunEvent 流发布任务状态变化；页面刷新通过 HTTP 查询完成。
 
-AI 回复满意度反馈接口 `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback` 只写入 `ai_message_feedbacks` 事实表，不产生 RunEvent，不通过 SSE 推送反馈状态；当前用户刷新或重新进入会话时通过 `GET .../feedback/me` 查询自己的反馈。运营分析页 `/api/internal/platform/analytics/**` 只读取 hourly/daily rollup、水位和明细查询接口，不订阅 RunEvent，也不新增 SSE 事件类型。反馈、Diff、Run 状态和 token 等运营指标由后台 rollup runner 定期从事实表聚合，主链路不在 RunEvent 里补发统计事件。
+AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId}/feedback` 只写入 `ai_message_feedbacks` 事实表，不产生 RunEvent，不通过 SSE 推送反馈状态；前端用既有 Run 终态事件绑定用户轮次，并通过 HTTP 批量接口恢复历史 Run 状态与当前用户反馈。旧消息反馈接口只作兼容。运营分析页 `/api/internal/platform/analytics/**` 只读取 hourly/daily rollup、水位和明细查询接口，不订阅 RunEvent，也不新增 SSE 事件类型。反馈、Diff、Run 状态和 token 等运营指标由后台 rollup runner 定期从事实表聚合，主链路不在 RunEvent 里补发统计事件。
 
 ## Internal Server Broadcast
 
@@ -455,7 +464,7 @@ AI 回复满意度反馈接口 `/api/internal/platform/opencode-runtime/messages
 }
 ```
 
-`workspace.version.sync-requested` 的 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`GIT_PULL_REQUESTED`、`GIT_PULLED`。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；远端节点使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset 到目标 commit。浏览器不订阅该广播；在线用户由前端提示手动刷新/同步，禁止自动覆盖脏个人 worktree。消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
+`workspace.version.sync-requested` 的 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`AGENT_CONFIG_PUBLISHED`、`GIT_PULL_REQUESTED`、`GIT_PULLED`。应用 Agent/Skill 配置推送 feature 成功后使用 `AGENT_CONFIG_PUBLISHED`，并先更新应用版本与本机副本 HEAD。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；远端节点使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset 到目标 commit。浏览器不订阅该广播；在线用户由前端提示手动刷新/同步，禁止自动覆盖脏个人 worktree。消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
 
 `common-parameter.refresh-requested` 用于通用参数 `value` 修改后的跨实例联动。某实例 `PATCH` 修改参数后，本地广播器发布该广播并发布本地 `CommonParameterReloadedEvent`；其他实例收到后发布本地 `CommonParameterReloadedEvent`，监听方直接从数据库读取最新参数并向本实例持有的 opencode manager 下发最新运行配置。远端处理不再转发广播，避免循环；消费者跳过 `originInstanceId` 与本机相同的事件。payload 只携带参数标识，不携带参数值（各实例自行从库读取，避免值在总线明文）：
 
@@ -486,6 +495,8 @@ AI 回复满意度反馈接口 `/api/internal/platform/opencode-runtime/messages
 ```text
 /api/internal/platform/workspace-management/file/ws?ticket=wft_...
 ```
+
+route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。
 
 客户端请求 envelope：
 
@@ -561,7 +572,7 @@ data: {"eventId":"evt_live_...","runId":"run_...","seq":0,"type":"message.part.d
 实现策略：
 
 - RunEvent SSE 入口优先从 Redis manifest 读取 Run 创建时固定的 `producerLinuxServerId`；manifest 缺失的 legacy/旧 Run 才按 `routing_decisions -> executionNodeId -> opencode process -> linuxServerId` 定位生产 Java。目标不是当前 Java 时通过 `BackendSseForwarder` 流式转发 `text/event-stream`，并透传 `Authorization`、`X-Trace-Id`、`Last-Event-ID` 和 query。目标 Java 收到内部路由头后跳过二次路由。
-- `LEGACY_FULL` 在目标 Java 合并 `run_events` polling replay、兼容消息 snapshot 与本机 live bus；每次按 `runId + lastSeq` 查询，默认批量上限 100。
+- `LEGACY_FULL` 在目标 Java 合并 `run_events` polling replay、按 dispatch user 裁剪的兼容消息 snapshot 与本机 live bus；durable 事件每次按 `runId + lastSeq` 查询，默认批量上限 100；远端消息单页 100、最多 20 页，归属不明确时消息投影为空但 durable 回放继续。
 - `REDIS_SUMMARY` 在目标 Java 首帧总发送完整 Hash/ZSET 物化 `run.snapshot.reset`，以 snapshot `runtimeVersion` 为起点，由最短 5 秒的 Redis 安全扫描和本机 live bus 唤醒、分页读取 Redis `runtime-events` 尾流。live 事件仍即时唤醒但帧本身不直接输出，所以慢订阅、并发追加和唤醒丢失都由 Redis 顺序补偿。活跃 SSE 连接不创建 500ms PostgreSQL polling，也不读取 `run_events`、`run_session_scopes` 或 routing/process 表。单个 Run 的跨 Java 实时消息链路不使用 Redis Pub/Sub，而是让 SSE 跟随 manifest 指定的生产 Java。
 - **legacy durable 事件可能重复投递**：落库的 durable 事件既经 live bus 即时下发，又可能在下一轮 replay 轮询中被查出（live 推送与轮询游标推进存在竞态）。同一 durable 事件携带稳定的 `evt_` 前缀 `eventId`，前端必须按 `eventId` 去重；transient 事件 `eventId` 为 `evt_live_` 前缀且 `seq=0`，同样按 `eventId` 去重。
 - `RunEventLiveBus` 基于 Reactor `Sinks`，只服务当前进程已连接的 SSE 订阅。live bus 是 best-effort 实时通道：客户端消费过慢、断开或并发发布产生背压时，后端可以丢弃当前 live 帧，但不得让全局 live bus 进入 error/complete；legacy durable 事件可由数据库 replay 恢复，legacy transient 内容依赖兼容消息 snapshot；新模式 live bus 丢帧不丢事实，durable/transient 事件由 `runtime-events` 有序尾流恢复，当前可见状态由物化 snapshot 恢复。

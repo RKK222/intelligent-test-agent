@@ -1,13 +1,14 @@
 package com.icbc.testagent.api.web.platform;
 
-import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.icbc.testagent.api.web.common.TraceIdWebFilter;
+import com.icbc.testagent.domain.opencodeprocess.BackendInstanceIdentity;
+import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.opencode.runtime.terminal.TerminalApplicationService;
 import com.icbc.testagent.opencode.runtime.terminal.TerminalTicketRequest;
 import com.icbc.testagent.opencode.runtime.terminal.TerminalTicketResponse;
-import com.icbc.testagent.domain.session.SessionId;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -26,7 +27,7 @@ class TerminalControllerTest {
                         "pty_1234567890abcdef",
                         Instant.parse("2026-06-19T00:01:00Z"),
                         "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef"));
-        WebTestClient client = WebTestClient.bindToController(new TerminalController(service))
+        WebTestClient client = WebTestClient.bindToController(new TerminalController(service, webSocketUrlFactory()))
                 .webFilter(new TraceIdWebFilter())
                 .build();
 
@@ -42,7 +43,7 @@ class TerminalControllerTest {
                 .expectBody()
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.ticket").isEqualTo("pty_1234567890abcdef")
-                .jsonPath("$.data.webSocketUrl").isEqualTo("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+                .jsonPath("$.data.webSocketUrl").isEqualTo("ws://122.233.30.114:8080/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
     }
 
     @Test
@@ -56,7 +57,7 @@ class TerminalControllerTest {
                         "pty_1234567890abcdef",
                         Instant.parse("2026-06-19T00:01:00Z"),
                         "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef"));
-        WebTestClient client = WebTestClient.bindToController(new TerminalController(service))
+        WebTestClient client = WebTestClient.bindToController(new TerminalController(service, webSocketUrlFactory()))
                 .webFilter(new TraceIdWebFilter())
                 .build();
 
@@ -72,6 +73,12 @@ class TerminalControllerTest {
                 .expectBody()
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.ticket").isEqualTo("pty_1234567890abcdef")
-                .jsonPath("$.data.webSocketUrl").isEqualTo("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+                .jsonPath("$.data.webSocketUrl").isEqualTo("ws://122.233.30.114:8080/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+    }
+
+    private CurrentBackendWebSocketUrlFactory webSocketUrlFactory() {
+        BackendInstanceIdentity identity = org.mockito.Mockito.mock(BackendInstanceIdentity.class);
+        when(identity.listenUrl()).thenReturn("http://122.233.30.114:8080");
+        return new CurrentBackendWebSocketUrlFactory(identity);
     }
 }

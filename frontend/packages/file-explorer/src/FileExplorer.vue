@@ -12,6 +12,8 @@ export type FileExplorerProps = {
   loadingPath?: Set<string>;
   hideHeader?: boolean;
   hideTabbar?: boolean;
+  /** 当前工作区是否允许文件新增、删除和重命名；只读时仍允许浏览、搜索和加入对话。 */
+  canWrite?: boolean;
   activeTab?: ExplorerTab;
   // 搜索相关 props（由应用层传入）
   searchResults?: FileSearchResult[];
@@ -32,7 +34,7 @@ import { highlightKeyword } from "./highlightKeyword";
 import DirectoryRows from "./DirectoryRows.vue";
 import FileIcon from "./FileIcon.vue";
 
-const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "Workspace" });
+const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "Workspace", canWrite: true });
 const computedTab = computed(() => props.activeTab ?? tab.value);
 const emit = defineEmits<{
   toggleDirectory: [path: string];
@@ -159,6 +161,7 @@ function fileIconClass(name: string, path: string) {
         :active-path="activePath"
         :loading-path="loadingPath"
         :change-stats="changeStats"
+        :can-write="canWrite"
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"

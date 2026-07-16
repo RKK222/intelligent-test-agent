@@ -22,12 +22,16 @@ import reactor.core.scheduler.Schedulers;
 public class TerminalController {
 
     private final TerminalApplicationService terminalService;
+    private final CurrentBackendWebSocketUrlFactory webSocketUrlFactory;
 
     /**
      * 注入终端应用服务，HTTP 层只负责发放短期 WebSocket ticket。
      */
-    public TerminalController(TerminalApplicationService terminalService) {
+    public TerminalController(
+            TerminalApplicationService terminalService,
+            CurrentBackendWebSocketUrlFactory webSocketUrlFactory) {
         this.terminalService = terminalService;
+        this.webSocketUrlFactory = webSocketUrlFactory;
     }
 
     /**
@@ -41,8 +45,7 @@ public class TerminalController {
         TerminalTicketRequest resolved = request == null ? new TerminalTicketRequest(null, null, null, null, null) : request;
         return blockingResponse(exchange, traceId -> terminalTicketResponse(
                 sessionId,
-                terminalService.createTicket(new SessionId(sessionId), resolved, traceId),
-                exchange));
+                terminalService.createTicket(new SessionId(sessionId), resolved, traceId)));
     }
 
     /**
@@ -55,15 +58,16 @@ public class TerminalController {
     }
 
     /**
-     * 内部平台路径需要返回同前缀 WebSocket URL，避免前端再做路径重写。
+     * 返回签发 ticket 的当前 Java 绝对地址，避免多后台负载均衡把 upgrade 分配到其他 JVM。
      */
     private TerminalTicketResponse terminalTicketResponse(
             String sessionId,
-            TerminalTicketResponse response,
-            ServerWebExchange exchange) {
+            TerminalTicketResponse response) {
+        String pathAndQuery = "/api/internal/platform/opencode-runtime/sessions/"
+                + sessionId + "/terminal/ws?ticket=" + response.ticket();
         return new TerminalTicketResponse(
                 response.ticket(),
                 response.expiresAt(),
-                "/api/internal/platform/opencode-runtime/sessions/" + sessionId + "/terminal/ws?ticket=" + response.ticket());
+                webSocketUrlFactory.absoluteUrl(pathAndQuery));
     }
 }

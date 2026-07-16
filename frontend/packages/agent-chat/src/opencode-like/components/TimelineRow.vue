@@ -5,15 +5,17 @@ import type { OpencodeLikeConversationState, TimelineRow } from "../state/types"
 export type TimelineRowProps = {
   row: TimelineRow;
   state: OpencodeLikeConversationState;
+  openWorkStatusEventKey?: string;
+  historicalWorkStatusExpanded?: boolean;
+  completedWorkStatusExpanded?: boolean;
 };
 </script>
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { Activity, ChevronUp } from "lucide-vue-next";
 import UserMessageRow from "./rows/UserMessageRow.vue";
 import AssistantPartRow from "./rows/AssistantPartRow.vue";
-import ThinkingRow from "./rows/ThinkingRow.vue";
-import WorkingStatusRow from "./rows/WorkingStatusRow.vue";
 import RetryRow from "./rows/RetryRow.vue";
 import DiffSummaryRow from "./rows/DiffSummaryRow.vue";
 import ErrorRow from "./rows/ErrorRow.vue";
@@ -21,9 +23,23 @@ import AssistantMessageFrame from "./rows/AssistantMessageFrame.vue";
 import ReasoningPartGroup from "./parts/ReasoningPartGroup.vue";
 import ContextToolGroup from "./tools/ContextToolGroup.vue";
 import ToolPartGroup from "./tools/ToolPartGroup.vue";
+import WorkStatusRow from "./rows/WorkStatusRow.vue";
+import OcIconButton from "./primitives/OcIconButton.vue";
 
 const props = defineProps<TimelineRowProps>();
-const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagent: [sessionId: string] }>();
+const emit = defineEmits<{
+  openDiff: [];
+  openFile: [path: string];
+  selectSubagent: [sessionId: string];
+  toggleWorkStatusEvent: [eventKey: string];
+  toggleHistoricalWorkStatus: [];
+  toggleCompletedWorkStatus: [];
+  closeWorkStatusEvent: [];
+}>();
+
+defineSlots<{
+  "completed-status-actions"?: (props: { row: Extract<TimelineRow, { type: "work-status" }> }) => unknown;
+}>();
 
 const userMessage = computed(() => props.state.messageById[props.row.type === "error" ? "" : props.row.userMessageId]);
 
@@ -140,13 +156,61 @@ const toolGroupParts = computed(() => {
       :streaming-text-by-part-id="state.streamingTextByPartId"
     />
   </AssistantMessageFrame>
-  <WorkingStatusRow
-    v-else-if="row.type === 'working-status'"
-    class="oc-row"
-    :continuation="row.previousAssistantPart"
-    :show-header="row.showAssistantHeader"
-  />
-  <ThinkingRow v-else-if="row.type === 'thinking'" class="oc-row" />
+  <div
+    v-else-if="row.type === 'work-status' && !row.isLatest && !historicalWorkStatusExpanded"
+    class="oc-row oc-work-status-history"
+  >
+    <OcIconButton
+      class="oc-work-status-history-trigger"
+      label="展开历史工作状态"
+      @click="emit('toggleHistoricalWorkStatus')"
+    >
+      <Activity aria-hidden="true" />
+    </OcIconButton>
+    <slot name="completed-status-actions" :row="row" />
+  </div>
+  <div
+    v-else-if="row.type === 'work-status' && row.isLatest && row.status === 'completed'"
+    class="oc-row oc-work-status-completed"
+  >
+    <div class="oc-work-status-completed-summary">
+      <OcIconButton
+        class="oc-work-status-completed-trigger"
+        :label="completedWorkStatusExpanded ? '收起已完成工作状态' : '展开已完成工作状态'"
+        :aria-expanded="completedWorkStatusExpanded"
+        @click="emit('toggleCompletedWorkStatus')"
+      >
+        <Activity aria-hidden="true" />
+      </OcIconButton>
+      <slot name="completed-status-actions" :row="row" />
+    </div>
+    <WorkStatusRow
+      v-if="completedWorkStatusExpanded"
+      :row="row"
+      :state="state"
+      :open-event-key="openWorkStatusEventKey"
+      @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
+      @close-event="emit('closeWorkStatusEvent')"
+    />
+  </div>
+  <div v-else-if="row.type === 'work-status'" class="oc-row oc-work-status-container">
+    <WorkStatusRow
+      :row="row"
+      :state="state"
+      :open-event-key="openWorkStatusEventKey"
+      @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
+      @close-event="emit('closeWorkStatusEvent')"
+    />
+    <OcIconButton
+      v-if="!row.isLatest"
+      class="oc-work-status-history-collapse"
+      label="收起历史工作状态"
+      @click="emit('toggleHistoricalWorkStatus')"
+    >
+      <ChevronUp aria-hidden="true" />
+    </OcIconButton>
+    <slot v-if="!row.isLatest && row.status === 'completed'" name="completed-status-actions" :row="row" />
+  </div>
   <RetryRow
     v-else-if="row.type === 'retry'"
     class="oc-row"

@@ -3,9 +3,11 @@ set -euo pipefail
 
 ARCHIVE="/data/0709/internal.zip"
 EXTRACT_DIR="/data/0709/test-agent-internal-frontend"
+EXTRACT_DIR_EXPLICIT=0
 FRONTEND_ROOT="/data/testagent"
 FRONTEND_HEALTH_URL="http://122.233.30.2/health"
 FRONTEND_URL="http://122.233.30.2/"
+NGINX_ENV="/data/testagent/config/nginx.env"
 KEEP_EXTRACT=0
 VALIDATE_ONLY=0
 
@@ -23,6 +25,7 @@ Options:
   --frontend-root <path>       Frontend install root. Default: /data/testagent.
   --frontend-health-url <url>  Frontend health URL. Default: http://122.233.30.2/health.
   --frontend-url <url>         Frontend page URL. Default: http://122.233.30.2/.
+  --nginx-env <path>           Nginx env path. Default: /data/testagent/config/nginx.env.
   --keep-extract              Keep extracted temporary files after success.
   --validate-only             Only unzip and validate frontend artifacts, without deploying.
   -h, --help                  Show this help.
@@ -37,6 +40,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --extract-dir)
       EXTRACT_DIR="$2"
+      EXTRACT_DIR_EXPLICIT=1
       shift 2
       ;;
     --frontend-root)
@@ -49,6 +53,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --frontend-url)
       FRONTEND_URL="$2"
+      shift 2
+      ;;
+    --nginx-env)
+      NGINX_ENV="$2"
       shift 2
       ;;
     --keep-extract)
@@ -70,6 +78,18 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# 仅校验包时使用系统临时目录，不要求校验机存在生产路径 /data/testagent。
+if [[ "${VALIDATE_ONLY}" -eq 1 && "${EXTRACT_DIR_EXPLICIT}" -eq 0 ]]; then
+  EXTRACT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-internal-frontend-validate.XXXXXX")"
+fi
+
+cleanup_validate_extract() {
+  if [[ "${VALIDATE_ONLY}" -eq 1 && "${KEEP_EXTRACT}" -eq 0 ]]; then
+    rm -rf "${EXTRACT_DIR}"
+  fi
+}
+trap cleanup_validate_extract EXIT
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -114,12 +134,14 @@ unzip -q "${ARCHIVE}" -d "${EXTRACT_DIR}"
 
 FRONTEND_ARCHIVE="$(find_first_file "${EXTRACT_DIR}" 'test-agent-frontend-dist.tar.gz')"
 DEPLOY_FRONTEND_SCRIPT="$(find_first_file "${EXTRACT_DIR}" 'deploy-internal-frontend.sh')"
+CONFIGURE_NGINX_SCRIPT="$(find_first_file "${EXTRACT_DIR}" 'configure-nginx.sh')"
 DEPLOY_INTERNAL_SRC=""
 if [[ -n "${DEPLOY_FRONTEND_SCRIPT}" ]]; then
   DEPLOY_INTERNAL_SRC="$(cd "$(dirname "${DEPLOY_FRONTEND_SCRIPT}")" && pwd)"
 fi
 
 require_file "${FRONTEND_ARCHIVE}"
+require_file "${CONFIGURE_NGINX_SCRIPT}"
 if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
   echo "deploy/internal directory not found in archive" >&2
   exit 1
@@ -134,6 +156,8 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   fi
   exit 0
 fi
+
+require_file "${NGINX_ENV}"
 
 log "Update frontend under ${FRONTEND_ROOT}"
 timestamp="$(date +%Y%m%d%H%M%S)"
@@ -154,8 +178,7 @@ if [[ -d "${FRONTEND_ROOT}/frontend" ]]; then
 fi
 
 tar -C "${FRONTEND_ROOT}" -xzf "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
-nginx -t
-systemctl reload nginx
+bash "${FRONTEND_ROOT}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 curl -fsS "${FRONTEND_HEALTH_URL}" >/dev/null
 curl -fsS "${FRONTEND_URL}" >/dev/null
 

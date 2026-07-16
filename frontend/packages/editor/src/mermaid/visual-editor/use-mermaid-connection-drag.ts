@@ -22,11 +22,16 @@ type ControllerOptions = {
   getCanvasElement: () => HTMLElement | undefined;
   getGraph: () => MermaidGraph;
   onConnect: (connection: MermaidPortConnection) => void;
+  /** 拖动已存在连线的端点重连到新节点/端口时调用；end 表示拖动的是哪一端。 */
+  onReconnect?: (edgeId: string, end: "source" | "target", connection: MermaidPortConnection) => void;
   requestAnimationFrame?: (callback: FrameRequestCallback) => number;
   cancelAnimationFrame?: (handle: number) => void;
   windowTarget?: Window;
   documentTarget?: Document;
 };
+
+/** 重连模式：记录被拖动的边与端点。end='target' 时固定端是 source，end='source' 时固定端是 target。 */
+export type MermaidReconnectMode = { edgeId: string; end: "source" | "target" };
 
 function oppositePosition(position: Position): Position {
   if (position === Position.Left) return Position.Right;
@@ -58,7 +63,9 @@ export function createMermaidConnectionDragController(options: ControllerOptions
   const dragPath = ref("");
   const invalidReason = ref<string>();
   const dragEndPoint = ref<{ x: number; y: number }>();
+  const isReconnecting = ref(false);
   let source: MermaidConnectionStart | undefined;
+  let reconnect: { edgeId: string; end: "source" | "target" } | undefined;
   let pendingPoint: MermaidScreenPoint | undefined;
   let frameId: number | undefined;
   let lastSnappedPort: { nodeId: string; handleId: string } | undefined;
@@ -125,6 +132,26 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     })[0];
   }
 
+  /** 根据当前模式构造连线。create 与 reconnect-target 都是 source(固定)->snapped(拖动端)；
+   *  reconnect-source 时固定端是 target，拖动端(snapped)成为新的 source，故方向反转。 */
+  function buildConnection(): MermaidPortConnection {
+    if (!source) return { source: null, target: null, sourceHandle: null, targetHandle: null };
+    if (reconnect?.end === "source") {
+      return {
+        source: targetNodeId.value ?? null,
+        target: source.nodeId,
+        sourceHandle: targetHandleId.value ?? null,
+        targetHandle: source.handleId
+      };
+    }
+    return {
+      source: source.nodeId,
+      target: targetNodeId.value ?? null,
+      sourceHandle: source.handleId,
+      targetHandle: targetHandleId.value ?? null
+    };
+  }
+
   function updateFromPoint(point: MermaidScreenPoint) {
     if (!source) return;
     const canvas = options.getCanvasElement();
@@ -157,19 +184,15 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     if (targetPort) {
       lastSnappedPort = { nodeId: targetPort.nodeId, handleId: targetPort.handleId };
       targetHandleId.value = targetPort.handleId;
-      const connection: MermaidPortConnection = {
-        source: source.nodeId,
-        target: targetPort.nodeId,
-        sourceHandle: source.handleId,
-        targetHandle: targetPort.handleId
-      };
+      const connection = buildConnection();
       const graph = options.getGraph();
-      if (canAppendMermaidEdge(graph, connection)) {
+      const excludeId = reconnect?.edgeId;
+      if (canAppendMermaidEdge(graph, connection, excludeId)) {
         targetStatus.value = "valid";
         invalidReason.value = undefined;
       } else {
         targetStatus.value = "invalid";
-        invalidReason.value = getMermaidConnectionInvalidReason(graph, connection);
+        invalidReason.value = getMermaidConnectionInvalidReason(graph, connection, excludeId);
       }
     } else {
       lastSnappedPort = undefined;
@@ -205,6 +228,8 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     frameId = undefined;
     pendingPoint = undefined;
     source = undefined;
+    reconnect = undefined;
+    isReconnecting.value = false;
     isDragging.value = false;
     sourceNodeId.value = undefined;
     sourceHandleId.value = undefined;
@@ -223,15 +248,14 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     if (frameId !== undefined) cancelFrame(frameId);
     frameId = undefined;
     pendingPoint = undefined;
-    const connection: MermaidPortConnection = {
-      source: source.nodeId,
-      target: targetNodeId.value ?? null,
-      sourceHandle: source.handleId,
-      targetHandle: targetHandleId.value ?? null
-    };
-    const shouldConnect = targetStatus.value === "valid";
+    const connection = buildConnection();
+    const mode = reconnect;
+    const shouldCommit = targetStatus.value === "valid";
     clearState();
-    if (shouldConnect) options.onConnect(connection);
+    if (shouldCommit) {
+      if (mode) options.onReconnect?.(mode.edgeId, mode.end, connection);
+      else options.onConnect(connection);
+    }
   }
 
   function cancelConnection() {
@@ -242,12 +266,20 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     if (event.key === "Escape") cancelConnection();
   }
 
-  function startConnection(start: MermaidConnectionStart) {
+  function startConnection(
+    start: MermaidConnectionStart,
+    options?: { reconnect?: { edgeId: string; end: "source" | "target" } }
+  ) {
     clearState();
     source = start;
+    reconnect = options?.reconnect;
+    isReconnecting.value = !!reconnect;
     isDragging.value = true;
-    sourceNodeId.value = start.nodeId;
-    sourceHandleId.value = start.handleId;
+    // 重连时 source 代表固定端，不作为"连线起点高亮"使用，避免误导；创建连线才高亮起点端口。
+    if (!reconnect) {
+      sourceNodeId.value = start.nodeId;
+      sourceHandleId.value = start.handleId;
+    }
     updatePath(start.point);
     windowTarget.addEventListener("pointermove", onPointerMove);
     windowTarget.addEventListener("pointerup", onPointerUp);
@@ -258,6 +290,7 @@ export function createMermaidConnectionDragController(options: ControllerOptions
 
   return {
     isDragging,
+    isReconnecting,
     sourceNodeId,
     sourceHandleId,
     targetNodeId,

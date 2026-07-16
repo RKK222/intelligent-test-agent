@@ -1,10 +1,13 @@
 <script lang="ts">
 import type { MessagePart } from "@test-agent/shared-types";
+import type { WorkStatusState } from "../../state/types";
 
 export type ReasoningPartGroupProps = {
   parts: Array<Extract<MessagePart, { type: "reasoning" }>>;
   busy?: boolean;
   streamingTextByPartId?: Record<string, string>;
+  statusOverride?: WorkStatusState;
+  showEmptyStatus?: boolean;
 };
 </script>
 
@@ -23,6 +26,7 @@ const source = computed(() =>
 );
 
 const aggregateStatus = computed(() => {
+  if (props.statusOverride) return props.statusOverride;
   if (props.busy) return "running";
   const statuses = props.parts.map((part) => part.status ?? "").map((status) => status.toLowerCase());
   if (statuses.some((status) => status === "running" || status === "pending")) return "running";
@@ -33,15 +37,19 @@ const aggregateStatus = computed(() => {
 
 const subtitleText = computed(() => {
   if (aggregateStatus.value === "running") return "思考中";
-  if (aggregateStatus.value === "failed") return "失败";
+  if (aggregateStatus.value === "retry") return "重试中";
+  if (aggregateStatus.value === "failed" || aggregateStatus.value === "error") return "失败";
+  if (aggregateStatus.value === "cancelled") return "已停止";
   return "已完成";
 });
 
 const detailText = computed(() => compactPartPreview(source.value));
+const hasDetail = computed(() => source.value.trim().length > 0);
 </script>
 
 <template>
   <OcDisclosure
+    v-if="hasDetail || !showEmptyStatus"
     class="oc-reasoning-part"
     title="思考状态"
     :detail="detailText"
@@ -54,4 +62,10 @@ const detailText = computed(() => compactPartPreview(source.value));
       <pre class="oc-reasoning-part__plain">{{ source || "暂无详细思考内容" }}</pre>
     </div>
   </OcDisclosure>
+  <section v-else class="oc-reasoning-part oc-disclosure">
+    <div class="oc-disclosure__trigger oc-disclosure__trigger--static" role="status" aria-live="polite">
+      <span class="oc-tool__title">思考状态</span>
+      <span :class="['oc-tool__status', aggregateStatus ? `is-${aggregateStatus}` : '']">{{ subtitleText }}</span>
+    </div>
+  </section>
 </template>

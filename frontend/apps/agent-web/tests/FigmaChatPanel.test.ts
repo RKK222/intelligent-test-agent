@@ -1616,10 +1616,20 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("reject-question")).toEqual([["ques_reject"]]);
   });
 
-  it("renders todos above the composer and expands the task list on demand", async () => {
+  it("renders the current status with Todo in the dock above the composer", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
-        messages: [],
+        messages: [
+          {
+            id: "msg_user_todo",
+            messageId: "msg_user_todo",
+            role: "user",
+            text: "实现 Todo 展示",
+            createdAt: "2026-07-15T09:00:00Z"
+          }
+        ],
+        running: true,
+        runtimeStatus: "RUNNING",
         processStatus: { status: "READY", initializable: false, message: "ready" },
         todos: [
           { id: "todo_1", text: "分析 SSE 字段", status: "pending", priority: "high" },
@@ -1629,12 +1639,17 @@ describe("FigmaChatPanel", () => {
         ]
       } as any
     });
+    await nextTick();
 
+    const dock = wrapper.find("[data-testid='figma-work-status-dock']");
     const todoPanel = wrapper.find(".oc-todo-panel");
     const composer = wrapper.find(".figma-chat-composer");
+    expect(dock.exists()).toBe(true);
     expect(todoPanel.exists()).toBe(true);
     expect(composer.exists()).toBe(true);
-    expect(todoPanel.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dock.element.contains(todoPanel.element)).toBe(true);
+    expect(wrapper.findAll(".oc-todo-panel")).toHaveLength(1);
+    expect(dock.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(wrapper.text()).toContain("待处理 1");
     expect(wrapper.text()).toContain("进行中 1");
     expect(wrapper.text()).toContain("已完成 1");
@@ -2648,11 +2663,20 @@ describe("FigmaChatPanel", () => {
     expect(text.indexOf("第二轮用户问题")).toBeLessThan(text.indexOf("第二轮助手回答"));
   });
 
-  it("shows persisted feedback once below the last output for a successful historical run", async () => {
+  it("shows persisted feedback beside the collapsed status icon for a successful historical run", async () => {
     const platformMessageId = "msg_0123456789abcdef0123456789abcdef";
+    const runId = "run_feedback_history";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-1",
+            messageId: "user-feedback-1",
+            runId,
+            role: "user",
+            text: "请完成分析",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
           {
             id: platformMessageId,
             messageId: platformMessageId,
@@ -2664,12 +2688,21 @@ describe("FigmaChatPanel", () => {
         ],
         running: false,
         runtimeStatus: "SUCCEEDED",
-        messageFeedbacks: {
-          [platformMessageId]: {
+        fileChanges: [
+          {
+            path: "src/main.ts",
+            patch: "@@\n-old\n+new",
+            additions: 1,
+            deletions: 1,
+            status: "modified"
+          }
+        ],
+        runStatusesByRunId: { [runId]: "SUCCEEDED" },
+        runFeedbacks: {
+          [runId]: {
             feedbackId: "fb_123",
-            messageId: platformMessageId,
             sessionId: "ses_123",
-            runId: "run_123",
+            runId,
             rating: "POSITIVE",
             reasonCode: null,
             comment: null,
@@ -2681,33 +2714,44 @@ describe("FigmaChatPanel", () => {
       },
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
+    await nextTick();
 
-    const buttons = wrapper.findAll(".figma-chat-feedback-btn");
+    const summary = wrapper.get(".oc-work-status-completed-summary");
+    const timeline = wrapper.get(".oc-timeline");
+    const dock = wrapper.get("[data-testid='figma-work-status-dock']");
+    const answerRow = timeline.get(".oc-text-part").element;
+    const buttons = summary.findAll(".figma-chat-feedback-btn");
     expect(buttons).toHaveLength(2);
     expect(buttons[0].classes()).toContain("is-selected");
-    const timelineActions = wrapper.findAll(".figma-chat-timeline-actions");
-    expect(timelineActions).toHaveLength(1);
-    expect(timelineActions[0].element.previousElementSibling?.classList.contains("oc-timeline-root")).toBe(true);
-    const componentSource = readFileSync(
-      resolve(process.cwd(), "apps/agent-web/src/components/FigmaChatPanel.vue"),
-      "utf8"
-    );
-    expect(componentSource).toMatch(/\.figma-chat-timeline-actions\s*\{[^}]*margin:\s*2px 0 0;/s);
-    expect(componentSource).not.toContain("margin: 2px 0 0 46px;");
+    expect(summary.get('[aria-label="展开已完成工作状态"]').attributes("aria-expanded")).toBe("false");
+    expect(timeline.element.contains(summary.element)).toBe(true);
+    expect(dock.find(".oc-work-status-completed-summary").exists()).toBe(false);
+    expect(dock.find(".oc-diff-summary").exists()).toBe(true);
+    expect(answerRow.compareDocumentPosition(summary.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(wrapper.find(".figma-chat-timeline-actions").exists()).toBe(false);
 
     await buttons[0].trigger("click");
 
     expect(wrapper.emitted("submit-feedback")).toEqual([[{
-      messageId: platformMessageId,
+      runId,
       rating: "POSITIVE"
     }]]);
   });
 
-  it("emits persisted feedback id after merging a temporary assistant message", async () => {
+  it("emits the run id after merging temporary assistant messages", async () => {
     const platformMessageId = "msg_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const runId = "run_feedback_merged";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-merge",
+            messageId: "user-feedback-merge",
+            runId,
+            role: "user",
+            text: "继续分析",
+            createdAt: "2026-06-25T08:59:00.000Z"
+          },
           {
             id: "assistant-run_123",
             role: "assistant",
@@ -2725,9 +2769,8 @@ describe("FigmaChatPanel", () => {
         ],
         running: false,
         runtimeStatus: "SUCCEEDED",
-        messageFeedbacks: {
-          [platformMessageId]: null
-        },
+        runStatusesByRunId: { [runId]: "SUCCEEDED" },
+        runFeedbacks: { [runId]: null },
         processStatus: { status: "READY", initializable: false, message: "ready" }
       },
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -2739,7 +2782,7 @@ describe("FigmaChatPanel", () => {
     await buttons[0].trigger("click");
 
     expect(wrapper.emitted("submit-feedback")).toEqual([[{
-      messageId: platformMessageId,
+      runId,
       rating: "POSITIVE"
     }]]);
   });
@@ -2749,6 +2792,13 @@ describe("FigmaChatPanel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-remote",
+            messageId: "user-feedback-remote",
+            role: "user",
+            text: "检查远端消息",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
           {
             id: remoteMessageId,
             messageId: remoteMessageId,
@@ -2768,12 +2818,21 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(0);
   });
 
-  it("submits platform message id after a remote message is mapped to persistence", async () => {
+  it("submits the run id without depending on remote or platform assistant ids", async () => {
     const remoteMessageId = "msg_f2d478d96001861rLCyXjYqf75";
     const platformMessageId = "msg_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const runId = "run_feedback_remote";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-mapped",
+            messageId: "user-feedback-mapped",
+            runId,
+            role: "user",
+            text: "等待落库",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
           {
             id: remoteMessageId,
             messageId: remoteMessageId,
@@ -2786,9 +2845,8 @@ describe("FigmaChatPanel", () => {
         ],
         running: false,
         runtimeStatus: "COMPLETED",
-        messageFeedbacks: {
-          [platformMessageId]: null
-        },
+        runStatusesByRunId: { [runId]: "COMPLETED" },
+        runFeedbacks: { [runId]: null },
         processStatus: { status: "READY", initializable: false, message: "ready" }
       },
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -2800,16 +2858,25 @@ describe("FigmaChatPanel", () => {
     await buttons[0].trigger("click");
 
     expect(wrapper.emitted("submit-feedback")).toEqual([[{
-      messageId: platformMessageId,
+      runId,
       rating: "POSITIVE"
     }]]);
   });
 
-  it("does not render assistant message feedback when the conversation is running", async () => {
+  it("does not render run feedback when the conversation is running", async () => {
     const platformMessageId = "msg_cccccccccccccccccccccccccccccccc";
+    const runId = "run_feedback_running";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-running",
+            messageId: "user-feedback-running",
+            runId,
+            role: "user",
+            text: "运行中的任务",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
           {
             id: platformMessageId,
             messageId: platformMessageId,
@@ -2821,12 +2888,12 @@ describe("FigmaChatPanel", () => {
         ],
         running: true,
         runtimeStatus: "RUNNING",
-        messageFeedbacks: {
-          [platformMessageId]: {
+        runStatusesByRunId: { [runId]: "RUNNING" },
+        runFeedbacks: {
+          [runId]: {
             feedbackId: "fb_123",
-            messageId: platformMessageId,
             sessionId: "ses_123",
-            runId: "run_123",
+            runId,
             rating: "POSITIVE",
             reasonCode: null,
             comment: null,
@@ -2872,9 +2939,17 @@ describe("FigmaChatPanel", () => {
 
   it("hides successful root-run feedback while viewing a child-agent timeline", async () => {
     const platformMessageId = "msg_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const runId = "run_feedback_child_root";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
+          {
+            id: "user-feedback-child",
+            messageId: "user-feedback-child",
+            runId,
+            role: "user",
+            text: "执行子任务"
+          },
           {
             id: platformMessageId,
             messageId: platformMessageId,
@@ -2894,6 +2969,7 @@ describe("FigmaChatPanel", () => {
         ],
         running: false,
         runtimeStatus: "SUCCEEDED",
+        runStatusesByRunId: { [runId]: "SUCCEEDED" },
         subagentsBySessionId: {
           ses_feedback_child: { sessionId: "ses_feedback_child", title: "子 Agent 输出" }
         },
@@ -2908,6 +2984,56 @@ describe("FigmaChatPanel", () => {
     await nextTick();
 
     expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(0);
+  });
+
+  it("shows run feedback after the user message when a successful run has no assistant part", async () => {
+    const runId = "run_feedback_without_assistant";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [{
+          id: "user-feedback-only",
+          messageId: "user-feedback-only",
+          runId,
+          role: "user",
+          text: "没有 assistant part 也要评价",
+          createdAt: "2026-07-15T13:00:00.000Z"
+        }],
+        running: false,
+        runtimeStatus: "SUCCEEDED",
+        runStatusesByRunId: { [runId]: "SUCCEEDED" },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+    await nextTick();
+
+    expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(2);
+    expect(wrapper.get(".oc-user-message").element.compareDocumentPosition(
+      wrapper.get(".oc-work-status-completed-summary").element
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps feedback actions for every successful historical run after a new run starts", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          { id: "u-run-1", role: "user", runId: "run_1", text: "第一轮", createdAt: "2026-07-15T10:00:00Z" },
+          { id: "a-run-1", role: "assistant", runId: "run_1", text: "第一轮完成", createdAt: "2026-07-15T10:01:00Z" },
+          { id: "u-run-2", role: "user", runId: "run_2", text: "第二轮", createdAt: "2026-07-15T10:02:00Z" },
+          { id: "a-run-2", role: "assistant", runId: "run_2", text: "第二轮完成", createdAt: "2026-07-15T10:03:00Z" },
+          { id: "u-run-3", role: "user", runId: "run_3", text: "第三轮", createdAt: "2026-07-15T10:04:00Z" }
+        ],
+        running: true,
+        runtimeStatus: "RUNNING",
+        runStatusesByRunId: { run_1: "SUCCEEDED", run_2: "COMPLETED", run_3: "RUNNING" },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+    await nextTick();
+
+    expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(4);
+    expect(wrapper.get("[data-testid='figma-work-status-dock']").find(".oc-work-status").exists()).toBe(true);
   });
 
   it.skip("renders historical generated files and opens the file changes drawer", async () => {
@@ -3254,7 +3380,13 @@ describe("FigmaChatPanel", () => {
 
     await showFullTimeline(wrapper);
     expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
-    expect(wrapper.find(".oc-tool").exists()).toBe(true);
+    expect(wrapper.findAll(".oc-work-status")).toHaveLength(1);
+    expect(wrapper.findAll(".oc-work-status-history-trigger")).toHaveLength(1);
+    expect(wrapper.find("[data-testid='oc-work-status-event-shell']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='oc-work-status-event-explore']").exists()).toBe(true);
+    await wrapper.get(".oc-work-status-history-trigger").trigger("click");
+    expect(wrapper.findAll(".oc-work-status")).toHaveLength(2);
+    expect(wrapper.find("[data-testid='oc-work-status-event-shell']").exists()).toBe(true);
     expect(wrapper.find(".figma-chat-task-panel").exists()).toBe(false);
   });
 
@@ -3576,9 +3708,16 @@ describe("FigmaChatPanel", () => {
     });
 
     await showFullTimeline(wrapper);
+    expect(wrapper.findAll(".oc-reasoning-part")).toHaveLength(1);
+    expect(wrapper.findAll(".oc-work-status")).toHaveLength(1);
+    expect(wrapper.findAll("[data-testid='oc-work-status-event-shell']")).toHaveLength(1);
+    expect(wrapper.findAll(".oc-work-status-history-trigger")).toHaveLength(1);
+    await wrapper.get(".oc-work-status-history-trigger").trigger("click");
     expect(wrapper.findAll(".oc-reasoning-part")).toHaveLength(2);
-    expect(wrapper.findAll(".oc-tool")).toHaveLength(2);
-    expect(wrapper.findAll(".oc-tool__body")).toHaveLength(0);
+    expect(wrapper.findAll(".oc-work-status")).toHaveLength(2);
+    expect(wrapper.findAll("[data-testid='oc-work-status-event-shell']")).toHaveLength(2);
+    expect(wrapper.findAll(".oc-reasoning-part__plain")).toHaveLength(0);
+    expect(wrapper.find("[data-testid='oc-work-status-popover']").exists()).toBe(false);
   });
 
   it("does not infer event questions from historical assistant option text", async () => {
@@ -3642,7 +3781,7 @@ describe("FigmaChatPanel", () => {
     expect(initial.find(".figma-chat-question-dock").exists()).toBe(false);
   });
 
-  it("shows the assistant avatar beside the running status", async () => {
+  it("does not show a synthetic assistant status before the first real event", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -3652,10 +3791,11 @@ describe("FigmaChatPanel", () => {
     });
 
     await showFullTimeline(wrapper);
-    expect(wrapper.find(".oc-thinking-row").exists()).toBe(true);
+    expect(wrapper.find(".oc-thinking-row").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("思考中");
   });
 
-  it("shows opencode retry status instead of leaving the run as thinking", async () => {
+  it("shows opencode retry status as a real runtime row", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [

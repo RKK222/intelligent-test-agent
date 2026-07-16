@@ -41,10 +41,18 @@ type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
 
 const props = defineProps<{
   workspaceId?: string;
+  /** 应用 Agent 配置所属的 feature 工作区；与普通文件使用的个人 workspace 分离。 */
+  agentConfigWorkspaceId?: string;
   /** 当前默认个人 worktree ID，用于本地提交和 feature 发布 */
   personalWorkspaceId?: string;
   apiBaseUrl?: string;
   canWrite: boolean;
+  /** 应用级 Agent/Skill/Rules/Templates 的独立写权限。 */
+  canManageAgentConfig?: boolean;
+  /** 公共 Git Agent/Skill 的独立写权限，仅超级管理员可用。 */
+  canManagePublicConfig?: boolean;
+  /** 超级管理员发布应用文件时不受 spec 本地专用规则限制。 */
+  canPublishSpec?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -63,6 +71,9 @@ const emit = defineEmits<{
 
 const workbench = useWorkbenchStore();
 const api = createBackendApiClient({ baseUrl: props.apiBaseUrl ?? "" });
+const effectiveAgentConfigWorkspaceId = computed(() =>
+  props.agentConfigWorkspaceId === undefined ? props.workspaceId : (props.agentConfigWorkspaceId || undefined)
+);
 
 // Resizing unstaged / staged boundary
 const unstagedHeight = ref<number | null>(null);
@@ -279,7 +290,7 @@ const workspaceStaged = computed(() =>
   workspaceDiffFiles.value.filter((f) => stagedWorkspacePaths.value.has(f.path) && !isConflictFile(f))
 );
 
-// spec 是个人研发过程资产：允许随个人 HEAD 本地提交，但永远不进入 feature 发布文件集合。
+// spec 默认是个人研发过程资产；普通角色不得发布，超管按“不受应用工作区限制”策略放行。
 function isLocalOnlySpecPath(path: string): boolean {
   const segments = path.replace(/\\/g, "/").split("/").filter((segment) => segment && segment !== ".");
   return segments[0] === "spec";
@@ -288,6 +299,7 @@ const workspaceConflicts = computed(() =>
   workspaceDiffFiles.value.filter((f) => isConflictFile(f))
 );
 const hasWorkspaceConflicts = computed(() => workspaceConflicts.value.length > 0);
+const hasBlockingWorkspaceConflicts = computed(() => props.canWrite && hasWorkspaceConflicts.value);
 const workspaceGitMutationPending = computed(() =>
   updatingWorkspaceIndexPaths.value.size > 0 || discardingWorkspacePaths.value.size > 0
 );
@@ -313,6 +325,19 @@ const agentsStaged = computed(() => {
   });
   return list;
 });
+
+function canWriteAgentScope(scope: "PUBLIC" | "WORKSPACE"): boolean {
+  return scope === "PUBLIC"
+    ? (props.canManagePublicConfig ?? props.canWrite)
+    : (props.canManageAgentConfig ?? props.canWrite);
+}
+
+const writableAgentStaged = computed(() =>
+  agentsStaged.value.filter((file) => canWriteAgentScope(file.scope))
+);
+const hasWritableStagedChanges = computed(() =>
+  (props.canWrite && workspaceStaged.value.length > 0) || writableAgentStaged.value.length > 0
+);
 
 // Overall counts
 const totalUnstagedCount = computed(() => workspaceUnstaged.value.length + workspaceConflicts.value.length + agentsUnstaged.value.length);
@@ -377,9 +402,9 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
     }
 
     // 3. Fetch workspace agent changes
-    if (props.workspaceId) {
+    if (effectiveAgentConfigWorkspaceId.value) {
       try {
-        const wksDiff = await api.getWorkspaceAgentDiff(props.workspaceId, workbench.workspaceWorktree?.worktreeId);
+        const wksDiff = await api.getWorkspaceAgentDiff(effectiveAgentConfigWorkspaceId.value, workbench.workspaceWorktree?.worktreeId);
         if (token !== refreshChangesToken) return;
         workspaceAgentDiffs.value = wksDiff.files;
       } catch {
@@ -532,7 +557,7 @@ function isConflictFile(file: { status?: string; rawStatus?: string }): boolean 
 }
 
 async function openWorkspaceConflict(path: string) {
-  if (!props.workspaceId || conflictLoading.value) return;
+  if (!props.canWrite || !props.workspaceId || conflictLoading.value) return;
   conflictLoading.value = true;
   errorMessage.value = "";
   try {
@@ -548,7 +573,7 @@ async function resolveWorkspaceConflict(payload: {
   resolution: WorkspaceGitConflictResolution;
   content?: string | null;
 }) {
-  if (!props.workspaceId || !activeConflict.value || conflictResolving.value) return;
+  if (!props.canWrite || !props.workspaceId || !activeConflict.value || conflictResolving.value) return;
   conflictResolving.value = true;
   errorMessage.value = "";
   try {
@@ -566,7 +591,7 @@ async function resolveWorkspaceConflict(payload: {
 }
 
 async function abortWorkspaceConflict() {
-  if (!props.workspaceId || conflictResolving.value) return;
+  if (!props.canWrite || !props.workspaceId || conflictResolving.value) return;
   conflictResolving.value = true;
   errorMessage.value = "";
   try {
@@ -583,7 +608,7 @@ async function abortWorkspaceConflict() {
 }
 
 async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") {
-  if (!props.workspaceId || conflictResolving.value) return;
+  if (!props.canWrite || !props.workspaceId || conflictResolving.value) return;
   const label = resolution === "CURRENT" ? "个人版本" : "远程应用版本";
   if (!window.confirm(`将 ${workspaceConflicts.value.length} 个冲突文件全部采用${label}，是否继续？`)) return;
   conflictResolving.value = true;
@@ -652,7 +677,7 @@ async function discardAllWorkspaceChanges() {
 
 // Stage agent file (real / mock)
 async function stageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" }) {
-  if (!props.canWrite) return;
+  if (!canWriteAgentScope(file.scope)) return;
   errorMessage.value = "";
   try {
     if (workbench.useMockTestData) {
@@ -669,7 +694,7 @@ async function stageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "W
     if (file.scope === "PUBLIC") {
       await api.stagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
     } else {
-      await api.stageWorkspaceAgentFiles(props.workspaceId!, [file.path], workbench.workspaceWorktree?.worktreeId);
+      await api.stageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path], workbench.workspaceWorktree?.worktreeId);
     }
     await refreshChanges();
   } catch (error) {
@@ -679,7 +704,7 @@ async function stageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "W
 
 // Unstage agent file (real / mock)
 async function unstageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" }) {
-  if (!props.canWrite) return;
+  if (!canWriteAgentScope(file.scope)) return;
   errorMessage.value = "";
   try {
     if (workbench.useMockTestData) {
@@ -696,7 +721,7 @@ async function unstageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | 
     if (file.scope === "PUBLIC") {
       await api.unstagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
     } else {
-      await api.unstageWorkspaceAgentFiles(props.workspaceId!, [file.path], workbench.workspaceWorktree?.worktreeId);
+      await api.unstageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path], workbench.workspaceWorktree?.worktreeId);
     }
     await refreshChanges();
   } catch (error) {
@@ -721,8 +746,8 @@ function handleOpenFileDiff(
 
 // Commit changes
 async function handleCommit(push = false) {
-  if (!props.canWrite || committing.value) return;
-  if (hasWorkspaceConflicts.value) {
+  if (committing.value || !hasWritableStagedChanges.value) return;
+  if (props.canWrite && hasWorkspaceConflicts.value) {
     errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
     progressMessage.value = "";
     return;
@@ -785,7 +810,7 @@ async function handleCommit(push = false) {
     }
 
     // 1. 应用工作空间先提交个人 worktree；推送时再从个人 HEAD 投影到 feature worktree。
-    if (workspaceStaged.value.length > 0) {
+    if (props.canWrite && workspaceStaged.value.length > 0) {
       if (!props.personalWorkspaceId) {
         errorMessage.value = "当前不是个人 worktree，不能提交或发布应用变更。";
         progressMessage.value = "";
@@ -797,7 +822,7 @@ async function handleCommit(push = false) {
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
       const files = workspaceStaged.value.map((file) => file.path);
-      const publishableFiles = files.filter((file) => !isLocalOnlySpecPath(file));
+      const publishableFiles = files.filter((file) => props.canPublishSpec || !isLocalOnlySpecPath(file));
       localOnlySpecFileCount = files.length - publishableFiles.length;
       await api.commitPersonalWorkspace(personalWorkspaceId, {
         commitMessage: msg,
@@ -852,7 +877,9 @@ async function handleCommit(push = false) {
     }
 
     // 2. Commit Agent PUBLIC changes
-    const publicStagedCount = publicAgentDiffs.value.filter((f) => f.staged).length;
+    const publicStagedCount = canWriteAgentScope("PUBLIC")
+      ? publicAgentDiffs.value.filter((f) => f.staged).length
+      : 0;
     if (publicStagedCount > 0) {
       progressMessage.value = "正在提交公共 Agent 配置...";
       const opId = newOperationId();
@@ -874,12 +901,14 @@ async function handleCommit(push = false) {
     }
 
     // 3. Commit Agent WORKSPACE changes
-    const workspaceStagedCount = workspaceAgentDiffs.value.filter((f) => f.staged).length;
-    if (workspaceStagedCount > 0 && props.workspaceId) {
+    const workspaceStagedCount = canWriteAgentScope("WORKSPACE")
+      ? workspaceAgentDiffs.value.filter((f) => f.staged).length
+      : 0;
+    if (workspaceStagedCount > 0 && effectiveAgentConfigWorkspaceId.value) {
       progressMessage.value = "正在提交工作空间 Agent 配置...";
       const opId = newOperationId();
       await runAgentOperation(
-        () => api.commitWorkspaceAgentConfig(props.workspaceId!, { message: msg, worktreeId: workbench.workspaceWorktree?.worktreeId, operationId: opId }),
+        () => api.commitWorkspaceAgentConfig(effectiveAgentConfigWorkspaceId.value!, { message: msg, worktreeId: workbench.workspaceWorktree?.worktreeId, operationId: opId }),
         "提交工作空间 Agent 配置",
         opId
       );
@@ -887,7 +916,7 @@ async function handleCommit(push = false) {
         progressMessage.value = "正在发布工作空间 Agent 配置...";
         const pushOpId = newOperationId();
         await runAgentOperation(
-          () => api.publishWorkspaceAgentConfig(props.workspaceId!, workbench.workspaceWorktree?.worktreeId, pushOpId),
+          () => api.publishWorkspaceAgentConfig(effectiveAgentConfigWorkspaceId.value!, workbench.workspaceWorktree?.worktreeId, pushOpId),
           "发布工作空间 Agent 配置",
           pushOpId
         );
@@ -1072,7 +1101,7 @@ defineExpose({
                   <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
                   <span>检测到 {{ workspaceConflicts.length }} 个冲突</span>
                 </div>
-                <div class="git-conflict-actions">
+                <div v-if="props.canWrite" class="git-conflict-actions">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1114,7 +1143,7 @@ defineExpose({
                 class="git-file-row git-conflict-row group"
                 :title="file.path"
                 :aria-label="file.path"
-                @click="openWorkspaceConflict(file.path)"
+                @click="props.canWrite && openWorkspaceConflict(file.path)"
               >
                 <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
                 <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
@@ -1137,6 +1166,7 @@ defineExpose({
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
                 <button
+                  v-if="props.canWrite"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="回退文件改动"
@@ -1147,6 +1177,7 @@ defineExpose({
                   <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
                 <button
+                  v-if="props.canWrite"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="暂存文件"
@@ -1185,6 +1216,7 @@ defineExpose({
                 </span>
                 
                 <button
+                  v-if="canWriteAgentScope(file.scope)"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="暂存文件"
@@ -1257,7 +1289,7 @@ defineExpose({
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
                 <button
-                  v-if="!hasWorkspaceConflicts"
+                  v-if="props.canWrite && !hasWorkspaceConflicts"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="回退文件改动"
@@ -1268,6 +1300,7 @@ defineExpose({
                   <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
                 <button
+                  v-if="props.canWrite"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="取消暂存"
@@ -1306,6 +1339,7 @@ defineExpose({
                 </span>
                 
                 <button
+                  v-if="canWriteAgentScope(file.scope)"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="取消暂存"
@@ -1336,8 +1370,8 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-commit flex-1"
-          :title="hasWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
-          :disabled="committing || hasWorkspaceConflicts || totalStagedCount === 0 || !commitMessage.trim()"
+          :title="hasBlockingWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
+          :disabled="committing || hasBlockingWorkspaceConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(false)"
         >
           <FolderGit2 class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -1346,8 +1380,8 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-push flex-1"
-          :title="hasWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送' : '提交并推送已暂存变更'"
-          :disabled="committing || hasWorkspaceConflicts || totalStagedCount === 0 || !commitMessage.trim()"
+          :title="hasBlockingWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送' : '提交并推送已暂存变更'"
+          :disabled="committing || hasBlockingWorkspaceConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(true)"
         >
           <Upload class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />

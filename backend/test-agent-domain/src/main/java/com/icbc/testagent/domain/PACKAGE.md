@@ -19,7 +19,7 @@
 - `session.SessionMessage`、`session.SessionMessageId`、`session.SessionMessageRole`、`session.SessionMessageRepository`：会话消息领域对象、角色和值对象、持久化端口；消息可携带 runId、远端 messageId、parts_json、token/cost 快照。
 - `run.Run`、`run.RunId`、`run.RunStatus`、`run.TokenUsage`、`run.RunRepository`：运行聚合和值对象、状态机、单次 token 消耗和值对象、持久化端口；`RunRepository.saveIfStatus` 用于按当前状态条件保存，防止终态事件与异步 transport error 竞态时旧状态覆盖新终态；`Run.applyTerminalFact` 只记录 root 终态事实，允许后到 root 终态纠正先到 transport error 临时失败。
 - `run.RunStorageMode`、`run.RunRuntimeManifest`、`run.RunRuntimeInput`、`run.RunRuntimeSnapshot`、`run.RunRuntimeReplay`、`run.RunRuntimeStreamEvent`、`run.RunRuntimeTail`、`run.RunOwnerLease`、`run.RunTerminalProjectionPending`、`run.RunRuntimeStore`：Run 运行数据面的模式、manifest、可信恢复快照、物化快照、durable seq 回放、全事件尾部、owner lease/fencing 和带 version 的终态投影 outbox 领域端口；条件接管原子校验活跃 manifest 快照并提升 token，事件、远端 Session 绑定及 scope/dedup/pending 写入都提供 fenced 入口，终态 outbox 支持服务器候选查询与 version CAS ack。Redis key、Lua、TTL 实现留在 persistence，`REDIS_SUMMARY` 不允许回退 PostgreSQL 或 JVM 内存。
-- `run.RunPersistenceAnchor`、`run.RunTerminalProjection`、`run.RunConversationSummary`、`run.RunDetailsLocator`、`run.RunSummaryPersistencePort`：新模式 PostgreSQL 控制面锚点、终态双摘要和低频远端定位端口；对象约束禁止承载原始输入输出、reasoning、工具内容或事件 payload。
+- `run.RunPersistenceAnchor`、`run.RunTerminalProjection`、`run.RunConversationSummary`、`run.RunDetailsLocator`、`run.RunSummaryPersistencePort`：新模式 PostgreSQL 控制面锚点、终态双摘要和低频远端定位端口；`RunDetailsLocator.dispatchMessageId` 用于 Redis 详情过期后的目标轮因果恢复，对象约束禁止承载原始输入输出、reasoning、工具内容或事件 payload。
 - `run.RunTerminalRetry`、`run.RunTerminalRetryState`、`run.RunTerminalRetryStore`：关系型终态事务故障后的 Redis 安全重试模型与端口；只允许保存已清洗投影并固定退避，未来详情期限是更早上限，详情已丢失时安全投影仍不超过 24 小时。
 - `run.RunDetailsLocator`、`run.RunDiffAction`、`run.RunSummaryPersistencePort`：新模式 PostgreSQL 非原文控制面端口；只允许读取远端定位 ID、写终态摘要以及为显式 Diff 动作增加聚合计数。
 - `event.RunEvent`、`event.RunEventDraft`、`event.RunEventId`、`event.RunEventType`、`event.RunEventRepository`：平台运行事件模型和 append-only 端口，支持按 Run 和按 root session 回放；RunEventType 覆盖基础 `run.*`（含 transient `run.snapshot.reset`）、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated` 等运行态事件。
@@ -27,7 +27,7 @@
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
 - `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
 - `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数和设置页工作空间创建进度；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
-- `scheduler.*`：定时任务定义、用户级 Cron 计划、运行记录、触发来源和状态枚举；`ScheduledTaskRepository` 作为持久化端口。
+- `scheduler.*`：定时任务定义、用户级 Cron 计划、运行记录、触发来源和状态枚举；`ScheduledTaskRepository`、`ScheduledTaskRunRetentionRepository` 作为持久化端口。
 - 后续可新增领域命令、领域服务接口和更多状态规则。
 
 ## 允许依赖

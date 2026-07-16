@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "dockview-vue/dist/styles/dockview.css";
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&family=Noto+Sans+SC:wght@100..900&display=swap');
+
+/* Google Fonts 已由 index.html 的 link 统一加载，避免 Tailwind 展开后触发 CSS @import 顺序告警。 */
 
 @source "../../../../packages/*/src/**/*.{vue,ts,js}";
 

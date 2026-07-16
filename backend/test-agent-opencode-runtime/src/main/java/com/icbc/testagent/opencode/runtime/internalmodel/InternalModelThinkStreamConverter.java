@@ -23,24 +23,27 @@ public class InternalModelThinkStreamConverter {
     }
 
     /**
-     * 转换单行 SSE 数据；无法解析为 OpenAI chunk 时保持原样，避免代理破坏上游非标准事件。
+     * 转换已经由 SSE 解码器提取出的 data 内容；无法解析为 OpenAI chunk 时保持原样。
      */
-    public String convertLine(String line) {
-        if (line == null || !line.startsWith(SSE_DATA_PREFIX)) {
-            return line;
-        }
-        String payload = line.substring(SSE_DATA_PREFIX.length());
-        if (payload.isBlank() || "[DONE]".equals(payload.trim())) {
-            return line;
+    public String convertData(String payload) {
+        if (payload == null || payload.isBlank() || "[DONE]".equals(payload.trim())) {
+            return payload;
         }
         try {
             JsonNode root = objectMapper.readTree(payload);
             if (!(root instanceof ObjectNode objectRoot) || !root.path("choices").isArray()) {
-                return line;
+                return payload;
             }
             for (JsonNode choice : root.path("choices")) {
                 JsonNode delta = choice.path("delta");
                 if (!(delta instanceof ObjectNode deltaObject)) {
+                    continue;
+                }
+                // 上游已经按标准字段拆出思考内容时，整个 delta 保持原样，避免再次解析 content 并污染跨事件状态。
+                JsonNode existingReasoning = deltaObject.get("reasoning_content");
+                if (existingReasoning != null && existingReasoning.isTextual()) {
+                    inThink = false;
+                    pendingTagPrefix = "";
                     continue;
                 }
                 JsonNode content = deltaObject.get("content");
@@ -57,10 +60,21 @@ public class InternalModelThinkStreamConverter {
                     deltaObject.put("reasoning_content", converted.reasoningContent());
                 }
             }
-            return SSE_DATA_PREFIX + objectMapper.writeValueAsString(objectRoot);
+            return objectMapper.writeValueAsString(objectRoot);
         } catch (Exception exception) {
+            return payload;
+        }
+    }
+
+    /**
+     * 兼容仍以原始 SSE data 行调用的测试和旧内部调用方。
+     */
+    public String convertLine(String line) {
+        if (line == null || !line.startsWith(SSE_DATA_PREFIX)) {
             return line;
         }
+        String payload = line.substring(SSE_DATA_PREFIX.length());
+        return SSE_DATA_PREFIX + convertData(payload);
     }
 
     private ConvertedText convertText(String text) {

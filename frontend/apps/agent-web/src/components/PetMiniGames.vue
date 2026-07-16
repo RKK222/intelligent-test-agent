@@ -4,6 +4,10 @@ import { Bomb, Gamepad2, RotateCcw, X } from "lucide-vue-next";
 
 type GameKind = "tetris" | "minesweeper" | "sudoku" | "snake";
 type TetrisCell = string | null;
+type TetrisShape = {
+  matrix: number[][];
+  color: string;
+};
 type TetrisPiece = {
   matrix: number[][];
   color: string;
@@ -31,7 +35,10 @@ const panel = ref<HTMLElement | null>(null);
 
 const TETRIS_ROWS = 16;
 const TETRIS_COLUMNS = 10;
-const TETRIS_TICK_MS = 460;
+const TETRIS_BASE_TICK_MS = 460;
+const TETRIS_MIN_TICK_MS = 120;
+const TETRIS_LINES_PER_LEVEL = 4;
+const RANDOM_DIFFICULTY_LEVELS = 5;
 const TETROMINOES = [
   { color: "cyan", matrix: [[1, 1, 1, 1]] },
   { color: "yellow", matrix: [[1, 1], [1, 1]] },
@@ -52,7 +59,12 @@ const tetrisScore = ref(0);
 const tetrisLines = ref(0);
 const tetrisRunning = ref(false);
 const tetrisGameOver = ref(false);
+const tetrisNextPiece = ref<TetrisShape | null>(null);
 let tetrisTimer: ReturnType<typeof setInterval> | null = null;
+
+const tetrisLevel = computed(() => Math.min(10, 1 + Math.floor(tetrisLines.value / TETRIS_LINES_PER_LEVEL)));
+const tetrisTickMs = computed(() => Math.max(TETRIS_MIN_TICK_MS, TETRIS_BASE_TICK_MS - (tetrisLevel.value - 1) * 45));
+const tetrisNextBoard = computed(() => tetrisNextPiece.value?.matrix ?? []);
 
 function clearTetrisTimer() {
   if (tetrisTimer) clearInterval(tetrisTimer);
@@ -61,15 +73,22 @@ function clearTetrisTimer() {
 
 function startTetrisTimer() {
   clearTetrisTimer();
-  if (tetrisRunning.value) tetrisTimer = setInterval(stepTetris, TETRIS_TICK_MS);
+  if (tetrisRunning.value) tetrisTimer = setInterval(stepTetris, tetrisTickMs.value);
 }
 
-function createTetrisPiece(): TetrisPiece {
+function createTetrisShape(): TetrisShape {
   const source = TETROMINOES[Math.floor(Math.random() * TETROMINOES.length)]!;
   return {
     matrix: source.matrix.map((row) => [...row]),
     color: source.color,
-    x: Math.floor((TETRIS_COLUMNS - source.matrix[0]!.length) / 2),
+  };
+}
+
+function createTetrisPiece(shape: TetrisShape): TetrisPiece {
+  return {
+    matrix: shape.matrix.map((row) => [...row]),
+    color: shape.color,
+    x: Math.floor((TETRIS_COLUMNS - shape.matrix[0]!.length) / 2),
     y: 0,
   };
 }
@@ -87,7 +106,9 @@ function tetrisCollides(piece: TetrisPiece, x = piece.x, y = piece.y, matrix = p
 }
 
 function spawnTetrisPiece() {
-  const piece = createTetrisPiece();
+  const shape = tetrisNextPiece.value ?? createTetrisShape();
+  tetrisNextPiece.value = createTetrisShape();
+  const piece = createTetrisPiece(shape);
   if (tetrisCollides(piece)) {
     tetrisPiece.value = null;
     tetrisRunning.value = false;
@@ -103,6 +124,7 @@ function startTetris() {
   tetrisScore.value = 0;
   tetrisLines.value = 0;
   tetrisGameOver.value = false;
+  tetrisNextPiece.value = createTetrisShape();
   tetrisRunning.value = true;
   spawnTetrisPiece();
   startTetrisTimer();
@@ -168,6 +190,7 @@ function lockTetrisPiece() {
     tetrisScore.value += [0, 100, 300, 500, 800][cleared] ?? cleared * 200;
   }
   spawnTetrisPiece();
+  if (cleared > 0) startTetrisTimer();
 }
 
 function stepTetris() {
@@ -204,7 +227,8 @@ const tetrisStatus = computed(() => {
 
 const MINE_ROWS = 8;
 const MINE_COLUMNS = 8;
-const MINE_COUNT = 10;
+const MINE_BASE_COUNT = 10;
+const MINE_MAX_COUNT = 18;
 
 function emptyMineBoard(): MineCell[] {
   return Array.from({ length: MINE_ROWS * MINE_COLUMNS }, () => ({
@@ -218,6 +242,9 @@ function emptyMineBoard(): MineCell[] {
 const mineBoard = ref<MineCell[]>(emptyMineBoard());
 const minesInitialized = ref(false);
 const mineStatus = ref<"ready" | "playing" | "won" | "lost">("ready");
+const randomDifficultyLevel = () => 1 + Math.floor(Math.random() * RANDOM_DIFFICULTY_LEVELS);
+const mineLevel = ref(randomDifficultyLevel());
+const mineCount = computed(() => Math.min(MINE_MAX_COUNT, MINE_BASE_COUNT + (mineLevel.value - 1) * 2));
 const mineFlags = computed(() => mineBoard.value.filter((cell) => cell.flagged).length);
 
 function mineNeighbors(index: number): number[] {
@@ -245,7 +272,7 @@ function initializeMines(firstIndex: number) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
     [candidates[index], candidates[swapIndex]] = [candidates[swapIndex]!, candidates[index]!];
   }
-  candidates.slice(0, MINE_COUNT).forEach((index) => {
+  candidates.slice(0, mineCount.value).forEach((index) => {
     mineBoard.value[index]!.mine = true;
   });
   mineBoard.value.forEach((cell, index) => {
@@ -276,7 +303,7 @@ function revealSafeMineRegion(index: number) {
 
 function updateMineWinStatus() {
   const revealedSafeCells = mineBoard.value.filter((cell) => cell.revealed && !cell.mine).length;
-  if (revealedSafeCells === MINE_ROWS * MINE_COLUMNS - MINE_COUNT) mineStatus.value = "won";
+  if (revealedSafeCells === MINE_ROWS * MINE_COLUMNS - mineCount.value) mineStatus.value = "won";
 }
 
 function revealAllMines() {
@@ -328,6 +355,8 @@ function toggleMineFlag(index: number) {
 }
 
 function resetMines() {
+  // 每次重开随机抽取难度，避免连续失败后被固定在越来越高的难度。
+  mineLevel.value = randomDifficultyLevel();
   mineBoard.value = emptyMineBoard();
   minesInitialized.value = false;
   mineStatus.value = "ready";
@@ -335,7 +364,7 @@ function resetMines() {
 
 const mineStatusText = computed(() => ({
   ready: "先翻一格，第一步安全",
-  playing: "找出全部 10 颗雷",
+  playing: `找出全部 ${mineCount.value} 颗雷`,
   won: "清场成功",
   lost: "踩雷了，再来一局",
 }[mineStatus.value]));
@@ -373,8 +402,15 @@ const SUDOKU_PUZZLE = [
   0, 0, 0, 0, 8, 0, 0, 7, 9,
 ] as const;
 
-function createSudokuBoard(): SudokuCell[] {
-  return SUDOKU_PUZZLE.map((value) => ({ value, given: value > 0, error: false }));
+const sudokuLevel = ref(randomDifficultyLevel());
+
+function createSudokuBoard(level = sudokuLevel.value): SudokuCell[] {
+  const givenIndexes = SUDOKU_PUZZLE.flatMap((value, index) => value > 0 ? [index] : []);
+  const hiddenIndexes = new Set(givenIndexes.slice(0, Math.min(12, (level - 1) * 3)));
+  return SUDOKU_PUZZLE.map((value, index) => {
+    const given = value > 0 && !hiddenIndexes.has(index);
+    return { value: given ? value : 0, given, error: false };
+  });
 }
 
 const sudokuBoard = ref<SudokuCell[]>(createSudokuBoard());
@@ -410,6 +446,8 @@ function setSudokuValue(value: number) {
 }
 
 function resetSudoku() {
+  // 每次重开随机抽取题面提示数量，连续失败也不会线性升难。
+  sudokuLevel.value = randomDifficultyLevel();
   sudokuBoard.value = createSudokuBoard();
   sudokuSelectedIndex.value = null;
   sudokuStatus.value = "ready";
@@ -424,7 +462,9 @@ function sudokuCellLabel(cell: SudokuCell, index: number): string {
 }
 
 const SNAKE_SIZE = 12;
-const SNAKE_TICK_MS = 190;
+const SNAKE_BASE_TICK_MS = 190;
+const SNAKE_MIN_TICK_MS = 75;
+const SNAKE_SCORE_PER_LEVEL = 3;
 const snakeBody = ref<SnakePoint[]>([]);
 const snakeDirection = ref<SnakePoint>({ x: 1, y: 0 });
 const snakeQueuedDirection = ref<SnakePoint>({ x: 1, y: 0 });
@@ -433,6 +473,9 @@ const snakeScore = ref(0);
 const snakeRunning = ref(false);
 const snakeGameOver = ref(false);
 let snakeTimer: ReturnType<typeof setInterval> | null = null;
+
+const snakeLevel = computed(() => Math.min(10, 1 + Math.floor(snakeScore.value / SNAKE_SCORE_PER_LEVEL)));
+const snakeTickMs = computed(() => Math.max(SNAKE_MIN_TICK_MS, SNAKE_BASE_TICK_MS - (snakeLevel.value - 1) * 20));
 
 function clearSnakeTimer() {
   if (snakeTimer) clearInterval(snakeTimer);
@@ -449,7 +492,7 @@ function nextSnakeFood(body: SnakePoint[]): SnakePoint {
 
 function startSnakeTimer() {
   clearSnakeTimer();
-  if (snakeRunning.value) snakeTimer = setInterval(stepSnake, SNAKE_TICK_MS);
+  if (snakeRunning.value) snakeTimer = setInterval(stepSnake, snakeTickMs.value);
 }
 
 function startSnake() {
@@ -490,6 +533,7 @@ function stepSnake() {
   if (eating) {
     snakeScore.value += 1;
     snakeFood.value = nextSnakeFood(nextBody);
+    startSnakeTimer();
   } else {
     nextBody.pop();
   }
@@ -648,7 +692,21 @@ onBeforeUnmount(() => {
       <div v-if="activeGame === 'tetris'" class="pet-tetris" data-testid="pet-tetris">
         <div class="pet-game-status-row">
           <span>{{ tetrisStatus }}</span>
+          <span data-testid="pet-tetris-level">等级 {{ tetrisLevel }} · 速度 {{ tetrisTickMs }}ms</span>
           <span>分数 {{ tetrisScore }} · 消行 {{ tetrisLines }}</span>
+        </div>
+        <div class="pet-tetris-next" data-testid="pet-tetris-next" aria-label="下一个俄罗斯方块">
+          <span>下一个</span>
+          <div class="pet-tetris-next-board" aria-hidden="true">
+            <div v-for="(row, rowIndex) in tetrisNextBoard" :key="rowIndex" class="pet-tetris-preview-row">
+              <span
+                v-for="(cell, columnIndex) in row"
+                :key="`${rowIndex}-${columnIndex}`"
+                class="pet-tetris-preview-cell"
+                :class="cell ? `is-${tetrisNextPiece?.color}` : undefined"
+              />
+            </div>
+          </div>
         </div>
         <div class="pet-tetris-board" role="grid" aria-label="俄罗斯方块棋盘">
           <template v-for="(row, rowIndex) in visibleTetrisBoard" :key="rowIndex">
@@ -674,7 +732,7 @@ onBeforeUnmount(() => {
       <div v-else-if="activeGame === 'minesweeper'" class="pet-mines" data-testid="pet-minesweeper">
         <div class="pet-game-status-row">
           <span>{{ mineStatusText }}</span>
-          <span>旗 {{ mineFlags }}/{{ MINE_COUNT }}</span>
+          <span>难度 {{ mineLevel }} · 旗 {{ mineFlags }}/{{ mineCount }}</span>
           <button type="button" aria-label="重开扫雷" @click="resetMines"><RotateCcw :size="13" /></button>
         </div>
         <div class="pet-mine-board" role="grid" aria-label="扫雷棋盘">
@@ -705,7 +763,7 @@ onBeforeUnmount(() => {
       <div v-else-if="activeGame === 'sudoku'" class="pet-sudoku" data-testid="pet-sudoku">
         <div class="pet-game-status-row">
           <span>{{ sudokuStatusText }}</span>
-          <span>剩余 {{ sudokuRemaining }} 格</span>
+          <span>难度 {{ sudokuLevel }} · 剩余 {{ sudokuRemaining }} 格</span>
           <button type="button" aria-label="重开数独" @click="resetSudoku"><RotateCcw :size="13" /></button>
         </div>
         <div class="pet-sudoku-board" role="grid" aria-label="数独棋盘">
@@ -740,7 +798,7 @@ onBeforeUnmount(() => {
       <div v-else class="pet-snake" data-testid="pet-snake">
         <div class="pet-game-status-row">
           <span>{{ snakeStatusText }}</span>
-          <span>得分 {{ snakeScore }}</span>
+          <span>等级 {{ snakeLevel }} · 得分 {{ snakeScore }}</span>
           <button type="button" aria-label="重开贪吃蛇" @click="startSnake"><RotateCcw :size="13" /></button>
         </div>
         <div class="pet-snake-board" role="grid" aria-label="贪吃蛇棋盘">
@@ -1047,6 +1105,50 @@ onBeforeUnmount(() => {
   margin-left: auto;
   border-radius: 6px;
 }
+
+.pet-tetris-next {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 29px;
+  margin-bottom: 7px;
+  color: #73808d;
+  font-size: 10px;
+}
+
+.pet-tetris-next-board {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 34px;
+  min-height: 26px;
+  padding: 3px;
+  border: 1px solid #d9e2e8;
+  border-radius: 5px;
+  background: #f1f5f7;
+}
+
+.pet-tetris-preview-row {
+  display: grid;
+  grid-template-columns: repeat(4, 8px);
+  grid-auto-rows: 8px;
+  gap: 1px;
+}
+
+.pet-tetris-preview-cell {
+  border-radius: 1px;
+  background: transparent;
+}
+
+.pet-tetris-preview-cell[class*="is-"] { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45); }
+.pet-tetris-preview-cell.is-cyan { background: #61c8c2; }
+.pet-tetris-preview-cell.is-yellow { background: #e2c66d; }
+.pet-tetris-preview-cell.is-violet { background: #8a76bd; }
+.pet-tetris-preview-cell.is-blue { background: #5f86b4; }
+.pet-tetris-preview-cell.is-orange { background: #d99361; }
+.pet-tetris-preview-cell.is-green { background: #72ad83; }
+.pet-tetris-preview-cell.is-rose { background: #cf7684; }
 
 .pet-tetris-board {
   display: grid;

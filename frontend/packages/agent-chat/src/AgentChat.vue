@@ -32,6 +32,7 @@ export type AgentChatProps = {
   permissions?: PermissionRequest[];
   questions?: QuestionRequest[];
   todos?: TodoItem[];
+  todoSnapshotsByUserMessageId?: Record<string, TodoItem[]>;
   agents?: AgentInfo[];
   models?: ModelInfo[];
   providers?: ProviderInfo[];
@@ -67,6 +68,7 @@ const props = withDefaults(defineProps<AgentChatProps>(), {
   permissions: () => [],
   questions: () => [],
   todos: () => [],
+  todoSnapshotsByUserMessageId: () => ({}),
   agents: () => [],
   models: () => [],
   providers: () => [],
@@ -177,6 +179,7 @@ function onHistorySearchInput(value: string) {
           :selected-model="selectedModel"
           :mode="mode"
           :todos="todos"
+          :todo-snapshots-by-user-message-id="todoSnapshotsByUserMessageId"
           :streaming-text-by-part-id="streamingTextByPartId"
           :message-scopes-by-id="messageScopesById"
           :subagents-by-session-id="subagentsBySessionId"

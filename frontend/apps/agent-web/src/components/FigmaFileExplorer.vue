@@ -32,6 +32,8 @@ const props = defineProps<FileExplorerProps & {
   apiBaseUrl?: string;
   /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
   workspaceId?: string;
+  /** 应用 Agent 配置固定使用应用 feature 工作区，不随个人 worktree 切换。 */
+  agentConfigWorkspaceId?: string;
   /** 当前默认个人工作区 ID，透传给 GitChangesPanel 用于提交并推送 */
   personalWorkspaceId?: string;
   /** 当前默认个人 worktree 分支，透传给底部工作空间切换入口展示 */
@@ -269,9 +271,13 @@ defineExpose({
         v-if="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
+        :agent-config-workspace-id="agentConfigWorkspaceId ?? ''"
         :personal-workspace-id="personalWorkspaceId"
         :api-base-url="apiBaseUrl"
         :can-write="!!canWrite"
+        :can-manage-agent-config="canManageAgentConfig ?? !!canWrite"
+        :can-manage-public-config="canManagePublicConfig ?? !!canWrite"
+        :can-publish-spec="!!canManagePublicConfig"
         @open-diff="(payload) => emit('openDiff', payload)"
         @changes-refreshed="(payload) => emit('changes-refreshed', payload)"
       />
@@ -347,6 +353,7 @@ defineExpose({
               :loading-path="loadingPath"
               :hide-header="true"
               :hide-tabbar="true"
+              :can-write="!!canWrite"
               :active-tab="tab"
               :search-results="searchResults"
               :search-loading="searchLoading"
@@ -403,7 +410,7 @@ defineExpose({
             <AgentConfigPanel
               ref="agentConfigPanelRef"
               :base-url="apiBaseUrl ?? ''"
-              :workspace-id="workspaceId"
+              :workspace-id="agentConfigWorkspaceId"
               :can-write="canManagePublicConfig ?? !!canWrite"
               :can-manage-workspace-config="canManageAgentConfig ?? !!canWrite"
               :hide-header="true"

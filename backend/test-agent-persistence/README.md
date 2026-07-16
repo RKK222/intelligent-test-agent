@@ -46,6 +46,7 @@
 - `V14__create_opencode_process_management_tables.sql`：创建 Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定表。
 - `V15__add_opencode_process_id_check_constraints.sql`：为 opencode 进程管理表加 `process_id` 前缀、稳定服务器身份、状态、port、baseUrl 形状等 CHECK 约束。
 - `V20260625184300__create_scheduler_framework_tables.sql`：创建 scheduler 任务定义、用户级计划、运行记录表，并给 sessions/runs/session_messages 增加来源预留字段；V18 之后新增 migration 统一使用 14 位时间戳版本，避免多人并行开发抢数字版本。
+- `V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加每日保留清理使用的索引，不写入业务数据。
 - `V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本已可能被历史库应用，禁止删除、重命名或直接改写。
 - `V20260627000000__cleanup_loopback_linux_server_seed.sql`：清理 V17 留下的 `127.0.0.1` loopback opencode 拓扑、用户进程、绑定和关联的 manager-backend 连接。
 - `V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`：为 `user_ssh_keys` 增加 `encrypted_aes_key` 列；V10 已被 F-COSS seed 占用，后续 schema 变更不得复用 V10。
@@ -74,13 +75,15 @@
 - `MyBatisConfigurationManagementRepository`：通过 `ConfigurationManagementMapper.xml` 实现配置管理表的应用只读查询、成员逻辑删除、仓库关联、版本库类型、版本库部署模式、工作空间和个人 SSH key 元数据持久化，是当前生产 Spring Bean。
 - `JdbcConfigurationManagementRepository`：配置管理存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试和迁移窗口；其中 `repository_type` / `deployment_mode` 映射只为兼容新增非空列，后续配置管理 SQL 变更必须改 MyBatis XML。
 - `MyBatisCommonParameterRepository`：当前 MyBatis 试点实现，按参数英文名和平台读取、列出并更新通用参数；SQL 位于 `src/main/resources/mybatis/CommonParameterMapper.xml`。
-- `MyBatisAiMessageFeedbackRepository`：通过 `AiMessageFeedbackMapper.xml` 实现反馈保存与 `(user_id, message_id)` 查询，服务层据此做单用户单消息 upsert。
+- `MyBatisAiRunFeedbackRepository`：通过 `AiRunFeedbackMapper.xml` 实现 Run 反馈保存与 `(user_id, run_id)` 单查/批查，新记录不写 `message_id`；`MyBatisAiMessageFeedbackRepository` 保留历史消息兼容。
 - `MyBatisAnalyticsRepository`：通过 `AnalyticsMapper.xml` 实现原始事实读取、hourly/daily rollup 写入、直方图、水位/锁、用户/组织/满意度/异常明细查询；Diff 事实按 storageMode 双读 legacy 事件与新模式 Run 计数，排除 shadow 事件双计数；看板查询只读 rollup 表，不返回 prompt、assistant 原文或费用字段。
 - `MyBatisDatabaseIdentityMaintenanceRepository`：通过 `DatabaseIdentityMapper.xml` 实现 identity 运维护口，查询 `pg_sequences` 当前值与 `max(id)`、执行 `ALTER TABLE ... RESTART WITH`；SQL 注入防护依赖白名单表名与服务层校验。
 - `MyBatisRunSessionScopeRepository`：通过 `RunSessionScopeMapper.xml` 保存 Run root scope 和当前 Run root/child session 清单，供 SSE/HTTP snapshot 按当前 Run 子树恢复消息，并支持按 `root_session_id` 汇总 Session 历史树；mapper 中 `MERGE ... USING (VALUES ...)` 的时间参数显式 cast 为 `timestamp`，避免 PostgreSQL 将未定型参数推断为 `text`。
 - `MyBatisSessionHistoryRepository`：通过 `SessionHistoryMapper.xml` 实现当前用户历史会话只读分页，按 `sessions.created_by_user_id`、`runs.triggered_by_user_id`、`session_messages.sender_user_id` 归因，left join 托管应用/工作区/版本上下文，排序严格按 `updated_at desc, id desc`，不复用 `JdbcSessionRepository` 的 pinned 排序 SQL。
 - `MyBatisSessionRuntimeStateRepository`：通过 `SessionRuntimeStateMapper.xml` 实现当前用户历史会话运行态只读摘要，复用历史会话可见性归因，只返回每个 ACTIVE 会话最近一个 `PENDING/RUNNING/CANCELLING` Run，并按最新 `question.asked/replied/rejected` 派生 `QUESTION` 待关注标记；不新增数据库表或 Flyway migration。
-- `MyBatisRunSummaryPersistenceRepository`：通过 `RunSummaryMapper.xml` 写无原文 Run 锚点、终态双摘要，并为显式 Diff 动作读取远端 ID 定位快照、用单条 UPDATE 增加 `REDIS_SUMMARY` 的 accepted/rejected 计数；该动作不写 `run_events`。终态 CAS 只允许一次较高事件序号的晚到刷新；跨终态状态仅允许已落库的 `FAILED + TRANSPORT_ERROR` 被 `REMOTE_ROOT/RECOVERY_REMOTE_ROOT` 事实纠正，禁止其它来源任意翻转。
+- `MyBatisRunSummaryPersistenceRepository`：通过 `RunSummaryMapper.xml` 写无原文 Run 锚点、终态双摘要，并从既有 `runs.dispatch_message_id` 读取稳定用户轮次锚点与远端 ID 定位快照，供 Redis 详情过期后的目标 Run 恢复和显式 Diff 动作使用；accepted/rejected 计数使用单条 UPDATE，且不写 `run_events`。终态 CAS 只允许一次较高事件序号的晚到刷新；跨终态状态仅允许已落库的 `FAILED + TRANSPORT_ERROR` 被 `REMOTE_ROOT/RECOVERY_REMOTE_ROOT` 事实纠正，禁止其它来源任意翻转。本变更复用既有列，不新增 migration。
+- `ScheduledTaskRunRetentionMapper` / `ScheduledTaskRunRetentionMapper.xml`：按 `ended_at` 和终态 status 清理超过 7 天的 scheduler 运行记录，显式排除活动状态。
+- `MyBatisScheduledTaskRunRetentionRepository`：实现 scheduler 运行记录保留策略 domain 端口，供框架维护任务调用。
 - `RedisRunTerminalRetryStore`：独立保存 PostgreSQL 终态事务失败后的已清洗 `RunTerminalProjection`。record 与全局 due ZSET 统一使用固定 `{terminal-retry}` hash tag；保存 Lua 按 `terminalProjectionVersion → lastEventSeq → failedAttempts/nextAttemptAt` 单调更新，旧 worker 不能覆盖晚到纠正版；删除 Lua 只在完整白名单 JSON 仍等于调用方处理记录时执行 `ZREM + DEL`，旧 worker 不能删除新版。缺失/非法 due member 的自愈 Lua 也只在 record 仍不存在时移除索引，不会误删并发新记录。每 Run JSON 使用 24 小时内的绝对 TTL，due ZSET 只保存 runId 和 `nextAttemptAt`；显式白名单序列化形状不包含 prompt、完整回答、parts、reasoning、工具输入输出或原始事件，Redis 不可用时返回 `RUNTIME_STATE_UNAVAILABLE`，不回退数据库或 JVM 内存队列。
 - `JdbcCommonParameterRepository`：通用参数存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试直接构造；后续通用参数 SQL 变更必须改 MyBatis XML。
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度保存、步骤更新、成功/失败记录和按 `operationId` 查询。
@@ -124,7 +127,7 @@
 - `RedisConversationContextStoreTest` 覆盖同 slot SHA-256 token key、五类反向索引/generation、只读路由解析、签发 fence CAS、Session revoke gate、全局代次、Lua 原子保存与续期及 Redis 异常映射；`RedisConversationContextStoreIntegrationTest` 在提供真实 Redis 端口时验证完整 `OpencodeServerProcess` JSON 往返、Workspace/进程/全局失效、并发归档 gate CAS 回滚及 `beginIssue → invalidate/revoke → late save` 拒绝。
 - `RedisRunCapacityPolicyTest` 固化 USER 输入专用 key、4 MiB 关键快照预留、单槽规范化上限以及 APPEND/PROJECT Lua 对 assistant role、text part 和显式 reset 的脚本契约。`RedisRunRuntimeStoreIntegrationTest` 在提供真实 Redis 端口时验证并发 append 的原子 seq/`${seq}-0` Stream、manifest 与 active 索引、容量截断后仍保留 USER/最终 assistant/text part/run-status 的物化 snapshot/reset、transient delta 聚合、durable/transient runtimeVersion 顺序、status/attention、动态 key TTL、scopeVersion、dedup、pending 字节记账/容量拒绝/原子 drain，并校验真实 Redis `noeviction` / `appendfsync everysec`；`RedisRunRuntimeIndexReservationTest` 验证跨 slot 恢复索引先于单 Run Lua 且始终使用最大保留窗口；`RedisRunOwnerLeaseIntegrationTest` 额外覆盖条件接管、终态拒绝和所有 fenced 写入口的旧 token 隔离。测试未提供真实 Redis 端口时会跳过，不能用 H2 或 mock 替代 Lua/Streams 原子行为验证。
 - `RedisRunTerminalRetryStoreIntegrationTest` 验证 record/due 固定同 slot 与 Lua 原子写删契约，并使用真实 Redis 验证安全投影白名单、due 时间、generation 单调覆盖、旧重排拒绝、compare-delete 和不超过 24 小时的 TTL。
-- ScheduledTask 覆盖时间戳 migration、三张 scheduler 表、运行记录分页筛选、due task 查询和会话来源预留字段读写。
+- ScheduledTask 覆盖时间戳 migration、三张 scheduler 表、运行记录分页筛选、due task 查询和会话来源预留字段读写；`MyBatisScheduledTaskRunRetentionRepositoryIntegrationTest` 额外覆盖七天边界、活动状态保留和 `ended_at` 索引。
 - Session 全局分页在空搜索条件下不会绑定可空 query pattern，避免 PostgreSQL 无法推断 null 参数类型。
 - ExecutionNode 覆盖可路由节点过滤：仅 READY 且 `running_runs < max_runs`，并按负载、权重、更新时间稳定排序。
 - `DruidDataSourceConfigurationTest` 覆盖 Druid DataSource 绑定和 Web 控制台默认关闭。

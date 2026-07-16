@@ -1,28 +1,39 @@
 import { canonicalMessageId, groupRenderableParts } from "./part-utils";
 import { normalizeToolName } from "./tool-registry";
-import type { OpencodeLikeConversationState, TimelineRow } from "./types";
+import { workStatusEventDescriptor } from "./work-status";
+import type {
+  OpencodeLikeConversationState,
+  TimelineRow,
+  WorkStatusEventGroup,
+  WorkStatusPartRef,
+  WorkStatusState
+} from "./types";
+
+type WorkStatusAccumulator = {
+  reasoningRefs: WorkStatusPartRef[];
+  events: WorkStatusEventGroup[];
+  eventIndices: Record<string, number>;
+};
 
 type AssistantRowAccumulator = {
   hasAssistantHeader: boolean;
   partIndex: number;
-  hasVisibleTextOutput: boolean;
   contextGroupIndex?: number;
   reasoningGroupIndex?: number;
   toolPartIndices: Record<string, number>;
   toolGroupIndices: Record<string, number>;
+  workStatus?: WorkStatusAccumulator;
 };
 
 export function createTimelineRows(state: OpencodeLikeConversationState): TimelineRow[] {
   const rows: TimelineRow[] = [];
-
-  if (state.userMessages.length === 0 && state.orphanAssistantMessages.length === 0 && state.running && state.runtimeStatus.type !== "retry") {
-    rows.push({ type: "thinking", key: "thinking:pending", userMessageId: "__pending__" });
-  }
+  const aggregateWorkStatus = !state.activeSubagentSessionId;
+  let latestWorkStatus: Extract<TimelineRow, { type: "work-status" }> | undefined;
+  let latestDiffSummary: Extract<TimelineRow, { type: "diff-summary" }> | undefined;
 
   const orphanAccumulator: AssistantRowAccumulator = {
     hasAssistantHeader: false,
     partIndex: 0,
-    hasVisibleTextOutput: false,
     toolPartIndices: {},
     toolGroupIndices: {}
   };
@@ -52,9 +63,9 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     const accumulator: AssistantRowAccumulator = {
       hasAssistantHeader: false,
       partIndex: 0,
-      hasVisibleTextOutput: false,
       toolPartIndices: {},
-      toolGroupIndices: {}
+      toolGroupIndices: {},
+      workStatus: aggregateWorkStatus ? createWorkStatusAccumulator() : undefined
     };
     for (const assistantMessage of assistantMessages) {
       const assistantMessageId = canonicalMessageId(assistantMessage);
@@ -66,33 +77,40 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
         appendAssistantGroupRow(rows, state, accumulator, {
           group,
           assistantMessageId,
-          userMessageId
+          userMessageId,
+          aggregateWorkStatus
         });
       }
     }
 
-    if (isActiveTurn(userMessageId, state) && state.running && state.runtimeStatus.type !== "retry" && accumulator.partIndex === 0) {
-      rows.push({ type: "thinking", key: `thinking:${userMessageId}`, userMessageId });
-    }
-    // 已出现工具/思考过程但文本尚未开始时，只追加一个轻量工作态行，避免恢复空 text 占位。
-    if (
-      isActiveTurn(userMessageId, state) &&
-      state.running &&
-      state.runtimeStatus.type !== "retry" &&
-      accumulator.partIndex > 0 &&
-      !accumulator.hasVisibleTextOutput
-    ) {
-      rows.push({
-        type: "working-status",
-        key: `working:${userMessageId}`,
-        userMessageId,
-        previousAssistantPart: accumulator.partIndex > 0 || accumulator.hasAssistantHeader,
-        showAssistantHeader: !accumulator.hasAssistantHeader
-      });
+    if (isLatestTurn(userMessageId, state) && state.diffFiles.length > 0) {
+      latestDiffSummary = { type: "diff-summary", key: `diff:${userMessageId}`, userMessageId, files: state.diffFiles };
     }
 
-    if (isLatestTurn(userMessageId, state) && state.diffFiles.length > 0) {
-      rows.push({ type: "diff-summary", key: `diff:${userMessageId}`, userMessageId, files: state.diffFiles });
+    if (aggregateWorkStatus) {
+      const runId = turnRunId(userMessage, assistantMessages);
+      const runStatus = runId ? state.runStatusesByRunId[runId] : undefined;
+      const workStatus: Extract<TimelineRow, { type: "work-status" }> = {
+        type: "work-status",
+        key: `work-status:${userMessageId}`,
+        userMessageId,
+        reasoningRefs: accumulator.workStatus?.reasoningRefs ?? [],
+        events: accumulator.workStatus?.events ?? [],
+        // 显式的分轮空快照同样是所有权证据；只有旧独立消费者完全未提供该键时，
+        // 最新轮才回退到兼容字段 todos。
+        todos: Object.prototype.hasOwnProperty.call(state.todoSnapshotsByUserMessageId, userMessageId)
+          ? state.todoSnapshotsByUserMessageId[userMessageId]
+          : isLatestTurn(userMessageId, state) ? state.todos : [],
+        status: workStatusState(userMessageId, runStatus, state),
+        isLatest: isLatestTurn(userMessageId, state),
+        runId,
+        runStatus
+      };
+      if (workStatus.isLatest) {
+        latestWorkStatus = workStatus;
+      } else {
+        rows.push(workStatus);
+      }
     }
   }
 
@@ -111,6 +129,12 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
       action: state.runtimeStatus.action
     });
   }
+  if (latestWorkStatus) {
+    rows.push(latestWorkStatus);
+  }
+  if (latestDiffSummary) {
+    rows.push(latestDiffSummary);
+  }
 
   return rows;
 }
@@ -125,13 +149,23 @@ function appendAssistantGroupRow(
     group: ReturnType<typeof groupRenderableParts>[number];
     assistantMessageId: string;
     userMessageId: string;
+    aggregateWorkStatus?: boolean;
   }
 ): void {
-  const { group, assistantMessageId, userMessageId } = params;
+  const { group, assistantMessageId, userMessageId, aggregateWorkStatus = false } = params;
   // 会话级 running 只属于最新用户轮次，不能把已结束历史轮次重新投影为进行中。
   const busy = isActiveTurn(userMessageId, state) && state.running;
   if (group.type === "context-tool-group") {
     const refs = group.refs.map((ref) => ({ messageId: assistantMessageId, partId: ref.partId }));
+    if (aggregateWorkStatus && accumulator.workStatus) {
+      for (const ref of refs) {
+        const part = state.partsByMessageId[ref.messageId]?.find((candidate) => candidate.partId === ref.partId);
+        if (part?.type === "tool") {
+          appendWorkStatusEvent(accumulator.workStatus, ref, part);
+        }
+      }
+      return;
+    }
     if (typeof accumulator.contextGroupIndex === "number") {
       const existing = rows[accumulator.contextGroupIndex];
       if (existing?.type === "context-tool-group") {
@@ -156,11 +190,12 @@ function appendAssistantGroupRow(
   }
 
   const part = state.partsByMessageId[assistantMessageId]?.find((candidate) => candidate.partId === group.partId);
-  if (part?.type === "text") {
-    accumulator.hasVisibleTextOutput = true;
-  }
   if (part?.type === "reasoning") {
     const ref = { messageId: assistantMessageId, partId: group.partId };
+    if (aggregateWorkStatus && accumulator.workStatus) {
+      accumulator.workStatus.reasoningRefs.push(ref);
+      return;
+    }
     if (typeof accumulator.reasoningGroupIndex === "number") {
       const existing = rows[accumulator.reasoningGroupIndex];
       if (existing?.type === "reasoning-group") {
@@ -193,6 +228,10 @@ function appendAssistantGroupRow(
         messageId: assistantMessageId,
         partId: group.partId
       });
+      return;
+    }
+    if (aggregateWorkStatus && accumulator.workStatus) {
+      appendWorkStatusEvent(accumulator.workStatus, { messageId: assistantMessageId, partId: group.partId }, part);
       return;
     }
     const ref = { messageId: assistantMessageId, partId: group.partId };
@@ -239,6 +278,47 @@ function appendAssistantGroupRow(
     messageId: assistantMessageId,
     partId: group.partId
   });
+}
+
+function createWorkStatusAccumulator(): WorkStatusAccumulator {
+  return { reasoningRefs: [], events: [], eventIndices: {} };
+}
+
+/** 同一类别只占一个图标，并按第一次出现顺序稳定追加后续引用。 */
+function appendWorkStatusEvent(
+  accumulator: WorkStatusAccumulator,
+  ref: WorkStatusPartRef,
+  part: Parameters<typeof workStatusEventDescriptor>[0]
+): void {
+  const descriptor = workStatusEventDescriptor(part);
+  const existingIndex = accumulator.eventIndices[descriptor.key];
+  if (typeof existingIndex === "number") {
+    accumulator.events[existingIndex]?.refs.push(ref);
+    return;
+  }
+  accumulator.eventIndices[descriptor.key] = accumulator.events.length;
+  accumulator.events.push({ ...descriptor, refs: [ref] });
+}
+
+function workStatusState(userMessageId: string, runStatus: string | undefined, state: OpencodeLikeConversationState): WorkStatusState {
+  const normalizedRunStatus = runStatus?.toUpperCase();
+  if (normalizedRunStatus === "SUCCEEDED" || normalizedRunStatus === "COMPLETED") return "completed";
+  if (normalizedRunStatus === "FAILED") return "failed";
+  if (normalizedRunStatus === "CANCELLED" || normalizedRunStatus === "CANCELED") return "cancelled";
+  if (!isLatestTurn(userMessageId, state)) return "completed";
+  const runtimeType = state.runtimeStatus.type.toLowerCase();
+  if (runtimeType === "retry") return "retry";
+  if (runtimeType === "failed") return "failed";
+  if (runtimeType === "cancelled" || runtimeType === "canceled") return "cancelled";
+  if (state.running || runtimeType === "busy" || runtimeType === "running") return "running";
+  return "completed";
+}
+
+function turnRunId(
+  userMessage: Extract<OpencodeLikeConversationState["messages"][number], { role: "user" }>,
+  assistantMessages: Extract<OpencodeLikeConversationState["messages"][number], { role: "assistant" }>[]
+): string | undefined {
+  return userMessage.runId ?? assistantMessages.find((message) => Boolean(message.runId))?.runId;
 }
 
 function appendSingleAssistantPartRow(

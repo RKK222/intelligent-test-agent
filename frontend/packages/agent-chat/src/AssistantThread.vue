@@ -25,6 +25,8 @@ export type AssistantThreadProps = {
   selectedModel?: string;
   mode?: string;
   todos?: TodoItem[];
+  todoSnapshotsByUserMessageId?: Record<string, TodoItem[]>;
+  runStatusesByRunId?: Record<string, string>;
   streamingTextByPartId?: Record<string, string>;
   messageScopesById?: Record<string, MessageScope>;
   subagentsBySessionId?: Record<string, SubagentSession>;
@@ -37,7 +39,6 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import ComposerArea from "./ComposerArea.vue";
 import OpencodeTimeline from "./opencode-like/components/OpencodeTimeline.vue";
 import RuntimeControls from "./RuntimeControls.vue";
-import TodoPanel from "./opencode-like/components/TodoPanel.vue";
 import { createOpencodeLikeState } from "./opencode-like/state/adapter";
 import { partSignature, scrollViewportToBottom, viewportIsAtBottom } from "./chat-utils";
 
@@ -47,6 +48,7 @@ const props = withDefaults(defineProps<AssistantThreadProps>(), {
   models: () => [],
   providers: () => [],
   todos: () => [],
+  todoSnapshotsByUserMessageId: () => ({}),
   streamingTextByPartId: () => ({}),
   messageScopesById: () => ({}),
   subagentsBySessionId: () => ({}),
@@ -69,6 +71,7 @@ const isAtBottom = ref(true);
 const hasNewContent = ref(false);
 const userInterrupted = ref(false);
 const activeSubagentSessionId = ref<string | null>(null);
+const workStatusDockRef = ref<HTMLElement | null>(null);
 let isProgrammaticScroll = false;
 
 const timelineState = computed(() =>
@@ -78,6 +81,8 @@ const timelineState = computed(() =>
     providers: props.providers,
     models: props.models,
     todos: props.todos,
+    todoSnapshotsByUserMessageId: props.todoSnapshotsByUserMessageId,
+    runStatusesByRunId: props.runStatusesByRunId,
     streamingTextByPartId: props.streamingTextByPartId,
     messageScopesById: props.messageScopesById,
     subagentsBySessionId: props.subagentsBySessionId,
@@ -194,6 +199,7 @@ function jumpToBottom() {
       </div>
       <OpencodeTimeline
         :state="timelineState"
+        :work-status-dock-target="activeSubagentSessionId ? undefined : workStatusDockRef"
         @open-diff="emit('openDiff')"
         @select-subagent="selectSubagent"
       />
@@ -206,7 +212,11 @@ function jumpToBottom() {
         查看新内容
       </button>
     </div>
-    <TodoPanel v-if="!activeSubagentSessionId" :todos="todos" />
+    <div
+      v-if="!activeSubagentSessionId"
+      ref="workStatusDockRef"
+      data-testid="assistant-work-status-dock"
+    />
     <ComposerArea
       v-if="!activeSubagentSessionId"
       :running="running"

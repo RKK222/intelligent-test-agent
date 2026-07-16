@@ -19,8 +19,8 @@ import { BookOpenText, Code2, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
-  AiMessageFeedback,
-  AiMessageFeedbackPayload,
+  AiRunFeedback,
+  AiRunFeedbackPayload,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   FileContent,
@@ -126,8 +126,9 @@ import {
   retryCountdownSeconds,
   retryExpirationDecision,
   projectRootInteractionSession,
+  reconcileCurrentTurnTodos,
   isSupersededInteractionAsk,
-  runEventMatchesRun,
+  runEventProjectionMode,
   runEventProjection,
   runtimeResources,
   runtimeStatus,
@@ -256,11 +257,15 @@ const run = shallowRef<Run | null>(null);
 // OpenCode 原生 title agent 会在 root Run 成功后异步发出 session.updated。
 // 该 Run 处于待命名状态时，保留既有 Run SSE，直到后端确认标题已持久化或显式关闭监听。
 const pendingSessionTitleRunId = ref<string | null>(null);
+// 新 Run HTTP 响应返回前，旧 Run 可能仍因标题同步保持订阅；该 ID 用于截断其对话投影。
+const supersededConversationRunId = ref<string | null>(null);
 const rawEntriesBySessionId = ref<Record<string, RawOutputEntry[]>>({});
 const rawRunSessionMap = ref<Record<string, string>>({});
 const reportedRunEventStreamErrors = new Set<string>();
 const lastPrompt = ref("");
 const lastRunDraft = ref<AutoRetryRunDraft | null>(null);
+// 仅当前页面真实发出的未决启动请求可以为 runtime-state 接管提供 Todo owner；跨标签页 Run 不猜归属。
+const pendingRequestedRunUserMessageId = ref<string | null>(null);
 const selectedAgent = ref("");
 const storedRuntimePreference = readStoredRuntimePreference();
 const selectedProvider = ref(storedRuntimePreference.provider);
@@ -436,12 +441,40 @@ onBeforeUnmount(() => {
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
-const messageFeedbacks = ref<Record<string, AiMessageFeedback | null>>({});
+const runFeedbacks = ref<Record<string, AiRunFeedback | null>>({});
 const feedbackSubmitting = ref<Record<string, boolean>>({});
 const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
 const assistantSummaryMessageIdsByRunId = ref<Record<string, string>>({});
 function dispatchChat(action: Parameters<typeof reduceAgentChatRuntime>[1]) {
-  chatState.value = reduceAgentChatRuntime(chatState.value, action);
+  const next = reduceAgentChatRuntime(chatState.value, action);
+  chatState.value = next;
+  return next;
+}
+
+function requestChatRun(userMessageId: string) {
+  const supersededRunId = run.value?.runId;
+  supersededConversationRunId.value = supersededRunId ?? null;
+  pendingRequestedRunUserMessageId.value = userMessageId;
+  dispatchChat({ type: "run.requested", userMessageId, supersededRunId });
+}
+
+function markConversationRunAdopted(runId: string, userMessageId?: string) {
+  const knownOwner = chatState.value.todoUserMessageIdByRunId[runId];
+  const pendingRequestOwner = supersededConversationRunId.value === runId
+    ? undefined
+    : pendingRequestedRunUserMessageId.value ?? undefined;
+  const ownerUserMessageId = knownOwner ?? userMessageId ?? pendingRequestOwner;
+  dispatchChat({ type: "run.adopted", runId, userMessageId: ownerUserMessageId });
+  if (
+    pendingRequestedRunUserMessageId.value
+    && ownerUserMessageId === pendingRequestedRunUserMessageId.value
+    && (userMessageId !== undefined || (!knownOwner && pendingRequestOwner !== undefined))
+  ) {
+    pendingRequestedRunUserMessageId.value = null;
+  }
+  if (supersededConversationRunId.value && supersededConversationRunId.value !== runId) {
+    supersededConversationRunId.value = null;
+  }
 }
 
 function clearAutoRetryState() {
@@ -450,6 +483,8 @@ function clearAutoRetryState() {
   retryActionInFlightKey.value = null;
   autoRetryStarting.value = false;
   ignoredRunIds.value = new Set();
+  supersededConversationRunId.value = null;
+  pendingRequestedRunUserMessageId.value = null;
 }
 
 function isPlatformSessionMessageId(id: string | undefined): id is string {
@@ -655,6 +690,16 @@ const appTemplatesWithVersions = computed(() =>
 // 当前选中的版本 ID：默认从 selectedWorkspaceId 与 recent 偏好反查；切到版本后由 handleSelectVersion 更新。
 const currentVersionFromWorkspace = ref<string | undefined>(undefined);
 const selectedVersionId = computed(() => currentVersionFromWorkspace.value);
+const selectedAgentConfigWorkspaceId = computed(() => {
+  const versionId = selectedVersionId.value;
+  if (!versionId) return isSuperAdmin.value ? selectedWorkspace.value?.workspaceId : undefined;
+  for (const versions of Object.values(versionsByTemplateId.value)) {
+    const version = versions.find((item) => item.versionId === versionId);
+    if (version?.runtimeWorkspace?.workspaceId) return version.runtimeWorkspace.workspaceId;
+  }
+  // 版本详情尚未加载时保持配置空态，避免把应用配置误写到个人 worktree 分支。
+  return currentPersonalWorkspaceId.value ? undefined : selectedWorkspace.value?.workspaceId;
+});
 // 触发懒加载：被调用时把 templateId 加入 loadedTemplateIds，useQueries 派生数组自动同步并发起请求。
 // 重复调用幂等：Set 内部去重；已加载完成的模板（versions 不为 undefined）不会重复请求。
 function ensureAppVersionsLoaded(templateId: string) {
@@ -774,6 +819,7 @@ function adoptRuntimeStateForCurrentSession(summary: SessionRuntimeStateSummary 
       updatedAt: active.updatedAt
     };
     run.value = adopted;
+    markConversationRunAdopted(adopted.runId);
     rememberRunSession(adopted);
     logs.value = [...logs.value.slice(-200), `[run] recovered ${active.runId} ${active.runStatus} via ${reason}`];
   }
@@ -1511,6 +1557,7 @@ async function recoverActiveRunForSession(
       if (run.value?.runId !== activeRun.runId || run.value.status !== activeRun.status) {
         // 刷新、历史切换或启动请求仍未返回时，以后端 active-run 为准接管 SSE。
         run.value = activeRun;
+        markConversationRunAdopted(activeRun.runId);
         rememberRunSession(activeRun);
         logs.value = [...logs.value.slice(-200), `[run] recovered ${activeRun.runId} ${activeRun.status} via ${reason}`];
       }
@@ -1646,7 +1693,17 @@ watch([run, pendingSessionTitleRunId, () => authStore.token], ([r, pendingTitleR
       if (ignoredRunIds.value.has(event.runId)) {
         return;
       }
-      if (!runEventMatchesRun(event, r.runId, run.value)) {
+      const projectionMode = runEventProjectionMode(
+        event,
+        r.runId,
+        run.value,
+        supersededConversationRunId.value
+      );
+      if (projectionMode === "ignore") {
+        return;
+      }
+      if (projectionMode === "title-only") {
+        applyRunEventWorkbenchProjection(event, false, r.sessionId);
         return;
       }
       handleRunEvent(event, r.sessionId);
@@ -1655,6 +1712,10 @@ watch([run, pendingSessionTitleRunId, () => authStore.token], ([r, pendingTitleR
       logs.value = [...logs.value.slice(-200), `[sse] ${status}`];
     },
     onError: () => {
+      // 新请求尚未拿到 HTTP 响应时 run.value 仍可能指向旧 Run；旧订阅错误不能污染新轮。
+      if (supersededConversationRunId.value === r.runId) {
+        return;
+      }
       if (run.value?.runId === r.runId && isRunBusyStatus(run.value.status)) {
         const message = "浏览器事件流连接异常，前端会等待自动重连；如后端确认失败，会继续收到 run.failed。";
         feedback.value = { kind: "error", title: RUN_EVENT_SSE_ERROR_TITLE, description: message };
@@ -1835,6 +1896,7 @@ function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: 
 type StartRunDraft = {
   prompt: string;
   parts: PromptPart[];
+  userMessageId: string;
   title?: string;
   command?: { command: string; arguments: string };
 };
@@ -1986,12 +2048,12 @@ const startRunMutation = useMutation({
         }
       });
       assertCurrent();
-      return { started, guard, activeSessionId, clientRequestId };
+      return { started, guard, activeSessionId, clientRequestId, userMessageId: input.userMessageId };
     } catch (error) {
       throw new StartRunMutationError(error, guard, activeSessionId, clientRequestId);
     }
   },
-  onSuccess: ({ started, guard, activeSessionId, clientRequestId }) => {
+  onSuccess: ({ started, guard, activeSessionId, clientRequestId, userMessageId }) => {
     if (!conversationInteractionIsCurrent(guard, activeSessionId)) {
       return;
     }
@@ -2001,6 +2063,7 @@ const startRunMutation = useMutation({
       return;
     }
     run.value = started;
+    markConversationRunAdopted(started.runId, userMessageId);
     rememberRunSession(started);
     logs.value = [...logs.value, `[run] ${started.runId} ${started.status}`];
   },
@@ -2035,6 +2098,11 @@ const startRunMutation = useMutation({
       lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
       chatStartedAt.value = null;
       nowTick.value = Date.now();
+    }
+  },
+  onSettled: (_data, _error, request) => {
+    if (pendingRequestedRunUserMessageId.value === request.input.userMessageId) {
+      pendingRequestedRunUserMessageId.value = null;
     }
   }
 });
@@ -2298,9 +2366,16 @@ function handleAutoRetryRun() {
     run.value = prepared.localRun;
   }
   clearRunEventSseFeedback();
-  lastRunDraft.value = prepared.input;
-  dispatchChat({ type: "run.requested" });
-  startRunMutation.mutate({ input: prepared.input, guard: captureConversationInteraction() }, {
+  // 远端 user message 可能已替换乐观 ID；重试必须复用 reducer 迁移后的当前 Run owner。
+  const retryInput: AutoRetryRunDraft = {
+    ...prepared.input,
+    userMessageId: run.value?.runId
+      ? chatState.value.todoUserMessageIdByRunId[run.value.runId] ?? prepared.input.userMessageId
+      : prepared.input.userMessageId
+  };
+  lastRunDraft.value = retryInput;
+  requestChatRun(retryInput.userMessageId);
+  startRunMutation.mutate({ input: retryInput, guard: captureConversationInteraction() }, {
     onSettled: () => {
       autoRetryStarting.value = false;
     }
@@ -2323,9 +2398,14 @@ watch(
       return;
     }
     followUpQueue.value = queue;
-    const draft: AutoRetryRunDraft = { prompt: next.prompt, parts: next.parts, command: next.command };
+    const draft: AutoRetryRunDraft = {
+      prompt: next.prompt,
+      parts: next.parts,
+      userMessageId: next.userMessageId,
+      command: next.command
+    };
     lastRunDraft.value = draft;
-    dispatchChat({ type: "run.requested" });
+    requestChatRun(draft.userMessageId);
     startRunMutation.mutate({ input: draft, guard: captureConversationInteraction() });
   }
 );
@@ -2466,28 +2546,50 @@ const rejectQuestionMutation = useMutation({
   }
 });
 
-const submitMessageFeedbackMutation = useMutation({
-  mutationFn: async (payload: AiMessageFeedbackPayload & { messageId: string }) =>
-    api.putMessageFeedback(payload.messageId, {
+const submitRunFeedbackMutation = useMutation({
+  mutationFn: async (payload: AiRunFeedbackPayload & { runId: string }) =>
+    putRunFeedbackWithProjectionRetry(payload.runId, {
       rating: payload.rating,
       reasonCode: payload.reasonCode,
       comment: payload.comment
     }),
   onMutate: payload => {
-    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: true };
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.runId]: true };
   },
   onSuccess: (saved, payload) => {
-    messageFeedbacks.value = { ...messageFeedbacks.value, [payload.messageId]: saved };
+    runFeedbacks.value = { ...runFeedbacks.value, [payload.runId]: saved };
     feedback.value = { kind: "success", title: "反馈已提交", description: payload.rating === "POSITIVE" ? "满意" : "不满意" };
   },
   onError: (error, payload) => {
     feedback.value = errorFeedback("提交反馈失败", error);
-    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: false };
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.runId]: false };
   },
   onSettled: (_data, _error, payload) => {
-    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: false };
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.runId]: false };
   }
 });
+
+/** 终态 SSE 可能略早于 Run 终态落库；只对该冲突做三次短退避，不重试其他错误。 */
+async function putRunFeedbackWithProjectionRetry(runId: string, payload: AiRunFeedbackPayload): Promise<AiRunFeedback> {
+  const delays = [0, 250, 500];
+  let lastError: unknown;
+  for (const delay of delays) {
+    if (delay > 0) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    try {
+      return await api.putRunFeedback(runId, payload);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof BackendApiError)
+        || error.code !== "CONFLICT"
+        || String(error.details.runStatus ?? "").toUpperCase() === "SUCCEEDED") {
+        throw error;
+      }
+    }
+  }
+  throw lastError;
+}
 
 function createTerminalTicket() {
   if (!session.value) {
@@ -3134,7 +3236,11 @@ async function openFile(path: string) {
   }
   centerMode.value = "editor";
   try {
-    const file = await api.readFile(selectedWorkspace.value.workspaceId, path, !currentPersonalWorkspaceId.value);
+    const file = await api.readFile(
+      selectedWorkspace.value.workspaceId,
+      path,
+      !currentPersonalWorkspaceId.value
+    );
     workbench.openTab({
       id: `file:${path}`,
       path,
@@ -3150,6 +3256,10 @@ async function openFile(path: string) {
 
 async function handleCreateEntry(directory: string, name: string, type: "file" | "directory") {
   if (!selectedWorkspace.value) {
+    return;
+  }
+  if (!currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
     return;
   }
   const workspaceId = selectedWorkspace.value.workspaceId;
@@ -3231,6 +3341,10 @@ async function handleRenameEntry(path: string, name: string) {
   if (!selectedWorkspace.value) {
     return;
   }
+  if (!currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
+    return;
+  }
   const workspaceId = selectedWorkspace.value.workspaceId;
   const lastSepIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   const parentDir = lastSepIndex >= 0 ? path.slice(0, lastSepIndex) : "";
@@ -3260,6 +3374,10 @@ async function handleRenameEntry(path: string, name: string) {
 
 async function handleDeleteEntry(path: string, type: "file" | "directory") {
   if (!selectedWorkspace.value) {
+    return;
+  }
+  if (!currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
     return;
   }
   const workspaceId = selectedWorkspace.value.workspaceId;
@@ -3635,8 +3753,17 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   lastPrompt.value = submitPrompt;
   diffContextParts.value = [];
   // OpenCode 风格的 Timeline 只展示用户原始问题和附件标识；模型请求仍使用下方未裁剪的完整 parts。
-  dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts: promptPartsForUserDisplay(parts) });
+  const submittedState = dispatchChat({
+    type: "user.submitted",
+    prompt: displayPrompt,
+    parts: promptPartsForUserDisplay(parts)
+  });
+  const userMessageId = [...submittedState.messages].reverse().find((message) => message.role === "user")?.id;
   if (!submitPrompt) {
+    return;
+  }
+  if (!userMessageId) {
+    feedback.value = { kind: "error", title: "启动 Run 失败", description: "未能建立当前用户消息标识，请重新发送" };
     return;
   }
   // 启动计时 + 重置任务消耗累计（lastDuration/lastTokens 保留上一轮终态以供刷新对比）
@@ -3645,16 +3772,25 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   // 解析命令（包括 Skill Command，格式为 /skill-name）
   const command = parseCommand(prompt, promptMode.value);
   if (runtimeBusy.value) {
-    followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(submitPrompt, parts, undefined, command ?? undefined));
+    followUpQueue.value = enqueueFollowUp(
+      followUpQueue.value,
+      createFollowUpDraft(submitPrompt, parts, userMessageId, undefined, command ?? undefined)
+    );
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
     chatContextStore.clearContexts();
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
-  const runDraft: AutoRetryRunDraft = { prompt: submitPrompt, parts, title: displayPrompt, command: command ?? undefined };
+  const runDraft: AutoRetryRunDraft = {
+    prompt: submitPrompt,
+    parts,
+    userMessageId,
+    title: displayPrompt,
+    command: command ?? undefined
+  };
   lastRunDraft.value = runDraft;
   clearRunEventSseFeedback();
-  dispatchChat({ type: "run.requested" });
+  requestChatRun(userMessageId);
   chatContextStore.clearContexts();
   startRunMutation.mutate({ input: runDraft, guard: captureConversationInteraction() });
 }
@@ -3770,10 +3906,10 @@ function handleStopRun() {
   }
 }
 
-/** 失败后的所有重试入口统一复用最近一次 prompt，避免子组件事件无人接收。 */
+/** 失败后的所有重试入口复用原用户消息轮次，不追加第二条相同的乐观 user message。 */
 function handleRetryRun() {
-  const prompt = lastPrompt.value.trim();
-  if (!prompt) {
+  const previousDraft = lastRunDraft.value;
+  if (!previousDraft?.prompt.trim()) {
     feedback.value = {
       kind: "info",
       title: "无法重试",
@@ -3781,7 +3917,18 @@ function handleRetryRun() {
     };
     return;
   }
-  handleSend(prompt);
+  const retryDraft: AutoRetryRunDraft = {
+    ...previousDraft,
+    userMessageId: run.value?.runId
+      ? chatState.value.todoUserMessageIdByRunId[run.value.runId] ?? previousDraft.userMessageId
+      : previousDraft.userMessageId
+  };
+  lastRunDraft.value = retryDraft;
+  chatStartedAt.value = Date.now();
+  accumulatedTokens.value = 0;
+  clearRunEventSseFeedback();
+  requestChatRun(retryDraft.userMessageId);
+  startRunMutation.mutate({ input: retryDraft, guard: captureConversationInteraction() });
 }
 
 function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
@@ -3955,11 +4102,7 @@ function applyRunEventWorkbenchProjection(
             ...platformMessageIdsByRemoteId.value,
             [remoteMessageId]: assistantSummaryMessageId
           };
-          void loadFeedbacksForMessages([{
-            messageId: assistantSummaryMessageId,
-            role: "ASSISTANT",
-            remoteMessageId
-          }], run.value.sessionId);
+          void loadFeedbacksForRunIds([event.runId], run.value.sessionId);
         }
       } else {
         // legacy 后端没有稳定摘要 ID，继续使用原有短期兼容查询。
@@ -4649,11 +4792,14 @@ async function switchSession(sessionId: string) {
           questions: liveQuestions === null
             ? chatState.value.questions
             : liveQuestions.filter((item) => item.sessionId === sessionId),
-          todos: liveTodos === null ? chatState.value.todos : liveTodos
+          todos: chatState.value.todos
         };
       }
+      if (liveTodos !== null) {
+        chatState.value = reconcileCurrentTurnTodos(chatState.value, liveTodos);
+      }
     } else if (liveTodos !== null) {
-      chatState.value = { ...chatState.value, todos: liveTodos };
+      chatState.value = reconcileCurrentTurnTodos(chatState.value, liveTodos);
     }
     // 正文可以先展示，但发送锁必须保留到关联 Run/Diff 投影完成，避免迟到历史详情覆盖新 Run。
     // 反馈状态独立异步补齐，不延长这把锁。
@@ -4706,6 +4852,7 @@ async function switchSession(sessionId: string) {
       }
       if (activeRun && isRunBusyStatus(activeRun.status)) {
         run.value = activeRun;
+        markConversationRunAdopted(activeRun.runId);
         rememberRunSession(activeRun);
         return;
       }
@@ -4838,7 +4985,7 @@ function handleNewConversation() {
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   clearAutoRetryState();
   dispatchChat({ type: "reset" });
-  messageFeedbacks.value = {};
+  runFeedbacks.value = {};
   feedbackSubmitting.value = {};
   platformMessageIdsByRemoteId.value = {};
   assistantSummaryMessageIdsByRunId.value = {};
@@ -4855,30 +5002,43 @@ function handleNewConversation() {
 }
 
 async function loadFeedbacksForMessages(
-  messages: Array<Pick<SessionMessage, "messageId" | "role" | "remoteMessageId">>,
+  messages: Array<Pick<SessionMessage, "messageId" | "role" | "remoteMessageId" | "runId">>,
   expectedSessionId?: string,
   interactionIsCurrent: () => boolean = () => true
 ) {
   rememberPersistedMessageIdentities(messages);
-  const assistantMessageIds = messages
-    .filter(message => message.role === "ASSISTANT" && isPlatformSessionMessageId(message.messageId))
-    .map(message => message.messageId!)
-  const uniqueIds = [...new Set(assistantMessageIds)];
-  const loaded: Record<string, AiMessageFeedback | null> = {};
-  await Promise.all(uniqueIds.map(async messageId => {
-    try {
-      loaded[messageId] = await api.getMyMessageFeedback(messageId);
-    } catch {
-      loaded[messageId] = null;
+  const uniqueIds = [...new Set(messages.map(message => message.runId).filter((runId): runId is string => Boolean(runId)))];
+  await loadFeedbacksForRunIds(uniqueIds, expectedSessionId, interactionIsCurrent);
+}
+
+async function loadFeedbacksForRunIds(
+  runIds: string[],
+  expectedSessionId?: string,
+  interactionIsCurrent: () => boolean = () => true
+) {
+  const loaded: Record<string, AiRunFeedback | null> = {};
+  const statuses: Record<string, string> = {};
+  try {
+    for (let index = 0; index < runIds.length; index += 100) {
+      const states = await api.queryMyRunFeedbacks({ runIds: runIds.slice(index, index + 100) });
+      for (const state of states) {
+        loaded[state.runId] = state.feedback ?? null;
+        statuses[state.runId] = state.runStatus;
+      }
     }
-  }));
+  } catch {
+    // 历史反馈加载失败不隐藏入口；已由消息/RunEvent 恢复的成功状态继续用于展示。
+  }
   if (interactionIsCurrent() && (!expectedSessionId || session.value?.sessionId === expectedSessionId)) {
-    messageFeedbacks.value = loaded;
+    runFeedbacks.value = { ...runFeedbacks.value, ...loaded };
+    if (Object.keys(statuses).length > 0) {
+      dispatchChat({ type: "run.statuses.loaded", statuses });
+    }
   }
 }
 
-function handleSubmitFeedback(payload: AiMessageFeedbackPayload & { messageId: string }) {
-  submitMessageFeedbackMutation.mutate(payload);
+function handleSubmitFeedback(payload: AiRunFeedbackPayload & { runId: string }) {
+  submitRunFeedbackMutation.mutate(payload);
 }
 
 function onCurrentFileFeedback(action: "accept-current" | "reject-current", path: string) {
@@ -4997,6 +5157,7 @@ async function handleLogout() {
           :can-manage-public-config="isSuperAdmin"
           :api-base-url="apiBaseUrl"
           :workspace-id="selectedWorkspace?.workspaceId"
+          :agent-config-workspace-id="selectedAgentConfigWorkspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"
           :personal-workspace-branch="currentPersonalWorkspaceBranch"
           :show-server-workspace-switch="isSuperAdmin"
@@ -5183,6 +5344,7 @@ async function handleLogout() {
           :questions="chatState.questions"
           :current-session-id="session?.sessionId"
           :todos="chatState.todos"
+          :todo-snapshots-by-user-message-id="chatState.todoSnapshotsByUserMessageId"
           :chat-contexts="chatContextStore.items"
           :chat-context-total-chars="chatContextStore.totalCharCount"
           :chat-context-over-limit="chatContextStore.isOverLimit"
@@ -5203,8 +5365,9 @@ async function handleLogout() {
           :models="models"
           :providers="providers"
           :selected-model="selectedModel"
-          :message-feedbacks="messageFeedbacks"
+          :run-feedbacks="runFeedbacks"
           :feedback-submitting="feedbackSubmitting"
+          :run-statuses-by-run-id="chatState.runStatusesByRunId"
           :commands="commands"
           :raw-output-entries="currentRawOutputEntries"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"

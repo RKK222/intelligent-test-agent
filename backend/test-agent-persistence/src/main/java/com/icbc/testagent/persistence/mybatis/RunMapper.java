@@ -21,6 +21,8 @@ public interface RunMapper {
 
     RunRow findById(@Param("runId") String runId);
 
+    List<RunRow> findByIds(@Param("runIds") List<String> runIds);
+
     RunRow findLatestActiveBySessionId(@Param("sessionId") String sessionId);
 
     List<RunRow> findStaleActiveRuns(

@@ -88,6 +88,16 @@
         where run_id = #{runId}
     </select>
 
+    <select id="findByIds" resultMap="RunRowMap">
+        select
+        <include refid="RunColumns"/>
+        from runs
+        where run_id in
+        <foreach collection="runIds" item="runId" open="(" separator="," close=")">
+            #{runId}
+        </foreach>
+    </select>
+
     <select id="findLatestActiveBySessionId" resultMap="RunRowMap">
         select
         <include refid="RunColumns"/>

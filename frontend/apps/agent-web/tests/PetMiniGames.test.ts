@@ -22,6 +22,9 @@ describe("PetMiniGames", () => {
     expect(wrapper.find('[data-testid="pet-tetris"]').exists()).toBe(true);
     expect(wrapper.findAll('.pet-tetris-cell')).toHaveLength(160);
     expect(wrapper.findAll('.pet-tetris-cell[class*="is-"]').length).toBeGreaterThan(0);
+    expect(wrapper.get('[data-testid="pet-tetris-next"]').text()).toContain("下一个");
+    expect(wrapper.findAll('.pet-tetris-preview-cell[class*="is-"]').length).toBeGreaterThan(0);
+    expect(wrapper.get('[data-testid="pet-tetris-level"]').text()).toContain("等级 1");
 
     await wrapper.get('[aria-label="直接落下"]').trigger("click");
     expect(wrapper.text()).toContain("分数");
@@ -59,6 +62,25 @@ describe("PetMiniGames", () => {
     expect(wrapper.findAll('.pet-mine-cell.is-revealed')).toHaveLength(0);
   });
 
+  it("randomizes minesweeper and sudoku difficulty for each new round", async () => {
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.99)
+      .mockReturnValueOnce(0.99);
+    const wrapper = mount(PetMiniGames);
+
+    await wrapper.get('[data-testid="pet-game-open-minesweeper"]').trigger("click");
+    expect(wrapper.text()).toContain("难度 1");
+    await wrapper.get('[aria-label="重开扫雷"]').trigger("click");
+    expect(wrapper.text()).toContain("难度 5");
+
+    await wrapper.findAll('.pet-game-tabs button')[2]!.trigger("click");
+    expect(wrapper.text()).toContain("难度 1");
+    await wrapper.get('[aria-label="重开数独"]').trigger("click");
+    expect(wrapper.text()).toContain("难度 5");
+  });
+
   it("supports sudoku selection, keyboard input, error checking and restart", async () => {
     const wrapper = mount(PetMiniGames);
     await wrapper.get('[data-testid="pet-game-open-sudoku"]').trigger("click");
@@ -79,6 +101,7 @@ describe("PetMiniGames", () => {
     await wrapper.get('[aria-label="重开数独"]').trigger("click");
     expect(wrapper.findAll('.pet-sudoku-cell')[2]!.text()).toBe("");
     expect(wrapper.text()).toContain("选一格开始填写");
+    expect(wrapper.text()).toMatch(/难度 [1-5]/);
   });
 
   it("runs and pauses snake with keyboard and compact controls", async () => {
@@ -91,6 +114,7 @@ describe("PetMiniGames", () => {
     expect(wrapper.findAll('.pet-snake-cell.is-head')).toHaveLength(1);
     expect(wrapper.findAll('.pet-snake-cell.is-body')).toHaveLength(2);
     expect(wrapper.findAll('.pet-snake-cell.is-food')).toHaveLength(1);
+    expect(wrapper.text()).toContain("等级 1");
 
     await wrapper.trigger("keydown", { key: "ArrowUp" });
     await vi.advanceTimersByTimeAsync(200);
