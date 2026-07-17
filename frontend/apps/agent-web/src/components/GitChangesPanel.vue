@@ -38,6 +38,8 @@ import type {
 import { Badge, Button } from "@test-agent/ui-kit";
 
 type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
+type DiffScope = "WORKSPACE" | "AGENT_WORKSPACE" | "PUBLIC";
+type AgentPanelDiffFile = AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" };
 
 const props = defineProps<{
   workspaceId?: string;
@@ -45,6 +47,8 @@ const props = defineProps<{
   agentConfigWorkspaceId?: string;
   /** 当前默认个人 worktree ID，用于本地提交和 feature 发布 */
   personalWorkspaceId?: string;
+  /** 当前默认个人 worktree 分支，用于在变更面板标识提交目标。 */
+  personalWorkspaceBranch?: string;
   apiBaseUrl?: string;
   canWrite: boolean;
   /** 应用级 Agent/Skill/Rules/Templates 的独立写权限。 */
@@ -333,29 +337,93 @@ const hasBlockingAgentConflicts = computed(() =>
   canWriteAgentScope("PUBLIC") && hasPublicAgentConflicts.value
 );
 
-const agentsUnstaged = computed(() => {
-  const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
-  publicAgentDiffs.value.forEach((f) => {
-    if (!f.staged && !isConflictFile(f)) list.push({ ...f, scope: "PUBLIC" });
-  });
-  workspaceAgentDiffs.value.forEach((f) => {
-    const path = normalizeWorkspaceAgentDiffPath(f.path);
-    if (!f.staged && path && !isConflictFile(f)) list.push({ ...f, path, scope: "WORKSPACE" });
-  });
-  return list;
-});
+const publicAgentUnstaged = computed<AgentPanelDiffFile[]>(() =>
+  publicAgentDiffs.value
+    .filter((file) => !file.staged && !isConflictFile(file))
+    .map((file) => ({ ...file, scope: "PUBLIC" }))
+);
+const publicAgentStaged = computed<AgentPanelDiffFile[]>(() =>
+  publicAgentDiffs.value
+    .filter((file) => file.staged && !isConflictFile(file))
+    .map((file) => ({ ...file, scope: "PUBLIC" }))
+);
+const workspaceAgentUnstaged = computed<AgentPanelDiffFile[]>(() =>
+  workspaceAgentDiffs.value.flatMap((file) => {
+    const path = normalizeWorkspaceAgentDiffPath(file.path);
+    return !file.staged && path && !isConflictFile(file)
+      ? [{ ...file, path, scope: "WORKSPACE" as const }]
+      : [];
+  })
+);
+const workspaceAgentStaged = computed<AgentPanelDiffFile[]>(() =>
+  workspaceAgentDiffs.value.flatMap((file) => {
+    const path = normalizeWorkspaceAgentDiffPath(file.path);
+    return file.staged && path && !isConflictFile(file)
+      ? [{ ...file, path, scope: "WORKSPACE" as const }]
+      : [];
+  })
+);
+const workspaceAgentConflicts = computed(() =>
+  workspaceAgentDiffs.value
+    .filter((file) => isConflictFile(file))
+    .map((file) => {
+      const path = normalizeWorkspaceAgentDiffPath(file.path);
+      return path ? { ...file, path, scope: "WORKSPACE" as const } : null;
+    })
+    .filter((file): file is Exclude<typeof file, null> => file !== null)
+);
 
-const agentsStaged = computed(() => {
-  const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
-  publicAgentDiffs.value.forEach((f) => {
-    if (f.staged && !isConflictFile(f)) list.push({ ...f, scope: "PUBLIC" });
-  });
-  workspaceAgentDiffs.value.forEach((f) => {
-    const path = normalizeWorkspaceAgentDiffPath(f.path);
-    if (f.staged && path && !isConflictFile(f)) list.push({ ...f, path, scope: "WORKSPACE" });
-  });
-  return list;
+const activeDiffScope = ref<DiffScope>("WORKSPACE");
+const hasSelectedDiffScope = ref(false);
+const diffScopes = computed(() => [
+  {
+    key: "WORKSPACE" as const,
+    label: "workspace",
+    count: workspaceUnstaged.value.length + workspaceStaged.value.length + workspaceConflicts.value.length,
+    description: "普通文件、docs、spec"
+  },
+  {
+    key: "AGENT_WORKSPACE" as const,
+    label: "应用Agent",
+    count: workspaceAgentUnstaged.value.length + workspaceAgentStaged.value.length + workspaceAgentConflicts.value.length,
+    description: "应用 .opencode 配置"
+  },
+  {
+    key: "PUBLIC" as const,
+    label: "公共Agent",
+    count: publicAgentUnstaged.value.length + publicAgentStaged.value.length + publicAgentConflicts.value.length,
+    description: "公共 opencode 配置"
+  }
+]);
+const activeScopeItem = computed(() =>
+  diffScopes.value.find((scope) => scope.key === activeDiffScope.value) ?? diffScopes.value[0]
+);
+const activeScopeMeta = computed(() => {
+  if (activeDiffScope.value === "WORKSPACE") {
+    return props.personalWorkspaceBranch
+      ? `个人 worktree · ${props.personalWorkspaceBranch}`
+      : "个人 worktree";
+  }
+  const worktree = activeDiffScope.value === "PUBLIC" ? workbench.publicWorktree : workbench.workspaceWorktree;
+  return worktree?.branch
+    ? `个人 worktree · ${worktree.branch}`
+    : activeDiffScope.value === "PUBLIC" ? "公共个人 worktree" : "应用配置 worktree";
 });
+const activeAgentUnstaged = computed<AgentPanelDiffFile[]>(() =>
+  activeDiffScope.value === "PUBLIC" ? publicAgentUnstaged.value : workspaceAgentUnstaged.value
+);
+const activeAgentStaged = computed<AgentPanelDiffFile[]>(() =>
+  activeDiffScope.value === "PUBLIC" ? publicAgentStaged.value : workspaceAgentStaged.value
+);
+const activeAgentConflicts = computed(() =>
+  activeDiffScope.value === "PUBLIC" ? publicAgentConflicts.value : workspaceAgentConflicts.value
+);
+const activeUnstagedCount = computed(() => activeDiffScope.value === "WORKSPACE"
+  ? workspaceUnstaged.value.length + workspaceConflicts.value.length
+  : activeAgentUnstaged.value.length + activeAgentConflicts.value.length);
+const activeStagedCount = computed(() => activeDiffScope.value === "WORKSPACE"
+  ? workspaceStaged.value.length
+  : activeAgentStaged.value.length);
 
 function canWriteAgentScope(scope: "PUBLIC" | "WORKSPACE"): boolean {
   return scope === "PUBLIC"
@@ -363,25 +431,33 @@ function canWriteAgentScope(scope: "PUBLIC" | "WORKSPACE"): boolean {
     : (props.canManageAgentConfig ?? props.canWrite);
 }
 
-const writableAgentStaged = computed(() =>
-  agentsStaged.value.filter((file) => canWriteAgentScope(file.scope))
-);
 const hasWritableStagedChanges = computed(() =>
-  (props.canWrite && workspaceStaged.value.length > 0) || writableAgentStaged.value.length > 0
+  activeDiffScope.value === "WORKSPACE"
+    ? props.canWrite && workspaceStaged.value.length > 0
+    : activeAgentStaged.value.some((file) => canWriteAgentScope(file.scope))
 );
 const hasPublishableStagedChanges = computed(() =>
-  (props.canWrite && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path)))
-  || writableAgentStaged.value.length > 0
+  activeDiffScope.value === "WORKSPACE"
+    ? props.canWrite && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path))
+    : activeAgentStaged.value.some((file) => canWriteAgentScope(file.scope))
+);
+const activeHasBlockingConflicts = computed(() =>
+  activeDiffScope.value === "WORKSPACE"
+    ? hasBlockingWorkspaceConflicts.value
+    : activeDiffScope.value === "PUBLIC" && hasBlockingAgentConflicts.value
 );
 
-// Overall counts
-const totalUnstagedCount = computed(() =>
-  workspaceUnstaged.value.length
-  + workspaceConflicts.value.length
-  + publicAgentConflicts.value.length
-  + agentsUnstaged.value.length
-);
-const totalStagedCount = computed(() => workspaceStaged.value.length + agentsStaged.value.length);
+function selectInitialDiffScope() {
+  if (hasSelectedDiffScope.value) return;
+  if (diffScopes.value.some((scope) => scope.key === activeDiffScope.value && scope.count > 0)) return;
+  const firstChangedScope = diffScopes.value.find((scope) => scope.count > 0);
+  if (firstChangedScope) activeDiffScope.value = firstChangedScope.key;
+}
+
+function selectDiffScope(scope: DiffScope) {
+  hasSelectedDiffScope.value = true;
+  activeDiffScope.value = scope;
+}
 
 // Watch for workspace change
 watch(
@@ -403,6 +479,7 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
   try {
     if (workbench.useMockTestData) {
       applyMockChanges();
+      selectInitialDiffScope();
       return;
     }
 
@@ -454,6 +531,7 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
     } else {
       workspaceAgentDiffs.value = [];
     }
+    selectInitialDiffScope();
   } catch (error) {
     if (token !== refreshChangesToken) return;
     errorMessage.value = errorMessageFor(error, "刷新变更列表失败");
@@ -886,12 +964,12 @@ function handleOpenFileDiff(
 // Commit changes
 async function handleCommit(push = false) {
   if (committing.value || !hasWritableStagedChanges.value) return;
-  if (props.canWrite && hasWorkspaceConflicts.value) {
+  if (activeDiffScope.value === "WORKSPACE" && props.canWrite && hasWorkspaceConflicts.value) {
     errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
     progressMessage.value = "";
     return;
   }
-  if (hasBlockingAgentConflicts.value) {
+  if (activeDiffScope.value === "PUBLIC" && hasBlockingAgentConflicts.value) {
     errorMessage.value = "公共 Agent 个人 worktree 存在合并冲突，请先解决冲突文件后再提交并推送。";
     progressMessage.value = "";
     return;
@@ -935,14 +1013,13 @@ async function handleCommit(push = false) {
       }
       commitStep.value = 5; // Success
       
-      // Clear all staged paths
-      stagedWorkspacePaths.value.clear();
-      publicAgentDiffs.value.forEach((f) => {
-        f.staged = false;
-      });
-      workspaceAgentDiffs.value.forEach((f) => {
-        f.staged = false;
-      });
+      if (activeDiffScope.value === "WORKSPACE") {
+        stagedWorkspacePaths.value.clear();
+      } else if (activeDiffScope.value === "PUBLIC") {
+        publicAgentDiffs.value.forEach((file) => { file.staged = false; });
+      } else {
+        workspaceAgentDiffs.value.forEach((file) => { file.staged = false; });
+      }
       
       commitMessage.value = "";
       progressMessage.value = push ? "提交并推送成功！(测试数据)" : "提交成功！(测试数据)";
@@ -954,7 +1031,7 @@ async function handleCommit(push = false) {
     }
 
     // 1. 应用工作空间先提交个人 worktree；推送时再从个人 HEAD 投影到 feature worktree。
-    if (props.canWrite && workspaceStaged.value.length > 0) {
+    if (activeDiffScope.value === "WORKSPACE" && props.canWrite && workspaceStaged.value.length > 0) {
       if (!props.personalWorkspaceId) {
         errorMessage.value = "当前不是个人 worktree，不能提交或发布应用变更。";
         progressMessage.value = "";
@@ -1024,7 +1101,7 @@ async function handleCommit(push = false) {
     const publicStagedCount = canWriteAgentScope("PUBLIC")
       ? publicAgentDiffs.value.filter((f) => f.staged).length
       : 0;
-    if (publicStagedCount > 0) {
+    if (activeDiffScope.value === "PUBLIC" && publicStagedCount > 0) {
       progressMessage.value = "正在提交公共 Agent 配置...";
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
@@ -1054,7 +1131,7 @@ async function handleCommit(push = false) {
       const workspaceStagedCount = canWriteAgentScope("WORKSPACE")
       ? workspaceAgentDiffs.value.filter((f) => f.staged).length
       : 0;
-    if (workspaceStagedCount > 0 && effectiveAgentConfigWorkspaceId.value) {
+    if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceStagedCount > 0 && effectiveAgentConfigWorkspaceId.value) {
       progressMessage.value = "正在提交工作空间 Agent 配置...";
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
@@ -1214,6 +1291,27 @@ defineExpose({
       <span>{{ progressMessage }}</span>
     </div>
 
+    <div class="git-scope-switcher" role="tablist" aria-label="Git 变更作用域">
+      <button
+        v-for="scope in diffScopes"
+        :key="scope.key"
+        type="button"
+        role="tab"
+        :aria-selected="activeDiffScope === scope.key"
+        :class="['git-scope-tab', { 'is-active': activeDiffScope === scope.key }]"
+        @click="selectDiffScope(scope.key)"
+      >
+        <span class="git-scope-tab-label">{{ scope.label }}</span>
+        <span class="git-scope-tab-count">{{ scope.count }}</span>
+      </button>
+    </div>
+    <div class="git-scope-meta">
+      <GitBranch class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
+      <span>{{ activeScopeItem.description }}</span>
+      <span class="git-scope-meta-separator">·</span>
+      <span>{{ activeScopeMeta }}</span>
+    </div>
+
     <!-- Scrollable file list area -->
     <div class="git-lists-container">
       <!-- 1. UNSTAGED SECTION -->
@@ -1221,7 +1319,7 @@ defineExpose({
         <div class="git-section-header" @click="unstagedExpanded = !unstagedExpanded">
           <ChevronDown v-if="unstagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span class="git-section-title">UNSTAGED (未暂存) ({{ totalUnstagedCount }})</span>
+          <span class="git-section-title">UNSTAGED (未暂存) ({{ activeUnstagedCount }})</span>
           <button
             type="button"
             class="git-refresh-btn ml-auto"
@@ -1235,7 +1333,7 @@ defineExpose({
 
         <div v-show="unstagedExpanded" class="git-section-content pl-2">
           <!-- 1a. Application Workspace -->
-          <div class="git-sub-section">
+          <div v-if="activeDiffScope === 'WORKSPACE'" class="git-sub-section">
             <div class="git-sub-header" @click.stop="workspaceUnstagedExpanded = !workspaceUnstagedExpanded">
               <ChevronDown v-if="workspaceUnstagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
@@ -1365,16 +1463,16 @@ defineExpose({
             </div>
           </div>
 
-          <!-- 1b. Agents -->
-          <div class="git-sub-section">
+          <!-- 1b. Agent/Skill scope; one scope is shown at a time to keep the panel readable. -->
+          <div v-else class="git-sub-section">
             <div class="git-sub-header" @click.stop="agentsUnstagedExpanded = !agentsUnstagedExpanded">
               <ChevronDown v-if="agentsUnstagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
-              <span>agents</span>
-              <span class="git-sub-badge ml-1">({{ agentsUnstaged.length + publicAgentConflicts.length }})</span>
+              <span>{{ activeScopeItem.label }}</span>
+              <span class="git-sub-badge ml-1">({{ activeAgentUnstaged.length + activeAgentConflicts.length }})</span>
             </div>
             <div v-show="agentsUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="publicAgentConflicts.length > 0" class="git-conflict-banner">
+              <div v-if="activeDiffScope === 'PUBLIC' && publicAgentConflicts.length > 0" class="git-conflict-banner">
                 <div class="git-conflict-header">
                   <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
                   <span>检测到 {{ publicAgentConflicts.length }} 个公共 Agent 冲突</span>
@@ -1409,23 +1507,26 @@ defineExpose({
                   </Button>
                 </div>
               </div>
+              <div v-if="activeDiffScope === 'AGENT_WORKSPACE' && workspaceAgentConflicts.length > 0" class="git-conflict-note">
+                检测到 {{ workspaceAgentConflicts.length }} 个应用 Agent 冲突，请在应用 Agents/Skills 配置区处理。
+              </div>
               <div
-                v-for="file in publicAgentConflicts"
-                :key="`public-conflict:${file.path}`"
+                v-for="file in activeAgentConflicts"
+                :key="`${activeDiffScope.toLowerCase()}-conflict:${file.path}`"
                 class="git-file-row git-conflict-row group"
                 :title="file.path"
                 :aria-label="file.path"
-                @click="openPublicAgentConflict(file.path)"
+                @click="activeDiffScope === 'PUBLIC' && openPublicAgentConflict(file.path)"
               >
                 <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
                 <span class="git-file-name" :title="file.path">
-                  <span class="git-scope-label">[公共]</span>
+                  <span class="git-scope-label">[{{ activeDiffScope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
                   {{ getFileName(file.path) }}
                 </span>
               </div>
-              <div v-if="agentsUnstaged.length === 0 && publicAgentConflicts.length === 0" class="git-empty-text">暂无变更</div>
+              <div v-if="activeAgentUnstaged.length === 0 && activeAgentConflicts.length === 0" class="git-empty-text">暂无变更</div>
               <div
-                v-for="file in agentsUnstaged"
+                v-for="file in activeAgentUnstaged"
                 :key="file.path"
                 class="git-file-row group"
                 :title="file.path"
@@ -1434,7 +1535,6 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">
-                  <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
                   {{ getFileName(file.path) }}
                 </span>
                 
@@ -1467,12 +1567,12 @@ defineExpose({
         <div class="git-section-header" @click="stagedExpanded = !stagedExpanded">
           <ChevronDown v-if="stagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span class="git-section-title">STAGED (已暂存) ({{ totalStagedCount }})</span>
+          <span class="git-section-title">STAGED (已暂存) ({{ activeStagedCount }})</span>
         </div>
 
         <div v-show="stagedExpanded" class="git-section-content pl-2">
           <!-- 2a. Application Workspace -->
-          <div class="git-sub-section">
+          <div v-if="activeDiffScope === 'WORKSPACE'" class="git-sub-section">
             <div class="git-sub-header" @click.stop="workspaceStagedExpanded = !workspaceStagedExpanded">
               <ChevronDown v-if="workspaceStagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
@@ -1538,18 +1638,18 @@ defineExpose({
             </div>
           </div>
 
-          <!-- 2b. Agents -->
-          <div class="git-sub-section">
+          <!-- 2b. Agent/Skill scope -->
+          <div v-else class="git-sub-section">
             <div class="git-sub-header" @click.stop="agentsStagedExpanded = !agentsStagedExpanded">
               <ChevronDown v-if="agentsStagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
-              <span>agents</span>
-              <span class="git-sub-badge ml-1">({{ agentsStaged.length }})</span>
+              <span>{{ activeScopeItem.label }}</span>
+              <span class="git-sub-badge ml-1">({{ activeAgentStaged.length }})</span>
             </div>
             <div v-show="agentsStagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="agentsStaged.length === 0" class="git-empty-text">无暂存文件</div>
+              <div v-if="activeAgentStaged.length === 0" class="git-empty-text">无暂存文件</div>
               <div
-                v-for="file in agentsStaged"
+                v-for="file in activeAgentStaged"
                 :key="file.path"
                 class="git-file-row group"
                 :title="file.path"
@@ -1558,7 +1658,6 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">
-                  <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
                   {{ getFileName(file.path) }}
                 </span>
                 
@@ -1580,6 +1679,10 @@ defineExpose({
 
     <!-- Commit Footer form -->
     <div class="git-commit-form">
+      <div class="git-commit-context">
+        <span>提交当前作用域</span>
+        <strong>{{ activeScopeItem.label }}</strong>
+      </div>
       <textarea
         v-model="commitMessage"
         class="git-commit-textarea"
@@ -1594,8 +1697,8 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-commit flex-1"
-          :title="hasBlockingWorkspaceConflicts || hasBlockingAgentConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
-          :disabled="committing || hasBlockingWorkspaceConflicts || hasBlockingAgentConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
+          :title="activeHasBlockingConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
+          :disabled="committing || activeHasBlockingConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(false)"
         >
           <FolderGit2 class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -1604,10 +1707,10 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-push flex-1"
-          :title="hasBlockingWorkspaceConflicts || hasBlockingAgentConflicts
+          :title="activeHasBlockingConflicts
             ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送'
             : (!hasPublishableStagedChanges ? '当前暂存内容仅允许本地提交' : '提交并推送可发布变更')"
-          :disabled="committing || hasBlockingWorkspaceConflicts || hasBlockingAgentConflicts || !hasPublishableStagedChanges || !commitMessage.trim()"
+          :disabled="committing || activeHasBlockingConflicts || !hasPublishableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(true)"
         >
           <Upload class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -1690,7 +1793,7 @@ defineExpose({
         </div>
 
         <footer class="ta-process-startup-footer">
-          <span>{{ props.personalWorkspaceId || workbench.publicWorktree?.branch || workbench.workspaceWorktree?.branch }}</span>
+          <span>{{ activeScopeItem.label }} · {{ activeScopeMeta }}</span>
           <button type="button" :disabled="committing" @click="showCommitProgressDialog = false">关闭</button>
         </footer>
       </section>
@@ -1741,6 +1844,91 @@ defineExpose({
   padding: 6px 8px;
   font-size: 11px;
   color: #15803d;
+}
+
+.git-scope-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 7px 8px 5px;
+  border-bottom: 1px solid #e4e4e7;
+  background: #fafafa;
+}
+
+.git-scope-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 4px;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+  font-size: 10px;
+  text-align: left;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.git-scope-tab:hover {
+  background: #f4f4f5;
+  color: #3f3f46;
+}
+
+.git-scope-tab.is-active {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 600;
+}
+
+.git-scope-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-scope-tab-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: #e4e4e7;
+  color: #71717a;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.git-scope-tab.is-active .git-scope-tab-count {
+  background: #c7d2fe;
+  color: #3730a3;
+}
+
+.git-scope-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 10px 6px;
+  border-bottom: 1px solid #e4e4e7;
+  color: #71717a;
+  font-size: 10px;
+}
+
+.git-scope-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-scope-meta-separator {
+  flex: 0 0 auto;
+  color: #a1a1aa;
 }
 
 .git-conflict-banner {
@@ -2061,6 +2249,24 @@ defineExpose({
   border-top: 1px solid #e4e4e7;
   padding: 8px;
   background: #fafafa;
+}
+
+.git-commit-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #71717a;
+  font-size: 10px;
+}
+
+.git-commit-context strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #52525b;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .git-commit-textarea {

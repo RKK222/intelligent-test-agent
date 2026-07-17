@@ -7568,3 +7568,17 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 最新全量包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 `9d57e21d750fadd9d57e0ac8f6251018943e9379ffb95f276d3a3517f83c24dd`；包内 programs 已确认包含 plugin、SDK、effect、zod。
   - 未修改 HTTP API、RunEvent、数据库、环境配置或 generated SDK。新增 axios、数据库驱动、企业私有 SDK 等基线外 import 时仍需在外网更新 runtime package/lockfile 并重打 programs/worker，不能在内网临时安装。
+
+### 2026-07-17 - Git 变更面板按工作空间作用域切换
+
+- Why:
+  - 应用普通文件、应用 `.opencode` Agent/Skill 和公共 `opencode` 配置同时展示时，列表层级拥挤且提交按钮可能跨仓库处理，用户需要按工作空间边界查看和操作。
+- What:
+  - `GitChangesPanel.vue` 增加“应用工作空间 / 应用 Agents/Skills / 公共 Agents/Skills”三个作用域标签，每次只渲染当前作用域的 UNSTAGED/STAGED 文件树；应用工作空间继续承载 docs/spec，Agent 作用域只展示对应仓库的 agents/skills。
+  - 提交、提交并推送、冲突阻断和测试模式清理均改为只作用于当前标签；补充个人 worktree 分支元信息展示，并将分支透传至变更面板。
+  - Git 面板测试补充三类路径的作用域切换断言，更新 agent-web 包说明、前端 README 和组件说明。
+- How:
+  - 复用现有 workspace/public/workspace-agent diff 查询、stage/unstage、commit/publish 和冲突 API；未增加后端接口、事件、数据库或环境配置。
+  - `agent-web` typecheck、GitChangesPanel 定向测试和前端全量测试均通过；按 `.env.test`/`test` profile 重启三服务，health/readiness 为 UP，前端 `127.0.0.1:3000` 返回 200。
+- Result:
+  - 前端全量 70 个测试文件通过（1098 项通过、1 项跳过）；作用域切换后不同仓库不会在同一棵文件树或同一次提交中混合。

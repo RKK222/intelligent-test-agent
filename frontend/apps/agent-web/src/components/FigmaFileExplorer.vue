@@ -284,6 +284,7 @@ defineExpose({
         :workspace-id="workspaceId"
         :agent-config-workspace-id="agentConfigWorkspaceId ?? ''"
         :personal-workspace-id="personalWorkspaceId"
+        :personal-workspace-branch="personalWorkspaceBranch"
         :api-base-url="apiBaseUrl"
         :can-write="!!canWrite"
         :can-manage-agent-config="canManageAgentConfig ?? !!canWrite"
