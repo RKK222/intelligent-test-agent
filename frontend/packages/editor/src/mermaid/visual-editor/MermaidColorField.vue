@@ -158,7 +158,7 @@ function reset() {
 .ta-mermaid-color-palette-wrapper { position: relative; width: 14px; height: 14px; display: inline-block; }
 .ta-mermaid-color-palette-btn { display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; border: 1px solid var(--ta-border, #dbe2ea); border-radius: 2px; background: var(--ta-surface, #fff); color: var(--ta-muted, #64748b); cursor: pointer; transition: transform 100ms ease, border-color 100ms ease, color 100ms ease; box-sizing: border-box; }
 .ta-mermaid-color-palette-wrapper:hover .ta-mermaid-color-palette-btn { transform: scale(1.2); border-color: var(--ta-border-strong, #94a3b8); color: var(--ta-ink, #172033); }
-.ta-mermaid-color-field__hidden-picker { position: absolute; top: 0; left: 0; width: 14px; height: 14px; opacity: 0; cursor: pointer; padding: 0; border: none; }
+.ta-mermaid-color-field__hidden-picker { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0.01; cursor: pointer; padding: 0; border: none; margin: 0; box-sizing: border-box; }
 .ta-mermaid-color-field__hidden-picker:disabled { cursor: not-allowed; }
 .ta-mermaid-color-field__hidden-input { display: none; }
 </style>

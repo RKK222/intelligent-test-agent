@@ -41,6 +41,27 @@
 - Result:
   - 三个作用域不再重复占用纵向空间，纯本地与可发布操作按暂存内容出现，推送后用户能直接看到提交/推送/仅本地文件数。
   - 不涉及 HTTP API、RunEvent、数据库、SQL、generated SDK、权限、安全或环境配置变更；manager 保持连接，但仍收到既有未托管 4097 端口的健康探测失败日志。
+### 2026-07-17 - 修复 Mermaid 编辑器取色器定位与文本布局微调
+
+- Why:
+  - 1. Mermaid 编辑器中，自定义取色器由于 input 标签 opacity 设为 0，导致 Chrome/Safari 等浏览器无法正确计算其渲染坐标而把系统色盘弹窗定位到屏幕左上角。
+  - 2. “节点类型”下的提示文字“拖到画布创建节点，也可点击添加。”过于冗余，用户要求删除。
+  - 3. “拖动图结构并应用后，修改会回写到当前 Markdown 代码块。”提示文字原先在标题下方，需微调放置在标题右侧，保持字体字号不变。
+  - 4. 之前会话重构属性面板时遗留了部分单元测试（MarkdownPreview.test.ts）和 E2E 测试（workbench.spec.ts）仍使用已被移除的“节点名称”字段导致测试失败，需予以修复。
+- What:
+  - 1. 调整 `MermaidColorField.vue` 中隐藏的取色器 `opacity` 为 `0.01` 并设置尺寸为百分之百填充，确保浏览器能正确感知其布局边界并将系统取色器精确定位在调色盘图标上方。
+  - 2. 删除了 `MermaidVisualEditor.vue` 侧边栏的“拖到画布创建节点，也可点击添加。”文字及其对应的 `.ta-mermaid-palette__hint` 样式。
+  - 3. 将 `MermaidEditorDialog.vue` 中弹窗标题“Mermaid 可视化编辑”和底下的说明文字使用 flex-baseline 进行横向同行排列，实现右侧伴随的紧凑布局。
+  - 4. 修复 `MarkdownPreview.test.ts` 和 `workbench.spec.ts` 中废弃的 `节点名称` 选择器逻辑，修改为模拟真实交互的“双击节点激活就地编辑器并修改 `节点文字`”的流程。
+- How:
+  - 1. 修改 `MermaidColorField.vue` 的 CSS，将 `.ta-mermaid-color-field__hidden-picker` 修改为 `width: 100%; height: 100%; opacity: 0.01; margin: 0; box-sizing: border-box;`。
+  - 2. 在 `MermaidVisualEditor.vue` 中移除 hint paragraph `<p class="ta-mermaid-palette__hint">...` 及其 CSS 样式定义。
+  - 3. 在 `MermaidEditorDialog.vue` 中将包含 `h2` 与 `p` 的容器 div 赋以类名 `ta-mermaid-dialog__header-left`，并在样式中为其声明 `display: flex; align-items: baseline; gap: 12px;`，同时清除 `p` 元素的 margin。
+  - 4. 更新 `MarkdownPreview.test.ts` 中的 VueFlow mock 支持 node-mermaid 插槽渲染，将原先直接查找 `节点名称` 的单测用例改为：双击节点 A 获取 teleported 内的 `.ta-mermaid-inline-editor` 并更新 `节点文字`。
+  - 5. 更新 `workbench.spec.ts` 的 Playwright 测试，将 `click()` 和 `getByLabel("节点名称")` 逻辑改为 `dblclick()` 并更新 `getByLabel("节点文字")` 后点击“完成”。
+- Result:
+  - 前端 `@test-agent/editor` 的全量 130 个 Vitest 单元测试已全部通过，其中包括修复并正常执行的 `MarkdownPreview.test.ts`，未引入任何破坏性更新或性能负荷。
+
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器文字多行编辑、主流颜色预设及属性面板紧凑布局
 
 - Why:

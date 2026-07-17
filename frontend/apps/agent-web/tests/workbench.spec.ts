@@ -1232,8 +1232,9 @@ Note over U,S: 保留说明
   await visualButtons.nth(0).click();
   const dialog = page.getByRole("dialog", { name: "Mermaid 可视化编辑" });
   await expect(dialog).toBeVisible();
-  await dialog.locator(".vue-flow__node").filter({ hasText: "开始" }).click();
-  await dialog.getByLabel("节点名称").fill("准备");
+  await dialog.locator(".vue-flow__node").filter({ hasText: "开始" }).dblclick();
+  await page.getByLabel("节点文字").fill("准备");
+  await page.getByRole("button", { name: "完成" }).click();
   await dialog.getByRole("button", { name: "应用到 Markdown" }).click();
 
   await expect(visualButtons).toHaveCount(2);
@@ -5041,6 +5042,7 @@ async function mockBackendApi(
     sessionInteractionsGate?: Promise<void>;
     messageFeedbackGate?: Promise<void>;
     feedbackRequests?: string[];
+    runFeedbackQueryRequests?: Array<Record<string, unknown>>;
     historyRun?: Record<string, unknown>;
     historyDiffFiles?: Array<Record<string, unknown>>;
     historyRunGate?: Promise<void>;
@@ -5887,6 +5889,13 @@ async function mockBackendApi(
       capture.feedbackRequests?.push(url.pathname);
       await capture.messageFeedbackGate;
       await route.fulfill(json(null));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/run-feedbacks/me/query") {
+      const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      capture.runFeedbackQueryRequests?.push(request);
+      const runIds = Array.isArray(request.runIds) ? request.runIds.filter((runId): runId is string => typeof runId === "string") : [];
+      await route.fulfill(json(runIds.map((runId) => ({ runId, runStatus: "SUCCEEDED", feedback: null }))));
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/active-run$/.test(url.pathname)) {

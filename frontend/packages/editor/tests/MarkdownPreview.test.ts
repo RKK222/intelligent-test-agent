@@ -1,6 +1,6 @@
 import { defineComponent } from "vue";
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/vue";
+import { fireEvent, render, within } from "@testing-library/vue";
 import MarkdownPreview from "../src/MarkdownPreview.vue";
 
 const mermaidParse = vi.hoisted(() => vi.fn().mockResolvedValue(true));
@@ -20,6 +20,7 @@ vi.mock("@vue-flow/core", () => ({
     props: ["nodes", "edges"],
     emits: ["nodeClick", "nodeDragStop", "connect"],
     template: `<div data-testid="vue-flow-mock">
+      <slot name="node-mermaid" v-for="node in (nodes || [])" :key="node.id" :id="node.id" :data="node.data" />
       <button data-testid="mock-select-a" @click="$emit('nodeClick', { node: { id: 'A' } })">select A</button>
     </div>`
   }),
@@ -143,11 +144,17 @@ classDef important fill:red
     expect(visualButton?.textContent).toContain("可视化编辑");
     await fireEvent.click(visualButton as Element);
     // 全量并发时 Mermaid/Vue Flow 懒模块首次转换可能超过 Testing Library 默认 1 秒。
-    expect(await findByRole("dialog", { name: "Mermaid 可视化编辑" }, { timeout: 5000 })).toBeTruthy();
+    const dialog = await findByRole("dialog", { name: "Mermaid 可视化编辑" }, { timeout: 5000 });
+    expect(dialog).toBeTruthy();
 
-    await fireEvent.click(getByTestId("mock-select-a"));
-    await fireEvent.update(getByLabelText("节点名称"), "准备");
-    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }, { timeout: 5000 }));
+    await fireEvent.click(within(dialog).getByTestId("mock-select-a"));
+    await fireEvent.dblClick(dialog.querySelector('[data-mermaid-node-id="A"]')!);
+    
+    const inlineEditor = document.body.querySelector('.ta-mermaid-inline-editor') as HTMLElement;
+    expect(inlineEditor).toBeTruthy();
+    await fireEvent.update(within(inlineEditor).getByLabelText("节点文字"), "准备");
+    await fireEvent.keyDown(within(inlineEditor).getByLabelText("节点文字"), { key: "Enter", ctrlKey: true });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "应用到 Markdown" }));
 
     await vi.waitFor(() => expect(emitted().change).toBeTruthy());
     const changes = emitted().change as Array<[string]>;

@@ -578,7 +578,6 @@ function onEdgesChange(changes: EdgeChange[]) {
       <aside class="ta-mermaid-inspector" aria-label="图属性">
         <section class="ta-mermaid-palette">
           <h3>节点类型</h3>
-          <p class="ta-mermaid-palette__hint">拖到画布创建节点，也可点击添加。</p>
           <div v-for="group in nodeGroups" :key="group.key" class="ta-mermaid-palette__group">
             <h4>{{ group.label }}</h4>
             <div class="ta-mermaid-palette__grid">
@@ -712,7 +711,6 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-inspector { min-height: 0; overflow: auto; border-left: 1px solid var(--ta-border, #e2e8f0); background: var(--ta-panel-2, #f8fafc); }
 .ta-mermaid-inspector section { padding: 13px; border-bottom: 1px solid var(--ta-border, #e2e8f0); }
 .ta-mermaid-inspector h3 { margin: 0 0 10px; color: var(--ta-ink, #172033); font-size: 12px; font-weight: 700; }
-.ta-mermaid-palette__hint { margin: -4px 0 10px; color: var(--ta-muted, #64748b); font-size: 10px; line-height: 1.45; }
 .ta-mermaid-palette__group + .ta-mermaid-palette__group { margin-top: 12px; }
 .ta-mermaid-palette__group h4 { margin: 0 0 6px; color: var(--ta-muted, #64748b); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; }
 .ta-mermaid-palette__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }

@@ -83,7 +83,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         class="ta-mermaid-dialog"
       >
         <header class="ta-mermaid-dialog__header">
-          <div>
+          <div class="ta-mermaid-dialog__header-left">
             <h2 id="ta-mermaid-dialog-title">Mermaid 可视化编辑</h2>
             <p>拖动图结构并应用后，修改会回写到当前 Markdown 代码块。</p>
           </div>
@@ -158,8 +158,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   padding: 9px 14px 9px 17px;
 }
 
+.ta-mermaid-dialog__header-left { display: flex; align-items: baseline; gap: 12px; }
 .ta-mermaid-dialog__header h2 { margin: 0; color: var(--ta-ink, #172033); font-size: 14px; }
-.ta-mermaid-dialog__header p { margin: 3px 0 0; color: var(--ta-muted, #64748b); font-size: 11px; }
+.ta-mermaid-dialog__header p { margin: 0; color: var(--ta-muted, #64748b); font-size: 11px; }
 .ta-mermaid-dialog__header button { width: 30px; height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--ta-muted, #64748b); font-size: 22px; cursor: pointer; }
 .ta-mermaid-dialog__header button:hover { background: var(--ta-hover, #f1f5f9); color: var(--ta-ink, #172033); }
 
