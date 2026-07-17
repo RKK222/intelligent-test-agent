@@ -708,6 +708,8 @@ function onRobotPointerDown(event: PointerEvent) {
 
 function onRobotPointerMove(event: PointerEvent) {
   if (!robotDragging.value) return;
+  // 只接受启动拖拽的活动指针；兼容 MouseEvent 兜底事件没有 pointerId 的情况。
+  if (robotDragPointerId !== null && typeof event.pointerId === "number" && event.pointerId !== robotDragPointerId) return;
   const deltaX = event.clientX - robotDragStartClientX;
   const deltaY = event.clientY - robotDragStartClientY;
   if (!robotDragWasEffective && Math.hypot(deltaX, deltaY) < ROBOT_DRAG_THRESHOLD) return;
@@ -724,6 +726,8 @@ function onRobotPointerMove(event: PointerEvent) {
 
 function finishRobotDrag(pointerId?: number) {
   if (!robotDragging.value) return;
+  // 非活动指针的 pointerup/pointercancel 不能提前结束当前拖拽。
+  if (pointerId !== undefined && robotDragPointerId !== null && pointerId !== robotDragPointerId) return;
   const wasEffective = robotDragWasEffective;
   if (wasEffective) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });

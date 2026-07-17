@@ -194,6 +194,25 @@ describe("FigmaShell", () => {
     expect(document.body.style.userSelect).toBe("");
   });
 
+  it("ignores move and release events from a non-active pointer", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    dispatchPointer(robot.element, "pointerdown", 20, 100, 100, "touch");
+    dispatchPointer(window, "pointermove", 21, 170, 160, "touch");
+    dispatchPointer(window, "pointerup", 21, 170, 160, "touch");
+    expect(robot.attributes("style")).toContain("left: 100px");
+    expect(robot.attributes("style")).toContain("top: 100px");
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 100, y: 100 }));
+
+    dispatchPointer(window, "pointermove", 20, 150, 140, "touch");
+    dispatchPointer(window, "pointerup", 20, 150, 140, "touch");
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 150, y: 140 }));
+  });
+
   it("clamps and persists a manually positioned robot when the viewport shrinks", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 900, y: 700 }));
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });

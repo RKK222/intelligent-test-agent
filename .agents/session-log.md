@@ -7889,3 +7889,16 @@ bash /tmp/test-api-after-restart.sh
   - 定向 Vitest 3 个文件 55 passed；agent-web typecheck 通过；Vite chrome108 构建通过。真实页面视觉脚本在本地 backend 503/400 资源告警下未完成自动唤起检查，组件交互测试已覆盖滑杆、按钮、持久化和比例范围。
 - Result:
   - 尺寸调整已实现并通过代码级与构建验证；未修改 API、RunEvent、数据库或安全契约。
+
+### 2026-07-17 - 吸收 Gemini 拖拽修复并隔离活动指针
+
+- Why:
+  - 复核 Gemini 近期针对 Citrix、远程桌面和旧 Chromium 的拖拽修复后，发现当前多事件兜底虽然已具备，但 `pointerId` 传入后没有实际校验，非活动指针可能串改或提前结束拖拽。
+- What:
+  - 保留 Gemini 的 `isPrimary` 容错、`setPointerCapture/releasePointerCapture` 异常保护、window 捕获阶段监听以及 MouseEvent 兜底；补充活动 `pointerId` 的 move/up/cancel 隔离。
+  - 新增多指事件回归测试，确认非活动指针不能改变位置或结束拖拽。
+- How:
+  - 只在 PointerEvent 携带活动 ID 时处理，缺少 `pointerId` 的 MouseEvent 兜底仍按兼容路径放行；不新增 API 或运行时依赖。
+  - FigmaShell、宠物偏好和头像相关定向测试 56 passed；agent-web typecheck 与 chrome108 Vite 构建通过。
+- Result:
+  - 拖拽兼容路径在 Gemini 修复基础上增加了多指/远程输入串线保护，未修改 API、RunEvent、数据库、安全或环境配置。
