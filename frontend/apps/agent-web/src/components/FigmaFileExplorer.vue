@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
-import type { FileContent, FileSearchResult } from "@test-agent/shared-types";
+import type { FileSearchResult } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
+import type { AgentFileLoadRequest } from "./agentFileLoad";
 import GitChangesPanel from "./GitChangesPanel.vue";
 import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe, Plus, RefreshCw, Search } from "lucide-vue-next";
 
@@ -71,7 +72,7 @@ const emit = defineEmits<{
   loadVersions: [templateId: string];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
-  openAgentFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }];
+  openAgentFile: [payload: AgentFileLoadRequest];
   openServerWorkspacePicker: [];
   // 搜索事件
   search: [keyword: string];

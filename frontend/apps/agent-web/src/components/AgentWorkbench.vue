@@ -23,7 +23,6 @@ import type {
   AiRunFeedbackPayload,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
-  FileContent,
   FileSearchResult,
   FileTreeEntry,
   ManagedApplication,
@@ -72,6 +71,7 @@ import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } f
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
+import type { AgentFileLoadRequest } from "./agentFileLoad";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
 import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
@@ -234,6 +234,9 @@ const fileTreeError = ref<string | null>(null);
 let workspaceLoadGeneration = 0;
 let workspaceFileReadSequence = 0;
 const latestWorkspaceFileReadByPath = new Map<string, number>();
+let agentFileLoadGeneration = 0;
+let agentFileReadSequence = 0;
+const latestAgentFileReadByPath = new Map<string, number>();
 const fileTreeRetryTimers = new Set<ReturnType<typeof setTimeout>>();
 // 多个目录可能同时在加载（用户连续点开多个折叠项，或 expandPathToFile 一次性
 // 展开多层）。使用 Set<string> 而非单值 ref，避免后到的加载把前者的 loading 状态覆盖，
@@ -710,6 +713,22 @@ const selectedAgentConfigWorkspaceId = computed(() => {
   // 版本详情尚未加载时保持配置空态，避免把应用配置误写到个人 worktree 分支。
   return currentPersonalWorkspaceId.value ? undefined : selectedWorkspace.value?.workspaceId;
 });
+// Agent 文件路由上下文变化时立即废弃旧读取。flush=sync 确保子面板解析公共服务器后再发出的请求
+// 捕获到的是新代次，而不是随后被异步 watch 误判为旧请求。
+watch(
+  () => [
+    selectedAgentConfigWorkspaceId.value ?? "",
+    workbench.publicWorktree?.worktreeId ?? "",
+    workbench.publicWorktree?.linuxServerId ?? "",
+    workbench.publicConfigLinuxServerId ?? "",
+    workbench.workspaceWorktree?.worktreeId ?? ""
+  ] as const,
+  () => {
+    agentFileLoadGeneration++;
+    latestAgentFileReadByPath.clear();
+  },
+  { flush: "sync" }
+);
 // 触发懒加载：被调用时把 templateId 加入 loadedTemplateIds，useQueries 派生数组自动同步并发起请求。
 // 重复调用幂等：Set 内部去重；已加载完成的模板（versions 不为 undefined）不会重复请求。
 function ensureAppVersionsLoaded(templateId: string) {
@@ -2620,6 +2639,8 @@ function resetWorkspaceState() {
   // Workspace 切换后必须清掉旧根目录绑定的文件树、编辑器、Diff 与运行态，避免误操作旧路径。
   workspaceLoadGeneration++;
   latestWorkspaceFileReadByPath.clear();
+  agentFileLoadGeneration++;
+  latestAgentFileReadByPath.clear();
   clearFileTreeRetryTimers();
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
@@ -3396,18 +3417,214 @@ async function openFile(path: string) {
   await loadWorkspaceFile(path, { activate: true });
 }
 
+function normalizedAgentRouteValue(value?: string | null): string {
+  return value ?? "";
+}
+
+function agentFileLoadContextIsCurrent(request: AgentFileLoadRequest): boolean {
+  if (request.scope === "PUBLIC") {
+    const currentWorktreeId = workbench.publicWorktree?.worktreeId;
+    const currentLinuxServerId = workbench.publicWorktree?.linuxServerId
+      ?? workbench.publicConfigLinuxServerId;
+    return normalizedAgentRouteValue(request.worktreeId) === normalizedAgentRouteValue(currentWorktreeId)
+      && normalizedAgentRouteValue(request.linuxServerId) === normalizedAgentRouteValue(currentLinuxServerId);
+  }
+  return Boolean(request.workspaceId)
+    && request.workspaceId === selectedAgentConfigWorkspaceId.value
+    && normalizedAgentRouteValue(request.worktreeId) === normalizedAgentRouteValue(workbench.workspaceWorktree?.worktreeId);
+}
+
+function agentFileReadIsCurrent(
+  request: AgentFileLoadRequest,
+  tabPath: string,
+  contextGeneration: number,
+  requestGeneration: number
+): boolean {
+  return agentFileLoadGeneration === contextGeneration
+    && agentFileLoadContextIsCurrent(request)
+    && latestAgentFileReadByPath.get(tabPath) === requestGeneration
+    && workbench.tabs.some((tab: EditorTab) => tab.path === tabPath);
+}
+
+function agentFileLoadRequestFromTab(tab: EditorTab, activate: boolean): AgentFileLoadRequest | undefined {
+  if (!isAgentFilePath(tab.path)) {
+    return undefined;
+  }
+  const file = agentFileInfo(tab.path);
+  const workspaceId = file.scope === "WORKSPACE" ? selectedAgentConfigWorkspaceId.value : undefined;
+  if (file.scope === "WORKSPACE" && !workspaceId) {
+    return undefined;
+  }
+  return {
+    ...file,
+    workspaceId,
+    readonly: Boolean(tab.readonly),
+    activate,
+    closeOnNotFound: false
+  };
+}
+
+function agentTabHasLoadedSnapshot(tab: EditorTab | undefined): boolean {
+  if (!tab) {
+    return false;
+  }
+  if (tab.hasLoadedSnapshot !== undefined) {
+    return tab.hasLoadedSnapshot;
+  }
+  if (tab.loadState === "loaded") {
+    return true;
+  }
+  // 旧版 Agent tab 没有三态标记；仅非空正文可作为缓存，历史空白 tab 必须重新走首次加载。
+  return tab.loadState === undefined && Boolean(tab.content || tab.savedContent);
+}
+
+async function loadAgentFile(request: AgentFileLoadRequest) {
+  if (!agentFileLoadContextIsCurrent(request)) {
+    return;
+  }
+  const tabPath = agentTabPath(request.scope, request.path, request.worktreeId, request.linuxServerId);
+  const existing = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+  if (editorTabIsDirty(existing)) {
+    // Agent 配置与普通文件遵循同一优先级：重复打开 dirty tab 只激活，绝不后台重读。
+    if (request.activate) {
+      centerMode.value = "editor";
+      workbench.setActivePath(tabPath);
+    }
+    return;
+  }
+  if (!request.activate && !existing) {
+    return;
+  }
+
+  const contextGeneration = agentFileLoadGeneration;
+  const requestGeneration = ++agentFileReadSequence;
+  latestAgentFileReadByPath.set(tabPath, requestGeneration);
+  const hadLoadedCache = agentTabHasLoadedSnapshot(existing);
+  const contentRevisionAtStart = existing?.contentRevision ?? 0;
+  const loadingPatch = {
+    loadState: "loading" as const,
+    loadError: undefined,
+    hasLoadedSnapshot: hadLoadedCache
+  };
+  if (request.activate) {
+    centerMode.value = "editor";
+    workbench.openTab({
+      id: existing?.id
+        ?? `${request.scope.toLowerCase()}:agent:file:${request.worktreeId ?? "direct"}:${request.linuxServerId ?? "local"}:${request.path}`,
+      path: tabPath,
+      title: existing?.title ?? (request.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? request.path),
+      content: existing?.content ?? "",
+      savedContent: existing?.savedContent ?? "",
+      // AgentConfigPanel 已完成权限判断；首次错误后的重试也必须保留目标权限，不能被临时加载态锁死为只读。
+      readonly: hadLoadedCache ? existing?.readonly : request.readonly,
+      livePreview: false,
+      ...loadingPatch
+    });
+  } else {
+    workbench.updateTab(tabPath, loadingPatch);
+  }
+
+  try {
+    const file = request.scope === "PUBLIC"
+      ? await api.readPublicAgentFile(request.path, request.worktreeId, request.linuxServerId)
+      : await api.readWorkspaceAgentFile(request.workspaceId!, request.path, request.worktreeId);
+    if (!agentFileReadIsCurrent(request, tabPath, contextGeneration, requestGeneration)) {
+      return;
+    }
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart || editorTabIsDirty(current)) {
+      // 即使用户随后保存或回退为 clean，修订代次也会阻止读取期间的旧响应覆盖编辑结果。
+      workbench.updateTab(tabPath, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      return;
+    }
+    workbench.updateTab(tabPath, {
+      content: file.content,
+      savedContent: file.content,
+      readonly: request.readonly,
+      loadState: "loaded",
+      loadError: undefined,
+      hasLoadedSnapshot: true
+    });
+  } catch (error) {
+    if (!agentFileReadIsCurrent(request, tabPath, contextGeneration, requestGeneration)) {
+      return;
+    }
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart) {
+      workbench.updateTab(tabPath, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      return;
+    }
+    if (request.closeOnNotFound
+      && error instanceof BackendApiError
+      && error.code === "NOT_FOUND"
+      && !editorTabIsDirty(current)) {
+      workbench.closeTab(tabPath);
+      return;
+    }
+    const failure = errorFeedback("读取 Agent 文件失败", error);
+    if (hadLoadedCache || editorTabIsDirty(current)) {
+      workbench.updateTab(tabPath, {
+        loadState: "loaded",
+        loadError: failure.description,
+        hasLoadedSnapshot: true
+      });
+      feedback.value = failure;
+      return;
+    }
+    workbench.updateTab(tabPath, {
+      loadState: "error",
+      loadError: failure.description,
+      hasLoadedSnapshot: false
+    });
+  }
+}
+
 function activateEditorTab(path: string) {
   const tab = workbench.tabs.find((item: EditorTab) => item.path === path);
   if (!tab) {
     return;
   }
   centerMode.value = "editor";
+  if (isAgentFilePath(path)) {
+    if (tab.loadState === "loading" || tab.loadState === "loaded") {
+      workbench.setActivePath(path);
+      return;
+    }
+    const request = agentFileLoadRequestFromTab(tab, true);
+    if (request) {
+      void loadAgentFile(request);
+      return;
+    }
+    workbench.setActivePath(path);
+    return;
+  }
   if (tab.loadState === "error") {
     void loadWorkspaceFile(path, { activate: true });
     return;
   }
   // loading 不重复请求；loaded 与旧 tab（undefined）直接使用内存缓存。
   workbench.setActivePath(path);
+}
+
+function retryActiveFile() {
+  const tab = activeTab.value;
+  if (!tab) {
+    return;
+  }
+  const request = agentFileLoadRequestFromTab(tab, true);
+  if (request) {
+    void loadAgentFile(request);
+    return;
+  }
+  void openFile(tab.path);
 }
 
 async function handleCreateEntry(directory: string, name: string, type: "file" | "directory") {
@@ -3980,17 +4197,8 @@ async function addWorkspaceRequirementToChatContext(reference: WorkspaceRequirem
   }
 }
 
-async function openAgentFile(payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }) {
-  centerMode.value = "editor";
-  const tabPath = agentTabPath(payload.scope, payload.path, payload.worktreeId, payload.linuxServerId);
-  workbench.openTab({
-    id: `${payload.scope.toLowerCase()}:agent:file:${payload.worktreeId ?? "direct"}:${payload.linuxServerId ?? "local"}:${payload.path}`,
-    path: tabPath,
-    title: payload.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? payload.path,
-    content: payload.content.content,
-    savedContent: payload.content.content,
-    readonly: payload.readonly
-  });
+async function openAgentFile(payload: AgentFileLoadRequest) {
+  await loadAgentFile(payload);
 }
 
 function toggleDirectory(path: string) {
@@ -5666,7 +5874,7 @@ async function handleLogout() {
                 type="button"
                 class="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
                 aria-label="重试读取文件"
-                @click="openFile(activeTab.path)"
+                @click="retryActiveFile"
               >
                 重试
               </button>

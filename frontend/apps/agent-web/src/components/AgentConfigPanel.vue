@@ -14,7 +14,7 @@ import {
   Upload,
   MoreHorizontal
 } from "lucide-vue-next";
-import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
+import { createBackendApiClient } from "@test-agent/backend-api";
 import { MergeConflictEditor } from "@test-agent/diff-viewer";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { Button, Input } from "@test-agent/ui-kit";
@@ -24,13 +24,13 @@ import type {
   AgentConfigStatus,
   AgentConfigWorktree,
   AgentConfigWorktreeOption,
-  FileContent,
   FileTreeEntry,
   PublicAgentRepositoryStatus,
   WorkspaceGitConflict,
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { formatAgentConfigError } from "./agentConfigErrors";
+import type { AgentFileLoadRequest } from "./agentFileLoad";
 import { notifyError, notifyInfo, notifySuccess } from "./notify";
 import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 
@@ -47,7 +47,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  openFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }];
+  openFile: [payload: AgentFileLoadRequest];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -380,20 +380,21 @@ function toggleDirectory(scope: Scope, path: string) {
 async function openFile(scope: Scope, path: string) {
   activeScope.value = scope;
   try {
-    const { file, linuxServerId } = await readAgentFile(scope, path);
+    const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
     activeFileByScope.value = { ...activeFileByScope.value, [scope]: path };
-    emit("openFile", { scope, path, content: file, readonly: !canWriteScope(scope), worktreeId: worktreeId(scope), linuxServerId });
+    emit("openFile", {
+      scope,
+      path,
+      workspaceId: scope === "WORKSPACE" ? props.workspaceId : undefined,
+      worktreeId: worktreeId(scope),
+      linuxServerId,
+      readonly: !canWriteScope(scope),
+      activate: true,
+      closeOnNotFound: false
+    });
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "读取 Agent 文件失败");
   }
-}
-
-async function readAgentFile(scope: Scope, path: string) {
-  const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
-  const file = scope === "PUBLIC"
-    ? await api.readPublicAgentFile(path, worktreeId(scope), linuxServerId)
-    : await api.readWorkspaceAgentFile(props.workspaceId!, path, worktreeId(scope));
-  return { file, linuxServerId };
 }
 
 /**
@@ -411,25 +412,19 @@ async function refreshActiveEditorFile(scope?: Scope, notifySkippedFile = true) 
     return;
   }
   try {
-    const { file, linuxServerId } = await readAgentFile(activeFile.scope, activeFile.path);
+    const linuxServerId = activeFile.scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
     activeFileByScope.value = { ...activeFileByScope.value, [activeFile.scope]: activeFile.path };
     emit("openFile", {
       scope: activeFile.scope,
       path: activeFile.path,
-      content: file,
-      readonly: !canWriteScope(activeFile.scope),
+      workspaceId: activeFile.scope === "WORKSPACE" ? props.workspaceId : undefined,
       worktreeId: worktreeId(activeFile.scope),
-      linuxServerId
+      linuxServerId,
+      readonly: !canWriteScope(activeFile.scope),
+      activate: false,
+      closeOnNotFound: true
     });
   } catch (error) {
-    if (error instanceof BackendApiError && error.code === "NOT_FOUND") {
-      workbench.closeTab(tabPath);
-      activeFileByScope.value = { ...activeFileByScope.value, [activeFile.scope]: null };
-      if (notifySkippedFile) {
-        notifyInfo("Agent 文件已不存在", `已关闭 ${activeFile.path}`);
-      }
-      return;
-    }
     errorMessage.value = formatAgentConfigError(error, "刷新 Agent 文件失败");
   }
 }

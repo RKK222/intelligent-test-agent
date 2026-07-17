@@ -228,13 +228,8 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(view.queryByText("legacy.bak")).toBeNull());
   });
 
-  it("reloads a clean active Agent editor from disk on refresh", async () => {
+  it("requests a clean active Agent editor refresh without reading content in the panel", async () => {
     const activePath = "agent-public::linux-1:agents/review.md";
-    apiClientMock.readPublicAgentFile.mockResolvedValue({
-      path: "agents/review.md",
-      content: "old content",
-      encoding: "utf-8"
-    });
     const { view } = renderPanel((store) => {
       store.tabs = [{
         id: "public-agent",
@@ -245,23 +240,26 @@ describe("AgentConfigPanel", () => {
       }];
       store.activePath = activePath;
     }, { hideHeader: false, activePath });
-    await waitFor(() => expect(apiClientMock.readPublicAgentFile).toHaveBeenCalledWith("agents/review.md", undefined, "linux-1"));
+    await waitFor(() => expect(view.emitted("openFile")?.length).toBeGreaterThan(0));
+    const refreshRequestsBeforeClick = view.emitted("openFile")?.length ?? 0;
 
-    apiClientMock.readPublicAgentFile.mockResolvedValue({
-      path: "agents/review.md",
-      content: "new content from disk",
-      encoding: "utf-8"
-    });
     await fireEvent.click(view.getByRole("button", { name: "刷新" }));
 
     await waitFor(() => {
       const events = (view.emitted("openFile") ?? []) as unknown[][];
+      expect(events.length).toBeGreaterThan(refreshRequestsBeforeClick);
       expect(events.at(-1)?.[0]).toMatchObject({
         scope: "PUBLIC",
         path: "agents/review.md",
-        content: { content: "new content from disk" }
+        workspaceId: undefined,
+        worktreeId: undefined,
+        linuxServerId: "linux-1",
+        readonly: false,
+        activate: false,
+        closeOnNotFound: true
       });
     });
+    expect(apiClientMock.readPublicAgentFile).not.toHaveBeenCalled();
   });
 
   it("does not overwrite an active Agent editor with unsaved changes", async () => {
@@ -313,25 +311,32 @@ describe("AgentConfigPanel", () => {
     expect(view.queryByText("package.json")).toBeNull();
   });
 
-  it("highlights the opened agent file instead of keeping the root scope active", async () => {
+  it("emits a public Agent load request without reading content in the panel", async () => {
     apiClientMock.listPublicAgentFiles.mockResolvedValue([
       { path: ".gitignore", name: ".gitignore", type: "file" }
     ]);
-    apiClientMock.readPublicAgentFile.mockResolvedValue({
-      path: ".gitignore",
-      content: "node_modules",
-      encoding: "utf-8"
-    });
-
     const { view } = renderPanel();
 
     await fireEvent.click(await view.findByText(".gitignore"));
 
-    await waitFor(() => expect(apiClientMock.readPublicAgentFile).toHaveBeenCalledWith(".gitignore", undefined, "linux-1"));
     await waitFor(() => {
+      const events = (view.emitted("openFile") ?? []) as unknown[][];
+      const payload = events.at(-1)?.[0] as Record<string, unknown> | undefined;
+      expect(payload).toMatchObject({
+        scope: "PUBLIC",
+        path: ".gitignore",
+        workspaceId: undefined,
+        worktreeId: undefined,
+        linuxServerId: "linux-1",
+        readonly: false,
+        activate: true,
+        closeOnNotFound: false
+      });
+      expect(payload).not.toHaveProperty("content");
       const fileRow = view.getByText(".gitignore").closest("button");
       expect(fileRow?.classList.contains("is-active")).toBe(true);
     });
+    expect(apiClientMock.readPublicAgentFile).not.toHaveBeenCalled();
     expect(view.container.querySelector(".agent-root-row.active")).toBeNull();
   });
 

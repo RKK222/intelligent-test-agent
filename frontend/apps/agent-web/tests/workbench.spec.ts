@@ -45,6 +45,285 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   ]);
 });
 
+test("Agent files open through the parent loader for public and workspace scopes", async ({ page }) => {
+  const agentFileFrames: Array<{
+    op: string;
+    scope: string;
+    path: string;
+    workspaceId?: string;
+    worktreeId?: string;
+    attempt?: number;
+  }> = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    agentFileFrames,
+    agentFileContents: {
+      "PUBLIC:agents/public-agent.md": "# public Agent content\n",
+      "WORKSPACE:agents/workspace-agent.md": "# workspace Agent content\n"
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const publicAgentsDirectory = page.getByRole("button", { name: "agents", exact: true });
+  await expect(publicAgentsDirectory).toHaveCount(1);
+  await publicAgentsDirectory.click();
+  await page.getByRole("button", { name: "public-agent.md", exact: true }).click();
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loading");
+  await expect(page.locator(".monaco-editor")).toContainText("public Agent content", { timeout: 10_000 });
+
+  await page.getByRole("button", { name: /应用级/ }).click();
+  const agentDirectories = page.getByRole("button", { name: "agents", exact: true });
+  await expect(agentDirectories).toHaveCount(2);
+  await agentDirectories.nth(1).click();
+  await page.getByRole("button", { name: "workspace-agent.md", exact: true }).click();
+  await expect(page.locator(".monaco-editor")).toContainText("workspace Agent content", { timeout: 10_000 });
+
+  await expect.poll(() => agentFileFrames.filter((frame) => frame.op === "agent-config.read")).toEqual([
+    {
+      op: "agent-config.read",
+      scope: "PUBLIC",
+      path: "agents/public-agent.md",
+      workspaceId: undefined,
+      worktreeId: undefined,
+      attempt: 1
+    },
+    {
+      op: "agent-config.read",
+      scope: "WORKSPACE",
+      path: "agents/workspace-agent.md",
+      workspaceId: "wrk_feature_agent",
+      worktreeId: undefined,
+      attempt: 1
+    }
+  ]);
+});
+
+test("Agent loading distinguishes empty files, retries failures, and reuses loaded tab cache", async ({ page }) => {
+  const agentFileFrames: Array<{
+    op: string;
+    scope: string;
+    path: string;
+    attempt?: number;
+  }> = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    agentFileFrames,
+    agentFileContents: {
+      "WORKSPACE:agents/empty-agent.md": "",
+      "WORKSPACE:agents/retry-agent.md": "# retry Agent succeeded"
+    },
+    agentFileReadFailureAttempts: {
+      "WORKSPACE:agents/retry-agent.md": [1]
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: /应用级/ }).click();
+  await page.getByRole("button", { name: "agents", exact: true }).last().click();
+  await page.getByRole("button", { name: "empty-agent.md", exact: true }).click();
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loaded");
+
+  const retryRow = page.getByRole("button", { name: "retry-agent.md", exact: true });
+  await retryRow.click();
+  await expect(page.getByText("读取文件失败", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "重试读取文件" }).click();
+  await expect(page.locator(".monaco-editor")).toContainText("retry Agent succeeded", { timeout: 10_000 });
+  await page.getByRole("textbox", { name: "Editor content" }).focus();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" and remains editable");
+  await expect(page.locator(".monaco-editor")).toContainText("and remains editable");
+  await page.locator(".ta-workbench-footer-save").click();
+  await expect(page.locator(".ta-workbench-footer-save")).toHaveCount(0);
+
+  const retryReads = () => agentFileFrames.filter((frame) => (
+    frame.op === "agent-config.read" && frame.path === "agents/retry-agent.md"
+  ));
+  await expect.poll(retryReads).toHaveLength(2);
+  await page.getByRole("tab").filter({ hasText: "empty-agent.md" }).click();
+  await page.getByRole("tab").filter({ hasText: "retry-agent.md" }).click();
+  await page.waitForTimeout(50);
+  expect(retryReads()).toHaveLength(2);
+
+  // 文件树重复点击表示显式刷新，clean tab 应重新读取；顶部 tab 激活则只使用缓存。
+  await retryRow.click();
+  await expect.poll(retryReads).toHaveLength(3);
+});
+
+test("late Agent responses update only their own tab and same-path stale responses are discarded", async ({ page }) => {
+  const agentFileFrames: Array<{ op: string; scope: string; path: string; attempt?: number }> = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    agentFileFrames,
+    agentFileContents: {
+      "PUBLIC:agents/agent-a.md": "# Agent A fallback",
+      "PUBLIC:agents/agent-b.md": "# Agent B response",
+      "PUBLIC:agents/agent-same.md": "# Agent same fallback",
+      "PUBLIC:agents/agent-closing.md": "# Agent must stay closed"
+    },
+    agentFileReadDelays: {
+      "PUBLIC:agents/agent-a.md": [250],
+      "PUBLIC:agents/agent-b.md": [20],
+      "PUBLIC:agents/agent-same.md": [250, 20],
+      "PUBLIC:agents/agent-closing.md": [250]
+    },
+    agentFileReadResponses: {
+      "PUBLIC:agents/agent-a.md": ["# Agent A response"],
+      "PUBLIC:agents/agent-same.md": ["# stale Agent response", "# newest Agent response"]
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "agents", exact: true }).click();
+  await page.getByRole("button", { name: "agent-a.md", exact: true }).click();
+  await page.getByRole("tab").filter({ hasText: "agent-a.md" }).click();
+  await page.getByRole("button", { name: "agent-b.md", exact: true }).click();
+  await expect(page.locator(".monaco-editor")).toContainText("Agent B response", { timeout: 10_000 });
+  await page.waitForTimeout(300);
+  await expect(page.locator(".monaco-editor")).toContainText("Agent B response");
+  await page.getByRole("tab").filter({ hasText: "agent-a.md" }).click();
+  await expect(page.locator(".monaco-editor")).toContainText("Agent A response");
+
+  const sameRow = page.getByRole("button", { name: "agent-same.md", exact: true });
+  await sameRow.click();
+  await sameRow.click();
+  await expect(page.locator(".monaco-editor")).toContainText("newest Agent response", { timeout: 10_000 });
+  await page.waitForTimeout(300);
+  await expect(page.locator(".monaco-editor")).not.toContainText("stale Agent response");
+
+  await page.getByRole("button", { name: "agent-closing.md", exact: true }).click();
+  const closingTab = page.getByRole("tab").filter({ hasText: "agent-closing.md" });
+  await closingTab.getByRole("button", { name: "关闭标签" }).click();
+  await page.waitForTimeout(300);
+  await expect(closingTab).toHaveCount(0);
+  expect(agentFileFrames.filter((frame) => frame.op === "agent-config.read" && frame.path === "agents/agent-a.md")).toHaveLength(1);
+  expect(agentFileFrames.filter((frame) => frame.op === "agent-config.read" && frame.path === "agents/agent-same.md")).toHaveLength(2);
+});
+
+test("dirty Agent tabs and edits made during refresh are never overwritten", async ({ page }) => {
+  const agentFileFrames: Array<{
+    op: string;
+    scope: string;
+    path: string;
+    workspaceId?: string;
+    attempt?: number;
+    content?: string;
+  }> = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    agentFileFrames,
+    agentFileContents: {
+      "WORKSPACE:agents/dirty-agent.md": "initial Agent disk content"
+    },
+    agentFileReadDelays: {
+      "WORKSPACE:agents/dirty-agent.md": [0, 350]
+    },
+    agentFileReadResponses: {
+      "WORKSPACE:agents/dirty-agent.md": ["initial Agent disk content", "stale Agent refresh response"]
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: /应用级/ }).click();
+  await page.getByRole("button", { name: "agents", exact: true }).last().click();
+  const row = page.getByRole("button", { name: "dirty-agent.md", exact: true });
+  await row.click();
+  await expect(page.locator(".monaco-editor")).toContainText("initial Agent disk content", { timeout: 10_000 });
+
+  await page.locator(".monaco-editor .view-line").first().click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("local dirty Agent content");
+  await row.click();
+  await page.waitForTimeout(50);
+  expect(agentFileFrames.filter((frame) => frame.op === "agent-config.read" && frame.path === "agents/dirty-agent.md")).toHaveLength(1);
+
+  await page.locator(".ta-workbench-footer-save").click();
+  await expect.poll(() => agentFileFrames.filter((frame) => frame.op === "agent-config.write")).toHaveLength(1);
+  await row.click();
+  await page.locator(".monaco-editor .view-line").first().click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("saved while Agent refresh is pending");
+  await page.locator(".ta-workbench-footer-save").click();
+  await expect.poll(() => agentFileFrames.filter((frame) => frame.op === "agent-config.write")).toHaveLength(2);
+  await page.waitForTimeout(400);
+  await expect(page.locator(".monaco-editor")).toContainText("saved while Agent refresh is pending");
+  await expect(page.locator(".monaco-editor")).not.toContainText("stale Agent refresh response");
+  await expect(page.locator(".ta-workbench-footer-save")).toHaveCount(0);
+});
+
+test("Agent refresh failures preserve cache and a missing clean file closes its tab", async ({ page }) => {
+  const agentFileFrames: Array<{ op: string; scope: string; path: string; attempt?: number }> = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    agentFileFrames,
+    agentFileContents: {
+      "PUBLIC:agents/cached-agent.md": "stable Agent cache",
+      "PUBLIC:agents/removed-agent.md": "Agent file before removal"
+    },
+    agentFileReadDelays: {
+      "PUBLIC:agents/cached-agent.md": [0, 250, 20]
+    },
+    agentFileReadFailureAttempts: {
+      "PUBLIC:agents/cached-agent.md": [3]
+    },
+    agentFileReadNotFoundAttempts: {
+      "PUBLIC:agents/removed-agent.md": [2]
+    },
+    agentFileReadResponses: {
+      "PUBLIC:agents/cached-agent.md": ["stable Agent cache", "stale Agent cache refresh"]
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "agents", exact: true }).click();
+  const cachedRow = page.getByRole("button", { name: "cached-agent.md", exact: true });
+  await cachedRow.click();
+  await expect(page.locator(".monaco-editor")).toContainText("stable Agent cache", { timeout: 10_000 });
+  await cachedRow.click();
+  await cachedRow.click();
+  await expect(page.getByText(/刷新文件失败，已保留上次内容/)).toBeVisible();
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loaded");
+  await expect(page.locator(".monaco-editor")).toContainText("stable Agent cache");
+  await page.waitForTimeout(300);
+  await expect(page.locator(".monaco-editor")).not.toContainText("stale Agent cache refresh");
+
+  await page.getByRole("button", { name: "removed-agent.md", exact: true }).click();
+  const removedTab = page.getByRole("tab").filter({ hasText: "removed-agent.md" });
+  await expect(page.locator(".monaco-editor")).toContainText("Agent file before removal");
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await expect(removedTab).toHaveCount(0);
+});
+
+test("switching application context discards a loading Agent response", async ({ page }) => {
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    applications: [
+      { appId: "app_gcms", appName: "F-GCMS", enabled: true },
+      { appId: "app_coss", appName: "F-COSS", enabled: true }
+    ],
+    recentWorkspaces: {
+      ...agentWorkspaceSetup().recentWorkspaces,
+      app_coss: null
+    },
+    agentFileContents: {
+      "WORKSPACE:agents/context-agent.md": "# stale Agent context response"
+    },
+    agentFileReadDelays: {
+      "WORKSPACE:agents/context-agent.md": [300]
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: /应用级/ }).click();
+  await page.getByRole("button", { name: "agents", exact: true }).last().click();
+  await page.getByRole("button", { name: "context-agent.md", exact: true }).click();
+  await page.getByRole("button", { name: "F-GCMS", exact: true }).click();
+  await page.getByRole("option", { name: /F-COSS/ }).click();
+  await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
+  await page.waitForTimeout(350);
+  await expect(page.getByRole("tab").filter({ hasText: "context-agent.md" })).toHaveCount(0);
+  await expect(page.getByText("stale Agent context response")).toHaveCount(0);
+});
+
 test("workspace file loading distinguishes an empty file and supports retry after an initial failure", async ({ page }) => {
   const fileReadRequests: Array<{ workspaceId: string; path: string; attempt: number }> = [];
   await mockBackendApi(page, {
@@ -4543,6 +4822,21 @@ async function mockBackendApi(
     fileReadFailureAttempts?: Record<string, number[]>;
     fileReadResponses?: Record<string, string[]>;
     fileWriteRequests?: Array<{ workspaceId: string; path: string; content: string }>;
+    agentFileFrames?: Array<{
+      op: string;
+      scope: string;
+      path: string;
+      workspaceId?: string;
+      worktreeId?: string;
+      attempt?: number;
+      content?: string;
+    }>;
+    /** Agent 文件配置以 `PUBLIC:path` / `WORKSPACE:path` 为键。 */
+    agentFileContents?: Record<string, string>;
+    agentFileReadDelays?: Record<string, number[]>;
+    agentFileReadFailureAttempts?: Record<string, number[]>;
+    agentFileReadNotFoundAttempts?: Record<string, number[]>;
+    agentFileReadResponses?: Record<string, string[]>;
     gitDiffRequests?: string[];
     workspaces?: Array<ReturnType<typeof workspace> & Record<string, unknown>>;
     workspaceRequests?: string[];
@@ -4636,6 +4930,17 @@ async function mockBackendApi(
   await page.exposeFunction("__taRecordWorkspaceFileRead", (workspaceId: string, path: string, attempt: number) => {
     capture.fileReadRequests?.push({ workspaceId, path, attempt });
   });
+  await page.exposeFunction("__taRecordAgentFileFrame", (frame: {
+    op: string;
+    scope: string;
+    path: string;
+    workspaceId?: string;
+    worktreeId?: string;
+    attempt?: number;
+    content?: string;
+  }) => {
+    capture.agentFileFrames?.push(frame);
+  });
   if (!capture.skipInitialAuthToken) {
     await page.addInitScript(() => {
       sessionStorage.setItem("test-agent.auth.token", "test-token");
@@ -4648,7 +4953,12 @@ async function mockBackendApi(
     fileReadDelays,
     fileReadFailuresBeforeSuccess,
     fileReadFailureAttempts,
-    fileReadResponses
+    fileReadResponses,
+    agentFileContents,
+    agentFileReadDelays,
+    agentFileReadFailureAttempts,
+    agentFileReadNotFoundAttempts,
+    agentFileReadResponses
   }) => {
     const recordFileRequest = (workspaceId: string, path: string) => {
       const win = window as Window & {
@@ -4670,7 +4980,22 @@ async function mockBackendApi(
       };
       win.__taRecordWorkspaceFileRead?.(workspaceId, path, attempt);
     };
+    const recordAgentFileFrame = (frame: {
+      op: string;
+      scope: string;
+      path: string;
+      workspaceId?: string;
+      worktreeId?: string;
+      attempt?: number;
+      content?: string;
+    }) => {
+      const win = window as Window & {
+        __taRecordAgentFileFrame?: (payload: typeof frame) => void;
+      };
+      win.__taRecordAgentFileFrame?.(frame);
+    };
     const readAttempts: Record<string, number> = {};
+    const agentReadAttempts: Record<string, number> = {};
     const entries = (path: string, workspaceId = "wrk_1234567890abcdef") => {
       if (workspaceId === "wrk_project_a") {
         return path === "src"
@@ -4712,6 +5037,31 @@ async function mockBackendApi(
           { name: "project-a", path: "/Users/huang/workspace/project-a" }
         ]
       };
+    };
+    const agentEntries = (scope: string, path: string) => {
+      const prefix = `${scope}:`;
+      const files = Object.keys(agentFileContents as Record<string, string>)
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => key.slice(prefix.length));
+      const directoryPrefix = path ? `${path}/` : "";
+      const children = new Map<string, { path: string; name: string; directory: boolean; size: number; lastModifiedAt: string }>();
+      for (const filePath of files) {
+        if (!filePath.startsWith(directoryPrefix)) continue;
+        const rest = filePath.slice(directoryPrefix.length);
+        if (!rest) continue;
+        const name = rest.split("/")[0] ?? rest;
+        const childPath = path ? `${path}/${name}` : name;
+        const directory = rest.includes("/");
+        const content = (agentFileContents as Record<string, string>)[`${scope}:${filePath}`] ?? "";
+        children.set(childPath, {
+          path: childPath,
+          name,
+          directory,
+          size: directory ? 0 : content.length,
+          lastModifiedAt: "2026-06-19T00:00:00Z"
+        });
+      }
+      return [...children.values()];
     };
     class MockWorkspaceFileWebSocket {
       static CONNECTING = 0;
@@ -4791,6 +5141,73 @@ async function mockBackendApi(
           const content = params.content ?? "";
           recordFileWrite(params.workspaceId ?? "", path, content);
           (fileContents as Record<string, string>)[path] = content;
+        } else if (request.op === "agent-config.list") {
+          const scope = params.scope ?? "PUBLIC";
+          const path = params.path ?? "";
+          recordAgentFileFrame({
+            op: request.op,
+            scope,
+            path,
+            workspaceId: params.workspaceId,
+            worktreeId: params.worktreeId
+          });
+          data = agentEntries(scope, path);
+        } else if (request.op === "agent-config.read") {
+          const scope = params.scope ?? "PUBLIC";
+          const path = params.path ?? "";
+          const key = `${scope}:${path}`;
+          const attemptKey = `${scope}:${params.workspaceId ?? ""}:${params.worktreeId ?? ""}:${path}`;
+          const attempt = (agentReadAttempts[attemptKey] ?? 0) + 1;
+          agentReadAttempts[attemptKey] = attempt;
+          recordAgentFileFrame({
+            op: request.op,
+            scope,
+            path,
+            workspaceId: params.workspaceId,
+            worktreeId: params.worktreeId,
+            attempt
+          });
+          const delay = (agentFileReadDelays as Record<string, number[]>)[key]?.[attempt - 1] ?? 0;
+          const failureAttempts = (agentFileReadFailureAttempts as Record<string, number[]>)[key] ?? [];
+          const notFoundAttempts = (agentFileReadNotFoundAttempts as Record<string, number[]>)[key] ?? [];
+          if (failureAttempts.includes(attempt) || notFoundAttempts.includes(attempt)) {
+            const notFound = notFoundAttempts.includes(attempt);
+            window.setTimeout(() => {
+              this.onmessage?.(new MessageEvent("message", {
+                data: JSON.stringify({
+                  id: request.id,
+                  type: "error",
+                  code: notFound ? "NOT_FOUND" : "FILE_READ_FAILED",
+                  message: notFound ? "mock Agent file not found" : "mock Agent file read failed",
+                  traceId: "trace_agent_e2e"
+                })
+              }));
+            }, delay);
+            return;
+          }
+          const content = (agentFileReadResponses as Record<string, string[]>)[key]?.[attempt - 1]
+            ?? (agentFileContents as Record<string, string>)[key]
+            ?? "";
+          data = { path, content, encoding: "utf-8", size: content.length };
+          window.setTimeout(() => {
+            this.onmessage?.(new MessageEvent("message", {
+              data: JSON.stringify({ id: request.id, type: "result", data, traceId: "trace_agent_e2e" })
+            }));
+          }, delay);
+          return;
+        } else if (request.op === "agent-config.write") {
+          const scope = params.scope ?? "PUBLIC";
+          const path = params.path ?? "";
+          const content = params.content ?? "";
+          recordAgentFileFrame({
+            op: request.op,
+            scope,
+            path,
+            workspaceId: params.workspaceId,
+            worktreeId: params.worktreeId,
+            content
+          });
+          (agentFileContents as Record<string, string>)[`${scope}:${path}`] = content;
         } else if (request.op === "workspace.status") {
           data = { path: params.path ?? "", exists: true, directory: false, size: 80, lastModifiedAt: "2026-06-19T00:00:00Z" };
         } else if (request.op === "directory.list") {
@@ -4829,7 +5246,12 @@ async function mockBackendApi(
     fileReadDelays: capture.fileReadDelays ?? {},
     fileReadFailuresBeforeSuccess: capture.fileReadFailuresBeforeSuccess ?? {},
     fileReadFailureAttempts: capture.fileReadFailureAttempts ?? {},
-    fileReadResponses: capture.fileReadResponses ?? {}
+    fileReadResponses: capture.fileReadResponses ?? {},
+    agentFileContents: capture.agentFileContents ?? {},
+    agentFileReadDelays: capture.agentFileReadDelays ?? {},
+    agentFileReadFailureAttempts: capture.agentFileReadFailureAttempts ?? {},
+    agentFileReadNotFoundAttempts: capture.agentFileReadNotFoundAttempts ?? {},
+    agentFileReadResponses: capture.agentFileReadResponses ?? {}
   });
   // E2E 不依赖外部字体，避免 Google Fonts 网络波动阻塞 domcontentloaded。
   await page.route("https://fonts.googleapis.com/**", async (route) => {
@@ -4919,6 +5341,67 @@ async function mockBackendApi(
       }
     }
     if (url.pathname.startsWith("/api/internal/platform/workspace-management")) {
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/status") {
+        await route.fulfill(json({
+          scope: "PUBLIC",
+          enabled: true,
+          writable: true,
+          gitUrl: "git@example.test:opencode-config.git",
+          gitRootPath: "/mock/public-config",
+          agentDirectory: "/mock/public-config/opencode",
+          currentBranch: "main",
+          commitHash: "public_commit"
+        }));
+        return;
+      }
+      if (method === "GET" && /^\/api\/internal\/platform\/workspace-management\/agent-config\/workspaces\/[^/]+\/status$/.test(url.pathname)) {
+        await route.fulfill(json({
+          scope: "WORKSPACE",
+          enabled: true,
+          writable: true,
+          gitUrl: null,
+          gitRootPath: "/mock/workspace-config",
+          agentDirectory: "/mock/workspace-config/.opencode",
+          currentBranch: "feature_testagent_20260715",
+          commitHash: "workspace_agent_commit"
+        }));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/repositories") {
+        await route.fulfill(json([{
+          linuxServerId: "10.8.0.12",
+          serverName: "dev-backend",
+          gitRootPath: "/mock/public-config",
+          configDirPath: "/mock/public-config/opencode",
+          worktreeRootPath: "/mock/public-worktrees",
+          status: "READY",
+          initialized: true,
+          initializationAllowed: true,
+          currentBranch: "main",
+          commitHash: "public_commit",
+          message: null
+        }]));
+        return;
+      }
+      if (method === "POST" && url.pathname === "/api/internal/platform/workspace-management/agent-config/file-ws-route") {
+        const body = JSON.parse(route.request().postData() ?? "{}") as {
+          scope?: string;
+          workspaceId?: string;
+          worktreeId?: string;
+          linuxServerId?: string;
+        };
+        await route.fulfill(json({
+          scope: body.scope ?? "PUBLIC",
+          workspaceId: body.workspaceId,
+          worktreeId: body.worktreeId,
+          linuxServerId: body.linuxServerId ?? "10.8.0.12",
+          baseUrl: "http://127.0.0.1:8080",
+          webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+          sameServer: true,
+          message: null
+        }));
+        return;
+      }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/backend-servers") {
         await route.fulfill(json([
           {
@@ -5485,6 +5968,47 @@ function runnableWorkspaceSetup() {
     },
     personalWorkspaces: {
       awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  };
+}
+
+function agentWorkspaceSetup() {
+  return {
+    ...runnableWorkspaceSetup(),
+    workspaceTemplates: {
+      app_gcms: [{
+        workspaceId: "awp_1",
+        workspaceName: "F-GCMS",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        defaultBranch: "main",
+        createdAt: "2026-06-19T00:00:00Z",
+        updatedAt: "2026-06-19T00:00:00Z"
+      }]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_1": [{
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: "2026年7月",
+        branch: "feature_testagent_20260715",
+        repoRootPath: "/Users/huang/workspace/app-feature",
+        workspaceRootPath: "/Users/huang/workspace/app-feature/F-GCMS/workspace",
+        runtimeWorkspace: {
+          ...workspace(),
+          workspaceId: "wrk_feature_agent",
+          name: "F-GCMS feature",
+          rootPath: "/Users/huang/workspace/app-feature/F-GCMS/workspace",
+          appId: "app_gcms",
+          versionId: "awv_20260715",
+          applicationWorkspaceId: "awp_1"
+        },
+        status: "ACTIVE",
+        createdAt: "2026-06-19T00:00:00Z",
+        updatedAt: "2026-06-19T00:00:00Z"
+      }]
     }
   };
 }

@@ -136,6 +136,20 @@
 - Result:
   - 最新 `test-agent-internal-release.zip` 为 207 MB，SHA-256 `f61c9760de34dd4b949b2c4d88c17f9b57b8b9a6923b9a5c2d6e51988bf85a47`；后端 health/readiness 为 `UP`，前端/CORS 为 200，manager WebSocket/config update 正常，日志确认从 classpath 加载 RSA 私钥。
   - 企业更新时 Java 必须重启；前端必须替换静态文件但只需 reload Nginx；worker 与既有用户 OpenCode 无需重启，可在后台部署时使用 `--skip-worker`。
+### 2026-07-17 - 修复 Agent 配置文件打开偶发空白
+
+- Why:
+  - 公共级和应用级 Agent 文件仍由 `AgentConfigPanel` 先读取正文、再创建 tab，绕过了普通工作区文件已有的加载三态、上下文/请求代次和内容修订保护；组件测试又默认返回空正文，工作台 WebSocket mock 未实现 `agent-config.read`，因此真实非空文件空白与竞态没有被覆盖。
+- What:
+  - `AgentConfigPanel` 改为只上报 scope、path、workspace/worktree/server、readonly 与打开/后台刷新语义；`AgentWorkbench` 新增独立 Agent 文件加载器，按 Agent 上下文代次、合成 tab 路径、同路径请求代次、tab 存在性和内容修订代次隔离响应，并统一处理首次 loading/error/retry、合法空文件、缓存刷新失败、NOT_FOUND 关闭 clean tab、dirty/读取期间编辑保护、顶部 tab 缓存和按 tab 类型重试。
+  - Playwright mock 增加 `agent-config.list/read/write` frame、延迟、失败、NOT_FOUND 和响应序列；新增公共级/应用级非空与空文件、重试、A/B 与同路径乱序、上下文切换、关闭 loading tab、dirty/编辑后保存保护、缓存刷新失败和顶部 tab 场景。Monaco 增加 Agent 编码路径同 tick 切换与异步初始化回归；同步前端总览、agent-web README/PACKAGE、模块地图和异步读取规范。
+- How:
+  - TDD 先移除子面板正文读取断言，再让工作台 Agent 场景通过父层加载器；首次失败重试测试发现临时 loading readonly 会把可写 Agent 永久锁成只读，改为从请求保留目标权限。既有 `CodeEditor` 路径/model URI 校验已通过新增回归，无需修改编辑器实现。
+  - 前端全量 Vitest 68 个文件通过（1091 passed / 1 skipped），typecheck、lint、build 和 `git diff --check` 通过；新增 6 个 Agent 工作台场景在 Chromium 定向通过，并在全量 E2E 的 Chromium/Mobile 两个项目中 12/12 通过。全量 E2E 总体为 133 passed / 52 failed / 1 skipped，52 条均位于非 Agent 场景，抽查为 Mermaid 仍断言旧节点语法、Help/设置/模型选择仍断言旧文案或旧 ARIA 角色等当前基线不一致，本次未扩大范围修改。
+- Result:
+  - test profile 三服务重启成功，使用 `superadmin99` 登录真实工作台后反复打开 `agents/test-design-agent.md` 与 `agents/test-design-case-generation.md`，两份公共级 Agent 正文均非空；快速切换、顶部缓存切换和文件树再次读取后，活动 tab 与 Monaco 正文保持一致，读取链路为 `agent-config.read` WebSocket RPC，Fetch/XHR 无文件请求仍属正常。当前 test 数据未创建应用级 Agent worktree，未在不新增外部状态的前提下做应用级真实文件复测，该路径由新增双浏览器 E2E 覆盖。
+  - 不改变 `EditorTab`、backend-api 公共方法、HTTP API、文件 WebSocket wire、`FileContent` DTO、RunEvent、后端 Java、数据库、鉴权、安全策略或 generated SDK；未修改环境配置。除全量 E2E 的非本任务基线失败和 test 数据缺少应用级 worktree 外，无本任务代码未完成事项。
+
 ### 2026-07-17 - 实现 Mermaid 可视化编辑器节点悬浮延时显示
 
 - Why:
