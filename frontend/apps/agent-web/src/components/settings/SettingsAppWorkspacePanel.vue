@@ -113,6 +113,7 @@ const WorkspaceDirectoryTree = defineComponent({
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  initialAppId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -321,7 +322,11 @@ async function run(action: () => Promise<void>) {
 async function loadApplications() {
   await run(async () => {
     applications.value = await api.listApplications(true);
-    if (!selectedAppId.value || !applications.value.some((item) => item.appId === selectedAppId.value)) {
+    // 如果传入了 initialAppId 且存在于列表中，优先使用它（来自右上角的选择）
+    const initialId = props.initialAppId;
+    if (initialId && applications.value.some((item) => item.appId === initialId)) {
+      selectedAppId.value = initialId;
+    } else if (!selectedAppId.value || !applications.value.some((item) => item.appId === selectedAppId.value)) {
       selectedAppId.value = applications.value[0]?.appId ?? "";
     }
     if (selectedAppId.value) {

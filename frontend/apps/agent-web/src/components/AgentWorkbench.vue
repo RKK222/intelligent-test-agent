@@ -5647,7 +5647,7 @@ async function handleLogout() {
     @select="selectServerWorkspaceDirectory"
   />
 
-  <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" @close="settingsOpen = false" />
+  <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" :initial-app-id="selectedAppId" @close="settingsOpen = false" />
 
   <HelpCenterDialog
     :open="helpCenterOpen"

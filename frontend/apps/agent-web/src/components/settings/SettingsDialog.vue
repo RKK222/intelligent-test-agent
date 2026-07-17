@@ -10,6 +10,7 @@ type MenuKey = "appWorkspace" | "repository" | "personal" | "userManagement";
 const props = defineProps<{
   open: boolean;
   currentUser: CurrentUser | null;
+  initialAppId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -90,7 +91,7 @@ function selectMenu(key: MenuKey) {
     <div class="ta-settings-shell">
       <SettingsMenu :active-key="activeKey" :current-user="currentUser" @select="selectMenu" />
       <div class="ta-settings-content">
-        <SettingsPanel :active-key="activeKey" :current-user="currentUser" :auto-open-create="autoOpenCreate" @switch-menu="handleSwitchMenu" />
+        <SettingsPanel :active-key="activeKey" :current-user="currentUser" :auto-open-create="autoOpenCreate" :initial-app-id="props.initialAppId" @switch-menu="handleSwitchMenu" />
       </div>
     </div>
     <template #footer>
