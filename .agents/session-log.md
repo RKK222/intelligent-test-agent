@@ -7876,3 +7876,16 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 对话区域的字体阅读体验更加舒适，排版呈现一致性良好，对中文与代码排版兼容度更强。
   - 没有任何 API、数据库、后端或生成的 SDK 变更。
+
+### 2026-07-17 - 增加兼容旧版 Chromium 的宠物尺寸缩放
+
+- Why:
+  - 用户需要自行调整小宠物大小，同时要求写法兼容企业内低版本 Chrome 内核。
+- What:
+  - 在宠物设置浮层增加 75%–150% 宠物大小滑杆和 +/- 步进按钮，按 5% 调整；比例与伙伴显示方式共用浏览器本地偏好，并兼容没有 `scale` 字段的旧记录。
+  - 根元素按比例计算 `width/height`，放大或缩小时重新夹紧当前位置，避免宠物超出视口；未使用新版 CSS `scale` 属性。
+- How:
+  - 复用 `pet-companions.ts` 的偏好读写与 `FigmaShell.vue` 的现有位置夹紧逻辑，使用标准 `input[type=range]` 和普通 CSS/TypeScript 数值计算。
+  - 定向 Vitest 3 个文件 55 passed；agent-web typecheck 通过；Vite chrome108 构建通过。真实页面视觉脚本在本地 backend 503/400 资源告警下未完成自动唤起检查，组件交互测试已覆盖滑杆、按钮、持久化和比例范围。
+- Result:
+  - 尺寸调整已实现并通过代码级与构建验证；未修改 API、RunEvent、数据库或安全契约。

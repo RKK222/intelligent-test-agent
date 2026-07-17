@@ -10,6 +10,10 @@ import {
   PET_COMPANIONS,
   getPetCompanion,
   loadPetPreference,
+  normalizePetScale,
+  PET_SCALE_MAX,
+  PET_SCALE_MIN,
+  PET_SCALE_STEP,
   resolvePetPreference,
   savePetPreference,
   type PetCompanionId,
@@ -330,7 +334,7 @@ const robotProcessInitButtonLabel = computed(() => {
 const robotProcessCardStyle = computed<CSSProperties>(() => {
   const width = 304;
   const gap = 14;
-  const preferredLeft = robotX.value + ROBOT_WIDTH + gap;
+  const preferredLeft = robotX.value + robotWidth.value + gap;
   const left = preferredLeft + width <= window.innerWidth - 12
     ? preferredLeft
     : robotX.value - width - gap;
@@ -443,8 +447,8 @@ const robotDragging = ref(false);
 // 鼠标悬浮时冻结当前视觉位置，避免用户准备点击宠物时它继续跳跃。
 const robotHovering = ref(false);
 
-const ROBOT_WIDTH = 44;
-const ROBOT_HEIGHT = 48;
+const ROBOT_BASE_WIDTH = 44;
+const ROBOT_BASE_HEIGHT = 48;
 const ROBOT_VIEWPORT_MARGIN = 8;
 const ROBOT_DRAG_THRESHOLD = 4;
 const ROBOT_KEYBOARD_STEP = 8;
@@ -454,6 +458,10 @@ const ROBOT_FIXED_STORAGE_KEY = "figma-shell-robot-fixed";
 const petPreference = ref(loadPetPreference(typeof window === "undefined" ? undefined : window.localStorage));
 const activePetId = ref<PetCompanionId>("sniffer");
 const activePet = computed(() => getPetCompanion(activePetId.value));
+const robotScale = computed(() => normalizePetScale(petPreference.value.scale ?? 1));
+const robotWidth = computed(() => ROBOT_BASE_WIDTH * robotScale.value);
+const robotHeight = computed(() => ROBOT_BASE_HEIGHT * robotScale.value);
+const robotScalePercent = computed(() => Math.round(robotScale.value * 100));
 const activePetModeLabel = computed(() => {
   if (petPreference.value.mode === "daily") return "每日轮换";
   if (petPreference.value.mode === "random") return "今日随机";
@@ -480,6 +488,27 @@ function selectPetCompanion(petId: PetCompanionId) {
     selectedPetId: petId,
   };
   refreshActivePet();
+}
+
+/** 保存宠物比例并按新尺寸重新夹紧位置，避免放大后跑出视口。 */
+function setPetScale(value: number) {
+  const scale = normalizePetScale(value);
+  petPreference.value = { ...petPreference.value, scale };
+  savePetPreference(typeof window === "undefined" ? undefined : window.localStorage, petPreference.value);
+
+  const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
+  robotX.value = position.x;
+  robotY.value = position.y;
+  if (robotHasSavedPosition.value) saveRobotPosition();
+}
+
+function onPetScaleInput(event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  if (input) setPetScale(Number(input.value));
+}
+
+function nudgePetScale(delta: number) {
+  setPetScale(robotScale.value + delta);
 }
 
 function togglePetSettings() {
@@ -523,8 +552,8 @@ type RobotPosition = { x: number; y: number };
 
 // 坐标统一表示机器人根元素左上角相对 viewport 的位置，避免存储、渲染和拖动出现 32px 偏移。
 function clampRobotPosition(position: RobotPosition): RobotPosition {
-  const maxX = Math.max(ROBOT_VIEWPORT_MARGIN, window.innerWidth - ROBOT_WIDTH - ROBOT_VIEWPORT_MARGIN);
-  const maxY = Math.max(ROBOT_VIEWPORT_MARGIN, window.innerHeight - ROBOT_HEIGHT - ROBOT_VIEWPORT_MARGIN);
+  const maxX = Math.max(ROBOT_VIEWPORT_MARGIN, window.innerWidth - robotWidth.value - ROBOT_VIEWPORT_MARGIN);
+  const maxY = Math.max(ROBOT_VIEWPORT_MARGIN, window.innerHeight - robotHeight.value - ROBOT_VIEWPORT_MARGIN);
   return {
     x: Math.min(maxX, Math.max(ROBOT_VIEWPORT_MARGIN, position.x)),
     y: Math.min(maxY, Math.max(ROBOT_VIEWPORT_MARGIN, position.y))
@@ -765,10 +794,10 @@ function getBirthPosition() {
     const rect = el.getBoundingClientRect();
     return {
       x: rect.left + rect.width / 2,
-      y: rect.bottom - ROBOT_HEIGHT
+      y: rect.bottom - robotHeight.value
     };
   }
-  return { x: 100, y: 36 - ROBOT_HEIGHT };
+  return { x: 100, y: 36 - robotHeight.value };
 }
 
 // Exit logic (interrupted or naturally)
@@ -890,7 +919,7 @@ function spawnRobot() {
 
   const [minX, maxX] = getSafeXRange("top");
   const targetX = minX + Math.random() * (maxX - minX);
-  const targetY = 36 - ROBOT_HEIGHT; // navbar bottom floor
+  const targetY = 36 - robotHeight.value; // navbar bottom floor
 
   robotDirection.value = targetX > birth.x ? "right" : "left";
 
@@ -1223,7 +1252,7 @@ function executeBigJump() {
   const startX = robotX.value;
   const startY = robotY.value;
   const targetLevel = robotCurrentLevel.value === "top" ? "bottom" : "top";
-  const targetY = targetLevel === "top" ? 36 - ROBOT_HEIGHT : window.innerHeight - ROBOT_HEIGHT - 4;
+  const targetY = targetLevel === "top" ? 36 - robotHeight.value : window.innerHeight - robotHeight.value - 4;
   const [minX, maxX] = getSafeXRange(targetLevel);
   const targetX = minX + Math.random() * (maxX - minX);
 
@@ -1346,7 +1375,7 @@ function handleWindowResize() {
   if (robotX.value > maxX) robotX.value = maxX;
   if (robotX.value < minX) robotX.value = minX;
   if (robotCurrentLevel.value === "bottom") {
-    robotY.value = window.innerHeight - ROBOT_HEIGHT - 4;
+    robotY.value = window.innerHeight - robotHeight.value - 4;
   }
 }
 
@@ -1354,8 +1383,8 @@ const robotStyle = computed(() => ({
   position: "fixed" as const,
   left: `${robotX.value}px`,
   top: `${robotY.value}px`,
-  width: `${ROBOT_WIDTH}px`,
-  height: `${ROBOT_HEIGHT}px`,
+  width: `${robotWidth.value}px`,
+  height: `${robotHeight.value}px`,
   zIndex: 9999,
   pointerEvents: "auto" as const,
   transition: robotTransition.value,
@@ -1365,7 +1394,7 @@ const robotStyle = computed(() => ({
 const robotQuestionStyle = computed<CSSProperties>(() => {
   const width = 390;
   const gap = 10;
-  const preferredLeft = robotX.value + ROBOT_WIDTH + gap;
+  const preferredLeft = robotX.value + robotWidth.value + gap;
   const left = preferredLeft + width <= window.innerWidth - 8
     ? preferredLeft
     : robotX.value - width - gap;
@@ -2153,6 +2182,40 @@ function submitJoinApp() {
             </span>
           </button>
         </div>
+        <div class="figma-pet-size-control" data-testid="pet-size-control">
+          <div class="figma-pet-size-label">
+            <span>宠物大小</span>
+            <output data-testid="pet-size-value">{{ robotScalePercent }}%</output>
+          </div>
+          <div class="figma-pet-size-row">
+            <button
+              type="button"
+              class="figma-pet-size-step"
+              aria-label="缩小小宠物"
+              :disabled="robotScale <= PET_SCALE_MIN"
+              @click="nudgePetScale(-PET_SCALE_STEP)"
+            >−</button>
+            <input
+              class="figma-pet-size-range"
+              data-testid="pet-size-range"
+              type="range"
+              :min="PET_SCALE_MIN"
+              :max="PET_SCALE_MAX"
+              :step="PET_SCALE_STEP"
+              :value="robotScale"
+              :aria-valuetext="`${robotScalePercent}%`"
+              aria-label="调整小宠物大小"
+              @input="onPetScaleInput"
+            />
+            <button
+              type="button"
+              class="figma-pet-size-step"
+              aria-label="放大小宠物"
+              :disabled="robotScale >= PET_SCALE_MAX"
+              @click="nudgePetScale(PET_SCALE_STEP)"
+            >＋</button>
+          </div>
+        </div>
       </section>
       <template v-if="(!robotGameOpen || !props.canPlayPetGames) && !petSettingsOpen">
         <textarea
@@ -2582,6 +2645,73 @@ function submitJoinApp() {
   justify-content: center;
   border-radius: 50%;
   background: color-mix(in srgb, var(--pet-accent, #5aa9a6) 10%, #fff);
+}
+
+.figma-pet-size-control {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid #e4e9ef;
+}
+
+.figma-pet-size-label,
+.figma-pet-size-row {
+  display: flex;
+  align-items: center;
+}
+
+.figma-pet-size-label {
+  justify-content: space-between;
+  margin-bottom: 5px;
+  color: #748295;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.figma-pet-size-label output {
+  color: #4d6478;
+  font-variant-numeric: tabular-nums;
+}
+
+.figma-pet-size-row {
+  gap: 6px;
+}
+
+.figma-pet-size-step {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 22px;
+  padding: 0;
+  border: 1px solid #d6e0e8;
+  border-radius: 6px;
+  background: #fff;
+  color: #587083;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 20px;
+}
+
+.figma-pet-size-step:hover:not(:disabled),
+.figma-pet-size-step:focus-visible {
+  border-color: #a9c1d0;
+  background: #f4f8fa;
+  color: #31546c;
+  outline: none;
+}
+
+.figma-pet-size-step:disabled {
+  cursor: not-allowed;
+  opacity: .42;
+}
+
+.figma-pet-size-range {
+  width: 100%;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
 }
 
 .figma-robot-companion-game {

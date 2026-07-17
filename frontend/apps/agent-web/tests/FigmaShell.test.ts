@@ -104,6 +104,29 @@ describe("FigmaShell", () => {
     });
   });
 
+  it("allows adjusting the pet size and persists it with the companion preference", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+    await wrapper.get('button[aria-label="选择小宠物"]').trigger("click");
+
+    const range = wrapper.get('[data-testid="pet-size-range"]');
+    await range.setValue("1.25");
+
+    expect(wrapper.get('[data-testid="pet-size-value"]').text()).toBe("125%");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("width: 55px");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("height: 60px");
+    expect(JSON.parse(window.localStorage.getItem("test-agent.pet-companion.v1")!)).toMatchObject({ scale: 1.25 });
+
+    await wrapper.get('button[aria-label="缩小小宠物"]').trigger("click");
+    expect(wrapper.get('[data-testid="pet-size-value"]').text()).toBe("120%");
+  });
+
   it("persists a pointer drag after crossing the movement threshold", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   PET_PREFERENCE_STORAGE_KEY,
+  normalizePetScale,
   dailyPetId,
   loadPetPreference,
   localDateKey,
@@ -10,6 +11,13 @@ import {
 } from "../src/components/pet-companions";
 
 describe("pet companions", () => {
+  it("normalizes pet sizes to the supported range and step", () => {
+    expect(normalizePetScale(0.4)).toBe(0.75);
+    expect(normalizePetScale(1.13)).toBe(1.15);
+    expect(normalizePetScale(2)).toBe(1.5);
+    expect(normalizePetScale("invalid")).toBe(1);
+  });
+
   it("rotates deterministically by local calendar day", () => {
     const firstDay = new Date(2026, 6, 15, 8, 30);
     const sameDay = new Date(2026, 6, 15, 23, 59);
@@ -58,5 +66,15 @@ describe("pet companions", () => {
       selectedPetId: "bird",
       randomPetId: "hedgehog",
     });
+  });
+
+  it("loads and clamps a persisted pet size without breaking old records", () => {
+    const storage = {
+      getItem: vi.fn(() => JSON.stringify({ mode: "selected", selectedPetId: "bird", scale: 1.37 })),
+    };
+
+    expect(loadPetPreference(storage)).toMatchObject({ scale: 1.35 });
+    expect(loadPetPreference({ getItem: vi.fn(() => JSON.stringify({ mode: "selected", selectedPetId: "bird" })) }))
+      .not.toHaveProperty("scale");
   });
 });

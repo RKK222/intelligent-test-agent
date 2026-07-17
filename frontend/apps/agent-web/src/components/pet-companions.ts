@@ -43,11 +43,16 @@ export type PetDisplayMode = "daily" | "random" | "selected";
 export type PetPreference = {
   mode: PetDisplayMode;
   selectedPetId: PetCompanionId;
+  /** 宠物显示比例；旧版本没有该字段时按 100% 兼容。 */
+  scale?: number;
   randomDate?: string;
   randomPetId?: PetCompanionId;
 };
 
 export const PET_PREFERENCE_STORAGE_KEY = "test-agent.pet-companion.v1";
+export const PET_SCALE_MIN = 0.75;
+export const PET_SCALE_MAX = 1.5;
+export const PET_SCALE_STEP = 0.05;
 
 const DEFAULT_PREFERENCE: PetPreference = {
   mode: "daily",
@@ -55,6 +60,14 @@ const DEFAULT_PREFERENCE: PetPreference = {
 };
 
 const PET_IDS = new Set<PetCompanionId>(PET_COMPANIONS.map((pet) => pet.id));
+
+/** 将输入和历史偏好规整到兼容旧版浏览器的固定步进范围。 */
+export function normalizePetScale(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  const bounded = Math.min(PET_SCALE_MAX, Math.max(PET_SCALE_MIN, numeric));
+  return Number((Math.round(bounded / PET_SCALE_STEP) * PET_SCALE_STEP).toFixed(2));
+}
 
 // 角色替换后仍兼容旧浏览器里的选择记录，把原角色映射到新的同职责伙伴。
 const LEGACY_PET_ID_ALIASES: Record<string, PetCompanionId> = {
@@ -100,12 +113,16 @@ export function loadPetPreference(storage: Pick<Storage, "getItem"> | undefined)
     if (!(["daily", "random", "selected"] as const).includes(parsed.mode as PetDisplayMode)) {
       return { ...DEFAULT_PREFERENCE };
     }
-    return {
+    const preference: PetPreference = {
       mode: parsed.mode as PetDisplayMode,
       selectedPetId: normalizePetCompanionId(parsed.selectedPetId) ?? DEFAULT_PREFERENCE.selectedPetId,
       randomDate: typeof parsed.randomDate === "string" ? parsed.randomDate : undefined,
       randomPetId: normalizePetCompanionId(parsed.randomPetId),
     };
+    if (typeof parsed.scale === "number" && Number.isFinite(parsed.scale)) {
+      preference.scale = normalizePetScale(parsed.scale);
+    }
+    return preference;
   } catch {
     return { ...DEFAULT_PREFERENCE };
   }
