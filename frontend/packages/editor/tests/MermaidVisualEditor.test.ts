@@ -1515,6 +1515,21 @@ describe("MermaidVisualEditor", () => {
     expect((emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges[0]?.label).toBe("");
   });
 
+  it("选中连线后可删除连线", async () => {
+    const { getByTestId, getByRole, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+
+    // 选中 edge-1（A->B）
+    await fireEvent.click(getByTestId("mock-edge-click"));
+
+    // 点击删除连线按钮
+    await fireEvent.click(getByRole("button", { name: "删除连线" }));
+
+    const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
+    expect(updates.at(-1)?.[0].edges).toEqual([]);
+  });
+
   it("点击空白画布同时取消选中的连线", async () => {
     const { getByTestId, queryByLabelText, queryByText } = render(MermaidVisualEditor, {
       props: { modelValue: graph() }

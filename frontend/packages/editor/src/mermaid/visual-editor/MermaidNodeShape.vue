@@ -132,7 +132,7 @@ const visualStyle = computed<CSSProperties>(() => ({
 .ta-mermaid-node-shape {
   display: block;
   overflow: visible;
-  color: var(--ta-border-strong, #94a3b8);
+  color: var(--ta-mermaid-stroke-default, #43464c);
   filter: drop-shadow(0 2px 3px rgba(15, 23, 42, 0.1));
   pointer-events: none;
 }

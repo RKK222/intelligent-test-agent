@@ -375,6 +375,16 @@ function deleteSelectedNode() {
   selectedNodeId.value = undefined;
 }
 
+function deleteSelectedEdge() {
+  const edgeId = selectedEdgeId.value;
+  if (!edgeId) return;
+  closeInlineEditor();
+  updateGraph((draft) => {
+    draft.edges = draft.edges.filter((edge) => edge.id !== edgeId);
+  });
+  selectedEdgeId.value = undefined;
+}
+
 /** 在当前可见画布中心提供键盘和点击创建的确定性落点。 */
 function getDefaultNodePosition(): MermaidPosition {
   const bounds = canvasRef.value?.getBoundingClientRect();
@@ -638,10 +648,9 @@ function onEdgesChange(changes: EdgeChange[]) {
         <section v-else-if="selectedEdge" class="ta-mermaid-edge-properties">
           <h3>当前连线</h3>
           <div class="ta-mermaid-fields">
-            <label>
-              <span>连线 ID</span>
-              <input :value="selectedEdge.id" disabled />
-            </label>
+            <div class="ta-mermaid-node-id-display">
+              连线ID：{{ selectedEdge.id }}
+            </div>
             <label>
               <span>连线文字</span>
               <textarea aria-label="连线文字" :value="selectedEdge.label" placeholder="为空则不显示文字" @input="updateSelectedEdgeLabel(($event.target as HTMLTextAreaElement).value)"></textarea>
@@ -651,6 +660,7 @@ function onEdgesChange(changes: EdgeChange[]) {
               :model-value="selectedEdge.style?.textColor"
               @update:model-value="updateSelectedEdgeTextColor"
             />
+            <button type="button" class="is-danger" @click="deleteSelectedEdge">删除连线</button>
           </div>
         </section>
         <p v-else class="ta-mermaid-empty">选择画布中的节点或连线后编辑。</p>
@@ -685,6 +695,13 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-toolbar__hint { margin-left: auto; color: var(--ta-muted, #64748b); font-size: 11px; }
 .ta-mermaid-workspace { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr) 280px; }
 .ta-mermaid-canvas { position: relative; min-height: 420px; background-color: var(--ta-surface, #fff); background-image: radial-gradient(circle, color-mix(in srgb, var(--ta-border, #dbe2ea) 75%, transparent) 1px, transparent 1px); background-size: 18px 18px; transition: box-shadow 120ms ease; }
+.ta-mermaid-canvas :deep(.vue-flow__edge-path) {
+  stroke: #7e89a0;
+}
+.ta-mermaid-canvas :deep(.vue-flow__arrowhead path) {
+  fill: #7e89a0;
+  stroke: #7e89a0;
+}
 .ta-mermaid-canvas.is-drag-over { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary, #4f46e5) 65%, transparent); }
 .ta-mermaid-canvas.is-connection-dragging :deep(.vue-flow__handle) { transition: none !important; }
 .ta-mermaid-canvas :deep(.vue-flow) { height: 100%; min-height: 420px; }
@@ -717,7 +734,7 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-inspector button.ta-mermaid-palette__item { display: flex; min-width: 0; min-height: 42px; padding: 3px; align-items: center; justify-content: center; color: var(--ta-border-strong, #94a3b8); }
 .ta-mermaid-inspector button.ta-mermaid-palette__item:hover { color: var(--ta-ink, #172033); }
 .ta-mermaid-palette__preview { position: relative; display: grid; width: 70px; height: 34px; place-items: center; pointer-events: none; }
-.ta-mermaid-palette__shape { position: absolute; left: 0; top: 4px; width: 70px; height: 26px; color: currentColor; }
+.ta-mermaid-palette__shape { position: absolute; left: 0; top: 4px; width: 70px; height: 26px; color: currentColor; --ta-mermaid-stroke-default: currentColor; }
 .ta-mermaid-palette__shape[data-mermaid-shape="database"],
 .ta-mermaid-palette__shape[data-mermaid-shape="doc"],
 .ta-mermaid-palette__shape[data-mermaid-shape="docs"] { top: 1px; height: 32px; }

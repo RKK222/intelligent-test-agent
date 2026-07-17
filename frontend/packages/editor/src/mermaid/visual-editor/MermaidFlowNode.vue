@@ -734,6 +734,7 @@ function onDoubleClick(event: MouseEvent) {
   height: 18px;
   flex: 0 0 28px;
   color: var(--ta-muted, #94a3b8);
+  --ta-mermaid-stroke-default: currentColor;
 }
 .ta-quick-menu-shape[data-mermaid-shape="circle"],
 .ta-quick-menu-shape[data-mermaid-shape="double-circle"] {

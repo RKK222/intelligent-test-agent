@@ -148,6 +148,13 @@ function deleteMessage(id: string) {
 .ta-sequence-toolbar button, .ta-sequence-inspector button { padding: 0 8px; cursor: pointer; }
 .ta-sequence-workspace { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr) 300px; }
 .ta-sequence-canvas { min-height: 440px; overflow: hidden; background-color: var(--ta-surface, #fff); background-image: linear-gradient(to right, transparent 17px, color-mix(in srgb, var(--ta-border, #dbe2ea) 45%, transparent) 18px), linear-gradient(to bottom, transparent 17px, color-mix(in srgb, var(--ta-border, #dbe2ea) 45%, transparent) 18px); background-size: 18px 18px; }
+.ta-sequence-canvas :deep(.vue-flow__edge-path) {
+  stroke: #7e89a0;
+}
+.ta-sequence-canvas :deep(.vue-flow__arrowhead path) {
+  fill: #7e89a0;
+  stroke: #7e89a0;
+}
 .ta-sequence-canvas :deep(.vue-flow) { height: 100%; min-height: 440px; }
 .ta-sequence-inspector { min-height: 0; overflow: auto; border-left: 1px solid var(--ta-border, #e2e8f0); background: var(--ta-panel-2, #f8fafc); }
 .ta-sequence-inspector section { padding: 12px; border-bottom: 1px solid var(--ta-border, #e2e8f0); }
