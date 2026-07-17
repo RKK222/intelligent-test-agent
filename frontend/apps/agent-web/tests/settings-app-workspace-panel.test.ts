@@ -340,6 +340,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
 
     const repositorySelect = getAllByLabelText("选择版本库")[0];
     expect(within(repositorySelect).getByText("F-WRTESTAPP 本地测试库(file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP)")).toBeTruthy();
+    expect(within(repositorySelect).getByText("MIMO 示例库(https://gitee.com/mimo/demo.git)")).toBeTruthy();
     expect(within(repositorySelect).getByText("添加版本库")).toBeTruthy();
   });
 
@@ -375,6 +376,45 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(container.querySelectorAll(".ta-workspace-step").length).toBe(0);
     await waitFor(() => expect(api.listRepositoryBranches).toHaveBeenCalledWith("repo_wr"));
     await waitFor(() => expect(api.getRepositoryTree).toHaveBeenCalledWith("F-COSS", "repo_wr", "feature_testagent_20260707"));
+  });
+
+  it("only offers linked test work repositories when creating a workspace", async () => {
+    const api = createApi();
+    const explicitlyNonTestStandardRepository: CodeRepositoryConfig = {
+      ...repositories[1],
+      repositoryId: "repo_explicit_non_test",
+      name: "显式应用代码库",
+      standard: true
+    };
+    const legacyTestRepository: CodeRepositoryConfig = {
+      ...repositories[0],
+      repositoryId: "repo_legacy_test",
+      name: "历史测试工作库",
+      repositoryType: null,
+      repositoryTypeLabel: null,
+      standard: true
+    };
+    api.listApplicationRepositories = vi.fn().mockResolvedValue([
+      explicitlyNonTestStandardRepository,
+      legacyTestRepository,
+      repositories[1],
+      repositories[0]
+    ]);
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
+    const { findByText, getByLabelText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+
+    const repositorySelect = getByLabelText("选择已关联版本库");
+    expect(within(repositorySelect).getByText("历史测试工作库(file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP)")).toBeTruthy();
+    expect(within(repositorySelect).getByText("F-WRTESTAPP 本地测试库(file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP)")).toBeTruthy();
+    expect(within(repositorySelect).queryByText("显式应用代码库(https://gitee.com/mimo/demo.git)")).toBeNull();
+    expect(within(repositorySelect).queryByText("MIMO 示例库(https://gitee.com/mimo/demo.git)")).toBeNull();
+    expect(getByText("只能关联类型为测试工作库的版本库。")).toBeTruthy();
+    await waitFor(() => expect(api.listRepositoryBranches).toHaveBeenCalledWith("repo_legacy_test"));
+    expect(api.listRepositoryBranches).not.toHaveBeenCalledWith("repo_explicit_non_test");
+    expect(api.listRepositoryBranches).not.toHaveBeenCalledWith("repo_mimo");
   });
 
   it("disables invalid test-work-repository branches and exposes the immediate tooltip text", async () => {
@@ -474,31 +514,19 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect((getByText("保存") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("requires yyyyMMdd version when creating a non-standard workspace", async () => {
+  it("keeps workspace repository selection empty when only non-test repositories are linked", async () => {
     const api = createApi();
     api.listApplicationRepositories = vi.fn().mockResolvedValue([repositories[1]]);
-    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature/demo"]);
-    api.getRepositoryTree = vi.fn().mockResolvedValue({
-      nodes: [{ name: "src", path: "src", type: "directory", children: [] }]
-    });
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("22345678-1234-1234-1234-123456789abc");
-    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
+    const { findByText, getByLabelText, getByText, queryByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
-    expect(await findByText("非标准库版本")).toBeTruthy();
 
-    await fireEvent.click(await findByText("src"));
-    await fireEvent.update(getByPlaceholderText("选择日期"), "20260707");
-    await fireEvent.click(getByText("保存"));
-
-    await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", expect.objectContaining({
-      repositoryId: "repo_mimo",
-      branch: "feature/demo",
-      directoryPath: "src",
-      workspaceName: "ai-test",
-      version: "20260707"
-    })));
+    const repositorySelect = getByLabelText("选择已关联版本库") as HTMLSelectElement;
+    expect(repositorySelect.value).toBe("");
+    expect(within(repositorySelect).queryByText("MIMO 示例库(https://gitee.com/mimo/demo.git)")).toBeNull();
+    expect(queryByText("非标准库版本")).toBeNull();
+    expect(api.listRepositoryBranches).not.toHaveBeenCalled();
   });
 
   it("confirms before removing an application member", async () => {

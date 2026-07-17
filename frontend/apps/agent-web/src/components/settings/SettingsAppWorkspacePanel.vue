@@ -170,6 +170,8 @@ const selectedUser = ref<PlatformUserSummary | null>(null);
 // 版本库
 const repositories = ref<CodeRepositoryConfig[]>([]);
 const appRepositories = ref<CodeRepositoryConfig[]>([]);
+// 创建工作空间只允许使用测试工作库；standard=true 兼容尚未补齐 repositoryType 的历史数据。
+const workspaceRepositories = computed(() => appRepositories.value.filter(isTestWorkRepository));
 const linkRepositoryId = ref("");
 const lastLinkRepositoryId = ref("");
 
@@ -190,7 +192,7 @@ let workspaceCreatePollTimer: number | undefined;
 const loadingBranches = ref(false);
 const loadingDirectories = ref(false);
 
-const selectedWorkspaceRepository = computed(() => appRepositories.value.find((item) => item.repositoryId === workspaceRepositoryId.value) ?? null);
+const selectedWorkspaceRepository = computed(() => workspaceRepositories.value.find((item) => item.repositoryId === workspaceRepositoryId.value) ?? null);
 const requiresWorkspaceVersion = computed(() => selectedWorkspaceRepository.value != null && !selectedWorkspaceRepository.value.standard);
 const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.steps ?? []);
 const customBranchError = ref("");
@@ -470,8 +472,8 @@ async function loadRepositories() {
   ]);
   repositories.value = all.items;
   appRepositories.value = linked;
-  if (!workspaceRepositoryId.value || !linked.some((item) => item.repositoryId === workspaceRepositoryId.value)) {
-    workspaceRepositoryId.value = linked[0]?.repositoryId ?? "";
+  if (!workspaceRepositoryId.value || !workspaceRepositories.value.some((item) => item.repositoryId === workspaceRepositoryId.value)) {
+    workspaceRepositoryId.value = workspaceRepositories.value[0]?.repositoryId ?? "";
   }
   await loadBranches();
 }
@@ -737,7 +739,11 @@ watch(workspaceBranch, () => {
 });
 
 function isTestWorkRepository(repository: CodeRepositoryConfig | null) {
-  return Boolean(repository?.standard || repository?.repositoryType === TEST_WORK_REPOSITORY_TYPE);
+  const repositoryType = repository?.repositoryType?.trim();
+  if (repositoryType) {
+    return repositoryType === TEST_WORK_REPOSITORY_TYPE;
+  }
+  return Boolean(repository?.standard);
 }
 
 function cloneTreeNode(node: RepositoryTreeNode): WorkspaceTreeNode {
@@ -945,9 +951,12 @@ onBeforeUnmount(() => {
           <div class="ta-workspace-create-form">
             <div class="ta-workspace-form-grid">
               <label class="ta-form-field">
-                <span class="ta-form-label">已关联版本库</span>
+                <span class="ta-form-label">
+                  已关联版本库
+                  <span class="ta-form-label-hint">只能关联类型为测试工作库的版本库。</span>
+                </span>
                 <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: 100%" filterable @change="loadBranches">
-                  <el-option v-for="repo in appRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
+                  <el-option v-for="repo in workspaceRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
                 </el-select>
               </label>
               <label class="ta-form-field">
@@ -1124,6 +1133,11 @@ onBeforeUnmount(() => {
   font-weight: 500;
   color: #606266;
   line-height: 1;
+}
+.ta-form-label-hint {
+  margin-left: 6px;
+  color: #909399;
+  font-weight: 400;
 }
 .ta-readonly-field {
   font-size: 13px;
