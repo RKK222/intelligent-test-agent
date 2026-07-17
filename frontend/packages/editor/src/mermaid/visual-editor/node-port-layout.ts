@@ -44,20 +44,29 @@ const CIRCLE_PORTS: RawPort[] = [
   { x: 85.4, y: 14.6, pos: Position.Top }
 ];
 
-/** 矩形：4 个顶点 + 每条边 2 个点，共 12 个端口。 */
+/** 矩形：算上顶点，长边上 5 个点，短边上 3 个点，每边中心均有一个点，共 12 个端口。 */
 const RECTANGLE_PORTS: RawPort[] = [
+  // 4 corners to maintain maximum compatibility with original layout
   { x: 0, y: 0, pos: Position.Top },
   { x: 100, y: 0, pos: Position.Top },
   { x: 0, y: 100, pos: Position.Bottom },
   { x: 100, y: 100, pos: Position.Bottom },
-  { x: 33.3, y: 0, pos: Position.Top },
-  { x: 66.7, y: 0, pos: Position.Top },
-  { x: 33.3, y: 100, pos: Position.Bottom },
-  { x: 66.7, y: 100, pos: Position.Bottom },
-  { x: 0, y: 33.3, pos: Position.Left },
-  { x: 0, y: 66.7, pos: Position.Left },
-  { x: 100, y: 33.3, pos: Position.Right },
-  { x: 100, y: 66.7, pos: Position.Right }
+
+  // Top edge non-corners: x: 25, 50, 75
+  { x: 25, y: 0, pos: Position.Top },
+  { x: 50, y: 0, pos: Position.Top },
+  { x: 75, y: 0, pos: Position.Top },
+
+  // Bottom edge non-corners: x: 25, 50, 75
+  { x: 25, y: 100, pos: Position.Bottom },
+  { x: 50, y: 100, pos: Position.Bottom },
+  { x: 75, y: 100, pos: Position.Bottom },
+
+  // Left edge midpoint: y: 50
+  { x: 0, y: 50, pos: Position.Left },
+
+  // Right edge midpoint: y: 50
+  { x: 100, y: 50, pos: Position.Right }
 ];
 
 /**

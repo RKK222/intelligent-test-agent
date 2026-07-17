@@ -139,10 +139,10 @@ describe("Mermaid 节点端口布局", () => {
   });
 
   it.each([
-    ["rectangle", Position.Top, "target-2"],
-    ["rectangle", Position.Bottom, "target-3"],
-    ["rectangle", Position.Left, "target-4"],
-    ["rectangle", Position.Right, "target-5"],
+    ["rectangle", Position.Top, "source-2"],
+    ["rectangle", Position.Bottom, "target-4"],
+    ["rectangle", Position.Left, "target-5"],
+    ["rectangle", Position.Right, "source-5"],
     ["diamond", Position.Top, "target-0"],
     ["diamond", Position.Right, "source-0"],
     ["diamond", Position.Bottom, "target-1"],

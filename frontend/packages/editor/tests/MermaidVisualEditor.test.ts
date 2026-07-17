@@ -411,13 +411,13 @@ describe("MermaidFlowNode", () => {
       vi.advanceTimersByTime(300);
       await Promise.resolve();
 
-      // 矩形四条边都没有正好位于 50% 的端口，旧实现会退化到左上角 target-0；
+      // 矩形长边 5 个点，短边 3 个点，每边都有一个点在最中间；
       // 现在应取各边上最接近中点的端口，使起始点落在箭头所在边上。
       const cases = [
-        { cls: "is-top", dir: "top", expectedPort: "target-2" },
-        { cls: "is-bottom", dir: "bottom", expectedPort: "target-3" },
-        { cls: "is-left", dir: "left", expectedPort: "target-4" },
-        { cls: "is-right", dir: "right", expectedPort: "target-5" }
+        { cls: "is-top", dir: "top", expectedPort: "source-2" },
+        { cls: "is-bottom", dir: "bottom", expectedPort: "target-4" },
+        { cls: "is-left", dir: "left", expectedPort: "target-5" },
+        { cls: "is-right", dir: "right", expectedPort: "source-5" }
       ];
       for (const item of cases) {
         const arrow = container.querySelector<HTMLElement>(
@@ -436,10 +436,10 @@ describe("MermaidFlowNode", () => {
       >;
       expect(payloads).toHaveLength(4);
       const portByDir = new Map(payloads.map(([payload]) => [payload.position, payload.portId]));
-      expect(portByDir.get("top")).toBe("target-2");
-      expect(portByDir.get("bottom")).toBe("target-3");
-      expect(portByDir.get("left")).toBe("target-4");
-      expect(portByDir.get("right")).toBe("target-5");
+      expect(portByDir.get("top")).toBe("source-2");
+      expect(portByDir.get("bottom")).toBe("target-4");
+      expect(portByDir.get("left")).toBe("target-5");
+      expect(portByDir.get("right")).toBe("source-5");
     } finally {
       vi.useRealTimers();
     }
@@ -1033,7 +1033,7 @@ describe("MermaidVisualEditor", () => {
     const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
     expect(updates.at(-1)?.[0].nodes[0]?.type).toBe("database");
     expect(updates.at(-1)?.[0].edges[0]).toMatchObject({
-      sourceHandle: "source-0",
+      sourceHandle: "target-3",
       targetHandle: "target-0"
     });
     expect(updates.at(-1)?.[0].edges[0]?.route).toBeUndefined();
