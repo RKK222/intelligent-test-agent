@@ -30,7 +30,7 @@ import type {
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { formatAgentConfigError } from "./agentConfigErrors";
-import type { AgentFileLoadRequest } from "./agentFileLoad";
+import { agentFileInfo, isAgentFilePath, type AgentFileLoadRequest } from "./agentFileLoad";
 import { notifyError, notifyInfo, notifySuccess } from "./notify";
 import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 
@@ -207,35 +207,15 @@ function activeAgentFileFromLocalSelection() {
 }
 
 function activeAgentFileFromEditorPath(path?: string) {
-  if (!path) return null;
-  const publicPrefix = "agent-public:";
-  const workspacePrefix = "agent-workspace:";
-  const scope: Scope | null = path.startsWith(publicPrefix)
-    ? "PUBLIC"
-    : path.startsWith(workspacePrefix)
-      ? "WORKSPACE"
-      : null;
-  if (!scope) return null;
-  const prefix = scope === "PUBLIC" ? publicPrefix : workspacePrefix;
-  const rest = path.slice(prefix.length);
-  const firstSeparator = rest.indexOf(":");
-  const secondSeparator = firstSeparator >= 0 ? rest.indexOf(":", firstSeparator + 1) : -1;
-  const rawWorktree = firstSeparator >= 0 ? rest.slice(0, firstSeparator) : "";
-  const rawLinuxServer = secondSeparator >= 0 ? rest.slice(firstSeparator + 1, secondSeparator) : "";
-  const rawPath = secondSeparator >= 0
-    ? rest.slice(secondSeparator + 1)
-    : firstSeparator >= 0
-      ? rest.slice(firstSeparator + 1)
-      : rest;
-  return {
-    scope,
-    path: decodeURIComponent(rawPath),
-    worktreeId: rawWorktree ? decodeURIComponent(rawWorktree) : undefined,
-    linuxServerId: rawLinuxServer ? decodeURIComponent(rawLinuxServer) : undefined
-  };
+  return path && isAgentFilePath(path) ? agentFileInfo(path) : null;
 }
 
-function isCurrentAgentFileContext(file: { scope: Scope; worktreeId?: string; linuxServerId?: string }) {
+function isCurrentAgentFileContext(file: {
+  scope: Scope;
+  workspaceId?: string;
+  worktreeId?: string;
+  linuxServerId?: string;
+}) {
   const currentWorktreeId = worktreeId(file.scope) ?? "";
   if ((file.worktreeId ?? "") !== currentWorktreeId) {
     return false;
@@ -244,7 +224,7 @@ function isCurrentAgentFileContext(file: { scope: Scope; worktreeId?: string; li
     const currentLinuxServerId = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value ?? "";
     return (file.linuxServerId ?? "") === currentLinuxServerId;
   }
-  return true;
+  return Boolean(file.workspaceId) && file.workspaceId === props.workspaceId;
 }
 
 function isRootActive(scope: Scope) {

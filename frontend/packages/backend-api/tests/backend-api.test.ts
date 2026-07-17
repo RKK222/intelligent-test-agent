@@ -2076,7 +2076,6 @@ describe("backend-api", () => {
     expect(sockets[1]?.sentMessages).toHaveLength(2);
   });
 
-  it("reads and renames workspace files through the same target backend websocket", async () => {
   it("reads and mutates workspace files through the same target backend websocket", async () => {
     const fetcher = vi
       .fn<typeof fetch>()

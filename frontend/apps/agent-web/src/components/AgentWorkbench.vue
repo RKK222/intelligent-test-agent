@@ -71,7 +71,12 @@ import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } f
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
-import type { AgentFileLoadRequest } from "./agentFileLoad";
+import {
+  agentFileInfo,
+  agentTabPath,
+  isAgentFilePath,
+  type AgentFileLoadRequest
+} from "./agentFileLoad";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
 import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
@@ -713,6 +718,29 @@ const selectedAgentConfigWorkspaceId = computed(() => {
   // 版本详情尚未加载时保持配置空态，避免把应用配置误写到个人 worktree 分支。
   return currentPersonalWorkspaceId.value ? undefined : selectedWorkspace.value?.workspaceId;
 });
+
+/** 路由切换会让旧响应失效，同时必须结束旧 tab 的 loading，保证返回原路由后可以重试。 */
+function invalidateAgentFileLoadContext() {
+  agentFileLoadGeneration++;
+  latestAgentFileReadByPath.clear();
+  for (const tab of workbench.tabs) {
+    if (!isAgentFilePath(tab.path) || tab.loadState !== "loading") continue;
+    if (workbench.tabHasLoadedSnapshot(tab) || editorTabIsDirty(tab)) {
+      workbench.updateTab(tab.path, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      continue;
+    }
+    workbench.updateTab(tab.path, {
+      loadState: "error",
+      loadError: "Agent 文件路由已切换，请重试读取。",
+      hasLoadedSnapshot: false
+    });
+  }
+}
+
 // Agent 文件路由上下文变化时立即废弃旧读取。flush=sync 确保子面板解析公共服务器后再发出的请求
 // 捕获到的是新代次，而不是随后被异步 watch 误判为旧请求。
 watch(
@@ -724,8 +752,7 @@ watch(
     workbench.workspaceWorktree?.worktreeId ?? ""
   ] as const,
   () => {
-    agentFileLoadGeneration++;
-    latestAgentFileReadByPath.clear();
+    invalidateAgentFileLoadContext();
   },
   { flush: "sync" }
 );
@@ -1866,10 +1893,10 @@ const saveMutation = useMutation({
       if (agent.scope === "PUBLIC") {
         await api.writePublicAgentFile(agent.path, tab.content, agent.worktreeId, agent.linuxServerId);
       } else {
-        if (!selectedWorkspace.value) {
-          throw new Error("未选择 Workspace");
+        if (!agent.workspaceId) {
+          throw new Error("Agent 文件缺少 Workspace 路由");
         }
-        await api.writeWorkspaceAgentFile(selectedWorkspace.value.workspaceId, agent.path, tab.content, agent.worktreeId);
+        await api.writeWorkspaceAgentFile(agent.workspaceId, agent.path, tab.content, agent.worktreeId);
       }
       return tab;
     }
@@ -1895,36 +1922,6 @@ const saveMutation = useMutation({
     feedback.value = errorFeedback("保存文件失败", error);
   }
 });
-
-const AGENT_PUBLIC_FILE_PREFIX = "agent-public:";
-const AGENT_WORKSPACE_FILE_PREFIX = "agent-workspace:";
-function isAgentFilePath(path: string): boolean {
-  return path.startsWith(AGENT_PUBLIC_FILE_PREFIX) || path.startsWith(AGENT_WORKSPACE_FILE_PREFIX);
-}
-function agentTabPath(scope: "PUBLIC" | "WORKSPACE", path: string, worktreeId?: string | null, linuxServerId?: string | null): string {
-  const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
-  return `${prefix}${encodeURIComponent(worktreeId ?? "")}:${encodeURIComponent(linuxServerId ?? "")}:${encodeURIComponent(path)}`;
-}
-function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: string; worktreeId?: string; linuxServerId?: string } {
-  const scope: "PUBLIC" | "WORKSPACE" = tabPath.startsWith(AGENT_PUBLIC_FILE_PREFIX) ? "PUBLIC" : "WORKSPACE";
-  const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
-  const rest = tabPath.slice(prefix.length);
-  const firstSeparator = rest.indexOf(":");
-  const secondSeparator = firstSeparator >= 0 ? rest.indexOf(":", firstSeparator + 1) : -1;
-  const rawWorktree = firstSeparator >= 0 ? rest.slice(0, firstSeparator) : "";
-  const rawLinuxServer = secondSeparator >= 0 ? rest.slice(firstSeparator + 1, secondSeparator) : "";
-  const rawPath = secondSeparator >= 0
-    ? rest.slice(secondSeparator + 1)
-    : firstSeparator >= 0
-      ? rest.slice(firstSeparator + 1)
-      : rest;
-  return {
-    scope,
-    path: decodeURIComponent(rawPath),
-    worktreeId: rawWorktree ? decodeURIComponent(rawWorktree) : undefined,
-    linuxServerId: rawLinuxServer ? decodeURIComponent(rawLinuxServer) : undefined
-  };
-}
 
 type StartRunDraft = {
   prompt: string;
@@ -3451,7 +3448,7 @@ function agentFileLoadRequestFromTab(tab: EditorTab, activate: boolean): AgentFi
     return undefined;
   }
   const file = agentFileInfo(tab.path);
-  const workspaceId = file.scope === "WORKSPACE" ? selectedAgentConfigWorkspaceId.value : undefined;
+  const workspaceId = file.scope === "WORKSPACE" ? file.workspaceId : undefined;
   if (file.scope === "WORKSPACE" && !workspaceId) {
     return undefined;
   }
@@ -3482,7 +3479,13 @@ async function loadAgentFile(request: AgentFileLoadRequest) {
   if (!agentFileLoadContextIsCurrent(request)) {
     return;
   }
-  const tabPath = agentTabPath(request.scope, request.path, request.worktreeId, request.linuxServerId);
+  const tabPath = agentTabPath(
+    request.scope,
+    request.path,
+    request.workspaceId,
+    request.worktreeId,
+    request.linuxServerId
+  );
   const existing = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
   if (editorTabIsDirty(existing)) {
     // Agent 配置与普通文件遵循同一优先级：重复打开 dirty tab 只激活，绝不后台重读。
@@ -3510,7 +3513,7 @@ async function loadAgentFile(request: AgentFileLoadRequest) {
     centerMode.value = "editor";
     workbench.openTab({
       id: existing?.id
-        ?? `${request.scope.toLowerCase()}:agent:file:${request.worktreeId ?? "direct"}:${request.linuxServerId ?? "local"}:${request.path}`,
+        ?? `${request.scope.toLowerCase()}:agent:file:${request.workspaceId ?? "global"}:${request.worktreeId ?? "direct"}:${request.linuxServerId ?? "local"}:${request.path}`,
       path: tabPath,
       title: existing?.title ?? (request.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? request.path),
       content: existing?.content ?? "",
@@ -3854,12 +3857,30 @@ function renameWorkspaceTreeEntry(path: string, nextPath: string) {
   );
 
   const openTabs = [...workbench.tabs];
+  const targetPathsToReload: string[] = [];
   for (const tab of openTabs) {
     const renamedTabPath = renameWorkspacePath(tab.path, path, nextPath);
     if (renamedTabPath !== tab.path) {
+      // 旧路径响应在 tab 改名后无法再命中；先显式失效，避免它与目标路径读取竞争。
+      latestWorkspaceFileReadByPath.delete(tab.path);
+      const wasLoading = tab.loadState === "loading";
+      const canRestoreSnapshot = workbench.tabHasLoadedSnapshot(tab) || editorTabIsDirty(tab);
       const title = renamedTabPath.split(/[\\/]+/).filter(Boolean).at(-1) ?? renamedTabPath;
       workbench.renameTab(tab.path, renamedTabPath, title);
+      if (wasLoading && canRestoreSnapshot) {
+        workbench.updateTab(renamedTabPath, {
+          loadState: "loaded",
+          loadError: undefined,
+          hasLoadedSnapshot: true
+        });
+      } else if (wasLoading) {
+        targetPathsToReload.push(renamedTabPath);
+      }
     }
+  }
+  // 首次读取没有快照时，从服务端已完成移动/改名的新路径后台补读，不抢回用户焦点。
+  for (const targetPath of targetPathsToReload) {
+    void loadWorkspaceFile(targetPath, { activate: false });
   }
   const activePathAfterRename = workbench.activePath && renameWorkspacePath(workbench.activePath, path, nextPath);
   if (activePathAfterRename && activePathAfterRename !== workbench.activePath) {
@@ -3950,7 +3971,7 @@ async function handleDeleteEntry(path: string, type: "file" | "directory") {
       const normalizedTabPath = tab.path.replace(/\\/g, "/");
       if (normalizedTabPath === normalizedDeletedPath
           || (type === "directory" && normalizedTabPath.startsWith(`${normalizedDeletedPath}/`))) {
-        workbench.closeTab(`file:${tab.path}`);
+        workbench.closeTab(tab.path);
       }
     }
     void refreshWorkspaceGitDiff();
@@ -5175,10 +5196,10 @@ const saveDiffFileMutation = useMutation({
       if (agent.scope === "PUBLIC") {
         await api.writePublicAgentFile(agent.path, content, agent.worktreeId, agent.linuxServerId);
       } else {
-        if (!selectedWorkspace.value) {
-          throw new Error("未选择 Workspace");
+        if (!agent.workspaceId) {
+          throw new Error("Agent 文件缺少 Workspace 路由");
         }
-        await api.writeWorkspaceAgentFile(selectedWorkspace.value.workspaceId, agent.path, content, agent.worktreeId);
+        await api.writeWorkspaceAgentFile(agent.workspaceId, agent.path, content, agent.worktreeId);
       }
       return { path, content };
     }

@@ -1,5 +1,20 @@
 # Session Log
 
+### 2026-07-17 - 合并远程主干并补齐文件加载路由边界
+
+- Why:
+  - 用户要求把本地代码安全提交到远程，遇到冲突时同时保留远端工作区文件能力与本地 Agent/Mermaid 功能，禁止在合并中丢失行为。
+- What:
+  - 将 5 笔本地 Agent/普通文件加载与 Mermaid 提交重放到最新 `origin/main`，逐项合并远端文件复制、移动、上传、目录删除、弹框样式和 `spec/**` 禁推规则；验证期间其他会话新增的 3 笔 Mermaid 提交保持独立、未覆盖。
+  - 修复审查发现的 4 个重要边界：应用级 Agent tab 持久携带 feature workspace ID 并据此重试/保存；删除文件或目录正确关闭原始 path 的 tab；移动/改名时废弃旧路径读取并恢复快照或补读新路径；Agent 路由切换时把旧 loading 收敛为 loaded/error，返回原路由后可重试。
+  - 合并测试冲突时保留扩展后的 workspace WebSocket 操作覆盖，修正重复测试标题、文件树删除按钮引入的歧义选择器和 Mermaid 现代节点语法断言；新增 workspaceId、删除 tab、改名读取竞态与 Agent A→B→A 路由切换回归。
+- How:
+  - 只读复审确认重放前后功能补丁一致，并报告 0 个 Critical、4 个 Important；4 项均先以失败测试复现后完成最小修复。
+  - 前端 lint、typecheck、production build 均通过；Vitest 70 个文件共 1105 项通过、1 项跳过；冲突及审查相关 Playwright 在 Chromium/Mobile 共 44/44 通过；`git diff --check`、未合并索引和冲突标记检查通过。
+- Result:
+  - 本地主干同时保留远端工作区文件功能、本地加载竞态保护和 Mermaid 功能，应用级 Agent 不再可能从 feature workspace 读取后误写个人 workspace，删除/改名/路由切换也不会残留失效或永久 loading 的 tab。
+  - 不改变 HTTP API、文件 WebSocket wire、RunEvent、数据库、鉴权或环境配置；仅增加前端合成 tab 身份中的 workspace 路由信息，兼容旧 tab 解析但禁止旧 tab 回退到个人 workspace 写入。生产构建仍只有既有大 chunk 提示，无未完成代码事项。
+
 ### 2026-07-17 - 优化工作区文件上传、新增与删除对话框样式
 
 - Why:

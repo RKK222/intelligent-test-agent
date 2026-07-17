@@ -53,6 +53,7 @@ test("Agent files open through the parent loader for public and workspace scopes
     workspaceId?: string;
     worktreeId?: string;
     attempt?: number;
+    content?: string;
   }> = [];
   await mockBackendApi(page, {
     ...agentWorkspaceSetup(),
@@ -60,6 +61,9 @@ test("Agent files open through the parent loader for public and workspace scopes
     agentFileContents: {
       "PUBLIC:agents/public-agent.md": "# public Agent content\n",
       "WORKSPACE:agents/workspace-agent.md": "# workspace Agent content\n"
+    },
+    agentFileReadDelays: {
+      "PUBLIC:agents/public-agent.md": [500]
     }
   });
 
@@ -96,6 +100,18 @@ test("Agent files open through the parent loader for public and workspace scopes
       attempt: 1
     }
   ]);
+
+  await page.getByRole("textbox", { name: "Editor content" }).focus();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("# workspace Agent updated");
+  await page.locator(".ta-workbench-footer-save").click();
+  await expect.poll(() => agentFileFrames.find((frame) => frame.op === "agent-config.write")).toMatchObject({
+    op: "agent-config.write",
+    scope: "WORKSPACE",
+    path: "agents/workspace-agent.md",
+    workspaceId: "wrk_feature_agent",
+    worktreeId: undefined
+  });
 });
 
 test("Agent loading distinguishes empty files, retries failures, and reuses loaded tab cache", async ({ page }) => {
@@ -134,6 +150,10 @@ test("Agent loading distinguishes empty files, retries failures, and reuses load
   await expect(page.locator(".monaco-editor")).toContainText("and remains editable");
   await page.locator(".ta-workbench-footer-save").click();
   await expect(page.locator(".ta-workbench-footer-save")).toHaveCount(0);
+  const savedMessage = page.getByRole("alert").filter({ hasText: "文件已保存" });
+  await expect(savedMessage).toBeVisible();
+  await savedMessage.locator(".el-message__closeBtn").click();
+  await expect(savedMessage).toBeHidden();
 
   const retryReads = () => agentFileFrames.filter((frame) => (
     frame.op === "agent-config.read" && frame.path === "agents/retry-agent.md"
@@ -324,6 +344,51 @@ test("switching application context discards a loading Agent response", async ({
   await expect(page.getByText("stale Agent context response")).toHaveCount(0);
 });
 
+test("switching public Agent routes settles an old load and allows retry after returning", async ({ page }) => {
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    authRoles: ["SUPER_ADMIN"],
+    publicAgentRepositories: [
+      publicAgentRepository("server-a", "backend-a"),
+      publicAgentRepository("server-b", "backend-b")
+    ],
+    publicAgentWorktreesByServer: {
+      "server-a": [],
+      "server-b": []
+    },
+    agentFileContents: {
+      "PUBLIC:public-route.md": "# fallback public route"
+    },
+    agentFileReadDelays: {
+      "PUBLIC:public-route.md": [500, 0]
+    },
+    agentFileReadResponses: {
+      "PUBLIC:public-route.md": ["# stale server A response", "# fresh server A response"]
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "public-route.md", exact: true }).click();
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loading");
+  // 折叠目录可让路由切换只验证 tab 失效/重试，不等待新服务器的目录重载。
+  await page.getByRole("button", { name: /公共级/ }).click();
+
+  await page.getByRole("button", { name: "更多操作" }).hover();
+  await page.getByRole("button", { name: "切换公共 worktree" }).click();
+  await page.getByRole("dialog", { name: "切换公共 worktree" }).getByLabel("服务器").selectOption("server-b");
+  await page.getByRole("dialog", { name: "切换公共 worktree" }).getByRole("button", { name: "确定" }).click();
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "error");
+
+  await page.getByRole("button", { name: "更多操作" }).hover();
+  await page.getByRole("button", { name: "切换公共 worktree" }).click();
+  await page.getByRole("dialog", { name: "切换公共 worktree" }).getByLabel("服务器").selectOption("server-a");
+  await page.getByRole("dialog", { name: "切换公共 worktree" }).getByRole("button", { name: "确定" }).click();
+  await page.getByRole("tab").filter({ hasText: "public-route.md" }).click();
+  await expect(page.locator(".monaco-editor")).toContainText("fresh server A response", { timeout: 10_000 });
+  await page.waitForTimeout(550);
+  await expect(page.locator(".monaco-editor")).not.toContainText("stale server A response");
+});
+
 test("workspace file loading distinguishes an empty file and supports retry after an initial failure", async ({ page }) => {
   const fileReadRequests: Array<{ workspaceId: string; path: string; attempt: number }> = [];
   await mockBackendApi(page, {
@@ -347,11 +412,11 @@ test("workspace file loading distinguishes an empty file and supports retry afte
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.getByRole("button", { name: /docs/ }).click();
-  await page.getByRole("button", { name: /empty.md/ }).click();
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "empty.md", exact: true }).click();
   await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loaded");
 
-  await page.getByRole("button", { name: /retry.md/ }).click();
+  await page.getByRole("button", { name: "retry.md", exact: true }).click();
   await expect(page.getByText("读取文件失败", { exact: true })).toBeVisible();
   await page.getByRole("tab").filter({ hasText: "empty.md" }).click();
   await page.getByRole("tab").filter({ hasText: "retry.md" }).click();
@@ -411,9 +476,9 @@ test("initial file loading is not editable and applies the response readonly sta
   await page.getByRole("button", { name: "消息列表" }).click();
   await page.getByRole("button", { name: /只读历史会话/ }).click();
   await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /docs/ })).toBeVisible();
-  await page.getByRole("button", { name: /docs/ }).click();
-  await page.getByRole("button", { name: /initial-readonly.md/ }).click();
+  await expect(page.getByRole("button", { name: "docs", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "initial-readonly.md", exact: true }).click();
   await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loading");
   await expect(page.locator(".monaco-editor")).toHaveCount(0);
   await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loaded");
@@ -456,11 +521,11 @@ test("late file responses update only their own tab and same-path stale response
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.getByRole("button", { name: /docs/ }).click();
-  await page.getByRole("button", { name: /a.md/ }).click();
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "a.md", exact: true }).click();
   await page.getByRole("tab").filter({ hasText: "a.md" }).click();
   expect(fileReadRequests.filter((item) => item.path === "docs/a.md")).toHaveLength(1);
-  await page.getByRole("button", { name: /b.md/ }).click();
+  await page.getByRole("button", { name: "b.md", exact: true }).click();
   await expect(page.locator(".monaco-editor")).toContainText("B response", { timeout: 10_000 });
   await page.waitForTimeout(300);
   await expect(page.locator(".monaco-editor")).toContainText("B response");
@@ -468,8 +533,8 @@ test("late file responses update only their own tab and same-path stale response
   await expect(page.locator(".monaco-editor")).toContainText("A response");
   expect(fileReadRequests.filter((item) => item.path === "docs/a.md")).toHaveLength(1);
 
-  await page.getByRole("button", { name: /same.md/ }).click();
-  await page.getByRole("button", { name: /same.md/ }).click();
+  await page.getByRole("button", { name: "same.md", exact: true }).click();
+  await page.getByRole("button", { name: "same.md", exact: true }).click();
   await expect(page.locator(".monaco-editor")).toContainText("newest same-path response", { timeout: 10_000 });
   await page.waitForTimeout(300);
   await expect(page.locator(".monaco-editor")).not.toContainText("stale same-path response");
@@ -497,8 +562,8 @@ test("dirty tabs are never reread or overwritten while a read is pending", async
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.getByRole("button", { name: /docs/ }).click();
-  const dirtyRow = page.getByRole("button", { name: /dirty.md/ });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  const dirtyRow = page.getByRole("button", { name: "dirty.md", exact: true });
   await dirtyRow.click();
   await expect(page.locator(".monaco-editor")).toContainText("initial disk content", { timeout: 10_000 });
 
@@ -529,8 +594,8 @@ test("a stale read cannot overwrite content edited and saved during refresh", as
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.getByRole("button", { name: /docs/ }).click();
-  const row = page.getByRole("button", { name: /save-during-refresh.md/ });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  const row = page.getByRole("button", { name: "save-during-refresh.md", exact: true });
   await row.click();
   await expect(page.locator(".monaco-editor")).toContainText("base disk content", { timeout: 10_000 });
 
@@ -568,8 +633,8 @@ test("overlapping refresh failure preserves the previously loaded cache", async 
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.getByRole("button", { name: /docs/ }).click();
-  const row = page.getByRole("button", { name: /overlap.md/ });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  const row = page.getByRole("button", { name: "overlap.md", exact: true });
   await row.click();
   await expect(page.locator(".monaco-editor")).toContainText("stable cached content", { timeout: 10_000 });
 
@@ -601,8 +666,8 @@ test("closing a loading file tab discards its late response", async ({ page }) =
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.getByRole("button", { name: /docs/ }).click();
-  await page.getByRole("button", { name: /closing.md/ }).click();
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "closing.md", exact: true }).click();
   const tab = page.getByRole("tab").filter({ hasText: "closing.md" });
   await tab.getByRole("button", { name: "关闭标签" }).click();
   await page.waitForTimeout(300);
@@ -676,8 +741,8 @@ test("switching workspace discards a loading file response from the previous wor
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.getByRole("button", { name: /docs/ }).click();
-  await page.getByRole("button", { name: /switching.md/ }).click();
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "switching.md", exact: true }).click();
   await page.getByRole("button", { name: "F-GCMS" }).click();
   await page.getByRole("option", { name: /F-COSS/ }).click();
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
@@ -745,10 +810,10 @@ test("an old refresh loop stops before reading the next file in a new workspace"
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.getByRole("button", { name: /docs/ }).click();
-  await page.getByRole("button", { name: /refresh-a.md/ }).click();
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: /^refresh-a\.md(?:\s|$)/ }).click();
   await expect(page.locator(".monaco-editor")).toContainText("refresh A", { timeout: 10_000 });
-  await page.getByRole("button", { name: /shared.md/ }).click();
+  await page.getByRole("button", { name: /^shared\.md(?:\s|$)/ }).click();
   await expect(page.locator(".monaco-editor")).toContainText("shared content");
 
   await page.getByRole("button", { name: "变更" }).click();
@@ -763,8 +828,8 @@ test("an old refresh loop stops before reading the next file in a new workspace"
   await page.getByRole("option", { name: /F-COSS/ }).click();
   await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
   await page.getByRole("tablist", { name: "工作区面板" }).getByRole("button", { name: "文件树" }).click();
-  await page.getByRole("button", { name: /docs/ }).click();
-  await page.getByRole("button", { name: /shared.md/ }).click();
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: /^shared\.md(?:\s|$)/ }).click();
   await expect.poll(() => fileReadRequests.filter((item) => (
     item.workspaceId === "wrk_coss_personal" && item.path === "docs/shared.md"
   )).length).toBeGreaterThanOrEqual(1);
@@ -773,6 +838,46 @@ test("an old refresh loop stops before reading the next file in a new workspace"
   expect(fileReadRequests.filter((item) => (
     item.workspaceId === "wrk_coss_personal" && item.path === "docs/shared.md"
   ))).toHaveLength(1);
+});
+
+test("renaming while the source file is loading reloads the target without stale overwrite", async ({ page }) => {
+  const fileReadRequests: Array<{ workspaceId: string; path: string; attempt: number }> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileReadRequests,
+    fileContents: {
+      "docs/race.md": "stable renamed content"
+    },
+    fileReadDelays: {
+      "docs/race.md": [0, 0, 900]
+    },
+    fileReadNotFoundAttempts: {
+      "docs/race.md": [3]
+    },
+    workspaceMutationDelays: {
+      "workspace.rename": 600
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  const sourceRow = page.getByRole("button", { name: "race.md", exact: true });
+  await sourceRow.dblclick();
+  const renameInput = page.getByRole("textbox", { name: "重命名工作区条目" });
+  await expect.poll(() => fileReadRequests.filter((request) => request.path === "docs/race.md")).toHaveLength(2);
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loaded");
+  await renameInput.fill("renamed.md");
+  await renameInput.press("Enter");
+  await sourceRow.dispatchEvent("click");
+  await expect.poll(() => fileReadRequests.filter((request) => request.path === "docs/race.md")).toHaveLength(3);
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loading");
+
+  const renamedTab = page.getByRole("tab").filter({ hasText: "renamed.md" });
+  await expect(renamedTab).toHaveCount(1);
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loaded", { timeout: 10_000 });
+  await expect(page.locator(".monaco-editor")).toContainText("stable renamed content");
+  await page.waitForTimeout(950);
+  await expect(page.locator(".monaco-editor")).toContainText("stable renamed content");
 });
 
 test("application workspace mutation entries follow member and super administrator permissions", async ({ page, context }) => {
@@ -841,6 +946,42 @@ test("application workspace mutation entries follow member and super administrat
   await expect(superPage.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" })).toBeVisible();
   await expect(superPage.getByRole("button", { name: "创建应用 worktree" })).toBeVisible();
   await superPage.close();
+});
+
+test("deleting an open workspace file or directory closes every affected tab", async ({ page }) => {
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileContents: {
+      "files/delete-me.md": "delete this file",
+      "docs/nested.md": "delete this directory"
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "files", exact: true }).click();
+  const deleteMeRow = page.getByRole("button", { name: "delete-me.md", exact: true });
+  await deleteMeRow.click();
+  const deleteMeTab = page.getByRole("tab").filter({ hasText: "delete-me.md" });
+  await expect(deleteMeTab).toHaveCount(1);
+  await deleteMeRow.hover();
+  await page.getByRole("button", { name: "删除 delete-me.md" }).click();
+  await page.getByRole("dialog", { name: "删除文件" }).getByRole("button", { name: "确认删除" }).click();
+  await expect(deleteMeTab).toHaveCount(0);
+
+  const deletedFileMessage = page.getByRole("alert").filter({ hasText: "文件已删除" });
+  await expect(deletedFileMessage).toBeVisible();
+  await deletedFileMessage.locator(".el-message__closeBtn").click();
+  await expect(deletedFileMessage).toBeHidden();
+
+  const docsRow = page.getByRole("button", { name: "docs", exact: true });
+  await docsRow.click();
+  await page.getByRole("button", { name: "nested.md", exact: true }).click();
+  const nestedTab = page.getByRole("tab").filter({ hasText: "nested.md" });
+  await expect(nestedTab).toHaveCount(1);
+  await docsRow.hover();
+  await page.getByRole("button", { name: "删除 docs" }).click();
+  await page.getByRole("dialog", { name: "删除文件夹" }).getByRole("button", { name: "确认删除" }).click();
+  await expect(nestedTab).toHaveCount(0);
 });
 
 test("workbench home opens the embedded user manual", async ({ page }) => {
@@ -1105,7 +1246,7 @@ Note over U,S: 保留说明
     workspaceId: "wrk_personal_default",
     path: "docs/mermaid.md"
   });
-  expect(fileWriteRequests[0]?.content).toContain('A["准备"]');
+  expect(fileWriteRequests[0]?.content).toContain('A@{ shape: rect, label: "准备" }');
   expect(fileWriteRequests[0]?.content).toContain("U->>S: 登录请求");
   expect(fileWriteRequests[0]?.content).toContain("classDef important fill:red");
   expect(fileWriteRequests[0]?.content).toContain("Note over U,S: 保留说明");
@@ -4820,7 +4961,9 @@ async function mockBackendApi(
     fileReadDelays?: Record<string, number[]>;
     fileReadFailuresBeforeSuccess?: Record<string, number>;
     fileReadFailureAttempts?: Record<string, number[]>;
+    fileReadNotFoundAttempts?: Record<string, number[]>;
     fileReadResponses?: Record<string, string[]>;
+    workspaceMutationDelays?: Record<string, number>;
     fileWriteRequests?: Array<{ workspaceId: string; path: string; content: string }>;
     agentFileFrames?: Array<{
       op: string;
@@ -4873,6 +5016,8 @@ async function mockBackendApi(
     workspaceTemplates?: Record<string, Array<Record<string, unknown>>>;
     /** 自定义 /applications/{appId}/workspace-templates/{tid}/versions 返回；key 用 `{appId}:{templateId}`。 */
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
+    publicAgentRepositories?: Array<Record<string, unknown>>;
+    publicAgentWorktreesByServer?: Record<string, Array<Record<string, unknown>>>;
     defaultPersonalRequests?: string[];
     processStatus?: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE";
     processStatusRequests?: string[];
@@ -4953,7 +5098,9 @@ async function mockBackendApi(
     fileReadDelays,
     fileReadFailuresBeforeSuccess,
     fileReadFailureAttempts,
+    fileReadNotFoundAttempts,
     fileReadResponses,
+    workspaceMutationDelays,
     agentFileContents,
     agentFileReadDelays,
     agentFileReadFailureAttempts,
@@ -5107,14 +5254,16 @@ async function mockBackendApi(
           const delay = (fileReadDelays as Record<string, number[]>)[path]?.[attempt - 1] ?? 0;
           const failures = (fileReadFailuresBeforeSuccess as Record<string, number>)[path] ?? 0;
           const failureAttempts = (fileReadFailureAttempts as Record<string, number[]>)[path] ?? [];
-          if (attempt <= failures || failureAttempts.includes(attempt)) {
+          const notFoundAttempts = (fileReadNotFoundAttempts as Record<string, number[]>)[path] ?? [];
+          if (attempt <= failures || failureAttempts.includes(attempt) || notFoundAttempts.includes(attempt)) {
+            const notFound = notFoundAttempts.includes(attempt);
             window.setTimeout(() => {
               this.onmessage?.(new MessageEvent("message", {
                 data: JSON.stringify({
                   id: request.id,
                   type: "error",
-                  code: "FILE_READ_FAILED",
-                  message: "mock file read failed",
+                  code: notFound ? "NOT_FOUND" : "FILE_READ_FAILED",
+                  message: notFound ? "mock file not found" : "mock file read failed",
                   traceId: "trace_e2e"
                 })
               }));
@@ -5141,6 +5290,22 @@ async function mockBackendApi(
           const content = params.content ?? "";
           recordFileWrite(params.workspaceId ?? "", path, content);
           (fileContents as Record<string, string>)[path] = content;
+        } else if (request.op === "workspace.rename") {
+          const path = params.path ?? "";
+          const name = params.name ?? "";
+          const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+          const parent = separatorIndex >= 0 ? path.slice(0, separatorIndex) : "";
+          const separator = path.includes("\\") ? "\\" : "/";
+          const nextPath = parent ? `${parent}${separator}${name}` : name;
+          window.setTimeout(() => {
+            const contents = fileContents as Record<string, string>;
+            contents[nextPath] = contents[path] ?? "";
+            delete contents[path];
+            this.onmessage?.(new MessageEvent("message", {
+              data: JSON.stringify({ id: request.id, type: "result", data: null, traceId: "trace_e2e" })
+            }));
+          }, (workspaceMutationDelays as Record<string, number>)[request.op] ?? 0);
+          return;
         } else if (request.op === "agent-config.list") {
           const scope = params.scope ?? "PUBLIC";
           const path = params.path ?? "";
@@ -5246,7 +5411,9 @@ async function mockBackendApi(
     fileReadDelays: capture.fileReadDelays ?? {},
     fileReadFailuresBeforeSuccess: capture.fileReadFailuresBeforeSuccess ?? {},
     fileReadFailureAttempts: capture.fileReadFailureAttempts ?? {},
+    fileReadNotFoundAttempts: capture.fileReadNotFoundAttempts ?? {},
     fileReadResponses: capture.fileReadResponses ?? {},
+    workspaceMutationDelays: capture.workspaceMutationDelays ?? {},
     agentFileContents: capture.agentFileContents ?? {},
     agentFileReadDelays: capture.agentFileReadDelays ?? {},
     agentFileReadFailureAttempts: capture.agentFileReadFailureAttempts ?? {},
@@ -5368,7 +5535,7 @@ async function mockBackendApi(
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/repositories") {
-        await route.fulfill(json([{
+        await route.fulfill(json(capture.publicAgentRepositories ?? [{
           linuxServerId: "10.8.0.12",
           serverName: "dev-backend",
           gitRootPath: "/mock/public-config",
@@ -5381,6 +5548,11 @@ async function mockBackendApi(
           commitHash: "public_commit",
           message: null
         }]));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/worktrees") {
+        const linuxServerId = url.searchParams.get("linuxServerId") ?? "";
+        await route.fulfill(json(capture.publicAgentWorktreesByServer?.[linuxServerId] ?? []));
         return;
       }
       if (method === "POST" && url.pathname === "/api/internal/platform/workspace-management/agent-config/file-ws-route") {
@@ -6010,6 +6182,22 @@ function agentWorkspaceSetup() {
         updatedAt: "2026-06-19T00:00:00Z"
       }]
     }
+  };
+}
+
+function publicAgentRepository(linuxServerId: string, serverName: string) {
+  return {
+    linuxServerId,
+    serverName,
+    gitRootPath: `/mock/${linuxServerId}/public-config`,
+    configDirPath: `/mock/${linuxServerId}/public-config/opencode`,
+    worktreeRootPath: `/mock/${linuxServerId}/public-worktrees`,
+    status: "READY",
+    initialized: true,
+    initializationAllowed: true,
+    currentBranch: "main",
+    commitHash: `${linuxServerId}_commit`,
+    message: null
   };
 }
 
