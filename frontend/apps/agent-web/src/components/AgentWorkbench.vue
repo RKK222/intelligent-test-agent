@@ -2949,6 +2949,11 @@ function handleLoadVersions(templateId: string) {
 function refreshCurrentWorkspacePanels() {
   if (!selectedWorkspace.value) return;
   void loadDirectory("", undefined, true);
+  for (const path of Object.keys(entriesByDirectory.value)) {
+    if (path !== "") {
+      void loadDirectory(path, undefined, true);
+    }
+  }
   void refreshWorkspaceGitDiff();
 }
 
