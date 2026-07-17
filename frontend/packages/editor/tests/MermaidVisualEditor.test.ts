@@ -377,7 +377,7 @@ describe("MermaidFlowNode", () => {
       });
       // 鼠标悬浮节点才显示快捷箭头（与是否选中无关）
       await fireEvent.mouseEnter(container.querySelector("[data-mermaid-node-id]")!);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(300);
       await Promise.resolve();
 
       // 矩形四条边都没有正好位于 50% 的端口，旧实现会退化到左上角 target-0；
@@ -420,7 +420,7 @@ describe("MermaidFlowNode", () => {
       });
       const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
       await fireEvent.mouseEnter(root);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(300);
       await Promise.resolve();
 
       await fireEvent.mouseEnter(container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!);
@@ -445,7 +445,7 @@ describe("MermaidFlowNode", () => {
         props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
       });
       await fireEvent.mouseEnter(container.querySelector("[data-mermaid-node-id]")!);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(300);
       await Promise.resolve();
 
       await fireEvent.mouseEnter(container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!);
@@ -471,7 +471,7 @@ describe("MermaidFlowNode", () => {
       });
       const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
       await fireEvent.mouseEnter(root);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(300);
       await Promise.resolve();
 
       const cases = [
@@ -517,7 +517,7 @@ describe("MermaidFlowNode", () => {
       });
       const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
       await fireEvent.mouseEnter(root);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(300);
       await Promise.resolve();
 
       const arrow = container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!;
@@ -1007,11 +1007,11 @@ describe("MermaidVisualEditor", () => {
       // 未悬浮、也未选中：不显示箭头
       expect(arrowsOf("A")).toBe(0);
 
-      // 悬浮 A：四周出现 4 个半透明快捷箭头（防误触，延迟 500ms 显示）
+      // 悬浮 A：四周出现 4 个半透明快捷箭头（防误触，延迟 300ms 显示）
       await fireEvent.mouseEnter(node("A"));
       expect(arrowsOf("A")).toBe(0);
 
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(300);
       await Promise.resolve();
       expect(arrowsOf("A")).toBe(4);
 
@@ -1081,7 +1081,7 @@ describe("MermaidVisualEditor", () => {
 
       // 悬浮 B → B 的快捷箭头显示
       await fireEvent.mouseEnter(container.querySelector<HTMLElement>('[data-mermaid-node-id="B"]')!);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(300);
       await Promise.resolve();
 
       await fireEvent.mouseEnter(container.querySelector<HTMLElement>(

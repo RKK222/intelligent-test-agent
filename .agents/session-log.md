@@ -141,15 +141,15 @@
 - Why:
   - 减少鼠标滑过节点时的误触，优化 Mermaid 可视化编辑器中快捷连接箭头的出现体验，提升用户编辑交互的连贯性。
 - What:
-  - 在 `MermaidFlowNode.vue` 中为鼠标移入节点的操作（`onNodeMouseEnter`）增加 500ms（0.5s）延迟显示的定时器（`quickMenuOpenTimer`），仅在鼠标停留超过该时间时才显示四向快捷建连大箭头。
+  - 在 `MermaidFlowNode.vue` 中为鼠标移入节点的操作（`onNodeMouseEnter`）增加 300ms（0.3s）延迟显示的定时器（`quickMenuOpenTimer`），仅在鼠标停留超过该时间时才显示四向快捷建连大箭头。
   - 在鼠标移出节点（`onNodeMouseLeave`）、聚焦（`onNodeFocusIn` / `keepQuickConnectorsOpen`）及组件销毁（`onBeforeUnmount`）等时机，安全地清理并重置该定时器，防止逻辑泄漏与重复触发。
-  - 优化对应的单元测试文件 `MermaidVisualEditor.test.ts`，为涉及悬浮显示快捷箭头的测试用例引入 Vitest 虚拟时钟（`vi.useFakeTimers()` 和 `vi.advanceTimersByTime(500)`），确保测试用例与新增的悬浮延迟行为完美契合，且测试能够全部通过。
+  - 优化对应的单元测试文件 `MermaidVisualEditor.test.ts`，为涉及悬浮显示快捷箭头的测试用例引入 Vitest 虚拟时钟（`vi.useFakeTimers()` 和 `vi.advanceTimersByTime(300)`），确保测试用例与新增的悬浮延迟行为完美契合，且测试能够全部通过。
 - How:
-  - 在 `MermaidFlowNode.vue` 的 `<script setup>` 中引入 `quickMenuOpenTimer` 及其对应的清理、设置和触发逻辑。
-  - 修改 `MermaidVisualEditor.test.ts` 中涉及悬浮的 6 个测试用例，在其 `mouseEnter` 触发后前进 500ms 时钟，并在最后统一调用 `vi.useRealTimers()` 还原。
+  - 在 `MermaidFlowNode.vue` 的 `<script setup>` 中引入 `quickMenuOpenTimer` 及其对应的清理、设置 and 触发逻辑。
+  - 修改 `MermaidVisualEditor.test.ts` 中涉及悬浮的 6 个测试用例，在其 `mouseEnter` 触发后前进 300ms 时钟，并在最后统一调用 `vi.useRealTimers()` 还原。
   - 运行全量 `vitest run packages/editor/tests/MermaidVisualEditor.test.ts` 进行了完美验证，并完成前端的代码格式化和类型检查。
 - Result:
-  - Mermaid 可视化编辑器完美实现了 0.5s 悬浮防误触延时显示快捷连接箭头的逻辑，鼠标短时间划过节点时不会触发箭头出现；全量前端测试 100% 通过（85/85 passed），代码类型和语法校验无任何异常。
+  - Mermaid 可视化编辑器完美实现了 0.3s 悬浮防误触延时显示快捷连接箭头的逻辑，鼠标短时间划过节点时不会触发箭头出现；全量前端测试 100% 通过（85/85 passed），代码类型和语法校验无任何异常。
 
 ### 2026-07-16 - 修复文件打开偶发空白与读取竞态
 

@@ -110,13 +110,13 @@ function onNodeMouseEnter() {
     return;
   }
   clearQuickMenuOpenTimer();
-  // 鼠标移入时，延迟 0.5 秒再显示四向快捷箭头，防止误触
+  // 鼠标移入时，延迟 0.3 秒再显示四向快捷箭头，防止误触
   quickMenuOpenTimer = setTimeout(() => {
     if (nodeHovered.value || nodeFocused.value) {
       hovered.value = true;
     }
     quickMenuOpenTimer = undefined;
-  }, 500);
+  }, 300);
 }
 
 function onNodeMouseLeave() {
