@@ -175,6 +175,42 @@ class WorkspaceFileWebSocketHandlerTest {
                 "new.md");
     }
 
+    @Test
+    void uploadsCopiesAndMovesWorkspaceFilesThroughWebSocketTicket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(workspaceTicket("wrk_1234567890abcdef"));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                agentConfigService,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of(
+                        """
+                        {"id":"req_upload","op":"workspace.upload","params":{"workspaceId":"wrk_1234567890abcdef","path":"assets/icon.bin","contentBase64":"AAEC/w=="}}
+                        """,
+                        """
+                        {"id":"req_copy","op":"workspace.copy","params":{"workspaceId":"wrk_1234567890abcdef","sourcePath":"docs/a.md","targetPath":"backup/a.md"}}
+                        """,
+                        """
+                        {"id":"req_move","op":"workspace.move","params":{"workspaceId":"wrk_1234567890abcdef","sourcePath":"docs/a.md","targetPath":"archive/a.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(3).allSatisfy(message -> assertThat(message).contains("\"type\":\"result\""));
+        var workspaceId = new com.enterprise.testagent.domain.workspace.WorkspaceId("wrk_1234567890abcdef");
+        verify(workspaceService).uploadFile(workspaceId, "assets/icon.bin", "AAEC/w==");
+        verify(workspaceService).copyFile(workspaceId, "docs/a.md", "backup/a.md");
+        verify(workspaceService).moveFile(workspaceId, "docs/a.md", "archive/a.md");
+    }
+
     private static WorkspaceFileWebSocketHandler handler(
             WorkspaceFileSocketTicketService ticketService,
             AgentConfigApplicationService agentConfigService) {

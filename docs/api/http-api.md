@@ -968,7 +968,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 | `GET` | `/api/internal/platform/workspace-management/backend-servers` | 查询可用于服务器工作空间选择器的后端服务器。 |
 | `POST` | `/api/internal/platform/workspace-management/file-ws/tickets` | 在目标后端创建文件 WebSocket 一次性 ticket。 |
 
-旧 `/api/workspaces/**`、旧 HTTP 文件接口以及内部平台 HTTP 文件 `workspaces/{workspaceId}/files*` 已作废，返回 `410 API_GONE`。工作区文件列表、读取、写入、状态和删除必须走 `file-ws-route`、目标后端 ticket 和文件 WebSocket RPC。
+旧 `/api/workspaces/**`、旧 HTTP 文件接口以及内部平台 HTTP 文件 `workspaces/{workspaceId}/files*` 已作废，返回 `410 API_GONE`。工作区文件列表、读取、写入、上传、复制、移动、状态和删除必须走 `file-ws-route`、目标后端 ticket 和文件 WebSocket RPC。
 
 普通前端不再通过 HTTP 传入物理目录注册 Workspace。应用版本工作区和个人工作区由后端根据应用、模板、版本、个人工作区等 id 读取通用参数并派生物理目录；仅超级管理员服务器工作空间选择器可通过目标后端文件 WebSocket ticket 在目标服务器上创建运行态 Workspace。
 
@@ -1071,7 +1071,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 服务器目录选择器只通过短期 ticket 建立的文件 WebSocket 使用；缺失、不可访问或非目录返回 `VALIDATION_ERROR`。创建服务器工作空间仍要求 `SUPER_ADMIN`，且目标服务器必须与当前 agent 服务器一致。
 
-文件 WebSocket RPC 的 `path` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层、不递归，默认最多 1000 项；`workspace.search` 按工作区相对路径递归匹配，空 query 可返回受深度、数量和超时保护的文件目录，默认最多 200 项、20 层、5 秒，并跳过 `.git`、`node_modules` 等黑名单目录。文件读取和写入只支持 UTF-8 文本，默认上限 1MB，可通过 `test-agent.files.*` 配置。
+文件 WebSocket RPC 的 `path` / `sourcePath` / `targetPath` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层、不递归，默认最多 1000 项；`workspace.search` 按工作区相对路径递归匹配，空 query 可返回受深度、数量和超时保护的文件目录，默认最多 200 项、20 层、5 秒，并跳过 `.git`、`node_modules` 等黑名单目录。文件读取和文本写入只支持 UTF-8，Base64 二进制上传允许新建任意普通文件；读取、写入和上传默认单文件上限 1MB，可通过 `test-agent.files.*` 配置，WebSocket 单帧上限会按该值的 Base64 膨胀量加 RPC envelope 余量同步设置。`workspace.upload`、`workspace.copy`、`workspace.move` 不覆盖已有目标，其中复制和移动只处理普通文件；源路径与目标路径分别执行写权限及 `.opencode/agents/**`、`.opencode/skills/**` 保护校验。
 
 ### 应用版本工作区 API
 

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.nio.file.Files;
+import java.util.Base64;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -69,6 +70,41 @@ class WorkspaceFileServiceTest {
 
         assertThat(Files.readString(root.resolve("empty.txt"))).isEmpty();
         assertThat(service.readContent(root.toString(), "empty.txt").size()).isZero();
+    }
+
+    @Test
+    void serviceUploadsBinaryContentWithoutOverwritingExistingFiles() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(8, 1000);
+        byte[] content = new byte[] {0, 1, 2, (byte) 255};
+        Files.createDirectories(root.resolve("assets"));
+
+        service.uploadFile(root.toString(), "assets/icon.bin", Base64.getEncoder().encodeToString(content));
+
+        assertThat(Files.readAllBytes(root.resolve("assets/icon.bin"))).containsExactly(content);
+        assertThatThrownBy(() -> service.uploadFile(root.toString(), "assets/icon.bin", "AA=="))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        assertThatThrownBy(() -> service.uploadFile(root.toString(), "assets/bad.bin", "***"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void serviceCopiesAndMovesRegularFilesAcrossWorkspaceDirectories() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("src"));
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("src/example.txt"), "example");
+
+        service.copyFile(root.toString(), "src/example.txt", "docs/copied.txt");
+        service.moveFile(root.toString(), "src/example.txt", "docs/moved.txt");
+
+        assertThat(Files.readString(root.resolve("docs/copied.txt"))).isEqualTo("example");
+        assertThat(Files.readString(root.resolve("docs/moved.txt"))).isEqualTo("example");
+        assertThat(Files.exists(root.resolve("src/example.txt"))).isFalse();
+        assertThatThrownBy(() -> service.copyFile(root.toString(), "docs/copied.txt", "../outside.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }
 
     @Test

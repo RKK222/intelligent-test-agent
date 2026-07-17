@@ -3,6 +3,7 @@ import { defineComponent, h } from "vue";
 import { fireEvent, render } from "@testing-library/vue";
 
 const editorLayout = vi.fn();
+const editorCreate = vi.fn();
 
 // 屏蔽 Monaco 真实加载（jsdom 无法运行 Monaco），提供一个最小 editor 工厂桩
 vi.mock("../src/monaco-env", () => {
@@ -35,7 +36,10 @@ vi.mock("../src/monaco-env", () => {
     editor: {
       getModel: () => null,
       createModel: () => fakeModel,
-      create: () => fakeEditor
+      create: (_element: HTMLElement, options: unknown) => {
+        editorCreate(options);
+        return fakeEditor;
+      }
     }
   };
   return {
@@ -68,6 +72,16 @@ import CodeEditor from "../src/CodeEditor.vue";
 const baseProps = { content: "# hi", dirty: false, readonly: false, saving: false };
 
 describe("CodeEditor Markdown 预览受控", () => {
+  it("中间源码编辑区默认启用自动换行", async () => {
+    editorCreate.mockClear();
+    render(CodeEditor, {
+      props: { ...baseProps, path: "logs/output.log" }
+    });
+
+    await vi.waitFor(() => expect(editorCreate).toHaveBeenCalled());
+    expect(editorCreate.mock.calls[0]?.[0]).toMatchObject({ wordWrap: "on" });
+  });
+
   it("无文件空态允许 app 层通过 slot 注入主页操作", async () => {
     const openManual = vi.fn();
     const { getByRole } = render(CodeEditor, {

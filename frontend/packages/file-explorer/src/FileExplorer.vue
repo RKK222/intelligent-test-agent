@@ -14,6 +14,8 @@ export type FileExplorerProps = {
   hideTabbar?: boolean;
   /** 当前工作区是否允许文件新增、删除和重命名；只读时仍允许浏览、搜索和加入对话。 */
   canWrite?: boolean;
+  /** 当前个人 worktree 是否存在可撤销的复制、移动或上传操作。 */
+  canUndo?: boolean;
   activeTab?: ExplorerTab;
   // 搜索相关 props（由应用层传入）
   searchResults?: FileSearchResult[];
@@ -25,13 +27,14 @@ export type ExplorerTab = "explorer" | "search" | "changes";
 </script>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { FolderTree, GitBranch, Plus, RefreshCw, Search } from "lucide-vue-next";
 import { Input, cn } from "@test-agent/ui-kit";
 import { filterLoadedFiles } from "./filterLoadedFiles";
 import { getVsCodeFileIconClass } from "./fileIcons";
 import { highlightKeyword } from "./highlightKeyword";
 import DirectoryRows from "./DirectoryRows.vue";
+import type { WorkspaceClipboardEntry } from "./DirectoryRows.vue";
 import FileIcon from "./FileIcon.vue";
 
 const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "Workspace", canWrite: true });
@@ -46,11 +49,21 @@ const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
   renameEntry: [path: string, name: string];
+  copyEntry: [sourcePath: string, targetDirectory: string];
+  moveEntry: [sourcePath: string, targetDirectory: string];
+  uploadFiles: [directory: string, files: File[]];
+  undoEntry: [];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
 
 const tab = ref<ExplorerTab>("explorer");
 const keyword = ref("");
+const clipboardEntry = ref<WorkspaceClipboardEntry>();
+const uploadInput = ref<HTMLInputElement | null>(null);
+const uploadDirectory = ref("");
+const rootDropActive = ref(false);
+const dragResetToken = ref(0);
+const directoryRowsRef = ref<InstanceType<typeof DirectoryRows> | null>(null);
 // 本地过滤结果（备用，当 searchResults prop 未提供时使用），统一映射为 FileSearchResult 形态
 const localSearchResults = computed<FileSearchResult[]>(() =>
   filterLoadedFiles(props.entriesByDirectory, keyword.value).map((entry) => ({
@@ -105,6 +118,77 @@ function getStatusLabel(status?: string): string {
 function fileIconClass(name: string, path: string) {
   return getVsCodeFileIconClass({ name, path, type: "file" });
 }
+
+function setClipboard(path: string, mode: "copy" | "move") {
+  clipboardEntry.value = { path, mode };
+}
+
+function pasteEntry(directory: string) {
+  const entry = clipboardEntry.value;
+  if (!entry || !props.canWrite) return;
+  if (entry.mode === "copy") {
+    emit("copyEntry", entry.path, directory);
+  } else {
+    emit("moveEntry", entry.path, directory);
+    clipboardEntry.value = undefined;
+  }
+}
+
+function requestUpload(directory: string) {
+  if (!props.canWrite) return;
+  uploadDirectory.value = directory;
+  uploadInput.value?.click();
+}
+
+function onUploadInput(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  if (files.length > 0) emit("uploadFiles", uploadDirectory.value, files);
+  input.value = "";
+}
+
+function onRootDragOver(event: DragEvent) {
+  if (!props.canWrite) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  rootDropActive.value = true;
+}
+
+function onRootDrop(event: DragEvent) {
+  if (!props.canWrite || !event.dataTransfer) return;
+  event.preventDefault();
+  const files = Array.from(event.dataTransfer.files ?? []);
+  rootDropActive.value = false;
+  if (files.length > 0) {
+    emit("uploadFiles", "", files);
+    return;
+  }
+  const sourcePath = event.dataTransfer.getData("application/x-test-agent-workspace-file");
+  if (sourcePath) emit("moveEntry", sourcePath, "");
+}
+
+function resetDragState() {
+  rootDropActive.value = false;
+  dragResetToken.value += 1;
+}
+
+function openRootActions() {
+  if (!props.canWrite) return;
+  directoryRowsRef.value?.openCreateDialog("");
+}
+
+onMounted(() => {
+  // drop 可能在递归子目录或树外结束，统一清理根节点与子目录的蓝色拖放高亮。
+  window.addEventListener("dragend", resetDragState, true);
+  window.addEventListener("drop", resetDragState, true);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("dragend", resetDragState, true);
+  window.removeEventListener("drop", resetDragState, true);
+});
+
+defineExpose({ openRootActions });
 </script>
 
 <template>
@@ -139,10 +223,26 @@ function fileIconClass(name: string, path: string) {
         <span v-if="changedFiles.length" class="ml-1 text-[10px]">{{ changedFiles.length }}</span>
       </button>
     </div>
-    <div v-if="computedTab === 'explorer'" class="ta-file-tree-scroll">
+    <div
+      v-if="computedTab === 'explorer'"
+      :class="['ta-file-tree-scroll', rootDropActive && 'is-root-drop-target']"
+      @dragover="onRootDragOver"
+      @dragleave.self="rootDropActive = false"
+      @drop="onRootDrop"
+    >
       <div v-if="!hideHeader" class="ta-file-tree-header">
         <span class="min-w-0 truncate" :title="workspaceName">{{ workspaceName }}</span>
         <div class="flex shrink-0 items-center gap-1">
+          <button
+            v-if="canWrite"
+            type="button"
+            class="ta-fe-icon-btn"
+            title="新建或上传到工作区根目录"
+            aria-label="新建或上传到工作区根目录"
+            @click="openRootActions"
+          >
+            <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </button>
           <button
             type="button"
             class="ta-fe-icon-btn"
@@ -155,6 +255,7 @@ function fileIconClass(name: string, path: string) {
         </div>
       </div>
       <DirectoryRows
+        ref="directoryRowsRef"
         directory=""
         :entries-by-directory="entriesByDirectory"
         :expanded-directories="expandedDirectories"
@@ -162,6 +263,9 @@ function fileIconClass(name: string, path: string) {
         :loading-path="loadingPath"
         :change-stats="changeStats"
         :can-write="canWrite"
+        :can-undo="canUndo"
+        :drag-reset-token="dragResetToken"
+        :clipboard-entry="clipboardEntry"
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"
@@ -169,7 +273,21 @@ function fileIconClass(name: string, path: string) {
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
         @rename-entry="(path, name) => emit('renameEntry', path, name)"
+        @set-clipboard="setClipboard"
+        @paste-entry="pasteEntry"
+        @undo-entry="emit('undoEntry')"
+        @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+        @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
+        @request-upload="requestUpload"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
+      />
+      <input
+        ref="uploadInput"
+        type="file"
+        class="sr-only"
+        multiple
+        aria-label="选择要上传到工作区的文件"
+        @change="onUploadInput"
       />
     </div>
     <div v-else-if="computedTab === 'search'" class="ta-file-tree-scroll">
@@ -226,6 +344,14 @@ function fileIconClass(name: string, path: string) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.ta-file-tree-scroll.is-root-drop-target {
+  outline: 1px solid var(--ta-accent, #2563eb);
+  outline-offset: -1px;
+  background: rgb(37 99 235 / 6%);
+}
+</style>
 
 <style scoped>
 .ta-fe-icon-btn {

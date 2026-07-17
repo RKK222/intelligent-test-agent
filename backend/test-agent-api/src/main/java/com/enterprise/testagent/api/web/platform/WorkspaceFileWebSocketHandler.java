@@ -118,6 +118,31 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     workspaceService.writeFile(workspaceId, path, text(params, "content"));
                     yield null;
                 }
+                case "workspace.upload" -> {
+                    WorkspaceId workspaceId = workspaceId(ticket, params);
+                    String path = requiredText(params, "path");
+                    requireWorkspaceWrite(ticket, workspaceId, path);
+                    workspaceService.uploadFile(workspaceId, path, text(params, "contentBase64"));
+                    yield null;
+                }
+                case "workspace.copy" -> {
+                    WorkspaceId workspaceId = workspaceId(ticket, params);
+                    String sourcePath = requiredText(params, "sourcePath");
+                    String targetPath = requiredText(params, "targetPath");
+                    requireWorkspaceWrite(ticket, workspaceId, sourcePath);
+                    requireWorkspaceWrite(ticket, workspaceId, targetPath);
+                    workspaceService.copyFile(workspaceId, sourcePath, targetPath);
+                    yield null;
+                }
+                case "workspace.move" -> {
+                    WorkspaceId workspaceId = workspaceId(ticket, params);
+                    String sourcePath = requiredText(params, "sourcePath");
+                    String targetPath = requiredText(params, "targetPath");
+                    requireWorkspaceWrite(ticket, workspaceId, sourcePath);
+                    requireWorkspaceWrite(ticket, workspaceId, targetPath);
+                    workspaceService.moveFile(workspaceId, sourcePath, targetPath);
+                    yield null;
+                }
                 case "workspace.rename" -> {
                     WorkspaceId workspaceId = workspaceId(ticket, params);
                     String path = requiredText(params, "path");

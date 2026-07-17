@@ -6,7 +6,7 @@ import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFoote
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
 import GitChangesPanel from "./GitChangesPanel.vue";
-import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe, RefreshCw, Search } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe, Plus, RefreshCw, Search } from "lucide-vue-next";
 
 const props = defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -81,6 +81,10 @@ const emit = defineEmits<{
   deleteEntry: [path: string, type: "file" | "directory"];
   // 双击文件或目录后重命名
   renameEntry: [path: string, name: string];
+  copyEntry: [sourcePath: string, targetDirectory: string];
+  moveEntry: [sourcePath: string, targetDirectory: string];
+  uploadFiles: [directory: string, files: File[]];
+  undoEntry: [];
   // 缓存并跳转
   cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
@@ -98,6 +102,12 @@ let dragStartHeight = 0;
 
 const iframeDialogVisible = ref(false);
 const iframeRef = ref<HTMLIFrameElement | null>(null);
+const fileExplorerRef = ref<InstanceType<typeof FileExplorer> | null>(null);
+
+function openRootActions() {
+  if (!props.canWrite) return;
+  fileExplorerRef.value?.openRootActions();
+}
 
 const iframeUrl = computed(() => {
   const baseUrl = import.meta.env.VITE_IFRAME_URL ?? "";
@@ -310,6 +320,17 @@ defineExpose({
             </button>
             <div class="figma-fe-section-actions" v-if="workspaceExpanded">
               <button
+                v-if="tab === 'explorer' && canWrite"
+                type="button"
+                class="figma-fe-section-action-btn"
+                title="新建或上传到工作区根目录"
+                aria-label="新建或上传到工作区根目录"
+                :disabled="!workspaceId"
+                @click="openRootActions"
+              >
+                <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </button>
+              <button
                 v-if="tab === 'explorer'"
                 type="button"
                 class="figma-fe-section-action-btn"
@@ -344,6 +365,8 @@ defineExpose({
             </div>
             <FileExplorer
               v-else
+              ref="fileExplorerRef"
+              :key="workspaceId"
               :workspace-name="workspaceName"
               :workspace-root-path="workspaceRootPath"
               :entries-by-directory="entriesByDirectory"
@@ -354,6 +377,7 @@ defineExpose({
               :hide-header="true"
               :hide-tabbar="true"
               :can-write="!!canWrite"
+              :can-undo="canUndo"
               :active-tab="tab"
               :search-results="searchResults"
               :search-loading="searchLoading"
@@ -367,6 +391,10 @@ defineExpose({
               @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
               @delete-entry="(path, type) => emit('deleteEntry', path, type)"
               @rename-entry="(path, name) => emit('renameEntry', path, name)"
+              @copy-entry="(sourcePath, targetDirectory) => emit('copyEntry', sourcePath, targetDirectory)"
+              @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+              @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
+              @undo-entry="emit('undoEntry')"
               @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
             />
           </div>

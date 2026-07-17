@@ -1,5 +1,22 @@
 # Session Log
 
+### 2026-07-17 - 补齐工作区文件编辑、搬运与上传交互
+
+- Why:
+  - 用户反馈中间文件编辑区不能自动换行，左侧工作区缺少文件复制/剪切/粘贴、拖动和本机文件上传能力。
+- What:
+  - Monaco 编辑器默认启用按视口自动换行；文件树支持普通文件的 `Ctrl/Cmd+C/X/V`、右键复制/剪切/粘贴、拖到目录，以及从本机多选或拖入文件上传。
+  - 补充 `Ctrl/Cmd+Z` 撤销当前个人 worktree 最近一次复制、移动或上传；撤销栈在 worktree 切换时清空。工作区标题和目录行的 `+` 统一打开显示目标路径的“新建/上传”面板，拖放在全局 `drop/dragend` 后清除所有蓝色目标框。
+  - 复用现有平台文件 route/ticket/WebSocket RPC，新增 `workspace.upload/copy/move` 操作；后端统一校验工作区边界、写权限、受保护配置路径、符号链接、文件大小和同名冲突，不新增后端到后端 HTTP 文件代理。
+  - 同步更新前后端模块 README、包级说明、HTTP/事件流 API 文档、架构与前端规范、用户手册，并补充前后端单元测试。
+- How:
+  - 前端最终全量 Vitest 1002 项通过（1 项跳过），13 个 workspace typecheck 和全量 production build 通过；新增文件树补充交互定向测试 14 项通过。全量首次出现 3 个无关 Mermaid 异步用例超时，单独重跑 20 项及随后全量重跑均通过。
+  - 后端 `WorkspaceFileServiceTest` 与 `WorkspaceFileWebSocketHandlerTest` 共 20 项通过；使用真实 Chromium 工作台验证上传入口、右键菜单、复制后粘贴入口、文件行展示和控制台无错误。
+  - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend，并检查 health/readiness、前端 HTTP、登录 CORS 和 Manager 日志；真实 Chromium 进一步验证根目录 `+` 目标文案、上传选项、拖动蓝框在 `dragend` 后消失且控制台无错误。
+- Result:
+  - 自动换行、个人 worktree 文件复制/移动/拖放/上传和撤销均可用；上传默认单文件上限 1 MB，复制、移动、上传均不覆盖同名文件，复制到同目录时前端自动生成副本名。
+  - 新增的是向后兼容的平台文件 WebSocket RPC，不改变 RunEvent SSE；不涉及数据库、SQL 或环境配置，文件大小与 WebSocket 帧均有上限。
+
 ### 2026-07-17 - 基于最新本地主干重建企业离线包
 
 - Why:

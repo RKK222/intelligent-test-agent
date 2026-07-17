@@ -655,6 +655,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     writeFile: (workspaceId: string, path: string, content: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.write", { path, content }),
+    uploadWorkspaceFile: (workspaceId: string, path: string, contentBase64: string) =>
+      workspaceFileRpc<void>(workspaceId, "workspace.upload", { path, contentBase64 }),
+    copyWorkspaceFile: (workspaceId: string, sourcePath: string, targetPath: string) =>
+      workspaceFileRpc<void>(workspaceId, "workspace.copy", { sourcePath, targetPath }),
+    moveWorkspaceFile: (workspaceId: string, sourcePath: string, targetPath: string) =>
+      workspaceFileRpc<void>(workspaceId, "workspace.move", { sourcePath, targetPath }),
     renameWorkspaceFile: (workspaceId: string, path: string, name: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.rename", { path, name }),
     fileStatus: async (workspaceId: string, path: string) => {

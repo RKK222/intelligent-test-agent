@@ -13,7 +13,7 @@
 
 1. 只能通过 `packages/backend-api` 访问平台后端服务（当前由 `test-agent-app` 装配运行），不得直连 opencode server，不得在组件中直接拼接后端 URL。
 2. Run、Diff 和 runtime 相关请求默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` URL；切换 agent 只能通过 `backend-api` 配置，不得在页面组件中手拼旧 runtime URL。
-3. 工作区文件和 Agent 配置文件的目录列表、读取、写入只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
+3. 工作区文件和 Agent 配置文件的目录列表、读取、写入、上传、复制和移动只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
 4. API 请求、响应、错误类型必须与 `docs/api/http-api.md` 一致；新增或变更 API 必须同步 `docs/api/http-api.md` 和 `docs/architecture/module-map.md`。
 5. 前端调试用原始报文查看器只能通过 `backend-api` 的可选 observer 捕获浏览器可访问的请求体和响应文本，不得记录 `Authorization`、Cookie 等敏感请求头，不得新增后端持久化或绕过平台后端直连 opencode。
 
@@ -108,6 +108,7 @@
 
 1. Dockview 面板恢复不能阻塞首屏交互；Monaco 编辑器和 Diff 组件按需加载。
 2. 大文件打开前应有大小检查和只读策略；Diff 展示避免一次性渲染超大变更；面板切换时不得重复初始化重型实例。
+3. 中间 Monaco 源码区默认按可视宽度自动换行；文件树复制/剪切/粘贴/撤销、拖动和上传必须在 `canWrite=false` 时同时隐藏并在事件处理层阻断。上传入口必须由工作区根或目标目录的 `+` 打开并展示目标路径，拖放结束必须清理全部目标高亮；撤销历史不得跨个人 worktree 保留。
 
 ### 请求与缓存
 

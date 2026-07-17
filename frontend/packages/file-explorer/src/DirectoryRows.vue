@@ -10,14 +10,25 @@ export type DirectoryRowsProps = {
   depth?: number;
   /** 只读工作区隐藏并阻断所有文件系统写入口。 */
   canWrite?: boolean;
+  /** 当前个人 worktree 是否存在可撤销的文件操作。 */
+  canUndo?: boolean;
+  /** 根组件递增该值，统一清理递归目录残留的拖放高亮。 */
+  dragResetToken?: number;
   /** 文件路径 → 行变更统计，用于在文件名后展示 +N -N。 */
   changeStats?: Record<string, { additions: number; deletions: number }>;
+  /** 文件树内部剪贴板，仅保存当前工作区的普通文件引用。 */
+  clipboardEntry?: WorkspaceClipboardEntry;
+};
+
+export type WorkspaceClipboardEntry = {
+  path: string;
+  mode: "copy" | "move";
 };
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
-import { Plane, Plus, Trash2 } from "lucide-vue-next";
+import { computed, nextTick, ref, watch } from "vue";
+import { Plane, Plus, Trash2, Upload } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileIcon from "./FileIcon.vue";
 
@@ -29,6 +40,12 @@ const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
   renameEntry: [path: string, name: string];
+  setClipboard: [path: string, mode: "copy" | "move"];
+  pasteEntry: [directory: string];
+  undoEntry: [];
+  moveEntry: [sourcePath: string, targetDirectory: string];
+  uploadFiles: [directory: string, files: File[]];
+  requestUpload: [directory: string];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
 
@@ -40,10 +57,11 @@ const entries = computed(() => {
   });
 });
 
-const fileContextMenu = ref<{ path: string; x: number; y: number } | null>(null);
+const entryContextMenu = ref<{ entry: FileTreeEntry; x: number; y: number } | null>(null);
+const dragOverDirectory = ref<string | null>(null);
 const showCreateDialog = ref(false);
 const createDialogParentDirectory = ref("");
-const createDialogType = ref<"file" | "directory">("file");
+const createDialogType = ref<"file" | "directory" | "upload">("file");
 const createDialogName = ref("");
 const createDialogError = ref("");
 const showDeleteDialog = ref(false);
@@ -63,23 +81,102 @@ function focusRenameInput() {
 }
 
 function openFileContextMenu(event: MouseEvent, entry: FileTreeEntry) {
-  if (entry.type !== "file") {
-    return;
-  }
   event.preventDefault();
-  fileContextMenu.value = { path: entry.path, x: event.clientX, y: event.clientY };
+  entryContextMenu.value = { entry, x: event.clientX, y: event.clientY };
 }
 
 function closeFileContextMenu() {
-  fileContextMenu.value = null;
+  entryContextMenu.value = null;
 }
 
 function emitAddFileContext() {
-  if (!fileContextMenu.value) {
+  const entry = entryContextMenu.value?.entry;
+  if (!entry || entry.type !== "file") {
     return;
   }
-  emit("addFileContext", fileContextMenu.value.path);
+  emit("addFileContext", entry.path);
   closeFileContextMenu();
+}
+
+function parentDirectory(path: string): string {
+  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return index >= 0 ? path.slice(0, index) : "";
+}
+
+function targetDirectory(entry: FileTreeEntry): string {
+  return entry.type === "directory" ? entry.path : parentDirectory(entry.path);
+}
+
+function emitSetClipboard(mode: "copy" | "move") {
+  const entry = entryContextMenu.value?.entry;
+  if (!props.canWrite || !entry || entry.type !== "file") return;
+  emit("setClipboard", entry.path, mode);
+  closeFileContextMenu();
+}
+
+function emitPasteEntry() {
+  const entry = entryContextMenu.value?.entry;
+  if (!props.canWrite || !props.clipboardEntry || !entry) return;
+  emit("pasteEntry", targetDirectory(entry));
+  closeFileContextMenu();
+}
+
+/** 文件树行聚焦后支持 Ctrl/Cmd+C、X、V，行为与右键菜单共用同一内部剪贴板。 */
+function onRowKeydown(event: KeyboardEvent, entry: FileTreeEntry) {
+  if (!props.canWrite || (!event.ctrlKey && !event.metaKey)) return;
+  const key = event.key.toLowerCase();
+  if ((key === "c" || key === "x") && entry.type === "file") {
+    event.preventDefault();
+    emit("setClipboard", entry.path, key === "c" ? "copy" : "move");
+    return;
+  }
+  if (key === "v" && props.clipboardEntry) {
+    event.preventDefault();
+    emit("pasteEntry", targetDirectory(entry));
+    return;
+  }
+  if (key === "z" && props.canUndo) {
+    event.preventDefault();
+    emit("undoEntry");
+  }
+}
+
+watch(() => props.dragResetToken, () => {
+  dragOverDirectory.value = null;
+});
+
+/** 普通文件使用 HTML5 drag data 传递相对路径，目录仅作为工作区内移动目标。 */
+function onDragStart(event: DragEvent, entry: FileTreeEntry) {
+  if (!props.canWrite || entry.type !== "file" || !event.dataTransfer) {
+    event.preventDefault();
+    return;
+  }
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("application/x-test-agent-workspace-file", entry.path);
+  event.dataTransfer.setData("text/plain", entry.path);
+}
+
+function onDirectoryDragOver(event: DragEvent, entry: FileTreeEntry) {
+  if (!props.canWrite || entry.type !== "directory") return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  dragOverDirectory.value = entry.path;
+}
+
+function onDirectoryDrop(event: DragEvent, entry: FileTreeEntry) {
+  if (!props.canWrite || entry.type !== "directory" || !event.dataTransfer) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const files = Array.from(event.dataTransfer.files ?? []);
+  if (files.length > 0) {
+    dragOverDirectory.value = null;
+    emit("uploadFiles", entry.path, files);
+    return;
+  }
+  const sourcePath = event.dataTransfer.getData("application/x-test-agent-workspace-file");
+  dragOverDirectory.value = null;
+  if (sourcePath) emit("moveEntry", sourcePath, entry.path);
 }
 
 function isKnownEmptyDirectory(path: string): boolean {
@@ -107,6 +204,9 @@ function openCreateDialog(directory: string) {
   showCreateDialog.value = true;
 }
 
+/** 根目录标题与目录行的“+”共用同一个明确目标路径的操作面板。 */
+defineExpose({ openCreateDialog });
+
 function closeCreateDialog() {
   showCreateDialog.value = false;
   createDialogError.value = "";
@@ -114,6 +214,11 @@ function closeCreateDialog() {
 
 function submitCreateDialog() {
   if (!props.canWrite) return;
+  if (createDialogType.value === "upload") {
+    emit("requestUpload", createDialogParentDirectory.value);
+    closeCreateDialog();
+    return;
+  }
   const name = createDialogName.value.trim();
   if (!name) {
     createDialogError.value = "请输入名称";
@@ -196,12 +301,19 @@ function submitRename() {
         type="button"
         :class="cn(
           'ta-file-tree-row',
-          activePath === entry.path && 'is-active'
+          activePath === entry.path && 'is-active',
+          dragOverDirectory === entry.path && 'is-drop-target'
         )"
+        :draggable="canWrite && entry.type === 'file'"
         :style="{ paddingLeft: depth * 16 + 6 + 'px' }"
         @click="onRowClick(entry)"
         @contextmenu="openFileContextMenu($event, entry)"
         @dblclick.stop="canWrite && startRename(entry)"
+        @keydown="onRowKeydown($event, entry)"
+        @dragstart="onDragStart($event, entry)"
+        @dragover="onDirectoryDragOver($event, entry)"
+        @dragleave="dragOverDirectory === entry.path && (dragOverDirectory = null)"
+        @drop="onDirectoryDrop($event, entry)"
       >
         <span
           v-for="i in depth"
@@ -243,8 +355,8 @@ function submitRename() {
           v-if="canWrite && entry.type === 'directory'"
           type="button"
           class="ta-file-tree-add-btn"
-          title="新建文件或文件夹"
-          aria-label="新建文件或文件夹"
+          title="新建或上传到此目录"
+          aria-label="新建或上传到此目录"
           @click.stop="openCreateDialog(entry.path)"
         >
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -282,6 +394,9 @@ function submitRename() {
         :loading-path="loadingPath"
         :change-stats="changeStats"
         :can-write="canWrite"
+        :can-undo="canUndo"
+        :drag-reset-token="dragResetToken"
+        :clipboard-entry="clipboardEntry"
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"
@@ -289,24 +404,76 @@ function submitRename() {
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
         @rename-entry="(path, name) => emit('renameEntry', path, name)"
+        @set-clipboard="(path, mode) => emit('setClipboard', path, mode)"
+        @paste-entry="emit('pasteEntry', $event)"
+        @undo-entry="emit('undoEntry')"
+        @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+        @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
+        @request-upload="emit('requestUpload', $event)"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
       />
     </div>
     <Teleport to="body">
       <div
-        v-if="fileContextMenu"
+        v-if="entryContextMenu"
         class="ta-file-context-menu-backdrop"
         @click="closeFileContextMenu"
         @contextmenu.prevent="closeFileContextMenu"
       />
       <div
-        v-if="fileContextMenu"
+        v-if="entryContextMenu"
         class="ta-file-context-menu"
         role="menu"
-        :style="{ left: `${fileContextMenu.x}px`, top: `${fileContextMenu.y}px` }"
+        :style="{ left: `${entryContextMenu.x}px`, top: `${entryContextMenu.y}px` }"
       >
-        <button type="button" role="menuitem" class="ta-file-context-menu-item" @click="emitAddFileContext">
+        <button
+          v-if="entryContextMenu.entry.type === 'file'"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emitAddFileContext"
+        >
           添加文件到对话
+        </button>
+        <button
+          v-if="canWrite && entryContextMenu.entry.type === 'file'"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emitSetClipboard('copy')"
+        >
+          复制
+          <span>Ctrl/Cmd+C</span>
+        </button>
+        <button
+          v-if="canWrite && entryContextMenu.entry.type === 'file'"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emitSetClipboard('move')"
+        >
+          剪切
+          <span>Ctrl/Cmd+X</span>
+        </button>
+        <button
+          v-if="canWrite && clipboardEntry"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emitPasteEntry"
+        >
+          粘贴到此处
+          <span>Ctrl/Cmd+V</span>
+        </button>
+        <button
+          v-if="canWrite && canUndo"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emit('undoEntry'); closeFileContextMenu()"
+        >
+          撤销上一步
+          <span>Ctrl/Cmd+Z</span>
         </button>
       </div>
     </Teleport>
@@ -320,11 +487,14 @@ function submitRename() {
         <section
           role="dialog"
           aria-modal="true"
-          aria-label="新建文件或文件夹"
+          aria-label="新建或上传文件"
           class="flex w-[min(360px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
         >
           <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
-            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">新建文件或文件夹</h2>
+            <div>
+              <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">新建或上传文件</h2>
+              <p class="mt-1 text-[11px] text-[var(--ta-muted)]">目标目录：{{ createDialogParentDirectory || '工作区根目录' }}</p>
+            </div>
           </header>
           <div class="flex flex-col gap-3">
             <div class="flex flex-col gap-1.5">
@@ -354,9 +524,21 @@ function submitRename() {
                 >
                   新建文件夹
                 </button>
+                <button
+                  type="button"
+                  :class="cn(
+                    'flex-1 rounded border px-3 py-1.5 text-[12px] transition',
+                    createDialogType === 'upload'
+                      ? 'border-[var(--ta-ink)] bg-[var(--ta-ink)] text-white'
+                      : 'border-[var(--ta-border)] bg-transparent text-[var(--ta-text)] hover:border-[var(--ta-border-strong)]'
+                  )"
+                  @click="createDialogType = 'upload'"
+                >
+                  上传文件
+                </button>
               </div>
             </div>
-            <div class="flex flex-col gap-1.5">
+            <div v-if="createDialogType !== 'upload'" class="flex flex-col gap-1.5">
               <label class="text-[11px] text-[var(--ta-muted)] font-medium">
                 {{ createDialogType === 'file' ? '文件名' : '文件夹名' }}
                 <span class="text-[var(--ta-danger,#b91c1c)]">*</span>
@@ -373,6 +555,10 @@ function submitRename() {
                 {{ createDialogError }}
               </span>
             </div>
+            <div v-else class="flex items-center gap-2 rounded border border-[var(--ta-border)] bg-[var(--ta-surface)] p-3 text-[12px] text-[var(--ta-muted)]">
+              <Upload class="h-4 w-4 shrink-0" :stroke-width="1.5" />
+              可一次选择多个本机文件，文件会上传到上方目标目录。
+            </div>
           </div>
           <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
             <button
@@ -385,10 +571,10 @@ function submitRename() {
             <button
               type="button"
               class="inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded border border-[var(--ta-ink)] bg-[var(--ta-ink)] px-3 text-[12px] font-medium text-white transition hover:bg-[#111111]"
-              :disabled="!createDialogName.trim()"
+              :disabled="createDialogType !== 'upload' && !createDialogName.trim()"
               @click="submitCreateDialog"
             >
-              确定
+              {{ createDialogType === 'upload' ? '选择文件' : '确定' }}
             </button>
           </footer>
         </section>
@@ -470,6 +656,19 @@ function submitRename() {
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ta-file-context-menu-item span {
+  color: #8b949e;
+  font-size: 11px;
+}
+
+:deep(.ta-file-tree-row.is-drop-target) {
+  outline: 1px solid var(--ta-accent, #2563eb);
+  outline-offset: -1px;
+  background: rgb(37 99 235 / 10%);
 }
 
 .ta-file-context-menu-item:hover {

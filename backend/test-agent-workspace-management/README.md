@@ -8,7 +8,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 - 工作区注册、查询和分页。
 - 工作区注册时记录 `linuxServerId`，并通过 `WorkspaceServerIdentity` 提供当前 Java 进程所属服务器和默认目录。
-- 工作区内文件单层列表、受限相对路径搜索、UTF-8 内容读写、普通文件或目录同目录重命名、文件状态、普通文件删除和路径越权拦截；搜索支持空关键字文件目录，并受数量、深度和超时上限保护。
+- 工作区内文件单层列表、受限相对路径搜索、UTF-8 内容读写、Base64 二进制新文件上传、普通文件跨目录复制/移动、普通文件或目录同目录重命名、文件状态、普通文件删除和路径越权拦截；上传沿用单文件大小上限且不覆盖已有条目，复制/移动只处理普通文件并拒绝覆盖目标；搜索支持空关键字文件目录，并受数量、深度和超时上限保护。
 - 文件 WebSocket ticket 创建前通过 `requireWorkspaceOnCurrentServer` 校验 workspace、当前后端和用户 opencode 进程同服务器；历史空服务器归属工作区在 root path 校验成功后回填当前服务器 ID。
 - 普通前端不再传物理目录创建 Workspace；应用版本和个人工作区目录由后端按通用参数与业务 id 派生。超级管理员服务器工作空间选择器通过目标后端目录浏览能力从该后端 Java 进程运行目录开始浏览。
 - `WorkspaceApplicationService` 同时实现领域 `TrustedWorkspaceResolver`：历史 `linux_server_id=null` 只有在当前节点能解析并访问真实 root 时才回填当前服务器。可信 root/server/status 变更先建立 Workspace mutation gate，关系型保存成功后用单个 Lua 原子再次失效并释放 gate，数据库失败只撤回自己的 gate token；托管个人/应用副本更新沿用同一规则，且仅在可信字段真正变化时执行，创建新 Workspace 不做无效清理。
@@ -27,7 +27,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 ## 测试覆盖
 
 - `WorkspaceApplicationServiceTest` 覆盖工作区创建、服务器归属、分页/详情查询、未找到错误和文件服务编排。
-- `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、普通文件和目录同目录重命名、目标冲突、普通文件删除、目录删除拒绝、路径穿越拒绝、目录列表排序与上限、相对路径/空关键字文件搜索、文件大小限制和 null 内容写入。
+- `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、Base64 二进制上传、普通文件复制/移动、普通文件和目录同目录重命名、目标冲突、普通文件删除、目录删除拒绝、路径穿越拒绝、目录列表排序与上限、相对路径/空关键字文件搜索、文件大小限制和 null 内容写入。
 - `WorkspaceDirectoryServiceTest` 覆盖服务器工作空间选择器的默认目录、只返回子目录、排序、父目录、条目上限和缺失目录错误码。
 - `GitPublishWorkflowTest` 覆盖直接发布、worktree 合并发布、冲突文件收集、merge abort、abort 失败保护，以及同步文件时先 clean/pull 再复制提交推送。
 - `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验及 `FORBIDDEN` 加载上下文、托管逻辑路径、个人 worktree 创建、Git diff、个人 worktree本地提交、从个人 `HEAD` 按白名单投影并推送 feature、普通角色 spec 禁推与超级管理员豁免、应用 Agent 发布后的版本 HEAD 更新和广播、应用副本只读 Git 操作及失败阶段命令透传；同步接口覆盖仅使用已提交文件的兼容路径。

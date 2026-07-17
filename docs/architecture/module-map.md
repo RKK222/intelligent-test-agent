@@ -43,7 +43,7 @@ Browser
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
-| `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/删除、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、agent 和 skill 管理业务。 |
+| `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/上传/复制/移动/删除、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、用户级会话运行态摘要/状态流、stale active Run 收敛业务任务、当前用户 opencode 进程强状态/弱健康/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理查询、创建测试用户和单角色调整。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器和参数更新跨实例广播。 |
@@ -66,8 +66,8 @@ Browser
 | `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、可选安全原始 HTTP 交换 observer、超级管理员服务器目录选择、平台文件 WebSocket route/ticket/RPC（workspace 与 Agent 配置文件）、工作区 Git diff/stage/unstage/冲突 API、用户 opencode 进程状态/初始化、用户级会话运行态摘要、运行管理 overview 与指标历史、定时任务管理、配置管理、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询、兼容同步 `askSideQuestion`、流式 `startSideQuestionRun` 和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE 和用户级运行态 fetch SSE client，负责按默认 `opencode` agent URL 连接 RunEvent、携带 Bearer Token 连接 runtime-state、自动重连、识别 `run.snapshot.reset`、解析前原始 `MessageEvent.data` 回调、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、工作台级 Pinia 状态，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |
-| `packages/file-explorer` | 文件树、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口。 |
-| `packages/editor` | Monaco 编辑器（原生 `monaco-editor`）、语言识别、内容编辑和只读展示。 |
+| `packages/file-explorer` | 文件树、普通文件复制/剪切/粘贴与拖放、浏览器文件上传选择、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口；实际文件操作由 app 层调用 backend-api。 |
+| `packages/editor` | Monaco 编辑器（原生 `monaco-editor`，源码区默认按可视宽度自动换行）、语言识别、内容编辑和只读展示。 |
 | `packages/diff-viewer` | Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。 |
 | `packages/agent-chat` | 自建最小 chat 运行时、opencode-like 主时间线、用户消息、message part timeline（text/reasoning/tool/file/retry/unknown fallback）、工具视图、Diff 摘要、runtime selector/status、slash command、`@` context、permission/question/Todo dock、Markdown 懒加载渲染（markdown-it + DOMPurify + highlight.js）、支持 `run.snapshot.reset` 的纯 RunEvent reducer，以及供实时事件和历史 `partsJson` 共用的 message part 归一化入口。旧 `AgentCard`/`TimelineCard`/`MessageParts` 路径已作废，仅保留兼容。 |
 | `packages/terminal` | 受控 PTY 前端包，负责 ticket WebSocket 连接、输入、resize、关闭和输出渲染，不创建 ticket、不直连 opencode server。 |

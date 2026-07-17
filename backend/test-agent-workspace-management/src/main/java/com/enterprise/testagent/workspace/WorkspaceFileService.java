@@ -5,9 +5,12 @@ import com.enterprise.testagent.common.error.PlatformException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -117,6 +120,90 @@ public class WorkspaceFileService {
             Files.writeString(target, content == null ? "" : content, StandardCharsets.UTF_8);
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "写入文件失败", Map.of("path", safePath(relativePath)), exception);
+        }
+    }
+
+    /**
+     * 把浏览器上传的 Base64 内容写入工作区新文件；拒绝覆盖已有条目，并沿用文本文件相同的大小上限。
+     */
+    public void uploadFile(String rootPath, String relativePath, String contentBase64) {
+        Path target = resolveNewFileTarget(rootPath, relativePath);
+        String encoded = contentBase64 == null ? "" : contentBase64;
+        long maxEncodedLength = 4L * ((maxFileBytes + 2L) / 3L);
+        if (encoded.length() > maxEncodedLength) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "上传文件超过大小限制",
+                    Map.of("path", safePath(relativePath), "maxFileBytes", maxFileBytes));
+        }
+        final byte[] bytes;
+        try {
+            bytes = Base64.getDecoder().decode(encoded);
+        } catch (IllegalArgumentException exception) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "上传文件内容不是有效的 Base64",
+                    Map.of("path", safePath(relativePath)),
+                    exception);
+        }
+        if (bytes.length > maxFileBytes) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "上传文件超过大小限制",
+                    Map.of("path", safePath(relativePath), "maxFileBytes", maxFileBytes));
+        }
+        try {
+            Files.write(target, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        } catch (FileAlreadyExistsException exception) {
+            throw targetConflict(relativePath, exception);
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "上传文件失败",
+                    Map.of("path", safePath(relativePath)),
+                    exception);
+        }
+    }
+
+    /**
+     * 在工作区内复制普通文件到新的相对路径；不覆盖目标文件，目录复制不在本接口范围内。
+     */
+    public void copyFile(String rootPath, String sourcePath, String targetPath) {
+        Path source = requireRegularFile(rootPath, sourcePath);
+        Path target = resolveNewFileTarget(rootPath, targetPath);
+        try {
+            Files.copy(source, target);
+        } catch (FileAlreadyExistsException exception) {
+            throw targetConflict(targetPath, exception);
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "复制文件失败",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)),
+                    exception);
+        }
+    }
+
+    /**
+     * 在工作区内跨目录移动普通文件；源文件和目标路径都必须位于同一工作区，且不覆盖已有条目。
+     */
+    public void moveFile(String rootPath, String sourcePath, String targetPath) {
+        Path source = requireRegularFile(rootPath, sourcePath);
+        Path target = resolveInsideRoot(rootPath, targetPath);
+        if (source.equals(target)) {
+            return;
+        }
+        target = resolveNewFileTarget(rootPath, targetPath);
+        try {
+            Files.move(source, target);
+        } catch (FileAlreadyExistsException exception) {
+            throw targetConflict(targetPath, exception);
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "移动文件失败",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)),
+                    exception);
         }
     }
 
@@ -271,6 +358,62 @@ public class WorkspaceFileService {
             throw new PlatformException(ErrorCode.FORBIDDEN, "文件路径超出工作区根目录", Map.of("path", safePath(relativePath)));
         }
         return target;
+    }
+
+    /**
+     * 校验源路径存在且为普通文件，避免复制、移动接口意外递归处理目录树或特殊文件。
+     */
+    private Path requireRegularFile(String rootPath, String relativePath) {
+        Path source = resolveInsideRoot(rootPath, relativePath);
+        if (!Files.exists(source)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在", Map.of("path", safePath(relativePath)));
+        }
+        if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "仅支持复制或移动普通文件", Map.of("path", safePath(relativePath)));
+        }
+        return source;
+    }
+
+    /**
+     * 校验新文件目标：不能是工作区根目录、不能覆盖已有条目，父目录必须真实存在于工作区内。
+     */
+    private Path resolveNewFileTarget(String rootPath, String relativePath) {
+        Path root = rootRealPath(rootPath);
+        Path target = resolveInsideRoot(rootPath, relativePath);
+        if (target.equals(root) || target.getFileName() == null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目标文件路径不能为空", Map.of("path", safePath(relativePath)));
+        }
+        if (Files.exists(target)) {
+            throw targetConflict(relativePath, null);
+        }
+        Path parent = target.getParent();
+        try {
+            if (parent == null || !Files.isDirectory(parent) || !parent.toRealPath().startsWith(root)) {
+                throw new PlatformException(ErrorCode.NOT_FOUND, "目标目录不存在", Map.of("path", safePath(relativePath)));
+            }
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目标目录不存在", Map.of("path", safePath(relativePath)), exception);
+        }
+        return target;
+    }
+
+    /**
+     * 统一构造不覆盖目标条目的冲突错误，details 只返回工作区相对路径。
+     */
+    private PlatformException targetConflict(String relativePath, Exception cause) {
+        if (cause == null) {
+            return new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "目标文件已存在",
+                    Map.of("path", safePath(relativePath)));
+        }
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                "目标文件已存在",
+                Map.of("path", safePath(relativePath)),
+                cause);
     }
 
     /**

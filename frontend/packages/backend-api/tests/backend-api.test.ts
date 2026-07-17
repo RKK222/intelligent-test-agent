@@ -1903,7 +1903,7 @@ describe("backend-api", () => {
     });
   });
 
-  it("reads and renames workspace files through the same target backend websocket", async () => {
+  it("reads and mutates workspace files through the same target backend websocket", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -1950,6 +1950,9 @@ describe("backend-api", () => {
       content: "# 设计"
     });
     await client.renameWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "详细设计.md");
+    await client.copyWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "backup/design.md");
+    await client.moveWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "archive/design.md");
+    await client.uploadWorkspaceFile("wrk_1234567890abcdef", "assets/icon.bin", "AAEC/w==");
 
     expect(sockets[0]?.sentMessages).toEqual([
       expect.objectContaining({
@@ -1959,6 +1962,18 @@ describe("backend-api", () => {
       expect.objectContaining({
         op: "workspace.rename",
         params: { workspaceId: "wrk_1234567890abcdef", path: "docs/design.md", name: "详细设计.md" }
+      }),
+      expect.objectContaining({
+        op: "workspace.copy",
+        params: { workspaceId: "wrk_1234567890abcdef", sourcePath: "docs/design.md", targetPath: "backup/design.md" }
+      }),
+      expect.objectContaining({
+        op: "workspace.move",
+        params: { workspaceId: "wrk_1234567890abcdef", sourcePath: "docs/design.md", targetPath: "archive/design.md" }
+      }),
+      expect.objectContaining({
+        op: "workspace.upload",
+        params: { workspaceId: "wrk_1234567890abcdef", path: "assets/icon.bin", contentBase64: "AAEC/w==" }
       })
     ]);
   });

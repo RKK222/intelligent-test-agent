@@ -44,6 +44,8 @@ packages/shared-types
 
 `packages/editor` 在 Markdown 预览中支持 Mermaid `flowchart`/`graph` 与 `sequenceDiagram` 可视化编辑。图模型、parser、serializer 与 Vue Flow 画布均留在 editor 包内；应用后只回写当前 Markdown fence，并继续复用工作台 dirty、Git Diff 与 workspace 文件保存链路。
 
+工作台中间 Monaco 源码区默认按可视宽度自动换行。左侧个人工作区普通文件支持 Ctrl/Cmd+C/X/V/Z、右键复制/剪切/粘贴/撤销和拖放到目录或根目录；工作区标题与目录行的 `+` 统一按明确目标路径新建或上传一个或多个本机文件，拖放结束后清除目标高亮。所有落盘和撤销操作继续走 backend-api 的目标后端文件 WebSocket route/ticket/RPC，只读应用版本副本不展示这些入口。
+
 ## 本地命令
 
 ```bash

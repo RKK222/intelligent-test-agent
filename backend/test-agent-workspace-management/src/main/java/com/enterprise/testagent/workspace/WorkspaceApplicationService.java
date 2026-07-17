@@ -302,6 +302,30 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     }
 
     /**
+     * 上传 Base64 文件内容到工作区新路径；二进制解码、大小和冲突校验由文件服务统一处理。
+     */
+    public void uploadFile(WorkspaceId workspaceId, String path, String contentBase64) {
+        Workspace workspace = getWorkspace(workspaceId);
+        fileService.uploadFile(workspace.rootPath(), path, contentBase64);
+    }
+
+    /**
+     * 在工作区内复制普通文件，不覆盖已有目标。
+     */
+    public void copyFile(WorkspaceId workspaceId, String sourcePath, String targetPath) {
+        Workspace workspace = getWorkspace(workspaceId);
+        fileService.copyFile(workspace.rootPath(), sourcePath, targetPath);
+    }
+
+    /**
+     * 在工作区内移动普通文件，不覆盖已有目标。
+     */
+    public void moveFile(WorkspaceId workspaceId, String sourcePath, String targetPath) {
+        Workspace workspace = getWorkspace(workspaceId);
+        fileService.moveFile(workspace.rootPath(), sourcePath, targetPath);
+    }
+
+    /**
      * 在工作区同一父目录内重命名普通文件或目录，名称校验和路径安全由文件服务统一处理。
      */
     public void renameFile(WorkspaceId workspaceId, String path, String name) {

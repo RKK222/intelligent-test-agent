@@ -157,7 +157,8 @@ async function ensureMonacoEditor(path: string) {
     lineHeight: 20,
     scrollBeyondLastLine: false,
     automaticLayout: true,
-    wordWrap: "off",
+    // 工作台中间编辑区默认按可视宽度换行，长日志、JSON 和说明文档无需横向滚动才能阅读。
+    wordWrap: "on",
     // 滚动条细线化：Monaco 内部使用自定义控件，垂直与水平都用 6px
     scrollbar: {
       vertical: "visible",

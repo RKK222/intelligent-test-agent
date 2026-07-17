@@ -12,7 +12,7 @@
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。
 - 暴露 Workspace、Session message、Run 与 Diff API；历史恢复优先使用 `getSessionTreeMessages`，`listSessionMessages(..., refresh=false)` 用于只读 transcript、Run ID 恢复和旧消息反馈兼容。新反馈不再依赖平台 assistant messageId。
-- 工作区文件列表、读取、写入、状态和删除统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。
+- 工作区文件列表、读取、写入、二进制上传、普通文件复制/移动、状态和删除统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。
 - 暴露 `listWorkspaceBackendServers()`、`listServerWorkspaceDirectories()`、`createServerWorkspace()` 等超级管理员服务器工作空间选择方法，目录浏览和创建也通过目标后端文件 WebSocket ticket 执行。
 - 暴露 `getActiveRun(sessionId)` 作为用户级 runtime-state SSE 不可用时的单次 fallback；返回 `null` 表示当前会话没有非终态 Run。调用方不得用它恢复固定间隔 active-run 轮询。
 - 暴露 `getSessionRuntimeState()` 兼容读取 `/api/internal/platform/opencode-runtime/sessions/runtime-state`；新工作台以 `event-stream-client` 的用户级 runtime-state SSE 为主入口，不在流连接期间并行调用该 HTTP 接口。

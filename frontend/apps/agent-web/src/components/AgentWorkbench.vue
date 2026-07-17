@@ -336,6 +336,11 @@ const selectedAppId = ref<string | undefined>(undefined);
 // 当前选中版本对应的默认个人工作区 ID，供 GitChangesPanel 调用 publishPersonalWorkspace。
 const currentPersonalWorkspaceId = ref<string | undefined>(undefined);
 const currentPersonalWorkspaceBranch = ref<string | undefined>(undefined);
+type WorkspaceUndoOperation =
+  | { kind: "delete"; paths: string[]; label: string }
+  | { kind: "move"; sourcePath: string; targetPath: string; label: string };
+// 撤销历史只属于当前个人 worktree，切换工作区后立即清空，避免跨 worktree 写入。
+const workspaceUndoStack = ref<WorkspaceUndoOperation[]>([]);
 let retryingWorkspaceAfterOpencodeReady = false;
 let selectingAppId: string | undefined;
 let appSelectionSeq = 0;
@@ -1605,6 +1610,7 @@ watch(selectedWorkspaceIdRef, (id, previous) => {
   if (previous && previous !== id) {
     void queryClient.cancelQueries({ queryKey: ["runtime", "agents", previous], exact: true });
     chatContextStore.clearContexts();
+    workspaceUndoStack.value = [];
   }
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
@@ -1612,6 +1618,9 @@ watch(selectedWorkspaceIdRef, (id, previous) => {
     void refreshWorkspaceGitDiff();
   }
 }, { immediate: true });
+watch(currentPersonalWorkspaceId, (id, previous) => {
+  if (id !== previous) workspaceUndoStack.value = [];
+});
 watch(agentsQuery.data, (data) => {
   if (!data) return;
   // 主运行 Agent 与 opencode local.agent.list() 保持一致：排除 subagent 和 hidden。
@@ -3280,6 +3289,167 @@ async function handleCreateEntry(directory: string, name: string, type: "file" |
     }
   } catch (error) {
     feedback.value = errorFeedback(`创建${type === "file" ? "文件" : "文件夹"}失败`, error);
+  }
+}
+
+function workspaceParentDirectory(path: string): string {
+  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return index >= 0 ? path.slice(0, index) : "";
+}
+
+function workspacePathInDirectory(directory: string, name: string): string {
+  if (!directory) return name;
+  return `${directory}${directory.includes("\\") ? "\\" : "/"}${name}`;
+}
+
+/** 同目录复制时生成不覆盖原文件的名称，其余冲突仍由后端原子校验兜底。 */
+function copiedFileTargetPath(sourcePath: string, targetDirectory: string): string {
+  const originalName = fileNameOf(sourcePath);
+  const existingNames = new Set((entriesByDirectory.value[targetDirectory] ?? []).map((entry) => entry.name));
+  if (!existingNames.has(originalName)) return workspacePathInDirectory(targetDirectory, originalName);
+
+  const extensionIndex = originalName.lastIndexOf(".");
+  const hasExtension = extensionIndex > 0;
+  const stem = hasExtension ? originalName.slice(0, extensionIndex) : originalName;
+  const extension = hasExtension ? originalName.slice(extensionIndex) : "";
+  let sequence = 1;
+  let candidate = `${stem} copy${extension}`;
+  while (existingNames.has(candidate)) {
+    sequence += 1;
+    candidate = `${stem} copy ${sequence}${extension}`;
+  }
+  return workspacePathInDirectory(targetDirectory, candidate);
+}
+
+/** 使用分块转换避免一次展开整个 Uint8Array 导致调用栈溢出。 */
+async function workspaceUploadBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+  }
+  return btoa(chunks.join(""));
+}
+
+async function handleCopyEntry(sourcePath: string, targetDirectory: string) {
+  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再复制文件。" };
+    return;
+  }
+  const targetPath = copiedFileTargetPath(sourcePath, targetDirectory);
+  try {
+    await api.copyWorkspaceFile(selectedWorkspace.value.workspaceId, sourcePath, targetPath);
+    await loadDirectory(targetDirectory, undefined, true);
+    workspaceUndoStack.value.push({ kind: "delete", paths: [targetPath], label: `复制 ${targetPath}` });
+    void refreshWorkspaceGitDiff();
+    feedback.value = { kind: "success", title: "文件已复制", description: targetPath };
+  } catch (error) {
+    feedback.value = errorFeedback("复制工作区文件失败", error);
+  }
+}
+
+async function handleMoveEntry(sourcePath: string, targetDirectory: string) {
+  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再移动文件。" };
+    return;
+  }
+  const sourceDirectory = workspaceParentDirectory(sourcePath);
+  if (sourceDirectory === targetDirectory) return;
+  const targetPath = workspacePathInDirectory(targetDirectory, fileNameOf(sourcePath));
+  try {
+    await api.moveWorkspaceFile(selectedWorkspace.value.workspaceId, sourcePath, targetPath);
+    renameWorkspaceTreeEntry(sourcePath, targetPath);
+    await Promise.all([
+      loadDirectory(sourceDirectory, undefined, true),
+      loadDirectory(targetDirectory, undefined, true)
+    ]);
+    workspaceUndoStack.value.push({
+      kind: "move",
+      sourcePath: targetPath,
+      targetPath: sourcePath,
+      label: `移动 ${sourcePath}`
+    });
+    void refreshWorkspaceGitDiff();
+    feedback.value = { kind: "success", title: "文件已移动", description: targetPath };
+  } catch (error) {
+    feedback.value = errorFeedback("移动工作区文件失败", error);
+  }
+}
+
+async function handleUploadFiles(directory: string, files: File[]) {
+  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传文件。" };
+    return;
+  }
+  const workspaceId = selectedWorkspace.value.workspaceId;
+  const failures: string[] = [];
+  const uploadedPaths: string[] = [];
+  let uploaded = 0;
+  for (const file of files) {
+    try {
+      // 浏览器通常只提供 basename；再次截断路径分隔符，避免构造 File 时夹带目录片段。
+      const targetPath = workspacePathInDirectory(directory, fileNameOf(file.name));
+      await api.uploadWorkspaceFile(workspaceId, targetPath, await workspaceUploadBase64(file));
+      uploaded += 1;
+      uploadedPaths.push(targetPath);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "上传失败";
+      failures.push(`${file.name}：${reason}`);
+    }
+  }
+  if (uploaded > 0) {
+    await loadDirectory(directory, undefined, true);
+    workspaceUndoStack.value.push({ kind: "delete", paths: uploadedPaths, label: `上传 ${uploaded} 个文件` });
+    void refreshWorkspaceGitDiff();
+  }
+  if (failures.length > 0) {
+    feedback.value = {
+      kind: "error",
+      title: uploaded > 0 ? "部分文件上传失败" : "上传文件失败",
+      description: failures.join("；")
+    };
+    return;
+  }
+  feedback.value = { kind: "success", title: `已上传 ${uploaded} 个文件`, description: directory || "工作区根目录" };
+}
+
+/** 撤销本页面最近一次复制、移动或上传；所有逆操作仍走当前个人 worktree 的平台文件 RPC。 */
+async function handleUndoWorkspaceFileOperation() {
+  const workspace = selectedWorkspace.value;
+  const operation = workspaceUndoStack.value.at(-1);
+  if (!workspace || !currentPersonalWorkspaceId.value || !operation) return;
+
+  try {
+    if (operation.kind === "move") {
+      await api.moveWorkspaceFile(workspace.workspaceId, operation.sourcePath, operation.targetPath);
+      renameWorkspaceTreeEntry(operation.sourcePath, operation.targetPath);
+      const directories = new Set([
+        workspaceParentDirectory(operation.sourcePath),
+        workspaceParentDirectory(operation.targetPath)
+      ]);
+      await Promise.all([...directories].map((directory) => loadDirectory(directory, undefined, true)));
+    } else {
+      const originalPaths = [...operation.paths];
+      const failedPaths: string[] = [];
+      for (const path of [...originalPaths].reverse()) {
+        try {
+          await api.deleteWorkspaceFile(workspace.workspaceId, path);
+        } catch {
+          failedPaths.push(path);
+        }
+      }
+      const directories = new Set(originalPaths.map(workspaceParentDirectory));
+      await Promise.all([...directories].map((directory) => loadDirectory(directory, undefined, true)));
+      if (failedPaths.length > 0) {
+        operation.paths = failedPaths;
+        throw new Error(`以下文件未能撤销：${failedPaths.join("、")}`);
+      }
+    }
+    workspaceUndoStack.value.pop();
+    void refreshWorkspaceGitDiff();
+    feedback.value = { kind: "success", title: "已撤销文件操作", description: operation.label };
+  } catch (error) {
+    feedback.value = errorFeedback("撤销文件操作失败", error);
   }
 }
 
@@ -5154,6 +5324,7 @@ async function handleLogout() {
           :loading-app-versions="loadingAppVersions"
           :creating-version="creatingVersion"
           :can-write="!!currentPersonalWorkspaceId"
+          :can-undo="workspaceUndoStack.length > 0"
           :can-manage-agent-config="isAppAdmin"
           :can-manage-public-config="isSuperAdmin"
           :api-base-url="apiBaseUrl"
@@ -5187,6 +5358,10 @@ async function handleLogout() {
           @create-entry="handleCreateEntry"
           @delete-entry="handleDeleteEntry"
           @rename-entry="handleRenameEntry"
+          @copy-entry="handleCopyEntry"
+          @move-entry="handleMoveEntry"
+          @upload-files="handleUploadFiles"
+          @undo-entry="handleUndoWorkspaceFileOperation"
           @cache-and-navigate="handleCacheAndNavigate"
         />
       </div>
