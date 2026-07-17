@@ -520,13 +520,17 @@ function preventNodeDragFromPort(event: MouseEvent) {
 }
 
 .ta-mermaid-flow-node__id {
-  position: relative;
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1;
-  margin-bottom: 3px;
   color: var(--ta-muted, #64748b);
   font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 10px;
+  font-size: 8px;
   letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .ta-mermaid-flow-node__label {
