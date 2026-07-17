@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-17 - 重构宠物拖拽状态锁与传统鼠标事件兜底
+
+- Why:
+  - 在企业 Citrix 虚拟化云桌面或特定低版本 Chromium 108 内核中，PointerEvent 存在 pointerId 频繁改变、或被外部宿主系统拦截并误发 pointercancel 的严重局限，导致上一轮兼容优化仍有失效发生。
+- What:
+  - 彻底解除了对 `pointerId` 进行强匹配一致性校验的依赖，只依靠全局 `robotDragging.value === true` 状态锁进行位置移动与拖动结束判断。
+  - 在 `pointerdown` 触发时显式调用 `event.preventDefault()`，在浏览器底层从源头拦截平移、滚动和图像拖拽等默认手势行为，强力防止 `pointercancel` 的意外触发。
+  - 引入了针对老旧/受限环境的传统鼠标事件（`mousemove` 和 `mouseup`）作为兜底监听。Fallback 监听器内通过 `instanceof window.PointerEvent` 自动过滤了现代指针事件，确保不与正常的 PointerEvent 重复计算。
+- How:
+  - 在 [FigmaShell.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/FigmaShell.vue) 修改 `onRobotPointerDown`、`onRobotPointerMove`、`finishRobotDrag` 与 `cleanupRobotDrag`。
+  - 在 [FigmaShell.test.ts](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/tests/FigmaShell.test.ts) 中丰富了单元测试，并新增了模拟老旧环境下通过 Fallback MouseEvents 完成拖拽的兼容测试用例。
+- Result:
+  - 前端 `@test-agent/agent-web` 的全量 41 个 Vitest 单元测试全部通过，`vue-tsc` 类型检查无任何报错，没有引入任何破坏性更新或性能影响。
+
 ### 2026-07-17 - 合并远程主干并补齐文件加载路由边界
 
 - Why:

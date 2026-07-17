@@ -601,8 +601,20 @@ function toggleRobotFixed() {
   }
 }
 
+function onRobotPointerMoveFallback(event: MouseEvent) {
+  // 如果是 PointerEvent，由 onRobotPointerMove 处理，这里直接忽略，防止重复计算位置
+  if (window.PointerEvent && event instanceof window.PointerEvent) return;
+  onRobotPointerMove(event as PointerEvent);
+}
+
+function finishRobotMouseDragFallback(event: MouseEvent) {
+  // 同样忽略 PointerEvent
+  if (window.PointerEvent && event instanceof window.PointerEvent) return;
+  finishRobotDrag();
+}
+
 function cleanupRobotDrag() {
-  if (!robotDragging.value && robotDragPointerId === null) return;
+  if (!robotDragging.value) return;
 
   // 释放指针捕获，防止对后续页面交互产生副作用
   if (robotDragPointerId !== null) {
@@ -621,15 +633,20 @@ function cleanupRobotDrag() {
   window.removeEventListener("pointermove", onRobotPointerMove, true);
   window.removeEventListener("pointerup", finishRobotPointerDrag, true);
   window.removeEventListener("pointercancel", finishRobotPointerDrag, true);
+  window.removeEventListener("mousemove", onRobotPointerMoveFallback, true);
+  window.removeEventListener("mouseup", finishRobotMouseDragFallback, true);
   document.body.style.cursor = robotDragPreviousCursor;
   document.body.style.userSelect = robotDragPreviousUserSelect;
 }
 
 function onRobotPointerDown(event: PointerEvent) {
-  // 移除 event.isPrimary === false 限制，避免远程桌面/虚拟驱动等情况下因 isPrimary 属性误判为 false 阻断拖拽。
-  // robotDragPointerId !== null 锁已能防止多指拖拽冲突。
-  if (robotDragPointerId !== null) return;
-  if (event.button !== 0 && event.pointerType === "mouse") return;
+  // 已经在拖拽中，防止冲突
+  if (robotDragging.value) return;
+  // 仅在鼠标类型下，限制必须是左键点击（event.button === 0）
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+
+  // 显式调用 preventDefault() 阻止浏览器触发默认手势（如选择、平移滚动等），这是防御 pointercancel 的重中之重
+  event.preventDefault();
 
   // 捕获指针事件，避免触控板/触屏手势触发滚动/缩放等默认行为导致的 pointercancel
   const el = event.currentTarget as HTMLElement;
@@ -656,10 +673,12 @@ function onRobotPointerDown(event: PointerEvent) {
   window.addEventListener("pointermove", onRobotPointerMove, true);
   window.addEventListener("pointerup", finishRobotPointerDrag, true);
   window.addEventListener("pointercancel", finishRobotPointerDrag, true);
+  window.addEventListener("mousemove", onRobotPointerMoveFallback, true);
+  window.addEventListener("mouseup", finishRobotMouseDragFallback, true);
 }
 
 function onRobotPointerMove(event: PointerEvent) {
-  if (event.pointerId !== robotDragPointerId) return;
+  if (!robotDragging.value) return;
   const deltaX = event.clientX - robotDragStartClientX;
   const deltaY = event.clientY - robotDragStartClientY;
   if (!robotDragWasEffective && Math.hypot(deltaX, deltaY) < ROBOT_DRAG_THRESHOLD) return;
@@ -675,7 +694,7 @@ function onRobotPointerMove(event: PointerEvent) {
 }
 
 function finishRobotDrag(pointerId?: number) {
-  if (robotDragPointerId === null || (pointerId !== undefined && pointerId !== robotDragPointerId)) return;
+  if (!robotDragging.value) return;
   const wasEffective = robotDragWasEffective;
   if (wasEffective) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });

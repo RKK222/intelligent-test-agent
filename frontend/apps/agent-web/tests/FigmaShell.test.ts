@@ -255,6 +255,25 @@ describe("FigmaShell", () => {
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 125, y: 135 }));
   });
 
+  it("drags successfully using fallback MouseEvents when PointerEvent is simulated as missing", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    dispatchPointer(robot.element, "pointerdown", 99, 100, 100, "mouse");
+
+    const moveEvent = new MouseEvent("mousemove", { bubbles: true, clientX: 130, clientY: 140 });
+    window.dispatchEvent(moveEvent);
+
+    const upEvent = new MouseEvent("mouseup", { bubbles: true, clientX: 130, clientY: 140 });
+    window.dispatchEvent(upEvent);
+
+    await wrapper.vm.$nextTick();
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 130, y: 140 }));
+  });
+
   it("moves the pet with arrow keys and persists the clamped position", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
