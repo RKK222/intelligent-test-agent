@@ -1,6 +1,7 @@
 package com.enterprise.testagent.persistence.mybatis;
 
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import java.time.Instant;
@@ -32,21 +33,67 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     }
 
     @Override
-    public Optional<PublicAgentConfigRolloutSyncRequest> findPendingSync(String linuxServerId) {
-        return Optional.ofNullable(mapper.findPendingSync(linuxServerId))
-                .map(row -> new PublicAgentConfigRolloutSyncRequest(
-                        row.rolloutId(), row.branch(), row.commitHash(), row.initiatedByUserId(), row.traceId()));
+    public Optional<PublicAgentConfigRolloutPreparation> findPreparing(String linuxServerId) {
+        return Optional.ofNullable(mapper.findPreparing(linuxServerId))
+                .map(row -> new PublicAgentConfigRolloutPreparation(
+                        row.rolloutId(), row.branch(), row.expectedCommitHash(), row.previousCommitHash(),
+                        row.initiatedByUserId(),
+                        row.initiatedLinuxServerId(), row.traceId(), row.createdAt()));
     }
 
     @Override
     public void createRollout(
             String rolloutId,
             String branch,
-            String commitHash,
+            String expectedCommitHash,
+            String previousCommitHash,
             String initiatedByUserId,
+            String initiatedLinuxServerId,
             String traceId,
             Instant now) {
-        mapper.insertRollout(rolloutId, branch, commitHash, initiatedByUserId, traceId, now);
+        mapper.insertRollout(
+                rolloutId,
+                branch,
+                expectedCommitHash,
+                previousCommitHash,
+                initiatedByUserId,
+                initiatedLinuxServerId,
+                traceId,
+                now);
+    }
+
+    @Override
+    public boolean activateRollout(String rolloutId, String commitHash, Instant now) {
+        return mapper.activateRollout(rolloutId, commitHash, now) == 1;
+    }
+
+    @Override
+    public boolean recordExpectedCommit(String rolloutId, String commitHash, Instant now) {
+        return mapper.recordExpectedCommit(rolloutId, commitHash, now) == 1;
+    }
+
+    @Override
+    public boolean abortPreparation(String rolloutId, String reason, Instant now) {
+        return mapper.abortPreparation(rolloutId, reason, now) == 1;
+    }
+
+    @Override
+    public void registerServerMembership(String linuxServerId, Instant now) {
+        mapper.upsertServerMembership(linuxServerId, now);
+    }
+
+    @Override
+    public List<String> findActiveServerMembershipIds() {
+        return mapper.findActiveServerMembershipIds();
+    }
+
+    @Override
+    @Transactional
+    public void decommissionServerMembership(String linuxServerId, Instant now) {
+        mapper.decommissionServerMembership(linuxServerId, now);
+        mapper.decommissionRolloutServers(linuxServerId, now);
+        mapper.abandonRolloutTargets(linuxServerId, now);
+        mapper.completeReadyRollouts(now);
     }
 
     @Override
@@ -65,8 +112,63 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     }
 
     @Override
-    public void markServerSynced(String rolloutId, String linuxServerId, Instant now) {
-        mapper.markServerSynced(rolloutId, linuxServerId, now);
+    @Transactional
+    public Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(
+            String linuxServerId,
+            Instant now,
+            Instant leaseUntil) {
+        return mapper.findClaimableServerSyncs(linuxServerId, now, 1).stream()
+                .findFirst()
+                .flatMap(row -> {
+                    String leaseToken = com.enterprise.testagent.common.id.RuntimeIdGenerator
+                            .publicAgentConfigRolloutLeaseToken();
+                    int updated = mapper.markServerSyncProcessing(
+                            row.rolloutId(), linuxServerId, leaseToken, leaseUntil, now);
+                    if (updated != 1) {
+                        return Optional.empty();
+                    }
+                    return Optional.of(new PublicAgentConfigRolloutSyncRequest(
+                            row.rolloutId(), row.branch(), row.commitHash(), row.initiatedByUserId(), row.traceId(),
+                            row.retryCount(), leaseUntil, leaseToken));
+                });
+    }
+
+    @Override
+    public boolean renewServerSync(
+            String rolloutId,
+            String linuxServerId,
+            String leaseToken,
+            Instant leaseUntil,
+            Instant now) {
+        return mapper.renewServerSync(rolloutId, linuxServerId, leaseToken, leaseUntil, now) == 1;
+    }
+
+    @Override
+    public boolean markServerSynced(
+            String rolloutId,
+            String linuxServerId,
+            String leaseToken,
+            Instant now) {
+        return mapper.markServerSynced(rolloutId, linuxServerId, leaseToken, now) == 1;
+    }
+
+    @Override
+    public boolean markServerSyncRetry(
+            String rolloutId,
+            String linuxServerId,
+            String leaseToken,
+            int retryCount,
+            Instant nextRetryAt,
+            String errorMessage,
+            Instant now) {
+        return mapper.markServerSyncRetry(
+                rolloutId,
+                linuxServerId,
+                leaseToken,
+                retryCount,
+                nextRetryAt,
+                errorMessage,
+                now) == 1;
     }
 
     /**
@@ -90,7 +192,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                     }
                     return new PublicAgentConfigRolloutTarget(
                             row.targetId(), row.rolloutId(), row.userId(), row.linuxServerId(), row.containerId(),
-                            row.port(), row.baseUrl(), row.retryCount(), leaseUntil, leaseToken, row.traceId());
+                            row.port(), row.processPid(), row.processStartedAt(), row.baseUrl(), row.retryCount(),
+                            leaseUntil, leaseToken, row.traceId());
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
@@ -113,6 +216,15 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     }
 
     @Override
+    public boolean renewTargetLease(
+            String targetId,
+            String leaseToken,
+            Instant leaseUntil,
+            Instant now) {
+        return mapper.renewTargetLease(targetId, leaseToken, leaseUntil, now) == 1;
+    }
+
+    @Override
     public void completeReadyRollouts(Instant now) {
         mapper.completeReadyRollouts(now);
     }
@@ -120,7 +232,7 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     private PublicAgentConfigRolloutTargetRow toRow(PublicAgentConfigRolloutTarget target) {
         return new PublicAgentConfigRolloutTargetRow(
                 target.targetId(), target.rolloutId(), target.userId(), target.linuxServerId(), target.containerId(),
-                target.port(), target.baseUrl(), target.retryCount(), target.leaseUntil(), target.leaseToken(),
-                target.traceId());
+                target.port(), target.processPid(), target.processStartedAt(), target.baseUrl(), target.retryCount(),
+                target.leaseUntil(), target.leaseToken(), target.traceId());
     }
 }

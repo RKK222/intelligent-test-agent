@@ -15,16 +15,51 @@ public interface PublicAgentConfigRolloutMapper {
 
     String findBlockingRolloutId(@Param("userId") String userId);
 
-    PublicAgentConfigRolloutSyncRow findPendingSync(@Param("linuxServerId") String linuxServerId);
+    PublicAgentConfigRolloutPreparationRow findPreparing(@Param("linuxServerId") String linuxServerId);
+
+    List<String> findActiveServerMembershipIds();
 
     List<String> findTargetWorkspaceRootPaths(@Param("targetId") String targetId);
 
     void insertRollout(
             @Param("rolloutId") String rolloutId,
             @Param("branch") String branch,
-            @Param("commitHash") String commitHash,
+            @Param("expectedCommitHash") String expectedCommitHash,
+            @Param("previousCommitHash") String previousCommitHash,
             @Param("initiatedByUserId") String initiatedByUserId,
+            @Param("initiatedLinuxServerId") String initiatedLinuxServerId,
             @Param("traceId") String traceId,
+            @Param("now") Instant now);
+
+    int activateRollout(
+            @Param("rolloutId") String rolloutId,
+            @Param("commitHash") String commitHash,
+            @Param("now") Instant now);
+
+    int recordExpectedCommit(
+            @Param("rolloutId") String rolloutId,
+            @Param("commitHash") String commitHash,
+            @Param("now") Instant now);
+
+    int abortPreparation(
+            @Param("rolloutId") String rolloutId,
+            @Param("reason") String reason,
+            @Param("now") Instant now);
+
+    void upsertServerMembership(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now);
+
+    int decommissionServerMembership(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now);
+
+    int decommissionRolloutServers(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now);
+
+    int abandonRolloutTargets(
+            @Param("linuxServerId") String linuxServerId,
             @Param("now") Instant now);
 
     void insertServer(
@@ -36,9 +71,38 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("row") PublicAgentConfigRolloutTargetRow row,
             @Param("now") Instant now);
 
+    List<PublicAgentConfigRolloutSyncRow> findClaimableServerSyncs(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now,
+            @Param("limit") int limit);
+
+    int markServerSyncProcessing(
+            @Param("rolloutId") String rolloutId,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("leaseToken") String leaseToken,
+            @Param("leaseUntil") Instant leaseUntil,
+            @Param("now") Instant now);
+
+    int renewServerSync(
+            @Param("rolloutId") String rolloutId,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("leaseToken") String leaseToken,
+            @Param("leaseUntil") Instant leaseUntil,
+            @Param("now") Instant now);
+
     int markServerSynced(
             @Param("rolloutId") String rolloutId,
             @Param("linuxServerId") String linuxServerId,
+            @Param("leaseToken") String leaseToken,
+            @Param("now") Instant now);
+
+    int markServerSyncRetry(
+            @Param("rolloutId") String rolloutId,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("leaseToken") String leaseToken,
+            @Param("retryCount") int retryCount,
+            @Param("nextRetryAt") Instant nextRetryAt,
+            @Param("errorMessage") String errorMessage,
             @Param("now") Instant now);
 
     List<PublicAgentConfigRolloutTargetRow> findClaimableTargets(
@@ -63,6 +127,12 @@ public interface PublicAgentConfigRolloutMapper {
     int markTargetDisposed(
             @Param("targetId") String targetId,
             @Param("leaseToken") String leaseToken,
+            @Param("now") Instant now);
+
+    int renewTargetLease(
+            @Param("targetId") String targetId,
+            @Param("leaseToken") String leaseToken,
+            @Param("leaseUntil") Instant leaseUntil,
             @Param("now") Instant now);
 
     int completeReadyRollouts(@Param("now") Instant now);

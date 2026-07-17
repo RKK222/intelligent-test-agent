@@ -693,6 +693,12 @@ export type UserOpencodeProcess = {
   publicConfigRolloutId?: string | null;
 };
 
+export type UserOpencodeMessageGate = {
+  messageSendAllowed: boolean;
+  messageSendBlockedReason?: string | null;
+  publicConfigRolloutId?: string | null;
+};
+
 export type UserOpencodeProcessHealthStatus =
   | "HEALTHY"
   | "UNHEALTHY"

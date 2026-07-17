@@ -441,10 +441,10 @@ describe("opencode readiness helpers", () => {
     expect(OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS).toBe(30_000);
   });
 
-  it("polls process state only while the current user is blocked by public config rollout", () => {
+  it("polls process state before and during rollout so an open page discovers a new gate", () => {
     expect(publicConfigGateRefetchInterval({ messageSendAllowed: false })).toBe(5_000);
-    expect(publicConfigGateRefetchInterval({ messageSendAllowed: true })).toBe(false);
-    expect(publicConfigGateRefetchInterval(null)).toBe(false);
+    expect(publicConfigGateRefetchInterval({ messageSendAllowed: true })).toBe(5_000);
+    expect(publicConfigGateRefetchInterval(null)).toBe(5_000);
   });
 
   it("builds weak health request only after process assignment is known", () => {

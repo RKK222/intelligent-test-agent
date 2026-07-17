@@ -10,6 +10,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessStartOpera
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessWeakHealthResponse;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunStorageMode;
@@ -707,6 +708,17 @@ final class RuntimeDtos {
      * 当前用户 opencode 进程初始化请求体，operationId 可空以兼容旧调用。
      */
     record UserOpencodeProcessInitializeRequest(String operationId) {
+    }
+
+    /** 公共配置发布消息闸门轻量响应，不包含进程健康状态。 */
+    record PublicConfigMessageGateResponse(
+            boolean messageSendAllowed,
+            String messageSendBlockedReason,
+            String publicConfigRolloutId) {
+
+        static PublicConfigMessageGateResponse from(PublicAgentConfigMessageGate.MessageGateStatus status) {
+            return new PublicConfigMessageGateResponse(status.allowed(), status.reason(), status.rolloutId());
+        }
     }
 
     /**

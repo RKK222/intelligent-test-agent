@@ -44,7 +44,7 @@ public class UserOpencodeProcessController {
         this.statusQueryService = Objects.requireNonNull(statusQueryService, "statusQueryService must not be null");
     }
 
-    /** 将持久化发布闸门附加到既有进程轮询响应，前端无需新增轮询接口。 */
+    /** 注入持久化发布闸门，供强状态响应和独立轻量轮询接口复用。 */
     @Autowired(required = false)
     void configurePublicConfigMessageGate(PublicAgentConfigMessageGate messageGate) {
         this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
@@ -64,6 +64,17 @@ public class UserOpencodeProcessController {
                     processAssignmentService.status(userId, agentId, traceId)
                             .withMessageGate(gate.allowed(), gate.reason(), gate.rolloutId()));
         });
+    }
+
+    /** 前端高频轮询只读取持久化发布闸门，不触发 manager health 或进程状态写回。 */
+    @GetMapping("/api/internal/agent/{agentId}/processes/me/message-gate")
+    public Mono<ApiResponse<RuntimeDtos.PublicConfigMessageGateResponse>> messageGate(
+            @PathVariable String agentId,
+            ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        validateOpencodeAgent(agentId);
+        return blockingResponse(exchange, traceId -> RuntimeDtos.PublicConfigMessageGateResponse.from(
+                publicConfigMessageGate.status(userId)));
     }
 
     /**

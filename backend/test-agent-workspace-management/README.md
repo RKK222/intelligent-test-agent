@@ -6,7 +6,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 ## 主要职责
 
-公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在远端更新成功后通过 `PublicAgentConfigRolloutCoordinator` 建立持久化禁发任务，广播携带 `rolloutId`。rollout 保存发起用户 ID；每台服务器从共享数据库读取待同步任务，复用该用户已加密保存的 SSH key 刷新 origin、fetch、checkout/reset 到明确 commit，再登记本机 manager 进程并确认同步，因此广播丢失、Java 重启或瞬时 Git 失败都不会解除门禁。远端已经更新且 rollout 已创建后不再转 `FAILED` 失败开放，而由定时补偿持续重试。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本；显式“拉取”会先同步当前管理员的稳定个人 worktree，成功后才推进共享副本。
+公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在任何远端 push 或共享运行副本切换前，先通过 `PublicAgentConfigRolloutCoordinator` 建立 `PREPARING` 持久化禁发任务；远端提交确认后才转为 `DRAINING` 并广播 `rolloutId`。push 回包不确定时会 fetch 验证远端是否已包含目标提交；发起 Java 退出时，同服务器补偿任务按远端事实恢复 PREPARING。每台服务器通过数据库租约认领同步任务，复用发起用户已加密保存的 SSH key 刷新 origin、fetch、checkout/reset 到明确 commit，再登记本机 manager 进程并确认同步，因此广播丢失、Java 重启、同服务器多 Java 或瞬时 Git 失败都不会提前解除门禁。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本；显式“拉取”会先同步当前管理员的稳定个人 worktree，成功后才在 PREPARING 闸门内推进共享副本。
 
 - 工作区注册、查询和分页。
 - 工作区注册时记录 `linuxServerId`，并通过 `WorkspaceServerIdentity` 提供当前 Java 进程所属服务器和默认目录。

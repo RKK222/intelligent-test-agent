@@ -12,6 +12,8 @@ public record PublicAgentConfigRolloutTargetRow(
         String linuxServerId,
         String containerId,
         int port,
+        Long processPid,
+        Instant processStartedAt,
         String baseUrl,
         int retryCount,
         Instant leaseUntil,

@@ -389,6 +389,9 @@ class UserOpencodeBackendRoutingService {
         if (isProcessWeakHealthRead(suffix, method)) {
             return Optional.empty();
         }
+        if (isProcessMessageGateRead(suffix, method)) {
+            return Optional.empty();
+        }
         if (isProcessInitializeOperationRead(suffix, method)) {
             return Optional.empty();
         }
@@ -406,6 +409,11 @@ class UserOpencodeBackendRoutingService {
     private boolean isProcessWeakHealthRead(String suffix, HttpMethod method) {
         return HttpMethod.GET.equals(method)
                 && "/processes/me/health".equals(suffix);
+    }
+
+    private boolean isProcessMessageGateRead(String suffix, HttpMethod method) {
+        return HttpMethod.GET.equals(method)
+                && "/processes/me/message-gate".equals(suffix);
     }
 
     private boolean isPlatformRuntimePath(String path, HttpMethod method) {

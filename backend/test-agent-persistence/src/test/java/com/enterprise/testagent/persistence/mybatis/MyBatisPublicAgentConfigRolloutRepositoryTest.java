@@ -28,6 +28,8 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
                 "linux-1",
                 "container-1",
                 4096,
+                123L,
+                NOW.minusSeconds(30),
                 "http://127.0.0.1:4096",
                 2,
                 null,
@@ -42,6 +44,25 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
         assertThat(targets.get(0).userId()).isEqualTo("usr_1");
         assertThat(targets.get(0).traceId()).isEqualTo("trace_rollout");
         assertThat(targets.get(0).leaseToken()).startsWith("acl_");
+        assertThat(targets.get(0).processPid()).isEqualTo(123L);
+    }
+
+    @Test
+    void serverSyncClaimUsesDatabaseLeaseToken() {
+        PublicAgentConfigRolloutMapper mapper = mock(PublicAgentConfigRolloutMapper.class);
+        MyBatisPublicAgentConfigRolloutRepository repository = new MyBatisPublicAgentConfigRolloutRepository(mapper);
+        PublicAgentConfigRolloutSyncRow row = new PublicAgentConfigRolloutSyncRow(
+                "acr_rollout", "main", "abc123", "usr-admin", "trace-rollout",
+                2, null, null);
+        when(mapper.findClaimableServerSyncs("linux-1", NOW, 1)).thenReturn(List.of(row));
+        when(mapper.markServerSyncProcessing(eq("acr_rollout"), eq("linux-1"), any(), any(), eq(NOW)))
+                .thenReturn(1);
+
+        var claim = repository.claimPendingSync("linux-1", NOW, NOW.plusSeconds(180));
+
+        assertThat(claim).isPresent();
+        assertThat(claim.get().retryCount()).isEqualTo(2);
+        assertThat(claim.get().leaseToken()).startsWith("acl_");
     }
 
     @Test

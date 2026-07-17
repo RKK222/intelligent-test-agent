@@ -71,6 +71,7 @@ import type {
   OpencodeProcessStartOperation,
   UserOpencodeProcessHealth,
   UserOpencodeProcessHealthRequest,
+  UserOpencodeMessageGate,
   PageResponse,
   PlatformUserSummary,
   PersonalWorkspace,
@@ -1070,6 +1071,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         timeoutMs: 120000
       }),
     getMyOpencodeProcess: () => request<UserOpencodeProcess>(agentPath("/processes/me")),
+    getMyOpencodeMessageGate: () =>
+      request<UserOpencodeMessageGate>(agentPath("/processes/me/message-gate")),
     getMyOpencodeProcessHealth: (params: UserOpencodeProcessHealthRequest) =>
       request<UserOpencodeProcessHealth>(agentPath(`/processes/me/health${query(params)}`)),
     initializeMyOpencodeProcess: (operationId?: string) =>

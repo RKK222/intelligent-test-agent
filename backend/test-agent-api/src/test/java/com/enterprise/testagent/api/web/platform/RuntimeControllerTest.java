@@ -351,6 +351,15 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.messageSendAllowed").isEqualTo(false)
                 .jsonPath("$.data.publicConfigRolloutId").isEqualTo("acr_rollout");
 
+        client.get()
+                .uri("/api/internal/agent/opencode/processes/me/message-gate")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.messageSendAllowed").isEqualTo(false)
+                .jsonPath("$.data.publicConfigRolloutId").isEqualTo("acr_rollout");
+
         client.post()
                 .uri("/api/internal/agent/opencode/processes/me/initialize")
                 .header("X-Trace-Id", "trace_1234567890abcdef")

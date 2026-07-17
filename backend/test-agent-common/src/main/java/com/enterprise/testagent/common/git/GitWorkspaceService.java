@@ -236,6 +236,37 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 解析任意本地或远端引用的提交，用于发布状态机在修改运行副本前固定目标版本。
+     */
+    public String resolveCommit(Path repoRoot, String ref) {
+        GitCommandResult result = executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "rev-parse", ref),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText().trim();
+    }
+
+    /**
+     * 判断 ancestor 是否已包含在 descendant 中；远端 push 回包不确定时用于确认实际结果。
+     */
+    public boolean isAncestor(Path repoRoot, String ancestor, String descendant) {
+        try {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "merge-base", "--is-ancestor", ancestor, descendant),
+                    null,
+                    DEFAULT_TIMEOUT);
+            return true;
+        } catch (PlatformException exception) {
+            Object exitCode = exception.details().get("exitCode");
+            if (exitCode instanceof Number number && number.intValue() == 1) {
+                return false;
+            }
+            // merge-base 只有退出码 1 表示“不是祖先”；超时、仓库损坏或引用错误必须继续失败关闭。
+            throw exception;
+        }
+    }
+
+    /**
      * stage 指定文件并提交；没有变更时 Git 会返回冲突错误，由业务层决定如何提示。
      */
     public void commitFiles(Path repoRoot, List<String> files, String message, String privateKey) {

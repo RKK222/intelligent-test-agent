@@ -7,10 +7,30 @@ import java.util.Optional;
  */
 public interface PublicAgentConfigRolloutCoordinator {
 
-    String begin(String branch, String commitHash, String localLinuxServerId, String initiatedByUserId, String traceId);
+    String prepare(
+            String branch,
+            String expectedCommitHash,
+            String previousCommitHash,
+            String localLinuxServerId,
+            String initiatedByUserId,
+            String traceId);
 
-    void markServerSynced(String rolloutId, String linuxServerId, String traceId);
+    void activate(String rolloutId, String commitHash);
 
-    Optional<PublicAgentConfigRolloutSyncRequest> pendingSync(String linuxServerId);
+    void recordExpectedCommit(String rolloutId, String commitHash);
+
+    void abortPreparation(String rolloutId, String reason);
+
+    Optional<PublicAgentConfigRolloutPreparation> preparing(String linuxServerId);
+
+    Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(String linuxServerId);
+
+    boolean renewServerSync(PublicAgentConfigRolloutSyncRequest request);
+
+    void markServerSynced(PublicAgentConfigRolloutSyncRequest request);
+
+    void markServerSyncRetry(PublicAgentConfigRolloutSyncRequest request, String errorMessage);
+
+    void decommissionServer(String linuxServerId);
 
 }

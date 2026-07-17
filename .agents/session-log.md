@@ -1,5 +1,23 @@
 # Session Log
 
+### 2026-07-17 - 修复公共配置发布状态机两个 P0 与进程复用风险
+
+- Why:
+  - 既有流程在远端 push、共享副本切换之前才建排空任务，进程崩溃会出现配置已发布但没有门禁/排空记录；服务器范围又来自历史 `linux_servers`，永久下线节点会让发布永远无法完成。
+  - 排空目标只保存容器和端口，旧记录遇到端口被新进程复用时可能误 dispose 新实例；已打开的工作台也只在加载时读取进程状态，不能及时发现新发布门禁。
+- What:
+  - 公共 update、update-and-push、publish 在任何远端或共享副本变更前先持久化 `PREPARING`，记录上一提交和预期提交；定时恢复程序依据远端提交祖先关系继续转入 `DRAINING`，只有能够确认未推送且共享副本已恢复时才允许 `ABORTED` 开闸。
+  - 新增独立 rollout server membership、数据库认领租约和超级管理员离线服务器退役入口；发起节点可统一插入服务器/目标记录，但每个 Java 只同步本服务器 Git、从本机 manager 快照进程并通过本机 opencode 排空，处理租约持续续期且 token 防止过期 worker 回写。
+  - target 固化 PID 与启动时间；dispose 前再次核对同一进程身份，端口已复用时绝不调用新进程。兼容迁移回填可识别的旧目标，仍缺身份的记录失败关闭并持续重试。每个进程的全部历史 Workspace Session 都空闲后只调用一次 `/global/dispose`，明确返回 `true` 才完成；用户自己的全部目标完成后立即解禁。
+  - 公共显式拉取先同步当前超管稳定个人 worktree，再更新共享运行副本；工作台新增每 5 秒轻量门禁查询，后端 Run、旁路问答、command/shell 继续复用同一持久化硬门禁。
+- How:
+  - 新增 PostgreSQL Flyway `V20260717213000`、`V20260717214000` 和对应 MyBatis XML；未修改已发布的 `V20260717173000`。真实 `.env.test` PostgreSQL 已成功应用两个迁移，membership 为当前服务器、无遗留活跃 rollout/缺身份待处理目标。
+  - JDK 25 定向回归共 145 项通过，包含占位 PREPARING 超时回滚和已确认远端提交恢复；shared-types、backend-api、agent-web typecheck 与工作台门禁测试通过；`mvn clean package -Dmaven.test.skip=true` 成功。
+  - 按 test profile 重启 backend、opencode-manager、frontend，backend readiness 为 `UP`，前端 HTTP 正常。H2 仍只是存量测试依赖，其 PostgreSQL 兼容模式不支持旧 migration 的 `timestamptz`/局部索引，未为测试篡改已发布 migration。
+- Result:
+  - 两个 P0 均已关闭：发布前具备可恢复的失败关闭状态机，服务器下线可显式退役；进程身份与属地执行保证旧目标不会跨服务器处理或误 dispose 复用端口的新进程。
+  - 修改涉及兼容性 HTTP DTO/新管理 API与关系型数据库结构；不涉及 RunEvent、generated SDK、环境配置或鉴权模型。真实双服务器物理端到端受单机环境限制，跨节点认领、fencing、重试与退役由单元和持久层测试覆盖。
+
 ### 2026-07-17 - 加固公共配置集群同步、属地排空与按用户解禁
 
 - Why:

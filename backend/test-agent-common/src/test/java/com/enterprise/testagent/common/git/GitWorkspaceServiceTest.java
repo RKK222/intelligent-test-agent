@@ -408,6 +408,34 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void resolvesCommitAndChecksAncestryForUncertainPushVerification() {
+        RecordingExecutor executor = new RecordingExecutor("abc123\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThat(service.resolveCommit(tempDir, "origin/main")).isEqualTo("abc123");
+        assertThat(service.isAncestor(tempDir, "abc123", "origin/main")).isTrue();
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-C", tempDir.toString(), "rev-parse", "origin/main"), null),
+                new Call(List.of("git", "-C", tempDir.toString(), "merge-base", "--is-ancestor",
+                        "abc123", "origin/main"), null));
+    }
+
+    @Test
+    void ancestryOnlyMapsGitExitCodeOneToFalse() {
+        GitWorkspaceService notAncestor = new GitWorkspaceService((command, privateKey, timeout) -> {
+            throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "not ancestor", Map.of("exitCode", 1));
+        });
+        GitWorkspaceService brokenRepository = new GitWorkspaceService((command, privateKey, timeout) -> {
+            throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "bad revision", Map.of("exitCode", 128));
+        });
+
+        assertThat(notAncestor.isAncestor(tempDir, "abc123", "origin/main")).isFalse();
+        assertThatThrownBy(() -> brokenRepository.isAncestor(tempDir, "abc123", "origin/main"))
+                .isInstanceOf(PlatformException.class);
+    }
+
+    @Test
     void reportsCleanWorktreeFromPorcelainStatus() {
         RecordingExecutor executor = new RecordingExecutor("\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);

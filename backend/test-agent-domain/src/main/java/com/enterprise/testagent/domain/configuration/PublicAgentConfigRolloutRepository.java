@@ -14,15 +14,29 @@ public interface PublicAgentConfigRolloutRepository {
     /** 所有服务器同步前阻止全部用户；同步后仅阻止仍有未 dispose 旧实例的用户。 */
     Optional<String> findBlockingRolloutId(String userId);
 
-    Optional<PublicAgentConfigRolloutSyncRequest> findPendingSync(String linuxServerId);
+    Optional<PublicAgentConfigRolloutPreparation> findPreparing(String linuxServerId);
 
     void createRollout(
             String rolloutId,
             String branch,
-            String commitHash,
+            String expectedCommitHash,
+            String previousCommitHash,
             String initiatedByUserId,
+            String initiatedLinuxServerId,
             String traceId,
             Instant now);
+
+    boolean activateRollout(String rolloutId, String commitHash, Instant now);
+
+    boolean recordExpectedCommit(String rolloutId, String commitHash, Instant now);
+
+    boolean abortPreparation(String rolloutId, String reason, Instant now);
+
+    void registerServerMembership(String linuxServerId, Instant now);
+
+    List<String> findActiveServerMembershipIds();
+
+    void decommissionServerMembership(String linuxServerId, Instant now);
 
     void addServer(String rolloutId, String linuxServerId, Instant now);
 
@@ -31,7 +45,32 @@ public interface PublicAgentConfigRolloutRepository {
     /** 返回该目标进程曾绑定过的全部工作区根目录，排空检查不得退化为默认 cwd。 */
     List<String> findTargetWorkspaceRootPaths(String targetId);
 
-    void markServerSynced(String rolloutId, String linuxServerId, Instant now);
+    Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(
+            String linuxServerId,
+            Instant now,
+            Instant leaseUntil);
+
+    boolean renewServerSync(
+            String rolloutId,
+            String linuxServerId,
+            String leaseToken,
+            Instant leaseUntil,
+            Instant now);
+
+    boolean markServerSynced(
+            String rolloutId,
+            String linuxServerId,
+            String leaseToken,
+            Instant now);
+
+    boolean markServerSyncRetry(
+            String rolloutId,
+            String linuxServerId,
+            String leaseToken,
+            int retryCount,
+            Instant nextRetryAt,
+            String errorMessage,
+            Instant now);
 
     List<PublicAgentConfigRolloutTarget> claimTargets(
             String linuxServerId,
@@ -48,6 +87,12 @@ public interface PublicAgentConfigRolloutRepository {
             Instant now);
 
     boolean markTargetDisposed(String targetId, String leaseToken, Instant now);
+
+    boolean renewTargetLease(
+            String targetId,
+            String leaseToken,
+            Instant leaseUntil,
+            Instant now);
 
     void completeReadyRollouts(Instant now);
 

@@ -1091,3 +1091,19 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 - 新增 `(rollout_id, user_id, status)` 索引，支持用户级门禁查询。
 
 该迁移只包含兼容性回填、列、索引和注释，不写测试或演示数据。历史 rollout 的发起人允许为空；新任务始终写入发起人。服务器同步必须取得本机 manager 实时清单后才可从 `PENDING` 转为 `SYNCED`，因此发布瞬间离线的持久化服务器会保持全员门禁并由补偿任务持续重试。
+
+## V20260717213000 公共配置发布完整状态机
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260717213000__complete_public_agent_config_rollout_state_machine.sql` 补齐发布和排空的并发边界：
+
+- rollout 增加发起服务器和发布前共享副本提交 `previous_commit_hash`，纯拉取时 `commit_hash` 在 `PREPARING` 可空；共享运行副本直接提交场景会先写 `PENDING_LOCAL_COMMIT` 占位，最终本地 commit 产生后在 push 前回写，避免进程崩溃恢复时把旧远端 HEAD 误认成本次发布结果。占位值尚未回写说明 push 必然还未发起，超过 5 分钟恢复窗口后可先恢复共享副本再转 `ABORTED`；实际 commit 已回写时，远端未包含目标提交也只有先完成同样恢复才允许开闸。唯一活跃索引同时覆盖 `PREPARING/DRAINING`，保证远端 push 或共享副本修改前已经建立全员消息门禁。
+- 新增 `public_agent_config_rollout_memberships`，把实际发布成员与 `linux_servers` 历史拓扑分离。新版 Java 自动登记 `ACTIVE`，临时离线成员继续参与；永久下线服务器由超级管理员显式置为 `DECOMMISSIONED`。
+- server 行增加重试、下次执行、租约和 fencing token；同一 Linux 服务器上的多个 Java 只有数据库认领者可以操作本机共享 Git 副本和确认 manager 快照。
+- target 增加 `process_pid/process_started_at`；worker 每次远端调用前后续租，dispose 前按 PID 和启动时间复核 manager 当前进程，避免端口复用后误 dispose 新实例。
+- 无法按服务器、容器、端口、PID 和启动时间映射用户的 target 保持 `user_id=null`，该目标完成前全员门禁，不允许因历史进程表缺失而提前放行。
+
+服务器退役会把当前 rollout 中该服务器置为 `DECOMMISSIONED`、残留 target 置为 `ABANDONED`，仅用于运维明确确认该节点永久离开集群的场景。迁移不自动导入历史 `linux_servers`，也不写测试、演示或个人数据。
+
+## V20260717214000 公共配置发布进程身份兼容回填
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260717214000__backfill_public_agent_rollout_process_identity.sql` 为升级时仍处于排空状态的存量 target，按 `linuxServerId + containerId + port` 从平台进程表回填 PID 和启动时间。旧进程表使用无时区 timestamp，迁移按当前数据库会话时区转换成绝对时间，与既有 JDBC 读写语义保持一致；无法可靠回填的行继续保留空身份，worker 会持久化重试并保持消息门禁，不会把端口复用或未知进程误判成已 dispose。

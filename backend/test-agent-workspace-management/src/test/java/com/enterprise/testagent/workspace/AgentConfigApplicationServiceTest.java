@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.error.ErrorCode;
@@ -25,6 +26,7 @@ import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
@@ -238,14 +240,84 @@ class AgentConfigApplicationServiceTest {
                 git,
                 new RecordingBroadcastPublisher());
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
-        when(coordinator.pendingSync("linux-1")).thenReturn(Optional.of(new PublicAgentConfigRolloutSyncRequest(
-                "acr_retry", "main", "commit_remote", ADMIN.value(), "trace_retry")));
+        PublicAgentConfigRolloutSyncRequest request = new PublicAgentConfigRolloutSyncRequest(
+                "acr_retry", "main", "commit_remote", ADMIN.value(), "trace_retry",
+                0, NOW.plusSeconds(180), "acl_sync");
+        when(coordinator.claimPendingSync("linux-1")).thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
         service.setPublicConfigRolloutCoordinator(coordinator);
 
         service.retryPendingPublicConfigSync();
 
         assertThat(git.resetCommit).isEqualTo("commit_remote");
-        verify(coordinator).markServerSynced("acr_retry", "linux-1", "trace_retry");
+        verify(coordinator).markServerSynced(request);
+    }
+
+    @Test
+    void preparingWithoutRecordedLocalCommitRollsBackAndAbortsAfterDeadline() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.preparing("linux-1")).thenReturn(Optional.of(new PublicAgentConfigRolloutPreparation(
+                "acr_preparing_local",
+                "main",
+                "PENDING_LOCAL_COMMIT",
+                "commit_previous",
+                ADMIN.value(),
+                "linux-1",
+                "trace_preparing_local",
+                NOW.minusSeconds(301))));
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        service.retryPreparingPublicConfigRollout();
+
+        assertThat(git.resetCommit).isEqualTo("commit_previous");
+        verify(coordinator).abortPreparation("acr_preparing_local", "LOCAL_COMMIT_NOT_RECORDED");
+    }
+
+    @Test
+    void preparingWithExpectedRemoteCommitActivatesAndBroadcastsRecovery() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.remoteCommit = "commit_expected";
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                publisher);
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.preparing("linux-1")).thenReturn(Optional.of(new PublicAgentConfigRolloutPreparation(
+                "acr_preparing_remote",
+                "main",
+                "commit_expected",
+                "commit_previous",
+                ADMIN.value(),
+                "linux-1",
+                "trace_preparing_remote",
+                NOW.minusSeconds(181))));
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        service.retryPreparingPublicConfigRollout();
+
+        verify(coordinator).activate("acr_preparing_remote", "commit_expected");
+        assertThat(publisher.events).singleElement().satisfies(event ->
+                assertThat(event.payload())
+                        .containsEntry("rolloutId", "acr_preparing_remote")
+                        .containsEntry("reason", "preparing-recovery"));
     }
 
     @Test
@@ -291,6 +363,8 @@ class AgentConfigApplicationServiceTest {
                 new InMemoryAgentConfigRepository(),
                 git,
                 new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        service.setPublicConfigRolloutCoordinator(coordinator);
 
         assertThatThrownBy(() -> service.updatePublicConfig(
                 "main",
@@ -301,6 +375,7 @@ class AgentConfigApplicationServiceTest {
                 .isInstanceOf(PlatformException.class)
                 .hasMessageContaining("Git 工作树存在未提交变更");
         assertThat(git.resetCommit).isNull();
+        verifyNoInteractions(coordinator);
     }
 
     @Test
@@ -1104,8 +1179,13 @@ class AgentConfigApplicationServiceTest {
                 git,
                 publisher);
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
-        when(coordinator.begin("main", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
+        when(coordinator.prepare("main", "commit_base", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
                 .thenReturn("acr_publish");
+        PublicAgentConfigRolloutSyncRequest syncRequest = new PublicAgentConfigRolloutSyncRequest(
+                "acr_publish", "main", "commit_base", ADMIN.value(), "trace_publish",
+                0, NOW.plusSeconds(180), "acl_publish");
+        when(coordinator.claimPendingSync("linux-1")).thenReturn(Optional.of(syncRequest));
+        when(coordinator.renewServerSync(syncRequest)).thenReturn(true);
         service.setPublicConfigRolloutCoordinator(coordinator);
 
         AgentConfigResponses.AgentConfigOperationResponse response = service.publicPublish(
@@ -1123,8 +1203,9 @@ class AgentConfigApplicationServiceTest {
                 .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
         assertThat(publisher.events).hasSize(1);
         assertThat(publisher.events.get(0).payload()).containsEntry("rolloutId", "acr_publish");
-        verify(coordinator).begin("main", "commit_base", "linux-1", ADMIN.value(), "trace_publish");
-        verify(coordinator).markServerSynced("acr_publish", "linux-1", "trace_publish");
+        verify(coordinator).prepare("main", "commit_base", "commit_base", "linux-1", ADMIN.value(), "trace_publish");
+        verify(coordinator).activate("acr_publish", "commit_base");
+        verify(coordinator).markServerSynced(syncRequest);
     }
 
     @Test
@@ -1624,6 +1705,7 @@ class AgentConfigApplicationServiceTest {
         private String stagedAfterAdd = "M opencode/agents/review.md";
         // 模拟当前 HEAD；commit 后会推进到下一个 commit id
         private String currentHead = "commit_base";
+        private String remoteCommit = "commit_base";
         private final List<String> headHistory = new ArrayList<>();
         private int stagedAllCallCount;
         private String lastCommitMessage;
@@ -1678,6 +1760,16 @@ class AgentConfigApplicationServiceTest {
         @Override
         public String headCommit(Path repoRoot) {
             return currentHead;
+        }
+
+        @Override
+        public String resolveCommit(Path repoRoot, String ref) {
+            return remoteCommit;
+        }
+
+        @Override
+        public boolean isAncestor(Path repoRoot, String ancestor, String descendant) {
+            return false;
         }
 
         @Override

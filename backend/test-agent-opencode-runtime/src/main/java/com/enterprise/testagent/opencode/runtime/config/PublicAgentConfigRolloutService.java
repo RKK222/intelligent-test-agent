@@ -9,6 +9,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
@@ -27,6 +28,7 @@ import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -48,6 +50,7 @@ public class PublicAgentConfigRolloutService
     private static final int CLAIM_LIMIT = 1;
     private static final int TOPOLOGY_LIMIT = 10_000;
     private static final Duration TARGET_LEASE = Duration.ofSeconds(60);
+    private static final Duration SERVER_SYNC_LEASE = Duration.ofMinutes(3);
     private static final Duration RUNTIME_TIMEOUT = Duration.ofSeconds(10);
 
     private final PublicAgentConfigRolloutRepository repository;
@@ -75,14 +78,13 @@ public class PublicAgentConfigRolloutService
         this.retryDelay = Duration.ofMillis(Math.max(1000L, retryDelayMillis));
     }
 
-    /**
-     * 推送成功后立即建立持久化闸门，并登记当前应参与同步的服务器。
-     */
+    /** 在任何远端 push 或共享运行副本切换前建立 PREPARING 闸门。 */
     @Override
     @Transactional
-    public String begin(
+    public String prepare(
             String branch,
-            String commitHash,
+            String expectedCommitHash,
+            String previousCommitHash,
             String localLinuxServerId,
             String initiatedByUserId,
             String traceId) {
@@ -94,19 +96,29 @@ public class PublicAgentConfigRolloutService
         });
         String rolloutId = RuntimeIdGenerator.publicAgentConfigRolloutId();
         Instant now = Instant.now();
-        repository.createRollout(rolloutId, branch, commitHash, initiatedByUserId, traceId, now);
+        repository.registerServerMembership(localLinuxServerId, now);
+        repository.createRollout(
+                rolloutId,
+                branch,
+                expectedCommitHash,
+                previousCommitHash,
+                initiatedByUserId,
+                localLinuxServerId,
+                traceId,
+                now);
 
-        List<ManagerRuntimeSnapshot> snapshots = heartbeatStore.liveManagerSnapshots();
         Set<String> serverIds = new LinkedHashSet<>();
         serverIds.add(localLinuxServerId);
-        // 服务器拓扑表是离线节点的持久化清单；只看 Redis 短 TTL 心跳会漏掉发布时恰好离线的服务器。
-        processRepository.findLinuxServers(TOPOLOGY_LIMIT)
-                .forEach(server -> serverIds.add(server.linuxServerId().value()));
+        // 发布成员独立于 linux_servers 历史拓扑；离线但未退役的成员仍会被保留，历史废弃记录不会误阻塞。
+        serverIds.addAll(repository.findActiveServerMembershipIds());
         Set<LinuxServerId> liveBackendServerIds = heartbeatStore.liveBackendServerIds();
         if (liveBackendServerIds != null) {
             liveBackendServerIds.forEach(serverId -> serverIds.add(serverId.value()));
         }
-        snapshots.forEach(snapshot -> serverIds.add(snapshot.container().linuxServerId().value()));
+        heartbeatStore.liveManagerSnapshots()
+                .forEach(snapshot -> serverIds.add(snapshot.container().linuxServerId().value()));
+        // 在线服务器立即补登记，消除刚升级实例尚未来得及执行周期 membership 刷新的窗口。
+        serverIds.forEach(serverId -> repository.registerServerMembership(serverId, now));
         serverIds.forEach(serverId -> repository.addServer(rolloutId, serverId, now));
 
         return rolloutId;
@@ -114,20 +126,124 @@ public class PublicAgentConfigRolloutService
 
     @Override
     @Transactional
-    public void markServerSynced(String rolloutId, String linuxServerId, String traceId) {
+    public void activate(String rolloutId, String commitHash) {
+        if (!repository.activateRollout(rolloutId, commitHash, Instant.now())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "公共 Agent/Skill 配置发布不再处于准备状态",
+                    Map.of("rolloutId", rolloutId));
+        }
+    }
+
+    @Override
+    public void recordExpectedCommit(String rolloutId, String commitHash) {
+        if (!repository.recordExpectedCommit(rolloutId, commitHash, Instant.now())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "公共 Agent/Skill 配置发布不再处于准备状态",
+                    Map.of("rolloutId", rolloutId));
+        }
+    }
+
+    @Override
+    @Transactional
+    public void abortPreparation(String rolloutId, String reason) {
+        repository.abortPreparation(rolloutId, safeError(reason), Instant.now());
+    }
+
+    @Override
+    public Optional<PublicAgentConfigRolloutPreparation> preparing(String linuxServerId) {
+        return repository.findPreparing(linuxServerId);
+    }
+
+    @Override
+    public Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(String linuxServerId) {
+        Instant now = Instant.now();
+        return repository.claimPendingSync(linuxServerId, now, now.plus(SERVER_SYNC_LEASE));
+    }
+
+    @Override
+    public boolean renewServerSync(PublicAgentConfigRolloutSyncRequest request) {
+        Instant now = Instant.now();
+        return repository.renewServerSync(
+                request.rolloutId(),
+                backendInstanceIdentity.linuxServerId(),
+                request.leaseToken(),
+                now.plus(SERVER_SYNC_LEASE),
+                now);
+    }
+
+    @Override
+    @Transactional
+    public void markServerSynced(PublicAgentConfigRolloutSyncRequest request) {
+        if (!renewServerSync(request)) {
+            return;
+        }
         Instant now = Instant.now();
         // 每台服务器完成 Git 更新后才采集本机 manager 进程清单，确保表中对应的是切换窗口内的存量实例。
-        snapshotServerTargets(rolloutId, linuxServerId, now);
-        repository.markServerSynced(rolloutId, linuxServerId, now);
+        snapshotServerTargets(
+                request.rolloutId(),
+                backendInstanceIdentity.linuxServerId(),
+                request.traceId(),
+                now);
+        repository.markServerSynced(
+                request.rolloutId(),
+                backendInstanceIdentity.linuxServerId(),
+                request.leaseToken(),
+                now);
         repository.completeReadyRollouts(now);
     }
 
     @Override
-    public Optional<PublicAgentConfigRolloutSyncRequest> pendingSync(String linuxServerId) {
-        return repository.findPendingSync(linuxServerId);
+    public void markServerSyncRetry(PublicAgentConfigRolloutSyncRequest request, String errorMessage) {
+        Instant now = Instant.now();
+        int retryCount = request.retryCount() + 1;
+        repository.markServerSyncRetry(
+                request.rolloutId(),
+                backendInstanceIdentity.linuxServerId(),
+                request.leaseToken(),
+                retryCount,
+                now.plus(retryDelay.multipliedBy(Math.min(retryCount, 6))),
+                safeError(errorMessage),
+                now);
     }
 
-    private void snapshotServerTargets(String rolloutId, String linuxServerId, Instant now) {
+    /** 每台新版 Java 定期登记自身为发布成员；历史 linux_servers 行不会被自动导入。 */
+    @Scheduled(
+            fixedDelayString = "${test-agent.public-agent-config.rollout.membership-refresh-delay-ms:30000}",
+            initialDelayString = "${test-agent.public-agent-config.rollout.membership-initial-delay-ms:1000}")
+    public void registerLocalServerMembership() {
+        repository.registerServerMembership(backendInstanceIdentity.linuxServerId(), Instant.now());
+    }
+
+    /** 只有已离线服务器可显式退役；退役是永久离开当前集群的运维确认。 */
+    @Override
+    @Transactional
+    public void decommissionServer(String linuxServerId) {
+        repository.findPreparing(linuxServerId).ifPresent(preparation -> {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "服务器仍有待确认的公共配置发布，不能退役",
+                    Map.of("linuxServerId", linuxServerId, "rolloutId", preparation.rolloutId()));
+        });
+        boolean currentServer = backendInstanceIdentity.linuxServerId().equals(linuxServerId);
+        Set<LinuxServerId> liveBackendServerIds = heartbeatStore.liveBackendServerIds();
+        boolean liveBackend = liveBackendServerIds != null
+                && liveBackendServerIds.stream().anyMatch(id -> id.value().equals(linuxServerId));
+        boolean liveManager = heartbeatStore.liveManagerSnapshots().stream()
+                .anyMatch(snapshot -> snapshot.container().linuxServerId().value().equals(linuxServerId));
+        if (currentServer || liveBackend || liveManager) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "在线服务器不能退役，请先停止该服务器上的 Java 和 opencode-manager",
+                    Map.of("linuxServerId", linuxServerId));
+        }
+        Instant now = Instant.now();
+        repository.decommissionServerMembership(linuxServerId, now);
+        repository.completeReadyRollouts(now);
+    }
+
+    private void snapshotServerTargets(String rolloutId, String linuxServerId, String traceId, Instant now) {
         List<ManagerRuntimeSnapshot> managers = heartbeatStore.liveManagerSnapshots().stream()
                 .filter(manager -> linuxServerId.equals(manager.container().linuxServerId().value()))
                 .toList();
@@ -137,33 +253,54 @@ public class PublicAgentConfigRolloutService
                     "目标服务器 manager 进程清单尚未就绪",
                     Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
         }
+        List<ManagedOpencodeProcessSnapshot> managedProcesses = managers.stream()
+                .flatMap(manager -> manager.managedProcesses().stream())
+                .toList();
+        boolean identityMissing = managedProcesses.stream()
+                .anyMatch(process -> process.pid() == null
+                        || process.pid() <= 0
+                        || process.startedAt() == null
+                        || process.baseUrl() == null
+                        || process.baseUrl().isBlank());
+        if (identityMissing) {
+            throw new PlatformException(
+                    ErrorCode.OPENCODE_UNAVAILABLE,
+                    "目标服务器 manager 进程清单缺少 PID 或启动时间，不能安全 dispose",
+                    Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
+        }
         Map<ProcessKey, String> usersByProcess = new HashMap<>();
         for (OpencodeServerProcess process : processRepository.findOpencodeServerProcesses(TOPOLOGY_LIMIT)) {
             usersByProcess.putIfAbsent(
                     new ProcessKey(
                             process.linuxServerId().value(),
                             process.containerId().value(),
-                            process.port()),
+                            process.port(),
+                            process.pid(),
+                            normalizedStartedAt(process.startedAt())),
                     process.userId().value());
         }
         for (ManagerRuntimeSnapshot manager : managers) {
             String containerId = manager.container().containerId().value();
             for (ManagedOpencodeProcessSnapshot process : manager.managedProcesses()) {
-                if (process.baseUrl() == null || process.baseUrl().isBlank()) {
-                    continue;
-                }
                 repository.addTarget(new PublicAgentConfigRolloutTarget(
                         RuntimeIdGenerator.publicAgentConfigRolloutTargetId(),
                         rolloutId,
-                        usersByProcess.get(new ProcessKey(linuxServerId, containerId, process.port())),
+                        usersByProcess.get(new ProcessKey(
+                                linuxServerId,
+                                containerId,
+                                process.port(),
+                                process.pid(),
+                                normalizedStartedAt(process.startedAt()))),
                         linuxServerId,
                         containerId,
                         process.port(),
+                        process.pid(),
+                        process.startedAt(),
                         process.baseUrl().trim(),
                         0,
                         null,
                         null,
-                        null), now);
+                        traceId), now);
             }
         }
     }
@@ -200,6 +337,14 @@ public class PublicAgentConfigRolloutService
     private void drainTarget(PublicAgentConfigRolloutTarget target) {
         Instant now = Instant.now();
         try {
+            if (!renewTargetLease(target)) {
+                return;
+            }
+            if (target.processPid() == null || target.processStartedAt() == null) {
+                // 升级前已创建但无法可靠回填身份的 target 必须失败关闭，禁止把端口上的进程误判为已释放。
+                retry(target, "TARGET_PROCESS_IDENTITY_MISSING", now);
+                return;
+            }
             ProcessPresence presence = processPresence(target);
             if (presence == ProcessPresence.UNKNOWN) {
                 retry(target, "MANAGER_SNAPSHOT_UNAVAILABLE", now);
@@ -211,13 +356,23 @@ public class PublicAgentConfigRolloutService
                 return;
             }
             ExecutionNode node = targetNode(target, now);
-            for (String rootPath : repository.findTargetWorkspaceRootPaths(target.targetId())) {
+            List<String> rootPaths = repository.findTargetWorkspaceRootPaths(target.targetId());
+            if (!renewTargetLease(target)) {
+                return;
+            }
+            for (String rootPath : rootPaths) {
+                if (!renewTargetLease(target)) {
+                    return;
+                }
                 String directory = workspacePathResolver.resolve(rootPath).toString();
                 JsonNode sessionStatus = runtime.runtime(new AgentRuntimeCommand(
                                 node, "GET", "/session/status", directory, null, Map.of(), null,
                                 target.traceId()))
                         .map(AgentRuntimeResult::body)
                         .block(RUNTIME_TIMEOUT);
+                if (!renewTargetLease(target)) {
+                    return;
+                }
                 SessionActivity activity = sessionActivity(sessionStatus);
                 if (activity == SessionActivity.BUSY) {
                     retry(target, "SESSION_RUNNING", now);
@@ -228,11 +383,19 @@ public class PublicAgentConfigRolloutService
                     return;
                 }
             }
+            // dispose 前再次续租并核对原进程身份，避免长工作区清单期间端口已被新进程复用。
+            if (!renewTargetLease(target) || processPresence(target) != ProcessPresence.PRESENT) {
+                retry(target, "PROCESS_IDENTITY_CHANGED", Instant.now());
+                return;
+            }
             JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
                             node, "POST", "/global/dispose", null, null, Map.of(), Map.of(),
                             target.traceId()))
                     .map(AgentRuntimeResult::body)
                     .block(RUNTIME_TIMEOUT);
+            if (!renewTargetLease(target)) {
+                return;
+            }
             // 只有 opencode 明确返回 true 才确认释放；空值、非布尔或 false 均进入重试，避免误解除闸门。
             if (disposed == null || !disposed.isBoolean() || !disposed.booleanValue()) {
                 retry(target, "DISPOSE_REJECTED", now);
@@ -242,6 +405,12 @@ public class PublicAgentConfigRolloutService
         } catch (Exception exception) {
             retry(target, safeError(exception.getMessage()), now);
         }
+    }
+
+    private boolean renewTargetLease(PublicAgentConfigRolloutTarget target) {
+        Instant now = Instant.now();
+        return repository.renewTargetLease(
+                target.targetId(), target.leaseToken(), now.plus(TARGET_LEASE), now);
     }
 
     private void retry(PublicAgentConfigRolloutTarget target, String error, Instant now) {
@@ -293,9 +462,20 @@ public class PublicAgentConfigRolloutService
                     || !target.containerId().equals(manager.container().containerId().value())) {
                 continue;
             }
-            boolean present = manager.managedProcesses().stream()
-                    .anyMatch(process -> process.port() == target.port());
-            return present ? ProcessPresence.PRESENT : ProcessPresence.ABSENT;
+            Optional<ManagedOpencodeProcessSnapshot> current = manager.managedProcesses().stream()
+                    .filter(process -> process.port() == target.port())
+                    .findFirst();
+            if (current.isEmpty()) {
+                return ProcessPresence.ABSENT;
+            }
+            ManagedOpencodeProcessSnapshot process = current.get();
+            if (process.pid() == null || process.startedAt() == null) {
+                return ProcessPresence.UNKNOWN;
+            }
+            boolean sameIdentity = process.pid().equals(target.processPid())
+                    && normalizedStartedAt(process.startedAt())
+                            .equals(normalizedStartedAt(target.processStartedAt()));
+            return sameIdentity ? ProcessPresence.PRESENT : ProcessPresence.ABSENT;
         }
         return ProcessPresence.UNKNOWN;
     }
@@ -305,7 +485,17 @@ public class PublicAgentConfigRolloutService
         return normalized.length() <= 1000 ? normalized : normalized.substring(0, 1000);
     }
 
-    private record ProcessKey(String linuxServerId, String containerId, int port) {
+    /** PostgreSQL timestamptz 按微秒保存，比较前统一精度，避免纳秒截断导致同一进程被误判。 */
+    private Instant normalizedStartedAt(Instant value) {
+        return value == null ? null : value.truncatedTo(ChronoUnit.MICROS);
+    }
+
+    private record ProcessKey(
+            String linuxServerId,
+            String containerId,
+            int port,
+            Long processPid,
+            Instant processStartedAt) {
     }
 
     private enum ProcessPresence {

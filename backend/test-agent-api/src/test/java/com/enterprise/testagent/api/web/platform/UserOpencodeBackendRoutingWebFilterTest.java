@@ -140,6 +140,11 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void messageGateReadStaysOnCurrentBackendBecauseItOnlyReadsSharedRolloutState() {
+        assertRequestIsNotForwarded("/api/internal/agent/opencode/processes/me/message-gate");
+    }
+
+    @Test
     void routesConfigurationWorkspaceCreationBecauseItRequiresUserOpencodeServer() {
         assertRequestIsForwarded("/api/internal/platform/configuration-management/applications/app_1/workspaces");
     }

@@ -119,6 +119,7 @@ import {
   nextCenterModeAfterVcsRefresh,
   notifyOnAttention,
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
+  PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
   OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
   opencodeAvailabilityFromHealth,
@@ -127,7 +128,6 @@ import {
   parseCommand,
   prepareAutoRetryRun,
   promptFromParts,
-  publicConfigGateRefetchInterval,
   resolveRetryDeadline,
   retryCountdownSeconds,
   retryExpirationDecision,
@@ -908,9 +908,31 @@ const opencodeProcessQuery = useQuery({
   queryFn: () => api.getMyOpencodeProcess(),
   retry: false,
   refetchOnWindowFocus: false,
-  refetchInterval: (query) => publicConfigGateRefetchInterval(query.state.data)
+  refetchInterval: false
 });
-const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
+const publicConfigMessageGateQuery = useQuery({
+  queryKey: computed(() => ["runtime", "opencode-process", "message-gate", authStore.token ?? ""] as const),
+  enabled: opencodeProcessEnabled,
+  queryFn: () => api.getMyOpencodeMessageGate(),
+  retry: false,
+  refetchOnWindowFocus: true,
+  refetchInterval: PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS
+});
+const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => {
+  const process = opencodeProcessQuery.data.value;
+  if (!process) {
+    return null;
+  }
+  const gate = publicConfigMessageGateQuery.data.value;
+  return gate
+    ? {
+        ...process,
+        messageSendAllowed: gate.messageSendAllowed,
+        messageSendBlockedReason: gate.messageSendBlockedReason,
+        publicConfigRolloutId: gate.publicConfigRolloutId
+      }
+    : process;
+});
 const opencodeAvailability = ref<OpencodeAvailabilityState>({ ready: false, source: "process" });
 const opencodeHealthRequest = computed(() => opencodeHealthRequestFromProcess(opencodeProcessStatus.value));
 const opencodeHealthQuery = useQuery({
