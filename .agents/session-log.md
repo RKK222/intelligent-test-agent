@@ -14,6 +14,20 @@
 - Result:
   - 本地主干同时保留远端工作区文件功能、本地加载竞态保护和 Mermaid 功能，应用级 Agent 不再可能从 feature workspace 读取后误写个人 workspace，删除/改名/路由切换也不会残留失效或永久 loading 的 tab。
   - 不改变 HTTP API、文件 WebSocket wire、RunEvent、数据库、鉴权或环境配置；仅增加前端合成 tab 身份中的 workspace 路由信息，兼容旧 tab 解析但禁止旧 tab 回退到个人 workspace 写入。生产构建仍只有既有大 chunk 提示，无未完成代码事项。
+### 2026-07-17 - 基于最新工作区文件功能重建企业离线包
+
+- Why:
+  - 用户要求在工作区文件编辑、上传、复制移动、目录删除、spec 发布限制和文件树样式优化全部合入主干后，再生成一份最新企业内网完整包。
+- What:
+  - 打包前确认 `main`、`origin/main`、`github/main` 均为 `9789218d` 且工作树干净；重新构建完整企业 ZIP，包含当前所有工作区文件能力及最新 UI 样式。
+  - 包内继续统一使用 `/data/0709/test-agent-internal-release.zip` 作为上传归档默认路径；不包含实际环境文件或独立私钥文件，后端 JAR 保留 classpath `rsa-private.key`。公共 Agent 配置未改动。
+- How:
+  - 执行标准企业打包，完成 SHA-256、ZIP/tar 完整性、后端/前端两个 `--validate-only`、Linux/amd64 Worker 架构和 OpenCode 1.17.8 校验。
+  - 使用 `.env.test` / `test` profile 重新编译并重启 backend、opencode-manager、frontend；检查 health/readiness、前端 HTTP、登录 CORS、Manager 日志与 RSA 私钥加载日志。
+  - 重跑 file-explorer 23 项测试，以及 `WorkspaceFileServiceTest`、`ManagedWorkspaceApplicationServiceTest`、`WorkspaceFileWebSocketHandlerTest`、`ManagedWorkspaceControllerTest` 共 80 项后端测试。
+- Result:
+  - 新包 `deploy/internal/dist/test-agent-internal-release.zip` 为 216858058 bytes（约 207 MiB），SHA-256 `04110b83f20966d3b049876a8b2f2207507259df3725480b45da38bf7a804f1f`，全部离线校验通过。
+  - 本地 health/readiness 为 `UP`，前端与 CORS 为 200，定向测试 103/103；本包新增向后兼容的工作区文件 WebSocket RPC/删除语义并收紧 spec 发布权限，不改变 RunEvent 或数据库结构。
 
 ### 2026-07-17 - 优化工作区文件上传、新增与删除对话框样式
 
