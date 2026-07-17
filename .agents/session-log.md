@@ -16,6 +16,17 @@
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器锚点与快捷箭头交互
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器平行四边形与梯形锚点布局
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器平行四边形与梯形锚点布局及节点 ID 样式
+#### 2026-07-17 - 统一历史工作状态展开交互
+
+- Why:
+  - 非最后一轮历史状态展开后会移除原 Activity 按钮并换成状态块右上角收起箭头，与最后一轮完成态的固定摘要行交互不一致。
+- What:
+  - 历史状态固定保留摘要行和同一 Activity 按钮，按钮动态切换展开/收起语义；状态块在摘要行下方按需显示，反馈入口保持同排，独立收起箭头删除。
+- How:
+  - 保留 `expandedHistoricalStatusKey` 单开状态，只调整 `TimelineRow` 模板和样式；组件测试覆盖按钮身份、`aria-expanded`、DOM 顺序、再次点击收起、新增轮次自动关闭和多个历史入口切换。
+- Result:
+  - agent-chat 时间线 38 项测试、全量前端 Vitest（1183 passed / 1 skipped）、lint、typecheck、production build 和 `git diff --check` 均通过；未修改 API、RunEvent、DTO、数据库、后端、安全或兼容性契约。
+
 ### 2026-07-17 - 增强 Mermaid Flowchart 等比缩放与原生样式编辑
 
 - Why:
