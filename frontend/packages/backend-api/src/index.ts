@@ -881,6 +881,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<void>(`${agentConfigBase}/public/stage`, { method: "POST", body: JSON.stringify({ files, worktreeId }) }),
     unstagePublicAgentFiles: (files: string[], worktreeId?: string | null) =>
       request<void>(`${agentConfigBase}/public/unstage`, { method: "POST", body: JSON.stringify({ files, worktreeId }) }),
+    discardPublicAgentFiles: (files: string[], worktreeId?: string | null) =>
+      request<void>(`${agentConfigBase}/public/discard`, { method: "POST", body: JSON.stringify({ files, worktreeId }) }),
     commitPublicAgentConfig: (payload: AgentConfigCommitPayload) =>
       request<AgentConfigOperation>(`${agentConfigBase}/public/commit`, { method: "POST", body: JSON.stringify(payload) }),
     publishPublicAgentConfig: (worktreeId?: string | null, operationId?: string) =>
@@ -928,6 +930,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }),
     unstageWorkspaceAgentFiles: (workspaceId: string, files: string[], worktreeId?: string | null) =>
       request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/unstage`, {
+        method: "POST",
+        body: JSON.stringify({ files, worktreeId })
+      }),
+    discardWorkspaceAgentFiles: (workspaceId: string, files: string[], worktreeId?: string | null) =>
+      request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/discard`, {
         method: "POST",
         body: JSON.stringify({ files, worktreeId })
       }),

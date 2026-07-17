@@ -3484,8 +3484,8 @@ async function loadAgentFile(request: AgentFileLoadRequest) {
     request.linuxServerId
   );
   const existing = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
-  if (editorTabIsDirty(existing)) {
-    // Agent 配置与普通文件遵循同一优先级：重复打开 dirty tab 只激活，绝不后台重读。
+  if (editorTabIsDirty(existing) && !request.replaceExistingDirty) {
+    // 普通刷新只激活 dirty tab；仅用户已确认 Git 回退时允许用磁盘结果替换旧草稿。
     if (request.activate) {
       centerMode.value = "editor";
       workbench.setActivePath(tabPath);
@@ -3532,7 +3532,8 @@ async function loadAgentFile(request: AgentFileLoadRequest) {
       return;
     }
     const current = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
-    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart || editorTabIsDirty(current)) {
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart
+      || (!request.replaceExistingDirty && editorTabIsDirty(current))) {
       // 即使用户随后保存或回退为 clean，修订代次也会阻止读取期间的旧响应覆盖编辑结果。
       workbench.updateTab(tabPath, {
         loadState: "loaded",
@@ -3565,7 +3566,7 @@ async function loadAgentFile(request: AgentFileLoadRequest) {
     if (request.closeOnNotFound
       && error instanceof BackendApiError
       && error.code === "NOT_FOUND"
-      && !editorTabIsDirty(current)) {
+      && (request.replaceExistingDirty || !editorTabIsDirty(current))) {
       workbench.closeTab(tabPath);
       return;
     }
@@ -4217,6 +4218,25 @@ async function addWorkspaceRequirementToChatContext(reference: WorkspaceRequirem
 
 async function openAgentFile(payload: AgentFileLoadRequest) {
   await loadAgentFile(payload);
+}
+
+/** Git 回退成功后按 tab 固化的 Agent 路由重读；未跟踪文件被删除时关闭对应 tab。 */
+async function refreshDiscardedAgentFiles(payload: { scope: "PUBLIC" | "WORKSPACE"; paths: string[] }) {
+  const paths = new Set(payload.paths);
+  const tabs = workbench.tabs.filter((tab: EditorTab) => {
+    if (!isAgentFilePath(tab.path)) return false;
+    const file = agentFileInfo(tab.path);
+    return file.scope === payload.scope && paths.has(file.path);
+  });
+  for (const tab of tabs) {
+    const request = agentFileLoadRequestFromTab(tab, false);
+    if (!request) continue;
+    await loadAgentFile({
+      ...request,
+      closeOnNotFound: true,
+      replaceExistingDirty: true
+    });
+  }
 }
 
 function toggleDirectory(path: string) {
@@ -5734,6 +5754,7 @@ async function handleLogout() {
             paths: payload?.paths,
             files: payload?.files
           })"
+          @agent-files-discarded="refreshDiscardedAgentFiles"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"

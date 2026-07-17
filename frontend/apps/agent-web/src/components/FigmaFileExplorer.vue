@@ -66,6 +66,7 @@ const emit = defineEmits<{
     files?: import("@test-agent/shared-types").WorkspaceGitDiffFile[];
     totalCount?: number;
   }];
+  "agent-files-discarded": [payload: { scope: "PUBLIC" | "WORKSPACE"; paths: string[] }];
   refresh: [];
   // 选择某个应用版本后由父组件切换运行态 Workspace
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -314,6 +315,7 @@ defineExpose({
         :can-manage-public-config="canManagePublicConfig ?? !!canWrite"
         @open-diff="(payload) => emit('openDiff', payload)"
         @changes-refreshed="handleChangesRefreshed"
+        @agent-files-discarded="(payload) => emit('agent-files-discarded', payload)"
       />
       <template v-if="tab !== 'changes'">
         <!-- Section 1: 应用工作空间 -->

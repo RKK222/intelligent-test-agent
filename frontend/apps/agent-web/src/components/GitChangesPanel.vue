@@ -71,6 +71,10 @@ const emit = defineEmits<{
     files?: WorkspaceGitDiffFile[];
     totalCount?: number;
   }];
+  "agent-files-discarded": [payload: {
+    scope: "PUBLIC" | "WORKSPACE";
+    paths: string[];
+  }];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -303,6 +307,8 @@ const updatingWorkspaceIndexPaths = ref<Set<string>>(new Set());
 const stagingAllWorkspaceFiles = ref(false);
 const unstagingAllWorkspaceFiles = ref(false);
 const discardingAllWorkspaceFiles = ref(false);
+const discardingAgentPaths = ref<Set<string>>(new Set());
+const discardingAllAgentFiles = ref(false);
 
 // Workspace diff computed lists
 const workspaceUnstaged = computed(() =>
@@ -331,6 +337,12 @@ const hasBlockingWorkspaceConflicts = computed(() => props.canWrite && hasWorksp
 const workspaceGitMutationPending = computed(() =>
   updatingWorkspaceIndexPaths.value.size > 0 || discardingWorkspacePaths.value.size > 0
 );
+
+function agentMutationKey(scope: "PUBLIC" | "WORKSPACE", path: string): string {
+  return `${scope}:${path}`;
+}
+
+const agentGitMutationPending = computed(() => discardingAgentPaths.value.size > 0);
 
 // Agent diff lists (Public + Workspace)
 const publicAgentDiffs = ref<AgentConfigDiffFile[]>([]);
@@ -976,6 +988,67 @@ async function unstageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | 
   }
 }
 
+/**
+ * 两类 Agent 文件共用同一回退交互；后端分别落到应用版本个人 worktree 与公共个人 worktree。
+ */
+async function discardAgentFiles(files: AgentPanelDiffFile[]) {
+  const scope = activeDiffScope.value === "PUBLIC" ? "PUBLIC" : "WORKSPACE";
+  if (
+    !canWriteAgentScope(scope)
+    || files.length === 0
+    || activeAgentConflicts.value.length > 0
+    || (scope === "WORKSPACE" && !effectiveAgentConfigWorkspaceId.value)
+  ) return;
+  const paths = [...new Set(files.filter((file) => file.scope === scope).map((file) => file.path))];
+  const pendingPaths = paths.filter((path) => !discardingAgentPaths.value.has(agentMutationKey(scope, path)));
+  if (pendingPaths.length === 0) return;
+  errorMessage.value = "";
+  discardingAgentPaths.value = new Set([
+    ...discardingAgentPaths.value,
+    ...pendingPaths.map((path) => agentMutationKey(scope, path))
+  ]);
+  try {
+    if (workbench.useMockTestData) {
+      if (scope === "PUBLIC") {
+        publicAgentDiffs.value = publicAgentDiffs.value.filter((file) => !pendingPaths.includes(file.path));
+      } else {
+        workspaceAgentDiffs.value = workspaceAgentDiffs.value.filter((file) => !pendingPaths.includes(file.path));
+      }
+    } else if (scope === "PUBLIC") {
+      await api.discardPublicAgentFiles(pendingPaths, workbench.publicWorktree?.worktreeId);
+      await refreshChanges();
+    } else {
+      await api.discardWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, pendingPaths);
+      await refreshChanges();
+    }
+    emit("agent-files-discarded", { scope, paths: pendingPaths });
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, `回退${scope === "PUBLIC" ? "公共" : "应用"} Agent 文件失败`);
+  } finally {
+    const next = new Set(discardingAgentPaths.value);
+    pendingPaths.forEach((path) => next.delete(agentMutationKey(scope, path)));
+    discardingAgentPaths.value = next;
+  }
+}
+
+async function discardAgentFile(file: AgentPanelDiffFile) {
+  await discardAgentFiles([file]);
+}
+
+async function discardAllAgentChanges() {
+  if (agentGitMutationPending.value || activeAgentConflicts.value.length > 0) return;
+  const files = [...activeAgentUnstaged.value, ...activeAgentStaged.value];
+  if (files.length === 0) return;
+  const scopeLabel = activeDiffScope.value === "PUBLIC" ? "公共 Agent" : "应用 Agent";
+  if (!window.confirm(`将丢弃 ${scopeLabel} 的 ${files.length} 个文件改动，此操作无法撤销，是否继续？`)) return;
+  discardingAllAgentFiles.value = true;
+  try {
+    await discardAgentFiles(files);
+  } finally {
+    discardingAllAgentFiles.value = false;
+  }
+}
+
 // Open Diff in right Monaco Editor workspace
 function handleOpenFileDiff(
   path: string,
@@ -1531,6 +1604,20 @@ defineExpose({
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
               <span>{{ activeScopeItem.label }}</span>
               <span class="git-sub-badge ml-1">({{ activeAgentUnstaged.length + activeAgentConflicts.length }})</span>
+              <div class="git-bulk-actions ml-auto">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  class="git-bulk-action"
+                  :aria-label="`丢弃全部${activeScopeItem.label}改动`"
+                  :title="activeAgentConflicts.length > 0 ? '存在未解决冲突，请先处理或取消合并' : `丢弃全部${activeScopeItem.label}改动`"
+                  :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending"
+                  @click.stop="discardAllAgentChanges"
+                >
+                  <Loader2 v-if="discardingAllAgentFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </Button>
+              </div>
             </div>
             <div v-show="agentsUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
               <div v-if="activeDiffScope === 'PUBLIC' && publicAgentConflicts.length > 0" class="git-conflict-banner">
@@ -1601,6 +1688,17 @@ defineExpose({
                   {{ getFileName(file.path) }}
                 </span>
                 
+                <button
+                  v-if="canWriteAgentScope(file.scope)"
+                  type="button"
+                  class="git-row-action hidden group-hover:inline-flex"
+                  title="回退文件改动"
+                  :disabled="discardingAgentPaths.has(agentMutationKey(file.scope, file.path))"
+                  @click.stop="discardAgentFile(file)"
+                >
+                  <Loader2 v-if="discardingAgentPaths.has(agentMutationKey(file.scope, file.path))" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </button>
                 <button
                   v-if="canWriteAgentScope(file.scope)"
                   type="button"
@@ -1724,6 +1822,17 @@ defineExpose({
                   {{ getFileName(file.path) }}
                 </span>
                 
+                <button
+                  v-if="canWriteAgentScope(file.scope) && activeAgentConflicts.length === 0"
+                  type="button"
+                  class="git-row-action hidden group-hover:inline-flex"
+                  title="回退文件改动"
+                  :disabled="discardingAgentPaths.has(agentMutationKey(file.scope, file.path))"
+                  @click.stop="discardAgentFile(file)"
+                >
+                  <Loader2 v-if="discardingAgentPaths.has(agentMutationKey(file.scope, file.path))" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </button>
                 <button
                   v-if="canWriteAgentScope(file.scope)"
                   type="button"

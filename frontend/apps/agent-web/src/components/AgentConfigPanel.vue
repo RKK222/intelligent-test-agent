@@ -10,7 +10,8 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  Upload
+  Upload,
+  MoreHorizontal
 } from "lucide-vue-next";
 import { createBackendApiClient } from "@test-agent/backend-api";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
@@ -717,13 +718,15 @@ function handleDiffFileClick(file: AgentConfigDiffFile) {
 
 const publicRepositories = ref<PublicAgentRepositoryStatus[]>([]);
 const selectedPublicLinuxServerId = ref("");
-const DIRECT_PUBLIC_CONFIG_OPTION = "__direct_public_config__";
 const showSwitchWorktreeModal = ref(false);
 const switchWorktreeOptionsLoading = ref(false);
 const switchWorktreeOptionsError = ref("");
 const switchPublicLinuxServerId = ref("");
-const switchPublicWorktreeId = ref(DIRECT_PUBLIC_CONFIG_OPTION);
+const switchPublicWorktreeId = ref("");
 const switchPublicWorktrees = ref<AgentConfigWorktreeOption[]>([]);
+const showCreatePublicWorktreeModal = ref(false);
+const createPublicWorktreeLinuxServerId = ref("");
+const createPublicWorktreeError = ref("");
 const showCreateWorkspacePackageModal = ref(false);
 const workspacePackageName = ref("");
 const workspacePackageError = ref("");
@@ -799,6 +802,7 @@ const canSubmitSwitchWorktree = computed(() =>
   !busy.value &&
   !switchWorktreeOptionsLoading.value &&
   !!switchPublicLinuxServerId.value &&
+  !!selectedSwitchWorktree.value &&
   initializedPublicRepositories.value.length > 0
 );
 
@@ -836,10 +840,62 @@ async function publicFileLinuxServerId() {
 async function openSwitchWorktreeModal() {
   if (!props.canWrite || status.value.PUBLIC?.enabled === false) return;
   switchWorktreeOptionsError.value = "";
-  switchPublicWorktreeId.value = DIRECT_PUBLIC_CONFIG_OPTION;
+  switchPublicWorktreeId.value = "";
   switchPublicWorktrees.value = [];
   showSwitchWorktreeModal.value = true;
   await loadPublicSwitchOptions();
+}
+
+async function openCreatePublicWorktreeModal() {
+  if (!props.canWrite || status.value.PUBLIC?.enabled === false || busy.value) return;
+  createPublicWorktreeError.value = "";
+  showCreatePublicWorktreeModal.value = true;
+  try {
+    publicRepositories.value = await api.listPublicAgentRepositories();
+    createPublicWorktreeLinuxServerId.value = preferredPublicServer(publicRepositories.value);
+    if (!createPublicWorktreeLinuxServerId.value) {
+      createPublicWorktreeError.value = "没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。";
+    }
+  } catch (error) {
+    createPublicWorktreeLinuxServerId.value = "";
+    createPublicWorktreeError.value = formatAgentConfigError(error, "加载公共配置服务器失败");
+  }
+}
+
+function closeCreatePublicWorktreeModal() {
+  showCreatePublicWorktreeModal.value = false;
+  createPublicWorktreeError.value = "";
+}
+
+async function submitCreatePublicWorktree() {
+  const serverId = createPublicWorktreeLinuxServerId.value;
+  if (!serverId || busy.value) return;
+  const repository = initializedPublicRepositories.value.find((item) => item.linuxServerId === serverId);
+  if (!repository) return;
+  busy.value = true;
+  createPublicWorktreeError.value = "";
+  try {
+    // 后端保证同一用户在同一服务器只生成 public-{userId} 稳定分支；重复创建会返回已有 worktree。
+    const created = await api.createPublicAgentWorktree({
+      baseName: "public-personal",
+      branch: repository.currentBranch?.trim() || status.value.PUBLIC?.currentBranch?.trim() || "main",
+      linuxServerId: serverId,
+      operationId: newOperationId()
+    });
+    publicConfigLinuxServerId.value = serverId;
+    selectedPublicLinuxServerId.value = serverId;
+    publicWorktree.value = { ...created };
+    resetPublicFileTree();
+    if (rootExpanded.value.has("PUBLIC")) {
+      await loadDirectory("PUBLIC", "");
+    }
+    closeCreatePublicWorktreeModal();
+    notifySuccess("公共 worktree 已就绪", `分支 ${created.branch}`);
+  } catch (error) {
+    createPublicWorktreeError.value = formatAgentConfigError(error, "创建公共 worktree 失败");
+  } finally {
+    busy.value = false;
+  }
 }
 
 function closeSwitchWorktreeModal() {
@@ -856,7 +912,7 @@ async function loadPublicSwitchOptions() {
     if (!switchPublicLinuxServerId.value) {
       switchWorktreeOptionsError.value = "没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。";
       switchPublicWorktrees.value = [];
-      switchPublicWorktreeId.value = DIRECT_PUBLIC_CONFIG_OPTION;
+      switchPublicWorktreeId.value = "";
       return;
     }
   } catch (error) {
@@ -864,7 +920,7 @@ async function loadPublicSwitchOptions() {
     publicRepositories.value = [];
     switchPublicLinuxServerId.value = "";
     switchPublicWorktrees.value = [];
-    switchPublicWorktreeId.value = DIRECT_PUBLIC_CONFIG_OPTION;
+    switchPublicWorktreeId.value = "";
     return;
   } finally {
     switchWorktreeOptionsLoading.value = false;
@@ -875,7 +931,7 @@ async function loadPublicSwitchOptions() {
 async function loadSwitchWorktreesForSelectedServer() {
   const serverId = switchPublicLinuxServerId.value;
   switchPublicWorktrees.value = [];
-  switchPublicWorktreeId.value = DIRECT_PUBLIC_CONFIG_OPTION;
+  switchPublicWorktreeId.value = "";
   if (!serverId) return;
   switchWorktreeOptionsLoading.value = true;
   switchWorktreeOptionsError.value = "";
@@ -884,6 +940,8 @@ async function loadSwitchWorktreesForSelectedServer() {
     switchPublicWorktrees.value = worktrees;
     if (publicWorktree.value?.linuxServerId === serverId && worktrees.some((item) => item.worktreeId === publicWorktree.value?.worktreeId)) {
       switchPublicWorktreeId.value = publicWorktree.value.worktreeId;
+    } else {
+      switchPublicWorktreeId.value = worktrees[0]?.worktreeId ?? "";
     }
   } catch (error) {
     switchWorktreeOptionsError.value = formatAgentConfigError(error, "加载公共 worktree 列表失败");
@@ -894,15 +952,24 @@ async function loadSwitchWorktreesForSelectedServer() {
 
 async function submitSwitchWorktree() {
   const serverId = switchPublicLinuxServerId.value;
-  if (!serverId || !canSubmitSwitchWorktree.value) return;
-  publicConfigLinuxServerId.value = serverId;
-  selectedPublicLinuxServerId.value = serverId;
-  publicWorktree.value = selectedSwitchWorktree.value ? { ...selectedSwitchWorktree.value } : null;
-  resetPublicFileTree();
-  if (rootExpanded.value.has("PUBLIC")) {
-    await loadDirectory("PUBLIC", "");
+  const selected = selectedSwitchWorktree.value;
+  if (!serverId || !selected || !canSubmitSwitchWorktree.value) return;
+  busy.value = true;
+  switchWorktreeOptionsError.value = "";
+  try {
+    publicConfigLinuxServerId.value = serverId;
+    selectedPublicLinuxServerId.value = serverId;
+    publicWorktree.value = { ...selected };
+    resetPublicFileTree();
+    if (rootExpanded.value.has("PUBLIC")) {
+      await loadDirectory("PUBLIC", "");
+    }
+    closeSwitchWorktreeModal();
+  } catch (error) {
+    switchWorktreeOptionsError.value = formatAgentConfigError(error, "切换公共 worktree 失败");
+  } finally {
+    busy.value = false;
   }
-  closeSwitchWorktreeModal();
 }
 
 function resetPublicFileTree() {
@@ -1219,6 +1286,37 @@ defineExpose({
             <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
           </button>
         </el-tooltip>
+        <div v-if="canWrite" class="agent-more-menu-container">
+          <button
+            type="button"
+            class="agent-icon-btn"
+            title="更多操作"
+            aria-label="更多操作"
+            :disabled="busy || status.PUBLIC?.enabled === false"
+          >
+            <MoreHorizontal class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </button>
+          <div class="agent-more-menu-dropdown">
+            <button
+              type="button"
+              class="agent-dropdown-item"
+              :disabled="busy || status.PUBLIC?.enabled === false"
+              @click="openCreatePublicWorktreeModal"
+            >
+              <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <span>创建公共 worktree</span>
+            </button>
+            <button
+              type="button"
+              class="agent-dropdown-item"
+              :disabled="busy || status.PUBLIC?.enabled === false"
+              @click="openSwitchWorktreeModal"
+            >
+              <GitBranch class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <span>切换公共 worktree</span>
+            </button>
+          </div>
+        </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
         <div
@@ -1407,7 +1505,7 @@ defineExpose({
                   v-model="switchPublicWorktreeId"
                   :disabled="switchWorktreeOptionsLoading || !switchPublicLinuxServerId"
                 >
-                  <option :value="DIRECT_PUBLIC_CONFIG_OPTION">直接公共配置目录</option>
+                  <option v-if="switchPublicWorktrees.length === 0" value="">当前服务器没有可切换的个人 worktree</option>
                   <option
                     v-for="worktree in switchPublicWorktrees"
                     :key="worktree.worktreeId"
@@ -1421,7 +1519,7 @@ defineExpose({
                 分支：{{ selectedSwitchWorktree.branch }} · 创建人：{{ selectedSwitchWorktree.createdByUserId }} / {{ selectedSwitchWorktree.createdByUsername ?? '未知用户' }}
               </span>
               <span v-else class="agent-modal-help">
-                选择直接公共配置目录时，文件操作会绑定到当前服务器的公共配置目录。
+                当前服务器尚无你的公共 worktree，请先从“更多操作”创建。
               </span>
             </div>
           </div>
@@ -1429,6 +1527,67 @@ defineExpose({
           <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
             <Button variant="ghost" size="sm" @click="closeSwitchWorktreeModal">取消</Button>
             <Button variant="primary" size="sm" :disabled="!canSubmitSwitchWorktree" @click="submitSwitchWorktree">确定</Button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="showCreatePublicWorktreeModal"
+        class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6"
+        @keydown.esc="closeCreatePublicWorktreeModal"
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-label="创建公共 worktree"
+          class="flex w-[min(440px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
+        >
+          <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
+            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">创建公共 worktree</h2>
+          </header>
+
+          <div class="flex flex-col gap-3">
+            <div v-if="createPublicWorktreeError" class="agent-modal-alert">
+              <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
+              <span>{{ createPublicWorktreeError }}</span>
+            </div>
+
+            <div class="flex flex-col gap-1.5">
+              <label for="public-create-server" class="text-[11px] text-[var(--ta-muted)] font-medium">服务器</label>
+              <div class="agent-modal-select">
+                <Globe2 class="h-3.5 w-3.5 text-[var(--ta-muted)]" :stroke-width="1.5" />
+                <select
+                  id="public-create-server"
+                  v-model="createPublicWorktreeLinuxServerId"
+                  :disabled="busy || initializedPublicRepositories.length === 0"
+                >
+                  <option
+                    v-for="repository in initializedPublicRepositories"
+                    :key="repository.linuxServerId"
+                    :value="repository.linuxServerId"
+                  >
+                    {{ repository.serverName || repository.linuxServerId }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div class="agent-modal-help leading-5">
+              系统会按当前用户创建固定的 <code>public-{用户ID}</code> 分支和个人 worktree；如果已经存在，会直接挂载已有 worktree。
+            </div>
+          </div>
+
+          <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
+            <Button variant="ghost" size="sm" @click="closeCreatePublicWorktreeModal">取消</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              :disabled="busy || !createPublicWorktreeLinuxServerId"
+              @click="submitCreatePublicWorktree"
+            >
+              创建并切换
+            </Button>
           </footer>
         </section>
       </div>

@@ -353,14 +353,14 @@ test("switching public Agent routes settles an old load and allows retry after r
       publicAgentRepository("server-b", "backend-b")
     ],
     publicAgentWorktreesByServer: {
-      "server-a": [],
-      "server-b": []
+      "server-a": [publicAgentWorktree("server-a")],
+      "server-b": [publicAgentWorktree("server-b")]
     },
     agentFileContents: {
       "PUBLIC:public-route.md": "# fallback public route"
     },
     agentFileReadDelays: {
-      "PUBLIC:public-route.md": [500, 0]
+      "PUBLIC:public-route.md": [2_000, 0]
     },
     agentFileReadResponses: {
       "PUBLIC:public-route.md": ["# stale server A response", "# fresh server A response"]
@@ -374,6 +374,7 @@ test("switching public Agent routes settles an old load and allows retry after r
   await page.getByRole("button", { name: /公共级/ }).click();
 
   await page.getByRole("button", { name: "更多操作" }).hover();
+  await expect(page.getByRole("button", { name: "创建公共 worktree" })).toBeVisible();
   await page.getByRole("button", { name: "切换公共 worktree" }).click();
   await page.getByRole("dialog", { name: "切换公共 worktree" }).getByLabel("服务器").selectOption("server-b");
   await page.getByRole("dialog", { name: "切换公共 worktree" }).getByRole("button", { name: "确定" }).click();
@@ -385,7 +386,7 @@ test("switching public Agent routes settles an old load and allows retry after r
   await page.getByRole("dialog", { name: "切换公共 worktree" }).getByRole("button", { name: "确定" }).click();
   await page.getByRole("tab").filter({ hasText: "public-route.md" }).click();
   await expect(page.locator(".monaco-editor")).toContainText("fresh server A response", { timeout: 10_000 });
-  await page.waitForTimeout(550);
+  await page.waitForTimeout(2_050);
   await expect(page.locator(".monaco-editor")).not.toContainText("stale server A response");
 });
 
@@ -6198,6 +6199,24 @@ function publicAgentRepository(linuxServerId: string, serverName: string) {
     currentBranch: "main",
     commitHash: `${linuxServerId}_commit`,
     message: null
+  };
+}
+
+function publicAgentWorktree(linuxServerId: string) {
+  return {
+    worktreeId: `agw_${linuxServerId}`,
+    scope: "PUBLIC",
+    workspaceId: null,
+    linuxServerId,
+    worktreeName: "public-usr_admin",
+    branch: "public-usr_admin",
+    rootPath: `/mock/${linuxServerId}/public-worktrees/public-usr_admin`,
+    agentDirectory: `/mock/${linuxServerId}/public-worktrees/public-usr_admin/opencode`,
+    status: "ACTIVE",
+    createdAt: "2026-07-17T00:00:00Z",
+    updatedAt: "2026-07-17T00:00:00Z",
+    createdByUserId: "usr_admin",
+    createdByUsername: "admin"
   };
 }
 

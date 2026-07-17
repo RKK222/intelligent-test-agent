@@ -28,7 +28,7 @@
 - `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间、应用版本工作区、应用版本服务器副本、服务器广播事件、个人工作区、同步记录、SSH key 和 scheduler 运行/计划的稳定前缀 ID。
 - `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads`、`git archive --remote`、tar 目录/文件树解析、超时、输出上限、非交互环境、临时 SSH key 文件清理，以及 `git_command_start/success/slow/failed/timeout/unavailable` 单行脱敏日志。
 - `GitCommitIdentity`：生成并校验单次 Git 提交身份；平台用户没有邮箱字段时使用保留的 `testagent.local` 域名补足 Git 必需的 email。
-- `GitWorkspaceService`：封装 clone、worktree add、分支/origin/head/status、porcelain/diff、索引恢复到 HEAD、冲突 stage 1/2/3 读取、按操作人身份提交、同名分支 push、个人分支到公共目标分支的非强制 refspec push、pull/fetch、冲突文件列表、`merge --abort` 和按提交/路径白名单投影文件等 Git 原子命令。
+- `GitWorkspaceService`：封装 clone、worktree add、分支/origin/head/status、porcelain/diff、索引恢复到 HEAD、指定文件回退（恢复已跟踪文件并清理新增/未跟踪文件）、冲突 stage 1/2/3 读取、按操作人身份提交、同名分支 push、个人分支到公共目标分支的非强制 refspec push、pull/fetch、冲突文件列表、`merge --abort` 和按提交/路径白名单投影文件等 Git 原子命令；冲突文件拒绝通过普通回退处理。
 - `SshKeyCryptoService`：封装个人 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成。
 - `RsaKeyService`：封装 SSH key 前端混合加密所需的 RSA 公钥导出和私钥解密；解密优先使用浏览器 Web Crypto 对齐的 RSA-OAEP/SHA-256 + MGF1-SHA-256 参数，并兼容历史 Java 默认 OAEP 参数密文。
 
@@ -38,7 +38,7 @@
 - `PageRequestTest`、`PageResponseTest` 覆盖分页边界、offset、总页数和列表防御性复制。
 - `ErrorCodeTest`、`RuntimeIdGeneratorTest` 覆盖稳定 HTTP 状态、默认中文说明和运行时 ID 前缀格式。
 - `GitRemoteServiceTest` 覆盖分支解析、archive tar 目录解析、目录/文件树解析和 Git 超时错误映射；`ProcessGitCommandExecutorTest` 覆盖 Git 命令日志输出和 URL 用户信息脱敏。
-- `GitWorkspaceServiceTest` 覆盖 clone 分支、worktree 创建、同名分支复用、分支/origin/head/status 查询、指定 pathspec 时展开未跟踪目录、porcelain 路径解码、staged/unstaged diff 聚合、提交、push、pull、fetch/reset、合并冲突文件列表解析、merge abort 和临时 SSH key 清理；内部版本库刷新 origin 的业务语义由 workspace-management 定向测试覆盖。
+- `GitWorkspaceServiceTest` 覆盖 clone 分支、worktree 创建、同名分支复用、分支/origin/head/status 查询、指定 pathspec 时展开未跟踪目录、porcelain 路径解码、staged/unstaged diff 聚合、已跟踪/暂存新增/未跟踪文件回退、冲突回退拒绝、提交、push、pull、fetch/reset、合并冲突文件列表解析、merge abort 和临时 SSH key 清理；内部版本库刷新 origin 的业务语义由 workspace-management 定向测试覆盖。
 - `SshKeyCryptoServiceTest` 覆盖 SSH key 加解密、指纹和密钥配置错误。
 - `RsaKeyServiceTest` 覆盖浏览器 Web Crypto RSA-OAEP/SHA-256 密文的后端解密兼容性。
 

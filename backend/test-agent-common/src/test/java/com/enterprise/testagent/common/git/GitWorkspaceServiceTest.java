@@ -1,6 +1,7 @@
 package com.enterprise.testagent.common.git;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -265,6 +266,44 @@ class GitWorkspaceServiceTest {
             assertThat(entry.unmerged()).isTrue();
             assertThat(entry.staged()).isTrue();
         });
+    }
+
+    @Test
+    void discardFilesRestoresTrackedAndCleansStagedAndUntrackedNewFiles() {
+        RecordingExecutor executor = new RecordingExecutor(
+                " M opencode/agents/review.md\nA  opencode/agents/new.md\n?? opencode/skills/new/SKILL.md\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.discardFiles(
+                tempDir,
+                List.of(
+                        "opencode/agents/review.md",
+                        "opencode/agents/new.md",
+                        "opencode/skills/new/SKILL.md"),
+                "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "status", "--porcelain", "--untracked-files=all"), null),
+                new Call(List.of("git", "-C", tempDir.toString(), "restore", "--staged", "--worktree", "--", "opencode/agents/review.md"), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", tempDir.toString(), "restore", "--staged", "--", "opencode/agents/new.md"), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", tempDir.toString(), "clean", "-f", "--", "opencode/agents/new.md", "opencode/skills/new/SKILL.md"), "PRIVATE KEY"));
+    }
+
+    @Test
+    void discardFilesRejectsConflictPathsBeforeMutatingGit() {
+        RecordingExecutor executor = new RecordingExecutor("UU opencode/agents/conflict.md\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThatThrownBy(() -> service.discardFiles(
+                tempDir,
+                List.of("opencode/agents/conflict.md"),
+                "PRIVATE KEY"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("合并编辑器");
+
+        assertThat(executor.calls).singleElement().satisfies(call ->
+                assertThat(call.command()).containsExactly(
+                        "git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "status", "--porcelain", "--untracked-files=all"));
     }
 
     @Test

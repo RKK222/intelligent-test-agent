@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createPinia } from "pinia";
 import AgentConfigPanel from "../src/components/AgentConfigPanel.vue";
 
@@ -130,7 +130,7 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
     expect(apiClientMock.listPublicAgentWorktrees).not.toHaveBeenCalled();
     expect(apiClientMock.createPublicAgentWorktree).not.toHaveBeenCalled();
-    expect(view.queryByText("创建公共 worktree")).toBeNull();
+    expect(view.getByText("创建公共 worktree")).toBeTruthy();
   });
 
   it("loads public and workspace agent status plus root directories without serial blocking", async () => {
@@ -188,8 +188,87 @@ describe("AgentConfigPanel", () => {
     expect(await view.findByText("worktree")).toBeTruthy();
     expect(view.getByText("worktree · change-agent-md")).toBeTruthy();
     expect(view.getByText("/data/opencode-public-worktrees/change-agent-md/opencode")).toBeTruthy();
+    expect(view.getByRole("button", { name: "更多操作" })).toBeTruthy();
     expect(view.queryByText("更新公共配置")).toBeNull();
-    expect(view.queryByText("切换公共 worktree")).toBeNull();
+    expect(view.getByText("创建公共 worktree")).toBeTruthy();
+    expect(view.getByText("切换公共 worktree")).toBeTruthy();
+  });
+
+  it("explicitly creates and mounts the current user's stable public worktree", async () => {
+    const secondRepository = {
+      ...initializedRepository(),
+      linuxServerId: "linux-2",
+      serverName: "备用服务器",
+      gitRootPath: "/data/public-config-2",
+      configDirPath: "/data/public-config-2/opencode",
+      worktreeRootPath: "/data/public-worktrees-2",
+      currentBranch: "release"
+    };
+    const createdWorktree = {
+      ...publicWorktreeOption(),
+      worktreeId: "agw_public_linux_2",
+      linuxServerId: "linux-2",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-worktrees-2/public-usr_admin"
+    };
+    apiClientMock.listPublicAgentRepositories.mockResolvedValue([initializedRepository(), secondRepository]);
+    apiClientMock.createPublicAgentWorktree.mockResolvedValue(createdWorktree);
+    const { view, workbench } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentWorktrees).toHaveBeenCalledWith("linux-1"));
+    await fireEvent.click(view.getByText("创建公共 worktree"));
+    const dialog = await view.findByRole("dialog", { name: "创建公共 worktree" });
+    await fireEvent.update(within(dialog).getByLabelText("服务器"), "linux-2");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建并切换" }));
+
+    await waitFor(() => expect(apiClientMock.createPublicAgentWorktree).toHaveBeenCalledWith(expect.objectContaining({
+      baseName: "public-personal",
+      branch: "release",
+      linuxServerId: "linux-2",
+      operationId: expect.stringMatching(/^aco_/)
+    })));
+    await waitFor(() => expect(workbench.publicWorktree?.worktreeId).toBe("agw_public_linux_2"));
+    expect(workbench.publicConfigLinuxServerId).toBe("linux-2");
+    await waitFor(() => expect(notifyMock.notifySuccess).toHaveBeenCalledWith(
+      "公共 worktree 已就绪",
+      "分支 public-usr_admin"
+    ));
+  });
+
+  it("switches to the current user's existing stable public worktree on another server", async () => {
+    const secondRepository = {
+      ...initializedRepository(),
+      linuxServerId: "linux-2",
+      serverName: "备用服务器",
+      gitRootPath: "/data/public-config-2",
+      configDirPath: "/data/public-config-2/opencode",
+      worktreeRootPath: "/data/public-worktrees-2"
+    };
+    const secondWorktree = {
+      ...publicWorktreeOption(),
+      worktreeId: "agw_public_linux_2",
+      linuxServerId: "linux-2",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-worktrees-2/public-usr_admin"
+    };
+    apiClientMock.listPublicAgentRepositories.mockResolvedValue([initializedRepository(), secondRepository]);
+    apiClientMock.listPublicAgentWorktrees.mockImplementation(async (linuxServerId: string) =>
+      linuxServerId === "linux-1" ? [publicWorktreeOption()] : [secondWorktree]
+    );
+    const { view, workbench } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentWorktrees).toHaveBeenCalledWith("linux-1"));
+    await fireEvent.click(view.getByText("切换公共 worktree"));
+    const dialog = await view.findByRole("dialog", { name: "切换公共 worktree" });
+    await fireEvent.update(within(dialog).getByLabelText("服务器"), "linux-2");
+    await waitFor(() => expect(apiClientMock.listPublicAgentWorktrees).toHaveBeenCalledWith("linux-2"));
+    await fireEvent.click(within(dialog).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => expect(workbench.publicWorktree?.worktreeId).toBe("agw_public_linux_2"));
+    expect(workbench.publicConfigLinuxServerId).toBe("linux-2");
+    expect(apiClientMock.createPublicAgentWorktree).not.toHaveBeenCalled();
   });
 
   it("shows the selected public worktree server and physical config directory", async () => {

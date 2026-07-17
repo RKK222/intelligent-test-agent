@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -611,6 +612,51 @@ public class GitWorkspaceService {
         command.add("--");
         command.addAll(files);
         executor.execute(List.copyOf(command), privateKey, DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 定点丢弃文件改动：已跟踪文件恢复索引和工作树，新增文件取消暂存后定点清理。
+     * 冲突文件必须由上层合并编辑器处理，不能通过普通回退绕过 Git stage 1/2/3。
+     */
+    public void discardFiles(Path repoRoot, List<String> files, String privateKey) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        Map<String, GitStatusEntry> statuses = new LinkedHashMap<>();
+        for (GitStatusEntry status : parseStatusPorcelain(statusPorcelain(repoRoot))) {
+            statuses.put(status.path(), status);
+        }
+        List<String> conflictFiles = files.stream()
+                .filter(file -> {
+                    GitStatusEntry status = statuses.get(file);
+                    return status != null && status.unmerged();
+                })
+                .toList();
+        if (!conflictFiles.isEmpty()) {
+            throw new PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.CONFLICT,
+                    "冲突文件必须通过合并编辑器解决",
+                    Map.of("files", conflictFiles));
+        }
+
+        List<String> trackedFiles = new ArrayList<>();
+        List<String> stagedNewFiles = new ArrayList<>();
+        List<String> untrackedFiles = new ArrayList<>();
+        for (String file : files) {
+            GitStatusEntry status = statuses.get(file);
+            if (status != null && status.stagedNewFile()) {
+                stagedNewFiles.add(file);
+            } else if (status != null && status.untrackedFile()) {
+                untrackedFiles.add(file);
+            } else {
+                trackedFiles.add(file);
+            }
+        }
+        restoreFiles(repoRoot, trackedFiles, privateKey);
+        unstageFiles(repoRoot, stagedNewFiles, privateKey);
+        List<String> filesToClean = new ArrayList<>(stagedNewFiles);
+        filesToClean.addAll(untrackedFiles);
+        cleanUntrackedFiles(repoRoot, filesToClean, privateKey);
     }
 
     /**

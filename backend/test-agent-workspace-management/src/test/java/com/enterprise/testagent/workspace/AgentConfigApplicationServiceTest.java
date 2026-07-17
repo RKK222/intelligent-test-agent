@@ -869,6 +869,40 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicDiscardUsesOwnedPublicWorktreePaths() {
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_discard",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                root.resolve(".configdev/public-usr_admin").toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+
+        service.publicDiscard(
+                List.of("opencode/agents/review.md", "opencode/skills/case/SKILL.md"),
+                "agw_public_discard",
+                ADMIN);
+
+        assertThat(git.discardedFiles).containsExactly("opencode/agents/review.md", "opencode/skills/case/SKILL.md");
+    }
+
+    @Test
     void publicWorktreePublishReturnsConflictFilesAndDoesNotMarkPublishedWhenMergeConflicts() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
@@ -1150,6 +1184,33 @@ class AgentConfigApplicationServiceTest {
         service.workspaceStage("wrk_project", List.of("agents/review.md", "skills/payment/SKILL.md"), null, ADMIN);
 
         assertThat(git.stagedFiles).containsExactly(".opencode/agents/review.md", ".opencode/skills/payment/SKILL.md");
+    }
+
+    @Test
+    void workspaceDiscardMapsDisplayedAgentPathsBackToOpencodeRoot() {
+        Path workspaceRoot = root.resolve("project");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project"),
+                        "project",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        service.workspaceDiscard("wrk_project", List.of("agents/review.md", "skills/payment/SKILL.md"), null, ADMIN);
+
+        assertThat(git.discardedFiles).containsExactly(".opencode/agents/review.md", ".opencode/skills/payment/SKILL.md");
     }
 
     @Test
@@ -1453,6 +1514,7 @@ class AgentConfigApplicationServiceTest {
         private final Map<String, String> diffByFileAndStage = new LinkedHashMap<>();
         private final List<String> diffFiles = new ArrayList<>();
         private List<String> stagedFiles = List.of();
+        private List<String> discardedFiles = List.of();
 
         @Override
         public void cloneBranch(String gitUrl, String branch, Path repoRoot, String privateKey) {
@@ -1592,6 +1654,12 @@ class AgentConfigApplicationServiceTest {
         @Override
         public void stageFiles(Path repoRoot, List<String> files, String privateKey) {
             this.stagedFiles = List.copyOf(files);
+            this.privateKeyUsed = privateKey;
+        }
+
+        @Override
+        public void discardFiles(Path repoRoot, List<String> files, String privateKey) {
+            this.discardedFiles = List.copyOf(files);
             this.privateKeyUsed = privateKey;
         }
 

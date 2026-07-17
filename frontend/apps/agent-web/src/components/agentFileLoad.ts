@@ -8,6 +8,8 @@ export type AgentFileLoadRequest = {
   readonly: boolean;
   activate: boolean;
   closeOnNotFound: boolean;
+  /** 用户明确执行 Git 回退后允许替换此前 dirty 快照；读取期间的新编辑仍受修订代次保护。 */
+  replaceExistingDirty?: boolean;
 };
 
 export type AgentFileTabInfo = {

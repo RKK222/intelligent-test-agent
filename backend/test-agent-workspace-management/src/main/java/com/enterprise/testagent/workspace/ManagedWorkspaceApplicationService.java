@@ -1139,28 +1139,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Path workspaceRoot = context.workspaceRoot();
         List<String> gitFiles = repoRelativeFiles(repoRoot, workspaceRoot, normalizeFiles(files));
         try {
-            Map<String, GitStatusEntry> statuses = new LinkedHashMap<>();
-            for (GitStatusEntry status : gitWorkspaceService.parseStatusPorcelain(gitWorkspaceService.statusPorcelain(repoRoot))) {
-                statuses.put(status.path(), status);
-            }
-            List<String> trackedFiles = new ArrayList<>();
-            List<String> stagedNewFiles = new ArrayList<>();
-            List<String> untrackedFiles = new ArrayList<>();
-            for (String gitFile : gitFiles) {
-                GitStatusEntry status = statuses.get(gitFile);
-                if (status != null && status.stagedNewFile()) {
-                    stagedNewFiles.add(gitFile);
-                } else if (status != null && status.untrackedFile()) {
-                    untrackedFiles.add(gitFile);
-                } else {
-                    trackedFiles.add(gitFile);
-                }
-            }
-            gitWorkspaceService.restoreFiles(repoRoot, trackedFiles, context.privateKey());
-            gitWorkspaceService.unstageFiles(repoRoot, stagedNewFiles, context.privateKey());
-            List<String> filesToClean = new ArrayList<>(stagedNewFiles);
-            filesToClean.addAll(untrackedFiles);
-            gitWorkspaceService.cleanUntrackedFiles(repoRoot, filesToClean, context.privateKey());
+            gitWorkspaceService.discardFiles(repoRoot, gitFiles, context.privateKey());
         } catch (PlatformException exception) {
             throw exception;
         } catch (Exception exception) {

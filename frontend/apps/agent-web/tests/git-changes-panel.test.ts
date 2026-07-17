@@ -25,6 +25,8 @@ const apiClientMock = vi.hoisted(() => ({
   stageWorkspaceAgentFiles: vi.fn(),
   unstagePublicAgentFiles: vi.fn(),
   unstageWorkspaceAgentFiles: vi.fn(),
+  discardPublicAgentFiles: vi.fn(),
+  discardWorkspaceAgentFiles: vi.fn(),
   commitPublicAgentConfig: vi.fn(),
   commitWorkspaceAgentConfig: vi.fn(),
   commitPersonalWorkspace: vi.fn(),
@@ -81,6 +83,8 @@ describe("GitChangesPanel", () => {
     apiClientMock.unstageWorkspaceGitFiles.mockResolvedValue(undefined);
     apiClientMock.getPublicAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({ files: [] });
+    apiClientMock.discardPublicAgentFiles.mockResolvedValue(undefined);
+    apiClientMock.discardWorkspaceAgentFiles.mockResolvedValue(undefined);
     apiClientMock.commitPersonalWorkspace.mockResolvedValue({
       status: "LOCAL_COMMITTED",
       personalWorkspaceId: "psw_default",
@@ -404,6 +408,92 @@ describe("GitChangesPanel", () => {
       expect.stringMatching(/^aco_/)
     ));
     expect(await view.findByText("提交并推送进度")).toBeTruthy();
+  });
+
+  it("discards an unstaged application Agent file and reloads its open editor route", async () => {
+    apiClientMock.getWorkspaceAgentDiff
+      .mockResolvedValueOnce({
+        files: [{
+          path: "agents/application-review.md",
+          status: "modified",
+          rawStatus: " M",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-old\n+new"
+        }]
+      })
+      .mockResolvedValueOnce({ files: [] });
+    const agentFilesDiscarded = vi.fn();
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_personal_runtime",
+        agentConfigWorkspaceId: "wrk_application_feature",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        "onAgent-files-discarded": agentFilesDiscarded
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
+    const row = await view.findByLabelText("agents/application-review.md");
+    await fireEvent.click(within(row).getByTitle("回退文件改动"));
+
+    await waitFor(() => expect(apiClientMock.discardWorkspaceAgentFiles).toHaveBeenCalledWith(
+      "wrk_application_feature",
+      ["agents/application-review.md"]
+    ));
+    await waitFor(() => expect(agentFilesDiscarded).toHaveBeenCalledWith({
+      scope: "WORKSPACE",
+      paths: ["agents/application-review.md"]
+    }));
+    await waitFor(() => expect(view.queryByLabelText("agents/application-review.md")).toBeNull());
+  });
+
+  it("discards all staged and unstaged public Agent files from the current personal worktree", async () => {
+    apiClientMock.getPublicAgentDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "opencode/agents/public-review.md", status: "modified", rawStatus: " M", staged: false, patch: "unstaged" },
+          { path: "opencode/skills/public-case/SKILL.md", status: "modified", rawStatus: "M ", staged: true, patch: "staged" }
+        ]
+      })
+      .mockResolvedValueOnce({ files: [] });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_personal_runtime",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    await fireEvent.click(view.getByRole("tab", { name: /^公共Agent/ }));
+    const discardAllButton = await view.findByRole("button", { name: "丢弃全部公共Agent改动" });
+    await fireEvent.click(discardAllButton);
+
+    expect(confirm).toHaveBeenCalledWith("将丢弃 公共 Agent 的 2 个文件改动，此操作无法撤销，是否继续？");
+    await waitFor(() => expect(apiClientMock.discardPublicAgentFiles).toHaveBeenCalledWith(
+      ["opencode/agents/public-review.md", "opencode/skills/public-case/SKILL.md"],
+      "agw_public"
+    ));
   });
 
   it("loads application workspace changes from platform git diff instead of opencode vcs diff", async () => {
@@ -904,6 +994,7 @@ describe("GitChangesPanel", () => {
       `.opencode/${fixture.files.applicationAgent}`
     ));
     expect(await view.findByText("合并编辑器")).toBeTruthy();
+    expect(within(conflictRow).queryByTitle("回退文件改动")).toBeNull();
   });
 
   it("keeps feature workspace git actions readonly when the user has no write permission", async () => {

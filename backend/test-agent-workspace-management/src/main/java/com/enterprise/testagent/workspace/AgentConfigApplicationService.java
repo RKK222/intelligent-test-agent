@@ -873,6 +873,14 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         gitWorkspaceService.unstageFiles(repoRootForPublicOperation(worktreeId, userId), normalizeFiles(files), decryptSingleSshKey(userId));
     }
 
+    /** 丢弃当前用户公共个人 worktree 中指定 Agent/Skill 文件的本地改动。 */
+    public void publicDiscard(List<String> files, String worktreeId, UserId userId) {
+        gitWorkspaceService.discardFiles(
+                repoRootForPublicOperation(worktreeId, userId),
+                normalizeFiles(files),
+                decryptSingleSshKey(userId));
+    }
+
     public void workspaceStage(String workspaceId, List<String> files, String worktreeId, UserId userId) {
         gitWorkspaceService.stageFiles(
                 repoRootForWorkspaceOperation(workspaceId, worktreeId),
@@ -882,6 +890,14 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     public void workspaceUnstage(String workspaceId, List<String> files, String worktreeId, UserId userId) {
         gitWorkspaceService.unstageFiles(
+                repoRootForWorkspaceOperation(workspaceId, worktreeId),
+                normalizeWorkspaceAgentFiles(files),
+                decryptSingleSshKey(userId));
+    }
+
+    /** 丢弃应用版本个人 worktree 中指定 Agent/Skill 文件的本地改动。 */
+    public void workspaceDiscard(String workspaceId, List<String> files, String worktreeId, UserId userId) {
+        gitWorkspaceService.discardFiles(
                 repoRootForWorkspaceOperation(workspaceId, worktreeId),
                 normalizeWorkspaceAgentFiles(files),
                 decryptSingleSshKey(userId));

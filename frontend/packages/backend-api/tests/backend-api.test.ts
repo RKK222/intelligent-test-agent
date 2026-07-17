@@ -2688,6 +2688,39 @@ describe("backend-api", () => {
     expect(sockets[0]?.sentMessages.map((message) => message.op)).toEqual(["agent-config.read", "agent-config.write"]);
   });
 
+  it("discards public and application Agent files through their Git worktree endpoints", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockImplementation(async () => new Response(
+        JSON.stringify({ success: true, traceId: "trace_fixed", data: null }),
+        { status: 200 }
+      ));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.discardPublicAgentFiles(
+      ["opencode/agents/review.md"],
+      "agw_public"
+    )).resolves.toBeNull();
+    await expect(client.discardWorkspaceAgentFiles(
+      "wrk_feature",
+      ["agents/review.md"],
+      undefined
+    )).resolves.toBeNull();
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/workspace-management/agent-config/public/discard"
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+      files: ["opencode/agents/review.md"],
+      worktreeId: "agw_public"
+    });
+    expect(fetcher.mock.calls[1]?.[0]).toBe(
+      "http://api/api/internal/platform/workspace-management/agent-config/workspaces/wrk_feature/discard"
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual({
+      files: ["agents/review.md"]
+    });
+  });
+
   it("persists and reads the (app, workspace) VCS branch preference through the platform API", async () => {
     const fetcher = vi
       .fn<typeof fetch>()

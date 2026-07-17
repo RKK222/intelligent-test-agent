@@ -333,6 +333,21 @@ public class AgentConfigController {
         return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
     }
 
+    @PostMapping("/public/discard")
+    public ApiResponse<Void> publicDiscard(@RequestBody AgentConfigDtos.StageRequest request, ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        var target = routingService.forwardTargetForPublicWorktree(request.worktreeId());
+        if (target.isPresent()) {
+            return routingService.forward(
+                    exchange,
+                    target.get(),
+                    request,
+                    new TypeReference<ApiResponse<Void>>() {});
+        }
+        service.publicDiscard(request.files(), request.worktreeId(), principal.userId());
+        return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
+    }
+
     @PostMapping("/public/commit")
     public ApiResponse<Object> publicCommit(@RequestBody AgentConfigDtos.CommitRequest request, ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
@@ -412,6 +427,16 @@ public class AgentConfigController {
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
         service.workspaceUnstage(workspaceId, request.files(), request.worktreeId(), principal.userId());
+        return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
+    }
+
+    @PostMapping("/workspaces/{workspaceId}/discard")
+    public ApiResponse<Void> workspaceDiscard(
+            @PathVariable String workspaceId,
+            @RequestBody AgentConfigDtos.StageRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        service.workspaceDiscard(workspaceId, request.files(), request.worktreeId(), principal.userId());
         return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
     }
 

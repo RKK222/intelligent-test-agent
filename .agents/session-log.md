@@ -7702,3 +7702,19 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - Mermaid 两个定向测试文件 117 passed；前端全量 70 个测试文件 1125 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 均通过，构建仅保留既有大 chunk 提示。
   - 同步 frontend 与 editor README；未修改公开类型、Mermaid 语法、API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增依赖。
+
+### 2026-07-17 - 补齐 Agent 文件回退与公共个人 worktree 显式创建
+
+- Why:
+  - 三作用域 Git 面板拆分后，应用 Agent 与公共 Agent 缺少普通文件已有的逐个/批量回退；公共级“更多操作”和显式创建入口也被移除，导致稳定个人分支只靠隐式挂载，用户无法理解或主动选择服务器创建。
+- What:
+  - 公共与应用 Agent 新增定点 discard HTTP 能力，共用 Git 原子回退：恢复已跟踪文件、取消暂存并清理新增文件、清理未跟踪文件；unmerged 文件返回 `CONFLICT`，继续使用既有三方合并/取消 merge。
+  - Git 变更面板为两类 Agent 的 staged/unstaged 行补回回退按钮和批量回退，成功后按 tab 固化的 scope/workspace/worktree/server 路由刷新已打开文件，未跟踪文件被删除时关闭 tab。
+  - 公共级恢复“更多操作”，提供“创建公共 worktree”和“切换公共 worktree”；创建选择已初始化服务器，由后端确保当前用户 `public-{userId}` 稳定分支/worktree，切换只选择已有个人 worktree，不允许任意命名、他人 worktree 或共享目录直编。
+- How:
+  - 后端复用 `GitWorkspaceService`、AgentConfig 路由/权限和既有冲突 API；前端复用 backend-api、统一 Git 面板和 Agent 文件加载器，没有新增第二套 Git/合并流程。
+  - 后端定向测试 130 passed；前端定向 117 passed、全量 1111 passed / 1 skipped、agent-web typecheck、Playwright 桌面/移动 2 passed，`git diff --check` 通过。
+  - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；backend health/readiness 为 UP、前端 3000 和登录 CORS 正常。
+- Result:
+  - 两类 Agent 普通文件可直接回退，冲突文件仍只能走合并处理；公共个人分支既可自动挂载，也可从明确入口创建或切换。
+  - 仅变更 HTTP API 与前端交互；未修改 RunEvent、数据库、性能、安全、环境配置或 generated SDK。
