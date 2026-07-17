@@ -42,20 +42,20 @@
     </Appenders>
 
     <Loggers>
-        <Logger name="com.icbc.testagent" level="INFO"/>
-        <Logger name="com.icbc.testagent.event" level="INFO">
+        <Logger name="com.enterprise.testagent" level="INFO"/>
+        <Logger name="com.enterprise.testagent.event" level="INFO">
             <AppenderRef ref="SseFile"/>
         </Logger>
-        <Logger name="com.icbc.testagent.api.web.platform.BackendSseForwarder" level="INFO">
+        <Logger name="com.enterprise.testagent.api.web.platform.BackendSseForwarder" level="INFO">
             <AppenderRef ref="SseFile"/>
         </Logger>
-        <Logger name="com.icbc.testagent.api.web.platform.RunEventSseBackendRoutingWebFilter" level="INFO">
+        <Logger name="com.enterprise.testagent.api.web.platform.RunEventSseBackendRoutingWebFilter" level="INFO">
             <AppenderRef ref="SseFile"/>
         </Logger>
-        <Logger name="com.icbc.testagent.api.web.platform.SessionRuntimeStateController" level="INFO">
+        <Logger name="com.enterprise.testagent.api.web.platform.SessionRuntimeStateController" level="INFO">
             <AppenderRef ref="SseFile"/>
         </Logger>
-        <Logger name="com.icbc.testagent.opencode.runtime.session.SessionRuntimeStateApplicationService" level="INFO">
+        <Logger name="com.enterprise.testagent.opencode.runtime.session.SessionRuntimeStateApplicationService" level="INFO">
             <AppenderRef ref="SseFile"/>
         </Logger>
         <Root level="INFO">

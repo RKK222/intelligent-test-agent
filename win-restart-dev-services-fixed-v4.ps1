@@ -948,7 +948,7 @@ function Build-OpencodeManager {
             $chinaTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("China Standard Time")
             $chinaBuildTime = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $chinaTimeZone)
             $buildVersion = "V" + $chinaBuildTime.ToString("yyyyMMdd.HHmmss", [System.Globalization.CultureInfo]::InvariantCulture)
-            $linkerFlags = "-X github.com/icbc/test-agent/opencode-manager/internal/control.buildVersion=$buildVersion"
+            $linkerFlags = "-X github.com/enterprise/test-agent/opencode-manager/internal/control.buildVersion=$buildVersion"
             $buildOutput = & go build -ldflags $linkerFlags -o "bin/opencode-manager.exe" ./cmd/opencode-manager 2>&1
             $buildExitCode = $LASTEXITCODE
         } catch {
@@ -1086,7 +1086,7 @@ function Start-Backend {
     foreach ($entry in Get-ChildItem Env: | Where-Object { $_.Name -like 'TEST_AGENT_*' }) {
         $envVars[$entry.Name] = $entry.Value
     }
-    foreach ($name in @('EXTERNAL_API_KEY', 'ICBC_OPENAI_AUTH_TOKEN', 'SPRING_PROFILES_ACTIVE')) {
+    foreach ($name in @('EXTERNAL_API_KEY', 'ENTERPRISE_OPENAI_AUTH_TOKEN', 'SPRING_PROFILES_ACTIVE')) {
         $value = [Environment]::GetEnvironmentVariable($name, "Process")
         if (-not [string]::IsNullOrEmpty($value)) {
             $envVars[$name] = $value

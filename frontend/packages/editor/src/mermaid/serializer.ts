@@ -1,22 +1,17 @@
-import { serializeMermaidLayout } from "./metadata";
-import { serializeMermaidEdgePorts } from "./edge-port-metadata";
-import type { MermaidEdgeRelation, MermaidGraph, MermaidNode, MermaidNodeType } from "./model";
+import { serializeMermaidCompactFlow } from "./compact-metadata";
+import type { MermaidEdgeRelation, MermaidGraph, MermaidNode } from "./model";
+import { MERMAID_MODERN_SHAPE_BY_TYPE } from "./node-shapes";
+import { serializeMermaidStyleDirectives } from "./style-directives";
 
-function escapeLabel(value: string): string {
-  return value.replaceAll("\n", " ").replaceAll('"', "&quot;");
+function quoteLabel(value: string): string {
+  const normalized = value.replaceAll("\r\n", " ").replaceAll("\n", " ").replaceAll("\r", " ");
+  return JSON.stringify(normalized);
 }
 
 function serializeNode(node: MermaidNode): string {
-  const label = `"${escapeLabel(node.text || node.id)}"`;
-  const wrappers: Record<MermaidNodeType, [string, string]> = {
-    rectangle: ["[", "]"],
-    rounded: ["(", ")"],
-    stadium: ["([", "])"],
-    diamond: ["{", "}"],
-    circle: ["((", "))"]
-  };
-  const [open, close] = wrappers[node.type];
-  return `${node.id}${open}${label}${close}`;
+  const label = quoteLabel(node.text);
+  const shape = MERMAID_MODERN_SHAPE_BY_TYPE[node.type];
+  return `${node.id}@{ shape: ${shape}, label: ${label} }`;
 }
 
 function operatorForRelation(relation: MermaidEdgeRelation): string {
@@ -30,8 +25,7 @@ function operatorForRelation(relation: MermaidEdgeRelation): string {
 export function serializeMermaidGraph(graph: MermaidGraph): string {
   const lines = [
     `${graph.kind} ${graph.direction}`,
-    ...serializeMermaidLayout(graph.nodes),
-    ...serializeMermaidEdgePorts(graph.edges)
+    ...serializeMermaidCompactFlow(graph)
   ];
   lines.push(...graph.nodes.map(serializeNode));
   const serializeEdge = (edge: MermaidGraph["edges"][number]) => {
@@ -50,5 +44,6 @@ export function serializeMermaidGraph(graph: MermaidGraph): string {
   } else {
     lines.push(...graph.edges.map(serializeEdge), ...graph.preservedLines);
   }
+  lines.push(...serializeMermaidStyleDirectives(graph));
   return `${lines.join("\n").trimEnd()}\n`;
 }

@@ -248,6 +248,8 @@ export function createMermaidConnectionDragController(options: ControllerOptions
     if (frameId !== undefined) cancelFrame(frameId);
     frameId = undefined;
     pendingPoint = undefined;
+    // 松手可能早于最后一个 requestAnimationFrame；同步测量终点，避免有效锚点被漏掉。
+    updateFromPoint({ x: event.clientX, y: event.clientY });
     const connection = buildConnection();
     const mode = reconnect;
     const shouldCommit = targetStatus.value === "valid";

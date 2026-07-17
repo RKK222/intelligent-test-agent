@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/icbc/test-agent/opencode-manager/internal/config"
-	"github.com/icbc/test-agent/opencode-manager/internal/health"
-	"github.com/icbc/test-agent/opencode-manager/internal/state"
+	"github.com/enterprise/test-agent/opencode-manager/internal/config"
+	"github.com/enterprise/test-agent/opencode-manager/internal/health"
+	"github.com/enterprise/test-agent/opencode-manager/internal/state"
 )
 
 type OSStarter struct{}
@@ -538,7 +538,7 @@ func formatStartCommand(command string, args []string, env map[string]string) st
 		"OPENCODE_CONFIG_DIR",
 		"TEST_AGENT_INTERNAL_PROXY_BASE_URL",
 		"TEST_AGENT_INTERNAL_PROXY_API_KEY",
-		"ICBC_UCID",
+		"ENTERPRISE_UCID",
 	} {
 		if value, ok := env[key]; ok {
 			if key == "TEST_AGENT_INTERNAL_PROXY_API_KEY" {

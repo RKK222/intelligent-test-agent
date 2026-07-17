@@ -21,7 +21,7 @@ RUN go mod download
 COPY opencode-manager/ ./
 RUN printf '%s' "${MANAGER_BUILD_VERSION}" | grep -Eq '^V[0-9]{8}\.[0-9]{6}$' \
     && go build -trimpath \
-      -ldflags="-s -w -X github.com/icbc/test-agent/opencode-manager/internal/control.buildVersion=${MANAGER_BUILD_VERSION}" \
+      -ldflags="-s -w -X github.com/enterprise/test-agent/opencode-manager/internal/control.buildVersion=${MANAGER_BUILD_VERSION}" \
       -o /out/opencode-manager ./cmd/opencode-manager
 
 FROM --platform=$BUILDPLATFORM ${BUN_IMAGE} AS opencode-node-build
@@ -129,7 +129,8 @@ RUN set -eux; \
     chmod +x ./bin/opencode; \
     ln -s /usr/local/lib/opencode-node/bin/opencode /usr/local/bin/opencode; \
     /usr/local/bin/opencode --version; \
-    node -e 'import("@lydell/node-pty").then(() => process.stdout.write("node-pty ok\\n"))'
+    node -e 'import("@lydell/node-pty").then(() => process.stdout.write("node-pty ok\\n"))'; \
+    node --input-type=module -e 'await Promise.all([import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); process.stdout.write("custom Tool runtime ok\\n")'
 
 COPY --from=manager-build /out/opencode-manager /usr/local/bin/opencode-manager
 COPY deploy/internal/opencode-worker-entrypoint.sh /usr/local/bin/opencode-worker-entrypoint

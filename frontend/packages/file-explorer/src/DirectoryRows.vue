@@ -10,14 +10,25 @@ export type DirectoryRowsProps = {
   depth?: number;
   /** 只读工作区隐藏并阻断所有文件系统写入口。 */
   canWrite?: boolean;
+  /** 当前个人 worktree 是否存在可撤销的文件操作。 */
+  canUndo?: boolean;
+  /** 根组件递增该值，统一清理递归目录残留的拖放高亮。 */
+  dragResetToken?: number;
   /** 文件路径 → 行变更统计，用于在文件名后展示 +N -N。 */
   changeStats?: Record<string, { additions: number; deletions: number }>;
+  /** 文件树内部剪贴板，仅保存当前工作区的普通文件引用。 */
+  clipboardEntry?: WorkspaceClipboardEntry;
+};
+
+export type WorkspaceClipboardEntry = {
+  path: string;
+  mode: "copy" | "move";
 };
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
-import { Plane, Plus, Trash2 } from "lucide-vue-next";
+import { computed, nextTick, ref, watch } from "vue";
+import { AlertTriangle, FilePlus2, Plane, Plus, Trash2, Upload, X } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileIcon from "./FileIcon.vue";
 
@@ -29,6 +40,12 @@ const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
   renameEntry: [path: string, name: string];
+  setClipboard: [path: string, mode: "copy" | "move"];
+  pasteEntry: [directory: string];
+  undoEntry: [];
+  moveEntry: [sourcePath: string, targetDirectory: string];
+  uploadFiles: [directory: string, files: File[]];
+  requestUpload: [directory: string];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
 
@@ -40,10 +57,11 @@ const entries = computed(() => {
   });
 });
 
-const fileContextMenu = ref<{ path: string; x: number; y: number } | null>(null);
+const entryContextMenu = ref<{ entry: FileTreeEntry; x: number; y: number } | null>(null);
+const dragOverDirectory = ref<string | null>(null);
 const showCreateDialog = ref(false);
 const createDialogParentDirectory = ref("");
-const createDialogType = ref<"file" | "directory">("file");
+const createDialogType = ref<"file" | "directory" | "upload">("file");
 const createDialogName = ref("");
 const createDialogError = ref("");
 const showDeleteDialog = ref(false);
@@ -63,23 +81,108 @@ function focusRenameInput() {
 }
 
 function openFileContextMenu(event: MouseEvent, entry: FileTreeEntry) {
-  if (entry.type !== "file") {
-    return;
-  }
   event.preventDefault();
-  fileContextMenu.value = { path: entry.path, x: event.clientX, y: event.clientY };
+  entryContextMenu.value = { entry, x: event.clientX, y: event.clientY };
 }
 
 function closeFileContextMenu() {
-  fileContextMenu.value = null;
+  entryContextMenu.value = null;
 }
 
 function emitAddFileContext() {
-  if (!fileContextMenu.value) {
+  const entry = entryContextMenu.value?.entry;
+  if (!entry || entry.type !== "file") {
     return;
   }
-  emit("addFileContext", fileContextMenu.value.path);
+  emit("addFileContext", entry.path);
   closeFileContextMenu();
+}
+
+function parentDirectory(path: string): string {
+  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return index >= 0 ? path.slice(0, index) : "";
+}
+
+function targetDirectory(entry: FileTreeEntry): string {
+  return entry.type === "directory" ? entry.path : parentDirectory(entry.path);
+}
+
+function emitSetClipboard(mode: "copy" | "move") {
+  const entry = entryContextMenu.value?.entry;
+  if (!props.canWrite || !entry || entry.type !== "file") return;
+  emit("setClipboard", entry.path, mode);
+  closeFileContextMenu();
+}
+
+function emitPasteEntry() {
+  const entry = entryContextMenu.value?.entry;
+  if (!props.canWrite || !props.clipboardEntry || !entry) return;
+  emit("pasteEntry", targetDirectory(entry));
+  closeFileContextMenu();
+}
+
+/** 文件树行聚焦后支持 Delete 和 Ctrl/Cmd+C、X、V、Z，所有写操作复用现有确认或事件链路。 */
+function onRowKeydown(event: KeyboardEvent, entry: FileTreeEntry) {
+  if (!props.canWrite || event.target instanceof HTMLInputElement) return;
+  const key = event.key.toLowerCase();
+  if (key === "delete" || key === "del") {
+    event.preventDefault();
+    openDeleteDialog(entry);
+    return;
+  }
+  if (!event.ctrlKey && !event.metaKey) return;
+  if ((key === "c" || key === "x") && entry.type === "file") {
+    event.preventDefault();
+    emit("setClipboard", entry.path, key === "c" ? "copy" : "move");
+    return;
+  }
+  if (key === "v" && props.clipboardEntry) {
+    event.preventDefault();
+    emit("pasteEntry", targetDirectory(entry));
+    return;
+  }
+  if (key === "z" && props.canUndo) {
+    event.preventDefault();
+    emit("undoEntry");
+  }
+}
+
+watch(() => props.dragResetToken, () => {
+  dragOverDirectory.value = null;
+});
+
+/** 普通文件使用 HTML5 drag data 传递相对路径，目录仅作为工作区内移动目标。 */
+function onDragStart(event: DragEvent, entry: FileTreeEntry) {
+  if (!props.canWrite || entry.type !== "file" || !event.dataTransfer) {
+    event.preventDefault();
+    return;
+  }
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("application/x-test-agent-workspace-file", entry.path);
+  event.dataTransfer.setData("text/plain", entry.path);
+}
+
+function onDirectoryDragOver(event: DragEvent, entry: FileTreeEntry) {
+  if (!props.canWrite || entry.type !== "directory") return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  dragOverDirectory.value = entry.path;
+}
+
+function onDirectoryDrop(event: DragEvent, entry: FileTreeEntry) {
+  if (!props.canWrite || entry.type !== "directory" || !event.dataTransfer) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const files = Array.from(event.dataTransfer.files ?? []);
+  if (files.length > 0) {
+    dragOverDirectory.value = null;
+    emit("uploadFiles", entry.path, files);
+    return;
+  }
+  const sourcePath = event.dataTransfer.getData("application/x-test-agent-workspace-file");
+  dragOverDirectory.value = null;
+  if (sourcePath) emit("moveEntry", sourcePath, entry.path);
 }
 
 function isKnownEmptyDirectory(path: string): boolean {
@@ -107,6 +210,9 @@ function openCreateDialog(directory: string) {
   showCreateDialog.value = true;
 }
 
+/** 根目录标题与目录行的“+”共用同一个明确目标路径的操作面板。 */
+defineExpose({ openCreateDialog });
+
 function closeCreateDialog() {
   showCreateDialog.value = false;
   createDialogError.value = "";
@@ -114,6 +220,11 @@ function closeCreateDialog() {
 
 function submitCreateDialog() {
   if (!props.canWrite) return;
+  if (createDialogType.value === "upload") {
+    emit("requestUpload", createDialogParentDirectory.value);
+    closeCreateDialog();
+    return;
+  }
   const name = createDialogName.value.trim();
   if (!name) {
     createDialogError.value = "请输入名称";
@@ -196,12 +307,24 @@ function submitRename() {
         type="button"
         :class="cn(
           'ta-file-tree-row',
-          activePath === entry.path && 'is-active'
+          activePath === entry.path && 'is-active',
+          dragOverDirectory === entry.path && 'is-drop-target'
         )"
-        :style="{ paddingLeft: depth * 16 + 6 + 'px' }"
+        :draggable="canWrite && entry.type === 'file'"
+        :style="{
+          paddingLeft: depth * 16 + 6 + 'px',
+          paddingRight: canWrite
+            ? (entry.type === 'directory' ? (entry.name.includes('测试执行') ? '68px' : '48px') : '26px')
+            : (entry.type === 'directory' && entry.name.includes('测试执行') ? '26px' : '6px')
+        }"
         @click="onRowClick(entry)"
         @contextmenu="openFileContextMenu($event, entry)"
         @dblclick.stop="canWrite && startRename(entry)"
+        @keydown="onRowKeydown($event, entry)"
+        @dragstart="onDragStart($event, entry)"
+        @dragover="onDirectoryDragOver($event, entry)"
+        @dragleave="dragOverDirectory === entry.path && (dragOverDirectory = null)"
+        @drop="onDirectoryDrop($event, entry)"
       >
         <span
           v-for="i in depth"
@@ -239,22 +362,24 @@ function submitRename() {
           <span class="ta-file-tree-badge is-deleted">-{{ changeStats[entry.path].deletions }}</span>
         </template>
         <i v-if="loadingPath?.has(entry.path)" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
+      </button>
+      <div class="ta-file-tree-actions">
         <button
           v-if="canWrite && entry.type === 'directory'"
           type="button"
           class="ta-file-tree-add-btn"
-          title="新建文件或文件夹"
-          aria-label="新建文件或文件夹"
+          title="新建或上传到此目录"
+          aria-label="新建或上传到此目录"
           @click.stop="openCreateDialog(entry.path)"
         >
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
-          v-if="canWrite && entry.type === 'file'"
+          v-if="canWrite"
           type="button"
           class="ta-file-tree-delete-btn"
           title="删除"
-          aria-label="删除"
+          :aria-label="`删除 ${entry.name}`"
           @click.stop="openDeleteDialog(entry)"
         >
           <Trash2 class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -269,7 +394,7 @@ function submitRename() {
         >
           <Plane class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
-      </button>
+      </div>
       <div v-if="renamingPath === entry.path && renameError" class="ta-file-tree-rename-error">
         {{ renameError }}
       </div>
@@ -282,6 +407,9 @@ function submitRename() {
         :loading-path="loadingPath"
         :change-stats="changeStats"
         :can-write="canWrite"
+        :can-undo="canUndo"
+        :drag-reset-token="dragResetToken"
+        :clipboard-entry="clipboardEntry"
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"
@@ -289,106 +417,170 @@ function submitRename() {
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
         @rename-entry="(path, name) => emit('renameEntry', path, name)"
+        @set-clipboard="(path, mode) => emit('setClipboard', path, mode)"
+        @paste-entry="emit('pasteEntry', $event)"
+        @undo-entry="emit('undoEntry')"
+        @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+        @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
+        @request-upload="emit('requestUpload', $event)"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
       />
     </div>
     <Teleport to="body">
       <div
-        v-if="fileContextMenu"
+        v-if="entryContextMenu"
         class="ta-file-context-menu-backdrop"
         @click="closeFileContextMenu"
         @contextmenu.prevent="closeFileContextMenu"
       />
       <div
-        v-if="fileContextMenu"
+        v-if="entryContextMenu"
         class="ta-file-context-menu"
         role="menu"
-        :style="{ left: `${fileContextMenu.x}px`, top: `${fileContextMenu.y}px` }"
+        :style="{ left: `${entryContextMenu.x}px`, top: `${entryContextMenu.y}px` }"
       >
-        <button type="button" role="menuitem" class="ta-file-context-menu-item" @click="emitAddFileContext">
+        <button
+          v-if="entryContextMenu.entry.type === 'file'"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emitAddFileContext"
+        >
           添加文件到对话
+        </button>
+        <button
+          v-if="canWrite && entryContextMenu.entry.type === 'file'"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emitSetClipboard('copy')"
+        >
+          复制
+          <span>Ctrl/Cmd+C</span>
+        </button>
+        <button
+          v-if="canWrite && entryContextMenu.entry.type === 'file'"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emitSetClipboard('move')"
+        >
+          剪切
+          <span>Ctrl/Cmd+X</span>
+        </button>
+        <button
+          v-if="canWrite && clipboardEntry"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emitPasteEntry"
+        >
+          粘贴到此处
+          <span>Ctrl/Cmd+V</span>
+        </button>
+        <button
+          v-if="canWrite && canUndo"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="emit('undoEntry'); closeFileContextMenu()"
+        >
+          撤销上一步
+          <span>Ctrl/Cmd+Z</span>
         </button>
       </div>
     </Teleport>
     <Teleport to="body">
       <div
         v-if="showCreateDialog"
-        class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6"
+        class="ta-file-dialog-overlay"
         @keydown.esc="closeCreateDialog"
         @click.self="closeCreateDialog"
       >
         <section
           role="dialog"
           aria-modal="true"
-          aria-label="新建文件或文件夹"
-          class="flex w-[min(360px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
+          aria-label="新建或上传文件"
+          class="ta-file-dialog"
         >
-          <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
-            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">新建文件或文件夹</h2>
+          <header class="ta-file-dialog-header">
+            <div class="ta-file-dialog-heading">
+              <span class="ta-file-dialog-icon"><FilePlus2 :size="16" :stroke-width="1.7" /></span>
+              <div>
+                <h2>新建或上传</h2>
+                <p>选择要在当前目录执行的操作</p>
+              </div>
+            </div>
+            <button type="button" class="ta-file-dialog-close" aria-label="关闭" @click="closeCreateDialog">
+              <X :size="15" :stroke-width="1.7" />
+            </button>
           </header>
-          <div class="flex flex-col gap-3">
-            <div class="flex flex-col gap-1.5">
-              <label class="text-[11px] text-[var(--ta-muted)] font-medium">类型</label>
-              <div class="flex gap-2">
+          <div class="ta-file-dialog-body">
+            <div class="ta-file-dialog-path">
+              <span>目标目录</span>
+              <code>{{ createDialogParentDirectory || '工作区根目录' }}</code>
+            </div>
+            <div class="ta-file-dialog-field">
+              <label>操作类型</label>
+              <div class="ta-file-dialog-segments">
                 <button
                   type="button"
-                  :class="cn(
-                    'flex-1 rounded border px-3 py-1.5 text-[12px] transition',
-                    createDialogType === 'file'
-                      ? 'border-[var(--ta-ink)] bg-[var(--ta-ink)] text-white'
-                      : 'border-[var(--ta-border)] bg-transparent text-[var(--ta-text)] hover:border-[var(--ta-border-strong)]'
-                  )"
+                  :class="{ 'is-active': createDialogType === 'file' }"
                   @click="createDialogType = 'file'"
                 >
-                  新建文件
+                  文件
                 </button>
                 <button
                   type="button"
-                  :class="cn(
-                    'flex-1 rounded border px-3 py-1.5 text-[12px] transition',
-                    createDialogType === 'directory'
-                      ? 'border-[var(--ta-ink)] bg-[var(--ta-ink)] text-white'
-                      : 'border-[var(--ta-border)] bg-transparent text-[var(--ta-text)] hover:border-[var(--ta-border-strong)]'
-                  )"
+                  :class="{ 'is-active': createDialogType === 'directory' }"
                   @click="createDialogType = 'directory'"
                 >
-                  新建文件夹
+                  文件夹
+                </button>
+                <button
+                  type="button"
+                  :class="{ 'is-active': createDialogType === 'upload' }"
+                  @click="createDialogType = 'upload'"
+                >
+                  上传
                 </button>
               </div>
             </div>
-            <div class="flex flex-col gap-1.5">
-              <label class="text-[11px] text-[var(--ta-muted)] font-medium">
+            <div v-if="createDialogType !== 'upload'" class="ta-file-dialog-field">
+              <label>
                 {{ createDialogType === 'file' ? '文件名' : '文件夹名' }}
-                <span class="text-[var(--ta-danger,#b91c1c)]">*</span>
               </label>
               <input
                 v-model="createDialogName"
                 type="text"
-                :placeholder="createDialogType === 'file' ? '请输入文件名' : '请输入文件夹名'"
-                class="h-8 w-full rounded border border-[var(--ta-border)] bg-[var(--ta-surface)] px-2 text-[12px] outline-none transition placeholder:text-[var(--ta-muted)] focus:border-[var(--ta-border-strong)]"
+                :placeholder="createDialogType === 'file' ? '例如：README.md' : '例如：docs'"
+                class="ta-file-dialog-input"
                 @keydown.enter="submitCreateDialog"
                 autofocus
               />
-              <span v-if="createDialogError" class="text-[11px] text-[var(--ta-danger,#b91c1c)]">
+              <span v-if="createDialogError" class="ta-file-dialog-error">
                 {{ createDialogError }}
               </span>
             </div>
+            <div v-else class="ta-file-dialog-upload-note">
+              <Upload :size="17" :stroke-width="1.6" />
+              <div>
+                <strong>从本机选择文件</strong>
+                <span>支持一次选择多个文件，上传时不会覆盖同名内容。</span>
+              </div>
+            </div>
           </div>
-          <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
-            <button
-              type="button"
-              class="inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded border border-[var(--ta-border)] bg-transparent px-3 text-[12px] font-medium text-[var(--ta-muted)] transition hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]"
-              @click="closeCreateDialog"
-            >
+          <footer class="ta-file-dialog-footer">
+            <button type="button" class="ta-file-dialog-button" @click="closeCreateDialog">
               取消
             </button>
             <button
               type="button"
-              class="inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded border border-[var(--ta-ink)] bg-[var(--ta-ink)] px-3 text-[12px] font-medium text-white transition hover:bg-[#111111]"
-              :disabled="!createDialogName.trim()"
+              class="ta-file-dialog-button is-primary"
+              :disabled="createDialogType !== 'upload' && !createDialogName.trim()"
               @click="submitCreateDialog"
             >
-              确定
+              {{ createDialogType === 'upload' ? '选择文件' : '创建' }}
             </button>
           </footer>
         </section>
@@ -397,40 +589,43 @@ function submitRename() {
     <Teleport to="body">
       <div
         v-if="showDeleteDialog"
-        class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6"
+        class="ta-file-dialog-overlay"
         @keydown.esc="closeDeleteDialog"
         @click.self="closeDeleteDialog"
       >
         <section
           role="dialog"
           aria-modal="true"
-          aria-label="删除文件"
-          class="flex w-[min(360px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
+          :aria-label="deleteDialogEntry?.type === 'directory' ? '删除文件夹' : '删除文件'"
+          class="ta-file-dialog ta-file-dialog--danger"
         >
-          <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
-            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">确认删除</h2>
+          <header class="ta-file-dialog-header">
+            <div class="ta-file-dialog-heading">
+              <span class="ta-file-dialog-icon"><AlertTriangle :size="16" :stroke-width="1.8" /></span>
+              <div>
+                <h2>确认删除</h2>
+                <p>此操作会立即写入当前个人 worktree</p>
+              </div>
+            </div>
+            <button type="button" class="ta-file-dialog-close" aria-label="关闭" @click="closeDeleteDialog">
+              <X :size="15" :stroke-width="1.7" />
+            </button>
           </header>
-          <div class="flex flex-col gap-3">
-            <p class="text-[12px] text-[var(--ta-text)]">
-              确定要删除{{ deleteDialogEntry?.type === 'directory' ? '文件夹' : '文件' }}
-              <strong class="text-[var(--ta-danger,#b91c1c)]">{{ deleteDialogEntry?.name }}</strong>
-              吗？删除后无法恢复。
+          <div class="ta-file-dialog-body">
+            <div class="ta-file-dialog-danger-card">
+              <span>{{ deleteDialogEntry?.type === 'directory' ? '文件夹' : '文件' }}</span>
+              <strong>{{ deleteDialogEntry?.path }}</strong>
+            </div>
+            <p class="ta-file-dialog-warning">
+              {{ deleteDialogEntry?.type === 'directory' ? '文件夹及其中的全部内容都会被删除。' : '文件删除后无法恢复。' }}
             </p>
           </div>
-          <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
-            <button
-              type="button"
-              class="inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded border border-[var(--ta-border)] bg-transparent px-3 text-[12px] font-medium text-[var(--ta-muted)] transition hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]"
-              @click="closeDeleteDialog"
-            >
+          <footer class="ta-file-dialog-footer">
+            <button type="button" class="ta-file-dialog-button" @click="closeDeleteDialog">
               取消
             </button>
-            <button
-              type="button"
-              class="inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded border border-[var(--ta-danger,#b91c1c)] bg-[var(--ta-danger,#b91c1c)] px-3 text-[12px] font-medium text-white transition hover:bg-[#991b1b]"
-              @click="submitDeleteDialog"
-            >
-              删除
+            <button type="button" class="ta-file-dialog-button is-danger" @click="submitDeleteDialog">
+              确认删除
             </button>
           </footer>
         </section>
@@ -440,6 +635,376 @@ function submitRename() {
 </template>
 
 <style scoped>
+.ta-file-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2700;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(8px);
+  animation: ta-fade-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ta-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ta-file-dialog {
+  width: min(440px, calc(100vw - 28px));
+  overflow: hidden;
+  border: 1px solid var(--ta-border-strong, #cfcfcf);
+  border-radius: 12px;
+  background: var(--ta-panel-2, #ffffff);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.02);
+  color: var(--ta-text, #333333);
+  animation: ta-file-dialog-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.ta-file-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--ta-border, #eaeaea);
+  background: var(--ta-surface, #ffffff);
+}
+
+.ta-file-dialog-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ta-file-dialog-heading h2 {
+  margin: 0;
+  color: var(--ta-text, #333333);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ta-file-dialog-heading p {
+  margin: 4px 0 0;
+  color: var(--ta-muted, #7a7a7a);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ta-file-dialog-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cce0ff;
+  border-radius: 8px;
+  background: #ecf3fe;
+  color: #2563eb;
+  transition: transform 0.2s ease;
+}
+
+.ta-file-dialog--danger .ta-file-dialog-icon {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: var(--ta-error, #9e3b34);
+}
+
+.ta-file-dialog-close {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ta-muted, #7a7a7a);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: -2px;
+  margin-right: -4px;
+}
+
+.ta-file-dialog-close:hover {
+  background: var(--ta-hover, #eef1f5);
+  color: var(--ta-text, #333333);
+}
+
+.ta-file-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: var(--ta-panel-2, #ffffff);
+}
+
+.ta-file-dialog-path {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ta-file-dialog-path span,
+.ta-file-dialog-field > label {
+  color: var(--ta-muted, #7a7a7a);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ta-file-dialog-path code {
+  overflow: hidden;
+  border: 1px solid var(--ta-border, #eaeaea);
+  border-radius: 8px;
+  background: var(--ta-bg, #f0f4fa);
+  padding: 8px 12px;
+  color: var(--ta-subtle, #444444);
+  font-family: var(--font-mono, "Geist Mono", monospace);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+.ta-file-dialog-field {
+  display: grid;
+  gap: 6px;
+}
+
+.ta-file-dialog-segments {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  border: 1px solid var(--ta-border, #eaeaea);
+  border-radius: 8px;
+  background: var(--ta-bg, #f0f4fa);
+  padding: 4px;
+}
+
+.ta-file-dialog-segments button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ta-muted, #7a7a7a);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ta-file-dialog-segments button:hover {
+  color: var(--ta-text, #333333);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.ta-file-dialog-segments button.is-active {
+  background: var(--ta-surface, #ffffff);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  color: var(--ta-text, #333333);
+  font-weight: 600;
+}
+
+.ta-file-dialog-input {
+  width: 100%;
+  height: 38px;
+  border: 1px solid var(--ta-border-strong, #cfcfcf);
+  border-radius: 8px;
+  outline: none;
+  background: var(--ta-surface, #fff);
+  padding: 0 12px;
+  color: var(--ta-text, #333333);
+  font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.ta-file-dialog-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.ta-file-dialog-input::placeholder {
+  color: #9aa3b2;
+}
+
+.ta-file-dialog-error {
+  color: var(--ta-error, #9e3b34);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.ta-file-dialog-upload-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  border: 2px dashed #bfdbfe;
+  border-radius: 10px;
+  background: #f0f7ff;
+  padding: 24px 16px;
+  color: #2563eb;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ta-file-dialog-upload-note:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  transform: translateY(-1px);
+}
+
+.ta-file-dialog-upload-note svg {
+  color: #3b82f6;
+  animation: ta-bounce 1s infinite alternate;
+}
+
+@keyframes ta-bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-4px); }
+}
+
+.ta-file-dialog-upload-note div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ta-file-dialog-upload-note strong {
+  color: #1e40af;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ta-file-dialog-upload-note span {
+  color: #60a5fa;
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 240px;
+  margin: 0 auto;
+}
+
+.ta-file-dialog-danger-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid #fee2e2;
+  border-radius: 10px;
+  background: #fef2f2;
+  padding: 14px 16px;
+}
+
+.ta-file-dialog-danger-card span {
+  color: #ef4444;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ta-file-dialog-danger-card strong {
+  overflow-wrap: anywhere;
+  color: #991b1b;
+  font-family: var(--font-mono, "Geist Mono", monospace);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ta-file-dialog-warning {
+  margin: 0;
+  color: var(--ta-muted, #7a7a7a);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ta-file-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--ta-border, #eaeaea);
+  background: var(--ta-surface, #ffffff);
+}
+
+.ta-file-dialog-button {
+  min-width: 80px;
+  height: 34px;
+  border: 1px solid var(--ta-border-strong, #cfcfcf);
+  border-radius: 8px;
+  background: var(--ta-surface, #fff);
+  color: var(--ta-text, #333333);
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ta-file-dialog-button:hover {
+  border-color: var(--ta-text, #333333);
+  background: var(--ta-hover, #f1f3f6);
+}
+
+.ta-file-dialog-button.is-primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15);
+}
+
+.ta-file-dialog-button.is-primary:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  box-shadow: 0 4px 6px rgba(29, 78, 216, 0.2);
+}
+
+.ta-file-dialog-button.is-danger {
+  border-color: #dc2626;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.15);
+}
+
+.ta-file-dialog-button.is-danger:hover {
+  border-color: #b91c1c;
+  background: #b91c1c;
+  box-shadow: 0 4px 6px rgba(185, 28, 28, 0.2);
+}
+
+.ta-file-dialog-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  box-shadow: none !important;
+}
+
+.ta-file-dialog-button:focus-visible,
+.ta-file-dialog-close:focus-visible,
+.ta-file-dialog-segments button:focus-visible {
+  outline: 2px solid var(--ta-accent, #3366ff);
+  outline-offset: 1px;
+}
+
+@keyframes ta-file-dialog-enter {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ta-file-dialog { animation: none; }
+}
+
 .ta-file-context-menu-backdrop {
   position: fixed;
   inset: 0;
@@ -470,6 +1035,19 @@ function submitRename() {
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ta-file-context-menu-item span {
+  color: #8b949e;
+  font-size: 11px;
+}
+
+:deep(.ta-file-tree-row.is-drop-target) {
+  outline: 1px solid var(--ta-accent, #2563eb);
+  outline-offset: -1px;
+  background: rgb(37 99 235 / 10%);
 }
 
 .ta-file-context-menu-item:hover {
@@ -480,6 +1058,22 @@ function submitRename() {
   position: relative;
 }
 
+.ta-file-tree-actions {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  display: flex;
+  height: 18px;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.ta-file-tree-actions > button {
+  margin-left: 0;
+  pointer-events: auto;
+}
+
 .ta-file-tree-add-btn {
   display: none;
   align-items: center;
@@ -488,15 +1082,15 @@ function submitRename() {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: 4px;
   background: transparent;
   color: var(--ta-tree-muted, #8b949e);
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: all 0.15s ease;
   margin-left: 4px;
 }
 
-.ta-file-tree-row:hover .ta-file-tree-add-btn {
+.ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-add-btn {
   display: inline-flex;
 }
 
@@ -513,21 +1107,22 @@ function submitRename() {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: 4px;
   background: transparent;
   color: var(--ta-tree-muted, #8b949e);
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: all 0.15s ease;
   margin-left: 4px;
 }
 
-.ta-file-tree-row:hover .ta-file-tree-delete-btn {
+.ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-delete-btn,
+.ta-file-tree-delete-btn:focus-visible {
   display: inline-flex;
 }
 
 .ta-file-tree-delete-btn:hover {
-  background: var(--ta-hover, #f1f5f9);
-  color: var(--ta-danger, #b91c1c);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--ta-danger, #dc2626);
 }
 
 .ta-file-tree-plane-btn {
@@ -546,7 +1141,7 @@ function submitRename() {
   margin-left: 4px;
 }
 
-.ta-file-tree-row:hover .ta-file-tree-plane-btn {
+.ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-plane-btn {
   display: inline-flex;
 }
 

@@ -8,6 +8,7 @@
 
 - `Button.vue`、`Badge.vue`、`Input.vue`、`Textarea.vue`、`Tabs.vue`、`Toast.vue`、`ShimmerDivider.vue`：消费全局 theme token，提供紧凑、可聚焦、可禁用的基础控件外观；流光分割线支持横向/纵向和动画/静态模式，默认横向动画接口保持兼容。
 - `lib.ts`：样式合并工具。
+- `clipboard.ts`：统一文本复制能力；安全上下文优先 Clipboard API，企业内 HTTP 或权限拒绝时回退到 Chromium 108 的 `execCommand("copy")`，并负责清理临时 textarea、恢复原焦点。
 
 ## 允许依赖
 

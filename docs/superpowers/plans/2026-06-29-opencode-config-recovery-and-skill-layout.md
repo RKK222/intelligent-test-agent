@@ -15,8 +15,8 @@
 ### Task 1: 脏仓库仍可浏览
 
 **Files:**
-- Modify: `backend/test-agent-workspace-management/src/test/java/com/icbc/testagent/workspace/AgentConfigApplicationServiceTest.java`
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/AgentConfigApplicationService.java`
+- Modify: `backend/test-agent-workspace-management/src/test/java/com/enterprise/testagent/workspace/AgentConfigApplicationServiceTest.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/AgentConfigApplicationService.java`
 
 - [ ] 增加失败测试，断言已初始化但脏的仓库返回 `initialized=true/status=CONFLICT`。
 - [ ] 运行测试确认按预期失败。
@@ -26,13 +26,13 @@
 ### Task 2: 显式放弃修改并同步
 
 **Files:**
-- Modify: `backend/test-agent-common/src/main/java/com/icbc/testagent/common/git/GitWorkspaceService.java`
-- Modify: `backend/test-agent-common/src/test/java/com/icbc/testagent/common/git/GitWorkspaceServiceTest.java`
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/AgentConfigApplicationService.java`
-- Modify: `backend/test-agent-workspace-management/src/test/java/com/icbc/testagent/workspace/AgentConfigApplicationServiceTest.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/AgentConfigDtos.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/AgentConfigController.java`
-- Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/AgentConfigControllerTest.java`
+- Modify: `backend/test-agent-common/src/main/java/com/enterprise/testagent/common/git/GitWorkspaceService.java`
+- Modify: `backend/test-agent-common/src/test/java/com/enterprise/testagent/common/git/GitWorkspaceServiceTest.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/AgentConfigApplicationService.java`
+- Modify: `backend/test-agent-workspace-management/src/test/java/com/enterprise/testagent/workspace/AgentConfigApplicationServiceTest.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/AgentConfigDtos.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/AgentConfigController.java`
+- Modify: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/AgentConfigControllerTest.java`
 - Modify: `frontend/packages/backend-api/src/index.ts`
 - Modify: `frontend/packages/backend-api/tests/backend-api.test.ts`
 
@@ -84,8 +84,8 @@
 ### Task 6: manager 断连诊断和修复
 
 **Files:**
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/ManagerControlWebSocketHandler.java`
-- Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/ManagerControlWebSocketHandlerTest.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/ManagerControlWebSocketHandler.java`
+- Modify: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/ManagerControlWebSocketHandlerTest.java`
 - Modify actual root-cause owner identified by the new log
 
 - [ ] 增加覆盖入站异常可观测性的失败测试。

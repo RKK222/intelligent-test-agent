@@ -1903,7 +1903,180 @@ describe("backend-api", () => {
     });
   });
 
-  it("reads and renames workspace files through the same target backend websocket", async () => {
+  it("shares one workspace file connection while concurrent callers wait for open", async () => {
+    let resolveRoute!: (response: Response) => void;
+    const routeResponse = new Promise<Response>((resolve) => {
+      resolveRoute = resolve;
+    });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      if (String(input).endsWith("/workspaces/wrk_concurrent/file-ws-route")) {
+        return routeResponse;
+      }
+      return new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            ticket: "wft_concurrent",
+            expiresAt: "2026-06-26T10:00:00Z",
+            webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_concurrent"
+          }
+        }),
+        { status: 200 }
+      );
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: manualWorkspaceWebSocketFactory(sockets)
+    });
+
+    const listRequest = client.listFiles("wrk_concurrent", "src");
+    const readRequest = client.readFile("wrk_concurrent", "docs/design.md");
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    resolveRoute(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            workspaceId: "wrk_concurrent",
+            linuxServerId: "linux-1",
+            baseUrl: "http://10.8.0.12:8080",
+            webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+            sameServer: true
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sockets[0]?.sentMessages).toEqual([]);
+
+    sockets[0]?.openConnection();
+
+    await expect(Promise.all([listRequest, readRequest])).resolves.toHaveLength(2);
+    expect(sockets[0]?.sentMessages.map((message) => message.op)).toEqual(["workspace.list", "workspace.read"]);
+  });
+
+  it("rejects a workspace connection closed before open and reconnects on the next call", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const isRoute = String(input).includes("/workspaces/wrk_reconnect/file-ws-route");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: isRoute
+            ? {
+                workspaceId: "wrk_reconnect",
+                linuxServerId: "linux-1",
+                baseUrl: "http://10.8.0.12:8080",
+                webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+                sameServer: true
+              }
+            : {
+                ticket: `wft_reconnect_${fetcher.mock.calls.length}`,
+                expiresAt: "2026-06-26T10:00:00Z",
+                webSocketUrl: `/api/internal/platform/workspace-management/file/ws?ticket=wft_reconnect_${fetcher.mock.calls.length}`
+              }
+        }),
+        { status: 200 }
+      );
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: manualWorkspaceWebSocketFactory(sockets)
+    });
+
+    let firstError: unknown;
+    const firstRequest = client.listFiles("wrk_reconnect", "src").catch((error: unknown) => {
+      firstError = error;
+    });
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+
+    sockets[0]?.close();
+
+    await vi.waitFor(() => expect(firstError).toBeInstanceOf(Error));
+    await firstRequest;
+    expect((firstError as Error).message).toContain("已关闭");
+
+    const secondRequest = client.listFiles("wrk_reconnect", "src");
+    await vi.waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]?.openConnection();
+
+    await expect(secondRequest).resolves.toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it("rejects a workspace connection errored before open", async () => {
+    const fetcher = workspaceFileFetcher("wrk_connect_error");
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: manualWorkspaceWebSocketFactory(sockets)
+    });
+    const request = client.listFiles("wrk_connect_error", "src");
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+
+    sockets[0]?.failConnection();
+
+    await expect(request).rejects.toThrow("连接失败");
+  });
+
+  it("does not let a stale workspace socket close evict a newer active socket", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const isRoute = String(input).includes("/workspaces/wrk_stale_close/file-ws-route");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: isRoute
+            ? {
+                workspaceId: "wrk_stale_close",
+                linuxServerId: "linux-1",
+                baseUrl: "http://10.8.0.12:8080",
+                webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+                sameServer: true
+              }
+            : {
+                ticket: `wft_stale_${fetcher.mock.calls.length}`,
+                expiresAt: "2026-06-26T10:00:00Z",
+                webSocketUrl: `/api/internal/platform/workspace-management/file/ws?ticket=wft_stale_${fetcher.mock.calls.length}`
+              }
+        }),
+        { status: 200 }
+      );
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: fakeWorkspaceWebSocketFactory(sockets)
+    });
+
+    await client.listFiles("wrk_stale_close", "src");
+    sockets[0]?.close();
+    await client.listFiles("wrk_stale_close", "src");
+
+    sockets[0]?.close();
+    await client.listFiles("wrk_stale_close", "src");
+
+    expect(sockets).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(sockets[1]?.sentMessages).toHaveLength(2);
+  });
+
+  it("reads and mutates workspace files through the same target backend websocket", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -1950,6 +2123,9 @@ describe("backend-api", () => {
       content: "# 设计"
     });
     await client.renameWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "详细设计.md");
+    await client.copyWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "backup/design.md");
+    await client.moveWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "archive/design.md");
+    await client.uploadWorkspaceFile("wrk_1234567890abcdef", "assets/icon.bin", "AAEC/w==");
 
     expect(sockets[0]?.sentMessages).toEqual([
       expect.objectContaining({
@@ -1959,8 +2135,261 @@ describe("backend-api", () => {
       expect.objectContaining({
         op: "workspace.rename",
         params: { workspaceId: "wrk_1234567890abcdef", path: "docs/design.md", name: "详细设计.md" }
+      }),
+      expect.objectContaining({
+        op: "workspace.copy",
+        params: { workspaceId: "wrk_1234567890abcdef", sourcePath: "docs/design.md", targetPath: "backup/design.md" }
+      }),
+      expect.objectContaining({
+        op: "workspace.move",
+        params: { workspaceId: "wrk_1234567890abcdef", sourcePath: "docs/design.md", targetPath: "archive/design.md" }
+      }),
+      expect.objectContaining({
+        op: "workspace.upload",
+        params: { workspaceId: "wrk_1234567890abcdef", path: "assets/icon.bin", contentBase64: "AAEC/w==" }
       })
     ]);
+  });
+
+  it("reconnects once when workspace.read fails with an explicit transport close", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const isRoute = String(input).includes("/workspaces/wrk_read_retry/file-ws-route");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: isRoute
+            ? {
+                workspaceId: "wrk_read_retry",
+                linuxServerId: "linux-1",
+                baseUrl: "http://10.8.0.12:8080",
+                webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+                sameServer: true
+              }
+            : {
+                ticket: `wft_read_retry_${fetcher.mock.calls.length}`,
+                expiresAt: "2026-06-26T10:00:00Z",
+                webSocketUrl: `/api/internal/platform/workspace-management/file/ws?ticket=wft_read_retry_${fetcher.mock.calls.length}`
+              }
+        }),
+        { status: 200 }
+      );
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: ((url: string) => {
+        const socket = new FakeWorkspaceWebSocket(url);
+        if (sockets.length === 0) {
+          socket.onSend = () => socket.close();
+        }
+        sockets.push(socket);
+        return socket;
+      }) satisfies WorkspaceWebSocketFactory
+    });
+
+    await expect(client.readFile("wrk_read_retry", "docs/design.md")).resolves.toMatchObject({
+      path: "docs/design.md",
+      content: "# 设计"
+    });
+
+    expect(sockets).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(sockets.map((socket) => socket.sentMessages.map((message) => message.op))).toEqual([
+      ["workspace.read"],
+      ["workspace.read"]
+    ]);
+  });
+
+  it("returns the second workspace.read transport failure without a third attempt", async () => {
+    const fetcher = workspaceFileFetcher("wrk_read_twice");
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: ((url: string) => {
+        const socket = new FakeWorkspaceWebSocket(url);
+        socket.onSend = () => socket.close();
+        sockets.push(socket);
+        return socket;
+      }) satisfies WorkspaceWebSocketFactory
+    });
+
+    await expect(client.readFile("wrk_read_twice", "docs/design.md")).rejects.toThrow("已关闭");
+
+    expect(sockets).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not retry workspace.read business errors", async () => {
+    const fetcher = workspaceFileFetcher("wrk_business_error");
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: ((url: string) => {
+        const socket = new FakeWorkspaceWebSocket(url);
+        socket.onSend = (message) => {
+          queueMicrotask(() => {
+            socket.onmessage?.({
+              data: JSON.stringify({
+                id: message.id,
+                type: "error",
+                code: "FILE_NOT_FOUND",
+                message: "文件不存在",
+                traceId: "trace_file_missing"
+              })
+            });
+          });
+        };
+        sockets.push(socket);
+        return socket;
+      }) satisfies WorkspaceWebSocketFactory
+    });
+
+    await expect(client.readFile("wrk_business_error", "missing.md")).rejects.toMatchObject({
+      name: "BackendApiError",
+      code: "FILE_NOT_FOUND"
+    });
+
+    expect(sockets).toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry workspace.read request timeouts", async () => {
+    const fetcher = workspaceFileFetcher("wrk_read_timeout");
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: manualWorkspaceWebSocketFactory(sockets)
+    });
+    const request = client.readFile("wrk_read_timeout", "docs/design.md");
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0]!.onSend = () => undefined;
+
+    vi.useFakeTimers();
+    try {
+      sockets[0]?.openConnection();
+      const rejection = expect(request).rejects.toMatchObject({
+        name: "BackendApiError",
+        code: "REQUEST_TIMEOUT"
+      });
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await rejection;
+      expect(sockets).toHaveLength(1);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry workspace.write after a transport close", async () => {
+    const fetcher = workspaceFileFetcher("wrk_write_failure");
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: ((url: string) => {
+        const socket = new FakeWorkspaceWebSocket(url);
+        socket.onSend = () => socket.close();
+        sockets.push(socket);
+        return socket;
+      }) satisfies WorkspaceWebSocketFactory
+    });
+
+    await expect(client.writeFile("wrk_write_failure", "docs/design.md", "changed")).rejects.toThrow("已关闭");
+
+    expect(sockets).toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a synchronous websocket send failure immediately and clears its request timer", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const isRoute = String(input).includes("/workspaces/wrk_send_failure/file-ws-route");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: isRoute
+            ? {
+                workspaceId: "wrk_send_failure",
+                linuxServerId: "linux-1",
+                baseUrl: "http://10.8.0.12:8080",
+                webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+                sameServer: true
+              }
+            : {
+                ticket: "wft_send_failure",
+                expiresAt: "2026-06-26T10:00:00Z",
+                webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_send_failure"
+              }
+        }),
+        { status: 200 }
+      );
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: manualWorkspaceWebSocketFactory(sockets)
+    });
+    const request = client.writeFile("wrk_send_failure", "docs/design.md", "changed");
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0]!.onSend = () => {
+      throw new Error("send exploded");
+    };
+
+    vi.useFakeTimers();
+    try {
+      sockets[0]?.openConnection();
+
+      await expect(request).rejects.toThrow("send exploded");
+      expect(vi.getTimerCount()).toBe(0);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(sockets).toHaveLength(1);
+      expect(sockets[0]?.closeCalls).toBe(1);
+      expect(sockets[0]?.closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the original send failure when closing the unusable socket also throws", async () => {
+    const fetcher = workspaceFileFetcher("wrk_send_close_failure");
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: manualWorkspaceWebSocketFactory(sockets)
+    });
+    const request = client.writeFile("wrk_send_close_failure", "docs/design.md", "changed");
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0]!.onSend = () => {
+      throw new Error("send exploded");
+    };
+    sockets[0]!.closeError = new Error("close exploded");
+
+    vi.useFakeTimers();
+    try {
+      sockets[0]?.openConnection();
+
+      await expect(request).rejects.toThrow("send exploded");
+      expect(vi.getTimerCount()).toBe(0);
+      expect(sockets[0]?.closeCalls).toBe(1);
+      expect(sockets[0]?.closed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("routes public agent config files through target backend websocket", async () => {
@@ -2036,6 +2465,167 @@ describe("backend-api", () => {
       op: "agent-config.list",
       params: { scope: "PUBLIC", path: "opencode/agents", worktreeId: "agw_1234567890abcdef" }
     });
+  });
+
+  it("shares one agent-config connection while concurrent callers wait for open", async () => {
+    let resolveRoute!: (response: Response) => void;
+    const routeResponse = new Promise<Response>((resolve) => {
+      resolveRoute = resolve;
+    });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      if (String(input).endsWith("/agent-config/file-ws-route")) {
+        return routeResponse;
+      }
+      return new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            ticket: "wft_agent_concurrent",
+            expiresAt: "2026-06-26T10:00:00Z",
+            webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_agent_concurrent"
+          }
+        }),
+        { status: 200 }
+      );
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: manualWorkspaceWebSocketFactory(sockets)
+    });
+
+    const listRequest = client.listPublicAgentFiles("opencode/agents", "agw_concurrent", "linux-2");
+    const readRequest = client.readPublicAgentFile("opencode/agents/review.md", "agw_concurrent", "linux-2");
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    resolveRoute(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            scope: "PUBLIC",
+            worktreeId: "agw_concurrent",
+            linuxServerId: "linux-2",
+            baseUrl: "http://10.8.0.13:8080",
+            webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+            sameServer: false
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sockets[0]?.sentMessages).toEqual([]);
+
+    sockets[0]?.openConnection();
+
+    await expect(Promise.all([listRequest, readRequest])).resolves.toHaveLength(2);
+    expect(sockets[0]?.sentMessages.map((message) => message.op)).toEqual(["agent-config.list", "agent-config.read"]);
+  });
+
+  it("reconnects once when agent-config.read fails with an explicit transport close", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const isRoute = String(input).endsWith("/agent-config/file-ws-route");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: isRoute
+            ? {
+                scope: "PUBLIC",
+                worktreeId: "agw_read_retry",
+                linuxServerId: "linux-2",
+                baseUrl: "http://10.8.0.13:8080",
+                webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+                sameServer: false
+              }
+            : {
+                ticket: `wft_agent_retry_${fetcher.mock.calls.length}`,
+                expiresAt: "2026-06-26T10:00:00Z",
+                webSocketUrl: `/api/internal/platform/workspace-management/file/ws?ticket=wft_agent_retry_${fetcher.mock.calls.length}`
+              }
+        }),
+        { status: 200 }
+      );
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: ((url: string) => {
+        const socket = new FakeWorkspaceWebSocket(url);
+        if (sockets.length === 0) {
+          socket.onSend = () => socket.close();
+        }
+        sockets.push(socket);
+        return socket;
+      }) satisfies WorkspaceWebSocketFactory
+    });
+
+    await expect(
+      client.readPublicAgentFile("opencode/agents/review.md", "agw_read_retry", "linux-2")
+    ).resolves.toMatchObject({
+      path: "review.md",
+      content: "agent content"
+    });
+
+    expect(sockets).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(sockets.map((socket) => socket.sentMessages.map((message) => message.op))).toEqual([
+      ["agent-config.read"],
+      ["agent-config.read"]
+    ]);
+  });
+
+  it("does not let a stale agent-config socket close evict a newer active socket", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const isRoute = String(input).endsWith("/agent-config/file-ws-route");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: isRoute
+            ? {
+                scope: "PUBLIC",
+                worktreeId: "agw_stale_close",
+                linuxServerId: "linux-2",
+                baseUrl: "http://10.8.0.13:8080",
+                webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+                sameServer: false
+              }
+            : {
+                ticket: `wft_agent_stale_${fetcher.mock.calls.length}`,
+                expiresAt: "2026-06-26T10:00:00Z",
+                webSocketUrl: `/api/internal/platform/workspace-management/file/ws?ticket=wft_agent_stale_${fetcher.mock.calls.length}`
+              }
+        }),
+        { status: 200 }
+      );
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: fakeWorkspaceWebSocketFactory(sockets)
+    });
+
+    await client.listPublicAgentFiles("opencode/agents", "agw_stale_close", "linux-2");
+    sockets[0]?.close();
+    await client.listPublicAgentFiles("opencode/agents", "agw_stale_close", "linux-2");
+
+    sockets[0]?.close();
+    await client.listPublicAgentFiles("opencode/agents", "agw_stale_close", "linux-2");
+
+    expect(sockets).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(sockets[1]?.sentMessages).toHaveLength(2);
   });
 
   it("routes workspace agent config read and write through one file websocket", async () => {
@@ -2358,18 +2948,36 @@ type WebSocketEventHandler = ((event: any) => void) | null;
 
 class FakeWorkspaceWebSocket {
   readonly sentMessages: Array<Record<string, unknown>> = [];
+  closeCalls = 0;
+  closed = false;
+  closeError?: Error;
+  onSend?: (message: Record<string, unknown>) => void;
   onopen: WebSocketEventHandler = null;
   onmessage: WebSocketEventHandler = null;
   onerror: WebSocketEventHandler = null;
   onclose: WebSocketEventHandler = null;
 
-  constructor(readonly url: string) {
-    queueMicrotask(() => this.onopen?.({}));
+  constructor(readonly url: string, autoOpen = true) {
+    if (autoOpen) {
+      queueMicrotask(() => this.openConnection());
+    }
+  }
+
+  openConnection() {
+    this.onopen?.({});
+  }
+
+  failConnection() {
+    this.onerror?.({});
   }
 
   send(payload: string) {
     const message = JSON.parse(payload) as { id: string; op: string };
     this.sentMessages.push(message);
+    if (this.onSend) {
+      this.onSend(message);
+      return;
+    }
     queueMicrotask(() => {
       this.onmessage?.({
         data: JSON.stringify({
@@ -2415,6 +3023,11 @@ class FakeWorkspaceWebSocket {
   }
 
   close() {
+    this.closeCalls += 1;
+    if (this.closeError) {
+      throw this.closeError;
+    }
+    this.closed = true;
     this.onclose?.({});
   }
 }
@@ -2425,4 +3038,38 @@ function fakeWorkspaceWebSocketFactory(instances: FakeWorkspaceWebSocket[]) {
     instances.push(socket);
     return socket;
   }) satisfies WorkspaceWebSocketFactory;
+}
+
+function manualWorkspaceWebSocketFactory(instances: FakeWorkspaceWebSocket[]) {
+  return ((url: string) => {
+    const socket = new FakeWorkspaceWebSocket(url, false);
+    instances.push(socket);
+    return socket;
+  }) satisfies WorkspaceWebSocketFactory;
+}
+
+function workspaceFileFetcher(workspaceId: string) {
+  return vi.fn<typeof fetch>().mockImplementation(async (input) => {
+    const isRoute = String(input).includes(`/workspaces/${workspaceId}/file-ws-route`);
+    return new Response(
+      JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: isRoute
+          ? {
+              workspaceId,
+              linuxServerId: "linux-1",
+              baseUrl: "http://10.8.0.12:8080",
+              webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+              sameServer: true
+            }
+          : {
+              ticket: `wft_${workspaceId}`,
+              expiresAt: "2026-06-26T10:00:00Z",
+              webSocketUrl: `/api/internal/platform/workspace-management/file/ws?ticket=wft_${workspaceId}`
+            }
+      }),
+      { status: 200 }
+    );
+  });
 }

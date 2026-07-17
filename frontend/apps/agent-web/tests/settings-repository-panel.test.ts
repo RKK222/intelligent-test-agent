@@ -236,8 +236,8 @@ describe("SettingsRepositoryPanel settings", () => {
     expect(await findByText("ssh://AUTH_ADMIN@")).toBeTruthy();
 
     await fireEvent.update(
-      getByPlaceholderText("scm-share.sdc.cs.icbc:29418/group/repository"),
-      "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform"
+      getByPlaceholderText("scm-share.sdc.cs.enterprise:29418/group/repository"),
+      "scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform"
     );
     await fireEvent.update(getByPlaceholderText("中文名称"), "接口平台");
     await fireEvent.update(getByLabelText("版本库类型"), "APPLICATION_CODE_REPOSITORY");
@@ -245,7 +245,7 @@ describe("SettingsRepositoryPanel settings", () => {
     await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
 
     await waitFor(() => expect(api.createRepository).toHaveBeenCalledWith({
-      gitUrl: "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
+      gitUrl: "scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform",
       name: "接口平台",
       englishName: "hzefficiencytools-interfaceplatform",
       deploymentMode: "INTERNAL",
@@ -300,8 +300,8 @@ describe("SettingsRepositoryPanel settings", () => {
 
     // Enter Git URL and check derived English name
     await fireEvent.update(
-      getByPlaceholderText("scm-share.sdc.cs.icbc:29418/group/repository"),
-      "scm-share.sdc.cs.icbc:29418/foo/bar-repo"
+      getByPlaceholderText("scm-share.sdc.cs.enterprise:29418/group/repository"),
+      "scm-share.sdc.cs.enterprise:29418/foo/bar-repo"
     );
     expect(englishNameInput.value).toBe("foo-bar-repo");
   });
@@ -323,7 +323,7 @@ describe("SettingsRepositoryPanel settings", () => {
     vi.mocked(api.listRepositories!).mockResolvedValue({
       items: [{
         repositoryId: "repo_internal",
-        gitUrl: "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
+        gitUrl: "scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform",
         name: "接口平台",
         englishName: "hzefficiencytools-interfaceplatform",
         repositoryType: "APPLICATION_CODE_REPOSITORY",
@@ -339,13 +339,13 @@ describe("SettingsRepositoryPanel settings", () => {
     });
     const { findByText, getByText, queryByText, container } = renderPanel(api);
 
-    expect(await findByText("hzefficiencytools-interfaceplatform · scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform")).toBeTruthy();
-    expect(queryByText("ssh://AUTH_ADMIN@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform")).toBeNull();
+    expect(await findByText("hzefficiencytools-interfaceplatform · scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform")).toBeTruthy();
+    expect(queryByText("ssh://AUTH_ADMIN@scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform")).toBeNull();
 
     await fireEvent.click(getByText("编辑"));
 
     expect(container.querySelector(".el-dialog-stub")).toBeTruthy();
-    expect(await findByText("ssh://AUTH_ADMIN@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform")).toBeTruthy();
+    expect(await findByText("ssh://AUTH_ADMIN@scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform")).toBeTruthy();
   });
 
   it("labels repository management forms and cancels repository editing", async () => {

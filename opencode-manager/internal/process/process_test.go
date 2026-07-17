@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/icbc/test-agent/opencode-manager/internal/config"
-	"github.com/icbc/test-agent/opencode-manager/internal/health"
-	"github.com/icbc/test-agent/opencode-manager/internal/state"
+	"github.com/enterprise/test-agent/opencode-manager/internal/config"
+	"github.com/enterprise/test-agent/opencode-manager/internal/health"
+	"github.com/enterprise/test-agent/opencode-manager/internal/state"
 )
 
 func TestBuildStartSpecUsesFixedOpencodeServeCommand(t *testing.T) {

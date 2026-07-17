@@ -15,8 +15,8 @@
 ### Task 1: 后端同步 root OpenCode 标题
 
 **Files:**
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationService.java`
 
 - [ ] 增加失败测试：经 `RunSessionScopeRouter` 路由后的 root `session.updated`（`isChildSession=false`，且 `sessionId/rootSessionId` 对应）从 `info.title` 或 `rawPayload.properties.info.title` 更新对应平台 Session；child、未知归属和空标题不覆盖主标题。
 - [ ] 运行 `mvn -pl test-agent-opencode-runtime -am -Dtest=RunApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`，确认测试因尚未同步标题失败。

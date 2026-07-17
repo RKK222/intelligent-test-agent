@@ -9,6 +9,7 @@ export const applicationWorkspaceRestrictionsFixture = {
     versionId: "awv_feature_20260715",
     featureWorkspaceId: "wrk_feature_readonly_20260715",
     personalWorkspaceId: "psw_member_default_20260715",
+    personalRuntimeWorkspaceId: "wrk_personal_default_20260715",
     featureBranch: "feature_testagent_20260715",
     personalBranch: "feature_testagent_20260715_usr_member_default"
   },

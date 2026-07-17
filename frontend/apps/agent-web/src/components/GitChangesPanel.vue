@@ -36,23 +36,26 @@ import type {
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { Badge, Button } from "@test-agent/ui-kit";
+import { isWorkspaceAgentConfigPath } from "./workbench-utils";
 
 type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
+type DiffScope = "WORKSPACE" | "AGENT_WORKSPACE" | "PUBLIC";
+type AgentPanelDiffFile = AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" };
 
 const props = defineProps<{
   workspaceId?: string;
-  /** 应用 Agent 配置所属的 feature 工作区；与普通文件使用的个人 workspace 分离。 */
+  /** 应用 Agent 配置所属的个人 workspace；与普通文件共用同一 Git worktree。 */
   agentConfigWorkspaceId?: string;
   /** 当前默认个人 worktree ID，用于本地提交和 feature 发布 */
   personalWorkspaceId?: string;
+  /** 当前默认个人 worktree 分支，用于在变更面板标识提交目标。 */
+  personalWorkspaceBranch?: string;
   apiBaseUrl?: string;
   canWrite: boolean;
   /** 应用级 Agent/Skill/Rules/Templates 的独立写权限。 */
   canManageAgentConfig?: boolean;
   /** 公共 Git Agent/Skill 的独立写权限，仅超级管理员可用。 */
   canManagePublicConfig?: boolean;
-  /** 超级管理员发布应用文件时不受 spec 本地专用规则限制。 */
-  canPublishSpec?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -66,6 +69,7 @@ const emit = defineEmits<{
     paths?: string[];
     reloadOpenFiles?: boolean;
     files?: WorkspaceGitDiffFile[];
+    totalCount?: number;
   }];
 }>();
 
@@ -130,6 +134,7 @@ const committing = ref(false);
 const errorMessage = ref("");
 const progressMessage = ref("");
 const activeConflict = ref<WorkspaceGitConflict | null>(null);
+const activeConflictScope = ref<"WORKSPACE" | "PUBLIC" | null>(null);
 const conflictLoading = ref(false);
 const conflictResolving = ref(false);
 const showCommitProgressDialog = ref(false);
@@ -141,6 +146,11 @@ const mergeResolutionCompleted = ref(false);
 
 type PublishGitStep =
   | "PREPARE_REMOTE"
+  | "PREPARING_REPOSITORY"
+  | "COMMITTING"
+  | "MERGING"
+  | "PUSHING"
+  | "BROADCASTING"
   | "PROJECT_HEAD"
   | "COMMIT_FEATURE"
   | "PUSH_REMOTE"
@@ -187,13 +197,19 @@ function getCommitStepStatusText(stepNum: number) {
 
 function commitStepNumber(step?: string | null): number {
   switch (step) {
+    case "COMMITTING":
+      return 2;
+    case "MERGING":
     case "PROJECT_HEAD":
       return 3;
+    case "PUSHING":
     case "COMMIT_FEATURE":
     case "PUSH_REMOTE":
       return 4;
+    case "BROADCASTING":
     case "COMPLETED":
       return 5;
+    case "PREPARING_REPOSITORY":
     case "PREPARE_REMOTE":
     default:
       return 1;
@@ -208,10 +224,16 @@ function commandsForStep(commands: string[] | undefined, step?: string | null): 
     switch (step as PublishGitStep) {
       case "PREPARE_REMOTE":
         return normalized.includes(" fetch ") || normalized.includes(" pull ");
+      case "PREPARING_REPOSITORY":
+        return normalized.includes(" status ") || normalized.includes(" fetch ") || normalized.includes(" pull ");
       case "PROJECT_HEAD":
         return normalized.includes(" checkout ") || normalized.includes(" rm ");
+      case "MERGING":
+        return normalized.includes(" merge ");
+      case "COMMITTING":
       case "COMMIT_FEATURE":
         return normalized.includes(" commit ");
+      case "PUSHING":
       case "PUSH_REMOTE":
         return normalized.includes(" push ");
       default:
@@ -290,10 +312,16 @@ const workspaceStaged = computed(() =>
   workspaceDiffFiles.value.filter((f) => stagedWorkspacePaths.value.has(f.path) && !isConflictFile(f))
 );
 
-// spec 默认是个人研发过程资产；普通角色不得发布，超管按“不受应用工作区限制”策略放行。
+// spec 是个人研发过程资产：允许编辑、暂存和本地提交，但任何角色都不得发布到 feature。
 function isLocalOnlySpecPath(path: string): boolean {
   const segments = path.replace(/\\/g, "/").split("/").filter((segment) => segment && segment !== ".");
   return segments[0] === "spec";
+}
+
+/** AgentConfig API 使用 `.opencode` 内相对路径，个人 worktree 提交/发布使用 workspace 相对路径。 */
+function workspaceAgentPersonalPath(path: string): string {
+  const normalized = path.replaceAll("\\", "/").replace(/^\/+/, "");
+  return normalized.startsWith(".opencode/") ? normalized : `.opencode/${normalized}`;
 }
 const workspaceConflicts = computed(() =>
   workspaceDiffFiles.value.filter((f) => isConflictFile(f))
@@ -307,24 +335,106 @@ const workspaceGitMutationPending = computed(() =>
 // Agent diff lists (Public + Workspace)
 const publicAgentDiffs = ref<AgentConfigDiffFile[]>([]);
 const workspaceAgentDiffs = ref<AgentConfigDiffFile[]>([]);
+const publicAgentConflicts = computed(() =>
+  publicAgentDiffs.value
+    .filter((file) => isConflictFile(file))
+    .map((file) => ({ ...file, scope: "PUBLIC" as const }))
+);
+const hasPublicAgentConflicts = computed(() => publicAgentConflicts.value.length > 0);
+const hasBlockingAgentConflicts = computed(() =>
+  canWriteAgentScope("PUBLIC") && hasPublicAgentConflicts.value
+);
 
-const agentsUnstaged = computed(() => {
-  const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
-  workspaceAgentDiffs.value.forEach((f) => {
-    const path = normalizeWorkspaceAgentDiffPath(f.path);
-    if (!f.staged && path) list.push({ ...f, path, scope: "WORKSPACE" });
-  });
-  return list;
-});
+const publicAgentUnstaged = computed<AgentPanelDiffFile[]>(() =>
+  publicAgentDiffs.value
+    .filter((file) => !file.staged && !isConflictFile(file))
+    .map((file) => ({ ...file, scope: "PUBLIC" }))
+);
+const publicAgentStaged = computed<AgentPanelDiffFile[]>(() =>
+  publicAgentDiffs.value
+    .filter((file) => file.staged && !isConflictFile(file))
+    .map((file) => ({ ...file, scope: "PUBLIC" }))
+);
+const workspaceAgentUnstaged = computed<AgentPanelDiffFile[]>(() =>
+  workspaceAgentDiffs.value.flatMap((file) => {
+    const path = normalizeWorkspaceAgentDiffPath(file.path);
+    return !file.staged && path && !isConflictFile(file)
+      ? [{ ...file, path, scope: "WORKSPACE" as const }]
+      : [];
+  })
+);
+const workspaceAgentStaged = computed<AgentPanelDiffFile[]>(() =>
+  workspaceAgentDiffs.value.flatMap((file) => {
+    const path = normalizeWorkspaceAgentDiffPath(file.path);
+    return file.staged && path && !isConflictFile(file)
+      ? [{ ...file, path, scope: "WORKSPACE" as const }]
+      : [];
+  })
+);
+const workspaceAgentConflicts = computed(() =>
+  workspaceAgentDiffs.value
+    .filter((file) => isConflictFile(file))
+    .map((file) => {
+      const path = normalizeWorkspaceAgentDiffPath(file.path);
+      return path ? { ...file, path, scope: "WORKSPACE" as const } : null;
+    })
+    .filter((file): file is Exclude<typeof file, null> => file !== null)
+);
 
-const agentsStaged = computed(() => {
-  const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
-  workspaceAgentDiffs.value.forEach((f) => {
-    const path = normalizeWorkspaceAgentDiffPath(f.path);
-    if (f.staged && path) list.push({ ...f, path, scope: "WORKSPACE" });
-  });
-  return list;
+const activeDiffScope = ref<DiffScope>("WORKSPACE");
+const hasSelectedDiffScope = ref(false);
+const diffScopes = computed(() => [
+  {
+    key: "WORKSPACE" as const,
+    label: "workspace",
+    count: workspaceUnstaged.value.length + workspaceStaged.value.length + workspaceConflicts.value.length,
+    description: "普通文件、docs、spec"
+  },
+  {
+    key: "AGENT_WORKSPACE" as const,
+    label: "应用Agent",
+    count: workspaceAgentUnstaged.value.length + workspaceAgentStaged.value.length + workspaceAgentConflicts.value.length,
+    description: "应用 .opencode 配置"
+  },
+  {
+    key: "PUBLIC" as const,
+    label: "公共Agent",
+    count: publicAgentUnstaged.value.length + publicAgentStaged.value.length + publicAgentConflicts.value.length,
+    description: "公共 opencode 配置"
+  }
+]);
+// 外层“变更”入口展示三个作用域的文件总量；分类 Tab 只负责分开展示，不改变总数口径。
+const totalChangedFileCount = computed(() =>
+  diffScopes.value.reduce((total, scope) => total + scope.count, 0)
+);
+const activeScopeItem = computed(() =>
+  diffScopes.value.find((scope) => scope.key === activeDiffScope.value) ?? diffScopes.value[0]
+);
+const activeScopeMeta = computed(() => {
+  if (activeDiffScope.value !== "PUBLIC") {
+    return props.personalWorkspaceBranch
+      ? `个人 worktree · ${props.personalWorkspaceBranch}`
+      : "个人 worktree";
+  }
+  return workbench.publicWorktree?.branch
+    ? `公共个人 worktree · ${workbench.publicWorktree.branch}`
+    : "公共个人 worktree";
 });
+const activeAgentUnstaged = computed<AgentPanelDiffFile[]>(() =>
+  activeDiffScope.value === "PUBLIC" ? publicAgentUnstaged.value : workspaceAgentUnstaged.value
+);
+const activeAgentStaged = computed<AgentPanelDiffFile[]>(() =>
+  activeDiffScope.value === "PUBLIC" ? publicAgentStaged.value : workspaceAgentStaged.value
+);
+const activeAgentConflicts = computed(() =>
+  activeDiffScope.value === "PUBLIC" ? publicAgentConflicts.value : workspaceAgentConflicts.value
+);
+const activeUnstagedCount = computed(() => activeDiffScope.value === "WORKSPACE"
+  ? workspaceUnstaged.value.length + workspaceConflicts.value.length
+  : activeAgentUnstaged.value.length + activeAgentConflicts.value.length);
+const activeStagedCount = computed(() => activeDiffScope.value === "WORKSPACE"
+  ? workspaceStaged.value.length
+  : activeAgentStaged.value.length);
 
 function canWriteAgentScope(scope: "PUBLIC" | "WORKSPACE"): boolean {
   return scope === "PUBLIC"
@@ -332,16 +442,35 @@ function canWriteAgentScope(scope: "PUBLIC" | "WORKSPACE"): boolean {
     : (props.canManageAgentConfig ?? props.canWrite);
 }
 
-const writableAgentStaged = computed(() =>
-  agentsStaged.value.filter((file) => canWriteAgentScope(file.scope))
-);
 const hasWritableStagedChanges = computed(() =>
-  (props.canWrite && workspaceStaged.value.length > 0) || writableAgentStaged.value.length > 0
+  activeDiffScope.value === "WORKSPACE"
+    ? props.canWrite && workspaceStaged.value.length > 0
+    : activeAgentStaged.value.some((file) => canWriteAgentScope(file.scope))
+);
+const hasPublishableStagedChanges = computed(() =>
+  activeDiffScope.value === "WORKSPACE"
+    ? props.canWrite && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path))
+    : activeAgentStaged.value.some((file) => canWriteAgentScope(file.scope))
+);
+const activeHasBlockingConflicts = computed(() =>
+  activeDiffScope.value === "WORKSPACE"
+    ? hasBlockingWorkspaceConflicts.value
+    : activeDiffScope.value === "PUBLIC"
+      ? hasBlockingAgentConflicts.value
+      : canWriteAgentScope("WORKSPACE") && workspaceAgentConflicts.value.length > 0
 );
 
-// Overall counts
-const totalUnstagedCount = computed(() => workspaceUnstaged.value.length + workspaceConflicts.value.length + agentsUnstaged.value.length);
-const totalStagedCount = computed(() => workspaceStaged.value.length + agentsStaged.value.length);
+function selectInitialDiffScope() {
+  if (hasSelectedDiffScope.value) return;
+  if (diffScopes.value.some((scope) => scope.key === activeDiffScope.value && scope.count > 0)) return;
+  const firstChangedScope = diffScopes.value.find((scope) => scope.count > 0);
+  if (firstChangedScope) activeDiffScope.value = firstChangedScope.key;
+}
+
+function selectDiffScope(scope: DiffScope) {
+  hasSelectedDiffScope.value = true;
+  activeDiffScope.value = scope;
+}
 
 // Watch for workspace change
 watch(
@@ -354,6 +483,14 @@ watch(
   { immediate: true }
 );
 
+watch(
+  () => workbench.publicWorktree?.worktreeId,
+  () => {
+    // 公共个人 worktree 可能晚于面板挂载才准备完成，切换后重新统计公共 Agent 变更。
+    void refreshChanges();
+  }
+);
+
 async function refreshChanges(options: { preserveError?: boolean } = {}) {
   const token = ++refreshChangesToken;
   loading.value = true;
@@ -363,6 +500,7 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
   try {
     if (workbench.useMockTestData) {
       applyMockChanges();
+      selectInitialDiffScope();
       return;
     }
 
@@ -371,17 +509,24 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
       try {
         const gitDiff = await api.getWorkspaceGitDiff(props.workspaceId);
         if (token !== refreshChangesToken) return;
-        workspaceDiffFiles.value = gitDiff.files.map((f) => ({
-          path: f.path,
-          rawStatus: f.rawStatus,
-          status: f.status,
-          patch: f.patch,
-          additions: f.additions,
-          deletions: f.deletions
-        }));
+        // `.opencode` 与普通文件同属个人 worktree，但在“应用Agent”视图单独展示和提交。
+        const workspaceFiles = gitDiff.files
+          .filter((f) => !isWorkspaceAgentConfigPath(f.path))
+          .map((f) => ({
+            path: f.path,
+            rawStatus: f.rawStatus,
+            status: f.status,
+            patch: f.patch,
+            additions: f.additions,
+            deletions: f.deletions
+          }));
+        workspaceDiffFiles.value = workspaceFiles;
         // 同步后端 staged 状态到前端 Set
         const stagedPaths = new Set<string>();
-        gitDiff.files.forEach((f) => { if (f.staged) stagedPaths.add(f.path); });
+        workspaceFiles.forEach((f) => {
+          const source = gitDiff.files.find((candidate) => candidate.path === f.path);
+          if (source?.staged) stagedPaths.add(f.path);
+        });
         stagedWorkspacePaths.value = stagedPaths;
       } catch {
         if (token !== refreshChangesToken) return;
@@ -404,7 +549,7 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
     // 3. Fetch workspace agent changes
     if (effectiveAgentConfigWorkspaceId.value) {
       try {
-        const wksDiff = await api.getWorkspaceAgentDiff(effectiveAgentConfigWorkspaceId.value, workbench.workspaceWorktree?.worktreeId);
+        const wksDiff = await api.getWorkspaceAgentDiff(effectiveAgentConfigWorkspaceId.value);
         if (token !== refreshChangesToken) return;
         workspaceAgentDiffs.value = wksDiff.files;
       } catch {
@@ -414,6 +559,7 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
     } else {
       workspaceAgentDiffs.value = [];
     }
+    selectInitialDiffScope();
   } catch (error) {
     if (token !== refreshChangesToken) return;
     errorMessage.value = errorMessageFor(error, "刷新变更列表失败");
@@ -535,7 +681,9 @@ function notifyChangesRefreshed(paths?: string[], reloadOpenFiles?: boolean) {
     paths?: string[];
     reloadOpenFiles?: boolean;
     files: WorkspaceGitDiffFile[];
+    totalCount: number;
   } = {
+    totalCount: totalChangedFileCount.value,
     files: workspaceDiffFiles.value.map((file) => ({
       path: file.path,
       rawStatus: file.rawStatus,
@@ -552,7 +700,7 @@ function notifyChangesRefreshed(paths?: string[], reloadOpenFiles?: boolean) {
 }
 
 function isConflictFile(file: { status?: string; rawStatus?: string }): boolean {
-  const rawStatus = (file.rawStatus ?? "").trim();
+  const rawStatus = (file.rawStatus ?? file.status ?? "").trim().toUpperCase();
   return file.status === "conflict" || ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(rawStatus);
 }
 
@@ -562,6 +710,7 @@ async function openWorkspaceConflict(path: string) {
   errorMessage.value = "";
   try {
     activeConflict.value = await api.getWorkspaceGitConflict(props.workspaceId, path);
+    activeConflictScope.value = "WORKSPACE";
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "读取 Git 冲突失败");
   } finally {
@@ -580,6 +729,7 @@ async function resolveWorkspaceConflict(payload: {
     const path = activeConflict.value.path;
     await api.resolveWorkspaceGitConflict(props.workspaceId, { path, ...payload });
     activeConflict.value = null;
+    activeConflictScope.value = null;
     await refreshChanges();
     mergeResolutionCompleted.value = workspaceConflicts.value.length === 0;
     notifyChangesRefreshed([path], true);
@@ -597,6 +747,7 @@ async function abortWorkspaceConflict() {
   try {
     await api.abortWorkspaceGitConflict(props.workspaceId);
     activeConflict.value = null;
+    activeConflictScope.value = null;
     mergeResolutionCompleted.value = false;
     await refreshChanges();
     notifyChangesRefreshed(undefined, true);
@@ -616,6 +767,7 @@ async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") 
   try {
     await api.resolveAllWorkspaceGitConflicts(props.workspaceId, { resolution });
     activeConflict.value = null;
+    activeConflictScope.value = null;
     await refreshChanges();
     mergeResolutionCompleted.value = workspaceConflicts.value.length === 0;
     notifyChangesRefreshed(undefined, true);
@@ -624,6 +776,101 @@ async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") 
   } finally {
     conflictResolving.value = false;
   }
+}
+
+async function openPublicAgentConflict(path: string) {
+  if (!canWriteAgentScope("PUBLIC") || !workbench.publicWorktree?.worktreeId || conflictLoading.value) return;
+  conflictLoading.value = true;
+  errorMessage.value = "";
+  try {
+    activeConflict.value = await api.getPublicAgentGitConflict(
+      path,
+      workbench.publicWorktree.worktreeId,
+      workbench.publicWorktree.linuxServerId ?? undefined
+    );
+    activeConflictScope.value = "PUBLIC";
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "读取公共 Agent Git 冲突失败");
+  } finally {
+    conflictLoading.value = false;
+  }
+}
+
+async function resolvePublicAgentConflict(payload: {
+  resolution: WorkspaceGitConflictResolution;
+  content?: string | null;
+}) {
+  if (!activeConflict.value || !workbench.publicWorktree?.worktreeId || conflictResolving.value) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.resolvePublicAgentGitConflict({
+      path: activeConflict.value.path,
+      ...payload,
+      worktreeId: workbench.publicWorktree.worktreeId,
+      linuxServerId: workbench.publicWorktree.linuxServerId
+    });
+    activeConflict.value = null;
+    activeConflictScope.value = null;
+    await refreshChanges();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "解决公共 Agent Git 冲突失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+async function abortPublicAgentConflict() {
+  if (!workbench.publicWorktree?.worktreeId || conflictResolving.value) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.abortPublicAgentGitConflict(
+      workbench.publicWorktree.worktreeId,
+      workbench.publicWorktree.linuxServerId ?? undefined
+    );
+    activeConflict.value = null;
+    activeConflictScope.value = null;
+    await refreshChanges();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "取消公共 Agent Git 合并失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+async function resolveAllPublicAgentConflicts(resolution: "CURRENT" | "INCOMING") {
+  if (!workbench.publicWorktree?.worktreeId || conflictResolving.value) return;
+  const label = resolution === "CURRENT" ? "本地个人版本" : "远端公共版本";
+  if (!window.confirm(`将 ${publicAgentConflicts.value.length} 个公共 Agent 冲突文件全部采用${label}，是否继续？`)) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.resolveAllPublicAgentGitConflicts({
+      resolution,
+      worktreeId: workbench.publicWorktree.worktreeId,
+      linuxServerId: workbench.publicWorktree.linuxServerId
+    });
+    activeConflict.value = null;
+    activeConflictScope.value = null;
+    await refreshChanges();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "批量解决公共 Agent Git 冲突失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+function resolveActiveConflict(payload: { resolution: WorkspaceGitConflictResolution; content?: string | null }) {
+  return activeConflictScope.value === "PUBLIC"
+    ? resolvePublicAgentConflict(payload)
+    : resolveWorkspaceConflict(payload);
+}
+
+function abortActiveConflict() {
+  return activeConflictScope.value === "PUBLIC"
+    ? abortPublicAgentConflict()
+    : abortWorkspaceConflict();
 }
 
 // 批量丢弃与单文件回退共用后端多路径 API，并一次刷新文件树和 Diff 状态。
@@ -694,7 +941,7 @@ async function stageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "W
     if (file.scope === "PUBLIC") {
       await api.stagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
     } else {
-      await api.stageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path], workbench.workspaceWorktree?.worktreeId);
+      await api.stageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path]);
     }
     await refreshChanges();
   } catch (error) {
@@ -721,7 +968,7 @@ async function unstageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | 
     if (file.scope === "PUBLIC") {
       await api.unstagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
     } else {
-      await api.unstageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path], workbench.workspaceWorktree?.worktreeId);
+      await api.unstageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path]);
     }
     await refreshChanges();
   } catch (error) {
@@ -747,8 +994,18 @@ function handleOpenFileDiff(
 // Commit changes
 async function handleCommit(push = false) {
   if (committing.value || !hasWritableStagedChanges.value) return;
-  if (props.canWrite && hasWorkspaceConflicts.value) {
+  if (activeDiffScope.value === "WORKSPACE" && props.canWrite && hasWorkspaceConflicts.value) {
     errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
+    progressMessage.value = "";
+    return;
+  }
+  if (activeDiffScope.value === "PUBLIC" && hasBlockingAgentConflicts.value) {
+    errorMessage.value = "公共 Agent 个人 worktree 存在合并冲突，请先解决冲突文件后再提交并推送。";
+    progressMessage.value = "";
+    return;
+  }
+  if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceAgentConflicts.value.length > 0) {
+    errorMessage.value = "应用 Agent 所在的个人 worktree 存在合并冲突，请先解决后再提交并推送。";
     progressMessage.value = "";
     return;
   }
@@ -791,14 +1048,13 @@ async function handleCommit(push = false) {
       }
       commitStep.value = 5; // Success
       
-      // Clear all staged paths
-      stagedWorkspacePaths.value.clear();
-      publicAgentDiffs.value.forEach((f) => {
-        f.staged = false;
-      });
-      workspaceAgentDiffs.value.forEach((f) => {
-        f.staged = false;
-      });
+      if (activeDiffScope.value === "WORKSPACE") {
+        stagedWorkspacePaths.value.clear();
+      } else if (activeDiffScope.value === "PUBLIC") {
+        publicAgentDiffs.value.forEach((file) => { file.staged = false; });
+      } else {
+        workspaceAgentDiffs.value.forEach((file) => { file.staged = false; });
+      }
       
       commitMessage.value = "";
       progressMessage.value = push ? "提交并推送成功！(测试数据)" : "提交成功！(测试数据)";
@@ -810,7 +1066,7 @@ async function handleCommit(push = false) {
     }
 
     // 1. 应用工作空间先提交个人 worktree；推送时再从个人 HEAD 投影到 feature worktree。
-    if (props.canWrite && workspaceStaged.value.length > 0) {
+    if (activeDiffScope.value === "WORKSPACE" && props.canWrite && workspaceStaged.value.length > 0) {
       if (!props.personalWorkspaceId) {
         errorMessage.value = "当前不是个人 worktree，不能提交或发布应用变更。";
         progressMessage.value = "";
@@ -822,7 +1078,7 @@ async function handleCommit(push = false) {
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
       const files = workspaceStaged.value.map((file) => file.path);
-      const publishableFiles = files.filter((file) => props.canPublishSpec || !isLocalOnlySpecPath(file));
+      const publishableFiles = files.filter((file) => !isLocalOnlySpecPath(file));
       localOnlySpecFileCount = files.length - publishableFiles.length;
       await api.commitPersonalWorkspace(personalWorkspaceId, {
         commitMessage: msg,
@@ -880,47 +1136,83 @@ async function handleCommit(push = false) {
     const publicStagedCount = canWriteAgentScope("PUBLIC")
       ? publicAgentDiffs.value.filter((f) => f.staged).length
       : 0;
-    if (publicStagedCount > 0) {
+    if (activeDiffScope.value === "PUBLIC" && publicStagedCount > 0) {
       progressMessage.value = "正在提交公共 Agent 配置...";
+      showCommitProgressDialog.value = true;
+      commitStep.value = 2;
       const opId = newOperationId();
       await runAgentOperation(
         () => api.commitPublicAgentConfig({ message: msg, worktreeId: workbench.publicWorktree?.worktreeId, operationId: opId }),
         "提交公共 Agent 配置",
         opId
       );
+      commitStep.value = 2;
       if (push) {
+        publishAttempted = true;
         progressMessage.value = "正在发布公共 Agent 配置...";
         const pushOpId = newOperationId();
         await runAgentOperation(
           () => api.publishPublicAgentConfig(workbench.publicWorktree?.worktreeId, pushOpId),
           "发布公共 Agent 配置",
-          pushOpId
+          pushOpId,
+          true
         );
+        commitStep.value = 5;
         remotePublishCompleted = true;
       }
     }
 
-    // 3. Commit Agent WORKSPACE changes
-    const workspaceStagedCount = canWriteAgentScope("WORKSPACE")
-      ? workspaceAgentDiffs.value.filter((f) => f.staged).length
-      : 0;
-    if (workspaceStagedCount > 0 && effectiveAgentConfigWorkspaceId.value) {
-      progressMessage.value = "正在提交工作空间 Agent 配置...";
-      const opId = newOperationId();
-      await runAgentOperation(
-        () => api.commitWorkspaceAgentConfig(effectiveAgentConfigWorkspaceId.value!, { message: msg, worktreeId: workbench.workspaceWorktree?.worktreeId, operationId: opId }),
-        "提交工作空间 Agent 配置",
-        opId
-      );
+    // 3. 应用 Agent 与普通文件共用个人 worktree，只是按 `.opencode` 路径隔离提交范围。
+    const workspaceStagedFiles = canWriteAgentScope("WORKSPACE")
+      ? workspaceAgentStaged.value.map((file) => workspaceAgentPersonalPath(file.path))
+      : [];
+    if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceStagedFiles.length > 0) {
+      if (!props.personalWorkspaceId) {
+        errorMessage.value = "当前不是个人 worktree，不能提交或发布应用 Agent。";
+        progressMessage.value = "";
+        committing.value = false;
+        return;
+      }
+      progressMessage.value = "正在提交个人 worktree 中的应用 Agent 配置...";
+      showCommitProgressDialog.value = true;
+      commitStep.value = 2;
+      await api.commitPersonalWorkspace(props.personalWorkspaceId, {
+        commitMessage: msg,
+        files: workspaceStagedFiles,
+        operationId: newOperationId()
+      });
+      commitStep.value = 2;
       if (push) {
-        progressMessage.value = "正在发布工作空间 Agent 配置...";
+        publishAttempted = true;
+        progressMessage.value = "正在从个人 HEAD 投影并推送应用 Agent 配置...";
+        commitStep.value = 3;
         const pushOpId = newOperationId();
-        await runAgentOperation(
-          () => api.publishWorkspaceAgentConfig(effectiveAgentConfigWorkspaceId.value!, workbench.workspaceWorktree?.worktreeId, pushOpId),
-          "发布工作空间 Agent 配置",
-          pushOpId
-        );
+        let publishProgressSocket: { close: () => void } | null = null;
+        try {
+          publishProgressSocket = await api.connectAgentConfigProgress(pushOpId, applyPublishProgressEvent);
+        } catch {
+          publishProgressSocket = null;
+        }
+        const result = await (async () => {
+          try {
+            return await api.publishPersonalWorkspace(props.personalWorkspaceId!, {
+              commitMessage: msg,
+              files: workspaceStagedFiles,
+              operationId: pushOpId
+            });
+          } finally {
+            setTimeout(() => publishProgressSocket?.close(), 1000);
+          }
+        })();
+        if (!hasLivePublishCommand.value) {
+          applyPublishExecution(result.currentStep, result.executedCommands);
+        }
+        if (result.status !== "PUBLISHED" || result.remotePushed !== true) {
+          throw new Error("应用 Agent 的 feature 分支推送结果未确认，请刷新后重试。");
+        }
+        publishResultConfirmed.value = true;
         remotePublishCompleted = true;
+        commitStep.value = 5;
       }
     }
 
@@ -954,12 +1246,24 @@ async function handleCommit(push = false) {
   }
 }
 
-async function runAgentOperation<T>(action: () => Promise<T>, label: string, operationId: string) {
+async function runAgentOperation<T>(
+  action: () => Promise<T>,
+  label: string,
+  operationId: string,
+  trackPublishProgress = false
+) {
+  if (trackPublishProgress) {
+    hasLivePublishCommand.value = false;
+    publishResultConfirmed.value = false;
+  }
   let socket: { close: () => void } | null = null;
   try {
     socket = await api.connectAgentConfigProgress(operationId, (event) => {
       if (event.currentStep) {
         progressMessage.value = `${label}: ${event.currentStep} (${event.status || ''})`;
+      }
+      if (trackPublishProgress) {
+        applyPublishProgressEvent(event);
       }
     });
   } catch {
@@ -975,6 +1279,13 @@ async function runAgentOperation<T>(action: () => Promise<T>, label: string, ope
     ) {
       const operation = result as { status?: string; errorMessage?: string | null };
       throw new Error(operation.errorMessage || `${label}未成功完成`);
+    }
+    if (trackPublishProgress && result && typeof result === "object") {
+      const operation = result as { currentStep?: string | null; executedCommands?: string[] };
+      if (!hasLivePublishCommand.value) {
+        applyPublishExecution(operation.currentStep, operation.executedCommands);
+      }
+      publishResultConfirmed.value = true;
     }
     return result;
   } finally {
@@ -1026,9 +1337,9 @@ defineExpose({
       <MergeConflictEditor
         :conflict="activeConflict"
         :resolving="conflictResolving"
-        @resolve="resolveWorkspaceConflict"
-        @abort="abortWorkspaceConflict"
-        @close="activeConflict = null"
+        @resolve="resolveActiveConflict"
+        @abort="abortActiveConflict"
+        @close="activeConflict = null; activeConflictScope = null"
       />
     </div>
     <!-- Header status / errors -->
@@ -1041,6 +1352,27 @@ defineExpose({
       <span>{{ progressMessage }}</span>
     </div>
 
+    <div class="git-scope-switcher" role="tablist" aria-label="Git 变更作用域">
+      <button
+        v-for="scope in diffScopes"
+        :key="scope.key"
+        type="button"
+        role="tab"
+        :aria-selected="activeDiffScope === scope.key"
+        :class="['git-scope-tab', { 'is-active': activeDiffScope === scope.key }]"
+        @click="selectDiffScope(scope.key)"
+      >
+        <span class="git-scope-tab-label">{{ scope.label }}</span>
+        <span class="git-scope-tab-count">{{ scope.count }}</span>
+      </button>
+    </div>
+    <div class="git-scope-meta">
+      <GitBranch class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
+      <span>{{ activeScopeItem.description }}</span>
+      <span class="git-scope-meta-separator">·</span>
+      <span>{{ activeScopeMeta }}</span>
+    </div>
+
     <!-- Scrollable file list area -->
     <div class="git-lists-container">
       <!-- 1. UNSTAGED SECTION -->
@@ -1048,7 +1380,7 @@ defineExpose({
         <div class="git-section-header" @click="unstagedExpanded = !unstagedExpanded">
           <ChevronDown v-if="unstagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span class="git-section-title">UNSTAGED (未暂存) ({{ totalUnstagedCount }})</span>
+          <span class="git-section-title">UNSTAGED (未暂存) ({{ activeUnstagedCount }})</span>
           <button
             type="button"
             class="git-refresh-btn ml-auto"
@@ -1062,7 +1394,7 @@ defineExpose({
 
         <div v-show="unstagedExpanded" class="git-section-content pl-2">
           <!-- 1a. Application Workspace -->
-          <div class="git-sub-section">
+          <div v-if="activeDiffScope === 'WORKSPACE'" class="git-sub-section">
             <div class="git-sub-header" @click.stop="workspaceUnstagedExpanded = !workspaceUnstagedExpanded">
               <ChevronDown v-if="workspaceUnstagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
@@ -1162,6 +1494,7 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
+                <Badge v-if="isLocalOnlySpecPath(file.path)" tone="neutral" class="ml-1 py-0 px-1 text-[9px]">仅本地</Badge>
                 <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
@@ -1191,18 +1524,72 @@ defineExpose({
             </div>
           </div>
 
-          <!-- 1b. Agents -->
-          <div class="git-sub-section">
+          <!-- 1b. Agent/Skill scope; one scope is shown at a time to keep the panel readable. -->
+          <div v-else class="git-sub-section">
             <div class="git-sub-header" @click.stop="agentsUnstagedExpanded = !agentsUnstagedExpanded">
               <ChevronDown v-if="agentsUnstagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
-              <span>agents</span>
-              <span class="git-sub-badge ml-1">({{ agentsUnstaged.length }})</span>
+              <span>{{ activeScopeItem.label }}</span>
+              <span class="git-sub-badge ml-1">({{ activeAgentUnstaged.length + activeAgentConflicts.length }})</span>
             </div>
             <div v-show="agentsUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="agentsUnstaged.length === 0" class="git-empty-text">暂无变更</div>
+              <div v-if="activeDiffScope === 'PUBLIC' && publicAgentConflicts.length > 0" class="git-conflict-banner">
+                <div class="git-conflict-header">
+                  <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
+                  <span>检测到 {{ publicAgentConflicts.length }} 个公共 Agent 冲突</span>
+                </div>
+                <div class="git-conflict-actions">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn"
+                    :disabled="conflictResolving"
+                    @click.stop="resolveAllPublicAgentConflicts('CURRENT')"
+                  >
+                    保留本地
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn"
+                    :disabled="conflictResolving"
+                    @click.stop="resolveAllPublicAgentConflicts('INCOMING')"
+                  >
+                    保留远程
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn btn-abort"
+                    :disabled="conflictResolving"
+                    @click.stop="abortPublicAgentConflict"
+                  >
+                    取消
+                  </Button>
+                </div>
+              </div>
+              <div v-if="activeDiffScope === 'AGENT_WORKSPACE' && workspaceAgentConflicts.length > 0" class="git-conflict-note">
+                检测到 {{ workspaceAgentConflicts.length }} 个应用 Agent 冲突，点击文件后使用与 workspace 相同的合并编辑器处理。
+              </div>
               <div
-                v-for="file in agentsUnstaged"
+                v-for="file in activeAgentConflicts"
+                :key="`${activeDiffScope.toLowerCase()}-conflict:${file.path}`"
+                class="git-file-row git-conflict-row group"
+                :title="file.path"
+                :aria-label="file.path"
+                @click="activeDiffScope === 'PUBLIC'
+                  ? openPublicAgentConflict(file.path)
+                  : openWorkspaceConflict(workspaceAgentPersonalPath(file.path))"
+              >
+                <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
+                <span class="git-file-name" :title="file.path">
+                  <span class="git-scope-label">[{{ activeDiffScope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
+                  {{ getFileName(file.path) }}
+                </span>
+              </div>
+              <div v-if="activeAgentUnstaged.length === 0 && activeAgentConflicts.length === 0" class="git-empty-text">暂无变更</div>
+              <div
+                v-for="file in activeAgentUnstaged"
                 :key="file.path"
                 class="git-file-row group"
                 :title="file.path"
@@ -1211,7 +1598,6 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">
-                  <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
                   {{ getFileName(file.path) }}
                 </span>
                 
@@ -1244,12 +1630,12 @@ defineExpose({
         <div class="git-section-header" @click="stagedExpanded = !stagedExpanded">
           <ChevronDown v-if="stagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span class="git-section-title">STAGED (已暂存) ({{ totalStagedCount }})</span>
+          <span class="git-section-title">STAGED (已暂存) ({{ activeStagedCount }})</span>
         </div>
 
         <div v-show="stagedExpanded" class="git-section-content pl-2">
           <!-- 2a. Application Workspace -->
-          <div class="git-sub-section">
+          <div v-if="activeDiffScope === 'WORKSPACE'" class="git-sub-section">
             <div class="git-sub-header" @click.stop="workspaceStagedExpanded = !workspaceStagedExpanded">
               <ChevronDown v-if="workspaceStagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
@@ -1285,6 +1671,7 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
+                <Badge v-if="isLocalOnlySpecPath(file.path)" tone="neutral" class="ml-1 py-0 px-1 text-[9px]">仅本地</Badge>
                 <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
@@ -1314,18 +1701,18 @@ defineExpose({
             </div>
           </div>
 
-          <!-- 2b. Agents -->
-          <div class="git-sub-section">
+          <!-- 2b. Agent/Skill scope -->
+          <div v-else class="git-sub-section">
             <div class="git-sub-header" @click.stop="agentsStagedExpanded = !agentsStagedExpanded">
               <ChevronDown v-if="agentsStagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
-              <span>agents</span>
-              <span class="git-sub-badge ml-1">({{ agentsStaged.length }})</span>
+              <span>{{ activeScopeItem.label }}</span>
+              <span class="git-sub-badge ml-1">({{ activeAgentStaged.length }})</span>
             </div>
             <div v-show="agentsStagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="agentsStaged.length === 0" class="git-empty-text">无暂存文件</div>
+              <div v-if="activeAgentStaged.length === 0" class="git-empty-text">无暂存文件</div>
               <div
-                v-for="file in agentsStaged"
+                v-for="file in activeAgentStaged"
                 :key="file.path"
                 class="git-file-row group"
                 :title="file.path"
@@ -1334,7 +1721,6 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">
-                  <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
                   {{ getFileName(file.path) }}
                 </span>
                 
@@ -1356,6 +1742,10 @@ defineExpose({
 
     <!-- Commit Footer form -->
     <div class="git-commit-form">
+      <div class="git-commit-context">
+        <span>提交当前作用域</span>
+        <strong>{{ activeScopeItem.label }}</strong>
+      </div>
       <textarea
         v-model="commitMessage"
         class="git-commit-textarea"
@@ -1370,8 +1760,8 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-commit flex-1"
-          :title="hasBlockingWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
-          :disabled="committing || hasBlockingWorkspaceConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
+          :title="activeHasBlockingConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
+          :disabled="committing || activeHasBlockingConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(false)"
         >
           <FolderGit2 class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -1380,8 +1770,10 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-push flex-1"
-          :title="hasBlockingWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送' : '提交并推送已暂存变更'"
-          :disabled="committing || hasBlockingWorkspaceConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
+          :title="activeHasBlockingConflicts
+            ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送'
+            : (!hasPublishableStagedChanges ? '当前暂存内容仅允许本地提交' : '提交并推送可发布变更')"
+          :disabled="committing || activeHasBlockingConflicts || !hasPublishableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(true)"
         >
           <Upload class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -1409,7 +1801,7 @@ defineExpose({
           <li :class="['ta-process-startup-step', getCommitStepClass(1)]">
             <component :is="getCommitStepIcon(1)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>校验并同步应用分支</span>
+              <span>校验并同步目标分支</span>
               <small>{{ getCommitStepStatusText(1) }}</small>
             </div>
           </li>
@@ -1423,21 +1815,21 @@ defineExpose({
           <li :class="['ta-process-startup-step', getCommitStepClass(3)]">
             <component :is="getCommitStepIcon(3)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>从个人 HEAD 投影白名单文件</span>
+              <span>合并远程分支或投影文件</span>
               <small>{{ getCommitStepStatusText(3) }}</small>
             </div>
           </li>
           <li :class="['ta-process-startup-step', getCommitStepClass(4)]">
             <component :is="getCommitStepIcon(4)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>提交并推送 feature 分支</span>
+              <span>提交并推送目标分支</span>
               <small>{{ getCommitStepStatusText(4) }}</small>
             </div>
           </li>
           <li :class="['ta-process-startup-step', getCommitStepClass(5)]">
             <component :is="getCommitStepIcon(5)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>完成并广播版本更新</span>
+              <span>完成并广播更新</span>
               <small>{{ getCommitStepStatusText(5) }}</small>
             </div>
           </li>
@@ -1464,7 +1856,7 @@ defineExpose({
         </div>
 
         <footer class="ta-process-startup-footer">
-          <span>{{ props.personalWorkspaceId }}</span>
+          <span>{{ activeScopeItem.label }} · {{ activeScopeMeta }}</span>
           <button type="button" :disabled="committing" @click="showCommitProgressDialog = false">关闭</button>
         </footer>
       </section>
@@ -1515,6 +1907,91 @@ defineExpose({
   padding: 6px 8px;
   font-size: 11px;
   color: #15803d;
+}
+
+.git-scope-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 7px 8px 5px;
+  border-bottom: 1px solid #e4e4e7;
+  background: #fafafa;
+}
+
+.git-scope-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 4px;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+  font-size: 10px;
+  text-align: left;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.git-scope-tab:hover {
+  background: #f4f4f5;
+  color: #3f3f46;
+}
+
+.git-scope-tab.is-active {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 600;
+}
+
+.git-scope-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-scope-tab-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: #e4e4e7;
+  color: #71717a;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.git-scope-tab.is-active .git-scope-tab-count {
+  background: #c7d2fe;
+  color: #3730a3;
+}
+
+.git-scope-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 10px 6px;
+  border-bottom: 1px solid #e4e4e7;
+  color: #71717a;
+  font-size: 10px;
+}
+
+.git-scope-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-scope-meta-separator {
+  flex: 0 0 auto;
+  color: #a1a1aa;
 }
 
 .git-conflict-banner {
@@ -1835,6 +2312,24 @@ defineExpose({
   border-top: 1px solid #e4e4e7;
   padding: 8px;
   background: #fafafa;
+}
+
+.git-commit-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #71717a;
+  font-size: 10px;
+}
+
+.git-commit-context strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #52525b;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .git-commit-textarea {

@@ -6,16 +6,13 @@ import {
   FolderGit2,
   GitBranch,
   GitCompare,
-  ArrowUpFromLine,
   Globe2,
   Loader2,
   Plus,
   RefreshCw,
-  Upload,
-  MoreHorizontal
+  Upload
 } from "lucide-vue-next";
 import { createBackendApiClient } from "@test-agent/backend-api";
-import { MergeConflictEditor } from "@test-agent/diff-viewer";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { Button, Input } from "@test-agent/ui-kit";
 import type {
@@ -24,14 +21,14 @@ import type {
   AgentConfigStatus,
   AgentConfigWorktree,
   AgentConfigWorktreeOption,
-  FileContent,
   FileTreeEntry,
   PublicAgentRepositoryStatus,
   WorkspaceGitConflict,
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { formatAgentConfigError } from "./agentConfigErrors";
-import { notifyError, notifySuccess } from "./notify";
+import { agentFileInfo, isAgentFilePath, type AgentFileLoadRequest } from "./agentFileLoad";
+import { notifyError, notifyInfo, notifySuccess } from "./notify";
 import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 
 const props = defineProps<{
@@ -47,7 +44,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  openFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }];
+  openFile: [payload: AgentFileLoadRequest];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -61,6 +58,7 @@ const entriesByScope = ref<Record<Scope, Record<string, FileTreeEntry[]>>>({ PUB
 const rootExpanded = ref<Set<Scope>>(new Set(["PUBLIC"]));
 const expandedByScope = ref<Record<Scope, Set<string>>>({ PUBLIC: new Set(), WORKSPACE: new Set() });
 const loadingByScope = ref<Record<Scope, Set<string>>>({ PUBLIC: new Set(), WORKSPACE: new Set() });
+const directoryGeneration = ref<Record<Scope, number>>({ PUBLIC: 0, WORKSPACE: 0 });
 const errorMessage = ref("");
 const activeScope = ref<Scope | null>(null);
 const activeFileByScope = ref<Record<Scope, string | null>>({ PUBLIC: null, WORKSPACE: null });
@@ -75,17 +73,12 @@ const publicWorktree = computed<AgentConfigWorktree | null>({
   get: () => workbench.publicWorktree,
   set: (val) => { workbench.publicWorktree = val; }
 });
-const workspaceWorktree = computed<AgentConfigWorktree | null>({
-  get: () => workbench.workspaceWorktree,
-  set: (val) => { workbench.workspaceWorktree = val; }
-});
 const publicConfigLinuxServerId = computed<string | null>({
   get: () => workbench.publicConfigLinuxServerId,
   set: (val) => { workbench.publicConfigLinuxServerId = val; }
 });
 
 const busy = ref(false);
-const activeWorktree = computed(() => activeScope.value === "PUBLIC" ? publicWorktree.value : workspaceWorktree.value);
 const selectedDiff = computed(() => diffFiles.value.find((file) => file.path === selectedDiffPath.value) ?? diffFiles.value[0]);
 const publicConflictFiles = computed<AgentConfigDiffFile[]>(() => {
   const byPath = new Map<string, AgentConfigDiffFile>();
@@ -103,22 +96,21 @@ const publicConflictPathSet = computed(() => new Set(publicConflictFiles.value.m
 const firstPublicConflictFile = computed(() => publicConflictFiles.value[0] ?? null);
 const activeAgentFile = computed(() => {
   if (props.activePath) {
-    return activeAgentFileFromEditorPath(props.activePath);
+    const editorFile = activeAgentFileFromEditorPath(props.activePath);
+    return editorFile && isCurrentAgentFileContext(editorFile) ? editorFile : null;
   }
   return activeAgentFileFromLocalSelection();
 });
 
 let refreshAllToken = 0;
 const refreshing = ref(false);
-void refreshAll();
+const panelBusy = computed(() => busy.value || refreshing.value);
+void refreshAll(false);
 
 watch(
   () => props.workspaceId,
   () => {
-    entriesByScope.value = { PUBLIC: entriesByScope.value.PUBLIC, WORKSPACE: {} };
-    if (workbench.workspaceWorktree) {
-      workbench.workspaceWorktree = null;
-    }
+    invalidateDirectoryCache("WORKSPACE", true);
     void refreshStatus();
     if (rootExpanded.value.has("WORKSPACE")) {
       void loadDirectory("WORKSPACE", "");
@@ -126,12 +118,17 @@ watch(
   }
 );
 
-async function refreshAll() {
+async function refreshAll(notifySkippedFile = true) {
   const token = ++refreshAllToken;
   refreshing.value = true;
   errorMessage.value = "";
-  // 手动刷新必须能打断旧的根目录 loading 状态，避免某次公共配置请求卡住后 UI 永远转圈。
-  loadingByScope.value = { PUBLIC: new Set(), WORKSPACE: new Set() };
+  const expandedSnapshot: Record<Scope, Set<string>> = {
+    PUBLIC: new Set(expandedByScope.value.PUBLIC),
+    WORKSPACE: new Set(expandedByScope.value.WORKSPACE)
+  };
+  // 刷新代次会让旧请求结果失效，避免切换 worktree 或磁盘内容变化后迟到响应重新写回旧树。
+  invalidateDirectoryCache("PUBLIC");
+  invalidateDirectoryCache("WORKSPACE");
   try {
     await refreshStatus();
     if (token !== refreshAllToken) return;
@@ -140,9 +137,12 @@ async function refreshAll() {
     if (props.workspaceId) tasks.push(loadDirectory("WORKSPACE", "", true));
     await Promise.allSettled(tasks);
     if (token !== refreshAllToken) return;
-    if (props.canWrite && status.value.PUBLIC?.enabled !== false) {
-      await loadPublicConflictFiles();
-    }
+    await Promise.all([
+      reloadExpandedDirectories("PUBLIC", expandedSnapshot.PUBLIC),
+      reloadExpandedDirectories("WORKSPACE", expandedSnapshot.WORKSPACE)
+    ]);
+    if (token !== refreshAllToken) return;
+    await refreshActiveEditorFile(undefined, notifySkippedFile);
   } finally {
     if (token === refreshAllToken) {
       refreshing.value = false;
@@ -166,6 +166,9 @@ async function refreshStatus() {
         if (nextServer) {
           selectedPublicLinuxServerId.value = nextServer;
           publicConfigLinuxServerId.value = nextServer;
+          if (props.canWrite) {
+            await ensureCurrentUserPublicWorktree(nextServer, publicResult.value.currentBranch);
+          }
         }
       } catch (error) {
         errorMessage.value = formatAgentConfigError(error, "加载公共配置仓库列表失败");
@@ -182,8 +185,34 @@ async function refreshStatus() {
   status.value = next;
 }
 
+/**
+ * 公共区与应用区保持相同的个人隔离语义：管理员进入后自动挂载自己在当前服务器上的长期 worktree。
+ */
+async function ensureCurrentUserPublicWorktree(linuxServerId: string, fallbackBranch?: string | null) {
+  if (
+    publicWorktree.value?.linuxServerId === linuxServerId
+    && publicWorktree.value.worktreeId
+  ) {
+    return;
+  }
+  const existing = await api.listPublicAgentWorktrees(linuxServerId);
+  if (existing[0]) {
+    publicWorktree.value = { ...existing[0] };
+    return;
+  }
+  const repository = publicRepositories.value.find((item) => item.linuxServerId === linuxServerId);
+  const branch = repository?.currentBranch?.trim() || fallbackBranch?.trim() || "main";
+  publicWorktree.value = await api.createPublicAgentWorktree({
+    baseName: "public-personal",
+    branch,
+    linuxServerId,
+    operationId: newOperationId()
+  });
+}
+
 function worktreeId(scope: Scope) {
-  return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : workspaceWorktree.value?.worktreeId;
+  // 应用级配置直接使用当前版本个人 workspace 的 Git 根，不再挂载独立 Agent worktree。
+  return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : undefined;
 }
 
 function activeAgentFileFromLocalSelection() {
@@ -193,25 +222,24 @@ function activeAgentFileFromLocalSelection() {
 }
 
 function activeAgentFileFromEditorPath(path?: string) {
-  if (!path) return null;
-  const publicPrefix = "agent-public:";
-  const workspacePrefix = "agent-workspace:";
-  const scope: Scope | null = path.startsWith(publicPrefix)
-    ? "PUBLIC"
-    : path.startsWith(workspacePrefix)
-      ? "WORKSPACE"
-      : null;
-  if (!scope) return null;
-  const prefix = scope === "PUBLIC" ? publicPrefix : workspacePrefix;
-  const rest = path.slice(prefix.length);
-  const firstSeparator = rest.indexOf(":");
-  const secondSeparator = firstSeparator >= 0 ? rest.indexOf(":", firstSeparator + 1) : -1;
-  const rawPath = secondSeparator >= 0
-    ? rest.slice(secondSeparator + 1)
-    : firstSeparator >= 0
-      ? rest.slice(firstSeparator + 1)
-      : rest;
-  return { scope, path: decodeURIComponent(rawPath) };
+  return path && isAgentFilePath(path) ? agentFileInfo(path) : null;
+}
+
+function isCurrentAgentFileContext(file: {
+  scope: Scope;
+  workspaceId?: string;
+  worktreeId?: string;
+  linuxServerId?: string;
+}) {
+  const currentWorktreeId = worktreeId(file.scope) ?? "";
+  if ((file.worktreeId ?? "") !== currentWorktreeId) {
+    return false;
+  }
+  if (file.scope === "PUBLIC") {
+    const currentLinuxServerId = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value ?? "";
+    return (file.linuxServerId ?? "") === currentLinuxServerId;
+  }
+  return Boolean(file.workspaceId) && file.workspaceId === props.workspaceId;
 }
 
 function isRootActive(scope: Scope) {
@@ -236,6 +264,7 @@ async function loadDirectory(scope: Scope, path: string, force = false) {
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
   if (!force && (entriesByScope.value[scope][path] !== undefined || loadingByScope.value[scope].has(path))) return;
+  const generation = directoryGeneration.value[scope];
   loadingByScope.value = { ...loadingByScope.value, [scope]: new Set([...loadingByScope.value[scope], path]) };
   errorMessage.value = "";
   try {
@@ -245,20 +274,65 @@ async function loadDirectory(scope: Scope, path: string, force = false) {
         ? api.listPublicAgentFiles(path, worktreeId(scope), linuxServerId)
         : api.listWorkspaceAgentFiles(props.workspaceId!, path, worktreeId(scope));
     })(), "加载 Agent 文件超时");
+    if (directoryGeneration.value[scope] !== generation) return;
     entriesByScope.value = {
       ...entriesByScope.value,
       [scope]: { ...entriesByScope.value[scope], [path]: entries }
     };
   } catch (error) {
+    if (directoryGeneration.value[scope] !== generation) return;
     errorMessage.value = formatAgentConfigError(error, "加载 Agent 文件失败");
     const nextExpanded = new Set(expandedByScope.value[scope]);
     nextExpanded.delete(path);
     expandedByScope.value = { ...expandedByScope.value, [scope]: nextExpanded };
   } finally {
+    if (directoryGeneration.value[scope] !== generation) return;
     const next = new Set(loadingByScope.value[scope]);
     next.delete(path);
     loadingByScope.value = { ...loadingByScope.value, [scope]: next };
   }
+}
+
+function invalidateDirectoryCache(scope: Scope, clearExpanded = false) {
+  directoryGeneration.value = {
+    ...directoryGeneration.value,
+    [scope]: directoryGeneration.value[scope] + 1
+  };
+  entriesByScope.value = { ...entriesByScope.value, [scope]: {} };
+  loadingByScope.value = { ...loadingByScope.value, [scope]: new Set() };
+  if (clearExpanded) {
+    expandedByScope.value = { ...expandedByScope.value, [scope]: new Set() };
+  }
+}
+
+/**
+ * 按目录深度恢复刷新前已经展开的节点；父目录已不存在时直接折叠，避免把旧 `.bak` 等条目重新写回树。
+ */
+async function reloadExpandedDirectories(scope: Scope, expanded: Set<string>) {
+  if (scope === "WORKSPACE" && !props.workspaceId) return;
+  if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
+  const paths = [...expanded].sort((left, right) => pathDepth(left) - pathDepth(right));
+  for (const path of paths) {
+    const parent = parentDirectory(path);
+    const stillExists = (entriesByScope.value[scope][parent] ?? [])
+      .some((entry) => entry.type === "directory" && entry.path === path);
+    if (!stillExists) {
+      const next = new Set(expandedByScope.value[scope]);
+      next.delete(path);
+      expandedByScope.value = { ...expandedByScope.value, [scope]: next };
+      continue;
+    }
+    await loadDirectory(scope, path, true);
+  }
+}
+
+function parentDirectory(path: string) {
+  const separator = path.lastIndexOf("/");
+  return separator < 0 ? "" : path.slice(0, separator);
+}
+
+function pathDepth(path: string) {
+  return path.split("/").filter(Boolean).length;
 }
 
 function withTimeout<T>(promise: Promise<T>, message: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
@@ -302,29 +376,67 @@ async function openFile(scope: Scope, path: string) {
   activeScope.value = scope;
   try {
     const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
-    const file = scope === "PUBLIC"
-      ? await api.readPublicAgentFile(path, worktreeId(scope), linuxServerId)
-      : await api.readWorkspaceAgentFile(props.workspaceId!, path, worktreeId(scope));
     activeFileByScope.value = { ...activeFileByScope.value, [scope]: path };
-    emit("openFile", { scope, path, content: file, readonly: !canWriteScope(scope), worktreeId: worktreeId(scope), linuxServerId });
+    emit("openFile", {
+      scope,
+      path,
+      workspaceId: scope === "WORKSPACE" ? props.workspaceId : undefined,
+      worktreeId: worktreeId(scope),
+      linuxServerId,
+      readonly: !canWriteScope(scope),
+      activate: true,
+      closeOnNotFound: false
+    });
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "读取 Agent 文件失败");
   }
 }
 
+/**
+ * 刷新磁盘内容时只覆盖没有未保存修改的活动 Agent 文件；文件已删除则关闭旧标签，避免继续显示不存在的 `.bak`。
+ */
+async function refreshActiveEditorFile(scope?: Scope, notifySkippedFile = true) {
+  const tabPath = props.activePath;
+  const activeFile = activeAgentFileFromEditorPath(tabPath);
+  if (!tabPath || !activeFile || (scope && activeFile.scope !== scope) || !isCurrentAgentFileContext(activeFile)) return;
+  const tab = workbench.tabs.find((item) => item.path === tabPath);
+  if (tab && !tab.livePreview && tab.content !== tab.savedContent) {
+    if (notifySkippedFile) {
+      notifyInfo("未覆盖未保存的 Agent 文件", activeFile.path);
+    }
+    return;
+  }
+  try {
+    const linuxServerId = activeFile.scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
+    activeFileByScope.value = { ...activeFileByScope.value, [activeFile.scope]: activeFile.path };
+    emit("openFile", {
+      scope: activeFile.scope,
+      path: activeFile.path,
+      workspaceId: activeFile.scope === "WORKSPACE" ? props.workspaceId : undefined,
+      worktreeId: worktreeId(activeFile.scope),
+      linuxServerId,
+      readonly: !canWriteScope(activeFile.scope),
+      activate: false,
+      closeOnNotFound: true
+    });
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, "刷新 Agent 文件失败");
+  }
+}
+
 async function refreshScope(scope: Scope) {
-  entriesByScope.value = { ...entriesByScope.value, [scope]: {} };
+  const expandedSnapshot = new Set(expandedByScope.value[scope]);
+  invalidateDirectoryCache(scope);
   await refreshStatus();
   if (scope !== "PUBLIC" || status.value.PUBLIC?.enabled !== false) {
-    await loadDirectory(scope, "");
+    await loadDirectory(scope, "", true);
+    await reloadExpandedDirectories(scope, expandedSnapshot);
+    await refreshActiveEditorFile(scope);
   }
 }
 
 // “更新公共配置”操作的正在进行状态标记，用以控制按钮禁用和加载动效
 const updatingPublicConfig = ref(false);
-// 正在创建 worktree 的作用域（PUBLIC 或 WORKSPACE），用以控制各创建按钮的加载动效
-const creatingWorktreeScope = ref<Scope | null>(null);
-
 // 更新公共配置弹窗的控制状态
 const showUpdatePublicConfigModal = ref(false);
 const updatePublicConfigBranch = ref("main");
@@ -603,15 +715,7 @@ function handleDiffFileClick(file: AgentConfigDiffFile) {
   selectedDiffPath.value = file.path;
 }
 
-// 创建 worktree 弹窗的控制状态
-const showCreateWorktreeModal = ref(false);
-const createWorktreeScope = ref<Scope | null>(null);
-const newWorktreeName = ref("change-agent-md");
-const createWorktreeOptionsLoading = ref(false);
-const createWorktreeOptionsError = ref("");
-const publicBranches = ref<string[]>([]);
 const publicRepositories = ref<PublicAgentRepositoryStatus[]>([]);
-const selectedPublicBranch = ref("");
 const selectedPublicLinuxServerId = ref("");
 const DIRECT_PUBLIC_CONFIG_OPTION = "__direct_public_config__";
 const showSwitchWorktreeModal = ref(false);
@@ -628,34 +732,50 @@ const initializedPublicRepositories = computed(() =>
   publicRepositories.value.filter((repository) => repository.initialized)
 );
 
-const publicRootBadge = computed(() => {
-  if (publicWorktree.value) {
-    return publicWorktree.value.worktreeName;
-  }
-  const serverId = publicConfigLinuxServerId.value;
-  if (!serverId) {
-    return "";
-  }
-  return publicRepositories.value.find((repository) => repository.linuxServerId === serverId)?.serverName ?? serverId;
-});
-
-// 获取当前作用域下的 Git 库分支名称
-const currentRepoBranch = computed(() => {
-  if (!createWorktreeScope.value) return "main";
-  if (createWorktreeScope.value === "PUBLIC") return selectedPublicBranch.value || publicBranches.value[0] || "main";
-  return status.value[createWorktreeScope.value]?.currentBranch ?? "main";
-});
-
-const selectedPublicRepository = computed(() =>
-  initializedPublicRepositories.value.find((repository) => repository.linuxServerId === selectedPublicLinuxServerId.value) ?? null
-);
-
 const activePublicRepository = computed(() => {
   const serverId = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value ?? selectedPublicLinuxServerId.value;
   return publicRepositories.value.find((repository) => repository.linuxServerId === serverId)
     ?? initializedPublicRepositories.value[0]
     ?? null;
 });
+
+const publicSource = computed(() => {
+  const repository = activePublicRepository.value;
+  const serverId = publicWorktree.value?.linuxServerId
+    ?? publicConfigLinuxServerId.value
+    ?? repository?.linuxServerId
+    ?? "";
+  const serverName = repository?.serverName || serverId;
+  if (publicWorktree.value) {
+    return {
+      mode: "worktree",
+      name: publicWorktree.value.worktreeName,
+      serverName,
+      serverId,
+      path: joinLinuxPath(publicWorktree.value.rootPath, "opencode")
+    };
+  }
+  return {
+    mode: "直接目录",
+    name: "",
+    serverName,
+    serverId,
+    path: repository?.configDirPath
+      ?? (repository?.gitRootPath ? joinLinuxPath(repository.gitRootPath, "opencode") : "")
+  };
+});
+
+const publicRootBadge = computed(() => {
+  const source = publicSource.value;
+  if (!source.serverName && !source.name) return "";
+  return source.mode === "worktree"
+    ? `worktree · ${source.name}`
+    : `直接 · ${source.serverName}`;
+});
+
+function joinLinuxPath(root: string, child: string) {
+  return `${root.replace(/\/+$/, "")}/${child}`;
+}
 
 const publicUpdateConflictMessage = computed(() =>
   activePublicRepository.value?.status === "CONFLICT"
@@ -675,77 +795,12 @@ const selectedSwitchWorktree = computed(() =>
   switchPublicWorktrees.value.find((worktree) => worktree.worktreeId === switchPublicWorktreeId.value) ?? null
 );
 
-const canSubmitCreateWorktree = computed(() => {
-  if (!newWorktreeName.value.trim() || busy.value || createWorktreeOptionsLoading.value) return false;
-  if (createWorktreeScope.value !== "PUBLIC") return true;
-  return !!selectedPublicBranch.value && !!selectedPublicLinuxServerId.value;
-});
-
 const canSubmitSwitchWorktree = computed(() =>
   !busy.value &&
   !switchWorktreeOptionsLoading.value &&
   !!switchPublicLinuxServerId.value &&
   initializedPublicRepositories.value.length > 0
 );
-
-// 弹窗的标题
-const createModalTitle = computed(() => {
-  return createWorktreeScope.value === "PUBLIC" ? "创建公共 worktree" : "创建应用 worktree";
-});
-
-/**
- * 触发创建 worktree 流程，初始化弹窗状态并打开弹窗
- * @param scope 作用域 (PUBLIC 或 WORKSPACE)
- */
-async function createWorktree(scope: Scope) {
-  if (scope === "PUBLIC" && !props.canWrite) return;
-  if (scope === "WORKSPACE" && (!props.workspaceId || !workspaceCanWrite.value)) return;
-  createWorktreeScope.value = scope;
-  newWorktreeName.value = "change-agent-md";
-  createWorktreeOptionsError.value = "";
-  showCreateWorktreeModal.value = true;
-  if (scope === "PUBLIC") {
-    await loadPublicCreateOptions();
-  }
-}
-
-// 关闭创建 worktree 弹窗并重置状态
-function closeCreateWorktreeModal() {
-  showCreateWorktreeModal.value = false;
-  createWorktreeScope.value = null;
-  createWorktreeOptionsError.value = "";
-}
-
-async function loadPublicCreateOptions() {
-  createWorktreeOptionsLoading.value = true;
-  createWorktreeOptionsError.value = "";
-  try {
-    const [branches, repositories] = await Promise.all([
-      api.listPublicAgentBranches(),
-      api.listPublicAgentRepositories()
-    ]);
-    publicBranches.value = branches;
-    publicRepositories.value = repositories;
-    selectedPublicBranch.value = preferredPublicBranch(branches);
-    selectedPublicLinuxServerId.value = preferredPublicServer(repositories);
-  } catch (error) {
-    createWorktreeOptionsError.value = formatAgentConfigError(error, "加载公共配置仓库选项失败");
-    publicBranches.value = [];
-    publicRepositories.value = [];
-    selectedPublicBranch.value = "";
-    selectedPublicLinuxServerId.value = "";
-  } finally {
-    createWorktreeOptionsLoading.value = false;
-  }
-}
-
-function preferredPublicBranch(branches: string[]) {
-  const current = status.value.PUBLIC?.currentBranch?.trim();
-  if (current && branches.includes(current)) {
-    return current;
-  }
-  return branches[0] ?? current ?? "main";
-}
 
 function preferredPublicServer(repositories: PublicAgentRepositoryStatus[]) {
   const activeServer = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value;
@@ -851,9 +906,7 @@ async function submitSwitchWorktree() {
 }
 
 function resetPublicFileTree() {
-  entriesByScope.value = { ...entriesByScope.value, PUBLIC: {} };
-  expandedByScope.value = { ...expandedByScope.value, PUBLIC: new Set() };
-  loadingByScope.value = { ...loadingByScope.value, PUBLIC: new Set() };
+  invalidateDirectoryCache("PUBLIC", true);
   if (activeScope.value === "PUBLIC") {
     diffFiles.value = [];
     selectedDiffPath.value = "";
@@ -1019,48 +1072,6 @@ const PINYIN_SEGMENTS: Record<string, string> = {
   "置": "zhi"
 };
 
-/**
- * 提交创建 worktree 请求到后端，并更新本地文件树
- */
-async function submitCreateWorktree() {
-  const scope = createWorktreeScope.value;
-  if (!scope) return;
-  const baseName = newWorktreeName.value.trim();
-  if (!baseName) return;
-  const branch = currentRepoBranch.value;
-  const targetLinuxServerId = selectedPublicLinuxServerId.value;
-  if (scope === "PUBLIC" && (!selectedPublicBranch.value || !selectedPublicLinuxServerId.value)) {
-    createWorktreeOptionsError.value = "没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。";
-    return;
-  }
-
-  closeCreateWorktreeModal();
-
-  creatingWorktreeScope.value = scope;
-  try {
-    const operationId = newOperationId();
-    const created = await runOperation(
-      () =>
-        scope === "PUBLIC"
-          ? api.createPublicAgentWorktree({ baseName, branch, linuxServerId: targetLinuxServerId, operationId })
-          : api.createWorkspaceAgentWorktree(props.workspaceId!, { baseName, branch, operationId }),
-      "创建 Agent worktree",
-      operationId
-    );
-    if (!created) return;
-    if (scope === "PUBLIC") {
-      publicWorktree.value = created;
-      publicConfigLinuxServerId.value = created.linuxServerId ?? targetLinuxServerId ?? null;
-    } else {
-      workspaceWorktree.value = created;
-    }
-    entriesByScope.value = { ...entriesByScope.value, [scope]: {} };
-    await loadDirectory(scope, "");
-  } finally {
-    creatingWorktreeScope.value = null;
-  }
-}
-
 async function loadDiff(scope = activeScope.value) {
   if (!scope) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
@@ -1182,24 +1193,15 @@ function newOperationId() {
 
 defineExpose({
   refreshAll,
-  busy
+  busy: panelBusy
 });
 </script>
 
 <template>
   <div class="agent-config-panel">
-    <div v-if="activePublicConflict" class="agent-merge-overlay">
-      <MergeConflictEditor
-        :conflict="activePublicConflict"
-        :resolving="publicConflictResolving"
-        @resolve="resolvePublicConflict"
-        @abort="abortPublicConflict"
-        @close="activePublicConflict = null"
-      />
-    </div>
     <div v-if="!hideHeader" class="agent-config-header">
       <span>Agent</span>
-      <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" :disabled="refreshing" @click="refreshAll">
+      <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" :disabled="refreshing" @click="refreshAll()">
         <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': refreshing }" :stroke-width="1.5" />
       </button>
     </div>
@@ -1210,81 +1212,25 @@ defineExpose({
 
     <div class="agent-tree">
       <div class="agent-root-row" :class="{ active: isRootActive('PUBLIC') }">
-        <el-tooltip content="公共级 agents 及skills" placement="top-start" :show-after="50">
+        <el-tooltip content="公共 Agent 配置；展开后可查看当前服务器、模式和物理路径" placement="top-start" :show-after="50">
           <button type="button" class="agent-root-main" @click="toggleRoot('PUBLIC')">
             <i :class="['codicon codicon-chevron-right ta-file-tree-twistie', rootExpanded.has('PUBLIC') && 'is-open']" aria-hidden="true" />
             <span class="agent-root-title">公共级</span>
             <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
           </button>
         </el-tooltip>
-        <div v-if="canWrite" class="agent-more-menu-container">
-          <button
-            type="button"
-            class="agent-icon-btn"
-            title="更多操作"
-            aria-label="更多操作"
-            :disabled="busy || status.PUBLIC?.enabled === false"
-          >
-            <Loader2 v-if="updatingPublicConfig || creatingWorktreeScope === 'PUBLIC'" class="h-3.5 w-3.5 animate-spin" />
-            <MoreHorizontal v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-          </button>
-          <div class="agent-more-menu-dropdown">
-            <button
-              type="button"
-              class="agent-dropdown-item"
-              :disabled="busy || status.PUBLIC?.enabled === false"
-              @click="updatePublicConfig"
-            >
-              <Loader2 v-if="updatingPublicConfig" class="h-3.5 w-3.5 animate-spin" />
-              <ArrowUpFromLine v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span>更新公共配置</span>
-            </button>
-            <button
-              type="button"
-              class="agent-dropdown-item"
-              :disabled="busy || status.PUBLIC?.enabled === false"
-              @click="openSwitchWorktreeModal"
-            >
-              <GitBranch class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span>切换公共 worktree</span>
-            </button>
-            <button
-              type="button"
-              class="agent-dropdown-item"
-              :disabled="busy || status.PUBLIC?.enabled === false"
-              @click="createWorktree('PUBLIC')"
-            >
-              <Loader2 v-if="creatingWorktreeScope === 'PUBLIC'" class="h-3.5 w-3.5 animate-spin" />
-              <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span>创建公共 worktree</span>
-            </button>
-          </div>
-        </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
-        <div v-if="publicConflictFiles.length > 0" class="agent-public-conflict-panel">
-          <div class="agent-public-conflict-heading">
-            <AlertTriangle class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <span>公共级存在 {{ publicConflictFiles.length }} 个冲突文件</span>
+        <div
+          v-if="publicSource.path"
+          class="agent-public-source"
+          :title="`${publicSource.mode} · ${publicSource.serverName || publicSource.serverId}\n${publicSource.path}`"
+        >
+          <div class="agent-public-source-meta">
+            <span class="agent-public-source-mode">{{ publicSource.mode }}</span>
+            <span>{{ publicSource.serverName || publicSource.serverId }}</span>
           </div>
-          <div class="agent-public-conflict-list">
-            <button
-              v-for="file in publicConflictFiles"
-              :key="`public-conflict:${file.path}`"
-              type="button"
-              class="agent-public-conflict-file"
-              :disabled="publicConflictLoading"
-              @click="openPublicConflict(file.path)"
-            >
-              <span>{{ file.path }}</span>
-              <span>处理冲突</span>
-            </button>
-          </div>
-          <div class="agent-conflict-actions">
-            <button type="button" :disabled="publicConflictResolving" @click="resolveAllPublicConflicts('CURRENT')">全部保留本地</button>
-            <button type="button" :disabled="publicConflictResolving" @click="resolveAllPublicConflicts('INCOMING')">全部采用远端</button>
-            <button type="button" :disabled="publicConflictResolving" @click="abortPublicConflict">取消合并</button>
-          </div>
+          <code>{{ publicSource.path }}</code>
         </div>
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <AgentConfigTreeNode
@@ -1312,7 +1258,7 @@ defineExpose({
           >
             <i :class="['codicon codicon-chevron-right ta-file-tree-twistie', rootExpanded.has('WORKSPACE') && 'is-open']" aria-hidden="true" />
             <span class="agent-root-title">应用级</span>
-            <span v-if="workspaceWorktree" class="agent-root-badge">{{ workspaceWorktree.worktreeName }}</span>
+            <span v-if="workspaceId" class="agent-root-badge">个人 worktree</span>
           </button>
         </el-tooltip>
         <button
@@ -1325,18 +1271,6 @@ defineExpose({
           @click="openCreateWorkspacePackageModal"
         >
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
-        </button>
-        <button
-          v-if="workspaceCanWrite"
-          type="button"
-          class="agent-icon-btn"
-          title="创建应用 worktree"
-          aria-label="创建应用 worktree"
-          :disabled="busy || !workspaceId"
-          @click="createWorktree('WORKSPACE')"
-        >
-          <Loader2 v-if="creatingWorktreeScope === 'WORKSPACE'" class="h-3.5 w-3.5 animate-spin" />
-          <GitBranch v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
       </div>
       <div v-if="rootExpanded.has('WORKSPACE')" class="agent-node-list">
@@ -1357,7 +1291,7 @@ defineExpose({
       </div>
     </div>
 
-    <div v-if="activeScope && (canWrite || activeScope === 'WORKSPACE') && !hideGitOps" class="agent-diff">
+    <div v-if="activeScope === 'PUBLIC' && canWrite && !hideGitOps" class="agent-diff">
       <div class="agent-diff-toolbar">
         <button type="button" class="agent-action-btn" :disabled="busy" @click="loadDiff()">
           <GitCompare class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -1716,95 +1650,6 @@ defineExpose({
         </section>
       </div>
     </Teleport>
-    <Teleport to="body">
-      <div
-        v-if="showCreateWorktreeModal"
-        class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6"
-        @keydown.esc="closeCreateWorktreeModal"
-      >
-        <section
-          role="dialog"
-          aria-modal="true"
-          :aria-label="createModalTitle"
-          class="flex w-[min(380px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
-        >
-          <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
-            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">{{ createModalTitle }}</h2>
-          </header>
-
-          <div class="flex flex-col gap-3">
-            <div v-if="createWorktreeOptionsError" class="agent-modal-alert">
-              <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
-              <span>{{ createWorktreeOptionsError }}</span>
-            </div>
-
-            <div v-if="createWorktreeScope === 'PUBLIC'" class="flex flex-col gap-3">
-              <div v-if="createWorktreeOptionsLoading" class="agent-modal-loading">
-                <Loader2 class="h-3.5 w-3.5 animate-spin" />
-                <span>加载远端分支和服务器状态</span>
-              </div>
-
-              <div class="flex flex-col gap-1.5">
-                <label for="public-worktree-branch" class="text-[11px] text-[var(--ta-muted)] font-medium">远端分支</label>
-                <div class="agent-modal-select">
-                  <GitBranch class="h-3.5 w-3.5 text-[var(--ta-muted)]" :stroke-width="1.5" />
-                  <select id="public-worktree-branch" v-model="selectedPublicBranch" :disabled="createWorktreeOptionsLoading">
-                    <option v-for="branch in publicBranches" :key="branch" :value="branch">{{ branch }}</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="flex flex-col gap-1.5">
-                <label for="public-worktree-server" class="text-[11px] text-[var(--ta-muted)] font-medium">目标服务器</label>
-                <div class="agent-modal-select">
-                  <Globe2 class="h-3.5 w-3.5 text-[var(--ta-muted)]" :stroke-width="1.5" />
-                  <select id="public-worktree-server" v-model="selectedPublicLinuxServerId" :disabled="createWorktreeOptionsLoading || initializedPublicRepositories.length === 0">
-                    <option
-                      v-for="repository in initializedPublicRepositories"
-                      :key="repository.linuxServerId"
-                      :value="repository.linuxServerId"
-                    >
-                      {{ repository.serverName || repository.linuxServerId }}
-                    </option>
-                  </select>
-                </div>
-                <span v-if="selectedPublicRepository" class="agent-modal-help">
-                  {{ selectedPublicRepository.gitRootPath }}
-                </span>
-                <span v-else-if="!createWorktreeOptionsLoading" class="agent-modal-help">
-                  没有已初始化服务器，请到系统管理 &gt; 配置管理 &gt; TestAgent公共配置管理初始化。
-                </span>
-              </div>
-            </div>
-
-            <div v-else class="flex flex-col gap-1.5">
-              <span class="text-[11px] text-[var(--ta-muted)] font-medium">当前 git 库分支</span>
-              <div class="flex items-center gap-1.5 text-[13px] text-[var(--ta-text)] bg-[var(--ta-hover)] px-2.5 py-2 rounded border border-[var(--ta-border)]">
-                <GitBranch class="h-3.5 w-3.5 text-[var(--ta-muted)]" :stroke-width="1.5" />
-                <span class="font-mono font-medium truncate">{{ currentRepoBranch }}</span>
-              </div>
-            </div>
-
-            <div class="flex flex-col gap-1.5">
-              <label for="worktree-branch-input" class="text-[11px] text-[var(--ta-muted)] font-medium">worktree 名称</label>
-              <Input
-                id="worktree-branch-input"
-                v-model="newWorktreeName"
-                placeholder="请输入 worktree 名称"
-                class="h-8 text-[13px]"
-                autofocus
-                @keydown.enter="submitCreateWorktree"
-              />
-            </div>
-          </div>
-
-          <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
-            <Button variant="ghost" size="sm" @click="closeCreateWorktreeModal">取消</Button>
-            <Button variant="primary" size="sm" :disabled="!canSubmitCreateWorktree" @click="submitCreateWorktree">确定</Button>
-          </footer>
-        </section>
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -2112,6 +1957,41 @@ defineExpose({
 }
 .agent-node-list {
   padding-left: 0;
+}
+.agent-public-source {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 6px 5px 22px;
+  border-left: 2px solid var(--ta-tree-border, #e5e5e5);
+  padding: 2px 0 3px 7px;
+  color: var(--ta-tree-muted, #8b949e);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.agent-public-source-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+.agent-public-source-meta span:last-child,
+.agent-public-source code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-public-source-mode {
+  flex-shrink: 0;
+  color: var(--ta-tree-text, #3b3b3b);
+  font-weight: 600;
+}
+.agent-public-source code {
+  display: block;
+  font-family: var(--ta-font-mono, "SFMono-Regular", Consolas, monospace);
+  color: var(--ta-tree-muted, #8b949e);
 }
 .agent-loading {
   display: flex;

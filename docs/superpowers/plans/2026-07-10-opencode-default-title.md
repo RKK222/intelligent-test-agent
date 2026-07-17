@@ -15,14 +15,14 @@
 ### Task 1: 覆盖默认标题创建行为
 
 **Files:**
-- Modify: `backend/test-agent-agent-runtime/src/main/java/com/icbc/testagent/agent/runtime/AgentCreateSessionCommand.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/AgentRuntimeTargetResolver.java`
-- Modify: `backend/test-agent-opencode-client/src/main/java/com/icbc/testagent/opencode/client/OpencodeCreateSessionCommand.java`
-- Modify: `backend/test-agent-opencode-client/src/main/java/com/icbc/testagent/opencode/client/GeneratedOpencodeSdkGateway.java`
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
-- Modify: `backend/test-agent-opencode-client/src/test/java/com/icbc/testagent/opencode/client/GeneratedOpencodeSdkGatewayTest.java`
-- Create: `backend/test-agent-agent-runtime/src/test/java/com/icbc/testagent/agent/runtime/AgentCreateSessionCommandTest.java`
-- Create: `backend/test-agent-opencode-client/src/test/java/com/icbc/testagent/opencode/client/OpencodeCreateSessionCommandTest.java`
+- Modify: `backend/test-agent-agent-runtime/src/main/java/com/enterprise/testagent/agent/runtime/AgentCreateSessionCommand.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/AgentRuntimeTargetResolver.java`
+- Modify: `backend/test-agent-opencode-client/src/main/java/com/enterprise/testagent/opencode/client/OpencodeCreateSessionCommand.java`
+- Modify: `backend/test-agent-opencode-client/src/main/java/com/enterprise/testagent/opencode/client/GeneratedOpencodeSdkGateway.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
+- Modify: `backend/test-agent-opencode-client/src/test/java/com/enterprise/testagent/opencode/client/GeneratedOpencodeSdkGatewayTest.java`
+- Create: `backend/test-agent-agent-runtime/src/test/java/com/enterprise/testagent/agent/runtime/AgentCreateSessionCommandTest.java`
+- Create: `backend/test-agent-opencode-client/src/test/java/com/enterprise/testagent/opencode/client/OpencodeCreateSessionCommandTest.java`
 - Modify: `backend/test-agent-agent-runtime/README.md`
 - Modify: `backend/test-agent-opencode-client/README.md`
 - Modify: `backend/test-agent-opencode-runtime/README.md`

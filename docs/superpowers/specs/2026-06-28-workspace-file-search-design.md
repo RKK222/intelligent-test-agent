@@ -34,7 +34,7 @@
 
 ```java
 // FileSearchResultResponse.java
-package com.icbc.testagent.workspace;
+package com.enterprise.testagent.workspace;
 
 public record FileSearchResultResponse(
     String path,           // 相对路径，如 "src/components/AgentConfig.vue"
@@ -139,10 +139,10 @@ export function highlightKeyword(text: string, keyword: string): Array<{text: st
 
 | 文件 | 改动类型 |
 |------|----------|
-| `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/FileSearchResultResponse.java` | 新增 |
-| `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/WorkspaceFileService.java` | 修改 |
-| `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/WorkspaceApplicationService.java` | 修改 |
-| `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/WorkspaceFileWebSocketHandler.java` | 修改 |
+| `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/FileSearchResultResponse.java` | 新增 |
+| `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/WorkspaceFileService.java` | 修改 |
+| `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/WorkspaceApplicationService.java` | 修改 |
+| `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/WorkspaceFileWebSocketHandler.java` | 修改 |
 | `frontend/packages/shared-types/src/index.ts` | 修改 |
 | `frontend/packages/backend-api/src/index.ts` | 修改 |
 | `frontend/packages/file-explorer/src/highlightKeyword.ts` | 新增 |

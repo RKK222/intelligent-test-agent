@@ -2,8 +2,8 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.AiRunFeedbackMapper">
-    <resultMap id="AiRunFeedbackRowMap" type="com.icbc.testagent.persistence.mybatis.AiMessageFeedbackRow">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.AiRunFeedbackMapper">
+    <resultMap id="AiRunFeedbackRowMap" type="com.enterprise.testagent.persistence.mybatis.AiMessageFeedbackRow">
         <constructor>
             <arg column="feedback_id" javaType="java.lang.String"/>
             <arg column="user_id" javaType="java.lang.String"/>

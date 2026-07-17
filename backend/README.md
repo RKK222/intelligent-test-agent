@@ -109,6 +109,7 @@ cp .env.local.example .env.local
 | `TESTAGENT` | 本地测试库历史兼容别名，启动脚本默认与 `TEST_AGENT_ROOT` 相同；仅用于展开既有 `$TESTAGENT/...` 通用参数路径。 |
 | `TEST_AGENT_LOCAL_DB_*` | 本地 PostgreSQL 连接信息 |
 | `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | Redis 连接信息，绑定到 Spring 标准 `spring.data.redis.*`；Redis 是系统必需依赖。 |
+| `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` | 个人 SSH key 混合加密使用的持久 PKCS8 PEM RSA 私钥路径；生产文件权限必须为 0600，共享数据库的全部 Java 必须使用同一私钥内容。 |
 | `TEST_AGENT_REDIS_SUMMARY_ENABLED` / `TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE` | Redis summary 运行模式开关和按 userId 稳定哈希的灰度比例，默认 `false/0`；开启后仅影响携带有效 `contextToken + clientRequestId` 的新 Run，活动 Run 不切换模式，回滚时把比例调回 `0`。 |
 | `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 `true`；启用时使用同一 Redis，显式设为 `false` 可关闭。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | 本地脚本判断是否启动 opencode-manager 和端口池的地址，不再作为 Java 固定 opencode node 配置。 |
@@ -119,10 +120,10 @@ cp .env.local.example .env.local
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。 |
-| `ICBC_OPENAI_AUTH_TOKEN` | 历史兼容项；新实现从数据库 `internal_model_proxy_settings` 明文读取全局 token，由前端“内部模型供应商”页面写入。 |
+| `ENTERPRISE_OPENAI_AUTH_TOKEN` | 历史兼容项；新实现从数据库 `internal_model_proxy_settings` 明文读取全局 token，由前端“内部模型供应商”页面写入。 |
 | `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
-| `TEST_AGENT_ICBC_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `icbc-openai` 地址一致。 |
-| `TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME` | 历史兼容项；新实现固定由 opencode 配置把环境变量 `ICBC_UCID` 注入请求头 `ucid`。 |
+| `TEST_AGENT_ENTERPRISE_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `enterprise-openai` 地址一致。 |
+| `TEST_AGENT_ENTERPRISE_OPENAI_UCID_HEADER_NAME` | 历史兼容项；新实现固定由 opencode 配置把环境变量 `ENTERPRISE_UCID` 注入请求头 `ucid`。 |
 
 `guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh`、`restart-dev-services.sh --profile guo --env-file .env.local` 或 `restart-dev-services.ps1 -Profile guo -EnvFile .env.local` 时，`.env.local` 仍可覆盖 yml，便于本地联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile，test profile 下默认启动本机 Go manager，即使 `.env.test` 中 `TEST_AGENT_OPENCODE_BASE_URL` 指向共享测试地址；停止 manager 时会清理其托管的用户 opencode 子进程和 state JSON，防止端口池残留进程导致下次初始化失败。每个稳定 `linuxServerId` 只部署一个 worker；生产和本地都不配置人工 `containerId/managerId`，Go manager 会从 `.serverid` 自动派生稳定 SHA-256 ID，hostname 只作为 `containerName` 展示。
 

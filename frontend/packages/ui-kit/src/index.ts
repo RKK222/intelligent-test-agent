@@ -1,4 +1,5 @@
 export { cn } from "./lib";
+export { copyTextToClipboard } from "./clipboard";
 export { default as Button } from "./Button.vue";
 export { default as Badge } from "./Badge.vue";
 export { default as Input } from "./Input.vue";
@@ -9,4 +10,3 @@ export { default as FeedbackBanner } from "./Toast.vue";
 export type { Feedback } from "./Toast.vue";
 export { default as Spinner } from "./Spinner.vue";
 export { default as ShimmerDivider } from "./ShimmerDivider.vue";
-

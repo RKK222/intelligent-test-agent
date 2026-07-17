@@ -15,10 +15,10 @@
 ### Task 1: 后端 stage/unstage API
 
 **Files:**
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationService.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/ManagedWorkspaceController.java`
-- Test: `backend/test-agent-workspace-management/src/test/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationServiceTest.java`
-- Test: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/ManagedWorkspaceControllerTest.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/ManagedWorkspaceApplicationService.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/ManagedWorkspaceController.java`
+- Test: `backend/test-agent-workspace-management/src/test/java/com/enterprise/testagent/workspace/ManagedWorkspaceApplicationServiceTest.java`
+- Test: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/ManagedWorkspaceControllerTest.java`
 
 - [ ] 写失败测试：非冲突文件定点 stage/unstage，冲突路径拒绝。
 - [ ] 运行目标测试并确认因服务和路由缺失而失败。

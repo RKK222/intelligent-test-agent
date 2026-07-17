@@ -13,7 +13,7 @@
 
 1. 只能通过 `packages/backend-api` 访问平台后端服务（当前由 `test-agent-app` 装配运行），不得直连 opencode server，不得在组件中直接拼接后端 URL。
 2. Run、Diff 和 runtime 相关请求默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` URL；切换 agent 只能通过 `backend-api` 配置，不得在页面组件中手拼旧 runtime URL。
-3. 工作区文件和 Agent 配置文件的目录列表、读取、写入只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
+3. 工作区文件和 Agent 配置文件的目录列表、读取、写入、上传、复制和移动只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
 4. API 请求、响应、错误类型必须与 `docs/api/http-api.md` 一致；新增或变更 API 必须同步 `docs/api/http-api.md` 和 `docs/architecture/module-map.md`。
 5. 前端调试用原始报文查看器只能通过 `backend-api` 的可选 observer 捕获浏览器可访问的请求体和响应文本，不得记录 `Authorization`、Cookie 等敏感请求头，不得新增后端持久化或绕过平台后端直连 opencode。
 
@@ -32,6 +32,7 @@
 2. 不把密钥、token 或敏感内容放入可持久化前端状态。
 3. Dockview 面板恢复必须使用稳定 id，避免刷新后丢失上下文。
 4. 当前事件流应优先按 `eventId` 去重，兼容旧事件时才回退 `runId + seq`；`seq=0` transient 文本事件不能因为相同 seq 被错误丢弃。
+5. 普通工作区文件与公共级/应用级 Agent 配置文件的异步读取都必须显式建模 loading/loaded/error。普通文件以 workspace 上下文隔离；Agent 文件以 scope/workspace/worktree/server 上下文和合成 tab 路径隔离，应用级 tab 必须持久携带 feature workspace ID，重试与写入均从 tab 路由还原目标，不得回退当前个人 workspace；两者都必须校验同路径请求代次、tab 存在性和用户内容修订代次。后台响应只能更新所属 tab 且不得抢焦点，合法空文件不能与“尚未加载”混淆，读取期间发生过编辑的内容即使随后已保存/回退为 clean 也不得被旧磁盘响应覆盖。顶部 loaded tab 应使用缓存，loading 不重复发请求，error/旧版未标记 Agent tab 重新读取；重试必须按 tab 类型分发，Agent 合成路径不得传给 `workspace.read`。Agent 上下文失效以及普通文件移动/改名导致旧路径失效时，必须把旧 loading 收敛为 loaded/error 或从新路径补读，禁止永久停留在 loading。切换 workspace 的批量循环必须固定起始上下文并在每个 `await` 边界中止旧任务。
 
 ## 包边界
 
@@ -108,6 +109,7 @@
 
 1. Dockview 面板恢复不能阻塞首屏交互；Monaco 编辑器和 Diff 组件按需加载。
 2. 大文件打开前应有大小检查和只读策略；Diff 展示避免一次性渲染超大变更；面板切换时不得重复初始化重型实例。
+3. 中间 Monaco 源码区默认按可视宽度自动换行；文件树复制/剪切/粘贴/撤销、删除、拖动和上传必须在 `canWrite=false` 时同时隐藏并在事件处理层阻断。上传入口必须由工作区根或目标目录的 `+` 打开并展示目标路径；文件/目录删除必须由行尾 `−` 或 Delete/Del 键进入同一确认弹框，目录递归删除要明确提示影响范围；拖放结束必须清理全部目标高亮，撤销历史不得跨个人 worktree 保留。
 
 ### 请求与缓存
 

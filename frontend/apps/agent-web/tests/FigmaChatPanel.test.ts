@@ -2564,6 +2564,89 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-raw-output-panel").exists()).toBe(false);
   });
 
+  it("downloads the filtered raw output entries as a text file", async () => {
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:raw");
+    const revokeObjectURL = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const createDesc = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const revokeDesc = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+
+    try {
+      const wrapper = mount(FigmaChatPanel, {
+        props: {
+          messages: [],
+          processStatus: { status: "READY", initializable: false, message: "ready" },
+          rawOutputEntries: [
+            {
+              id: "raw_req_1",
+              kind: "request",
+              title: "POST /api/internal/agent/opencode/runs",
+              method: "POST",
+              path: "/api/internal/agent/opencode/runs",
+              traceId: "trace_frontend",
+              body: '{"sessionId":"ses_1","prompt":"hello"}',
+              occurredAt: "2026-07-02T08:00:00.000Z"
+            },
+            {
+              id: "raw_sse_1",
+              kind: "sse",
+              title: "message.part.delta",
+              eventName: "message.part.delta",
+              runId: "run_1",
+              body: '{"type":"message.part.delta","payload":{"delta":"world"}}',
+              occurredAt: "2026-07-02T08:00:01.000Z"
+            }
+          ]
+        } as any
+      });
+
+      const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+      expect(rawButton).toBeTruthy();
+      await rawButton!.trigger("click");
+
+      const downloadButton = wrapper.findAll("button").find((button) => button.text().includes("下载"));
+      expect(downloadButton).toBeTruthy();
+      expect(downloadButton!.attributes("disabled")).toBeUndefined();
+      await downloadButton!.trigger("click");
+
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      const blob = createObjectURL.mock.calls[0][0] as Blob;
+      const text = await blob.text();
+      expect(text).toContain('{"sessionId":"ses_1","prompt":"hello"}');
+      expect(text).toContain('{"type":"message.part.delta","payload":{"delta":"world"}}');
+      expect(text).toContain("请求");
+      expect(text).toContain("SSE");
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:raw");
+
+      // 过滤后只下载命中条目，未命中条目不进入导出文本
+      const sseFilter = wrapper.findAll(".figma-chat-raw-filter").find((button) => button.text() === "SSE");
+      expect(sseFilter).toBeTruthy();
+      await sseFilter!.trigger("click");
+      createObjectURL.mockClear();
+      await downloadButton!.trigger("click");
+      const filteredBlob = createObjectURL.mock.calls[0][0] as Blob;
+      const filteredText = await filteredBlob.text();
+      expect(filteredText).toContain('{"type":"message.part.delta"');
+      expect(filteredText).not.toContain("POST /api/internal/agent/opencode/runs");
+      expect(filteredText).not.toContain('{"sessionId":"ses_1"');
+    } finally {
+      clickSpy.mockRestore();
+      if (createDesc) {
+        Object.defineProperty(URL, "createObjectURL", createDesc);
+      } else {
+        delete (URL as unknown as Record<string, unknown>).createObjectURL;
+      }
+      if (revokeDesc) {
+        Object.defineProperty(URL, "revokeObjectURL", revokeDesc);
+      } else {
+        delete (URL as unknown as Record<string, unknown>).revokeObjectURL;
+      }
+    }
+  });
+
   it("shows an empty raw output state for sessions without captured exchanges", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -2578,6 +2661,11 @@ describe("FigmaChatPanel", () => {
     await rawButton!.trigger("click");
 
     expect(wrapper.text()).toContain("当前会话暂无原始报文");
+
+    // 无可见报文时下载按钮应禁用，避免导出空文件
+    const downloadButton = wrapper.findAll("button").find((button) => button.text().includes("下载"));
+    expect(downloadButton).toBeTruthy();
+    expect(downloadButton!.attributes("disabled")).toBeDefined();
   });
 
   it("shows created and updated times in the history drawer", async () => {

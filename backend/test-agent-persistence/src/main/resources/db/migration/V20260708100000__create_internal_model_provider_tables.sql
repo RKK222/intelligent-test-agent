@@ -17,11 +17,12 @@ comment on column internal_model_providers.sort_order is '排序号';
 
 create table if not exists internal_model_proxy_settings (
     setting_id varchar(64) primary key,
-    icbc_openai_auth_token text,
+    enterprise_openai_auth_token text,
     created_at timestamp not null,
     updated_at timestamp not null,
     constraint ck_internal_model_proxy_settings_singleton check (setting_id = 'default')
 );
 
 comment on table internal_model_proxy_settings is '企业内部模型代理全局设置';
-comment on column internal_model_proxy_settings.icbc_openai_auth_token is '内部模型接口鉴权 token，按需求明文保存';
+comment on column internal_model_proxy_settings.enterprise_openai_auth_token is '内部模型接口鉴权 token，按需求明文保存';
+-- migration checksum compatibility pad: nROmjY

@@ -10,7 +10,7 @@ const users: UserManagementUser[] = [
     userId: "usr_existing",
     username: "alice",
     unifiedAuthId: "AUTH_1",
-    organization: "工行",
+    organization: "企业",
     rdDepartment: "研发部",
     department: "测试部",
     status: "ACTIVE",

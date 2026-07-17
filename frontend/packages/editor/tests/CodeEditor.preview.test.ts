@@ -3,6 +3,7 @@ import { defineComponent, h } from "vue";
 import { fireEvent, render } from "@testing-library/vue";
 
 const editorLayout = vi.fn();
+const editorCreate = vi.fn();
 
 // 屏蔽 Monaco 真实加载（jsdom 无法运行 Monaco），提供一个最小 editor 工厂桩
 vi.mock("../src/monaco-env", () => {
@@ -35,7 +36,10 @@ vi.mock("../src/monaco-env", () => {
     editor: {
       getModel: () => null,
       createModel: () => fakeModel,
-      create: () => fakeEditor
+      create: (_element: HTMLElement, options: unknown) => {
+        editorCreate(options);
+        return fakeEditor;
+      }
     }
   };
   return {
@@ -68,6 +72,16 @@ import CodeEditor from "../src/CodeEditor.vue";
 const baseProps = { content: "# hi", dirty: false, readonly: false, saving: false };
 
 describe("CodeEditor Markdown 预览受控", () => {
+  it("中间源码编辑区默认启用自动换行", async () => {
+    editorCreate.mockClear();
+    render(CodeEditor, {
+      props: { ...baseProps, path: "logs/output.log" }
+    });
+
+    await vi.waitFor(() => expect(editorCreate).toHaveBeenCalled());
+    expect(editorCreate.mock.calls[0]?.[0]).toMatchObject({ wordWrap: "on" });
+  });
+
   it("无文件空态允许 app 层通过 slot 注入主页操作", async () => {
     const openManual = vi.fn();
     const { getByRole } = render(CodeEditor, {
@@ -147,9 +161,11 @@ describe("CodeEditor Markdown 预览受控", () => {
     await new Promise((resolve) => setTimeout(resolve, 350));
 
     await fireEvent.click(container.querySelector('[data-mermaid-mode="visual"]') as Element);
-    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }));
+    // 全量并发时 Mermaid/Vue Flow 懒模块首次转换可能超过 Testing Library 默认 1 秒。
+    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }, { timeout: 5000 }));
 
     await vi.waitFor(() => expect(emitted().change).toBeTruthy());
-    expect((emitted().change as Array<[string]>)[0]?.[0]).toContain("%% editor-layout:");
+    expect((emitted().change as Array<[string]>)[0]?.[0])
+      .toMatch(/^```mermaid\nflowchart TD\n%%@[A-Za-z0-9_-]+(?:\n%%@\+[A-Za-z0-9_-]+)*$/m);
   });
 });

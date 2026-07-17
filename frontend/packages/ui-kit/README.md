@@ -8,6 +8,7 @@
 
 - Button、Badge、Input、Tabs、FeedbackBanner、Spinner、ShimmerDivider 等基础组件；`ShimmerDivider` 支持横向/纵向布局、可调速度和保留渐变的静态模式。
 - 提供 `cn` 样式合并工具。
+- 提供 `copyTextToClipboard` 浏览器复制工具：安全上下文优先使用 Clipboard API，企业内 HTTP 或权限拒绝时回退到 Chromium 108 可用的受控 textarea 复制。
 - 统一基础控件的 Figma Web IDE 浅灰视觉状态：hover/focus/disabled、紧凑工具栏尺寸、状态徽标色阶和输入框边界。
 - 组件样式必须消费 app 全局 theme token，不能在包内引入业务专用配色或运行态语义。
 

@@ -1,4 +1,4 @@
-import { serializeMermaidLayout } from "../metadata";
+import { serializeMermaidCompactSequence } from "../compact-metadata";
 import type { MermaidSequenceDiagram, MermaidSequenceMessageType } from "./model";
 
 function operator(type: MermaidSequenceMessageType): string {
@@ -13,7 +13,7 @@ function inline(value: string): string {
 }
 
 export function serializeMermaidSequence(diagram: MermaidSequenceDiagram): string {
-  const lines = ["sequenceDiagram", ...serializeMermaidLayout(diagram.participants)];
+  const lines = ["sequenceDiagram", ...serializeMermaidCompactSequence(diagram)];
   for (const participant of diagram.participants) {
     const label = inline(participant.text);
     lines.push(`${participant.type} ${participant.id}${label && label !== participant.id ? ` as ${label}` : ""}`);

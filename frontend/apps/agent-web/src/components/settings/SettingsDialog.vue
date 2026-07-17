@@ -10,6 +10,7 @@ type MenuKey = "appWorkspace" | "repository" | "personal" | "userManagement";
 const props = defineProps<{
   open: boolean;
   currentUser: CurrentUser | null;
+  initialAppId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -22,6 +23,7 @@ provide("api", api);
 
 const activeKey = ref<MenuKey>("appWorkspace");
 const autoOpenCreate = ref(false);
+const refreshKey = ref(0);
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const hasAppAdmin = computed(() => hasSuperAdmin.value || props.currentUser?.roles?.includes("APP_ADMIN") === true);
 const defaultMenuKey = computed<MenuKey>(() => hasAppAdmin.value ? "appWorkspace" : "personal");
@@ -32,6 +34,7 @@ watch(
     if (open) {
       activeKey.value = defaultMenuKey.value;
       autoOpenCreate.value = false;
+      refreshKey.value += 1;
     }
   }
 );
@@ -90,7 +93,7 @@ function selectMenu(key: MenuKey) {
     <div class="ta-settings-shell">
       <SettingsMenu :active-key="activeKey" :current-user="currentUser" @select="selectMenu" />
       <div class="ta-settings-content">
-        <SettingsPanel :active-key="activeKey" :current-user="currentUser" :auto-open-create="autoOpenCreate" @switch-menu="handleSwitchMenu" />
+        <SettingsPanel :active-key="activeKey" :current-user="currentUser" :auto-open-create="autoOpenCreate" :initial-app-id="props.initialAppId" :refresh-key="refreshKey" @switch-menu="handleSwitchMenu" />
       </div>
     </div>
     <template #footer>

@@ -63,7 +63,7 @@
 **Files:**
 - Test: `frontend/apps/agent-web/tests/FigmaShell.test.ts`
 - Test: `frontend/packages/file-explorer/tests/DirectoryRows.test.ts`
-- Test: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationServiceTest.java`
+- Test: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationServiceTest.java`
 
 - [ ] 运行：`cd frontend && corepack pnpm test --run apps/agent-web/tests/FigmaShell.test.ts packages/file-explorer/tests/DirectoryRows.test.ts`。
 - [ ] 运行：`cd backend && mvn -pl test-agent-opencode-runtime -am -Dtest=OpencodeRuntimeApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`。

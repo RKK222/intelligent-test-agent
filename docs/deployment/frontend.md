@@ -19,7 +19,7 @@ corepack pnpm build
 
 企业内当前部署不单独手工执行本节命令，统一使用 `deploy/internal/package-release.sh --env-file /data/testagent/config/docker.env` 生成 `test-agent-frontend-dist.tar.gz` 和完整 `test-agent-internal-release.zip`。部署入口见 `deploy/internal/README.md`：单后台按 `deploy/internal/SINGLE-BACKEND.md`，多后台按 `deploy/internal/MULTI-BACKEND.md`。两种模式都只在 `122.233.30.2:/data/testagent/frontend` 部署一份静态资源；`/data/testagent/config/nginx.env` 分别声明单个或多个 Java endpoint，前端部署脚本自动渲染、校验和 reload 实体 Nginx。多后台的 PTY、文件和 Agent 配置进度 WebSocket 都使用 ticket 签发 Java 的绝对地址，浏览器网段必须能访问每台 Java `:8080`。
 
-如果后端服务器能免密直连前端服务器，可在后端执行 `/data/testagent/deploy/internal/deploy-internal-release.sh --archive /data/0709/internal.zip`，脚本会用 `scp` 分发前端包到 `122.233.30.2`。如果现场统一登录策略导致 `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`，把同一个 zip 放到 `122.233.30.2:/data/0709/internal.zip`，在前端机本地执行 `deploy/internal/deploy-internal-frontend.sh --archive /data/0709/internal.zip`，后端节点部署时统一加 `--skip-frontend`。
+企业内完整 ZIP 和 SHA-256 校验文件统一上传到每台目标服务器的 `/data/0709/`，固定为 `test-agent-internal-release.zip` 和 `test-agent-internal-release.zip.sha256`；部署前在该目录执行 `sha256sum -c test-agent-internal-release.zip.sha256`。如果后端服务器能免密直连前端服务器，可在后端执行 `/data/testagent/deploy/internal/deploy-internal-release.sh --archive /data/0709/test-agent-internal-release.zip`，脚本会用 `scp` 分发前端包到 `122.233.30.2`。如果现场统一登录策略导致 `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`，把同一份 ZIP 和校验文件放到 `122.233.30.2:/data/0709/`，在前端机本地执行 `deploy/internal/deploy-internal-frontend.sh --archive /data/0709/test-agent-internal-release.zip`，后端节点部署时统一加 `--skip-frontend`。`/data/0709/` 只存放上传交付物，前端静态资源仍安装到 `/data/testagent/frontend`。
 
 `frontend-opencode` 使用 Vite 生产构建：
 

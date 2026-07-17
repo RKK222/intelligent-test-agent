@@ -37,6 +37,7 @@ describe("FigmaShell", () => {
     window.localStorage.removeItem("figma-shell-robot-pos");
     window.localStorage.removeItem("figma-shell-robot-fixed");
     window.localStorage.removeItem("test-agent.pet-companion.v1");
+    document.querySelector('[data-testid="pointer-event-blocker"]')?.remove();
   });
 
   it("opens the built-in manual from the global help entry", async () => {
@@ -125,6 +126,51 @@ describe("FigmaShell", () => {
     expect(robot.attributes("style")).toContain("top: 150px");
   });
 
+  it("drags successfully even if pointer capture throws DOMException in the compatibility path", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+    const setPointerCapture = vi.fn(() => {
+      throw new DOMException("pointer capture unavailable", "NotFoundError");
+    });
+    Object.defineProperty(robot.element, "setPointerCapture", {
+      configurable: true,
+      value: setPointerCapture,
+    });
+
+    dispatchPointer(robot.element, "pointerdown", 81, 100, 100, "mouse");
+    dispatchPointer(window, "pointermove", 81, 145, 135, "mouse");
+    dispatchPointer(window, "pointerup", 81, 145, 135, "mouse");
+    await wrapper.vm.$nextTick();
+
+    expect(setPointerCapture).toHaveBeenCalled();
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 145, y: 135 }));
+  });
+
+  it("keeps dragging when a workbench child stops pointer event propagation", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+    const eventBlocker = document.createElement("div");
+    eventBlocker.dataset.testid = "pointer-event-blocker";
+    eventBlocker.addEventListener("pointermove", (event) => event.stopPropagation());
+    eventBlocker.addEventListener("pointerup", (event) => event.stopPropagation());
+    document.body.appendChild(eventBlocker);
+
+    dispatchPointer(robot.element, "pointerdown", 82, 100, 100, "mouse");
+    dispatchPointer(eventBlocker, "pointermove", 82, 150, 140, "mouse");
+    dispatchPointer(eventBlocker, "pointerup", 82, 150, 140, "mouse");
+    await wrapper.vm.$nextTick();
+
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 150, y: 140 }));
+    expect(document.body.style.cursor).toBe("");
+    expect(document.body.style.userSelect).toBe("");
+  });
+
   it("clamps and persists a manually positioned robot when the viewport shrinks", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 900, y: 700 }));
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
@@ -207,6 +253,25 @@ describe("FigmaShell", () => {
     await wrapper.vm.$nextTick();
 
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 125, y: 135 }));
+  });
+
+  it("drags successfully using fallback MouseEvents when PointerEvent is simulated as missing", async () => {
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+    await summonRobot(wrapper);
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+
+    dispatchPointer(robot.element, "pointerdown", 99, 100, 100, "mouse");
+
+    const moveEvent = new MouseEvent("mousemove", { bubbles: true, clientX: 130, clientY: 140 });
+    window.dispatchEvent(moveEvent);
+
+    const upEvent = new MouseEvent("mouseup", { bubbles: true, clientX: 130, clientY: 140 });
+    window.dispatchEvent(upEvent);
+
+    await wrapper.vm.$nextTick();
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 130, y: 140 }));
   });
 
   it("moves the pet with arrow keys and persists the clamped position", async () => {
@@ -363,7 +428,7 @@ describe("FigmaShell", () => {
 
   it("opens games from the shared pet dialog without a separate activity button", async () => {
     vi.useFakeTimers();
-    const wrapper = mountShell();
+    const wrapper = mountShell({ props: { canPlayPetGames: true } });
     await summonRobot(wrapper);
 
     expect(wrapper.find('[data-testid="robot-game-toggle"]').exists()).toBe(false);
@@ -380,6 +445,19 @@ describe("FigmaShell", () => {
     expect(wrapper.text()).toContain("贪吃蛇");
 
     await wrapper.get('[aria-label="关闭宠物旁路问答"]').trigger("click");
+    expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(false);
+  });
+
+  it("hides the pet game entry for non-super administrators", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[aria-label="打开宠物小游戏"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="pet-mini-games"]').exists()).toBe(false);
   });
 
@@ -409,6 +487,7 @@ describe("FigmaShell", () => {
     vi.useFakeTimers();
     const wrapper = mountShell({
       props: {
+        canPlayPetGames: true,
         showProcessStatusInPet: true,
         sideQuestionAvailable: false,
         opencodeProcessStatus: {

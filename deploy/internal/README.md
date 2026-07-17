@@ -14,11 +14,12 @@
 - Mac 构建机允许联网；企业服务器完全离线。
 - 企业内不使用 Docker Compose，worker 由 `opencode-worker-docker.sh` 管理。
 - Java 读取 `/data/testagent/config/backend.env`。
+- Java 通过 `backend.env` 中的 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 读取持久 RSA 私钥；文件默认 `/data/testagent/config/ssh-rsa-private.key`、权限 0600，多后台必须内容一致。
 - worker 读取 `/data/testagent/config/docker.env`。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与本机 worker 的 `TEST_AGENT_DATA_ROOT` 一致。
 - 每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不配置人工 `containerId/managerId`。
 - 企业模型供应商地址和上游 token 由数据库及管理页面维护，不写入 `docker.env`。
-- 正式模型链路为 `OpenCode → 本机 Java:8080 → 行内模型:9070`，不使用 19070 relay 或 host network。
+- 正式模型链路为 `OpenCode → 本机 Java:8080 → 企业内部模型:9070`，不使用 19070 relay 或 host network。
 
 ## Mac 打包
 
@@ -44,6 +45,31 @@ deploy/internal/dist/frontend/
 
 完整 zip 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档。企业服务器只执行校验、解压、`docker load` 和服务启停，不执行 Maven、pnpm、Docker build 或联网下载。
 
+## 自定义 Tool 离线依赖
+
+`test-agent-programs.tar.gz` 已内置与 OpenCode `1.17.8` 锁定的自定义 Tool 基线：`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其全部传递依赖；Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。OpenCode 启动时不会联网安装依赖，而会为公共配置 `tools/` 和项目 `.opencode/tools/` 建立指向 `/data/testagent/programs/opencode/node_modules` 的非覆盖式链接；配置目录已有同名包时保留现有版本，链接目录由 `.gitignore` 排除，不应提交到公共仓库。
+
+这套基线覆盖使用官方 `tool(...)`、schema、SDK 类型和 Effect/Zod 的 Tool。`axios`、数据库驱动或企业私有 SDK 等任意业务依赖不会被猜测加入；新增这类 import 时，必须同步修改 `opencode-node-runtime.package.json` 和 lockfile，在外网 Mac 重新打完整企业包。升级依赖不能只替换 Tool 文件，必须同时解压新 programs、导入新 worker 镜像并重启 worker；标准 `deploy-internal-release.sh` 已按该顺序执行。
+
+## 统一上传目录
+
+企业内所有目标服务器统一把完整 ZIP 和 SHA-256 校验文件上传到 `/data/0709/`，文件名保持不变：
+
+```text
+/data/0709/test-agent-internal-release.zip
+/data/0709/test-agent-internal-release.zip.sha256
+```
+
+单后台时上传到前端 `.2` 和后台 `.114`；多后台时上传到前端及每个后台节点。每台服务器开始部署前都先执行：
+
+```bash
+cd /data/0709
+sha256sum -c test-agent-internal-release.zip.sha256
+unzip -t test-agent-internal-release.zip
+```
+
+`/data/0709/` 只作为离线交付物上传和校验目录；部署脚本仍把运行文件安装到 `/data/testagent/`，两者不要混用。
+
 ## 标准目录
 
 ```text
@@ -52,6 +78,7 @@ deploy/internal/dist/frontend/
     backend.env
     docker.env
     nginx.env        # 仅前端 Nginx 服务器
+    ssh-rsa-private.key  # 仅 Java 后台；不进入交付包，多后台内容一致
   data/
   deploy/internal/
   dist/

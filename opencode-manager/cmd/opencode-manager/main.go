@@ -14,11 +14,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/icbc/test-agent/opencode-manager/internal/config"
-	"github.com/icbc/test-agent/opencode-manager/internal/control"
-	"github.com/icbc/test-agent/opencode-manager/internal/health"
-	"github.com/icbc/test-agent/opencode-manager/internal/process"
-	"github.com/icbc/test-agent/opencode-manager/internal/state"
+	"github.com/enterprise/test-agent/opencode-manager/internal/config"
+	"github.com/enterprise/test-agent/opencode-manager/internal/control"
+	"github.com/enterprise/test-agent/opencode-manager/internal/health"
+	"github.com/enterprise/test-agent/opencode-manager/internal/process"
+	"github.com/enterprise/test-agent/opencode-manager/internal/state"
 )
 
 // main 只负责 CLI 协议适配，真实生命周期逻辑位于 internal/process。

@@ -67,7 +67,7 @@ Token 校验流程：
 2. 日志、错误响应、前端状态不得输出密钥。
 3. 后端生产容器只运行 Java 进程；数据库、Redis 和 opencode server 地址必须从外部配置注入，不能写入镜像或仓库。
 4. 前端不得把密钥写入源码、localStorage 或可公开构建产物。
-5. 个人 Git SSH 私钥必须使用 AES-GCM 加密后落库，加密密钥来自 `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 或 `test-agent.security.ssh-key-encryption-key`，要求为 Base64 编码的 16/24/32 字节 AES key；不得提供硬编码默认值。
+5. 个人 Git SSH 私钥必须在浏览器端使用每条记录独立的 AES-256-GCM 临时密钥加密，临时 AES 密钥再用平台 RSA-OAEP/SHA-256 公钥加密后落库。生产 Java 必须通过 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` / `test-agent.security.ssh-rsa-private-key-path` 加载权限为 0600 的持久 PKCS8 PEM 私钥；共享同一数据库的全部 Java 必须使用同一文件内容，禁止使用重启即变化的临时 RSA key 或把私钥提交到代码/交付包。
 6. SSH key API 只能返回 `sshKeyId/name/fingerprint/createdAt` 元信息，禁止回显私钥明文或密文。指纹基于规范化私钥内容的 SHA-256 生成。
 7. Git SSH 远端命令只允许使用当前登录用户保存的唯一 SSH key。临时私钥文件必须设置最小可行权限并在命令结束后清理；Git 命令环境必须禁用交互式凭据提示。
 8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push/pull/副本同步仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录只允许来自 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT` / `OPENCODE_PERSONAL_WORKTREE_ROOT`；缺失或空白时必须失败，不能回退到 yml、环境变量或代码默认路径。磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。跨服务器副本同步在 `fetch/reset --hard` 前必须确认工作树无未提交变更，否则标记副本 `FAILED` 并拒绝静默覆盖。
@@ -107,10 +107,11 @@ Token 校验流程：
 3. ticket 只能通过用户登录态创建，短期过期、一次性消费，并绑定 workspace、目标服务器、当前 agent 服务器、模式、Agent 配置 scope/worktree、traceId 和是否 `SUPER_ADMIN`；不得把长期 Bearer token 放入 WebSocket URL。
 4. WebSocket upgrade 必须校验 Origin 白名单、ticket 有效性和 ticket 模式；ticket 消费后无论连接成功与否都不能重复使用。
 5. `workspace.list/read/write/rename/status/delete` 必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，删除默认只允许普通文件，目录删除返回统一错误，不允许递归删除。
-6. `agent-config.list/read/write` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，写入必须校验 `SUPER_ADMIN`，路径仍由 workspace-management 文件服务归一化。
-7. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
-8. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
-9. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
+6. `agent-config.list/read/write` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，公共配置写入校验 `SUPER_ADMIN`，应用配置写入校验 `APP_ADMIN`（`SUPER_ADMIN` 继承），路径仍由 workspace-management 文件服务归一化。
+7. 应用 `.opencode/**` 与普通文件共用版本个人 worktree 时，个人 worktree 的 `commit/publish` HTTP 入口也必须对规范化文件白名单执行 `APP_ADMIN` 校验；不能只依赖前端 Tab 或 Agent 文件 WebSocket 权限。`spec/**` 禁止发布的服务层规则继续对所有角色生效。
+8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
+9. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
+10. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
 
 ## 服务器广播安全
 

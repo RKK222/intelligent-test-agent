@@ -19,8 +19,8 @@
 ### Task 1: CLOSED 状态事件透传回归与修复
 
 **Files:**
-- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
-- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`
+- Modify: `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
+- Modify: `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationService.java`
 - Modify: `backend/test-agent-opencode-runtime/README.md`
 - Modify: `.agents/session-log.md`
 

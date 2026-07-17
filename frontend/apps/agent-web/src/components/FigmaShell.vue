@@ -59,6 +59,8 @@ const props = withDefaults(
     /** 宠物问答可复用主对话；没有主对话时由工作台切换为用户手册知识上下文。 */
     sideQuestionAvailable?: boolean;
     sideQuestionManualMode?: boolean;
+    /** 仅 SUPER_ADMIN 可以打开宠物小游戏；默认关闭以避免独立挂载时泄露入口。 */
+    canPlayPetGames?: boolean;
     showLeftPanel?: boolean;
     showRightPanel?: boolean;
     runtimeInventory?: RuntimeInventorySummary;
@@ -75,6 +77,7 @@ const props = withDefaults(
     showProcessStatusInPet: false,
     sideQuestionAvailable: true,
     sideQuestionManualMode: false,
+    canPlayPetGames: false,
     showLeftPanel: true,
     showRightPanel: true
   }
@@ -509,7 +512,6 @@ let robotDragStartClientY = 0;
 let robotDragStartX = 0;
 let robotDragStartY = 0;
 let robotDragWasEffective = false;
-let robotDragTarget: HTMLElement | null = null;
 let robotDragPreviousCursor = "";
 let robotDragPreviousUserSelect = "";
 let robotSuppressClick = false;
@@ -599,48 +601,84 @@ function toggleRobotFixed() {
   }
 }
 
+function onRobotPointerMoveFallback(event: MouseEvent) {
+  // 如果是 PointerEvent，由 onRobotPointerMove 处理，这里直接忽略，防止重复计算位置
+  if (window.PointerEvent && event instanceof window.PointerEvent) return;
+  onRobotPointerMove(event as PointerEvent);
+}
+
+function finishRobotMouseDragFallback(event: MouseEvent) {
+  // 同样忽略 PointerEvent
+  if (window.PointerEvent && event instanceof window.PointerEvent) return;
+  finishRobotDrag();
+}
+
 function cleanupRobotDrag() {
-  const target = robotDragTarget;
-  const pointerId = robotDragPointerId;
-  if (!robotDragging.value && !target && pointerId === null) return;
+  if (!robotDragging.value) return;
+
+  // 释放指针捕获，防止对后续页面交互产生副作用
+  if (robotDragPointerId !== null) {
+    const el = document.querySelector(".figma-robot-agent") as HTMLElement;
+    if (el && typeof el.releasePointerCapture === "function") {
+      try {
+        el.releasePointerCapture(robotDragPointerId);
+      } catch (e) {
+        // 捕获异常，确保在不支持 releasePointerCapture 的老版本/兼容性模式下不崩溃
+      }
+    }
+  }
 
   robotDragging.value = false;
   robotDragPointerId = null;
-  robotDragTarget = null;
-  window.removeEventListener("pointermove", onRobotPointerMove);
-  window.removeEventListener("pointerup", finishRobotPointerDrag);
-  window.removeEventListener("pointercancel", finishRobotPointerDrag);
+  window.removeEventListener("pointermove", onRobotPointerMove, true);
+  window.removeEventListener("pointerup", finishRobotPointerDrag, true);
+  window.removeEventListener("pointercancel", finishRobotPointerDrag, true);
+  window.removeEventListener("mousemove", onRobotPointerMoveFallback, true);
+  window.removeEventListener("mouseup", finishRobotMouseDragFallback, true);
   document.body.style.cursor = robotDragPreviousCursor;
   document.body.style.userSelect = robotDragPreviousUserSelect;
-  if (target && pointerId !== null && target.hasPointerCapture?.(pointerId)) {
-    target.releasePointerCapture?.(pointerId);
-  }
 }
 
 function onRobotPointerDown(event: PointerEvent) {
-  if (event.isPrimary === false || robotDragPointerId !== null) return;
-  if (event.button !== 0 && event.pointerType === "mouse") return;
+  // 已经在拖拽中，防止冲突
+  if (robotDragging.value) return;
+  // 仅在鼠标类型下，限制必须是左键点击（event.button === 0）
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+
+  // 显式调用 preventDefault() 阻止浏览器触发默认手势（如选择、平移滚动等），这是防御 pointercancel 的重中之重
+  event.preventDefault();
+
+  // 捕获指针事件，避免触控板/触屏手势触发滚动/缩放等默认行为导致的 pointercancel
+  const el = event.currentTarget as HTMLElement;
+  if (el && typeof el.setPointerCapture === "function") {
+    try {
+      el.setPointerCapture(event.pointerId);
+    } catch (e) {
+      // 兼容不支持 setPointerCapture 的旧版或特定定制版 Chromium
+    }
+  }
+
   robotDragPointerId = event.pointerId;
   robotDragStartClientX = event.clientX;
   robotDragStartClientY = event.clientY;
   robotDragStartX = robotX.value;
   robotDragStartY = robotY.value;
   robotDragWasEffective = false;
-  robotDragTarget = event.currentTarget as HTMLElement;
-  robotDragTarget.setPointerCapture?.(event.pointerId);
   robotDragging.value = true;
   robotDragPreviousCursor = document.body.style.cursor;
   robotDragPreviousUserSelect = document.body.style.userSelect;
   document.body.style.cursor = "grabbing";
   document.body.style.userSelect = "none";
-  // Chromium 108 企业内核的 pointer capture 兼容性不稳定，拖动期间改由 window 接收全局事件。
-  window.addEventListener("pointermove", onRobotPointerMove);
-  window.addEventListener("pointerup", finishRobotPointerDrag);
-  window.addEventListener("pointercancel", finishRobotPointerDrag);
+  // Chromium 108 企业内核不依赖 pointer capture；捕获阶段先于编辑器等组件的 stopPropagation 接收拖动事件。
+  window.addEventListener("pointermove", onRobotPointerMove, true);
+  window.addEventListener("pointerup", finishRobotPointerDrag, true);
+  window.addEventListener("pointercancel", finishRobotPointerDrag, true);
+  window.addEventListener("mousemove", onRobotPointerMoveFallback, true);
+  window.addEventListener("mouseup", finishRobotMouseDragFallback, true);
 }
 
 function onRobotPointerMove(event: PointerEvent) {
-  if (event.pointerId !== robotDragPointerId) return;
+  if (!robotDragging.value) return;
   const deltaX = event.clientX - robotDragStartClientX;
   const deltaY = event.clientY - robotDragStartClientY;
   if (!robotDragWasEffective && Math.hypot(deltaX, deltaY) < ROBOT_DRAG_THRESHOLD) return;
@@ -656,7 +694,7 @@ function onRobotPointerMove(event: PointerEvent) {
 }
 
 function finishRobotDrag(pointerId?: number) {
-  if (robotDragPointerId === null || (pointerId !== undefined && pointerId !== robotDragPointerId)) return;
+  if (!robotDragging.value) return;
   const wasEffective = robotDragWasEffective;
   if (wasEffective) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
@@ -1348,6 +1386,7 @@ function closeRobotQuestion() {
 }
 
 function openRobotGames() {
+  if (!props.canPlayPetGames) return;
   robotProcessStatusOpen.value = false;
   robotQuestionOpen.value = true;
   robotGameOpen.value = true;
@@ -1355,6 +1394,7 @@ function openRobotGames() {
 }
 
 function toggleRobotGameView() {
+  if (!props.canPlayPetGames) return;
   if (robotGameOpen.value) robotGameOpen.value = false;
   else openRobotGames();
 }
@@ -1464,6 +1504,10 @@ function toggleRobotVisibility() {
     resumeNaturalRobotBehavior();
   }
 }
+
+watch(() => props.canPlayPetGames, (allowed) => {
+  if (!allowed) robotGameOpen.value = false;
+});
 
 watch(
   [
@@ -1933,6 +1977,7 @@ function submitJoinApp() {
       aria-describedby="figma-robot-instructions"
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       @pointerdown="onRobotPointerDown"
+      @dragstart.prevent
       @pointerenter="onRobotPointerEnter"
       @pointerleave="onRobotPointerLeave"
       @keydown="onRobotKeydown"
@@ -2046,6 +2091,7 @@ function submitJoinApp() {
             <PawPrint :size="13" aria-hidden="true" />
           </button>
           <button
+            v-if="props.canPlayPetGames"
             type="button"
             class="figma-robot-companion-game-toggle"
             :class="{ 'is-active': robotGameOpen }"
@@ -2108,7 +2154,7 @@ function submitJoinApp() {
           </button>
         </div>
       </section>
-      <template v-if="!robotGameOpen && !petSettingsOpen">
+      <template v-if="(!robotGameOpen || !props.canPlayPetGames) && !petSettingsOpen">
         <textarea
           ref="robotQuestionInput"
           v-model="robotQuestionDraft"
@@ -2152,7 +2198,7 @@ function submitJoinApp() {
           {{ sideQuestionProgress || "正在准备回答" }}
         </div>
       </template>
-      <div v-else-if="robotGameOpen" class="figma-robot-companion-game">
+      <div v-else-if="robotGameOpen && props.canPlayPetGames" class="figma-robot-companion-game">
         <PetMiniGames embedded />
       </div>
     </section>

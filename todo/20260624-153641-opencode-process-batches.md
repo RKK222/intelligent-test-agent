@@ -26,11 +26,11 @@
   - `docs/deployment/database.md`：新增表和字段必须同步 Flyway migration 说明。
   - `docs/deployment/backend.md`：现有生产部署只描述 Java 后端与固定 opencode 节点配置。
   - `docs/standards/security.md`：管理 API、socket 鉴权、日志脱敏和密钥管理必须遵守。
-  - `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`：当前 Run 启动、节点路由和 agent session 粘滞入口。
-  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/node/ExecutionNode.java`：当前执行节点领域模型。
-  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/agent/AgentSessionBinding.java`：当前平台 Session 到远端 agent session 的绑定模型。
-  - `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/JdbcExecutionNodeRepository.java`：当前执行节点持久化实现。
-  - `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/JdbcAgentSessionBindingRepository.java`：当前 agent 绑定持久化实现。
+  - `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationService.java`：当前 Run 启动、节点路由和 agent session 粘滞入口。
+  - `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/node/ExecutionNode.java`：当前执行节点领域模型。
+  - `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/agent/AgentSessionBinding.java`：当前平台 Session 到远端 agent session 的绑定模型。
+  - `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/JdbcExecutionNodeRepository.java`：当前执行节点持久化实现。
+  - `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/JdbcAgentSessionBindingRepository.java`：当前 agent 绑定持久化实现。
   - `frontend/apps/agent-web/src/components/settings/SettingsDialog.vue`：已有设置入口，可作为新增超管菜单的相邻 UI 参考。
   - `frontend/packages/backend-api/src/index.ts`：前端新增运行管理 API client 的唯一位置。
 - 当前实现：
@@ -66,11 +66,11 @@
 ### 2. 批次 1：后端拓扑与运行态数据模型
 
 - 修改文件：
-  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/node/*`
-  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/agent/*`
+  - `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/node/*`
+  - `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/agent/*`
   - `backend/test-agent-persistence/src/main/resources/db/migration/V14__create_opencode_process_management_tables.sql`
-  - `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/*`
-  - `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/JdbcRepositoryIntegrationTest.java`
+  - `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/*`
+  - `backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/JdbcRepositoryIntegrationTest.java`
   - `backend/test-agent-domain/README.md`
   - `backend/test-agent-persistence/README.md`
   - `docs/deployment/database.md`
@@ -91,8 +91,8 @@
 ### 3. 批次 2：后端调度服务骨架
 
 - 修改文件：
-  - `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/*`
-  - `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/process/*`
+  - `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/process/*`
+  - `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/process/*`
   - `backend/test-agent-opencode-runtime/README.md`
   - `docs/architecture/module-map.md`
 - 修改位置：
@@ -133,10 +133,10 @@
 ### 5. 批次 4：后端与管理进程 socket 通信
 
 - 修改文件：
-  - `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/socket/*`
-  - `backend/test-agent-app/src/main/java/com/icbc/testagent/app/config/*`
-  - `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/*`
-  - `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/*`
+  - `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/process/socket/*`
+  - `backend/test-agent-app/src/main/java/com/enterprise/testagent/app/config/*`
+  - `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/*`
+  - `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/*`
   - `opencode-manager/src/*`
   - `docs/standards/security.md`
   - `docs/deployment/backend.md`
@@ -153,12 +153,12 @@
 ### 6. 批次 5：opencode runtime 接入用户专属进程模型
 
 - 修改文件：
-  - `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`
-  - `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationService.java`
-  - `backend/test-agent-agent-runtime/src/main/java/com/icbc/testagent/agent/runtime/*`
-  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/node/*`
-  - `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
-  - `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationServiceTest.java`
+  - `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationService.java`
+  - `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationService.java`
+  - `backend/test-agent-agent-runtime/src/main/java/com/enterprise/testagent/agent/runtime/*`
+  - `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/node/*`
+  - `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/run/RunApplicationServiceTest.java`
+  - `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/runtime/OpencodeRuntimeApplicationServiceTest.java`
   - `docs/api/http-api.md`
   - `docs/deployment/backend.md`
 - 修改位置：
@@ -174,14 +174,14 @@
 ### 7. 批次 6：超级管理员运行管理页
 
 - 修改文件：
-  - `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/RuntimeManagementController.java`
-  - `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/RuntimeManagementDtos.java`
-  - `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/RuntimeManagementControllerTest.java`
-  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/opencodeprocess/OpencodeServerProcessFilter.java`
-  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/opencodeprocess/OpencodeProcessManagementRepository.java`
-  - `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/JdbcOpencodeProcessManagementRepository.java`
-  - `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/RuntimeManagementQueryService.java`
-  - `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/process/RuntimeManagementQueryServiceTest.java`
+  - `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/RuntimeManagementController.java`
+  - `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/RuntimeManagementDtos.java`
+  - `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/RuntimeManagementControllerTest.java`
+  - `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/opencodeprocess/OpencodeServerProcessFilter.java`
+  - `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/opencodeprocess/OpencodeProcessManagementRepository.java`
+  - `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/JdbcOpencodeProcessManagementRepository.java`
+  - `backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/process/RuntimeManagementQueryService.java`
+  - `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/process/RuntimeManagementQueryServiceTest.java`
   - `frontend/packages/shared-types/src/index.ts`
   - `frontend/packages/backend-api/src/index.ts`
   - `frontend/apps/agent-web/src/components/settings/SettingsMenu.vue`

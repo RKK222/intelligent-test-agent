@@ -22,9 +22,9 @@
 ### Task 1: 增加领域清理端口和 scheduler handler 红灯测试
 
 **Files:**
-- Create: `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/scheduler/ScheduledTaskRunRetentionRepository.java`
-- Create: `backend/test-agent-scheduler/src/main/java/com/icbc/testagent/scheduler/ScheduledTaskRunRetentionTaskHandler.java`
-- Create: `backend/test-agent-scheduler/src/test/java/com/icbc/testagent/scheduler/ScheduledTaskRunRetentionTaskHandlerTest.java`
+- Create: `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/scheduler/ScheduledTaskRunRetentionRepository.java`
+- Create: `backend/test-agent-scheduler/src/main/java/com/enterprise/testagent/scheduler/ScheduledTaskRunRetentionTaskHandler.java`
+- Create: `backend/test-agent-scheduler/src/test/java/com/enterprise/testagent/scheduler/ScheduledTaskRunRetentionTaskHandlerTest.java`
 
 **Interfaces:**
 - `ScheduledTaskRunRetentionRepository#deleteEndedBefore(Instant cutoff)` returns the number of deleted rows.
@@ -87,10 +87,10 @@ Run the same Maven command. Expected: the new handler test passes with zero fail
 ### Task 2: Add MyBatis XML persistence adapter and integration test
 
 **Files:**
-- Create: `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/ScheduledTaskRunRetentionMapper.java`
+- Create: `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/ScheduledTaskRunRetentionMapper.java`
 - Create: `backend/test-agent-persistence/src/main/resources/mybatis/ScheduledTaskRunRetentionMapper.xml`
-- Create: `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/MyBatisScheduledTaskRunRetentionRepository.java`
-- Create: `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisScheduledTaskRunRetentionRepositoryIntegrationTest.java`
+- Create: `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/MyBatisScheduledTaskRunRetentionRepository.java`
+- Create: `backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/MyBatisScheduledTaskRunRetentionRepositoryIntegrationTest.java`
 
 **Interfaces:**
 - Mapper method: `int deleteEndedBefore(@Param("cutoff") Instant cutoff)`.
@@ -143,8 +143,8 @@ Run the same Maven command. Expected: the integration test passes and the XML ma
 **Files:**
 - Create: `backend/test-agent-persistence/src/main/resources/db/migration/V20260715000000__add_scheduler_run_retention_index.sql`
 - Modify: `backend/test-agent-scheduler/README.md`
-- Modify: `backend/test-agent-scheduler/src/main/java/com/icbc/testagent/scheduler/PACKAGE.md`
-- Modify: `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/PACKAGE.md`
+- Modify: `backend/test-agent-scheduler/src/main/java/com/enterprise/testagent/scheduler/PACKAGE.md`
+- Modify: `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/PACKAGE.md`
 - Modify: `backend/test-agent-persistence/README.md` if its module-level task list differs from PACKAGE.md
 - Modify: `docs/deployment/database.md`
 - Modify: `docs/deployment/backend.md`
@@ -218,17 +218,17 @@ Confirm no `.env.local`, generated SDK, unrelated worktree changes, API/event fi
 Stage the exact changed files and commit with a Chinese message:
 
 ```bash
-git add backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/scheduler/ScheduledTaskRunRetentionRepository.java \
-  backend/test-agent-scheduler/src/main/java/com/icbc/testagent/scheduler/ScheduledTaskRunRetentionTaskHandler.java \
-  backend/test-agent-scheduler/src/test/java/com/icbc/testagent/scheduler/ScheduledTaskRunRetentionTaskHandlerTest.java \
-  backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/ScheduledTaskRunRetentionMapper.java \
+git add backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/scheduler/ScheduledTaskRunRetentionRepository.java \
+  backend/test-agent-scheduler/src/main/java/com/enterprise/testagent/scheduler/ScheduledTaskRunRetentionTaskHandler.java \
+  backend/test-agent-scheduler/src/test/java/com/enterprise/testagent/scheduler/ScheduledTaskRunRetentionTaskHandlerTest.java \
+  backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/ScheduledTaskRunRetentionMapper.java \
   backend/test-agent-persistence/src/main/resources/mybatis/ScheduledTaskRunRetentionMapper.xml \
-  backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/MyBatisScheduledTaskRunRetentionRepository.java \
-  backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisScheduledTaskRunRetentionRepositoryIntegrationTest.java \
+  backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/MyBatisScheduledTaskRunRetentionRepository.java \
+  backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/MyBatisScheduledTaskRunRetentionRepositoryIntegrationTest.java \
   backend/test-agent-persistence/src/main/resources/db/migration/V20260715000000__add_scheduler_run_retention_index.sql \
   backend/test-agent-scheduler/README.md \
-  backend/test-agent-scheduler/src/main/java/com/icbc/testagent/scheduler/PACKAGE.md \
-  backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/PACKAGE.md \
+  backend/test-agent-scheduler/src/main/java/com/enterprise/testagent/scheduler/PACKAGE.md \
+  backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/PACKAGE.md \
   backend/test-agent-persistence/README.md \
   docs/deployment/database.md \
   docs/deployment/backend.md \

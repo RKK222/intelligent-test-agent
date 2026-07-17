@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createPinia } from "pinia";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
+import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { applicationWorkspaceRestrictionsFixture as fixture } from "../../../tests/fixtures/application-workspace-restrictions";
 
 const apiClientMock = vi.hoisted(() => ({
@@ -14,6 +15,10 @@ const apiClientMock = vi.hoisted(() => ({
   resolveWorkspaceGitConflict: vi.fn(),
   abortWorkspaceGitConflict: vi.fn(),
   resolveAllWorkspaceGitConflicts: vi.fn(),
+  getPublicAgentGitConflict: vi.fn(),
+  resolvePublicAgentGitConflict: vi.fn(),
+  resolveAllPublicAgentGitConflicts: vi.fn(),
+  abortPublicAgentGitConflict: vi.fn(),
   getPublicAgentDiff: vi.fn(),
   getWorkspaceAgentDiff: vi.fn(),
   stagePublicAgentFiles: vi.fn(),
@@ -116,11 +121,22 @@ describe("GitChangesPanel", () => {
     apiClientMock.resolveWorkspaceGitConflict.mockResolvedValue(undefined);
     apiClientMock.abortWorkspaceGitConflict.mockResolvedValue(undefined);
     apiClientMock.resolveAllWorkspaceGitConflicts.mockResolvedValue(undefined);
+    apiClientMock.getPublicAgentGitConflict.mockResolvedValue({
+      path: "opencode/agents/public-review.md",
+      rawStatus: "UU",
+      baseContent: "base",
+      currentContent: "local",
+      incomingContent: "remote",
+      resultContent: ""
+    });
+    apiClientMock.resolvePublicAgentGitConflict.mockResolvedValue(undefined);
+    apiClientMock.resolveAllPublicAgentGitConflicts.mockResolvedValue(undefined);
+    apiClientMock.abortPublicAgentGitConflict.mockResolvedValue(undefined);
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
-    apiClientMock.commitPublicAgentConfig.mockResolvedValue({ status: "COMMITTED" });
-    apiClientMock.commitWorkspaceAgentConfig.mockResolvedValue({ status: "COMMITTED" });
-    apiClientMock.publishPublicAgentConfig.mockResolvedValue({ status: "PUBLISHED" });
-    apiClientMock.publishWorkspaceAgentConfig.mockResolvedValue({ status: "PUBLISHED" });
+    apiClientMock.commitPublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    apiClientMock.commitWorkspaceAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    apiClientMock.publishPublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    apiClientMock.publishWorkspaceAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
   });
 
   afterEach(() => {
@@ -139,6 +155,14 @@ describe("GitChangesPanel", () => {
           patch: "@@ -1 +1 @@\n-旧\n+新",
           additions: 1,
           deletions: 1
+        },
+        {
+          path: ".opencode/skills/leaked-from-personal-worktree/SKILL.md",
+          status: "untracked",
+          staged: false,
+          patch: "+wrong-scope",
+          additions: 1,
+          deletions: 0
         }
       ]
     });
@@ -180,11 +204,206 @@ describe("GitChangesPanel", () => {
 
     expect(view.queryByRole("button", { name: "加载测试数据" })).toBeNull();
     expect(await view.findByText("登录测试.md")).toBeTruthy();
+    expect(view.queryByText("leaked-from-personal-worktree", { exact: false })).toBeNull();
+    expect(view.queryByText("payment-test.md", { exact: false })).toBeNull();
+    await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
     expect(await view.findByText("payment-test.md", { exact: false })).toBeTruthy();
     expect(await view.findByText("SKILL.md", { exact: false })).toBeTruthy();
+    expect(view.queryByText("登录测试.md")).toBeNull();
     expect(view.queryByText("F-COSS/workspace/02-设计/Test Material.md", { exact: false })).toBeNull();
     expect(view.queryByText("[公共]", { exact: false })).toBeNull();
     expect(view.queryByText("opencode/agents/public_agent_test.json", { exact: false })).toBeNull();
+  });
+
+  it("switches among workspace, application Agent/Skill, and public Agent scopes without mixing files", async () => {
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [
+        { path: fixture.files.docs, status: "modified", staged: false, patch: "" },
+        { path: fixture.files.spec, status: "added", staged: false, patch: "" }
+      ]
+    });
+    apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({
+      files: [{ path: fixture.files.applicationSkill, status: "M", staged: false, patch: "" }]
+    });
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [{ path: fixture.files.publicAgent, status: "M", staged: false, patch: "" }]
+    });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("publish-guide.md", { exact: false })).toBeTruthy();
+    await waitFor(() => {
+      const events = view.emitted("changes-refreshed") as unknown as Array<[{ totalCount?: number }]>;
+      expect(events.at(-1)?.[0]).toMatchObject({ totalCount: 4 });
+    });
+    expect(view.queryByText("SKILL.md", { exact: false })).toBeNull();
+    expect(view.queryByText("public-review.md", { exact: false })).toBeNull();
+
+    await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
+    expect(await view.findByText("SKILL.md", { exact: false })).toBeTruthy();
+    expect(view.queryByText("publish-guide.md", { exact: false })).toBeNull();
+    expect(view.queryByText("public-review.md", { exact: false })).toBeNull();
+
+    await fireEvent.click(view.getByRole("tab", { name: /^公共Agent/ }));
+    expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
+    expect(view.queryByText("publish-guide.md", { exact: false })).toBeNull();
+    expect(view.queryByText("SKILL.md", { exact: false })).toBeNull();
+  });
+
+  it("commits only the selected Agent scope when workspace files are also staged", async () => {
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [{ path: fixture.files.docs, status: "modified", staged: true, patch: "" }]
+    });
+    apiClientMock.getWorkspaceAgentDiff
+      .mockResolvedValueOnce({
+        files: [{ path: fixture.files.applicationSkill, status: "M", staged: true, patch: "" }]
+      })
+      .mockResolvedValue({ files: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        agentConfigWorkspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        personalWorkspaceBranch: fixture.application.personalBranch,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await view.findByText("publish-guide.md", { exact: false });
+    await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 只提交应用配置");
+    await fireEvent.click(view.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
+      fixture.application.personalWorkspaceId,
+      expect.objectContaining({
+        commitMessage: "agent: 只提交应用配置",
+        files: [`.opencode/${fixture.files.applicationSkill}`]
+      })
+    ));
+    expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
+    expect(apiClientMock.getWorkspaceAgentDiff).toHaveBeenCalledWith(fixture.application.personalRuntimeWorkspaceId);
+  });
+
+  it("shows public Agent changes and uses the shared conflict interaction", async () => {
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [
+        {
+          path: "opencode/agents/public-review.md",
+          status: "modified",
+          rawStatus: " M",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-old\n+new"
+        },
+        {
+          path: "opencode/agents/public-conflict.md",
+          status: "conflict",
+          rawStatus: "UU",
+          staged: false,
+          patch: ""
+        }
+      ]
+    });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
+    expect((await view.findAllByText("[公共]", { exact: false })).length).toBeGreaterThan(0);
+    expect(await view.findByText("检测到 1 个公共 Agent 冲突")).toBeTruthy();
+    await fireEvent.click(view.getByText("public-conflict.md", { exact: false }));
+    await waitFor(() => expect(apiClientMock.getPublicAgentGitConflict).toHaveBeenCalledWith(
+      "opencode/agents/public-conflict.md",
+      "agw_public",
+      "linux-1"
+    ));
+    expect(await view.findByText("合并编辑器")).toBeTruthy();
+  });
+
+  it("commits and publishes staged public Agent files through the shared progress dialog", async () => {
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [{
+        path: "opencode/agents/public-review.md",
+        status: "modified",
+        rawStatus: "M ",
+        staged: true,
+        patch: "@@ -1 +1 @@\n-old\n+new"
+      }]
+    });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "更新公共 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.commitPublicAgentConfig).toHaveBeenCalledWith(expect.objectContaining({
+      message: "更新公共 Agent",
+      worktreeId: "agw_public"
+    })));
+    await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledWith(
+      "agw_public",
+      expect.stringMatching(/^aco_/)
+    ));
+    expect(await view.findByText("提交并推送进度")).toBeTruthy();
   });
 
   it("loads application workspace changes from platform git diff instead of opencode vcs diff", async () => {
@@ -514,17 +733,20 @@ describe("GitChangesPanel", () => {
     });
 
     expect(await view.findByText("design.md")).toBeTruthy();
+    expect(view.getByText("仅本地")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 保存本地设计");
-    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(view.getByRole("button", { name: "提交并推送" }).getAttribute("title")).toBe("当前暂存内容仅允许本地提交");
+    await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
     await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
       files: ["spec/payment/design.md"]
     })));
     expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
-    expect(await view.findByText("1 个 spec 文件已提交到个人 worktree，未推送。")).toBeTruthy();
+    expect(await view.findByText("提交成功！")).toBeTruthy();
   });
 
-  it("lets a super administrator publish spec with the unrestricted workspace policy", async () => {
+  it("keeps spec local for a super administrator too", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
         files: [
@@ -535,25 +757,26 @@ describe("GitChangesPanel", () => {
 
     const view = render(GitChangesPanel, {
       props: {
-        workspaceId: fixture.application.featureWorkspaceId,
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
         personalWorkspaceId: fixture.application.personalWorkspaceId,
         apiBaseUrl: "http://api",
         canWrite: true,
         canManageAgentConfig: true,
-        canManagePublicConfig: true,
-        canPublishSpec: true
+        canManagePublicConfig: true
       },
       global: { plugins: [createPinia()] }
     });
 
     expect(await view.findByText("design.md")).toBeTruthy();
-    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 超管发布设计");
-    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 超管本地提交设计");
+    expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
-    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith(
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
       fixture.application.personalWorkspaceId,
       expect.objectContaining({ files: [fixture.files.spec] })
     ));
+    expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
   });
 
   it("shows application agent changes as readonly to a regular member", async () => {
@@ -563,7 +786,7 @@ describe("GitChangesPanel", () => {
 
     const view = render(GitChangesPanel, {
       props: {
-        workspaceId: fixture.application.featureWorkspaceId,
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
         personalWorkspaceId: fixture.application.personalWorkspaceId,
         apiBaseUrl: "http://api",
         canWrite: true,
@@ -579,7 +802,7 @@ describe("GitChangesPanel", () => {
     expect(apiClientMock.stageWorkspaceAgentFiles).not.toHaveBeenCalled();
   });
 
-  it("lets an application administrator commit application agent config without a personal worktree", async () => {
+  it("commits application Agent config in the current version personal worktree", async () => {
     apiClientMock.getWorkspaceAgentDiff
       .mockResolvedValueOnce({
         files: [{ path: fixture.files.applicationSkill, status: "M", staged: true, patch: "" }]
@@ -588,10 +811,12 @@ describe("GitChangesPanel", () => {
 
     const view = render(GitChangesPanel, {
       props: {
-        workspaceId: fixture.application.personalWorkspaceId,
-        agentConfigWorkspaceId: fixture.application.featureWorkspaceId,
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        agentConfigWorkspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        personalWorkspaceBranch: fixture.application.personalBranch,
         apiBaseUrl: "http://api",
-        canWrite: false,
+        canWrite: true,
         canManageAgentConfig: true,
         canManagePublicConfig: false
       },
@@ -602,11 +827,83 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 更新支付案例技能");
     await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
-    await waitFor(() => expect(apiClientMock.commitWorkspaceAgentConfig).toHaveBeenCalledWith(
-      fixture.application.featureWorkspaceId,
-      expect.objectContaining({ message: "agent: 更新支付案例技能" })
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
+      fixture.application.personalWorkspaceId,
+      expect.objectContaining({
+        commitMessage: "agent: 更新支付案例技能",
+        files: [`.opencode/${fixture.files.applicationSkill}`]
+      })
     ));
-    expect(apiClientMock.commitPersonalWorkspace).not.toHaveBeenCalled();
+    expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
+    expect(view.getByText(`个人 worktree · ${fixture.application.personalBranch}`)).toBeTruthy();
+  });
+
+  it("publishes only the selected application Agent paths from personal HEAD", async () => {
+    apiClientMock.getWorkspaceAgentDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: fixture.files.applicationAgent, status: "M", staged: true, patch: "" },
+          { path: fixture.files.applicationSkill, status: "M", staged: false, patch: "" }
+        ]
+      })
+      .mockResolvedValue({ files: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        personalWorkspaceBranch: fixture.application.personalBranch,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await view.findByText("payment-test.md", { exact: false });
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 发布支付 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    const expectedFiles = [`.opencode/${fixture.files.applicationAgent}`];
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
+      fixture.application.personalWorkspaceId,
+      expect.objectContaining({ files: expectedFiles })
+    ));
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith(
+      fixture.application.personalWorkspaceId,
+      expect.objectContaining({ files: expectedFiles })
+    );
+    expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
+    expect(apiClientMock.publishWorkspaceAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it("opens application Agent conflicts through the shared personal-worktree merge editor", async () => {
+    apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({
+      files: [{ path: fixture.files.applicationAgent, status: "UU", staged: false, patch: "" }]
+    });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
+    const conflictRow = await view.findByLabelText(fixture.files.applicationAgent);
+    await fireEvent.click(conflictRow);
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceGitConflict).toHaveBeenCalledWith(
+      fixture.application.personalRuntimeWorkspaceId,
+      `.opencode/${fixture.files.applicationAgent}`
+    ));
+    expect(await view.findByText("合并编辑器")).toBeTruthy();
   });
 
   it("keeps feature workspace git actions readonly when the user has no write permission", async () => {

@@ -29,6 +29,7 @@ import {
   X,
   Copy,
   Check,
+  Download,
 } from 'lucide-vue-next'
 import type {
   AgentInfo,
@@ -50,7 +51,7 @@ import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
 import { MarkdownView, OpencodeTimeline, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
-import { Spinner } from '@test-agent/ui-kit'
+import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
 import type { WorkspaceRequirementReference } from './workbench-utils'
@@ -385,12 +386,12 @@ function copyText(text: string, id: string) {
 }
 
 function copyTextWithClipboard(text: string, onSuccess: () => void) {
-  if (!navigator.clipboard || !window.isSecureContext) {
-    console.warn('Clipboard API is unavailable in this browser context')
-    return
-  }
-  navigator.clipboard.writeText(text).then(onSuccess).catch((err) => {
-    console.error('Failed to copy: ', err)
+  void copyTextToClipboard(text).then((copied) => {
+    if (copied) {
+      onSuccess()
+      return
+    }
+    console.warn('Clipboard copy is unavailable in this browser context')
   })
 }
 
@@ -2845,6 +2846,42 @@ function rawOutputBody(entry: RawOutputEntry) {
   return entry.body || '（空报文体）'
 }
 
+// 生成原始输出导出文件名用的本地时间戳（普通 Vue 组件可用 new Date，Workflow 脚本限制不适用）。
+function formatRawOutputStamp() {
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  const now = new Date()
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+}
+
+// 下载当前过滤后的原始报文为文本文件。导出的是页面缓存中已脱敏、已截断后的可见副本，
+// 不绕过 prepareRawOutputBody 的安全边界；仅导出与浮层计数一致的被过滤条目。
+function downloadRawOutput() {
+  const entries = filteredRawOutputEntries.value
+  if (entries.length === 0) return
+  const lines: string[] = [`# 原始输出（共 ${entries.length} 条）`, '']
+  entries.forEach((entry, index) => {
+    const detail = [
+      `时间: ${rawOutputTime(entry.occurredAt)}`,
+      entry.status ? `状态: ${entry.status}` : '',
+      entry.contentType ? `Content-Type: ${entry.contentType}` : '',
+      entry.traceId ? `trace: ${entry.traceId}` : '',
+      entry.runId ? `run: ${entry.runId}` : '',
+    ].filter(Boolean)
+    lines.push(`===== [${rawOutputKindLabel(entry.kind)}] ${entry.title} =====`)
+    lines.push(detail.join('\n'))
+    lines.push('')
+    lines.push(rawOutputBody(entry))
+    if (index < entries.length - 1) lines.push('')
+  })
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `raw-output-${formatRawOutputStamp()}.txt`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function startRawOutputDrag(event: PointerEvent) {
   if ((event.target as HTMLElement | null)?.closest('button')) return
   event.preventDefault()
@@ -5146,6 +5183,17 @@ function onCompositionEnd() {
           <button type="button" class="figma-chat-raw-action" @click="emit('clear-raw-output')">清空</button>
           <button
             type="button"
+            class="figma-chat-raw-action"
+            :disabled="filteredRawOutputEntries.length === 0"
+            aria-label="下载原始输出"
+            title="下载当前过滤结果为文本文件"
+            @click="downloadRawOutput"
+          >
+            <Download :size="14" />
+            <span>下载</span>
+          </button>
+          <button
+            type="button"
             class="figma-chat-raw-close"
             aria-label="关闭原始输出"
             @click="closeRawOutput"
@@ -5408,6 +5456,7 @@ function onCompositionEnd() {
 }
 .figma-chat-raw-action {
   padding: 0 9px;
+  gap: 4px;
 }
 .figma-chat-raw-close {
   width: 26px;
@@ -5417,6 +5466,13 @@ function onCompositionEnd() {
 .figma-chat-raw-close:hover {
   color: var(--ta-text);
   background: var(--ta-hover);
+}
+.figma-chat-raw-action:disabled,
+.figma-chat-raw-action:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.5;
+  color: var(--ta-muted);
+  background: var(--ta-surface);
 }
 .figma-chat-raw-search {
   flex-shrink: 0;

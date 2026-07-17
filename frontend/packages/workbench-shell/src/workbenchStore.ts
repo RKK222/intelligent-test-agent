@@ -9,9 +9,28 @@ export type EditorTab = {
   content: string;
   savedContent: string;
   readonly?: boolean;
+  loadState?: "loading" | "loaded" | "error";
+  loadError?: string;
+  /** 已取得可用文件快照（包含合法空文件），用于区分首次加载与后台刷新。 */
+  hasLoadedSnapshot?: boolean;
+  /** 用户内容修订代次；保存或后台同步不递增，用于识别读取期间发生过的编辑。 */
+  contentRevision?: number;
   /** 实时追踪打开的 agent 改动预览 tab：只读、内容随 diff 事件刷新、不可保存。 */
   livePreview?: boolean;
 };
+
+/** 兼容旧 tab，并优先使用不会被瞬时 loading 覆盖的快照身份。 */
+function editorTabHasLoadedSnapshot(
+  tab: Pick<EditorTab, "loadState" | "hasLoadedSnapshot"> | undefined
+): boolean {
+  if (!tab) {
+    return false;
+  }
+  if (tab.hasLoadedSnapshot !== undefined) {
+    return tab.hasLoadedSnapshot;
+  }
+  return tab.loadState === undefined || tab.loadState === "loaded";
+}
 
 // 预定义测试数据供 UI 演示和 diff 效果展示，路径模拟真实应用工作区，而不是平台自身源码。
 export const mockVcsDiffFiles: RunDiffFile[] = [
@@ -121,7 +140,6 @@ export const useWorkbenchStore = defineStore("workbench", () => {
   const activePath = ref<string | undefined>(undefined);
   const selectedDiffPath = ref<string | undefined>(undefined);
   const publicWorktree = ref<AgentConfigWorktree | null>(null);
-  const workspaceWorktree = ref<AgentConfigWorktree | null>(null);
   const publicConfigLinuxServerId = ref<string | null>(null);
   const useMockTestData = ref(false);
 
@@ -149,7 +167,16 @@ export const useWorkbenchStore = defineStore("workbench", () => {
   }
 
   function updateTabContent(path: string, content: string) {
-    tabs.value = tabs.value.map((item) => (item.path === path ? { ...item, content } : item));
+    tabs.value = tabs.value.map((item) => (
+      item.path === path
+        ? { ...item, content, contentRevision: (item.contentRevision ?? 0) + 1 }
+        : item
+    ));
+  }
+
+  /** 后台响应只更新它所属的 tab，不能因此抢回当前编辑器焦点。 */
+  function updateTab(path: string, patch: Partial<Omit<EditorTab, "id" | "path">>) {
+    tabs.value = tabs.value.map((item) => (item.path === path ? { ...item, ...patch } : item));
   }
 
   /**
@@ -187,7 +214,6 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     activePath.value = undefined;
     selectedDiffPath.value = undefined;
     publicWorktree.value = null;
-    workspaceWorktree.value = null;
     publicConfigLinuxServerId.value = null;
   }
 
@@ -196,13 +222,14 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     activePath,
     selectedDiffPath,
     publicWorktree,
-    workspaceWorktree,
     publicConfigLinuxServerId,
     useMockTestData,
     setActivePath,
     setSelectedDiffPath,
     openTab,
     closeTab,
+    tabHasLoadedSnapshot: editorTabHasLoadedSnapshot,
+    updateTab,
     updateTabContent,
     renameTab,
     markTabSaved,

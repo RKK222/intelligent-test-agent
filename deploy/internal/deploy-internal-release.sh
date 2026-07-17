@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ARCHIVE="/data/0709/internal.zip"
+ARCHIVE="/data/0709/test-agent-internal-release.zip"
 EXTRACT_DIR="/data/0709/test-agent-internal-release"
 EXTRACT_DIR_EXPLICIT=0
 INSTALL_ROOT="/data/testagent"
@@ -31,13 +31,13 @@ Usage: deploy/internal/deploy-internal-release.sh [options]
 
 Deploy an enterprise internal release zip from a backend server. The default
 matches the current single-backend enterprise deployment:
-  - release zip: /data/0709/internal.zip
+  - release zip: /data/0709/test-agent-internal-release.zip
   - backend/worker server: local 122.233.30.114
   - frontend server: 122.233.30.2
   - install root: /data/testagent
 
 Options:
-  --archive <path>              Release zip path. Default: /data/0709/internal.zip.
+  --archive <path>              Release zip path. Default: /data/0709/test-agent-internal-release.zip.
   --extract-dir <path>          Temporary unzip directory. Default: /data/0709/test-agent-internal-release.
   --install-root <path>         Backend install root. Default: /data/testagent.
   --backend-host <host>         Local backend advertised host. Default: 122.233.30.114.

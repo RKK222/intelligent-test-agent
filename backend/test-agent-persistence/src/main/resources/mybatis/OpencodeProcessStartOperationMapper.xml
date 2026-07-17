@@ -2,8 +2,8 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.OpencodeProcessStartOperationMapper">
-    <resultMap id="OpencodeProcessStartOperationRowMap" type="com.icbc.testagent.persistence.mybatis.OpencodeProcessStartOperationRow">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.OpencodeProcessStartOperationMapper">
+    <resultMap id="OpencodeProcessStartOperationRowMap" type="com.enterprise.testagent.persistence.mybatis.OpencodeProcessStartOperationRow">
         <constructor>
             <arg column="operation_id" javaType="java.lang.String"/>
             <arg column="requested_by_user_id" javaType="java.lang.String"/>

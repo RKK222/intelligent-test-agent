@@ -24,21 +24,21 @@
 ## 文件结构
 
 **新建（后端）：**
-- `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/maintenance/IdentityManagedTable.java` — 白名单枚举，持有真实表名（domain 概念，persistence 与 system-management 均可见）。
-- `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/maintenance/IdentityStatus.java` — 域记录，端口返回类型（含 currentValue/maxId/conflict）。
-- `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/maintenance/DatabaseIdentityMaintenancePort.java` — 端口接口（queryIdentityStatus / restartIdentity）。
-- `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/DatabaseIdentityMapper.java` — MyBatis mapper 接口。
-- `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/MyBatisDatabaseIdentityMaintenanceRepository.java` — 端口实现，包装 mapper 并把 Map 行映射为 IdentityStatus。
+- `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/maintenance/IdentityManagedTable.java` — 白名单枚举，持有真实表名（domain 概念，persistence 与 system-management 均可见）。
+- `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/maintenance/IdentityStatus.java` — 域记录，端口返回类型（含 currentValue/maxId/conflict）。
+- `backend/test-agent-domain/src/main/java/com/enterprise/testagent/domain/maintenance/DatabaseIdentityMaintenancePort.java` — 端口接口（queryIdentityStatus / restartIdentity）。
+- `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/DatabaseIdentityMapper.java` — MyBatis mapper 接口。
+- `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/MyBatisDatabaseIdentityMaintenanceRepository.java` — 端口实现，包装 mapper 并把 Map 行映射为 IdentityStatus。
 - `backend/test-agent-persistence/src/main/resources/mybatis/DatabaseIdentityMapper.xml` — SQL。
-- `backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityResponses.java` — 对外 DTO（`IdentityStatusDto` + Command 记录）。
-- `backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityMaintenanceService.java` — 应用服务，依赖 domain 端口。
-- `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/DatabaseIdentityController.java` — HTTP 入口。
-- `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/DatabaseIdentityDtos.java` — 请求 DTO。
+- `backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityResponses.java` — 对外 DTO（`IdentityStatusDto` + Command 记录）。
+- `backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityMaintenanceService.java` — 应用服务，依赖 domain 端口。
+- `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityController.java` — HTTP 入口。
+- `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityDtos.java` — 请求 DTO。
 
 **新建（测试）：**
-- `backend/test-agent-system-management/src/test/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityMaintenanceServiceTest.java`
-- `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/DatabaseIdentityControllerTest.java`
-- `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisDatabaseIdentityMapperIntegrationTest.java`
+- `backend/test-agent-system-management/src/test/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityMaintenanceServiceTest.java`
+- `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityControllerTest.java`
+- `backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/MyBatisDatabaseIdentityMapperIntegrationTest.java`
 
 **修改（前端）：**
 - `frontend/packages/shared-types/src/index.ts` — 新增 `IdentityStatus` 类型。
@@ -57,12 +57,12 @@
 ### Task 1: 白名单枚举 IdentityManagedTable
 
 **Files:**
-- Create: `backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/maintenance/IdentityManagedTable.java`
+- Create: `backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/maintenance/IdentityManagedTable.java`
 
 - [ ] **Step 1: 创建枚举**
 
 ```java
-package com.icbc.testagent.system.management.maintenance;
+package com.enterprise.testagent.system.management.maintenance;
 
 /**
  * 受运维管理的 identity 主键表白名单。
@@ -111,7 +111,7 @@ Expected: BUILD SUCCESS
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/maintenance/IdentityManagedTable.java
+git add backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/maintenance/IdentityManagedTable.java
 git commit -m "新增 identity 运维白名单枚举 IdentityManagedTable"
 ```
 
@@ -120,14 +120,14 @@ git commit -m "新增 identity 运维白名单枚举 IdentityManagedTable"
 ### Task 2: 响应 DTO DatabaseIdentityResponses
 
 **Files:**
-- Create: `backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityResponses.java`
+- Create: `backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityResponses.java`
 
 - [ ] **Step 1: 创建 DTO 与 Command 记录**
 
 参考 `UserManagementResponses` 的 record 风格。
 
 ```java
-package com.icbc.testagent.system.management.maintenance;
+package com.enterprise.testagent.system.management.maintenance;
 
 import java.time.Instant;
 
@@ -172,7 +172,7 @@ Expected: BUILD SUCCESS
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityResponses.java
+git add backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityResponses.java
 git commit -m "新增 identity 运维响应 DTO 与命令记录"
 ```
 
@@ -181,14 +181,14 @@ git commit -m "新增 identity 运维响应 DTO 与命令记录"
 ### Task 3: MyBatis Mapper 接口
 
 **Files:**
-- Create: `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/DatabaseIdentityMapper.java`
+- Create: `backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/DatabaseIdentityMapper.java`
 
 - [ ] **Step 1: 创建 mapper 接口**
 
 参考 `CommonParameterMapper` 的 `@Mapper` + `@Param` 风格。
 
 ```java
-package com.icbc.testagent.persistence.mybatis;
+package com.enterprise.testagent.persistence.mybatis;
 
 import java.util.Map;
 import org.apache.ibatis.annotations.Mapper;
@@ -224,7 +224,7 @@ Expected: BUILD SUCCESS
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/mybatis/DatabaseIdentityMapper.java
+git add backend/test-agent-persistence/src/main/java/com/enterprise/testagent/persistence/mybatis/DatabaseIdentityMapper.java
 git commit -m "新增 DatabaseIdentityMapper 接口"
 ```
 
@@ -247,7 +247,7 @@ git commit -m "新增 DatabaseIdentityMapper 接口"
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.icbc.testagent.persistence.mybatis.DatabaseIdentityMapper">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.DatabaseIdentityMapper">
 
     <!--
         查询一张表的 identity 序列当前值与 max(id)。
@@ -292,20 +292,20 @@ git commit -m "新增 DatabaseIdentityMapper XML SQL"
 ### Task 5: 应用服务 DatabaseIdentityMaintenanceService
 
 **Files:**
-- Create: `backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityMaintenanceService.java`
+- Create: `backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityMaintenanceService.java`
 
 **职责：** 白名单校验 → 调 mapper 查询/对齐/重启 → 计算 conflict → 审计日志。冲突判定：`currentValue != null && maxId != null && currentValue < maxId`（is_called=t 正常态下，nextval=currentValue+1，安全当 currentValue>=maxId）。
 
 - [ ] **Step 1: 创建服务**
 
 ```java
-package com.icbc.testagent.system.management.maintenance;
+package com.enterprise.testagent.system.management.maintenance;
 
-import com.icbc.testagent.common.error.ErrorCode;
-import com.icbc.testagent.common.error.PlatformException;
-import com.icbc.testagent.persistence.mybatis.DatabaseIdentityMapper;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityResponses.IdentityStatusDto;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityResponses.RestartIdentityCommand;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.persistence.mybatis.DatabaseIdentityMapper;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityResponses.IdentityStatusDto;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityResponses.RestartIdentityCommand;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -422,7 +422,7 @@ Expected: BUILD SUCCESS
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/test-agent-system-management/src/main/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityMaintenanceService.java
+git add backend/test-agent-system-management/src/main/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityMaintenanceService.java
 git commit -m "新增 DatabaseIdentityMaintenanceService 应用服务"
 ```
 
@@ -431,14 +431,14 @@ git commit -m "新增 DatabaseIdentityMaintenanceService 应用服务"
 ### Task 6: 服务层单元测试
 
 **Files:**
-- Create: `backend/test-agent-system-management/src/test/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityMaintenanceServiceTest.java`
+- Create: `backend/test-agent-system-management/src/test/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityMaintenanceServiceTest.java`
 
 参考 `UserManagementApplicationServiceTest` 的 Mockito + AssertJ 风格。
 
 - [ ] **Step 1: 写失败测试**
 
 ```java
-package com.icbc.testagent.system.management.maintenance;
+package com.enterprise.testagent.system.management.maintenance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -448,11 +448,11 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.icbc.testagent.common.error.ErrorCode;
-import com.icbc.testagent.common.error.PlatformException;
-import com.icbc.testagent.persistence.mybatis.DatabaseIdentityMapper;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityResponses.IdentityStatusDto;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityResponses.RestartIdentityCommand;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.persistence.mybatis.DatabaseIdentityMapper;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityResponses.IdentityStatusDto;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityResponses.RestartIdentityCommand;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -575,7 +575,7 @@ Expected: Tests run: 8, Failures: 0, Errors: 0
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/test-agent-system-management/src/test/java/com/icbc/testagent/system/management/maintenance/DatabaseIdentityMaintenanceServiceTest.java
+git add backend/test-agent-system-management/src/test/java/com/enterprise/testagent/system/management/maintenance/DatabaseIdentityMaintenanceServiceTest.java
 git commit -m "新增 DatabaseIdentityMaintenanceService 单元测试"
 ```
 
@@ -584,15 +584,15 @@ git commit -m "新增 DatabaseIdentityMaintenanceService 单元测试"
 ### Task 7: Controller 与请求 DTO
 
 **Files:**
-- Create: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/DatabaseIdentityDtos.java`
-- Create: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/DatabaseIdentityController.java`
+- Create: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityDtos.java`
+- Create: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityController.java`
 
 参考 `UserManagementController` + `UserManagementDtos` 风格，复用 `requireSuperAdmin`、`AuthWebSupport`、`RuntimeApiSupport`。
 
 - [ ] **Step 1: 创建请求 DTO**
 
 ```java
-package com.icbc.testagent.api.web.platform;
+package com.enterprise.testagent.api.web.platform;
 
 /**
  * identity 运维 HTTP 请求 DTO，与 UserManagementDtos 同风格。
@@ -615,16 +615,16 @@ public final class DatabaseIdentityDtos {
 - [ ] **Step 2: 创建 Controller**
 
 ```java
-package com.icbc.testagent.api.web.platform;
+package com.enterprise.testagent.api.web.platform;
 
-import com.icbc.testagent.api.web.common.AuthWebSupport;
-import com.icbc.testagent.api.web.common.RuntimeApiSupport;
-import com.icbc.testagent.common.api.ApiResponse;
-import com.icbc.testagent.domain.auth.AuthPrincipal;
-import com.icbc.testagent.domain.dictionary.Dictionary;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityMaintenanceService;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityResponses.RestartIdentityCommand;
-import com.icbc.testagent.system.management.maintenance.IdentityManagedTable;
+import com.enterprise.testagent.api.web.common.AuthWebSupport;
+import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
+import com.enterprise.testagent.common.api.ApiResponse;
+import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityMaintenanceService;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityResponses.RestartIdentityCommand;
+import com.enterprise.testagent.system.management.maintenance.IdentityManagedTable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -678,8 +678,8 @@ public class DatabaseIdentityController {
             ServerWebExchange exchange) {
         requireSuperAdmin(exchange);
         if (request.targetValue() == null) {
-            throw new com.icbc.testagent.common.error.PlatformException(
-                    com.icbc.testagent.common.error.ErrorCode.VALIDATION_ERROR, "目标值不能为空");
+            throw new com.enterprise.testagent.common.error.PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.VALIDATION_ERROR, "目标值不能为空");
         }
         IdentityManagedTable table = DatabaseIdentityMaintenanceService.requireTable(request.table());
         return ok(exchange, service.restartIdentity(
@@ -704,7 +704,7 @@ Expected: BUILD SUCCESS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/DatabaseIdentityController.java backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/DatabaseIdentityDtos.java
+git add backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityController.java backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityDtos.java
 git commit -m "新增 DatabaseIdentityController 与请求 DTO"
 ```
 
@@ -713,14 +713,14 @@ git commit -m "新增 DatabaseIdentityController 与请求 DTO"
 ### Task 8: Controller 切片测试
 
 **Files:**
-- Create: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/DatabaseIdentityControllerTest.java`
+- Create: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityControllerTest.java`
 
 参考 `UserManagementControllerTest` 的 `WebTestClient` + `client()` helper 范式。
 
 - [ ] **Step 1: 写测试**
 
 ```java
-package com.icbc.testagent.api.web.platform;
+package com.enterprise.testagent.api.web.platform;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -728,18 +728,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.icbc.testagent.api.web.common.AuthWebSupport;
-import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
-import com.icbc.testagent.api.web.common.TraceIdWebFilter;
-import com.icbc.testagent.common.error.ErrorCode;
-import com.icbc.testagent.common.error.PlatformException;
-import com.icbc.testagent.domain.auth.AuthPrincipal;
-import com.icbc.testagent.domain.dictionary.Dictionary;
-import com.icbc.testagent.domain.user.UserId;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityMaintenanceService;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityResponses.IdentityStatusDto;
-import com.icbc.testagent.system.management.maintenance.DatabaseIdentityResponses.RestartIdentityCommand;
-import com.icbc.testagent.system.management.maintenance.IdentityManagedTable;
+import com.enterprise.testagent.api.web.common.AuthWebSupport;
+import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
+import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityMaintenanceService;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityResponses.IdentityStatusDto;
+import com.enterprise.testagent.system.management.maintenance.DatabaseIdentityResponses.RestartIdentityCommand;
+import com.enterprise.testagent.system.management.maintenance.IdentityManagedTable;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -868,7 +868,7 @@ Expected: Tests run: 5, Failures: 0, Errors: 0
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/DatabaseIdentityControllerTest.java
+git add backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/DatabaseIdentityControllerTest.java
 git commit -m "新增 DatabaseIdentityController 切片测试"
 ```
 
@@ -877,7 +877,7 @@ git commit -m "新增 DatabaseIdentityController 切片测试"
 ### Task 9: Mapper 集成测试（H2）
 
 **Files:**
-- Create: `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisDatabaseIdentityMapperIntegrationTest.java`
+- Create: `backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/MyBatisDatabaseIdentityMapperIntegrationTest.java`
 
 参考 `MyBatisCommonParameterRepositoryIntegrationTest` 的 H2 + Flyway + SqlSessionFactory 范式。
 
@@ -886,11 +886,11 @@ git commit -m "新增 DatabaseIdentityController 切片测试"
 - [ ] **Step 1: 写测试**
 
 ```java
-package com.icbc.testagent.persistence;
+package com.enterprise.testagent.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.icbc.testagent.persistence.mybatis.DatabaseIdentityMapper;
+import com.enterprise.testagent.persistence.mybatis.DatabaseIdentityMapper;
 import java.util.UUID;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
@@ -960,7 +960,7 @@ Expected: Tests run: 1, Failures: 0, Errors: 0
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisDatabaseIdentityMapperIntegrationTest.java
+git add backend/test-agent-persistence/src/test/java/com/enterprise/testagent/persistence/MyBatisDatabaseIdentityMapperIntegrationTest.java
 git commit -m "新增 DatabaseIdentityMapper H2 集成测试"
 ```
 

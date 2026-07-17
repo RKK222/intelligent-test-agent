@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
-import type { FileContent, FileSearchResult } from "@test-agent/shared-types";
+import type { FileSearchResult } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
+import type { AgentFileLoadRequest } from "./agentFileLoad";
 import GitChangesPanel from "./GitChangesPanel.vue";
-import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe, RefreshCw, Search } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe, Plus, RefreshCw, Search } from "lucide-vue-next";
 
 const props = defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -32,7 +33,7 @@ const props = defineProps<FileExplorerProps & {
   apiBaseUrl?: string;
   /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
   workspaceId?: string;
-  /** 应用 Agent 配置固定使用应用 feature 工作区，不随个人 worktree 切换。 */
+  /** 应用 Agent 配置使用当前版本的个人 worktree，与普通 workspace 文件共用 Git 根。 */
   agentConfigWorkspaceId?: string;
   /** 当前默认个人工作区 ID，透传给 GitChangesPanel 用于提交并推送 */
   personalWorkspaceId?: string;
@@ -63,6 +64,7 @@ const emit = defineEmits<{
     paths?: string[];
     reloadOpenFiles?: boolean;
     files?: import("@test-agent/shared-types").WorkspaceGitDiffFile[];
+    totalCount?: number;
   }];
   refresh: [];
   // 选择某个应用版本后由父组件切换运行态 Workspace
@@ -71,7 +73,7 @@ const emit = defineEmits<{
   loadVersions: [templateId: string];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
-  openAgentFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }];
+  openAgentFile: [payload: AgentFileLoadRequest];
   openServerWorkspacePicker: [];
   // 搜索事件
   search: [keyword: string];
@@ -81,6 +83,10 @@ const emit = defineEmits<{
   deleteEntry: [path: string, type: "file" | "directory"];
   // 双击文件或目录后重命名
   renameEntry: [path: string, name: string];
+  copyEntry: [sourcePath: string, targetDirectory: string];
+  moveEntry: [sourcePath: string, targetDirectory: string];
+  uploadFiles: [directory: string, files: File[]];
+  undoEntry: [];
   // 缓存并跳转
   cacheAndNavigate: [path: string, type: "file" | "directory"];
 }>();
@@ -91,6 +97,8 @@ const agentConfigPanelRef = ref<InstanceType<typeof AgentConfigPanel> | null>(nu
 const gitChangesPanelRef = ref<InstanceType<typeof GitChangesPanel> | null>(null);
 
 const tab = ref<ExplorerTab>("explorer");
+const totalChangedFileCount = ref<number | null>(null);
+const displayedChangedFileCount = computed(() => totalChangedFileCount.value ?? props.changedFiles.length);
 const workspaceHeight = ref<number | null>(null);
 const resizing = ref(false);
 let dragStartY = 0;
@@ -98,6 +106,12 @@ let dragStartHeight = 0;
 
 const iframeDialogVisible = ref(false);
 const iframeRef = ref<HTMLIFrameElement | null>(null);
+const fileExplorerRef = ref<InstanceType<typeof FileExplorer> | null>(null);
+
+function openRootActions() {
+  if (!props.canWrite) return;
+  fileExplorerRef.value?.openRootActions();
+}
 
 const iframeUrl = computed(() => {
   const baseUrl = import.meta.env.VITE_IFRAME_URL ?? "";
@@ -225,6 +239,26 @@ function refreshAll() {
   refreshChanges();
 }
 
+function handleChangesRefreshed(payload?: {
+  paths?: string[];
+  reloadOpenFiles?: boolean;
+  files?: import("@test-agent/shared-types").WorkspaceGitDiffFile[];
+  totalCount?: number;
+}) {
+  if (payload?.totalCount !== undefined) {
+    totalChangedFileCount.value = payload.totalCount;
+  }
+  emit("changes-refreshed", payload);
+}
+
+watch(
+  () => props.workspaceId,
+  () => {
+    // 切换工作区时先回退到已知 workspace 数量，等待三类 diff 刷新后再展示新总数。
+    totalChangedFileCount.value = null;
+  }
+);
+
 defineExpose({
   refreshAll,
   refreshChanges
@@ -261,27 +295,27 @@ defineExpose({
         @click="tab = 'changes'"
       >
         <GitBranch class="h-4 w-4" :stroke-width="1.5" />
-        <span v-if="changedFiles.length" class="ml-1 text-[10px]">{{ changedFiles.length }}</span>
+        <span v-if="displayedChangedFileCount" class="ml-1 text-[10px]">{{ displayedChangedFileCount }}</span>
       </button>
     </div>
 
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <GitChangesPanel
-        v-if="tab === 'changes'"
+        v-show="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
-        :agent-config-workspace-id="agentConfigWorkspaceId ?? ''"
+        :agent-config-workspace-id="agentConfigWorkspaceId"
         :personal-workspace-id="personalWorkspaceId"
+        :personal-workspace-branch="personalWorkspaceBranch"
         :api-base-url="apiBaseUrl"
         :can-write="!!canWrite"
         :can-manage-agent-config="canManageAgentConfig ?? !!canWrite"
         :can-manage-public-config="canManagePublicConfig ?? !!canWrite"
-        :can-publish-spec="!!canManagePublicConfig"
         @open-diff="(payload) => emit('openDiff', payload)"
-        @changes-refreshed="(payload) => emit('changes-refreshed', payload)"
+        @changes-refreshed="handleChangesRefreshed"
       />
-      <template v-else>
+      <template v-if="tab !== 'changes'">
         <!-- Section 1: 应用工作空间 -->
         <div
           class="figma-fe-section figma-fe-section-workspace"
@@ -309,6 +343,17 @@ defineExpose({
               </el-tooltip>
             </button>
             <div class="figma-fe-section-actions" v-if="workspaceExpanded">
+              <button
+                v-if="tab === 'explorer' && canWrite"
+                type="button"
+                class="figma-fe-section-action-btn"
+                title="新建或上传到工作区根目录"
+                aria-label="新建或上传到工作区根目录"
+                :disabled="!workspaceId"
+                @click="openRootActions"
+              >
+                <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </button>
               <button
                 v-if="tab === 'explorer'"
                 type="button"
@@ -344,6 +389,8 @@ defineExpose({
             </div>
             <FileExplorer
               v-else
+              ref="fileExplorerRef"
+              :key="workspaceId"
               :workspace-name="workspaceName"
               :workspace-root-path="workspaceRootPath"
               :entries-by-directory="entriesByDirectory"
@@ -354,6 +401,7 @@ defineExpose({
               :hide-header="true"
               :hide-tabbar="true"
               :can-write="!!canWrite"
+              :can-undo="canUndo"
               :active-tab="tab"
               :search-results="searchResults"
               :search-loading="searchLoading"
@@ -367,6 +415,10 @@ defineExpose({
               @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
               @delete-entry="(path, type) => emit('deleteEntry', path, type)"
               @rename-entry="(path, name) => emit('renameEntry', path, name)"
+              @copy-entry="(sourcePath, targetDirectory) => emit('copyEntry', sourcePath, targetDirectory)"
+              @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+              @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
+              @undo-entry="emit('undoEntry')"
               @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
             />
           </div>

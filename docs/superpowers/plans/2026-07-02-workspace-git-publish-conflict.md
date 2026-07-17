@@ -15,11 +15,11 @@
 ### Task 1: 文件白名单提交与推送确认
 
 **Files:**
-- Modify: `backend/test-agent-common/src/main/java/com/icbc/testagent/common/git/GitWorkspaceService.java`
-- Modify: `backend/test-agent-common/src/test/java/com/icbc/testagent/common/git/GitWorkspaceServiceTest.java`
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationService.java`
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/ManagedWorkspaceResponses.java`
-- Test: `backend/test-agent-workspace-management/src/test/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationServiceTest.java`
+- Modify: `backend/test-agent-common/src/main/java/com/enterprise/testagent/common/git/GitWorkspaceService.java`
+- Modify: `backend/test-agent-common/src/test/java/com/enterprise/testagent/common/git/GitWorkspaceServiceTest.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/ManagedWorkspaceApplicationService.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/ManagedWorkspaceResponses.java`
+- Test: `backend/test-agent-workspace-management/src/test/java/com/enterprise/testagent/workspace/ManagedWorkspaceApplicationServiceTest.java`
 
 - [ ] 写失败测试：普通发布存在其他 staged 文件时，必须先 unstage 全部并只提交请求文件。
 - [ ] 运行目标测试并确认因缺少隔离逻辑失败。
@@ -30,14 +30,14 @@
 ### Task 2: 冲突读取、解决和取消 API
 
 **Files:**
-- Modify: `backend/test-agent-common/src/main/java/com/icbc/testagent/common/git/GitWorkspaceService.java`
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationService.java`
-- Modify: `backend/test-agent-workspace-management/src/main/java/com/icbc/testagent/workspace/ManagedWorkspaceResponses.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/ManagedWorkspaceDtos.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/ManagedWorkspaceController.java`
-- Test: `backend/test-agent-common/src/test/java/com/icbc/testagent/common/git/GitWorkspaceServiceTest.java`
-- Test: `backend/test-agent-workspace-management/src/test/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationServiceTest.java`
-- Test: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/ManagedWorkspaceControllerTest.java`
+- Modify: `backend/test-agent-common/src/main/java/com/enterprise/testagent/common/git/GitWorkspaceService.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/ManagedWorkspaceApplicationService.java`
+- Modify: `backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/ManagedWorkspaceResponses.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/ManagedWorkspaceDtos.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/ManagedWorkspaceController.java`
+- Test: `backend/test-agent-common/src/test/java/com/enterprise/testagent/common/git/GitWorkspaceServiceTest.java`
+- Test: `backend/test-agent-workspace-management/src/test/java/com/enterprise/testagent/workspace/ManagedWorkspaceApplicationServiceTest.java`
+- Test: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/ManagedWorkspaceControllerTest.java`
 
 - [ ] 写失败测试：读取 stage 1/2/3、拒绝非冲突路径、CURRENT/INCOMING/BOTH/MANUAL/DELETE 解决和 abort。
 - [ ] 运行目标测试并确认失败原因是 API/服务缺失。

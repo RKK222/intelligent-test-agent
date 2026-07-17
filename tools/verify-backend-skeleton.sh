@@ -58,7 +58,7 @@ done
 [[ ! -d "${BACKEND_DIR}/test-agent-gateway" ]] || fail "test-agent-gateway must not exist"
 [[ ! -d "${BACKEND_DIR}/test-agent-control-plane" ]] || fail "test-agent-control-plane must not exist"
 
-assert_file "${BACKEND_DIR}/test-agent-app/src/main/java/com/icbc/testagent/app/TestAgentApplication.java"
+assert_file "${BACKEND_DIR}/test-agent-app/src/main/java/com/enterprise/testagent/app/TestAgentApplication.java"
 assert_file "${BACKEND_DIR}/test-agent-opencode-sdk-generated/src/main/java/com/example/opencode/sdk/ApiClient.java"
 assert_dir "${BACKEND_DIR}/test-agent-opencode-sdk-generated/src/main/java/com/example/opencode/sdk/api"
 assert_dir "${BACKEND_DIR}/test-agent-opencode-sdk-generated/src/main/java/com/example/opencode/sdk/model"

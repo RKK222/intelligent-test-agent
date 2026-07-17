@@ -1,23 +1,38 @@
 import { MarkerType, type Edge, type Node, type XYPosition } from "@vue-flow/core";
 import { isMermaidPortHandle } from "../edge-port-metadata";
-import { cloneMermaidGraph, type MermaidGraph, type MermaidNodeType } from "../model";
+import {
+  clearMermaidEdgeRoutes,
+  type MermaidGraph,
+  type MermaidNodeStyle,
+  type MermaidNodeType,
+  type MermaidPosition
+} from "../model";
 import { getMermaidNodePortId } from "./node-ports";
 
 export type MermaidFlowNodeData = {
   text: string;
   nodeType: MermaidNodeType;
   direction: MermaidGraph["direction"];
+  scale?: number;
+  style?: MermaidNodeStyle;
 };
 
 export type MermaidFlowNode = Node<MermaidFlowNodeData, Record<string, never>, "mermaid">;
-export type MermaidFlowEdge = Edge<Record<string, never>>;
+export type MermaidFlowEdgeData = { routePoints?: MermaidPosition[]; textColor?: string };
+export type MermaidFlowEdge = Edge<MermaidFlowEdgeData>;
 
 export function toVueFlowNodes(graph: MermaidGraph): MermaidFlowNode[] {
   return graph.nodes.map((node) => ({
     id: node.id,
     type: "mermaid",
     position: { ...node.position },
-    data: { text: node.text, nodeType: node.type, direction: graph.direction },
+    data: {
+      text: node.text,
+      nodeType: node.type,
+      direction: graph.direction,
+      scale: node.scale,
+      style: node.style ? { ...node.style } : undefined
+    },
     ariaLabel: `${node.id} ${node.text}`
   }));
 }
@@ -41,6 +56,10 @@ export function toVueFlowEdges(graph: MermaidGraph): MermaidFlowEdge[] {
       label: edge.label || undefined,
       type: "mermaid-edge",
       markerEnd: edge.relation === "line" ? undefined : MarkerType.ArrowClosed,
+      data: {
+        ...(edge.route ? { routePoints: edge.route.points.map((point) => ({ ...point })) } : {}),
+        ...(edge.style?.textColor ? { textColor: edge.style.textColor } : {})
+      },
       animated: false,
       style:
         edge.relation === "dotted"
@@ -58,7 +77,7 @@ export function applyVueFlowPositions(
   graph: MermaidGraph,
   positions: ReadonlyArray<{ id: string; position: XYPosition }>
 ): MermaidGraph {
-  const next = cloneMermaidGraph(graph);
+  const next = clearMermaidEdgeRoutes(graph);
   const byId = new Map(positions.map((item) => [item.id, item.position]));
   next.nodes = next.nodes.map((node) => {
     const position = byId.get(node.id);
@@ -120,7 +139,7 @@ export function getMermaidConnectionInvalidReason(
 /** 只把带完整固定端口的有效拖线转换为 Mermaid 边。 */
 export function appendMermaidEdge(graph: MermaidGraph, connection: MermaidPortConnection): MermaidGraph {
   if (!canAppendMermaidEdge(graph, connection)) return graph;
-  const next = cloneMermaidGraph(graph);
+  const next = clearMermaidEdgeRoutes(graph);
   const usedIds = new Set(next.edges.map((edge) => edge.id));
   let sequence = next.edges.length + 1;
   while (usedIds.has(`edge-${sequence}`)) sequence += 1;
@@ -143,7 +162,7 @@ export function updateMermaidEdge(
   end: "source" | "target",
   connection: MermaidPortConnection
 ): MermaidGraph {
-  const next = cloneMermaidGraph(graph);
+  const next = clearMermaidEdgeRoutes(graph);
   const edge = next.edges.find((item) => item.id === edgeId);
   if (!edge) return graph;
   if (end === "target") {

@@ -28,7 +28,7 @@
 
 ### 修改内容
 
-**文件：** `backend/test-agent-configuration-management/src/main/java/com/icbc/testagent/configuration/management/GitCloneCacheService.java`
+**文件：** `backend/test-agent-configuration-management/src/main/java/com/enterprise/testagent/configuration/management/GitCloneCacheService.java`
 
 **修改前：**
 ```bash

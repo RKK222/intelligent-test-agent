@@ -47,7 +47,7 @@ const WorkspaceDirectoryTree = defineComponent({
     const expandedPaths = ref(new Set<string>());
     const collectDefaultExpandedPaths = (nodes: WorkspaceTreeNode[], depth = 0, acc = new Set<string>()) => {
       for (const node of nodes) {
-        if (node.type === "directory" && node.children.length > 0 && depth <= 1) {
+        if (node.type === "directory" && node.children.length > 0 && depth <= 2) {
           acc.add(node.path);
           collectDefaultExpandedPaths(node.children, depth + 1, acc);
         }
@@ -88,7 +88,7 @@ const WorkspaceDirectoryTree = defineComponent({
                   { "is-selected": props.selectedPath === node.path, "is-selectable": selectable }
                 ],
                 style: { paddingLeft: `${8 + depth * 16}px` },
-                disabled: !selectable && !expandable,
+                disabled: !selectable && (!expandable || !isTreeNodeUnderCurrentApp(node)),
                 title: workspaceTreeNodeTitle(node),
                 "aria-expanded": expandable ? String(expanded) : undefined,
                 onClick: () => {
@@ -113,6 +113,8 @@ const WorkspaceDirectoryTree = defineComponent({
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  initialAppId?: string;
+  refreshKey?: number;
 }>();
 
 const emit = defineEmits<{
@@ -321,7 +323,11 @@ async function run(action: () => Promise<void>) {
 async function loadApplications() {
   await run(async () => {
     applications.value = await api.listApplications(true);
-    if (!selectedAppId.value || !applications.value.some((item) => item.appId === selectedAppId.value)) {
+    // 如果传入了 initialAppId 且存在于列表中，优先使用它（来自右上角的选择）
+    const initialId = props.initialAppId;
+    if (initialId && applications.value.some((item) => item.appId === initialId)) {
+      selectedAppId.value = initialId;
+    } else if (!selectedAppId.value || !applications.value.some((item) => item.appId === selectedAppId.value)) {
       selectedAppId.value = applications.value[0]?.appId ?? "";
     }
     if (selectedAppId.value) {
@@ -694,6 +700,21 @@ watch(() => props.currentUser, async (user) => {
   }
 }, { immediate: true });
 
+// 每次对话框打开时刷新应用列表，确保选中右上角当前应用
+watch(() => props.refreshKey, () => {
+  if (props.currentUser && hasAppSettingsPermission.value) {
+    loadApplications();
+  }
+});
+
+// 右上角切换应用时同步更新设置弹窗中的选中
+watch(() => props.initialAppId, (newAppId) => {
+  if (!newAppId || !hasAppSettingsPermission.value) return;
+  if (applications.value.some((item) => item.appId === newAppId)) {
+    selectedAppId.value = newAppId;
+  }
+});
+
 watch(selectedAppId, async (appId) => {
   if (!appId || !hasAppSettingsPermission.value) return;
   pendingDangerAction.value = null;
@@ -729,11 +750,7 @@ function cloneTreeNode(node: RepositoryTreeNode): WorkspaceTreeNode {
 }
 
 function filterRepositoryTree(nodes: WorkspaceTreeNode[]) {
-  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) {
-    return sortTreeNodes(nodes);
-  }
-  const appName = selectedAppName.value;
-  return sortTreeNodes(nodes.filter((node) => node.type === "directory" && node.name === appName && node.path === appName));
+  return sortTreeNodes(nodes);
 }
 
 function sortTreeNodes(nodes: WorkspaceTreeNode[]) {
@@ -762,10 +779,21 @@ function isSelectableWorkspaceTreeNode(node: WorkspaceTreeNode) {
   return parts.length === 2 && parts[0] === appName && Boolean(parts[1]);
 }
 
+/**
+ * 判断节点是否属于当前应用目录下，仅测试工作库时限制交互范围。
+ * 其他应用的目录仅展示、不可展开也不可选中。
+ */
+function isTreeNodeUnderCurrentApp(node: WorkspaceTreeNode): boolean {
+  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return true;
+  const appName = selectedAppName.value;
+  return node.path === appName || node.path.startsWith(appName + "/");
+}
+
 function workspaceTreeNodeTitle(node: WorkspaceTreeNode) {
   if (isSelectableWorkspaceTreeNode(node)) return "选择为工作空间";
   if (node.type === "file") return "文件仅可浏览，不能选择为工作空间";
   if (isTestWorkRepository(selectedWorkspaceRepository.value)) {
+    if (!isTreeNodeUnderCurrentApp(node)) return "其他应用目录仅可查看，不能选择为工作空间";
     return "测试工作库只能选择应用同名目录的一级子目录";
   }
   return "目录";
@@ -1239,7 +1267,9 @@ onBeforeUnmount(() => {
 .ta-workspace-tree-panel {
   position: relative;
   min-height: 160px;
-  overflow: hidden;
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #f8fafc;

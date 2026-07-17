@@ -48,7 +48,47 @@ diff --git a/packages/opencode/src/config/config.ts b/packages/opencode/src/conf
 index 7f568f4..c717bb3 100644
 --- a/packages/opencode/src/config/config.ts
 +++ b/packages/opencode/src/config/config.ts
-@@ -434,26 +434,28 @@ export const layer = Layer.effect(
+@@ -39,5 +39,39 @@ import { withTransientReadRetry } from "@/util/effect-http-client"
+ // Custom merge function that concatenates array fields instead of replacing them
+ // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
++async function ensureOfflineToolDependencies(dir: string) {
++  const sourceRoot = process.env.OPENCODE_OFFLINE_TOOL_NODE_MODULES?.trim()
++  if (!sourceRoot) return
++
++  const sourceStat = await fsNode.stat(sourceRoot)
++  if (!sourceStat.isDirectory()) throw new Error(`offline Tool dependency directory is not a directory: ${sourceRoot}`)
++
++  const targetRoot = path.join(dir, "node_modules")
++  await fsNode.mkdir(targetRoot, { recursive: true })
++
++  // 企业包内依赖是只读且由 lockfile 固定；仅填充不存在的链接，保留配置仓库自行安装的同名版本。
++  const linkPackage = async (source: string, target: string) => {
++    await fsNode.symlink(source, target, process.platform === "win32" ? "junction" : "dir").catch((error) => {
++      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
++    })
++  }
++
++  for (const entry of await fsNode.readdir(sourceRoot, { withFileTypes: true })) {
++    if (entry.name.startsWith(".")) continue
++    const source = path.join(sourceRoot, entry.name)
++    if (entry.name.startsWith("@") && entry.isDirectory()) {
++      const targetScope = path.join(targetRoot, entry.name)
++      await fsNode.mkdir(targetScope, { recursive: true })
++      for (const child of await fsNode.readdir(source, { withFileTypes: true })) {
++        if (!child.isDirectory() && !child.isSymbolicLink()) continue
++        await linkPackage(path.join(source, child.name), path.join(targetScope, child.name))
++      }
++      continue
++    }
++    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
++    await linkPackage(source, path.join(targetRoot, entry.name))
++  }
++}
++
+ function mergeConfig(target: Info, source: Info): Info {
+   return mergeDeep(target, source) as Info
+ }
+@@ -434,26 +468,30 @@ export const layer = Layer.effect(
 
            yield* ensureGitignore(dir).pipe(Effect.orDie)
 
@@ -72,7 +112,9 @@ index 7f568f4..c717bb3 100644
 -              Effect.forkDetach,
 -            )
 -          deps.push(dep)
-+          if (!Flag.OPENCODE_DISABLE_CONFIG_DEPENDENCY_INSTALL) {
++          if (Flag.OPENCODE_DISABLE_CONFIG_DEPENDENCY_INSTALL) {
++            yield* Effect.promise(() => ensureOfflineToolDependencies(dir))
++          } else {
 +            const dep = yield* npmSvc
 +              .install(dir, {
 +                add: [

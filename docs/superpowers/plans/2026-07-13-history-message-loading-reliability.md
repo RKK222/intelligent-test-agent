@@ -21,8 +21,8 @@
 ### Task 1: manager WebSocket 并发发送可靠性
 
 **Files:**
-- Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/ManagerControlWebSocketHandlerTest.java`
-- Modify: `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/ManagerControlWebSocketHandler.java`
+- Modify: `backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/ManagerControlWebSocketHandlerTest.java`
+- Modify: `backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/ManagerControlWebSocketHandler.java`
 
 **Interfaces:**
 - Consumes: `ManagerConnectionRegistry.register(..., ManagerCommandSender)` 与 `Sinks.Many<ManagerControlMessage>`。
@@ -143,8 +143,8 @@ Expected: 所有命令退出码为 0。
 
 ```bash
 git add \
-  backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/ManagerControlWebSocketHandler.java \
-  backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/ManagerControlWebSocketHandlerTest.java \
+  backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/ManagerControlWebSocketHandler.java \
+  backend/test-agent-api/src/test/java/com/enterprise/testagent/api/web/platform/ManagerControlWebSocketHandlerTest.java \
   backend/test-agent-api/README.md \
   frontend/apps/agent-web/src/components/AgentWorkbench.vue \
   frontend/apps/agent-web/src/components/FigmaChatPanel.vue \

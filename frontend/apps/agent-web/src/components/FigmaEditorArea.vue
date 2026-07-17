@@ -14,6 +14,8 @@ const props = withDefaults(
     breadcrumbPath?: string;
     /** 写入路径（编辑器模式显示） */
     writePath?: string;
+    /** 当前工作区绝对根目录，用于页脚复制文件绝对路径 */
+    workspaceRootPath?: string;
     /** 最近一次更新时间（秒或 ISO 字符串） */
     updatedAt?: string | number;
     dirty?: boolean;
@@ -228,6 +230,7 @@ watch(
 
     <WorkbenchFooter
       :write-path="writePath"
+      :workspace-root-path="workspaceRootPath"
       :updated-at="updatedAt"
       :dirty="dirty"
       :readonly="readonly"

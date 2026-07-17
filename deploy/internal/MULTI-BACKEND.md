@@ -10,8 +10,8 @@
 | 后台 A + worker A | `122.233.30.4` / `test-agent-backend-122-233-30-4` |
 | 后台 B + worker B | `122.233.30.114` / `test-agent-backend-122-233-30-114` |
 | Redis | `122.233.30.20:6379` |
-| PostgreSQL | `122.42.203.103:8000/testagent` |
-| 行内模型 | `ai-code.sdc.icbc:9070` |
+| PostgreSQL | `122.233.30.147:5432/postgres` |
+| 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
 ## 1. 正式拓扑
 
@@ -24,7 +24,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
    |                                                     |
    +---------------- 共享 PostgreSQL / Redis ------------+
    |                                                     |
-   `-> ai-code.sdc.icbc:9070          ai-code.sdc.icbc:9070 <-'
+   `-> ai-code.sdc.enterprise:9070          ai-code.sdc.enterprise:9070 <-'
 ```
 
 必须同时满足：
@@ -34,7 +34,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 3. 每台后台只运行一个本机 worker；worker 只连接本机 `.serverhost:8080`。
 4. 各节点 `/data/testagent/data` 是本机目录，不做跨服务器共享挂载。
 5. 所有后台之间能双向访问对方声明的 `TEST_AGENT_SERVER_ADVERTISED_HOST:8080`。
-6. Nginx 能访问全部后台 `:8080`；每台 Java 宿主机都能访问 PostgreSQL、Redis 和 `ai-code.sdc.icbc:9070`。
+6. Nginx 能访问全部后台 `:8080`；每台 Java 宿主机都能访问 PostgreSQL、Redis 和 `ai-code.sdc.enterprise:9070`。
 7. 所有后台启用相同的服务器广播 channel。
 8. 每台后台都要初始化本服务器公共 OpenCode 配置。
 
@@ -50,7 +50,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | `.114` | `.4:8080` | Java B 转发到 Java A |
 | 每台 worker 容器 | 本机 Java `:8080` | manager WebSocket、内部模型代理 |
 | 每台后台 | PostgreSQL、Redis | 共享持久化和运行态 |
-| 每台后台 | `ai-code.sdc.icbc:9070` | 行内模型调用 |
+| 每台后台 | `ai-code.sdc.enterprise:9070` | 企业内部模型调用 |
 | Java 后台 | 每台后台 `4096-4105` | 访问本机或目标服务器上的用户 OpenCode 进程；浏览器不直连这些端口 |
 
 两个服务器可以重复使用 `4096-4105`，因为 IP 不同；同一台服务器的宿主机和容器端口必须同号。正式部署不使用 `--network host`、`19070` relay 或额外 model relay。
@@ -61,12 +61,12 @@ Java A <---------------- 互访 8080 ----------------> Java B
 # 在 .4
 curl -fsS http://122.233.30.114:8080/actuator/health
 nc -vz 122.233.30.20 6379
-nc -vz ai-code.sdc.icbc 9070
+nc -vz ai-code.sdc.enterprise 9070
 
 # 在 .114
 curl -fsS http://122.233.30.4:8080/actuator/health
 nc -vz 122.233.30.20 6379
-nc -vz ai-code.sdc.icbc 9070
+nc -vz ai-code.sdc.enterprise 9070
 ```
 
 ## 3. Mac 打包与分发
@@ -111,6 +111,19 @@ cp -a /data/testagent/config/backend.env \
   /data/testagent/config/backend.env.bak.$(date +%Y%m%d%H%M%S) 2>/dev/null || true
 ```
 
+两台 Java 共享数据库，必须使用同一份持久 RSA 私钥。只在受控服务器生成一次，再通过安全介质复制到 `.4` 和 `.114` 的同一路径，禁止两台分别生成：
+
+```bash
+umask 077
+openssl genpkey -algorithm RSA \
+  -pkeyopt rsa_keygen_bits:3072 \
+  -out /data/testagent/config/ssh-rsa-private.key
+chmod 0600 /data/testagent/config/ssh-rsa-private.key
+openssl pkey -in /data/testagent/config/ssh-rsa-private.key -check -noout
+```
+
+复制后两台分别执行 `sha256sum /data/testagent/config/ssh-rsa-private.key`，摘要必须完全相同。旧版本曾使用临时 RSA key 时，首次切换后现有用户需删除并重新添加一次 SSH key；后续升级永久保留该文件。
+
 后台 A `.4` 的 `/data/testagent/config/backend.env` 全文：
 
 ```dotenv
@@ -121,8 +134,8 @@ TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.4
 TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-4
 SYS_DATA_ROOT_DIR=/data/testagent/data
 
-TEST_AGENT_DB_URL=jdbc:postgresql://122.42.203.103:8000/testagent
-TEST_AGENT_DB_USERNAME=testagent
+TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres
+TEST_AGENT_DB_USERNAME=postgres
 TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
@@ -133,6 +146,7 @@ TEST_AGENT_REDIS_TIMEOUT=1s
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
 TEST_AGENT_API_TOKEN=
+TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_INTERNAL_PROXY_API_KEY=REPLACE_INTERNAL_PROXY_API_KEY
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
@@ -176,8 +190,8 @@ TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114
 TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-114
 SYS_DATA_ROOT_DIR=/data/testagent/data
 
-TEST_AGENT_DB_URL=jdbc:postgresql://122.42.203.103:8000/testagent
-TEST_AGENT_DB_USERNAME=testagent
+TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres
+TEST_AGENT_DB_USERNAME=postgres
 TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
@@ -188,6 +202,7 @@ TEST_AGENT_REDIS_TIMEOUT=1s
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
 TEST_AGENT_API_TOKEN=
+TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_INTERNAL_PROXY_API_KEY=REPLACE_INTERNAL_PROXY_API_KEY
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
@@ -385,20 +400,20 @@ sed -n '1,220p' /tmp/opencode.jsonc
 JSONC 中三个 `{env:...}` 引用必须原样保留，由各用户所属 Java 动态注入，不要替换成固定 UCID 或固定代理地址。
 
 ```text
-icbc-qwen/Qwen3.6-27B                 -> qwen-prod
-icbc-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
+enterprise-qwen/Qwen3.6-27B                 -> qwen-prod
+enterprise-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
 ```
 
 共享数据库的“内部模型供应商”页面完整填写如下；只需把两个 token 替换为现场已有值：
 
 | Provider ID | 名称 | Base URL | Token | 启用 | 排序 |
 |---|---|---|---|---|---:|
-| `qwen-prod` | `企业通义` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
-| `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
+| `qwen-prod` | `企业通义` | `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
+| `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
 
-公共配置必须包含 `includeUsage=false`，避免 OpenCode 1.17.8 默认添加行内接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
+公共配置必须包含 `includeUsage=false`，避免 OpenCode 1.17.8 默认添加企业内部接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
 
-`icbc-qwen` / `icbc-deepseek` 是 OpenCode provider key；`qwen-prod` / `deepseek-prod` 是数据库和 `X-ICBC-Model-Provider` 使用的 Java 路由键，不能混用。上游 token 只在共享数据库维护，由 Java 以 `Authorization: Bearer <token>` 注入。用户 UCID 由拥有该用户进程的 Java 从用户表读取并逐进程注入，不使用全局 UCID env 文件。
+`enterprise-qwen` / `enterprise-deepseek` 是 OpenCode provider key；`qwen-prod` / `deepseek-prod` 是数据库和 `X-Enterprise-Model-Provider` 使用的 Java 路由键，不能混用。上游 token 只在共享数据库维护，由 Java 以 `Authorization: Bearer <token>` 注入。用户 UCID 由拥有该用户进程的 Java 从用户表读取并逐进程注入，不使用全局 UCID env 文件。
 
 变更生效规则：
 
@@ -406,6 +421,8 @@ icbc-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
 2. 修改共享数据库供应商或 token 后点击“刷新 Java 内存”；广播启用时所有 Java 会分别重载同一数据库快照。
 3. 在两台后台分别查询 refresh-status，必须都包含 `qwen-prod`、`deepseek-prod` 且 `tokenConfigured=true`；广播失败时逐台重启 Java 重新加载。
 4. 只重启 Java 不会让已经运行的用户 OpenCode 重新读取公共配置或重新注入 UCID，涉及进程配置时仍要重启对应用户进程。
+
+公共 `tools/*.ts` 随各服务器公共配置仓库更新，项目专用 Tool 位于工作区 `.opencode/tools/*.ts`。企业 programs 已离线内置 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及传递依赖；仅更新 Tool 文件时，在每台目标服务器同步公共仓库后重启该节点相关用户 OpenCode 进程。Tool 新增基线外第三方 import 时，必须重新打完整企业包，并在每台后台同时更新 programs、worker 镜像和 worker，不能只向一台服务器复制 `node_modules`。
 
 ## 9. 集群验收
 

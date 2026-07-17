@@ -122,6 +122,16 @@ function buildModel(path: string, content: string): monaco.editor.ITextModel {
   return m.editor.createModel(content, languageFromPath(path), uri);
 }
 
+function modelMatchesPath(candidate: monaco.editor.ITextModel, path: string): boolean {
+  if (!monacoLib) {
+    return false;
+  }
+  const expectedUri = typeof monacoLib.Uri.file === "function"
+    ? monacoLib.Uri.file(path)
+    : monacoLib.Uri.parse(`file:///${path}`);
+  return candidate.uri.toString() === expectedUri.toString();
+}
+
 async function ensureMonacoEditor(path: string) {
   const sequence = ++ensureEditorSequence;
   if (!containerEl.value || !containerEl.value.parentNode) {
@@ -157,7 +167,8 @@ async function ensureMonacoEditor(path: string) {
     lineHeight: 20,
     scrollBeyondLastLine: false,
     automaticLayout: true,
-    wordWrap: "off",
+    // 工作台中间编辑区默认按可视宽度换行，长日志、JSON 和说明文档无需横向滚动才能阅读。
+    wordWrap: "on",
     // 滚动条细线化：Monaco 内部使用自定义控件，垂直与水平都用 6px
     scrollbar: {
       vertical: "visible",
@@ -352,7 +363,8 @@ function syncFromEditor() {
 watch(
   () => props.content,
   (content) => {
-    if (!model || content === model.getValue()) {
+    // path/content 可能在同一 tick 更新；旧模型 URI 未切换完成时禁止写入新文件内容。
+    if (!model || !props.path || !modelMatchesPath(model, props.path) || content === model.getValue()) {
       return;
     }
     syncing = true;

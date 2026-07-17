@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { BaseEdge, getSmoothStepPath, Position, type EdgeProps } from "@vue-flow/core";
+import { buildRoundedOrthogonalPath, getPolylineMidpoint, reattachMermaidEdgeRoutePoints } from "./edge-path";
+import type { MermaidFlowEdgeData } from "./vue-flow-adapter";
 
-const props = defineProps<EdgeProps>();
+const props = defineProps<EdgeProps<MermaidFlowEdgeData>>();
 const emit = defineEmits<{
   reconnectStart: [
     payload: {
@@ -14,21 +16,35 @@ const emit = defineEmits<{
       fixedPosition: Position;
     }
   ];
+  editRequest: [payload: { edgeId: string; clientX: number; clientY: number }];
 }>();
 
-const path = computed(() =>
-  getSmoothStepPath({
+const routePoints = computed(() => {
+  const stored = props.data?.routePoints;
+  if (!stored || stored.length < 2) return [];
+  return reattachMermaidEdgeRoutePoints(stored, {
+    source: { x: props.sourceX, y: props.sourceY },
+    sourcePosition: props.sourcePosition,
+    target: { x: props.targetX, y: props.targetY },
+    targetPosition: props.targetPosition
+  });
+});
+
+const path = computed(() => {
+  const routed = buildRoundedOrthogonalPath(routePoints.value);
+  if (routed) return routed;
+  return getSmoothStepPath({
     sourceX: props.sourceX,
     sourceY: props.sourceY,
     sourcePosition: props.sourcePosition,
     targetX: props.targetX,
     targetY: props.targetY,
     targetPosition: props.targetPosition
-  })[0]
-);
+  })[0];
+});
 
-/** 自定义边不会从 Vue Flow 拿到 labelX/labelY，这里取边中点放标签。 */
-const labelPos = computed(() => ({
+/** 有 ELK 轨道时按折线路程取中点；兼容旧边时仍取起终点几何中点。 */
+const labelPos = computed(() => getPolylineMidpoint(routePoints.value) ?? ({
   x: (props.sourceX + props.targetX) / 2,
   y: (props.sourceY + props.targetY) / 2
 }));
@@ -51,10 +67,25 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
     fixedPosition: fixed.position
   });
 }
+
+function onDoubleClick(event: MouseEvent) {
+  event.preventDefault();
+  event.stopPropagation();
+  emit("editRequest", { edgeId: props.id, clientX: event.clientX, clientY: event.clientY });
+}
 </script>
 
 <template>
   <BaseEdge :path="path" :style="props.style" :marker-end="props.markerEnd" :marker-start="props.markerStart" />
+  <path
+    :d="path"
+    class="ta-mermaid-edge-edit-hitbox"
+    fill="none"
+    stroke="transparent"
+    stroke-width="20"
+    pointer-events="stroke"
+    @dblclick="onDoubleClick"
+  />
   <text
     v-if="props.label"
     :x="labelPos.x"
@@ -62,6 +93,7 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
     text-anchor="middle"
     dominant-baseline="central"
     class="ta-mermaid-edge-label"
+    :style="props.data?.textColor ? { fill: props.data.textColor } : undefined"
   >{{ props.label }}</text>
   <template v-if="props.selected">
     <circle
@@ -69,6 +101,7 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
       :cy="props.sourceY"
       r="6"
       class="ta-mermaid-edge-handle"
+      pointer-events="all"
       aria-label="拖动起点重连"
       @pointerdown="onHandlePointerDown($event, 'source')"
     />
@@ -77,6 +110,7 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
       :cy="props.targetY"
       r="6"
       class="ta-mermaid-edge-handle"
+      pointer-events="all"
       aria-label="拖动终点重连"
       @pointerdown="onHandlePointerDown($event, 'target')"
     />
@@ -84,6 +118,7 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
 </template>
 
 <style scoped>
+.ta-mermaid-edge-edit-hitbox { cursor: pointer; }
 .ta-mermaid-edge-label {
   fill: var(--ta-ink, #172033);
   font-size: 11px;

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/icbc/test-agent/opencode-manager/internal/state"
+	"github.com/enterprise/test-agent/opencode-manager/internal/state"
 )
 
 // Status 表达 opencode server 的本地健康检测结果。

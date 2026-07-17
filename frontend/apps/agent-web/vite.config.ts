@@ -57,6 +57,9 @@ export default defineConfig({
   define: {
     "import.meta.env.VITE_TEST_AGENT_BUILD_VERSION": JSON.stringify(buildVersion)
   },
+  optimizeDeps: {
+    exclude: ["mermaid", "@mermaid-js/layout-elk"]
+  },
   plugins: [
     manualIndexRoute(),
     vue(),
@@ -70,6 +73,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      "mermaid": "mermaid/dist/mermaid.esm.min.mjs",
       "@": fileURLToPath(new URL("./src", import.meta.url)),
       "@test-agent/shared-types": pkgSrc("shared-types"),
       "@test-agent/backend-api": pkgSrc("backend-api"),
