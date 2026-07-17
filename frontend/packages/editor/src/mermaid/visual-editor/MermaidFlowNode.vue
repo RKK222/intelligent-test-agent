@@ -471,7 +471,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
 
 .ta-mermaid-flow-node :deep(.vue-flow__handle) {
   position: absolute !important;
-  z-index: 3;
+  z-index: 22;
   width: 16px;
   height: 16px;
   border: 0 !important;
@@ -569,7 +569,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   display: grid;
   place-items: center;
   z-index: 21;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 /* 引导大箭头默认半透明，悬停时变不透明并滑出面板 */
@@ -582,25 +582,25 @@ function preventNodeDragFromPort(event: MouseEvent) {
 /* 根据端口位置决定大箭头的偏移方向和定位 */
 .ta-mermaid-quick-connector-wrapper.is-right .ta-mermaid-quick-arrow {
   position: absolute !important;
-  left: 12px;
+  left: 18px;
   top: 50%;
   transform: translateY(-50%);
 }
 .ta-mermaid-quick-connector-wrapper.is-left .ta-mermaid-quick-arrow {
   position: absolute !important;
-  right: 12px;
+  right: 18px;
   top: 50%;
   transform: translateY(-50%);
 }
 .ta-mermaid-quick-connector-wrapper.is-top .ta-mermaid-quick-arrow {
   position: absolute !important;
-  bottom: 12px;
+  bottom: 18px;
   left: 50%;
   transform: translateX(-50%);
 }
 .ta-mermaid-quick-connector-wrapper.is-bottom .ta-mermaid-quick-arrow {
   position: absolute !important;
-  top: 12px;
+  top: 18px;
   left: 50%;
   transform: translateX(-50%);
 }
@@ -707,7 +707,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   content: "";
   position: absolute;
   left: 12px;
-  width: 24px;
+  width: 28px;
   height: 48px;
   top: -12px;
   background: transparent;
@@ -718,7 +718,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   content: "";
   position: absolute;
   right: 12px;
-  width: 24px;
+  width: 28px;
   height: 48px;
   top: -12px;
   background: transparent;
@@ -730,7 +730,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   position: absolute;
   bottom: 12px;
   width: 48px;
-  height: 24px;
+  height: 28px;
   left: -12px;
   background: transparent;
   pointer-events: auto;
@@ -741,7 +741,7 @@ function preventNodeDragFromPort(event: MouseEvent) {
   position: absolute;
   top: 12px;
   width: 48px;
-  height: 24px;
+  height: 28px;
   left: -12px;
   background: transparent;
   pointer-events: auto;

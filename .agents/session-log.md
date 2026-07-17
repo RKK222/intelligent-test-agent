@@ -13,6 +13,20 @@
   - 在 [FigmaShell.test.ts](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/tests/FigmaShell.test.ts) 中丰富了单元测试，并新增了模拟老旧环境下通过 Fallback MouseEvents 完成拖拽的兼容测试用例。
 - Result:
   - 前端 `@test-agent/agent-web` 的全量 41 个 Vitest 单元测试全部通过，`vue-tsc` 类型检查无任何报错，没有引入任何破坏性更新或性能影响。
+### 2026-07-17 - 优化 Mermaid 流程图编辑器锚点与快捷箭头交互
+
+- Why:
+  - Mermaid 可视化编辑器中，图形四周的 4 个快捷连接箭头距离边框和中央锚点（Handle）过近，且快捷箭头包装容器（`.ta-mermaid-quick-connector-wrapper`）因 z-index 较高和具有 `pointer-events: auto` 覆盖并阻断了中央锚点（Handle）的交互事件，导致用户难以选中锚点进行拖拽连线（尤其是节点处于选中状态时）。
+- What:
+  - 将 `.vue-flow__handle` 的 `z-index` 从 `3` 提升至 `22`，确保其在层叠上下文上高于快捷连接箭头容器（`z-index: 21`），从而优先接收鼠标和触摸事件。
+  - 将快捷连接箭头容器 `.ta-mermaid-quick-connector-wrapper` 的 `pointer-events` 从 `auto` 调整为 `none`，并在子组件大箭头本身（`.ta-mermaid-quick-arrow`）和桥接防抖伪元素（`::after`）上显式保持 `pointer-events: auto`。以此完全释放 wrapper 自身重合区域的指针穿透，防止其拦截对节点内容或 Handle 的交互。
+  - 增加快捷连接大箭头的四向边框外延偏移，各方向定位偏移量由 `12px` 增加至 `18px`，使界面排版更清爽、宽敞，彻底拉开大箭头与中央锚点的物理距离。
+  - 同步将四向 hover 桥接防抖伪元素（`::after`）的宽度/高度由 `24px` 拓宽为 `28px`，确保鼠标在节点与被外推的箭头之间滑行时，悬浮状态能够被平滑接力，不会发生误触消失。
+- How:
+  - 修改 `frontend/packages/editor/src/mermaid/visual-editor/MermaidFlowNode.vue` 下的相关 CSS 定位、z-index、pointer-events 和伪元素尺寸属性。
+  - 运行全量 `corepack pnpm test packages/editor/tests/MermaidVisualEditor.test.ts` 进行验证，103 项测试全部绿灯通过；执行全量前端测试，1125 项测试均顺利通过。
+- Result:
+  - 彻底解决了 Mermaid 可视化编辑器中快捷连接大箭头阻碍、遮挡中央锚点选择的 Bug。现在用户不论在节点未选中还是已选中状态下，都可以轻松、顺畅地点击和拖动中央锚点（紫色小叉）来创建连线，同时 4 向大箭头指示也更加错落有致、符合人体工学。未改动后端代码、API 契约、事件流或环境配置。
 
 ### 2026-07-17 - 合并远程主干并补齐文件加载路由边界
 
