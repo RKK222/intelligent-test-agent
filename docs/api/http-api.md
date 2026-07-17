@@ -2023,7 +2023,7 @@ Base URL：`/api/internal/platform/scheduler-management`
 }
 ```
 
-Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 `RUNNING`，不等待 agent 的 prompt HTTP 请求完成。prompt 提交或后续事件流失败时通过同一 RunEvent 链路追加 `run.failed`，前端不应把创建 Run 接口的等待时间当作智能体执行超时。
+Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 `RUNNING`，不等待 agent 的 prompt/command HTTP 请求完成。后台 `prompt_async` 或 `/session/{sessionID}/command` 的调用完成异常只是候选失败：平台保留 300ms 根终态裁决窗口，窗口内由 root session 的 `idle` / `session.error` 派生的 `run.succeeded` / `run.failed` 获胜；窗口结束仍无 root 终态且 Run 仍为运行态时，才通过同一 RunEvent 链路追加一次安全的 `run.failed`。真正的事件流中断继续使用运行态丢失与 owner 恢复规则。前端不应把创建 Run 接口的等待时间当作智能体执行超时。
 
 携带有效 `contextToken` 时，`ConversationRunContextResolver` 在 Run 产生数据库副作用前完成 Redis 校验，并以完整进程快照调用公共状态服务 `querySnapshot` 动态探测；该路径不按 processId 查询数据库，稳定 `RUNNING` 为 0 次 Repository SELECT、0 次数据库写入，只有状态、PID 或服务地址确有变化时写一次。探测返回 `STALE` 时拒绝本次 Run 但保留 token；只有明确返回 `NOT_STARTED` 时才按 processId 失效相关上下文。`RunApplicationService` 随后直接复用 Session、Workspace、ExecutionNode 和可空 AgentSessionBinding 快照，已有远端 session 的其余控制面查询仍为 0 次 PostgreSQL SELECT。
 
@@ -2057,7 +2057,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 }
 ```
 
-`command` / `arguments` 为可选字段。提供 `command` 时，平台仍先创建并持久化 Run、订阅 RunEvent，再由后端后台调用 opencode 原生 `/session/{sessionID}/command`；创建 Run 接口不会等待技能执行完成。这样 slash 技能与普通 prompt 共用 active-run 恢复、SSE 实时输出和取消语义。未提供 `command` 时继续使用 `prompt_async`。
+`command` / `arguments` 为可选字段。提供 `command` 时，平台仍先创建并持久化 Run、订阅 RunEvent，再由后端后台调用 opencode 原生 `/session/{sessionID}/command`；创建 Run 接口不会等待技能执行完成。这样 slash 技能与普通 prompt 共用 active-run 恢复、SSE 实时输出、终态裁决和取消语义。未提供 `command` 时继续使用 `prompt_async`。两种调用的 HTTP 完成异常都不能覆盖已经到达的 root 终态，也不能依赖第三方英文错误文案判断是否延迟裁决。
 
 兼容要求：
 

@@ -23,11 +23,12 @@
 5. 前端断线后通过 Last-Event-ID 续传 durable RunEvent。legacy 从数据库事件和按稳定 dispatch user 因果裁剪后的 opencode projected messages 恢复；新模式首先用 Redis 物化 snapshot reset 恢复当前可见状态，再按 `runtimeVersion` 从 `runtime-events` Stream 连续读取 durable/transient 尾流，不触发兼容远端消息 snapshot。
 6. 不把 opencode raw event 原样透传给前端，也不把大段日志、bash/tool output 或高频文本 delta 作为平台持久化事件保存。
 7. generated SDK 事件必须在 `test-agent-event` 或 `test-agent-opencode-client` 映射为平台事件。
-8. root `run.succeeded/run.failed/run.cancelled` 是 Run 终态事实源；`Streaming response failed` 等 prompt_async 提交错误、SSE 订阅 transport error 或浏览器连接错误没有独立业务终态含义，先到时只可延迟收敛为失败，窗口内若收到 root 终态则不得补写旧 `run.failed`；若临时失败已经先落库，后到 root 终态仍可按最后 root 终态纠正 Run 状态和最终快照。
+8. root `run.succeeded/run.failed/run.cancelled` 是 Run 终态事实源；`prompt_async` 与 `/session/{sessionID}/command` 的调用完成异常不论错误语言或包装类型都只是候选失败，统一等待 300ms 根终态窗口。窗口内若收到 root `idle/session.error` 派生终态则不得补写旧 `run.failed`；窗口结束仍无 root 终态时才追加一次失败。真正的 SSE 订阅 transport error 或浏览器连接错误没有独立业务终态含义，继续按运行态丢失/重连规则处理；若旧服务已先落临时失败，后到 root 终态仍可纠正 Run 状态和最终快照。
 9. stale active Run 后台收敛也会追加既有 `run.failed` 事件。该事件只表示平台侧长时间未收到有效运行输出且本地后台订阅可能失效，不代表后端主动取消或中止远端 opencode 会话。
 10. `SIDE_QUESTION` Run 使用同一 RunEvent SSE：`side_question.started/progress` 为 durable，`side_question.delta` 为 transient；最终完整答案只以 `run.succeeded.payload.answer` 为权威结果，供客户端校准断线期间遗漏的 delta。
 11. 前端 `onRawMessage` 捕获的 RunEvent SSE `MessageEvent.data` 只用于页面“原始输出”观察副本；它与 HTTP 原始报文共用预缓存安全处理，递归脱敏所有层级、大小写不敏感的 `contextToken` 后再截断和缓存。该处理不改写交给 RunEvent reducer 的实际事件，但禁止原始 SSE 数据绕过脱敏直接进入调试缓存。
 12. Run 的 `storageMode` 由创建时 manifest 固定，活动期间禁止切换。manifest 缺失表示 legacy/旧数据；Redis 新模式运行态缺失或不可用时返回 `RUN_DETAILS_EXPIRED` / `RUNTIME_STATE_UNAVAILABLE`，不得回退数据库或 JVM 内存读取原始详情。
+13. 已认证前端以标量 `(runId, sessionId, token)` 标识单 Run fetch SSE，同一逻辑 Run 同时最多保留一条应用层订阅；Run 对象的 status 投影、冲突终态纠正和标题等待不得重建连接。终态先保留 500ms 稳定窗口，普通终态随后关闭，标题待定则复用原连接直到标题同步或 watch closed；连接内游标、事件去重与 transport reconnect 仍由公共 event-stream client 维护。
 
 ## RunEvent 基础字段
 
@@ -402,7 +403,7 @@ scope 发现与缓存规则：
 - root session idle 额外派生 `run.succeeded`；child session idle 只发送 `session.status`。不得用“idle 前尚无 assistant 输出”过滤真实远端终态；平台通过正确的 OpenCode 时序 dispatch ID 防止消息排序错误导致的无输出 idle。
 - root `session.error` 额外派生 `run.failed`；child `session.error` 只发送 `session.error`。
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
-- 后端处理 root 终态时必须先读取当前 Run，并把 root 终态作为最终事实保存；后到 root 终态可以纠正先到的 transport error 临时失败并刷新终态快照。`Streaming response failed` 等 transport error 没有独立业务终态含义，应给 root 终态短暂到达窗口；窗口内没有 root 终态时才在 Run 仍非终态的前提下收敛为 `run.failed`，并在 payload 中保留单行、长度受限的安全错误说明，供前端解释为什么停止输出。
+- 后端处理 root 终态时必须先读取当前 Run，并把 root 终态作为最终事实保存；后到 root 终态可以纠正旧服务先落的临时失败并刷新终态快照。后台 dispatch 的响应异常（包括本地化 `PlatformException`）统一给 root 终态 300ms 到达窗口，不再依赖 `Streaming response failed` 等英文字面量；窗口内没有 root 终态时才在 Run 仍非终态的前提下收敛为一次 `run.failed`，并在 payload 中保留单行、长度受限的安全错误说明。`REDIS_SUMMARY` 在该窗口内继续持有原 owner lease 和原事件订阅；根终态沿既有生命周期释放 owner，无根终态时以原 fencing token 追加失败、完成投影再释放，owner 已转移或 manifest 已终态的旧执行者不得写失败。真正的事件流错误仍走运行态丢失与 owner 重新竞争链路。
 
 ## 内部模型代理 SSE
 

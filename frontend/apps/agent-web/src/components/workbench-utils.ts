@@ -115,6 +115,39 @@ export function runEventMatchesRun(
   return Boolean(event.runId && subscribedRunId && currentRun?.runId && event.runId === subscribedRunId && event.runId === currentRun.runId);
 }
 
+/**
+ * RunEvent 订阅只暴露稳定标量身份；Run 对象内的 status 等投影变化不能重建同一条 SSE。
+ */
+export function runEventSubscriptionRunId(
+  currentRun: Pick<Run, "runId" | "status"> | null | undefined,
+  pendingTitleRunId: string | null | undefined,
+  terminalSettleRunId: string | null | undefined
+): string | undefined {
+  if (!currentRun) {
+    return undefined;
+  }
+  const busy = currentRun.status === "PENDING"
+    || currentRun.status === "QUEUED"
+    || currentRun.status === "RUNNING"
+    || currentRun.status === "CANCELLING";
+  return busy || pendingTitleRunId === currentRun.runId || terminalSettleRunId === currentRun.runId
+    ? currentRun.runId
+    : undefined;
+}
+
+/** 平台会话切换时先撤销旧 Run 身份，避免旧连接晚到事件投影到新会话。 */
+export function runEventSubscriptionSessionId(
+  subscribedRunId: string | undefined,
+  currentRun: Pick<Run, "runId" | "sessionId"> | null | undefined,
+  currentSessionId: string | undefined
+): string | undefined {
+  return subscribedRunId
+    && currentRun?.runId === subscribedRunId
+    && currentRun.sessionId === currentSessionId
+    ? currentRun.sessionId
+    : undefined;
+}
+
 export type RunEventProjectionMode = "conversation" | "title-only" | "ignore";
 
 /**

@@ -135,6 +135,8 @@ import {
   isSupersededInteractionAsk,
   runEventProjectionMode,
   runEventProjection,
+  runEventSubscriptionRunId,
+  runEventSubscriptionSessionId,
   runtimeResources,
   runtimeStatus,
   platformSessionTitleFromSynchronizedEventPayload,
@@ -164,6 +166,7 @@ const router = useRouter();
 const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
 const AGENT_CATALOG_REQUEST_TIMEOUT_MS = 8000;
 const RUN_EVENT_SSE_ERROR_TITLE = "RunEvent SSE 连接异常";
+const RUN_EVENT_TERMINAL_SETTLE_MS = 500;
 const OPENCODE_PROCESS_START_STEPS = [
   { step: "VALIDATING_REQUEST", name: "校验请求" },
   { step: "CHECKING_ASSIGNMENT", name: "确认分配" },
@@ -267,11 +270,16 @@ const run = shallowRef<Run | null>(null);
 // OpenCode 原生 title agent 会在 root Run 成功后异步发出 session.updated。
 // 该 Run 处于待命名状态时，保留既有 Run SSE，直到后端确认标题已持久化或显式关闭监听。
 const pendingSessionTitleRunId = ref<string | null>(null);
+// 冲突终态可能在同一批 durable replay 中被根事实纠正；hold 先于 status 投影建立，避免连接抖动。
+const terminalRunEventSubscriptionHoldRunId = ref<string | null>(null);
+let terminalRunEventSubscriptionHoldTimer: ReturnType<typeof setTimeout> | null = null;
 // 新 Run HTTP 响应返回前，旧 Run 可能仍因标题同步保持订阅；该 ID 用于截断其对话投影。
 const supersededConversationRunId = ref<string | null>(null);
 const rawEntriesBySessionId = ref<Record<string, RawOutputEntry[]>>({});
 const rawRunSessionMap = ref<Record<string, string>>({});
 const reportedRunEventStreamErrors = new Set<string>();
+// legacy 终态重放只能为每个逻辑 Run 启动一条 messages -> feedback 批量恢复链。
+const legacyFeedbackRecoveryRunIds = new Set<string>();
 const lastPrompt = ref("");
 const lastRunDraft = ref<AutoRetryRunDraft | null>(null);
 // 仅当前页面真实发出的未决启动请求可以为 runtime-state 接管提供 Todo owner；跨标签页 Run 不猜归属。
@@ -442,6 +450,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   invalidateConversationInteraction();
+  clearTerminalRunEventSubscriptionHold();
   window.removeEventListener("keydown", onWindowKeydown);
   clearFileTreeRetryTimers();
   if (workspaceFileCandidateTimer) {
@@ -1731,61 +1740,103 @@ watch([() => selectedProvider.value, () => selectedModel.value, allModels], ([pr
   }
 });
 
-// ===== RunEvent SSE 订阅：Run 运行中或等待 OpenCode 原生标题时建立 =====
-watch([run, pendingSessionTitleRunId, () => authStore.token], ([r, pendingTitleRunId], _old, onCleanup) => {
-  if (!r || (!isRunBusyStatus(r.status) && pendingTitleRunId !== r.runId)) {
+// ===== RunEvent SSE 订阅：仅标量身份变化时切换，同一 Run 的状态投影不重建连接 =====
+const activeRunEventSubscriptionRunId = computed(() => runEventSubscriptionRunId(
+  run.value,
+  pendingSessionTitleRunId.value,
+  terminalRunEventSubscriptionHoldRunId.value
+));
+const activeRunEventSubscriptionSessionId = computed(() => runEventSubscriptionSessionId(
+  activeRunEventSubscriptionRunId.value,
+  run.value,
+  session.value?.sessionId
+));
+
+function holdTerminalRunEventSubscription(runId: string) {
+  // 已关闭或已切换 Run 的连接晚到事件不能重新建立旧订阅。
+  if (activeRunEventSubscriptionRunId.value !== runId) {
     return;
   }
-  const subscription = subscribeRunEvents({
-    baseUrl: apiBaseUrl,
-    runId: r.runId,
-    token: authStore.token,
-    onRawMessage: (message) => observeRawRunEventMessage(message, r.sessionId),
-    onEvent: (event) => {
-      if (ignoredRunIds.value.has(event.runId)) {
-        return;
-      }
-      const projectionMode = runEventProjectionMode(
-        event,
-        r.runId,
-        run.value,
-        supersededConversationRunId.value
-      );
-      if (projectionMode === "ignore") {
-        return;
-      }
-      if (projectionMode === "title-only") {
-        applyRunEventWorkbenchProjection(event, false, r.sessionId);
-        return;
-      }
-      handleRunEvent(event, r.sessionId);
-    },
-    onStatus: (status) => {
-      logs.value = [...logs.value.slice(-200), `[sse] ${status}`];
-    },
-    onError: () => {
-      // 新请求尚未拿到 HTTP 响应时 run.value 仍可能指向旧 Run；旧订阅错误不能污染新轮。
-      if (supersededConversationRunId.value === r.runId) {
-        return;
-      }
-      if (run.value?.runId === r.runId && isRunBusyStatus(run.value.status)) {
-        const message = "浏览器事件流连接异常，前端会等待自动重连；如后端确认失败，会继续收到 run.failed。";
-        feedback.value = { kind: "error", title: RUN_EVENT_SSE_ERROR_TITLE, description: message };
-        if (!reportedRunEventStreamErrors.has(r.runId)) {
-          reportedRunEventStreamErrors.add(r.runId);
-          observeRunEventStreamError(r.runId, r.sessionId);
-          dispatchChat({ type: "run.stream.error", runId: r.runId, message });
+  if (terminalRunEventSubscriptionHoldTimer) {
+    clearTimeout(terminalRunEventSubscriptionHoldTimer);
+  }
+  terminalRunEventSubscriptionHoldRunId.value = runId;
+  terminalRunEventSubscriptionHoldTimer = setTimeout(() => {
+    terminalRunEventSubscriptionHoldTimer = null;
+    if (terminalRunEventSubscriptionHoldRunId.value === runId) {
+      terminalRunEventSubscriptionHoldRunId.value = null;
+    }
+  }, RUN_EVENT_TERMINAL_SETTLE_MS);
+}
+
+function clearTerminalRunEventSubscriptionHold() {
+  if (terminalRunEventSubscriptionHoldTimer) {
+    clearTimeout(terminalRunEventSubscriptionHoldTimer);
+    terminalRunEventSubscriptionHoldTimer = null;
+  }
+  terminalRunEventSubscriptionHoldRunId.value = null;
+}
+
+watch(
+  [activeRunEventSubscriptionRunId, activeRunEventSubscriptionSessionId, () => authStore.token],
+  ([subscribedRunId, subscribedSessionId, token], _old, onCleanup) => {
+    if (!subscribedRunId || !subscribedSessionId || !token) {
+      return;
+    }
+    const subscription = subscribeRunEvents({
+      baseUrl: apiBaseUrl,
+      runId: subscribedRunId,
+      token,
+      onRawMessage: (message) => observeRawRunEventMessage(message, subscribedSessionId),
+      onEvent: (event) => {
+        if (ignoredRunIds.value.has(event.runId)) {
+          return;
+        }
+        const projectionMode = runEventProjectionMode(
+          event,
+          subscribedRunId,
+          run.value,
+          supersededConversationRunId.value
+        );
+        if (projectionMode === "ignore") {
+          return;
+        }
+        if (projectionMode === "title-only") {
+          applyRunEventWorkbenchProjection(event, false, subscribedSessionId);
+          return;
+        }
+        handleRunEvent(event, subscribedSessionId);
+      },
+      onStatus: (status) => {
+        logs.value = [...logs.value.slice(-200), `[sse] ${status}`];
+      },
+      onError: () => {
+        // 新请求尚未拿到 HTTP 响应时 run.value 仍可能指向旧 Run；旧订阅错误不能污染新轮。
+        if (supersededConversationRunId.value === subscribedRunId) {
+          return;
+        }
+        if (run.value?.runId === subscribedRunId && isRunBusyStatus(run.value.status)) {
+          const message = "浏览器事件流连接异常，前端会等待自动重连；如后端确认失败，会继续收到 run.failed。";
+          feedback.value = { kind: "error", title: RUN_EVENT_SSE_ERROR_TITLE, description: message };
+          if (!reportedRunEventStreamErrors.has(subscribedRunId)) {
+            reportedRunEventStreamErrors.add(subscribedRunId);
+            observeRunEventStreamError(subscribedRunId, subscribedSessionId);
+            dispatchChat({ type: "run.stream.error", runId: subscribedRunId, message });
+          }
         }
       }
-    }
-  });
-  onCleanup(() => subscription.close());
-});
+    });
+    onCleanup(() => subscription.close());
+  }
+);
 
 // 切换会话时释放旁路问答展示；主 Run 的恢复仍统一由 runtime-state 流和带 fence 的 fallback 接管。
 watch(
   () => session.value?.sessionId,
-  (sessionId) => {
+  (sessionId, previousSessionId) => {
+    if (sessionId !== previousSessionId) {
+      legacyFeedbackRecoveryRunIds.clear();
+    }
     robotSideQuestion.resetForSessionChange(sessionId);
   },
   { immediate: true }
@@ -4634,6 +4685,8 @@ function applyRunEventWorkbenchProjection(
       void refreshWorkspaceGitDiff();
     }
   } else if (event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
+    // 必须先建立 hold 再修改 run.status，否则标量订阅会在根纠正终态到达前关闭。
+    holdTerminalRunEventSubscription(event.runId);
     if (event.type === "run.succeeded") {
       clearRunEventSseFeedback();
     }
@@ -4682,7 +4735,7 @@ function applyRunEventWorkbenchProjection(
         }
       } else {
         // legacy 后端没有稳定摘要 ID，继续使用原有短期兼容查询。
-        void refreshPersistedFeedbackIdentities(run.value.sessionId);
+        startLegacyFeedbackRecovery(event.runId, run.value.sessionId);
       }
     }
     // 触发 taskUsage 重新计算
@@ -4700,7 +4753,15 @@ function hasUnmappedAssistantRemoteMessages(): boolean {
   });
 }
 
-async function refreshPersistedFeedbackIdentities(sessionId: string, attempt = 1): Promise<void> {
+function startLegacyFeedbackRecovery(runId: string, sessionId: string) {
+  if (legacyFeedbackRecoveryRunIds.has(runId)) {
+    return;
+  }
+  legacyFeedbackRecoveryRunIds.add(runId);
+  void refreshPersistedFeedbackIdentities(runId, sessionId);
+}
+
+async function refreshPersistedFeedbackIdentities(runId: string, sessionId: string, attempt = 1): Promise<void> {
   try {
     const page = await api.listSessionMessages(sessionId, 1, 100, { refresh: false });
     if (session.value?.sessionId !== sessionId) {
@@ -4710,11 +4771,11 @@ async function refreshPersistedFeedbackIdentities(sessionId: string, attempt = 1
     rememberPersistedMessageIdentities(persistedMessages);
     await loadFeedbacksForMessages(persistedMessages, sessionId);
     if (attempt < 3 && hasUnmappedAssistantRemoteMessages()) {
-      setTimeout(() => void refreshPersistedFeedbackIdentities(sessionId, attempt + 1), 500);
+      setTimeout(() => void refreshPersistedFeedbackIdentities(runId, sessionId, attempt + 1), 500);
     }
   } catch {
     if (attempt < 3 && session.value?.sessionId === sessionId) {
-      setTimeout(() => void refreshPersistedFeedbackIdentities(sessionId, attempt + 1), 500);
+      setTimeout(() => void refreshPersistedFeedbackIdentities(runId, sessionId, attempt + 1), 500);
     }
   }
 }

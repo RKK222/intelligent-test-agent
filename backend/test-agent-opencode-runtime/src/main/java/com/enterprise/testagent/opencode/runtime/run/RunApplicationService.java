@@ -953,12 +953,12 @@ public class RunApplicationService {
                     input.command(),
                     input.arguments(),
                     traceId);
-            // prompt_async 的 HTTP 响应不代表 Run 完成，不能阻塞创建 Run 的接口和后续 SSE 订阅。
+            // prompt_async/command 的 HTTP 结果不是 Run 终态，后台调用异常需给 root 终态留出到达窗口。
             Mono.defer(() -> runtime.startRun(command))
                     .subscribe(
                             ignored -> {
                             },
-                            error -> failRunFromStream(
+                            error -> failRunFromDispatch(
                                     resolvedAgentId, running, RunStorageMode.LEGACY_FULL, traceId, error));
             return running;
         } catch (PlatformException exception) {
@@ -1191,7 +1191,7 @@ public class RunApplicationService {
                         .subscribe(
                                 ignored -> {
                                 },
-                                error -> failRunFromStreamIfOwned(
+                                error -> failRunFromDispatchIfOwned(
                                         resolvedAgentId, running, RunStorageMode.REDIS_SUMMARY,
                                         traceId, error, claimedOwnership));
                 subscriptionHandedOff = true;
@@ -1278,7 +1278,7 @@ public class RunApplicationService {
         return ownership == null ? null : ownership.lease();
     }
 
-    private void failRunFromStreamIfOwned(
+    private void failRunFromDispatchIfOwned(
             String agentId,
             Run run,
             RunStorageMode storageMode,
@@ -1292,10 +1292,8 @@ public class RunApplicationService {
                 return;
             }
         }
-        failRunFromStream(agentId, run, storageMode, traceId, error, ownership);
-        if (ownership != null) {
-            releaseOwnershipBestEffort(ownership, run.runId(), traceId);
-        }
+        scheduleRunFailureAfterTerminalGrace(
+                agentId, run, storageMode, traceId, error, "dispatch_response", ownership);
     }
 
     private void discardBeforeDispatchBestEffort(
@@ -3458,24 +3456,76 @@ public class RunApplicationService {
             Throwable error,
             RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         if (isStreamingTransportError(error)) {
-            LOGGER.info(
-                    "Delay Run failure for transport error, runId={}, delayMs={}, traceId={}",
-                    run.runId().value(),
-                    TRANSPORT_ERROR_TERMINAL_GRACE.toMillis(),
-                    traceId);
-            Mono.delay(TRANSPORT_ERROR_TERMINAL_GRACE)
-                    .publishOn(Schedulers.boundedElastic())
-                    .subscribe(
-                            ignored -> failRunAfterTransportGrace(
-                                    agentId, run, storageMode, traceId, error),
-                            delayedError -> LOGGER.warn(
-                                    "Failed to schedule delayed Run stream failure, runId={}, traceId={}, exceptionType={}",
-                                    run.runId().value(),
-                                    traceId,
-                                    delayedError.getClass().getSimpleName()));
+            scheduleRunFailureAfterTerminalGrace(
+                    agentId, run, storageMode, traceId, error, "stream_transport", null);
             return;
         }
         failRunFromStreamNow(agentId, run, storageMode, traceId, error, ownership);
+    }
+
+    /**
+     * 远程 prompt/command 已经可能产生业务副作用，调用响应异常只能作为候选失败。
+     */
+    private void failRunFromDispatch(
+            String agentId,
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            Throwable error) {
+        scheduleRunFailureAfterTerminalGrace(
+                agentId, run, storageMode, traceId, error, "dispatch_response", null);
+    }
+
+    private void scheduleRunFailureAfterTerminalGrace(
+            String agentId,
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            Throwable error,
+            String source,
+            RunOwnerLeaseSupervisor.OwnershipHandle retainedOwnership) {
+        LOGGER.info(
+                "Delay Run failure for terminal arbitration, runId={}, storageMode={}, source={}, errorCode={}, "
+                        + "exceptionType={}, delayMs={}, traceId={}",
+                run.runId().value(),
+                storageMode,
+                source,
+                platformErrorCode(error),
+                error.getClass().getSimpleName(),
+                TRANSPORT_ERROR_TERMINAL_GRACE.toMillis(),
+                traceId);
+        Mono.delay(TRANSPORT_ERROR_TERMINAL_GRACE)
+                .publishOn(Schedulers.boundedElastic())
+                .subscribe(
+                        ignored -> {
+                            if (retainedOwnership == null) {
+                                failRunAfterTransportGrace(
+                                        agentId, run, storageMode, traceId, error, source);
+                            } else {
+                                failRunAfterDispatchGraceWithOwnership(
+                                        agentId, run, storageMode, traceId, error, source, retainedOwnership);
+                            }
+                        },
+                        delayedError -> LOGGER.warn(
+                                "Failed to schedule delayed Run failure, runId={}, storageMode={}, source={}, "
+                                        + "errorCode={}, traceId={}, exceptionType={}",
+                                run.runId().value(),
+                                storageMode,
+                                source,
+                                platformErrorCode(error),
+                                traceId,
+                                delayedError.getClass().getSimpleName()));
+    }
+
+    private String platformErrorCode(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof PlatformException platformException) {
+                return platformException.errorCode().name();
+            }
+            current = current.getCause();
+        }
+        return "UNKNOWN";
     }
 
     /** transport grace 到期后重新竞争 owner；其它 Java 已接管时旧执行者不得落终态。 */
@@ -3484,8 +3534,15 @@ public class RunApplicationService {
             Run run,
             RunStorageMode storageMode,
             String traceId,
-            Throwable error) {
+            Throwable error,
+            String source) {
         if (storageMode != RunStorageMode.REDIS_SUMMARY || ownerLeaseSupervisor == null) {
+            Run current = runRepository.findById(run.runId()).orElse(run);
+            if (current.status().isTerminal()) {
+                logDelayedFailureSuppressed(run, storageMode, traceId, source, error, current.status());
+                return;
+            }
+            logDelayedFailurePersisting(run, storageMode, traceId, source, error);
             failRunFromStreamNow(agentId, run, storageMode, traceId, error, null);
             return;
         }
@@ -3493,6 +3550,13 @@ public class RunApplicationService {
         try {
             RunRuntimeManifest expected = runRuntimeStore.findManifest(run.runId()).orElse(null);
             if (expected == null || !expected.active()) {
+                logDelayedFailureSuppressed(
+                        run,
+                        storageMode,
+                        traceId,
+                        source,
+                        error,
+                        expected == null ? null : expected.status());
                 return;
             }
             ownership = runRuntimeStore
@@ -3500,13 +3564,24 @@ public class RunApplicationService {
                     .flatMap(ownerLeaseSupervisor::adopt)
                     .orElse(null);
             if (ownership == null) {
+                LOGGER.info(
+                        "Suppress delayed Run failure because owner changed, runId={}, storageMode={}, source={}, "
+                                + "errorCode={}, traceId={}",
+                        run.runId().value(),
+                        storageMode,
+                        source,
+                        platformErrorCode(error),
+                        traceId);
                 return;
             }
+            logDelayedFailurePersisting(run, storageMode, traceId, source, error);
             failRunFromStreamNow(agentId, run, storageMode, traceId, error, ownership);
         } catch (RuntimeException exception) {
             LOGGER.warn(
-                    "Delayed Run stream failure deferred to current owner, runId={}, traceId={}, exceptionType={}",
-                    run.runId().value(), traceId, exception.getClass().getSimpleName());
+                    "Delayed Run stream failure deferred to current owner, runId={}, storageMode={}, source={}, "
+                            + "errorCode={}, traceId={}, exceptionType={}",
+                    run.runId().value(), storageMode, source, platformErrorCode(error), traceId,
+                    exception.getClass().getSimpleName());
         } finally {
             if (ownership != null) {
                 releaseOwnershipBestEffort(ownership, run.runId(), traceId);
@@ -3514,18 +3589,98 @@ public class RunApplicationService {
         }
     }
 
-    private void failRunFromStreamNow(
+    /** dispatch 响应异常期间保留原 owner，避免提前关闭仍可达的 root 事件流。 */
+    private void failRunAfterDispatchGraceWithOwnership(
+            String agentId,
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            Throwable error,
+            String source,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
+        try {
+            RunRuntimeManifest manifest = runRuntimeStore.findManifest(run.runId()).orElse(null);
+            if (manifest == null || !manifest.active()) {
+                logDelayedFailureSuppressed(
+                        run,
+                        storageMode,
+                        traceId,
+                        source,
+                        error,
+                        manifest == null ? null : manifest.status());
+                return;
+            }
+            ownerLeaseSupervisor.requireOwned(ownership);
+            logDelayedFailurePersisting(run, storageMode, traceId, source, error);
+            if (failRunFromStreamNow(agentId, run, storageMode, traceId, error, ownership)) {
+                releaseOwnershipBestEffort(ownership, run.runId(), traceId);
+            }
+        } catch (RunOwnershipLostException ignored) {
+            LOGGER.info(
+                    "Suppress delayed Run failure after ownership transfer, runId={}, storageMode={}, source={}, "
+                            + "errorCode={}, traceId={}",
+                    run.runId().value(),
+                    storageMode,
+                    source,
+                    platformErrorCode(error),
+                    traceId);
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Defer delayed Run failure because runtime state is unavailable, runId={}, storageMode={}, "
+                            + "source={}, errorCode={}, traceId={}, exceptionType={}",
+                    run.runId().value(), storageMode, source, platformErrorCode(error), traceId,
+                    exception.getClass().getSimpleName());
+        }
+    }
+
+    private void logDelayedFailureSuppressed(
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            String source,
+            Throwable error,
+            RunStatus terminalStatus) {
+        LOGGER.info(
+                "Suppress delayed Run failure because root terminal already won, runId={}, storageMode={}, "
+                        + "source={}, terminalStatus={}, errorCode={}, traceId={}",
+                run.runId().value(),
+                storageMode,
+                source,
+                terminalStatus,
+                platformErrorCode(error),
+                traceId);
+    }
+
+    private void logDelayedFailurePersisting(
+            Run run,
+            RunStorageMode storageMode,
+            String traceId,
+            String source,
+            Throwable error) {
+        LOGGER.warn(
+                "Persist delayed Run failure after terminal grace, runId={}, storageMode={}, source={}, "
+                        + "errorCode={}, exceptionType={}, traceId={}",
+                run.runId().value(),
+                storageMode,
+                source,
+                platformErrorCode(error),
+                error.getClass().getSimpleName(),
+                traceId);
+    }
+
+    private boolean failRunFromStreamNow(
             String agentId,
             Run run,
             RunStorageMode storageMode,
             String traceId,
             Throwable error,
             RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
+        boolean terminalPersisted = false;
         try {
             if (storageMode == RunStorageMode.REDIS_SUMMARY) {
                 RunRuntimeManifest manifest = runRuntimeStore.findManifest(run.runId()).orElse(null);
                 if (manifest == null || manifest.status().isTerminal()) {
-                    return;
+                    return false;
                 }
                 Instant occurredAt = Instant.now();
                 String safeMessage = safeStreamErrorMessage(error);
@@ -3545,6 +3700,7 @@ public class RunApplicationService {
                                 false),
                         RunStorageMode.REDIS_SUMMARY,
                         ownership);
+                terminalPersisted = true;
                 // fenced terminal append 成功后 manifest 已终态，不再允许其它 owner 接管。
                 runTerminalProjectionService.project(
                         run.runId(),
@@ -3554,27 +3710,31 @@ public class RunApplicationService {
                         safeMessage,
                         false,
                         traceId);
-                return;
+                return true;
             }
             Run current = runRepository.findById(run.runId()).orElse(run);
             if (!current.status().isTerminal()) {
                 Instant occurredAt = Instant.now();
                 Run failed = current.fail(occurredAt);
-                saveRunIfStatus(failed, current.status(), traceId, "stream_error")
-                        .ifPresent(saved -> {
-                            append(saved.runId(), RunEventType.RUN_FAILED, traceId, occurredAt,
-                                    Map.of(
-                                            "error", Map.of(
-                                                    "name", error.getClass().getSimpleName(),
-                                                    "message", safeStreamErrorMessage(error)),
-                                            "message", safeStreamErrorMessage(error)));
-                            snapshotService.persistRunSnapshot(agentId, saved, traceId);
-                        });
+                Optional<Run> saved = saveRunIfStatus(failed, current.status(), traceId, "stream_error");
+                if (saved.isPresent()) {
+                    Run savedRun = saved.orElseThrow();
+                    terminalPersisted = true;
+                    append(savedRun.runId(), RunEventType.RUN_FAILED, traceId, occurredAt,
+                            Map.of(
+                                    "error", Map.of(
+                                            "name", error.getClass().getSimpleName(),
+                                            "message", safeStreamErrorMessage(error)),
+                                    "message", safeStreamErrorMessage(error)));
+                    snapshotService.persistRunSnapshot(agentId, savedRun, traceId);
+                }
             }
+            return terminalPersisted;
         } catch (RuntimeException exception) {
             LOGGER.warn(
                     "Failed to persist opencode stream failure, runId={}, traceId={}, exceptionType={}",
                     run.runId().value(), traceId, exception.getClass().getSimpleName());
+            return terminalPersisted;
         } finally {
             runSessionScopeRouter.finishRun(run.runId());
         }

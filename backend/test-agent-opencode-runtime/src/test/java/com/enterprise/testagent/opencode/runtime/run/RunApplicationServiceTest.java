@@ -565,6 +565,120 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void redisSummaryKeepsOwnerDuringSlashCommandFailureGraceAndAcceptsRootSuccess() {
+        RedisDispatchGraceFixture fixture = redisDispatchGraceFixture();
+
+        Run run = fixture.startRun();
+
+        sleep(Duration.ofMillis(100));
+        assertThat(fixture.runtimeManifest().get().status()).isEqualTo(RunStatus.RUNNING);
+        org.mockito.Mockito.verify(fixture.ownerSupervisor(), org.mockito.Mockito.never())
+                .release(fixture.ownership());
+        org.mockito.Mockito.verify(fixture.runtimeStore(), org.mockito.Mockito.never()).appendDurable(
+                org.mockito.ArgumentMatchers.argThat(draft -> draft.type() == RunEventType.RUN_FAILED),
+                org.mockito.ArgumentMatchers.any(RunOwnerLease.class));
+
+        fixture.remoteEvents().tryEmitNext(new RunEventDraft(
+                run.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                "trace_dispatch_grace",
+                Instant.now(),
+                Map.of("messageID", "msg_remote1234567890abcdef")));
+
+        awaitManifestStatus(fixture.runtimeManifest(), RunStatus.SUCCEEDED);
+        org.mockito.Mockito.verify(fixture.ownerSupervisor(), org.mockito.Mockito.timeout(1_000))
+                .release(fixture.ownership());
+        org.mockito.Mockito.verify(fixture.runtimeStore(), org.mockito.Mockito.never()).appendDurable(
+                org.mockito.ArgumentMatchers.argThat(draft -> draft.type() == RunEventType.RUN_FAILED),
+                org.mockito.ArgumentMatchers.any(RunOwnerLease.class));
+    }
+
+    @Test
+    void redisSummaryPersistsOneFencedFailureAfterSlashCommandGraceWithoutRootTerminal() {
+        RedisDispatchGraceFixture fixture = redisDispatchGraceFixture();
+
+        Run run = fixture.startRun();
+
+        awaitManifestStatus(fixture.runtimeManifest(), RunStatus.FAILED);
+        org.mockito.Mockito.verify(fixture.runtimeStore(), org.mockito.Mockito.timeout(1_000).times(1))
+                .appendDurable(
+                        org.mockito.ArgumentMatchers.argThat(draft -> draft.type() == RunEventType.RUN_FAILED),
+                        org.mockito.ArgumentMatchers.argThat(lease ->
+                                lease.runId().equals(run.runId()) && lease.fencingToken() == 11L));
+        org.mockito.Mockito.verify(fixture.terminalProjection(), org.mockito.Mockito.timeout(1_000)).project(
+                org.mockito.ArgumentMatchers.eq(run.runId()),
+                org.mockito.ArgumentMatchers.eq(RunStatus.FAILED),
+                org.mockito.ArgumentMatchers.eq("TRANSPORT_ERROR"),
+                org.mockito.ArgumentMatchers.eq("STREAM_ERROR"),
+                org.mockito.ArgumentMatchers.eq("TestAgent 服务响应异常"),
+                org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq("trace_dispatch_grace"));
+        org.mockito.Mockito.verify(fixture.ownerSupervisor(), org.mockito.Mockito.timeout(1_000))
+                .release(fixture.ownership());
+    }
+
+    @Test
+    void redisSummaryUsesRootFailureInsteadOfSlashCommandCandidateFailure() {
+        RedisDispatchGraceFixture fixture = redisDispatchGraceFixture();
+
+        Run run = fixture.startRun();
+        fixture.remoteEvents().tryEmitNext(new RunEventDraft(
+                run.runId(),
+                RunEventType.RUN_FAILED,
+                "trace_dispatch_grace",
+                Instant.now(),
+                Map.of("message", "根 session.error")));
+
+        awaitManifestStatus(fixture.runtimeManifest(), RunStatus.FAILED);
+        sleep(Duration.ofMillis(400));
+        org.mockito.Mockito.verify(fixture.runtimeStore(), org.mockito.Mockito.times(1)).appendDurable(
+                org.mockito.ArgumentMatchers.argThat(draft -> draft.type() == RunEventType.RUN_FAILED),
+                org.mockito.ArgumentMatchers.any(RunOwnerLease.class));
+        org.mockito.Mockito.verify(fixture.terminalProjection()).project(
+                org.mockito.ArgumentMatchers.eq(run.runId()),
+                org.mockito.ArgumentMatchers.eq(RunStatus.FAILED),
+                org.mockito.ArgumentMatchers.eq("REMOTE_ROOT"),
+                org.mockito.ArgumentMatchers.eq("REMOTE_FAILED"),
+                org.mockito.ArgumentMatchers.eq("根 session.error"),
+                org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq("trace_dispatch_grace"));
+    }
+
+    @Test
+    void redisSummaryDoesNotPersistSlashCommandFailureAfterOwnerTransfersDuringGrace() {
+        RedisDispatchGraceFixture fixture = redisDispatchGraceFixture();
+
+        fixture.startRun();
+        sleep(Duration.ofMillis(100));
+        org.mockito.Mockito.doThrow(new RunOwnershipLostException("owner transferred"))
+                .when(fixture.ownerSupervisor()).requireOwned(fixture.ownership());
+
+        sleep(Duration.ofMillis(350));
+        assertThat(fixture.runtimeManifest().get().status()).isEqualTo(RunStatus.RUNNING);
+        org.mockito.Mockito.verify(fixture.runtimeStore(), org.mockito.Mockito.never()).appendDurable(
+                org.mockito.ArgumentMatchers.argThat(draft -> draft.type() == RunEventType.RUN_FAILED),
+                org.mockito.ArgumentMatchers.any(RunOwnerLease.class));
+        org.mockito.Mockito.verifyNoInteractions(fixture.terminalProjection());
+    }
+
+    @Test
+    void redisSummaryDoesNotReleaseOwnerWhenFencedCandidateFailureWasNotPersisted() {
+        RedisDispatchGraceFixture fixture = redisDispatchGraceFixture();
+        org.mockito.Mockito.doThrow(new DataAccessResourceFailureException("redis append failed"))
+                .when(fixture.runtimeStore()).appendDurable(
+                        org.mockito.ArgumentMatchers.argThat(draft -> draft.type() == RunEventType.RUN_FAILED),
+                        org.mockito.ArgumentMatchers.any(RunOwnerLease.class));
+
+        fixture.startRun();
+
+        sleep(Duration.ofMillis(450));
+        assertThat(fixture.runtimeManifest().get().status()).isEqualTo(RunStatus.RUNNING);
+        org.mockito.Mockito.verify(fixture.ownerSupervisor(), org.mockito.Mockito.never())
+                .release(fixture.ownership());
+        org.mockito.Mockito.verifyNoInteractions(fixture.terminalProjection());
+    }
+
+    @Test
     void redisSummaryStartupRedisFailureAfterAnchorSchedulesLossConvergence() {
         UserId userId = new UserId("usr_startup_redis_loss");
         Workspace workspaceSnapshot = workspace().withLinuxServerId("server-a", "trace_startup_loss", NOW);
@@ -1876,6 +1990,66 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void servicePrefersRootSuccessWhenSlashCommandResponseFailsWithUnifiedPlatformException() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        FakeExecutionNodeRepository nodes = new FakeExecutionNodeRepository();
+        FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
+        AgentRuntimeRegistry registry = runtimeRegistry(facade);
+        CountingSnapshotService snapshots = new CountingSnapshotService(runs, sessions, messages, nodes, registry, bindings);
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                command.traceId(),
+                Instant.now(),
+                Map.of("messageID", "msg_remote1234567890abcdef")))
+                .delaySubscription(Duration.ofMillis(50));
+        facade.startCommand = ignored -> Mono.error(new PlatformException(
+                ErrorCode.OPENCODE_BAD_GATEWAY,
+                "TestAgent 服务响应异常"));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                runs,
+                messages,
+                nodes,
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                registry,
+                bindings,
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                snapshots,
+                null,
+                null);
+
+        Run run = service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "/test-design-path",
+                        List.of(StartRunInput.PromptPart.text("/test-design-path")),
+                        null,
+                        "build",
+                        "enterprise-qwen/Qwen3.6-27B",
+                        null,
+                        "build",
+                        "test-design-path",
+                        ""),
+                "trace_1234567890abcdef");
+
+        awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        sleep(Duration.ofMillis(400));
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+        assertThat(snapshots.persistCalls).isEqualTo(1);
+    }
+
+    @Test
     void serviceUsesLaterRootTerminalEventAfterEarlierAsyncPromptTransportFailure() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
@@ -3000,6 +3174,110 @@ class RunApplicationServiceTest {
         assertThat(messages.saved).hasSizeGreaterThanOrEqualTo(expected);
     }
 
+    /** 构造 slash command 调用异常后的 REDIS_SUMMARY 终态裁决场景。 */
+    private static RedisDispatchGraceFixture redisDispatchGraceFixture() {
+        String traceId = "trace_dispatch_grace";
+        UserId userId = new UserId("usr_dispatch_grace");
+        Workspace workspaceSnapshot = workspace().withLinuxServerId("server-a", traceId, NOW);
+        ExecutionNode nodeSnapshot = userProcessNode("node_ocp_dispatch_grace", "http://10.8.0.12:4096");
+        Session sessionSnapshot = session().attachOpencodeSession(
+                REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(), NOW, traceId);
+        AgentSessionBinding bindingSnapshot = new AgentSessionBinding(
+                sessionSnapshot.sessionId(), "opencode", REMOTE_SESSION_ID, nodeSnapshot.executionNodeId(),
+                NOW, NOW, traceId);
+        ConversationRunContext context = new ConversationRunContext(
+                userId, "opencode", "ocp_dispatch_grace", "server-a",
+                sessionSnapshot, workspaceSnapshot, nodeSnapshot, bindingSnapshot, 1, NOW.plusSeconds(3600));
+        StartRunInput input = new StartRunInput(
+                sessionSnapshot.sessionId(), "/test-design-path", List.of(), null,
+                "build", "enterprise-qwen/Qwen3.6-27B", null, "build",
+                "test-design-path", "", "ctx_dispatch_grace", "request-dispatch-grace");
+        ConversationRunContextResolver contextResolver = org.mockito.Mockito.mock(ConversationRunContextResolver.class);
+        org.mockito.Mockito.when(contextResolver.resolve(userId, "opencode", input, traceId))
+                .thenReturn(Optional.of(context));
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, context)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        AtomicReference<RunRuntimeManifest> runtimeManifest = new AtomicReference<>();
+        RunRuntimeStore runtimeStore = mockRuntimeStoreForStart(runtimeManifest);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        org.mockito.Mockito.when(identity.backendProcessId()).thenReturn("bjp_dispatch_grace");
+        RunTerminalProjectionService terminalProjection = org.mockito.Mockito.mock(RunTerminalProjectionService.class);
+        RunOwnerLeaseSupervisor ownerSupervisor = org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.class);
+        RunOwnerLeaseSupervisor.OwnershipHandle ownership =
+                org.mockito.Mockito.mock(RunOwnerLeaseSupervisor.OwnershipHandle.class);
+        AtomicReference<RunOwnerLease> claimedLease = new AtomicReference<>();
+        org.mockito.Mockito.when(runtimeStore.claimOwnerLease(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("bjp_dispatch_grace")))
+                .thenAnswer(invocation -> {
+                    RunOwnerLease lease = new RunOwnerLease(
+                            invocation.getArgument(0), "bjp_dispatch_grace", 11L, NOW.plusSeconds(15));
+                    claimedLease.set(lease);
+                    return Optional.of(lease);
+                });
+        org.mockito.Mockito.when(ownerSupervisor.adopt(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.of(ownership));
+        org.mockito.Mockito.when(ownership.lease()).thenAnswer(ignored -> claimedLease.get());
+        org.mockito.Mockito.when(ownership.lost()).thenReturn(Mono.never());
+        Sinks.Many<RunEventDraft> remoteEvents = Sinks.many().unicast().onBackpressureBuffer();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = ignored -> remoteEvents.asFlux();
+        facade.startCommand = ignored -> Mono.error(new PlatformException(
+                ErrorCode.OPENCODE_BAD_GATEWAY,
+                "TestAgent 服务响应异常"));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), new FakeRunRepository(),
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository(), new RunEventLiveBus(), runtimeStore),
+                runtimeRegistry(facade, RUNTIME_DISPATCH_MESSAGE_ID),
+                new FakeAgentSessionBindingRepository(), new RunEventLiveBus(),
+                new RunEventPersistencePolicy(), null,
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class),
+                null, null, null, contextResolver, runtimeStore, selector, summaryPort,
+                terminalProjection, identity, ownerSupervisor);
+        return new RedisDispatchGraceFixture(
+                service, userId, input, traceId, runtimeManifest, runtimeStore,
+                terminalProjection, ownerSupervisor, ownership, remoteEvents);
+    }
+
+    private record RedisDispatchGraceFixture(
+            RunApplicationService service,
+            UserId userId,
+            StartRunInput input,
+            String traceId,
+            AtomicReference<RunRuntimeManifest> runtimeManifest,
+            RunRuntimeStore runtimeStore,
+            RunTerminalProjectionService terminalProjection,
+            RunOwnerLeaseSupervisor ownerSupervisor,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership,
+            Sinks.Many<RunEventDraft> remoteEvents) {
+
+        private Run startRun() {
+            return service.startRun(userId, "opencode", input, traceId);
+        }
+    }
+
+    private static void awaitManifestStatus(
+            AtomicReference<RunRuntimeManifest> manifest,
+            RunStatus expectedStatus) {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            RunRuntimeManifest current = manifest.get();
+            if (current != null && current.status() == expectedStatus) {
+                return;
+            }
+            sleepBriefly();
+        }
+        assertThat(manifest.get()).isNotNull().extracting(RunRuntimeManifest::status).isEqualTo(expectedStatus);
+    }
+
     private static void sleepBriefly() {
         try {
             Thread.sleep(10);
@@ -3510,6 +3788,8 @@ class RunApplicationServiceTest {
         private Function<OpencodeStreamEventsCommand, Flux<RunEventDraft>> streamEvents = ignored -> Flux.empty();
         private Function<OpencodeStartRunCommand, Mono<OpencodeStartRunResult>> startRun =
                 ignored -> Mono.just(new OpencodeStartRunResult(true));
+        private Function<OpencodeStartCommand, Mono<OpencodeStartRunResult>> startCommand =
+                ignored -> Mono.just(new OpencodeStartRunResult(true));
         private Function<OpencodeRuntimeCommand, Mono<OpencodeRuntimeResult>> runtime =
                 ignored -> Mono.just(new OpencodeRuntimeResult(JsonNodeFactory.instance.objectNode()));
 
@@ -3550,7 +3830,7 @@ class RunApplicationServiceTest {
         public Mono<OpencodeStartRunResult> startCommand(OpencodeStartCommand command) {
             callOrder.add("startCommand");
             startCommandCommands.add(command);
-            return Mono.just(new OpencodeStartRunResult(true));
+            return startCommand.apply(command);
         }
 
         @Override

@@ -464,6 +464,24 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("clears a stale SSE diagnostic card when a new run is requested", () => {
+    const pending = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), { type: "run.requested" });
+    const withStreamError = reduceAgentChatRuntime(pending, {
+      type: "run.stream.error",
+      runId: "run_old",
+      message: "浏览器事件流连接异常",
+      occurredAt: "2026-07-17T08:00:00Z"
+    });
+
+    const next = reduceAgentChatRuntime(withStreamError, {
+      type: "run.requested",
+      supersededRunId: "run_old"
+    });
+
+    expect(next.status).toBe("PENDING");
+    expect(next.messages).toHaveLength(0);
+  });
+
   it("keeps opencode session retry status visible with the upstream action", () => {
     const pending = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), { type: "run.requested" });
 

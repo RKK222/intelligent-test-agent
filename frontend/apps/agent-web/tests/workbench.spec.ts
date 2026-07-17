@@ -2228,68 +2228,75 @@ test("direct run projects remote question and permission to the platform session
   await expect.poll(() => questionReplies).toEqual([{ answers: [["A"]] }]);
 });
 
-test("a title-pending run keeps its SSE open until the synchronized native title arrives", async ({ page }) => {
-  await page.addInitScript(() => {
-    type StreamProbe = { runId: string; closed: boolean };
-    const probes: StreamProbe[] = [];
-    (window as Window & { __titleWatchRunStreams?: StreamProbe[] }).__titleWatchRunStreams = probes;
-
-    class MockRunEventSource {
-      onopen: ((event: Event) => void) | null = null;
-      onerror: ((event: Event) => void) | null = null;
-      private readonly listeners = new Map<string, Set<EventListener>>();
-      private closed = false;
-      private readonly probe: StreamProbe;
-
-      constructor(readonly url: string) {
-        const runId = decodeURIComponent(url).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
-        this.probe = { runId, closed: false };
-        probes.push(this.probe);
-        window.setTimeout(() => this.onopen?.(new Event("open")), 0);
-        window.setTimeout(() => this.emit("run.succeeded", runId, 1, { platformSessionTitlePending: true }), 10);
-        window.setTimeout(() => this.emit("session.updated", runId, 2, {
-          platformSessionTitleSynchronized: true,
-          platformSessionTitle: "登录功能测试设计",
-          isChildSession: false
-        }), 80);
+test("conflicting terminal replay keeps one authenticated SSE and one legacy feedback recovery chain", async ({ page }) => {
+  const sessionMessageRequests: string[] = [];
+  const runFeedbackQueryRequests: Array<Record<string, unknown>> = [];
+  await installAuthenticatedRunEventFetchStream(page, {
+    run_1: [
+      {
+        delayMs: 10,
+        events: [
+          {
+            seq: 1,
+            type: "message.updated",
+            payload: {
+              messageId: "msg_remote_live",
+              role: "assistant",
+              message: { id: "msg_remote_live", role: "assistant" }
+            }
+          },
+          {
+            seq: 2,
+            type: "message.part.updated",
+            payload: {
+              messageId: "msg_remote_live",
+              partId: "part_remote_live",
+              part: {
+                id: "part_remote_live",
+                messageID: "msg_remote_live",
+                type: "text",
+                text: "根终态最终回答"
+              }
+            }
+          },
+          {
+            seq: 3,
+            type: "run.failed",
+            payload: { message: "候选网关失败" }
+          },
+          {
+            seq: 4,
+            type: "run.succeeded",
+            payload: { platformSessionTitlePending: true }
+          }
+        ]
+      },
+      {
+        delayMs: 1_600,
+        events: [{
+          seq: 5,
+          type: "session.updated",
+          payload: {
+            platformSessionTitleSynchronized: true,
+            platformSessionTitle: "登录功能测试设计",
+            isChildSession: false
+          }
+        }]
       }
-
-      addEventListener(type: string, listener: EventListener) {
-        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
-        listeners.add(listener);
-        this.listeners.set(type, listeners);
-      }
-
-      removeEventListener(type: string, listener: EventListener) {
-        this.listeners.get(type)?.delete(listener);
-      }
-
-      close() {
-        this.closed = true;
-        this.probe.closed = true;
-      }
-
-      private emit(type: string, runId: string, seq: number, payload: Record<string, unknown>) {
-        if (this.closed) return;
-        const event = new MessageEvent(type, {
-          data: JSON.stringify({
-            eventId: `evt_title_watch_${seq}`,
-            runId,
-            seq,
-            type,
-            traceId: "trace_e2e",
-            occurredAt: "2026-06-19T00:00:00Z",
-            payload
-          }),
-          lastEventId: String(seq)
-        });
-        this.listeners.get(type)?.forEach((listener) => listener(event));
-      }
-    }
-
-    (window as Window & { EventSource: typeof EventSource }).EventSource = MockRunEventSource as unknown as typeof EventSource;
+    ]
   });
   await mockBackendApi(page, {
+    sessionMessageRequests,
+    runFeedbackQueryRequests,
+    sessionMessages: [{
+      messageId: "msg_11111111111111111111111111111111",
+      remoteMessageId: "msg_persisted_other",
+      sessionId: "ses_1",
+      role: "ASSISTANT",
+      content: "已持久化但不是当前远端消息",
+      createdAt: "2026-07-17T08:00:00Z",
+      runId: "run_1"
+    }],
     recentWorkspaces: {
       app_gcms: {
         ...workspace(),
@@ -2308,70 +2315,56 @@ test("a title-pending run keeps its SSE open until the synchronized native title
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.getByText("任务完成")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(false);
+  await page.waitForTimeout(1_100);
+  expect(await page.evaluate(() => (
+    window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }
+  ).__titleWatchRunStreams?.length)).toBe(1);
+  await expect.poll(() => sessionMessageRequests.length).toBe(3);
+  await expect.poll(() => runFeedbackQueryRequests.length).toBe(3);
+  expect(runFeedbackQueryRequests).toEqual(Array.from({ length: 3 }, () => ({ runIds: ["run_1"] })));
+  expect(await page.evaluate(() => (
+    window as Window & { __titleWatchRunStreams?: Array<{ authorization: string | null }> }
+  ).__titleWatchRunStreams?.[0]?.authorization)).toBe("Bearer test-token");
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }
+  ).__titleWatchRunStreams?.[0]?.closed)).toBe(false);
   await expect(page.locator(".figma-chat-title")).toHaveText("登录功能测试设计");
-  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(true);
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }
+  ).__titleWatchRunStreams?.[0]?.closed)).toBe(true);
+  expect(sessionMessageRequests).toHaveLength(3);
+  expect(runFeedbackQueryRequests).toHaveLength(3);
 });
 
-test("a title-pending SSE closes when the backend closes the title watch or a new run starts", async ({ page }) => {
-  await page.addInitScript(() => {
-    type StreamProbe = { runId: string; closed: boolean };
-    const probes: StreamProbe[] = [];
-    (window as Window & { __titleWatchRunStreams?: StreamProbe[] }).__titleWatchRunStreams = probes;
-
-    class MockRunEventSource {
-      onopen: ((event: Event) => void) | null = null;
-      onerror: ((event: Event) => void) | null = null;
-      private readonly listeners = new Map<string, Set<EventListener>>();
-      private closed = false;
-      private readonly probe: StreamProbe;
-
-      constructor(readonly url: string) {
-        const runId = decodeURIComponent(url).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
-        this.probe = { runId, closed: false };
-        probes.push(this.probe);
-        window.setTimeout(() => this.onopen?.(new Event("open")), 0);
-        if (runId === "run_1") {
-          window.setTimeout(() => this.emit("run.succeeded", runId, 1, { platformSessionTitlePending: true }), 10);
-        }
+test("a new run replaces one title-pending fetch SSE and ignores the old stream's late title", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await installAuthenticatedRunEventFetchStream(page, {
+    run_1: [
+      {
+        delayMs: 10,
+        events: [{
+          seq: 1,
+          type: "run.succeeded",
+          payload: { platformSessionTitlePending: true }
+        }]
+      },
+      {
+        delayMs: 600,
+        events: [{
+          seq: 2,
+          type: "session.updated",
+          payload: {
+            platformSessionTitleSynchronized: true,
+            platformSessionTitle: "旧 Run 晚到标题",
+            isChildSession: false
+          }
+        }]
       }
-
-      addEventListener(type: string, listener: EventListener) {
-        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
-        listeners.add(listener);
-        this.listeners.set(type, listeners);
-      }
-
-      removeEventListener(type: string, listener: EventListener) {
-        this.listeners.get(type)?.delete(listener);
-      }
-
-      close() {
-        this.closed = true;
-        this.probe.closed = true;
-      }
-
-      private emit(type: string, runId: string, seq: number, payload: Record<string, unknown>) {
-        if (this.closed) return;
-        const event = new MessageEvent(type, {
-          data: JSON.stringify({
-            eventId: `evt_title_watch_${runId}_${seq}`,
-            runId,
-            seq,
-            type,
-            traceId: "trace_e2e",
-            occurredAt: "2026-06-19T00:00:00Z",
-            payload
-          }),
-          lastEventId: String(seq)
-        });
-        this.listeners.get(type)?.forEach((listener) => listener(event));
-      }
-    }
-
-    (window as Window & { EventSource: typeof EventSource }).EventSource = MockRunEventSource as unknown as typeof EventSource;
+    ],
+    run_2: []
   });
   await mockBackendApi(page, {
+    runRequests,
     runIds: ["run_1", "run_2"],
     recentWorkspaces: {
       app_gcms: {
@@ -2396,8 +2389,21 @@ test("a title-pending SSE closes when the backend closes the title watch or a ne
 
   await composer.fill("第二轮开始后关闭旧标题监听");
   await page.getByRole("button", { name: "发送" }).click();
-  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.length)).toBe(2);
-  await expect.poll(() => page.evaluate(() => (window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }).__titleWatchRunStreams?.[0]?.closed)).toBe(true);
+  await expect.poll(() => runRequests.length).toBe(2);
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }
+  ).__titleWatchRunStreams?.length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & { __titleWatchRunStreams?: Array<{ closed: boolean }> }
+  ).__titleWatchRunStreams?.[0]?.closed)).toBe(true);
+  await page.waitForTimeout(700);
+  await expect(page.locator(".figma-chat-title")).not.toHaveText("旧 Run 晚到标题");
+  expect(await page.evaluate(() => (
+    window as Window & { __titleWatchRunStreams?: Array<{ runId: string; authorization: string | null; closed: boolean }> }
+  ).__titleWatchRunStreams)).toEqual([
+    { runId: "run_1", authorization: "Bearer test-token", closed: true },
+    { runId: "run_2", authorization: "Bearer test-token", closed: false }
+  ]);
 });
 
 test("a superseded title-pending run cannot restore its todos into the next turn", async ({ page }) => {
@@ -2636,67 +2642,64 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
 test("new run success clears stale RunEvent SSE connection feedback", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await page.addInitScript(() => {
-    class MockRunEventSource {
-      onopen: ((event: Event) => void) | null = null;
-      onerror: ((event: Event) => void) | null = null;
-      private readonly listeners = new Map<string, Set<EventListener>>();
-      private closed = false;
-
-      constructor(readonly url: string) {
-        const runId = decodeURIComponent(url).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
-        window.setTimeout(() => this.onopen?.(new Event("open")), 0);
-        if (runId === "run_1") {
-          window.setTimeout(() => {
-            if (!this.closed) {
-              this.onerror?.(new Event("error"));
+    const nativeFetch = window.fetch.bind(window);
+    const attempts: Record<string, number> = {};
+    (window as Window & { __runEventFetchAttempts?: Record<string, number> }).__runEventFetchAttempts = attempts;
+    window.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      const requestUrl = new URL(request.url, window.location.origin);
+      const runId = decodeURIComponent(requestUrl.pathname)
+        .match(/^\/api\/internal\/agent\/opencode\/runs\/([^/]+)\/events$/)?.[1];
+      if (!runId) {
+        return nativeFetch(input, init);
+      }
+      const attempt = (attempts[runId] ?? 0) + 1;
+      attempts[runId] = attempt;
+      const encoder = new TextEncoder();
+      let timer: number | undefined;
+      let closed = false;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          timer = window.setTimeout(() => {
+            if (closed) return;
+            if (runId === "run_1" && attempt === 1) {
+              closed = true;
+              controller.error(new Error("mock authenticated fetch SSE failure"));
+              return;
             }
+            const type = runId === "run_1" ? "run.failed" : "run.succeeded";
+            const payload = runId === "run_1"
+              ? { error: { name: "ConnectionError", message: "Streaming response failed" } }
+              : {};
+            controller.enqueue(encoder.encode(
+              `id: evt_mock_${runId}_1\nevent: ${type}\ndata: ${JSON.stringify({
+                eventId: `evt_mock_${runId}_1`,
+                runId,
+                seq: 1,
+                type,
+                traceId: "trace_e2e",
+                occurredAt: "2026-07-17T08:00:00Z",
+                payload
+              })}\n\n`
+            ));
           }, 20);
-          window.setTimeout(() => {
-            this.emit("run.failed", runId, 1, {
-              error: { name: "ConnectionError", message: "Streaming response failed" }
-            });
-          }, 60);
-        } else {
-          window.setTimeout(() => {
-            this.emit("run.succeeded", runId, 1, {});
-          }, 20);
+          request.signal.addEventListener("abort", () => {
+            closed = true;
+            if (timer !== undefined) window.clearTimeout(timer);
+            try {
+              controller.error(new DOMException("RunEvent stream aborted", "AbortError"));
+            } catch {
+              // reader 已结束时无需重复关闭。
+            }
+          }, { once: true });
+        },
+        cancel() {
+          closed = true;
+          if (timer !== undefined) window.clearTimeout(timer);
         }
-      }
-
-      addEventListener(type: string, listener: EventListener) {
-        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
-        listeners.add(listener);
-        this.listeners.set(type, listeners);
-      }
-
-      removeEventListener(type: string, listener: EventListener) {
-        this.listeners.get(type)?.delete(listener);
-      }
-
-      close() {
-        this.closed = true;
-      }
-
-      private emit(type: string, runId: string, seq: number, payload: Record<string, unknown>) {
-        if (this.closed) {
-          return;
-        }
-        const message = new MessageEvent(type, {
-          data: JSON.stringify({
-            eventId: `evt_mock_${runId}_${seq}`,
-            runId,
-            seq,
-            type,
-            traceId: "trace_e2e",
-            occurredAt: "2026-06-19T00:00:00Z",
-            payload
-          }),
-          lastEventId: String(seq)
-        });
-        this.listeners.get(type)?.forEach((listener) => listener(message));
-      }
-    }
-    (window as Window & { EventSource: typeof EventSource }).EventSource = MockRunEventSource as unknown as typeof EventSource;
+      });
+      return new Response(body, { headers: { "content-type": "text/event-stream" } });
+    };
   });
   await mockBackendApi(page, {
     runRequests,
@@ -2727,11 +2730,14 @@ test("new run success clears stale RunEvent SSE connection feedback", async ({ p
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect.poll(() => runRequests.length).toBe(2);
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & { __runEventFetchAttempts?: Record<string, number> }
+  ).__runEventFetchAttempts?.run_2)).toBe(1);
+  await expect(page.getByText("任务完成")).toBeVisible();
   await expect(page.getByText("RunEvent SSE 连接异常")).toHaveCount(0);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
   await expect(page.getByText("Streaming response failed")).toHaveCount(0);
   await expect(page.getByText("任务失败")).toHaveCount(0);
-  await expect(page.getByText("任务完成")).toBeVisible();
 });
 
 test("a live diff refreshes the changed file parent directory before the run finishes", async ({ page }) => {
@@ -4862,6 +4868,82 @@ test("workspace cascade submenu shifts up when it would overflow the viewport bo
   // 子菜单底部必须 <= 视口高度（不能被底部遮挡）
   expect(submenuBox!.y + submenuBox!.height).toBeLessThanOrEqual(viewport!.height);
 });
+
+type RunEventFetchBatch = {
+  delayMs: number;
+  events: Array<{ seq: number; type: string; payload: Record<string, unknown> }>;
+};
+
+/** 认证后的主 RunEvent 客户端走 fetch SSE；同一 batch 用于复现 durable 终态同步重放。 */
+async function installAuthenticatedRunEventFetchStream(
+  page: Page,
+  scenarios: Record<string, RunEventFetchBatch[]>
+) {
+  await page.addInitScript(({ scenarios }) => {
+    type StreamProbe = { runId: string; authorization: string | null; closed: boolean };
+    const probes: StreamProbe[] = [];
+    (window as Window & { __titleWatchRunStreams?: StreamProbe[] }).__titleWatchRunStreams = probes;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      const requestUrl = new URL(request.url, window.location.origin);
+      const runId = decodeURIComponent(requestUrl.pathname)
+        .match(/^\/api\/internal\/agent\/opencode\/runs\/([^/]+)\/events$/)?.[1];
+      if (!runId) {
+        return nativeFetch(input, init);
+      }
+      const probe: StreamProbe = {
+        runId,
+        authorization: request.headers.get("authorization"),
+        closed: false
+      };
+      probes.push(probe);
+      const encoder = new TextEncoder();
+      let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+      let timers: number[] = [];
+      const closeProbe = () => {
+        if (probe.closed) return;
+        probe.closed = true;
+        timers.forEach((timer) => window.clearTimeout(timer));
+        timers = [];
+      };
+      const body = new ReadableStream<Uint8Array>({
+        start(streamController) {
+          controller = streamController;
+          for (const batch of scenarios[runId] ?? []) {
+            timers.push(window.setTimeout(() => {
+              if (probe.closed) return;
+              const frame = batch.events.map((item) => (
+                `id: evt_title_${runId}_${item.seq}\nevent: ${item.type}\ndata: ${JSON.stringify({
+                  eventId: `evt_title_${runId}_${item.seq}`,
+                  runId,
+                  seq: item.seq,
+                  type: item.type,
+                  traceId: "trace_e2e",
+                  occurredAt: "2026-07-17T08:00:00Z",
+                  payload: item.payload
+                })}\n\n`
+              )).join("");
+              streamController.enqueue(encoder.encode(frame));
+            }, batch.delayMs));
+          }
+        },
+        cancel() {
+          closeProbe();
+        }
+      });
+      request.signal.addEventListener("abort", () => {
+        closeProbe();
+        try {
+          controller?.error(new DOMException("RunEvent stream aborted", "AbortError"));
+        } catch {
+          // reader 已结束时无需重复关闭。
+        }
+      }, { once: true });
+      return new Response(body, { headers: { "content-type": "text/event-stream" } });
+    };
+  }, { scenarios });
+}
 
 type PetStreamEvent = {
   eventId: string;

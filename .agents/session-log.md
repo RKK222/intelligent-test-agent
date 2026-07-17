@@ -42,6 +42,24 @@
   - 三个作用域不再重复占用纵向空间，纯本地与可发布操作按暂存内容出现，推送后用户能直接看到提交/推送/仅本地文件数。
   - 不涉及 HTTP API、RunEvent、数据库、SQL、generated SDK、权限、安全或环境配置变更；manager 保持连接，但仍收到既有未托管 4097 端口的健康探测失败日志。
 ### 2026-07-17 - 修复 Mermaid 编辑器取色器定位与文本布局微调
+### 2026-07-17 - 修复 Run 根终态竞态与 SSE 重订阅循环
+
+- Why:
+  - 现场 slash 技能请求已由 OpenCode 产生 `busy`、assistant message 和根 `idle`，但 Java 的 `/session/{sessionID}/command` 调用随后返回通用 `PlatformException`，后端因此先追加 `run.failed`、再追加根 `run.succeeded`，形成冲突终态。
+  - 前端以整个可变 `Run` 对象作为订阅依赖，终态投影会重建 SSE；durable 事件重放又触发消息与反馈恢复查询，最终形成亚秒级高频循环。
+- What:
+  - 后端把远端调用完成异常与真正的事件流中断拆分；普通 prompt 和 slash command 的调用异常统一进入 300ms 根终态裁决，根 `idle/session.error` 优先，无根终态才追加一次失败。
+  - `REDIS_SUMMARY` 在裁决窗口内保留原 owner lease、事件订阅和 fencing token；根终态、owner 转移或 manifest 已终态时旧执行者不写失败，无根终态时才 fenced 追加失败、投影并释放 owner；补充携带 `runId/traceId/storageMode/errorCode` 的结构化日志。
+  - 前端改用 `(runId, sessionId, token)` 标量订阅身份，增加 500ms 终态 hold 和标题等待复用；按 `runId` 合并 legacy 消息/反馈恢复链，并在新 Run 开始时清理旧 `run.stream.error` 诊断卡。
+  - 将相关旧 `window.EventSource` E2E 改成认证 fetch SSE 流，覆盖冲突终态重放、标题等待、新 Run 切换、旧连接晚到事件和最多三轮反馈兼容查询；同步 HTTP API、RunEvent、runtime 与前端 README。
+- How:
+  - 后端单测覆盖 slash 调用异常后根成功、无根终态、根 `session.error`、Redis owner 保留/转移、fenced 失败与 append 异常；前端工具与 reducer 单测覆盖稳定订阅身份、终态 hold、标题等待、会话切换和旧 SSE 诊断清理。
+  - 执行 `mvn -pl test-agent-opencode-runtime -am -DskipITs test`、两组 Vitest、agent-web typecheck、生产 build，以及 3 条认证 fetch SSE Chromium 定向 Playwright。
+- Result:
+  - 后端 reactor 全部通过，目标 runtime 模块 553 项测试通过；前端 workbench-utils 81 项、runtime-reducer 58 项通过，typecheck 与 production build 通过，3 条本故障关键 Playwright 全部通过。
+  - 全量 workbench Playwright 初次运行结果为 66 通过、30 失败；其中 1 条与本改动相关的旧 EventSource 用例已迁移为认证 fetch SSE 并定向通过，其余 29 条为工作区身份、设置页、手册文案等不在本修复范围内的存量断言，未扩大范围修改。
+  - 不修改 HTTP URL、DTO、RunEvent wire name、数据库、Flyway、generated SDK、环境配置或安全权限；通过稳定单连接和反馈链合并消除现场三个接口的高频循环。
+
 ### 2026-07-17 - 修复 Mermaid 编辑器取色器定位、元素默认着色与连线面板优化
 
 - Why:

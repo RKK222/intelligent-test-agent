@@ -126,7 +126,8 @@ export function reduceAgentChatRuntime(
         "RunEvent SSE 连接异常",
         {
           error: { message: action.message ?? "浏览器事件流连接异常，正在等待自动重连", name: "EventSourceError" },
-          type: "run.stream.error"
+          type: "run.stream.error",
+          runId: action.runId
         },
         {
           eventId,
@@ -1825,7 +1826,11 @@ function removeEmptyAssistant(messages: AgentMessage[]): AgentMessage[] {
 
 function removeRunFailedCards(messages: AgentMessage[], runId?: string): AgentMessage[] {
   return messages.filter((message) => {
-    if (message.role !== "card" || message.cardType !== "event" || text(message.payload.type) !== "run.failed") {
+    if (message.role !== "card" || message.cardType !== "event") {
+      return true;
+    }
+    const type = text(message.payload.type);
+    if (type !== "run.failed" && type !== "run.stream.error") {
       return true;
     }
     const cardRunId = text(message.payload.runId);

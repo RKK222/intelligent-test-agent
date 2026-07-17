@@ -30,6 +30,8 @@ import {
   resolveRetryDeadline,
   retryCountdownSeconds,
   retryExpirationDecision,
+  runEventSubscriptionRunId,
+  runEventSubscriptionSessionId,
   sessionTitleEventMatchesCurrentSession,
   platformSessionTitleFromSynchronizedEventPayload,
   projectRootInteractionSession,
@@ -186,6 +188,36 @@ describe("runEventProjectionMode", () => {
     const next = { ...current, runId: "run_next", status: "RUNNING" } as Run;
     expect(runEventProjectionMode({ runId: "run_next", type: "todo.updated" }, "run_next", next, "run_old")).toBe("conversation");
     expect(runEventProjectionMode({ runId: "run_old", type: "session.updated" }, "run_old", next, "run_old")).toBe("ignore");
+  });
+});
+
+describe("RunEvent subscription identity", () => {
+  const running = {
+    runId: "run_current",
+    sessionId: "ses_current",
+    workspaceId: "wrk_1",
+    status: "RUNNING",
+    createdAt: "2026-07-17T08:00:00Z",
+    updatedAt: "2026-07-17T08:00:00Z"
+  } as Run;
+
+  it("keeps the same scalar run identity while busy, settling a terminal, or waiting for title", () => {
+    expect(runEventSubscriptionRunId(running, null, null)).toBe("run_current");
+    expect(runEventSubscriptionRunId({ ...running, status: "FAILED" }, null, "run_current"))
+      .toBe("run_current");
+    expect(runEventSubscriptionRunId({ ...running, status: "SUCCEEDED" }, "run_current", null))
+      .toBe("run_current");
+    expect(runEventSubscriptionRunId({ ...running, status: "SUCCEEDED" }, null, null))
+      .toBeUndefined();
+  });
+
+  it("switches once to a new run and rejects a run whose platform session is no longer current", () => {
+    const next = { ...running, runId: "run_next", sessionId: "ses_next" } as Run;
+
+    expect(runEventSubscriptionRunId(next, "run_current", "run_current")).toBe("run_next");
+    expect(runEventSubscriptionSessionId("run_current", running, "ses_current")).toBe("ses_current");
+    expect(runEventSubscriptionSessionId("run_current", running, "ses_next")).toBeUndefined();
+    expect(runEventSubscriptionSessionId("run_next", next, "ses_next")).toBe("ses_next");
   });
 });
 
