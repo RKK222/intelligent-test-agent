@@ -1,5 +1,21 @@
 # Session Log
 
+### 2026-07-17 - 基于最新本地主干重建企业离线包
+
+- Why:
+  - 用户要求在统一 `/data/0709/` 上传目录并合入最新宠物拖动兼容修复后，重新生成可导入企业内网的完整离线包。
+- What:
+  - 打包前 fetch `origin/main` 与 `github/main`，两端均为 `54f63dca`，本地 `main` 无远端遗漏提交；基于 `91f1bb22` 重新构建完整企业 ZIP，包含 `d6716ad9` 的 Chromium 108/远程桌面宠物拖动兼容修复。
+  - 包内后端部署脚本、前端部署脚本与 README 的默认归档路径均为 `/data/0709/test-agent-internal-release.zip`；没有打入实际 `backend.env`、`docker.env`、`nginx.env` 或独立私钥文件，后端 JAR 保留并实际从 classpath 加载 `rsa-private.key`。
+  - 本次未改动公共 Agent 配置，公共 Agent 全量配置包无需随企业应用包更新。
+- How:
+  - 执行 `deploy/internal/package-release.sh --output-dir deploy/internal/dist`，并完成 SHA-256、ZIP/tar 完整性、后端/前端两个 `--validate-only` 入口、Linux/amd64 Worker 架构及 OpenCode 1.17.8 校验。
+  - 使用 `.env.test` / `test` profile 重新编译并重启 backend、opencode-manager、frontend；独立检查 health/readiness、前端 HTTP、登录 CORS、Manager 日志和 RSA 私钥加载日志。
+  - 执行 `FigmaShell.test.ts` 40 项单测和宠物跨命中区拖动 Chromium E2E。E2E 首次运行碰到 Vite 首次依赖优化自动 reload，路由 mock 丢失；依赖稳定后原命令重跑通过。
+- Result:
+  - 新包 `deploy/internal/dist/test-agent-internal-release.zip` 为 216849545 bytes（约 207 MiB），SHA-256 `07de29e5b7850c9587d699f6215d215f7a735ddfbbf0e7f6b92e7dd72f11eda4`，全部离线校验通过。
+  - 本地 health/readiness 为 `UP`，前端与 CORS 为 200，单测 40/40、Chromium E2E 1/1；不涉及 API、事件、数据库、性能或安全契约变更。
+
 ### 2026-07-17 - 修复企业内部小宠物拖拽失败与手势取消兼容
 
 - Why:
