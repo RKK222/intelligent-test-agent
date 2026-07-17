@@ -1100,7 +1100,7 @@ function submitRename() {
 }
 
 .ta-file-tree-delete-btn {
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   width: 18px;
@@ -1110,7 +1110,6 @@ function submitRename() {
   border-radius: 4px;
   background: transparent;
   color: var(--ta-tree-muted, #8b949e);
-  opacity: 0.58;
   cursor: pointer;
   transition: all 0.15s ease;
   margin-left: 4px;
@@ -1118,7 +1117,7 @@ function submitRename() {
 
 .ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-delete-btn,
 .ta-file-tree-delete-btn:focus-visible {
-  opacity: 1;
+  display: inline-flex;
 }
 
 .ta-file-tree-delete-btn:hover {

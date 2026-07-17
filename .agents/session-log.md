@@ -9,7 +9,7 @@
   - 增强了遮罩层 Acrylic 玻璃模糊质感，重塑了对话框卡片圆角和深邃投影，调整了字体排版与标签边距。
   - 优化了新建/上传的类型切换 Segment Pill 样式、新建输入框焦点动效，以及虚线拖拽上传区域的动效和交互感。
   - 统一了删除对话框 Danger Card 的醒目提示色调与字体排版，并美化了文件树头部操作按钮的 hover 效果。
-  - 将文件树每一行原本的减号（Minus）删除按钮替换为标准的垃圾桶（Trash2）图标，并将其 Hover 配色优化为淡红背景与亮红删除色。
+  - 将文件树每一行原本的减号（Minus）删除按钮替换为标准的垃圾桶（Trash2）图标，并将其修改为默认隐藏、仅在悬浮/聚焦所在行时展示，其 Hover 配色优化为淡红背景与亮红删除色。
 - How:
   - 修改了 DirectoryRows.vue 的 `<style scoped>` 样式块以及 FileExplorer.vue 中的 `.ta-fe-icon-btn` 样式类。
   - 运行并通过了 file-explorer 包的 Vitest 单元测试 (5/5 files, 23/23 tests passed)。
