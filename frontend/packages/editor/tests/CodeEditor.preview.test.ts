@@ -161,7 +161,8 @@ describe("CodeEditor Markdown 预览受控", () => {
     await new Promise((resolve) => setTimeout(resolve, 350));
 
     await fireEvent.click(container.querySelector('[data-mermaid-mode="visual"]') as Element);
-    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }));
+    // 全量并发时 Mermaid/Vue Flow 懒模块首次转换可能超过 Testing Library 默认 1 秒。
+    await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }, { timeout: 5000 }));
 
     await vi.waitFor(() => expect(emitted().change).toBeTruthy());
     expect((emitted().change as Array<[string]>)[0]?.[0])

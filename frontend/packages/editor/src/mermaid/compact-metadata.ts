@@ -1,12 +1,15 @@
 import type { MermaidGraph, MermaidPosition } from "./model";
 import type { MermaidSequenceDiagram } from "./sequence/model";
 
-const MAGIC_AND_VERSION = 0xa1;
+const FLOW_VERSION_A1 = 0xa1;
+const FLOW_VERSION_A2 = 0xa2;
 const FLAG_COORDINATES = 1 << 0;
 const FLAG_PORTS = 1 << 1;
 const FLAG_ROUTES = 1 << 2;
 const FLAG_SEQUENCE = 1 << 3;
-const KNOWN_FLAGS = FLAG_COORDINATES | FLAG_PORTS | FLAG_ROUTES | FLAG_SEQUENCE;
+const FLAG_SCALES = 1 << 4;
+const KNOWN_FLAGS_A1 = FLAG_COORDINATES | FLAG_PORTS | FLAG_ROUTES | FLAG_SEQUENCE;
+const KNOWN_FLAGS_A2 = KNOWN_FLAGS_A1 | FLAG_SCALES;
 const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const MAX_DECODED_BYTES = 1024 * 1024;
 const MAX_ENCODED_CHARS = Math.ceil(MAX_DECODED_BYTES * 4 / 3);
@@ -34,6 +37,8 @@ type DecodedFlowMetadata = {
   ports: Array<{ sourceHandle?: string; targetHandle?: string }>;
   hasRoutes: boolean;
   routes: Array<{ points: MermaidPosition[] } | undefined>;
+  hasScales: boolean;
+  scales: Array<number | undefined>;
 };
 
 class ByteReader {
@@ -221,6 +226,12 @@ function scaledPosition(position: MermaidPosition): ScaledPosition | null {
 
 function positionFromScaled(position: ScaledPosition): MermaidPosition {
   return { x: position.x / COORDINATE_SCALE, y: position.y / COORDINATE_SCALE };
+}
+
+function encodedScale(scale: number | undefined): number | null {
+  if (scale === undefined || scale === 1) return 0;
+  if (!Number.isFinite(scale) || scale < 0.5 || scale > 3) return null;
+  return Math.round(scale * 1000);
 }
 
 function portCode(handle: string | undefined): number {
@@ -442,16 +453,21 @@ export function serializeMermaidCompactFlow(graph: MermaidGraph): string[] {
   );
   const encodableRoutes = routes.map((route, index) => nodeIds.has(graph.edges[index]!.source) ? route : null);
   const hasRoutes = encodableRoutes.some((route) => route !== null);
-  if (!hasCoordinates && !hasPorts && !hasRoutes) return [];
+  const scales = graph.nodes.map((node) => encodedScale(node.scale));
+  if (scales.some((scale) => scale === null)) return [];
+  const hasScales = (scales as number[]).some((scale) => scale !== 0);
+  if (!hasCoordinates && !hasPorts && !hasRoutes && !hasScales) return [];
 
   const flags =
     (hasCoordinates ? FLAG_COORDINATES : 0) |
     (hasPorts ? FLAG_PORTS : 0) |
-    (hasRoutes ? FLAG_ROUTES : 0);
-  const body = [MAGIC_AND_VERSION, flags];
+    (hasRoutes ? FLAG_ROUTES : 0) |
+    (hasScales ? FLAG_SCALES : 0);
+  const body = [hasScales ? FLOW_VERSION_A2 : FLOW_VERSION_A1, flags];
   writeUnsigned(body, graph.nodes.length);
   writeUnsigned(body, graph.edges.length);
   if (hasCoordinates) encodeCoordinates(body, positions as ScaledPosition[]);
+  if (hasScales) for (const scale of scales as number[]) writeUnsigned(body, scale);
   if (hasPorts) body.push(...portBytes);
   if (hasRoutes) encodeRoutes(body, encodableRoutes, routeSources);
   const bytes = appendChecksum(body, topologySignatureForFlow(graph));
@@ -463,10 +479,13 @@ export function applyMermaidCompactFlow(graph: MermaidGraph, encoded: string): b
   try {
     const body = verifyEnvelope(encoded, topologySignatureForFlow(graph));
     const reader = new ByteReader(body);
-    if (reader.readByte() !== MAGIC_AND_VERSION) throw new Error("metadata 版本不支持");
+    const version = reader.readByte();
+    if (version !== FLOW_VERSION_A1 && version !== FLOW_VERSION_A2) throw new Error("metadata 版本不支持");
     const flags = reader.readByte();
-    if ((flags & ~KNOWN_FLAGS) !== 0 || (flags & FLAG_SEQUENCE) !== 0) throw new Error("Flow flags 非法");
-    if ((flags & (FLAG_COORDINATES | FLAG_PORTS | FLAG_ROUTES)) === 0) throw new Error("metadata 内容为空");
+    const knownFlags = version === FLOW_VERSION_A2 ? KNOWN_FLAGS_A2 : KNOWN_FLAGS_A1;
+    if ((flags & ~knownFlags) !== 0 || (flags & FLAG_SEQUENCE) !== 0) throw new Error("Flow flags 非法");
+    if (version === FLOW_VERSION_A2 && (flags & FLAG_SCALES) === 0) throw new Error("A2 缺少缩放数据");
+    if ((flags & (FLAG_COORDINATES | FLAG_PORTS | FLAG_ROUTES | FLAG_SCALES)) === 0) throw new Error("metadata 内容为空");
     const entityCount = reader.readUnsigned();
     const edgeCount = reader.readUnsigned();
     if (entityCount !== graph.nodes.length || edgeCount !== graph.edges.length) throw new Error("拓扑数量不匹配");
@@ -475,6 +494,15 @@ export function applyMermaidCompactFlow(graph: MermaidGraph, encoded: string): b
     const scaledPositions = hasCoordinates
       ? decodeCoordinates(reader, entityCount)
       : graph.nodes.map(() => ({ x: 0, y: 0 }));
+    const hasScales = (flags & FLAG_SCALES) !== 0;
+    const scales = graph.nodes.map(() => undefined as number | undefined);
+    if (hasScales) {
+      for (let index = 0; index < entityCount; index += 1) {
+        const value = reader.readUnsigned();
+        if (value !== 0 && (value < 500 || value > 3000)) throw new Error("缩放比例超出范围");
+        scales[index] = value === 0 || value === 1000 ? undefined : value / 1000;
+      }
+    }
     const hasPorts = (flags & FLAG_PORTS) !== 0;
     const ports: DecodedFlowMetadata["ports"] = [];
     for (let index = 0; index < edgeCount; index += 1) {
@@ -502,10 +530,16 @@ export function applyMermaidCompactFlow(graph: MermaidGraph, encoded: string): b
       hasPorts,
       ports,
       hasRoutes,
-      routes
+      routes,
+      hasScales,
+      scales
     };
     graph.nodes.forEach((node, index) => {
       node.position = { ...decoded.positions[index]! };
+      if (decoded.hasScales) {
+        if (decoded.scales[index] === undefined) delete node.scale;
+        else node.scale = decoded.scales[index];
+      }
     });
     graph.edges.forEach((edge, index) => {
       delete edge.sourceHandle;
@@ -531,7 +565,7 @@ export function serializeMermaidCompactSequence(diagram: MermaidSequenceDiagram)
     !positions.every((position) => position !== null) ||
     !(positions as ScaledPosition[]).some((position) => position.x !== 0 || position.y !== 0)
   ) return [];
-  const body = [MAGIC_AND_VERSION, FLAG_COORDINATES | FLAG_SEQUENCE];
+  const body = [FLOW_VERSION_A1, FLAG_COORDINATES | FLAG_SEQUENCE];
   writeUnsigned(body, diagram.participants.length);
   writeUnsigned(body, 0);
   encodeCoordinates(body, positions as ScaledPosition[]);
@@ -544,10 +578,10 @@ export function applyMermaidCompactSequence(diagram: MermaidSequenceDiagram, enc
   try {
     const body = verifyEnvelope(encoded, topologySignatureForSequence(diagram));
     const reader = new ByteReader(body);
-    if (reader.readByte() !== MAGIC_AND_VERSION) throw new Error("metadata 版本不支持");
+    if (reader.readByte() !== FLOW_VERSION_A1) throw new Error("metadata 版本不支持");
     const flags = reader.readByte();
     if (
-      (flags & ~KNOWN_FLAGS) !== 0 ||
+      (flags & ~KNOWN_FLAGS_A1) !== 0 ||
       (flags & FLAG_SEQUENCE) === 0 ||
       (flags & FLAG_COORDINATES) === 0 ||
       (flags & (FLAG_PORTS | FLAG_ROUTES)) !== 0

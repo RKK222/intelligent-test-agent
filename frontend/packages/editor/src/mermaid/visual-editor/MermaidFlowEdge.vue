@@ -16,6 +16,7 @@ const emit = defineEmits<{
       fixedPosition: Position;
     }
   ];
+  editRequest: [payload: { edgeId: string; clientX: number; clientY: number }];
 }>();
 
 const routePoints = computed(() => {
@@ -66,10 +67,25 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
     fixedPosition: fixed.position
   });
 }
+
+function onDoubleClick(event: MouseEvent) {
+  event.preventDefault();
+  event.stopPropagation();
+  emit("editRequest", { edgeId: props.id, clientX: event.clientX, clientY: event.clientY });
+}
 </script>
 
 <template>
   <BaseEdge :path="path" :style="props.style" :marker-end="props.markerEnd" :marker-start="props.markerStart" />
+  <path
+    :d="path"
+    class="ta-mermaid-edge-edit-hitbox"
+    fill="none"
+    stroke="transparent"
+    stroke-width="20"
+    pointer-events="stroke"
+    @dblclick="onDoubleClick"
+  />
   <text
     v-if="props.label"
     :x="labelPos.x"
@@ -77,6 +93,7 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
     text-anchor="middle"
     dominant-baseline="central"
     class="ta-mermaid-edge-label"
+    :style="props.data?.textColor ? { fill: props.data.textColor } : undefined"
   >{{ props.label }}</text>
   <template v-if="props.selected">
     <circle
@@ -101,6 +118,7 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
 </template>
 
 <style scoped>
+.ta-mermaid-edge-edit-hitbox { cursor: pointer; }
 .ta-mermaid-edge-label {
   fill: var(--ta-ink, #172033);
   font-size: 11px;

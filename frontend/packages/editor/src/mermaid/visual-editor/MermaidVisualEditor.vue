@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, type CSSProperties } from "vue";
 import {
   ConnectionMode,
   Position,
@@ -18,15 +18,18 @@ import {
   type MermaidNodeType,
   type MermaidPosition
 } from "../model";
-import { MERMAID_NODE_SHAPES } from "../node-shapes";
+import { getMermaidNodeSize, MERMAID_NODE_SHAPES } from "../node-shapes";
 import MermaidFlowNode from "./MermaidFlowNode.vue";
 import MermaidFlowEdge from "./MermaidFlowEdge.vue";
 import MermaidNodeShape from "./MermaidNodeShape.vue";
+import MermaidColorField from "./MermaidColorField.vue";
+import MermaidInlineEditor from "./MermaidInlineEditor.vue";
 import { findEdgePort, oppositePosition, remapMermaidNodeEdgePorts } from "./node-port-layout";
 import {
   useMermaidConnectionDrag,
   type MermaidConnectionStart
 } from "./use-mermaid-connection-drag";
+import { useMermaidNodeResize, type MermaidNodeResizeStart } from "./use-mermaid-node-resize";
 import {
   appendMermaidEdge,
   applyVueFlowPositions,
@@ -49,15 +52,40 @@ const vueFlowRef = ref<{ screenToFlowCoordinate: (position: MermaidPosition) => 
 const canvasRef = ref<HTMLElement>();
 const selectedNodeId = ref<string>();
 const selectedEdgeId = ref<string>();
+type InlineEditorState = {
+  kind: "node" | "edge";
+  id: string;
+  text: string;
+  textColor?: string;
+  position: CSSProperties;
+};
+const inlineEditor = ref<InlineEditorState>();
 const isCanvasDragOver = ref(false);
-const flowNodes = computed(() => toVueFlowNodes(props.modelValue));
+const resizePreviewGraph = ref<MermaidGraph>();
+const displayedGraph = computed(() => resizePreviewGraph.value ?? props.modelValue);
+const flowNodes = computed(() => toVueFlowNodes(displayedGraph.value));
 /** 选中边需要高于 Vue Flow 节点层，端点圆圈才能接收重锚拖拽。 */
-const flowEdges = computed(() => toVueFlowEdges(props.modelValue).map((edge) => {
+const flowEdges = computed(() => toVueFlowEdges(displayedGraph.value).map((edge) => {
   const selected = edge.id === selectedEdgeId.value;
   return { ...edge, selected, zIndex: selected ? 1001 : 0 };
 }));
-const selectedNode = computed(() => props.modelValue.nodes.find((node) => node.id === selectedNodeId.value));
+const selectedNode = computed(() => displayedGraph.value.nodes.find((node) => node.id === selectedNodeId.value));
 const selectedEdge = computed(() => props.modelValue.edges.find((edge) => edge.id === selectedEdgeId.value));
+const selectedNodeSize = computed(() => selectedNode.value ? getMermaidNodeSize(selectedNode.value) : undefined);
+const selectedNodeScaleLabel = computed(() => `${Math.round((selectedNode.value?.scale ?? 1) * 1000) / 10}%`);
+
+function inlineEditorPosition(clientX: number, clientY: number): CSSProperties {
+  const width = Math.min(286, Math.max(1, window.innerWidth - 16));
+  const height = 176;
+  return {
+    left: `${Math.round(Math.min(Math.max(clientX + 8, 8), window.innerWidth - width - 8))}px`,
+    top: `${Math.round(Math.min(Math.max(clientY + 8, 8), window.innerHeight - height - 8))}px`
+  };
+}
+
+function closeInlineEditor() {
+  inlineEditor.value = undefined;
+}
 
 function updateGraph(updater: (draft: MermaidGraph) => void, options?: { preserveRoutes?: boolean }) {
   const draft = cloneMermaidGraph(props.modelValue);
@@ -101,6 +129,78 @@ const {
   onConnect: commitConnection,
   onReconnect: commitReconnect
 });
+
+const { isResizing, startResize, cancelResize } = useMermaidNodeResize({
+  getGraph: () => props.modelValue,
+  screenToFlowCoordinate: (position) => vueFlowRef.value?.screenToFlowCoordinate(position) ?? position,
+  onPreview: (graph) => { resizePreviewGraph.value = graph; },
+  onCommit: (graph) => emit("update:modelValue", graph)
+});
+
+function onResizeStart(start: MermaidNodeResizeStart) {
+  if (isDragging.value || inlineEditor.value) return;
+  startResize(start);
+}
+
+function onNodeEditRequest(payload: { nodeId: string; clientX: number; clientY: number }) {
+  if (isDragging.value) return;
+  const node = props.modelValue.nodes.find((item) => item.id === payload.nodeId);
+  if (!node) return;
+  cancelResize();
+  selectedNodeId.value = node.id;
+  selectedEdgeId.value = undefined;
+  inlineEditor.value = {
+    kind: "node",
+    id: node.id,
+    text: node.text,
+    textColor: node.style?.textColor,
+    position: inlineEditorPosition(payload.clientX, payload.clientY)
+  };
+}
+
+function onEdgeEditRequest(payload: { edgeId: string; clientX: number; clientY: number }) {
+  if (isDragging.value) return;
+  const edge = props.modelValue.edges.find((item) => item.id === payload.edgeId);
+  if (!edge) return;
+  cancelResize();
+  selectedEdgeId.value = edge.id;
+  selectedNodeId.value = undefined;
+  inlineEditor.value = {
+    kind: "edge",
+    id: edge.id,
+    text: edge.label,
+    textColor: edge.style?.textColor,
+    position: inlineEditorPosition(payload.clientX, payload.clientY)
+  };
+}
+
+function cleanNodeStyle(node: MermaidNode) {
+  if (node.style && !node.style.textColor && !node.style.fillColor && !node.style.strokeColor) delete node.style;
+}
+
+function commitInlineEditor(value: { text: string; textColor?: string }) {
+  const state = inlineEditor.value;
+  if (!state) return;
+  closeInlineEditor();
+  if (state.kind === "node") {
+    const current = props.modelValue.nodes.find((node) => node.id === state.id);
+    updateGraph((draft) => {
+      const node = draft.nodes.find((item) => item.id === state.id);
+      if (!node) return;
+      node.text = value.text;
+      node.style = { ...node.style, textColor: value.textColor };
+      cleanNodeStyle(node);
+    }, { preserveRoutes: current?.text === value.text });
+    return;
+  }
+  updateGraph((draft) => {
+    const edge = draft.edges.find((item) => item.id === state.id);
+    if (!edge) return;
+    edge.label = value.text;
+    edge.style = { ...edge.style, textColor: value.textColor };
+    if (!edge.style.textColor) delete edge.style;
+  }, { preserveRoutes: true });
+}
 
 function onConnectionStart(start: MermaidConnectionStart) {
   startConnection(start);
@@ -192,18 +292,22 @@ function onQuickConnect(payload: { nodeId?: string; portId: string; position: Po
 }
 
 function onNodeClick(event: NodeMouseEvent) {
+  closeInlineEditor();
   selectedNodeId.value = event.node.id;
   selectedEdgeId.value = undefined;
 }
 
 /** 点击空白画布时取消选中，使半透明快捷箭头随选中态消失。 */
 function onPaneClick() {
+  cancelResize();
+  closeInlineEditor();
   selectedNodeId.value = undefined;
   selectedEdgeId.value = undefined;
 }
 
 /** 选中连线时记录连线、取消节点选中，便于在属性面板编辑连线文字。 */
 function onEdgeClick(event: EdgeMouseEvent) {
+  closeInlineEditor();
   selectedEdgeId.value = event.edge.id;
   selectedNodeId.value = undefined;
 }
@@ -220,6 +324,27 @@ function updateSelectedNode(patch: Partial<Pick<MermaidNode, "text" | "type">>) 
   });
 }
 
+function resetSelectedNodeScale() {
+  if (!selectedNodeId.value) return;
+  updateGraph((draft) => {
+    const node = draft.nodes.find((item) => item.id === selectedNodeId.value);
+    if (node) delete node.scale;
+  });
+}
+
+function updateSelectedNodeColor(
+  key: "textColor" | "fillColor" | "strokeColor",
+  value: string | undefined
+) {
+  if (!selectedNodeId.value) return;
+  updateGraph((draft) => {
+    const node = draft.nodes.find((item) => item.id === selectedNodeId.value);
+    if (!node || (node.type === "text" && key !== "textColor")) return;
+    node.style = { ...node.style, [key]: value };
+    cleanNodeStyle(node);
+  }, { preserveRoutes: true });
+}
+
 /** 编辑选中连线的文字：输入即新增/修改，清空即删除文字（连线不再显示标签）。 */
 function updateSelectedEdgeLabel(text: string) {
   if (!selectedEdgeId.value) return;
@@ -229,9 +354,20 @@ function updateSelectedEdgeLabel(text: string) {
   }, { preserveRoutes: true });
 }
 
+function updateSelectedEdgeTextColor(value: string | undefined) {
+  if (!selectedEdgeId.value) return;
+  updateGraph((draft) => {
+    const edge = draft.edges.find((item) => item.id === selectedEdgeId.value);
+    if (!edge) return;
+    edge.style = { ...edge.style, textColor: value };
+    if (!edge.style.textColor) delete edge.style;
+  }, { preserveRoutes: true });
+}
+
 function deleteSelectedNode() {
   const nodeId = selectedNodeId.value;
   if (!nodeId) return;
+  closeInlineEditor();
   updateGraph((draft) => {
     draft.nodes = draft.nodes.filter((node) => node.id !== nodeId);
     draft.edges = draft.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
@@ -311,6 +447,7 @@ function updateDirection(event: Event) {
 function onNodesChange(changes: NodeChange[]) {
   const removes = changes.filter((change) => change.type === "remove");
   if (removes.length === 0) return;
+  closeInlineEditor();
   const removeIds = new Set(removes.map((change) => change.id));
   updateGraph((draft) => {
     draft.nodes = draft.nodes.filter((node) => !removeIds.has(node.id));
@@ -330,6 +467,7 @@ function onNodesChange(changes: NodeChange[]) {
 function onEdgesChange(changes: EdgeChange[]) {
   const removes = changes.filter((change) => change.type === "remove");
   if (removes.length === 0) return;
+  closeInlineEditor();
   const removeIds = new Set(removes.map((change) => change.id));
   updateGraph((draft) => {
     draft.edges = draft.edges.filter((edge) => !removeIds.has(edge.id));
@@ -359,7 +497,7 @@ function onEdgesChange(changes: EdgeChange[]) {
     <div class="ta-mermaid-workspace">
       <div
         ref="canvasRef"
-        :class="['ta-mermaid-canvas', { 'is-drag-over': isCanvasDragOver, 'is-connection-dragging': isDragging }]"
+        :class="['ta-mermaid-canvas', { 'is-drag-over': isCanvasDragOver, 'is-connection-dragging': isDragging, 'is-node-resizing': isResizing }]"
         aria-label="Mermaid 可视化画布"
         @dragover="onCanvasDragOver"
         @dragleave="onCanvasDragLeave"
@@ -391,12 +529,19 @@ function onEdgesChange(changes: EdgeChange[]) {
               :is-connection-target="isDragging && targetNodeId === nodeProps.id"
               :snapped-handle-id="targetNodeId === nodeProps.id ? targetHandleId : undefined"
               :connection-status="targetNodeId === nodeProps.id ? targetStatus : undefined"
+              :resize-enabled="!isDragging && !inlineEditor"
               @connection-start="onConnectionStart"
               @quick-connect="onQuickConnect"
+              @resize-start="onResizeStart"
+              @edit-request="onNodeEditRequest"
             />
           </template>
           <template #edge-mermaid-edge="edgeProps">
-            <MermaidFlowEdge v-bind="edgeProps" @reconnect-start="onReconnectStart" />
+            <MermaidFlowEdge
+              v-bind="edgeProps"
+              @reconnect-start="onReconnectStart"
+              @edit-request="onEdgeEditRequest"
+            />
           </template>
         </VueFlow>
         <svg
@@ -473,6 +618,31 @@ function onEdgesChange(changes: EdgeChange[]) {
                 <option v-for="item in nodeTypes" :key="item.type" :value="item.type">{{ item.label }}</option>
               </select>
             </label>
+            <div class="ta-mermaid-size-summary" aria-label="节点尺寸">
+              <span>缩放比例</span>
+              <strong>{{ selectedNodeScaleLabel }}</strong>
+              <span>实际尺寸</span>
+              <strong>{{ selectedNodeSize?.width }} × {{ selectedNodeSize?.height }} px</strong>
+            </div>
+            <button type="button" :disabled="!selectedNode.scale" @click="resetSelectedNodeScale">恢复默认尺寸</button>
+            <MermaidColorField
+              label="文字颜色"
+              :model-value="selectedNode.style?.textColor"
+              @update:model-value="updateSelectedNodeColor('textColor', $event)"
+            />
+            <MermaidColorField
+              label="填充颜色"
+              :model-value="selectedNode.style?.fillColor"
+              :disabled="selectedNode.type === 'text'"
+              @update:model-value="updateSelectedNodeColor('fillColor', $event)"
+            />
+            <MermaidColorField
+              label="边框颜色"
+              :model-value="selectedNode.style?.strokeColor"
+              :disabled="selectedNode.type === 'text'"
+              @update:model-value="updateSelectedNodeColor('strokeColor', $event)"
+            />
+            <p v-if="selectedNode.type === 'text'" class="ta-mermaid-field-hint">文本块没有可见填充或边框</p>
             <button type="button" class="is-danger" @click="deleteSelectedNode">删除节点</button>
           </div>
         </section>
@@ -487,11 +657,25 @@ function onEdgesChange(changes: EdgeChange[]) {
               <span>连线文字</span>
               <input aria-label="连线文字" :value="selectedEdge.label" placeholder="为空则不显示文字" @input="updateSelectedEdgeLabel(($event.target as HTMLInputElement).value)" />
             </label>
+            <MermaidColorField
+              label="连线文字颜色"
+              :model-value="selectedEdge.style?.textColor"
+              @update:model-value="updateSelectedEdgeTextColor"
+            />
           </div>
         </section>
         <p v-else class="ta-mermaid-empty">选择画布中的节点或连线后编辑。</p>
       </aside>
     </div>
+    <MermaidInlineEditor
+      v-if="inlineEditor"
+      :kind="inlineEditor.kind"
+      :text="inlineEditor.text"
+      :text-color="inlineEditor.textColor"
+      :position="inlineEditor.position"
+      @commit="commitInlineEditor"
+      @cancel="closeInlineEditor"
+    />
   </div>
 </template>
 
@@ -562,6 +746,9 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-fields { display: grid; gap: 8px; }
 .ta-mermaid-fields label { display: grid; gap: 3px; color: var(--ta-muted, #64748b); font-size: 10px; }
 .ta-mermaid-fields input, .ta-mermaid-fields select { width: 100%; padding: 4px 7px; }
+.ta-mermaid-size-summary { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; color: var(--ta-muted, #64748b); font-size: 10px; }
+.ta-mermaid-size-summary strong { color: var(--ta-ink, #172033); font-size: 11px; font-weight: 600; }
+.ta-mermaid-field-hint { margin: -2px 0 0; color: var(--ta-muted, #64748b); font-size: 10px; line-height: 1.3; }
 .ta-mermaid-inspector button.is-danger { color: #b42318; }
 .ta-mermaid-empty { margin: 0; color: var(--ta-muted, #64748b); font-size: 11px; line-height: 1.5; }
 @media (max-width: 820px) { .ta-mermaid-workspace { grid-template-columns: 1fr; grid-template-rows: minmax(360px, 1fr) 240px; } .ta-mermaid-inspector { border-top: 1px solid var(--ta-border, #e2e8f0); border-left: 0; } .ta-mermaid-toolbar__hint { display: none; } }

@@ -9,6 +9,7 @@ import {
 import { findEdgePort, getMermaidNodePorts } from "./node-port-layout";
 import MermaidNodeShape from "./MermaidNodeShape.vue";
 import type { MermaidConnectionStart } from "./use-mermaid-connection-drag";
+import type { MermaidNodeResizeStart, MermaidResizeCorner } from "./use-mermaid-node-resize";
 import type { MermaidFlowNodeData } from "./vue-flow-adapter";
 
 import type { MermaidNodeType } from "../model";
@@ -22,18 +23,29 @@ const props = defineProps<{
   isConnectionTarget?: boolean;
   snappedHandleId?: string;
   connectionStatus?: "valid" | "invalid";
+  resizeEnabled?: boolean;
 }>();
 const emit = defineEmits<{
   connectionStart: [start: MermaidConnectionStart];
   quickConnect: [payload: { nodeId: string; portId: string; position: Position; shapeType: MermaidNodeType }];
+  resizeStart: [start: MermaidNodeResizeStart];
+  editRequest: [payload: { nodeId: string; clientX: number; clientY: number }];
 }>();
 
 const quickShapes = MERMAID_NODE_SHAPES;
 
 /** 节点真实尺寸直接使用领域目录，与 ELK 的包围盒计算保持一致。 */
 const nodeStyle = computed<CSSProperties>(() => {
-  const size = getMermaidNodeSize({ type: props.data.nodeType, text: props.data.text });
-  return { width: `${size.width}px`, height: `${size.height}px` };
+  const size = getMermaidNodeSize({
+    type: props.data.nodeType,
+    text: props.data.text,
+    scale: props.data.scale
+  });
+  return {
+    width: `${size.width}px`,
+    height: `${size.height}px`,
+    color: props.data.style?.textColor
+  };
 });
 
 /** 鼠标悬浮在节点上时才显示四向快捷箭头，与是否选中无关；离开后隐藏。 */
@@ -331,6 +343,21 @@ function preventNodeDragFromPort(event: MouseEvent) {
   event.preventDefault();
   event.stopPropagation();
 }
+
+function onResizePointerDown(event: PointerEvent, corner: MermaidResizeCorner) {
+  if (event.button !== 0 || !props.resizeEnabled) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("resizeStart", { nodeId: props.id, corner, pointerId: event.pointerId });
+}
+
+function onDoubleClick(event: MouseEvent) {
+  const target = event.target instanceof Element ? event.target : undefined;
+  if (target?.closest("[data-mermaid-handle], .ta-mermaid-resize-handle, .ta-mermaid-quick-connector-wrapper")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("editRequest", { nodeId: props.id, clientX: event.clientX, clientY: event.clientY });
+}
 </script>
 
 <template>
@@ -356,11 +383,14 @@ function preventNodeDragFromPort(event: MouseEvent) {
     @blur="onNodeFocusOut"
     @focusin="onNodeFocusIn"
     @focusout="onNodeFocusOut"
+    @dblclick="onDoubleClick"
   >
     <MermaidNodeShape
       class="ta-mermaid-flow-node__shape"
       :type="data.nodeType"
       :selected="selected"
+      :fill-color="data.style?.fillColor"
+      :stroke-color="data.style?.strokeColor"
     />
     <Handle
       v-for="port in allPorts"
@@ -375,6 +405,18 @@ function preventNodeDragFromPort(event: MouseEvent) {
       :data-mermaid-position="port.position"
     />
     <div class="ta-mermaid-flow-node__label">{{ data.text }}</div>
+    <button
+      v-for="corner in (['nw', 'ne', 'sw', 'se'] as const)"
+      v-if="selected && resizeEnabled"
+      :key="corner"
+      type="button"
+      class="ta-mermaid-resize-handle nodrag nopan"
+      :class="`is-${corner}`"
+      :data-resize-corner="corner"
+      :aria-label="`从${corner}角缩放节点`"
+      @pointerdown="onResizePointerDown($event, corner)"
+      @mousedown.stop.prevent
+    />
 
     <!-- 快捷四向连接器：鼠标悬浮节点时显示（半透明），离开后隐藏，与是否选中无关 -->
     <template v-if="hovered">
@@ -528,6 +570,23 @@ function preventNodeDragFromPort(event: MouseEvent) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.ta-mermaid-resize-handle {
+  position: absolute;
+  z-index: 30;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  background: var(--primary, #4f46e5);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary, #4f46e5) 72%, #fff);
+}
+.ta-mermaid-resize-handle.is-nw { left: -8.5px; top: -8.5px; cursor: nwse-resize; }
+.ta-mermaid-resize-handle.is-ne { right: -8.5px; top: -8.5px; cursor: nesw-resize; }
+.ta-mermaid-resize-handle.is-sw { left: -8.5px; bottom: -8.5px; cursor: nesw-resize; }
+.ta-mermaid-resize-handle.is-se { right: -8.5px; bottom: -8.5px; cursor: nwse-resize; }
 
 .ta-mermaid-port-container :deep(.vue-flow__handle) {
   position: absolute !important;

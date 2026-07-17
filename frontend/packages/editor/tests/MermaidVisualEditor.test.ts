@@ -89,6 +89,7 @@ vi.mock("@vue-flow/core", () => ({
 import MermaidVisualEditor from "../src/mermaid/visual-editor/MermaidVisualEditor.vue";
 import MermaidFlowNode from "../src/mermaid/visual-editor/MermaidFlowNode.vue";
 import MermaidFlowEdge from "../src/mermaid/visual-editor/MermaidFlowEdge.vue";
+import MermaidInlineEditor from "../src/mermaid/visual-editor/MermaidInlineEditor.vue";
 import flowNodeSource from "../src/mermaid/visual-editor/MermaidFlowNode.vue?raw";
 import visualEditorSource from "../src/mermaid/visual-editor/MermaidVisualEditor.vue?raw";
 
@@ -129,12 +130,33 @@ function terminalPathDelta(path: string): { x: number; y: number } {
 
 describe("Mermaid Vue Flow 适配", () => {
   it("把领域节点和边映射为 Vue Flow 元素", () => {
-    expect(toVueFlowNodes(graph())).toMatchObject([
-      { id: "A", type: "mermaid", position: { x: 80, y: 70 }, data: { text: "开始", nodeType: "rectangle" } },
+    const styled = graph();
+    styled.nodes[0]!.scale = 1.5;
+    styled.nodes[0]!.style = { textColor: "#112233", fillColor: "#AABBCC", strokeColor: "#445566" };
+    styled.edges[0]!.style = { textColor: "#778899" };
+    expect(toVueFlowNodes(styled)).toMatchObject([
+      {
+        id: "A",
+        type: "mermaid",
+        position: { x: 80, y: 70 },
+        data: {
+          text: "开始",
+          nodeType: "rectangle",
+          scale: 1.5,
+          style: { textColor: "#112233", fillColor: "#AABBCC", strokeColor: "#445566" }
+        }
+      },
       { id: "B", type: "mermaid", position: { x: 300, y: 70 }, data: { text: "结束", nodeType: "diamond" } }
     ]);
-    expect(toVueFlowEdges(graph())).toMatchObject([
-      { id: "edge-1", source: "A", target: "B", label: "下一步", markerEnd: "arrowclosed" }
+    expect(toVueFlowEdges(styled)).toMatchObject([
+      {
+        id: "edge-1",
+        source: "A",
+        target: "B",
+        label: "下一步",
+        markerEnd: "arrowclosed",
+        data: { textColor: "#778899" }
+      }
     ]);
   });
 
@@ -338,6 +360,85 @@ describe("MermaidFlowNode", () => {
     expect(root.style.width).toBe(`${width}px`);
     expect(root.style.height).toBe(`${height}px`);
     expect(root.querySelector(`svg[data-mermaid-shape="${nodeType}"]`)).toBeTruthy();
+  });
+
+  it("按比例渲染实际尺寸，并把文字、填充和边框色传给共享轮廓", () => {
+    const { container } = render(MermaidFlowNode, {
+      props: {
+        id: "A",
+        selected: true,
+        data: {
+          text: "节点",
+          nodeType: "rectangle",
+          direction: "LR",
+          scale: 1.5,
+          style: { textColor: "#112233", fillColor: "#AABBCC", strokeColor: "#445566" }
+        }
+      }
+    });
+
+    const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
+    const shape = root.querySelector<HTMLElement>("[data-mermaid-shape]")!;
+    expect(root.style.width).toBe("180px");
+    expect(root.style.height).toBe("78px");
+    expect(root.style.color).toBe("rgb(17, 34, 51)");
+    expect(shape.style.getPropertyValue("--ta-mermaid-fill")).toBe("#AABBCC");
+    expect(shape.style.getPropertyValue("--ta-mermaid-stroke")).toBe("#445566");
+    expect(shape.classList.contains("is-selected")).toBe(true);
+  });
+
+  it("选中节点显示四个外置缩放点，按下时发出角和 pointerId", () => {
+    const { container, emitted } = render(MermaidFlowNode, {
+      props: {
+        id: "A",
+        selected: true,
+        resizeEnabled: true,
+        data: { text: "节点", nodeType: "rectangle", direction: "LR" }
+      }
+    });
+    const handles = container.querySelectorAll<HTMLElement>(".ta-mermaid-resize-handle");
+    expect(handles).toHaveLength(4);
+    expect(Array.from(handles).map((handle) => handle.dataset.resizeCorner)).toEqual(["nw", "ne", "sw", "se"]);
+
+    const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
+    Object.defineProperty(event, "pointerId", { value: 9 });
+    handles[3]!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    const resizeCalls = emitted().resizeStart as Array<[{ nodeId: string; corner: string; pointerId: number }]>;
+    expect(resizeCalls[0]?.[0]).toEqual({ nodeId: "A", corner: "se", pointerId: 9 });
+  });
+
+  it("缩放被禁用或节点未选中时不显示缩放点", () => {
+    for (const props of [
+      { selected: false, resizeEnabled: true },
+      { selected: true, resizeEnabled: false }
+    ]) {
+      const rendered = render(MermaidFlowNode, {
+        props: {
+          id: "A",
+          ...props,
+          data: { text: "节点", nodeType: "rectangle", direction: "LR" }
+        }
+      });
+      expect(rendered.container.querySelectorAll(".ta-mermaid-resize-handle")).toHaveLength(0);
+      rendered.unmount();
+    }
+  });
+
+  it("双击节点主体发出就地编辑请求，双击连接点不触发", async () => {
+    const { container, emitted } = render(MermaidFlowNode, {
+      props: {
+        id: "A",
+        data: { text: "节点", nodeType: "rectangle", direction: "LR" }
+      }
+    });
+    const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
+    await fireEvent.dblClick(root, { clientX: 120, clientY: 80 });
+    const editCalls = emitted().editRequest as Array<[{ nodeId: string; clientX: number; clientY: number }]>;
+    expect(editCalls[0]?.[0]).toEqual({ nodeId: "A", clientX: 120, clientY: 80 });
+
+    await fireEvent.dblClick(container.querySelector<HTMLElement>("[data-mermaid-handle]")!);
+    expect(emitted().editRequest).toHaveLength(1);
   });
 
   it.each([
@@ -773,6 +874,28 @@ describe("MermaidFlowEdge", () => {
     expect(withoutLabel.container.querySelector(".ta-mermaid-edge-label")).toBeNull();
   });
 
+  it("使用领域边样式渲染标签文字颜色并保留白色光晕", () => {
+    const { container } = render(MermaidFlowEdge, {
+      props: {
+        ...edgeProps(),
+        label: "下一步",
+        data: { textColor: "#123456" }
+      } as unknown as EdgeProps
+    });
+    const label = container.querySelector<SVGTextElement>(".ta-mermaid-edge-label")!;
+    expect(label.style.fill).toBe("rgb(18, 52, 86)");
+    expect(label.classList.contains("ta-mermaid-edge-label")).toBe(true);
+  });
+
+  it("空连线也渲染可双击命中的透明路径并发出编辑请求", async () => {
+    const { container, emitted } = render(MermaidFlowEdge, { props: edgeProps() });
+    const hitbox = container.querySelector<SVGPathElement>(".ta-mermaid-edge-edit-hitbox")!;
+    expect(hitbox).toBeTruthy();
+    await fireEvent.dblClick(hitbox, { clientX: 210, clientY: 120 });
+    const editCalls = emitted().editRequest as Array<[{ edgeId: string; clientX: number; clientY: number }]>;
+    expect(editCalls[0]?.[0]).toEqual({ edgeId: "edge-1", clientX: 210, clientY: 120 });
+  });
+
   it("优先按自动布局路由绘制圆角正交 path，并按路径长度定位标签", () => {
     const { getByTestId, container } = render(MermaidFlowEdge, {
       props: {
@@ -887,6 +1010,37 @@ describe("MermaidFlowEdge", () => {
   });
 });
 
+describe("MermaidInlineEditor", () => {
+  it("非法 HEX 不更新草稿，合法三位 HEX 规范化后可按 Enter 提交", async () => {
+    const { getByLabelText, getByRole, emitted } = render(MermaidInlineEditor, {
+      props: { kind: "node", text: "开始", position: { left: "8px", top: "8px" } }
+    });
+    await fireEvent.update(getByLabelText("文字颜色"), "red");
+    expect(getByRole("alert").textContent).toContain("#RGB");
+    await fireEvent.update(getByLabelText("文字颜色"), "#abc");
+    await fireEvent.update(getByLabelText("节点文字"), "处理");
+    await fireEvent.keyDown(getByLabelText("节点文字"), { key: "Enter" });
+
+    const commitCalls = emitted().commit as Array<[{ text: string; textColor?: string }]>;
+    expect(commitCalls[0]?.[0]).toEqual({ text: "处理", textColor: "#AABBCC" });
+  });
+
+  it("恢复默认颜色后提交 undefined", async () => {
+    const { getByRole, emitted } = render(MermaidInlineEditor, {
+      props: {
+        kind: "edge",
+        text: "通过",
+        textColor: "#123456",
+        position: { left: "8px", top: "8px" }
+      }
+    });
+    await fireEvent.click(getByRole("button", { name: "恢复默认连线文字颜色" }));
+    await fireEvent.click(getByRole("button", { name: "完成编辑" }));
+    const commitCalls = emitted().commit as Array<[{ text: string; textColor?: string }]>;
+    expect(commitCalls[0]?.[0]).toEqual({ text: "通过", textColor: undefined });
+  });
+});
+
 describe("MermaidVisualEditor", () => {
   it("节点图形库使用三列紧凑布局压缩纵向高度", () => {
     expect(visualEditorSource).toContain(
@@ -970,6 +1124,133 @@ describe("MermaidVisualEditor", () => {
     ]);
   });
 
+  it("属性栏显示缩放比例和实际尺寸，并可恢复默认尺寸", async () => {
+    const model = routedGraph();
+    model.nodes[0]!.scale = 1.5;
+    const { getByTestId, getByText, getByRole, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: model }
+    });
+
+    await fireEvent.click(getByTestId("mock-select"));
+    expect(getByText("150%")).toBeTruthy();
+    expect(getByText("180 × 78 px")).toBeTruthy();
+    await fireEvent.click(getByRole("button", { name: "恢复默认尺寸" }));
+
+    const updated = (emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0];
+    expect(updated?.nodes[0]?.scale).toBeUndefined();
+    expect(updated?.edges[0]?.route).toBeUndefined();
+  });
+
+  it("双击节点打开草稿浮层，完成时一次提交文字和文字颜色", async () => {
+    const { container, getByLabelText, getByRole, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: routedGraph() }
+    });
+    await fireEvent.dblClick(container.querySelector<HTMLElement>('[data-mermaid-node-id="A"]')!, {
+      clientX: 240,
+      clientY: 160
+    });
+
+    const dialog = within(getByRole("dialog", { name: "编辑节点" }));
+    const text = dialog.getByLabelText("节点文字") as HTMLInputElement;
+    expect(text.value).toBe("开始");
+    await fireEvent.update(text, "准备");
+    await fireEvent.update(dialog.getByLabelText("文字颜色"), "#abc");
+    expect(emitted()["update:modelValue"]).toBeUndefined();
+    await fireEvent.click(dialog.getByRole("button", { name: "完成编辑" }));
+
+    const updated = (emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0];
+    expect(updated?.nodes[0]).toMatchObject({ text: "准备", style: { textColor: "#AABBCC" } });
+    expect(updated?.edges[0]?.route).toBeUndefined();
+  });
+
+  it("Esc 或取消丢弃节点浮层草稿", async () => {
+    const { container, getByLabelText, emitted, queryByLabelText } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+    await fireEvent.dblClick(container.querySelector<HTMLElement>('[data-mermaid-node-id="A"]')!);
+    await fireEvent.update(getByLabelText("节点文字"), "不保存");
+    await fireEvent.keyDown(getByLabelText("节点文字"), { key: "Escape" });
+
+    expect(queryByLabelText("节点文字")).toBeNull();
+    expect(emitted()["update:modelValue"]).toBeUndefined();
+  });
+
+  it("双击空连线可新增文字和颜色，修改样式时保留路由", async () => {
+    const model = routedGraph();
+    model.edges[0]!.label = "";
+    const { container, getByLabelText, getByRole, emitted } = render(MermaidVisualEditor, {
+      props: { modelValue: model }
+    });
+    await fireEvent.dblClick(container.querySelector<SVGPathElement>(".ta-mermaid-edge-edit-hitbox")!, {
+      clientX: 260,
+      clientY: 180
+    });
+    const dialog = within(getByRole("dialog", { name: "编辑连线" }));
+    await fireEvent.update(dialog.getByLabelText("连线文字"), "通过");
+    await fireEvent.update(dialog.getByLabelText("连线文字颜色"), "#123456");
+    await fireEvent.click(dialog.getByRole("button", { name: "完成编辑" }));
+
+    const updated = (emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0];
+    expect(updated?.edges[0]).toMatchObject({ label: "通过", style: { textColor: "#123456" } });
+    expect(updated?.edges[0]?.route?.points).toEqual(model.edges[0]!.route!.points);
+  });
+
+  it("右侧节点和连线属性同步设置颜色，文本块禁用表面颜色", async () => {
+    const NodeHost = defineComponent({
+      components: { MermaidVisualEditor },
+      setup() { return { model: ref(graph()) }; },
+      template: `<MermaidVisualEditor v-model="model" /><pre data-testid="node-style-json">{{ JSON.stringify(model.nodes[0].style) }}</pre>`
+    });
+    const nodeView = render(NodeHost);
+    await fireEvent.click(nodeView.getByTestId("mock-select"));
+    await fireEvent.update(nodeView.getByLabelText("文字颜色"), "#112233");
+    await fireEvent.update(nodeView.getByLabelText("填充颜色"), "#aabbcc");
+    await fireEvent.update(nodeView.getByLabelText("边框颜色"), "#445566");
+    expect(JSON.parse(nodeView.getByTestId("node-style-json").textContent ?? "{}" )).toEqual({
+      textColor: "#112233",
+      fillColor: "#AABBCC",
+      strokeColor: "#445566"
+    });
+    nodeView.unmount();
+
+    const textModel = graph();
+    textModel.nodes[0]!.type = "text";
+    const textView = render(MermaidVisualEditor, { props: { modelValue: textModel } });
+    await fireEvent.click(textView.getByTestId("mock-select"));
+    expect((textView.getByLabelText("填充颜色") as HTMLInputElement).disabled).toBe(true);
+    expect((textView.getByLabelText("边框颜色") as HTMLInputElement).disabled).toBe(true);
+    expect(textView.getByText("文本块没有可见填充或边框")).toBeTruthy();
+    textView.unmount();
+
+    const EdgeHost = defineComponent({
+      components: { MermaidVisualEditor },
+      setup() { return { model: ref(routedGraph()) }; },
+      template: `<MermaidVisualEditor v-model="model" /><pre data-testid="edge-json">{{ JSON.stringify(model.edges[0]) }}</pre>`
+    });
+    const edgeView = render(EdgeHost);
+    await fireEvent.click(edgeView.getByTestId("mock-edge-click"));
+    await fireEvent.update(edgeView.getByLabelText("连线文字颜色"), "#778899");
+    const edgeUpdate = JSON.parse(edgeView.getByTestId("edge-json").textContent ?? "{}");
+    expect(edgeUpdate.style).toEqual({ textColor: "#778899" });
+    expect(edgeUpdate.route).toBeDefined();
+  });
+
+  it("手工输入六位 HEX 时三位前缀不会被提前扩展", async () => {
+    const NodeHost = defineComponent({
+      components: { MermaidVisualEditor },
+      setup() { return { model: ref(graph()) }; },
+      template: `<MermaidVisualEditor v-model="model" />`
+    });
+    const view = render(NodeHost);
+    await fireEvent.click(view.getByTestId("mock-select"));
+    const input = view.getByLabelText("文字颜色") as HTMLInputElement;
+
+    await fireEvent.update(input, "#123");
+    expect(input.value).toBe("#123");
+    await fireEvent.update(input, "#123456");
+    expect(input.value).toBe("#123456");
+  });
+
   it("把节点类型拖到画布落点后创建节点", async () => {
     const { getByLabelText, emitted } = render(MermaidVisualEditor, { props: { modelValue: graph() } });
     const dataTransfer = {
@@ -1037,6 +1318,29 @@ describe("MermaidVisualEditor", () => {
       targetHandle: "target-0"
     });
     expect(updates.at(-1)?.[0].edges[0]?.route).toBeUndefined();
+  });
+
+  it("改名和换形时保留节点比例与自定义颜色", async () => {
+    const model = graph();
+    model.nodes[0]!.scale = 1.5;
+    model.nodes[0]!.style = { textColor: "#112233", fillColor: "#AABBCC", strokeColor: "#445566" };
+    const EditorHost = defineComponent({
+      components: { MermaidVisualEditor },
+      setup() { return { model: ref(model) }; },
+      template: `<MermaidVisualEditor v-model="model" /><pre data-testid="node-json">{{ JSON.stringify(model.nodes[0]) }}</pre>`
+    });
+    const rendered = render(EditorHost);
+    await fireEvent.click(rendered.getByTestId("mock-select"));
+    await fireEvent.update(rendered.getByLabelText("节点名称"), "准备");
+    await fireEvent.update(rendered.getByLabelText("节点类型"), "rounded");
+
+    const node = JSON.parse(rendered.getByTestId("node-json").textContent ?? "{}");
+    expect(node).toMatchObject({
+      text: "准备",
+      type: "rounded",
+      scale: 1.5,
+      style: { textColor: "#112233", fillColor: "#AABBCC", strokeColor: "#445566" }
+    });
   });
 
   it("只修改连线文字时保留自动布局路由", async () => {

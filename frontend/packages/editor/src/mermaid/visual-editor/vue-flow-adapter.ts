@@ -3,6 +3,7 @@ import { isMermaidPortHandle } from "../edge-port-metadata";
 import {
   clearMermaidEdgeRoutes,
   type MermaidGraph,
+  type MermaidNodeStyle,
   type MermaidNodeType,
   type MermaidPosition
 } from "../model";
@@ -12,10 +13,12 @@ export type MermaidFlowNodeData = {
   text: string;
   nodeType: MermaidNodeType;
   direction: MermaidGraph["direction"];
+  scale?: number;
+  style?: MermaidNodeStyle;
 };
 
 export type MermaidFlowNode = Node<MermaidFlowNodeData, Record<string, never>, "mermaid">;
-export type MermaidFlowEdgeData = { routePoints?: MermaidPosition[] };
+export type MermaidFlowEdgeData = { routePoints?: MermaidPosition[]; textColor?: string };
 export type MermaidFlowEdge = Edge<MermaidFlowEdgeData>;
 
 export function toVueFlowNodes(graph: MermaidGraph): MermaidFlowNode[] {
@@ -23,7 +26,13 @@ export function toVueFlowNodes(graph: MermaidGraph): MermaidFlowNode[] {
     id: node.id,
     type: "mermaid",
     position: { ...node.position },
-    data: { text: node.text, nodeType: node.type, direction: graph.direction },
+    data: {
+      text: node.text,
+      nodeType: node.type,
+      direction: graph.direction,
+      scale: node.scale,
+      style: node.style ? { ...node.style } : undefined
+    },
     ariaLabel: `${node.id} ${node.text}`
   }));
 }
@@ -47,7 +56,10 @@ export function toVueFlowEdges(graph: MermaidGraph): MermaidFlowEdge[] {
       label: edge.label || undefined,
       type: "mermaid-edge",
       markerEnd: edge.relation === "line" ? undefined : MarkerType.ArrowClosed,
-      data: edge.route ? { routePoints: edge.route.points.map((point) => ({ ...point })) } : {},
+      data: {
+        ...(edge.route ? { routePoints: edge.route.points.map((point) => ({ ...point })) } : {}),
+        ...(edge.style?.textColor ? { textColor: edge.style.textColor } : {})
+      },
       animated: false,
       style:
         edge.relation === "dotted"

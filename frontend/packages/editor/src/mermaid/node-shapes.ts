@@ -81,13 +81,27 @@ export function getMermaidNodeShape(type: MermaidNodeType): MermaidNodeShapeDefi
  * 画布与 ELK 共用同一包围盒估算。中文按 12px 单字宽度计算，长文本继续沿用 190px
  * 上限并由节点标签省略，避免自动布局与真实节点宽度再次分叉。
  */
-export function getMermaidNodeSize(node: { type: MermaidNodeType; text: string }): MermaidNodeSize {
+export function getMermaidNodeBaseSize(node: { type: MermaidNodeType; text: string }): MermaidNodeSize {
   const rule = NODE_SIZE_RULES[node.type] ?? NODE_SIZE_RULES.rectangle;
   if (rule.fixedWidth) return { width: rule.fixedWidth, height: rule.height };
   const contentWidth = Array.from(node.text || "").length * 12 + (rule.horizontalPadding ?? 0);
   return {
     width: Math.max(rule.minWidth, Math.min(rule.maxWidth ?? rule.minWidth, contentWidth)),
     height: rule.height
+  };
+}
+
+/** 实际尺寸在默认包围盒上等比缩放；统一限制范围并保留 0.1px，供画布和 ELK 共用。 */
+export function getMermaidNodeSize(node: {
+  type: MermaidNodeType;
+  text: string;
+  scale?: number;
+}): MermaidNodeSize {
+  const base = getMermaidNodeBaseSize(node);
+  const scale = Number.isFinite(node.scale) ? Math.min(3, Math.max(0.5, node.scale ?? 1)) : 1;
+  return {
+    width: Math.round(base.width * scale * 10) / 10,
+    height: Math.round(base.height * scale * 10) / 10
   };
 }
 

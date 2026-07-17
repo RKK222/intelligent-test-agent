@@ -10,6 +10,7 @@ import type {
   MermaidNodeType
 } from "./model";
 import { findMermaidNodeTypeByModernShape } from "./node-shapes";
+import { consumeMermaidStyleDirectives, type MermaidPreservedRecord } from "./style-directives";
 
 const HEADER_PATTERN = /^\s*(flowchart|graph)(?:\s+(TD|TB|BT|LR|RL))?\s*;?\s*$/i;
 const NODE_ID_PATTERN = "[A-Za-z_][A-Za-z0-9_-]*";
@@ -246,6 +247,105 @@ function parseEdgeLine(line: string): {
   };
 }
 
+const PRESERVED_EDGE_OPERATORS = [
+  "<-.->", "<==>", "<-->", "o--o", "o--x", "x--o", "x--x",
+  "-.->", "==>", "<==", "-->", "<--", "--o", "--x", "---", "~~~"
+] as const;
+
+/** 扫描最外层边操作符，节点标签、现代属性和连线标签中的符号不会被误计为 link。 */
+function scanPreservedEdgeOperators(line: string): Array<{ start: number; end: number }> {
+  const operators: Array<{ start: number; end: number }> = [];
+  const closingByOpening: Record<string, string> = { "[": "]", "(": ")", "{": "}" };
+  const closings: string[] = [];
+  let quote: "\"" | "'" | undefined;
+  let escaped = false;
+  let pipeLabel = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote === "\"") {
+      escaped = true;
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = quote === character ? undefined : quote ?? character;
+      continue;
+    }
+    if (quote) continue;
+    if (closingByOpening[character]) {
+      closings.push(closingByOpening[character]!);
+      continue;
+    }
+    if (closings.at(-1) === character) {
+      closings.pop();
+      continue;
+    }
+    if (closings.length > 0) continue;
+    if (character === "|") {
+      pipeLabel = !pipeLabel;
+      continue;
+    }
+    if (pipeLabel) continue;
+    const operator = PRESERVED_EDGE_OPERATORS.find((candidate) => line.startsWith(candidate, index));
+    if (!operator) continue;
+    operators.push({ start: index, end: index + operator.length });
+    index += operator.length - 1;
+  }
+  return operators;
+}
+
+function endpointAlternativeCount(source: string, side: "source" | "target"): number {
+  const statement = side === "source"
+    ? source.slice(source.lastIndexOf(";") + 1)
+    : source.slice(0, source.indexOf(";") < 0 ? source.length : source.indexOf(";"));
+  let count = 1;
+  let depth = 0;
+  let quote: "\"" | "'" | undefined;
+  let escaped = false;
+  let pipeLabel = false;
+  for (const character of statement) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote === "\"") {
+      escaped = true;
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = quote === character ? undefined : quote ?? character;
+      continue;
+    }
+    if (quote) continue;
+    if ("[({".includes(character)) depth += 1;
+    else if ("])}".includes(character)) depth = Math.max(0, depth - 1);
+    else if (character === "|" && depth === 0) pipeLabel = !pipeLabel;
+    else if (character === "&" && depth === 0 && !pipeLabel) count += 1;
+  }
+  return count;
+}
+
+/** 多目标和链式语句会展开成多条 Mermaid link，linkStyle 的全局索引必须按展开数偏移。 */
+function countPreservedMermaidLinks(line: string): number {
+  const trimmed = line.trim();
+  if (
+    !trimmed ||
+    trimmed.startsWith("%%") ||
+    /^(?:accTitle|accDescr)\s*[:{]/i.test(trimmed)
+  ) return 0;
+  const operators = scanPreservedEdgeOperators(line);
+  return operators.reduce((count, operator, index) => {
+    const previousEnd = operators[index - 1]?.end ?? 0;
+    const nextStart = operators[index + 1]?.start ?? line.length;
+    const sourceCount = endpointAlternativeCount(line.slice(previousEnd, operator.start), "source");
+    const targetCount = endpointAlternativeCount(line.slice(operator.end, nextStart), "target");
+    return count + sourceCount * targetCount;
+  }, 0);
+}
+
 /** 将当前支持范围内的 Mermaid flowchart/graph 转为可视化中间模型。 */
 export function parseMermaidFlowchart(source: string): MermaidGraph {
   const lines = source.replaceAll("\r\n", "\n").split("\n");
@@ -273,8 +373,17 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   const edges: MermaidGraph["edges"] = [];
   const preservedModernNodeIds = new Set<string>();
   let scanPreservedBlockDepth = 0;
+  let scanAccessibilityDescriptionBlock = false;
   for (const line of lines) {
     const trimmed = line.trim();
+    if (scanAccessibilityDescriptionBlock) {
+      if (trimmed.includes("}")) scanAccessibilityDescriptionBlock = false;
+      continue;
+    }
+    if (/^accDescr\s*\{/i.test(trimmed)) {
+      if (!trimmed.includes("}")) scanAccessibilityDescriptionBlock = true;
+      continue;
+    }
     const startsPreservedBlock = /^subgraph\b/i.test(trimmed);
     const insidePreservedBlock = scanPreservedBlockDepth > 0 || startsPreservedBlock;
     if (startsPreservedBlock) scanPreservedBlockDepth += 1;
@@ -294,11 +403,18 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
     if (/^end\s*;?$/i.test(trimmed) && scanPreservedBlockDepth > 0) scanPreservedBlockDepth -= 1;
   }
   // 私有注释先带源码索引按普通行保留，只有整个新/旧 metadata 验证成功后才统一消费。
-  const preservedRecords: Array<{ sourceIndex: number; beforeEditableIndex: number; line: string }> = [];
+  const preservedRecords: MermaidPreservedRecord[] = [];
   let preservedBlockDepth = 0;
+  let accessibilityDescriptionBlock = false;
 
-  const preserveLine = (line: string, sourceIndex: number) => {
-    preservedRecords.push({ sourceIndex, beforeEditableIndex: edges.length, line });
+  const preserveLine = (line: string, sourceIndex: number, countLinks = true) => {
+    const linkCount = countLinks ? countPreservedMermaidLinks(line) : 0;
+    preservedRecords.push({
+      sourceIndex,
+      beforeEditableIndex: edges.length,
+      line,
+      linkCount: linkCount > 0 ? linkCount : undefined
+    });
   };
 
   const upsertNode = (parsed: ParsedNode) => {
@@ -319,6 +435,16 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
     // 节点声明或空行不会进入 preservedLines；用空占位保住原中断，避免保存后把坏续行重新拼成有效 marker。
     if (interruptedCompactContinuations.has(index)) preserveLine("", index - 0.5);
     const trimmed = line.trim();
+    if (accessibilityDescriptionBlock) {
+      preserveLine(line, index, false);
+      if (trimmed.includes("}")) accessibilityDescriptionBlock = false;
+      return;
+    }
+    if (/^accDescr\s*\{/i.test(trimmed)) {
+      preserveLine(line, index, false);
+      if (!trimmed.includes("}")) accessibilityDescriptionBlock = true;
+      return;
+    }
     if (preservedBlockDepth > 0) {
       preserveLine(line, index);
       if (/^subgraph\b/i.test(trimmed)) preservedBlockDepth += 1;
@@ -390,6 +516,7 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
     preservedLines: preservedRecords.map((record) => record.line),
     preservedSegments: []
   };
+  const consumedStyleIndexes = consumeMermaidStyleDirectives(graph, preservedRecords);
   const compactApplied = compactMetadata.encoded !== null
     ? applyMermaidCompactFlow(graph, compactMetadata.encoded)
     : false;
@@ -404,13 +531,22 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   if (compactApplied) {
     for (const index of compactMetadata.markerLineIndexes) removedIndexes.add(index);
   }
+  for (const index of consumedStyleIndexes) removedIndexes.add(index);
 
   const remainingRecords = preservedRecords.filter((record) => !removedIndexes.has(record.sourceIndex));
   graph.preservedLines = remainingRecords.map((record) => record.line);
   for (const record of remainingRecords) {
     const current = graph.preservedSegments!.at(-1);
-    if (current?.beforeEditableIndex === record.beforeEditableIndex) current.lines.push(record.line);
-    else graph.preservedSegments!.push({ beforeEditableIndex: record.beforeEditableIndex, lines: [record.line] });
+    if (current?.beforeEditableIndex === record.beforeEditableIndex) {
+      current.lines.push(record.line);
+      current.linkCount = (current.linkCount ?? 0) + (record.linkCount ?? 0);
+    } else {
+      graph.preservedSegments!.push({
+        beforeEditableIndex: record.beforeEditableIndex,
+        lines: [record.line],
+        ...(record.linkCount ? { linkCount: record.linkCount } : {})
+      });
+    }
   }
   return graph;
 }

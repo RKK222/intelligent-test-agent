@@ -27,11 +27,23 @@ export type MermaidEdgeRoute = {
   points: MermaidPosition[];
 };
 
+export type MermaidNodeStyle = {
+  textColor?: string;
+  fillColor?: string;
+  strokeColor?: string;
+};
+
+export type MermaidEdgeStyle = {
+  textColor?: string;
+};
+
 export type MermaidNode = {
   id: string;
   text: string;
   type: MermaidNodeType;
   position: MermaidPosition;
+  scale?: number;
+  style?: MermaidNodeStyle;
 };
 
 export type MermaidEdge = {
@@ -43,12 +55,15 @@ export type MermaidEdge = {
   route?: MermaidEdgeRoute;
   label: string;
   relation: MermaidEdgeRelation;
+  style?: MermaidEdgeStyle;
 };
 
 export type MermaidPreservedSegment = {
   /** 在第几条可编辑边/消息之前写回；超出范围时追加到末尾。 */
   beforeEditableIndex: number;
   lines: string[];
+  /** 片段内 Mermaid 实际 link 数，用于把可编辑边映射到全局 linkStyle 索引。 */
+  linkCount?: number;
 };
 
 export type MermaidGraph = {
@@ -72,15 +87,21 @@ export type MermaidBlock = {
 export function cloneMermaidGraph(graph: MermaidGraph): MermaidGraph {
   return {
     ...graph,
-    nodes: graph.nodes.map((node) => ({ ...node, position: { ...node.position } })),
+    nodes: graph.nodes.map((node) => ({
+      ...node,
+      position: { ...node.position },
+      style: node.style ? { ...node.style } : undefined
+    })),
     edges: graph.edges.map((edge) => ({
       ...edge,
+      style: edge.style ? { ...edge.style } : undefined,
       route: edge.route ? { points: edge.route.points.map((point) => ({ ...point })) } : undefined
     })),
     preservedLines: [...graph.preservedLines],
     preservedSegments: graph.preservedSegments?.map((segment) => ({
       beforeEditableIndex: segment.beforeEditableIndex,
-      lines: [...segment.lines]
+      lines: [...segment.lines],
+      ...(segment.linkCount ? { linkCount: segment.linkCount } : {})
     }))
   };
 }

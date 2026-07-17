@@ -40,4 +40,18 @@ describe("Mermaid Flowchart 图形目录", () => {
     expect(sizeOf("doc")).toEqual({ width: 132, height: 68 });
     expect(sizeOf("docs")).toEqual({ width: 140, height: 76 });
   });
+
+  it.each(MERMAID_NODE_SHAPES)("$label 在 50%/100%/300% 时保持宽高比并精确到 0.1px", ({ type }) => {
+    const base = getMermaidNodeSize({ type, text: "节点" });
+
+    expect(getMermaidNodeSize({ type, text: "节点", scale: 0.5 })).toEqual({
+      width: Math.round(base.width * 5) / 10,
+      height: Math.round(base.height * 5) / 10
+    });
+    expect(getMermaidNodeSize({ type, text: "节点", scale: 1 })).toEqual(base);
+    expect(getMermaidNodeSize({ type, text: "节点", scale: 3 })).toEqual({
+      width: Math.round(base.width * 30) / 10,
+      height: Math.round(base.height * 30) / 10
+    });
+  });
 });

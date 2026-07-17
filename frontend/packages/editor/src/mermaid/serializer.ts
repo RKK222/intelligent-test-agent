@@ -1,6 +1,7 @@
 import { serializeMermaidCompactFlow } from "./compact-metadata";
 import type { MermaidEdgeRelation, MermaidGraph, MermaidNode } from "./model";
 import { MERMAID_MODERN_SHAPE_BY_TYPE } from "./node-shapes";
+import { serializeMermaidStyleDirectives } from "./style-directives";
 
 function quoteLabel(value: string): string {
   const normalized = value.replaceAll("\r\n", " ").replaceAll("\n", " ").replaceAll("\r", " ");
@@ -43,5 +44,6 @@ export function serializeMermaidGraph(graph: MermaidGraph): string {
   } else {
     lines.push(...graph.edges.map(serializeEdge), ...graph.preservedLines);
   }
+  lines.push(...serializeMermaidStyleDirectives(graph));
   return `${lines.join("\n").trimEnd()}\n`;
 }

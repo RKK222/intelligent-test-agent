@@ -181,6 +181,50 @@ U->>S: 请求`);
     expect(compactMarkers(serializeMermaidGraph(graphWithCompactMetadata()))[0]).toBe(flowMarker);
   });
 
+  it("仅在存在自定义比例时使用 A2，并按千分比精度往返 50%–300%", () => {
+    const graph = parseMermaidFlowchart("flowchart LR\nA --> B\nB --> C");
+    graph.nodes[0]!.scale = 0.5;
+    graph.nodes[1]!.scale = 1.2344;
+    graph.nodes[2]!.scale = 3;
+
+    const serialized = serializeMermaidGraph(graph);
+    const marker = compactMarkers(serialized)[0]!;
+    expect(decodeBase64Url(marker.slice(3))[0]).toBe(0xa2);
+    expect(parseMermaidFlowchart(serialized).nodes.map((node) => node.scale)).toEqual([0.5, 1.234, 3]);
+
+    graph.nodes.forEach((node) => delete node.scale);
+    graph.nodes[0]!.position = { x: 10, y: 20 };
+    const a1Marker = compactMarkers(serializeMermaidGraph(graph))[0]!;
+    expect(decodeBase64Url(a1Marker.slice(3))[0]).toBe(0xa1);
+  });
+
+  it("A2 节点默认比例用零表示，显式 100% 保存后恢复为无 scale", () => {
+    const graph = parseMermaidFlowchart("flowchart LR\nA --> B");
+    graph.nodes[0]!.scale = 1;
+    graph.nodes[1]!.scale = 1.5;
+
+    const reparsed = parseMermaidFlowchart(serializeMermaidGraph(graph));
+    expect(reparsed.nodes[0]!.scale).toBeUndefined();
+    expect(reparsed.nodes[1]!.scale).toBe(1.5);
+  });
+
+  it("损坏或越界的 A2 scale 原子失败并保留原始注释", () => {
+    const topology = parseMermaidFlowchart("flowchart LR\nA[开始]\nB{检查}\nA --> B");
+    const signature = flowSignature(topology);
+    const invalidMarkers = [
+      markerForBody([0xa2, 0x10, 2, 1, ...unsignedLeb128(499), 0], signature),
+      markerForBody([0xa2, 0x10, 2, 1, ...unsignedLeb128(3001), 0], signature),
+      markerForBody([0xa2, 0x10, 2, 1, 0x80], signature),
+      markerForBody([0xa1, 0x10, 2, 1, ...unsignedLeb128(1500), 0], signature)
+    ];
+
+    for (const marker of invalidMarkers) {
+      const parsed = parseMermaidFlowchart(flowSource(marker));
+      expect(parsed.nodes.every((node) => node.scale === undefined)).toBe(true);
+      expect(parsed.preservedLines).toContain(marker);
+    }
+  });
+
   it("Flow 坐标、端口和正交路由通过一个 Base64URL 注释按 0.1px 精度往返", () => {
     const serialized = serializeMermaidGraph(graphWithCompactMetadata());
     const markers = compactMarkers(serialized);

@@ -1,11 +1,19 @@
 <script setup lang="ts">
+import { computed, type CSSProperties } from "vue";
 import type { MermaidNodeType } from "../model";
 
-defineProps<{
+const props = defineProps<{
   type: MermaidNodeType;
   selected?: boolean;
   thumbnail?: boolean;
+  fillColor?: string;
+  strokeColor?: string;
 }>();
+
+const visualStyle = computed<CSSProperties>(() => ({
+  ...(props.fillColor ? { "--ta-mermaid-fill": props.fillColor } : {}),
+  ...(props.strokeColor ? { "--ta-mermaid-stroke": props.strokeColor } : {})
+}) as CSSProperties);
 </script>
 
 <template>
@@ -14,6 +22,7 @@ defineProps<{
     :data-mermaid-shape="type"
     viewBox="0 0 100 100"
     preserveAspectRatio="none"
+    :style="visualStyle"
     aria-hidden="true"
   >
     <rect
@@ -137,15 +146,15 @@ defineProps<{
 }
 
 .ta-mermaid-node-shape__surface {
-  fill: var(--ta-surface, #fff);
-  stroke: currentColor;
+  fill: var(--ta-mermaid-fill, var(--ta-surface, #fff));
+  stroke: var(--ta-mermaid-stroke, currentColor);
   stroke-width: 1.5;
   stroke-linejoin: round;
 }
 
 .ta-mermaid-node-shape__detail {
   fill: none;
-  stroke: currentColor;
+  stroke: var(--ta-mermaid-stroke, currentColor);
   stroke-width: 1.5;
   stroke-linecap: round;
 }
@@ -158,8 +167,8 @@ defineProps<{
 }
 
 .ta-mermaid-node-shape__stack {
-  fill: var(--ta-panel-2, #f8fafc);
-  stroke: currentColor;
+  fill: color-mix(in srgb, var(--ta-mermaid-fill, var(--ta-surface, #fff)) 28%, white);
+  stroke: var(--ta-mermaid-stroke, currentColor);
   stroke-width: 1.35;
   stroke-linejoin: round;
 }
@@ -174,7 +183,6 @@ defineProps<{
 }
 
 .ta-mermaid-node-shape.is-selected {
-  color: var(--primary, #4f46e5);
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--primary, #4f46e5) 30%, transparent));
 }
 
