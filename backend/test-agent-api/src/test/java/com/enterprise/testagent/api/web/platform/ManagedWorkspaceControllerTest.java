@@ -322,6 +322,69 @@ class ManagedWorkspaceControllerTest {
                 TRACE_ID);
     }
 
+    @Test
+    void ordinaryMemberCannotCommitApplicationAgentConfigThroughPersonalWorkspaceApi() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/personal-workspaces/psw_123/commit")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"commitMessage":"agent: 修改应用技能","files":["src/App.java","./.opencode/skills/case-design/SKILL.md"]}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("FORBIDDEN")
+                .jsonPath("$.details.files[0]").isEqualTo("./.opencode/skills/case-design/SKILL.md");
+
+        org.mockito.Mockito.verifyNoInteractions(service);
+    }
+
+    @Test
+    void ordinaryMemberCannotMutateApplicationAgentConfigThroughWorkspaceGitApi() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/workspaces/wrk_personal/git-stage")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"files":[".opencode/agents/payment-test.md"]}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("FORBIDDEN");
+
+        org.mockito.Mockito.verifyNoInteractions(service);
+    }
+
+    @Test
+    void applicationAdministratorPublishesAgentConfigFromPersonalWorkspace() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+
+        client(service, readyAssignmentService("127.0.0.1"), List.of("APP_ADMIN")).post()
+                .uri("/api/internal/platform/workspace-management/personal-workspaces/psw_123/publish")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"commitMessage":"agent: 发布应用技能","files":[".opencode/skills/case-design/SKILL.md"]}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).publishPersonalWorkspace(
+                "psw_123",
+                "agent: 发布应用技能",
+                List.of(".opencode/skills/case-design/SKILL.md"),
+                null,
+                null,
+                USER_ID,
+                TRACE_ID);
+    }
+
     private WebTestClient client(ManagedWorkspaceApplicationService service) {
         return client(service, readyAssignmentService("127.0.0.1"));
     }

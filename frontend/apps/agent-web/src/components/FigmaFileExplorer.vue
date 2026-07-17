@@ -33,7 +33,7 @@ const props = defineProps<FileExplorerProps & {
   apiBaseUrl?: string;
   /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
   workspaceId?: string;
-  /** 应用 Agent 配置固定使用应用 feature 工作区，不随个人 worktree 切换。 */
+  /** 应用 Agent 配置使用当前版本的个人 worktree，与普通 workspace 文件共用 Git 根。 */
   agentConfigWorkspaceId?: string;
   /** 当前默认个人工作区 ID，透传给 GitChangesPanel 用于提交并推送 */
   personalWorkspaceId?: string;
@@ -282,7 +282,7 @@ defineExpose({
         v-if="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
-        :agent-config-workspace-id="agentConfigWorkspaceId ?? ''"
+        :agent-config-workspace-id="agentConfigWorkspaceId"
         :personal-workspace-id="personalWorkspaceId"
         :personal-workspace-branch="personalWorkspaceBranch"
         :api-base-url="apiBaseUrl"

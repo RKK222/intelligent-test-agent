@@ -36,6 +36,7 @@ import type {
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { Badge, Button } from "@test-agent/ui-kit";
+import { isWorkspaceAgentConfigPath } from "./workbench-utils";
 
 type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
 type DiffScope = "WORKSPACE" | "AGENT_WORKSPACE" | "PUBLIC";
@@ -43,7 +44,7 @@ type AgentPanelDiffFile = AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" 
 
 const props = defineProps<{
   workspaceId?: string;
-  /** 应用 Agent 配置所属的 feature 工作区；与普通文件使用的个人 workspace 分离。 */
+  /** 应用 Agent 配置所属的个人 workspace；与普通文件共用同一 Git worktree。 */
   agentConfigWorkspaceId?: string;
   /** 当前默认个人 worktree ID，用于本地提交和 feature 发布 */
   personalWorkspaceId?: string;
@@ -315,6 +316,12 @@ function isLocalOnlySpecPath(path: string): boolean {
   const segments = path.replace(/\\/g, "/").split("/").filter((segment) => segment && segment !== ".");
   return segments[0] === "spec";
 }
+
+/** AgentConfig API 使用 `.opencode` 内相对路径，个人 worktree 提交/发布使用 workspace 相对路径。 */
+function workspaceAgentPersonalPath(path: string): string {
+  const normalized = path.replaceAll("\\", "/").replace(/^\/+/, "");
+  return normalized.startsWith(".opencode/") ? normalized : `.opencode/${normalized}`;
+}
 const workspaceConflicts = computed(() =>
   workspaceDiffFiles.value.filter((f) => isConflictFile(f))
 );
@@ -399,15 +406,14 @@ const activeScopeItem = computed(() =>
   diffScopes.value.find((scope) => scope.key === activeDiffScope.value) ?? diffScopes.value[0]
 );
 const activeScopeMeta = computed(() => {
-  if (activeDiffScope.value === "WORKSPACE") {
+  if (activeDiffScope.value !== "PUBLIC") {
     return props.personalWorkspaceBranch
       ? `个人 worktree · ${props.personalWorkspaceBranch}`
       : "个人 worktree";
   }
-  const worktree = activeDiffScope.value === "PUBLIC" ? workbench.publicWorktree : workbench.workspaceWorktree;
-  return worktree?.branch
-    ? `个人 worktree · ${worktree.branch}`
-    : activeDiffScope.value === "PUBLIC" ? "公共个人 worktree" : "应用配置 worktree";
+  return workbench.publicWorktree?.branch
+    ? `公共个人 worktree · ${workbench.publicWorktree.branch}`
+    : "公共个人 worktree";
 });
 const activeAgentUnstaged = computed<AgentPanelDiffFile[]>(() =>
   activeDiffScope.value === "PUBLIC" ? publicAgentUnstaged.value : workspaceAgentUnstaged.value
@@ -444,7 +450,9 @@ const hasPublishableStagedChanges = computed(() =>
 const activeHasBlockingConflicts = computed(() =>
   activeDiffScope.value === "WORKSPACE"
     ? hasBlockingWorkspaceConflicts.value
-    : activeDiffScope.value === "PUBLIC" && hasBlockingAgentConflicts.value
+    : activeDiffScope.value === "PUBLIC"
+      ? hasBlockingAgentConflicts.value
+      : canWriteAgentScope("WORKSPACE") && workspaceAgentConflicts.value.length > 0
 );
 
 function selectInitialDiffScope() {
@@ -488,17 +496,24 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
       try {
         const gitDiff = await api.getWorkspaceGitDiff(props.workspaceId);
         if (token !== refreshChangesToken) return;
-        workspaceDiffFiles.value = gitDiff.files.map((f) => ({
-          path: f.path,
-          rawStatus: f.rawStatus,
-          status: f.status,
-          patch: f.patch,
-          additions: f.additions,
-          deletions: f.deletions
-        }));
+        // `.opencode` 与普通文件同属个人 worktree，但在“应用Agent”视图单独展示和提交。
+        const workspaceFiles = gitDiff.files
+          .filter((f) => !isWorkspaceAgentConfigPath(f.path))
+          .map((f) => ({
+            path: f.path,
+            rawStatus: f.rawStatus,
+            status: f.status,
+            patch: f.patch,
+            additions: f.additions,
+            deletions: f.deletions
+          }));
+        workspaceDiffFiles.value = workspaceFiles;
         // 同步后端 staged 状态到前端 Set
         const stagedPaths = new Set<string>();
-        gitDiff.files.forEach((f) => { if (f.staged) stagedPaths.add(f.path); });
+        workspaceFiles.forEach((f) => {
+          const source = gitDiff.files.find((candidate) => candidate.path === f.path);
+          if (source?.staged) stagedPaths.add(f.path);
+        });
         stagedWorkspacePaths.value = stagedPaths;
       } catch {
         if (token !== refreshChangesToken) return;
@@ -521,7 +536,7 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
     // 3. Fetch workspace agent changes
     if (effectiveAgentConfigWorkspaceId.value) {
       try {
-        const wksDiff = await api.getWorkspaceAgentDiff(effectiveAgentConfigWorkspaceId.value, workbench.workspaceWorktree?.worktreeId);
+        const wksDiff = await api.getWorkspaceAgentDiff(effectiveAgentConfigWorkspaceId.value);
         if (token !== refreshChangesToken) return;
         workspaceAgentDiffs.value = wksDiff.files;
       } catch {
@@ -670,7 +685,7 @@ function notifyChangesRefreshed(paths?: string[], reloadOpenFiles?: boolean) {
 }
 
 function isConflictFile(file: { status?: string; rawStatus?: string }): boolean {
-  const rawStatus = (file.rawStatus ?? "").trim();
+  const rawStatus = (file.rawStatus ?? file.status ?? "").trim().toUpperCase();
   return file.status === "conflict" || ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(rawStatus);
 }
 
@@ -911,7 +926,7 @@ async function stageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "W
     if (file.scope === "PUBLIC") {
       await api.stagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
     } else {
-      await api.stageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path], workbench.workspaceWorktree?.worktreeId);
+      await api.stageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path]);
     }
     await refreshChanges();
   } catch (error) {
@@ -938,7 +953,7 @@ async function unstageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | 
     if (file.scope === "PUBLIC") {
       await api.unstagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
     } else {
-      await api.unstageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path], workbench.workspaceWorktree?.worktreeId);
+      await api.unstageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path]);
     }
     await refreshChanges();
   } catch (error) {
@@ -971,6 +986,11 @@ async function handleCommit(push = false) {
   }
   if (activeDiffScope.value === "PUBLIC" && hasBlockingAgentConflicts.value) {
     errorMessage.value = "公共 Agent 个人 worktree 存在合并冲突，请先解决冲突文件后再提交并推送。";
+    progressMessage.value = "";
+    return;
+  }
+  if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceAgentConflicts.value.length > 0) {
+    errorMessage.value = "应用 Agent 所在的个人 worktree 存在合并冲突，请先解决后再提交并推送。";
     progressMessage.value = "";
     return;
   }
@@ -1127,31 +1147,57 @@ async function handleCommit(push = false) {
       }
     }
 
-    // 3. Commit Agent WORKSPACE changes
-      const workspaceStagedCount = canWriteAgentScope("WORKSPACE")
-      ? workspaceAgentDiffs.value.filter((f) => f.staged).length
-      : 0;
-    if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceStagedCount > 0 && effectiveAgentConfigWorkspaceId.value) {
-      progressMessage.value = "正在提交工作空间 Agent 配置...";
+    // 3. 应用 Agent 与普通文件共用个人 worktree，只是按 `.opencode` 路径隔离提交范围。
+    const workspaceStagedFiles = canWriteAgentScope("WORKSPACE")
+      ? workspaceAgentStaged.value.map((file) => workspaceAgentPersonalPath(file.path))
+      : [];
+    if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceStagedFiles.length > 0) {
+      if (!props.personalWorkspaceId) {
+        errorMessage.value = "当前不是个人 worktree，不能提交或发布应用 Agent。";
+        progressMessage.value = "";
+        committing.value = false;
+        return;
+      }
+      progressMessage.value = "正在提交个人 worktree 中的应用 Agent 配置...";
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
-      const opId = newOperationId();
-      await runAgentOperation(
-        () => api.commitWorkspaceAgentConfig(effectiveAgentConfigWorkspaceId.value!, { message: msg, worktreeId: workbench.workspaceWorktree?.worktreeId, operationId: opId }),
-        "提交工作空间 Agent 配置",
-        opId
-      );
+      await api.commitPersonalWorkspace(props.personalWorkspaceId, {
+        commitMessage: msg,
+        files: workspaceStagedFiles,
+        operationId: newOperationId()
+      });
       commitStep.value = 2;
       if (push) {
-        progressMessage.value = "正在发布工作空间 Agent 配置...";
+        publishAttempted = true;
+        progressMessage.value = "正在从个人 HEAD 投影并推送应用 Agent 配置...";
+        commitStep.value = 3;
         const pushOpId = newOperationId();
-        await runAgentOperation(
-          () => api.publishWorkspaceAgentConfig(effectiveAgentConfigWorkspaceId.value!, workbench.workspaceWorktree?.worktreeId, pushOpId),
-          "发布工作空间 Agent 配置",
-          pushOpId,
-          true
-        );
+        let publishProgressSocket: { close: () => void } | null = null;
+        try {
+          publishProgressSocket = await api.connectAgentConfigProgress(pushOpId, applyPublishProgressEvent);
+        } catch {
+          publishProgressSocket = null;
+        }
+        const result = await (async () => {
+          try {
+            return await api.publishPersonalWorkspace(props.personalWorkspaceId!, {
+              commitMessage: msg,
+              files: workspaceStagedFiles,
+              operationId: pushOpId
+            });
+          } finally {
+            setTimeout(() => publishProgressSocket?.close(), 1000);
+          }
+        })();
+        if (!hasLivePublishCommand.value) {
+          applyPublishExecution(result.currentStep, result.executedCommands);
+        }
+        if (result.status !== "PUBLISHED" || result.remotePushed !== true) {
+          throw new Error("应用 Agent 的 feature 分支推送结果未确认，请刷新后重试。");
+        }
+        publishResultConfirmed.value = true;
         remotePublishCompleted = true;
+        commitStep.value = 5;
       }
     }
 
@@ -1508,7 +1554,7 @@ defineExpose({
                 </div>
               </div>
               <div v-if="activeDiffScope === 'AGENT_WORKSPACE' && workspaceAgentConflicts.length > 0" class="git-conflict-note">
-                检测到 {{ workspaceAgentConflicts.length }} 个应用 Agent 冲突，请在应用 Agents/Skills 配置区处理。
+                检测到 {{ workspaceAgentConflicts.length }} 个应用 Agent 冲突，点击文件后使用与 workspace 相同的合并编辑器处理。
               </div>
               <div
                 v-for="file in activeAgentConflicts"
@@ -1516,7 +1562,9 @@ defineExpose({
                 class="git-file-row git-conflict-row group"
                 :title="file.path"
                 :aria-label="file.path"
-                @click="activeDiffScope === 'PUBLIC' && openPublicAgentConflict(file.path)"
+                @click="activeDiffScope === 'PUBLIC'
+                  ? openPublicAgentConflict(file.path)
+                  : openWorkspaceConflict(workspaceAgentPersonalPath(file.path))"
               >
                 <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
                 <span class="git-file-name" :title="file.path">

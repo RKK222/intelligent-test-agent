@@ -708,16 +708,9 @@ const appTemplatesWithVersions = computed(() =>
 // 当前选中的版本 ID：默认从 selectedWorkspaceId 与 recent 偏好反查；切到版本后由 handleSelectVersion 更新。
 const currentVersionFromWorkspace = ref<string | undefined>(undefined);
 const selectedVersionId = computed(() => currentVersionFromWorkspace.value);
-const selectedAgentConfigWorkspaceId = computed(() => {
-  const versionId = selectedVersionId.value;
-  if (!versionId) return isSuperAdmin.value ? selectedWorkspace.value?.workspaceId : undefined;
-  for (const versions of Object.values(versionsByTemplateId.value)) {
-    const version = versions.find((item) => item.versionId === versionId);
-    if (version?.runtimeWorkspace?.workspaceId) return version.runtimeWorkspace.workspaceId;
-  }
-  // 版本详情尚未加载时保持配置空态，避免把应用配置误写到个人 worktree 分支。
-  return currentPersonalWorkspaceId.value ? undefined : selectedWorkspace.value?.workspaceId;
-});
+// 方案 1：应用 Agent 与普通文件始终落在同一个版本个人 worktree。
+// AgentConfig API 仍负责 `.opencode` 的目录与写权限，但 workspaceId 不再切到 feature 副本。
+const selectedAgentConfigWorkspaceId = computed(() => selectedWorkspace.value?.workspaceId);
 
 /** 路由切换会让旧响应失效，同时必须结束旧 tab 的 loading，保证返回原路由后可以重试。 */
 function invalidateAgentFileLoadContext() {
@@ -748,8 +741,7 @@ watch(
     selectedAgentConfigWorkspaceId.value ?? "",
     workbench.publicWorktree?.worktreeId ?? "",
     workbench.publicWorktree?.linuxServerId ?? "",
-    workbench.publicConfigLinuxServerId ?? "",
-    workbench.workspaceWorktree?.worktreeId ?? ""
+    workbench.publicConfigLinuxServerId ?? ""
   ] as const,
   () => {
     invalidateAgentFileLoadContext();
@@ -3428,7 +3420,7 @@ function agentFileLoadContextIsCurrent(request: AgentFileLoadRequest): boolean {
   }
   return Boolean(request.workspaceId)
     && request.workspaceId === selectedAgentConfigWorkspaceId.value
-    && normalizedAgentRouteValue(request.worktreeId) === normalizedAgentRouteValue(workbench.workspaceWorktree?.worktreeId);
+    && !request.worktreeId;
 }
 
 function agentFileReadIsCurrent(
@@ -5025,7 +5017,7 @@ async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
 
       let mappedWks: RunDiffFile[] = [];
       if (selectedWorkspace.value) {
-        const wksDiff = await api.getWorkspaceAgentDiff(selectedWorkspace.value.workspaceId, workbench.workspaceWorktree?.worktreeId).catch(() => ({ files: [] }));
+        const wksDiff = await api.getWorkspaceAgentDiff(selectedWorkspace.value.workspaceId).catch(() => ({ files: [] }));
         mappedWks = wksDiff.files.map((f) => ({
           path: f.path,
           status: f.status,

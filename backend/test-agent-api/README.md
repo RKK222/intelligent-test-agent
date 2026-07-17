@@ -11,7 +11,7 @@
 - `web.platform` 承载平台自身接口，`web.agent` 承载 agent runtime 代理入口，`web.common` 承载 traceId、鉴权、限流、旧接口作废拦截和统一异常等入口支撑。
 - 普通 Workspace HTTP 入口只保留查询和文件路由；服务器目录选择与创建仅通过超级管理员文件 WebSocket ticket 执行。
 - 暴露应用版本工作区、版本 `git pull` 和个人工作区运行接口，Controller 只解析登录主体、traceId、当前用户 opencode agent 服务器并委托 workspace-management；应用成员权限由业务服务校验。
-- 工作区 Git 入口包含 diff/discard、真实 stage/unstage、三方冲突读取、单文件解决、取消 merge、个人 worktree 本地提交和 feature 发布；发布只把个人 `HEAD` 中允许发布的非 `spec/**` 文件投影到应用 feature worktree，不 merge 个人分支，`SUPER_ADMIN` 也不能绕过目录规则。冲突内容、index 操作、解决规则与发布路径校验由 workspace-management 负责，Controller 只转换 DTO。个人工作区提交/发布 DTO 透传可选 `operationId`，供业务层复用 Agent 配置进度 WebSocket 推送当前 Git 命令。
+- 工作区 Git 入口包含 diff/discard、真实 stage/unstage、三方冲突读取、单文件解决、取消 merge、个人 worktree 本地提交和 feature 发布；发布只把个人 `HEAD` 中允许发布的非 `spec/**` 文件投影到应用 feature worktree，不 merge 个人分支，`SUPER_ADMIN` 也不能绕过目录规则。应用 `.opencode/**` 与普通文件共用个人 worktree，因此 `ManagedWorkspaceController` 在 commit/publish 入口对该目录再次校验 `APP_ADMIN`（含 `SUPER_ADMIN`），防止绕过 AgentConfig API；其它 Git 业务规则仍由 workspace-management 负责。个人工作区提交/发布 DTO 透传可选 `operationId`，供业务层复用 Agent 配置进度 WebSocket 推送当前 Git 命令。
 - 暴露配置管理接口，Controller 只委托 configuration-management 业务服务；新建应用只允许 `SUPER_ADMIN`，应用成员、版本库和工作区管理校验 `APP_ADMIN` 且 `SUPER_ADMIN` 继承该能力。版本库类型下拉、部署模式选项接口、新增代码库的 `repositoryType/deploymentMode` DTO、应用版本库远端树接口和工作空间创建 `directoryNew` DTO 仅做协议转换，旧 `standard` 兼容派生、内部模式 SSH 前缀、远端树过滤和别名唯一校验由业务服务处理。设置页保存应用工作空间接口会读取当前用户 READY opencode 进程的 Linux 服务器并委托 workspace-management 创建初始版本工作区，进度通过 `workspace-create-operations/{operationId}` HTTP 轮询查询；分支和远端树加载接口不触发 clone。
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO。
@@ -78,7 +78,7 @@
 - Workspace 文件 WebSocket 入口应覆盖 route、ticket、Origin、同服务器校验、ticket 在归属未 READY 时复查强状态、RPC 成功/错误 envelope、上传/复制/移动、普通文件/目录树删除和受保护 `.opencode` 根目录拒绝；对应 HTTP/协议契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、文件 WebSocket route/ticket/op、文件读写权限、Git 操作鉴权、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
-- `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull`、工作区 Git stage/unstage、冲突解决和最近使用接口。
+- `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull`、工作区 Git stage/unstage、冲突解决、最近使用接口，以及普通成员绕过 Agent API 提交 `.opencode/**` 时的拒绝。
 - `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单。
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。

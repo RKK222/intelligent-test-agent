@@ -140,7 +140,6 @@ export const useWorkbenchStore = defineStore("workbench", () => {
   const activePath = ref<string | undefined>(undefined);
   const selectedDiffPath = ref<string | undefined>(undefined);
   const publicWorktree = ref<AgentConfigWorktree | null>(null);
-  const workspaceWorktree = ref<AgentConfigWorktree | null>(null);
   const publicConfigLinuxServerId = ref<string | null>(null);
   const useMockTestData = ref(false);
 
@@ -215,7 +214,6 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     activePath.value = undefined;
     selectedDiffPath.value = undefined;
     publicWorktree.value = null;
-    workspaceWorktree.value = null;
     publicConfigLinuxServerId.value = null;
   }
 
@@ -224,7 +222,6 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     activePath,
     selectedDiffPath,
     publicWorktree,
-    workspaceWorktree,
     publicConfigLinuxServerId,
     useMockTestData,
     setActivePath,

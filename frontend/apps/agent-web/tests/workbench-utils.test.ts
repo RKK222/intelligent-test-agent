@@ -14,6 +14,7 @@ import {
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
   filterWorkspaceRootEntries,
+  isWorkspaceAgentConfigPath,
   inferDiffFromToolPart,
   historyItems,
   reconcileCurrentTurnTodos,
@@ -68,6 +69,15 @@ describe("filterWorkspaceRootEntries", () => {
       { path: "src", name: "src", type: "directory" }
     ]);
     expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
+
+describe("isWorkspaceAgentConfigPath", () => {
+  it("识别普通 workspace 中需要交给 Agent 配置区管理的 .opencode 路径", () => {
+    expect(isWorkspaceAgentConfigPath(".opencode/skills/demo/SKILL.md")).toBe(true);
+    expect(isWorkspaceAgentConfigPath("workspace/.opencode/agents/demo.md")).toBe(true);
+    expect(isWorkspaceAgentConfigPath('".opencode\\skills\\demo\\SKILL.md"')).toBe(true);
+    expect(isWorkspaceAgentConfigPath("docs/spec.md")).toBe(false);
   });
 });
 

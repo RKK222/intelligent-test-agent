@@ -48,11 +48,19 @@ export type WorkspaceRequirementReference = {
 /**
  * `.opencode` 已由下方 Agent 配置树专门管理，普通工作空间根目录不重复展示。
  */
+export function isWorkspaceAgentConfigPath(path: string): boolean {
+  const normalized = path
+    .replaceAll("\\", "/")
+    .trim()
+    .replace(/^"|"$/g, "");
+  return normalized.split("/").filter(Boolean).includes(".opencode");
+}
+
 export function filterWorkspaceRootEntries(path: string, entries: FileTreeEntry[]): FileTreeEntry[] {
   if (path !== "") {
     return entries;
   }
-  return entries.filter((entry) => entry.name !== ".opencode");
+  return entries.filter((entry) => !isWorkspaceAgentConfigPath(entry.name));
 }
 
 export const workspaceRequirementStageDirectories = ["01-需求", "02-设计", "03-编码", "04-测试"] as const;

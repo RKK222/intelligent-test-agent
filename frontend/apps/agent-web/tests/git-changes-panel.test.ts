@@ -155,6 +155,14 @@ describe("GitChangesPanel", () => {
           patch: "@@ -1 +1 @@\n-旧\n+新",
           additions: 1,
           deletions: 1
+        },
+        {
+          path: ".opencode/skills/leaked-from-personal-worktree/SKILL.md",
+          status: "untracked",
+          staged: false,
+          patch: "+wrong-scope",
+          additions: 1,
+          deletions: 0
         }
       ]
     });
@@ -196,6 +204,7 @@ describe("GitChangesPanel", () => {
 
     expect(view.queryByRole("button", { name: "加载测试数据" })).toBeNull();
     expect(await view.findByText("登录测试.md")).toBeTruthy();
+    expect(view.queryByText("leaked-from-personal-worktree", { exact: false })).toBeNull();
     expect(view.queryByText("payment-test.md", { exact: false })).toBeNull();
     await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
     expect(await view.findByText("payment-test.md", { exact: false })).toBeTruthy();
@@ -219,7 +228,7 @@ describe("GitChangesPanel", () => {
 
     const view = render(GitChangesPanel, {
       props: {
-        workspaceId: fixture.application.featureWorkspaceId,
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
         apiBaseUrl: "http://api",
         canWrite: true,
         canManageAgentConfig: true,
@@ -255,9 +264,10 @@ describe("GitChangesPanel", () => {
 
     const view = render(GitChangesPanel, {
       props: {
-        workspaceId: fixture.application.featureWorkspaceId,
-        agentConfigWorkspaceId: fixture.application.featureWorkspaceId,
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        agentConfigWorkspaceId: fixture.application.personalRuntimeWorkspaceId,
         personalWorkspaceId: fixture.application.personalWorkspaceId,
+        personalWorkspaceBranch: fixture.application.personalBranch,
         apiBaseUrl: "http://api",
         canWrite: true,
         canManageAgentConfig: true,
@@ -271,11 +281,15 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 只提交应用配置");
     await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
-    await waitFor(() => expect(apiClientMock.commitWorkspaceAgentConfig).toHaveBeenCalledWith(
-      fixture.application.featureWorkspaceId,
-      expect.objectContaining({ message: "agent: 只提交应用配置" })
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
+      fixture.application.personalWorkspaceId,
+      expect.objectContaining({
+        commitMessage: "agent: 只提交应用配置",
+        files: [`.opencode/${fixture.files.applicationSkill}`]
+      })
     ));
-    expect(apiClientMock.commitPersonalWorkspace).not.toHaveBeenCalled();
+    expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
+    expect(apiClientMock.getWorkspaceAgentDiff).toHaveBeenCalledWith(fixture.application.personalRuntimeWorkspaceId);
   });
 
   it("shows public Agent changes and uses the shared conflict interaction", async () => {
@@ -736,7 +750,7 @@ describe("GitChangesPanel", () => {
 
     const view = render(GitChangesPanel, {
       props: {
-        workspaceId: fixture.application.featureWorkspaceId,
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
         personalWorkspaceId: fixture.application.personalWorkspaceId,
         apiBaseUrl: "http://api",
         canWrite: true,
@@ -765,7 +779,7 @@ describe("GitChangesPanel", () => {
 
     const view = render(GitChangesPanel, {
       props: {
-        workspaceId: fixture.application.featureWorkspaceId,
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
         personalWorkspaceId: fixture.application.personalWorkspaceId,
         apiBaseUrl: "http://api",
         canWrite: true,
@@ -781,7 +795,7 @@ describe("GitChangesPanel", () => {
     expect(apiClientMock.stageWorkspaceAgentFiles).not.toHaveBeenCalled();
   });
 
-  it("lets an application administrator commit application agent config without a personal worktree", async () => {
+  it("commits application Agent config in the current version personal worktree", async () => {
     apiClientMock.getWorkspaceAgentDiff
       .mockResolvedValueOnce({
         files: [{ path: fixture.files.applicationSkill, status: "M", staged: true, patch: "" }]
@@ -790,10 +804,12 @@ describe("GitChangesPanel", () => {
 
     const view = render(GitChangesPanel, {
       props: {
-        workspaceId: fixture.application.personalWorkspaceId,
-        agentConfigWorkspaceId: fixture.application.featureWorkspaceId,
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        agentConfigWorkspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        personalWorkspaceBranch: fixture.application.personalBranch,
         apiBaseUrl: "http://api",
-        canWrite: false,
+        canWrite: true,
         canManageAgentConfig: true,
         canManagePublicConfig: false
       },
@@ -804,11 +820,83 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 更新支付案例技能");
     await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
-    await waitFor(() => expect(apiClientMock.commitWorkspaceAgentConfig).toHaveBeenCalledWith(
-      fixture.application.featureWorkspaceId,
-      expect.objectContaining({ message: "agent: 更新支付案例技能" })
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
+      fixture.application.personalWorkspaceId,
+      expect.objectContaining({
+        commitMessage: "agent: 更新支付案例技能",
+        files: [`.opencode/${fixture.files.applicationSkill}`]
+      })
     ));
-    expect(apiClientMock.commitPersonalWorkspace).not.toHaveBeenCalled();
+    expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
+    expect(view.getByText(`个人 worktree · ${fixture.application.personalBranch}`)).toBeTruthy();
+  });
+
+  it("publishes only the selected application Agent paths from personal HEAD", async () => {
+    apiClientMock.getWorkspaceAgentDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: fixture.files.applicationAgent, status: "M", staged: true, patch: "" },
+          { path: fixture.files.applicationSkill, status: "M", staged: false, patch: "" }
+        ]
+      })
+      .mockResolvedValue({ files: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        personalWorkspaceBranch: fixture.application.personalBranch,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await view.findByText("payment-test.md", { exact: false });
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 发布支付 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    const expectedFiles = [`.opencode/${fixture.files.applicationAgent}`];
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
+      fixture.application.personalWorkspaceId,
+      expect.objectContaining({ files: expectedFiles })
+    ));
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith(
+      fixture.application.personalWorkspaceId,
+      expect.objectContaining({ files: expectedFiles })
+    );
+    expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
+    expect(apiClientMock.publishWorkspaceAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it("opens application Agent conflicts through the shared personal-worktree merge editor", async () => {
+    apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({
+      files: [{ path: fixture.files.applicationAgent, status: "UU", staged: false, patch: "" }]
+    });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
+    const conflictRow = await view.findByLabelText(fixture.files.applicationAgent);
+    await fireEvent.click(conflictRow);
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceGitConflict).toHaveBeenCalledWith(
+      fixture.application.personalRuntimeWorkspaceId,
+      `.opencode/${fixture.files.applicationAgent}`
+    ));
+    expect(await view.findByText("合并编辑器")).toBeTruthy();
   });
 
   it("keeps feature workspace git actions readonly when the user has no write permission", async () => {

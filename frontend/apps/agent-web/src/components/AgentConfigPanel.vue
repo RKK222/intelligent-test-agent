@@ -73,17 +73,12 @@ const publicWorktree = computed<AgentConfigWorktree | null>({
   get: () => workbench.publicWorktree,
   set: (val) => { workbench.publicWorktree = val; }
 });
-const workspaceWorktree = computed<AgentConfigWorktree | null>({
-  get: () => workbench.workspaceWorktree,
-  set: (val) => { workbench.workspaceWorktree = val; }
-});
 const publicConfigLinuxServerId = computed<string | null>({
   get: () => workbench.publicConfigLinuxServerId,
   set: (val) => { workbench.publicConfigLinuxServerId = val; }
 });
 
 const busy = ref(false);
-const activeWorktree = computed(() => activeScope.value === "PUBLIC" ? publicWorktree.value : workspaceWorktree.value);
 const selectedDiff = computed(() => diffFiles.value.find((file) => file.path === selectedDiffPath.value) ?? diffFiles.value[0]);
 const publicConflictFiles = computed<AgentConfigDiffFile[]>(() => {
   const byPath = new Map<string, AgentConfigDiffFile>();
@@ -116,9 +111,6 @@ watch(
   () => props.workspaceId,
   () => {
     invalidateDirectoryCache("WORKSPACE", true);
-    if (workbench.workspaceWorktree) {
-      workbench.workspaceWorktree = null;
-    }
     void refreshStatus();
     if (rootExpanded.value.has("WORKSPACE")) {
       void loadDirectory("WORKSPACE", "");
@@ -219,7 +211,8 @@ async function ensureCurrentUserPublicWorktree(linuxServerId: string, fallbackBr
 }
 
 function worktreeId(scope: Scope) {
-  return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : workspaceWorktree.value?.worktreeId;
+  // 应用级配置直接使用当前版本个人 workspace 的 Git 根，不再挂载独立 Agent worktree。
+  return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : undefined;
 }
 
 function activeAgentFileFromLocalSelection() {
@@ -444,9 +437,6 @@ async function refreshScope(scope: Scope) {
 
 // “更新公共配置”操作的正在进行状态标记，用以控制按钮禁用和加载动效
 const updatingPublicConfig = ref(false);
-// 正在创建 worktree 的作用域（PUBLIC 或 WORKSPACE），用以控制各创建按钮的加载动效
-const creatingWorktreeScope = ref<Scope | null>(null);
-
 // 更新公共配置弹窗的控制状态
 const showUpdatePublicConfigModal = ref(false);
 const updatePublicConfigBranch = ref("main");
@@ -725,15 +715,7 @@ function handleDiffFileClick(file: AgentConfigDiffFile) {
   selectedDiffPath.value = file.path;
 }
 
-// 创建 worktree 弹窗的控制状态
-const showCreateWorktreeModal = ref(false);
-const createWorktreeScope = ref<Scope | null>(null);
-const newWorktreeName = ref("change-agent-md");
-const createWorktreeOptionsLoading = ref(false);
-const createWorktreeOptionsError = ref("");
-const publicBranches = ref<string[]>([]);
 const publicRepositories = ref<PublicAgentRepositoryStatus[]>([]);
-const selectedPublicBranch = ref("");
 const selectedPublicLinuxServerId = ref("");
 const DIRECT_PUBLIC_CONFIG_OPTION = "__direct_public_config__";
 const showSwitchWorktreeModal = ref(false);
@@ -748,17 +730,6 @@ const workspacePackageError = ref("");
 
 const initializedPublicRepositories = computed(() =>
   publicRepositories.value.filter((repository) => repository.initialized)
-);
-
-// 获取当前作用域下的 Git 库分支名称
-const currentRepoBranch = computed(() => {
-  if (!createWorktreeScope.value) return "main";
-  if (createWorktreeScope.value === "PUBLIC") return selectedPublicBranch.value || publicBranches.value[0] || "main";
-  return status.value[createWorktreeScope.value]?.currentBranch ?? "main";
-});
-
-const selectedPublicRepository = computed(() =>
-  initializedPublicRepositories.value.find((repository) => repository.linuxServerId === selectedPublicLinuxServerId.value) ?? null
 );
 
 const activePublicRepository = computed(() => {
@@ -824,77 +795,12 @@ const selectedSwitchWorktree = computed(() =>
   switchPublicWorktrees.value.find((worktree) => worktree.worktreeId === switchPublicWorktreeId.value) ?? null
 );
 
-const canSubmitCreateWorktree = computed(() => {
-  if (!newWorktreeName.value.trim() || busy.value || createWorktreeOptionsLoading.value) return false;
-  if (createWorktreeScope.value !== "PUBLIC") return true;
-  return !!selectedPublicBranch.value && !!selectedPublicLinuxServerId.value;
-});
-
 const canSubmitSwitchWorktree = computed(() =>
   !busy.value &&
   !switchWorktreeOptionsLoading.value &&
   !!switchPublicLinuxServerId.value &&
   initializedPublicRepositories.value.length > 0
 );
-
-// 弹窗的标题
-const createModalTitle = computed(() => {
-  return createWorktreeScope.value === "PUBLIC" ? "创建公共 worktree" : "创建应用 worktree";
-});
-
-/**
- * 触发创建 worktree 流程，初始化弹窗状态并打开弹窗
- * @param scope 作用域 (PUBLIC 或 WORKSPACE)
- */
-async function createWorktree(scope: Scope) {
-  if (scope === "PUBLIC" && !props.canWrite) return;
-  if (scope === "WORKSPACE" && (!props.workspaceId || !workspaceCanWrite.value)) return;
-  createWorktreeScope.value = scope;
-  newWorktreeName.value = "change-agent-md";
-  createWorktreeOptionsError.value = "";
-  showCreateWorktreeModal.value = true;
-  if (scope === "PUBLIC") {
-    await loadPublicCreateOptions();
-  }
-}
-
-// 关闭创建 worktree 弹窗并重置状态
-function closeCreateWorktreeModal() {
-  showCreateWorktreeModal.value = false;
-  createWorktreeScope.value = null;
-  createWorktreeOptionsError.value = "";
-}
-
-async function loadPublicCreateOptions() {
-  createWorktreeOptionsLoading.value = true;
-  createWorktreeOptionsError.value = "";
-  try {
-    const [branches, repositories] = await Promise.all([
-      api.listPublicAgentBranches(),
-      api.listPublicAgentRepositories()
-    ]);
-    publicBranches.value = branches;
-    publicRepositories.value = repositories;
-    selectedPublicBranch.value = preferredPublicBranch(branches);
-    selectedPublicLinuxServerId.value = preferredPublicServer(repositories);
-  } catch (error) {
-    createWorktreeOptionsError.value = formatAgentConfigError(error, "加载公共配置仓库选项失败");
-    publicBranches.value = [];
-    publicRepositories.value = [];
-    selectedPublicBranch.value = "";
-    selectedPublicLinuxServerId.value = "";
-  } finally {
-    createWorktreeOptionsLoading.value = false;
-  }
-}
-
-function preferredPublicBranch(branches: string[]) {
-  const current = status.value.PUBLIC?.currentBranch?.trim();
-  if (current && branches.includes(current)) {
-    return current;
-  }
-  return branches[0] ?? current ?? "main";
-}
 
 function preferredPublicServer(repositories: PublicAgentRepositoryStatus[]) {
   const activeServer = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value;
@@ -1166,48 +1072,6 @@ const PINYIN_SEGMENTS: Record<string, string> = {
   "置": "zhi"
 };
 
-/**
- * 提交创建 worktree 请求到后端，并更新本地文件树
- */
-async function submitCreateWorktree() {
-  const scope = createWorktreeScope.value;
-  if (!scope) return;
-  const baseName = newWorktreeName.value.trim();
-  if (!baseName) return;
-  const branch = currentRepoBranch.value;
-  const targetLinuxServerId = selectedPublicLinuxServerId.value;
-  if (scope === "PUBLIC" && (!selectedPublicBranch.value || !selectedPublicLinuxServerId.value)) {
-    createWorktreeOptionsError.value = "没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。";
-    return;
-  }
-
-  closeCreateWorktreeModal();
-
-  creatingWorktreeScope.value = scope;
-  try {
-    const operationId = newOperationId();
-    const created = await runOperation(
-      () =>
-        scope === "PUBLIC"
-          ? api.createPublicAgentWorktree({ baseName, branch, linuxServerId: targetLinuxServerId, operationId })
-          : api.createWorkspaceAgentWorktree(props.workspaceId!, { baseName, branch, operationId }),
-      "创建 Agent worktree",
-      operationId
-    );
-    if (!created) return;
-    if (scope === "PUBLIC") {
-      publicWorktree.value = created;
-      publicConfigLinuxServerId.value = created.linuxServerId ?? targetLinuxServerId ?? null;
-    } else {
-      workspaceWorktree.value = created;
-    }
-    entriesByScope.value = { ...entriesByScope.value, [scope]: {} };
-    await loadDirectory(scope, "");
-  } finally {
-    creatingWorktreeScope.value = null;
-  }
-}
-
 async function loadDiff(scope = activeScope.value) {
   if (!scope) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
@@ -1394,7 +1258,7 @@ defineExpose({
           >
             <i :class="['codicon codicon-chevron-right ta-file-tree-twistie', rootExpanded.has('WORKSPACE') && 'is-open']" aria-hidden="true" />
             <span class="agent-root-title">应用级</span>
-            <span v-if="workspaceWorktree" class="agent-root-badge">{{ workspaceWorktree.worktreeName }}</span>
+            <span v-if="workspaceId" class="agent-root-badge">个人 worktree</span>
           </button>
         </el-tooltip>
         <button
@@ -1407,18 +1271,6 @@ defineExpose({
           @click="openCreateWorkspacePackageModal"
         >
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
-        </button>
-        <button
-          v-if="workspaceCanWrite"
-          type="button"
-          class="agent-icon-btn"
-          title="创建应用 worktree"
-          aria-label="创建应用 worktree"
-          :disabled="busy || !workspaceId"
-          @click="createWorktree('WORKSPACE')"
-        >
-          <Loader2 v-if="creatingWorktreeScope === 'WORKSPACE'" class="h-3.5 w-3.5 animate-spin" />
-          <GitBranch v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
       </div>
       <div v-if="rootExpanded.has('WORKSPACE')" class="agent-node-list">
@@ -1439,7 +1291,7 @@ defineExpose({
       </div>
     </div>
 
-    <div v-if="activeScope && (canWrite || activeScope === 'WORKSPACE') && !hideGitOps" class="agent-diff">
+    <div v-if="activeScope === 'PUBLIC' && canWrite && !hideGitOps" class="agent-diff">
       <div class="agent-diff-toolbar">
         <button type="button" class="agent-action-btn" :disabled="busy" @click="loadDiff()">
           <GitCompare class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -1794,95 +1646,6 @@ defineExpose({
           <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
             <Button variant="ghost" size="sm" @click="closeCreateWorkspacePackageModal">取消</Button>
             <Button variant="primary" size="sm" :disabled="busy || !workspacePackageName.trim()" @click="submitCreateWorkspacePackage">创建</Button>
-          </footer>
-        </section>
-      </div>
-    </Teleport>
-    <Teleport to="body">
-      <div
-        v-if="showCreateWorktreeModal"
-        class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6"
-        @keydown.esc="closeCreateWorktreeModal"
-      >
-        <section
-          role="dialog"
-          aria-modal="true"
-          :aria-label="createModalTitle"
-          class="flex w-[min(380px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
-        >
-          <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
-            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">{{ createModalTitle }}</h2>
-          </header>
-
-          <div class="flex flex-col gap-3">
-            <div v-if="createWorktreeOptionsError" class="agent-modal-alert">
-              <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
-              <span>{{ createWorktreeOptionsError }}</span>
-            </div>
-
-            <div v-if="createWorktreeScope === 'PUBLIC'" class="flex flex-col gap-3">
-              <div v-if="createWorktreeOptionsLoading" class="agent-modal-loading">
-                <Loader2 class="h-3.5 w-3.5 animate-spin" />
-                <span>加载远端分支和服务器状态</span>
-              </div>
-
-              <div class="flex flex-col gap-1.5">
-                <label for="public-worktree-branch" class="text-[11px] text-[var(--ta-muted)] font-medium">远端分支</label>
-                <div class="agent-modal-select">
-                  <GitBranch class="h-3.5 w-3.5 text-[var(--ta-muted)]" :stroke-width="1.5" />
-                  <select id="public-worktree-branch" v-model="selectedPublicBranch" :disabled="createWorktreeOptionsLoading">
-                    <option v-for="branch in publicBranches" :key="branch" :value="branch">{{ branch }}</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="flex flex-col gap-1.5">
-                <label for="public-worktree-server" class="text-[11px] text-[var(--ta-muted)] font-medium">目标服务器</label>
-                <div class="agent-modal-select">
-                  <Globe2 class="h-3.5 w-3.5 text-[var(--ta-muted)]" :stroke-width="1.5" />
-                  <select id="public-worktree-server" v-model="selectedPublicLinuxServerId" :disabled="createWorktreeOptionsLoading || initializedPublicRepositories.length === 0">
-                    <option
-                      v-for="repository in initializedPublicRepositories"
-                      :key="repository.linuxServerId"
-                      :value="repository.linuxServerId"
-                    >
-                      {{ repository.serverName || repository.linuxServerId }}
-                    </option>
-                  </select>
-                </div>
-                <span v-if="selectedPublicRepository" class="agent-modal-help">
-                  {{ selectedPublicRepository.gitRootPath }}
-                </span>
-                <span v-else-if="!createWorktreeOptionsLoading" class="agent-modal-help">
-                  没有已初始化服务器，请到系统管理 &gt; 配置管理 &gt; TestAgent公共配置管理初始化。
-                </span>
-              </div>
-            </div>
-
-            <div v-else class="flex flex-col gap-1.5">
-              <span class="text-[11px] text-[var(--ta-muted)] font-medium">当前 git 库分支</span>
-              <div class="flex items-center gap-1.5 text-[13px] text-[var(--ta-text)] bg-[var(--ta-hover)] px-2.5 py-2 rounded border border-[var(--ta-border)]">
-                <GitBranch class="h-3.5 w-3.5 text-[var(--ta-muted)]" :stroke-width="1.5" />
-                <span class="font-mono font-medium truncate">{{ currentRepoBranch }}</span>
-              </div>
-            </div>
-
-            <div class="flex flex-col gap-1.5">
-              <label for="worktree-branch-input" class="text-[11px] text-[var(--ta-muted)] font-medium">worktree 名称</label>
-              <Input
-                id="worktree-branch-input"
-                v-model="newWorktreeName"
-                placeholder="请输入 worktree 名称"
-                class="h-8 text-[13px]"
-                autofocus
-                @keydown.enter="submitCreateWorktree"
-              />
-            </div>
-          </div>
-
-          <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
-            <Button variant="ghost" size="sm" @click="closeCreateWorktreeModal">取消</Button>
-            <Button variant="primary" size="sm" :disabled="!canSubmitCreateWorktree" @click="submitCreateWorktree">确定</Button>
           </footer>
         </section>
       </div>

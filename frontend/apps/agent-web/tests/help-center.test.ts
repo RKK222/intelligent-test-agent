@@ -136,9 +136,10 @@ describe("help center", () => {
     expect(workspace).toContain("超级管理员也不能绕过该目录限制");
     expect(workspace).toContain("`docs/**`");
     expect(agentConfig).toContain("只有超级管理员可以创建公共 worktree");
-    expect(agentConfig).toContain("只有应用管理员与超级管理员可以创建应用 worktree");
+    expect(agentConfig).toContain("不再创建独立的“应用配置 worktree”");
+    expect(agentConfig).toContain("个人 `HEAD`");
     expect(agentConfig).toContain("`compatibility: opencode`");
     expect(agentConfig).toContain("公共配置推送成功后，平台会广播公共配置同步");
-    expect(agentConfig).toContain("应用配置推送成功后也会更新对应应用版本 HEAD");
+    expect(agentConfig).toContain("推送成功后更新应用版本 HEAD");
   });
 });

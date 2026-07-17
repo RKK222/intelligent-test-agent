@@ -107,10 +107,11 @@ Token 校验流程：
 3. ticket 只能通过用户登录态创建，短期过期、一次性消费，并绑定 workspace、目标服务器、当前 agent 服务器、模式、Agent 配置 scope/worktree、traceId 和是否 `SUPER_ADMIN`；不得把长期 Bearer token 放入 WebSocket URL。
 4. WebSocket upgrade 必须校验 Origin 白名单、ticket 有效性和 ticket 模式；ticket 消费后无论连接成功与否都不能重复使用。
 5. `workspace.list/read/write/rename/status/delete` 必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，删除默认只允许普通文件，目录删除返回统一错误，不允许递归删除。
-6. `agent-config.list/read/write` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，写入必须校验 `SUPER_ADMIN`，路径仍由 workspace-management 文件服务归一化。
-7. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
-8. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
-9. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
+6. `agent-config.list/read/write` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，公共配置写入校验 `SUPER_ADMIN`，应用配置写入校验 `APP_ADMIN`（`SUPER_ADMIN` 继承），路径仍由 workspace-management 文件服务归一化。
+7. 应用 `.opencode/**` 与普通文件共用版本个人 worktree 时，个人 worktree 的 `commit/publish` HTTP 入口也必须对规范化文件白名单执行 `APP_ADMIN` 校验；不能只依赖前端 Tab 或 Agent 文件 WebSocket 权限。`spec/**` 禁止发布的服务层规则继续对所有角色生效。
+8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
+9. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
+10. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
 
 ## 服务器广播安全
 

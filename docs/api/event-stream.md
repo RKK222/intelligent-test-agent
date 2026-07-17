@@ -464,7 +464,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 }
 ```
 
-`workspace.version.sync-requested` 的 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`AGENT_CONFIG_PUBLISHED`、`GIT_PULL_REQUESTED`、`GIT_PULLED`。应用 Agent/Skill 配置推送 feature 成功后使用 `AGENT_CONFIG_PUBLISHED`，并先更新应用版本与本机副本 HEAD。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；远端节点使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset 到目标 commit。浏览器不订阅该广播；在线用户由前端提示手动刷新/同步，禁止自动覆盖脏个人 worktree。消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
+`workspace.version.sync-requested` 的 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`AGENT_CONFIG_PUBLISHED`、`GIT_PULL_REQUESTED`、`GIT_PULLED`。当前应用 Agent/Skill 与 workspace 共用个人 worktree，按个人 `HEAD` 白名单投影成功后使用 `PERSONAL_PUBLISHED`；兼容的旧工作空间 Agent 直发入口仍使用 `AGENT_CONFIG_PUBLISHED`。两条路径都会先更新应用版本与本机副本 HEAD。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；远端节点使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset 到目标 commit。浏览器不订阅该广播；在线用户由前端提示手动刷新/同步，禁止自动覆盖脏个人 worktree。消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
 
 `common-parameter.refresh-requested` 用于通用参数 `value` 修改后的跨实例联动。某实例 `PATCH` 修改参数后，本地广播器发布该广播并发布本地 `CommonParameterReloadedEvent`；其他实例收到后发布本地 `CommonParameterReloadedEvent`，监听方直接从数据库读取最新参数并向本实例持有的 opencode manager 下发最新运行配置。远端处理不再转发广播，避免循环；消费者跳过 `originInstanceId` 与本机相同的事件。payload 只携带参数标识，不携带参数值（各实例自行从库读取，避免值在总线明文）：
 

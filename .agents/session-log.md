@@ -7596,3 +7596,18 @@ bash /tmp/test-api-after-restart.sh
   - `agent-web` typecheck、GitChangesPanel 定向测试和前端全量测试均通过；按 `.env.test`/`test` profile 重启三服务，health/readiness 为 UP，前端 `127.0.0.1:3000` 返回 200。
 - Result:
   - 前端全量 70 个测试文件通过（1098 项通过、1 项跳过）；作用域切换后不同仓库不会在同一棵文件树或同一次提交中混合。
+
+### 2026-07-17 - 应用 Agent 统一使用版本个人 worktree
+
+- Why:
+  - 三标签初版仍把应用 `.opencode` 指向独立应用配置 worktree，和“应用版本绑定 feature 分支、每人在版本个人 worktree 工作”的原始拓扑不一致；应用 Agent 的提交、推送和冲突交互也没有完全复用普通应用工作区流程。
+- What:
+  - 应用工作区与“应用Agent”标签统一读取同一个版本个人 workspace：workspace 过滤 `.opencode/**`，应用 Agent 只展示 `.opencode/**`，两者显示同一个人 worktree 分支；删除前端独立应用 worktree 状态、创建函数和弹窗。
+  - 应用 Agent 暂存仍经 AgentConfig API 做角色校验，提交改走个人 worktree 本地提交，推送按 `.opencode/**` 白名单从个人 HEAD 投影到版本 feature worktree；冲突复用 workspace 合并编辑器。公共 Agent 保持公共共享分支上的个人 worktree 和原有提交/推送/冲突流程。
+  - 个人 worktree 通用 Git API 增加 `.opencode/**` 后端兜底鉴权，避免普通用户绕过 AgentConfig 写接口直接暂存、提交、发布或解决冲突；同步 HTTP、事件、安全、模块说明、测试设计和用户手册。
+  - 在真实应用个人 worktree 放置 docs、spec、archive、应用 Agent/Skill/rules/templates 样例，在公共个人 worktree 放置公共 Agent 样例；旧独立应用配置 worktree 中的误放样例已移除并保持 clean。
+- How:
+  - 前端 4 个定向测试文件 131 passed；后端 `ManagedWorkspaceControllerTest` 14 passed；后端 18 模块 `mvn clean package -Dmaven.test.skip=true` 成功，`git diff --check` 通过。
+  - 使用 `.env.test` / `test` profile / JDK 25 重启 backend、opencode-manager 和 frontend，health/readiness 为 UP、前端 3000 返回 200、登录 CORS 与 manager WebSocket 正常。
+- Result:
+  - 方案 1 的 Git 拓扑、三标签落位、应用 Agent 权限兜底及样例文件已实现并运行验证。全量前端测试与 typecheck 被同一工作树中并行未提交的宠物角色替换改动阻断（宠物测试断言和 `octopus` 联合类型不一致）；Playwright 权限专项在既有夹具的 `tests` 目录定位处超时，尚未执行到本次新增断言，未修改这些任务外文件。

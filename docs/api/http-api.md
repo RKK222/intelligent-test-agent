@@ -1104,16 +1104,16 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 将所选应用版本工作区文件同步到个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 显式确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取应用版本工作区或个人 worktree 的变更文件列表，返回 `{ files: [{ path, rawStatus, status, staged, patch, additions, deletions }] }`；Git unmerged 状态会返回 `status=conflict`。 |
-| `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前应用版本工作区或个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
-| `POST` | `/workspaces/{workspaceId}/git-stage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件定点加入真实 Git index。 |
-| `POST` | `/workspaces/{workspaceId}/git-unstage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件从真实 Git index 撤回工作树。 |
+| `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前应用版本工作区或个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean；`.opencode/**` 要求 `APP_ADMIN`。 |
+| `POST` | `/workspaces/{workspaceId}/git-stage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件定点加入真实 Git index；`.opencode/**` 要求 `APP_ADMIN`。 |
+| `POST` | `/workspaces/{workspaceId}/git-unstage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件从真实 Git index 撤回工作树；`.opencode/**` 要求 `APP_ADMIN`。 |
 | `GET` | `/workspaces/{workspaceId}/git-conflict?path={path}` | 读取个人 worktree 冲突文件的 Git base/current/incoming stage 与工作树结果。 |
-| `POST` | `/workspaces/{workspaceId}/git-conflict/resolve` | 解决单个冲突并定点 stage，支持当前、应用、两者、手工内容和删除语义。 |
-| `POST` | `/workspaces/{workspaceId}/git-conflict/resolve-all` | 使用 Git index 原生 ours/theirs 批量解决全部冲突；只支持 `CURRENT/INCOMING`。 |
-| `POST` | `/workspaces/{workspaceId}/git-conflict/abort` | 在个人 worktree 中执行 `merge --abort`，取消整次未完成合并。 |
+| `POST` | `/workspaces/{workspaceId}/git-conflict/resolve` | 解决单个冲突并定点 stage，支持当前、应用、两者、手工内容和删除语义；`.opencode/**` 要求 `APP_ADMIN`。 |
+| `POST` | `/workspaces/{workspaceId}/git-conflict/resolve-all` | 使用 Git index 原生 ours/theirs 批量解决全部冲突；只支持 `CURRENT/INCOMING`；当前冲突包含 `.opencode/**` 时要求 `APP_ADMIN`。 |
+| `POST` | `/workspaces/{workspaceId}/git-conflict/abort` | 在个人 worktree 中执行 `merge --abort`，取消整次未完成合并；当前冲突包含 `.opencode/**` 时要求 `APP_ADMIN`。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish-preview` | 发布前预检应用分支 HEAD、待合入提交数、A/M/D/R 汇总和样例路径；不修改个人 worktree。若个人 worktree 已处于未完成 merge，只返回已记录的应用 HEAD，不重复拉取远程。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/commit` | 仅在个人 worktree stage 并提交 `files` 白名单；不推送、不广播。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 要求 `files` 已在个人 worktree 本地提交，再从个人 `HEAD` 按白名单投影到应用 feature worktree，提交并推送；不 merge 整个个人分支。响应包含 `currentStep/executedCommands`。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/commit` | 仅在个人 worktree stage 并提交 `files` 白名单；不推送、不广播。请求包含 `.opencode/**` 时要求 `APP_ADMIN`（`SUPER_ADMIN` 继承）。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 要求 `files` 已在个人 worktree 本地提交，再从个人 `HEAD` 按白名单投影到应用 feature worktree，提交并推送；不 merge 整个个人分支。请求包含 `.opencode/**` 时要求 `APP_ADMIN`，响应包含 `currentStep/executedCommands`。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 
@@ -1286,11 +1286,11 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 后端执行流程：
 
-1. `commit` 在个人 worktree 隔离 index，只 stage `files` 白名单并提交；不推送、不广播。
+1. API 入口先按规范化相对路径检查目录权限；`.opencode/**` 仅 `APP_ADMIN` 或 `SUPER_ADMIN` 可提交/发布，避免绕过 Agent 配置接口。随后 `commit` 在个人 worktree 隔离 index，只 stage `files` 白名单并提交；不推送、不广播。
 2. `publish` 校验个人 worktree 未处于 merge 状态，且 `files` 在个人 worktree 没有未提交变更；未先本地提交时返回 `CONFLICT`。
 3. 确保当前服务器的应用 feature worktree clean，`git fetch` + `git pull --ff-only {appVersionBranch}`，并校验可选 `expectedApplicationHead`。
 4. 读取个人仓库 `HEAD`，将 `files` 映射为 feature worktree 的仓库相对路径；存在的文件执行 checkout 投影，不存在的文件执行定点删除。
-5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push，服务端在准备 feature worktree 前对所有角色强制拒绝 `spec/**`，`SUPER_ADMIN` 也不能绕过目录规则，其它未选文件仍不会泄漏。
+5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push。应用 Agent 使用同一流程，只把选中的 `.opencode/**` 从个人 `HEAD` 投影到 feature。服务端在准备 feature worktree 前对所有角色强制拒绝 `spec/**`，`SUPER_ADMIN` 也不能绕过目录规则，其它未选文件仍不会泄漏。
 
 发布结果：
 

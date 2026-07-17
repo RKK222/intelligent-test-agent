@@ -59,7 +59,6 @@ vi.mock("@test-agent/workbench-shell", async () => {
   const vue = await vi.importActual<typeof import("vue")>("vue");
   const store = vue.reactive({
     publicWorktree: null,
-    workspaceWorktree: null,
     publicConfigLinuxServerId: null,
     tabs: [],
     activePath: undefined,
@@ -81,7 +80,6 @@ describe("AgentConfigPanel", () => {
   beforeEach(() => {
     const workbench = currentWorkbenchStore();
     workbench.publicWorktree = null;
-    workbench.workspaceWorktree = null;
     workbench.publicConfigLinuxServerId = null;
     workbench.tabs = [];
     workbench.activePath = undefined;
@@ -394,7 +392,6 @@ type PublicWorktree = {
 
 type WorkbenchStoreMock = {
   publicWorktree: PublicWorktree | null;
-  workspaceWorktree: PublicWorktree | null;
   publicConfigLinuxServerId: string | null;
   tabs: Array<{
     id: string;

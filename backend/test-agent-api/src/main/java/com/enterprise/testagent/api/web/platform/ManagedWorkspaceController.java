@@ -3,11 +3,18 @@ package com.enterprise.testagent.api.web.platform;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.workspace.ManagedWorkspaceApplicationService;
 import java.net.URI;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -194,7 +201,8 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
             ServerWebExchange exchange) {
-        service.discardWorkspaceGitFiles(workspaceId, request.files(), userId(exchange));
+        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
+        service.discardWorkspaceGitFiles(workspaceId, request.files(), principal.userId());
         return ok(exchange, null);
     }
 
@@ -203,7 +211,8 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
             ServerWebExchange exchange) {
-        service.stageWorkspaceGitFiles(workspaceId, request.files(), userId(exchange));
+        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
+        service.stageWorkspaceGitFiles(workspaceId, request.files(), principal.userId());
         return ok(exchange, null);
     }
 
@@ -212,7 +221,8 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
             ServerWebExchange exchange) {
-        service.unstageWorkspaceGitFiles(workspaceId, request.files(), userId(exchange));
+        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
+        service.unstageWorkspaceGitFiles(workspaceId, request.files(), principal.userId());
         return ok(exchange, null);
     }
 
@@ -229,12 +239,13 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.ResolveWorkspaceGitConflictRequest request,
             ServerWebExchange exchange) {
+        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, List.of(request.path()));
         service.resolveWorkspaceGitConflict(
                 workspaceId,
                 request.path(),
                 request.resolution(),
                 request.content(),
-                userId(exchange));
+                principal.userId());
         return ok(exchange, null);
     }
 
@@ -242,7 +253,8 @@ public class ManagedWorkspaceController {
     public ApiResponse<Object> abortWorkspaceGitConflict(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {
-        service.abortWorkspaceGitConflict(workspaceId, userId(exchange));
+        AuthPrincipal principal = requireWorkspaceConflictPermission(exchange, workspaceId);
+        service.abortWorkspaceGitConflict(workspaceId, principal.userId());
         return ok(exchange, null);
     }
 
@@ -251,7 +263,8 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.ResolveAllWorkspaceGitConflictsRequest request,
             ServerWebExchange exchange) {
-        service.resolveAllWorkspaceGitConflicts(workspaceId, request.resolution(), userId(exchange));
+        AuthPrincipal principal = requireWorkspaceConflictPermission(exchange, workspaceId);
+        service.resolveAllWorkspaceGitConflicts(workspaceId, request.resolution(), principal.userId());
         return ok(exchange, null);
     }
 
@@ -274,13 +287,14 @@ public class ManagedWorkspaceController {
             @PathVariable String personalWorkspaceId,
             @RequestBody ManagedWorkspaceDtos.PublishPersonalWorkspaceRequest request,
             ServerWebExchange exchange) {
+        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
         return ok(exchange, service.publishPersonalWorkspace(
                 personalWorkspaceId,
                 request.commitMessage(),
                 request.files(),
                 request.expectedApplicationHead(),
                 request.operationId(),
-                userId(exchange),
+                principal.userId(),
                 RuntimeApiSupport.traceId(exchange)));
     }
 
@@ -290,12 +304,68 @@ public class ManagedWorkspaceController {
             @PathVariable String personalWorkspaceId,
             @RequestBody ManagedWorkspaceDtos.PublishPersonalWorkspaceRequest request,
             ServerWebExchange exchange) {
+        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
         return ok(exchange, service.commitPersonalWorkspace(
                 personalWorkspaceId,
                 request.commitMessage(),
                 request.files(),
-                userId(exchange),
+                principal.userId(),
                 RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /**
+     * 个人 worktree 只是物理隔离，目录写权限仍由平台后端兜底。
+     * `.opencode/**` 只能由应用管理员提交或发布，避免绕过 AgentConfig 写接口的角色校验。
+     */
+    private AuthPrincipal requirePersonalWorkspacePathPermission(ServerWebExchange exchange, List<String> files) {
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        List<String> protectedFiles = files == null ? List.of() : files.stream()
+                .filter(this::isApplicationAgentConfigPath)
+                .toList();
+        if (!protectedFiles.isEmpty() && !AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "应用 Agent 配置仅允许应用管理员提交或发布",
+                    Map.of("files", protectedFiles));
+        }
+        return principal;
+    }
+
+    /** 批量解决或取消 merge 前检查当前冲突中是否包含受保护的应用 Agent 配置。 */
+    private AuthPrincipal requireWorkspaceConflictPermission(ServerWebExchange exchange, String workspaceId) {
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        if (AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
+            return principal;
+        }
+        var diff = service.getWorkspaceGitDiff(workspaceId, principal.userId());
+        List<String> protectedFiles = diff == null ? List.of() : diff.files().stream()
+                .filter(file -> "conflict".equalsIgnoreCase(file.status()))
+                .map(com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse::path)
+                .filter(this::isApplicationAgentConfigPath)
+                .toList();
+        if (!protectedFiles.isEmpty() && !AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "应用 Agent 配置冲突仅允许应用管理员处理",
+                    Map.of("files", protectedFiles));
+        }
+        return principal;
+    }
+
+    private boolean isApplicationAgentConfigPath(String file) {
+        if (file == null || file.isBlank()) {
+            return false;
+        }
+        try {
+            String normalized = Path.of(file.replace('\\', '/')).normalize().toString().replace('\\', '/');
+            while (normalized.startsWith("./")) {
+                normalized = normalized.substring(2);
+            }
+            return normalized.equals(".opencode") || normalized.startsWith(".opencode/");
+        } catch (RuntimeException exception) {
+            // 非法路径由业务服务统一返回参数错误；权限判断不在此改变错误契约。
+            return false;
+        }
     }
 
     private UserId userId(ServerWebExchange exchange) {
