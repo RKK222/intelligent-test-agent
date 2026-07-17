@@ -5786,7 +5786,7 @@ function onCompositionEnd() {
   height: 100%;
   min-height: 0;
   background: #fff;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   /* 抽屉遮罩使用 position: absolute 覆盖在聊天面板上，需要 root 作为定位上下文 */
   position: relative;
 }
@@ -5799,7 +5799,7 @@ function onCompositionEnd() {
   letter-spacing: 0.0143em;
   color: #18181b;
   margin: 0;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   line-height: 20px;
   white-space: nowrap;
   overflow: hidden;
@@ -5878,7 +5878,7 @@ function onCompositionEnd() {
   border-radius: 8px;
   flex-shrink: 0;
   cursor: pointer;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
@@ -6569,7 +6569,7 @@ function onCompositionEnd() {
   color: #666;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
 }
 
 .figma-chat-stopped,
@@ -7374,7 +7374,7 @@ function onCompositionEnd() {
 .figma-chat-usage-label {
   color: #a40dbc;
   font-weight: 600;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
 }
 
 .figma-chat-usage-value {
@@ -7725,7 +7725,7 @@ function onCompositionEnd() {
   min-height: 40px;
   max-height: 260px;
   padding: 8px 12px 4px;
-  font-family: 'Inter', 'PingFang SC', sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 20px;
   color: #111;
@@ -7772,7 +7772,7 @@ function onCompositionEnd() {
   border-radius: 12px;
   background: #f4f4f5;
   color: #555;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -7912,7 +7912,7 @@ function onCompositionEnd() {
   border-radius: 10px;
   background: #fff;
   box-shadow: 0 18px 40px rgba(15, 15, 18, 0.18);
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   animation: figma-chat-attachment-pop 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -7972,7 +7972,7 @@ function onCompositionEnd() {
   background: #f8faff;
   color: #333;
   cursor: default;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
 }
 
 .figma-chat-attachment-drop-icon {
@@ -8057,7 +8057,7 @@ function onCompositionEnd() {
   height: 100%;
   background: #fff;
   box-shadow: -8px 0 24px rgba(15, 15, 18, 0.16);
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   animation: figma-chat-drawer-slide 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -8190,7 +8190,7 @@ function onCompositionEnd() {
 }
 
 .figma-chat-drawer-toggle-text {
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
 }
 
 .figma-chat-drawer-body {
@@ -8229,7 +8229,7 @@ function onCompositionEnd() {
   color: #333;
   text-align: left;
   cursor: pointer;
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   font-size: 12px;
   line-height: 18px;
   transition: background-color 0.1s ease, border-color 0.1s ease;

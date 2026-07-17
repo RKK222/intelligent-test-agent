@@ -7775,3 +7775,18 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 两类 Agent 普通文件可直接回退，冲突文件仍只能走合并处理；公共个人分支既可自动挂载，也可从明确入口创建或切换。
   - 仅变更 HTTP API 与前端交互；未修改 RunEvent、数据库、性能、安全、环境配置或 generated SDK。
+### 2026-07-17 - 优化智能体普通文字与代码块字体配置
+
+- Why:
+  - 智能体对话区域使用的字体设置较为基础（Geist 和 Noto Sans SC），普通文本与代码块字体缺乏对业界现代主流 UI/UX 标准（如 Inter 和 JetBrains Mono）及跨平台系统默认字体的广泛兼容。
+- What:
+  - 将全局和智能体对话的 sans-serif（无衬线/普通文本）字体优化为 `"Inter"`, `"Geist Sans"`, `-apple-system`, `BlinkMacSystemFont`, `"PingFang SC"`, `"Noto Sans SC"`, `"Microsoft YaHei"`, `sans-serif`。
+  - 将 monospace（等宽/代码块）字体优化为 `"JetBrains Mono"`, `"Geist Mono"`, `"SFMono-Regular"`, `Consolas`, `monospace`。
+  - 重构了 `FigmaChatPanel.vue` 中所有硬编码的 `'PingFang SC', 'Microsoft YaHei', sans-serif` 与 `'Inter', 'PingFang SC', sans-serif`，统一使用全局 CSS 变量 `var(--font-sans)` 渲染，使字体呈现更加一致和规范。
+- How:
+  - 修改 `globals.css` 中的 `--font-sans` 和 `--font-mono` 主题变量。
+  - 修改 `tokens.css` 中的 `--oc-font-sans` 和 `--oc-font-mono` 智能体专用变量。
+  - 在 `FigmaChatPanel.vue` 内部统一使用 `var(--font-sans)`，并本地运行 `pnpm run build` 进行生产包构建，确认打包成功且无编译异常。
+- Result:
+  - 对话区域的字体阅读体验更加舒适，排版呈现一致性良好，对中文与代码排版兼容度更强。
+  - 没有任何 API、数据库、后端或生成的 SDK 变更。
