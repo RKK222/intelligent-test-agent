@@ -14,6 +14,18 @@
   - 对话中的 `#` 可正确发现 `spec/<需求项>/<阶段>/<子条目>`，旧结构不会进入候选；按 `.env.test` 重启后 backend health/readiness 为 `UP`、前端 HTTP 200。
   - 不涉及 API、RunEvent、数据库、环境配置、权限或安全逻辑。
 
+### 2026-07-17 - 小宠物首次唤起默认固定
+
+- Why:
+  - 用户希望小宠物打开后不要随机跳跃，默认保持在当前可见位置；同时不能覆盖已通过双击明确取消固定的偏好。
+- What:
+  - 将未设置过固定偏好的首次手动唤起和首次自动出现改为固定，并写入既有 `figma-shell-robot-fixed` 本地存储；已保存为 `false` 的用户仍保持自然动作和自然离场。
+  - 新增组件回归测试，覆盖首次唤起固定、无随机动作，以及自然动作/定时器场景显式取消固定；同步更新 agent-web README。
+- How:
+  - `loadRobotFixed` 区分 `true`、`false` 与未设置的 `null`；首次显示通过 `applyRobotFixedPreference` 使用固定默认值。未改 API、RunEvent、数据库、环境配置或安全逻辑。
+- Result:
+  - agent-web 定向 FigmaShell 测试 44 项通过；后续继续执行 typecheck 与 chrome108 构建验证。
+
 ### 2026-07-17 - 澄清公共与应用 OpenCode 配置层及依赖目录
 
 - Changed: 仅核对目录职责，未修改运行逻辑；确认进程仍以公共共享 checkout 的 `opencode/` 作为 `OPENCODE_CONFIG_DIR`，同时按当前会话目录向上加载应用个人 worktree 的 `.opencode/`。

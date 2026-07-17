@@ -81,6 +81,23 @@ describe("FigmaShell", () => {
       .toBe(petSvg.classes().find((className) => className.startsWith("is-")));
   });
 
+  it("fixes the pet by default on first summon and prevents random motion", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+
+    const robot = wrapper.get('[data-testid="figma-robot"]');
+    expect(robot.find(".robot-pin-indicator").exists()).toBe(true);
+    expect(window.localStorage.getItem("figma-shell-robot-fixed")).toBe("true");
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(robot.find(".state-idle").exists()).toBe(true);
+    expect(robot.find(".state-walking").exists()).toBe(false);
+    expect(robot.find(".state-jumping-up").exists()).toBe(false);
+    expect(robot.find(".state-jumping-down").exists()).toBe(false);
+  });
+
   it("lets the user choose a companion and persists the selected mode", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
@@ -362,6 +379,7 @@ describe("FigmaShell", () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     vi.spyOn(Math, "random").mockReturnValue(0);
+    window.localStorage.setItem("figma-shell-robot-fixed", "false");
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
     await summonRobot(wrapper);
@@ -393,6 +411,7 @@ describe("FigmaShell", () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     vi.spyOn(Math, "random").mockReturnValue(0);
+    window.localStorage.setItem("figma-shell-robot-fixed", "false");
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
     await summonRobot(wrapper);
@@ -414,6 +433,7 @@ describe("FigmaShell", () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const random = vi.spyOn(Math, "random").mockReturnValue(0.8);
+    window.localStorage.setItem("figma-shell-robot-fixed", "false");
     const wrapper = mountShell();
     await summonRobot(wrapper);
     await vi.advanceTimersByTimeAsync(1_801);
@@ -446,6 +466,7 @@ describe("FigmaShell", () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     vi.spyOn(Math, "random").mockReturnValue(0);
+    window.localStorage.setItem("figma-shell-robot-fixed", "false");
     const wrapper = mountShell();
     await summonRobot(wrapper);
 
@@ -626,6 +647,7 @@ describe("FigmaShell", () => {
   it("toggles the pet immediately and restores a saved manual position after a full idle minute", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    window.localStorage.setItem("figma-shell-robot-fixed", "false");
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 140, y: 160 }));
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
@@ -657,6 +679,7 @@ describe("FigmaShell", () => {
     vi.useFakeTimers();
     const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    window.localStorage.setItem("figma-shell-robot-fixed", "false");
     const wrapper = mountShell();
 
     await vi.advanceTimersByTimeAsync(30_000);
@@ -916,6 +939,7 @@ describe("FigmaShell", () => {
   it("toggles the fixed state on double click and halts behavior cycles", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    window.localStorage.setItem("figma-shell-robot-fixed", "false");
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
     await summonRobot(wrapper);

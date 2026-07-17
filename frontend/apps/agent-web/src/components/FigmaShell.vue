@@ -518,12 +518,18 @@ function togglePetSettings() {
 
 refreshActivePet();
 
-function loadRobotFixed(): boolean {
+/**
+ * 返回用户明确保存过的固定偏好；null 表示从未设置，供首次唤起采用固定默认值。
+ * 这样不会覆盖已经通过双击明确取消固定的用户选择。
+ */
+function loadRobotFixed(): boolean | null {
   try {
     const raw = window.localStorage.getItem(ROBOT_FIXED_STORAGE_KEY);
-    return raw === "true";
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -533,6 +539,14 @@ function saveRobotFixed(fixed: boolean) {
   } catch {
     // Ignore storage errors in private mode
   }
+}
+
+/** 首次显示时默认固定；用户明确选择后继续尊重已保存的固定状态。 */
+function applyRobotFixedPreference() {
+  const savedFixed = loadRobotFixed();
+  robotFixed.value = savedFixed ?? true;
+  if (savedFixed === null) saveRobotFixed(true);
+  return robotFixed.value;
 }
 
 let robotDragPointerId: number | null = null;
@@ -899,6 +913,8 @@ function spawnRobot() {
 
   clearAllRobotTimers();
   refreshActivePet();
+  // 自动首次出现也遵循“默认固定”，不会先执行一段随机跳跃再被固定。
+  applyRobotFixedPreference();
   if (inactivityTimer) clearTimeout(inactivityTimer);
 
   const savedPosition = loadSavedRobotPosition();
@@ -908,6 +924,13 @@ function spawnRobot() {
   robotHasSavedPosition.value = Boolean(savedPosition);
   robotKeepVisible.value = false;
   robotCurrentLevel.value = savedPosition && savedPosition.y > window.innerHeight / 2 ? "bottom" : "top";
+
+  if (robotFixed.value) {
+    robotState.value = "idle";
+    robotDirection.value = "front";
+    robotTransition.value = "none";
+    return;
+  }
 
   // 有保存坐标时从该起点直接进入自然待机；坐标不是静止开关，动作和离场仍照常启动。
   if (savedPosition) {
@@ -1518,7 +1541,7 @@ function toggleRobotVisibility() {
   robotY.value = position.y;
   robotHasSavedPosition.value = Boolean(saved);
   
-  robotFixed.value = loadRobotFixed();
+  applyRobotFixedPreference();
   if (robotFixed.value) {
     robotState.value = "idle";
     robotDirection.value = "front";
@@ -1584,7 +1607,8 @@ onMounted(() => {
     robotHasSavedPosition.value = true;
   }
   
-  robotFixed.value = loadRobotFixed();
+  const savedFixed = loadRobotFixed();
+  robotFixed.value = savedFixed === true;
   if (robotFixed.value) {
     const position = savedPosition ?? clampRobotPosition(getBirthPosition());
     robotX.value = position.x;
