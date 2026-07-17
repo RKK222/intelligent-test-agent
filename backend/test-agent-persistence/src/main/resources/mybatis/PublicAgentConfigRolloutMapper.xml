@@ -6,6 +6,7 @@
             <arg column="rollout_id" javaType="java.lang.String"/>
             <arg column="branch" javaType="java.lang.String"/>
             <arg column="commit_hash" javaType="java.lang.String"/>
+            <arg column="initiated_by_user_id" javaType="java.lang.String"/>
             <arg column="trace_id" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
@@ -13,12 +14,15 @@
         <constructor>
             <arg column="target_id" javaType="java.lang.String"/>
             <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
             <arg column="linux_server_id" javaType="java.lang.String"/>
             <arg column="container_id" javaType="java.lang.String"/>
             <arg column="port" javaType="int"/>
             <arg column="base_url" javaType="java.lang.String"/>
             <arg column="retry_count" javaType="int"/>
             <arg column="lease_until" javaType="java.time.Instant"/>
+            <arg column="lease_token" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
 
@@ -40,13 +44,9 @@
               or exists (
                   select 1
                   from public_agent_config_rollout_targets t
-                  join opencode_server_processes p
-                    on p.linux_server_id = t.linux_server_id
-                   and p.container_id = t.container_id
-                   and p.port = t.port
                   where t.rollout_id = r.rollout_id
                     and t.status &lt;&gt; 'DISPOSED'
-                    and p.user_id = #{userId}
+                    and t.user_id = #{userId}
               )
           )
         order by r.created_at desc
@@ -54,7 +54,7 @@
     </select>
 
     <select id="findPendingSync" resultMap="SyncRowMap">
-        select r.rollout_id, r.branch, r.commit_hash, r.trace_id
+        select r.rollout_id, r.branch, r.commit_hash, r.initiated_by_user_id, r.trace_id
         from public_agent_config_rollouts r
         join public_agent_config_rollout_servers s on s.rollout_id = r.rollout_id
         where r.status = 'DRAINING'
@@ -64,10 +64,25 @@
         limit 1
     </select>
 
+    <select id="findTargetWorkspaceRootPaths" resultType="java.lang.String">
+        select distinct w.root_path
+        from public_agent_config_rollout_targets t
+        join execution_nodes n on n.base_url = t.base_url
+        join agent_session_bindings b
+          on b.execution_node_id = n.execution_node_id
+         and b.agent_id = 'opencode'
+        join sessions s on s.session_id = b.session_id
+        join workspaces w on w.workspace_id = s.workspace_id
+        where t.target_id = #{targetId}
+        order by w.root_path
+    </select>
+
     <insert id="insertRollout">
         insert into public_agent_config_rollouts(
-            rollout_id, branch, commit_hash, status, trace_id, created_at, updated_at
-        ) values (#{rolloutId}, #{branch}, #{commitHash}, 'DRAINING', #{traceId}, #{now}, #{now})
+            rollout_id, branch, commit_hash, initiated_by_user_id, status, trace_id, created_at, updated_at
+        ) values (
+            #{rolloutId}, #{branch}, #{commitHash}, #{initiatedByUserId}, 'DRAINING', #{traceId}, #{now}, #{now}
+        )
     </insert>
 
     <insert id="insertServer">
@@ -79,11 +94,11 @@
 
     <insert id="insertTarget">
         insert into public_agent_config_rollout_targets(
-            target_id, rollout_id, linux_server_id, container_id, port, base_url,
-            status, retry_count, next_retry_at, lease_until, created_at, updated_at
+            target_id, rollout_id, user_id, linux_server_id, container_id, port, base_url,
+            status, retry_count, next_retry_at, lease_until, lease_token, created_at, updated_at
         ) values (
-            #{row.targetId}, #{row.rolloutId}, #{row.linuxServerId}, #{row.containerId}, #{row.port}, #{row.baseUrl},
-            'RETRY_WAIT', #{row.retryCount}, #{now}, null, #{now}, #{now}
+            #{row.targetId}, #{row.rolloutId}, #{row.userId}, #{row.linuxServerId}, #{row.containerId},
+            #{row.port}, #{row.baseUrl}, 'RETRY_WAIT', #{row.retryCount}, #{now}, null, null, #{now}, #{now}
         ) on conflict (rollout_id, linux_server_id, container_id, port) do nothing
     </insert>
 
@@ -94,41 +109,43 @@
     </update>
 
     <select id="findClaimableTargets" resultMap="TargetRowMap">
-        select target_id, rollout_id, linux_server_id, container_id, port, base_url, retry_count, lease_until
+        select t.target_id, t.rollout_id, t.user_id, t.linux_server_id, t.container_id, t.port, t.base_url,
+               t.retry_count, t.lease_until, t.lease_token, r.trace_id
         from public_agent_config_rollout_targets t
-        where exists (
-                select 1 from public_agent_config_rollouts r
-                where r.rollout_id = t.rollout_id and r.status = 'DRAINING'
-              )
-          and not exists (
+        join public_agent_config_rollouts r
+          on r.rollout_id = t.rollout_id and r.status = 'DRAINING'
+        where not exists (
                 select 1 from public_agent_config_rollout_servers s
                 where s.rollout_id = t.rollout_id and s.status &lt;&gt; 'SYNCED'
               )
           and t.linux_server_id = #{linuxServerId}
-          and ((status = 'RETRY_WAIT' and next_retry_at &lt;= #{now})
-            or (status = 'PROCESSING' and lease_until &lt;= #{now}))
-        order by next_retry_at, created_at
+          and ((t.status = 'RETRY_WAIT' and t.next_retry_at &lt;= #{now})
+            or (t.status = 'PROCESSING' and t.lease_until &lt;= #{now}))
+        order by t.next_retry_at, t.created_at
         for update skip locked
         limit #{limit}
     </select>
 
     <update id="markTargetProcessing">
         update public_agent_config_rollout_targets
-        set status = 'PROCESSING', lease_until = #{leaseUntil}, updated_at = #{now}
+        set status = 'PROCESSING', lease_until = #{leaseUntil}, lease_token = #{leaseToken}, updated_at = #{now}
         where target_id = #{targetId}
+          and ((status = 'RETRY_WAIT' and next_retry_at &lt;= #{now})
+            or (status = 'PROCESSING' and lease_until &lt;= #{now}))
     </update>
 
     <update id="markTargetRetry">
         update public_agent_config_rollout_targets
         set status = 'RETRY_WAIT', retry_count = #{retryCount}, next_retry_at = #{nextRetryAt},
-            lease_until = null, last_error = #{errorMessage}, updated_at = #{now}
-        where target_id = #{targetId}
+            lease_until = null, lease_token = null, last_error = #{errorMessage}, updated_at = #{now}
+        where target_id = #{targetId} and status = 'PROCESSING' and lease_token = #{leaseToken}
     </update>
 
     <update id="markTargetDisposed">
         update public_agent_config_rollout_targets
-        set status = 'DISPOSED', disposed_at = #{now}, lease_until = null, last_error = null, updated_at = #{now}
-        where target_id = #{targetId}
+        set status = 'DISPOSED', disposed_at = #{now}, lease_until = null, lease_token = null,
+            last_error = null, updated_at = #{now}
+        where target_id = #{targetId} and status = 'PROCESSING' and lease_token = #{leaseToken}
     </update>
 
     <update id="completeReadyRollouts">
@@ -145,9 +162,4 @@
           )
     </update>
 
-    <update id="markFailed">
-        update public_agent_config_rollouts
-        set status = 'FAILED', failure_reason = #{reason}, completed_at = #{now}, updated_at = #{now}
-        where rollout_id = #{rolloutId} and status = 'DRAINING'
-    </update>
 </mapper>

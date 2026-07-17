@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.enterprise.testagent.agent.runtime.AgentPromptPart;
 import com.enterprise.testagent.agent.runtime.AgentEventStream;
 import com.enterprise.testagent.agent.runtime.AgentRuntime;
+import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeCommand;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessage;
@@ -13,6 +14,7 @@ import com.enterprise.testagent.agent.runtime.AgentStartRunCommand;
 import com.enterprise.testagent.agent.runtime.AgentStartRunResult;
 import com.enterprise.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.event.RunEventDraft;
 import com.enterprise.testagent.domain.event.RunEventType;
 import com.enterprise.testagent.domain.routing.RoutingDecision;
@@ -76,6 +78,14 @@ public class SideQuestionStreamingApplicationService {
     private final Duration taskTimeout;
     private final Scheduler timeoutScheduler;
     private final SideQuestionAnswerExtractor answerExtractor = new SideQuestionAnswerExtractor();
+    private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
+            PublicAgentConfigMessageGate.MessageGateStatus.open();
+
+    /** 公共配置发布期间，旁路问答与普通 Run 必须复用同一用户级消息门禁。 */
+    @Autowired
+    void configurePublicConfigMessageGate(PublicAgentConfigMessageGate messageGate) {
+        this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
+    }
 
     /** 生产环境使用 bounded-elastic 执行阻塞式仓储和远端调用，避免占用 WebFlux 事件线程。 */
     @Autowired
@@ -163,6 +173,9 @@ public class SideQuestionStreamingApplicationService {
             String traceId) {
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(mainSessionId, "mainSessionId must not be null");
+        if (isDefaultAgent(agentId)) {
+            publicConfigMessageGate.requireAllowed(userId);
+        }
         String normalizedQuestion = SideQuestionPolicy.requireQuestion(question);
         String normalizedMessageId = normalizeOptional(messageId);
         String normalizedModel = normalizeOptional(model);
@@ -244,6 +257,9 @@ public class SideQuestionStreamingApplicationService {
             String traceId) {
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(workspaceId, "workspaceId must not be null");
+        if (isDefaultAgent(agentId)) {
+            publicConfigMessageGate.requireAllowed(userId);
+        }
         String normalizedQuestion = SideQuestionPolicy.requireQuestion(question);
         String normalizedModel = normalizeOptional(model);
 
@@ -828,6 +844,11 @@ public class SideQuestionStreamingApplicationService {
 
     private String normalizeOptional(String value) {
         return Optional.ofNullable(value).map(String::trim).filter(text -> !text.isEmpty()).orElse(null);
+    }
+
+    private boolean isDefaultAgent(String agentId) {
+        return AgentRuntimeRegistry.DEFAULT_AGENT_ID.equalsIgnoreCase(
+                Optional.ofNullable(agentId).map(String::trim).orElse(""));
     }
 
     private String firstText(Map<String, Object> values, String... keys) {

@@ -161,6 +161,13 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成公共配置排空目标认领令牌，防止租约过期后的旧 worker 回写新状态。
+     */
+    public static String publicAgentConfigRolloutLeaseToken() {
+        return prefixed("acl_");
+    }
+
+    /**
      * 生成后端 Java 进程 ID，返回值固定使用 {@code bjp_} 前缀。
      */
     public static String backendProcessId() {

@@ -127,6 +127,7 @@ import {
   parseCommand,
   prepareAutoRetryRun,
   promptFromParts,
+  publicConfigGateRefetchInterval,
   resolveRetryDeadline,
   retryCountdownSeconds,
   retryExpirationDecision,
@@ -907,7 +908,7 @@ const opencodeProcessQuery = useQuery({
   queryFn: () => api.getMyOpencodeProcess(),
   retry: false,
   refetchOnWindowFocus: false,
-  refetchInterval: false
+  refetchInterval: (query) => publicConfigGateRefetchInterval(query.state.data)
 });
 const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
 const opencodeAvailability = ref<OpencodeAvailabilityState>({ ready: false, source: "process" });
@@ -1053,6 +1054,7 @@ const runtimeReady = computed(() => opencodeProcessReady.value && selectedWorksp
 const runReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
 // 宠物问答不再要求先建立主对话：有对话时复用上下文，无对话时只要工作区和用户进程就绪即可查手册。
 const robotQuestionAvailable = computed(() => opencodeProcessReady.value
+  && opencodeProcessStatus.value?.messageSendAllowed !== false
   && Boolean(session.value?.sessionId || selectedWorkspaceIdRef.value));
 
 // 模型和 Provider 登录后立即加载
@@ -4443,6 +4445,11 @@ function latestRemoteMessageId(): string | undefined {
 }
 
 async function submitRobotQuestion(question: string) {
+  if (opencodeProcessStatus.value?.messageSendAllowed === false) {
+    robotSideQuestion.error.value = opencodeProcessStatus.value.messageSendBlockedReason
+      ?? "公共 Agent/Skill 配置正在同步，旧会话排空后将自动恢复发送";
+    return;
+  }
   if (session.value?.sessionId) {
     await robotSideQuestion.submit({
       sessionId: session.value.sessionId,

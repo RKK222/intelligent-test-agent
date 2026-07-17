@@ -8,10 +8,13 @@ import java.time.Instant;
 public record PublicAgentConfigRolloutTargetRow(
         String targetId,
         String rolloutId,
+        String userId,
         String linuxServerId,
         String containerId,
         int port,
         String baseUrl,
         int retryCount,
-        Instant leaseUntil) {
+        Instant leaseUntil,
+        String leaseToken,
+        String traceId) {
 }

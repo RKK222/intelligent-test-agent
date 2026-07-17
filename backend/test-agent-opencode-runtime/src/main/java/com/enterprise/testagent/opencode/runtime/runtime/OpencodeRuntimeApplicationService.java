@@ -7,6 +7,7 @@ import com.enterprise.testagent.agent.runtime.AgentSessionMessagesCommand;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
 import com.enterprise.testagent.domain.session.SessionRepository;
@@ -44,6 +45,8 @@ public class OpencodeRuntimeApplicationService {
     private final ObjectMapper objectMapper;
     private final ModelCatalogApplicationService modelCatalogService;
     private final RunApplicationService runApplicationService;
+    private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
+            PublicAgentConfigMessageGate.MessageGateStatus.open();
     private final ThreadLocal<String> agentContext = new ThreadLocal<>();
     private final ThreadLocal<UserId> userContext = new ThreadLocal<>();
 
@@ -73,6 +76,12 @@ public class OpencodeRuntimeApplicationService {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.modelCatalogService = modelCatalogService;
         this.runApplicationService = runApplicationService;
+    }
+
+    /** 兼容旧 side-question HTTP 入口，但发送前必须执行与新 Run 相同的用户级门禁。 */
+    @Autowired
+    void configurePublicConfigMessageGate(PublicAgentConfigMessageGate messageGate) {
+        this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
     }
 
     /**
@@ -430,6 +439,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public SideQuestionResult sideQuestion(String sessionId, SideQuestionInput input, String traceId) {
         Objects.requireNonNull(input, "input must not be null");
+        requireNewMessageAllowed();
         String question = SideQuestionPolicy.requireQuestion(input.question());
 
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
@@ -533,6 +543,7 @@ public class OpencodeRuntimeApplicationService {
      * 执行远端 session command。
      */
     public Object commandSession(String sessionId, Map<String, Object> body, String traceId) {
+        requireNewMessageAllowed();
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/command", safeBody(body), traceId);
     }
@@ -541,6 +552,7 @@ public class OpencodeRuntimeApplicationService {
      * 执行远端 session shell 命令；shell 安全边界由 API 层和 opencode runtime 共同约束。
      */
     public Object shellSession(String sessionId, Map<String, Object> body, String traceId) {
+        requireNewMessageAllowed();
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/shell", safeBody(body), traceId);
     }
@@ -904,6 +916,13 @@ public class OpencodeRuntimeApplicationService {
      */
     private UserId currentUserId() {
         return userContext.get();
+    }
+
+    /** legacy runtime 中仍会触发新推理的入口统一复用公共配置门禁。 */
+    private void requireNewMessageAllowed() {
+        if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(currentAgentId())) {
+            publicConfigMessageGate.requireAllowed(currentUserId());
+        }
     }
 
     private void setUserContext(UserId userId) {

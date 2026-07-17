@@ -20,10 +20,14 @@ import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -41,26 +45,33 @@ import org.springframework.transaction.annotation.Transactional;
 public class PublicAgentConfigRolloutService
         implements PublicAgentConfigRolloutCoordinator, PublicAgentConfigMessageGate {
 
-    private static final int CLAIM_LIMIT = 20;
-    private static final Duration TARGET_LEASE = Duration.ofSeconds(30);
+    private static final int CLAIM_LIMIT = 1;
+    private static final int TOPOLOGY_LIMIT = 10_000;
+    private static final Duration TARGET_LEASE = Duration.ofSeconds(60);
     private static final Duration RUNTIME_TIMEOUT = Duration.ofSeconds(10);
 
     private final PublicAgentConfigRolloutRepository repository;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
+    private final OpencodeProcessManagementRepository processRepository;
     private final AgentRuntime runtime;
     private final BackendInstanceIdentity backendInstanceIdentity;
+    private final ManagedWorkspacePathResolver workspacePathResolver;
     private final Duration retryDelay;
 
     public PublicAgentConfigRolloutService(
             PublicAgentConfigRolloutRepository repository,
             OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessManagementRepository processRepository,
             AgentRuntimeRegistry runtimeRegistry,
             BackendInstanceIdentity backendInstanceIdentity,
+            ManagedWorkspacePathResolver workspacePathResolver,
             @Value("${test-agent.public-agent-config.rollout.retry-delay-ms:5000}") long retryDelayMillis) {
         this.repository = repository;
         this.heartbeatStore = heartbeatStore;
+        this.processRepository = processRepository;
         this.runtime = runtimeRegistry.require(AgentRuntimeRegistry.DEFAULT_AGENT_ID);
         this.backendInstanceIdentity = backendInstanceIdentity;
+        this.workspacePathResolver = workspacePathResolver;
         this.retryDelay = Duration.ofMillis(Math.max(1000L, retryDelayMillis));
     }
 
@@ -69,7 +80,12 @@ public class PublicAgentConfigRolloutService
      */
     @Override
     @Transactional
-    public String begin(String branch, String commitHash, String localLinuxServerId, String traceId) {
+    public String begin(
+            String branch,
+            String commitHash,
+            String localLinuxServerId,
+            String initiatedByUserId,
+            String traceId) {
         repository.findActiveRolloutId().ifPresent(active -> {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
@@ -78,11 +94,14 @@ public class PublicAgentConfigRolloutService
         });
         String rolloutId = RuntimeIdGenerator.publicAgentConfigRolloutId();
         Instant now = Instant.now();
-        repository.createRollout(rolloutId, branch, commitHash, traceId, now);
+        repository.createRollout(rolloutId, branch, commitHash, initiatedByUserId, traceId, now);
 
         List<ManagerRuntimeSnapshot> snapshots = heartbeatStore.liveManagerSnapshots();
         Set<String> serverIds = new LinkedHashSet<>();
         serverIds.add(localLinuxServerId);
+        // 服务器拓扑表是离线节点的持久化清单；只看 Redis 短 TTL 心跳会漏掉发布时恰好离线的服务器。
+        processRepository.findLinuxServers(TOPOLOGY_LIMIT)
+                .forEach(server -> serverIds.add(server.linuxServerId().value()));
         Set<LinuxServerId> liveBackendServerIds = heartbeatStore.liveBackendServerIds();
         if (liveBackendServerIds != null) {
             liveBackendServerIds.forEach(serverId -> serverIds.add(serverId.value()));
@@ -109,10 +128,25 @@ public class PublicAgentConfigRolloutService
     }
 
     private void snapshotServerTargets(String rolloutId, String linuxServerId, Instant now) {
-        for (ManagerRuntimeSnapshot manager : heartbeatStore.liveManagerSnapshots()) {
-            if (!linuxServerId.equals(manager.container().linuxServerId().value())) {
-                continue;
-            }
+        List<ManagerRuntimeSnapshot> managers = heartbeatStore.liveManagerSnapshots().stream()
+                .filter(manager -> linuxServerId.equals(manager.container().linuxServerId().value()))
+                .toList();
+        if (managers.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.OPENCODE_UNAVAILABLE,
+                    "目标服务器 manager 进程清单尚未就绪",
+                    Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
+        }
+        Map<ProcessKey, String> usersByProcess = new HashMap<>();
+        for (OpencodeServerProcess process : processRepository.findOpencodeServerProcesses(TOPOLOGY_LIMIT)) {
+            usersByProcess.putIfAbsent(
+                    new ProcessKey(
+                            process.linuxServerId().value(),
+                            process.containerId().value(),
+                            process.port()),
+                    process.userId().value());
+        }
+        for (ManagerRuntimeSnapshot manager : managers) {
             String containerId = manager.container().containerId().value();
             for (ManagedOpencodeProcessSnapshot process : manager.managedProcesses()) {
                 if (process.baseUrl() == null || process.baseUrl().isBlank()) {
@@ -121,19 +155,17 @@ public class PublicAgentConfigRolloutService
                 repository.addTarget(new PublicAgentConfigRolloutTarget(
                         RuntimeIdGenerator.publicAgentConfigRolloutTargetId(),
                         rolloutId,
+                        usersByProcess.get(new ProcessKey(linuxServerId, containerId, process.port())),
                         linuxServerId,
                         containerId,
                         process.port(),
                         process.baseUrl().trim(),
                         0,
+                        null,
+                        null,
                         null), now);
             }
         }
-    }
-
-    @Override
-    public void fail(String rolloutId, String reason, String traceId) {
-        repository.markFailed(rolloutId, safeError(reason), Instant.now());
     }
 
     @Override
@@ -168,19 +200,37 @@ public class PublicAgentConfigRolloutService
     private void drainTarget(PublicAgentConfigRolloutTarget target) {
         Instant now = Instant.now();
         try {
-            ExecutionNode node = targetNode(target, now);
-            JsonNode sessionStatus = runtime.runtime(new AgentRuntimeCommand(
-                            node, "GET", "/session/status", null, null, Map.of(), null,
-                            target.rolloutId()))
-                    .map(AgentRuntimeResult::body)
-                    .block(RUNTIME_TIMEOUT);
-            if (hasRunningSession(sessionStatus)) {
-                retry(target, "SESSION_RUNNING", now);
+            ProcessPresence presence = processPresence(target);
+            if (presence == ProcessPresence.UNKNOWN) {
+                retry(target, "MANAGER_SNAPSHOT_UNAVAILABLE", now);
                 return;
+            }
+            if (presence == ProcessPresence.ABSENT) {
+                // manager 明确确认目标端口已不存在时等同于已经释放，无需向死地址重复调用 dispose。
+                repository.markTargetDisposed(target.targetId(), target.leaseToken(), Instant.now());
+                return;
+            }
+            ExecutionNode node = targetNode(target, now);
+            for (String rootPath : repository.findTargetWorkspaceRootPaths(target.targetId())) {
+                String directory = workspacePathResolver.resolve(rootPath).toString();
+                JsonNode sessionStatus = runtime.runtime(new AgentRuntimeCommand(
+                                node, "GET", "/session/status", directory, null, Map.of(), null,
+                                target.traceId()))
+                        .map(AgentRuntimeResult::body)
+                        .block(RUNTIME_TIMEOUT);
+                SessionActivity activity = sessionActivity(sessionStatus);
+                if (activity == SessionActivity.BUSY) {
+                    retry(target, "SESSION_RUNNING", now);
+                    return;
+                }
+                if (activity == SessionActivity.INVALID) {
+                    retry(target, "SESSION_STATUS_INVALID", now);
+                    return;
+                }
             }
             JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
                             node, "POST", "/global/dispose", null, null, Map.of(), Map.of(),
-                            target.rolloutId()))
+                            target.traceId()))
                     .map(AgentRuntimeResult::body)
                     .block(RUNTIME_TIMEOUT);
             // 只有 opencode 明确返回 true 才确认释放；空值、非布尔或 false 均进入重试，避免误解除闸门。
@@ -188,7 +238,7 @@ public class PublicAgentConfigRolloutService
                 retry(target, "DISPOSE_REJECTED", now);
                 return;
             }
-            repository.markTargetDisposed(target.targetId(), Instant.now());
+            repository.markTargetDisposed(target.targetId(), target.leaseToken(), Instant.now());
         } catch (Exception exception) {
             retry(target, safeError(exception.getMessage()), now);
         }
@@ -199,6 +249,7 @@ public class PublicAgentConfigRolloutService
         long multiplier = Math.min(retryCount, 6);
         repository.markTargetRetry(
                 target.targetId(),
+                target.leaseToken(),
                 retryCount,
                 now.plus(retryDelay.multipliedBy(multiplier)),
                 safeError(error),
@@ -215,30 +266,57 @@ public class PublicAgentConfigRolloutService
                 now);
     }
 
-    /** Session status 是 sessionId 到状态对象的映射；busy/retry 都表示仍不可排空。 */
-    private boolean hasRunningSession(JsonNode node) {
-        if (node == null || node.isNull()) {
-            return false;
+    /** Session status 必须是 sessionId 到合法状态对象的映射；未知结构一律失败关闭。 */
+    private SessionActivity sessionActivity(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return SessionActivity.INVALID;
         }
-        if (node.isObject()) {
-            JsonNode type = node.get("type");
-            if (type != null && type.isTextual()) {
-                String value = type.textValue();
-                if ("busy".equalsIgnoreCase(value) || "retry".equalsIgnoreCase(value)) {
-                    return true;
-                }
+        for (JsonNode status : node) {
+            if (!status.isObject() || !status.path("type").isTextual()) {
+                return SessionActivity.INVALID;
+            }
+            String type = status.path("type").textValue();
+            if ("busy".equalsIgnoreCase(type) || "retry".equalsIgnoreCase(type)) {
+                return SessionActivity.BUSY;
+            }
+            if (!"idle".equalsIgnoreCase(type)) {
+                return SessionActivity.INVALID;
             }
         }
-        for (JsonNode child : node) {
-            if (hasRunningSession(child)) {
-                return true;
+        return SessionActivity.IDLE;
+    }
+
+    /** 只有本服务器对应 container 的 manager 快照可以确认目标仍在或已经消失。 */
+    private ProcessPresence processPresence(PublicAgentConfigRolloutTarget target) {
+        for (ManagerRuntimeSnapshot manager : heartbeatStore.liveManagerSnapshots()) {
+            if (!target.linuxServerId().equals(manager.container().linuxServerId().value())
+                    || !target.containerId().equals(manager.container().containerId().value())) {
+                continue;
             }
+            boolean present = manager.managedProcesses().stream()
+                    .anyMatch(process -> process.port() == target.port());
+            return present ? ProcessPresence.PRESENT : ProcessPresence.ABSENT;
         }
-        return false;
+        return ProcessPresence.UNKNOWN;
     }
 
     private String safeError(String value) {
         String normalized = value == null || value.isBlank() ? "UNKNOWN" : value.trim();
         return normalized.length() <= 1000 ? normalized : normalized.substring(0, 1000);
+    }
+
+    private record ProcessKey(String linuxServerId, String containerId, int port) {
+    }
+
+    private enum ProcessPresence {
+        PRESENT,
+        ABSENT,
+        UNKNOWN
+    }
+
+    private enum SessionActivity {
+        IDLE,
+        BUSY,
+        INVALID
     }
 }

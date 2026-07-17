@@ -24,6 +24,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryDeploymentMod
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
@@ -429,17 +430,15 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     privateKey);
             ensurePublicRepositoryReady(config, normalizedBranch, privateKey, discardLocalChanges);
             String commitHash = gitWorkspaceService.headCommit(config.gitRoot());
-            rolloutId = beginPublicConfigRollout(normalizedBranch, commitHash, traceId);
+            rolloutId = beginPublicConfigRollout(normalizedBranch, commitHash, userId, traceId);
             markLocalPublicConfigSynced(rolloutId, traceId);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update", rolloutId, traceId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
-            failPublicConfigRollout(rolloutId, exception.getMessage(), traceId);
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
             throw exception;
         } catch (Exception exception) {
-            failPublicConfigRollout(rolloutId, exception.getMessage(), traceId);
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "公共 Agent 配置更新失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 配置更新失败", Map.of(), exception);
         }
@@ -567,17 +566,15 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             progress.step(AgentConfigOperationStep.PUSHING);
             gitWorkspaceService.push(repoRoot, normalizedBranch, false, privateKey);
             String commitHash = gitWorkspaceService.headCommit(repoRoot);
-            rolloutId = beginPublicConfigRollout(normalizedBranch, commitHash, traceId);
+            rolloutId = beginPublicConfigRollout(normalizedBranch, commitHash, userId, traceId);
             markLocalPublicConfigSynced(rolloutId, traceId);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update-and-push", rolloutId, traceId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
-            failPublicConfigRollout(rolloutId, exception.getMessage(), traceId);
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
             throw exception;
         } catch (Exception exception) {
-            failPublicConfigRollout(rolloutId, exception.getMessage(), traceId);
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "公共 Agent 配置更新并推送失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 配置更新并推送失败", Map.of(), exception);
         } finally {
@@ -1043,7 +1040,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             gitWorkspaceService.pushRef(personalRepoRoot, worktree.branch(), branch, privateKey);
             String commitHash = gitWorkspaceService.headCommit(personalRepoRoot);
             // 远端 push 成功后先落持久化禁发和存量进程清单，消除同步窗口内新 Run 进入的竞态。
-            rolloutId = beginPublicConfigRollout(branch, commitHash, traceId);
+            rolloutId = beginPublicConfigRollout(branch, commitHash, userId, traceId);
             // 共享仓库只作为运行时同步副本；成功推送后更新到明确提交，不承载用户编辑。
             gitWorkspaceService.checkoutTrackingBranch(sharedRepoRoot, branch, privateKey);
             gitWorkspaceService.resetHardToCommit(sharedRepoRoot, commitHash);
@@ -1052,11 +1049,9 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             broadcastPublicSync(branch, commitHash, "publish", rolloutId, traceId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
-            failPublicConfigRollout(rolloutId, exception.getMessage(), traceId);
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
             throw exception;
         } catch (Exception exception) {
-            failPublicConfigRollout(rolloutId, exception.getMessage(), traceId);
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "发布公共 Agent 配置失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "发布公共 Agent 配置失败", Map.of(), exception);
         }
@@ -1137,7 +1132,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         }
         Object rolloutValue = event.payload().get("rolloutId");
         String rolloutId = rolloutValue instanceof String value && !value.isBlank() ? value : null;
-        synchronizePublicRuntimeRepository(branch, commitHash, rolloutId, event.traceId());
+        if (rolloutId != null && publicConfigRolloutCoordinator != null) {
+            publicConfigRolloutCoordinator.pendingSync(serverIdentity.linuxServerId())
+                    .filter(request -> rolloutId.equals(request.rolloutId()))
+                    .ifPresent(this::synchronizePublicRuntimeRepository);
+            return;
+        }
+        synchronizePublicRuntimeRepository(branch, commitHash, null, null, event.traceId());
     }
 
     /**
@@ -1151,25 +1152,41 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             return;
         }
         publicConfigRolloutCoordinator.pendingSync(serverIdentity.linuxServerId())
-                .ifPresent(request -> synchronizePublicRuntimeRepository(
-                        request.branch(), request.commitHash(), request.rolloutId(), request.traceId()));
+                .ifPresent(this::synchronizePublicRuntimeRepository);
+    }
+
+    private void synchronizePublicRuntimeRepository(PublicAgentConfigRolloutSyncRequest request) {
+        synchronizePublicRuntimeRepository(
+                request.branch(),
+                request.commitHash(),
+                request.rolloutId(),
+                request.initiatedByUserId(),
+                request.traceId());
     }
 
     private void synchronizePublicRuntimeRepository(
             String branch,
             String commitHash,
             String rolloutId,
+            String initiatedByUserId,
             String traceId) {
         synchronized (publicWorktreeLocks.computeIfAbsent("public-runtime-sync", ignored -> new Object())) {
-            PublicConfig config = publicConfig();
+            UserId initiator = initiatedByUserId == null || initiatedByUserId.isBlank()
+                    ? null
+                    : new UserId(initiatedByUserId);
+            PublicConfig config = initiator == null ? publicConfig() : requireEnabledPublicConfig(initiator);
             if (!config.enabled() || !gitWorkspaceService.isGitRepository(config.gitRoot())) {
                 return;
             }
             if (!gitWorkspaceService.isWorktreeClean(config.gitRoot())) {
                 return;
             }
-            gitWorkspaceService.fetch(config.gitRoot(), null);
-            gitWorkspaceService.checkoutTrackingBranch(config.gitRoot(), branch, null);
+            String privateKey = initiator == null ? null : decryptSingleSshKey(initiator);
+            if (initiator != null) {
+                ensurePublicRepositoryOriginReady(config.gitRoot(), config);
+            }
+            gitWorkspaceService.fetch(config.gitRoot(), privateKey);
+            gitWorkspaceService.checkoutTrackingBranch(config.gitRoot(), branch, privateKey);
             gitWorkspaceService.resetHardToCommit(config.gitRoot(), commitHash);
             if (rolloutId != null && publicConfigRolloutCoordinator != null) {
                 publicConfigRolloutCoordinator.markServerSynced(
@@ -1906,22 +1923,21 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 Map.copyOf(payload)));
     }
 
-    private String beginPublicConfigRollout(String branch, String commitHash, String traceId) {
+    private String beginPublicConfigRollout(String branch, String commitHash, UserId userId, String traceId) {
         if (publicConfigRolloutCoordinator == null) {
             return null;
         }
-        return publicConfigRolloutCoordinator.begin(branch, commitHash, serverIdentity.linuxServerId(), traceId);
+        return publicConfigRolloutCoordinator.begin(
+                branch,
+                commitHash,
+                serverIdentity.linuxServerId(),
+                userId.value(),
+                traceId);
     }
 
     private void markLocalPublicConfigSynced(String rolloutId, String traceId) {
         if (rolloutId != null && publicConfigRolloutCoordinator != null) {
             publicConfigRolloutCoordinator.markServerSynced(rolloutId, serverIdentity.linuxServerId(), traceId);
-        }
-    }
-
-    private void failPublicConfigRollout(String rolloutId, String reason, String traceId) {
-        if (rolloutId != null && publicConfigRolloutCoordinator != null) {
-            publicConfigRolloutCoordinator.fail(rolloutId, reason, traceId);
         }
     }
 

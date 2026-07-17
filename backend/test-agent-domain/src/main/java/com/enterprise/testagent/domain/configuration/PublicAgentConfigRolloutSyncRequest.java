@@ -7,5 +7,6 @@ public record PublicAgentConfigRolloutSyncRequest(
         String rolloutId,
         String branch,
         String commitHash,
+        String initiatedByUserId,
         String traceId) {
 }

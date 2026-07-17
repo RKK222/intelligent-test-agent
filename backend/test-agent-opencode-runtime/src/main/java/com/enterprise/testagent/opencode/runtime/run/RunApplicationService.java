@@ -819,13 +819,7 @@ public class RunApplicationService {
     private Run startRunInternal(UserId userId, String agentId, StartRunInput input, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(resolvedAgentId)) {
-            PublicAgentConfigMessageGate.MessageGateStatus gate = publicConfigMessageGate.status(userId);
-            if (!gate.allowed()) {
-                throw new PlatformException(
-                        ErrorCode.CONFLICT,
-                        gate.reason(),
-                        Map.of("rolloutId", gate.rolloutId()));
-            }
+            publicConfigMessageGate.requireAllowed(userId);
         }
         ConversationRunContext conversationContext = resolveConversationContext(userId, resolvedAgentId, input, traceId);
         LOGGER.info("Run starting, userId={}, agentId={}, sessionId={}, traceId={}",

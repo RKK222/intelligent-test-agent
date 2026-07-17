@@ -1,6 +1,7 @@
 package com.enterprise.testagent.opencode.runtime.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -18,6 +19,7 @@ import com.enterprise.testagent.agent.runtime.AgentSessionMessage;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.enterprise.testagent.agent.runtime.AgentStartRunCommand;
 import com.enterprise.testagent.domain.event.RunEventDraft;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.event.RunEventType;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
@@ -64,6 +66,27 @@ class SideQuestionStreamingApplicationServiceTest {
     private static final WorkspaceId WORKSPACE_ID = new WorkspaceId("wrk_sidequestionstream01");
     private static final String TRACE_ID = "trace_sidequestionstream01";
     private static final ObjectMapper JSON = new ObjectMapper();
+
+    @Test
+    void publicConfigGateBlocksSideQuestionBeforeCreatingInternalRun() {
+        Fixture fixture = new Fixture(Runnable::run);
+        PublicAgentConfigMessageGate gate = ignored ->
+                PublicAgentConfigMessageGate.MessageGateStatus.blocked("acr_active");
+        fixture.service.configurePublicConfigMessageGate(gate);
+
+        assertThatThrownBy(() -> fixture.service.start(
+                        USER_ID,
+                        " OpenCode ",
+                        MAIN_SESSION_ID,
+                        "排空期间不能发送",
+                        null,
+                        "provider/model",
+                        TRACE_ID))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class);
+
+        verify(fixture.sessions, never()).save(any());
+        verify(fixture.runs, never()).save(any());
+    }
 
     @Test
     void startReturnsImmediatelyAndCreatesArchivedInternalSessionAndIndependentPendingRun() {

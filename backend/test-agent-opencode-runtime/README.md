@@ -6,7 +6,7 @@
 
 ## 主要职责
 
-- `PublicAgentConfigRolloutService` 实现公共 Agent/Skill 发布的持久化消息闸门与排空 worker：服务器 Git 同步后从 `OpencodeProcessHeartbeatStore.liveManagerSnapshots()` 登记本机已有进程；所有服务器确认后，每个 Java 只认领 `linuxServerId=BackendInstanceIdentity.linuxServerId()` 的目标，通过稳定 `AgentRuntime` 调用本机 `/session/status`，忙碌 Session 递增重试次数并退避，空闲实例调用本机 `/global/dispose`，禁止跨服务器代处理。数据库行锁和租约允许同服务器多 Java 实例安全认领且在进程重启后继续处理；消息闸门复用 `opencode_server_processes` 的用户归属，某用户目标 dispose 后立即恢复该用户，`RunApplicationService` 同时读取同一用户级闸门强制拒绝未排空用户的新 opencode Run。
+- `PublicAgentConfigRolloutService` 实现公共 Agent/Skill 发布的持久化消息闸门与持续排空 worker：服务器 Git 同步后必须先拿到本服务器 manager 快照，再登记已有进程及当时的用户归属；所有服务器确认后，每个 Java 只认领 `linuxServerId=BackendInstanceIdentity.linuxServerId()` 的一个目标。worker 通过既有 session binding 找出该进程使用过的全部 workspace directory，逐目录调用本机 `/session/status`；任一 `busy/retry`、未知结构或 manager 快照缺失都递增重试次数并退避，全部明确空闲后只调用一次本机 `/global/dispose`。数据库 `SKIP LOCKED`、60 秒单目标租约和唯一 lease token 防止同服务器多 Java 的过期 worker 覆盖新结果；目标进程已由本机 manager 明确确认消失时直接收敛。目标保存用户快照，某用户 target dispose 后立即恢复该用户；`RunApplicationService`、流式/旧版旁路问答、legacy command/shell 同时读取同一用户级闸门，禁止排空期间产生新 opencode 消息。
 
 - Session 创建、查询、消息追加、归档和当前用户历史会话分页；用户历史由 `SessionHistoryRepository` 只读端口提供，按会话创建人、Run 触发人、消息发送人归因，保留 `pinned` 字段但排序只使用更新时间倒序。
 - 会话运行上下文签发与校验；`ConversationContextApplicationService` 在所有权威读取前取得 Redis 签发租约，校验 Session owner 后先通过 `ConversationWorkspaceAccessAuthorizer` 确认托管应用已启用、用户仍是有效成员且个人 Workspace 属于本人，再通过 `TrustedWorkspaceResolver` 安全解析历史空服务器 Workspace、读取当前用户 `READY` 完整进程与 agent binding 构造控制面快照。历史 Workspace 首次回填一发生就放弃本轮保存，只允许使用全新租约重新执行一次 Session、成员、Workspace 等完整权威读取；其它 CAS 失败不重试。读取先 `peek`，校验认证用户、agent、Session、版本和过期时间后再原子 `touch`；缺失或失效分别返回 `CONVERSATION_CONTEXT_REQUIRED`、`CONVERSATION_CONTEXT_EXPIRED`，运行态存储异常返回 `RUNTIME_STATE_UNAVAILABLE`，不回退数据库或 JVM 内存。

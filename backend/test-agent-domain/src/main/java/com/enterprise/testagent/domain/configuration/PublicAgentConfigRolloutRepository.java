@@ -16,11 +16,20 @@ public interface PublicAgentConfigRolloutRepository {
 
     Optional<PublicAgentConfigRolloutSyncRequest> findPendingSync(String linuxServerId);
 
-    void createRollout(String rolloutId, String branch, String commitHash, String traceId, Instant now);
+    void createRollout(
+            String rolloutId,
+            String branch,
+            String commitHash,
+            String initiatedByUserId,
+            String traceId,
+            Instant now);
 
     void addServer(String rolloutId, String linuxServerId, Instant now);
 
     void addTarget(PublicAgentConfigRolloutTarget target, Instant now);
+
+    /** 返回该目标进程曾绑定过的全部工作区根目录，排空检查不得退化为默认 cwd。 */
+    List<String> findTargetWorkspaceRootPaths(String targetId);
 
     void markServerSynced(String rolloutId, String linuxServerId, Instant now);
 
@@ -30,11 +39,16 @@ public interface PublicAgentConfigRolloutRepository {
             Instant leaseUntil,
             int limit);
 
-    void markTargetRetry(String targetId, int retryCount, Instant nextRetryAt, String errorMessage, Instant now);
+    boolean markTargetRetry(
+            String targetId,
+            String leaseToken,
+            int retryCount,
+            Instant nextRetryAt,
+            String errorMessage,
+            Instant now);
 
-    void markTargetDisposed(String targetId, Instant now);
+    boolean markTargetDisposed(String targetId, String leaseToken, Instant now);
 
     void completeReadyRollouts(Instant now);
 
-    void markFailed(String rolloutId, String reason, Instant now);
 }

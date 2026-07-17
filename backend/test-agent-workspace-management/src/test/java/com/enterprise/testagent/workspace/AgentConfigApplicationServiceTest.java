@@ -239,7 +239,7 @@ class AgentConfigApplicationServiceTest {
                 new RecordingBroadcastPublisher());
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
         when(coordinator.pendingSync("linux-1")).thenReturn(Optional.of(new PublicAgentConfigRolloutSyncRequest(
-                "acr_retry", "main", "commit_remote", "trace_retry")));
+                "acr_retry", "main", "commit_remote", ADMIN.value(), "trace_retry")));
         service.setPublicConfigRolloutCoordinator(coordinator);
 
         service.retryPendingPublicConfigSync();
@@ -1104,7 +1104,7 @@ class AgentConfigApplicationServiceTest {
                 git,
                 publisher);
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
-        when(coordinator.begin("main", "commit_base", "linux-1", "trace_publish"))
+        when(coordinator.begin("main", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
                 .thenReturn("acr_publish");
         service.setPublicConfigRolloutCoordinator(coordinator);
 
@@ -1123,7 +1123,7 @@ class AgentConfigApplicationServiceTest {
                 .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
         assertThat(publisher.events).hasSize(1);
         assertThat(publisher.events.get(0).payload()).containsEntry("rolloutId", "acr_publish");
-        verify(coordinator).begin("main", "commit_base", "linux-1", "trace_publish");
+        verify(coordinator).begin("main", "commit_base", "linux-1", ADMIN.value(), "trace_publish");
         verify(coordinator).markServerSynced("acr_publish", "linux-1", "trace_publish");
     }
 

@@ -5,5 +5,6 @@ public record PublicAgentConfigRolloutSyncRow(
         String rolloutId,
         String branch,
         String commitHash,
+        String initiatedByUserId,
         String traceId) {
 }

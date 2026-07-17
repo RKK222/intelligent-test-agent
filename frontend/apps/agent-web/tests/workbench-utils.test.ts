@@ -4,11 +4,13 @@ import * as workbenchUtils from "../src/components/workbench-utils";
 import {
   assistantSummaryMessageId,
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
+  PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
   OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
   opencodeAvailabilityFromHealth,
   opencodeAvailabilityFromProcess,
   opencodeHealthRequestFromProcess,
+  publicConfigGateRefetchInterval,
   chatStateFromSessionTreeSnapshot,
   dedupeSessionMessages,
   diffFilesFromPayload,
@@ -434,8 +436,15 @@ describe("historyRuntimeBadgeCounts", () => {
 describe("opencode readiness helpers", () => {
   it("keeps health, runtime catalog and VCS refresh intervals explicit", () => {
     expect(OPENCODE_HEALTH_REFETCH_INTERVAL_MS).toBe(10_000);
+    expect(PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS).toBe(5_000);
     expect(OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS).toBe(300_000);
     expect(OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS).toBe(30_000);
+  });
+
+  it("polls process state only while the current user is blocked by public config rollout", () => {
+    expect(publicConfigGateRefetchInterval({ messageSendAllowed: false })).toBe(5_000);
+    expect(publicConfigGateRefetchInterval({ messageSendAllowed: true })).toBe(false);
+    expect(publicConfigGateRefetchInterval(null)).toBe(false);
   });
 
   it("builds weak health request only after process assignment is known", () => {

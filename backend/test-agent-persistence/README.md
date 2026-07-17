@@ -47,6 +47,8 @@
 - `V15__add_opencode_process_id_check_constraints.sql`：为 opencode 进程管理表加 `process_id` 前缀、稳定服务器身份、状态、port、baseUrl 形状等 CHECK 约束。
 - `V20260625184300__create_scheduler_framework_tables.sql`：创建 scheduler 任务定义、用户级计划、运行记录表，并给 sessions/runs/session_messages 增加来源预留字段；V18 之后新增 migration 统一使用 14 位时间戳版本，避免多人并行开发抢数字版本。
 - `V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加每日保留清理使用的索引，不写入业务数据。
+- `V20260717173000__create_public_agent_config_rollouts.sql`：创建公共 Agent/Skill 发布 rollout、服务器同步和存量进程目标表。
+- `V20260717200000__harden_public_agent_config_rollout.sql`：为 rollout 保存发起人，为目标快照用户并增加认领 fencing token；历史目标按服务器、容器、端口回填用户归属，不写测试或演示数据。
 - `V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本已可能被历史库应用，禁止删除、重命名或直接改写。
 - `V20260627000000__cleanup_loopback_linux_server_seed.sql`：清理 V17 留下的 `127.0.0.1` loopback opencode 拓扑、用户进程、绑定和关联的 manager-backend 连接。
 - `V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`：为 `user_ssh_keys` 增加 `encrypted_aes_key` 列；V10 已被 F-COSS seed 占用，后续 schema 变更不得复用 V10。
@@ -81,6 +83,7 @@
 - `MyBatisRunSessionScopeRepository`：通过 `RunSessionScopeMapper.xml` 保存 Run root scope 和当前 Run root/child session 清单，供 SSE/HTTP snapshot 按当前 Run 子树恢复消息，并支持按 `root_session_id` 汇总 Session 历史树；mapper 中 `MERGE ... USING (VALUES ...)` 的时间参数显式 cast 为 `timestamp`，避免 PostgreSQL 将未定型参数推断为 `text`。
 - `MyBatisSessionHistoryRepository`：通过 `SessionHistoryMapper.xml` 实现当前用户历史会话只读分页，按 `sessions.created_by_user_id`、`runs.triggered_by_user_id`、`session_messages.sender_user_id` 归因，left join 托管应用/工作区/版本上下文，排序严格按 `updated_at desc, id desc`，不复用 `JdbcSessionRepository` 的 pinned 排序 SQL。
 - `MyBatisSessionRuntimeStateRepository`：通过 `SessionRuntimeStateMapper.xml` 实现当前用户历史会话运行态只读摘要，复用历史会话可见性归因，只返回每个 ACTIVE 会话最近一个 `PENDING/RUNNING/CANCELLING` Run，并按最新 `question.asked/replied/rejected` 派生 `QUESTION` 待关注标记；不新增数据库表或 Flyway migration。
+- `MyBatisPublicAgentConfigRolloutRepository`：通过 `PublicAgentConfigRolloutMapper.xml` 持久化发布硬闸门、服务器同步和本机目标认领；用户门禁读取发布窗口的用户快照，目标认领按 `linuxServerId + leaseToken` fencing，Workspace 根目录查询复用既有 execution node、opencode binding、Session 和 Workspace 关系。
 - `MyBatisRunSummaryPersistenceRepository`：通过 `RunSummaryMapper.xml` 写无原文 Run 锚点、终态双摘要，并从既有 `runs.dispatch_message_id` 读取稳定用户轮次锚点与远端 ID 定位快照，供 Redis 详情过期后的目标 Run 恢复和显式 Diff 动作使用；accepted/rejected 计数使用单条 UPDATE，且不写 `run_events`。终态 CAS 只允许一次较高事件序号的晚到刷新；跨终态状态仅允许已落库的 `FAILED + TRANSPORT_ERROR` 被 `REMOTE_ROOT/RECOVERY_REMOTE_ROOT` 事实纠正，禁止其它来源任意翻转。本变更复用既有列，不新增 migration。
 - `ScheduledTaskRunRetentionMapper` / `ScheduledTaskRunRetentionMapper.xml`：按 `ended_at` 和终态 status 清理超过 7 天的 scheduler 运行记录，显式排除活动状态。
 - `MyBatisScheduledTaskRunRetentionRepository`：实现 scheduler 运行记录保留策略 domain 端口，供框架维护任务调用。
@@ -118,6 +121,7 @@
 - `MyBatisSessionTitleUpdateRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Session 标题 XML 条件更新成功与预期标题不匹配时不覆盖新标题。
 - 运营分析原始事实扫描按 `storage_mode` 双读：legacy Diff 只读 `run_events`，`REDIS_SUMMARY` 只读 `runs.diff_*_count`，即使灰度期间残留 shadow 事件也不重复计数；新模式 USER/ASSISTANT 数量只读取 `content_kind=SUMMARY` 的终态摘要，残留 RAW shadow 消息同样排除。相关 XML 通过持久化模块编译、Flyway 集成和运行时服务单测覆盖；`AnalyticsQueryServiceTest` 固化空分母、满意率、采纳率、p95 和 CSV 字段口径。
 - `PersistenceSqlConventionTest` 固化持久层 SQL 规则：存量 JDBC 文件只允许留在白名单，MyBatis mapper 不得使用注解 SQL。
+- `MyBatisPublicAgentConfigRolloutRepositoryTest` 固化目标认领生成用户/trace/lease token 快照，并验证过期 lease 不能把目标误写为重试或已 dispose。
 - SessionMessage/Run 覆盖 V16 token/cost 字段读写、parts_json 兼容、按 `(sessionId, remoteMessageId)` 查询以及最近非终态 Run 查询。
 - RunEvent 覆盖 append-only seq 单调递增、并发追加唯一性、`runId + lastSeq` 增量读取、结构化 scope 列和 `(run_id, seq)` 唯一约束。
 - Session 覆盖远端 opencode 映射、全局搜索、置顶排序、工作区会话分页和归档过滤。

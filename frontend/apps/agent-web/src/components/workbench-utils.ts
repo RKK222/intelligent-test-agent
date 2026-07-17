@@ -256,6 +256,14 @@ export function assistantSummaryMessageId(payload: Record<string, unknown>): str
 }
 
 export const OPENCODE_HEALTH_REFETCH_INTERVAL_MS = 10_000;
+export const PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS = 5_000;
+
+/** 排空期间轮询当前用户门禁；一旦该用户 target dispose，下一轮查询立即恢复发送并停止轮询。 */
+export function publicConfigGateRefetchInterval(
+  process: Partial<UserOpencodeProcess> | null | undefined
+): number | false {
+  return process?.messageSendAllowed === false ? PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS : false;
+}
 export const OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS = 300_000;
 export const OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS = 30_000;
 

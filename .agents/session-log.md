@@ -1,5 +1,21 @@
 # Session Log
 
+### 2026-07-17 - 加固公共配置集群同步、属地排空与按用户解禁
+
+- Why:
+  - 前两次实现仍存在关键缺口：发起节点可能代替其他服务器调用 opencode、用户归属依赖可变化的进程表、处理租约缺少 fencing、仅检查单一目录、漏广播或同步异常可能提前开闸，消息入口和前端解禁也未完整覆盖。
+- What:
+  - rollout 持久化发起人，target 固化用户快照并增加唯一处理令牌；发起服务器只负责建单和广播，每个 Java 只认领本机 `linuxServerId` 的 target，先核对本机 manager 进程清单，再通过本机 opencode 检查该进程绑定的全部 workspace 目录并调用一次 `/global/dispose`。
+  - busy、未知状态、同步失败和 dispose 未明确返回 `true` 均持久化增加重试次数并由 5 秒定时任务持续处理；更新/重启期间不再失败开闸。某用户 target dispose 成功后，该用户立即解禁，其他未处理用户继续阻断，前端以 5 秒轮询同步状态。
+  - 公共共享仓库远端同步复用数据库中的发起人凭据配置和既有 Git/密钥解密能力；所有服务器切到目标提交并完成旧实例释放后，下一次请求重新创建 opencode Instance，从而加载新的 `opencode.jsonc`。
+  - 新增 `V20260717200000` PostgreSQL migration、MyBatis XML 查询与 fencing 更新，并同步 runtime/workspace/persistence/API、部署和测试文档；H2 仅为项目原有的内存集成测试数据库，不是本次新增，也不用于真实运行。
+- How:
+  - JDK 25 后端定向测试 102 项通过；前端全量 1203 项通过、1 项跳过，typecheck 通过；后端全模块跳过测试安装成功。真实 `.env.test` PostgreSQL 成功应用 migration，并按 test profile 重启 backend、opencode-manager、frontend，readiness 为 UP、前端 HTTP 200，日志确认排空与漏广播补偿任务约每 5 秒持续执行。
+  - 后端全量测试仍有两个任务外/存量阻断：configuration-management 的仓库树过滤断言在独立复跑时仍失败；persistence 的 H2 PostgreSQL 兼容模式不能解析既有已发布 migration `V20260717173000` 的 `timestamptz`，继续兼容后还会遇到该 migration 的 PostgreSQL 局部表达式索引。未为测试篡改已发布 migration，真实 PostgreSQL 验证通过。
+- Result:
+  - 公共 Agent/Skill 发布具备持久、属地执行、失败关闭且可重启恢复的集群排空流程；消息门禁按用户在 dispose 后立即恢复，配置在旧 Instance 清除后的下一次请求生效。
+  - 涉及数据库兼容新增字段和既有 HTTP 状态字段语义；未修改 RunEvent、generated SDK、环境配置或鉴权模型。真实双服务器端到端受本机单服务器环境限制，属地认领、租约 fencing 与重试由单元/持久层测试覆盖。
+
 ### 2026-07-17 - 公共配置排空门禁改为按用户恢复
 
 - Why:

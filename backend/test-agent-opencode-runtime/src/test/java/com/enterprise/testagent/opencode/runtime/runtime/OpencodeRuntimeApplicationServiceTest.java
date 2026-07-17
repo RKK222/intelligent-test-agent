@@ -14,6 +14,7 @@ import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.enterprise.testagent.agent.runtime.OpencodeAgentRuntime;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -52,6 +53,25 @@ class OpencodeRuntimeApplicationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void legacySideQuestionUsesSamePublicConfigGate() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        PublicAgentConfigMessageGate gate = ignored ->
+                PublicAgentConfigMessageGate.MessageGateStatus.blocked("acr_active");
+        fixture.service.configurePublicConfigMessageGate(gate);
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.sideQuestion(
+                                "ses_1234567890abcdef",
+                                new SideQuestionInput("问题", null, null, "provider/model"),
+                                "trace_1234567890abcdef")))
+                .isInstanceOf(PlatformException.class);
+
+        verify(fixture.facade, never()).runtime(any());
+    }
 
     @Test
     void listAgentsUsesWorkspaceDirectoryAndAgentPath() {
