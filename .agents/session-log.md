@@ -150,20 +150,21 @@
   - test profile 三服务重启成功，使用 `superadmin99` 登录真实工作台后反复打开 `agents/test-design-agent.md` 与 `agents/test-design-case-generation.md`，两份公共级 Agent 正文均非空；快速切换、顶部缓存切换和文件树再次读取后，活动 tab 与 Monaco 正文保持一致，读取链路为 `agent-config.read` WebSocket RPC，Fetch/XHR 无文件请求仍属正常。当前 test 数据未创建应用级 Agent worktree，未在不新增外部状态的前提下做应用级真实文件复测，该路径由新增双浏览器 E2E 覆盖。
   - 不改变 `EditorTab`、backend-api 公共方法、HTTP API、文件 WebSocket wire、`FileContent` DTO、RunEvent、后端 Java、数据库、鉴权、安全策略或 generated SDK；未修改环境配置。除全量 E2E 的非本任务基线失败和 test 数据缺少应用级 worktree 外，无本任务代码未完成事项。
 
-### 2026-07-17 - 实现 Mermaid 可视化编辑器节点悬浮延时显示
+### 2026-07-17 - 实现 Mermaid 可视化编辑器节点悬浮与快捷建连延时显示
 
 - Why:
-  - 减少鼠标滑过节点时的误触，优化 Mermaid 可视化编辑器中快捷连接箭头的出现体验，提升用户编辑交互的连贯性。
+  - 减少鼠标滑过节点及快捷箭头时的误触，优化 Mermaid 可视化编辑器中快捷连接箭头与图形选择菜单的出现体验，提升用户编辑交互的连贯性。
 - What:
   - 在 `MermaidFlowNode.vue` 中为鼠标移入节点的操作（`onNodeMouseEnter`）增加 300ms（0.3s）延迟显示的定时器（`quickMenuOpenTimer`），仅在鼠标停留超过该时间时才显示四向快捷建连大箭头。
-  - 在鼠标移出节点（`onNodeMouseLeave`）、聚焦（`onNodeFocusIn` / `keepQuickConnectorsOpen`）及组件销毁（`onBeforeUnmount`）等时机，安全地清理并重置该定时器，防止逻辑泄漏与重复触发。
-  - 优化对应的单元测试文件 `MermaidVisualEditor.test.ts`，为涉及悬浮显示快捷箭头的测试用例引入 Vitest 虚拟时钟（`vi.useFakeTimers()` 和 `vi.advanceTimersByTime(300)`），确保测试用例与新增的悬浮延迟行为完美契合，且测试能够全部通过。
+  - 在 `MermaidFlowNode.vue` 中为鼠标移入快捷箭头的操作（`onArrowMouseEnter`）增加 200ms（0.2s）延迟显示的定时器（`arrowHoverTimer`），仅在鼠标停留超过该时间时才展示图形选择菜单，并在切换到其他箭头时立即关闭当前活动的旧菜单。
+  - 在鼠标移出节点/移出箭头、触发聚焦及组件销毁等时机，安全地清理并重置以上定时器，防止逻辑泄漏与重复触发。
+  - 优化对应的单元测试文件 `MermaidVisualEditor.test.ts`，为涉及悬浮显示快捷箭头和快捷图形菜单的测试用例引入 Vitest 虚拟时钟（`vi.useFakeTimers()`），在其 hover 操作后通过 `vi.advanceTimersByTime(...)` 前进对应的时间（300ms/200ms），确保测试能够全部通过。
 - How:
-  - 在 `MermaidFlowNode.vue` 的 `<script setup>` 中引入 `quickMenuOpenTimer` 及其对应的清理、设置 and 触发逻辑。
-  - 修改 `MermaidVisualEditor.test.ts` 中涉及悬浮的 6 个测试用例，在其 `mouseEnter` 触发后前进 300ms 时钟，并在最后统一调用 `vi.useRealTimers()` 还原。
+  - 在 `MermaidFlowNode.vue` 的 `<script setup>` 中引入 `quickMenuOpenTimer` 和 `arrowHoverTimer` 及其对应的清理、设置 and 触发逻辑，并在模板中将快捷箭头按钮的相关事件绑定为 `onArrowMouseEnter` 与 `onArrowMouseLeave`。
+  - 修改 `MermaidVisualEditor.test.ts` 中涉及悬浮的测试用例，在 `mouseEnter` 触发后分别推进 300ms (节点悬浮) 或 200ms (箭头悬浮)。
   - 运行全量 `vitest run packages/editor/tests/MermaidVisualEditor.test.ts` 进行了完美验证，并完成前端的代码格式化和类型检查。
 - Result:
-  - Mermaid 可视化编辑器完美实现了 0.3s 悬浮防误触延时显示快捷连接箭头的逻辑，鼠标短时间划过节点时不会触发箭头出现；全量前端测试 100% 通过（85/85 passed），代码类型和语法校验无任何异常。
+  - Mermaid 可视化编辑器完美实现了 0.3s 节点悬浮防误触延时与 0.2s 箭头悬浮防误触延时的逻辑，鼠标快速滑动时不会触发任何悬浮元素；全量前端测试 100% 通过（85/85 passed），代码类型和语法校验无任何异常。
 
 ### 2026-07-16 - 修复文件打开偶发空白与读取竞态
 

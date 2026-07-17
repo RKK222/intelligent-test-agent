@@ -46,6 +46,8 @@ const quickMenuStyle = ref<CSSProperties>({ position: "fixed" });
 let quickMenuCloseTimer: ReturnType<typeof setTimeout> | undefined;
 // 悬浮延时定时器，用于防误触
 let quickMenuOpenTimer: ReturnType<typeof setTimeout> | undefined;
+// 鼠标悬停在快捷箭头上的延时定时器，用于防误触图形菜单
+let arrowHoverTimer: ReturnType<typeof setTimeout> | undefined;
 
 const QUICK_MENU_WIDTH = 248;
 const QUICK_MENU_HEIGHT = 276;
@@ -96,9 +98,18 @@ function clearQuickMenuOpenTimer() {
   }
 }
 
+// 清理鼠标在快捷箭头悬停的定时器
+function clearArrowHoverTimer() {
+  if (arrowHoverTimer !== undefined) {
+    clearTimeout(arrowHoverTimer);
+    arrowHoverTimer = undefined;
+  }
+}
+
 function keepQuickConnectorsOpen() {
   clearQuickMenuCloseTimer();
   clearQuickMenuOpenTimer();
+  clearArrowHoverTimer();
   hovered.value = true;
 }
 
@@ -121,8 +132,9 @@ function onNodeMouseEnter() {
 
 function onNodeMouseLeave() {
   nodeHovered.value = false;
-  // 鼠标离开时立即清理打开定时器，并触发关闭逻辑
+  // 鼠标离开时立即清理打开定时器与箭头悬停定时器，并触发关闭逻辑
   clearQuickMenuOpenTimer();
+  clearArrowHoverTimer();
   scheduleQuickConnectorsClose();
 }
 
@@ -202,8 +214,36 @@ function positionQuickMenu(anchor: DOMRect, preferred: Position) {
 
 function openQuickMenu(event: MouseEvent | FocusEvent, arrow: { dir: Position; portId: string }) {
   keepQuickConnectorsOpen();
+  clearArrowHoverTimer();
   activeQuickArrow.value = arrow;
   positionQuickMenu((event.currentTarget as HTMLElement).getBoundingClientRect(), arrow.dir);
+}
+
+function onArrowMouseEnter(event: MouseEvent, arrow: { dir: Position; portId: string }) {
+  keepQuickConnectorsOpen();
+  clearArrowHoverTimer();
+  
+  // 如果进入了另一个不同的快捷箭头，立即关闭上一个箭头的菜单
+  if (activeQuickArrow.value && (activeQuickArrow.value.dir !== arrow.dir || activeQuickArrow.value.portId !== arrow.portId)) {
+    activeQuickArrow.value = undefined;
+  }
+  
+  // 如果当前已经是这个箭头的菜单，不需要重复计时
+  if (activeQuickArrow.value?.dir === arrow.dir && activeQuickArrow.value?.portId === arrow.portId) {
+    return;
+  }
+  
+  const targetElement = event.currentTarget as HTMLElement;
+  arrowHoverTimer = setTimeout(() => {
+    activeQuickArrow.value = arrow;
+    positionQuickMenu(targetElement.getBoundingClientRect(), arrow.dir);
+    arrowHoverTimer = undefined;
+  }, 200);
+}
+
+function onArrowMouseLeave() {
+  clearArrowHoverTimer();
+  scheduleQuickConnectorsClose();
 }
 
 function emitQuickConnect(shapeType: MermaidNodeType) {
@@ -215,6 +255,7 @@ function emitQuickConnect(shapeType: MermaidNodeType) {
 onBeforeUnmount(() => {
   clearQuickMenuCloseTimer();
   clearQuickMenuOpenTimer();
+  clearArrowHoverTimer();
 });
 
 function portClasses(portId: string) {
@@ -330,10 +371,10 @@ function preventNodeDragFromPort(event: MouseEvent) {
           type="button"
           class="ta-mermaid-quick-arrow"
           :aria-label="arrow.ariaLabel"
-          @mouseenter="openQuickMenu($event, arrow)"
-          @mouseleave="scheduleQuickConnectorsClose"
+          @mouseenter="onArrowMouseEnter($event, arrow)"
+          @mouseleave="onArrowMouseLeave"
           @focus="openQuickMenu($event, arrow)"
-          @blur="scheduleQuickConnectorsClose"
+          @blur="onArrowMouseLeave"
           @pointerdown.stop
         >
           <svg class="ta-quick-arrow-icon" viewBox="0 0 24 24" width="12" height="12">

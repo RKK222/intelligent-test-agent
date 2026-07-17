@@ -393,6 +393,8 @@ describe("MermaidFlowNode", () => {
           `.ta-mermaid-quick-connector-wrapper.${item.cls} .ta-mermaid-quick-arrow`
         )!;
         await fireEvent.mouseEnter(arrow);
+        vi.advanceTimersByTime(200);
+        await Promise.resolve();
         const button = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button");
         expect(button).toBeTruthy();
         await fireEvent.click(button!);
@@ -424,6 +426,8 @@ describe("MermaidFlowNode", () => {
       await Promise.resolve();
 
       await fireEvent.mouseEnter(container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!);
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
 
       const button = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button")!;
       // pointerdown 冒泡到箭头时被 @pointerdown.stop 拦截，不会发起端口连线拖拽
@@ -449,6 +453,8 @@ describe("MermaidFlowNode", () => {
       await Promise.resolve();
 
       await fireEvent.mouseEnter(container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!);
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
 
       const menu = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu")!;
       const buttons = within(menu).getAllByRole("button");
@@ -497,6 +503,8 @@ describe("MermaidFlowNode", () => {
         });
 
         await fireEvent.mouseEnter(arrow);
+        vi.advanceTimersByTime(200);
+        await Promise.resolve();
         const menu = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu")!;
         expect(menu).toBeTruthy();
         expect(container.contains(menu)).toBe(false);
@@ -522,6 +530,8 @@ describe("MermaidFlowNode", () => {
 
       const arrow = container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!;
       await fireEvent.mouseEnter(arrow);
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
       expect(document.body.querySelector(".ta-mermaid-quick-menu")).toBeTruthy();
 
       await fireEvent.mouseLeave(arrow);
@@ -1087,6 +1097,8 @@ describe("MermaidVisualEditor", () => {
       await fireEvent.mouseEnter(container.querySelector<HTMLElement>(
         '[data-mermaid-node-id="B"] .ta-mermaid-quick-arrow'
       )!);
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
 
       // 点击 B 的第一个快捷形状按钮（开始/结束）
       const bBtn = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button")!;
