@@ -1,5 +1,16 @@
 # Session Log
 
+### 2026-07-17 - 核对公共个人 worktree 缺少 node_modules 的原因
+
+- Why:
+  - 用户发现公共级 Agent 文件树切换到个人 worktree 后不再显示 `node_modules`，需要确认是删除、前端过滤还是运行目录变化。
+- What:
+  - 本机共享运行目录 `.testagent/agent-opencode/.config/opencode/node_modules` 仍存在；公共个人 worktree `.configdev/public-usr_test_dev/opencode` 只包含 Git 已跟踪配置，因此没有共享目录中被本地 `.gitignore` 排除的 `node_modules`、`package.json` 和 lockfile。
+- How:
+  - 对照两个物理目录、Git tracked/ignored 状态和 manager process state；4097 进程的 `OPENCODE_CONFIG_DIR` 仍明确指向共享运行目录 `.config/opencode/`。
+- Result:
+  - 当前是“个人 Git 编辑区”和“共享运行区”分离后的预期差异，不是依赖被删除，也不影响现有 Agent/Skill 运行。若后续要求个人 worktree 内支持 Tool 依赖解析，应建立 Git 忽略的本地依赖链接，不应把 `node_modules` 纳入公共仓库。
+
 ### 2026-07-17 - 修复公共配置发布状态机两个 P0 与进程复用风险
 
 - Why:
