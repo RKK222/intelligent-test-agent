@@ -8029,3 +8029,21 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 历史真实 rollout `acr_6d4c57c7ec5d44b29314ed32443ad777` 已由定时重试自动推进到 `COMPLETED / SYNCED`，目标数为 0；backend health/readiness 为 UP，前端 3000 返回 200。现有公共仓库 pull API 手工触发成功，返回本机 `READY`、`master` 和提交 `e475eec5a396f621fe3c8b198fde9116956cd262`。
   - 同步更新 workspace、runtime、persistence、frontend README/PACKAGE 及 HTTP API、模块图、前端规范。未新增或变更 API/事件/数据库结构，不涉及 migration、generated SDK、环境配置或凭据；用户消息门禁仍按该用户 target dispose 完成后单独解除。
+### 2026-07-17 - 优化 Mermaid 编辑器右侧连线属性与节点类型库占用高度
+
+- Why:
+  - 用户不需要在右侧连线状态面板中显示和编辑连线文字（包含 textarea 输入框），但希望保留连线文字的颜色属性编辑，且保留画布上双击连线唤起行内编辑器的连线文字编辑功能。
+  - 节点类型库各图形在侧边栏占用的纵向高度过大，需要改小以腾出更多屏幕空间，但不能改变图形自身的宽高比例和实际尺寸。
+- What:
+  - 在 `MermaidVisualEditor.vue` 中移除了右侧属性面板 `<section v-else-if="selectedEdge">` 内部关于“连线文字”的 label 及 textarea 输入框。
+  - 调整了右侧节点类型图形库网格项的 CSS 样式：将按钮网格项 `.ta-mermaid-palette__item` 的 `min-height` 从 `42px` 减少到 `30px`，并将 padding 缩窄；将 `.ta-mermaid-palette__preview` 预览区域的 `height` 从 `34px` 缩窄到 `26px`。
+  - 保持图形 SVG 自身高度（`26px`/`32px`/`34px`）不变，通过调整绝对定位的 `top` 属性值（`-3px`/`-4px` 等），使其在缩矮后的按钮容器内实现完美的垂直居中溢出。
+  - 保持 `updateSelectedEdgeLabel` 逻辑和 InlineEditor 的编辑处理逻辑不变，保证用户在画布中双击连线依然可以正常对连线文字进行就地编辑。
+- How:
+  - 修改 `MermaidVisualEditor.vue`，删除了对应的连线文字 textarea，并重构了图形库和图形容器高度以及偏移样式的 CSS 部分。
+  - 更新并重构了 `MermaidVisualEditor.test.ts` 中涉及通过右侧属性面板修改或获取连线文字的单元测试，改为通过双击连线 hitbox 并在 `InlineEditor` 模态框中修改和保存。
+  - 调整了 `MermaidVisualEditor.test.ts` 中针对图形库占高样式和 `double-circle` 偏移 top 属性的 `visualEditorSource` 源码检测断言。
+  - 运行单元测试 `npx vitest run packages/editor/tests/MermaidVisualEditor.test.ts` 确保全部 120 个测试案例通过。
+- Result:
+  - 成功去除了右侧属性面板中的连线文字输入框，并将图形库各图形占用的纵向高度大幅收缩（从 42px 降到 30px），而各图形的大小和双击就地编辑功能依旧完美保留并运行通过。
+  - 没有任何 API、数据库、后端或生成的 SDK 变更。

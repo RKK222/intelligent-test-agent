@@ -1063,13 +1063,13 @@ describe("MermaidVisualEditor", () => {
       ".ta-mermaid-palette__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }"
     );
     expect(visualEditorSource).toContain(
-      ".ta-mermaid-inspector button.ta-mermaid-palette__item { display: flex; min-width: 0; min-height: 42px; padding: 3px;"
+      ".ta-mermaid-inspector button.ta-mermaid-palette__item { display: flex; min-width: 0; min-height: 30px; padding: 1px 3px;"
     );
     expect(visualEditorSource).toContain(
-      ".ta-mermaid-palette__preview { position: relative; display: grid; width: 70px; height: 34px;"
+      ".ta-mermaid-palette__preview { position: relative; display: grid; width: 70px; height: 26px;"
     );
     expect(visualEditorSource).toContain(
-      "[data-mermaid-shape=\"double-circle\"] { left: 18px; top: 0; width: 34px; height: 34px; }"
+      "[data-mermaid-shape=\"double-circle\"] { left: 18px; top: -4px; width: 34px; height: 34px; }"
     );
   });
 
