@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-17 - 对话需求引用切换为 spec 四级目录解析
+
+- Why:
+  - 需求目录增加 `spec` 上级目录后，原先按根目录固定层级取值的 `#` 候选解析会把 `spec` 当作需求项，导致阶段校验失败、候选消失。
+- What:
+  - `#` 需求引用只接受 `spec/<需求项>/<阶段>/<子条目>/...`，按需求项与子条目聚合四个受支持阶段；明确不兼容旧的根目录结构。
+  - 同步更新组件说明、agent-web README、用户手册，并固化新结构与旧结构排除的回归测试数据。
+- How:
+  - 复用现有 `workspaceRequirementReferences()` 和会话上下文校验，仅调整路径索引与引用 id，不新增解析链路或接口。
+  - 定向 Vitest 通过 205 项、跳过 1 项；agent-web typecheck、agent-web 生产构建和用户手册构建通过。
+- Result:
+  - 对话中的 `#` 可正确发现 `spec/<需求项>/<阶段>/<子条目>`，旧结构不会进入候选；按 `.env.test` 重启后 backend health/readiness 为 `UP`、前端 HTTP 200。
+  - 不涉及 API、RunEvent、数据库、环境配置、权限或安全逻辑。
+
 ### 2026-07-17 - 澄清公共与应用 OpenCode 配置层及依赖目录
 
 - Changed: 仅核对目录职责，未修改运行逻辑；确认进程仍以公共共享 checkout 的 `opencode/` 作为 `OPENCODE_CONFIG_DIR`，同时按当前会话目录向上加载应用个人 worktree 的 `.opencode/`。

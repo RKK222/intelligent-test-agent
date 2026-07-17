@@ -676,7 +676,7 @@ const props =
     /** 当前个人 worktree 中与 @ 查询匹配的文件。 */
     workspaceFileCandidates?: FileSearchResult[]
     workspaceFileCandidatesLoading?: boolean
-    /** 当前个人 worktree 中按“需求项/阶段/子条目”跨需求、设计、编码、测试聚合的引用。 */
+    /** 当前个人 worktree 中按“spec/需求项/阶段/子条目”跨需求、设计、编码、测试聚合的引用。 */
     workspaceRequirementReferences?: WorkspaceRequirementReference[]
     workspaceRequirementReferencesLoading?: boolean
     /** Agent 目录首次加载中。 */
@@ -4316,7 +4316,7 @@ function onCompositionEnd() {
       </div>
     </div>
 
-    <!-- # 子条目候选：聚合当前个人 worktree 同一子条目在需求、设计、编码、测试阶段的文件。 -->
+    <!-- # 子条目候选：聚合当前个人 worktree 的 spec 目录中同一子条目在需求、设计、编码、测试阶段的文件。 -->
     <div v-if="!activeSubagentSessionId && showRequirementPanel" class="figma-chat-agent-panel figma-chat-requirement-panel">
       <div class="figma-chat-choice-header">
         <div class="figma-chat-choice-question">需求子条目</div>

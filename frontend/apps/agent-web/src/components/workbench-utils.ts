@@ -67,20 +67,21 @@ export const workspaceRequirementStageDirectories = ["01-需求", "02-设计", "
 const workspaceRequirementStages = new Set<string>(workspaceRequirementStageDirectories);
 
 /**
- * 将当前个人 worktree 的文件搜索结果按“需求项/阶段/子条目”聚合。
+ * 将当前个人 worktree 的文件搜索结果按“spec/需求项/阶段/子条目”聚合。
  * 同名子条目可分布在需求、设计、编码、测试阶段；其下所有文件最终均作为同一条子条目上下文。
+ * spec 是唯一合法上级目录，旧的根目录需求结构不再兼容。
  */
 export function workspaceRequirementReferences(results: FileSearchResult[]): WorkspaceRequirementReference[] {
   const references = new Map<string, WorkspaceRequirementReference>();
   for (const result of results) {
     const parts = result.path.replace(/\\/g, "/").split("/").filter(Boolean);
-    const stageName = parts[1];
-    if (!stageName || !workspaceRequirementStages.has(stageName) || parts.length < 4) {
+    const stageName = parts[2];
+    if (parts[0] !== "spec" || !stageName || !workspaceRequirementStages.has(stageName) || parts.length < 5) {
       continue;
     }
-    const requirementName = parts[0];
-    const subitemName = parts[2];
-    const id = `${requirementName}/01-需求/${subitemName}`;
+    const requirementName = parts[1];
+    const subitemName = parts[3];
+    const id = `spec/${requirementName}/01-需求/${subitemName}`;
     const current = references.get(id) ?? { id, requirementName, subitemName, filePaths: [] };
     if (!current.filePaths.includes(result.path)) {
       current.filePaths.push(result.path);

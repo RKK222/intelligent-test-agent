@@ -262,7 +262,7 @@ const workspaceFileCandidates = ref<FileSearchResult[]>([]);
 const workspaceFileCandidatesLoading = ref(false);
 let workspaceFileCandidateTimer: ReturnType<typeof setTimeout> | null = null;
 let workspaceFileCandidateSeq = 0;
-// # 候选按当前个人 worktree 的“需求项/阶段/同名子条目”聚合，每次重新打开面板时刷新。
+// # 候选只按当前个人 worktree 的“spec/需求项/阶段/同名子条目”聚合，每次重新打开面板时刷新。
 const workspaceRequirementCandidates = ref<WorkspaceRequirementReference[]>([]);
 const workspaceRequirementCandidatesLoading = ref(false);
 let workspaceRequirementLoadSeq = 0;
@@ -3312,7 +3312,7 @@ function handleWorkspaceFileCandidateSearch(query: string | null) {
 }
 
 /**
- * 懒加载当前个人 worktree 的需求子条目。四个阶段目录继续分别通过平台 workspace.search 查询，
+ * 懒加载当前个人 worktree 的 spec 需求子条目。四个阶段目录继续分别通过平台 workspace.search 查询，
  * 前端只负责把同一需求项下的同名子条目聚合为一个可选择的业务上下文。
  */
 async function loadWorkspaceRequirementCandidates() {
@@ -4278,7 +4278,7 @@ async function addWorkspaceFileToChatContext(path: string, silentSuccess = false
 }
 
 /**
- * # 子条目选中后，把 01-需求、02-设计、03-编码、04-测试下属于该子条目的全部文件逐个复用现有附件链路添加。
+ * # 子条目选中后，把 spec/<需求项>/01-需求、02-设计、03-编码、04-测试下属于该子条目的全部文件逐个复用现有附件链路添加。
  * 单个文件仍沿用二进制、重复和容量校验，避免需求引用绕过对话上下文安全边界。
  */
 async function addWorkspaceRequirementToChatContext(reference: WorkspaceRequirementReference) {

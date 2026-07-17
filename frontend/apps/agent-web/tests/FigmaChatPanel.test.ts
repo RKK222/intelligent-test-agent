@@ -1069,10 +1069,10 @@ describe("FigmaChatPanel", () => {
 
   it("collapses large context collections and summarizes files by workspace stage", async () => {
     const paths = [
-      "0318-需求项/01-需求/S0001-子条目/需求说明书.md",
-      "0318-需求项/02-设计/S0001-子条目/详细设计说明书.md",
-      "0318-需求项/03-编码/S0001-子条目/service.ts",
-      "0318-需求项/04-测试/S0001-子条目/测试案例.md",
+      "spec/0318-需求项/01-需求/S0001-子条目/需求说明书.md",
+      "spec/0318-需求项/02-设计/S0001-子条目/详细设计说明书.md",
+      "spec/0318-需求项/03-编码/S0001-子条目/service.ts",
+      "spec/0318-需求项/04-测试/S0001-子条目/测试案例.md",
       "README.md"
     ];
     const wrapper = mount(FigmaChatPanel, {
@@ -1286,13 +1286,13 @@ describe("FigmaChatPanel", () => {
 
   it("recognizes requirement subitems from the current worktree when the user types hash", async () => {
     const reference = {
-      id: "120260624-0318-需求项/01-需求/S0001-子条目",
+      id: "spec/120260624-0318-需求项/01-需求/S0001-子条目",
       requirementName: "120260624-0318-需求项",
       subitemName: "S0001-子条目",
       filePaths: [
-        "120260624-0318-需求项/01-需求/S0001-子条目/需求文档/S20260630-000038-助商组合贷新增信鸽取证状态需求说明书.md",
-        "120260624-0318-需求项/02-设计/S0001-子条目/S20260630-000038-助商组合贷新增信鸽取证状态详细设计说明书.md",
-        "120260624-0318-需求项/03-编码/S0001-子条目/031-业务代码/S20260630-000038-助商组合贷新增信鸽取证状态单元测试说明.md"
+        "spec/120260624-0318-需求项/01-需求/S0001-子条目/需求文档/S20260630-000038-助商组合贷新增信鸽取证状态需求说明书.md",
+        "spec/120260624-0318-需求项/02-设计/S0001-子条目/S20260630-000038-助商组合贷新增信鸽取证状态详细设计说明书.md",
+        "spec/120260624-0318-需求项/03-编码/S0001-子条目/031-业务代码/S20260630-000038-助商组合贷新增信鸽取证状态单元测试说明.md"
       ]
     };
     const wrapper = mount(FigmaChatPanel, {
