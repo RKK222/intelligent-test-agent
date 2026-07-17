@@ -49,6 +49,8 @@ const props = defineProps<{
   personalWorkspaceId?: string;
   /** 当前默认个人 worktree 分支，用于在变更面板标识提交目标。 */
   personalWorkspaceBranch?: string;
+  /** Agent 文件成功落盘后递增，用于在面板隐藏时也主动刷新 diff。 */
+  agentConfigRevision?: number;
   apiBaseUrl?: string;
   canWrite: boolean;
   /** 应用级 Agent/Skill/Rules/Templates 的独立写权限。 */
@@ -560,6 +562,15 @@ watch(
     if (previousWorktreeId) resetCommitBatch();
     // 公共个人 worktree 可能晚于面板挂载才准备完成，切换后重新统计公共 Agent 变更。
     void refreshChanges();
+  }
+);
+
+watch(
+  () => props.agentConfigRevision,
+  (revision, previousRevision) => {
+    if (revision !== previousRevision) {
+      void refreshChanges();
+    }
   }
 );
 

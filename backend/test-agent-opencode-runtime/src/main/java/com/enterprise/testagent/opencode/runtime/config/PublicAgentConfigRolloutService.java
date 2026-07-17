@@ -7,6 +7,7 @@ import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
+import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
@@ -23,6 +24,7 @@ import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -48,7 +50,8 @@ public class PublicAgentConfigRolloutService
         implements PublicAgentConfigRolloutCoordinator, PublicAgentConfigMessageGate {
 
     private static final int CLAIM_LIMIT = 1;
-    private static final int TOPOLOGY_LIMIT = 10_000;
+    /** 分页进程仓储单次查询硬上限；当前 manager 容量远低于该值。 */
+    private static final int TOPOLOGY_LIMIT = PageRequest.MAX_SIZE;
     private static final Duration TARGET_LEASE = Duration.ofSeconds(60);
     private static final Duration SERVER_SYNC_LEASE = Duration.ofMinutes(3);
     private static final Duration RUNTIME_TIMEOUT = Duration.ofSeconds(10);
@@ -269,7 +272,11 @@ public class PublicAgentConfigRolloutService
                     Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
         }
         Map<ProcessKey, String> usersByProcess = new HashMap<>();
-        for (OpencodeServerProcess process : processRepository.findOpencodeServerProcesses(TOPOLOGY_LIMIT)) {
+        // 目标登记只允许读取本服务器进程；跨服务器历史脏行既不属于本 worker，也不能阻塞本机排空。
+        List<OpencodeServerProcess> localProcesses = processRepository.findOpencodeServerProcesses(
+                new OpencodeServerProcessFilter(null, new LinuxServerId(linuxServerId), null, null),
+                new PageRequest(1, TOPOLOGY_LIMIT)).items();
+        for (OpencodeServerProcess process : localProcesses) {
             usersByProcess.putIfAbsent(
                     new ProcessKey(
                             process.linuxServerId().value(),

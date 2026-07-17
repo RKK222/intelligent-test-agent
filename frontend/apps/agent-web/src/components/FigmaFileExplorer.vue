@@ -39,6 +39,8 @@ const props = defineProps<FileExplorerProps & {
   personalWorkspaceId?: string;
   /** 当前默认个人 worktree 分支，透传给底部工作空间切换入口展示 */
   personalWorkspaceBranch?: string;
+  /** Agent 配置保存修订号；变化时通知 GitChangesPanel 立即重新统计变更。 */
+  agentConfigRevision?: number;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
   /** 搜索结果列表 */
@@ -310,6 +312,7 @@ defineExpose({
         :agent-config-workspace-id="agentConfigWorkspaceId"
         :personal-workspace-id="personalWorkspaceId"
         :personal-workspace-branch="personalWorkspaceBranch"
+        :agent-config-revision="agentConfigRevision"
         :api-base-url="apiBaseUrl"
         :can-write="!!canWrite"
         :can-manage-agent-config="canManageAgentConfig ?? !!canWrite"

@@ -2054,9 +2054,20 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         if (rolloutId == null || publicConfigRolloutCoordinator == null) {
             return;
         }
-        publicConfigRolloutCoordinator.claimPendingSync(serverIdentity.linuxServerId())
-                .filter(request -> rolloutId.equals(request.rolloutId()))
-                .ifPresent(this::synchronizePublicRuntimeRepository);
+        try {
+            publicConfigRolloutCoordinator.claimPendingSync(serverIdentity.linuxServerId())
+                    .filter(request -> rolloutId.equals(request.rolloutId()))
+                    .ifPresent(this::synchronizePublicRuntimeRepository);
+        } catch (RuntimeException exception) {
+            // 远端 push 与 rollout 激活已经完成；这里仅是本机同步的低延迟触发器。失败后保留数据库任务，
+            // 由既有定时排空程序继续认领，不能把已经成功且不可逆的远端发布误报为失败。
+            LOGGER.warn(
+                    "event=agent_config_public_local_sync_kick_deferred rolloutId={} linuxServerId={} message={}",
+                    rolloutId,
+                    serverIdentity.linuxServerId(),
+                    exception.getMessage(),
+                    exception);
+        }
     }
 
     /**

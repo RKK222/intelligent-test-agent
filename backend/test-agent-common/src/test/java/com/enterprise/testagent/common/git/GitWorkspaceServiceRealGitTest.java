@@ -111,6 +111,50 @@ class GitWorkspaceServiceRealGitTest {
         assertThat(Files.readString(incomingRepo.resolve("中文/远程新增.txt"))).isEqualTo("incoming\n");
     }
 
+    @Test
+    void fetchesRemoteAgentCommitIntoPersonalAndSharedRepositories() throws Exception {
+        Path remote = tempDir.resolve("public-agent.git");
+        Files.createDirectories(remote);
+        git(remote, "init", "--bare");
+
+        Path writer = tempDir.resolve("remote-writer");
+        git(tempDir, "clone", remote.toString(), writer.toString());
+        git(writer, "config", "user.name", "Remote Admin");
+        git(writer, "config", "user.email", "remote-admin@example.invalid");
+        git(writer, "checkout", "-b", "main");
+        Files.createDirectories(writer.resolve("opencode/agents"));
+        write(writer, "opencode/agents/remote-review.md", "version 1\n");
+        git(writer, "add", "--all");
+        git(writer, "commit", "-m", "initial public agent");
+        git(writer, "push", "-u", "origin", "main");
+
+        Path personal = tempDir.resolve("public-admin-worktree");
+        Path shared = tempDir.resolve("public-runtime");
+        git(tempDir, "clone", "--branch", "main", remote.toString(), personal.toString());
+        git(tempDir, "clone", "--branch", "main", remote.toString(), shared.toString());
+
+        write(writer, "opencode/agents/remote-review.md", "version 2 from remote\n");
+        git(writer, "commit", "-am", "update public agent remotely");
+        git(writer, "push", "origin", "main");
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        service.fetch(personal, null);
+        service.mergeBranch(
+                personal,
+                "origin/main",
+                null,
+                GitCommitIdentity.forPlatformUser("admin", "AUTH_ADMIN"));
+        service.fetch(shared, null);
+        String remoteCommit = git(shared, "rev-parse", "origin/main").stdoutText().trim();
+        service.resetHardToCommit(shared, remoteCommit);
+
+        assertThat(Files.readString(personal.resolve("opencode/agents/remote-review.md")))
+                .isEqualTo("version 2 from remote\n");
+        assertThat(Files.readString(shared.resolve("opencode/agents/remote-review.md")))
+                .isEqualTo("version 2 from remote\n");
+        assertThat(git(shared, "rev-parse", "HEAD").stdoutText().trim()).isEqualTo(remoteCommit);
+    }
+
     private Path createAddDeleteConflict(String suffix) throws Exception {
         Path repo = tempDir.resolve("repo-" + suffix);
         Files.createDirectories(repo);

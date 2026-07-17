@@ -7966,3 +7966,19 @@ bash /tmp/test-api-after-restart.sh
   - FigmaShell、宠物偏好和头像相关定向测试 56 passed；agent-web typecheck 与 chrome108 Vite 构建通过。
 - Result:
   - 拖拽兼容路径在 Gemini 修复基础上增加了多指/远程输入串线保护，未修改 API、RunEvent、数据库、安全或环境配置。
+
+### 2026-07-17 - 修复公共 Agent 发布误报、自动 Diff 与跨服务器排空
+
+- Why:
+  - 公共 Agent 保存后 Git Diff 只在手工刷新后出现；远端已经产生提交时前端仍可能收到“发布失败”，提交信息也因此不清空。公共配置排空在真实启动后还暴露 MyBatis primitive 映射、超出分页上限及本机误读其他服务器历史脏进程三个持续重试问题。
+- What:
+  - Agent 保存成功后通过既有组件链路传递 revision，复用 Git 变更面板现有刷新方法自动更新公共 Diff；发布确认成功后继续复用既有成功分支清空提交信息并刷新摘要。
+  - 远端 push 与 rollout 激活后的本机同步只作为低延迟触发，异常不再逆转已经成功的发布响应，持久化同步任务仍由既有 5 秒定时程序持续认领。
+  - rollout MyBatis 构造映射改为 primitive `int`；本机用户映射只分页读取当前 `linuxServerId` 的 opencode 进程，分页大小复用 `PageRequest.MAX_SIZE`，避免其他服务器历史脏行阻断本机 dispose/同步。
+  - 新增真实 bare remote 集成测试：远端先推进提交，再验证稳定个人 worktree fetch/merge 与共享运行副本 fetch/reset 均更新到同一远端提交；未操作业务远端仓库。
+- How:
+  - 复用 `refreshChanges`、`GitWorkspaceService.fetch/mergeBranch/resetHardToCommit`、`PublicAgentConfigRolloutCoordinator`、`OpencodeProcessRepository.findOpencodeServerProcesses` 和现有定时排空状态机，没有新增 Git、dispose、跨服务器转发或手工拉取接口。
+  - 前端 Git 面板 35 passed、agent-web typecheck 通过；MyBatis 映射 4 passed、Agent 发布服务 45 passed、真实 Git 5 passed、rollout 服务 15 passed；JDK 25 下后端打包并按 `.env.test`/`test` profile 重启 backend、manager、frontend 成功。
+- Result:
+  - 历史真实 rollout `acr_6d4c57c7ec5d44b29314ed32443ad777` 已由定时重试自动推进到 `COMPLETED / SYNCED`，目标数为 0；backend health/readiness 为 UP，前端 3000 返回 200。现有公共仓库 pull API 手工触发成功，返回本机 `READY`、`master` 和提交 `e475eec5a396f621fe3c8b198fde9116956cd262`。
+  - 同步更新 workspace、runtime、persistence、frontend README/PACKAGE 及 HTTP API、模块图、前端规范。未新增或变更 API/事件/数据库结构，不涉及 migration、generated SDK、环境配置或凭据；用户消息门禁仍按该用户 target dispose 完成后单独解除。

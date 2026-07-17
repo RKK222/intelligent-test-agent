@@ -8,7 +8,7 @@
             <arg column="commit_hash" javaType="java.lang.String"/>
             <arg column="initiated_by_user_id" javaType="java.lang.String"/>
             <arg column="trace_id" javaType="java.lang.String"/>
-            <arg column="retry_count" javaType="int"/>
+            <arg column="retry_count" javaType="_int"/>
             <arg column="lease_until" javaType="java.time.Instant"/>
             <arg column="lease_token" javaType="java.lang.String"/>
         </constructor>
@@ -32,11 +32,11 @@
             <arg column="user_id" javaType="java.lang.String"/>
             <arg column="linux_server_id" javaType="java.lang.String"/>
             <arg column="container_id" javaType="java.lang.String"/>
-            <arg column="port" javaType="int"/>
+            <arg column="port" javaType="_int"/>
             <arg column="process_pid" javaType="java.lang.Long"/>
             <arg column="process_started_at" javaType="java.time.Instant"/>
             <arg column="base_url" javaType="java.lang.String"/>
-            <arg column="retry_count" javaType="int"/>
+            <arg column="retry_count" javaType="_int"/>
             <arg column="lease_until" javaType="java.time.Instant"/>
             <arg column="lease_token" javaType="java.lang.String"/>
             <arg column="trace_id" javaType="java.lang.String"/>

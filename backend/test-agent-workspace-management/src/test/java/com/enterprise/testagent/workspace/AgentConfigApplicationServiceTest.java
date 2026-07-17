@@ -1209,6 +1209,56 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicWorktreePublishStaysSuccessfulWhenImmediateLocalSyncKickFails() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.createDirectories(root.resolve(".configdev/review-agent/.git"));
+        Files.createDirectories(root.resolve(".configdev/review-agent/opencode"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "review-agent",
+                "review-agent",
+                root.resolve(".configdev/review-agent").toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                publisher);
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.prepare("main", "commit_base", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
+                .thenReturn("acr_publish");
+        when(coordinator.claimPendingSync("linux-1"))
+                .thenThrow(new IllegalStateException("temporary rollout storage failure"));
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.publicPublish(
+                "agw_public",
+                "aco_publish_deferred_sync",
+                ADMIN,
+                "trace_publish");
+
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
+        assertThat(git.pushedBranch).isEqualTo("review-agent:main");
+        assertThat(git.resetCommit).isEqualTo("commit_base");
+        assertThat(publisher.events).hasSize(1);
+        verify(coordinator).activate("acr_publish", "commit_base");
+        verify(coordinator).claimPendingSync("linux-1");
+    }
+
+    @Test
     void publicWorktreeOperationsRejectAnotherUsersWorktree() {
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
         agentConfigs.saveWorktree(new AgentConfigWorktree(

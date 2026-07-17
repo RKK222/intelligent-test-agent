@@ -1953,6 +1953,9 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(path: string): Promise<
 }
 
 // ===== Mutations =====
+// Agent 文件落盘后递增，由左侧 GitChangesPanel 监听并刷新公共/应用 Agent diff。
+const agentConfigRevision = ref(0);
+
 const saveMutation = useMutation({
   mutationFn: async (tab: NonNullable<typeof activeTab.value>) => {
     if (isAgentFilePath(tab.path)) {
@@ -1975,6 +1978,9 @@ const saveMutation = useMutation({
   },
   onSuccess: async (tab) => {
     workbench.markTabSaved(tab.path, tab.content);
+    if (isAgentFilePath(tab.path)) {
+      agentConfigRevision.value += 1;
+    }
     const catalogRefreshError = isAgentFilePath(tab.path)
       ? await refreshRuntimeCatalogAfterAgentConfigSave(agentFileInfo(tab.path).path)
       : null;
@@ -5330,6 +5336,9 @@ const saveDiffFileMutation = useMutation({
     if (tab) {
       workbench.markTabSaved(path, content);
     }
+    if (isAgentFilePath(path)) {
+      agentConfigRevision.value += 1;
+    }
     const catalogRefreshError = isAgentFilePath(path)
       ? await refreshRuntimeCatalogAfterAgentConfigSave(agentFileInfo(path).path)
       : null;
@@ -5836,6 +5845,7 @@ async function handleLogout() {
           :agent-config-workspace-id="selectedAgentConfigWorkspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"
           :personal-workspace-branch="currentPersonalWorkspaceBranch"
+          :agent-config-revision="agentConfigRevision"
           :show-server-workspace-switch="isSuperAdmin"
           :search-results="searchResults"
           :search-loading="searchLoading"

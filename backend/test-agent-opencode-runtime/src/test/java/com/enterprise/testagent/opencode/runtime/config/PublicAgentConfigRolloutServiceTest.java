@@ -14,6 +14,8 @@ import com.enterprise.testagent.agent.runtime.AgentRuntime;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeCommand;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
+import com.enterprise.testagent.common.pagination.PageRequest;
+import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
@@ -25,6 +27,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,6 +59,9 @@ class PublicAgentConfigRolloutServiceTest {
         when(registry.require(AgentRuntimeRegistry.DEFAULT_AGENT_ID)).thenReturn(runtime);
         when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of());
         when(processRepository.findOpencodeServerProcesses(any(Integer.class))).thenReturn(List.of());
+        when(processRepository.findOpencodeServerProcesses(
+                any(OpencodeServerProcessFilter.class), any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(), 1, PageRequest.MAX_SIZE, 0));
         when(repository.findTargetWorkspaceRootPaths("act_target")).thenReturn(List.of("/workspace/a"));
         when(workspacePathResolver.resolve("/workspace/a")).thenReturn(Path.of("/workspace/a"));
         when(backendInstanceIdentity.linuxServerId()).thenReturn("linux-1");
@@ -179,6 +185,9 @@ class PublicAgentConfigRolloutServiceTest {
 
         service.markServerSynced(request);
 
+        verify(processRepository).findOpencodeServerProcesses(
+                new OpencodeServerProcessFilter(null, new LinuxServerId("linux-1"), null, null),
+                new PageRequest(1, PageRequest.MAX_SIZE));
         verify(repository).addTarget(any(PublicAgentConfigRolloutTarget.class), any(Instant.class));
         verify(repository).markServerSynced(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(Instant.class));
     }

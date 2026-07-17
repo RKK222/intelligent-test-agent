@@ -33,6 +33,7 @@
 3. Dockview 面板恢复必须使用稳定 id，避免刷新后丢失上下文。
 4. 当前事件流应优先按 `eventId` 去重，兼容旧事件时才回退 `runId + seq`；`seq=0` transient 文本事件不能因为相同 seq 被错误丢弃。
 5. 普通工作区文件与公共级/应用级 Agent 配置文件的异步读取都必须显式建模 loading/loaded/error。普通文件以 workspace 上下文隔离；Agent 文件以 scope/workspace/worktree/server 上下文和合成 tab 路径隔离，应用级 tab 必须持久携带 feature workspace ID，重试与写入均从 tab 路由还原目标，不得回退当前个人 workspace；两者都必须校验同路径请求代次、tab 存在性和用户内容修订代次。后台响应只能更新所属 tab 且不得抢焦点，合法空文件不能与“尚未加载”混淆，读取期间发生过编辑的内容即使随后已保存/回退为 clean 也不得被旧磁盘响应覆盖。顶部 loaded tab 应使用缓存，loading 不重复发请求，error/旧版未标记 Agent tab 重新读取；重试必须按 tab 类型分发，Agent 合成路径不得传给 `workspace.read`。Agent 上下文失效以及普通文件移动/改名导致旧路径失效时，必须把旧 loading 收敛为 loaded/error 或从新路径补读，禁止永久停留在 loading。切换 workspace 的批量循环必须固定起始上下文并在每个 `await` 边界中止旧任务。
+6. 公共级或应用级 Agent 配置文件成功落盘后必须主动刷新 Git Changes 统计，不得依赖用户手工点击刷新；刷新触发只传递修订信号并复用 Git Changes 既有查询方法，不在编辑器保存链路复制 diff 请求。
 
 ## 包边界
 

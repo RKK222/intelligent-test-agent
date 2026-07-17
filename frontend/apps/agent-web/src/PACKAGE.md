@@ -18,7 +18,7 @@
 - `AgentWorkbench` 删除普通文件或目录树后同步清理文件树缓存、后代展开状态和目录内全部已打开 Tab，并刷新 Git diff；删除不进入撤销栈。
 - `AgentWorkbench` 的公共级与应用级 Agent 文件入口使用独立加载器：按 scope/workspace/worktree/server 上下文代次、合成 tab 路径、同路径请求代次、tab 存在性和内容修订代次隔离异步响应；首次 loading 不挂载空 Monaco，零字节文件进入 loaded，dirty 或读取期间发生编辑时保留用户正文，缓存刷新失败保留上次正文，NOT_FOUND 刷新只关闭 clean tab。顶部 tab 对 loaded 使用缓存，对 loading 去重，对 error/旧版未标记 tab 重新读取；通用重试按 Agent/普通文件类型分发。
 - `AgentWorkbench` 每次 `run.requested` 记录用户消息 ID 和被替代 Run；旧 Run 因标题同步继续订阅时，`runEventProjectionMode` 只放行 `session.updated`，其余消息、Todo、snapshot、错误回调和终态不进入对话 reducer。HTTP 或 runtime-state 接管仅使用本页显式未决启动请求绑定用户消息，外部 Run 等远端 user message 后再归属；follow-up、手动重试和自动重试均携带原用户消息 ID。历史 session Todo HTTP 通过 `reconcileCurrentTurnTodos` 按最新 root 轮保守校准，无归属证据的非空结果不展示，显式事件快照优先于持久化 part fallback。
-- `AgentWorkbench` 保存 Agent 定义或 Skill 的 `SKILL.md` 后复用 backend-api 已有 `disposeGlobal()` 调用 OpenCode 原生 dispose，并重新拉取当前工作区 Agent/Command 目录；文件保存成功但运行态刷新失败时明确提示部分成功，不把已落盘文件误报为保存失败。
+- `AgentWorkbench` 保存 Agent 定义或 Skill 的 `SKILL.md` 后复用 backend-api 已有 `disposeGlobal()` 调用 OpenCode 原生 dispose，并重新拉取当前工作区 Agent/Command 目录；任何 Agent 配置文件成功落盘都会递增修订号，让隐藏或显示中的 `GitChangesPanel` 立即重新统计公共/应用 Agent diff；文件保存成功但运行态刷新失败时明确提示部分成功，不把已落盘文件误报为保存失败。
 - `run.snapshot.reset`：由 agent-chat reducer 原子清空并重放当前 Run，`AgentWorkbench` 同步清空独立 Diff/实时跟随状态后按快照原顺序重建，且不重复桌面通知、不推进 durable 游标。
 - `REDIS_SUMMARY` 记录 `run.created.assistantSummaryMessageId`，终态把最后 root assistant 的 remote ID 直接绑定到稳定平台反馈 ID，不轮询 Session 消息表。
 - `components/useSideQuestionRun.ts`：只管理宠物旁路 Run 的单飞、RunEvent SSE、真实阶段、delta、终态校准、重连提示和订阅释放；不持有主 Run abort 能力，主 Session 切换时清理旧上下文展示。

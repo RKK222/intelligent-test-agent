@@ -7,8 +7,13 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.Reader;
 import java.time.Instant;
 import java.util.List;
+import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.io.Resources;
+import org.apache.ibatis.mapping.ResultMap;
+import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -16,6 +21,29 @@ import org.mockito.ArgumentCaptor;
 class MyBatisPublicAgentConfigRolloutRepositoryTest {
 
     private static final Instant NOW = Instant.parse("2026-07-17T12:00:00Z");
+
+    @Test
+    void constructorMappingsKeepPrimitiveIntegerTypes() throws Exception {
+        Configuration configuration = new Configuration();
+        String resource = "mybatis/PublicAgentConfigRolloutMapper.xml";
+        try (Reader reader = Resources.getResourceAsReader(resource)) {
+            new XMLMapperBuilder(reader, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+
+        ResultMap syncRow = configuration.getResultMap(
+                "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.SyncRowMap");
+        ResultMap targetRow = configuration.getResultMap(
+                "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.TargetRowMap");
+
+        assertThat(syncRow.getResultMappings())
+                .filteredOn(mapping -> "retry_count".equals(mapping.getColumn()))
+                .singleElement()
+                .extracting(mapping -> mapping.getJavaType())
+                .isEqualTo(int.class);
+        assertThat(targetRow.getResultMappings())
+                .filteredOn(mapping -> List.of("port", "retry_count").contains(mapping.getColumn()))
+                .allSatisfy(mapping -> assertThat(mapping.getJavaType()).isEqualTo(int.class));
+    }
 
     @Test
     void claimAssignsUniqueLeaseTokenAndCarriesUserAndTrace() {

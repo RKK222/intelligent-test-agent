@@ -6,7 +6,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 ## 主要职责
 
-公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在任何远端 push 或共享运行副本切换前，先通过 `PublicAgentConfigRolloutCoordinator` 建立 `PREPARING` 持久化禁发任务；远端提交确认后才转为 `DRAINING` 并广播 `rolloutId`。push 回包不确定时会 fetch 验证远端是否已包含目标提交；发起 Java 退出时，同服务器补偿任务按远端事实恢复 PREPARING。每台服务器通过数据库租约认领同步任务，复用发起用户已加密保存的 SSH key 刷新 origin、fetch、checkout/reset 到明确 commit，再登记本机 manager 进程并确认同步，因此广播丢失、Java 重启、同服务器多 Java 或瞬时 Git 失败都不会提前解除门禁。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本；显式“拉取”会先同步当前管理员的稳定个人 worktree，成功后才在 PREPARING 闸门内推进共享副本。
+公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在任何远端 push 或共享运行副本切换前，先通过 `PublicAgentConfigRolloutCoordinator` 建立 `PREPARING` 持久化禁发任务；远端提交确认后才转为 `DRAINING` 并广播 `rolloutId`。push 回包不确定时会 fetch 验证远端是否已包含目标提交；发起 Java 退出时，同服务器补偿任务按远端事实恢复 PREPARING。每台服务器通过数据库租约认领同步任务，复用发起用户已加密保存的 SSH key 刷新 origin、fetch、checkout/reset 到明确 commit，再登记本机 manager 进程并确认同步，因此广播丢失、Java 重启、同服务器多 Java 或瞬时 Git 失败都不会提前解除门禁。发布请求内的本机同步只是低延迟触发，触发失败后保留数据库 `PENDING` 任务交给 5 秒补偿程序，不能把已经完成的远端 push 误报为发布失败。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本；显式“拉取”会先同步当前管理员的稳定个人 worktree，成功后才在 PREPARING 闸门内推进共享副本。
 
 - 工作区注册、查询和分页。
 - 工作区注册时记录 `linuxServerId`，并通过 `WorkspaceServerIdentity` 提供当前 Java 进程所属服务器和默认目录。
@@ -33,7 +33,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - `WorkspaceDirectoryServiceTest` 覆盖服务器工作空间选择器的默认目录、只返回子目录、排序、父目录、条目上限和缺失目录错误码。
 - `GitPublishWorkflowTest` 覆盖直接发布、worktree 合并发布、冲突文件收集、merge abort、abort 失败保护，以及同步文件时先 clean/pull 再复制提交推送。
 - `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验及 `FORBIDDEN` 加载上下文、托管逻辑路径、个人 worktree 创建、Git diff、个人 worktree 本地提交、从个人 `HEAD` 按白名单投影并推送 feature、所有角色 spec 禁推、应用 Agent 发布后的版本 HEAD 更新和广播、应用副本只读 Git 操作及失败阶段命令透传；同步接口覆盖仅使用已提交文件的兼容路径。
-- `AgentConfigApplicationServiceTest` 覆盖公共仓库初始化/更新、显式拉取先合并当前管理员稳定个人 worktree 且脏 worktree 不更新共享副本、当前用户长期公共 worktree 的稳定命名与复用、按服务器和创建人过滤、跨用户操作拒绝、公共/应用 Agent 文件回退路径映射、公共个人分支合并远端后以 refspec 推送到公共分支、冲突保留在个人 worktree、共享运行时副本同步与广播，以及工作空间级 Agent/Skill 配置读写和 diff。
+- `AgentConfigApplicationServiceTest` 覆盖公共仓库初始化/更新、显式拉取先合并当前管理员稳定个人 worktree 且脏 worktree 不更新共享副本、当前用户长期公共 worktree 的稳定命名与复用、按服务器和创建人过滤、跨用户操作拒绝、公共/应用 Agent 文件回退路径映射、公共个人分支合并远端后以 refspec 推送到公共分支、冲突保留在个人 worktree、共享运行时副本同步与广播、push 成功后本机同步触发异常不反转发布结果，以及工作空间级 Agent/Skill 配置读写和 diff。`GitWorkspaceServiceRealGitTest` 使用临时 bare 远端验证远端先产生新提交后，个人 worktree 与共享运行副本均能同步到同一提交。
 
 ## 允许依赖
 

@@ -149,6 +149,55 @@ describe("GitChangesPanel", () => {
     vi.restoreAllMocks();
   });
 
+  it("refreshes public Agent diff when a saved Agent revision changes", async () => {
+    apiClientMock.getPublicAgentDiff
+      .mockResolvedValueOnce({ files: [] })
+      .mockResolvedValue({
+        files: [{
+          path: "opencode/agents/public-review.md",
+          status: "M",
+          rawStatus: " M",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-old\n+new"
+        }]
+      });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true,
+        agentConfigRevision: 0
+      },
+      global: { plugins: [pinia] }
+    });
+    await waitFor(() => expect(apiClientMock.getPublicAgentDiff).toHaveBeenCalledTimes(1));
+
+    await view.rerender({
+      apiBaseUrl: "http://api",
+      canWrite: true,
+      canManagePublicConfig: true,
+      agentConfigRevision: 1
+    });
+
+    expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
+    expect(apiClientMock.getPublicAgentDiff).toHaveBeenCalledTimes(2);
+  });
+
   it("does not expose mock data button and loads workspace plus application agent changes", async () => {
     apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
       files: [
@@ -917,6 +966,7 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledTimes(1));
 
     const summary = await view.findByLabelText("本轮累计结果");
+    expect((view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述...") as HTMLInputElement).value).toBe("");
     expect(summary.textContent).toContain("本地提交 4 个文件");
     expect(summary.textContent).toContain("远端推送 3 个文件");
     expect(summary.textContent).toContain("仅本地 1 个 spec 文件");
