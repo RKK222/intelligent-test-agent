@@ -374,8 +374,6 @@ function preventNodeDragFromPort(event: MouseEvent) {
       :data-mermaid-handle="port.id"
       :data-mermaid-position="port.position"
     />
-    
-    <div class="ta-mermaid-flow-node__id">{{ id }}</div>
     <div class="ta-mermaid-flow-node__label">{{ data.text }}</div>
 
     <!-- 快捷四向连接器：鼠标悬浮节点时显示（半透明），离开后隐藏，与是否选中无关 -->
@@ -519,19 +517,6 @@ function preventNodeDragFromPort(event: MouseEvent) {
   transform: translate(-50%, -50%) scale(1.3);
 }
 
-.ta-mermaid-flow-node__id {
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1;
-  color: var(--ta-muted, #64748b);
-  font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 8px;
-  letter-spacing: 0.04em;
-  line-height: 1;
-  white-space: nowrap;
-}
 
 .ta-mermaid-flow-node__label {
   position: relative;

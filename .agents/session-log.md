@@ -16,22 +16,23 @@
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器锚点与快捷箭头交互
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器平行四边形与梯形锚点布局
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器平行四边形与梯形锚点布局及节点 ID 样式
+#### 2026-07-17 - 优化 Mermaid 流程图编辑器平行四边形与梯形锚点布局且隐藏节点 ID
 
 - Why:
   - 1. 用户反馈普通处理步骤（`rectangle`）、子程序（`subroutine`）、人工处理（`trapezoid`）三种图形的边框锚点（端口）不在边的最中间，要求将其改为长边上 5 个点，短边上 3 个点（含顶点），从而确保每条边都在最中间有一个锚点。
-  - 2. 输入或输出（`parallelogram` 平行四边形）图形的锚点也存在类似需求：短边上 3 个点，长边上 5 个点（含顶点），其中水平长边上的中心点位置需要在 shape 中心（50%）映射到边的位置，而不是该边自身的几何中点。
-  - 3. 用户要求将图形上的节点 ID 文字缩小字体，并移动到图形的顶部。
+  - 2. 输入或输出（`parallelogram` 平行四边形）图形的锚点也存在类似需求：短边上 3 个点，长边上 5 个点（含顶点），其中水平长边上的中心点位置需要在 shape 中心（50%）映射 to 边的位置，而不是该边自身的几何中点。
+  - 3. 用户最终要求不再在流程图节点图形上显示节点 ID 文字。
 - What:
   - 1. 确保普通处理步骤与子程序图形 of 12 端口配置继续保持长边 5 点、短边 3 点（含 4 个共享顶点及中点 50%），以提供各个方向上的正中心锚点。
   - 2. 更新人工处理（`trapezoid` 梯形）图形的端口布局为 12 端口格式，将长边（Top/Bottom）设计为 5 个等分或对称点，短边（Left/Right）设计为 3 个点（顶点 + 50% 处的倾斜中点 `(10, 50)` 及 `(90, 50)`），使得每条边正中心都有一个连接点。
   - 3. 更新输入或输出（`parallelogram` 平行四边形）图形的端口布局为 12 端口格式，长边（Top/Bottom）设计为 5 个点（含顶点，中心点取 y 投影的 `x = 50`，其余等分点随之设计），短边（Left/Right）设计为 3 个点（含顶点及其中点 `(10, 50)` / `(90, 50)`），使其完美对齐中心映射位置。
-  - 4. 优化节点 ID 文字的布局与样式：将其修改为绝对定位并置于图形顶部 `top: 6px`、水平居中，同时将字体大小由 10px 缩小至 8px。
+  - 4. 彻底从节点组件模板及样式块中移除了节点 ID (`ta-mermaid-flow-node__id`) 的渲染元素与相关 CSS 规则，节点上只保留展示文本内容。
 - How:
   - 修改 `frontend/packages/editor/src/mermaid/visual-editor/node-port-layout.ts` 中的 `TRAPEZOID_PORTS` 与 `PARALLELOGRAM_PORTS` 坐标值。
-  - 修改 `frontend/packages/editor/src/mermaid/visual-editor/MermaidFlowNode.vue` 的 CSS 样式规则。
+  - 从 `frontend/packages/editor/src/mermaid/visual-editor/MermaidFlowNode.vue` 模板和样式中移除节点 ID 的 div 元素和 CSS 代码。
   - 并在 `frontend/packages/editor/tests/node-port-layout.test.ts` 中添加并运行 `parallelogram` 与 `trapezoid` 对应的 `findEdgePort` 正确中点选取的测试断言。
 - Result:
-  - 完美完成了平行四边形、梯形图形各边中点锚点位置的修正，且节点 ID 文字已缩小并固定于图形顶部展示，通过了前后端测试和类型检查，不产生任何回归。
+  - 完美完成了平行四边形、梯形图形各边中点锚点位置的修正，且节点 ID 文本完全隐藏，通过了全量测试、类型检查和打包编译。
 
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器锚点、快捷箭头与节点边框端口交互
 
