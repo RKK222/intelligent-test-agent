@@ -7540,3 +7540,18 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - Mermaid 编辑器定向测试 86 passed，editor 全量 14 文件 257 passed；前端全量 70 文件 1105 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 均通过，构建仅保留既有大 chunk 提示。
   - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增依赖。
+
+### 2026-07-17 - 补齐企业自定义 Tool 离线运行时并重打全量包
+
+- Why:
+  - 企业内导入的 `tools/*.ts` 使用 `@opencode-ai/plugin` 时无法加载；旧 programs 只有 PTY 和 JSONC 依赖，同时又明确关闭 OpenCode 启动期依赖下载，因此内网不能自动补包。
+- What:
+  - 企业 Node runtime 固定加入 OpenCode `1.17.8` 对应的 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及 lockfile 全部传递依赖。
+  - OpenCode 兼容层为公共配置 `tools/` 与项目 `.opencode/tools/` 建立指向 programs `node_modules` 的非覆盖式链接，保留配置目录已有同名包；业务 Tool 文件仍由内网自行维护，不纳入交付包。
+  - 镜像校验改为 `--network none`，真实枚举公共区和项目区两个自定义 Tool，并核对四个基线包的链接；部署文档补充依赖边界、更新顺序和故障处理。
+- How:
+  - 固定 runtime package/lockfile，在 Docker 构建期直接 import 四个基线包；使用 OpenCode 原有配置目录遍历和 Tool Registry，没有新增第二套 Tool 扫描或内网 npm 安装路径。
+  - 从最新业务基线 `6f1512ab` 加本次改动重新执行完整 `package-release.sh`；后端 Maven 打包、前端 typecheck/生产 build、Linux/amd64 Worker 构建、断网 Tool 回归、ZIP/SHA、前后端部署预检全部通过。
+- Result:
+  - 最新全量包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 `9d57e21d750fadd9d57e0ac8f6251018943e9379ffb95f276d3a3517f83c24dd`；包内 programs 已确认包含 plugin、SDK、effect、zod。
+  - 未修改 HTTP API、RunEvent、数据库、环境配置或 generated SDK。新增 axios、数据库驱动、企业私有 SDK 等基线外 import 时仍需在外网更新 runtime package/lockfile 并重打 programs/worker，不能在内网临时安装。

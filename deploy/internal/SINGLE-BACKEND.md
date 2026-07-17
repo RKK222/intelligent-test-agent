@@ -324,6 +324,8 @@ deepseek-prod
 
 更新公共配置后，要在运行管理中重启已有用户 OpenCode 进程；只重启 Java 不会让已运行的 OpenCode 重新读取公共配置。供应商地址、启用状态或 token 变化后先点击“刷新 Java 内存”；单后台广播异常时可直接重启 Java 重新加载数据库快照。
 
+公共自定义 Tool 文件放在本服务器公共配置的 `tools/*.ts`，项目专用 Tool 放在工作区 `.opencode/tools/*.ts`。当前企业包已离线内置 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及传递依赖；Tool 使用 Node 22 自带 `fetch` 不需要另加包。仅修改 Tool 文件时，由超级管理员保存并重启相关用户 OpenCode 进程即可；若 Tool 新增了上述基线之外的第三方 import，则必须重新打包并部署 programs/worker，不能在内网执行 `npm install`。
+
 ## 8. 验收
 
 在 `.114` 执行：

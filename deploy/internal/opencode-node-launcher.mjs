@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFile } from "node:fs/promises"
+import { fileURLToPath } from "node:url"
 
 const runtimeRoot = new URL("../", import.meta.url)
 
@@ -74,6 +75,9 @@ function enableOfflineDefaults() {
   for (const [key, value] of Object.entries(defaults)) {
     if (process.env[key] === undefined) process.env[key] = value
   }
+  // 自定义 Tool 从公共配置或项目 .opencode 目录加载，Node 只会沿 Tool 文件目录向上找依赖。
+  // 固定指向随 programs 交付的锁定 node_modules，由兼容层为每个配置目录建立非覆盖式链接。
+  process.env.OPENCODE_OFFLINE_TOOL_NODE_MODULES = fileURLToPath(new URL("node_modules/", runtimeRoot))
 }
 
 async function serve(args) {

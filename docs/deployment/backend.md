@@ -171,6 +171,8 @@ opencode worker 扩容流程：
 3. 先启动 Java，确认它写出的 `.serverid/.serverhost` 正确，再启动该服务器唯一的 worker；不要配置人工 `containerId/managerId`。
 4. 检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录，容器行以 `containerName` 展示可读名称，并保留哈希 `containerId` 用于路由。
 
+企业离线 worker 的 `/data/testagent/programs/opencode/node_modules` 是自定义 Tool 依赖的统一只读来源，固定包含 OpenCode `1.17.8` 对应的 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及 lockfile 传递依赖。用户进程启动后会为公共配置目录和工作区 `.opencode` 目录补充非覆盖式模块链接，禁止在内网启动阶段执行 npm 下载。Tool 新增其它第三方包时必须在外网构建侧更新 runtime package/lockfile、重打 programs 和 worker 镜像，再重启 worker。
+
 常见故障处理：
 
 | 现象 | 排查顺序 | 处理 |
@@ -180,6 +182,7 @@ opencode worker 扩容流程：
 | 创建公共 Agent worktree 返回 `CONFLICT` 且提示“公共配置仓库未初始化” | 在系统管理 > 配置管理 > opencode公共配置管理中查看对应 `linuxServerId` 的 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`、`OPENCODE_PUBLIC_CONFIG_DIR` 和状态；确认当前管理员 SSH key 有公共配置仓库读取权限 | 对该服务器执行初始化；不要在创建 worktree 时手工拷贝半初始化目录。 |
 | 用户初始化返回 `OPENCODE_TIMEOUT` | 查看 `{stateDir}/logs/{port}.log`、后端命令超时配置、opencode CLI 是否卡住 | 先保留日志，再 stop/restart 目标端口或扩容新容器。 |
 | `opencode --version` 返回 `Trace/breakpoint trap`、退出码 `133`，`dmesg` 出现 `trap int3` | 这是旧版交付物中 Bun 可执行文件在低于 `5.1` 内核上的启动失败特征；先检查容器内 `readlink -f /usr/local/bin/opencode` 与版本 | 当前企业发布包已改为 Node 22 加载 OpenCode `1.17.8` server bundle，入口应位于 `/usr/local/lib/opencode-node/`；重新构建并 `docker load` 新 worker 镜像、解压新 `test-agent-programs.tar.gz` 后再重启 worker。若仍指向 `opencode-ai/bin/opencode.exe`，说明旧外挂程序未被替换。 |
+| 自定义 Tool 报 `Cannot find package '@opencode-ai/plugin'` 或其它模块缺失 | 检查 `/data/testagent/programs/opencode/node_modules` 是否包含对应包，并检查 Tool 所在公共配置或 `.opencode` 目录下 `node_modules` 链接；确认 programs 与 worker 镜像来自同一个企业包 | 用完整包同时更新 programs 和 worker 镜像并重启 worker。若缺失的是业务第三方包，先在外网构建侧加入 runtime package/lockfile 后重打包，禁止在内网临时 npm 安装。 |
 | Node 输出 `uv_thread_create` assertion 后 `Aborted`，但 `node --version` 正常 | 检查 Docker server 版本、容器 `Seccomp` 和 `getconf GNU_LIBC_VERSION`；Docker `18.09` 默认 seccomp 无法正确兼容 Debian 12/glibc 2.36 的线程创建路径 | 使用当前 Debian 11 bullseye/glibc 2.31 worker 包并通过 `opencode-worker-docker.sh` 重新创建容器；按企业现场要求，该脚本默认添加 `--privileged`，无需另外手写 `docker run`。 |
 | 用户初始化返回 `OPENCODE_BAD_GATEWAY` 且包含 `already managed but unhealthy` | 目标端口已有 manager 本地 state，但 PID 或 HTTP 健康检查失败 | 先查看 `{stateDir}/processes/{port}.json` 和 `{stateDir}/logs/{port}.log`；确认无业务流量后用 manager `restart` 或 `stop` 清理该端口。健康的已托管端口会被幂等复用，不会再因 `already managed` 初始化失败。 |
 | 进程健康异常后没有同服务器重建 | 检查原 `linuxServerId` 下是否还有 `READY` 且有容量的容器 | 在同一 Linux 服务器上恢复或扩容容器；不要把该用户迁移到其他服务器，否则 session 目录不可用。 |
