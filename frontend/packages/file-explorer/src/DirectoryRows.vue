@@ -28,7 +28,7 @@ export type WorkspaceClipboardEntry = {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { AlertTriangle, FilePlus2, Minus, Plane, Plus, Upload, X } from "lucide-vue-next";
+import { AlertTriangle, FilePlus2, Plane, Plus, Trash2, Upload, X } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileIcon from "./FileIcon.vue";
 
@@ -382,7 +382,7 @@ function submitRename() {
           :aria-label="`删除 ${entry.name}`"
           @click.stop="openDeleteDialog(entry)"
         >
-          <Minus class="h-3.5 w-3.5" :stroke-width="1.5" />
+          <Trash2 class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
           v-if="entry.type === 'directory' && entry.name.includes('测试执行')"
@@ -1082,11 +1082,11 @@ function submitRename() {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: 4px;
   background: transparent;
   color: var(--ta-tree-muted, #8b949e);
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: all 0.15s ease;
   margin-left: 4px;
 }
 
@@ -1107,12 +1107,12 @@ function submitRename() {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: 4px;
   background: transparent;
   color: var(--ta-tree-muted, #8b949e);
   opacity: 0.58;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: all 0.15s ease;
   margin-left: 4px;
 }
 
@@ -1122,8 +1122,8 @@ function submitRename() {
 }
 
 .ta-file-tree-delete-btn:hover {
-  background: var(--ta-hover, #f1f5f9);
-  color: var(--ta-danger, #b91c1c);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--ta-danger, #dc2626);
 }
 
 .ta-file-tree-plane-btn {
