@@ -7703,6 +7703,21 @@ bash /tmp/test-api-after-restart.sh
   - Mermaid 两个定向测试文件 117 passed；前端全量 70 个测试文件 1125 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 均通过，构建仅保留既有大 chunk 提示。
   - 同步 frontend 与 editor README；未修改公开类型、Mermaid 语法、API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增依赖。
 
+### 2026-07-17 - 使用用户提供的五张图片头像并用角色底色与细光圈表达状态
+
+- Why:
+  - 现有 SVG 宠物在小尺寸头像中风格过于统一，用户提供了兔子、巡检鸟、星探狐、数据刺猬和侦探犬五张最终视觉稿，要求直接使用，并明确状态不要再通过眼睛虹膜表达。
+- What:
+  - 将五个伙伴替换为用户提供的 PNG 素材，白色连通背景转为透明，新增不同角色的头像底色圆；以数据刺猬替换原守护鲨，旧 `cat`/`shark` 等本地偏好 ID 映射到新伙伴。
+  - 进程状态改为细光圈：ready 青蓝、初始化/错误暖红、检查中银蓝，均只描边不填充；移除眼睛状态环和独立状态点，名册保持各角色独立底色。
+  - 同步 agent-web/前端/用户手册说明与组件、偏好、Shell 回归断言，并保留原有每日轮换、每天随机、自主选择和本地存储兼容逻辑。
+- How:
+  - 在 `frontend/apps/agent-web/src/assets/pets/` 引入五张素材并由 `PetCompanionAvatar` 统一渲染；状态只由 `pet-status-halo` 细光圈承载。
+  - 定向 Vitest 3 个文件 52 passed；Playwright 真实页面视觉脚本通过，五个头像、不同底色和 ready 光圈均被检查；服务仍运行于 `http://127.0.0.1:3000`，后端 health 保持 UP。
+- Result:
+  - 宠物定向测试和素材视觉检查通过。agent-web typecheck/生产 build 仍被同一工作树中并行未提交的 `AgentWorkbench.vue` 中 `request` 未定义错误阻断，非本次头像改动引入；页面视觉脚本仍记录既有接口 400 资源告警，但头像渲染与交互验证通过。
+  - 未修改 API、RunEvent、数据库、安全或环境配置；新增仅为前端图片素材和头像表现逻辑。
+
 ### 2026-07-17 - 补齐 Agent 文件回退与公共个人 worktree 显式创建
 
 - Why:

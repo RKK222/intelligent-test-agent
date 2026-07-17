@@ -7,32 +7,32 @@ export const PET_COMPANIONS = [
     accent: "#45b98f",
   },
   {
-    id: "chameleon",
-    name: "全域环境扫描仪",
-    species: "机械变色龙",
-    duty: "跨环境全域扫描",
-    accent: "#7f8fe8",
+    id: "bunny",
+    name: "雷达兔",
+    species: "雷达兔",
+    duty: "环境扫描与快速感知",
+    accent: "#48bdb7",
   },
   {
-    id: "platypus",
-    name: "多模态异形体",
-    species: "电感鸭嘴兽",
-    duty: "感知异常数据流",
-    accent: "#35b7bd",
+    id: "fox",
+    name: "星探狐",
+    species: "探索狐狸",
+    duty: "敏锐定位异常",
+    accent: "#e78a55",
   },
   {
-    id: "owl",
-    name: "全天候静默监视器",
-    species: "机械哨兵猫头鹰",
-    duty: "持续守护质量",
-    accent: "#4d86d9",
+    id: "bird",
+    name: "巡检小鸟",
+    species: "巡检小鸟",
+    duty: "巡检与持续监控",
+    accent: "#f0b52b",
   },
   {
-    id: "glitch",
-    name: "缺陷清理官",
-    species: "Bug 吞噬怪",
-    duty: "收纳并清理缺陷",
-    accent: "#e57d79",
+    id: "hedgehog",
+    name: "数据刺猬",
+    species: "数据刺猬",
+    duty: "收集分析与深度排查",
+    accent: "#7662d8",
   },
 ] as const;
 
@@ -55,6 +55,22 @@ const DEFAULT_PREFERENCE: PetPreference = {
 };
 
 const PET_IDS = new Set<PetCompanionId>(PET_COMPANIONS.map((pet) => pet.id));
+
+// 角色替换后仍兼容旧浏览器里的选择记录，把原角色映射到新的同职责伙伴。
+const LEGACY_PET_ID_ALIASES: Record<string, PetCompanionId> = {
+  chameleon: "bunny",
+  platypus: "fox",
+  octopus: "fox",
+  cat: "fox",
+  owl: "bird",
+  glitch: "hedgehog",
+  shark: "hedgehog",
+};
+
+function normalizePetCompanionId(value: unknown): PetCompanionId | undefined {
+  if (isPetCompanionId(value)) return value;
+  return typeof value === "string" ? LEGACY_PET_ID_ALIASES[value] : undefined;
+}
 
 export function isPetCompanionId(value: unknown): value is PetCompanionId {
   return typeof value === "string" && PET_IDS.has(value as PetCompanionId);
@@ -86,9 +102,9 @@ export function loadPetPreference(storage: Pick<Storage, "getItem"> | undefined)
     }
     return {
       mode: parsed.mode as PetDisplayMode,
-      selectedPetId: isPetCompanionId(parsed.selectedPetId) ? parsed.selectedPetId : DEFAULT_PREFERENCE.selectedPetId,
+      selectedPetId: normalizePetCompanionId(parsed.selectedPetId) ?? DEFAULT_PREFERENCE.selectedPetId,
       randomDate: typeof parsed.randomDate === "string" ? parsed.randomDate : undefined,
-      randomPetId: isPetCompanionId(parsed.randomPetId) ? parsed.randomPetId : undefined,
+      randomPetId: normalizePetCompanionId(parsed.randomPetId),
     };
   } catch {
     return { ...DEFAULT_PREFERENCE };

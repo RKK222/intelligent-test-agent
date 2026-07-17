@@ -42,9 +42,21 @@ describe("pet companions", () => {
 
     expect(loadPetPreference(storage)).toMatchObject({ mode: "daily", selectedPetId: "sniffer" });
 
-    const selected: PetPreference = { mode: "selected", selectedPetId: "owl" };
+    const selected: PetPreference = { mode: "selected", selectedPetId: "bird" };
     savePetPreference(storage, selected);
     expect(storage.setItem).toHaveBeenCalledWith(PET_PREFERENCE_STORAGE_KEY, JSON.stringify(selected));
     expect(loadPetPreference(storage)).toEqual(selected);
+  });
+
+  it("maps removed role ids to their replacement companions", () => {
+    const storage = {
+      getItem: vi.fn(() => JSON.stringify({ mode: "selected", selectedPetId: "owl", randomPetId: "glitch" })),
+    };
+
+    expect(loadPetPreference(storage)).toMatchObject({
+      mode: "selected",
+      selectedPetId: "bird",
+      randomPetId: "hedgehog",
+    });
   });
 });

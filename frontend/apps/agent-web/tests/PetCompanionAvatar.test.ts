@@ -14,33 +14,38 @@ describe("PetCompanionAvatar", () => {
     });
 
     expect(wrapper.get("svg").classes()).toEqual(expect.arrayContaining(["has-status", "status-ready"]));
-    expect(wrapper.findAll(".pet-eye")).toHaveLength(2);
-    expect(wrapper.get(".pet-eye").attributes("fill")).toBeTruthy();
+    expect(wrapper.find(".pet-status-disc").exists()).toBe(false);
+    expect(wrapper.get(".pet-status-halo").attributes("fill")).toBe("none");
+    expect(wrapper.get(".pet-status-halo").attributes("stroke")).toBe("#78c6d2");
     expect(wrapper.find('[data-testid="robot-process-status-beacon"]').exists()).toBe(false);
   });
 
-  it("keeps roster avatars in their original eye colors", () => {
+  it("uses the supplied raster avatar and hides status overlays in the roster", () => {
     const wrapper = mount(PetCompanionAvatar, {
-      props: { petId: "owl" },
+      props: { petId: "bird" },
     });
 
     expect(wrapper.get("svg").classes()).not.toContain("has-status");
-    expect(wrapper.get(".pet-eye").attributes("fill")).toBe("#3f79cc");
+    expect(wrapper.get("image").attributes("href")).toBeTruthy();
+    expect(wrapper.get(".pet-status-disc").attributes("fill")).toBe("#f7d77d");
   });
 
-  it("maps initialization, error, and checking states onto the eyes", async () => {
+  it("maps initialization, error, and checking states onto the status halo", async () => {
     const wrapper = mount(PetCompanionAvatar, {
       props: {
-        petId: "platypus",
+        petId: "fox",
         showStatus: true,
         statusTone: "checking",
       },
     });
 
     expect(wrapper.get("svg").classes()).toContain("status-checking");
+    expect(wrapper.get(".pet-status-halo").attributes("stroke")).toBe("#b2c0cc");
     await wrapper.setProps({ statusTone: "needs-initialization" });
     expect(wrapper.get("svg").classes()).toContain("status-needs-initialization");
+    expect(wrapper.get(".pet-status-halo").attributes("stroke")).toBe("#ef8e84");
     await wrapper.setProps({ statusTone: "error" });
     expect(wrapper.get("svg").classes()).toContain("status-error");
+    expect(wrapper.get(".pet-status-halo").attributes("stroke")).toBe("#ef8e84");
   });
 });

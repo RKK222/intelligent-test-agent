@@ -91,16 +91,16 @@ describe("FigmaShell", () => {
     await vi.advanceTimersByTimeAsync(250);
     await wrapper.vm.$nextTick();
     await wrapper.get('button[aria-label="选择小宠物"]').trigger("click");
-    await wrapper.get('button[aria-label="选择缺陷清理官"]').trigger("click");
+    await wrapper.get('button[aria-label="选择星探狐"]').trigger("click");
 
-    expect(wrapper.get(".robot-svg").classes()).toContain("is-glitch");
+    expect(wrapper.get(".robot-svg").classes()).toContain("is-fox");
     expect(wrapper.get("#figma-robot-side-question-title").text()).toBe("问问小宠物");
     expect(wrapper.get(".robot-svg").classes()).toContain("has-status");
-    expect(wrapper.get(".robot-svg").findAll(".pet-eye")).toHaveLength(2);
+    expect(wrapper.get(".robot-svg").find(".pet-status-halo").attributes("fill")).toBe("none");
     expect(wrapper.find('[data-testid="robot-process-status-beacon"]').exists()).toBe(false);
     expect(JSON.parse(window.localStorage.getItem("test-agent.pet-companion.v1")!)).toMatchObject({
       mode: "selected",
-      selectedPetId: "glitch",
+      selectedPetId: "fox",
     });
   });
 
