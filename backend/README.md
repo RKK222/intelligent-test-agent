@@ -26,14 +26,14 @@
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-agent-runtime` | 多 agent 运行时接口、registry、统一日志/指标包装和 opencode 适配器 |
-| `test-agent-workspace-management` | Workspace、文件、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent 和 skill 管理业务 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、Redis active/session scope 路由、用户级会话运行态摘要、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query 和 PTY terminal 业务 |
+| `test-agent-workspace-management` | Workspace、文件、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、应用引用资产库多服务器副本、agent 和 skill 管理业务 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、Redis active/session scope 路由、用户级会话运行态摘要、opencode 进程启动环境、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query 和 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
-| `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、应用工作空间和个人 SSH key 配置管理 |
+| `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库英文名/类型冻结、应用工作空间和个人 SSH key 配置管理 |
 | `test-agent-scheduler` | 分布式定时任务框架，提供任务注册、Cron 调度、Redis 锁、运行记录、运行记录保留清理、Cron 调整、手动触发和协作式停止管理服务；具体业务任务仍放在所属业务模块 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
-| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、opencode 用户进程管理表映射、AI 反馈表和运营分析 rollup 表 |
+| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、opencode 用户进程管理表映射、引用资产总体/副本表、AI 反馈表和运营分析 rollup 表 |
 | `test-agent-event` | 按 storage mode 分流的 RunEvent 追加、SSE、Redis/数据库回放，以及用户级运行态刷新所需的全局事件触发流 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
@@ -190,7 +190,7 @@ mvn test
 - 新增业务文件前先列出现有合适工程；无合适工程时按业务边界新建 Maven module。
 - `test-agent-app` 只放启动、装配、profile、migration 和 health 等运行入口，不放 Controller 或业务服务。
 - HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 默认保留，明确作废的入口除外；新 URL 同步写入 `docs/api/http-api.md`。
-- Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent、skill 管理业务放在 `test-agent-workspace-management`。
+- Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、应用引用资产库副本、agent、skill 管理业务放在 `test-agent-workspace-management`。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
 - Model/Provider 目录始终由 opencode 配置文件决定；内部模型代理和 `<think>` 流式转换放在 `test-agent-opencode-runtime` / `test-agent-api`，内部供应商地址和 token 端口放在 `test-agent-domain`，MyBatis/Flyway 实现放在 `test-agent-persistence`。

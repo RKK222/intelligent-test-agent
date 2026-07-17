@@ -68,6 +68,8 @@ OpenCode、内置编辑器、文件树和终端始终使用当前个人 worktree
 
 普通用户可以只读查看公共 Agent/Skill 和应用 Agent/Skill。公共 Git 仅超级管理员可写；应用 Git 中的 Agent、Skill、rules 和 templates 仅应用管理员或超级管理员可写。没有权限时，左侧 Agents 配置树不提供创建入口，配置文件以只读编辑器打开；所有写入、暂存和发布请求仍由后端再次校验权限。
 
+应用管理员或超级管理员还可以从工作台底部的“引用配置”入口，把应用资产库中已同步的橙色 SDD 根目录写入当前个人工作区的 `.opencode/opencode.jsonc`。该流程不复制资产文件，也不创建新的 worktree；完整步骤见[引用配置](./reference-config.md)。
+
 ## 常见空态
 
 ### 未选择工作区

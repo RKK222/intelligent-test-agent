@@ -21,8 +21,11 @@ go build -ldflags "-X github.com/enterprise/test-agent/opencode-manager/internal
 ```bash
 XDG_DATA_HOME={common_parameters.OPENCODE_SESSION_DIR}/users/{unifiedAuthId} \
 OPENCODE_CONFIG_DIR={common_parameters.OPENCODE_PUBLIC_CONFIG_DIR} \
+OPENCODE_REFERENCES_DIR={common_parameters.OPENCODE_REFERENCES_DIR} \
 opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 ```
+
+`OPENCODE_REFERENCES_DIR` 不是 manager 自身环境变量。Java 后端在公共进程启动程序中按目标平台解析通用参数，并通过 WebSocket `command.environment` 传给 manager；manager 将收到的非空键值合并进子进程环境。滚动升级期间参数缺失不会阻断 opencode server 启动。该变量只对新启动的进程，以及由平台公共停止/启动程序完成的受管重启生效；已经运行的进程不会因引用资产初始化、同步或参数变化自动重启。
 
 企业 Linux worker 中该兼容 CLI 由 Node 22 启动 OpenCode `1.17.8` server bundle，只实现 manager 实际依赖的 `--version` 与 `serve --hostname/--port/--cors/--print-logs` 接口，不使用上游 npm 包内嵌的 Bun 可执行文件。manager 的启动、健康探测、state 和停止语义保持不变。
 
@@ -99,7 +102,7 @@ WebSocket 文本帧为 JSON，协议版本固定 `opencode-manager.v1`。manager
 
 - `register`：连接建立后注册容器、端口池、容量、能力和 linker 注入的 `buildVersion`。
 - `configRequest`：收到 `registered` 后主动请求 Java 从 `common_parameters` 返回当前运行配置。后端 `configUpdate` 必须包含 `maxProcesses`、`sessionRoot`（来自 `OPENCODE_SESSION_DIR`）和 `configDir`（来自 `OPENCODE_PUBLIC_CONFIG_DIR`）；收到完整配置前，manager 拒绝 `start`/`restart`，不会用本地默认路径启动用户进程。Java 下发 `start` 命令时还会携带按用户生成的显式 `sessionPath`；manager 优先使用该路径作为 `XDG_DATA_HOME`，只有本地 CLI 或旧命令帧未携带时才按 `{sessionRoot}/{port}` 兼容派生。
-- `managerHeartbeat`：每 5 秒通过本服务器 Java socket 上报当前进程数、已连接后端 ID、端口池、linker 注入的 `buildVersion`、容器 CPU/内存/磁盘 IO 指标、`metricsSource` 和本地 opencode server 进程明细，Java 写入 Redis latest snapshot，TTL 为 10 秒；资源指标同时追加到 Redis 48 小时历史 ZSET。进程明细包含安全展示用 `startCommand`，会展示 `XDG_DATA_HOME`、`OPENCODE_CONFIG_DIR`、`TEST_AGENT_INTERNAL_PROXY_BASE_URL`、`ENTERPRISE_UCID` 和 `opencode serve` 固定参数，但 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 必须显示为 `<redacted>`；旧 state 缺字段时优先使用 state 内保存的 `sessionPath` 派生，仍缺失时才按当前配置和端口派生。心跳生成前会清理 PID 已不存在的 stale state；`configUpdate` 成功应用以及 `start`、`stop`、`restart` 成功后还会立即补发一次心跳，加速 Redis latest snapshot 收敛。
+- `managerHeartbeat`：每 5 秒通过本服务器 Java socket 上报当前进程数、已连接后端 ID、端口池、linker 注入的 `buildVersion`、容器 CPU/内存/磁盘 IO 指标、`metricsSource` 和本地 opencode server 进程明细，Java 写入 Redis latest snapshot，TTL 为 10 秒；资源指标同时追加到 Redis 48 小时历史 ZSET。进程明细包含安全展示用 `startCommand`，会展示 `XDG_DATA_HOME`、`OPENCODE_CONFIG_DIR`、`OPENCODE_REFERENCES_DIR`、`TEST_AGENT_INTERNAL_PROXY_BASE_URL`、`ENTERPRISE_UCID` 和 `opencode serve` 固定参数；值按 shell 单参数规则安全引用。`TEST_AGENT_INTERNAL_PROXY_API_KEY` 只能显示为 `<redacted>`，其它未列入展示白名单的透传环境变量完全不进入 `startCommand`，但仍会进入实际子进程环境。旧 state 缺字段时优先使用 state 内保存的 `sessionPath` 派生，仍缺失时才按当前配置和端口派生。心跳生成前会清理 PID 已不存在的 stale state；`configUpdate` 成功应用以及 `start`、`stop`、`restart` 成功后还会立即补发一次心跳，加速 Redis latest snapshot 收敛。
 - `commandResult`：执行后端 `command` 后返回状态、端口、PID、路径、traceId 和可选 `errorCode`。`start` 发现目标服务器 `OPENCODE_PUBLIC_CONFIG_DIR` 未初始化时返回 `FAILED`、`errorCode=OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化。
 
 manager 当前接受的命令为 `start`、`health`、`stop`、`restart`。命令最终复用 `internal/process`，不会重新实现 opencode 生命周期逻辑。`restart` 会先读取本地 state 中保存的 `sessionPath`，停止后再用同一路径启动，避免重启时退回按端口派生目录；总命令超时同时覆盖停止、重新启动和回包，停止阶段最多使用一半预算，避免新进程实际已启动但 Java 等待端先返回超时。超级管理员运行管理页的“重启/停止”按钮先调用 Java 后端 HTTP API，再由后端通过已认证的 manager WebSocket 转发 `restart`/`stop`，浏览器不直连 manager 或 opencode server。

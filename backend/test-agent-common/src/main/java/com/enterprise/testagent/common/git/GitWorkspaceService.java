@@ -56,6 +56,33 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 使用 ls-remote 精确解析远端分支当前提交。调用方据此固定一次同步 generation 的目标版本，
+     * 避免 clone/fetch 期间分支继续前进导致不同服务器落到不同提交。
+     */
+    public String resolveRemoteBranchCommit(String gitUrl, String branch, String privateKey) {
+        String normalizedBranch = Objects.requireNonNull(branch, "branch must not be null").trim();
+        if (normalizedBranch.isEmpty()) {
+            throw new IllegalArgumentException("branch must not be blank");
+        }
+        String expectedRef = "refs/heads/" + normalizedBranch;
+        String output = executor.execute(
+                List.of("git", "ls-remote", "--heads", gitUrl, expectedRef),
+                privateKey,
+                DEFAULT_TIMEOUT).stdoutText();
+        return output.lines()
+                .map(String::trim)
+                .filter(line -> !line.isEmpty())
+                .map(line -> line.split("\\s+", 2))
+                .filter(fields -> fields.length == 2 && expectedRef.equals(fields[1]))
+                .map(fields -> fields[0])
+                .findFirst()
+                .orElseThrow(() -> new PlatformException(
+                        com.enterprise.testagent.common.error.ErrorCode.GIT_UNAVAILABLE,
+                        "Git 远端分支不存在",
+                        Map.of("branch", normalizedBranch)));
+    }
+
+    /**
      * 基于应用版本仓库创建个人 worktree，并创建新的个人分支。
      */
     public void createWorktree(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {

@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.configuration.management.ConfigurationManagementApplicationService;
 import com.enterprise.testagent.configuration.management.ConfigurationManagementResponses.ApplicationMemberResponse;
 import com.enterprise.testagent.configuration.management.ConfigurationManagementResponses.ApplicationResponse;
@@ -258,6 +260,31 @@ class ConfigurationManagementControllerTest {
                 .jsonPath("$.data.repositoryType").isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value())
                 .jsonPath("$.data.repositoryTypeLabel").isEqualTo("测试工作库")
                 .jsonPath("$.data.standard").isEqualTo(true);
+    }
+
+    @Test
+    void initializedReferenceRepositoryIdentityConflictIsReturnedAsConflict() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.updateRepository("repo_reference_assets", "资产库新名称", "assets-renamed", false))
+                .thenThrow(new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "引用资产库初始化后禁止修改版本库英文名称"));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.patch()
+                .uri("/api/internal/platform/configuration-management/repositories/repo_reference_assets")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"name":"资产库新名称","englishName":"assets-renamed","standard":false}
+                        """)
+                .exchange()
+                .expectStatus().isEqualTo(409)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo(ErrorCode.CONFLICT.name())
+                .jsonPath("$.message").isEqualTo("引用资产库初始化后禁止修改版本库英文名称");
+        verify(service).updateRepository(
+                "repo_reference_assets", "资产库新名称", "assets-renamed", false);
     }
 
     @Test

@@ -536,6 +536,7 @@ func formatStartCommand(command string, args []string, env map[string]string) st
 	for _, key := range []string{
 		"XDG_DATA_HOME",
 		"OPENCODE_CONFIG_DIR",
+		"OPENCODE_REFERENCES_DIR",
 		"TEST_AGENT_INTERNAL_PROXY_BASE_URL",
 		"TEST_AGENT_INTERNAL_PROXY_API_KEY",
 		"ENTERPRISE_UCID",

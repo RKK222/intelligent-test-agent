@@ -2,6 +2,7 @@ import { shallowMount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import FigmaFileExplorer from "../src/components/FigmaFileExplorer.vue";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
+import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
 
 vi.mock("@test-agent/workbench-shell", async () =>
   vi.importActual("../../../packages/workbench-shell/src/workbenchStore")
@@ -49,5 +50,24 @@ describe("FigmaFileExplorer", () => {
     await wrapper.vm.$nextTick();
 
     expect(changesEntry.text()).toContain("4");
+  });
+
+  it("passes reference visibility to the footer and forwards its open event", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: [],
+        showReferenceConfiguration: true
+      }
+    });
+
+    const footer = wrapper.getComponent(WorkbenchFooter);
+    expect(footer.props("showReferenceConfiguration")).toBe(true);
+    footer.vm.$emit("open-reference-configuration");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.emitted("openReferenceConfiguration")).toHaveLength(1);
   });
 });

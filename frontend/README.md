@@ -20,6 +20,7 @@
 - Vue Flow（`@vue-flow/core`，仅在 Mermaid 可视化编辑时懒加载）
 - lucide-vue-next
 - @vscode/codicons（仅文件浏览区使用）
+- jsonc-parser 3.3.1（引用配置对 `.opencode/opencode.jsonc` 做保留注释的最小字段补丁）
 - pnpm workspace
 
 ## workspace
@@ -47,6 +48,8 @@ packages/shared-types
 `packages/editor` 在 Markdown 预览中支持 Mermaid `flowchart`/`graph` 与 `sequenceDiagram` 可视化编辑。Flowchart 提供按“流程图 / 文档与显示”分组的 14 类共享 SVG 节点、轮廓分配的 8/12 个端口和不随画布缩放、可在视口边缘翻转的双列快捷建连菜单；节点无论是否选中都可直接从可见连接点拖出连线，选中节点的连接点外围继续用于移动节点，选中连线可拖动绿色端点更换起止锚点。选中节点还可通过四角外置手柄在 50%–300% 范围内等比缩放，实际节点、端口、ELK 包围盒和路由端点共用缩放后的尺寸；双击节点或连线可就地编辑文字与文字颜色，右侧属性栏可设置节点文字、填充、边框颜色和连线文字颜色。读取兼容旧语法，应用时统一规范化为现代 `ID@{ shape: <短名>, label: "<文本>" }`；颜色使用 Mermaid 原生 `style` / `linkStyle`，比例使用兼容旧版的紧凑私有 metadata。图模型、parser、serializer 与 Vue Flow 画布均留在 editor 包内；应用后只回写当前 Markdown fence，并继续复用工作台 dirty、Git Diff 与 workspace 文件保存链路。
 
 工作台中间 Monaco 源码区默认按可视宽度自动换行。左侧个人工作区普通文件支持 Ctrl/Cmd+C/X/V/Z、右键复制/剪切/粘贴/撤销和拖放到目录或根目录；工作区标题与目录行的 `+` 统一按明确目标路径新建或上传一个或多个本机文件，文件/目录行尾 `−` 与 Delete/Del 键共用删除确认，目录删除会递归清理内容；拖放结束后清除目标高亮。文件操作弹框统一使用紧凑工作台面板样式。所有落盘和撤销操作继续走 backend-api 的目标后端文件 WebSocket route/ticket/RPC，只读应用版本副本不展示这些入口。
+
+应用管理员或超级管理员在已选择应用和个人运行态工作区时，可从工作区切换按钮后的“引用配置”入口初始化/同步应用资产库，并在双栏弹窗选择后端标记的橙色 SDD 根目录。活动状态每 2 秒轮询；保存前重新读取当前个人工作区 `.opencode/opencode.jsonc`，再用 `jsonc-parser` 最小更新目标 `references` 节点，文件读写继续走 workspace 文件 WebSocket RPC。已有用户 opencode 进程不会因保存或同步自动重启，引用目录环境在下次启动或受管重启生效。
 
 ## 本地命令
 

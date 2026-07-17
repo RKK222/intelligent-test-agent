@@ -510,6 +510,50 @@ macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `too
 - `OPENCODE_REFERENCES_DIR` 为部署/初始化参数（`editable=false`），更新返回 `VALIDATION_ERROR`「该通用参数为只读参数，修改后将影响系统正常运行」；`REFERENCES_SDD_FOLDER_NAMES` 为可改参数（`editable=true`），修改后经 `common-parameter.refresh-requested` 跨实例广播保证 DB 一致。二者均不触发 opencode manager 热刷新，由消费方下次读取时直读 DB 生效。
 - 该参数属于生产运行所需系统参数，不是测试或演示数据；既有环境如需调整实际目录或目录名清单，应通过通用参数管理页面/API 修改 value，不改写已发布 migration。
 
+## V20260718110000 引用资产库状态与服务器副本表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260718110000__create_reference_repository_replica_tables.sql` 新增引用资产库总体状态和每台 Linux 服务器副本任务，只创建运行必需结构，不写测试、演示或个人开发数据。
+
+`reference_repository_states` 每个代码库一行：
+
+| 字段 | 说明 |
+|---|---|
+| `repository_id` | 主键，同时外键引用 `code_repositories.repository_id`。 |
+| `branch` / `target_commit_hash` | 首次初始化后固定的分支，以及当前 generation 固定的远端目标提交。未初始化兼容状态允许为空。 |
+| `generation` | 非负同步代次，默认 0；首次初始化写 1，后续同步只递增。 |
+| `status` | `UNINITIALIZED`、`INITIALIZING`、`VERIFYING`、`SYNCHRONIZING`、`READY`、`FAILED`。 |
+| `credential_user_id` | 当前 generation 执行 Git 操作的用户，可空，外键引用 `users.user_id`；凭据内容不进入本表。 |
+| `trace_id` / `last_error` | 最近一次操作 traceId 和可空安全错误说明。 |
+| `initialized_at` / `created_at` / `updated_at` | 首次初始化、记录创建和最近更新时间。 |
+
+`reference_repository_replicas` 每个代码库、每台稳定服务器一行：
+
+| 字段 | 说明 |
+|---|---|
+| `repository_id` / `linux_server_id` | 复合主键；`repository_id` 外键引用总体状态并 `ON DELETE CASCADE`，`linux_server_id` 保存稳定服务器身份。 |
+| `generation` / `branch` | 本副本当前目标代次和分支。 |
+| `status` | `PENDING`、`PROCESSING`、`READY`、`RETRY_WAIT`、`BLOCKED`、`DEFERRED`。 |
+| `current_commit_hash` / `synced_at` | 本机已校验提交和最近成功同步时间。 |
+| `retry_count` / `next_retry_at` | 非负重试次数和指数退避后的下次可认领时间。 |
+| `lease_token` / `lease_until` | worker 数据库租约 fencing token 和到期时间；不保存用户凭据。 |
+| `last_error` / `created_at` / `updated_at` | 可空安全错误说明和时间戳。 |
+
+generation、租约和 CAS 规则：
+
+- 首次初始化使用主键 insert-if-absent；并发不同分支只有一个胜者，失败方读取胜者状态，不能混合分支与提交。
+- 新同步只允许在总体仍为预期 generation、分支未变且旧状态为 `READY` / `FAILED` 时 CAS 推进；活动状态的重复同步幂等返回当前 generation。
+- 副本目标只接受相同或更高 generation。更高 generation 会清空旧租约、重试和提交投影；同 generation 的 `DEFERRED` 服务器恢复上线时重置为 `PENDING`。
+- worker 只能认领 `PENDING` / `DEFERRED`、已到期的 `RETRY_WAIT` 或租约已过期的 `PROCESSING`。续租及 `READY` / `RETRY_WAIT` / `BLOCKED` 写回必须同时匹配 `repository_id + linux_server_id + generation + lease_token`，并要求租约在写回时仍未过期；旧 generation 或旧 token 无权修改共享副本状态。
+- 补偿扫描把当前 generation 中离线服务器的 `PENDING`、`RETRY_WAIT`、`PROCESSING` 转为 `DEFERRED` 并清除租约；离线目标保留，恢复后重新参与同步，但不阻塞当前在线服务器汇总为 `READY`。
+
+索引：
+
+- `idx_reference_repository_replicas_claim(linux_server_id, status, next_retry_at, lease_until, updated_at)` 支持本机按状态、退避和租约查找可认领任务。
+- `idx_reference_repository_replicas_generation(repository_id, generation, status)` 支持当前代次的总体状态汇总。
+- `reference_repository_states` 使用 `repository_id` 主键稳定游标分页，不另建重复索引。
+
+所有新增关系型 SQL 均由 `ReferenceRepositoryMapper.xml` 维护，`ReferenceRepositoryMapper` 只声明参数化方法，`MyBatisReferenceRepositoryRepository` 负责领域对象映射和事务边界；未新增 JDBC SQL 或 MyBatis 注解 SQL。迁移是纯新增表，旧客户端和旧代码库记录不受影响；只有成功写入 `branch` 的引用资产库会触发配置管理的 `englishName` 与代码库类型冻结兼容规则。
+
 
 ## V20260626170000 公共 Agent 配置管理
 

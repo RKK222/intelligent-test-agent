@@ -3,6 +3,8 @@ package com.enterprise.testagent.opencode.runtime.process;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
+import com.enterprise.testagent.domain.configuration.CommonParameterValues;
+import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -41,6 +43,7 @@ import org.springframework.stereotype.Service;
 public class OpencodeProcessStartupService {
 
     private static final String OPENCODE_AGENT_ID = "opencode";
+    private static final String OPENCODE_REFERENCES_DIR_PARAM = "OPENCODE_REFERENCES_DIR";
     private static final Duration DEFAULT_STARTUP_HEALTH_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration DEFAULT_STARTUP_HEALTH_POLL_INTERVAL = Duration.ofMillis(500);
 
@@ -55,6 +58,7 @@ public class OpencodeProcessStartupService {
     private final InternalModelProxyRuntimeSettings internalProxySettings;
     private final UserRepository userRepository;
     private final ConversationContextStore conversationContextStore;
+    private final CommonParameterValues commonParameterValues;
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -69,7 +73,8 @@ public class OpencodeProcessStartupService {
             ManagerControlSettings managerControlSettings,
             InternalModelProxyRuntimeSettings internalProxySettings,
             UserRepository userRepository,
-            ConversationContextStore conversationContextStore) {
+            ConversationContextStore conversationContextStore,
+            CommonParameterValues commonParameterValues) {
         this(
                 repository,
                 executionNodeRepository,
@@ -82,7 +87,8 @@ public class OpencodeProcessStartupService {
                 OpencodeProcessStartupService::sleepCurrentThread,
                 internalProxySettings,
                 userRepository,
-                conversationContextStore);
+                conversationContextStore,
+                commonParameterValues);
     }
 
     /**
@@ -118,6 +124,32 @@ public class OpencodeProcessStartupService {
                 heartbeatStore,
                 (OpencodeProcessStatusQueryService) null,
                 clock);
+    }
+
+    /**
+     * 测试构造器允许验证目标 Java 平台的通用参数解析与启动环境合并。
+     */
+    OpencodeProcessStartupService(
+            OpencodeProcessManagementRepository repository,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            Clock clock,
+            CommonParameterValues commonParameterValues) {
+        this(
+                repository,
+                executionNodeRepository,
+                gateway,
+                heartbeatStore,
+                null,
+                clock,
+                DEFAULT_STARTUP_HEALTH_TIMEOUT,
+                DEFAULT_STARTUP_HEALTH_POLL_INTERVAL,
+                duration -> { },
+                null,
+                null,
+                null,
+                commonParameterValues);
     }
 
     /**
@@ -208,6 +240,36 @@ public class OpencodeProcessStartupService {
             InternalModelProxyRuntimeSettings internalProxySettings,
             UserRepository userRepository,
             ConversationContextStore conversationContextStore) {
+        this(
+                repository,
+                executionNodeRepository,
+                gateway,
+                heartbeatStore,
+                statusQueryService,
+                clock,
+                startupHealthTimeout,
+                startupHealthPollInterval,
+                startupHealthSleeper,
+                internalProxySettings,
+                userRepository,
+                conversationContextStore,
+                null);
+    }
+
+    OpencodeProcessStartupService(
+            OpencodeProcessManagementRepository repository,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessStatusQueryService statusQueryService,
+            Clock clock,
+            Duration startupHealthTimeout,
+            Duration startupHealthPollInterval,
+            Consumer<Duration> startupHealthSleeper,
+            InternalModelProxyRuntimeSettings internalProxySettings,
+            UserRepository userRepository,
+            ConversationContextStore conversationContextStore,
+            CommonParameterValues commonParameterValues) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
@@ -222,6 +284,7 @@ public class OpencodeProcessStartupService {
         this.internalProxySettings = internalProxySettings;
         this.userRepository = userRepository;
         this.conversationContextStore = conversationContextStore;
+        this.commonParameterValues = commonParameterValues;
     }
 
     /**
@@ -439,18 +502,29 @@ public class OpencodeProcessStartupService {
                 request.baseUrl(),
                 request.sessionPath(),
                 request.configPath(),
-                internalProxyEnvironment(request),
+                startupEnvironment(request),
                 request.traceId());
     }
 
-    private Map<String, String> internalProxyEnvironment(OpencodeProcessStartupRequest request) {
-        if (internalProxySettings == null) {
-            return request.environment();
-        }
+    /**
+     * 合并调用方环境、目标 Java 平台引用目录和平台内部代理变量。
+     *
+     * <p>引用目录是可选的滚动升级能力：旧库缺少参数时不阻止既有进程启动；调用方显式提供同名值时
+     * 保留调用方选择。内部代理变量继续由平台权威配置覆盖，避免调用方替换鉴权或路由信息。
+     */
+    private Map<String, String> startupEnvironment(OpencodeProcessStartupRequest request) {
         Map<String, String> environment = new java.util.LinkedHashMap<>(request.environment());
-        environment.put(InternalModelProxyRuntimeSettings.API_KEY_ENV_NAME, internalProxySettings.requireApiKey());
-        environment.put(InternalModelProxyRuntimeSettings.BASE_URL_ENV_NAME, internalProxySettings.sameNodeProxyBaseUrl());
-        environment.put(InternalModelProxyRuntimeSettings.UCID_ENV_NAME, unifiedAuthId(request.userId()));
+        if (!environment.containsKey(OPENCODE_REFERENCES_DIR_PARAM) && commonParameterValues != null) {
+            commonParameterValues.resolvedValue(OPENCODE_REFERENCES_DIR_PARAM, ParameterPlatform.current())
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .ifPresent(value -> environment.put(OPENCODE_REFERENCES_DIR_PARAM, value));
+        }
+        if (internalProxySettings != null) {
+            environment.put(InternalModelProxyRuntimeSettings.API_KEY_ENV_NAME, internalProxySettings.requireApiKey());
+            environment.put(InternalModelProxyRuntimeSettings.BASE_URL_ENV_NAME, internalProxySettings.sameNodeProxyBaseUrl());
+            environment.put(InternalModelProxyRuntimeSettings.UCID_ENV_NAME, unifiedAuthId(request.userId()));
+        }
         return Map.copyOf(environment);
     }
 

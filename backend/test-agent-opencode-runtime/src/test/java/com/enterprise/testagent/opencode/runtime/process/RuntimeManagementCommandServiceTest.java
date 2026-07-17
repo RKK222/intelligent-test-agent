@@ -7,6 +7,8 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
+import com.enterprise.testagent.domain.configuration.CommonParameterValues;
+import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -117,6 +119,39 @@ class RuntimeManagementCommandServiceTest {
             assertThat(command.sessionPath()).isEqualTo(running.sessionPath());
         });
         assertThat(result.status()).isEqualTo("STARTED");
+    }
+
+    @Test
+    void restartTrackedUserProcessInjectsReferencesDirectoryThroughCommonStartupService() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(running.processId(), running);
+        repository.bindingsByProcessId.put(running.processId(), binding(running, NOW.minusSeconds(1800)));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("port 4097 is not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        CommonParameterValues commonParameterValues = org.mockito.Mockito.mock(CommonParameterValues.class);
+        org.mockito.Mockito.when(commonParameterValues.resolvedValue(
+                        "OPENCODE_REFERENCES_DIR", ParameterPlatform.current()))
+                .thenReturn(Optional.of("/data/testagent/references"));
+        OpencodeProcessStartupService startupService = new OpencodeProcessStartupService(
+                repository,
+                repository,
+                gateway,
+                new RecordingHeartbeatStore(),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                commonParameterValues);
+        RuntimeManagementCommandService service = new RuntimeManagementCommandService(
+                gateway,
+                repository,
+                startupService,
+                new OpencodeProcessStopService(gateway, repository, Clock.fixed(NOW, ZoneOffset.UTC)));
+
+        service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
+
+        assertThat(gateway.startCommands).singleElement().satisfies(command ->
+                assertThat(command.environment())
+                        .containsEntry("OPENCODE_REFERENCES_DIR", "/data/testagent/references"));
     }
 
     @Test

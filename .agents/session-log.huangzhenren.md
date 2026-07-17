@@ -5,6 +5,33 @@
 
 ## Entries
 
+### 2026-07-18 - 增加引用配置与资产库多节点同步
+
+- Why:
+  - 应用管理员需要在个人工作区内初始化应用资产库、保证所有在线 Java 服务器副本收敛到同一远端提交，并把可选的首层 SDD 目录安全写入工作区 `.opencode/opencode.jsonc`。
+- What:
+  - 新增引用库状态/副本领域模型、MyBatis XML 仓储、Flyway `V20260718110000`、APP_ADMIN 内部 API 与 `reference-repository.sync-requested` 内部广播；状态机按固定远端分支 HEAD、代次、数据库租约和定时补偿完成多节点同步，离线节点延后补齐。
+  - Git 副本初始化采用同级临时目录和原子改名；已有副本校验 origin、分支、干净状态和快进关系，拒绝未知目录、脏仓库、分叉、符号链接及路径穿越，不删除或强制覆盖冲突内容。
+  - 前端仅在 APP_ADMIN/SUPER_ADMIN 的个人应用工作区显示引用配置入口；双栏弹窗覆盖分支选择、2 秒状态轮询、逐服务器错误、首层橙色目录选择及 JSONC 保存/更新。`jsonc-parser` 以最小补丁保留注释、尾逗号、未知字段，并阻止非法 JSONC、非对象 references、Git/字符串同名引用和路径冲突。
+  - 新启动及平台管理重启的 OpenCode 进程由公共启动服务注入 `OPENCODE_REFERENCES_DIR`；manager 安全命令展示该非敏感变量，未改变 configUpdate 协议或既有进程。
+  - 同步 HTTP API、事件、数据库、部署、模块 README/PACKAGE、manager/前端说明及用户手册；修正既有参数种子 migration 注释中的 Flyway 占位符字面量，使 PostgreSQL 全量迁移可解析，参数值语义未变。
+- How:
+  - 复用现有应用关联、分支查询、服务器广播、在线服务器快照、公共启动服务和平台文件 WebSocket route/ticket/RPC；凭据只在发起节点解密，广播不携带凭据、SSH key、文件内容且不进入 RunEvent SSE。
+  - 代次 CAS、租约 token/fencing 与本机文件锁共同避免并发 worker 回写；临时网络错误指数退避，永久 Git 冲突等待管理员重新同步；目录树每层限制 1000 项。
+- Result:
+  - 引用功能后端定向 reactor 通过，相关 122 项测试全部通过（含真实 Git、安全路径、租约/补偿、MyBatis H2、Testcontainers PostgreSQL、权限 API、配置冻结、运行时注入和 Spring 装配）；`go test ./...` 通过。
+  - 前端全量 Vitest 75 个文件通过（1247 passed / 1 skipped），typecheck、lint、用户手册和生产 build 通过。
+  - 用户指定的后端全量命令在 persistence 被既有 `V20260717173000` 的 `timestamptz` 与 H2 不兼容阻断（76 errors；引用库 PostgreSQL/MyBatis 用例本身通过）；前端 E2E 在既有 `workbench.spec.ts` Agent 树隐藏/`agents` 目录缺失处连续失败 14 项，随后停止，2 项中断、176 项未运行。本次未扩大范围修改这些基线问题。
+  - 本机没有真实双服务器环境，离线恢复、跨 Java 租约互斥和副本收敛由测试覆盖，仍需在双服务器部署环境执行计划中的人工验收。
+  - 涉及新增内部 HTTP API、内部广播、两张数据库表和兼容性配置字段；不修改 generated SDK、`.env.local`、OpenCode 源码或 manager 协议。既有运行进程不重启，引用目录在下次平台管理启动/重启后生效。
+- Verification:
+  - `mvn -pl test-agent-app -am '-Dtest=GitWorkspaceServiceRealGitTest,ReferenceRepository*,ConfigurationManagementApplicationServiceTest,ConfigurationManagementControllerTest,OpencodeProcessStartupServiceTest,RuntimeManagementCommandServiceTest' -Dsurefire.failIfNoSpecifiedTests=false test`
+  - `mvn -pl test-agent-persistence -am -Dtest=MyBatisReferenceRepositoryRepositoryIntegrationTest,MyBatisReferenceRepositoryPostgresqlIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test`
+  - `go test ./...`
+  - `corepack pnpm test && corepack pnpm typecheck && corepack pnpm build`、`corepack pnpm lint`
+- Next:
+  - 修复既有 H2 migration 兼容和 workbench E2E Agent 树基线后重跑完整套件；在真实双服务器环境完成离线恢复与 HEAD 一致性人工验收。
+
 ### 2026-07-18 - 新增引用资产通用参数
 
 - Why:

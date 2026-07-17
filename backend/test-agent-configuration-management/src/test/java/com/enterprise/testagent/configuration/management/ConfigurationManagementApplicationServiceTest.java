@@ -2,6 +2,7 @@ package com.enterprise.testagent.configuration.management;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -26,6 +27,9 @@ import com.enterprise.testagent.domain.dictionary.DictId;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryState;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -55,7 +59,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
         when(repository.findApplication(new ApplicationId("F-NEW"))).thenReturn(Optional.empty());
         when(repository.saveApplication(org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -81,7 +86,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
         when(repository.findApplication(new ApplicationId("F-OLD"))).thenReturn(Optional.of(
                 new ApplicationDefinition(new ApplicationId("F-OLD"), "已有应用", true, NOW, NOW)));
 
@@ -107,7 +113,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
         service.setConversationContextStore(contextStore);
 
         service.removeMember("app_1234567890abcdef", "usr_1234567890abcdef");
@@ -133,7 +140,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
         service.setConversationContextStore(contextStore);
 
         assertThatThrownBy(() -> service.removeMember("app_1234567890abcdef", "usr_1234567890abcdef"))
@@ -159,7 +167,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
         service.setConversationContextStore(contextStore);
 
         assertThatThrownBy(() -> service.removeMember("app_1234567890abcdef", userId.value()))
@@ -178,7 +187,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
         when(repository.findRepositoryByGitUrl("https://gitee.com/demo/repo.git")).thenReturn(Optional.empty());
         when(repository.findRepositoryByEnglishName("demo")).thenReturn(Optional.empty());
         when(repository.saveRepository(argThat(saved -> "demo".equals(saved.englishName()))))
@@ -209,7 +219,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
         when(repository.findRepositoryByGitUrl("https://gitee.com/demo/asset.git")).thenReturn(Optional.empty());
         when(repository.findRepositoryByEnglishName("asset")).thenReturn(Optional.empty());
         when(repository.saveRepository(argThat(saved -> "asset".equals(saved.englishName()))))
@@ -239,7 +250,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
         String storedGitUrl = "scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform";
         when(repository.findRepositoryByGitUrl(storedGitUrl)).thenReturn(Optional.empty());
         when(repository.findRepositoryByEnglishName("hzefficiencytools-interfaceplatform")).thenReturn(Optional.empty());
@@ -271,7 +283,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
 
         assertThat(service.listRepositoryTypes())
                 .extracting(ConfigurationManagementResponses.RepositoryTypeOptionResponse::typeCode)
@@ -289,7 +302,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
 
         assertThatThrownBy(() -> service.createRepository(
                 "https://gitee.com/demo/repo.git",
@@ -309,7 +323,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
 
         assertThatThrownBy(() -> service.createRepository(
                 "https://gitee.com/demo/repo.git",
@@ -349,11 +364,95 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
 
         assertThatThrownBy(() -> service.updateRepository("repo_123", "演示库", "Demo", false))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
+    void initializedReferenceRepositoryRejectsEnglishNameChange() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ReferenceRepositoryRepository referenceRepository = org.mockito.Mockito.mock(ReferenceRepositoryRepository.class);
+        CodeRepository current = assetRepository();
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        when(referenceRepository.findState(current.repositoryId()))
+                .thenReturn(Optional.of(initializedReferenceState(current.repositoryId())));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                referenceRepository);
+
+        assertThatThrownBy(() -> service.updateRepository(
+                        current.repositoryId().value(), "资产库新名称", "assets-renamed", false))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("英文名称");
+                });
+        verify(repository, org.mockito.Mockito.never()).updateRepositoryMetadata(any());
+    }
+
+    @Test
+    void initializedReferenceRepositoryRejectsRepositoryTypeChange() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ReferenceRepositoryRepository referenceRepository = org.mockito.Mockito.mock(ReferenceRepositoryRepository.class);
+        CodeRepository current = assetRepository();
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        when(referenceRepository.findState(current.repositoryId()))
+                .thenReturn(Optional.of(initializedReferenceState(current.repositoryId())));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                referenceRepository);
+
+        assertThatThrownBy(() -> service.updateRepository(
+                        current.repositoryId().value(), "资产库新名称", current.englishName(), true))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("类型");
+                });
+        verify(repository, org.mockito.Mockito.never()).updateRepositoryMetadata(any());
+    }
+
+    @Test
+    void initializedReferenceRepositoryAllowsChineseNameChange() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ReferenceRepositoryRepository referenceRepository = org.mockito.Mockito.mock(ReferenceRepositoryRepository.class);
+        CodeRepository current = assetRepository();
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        when(repository.findRepositoryByEnglishName(current.englishName())).thenReturn(Optional.of(current));
+        when(referenceRepository.findState(current.repositoryId()))
+                .thenReturn(Optional.of(initializedReferenceState(current.repositoryId())));
+        when(repository.updateRepositoryMetadata(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                referenceRepository);
+
+        ConfigurationManagementResponses.CodeRepositoryResponse response = service.updateRepository(
+                current.repositoryId().value(), "资产库新名称", current.englishName(), false);
+
+        assertThat(response.name()).isEqualTo("资产库新名称");
+        assertThat(response.englishName()).isEqualTo(current.englishName());
+        assertThat(response.repositoryType()).isEqualTo(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
+        verify(repository).updateRepositoryMetadata(argThat(updated ->
+                "资产库新名称".equals(updated.name())
+                        && current.englishName().equals(updated.englishName())
+                        && CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value().equals(updated.repositoryType())));
     }
 
     @Test
@@ -386,7 +485,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
 
         assertThatThrownBy(() -> service.renameWorkspace("app_1", "awp_1", " ai-test "))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
@@ -410,7 +510,7 @@ class ConfigurationManagementApplicationServiceTest {
         when(gitRemoteService.listBranches(eq(codeRepository.gitUrl()), eq(PRIVATE_KEY))).thenReturn(List.of("main"));
 
         ConfigurationManagementApplicationService service =
-                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, gitCloneCacheService, encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, gitCloneCacheService, encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class), noReferenceRepositoryState());
 
         assertThat(service.listBranches("repo_123", userId)).containsExactly("main");
         verify(gitRemoteService).listBranches(codeRepository.gitUrl(), PRIVATE_KEY);
@@ -446,7 +546,7 @@ class ConfigurationManagementApplicationServiceTest {
                 eq(PRIVATE_KEY))).thenReturn(List.of("main"));
 
         ConfigurationManagementApplicationService service =
-                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, gitCloneCacheService, encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, gitCloneCacheService, encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class), noReferenceRepositoryState());
 
         assertThat(service.listBranches("repo_123", userId)).containsExactly("main");
         verify(gitRemoteService).listBranches(
@@ -455,7 +555,7 @@ class ConfigurationManagementApplicationServiceTest {
     }
 
     @Test
-    void repositoryTreeFiltersTestWorkRepositoryToCurrentAppRoot() {
+    void repositoryTreeKeepsAllRootDirectoriesForTestWorkRepository() {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
         UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);
         GitRemoteService gitRemoteService = org.mockito.Mockito.mock(GitRemoteService.class);
@@ -500,12 +600,15 @@ class ConfigurationManagementApplicationServiceTest {
         when(gitRemoteService.listTree(codeRepository.gitUrl(), "feature_testagent_20260707", PRIVATE_KEY)).thenReturn(remoteTree);
 
         ConfigurationManagementApplicationService service =
-                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, createTestCacheService(), encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, createTestCacheService(), encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class), noReferenceRepositoryState());
 
         ConfigurationManagementResponses.RepositoryTreeResponse response =
                 service.listRepositoryTree("app_f_coss", "repo_123", "feature_testagent_20260707", userId);
 
-        assertThat(response.nodes()).singleElement().satisfies(root -> {
+        assertThat(response.nodes())
+                .extracting(ConfigurationManagementResponses.RepositoryTreeNodeResponse::path)
+                .containsExactly("F-COSS", "OTHER");
+        assertThat(response.nodes().get(0)).satisfies(root -> {
             assertThat(root.name()).isEqualTo("F-COSS");
             assertThat(root.children()).singleElement().satisfies(child -> {
                 assertThat(child.path()).isEqualTo("F-COSS/W1");
@@ -533,7 +636,7 @@ class ConfigurationManagementApplicationServiceTest {
         when(gitRemoteService.listTree(codeRepository.gitUrl(), "main", null)).thenReturn(remoteTree);
 
         ConfigurationManagementApplicationService service =
-                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, createTestCacheService(), sshKeyFixtures.encryptionService(), org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, createTestCacheService(), sshKeyFixtures.encryptionService(), org.mockito.Mockito.mock(ManagedWorkspaceRepository.class), noReferenceRepositoryState());
 
         ConfigurationManagementResponses.RepositoryTreeResponse response =
                 service.listRepositoryTree("app_f_coss", "repo_123", "main", new UserId("usr_123"));
@@ -556,6 +659,7 @@ class ConfigurationManagementApplicationServiceTest {
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
                 org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState(),
                 "internal");
 
         ConfigurationManagementResponses.RepositoryDeploymentOptionsResponse response = service.repositoryDeploymentOptions(userId);
@@ -580,7 +684,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(GitRemoteService.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
 
         SshKeyTestFixtures.EncryptedPayload payload = sshKeyFixtures.encryptPayload(PRIVATE_KEY);
         assertThatThrownBy(() -> service.addSshKey(
@@ -604,7 +709,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(GitRemoteService.class),
                 createTestCacheService(),
                 sshKeyFixtures.encryptionService(),
-                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
 
         SshKeyTestFixtures.EncryptedPayload payload = sshKeyFixtures.encryptPayload(PRIVATE_KEY);
         ConfigurationManagementResponses.SshKeyResponse response = service.addSshKey(
@@ -624,6 +730,10 @@ class ConfigurationManagementApplicationServiceTest {
         // 测试用的临时缓存目录
         Path tempDir = Path.of(System.getProperty("java.io.tmpdir"), "git-cache-test-" + System.currentTimeMillis());
         return new GitCloneCacheService(tempDir, Duration.ofHours(1), Duration.ofMinutes(5));
+    }
+
+    private static ReferenceRepositoryRepository noReferenceRepositoryState() {
+        return org.mockito.Mockito.mock(ReferenceRepositoryRepository.class);
     }
 
     private static DictionaryRepository repositoryTypeDictionaryRepository() {
@@ -660,6 +770,34 @@ class ConfigurationManagementApplicationServiceTest {
                 "demo",
                 CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
                 false,
+                NOW,
+                NOW);
+    }
+
+    private static CodeRepository assetRepository() {
+        return new CodeRepository(
+                new CodeRepositoryId("repo_reference_assets"),
+                "https://gitee.com/demo/assets.git",
+                "资产库",
+                "assets",
+                CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                NOW,
+                NOW);
+    }
+
+    private static ReferenceRepositoryState initializedReferenceState(CodeRepositoryId repositoryId) {
+        return new ReferenceRepositoryState(
+                repositoryId,
+                "main",
+                "commit-1",
+                1L,
+                ReferenceRepositoryStatus.READY,
+                null,
+                "trace_reference",
+                null,
+                NOW,
                 NOW,
                 NOW);
     }

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -67,6 +68,43 @@ func TestBuildStartSpecPrefersExplicitSessionPath(t *testing.T) {
 	wantStartCommand := "XDG_DATA_HOME=/tmp/sessions/users/usr_1234567890abcdef OPENCODE_CONFIG_DIR=/tmp/config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
 	if spec.StartCommand != wantStartCommand {
 		t.Fatalf("unexpected start command %q", spec.StartCommand)
+	}
+}
+
+func TestBuildStartSpecDisplaysReferencesDirWithoutExposingSensitiveEnvironment(t *testing.T) {
+	cfg := testConfig(t)
+	spec, err := BuildStartSpec(cfg, StartRequest{
+		Port: 4096,
+		Environment: map[string]string{
+			"OPENCODE_REFERENCES_DIR":                 "/data/testagent/reference assets",
+			"TEST_AGENT_INTERNAL_PROXY_API_KEY":       "proxy-secret",
+			"TEST_AGENT_INTERNAL_PROXY_BASE_URL":      "http://127.0.0.1:8080/proxy",
+			"ENTERPRISE_UCID":                         "employee-001",
+			"UNLISTED_SENSITIVE_ENVIRONMENT_VARIABLE": "must-not-be-displayed",
+		},
+		TraceID: "trace_1234567890abcdef",
+	})
+	if err != nil {
+		t.Fatalf("BuildStartSpec returned error: %v", err)
+	}
+
+	// 子进程环境继续完整透传；startCommand 只展示允许项并保持代理密钥脱敏。
+	if spec.Env["OPENCODE_REFERENCES_DIR"] != "/data/testagent/reference assets" {
+		t.Fatalf("expected references dir in child env, got %#v", spec.Env)
+	}
+	if spec.Env["UNLISTED_SENSITIVE_ENVIRONMENT_VARIABLE"] != "must-not-be-displayed" {
+		t.Fatalf("expected unlisted environment to reach child process, got %#v", spec.Env)
+	}
+	if !strings.Contains(spec.StartCommand, "OPENCODE_REFERENCES_DIR='/data/testagent/reference assets'") {
+		t.Fatalf("expected references dir in safe start command, got %q", spec.StartCommand)
+	}
+	if !strings.Contains(spec.StartCommand, "TEST_AGENT_INTERNAL_PROXY_API_KEY='<redacted>'") {
+		t.Fatalf("expected proxy api key to remain redacted, got %q", spec.StartCommand)
+	}
+	if strings.Contains(spec.StartCommand, "proxy-secret") ||
+		strings.Contains(spec.StartCommand, "UNLISTED_SENSITIVE_ENVIRONMENT_VARIABLE") ||
+		strings.Contains(spec.StartCommand, "must-not-be-displayed") {
+		t.Fatalf("start command exposed sensitive environment: %q", spec.StartCommand)
 	}
 }
 

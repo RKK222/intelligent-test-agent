@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { ArrowLeftRight, Eye, EyeOff, Plus, Save, ServerCog, Target } from "lucide-vue-next";
+import { ArrowLeftRight, Eye, EyeOff, LibraryBig, Plus, Save, ServerCog, Target } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
@@ -51,6 +51,8 @@ const props = defineProps<{
   creatingVersion?: boolean;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
+  /** 是否显示当前个人工作区的引用配置入口 */
+  showReferenceConfiguration?: boolean;
   /** 服务器工作空间切换入口是否禁用 */
   serverWorkspaceSwitchDisabled?: boolean;
 }>();
@@ -68,6 +70,8 @@ const emit = defineEmits<{
   (e: "create-version", payload: { template: AppWorkspaceTemplate; version: string; branch?: string }): void;
   // 超级管理员打开跨服务器工作空间选择器。
   (e: "open-server-workspace-picker"): void;
+  // 应用管理员打开当前个人工作区的引用配置弹窗。
+  (e: "open-reference-configuration"): void;
 }>();
 
 const updatedLabel = computed(() => {
@@ -575,6 +579,16 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         </Teleport>
       </div>
       <button
+        v-if="!showSave && showReferenceConfiguration"
+        type="button"
+        class="ta-workbench-reference-configuration"
+        title="打开引用配置"
+        aria-label="打开引用配置"
+        @click="emit('open-reference-configuration')"
+      >
+        <LibraryBig class="ta-workbench-footer-icon" />
+      </button>
+      <button
         v-if="!showSave && showServerWorkspaceSwitch"
         type="button"
         class="ta-workbench-server-switch"
@@ -820,7 +834,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   color: #555;
 }
 
-.ta-workbench-server-switch {
+.ta-workbench-server-switch,
+.ta-workbench-reference-configuration {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -834,7 +849,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   transition: background-color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
 }
 
-.ta-workbench-server-switch:hover:not(:disabled) {
+.ta-workbench-server-switch:hover:not(:disabled),
+.ta-workbench-reference-configuration:hover:not(:disabled) {
   background: #f5f5f5;
   border-color: #b5b5b5;
 }

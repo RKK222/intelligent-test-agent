@@ -47,6 +47,33 @@ describe("WorkbenchFooter", () => {
     expect(shown.emitted("open-server-workspace-picker")).toHaveLength(1);
   });
 
+  it("places the accessible reference configuration icon immediately after the workspace switch", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        appName: "F-COSS",
+        templates: [template],
+        showReferenceConfiguration: true,
+        showSave: false
+      }
+    });
+
+    const buttons = wrapper.find(".ta-workbench-footer-left").findAll("button");
+    expect(buttons[0].classes()).toContain("ta-workbench-footer-branch");
+    expect(buttons[1].attributes("aria-label")).toBe("打开引用配置");
+    expect(buttons[1].attributes("title")).toBe("打开引用配置");
+
+    await buttons[1].trigger("click");
+    expect(wrapper.emitted("open-reference-configuration")).toHaveLength(1);
+  });
+
+  it("hides the reference configuration icon unless explicitly authorized by the parent", () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: { appName: "F-COSS", templates: [template], showSave: false }
+    });
+
+    expect(wrapper.find('button[aria-label="打开引用配置"]').exists()).toBe(false);
+  });
+
   it("shows the active personal worktree branch in the switch trigger", () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {

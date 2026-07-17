@@ -34,6 +34,7 @@ import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -68,6 +69,7 @@ public class ConfigurationManagementApplicationService {
     private final GitCloneCacheService gitCloneCacheService;
     private final SshKeyEncryptionService sshKeyEncryptionService;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
+    private final ReferenceRepositoryRepository referenceRepository;
     private final String defaultRepositoryDeploymentMode;
     private ConversationContextStore conversationContextStore;
 
@@ -88,8 +90,18 @@ public class ConfigurationManagementApplicationService {
             GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService,
             ManagedWorkspaceRepository managedWorkspaceRepository,
+            ReferenceRepositoryRepository referenceRepository,
             @Value("${test-agent.deployment.mode:external}") String deploymentMode) {
-        this(configurationRepository, dictionaryRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository, deploymentMode);
+        this(
+                configurationRepository,
+                dictionaryRepository,
+                userRepository,
+                new GitRemoteService(),
+                gitCloneCacheService,
+                sshKeyEncryptionService,
+                managedWorkspaceRepository,
+                referenceRepository,
+                deploymentMode);
     }
 
     /**
@@ -101,8 +113,18 @@ public class ConfigurationManagementApplicationService {
             UserRepository userRepository,
             GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService,
-            ManagedWorkspaceRepository managedWorkspaceRepository) {
-        this(configurationRepository, dictionaryRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository, "external");
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            ReferenceRepositoryRepository referenceRepository) {
+        this(
+                configurationRepository,
+                dictionaryRepository,
+                userRepository,
+                new GitRemoteService(),
+                gitCloneCacheService,
+                sshKeyEncryptionService,
+                managedWorkspaceRepository,
+                referenceRepository,
+                "external");
     }
 
     /**
@@ -115,8 +137,18 @@ public class ConfigurationManagementApplicationService {
             GitRemoteService gitRemoteService,
             GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService,
-            ManagedWorkspaceRepository managedWorkspaceRepository) {
-        this(configurationRepository, dictionaryRepository, userRepository, gitRemoteService, gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository, "external");
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            ReferenceRepositoryRepository referenceRepository) {
+        this(
+                configurationRepository,
+                dictionaryRepository,
+                userRepository,
+                gitRemoteService,
+                gitCloneCacheService,
+                sshKeyEncryptionService,
+                managedWorkspaceRepository,
+                referenceRepository,
+                "external");
     }
 
     ConfigurationManagementApplicationService(
@@ -127,6 +159,7 @@ public class ConfigurationManagementApplicationService {
             GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService,
             ManagedWorkspaceRepository managedWorkspaceRepository,
+            ReferenceRepositoryRepository referenceRepository,
             String deploymentMode) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.dictionaryRepository = Objects.requireNonNull(dictionaryRepository, "dictionaryRepository must not be null");
@@ -135,6 +168,7 @@ public class ConfigurationManagementApplicationService {
         this.gitCloneCacheService = Objects.requireNonNull(gitCloneCacheService, "gitCloneCacheService must not be null");
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
         this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository, "managedWorkspaceRepository must not be null");
+        this.referenceRepository = Objects.requireNonNull(referenceRepository, "referenceRepository must not be null");
         this.defaultRepositoryDeploymentMode = CodeRepositoryDeploymentMode.fromDeploymentProperty(deploymentMode).value();
     }
 
@@ -288,16 +322,42 @@ public class ConfigurationManagementApplicationService {
     public CodeRepositoryResponse updateRepository(String repositoryId, String name, String englishName, Boolean standard) {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
         String normalizedEnglishName = normalizeRepositoryEnglishName(englishName);
-        ensureRepositoryEnglishNameUnique(normalizedEnglishName, repository.repositoryId());
-        String nextRepositoryType = standard == null
+        String nextRepositoryType = standard == null || Boolean.TRUE.equals(standard) == repository.standard()
                 ? repository.repositoryType()
                 : CodeRepositoryType.fromStandard(Boolean.TRUE.equals(standard)).value();
+        ensureInitializedReferenceIdentity(repository, normalizedEnglishName, nextRepositoryType);
+        ensureRepositoryEnglishNameUnique(normalizedEnglishName, repository.repositoryId());
         CodeRepository updated = repository.editMetadata(
                 requireText(name, "代码库名称不能为空", "name"),
                 normalizedEnglishName,
                 nextRepositoryType,
                 Instant.now());
         return repositoryResponse(configurationRepository.updateRepositoryMetadata(updated));
+    }
+
+    /** 引用资产初始化后磁盘目录身份由 englishName 固定，且状态行不能失去资产库配置归属。 */
+    private void ensureInitializedReferenceIdentity(
+            CodeRepository repository,
+            String nextEnglishName,
+            String nextRepositoryType) {
+        boolean initialized = referenceRepository.findState(repository.repositoryId())
+                .map(state -> state.branch() != null)
+                .orElse(false);
+        if (!initialized) {
+            return;
+        }
+        if (!repository.englishName().equals(nextEnglishName)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "引用资产库初始化后禁止修改版本库英文名称",
+                    Map.of("repositoryId", repository.repositoryId().value(), "field", "englishName"));
+        }
+        if (!CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value().equals(nextRepositoryType)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "引用资产库初始化后禁止修改版本库类型",
+                    Map.of("repositoryId", repository.repositoryId().value(), "field", "repositoryType"));
+        }
     }
 
     public List<CodeRepositoryResponse> listApplicationRepositories(String appId) {

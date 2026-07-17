@@ -155,6 +155,32 @@ class GitWorkspaceServiceRealGitTest {
         assertThat(git(shared, "rev-parse", "HEAD").stdoutText().trim()).isEqualTo(remoteCommit);
     }
 
+    @Test
+    void resolvesLatestCommitOfExactRemoteBranch() throws Exception {
+        Path remote = tempDir.resolve("reference-assets.git");
+        Files.createDirectories(remote);
+        git(remote, "init", "--bare");
+
+        Path writer = tempDir.resolve("reference-writer");
+        git(tempDir, "clone", remote.toString(), writer.toString());
+        git(writer, "config", "user.name", "Reference Admin");
+        git(writer, "config", "user.email", "reference-admin@example.invalid");
+        git(writer, "checkout", "-b", "main");
+        write(writer, "README.md", "version 1\n");
+        git(writer, "add", "--all");
+        git(writer, "commit", "-m", "initial reference asset");
+        git(writer, "push", "-u", "origin", "main");
+        write(writer, "README.md", "version 2\n");
+        git(writer, "commit", "-am", "update reference asset");
+        git(writer, "push", "origin", "main");
+        String expectedCommit = git(writer, "rev-parse", "HEAD").stdoutText().trim();
+
+        GitWorkspaceService service = new GitWorkspaceService();
+
+        assertThat(service.resolveRemoteBranchCommit(remote.toString(), "main", null))
+                .isEqualTo(expectedCommit);
+    }
+
     private Path createAddDeleteConflict(String suffix) throws Exception {
         Path repo = tempDir.resolve("repo-" + suffix);
         Files.createDirectories(repo);

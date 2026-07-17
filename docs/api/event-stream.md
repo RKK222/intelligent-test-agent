@@ -419,6 +419,8 @@ scope 发现与缓存规则：
 
 应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。多服务器下应用版本工作区同步使用后端内部服务器广播，不暴露给浏览器 SSE。
 
+应用引用资产库的初始化、同步、状态和目录树接口同样不产生 RunEvent/SSE。多服务器副本通过内部 `reference-repository.sync-requested` 广播低延迟唤醒，并通过数据库 generation、租约和定时补偿收敛；该广播不写入 `run_events`，不进入 RunEvent SSE，也不参与 `Last-Event-ID` 续传。
+
 Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/agent-config/**` 的公共级/工作空间级 Git 更新、worktree、commit、publish 进度通过 ticket 保护的 WebSocket `/operations/{operationId}/ws?ticket=...` 推送 `snapshot`、`step`、`completed`、`failed`，也可通过 `GET /operations/{operationId}` 查询快照；公共 Git 仅 SUPER_ADMIN，应用级 Agent/Skill Git 由 APP_ADMIN（含 SUPER_ADMIN）执行。ticket 响应返回签发节点的绝对 `ws://`/`wss://` 地址，保证多后台下 upgrade 回到保存一次性 ticket 的同一 JVM；跨节点进度继续由既有服务器广播汇入该节点。该进度不写入 `run_events`，不参与 RunEvent `Last-Event-ID` 续传。
 
 当前用户 opencode 进程初始化进度不产生 RunEvent/SSE。`POST /api/internal/agent/{agentId}/processes/me/initialize` 传入 `operationId` 时，后端把校验、确认分配、选择容器、准备参数、进程启动、记录候选进程、检查进程、健康检查、写入绑定和完成/失败写入 `opencode_process_start_operations`；前端通过 `GET /api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}` HTTP 轮询读取。该只读查询不触发 manager health/start，不写 RunEvent，也不参与 `Last-Event-ID` 续传。
@@ -433,7 +435,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 ## Internal Server Broadcast
 
-内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件为应用版本工作区副本同步和公共 Agent 配置同步。
+内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件包括应用版本工作区副本同步、公共 Agent 配置同步、通用参数刷新和引用资产库副本同步。
 
 传输：
 
@@ -477,6 +479,18 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
   "traceId": "trace_..."
 }
 ```
+
+`reference-repository.sync-requested` 用于应用资产库首次初始化或新 generation 同步后的低延迟唤醒。payload 固定只包含：
+
+```json
+{
+  "repositoryId": "repo_assets",
+  "generation": 2,
+  "traceId": "trace_reference_sync"
+}
+```
+
+消费者只把广播视为唤醒信号，仍需按 `repositoryId + generation + 本机 linuxServerId` 从数据库认领带 fencing token 的租约；重复、乱序或丢失广播均不能绕过数据库状态。payload 不包含分支、commit、Git URL、用户 ID、SSH 私钥、token、Authorization、Cookie、文件内容或目录内容。广播发布失败不反转已经提交的数据库目标，默认 60 秒补偿扫描负责恢复漏消息和节点重新上线后的 `DEFERRED` 副本。
 
 `agent-config.public-sync-requested` 用于公共 Agent 配置更新或发布后的多服务器同步，payload 只允许包含：
 ```json

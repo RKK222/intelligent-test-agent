@@ -227,6 +227,43 @@ export type StartRunPayload = {
   clientRequestId?: string;
 };
 
+/** 引用资产库在单台 Linux 服务器上的同步投影。 */
+export type ReferenceRepositoryServerStatus = {
+  linuxServerId: string;
+  status: string;
+  currentBranch?: string | null;
+  currentCommitHash?: string | null;
+  error?: string | null;
+};
+
+/** 当前应用关联的引用资产库及其总体/逐服务器状态。 */
+export type ReferenceRepositoryStatus = {
+  repositoryId: string;
+  name: string;
+  englishName: string;
+  gitUrl: string;
+  initialized: boolean;
+  branch?: string | null;
+  targetCommitHash?: string | null;
+  generation: number;
+  status: string;
+  targetServerCount: number;
+  readyServerCount: number;
+  servers: ReferenceRepositoryServerStatus[];
+  traceId?: string | null;
+  message?: string | null;
+};
+
+/** 引用资产库单层目录响应；只有后端标记的首层 SDD 目录允许配置。 */
+export type ReferenceRepositoryTreeNode = {
+  path: string;
+  name: string;
+  directory: boolean;
+  size: number;
+  highlighted: boolean;
+  selectable: boolean;
+};
+
 export type ExtraRequestInit = RequestInit & { timeoutMs?: number };
 
 type RequestFn = <T>(path: string, init?: ExtraRequestInit) => Promise<T>;
@@ -247,6 +284,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const systemManagementBase = "/api/internal/platform/system-management";
   const analyticsBase = "/api/internal/platform/analytics";
   const commonParameterBase = `${configurationBase}/common-parameters`;
+  const referenceRepositoryBase = (appId: string) =>
+    `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/reference-repositories`;
   const fetcher = options.fetcher ?? fetch;
   const webSocketFactory: WorkspaceWebSocketFactory =
     options.webSocketFactory ??
@@ -578,6 +617,27 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<PageResponse<Workspace>>(`${workspaceManagementBase}/workspaces?page=${page}&size=${size}`),
     getWorkspace: (workspaceId: string) => request<Workspace>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}`),
     listManagedApplications: () => request<ManagedApplication[]>(`${workspaceManagementBase}/applications`),
+    /** 仅返回当前应用关联的 APPLICATION_ASSET_REPOSITORY。 */
+    listReferenceRepositories: (appId: string) =>
+      request<ReferenceRepositoryStatus[]>(referenceRepositoryBase(appId)),
+    initializeReferenceRepository: (appId: string, repositoryId: string, branch: string) =>
+      request<ReferenceRepositoryStatus>(
+        `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/initialize`,
+        { method: "POST", body: JSON.stringify({ branch }) }
+      ),
+    synchronizeReferenceRepository: (appId: string, repositoryId: string) =>
+      request<ReferenceRepositoryStatus>(
+        `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/synchronize`,
+        { method: "POST" }
+      ),
+    getReferenceRepositoryStatus: (appId: string, repositoryId: string) =>
+      request<ReferenceRepositoryStatus>(
+        `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/status`
+      ),
+    listReferenceRepositoryTree: (appId: string, repositoryId: string, path = "") =>
+      request<ReferenceRepositoryTreeNode[]>(
+        `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({ path })}`
+      ),
     listWorkspaceTemplates: (appId: string) =>
       request<ApplicationWorkspaceTemplate[]>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates`),
     listWorkspaceVersions: (appId: string, templateId: string) =>

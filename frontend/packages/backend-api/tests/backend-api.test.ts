@@ -2,6 +2,67 @@ import { describe, expect, it, vi } from "vitest";
 import { BackendApiError, createBackendApiClient, type WorkspaceWebSocketFactory } from "../src";
 
 describe("backend-api", () => {
+  it("calls every application reference repository endpoint with the current app id", async () => {
+    const status = {
+      repositoryId: "repo/assets",
+      name: "需求资产库",
+      englishName: "requirements",
+      gitUrl: "ssh://git.example.test/requirements.git",
+      initialized: true,
+      branch: "main",
+      targetCommitHash: "abc123",
+      generation: 2,
+      status: "READY",
+      targetServerCount: 1,
+      readyServerCount: 1,
+      servers: [],
+      traceId: "trace_backend",
+      message: null
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const path = String(input);
+      const data = path.endsWith("/tree?path=docs%2Fapi")
+        ? [{ path: "docs/api/openapi.yaml", name: "openapi.yaml", directory: false, size: 42, highlighted: false, selectable: false }]
+        : path.endsWith("/reference-repositories")
+          ? [status]
+          : status;
+      return new Response(JSON.stringify({ success: true, traceId: "trace_backend", data }), { status: 200 });
+    });
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.listReferenceRepositories("app/demo");
+    await client.initializeReferenceRepository("app/demo", "repo/assets", "feature/docs");
+    await client.synchronizeReferenceRepository("app/demo", "repo/assets");
+    await client.getReferenceRepositoryStatus("app/demo", "repo/assets");
+    await expect(client.listReferenceRepositoryTree("app/demo", "repo/assets", "docs/api")).resolves.toEqual([
+      expect.objectContaining({ path: "docs/api/openapi.yaml", directory: false })
+    ]);
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
+      ["http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories", undefined, undefined],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/initialize",
+        "POST",
+        JSON.stringify({ branch: "feature/docs" })
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/synchronize",
+        "POST",
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/status",
+        undefined,
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/tree?path=docs%2Fapi",
+        undefined,
+        undefined
+      ]
+    ]);
+  });
+
   it("normalizes a pending native OpenCode question for a historical platform session", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

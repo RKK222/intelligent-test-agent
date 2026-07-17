@@ -57,6 +57,7 @@ declare module 'vue' {
     PetCompanionAvatar: typeof import('./src/components/PetCompanionAvatar.vue')['default']
     PetMiniGames: typeof import('./src/components/PetMiniGames.vue')['default']
     ReadonlyTranscript: typeof import('./src/components/ReadonlyTranscript.vue')['default']
+    ReferenceConfigurationDialog: typeof import('./src/components/ReferenceConfigurationDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     RuntimeManagementPanel: typeof import('./src/components/settings/RuntimeManagementPanel.vue')['default']

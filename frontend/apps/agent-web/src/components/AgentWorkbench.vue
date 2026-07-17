@@ -82,6 +82,8 @@ import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
 import { type PreviewMode } from "./WorkbenchFooter.vue";
 import OpencodeProcessStartupDialog from "./OpencodeProcessStartupDialog.vue";
+import ReferenceConfigurationDialog from "./ReferenceConfigurationDialog.vue";
+import { canShowReferenceConfiguration } from "./reference-configuration-access";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
@@ -387,6 +389,7 @@ const robotSideQuestion = useSideQuestionRun({
   getAuthToken: () => authStore.token
 });
 const serverWorkspacePickerOpen = ref(false);
+const referenceConfigurationOpen = ref(false);
 const serverWorkspacePickerLoading = ref(false);
 const serverWorkspaceServers = shallowRef<WorkspaceBackendServer[]>([]);
 const serverWorkspaceDirectory = shallowRef<WorkspaceDirectoryList | null>(null);
@@ -400,6 +403,14 @@ const liveFollowedParts = ref<Set<string>>(new Set());
 // 切换非 Markdown 文件时由 watch 主动复位，避免下次切回 md 时残留之前的开启状态。
 const markdownPreviewMode = ref<PreviewMode>("off");
 const markdownPreview = computed(() => markdownPreviewMode.value !== "off");
+const showReferenceConfiguration = computed(() =>
+  canShowReferenceConfiguration({
+    roles: authStore.currentUser?.roles,
+    personalWorkspaceId: currentPersonalWorkspaceId.value,
+    runtimeWorkspaceId: selectedWorkspace.value?.workspaceId,
+    appId: selectedAppId.value
+  })
+);
 // 只有用户主动触发的健康刷新需要短暂阻止提交；后台轮询刷新不应周期性打断输入体验。
 const manualOpencodeProcessRefreshing = ref(false);
 
@@ -2764,6 +2775,8 @@ function resetWorkspaceState() {
   selectedWorkspaceSnapshot.value = undefined;
   currentPersonalWorkspaceId.value = undefined;
   currentPersonalWorkspaceBranch.value = undefined;
+  // 引用弹窗绑定个人工作区；切仓必须立即卸载其轮询与迟到响应上下文。
+  referenceConfigurationOpen.value = false;
   workbench.resetWorkspaceView();
 }
 
@@ -2854,6 +2867,11 @@ async function openServerWorkspacePicker() {
   } finally {
     serverWorkspacePickerLoading.value = false;
   }
+}
+
+function openReferenceConfiguration() {
+  if (!showReferenceConfiguration.value || !selectedAppId.value || !selectedWorkspace.value) return;
+  referenceConfigurationOpen.value = true;
 }
 
 async function selectServerWorkspaceServer(server: WorkspaceBackendServer) {
@@ -5847,6 +5865,7 @@ async function handleLogout() {
           :personal-workspace-branch="currentPersonalWorkspaceBranch"
           :agent-config-revision="agentConfigRevision"
           :show-server-workspace-switch="isSuperAdmin"
+          :show-reference-configuration="showReferenceConfiguration"
           :search-results="searchResults"
           :search-loading="searchLoading"
           :search-keyword="searchKeyword"
@@ -5869,6 +5888,7 @@ async function handleLogout() {
           @create-version="handleCreateVersion"
           @open-agent-file="openAgentFile"
           @open-server-workspace-picker="openServerWorkspacePicker"
+          @open-reference-configuration="openReferenceConfiguration"
           @search="handleFileSearch"
           @create-entry="handleCreateEntry"
           @delete-entry="handleDeleteEntry"
@@ -6183,6 +6203,13 @@ async function handleLogout() {
     @select-server="selectServerWorkspaceServer"
     @navigate="(path: string) => loadServerWorkspaceDirectories(path)"
     @select="selectServerWorkspaceDirectory"
+  />
+
+  <ReferenceConfigurationDialog
+    :open="referenceConfigurationOpen"
+    :app-id="selectedAppId ?? ''"
+    :workspace-id="selectedWorkspace?.workspaceId ?? ''"
+    @close="referenceConfigurationOpen = false"
   />
 
   <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" :initial-app-id="selectedAppId" @close="settingsOpen = false" />

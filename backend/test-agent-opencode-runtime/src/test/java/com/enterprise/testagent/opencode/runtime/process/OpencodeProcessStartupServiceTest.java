@@ -7,6 +7,8 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
+import com.enterprise.testagent.domain.configuration.CommonParameterValues;
+import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -100,6 +102,77 @@ class OpencodeProcessStartupServiceTest {
             assertThat(binding.processId()).isEqualTo(processId);
             assertThat(binding.createdAt()).isEqualTo(bindingCreatedAt);
         });
+    }
+
+    @Test
+    void startAndVerifyInjectsReferencesDirectoryResolvedForTargetPlatform() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        CommonParameterValues commonParameterValues = Mockito.mock(CommonParameterValues.class);
+        Mockito.when(commonParameterValues.resolvedValue("OPENCODE_REFERENCES_DIR", ParameterPlatform.current()))
+                .thenReturn(Optional.of(" /data/testagent/references "));
+        OpencodeProcessStartupService service = new OpencodeProcessStartupService(
+                repository,
+                repository,
+                gateway,
+                new RecordingHeartbeatStore(),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                commonParameterValues);
+
+        service.startAndVerify(request(null, null, null));
+
+        assertThat(gateway.startCommands).singleElement().satisfies(command ->
+                assertThat(command.environment())
+                        .containsEntry("OPENCODE_REFERENCES_DIR", "/data/testagent/references"));
+        Mockito.verify(commonParameterValues)
+                .resolvedValue("OPENCODE_REFERENCES_DIR", ParameterPlatform.current());
+    }
+
+    @Test
+    void startAndVerifySkipsReferencesDirectoryWhenTargetPlatformParameterIsMissing() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        CommonParameterValues commonParameterValues = Mockito.mock(CommonParameterValues.class);
+        Mockito.when(commonParameterValues.resolvedValue("OPENCODE_REFERENCES_DIR", ParameterPlatform.current()))
+                .thenReturn(Optional.empty());
+        OpencodeProcessStartupService service = new OpencodeProcessStartupService(
+                repository,
+                repository,
+                gateway,
+                new RecordingHeartbeatStore(),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                commonParameterValues);
+
+        service.startAndVerify(request(null, null, null));
+
+        assertThat(gateway.startCommands).singleElement().satisfies(command ->
+                assertThat(command.environment()).doesNotContainKey("OPENCODE_REFERENCES_DIR"));
+    }
+
+    @Test
+    void startAndVerifyKeepsExplicitReferencesDirectoryFromCaller() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        CommonParameterValues commonParameterValues = Mockito.mock(CommonParameterValues.class);
+        Mockito.when(commonParameterValues.resolvedValue("OPENCODE_REFERENCES_DIR", ParameterPlatform.current()))
+                .thenReturn(Optional.of("/data/platform/references"));
+        OpencodeProcessStartupService service = new OpencodeProcessStartupService(
+                repository,
+                repository,
+                gateway,
+                new RecordingHeartbeatStore(),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                commonParameterValues);
+
+        service.startAndVerify(request(
+                null,
+                null,
+                null,
+                Map.of("OPENCODE_REFERENCES_DIR", "/data/caller/references")));
+
+        assertThat(gateway.startCommands).singleElement().satisfies(command ->
+                assertThat(command.environment())
+                        .containsEntry("OPENCODE_REFERENCES_DIR", "/data/caller/references"));
     }
 
     @Test
@@ -258,6 +331,14 @@ class OpencodeProcessStartupServiceTest {
             OpencodeProcessId processId,
             Instant createdAt,
             Instant bindingCreatedAt) {
+        return request(processId, createdAt, bindingCreatedAt, Map.of());
+    }
+
+    private static OpencodeProcessStartupRequest request(
+            OpencodeProcessId processId,
+            Instant createdAt,
+            Instant bindingCreatedAt,
+            Map<String, String> environment) {
         return new OpencodeProcessStartupRequest(
                 USER_ID,
                 processId,
@@ -269,7 +350,7 @@ class OpencodeProcessStartupServiceTest {
                 "http://10.8.0.12:4097",
                 "/data/opencode/session/4097",
                 "/data/opencode/.config/opencode/",
-                java.util.Map.of(),
+                environment,
                 TRACE_ID);
     }
 

@@ -27,6 +27,7 @@
 - `web.aop.ApiLoggingAspect` 按目标 Controller logger 记录前端 HTTP 操作入口、出口、耗时、状态和脱敏请求/响应摘要；`contextToken` 与 Authorization、Cookie 等敏感字段同样强制掩码。`web.aop.WebSocketLoggingAspect` 按目标 WebSocket handler logger 记录前端长连接入口、结束信号和异常；`web.aop.ServiceLoggingAspect` 按目标 Service logger 记录业务服务入口、出口、耗时、状态和轻量参数摘要。三者统一进入 `logs/backend.log`，ERROR 级别同时进入 `logs/error.log`；SSE 相关 Controller/Service/logger 还会额外进入 `logs/sse.log`。
 - 暴露超级管理员运行管理 overview、容器/按稳定服务器身份的后端指标历史和有主/无主 opencode server 重启/停止 API；旧后端进程指标入口已作废。Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、后端指标 DTO 映射和 traceId 处理；后端指标 DTO 按可空字段透传服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped/GC/线程字段，并保留旧别名 `memoryMaxBytes`、`jvmGcPauseMillis`。重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是当前 Java 或同服务器选中 Java 时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 `port ... is not managed` 后重新拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员定时任务管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
+- 暴露应用引用资产库 5 个内部 API，`ReferenceRepositoryController` 只做 `APP_ADMIN` 鉴权（`SUPER_ADMIN` 继承）、初始化分支请求 DTO、traceId 和阻塞 Git/文件任务调度；列表、初始化、同步、状态、单层树的业务规则全部委托 workspace-management，不在 Controller 访问 Repository 或文件系统。
 - 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页参数、创建用户请求和单角色调整请求转换；用户创建、角色替换和 ROLE 字典校验委托 `test-agent-system-management`。
 - 暴露 AI Run 整体回复反馈 API：单查/写入按 `runId`，批量查询每次最多 100 个 Run；Controller 只读取当前登录用户和 traceId，成功状态、主对话与归属校验由 runtime 服务完成。旧 messageId API 保留兼容。
 - 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、通用筛选参数传递、CSV 响应头和统一错误转换；查询服务只读 rollup。
@@ -74,6 +75,7 @@
 - `PlatformOpencodeRuntimeControllerTest` 覆盖 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission reply、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/{agentId}/...` 原始 opencode 路径兼容、agentId、traceId 和可选用户主体透传。
 - `AuthWebSupportTest` 覆盖可选认证主体读取，确保 static-token 兼容入口不会因缺少用户主体抛错。
+- `ReferenceRepositoryControllerTest` 覆盖 5 个内部端点、初始化 body/traceId/当前用户透传、`APP_ADMIN` 成功、`SUPER_ADMIN` 继承和普通用户在调用业务服务前被拒绝。
 - `CurrentBackendWebSocketUrlFactoryTest`、`TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖当前 Java 绝对 WebSocket URL、PTY ticket、origin 拒绝、单会话互斥、输入限流、关闭和超时。
 - Workspace 文件 WebSocket 入口应覆盖 route、ticket、Origin、同服务器校验、ticket 在归属未 READY 时复查强状态、RPC 成功/错误 envelope、上传/复制/移动、普通文件/目录树删除和受保护 `.opencode` 根目录拒绝；对应 HTTP/协议契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、文件 WebSocket route/ticket/op、文件读写权限、Git stage/unstage/discard/冲突操作鉴权、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。

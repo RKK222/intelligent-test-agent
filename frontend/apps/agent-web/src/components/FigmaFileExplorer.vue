@@ -43,6 +43,8 @@ const props = defineProps<FileExplorerProps & {
   agentConfigRevision?: number;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
+  /** 是否显示应用管理员个人工作区引用配置入口 */
+  showReferenceConfiguration?: boolean;
   /** 搜索结果列表 */
   searchResults?: FileSearchResult[];
   /** 搜索加载中 */
@@ -78,6 +80,7 @@ const emit = defineEmits<{
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
   openAgentFile: [payload: AgentFileLoadRequest];
   openServerWorkspacePicker: [];
+  openReferenceConfiguration: [];
   // 搜索事件
   search: [keyword: string];
   // 创建文件或文件夹
@@ -489,10 +492,12 @@ defineExpose({
       :loading-versions="loadingAppVersions"
       :creating-version="creatingVersion"
       :show-server-workspace-switch="showServerWorkspaceSwitch"
+      :show-reference-configuration="showReferenceConfiguration"
       @select-version="(payload) => emit('selectVersion', payload)"
       @load-versions="(templateId: string) => emit('loadVersions', templateId)"
       @create-version="(payload) => emit('createVersion', payload)"
       @open-server-workspace-picker="emit('openServerWorkspacePicker')"
+      @open-reference-configuration="emit('openReferenceConfiguration')"
     />
 
     <Teleport to="body">

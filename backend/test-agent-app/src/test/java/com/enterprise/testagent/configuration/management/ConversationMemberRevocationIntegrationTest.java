@@ -18,6 +18,7 @@ import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepo
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
@@ -142,7 +143,8 @@ class ConversationMemberRevocationIntegrationTest {
                         mock(UserRepository.class),
                         mock(GitCloneCacheService.class),
                         mock(SshKeyEncryptionService.class),
-                        managedWorkspaceRepository);
+                        managedWorkspaceRepository,
+                        mock(ReferenceRepositoryRepository.class));
         configurationService.setConversationContextStore(contextStore);
         configurationService.removeMember(APP_ID.value(), USER_ID.value());
 
