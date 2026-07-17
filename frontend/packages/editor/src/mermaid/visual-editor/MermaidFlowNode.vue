@@ -266,29 +266,47 @@ function portClasses(portId: string) {
   };
 }
 
+function measurePort(element: HTMLElement): MermaidConnectionPortGeometry {
+  const rect = element.getBoundingClientRect();
+  return {
+    nodeId: props.id,
+    handleId: element.dataset.mermaidHandle ?? "",
+    position: (element.dataset.mermaidPosition ?? Position.Bottom) as Position,
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2
+  };
+}
+
 function findPortAtPoint(nodeElement: HTMLElement, point: { x: number; y: number }) {
-  const ports: MermaidConnectionPortGeometry[] = Array.from(
+  const ports = Array.from(
     nodeElement.querySelectorAll<HTMLElement>("[data-mermaid-handle]"),
-    (element) => {
-      const rect = element.getBoundingClientRect();
-      return {
-        nodeId: props.id,
-        handleId: element.dataset.mermaidHandle ?? "",
-        position: (element.dataset.mermaidPosition ?? Position.Bottom) as Position,
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2
-      };
-    }
+    measurePort
   );
   return findNearestConnectionPort(point, ports, MERMAID_SOURCE_HIT_RADIUS);
 }
 
-/** Handle 本身不接管事件；节点根元素使用更大的 18px 屏幕半径完成易选中的起线命中。 */
+/**
+ * 直接命中 Handle 时始终优先起线；选中节点只关闭外围 18px 扩展命中，
+ * 从而同时保留精确锚点拖线和节点正文拖动。
+ */
+function findConnectionStartPort(nodeElement: HTMLElement, target: EventTarget | null, point: { x: number; y: number }) {
+  const directHandle = target instanceof Element
+    ? target.closest<HTMLElement>("[data-mermaid-handle]")
+    : null;
+  if (directHandle && nodeElement.contains(directHandle)) return measurePort(directHandle);
+  if (props.selected) return undefined;
+  return findPortAtPoint(nodeElement, point);
+}
+
+/** 节点根元素统一解析直接 Handle 与 18px 扩展命中，并发出自定义起线事件。 */
 function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return;
-  if (props.selected) return;
   const nodeElement = event.currentTarget as HTMLElement;
-  const port = findPortAtPoint(nodeElement, { x: event.clientX, y: event.clientY });
+  const port = findConnectionStartPort(
+    nodeElement,
+    event.target,
+    { x: event.clientX, y: event.clientY }
+  );
   if (!port) return;
   event.preventDefault();
   event.stopPropagation();
@@ -304,9 +322,12 @@ function onPointerDown(event: PointerEvent) {
 /** Vue Flow 以 mousedown 启动节点拖拽，端口命中时需在根元素捕获阶段阻断该兼容鼠标事件。 */
 function preventNodeDragFromPort(event: MouseEvent) {
   if (event.button !== 0) return;
-  if (props.selected) return;
   const nodeElement = event.currentTarget as HTMLElement;
-  if (!findPortAtPoint(nodeElement, { x: event.clientX, y: event.clientY })) return;
+  if (!findConnectionStartPort(
+    nodeElement,
+    event.target,
+    { x: event.clientX, y: event.clientY }
+  )) return;
   event.preventDefault();
   event.stopPropagation();
 }

@@ -7623,3 +7623,17 @@ bash /tmp/test-api-after-restart.sh
   - 新增外层角标组件回归，扩充三作用域测试覆盖 docs、spec、应用 Skill 和公共 Agent；相关 3 个测试文件 41 passed，agent-web typecheck 通过，后端 18 模块打包成功。
 - Result:
   - 使用 `.env.test` / `test` profile 重启三服务，backend health/readiness 为 UP、前端 3000 返回 200。前端全量 1105 passed / 1 skipped / 1 failed，唯一失败来自任务外未提交宠物改动中“像素猫”测试与“星探狐”名册不一致。
+### 2026-07-17 - 修复 Mermaid 锚点拖线与连线重锚回归
+
+- Why:
+  - 14 类 Flowchart 节点增强后，选中节点会直接跳过锚点起线事件；选中连线的绿色端点又位于节点透明 Handle 下方，导致无法拖动更换锚点。松手早于最后一帧坐标刷新时还可能丢失有效吸附。
+- What:
+  - 选中和未选中节点直接命中可见 Handle 都可起线；仅未选中节点保留 18px 扩展命中区，选中节点的锚点外围继续用于拖动节点。`pointerdown` 与 `mousedown.capture` 统一复用同一端口判定。
+  - 编辑器显式维护边的 `selected` 与 `zIndex`：选中边提升到 1001，未选中边恢复为 0；绿色端点启用完整指针命中。松手时同步处理最终坐标后再提交新建或 source/target 重锚。
+- How:
+  - Vue Flow 测试替身改为真实渲染自定义边槽；TDD 覆盖 14 类节点选中/未选中起线、选中节点扩展区移动、边层级与标签编辑后的重锚，以及新建和两端重锚的动画帧竞态、同节点/跨节点、自环、判重与路由清除。
+  - 真实页面完成选中节点拖 Handle 建连、选中边绿色端点 `elementFromPoint` 命中和跨节点重锚，并确认浏览器无控制台错误。
+  - 根目录 `lint` 与 `typecheck` 都会构建 user-manual 并共用 VitePress `.temp`，并行执行会产生临时文件竞争；本次及后续应串行复验。
+- Result:
+  - Mermaid 两个定向测试文件 117 passed；前端全量 70 个测试文件 1125 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 均通过，构建仅保留既有大 chunk 提示。
+  - 同步 frontend 与 editor README；未修改公开类型、Mermaid 语法、API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增依赖。

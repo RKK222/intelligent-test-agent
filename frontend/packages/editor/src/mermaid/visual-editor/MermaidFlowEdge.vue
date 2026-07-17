@@ -84,6 +84,7 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
       :cy="props.sourceY"
       r="6"
       class="ta-mermaid-edge-handle"
+      pointer-events="all"
       aria-label="拖动起点重连"
       @pointerdown="onHandlePointerDown($event, 'source')"
     />
@@ -92,6 +93,7 @@ function onHandlePointerDown(event: PointerEvent, end: "source" | "target") {
       :cy="props.targetY"
       r="6"
       class="ta-mermaid-edge-handle"
+      pointer-events="all"
       aria-label="拖动终点重连"
       @pointerdown="onHandlePointerDown($event, 'target')"
     />

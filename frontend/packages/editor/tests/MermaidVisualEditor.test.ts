@@ -25,6 +25,37 @@ vi.mock("@vue-flow/core", () => ({
     },
     template: `<div data-testid="vue-flow-mock">
       <slot name="node-mermaid" v-for="node in (nodes || [])" :key="node.id" :id="node.id" :data="node.data" />
+      <div
+        v-for="edge in (edges || [])"
+        :key="edge.id"
+        :data-testid="'mock-flow-edge-' + edge.id"
+        :data-edge-selected="String(Boolean(edge.selected))"
+        :data-edge-z-index="String(edge.zIndex ?? 0)"
+      >
+        <slot
+          name="edge-mermaid-edge"
+          :id="edge.id"
+          :source="edge.source"
+          :target="edge.target"
+          :source-node="{ id: edge.source }"
+          :target-node="{ id: edge.target }"
+          :type="edge.type"
+          :source-x="10"
+          :source-y="20"
+          :target-x="100"
+          :target-y="20"
+          source-position="right"
+          target-position="left"
+          :source-handle-id="edge.sourceHandle"
+          :target-handle-id="edge.targetHandle"
+          :marker-end="edge.markerEnd"
+          marker-start=""
+          :style="edge.style || {}"
+          :data="edge.data || {}"
+          :events="{}"
+          :selected="Boolean(edge.selected)"
+        />
+      </div>
       <button data-testid="mock-drag" @click="$emit('nodeDragStop', { node: { id: 'A', position: { x: 480, y: 260 } } })">drag</button>
       <button data-testid="mock-connect" @click="$emit('connect', { source: 'B', target: 'A' })">connect</button>
       <button data-testid="mock-select" @click="$emit('nodeClick', { node: { id: 'A' } })">select</button>
@@ -605,6 +636,78 @@ describe("MermaidFlowNode", () => {
     expect(mouseDown.defaultPrevented).toBe(true);
   });
 
+  it.each([
+    "stadium", "rectangle", "rounded", "subroutine", "database", "circle", "diamond",
+    "hexagon", "parallelogram", "trapezoid", "double-circle", "text", "doc", "docs"
+  ] as const)("%s 节点无论是否选中，直接按住 Handle 均可发起拖线", (nodeType) => {
+    for (const selected of [false, true]) {
+      const { container, emitted, unmount } = render(MermaidFlowNode, {
+        props: {
+          id: "A",
+          data: { text: "节点", nodeType, direction: "LR" },
+          selected
+        }
+      });
+      const handle = container.querySelector<HTMLElement>('[data-testid="handle"]')!;
+      Object.defineProperty(handle, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ left: 0, top: 0, right: 16, bottom: 16, width: 16, height: 16 })
+      });
+      const event = new MouseEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 8,
+        clientY: 8
+      });
+      Object.defineProperty(event, "pointerId", { value: 7 });
+
+      handle.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(emitted().connectionStart).toHaveLength(1);
+      expect((emitted().connectionStart as Array<[{ handleId: string }]>)[0]?.[0].handleId)
+        .toBe(handle.dataset.handleId);
+      unmount();
+    }
+  });
+
+  it("选中节点只在直接 Handle 上阻止节点拖动，18px 外围仍交给节点移动", () => {
+    const { container, getAllByTestId } = render(MermaidFlowNode, {
+      props: {
+        id: "A",
+        data: { text: "节点", nodeType: "rectangle", direction: "LR" },
+        selected: true
+      }
+    });
+    const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
+    const handle = getAllByTestId("handle")[0] as HTMLElement;
+    Object.defineProperty(handle, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, right: 16, bottom: 16, width: 16, height: 16 })
+    });
+
+    const directMouseDown = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      clientX: 8,
+      clientY: 8
+    });
+    handle.dispatchEvent(directMouseDown);
+    expect(directMouseDown.defaultPrevented).toBe(true);
+
+    const expandedMouseDown = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      clientX: 25,
+      clientY: 8
+    });
+    root.dispatchEvent(expandedMouseDown);
+    expect(expandedMouseDown.defaultPrevented).toBe(false);
+  });
+
   it("拖线时区分起点、当前目标和有效或无效吸附状态", () => {
     const { container } = render(MermaidFlowNode, {
       props: {
@@ -629,6 +732,9 @@ describe("MermaidFlowEdge", () => {
       id: "edge-1",
       source: "A",
       target: "B",
+      sourceNode: { id: "A" },
+      targetNode: { id: "B" },
+      type: "mermaid-edge",
       sourceX: 10,
       sourceY: 20,
       sourcePosition: "right",
@@ -650,7 +756,9 @@ describe("MermaidFlowEdge", () => {
     expect(idle.container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(0);
 
     const active = render(MermaidFlowEdge, { props: edgeProps(true) });
-    expect(active.container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(2);
+    const handles = active.container.querySelectorAll(".ta-mermaid-edge-handle");
+    expect(handles).toHaveLength(2);
+    expect(Array.from(handles).every((handle) => handle.getAttribute("pointer-events") === "all")).toBe(true);
   });
 
   it("有文字时在边中点渲染标签，无文字不渲染", () => {
@@ -1092,6 +1200,43 @@ describe("MermaidVisualEditor", () => {
     await fireEvent.click(getByTestId("mock-pane-click"));
     expect(queryByLabelText("连线文字")).toBeNull();
     expect(queryByText("选择画布中的节点或连线后编辑。")).toBeTruthy();
+  });
+
+  it("选中连线后显示可重锚端点并提升图层，取消选中后恢复", async () => {
+    const { getByTestId, container } = render(MermaidVisualEditor, {
+      props: { modelValue: graph() }
+    });
+    const flowEdge = getByTestId("mock-flow-edge-edge-1");
+    expect(flowEdge.dataset.edgeSelected).toBe("false");
+    expect(flowEdge.dataset.edgeZIndex).toBe("0");
+    expect(container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(0);
+
+    await fireEvent.click(getByTestId("mock-edge-click"));
+    expect(flowEdge.dataset.edgeSelected).toBe("true");
+    expect(flowEdge.dataset.edgeZIndex).toBe("1001");
+    expect(container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(2);
+
+    await fireEvent.click(getByTestId("mock-pane-click"));
+    expect(flowEdge.dataset.edgeSelected).toBe("false");
+    expect(flowEdge.dataset.edgeZIndex).toBe("0");
+    expect(container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(0);
+  });
+
+  it("修改连线文字后保持连线选中与可重锚状态", async () => {
+    const EditorHost = defineComponent({
+      components: { MermaidVisualEditor },
+      setup() {
+        return { model: ref(graph()) };
+      },
+      template: `<MermaidVisualEditor v-model="model" />`
+    });
+    const { getByTestId, getByLabelText, container } = render(EditorHost);
+
+    await fireEvent.click(getByTestId("mock-edge-click"));
+    await fireEvent.update(getByLabelText("连线文字"), "更新后的连线");
+
+    expect(getByTestId("mock-flow-edge-edge-1").dataset.edgeSelected).toBe("true");
+    expect(container.querySelectorAll(".ta-mermaid-edge-handle")).toHaveLength(2);
   });
 
   it("快捷图形从被悬浮节点（而非被选中节点）发出连线", async () => {

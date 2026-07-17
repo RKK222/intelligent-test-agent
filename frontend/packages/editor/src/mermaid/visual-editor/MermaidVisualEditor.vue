@@ -51,7 +51,11 @@ const selectedNodeId = ref<string>();
 const selectedEdgeId = ref<string>();
 const isCanvasDragOver = ref(false);
 const flowNodes = computed(() => toVueFlowNodes(props.modelValue));
-const flowEdges = computed(() => toVueFlowEdges(props.modelValue));
+/** 选中边需要高于 Vue Flow 节点层，端点圆圈才能接收重锚拖拽。 */
+const flowEdges = computed(() => toVueFlowEdges(props.modelValue).map((edge) => {
+  const selected = edge.id === selectedEdgeId.value;
+  return { ...edge, selected, zIndex: selected ? 1001 : 0 };
+}));
 const selectedNode = computed(() => props.modelValue.nodes.find((node) => node.id === selectedNodeId.value));
 const selectedEdge = computed(() => props.modelValue.edges.find((edge) => edge.id === selectedEdgeId.value));
 

@@ -172,6 +172,58 @@ describe("Mermaid 拖线控制器", () => {
     expect(controller.isDragging.value).toBe(false);
   });
 
+  it("最终移动帧尚未执行时，松手仍按指针终点创建连接", () => {
+    const { controller, frames, onConnect, cancelAnimationFrame } = createControllerFixture();
+    controller.startConnection({
+      pointerId: 7,
+      nodeId: "A",
+      handleId: "source-0",
+      position: Position.Right,
+      point: { x: 120, y: 60 }
+    });
+
+    window.dispatchEvent(pointerEvent("pointermove", 250, 60));
+    expect(frames).toHaveLength(1);
+    window.dispatchEvent(pointerEvent("pointerup", 250, 60));
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
+    expect(onConnect).toHaveBeenCalledWith({
+      source: "A",
+      target: "B",
+      sourceHandle: "source-0",
+      targetHandle: "target-1"
+    });
+  });
+
+  it.each(["target", "source"] as const)(
+    "最终移动帧尚未执行时，松手仍提交 %s 端重连",
+    (end) => {
+      const fixture = createControllerFixture(true);
+      if (end === "source") {
+        Object.defineProperty(document, "elementsFromPoint", {
+          configurable: true,
+          value: vi.fn(() => [fixture.sourcePort, fixture.sourceNode, fixture.canvas])
+        });
+      }
+      const start = end === "target"
+        ? { pointerId: 7, nodeId: "A", handleId: "source-0", position: Position.Right, point: { x: 120, y: 60 } }
+        : { pointerId: 7, nodeId: "B", handleId: "target-1", position: Position.Left, point: { x: 250, y: 60 } };
+      const finalPoint = end === "target" ? { x: 250, y: 60 } : { x: 120, y: 60 };
+      fixture.controller.startConnection(start, { reconnect: { edgeId: "edge-1", end } });
+
+      window.dispatchEvent(pointerEvent("pointermove", finalPoint.x, finalPoint.y));
+      expect(fixture.frames).toHaveLength(1);
+      window.dispatchEvent(pointerEvent("pointerup", finalPoint.x, finalPoint.y));
+
+      expect(fixture.onReconnect).toHaveBeenCalledWith("edge-1", end, {
+        source: "A",
+        target: "B",
+        sourceHandle: "source-0",
+        targetHandle: "target-1"
+      });
+    }
+  );
+
   it("重复边显示无效吸附且松开不写入", () => {
     const { controller, frames, onConnect } = createControllerFixture(true);
     controller.startConnection({
