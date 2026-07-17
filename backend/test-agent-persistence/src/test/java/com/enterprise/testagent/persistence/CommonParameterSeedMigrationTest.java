@@ -24,4 +24,19 @@ class CommonParameterSeedMigrationTest {
         assertThat(sql).contains(
                 "'param_sys_data_root_dir_windows', 'SYS_DATA_ROOT_DIR', '系统数据根目录', 'D:/data/.testagent', 'windows'");
     }
+
+    @Test
+    void referencesParamsSeedContainsAllPlatformDefaults() throws Exception {
+        String sql = Files.readString(Path.of(
+                "src/main/resources/db/migration/V20260718100000__seed_references_params.sql"));
+
+        assertThat(sql).contains("OPENCODE_REFERENCES_DIR", "引用资产根目录", "REFERENCES_SDD_FOLDER_NAMES", "规格驱动标准目录名称");
+        // 引用资产根目录：all 平台、值引用 SYS_DATA_ROOT_DIR、只读（editable=false）。
+        // 值用 '$' || '{SYS_DATA_ROOT_DIR}/...' 拼接规避 Flyway 占位符替换，故断言拼接片段。
+        assertThat(sql).contains(
+                "'param_opencode_references_dir_all', 'OPENCODE_REFERENCES_DIR', '引用资产根目录', '$' || '{SYS_DATA_ROOT_DIR}/agent-opencode/references', 'all', false");
+        // 规格驱动标准目录名称：all 平台、可改（editable=true）。
+        assertThat(sql).contains(
+                "'param_references_sdd_folder_names_all', 'REFERENCES_SDD_FOLDER_NAMES', '规格驱动标准目录名称', 'docs,spec', 'all', true");
+    }
 }

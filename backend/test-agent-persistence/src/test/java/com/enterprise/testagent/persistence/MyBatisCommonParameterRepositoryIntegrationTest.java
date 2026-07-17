@@ -75,6 +75,21 @@ class MyBatisCommonParameterRepositoryIntegrationTest {
                     assertThat(parameter.chineseName()).isEqualTo("公共agent配置Git库地址");
                     assertThat(parameter.editable()).isTrue();
                 });
+        // 引用资产参数：根目录引用 SYS_DATA_ROOT_DIR（all 平台、只读）；规格目录名称清单可改。
+        assertThat(repository.findByEnglishNameAndPlatform("OPENCODE_REFERENCES_DIR", ParameterPlatform.ALL))
+                .get()
+                .satisfies(parameter -> {
+                    assertThat(parameter.parameterValue()).isEqualTo("${SYS_DATA_ROOT_DIR}/agent-opencode/references");
+                    assertThat(parameter.chineseName()).isEqualTo("引用资产根目录");
+                    assertThat(parameter.editable()).isFalse();
+                });
+        assertThat(repository.findByEnglishNameAndPlatform("REFERENCES_SDD_FOLDER_NAMES", ParameterPlatform.ALL))
+                .get()
+                .satisfies(parameter -> {
+                    assertThat(parameter.parameterValue()).isEqualTo("docs,spec");
+                    assertThat(parameter.chineseName()).isEqualTo("规格驱动标准目录名称");
+                    assertThat(parameter.editable()).isTrue();
+                });
     }
 
     @Test

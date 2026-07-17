@@ -494,6 +494,23 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `tools/cleanup-old-path-data.sql` 的默认审计模式；确认引用后，再传入 `apply_cleanup=true` 和绝对 `test_agent_root` 迁移 `workspaces`、版本、replica、个人工作区、Agent worktree 和非运行 opencode 进程的路径字段。六个 macOS 通用参数和公共 Git 地址参数必须通过通用参数管理 API/页面修改，以保留修改历史并触发配置联动。该脚本不删除 Session、Run、审计记录或磁盘目录，也不是 Flyway migration。
 
 
+## V20260718100000 通用参数种子引用资产参数
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260718100000__seed_references_params.sql` 初始化引用资产相关通用参数：
+
+| 参数 | 平台 | 默认值 | editable | 说明 |
+|---|---|---|---|---|
+| `OPENCODE_REFERENCES_DIR` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/references` | `false` | 引用资产根目录，统一引用 `SYS_DATA_ROOT_DIR`，运行态由通用参数解析器按当前/目标平台展开。只读，不允许前端修改。 |
+| `REFERENCES_SDD_FOLDER_NAMES` | `all` | `docs,spec` | `true` | 规格驱动（SDD）场景识别规格目录的名称清单，逗号分隔、小写。允许前端按团队约定调整。 |
+
+兼容策略：
+
+- 两参数均为 `platform=all` 单行；`OPENCODE_REFERENCES_DIR` 复用 `all` 行引用平台参数 `SYS_DATA_ROOT_DIR` 的解析能力（`SYS_DATA_ROOT_DIR` 仅有 linux/windows/macos 行，无 all 行），与 `OPENCODE_SESSION_DIR` 等路径参数一致。macOS 实际路径为 `$HOME/.testagent/agent-opencode/references`，Linux 为 `/data/.testagent/agent-opencode/references`，Windows 为 `D:/data/.testagent/agent-opencode/references`。
+- Flyway 默认把 `${...}` 当作占位符替换，故 `OPENCODE_REFERENCES_DIR` 的值在 SQL 中用 `'$' || '{SYS_DATA_ROOT_DIR}/agent-opencode/references'` 拼接，使 SQL 文本不出现占位符序列，DB 实际存储美元符加大括号包裹的 `SYS_DATA_ROOT_DIR` 字面量；`REFERENCES_SDD_FOLDER_NAMES` 值无占位符，直接以字面量写入。
+- `OPENCODE_REFERENCES_DIR` 为部署/初始化参数（`editable=false`），更新返回 `VALIDATION_ERROR`「该通用参数为只读参数，修改后将影响系统正常运行」；`REFERENCES_SDD_FOLDER_NAMES` 为可改参数（`editable=true`），修改后经 `common-parameter.refresh-requested` 跨实例广播保证 DB 一致。二者均不触发 opencode manager 热刷新，由消费方下次读取时直读 DB 生效。
+- 该参数属于生产运行所需系统参数，不是测试或演示数据；既有环境如需调整实际目录或目录名清单，应通过通用参数管理页面/API 修改 value，不改写已发布 migration。
+
+
 ## V20260626170000 公共 Agent 配置管理
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260626170000__add_agent_config_management.sql` 增加公共 Agent 配置参数、worktree 记录和 Git 长操作进度表。
