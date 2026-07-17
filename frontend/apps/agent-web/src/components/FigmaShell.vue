@@ -604,6 +604,18 @@ function toggleRobotFixed() {
 function cleanupRobotDrag() {
   if (!robotDragging.value && robotDragPointerId === null) return;
 
+  // 释放指针捕获，防止对后续页面交互产生副作用
+  if (robotDragPointerId !== null) {
+    const el = document.querySelector(".figma-robot-agent") as HTMLElement;
+    if (el && typeof el.releasePointerCapture === "function") {
+      try {
+        el.releasePointerCapture(robotDragPointerId);
+      } catch (e) {
+        // 捕获异常，确保在不支持 releasePointerCapture 的老版本/兼容性模式下不崩溃
+      }
+    }
+  }
+
   robotDragging.value = false;
   robotDragPointerId = null;
   window.removeEventListener("pointermove", onRobotPointerMove, true);
@@ -614,8 +626,21 @@ function cleanupRobotDrag() {
 }
 
 function onRobotPointerDown(event: PointerEvent) {
-  if (event.isPrimary === false || robotDragPointerId !== null) return;
+  // 移除 event.isPrimary === false 限制，避免远程桌面/虚拟驱动等情况下因 isPrimary 属性误判为 false 阻断拖拽。
+  // robotDragPointerId !== null 锁已能防止多指拖拽冲突。
+  if (robotDragPointerId !== null) return;
   if (event.button !== 0 && event.pointerType === "mouse") return;
+
+  // 捕获指针事件，避免触控板/触屏手势触发滚动/缩放等默认行为导致的 pointercancel
+  const el = event.currentTarget as HTMLElement;
+  if (el && typeof el.setPointerCapture === "function") {
+    try {
+      el.setPointerCapture(event.pointerId);
+    } catch (e) {
+      // 兼容不支持 setPointerCapture 的旧版或特定定制版 Chromium
+    }
+  }
+
   robotDragPointerId = event.pointerId;
   robotDragStartClientX = event.clientX;
   robotDragStartClientY = event.clientY;

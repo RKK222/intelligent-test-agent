@@ -1,5 +1,21 @@
 # Session Log
 
+### 2026-07-17 - 修复企业内部小宠物拖拽失败与手势取消兼容
+
+- Why:
+  - 交付的宠物拖拽在企业云桌面（如 Citrix/RDP）和特定低版本 Chromium 108 上依旧无法工作。排查后发现两个关键阻断原因：
+    1. 远程桌面/多输入设备在分发 `PointerEvent` 时经常误将 `isPrimary` 设置为 `false`，从而在 `onRobotPointerDown` 中被直接 return 拦截。
+    2. 缺少 `Pointer Capture`（指针捕获）导致在触屏或触控板上移动时，很容易被浏览器误识别为原生的滚动/平移手势，触发原生 `pointercancel` 瞬间结束拖动。
+- What:
+  - 彻底移除了 `event.isPrimary === false` 的冗余判定（因为在单指针场景中，已有的 `robotDragPointerId !== null` 加锁可以完全满足防护要求）。
+  - 在 pointerdown 时使用 try-catch 包裹显式调用 `setPointerCapture`，并在 cleanup 拖动时显式调用 `releasePointerCapture`。通过 pointer capture 自动禁用浏览器的默认滚动/缩放手势识别，阻止 `pointercancel` 触发，同时保留 window 级捕获阶段 move 事件监听作为双保险。
+- How:
+  - 在 [FigmaShell.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/FigmaShell.vue) 修改 `onRobotPointerDown` 和 `cleanupRobotDrag`。
+  - 同步修改 [FigmaShell.test.ts](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/tests/FigmaShell.test.ts) 中的测试用例，将 mock `setPointerCapture` 抛 DOMException 的用例调整为期望 setPointerCapture 被调用但即使抛错也能正确回退至 window 级拖拽，保持在不支持 capture 的遗留内核下的平滑回退。
+- Result:
+  - 全量 Vitest 单元测试 `FigmaShell.test.ts` 中的 40 个测试用例全部 100% 通过。
+  - 前端 `@test-agent/agent-web` 的 `vue-tsc` 类型检查完全通过，没有任何报错。
+
 ### 2026-07-16 - 交付并发布精简版应用测试资产库初始化骨架
 
 - Why:

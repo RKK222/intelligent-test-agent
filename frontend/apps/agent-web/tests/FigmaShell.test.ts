@@ -126,7 +126,7 @@ describe("FigmaShell", () => {
     expect(robot.attributes("style")).toContain("top: 150px");
   });
 
-  it("drags without invoking pointer capture in the Chromium 108 compatibility path", async () => {
+  it("drags successfully even if pointer capture throws DOMException in the compatibility path", async () => {
     window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 100, y: 100 }));
     const wrapper = mountShell();
     await wrapper.vm.$nextTick();
@@ -145,7 +145,7 @@ describe("FigmaShell", () => {
     dispatchPointer(window, "pointerup", 81, 145, 135, "mouse");
     await wrapper.vm.$nextTick();
 
-    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(setPointerCapture).toHaveBeenCalled();
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 145, y: 135 }));
   });
 
