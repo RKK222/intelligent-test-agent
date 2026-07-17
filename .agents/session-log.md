@@ -14,6 +14,23 @@
 - Result:
   - 本地主干同时保留远端工作区文件功能、本地加载竞态保护和 Mermaid 功能，应用级 Agent 不再可能从 feature workspace 读取后误写个人 workspace，删除/改名/路由切换也不会残留失效或永久 loading 的 tab。
   - 不改变 HTTP API、文件 WebSocket wire、RunEvent、数据库、鉴权或环境配置；仅增加前端合成 tab 身份中的 workspace 路由信息，兼容旧 tab 解析但禁止旧 tab 回退到个人 workspace 写入。生产构建仍只有既有大 chunk 提示，无未完成代码事项。
+
+### 2026-07-17 - 公共 Agent 配置改为按用户个人 worktree 并统一 Git 交互
+
+- Why:
+  - 用户反馈项目内 `@` 子智能体仍可能读取公共 Agent 的旧副本，并要求公共区域虽然不按应用版本管理，也要像应用一样为每个用户建立稳定的本地分支与 worktree；公共文件编辑后的提交、推送和冲突合并交互需与应用保持一致。
+- What:
+  - 公共配置 worktree 改为每用户、每服务器一个稳定 `public-{userId}` 分支，不再带版本或日期；进入公共区时自动查询并复用当前用户的有效 worktree，不存在时自动创建，列表、文件和 Git 操作均校验归属，不能访问其他用户的 worktree。
+  - 公共配置发布改为在个人 worktree 中 fetch/merge 公共远端分支，再以非强制 refspec 推送到公共分支；冲突保留在个人 worktree 供继续处理，成功后才同步共享运行副本并广播，个人 worktree 保持 ACTIVE。
+  - 前端把公共 Agent 的 diff、暂存、提交、推送、冲突文件、保留本地/远程和取消合并统一收敛到应用既有 Git 变更面板与进度弹框，移除公共区单独的切换、直接更新和冲突入口；同步前后端 README 与 HTTP API 文档。
+- How:
+  - 复用 `GitWorkspaceService`、Agent 配置文件 WebSocket route/ticket/RPC、既有操作进度和 Git 冲突编辑器；新增非 force 的 `sourceBranch:targetBranch` 推送能力，没有新增文件 HTTP 代理、数据库字段或事件类型。
+  - 前端相关 39 项 Vitest、typecheck，以及后端 common/workspace/API 相关 81 项测试通过；完整后端启动构建通过。前端全量 Vitest 另有 2 个无关 Mermaid 可视化编辑异步用例失败，其余 994 项通过，本次未扩大范围修改。
+  - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端和登录 CORS 为 200，manager WebSocket 已连接且无重连或解码异常。
+- Result:
+  - 公共 Agent 文件现在始终在当前用户自己的长期 worktree 中编辑和提交；推送前会合并最新公共分支，冲突可在与应用一致的界面中解决，发布后共享运行副本和其他使用方会收到更新。
+  - HTTP DTO、文件 WebSocket RPC 和事件字段形状保持兼容；不涉及数据库、SQL、generated SDK、环境配置或安全权限扩张，公共写权限仍仅限超级管理员。
+
 ### 2026-07-17 - 基于最新工作区文件功能重建企业离线包
 
 - Why:

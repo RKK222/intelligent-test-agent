@@ -31,7 +31,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - `WorkspaceDirectoryServiceTest` 覆盖服务器工作空间选择器的默认目录、只返回子目录、排序、父目录、条目上限和缺失目录错误码。
 - `GitPublishWorkflowTest` 覆盖直接发布、worktree 合并发布、冲突文件收集、merge abort、abort 失败保护，以及同步文件时先 clean/pull 再复制提交推送。
 - `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验及 `FORBIDDEN` 加载上下文、托管逻辑路径、个人 worktree 创建、Git diff、个人 worktree 本地提交、从个人 `HEAD` 按白名单投影并推送 feature、所有角色 spec 禁推、应用 Agent 发布后的版本 HEAD 更新和广播、应用副本只读 Git 操作及失败阶段命令透传；同步接口覆盖仅使用已提交文件的兼容路径。
-- `AgentConfigApplicationServiceTest` 覆盖公共 Git 地址未配置禁用、内部公共 Git 片段在分支查询时按当前统一认证号拼接、公共更新/初始化 clone 与广播、脏仓库保持可浏览并返回真实待提交路径、默认拒绝覆盖和显式恢复已跟踪修改、公共提交并推送在 fetch 前刷新当前管理员 origin、先 fetch 后 merge 远端、远端 merge 冲突不推送、冲突解决后继续提交 merge index、公共 worktree 未初始化时拒绝 clone、worktree 名称拼接日期、服务器归属保存、公共 worktree 切换列表按服务器/状态过滤并返回创建人、Agent 配置文件服务器归属查询、公共/工作空间级 diff patch 聚合、公共/工作空间 worktree publish 冲突文件返回与不推送，以及工作空间级 `.opencode/` 根下 `agents/` 与 `skills/` 技能包读写和 diff 过滤。`GitRemoteServiceTest` / `ProcessGitCommandExecutorTest` 覆盖远端只读查询 60 秒超时边界、Git 命令开始/成功日志输出和超时 details 命令脱敏。
+- `AgentConfigApplicationServiceTest` 覆盖公共仓库初始化/更新、当前用户长期公共 worktree 的稳定命名与复用、按服务器和创建人过滤、跨用户操作拒绝、公共个人分支合并远端后以 refspec 推送到公共分支、冲突保留在个人 worktree、共享运行时副本同步与广播，以及工作空间级 Agent/Skill 配置读写和 diff。
 
 ## 允许依赖
 

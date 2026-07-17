@@ -161,7 +161,7 @@ public class AgentConfigController {
             @RequestParam(required = false) String worktreeId,
             @RequestParam(required = false) String linuxServerId,
             ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
         return publicConflictTarget(worktreeId, linuxServerId)
                 .map(target -> routingService.forward(
                         exchange,
@@ -169,7 +169,7 @@ public class AgentConfigController {
                         null,
                         new TypeReference<ApiResponse<Object>>() {}))
                 .orElseGet(() -> ok(exchange, new AgentConfigDtos.GitConflictFilesResponse(
-                        service.publicGitConflictFiles(worktreeId))));
+                        service.publicGitConflictFiles(worktreeId, principal.userId()))));
     }
 
     @GetMapping("/public/git-conflict")
@@ -178,14 +178,14 @@ public class AgentConfigController {
             @RequestParam(required = false) String worktreeId,
             @RequestParam(required = false) String linuxServerId,
             ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
         return publicConflictTarget(worktreeId, linuxServerId)
                 .map(target -> routingService.forward(
                         exchange,
                         target,
                         null,
                         new TypeReference<ApiResponse<Object>>() {}))
-                .orElseGet(() -> ok(exchange, service.getPublicGitConflict(path, worktreeId)));
+                .orElseGet(() -> ok(exchange, service.getPublicGitConflict(path, worktreeId, principal.userId())));
     }
 
     @PostMapping("/public/git-conflict/resolve")
@@ -282,16 +282,16 @@ public class AgentConfigController {
     public ApiResponse<List<AgentConfigResponses.AgentConfigWorktreeOptionResponse>> publicWorktrees(
             @RequestParam(required = false) String linuxServerId,
             ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
         if (linuxServerId == null || linuxServerId.isBlank()) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "服务器不能为空", Map.of("linuxServerId", ""));
         }
-        return ApiResponse.ok(service.listPublicWorktrees(linuxServerId), RuntimeApiSupport.traceId(exchange));
+        return ApiResponse.ok(service.listPublicWorktrees(linuxServerId, principal.userId()), RuntimeApiSupport.traceId(exchange));
     }
 
     @GetMapping("/public/diff")
     public ApiResponse<Object> publicDiff(@RequestParam(required = false) String worktreeId, ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
         var target = routingService.forwardTargetForPublicWorktree(worktreeId);
         if (target.isPresent()) {
             return routingService.forward(
@@ -300,7 +300,7 @@ public class AgentConfigController {
                     null,
                     new TypeReference<ApiResponse<Object>>() {});
         }
-        return ok(exchange, service.publicDiff(worktreeId));
+        return ok(exchange, service.publicDiff(worktreeId, principal.userId()));
     }
 
     @PostMapping("/public/stage")

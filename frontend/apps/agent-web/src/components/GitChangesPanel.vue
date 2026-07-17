@@ -128,6 +128,7 @@ const committing = ref(false);
 const errorMessage = ref("");
 const progressMessage = ref("");
 const activeConflict = ref<WorkspaceGitConflict | null>(null);
+const activeConflictScope = ref<"WORKSPACE" | "PUBLIC" | null>(null);
 const conflictLoading = ref(false);
 const conflictResolving = ref(false);
 const showCommitProgressDialog = ref(false);
@@ -139,6 +140,11 @@ const mergeResolutionCompleted = ref(false);
 
 type PublishGitStep =
   | "PREPARE_REMOTE"
+  | "PREPARING_REPOSITORY"
+  | "COMMITTING"
+  | "MERGING"
+  | "PUSHING"
+  | "BROADCASTING"
   | "PROJECT_HEAD"
   | "COMMIT_FEATURE"
   | "PUSH_REMOTE"
@@ -185,13 +191,19 @@ function getCommitStepStatusText(stepNum: number) {
 
 function commitStepNumber(step?: string | null): number {
   switch (step) {
+    case "COMMITTING":
+      return 2;
+    case "MERGING":
     case "PROJECT_HEAD":
       return 3;
+    case "PUSHING":
     case "COMMIT_FEATURE":
     case "PUSH_REMOTE":
       return 4;
+    case "BROADCASTING":
     case "COMPLETED":
       return 5;
+    case "PREPARING_REPOSITORY":
     case "PREPARE_REMOTE":
     default:
       return 1;
@@ -206,10 +218,16 @@ function commandsForStep(commands: string[] | undefined, step?: string | null): 
     switch (step as PublishGitStep) {
       case "PREPARE_REMOTE":
         return normalized.includes(" fetch ") || normalized.includes(" pull ");
+      case "PREPARING_REPOSITORY":
+        return normalized.includes(" status ") || normalized.includes(" fetch ") || normalized.includes(" pull ");
       case "PROJECT_HEAD":
         return normalized.includes(" checkout ") || normalized.includes(" rm ");
+      case "MERGING":
+        return normalized.includes(" merge ");
+      case "COMMITTING":
       case "COMMIT_FEATURE":
         return normalized.includes(" commit ");
+      case "PUSHING":
       case "PUSH_REMOTE":
         return normalized.includes(" push ");
       default:
@@ -305,21 +323,36 @@ const workspaceGitMutationPending = computed(() =>
 // Agent diff lists (Public + Workspace)
 const publicAgentDiffs = ref<AgentConfigDiffFile[]>([]);
 const workspaceAgentDiffs = ref<AgentConfigDiffFile[]>([]);
+const publicAgentConflicts = computed(() =>
+  publicAgentDiffs.value
+    .filter((file) => isConflictFile(file))
+    .map((file) => ({ ...file, scope: "PUBLIC" as const }))
+);
+const hasPublicAgentConflicts = computed(() => publicAgentConflicts.value.length > 0);
+const hasBlockingAgentConflicts = computed(() =>
+  canWriteAgentScope("PUBLIC") && hasPublicAgentConflicts.value
+);
 
 const agentsUnstaged = computed(() => {
   const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
+  publicAgentDiffs.value.forEach((f) => {
+    if (!f.staged && !isConflictFile(f)) list.push({ ...f, scope: "PUBLIC" });
+  });
   workspaceAgentDiffs.value.forEach((f) => {
     const path = normalizeWorkspaceAgentDiffPath(f.path);
-    if (!f.staged && path) list.push({ ...f, path, scope: "WORKSPACE" });
+    if (!f.staged && path && !isConflictFile(f)) list.push({ ...f, path, scope: "WORKSPACE" });
   });
   return list;
 });
 
 const agentsStaged = computed(() => {
   const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
+  publicAgentDiffs.value.forEach((f) => {
+    if (f.staged && !isConflictFile(f)) list.push({ ...f, scope: "PUBLIC" });
+  });
   workspaceAgentDiffs.value.forEach((f) => {
     const path = normalizeWorkspaceAgentDiffPath(f.path);
-    if (f.staged && path) list.push({ ...f, path, scope: "WORKSPACE" });
+    if (f.staged && path && !isConflictFile(f)) list.push({ ...f, path, scope: "WORKSPACE" });
   });
   return list;
 });
@@ -342,7 +375,12 @@ const hasPublishableStagedChanges = computed(() =>
 );
 
 // Overall counts
-const totalUnstagedCount = computed(() => workspaceUnstaged.value.length + workspaceConflicts.value.length + agentsUnstaged.value.length);
+const totalUnstagedCount = computed(() =>
+  workspaceUnstaged.value.length
+  + workspaceConflicts.value.length
+  + publicAgentConflicts.value.length
+  + agentsUnstaged.value.length
+);
 const totalStagedCount = computed(() => workspaceStaged.value.length + agentsStaged.value.length);
 
 // Watch for workspace change
@@ -564,6 +602,7 @@ async function openWorkspaceConflict(path: string) {
   errorMessage.value = "";
   try {
     activeConflict.value = await api.getWorkspaceGitConflict(props.workspaceId, path);
+    activeConflictScope.value = "WORKSPACE";
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "读取 Git 冲突失败");
   } finally {
@@ -582,6 +621,7 @@ async function resolveWorkspaceConflict(payload: {
     const path = activeConflict.value.path;
     await api.resolveWorkspaceGitConflict(props.workspaceId, { path, ...payload });
     activeConflict.value = null;
+    activeConflictScope.value = null;
     await refreshChanges();
     mergeResolutionCompleted.value = workspaceConflicts.value.length === 0;
     notifyChangesRefreshed([path], true);
@@ -599,6 +639,7 @@ async function abortWorkspaceConflict() {
   try {
     await api.abortWorkspaceGitConflict(props.workspaceId);
     activeConflict.value = null;
+    activeConflictScope.value = null;
     mergeResolutionCompleted.value = false;
     await refreshChanges();
     notifyChangesRefreshed(undefined, true);
@@ -618,6 +659,7 @@ async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") 
   try {
     await api.resolveAllWorkspaceGitConflicts(props.workspaceId, { resolution });
     activeConflict.value = null;
+    activeConflictScope.value = null;
     await refreshChanges();
     mergeResolutionCompleted.value = workspaceConflicts.value.length === 0;
     notifyChangesRefreshed(undefined, true);
@@ -626,6 +668,101 @@ async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") 
   } finally {
     conflictResolving.value = false;
   }
+}
+
+async function openPublicAgentConflict(path: string) {
+  if (!canWriteAgentScope("PUBLIC") || !workbench.publicWorktree?.worktreeId || conflictLoading.value) return;
+  conflictLoading.value = true;
+  errorMessage.value = "";
+  try {
+    activeConflict.value = await api.getPublicAgentGitConflict(
+      path,
+      workbench.publicWorktree.worktreeId,
+      workbench.publicWorktree.linuxServerId ?? undefined
+    );
+    activeConflictScope.value = "PUBLIC";
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "读取公共 Agent Git 冲突失败");
+  } finally {
+    conflictLoading.value = false;
+  }
+}
+
+async function resolvePublicAgentConflict(payload: {
+  resolution: WorkspaceGitConflictResolution;
+  content?: string | null;
+}) {
+  if (!activeConflict.value || !workbench.publicWorktree?.worktreeId || conflictResolving.value) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.resolvePublicAgentGitConflict({
+      path: activeConflict.value.path,
+      ...payload,
+      worktreeId: workbench.publicWorktree.worktreeId,
+      linuxServerId: workbench.publicWorktree.linuxServerId
+    });
+    activeConflict.value = null;
+    activeConflictScope.value = null;
+    await refreshChanges();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "解决公共 Agent Git 冲突失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+async function abortPublicAgentConflict() {
+  if (!workbench.publicWorktree?.worktreeId || conflictResolving.value) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.abortPublicAgentGitConflict(
+      workbench.publicWorktree.worktreeId,
+      workbench.publicWorktree.linuxServerId ?? undefined
+    );
+    activeConflict.value = null;
+    activeConflictScope.value = null;
+    await refreshChanges();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "取消公共 Agent Git 合并失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+async function resolveAllPublicAgentConflicts(resolution: "CURRENT" | "INCOMING") {
+  if (!workbench.publicWorktree?.worktreeId || conflictResolving.value) return;
+  const label = resolution === "CURRENT" ? "本地个人版本" : "远端公共版本";
+  if (!window.confirm(`将 ${publicAgentConflicts.value.length} 个公共 Agent 冲突文件全部采用${label}，是否继续？`)) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.resolveAllPublicAgentGitConflicts({
+      resolution,
+      worktreeId: workbench.publicWorktree.worktreeId,
+      linuxServerId: workbench.publicWorktree.linuxServerId
+    });
+    activeConflict.value = null;
+    activeConflictScope.value = null;
+    await refreshChanges();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "批量解决公共 Agent Git 冲突失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+function resolveActiveConflict(payload: { resolution: WorkspaceGitConflictResolution; content?: string | null }) {
+  return activeConflictScope.value === "PUBLIC"
+    ? resolvePublicAgentConflict(payload)
+    : resolveWorkspaceConflict(payload);
+}
+
+function abortActiveConflict() {
+  return activeConflictScope.value === "PUBLIC"
+    ? abortPublicAgentConflict()
+    : abortWorkspaceConflict();
 }
 
 // 批量丢弃与单文件回退共用后端多路径 API，并一次刷新文件树和 Diff 状态。
@@ -751,6 +888,11 @@ async function handleCommit(push = false) {
   if (committing.value || !hasWritableStagedChanges.value) return;
   if (props.canWrite && hasWorkspaceConflicts.value) {
     errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
+    progressMessage.value = "";
+    return;
+  }
+  if (hasBlockingAgentConflicts.value) {
+    errorMessage.value = "公共 Agent 个人 worktree 存在合并冲突，请先解决冲突文件后再提交并推送。";
     progressMessage.value = "";
     return;
   }
@@ -884,43 +1026,53 @@ async function handleCommit(push = false) {
       : 0;
     if (publicStagedCount > 0) {
       progressMessage.value = "正在提交公共 Agent 配置...";
+      showCommitProgressDialog.value = true;
+      commitStep.value = 2;
       const opId = newOperationId();
       await runAgentOperation(
         () => api.commitPublicAgentConfig({ message: msg, worktreeId: workbench.publicWorktree?.worktreeId, operationId: opId }),
         "提交公共 Agent 配置",
         opId
       );
+      commitStep.value = 2;
       if (push) {
+        publishAttempted = true;
         progressMessage.value = "正在发布公共 Agent 配置...";
         const pushOpId = newOperationId();
         await runAgentOperation(
           () => api.publishPublicAgentConfig(workbench.publicWorktree?.worktreeId, pushOpId),
           "发布公共 Agent 配置",
-          pushOpId
+          pushOpId,
+          true
         );
+        commitStep.value = 5;
         remotePublishCompleted = true;
       }
     }
 
     // 3. Commit Agent WORKSPACE changes
-    const workspaceStagedCount = canWriteAgentScope("WORKSPACE")
+      const workspaceStagedCount = canWriteAgentScope("WORKSPACE")
       ? workspaceAgentDiffs.value.filter((f) => f.staged).length
       : 0;
     if (workspaceStagedCount > 0 && effectiveAgentConfigWorkspaceId.value) {
       progressMessage.value = "正在提交工作空间 Agent 配置...";
+      showCommitProgressDialog.value = true;
+      commitStep.value = 2;
       const opId = newOperationId();
       await runAgentOperation(
         () => api.commitWorkspaceAgentConfig(effectiveAgentConfigWorkspaceId.value!, { message: msg, worktreeId: workbench.workspaceWorktree?.worktreeId, operationId: opId }),
         "提交工作空间 Agent 配置",
         opId
       );
+      commitStep.value = 2;
       if (push) {
         progressMessage.value = "正在发布工作空间 Agent 配置...";
         const pushOpId = newOperationId();
         await runAgentOperation(
           () => api.publishWorkspaceAgentConfig(effectiveAgentConfigWorkspaceId.value!, workbench.workspaceWorktree?.worktreeId, pushOpId),
           "发布工作空间 Agent 配置",
-          pushOpId
+          pushOpId,
+          true
         );
         remotePublishCompleted = true;
       }
@@ -956,12 +1108,24 @@ async function handleCommit(push = false) {
   }
 }
 
-async function runAgentOperation<T>(action: () => Promise<T>, label: string, operationId: string) {
+async function runAgentOperation<T>(
+  action: () => Promise<T>,
+  label: string,
+  operationId: string,
+  trackPublishProgress = false
+) {
+  if (trackPublishProgress) {
+    hasLivePublishCommand.value = false;
+    publishResultConfirmed.value = false;
+  }
   let socket: { close: () => void } | null = null;
   try {
     socket = await api.connectAgentConfigProgress(operationId, (event) => {
       if (event.currentStep) {
         progressMessage.value = `${label}: ${event.currentStep} (${event.status || ''})`;
+      }
+      if (trackPublishProgress) {
+        applyPublishProgressEvent(event);
       }
     });
   } catch {
@@ -977,6 +1141,13 @@ async function runAgentOperation<T>(action: () => Promise<T>, label: string, ope
     ) {
       const operation = result as { status?: string; errorMessage?: string | null };
       throw new Error(operation.errorMessage || `${label}未成功完成`);
+    }
+    if (trackPublishProgress && result && typeof result === "object") {
+      const operation = result as { currentStep?: string | null; executedCommands?: string[] };
+      if (!hasLivePublishCommand.value) {
+        applyPublishExecution(operation.currentStep, operation.executedCommands);
+      }
+      publishResultConfirmed.value = true;
     }
     return result;
   } finally {
@@ -1028,9 +1199,9 @@ defineExpose({
       <MergeConflictEditor
         :conflict="activeConflict"
         :resolving="conflictResolving"
-        @resolve="resolveWorkspaceConflict"
-        @abort="abortWorkspaceConflict"
-        @close="activeConflict = null"
+        @resolve="resolveActiveConflict"
+        @abort="abortActiveConflict"
+        @close="activeConflict = null; activeConflictScope = null"
       />
     </div>
     <!-- Header status / errors -->
@@ -1200,10 +1371,59 @@ defineExpose({
               <ChevronDown v-if="agentsUnstagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
               <span>agents</span>
-              <span class="git-sub-badge ml-1">({{ agentsUnstaged.length }})</span>
+              <span class="git-sub-badge ml-1">({{ agentsUnstaged.length + publicAgentConflicts.length }})</span>
             </div>
             <div v-show="agentsUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="agentsUnstaged.length === 0" class="git-empty-text">暂无变更</div>
+              <div v-if="publicAgentConflicts.length > 0" class="git-conflict-banner">
+                <div class="git-conflict-header">
+                  <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
+                  <span>检测到 {{ publicAgentConflicts.length }} 个公共 Agent 冲突</span>
+                </div>
+                <div class="git-conflict-actions">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn"
+                    :disabled="conflictResolving"
+                    @click.stop="resolveAllPublicAgentConflicts('CURRENT')"
+                  >
+                    保留本地
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn"
+                    :disabled="conflictResolving"
+                    @click.stop="resolveAllPublicAgentConflicts('INCOMING')"
+                  >
+                    保留远程
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn btn-abort"
+                    :disabled="conflictResolving"
+                    @click.stop="abortPublicAgentConflict"
+                  >
+                    取消
+                  </Button>
+                </div>
+              </div>
+              <div
+                v-for="file in publicAgentConflicts"
+                :key="`public-conflict:${file.path}`"
+                class="git-file-row git-conflict-row group"
+                :title="file.path"
+                :aria-label="file.path"
+                @click="openPublicAgentConflict(file.path)"
+              >
+                <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
+                <span class="git-file-name" :title="file.path">
+                  <span class="git-scope-label">[公共]</span>
+                  {{ getFileName(file.path) }}
+                </span>
+              </div>
+              <div v-if="agentsUnstaged.length === 0 && publicAgentConflicts.length === 0" class="git-empty-text">暂无变更</div>
               <div
                 v-for="file in agentsUnstaged"
                 :key="file.path"
@@ -1374,8 +1594,8 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-commit flex-1"
-          :title="hasBlockingWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
-          :disabled="committing || hasBlockingWorkspaceConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
+          :title="hasBlockingWorkspaceConflicts || hasBlockingAgentConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
+          :disabled="committing || hasBlockingWorkspaceConflicts || hasBlockingAgentConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(false)"
         >
           <FolderGit2 class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -1384,10 +1604,10 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-push flex-1"
-          :title="hasBlockingWorkspaceConflicts
+          :title="hasBlockingWorkspaceConflicts || hasBlockingAgentConflicts
             ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送'
             : (!hasPublishableStagedChanges ? '当前暂存内容仅允许本地提交' : '提交并推送可发布变更')"
-          :disabled="committing || hasBlockingWorkspaceConflicts || !hasPublishableStagedChanges || !commitMessage.trim()"
+          :disabled="committing || hasBlockingWorkspaceConflicts || hasBlockingAgentConflicts || !hasPublishableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(true)"
         >
           <Upload class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -1415,7 +1635,7 @@ defineExpose({
           <li :class="['ta-process-startup-step', getCommitStepClass(1)]">
             <component :is="getCommitStepIcon(1)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>校验并同步应用分支</span>
+              <span>校验并同步目标分支</span>
               <small>{{ getCommitStepStatusText(1) }}</small>
             </div>
           </li>
@@ -1429,21 +1649,21 @@ defineExpose({
           <li :class="['ta-process-startup-step', getCommitStepClass(3)]">
             <component :is="getCommitStepIcon(3)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>从个人 HEAD 投影白名单文件</span>
+              <span>合并远程分支或投影文件</span>
               <small>{{ getCommitStepStatusText(3) }}</small>
             </div>
           </li>
           <li :class="['ta-process-startup-step', getCommitStepClass(4)]">
             <component :is="getCommitStepIcon(4)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>提交并推送 feature 分支</span>
+              <span>提交并推送目标分支</span>
               <small>{{ getCommitStepStatusText(4) }}</small>
             </div>
           </li>
           <li :class="['ta-process-startup-step', getCommitStepClass(5)]">
             <component :is="getCommitStepIcon(5)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>完成并广播版本更新</span>
+              <span>完成并广播更新</span>
               <small>{{ getCommitStepStatusText(5) }}</small>
             </div>
           </li>
@@ -1470,7 +1690,7 @@ defineExpose({
         </div>
 
         <footer class="ta-process-startup-footer">
-          <span>{{ props.personalWorkspaceId }}</span>
+          <span>{{ props.personalWorkspaceId || workbench.publicWorktree?.branch || workbench.workspaceWorktree?.branch }}</span>
           <button type="button" :disabled="committing" @click="showCommitProgressDialog = false">关闭</button>
         </footer>
       </section>

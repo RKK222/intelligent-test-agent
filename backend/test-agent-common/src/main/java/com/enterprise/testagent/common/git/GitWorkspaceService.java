@@ -279,6 +279,22 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 将个人本地分支推送到指定远端公共分支；不使用 force，远端前进时由 Git 拒绝并交给调用方处理。
+     */
+    public void pushRef(Path repoRoot, String sourceBranch, String targetBranch, String privateKey) {
+        executor.execute(
+                List.of(
+                        "git",
+                        "-C",
+                        repoRoot.toString(),
+                        "push",
+                        "origin",
+                        sourceBranch + ":" + targetBranch),
+                privateKey,
+                PUSH_TIMEOUT);
+    }
+
+    /**
      * 切换到本地分支；本地不存在时基于 origin/branch 创建 tracking 分支。
      */
     public void checkoutTrackingBranch(Path repoRoot, String branch, String privateKey) {

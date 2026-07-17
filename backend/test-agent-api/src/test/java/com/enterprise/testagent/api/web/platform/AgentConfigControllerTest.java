@@ -252,7 +252,7 @@ class AgentConfigControllerTest {
     @Test
     void superAdminCanListPublicWorktreesByLinuxServer() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
-        when(service.listPublicWorktrees("127.0.0.1")).thenReturn(List.of(
+        when(service.listPublicWorktrees("127.0.0.1", USER_ID)).thenReturn(List.of(
                 new AgentConfigWorktreeOptionResponse(
                         "agw_123",
                         "PUBLIC",
@@ -279,7 +279,7 @@ class AgentConfigControllerTest {
                 .jsonPath("$.data[0].createdByUserId").isEqualTo("usr_admin")
                 .jsonPath("$.data[0].createdByUsername").isEqualTo("admin");
 
-        verify(service).listPublicWorktrees("127.0.0.1");
+        verify(service).listPublicWorktrees("127.0.0.1", USER_ID);
     }
 
     @Test

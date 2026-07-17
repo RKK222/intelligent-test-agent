@@ -20,6 +20,7 @@ const apiClientMock = vi.hoisted(() => ({
   listPublicAgentBranches: vi.fn(),
   listPublicAgentRepositories: vi.fn(),
   listPublicAgentWorktrees: vi.fn(),
+  createPublicAgentWorktree: vi.fn(),
   readPublicAgentFile: vi.fn(),
   readWorkspaceAgentFile: vi.fn(),
   writeWorkspaceAgentFile: vi.fn(),
@@ -90,7 +91,8 @@ describe("AgentConfigPanel", () => {
     apiClientMock.listWorkspaceAgentFiles.mockResolvedValue([]);
     apiClientMock.listPublicAgentBranches.mockResolvedValue(["main", "develop"]);
     apiClientMock.listPublicAgentRepositories.mockResolvedValue([initializedRepository()]);
-    apiClientMock.listPublicAgentWorktrees.mockResolvedValue([]);
+    apiClientMock.listPublicAgentWorktrees.mockResolvedValue([publicWorktreeOption()]);
+    apiClientMock.createPublicAgentWorktree.mockResolvedValue(publicWorktreeOption());
     apiClientMock.readPublicAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.readWorkspaceAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
@@ -122,17 +124,15 @@ describe("AgentConfigPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("loads remote branches and disables public worktree creation when no server is initialized", async () => {
+  it("does not create a public worktree when no server is initialized", async () => {
     apiClientMock.listPublicAgentRepositories.mockResolvedValue([uninitializedRepository()]);
 
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByText("创建公共 worktree"));
-
-    expect(await view.findByText("远端分支")).toBeTruthy();
-    expect(await view.findByText("没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。")).toBeTruthy();
-    expect((view.getByRole("button", { name: "确定" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(apiClientMock.listPublicAgentWorktrees).not.toHaveBeenCalled();
+    expect(apiClientMock.createPublicAgentWorktree).not.toHaveBeenCalled();
+    expect(view.queryByText("创建公共 worktree")).toBeNull();
   });
 
   it("loads public and workspace agent status plus root directories without serial blocking", async () => {
@@ -154,17 +154,17 @@ describe("AgentConfigPanel", () => {
     resolvePublicFiles([]);
   });
 
-  it("loads public conflict file names without fetching full public diff on startup", async () => {
+  it("leaves public conflict interaction to the shared Git changes panel", async () => {
     apiClientMock.getPublicAgentGitConflictFiles.mockResolvedValueOnce({
       files: ["opencode/agents/test-design-orchestrator.md"]
     });
 
     const { view } = renderPanel();
 
-    await waitFor(() => expect(apiClientMock.getPublicAgentGitConflictFiles).toHaveBeenCalledWith(undefined, "linux-1"));
+    await waitFor(() => expect(apiClientMock.listPublicAgentWorktrees).toHaveBeenCalledWith("linux-1"));
+    expect(apiClientMock.getPublicAgentGitConflictFiles).not.toHaveBeenCalled();
     expect(apiClientMock.getPublicAgentDiff).not.toHaveBeenCalled();
-    expect(await view.findByText("公共级存在 1 个冲突文件")).toBeTruthy();
-    expect(await view.findByText("opencode/agents/test-design-orchestrator.md")).toBeTruthy();
+    expect(view.queryByText("公共级存在 1 个冲突文件")).toBeNull();
   });
 
   it("renders agent files with VS Code codicons and compact tree rows", async () => {
@@ -184,12 +184,14 @@ describe("AgentConfigPanel", () => {
     expect(view.container.querySelector("use")?.getAttribute("href")).toContain("#Readme");
   });
 
-  it("shows the direct public server and physical config directory", async () => {
+  it("automatically mounts the current user's public worktree", async () => {
     const { view } = renderPanel();
 
-    expect(await view.findByText("直接目录")).toBeTruthy();
-    expect(view.getByText("直接 · 测试服务器")).toBeTruthy();
-    expect(view.getByText("/data/opencode-public-config/opencode")).toBeTruthy();
+    expect(await view.findByText("worktree")).toBeTruthy();
+    expect(view.getByText("worktree · change-agent-md")).toBeTruthy();
+    expect(view.getByText("/data/opencode-public-worktrees/change-agent-md/opencode")).toBeTruthy();
+    expect(view.queryByText("更新公共配置")).toBeNull();
+    expect(view.queryByText("切换公共 worktree")).toBeNull();
   });
 
   it("shows the selected public worktree server and physical config directory", async () => {
@@ -229,7 +231,7 @@ describe("AgentConfigPanel", () => {
   });
 
   it("requests a clean active Agent editor refresh without reading content in the panel", async () => {
-    const activePath = "agent-public::linux-1:agents/review.md";
+    const activePath = "agent-public:agw_1234567890abcdef:linux-1:agents/review.md";
     const { view } = renderPanel((store) => {
       store.tabs = [{
         id: "public-agent",
@@ -263,7 +265,7 @@ describe("AgentConfigPanel", () => {
   });
 
   it("does not overwrite an active Agent editor with unsaved changes", async () => {
-    const activePath = "agent-public::linux-1:agents/review.md";
+    const activePath = "agent-public:agw_1234567890abcdef:linux-1:agents/review.md";
     const { view } = renderPanel((store) => {
       store.tabs = [{
         id: "public-agent",
@@ -340,41 +342,6 @@ describe("AgentConfigPanel", () => {
     expect(view.container.querySelector(".agent-root-row.active")).toBeNull();
   });
 
-  it("switches public level to a selected worktree and reloads files with worktree context", async () => {
-    apiClientMock.listPublicAgentWorktrees.mockResolvedValue([publicWorktreeOption()]);
-
-    const { view, workbench } = renderPanel();
-
-    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith("", undefined, "linux-1"));
-    await fireEvent.click(view.getByText("切换公共 worktree"));
-
-    expect(await view.findByText("change-agent-md / main / usr_admin / admin")).toBeTruthy();
-    await fireEvent.update(view.getByLabelText("公共 worktree"), "agw_1234567890abcdef");
-    await fireEvent.click(view.getByRole("button", { name: "确定" }));
-
-    await waitFor(() => expect(workbench.publicWorktree?.worktreeId).toBe("agw_1234567890abcdef"));
-    expect(workbench.publicConfigLinuxServerId).toBe("linux-1");
-    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenLastCalledWith("", "agw_1234567890abcdef", "linux-1"));
-  });
-
-  it("switches public level back to direct public config directory and reloads files with server context", async () => {
-    apiClientMock.listPublicAgentWorktrees.mockResolvedValue([publicWorktreeOption()]);
-
-    const { view, workbench } = renderPanel((store) => {
-      store.publicWorktree = publicWorktreeOption();
-      store.publicConfigLinuxServerId = "linux-1";
-    });
-
-    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith("", "agw_1234567890abcdef", "linux-1"));
-    await fireEvent.click(view.getByText("切换公共 worktree"));
-    await view.findByText("change-agent-md / main / usr_admin / admin");
-    await fireEvent.update(view.getByLabelText("公共 worktree"), "__direct_public_config__");
-    await fireEvent.click(view.getByRole("button", { name: "确定" }));
-
-    await waitFor(() => expect(workbench.publicWorktree).toBeNull());
-    expect(workbench.publicConfigLinuxServerId).toBe("linux-1");
-    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenLastCalledWith("", undefined, "linux-1"));
-  });
 
   it("initializes an OpenCode-compatible workspace agent and skill package", async () => {
     const { view } = renderPanel();
@@ -407,193 +374,6 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
   });
 
-  it("submits dirty public repository changes without forcing discard", async () => {
-    apiClientMock.listPublicAgentRepositories.mockResolvedValue([{
-      ...initializedRepository(),
-      status: "CONFLICT",
-      message: "Git 工作树存在未提交变更"
-    }]);
-    const { view } = renderPanel();
-
-    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByText("更新公共配置"));
-
-    expect(await view.findByText("Git 工作树存在未提交变更")).toBeTruthy();
-    const confirmButton = view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement;
-    // 提交信息未填写时按钮应禁用
-    expect(confirmButton.disabled).toBe(true);
-
-    // 输入提交信息后按钮可点
-    await fireEvent.update(view.getByLabelText("提交信息 *"), "chore: sync public config");
-    expect(confirmButton.disabled).toBe(false);
-    await fireEvent.click(confirmButton);
-
-    await waitFor(() => expect(apiClientMock.updatePublicAgentConfigAndPush).toHaveBeenCalledWith({
-      branch: "main",
-      commitMessage: "chore: sync public config",
-      operationId: expect.stringMatching(/^aco_/),
-      discardLocalChanges: false
-    }));
-  });
-
-  it("allows submit after user explicitly confirms discard for dirty public repo", async () => {
-    apiClientMock.listPublicAgentRepositories.mockResolvedValue([{
-      ...initializedRepository(),
-      status: "CONFLICT",
-      message: "Git 工作树存在未提交变更"
-    }]);
-    const { view } = renderPanel();
-
-    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByText("更新公共配置"));
-    await view.findByText("Git 工作树存在未提交变更");
-    await fireEvent.update(view.getByLabelText("提交信息 *"), "chore: sync public config");
-    await fireEvent.click(view.getByLabelText("放弃已跟踪本地修改后再提交"));
-    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
-
-    await waitFor(() => expect(apiClientMock.updatePublicAgentConfigAndPush).toHaveBeenCalledWith({
-      branch: "main",
-      commitMessage: "chore: sync public config",
-      operationId: expect.stringMatching(/^aco_/),
-      discardLocalChanges: true
-    }));
-    expect(apiClientMock.updatePublicAgentConfig).not.toHaveBeenCalled();
-  });
-
-  it("submits update-and-push with default discard flag when public repo is clean", async () => {
-    const { view } = renderPanel();
-
-    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByText("更新公共配置"));
-
-    await view.findByLabelText("提交信息 *");
-    await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: update agent docs");
-    const confirmButton = view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement;
-    expect(confirmButton.disabled).toBe(false);
-    await fireEvent.click(confirmButton);
-
-    await waitFor(() => expect(apiClientMock.updatePublicAgentConfigAndPush).toHaveBeenCalledWith({
-      branch: "main",
-      commitMessage: "feat: update agent docs",
-      operationId: expect.stringMatching(/^aco_/),
-      discardLocalChanges: false
-    }));
-    await waitFor(() => expect(notifyMock.notifySuccess).toHaveBeenCalledWith(
-      "公共 Agent 已提交并推送",
-      expect.stringContaining("newcommit123")
-    ));
-  });
-
-  it("shows public update-and-push Git progress commands", async () => {
-    apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, onEvent: (event: unknown) => void) => {
-      onEvent({
-        type: "step",
-        status: "RUNNING",
-        currentStep: "PUSHING",
-        command: "git -C /repo push origin main"
-      });
-      return { close: vi.fn() };
-    });
-    const { view } = renderPanel();
-
-    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByText("更新公共配置"));
-    await view.findByLabelText("提交信息 *");
-    await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: update agent docs");
-    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
-
-    expect(await view.findByRole("dialog", { name: "公共 Agent 提交并推送进度" })).toBeTruthy();
-    expect(await view.findByText("推送到远端仓库")).toBeTruthy();
-    expect(await view.findByText("git -C /repo push origin main")).toBeTruthy();
-  });
-
-  it("does not report success when update-and-push operation status is failed", async () => {
-    apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValueOnce({
-      status: "FAILED",
-      currentStep: "PUSHING",
-      errorMessage: "远端拒绝推送"
-    });
-    const { view } = renderPanel();
-
-    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByText("更新公共配置"));
-    await view.findByLabelText("提交信息 *");
-    await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: try push");
-    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
-
-    await waitFor(() => expect(notifyMock.notifyError).toHaveBeenCalledWith(
-      "公共 Agent 提交并推送失败",
-      expect.stringContaining("远端拒绝推送")
-    ));
-    expect(notifyMock.notifySuccess).not.toHaveBeenCalled();
-    expect(await view.findAllByText(/远端拒绝推送/)).not.toHaveLength(0);
-  });
-
-  it("shows error toast when update-and-push fails", async () => {
-    apiClientMock.updatePublicAgentConfigAndPush.mockRejectedValueOnce(new Error("远端 push 失败：non-fast-forward"));
-    const { view } = renderPanel();
-
-    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByText("更新公共配置"));
-    await view.findByLabelText("提交信息 *");
-    await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: try push");
-    const confirmButton = view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement;
-    await fireEvent.click(confirmButton);
-
-    await waitFor(() => expect(notifyMock.notifyError).toHaveBeenCalledWith(
-      "公共 Agent 提交并推送失败",
-      expect.stringContaining("non-fast-forward")
-    ));
-    expect(notifyMock.notifySuccess).not.toHaveBeenCalled();
-  });
-
-  it("shows conflict files and opens public conflict editor after update-and-push conflict", async () => {
-    apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValueOnce({
-      status: "FAILED",
-      currentStep: "MERGING",
-      errorMessage: "合并冲突，请先处理 opencode/agents/test-design-orchestrator.md 后重试"
-    });
-    apiClientMock.getPublicAgentDiff.mockResolvedValue({
-      files: [
-        {
-          path: "opencode/agents/test-design-orchestrator.md",
-          status: "conflict",
-          rawStatus: "UU",
-          staged: false,
-          patch: "",
-          additions: 0,
-          deletions: 0
-        }
-      ]
-    });
-    apiClientMock.getPublicAgentGitConflict.mockResolvedValueOnce({
-        path: "opencode/agents/test-design-orchestrator.md",
-      rawStatus: "UU",
-      baseContent: "base",
-      currentContent: "local",
-      incomingContent: "remote",
-      resultContent: "<<<<<<< HEAD\nlocal\n=======\nremote\n>>>>>>> origin/master"
-    });
-    const { view } = renderPanel();
-
-    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByText("更新公共配置"));
-    await view.findByLabelText("提交信息 *");
-    await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: resolve conflict");
-    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
-
-    expect(await view.findAllByText("opencode/agents/test-design-orchestrator.md")).not.toHaveLength(0);
-    const conflictButtons = await view.findAllByText("处理冲突");
-    await fireEvent.click(conflictButtons[0]);
-
-    await waitFor(() => expect(apiClientMock.getPublicAgentGitConflict).toHaveBeenCalledWith(
-      "opencode/agents/test-design-orchestrator.md",
-      undefined,
-      "linux-1"
-    ));
-    expect(await view.findByText("合并编辑器")).toBeTruthy();
-    expect(await view.findByText("合并结果（可编辑）")).toBeTruthy();
-  });
 });
 
 type PublicWorktree = {

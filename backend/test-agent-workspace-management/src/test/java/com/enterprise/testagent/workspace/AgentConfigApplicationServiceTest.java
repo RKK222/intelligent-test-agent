@@ -168,7 +168,7 @@ class AgentConfigApplicationServiceTest {
                 "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
                 "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()));
 
-        List<FileTreeEntryResponse> entries = service.listPublicAgentFiles("", null);
+        List<FileTreeEntryResponse> entries = service.listPublicAgentFiles("", null, ADMIN);
 
         assertThat(entries).isEmpty();
         assertThat(Files.exists(root.resolve(".config"))).isFalse();
@@ -176,15 +176,15 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void publicDirectWriteIsRejectedWhenGitUrlIsUnconfigured() {
+    void publicDirectWriteIsRejectedBecausePersonalWorktreeIsRequired() {
         AgentConfigApplicationService service = service(Map.of(
                 "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
                 "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
                 "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()));
 
-        assertThatThrownBy(() -> service.writePublicAgentFile("review.md", "review", null))
+        assertThatThrownBy(() -> service.writePublicAgentFile("review.md", "review", null, ADMIN))
                 .isInstanceOf(PlatformException.class)
-                .hasMessageContaining("请先在“系统管理 → 通用参数管理”中配置 OPENCODE_PUBLIC_AGENT_GIT_URL");
+                .hasMessageContaining("worktreeId 不能为空");
     }
 
     @Test
@@ -246,7 +246,7 @@ class AgentConfigApplicationServiceTest {
         assertThat(status.initialized()).isTrue();
         assertThat(status.initializationAllowed()).isTrue();
         assertThat(status.message()).isEqualTo("Git 工作树存在未提交变更：opencode/agents/review.md");
-        assertThat(service.listPublicAgentFiles("agents", null))
+        assertThat(service.listPublicAgentFiles("agents", null, ADMIN))
                 .extracting(FileTreeEntryResponse::name)
                 .containsExactly("review.md");
     }
@@ -543,7 +543,7 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void publicWorktreeNameAppendsCurrentDateAndCreatesGitWorktree() throws Exception {
+    void publicWorktreeUsesStablePerUserBranchAndCreatesReusableGitWorktree() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
         Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
@@ -564,18 +564,27 @@ class AgentConfigApplicationServiceTest {
                 ADMIN,
                 "trace_worktree");
 
-        assertThat(response.worktreeName()).isEqualTo("change-agent-md-20260626");
+        assertThat(response.worktreeName()).isEqualTo("public-usr_admin");
         assertThat(response.rootPath().replace('\\', '/'))
-                .endsWith("/.configdev/change-agent-md-20260626");
-        assertThat(git.worktreeBranch).isEqualTo("change-agent-md-20260626");
+                .endsWith("/.configdev/public-usr_admin");
+        assertThat(git.worktreeBranch).isEqualTo("public-usr_admin");
         assertThat(git.worktreeRoot.toString().replace('\\', '/'))
-                .endsWith("/.configdev/change-agent-md-20260626");
+                .endsWith("/.configdev/public-usr_admin");
         assertThat(agentConfigs.findWorktree(response.worktreeId()))
                 .map(AgentConfigWorktree::status)
                 .contains(AgentConfigWorktreeStatus.ACTIVE);
         assertThat(agentConfigs.findWorktree(response.worktreeId()))
                 .map(AgentConfigWorktree::linuxServerId)
                 .contains("linux-1");
+
+        AgentConfigResponses.AgentConfigWorktreeResponse reused = service.createPublicWorktree(
+                "ignored-on-reuse",
+                "main",
+                ADMIN,
+                "trace_worktree_again");
+
+        assertThat(reused.worktreeId()).isEqualTo(response.worktreeId());
+        assertThat(agentConfigs.findWorktrees(AgentConfigScope.PUBLIC, null, ADMIN)).hasSize(1);
     }
 
     @Test
@@ -779,7 +788,31 @@ class AgentConfigApplicationServiceTest {
                 new RecordingBroadcastPublisher(),
                 Optional.empty());
 
-        AgentConfigResponses.AgentConfigDiffResponse diff = service.publicDiff(null);
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        AgentConfigWorktree worktree = new AgentConfigWorktree(
+                "agw_public_diff",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                root.resolve(".config").toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW);
+        agentConfigs.saveWorktree(worktree);
+        service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+
+        AgentConfigResponses.AgentConfigDiffResponse diff = service.publicDiff("agw_public_diff", ADMIN);
 
         assertThat(diff.files()).singleElement().satisfies(file -> {
             assertThat(file.path()).isEqualTo("opencode/agents/public-review.md");
@@ -794,6 +827,8 @@ class AgentConfigApplicationServiceTest {
     void publicWorktreePublishReturnsConflictFilesAndDoesNotMarkPublishedWhenMergeConflicts() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
+        Files.createDirectories(root.resolve(".configdev/review-agent/.git"));
+        Files.createDirectories(root.resolve(".configdev/review-agent/opencode"));
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
         AgentConfigWorktree worktree = new AgentConfigWorktree(
                 "agw_public",
@@ -826,15 +861,92 @@ class AgentConfigApplicationServiceTest {
                     assertThat(exception.details()).containsEntry("conflictFiles", List.of("opencode/agents/review.md", "opencode/skills/pay/SKILL.md"));
                 });
 
-        assertThat(git.abortedMergeRepoRoot).isEqualTo(root.resolve(".config"));
+        assertThat(git.abortedMergeRepoRoot).isNull();
+        assertThat(git.mergedRepoRoot).isEqualTo(root.resolve(".configdev/review-agent"));
         assertThat(git.pushedBranch).isNull();
         assertThat(agentConfigs.findWorktree("agw_public")).get().extracting(AgentConfigWorktree::status)
                 .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
         assertThat(agentConfigs.findOperation("aco_publish_conflict")).get().satisfies(operation -> {
             assertThat(operation.status()).isEqualTo(AgentConfigOperationStatus.FAILED);
             assertThat(operation.errorCode()).isEqualTo(ErrorCode.CONFLICT.name());
-            assertThat(operation.errorMessage()).contains("合并冲突");
+            assertThat(operation.errorMessage()).contains("冲突");
         });
+    }
+
+    @Test
+    void publicWorktreePublishMergesRemoteInPersonalWorktreeAndPushesToPublicBranch() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.createDirectories(root.resolve(".configdev/review-agent/.git"));
+        Files.createDirectories(root.resolve(".configdev/review-agent/opencode"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        AgentConfigWorktree worktree = new AgentConfigWorktree(
+                "agw_public",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "review-agent",
+                "review-agent",
+                root.resolve(".configdev/review-agent").toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW);
+        agentConfigs.saveWorktree(worktree);
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                publisher);
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.publicPublish(
+                "agw_public",
+                "aco_publish_success",
+                ADMIN,
+                "trace_publish");
+
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
+        assertThat(git.mergedRepoRoot).isEqualTo(root.resolve(".configdev/review-agent"));
+        assertThat(git.mergedBranch).isEqualTo("origin/main");
+        assertThat(git.pushedBranch).isEqualTo("review-agent:main");
+        assertThat(git.resetCommit).isEqualTo("commit_base");
+        assertThat(agentConfigs.findWorktree("agw_public")).get().extracting(AgentConfigWorktree::status)
+                .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
+        assertThat(publisher.events).hasSize(1);
+    }
+
+    @Test
+    void publicWorktreeOperationsRejectAnotherUsersWorktree() {
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_other",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-other",
+                "public-other",
+                root.resolve(".configdev/public-other").toString(),
+                new UserId("usr_alice"),
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher());
+
+        assertThatThrownBy(() -> service.publicDiff("agw_other", ADMIN))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
     }
 
     @Test
@@ -1057,7 +1169,8 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void listPublicWorktreesFiltersActiveWorktreesByServerAndIncludesCreatorName() {
+    void listPublicWorktreesOnlyReturnsCurrentUsersActiveWorktreeOnServer() throws Exception {
+        Files.createDirectories(root.resolve("worktrees/new-change/.git"));
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
         agentConfigs.saveWorktree(new AgentConfigWorktree(
                 "agw_public_new",
@@ -1065,9 +1178,9 @@ class AgentConfigApplicationServiceTest {
                 null,
                 "linux-2",
                 "new-change",
-                "new-change",
+                "main",
                 root.resolve("worktrees/new-change").toString(),
-                new UserId("usr_alice"),
+                ADMIN,
                 AgentConfigWorktreeStatus.ACTIVE,
                 NOW,
                 NOW.plusSeconds(30)));
@@ -1128,14 +1241,12 @@ class AgentConfigApplicationServiceTest {
                 new RecordingGitWorkspaceService(),
                 new RecordingBroadcastPublisher());
 
-        List<AgentConfigResponses.AgentConfigWorktreeOptionResponse> options = service.listPublicWorktrees("linux-2");
+        List<AgentConfigResponses.AgentConfigWorktreeOptionResponse> options = service.listPublicWorktrees("linux-2", ADMIN);
 
         assertThat(options).extracting(AgentConfigResponses.AgentConfigWorktreeOptionResponse::worktreeId)
-                .containsExactly("agw_public_new", "agw_public_old");
-        assertThat(options.get(0).createdByUserId()).isEqualTo("usr_alice");
-        assertThat(options.get(0).createdByUsername()).isEqualTo("alice");
-        assertThat(options.get(1).createdByUserId()).isEqualTo("usr_missing");
-        assertThat(options.get(1).createdByUsername()).isNull();
+                .containsExactly("agw_public_new");
+        assertThat(options.get(0).createdByUserId()).isEqualTo("usr_admin");
+        assertThat(options.get(0).createdByUsername()).isEqualTo("admin");
     }
 
     private AgentConfigApplicationService service(Map<String, String> parameters) {
@@ -1282,6 +1393,7 @@ class AgentConfigApplicationServiceTest {
         private String pushedBranch;
         private Boolean pushedForce;
         private String mergedBranch;
+        private Path mergedRepoRoot;
         private boolean mergeInProgress;
         private boolean failMergeWithConflict;
         private GitCommitIdentity lastMergeIdentity;
@@ -1321,7 +1433,7 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public String currentBranch(Path repoRoot) {
-            return "main";
+            return repoRoot.equals(worktreeRoot) && worktreeBranch != null ? worktreeBranch : "main";
         }
 
         @Override
@@ -1351,6 +1463,7 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public void mergeBranch(Path repoRoot, String branch, String privateKey) {
+            this.mergedRepoRoot = repoRoot;
             this.mergedBranch = branch;
             if (failMergeWithConflict) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
@@ -1392,6 +1505,17 @@ class AgentConfigApplicationServiceTest {
         public void createWorktree(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
             this.worktreeRoot = worktreeRoot;
             this.worktreeBranch = branch;
+        }
+
+        @Override
+        public void createWorktreeReusingBranch(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
+            createWorktree(repoRoot, worktreeRoot, branch, privateKey);
+            try {
+                Files.createDirectories(worktreeRoot.resolve(".git"));
+                Files.createDirectories(worktreeRoot.resolve("opencode"));
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
         }
 
         @Override
@@ -1442,6 +1566,14 @@ class AgentConfigApplicationServiceTest {
         public void push(Path repoRoot, String branch, boolean force, String privateKey) {
             this.pushedBranch = branch;
             this.pushedForce = force;
+            this.privateKeyUsed = privateKey;
+        }
+
+
+        @Override
+        public void pushRef(Path repoRoot, String sourceBranch, String targetBranch, String privateKey) {
+            this.pushedBranch = sourceBranch + ":" + targetBranch;
+            this.pushedForce = false;
             this.privateKeyUsed = privateKey;
         }
     }

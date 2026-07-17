@@ -53,6 +53,24 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void pushRefPublishesPersonalBranchToPublicTargetWithoutForce() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.pushRef(tempDir, "public-usr_admin", "main", "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(new Call(
+                List.of(
+                        "git",
+                        "-C",
+                        tempDir.toString(),
+                        "push",
+                        "origin",
+                        "public-usr_admin:main"),
+                "PRIVATE KEY"));
+    }
+
+    @Test
     void createWorktreeCreatesNewBranchFromApplicationBranch() {
         RecordingExecutor executor = new RecordingExecutor("");
         GitWorkspaceService service = new GitWorkspaceService(executor);

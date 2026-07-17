@@ -48,6 +48,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,6 +108,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private final Clock clock;
     private final AgentConfigProgressSink progressSink;
     private final CodeRepositoryDeploymentMode publicGitDeploymentMode;
+    private final Map<String, Object> publicWorktreeLocks = new ConcurrentHashMap<>();
     private ManagedWorkspaceApplicationService managedWorkspaceApplicationService;
 
     /** 应用配置发布复用托管 feature 版本的 HEAD 更新与广播链路。 */
@@ -517,8 +519,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 Map.of("conflictFiles", List.copyOf(conflictFiles)));
     }
 
-    public ManagedWorkspaceResponses.WorkspaceGitConflictResponse getPublicGitConflict(String path, String worktreeId) {
-        Path repoRoot = repoRootForPublicOperation(worktreeId);
+    public ManagedWorkspaceResponses.WorkspaceGitConflictResponse getPublicGitConflict(
+            String path,
+            String worktreeId,
+            UserId userId) {
+        Path repoRoot = repoRootForPublicOperation(worktreeId, userId);
         String gitFile = publicGitFile(path);
         Set<Integer> stages = gitWorkspaceService.conflictStages(repoRoot, gitFile);
         if (stages.isEmpty()) {
@@ -534,8 +539,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 readConflictWorkingContent(resultPath));
     }
 
-    public List<String> publicGitConflictFiles(String worktreeId) {
-        Path repoRoot = repoRootForPublicOperation(worktreeId);
+    public List<String> publicGitConflictFiles(String worktreeId, UserId userId) {
+        Path repoRoot = repoRootForPublicOperation(worktreeId, userId);
         if (!gitWorkspaceService.isGitRepository(repoRoot)) {
             return List.of();
         }
@@ -543,7 +548,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     public void resolvePublicGitConflict(String path, String resolution, String content, String worktreeId, UserId userId) {
-        Path repoRoot = repoRootForPublicOperation(worktreeId);
+        Path repoRoot = repoRootForPublicOperation(worktreeId, userId);
         String gitFile = publicGitFile(path);
         Set<Integer> stages = gitWorkspaceService.conflictStages(repoRoot, gitFile);
         if (stages.isEmpty()) {
@@ -587,7 +592,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     public void abortPublicGitConflict(String worktreeId, UserId userId) {
-        Path repoRoot = repoRootForPublicOperation(worktreeId);
+        Path repoRoot = repoRootForPublicOperation(worktreeId, userId);
         if (!gitWorkspaceService.isMergeInProgress(repoRoot)) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前没有可取消的 Git 合并", Map.of());
         }
@@ -595,7 +600,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     public void resolveAllPublicGitConflicts(String resolution, String worktreeId, UserId userId) {
-        Path repoRoot = repoRootForPublicOperation(worktreeId);
+        Path repoRoot = repoRootForPublicOperation(worktreeId, userId);
         if (!gitWorkspaceService.isMergeInProgress(repoRoot)) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前没有可解决的 Git 合并", Map.of());
         }
@@ -614,8 +619,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         gitWorkspaceService.resolveAllConflicts(repoRoot, side, decryptSingleSshKey(userId));
     }
 
-    public List<FileTreeEntryResponse> listPublicAgentFiles(String relativePath, String worktreeId) {
-        Path agentRoot = publicAgentRootForRead(worktreeId);
+    public List<FileTreeEntryResponse> listPublicAgentFiles(String relativePath, String worktreeId, UserId userId) {
+        Path agentRoot = publicAgentRootForRead(worktreeId, userId);
         // 公共配置目录须由管理员初始化（git clone）后才会存在；未初始化时返回空列表，不自动创建，
         // 避免浏览即静默建出 OPENCODE_PUBLIC_CONFIG_DIR 空壳。
         if (!Files.isDirectory(agentRoot)) {
@@ -624,15 +629,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return fileService.listDirectory(agentRoot.toString(), relativePath);
     }
 
-    public FileContentResponse readPublicAgentFile(String relativePath, String worktreeId) {
-        return fileService.readContent(publicAgentRootForRead(worktreeId).toString(), relativePath);
+    public FileContentResponse readPublicAgentFile(String relativePath, String worktreeId, UserId userId) {
+        return fileService.readContent(publicAgentRootForRead(worktreeId, userId).toString(), relativePath);
     }
 
-    public void writePublicAgentFile(String relativePath, String content, String worktreeId) {
-        if (worktreeId == null || worktreeId.isBlank()) {
-            requireEnabledPublicConfig();
-        }
-        Path agentRoot = publicAgentRootForWrite(worktreeId);
+    public void writePublicAgentFile(String relativePath, String content, String worktreeId, UserId userId) {
+        Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
         ensureDirectory(agentRoot);
         fileService.writeContent(agentRoot.toString(), relativePath, content);
     }
@@ -686,39 +688,68 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     "公共 Agent worktree 必须在目标服务器创建",
                     Map.of("targetLinuxServerId", linuxServerId.trim(), "currentLinuxServerId", serverIdentity.linuxServerId()));
         }
-        PublicConfig config = requireEnabledPublicConfig(userId);
-        String normalizedBranch = requireText(branch, "分支不能为空", "branch");
-        String worktreeName = worktreeName(baseName);
-        AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "create-worktree", normalizedBranch, traceId);
-        try {
-            String privateKey = decryptSingleSshKey(userId);
-            progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-            ensureExistingPublicRepositoryReady(config, normalizedBranch, privateKey);
-            progress.step(AgentConfigOperationStep.CREATING_WORKTREE);
-            Path worktreeRoot = config.worktreeRoot().resolve(worktreeName).normalize();
-            ensureChild(config.worktreeRoot(), worktreeRoot, "worktreeName");
-            gitWorkspaceService.createWorktree(config.gitRoot(), worktreeRoot, worktreeName, privateKey);
-            AgentConfigWorktree worktree = new AgentConfigWorktree(
-                    RuntimeIdGenerator.agentConfigWorktreeId(),
+        String lockKey = serverIdentity.linuxServerId() + ":" + userId.value();
+        synchronized (publicWorktreeLocks.computeIfAbsent(lockKey, ignored -> new Object())) {
+            PublicConfig config = requireEnabledPublicConfig(userId);
+            String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+            Optional<AgentConfigWorktree> existing = agentConfigRepository.findWorktrees(
                     AgentConfigScope.PUBLIC,
                     null,
-                    serverIdentity.linuxServerId(),
-                    worktreeName,
-                    worktreeName,
-                    worktreeRoot.toString(),
                     userId,
-                    AgentConfigWorktreeStatus.ACTIVE,
-                    now(),
-                    now());
-            agentConfigRepository.saveWorktree(worktree);
-            progress.succeeded(gitWorkspaceService.headCommit(config.gitRoot()));
-            return AgentConfigResponses.AgentConfigWorktreeResponse.from(worktree, publicStandardAgentRoot(worktreeRoot).toString());
-        } catch (PlatformException exception) {
-            progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
-            throw exception;
-        } catch (Exception exception) {
-            progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建公共 Agent worktree 失败");
-            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建公共 Agent worktree 失败", Map.of(), exception);
+                    serverIdentity.linuxServerId(),
+                    AgentConfigWorktreeStatus.ACTIVE).stream()
+                    .filter(this::isReusablePublicWorktree)
+                    .findFirst();
+            if (existing.isPresent()) {
+                AgentConfigWorktree worktree = existing.get();
+                return AgentConfigResponses.AgentConfigWorktreeResponse.from(
+                        worktree,
+                        publicStandardAgentRoot(Path.of(worktree.rootPath())).toString());
+            }
+            String worktreeName = publicWorktreeName(userId);
+            AgentConfigProgress progress = startProgress(
+                    operationId,
+                    AgentConfigScope.PUBLIC,
+                    null,
+                    "create-worktree",
+                    normalizedBranch,
+                    traceId);
+            try {
+                String privateKey = decryptSingleSshKey(userId);
+                progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
+                ensureExistingPublicRepositoryReady(config, normalizedBranch, privateKey);
+                progress.step(AgentConfigOperationStep.CREATING_WORKTREE);
+                Path worktreeRoot = config.worktreeRoot().resolve(worktreeName).normalize();
+                ensureChild(config.worktreeRoot(), worktreeRoot, "worktreeName");
+                gitWorkspaceService.createWorktreeReusingBranch(
+                        config.gitRoot(),
+                        worktreeRoot,
+                        worktreeName,
+                        privateKey);
+                AgentConfigWorktree worktree = new AgentConfigWorktree(
+                        RuntimeIdGenerator.agentConfigWorktreeId(),
+                        AgentConfigScope.PUBLIC,
+                        null,
+                        serverIdentity.linuxServerId(),
+                        worktreeName,
+                        worktreeName,
+                        worktreeRoot.toString(),
+                        userId,
+                        AgentConfigWorktreeStatus.ACTIVE,
+                        now(),
+                        now());
+                agentConfigRepository.saveWorktree(worktree);
+                progress.succeeded(gitWorkspaceService.headCommit(worktreeRoot));
+                return AgentConfigResponses.AgentConfigWorktreeResponse.from(
+                        worktree,
+                        publicStandardAgentRoot(worktreeRoot).toString());
+            } catch (PlatformException exception) {
+                progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
+                throw exception;
+            } catch (Exception exception) {
+                progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建公共 Agent worktree 失败");
+                throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建公共 Agent worktree 失败", Map.of(), exception);
+            }
         }
     }
 
@@ -735,16 +766,19 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     /**
-     * 查询某台服务器上的公共 ACTIVE worktree，并补齐创建人展示名供管理员切换时识别。
+     * 查询当前用户在某台服务器上可复用的公共 ACTIVE worktree。
      */
-    public List<AgentConfigResponses.AgentConfigWorktreeOptionResponse> listPublicWorktrees(String linuxServerId) {
+    public List<AgentConfigResponses.AgentConfigWorktreeOptionResponse> listPublicWorktrees(
+            String linuxServerId,
+            UserId userId) {
         String targetServerId = requireText(linuxServerId, "服务器不能为空", "linuxServerId");
         return agentConfigRepository.findWorktrees(
-                        AgentConfigScope.PUBLIC,
-                        null,
-                        null,
-                        targetServerId,
-                        AgentConfigWorktreeStatus.ACTIVE).stream()
+                AgentConfigScope.PUBLIC,
+                null,
+                userId,
+                targetServerId,
+                AgentConfigWorktreeStatus.ACTIVE).stream()
+                .filter(this::isReusablePublicWorktree)
                 .map(worktree -> AgentConfigResponses.AgentConfigWorktreeOptionResponse.from(
                         worktree,
                         publicStandardAgentRoot(Path.of(worktree.rootPath())).toString(),
@@ -823,8 +857,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         }
     }
 
-    public AgentConfigResponses.AgentConfigDiffResponse publicDiff(String worktreeId) {
-        return diff(repoRootForPublicOperation(worktreeId));
+    public AgentConfigResponses.AgentConfigDiffResponse publicDiff(String worktreeId, UserId userId) {
+        return diff(repoRootForPublicOperation(worktreeId, userId));
     }
 
     public AgentConfigResponses.AgentConfigDiffResponse workspaceDiff(String workspaceId, String worktreeId) {
@@ -832,11 +866,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     public void publicStage(List<String> files, String worktreeId, UserId userId) {
-        gitWorkspaceService.stageFiles(repoRootForPublicOperation(worktreeId), normalizeFiles(files), decryptSingleSshKey(userId));
+        gitWorkspaceService.stageFiles(repoRootForPublicOperation(worktreeId, userId), normalizeFiles(files), decryptSingleSshKey(userId));
     }
 
     public void publicUnstage(List<String> files, String worktreeId, UserId userId) {
-        gitWorkspaceService.unstageFiles(repoRootForPublicOperation(worktreeId), normalizeFiles(files), decryptSingleSshKey(userId));
+        gitWorkspaceService.unstageFiles(repoRootForPublicOperation(worktreeId, userId), normalizeFiles(files), decryptSingleSshKey(userId));
     }
 
     public void workspaceStage(String workspaceId, List<String> files, String worktreeId, UserId userId) {
@@ -859,7 +893,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             String operationId,
             UserId userId,
             String traceId) {
-        return commit(repoRootForPublicOperation(worktreeId), AgentConfigScope.PUBLIC, null, message, operationId, userId, traceId);
+        return commit(repoRootForPublicOperation(worktreeId, userId), AgentConfigScope.PUBLIC, null, message, operationId, userId, traceId);
     }
 
     public AgentConfigResponses.AgentConfigOperationResponse workspaceCommit(
@@ -883,33 +917,36 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         try {
             String privateKey = decryptSingleSshKey(userId);
             GitCommitIdentity commitIdentity = gitCommitIdentity(userId);
-            String commitHash;
-            String branch;
-            if (worktreeId == null || worktreeId.isBlank()) {
-                Path repoRoot = config.gitRoot();
-                ensureExistingCleanRepository(repoRoot, config);
-                branch = gitWorkspaceService.currentBranch(repoRoot);
-                progress.step(AgentConfigOperationStep.PUSHING);
-                commitHash = gitPublishWorkflow.publishDirectBranch(repoRoot, branch, false, privateKey).headCommit();
-            } else {
-                AgentConfigWorktree worktree = existingWorktree(worktreeId, AgentConfigScope.PUBLIC, null);
-                Path repoRoot = config.gitRoot();
-                ensureExistingCleanRepository(repoRoot, config);
-                branch = gitWorkspaceService.currentBranch(repoRoot);
-                progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-                progress.step(AgentConfigOperationStep.MERGING);
-                GitPublishWorkflow.PublishResult result = gitPublishWorkflow.publishMergedBranch(
-                        repoRoot,
-                        branch,
-                        worktree.branch(),
-                        false,
+            AgentConfigWorktree worktree = ownedPublicWorktree(worktreeId, userId);
+            Path sharedRepoRoot = config.gitRoot();
+            Path personalRepoRoot = Path.of(worktree.rootPath());
+            ensureExistingCleanRepository(sharedRepoRoot, config);
+            ensureExistingCleanRepository(personalRepoRoot, config);
+            String branch = gitWorkspaceService.currentBranch(sharedRepoRoot);
+            progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
+            gitWorkspaceService.fetch(personalRepoRoot, privateKey);
+            progress.step(AgentConfigOperationStep.MERGING);
+            try {
+                gitWorkspaceService.mergeBranch(
+                        personalRepoRoot,
+                        "origin/" + branch,
                         privateKey,
                         commitIdentity);
-                throwIfConflicted(result, "公共 Agent 配置合并冲突");
-                progress.step(AgentConfigOperationStep.PUSHING);
-                commitHash = result.headCommit();
-                agentConfigRepository.saveWorktree(worktree.markPublished(now()));
+            } catch (PlatformException mergeException) {
+                List<String> conflictFiles = gitWorkspaceService.conflictPaths(personalRepoRoot);
+                if (!conflictFiles.isEmpty()) {
+                    throw publicMergeConflict(
+                            conflictFiles,
+                            "公共 Agent 配置与远端分支存在冲突，请解决后重新提交并推送");
+                }
+                throw mergeException;
             }
+            progress.step(AgentConfigOperationStep.PUSHING);
+            gitWorkspaceService.pushRef(personalRepoRoot, worktree.branch(), branch, privateKey);
+            String commitHash = gitWorkspaceService.headCommit(personalRepoRoot);
+            // 共享仓库只作为运行时同步副本；成功推送后更新到明确提交，不承载用户编辑。
+            gitWorkspaceService.checkoutTrackingBranch(sharedRepoRoot, branch, privateKey);
+            gitWorkspaceService.resetHardToCommit(sharedRepoRoot, commitHash);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(branch, commitHash, "publish", traceId);
             return progress.succeeded(commitHash);
@@ -1303,8 +1340,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 key.encryptionNonce());
     }
 
-    private Path publicAgentRootForRead(String worktreeId) {
-        Path repoRoot = repoRootForPublicOperation(worktreeId);
+    private Path publicAgentRootForRead(String worktreeId, UserId userId) {
+        Path repoRoot = worktreeId == null || worktreeId.isBlank()
+                ? requireEnabledPublicConfig().gitRoot()
+                : repoRootForPublicOperation(worktreeId, userId);
         Path standard = publicStandardAgentRoot(repoRoot);
         if (Files.isDirectory(standard)) {
             return standard;
@@ -1313,8 +1352,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return Files.isDirectory(legacy) ? legacy : standard;
     }
 
-    private Path publicAgentRootForWrite(String worktreeId) {
-        return publicStandardAgentRoot(repoRootForPublicOperation(worktreeId));
+    private Path publicAgentRootForWrite(String worktreeId, UserId userId) {
+        return publicStandardAgentRoot(repoRootForPublicOperation(worktreeId, userId));
     }
 
     private String usernameFor(UserId userId) {
@@ -1346,11 +1385,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return workspaceStandardAgentRoot(repoRootForWorkspaceOperation(workspaceId, worktreeId));
     }
 
-    private Path repoRootForPublicOperation(String worktreeId) {
-        if (worktreeId == null || worktreeId.isBlank()) {
-            return requireEnabledPublicConfig().gitRoot();
-        }
-        return Path.of(existingWorktree(worktreeId, AgentConfigScope.PUBLIC, null).rootPath());
+    private Path repoRootForPublicOperation(String worktreeId, UserId userId) {
+        return Path.of(ownedPublicWorktree(worktreeId, userId).rootPath());
     }
 
     private Path repoRootForWorkspaceOperation(String workspaceId, String worktreeId) {
@@ -1377,6 +1413,25 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                             "currentLinuxServerId", serverIdentity.linuxServerId()));
         }
         return worktree;
+    }
+
+    private AgentConfigWorktree ownedPublicWorktree(String worktreeId, UserId userId) {
+        AgentConfigWorktree worktree = existingWorktree(worktreeId, AgentConfigScope.PUBLIC, null);
+        if (!Objects.equals(userId, worktree.createdBy())) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "Agent worktree 不存在", Map.of("worktreeId", worktreeId));
+        }
+        return worktree;
+    }
+
+    private boolean isReusablePublicWorktree(AgentConfigWorktree worktree) {
+        try {
+            Path root = Path.of(worktree.rootPath());
+            return Files.isDirectory(root)
+                    && gitWorkspaceService.isGitRepository(root)
+                    && worktree.branch().equals(gitWorkspaceService.currentBranch(root));
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     private AgentConfigWorktree existingWorktreeForRouting(String worktreeId, AgentConfigScope scope, WorkspaceId workspaceId) {
@@ -1565,6 +1620,14 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "worktree 名称格式无效", Map.of("worktreeName", normalized));
         }
         return normalized + "-" + WORKTREE_SUFFIX_FORMATTER.format(now());
+    }
+
+    private String publicWorktreeName(UserId userId) {
+        String userPart = userId.value().replaceAll("[^A-Za-z0-9._-]", "-");
+        if (userPart.length() > 48) {
+            userPart = userPart.substring(0, 48);
+        }
+        return "public-" + userPart;
     }
 
     private List<String> normalizeFiles(List<String> files) {

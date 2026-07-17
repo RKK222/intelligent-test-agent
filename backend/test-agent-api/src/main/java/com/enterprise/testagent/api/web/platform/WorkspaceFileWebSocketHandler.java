@@ -198,6 +198,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         }
     }
 
+    private com.enterprise.testagent.domain.user.UserId ticketUserId(WorkspaceFileSocketTicket ticket) {
+        return ticket.userId() == null
+                ? null
+                : new com.enterprise.testagent.domain.user.UserId(ticket.userId());
+    }
+
     private boolean protectedConfigPath(String path) {
         String normalized = path == null ? "" : path.trim().replace('\\', '/');
         try {
@@ -245,7 +251,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         String scope = agentConfigScope(ticket, params);
         String worktreeId = agentConfigWorktreeId(ticket, params);
         if (SCOPE_PUBLIC.equals(scope)) {
-            return agentConfigService.listPublicAgentFiles(text(params, "path"), worktreeId);
+            return agentConfigService.listPublicAgentFiles(text(params, "path"), worktreeId, ticketUserId(ticket));
         }
         return agentConfigService.listWorkspaceAgentFiles(agentConfigWorkspaceId(ticket, params), text(params, "path"), worktreeId);
     }
@@ -254,7 +260,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         String scope = agentConfigScope(ticket, params);
         String worktreeId = agentConfigWorktreeId(ticket, params);
         if (SCOPE_PUBLIC.equals(scope)) {
-            return agentConfigService.readPublicAgentFile(requiredText(params, "path"), worktreeId);
+            return agentConfigService.readPublicAgentFile(requiredText(params, "path"), worktreeId, ticketUserId(ticket));
         }
         return agentConfigService.readWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), worktreeId);
     }
@@ -266,7 +272,11 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
             }
             String worktreeId = agentConfigWorktreeId(ticket, params);
-            agentConfigService.writePublicAgentFile(requiredText(params, "path"), text(params, "content"), worktreeId);
+            agentConfigService.writePublicAgentFile(
+                    requiredText(params, "path"),
+                    text(params, "content"),
+                    worktreeId,
+                    ticketUserId(ticket));
             return;
         }
         if (!ticket.appAdmin()) {

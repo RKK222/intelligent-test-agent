@@ -76,7 +76,7 @@
 - `AuthWebSupportTest` 覆盖可选认证主体读取，确保 static-token 兼容入口不会因缺少用户主体抛错。
 - `CurrentBackendWebSocketUrlFactoryTest`、`TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖当前 Java 绝对 WebSocket URL、PTY ticket、origin 拒绝、单会话互斥、输入限流、关闭和超时。
 - Workspace 文件 WebSocket 入口应覆盖 route、ticket、Origin、同服务器校验、ticket 在归属未 READY 时复查强状态、RPC 成功/错误 envelope、上传/复制/移动、普通文件/目录树删除和受保护 `.opencode` 根目录拒绝；对应 HTTP/协议契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
-- Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表按 `linuxServerId` 去重、公共仓库初始化/显式拉取的 `SUPER_ADMIN` 权限和目标服务器路由、公共 worktree 列表权限和缺参校验、文件 WebSocket route/ticket/op、文件读写权限、Git 操作鉴权、operation ticket、Origin 拒绝和进度 envelope；对应 HTTP/协议契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
+- Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、文件 WebSocket route/ticket/op、文件读写权限、Git 操作鉴权、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
 - `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull`、工作区 Git stage/unstage、冲突解决和最近使用接口。
 - `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单。

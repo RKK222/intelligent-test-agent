@@ -6,16 +6,13 @@ import {
   FolderGit2,
   GitBranch,
   GitCompare,
-  ArrowUpFromLine,
   Globe2,
   Loader2,
   Plus,
   RefreshCw,
-  Upload,
-  MoreHorizontal
+  Upload
 } from "lucide-vue-next";
 import { createBackendApiClient } from "@test-agent/backend-api";
-import { MergeConflictEditor } from "@test-agent/diff-viewer";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { Button, Input } from "@test-agent/ui-kit";
 import type {
@@ -154,9 +151,6 @@ async function refreshAll(notifySkippedFile = true) {
     ]);
     if (token !== refreshAllToken) return;
     await refreshActiveEditorFile(undefined, notifySkippedFile);
-    if (props.canWrite && status.value.PUBLIC?.enabled !== false) {
-      await loadPublicConflictFiles();
-    }
   } finally {
     if (token === refreshAllToken) {
       refreshing.value = false;
@@ -180,6 +174,9 @@ async function refreshStatus() {
         if (nextServer) {
           selectedPublicLinuxServerId.value = nextServer;
           publicConfigLinuxServerId.value = nextServer;
+          if (props.canWrite) {
+            await ensureCurrentUserPublicWorktree(nextServer, publicResult.value.currentBranch);
+          }
         }
       } catch (error) {
         errorMessage.value = formatAgentConfigError(error, "加载公共配置仓库列表失败");
@@ -194,6 +191,31 @@ async function refreshStatus() {
     errorMessage.value = formatAgentConfigError(workspaceResult.reason, "加载应用 Agent 状态失败");
   }
   status.value = next;
+}
+
+/**
+ * 公共区与应用区保持相同的个人隔离语义：管理员进入后自动挂载自己在当前服务器上的长期 worktree。
+ */
+async function ensureCurrentUserPublicWorktree(linuxServerId: string, fallbackBranch?: string | null) {
+  if (
+    publicWorktree.value?.linuxServerId === linuxServerId
+    && publicWorktree.value.worktreeId
+  ) {
+    return;
+  }
+  const existing = await api.listPublicAgentWorktrees(linuxServerId);
+  if (existing[0]) {
+    publicWorktree.value = { ...existing[0] };
+    return;
+  }
+  const repository = publicRepositories.value.find((item) => item.linuxServerId === linuxServerId);
+  const branch = repository?.currentBranch?.trim() || fallbackBranch?.trim() || "main";
+  publicWorktree.value = await api.createPublicAgentWorktree({
+    baseName: "public-personal",
+    branch,
+    linuxServerId,
+    operationId: newOperationId()
+  });
 }
 
 function worktreeId(scope: Scope) {
@@ -1313,15 +1335,6 @@ defineExpose({
 
 <template>
   <div class="agent-config-panel">
-    <div v-if="activePublicConflict" class="agent-merge-overlay">
-      <MergeConflictEditor
-        :conflict="activePublicConflict"
-        :resolving="publicConflictResolving"
-        @resolve="resolvePublicConflict"
-        @abort="abortPublicConflict"
-        @close="activePublicConflict = null"
-      />
-    </div>
     <div v-if="!hideHeader" class="agent-config-header">
       <span>Agent</span>
       <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" :disabled="refreshing" @click="refreshAll()">
@@ -1342,49 +1355,6 @@ defineExpose({
             <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
           </button>
         </el-tooltip>
-        <div v-if="canWrite" class="agent-more-menu-container">
-          <button
-            type="button"
-            class="agent-icon-btn"
-            title="更多操作"
-            aria-label="更多操作"
-            :disabled="busy || status.PUBLIC?.enabled === false"
-          >
-            <Loader2 v-if="updatingPublicConfig || creatingWorktreeScope === 'PUBLIC'" class="h-3.5 w-3.5 animate-spin" />
-            <MoreHorizontal v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-          </button>
-          <div class="agent-more-menu-dropdown">
-            <button
-              type="button"
-              class="agent-dropdown-item"
-              :disabled="busy || status.PUBLIC?.enabled === false"
-              @click="updatePublicConfig"
-            >
-              <Loader2 v-if="updatingPublicConfig" class="h-3.5 w-3.5 animate-spin" />
-              <ArrowUpFromLine v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span>更新公共配置</span>
-            </button>
-            <button
-              type="button"
-              class="agent-dropdown-item"
-              :disabled="busy || status.PUBLIC?.enabled === false"
-              @click="openSwitchWorktreeModal"
-            >
-              <GitBranch class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span>切换公共 worktree</span>
-            </button>
-            <button
-              type="button"
-              class="agent-dropdown-item"
-              :disabled="busy || status.PUBLIC?.enabled === false"
-              @click="createWorktree('PUBLIC')"
-            >
-              <Loader2 v-if="creatingWorktreeScope === 'PUBLIC'" class="h-3.5 w-3.5 animate-spin" />
-              <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span>创建公共 worktree</span>
-            </button>
-          </div>
-        </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
         <div
@@ -1397,30 +1367,6 @@ defineExpose({
             <span>{{ publicSource.serverName || publicSource.serverId }}</span>
           </div>
           <code>{{ publicSource.path }}</code>
-        </div>
-        <div v-if="publicConflictFiles.length > 0" class="agent-public-conflict-panel">
-          <div class="agent-public-conflict-heading">
-            <AlertTriangle class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <span>公共级存在 {{ publicConflictFiles.length }} 个冲突文件</span>
-          </div>
-          <div class="agent-public-conflict-list">
-            <button
-              v-for="file in publicConflictFiles"
-              :key="`public-conflict:${file.path}`"
-              type="button"
-              class="agent-public-conflict-file"
-              :disabled="publicConflictLoading"
-              @click="openPublicConflict(file.path)"
-            >
-              <span>{{ file.path }}</span>
-              <span>处理冲突</span>
-            </button>
-          </div>
-          <div class="agent-conflict-actions">
-            <button type="button" :disabled="publicConflictResolving" @click="resolveAllPublicConflicts('CURRENT')">全部保留本地</button>
-            <button type="button" :disabled="publicConflictResolving" @click="resolveAllPublicConflicts('INCOMING')">全部采用远端</button>
-            <button type="button" :disabled="publicConflictResolving" @click="abortPublicConflict">取消合并</button>
-          </div>
         </div>
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <AgentConfigTreeNode

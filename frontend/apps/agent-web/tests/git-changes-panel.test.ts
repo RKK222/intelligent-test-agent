@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createPinia } from "pinia";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
+import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { applicationWorkspaceRestrictionsFixture as fixture } from "../../../tests/fixtures/application-workspace-restrictions";
 
 const apiClientMock = vi.hoisted(() => ({
@@ -14,6 +15,10 @@ const apiClientMock = vi.hoisted(() => ({
   resolveWorkspaceGitConflict: vi.fn(),
   abortWorkspaceGitConflict: vi.fn(),
   resolveAllWorkspaceGitConflicts: vi.fn(),
+  getPublicAgentGitConflict: vi.fn(),
+  resolvePublicAgentGitConflict: vi.fn(),
+  resolveAllPublicAgentGitConflicts: vi.fn(),
+  abortPublicAgentGitConflict: vi.fn(),
   getPublicAgentDiff: vi.fn(),
   getWorkspaceAgentDiff: vi.fn(),
   stagePublicAgentFiles: vi.fn(),
@@ -116,11 +121,22 @@ describe("GitChangesPanel", () => {
     apiClientMock.resolveWorkspaceGitConflict.mockResolvedValue(undefined);
     apiClientMock.abortWorkspaceGitConflict.mockResolvedValue(undefined);
     apiClientMock.resolveAllWorkspaceGitConflicts.mockResolvedValue(undefined);
+    apiClientMock.getPublicAgentGitConflict.mockResolvedValue({
+      path: "opencode/agents/public-review.md",
+      rawStatus: "UU",
+      baseContent: "base",
+      currentContent: "local",
+      incomingContent: "remote",
+      resultContent: ""
+    });
+    apiClientMock.resolvePublicAgentGitConflict.mockResolvedValue(undefined);
+    apiClientMock.resolveAllPublicAgentGitConflicts.mockResolvedValue(undefined);
+    apiClientMock.abortPublicAgentGitConflict.mockResolvedValue(undefined);
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
-    apiClientMock.commitPublicAgentConfig.mockResolvedValue({ status: "COMMITTED" });
-    apiClientMock.commitWorkspaceAgentConfig.mockResolvedValue({ status: "COMMITTED" });
-    apiClientMock.publishPublicAgentConfig.mockResolvedValue({ status: "PUBLISHED" });
-    apiClientMock.publishWorkspaceAgentConfig.mockResolvedValue({ status: "PUBLISHED" });
+    apiClientMock.commitPublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    apiClientMock.commitWorkspaceAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    apiClientMock.publishPublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    apiClientMock.publishWorkspaceAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
   });
 
   afterEach(() => {
@@ -185,6 +201,113 @@ describe("GitChangesPanel", () => {
     expect(view.queryByText("F-COSS/workspace/02-设计/Test Material.md", { exact: false })).toBeNull();
     expect(view.queryByText("[公共]", { exact: false })).toBeNull();
     expect(view.queryByText("opencode/agents/public_agent_test.json", { exact: false })).toBeNull();
+  });
+
+  it("shows public Agent changes and uses the shared conflict interaction", async () => {
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [
+        {
+          path: "opencode/agents/public-review.md",
+          status: "modified",
+          rawStatus: " M",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-old\n+new"
+        },
+        {
+          path: "opencode/agents/public-conflict.md",
+          status: "conflict",
+          rawStatus: "UU",
+          staged: false,
+          patch: ""
+        }
+      ]
+    });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
+    expect((await view.findAllByText("[公共]", { exact: false })).length).toBeGreaterThan(0);
+    expect(await view.findByText("检测到 1 个公共 Agent 冲突")).toBeTruthy();
+    await fireEvent.click(view.getByText("public-conflict.md", { exact: false }));
+    await waitFor(() => expect(apiClientMock.getPublicAgentGitConflict).toHaveBeenCalledWith(
+      "opencode/agents/public-conflict.md",
+      "agw_public",
+      "linux-1"
+    ));
+    expect(await view.findByText("合并编辑器")).toBeTruthy();
+  });
+
+  it("commits and publishes staged public Agent files through the shared progress dialog", async () => {
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [{
+        path: "opencode/agents/public-review.md",
+        status: "modified",
+        rawStatus: "M ",
+        staged: true,
+        patch: "@@ -1 +1 @@\n-old\n+new"
+      }]
+    });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "更新公共 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.commitPublicAgentConfig).toHaveBeenCalledWith(expect.objectContaining({
+      message: "更新公共 Agent",
+      worktreeId: "agw_public"
+    })));
+    await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledWith(
+      "agw_public",
+      expect.stringMatching(/^aco_/)
+    ));
+    expect(await view.findByText("提交并推送进度")).toBeTruthy();
   });
 
   it("loads application workspace changes from platform git diff instead of opencode vcs diff", async () => {

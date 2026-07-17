@@ -10,6 +10,7 @@ import com.enterprise.testagent.workspace.FileContentResponse;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.domain.user.UserId;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
@@ -42,7 +43,7 @@ class WorkspaceFileWebSocketHandlerTest {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
         when(ticketService.consume("wft_public", "http://localhost:3000")).thenReturn(agentTicket(true, "PUBLIC", null, "agw_123"));
-        when(agentConfigService.readPublicAgentFile("review.md", "agw_123"))
+        when(agentConfigService.readPublicAgentFile("review.md", "agw_123", new UserId("usr_admin")))
                 .thenReturn(new FileContentResponse("review.md", "content", 7));
         WebSocketHandler handler = handler(ticketService, agentConfigService);
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
@@ -58,7 +59,7 @@ class WorkspaceFileWebSocketHandlerTest {
             assertThat(message).contains("\"type\":\"result\"");
             assertThat(message).contains("\"content\":\"content\"");
         });
-        verify(agentConfigService).readPublicAgentFile("review.md", "agw_123");
+        verify(agentConfigService).readPublicAgentFile("review.md", "agw_123", new UserId("usr_admin"));
     }
 
     @Test
@@ -79,7 +80,7 @@ class WorkspaceFileWebSocketHandlerTest {
             assertThat(message).contains("\"type\":\"error\"");
             assertThat(message).contains("\"code\":\"FORBIDDEN\"");
         });
-        verify(agentConfigService, never()).writePublicAgentFile("review.md", "changed", "agw_123");
+        verify(agentConfigService, never()).writePublicAgentFile("review.md", "changed", "agw_123", new UserId("usr_admin"));
     }
 
     @Test
@@ -100,7 +101,7 @@ class WorkspaceFileWebSocketHandlerTest {
             assertThat(message).contains("\"type\":\"error\"");
             assertThat(message).contains("\"code\":\"FORBIDDEN\"");
         });
-        verify(agentConfigService, never()).readPublicAgentFile("review.md", "agw_other");
+        verify(agentConfigService, never()).readPublicAgentFile("review.md", "agw_other", new UserId("usr_admin"));
     }
 
     @Test
@@ -239,6 +240,8 @@ class WorkspaceFileWebSocketHandlerTest {
                 "linux-1",
                 null,
                 superAdmin,
+                superAdmin,
+                "usr_admin",
                 "agent-config",
                 scope,
                 worktreeId,
