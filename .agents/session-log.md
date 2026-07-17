@@ -25,11 +25,13 @@
   - 包内增加 `spec/README.md` 作为个人测试过程资产目录占位；不含 workagent、公共配置、`.git`、依赖、缓存或真实凭据。
   - 将 F-COSS 专属 `.opencode` 发布到 `workspace-test.git` 的 `feature_testagent_20260618`，再从 `usr_test_dev` 个人工作区按白名单投影 `README/docs/archive/.gitignore`，没有选中个人工作区原有的 11 份未跟踪测试材料。
   - 在 `usr_test_dev` 个人分支补入并推送 `F-COSS/workspace/spec/README.md`，共享 feature 分支继续不包含 `spec/**`。
+  - 将测试数据中的 `120260624-0318-新增助商组合贷信鸽取证状态` 和 `I20260713-测试设计产物命名验收` 两个完整需求目录从工作区根目录调整到 `spec/`，其中首个需求原有未跟踪的 11 份测试设计产物也一并纳入个人分支。
 - How:
   - 复用系统应用配置 `stage/commit/publish` 与个人工作区 `commit/publish` API，而非命令行 Git 提交推送；系统最终记录 `targetCommitHash == replicaCommitHash == 95a00a7c995432e00bf835407512c489436c8d0b`，应用配置和 feature 工作区 diff 均为 0。
   - ZIP 使用 JDK `jar --no-manifest` 生成，执行完整性、排除项、实际解压目录逐文件比对和 SHA-256 校验；`spec` 通过 README 占位，避免 Git 丢弃空目录；同时确认本地后端 readiness 与前端 HTTP 可用。
+  - 两个需求目录移动前后使用逐文件 SHA-256 清单比对，20 个文件内容完全一致；远端个人分支逐路径核验根目录无残留、`spec` 下文件数分别为 15 和 5，共享 feature 仍无 `spec/**`。
 - Result:
-  - 精简后的应用配置提交为 `704fc9520239bee0e9f77609e746d68790e2fe63`，最终远端 feature 提交为 `95a00a7c995432e00bf835407512c489436c8d0b`；个人分支占位提交为 `6c85def`。ZIP 共 17 个文件、约 13 KB，SHA-256 为 `fe6f60a92a5f4e4f5ee3450e8806001c206b18418f6819cf4bf8851717d48945`。
+  - 精简后的应用配置提交为 `704fc9520239bee0e9f77609e746d68790e2fe63`，最终远端 feature 提交为 `95a00a7c995432e00bf835407512c489436c8d0b`；个人分支占位提交为 `6c85def`，两个需求归位提交为 `113a55b`。ZIP 共 17 个文件、约 13 KB，SHA-256 为 `fe6f60a92a5f4e4f5ee3450e8806001c206b18418f6819cf4bf8851717d48945`。
   - 不涉及主项目 API、事件、数据库、性能、安全或兼容性代码变更；仅新增交付物与会话记录。
 
 ### 2026-07-16 - 统一企业离线包上传目录与文件名
