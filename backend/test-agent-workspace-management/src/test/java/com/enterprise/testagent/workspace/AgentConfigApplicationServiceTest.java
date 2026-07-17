@@ -588,6 +588,51 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicWorktreeDoesNotReuseLegacyVersionedBranch() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        Path legacyRoot = root.resolve(".configdev/public-personal-20260717");
+        Files.createDirectories(legacyRoot.resolve(".git"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_legacy_public",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-personal-20260717",
+                "public-personal-20260717",
+                legacyRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+
+        AgentConfigResponses.AgentConfigWorktreeResponse response = service.createPublicWorktree(
+                "ignored",
+                "main",
+                ADMIN,
+                "trace_migrate_legacy_worktree");
+
+        assertThat(response.worktreeId()).isNotEqualTo("agw_legacy_public");
+        assertThat(response.worktreeName()).isEqualTo("public-usr_admin");
+        assertThat(response.branch()).isEqualTo("public-usr_admin");
+        assertThat(agentConfigs.findWorktrees(AgentConfigScope.PUBLIC, null, ADMIN)).hasSize(2);
+        assertThat(service.listPublicWorktrees("linux-1", ADMIN))
+                .extracting(AgentConfigResponses.AgentConfigWorktreeOptionResponse::worktreeId)
+                .containsExactly(response.worktreeId());
+    }
+
+    @Test
     void publicWorktreeFailsWhenGitRootMissingAndDoesNotClone() {
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
@@ -1170,16 +1215,16 @@ class AgentConfigApplicationServiceTest {
 
     @Test
     void listPublicWorktreesOnlyReturnsCurrentUsersActiveWorktreeOnServer() throws Exception {
-        Files.createDirectories(root.resolve("worktrees/new-change/.git"));
+        Files.createDirectories(root.resolve("worktrees/public-usr_admin/.git"));
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
         agentConfigs.saveWorktree(new AgentConfigWorktree(
                 "agw_public_new",
                 AgentConfigScope.PUBLIC,
                 null,
                 "linux-2",
-                "new-change",
-                "main",
-                root.resolve("worktrees/new-change").toString(),
+                "public-usr_admin",
+                "public-usr_admin",
+                root.resolve("worktrees/public-usr_admin").toString(),
                 ADMIN,
                 AgentConfigWorktreeStatus.ACTIVE,
                 NOW,
@@ -1232,13 +1277,16 @@ class AgentConfigApplicationServiceTest {
                 AgentConfigWorktreeStatus.ACTIVE,
                 NOW,
                 NOW.plusSeconds(60)));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeRoot = root.resolve("worktrees/public-usr_admin");
+        git.worktreeBranch = "public-usr_admin";
         AgentConfigApplicationService service = service(
                 Map.of(
                         "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
                         "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
                         "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
                 agentConfigs,
-                new RecordingGitWorkspaceService(),
+                git,
                 new RecordingBroadcastPublisher());
 
         List<AgentConfigResponses.AgentConfigWorktreeOptionResponse> options = service.listPublicWorktrees("linux-2", ADMIN);

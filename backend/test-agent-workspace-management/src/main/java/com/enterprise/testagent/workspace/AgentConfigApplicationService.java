@@ -698,7 +698,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     userId,
                     serverIdentity.linuxServerId(),
                     AgentConfigWorktreeStatus.ACTIVE).stream()
-                    .filter(this::isReusablePublicWorktree)
+                    .filter(worktree -> isReusablePublicWorktree(worktree, userId))
                     .findFirst();
             if (existing.isPresent()) {
                 AgentConfigWorktree worktree = existing.get();
@@ -778,7 +778,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 userId,
                 targetServerId,
                 AgentConfigWorktreeStatus.ACTIVE).stream()
-                .filter(this::isReusablePublicWorktree)
+                .filter(worktree -> isReusablePublicWorktree(worktree, userId))
                 .map(worktree -> AgentConfigResponses.AgentConfigWorktreeOptionResponse.from(
                         worktree,
                         publicStandardAgentRoot(Path.of(worktree.rootPath())).toString(),
@@ -1423,10 +1423,15 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return worktree;
     }
 
-    private boolean isReusablePublicWorktree(AgentConfigWorktree worktree) {
+    private boolean isReusablePublicWorktree(AgentConfigWorktree worktree, UserId userId) {
         try {
+            String stableName = publicWorktreeName(userId);
             Path root = Path.of(worktree.rootPath());
-            return Files.isDirectory(root)
+            // 历史公共 worktree 可能带日期或手工名称；继续复用会让公共分支再次表现为版本化分支，
+            // 因此只认当前用户的稳定名称，旧记录保留但不再挂载。
+            return stableName.equals(worktree.worktreeName())
+                    && stableName.equals(worktree.branch())
+                    && Files.isDirectory(root)
                     && gitWorkspaceService.isGitRepository(root)
                     && worktree.branch().equals(gitWorkspaceService.currentBranch(root));
         } catch (Exception exception) {

@@ -15,6 +15,19 @@
   - 本地主干同时保留远端工作区文件功能、本地加载竞态保护和 Mermaid 功能，应用级 Agent 不再可能从 feature workspace 读取后误写个人 workspace，删除/改名/路由切换也不会残留失效或永久 loading 的 tab。
   - 不改变 HTTP API、文件 WebSocket wire、RunEvent、数据库、鉴权或环境配置；仅增加前端合成 tab 身份中的 workspace 路由信息，兼容旧 tab 解析但禁止旧 tab 回退到个人 workspace 写入。生产构建仍只有既有大 chunk 提示，无未完成代码事项。
 
+### 2026-07-17 - 兼容迁移旧公共 Agent worktree 并准备三类验收数据
+
+- Why:
+  - 实机验收发现数据库中已有的日期型公共 worktree 仍会被“有效 worktree”逻辑复用，导致公共区继续显示旧分支；用户同时要求准备应用普通目录、公共 Agent、应用 Agent/Skill 等测试文件，用于前端 Git 交互验收。
+- What:
+  - 公共 worktree 复用条件收紧为 worktree 名和分支都必须等于稳定的 `public-{userId}`；旧日期型或手工命名 ACTIVE 记录不再挂载，但保留数据库记录和磁盘目录，避免迁移时丢失未提交内容。
+  - 为 F-COSS 测试应用准备 3 个普通目录文件、1 个应用 Agent、1 个应用 Skill 及 rules/templates 样例、1 个公共 Agent 样例；公共 worktree 为 `public-usr_test_dev`，应用 Agent 配置使用独立个人 worktree。
+- How:
+  - 复用现有 Agent 配置仓储、`GitWorkspaceService.currentBranch` 与平台文件 WebSocket route/ticket/RPC，没有直接操作业务工作区文件；通过真实浏览器 Origin 写入并逐文件回读，再分别调用普通工作区、应用 Agent 配置和公共 Agent 配置 Git Diff 校验。
+  - `AgentConfigApplicationServiceTest` 新增旧日期分支不复用回归；workspace-management 模块定向测试 37 项通过，使用 `.env.test` / `test` profile 完整重启 backend、opencode-manager、frontend，health/readiness 与前端 HTTP 正常。
+- Result:
+  - 当前用户进入公共区会创建或复用长期稳定个人分支，不再回到历史日期分支；旧 worktree 数据安全保留。
+  - 8 个验收文件有意保持在对应业务 worktree 的未提交状态，便于验证前端差异、暂存、提交、推送和冲突处理；本次不改 DTO、事件、数据库结构、SQL、generated SDK 或环境配置。
 ### 2026-07-17 - 公共 Agent 配置改为按用户个人 worktree 并统一 Git 交互
 
 - Why:
