@@ -185,9 +185,8 @@ describe("AgentConfigPanel", () => {
   it("automatically mounts the current user's public worktree", async () => {
     const { view } = renderPanel();
 
-    expect(await view.findByText("worktree")).toBeTruthy();
-    expect(view.getByText("worktree · change-agent-md")).toBeTruthy();
-    expect(view.getByText("/data/opencode-public-worktrees/change-agent-md/opencode")).toBeTruthy();
+    expect(await view.findByText("worktree · change-agent-md · 测试服务器")).toBeTruthy();
+    expect(view.queryByText("/data/opencode-public-worktrees/change-agent-md/opencode")).toBeNull();
     expect(view.getByRole("button", { name: "更多操作" })).toBeTruthy();
     expect(view.queryByText("更新公共配置")).toBeNull();
     expect(view.getByText("创建公共 worktree")).toBeTruthy();
@@ -277,9 +276,10 @@ describe("AgentConfigPanel", () => {
       store.publicConfigLinuxServerId = "linux-1";
     });
 
-    expect(await view.findByText("worktree")).toBeTruthy();
-    expect(view.getByText("worktree · change-agent-md")).toBeTruthy();
-    expect(view.getByText("/data/opencode-public-worktrees/change-agent-md/opencode")).toBeTruthy();
+    expect(await view.findByText("worktree · change-agent-md · 测试服务器")).toBeTruthy();
+    expect(view.queryByText("/data/opencode-public-worktrees/change-agent-md/opencode")).toBeNull();
+    expect(view.container.querySelector(".agent-root-main")?.getAttribute("title"))
+      .toBe("worktree · change-agent-md · 测试服务器 · /data/opencode-public-worktrees/change-agent-md/opencode");
   });
 
   it("clears stale expanded entries and reloads the current disk tree", async () => {

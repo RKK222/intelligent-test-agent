@@ -1,15 +1,17 @@
 # Session Log
 
-### 2026-07-17 - 核对公共个人 worktree 缺少 node_modules 的原因
+### 2026-07-17 - 核对公共配置 node_modules 来源并收敛来源展示
 
 - Why:
-  - 用户发现公共级 Agent 文件树切换到个人 worktree 后不再显示 `node_modules`，需要确认是删除、前端过滤还是运行目录变化。
+  - 用户发现公共级 Agent 文件树切换到个人 worktree 后不再显示 `node_modules`，并质疑远端已无该目录时共享 checkout 为何仍保留；公共级根目录下还重复占用两行展示服务器和物理路径。
 - What:
-  - 本机共享运行目录 `.testagent/agent-opencode/.config/opencode/node_modules` 仍存在；公共个人 worktree `.configdev/public-usr_test_dev/opencode` 只包含 Git 已跟踪配置，因此没有共享目录中被本地 `.gitignore` 排除的 `node_modules`、`package.json` 和 lockfile。
+  - 确认 `.testagent/agent-opencode/.config` 同时承担公共仓库 `master` checkout 和本机 `OPENCODE_CONFIG_DIR`；公共个人 worktree 只包含 Git 跟踪内容，因此不会出现共享运行目录中的忽略文件。
+  - 公共级根行合并展示个人 worktree、目标服务器，窄栏截断并通过悬浮提示展示完整物理路径，删除树下重复来源块。
 - How:
-  - 对照两个物理目录、Git tracked/ignored 状态和 manager process state；4097 进程的 `OPENCODE_CONFIG_DIR` 仍明确指向共享运行目录 `.config/opencode/`。
+  - 扫描公共仓库全部可达提交、reflog、stash、`master`/`enterprise` 远端分支目录树，均未发现 `opencode/node_modules`、package/lockfile 或运行期 `.gitignore` 被提交；clone 时间为 2026-06-30 09:40:53，OpenCode 在 09:41:07 至 09:41:15 依次生成 `.gitignore`、`node_modules`、package/lockfile，与 1.17.8 源码的 `ensureGitignore` 和依赖安装流程一致。
+  - Agent 配置面板组件测试覆盖合并后的文案、隐藏独立路径行和完整 title 路径；同步 agent-web README。定向 Vitest 14 项和 agent-web typecheck 通过，并按 `.env.test` / `test` profile 重启三项服务，health/readiness、前端 HTTP 和登录 CORS 正常。
 - Result:
-  - 当前是“个人 Git 编辑区”和“共享运行区”分离后的预期差异，不是依赖被删除，也不影响现有 Agent/Skill 运行。若后续要求个人 worktree 内支持 Tool 依赖解析，应建立 Git 忽略的本地依赖链接，不应把 `node_modules` 纳入公共仓库。
+  - 本机 `node_modules` 不是远端分支残留，也没有本地删除提交证据；它从 clone 后首次 OpenCode 初始化起就是 ignored 运行产物，Git 拉取、重置和切分支不会删除。若历史上确曾提交，只可能存在于本机 clone 前已被强推/删除的远端历史或其它仓库，当前仓库无法证明。
 
 ### 2026-07-17 - 修复公共配置发布状态机两个 P0 与进程复用风险
 

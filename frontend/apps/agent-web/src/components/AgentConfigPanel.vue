@@ -772,8 +772,15 @@ const publicRootBadge = computed(() => {
   const source = publicSource.value;
   if (!source.serverName && !source.name) return "";
   return source.mode === "worktree"
-    ? `worktree · ${source.name}`
-    : `直接 · ${source.serverName}`;
+    ? ["worktree", source.name, source.serverName || source.serverId].filter(Boolean).join(" · ")
+    : ["直接", source.serverName || source.serverId].filter(Boolean).join(" · ");
+});
+
+const publicSourceTooltip = computed(() => {
+  const source = publicSource.value;
+  return [source.mode, source.name, source.serverName || source.serverId, source.path]
+    .filter(Boolean)
+    .join(" · ");
 });
 
 function joinLinuxPath(root: string, child: string) {
@@ -1279,8 +1286,8 @@ defineExpose({
 
     <div class="agent-tree">
       <div class="agent-root-row" :class="{ active: isRootActive('PUBLIC') }">
-        <el-tooltip content="公共 Agent 配置；展开后可查看当前服务器、模式和物理路径" placement="top-start" :show-after="50">
-          <button type="button" class="agent-root-main" @click="toggleRoot('PUBLIC')">
+        <el-tooltip :content="publicSourceTooltip" placement="top-start" :show-after="50">
+          <button type="button" class="agent-root-main" :title="publicSourceTooltip" @click="toggleRoot('PUBLIC')">
             <i :class="['codicon codicon-chevron-right ta-file-tree-twistie', rootExpanded.has('PUBLIC') && 'is-open']" aria-hidden="true" />
             <span class="agent-root-title">公共级</span>
             <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
@@ -1319,17 +1326,6 @@ defineExpose({
         </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
-        <div
-          v-if="publicSource.path"
-          class="agent-public-source"
-          :title="`${publicSource.mode} · ${publicSource.serverName || publicSource.serverId}\n${publicSource.path}`"
-        >
-          <div class="agent-public-source-meta">
-            <span class="agent-public-source-mode">{{ publicSource.mode }}</span>
-            <span>{{ publicSource.serverName || publicSource.serverId }}</span>
-          </div>
-          <code>{{ publicSource.path }}</code>
-        </div>
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <AgentConfigTreeNode
           v-for="entry in visibleEntries('PUBLIC', '')"
@@ -2116,41 +2112,6 @@ defineExpose({
 }
 .agent-node-list {
   padding-left: 0;
-}
-.agent-public-source {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-  margin: 2px 6px 5px 22px;
-  border-left: 2px solid var(--ta-tree-border, #e5e5e5);
-  padding: 2px 0 3px 7px;
-  color: var(--ta-tree-muted, #8b949e);
-  font-size: 10px;
-  line-height: 1.35;
-}
-.agent-public-source-meta {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 5px;
-}
-.agent-public-source-meta span:last-child,
-.agent-public-source code {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-public-source-mode {
-  flex-shrink: 0;
-  color: var(--ta-tree-text, #3b3b3b);
-  font-weight: 600;
-}
-.agent-public-source code {
-  display: block;
-  font-family: var(--ta-font-mono, "SFMono-Regular", Consolas, monospace);
-  color: var(--ta-tree-muted, #8b949e);
 }
 .agent-loading {
   display: flex;
