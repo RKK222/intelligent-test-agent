@@ -1,5 +1,13 @@
 # Session Log
 
+### 2026-07-17 - 澄清公共与应用 OpenCode 配置层及依赖目录
+
+- Changed: 仅核对目录职责，未修改运行逻辑；确认进程仍以公共共享 checkout 的 `opencode/` 作为 `OPENCODE_CONFIG_DIR`，同时按当前会话目录向上加载应用个人 worktree 的 `.opencode/`。
+- Pitfalls: `OPENCODE_CONFIG_DIR` 不是排他的配置根；OpenCode 1.17.8 会对公共配置目录和发现的每个项目 `.opencode` 都执行 `.gitignore` 创建及 `@opencode-ai/plugin` 依赖安装。
+- Resolved: Yes - 应用 `.opencode/node_modules` 于 2026-07-17 12:36 首次运行时生成，是 61MB 实体目录且始终被忽略；公共个人 worktree 未被运行态直接加载，所以没有该目录，公共共享运行 checkout 则保留自己的依赖目录。
+- Verification: 对照 manager 4096 进程 start command、OpenCode `ConfigPaths.directories`/`Config.loadInstanceState` 源码、三个物理目录的 Git ignored 状态和文件出生时间。
+- Next: 若要避免每个应用 worktree 重复安装依赖，应单独设计统一只读依赖源或非覆盖式链接，不能通过关闭项目配置加载解决，否则应用 Agent/Skill 会失效。
+
 ### 2026-07-17 - 核对公共配置 node_modules 来源并收敛来源展示
 
 - Why:
