@@ -1,6 +1,6 @@
 ---
 name: code-update-handoff
-description: Use when finishing or pausing any code-change task in this repo so the handoff stays candid, a `Not done yet` section is always included, and `.agents/session-log.md` is updated once per meaningful session boundary for future agents.
+description: Use when finishing or pausing any code-change task in this repo so the handoff stays candid, a `Not done yet` section is always included, and the per-author `.agents/session-log.{id}.md` is updated once per meaningful session boundary for future agents.
 ---
 
 # Code Update Handoff
@@ -10,7 +10,7 @@ Use this skill at the end of any repository edit batch, before the final reply.
 ## Required Workflow
 
 1. Review the latest diff, test output, and any unresolved risks.
-2. If the session produced new durable information worth preserving, write or update `.agents/session-log.md` once for the session and merge related edits into a single top entry.
+2. If the session produced new durable information worth preserving, write or update your per-author file `.agents/session-log.{id}.md` once for the session and merge related edits into a single top entry. `{id}` is your sanitized `git config user.name` (lowercase, runs of non-`[a-z0-9]` collapsed to a single `-`, trimmed; fall back to `hostname -s` if empty). Do not append to the frozen shared `.agents/session-log.md`.
 3. Reply to the user with a concise handoff that always includes:
    - what changed
    - what was verified
@@ -20,7 +20,7 @@ Use this skill at the end of any repository edit batch, before the final reply.
 
 ## Session Log
 
-Keep `.agents/session-log.md` as a compact, chronological record for other developers and agents.
+Each committer keeps their own compact, chronological record in `.agents/session-log.{id}.md` (`{id}` = sanitized `git config user.name`). The shared `.agents/session-log.md` is a frozen legacy archive-never append to it. Before committing, review the recent entries of every `.agents/session-log*.md` file so you don't clobber or re-derive others' work.
 
 ### Entry Format
 

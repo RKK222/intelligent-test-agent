@@ -36,8 +36,8 @@
 19. 完成前必须按 `docs/guides/self-checklist.md` 自检。
 20. 后端新增文件前必须先按 `docs/architecture/module-map.md` 和 `docs/architecture/dependency-rules.md` 分析是否已有合适工程；没有合适工程时，按业务边界新建 Maven module 后再落文件。模块 README 即包级说明。
 21. **未经用户明确要求，不得修改 `.env.local` 等环境配置文件**。此类文件包含敏感的数据库连接、API 密钥等，仅在用户明确指示时方可修改。
-22. 每次会话收尾时，如果本次出现了值得保留给后续开发者/智能体的新增信息（例如新的坑、验证结论、外部状态变化或明确决策），再更新 `.agents/session-log.md`，用 `Why / What / How / Result` 说明本次变更；同一会话内的零散小改动合并为一条，不要按文件或命令频繁记账。该文件属于仓库内容，应随本次 git 提交一起保留，必要时可与其他改动一并推送远程。
-23. 每次提交代码前，必须先回顾 `.agents/session-log.md` 中所有人记录的近期变更、坑点和未完成事项，确认本次暂存内容不会覆盖、丢弃或误合并其他开发者/智能体已经提交的成果；如发现冲突或残留合并标记，必须先处理或明确说明风险。
+22. 每次会话收尾时，如果本次出现了值得保留给后续开发者/智能体的新增信息（例如新的坑、验证结论、外部状态变化或明确决策），按本机提交者身份写入对应的 `.agents/session-log.{id}.md`，用 `Why / What / How / Result` 说明本次变更；同一会话内的零散小改动合并为一条，不要按文件或命令频繁记账。`{id}` 取本仓库 `git config user.name`，转小写、连续非 `[a-z0-9]` 字符折叠为单个 `-` 并去首尾 `-`，结果为空时回退 `hostname -s` 同样清洗（如 `huangzhenren`）。每位提交者只写自己的文件，不再向已冻结的共享 `.agents/session-log.md` 追加，避免多人共写单文件冲突。这些文件属于仓库内容，应随本次 git 提交一起保留，必要时可与其他改动一并推送远程。
+23. 每次提交代码前，必须先回顾所有 `.agents/session-log*.md`（含已冻结的 `.agents/session-log.md` 旧档和各 `.agents/session-log.{id}.md`）中近期条目记录的变更、坑点和未完成事项，确认本次暂存内容不会覆盖、丢弃或误合并其他开发者/智能体已经提交的成果；如发现冲突或残留合并标记，必须先处理或明确说明风险。
 24. 后续新增或修改关系型数据库 SQL 必须通过 MyBatis XML mapper 实现；存量 `Jdbc*Repository` 仅作为迁移窗口保留，不得继续新增 JDBC SQL。Redis、Flyway migration 和 Druid 连接池不受此条限制。
 
 ## 完成标准
@@ -49,5 +49,5 @@
 - 哪些文档已同步更新。
 - 是否涉及 API、事件、数据库、性能、安全或兼容性。
 - 是否存在未完成事项或风险。
-- 是否已按需更新 `.agents/session-log.md` 并纳入本次提交。
+- 是否已按需更新本机对应的 `.agents/session-log.{id}.md` 并纳入本次提交（不再追加到已冻结的 `.agents/session-log.md`）。
 - 不要随意新建git分支，除非我明确的告诉你需要新建。完成后必须自动提交 git 且 commit 信息用中文。
