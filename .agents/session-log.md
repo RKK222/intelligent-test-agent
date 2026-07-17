@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-17 - 合并最新主干并重建企业离线全量包
+
+- Why:
+  - 用户要求基于最新代码重新打包；首次构建完成后远程主干又新增 Mermaid 编辑器、历史工作状态和文档提交，因此旧 ZIP 已不再代表最新代码。
+- What:
+  - 将本地 Agent 回退/公共 worktree、宠物状态光圈和 Git 面板布局 3 个提交重放到 `origin/main` / `github/main` 最新共同基线 `3f6ff36d`，保留远程新增的 10 个提交；最终业务源码基线为 `4302b29f`。
+  - 重新生成完整企业离线 ZIP，包含后端 JAR、前端、manager、Linux/amd64 Worker、OpenCode 1.17.8、公共配置模板以及自定义 Tool 的 plugin/SDK/effect/zod 全量离线依赖。
+- How:
+  - 前端全量 Vitest 72 个文件共 1190 passed / 1 skipped；后端 Git、工作区、Agent 配置和 API 定向 130 passed。
+  - 完整执行 `package-release.sh`，并通过 SHA-256、ZIP 完整性、前后端 `--validate-only`、Worker 镜像版本/架构和断网 Tool 运行时验证。
+- Result:
+  - 新包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 `42fe5f158da9dc7cca2bf33b6004af9c186588f9c3f4b767ad7221726f278ba3`；对应校验文件为 `test-agent-internal-release.zip.sha256`。
+  - 本轮合入包含 Agent discard HTTP API，但不修改 RunEvent、数据库、环境配置或 generated SDK；打包过程未重启本地或内网服务，部署时仍需按后端 Java → `.serverid/.serverhost` → Worker、前端的顺序更新。
+
 ### 2026-07-17 - 收敛 Git 三作用域布局并补充提交推送结果摘要
 
 - Why:
