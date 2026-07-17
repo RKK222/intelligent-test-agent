@@ -391,7 +391,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(invalidOption.title).toBe(branchRuleTooltip);
   });
 
-  it("shows only the current app subtree and expands to direct-child directories by default", async () => {
+  it("shows all root directories without filtering by app name, expanding to direct-child directories by default", async () => {
     const api = createApi();
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
     api.getRepositoryTree = vi.fn().mockResolvedValue(repositoryTree);
@@ -401,10 +401,8 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
 
-    await findByText("F-COSS");
-    const appRoot = getTreePathElement(container, "F-COSS")!;
-    expect(appRoot).toBeTruthy();
-    expect(queryByText("OTHER-APP")).toBeNull();
+    expect(await findByText("F-COSS")).toBeTruthy();
+    expect(await findByText("OTHER-APP")).toBeTruthy();
     expect(await findByText("F-COSS/W1")).toBeTruthy();
     expect((getByText("F-COSS/W1").closest("button") as HTMLButtonElement).disabled).toBe(false);
     expect(await findByText("F-COSS/W1/F1")).toBeTruthy();

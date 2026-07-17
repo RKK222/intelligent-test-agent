@@ -354,7 +354,7 @@ public class ConfigurationManagementApplicationService {
 
     /**
      * 读取应用已关联版本库的远端目录/文件树。新接口只使用 git archive，不触发 clone/cache 落盘。
-     * 测试工作库仅返回当前应用同名根目录及其完整子树。
+     * 标准测试工作库仅过滤文件根、保留完整目录树供选择。
      */
     public RepositoryTreeResponse listRepositoryTree(String appId, String repositoryId, String branch, UserId currentUserId) {
         ApplicationDefinition application = existingEnabledApp(appId);
@@ -369,7 +369,6 @@ public class ConfigurationManagementApplicationService {
         if (repository.standard()) {
             nodes = nodes.stream()
                     .filter(node -> GitRemoteService.NODE_TYPE_DIRECTORY.equals(node.type()))
-                    .filter(node -> application.appName().equals(node.name()) && application.appName().equals(node.path()))
                     .toList();
         }
         return new RepositoryTreeResponse(nodes.stream().map(this::treeNodeResponse).toList());
