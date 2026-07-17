@@ -1238,11 +1238,24 @@ function Follow-ServiceLogs {
                 if ($state -eq 'Running' -or $state -eq 'NotStarted') {
                     $anyRunning = $true
                 }
-                $lines = Receive-Job -Job $job -Keep -ErrorAction SilentlyContinue
-                foreach ($line in @($lines)) {
-                    if ($null -ne $line -and $line -ne '') {
-                        Write-Host "[$($job.Name.Substring(5))] $line"
+                if ($state -eq 'Completed' -or $state -eq 'Failed' -or $state -eq 'Stopped') {
+                    continue
+                }
+                $oldEA = $ErrorActionPreference
+                $ErrorActionPreference = "SilentlyContinue"
+                try {
+                    $lines = Receive-Job -Job $job -Keep 2>&1
+                    if ($null -ne $lines -and $lines -isnot [System.Management.Automation.ErrorRecord]) {
+                        foreach ($line in @($lines)) {
+                            if ($null -ne $line -and $line -ne '') {
+                                Write-Host "[$($job.Name.Substring(5))] $line"
+                            }
+                        }
                     }
+                } catch {
+                    Write-Host "[$($job.Name.Substring(5))] Error reading job output: $_"
+                } finally {
+                    $ErrorActionPreference = $oldEA
                 }
             }
             if (-not $anyRunning) {
