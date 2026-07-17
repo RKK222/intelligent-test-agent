@@ -780,6 +780,21 @@ describe("MermaidFlowEdge", () => {
 });
 
 describe("MermaidVisualEditor", () => {
+  it("节点图形库使用三列紧凑布局压缩纵向高度", () => {
+    expect(visualEditorSource).toContain(
+      ".ta-mermaid-palette__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }"
+    );
+    expect(visualEditorSource).toContain(
+      ".ta-mermaid-inspector button.ta-mermaid-palette__item { display: flex; min-width: 0; min-height: 42px; padding: 3px;"
+    );
+    expect(visualEditorSource).toContain(
+      ".ta-mermaid-palette__preview { position: relative; display: grid; width: 70px; height: 34px;"
+    );
+    expect(visualEditorSource).toContain(
+      "[data-mermaid-shape=\"double-circle\"] { left: 18px; top: 0; width: 34px; height: 34px; }"
+    );
+  });
+
   it("按流程图和文档与显示分组提供十四种节点图形", () => {
     const { getByRole, queryByRole } = render(MermaidVisualEditor, { props: { modelValue: graph() } });
 

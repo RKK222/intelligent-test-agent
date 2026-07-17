@@ -7481,3 +7481,16 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - editor 全量 12 个 Vitest 文件 172 passed；前端全量 64 个文件 981 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，build 仅保留既有大 chunk 提示。
   - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。
+
+### 2026-07-17 - Mermaid 节点图形库改为三列紧凑布局
+
+- Why:
+  - Flowchart 可视化编辑器的 14 类节点图形库采用两列、52px 高卡片，流程图与文档分组共占 8 行，挤压右侧当前节点属性区。
+- What:
+  - 保持检查器 280px 宽和全部节点常显，将图形库调整为三列、42px 高卡片、5px 间距；缩略图统一收敛到 70×34px，圆形类为 34×34px，流程图与文档分组分别降为 4 行和 1 行。
+  - 中文名称、分组、点击/拖放创建、画布节点尺寸、端口、ELK 路由和双列快捷建连均保持不变；同步 editor README 与设计规格。
+- How:
+  - TDD 新增紧凑布局样式回归；真实组件预览实测桌面每格 81×42px、无标签溢出或 SVG 裁切，760px 窄屏仍保持三列且中文完整。
+- Result:
+  - Mermaid 编辑器定向测试 86 passed，editor 全量 14 文件 257 passed；前端全量 70 文件 1105 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 均通过，构建仅保留既有大 chunk 提示。
+  - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增依赖。
