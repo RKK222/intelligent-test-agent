@@ -146,8 +146,18 @@ type CommitResultSummary = {
   committedFiles: number;
   pushedFiles: number;
   localOnlySpecFiles: number;
+  hadRemotePush: boolean;
+  scopes: Array<{
+    scope: DiffScope;
+    label: string;
+    committedFiles: number;
+    pushedFiles: number;
+    localOnlySpecFiles: number;
+    hadRemotePush: boolean;
+  }>;
 };
 const commitResultSummary = ref<CommitResultSummary | null>(null);
+const commitBatchCompleted = ref(true);
 
 type PublishGitStep =
   | "PREPARE_REMOTE"
@@ -417,6 +427,43 @@ const diffScopes = computed(() => [
 const totalChangedFileCount = computed(() =>
   diffScopes.value.reduce((total, scope) => total + scope.count, 0)
 );
+
+function commitScopeLabel(scope: DiffScope): string {
+  if (scope === "AGENT_WORKSPACE") return "应用 Agent";
+  if (scope === "PUBLIC") return "公共 Agent";
+  return "workspace";
+}
+
+function resetCommitBatch() {
+  commitResultSummary.value = null;
+  commitBatchCompleted.value = true;
+}
+
+function recordCommitResult(
+  scope: DiffScope,
+  result: Pick<CommitResultSummary, "committedFiles" | "pushedFiles" | "localOnlySpecFiles" | "hadRemotePush">
+) {
+  const scopes = [...(commitResultSummary.value?.scopes ?? [])];
+  const index = scopes.findIndex((item) => item.scope === scope);
+  const previous = index >= 0 ? scopes[index] : null;
+  const nextScope = {
+    scope,
+    label: commitScopeLabel(scope),
+    committedFiles: (previous?.committedFiles ?? 0) + result.committedFiles,
+    pushedFiles: (previous?.pushedFiles ?? 0) + result.pushedFiles,
+    localOnlySpecFiles: (previous?.localOnlySpecFiles ?? 0) + result.localOnlySpecFiles,
+    hadRemotePush: (previous?.hadRemotePush ?? false) || result.hadRemotePush
+  };
+  if (index >= 0) scopes[index] = nextScope;
+  else scopes.push(nextScope);
+  commitResultSummary.value = {
+    committedFiles: scopes.reduce((total, item) => total + item.committedFiles, 0),
+    pushedFiles: scopes.reduce((total, item) => total + item.pushedFiles, 0),
+    localOnlySpecFiles: scopes.reduce((total, item) => total + item.localOnlySpecFiles, 0),
+    hadRemotePush: scopes.some((item) => item.hadRemotePush),
+    scopes
+  };
+}
 const activeScopeItem = computed(() =>
   diffScopes.value.find((scope) => scope.key === activeDiffScope.value) ?? diffScopes.value[0]
 );
@@ -499,6 +546,7 @@ function selectDiffScope(scope: DiffScope) {
 watch(
   () => props.workspaceId,
   () => {
+    resetCommitBatch();
     mergeResolutionCompleted.value = false;
     stagedWorkspacePaths.value.clear();
     void refreshChanges();
@@ -508,7 +556,8 @@ watch(
 
 watch(
   () => workbench.publicWorktree?.worktreeId,
-  () => {
+  (_worktreeId, previousWorktreeId) => {
+    if (previousWorktreeId) resetCommitBatch();
     // 公共个人 worktree 可能晚于面板挂载才准备完成，切换后重新统计公共 Agent 变更。
     void refreshChanges();
   }
@@ -1078,6 +1127,7 @@ function handleOpenFileDiff(
 // Commit changes
 async function handleCommit(push = false) {
   if (committing.value || !hasWritableStagedChanges.value) return;
+  const operationScope = activeDiffScope.value;
   if (activeDiffScope.value === "WORKSPACE" && props.canWrite && hasWorkspaceConflicts.value) {
     errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
     progressMessage.value = "";
@@ -1118,7 +1168,10 @@ async function handleCommit(push = false) {
   hasLivePublishCommand.value = false;
   publishResultConfirmed.value = false;
   commitRequestedPush.value = push;
-  commitResultSummary.value = null;
+  if (commitBatchCompleted.value) {
+    commitResultSummary.value = null;
+    commitBatchCompleted.value = false;
+  }
   showCommitProgressDialog.value = false;
   commitStep.value = 0;
   let publishAttempted = false;
@@ -1155,11 +1208,12 @@ async function handleCommit(push = false) {
       }
       
       commitMessage.value = "";
-      commitResultSummary.value = {
+      recordCommitResult(operationScope, {
         committedFiles: plannedCommittedFileCount,
         pushedFiles: plannedPushedFileCount,
-        localOnlySpecFiles: plannedLocalOnlySpecFileCount
-      };
+        localOnlySpecFiles: plannedLocalOnlySpecFileCount,
+        hadRemotePush: push && plannedPushedFileCount > 0
+      });
       progressMessage.value = push ? "提交并推送成功！(测试数据)" : "提交成功！(测试数据)";
       setTimeout(() => {
         progressMessage.value = "";
@@ -1320,11 +1374,12 @@ async function handleCommit(push = false) {
     }
 
     commitMessage.value = "";
-    commitResultSummary.value = {
+    recordCommitResult(operationScope, {
       committedFiles: plannedCommittedFileCount,
       pushedFiles: remotePublishCompleted ? plannedPushedFileCount : 0,
-      localOnlySpecFiles: plannedLocalOnlySpecFileCount
-    };
+      localOnlySpecFiles: plannedLocalOnlySpecFileCount,
+      hadRemotePush: remotePublishCompleted
+    });
     if (push && localOnlySpecFileCount > 0) {
       progressMessage.value = remotePublishCompleted
         ? `可发布文件已推送；${localOnlySpecFileCount} 个 spec 文件仅提交到个人 worktree。`
@@ -1333,6 +1388,7 @@ async function handleCommit(push = false) {
       progressMessage.value = push ? "提交并推送成功！" : "提交成功！";
     }
     await refreshChanges();
+    commitBatchCompleted.value = totalChangedFileCount.value === 0;
     setTimeout(() => {
       progressMessage.value = "";
     }, 2000);
@@ -1972,12 +2028,21 @@ defineExpose({
         <div v-else-if="progressMessage && !committing" class="mx-4 my-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-left text-xs text-green-700">
           {{ progressMessage }}
         </div>
-        <div v-if="commitResultSummary && !committing && !errorMessage" class="git-result-summary mx-4 my-3" aria-label="本次处理结果">
-          <strong>本次处理结果</strong>
+        <div v-if="commitResultSummary && !committing && !errorMessage" class="git-result-summary mx-4 my-3" aria-label="本轮累计结果">
+          <strong>本轮累计结果</strong>
           <div class="git-result-summary-items">
-            <span>提交 <b>{{ commitResultSummary.committedFiles }}</b> 个文件</span>
-            <span v-if="commitRequestedPush">推送 <b>{{ commitResultSummary.pushedFiles }}</b> 个文件</span>
+            <span>本地提交 <b>{{ commitResultSummary.committedFiles }}</b> 个文件</span>
+            <span v-if="commitResultSummary.hadRemotePush">远端推送 <b>{{ commitResultSummary.pushedFiles }}</b> 个文件</span>
             <span v-if="commitResultSummary.localOnlySpecFiles > 0">仅本地 <b>{{ commitResultSummary.localOnlySpecFiles }}</b> 个 spec 文件</span>
+          </div>
+          <p class="git-result-summary-note">连续处理多个 Tab 时自动累计，全部差异清空后结束本轮。</p>
+          <div class="git-result-scope-list">
+            <div v-for="scope in commitResultSummary.scopes" :key="scope.scope" class="git-result-scope-row">
+              <strong>{{ scope.label }}</strong>
+              <span>提交 {{ scope.committedFiles }}</span>
+              <span v-if="scope.hadRemotePush">远端 {{ scope.pushedFiles }}</span>
+              <span v-if="scope.localOnlySpecFiles > 0">仅本地 spec {{ scope.localOnlySpecFiles }}</span>
+            </div>
           </div>
         </div>
 
@@ -2676,6 +2741,36 @@ defineExpose({
   border-radius: 999px;
   background: #dcfce7;
   font-size: 11px;
+}
+
+.git-result-summary-note {
+  margin: 7px 0 0;
+  color: #4b7a5a;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.git-result-scope-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid #bbf7d0;
+}
+
+.git-result-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #3f6f4e;
+  font-size: 10px;
+}
+
+.git-result-scope-row strong {
+  min-width: 62px;
+  color: #166534;
+  font-size: 10px;
 }
 
 @keyframes ta-process-spin {

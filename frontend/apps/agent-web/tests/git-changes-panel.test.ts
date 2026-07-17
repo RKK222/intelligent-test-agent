@@ -810,9 +810,9 @@ describe("GitChangesPanel", () => {
       files: ["docs/payment.md"]
     }));
     expect(await view.findByText("可发布文件已推送；1 个 spec 文件仅提交到个人 worktree。")).toBeTruthy();
-    expect(view.getByLabelText("本次处理结果").textContent).toContain("提交 2 个文件");
-    expect(view.getByLabelText("本次处理结果").textContent).toContain("推送 1 个文件");
-    expect(view.getByLabelText("本次处理结果").textContent).toContain("仅本地 1 个 spec 文件");
+    expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 2 个文件");
+    expect(view.getByLabelText("本轮累计结果").textContent).toContain("远端推送 1 个文件");
+    expect(view.getByLabelText("本轮累计结果").textContent).toContain("仅本地 1 个 spec 文件");
   });
 
   it("only commits when all selected workspace files are under spec", async () => {
@@ -846,8 +846,83 @@ describe("GitChangesPanel", () => {
     })));
     expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
     expect(await view.findByText("提交成功！")).toBeTruthy();
-    expect(view.getByLabelText("本次处理结果").textContent).toContain("提交 1 个文件");
-    expect(view.getByLabelText("本次处理结果").textContent).toContain("仅本地 1 个 spec 文件");
+    expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 1 个文件");
+    expect(view.getByLabelText("本轮累计结果").textContent).toContain("仅本地 1 个 spec 文件");
+  });
+
+  it("accumulates workspace, application Agent, and public Agent results in one batch", async () => {
+    let workspaceFiles = [
+      { path: "docs/payment.md", status: "added", rawStatus: "A ", staged: true, patch: "", additions: 1, deletions: 0 },
+      { path: "spec/payment/design.md", status: "added", rawStatus: "A ", staged: true, patch: "", additions: 1, deletions: 0 }
+    ];
+    let applicationAgentFiles = [
+      { path: "agents/payment-review.md", status: "M", rawStatus: "M ", staged: true, patch: "" }
+    ];
+    let publicAgentFiles = [
+      { path: "opencode/agents/public-review.md", status: "M", rawStatus: "M ", staged: true, patch: "" }
+    ];
+    apiClientMock.getWorkspaceGitDiff.mockImplementation(async () => ({ files: workspaceFiles }));
+    apiClientMock.getWorkspaceAgentDiff.mockImplementation(async () => ({ files: applicationAgentFiles }));
+    apiClientMock.getPublicAgentDiff.mockImplementation(async () => ({ files: publicAgentFiles }));
+
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    expect(await view.findByText("payment.md", { exact: false })).toBeTruthy();
+    workspaceFiles = [];
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "docs: 提交应用文件");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 2 个文件"));
+    await fireEvent.click(view.getByText("关闭", { selector: "button" }));
+
+    await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
+    expect(await view.findByText("payment-review.md", { exact: false })).toBeTruthy();
+    applicationAgentFiles = [];
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 提交应用 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 3 个文件"));
+    await fireEvent.click(view.getByText("关闭", { selector: "button" }));
+
+    await fireEvent.click(view.getByRole("tab", { name: /^公共Agent/ }));
+    expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
+    publicAgentFiles = [];
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 提交公共 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledTimes(1));
+
+    const summary = await view.findByLabelText("本轮累计结果");
+    expect(summary.textContent).toContain("本地提交 4 个文件");
+    expect(summary.textContent).toContain("远端推送 3 个文件");
+    expect(summary.textContent).toContain("仅本地 1 个 spec 文件");
+    expect(summary.textContent).toContain("workspace提交 2远端 1仅本地 spec 1");
+    expect(summary.textContent).toContain("应用 Agent提交 1远端 1");
+    expect(summary.textContent).toContain("公共 Agent提交 1远端 1");
   });
 
   it("keeps spec local for a super administrator too", async () => {

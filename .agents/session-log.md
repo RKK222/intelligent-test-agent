@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-17 - Git 三作用域提交结果改为本轮累计
+
+- Why:
+  - 用户连续处理公共 Agent、应用 spec、应用 docs 和应用 Agent 后，进度页只展示最后一次所在 Tab 的 2 个文件，虽然各作用域实际都已推送，结果摘要无法完整对应本轮操作。
+- What:
+  - 提交结果在 workspace、应用 Agent、公共 Agent 之间按同一轮累计，分别统计本地提交、远端推送和仅本地 spec 文件；结果页同时展示总计和三个作用域明细。
+  - 三类差异全部清空后结束本轮，下一批变更重新计数；切换应用工作区或公共个人 worktree 时清空旧结果，避免跨工作区串账。
+- How:
+  - 复用现有暂存文件数、`remotePushed` 成功确认和三个 diff 刷新结果，不改变提交/发布 API 与 spec 禁推规则；新增跨三个 Tab 连续提交并推送的组件回归。
+  - Git 面板定向 Vitest 34 项、前端全量 Vitest 1191 项通过且 1 项跳过，agent-web typecheck 通过；使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend，health/readiness、前端 HTTP、登录 CORS 正常，登录页无控制台错误。
+- Result:
+  - 最后一笔操作完成后，用户可看到本轮所有作用域的完整提交与推送数量，不再被最后一次操作的文件数覆盖；spec 仍明确标为仅本地。
+  - 不涉及 HTTP API、RunEvent、数据库、SQL、generated SDK、权限、安全或环境配置变更；当前无复用登录态，因此真实工作台结果弹框未做浏览器点击验证，由组件测试覆盖。
+
 ### 2026-07-17 - 合并最新主干并重建企业离线全量包
 
 - Why:
