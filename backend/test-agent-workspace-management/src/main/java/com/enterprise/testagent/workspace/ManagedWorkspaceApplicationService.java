@@ -1555,29 +1555,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String operationId,
             UserId userId,
             String traceId) {
-        return publishPersonalWorkspace(
-                personalWorkspaceId,
-                commitMessage,
-                files,
-                expectedApplicationHead,
-                operationId,
-                userId,
-                traceId,
-                false);
-    }
-
-    /**
-     * 超级管理员发布入口允许显式绕过个人 spec 本地专用规则；其它调用方继续走默认限制。
-     */
-    public ManagedWorkspaceResponses.PersonalWorkspacePublishResponse publishPersonalWorkspace(
-            String personalWorkspaceId,
-            String commitMessage,
-            List<String> files,
-            String expectedApplicationHead,
-            String operationId,
-            UserId userId,
-            String traceId,
-            boolean unrestricted) {
         PublishProgressContext progress = new PublishProgressContext();
         List<String> commands = List.of();
         try {
@@ -1591,8 +1568,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                             expectedApplicationHead,
                             userId,
                             traceId,
-                            progress,
-                            unrestricted);
+                            progress);
             commands = new java.util.ArrayList<>(com.enterprise.testagent.common.git.GitCommandExecutor.stopRecording());
             return response.withExecution(commands, progress.currentStep());
         } catch (PlatformException exception) {
@@ -1610,8 +1586,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String expectedApplicationHead,
             UserId userId,
             String traceId,
-            PublishProgressContext progress,
-            boolean unrestricted) {
+            PublishProgressContext progress) {
         PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
         ensurePersonalOwner(personal, userId);
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
@@ -1620,10 +1595,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         GitCommitIdentity commitIdentity = gitCommitIdentity(userId);
         Path personalRepoRoot = pathResolver.resolve(personal.repoRootPath());
         Path personalWorkspaceRoot = pathResolver.resolve(personal.workspaceRootPath());
-        List<String> publishFiles = normalizePublishFiles(files, unrestricted);
+        List<String> publishFiles = normalizePublishFiles(files);
         List<String> gitFiles = repoRelativeFiles(personalRepoRoot, personalWorkspaceRoot, publishFiles);
 
-        // 发布只读取个人分支 HEAD。普通角色的 spec 不得进入 feature 分支，超管不受此限制；
+        // 发布只读取个人分支 HEAD。spec 对所有角色都不得进入 feature 分支；
         // 其它选择文件若仍有未提交状态，要求先走“本地提交”。
         if (gitWorkspaceService.isMergeInProgress(personalRepoRoot)) {
             throw new PlatformException(
@@ -3135,14 +3110,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 发布入口的服务端强制策略：普通角色的 spec 只能留在个人分支本地提交，超级管理员不受该限制。
+     * 发布入口的服务端强制策略：spec 只能留在个人分支本地提交，任何角色都不能豁免。
      * 先按文件系统语义归一化再判断，避免通过 ./spec 或重复分隔符绕过目录边界。
      */
-    private List<String> normalizePublishFiles(List<String> files, boolean unrestricted) {
+    private List<String> normalizePublishFiles(List<String> files) {
         List<String> normalizedFiles = normalizeFiles(files);
-        if (unrestricted) {
-            return normalizedFiles;
-        }
         List<String> localOnlyFiles = normalizedFiles.stream()
                 .filter(this::isLocalOnlySpecPath)
                 .toList();

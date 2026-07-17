@@ -1446,35 +1446,6 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void superAdministratorCanPublishSpecFilesToFeatureBranch() {
-        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
-        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
-        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
-        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
-        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
-
-        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
-                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
-        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
-                version.versionId(), new UserId("usr_1"), "trace_default");
-        git.nextHeadCommit = "commit_super_spec";
-
-        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
-                personal.personalWorkspaceId(),
-                "spec: 超管发布设计",
-                List.of("spec/design.md"),
-                null,
-                null,
-                new UserId("usr_1"),
-                "trace_publish",
-                true);
-
-        assertThat(result.status()).isEqualTo("PUBLISHED");
-        assertThat(git.materializedFiles).containsExactly("F-GCMS/workspace/spec/design.md");
-        assertThat(git.pushedBranch).isEqualTo(version.branch());
-    }
-
-    @Test
     void publishPersonalWorkspaceRepairsStaleApplicationReplicaPath() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();

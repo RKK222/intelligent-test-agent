@@ -1,5 +1,20 @@
 # Session Log
 
+### 2026-07-17 - 将 spec 发布限制收敛为目录硬规则
+
+- Why:
+  - 超级管理员此前会绕过 `spec/**` 发布过滤，导致个人过程资产仍可从 diff 进入应用 feature 分支；用户确认超管豁免只适用于有权限的目录操作，不能绕过 spec 禁推规则。
+- What:
+  - 前端保留 `spec/**` 的 diff、暂存和本地提交能力，并标记“仅本地”；仅暂存 spec 时禁用“提交并推送”，混选时只发布非 spec 文件。
+  - 移除前后端 `SUPER_ADMIN` 的 spec 发布旁路，服务端对所有角色统一规范化路径并拒绝 `spec/**` 及路径别名；同步用户手册、API 文档、模块 README 和固定测试设计。
+  - 浏览器回归中同步修正文件树新增删除入口后的歧义选择器，以及当前 Tab/编辑器与“新建或上传”文案对应的旧断言。
+- How:
+  - 前端组件与帮助文档测试 34/34、后端 `ManagedWorkspaceApplicationServiceTest` 与 `ManagedWorkspaceControllerTest` 共 59/59、桌面与移动 Playwright 4/4 通过；agent-web typecheck、agent-web build 和 user-manual build 通过。
+  - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端与登录 CORS 为 200，真实浏览器可打开登录页且 manager WebSocket 已连接。
+- Result:
+  - `spec/**` 对普通成员、应用管理员和超级管理员都只存在于个人 worktree 的本地提交，不再投影或推送到应用 feature；后端直接 API 同样不能绕过。
+  - 本次调整不改变 DTO、事件或数据库结构，不新增文件协议；权限收紧只影响原先错误放行的超级管理员 spec 发布路径。
+
 ### 2026-07-17 - 补齐工作区文件编辑、搬运与上传交互
 
 - Why:

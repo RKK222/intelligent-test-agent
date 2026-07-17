@@ -514,17 +514,20 @@ describe("GitChangesPanel", () => {
     });
 
     expect(await view.findByText("design.md")).toBeTruthy();
+    expect(view.getByText("仅本地")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 保存本地设计");
-    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(view.getByRole("button", { name: "提交并推送" }).getAttribute("title")).toBe("当前暂存内容仅允许本地提交");
+    await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
     await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
       files: ["spec/payment/design.md"]
     })));
     expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
-    expect(await view.findByText("1 个 spec 文件已提交到个人 worktree，未推送。")).toBeTruthy();
+    expect(await view.findByText("提交成功！")).toBeTruthy();
   });
 
-  it("lets a super administrator publish spec with the unrestricted workspace policy", async () => {
+  it("keeps spec local for a super administrator too", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
         files: [
@@ -540,20 +543,21 @@ describe("GitChangesPanel", () => {
         apiBaseUrl: "http://api",
         canWrite: true,
         canManageAgentConfig: true,
-        canManagePublicConfig: true,
-        canPublishSpec: true
+        canManagePublicConfig: true
       },
       global: { plugins: [createPinia()] }
     });
 
     expect(await view.findByText("design.md")).toBeTruthy();
-    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 超管发布设计");
-    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 超管本地提交设计");
+    expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
-    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith(
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
       fixture.application.personalWorkspaceId,
       expect.objectContaining({ files: [fixture.files.spec] })
     ));
+    expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
   });
 
   it("shows application agent changes as readonly to a regular member", async () => {

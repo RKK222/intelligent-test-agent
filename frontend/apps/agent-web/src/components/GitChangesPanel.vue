@@ -51,8 +51,6 @@ const props = defineProps<{
   canManageAgentConfig?: boolean;
   /** 公共 Git Agent/Skill 的独立写权限，仅超级管理员可用。 */
   canManagePublicConfig?: boolean;
-  /** 超级管理员发布应用文件时不受 spec 本地专用规则限制。 */
-  canPublishSpec?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -290,7 +288,7 @@ const workspaceStaged = computed(() =>
   workspaceDiffFiles.value.filter((f) => stagedWorkspacePaths.value.has(f.path) && !isConflictFile(f))
 );
 
-// spec 默认是个人研发过程资产；普通角色不得发布，超管按“不受应用工作区限制”策略放行。
+// spec 是个人研发过程资产：允许编辑、暂存和本地提交，但任何角色都不得发布到 feature。
 function isLocalOnlySpecPath(path: string): boolean {
   const segments = path.replace(/\\/g, "/").split("/").filter((segment) => segment && segment !== ".");
   return segments[0] === "spec";
@@ -337,6 +335,10 @@ const writableAgentStaged = computed(() =>
 );
 const hasWritableStagedChanges = computed(() =>
   (props.canWrite && workspaceStaged.value.length > 0) || writableAgentStaged.value.length > 0
+);
+const hasPublishableStagedChanges = computed(() =>
+  (props.canWrite && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path)))
+  || writableAgentStaged.value.length > 0
 );
 
 // Overall counts
@@ -822,7 +824,7 @@ async function handleCommit(push = false) {
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
       const files = workspaceStaged.value.map((file) => file.path);
-      const publishableFiles = files.filter((file) => props.canPublishSpec || !isLocalOnlySpecPath(file));
+      const publishableFiles = files.filter((file) => !isLocalOnlySpecPath(file));
       localOnlySpecFileCount = files.length - publishableFiles.length;
       await api.commitPersonalWorkspace(personalWorkspaceId, {
         commitMessage: msg,
@@ -1162,6 +1164,7 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
+                <Badge v-if="isLocalOnlySpecPath(file.path)" tone="neutral" class="ml-1 py-0 px-1 text-[9px]">仅本地</Badge>
                 <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
@@ -1285,6 +1288,7 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
+                <Badge v-if="isLocalOnlySpecPath(file.path)" tone="neutral" class="ml-1 py-0 px-1 text-[9px]">仅本地</Badge>
                 <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
@@ -1380,8 +1384,10 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-push flex-1"
-          :title="hasBlockingWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送' : '提交并推送已暂存变更'"
-          :disabled="committing || hasBlockingWorkspaceConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
+          :title="hasBlockingWorkspaceConflicts
+            ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送'
+            : (!hasPublishableStagedChanges ? '当前暂存内容仅允许本地提交' : '提交并推送可发布变更')"
+          :disabled="committing || hasBlockingWorkspaceConflicts || !hasPublishableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(true)"
         >
           <Upload class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />

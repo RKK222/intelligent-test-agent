@@ -281,10 +281,7 @@ public class ManagedWorkspaceController {
                 request.expectedApplicationHead(),
                 request.operationId(),
                 userId(exchange),
-                RuntimeApiSupport.traceId(exchange),
-                AuthWebSupport.hasRole(
-                        AuthWebSupport.getAuthPrincipal(exchange),
-                        com.enterprise.testagent.domain.dictionary.Dictionary.ROLE_SUPER_ADMIN)));
+                RuntimeApiSupport.traceId(exchange)));
     }
 
     /** 仅提交当前个人 worktree；推送必须由后续发布接口从个人 HEAD 投影到 feature worktree。 */

@@ -133,7 +133,7 @@ describe("help center", () => {
     expect(workspace).toContain("只把允许发布且已进入个人 `HEAD` 的文件");
     expect(workspace).toContain("`spec/**`");
     expect(workspace).toContain("只保留个人提交");
-    expect(workspace).toContain("超级管理员不受该限制");
+    expect(workspace).toContain("超级管理员也不能绕过该目录限制");
     expect(workspace).toContain("`docs/**`");
     expect(agentConfig).toContain("只有超级管理员可以创建公共 worktree");
     expect(agentConfig).toContain("只有应用管理员与超级管理员可以创建应用 worktree");

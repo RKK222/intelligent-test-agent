@@ -287,7 +287,6 @@ defineExpose({
         :can-write="!!canWrite"
         :can-manage-agent-config="canManageAgentConfig ?? !!canWrite"
         :can-manage-public-config="canManagePublicConfig ?? !!canWrite"
-        :can-publish-spec="!!canManagePublicConfig"
         @open-diff="(payload) => emit('openDiff', payload)"
         @changes-refreshed="(payload) => emit('changes-refreshed', payload)"
       />

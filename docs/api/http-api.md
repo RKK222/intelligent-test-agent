@@ -1033,7 +1033,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 ]
 ```
 
-`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 要求当前用户 opencode 进程服务器归属、workspace 和目标后端同服务器。签发优先使用轻量归属快照；当快照未 READY 时会复查当前用户 opencode 强状态，避免文件树与进程状态卡可用性不一致，但不会触发 `start` 命令；`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录；`mode=agent-config` 绑定 Agent 配置 scope/workspace/worktree，读取允许登录用户，公共 Git 写入仅 `SUPER_ADMIN`，应用级配置写入由 WebSocket handler 校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。普通用户写应用版本副本会返回只读错误；个人 worktree 普通文件仍可写，`.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）仅 APP_ADMIN 可写。
+`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 要求当前用户 opencode 进程服务器归属、workspace 和目标后端同服务器。签发优先使用轻量归属快照；当快照未 READY 时会复查当前用户 opencode 强状态，避免文件树与进程状态卡可用性不一致，但不会触发 `start` 命令；`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录；`mode=agent-config` 绑定 Agent 配置 scope/workspace/worktree，读取允许登录用户，公共 Git 写入仅 `SUPER_ADMIN`，应用级配置写入由 WebSocket handler 校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。普通用户写应用版本副本会返回只读错误；个人 worktree 普通文件仍可写，并可通过 `workspace.delete` 删除普通文件或递归删除目录树；删除不跟随符号链接，工作区根目录和任意层级 `.git` 元数据禁止删除。`.opencode` 根及其 `agents/**`、`skills/**`（含 rules/templates）仅 APP_ADMIN 可写。
 
 请求体：
 
@@ -1289,7 +1289,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 2. `publish` 校验个人 worktree 未处于 merge 状态，且 `files` 在个人 worktree 没有未提交变更；未先本地提交时返回 `CONFLICT`。
 3. 确保当前服务器的应用 feature worktree clean，`git fetch` + `git pull --ff-only {appVersionBranch}`，并校验可选 `expectedApplicationHead`。
 4. 读取个人仓库 `HEAD`，将 `files` 映射为 feature worktree 的仓库相对路径；存在的文件执行 checkout 投影，不存在的文件执行定点删除。
-5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push，服务端在准备 feature worktree 前对普通成员和应用管理员强制拒绝 `spec/**`，`SUPER_ADMIN` 不受该发布路径限制，其它未选文件仍不会泄漏。
+5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push，服务端在准备 feature worktree 前对所有角色强制拒绝 `spec/**`，`SUPER_ADMIN` 也不能绕过目录规则，其它未选文件仍不会泄漏。
 
 发布结果：
 

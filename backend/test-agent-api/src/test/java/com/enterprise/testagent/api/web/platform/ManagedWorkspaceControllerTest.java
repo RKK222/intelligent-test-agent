@@ -299,7 +299,7 @@ class ManagedWorkspaceControllerTest {
     }
 
     @Test
-    void superAdministratorPublishForwardsUnrestrictedPolicy() {
+    void superAdministratorPublishUsesTheSameDirectoryPolicy() {
         ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
 
         client(service, readyAssignmentService("127.0.0.1"), List.of("SUPER_ADMIN")).post()
@@ -319,8 +319,7 @@ class ManagedWorkspaceControllerTest {
                 null,
                 null,
                 USER_ID,
-                TRACE_ID,
-                true);
+                TRACE_ID);
     }
 
     private WebTestClient client(ManagedWorkspaceApplicationService service) {
