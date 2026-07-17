@@ -1,6 +1,20 @@
 export type MermaidGraphKind = "flowchart" | "graph";
 export type MermaidDirection = "TD" | "TB" | "BT" | "LR" | "RL";
-export type MermaidNodeType = "rectangle" | "rounded" | "stadium" | "diamond" | "circle";
+export type MermaidNodeType =
+  | "rectangle"
+  | "rounded"
+  | "stadium"
+  | "diamond"
+  | "circle"
+  | "subroutine"
+  | "database"
+  | "hexagon"
+  | "parallelogram"
+  | "trapezoid"
+  | "double-circle"
+  | "text"
+  | "doc"
+  | "docs";
 export type MermaidEdgeRelation = "arrow" | "line" | "dotted" | "thick";
 
 export type MermaidPosition = {

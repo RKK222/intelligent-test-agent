@@ -1,0 +1,80 @@
+/** Agent 配置文件加载请求只携带路由与交互语义，正文统一由工作台父层读取。 */
+export type AgentFileLoadRequest = {
+  scope: "PUBLIC" | "WORKSPACE";
+  path: string;
+  workspaceId?: string;
+  worktreeId?: string | null;
+  linuxServerId?: string | null;
+  readonly: boolean;
+  activate: boolean;
+  closeOnNotFound: boolean;
+};
+
+export type AgentFileTabInfo = {
+  scope: "PUBLIC" | "WORKSPACE";
+  path: string;
+  workspaceId?: string;
+  worktreeId?: string;
+  linuxServerId?: string;
+};
+
+const AGENT_PUBLIC_FILE_PREFIX = "agent-public:";
+const AGENT_WORKSPACE_FILE_PREFIX = "agent-workspace:";
+
+export function isAgentFilePath(path: string): boolean {
+  return path.startsWith(AGENT_PUBLIC_FILE_PREFIX) || path.startsWith(AGENT_WORKSPACE_FILE_PREFIX);
+}
+
+/**
+ * Agent tab 的 path 同时承担唯一身份与后续写入路由，应用级文件必须把 feature workspace 固化在其中。
+ * 路径本身先编码，因此分隔符只会出现在路由元数据之间。
+ */
+export function agentTabPath(
+  scope: "PUBLIC" | "WORKSPACE",
+  path: string,
+  workspaceId?: string | null,
+  worktreeId?: string | null,
+  linuxServerId?: string | null
+): string {
+  const encodedPath = encodeURIComponent(path);
+  const encodedWorktree = encodeURIComponent(worktreeId ?? "");
+  const encodedLinuxServer = encodeURIComponent(linuxServerId ?? "");
+  if (scope === "PUBLIC") {
+    return `${AGENT_PUBLIC_FILE_PREFIX}${encodedWorktree}:${encodedLinuxServer}:${encodedPath}`;
+  }
+  return `${AGENT_WORKSPACE_FILE_PREFIX}${encodeURIComponent(workspaceId ?? "")}:${encodedWorktree}:${encodedLinuxServer}:${encodedPath}`;
+}
+
+function decodeRouteValue(value: string): string | undefined {
+  return value ? decodeURIComponent(value) : undefined;
+}
+
+export function agentFileInfo(tabPath: string): AgentFileTabInfo {
+  const scope: "PUBLIC" | "WORKSPACE" = tabPath.startsWith(AGENT_PUBLIC_FILE_PREFIX) ? "PUBLIC" : "WORKSPACE";
+  const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
+  const parts = tabPath.slice(prefix.length).split(":");
+
+  if (scope === "PUBLIC") {
+    const [rawWorktree = "", rawLinuxServer = "", rawPath = ""] = parts;
+    return {
+      scope,
+      path: decodeURIComponent(rawPath),
+      workspaceId: undefined,
+      worktreeId: decodeRouteValue(rawWorktree),
+      linuxServerId: decodeRouteValue(rawLinuxServer)
+    };
+  }
+
+  // 新格式固定四段；三段旧 tab 不携带 workspaceId，只允许读取信息，不得回退到当前个人工作区写入。
+  const isLegacyPath = parts.length < 4;
+  const [rawWorkspace = "", rawWorktree = "", rawLinuxServer = "", rawPath = ""] = isLegacyPath
+    ? ["", parts[0] ?? "", parts[1] ?? "", parts[2] ?? ""]
+    : parts;
+  return {
+    scope,
+    path: decodeURIComponent(rawPath),
+    workspaceId: decodeRouteValue(rawWorkspace),
+    worktreeId: decodeRouteValue(rawWorktree),
+    linuxServerId: decodeRouteValue(rawLinuxServer)
+  };
+}

@@ -9,11 +9,16 @@ import type {
   MermaidNode,
   MermaidNodeType
 } from "./model";
+import { findMermaidNodeTypeByModernShape } from "./node-shapes";
 
 const HEADER_PATTERN = /^\s*(flowchart|graph)(?:\s+(TD|TB|BT|LR|RL))?\s*;?\s*$/i;
 const NODE_ID_PATTERN = "[A-Za-z_][A-Za-z0-9_-]*";
 
 type ParsedNode = Pick<MermaidNode, "id" | "text" | "type"> & { explicit: boolean };
+
+type ModernNodeExpression =
+  | { status: "supported"; node: ParsedNode }
+  | { status: "preserved"; id: string };
 
 function unquoteLabel(label: string): string {
   const trimmed = label.trim();
@@ -21,12 +26,176 @@ function unquoteLabel(label: string): string {
   return value.replaceAll("&quot;", '"').replaceAll("&#124;", "|");
 }
 
+/**
+ * 现代属性只接管可无损解码的 YAML 标量：shape 可使用已知裸短名，label 必须是单引号
+ * 或 JSON/YAML 共有双引号转义子集。其他值返回 null，由上层整句保留，避免可见标签变化。
+ */
+function unquoteModernProperty(value: string, allowPlain: boolean): string | null {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const decoded = JSON.parse(trimmed);
+      if (typeof decoded === "string") {
+        return decoded.replaceAll("&quot;", '"').replaceAll("&#124;", "|");
+      }
+    } catch {
+      return null;
+    }
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replaceAll("''", "'")
+      .replaceAll("&quot;", '"').replaceAll("&#124;", "|");
+  }
+  if (/^["']|["']$/.test(trimmed)) return null;
+  // Mermaid 通过 YAML 解析裸标量，false/null/日期/十六进制数等并不保持原始字符串语义。
+  // shape 只会再与已知短名匹配，可以接管；label 为避免可见内容变化，只接管引号字符串。
+  return allowPlain ? unquoteLabel(trimmed) : null;
+}
+
+/** 按引号边界拆分现代节点属性，标签中的逗号不会被误当成字段分隔符。 */
+function splitModernNodeProperties(source: string): string[] | null {
+  const properties: string[] = [];
+  let start = 0;
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote === '"') {
+      escaped = true;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = quote === character ? undefined : quote ?? character;
+      continue;
+    }
+    if (character === "," && !quote) {
+      properties.push(source.slice(start, index));
+      start = index + 1;
+    }
+  }
+  if (quote || escaped) return null;
+  properties.push(source.slice(start));
+  return properties;
+}
+
+/**
+ * 解析 `ID@{ shape: ..., label: ... }`。只有 shape/label 两个字段可被无损接管；
+ * 出现未知字段、重复字段或未知 shape 时保留原文，避免保存后丢失 Mermaid 信息。
+ */
+function parseModernNodeExpression(value: string): ModernNodeExpression | null {
+  const match = value.match(new RegExp(`^(${NODE_ID_PATTERN})@\\{([\\s\\S]*)\\}$`));
+  if (!match) return null;
+  const id = match[1] ?? "";
+  const parts = splitModernNodeProperties(match[2] ?? "");
+  if (!parts) return { status: "preserved", id };
+
+  const properties = new Map<string, string>();
+  for (const part of parts) {
+    const property = part.match(/^\s*([A-Za-z][A-Za-z0-9_-]*)\s*:\s*([\s\S]*?)\s*$/);
+    if (!property) return { status: "preserved", id };
+    const key = property[1]?.toLowerCase() ?? "";
+    if ((key !== "shape" && key !== "label") || properties.has(key)) {
+      return { status: "preserved", id };
+    }
+    properties.set(key, property[2] ?? "");
+  }
+
+  const rawShape = properties.get("shape");
+  if (!rawShape) return { status: "preserved", id };
+  const decodedShape = unquoteModernProperty(rawShape, true);
+  if (decodedShape === null) return { status: "preserved", id };
+  const type = findMermaidNodeTypeByModernShape(decodedShape);
+  if (!type) return { status: "preserved", id };
+  const rawLabel = properties.get("label");
+  const decodedLabel = rawLabel === undefined ? id : unquoteModernProperty(rawLabel, false);
+  if (decodedLabel === null) return { status: "preserved", id };
+  return {
+    status: "supported",
+    node: {
+      id,
+      text: decodedLabel,
+      type,
+      explicit: true
+    }
+  };
+}
+
+/**
+ * 扫描一行中独立或内联的现代节点表达式。未知节点即使出现在边声明里，也要先登记其
+ * ID，避免后续 `A --> B` 把同一个未知形状重新推断成矩形。
+ */
+function scanModernNodeExpressions(line: string): { ids: string[]; hasPreserved: boolean } {
+  const ids: string[] = [];
+  let hasPreserved = false;
+  const isIdentifierPart = (character: string) => /[A-Za-z0-9_-]/.test(character);
+  const isIdentifierStart = (character: string) => /[A-Za-z_]/.test(character);
+  let searchFrom = 0;
+  while (searchFrom < line.length) {
+    const markerIndex = line.indexOf("@{", searchFrom);
+    if (markerIndex < 0) break;
+    let expressionStart = markerIndex;
+    while (expressionStart > 0 && isIdentifierPart(line[expressionStart - 1]!)) expressionStart -= 1;
+    if (expressionStart === markerIndex || !isIdentifierStart(line[expressionStart]!)) {
+      searchFrom = markerIndex + 2;
+      continue;
+    }
+    let quote: '"' | "'" | undefined;
+    let escaped = false;
+    let end = -1;
+    for (let index = markerIndex + 2; index < line.length; index += 1) {
+      const character = line[index]!;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === "\\" && quote === '"') {
+        escaped = true;
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        quote = quote === character ? undefined : quote ?? character;
+        continue;
+      }
+      if (character === "}" && !quote) {
+        end = index;
+        break;
+      }
+    }
+    if (end < 0) {
+      ids.push(line.slice(expressionStart, markerIndex));
+      hasPreserved = true;
+      break;
+    }
+    const modern = parseModernNodeExpression(line.slice(expressionStart, end + 1));
+    if (modern) {
+      ids.push(modern.status === "supported" ? modern.node.id : modern.id);
+      if (modern.status === "preserved") hasPreserved = true;
+    } else {
+      hasPreserved = true;
+    }
+    searchFrom = end + 1;
+  }
+  return { ids, hasPreserved };
+}
+
 function parseNodeExpression(expression: string): ParsedNode | null {
   const value = expression.trim().replace(/;$/, "").trim();
+  const modern = parseModernNodeExpression(value);
+  if (modern) return modern.status === "supported" ? modern.node : null;
   const shapes: Array<{ pattern: RegExp; type: MermaidNodeType }> = [
+    { pattern: /^([A-Za-z_][A-Za-z0-9_-]*)\(\(\((.*)\)\)\)$/, type: "double-circle" },
     { pattern: new RegExp(`^(${NODE_ID_PATTERN})\\(\\((.*)\\)\\)$`), type: "circle" },
     { pattern: new RegExp(`^(${NODE_ID_PATTERN})\\(\\[(.*)\\]\\)$`), type: "stadium" },
+    { pattern: /^([A-Za-z_][A-Za-z0-9_-]*)\[\[(.*)\]\]$/, type: "subroutine" },
+    { pattern: /^([A-Za-z_][A-Za-z0-9_-]*)\[\((.*)\)\]$/, type: "database" },
+    { pattern: /^([A-Za-z_][A-Za-z0-9_-]*)\{\{(.*)\}\}$/, type: "hexagon" },
     { pattern: new RegExp(`^(${NODE_ID_PATTERN})\\{(.*)\\}$`), type: "diamond" },
+    { pattern: /^([A-Za-z_][A-Za-z0-9_-]*)\[\/(.*)\/\]$/, type: "parallelogram" },
+    { pattern: /^([A-Za-z_][A-Za-z0-9_-]*)\[\/(.*)\\\]$/, type: "trapezoid" },
     { pattern: new RegExp(`^(${NODE_ID_PATTERN})\\((.*)\\)$`), type: "rounded" },
     { pattern: new RegExp(`^(${NODE_ID_PATTERN})\\[(.*)\\]$`), type: "rectangle" }
   ];
@@ -102,6 +271,28 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
   ));
   const nodes = new Map<string, MermaidNode & { explicit: boolean }>();
   const edges: MermaidGraph["edges"] = [];
+  const preservedModernNodeIds = new Set<string>();
+  let scanPreservedBlockDepth = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const startsPreservedBlock = /^subgraph\b/i.test(trimmed);
+    const insidePreservedBlock = scanPreservedBlockDepth > 0 || startsPreservedBlock;
+    if (startsPreservedBlock) scanPreservedBlockDepth += 1;
+    if (!trimmed.startsWith("%%")) {
+      const scan = scanModernNodeExpressions(line);
+      if (scan.ids.length > 0) {
+        const normalized = trimmed.replace(/;$/, "").trim();
+        const standalone = parseModernNodeExpression(normalized);
+        const editableStatement = !insidePreservedBlock && !scan.hasPreserved && (
+          standalone?.status === "supported" || parseEdgeLine(line) !== null
+        );
+        if (!editableStatement) {
+          for (const id of scan.ids) preservedModernNodeIds.add(id);
+        }
+      }
+    }
+    if (/^end\s*;?$/i.test(trimmed) && scanPreservedBlockDepth > 0) scanPreservedBlockDepth -= 1;
+  }
   // 私有注释先带源码索引按普通行保留，只有整个新/旧 metadata 验证成功后才统一消费。
   const preservedRecords: Array<{ sourceIndex: number; beforeEditableIndex: number; line: string }> = [];
   let preservedBlockDepth = 0;
@@ -142,6 +333,11 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
     }
     const edge = parseEdgeLine(line);
     if (edge) {
+      // 未知/带额外属性的现代节点不能被后续裸 ID 连线重新推断为矩形。
+      if (preservedModernNodeIds.has(edge.source.id) || preservedModernNodeIds.has(edge.target.id)) {
+        preserveLine(line, index);
+        return;
+      }
       upsertNode(edge.source);
       upsertNode(edge.target);
       edges.push({
@@ -155,6 +351,10 @@ export function parseMermaidFlowchart(source: string): MermaidGraph {
     }
     const node = parseNodeExpression(line);
     if (node) {
+      if (preservedModernNodeIds.has(node.id)) {
+        preserveLine(line, index);
+        return;
+      }
       upsertNode(node);
       return;
     }

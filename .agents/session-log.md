@@ -1,5 +1,20 @@
 # Session Log
 
+### 2026-07-17 - 合并远程主干并补齐文件加载路由边界
+
+- Why:
+  - 用户要求把本地代码安全提交到远程，遇到冲突时同时保留远端工作区文件能力与本地 Agent/Mermaid 功能，禁止在合并中丢失行为。
+- What:
+  - 将 5 笔本地 Agent/普通文件加载与 Mermaid 提交重放到最新 `origin/main`，逐项合并远端文件复制、移动、上传、目录删除、弹框样式和 `spec/**` 禁推规则；验证期间其他会话新增的 3 笔 Mermaid 提交保持独立、未覆盖。
+  - 修复审查发现的 4 个重要边界：应用级 Agent tab 持久携带 feature workspace ID 并据此重试/保存；删除文件或目录正确关闭原始 path 的 tab；移动/改名时废弃旧路径读取并恢复快照或补读新路径；Agent 路由切换时把旧 loading 收敛为 loaded/error，返回原路由后可重试。
+  - 合并测试冲突时保留扩展后的 workspace WebSocket 操作覆盖，修正重复测试标题、文件树删除按钮引入的歧义选择器和 Mermaid 现代节点语法断言；新增 workspaceId、删除 tab、改名读取竞态与 Agent A→B→A 路由切换回归。
+- How:
+  - 只读复审确认重放前后功能补丁一致，并报告 0 个 Critical、4 个 Important；4 项均先以失败测试复现后完成最小修复。
+  - 前端 lint、typecheck、production build 均通过；Vitest 70 个文件共 1105 项通过、1 项跳过；冲突及审查相关 Playwright 在 Chromium/Mobile 共 44/44 通过；`git diff --check`、未合并索引和冲突标记检查通过。
+- Result:
+  - 本地主干同时保留远端工作区文件功能、本地加载竞态保护和 Mermaid 功能，应用级 Agent 不再可能从 feature workspace 读取后误写个人 workspace，删除/改名/路由切换也不会残留失效或永久 loading 的 tab。
+  - 不改变 HTTP API、文件 WebSocket wire、RunEvent、数据库、鉴权或环境配置；仅增加前端合成 tab 身份中的 workspace 路由信息，兼容旧 tab 解析但禁止旧 tab 回退到个人 workspace 写入。生产构建仍只有既有大 chunk 提示，无未完成代码事项。
+
 ### 2026-07-17 - 优化工作区文件上传、新增与删除对话框样式
 
 - Why:
@@ -136,6 +151,65 @@
 - Result:
   - 最新 `test-agent-internal-release.zip` 为 207 MB，SHA-256 `f61c9760de34dd4b949b2c4d88c17f9b57b8b9a6923b9a5c2d6e51988bf85a47`；后端 health/readiness 为 `UP`，前端/CORS 为 200，manager WebSocket/config update 正常，日志确认从 classpath 加载 RSA 私钥。
   - 企业更新时 Java 必须重启；前端必须替换静态文件但只需 reload Nginx；worker 与既有用户 OpenCode 无需重启，可在后台部署时使用 `--skip-worker`。
+### 2026-07-17 - 修复 Agent 配置文件打开偶发空白
+
+- Why:
+  - 公共级和应用级 Agent 文件仍由 `AgentConfigPanel` 先读取正文、再创建 tab，绕过了普通工作区文件已有的加载三态、上下文/请求代次和内容修订保护；组件测试又默认返回空正文，工作台 WebSocket mock 未实现 `agent-config.read`，因此真实非空文件空白与竞态没有被覆盖。
+- What:
+  - `AgentConfigPanel` 改为只上报 scope、path、workspace/worktree/server、readonly 与打开/后台刷新语义；`AgentWorkbench` 新增独立 Agent 文件加载器，按 Agent 上下文代次、合成 tab 路径、同路径请求代次、tab 存在性和内容修订代次隔离响应，并统一处理首次 loading/error/retry、合法空文件、缓存刷新失败、NOT_FOUND 关闭 clean tab、dirty/读取期间编辑保护、顶部 tab 缓存和按 tab 类型重试。
+  - Playwright mock 增加 `agent-config.list/read/write` frame、延迟、失败、NOT_FOUND 和响应序列；新增公共级/应用级非空与空文件、重试、A/B 与同路径乱序、上下文切换、关闭 loading tab、dirty/编辑后保存保护、缓存刷新失败和顶部 tab 场景。Monaco 增加 Agent 编码路径同 tick 切换与异步初始化回归；同步前端总览、agent-web README/PACKAGE、模块地图和异步读取规范。
+- How:
+  - TDD 先移除子面板正文读取断言，再让工作台 Agent 场景通过父层加载器；首次失败重试测试发现临时 loading readonly 会把可写 Agent 永久锁成只读，改为从请求保留目标权限。既有 `CodeEditor` 路径/model URI 校验已通过新增回归，无需修改编辑器实现。
+  - 前端全量 Vitest 68 个文件通过（1091 passed / 1 skipped），typecheck、lint、build 和 `git diff --check` 通过；新增 6 个 Agent 工作台场景在 Chromium 定向通过，并在全量 E2E 的 Chromium/Mobile 两个项目中 12/12 通过。全量 E2E 总体为 133 passed / 52 failed / 1 skipped，52 条均位于非 Agent 场景，抽查为 Mermaid 仍断言旧节点语法、Help/设置/模型选择仍断言旧文案或旧 ARIA 角色等当前基线不一致，本次未扩大范围修改。
+- Result:
+  - test profile 三服务重启成功，使用 `superadmin99` 登录真实工作台后反复打开 `agents/test-design-agent.md` 与 `agents/test-design-case-generation.md`，两份公共级 Agent 正文均非空；快速切换、顶部缓存切换和文件树再次读取后，活动 tab 与 Monaco 正文保持一致，读取链路为 `agent-config.read` WebSocket RPC，Fetch/XHR 无文件请求仍属正常。当前 test 数据未创建应用级 Agent worktree，未在不新增外部状态的前提下做应用级真实文件复测，该路径由新增双浏览器 E2E 覆盖。
+  - 不改变 `EditorTab`、backend-api 公共方法、HTTP API、文件 WebSocket wire、`FileContent` DTO、RunEvent、后端 Java、数据库、鉴权、安全策略或 generated SDK；未修改环境配置。除全量 E2E 的非本任务基线失败和 test 数据缺少应用级 worktree 外，无本任务代码未完成事项。
+
+### 2026-07-17 - 实现 Mermaid 可视化编辑器节点悬浮与快捷建连延时显示
+
+- Why:
+  - 减少鼠标滑过节点及快捷箭头时的误触，优化 Mermaid 可视化编辑器中快捷连接箭头与图形选择菜单的出现体验，提升用户编辑交互的连贯性。
+- What:
+  - 在 `MermaidFlowNode.vue` 中为鼠标移入节点的操作（`onNodeMouseEnter`）增加 300ms（0.3s）延迟显示的定时器（`quickMenuOpenTimer`），仅在鼠标停留超过该时间时才显示四向快捷建连大箭头。
+  - 在 `MermaidFlowNode.vue` 中为鼠标移入快捷箭头的操作（`onArrowMouseEnter`）增加 200ms（0.2s）延迟显示的定时器（`arrowHoverTimer`），仅在鼠标停留超过该时间时才展示图形选择菜单，并在切换到其他箭头时立即关闭当前活动的旧菜单。
+  - 在鼠标移出节点/移出箭头、触发聚焦及组件销毁等时机，安全地清理并重置以上定时器，防止逻辑泄漏与重复触发。
+  - 优化对应的单元测试文件 `MermaidVisualEditor.test.ts`，为涉及悬浮显示快捷箭头和快捷图形菜单的测试用例引入 Vitest 虚拟时钟（`vi.useFakeTimers()`），在其 hover 操作后通过 `vi.advanceTimersByTime(...)` 前进对应的时间（300ms/200ms），确保测试能够全部通过。
+- How:
+  - 在 `MermaidFlowNode.vue` 的 `<script setup>` 中引入 `quickMenuOpenTimer` 和 `arrowHoverTimer` 及其对应的清理、设置 and 触发逻辑，并在模板中将快捷箭头按钮的相关事件绑定为 `onArrowMouseEnter` 与 `onArrowMouseLeave`。
+  - 修改 `MermaidVisualEditor.test.ts` 中涉及悬浮的测试用例，在 `mouseEnter` 触发后分别推进 300ms (节点悬浮) 或 200ms (箭头悬浮)。
+  - 运行全量 `vitest run packages/editor/tests/MermaidVisualEditor.test.ts` 进行了完美验证，并完成前端的代码格式化和类型检查。
+- Result:
+  - Mermaid 可视化编辑器完美实现了 0.3s 节点悬浮防误触延时与 0.2s 箭头悬浮防误触延时的逻辑，鼠标快速滑动时不会触发任何悬浮元素；全量前端测试 100% 通过（85/85 passed），代码类型和语法校验无任何异常。
+
+### 2026-07-16 - 修复文件打开偶发空白与读取竞态
+
+- Why:
+  - 普通工作区文件实际通过 WebSocket `workspace.read` 读取，浏览器 Fetch/XHR 无请求是正常现象；偶发空白来自文件连接并发建连/旧连接回调竞态、tab 缺少显式加载状态，以及路径与正文同 tick 切换时 Monaco 新内容可能写入旧模型。
+- What:
+  - `backend-api` 为 workspace 与 Agent 配置文件连接增加按路由键隔离的 single-flight，连接/error/close/send 只清理自身缓存和 pending；只有 `workspace.read`、`agent-config.read` 遇到明确传输失败时重连重试一次，业务错误、超时和写操作不重试。
+  - 工作台 tab 增加 loading/loaded/error、错误、稳定磁盘快照身份和用户内容修订代次；文件树、搜索、对话文件卡片和顶部 tab 统一使用带 workspace/同路径请求代次的加载器，迟到响应只更新仍存在且修订未变化的所属 tab，首次失败可重试，合法空文件正常 loaded，刷新失败和读取期间编辑后保存/回退 clean 的内容均保留。
+  - 首次无缓存 loading 不挂载 Monaco；`CodeEditor` 仅在 model URI 与当前路径一致时同步外部正文。批量磁盘刷新固定起始 workspace 上下文，不能跨 await 进入新 workspace。
+- How:
+  - TDD 先复现并发 route/ticket 重复、open 前 close 永久等待、旧 close 驱逐新连接、read 不重试、同步 send 残留 pending，以及 A→B 同 tick 时 B 正文污染 A model；两轮 reviewer 继续发现并补齐首次 loading 可编辑、重叠刷新丢失缓存身份、旧 workspace 刷新循环、send 失败遗留底层 socket，以及读取期间编辑并保存后被旧响应覆盖的边界。
+  - backend-api 定向 69/69；工作台/store/Monaco 聚焦 12/12；工作台文件加载 Chromium/Mobile 22/22（只读用例使用真实应用 workspace 调用上下文，不伪造 WebSocket readonly 字段）；前端全量 68 个测试文件为 1089 passed / 1 skipped，typecheck、lint、build、`git diff --check` 均通过。test profile 三服务重启成功，后端 Maven 与前端生产构建通过。
+- Result:
+  - 使用测试超管账号启动其本地 TestAgent 进程后，真实工作区 `docs/OpenCode自我介绍.md` 显示 32 行非空正文；与 `login-flow.md` 连续快速切换 6 次后活动 tab 和 Monaco 内容仍一致，后端只建立一次 workspace route/ticket，后续读取复用同一 WebSocket。
+  - 不变更 HTTP API、文件 WebSocket wire、`FileContent` DTO、RunEvent、数据库、鉴权、安全策略或 generated SDK；single-flight 减少并发建连开销，兼容旧 tab。仅保留既有构建大 chunk 警告和 Element Plus Tour 非 props 浏览器 warning，无本任务未完成事项。
+
+### 2026-07-16 - 扩展 Mermaid Flowchart 十四类节点
+
+- Why:
+  - 用户要求按指定中文名称补齐 14 类 Flowchart 节点，采用轮廓分配端口与 B 型双列快捷建连菜单，并将可视化应用结果统一为 Mermaid 现代节点语法。
+- What:
+  - 新增唯一节点目录和共享 SVG 轮廓，统一类型、分组、现代短名、尺寸与 8/12 个端口；画布、图形库、快捷菜单和 ELK 复用同一配置。
+  - Parser 兼容 11 类旧语法及 14 类现代语法，保守保留未知形状、额外属性、损坏语句和无法无损接管的 YAML 标量；serializer 稳定输出 `ID@{ shape: <短名>, label: "<文本>" }`。
+  - 换形时按轮廓最近位置迁移端口并维持自环两端不同；快捷菜单改为屏幕空间 Teleport 浮层，支持视口翻转、低缩放可读、悬浮关闭时序和键盘四向入口。
+- How:
+  - TDD 覆盖 14 类解析/序列化、官方 Mermaid 11.16 parser、标签转义与 YAML 边界、未知语句隔离、SVG/尺寸/分组、端口轮廓、换形、自环、ELK 路由、1 MiB 紧凑 metadata 线性扫描及快捷菜单交互。
+  - 定向 Vitest 7 个文件 207 项通过；全量 `lint`、`typecheck`、`test`（1086 passed / 1 skipped）和 `build` 均通过，构建仅保留既有大 chunk 警告；只读复审无 Critical、Important 或 Minor 问题。
+- Result:
+  - Flowchart 编辑器完整支持约定的 14 类节点并保持旧内容兼容、未知内容无损和现代语法稳定往返；editor 包 README、包说明与前端总览已同步。
+  - 不涉及后端 API、RunEvent、数据库、依赖、环境配置或安全契约；1 MiB 扫描性能保持线性，未发现未完成事项。
 
 ### 2026-07-16 - 恢复企业内部域名原始标识
 
@@ -7422,3 +7496,16 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - editor 全量 12 个 Vitest 文件 172 passed；前端全量 64 个文件 981 passed / 1 skipped，13 个项目 lint 与 typecheck、agent-web 生产 build 和 `git diff --check` 通过，build 仅保留既有大 chunk 提示。
   - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增运行时依赖。
+
+### 2026-07-17 - Mermaid 节点图形库改为三列紧凑布局
+
+- Why:
+  - Flowchart 可视化编辑器的 14 类节点图形库采用两列、52px 高卡片，流程图与文档分组共占 8 行，挤压右侧当前节点属性区。
+- What:
+  - 保持检查器 280px 宽和全部节点常显，将图形库调整为三列、42px 高卡片、5px 间距；缩略图统一收敛到 70×34px，圆形类为 34×34px，流程图与文档分组分别降为 4 行和 1 行。
+  - 中文名称、分组、点击/拖放创建、画布节点尺寸、端口、ELK 路由和双列快捷建连均保持不变；同步 editor README 与设计规格。
+- How:
+  - TDD 新增紧凑布局样式回归；真实组件预览实测桌面每格 81×42px、无标签溢出或 SVG 裁切，760px 窄屏仍保持三列且中文完整。
+- Result:
+  - Mermaid 编辑器定向测试 86 passed，editor 全量 14 文件 257 passed；前端全量 70 文件 1105 passed / 1 skipped，lint、typecheck、生产 build 和 `git diff --check` 均通过，构建仅保留既有大 chunk 提示。
+  - 未修改 API、RunEvent、DTO、数据库、后端、安全、环境配置或 generated SDK；没有新增依赖。

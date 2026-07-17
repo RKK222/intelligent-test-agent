@@ -23,7 +23,6 @@ import type {
   AiRunFeedbackPayload,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
-  FileContent,
   FileSearchResult,
   FileTreeEntry,
   ManagedApplication,
@@ -72,6 +71,12 @@ import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } f
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
+import {
+  agentFileInfo,
+  agentTabPath,
+  isAgentFilePath,
+  type AgentFileLoadRequest
+} from "./agentFileLoad";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
 import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
@@ -232,6 +237,11 @@ const expandedDirectories = ref<Set<string>>(new Set());
 // 文件树面板内错误状态，不覆盖全局顶部反馈
 const fileTreeError = ref<string | null>(null);
 let workspaceLoadGeneration = 0;
+let workspaceFileReadSequence = 0;
+const latestWorkspaceFileReadByPath = new Map<string, number>();
+let agentFileLoadGeneration = 0;
+let agentFileReadSequence = 0;
+const latestAgentFileReadByPath = new Map<string, number>();
 const fileTreeRetryTimers = new Set<ReturnType<typeof setTimeout>>();
 // 多个目录可能同时在加载（用户连续点开多个折叠项，或 expandPathToFile 一次性
 // 展开多层）。使用 Set<string> 而非单值 ref，避免后到的加载把前者的 loading 状态覆盖，
@@ -541,6 +551,9 @@ const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
+const activeTabInitialLoading = computed(() =>
+  activeTab.value?.loadState === "loading" && activeTab.value.hasLoadedSnapshot === false
+);
 const codeEditorRef = ref<any>(null);
 const breadcrumbDisplay = computed(() => {
   if (!activePath.value) return "";
@@ -705,6 +718,44 @@ const selectedAgentConfigWorkspaceId = computed(() => {
   // 版本详情尚未加载时保持配置空态，避免把应用配置误写到个人 worktree 分支。
   return currentPersonalWorkspaceId.value ? undefined : selectedWorkspace.value?.workspaceId;
 });
+
+/** 路由切换会让旧响应失效，同时必须结束旧 tab 的 loading，保证返回原路由后可以重试。 */
+function invalidateAgentFileLoadContext() {
+  agentFileLoadGeneration++;
+  latestAgentFileReadByPath.clear();
+  for (const tab of workbench.tabs) {
+    if (!isAgentFilePath(tab.path) || tab.loadState !== "loading") continue;
+    if (workbench.tabHasLoadedSnapshot(tab) || editorTabIsDirty(tab)) {
+      workbench.updateTab(tab.path, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      continue;
+    }
+    workbench.updateTab(tab.path, {
+      loadState: "error",
+      loadError: "Agent 文件路由已切换，请重试读取。",
+      hasLoadedSnapshot: false
+    });
+  }
+}
+
+// Agent 文件路由上下文变化时立即废弃旧读取。flush=sync 确保子面板解析公共服务器后再发出的请求
+// 捕获到的是新代次，而不是随后被异步 watch 误判为旧请求。
+watch(
+  () => [
+    selectedAgentConfigWorkspaceId.value ?? "",
+    workbench.publicWorktree?.worktreeId ?? "",
+    workbench.publicWorktree?.linuxServerId ?? "",
+    workbench.publicConfigLinuxServerId ?? "",
+    workbench.workspaceWorktree?.worktreeId ?? ""
+  ] as const,
+  () => {
+    invalidateAgentFileLoadContext();
+  },
+  { flush: "sync" }
+);
 // 触发懒加载：被调用时把 templateId 加入 loadedTemplateIds，useQueries 派生数组自动同步并发起请求。
 // 重复调用幂等：Set 内部去重；已加载完成的模板（versions 不为 undefined）不会重复请求。
 function ensureAppVersionsLoaded(templateId: string) {
@@ -1842,10 +1893,10 @@ const saveMutation = useMutation({
       if (agent.scope === "PUBLIC") {
         await api.writePublicAgentFile(agent.path, tab.content, agent.worktreeId, agent.linuxServerId);
       } else {
-        if (!selectedWorkspace.value) {
-          throw new Error("未选择 Workspace");
+        if (!agent.workspaceId) {
+          throw new Error("Agent 文件缺少 Workspace 路由");
         }
-        await api.writeWorkspaceAgentFile(selectedWorkspace.value.workspaceId, agent.path, tab.content, agent.worktreeId);
+        await api.writeWorkspaceAgentFile(agent.workspaceId, agent.path, tab.content, agent.worktreeId);
       }
       return tab;
     }
@@ -1871,36 +1922,6 @@ const saveMutation = useMutation({
     feedback.value = errorFeedback("保存文件失败", error);
   }
 });
-
-const AGENT_PUBLIC_FILE_PREFIX = "agent-public:";
-const AGENT_WORKSPACE_FILE_PREFIX = "agent-workspace:";
-function isAgentFilePath(path: string): boolean {
-  return path.startsWith(AGENT_PUBLIC_FILE_PREFIX) || path.startsWith(AGENT_WORKSPACE_FILE_PREFIX);
-}
-function agentTabPath(scope: "PUBLIC" | "WORKSPACE", path: string, worktreeId?: string | null, linuxServerId?: string | null): string {
-  const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
-  return `${prefix}${encodeURIComponent(worktreeId ?? "")}:${encodeURIComponent(linuxServerId ?? "")}:${encodeURIComponent(path)}`;
-}
-function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: string; worktreeId?: string; linuxServerId?: string } {
-  const scope: "PUBLIC" | "WORKSPACE" = tabPath.startsWith(AGENT_PUBLIC_FILE_PREFIX) ? "PUBLIC" : "WORKSPACE";
-  const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
-  const rest = tabPath.slice(prefix.length);
-  const firstSeparator = rest.indexOf(":");
-  const secondSeparator = firstSeparator >= 0 ? rest.indexOf(":", firstSeparator + 1) : -1;
-  const rawWorktree = firstSeparator >= 0 ? rest.slice(0, firstSeparator) : "";
-  const rawLinuxServer = secondSeparator >= 0 ? rest.slice(firstSeparator + 1, secondSeparator) : "";
-  const rawPath = secondSeparator >= 0
-    ? rest.slice(secondSeparator + 1)
-    : firstSeparator >= 0
-      ? rest.slice(firstSeparator + 1)
-      : rest;
-  return {
-    scope,
-    path: decodeURIComponent(rawPath),
-    worktreeId: rawWorktree ? decodeURIComponent(rawWorktree) : undefined,
-    linuxServerId: rawLinuxServer ? decodeURIComponent(rawLinuxServer) : undefined
-  };
-}
 
 type StartRunDraft = {
   prompt: string;
@@ -2614,6 +2635,9 @@ function createTerminalTicket() {
 function resetWorkspaceState() {
   // Workspace 切换后必须清掉旧根目录绑定的文件树、编辑器、Diff 与运行态，避免误操作旧路径。
   workspaceLoadGeneration++;
+  latestWorkspaceFileReadByPath.clear();
+  agentFileLoadGeneration++;
+  latestAgentFileReadByPath.clear();
   clearFileTreeRetryTimers();
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
@@ -3239,28 +3263,371 @@ async function loadWorkspaceRequirementCandidates() {
   }
 }
 
+type WorkspaceFileLoadOptions = {
+  activate?: boolean;
+  closeOnNotFound?: boolean;
+  expectedContext?: WorkspaceFileLoadContext;
+};
+
+type WorkspaceFileLoadContext = {
+  workspaceId: string;
+  workspaceGeneration: number;
+};
+
+function workspaceFileLoadContextIsCurrent(context: WorkspaceFileLoadContext): boolean {
+  return selectedWorkspaceIdRef.value === context.workspaceId
+    && workspaceLoadGeneration === context.workspaceGeneration;
+}
+
+function workspaceFileReadIsCurrent(
+  workspaceId: string,
+  path: string,
+  workspaceGeneration: number,
+  requestGeneration: number
+): boolean {
+  return selectedWorkspaceIdRef.value === workspaceId
+    && workspaceLoadGeneration === workspaceGeneration
+    && latestWorkspaceFileReadByPath.get(path) === requestGeneration
+    && workbench.tabs.some((tab: EditorTab) => tab.path === path);
+}
+
+function editorTabIsDirty(tab: EditorTab | undefined): boolean {
+  return Boolean(tab && !tab.livePreview && tab.content !== tab.savedContent);
+}
+
+async function loadWorkspaceFile(path: string, options: WorkspaceFileLoadOptions = {}) {
+  const workspace = selectedWorkspace.value;
+  const context = options.expectedContext ?? (workspace
+    ? { workspaceId: workspace.workspaceId, workspaceGeneration: workspaceLoadGeneration }
+    : undefined);
+  if (!workspace || !context || workspace.workspaceId !== context.workspaceId
+    || !workspaceFileLoadContextIsCurrent(context)) {
+    return;
+  }
+  const activate = options.activate !== false;
+  const existing = workbench.tabs.find((tab: EditorTab) => tab.path === path);
+  if (editorTabIsDirty(existing)) {
+    // 未保存内容始终优先：重复打开只激活，不发起可能覆盖编辑内容的磁盘读取。
+    if (activate) {
+      centerMode.value = "editor";
+      workbench.setActivePath(path);
+    }
+    return;
+  }
+
+  const workspaceId = context.workspaceId;
+  // Workspace 代次与同路径请求代次共同隔离迟到响应，切换根目录或再次读取后旧结果直接作废。
+  const workspaceGeneration = context.workspaceGeneration;
+  const requestGeneration = ++workspaceFileReadSequence;
+  latestWorkspaceFileReadByPath.set(path, requestGeneration);
+  const hadLoadedCache = workbench.tabHasLoadedSnapshot(existing);
+  const contentRevisionAtStart = existing?.contentRevision ?? 0;
+  const loadingPatch = {
+    loadState: "loading" as const,
+    loadError: undefined,
+    // 将 legacy loaded 身份固化到 tab，后续重叠刷新不能被瞬时 loading 状态抹掉。
+    hasLoadedSnapshot: hadLoadedCache
+  };
+  if (activate) {
+    centerMode.value = "editor";
+    workbench.openTab({
+      id: existing && !existing.livePreview ? existing.id : `file:${path}`,
+      path,
+      title: existing?.title ?? (path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path),
+      content: existing?.content ?? "",
+      savedContent: existing?.savedContent ?? "",
+      // 首次读取尚不知道最终权限，先按只读挂载；有缓存的后台刷新保持原编辑能力。
+      readonly: hadLoadedCache ? existing?.readonly : true,
+      livePreview: false,
+      ...loadingPatch
+    });
+  } else if (existing) {
+    workbench.updateTab(path, loadingPatch);
+  } else {
+    return;
+  }
+
+  try {
+    const file = await api.readFile(workspaceId, path, !currentPersonalWorkspaceId.value);
+    if (!workspaceFileReadIsCurrent(workspaceId, path, workspaceGeneration, requestGeneration)) {
+      return;
+    }
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === path);
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart || editorTabIsDirty(current)) {
+      // dirty 可能在读取完成前已被保存/回退为 clean；修订代次确保任何期间编辑都会让旧响应失效。
+      workbench.updateTab(path, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      return;
+    }
+    workbench.updateTab(path, {
+      content: file.content,
+      savedContent: file.content,
+      readonly: file.readonly,
+      loadState: "loaded",
+      loadError: undefined,
+      hasLoadedSnapshot: true
+    });
+  } catch (error) {
+    if (!workspaceFileReadIsCurrent(workspaceId, path, workspaceGeneration, requestGeneration)) {
+      return;
+    }
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === path);
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart) {
+      // 读取期间发生过编辑时，错误响应也已失去意义；结束 loading 并保留当前正文与保存基线。
+      workbench.updateTab(path, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      return;
+    }
+    if (options.closeOnNotFound
+      && error instanceof BackendApiError
+      && error.code === "NOT_FOUND"
+      && !editorTabIsDirty(current)) {
+      workbench.closeTab(path);
+      return;
+    }
+    const failure = errorFeedback("读取文件失败", error);
+    if (hadLoadedCache || editorTabIsDirty(current)) {
+      // 已有可用正文的刷新失败只提示错误，继续保留缓存与 savedContent。
+      workbench.updateTab(path, {
+        loadState: "loaded",
+        loadError: failure.description,
+        hasLoadedSnapshot: true
+      });
+      feedback.value = failure;
+      return;
+    }
+    workbench.updateTab(path, {
+      loadState: "error",
+      loadError: failure.description,
+      hasLoadedSnapshot: false
+    });
+  }
+}
+
 async function openFile(path: string) {
-  if (!selectedWorkspace.value) {
+  await loadWorkspaceFile(path, { activate: true });
+}
+
+function normalizedAgentRouteValue(value?: string | null): string {
+  return value ?? "";
+}
+
+function agentFileLoadContextIsCurrent(request: AgentFileLoadRequest): boolean {
+  if (request.scope === "PUBLIC") {
+    const currentWorktreeId = workbench.publicWorktree?.worktreeId;
+    const currentLinuxServerId = workbench.publicWorktree?.linuxServerId
+      ?? workbench.publicConfigLinuxServerId;
+    return normalizedAgentRouteValue(request.worktreeId) === normalizedAgentRouteValue(currentWorktreeId)
+      && normalizedAgentRouteValue(request.linuxServerId) === normalizedAgentRouteValue(currentLinuxServerId);
+  }
+  return Boolean(request.workspaceId)
+    && request.workspaceId === selectedAgentConfigWorkspaceId.value
+    && normalizedAgentRouteValue(request.worktreeId) === normalizedAgentRouteValue(workbench.workspaceWorktree?.worktreeId);
+}
+
+function agentFileReadIsCurrent(
+  request: AgentFileLoadRequest,
+  tabPath: string,
+  contextGeneration: number,
+  requestGeneration: number
+): boolean {
+  return agentFileLoadGeneration === contextGeneration
+    && agentFileLoadContextIsCurrent(request)
+    && latestAgentFileReadByPath.get(tabPath) === requestGeneration
+    && workbench.tabs.some((tab: EditorTab) => tab.path === tabPath);
+}
+
+function agentFileLoadRequestFromTab(tab: EditorTab, activate: boolean): AgentFileLoadRequest | undefined {
+  if (!isAgentFilePath(tab.path)) {
+    return undefined;
+  }
+  const file = agentFileInfo(tab.path);
+  const workspaceId = file.scope === "WORKSPACE" ? file.workspaceId : undefined;
+  if (file.scope === "WORKSPACE" && !workspaceId) {
+    return undefined;
+  }
+  return {
+    ...file,
+    workspaceId,
+    readonly: Boolean(tab.readonly),
+    activate,
+    closeOnNotFound: false
+  };
+}
+
+function agentTabHasLoadedSnapshot(tab: EditorTab | undefined): boolean {
+  if (!tab) {
+    return false;
+  }
+  if (tab.hasLoadedSnapshot !== undefined) {
+    return tab.hasLoadedSnapshot;
+  }
+  if (tab.loadState === "loaded") {
+    return true;
+  }
+  // 旧版 Agent tab 没有三态标记；仅非空正文可作为缓存，历史空白 tab 必须重新走首次加载。
+  return tab.loadState === undefined && Boolean(tab.content || tab.savedContent);
+}
+
+async function loadAgentFile(request: AgentFileLoadRequest) {
+  if (!agentFileLoadContextIsCurrent(request)) {
+    return;
+  }
+  const tabPath = agentTabPath(
+    request.scope,
+    request.path,
+    request.workspaceId,
+    request.worktreeId,
+    request.linuxServerId
+  );
+  const existing = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+  if (editorTabIsDirty(existing)) {
+    // Agent 配置与普通文件遵循同一优先级：重复打开 dirty tab 只激活，绝不后台重读。
+    if (request.activate) {
+      centerMode.value = "editor";
+      workbench.setActivePath(tabPath);
+    }
+    return;
+  }
+  if (!request.activate && !existing) {
+    return;
+  }
+
+  const contextGeneration = agentFileLoadGeneration;
+  const requestGeneration = ++agentFileReadSequence;
+  latestAgentFileReadByPath.set(tabPath, requestGeneration);
+  const hadLoadedCache = agentTabHasLoadedSnapshot(existing);
+  const contentRevisionAtStart = existing?.contentRevision ?? 0;
+  const loadingPatch = {
+    loadState: "loading" as const,
+    loadError: undefined,
+    hasLoadedSnapshot: hadLoadedCache
+  };
+  if (request.activate) {
+    centerMode.value = "editor";
+    workbench.openTab({
+      id: existing?.id
+        ?? `${request.scope.toLowerCase()}:agent:file:${request.workspaceId ?? "global"}:${request.worktreeId ?? "direct"}:${request.linuxServerId ?? "local"}:${request.path}`,
+      path: tabPath,
+      title: existing?.title ?? (request.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? request.path),
+      content: existing?.content ?? "",
+      savedContent: existing?.savedContent ?? "",
+      // AgentConfigPanel 已完成权限判断；首次错误后的重试也必须保留目标权限，不能被临时加载态锁死为只读。
+      readonly: hadLoadedCache ? existing?.readonly : request.readonly,
+      livePreview: false,
+      ...loadingPatch
+    });
+  } else {
+    workbench.updateTab(tabPath, loadingPatch);
+  }
+
+  try {
+    const file = request.scope === "PUBLIC"
+      ? await api.readPublicAgentFile(request.path, request.worktreeId, request.linuxServerId)
+      : await api.readWorkspaceAgentFile(request.workspaceId!, request.path, request.worktreeId);
+    if (!agentFileReadIsCurrent(request, tabPath, contextGeneration, requestGeneration)) {
+      return;
+    }
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart || editorTabIsDirty(current)) {
+      // 即使用户随后保存或回退为 clean，修订代次也会阻止读取期间的旧响应覆盖编辑结果。
+      workbench.updateTab(tabPath, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      return;
+    }
+    workbench.updateTab(tabPath, {
+      content: file.content,
+      savedContent: file.content,
+      readonly: request.readonly,
+      loadState: "loaded",
+      loadError: undefined,
+      hasLoadedSnapshot: true
+    });
+  } catch (error) {
+    if (!agentFileReadIsCurrent(request, tabPath, contextGeneration, requestGeneration)) {
+      return;
+    }
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+    if ((current?.contentRevision ?? 0) !== contentRevisionAtStart) {
+      workbench.updateTab(tabPath, {
+        loadState: "loaded",
+        loadError: undefined,
+        hasLoadedSnapshot: true
+      });
+      return;
+    }
+    if (request.closeOnNotFound
+      && error instanceof BackendApiError
+      && error.code === "NOT_FOUND"
+      && !editorTabIsDirty(current)) {
+      workbench.closeTab(tabPath);
+      return;
+    }
+    const failure = errorFeedback("读取 Agent 文件失败", error);
+    if (hadLoadedCache || editorTabIsDirty(current)) {
+      workbench.updateTab(tabPath, {
+        loadState: "loaded",
+        loadError: failure.description,
+        hasLoadedSnapshot: true
+      });
+      feedback.value = failure;
+      return;
+    }
+    workbench.updateTab(tabPath, {
+      loadState: "error",
+      loadError: failure.description,
+      hasLoadedSnapshot: false
+    });
+  }
+}
+
+function activateEditorTab(path: string) {
+  const tab = workbench.tabs.find((item: EditorTab) => item.path === path);
+  if (!tab) {
     return;
   }
   centerMode.value = "editor";
-  try {
-    const file = await api.readFile(
-      selectedWorkspace.value.workspaceId,
-      path,
-      !currentPersonalWorkspaceId.value
-    );
-    workbench.openTab({
-      id: `file:${path}`,
-      path,
-      title: path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path,
-      content: file.content,
-      savedContent: file.content,
-      readonly: file.readonly
-    });
-  } catch (error) {
-    feedback.value = errorFeedback("读取文件失败", error);
+  if (isAgentFilePath(path)) {
+    if (tab.loadState === "loading" || tab.loadState === "loaded") {
+      workbench.setActivePath(path);
+      return;
+    }
+    const request = agentFileLoadRequestFromTab(tab, true);
+    if (request) {
+      void loadAgentFile(request);
+      return;
+    }
+    workbench.setActivePath(path);
+    return;
   }
+  if (tab.loadState === "error") {
+    void loadWorkspaceFile(path, { activate: true });
+    return;
+  }
+  // loading 不重复请求；loaded 与旧 tab（undefined）直接使用内存缓存。
+  workbench.setActivePath(path);
+}
+
+function retryActiveFile() {
+  const tab = activeTab.value;
+  if (!tab) {
+    return;
+  }
+  const request = agentFileLoadRequestFromTab(tab, true);
+  if (request) {
+    void loadAgentFile(request);
+    return;
+  }
+  void openFile(tab.path);
 }
 
 async function handleCreateEntry(directory: string, name: string, type: "file" | "directory") {
@@ -3490,12 +3857,30 @@ function renameWorkspaceTreeEntry(path: string, nextPath: string) {
   );
 
   const openTabs = [...workbench.tabs];
+  const targetPathsToReload: string[] = [];
   for (const tab of openTabs) {
     const renamedTabPath = renameWorkspacePath(tab.path, path, nextPath);
     if (renamedTabPath !== tab.path) {
+      // 旧路径响应在 tab 改名后无法再命中；先显式失效，避免它与目标路径读取竞争。
+      latestWorkspaceFileReadByPath.delete(tab.path);
+      const wasLoading = tab.loadState === "loading";
+      const canRestoreSnapshot = workbench.tabHasLoadedSnapshot(tab) || editorTabIsDirty(tab);
       const title = renamedTabPath.split(/[\\/]+/).filter(Boolean).at(-1) ?? renamedTabPath;
       workbench.renameTab(tab.path, renamedTabPath, title);
+      if (wasLoading && canRestoreSnapshot) {
+        workbench.updateTab(renamedTabPath, {
+          loadState: "loaded",
+          loadError: undefined,
+          hasLoadedSnapshot: true
+        });
+      } else if (wasLoading) {
+        targetPathsToReload.push(renamedTabPath);
+      }
     }
+  }
+  // 首次读取没有快照时，从服务端已完成移动/改名的新路径后台补读，不抢回用户焦点。
+  for (const targetPath of targetPathsToReload) {
+    void loadWorkspaceFile(targetPath, { activate: false });
   }
   const activePathAfterRename = workbench.activePath && renameWorkspacePath(workbench.activePath, path, nextPath);
   if (activePathAfterRename && activePathAfterRename !== workbench.activePath) {
@@ -3586,7 +3971,7 @@ async function handleDeleteEntry(path: string, type: "file" | "directory") {
       const normalizedTabPath = tab.path.replace(/\\/g, "/");
       if (normalizedTabPath === normalizedDeletedPath
           || (type === "directory" && normalizedTabPath.startsWith(`${normalizedDeletedPath}/`))) {
-        workbench.closeTab(`file:${tab.path}`);
+        workbench.closeTab(tab.path);
       }
     }
     void refreshWorkspaceGitDiff();
@@ -3833,17 +4218,8 @@ async function addWorkspaceRequirementToChatContext(reference: WorkspaceRequirem
   }
 }
 
-async function openAgentFile(payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }) {
-  centerMode.value = "editor";
-  const tabPath = agentTabPath(payload.scope, payload.path, payload.worktreeId, payload.linuxServerId);
-  workbench.openTab({
-    id: `${payload.scope.toLowerCase()}:agent:file:${payload.worktreeId ?? "direct"}:${payload.linuxServerId ?? "local"}:${payload.path}`,
-    path: tabPath,
-    title: payload.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? payload.path,
-    content: payload.content.content,
-    savedContent: payload.content.content,
-    readonly: payload.readonly
-  });
+async function openAgentFile(payload: AgentFileLoadRequest) {
+  await loadAgentFile(payload);
 }
 
 function toggleDirectory(path: string) {
@@ -4682,10 +5058,14 @@ async function loadWorkspaceGitDiffFiles(): Promise<RunDiffFile[]> {
 }
 
 async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
-  if (!selectedWorkspace.value) {
+  const workspace = selectedWorkspace.value;
+  if (!workspace) {
     return;
   }
-  const workspaceId = selectedWorkspace.value.workspaceId;
+  const context: WorkspaceFileLoadContext = {
+    workspaceId: workspace.workspaceId,
+    workspaceGeneration: workspaceLoadGeneration
+  };
   const pathFilter = paths && paths.length > 0 ? new Set(paths) : null;
   const workspaceTabs = workbench.tabs.filter(
     (tab: EditorTab) =>
@@ -4693,24 +5073,19 @@ async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
       !isAgentFilePath(tab.path) &&
       (!pathFilter || pathFilter.has(tab.path))
   );
-  const previousActivePath = activePath.value;
   for (const tab of workspaceTabs) {
-    try {
-      const file = await api.readFile(workspaceId, tab.path, !currentPersonalWorkspaceId.value);
-      workbench.openTab({
-        ...tab,
-        content: file.content,
-        savedContent: file.content,
-        readonly: file.readonly
-      });
-    } catch (error) {
-      if (error instanceof BackendApiError && error.code === "NOT_FOUND") {
-        workbench.closeTab(tab.path);
-      }
+    // 批量刷新跨越 await；每轮前后都核对起始 Workspace，切换后立即终止旧循环。
+    if (!workspaceFileLoadContextIsCurrent(context)) {
+      break;
     }
-  }
-  if (previousActivePath && workbench.tabs.some((tab: EditorTab) => tab.path === previousActivePath)) {
-    workbench.setActivePath(previousActivePath);
+    await loadWorkspaceFile(tab.path, {
+      activate: false,
+      closeOnNotFound: true,
+      expectedContext: context
+    });
+    if (!workspaceFileLoadContextIsCurrent(context)) {
+      break;
+    }
   }
 }
 
@@ -4821,10 +5196,10 @@ const saveDiffFileMutation = useMutation({
       if (agent.scope === "PUBLIC") {
         await api.writePublicAgentFile(agent.path, content, agent.worktreeId, agent.linuxServerId);
       } else {
-        if (!selectedWorkspace.value) {
-          throw new Error("未选择 Workspace");
+        if (!agent.workspaceId) {
+          throw new Error("Agent 文件缺少 Workspace 路由");
         }
-        await api.writeWorkspaceAgentFile(selectedWorkspace.value.workspaceId, agent.path, content, agent.worktreeId);
+        await api.writeWorkspaceAgentFile(agent.workspaceId, agent.path, content, agent.worktreeId);
       }
       return { path, content };
     }
@@ -5456,7 +5831,7 @@ async function handleLogout() {
           :show-server-workspace-switch="isSuperAdmin"
           :markdown-preview="markdownPreview"
           :markdown-preview-mode="markdownPreviewMode"
-          @activate="(path: string) => workbench.setActivePath(path)"
+          @activate="activateEditorTab"
           @locate-file="handleLocateFile"
           @close="handleCloseTab"
           @close-many="handleCloseTabs"
@@ -5471,32 +5846,68 @@ async function handleLogout() {
           @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
           @cache-and-navigate="(path: string) => handleCacheAndNavigate(path, 'file')"
         >
-          <CodeEditor
-            ref="codeEditorRef"
-            :path="activeTab?.path"
-            :content="activeTab?.content"
-            :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
-            :readonly="activeTab?.readonly"
-            :saving="saveMutation.isPending.value"
-            :show-preview="markdownPreview"
-            :preview-mode="markdownPreviewMode"
-            @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
-            @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
-            @add-selection-context="addCurrentSelectionToChatContext"
-            @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
+          <div
+            class="relative h-full min-h-0"
+            data-testid="file-load-state"
+            :data-state="activeTab?.loadState ?? (activeTab ? 'loaded' : 'idle')"
           >
-            <template #empty-actions>
+            <CodeEditor
+              v-if="!activeTabInitialLoading"
+              ref="codeEditorRef"
+              :path="activeTab?.path"
+              :content="activeTab?.content"
+              :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
+              :readonly="activeTab?.readonly"
+              :saving="saveMutation.isPending.value"
+              :show-preview="markdownPreview"
+              :preview-mode="markdownPreviewMode"
+              @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
+              @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+              @add-selection-context="addCurrentSelectionToChatContext"
+              @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
+            >
+              <template #empty-actions>
+                <button
+                  type="button"
+                  class="managed-editor-home-help"
+                  data-testid="workbench-home-help"
+                  @click="openHelpCenter('getting-started')"
+                >
+                  <BookOpenText :size="15" />
+                  打开用户手册
+                </button>
+              </template>
+            </CodeEditor>
+            <div
+              v-if="activeTab?.loadState === 'loading'"
+              class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-white/85 text-sm text-slate-500"
+              role="status"
+            >
+              正在读取文件…
+            </div>
+            <div
+              v-else-if="activeTab?.loadState === 'error'"
+              class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white text-sm text-slate-500"
+            >
+              <div class="font-medium text-slate-700">读取文件失败</div>
+              <div class="max-w-[520px] px-6 text-center text-xs text-slate-400">{{ activeTab.loadError }}</div>
               <button
                 type="button"
-                class="managed-editor-home-help"
-                data-testid="workbench-home-help"
-                @click="openHelpCenter('getting-started')"
+                class="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                aria-label="重试读取文件"
+                @click="retryActiveFile"
               >
-                <BookOpenText :size="15" />
-                打开用户手册
+                重试
               </button>
-            </template>
-          </CodeEditor>
+            </div>
+            <div
+              v-else-if="activeTab?.loadError"
+              class="pointer-events-none absolute inset-x-3 top-3 z-10 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+              role="status"
+            >
+              刷新文件失败，已保留上次内容：{{ activeTab.loadError }}
+            </div>
+          </div>
         </FigmaEditorArea>
       </main>
     </template>

@@ -329,7 +329,10 @@ U->>S: 请求`);
       ...markerLines,
       "%% editor-layout:",
       '%% {"N1":{"x":5,"y":6}}'
-    ]).replace('N30["N30"]', 'N30["复核"]');
+    ]).replace(
+      'N30@{ shape: rect, label: "N30" }',
+      'N30@{ shape: rect, label: "复核" }'
+    );
 
     const parsed = parseMermaidFlowchart(withLegacy);
     expect(parsed.nodes[0]!.position).toEqual({ x: 5, y: 6 });
@@ -567,7 +570,10 @@ G --> E`);
     const labelChanged = parseMermaidFlowchart(serialized.replace("A --> B", "A -->|仅改标签| B"));
     expect(labelChanged.edges[0]!.route?.points).toHaveLength(3);
 
-    const nodeChanged = parseMermaidFlowchart(serialized.replace("A[\"开始\"]", "A[\"新开始\"]"));
+    const nodeChanged = parseMermaidFlowchart(serialized.replace(
+      'A@{ shape: rect, label: "开始" }',
+      'A@{ shape: rect, label: "新开始" }'
+    ));
     expect(nodeChanged.edges[0]!.route).toBeUndefined();
     expect(nodeChanged.preservedLines).toEqual(expect.arrayContaining(compactMarkers(serialized)));
 

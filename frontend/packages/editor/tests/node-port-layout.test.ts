@@ -1,10 +1,12 @@
 /// <reference types="vite/client" />
 import { Position } from "@vue-flow/core";
 import { describe, expect, it } from "vitest";
+import type { MermaidGraph, MermaidNodeType } from "../src/mermaid/model";
 import {
   findEdgePort,
   getMermaidNodePorts,
-  oppositePosition
+  oppositePosition,
+  remapMermaidNodeEdgePorts
 } from "../src/mermaid/visual-editor/node-port-layout";
 
 describe("Mermaid 节点端口布局", () => {
@@ -22,10 +24,111 @@ describe("Mermaid 节点端口布局", () => {
     expect(getMermaidNodePorts("circle")).toHaveLength(8);
     expect(getMermaidNodePorts("rounded")).toHaveLength(8);
     expect(getMermaidNodePorts("stadium")).toHaveLength(8);
+    expect(getMermaidNodePorts("subroutine")).toHaveLength(12);
+    expect(getMermaidNodePorts("database")).toHaveLength(8);
+    expect(getMermaidNodePorts("hexagon")).toHaveLength(12);
+    expect(getMermaidNodePorts("parallelogram")).toHaveLength(12);
+    expect(getMermaidNodePorts("trapezoid")).toHaveLength(12);
+    expect(getMermaidNodePorts("double-circle")).toHaveLength(8);
+    expect(getMermaidNodePorts("text")).toHaveLength(8);
+    expect(getMermaidNodePorts("doc")).toHaveLength(8);
+    expect(getMermaidNodePorts("docs")).toHaveLength(8);
     // 圆角与胶囊共用同一套端口坐标
     expect(getMermaidNodePorts("stadium").map((p) => `${p.x},${p.y}`)).toEqual(
       getMermaidNodePorts("rounded").map((p) => `${p.x},${p.y}`)
     );
+  });
+
+  it("十四种节点都提供上下左右快捷建连端口", () => {
+    const types: MermaidNodeType[] = [
+      "stadium", "rectangle", "rounded", "subroutine", "database", "circle", "diamond",
+      "hexagon", "parallelogram", "trapezoid", "double-circle", "text", "doc", "docs"
+    ];
+
+    for (const type of types) {
+      for (const position of [Position.Top, Position.Right, Position.Bottom, Position.Left]) {
+        expect(findEdgePort(type, position), `${type} 缺少 ${position} 端口`).toMatchObject({ position });
+      }
+    }
+  });
+
+  it("文档与多文档底部端口贴合正面页面的波浪轮廓", () => {
+    for (const type of ["doc", "docs"] as const) {
+      const bottomPorts = getMermaidNodePorts(type).filter((port) => port.position === Position.Bottom);
+      expect(bottomPorts.map(({ x, y }) => ({ x, y }))).toEqual([
+        { x: 85, y: 77 },
+        { x: 50, y: 100 },
+        { x: 15, y: 77 }
+      ]);
+    }
+  });
+
+  it("切换形状时按相对位置迁移端口并保持自环端口不同", () => {
+    const graph: MermaidGraph = {
+      kind: "flowchart",
+      direction: "LR",
+      nodes: [
+        { id: "A", text: "判断", type: "diamond", position: { x: 0, y: 0 } },
+        { id: "B", text: "结果", type: "rectangle", position: { x: 200, y: 0 } }
+      ],
+      edges: [
+        {
+          id: "edge-1",
+          source: "A",
+          target: "B",
+          sourceHandle: "source-0",
+          targetHandle: "target-0",
+          label: "",
+          relation: "arrow"
+        },
+        {
+          id: "edge-2",
+          source: "A",
+          target: "A",
+          sourceHandle: "target-0",
+          targetHandle: "source-2",
+          label: "",
+          relation: "arrow"
+        }
+      ],
+      preservedLines: []
+    };
+
+    remapMermaidNodeEdgePorts(graph, "A", "diamond", "database");
+
+    expect(graph.edges[0]!.sourceHandle).toBe("target-1");
+    expect(graph.edges[0]!.targetHandle).toBe("target-0");
+    expect(graph.edges[1]!.sourceHandle).not.toBe(graph.edges[1]!.targetHandle);
+    const databaseHandles = new Set(getMermaidNodePorts("database").map((port) => port.handleId));
+    expect(databaseHandles.has(graph.edges[1]!.sourceHandle!)).toBe(true);
+    expect(databaseHandles.has(graph.edges[1]!.targetHandle!)).toBe(true);
+  });
+
+  it("换形时在整个新轮廓选择欧氏距离最近的端口", () => {
+    const graph: MermaidGraph = {
+      kind: "flowchart",
+      direction: "LR",
+      nodes: [
+        { id: "A", text: "判断", type: "diamond", position: { x: 0, y: 0 } },
+        { id: "B", text: "结果", type: "rectangle", position: { x: 200, y: 0 } }
+      ],
+      edges: [{
+        id: "edge-1",
+        source: "A",
+        target: "B",
+        // diamond target-2 位于左上斜边 (16.7, 33.3)。
+        sourceHandle: "target-2",
+        targetHandle: "target-0",
+        label: "",
+        relation: "arrow"
+      }],
+      preservedLines: []
+    };
+
+    remapMermaidNodeEdgePorts(graph, "A", "diamond", "database");
+
+    // database source-3 位于左侧 (0, 25)，比顶部 (50, 0) 更接近旧位置。
+    expect(graph.edges[0]?.sourceHandle).toBe("source-3");
   });
 
   it("oppositePosition 返回对边方向", () => {
