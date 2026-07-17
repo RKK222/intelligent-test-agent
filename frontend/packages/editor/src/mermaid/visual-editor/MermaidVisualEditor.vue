@@ -604,32 +604,22 @@ function onEdgesChange(changes: EdgeChange[]) {
         <section v-if="selectedNode" class="ta-mermaid-node-properties">
           <h3>当前节点</h3>
           <div class="ta-mermaid-fields">
-            <label>
-              <span>节点 ID</span>
-              <input :value="selectedNode.id" disabled />
-            </label>
-            <label>
-              <span>节点名称</span>
-              <input aria-label="节点名称" :value="selectedNode.text" @input="updateSelectedNode({ text: ($event.target as HTMLInputElement).value })" />
-            </label>
-            <label>
+            <div class="ta-mermaid-node-id-display">
+              节点ID：{{ selectedNode.id }}
+            </div>
+            <label class="ta-mermaid-field-horizontal">
               <span>节点类型</span>
               <select aria-label="节点类型" :value="selectedNode.type" @change="updateSelectedNode({ type: ($event.target as HTMLSelectElement).value as MermaidNodeType })">
                 <option v-for="item in nodeTypes" :key="item.type" :value="item.type">{{ item.label }}</option>
               </select>
             </label>
-            <div class="ta-mermaid-size-summary" aria-label="节点尺寸">
-              <span>缩放比例</span>
-              <strong>{{ selectedNodeScaleLabel }}</strong>
-              <span>实际尺寸</span>
-              <strong>{{ selectedNodeSize?.width }} × {{ selectedNodeSize?.height }} px</strong>
+            <div class="ta-mermaid-size-row">
+              <div class="ta-mermaid-size-summary" aria-label="节点尺寸">
+                <span>缩放: <strong>{{ selectedNodeScaleLabel }}</strong></span>
+                <span>尺寸: <strong>{{ selectedNodeSize?.width }} × {{ selectedNodeSize?.height }} px</strong></span>
+              </div>
+              <button type="button" class="ta-mermaid-reset-size-btn" :disabled="!selectedNode.scale" @click="resetSelectedNodeScale">恢复默认尺寸</button>
             </div>
-            <button type="button" :disabled="!selectedNode.scale" @click="resetSelectedNodeScale">恢复默认尺寸</button>
-            <MermaidColorField
-              label="文字颜色"
-              :model-value="selectedNode.style?.textColor"
-              @update:model-value="updateSelectedNodeColor('textColor', $event)"
-            />
             <MermaidColorField
               label="填充颜色"
               :model-value="selectedNode.style?.fillColor"
@@ -655,7 +645,7 @@ function onEdgesChange(changes: EdgeChange[]) {
             </label>
             <label>
               <span>连线文字</span>
-              <input aria-label="连线文字" :value="selectedEdge.label" placeholder="为空则不显示文字" @input="updateSelectedEdgeLabel(($event.target as HTMLInputElement).value)" />
+              <textarea aria-label="连线文字" :value="selectedEdge.label" placeholder="为空则不显示文字" @input="updateSelectedEdgeLabel(($event.target as HTMLTextAreaElement).value)"></textarea>
             </label>
             <MermaidColorField
               label="连线文字颜色"
@@ -687,7 +677,7 @@ function onEdgesChange(changes: EdgeChange[]) {
 <style scoped>
 .ta-mermaid-visual-editor { display: flex; min-height: 0; flex: 1; flex-direction: column; background: var(--ta-surface, #fff); color: var(--ta-text, #334155); }
 .ta-mermaid-toolbar { display: flex; min-height: 44px; align-items: center; gap: 7px; border-bottom: 1px solid var(--ta-border, #e2e8f0); padding: 6px 10px; background: var(--ta-panel-2, #f8fafc); }
-.ta-mermaid-toolbar button, .ta-mermaid-toolbar select, .ta-mermaid-inspector button, .ta-mermaid-inspector input, .ta-mermaid-inspector select { min-height: 28px; border: 1px solid var(--ta-border, #dbe2ea); border-radius: 5px; background: var(--ta-surface, #fff); color: var(--ta-ink, #172033); font: inherit; font-size: 12px; }
+.ta-mermaid-toolbar button, .ta-mermaid-toolbar select, .ta-mermaid-inspector button, .ta-mermaid-inspector input, .ta-mermaid-inspector select, .ta-mermaid-inspector textarea { min-height: 28px; border: 1px solid var(--ta-border, #dbe2ea); border-radius: 5px; background: var(--ta-surface, #fff); color: var(--ta-ink, #172033); font: inherit; font-size: 12px; }
 .ta-mermaid-toolbar button, .ta-mermaid-inspector button { padding: 0 9px; cursor: pointer; }
 .ta-mermaid-toolbar button:hover, .ta-mermaid-inspector button:hover { border-color: var(--ta-border-strong, #94a3b8); background: var(--ta-hover, #f1f5f9); }
 .ta-mermaid-toolbar button:focus-visible, .ta-mermaid-toolbar select:focus-visible, .ta-mermaid-inspector button:focus-visible, .ta-mermaid-inspector input:focus-visible, .ta-mermaid-inspector select:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary, #4f46e5) 55%, transparent); outline-offset: 1px; }
@@ -744,10 +734,18 @@ function onEdgesChange(changes: EdgeChange[]) {
 .ta-mermaid-node-properties { min-height: 132px; }
 .ta-mermaid-edge-properties { min-height: 132px; }
 .ta-mermaid-fields { display: grid; gap: 8px; }
+.ta-mermaid-node-id-display { color: var(--ta-muted, #64748b); font-size: 11px; font-weight: 500; }
 .ta-mermaid-fields label { display: grid; gap: 3px; color: var(--ta-muted, #64748b); font-size: 10px; }
-.ta-mermaid-fields input, .ta-mermaid-fields select { width: 100%; padding: 4px 7px; }
-.ta-mermaid-size-summary { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; color: var(--ta-muted, #64748b); font-size: 10px; }
+.ta-mermaid-field-horizontal { display: flex !important; flex-direction: row !important; align-items: center; justify-content: space-between; gap: 8px; }
+.ta-mermaid-field-horizontal select { width: auto !important; flex: 1; min-width: 0; }
+.ta-mermaid-fields input, .ta-mermaid-fields select, .ta-mermaid-fields textarea { width: 100%; padding: 4px 7px; }
+.ta-mermaid-fields textarea { min-height: 48px; resize: vertical; padding: 6px 7px; }
+.ta-mermaid-size-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ta-mermaid-size-summary { display: flex; gap: 8px; color: var(--ta-muted, #64748b); font-size: 10px; }
 .ta-mermaid-size-summary strong { color: var(--ta-ink, #172033); font-size: 11px; font-weight: 600; }
+.ta-mermaid-reset-size-btn { padding: 0 6px !important; font-size: 10px !important; min-height: 20px !important; white-space: nowrap; border: 1px solid var(--ta-border, #dbe2ea); border-radius: 5px; background: var(--ta-surface, #fff); color: var(--ta-ink, #172033); cursor: pointer; }
+.ta-mermaid-reset-size-btn:hover { border-color: var(--ta-border-strong, #94a3b8); background: var(--ta-hover, #f1f5f9); }
+.ta-mermaid-reset-size-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ta-mermaid-field-hint { margin: -2px 0 0; color: var(--ta-muted, #64748b); font-size: 10px; line-height: 1.3; }
 .ta-mermaid-inspector button.is-danger { color: #b42318; }
 .ta-mermaid-empty { margin: 0; color: var(--ta-muted, #64748b); font-size: 11px; line-height: 1.5; }

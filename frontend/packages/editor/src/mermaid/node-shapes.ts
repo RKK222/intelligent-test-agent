@@ -83,11 +83,15 @@ export function getMermaidNodeShape(type: MermaidNodeType): MermaidNodeShapeDefi
  */
 export function getMermaidNodeBaseSize(node: { type: MermaidNodeType; text: string }): MermaidNodeSize {
   const rule = NODE_SIZE_RULES[node.type] ?? NODE_SIZE_RULES.rectangle;
-  if (rule.fixedWidth) return { width: rule.fixedWidth, height: rule.height };
-  const contentWidth = Array.from(node.text || "").length * 12 + (rule.horizontalPadding ?? 0);
+  const lines = (node.text || "").split(/\r?\n/);
+  const extraLines = Math.max(0, lines.length - 1);
+  const extraHeight = extraLines * 16;
+  if (rule.fixedWidth) return { width: rule.fixedWidth, height: rule.height + extraHeight };
+  const longestLine = lines.reduce((longest, line) => line.length > longest.length ? line : longest, "");
+  const contentWidth = Array.from(longestLine).length * 12 + (rule.horizontalPadding ?? 0);
   return {
     width: Math.max(rule.minWidth, Math.min(rule.maxWidth ?? rule.minWidth, contentWidth)),
-    height: rule.height
+    height: rule.height + extraHeight
   };
 }
 

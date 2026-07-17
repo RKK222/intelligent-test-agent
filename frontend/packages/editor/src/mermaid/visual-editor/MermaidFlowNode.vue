@@ -568,7 +568,8 @@ function onDoubleClick(event: MouseEvent) {
   font-weight: 600;
   line-height: 1.35;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .ta-mermaid-resize-handle {

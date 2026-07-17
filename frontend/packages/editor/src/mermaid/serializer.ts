@@ -4,8 +4,7 @@ import { MERMAID_MODERN_SHAPE_BY_TYPE } from "./node-shapes";
 import { serializeMermaidStyleDirectives } from "./style-directives";
 
 function quoteLabel(value: string): string {
-  const normalized = value.replaceAll("\r\n", " ").replaceAll("\n", " ").replaceAll("\r", " ");
-  return JSON.stringify(normalized);
+  return JSON.stringify(value);
 }
 
 function serializeNode(node: MermaidNode): string {
@@ -29,7 +28,7 @@ export function serializeMermaidGraph(graph: MermaidGraph): string {
   ];
   lines.push(...graph.nodes.map(serializeNode));
   const serializeEdge = (edge: MermaidGraph["edges"][number]) => {
-    const rawLabel = edge.label.trim().replaceAll("|", "&#124;").replaceAll("\n", " ");
+    const rawLabel = edge.label.trim().replaceAll("|", "&#124;").replaceAll("\n", "<br>");
     const label = rawLabel ? `|${rawLabel}|` : "";
     return `${edge.source} ${operatorForRelation(edge.relation)}${label} ${edge.target}`;
   };

@@ -147,6 +147,21 @@ A@{ shape: 'rect', label: '路径\' }`;
     await expect(mermaid.parse(serializeMermaidGraph(graph))).resolves.toBeTruthy();
   });
 
+  it("支持多行文本的解析与序列化且被官方 parser 接受", async () => {
+    const source = "flowchart TD\nA@{ shape: rect, label: \"第一行\\n第二行\" }\nB@{ shape: rect, label: \"新行\" }\nA -->|连线<br>第二行| B";
+    const mermaid = (await import("mermaid")).default;
+
+    await expect(mermaid.parse(source)).resolves.toBeTruthy();
+    const graph = parseMermaidFlowchart(source);
+    expect(graph.nodes[0]).toMatchObject({ id: "A", type: "rectangle", text: "第一行\n第二行" });
+    expect(graph.edges[0]).toMatchObject({ source: "A", target: "B", label: "连线\n第二行" });
+
+    const serialized = serializeMermaidGraph(graph);
+    expect(serialized).toContain("A@{ shape: rect, label: \"第一行\\n第二行\" }");
+    expect(serialized).toContain("A -->|连线<br>第二行| B");
+    await expect(mermaid.parse(serialized)).resolves.toBeTruthy();
+  });
+
   it.each(["false", "null", "~", "0x10"])(
     "YAML 非字符串裸标量 label=%s 时保留原句及关联边",
     (label) => {
@@ -455,16 +470,16 @@ linkStyle 0 color:#456`);
     expect(serialized).toContain("linkStyle 0 color:#FFEEDD");
   });
 
-  it("现代节点标签转义引号并把换行稳定规范化为空格", async () => {
+  it("现代节点标签转义引号并把换行稳定保留", async () => {
     const graph = parseMermaidFlowchart('flowchart TD\nA@{ shape: rect, label: "原始" }');
     graph.nodes[0]!.text = '他说 "完成"\n下一步 | 检查';
 
     const serialized = serializeMermaidGraph(graph);
     const mermaid = (await import("mermaid")).default;
 
-    expect(serialized).toContain('A@{ shape: rect, label: "他说 \\"完成\\" 下一步 | 检查" }');
+    expect(serialized).toContain('A@{ shape: rect, label: "他说 \\"完成\\"\\n下一步 | 检查" }');
     await expect(mermaid.parse(serialized)).resolves.toBeTruthy();
-    expect(parseMermaidFlowchart(serialized).nodes[0]?.text).toBe('他说 "完成" 下一步 | 检查');
+    expect(parseMermaidFlowchart(serialized).nodes[0]?.text).toBe('他说 "完成"\n下一步 | 检查');
   });
 
   it("现代节点标签转义反斜杠且通过官方 parser 稳定往返", async () => {

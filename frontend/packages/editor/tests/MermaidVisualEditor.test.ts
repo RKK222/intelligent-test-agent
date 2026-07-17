@@ -1019,7 +1019,7 @@ describe("MermaidInlineEditor", () => {
     expect(getByRole("alert").textContent).toContain("#RGB");
     await fireEvent.update(getByLabelText("文字颜色"), "#abc");
     await fireEvent.update(getByLabelText("节点文字"), "处理");
-    await fireEvent.keyDown(getByLabelText("节点文字"), { key: "Enter" });
+    await fireEvent.keyDown(getByLabelText("节点文字"), { key: "Enter", ctrlKey: true });
 
     const commitCalls = emitted().commit as Array<[{ text: string; textColor?: string }]>;
     expect(commitCalls[0]?.[0]).toEqual({ text: "处理", textColor: "#AABBCC" });
@@ -1038,6 +1038,22 @@ describe("MermaidInlineEditor", () => {
     await fireEvent.click(getByRole("button", { name: "完成编辑" }));
     const commitCalls = emitted().commit as Array<[{ text: string; textColor?: string }]>;
     expect(commitCalls[0]?.[0]).toEqual({ text: "通过", textColor: undefined });
+  });
+
+  it("支持多行文字并可以通过 Ctrl+Enter 提交", async () => {
+    const { getByLabelText, emitted } = render(MermaidInlineEditor, {
+      props: { kind: "node", text: "第一行\n第二行", position: { left: "8px", top: "8px" } }
+    });
+    const textarea = getByLabelText("节点文字") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("第一行\n第二行");
+    await fireEvent.update(textarea, "新第一行\n新第二行");
+    // 普通 Enter 不提交
+    await fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(emitted().commit).toBeUndefined();
+    // Ctrl+Enter 提交
+    await fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    const commitCalls = emitted().commit as Array<[{ text: string; textColor?: string }]>;
+    expect(commitCalls[0]?.[0]).toEqual({ text: "新第一行\n新第二行", textColor: undefined });
   });
 });
 
@@ -1111,12 +1127,11 @@ describe("MermaidVisualEditor", () => {
       },
       template: `<MermaidVisualEditor v-model="model" />`
     });
-    const { getByLabelText, getByRole } = render(EditorHost);
+    const { getByLabelText, getByRole, getByText } = render(EditorHost);
 
     await fireEvent.click(getByRole("button", { name: "添加圆角处理节点" }));
 
-    expect((getByLabelText("节点 ID") as HTMLInputElement).value).toBe("N3");
-    expect((getByLabelText("节点名称") as HTMLInputElement).value).toBe("新节点");
+    expect(getByText("节点ID：N3")).toBeTruthy();
     expect((getByLabelText("节点类型") as HTMLSelectElement).value).toBe("rounded");
     expect(within(getByLabelText("节点类型")).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "开始/结束", "普通处理步骤", "圆角处理节点", "子程序", "数据库", "连接点", "条件判断",
@@ -1203,7 +1218,9 @@ describe("MermaidVisualEditor", () => {
     });
     const nodeView = render(NodeHost);
     await fireEvent.click(nodeView.getByTestId("mock-select"));
+    await fireEvent.dblClick(nodeView.container.querySelector<HTMLElement>('[data-mermaid-node-id="A"]')!);
     await fireEvent.update(nodeView.getByLabelText("文字颜色"), "#112233");
+    await fireEvent.click(nodeView.getByRole("button", { name: "完成编辑" }));
     await fireEvent.update(nodeView.getByLabelText("填充颜色"), "#aabbcc");
     await fireEvent.update(nodeView.getByLabelText("边框颜色"), "#445566");
     expect(JSON.parse(nodeView.getByTestId("node-style-json").textContent ?? "{}" )).toEqual({
@@ -1243,6 +1260,7 @@ describe("MermaidVisualEditor", () => {
     });
     const view = render(NodeHost);
     await fireEvent.click(view.getByTestId("mock-select"));
+    await fireEvent.dblClick(view.container.querySelector<HTMLElement>('[data-mermaid-node-id="A"]')!);
     const input = view.getByLabelText("文字颜色") as HTMLInputElement;
 
     await fireEvent.update(input, "#123");
@@ -1293,7 +1311,7 @@ describe("MermaidVisualEditor", () => {
     });
 
     await fireEvent.click(getByTestId("mock-select"));
-    await fireEvent.update(getByLabelText("节点名称"), "更宽的节点名称");
+    await fireEvent.update(getByLabelText("节点类型"), "database");
     await fireEvent.update(getByLabelText("图方向"), "TD");
 
     const updates = emitted()["update:modelValue"] as Array<[MermaidGraph]>;
@@ -1331,7 +1349,9 @@ describe("MermaidVisualEditor", () => {
     });
     const rendered = render(EditorHost);
     await fireEvent.click(rendered.getByTestId("mock-select"));
-    await fireEvent.update(rendered.getByLabelText("节点名称"), "准备");
+    await fireEvent.dblClick(rendered.container.querySelector<HTMLElement>('[data-mermaid-node-id="A"]')!);
+    await fireEvent.update(rendered.getByLabelText("节点文字"), "准备");
+    await fireEvent.keyDown(rendered.getByLabelText("节点文字"), { key: "Enter", ctrlKey: true });
     await fireEvent.update(rendered.getByLabelText("节点类型"), "rounded");
 
     const node = JSON.parse(rendered.getByTestId("node-json").textContent ?? "{}");
@@ -1365,12 +1385,14 @@ describe("MermaidVisualEditor", () => {
   });
 
   it("可选择节点并修改名称、类型和删除关联边", async () => {
-    const { getByTestId, getByLabelText, getByRole, emitted } = render(MermaidVisualEditor, {
+    const { getByTestId, getByLabelText, getByRole, container, emitted } = render(MermaidVisualEditor, {
       props: { modelValue: graph() }
     });
 
     await fireEvent.click(getByTestId("mock-select"));
-    await fireEvent.update(getByLabelText("节点名称"), "准备");
+    await fireEvent.dblClick(container.querySelector<HTMLElement>('[data-mermaid-node-id="A"]')!);
+    await fireEvent.update(getByLabelText("节点文字"), "准备");
+    await fireEvent.keyDown(getByLabelText("节点文字"), { key: "Enter", ctrlKey: true });
     await fireEvent.update(getByLabelText("节点类型"), "rounded");
     await fireEvent.click(getByRole("button", { name: "删除节点" }));
 

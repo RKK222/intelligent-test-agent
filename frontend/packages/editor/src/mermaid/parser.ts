@@ -24,7 +24,7 @@ type ModernNodeExpression =
 function unquoteLabel(label: string): string {
   const trimmed = label.trim();
   const value = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
-  return value.replaceAll("&quot;", '"').replaceAll("&#124;", "|");
+  return value.replaceAll("&quot;", '"').replaceAll("&#124;", "|").replaceAll(/<br\s*\/?>/gi, "\n");
 }
 
 /**
@@ -37,7 +37,7 @@ function unquoteModernProperty(value: string, allowPlain: boolean): string | nul
     try {
       const decoded = JSON.parse(trimmed);
       if (typeof decoded === "string") {
-        return decoded.replaceAll("&quot;", '"').replaceAll("&#124;", "|");
+        return decoded.replaceAll("&quot;", '"').replaceAll("&#124;", "|").replaceAll(/<br\s*\/?>/gi, "\n");
       }
     } catch {
       return null;
@@ -45,11 +45,11 @@ function unquoteModernProperty(value: string, allowPlain: boolean): string | nul
   }
   if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
     return trimmed.slice(1, -1).replaceAll("''", "'")
-      .replaceAll("&quot;", '"').replaceAll("&#124;", "|");
+      .replaceAll("&quot;", '"').replaceAll("&#124;", "|").replaceAll(/<br\s*\/?>/gi, "\n");
   }
   if (/^["']|["']$/.test(trimmed)) return null;
   // Mermaid 通过 YAML 解析裸标量，false/null/日期/十六进制数等并不保持原始字符串语义。
-  // shape 只会再与已知短名匹配，可以接管；label 为避免可见内容变化，只接管引号字符串。
+  // shape 只会再与已知短名匹配，可以接管；label 为避免可见内容变化，只接管引号字符串.
   return allowPlain ? unquoteLabel(trimmed) : null;
 }
 
