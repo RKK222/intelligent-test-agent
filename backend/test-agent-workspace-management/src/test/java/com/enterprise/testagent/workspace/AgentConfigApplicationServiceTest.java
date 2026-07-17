@@ -307,6 +307,102 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicUpdateMergesRemoteBranchIntoCurrentAdministratorsStableWorktree() throws Exception {
+        Path sharedRoot = root.resolve(".config");
+        Path personalRoot = root.resolve(".configdev/public-usr_admin");
+        Files.createDirectories(sharedRoot.resolve(".git"));
+        Files.createDirectories(sharedRoot.resolve("opencode"));
+        Files.writeString(sharedRoot.resolve("opencode/config.json"), "{}");
+        Files.createDirectories(personalRoot.resolve(".git"));
+        Files.createDirectories(personalRoot.resolve("opencode"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_admin",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                personalRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeRoot = personalRoot;
+        git.worktreeBranch = "public-usr_admin";
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", sharedRoot.toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.updatePublicConfig(
+                "main",
+                "aco_pull_personal_worktree",
+                false,
+                ADMIN,
+                "trace_pull_personal_worktree");
+
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
+        assertThat(git.mergedRepoRoot).isEqualTo(personalRoot);
+        assertThat(git.mergedBranch).isEqualTo("origin/main");
+        assertThat(git.pulledBranch).isEqualTo("main");
+        assertThat(git.fetchCallCount).isEqualTo(2);
+    }
+
+    @Test
+    void publicUpdateRejectsDirtyPersonalWorktreeBeforeChangingSharedRuntimeCopy() throws Exception {
+        Path sharedRoot = root.resolve(".config");
+        Path personalRoot = root.resolve(".configdev/public-usr_admin");
+        Files.createDirectories(sharedRoot.resolve(".git"));
+        Files.createDirectories(sharedRoot.resolve("opencode"));
+        Files.writeString(sharedRoot.resolve("opencode/config.json"), "{}");
+        Files.createDirectories(personalRoot.resolve(".git"));
+        Files.createDirectories(personalRoot.resolve("opencode"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_admin_dirty",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                personalRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeRoot = personalRoot;
+        git.worktreeBranch = "public-usr_admin";
+        git.worktreeCleanByRoot.put(personalRoot, false);
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", sharedRoot.toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+
+        assertThatThrownBy(() -> service.updatePublicConfig(
+                "main",
+                "aco_pull_dirty_personal",
+                false,
+                ADMIN,
+                "trace_pull_dirty_personal"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("Git 工作树存在未提交变更");
+
+        assertThat(git.pulledBranch).isNull();
+        assertThat(git.fetchCallCount).isZero();
+    }
+
+    @Test
     void publicUpdateAndPushStagesCommitsAndPushesWhenLocalChangesExist() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
@@ -1484,6 +1580,7 @@ class AgentConfigApplicationServiceTest {
         private String worktreeBranch;
         private Path worktreeRoot;
         private boolean worktreeClean = true;
+        private final Map<Path, Boolean> worktreeCleanByRoot = new LinkedHashMap<>();
         private String originUrl = "git@gitee.com:test/agent-config.git";
         private int commandOrder;
         private int originRefreshOrder;
@@ -1553,7 +1650,7 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public boolean isWorktreeClean(Path repoRoot) {
-            return worktreeClean;
+            return worktreeCleanByRoot.getOrDefault(repoRoot, worktreeClean);
         }
 
         @Override

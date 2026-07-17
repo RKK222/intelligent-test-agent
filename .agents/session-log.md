@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-17 - 修复公共配置拉取未同步个人 worktree
+
+- Why:
+  - 实机发现远端公共 Agent/Skill 已更新后，系统管理点击“拉取”只更新服务器共享仓库，当前超管文件树实际读取的稳定个人 worktree 仍停留在旧提交。
+- What:
+  - 公共仓库显式拉取现在先把 `origin/{branch}` 合并到当前用户、当前服务器的 `public-{userId}` 稳定 worktree，成功后才更新共享运行副本并广播；脏 worktree 默认拒绝覆盖，合并冲突保留给既有三方处理。
+  - 同步更新 workspace-management README、HTTP API 和部署文档，并修正文档中仍写日期型公共 worktree 的旧口径。
+- How:
+  - 复用 `AgentConfigRepository.findWorktrees`、`GitWorkspaceService.fetch/mergeBranch`、现有 Git 身份和冲突响应，没有新增 API、数据库字段、SQL、文件代理或 Git 包装层。
+  - workspace-management 41 项与 API 15 项定向测试通过；使用 `.env.test` / `test` profile 重启三服务，health/readiness、前端 HTTP、登录 CORS 和 manager WebSocket 连接正常。
+- Result:
+  - “拉取成功”后当前超管个人 worktree 确实包含远端公共分支更新；个人未提交内容不会被静默覆盖，共享副本不会在个人同步失败后继续前进。
+  - 公共配置发布后的全局禁发、进程清单入表、运行 Session 排空重试与逐实例 dispose 尚未实现；需作为独立跨 workspace/runtime/persistence/frontend 批次完成。验证期间其他会话新增的 `FigmaShell.vue`、`pet-companions.ts` 修改保持未暂存、未纳入本次提交。
+
 ### 2026-07-17 - Git 三作用域提交结果改为本轮累计
 
 - Why:

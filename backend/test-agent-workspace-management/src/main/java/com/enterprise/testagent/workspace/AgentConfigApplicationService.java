@@ -408,6 +408,15 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             PublicConfig config = requireEnabledPublicConfig(userId);
             String privateKey = decryptSingleSshKey(userId);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
+            // “拉取”不仅更新服务器共享运行副本，还必须先把远端公共分支合并到当前超管的稳定个人
+            // worktree；否则前端继续从个人 worktree 读取时会看到旧内容，却收到“已拉取”的误导结果。
+            progress.step(AgentConfigOperationStep.MERGING);
+            syncOwnedPublicWorktreeFromRemote(
+                    config,
+                    normalizedBranch,
+                    discardLocalChanges,
+                    userId,
+                    privateKey);
             ensurePublicRepositoryReady(config, normalizedBranch, privateKey, discardLocalChanges);
             String commitHash = gitWorkspaceService.headCommit(config.gitRoot());
             progress.step(AgentConfigOperationStep.BROADCASTING);
@@ -419,6 +428,59 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         } catch (Exception exception) {
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "公共 Agent 配置更新失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 配置更新失败", Map.of(), exception);
+        }
+    }
+
+    /**
+     * 将远端公共分支合并到当前用户在本服务器上的稳定个人 worktree。
+     *
+     * <p>公共文件读写已经以个人 worktree 为事实源，因此服务器“拉取”必须同步这棵 worktree。
+     * 有未提交改动时默认拒绝覆盖；只有调用方明确确认放弃本地已跟踪改动后才 reset。
+     * 合并冲突保留在个人 worktree 中，供既有三方冲突界面继续处理。
+     */
+    private void syncOwnedPublicWorktreeFromRemote(
+            PublicConfig config,
+            String branch,
+            boolean discardLocalChanges,
+            UserId userId,
+            String privateKey) {
+        Optional<AgentConfigWorktree> activeWorktree = agentConfigRepository.findWorktrees(
+                AgentConfigScope.PUBLIC,
+                null,
+                userId,
+                serverIdentity.linuxServerId(),
+                AgentConfigWorktreeStatus.ACTIVE).stream()
+                .filter(worktree -> isReusablePublicWorktree(worktree, userId))
+                .findFirst();
+        if (activeWorktree.isEmpty()) {
+            return;
+        }
+
+        Path repoRoot = Path.of(activeWorktree.get().rootPath());
+        ensureExistingRepositoryReadyForSync(repoRoot, config, discardLocalChanges);
+        if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
+            List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
+            throw publicMergeConflict(
+                    conflictFiles,
+                    conflictFiles.isEmpty()
+                            ? "公共 Agent 个人 worktree 存在未完成的 Git 合并，请先完成或取消合并"
+                            : "公共 Agent 个人 worktree 仍有未解决的 Git 合并冲突");
+        }
+        gitWorkspaceService.fetch(repoRoot, privateKey);
+        try {
+            gitWorkspaceService.mergeBranch(
+                    repoRoot,
+                    "origin/" + branch,
+                    privateKey,
+                    gitCommitIdentity(userId));
+        } catch (PlatformException mergeException) {
+            List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
+            if (!conflictFiles.isEmpty()) {
+                throw publicMergeConflict(
+                        conflictFiles,
+                        "公共 Agent 个人 worktree 与远端分支存在冲突，请解决后重新拉取");
+            }
+            throw mergeException;
         }
     }
 
