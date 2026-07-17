@@ -22,13 +22,14 @@
   - 用户要求按项目工作目录边界整理仅属于应用 Git 的测试资产初始化包，排除公共 Git，并把同一目录补到当前本地 F-COSS 测试仓库后通过系统功能推送远程。
 - What:
   - 生成 `artifacts/应用测试资产库初始化包-20260716.zip`：应用专属 `.opencode` 只保留 1 份 Agent 模板和 1 份 Skill 模板的系统原生四文件架子；`docs/应用架构`、`docs/功能模块`、`docs/数据架构`、`docs/部署架构` 除目录 README 外全部使用 `_模板.md` 示例，并保留 `archive` 说明。
-  - 包内不含 workagent、公共配置、`.git`、依赖、缓存、真实凭据或个人 `spec`。
+  - 包内增加 `spec/README.md` 作为个人测试过程资产目录占位；不含 workagent、公共配置、`.git`、依赖、缓存或真实凭据。
   - 将 F-COSS 专属 `.opencode` 发布到 `workspace-test.git` 的 `feature_testagent_20260618`，再从 `usr_test_dev` 个人工作区按白名单投影 `README/docs/archive/.gitignore`，没有选中个人工作区原有的 11 份未跟踪测试材料。
+  - 在 `usr_test_dev` 个人分支补入并推送 `F-COSS/workspace/spec/README.md`，共享 feature 分支继续不包含 `spec/**`。
 - How:
   - 复用系统应用配置 `stage/commit/publish` 与个人工作区 `commit/publish` API，而非命令行 Git 提交推送；系统最终记录 `targetCommitHash == replicaCommitHash == 95a00a7c995432e00bf835407512c489436c8d0b`，应用配置和 feature 工作区 diff 均为 0。
-  - ZIP 使用 JDK `jar --no-manifest` 生成，执行完整性、排除项、实际解压目录逐文件比对和 SHA-256 校验；同时确认本地后端 readiness 与前端 HTTP 可用。
+  - ZIP 使用 JDK `jar --no-manifest` 生成，执行完整性、排除项、实际解压目录逐文件比对和 SHA-256 校验；`spec` 通过 README 占位，避免 Git 丢弃空目录；同时确认本地后端 readiness 与前端 HTTP 可用。
 - Result:
-  - 精简后的应用配置提交为 `704fc9520239bee0e9f77609e746d68790e2fe63`，最终远端 feature 提交为 `95a00a7c995432e00bf835407512c489436c8d0b`；ZIP 共 16 个文件、约 12 KB，SHA-256 为 `7157e373f8a2fe9493bced30e8e4b44ac50d37f6a9023f8736e9164678d1f00d`。
+  - 精简后的应用配置提交为 `704fc9520239bee0e9f77609e746d68790e2fe63`，最终远端 feature 提交为 `95a00a7c995432e00bf835407512c489436c8d0b`；个人分支占位提交为 `6c85def`。ZIP 共 17 个文件、约 13 KB，SHA-256 为 `fe6f60a92a5f4e4f5ee3450e8806001c206b18418f6819cf4bf8851717d48945`。
   - 不涉及主项目 API、事件、数据库、性能、安全或兼容性代码变更；仅新增交付物与会话记录。
 
 ### 2026-07-16 - 统一企业离线包上传目录与文件名
