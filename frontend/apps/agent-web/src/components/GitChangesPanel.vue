@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
-  GitBranch,
   FolderGit2,
   Upload,
   Plus,
@@ -118,11 +117,6 @@ function onUnstagedResizeEnd() {
 // Section Expand States
 const unstagedExpanded = ref(true);
 const stagedExpanded = ref(true);
-const workspaceUnstagedExpanded = ref(true);
-const workspaceStagedExpanded = ref(true);
-const agentsUnstagedExpanded = ref(true);
-const agentsStagedExpanded = ref(true);
-
 const unstagedStyle = computed(() => {
   if (!unstagedExpanded.value) return {};
   if (!stagedExpanded.value) return { flex: "1", minHeight: "0" };
@@ -147,6 +141,13 @@ const executedCommands = ref<string[]>([]);
 const hasLivePublishCommand = ref(false);
 const publishResultConfirmed = ref(false);
 const mergeResolutionCompleted = ref(false);
+const commitRequestedPush = ref(false);
+type CommitResultSummary = {
+  committedFiles: number;
+  pushedFiles: number;
+  localOnlySpecFiles: number;
+};
+const commitResultSummary = ref<CommitResultSummary | null>(null);
 
 type PublishGitStep =
   | "PREPARE_REMOTE"
@@ -399,20 +400,17 @@ const diffScopes = computed(() => [
   {
     key: "WORKSPACE" as const,
     label: "workspace",
-    count: workspaceUnstaged.value.length + workspaceStaged.value.length + workspaceConflicts.value.length,
-    description: "普通文件、docs、spec"
+    count: workspaceUnstaged.value.length + workspaceStaged.value.length + workspaceConflicts.value.length
   },
   {
     key: "AGENT_WORKSPACE" as const,
     label: "应用Agent",
-    count: workspaceAgentUnstaged.value.length + workspaceAgentStaged.value.length + workspaceAgentConflicts.value.length,
-    description: "应用 .opencode 配置"
+    count: workspaceAgentUnstaged.value.length + workspaceAgentStaged.value.length + workspaceAgentConflicts.value.length
   },
   {
     key: "PUBLIC" as const,
     label: "公共Agent",
-    count: publicAgentUnstaged.value.length + publicAgentStaged.value.length + publicAgentConflicts.value.length,
-    description: "公共 opencode 配置"
+    count: publicAgentUnstaged.value.length + publicAgentStaged.value.length + publicAgentConflicts.value.length
   }
 ]);
 // 外层“变更”入口展示三个作用域的文件总量；分类 Tab 只负责分开展示，不改变总数口径。
@@ -464,6 +462,19 @@ const hasPublishableStagedChanges = computed(() =>
     ? props.canWrite && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path))
     : activeAgentStaged.value.some((file) => canWriteAgentScope(file.scope))
 );
+const workspaceStagedSpecCount = computed(() =>
+  workspaceStaged.value.filter((file) => isLocalOnlySpecPath(file.path)).length
+);
+const workspaceStagedPublishableCount = computed(() =>
+  workspaceStaged.value.length - workspaceStagedSpecCount.value
+);
+const workspaceCommitHint = computed(() => {
+  if (activeDiffScope.value !== "WORKSPACE" || workspaceStagedSpecCount.value === 0) return "";
+  if (workspaceStagedPublishableCount.value === 0) {
+    return `${workspaceStagedSpecCount.value} 个 spec 文件只提交到个人 worktree，不会推送。`;
+  }
+  return `选择“提交并推送”时：提交 ${workspaceStaged.value.length} 个文件、推送 ${workspaceStagedPublishableCount.value} 个文件；其中 ${workspaceStagedSpecCount.value} 个 spec 文件只提交到个人 worktree。`;
+});
 const activeHasBlockingConflicts = computed(() =>
   activeDiffScope.value === "WORKSPACE"
     ? hasBlockingWorkspaceConflicts.value
@@ -1088,12 +1099,26 @@ async function handleCommit(push = false) {
     return;
   }
 
+  const plannedCommittedFileCount = activeDiffScope.value === "WORKSPACE"
+    ? workspaceStaged.value.length
+    : activeAgentStaged.value.filter((file) => canWriteAgentScope(file.scope)).length;
+  const plannedLocalOnlySpecFileCount = activeDiffScope.value === "WORKSPACE"
+    ? workspaceStagedSpecCount.value
+    : 0;
+  const plannedPushedFileCount = push
+    ? activeDiffScope.value === "WORKSPACE"
+      ? workspaceStagedPublishableCount.value
+      : plannedCommittedFileCount
+    : 0;
+
   committing.value = true;
   errorMessage.value = "";
   progressMessage.value = "";
   executedCommands.value = [];
   hasLivePublishCommand.value = false;
   publishResultConfirmed.value = false;
+  commitRequestedPush.value = push;
+  commitResultSummary.value = null;
   showCommitProgressDialog.value = false;
   commitStep.value = 0;
   let publishAttempted = false;
@@ -1130,6 +1155,11 @@ async function handleCommit(push = false) {
       }
       
       commitMessage.value = "";
+      commitResultSummary.value = {
+        committedFiles: plannedCommittedFileCount,
+        pushedFiles: plannedPushedFileCount,
+        localOnlySpecFiles: plannedLocalOnlySpecFileCount
+      };
       progressMessage.value = push ? "提交并推送成功！(测试数据)" : "提交成功！(测试数据)";
       setTimeout(() => {
         progressMessage.value = "";
@@ -1290,6 +1320,11 @@ async function handleCommit(push = false) {
     }
 
     commitMessage.value = "";
+    commitResultSummary.value = {
+      committedFiles: plannedCommittedFileCount,
+      pushedFiles: remotePublishCompleted ? plannedPushedFileCount : 0,
+      localOnlySpecFiles: plannedLocalOnlySpecFileCount
+    };
     if (push && localOnlySpecFileCount > 0) {
       progressMessage.value = remotePublishCompleted
         ? `可发布文件已推送；${localOnlySpecFileCount} 个 spec 文件仅提交到个人 worktree。`
@@ -1439,12 +1474,6 @@ defineExpose({
         <span class="git-scope-tab-count">{{ scope.count }}</span>
       </button>
     </div>
-    <div class="git-scope-meta">
-      <GitBranch class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
-      <span>{{ activeScopeItem.description }}</span>
-      <span class="git-scope-meta-separator">·</span>
-      <span>{{ activeScopeMeta }}</span>
-    </div>
 
     <!-- Scrollable file list area -->
     <div class="git-lists-container">
@@ -1454,53 +1483,62 @@ defineExpose({
           <ChevronDown v-if="unstagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
           <span class="git-section-title">UNSTAGED (未暂存) ({{ activeUnstagedCount }})</span>
-          <button
-            type="button"
-            class="git-refresh-btn ml-auto"
-            title="刷新变更列表"
-            @click.stop="refreshChanges()"
-            :disabled="loading"
-          >
-            <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': loading }" :stroke-width="1.5" />
-          </button>
+          <div class="git-section-actions ml-auto">
+            <button
+              type="button"
+              class="git-refresh-btn"
+              title="刷新变更列表"
+              @click.stop="refreshChanges()"
+              :disabled="loading"
+            >
+              <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': loading }" :stroke-width="1.5" />
+            </button>
+            <template v-if="activeDiffScope === 'WORKSPACE'">
+              <Button
+                size="icon"
+                variant="ghost"
+                class="git-bulk-action"
+                aria-label="丢弃全部应用工作空间改动"
+                :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '丢弃全部应用工作空间改动'"
+                :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceDiffFiles.length === 0 || workspaceGitMutationPending"
+                @click.stop="discardAllWorkspaceChanges"
+              >
+                <Loader2 v-if="discardingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                class="git-bulk-action"
+                aria-label="全部暂存应用工作空间变更"
+                :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '全部暂存应用工作空间变更'"
+                :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceUnstaged.length === 0 || workspaceGitMutationPending"
+                @click.stop="stageAllWorkspaceChanges"
+              >
+                <Loader2 v-if="stagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </Button>
+            </template>
+            <Button
+              v-else
+              size="icon"
+              variant="ghost"
+              class="git-bulk-action"
+              :aria-label="`丢弃全部${activeScopeItem.label}改动`"
+              :title="activeAgentConflicts.length > 0 ? '存在未解决冲突，请先处理或取消合并' : `丢弃全部${activeScopeItem.label}改动`"
+              :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending"
+              @click.stop="discardAllAgentChanges"
+            >
+              <Loader2 v-if="discardingAllAgentFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+              <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+            </Button>
+          </div>
         </div>
 
-        <div v-show="unstagedExpanded" class="git-section-content pl-2">
+        <div v-show="unstagedExpanded" class="git-section-content">
           <!-- 1a. Application Workspace -->
           <div v-if="activeDiffScope === 'WORKSPACE'" class="git-sub-section">
-            <div class="git-sub-header" @click.stop="workspaceUnstagedExpanded = !workspaceUnstagedExpanded">
-              <ChevronDown v-if="workspaceUnstagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
-              <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
-              <span>应用工作空间</span>
-              <span class="git-sub-badge ml-1">({{ workspaceUnstaged.length + workspaceConflicts.length }})</span>
-              <div class="git-bulk-actions ml-auto">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  class="git-bulk-action"
-                  aria-label="丢弃全部应用工作空间改动"
-                  :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '丢弃全部应用工作空间改动'"
-                  :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceDiffFiles.length === 0 || workspaceGitMutationPending"
-                  @click.stop="discardAllWorkspaceChanges"
-                >
-                  <Loader2 v-if="discardingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
-                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  class="git-bulk-action"
-                  aria-label="全部暂存应用工作空间变更"
-                  :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '全部暂存应用工作空间变更'"
-                  :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceUnstaged.length === 0 || workspaceGitMutationPending"
-                  @click.stop="stageAllWorkspaceChanges"
-                >
-                  <Loader2 v-if="stagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
-                  <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-                </Button>
-              </div>
-            </div>
-            <div v-show="workspaceUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
+            <div class="git-sub-content px-2 py-0.5 space-y-0.5">
               <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner">
                 <div class="git-conflict-header">
                   <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
@@ -1599,27 +1637,7 @@ defineExpose({
 
           <!-- 1b. Agent/Skill scope; one scope is shown at a time to keep the panel readable. -->
           <div v-else class="git-sub-section">
-            <div class="git-sub-header" @click.stop="agentsUnstagedExpanded = !agentsUnstagedExpanded">
-              <ChevronDown v-if="agentsUnstagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
-              <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
-              <span>{{ activeScopeItem.label }}</span>
-              <span class="git-sub-badge ml-1">({{ activeAgentUnstaged.length + activeAgentConflicts.length }})</span>
-              <div class="git-bulk-actions ml-auto">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  class="git-bulk-action"
-                  :aria-label="`丢弃全部${activeScopeItem.label}改动`"
-                  :title="activeAgentConflicts.length > 0 ? '存在未解决冲突，请先处理或取消合并' : `丢弃全部${activeScopeItem.label}改动`"
-                  :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending"
-                  @click.stop="discardAllAgentChanges"
-                >
-                  <Loader2 v-if="discardingAllAgentFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
-                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-                </Button>
-              </div>
-            </div>
-            <div v-show="agentsUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
+            <div class="git-sub-content px-2 py-0.5 space-y-0.5">
               <div v-if="activeDiffScope === 'PUBLIC' && publicAgentConflicts.length > 0" class="git-conflict-banner">
                 <div class="git-conflict-header">
                   <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
@@ -1729,32 +1747,25 @@ defineExpose({
           <ChevronDown v-if="stagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
           <span class="git-section-title">STAGED (已暂存) ({{ activeStagedCount }})</span>
+          <Button
+            v-if="activeDiffScope === 'WORKSPACE'"
+            size="icon"
+            variant="ghost"
+            class="git-bulk-action ml-auto"
+            aria-label="全部回退到未暂存"
+            title="全部回退到未暂存"
+            :disabled="!props.canWrite || workspaceStaged.length === 0 || workspaceGitMutationPending"
+            @click.stop="unstageAllWorkspaceChanges"
+          >
+            <Loader2 v-if="unstagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+            <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </Button>
         </div>
 
-        <div v-show="stagedExpanded" class="git-section-content pl-2">
+        <div v-show="stagedExpanded" class="git-section-content">
           <!-- 2a. Application Workspace -->
           <div v-if="activeDiffScope === 'WORKSPACE'" class="git-sub-section">
-            <div class="git-sub-header" @click.stop="workspaceStagedExpanded = !workspaceStagedExpanded">
-              <ChevronDown v-if="workspaceStagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
-              <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
-              <span>应用工作空间</span>
-              <span class="git-sub-badge ml-1">({{ workspaceStaged.length }})</span>
-              <div class="git-bulk-actions ml-auto">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  class="git-bulk-action"
-                  aria-label="全部回退到未暂存"
-                  title="全部回退到未暂存"
-                  :disabled="!props.canWrite || workspaceStaged.length === 0 || workspaceGitMutationPending"
-                  @click.stop="unstageAllWorkspaceChanges"
-                >
-                  <Loader2 v-if="unstagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
-                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-                </Button>
-              </div>
-            </div>
-            <div v-show="workspaceStagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
+            <div class="git-sub-content px-2 py-0.5 space-y-0.5">
               <div v-if="hasWorkspaceConflicts && workspaceStaged.length > 0" class="git-conflict-note">
                 可继续取消暂存普通文件；解决全部冲突后 Git 才允许提交
               </div>
@@ -1801,13 +1812,7 @@ defineExpose({
 
           <!-- 2b. Agent/Skill scope -->
           <div v-else class="git-sub-section">
-            <div class="git-sub-header" @click.stop="agentsStagedExpanded = !agentsStagedExpanded">
-              <ChevronDown v-if="agentsStagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
-              <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
-              <span>{{ activeScopeItem.label }}</span>
-              <span class="git-sub-badge ml-1">({{ activeAgentStaged.length }})</span>
-            </div>
-            <div v-show="agentsStagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
+            <div class="git-sub-content px-2 py-0.5 space-y-0.5">
               <div v-if="activeAgentStaged.length === 0" class="git-empty-text">无暂存文件</div>
               <div
                 v-for="file in activeAgentStaged"
@@ -1863,6 +1868,9 @@ defineExpose({
         rows="2"
       ></textarea>
 
+      <div v-if="workspaceCommitHint" class="git-commit-hint" role="note">
+        {{ workspaceCommitHint }}
+      </div>
 
       <!-- Action buttons -->
       <div class="git-actions-row">
@@ -1877,6 +1885,7 @@ defineExpose({
           <span>提交</span>
         </button>
         <button
+          v-if="hasPublishableStagedChanges"
           type="button"
           class="git-action-btn btn-push flex-1"
           :title="activeHasBlockingConflicts
@@ -1893,10 +1902,10 @@ defineExpose({
 
     <!-- Git Commit & Push Progress Dialog Overlay -->
     <div v-if="showCommitProgressDialog" class="ta-process-startup-backdrop" role="presentation">
-      <section class="ta-process-startup-dialog" role="dialog" aria-modal="true" aria-label="提交并推送">
+      <section class="ta-process-startup-dialog" role="dialog" aria-modal="true" :aria-label="commitRequestedPush ? '提交并推送' : '提交'">
         <header class="ta-process-startup-header">
           <div>
-            <h2 class="text-sm font-bold text-zinc-900 dark:text-zinc-100">提交并推送进度</h2>
+            <h2 class="text-sm font-bold text-zinc-900 dark:text-zinc-100">{{ commitRequestedPush ? '提交并推送进度' : '提交进度' }}</h2>
             <p v-if="committing" class="text-xs text-zinc-500">正在处理中...</p>
             <p v-else-if="errorMessage" class="text-xs text-red-600 font-medium">执行失败</p>
             <p v-else class="text-xs text-green-600 font-medium">执行成功</p>
@@ -1962,6 +1971,14 @@ defineExpose({
         </div>
         <div v-else-if="progressMessage && !committing" class="mx-4 my-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-left text-xs text-green-700">
           {{ progressMessage }}
+        </div>
+        <div v-if="commitResultSummary && !committing && !errorMessage" class="git-result-summary mx-4 my-3" aria-label="本次处理结果">
+          <strong>本次处理结果</strong>
+          <div class="git-result-summary-items">
+            <span>提交 <b>{{ commitResultSummary.committedFiles }}</b> 个文件</span>
+            <span v-if="commitRequestedPush">推送 <b>{{ commitResultSummary.pushedFiles }}</b> 个文件</span>
+            <span v-if="commitResultSummary.localOnlySpecFiles > 0">仅本地 <b>{{ commitResultSummary.localOnlySpecFiles }}</b> 个 spec 文件</span>
+          </div>
         </div>
 
         <footer class="ta-process-startup-footer">
@@ -2079,28 +2096,6 @@ defineExpose({
 .git-scope-tab.is-active .git-scope-tab-count {
   background: #c7d2fe;
   color: #3730a3;
-}
-
-.git-scope-meta {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  padding: 0 10px 6px;
-  border-bottom: 1px solid #e4e4e7;
-  color: #71717a;
-  font-size: 10px;
-}
-
-.git-scope-meta > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.git-scope-meta-separator {
-  flex: 0 0 auto;
-  color: #a1a1aa;
 }
 
 .git-conflict-banner {
@@ -2253,6 +2248,12 @@ defineExpose({
   color: #18181b;
 }
 
+.git-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .git-refresh-btn {
   display: inline-flex;
   align-items: center;
@@ -2284,35 +2285,6 @@ defineExpose({
   flex-direction: column;
   margin-top: 4px;
   margin-bottom: 8px;
-}
-
-.git-sub-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #52525b;
-  cursor: pointer;
-  user-select: none;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-
-.git-sub-header:hover {
-  background: #f4f4f5;
-  color: #18181b;
-}
-
-.git-sub-badge {
-  font-weight: 400;
-  color: #a1a1aa;
-}
-
-.git-bulk-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
 }
 
 .git-bulk-action {
@@ -2462,6 +2434,16 @@ defineExpose({
   background: #f4f4f5;
   color: #a1a1aa;
   cursor: not-allowed;
+}
+
+.git-commit-hint {
+  padding: 6px 8px;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .git-options-row {
@@ -2666,6 +2648,34 @@ defineExpose({
 .ta-process-startup-error strong {
   font-size: 14px;
   display: block;
+}
+
+.git-result-summary {
+  padding: 10px 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+  text-align: left;
+}
+
+.git-result-summary > strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.git-result-summary-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.git-result-summary-items span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #dcfce7;
+  font-size: 11px;
 }
 
 @keyframes ta-process-spin {

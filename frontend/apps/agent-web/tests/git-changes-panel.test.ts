@@ -251,16 +251,22 @@ describe("GitChangesPanel", () => {
     });
     expect(view.queryByText("SKILL.md", { exact: false })).toBeNull();
     expect(view.queryByText("public-review.md", { exact: false })).toBeNull();
+    expect(view.container.querySelector(".git-scope-meta")).toBeNull();
+    expect(view.container.querySelector(".git-sub-header")).toBeNull();
 
     await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
     expect(await view.findByText("SKILL.md", { exact: false })).toBeTruthy();
     expect(view.queryByText("publish-guide.md", { exact: false })).toBeNull();
     expect(view.queryByText("public-review.md", { exact: false })).toBeNull();
+    expect(view.container.querySelector(".git-scope-meta")).toBeNull();
+    expect(view.container.querySelector(".git-sub-header")).toBeNull();
 
     await fireEvent.click(view.getByRole("tab", { name: /^公共Agent/ }));
     expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
     expect(view.queryByText("publish-guide.md", { exact: false })).toBeNull();
     expect(view.queryByText("SKILL.md", { exact: false })).toBeNull();
+    expect(view.container.querySelector(".git-scope-meta")).toBeNull();
+    expect(view.container.querySelector(".git-sub-header")).toBeNull();
   });
 
   it("commits only the selected Agent scope when workspace files are also staged", async () => {
@@ -791,6 +797,9 @@ describe("GitChangesPanel", () => {
     });
 
     expect(await view.findByText("design.md")).toBeTruthy();
+    expect(view.queryByText("应用工作空间")).toBeNull();
+    expect(view.queryByText("普通文件、docs、spec")).toBeNull();
+    expect(view.getByText("选择“提交并推送”时：提交 2 个文件、推送 1 个文件；其中 1 个 spec 文件只提交到个人 worktree。")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "docs: 更新支付说明");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
@@ -801,6 +810,9 @@ describe("GitChangesPanel", () => {
       files: ["docs/payment.md"]
     }));
     expect(await view.findByText("可发布文件已推送；1 个 spec 文件仅提交到个人 worktree。")).toBeTruthy();
+    expect(view.getByLabelText("本次处理结果").textContent).toContain("提交 2 个文件");
+    expect(view.getByLabelText("本次处理结果").textContent).toContain("推送 1 个文件");
+    expect(view.getByLabelText("本次处理结果").textContent).toContain("仅本地 1 个 spec 文件");
   });
 
   it("only commits when all selected workspace files are under spec", async () => {
@@ -824,9 +836,9 @@ describe("GitChangesPanel", () => {
 
     expect(await view.findByText("design.md")).toBeTruthy();
     expect(view.getByText("仅本地")).toBeTruthy();
+    expect(view.getByText("1 个 spec 文件只提交到个人 worktree，不会推送。")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 保存本地设计");
-    expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(view.getByRole("button", { name: "提交并推送" }).getAttribute("title")).toBe("当前暂存内容仅允许本地提交");
+    expect(view.queryByRole("button", { name: "提交并推送" })).toBeNull();
     await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
     await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
@@ -834,6 +846,8 @@ describe("GitChangesPanel", () => {
     })));
     expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
     expect(await view.findByText("提交成功！")).toBeTruthy();
+    expect(view.getByLabelText("本次处理结果").textContent).toContain("提交 1 个文件");
+    expect(view.getByLabelText("本次处理结果").textContent).toContain("仅本地 1 个 spec 文件");
   });
 
   it("keeps spec local for a super administrator too", async () => {
@@ -859,7 +873,7 @@ describe("GitChangesPanel", () => {
 
     expect(await view.findByText("design.md")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 超管本地提交设计");
-    expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(view.queryByRole("button", { name: "提交并推送" })).toBeNull();
     await fireEvent.click(view.getByRole("button", { name: "提交" }));
 
     await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
@@ -925,7 +939,7 @@ describe("GitChangesPanel", () => {
       })
     ));
     expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
-    expect(view.getByText(`个人 worktree · ${fixture.application.personalBranch}`)).toBeTruthy();
+    expect(view.queryByText(`个人 worktree · ${fixture.application.personalBranch}`)).toBeNull();
   });
 
   it("publishes only the selected application Agent paths from personal HEAD", async () => {
@@ -1428,7 +1442,7 @@ describe("GitChangesPanel", () => {
     await fireEvent.click(unstage);
     await waitFor(() => expect(apiClientMock.unstageWorkspaceGitFiles)
       .toHaveBeenCalledWith("wrk_1234567890abcdef", [unstaged.path]));
-    expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(view.queryByRole("button", { name: "提交并推送" })).toBeNull();
   });
 
   it("emits the already loaded vcs diff when opening a workspace file", async () => {

@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-17 - 收敛 Git 三作用域布局并补充提交推送结果摘要
+
+- Why:
+  - 用户反馈文件页进入时 Agents 展开会挤压工作空间，Git 三个 Tab 下又重复展示 worktree/作用域说明和二级分组；纯 `spec/**` 暂存仍显示不可用的推送按钮，推送完成页也缺少文件数量总结。
+- What:
+  - 文件页默认收起 Agents 并固定在底部，展开后保留原上下分屏拖拽；workspace、应用 Agent、公共 Agent 三个 Git Tab 都直接在 `UNSTAGED/STAGED` 下展示文件，批量操作上移到一级标题。
+  - workspace 仅暂存 `spec/**` 时只展示“提交”；混合暂存时操作前提示提交、推送及仅本地数量，成功进度页汇总实际提交、推送和仅本地 spec 文件数。
+- How:
+  - 复用现有 `isLocalOnlySpecPath` 发布白名单、暂存列表和发布成功确认，不改变后端发布策略或新增 API；补充三个 Tab 无重复分组、Agents 默认收起、纯 spec 和混合发布结果测试。
+  - Git 面板与文件区定向 Vitest 35/35、前端全量 Vitest 1112 项通过且 1 项跳过、agent-web typecheck 通过；使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend，health/readiness、前端 HTTP 和登录 CORS 正常。应用内浏览器连接组件初始化失败且重启后停在登录页，因此未把真实页面点击检查计为已验证。
+- Result:
+  - 三个作用域不再重复占用纵向空间，纯本地与可发布操作按暂存内容出现，推送后用户能直接看到提交/推送/仅本地文件数。
+  - 不涉及 HTTP API、RunEvent、数据库、SQL、generated SDK、权限、安全或环境配置变更；manager 保持连接，但仍收到既有未托管 4097 端口的健康探测失败日志。
+
 ### 2026-07-17 - 重构宠物拖拽状态锁与传统鼠标事件兜底
 
 - Why:

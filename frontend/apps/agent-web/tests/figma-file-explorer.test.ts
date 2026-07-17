@@ -8,6 +8,23 @@ vi.mock("@test-agent/workbench-shell", async () =>
 );
 
 describe("FigmaFileExplorer", () => {
+  it("keeps Agents collapsed at the bottom when entering the file view", () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+
+    const sections = wrapper.findAll(".figma-fe-section");
+    expect(sections).toHaveLength(2);
+    expect(sections[0].attributes("style")).toContain("flex: 1");
+    expect(sections[1].classes()).not.toContain("is-expanded");
+    expect(sections[1].text()).toContain("Agents");
+  });
+
   it("shows the total diff count reported by all three change scopes", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {

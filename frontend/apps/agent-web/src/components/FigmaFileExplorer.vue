@@ -93,7 +93,8 @@ const emit = defineEmits<{
 }>();
 
 const workspaceExpanded = ref(true);
-const agentsExpanded = ref(true);
+// 文件页优先完整展示工作空间；Agents 默认收起并固定在面板底部，用户需要时再展开。
+const agentsExpanded = ref(false);
 const agentConfigPanelRef = ref<InstanceType<typeof AgentConfigPanel> | null>(null);
 const gitChangesPanelRef = ref<InstanceType<typeof GitChangesPanel> | null>(null);
 
