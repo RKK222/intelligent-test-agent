@@ -206,9 +206,26 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelectorAll(".oc-work-status-history-trigger")).toHaveLength(1);
     expect(container.querySelectorAll(".oc-work-status")).toHaveLength(1);
 
-    await fireEvent.click(getByRole("button", { name: "展开历史工作状态" }));
-    expect(container.querySelectorAll(".oc-work-status")).toHaveLength(2);
-    expect(getByRole("button", { name: "收起历史工作状态" })).toBeTruthy();
+    const historicalRow = container.querySelector(".oc-work-status-history") as HTMLElement;
+    const collapsedTrigger = getByRole("button", { name: "展开历史工作状态" });
+    expect(collapsedTrigger.getAttribute("aria-expanded")).toBe("false");
+    expect(historicalRow.querySelector(".oc-work-status")).toBeNull();
+
+    await fireEvent.click(collapsedTrigger);
+
+    const expandedTrigger = getByRole("button", { name: "收起历史工作状态" });
+    const historicalSummary = historicalRow.querySelector(".oc-work-status-history-summary") as HTMLElement;
+    const historicalStatus = historicalRow.querySelector(".oc-work-status") as HTMLElement;
+    expect(expandedTrigger).toBe(collapsedTrigger);
+    expect(expandedTrigger.getAttribute("aria-expanded")).toBe("true");
+    expect(historicalStatus).toBeTruthy();
+    expect(historicalSummary.compareDocumentPosition(historicalStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await fireEvent.click(expandedTrigger);
+
+    expect(getByRole("button", { name: "展开历史工作状态" })).toBe(collapsedTrigger);
+    expect(collapsedTrigger.getAttribute("aria-expanded")).toBe("false");
+    expect(historicalRow.querySelector(".oc-work-status")).toBeNull();
 
     await rerender({
       state: createOpencodeLikeState({
@@ -220,6 +237,15 @@ describe("OpencodeTimeline", () => {
 
     expect(container.querySelectorAll(".oc-work-status-history-trigger")).toHaveLength(2);
     expect(container.querySelectorAll(".oc-work-status")).toHaveLength(1);
+
+    const historicalTriggers = container.querySelectorAll(".oc-work-status-history-trigger");
+    await fireEvent.click(historicalTriggers[0] as HTMLElement);
+    expect(container.querySelectorAll(".oc-work-status-history .oc-work-status")).toHaveLength(1);
+
+    await fireEvent.click(historicalTriggers[1] as HTMLElement);
+    expect(container.querySelectorAll(".oc-work-status-history .oc-work-status")).toHaveLength(1);
+    expect((historicalTriggers[0] as HTMLElement).getAttribute("aria-expanded")).toBe("false");
+    expect((historicalTriggers[1] as HTMLElement).getAttribute("aria-expanded")).toBe("true");
   });
 
   it("renders root events as icons after assistant text and diff output", async () => {
