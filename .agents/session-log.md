@@ -14,6 +14,21 @@
 - Result:
   - 前端 `@test-agent/agent-web` 的全量 41 个 Vitest 单元测试全部通过，`vue-tsc` 类型检查无任何报错，没有引入任何破坏性更新或性能影响。
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器锚点与快捷箭头交互
+### 2026-07-17 - 优化 Mermaid 流程图编辑器平行四边形与梯形锚点布局
+
+- Why:
+  - 1. 用户反馈普通处理步骤（`rectangle`）、子程序（`subroutine`）、人工处理（`trapezoid`）三种图形的边框锚点（端口）不在边的最中间，要求将其改为长边上 5 个点，短边上 3 个点（含顶点），从而确保每条边都在最中间有一个锚点。
+  - 2. 输入或输出（`parallelogram` 平行四边形）图形的锚点也存在类似需求：短边上 3 个点，长边上 5 个点（含顶点），其中水平长边上的中心点位置需要在 shape 中心（50%）映射到边的位置，而不是该边自身的几何中点。
+- What:
+  - 1. 确保普通处理步骤与子程序图形的 12 端口配置继续保持长边 5 点、短边 3 点（含 4 个共享顶点及中点 50%），以提供各个方向上的正中心锚点。
+  - 2. 更新人工处理（`trapezoid` 梯形）图形的端口布局为 12 端口格式，将长边（Top/Bottom）设计为 5 个等分或对称点，短边（Left/Right）设计为 3 个点（顶点 + 50% 处的倾斜中点 `(10, 50)` 及 `(90, 50)`），使得每条边正中心都有一个连接点。
+  - 3. 更新输入或输出（`parallelogram` 平行四边形）图形的端口布局为 12 端口格式，长边（Top/Bottom）设计为 5 个点（含顶点，中心点取 y 投影的 `x = 50`，其余等分点随之设计），短边（Left/Right）设计为 3 个点（含顶点及其中点 `(10, 50)` / `(90, 50)`），使其完美对齐中心映射位置。
+- How:
+  - 修改 `frontend/packages/editor/src/mermaid/visual-editor/node-port-layout.ts` 中的 `TRAPEZOID_PORTS` 与 `PARALLELOGRAM_PORTS` 坐标值。
+  - 并在 `frontend/packages/editor/tests/node-port-layout.test.ts` 中添加并运行 `parallelogram` 与 `trapezoid` 对应的 `findEdgePort` 正确中点选取的测试断言。
+- Result:
+  - 完美完成了平行四边形、梯形图形各边中点锚点位置的修正，通过了前后端测试和类型检查，不产生任何回归。
+
 ### 2026-07-17 - 优化 Mermaid 流程图编辑器锚点、快捷箭头与节点边框端口交互
 
 - Why:

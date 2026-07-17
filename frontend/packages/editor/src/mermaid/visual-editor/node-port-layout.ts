@@ -112,36 +112,54 @@ const HEXAGON_PORTS: RawPort[] = [
   { x: 10, y: 25, pos: Position.Left }
 ];
 
-/** 输入输出平行四边形：4 个顶点 + 每条边 2 个点，共 12 个端口。 */
+/** 输入输出平行四边形：算上顶点，长边上 5 个点（Top/Bottom，中心点对齐 shape 中心 50% 映射），短边上 3 个点（Left/Right），每边中心均有一个点，共 12 个端口。 */
 const PARALLELOGRAM_PORTS: RawPort[] = [
+  // 4 corners
   { x: 20, y: 0, pos: Position.Top },
   { x: 100, y: 0, pos: Position.Top },
   { x: 0, y: 100, pos: Position.Bottom },
   { x: 80, y: 100, pos: Position.Bottom },
-  { x: 46.7, y: 0, pos: Position.Top },
-  { x: 73.3, y: 0, pos: Position.Top },
-  { x: 26.7, y: 100, pos: Position.Bottom },
-  { x: 53.3, y: 100, pos: Position.Bottom },
-  { x: 13.3, y: 33.3, pos: Position.Left },
-  { x: 6.7, y: 66.7, pos: Position.Left },
-  { x: 93.3, y: 33.3, pos: Position.Right },
-  { x: 86.7, y: 66.7, pos: Position.Right }
+
+  // Top edge non-corners: (35, 0), (50, 0), (75, 0)
+  { x: 35, y: 0, pos: Position.Top },
+  { x: 50, y: 0, pos: Position.Top },
+  { x: 75, y: 0, pos: Position.Top },
+
+  // Bottom edge non-corners: (25, 100), (50, 100), (65, 100)
+  { x: 25, y: 100, pos: Position.Bottom },
+  { x: 50, y: 100, pos: Position.Bottom },
+  { x: 65, y: 100, pos: Position.Bottom },
+
+  // Left edge midpoint: (10, 50)
+  { x: 10, y: 50, pos: Position.Left },
+
+  // Right edge midpoint: (90, 50)
+  { x: 90, y: 50, pos: Position.Right }
 ];
 
-/** 人工处理梯形：4 个顶点 + 每条边 2 个点，共 12 个端口。 */
+/** 人工处理梯形：算上顶点，长边上 5 个点（Top/Bottom，注意 Top 是短边在此也被对称设计以便于 12 端口排布），短边上 3 个点（Left/Right），每边中心均有一个点，共 12 个端口。 */
 const TRAPEZOID_PORTS: RawPort[] = [
+  // 4 corners
   { x: 20, y: 0, pos: Position.Top },
   { x: 80, y: 0, pos: Position.Top },
   { x: 0, y: 100, pos: Position.Bottom },
   { x: 100, y: 100, pos: Position.Bottom },
-  { x: 40, y: 0, pos: Position.Top },
-  { x: 60, y: 0, pos: Position.Top },
-  { x: 33.3, y: 100, pos: Position.Bottom },
-  { x: 66.7, y: 100, pos: Position.Bottom },
-  { x: 13.3, y: 33.3, pos: Position.Left },
-  { x: 6.7, y: 66.7, pos: Position.Left },
-  { x: 86.7, y: 33.3, pos: Position.Right },
-  { x: 93.3, y: 66.7, pos: Position.Right }
+
+  // Top edge non-corners: (35, 0), (50, 0), (65, 0)
+  { x: 35, y: 0, pos: Position.Top },
+  { x: 50, y: 0, pos: Position.Top },
+  { x: 65, y: 0, pos: Position.Top },
+
+  // Bottom edge non-corners: (25, 100), (50, 100), (75, 100)
+  { x: 25, y: 100, pos: Position.Bottom },
+  { x: 50, y: 100, pos: Position.Bottom },
+  { x: 75, y: 100, pos: Position.Bottom },
+
+  // Left edge midpoint: (10, 50)
+  { x: 10, y: 50, pos: Position.Left },
+
+  // Right edge midpoint: (90, 50)
+  { x: 90, y: 50, pos: Position.Right }
 ];
 
 /** 无边框文本按隐形包围盒布点，四角与四边中点共 8 个。 */

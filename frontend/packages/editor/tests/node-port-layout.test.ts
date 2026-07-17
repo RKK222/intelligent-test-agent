@@ -154,7 +154,15 @@ describe("Mermaid 节点端口布局", () => {
     ["rounded", Position.Top, "source-1"],
     ["rounded", Position.Bottom, "target-3"],
     ["rounded", Position.Left, "target-0"],
-    ["rounded", Position.Right, "source-0"]
+    ["rounded", Position.Right, "source-0"],
+    ["parallelogram", Position.Top, "source-2"],
+    ["parallelogram", Position.Bottom, "target-4"],
+    ["parallelogram", Position.Left, "target-5"],
+    ["parallelogram", Position.Right, "source-5"],
+    ["trapezoid", Position.Top, "source-2"],
+    ["trapezoid", Position.Bottom, "target-4"],
+    ["trapezoid", Position.Left, "target-5"],
+    ["trapezoid", Position.Right, "source-5"]
   ] as const)("findEdgePort(%s, %s) 选中该边最接近中点的端口 %s", (nodeType, edge, expected) => {
     const port = findEdgePort(nodeType, edge);
     expect(port?.handleId).toBe(expected);
