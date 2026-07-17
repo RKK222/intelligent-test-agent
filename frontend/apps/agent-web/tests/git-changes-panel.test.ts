@@ -217,7 +217,10 @@ describe("GitChangesPanel", () => {
 
   it("switches among workspace, application Agent/Skill, and public Agent scopes without mixing files", async () => {
     apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
-      files: [{ path: fixture.files.docs, status: "modified", staged: false, patch: "" }]
+      files: [
+        { path: fixture.files.docs, status: "modified", staged: false, patch: "" },
+        { path: fixture.files.spec, status: "added", staged: false, patch: "" }
+      ]
     });
     apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({
       files: [{ path: fixture.files.applicationSkill, status: "M", staged: false, patch: "" }]
@@ -238,6 +241,10 @@ describe("GitChangesPanel", () => {
     });
 
     expect(await view.findByText("publish-guide.md", { exact: false })).toBeTruthy();
+    await waitFor(() => {
+      const events = view.emitted("changes-refreshed") as unknown as Array<[{ totalCount?: number }]>;
+      expect(events.at(-1)?.[0]).toMatchObject({ totalCount: 4 });
+    });
     expect(view.queryByText("SKILL.md", { exact: false })).toBeNull();
     expect(view.queryByText("public-review.md", { exact: false })).toBeNull();
 

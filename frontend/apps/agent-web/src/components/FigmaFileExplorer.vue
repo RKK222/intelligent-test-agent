@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
 import type { FileSearchResult } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
@@ -64,6 +64,7 @@ const emit = defineEmits<{
     paths?: string[];
     reloadOpenFiles?: boolean;
     files?: import("@test-agent/shared-types").WorkspaceGitDiffFile[];
+    totalCount?: number;
   }];
   refresh: [];
   // 选择某个应用版本后由父组件切换运行态 Workspace
@@ -96,6 +97,8 @@ const agentConfigPanelRef = ref<InstanceType<typeof AgentConfigPanel> | null>(nu
 const gitChangesPanelRef = ref<InstanceType<typeof GitChangesPanel> | null>(null);
 
 const tab = ref<ExplorerTab>("explorer");
+const totalChangedFileCount = ref<number | null>(null);
+const displayedChangedFileCount = computed(() => totalChangedFileCount.value ?? props.changedFiles.length);
 const workspaceHeight = ref<number | null>(null);
 const resizing = ref(false);
 let dragStartY = 0;
@@ -236,6 +239,26 @@ function refreshAll() {
   refreshChanges();
 }
 
+function handleChangesRefreshed(payload?: {
+  paths?: string[];
+  reloadOpenFiles?: boolean;
+  files?: import("@test-agent/shared-types").WorkspaceGitDiffFile[];
+  totalCount?: number;
+}) {
+  if (payload?.totalCount !== undefined) {
+    totalChangedFileCount.value = payload.totalCount;
+  }
+  emit("changes-refreshed", payload);
+}
+
+watch(
+  () => props.workspaceId,
+  () => {
+    // 切换工作区时先回退到已知 workspace 数量，等待三类 diff 刷新后再展示新总数。
+    totalChangedFileCount.value = null;
+  }
+);
+
 defineExpose({
   refreshAll,
   refreshChanges
@@ -272,14 +295,14 @@ defineExpose({
         @click="tab = 'changes'"
       >
         <GitBranch class="h-4 w-4" :stroke-width="1.5" />
-        <span v-if="changedFiles.length" class="ml-1 text-[10px]">{{ changedFiles.length }}</span>
+        <span v-if="displayedChangedFileCount" class="ml-1 text-[10px]">{{ displayedChangedFileCount }}</span>
       </button>
     </div>
 
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <GitChangesPanel
-        v-if="tab === 'changes'"
+        v-show="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
         :agent-config-workspace-id="agentConfigWorkspaceId"
@@ -290,9 +313,9 @@ defineExpose({
         :can-manage-agent-config="canManageAgentConfig ?? !!canWrite"
         :can-manage-public-config="canManagePublicConfig ?? !!canWrite"
         @open-diff="(payload) => emit('openDiff', payload)"
-        @changes-refreshed="(payload) => emit('changes-refreshed', payload)"
+        @changes-refreshed="handleChangesRefreshed"
       />
-      <template v-else>
+      <template v-if="tab !== 'changes'">
         <!-- Section 1: 应用工作空间 -->
         <div
           class="figma-fe-section figma-fe-section-workspace"

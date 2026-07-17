@@ -7611,3 +7611,15 @@ bash /tmp/test-api-after-restart.sh
   - 使用 `.env.test` / `test` profile / JDK 25 重启 backend、opencode-manager 和 frontend，health/readiness 为 UP、前端 3000 返回 200、登录 CORS 与 manager WebSocket 正常。
 - Result:
   - 方案 1 的 Git 拓扑、三标签落位、应用 Agent 权限兜底及样例文件已实现并运行验证。全量前端测试与 typecheck 被同一工作树中并行未提交的宠物角色替换改动阻断（宠物测试断言和 `octopus` 联合类型不一致）；Playwright 权限专项在既有夹具的 `tests` 目录定位处超时，尚未执行到本次新增断言，未修改这些任务外文件。
+
+### 2026-07-17 - Diff 入口按三个作用域展示总变更数
+
+- Why:
+  - 三标签拆分后，左侧“变更”入口仍只使用 workspace diff 数量，公共 Agent 未计入，容易把分类展示误解为减少了整体差异。
+- What:
+  - `GitChangesPanel` 复用三个作用域现有分类结果计算唯一文件总量，并回传给 `FigmaFileExplorer` 的“变更”角标；总量包含普通文件、docs、spec、应用 `.opencode` 和公共 Agent，不受当前 Tab 或发布白名单影响。
+  - Git 面板常驻但通过 `v-show` 隐藏，使首次进入文件树时即可加载总量；公共个人 worktree 准备或切换后自动重新统计。
+- How:
+  - 新增外层角标组件回归，扩充三作用域测试覆盖 docs、spec、应用 Skill 和公共 Agent；相关 3 个测试文件 41 passed，agent-web typecheck 通过，后端 18 模块打包成功。
+- Result:
+  - 使用 `.env.test` / `test` profile 重启三服务，backend health/readiness 为 UP、前端 3000 返回 200。前端全量 1105 passed / 1 skipped / 1 failed，唯一失败来自任务外未提交宠物改动中“像素猫”测试与“星探狐”名册不一致。

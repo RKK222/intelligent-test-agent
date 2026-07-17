@@ -69,6 +69,7 @@ const emit = defineEmits<{
     paths?: string[];
     reloadOpenFiles?: boolean;
     files?: WorkspaceGitDiffFile[];
+    totalCount?: number;
   }];
 }>();
 
@@ -402,6 +403,10 @@ const diffScopes = computed(() => [
     description: "公共 opencode 配置"
   }
 ]);
+// 外层“变更”入口展示三个作用域的文件总量；分类 Tab 只负责分开展示，不改变总数口径。
+const totalChangedFileCount = computed(() =>
+  diffScopes.value.reduce((total, scope) => total + scope.count, 0)
+);
 const activeScopeItem = computed(() =>
   diffScopes.value.find((scope) => scope.key === activeDiffScope.value) ?? diffScopes.value[0]
 );
@@ -476,6 +481,14 @@ watch(
     void refreshChanges();
   },
   { immediate: true }
+);
+
+watch(
+  () => workbench.publicWorktree?.worktreeId,
+  () => {
+    // 公共个人 worktree 可能晚于面板挂载才准备完成，切换后重新统计公共 Agent 变更。
+    void refreshChanges();
+  }
 );
 
 async function refreshChanges(options: { preserveError?: boolean } = {}) {
@@ -668,7 +681,9 @@ function notifyChangesRefreshed(paths?: string[], reloadOpenFiles?: boolean) {
     paths?: string[];
     reloadOpenFiles?: boolean;
     files: WorkspaceGitDiffFile[];
+    totalCount: number;
   } = {
+    totalCount: totalChangedFileCount.value,
     files: workspaceDiffFiles.value.map((file) => ({
       path: file.path,
       rawStatus: file.rawStatus,
