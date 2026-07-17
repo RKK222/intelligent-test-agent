@@ -367,115 +367,146 @@ describe("MermaidFlowNode", () => {
   });
 
   it("快捷箭头按方向选中该边上的连接点作为起始点", async () => {
-    const { container, emitted } = render(MermaidFlowNode, {
-      props: {
-        id: "A",
-        data: { text: "开始", nodeType: "rectangle", direction: "LR" }
+    vi.useFakeTimers();
+    try {
+      const { container, emitted } = render(MermaidFlowNode, {
+        props: {
+          id: "A",
+          data: { text: "开始", nodeType: "rectangle", direction: "LR" }
+        }
+      });
+      // 鼠标悬浮节点才显示快捷箭头（与是否选中无关）
+      await fireEvent.mouseEnter(container.querySelector("[data-mermaid-node-id]")!);
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+
+      // 矩形四条边都没有正好位于 50% 的端口，旧实现会退化到左上角 target-0；
+      // 现在应取各边上最接近中点的端口，使起始点落在箭头所在边上。
+      const cases = [
+        { cls: "is-top", dir: "top", expectedPort: "target-2" },
+        { cls: "is-bottom", dir: "bottom", expectedPort: "target-3" },
+        { cls: "is-left", dir: "left", expectedPort: "target-4" },
+        { cls: "is-right", dir: "right", expectedPort: "target-5" }
+      ];
+      for (const item of cases) {
+        const arrow = container.querySelector<HTMLElement>(
+          `.ta-mermaid-quick-connector-wrapper.${item.cls} .ta-mermaid-quick-arrow`
+        )!;
+        await fireEvent.mouseEnter(arrow);
+        const button = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button");
+        expect(button).toBeTruthy();
+        await fireEvent.click(button!);
       }
-    });
-    // 鼠标悬浮节点才显示快捷箭头（与是否选中无关）
-    await fireEvent.mouseEnter(container.querySelector("[data-mermaid-node-id]")!);
 
-    // 矩形四条边都没有正好位于 50% 的端口，旧实现会退化到左上角 target-0；
-    // 现在应取各边上最接近中点的端口，使起始点落在箭头所在边上。
-    const cases = [
-      { cls: "is-top", dir: "top", expectedPort: "target-2" },
-      { cls: "is-bottom", dir: "bottom", expectedPort: "target-3" },
-      { cls: "is-left", dir: "left", expectedPort: "target-4" },
-      { cls: "is-right", dir: "right", expectedPort: "target-5" }
-    ];
-    for (const item of cases) {
-      const arrow = container.querySelector<HTMLElement>(
-        `.ta-mermaid-quick-connector-wrapper.${item.cls} .ta-mermaid-quick-arrow`
-      )!;
-      await fireEvent.mouseEnter(arrow);
-      const button = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button");
-      expect(button).toBeTruthy();
-      await fireEvent.click(button!);
+      const payloads = emitted().quickConnect as Array<
+        [{ portId: string; position: string; shapeType: string }]
+      >;
+      expect(payloads).toHaveLength(4);
+      const portByDir = new Map(payloads.map(([payload]) => [payload.position, payload.portId]));
+      expect(portByDir.get("top")).toBe("target-2");
+      expect(portByDir.get("bottom")).toBe("target-3");
+      expect(portByDir.get("left")).toBe("target-4");
+      expect(portByDir.get("right")).toBe("target-5");
+    } finally {
+      vi.useRealTimers();
     }
-
-    const payloads = emitted().quickConnect as Array<
-      [{ portId: string; position: string; shapeType: string }]
-    >;
-    expect(payloads).toHaveLength(4);
-    const portByDir = new Map(payloads.map(([payload]) => [payload.position, payload.portId]));
-    expect(portByDir.get("top")).toBe("target-2");
-    expect(portByDir.get("bottom")).toBe("target-3");
-    expect(portByDir.get("left")).toBe("target-4");
-    expect(portByDir.get("right")).toBe("target-5");
   });
 
   it("点击快捷箭头不会误触发端口连线拖拽", async () => {
-    const { container, emitted } = render(MermaidFlowNode, {
-      props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
-    });
-    const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
-    await fireEvent.mouseEnter(root);
-    await fireEvent.mouseEnter(container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!);
+    vi.useFakeTimers();
+    try {
+      const { container, emitted } = render(MermaidFlowNode, {
+        props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
+      });
+      const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
+      await fireEvent.mouseEnter(root);
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
 
-    const button = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button")!;
-    // pointerdown 冒泡到箭头时被 @pointerdown.stop 拦截，不会发起端口连线拖拽
-    await fireEvent.pointerDown(button);
-    expect(emitted().connectionStart ?? []).toHaveLength(0);
+      await fireEvent.mouseEnter(container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!);
 
-    // click 仍能正常触发快捷建连
-    await fireEvent.click(button);
-    expect(emitted().quickConnect).toHaveLength(1);
+      const button = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button")!;
+      // pointerdown 冒泡到箭头时被 @pointerdown.stop 拦截，不会发起端口连线拖拽
+      await fireEvent.pointerDown(button);
+      expect(emitted().connectionStart ?? []).toHaveLength(0);
+
+      // click 仍能正常触发快捷建连
+      await fireEvent.click(button);
+      expect(emitted().quickConnect).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("快捷建连使用包含十四种中文名称的双列菜单", async () => {
-    const { container } = render(MermaidFlowNode, {
-      props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
-    });
-    await fireEvent.mouseEnter(container.querySelector("[data-mermaid-node-id]")!);
-    await fireEvent.mouseEnter(container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!);
+    vi.useFakeTimers();
+    try {
+      const { container } = render(MermaidFlowNode, {
+        props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
+      });
+      await fireEvent.mouseEnter(container.querySelector("[data-mermaid-node-id]")!);
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
 
-    const menu = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu")!;
-    const buttons = within(menu).getAllByRole("button");
-    expect(menu.classList.contains("is-two-column")).toBe(true);
-    expect(buttons.map((button) => button.textContent?.trim())).toEqual([
-      "开始/结束", "普通处理步骤", "圆角处理节点", "子程序", "数据库", "连接点", "条件判断",
-      "准备步骤", "输入或输出", "人工处理", "终止节点", "文本块", "文档", "多文档"
-    ]);
-    expect(menu.querySelector('svg[data-mermaid-shape="text"] [data-mermaid-shape-thumbnail]')).toBeTruthy();
+      await fireEvent.mouseEnter(container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!);
+
+      const menu = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu")!;
+      const buttons = within(menu).getAllByRole("button");
+      expect(menu.classList.contains("is-two-column")).toBe(true);
+      expect(buttons.map((button) => button.textContent?.trim())).toEqual([
+        "开始/结束", "普通处理步骤", "圆角处理节点", "子程序", "数据库", "连接点", "条件判断",
+        "准备步骤", "输入或输出", "人工处理", "终止节点", "文本块", "文档", "多文档"
+      ]);
+      expect(menu.querySelector('svg[data-mermaid-shape="text"] [data-mermaid-shape-thumbnail]')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("快捷菜单使用屏幕空间浮层并在视口边缘自动翻转", async () => {
-    const { container } = render(MermaidFlowNode, {
-      props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
-    });
-    const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
-    await fireEvent.mouseEnter(root);
-    const cases = [
-      { direction: "top", expected: "bottom", rect: { left: 490, right: 510, top: 4, bottom: 24 } },
-      { direction: "bottom", expected: "top", rect: { left: 490, right: 510, top: 744, bottom: 764 } },
-      { direction: "left", expected: "right", rect: { left: 4, right: 24, top: 374, bottom: 394 } },
-      { direction: "right", expected: "left", rect: { left: 1000, right: 1020, top: 374, bottom: 394 } }
-    ];
-    for (const item of cases) {
-      const arrow = container.querySelector<HTMLElement>(
-        `.ta-mermaid-quick-connector-wrapper.is-${item.direction} .ta-mermaid-quick-arrow`
-      )!;
-      Object.defineProperty(arrow, "getBoundingClientRect", {
-        configurable: true,
-        value: () => ({
-          ...item.rect,
-          width: item.rect.right - item.rect.left,
-          height: item.rect.bottom - item.rect.top,
-          x: item.rect.left,
-          y: item.rect.top,
-          toJSON: () => ({})
-        })
+    vi.useFakeTimers();
+    try {
+      const { container } = render(MermaidFlowNode, {
+        props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
       });
+      const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
+      await fireEvent.mouseEnter(root);
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
 
-      await fireEvent.mouseEnter(arrow);
-      const menu = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu")!;
-      expect(menu).toBeTruthy();
-      expect(container.contains(menu)).toBe(false);
-      expect(menu.classList.contains(`is-placement-${item.expected}`)).toBe(true);
-      expect(menu.style.position).toBe("fixed");
+      const cases = [
+        { direction: "top", expected: "bottom", rect: { left: 490, right: 510, top: 4, bottom: 24 } },
+        { direction: "bottom", expected: "top", rect: { left: 490, right: 510, top: 744, bottom: 764 } },
+        { direction: "left", expected: "right", rect: { left: 4, right: 24, top: 374, bottom: 394 } },
+        { direction: "right", expected: "left", rect: { left: 1000, right: 1020, top: 374, bottom: 394 } }
+      ];
+      for (const item of cases) {
+        const arrow = container.querySelector<HTMLElement>(
+          `.ta-mermaid-quick-connector-wrapper.is-${item.direction} .ta-mermaid-quick-arrow`
+        )!;
+        Object.defineProperty(arrow, "getBoundingClientRect", {
+          configurable: true,
+          value: () => ({
+            ...item.rect,
+            width: item.rect.right - item.rect.left,
+            height: item.rect.bottom - item.rect.top,
+            x: item.rect.left,
+            y: item.rect.top,
+            toJSON: () => ({})
+          })
+        });
+
+        await fireEvent.mouseEnter(arrow);
+        const menu = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu")!;
+        expect(menu).toBeTruthy();
+        expect(container.contains(menu)).toBe(false);
+        expect(menu.classList.contains(`is-placement-${item.expected}`)).toBe(true);
+        expect(menu.style.position).toBe("fixed");
+      }
+      expect(flowNodeSource).toContain('<Teleport to="body">');
+    } finally {
+      vi.useRealTimers();
     }
-    expect(flowNodeSource).toContain('<Teleport to="body">');
   });
 
   it("从快捷箭头移回节点后只关闭菜单并保持四向箭头可见", async () => {
@@ -486,6 +517,9 @@ describe("MermaidFlowNode", () => {
       });
       const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
       await fireEvent.mouseEnter(root);
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+
       const arrow = container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!;
       await fireEvent.mouseEnter(arrow);
       expect(document.body.querySelector(".ta-mermaid-quick-menu")).toBeTruthy();
@@ -961,23 +995,32 @@ describe("MermaidVisualEditor", () => {
   });
 
   it("鼠标悬浮节点显示四向快捷箭头，离开后隐藏（与选中无关）", async () => {
-    const { container } = render(MermaidVisualEditor, {
-      props: { modelValue: graph() }
-    });
-    const arrowsOf = (nodeId: string) =>
-      container.querySelectorAll(`[data-mermaid-node-id="${nodeId}"] .ta-mermaid-quick-connector-wrapper`).length;
-    const node = (id: string) => container.querySelector<HTMLElement>(`[data-mermaid-node-id="${id}"]`)!;
+    vi.useFakeTimers();
+    try {
+      const { container } = render(MermaidVisualEditor, {
+        props: { modelValue: graph() }
+      });
+      const arrowsOf = (nodeId: string) =>
+        container.querySelectorAll(`[data-mermaid-node-id="${nodeId}"] .ta-mermaid-quick-connector-wrapper`).length;
+      const node = (id: string) => container.querySelector<HTMLElement>(`[data-mermaid-node-id="${id}"]`)!;
 
-    // 未悬浮、也未选中：不显示箭头
-    expect(arrowsOf("A")).toBe(0);
+      // 未悬浮、也未选中：不显示箭头
+      expect(arrowsOf("A")).toBe(0);
 
-    // 悬浮 A：四周出现 4 个半透明快捷箭头
-    await fireEvent.mouseEnter(node("A"));
-    expect(arrowsOf("A")).toBe(4);
+      // 悬浮 A：四周出现 4 个半透明快捷箭头（防误触，延迟 500ms 显示）
+      await fireEvent.mouseEnter(node("A"));
+      expect(arrowsOf("A")).toBe(0);
 
-    // 离开 A：箭头隐藏
-    await fireEvent.mouseLeave(node("A"));
-    expect(arrowsOf("A")).toBe(0);
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+      expect(arrowsOf("A")).toBe(4);
+
+      // 离开 A：箭头隐藏
+      await fireEvent.mouseLeave(node("A"));
+      expect(arrowsOf("A")).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("点击空白画布取消选中节点", async () => {
@@ -1027,25 +1070,33 @@ describe("MermaidVisualEditor", () => {
   });
 
   it("快捷图形从被悬浮节点（而非被选中节点）发出连线", async () => {
-    const { getByTestId, container, emitted } = render(MermaidVisualEditor, {
-      props: { modelValue: graph() }
-    });
+    vi.useFakeTimers();
+    try {
+      const { getByTestId, container, emitted } = render(MermaidVisualEditor, {
+        props: { modelValue: graph() }
+      });
 
-    // 选中 A，但悬浮 B
-    await fireEvent.click(getByTestId("mock-select")); // selectedNodeId = A
+      // 选中 A，但悬浮 B
+      await fireEvent.click(getByTestId("mock-select")); // selectedNodeId = A
 
-    // 悬浮 B → B 的快捷箭头显示
-    await fireEvent.mouseEnter(container.querySelector<HTMLElement>('[data-mermaid-node-id="B"]')!);
-    await fireEvent.mouseEnter(container.querySelector<HTMLElement>(
-      '[data-mermaid-node-id="B"] .ta-mermaid-quick-arrow'
-    )!);
+      // 悬浮 B → B 的快捷箭头显示
+      await fireEvent.mouseEnter(container.querySelector<HTMLElement>('[data-mermaid-node-id="B"]')!);
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
 
-    // 点击 B 的第一个快捷形状按钮（开始/结束）
-    const bBtn = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button")!;
-    await fireEvent.click(bBtn);
+      await fireEvent.mouseEnter(container.querySelector<HTMLElement>(
+        '[data-mermaid-node-id="B"] .ta-mermaid-quick-arrow'
+      )!);
 
-    // 新节点 N3 应该连接到 B，而不是 A
-    const lastEdge = (emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges.at(-1);
-    expect(lastEdge).toMatchObject({ source: "B", target: "N3" });
+      // 点击 B 的第一个快捷形状按钮（开始/结束）
+      const bBtn = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu button")!;
+      await fireEvent.click(bBtn);
+
+      // 新节点 N3 应该连接到 B，而不是 A
+      const lastEdge = (emitted()["update:modelValue"] as Array<[MermaidGraph]>).at(-1)?.[0].edges.at(-1);
+      expect(lastEdge).toMatchObject({ source: "B", target: "N3" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

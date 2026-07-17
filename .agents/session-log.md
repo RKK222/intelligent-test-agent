@@ -136,6 +136,21 @@
 - Result:
   - 最新 `test-agent-internal-release.zip` 为 207 MB，SHA-256 `f61c9760de34dd4b949b2c4d88c17f9b57b8b9a6923b9a5c2d6e51988bf85a47`；后端 health/readiness 为 `UP`，前端/CORS 为 200，manager WebSocket/config update 正常，日志确认从 classpath 加载 RSA 私钥。
   - 企业更新时 Java 必须重启；前端必须替换静态文件但只需 reload Nginx；worker 与既有用户 OpenCode 无需重启，可在后台部署时使用 `--skip-worker`。
+### 2026-07-17 - 实现 Mermaid 可视化编辑器节点悬浮延时显示
+
+- Why:
+  - 减少鼠标滑过节点时的误触，优化 Mermaid 可视化编辑器中快捷连接箭头的出现体验，提升用户编辑交互的连贯性。
+- What:
+  - 在 `MermaidFlowNode.vue` 中为鼠标移入节点的操作（`onNodeMouseEnter`）增加 500ms（0.5s）延迟显示的定时器（`quickMenuOpenTimer`），仅在鼠标停留超过该时间时才显示四向快捷建连大箭头。
+  - 在鼠标移出节点（`onNodeMouseLeave`）、聚焦（`onNodeFocusIn` / `keepQuickConnectorsOpen`）及组件销毁（`onBeforeUnmount`）等时机，安全地清理并重置该定时器，防止逻辑泄漏与重复触发。
+  - 优化对应的单元测试文件 `MermaidVisualEditor.test.ts`，为涉及悬浮显示快捷箭头的测试用例引入 Vitest 虚拟时钟（`vi.useFakeTimers()` 和 `vi.advanceTimersByTime(500)`），确保测试用例与新增的悬浮延迟行为完美契合，且测试能够全部通过。
+- How:
+  - 在 `MermaidFlowNode.vue` 的 `<script setup>` 中引入 `quickMenuOpenTimer` 及其对应的清理、设置和触发逻辑。
+  - 修改 `MermaidVisualEditor.test.ts` 中涉及悬浮的 6 个测试用例，在其 `mouseEnter` 触发后前进 500ms 时钟，并在最后统一调用 `vi.useRealTimers()` 还原。
+  - 运行全量 `vitest run packages/editor/tests/MermaidVisualEditor.test.ts` 进行了完美验证，并完成前端的代码格式化和类型检查。
+- Result:
+  - Mermaid 可视化编辑器完美实现了 0.5s 悬浮防误触延时显示快捷连接箭头的逻辑，鼠标短时间划过节点时不会触发箭头出现；全量前端测试 100% 通过（85/85 passed），代码类型和语法校验无任何异常。
+
 ### 2026-07-16 - 修复文件打开偶发空白与读取竞态
 
 - Why:

@@ -44,6 +44,8 @@ const activeQuickArrow = ref<{ dir: Position; portId: string }>();
 const quickMenuPlacement = ref<Position>(Position.Bottom);
 const quickMenuStyle = ref<CSSProperties>({ position: "fixed" });
 let quickMenuCloseTimer: ReturnType<typeof setTimeout> | undefined;
+// 悬浮延时定时器，用于防误触
+let quickMenuOpenTimer: ReturnType<typeof setTimeout> | undefined;
 
 const QUICK_MENU_WIDTH = 248;
 const QUICK_MENU_HEIGHT = 276;
@@ -86,18 +88,41 @@ function clearQuickMenuCloseTimer() {
   }
 }
 
+// 清理延时打开的定时器
+function clearQuickMenuOpenTimer() {
+  if (quickMenuOpenTimer !== undefined) {
+    clearTimeout(quickMenuOpenTimer);
+    quickMenuOpenTimer = undefined;
+  }
+}
+
 function keepQuickConnectorsOpen() {
   clearQuickMenuCloseTimer();
+  clearQuickMenuOpenTimer();
   hovered.value = true;
 }
 
 function onNodeMouseEnter() {
   nodeHovered.value = true;
-  keepQuickConnectorsOpen();
+  clearQuickMenuCloseTimer();
+  // 如果当前已经显示（比如聚焦状态下），不需要重复计时
+  if (hovered.value) {
+    return;
+  }
+  clearQuickMenuOpenTimer();
+  // 鼠标移入时，延迟 0.5 秒再显示四向快捷箭头，防止误触
+  quickMenuOpenTimer = setTimeout(() => {
+    if (nodeHovered.value || nodeFocused.value) {
+      hovered.value = true;
+    }
+    quickMenuOpenTimer = undefined;
+  }, 500);
 }
 
 function onNodeMouseLeave() {
   nodeHovered.value = false;
+  // 鼠标离开时立即清理打开定时器，并触发关闭逻辑
+  clearQuickMenuOpenTimer();
   scheduleQuickConnectorsClose();
 }
 
@@ -187,7 +212,10 @@ function emitQuickConnect(shapeType: MermaidNodeType) {
   emit("quickConnect", { nodeId: props.id, portId: arrow.portId, position: arrow.dir, shapeType });
 }
 
-onBeforeUnmount(clearQuickMenuCloseTimer);
+onBeforeUnmount(() => {
+  clearQuickMenuCloseTimer();
+  clearQuickMenuOpenTimer();
+});
 
 function portClasses(portId: string) {
   return {
