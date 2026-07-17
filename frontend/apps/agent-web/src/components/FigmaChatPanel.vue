@@ -604,6 +604,8 @@ type OpencodeProcessState = {
   serviceAddress?: string | null
   linuxServerId?: string
   port?: number | string
+  messageSendAllowed?: boolean
+  messageSendBlockedReason?: string | null
 }
 
 // 抽屉里 diff 行的解析结果：保留原始前缀符号供渲染和后续扩展使用
@@ -1992,6 +1994,11 @@ const processReady = computed(() => {
   }
   return !props.processStatus || props.processStatus.status === 'READY'
 })
+const publicConfigMessageBlocked = computed(() => props.processStatus?.messageSendAllowed === false)
+const publicConfigMessageBlockedReason = computed(
+  () => props.processStatus?.messageSendBlockedReason?.trim()
+    || '公共 Agent/Skill 配置正在同步，旧会话排空后将自动恢复发送'
+)
 const composerInteractionBlocked = computed(() => !processReady.value)
 const agentPickerDisabled = computed(() => composerInteractionBlocked.value)
 const modelSelectionDisabled = computed(() => props.modelPickerDisabled === true || composerInteractionBlocked.value)
@@ -1999,10 +2006,13 @@ const processSubmitBlocked = computed(
   () =>
     props.running ||
     !processReady.value ||
+    publicConfigMessageBlocked.value ||
     (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
 const newConversationBlocked = computed(
-  () => !processReady.value || (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
+  () => !processReady.value
+    || publicConfigMessageBlocked.value
+    || (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
 const readonlyBlockedReason = computed(() => props.readonlyReason?.trim() ?? '')
 const readonlySubmitBlocked = computed(() => Boolean(readonlyBlockedReason.value))
@@ -2015,6 +2025,7 @@ const contextSendBlockedReason = computed(() => {
 })
 const sendBlockedTitle = computed(() => {
   if (!processReady.value) return '请先初始化 TestAgent 进程'
+  if (publicConfigMessageBlocked.value) return publicConfigMessageBlockedReason.value
   return readonlyBlockedReason.value || contextSendBlockedReason.value || '发送'
 })
 const sendSubmitBlocked = computed(
@@ -2027,6 +2038,7 @@ const sendSubmitBlocked = computed(
 const composerPlaceholder = computed(() => {
   if (props.processLoading && !props.processStatus) return '正在检查 TestAgent 进程…'
   if (!processReady.value) return '请先初始化 TestAgent 进程'
+  if (publicConfigMessageBlocked.value) return publicConfigMessageBlockedReason.value
   return props.placeholder || 'Ask the AI agent...'
 })
 const processStatusVisible = computed(

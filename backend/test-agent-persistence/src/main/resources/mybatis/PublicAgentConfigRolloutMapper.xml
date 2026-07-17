@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper">
+    <resultMap id="SyncRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutSyncRow">
+        <constructor>
+            <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="commit_hash" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="TargetRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutTargetRow">
+        <constructor>
+            <arg column="target_id" javaType="java.lang.String"/>
+            <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="container_id" javaType="java.lang.String"/>
+            <arg column="port" javaType="int"/>
+            <arg column="base_url" javaType="java.lang.String"/>
+            <arg column="retry_count" javaType="int"/>
+            <arg column="lease_until" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findActiveRolloutId" resultType="java.lang.String">
+        select rollout_id from public_agent_config_rollouts
+        where status = 'DRAINING'
+        order by created_at desc limit 1
+    </select>
+
+    <select id="findPendingSync" resultMap="SyncRowMap">
+        select r.rollout_id, r.branch, r.commit_hash, r.trace_id
+        from public_agent_config_rollouts r
+        join public_agent_config_rollout_servers s on s.rollout_id = r.rollout_id
+        where r.status = 'DRAINING'
+          and s.status = 'PENDING'
+          and s.linux_server_id = #{linuxServerId}
+        order by r.created_at
+        limit 1
+    </select>
+
+    <insert id="insertRollout">
+        insert into public_agent_config_rollouts(
+            rollout_id, branch, commit_hash, status, trace_id, created_at, updated_at
+        ) values (#{rolloutId}, #{branch}, #{commitHash}, 'DRAINING', #{traceId}, #{now}, #{now})
+    </insert>
+
+    <insert id="insertServer">
+        insert into public_agent_config_rollout_servers(
+            rollout_id, linux_server_id, status, created_at, updated_at
+        ) values (#{rolloutId}, #{linuxServerId}, 'PENDING', #{now}, #{now})
+        on conflict (rollout_id, linux_server_id) do nothing
+    </insert>
+
+    <insert id="insertTarget">
+        insert into public_agent_config_rollout_targets(
+            target_id, rollout_id, linux_server_id, container_id, port, base_url,
+            status, retry_count, next_retry_at, lease_until, created_at, updated_at
+        ) values (
+            #{row.targetId}, #{row.rolloutId}, #{row.linuxServerId}, #{row.containerId}, #{row.port}, #{row.baseUrl},
+            'RETRY_WAIT', #{row.retryCount}, #{now}, null, #{now}, #{now}
+        ) on conflict (rollout_id, linux_server_id, container_id, port) do nothing
+    </insert>
+
+    <update id="markServerSynced">
+        update public_agent_config_rollout_servers
+        set status = 'SYNCED', synced_at = #{now}, updated_at = #{now}
+        where rollout_id = #{rolloutId} and linux_server_id = #{linuxServerId}
+    </update>
+
+    <select id="findClaimableTargets" resultMap="TargetRowMap">
+        select target_id, rollout_id, linux_server_id, container_id, port, base_url, retry_count, lease_until
+        from public_agent_config_rollout_targets t
+        where exists (
+                select 1 from public_agent_config_rollouts r
+                where r.rollout_id = t.rollout_id and r.status = 'DRAINING'
+              )
+          and not exists (
+                select 1 from public_agent_config_rollout_servers s
+                where s.rollout_id = t.rollout_id and s.status &lt;&gt; 'SYNCED'
+              )
+          and t.linux_server_id = #{linuxServerId}
+          and ((status = 'RETRY_WAIT' and next_retry_at &lt;= #{now})
+            or (status = 'PROCESSING' and lease_until &lt;= #{now}))
+        order by next_retry_at, created_at
+        for update skip locked
+        limit #{limit}
+    </select>
+
+    <update id="markTargetProcessing">
+        update public_agent_config_rollout_targets
+        set status = 'PROCESSING', lease_until = #{leaseUntil}, updated_at = #{now}
+        where target_id = #{targetId}
+    </update>
+
+    <update id="markTargetRetry">
+        update public_agent_config_rollout_targets
+        set status = 'RETRY_WAIT', retry_count = #{retryCount}, next_retry_at = #{nextRetryAt},
+            lease_until = null, last_error = #{errorMessage}, updated_at = #{now}
+        where target_id = #{targetId}
+    </update>
+
+    <update id="markTargetDisposed">
+        update public_agent_config_rollout_targets
+        set status = 'DISPOSED', disposed_at = #{now}, lease_until = null, last_error = null, updated_at = #{now}
+        where target_id = #{targetId}
+    </update>
+
+    <update id="completeReadyRollouts">
+        update public_agent_config_rollouts r
+        set status = 'COMPLETED', completed_at = #{now}, updated_at = #{now}
+        where r.status = 'DRAINING'
+          and not exists (
+              select 1 from public_agent_config_rollout_servers s
+              where s.rollout_id = r.rollout_id and s.status &lt;&gt; 'SYNCED'
+          )
+          and not exists (
+              select 1 from public_agent_config_rollout_targets t
+              where t.rollout_id = r.rollout_id and t.status &lt;&gt; 'DISPOSED'
+          )
+    </update>
+
+    <update id="markFailed">
+        update public_agent_config_rollouts
+        set status = 'FAILED', failure_reason = #{reason}, completed_at = #{now}, updated_at = #{now}
+        where rollout_id = #{rolloutId} and status = 'DRAINING'
+    </update>
+</mapper>

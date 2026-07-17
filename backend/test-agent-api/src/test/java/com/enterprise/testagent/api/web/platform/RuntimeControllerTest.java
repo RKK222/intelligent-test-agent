@@ -34,6 +34,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessStartOpera
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStatus;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.common.pagination.PageResponse;
@@ -327,7 +328,10 @@ class RuntimeControllerTest {
                         "trace_1234567890abcdef",
                         NOW,
                         NOW)));
-        WebTestClient client = WebTestClient.bindToController(new UserOpencodeProcessController(service, statusQueryService))
+        UserOpencodeProcessController controller = new UserOpencodeProcessController(service, statusQueryService);
+        controller.configurePublicConfigMessageGate(() ->
+                PublicAgentConfigMessageGate.MessageGateStatus.blocked("acr_rollout"));
+        WebTestClient client = WebTestClient.bindToController(controller)
                 .webFilter(new TraceIdWebFilter())
                 .webFilter(authenticatedUserFilter())
                 .build();
@@ -341,7 +345,9 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.status").isEqualTo("READY")
                 .jsonPath("$.data.baseUrl").isEqualTo("http://10.8.0.12:4096")
                 .jsonPath("$.data.serviceStatus").isEqualTo("RUNNING")
-                .jsonPath("$.data.serviceAddress").isEqualTo("10.8.0.12:4096");
+                .jsonPath("$.data.serviceAddress").isEqualTo("10.8.0.12:4096")
+                .jsonPath("$.data.messageSendAllowed").isEqualTo(false)
+                .jsonPath("$.data.publicConfigRolloutId").isEqualTo("acr_rollout");
 
         client.post()
                 .uri("/api/internal/agent/opencode/processes/me/initialize")

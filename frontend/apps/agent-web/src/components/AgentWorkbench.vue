@@ -4317,6 +4317,15 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
     return;
   }
+  if (opencodeProcessStatus.value?.messageSendAllowed === false) {
+    feedback.value = {
+      kind: "info",
+      title: "公共 Agent/Skill 配置同步中",
+      description: opencodeProcessStatus.value.messageSendBlockedReason
+        ?? "旧会话排空并释放实例后将自动恢复发送"
+    };
+    return;
+  }
   if (!opencodeProcessReady.value) {
     // 与聊天面板状态卡一致：按 serviceStatus 区分"未分配 / 未运行"提示
     const assignedServerName = opencodeProcessStatus.value?.linuxServerId?.trim();

@@ -5,12 +5,14 @@ import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStatusQueryService;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessWeakHealthRequest;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import java.util.Objects;
 import java.util.function.Function;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +31,8 @@ public class UserOpencodeProcessController {
 
     private final UserOpencodeProcessAssignmentService processAssignmentService;
     private final OpencodeProcessStatusQueryService statusQueryService;
+    private PublicAgentConfigMessageGate publicConfigMessageGate = () ->
+            PublicAgentConfigMessageGate.MessageGateStatus.open();
 
     /**
      * 注入用户 TestAgent 进程分配服务，Controller 只负责协议适配和鉴权。
@@ -40,6 +44,12 @@ public class UserOpencodeProcessController {
         this.statusQueryService = Objects.requireNonNull(statusQueryService, "statusQueryService must not be null");
     }
 
+    /** 将持久化发布闸门附加到既有进程轮询响应，前端无需新增轮询接口。 */
+    @Autowired(required = false)
+    void configurePublicConfigMessageGate(PublicAgentConfigMessageGate messageGate) {
+        this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
+    }
+
     /**
      * 查询当前用户 TestAgent 进程状态，不触发进程启动。
      */
@@ -48,8 +58,12 @@ public class UserOpencodeProcessController {
             @PathVariable String agentId,
             ServerWebExchange exchange) {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return blockingResponse(exchange, traceId -> RuntimeDtos.UserOpencodeProcessResponse.from(
-                processAssignmentService.status(userId, agentId, traceId)));
+        return blockingResponse(exchange, traceId -> {
+            PublicAgentConfigMessageGate.MessageGateStatus gate = publicConfigMessageGate.status();
+            return RuntimeDtos.UserOpencodeProcessResponse.from(
+                    processAssignmentService.status(userId, agentId, traceId)
+                            .withMessageGate(gate.allowed(), gate.reason(), gate.rolloutId()));
+        });
     }
 
     /**

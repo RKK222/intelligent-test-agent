@@ -17,6 +17,7 @@ import com.enterprise.testagent.agent.runtime.AgentStartRunCommand;
 import com.enterprise.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.event.RunEventDraft;
 import com.enterprise.testagent.domain.event.RunEventScopeContext;
 import com.enterprise.testagent.domain.event.RunSessionScope;
@@ -49,8 +50,8 @@ import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
-import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -168,6 +169,8 @@ public class RunApplicationService {
     private RunSummaryPersistencePort runSummaryPersistencePort;
     private RunTerminalProjectionService runTerminalProjectionService;
     private BackendInstanceIdentity backendInstanceIdentity;
+    private PublicAgentConfigMessageGate publicConfigMessageGate = () ->
+            PublicAgentConfigMessageGate.MessageGateStatus.open();
     private RunOwnerLeaseSupervisor ownerLeaseSupervisor;
     private RunRuntimeLossConvergenceScheduler runtimeLossScheduler;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
@@ -670,6 +673,12 @@ public class RunApplicationService {
                 runtimeLossScheduler, "runtimeLossScheduler must not be null");
     }
 
+    /** 公共 Agent/Skill 发布期间的硬闸门放在 Run 应用入口，不能只依赖前端按钮状态。 */
+    @Autowired
+    void configurePublicConfigMessageGate(PublicAgentConfigMessageGate messageGate) {
+        this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
+    }
+
     /**
      * 创建兼容旧装配的服务实例，不显式传入快照服务时内部构造默认实现。
      */
@@ -809,6 +818,15 @@ public class RunApplicationService {
 
     private Run startRunInternal(UserId userId, String agentId, StartRunInput input, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(resolvedAgentId)) {
+            PublicAgentConfigMessageGate.MessageGateStatus gate = publicConfigMessageGate.status();
+            if (!gate.allowed()) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        gate.reason(),
+                        Map.of("rolloutId", gate.rolloutId()));
+            }
+        }
         ConversationRunContext conversationContext = resolveConversationContext(userId, resolvedAgentId, input, traceId);
         LOGGER.info("Run starting, userId={}, agentId={}, sessionId={}, traceId={}",
                 userId != null ? userId.value() : "anonymous",

@@ -1,5 +1,21 @@
 # Session Log
 
+### 2026-07-17 - 完成公共 Agent/Skill 发布后的集群排空与实例释放
+
+- Why:
+  - 之前只修复了公共配置拉取未同步个人 worktree，尚未实现用户要求的“远端 push 后各服务器同步、存量进程入表、全局禁发、旧 Session 排空重试、空闲实例 dispose、全部完成后恢复发送”。
+- What:
+  - 公共 `update/update-and-push/publish` 在远端更新后创建持久化 rollout，广播携带 rolloutId；各在线后端服务器同步共享 Git 副本后，从本机 manager Redis 心跳登记已有 opencode 进程并确认服务器同步。
+  - 新增 rollout/server/target 三张表及 MyBatis XML 仓储；每个 Java 只认领与本机 `linuxServerId` 一致的目标，通过行锁和处理租约逐一调用本机 `/session/status`，busy/retry 记录递增重试次数，idle 后调用本机 `/global/dispose`，禁止跨服务器代处理，全部完成后自动解除闸门。
+  - `/processes/me` 增加兼容性禁发状态字段；聊天面板、父层发送入口和后端 `RunApplicationService` 分层拦截新 opencode Run，后端持久化闸门为最终依据。
+- How:
+  - 复用 `OpencodeProcessHeartbeatStore.liveBackendServerIds/liveManagerSnapshots`、既有服务器广播、稳定 `AgentRuntime` 和 Run 入口，没有扫描 Redis 私有 key、没有新增 Java-to-Java 文件代理、没有修改 generated SDK。
+  - 后端定向测试覆盖发布协调、逐服务器进程快照、busy 重试、dispose 明确成功确认、Run 硬闸门和 API 状态字段；前端组件测试覆盖排空期禁发，agent-web typecheck 通过。
+- Result:
+  - 公共配置发布现在具备可重启恢复的集群排空状态机；运行中的旧 Session 不会被中断，空闲实例被逐一释放，重试不设最大次数，只有全部服务器和目标完成才恢复新消息。
+  - 使用 `.env.test` / `test` profile 完整重启 backend、opencode-manager、frontend；Flyway 成功应用 `V20260717173000`，health/readiness 为 `UP`、前端 HTTP 为 200，排空与漏广播补偿定时任务持续执行成功。
+  - 涉及 HTTP 响应兼容字段和数据库新增表；不改变 RunEvent、鉴权、用户数据、环境配置或 generated SDK。
+
 ### 2026-07-17 - 修复公共配置拉取未同步个人 worktree
 
 - Why:

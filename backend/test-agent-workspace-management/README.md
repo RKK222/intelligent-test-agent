@@ -6,6 +6,8 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 ## 主要职责
 
+公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在远端更新成功后通过 `PublicAgentConfigRolloutCoordinator` 建立持久化禁发任务，广播携带 `rolloutId`。每台服务器更新共享仓库后登记本机 manager 进程并确认同步；运行时模块完成旧 Session 排空和逐实例 dispose 后才解除闸门。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本。
+
 - 工作区注册、查询和分页。
 - 工作区注册时记录 `linuxServerId`，并通过 `WorkspaceServerIdentity` 提供当前 Java 进程所属服务器和默认目录。
 - 工作区内文件单层列表、受限相对路径搜索、UTF-8 内容读写、Base64 二进制新文件上传、普通文件跨目录复制/移动、普通文件或目录同目录重命名、文件状态、普通文件/目录树删除和路径越权拦截；目录删除不跟随符号链接，并拒绝工作区根目录和任意层级 `.git` 元数据；上传沿用单文件大小上限且不覆盖已有条目，复制/移动只处理普通文件并拒绝覆盖目标；搜索支持空关键字文件目录，并受数量、深度和超时上限保护。

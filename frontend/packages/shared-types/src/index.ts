@@ -687,6 +687,10 @@ export type UserOpencodeProcess = {
   checkedAt: string;
   /** 后端 Java 服务器 IP 地址 */
   backendJavaServerIp?: string;
+  /** 公共 Agent/Skill 配置发布排空期间为 false；后端 Run 入口仍会再次强制校验。 */
+  messageSendAllowed?: boolean;
+  messageSendBlockedReason?: string | null;
+  publicConfigRolloutId?: string | null;
 };
 
 export type UserOpencodeProcessHealthStatus =

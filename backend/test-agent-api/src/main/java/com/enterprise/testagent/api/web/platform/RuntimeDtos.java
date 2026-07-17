@@ -675,7 +675,10 @@ final class RuntimeDtos {
             Instant checkedAt,
             String serviceStatus,
             String serviceAddress,
-            String backendJavaServerIp) {
+            String backendJavaServerIp,
+            boolean messageSendAllowed,
+            String messageSendBlockedReason,
+            String publicConfigRolloutId) {
 
         /**
          * 从应用层响应映射为 HTTP DTO，避免 Controller 泄露内部枚举对象。
@@ -693,7 +696,10 @@ final class RuntimeDtos {
                     response.checkedAt(),
                     response.serviceStatus().name(),
                     response.serviceAddress(),
-                    response.backendJavaServerIp());
+                    response.backendJavaServerIp(),
+                    response.messageSendAllowed(),
+                    response.messageSendBlockedReason(),
+                    response.publicConfigRolloutId());
         }
     }
 

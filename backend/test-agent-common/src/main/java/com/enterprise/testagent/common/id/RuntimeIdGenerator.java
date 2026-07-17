@@ -147,6 +147,20 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成公共 Agent 配置发布排空任务 ID。
+     */
+    public static String publicAgentConfigRolloutId() {
+        return prefixed("acr_");
+    }
+
+    /**
+     * 生成公共 Agent 配置发布所登记的 opencode 进程目标 ID。
+     */
+    public static String publicAgentConfigRolloutTargetId() {
+        return prefixed("act_");
+    }
+
+    /**
      * 生成后端 Java 进程 ID，返回值固定使用 {@code bjp_} 前缀。
      */
     public static String backendProcessId() {

@@ -4,6 +4,8 @@
 
 完全自研测试智能体 Web IDE 前端。`frontend/interaction-visual-demo` 只作为交互参考资料，不纳入 `pnpm-workspace.yaml` 构建；顶层 `frontend-opencode` 是 opencode IDE App 的 Vue/TypeScript/Vite 复刻交付物，作为独立工程单独安装、构建和验收，不纳入 `frontend/pnpm-workspace.yaml`。
 
+公共 Agent/Skill 更新或发布进入存量 Session 排空期时，现有 `/processes/me` 轮询返回 `messageSendAllowed=false` 和阻断原因。聊天面板禁用发送与新会话按钮、输入框展示排空提示，父级 `handleSend` 再次拦截；字段缺失按允许处理以兼容旧后端。前端状态只负责即时反馈，后端 Run 入口仍以持久化发布任务为硬闸门。
+
 ## 技术栈
 
 - Vue 3

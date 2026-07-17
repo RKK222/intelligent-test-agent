@@ -69,6 +69,30 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("send")).toBeUndefined();
   });
 
+  it("blocks new messages while public Agent config sessions are draining", async () => {
+    const reason = "公共 Agent/Skill 配置正在同步，旧会话排空后将自动恢复发送";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "此时不能发送",
+        processStatus: {
+          status: "READY",
+          initializable: false,
+          message: "ready",
+          messageSendAllowed: false,
+          messageSendBlockedReason: reason
+        }
+      } as any
+    });
+
+    const sendButton = wrapper.get('button[aria-label="发送"]');
+    expect(sendButton.attributes("disabled")).toBeDefined();
+    expect(sendButton.attributes("title")).toBe(reason);
+    expect(wrapper.get("textarea").attributes("placeholder")).toBe(reason);
+    await sendButton.trigger("click");
+    expect(wrapper.emitted("send")).toBeUndefined();
+  });
+
   it("uses the native timeline without a mode toggle or activity overlay", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

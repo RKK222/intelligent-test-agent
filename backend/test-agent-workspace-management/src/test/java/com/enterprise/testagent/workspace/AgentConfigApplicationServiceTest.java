@@ -24,6 +24,8 @@ import com.enterprise.testagent.domain.configuration.CommonParameter;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.user.User;
@@ -200,7 +202,6 @@ class AgentConfigApplicationServiceTest {
                 agentConfigs,
                 git,
                 publisher);
-
         AgentConfigResponses.AgentConfigOperationResponse response = service.updatePublicConfig(
                 "main",
                 "aco_update_1234567890",
@@ -221,6 +222,30 @@ class AgentConfigApplicationServiceTest {
         assertThat(publisher.events.get(0).payload())
                 .containsEntry("branch", "main")
                 .containsEntry("commitHash", "commit_base");
+    }
+
+    @Test
+    void pendingPublicSyncIsRetriedFromDurableRolloutState() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.pendingSync("linux-1")).thenReturn(Optional.of(new PublicAgentConfigRolloutSyncRequest(
+                "acr_retry", "main", "commit_remote", "trace_retry")));
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingPublicConfigSync();
+
+        assertThat(git.resetCommit).isEqualTo("commit_remote");
+        verify(coordinator).markServerSynced("acr_retry", "linux-1", "trace_retry");
     }
 
     @Test
@@ -1078,6 +1103,10 @@ class AgentConfigApplicationServiceTest {
                 agentConfigs,
                 git,
                 publisher);
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.begin("main", "commit_base", "linux-1", "trace_publish"))
+                .thenReturn("acr_publish");
+        service.setPublicConfigRolloutCoordinator(coordinator);
 
         AgentConfigResponses.AgentConfigOperationResponse response = service.publicPublish(
                 "agw_public",
@@ -1093,6 +1122,9 @@ class AgentConfigApplicationServiceTest {
         assertThat(agentConfigs.findWorktree("agw_public")).get().extracting(AgentConfigWorktree::status)
                 .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
         assertThat(publisher.events).hasSize(1);
+        assertThat(publisher.events.get(0).payload()).containsEntry("rolloutId", "acr_publish");
+        verify(coordinator).begin("main", "commit_base", "linux-1", "trace_publish");
+        verify(coordinator).markServerSynced("acr_publish", "linux-1", "trace_publish");
     }
 
     @Test

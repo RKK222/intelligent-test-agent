@@ -104,6 +104,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 
 class RunApplicationServiceTest {
 
@@ -111,6 +112,31 @@ class RunApplicationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
     private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
+
+    @Test
+    void serviceRejectsNewOpencodeRunWhilePublicConfigIsDraining() {
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()),
+                new FakeAgentSessionBindingRepository());
+        service.configurePublicConfigMessageGate(() ->
+                PublicAgentConfigMessageGate.MessageGateStatus.blocked("acr_rollout"));
+
+        assertThatThrownBy(() -> service.startRun(
+                new SessionId("ses_1234567890abcdef"),
+                "run the tests",
+                "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details()).containsEntry("rolloutId", "acr_rollout");
+                });
+    }
 
     @Test
     void serviceCreatesRemoteOpencodeSessionOnFirstRunAndDoesNotSendPlatformWorkspace() {

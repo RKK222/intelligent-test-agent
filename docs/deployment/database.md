@@ -1070,3 +1070,13 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 ## V20260711120000 旁路问答来源注释
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260711120000__document_side_question_run_source.sql` 只把 `sessions`、`runs`、`session_messages` 三个 `source_type` 字段的允许值注释扩展为 `MANUAL/SCHEDULED_TASK/SIDE_QUESTION`。该迁移不改变表结构、约束或索引，也不写入任何业务、测试或演示数据。
+
+## V20260717173000 公共 Agent 配置发布排空
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260717173000__create_public_agent_config_rollouts.sql` 新增三张生产运行状态表：
+
+- `public_agent_config_rollouts`：保存公共分支、commit、`DRAINING/COMPLETED/FAILED` 状态和 traceId；部分唯一索引保证集群同一时刻只有一个排空任务。
+- `public_agent_config_rollout_servers`：保存本次需要同步的 `linuxServerId` 及 `PENDING/SYNCED` 状态；服务器在共享 Git 副本更新并登记进程后才写 `SYNCED`。
+- `public_agent_config_rollout_targets`：保存 manager 心跳中的存量 opencode `linuxServerId/containerId/port/baseUrl`、`PROCESSING/RETRY_WAIT/DISPOSED`、重试次数、下次重试时间、处理租约和最后错误。认领 SQL 强制 `linux_server_id=当前 Java 所在服务器`，再以 `FOR UPDATE SKIP LOCKED` 允许同服务器多 Java worker 安全认领；发布服务器可以统一落表，但不能跨服务器代查 Session 或 dispose，过期租约由目标所属服务器恢复。
+
+该迁移只创建运行必需结构，不写测试或演示数据。Git 同步补偿、目标轮询和 Session 重试间隔可通过 Spring 属性 `test-agent.public-agent-config.rollout.sync-retry-delay-ms`、`poll-delay-ms`、`retry-delay-ms` 调整，默认均为 5000ms；Redis 广播丢失或 Java 重启后会从 PENDING 服务器记录继续同步，目标会持续重试直至 dispose 成功，不设最大次数。
