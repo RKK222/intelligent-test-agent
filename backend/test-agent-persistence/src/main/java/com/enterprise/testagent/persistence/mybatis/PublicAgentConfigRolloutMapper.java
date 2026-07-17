@@ -13,6 +13,8 @@ public interface PublicAgentConfigRolloutMapper {
 
     String findActiveRolloutId();
 
+    String findBlockingRolloutId(@Param("userId") String userId);
+
     PublicAgentConfigRolloutSyncRow findPendingSync(@Param("linuxServerId") String linuxServerId);
 
     void insertRollout(

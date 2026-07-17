@@ -28,6 +28,31 @@
         order by created_at desc limit 1
     </select>
 
+    <select id="findBlockingRolloutId" resultType="java.lang.String">
+        select r.rollout_id
+        from public_agent_config_rollouts r
+        where r.status = 'DRAINING'
+          and (
+              exists (
+                  select 1 from public_agent_config_rollout_servers s
+                  where s.rollout_id = r.rollout_id and s.status &lt;&gt; 'SYNCED'
+              )
+              or exists (
+                  select 1
+                  from public_agent_config_rollout_targets t
+                  join opencode_server_processes p
+                    on p.linux_server_id = t.linux_server_id
+                   and p.container_id = t.container_id
+                   and p.port = t.port
+                  where t.rollout_id = r.rollout_id
+                    and t.status &lt;&gt; 'DISPOSED'
+                    and p.user_id = #{userId}
+              )
+          )
+        order by r.created_at desc
+        limit 1
+    </select>
+
     <select id="findPendingSync" resultMap="SyncRowMap">
         select r.rollout_id, r.branch, r.commit_hash, r.trace_id
         from public_agent_config_rollouts r

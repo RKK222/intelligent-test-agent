@@ -21,6 +21,7 @@ import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.enterprise.testagent.domain.user.UserId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
@@ -57,6 +58,25 @@ class PublicAgentConfigRolloutServiceTest {
         assertThat(rolloutId).startsWith("acr_");
         verify(repository).createRollout(eq(rolloutId), eq("main"), eq("abc123"), eq("trace-1"), any(Instant.class));
         verify(repository).addServer(eq(rolloutId), eq("linux-1"), any(Instant.class));
+    }
+
+    @Test
+    void userGateOpensImmediatelyAfterOwnTargetsAreDisposed() {
+        when(repository.findBlockingRolloutId("usr-1")).thenReturn(Optional.empty());
+
+        assertThat(service.status(new UserId("usr-1")).allowed()).isTrue();
+
+        verify(repository).findBlockingRolloutId("usr-1");
+        verify(repository, never()).findActiveRolloutId();
+    }
+
+    @Test
+    void userGateRemainsBlockedWhileOwnTargetIsPending() {
+        when(repository.findBlockingRolloutId("usr-1")).thenReturn(Optional.of("acr_rollout"));
+
+        assertThat(service.status(new UserId("usr-1")))
+                .isEqualTo(com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate
+                        .MessageGateStatus.blocked("acr_rollout"));
     }
 
     @Test

@@ -31,7 +31,7 @@ public class UserOpencodeProcessController {
 
     private final UserOpencodeProcessAssignmentService processAssignmentService;
     private final OpencodeProcessStatusQueryService statusQueryService;
-    private PublicAgentConfigMessageGate publicConfigMessageGate = () ->
+    private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
 
     /**
@@ -59,7 +59,7 @@ public class UserOpencodeProcessController {
             ServerWebExchange exchange) {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return blockingResponse(exchange, traceId -> {
-            PublicAgentConfigMessageGate.MessageGateStatus gate = publicConfigMessageGate.status();
+            PublicAgentConfigMessageGate.MessageGateStatus gate = publicConfigMessageGate.status(userId);
             return RuntimeDtos.UserOpencodeProcessResponse.from(
                     processAssignmentService.status(userId, agentId, traceId)
                             .withMessageGate(gate.allowed(), gate.reason(), gate.rolloutId()));

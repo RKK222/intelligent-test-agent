@@ -27,6 +27,11 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     }
 
     @Override
+    public Optional<String> findBlockingRolloutId(String userId) {
+        return Optional.ofNullable(mapper.findBlockingRolloutId(userId));
+    }
+
+    @Override
     public Optional<PublicAgentConfigRolloutSyncRequest> findPendingSync(String linuxServerId) {
         return Optional.ofNullable(mapper.findPendingSync(linuxServerId))
                 .map(row -> new PublicAgentConfigRolloutSyncRequest(

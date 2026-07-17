@@ -329,8 +329,10 @@ class RuntimeControllerTest {
                         NOW,
                         NOW)));
         UserOpencodeProcessController controller = new UserOpencodeProcessController(service, statusQueryService);
-        controller.configurePublicConfigMessageGate(() ->
-                PublicAgentConfigMessageGate.MessageGateStatus.blocked("acr_rollout"));
+        controller.configurePublicConfigMessageGate(userId -> {
+            assertThat(userId).isEqualTo(new UserId("usr_1234567890abcdef"));
+            return PublicAgentConfigMessageGate.MessageGateStatus.blocked("acr_rollout");
+        });
         WebTestClient client = WebTestClient.bindToController(controller)
                 .webFilter(new TraceIdWebFilter())
                 .webFilter(authenticatedUserFilter())

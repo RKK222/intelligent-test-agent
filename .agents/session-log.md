@@ -1,5 +1,19 @@
 # Session Log
 
+### 2026-07-17 - 公共配置排空门禁改为按用户恢复
+
+- Why:
+  - 原实现只有整个 rollout 全部完成才解除全局门禁，不符合“某用户旧 opencode dispose 成功后该用户立即恢复发送”的要求。
+- What:
+  - `/processes/me` 与 `RunApplicationService` 把当前 `UserId` 传入同一持久化门禁；服务器尚未全部同步时仍全员禁发，之后仅阻止当前用户未 `DISPOSED` 的旧 target。
+  - 门禁查询复用 target 的 `linuxServerId/containerId/port` 与既有 `opencode_server_processes.user_id` 关联，不新增字段、表、migration 或接口；一次 `/global/dispose` 明确返回 true 后即足够清理该用户 opencode server 的 Instance/配置缓存。
+- How:
+  - MyBatis XML 新增用户级阻断查询；保留无用户主体内部调用的保守全局门禁，前端继续复用既有三个状态字段，不新增协议面。
+  - 后端定向 95 项通过，agent-web typecheck 通过；测试库事务实测同一 target `before_dispose=1`、`after_dispose=0` 后回滚。
+- Result:
+  - 用户 B dispose 后可立即发送，仍 busy 的用户 A 继续被前后端拦截；rollout 仍在所有目标结束后统一标记 `COMPLETED`。
+  - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend，health/readiness 为 `UP`、前端 HTTP 200、manager WebSocket 已连接。
+
 ### 2026-07-17 - 完成公共 Agent/Skill 发布后的集群排空与实例释放
 
 - Why:

@@ -20,6 +20,7 @@ import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.enterprise.testagent.domain.user.UserId;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
@@ -136,8 +137,11 @@ public class PublicAgentConfigRolloutService
     }
 
     @Override
-    public MessageGateStatus status() {
-        return repository.findActiveRolloutId()
+    public MessageGateStatus status(UserId userId) {
+        Optional<String> blockingRollout = userId == null
+                ? repository.findActiveRolloutId()
+                : repository.findBlockingRolloutId(userId.value());
+        return blockingRollout
                 .map(MessageGateStatus::blocked)
                 .orElseGet(MessageGateStatus::open);
     }

@@ -169,7 +169,7 @@ public class RunApplicationService {
     private RunSummaryPersistencePort runSummaryPersistencePort;
     private RunTerminalProjectionService runTerminalProjectionService;
     private BackendInstanceIdentity backendInstanceIdentity;
-    private PublicAgentConfigMessageGate publicConfigMessageGate = () ->
+    private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
     private RunOwnerLeaseSupervisor ownerLeaseSupervisor;
     private RunRuntimeLossConvergenceScheduler runtimeLossScheduler;
@@ -819,7 +819,7 @@ public class RunApplicationService {
     private Run startRunInternal(UserId userId, String agentId, StartRunInput input, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(resolvedAgentId)) {
-            PublicAgentConfigMessageGate.MessageGateStatus gate = publicConfigMessageGate.status();
+            PublicAgentConfigMessageGate.MessageGateStatus gate = publicConfigMessageGate.status(userId);
             if (!gate.allowed()) {
                 throw new PlatformException(
                         ErrorCode.CONFLICT,

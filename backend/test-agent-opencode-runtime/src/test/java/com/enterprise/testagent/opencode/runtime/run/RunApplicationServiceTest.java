@@ -125,12 +125,15 @@ class RunApplicationServiceTest {
                 new RunEventAppender(new FakeRunEventRepository()),
                 runtimeRegistry(new FakeOpencodeFacade()),
                 new FakeAgentSessionBindingRepository());
-        service.configurePublicConfigMessageGate(() ->
-                PublicAgentConfigMessageGate.MessageGateStatus.blocked("acr_rollout"));
+        UserId userId = new UserId("usr_1234567890abcdef");
+        service.configurePublicConfigMessageGate(gatedUserId -> {
+            assertThat(gatedUserId).isEqualTo(userId);
+            return PublicAgentConfigMessageGate.MessageGateStatus.blocked("acr_rollout");
+        });
 
         assertThatThrownBy(() -> service.startRun(
-                new SessionId("ses_1234567890abcdef"),
-                "run the tests",
+                userId,
+                StartRunInput.ofPrompt(new SessionId("ses_1234567890abcdef"), "run the tests"),
                 "trace_1234567890abcdef"))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
