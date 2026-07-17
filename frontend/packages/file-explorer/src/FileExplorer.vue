@@ -370,7 +370,7 @@ defineExpose({ openRootActions });
 }
 
 .ta-fe-icon-btn:hover {
-  background: transparent;
+  background: var(--ta-hover, #f1f3f6);
   color: var(--ta-tree-text, #3b3b3b);
 }
 

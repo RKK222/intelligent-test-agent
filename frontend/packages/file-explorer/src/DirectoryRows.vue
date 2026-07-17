@@ -642,122 +642,136 @@ function submitRename() {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgb(15 23 42 / 28%);
-  backdrop-filter: blur(2px);
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(8px);
+  animation: ta-fade-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ta-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .ta-file-dialog {
-  width: min(420px, calc(100vw - 28px));
+  width: min(440px, calc(100vw - 28px));
   overflow: hidden;
-  border: 1px solid var(--ta-border, #d9dde5);
-  border-radius: 10px;
-  background: var(--ta-panel, #fff);
-  box-shadow: 0 20px 56px rgb(15 23 42 / 22%), 0 2px 8px rgb(15 23 42 / 10%);
-  color: var(--ta-text, #1f2937);
-  animation: ta-file-dialog-enter 140ms ease-out;
+  border: 1px solid var(--ta-border-strong, #cfcfcf);
+  border-radius: 12px;
+  background: var(--ta-panel-2, #ffffff);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.02);
+  color: var(--ta-text, #333333);
+  animation: ta-file-dialog-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
 }
 
 .ta-file-dialog-header {
   display: flex;
-  min-height: 58px;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--ta-border, #e5e7eb);
-  background: var(--ta-surface, #fafbfc);
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--ta-border, #eaeaea);
+  background: var(--ta-surface, #ffffff);
 }
 
 .ta-file-dialog-heading {
   display: flex;
   min-width: 0;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .ta-file-dialog-heading h2 {
   margin: 0;
-  color: var(--ta-text, #20242c);
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1.25;
+  color: var(--ta-text, #333333);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .ta-file-dialog-heading p {
-  margin: 3px 0 0;
-  color: var(--ta-muted, #697386);
-  font-size: 11px;
-  line-height: 1.3;
+  margin: 4px 0 0;
+  color: var(--ta-muted, #7a7a7a);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .ta-file-dialog-icon {
   display: inline-flex;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border: 1px solid #cbd9f6;
-  border-radius: 7px;
-  background: #edf3ff;
-  color: #315fbd;
+  border: 1px solid #cce0ff;
+  border-radius: 8px;
+  background: #ecf3fe;
+  color: #2563eb;
+  transition: transform 0.2s ease;
 }
 
 .ta-file-dialog--danger .ta-file-dialog-icon {
-  border-color: #f0c6c2;
-  background: #fff1ef;
-  color: var(--ta-danger, #b91c1c);
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: var(--ta-error, #9e3b34);
 }
 
 .ta-file-dialog-close {
   display: inline-flex;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 5px;
+  border-radius: 50%;
   background: transparent;
-  color: var(--ta-muted, #697386);
+  color: var(--ta-muted, #7a7a7a);
   cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: -2px;
+  margin-right: -4px;
 }
 
 .ta-file-dialog-close:hover {
   background: var(--ta-hover, #eef1f5);
-  color: var(--ta-text, #20242c);
+  color: var(--ta-text, #333333);
 }
 
 .ta-file-dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px;
+  gap: 16px;
+  padding: 20px;
+  background: var(--ta-panel-2, #ffffff);
 }
 
 .ta-file-dialog-path {
-  display: grid;
-  gap: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .ta-file-dialog-path span,
 .ta-file-dialog-field > label {
-  color: var(--ta-muted, #697386);
-  font-size: 11px;
-  font-weight: 600;
+  color: var(--ta-muted, #7a7a7a);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .ta-file-dialog-path code {
   overflow: hidden;
-  border: 1px solid var(--ta-border, #dfe3ea);
-  border-radius: 6px;
-  background: var(--ta-tree-bg, #f8f8f8);
-  padding: 7px 9px;
-  color: var(--ta-text, #2f3540);
-  font-family: var(--ta-mono, "SFMono-Regular", Consolas, monospace);
-  font-size: 11px;
+  border: 1px solid var(--ta-border, #eaeaea);
+  border-radius: 8px;
+  background: var(--ta-bg, #f0f4fa);
+  padding: 8px 12px;
+  color: var(--ta-subtle, #444444);
+  font-family: var(--font-mono, "Geist Mono", monospace);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: -0.01em;
 }
 
 .ta-file-dialog-field {
@@ -768,50 +782,53 @@ function submitRename() {
 .ta-file-dialog-segments {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 3px;
-  border: 1px solid var(--ta-border, #dfe3ea);
-  border-radius: 7px;
-  background: var(--ta-tree-bg, #f5f6f8);
-  padding: 3px;
+  gap: 4px;
+  border: 1px solid var(--ta-border, #eaeaea);
+  border-radius: 8px;
+  background: var(--ta-bg, #f0f4fa);
+  padding: 4px;
 }
 
 .ta-file-dialog-segments button {
-  min-height: 28px;
+  min-height: 30px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--ta-muted, #697386);
+  color: var(--ta-muted, #7a7a7a);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .ta-file-dialog-segments button:hover {
-  color: var(--ta-text, #20242c);
+  color: var(--ta-text, #333333);
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .ta-file-dialog-segments button.is-active {
-  background: var(--ta-panel, #fff);
-  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
-  color: var(--ta-text, #20242c);
+  background: var(--ta-surface, #ffffff);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  color: var(--ta-text, #333333);
   font-weight: 600;
 }
 
 .ta-file-dialog-input {
   width: 100%;
-  height: 34px;
-  border: 1px solid var(--ta-border, #d9dde5);
-  border-radius: 6px;
+  height: 38px;
+  border: 1px solid var(--ta-border-strong, #cfcfcf);
+  border-radius: 8px;
   outline: none;
-  background: var(--ta-panel, #fff);
-  padding: 0 10px;
-  color: var(--ta-text, #20242c);
-  font-size: 12px;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  background: var(--ta-surface, #fff);
+  padding: 0 12px;
+  color: var(--ta-text, #333333);
+  font-size: 13px;
+  transition: all 0.15s ease;
 }
 
 .ta-file-dialog-input:focus {
-  border-color: var(--ta-accent, #3366ff);
-  box-shadow: 0 0 0 2px rgb(51 102 255 / 12%);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
 .ta-file-dialog-input::placeholder {
@@ -819,121 +836,157 @@ function submitRename() {
 }
 
 .ta-file-dialog-error {
-  color: var(--ta-danger, #b91c1c);
-  font-size: 11px;
+  color: var(--ta-error, #9e3b34);
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 .ta-file-dialog-upload-note {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 10px;
-  border: 1px dashed #b9c9e8;
-  border-radius: 7px;
-  background: #f6f9ff;
-  padding: 12px;
-  color: #41659f;
+  border: 2px dashed #bfdbfe;
+  border-radius: 10px;
+  background: #f0f7ff;
+  padding: 24px 16px;
+  color: #2563eb;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ta-file-dialog-upload-note:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  transform: translateY(-1px);
+}
+
+.ta-file-dialog-upload-note svg {
+  color: #3b82f6;
+  animation: ta-bounce 1s infinite alternate;
+}
+
+@keyframes ta-bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-4px); }
 }
 
 .ta-file-dialog-upload-note div {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .ta-file-dialog-upload-note strong {
-  color: #31578f;
-  font-size: 12px;
+  color: #1e40af;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .ta-file-dialog-upload-note span {
-  color: #667a9c;
+  color: #60a5fa;
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.4;
+  max-width: 240px;
+  margin: 0 auto;
 }
 
 .ta-file-dialog-danger-card {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  border: 1px solid #efcfcb;
-  border-radius: 7px;
-  background: #fff7f6;
-  padding: 11px 12px;
+  border: 1px solid #fee2e2;
+  border-radius: 10px;
+  background: #fef2f2;
+  padding: 14px 16px;
 }
 
 .ta-file-dialog-danger-card span {
-  color: #9b5b54;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  color: #ef4444;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .ta-file-dialog-danger-card strong {
   overflow-wrap: anywhere;
-  color: #7f312a;
-  font-family: var(--ta-mono, "SFMono-Regular", Consolas, monospace);
-  font-size: 12px;
+  color: #991b1b;
+  font-family: var(--font-mono, "Geist Mono", monospace);
+  font-size: 13px;
   font-weight: 600;
+  line-height: 1.4;
 }
 
 .ta-file-dialog-warning {
   margin: 0;
-  color: var(--ta-muted, #697386);
+  color: var(--ta-muted, #7a7a7a);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.5;
 }
 
 .ta-file-dialog-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--ta-border, #e5e7eb);
-  background: var(--ta-surface, #fafbfc);
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--ta-border, #eaeaea);
+  background: var(--ta-surface, #ffffff);
 }
 
 .ta-file-dialog-button {
-  min-width: 68px;
-  height: 30px;
-  border: 1px solid var(--ta-border, #d9dde5);
-  border-radius: 6px;
-  background: var(--ta-panel, #fff);
-  color: var(--ta-text, #2f3540);
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 550;
+  min-width: 80px;
+  height: 34px;
+  border: 1px solid var(--ta-border-strong, #cfcfcf);
+  border-radius: 8px;
+  background: var(--ta-surface, #fff);
+  color: var(--ta-text, #333333);
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .ta-file-dialog-button:hover {
-  border-color: var(--ta-border-strong, #b9c0cc);
+  border-color: var(--ta-text, #333333);
   background: var(--ta-hover, #f1f3f6);
 }
 
 .ta-file-dialog-button.is-primary {
-  border-color: #315fbd;
-  background: #315fbd;
+  border-color: #2563eb;
+  background: #2563eb;
   color: #fff;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15);
 }
 
 .ta-file-dialog-button.is-primary:hover {
-  border-color: #274e9f;
-  background: #274e9f;
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  box-shadow: 0 4px 6px rgba(29, 78, 216, 0.2);
 }
 
 .ta-file-dialog-button.is-danger {
-  border-color: var(--ta-danger, #b91c1c);
-  background: var(--ta-danger, #b91c1c);
+  border-color: #dc2626;
+  background: #dc2626;
   color: #fff;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.15);
 }
 
 .ta-file-dialog-button.is-danger:hover {
-  border-color: #991b1b;
-  background: #991b1b;
+  border-color: #b91c1c;
+  background: #b91c1c;
+  box-shadow: 0 4px 6px rgba(185, 28, 28, 0.2);
 }
 
 .ta-file-dialog-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+  box-shadow: none !important;
 }
 
 .ta-file-dialog-button:focus-visible,
@@ -944,8 +997,8 @@ function submitRename() {
 }
 
 @keyframes ta-file-dialog-enter {
-  from { opacity: 0; transform: translateY(5px) scale(0.99); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
