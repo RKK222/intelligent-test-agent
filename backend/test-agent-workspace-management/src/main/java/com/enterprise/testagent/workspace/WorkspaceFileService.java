@@ -4,10 +4,13 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -263,21 +266,53 @@ public class WorkspaceFileService {
     }
 
     /**
-     * 删除 rootPath 内的普通文件；目录删除按平台文件安全规范拒绝。
+     * 删除 rootPath 内的普通文件或目录树；拒绝删除工作区根目录，遍历目录时不跟随符号链接。
      */
     public void deleteFile(String rootPath, String relativePath) {
+        Path root = rootRealPath(rootPath);
         Path target = resolveInsideRoot(rootPath, relativePath);
-        if (!Files.exists(target)) {
+        if (target.equals(root)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "禁止删除工作区根目录", Map.of("path", safePath(relativePath)));
+        }
+        if (containsGitMetadataSegment(relativePath)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "禁止删除版本库元数据", Map.of("path", safePath(relativePath)));
+        }
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
             throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在", Map.of("path", safePath(relativePath)));
         }
-        if (!Files.isRegularFile(target)) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "仅支持删除普通文件", Map.of("path", safePath(relativePath)));
-        }
         try {
-            Files.delete(target);
+            if (!Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
+                Files.delete(target);
+                return;
+            }
+            Files.walkFileTree(target, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws java.io.IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path directory, java.io.IOException exception) throws java.io.IOException {
+                    if (exception != null) {
+                        throw exception;
+                    }
+                    Files.delete(directory);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "删除失败", Map.of("path", safePath(relativePath)), exception);
         }
+    }
+
+    /**
+     * 目录递归删除不得触碰任意层级的 .git 元数据，避免个人 worktree 因一次文件操作失去版本库结构。
+     */
+    private boolean containsGitMetadataSegment(String relativePath) {
+        return List.of(normalizeRelativePath(relativePath).split("/"))
+                .stream()
+                .anyMatch(".git"::equals);
     }
 
     /**

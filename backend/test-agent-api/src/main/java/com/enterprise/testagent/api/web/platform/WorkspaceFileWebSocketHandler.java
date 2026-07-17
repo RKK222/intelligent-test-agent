@@ -200,7 +200,14 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
 
     private boolean protectedConfigPath(String path) {
         String normalized = path == null ? "" : path.trim().replace('\\', '/');
-        return normalized.equals(".opencode/agents")
+        try {
+            // 权限判断必须先折叠 ./ 与 ../，避免等价路径绕过受保护配置目录校验。
+            normalized = java.nio.file.Path.of(normalized).normalize().toString().replace('\\', '/');
+        } catch (RuntimeException exception) {
+            return true;
+        }
+        return normalized.equals(".opencode")
+                || normalized.equals(".opencode/agents")
                 || normalized.startsWith(".opencode/agents/")
                 || normalized.equals(".opencode/skills")
                 || normalized.startsWith(".opencode/skills/");

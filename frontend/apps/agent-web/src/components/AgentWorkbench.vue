@@ -3562,7 +3562,7 @@ async function handleDeleteEntry(path: string, type: "file" | "directory") {
     const filtered = currentEntries.filter((e) => e.path !== path);
     entriesByDirectory.value = { ...entriesByDirectory.value, [parentDir]: filtered };
 
-    // 如果被删除的是目录，同时清理其子目录缓存和展开状态
+    // 如果被删除的是目录，同时清理其子目录缓存和所有后代展开状态。
     if (type === "directory") {
       const nextEntries = { ...entriesByDirectory.value };
       for (const key of Object.keys(nextEntries)) {
@@ -3571,17 +3571,30 @@ async function handleDeleteEntry(path: string, type: "file" | "directory") {
         }
       }
       entriesByDirectory.value = nextEntries;
-      if (expandedDirectories.value.has(path)) {
-        const nextExpanded = new Set(expandedDirectories.value);
-        nextExpanded.delete(path);
-        expandedDirectories.value = nextExpanded;
-      }
+      const normalizedPath = path.replace(/\\/g, "/");
+      expandedDirectories.value = new Set(
+        [...expandedDirectories.value].filter((directory) => {
+          const normalizedDirectory = directory.replace(/\\/g, "/");
+          return normalizedDirectory !== normalizedPath && !normalizedDirectory.startsWith(`${normalizedPath}/`);
+        })
+      );
     }
 
-    // 如果被删除的是当前打开的文件，关闭标签页
-    if (type === "file" && activePath.value === path) {
-      workbench.closeTab(`file:${path}`);
+    // 删除目录时关闭目录内全部已打开文件，避免保留指向已不存在路径的编辑器标签。
+    const normalizedDeletedPath = path.replace(/\\/g, "/");
+    for (const tab of [...workbench.tabs]) {
+      const normalizedTabPath = tab.path.replace(/\\/g, "/");
+      if (normalizedTabPath === normalizedDeletedPath
+          || (type === "directory" && normalizedTabPath.startsWith(`${normalizedDeletedPath}/`))) {
+        workbench.closeTab(`file:${tab.path}`);
+      }
     }
+    void refreshWorkspaceGitDiff();
+    feedback.value = {
+      kind: "success",
+      title: type === "directory" ? "文件夹已删除" : "文件已删除",
+      description: path
+    };
   } catch (error) {
     feedback.value = errorFeedback(`删除${type === "file" ? "文件" : "文件夹"}失败`, error);
   }

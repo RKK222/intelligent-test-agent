@@ -4,7 +4,7 @@ import DirectoryRows from "../src/DirectoryRows.vue";
 import { applicationWorkspaceRestrictionsFixture } from "../../../tests/fixtures/application-workspace-restrictions";
 
 describe("DirectoryRows", () => {
-  it("only exposes delete action for files", async () => {
+  it("exposes minus delete actions for both files and directories", async () => {
     const view = render(DirectoryRows, {
       props: {
         directory: "",
@@ -18,17 +18,42 @@ describe("DirectoryRows", () => {
       }
     });
 
-    const deleteButtons = view.getAllByRole("button", { name: "删除" });
-    expect(deleteButtons).toHaveLength(1);
+    const deleteButtons = view.getAllByRole("button", { name: /^删除 / });
+    expect(deleteButtons).toHaveLength(2);
 
-    await fireEvent.click(deleteButtons[0]);
+    await fireEvent.click(view.getByRole("button", { name: "删除 README.md" }));
     const dialog = view.getByRole("dialog", { name: "删除文件" });
     expect(dialog.textContent).toContain("README.md");
-    expect(dialog.textContent).not.toContain("文件夹");
 
-    await fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+    await fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     expect(view.emitted("deleteEntry")).toEqual([["README.md", "file"]]);
+
+    await fireEvent.click(view.getByRole("button", { name: "删除 src" }));
+    const directoryDialog = view.getByRole("dialog", { name: "删除文件夹" });
+    expect(directoryDialog.textContent).toContain("文件夹及其中的全部内容都会被删除");
+    await fireEvent.click(within(directoryDialog).getByRole("button", { name: "确认删除" }));
+
+    expect(view.emitted("deleteEntry")).toEqual([
+      ["README.md", "file"],
+      ["src", "directory"]
+    ]);
+  });
+
+  it("opens the shared confirmation dialog when Delete is pressed on a focused row", async () => {
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": [{ type: "directory", path: "docs", name: "docs" }] },
+        expandedDirectories: new Set<string>()
+      }
+    });
+
+    await fireEvent.keyDown(view.getByRole("button", { name: "docs" }), { key: "Delete" });
+    const dialog = view.getByRole("dialog", { name: "删除文件夹" });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    expect(view.emitted("deleteEntry")).toEqual([["docs", "directory"]]);
   });
 
   it("double-clicks a file to edit its name and emits the renamed filename", async () => {
@@ -42,7 +67,7 @@ describe("DirectoryRows", () => {
       }
     });
 
-    await fireEvent.dblClick(view.getByRole("button", { name: /README\.md/ }));
+    await fireEvent.dblClick(view.getByRole("button", { name: "README.md" }));
     const input = view.getByRole("textbox", { name: "重命名工作区条目" }) as HTMLInputElement;
     expect(input.value).toBe("README.md");
 
@@ -63,7 +88,7 @@ describe("DirectoryRows", () => {
       }
     });
 
-    await fireEvent.dblClick(view.getByRole("button", { name: /tests/ }));
+    await fireEvent.dblClick(view.getByRole("button", { name: "tests" }));
     const input = view.getByRole("textbox", { name: "重命名工作区条目" }) as HTMLInputElement;
     expect(input.value).toBe("tests");
 
@@ -83,10 +108,10 @@ describe("DirectoryRows", () => {
       }
     });
 
-    expect(view.queryByRole("button", { name: "新建文件或文件夹" })).toBeNull();
-    expect(view.queryByRole("button", { name: "删除" })).toBeNull();
+    expect(view.queryByRole("button", { name: "新建或上传到此目录" })).toBeNull();
+    expect(view.queryByRole("button", { name: /^删除 / })).toBeNull();
 
-    const readme = view.getByRole("button", { name: /README\.md/ });
+    const readme = view.getByRole("button", { name: "README.md" });
     await fireEvent.dblClick(readme);
     expect(view.queryByRole("textbox", { name: "重命名工作区条目" })).toBeNull();
 
@@ -110,8 +135,8 @@ describe("DirectoryRows", () => {
       clipboardEntry: { path: "README.md", mode: "copy" as const }
     };
     const view = render(DirectoryRows, { props });
-    const readme = view.getByRole("button", { name: /README\.md/ });
-    const docs = view.getByRole("button", { name: /docs/ });
+    const readme = view.getByRole("button", { name: "README.md" });
+    const docs = view.getByRole("button", { name: "docs" });
 
     await fireEvent.keyDown(readme, { key: "c", ctrlKey: true });
     await fireEvent.keyDown(readme, { key: "x", metaKey: true });
@@ -144,8 +169,8 @@ describe("DirectoryRows", () => {
       setData: (type: string, value: string) => data.set(type, value),
       getData: (type: string) => data.get(type) ?? ""
     };
-    const readme = view.getByRole("button", { name: /README\.md/ });
-    const docs = view.getByRole("button", { name: /docs/ });
+    const readme = view.getByRole("button", { name: "README.md" });
+    const docs = view.getByRole("button", { name: "docs" });
 
     await fireEvent.dragStart(readme, { dataTransfer });
     await fireEvent.dragOver(docs, { dataTransfer });
@@ -165,8 +190,9 @@ describe("DirectoryRows", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "新建或上传到此目录" }));
     const dialog = view.getByRole("dialog", { name: "新建或上传文件" });
-    expect(dialog.textContent).toContain("目标目录：docs");
-    await fireEvent.click(within(dialog).getByRole("button", { name: "上传文件" }));
+    expect(dialog.textContent).toContain("目标目录");
+    expect(dialog.textContent).toContain("docs");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "上传" }));
     await fireEvent.click(within(dialog).getByRole("button", { name: "选择文件" }));
 
     expect(view.emitted("requestUpload")).toEqual([["docs"]]);
@@ -182,7 +208,7 @@ describe("DirectoryRows", () => {
       }
     });
 
-    await fireEvent.keyDown(view.getByRole("button", { name: /README\.md/ }), { key: "z", metaKey: true });
+    await fireEvent.keyDown(view.getByRole("button", { name: "README.md" }), { key: "z", metaKey: true });
 
     expect(view.emitted("undoEntry")).toEqual([[]]);
   });
@@ -195,7 +221,7 @@ describe("DirectoryRows", () => {
       dragResetToken: 0
     };
     const view = render(DirectoryRows, { props });
-    const docs = view.getByRole("button", { name: /docs/ });
+    const docs = view.getByRole("button", { name: "docs" });
 
     await fireEvent.dragOver(docs, { dataTransfer: { dropEffect: "none" } });
     expect(docs.classList.contains("is-drop-target")).toBe(true);

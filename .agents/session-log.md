@@ -15,6 +15,21 @@
   - `spec/**` 对普通成员、应用管理员和超级管理员都只存在于个人 worktree 的本地提交，不再投影或推送到应用 feature；后端直接 API 同样不能绕过。
   - 本次调整不改变 DTO、事件或数据库结构，不新增文件协议；权限收紧只影响原先错误放行的超级管理员 spec 发布路径。
 
+### 2026-07-17 - 支持工作区文件目录删除并统一操作弹框
+
+- Why:
+  - 用户要求在个人 worktree 文件树中同时支持文件和目录删除：每项常驻 `-` 入口、聚焦后按 `Delete/Del` 删除，并让现有新建、上传、删除弹框与工作台整体视觉一致。
+- What:
+  - 复用已有 `workspace.delete` WebSocket RPC 和前端确认链路，将删除扩展为普通文件、符号链接与目录树；目录递归删除不跟随符号链接，明确禁止删除工作区根目录和任何 `.git` 路径，普通用户也不能通过等价路径删除受保护 `.opencode`。
+  - 文件树将 `+/-` 调整为文件行同级操作，消除嵌套按钮；文件与目录均常驻低强调 `-`，支持 `Delete/Del` 打开统一确认弹框。删除目录后同步清理目录缓存、展开状态和该目录下已打开标签，并刷新 Git 变更。
+  - 新建/上传与删除弹框统一为工作台紧凑面板样式，明确目标目录、操作类型、个人 worktree 边界和目录递归删除风险；同步更新模块 README、包级说明、HTTP/事件流 API 文档、前端规范和用户手册。
+- How:
+  - 文件树定向测试 15/15、后端 `WorkspaceFileServiceTest` 与 `WorkspaceFileWebSocketHandlerTest` 共 21/21 通过；前端全量类型检查和 production build 通过，全量 Vitest 使用单 worker 稳定模式运行 1003 项通过、1 项跳过。
+  - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend，检查 health/readiness、前端 HTTP、登录 CORS 和 manager WebSocket；真实 Chromium 验证常驻 `-`、根目录新建/上传面板、目录 `Delete` 确认框、无残留拖放蓝框且控制台无错误，未确认删除任何用户文件。
+- Result:
+  - 文件和目录删除入口、键盘删除与递归删除均可用，且只通过当前个人 worktree 的既有平台文件链路执行；删除不可通过 `Ctrl/Cmd+Z` 恢复，确认框已明确提示。
+  - `workspace.delete` 为向后兼容的语义扩展，不改变 RunEvent SSE；不涉及数据库、SQL 或环境配置，安全边界得到加强，目录删除耗时随目录规模线性增长。
+
 ### 2026-07-17 - 补齐工作区文件编辑、搬运与上传交互
 
 - Why:

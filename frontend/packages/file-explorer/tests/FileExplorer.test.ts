@@ -55,8 +55,8 @@ describe("FileExplorer", () => {
         changedFiles: []
       }
     });
-    const readme = view.getByRole("button", { name: /README\.md/ });
-    const docs = view.getByRole("button", { name: /docs/ });
+    const readme = view.getByRole("button", { name: "README.md" });
+    const docs = view.getByRole("button", { name: "docs" });
 
     await fireEvent.keyDown(readme, { key: "c", ctrlKey: true });
     await fireEvent.keyDown(docs, { key: "v", ctrlKey: true });
@@ -79,9 +79,10 @@ describe("FileExplorer", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "新建或上传到工作区根目录" }));
     const dialog = view.getByRole("dialog", { name: "新建或上传文件" });
-    expect(dialog.textContent).toContain("目标目录：工作区根目录");
-    await fireEvent.click(view.getByRole("button", { name: /README\.md/ }));
-    await fireEvent.keyDown(view.getByRole("button", { name: /README\.md/ }), { key: "z", ctrlKey: true });
+    expect(dialog.textContent).toContain("目标目录");
+    expect(dialog.textContent).toContain("工作区根目录");
+    await fireEvent.click(view.getByRole("button", { name: "README.md" }));
+    await fireEvent.keyDown(view.getByRole("button", { name: "README.md" }), { key: "z", ctrlKey: true });
 
     expect(view.emitted("undoEntry")).toEqual([[]]);
   });

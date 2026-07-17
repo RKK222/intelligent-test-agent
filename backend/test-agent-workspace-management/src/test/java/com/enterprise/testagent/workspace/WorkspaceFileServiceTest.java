@@ -139,17 +139,30 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
-    void serviceDeletesOnlyRegularFilesInsideWorkspaceRoot() throws Exception {
+    void serviceDeletesRegularFilesAndDirectoryTreesInsideWorkspaceRoot() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
         Files.writeString(root.resolve("remove.txt"), "delete me");
-        Files.createDirectory(root.resolve("directory"));
+        Files.createDirectories(root.resolve("directory/nested"));
+        Files.writeString(root.resolve("directory/nested/case.md"), "case");
 
         service.deleteFile(root.toString(), "remove.txt");
+        service.deleteFile(root.toString(), "directory");
 
         assertThat(Files.exists(root.resolve("remove.txt"))).isFalse();
-        assertThatThrownBy(() -> service.deleteFile(root.toString(), "directory"))
+        assertThat(Files.exists(root.resolve("directory"))).isFalse();
+    }
+
+    @Test
+    void serviceRejectsDeletingWorkspaceRootOrGitMetadata() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("nested/.git"));
+
+        assertThatThrownBy(() -> service.deleteFile(root.toString(), ""))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+        assertThatThrownBy(() -> service.deleteFile(root.toString(), "nested/.git"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }
 
     @Test
