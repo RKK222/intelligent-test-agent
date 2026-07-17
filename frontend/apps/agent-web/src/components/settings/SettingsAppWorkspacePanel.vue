@@ -114,6 +114,7 @@ const WorkspaceDirectoryTree = defineComponent({
 const props = defineProps<{
   currentUser: CurrentUser | null;
   initialAppId?: string;
+  refreshKey?: number;
 }>();
 
 const emit = defineEmits<{
@@ -698,6 +699,21 @@ watch(() => props.currentUser, async (user) => {
     clearAppContext();
   }
 }, { immediate: true });
+
+// 每次对话框打开时刷新应用列表，确保选中右上角当前应用
+watch(() => props.refreshKey, () => {
+  if (props.currentUser && hasAppSettingsPermission.value) {
+    loadApplications();
+  }
+});
+
+// 右上角切换应用时同步更新设置弹窗中的选中
+watch(() => props.initialAppId, (newAppId) => {
+  if (!newAppId || !hasAppSettingsPermission.value) return;
+  if (applications.value.some((item) => item.appId === newAppId)) {
+    selectedAppId.value = newAppId;
+  }
+});
 
 watch(selectedAppId, async (appId) => {
   if (!appId || !hasAppSettingsPermission.value) return;
