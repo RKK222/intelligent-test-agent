@@ -10,6 +10,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 - 工作区注册、查询和分页。
 - 应用引用资产库管理：只处理当前应用关联的 `APPLICATION_ASSET_REPOSITORY`，首次初始化固定远端 HEAD，后续同分支同步或管理员受控切换分支都以 generation 固定目标提交；按在线及历史 Linux 服务器创建副本目标，通过 `reference-repository.sync-requested` 低延迟唤醒、数据库租约/CAS fencing、本机文件锁和 60 秒补偿扫描收敛。离线副本进入 `DEFERRED` 并在恢复后补齐；新目录在同根临时目录校验后原子移动，已有目录必须干净且同源，同分支仅允许快进；跨分支显式抓取目标 refspec，从固定提交创建不存在的本地分支，已有目标本地分支仍拒绝分叉。主动指针核验只读本地实际 branch、HEAD、origin 和工作树状态，实际快照与目标指针分别返回。目录树仅开放总体与当前服务器副本均 `READY` 的单层安全读取，并只把根层命中 `REFERENCES_SDD_FOLDER_NAMES` 的目录标记为可选。
+- 引用资产库列表和状态另返回可空的 `repositoryPath`：业务层只用当前平台 `OPENCODE_REFERENCES_DIR` 与可信英文名派生规范化绝对路径；参数缺失或历史非法名称不阻断仓库列表，也不把物理路径写入错误或日志。
 - 工作区引用组合视图：读取当前工作区最新 `.opencode/opencode.jsonc`，只接受能反向验证到当前应用资产库、本机同 generation `READY` 副本、当前平台引用根目录和允许 SDD 根目录的本地引用对象。`merge=true` 按 `sdd-folder-name` 合并到工作区同名一级目录，工作区已有目录保持普通来源，纯引用后代标记只读引用来源；`merge=false` 以参考别名投影只读一级目录。文件同名不覆盖，节点使用稳定身份并携带冲突来源；单引用异常转为局部 warning，不阻断工作区内容，所有路径继续拒绝 `.git`、符号链接和 root 穿越。
 - 工作区注册时记录 `linuxServerId`，并通过 `WorkspaceServerIdentity` 提供当前 Java 进程所属服务器和默认目录。
 - 工作区内原始文件单层列表、受限相对路径搜索、UTF-8 内容读写、Base64 二进制新文件上传、普通文件跨目录复制/移动、普通文件或目录同目录重命名、文件状态、普通文件/目录树删除和路径越权拦截；目录删除不跟随符号链接，并拒绝工作区根目录和任意层级 `.git` 元数据；上传沿用单文件大小上限且不覆盖已有条目，复制/移动只处理普通文件并拒绝覆盖目标；搜索支持空关键字文件目录，并受数量、深度和超时上限保护。组合文件树只新增只读 list/read 视图，不改变这些原始写操作的物理工作区边界。
@@ -38,6 +39,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - `AgentConfigApplicationServiceTest` 覆盖公共仓库初始化/更新、显式拉取先合并当前管理员稳定个人 worktree 且脏 worktree 不更新共享副本、当前用户长期公共 worktree 的稳定命名与复用、按服务器和创建人过滤、跨用户操作拒绝、公共/应用 Agent 文件回退路径映射、公共个人分支合并远端后以 refspec 推送到公共分支、冲突保留在个人 worktree、共享运行时副本同步与广播、push 成功后本机同步触发异常不反转发布结果，以及工作空间级 Agent/Skill 配置读写和 diff。`GitWorkspaceServiceRealGitTest` 使用临时 bare 远端验证远端先产生新提交后，个人 worktree 与共享运行副本均能同步到同一提交。
 
 - `ReferenceRepositoryApplicationServiceTest`、`ReferenceRepositoryRealGitSafetyTest`、`ReferenceRepositoryReplicaReconcilerTest` 覆盖分支一次性初始化、generation/CAS、广播唤醒、租约丢失、离线 `DEFERRED`/恢复、指数退避与永久阻塞、本机文件锁、临时 clone + 原子移动、已有仓库脏状态/origin/分支/分叉保护、树路径穿越/`.git`/符号链接/1000 项上限和补偿器生命周期。
+- 其中 `ReferenceRepositoryApplicationServiceTest` 还覆盖服务器展示路径规范化、引用根参数缺失和历史非法英文名兼容。
 - `WorkspaceViewApplicationServiceTest` 覆盖 JSONC 注释/尾逗号/缺失/非法/超限、Git 引用对象拒绝、merge true/false、递归目录归并、文件及类型冲突并列、稳定 ID、归并后 1000 项上限、personal/version/replica 映射、逐次 READY 校验、UTF-8 只读、路径穿越/`.git`/符号链接和安全 warning。
 
 ## 允许依赖

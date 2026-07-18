@@ -1109,6 +1109,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
   "name": "应用参考资料",
   "englishName": "application-assets",
   "gitUrl": "git@example.test:team/assets.git",
+  "repositoryPath": "/opt/testagent/references/application-assets",
   "initialized": true,
   "branch": "main",
   "targetCommitHash": "0123456789abcdef",
@@ -1150,6 +1151,8 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 
 `branch/targetCommitHash` 是当前 generation 的目标指针，`servers[].currentBranch/currentCommitHash` 是最近一次从该服务器实际观察到的指针；新 generation 不用目标值覆盖实际快照。`online=false` 时实际指针和 `verifiedAt` 可能是离线前快照；`matchesTarget=null` 表示尚无完整观察，`false` 也用于 branch/HEAD、origin、干净状态或可信目录任一不符合目标的情况。`syncedAt` 是最近成功同步时间，`verifiedAt` 是最近成功完成实际指针读取的时间。`message` 和 `servers[].error` 只返回安全错误说明，不包含凭据、Git 原始 stderr 或内部命令。
 
+`repositoryPath` 是可空兼容字段，仅由当前平台解析后的 `OPENCODE_REFERENCES_DIR` 与已校验的版本库英文名在服务端拼接、绝对化和规范化得到。参数缺失或历史英文名不合法时返回 `null`，不影响仓库列表和状态；客户端不得提交或持久化该字段。该物理路径只通过本节要求 `APP_ADMIN` 的既有响应返回，不进入错误消息或业务日志。
+
 分支切换先解析远端 HEAD，再用旧 generation 与旧分支 CAS 建立新代次。在线节点在干净、origin 匹配的共享仓库中切换；已有目标本地分支必须可快进到固定目标，脏仓库、非 Git 目录、origin 冲突或分叉会阻塞该服务器，不删除、清理或强制覆盖。已经成功的服务器不因其它节点失败而回滚；离线及历史副本由数据库目标、广播唤醒和补偿扫描最终追平。
 
 树接口的 `data[]` 字段为：
@@ -1182,7 +1185,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 - 每次只列一层，目录优先并按名称排序，最多返回 1000 项；`.git` 和符号链接不进入结果。
 - 只有仓库根层、名称命中 `REFERENCES_SDD_FOLDER_NAMES` 小写清单的真实目录才返回 `highlighted=true`、`selectable=true`。文件和所有嵌套目录均不可选。
 
-初始化分支一经成功写入便不可切换；再次用相同分支调用为幂等查询，用不同分支调用返回 `CONFLICT`。未初始化时调用同步返回 `CONFLICT`。应用不存在或未启用返回 `NOT_FOUND`；代码库未关联当前应用、类型错误、ID/分支/英文名不合法返回 `VALIDATION_ERROR`；缺少当前用户 SSH key 返回 `FORBIDDEN`；Git 网络/超时按统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT` 返回。缺少引用根目录参数、磁盘读取或原子落盘异常按统一安全错误返回。
+初始化接口只负责首次固定分支；再次用相同分支调用为幂等查询，用不同分支调用返回 `CONFLICT`，后续分支变化必须使用受控 `switch-branch` 接口。未初始化时调用同步返回 `CONFLICT`。应用不存在或未启用返回 `NOT_FOUND`；代码库未关联当前应用、类型错误、ID/分支/英文名不合法返回 `VALIDATION_ERROR`；缺少当前用户 SSH key 返回 `FORBIDDEN`；Git 网络/超时按统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT` 返回。缺少引用根目录参数、磁盘读取或原子落盘异常按统一安全错误返回。
 
 所有成功响应仍包裹 `ApiResponse<T>`，入口生成或透传同一 `traceId`；初始化/同步将该 traceId 写入总体状态并放入内部唤醒广播，后续状态查询返回最近 generation 的 traceId。错误响应遵循本文统一格式，并通过响应头和响应体返回同一个 traceId。
 

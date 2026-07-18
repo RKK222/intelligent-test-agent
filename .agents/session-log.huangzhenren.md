@@ -5,6 +5,31 @@
 
 ## Entries
 
+### 2026-07-18 - 引用资产 Git 指针核验进度与服务器路径
+
+- Why:
+  - “刷新 Git 指针”需要等待多服务器核验，原页面只有按钮转圈，用户无法判断任务创建、各节点处理和汇总所处阶段；已选仓库也缺少服务器绝对目录，现场排查不便。
+- What:
+  - 引用资产库统一状态响应新增可空 `repositoryPath`，由当前平台解析后的 `OPENCODE_REFERENCES_DIR` 与已校验英文名拼接并规范化；参数缺失、历史非法名称或旧响应缺字段时前端显示“服务器路径暂不可用”，不阻断仓库列表。
+  - “刷新 Git 指针”在 POST 返回前打开三阶段嵌套弹层，展示创建核验任务、逐服务器核验和汇总结果；逐节点映射等待、处理中、完成、阻塞、等待重试与离线延后，并展示目标分支/HEAD、就绪数量、安全错误和 traceId。
+  - 弹层按仓库 ID、请求序号与核验 generation fencing；执行期间禁止关闭弹层和外层引用配置页、拦截 Escape 并限制焦点，终态由用户手动关闭后恢复到当前刷新按钮。POST 失败可重试，状态轮询临时失败沿用 2 秒自动重试。
+  - 同步 HTTP API、workspace/API README 与 PACKAGE、前端/backend-api 说明、模块地图、安全规范和引用配置用户手册；未新增接口、事件、广播、数据库、manager 协议或环境配置。
+- How:
+  - 继续复用既有 `/verify`、`/status` 与状态轮询；后端只在业务响应组装时派生路径，并捕获参数/旧数据路径错误返回空，不记录物理路径。
+  - TDD 覆盖路径规范化、缺参、历史非法英文名、Controller JSON、旧响应兼容、弹层先于请求完成出现、三阶段/逐服务器状态、成功/失败/离线、轮询暂时失败、重试、关闭限制和焦点恢复。
+  - 调试中确认 Vue 更新仓库快照会替换弹层与按钮 DOM，测试必须断言当前节点；业务状态实际已正确推进，未用放宽状态机掩盖失败。
+- Result:
+  - 后端定向 reactor 通过：workspace 47 项、API 3 项；前端全量 Vitest 79 个文件通过（1305 passed / 1 skipped），13 个项目 typecheck、lint、用户手册和生产 build 通过，构建仅保留既有大 chunk 提示。
+  - 引用组合树 Playwright 的 Chromium/mobile 场景均渲染出目标节点，但当前 `HEAD` 的首次引导已使用 `v7`，E2E 基线仍写入 `test-agent.onboarding.v2`，`el-tour` 遮罩拦截点击后两项超时；本次未扩大范围修改该既有基线。
+  - 仅增加向后兼容的可空 HTTP 响应字段；路径只对既有 `APP_ADMIN` 接口可见且不进入日志/错误。未修改 RunEvent、内部广播、Flyway/MyBatis、generated SDK、manager 或 `.env.local`。
+- Verification:
+  - `mvn -pl test-agent-workspace-management,test-agent-api -am -Dtest='ReferenceRepositoryApplicationServiceTest,ReferenceRepositoryControllerTest' -Dsurefire.failIfNoSpecifiedTests=false test`
+  - `corepack pnpm test`、`corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm build`
+  - `corepack pnpm e2e --grep "workspace tree merges references with source colors and exposes non-merged aliases"`（被上述既有 v2/v7 引导基线阻断）
+  - `git diff --check`、session log 回顾与只读差异审查。
+- Next:
+  - 在独立任务中把 Playwright 的首次引导抑制键从硬编码旧版本改为与产品版本同步，再恢复引用组合树 Chromium/mobile 定向绿灯；真实多服务器环境仍需按上一条 session log 的计划完成实际路径与 HEAD 人工验收。
+
 ### 2026-07-18 - 引用资产分支切换与服务器指针核验
 
 - Why:

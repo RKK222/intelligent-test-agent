@@ -97,6 +97,7 @@ Token 校验流程：
 6. opencode-manager WebSocket 控制面只允许容器内 manager 使用独立 token 访问，不接受浏览器用户 token；manager 不得通过 HTTP 与 Java 后端交互，也不再连接其他服务器 Java。manager 只连接 `.serverhost + OPENCODE_MANAGER_BACKEND_PORT` 推导出的本服务器 Java，断开后按重连间隔无限重连并重新拉取配置。返回给 Java 间用户进程路由使用的 `listenUrl` 必须是可信内网内其它后端可访问的直连地址，不应暴露到公网或不可信网络。
 7. 用户专属 opencode server 默认监听 `0.0.0.0:{port}` 且不设置 Basic Auth，生产必须用容器网络、主机防火墙或内网网关限制端口池访问面；浏览器和外部系统不得直接访问这些端口。
 8. `tools/verify-opencode-process-deployment.sh` 只用于只读 smoke check；传入的 manager token 和 `SUPER_ADMIN` 用户 token 不会由脚本打印。生产执行时应使用临时 shell、禁用命令历史或通过安全变量注入，避免 token 留在 history 中。
+9. 应用引用资产库状态中的 `repositoryPath` 只能由服务端使用当前平台 `OPENCODE_REFERENCES_DIR` 和已校验版本库英文名派生，并且只通过既有 `APP_ADMIN` 接口返回；参数缺失或历史名称非法时返回空。客户端输入不得控制该路径，日志、trace 和错误消息不得记录该物理路径。
 
 ## 平台文件 WebSocket 安全例外
 

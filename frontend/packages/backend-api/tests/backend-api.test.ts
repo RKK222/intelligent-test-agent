@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { BackendApiError, createBackendApiClient, type WorkspaceWebSocketFactory } from "../src";
+import { BackendApiError, createBackendApiClient, type ReferenceRepositoryStatus, type WorkspaceWebSocketFactory } from "../src";
 
 describe("backend-api", () => {
   it("calls every application reference repository endpoint with the current app id", async () => {
-    const status = {
+    const status: ReferenceRepositoryStatus = {
       repositoryId: "repo/assets",
       name: "需求资产库",
       englishName: "requirements",
       gitUrl: "ssh://git.example.test/requirements.git",
+      repositoryPath: "/data/.testagent/agent-opencode/references/requirements",
       initialized: true,
       branch: "main",
       targetCommitHash: "abc123",
@@ -48,6 +49,7 @@ describe("backend-api", () => {
     await client.verifyReferenceRepositoryPointers("app/demo", "repo/assets");
     await expect(client.getReferenceRepositoryStatus("app/demo", "repo/assets")).resolves.toEqual(
       expect.objectContaining({
+        repositoryPath: "/data/.testagent/agent-opencode/references/requirements",
         operation: "VERIFY_POINTERS",
         servers: [expect.objectContaining({
           online: true,

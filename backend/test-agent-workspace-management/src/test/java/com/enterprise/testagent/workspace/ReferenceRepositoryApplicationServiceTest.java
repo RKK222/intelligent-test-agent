@@ -117,15 +117,46 @@ class ReferenceRepositoryApplicationServiceTest {
         when(configurationRepository.findRepositoriesByApplication(APP))
                 .thenReturn(List.of(assetRepository(), codeRepository()));
         when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.empty());
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR"))
+                .thenReturn(Optional.of(tempDir.resolve("references/../references").toString()));
 
         List<ReferenceRepositoryResponses.Status> result = service.list(APP.value());
 
         assertThat(result).singleElement().satisfies(status -> {
             assertThat(status.repositoryId()).isEqualTo(ASSET_ID.value());
             assertThat(status.gitUrl()).isEqualTo("https://git.example.test/assets.git");
+            assertThat(status.repositoryPath())
+                    .isEqualTo(tempDir.resolve("references/assets").toAbsolutePath().normalize().toString());
             assertThat(status.status()).isEqualTo(ReferenceRepositoryStatus.UNINITIALIZED.name());
         });
         verify(referenceRepository, never()).findState(codeRepository().repositoryId());
+    }
+
+    @Test
+    void listKeepsRepositoryVisibleWhenReferencesDirectoryParameterIsMissing() {
+        when(configurationRepository.findRepositoriesByApplication(APP))
+                .thenReturn(List.of(assetRepository()));
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.empty());
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR")).thenReturn(Optional.empty());
+
+        assertThat(service.list(APP.value()))
+                .singleElement()
+                .extracting(ReferenceRepositoryResponses.Status::repositoryPath)
+                .isNull();
+    }
+
+    @Test
+    void listKeepsLegacyRepositoryWithInvalidEnglishNameVisibleWithoutPath() {
+        when(configurationRepository.findRepositoriesByApplication(APP))
+                .thenReturn(List.of(assetRepository("legacy_name")));
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.empty());
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR"))
+                .thenReturn(Optional.of(tempDir.resolve("references").toString()));
+
+        assertThat(service.list(APP.value()))
+                .singleElement()
+                .extracting(ReferenceRepositoryResponses.Status::repositoryPath)
+                .isNull();
     }
 
     @Test

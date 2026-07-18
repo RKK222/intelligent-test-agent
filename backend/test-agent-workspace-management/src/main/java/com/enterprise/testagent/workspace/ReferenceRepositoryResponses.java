@@ -13,6 +13,7 @@ public final class ReferenceRepositoryResponses {
             String name,
             String englishName,
             String gitUrl,
+            String repositoryPath,
             boolean initialized,
             String branch,
             String targetCommitHash,
@@ -29,13 +30,23 @@ public final class ReferenceRepositoryResponses {
             servers = servers == null ? List.of() : List.copyOf(servers);
         }
 
+        /** 兼容未包含服务器绝对路径字段的旧调用方。 */
+        public Status(
+                String repositoryId, String name, String englishName, String gitUrl, boolean initialized,
+                String branch, String targetCommitHash, long generation, String status, String operation,
+                int targetServerCount, int readyServerCount, List<ServerStatus> servers,
+                String traceId, String message) {
+            this(repositoryId, name, englishName, gitUrl, null, initialized, branch, targetCommitHash, generation,
+                    status, operation, targetServerCount, readyServerCount, servers, traceId, message);
+        }
+
         /** 兼容旧调用方构造；历史响应默认按同步操作展示。 */
         public Status(
                 String repositoryId, String name, String englishName, String gitUrl, boolean initialized,
                 String branch, String targetCommitHash, long generation, String status,
                 int targetServerCount, int readyServerCount, List<ServerStatus> servers,
                 String traceId, String message) {
-            this(repositoryId, name, englishName, gitUrl, initialized, branch, targetCommitHash, generation,
+            this(repositoryId, name, englishName, gitUrl, null, initialized, branch, targetCommitHash, generation,
                     status, "SYNCHRONIZE", targetServerCount, readyServerCount, servers, traceId, message);
         }
     }

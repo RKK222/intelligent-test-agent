@@ -10,6 +10,7 @@ function status(overrides: Partial<ReferenceRepositoryStatus> = {}): ReferenceRe
     name: "需求资产库",
     englishName: "requirements",
     gitUrl: "ssh://git.example.test/requirements.git",
+    repositoryPath: "/data/.testagent/agent-opencode/references/requirements",
     initialized: true,
     branch: "main",
     targetCommitHash: "abc123",
@@ -743,6 +744,271 @@ describe("ReferenceConfigurationDialog", () => {
     await flushPromises();
     expect(mockApi.verifyReferenceRepositoryPointers).toHaveBeenCalledWith("app-demo", "repo-assets");
     expect(mockApi.synchronizeReferenceRepository).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the server repository path immediately before the refresh action with a legacy fallback", async () => {
+    const mockApi = api({ synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()) });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    const path = wrapper.get('[data-reference-repository-path="true"]');
+    const refresh = wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]');
+    expect(path.text()).toContain("/data/.testagent/agent-opencode/references/requirements");
+    expect(path.attributes("title")).toBe("/data/.testagent/agent-opencode/references/requirements");
+    expect(path.element.compareDocumentPosition(refresh.element) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+
+    mockApi.synchronizeReferenceRepository.mockResolvedValueOnce(status({ repositoryPath: undefined }));
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-reference-repository-path="true"]').text()).toContain("服务器路径暂不可用");
+  });
+
+  it("opens verification progress before the request resolves and expands live server stages", async () => {
+    const verification = deferred<ReferenceRepositoryStatus>();
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
+      verifyReferenceRepositoryPointers: vi.fn().mockReturnValue(verification.promise)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    const refresh = wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]');
+    await refresh.trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const progress = wrapper.get('[aria-label="Git 指针核验进度"]');
+    expect(progress.text()).toContain("创建核验任务");
+    expect(progress.text()).toContain("正在创建");
+    expect(wrapper.get('button[aria-label="关闭 Git 指针核验进度"]').attributes()).toHaveProperty("disabled");
+    expect(wrapper.get(".reference-dialog-header").attributes()).toHaveProperty("inert");
+    expect(wrapper.get(".reference-dialog-body").attributes()).toHaveProperty("inert");
+    expect(document.activeElement).toBe(progress.element);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(progress.element);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[aria-label="Git 指针核验进度"]').exists()).toBe(true);
+    expect(wrapper.emitted("close")).toBeUndefined();
+
+    verification.resolve(status({
+      generation: 2,
+      status: "VERIFYING",
+      operation: "VERIFY_POINTERS",
+      targetServerCount: 2,
+      readyServerCount: 0,
+      servers: [
+        { linuxServerId: "linux-a", status: "PENDING", online: true },
+        { linuxServerId: "linux-b", status: "PROCESSING", online: true }
+      ]
+    }));
+    await flushPromises();
+
+    const updatedProgress = wrapper.get('[aria-label="Git 指针核验进度"]');
+    expect(updatedProgress.text()).toContain("任务已创建");
+    expect(updatedProgress.text()).toContain("各服务器核验");
+    expect(updatedProgress.text()).toContain("等待认领");
+    expect(updatedProgress.text()).toContain("核验中");
+    expect(updatedProgress.text()).toContain("linux-a");
+    expect(updatedProgress.text()).toContain("linux-b");
+  });
+
+  it("keeps the progress result until manually closed and restores focus after online servers converge", async () => {
+    vi.useFakeTimers();
+    const verified = status({
+      generation: 2,
+      status: "READY",
+      operation: "VERIFY_POINTERS",
+      targetServerCount: 2,
+      readyServerCount: 1,
+      servers: [
+        {
+          linuxServerId: "linux-a",
+          status: "READY",
+          currentBranch: "main",
+          currentCommitHash: "abc123",
+          online: true,
+          matchesTarget: true,
+          verifiedAt: "2026-07-18T10:00:00Z"
+        },
+        {
+          linuxServerId: "linux-b",
+          status: "DEFERRED",
+          currentBranch: "main",
+          currentCommitHash: "old123",
+          online: false,
+          matchesTarget: false,
+          verifiedAt: "2026-07-17T10:00:00Z"
+        }
+      ]
+    });
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
+      verifyReferenceRepositoryPointers: vi.fn().mockResolvedValue(status({
+        generation: 2,
+        status: "VERIFYING",
+        operation: "VERIFY_POINTERS",
+        targetServerCount: 2,
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: vi.fn().mockResolvedValue(verified)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    const refresh = wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]');
+    await refresh.trigger("click");
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+
+    const progress = wrapper.get('[aria-label="Git 指针核验进度"]');
+    expect(progress.text()).toContain("核验完成");
+    expect(progress.text()).toContain("1/2 台就绪");
+    expect(progress.text()).toContain("已一致");
+    expect(progress.text()).toContain("离线延后");
+    const close = wrapper.get('button[aria-label="关闭 Git 指针核验进度"]');
+    expect(close.attributes()).not.toHaveProperty("disabled");
+
+    await close.trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[aria-label="Git 指针核验进度"]').exists()).toBe(false);
+    expect(document.activeElement).toBe(wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]').element);
+  });
+
+  it("shows failed verification details and retries inside the progress dialog", async () => {
+    vi.useFakeTimers();
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
+      verifyReferenceRepositoryPointers: vi.fn().mockResolvedValue(status({
+        generation: 2,
+        status: "VERIFYING",
+        operation: "VERIFY_POINTERS",
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status({
+        generation: 2,
+        status: "FAILED",
+        operation: "VERIFY_POINTERS",
+        readyServerCount: 0,
+        traceId: "trace_verify_failed",
+        message: "服务器指针核验失败",
+        servers: [{
+          linuxServerId: "linux-a",
+          status: "BLOCKED",
+          online: true,
+          currentBranch: "release",
+          currentCommitHash: "other123",
+          matchesTarget: false,
+          error: "本地 origin 不一致"
+        }]
+      }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]').trigger("click");
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+
+    const progress = wrapper.get('[aria-label="Git 指针核验进度"]');
+    expect(progress.text()).toContain("核验失败");
+    expect(progress.text()).toContain("本地 origin 不一致");
+    expect(progress.text()).toContain("trace_verify_failed");
+    expect(wrapper.find('button[aria-label="重试 Git 指针核验"]').exists()).toBe(true);
+  });
+
+  it("keeps a failed verification request visible and retries it in place", async () => {
+    const verify = vi.fn()
+      .mockRejectedValueOnce(new BackendApiError(503, {
+        success: false,
+        code: "REFERENCE_VERIFY_FAILED",
+        message: "核验任务暂时无法创建",
+        traceId: "trace_verify_request_failed",
+        retryable: true
+      }))
+      .mockResolvedValueOnce(status({
+        generation: 2,
+        status: "VERIFYING",
+        operation: "VERIFY_POINTERS",
+        readyServerCount: 0
+      }));
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
+      verifyReferenceRepositoryPointers: verify
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]').trigger("click");
+    await flushPromises();
+
+    const failedProgress = wrapper.get('[aria-label="Git 指针核验进度"]');
+    expect(failedProgress.text()).toContain("核验任务暂时无法创建");
+    expect(failedProgress.text()).toContain("trace_verify_request_failed");
+    expect(wrapper.get('button[aria-label="关闭 Git 指针核验进度"]').attributes()).not.toHaveProperty("disabled");
+
+    await wrapper.get('button[aria-label="重试 Git 指针核验"]').trigger("click");
+    await flushPromises();
+
+    expect(verify).toHaveBeenCalledTimes(2);
+    const retriedProgress = wrapper.get('[aria-label="Git 指针核验进度"]');
+    expect(retriedProgress.text()).toContain("任务已创建");
+    expect(retriedProgress.text()).toContain("正在核验服务器 Git 指针");
+    expect(wrapper.get('button[aria-label="关闭 Git 指针核验进度"]').attributes()).toHaveProperty("disabled");
+  });
+
+  it("keeps polling after a transient progress error and clears it on success", async () => {
+    vi.useFakeTimers();
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
+      verifyReferenceRepositoryPointers: vi.fn().mockResolvedValue(status({
+        generation: 2,
+        status: "VERIFYING",
+        operation: "VERIFY_POINTERS",
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: vi.fn()
+        .mockRejectedValueOnce(new BackendApiError(503, {
+          success: false,
+          code: "REFERENCE_STATUS_FAILED",
+          message: "临时状态错误",
+          traceId: "trace_transient_progress",
+          retryable: true
+        }))
+        .mockResolvedValueOnce(status({
+          generation: 2,
+          status: "READY",
+          operation: "VERIFY_POINTERS"
+        }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]').trigger("click");
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(wrapper.get('[aria-label="Git 指针核验进度"]').text()).toContain("临时状态错误");
+    expect(wrapper.get('[aria-label="Git 指针核验进度"]').text()).toContain("正在自动重试");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(wrapper.get('[aria-label="Git 指针核验进度"]').text()).toContain("核验完成");
+    expect(wrapper.get('[aria-label="Git 指针核验进度"]').text()).not.toContain("临时状态错误");
   });
 
   it("copies the complete target and server commit hashes", async () => {

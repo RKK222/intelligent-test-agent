@@ -33,6 +33,7 @@ import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -964,6 +965,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 repository.name(),
                 repository.englishName(),
                 repository.gitUrl(),
+                repositoryPathForResponse(repository),
                 state != null && state.branch() != null,
                 state == null ? null : state.branch(),
                 state == null ? null : state.targetCommitHash(),
@@ -975,6 +977,17 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 servers,
                 state == null ? null : state.traceId(),
                 state == null ? null : state.lastError());
+    }
+
+    /**
+     * 状态查询只展示由只读通用参数和可信英文名派生的绝对路径；旧数据不可解析时返回空，不能拖垮仓库列表。
+     */
+    private String repositoryPathForResponse(CodeRepository repository) {
+        try {
+            return repositoryRoot(repository).toString();
+        } catch (PlatformException | InvalidPathException exception) {
+            return null;
+        }
     }
 
     private Boolean matchesTarget(ReferenceRepositoryReplica replica, ReferenceRepositoryState state) {

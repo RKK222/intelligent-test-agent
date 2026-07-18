@@ -250,6 +250,7 @@ export type ReferenceRepositoryStatus = {
   name: string;
   englishName: string;
   gitUrl: string;
+  repositoryPath?: string | null;
   initialized: boolean;
   branch?: string | null;
   targetCommitHash?: string | null;

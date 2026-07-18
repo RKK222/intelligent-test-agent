@@ -56,6 +56,7 @@ class ReferenceRepositoryControllerTest {
         client.get().uri(BASE + "/repo-assets/status").header("X-Trace-Id", TRACE_ID).exchange()
                 .expectStatus().isOk().expectBody()
                 .jsonPath("$.data.status").isEqualTo("INITIALIZING")
+                .jsonPath("$.data.repositoryPath").isEqualTo("/data/references/assets")
                 .jsonPath("$.data.operation").isEqualTo("SYNCHRONIZE");
         client.get().uri(BASE + "/repo-assets/tree?path=docs").header("X-Trace-Id", TRACE_ID).exchange()
                 .expectStatus().isOk().expectBody().jsonPath("$.data[0].path").isEqualTo("docs/spec.md");
@@ -116,11 +117,13 @@ class ReferenceRepositoryControllerTest {
                 "资产库",
                 "assets",
                 "https://git.example.test/assets.git",
+                "/data/references/assets",
                 true,
                 "main",
                 "commit-1",
                 1L,
                 "INITIALIZING",
+                "SYNCHRONIZE",
                 1,
                 0,
                 List.of(),
