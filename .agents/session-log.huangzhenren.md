@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-07-18 - Service 日志切面改为仅在异常时打印
+
+- Why:
+  - `ServiceLoggingAspect` 对每个 `@Service` public 方法都打 `service_entry` + `service_exit(success)` 两条 INFO，正常调用产生大量噪声（如 `PublicAgentConfigRolloutService.claimPendingSync` 每 5 秒一条），单条 INFO 不携带结果或异常，诊断价值低。
+- What:
+  - 删除 `service_entry`、成功 `service_exit`、Mono `doOnSuccess`、Flux `service_stream_start/end`；仅保留异常时 ERROR 日志，并在其中补 `args` 字段（沿用 `argsSummary`，仅类型+轻量值，避免泄漏 prompt/token）。
+  - 同步 `package-info.java` 与 `test-agent-api/README.md` 中该切面的描述。
+- How:
+  - 改 `logServiceCall`：正常返回静默；Mono/Flux 仅挂 `doOnError`；同步异常走 `catch` 记录后原样抛出。
+  - `argsSummary` 改为仅在 `logError` 内惰性计算，去掉每次成功调用都算参数摘要的开销；`argsSummary`/`argSummary` 方法保留（有单测直接覆盖）。
+- Result:
+  - `mvn -pl test-agent-api -am test -Dtest=ServiceLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`：4 passed / 0 failures，BUILD SUCCESS。
+  - 仅日志行为变化，无 API/事件/数据库/兼容性影响；事件名 `service_exit status=error` 保留，兼容既有日志查询。
+- Pitfalls:
+  - 正常调用不再有任何日志；原先依赖 `service_entry` 作为调用频率心跳的观测需改用其他来源。traceId=unknown 的后台调用异常仍会记录。
+- Verification:
+  - `mvn -pl test-agent-api -am test -Dtest=ServiceLoggingAspectTest -Dsurefire.failIfNoSpecifiedTests=false`
+- Next:
+  - None。
+
 ### 2026-07-18 - 引用资产 Git 指针核验进度与服务器路径
 
 - Why:

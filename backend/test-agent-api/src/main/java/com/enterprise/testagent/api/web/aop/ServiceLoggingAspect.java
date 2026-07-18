@@ -18,7 +18,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * Service 方法日志切面，统一记录业务服务入口、出口、耗时和错误。
+ * Service 方法日志切面，仅在抛出异常时记录方法、参数摘要、耗时和错误，避免对正常调用产生日志噪声。
  *
  * <p>该切面只记录参数类型摘要，不记录完整参数和返回体，避免把 prompt、文件内容、token 或大对象写入日志。
  */
@@ -34,66 +34,47 @@ public class ServiceLoggingAspect {
     }
 
     /**
-     * 环绕记录 service 调用。响应式返回值在订阅完成、取消或错误时记录最终状态。
+     * 环绕 service 调用；正常返回保持静默，仅在抛出异常时记录方法、参数摘要、耗时和错误。
+     * 响应式返回值在错误信号到达订阅者时记录，原异常继续向上游传播。
      */
     @Around("serviceMethods()")
     public Object logServiceCall(ProceedingJoinPoint joinPoint) throws Throwable {
         Logger logger = loggerFor(joinPoint);
         String traceId = currentTraceId();
         String methodName = methodName(joinPoint);
-        String argsSummary = argsSummary(joinPoint.getArgs());
+        Object[] args = joinPoint.getArgs();
         long startTime = System.currentTimeMillis();
-
-        logger.info("event=service_entry traceId={} method={} args={}", traceId, methodName, argsSummary);
         try {
             Object result = joinPoint.proceed();
-            return handleResult(result, logger, traceId, methodName, startTime);
+            if (result instanceof Mono<?> mono) {
+                return mono.doOnError(error -> logError(logger, traceId, methodName, args, startTime, error));
+            }
+            if (result instanceof Flux<?> flux) {
+                return flux.doOnError(error -> logError(logger, traceId, methodName, args, startTime, error));
+            }
+            return result;
         } catch (Throwable error) {
-            logError(logger, traceId, methodName, System.currentTimeMillis() - startTime, error);
+            logError(logger, traceId, methodName, args, startTime, error);
             throw error;
         }
     }
 
-    private Object handleResult(
-            Object result,
+    /**
+     * 异常时记录 ERROR 日志；参数摘要只含类型和轻量值，不记录完整参数与返回体。
+     */
+    private void logError(
             Logger logger,
             String traceId,
             String methodName,
-            long startTime) {
-        if (result instanceof Mono<?> mono) {
-            return mono
-                    .doOnSuccess(value -> logSuccess(logger, traceId, methodName, startTime, "mono"))
-                    .doOnError(error -> logError(logger, traceId, methodName,
-                            System.currentTimeMillis() - startTime, error));
-        }
-        if (result instanceof Flux<?> flux) {
-            logger.info("event=service_stream_start traceId={} method={}", traceId, methodName);
-            return flux.doFinally(signal -> logger.info(
-                    "event=service_stream_end traceId={} method={} signal={} durationMs={}",
-                    traceId,
-                    methodName,
-                    signal,
-                    System.currentTimeMillis() - startTime));
-        }
-        logSuccess(logger, traceId, methodName, startTime, result == null ? "void" : "sync");
-        return result;
-    }
-
-    private void logSuccess(Logger logger, String traceId, String methodName, long startTime, String returnKind) {
-        logger.info(
-                "event=service_exit traceId={} method={} durationMs={} status=success returnKind={}",
+            Object[] args,
+            long startTime,
+            Throwable error) {
+        logger.error(
+                "event=service_exit traceId={} method={} durationMs={} status=error args={} errorType={} errorCode={} message={}",
                 traceId,
                 methodName,
                 System.currentTimeMillis() - startTime,
-                returnKind);
-    }
-
-    private void logError(Logger logger, String traceId, String methodName, long duration, Throwable error) {
-        logger.error(
-                "event=service_exit traceId={} method={} durationMs={} status=error errorType={} errorCode={} message={}",
-                traceId,
-                methodName,
-                duration,
+                argsSummary(args),
                 error.getClass().getSimpleName(),
                 errorCode(error),
                 SensitiveDataMasker.truncate(error.getMessage()),
