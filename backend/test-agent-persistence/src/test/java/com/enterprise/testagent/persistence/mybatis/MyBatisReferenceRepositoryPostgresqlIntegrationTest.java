@@ -72,7 +72,7 @@ class MyBatisReferenceRepositoryPostgresqlIntegrationTest {
         assertThat(repository.findReplicas(REPOSITORY_ID)).singleElement().satisfies(replica -> {
             assertThat(replica.generation()).isEqualTo(1L);
             assertThat(replica.status()).isEqualTo(ReferenceRepositoryReplicaStatus.PENDING);
-            assertThat(replica.currentBranch()).isEqualTo("main");
+            assertThat(replica.currentBranch()).isNull();
         });
 
         assertThat(repository.updateOverallStatus(

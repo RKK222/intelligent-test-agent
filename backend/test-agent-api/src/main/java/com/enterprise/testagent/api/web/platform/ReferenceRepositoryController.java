@@ -55,6 +55,27 @@ public class ReferenceRepositoryController {
                 appId, repositoryId, principal.userId(), traceId));
     }
 
+    @PostMapping("/{repositoryId}/switch-branch")
+    public Mono<ApiResponse<Object>> switchBranch(
+            @PathVariable String appId,
+            @PathVariable String repositoryId,
+            @RequestBody ReferenceRepositoryDtos.SwitchBranchRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = requireAppAdmin(exchange);
+        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> service.switchBranch(
+                appId, repositoryId, request.branch(), principal.userId(), traceId));
+    }
+
+    @PostMapping("/{repositoryId}/verify")
+    public Mono<ApiResponse<Object>> verify(
+            @PathVariable String appId,
+            @PathVariable String repositoryId,
+            ServerWebExchange exchange) {
+        requireAppAdmin(exchange);
+        return RuntimeApiSupport.blockingObjectResponse(
+                exchange, traceId -> service.verify(appId, repositoryId, traceId));
+    }
+
     @GetMapping("/{repositoryId}/status")
     public Mono<ApiResponse<Object>> status(
             @PathVariable String appId,

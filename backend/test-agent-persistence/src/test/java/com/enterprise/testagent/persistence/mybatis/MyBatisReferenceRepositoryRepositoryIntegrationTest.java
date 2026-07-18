@@ -6,6 +6,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplica;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryOperationType;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryState;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
 import com.enterprise.testagent.domain.user.UserId;
@@ -70,6 +71,9 @@ class MyBatisReferenceRepositoryRepositoryIntegrationTest {
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260718110000__create_reference_repository_replica_tables.sql"))
                 .execute(schemaDataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260718143000__add_reference_repository_operations_and_verification.sql"))
+                .execute(schemaDataSource);
         jdbcClient = JdbcClient.create(dataSource);
         insertCredentialUserAndRepository();
 
@@ -94,6 +98,76 @@ class MyBatisReferenceRepositoryRepositoryIntegrationTest {
                 .query(Integer.class).single()).isZero();
         assertThat(jdbcClient.sql("select count(*) from reference_repository_replicas")
                 .query(Integer.class).single()).isZero();
+    }
+
+    @Test
+    void migrationAddsCompatibleOperationAndVerifiedAtColumns() {
+        assertThat(jdbcClient.sql("select operation_type from reference_repository_states")
+                .query(String.class).optional()).isEmpty();
+        assertThat(jdbcClient.sql("select verified_at from reference_repository_replicas")
+                .query(Timestamp.class).optional()).isEmpty();
+    }
+
+    @Test
+    void generationAdvanceUsesExpectedOldBranchAndMapsOperation() {
+        assertThat(repository.initializeIfAbsent(state(
+                "main", "commit-1", 1L, ReferenceRepositoryStatus.READY))).isPresent();
+        ReferenceRepositoryState switched = new ReferenceRepositoryState(
+                REPOSITORY_ID,
+                "release",
+                "commit-release",
+                2L,
+                ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SWITCH_BRANCH,
+                USER_ID,
+                "trace_switch",
+                null,
+                NOW,
+                NOW,
+                NOW.plusSeconds(1));
+
+        assertThat(repository.advanceGenerationIfCurrent(1L, "other", switched)).isEmpty();
+        assertThat(repository.advanceGenerationIfCurrent(1L, "main", switched)).contains(switched);
+        assertThat(repository.findState(REPOSITORY_ID).orElseThrow().operationType())
+                .isEqualTo(ReferenceRepositoryOperationType.SWITCH_BRANCH);
+    }
+
+    @Test
+    void newGenerationPreservesObservedPointerAndFencedVerificationUpdatesIt() {
+        assertThat(repository.initializeIfAbsent(state(
+                "main", "commit-1", 1L, ReferenceRepositoryStatus.READY))).isPresent();
+        repository.upsertTargets(REPOSITORY_ID, 1L, "main", Set.of(SERVER_ID), NOW);
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "lease-sync", NOW.plusSeconds(30), NOW)).isPresent();
+        assertThat(repository.markReady(
+                REPOSITORY_ID, 1L, SERVER_ID, "lease-sync", "main", "commit-1",
+                NOW.plusSeconds(1), NOW.plusSeconds(1))).isTrue();
+        ReferenceRepositoryState verifying = new ReferenceRepositoryState(
+                REPOSITORY_ID, "main", "commit-1", 2L, ReferenceRepositoryStatus.VERIFYING,
+                ReferenceRepositoryOperationType.VERIFY_POINTERS, USER_ID, "trace_verify", null,
+                NOW, NOW, NOW.plusSeconds(2));
+        assertThat(repository.advanceGenerationIfCurrent(1L, "main", verifying)).contains(verifying);
+        repository.upsertTargets(REPOSITORY_ID, 2L, "main", Set.of(SERVER_ID), NOW.plusSeconds(2));
+
+        assertThat(repository.findReplicas(REPOSITORY_ID)).singleElement().satisfies(replica -> {
+            assertThat(replica.currentBranch()).isEqualTo("main");
+            assertThat(replica.currentCommitHash()).isEqualTo("commit-1");
+            assertThat(replica.syncedAt()).isEqualTo(NOW.plusSeconds(1));
+            assertThat(replica.verifiedAt()).isNull();
+        });
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 2L, SERVER_ID, "lease-verify", NOW.plusSeconds(40), NOW.plusSeconds(3))).isPresent();
+        assertThat(repository.markVerificationResult(
+                REPOSITORY_ID, 2L, SERVER_ID, "stale-token", ReferenceRepositoryReplicaStatus.READY,
+                "main", "commit-1", NOW.plusSeconds(4), null, NOW.plusSeconds(4))).isFalse();
+        assertThat(repository.markVerificationResult(
+                REPOSITORY_ID, 2L, SERVER_ID, "lease-verify", ReferenceRepositoryReplicaStatus.READY,
+                "main", "commit-1", NOW.plusSeconds(4), null, NOW.plusSeconds(4))).isTrue();
+        assertThat(repository.findReplicas(REPOSITORY_ID)).singleElement().satisfies(replica -> {
+            assertThat(replica.status()).isEqualTo(ReferenceRepositoryReplicaStatus.READY);
+            assertThat(replica.verifiedAt()).isEqualTo(NOW.plusSeconds(4));
+            assertThat(replica.syncedAt()).isEqualTo(NOW.plusSeconds(1));
+        });
     }
 
     @Test

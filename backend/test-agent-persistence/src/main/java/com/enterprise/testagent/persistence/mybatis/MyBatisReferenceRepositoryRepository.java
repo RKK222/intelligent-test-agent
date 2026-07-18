@@ -4,6 +4,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplica;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryOperationType;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryState;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
@@ -60,8 +61,9 @@ public class MyBatisReferenceRepositoryRepository implements ReferenceRepository
     @Override
     public Optional<ReferenceRepositoryState> advanceGenerationIfCurrent(
             long expectedGeneration,
+            String expectedOldBranch,
             ReferenceRepositoryState nextState) {
-        if (mapper.advanceStateIfCurrent(expectedGeneration, toRow(nextState)) != 1) {
+        if (mapper.advanceStateIfCurrent(expectedGeneration, expectedOldBranch, toRow(nextState)) != 1) {
             return Optional.empty();
         }
         return findState(nextState.repositoryId());
@@ -175,6 +177,23 @@ public class MyBatisReferenceRepositoryRepository implements ReferenceRepository
     }
 
     @Override
+    public boolean markVerificationResult(
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            String leaseToken,
+            ReferenceRepositoryReplicaStatus status,
+            String actualBranch,
+            String actualCommitHash,
+            Instant verifiedAt,
+            String lastError,
+            Instant now) {
+        return mapper.markVerificationResult(
+                repositoryId.value(), generation, linuxServerId.value(), leaseToken, status.name(),
+                actualBranch, actualCommitHash, verifiedAt, lastError, now) == 1;
+    }
+
+    @Override
     public boolean updateOverallStatus(
             CodeRepositoryId repositoryId,
             long generation,
@@ -191,6 +210,7 @@ public class MyBatisReferenceRepositoryRepository implements ReferenceRepository
                 state.targetCommitHash(),
                 state.generation(),
                 state.status().name(),
+                state.operationType().name(),
                 state.credentialUserId() == null ? null : state.credentialUserId().value(),
                 state.traceId(),
                 state.lastError(),
@@ -206,6 +226,7 @@ public class MyBatisReferenceRepositoryRepository implements ReferenceRepository
                 row.targetCommitHash(),
                 row.generation(),
                 ReferenceRepositoryStatus.valueOf(row.status()),
+                ReferenceRepositoryOperationType.valueOf(row.operationType()),
                 row.credentialUserId() == null ? null : new UserId(row.credentialUserId()),
                 row.traceId(),
                 row.lastError(),
@@ -228,6 +249,7 @@ public class MyBatisReferenceRepositoryRepository implements ReferenceRepository
                 row.leaseUntil(),
                 row.lastError(),
                 row.syncedAt(),
+                row.verifiedAt(),
                 row.createdAt(),
                 row.updatedAt());
     }

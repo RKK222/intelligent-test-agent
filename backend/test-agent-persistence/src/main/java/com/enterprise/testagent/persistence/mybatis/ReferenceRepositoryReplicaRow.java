@@ -16,6 +16,7 @@ public record ReferenceRepositoryReplicaRow(
         Instant leaseUntil,
         String lastError,
         Instant syncedAt,
+        Instant verifiedAt,
         Instant createdAt,
         Instant updatedAt) {
 }

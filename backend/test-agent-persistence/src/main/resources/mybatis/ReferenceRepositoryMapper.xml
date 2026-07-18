@@ -10,6 +10,7 @@
             <arg column="target_commit_hash" javaType="java.lang.String"/>
             <arg column="generation" javaType="_long"/>
             <arg column="status" javaType="java.lang.String"/>
+            <arg column="operation_type" javaType="java.lang.String"/>
             <arg column="credential_user_id" javaType="java.lang.String"/>
             <arg column="trace_id" javaType="java.lang.String"/>
             <arg column="last_error" javaType="java.lang.String"/>
@@ -33,18 +34,19 @@
             <arg column="lease_until" javaType="java.time.Instant"/>
             <arg column="last_error" javaType="java.lang.String"/>
             <arg column="synced_at" javaType="java.time.Instant"/>
+            <arg column="verified_at" javaType="java.time.Instant"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
         </constructor>
     </resultMap>
 
     <sql id="StateColumns">
-        repository_id, branch, target_commit_hash, generation, status, credential_user_id,
+        repository_id, branch, target_commit_hash, generation, status, operation_type, credential_user_id,
         trace_id, last_error, initialized_at, created_at, updated_at
     </sql>
     <sql id="ReplicaColumns">
         repository_id, linux_server_id, generation, status, branch, current_commit_hash,
-        retry_count, next_retry_at, lease_token, lease_until, last_error, synced_at, created_at, updated_at
+        retry_count, next_retry_at, lease_token, lease_until, last_error, synced_at, verified_at, created_at, updated_at
     </sql>
 
     <select id="findState" resultMap="StateRowMap">
@@ -72,10 +74,10 @@
 
     <insert id="initializeStateIfAbsent" databaseId="postgresql">
         insert into reference_repository_states(
-            repository_id, branch, target_commit_hash, generation, status, credential_user_id,
+            repository_id, branch, target_commit_hash, generation, status, operation_type, credential_user_id,
             trace_id, last_error, initialized_at, created_at, updated_at
         ) values (
-            #{row.repositoryId}, #{row.branch}, #{row.targetCommitHash}, #{row.generation}, #{row.status},
+            #{row.repositoryId}, #{row.branch}, #{row.targetCommitHash}, #{row.generation}, #{row.status}, #{row.operationType},
             #{row.credentialUserId}, #{row.traceId}, #{row.lastError}, #{row.initializedAt},
             #{row.createdAt}, #{row.updatedAt}
         )
@@ -85,19 +87,19 @@
     <insert id="initializeStateIfAbsent">
         merge into reference_repository_states as target
         using (values (
-            #{row.repositoryId}, #{row.branch}, #{row.targetCommitHash}, #{row.generation}, #{row.status},
+            #{row.repositoryId}, #{row.branch}, #{row.targetCommitHash}, #{row.generation}, #{row.status}, #{row.operationType},
             #{row.credentialUserId}, #{row.traceId}, #{row.lastError}, cast(#{row.initializedAt} as timestamp),
             cast(#{row.createdAt} as timestamp), cast(#{row.updatedAt} as timestamp)
         )) as source(
-            repository_id, branch, target_commit_hash, generation, status, credential_user_id,
+            repository_id, branch, target_commit_hash, generation, status, operation_type, credential_user_id,
             trace_id, last_error, initialized_at, created_at, updated_at
         )
         on target.repository_id = source.repository_id
         when not matched then insert (
-            repository_id, branch, target_commit_hash, generation, status, credential_user_id,
+            repository_id, branch, target_commit_hash, generation, status, operation_type, credential_user_id,
             trace_id, last_error, initialized_at, created_at, updated_at
         ) values (
-            source.repository_id, source.branch, source.target_commit_hash, source.generation, source.status,
+            source.repository_id, source.branch, source.target_commit_hash, source.generation, source.status, source.operation_type,
             source.credential_user_id, source.trace_id, source.last_error, source.initialized_at,
             source.created_at, source.updated_at
         )
@@ -105,15 +107,17 @@
 
     <update id="advanceStateIfCurrent">
         update reference_repository_states
-        set target_commit_hash = #{row.targetCommitHash},
+        set branch = #{row.branch},
+            target_commit_hash = #{row.targetCommitHash},
             generation = #{row.generation},
             status = #{row.status},
+            operation_type = #{row.operationType},
             credential_user_id = #{row.credentialUserId},
             trace_id = #{row.traceId},
             last_error = #{row.lastError},
             updated_at = #{row.updatedAt}
         where repository_id = #{row.repositoryId}
-          and branch = #{row.branch}
+          and branch = #{expectedOldBranch}
           and generation = #{expectedGeneration}
           and status in ('READY', 'FAILED')
     </update>
@@ -122,7 +126,7 @@
         insert into reference_repository_replicas(
             repository_id, linux_server_id, generation, status, branch, retry_count, created_at, updated_at
         ) values (
-            #{repositoryId}, #{linuxServerId}, #{generation}, 'PENDING', #{branch}, 0, #{now}, #{now}
+            #{repositoryId}, #{linuxServerId}, #{generation}, 'PENDING', null, 0, #{now}, #{now}
         )
         on conflict (repository_id, linux_server_id) do update set
             generation = excluded.generation,
@@ -131,18 +135,6 @@
                     or (reference_repository_replicas.generation = excluded.generation
                         and reference_repository_replicas.status = 'DEFERRED') then 'PENDING'
                 else reference_repository_replicas.status
-            end,
-            branch = case
-                when reference_repository_replicas.generation &lt; excluded.generation
-                    or (reference_repository_replicas.generation = excluded.generation
-                        and reference_repository_replicas.status = 'DEFERRED') then excluded.branch
-                else reference_repository_replicas.branch
-            end,
-            current_commit_hash = case
-                when reference_repository_replicas.generation &lt; excluded.generation
-                    or (reference_repository_replicas.generation = excluded.generation
-                        and reference_repository_replicas.status = 'DEFERRED') then null
-                else reference_repository_replicas.current_commit_hash
             end,
             retry_count = case
                 when reference_repository_replicas.generation &lt; excluded.generation
@@ -174,12 +166,6 @@
                         and reference_repository_replicas.status = 'DEFERRED') then null
                 else reference_repository_replicas.last_error
             end,
-            synced_at = case
-                when reference_repository_replicas.generation &lt; excluded.generation
-                    or (reference_repository_replicas.generation = excluded.generation
-                        and reference_repository_replicas.status = 'DEFERRED') then null
-                else reference_repository_replicas.synced_at
-            end,
             updated_at = case
                 when reference_repository_replicas.generation &lt; excluded.generation
                     or (reference_repository_replicas.generation = excluded.generation
@@ -198,19 +184,16 @@
         when matched and target.generation &lt;= source.generation then update set
             generation = source.generation,
             status = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then 'PENDING' else target.status end,
-            branch = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then source.branch else target.branch end,
-            current_commit_hash = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then null else target.current_commit_hash end,
             retry_count = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then 0 else target.retry_count end,
             next_retry_at = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then null else target.next_retry_at end,
             lease_token = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then null else target.lease_token end,
             lease_until = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then null else target.lease_until end,
             last_error = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then null else target.last_error end,
-            synced_at = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then null else target.synced_at end,
             updated_at = case when target.generation &lt; source.generation or target.status = 'DEFERRED' then source.updated_at else target.updated_at end
         when not matched then insert (
             repository_id, linux_server_id, generation, status, branch, retry_count, created_at, updated_at
         ) values (
-            source.repository_id, source.linux_server_id, source.generation, 'PENDING', source.branch,
+            source.repository_id, source.linux_server_id, source.generation, 'PENDING', null,
             0, source.updated_at, source.updated_at
         )
     </insert>
@@ -293,6 +276,16 @@
         update reference_repository_replicas
         set status = 'BLOCKED', lease_token = null, lease_until = null,
             last_error = #{lastError}, updated_at = #{now}
+        where repository_id = #{repositoryId} and linux_server_id = #{linuxServerId}
+          and generation = #{generation} and status = 'PROCESSING'
+          and lease_token = #{leaseToken} and lease_until &gt; #{now}
+    </update>
+
+    <update id="markVerificationResult">
+        update reference_repository_replicas
+        set status = #{status}, branch = #{actualBranch}, current_commit_hash = #{actualCommitHash},
+            retry_count = 0, next_retry_at = null, lease_token = null, lease_until = null,
+            last_error = #{lastError}, verified_at = #{verifiedAt}, updated_at = #{now}
         where repository_id = #{repositoryId} and linux_server_id = #{linuxServerId}
           and generation = #{generation} and status = 'PROCESSING'
           and lease_token = #{leaseToken} and lease_until &gt; #{now}

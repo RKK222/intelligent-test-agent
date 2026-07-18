@@ -74,4 +74,41 @@ class ReferenceRepositoryDomainTest {
         assertThat(state.credentialUserId()).isEqualTo(new UserId("usr_admin"));
         assertThat(state.status().active()).isTrue();
     }
+
+    @Test
+    void repositoryStateAndReplicaPreserveOperationAndVerificationSnapshot() {
+        Instant now = Instant.parse("2026-07-18T00:00:00Z");
+        ReferenceRepositoryState state = new ReferenceRepositoryState(
+                new CodeRepositoryId("repo_assets"),
+                "release",
+                "def456",
+                5L,
+                ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SWITCH_BRANCH,
+                new UserId("usr_admin"),
+                "trace_switch",
+                null,
+                now,
+                now,
+                now);
+        ReferenceRepositoryReplica replica = new ReferenceRepositoryReplica(
+                new CodeRepositoryId("repo_assets"),
+                new LinuxServerId("server-a"),
+                5L,
+                ReferenceRepositoryReplicaStatus.READY,
+                "release",
+                "def456",
+                0,
+                null,
+                null,
+                null,
+                null,
+                now,
+                now,
+                now,
+                now);
+
+        assertThat(state.operationType()).isEqualTo(ReferenceRepositoryOperationType.SWITCH_BRANCH);
+        assertThat(replica.verifiedAt()).isEqualTo(now);
+    }
 }

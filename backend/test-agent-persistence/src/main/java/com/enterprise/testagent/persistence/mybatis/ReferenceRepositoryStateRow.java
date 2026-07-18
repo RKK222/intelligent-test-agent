@@ -9,6 +9,7 @@ public record ReferenceRepositoryStateRow(
         String targetCommitHash,
         long generation,
         String status,
+        String operationType,
         String credentialUserId,
         String traceId,
         String lastError,

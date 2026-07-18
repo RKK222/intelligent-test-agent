@@ -23,7 +23,15 @@ public interface ReferenceRepositoryRepository {
     /** 仅当数据库仍为 expectedGeneration 且处于终态时推进 generation；竞争失败返回 empty。 */
     Optional<ReferenceRepositoryState> advanceGenerationIfCurrent(
             long expectedGeneration,
+            String expectedOldBranch,
             ReferenceRepositoryState nextState);
+
+    /** 同分支同步兼容入口。 */
+    default Optional<ReferenceRepositoryState> advanceGenerationIfCurrent(
+            long expectedGeneration,
+            ReferenceRepositoryState nextState) {
+        return advanceGenerationIfCurrent(expectedGeneration, nextState.branch(), nextState);
+    }
 
     void upsertTargets(
             CodeRepositoryId repositoryId,
@@ -86,6 +94,19 @@ public interface ReferenceRepositoryRepository {
             long generation,
             LinuxServerId linuxServerId,
             String leaseToken,
+            String lastError,
+            Instant now);
+
+    /** 主动核验只读观察后的 fenced 写回；actual 指针允许为空以表达无法可信观察。 */
+    boolean markVerificationResult(
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            String leaseToken,
+            ReferenceRepositoryReplicaStatus status,
+            String actualBranch,
+            String actualCommitHash,
+            Instant verifiedAt,
             String lastError,
             Instant now);
 

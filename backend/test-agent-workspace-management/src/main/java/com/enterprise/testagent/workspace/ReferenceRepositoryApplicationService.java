@@ -19,6 +19,7 @@ import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplica;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryOperationType;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryState;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
@@ -234,6 +235,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 targetCommit,
                 1L,
                 ReferenceRepositoryStatus.INITIALIZING,
+                ReferenceRepositoryOperationType.INITIALIZE,
                 userId,
                 requireTraceId(traceId),
                 null,
@@ -278,6 +280,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 targetCommit,
                 current.generation() + 1L,
                 ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SYNCHRONIZE,
                 userId,
                 requireTraceId(traceId),
                 null,
@@ -285,7 +288,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 current.createdAt(),
                 now);
         Optional<ReferenceRepositoryState> advanced = referenceRepository.advanceGenerationIfCurrent(
-                current.generation(), next);
+                current.generation(), current.branch(), next);
         if (advanced.isEmpty()) {
             ReferenceRepositoryState winner = referenceRepository.findState(repository.repositoryId())
                     .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库同步竞争状态不存在"));
@@ -299,6 +302,103 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         referenceRepository.upsertTargets(saved.repositoryId(), saved.generation(), saved.branch(), targets, now);
         publishSyncRequested(saved);
         return status(repository, saved);
+    }
+
+    /** 受控切换分支：先固定远端 HEAD，再用旧分支与 generation 双重 CAS 推进新代次。 */
+    public ReferenceRepositoryResponses.Status switchBranch(
+            String appId,
+            String repositoryId,
+            String branch,
+            UserId userId,
+            String traceId) {
+        CodeRepository repository = requireLinkedAssetRepository(applicationId(appId), repositoryId(repositoryId));
+        String normalizedBranch = normalizeBranch(branch);
+        ReferenceRepositoryState current = referenceRepository.findState(repository.repositoryId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库尚未初始化"));
+        if (current.status().active()) {
+            if (current.operationType() == ReferenceRepositoryOperationType.SWITCH_BRANCH
+                    && normalizedBranch.equals(current.branch())) {
+                return status(repository, current);
+            }
+            throw new PlatformException(ErrorCode.CONFLICT, "引用资产库存在执行中的操作");
+        }
+        requireTerminalState(current);
+        if (normalizedBranch.equals(current.branch())) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目标分支与当前分支相同");
+        }
+        String targetCommit = resolveRemoteHead(repository, normalizedBranch, userId);
+        Instant now = clock.instant();
+        ReferenceRepositoryState next = new ReferenceRepositoryState(
+                repository.repositoryId(), normalizedBranch, targetCommit, current.generation() + 1L,
+                ReferenceRepositoryStatus.SYNCHRONIZING, ReferenceRepositoryOperationType.SWITCH_BRANCH,
+                userId, requireTraceId(traceId), null, current.initializedAt(), current.createdAt(), now);
+        Optional<ReferenceRepositoryState> advanced = referenceRepository.advanceGenerationIfCurrent(
+                current.generation(), current.branch(), next);
+        if (advanced.isEmpty()) {
+            ReferenceRepositoryState winner = referenceRepository.findState(repository.repositoryId())
+                    .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库切换竞争状态不存在"));
+            if (winner.operationType() == ReferenceRepositoryOperationType.SWITCH_BRANCH
+                    && winner.status().active()
+                    && normalizedBranch.equals(winner.branch())) {
+                return status(repository, winner);
+            }
+            throw new PlatformException(ErrorCode.CONFLICT, "引用资产库切换与其它操作冲突");
+        }
+        ReferenceRepositoryState saved = advanced.orElseThrow();
+        createTargetsForNewGeneration(saved, now);
+        publishSyncRequested(saved);
+        return status(repository, saved);
+    }
+
+    /** 主动核验只推进代次，不解析远端、不修改磁盘，并保留上一代实际指针快照。 */
+    public ReferenceRepositoryResponses.Status verify(String appId, String repositoryId, String traceId) {
+        CodeRepository repository = requireLinkedAssetRepository(applicationId(appId), repositoryId(repositoryId));
+        ReferenceRepositoryState current = referenceRepository.findState(repository.repositoryId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库尚未初始化"));
+        if (current.status().active()) {
+            if (current.operationType() == ReferenceRepositoryOperationType.VERIFY_POINTERS) {
+                return status(repository, current);
+            }
+            throw new PlatformException(ErrorCode.CONFLICT, "引用资产库存在执行中的操作");
+        }
+        requireTerminalState(current);
+        Instant now = clock.instant();
+        ReferenceRepositoryState next = new ReferenceRepositoryState(
+                current.repositoryId(), current.branch(), current.targetCommitHash(), current.generation() + 1L,
+                ReferenceRepositoryStatus.VERIFYING, ReferenceRepositoryOperationType.VERIFY_POINTERS,
+                current.credentialUserId(), requireTraceId(traceId), null,
+                current.initializedAt(), current.createdAt(), now);
+        Optional<ReferenceRepositoryState> advanced = referenceRepository.advanceGenerationIfCurrent(
+                current.generation(), current.branch(), next);
+        if (advanced.isEmpty()) {
+            ReferenceRepositoryState winner = referenceRepository.findState(repository.repositoryId())
+                    .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库核验竞争状态不存在"));
+            if (winner.operationType() == ReferenceRepositoryOperationType.VERIFY_POINTERS && winner.status().active()) {
+                return status(repository, winner);
+            }
+            throw new PlatformException(ErrorCode.CONFLICT, "引用资产库核验与其它操作冲突");
+        }
+        ReferenceRepositoryState saved = advanced.orElseThrow();
+        createTargetsForNewGeneration(saved, now);
+        publishSyncRequested(saved);
+        return status(repository, saved);
+    }
+
+    private void createTargetsForNewGeneration(ReferenceRepositoryState state, Instant now) {
+        Set<LinuxServerId> live = liveServerIds();
+        Set<LinuxServerId> targets = new LinkedHashSet<>(live);
+        referenceRepository.findReplicas(state.repositoryId()).stream()
+                .map(ReferenceRepositoryReplica::linuxServerId)
+                .forEach(targets::add);
+        referenceRepository.upsertTargets(state.repositoryId(), state.generation(), state.branch(), targets, now);
+        referenceRepository.deferOfflineReplicas(state.repositoryId(), state.generation(), live, now);
+    }
+
+    private void requireTerminalState(ReferenceRepositoryState state) {
+        if (state.status() != ReferenceRepositoryStatus.READY
+                && state.status() != ReferenceRepositoryStatus.FAILED) {
+            throw new PlatformException(ErrorCode.CONFLICT, "引用资产库当前状态不允许执行该操作");
+        }
     }
 
     public ReferenceRepositoryResponses.Status status(String appId, String repositoryId) {
@@ -474,7 +574,15 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             return;
         }
         CodeRepository repository = configurationRepository.findRepository(claimed.repositoryId()).orElse(null);
-        if (repository == null || !isAssetRepository(repository) || state.credentialUserId() == null) {
+        if (repository == null || !isAssetRepository(repository)) {
+            markBlocked(claimed, "引用资产库配置不存在");
+            return;
+        }
+        if (state.operationType() == ReferenceRepositoryOperationType.VERIFY_POINTERS) {
+            verifyClaimedReplica(claimed, repository, state, traceId);
+            return;
+        }
+        if (state.credentialUserId() == null) {
             markBlocked(claimed, "引用资产库配置或凭据用户不存在");
             return;
         }
@@ -523,6 +631,51 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         }
     }
 
+    /** 主动核验全程只读 Git 与文件系统；任何不可信状态都按 BLOCKED fenced 写回实际快照。 */
+    private void verifyClaimedReplica(
+            ReferenceRepositoryReplica claimed,
+            CodeRepository repository,
+            ReferenceRepositoryState state,
+            String traceId) {
+        String actualBranch = claimed.currentBranch();
+        String actualCommit = claimed.currentCommitHash();
+        String error = null;
+        try {
+            Path repoRoot = repositoryRoot(repository);
+            if (Files.isSymbolicLink(repoRoot)
+                    || !Files.isDirectory(repoRoot, LinkOption.NOFOLLOW_LINKS)
+                    || !gitWorkspaceService.isGitRepository(repoRoot)) {
+                error = "引用资产目标目录不是可信 Git 仓库";
+            } else {
+                actualBranch = gitWorkspaceService.currentBranch(repoRoot);
+                actualCommit = gitWorkspaceService.headCommit(repoRoot);
+                if (!repository.matchesStoredOrigin(gitWorkspaceService.originUrl(repoRoot))) {
+                    error = "引用资产本地仓库 origin 与数据库不一致";
+                } else if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
+                    error = "引用资产本地仓库存在未提交修改";
+                } else if (!state.branch().equals(actualBranch)
+                        || !state.targetCommitHash().equals(actualCommit)) {
+                    error = "引用资产本地实际指针与目标不一致";
+                }
+            }
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Reference repository pointer verification failed repositoryId={} linuxServerId={} generation={} traceId={}",
+                    claimed.repositoryId().value(), claimed.linuxServerId().value(), claimed.generation(), traceId);
+            error = "引用资产本地指针核验失败";
+        }
+        Instant now = clock.instant();
+        ReferenceRepositoryReplicaStatus resultStatus = error == null
+                ? ReferenceRepositoryReplicaStatus.READY
+                : ReferenceRepositoryReplicaStatus.BLOCKED;
+        boolean updated = referenceRepository.markVerificationResult(
+                claimed.repositoryId(), claimed.generation(), claimed.linuxServerId(), claimed.leaseToken(),
+                resultStatus, actualBranch, actualCommit, now, error, now);
+        if (updated) {
+            refreshOverallStatus(state.repositoryId(), state.generation());
+        }
+    }
+
     /** 只有明确的 Git 网络或超时错误自动重试；凭据、仓库、分支和参数错误等待管理员开启新 generation。 */
     private boolean isTransientGitFailure(PlatformException exception) {
         if (exception.errorCode() == ErrorCode.GIT_TIMEOUT) {
@@ -535,7 +688,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         return "NETWORK_UNAVAILABLE".equals(failureType) || "TIMEOUT".equals(failureType);
     }
 
-    /** 新目录先在同根临时目录校验再原子移动；已有目录只允许干净、同源、无分叉快进。 */
+    /** 新目录先在同根临时目录校验再原子移动；已有目录按操作类型执行同分支快进或受控跨分支切换。 */
     private void synchronizeDirectory(
             ReferenceRepositoryReplica claimed,
             CodeRepository repository,
@@ -590,7 +743,8 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         if (!repository.matchesStoredOrigin(gitWorkspaceService.originUrl(repoRoot))) {
             throw new ReplicaBlockedException("引用资产本地仓库 origin 与数据库不一致");
         }
-        if (!state.branch().equals(gitWorkspaceService.currentBranch(repoRoot))) {
+        if (state.operationType() != ReferenceRepositoryOperationType.SWITCH_BRANCH
+                && !state.branch().equals(gitWorkspaceService.currentBranch(repoRoot))) {
             throw new ReplicaBlockedException("引用资产本地仓库分支与初始化分支不一致");
         }
         if (repository.internalDeployment()) {
@@ -604,8 +758,15 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         renewLeaseOrThrow(claimed);
         gitWorkspaceService.fetch(repoRoot, privateKey);
         String targetCommit = gitWorkspaceService.resolveCommit(repoRoot, state.targetCommitHash());
-        if (!state.targetCommitHash().equals(targetCommit)
-                || !gitWorkspaceService.isAncestor(repoRoot, currentCommit, targetCommit)) {
+        if (!state.targetCommitHash().equals(targetCommit)) {
+            throw new ReplicaBlockedException("引用资产无法解析固定目标提交");
+        }
+        if (state.operationType() == ReferenceRepositoryOperationType.SWITCH_BRANCH) {
+            renewLeaseOrThrow(claimed);
+            gitWorkspaceService.checkoutBranchAtFixedCommit(repoRoot, state.branch(), targetCommit, privateKey);
+            return;
+        }
+        if (!gitWorkspaceService.isAncestor(repoRoot, currentCommit, targetCommit)) {
             throw new ReplicaBlockedException("引用资产本地仓库与目标提交发生分叉");
         }
         renewLeaseOrThrow(claimed);
@@ -730,9 +891,11 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             referenceRepository.updateOverallStatus(
                     repositoryId, generation, ReferenceRepositoryStatus.READY, null, clock.instant());
         } else if (!online.isEmpty()) {
-            ReferenceRepositoryStatus activeStatus = state.status() == ReferenceRepositoryStatus.INITIALIZING
-                    ? ReferenceRepositoryStatus.INITIALIZING
-                    : ReferenceRepositoryStatus.SYNCHRONIZING;
+            ReferenceRepositoryStatus activeStatus = switch (state.operationType()) {
+                case INITIALIZE -> ReferenceRepositoryStatus.INITIALIZING;
+                case VERIFY_POINTERS -> ReferenceRepositoryStatus.VERIFYING;
+                case SYNCHRONIZE, SWITCH_BRANCH -> ReferenceRepositoryStatus.SYNCHRONIZING;
+            };
             referenceRepository.updateOverallStatus(
                     repositoryId, generation, activeStatus, null, clock.instant());
         }
@@ -743,14 +906,19 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 ? List.of()
                 : referenceRepository.findReplicas(repository.repositoryId());
         long generation = state == null ? 0L : state.generation();
+        Set<LinuxServerId> live = liveServerIds();
         List<ReferenceRepositoryResponses.ServerStatus> servers = replicas.stream()
                 .filter(replica -> replica.generation() == generation)
                 .sorted(Comparator.comparing(replica -> replica.linuxServerId().value()))
                 .map(replica -> new ReferenceRepositoryResponses.ServerStatus(
                         replica.linuxServerId().value(),
                         replica.status().name(),
+                        live.contains(replica.linuxServerId()),
                         replica.currentBranch(),
                         replica.currentCommitHash(),
+                        matchesTarget(replica, state),
+                        replica.verifiedAt(),
+                        replica.syncedAt(),
                         replica.lastError()))
                 .toList();
         int ready = (int) servers.stream()
@@ -766,11 +934,20 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 state == null ? null : state.targetCommitHash(),
                 generation,
                 state == null ? ReferenceRepositoryStatus.UNINITIALIZED.name() : state.status().name(),
+                state == null ? null : state.operationType().name(),
                 servers.size(),
                 ready,
                 servers,
                 state == null ? null : state.traceId(),
                 state == null ? null : state.lastError());
+    }
+
+    private Boolean matchesTarget(ReferenceRepositoryReplica replica, ReferenceRepositoryState state) {
+        if (state == null || replica.currentBranch() == null || replica.currentCommitHash() == null) {
+            return null;
+        }
+        return Objects.equals(state.branch(), replica.currentBranch())
+                && Objects.equals(state.targetCommitHash(), replica.currentCommitHash());
     }
 
     private CodeRepository requireLinkedAssetRepository(ApplicationId appId, CodeRepositoryId repositoryId) {

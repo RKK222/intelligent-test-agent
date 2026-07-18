@@ -20,6 +20,7 @@ public record ReferenceRepositoryReplica(
         Instant leaseUntil,
         String lastError,
         Instant syncedAt,
+        Instant verifiedAt,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -36,6 +37,26 @@ public record ReferenceRepositoryReplica(
         currentCommitHash = normalize(currentCommitHash);
         leaseToken = normalize(leaseToken);
         lastError = normalize(lastError);
+    }
+
+    /** 兼容存量构造；旧副本尚未经过主动核验。 */
+    public ReferenceRepositoryReplica(
+            CodeRepositoryId repositoryId,
+            LinuxServerId linuxServerId,
+            long generation,
+            ReferenceRepositoryReplicaStatus status,
+            String currentBranch,
+            String currentCommitHash,
+            int retryCount,
+            Instant nextRetryAt,
+            String leaseToken,
+            Instant leaseUntil,
+            String lastError,
+            Instant syncedAt,
+            Instant createdAt,
+            Instant updatedAt) {
+        this(repositoryId, linuxServerId, generation, status, currentBranch, currentCommitHash, retryCount,
+                nextRetryAt, leaseToken, leaseUntil, lastError, syncedAt, null, createdAt, updatedAt);
     }
 
     /** 临时 Git/网络错误从五秒开始指数退避，最高五分钟。 */

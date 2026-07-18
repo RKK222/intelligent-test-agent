@@ -34,6 +34,8 @@ class ReferenceRepositoryControllerTest {
         when(service.list("app-demo")).thenReturn(List.of(status));
         when(service.initialize("app-demo", "repo-assets", "main", USER_ID, TRACE_ID)).thenReturn(status);
         when(service.synchronize("app-demo", "repo-assets", USER_ID, TRACE_ID)).thenReturn(status);
+        when(service.switchBranch("app-demo", "repo-assets", "release", USER_ID, TRACE_ID)).thenReturn(status);
+        when(service.verify("app-demo", "repo-assets", TRACE_ID)).thenReturn(status);
         when(service.status("app-demo", "repo-assets")).thenReturn(status);
         when(service.tree("app-demo", "repo-assets", "docs")).thenReturn(List.of(
                 new ReferenceRepositoryResponses.TreeNode("docs/spec.md", "spec.md", false, 12L, false, false)));
@@ -46,13 +48,22 @@ class ReferenceRepositoryControllerTest {
                 .expectStatus().isOk().expectBody().jsonPath("$.data.generation").isEqualTo(1);
         client.post().uri(BASE + "/repo-assets/synchronize").header("X-Trace-Id", TRACE_ID).exchange()
                 .expectStatus().isOk();
+        client.post().uri(BASE + "/repo-assets/switch-branch").header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"branch\":\"release\"}").exchange()
+                .expectStatus().isOk();
+        client.post().uri(BASE + "/repo-assets/verify").header("X-Trace-Id", TRACE_ID).exchange()
+                .expectStatus().isOk();
         client.get().uri(BASE + "/repo-assets/status").header("X-Trace-Id", TRACE_ID).exchange()
-                .expectStatus().isOk().expectBody().jsonPath("$.data.status").isEqualTo("INITIALIZING");
+                .expectStatus().isOk().expectBody()
+                .jsonPath("$.data.status").isEqualTo("INITIALIZING")
+                .jsonPath("$.data.operation").isEqualTo("SYNCHRONIZE");
         client.get().uri(BASE + "/repo-assets/tree?path=docs").header("X-Trace-Id", TRACE_ID).exchange()
                 .expectStatus().isOk().expectBody().jsonPath("$.data[0].path").isEqualTo("docs/spec.md");
 
         verify(service).initialize("app-demo", "repo-assets", "main", USER_ID, TRACE_ID);
         verify(service).synchronize("app-demo", "repo-assets", USER_ID, TRACE_ID);
+        verify(service).switchBranch("app-demo", "repo-assets", "release", USER_ID, TRACE_ID);
+        verify(service).verify("app-demo", "repo-assets", TRACE_ID);
         verify(service).tree("app-demo", "repo-assets", "docs");
     }
 
@@ -66,6 +77,10 @@ class ReferenceRepositoryControllerTest {
                 .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"branch\":\"main\"}")
                 .exchange().expectStatus().isForbidden();
         client.post().uri(BASE + "/repo-assets/synchronize").exchange().expectStatus().isForbidden();
+        client.post().uri(BASE + "/repo-assets/switch-branch")
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"branch\":\"release\"}")
+                .exchange().expectStatus().isForbidden();
+        client.post().uri(BASE + "/repo-assets/verify").exchange().expectStatus().isForbidden();
         client.get().uri(BASE + "/repo-assets/status").exchange().expectStatus().isForbidden();
         client.get().uri(BASE + "/repo-assets/tree?path=").exchange().expectStatus().isForbidden();
 

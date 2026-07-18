@@ -1,6 +1,9 @@
 package com.enterprise.testagent.common.git;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.enterprise.testagent.common.error.PlatformException;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -179,6 +182,40 @@ class GitWorkspaceServiceRealGitTest {
 
         assertThat(service.resolveRemoteBranchCommit(remote.toString(), "main", null))
                 .isEqualTo(expectedCommit);
+    }
+
+    @Test
+    void safelyChecksOutExistingTargetBranchOnlyWhenItCanFastForward() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "base.txt", "base\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        git(repo, "branch", "release");
+        git(repo, "checkout", "release");
+        write(repo, "release.txt", "release\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "release target");
+        String target = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+        git(repo, "checkout", "main");
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        service.checkoutBranchAtFixedCommit(repo, "release", target, null);
+
+        assertThat(service.currentBranch(repo)).isEqualTo("release");
+        assertThat(service.headCommit(repo)).isEqualTo(target);
+
+        git(repo, "checkout", "main");
+        git(repo, "branch", "-D", "release");
+        git(repo, "checkout", "--orphan", "release");
+        git(repo, "rm", "-rf", ".");
+        write(repo, "diverged.txt", "diverged\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "diverged release");
+        git(repo, "checkout", "main");
+
+        assertThatThrownBy(() -> service.checkoutBranchAtFixedCommit(repo, "release", target, null))
+                .isInstanceOf(PlatformException.class);
+        assertThat(service.currentBranch(repo)).isEqualTo("main");
     }
 
     private Path createAddDeleteConflict(String suffix) throws Exception {

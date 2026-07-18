@@ -9,4 +9,8 @@ public final class ReferenceRepositoryDtos {
     /** 首次初始化分支请求；分支语义与安全校验由业务服务统一处理。 */
     public record InitializeRequest(String branch) {
     }
+
+    /** 受控切换目标分支请求。 */
+    public record SwitchBranchRequest(String branch) {
+    }
 }

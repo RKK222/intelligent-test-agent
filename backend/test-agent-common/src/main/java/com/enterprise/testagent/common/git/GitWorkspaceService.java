@@ -371,6 +371,53 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 将受管共享副本安全切换到固定提交。已有目标本地分支必须可快进到目标提交；
+     * 不存在时只从同名 origin 分支建立 tracking，绝不使用 -B 覆盖未知本地分支。
+     */
+    public void checkoutBranchAtFixedCommit(
+            Path repoRoot,
+            String branch,
+            String targetCommit,
+            String privateKey) {
+        String localRef = "refs/heads/" + branch;
+        if (localBranchExists(repoRoot, localRef)) {
+            String localCommit = resolveCommit(repoRoot, localRef);
+            if (!isAncestor(repoRoot, localCommit, targetCommit)) {
+                throw new PlatformException(
+                        com.enterprise.testagent.common.error.ErrorCode.CONFLICT,
+                        "目标本地分支与远端目标提交发生分叉",
+                        Map.of("branch", branch));
+            }
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "checkout", branch),
+                    privateKey,
+                    DEFAULT_TIMEOUT);
+        } else {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "checkout", "-b", branch, "--track", "origin/" + branch),
+                    privateKey,
+                    DEFAULT_TIMEOUT);
+        }
+        resetHardToCommit(repoRoot, targetCommit);
+    }
+
+    private boolean localBranchExists(Path repoRoot, String localRef) {
+        try {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "show-ref", "--verify", "--quiet", localRef),
+                    null,
+                    DEFAULT_TIMEOUT);
+            return true;
+        } catch (PlatformException exception) {
+            Object exitCode = exception.details().get("exitCode");
+            if (exitCode instanceof Number number && number.intValue() == 1) {
+                return false;
+            }
+            throw exception;
+        }
+    }
+
+    /**
      * 将指定本地分支合并进当前分支，调用方负责提前 pull、clean 校验和冲突处理。
      */
     public void mergeBranch(Path repoRoot, String branch, String privateKey) {

@@ -21,6 +21,7 @@ public interface ReferenceRepositoryMapper {
 
     int advanceStateIfCurrent(
             @Param("expectedGeneration") long expectedGeneration,
+            @Param("expectedOldBranch") String expectedOldBranch,
             @Param("row") ReferenceRepositoryStateRow row);
 
     void upsertTarget(
@@ -82,6 +83,18 @@ public interface ReferenceRepositoryMapper {
             @Param("generation") long generation,
             @Param("linuxServerId") String linuxServerId,
             @Param("leaseToken") String leaseToken,
+            @Param("lastError") String lastError,
+            @Param("now") Instant now);
+
+    int markVerificationResult(
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("leaseToken") String leaseToken,
+            @Param("status") String status,
+            @Param("actualBranch") String actualBranch,
+            @Param("actualCommitHash") String actualCommitHash,
+            @Param("verifiedAt") Instant verifiedAt,
             @Param("lastError") String lastError,
             @Param("now") Instant now);
 
