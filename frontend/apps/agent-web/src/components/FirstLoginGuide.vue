@@ -150,8 +150,8 @@ defineExpose({ restart });
       :prev-button-props="previousButton"
       :next-button-props="nextButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>07</span><strong>先在设置中配置 SSH</strong></div></template>
-      <p>点击齿轮进入“个人设置”，添加你自己的 SSH 私钥。完成后才能正常访问有权限的 Git 仓库、分支和工作区文件。</p>
+      <template #header><div class="ta-onboarding-heading"><span>07</span><strong>设置里的常用操作</strong></div></template>
+      <p>普通用户点击齿轮后主要使用“个人设置”添加或删除自己的 SSH Key。若账号同时有应用管理员权限，还会看到“应用管理”（成员、版本库关联、工作空间）和“版本库管理”；“用户管理”不属于普通用户操作。</p>
     </ElTourStep>
     <ElTourStep
       target='[data-onboarding="manual"]'

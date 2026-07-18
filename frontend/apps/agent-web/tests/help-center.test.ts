@@ -48,6 +48,7 @@ function mountHelpCenter(props: Record<string, unknown> = {}) {
 describe("help center", () => {
   it("keeps manual navigation under the same-origin help base and rejects unknown topics", () => {
     expect(helpDocumentUrl("process-initialization")).toBe("/help/guide/process-initialization.html");
+    expect(helpDocumentUrl("settings")).toBe("/help/guide/settings.html");
     expect(helpDocumentUrl("directory-mapping")).toBe("/help/guide/directory-mapping.html");
     expect(normalizeHelpTopic("unknown")).toBe("getting-started");
   });
@@ -141,5 +142,15 @@ describe("help center", () => {
     expect(agentConfig).toContain("`compatibility: opencode`");
     expect(agentConfig).toContain("公共配置推送成功后，平台会广播公共配置同步");
     expect(agentConfig).toContain("推送成功后更新应用版本 HEAD");
+  });
+
+  it("grounds settings questions in the role-aware operations chapter", () => {
+    const settings = helpTopicById("settings").content;
+
+    expect(settings).toContain("普通用户：个人设置");
+    expect(settings).toContain("应用人员管理");
+    expect(settings).toContain("应用与版本库关联");
+    expect(settings).toContain("工作空间管理");
+    expect(settings).toContain("超级管理员专属的“用户管理”");
   });
 });

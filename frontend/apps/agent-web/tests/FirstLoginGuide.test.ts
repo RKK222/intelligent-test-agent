@@ -58,7 +58,11 @@ describe("FirstLoginGuide", () => {
     expect(wrapper.text()).toContain("第一条消息会建立对话");
     expect(wrapper.text()).toContain("08");
     expect(wrapper.text()).not.toContain("超级管理员");
-    expect(wrapper.find('[data-target="[data-onboarding=\\\"settings\\\"]"]').text()).toContain("配置 SSH");
+    const settingsStep = wrapper.find('[data-target="[data-onboarding=\\\"settings\\\"]"]');
+    expect(settingsStep.text()).toContain("个人设置");
+    expect(settingsStep.text()).toContain("应用管理");
+    expect(settingsStep.text()).toContain("版本库管理");
+    expect(settingsStep.text()).toContain("用户管理");
 
     wrapper.getComponent(tourStub).vm.$emit("finish");
     await wrapper.vm.$nextTick();
