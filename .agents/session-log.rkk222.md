@@ -5,6 +5,17 @@
 
 ## Entries
 
+### 2026-07-18 - 发布公共 Mermaid 规约到远端 master
+
+- Why:
+  - 用户确认将公共测试设计 Agent 的 Mermaid 11.16.0 规约提交发布到远端主分支，使公共仓库包含该修复。
+- What:
+  - 将公共配置提交 `3c89512 统一 Mermaid 11.16.0 语法规约` 从现有 `public-usr_test_dev` 分支推送到 `origin/master`。
+- How:
+  - 推送前执行 `git fetch origin`，确认本地相对 `origin/master` 为 `1 ahead / 0 behind`，随后使用非强制 `git push origin HEAD:master`；最后通过 `git ls-remote` 和远端跟踪引用双重核对。
+- Result:
+  - 远端 `refs/heads/master` 已从 `37c9ef8` 快进到 `3c89512bae0c6fa681157e61fc4c62e4d8430ed8`，本地公共 worktree clean；未验证平台各节点的公共配置 rollout 状态。
+
 ### 2026-07-18 - 公共测试设计 Agent 统一 Mermaid 11.16.0 语法规约
 
 - Why:
