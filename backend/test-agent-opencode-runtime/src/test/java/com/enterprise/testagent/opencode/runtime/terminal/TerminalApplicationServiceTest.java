@@ -127,13 +127,13 @@ class TerminalApplicationServiceTest {
     }
 
     @Test
-    void createServerTicketRequiresExactConfirmationAndIssuesRootTarget() {
-        TerminalApplicationService service = serverService(true, true);
+    void createServerTicketRequiresExactConfirmationAndIssuesServerShellTarget() {
+        TerminalApplicationService service = serverService(true);
 
         assertThatThrownBy(() -> service.createServerTicket(
                         new LinuxServerId("server-a"),
                         new UserId("usr_admin"),
-                        new ServerTerminalTicketRequest("ROOT@server-b", 120, 32),
+                        new ServerTerminalTicketRequest("SERVER@server-b", 120, 32),
                         "trace_1234567890abcdef"))
                 .isInstanceOf(PlatformException.class)
                 .extracting("errorCode")
@@ -142,33 +142,28 @@ class TerminalApplicationServiceTest {
         TerminalTicketResponse response = service.createServerTicket(
                 new LinuxServerId("server-a"),
                 new UserId("usr_admin"),
-                new ServerTerminalTicketRequest("ROOT@server-a", 120, 32),
+                new ServerTerminalTicketRequest("SERVER@server-a", 120, 32),
                 "trace_1234567890abcdef");
         TerminalTicket ticket = service.consumeServerTicket(
                 new LinuxServerId("server-a"), response.ticket(), "https://console.example", "trace_ws");
 
-        assertThat(ticket.serverRoot()).isTrue();
+        assertThat(ticket.serverShell()).isTrue();
         assertThat(ticket.userId()).isEqualTo(new UserId("usr_admin"));
         assertThat(ticket.cwd()).isEqualTo(tempDir.toAbsolutePath().normalize());
         assertThat(ticket.shell()).isEqualTo("/bin/bash");
     }
 
     @Test
-    void createServerTicketFailsClosedWhenFeatureOrRootProcessIsMissing() {
-        assertThatThrownBy(() -> serverService(false, true).createServerTicket(
+    void createServerTicketFailsClosedWhenFeatureIsDisabled() {
+        assertThatThrownBy(() -> serverService(false).createServerTicket(
                         new LinuxServerId("server-a"), new UserId("usr_admin"),
-                        new ServerTerminalTicketRequest("ROOT@server-a", 80, 24), "trace"))
+                        new ServerTerminalTicketRequest("SERVER@server-a", 80, 24), "trace"))
                 .isInstanceOf(PlatformException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.TERMINAL_UNAVAILABLE);
-        assertThatThrownBy(() -> serverService(true, false).createServerTicket(
-                        new LinuxServerId("server-a"), new UserId("usr_admin"),
-                        new ServerTerminalTicketRequest("ROOT@server-a", 80, 24), "trace"))
-                .isInstanceOf(PlatformException.class)
-                .hasMessageContaining("root");
     }
 
-    private TerminalApplicationService serverService(boolean enabled, boolean root) {
+    private TerminalApplicationService serverService(boolean enabled) {
         BackendInstanceIdentity identity = new BackendInstanceIdentity() {
             @Override public String instanceId() { return "backend-a"; }
             @Override public String linuxServerId() { return "server-a"; }
@@ -184,8 +179,7 @@ class TerminalApplicationServiceTest {
                 com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
                 identity,
                 enabled,
-                tempDir,
-                () -> root);
+                tempDir);
     }
 
     private static final class Fixture {

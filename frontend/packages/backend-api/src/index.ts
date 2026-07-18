@@ -1413,7 +1413,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(compactObject(payload))
       }),
-    createServerRootTerminalTicket: (linuxServerId: string, payload: ServerTerminalTicketRequest) =>
+    createServerTerminalTicket: (linuxServerId: string, payload: ServerTerminalTicketRequest) =>
       request<TerminalTicketResponse>(
         `${opencodeRuntimeBase}/management/linux-servers/${encodeURIComponent(linuxServerId)}/terminal/tickets`,
         {

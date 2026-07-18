@@ -17,7 +17,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.BooleanSupplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -40,9 +39,8 @@ public class TerminalApplicationService {
     private final TerminalAuditLogger auditLogger;
     private final ManagedWorkspacePathResolver pathResolver;
     private final BackendInstanceIdentity backendIdentity;
-    private final boolean serverRootEnabled;
+    private final boolean serverTerminalEnabled;
     private final Path serverWorkingDirectory;
-    private final BooleanSupplier rootProcess;
 
     /**
      * 创建 PTY ticket 应用服务，所有安全校验在签发 ticket 前完成。
@@ -56,10 +54,10 @@ public class TerminalApplicationService {
             TerminalAuditLogger auditLogger,
             ManagedWorkspacePathResolver pathResolver,
             BackendInstanceIdentity backendIdentity,
-            @Value("${test-agent.terminal.server-root-enabled:false}") boolean serverRootEnabled,
-            @Value("${test-agent.terminal.server-working-directory:/data/testagent}") String serverWorkingDirectory) {
+            @Value("${test-agent.terminal.server-enabled:false}") boolean serverTerminalEnabled,
+            @Value("${test-agent.terminal.server-working-directory:${user.dir}}") String serverWorkingDirectory) {
         this(workspaceRepository, sessionRepository, ticketStore, ticketRateLimiter, auditLogger, pathResolver,
-                backendIdentity, serverRootEnabled, Path.of(serverWorkingDirectory), TerminalApplicationService::effectiveRoot);
+                backendIdentity, serverTerminalEnabled, Path.of(serverWorkingDirectory));
     }
 
     TerminalApplicationService(
@@ -70,9 +68,8 @@ public class TerminalApplicationService {
             TerminalAuditLogger auditLogger,
             ManagedWorkspacePathResolver pathResolver,
             BackendInstanceIdentity backendIdentity,
-            boolean serverRootEnabled,
-            Path serverWorkingDirectory,
-            BooleanSupplier rootProcess) {
+            boolean serverTerminalEnabled,
+            Path serverWorkingDirectory) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.ticketStore = Objects.requireNonNull(ticketStore, "ticketStore must not be null");
@@ -80,9 +77,8 @@ public class TerminalApplicationService {
         this.auditLogger = Objects.requireNonNull(auditLogger, "auditLogger must not be null");
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.backendIdentity = Objects.requireNonNull(backendIdentity, "backendIdentity must not be null");
-        this.serverRootEnabled = serverRootEnabled;
+        this.serverTerminalEnabled = serverTerminalEnabled;
         this.serverWorkingDirectory = Objects.requireNonNull(serverWorkingDirectory, "serverWorkingDirectory must not be null");
-        this.rootProcess = Objects.requireNonNull(rootProcess, "rootProcess must not be null");
     }
 
     public TerminalApplicationService(
@@ -100,39 +96,35 @@ public class TerminalApplicationService {
                 ManagedWorkspacePathResolver.legacyOnly(),
                 testBackendIdentity(),
                 false,
-                Path.of("/data/testagent"),
-                () -> false);
+                Path.of(System.getProperty("user.dir")));
     }
 
     /**
-     * 签发当前 Linux 服务器 root 终端 ticket。该能力默认关闭，并要求目标、确认文本和进程 UID 同时匹配。
+     * 签发当前部署服务器终端 ticket。shell 直接继承 Java 进程的系统用户和操作系统权限。
      */
     public TerminalTicketResponse createServerTicket(
             LinuxServerId linuxServerId,
             UserId userId,
             ServerTerminalTicketRequest request,
             String traceId) {
-        if (!serverRootEnabled) {
-            throw new PlatformException(ErrorCode.TERMINAL_UNAVAILABLE, "服务器 root 终端未启用");
+        if (!serverTerminalEnabled) {
+            throw new PlatformException(ErrorCode.TERMINAL_UNAVAILABLE, "服务器终端未启用");
         }
         if (!backendIdentity.linuxServerId().equals(linuxServerId.value())) {
             throw new PlatformException(ErrorCode.TERMINAL_UNAVAILABLE, "请求未路由到目标服务器",
                     Map.of("linuxServerId", linuxServerId.value()));
         }
-        String expectedConfirmation = "ROOT@" + linuxServerId.value();
+        String expectedConfirmation = "SERVER@" + linuxServerId.value();
         if (request == null || !expectedConfirmation.equals(request.confirmationText())) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "请输入完整确认文本",
                     Map.of("expected", expectedConfirmation));
-        }
-        if (!rootProcess.getAsBoolean()) {
-            throw new PlatformException(ErrorCode.TERMINAL_UNAVAILABLE, "后端 Java 必须以 Linux root 用户运行");
         }
         Path cwd = serverWorkingDirectory.toAbsolutePath().normalize();
         if (!Files.isDirectory(cwd) || !Files.isExecutable(Path.of("/bin/bash"))) {
             throw new PlatformException(ErrorCode.TERMINAL_UNAVAILABLE, "服务器终端工作目录或 /bin/bash 不可用");
         }
         ticketRateLimiter.acquireServer(linuxServerId, userId);
-        TerminalTicket ticket = ticketStore.issue(TerminalTicketDraft.serverRoot(
+        TerminalTicket ticket = ticketStore.issue(TerminalTicketDraft.serverShell(
                 linuxServerId,
                 userId,
                 cwd,
@@ -192,7 +184,7 @@ public class TerminalApplicationService {
         return ticketStore.consume(sessionId, ticket, origin, traceId);
     }
 
-    /** 消费目标服务器的一次性 root ticket。 */
+    /** 消费目标服务器的一次性终端 ticket。 */
     public TerminalTicket consumeServerTicket(LinuxServerId linuxServerId, String ticket, String origin, String traceId) {
         return ticketStore.consumeServer(linuxServerId, ticket, origin, traceId);
     }
@@ -249,21 +241,6 @@ public class TerminalApplicationService {
             return fallback;
         }
         return Math.min(value, max);
-    }
-
-    /** 从 Linux procfs 读取 effective UID，避免依赖可伪造的用户名或环境变量。 */
-    private static boolean effectiveRoot() {
-        try {
-            for (String line : Files.readAllLines(Path.of("/proc/self/status"))) {
-                if (line.startsWith("Uid:")) {
-                    String[] values = line.substring(4).trim().split("\\s+");
-                    return values.length > 1 && "0".equals(values[1]);
-                }
-            }
-        } catch (Exception ignored) {
-            // procfs 不可用时安全地判定为非 root，禁止开放高危终端。
-        }
-        return false;
     }
 
     private static BackendInstanceIdentity testBackendIdentity() {

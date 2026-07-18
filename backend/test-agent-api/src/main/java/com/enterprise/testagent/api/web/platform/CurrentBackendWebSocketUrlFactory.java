@@ -19,17 +19,20 @@ class CurrentBackendWebSocketUrlFactory {
 
     private final BackendInstanceIdentity backendIdentity;
     private final String publicTerminalBaseUrl;
+    private final boolean allowInsecureServerWebSocket;
 
     @Autowired
     CurrentBackendWebSocketUrlFactory(
             BackendInstanceIdentity backendIdentity,
-            @Value("${test-agent.terminal.public-websocket-base-url:}") String publicTerminalBaseUrl) {
+            @Value("${test-agent.terminal.public-websocket-base-url:}") String publicTerminalBaseUrl,
+            @Value("${test-agent.terminal.allow-insecure-server-websocket:false}") boolean allowInsecureServerWebSocket) {
         this.backendIdentity = Objects.requireNonNull(backendIdentity, "backendIdentity must not be null");
         this.publicTerminalBaseUrl = publicTerminalBaseUrl == null ? "" : publicTerminalBaseUrl.trim();
+        this.allowInsecureServerWebSocket = allowInsecureServerWebSocket;
     }
 
     CurrentBackendWebSocketUrlFactory(BackendInstanceIdentity backendIdentity) {
-        this(backendIdentity, "");
+        this(backendIdentity, "", false);
     }
 
     String absoluteUrl(String pathAndQuery) {
@@ -59,13 +62,16 @@ class CurrentBackendWebSocketUrlFactory {
     }
 
     /**
-     * 服务器 root 终端只能返回统一 HTTPS 网关的 wss 地址，禁止浏览器直连后端明文端口。
+     * 正式环境的服务器终端只返回统一 HTTPS 网关的 WSS 地址；本地 test profile 可显式允许直连。
      */
-    String serverRootUrl(String pathAndQuery) {
+    String serverTerminalUrl(String pathAndQuery) {
         if (pathAndQuery == null || !pathAndQuery.startsWith("/")) {
             throw new IllegalArgumentException("pathAndQuery must start with /");
         }
         if (publicTerminalBaseUrl.isBlank()) {
+            if (allowInsecureServerWebSocket) {
+                return absoluteUrl(pathAndQuery);
+            }
             throw new PlatformException(ErrorCode.TERMINAL_UNAVAILABLE, "服务器终端 WSS 网关未配置");
         }
         URI base;

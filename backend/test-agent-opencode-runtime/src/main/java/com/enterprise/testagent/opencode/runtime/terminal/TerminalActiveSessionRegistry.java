@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.stereotype.Component;
 
 /**
- * 单实例 active PTY 注册表：workspace 按 session、root 终端按服务器和用户限制单连接。
+ * 单实例 active PTY 注册表：workspace 按 session、服务器终端按服务器和用户限制单连接。
  */
 @Component
 public class TerminalActiveSessionRegistry {
@@ -26,7 +26,7 @@ public class TerminalActiveSessionRegistry {
         if (existing != null) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    ticket.serverRoot() ? "当前用户已打开该服务器 root 终端" : "Session 已存在 active PTY",
+                    ticket.serverShell() ? "当前用户已打开该服务器终端" : "Session 已存在 active PTY",
                     Map.of("targetId", ticket.auditTargetId()));
         }
         return lease;

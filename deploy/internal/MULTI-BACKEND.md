@@ -1,6 +1,6 @@
 # 企业内多后台部署
 
-当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。任意入口 Java 收到需要归属路由的请求后，会根据公共路由程序选择目标 Java，再由目标 Java控制本机 manager。workspace PTY 和 Agent 配置进度 ticket 响应沿用签发 Java 地址；服务器 root ticket 的 HTTP POST 先按 `linuxServerId` 路由，WSS 再由 Nginx 精确 location 固定到同一 Java，因此 ticket 的签发和消费不会跨 JVM，也不依赖 sticky。
+当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。任意入口 Java 收到需要归属路由的请求后，会根据公共路由程序选择目标 Java，再由目标 Java控制本机 manager。workspace PTY 和 Agent 配置进度 ticket 响应沿用签发 Java 地址；服务器终端 ticket 的 HTTP POST 先按 `linuxServerId` 路由，WSS 再由 Nginx 精确 location 固定到同一 Java，因此 ticket 的签发和消费不会跨 JVM，也不依赖 sticky。
 
 本文用两个后台举例：
 

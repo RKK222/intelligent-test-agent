@@ -36,7 +36,7 @@ record TerminalTicketDraft(
         this(sessionId, workspaceId, executionNodeId, null, null, workspaceRoot, cwd, shell, cols, rows, traceId);
     }
 
-    static TerminalTicketDraft serverRoot(
+    static TerminalTicketDraft serverShell(
             LinuxServerId linuxServerId,
             UserId userId,
             Path cwd,

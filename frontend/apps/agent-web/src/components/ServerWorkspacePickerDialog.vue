@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ElMessageBox } from "element-plus";
 import { computed, nextTick, ref, watch } from "vue";
 import type { TerminalTicketResponse, WorkspaceBackendServer, WorkspaceDirectoryList } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
@@ -31,29 +32,50 @@ const serverMismatch = computed(
 );
 const disabledReason = computed(() => (serverMismatch.value ? "工作空间与 agent 不在同一服务器" : ""));
 const activeView = ref<"workspace" | "terminal">("workspace");
-const terminalConfirmation = ref("");
-const expectedTerminalConfirmation = computed(() => `ROOT@${selectedServer.value?.linuxServerId ?? ""}`);
 
-/** 切换服务器或关闭弹窗时清除高危确认，禁止在不同目标间复用确认文本。 */
+/** 关闭弹窗时返回目录视图；切换服务器由 TerminalPanel key 负责关闭旧会话。 */
 watch(
-  [() => props.selectedServerId, () => props.open],
-  ([, open]) => {
-    terminalConfirmation.value = "";
+  () => props.open,
+  (open) => {
     if (!open) activeView.value = "workspace";
   }
 );
 
 function openServerTerminal() {
   if (!props.serverTerminalEnabled || !selectedServer.value) return;
-  terminalConfirmation.value = "";
   activeView.value = "terminal";
 }
 
-function createSelectedServerTerminalTicket() {
+/**
+ * 连接前展示目标服务器二次确认；确认后自动组装只用于防止目标串线的绑定值。
+ * 用户取消使用 AbortError 收敛为 idle，不在终端中显示伪失败。
+ */
+async function createSelectedServerTerminalTicket() {
   if (!selectedServer.value || !props.createServerTerminalTicket) {
     throw new Error("当前服务器终端不可用");
   }
-  return props.createServerTerminalTicket(selectedServer.value.linuxServerId, terminalConfirmation.value);
+  const server = selectedServer.value;
+  try {
+    await ElMessageBox.confirm(
+      `即将连接服务器 ${server.name || server.linuxServerId}（${server.linuxServerId}）。终端权限与启动目标 Java 的系统用户完全一致，不会额外提权。`,
+      "确认连接服务器终端",
+      {
+        type: "warning",
+        confirmButtonText: "确认连接",
+        cancelButtonText: "取消",
+        distinguishCancelAndClose: true,
+        autofocus: false
+      }
+    );
+  } catch (error) {
+    if (error === "cancel" || error === "close") {
+      const aborted = new Error("用户取消连接");
+      aborted.name = "AbortError";
+      throw aborted;
+    }
+    throw error;
+  }
+  return props.createServerTerminalTicket(server.linuxServerId, `SERVER@${server.linuxServerId}`);
 }
 
 // macOS Finder-style navigation history stack
@@ -356,23 +378,14 @@ const breadcrumbs = computed(() => {
             <div class="flex shrink-0 items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-800" role="alert">
               <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
               <span>
-                这是 <strong>{{ selectedServer?.name || selectedServer?.linuxServerId }}</strong> 的 Linux root shell，命令会直接修改部署服务器。
-                平台不使用 SSH 用户名或密码；目标 Java 必须以 root 运行。
+                这是 <strong>{{ selectedServer?.name || selectedServer?.linuxServerId }}</strong> 的部署服务器 shell，命令会直接修改该服务器。
+                它不使用 SSH、sudo 或额外授权，权限与启动目标 Java 的系统用户完全一致。
               </span>
             </div>
 
-            <section class="shrink-0 rounded-md border border-[var(--ta-border)] bg-white px-3 py-2 shadow-sm">
-              <label class="grid grid-cols-[minmax(260px,auto)_minmax(240px,1fr)] items-center gap-3 text-[12px] text-gray-700">
-                <span>请手工输入 <code class="font-mono font-bold text-red-700">{{ expectedTerminalConfirmation }}</code> 后连接</span>
-                <input
-                  v-model="terminalConfirmation"
-                  type="text"
-                  autocomplete="off"
-                  spellcheck="false"
-                  :placeholder="expectedTerminalConfirmation"
-                  class="h-8 min-w-0 rounded-md border border-gray-300 px-2.5 font-mono text-[12px] outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-100"
-                />
-              </label>
+            <section class="flex shrink-0 items-center justify-between gap-3 rounded-md border border-[var(--ta-border)] bg-white px-3 py-2 text-[12px] text-gray-600 shadow-sm">
+              <span>点击“连接服务器终端”后，请在二次确认中核对目标服务器。</span>
+              <code v-if="selectedServer" class="shrink-0 font-mono font-semibold text-gray-700">{{ selectedServer.linuxServerId }}</code>
             </section>
 
             <div class="min-h-0 flex-1">
@@ -382,10 +395,8 @@ const breadcrumbs = computed(() => {
                 class="h-full min-h-0"
                 :base-url="terminalBaseUrl ?? ''"
                 :create-ticket="createSelectedServerTerminalTicket"
-                :disabled="terminalConfirmation !== expectedTerminalConfirmation"
-                :disabled-reason="`确认文本必须完全等于 ${expectedTerminalConfirmation}`"
-                :title="`root@${selectedServer.linuxServerId}`"
-                connect-label="连接 root 终端"
+                :title="`server@${selectedServer.linuxServerId}`"
+                connect-label="连接服务器终端"
                 danger
               />
               <div v-else class="flex h-full items-center justify-center text-[13px] text-gray-400">请先选择服务器。</div>

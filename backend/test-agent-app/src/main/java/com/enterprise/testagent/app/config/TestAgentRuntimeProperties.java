@@ -345,9 +345,10 @@ public class TestAgentRuntimeProperties {
      * 受控 PTY 终端连接、输入、输出和 ticket 限制配置项。
      */
     public static class Terminal {
-        private boolean serverRootEnabled;
-        private Path serverWorkingDirectory = Path.of("/data/testagent");
+        private boolean serverEnabled;
+        private Path serverWorkingDirectory = Path.of(System.getProperty("user.dir"));
         private String publicWebsocketBaseUrl = "";
+        private boolean allowInsecureServerWebsocket;
         private int maxInputBytes = 16 * 1024;
         private int inputMessagesPerWindow = 64;
         private int resizeMessagesPerWindow = 10;
@@ -359,14 +360,14 @@ public class TestAgentRuntimeProperties {
         private int ticketCapacity = 10;
         private Duration ticketWindow = Duration.ofMinutes(1);
 
-        /** 返回是否开放超级管理员服务器 root 终端。 */
-        public boolean isServerRootEnabled() {
-            return serverRootEnabled;
+        /** 返回是否开放超级管理员服务器终端。 */
+        public boolean isServerEnabled() {
+            return serverEnabled;
         }
 
-        /** 绑定是否开放超级管理员服务器 root 终端。 */
-        public void setServerRootEnabled(boolean serverRootEnabled) {
-            this.serverRootEnabled = serverRootEnabled;
+        /** 绑定是否开放超级管理员服务器终端。 */
+        public void setServerEnabled(boolean serverEnabled) {
+            this.serverEnabled = serverEnabled;
         }
 
         /** 返回服务器终端固定工作目录。 */
@@ -387,6 +388,16 @@ public class TestAgentRuntimeProperties {
         /** 绑定对浏览器公开的 WSS 网关基址。 */
         public void setPublicWebsocketBaseUrl(String publicWebsocketBaseUrl) {
             this.publicWebsocketBaseUrl = publicWebsocketBaseUrl;
+        }
+
+        /** 返回是否允许服务器终端直连明文 WebSocket；仅供本地 test profile 使用。 */
+        public boolean isAllowInsecureServerWebsocket() {
+            return allowInsecureServerWebsocket;
+        }
+
+        /** 绑定是否允许服务器终端直连明文 WebSocket。 */
+        public void setAllowInsecureServerWebsocket(boolean allowInsecureServerWebsocket) {
+            this.allowInsecureServerWebsocket = allowInsecureServerWebsocket;
         }
 
         /**

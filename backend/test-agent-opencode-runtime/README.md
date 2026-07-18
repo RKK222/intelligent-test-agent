@@ -59,7 +59,7 @@
 - agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
 - Model/Provider 目录编排：前端对话框始终通过 runtime 代理 opencode 原生 `/api/model`、`/api/provider`，不再从 `ai_model_configs` 或 `ModelCatalogApplicationService` 返回托管目录；Run 启动前不再 `PATCH /global/config` 同步 provider。
 - 内部模型代理：按 `X-Enterprise-Model-Provider` 查 JVM 内存中的内部供应商地址，向上游注入数据库保存的全局 `ENTERPRISE_OPENAI_AUTH_TOKEN` 和 `ucid`，并把流式 `<think>...</think>` 转换为 `reasoning_content`。
-- PTY terminal ticket、限流、JVM 内 active registry、Pty4J 进程适配、真实 resize 和审计；同一链路同时承载 workspace shell 与默认关闭的服务器 root shell。workspace shell 仅允许 `sh`、`bash`、`zsh`；root shell 固定 `/bin/bash`、固定工作目录和最小环境，要求目标 Java effective UID 为 0。
+- PTY terminal ticket、限流、JVM 内 active registry、Pty4J 进程适配、真实 resize 和审计；同一链路同时承载 workspace shell 与默认关闭的服务器 shell。workspace shell 仅允许 `sh`、`bash`、`zsh`；服务器 shell 固定 `/bin/bash`、固定工作目录和不含 Java 密钥的最小环境，操作系统用户与权限直接继承目标 Java 进程，不切换用户或提权。
 
 ## Model 目录配置
 

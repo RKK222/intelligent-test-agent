@@ -91,15 +91,15 @@ class TerminalControllerTest {
     void createsSuperAdminServerTicketWithWssGatewayUrl() {
         TerminalApplicationService service = org.mockito.Mockito.mock(TerminalApplicationService.class);
         RuntimeManagementBackendRoutingService routing = org.mockito.Mockito.mock(RuntimeManagementBackendRoutingService.class);
-        ServerTerminalTicketRequest request = new ServerTerminalTicketRequest("ROOT@server-a", 120, 32);
+        ServerTerminalTicketRequest request = new ServerTerminalTicketRequest("SERVER@server-a", 120, 32);
         when(routing.forwardTargetForLinuxServer(any(), eq(new LinuxServerId("server-a"))))
                 .thenReturn(Optional.empty());
         when(service.createServerTicket(
                 eq(new LinuxServerId("server-a")), eq(new UserId("usr_admin")), eq(request), eq("trace_1234567890abcdef")))
                 .thenReturn(new TerminalTicketResponse(
-                        "pty_root", Instant.parse("2026-07-18T06:00:00Z"), "/unused"));
+                        "pty_server", Instant.parse("2026-07-18T06:00:00Z"), "/unused"));
         CurrentBackendWebSocketUrlFactory urls = new CurrentBackendWebSocketUrlFactory(
-                org.mockito.Mockito.mock(BackendInstanceIdentity.class), "wss://console.example");
+                org.mockito.Mockito.mock(BackendInstanceIdentity.class), "wss://console.example", false);
         TerminalController controller = new TerminalController(service, urls, routing);
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .post("/api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/tickets")
@@ -113,7 +113,7 @@ class TerminalControllerTest {
 
         org.assertj.core.api.Assertions.assertThat(response).isNotNull();
         org.assertj.core.api.Assertions.assertThat(response.data().webSocketUrl())
-                .isEqualTo("wss://console.example/api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/ws?ticket=pty_root");
+                .isEqualTo("wss://console.example/api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/ws?ticket=pty_server");
     }
 
     private CurrentBackendWebSocketUrlFactory webSocketUrlFactory() {

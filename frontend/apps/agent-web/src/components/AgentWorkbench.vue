@@ -2753,9 +2753,9 @@ function createTerminalTicket() {
   });
 }
 
-/** 为服务器选择器内的超级管理员 root 终端签发一次性 ticket。 */
+/** 为服务器选择器内的超级管理员服务器终端签发一次性 ticket。 */
 function createServerTerminalTicket(linuxServerId: string, confirmationText: string) {
-  return api.createServerRootTerminalTicket(linuxServerId, {
+  return api.createServerTerminalTicket(linuxServerId, {
     confirmationText,
     cols: 120,
     rows: 32

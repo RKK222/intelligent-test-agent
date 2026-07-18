@@ -61,9 +61,9 @@ public class TerminalTicketRateLimiter {
         }
     }
 
-    /** 按服务器和超级管理员用户限制 root ticket 创建频率。 */
+    /** 按服务器和超级管理员用户限制服务器终端 ticket 创建频率。 */
     public void acquireServer(LinuxServerId linuxServerId, UserId userId) {
-        String key = "server-root|" + linuxServerId.value() + "|" + userId.value();
+        String key = "server-shell|" + linuxServerId.value() + "|" + userId.value();
         Counter counter = counters.computeIfAbsent(key, ignored -> new Counter(clock.instant()));
         if (!counter.tryAcquire(clock.instant(), capacity, window)) {
             throw new PlatformException(

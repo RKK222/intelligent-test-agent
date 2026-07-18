@@ -27,22 +27,37 @@ class CurrentBackendWebSocketUrlFactoryTest {
     }
 
     @Test
-    void buildsServerRootUrlOnlyFromConfiguredWssGateway() {
+    void buildsServerTerminalUrlFromConfiguredWssGateway() {
         CurrentBackendWebSocketUrlFactory factory = new CurrentBackendWebSocketUrlFactory(
-                mock(BackendInstanceIdentity.class), "wss://console.example/internal");
+                mock(BackendInstanceIdentity.class), "wss://console.example/internal", false);
 
-        assertThat(factory.serverRootUrl("/api/root/ws?ticket=pty_1"))
-                .isEqualTo("wss://console.example/internal/api/root/ws?ticket=pty_1");
+        assertThat(factory.serverTerminalUrl("/api/server/ws?ticket=pty_1"))
+                .isEqualTo("wss://console.example/internal/api/server/ws?ticket=pty_1");
     }
 
     @Test
-    void rejectsPlaintextServerRootGateway() {
+    void rejectsPlaintextServerTerminalGateway() {
         CurrentBackendWebSocketUrlFactory factory = new CurrentBackendWebSocketUrlFactory(
-                mock(BackendInstanceIdentity.class), "ws://console.example");
+                mock(BackendInstanceIdentity.class), "ws://console.example", false);
 
-        assertThatThrownBy(() -> factory.serverRootUrl("/api/root/ws?ticket=pty_1"))
+        assertThatThrownBy(() -> factory.serverTerminalUrl("/api/server/ws?ticket=pty_1"))
                 .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
                 .hasMessageContaining("wss");
+    }
+
+    @Test
+    void allowsDirectServerTerminalWebSocketOnlyWhenExplicitlyEnabled() {
+        BackendInstanceIdentity identity = mock(BackendInstanceIdentity.class);
+        when(identity.listenUrl()).thenReturn("http://127.0.0.1:8080");
+
+        CurrentBackendWebSocketUrlFactory localFactory = new CurrentBackendWebSocketUrlFactory(identity, "", true);
+        assertThat(localFactory.serverTerminalUrl("/api/server/ws?ticket=pty_1"))
+                .isEqualTo("ws://127.0.0.1:8080/api/server/ws?ticket=pty_1");
+
+        CurrentBackendWebSocketUrlFactory productionFactory = new CurrentBackendWebSocketUrlFactory(identity, "", false);
+        assertThatThrownBy(() -> productionFactory.serverTerminalUrl("/api/server/ws?ticket=pty_1"))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("WSS");
     }
 
     private CurrentBackendWebSocketUrlFactory factory(String listenUrl) {

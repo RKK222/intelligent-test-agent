@@ -48,7 +48,7 @@ public class TerminalTicketStore {
         Instant expiresAt = clock.instant().plus(DEFAULT_TTL);
         TerminalTicket ticket = new TerminalTicket(
                 ticketIdFactory.get(),
-                draft.linuxServerId() == null ? TerminalTicket.TARGET_WORKSPACE : TerminalTicket.TARGET_SERVER_ROOT,
+                draft.linuxServerId() == null ? TerminalTicket.TARGET_WORKSPACE : TerminalTicket.TARGET_SERVER_SHELL,
                 draft.sessionId(),
                 draft.workspaceId(),
                 draft.executionNodeId(),
@@ -73,7 +73,7 @@ public class TerminalTicketStore {
         if (ticket == null) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "PTY ticket 不存在或已使用", Map.of("sessionId", sessionId.value()));
         }
-        if (ticket.serverRoot() || !ticket.sessionId().equals(sessionId)) {
+        if (ticket.serverShell() || !ticket.sessionId().equals(sessionId)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "PTY ticket 与 Session 不匹配", Map.of("sessionId", sessionId.value()));
         }
         if (ticket.expiresAt().isBefore(clock.instant())) {
@@ -86,7 +86,7 @@ public class TerminalTicketStore {
     }
 
     /**
-     * 一次性消费服务器 root ticket，校验目标服务器、过期时间和浏览器 Origin。
+     * 一次性消费服务器终端 ticket，校验目标服务器、过期时间和浏览器 Origin。
      */
     public TerminalTicket consumeServer(LinuxServerId linuxServerId, String ticketValue, String origin, String traceId) {
         TerminalTicket ticket = tickets.remove(ticketValue);
@@ -94,7 +94,7 @@ public class TerminalTicketStore {
             throw new PlatformException(ErrorCode.FORBIDDEN, "PTY ticket 不存在或已使用",
                     Map.of("linuxServerId", linuxServerId.value()));
         }
-        if (!ticket.serverRoot() || !ticket.linuxServerId().equals(linuxServerId)) {
+        if (!ticket.serverShell() || !ticket.linuxServerId().equals(linuxServerId)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "PTY ticket 与服务器不匹配",
                     Map.of("linuxServerId", linuxServerId.value()));
         }

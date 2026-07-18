@@ -37,7 +37,7 @@ server {
         proxy_cache off;
     }
 
-    # 服务器 root 终端 ticket 保存在目标 Java 内存，必须按 linuxServerId 定向代理 WebSocket。
+    # 服务器终端 ticket 保存在目标 Java 内存，必须按 linuxServerId 定向代理 WebSocket。
     ${TEST_AGENT_TERMINAL_LOCATIONS}
 
     location /api/ {

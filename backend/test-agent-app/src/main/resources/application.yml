@@ -109,9 +109,10 @@ test-agent:
     channel: ${TEST_AGENT_SERVER_BROADCAST_CHANNEL:test-agent:server-broadcast}
     instance-id: ${TEST_AGENT_SERVER_BROADCAST_INSTANCE_ID:}
   terminal:
-    server-root-enabled: ${TEST_AGENT_SERVER_TERMINAL_ENABLED:false}
-    server-working-directory: ${TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY:/data/testagent}
+    server-enabled: ${TEST_AGENT_SERVER_TERMINAL_ENABLED:false}
+    server-working-directory: ${TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY:${user.dir}}
     public-websocket-base-url: ${TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL:}
+    allow-insecure-server-websocket: ${TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET:false}
     max-input-bytes: 16384
     input-messages-per-window: 64
     resize-messages-per-window: 10

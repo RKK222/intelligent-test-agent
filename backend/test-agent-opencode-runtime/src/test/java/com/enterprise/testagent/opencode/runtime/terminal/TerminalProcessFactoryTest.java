@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -46,6 +47,19 @@ class TerminalProcessFactoryTest {
                 .blockFirst(Duration.ofSeconds(5));
 
         assertThat(output).contains("terminal-factory-marker");
+    }
+
+    @Test
+    void serverShellEnvironmentUsesJavaUserWithoutSensitiveVariables() {
+        Map<String, String> environment = TerminalProcessFactory.serverShellEnvironment();
+
+        assertThat(environment.get("USER")).isEqualTo(System.getProperty("user.name"));
+        assertThat(environment.get("HOME")).isEqualTo(System.getProperty("user.home"));
+        assertThat(environment).containsEntry("SHELL", "/bin/bash");
+        assertThat(environment).doesNotContainKeys(
+                "TEST_AGENT_TEST_DB_PASSWORD",
+                "TEST_AGENT_REDIS_PASSWORD",
+                "ENTERPRISE_OPENAI_AUTH_TOKEN");
     }
 
     private TerminalTicket ticket(String shell) {

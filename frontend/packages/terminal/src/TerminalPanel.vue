@@ -128,6 +128,10 @@ async function connect() {
     sessionRef.value = nextSession;
     snapshot.value = nextSession.snapshot();
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      snapshot.value = { ...initialSnapshot };
+      return;
+    }
     snapshot.value = {
       status: "error",
       output: "",

@@ -1,7 +1,7 @@
 package com.enterprise.testagent.opencode.runtime.terminal;
 
 /**
- * 服务器 root 终端 ticket 请求。确认文本必须由用户当次手工输入，不能由前端自动代填。
+ * 服务器终端 ticket 请求。确认值由连接确认框绑定到用户当次选择的目标服务器。
  */
 public record ServerTerminalTicketRequest(
         String confirmationText,

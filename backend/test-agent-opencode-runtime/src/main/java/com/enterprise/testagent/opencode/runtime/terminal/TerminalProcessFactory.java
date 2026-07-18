@@ -64,18 +64,30 @@ public class TerminalProcessFactory {
         return List.of(shell, "-i", "-s");
     }
 
-    /** root 终端不继承 Java 进程中的密钥环境；workspace 终端保持既有环境兼容性。 */
+    /**
+     * 服务器终端由 Java 直接启动，因此操作系统用户和权限天然与 Java 一致；这里只构造不含密钥的最小环境。
+     * workspace 终端保持既有环境兼容性。
+     */
     private Map<String, String> environment(TerminalTicket ticket) {
-        Map<String, String> environment = ticket.serverRoot() ? new HashMap<>() : new HashMap<>(System.getenv());
+        Map<String, String> environment = ticket.serverShell() ? serverShellEnvironment() : new HashMap<>(System.getenv());
         environment.put("TERM", "xterm-256color");
-        if (ticket.serverRoot()) {
-            environment.put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-            environment.put("HOME", "/root");
-            environment.put("USER", "root");
-            environment.put("LOGNAME", "root");
-            environment.put("SHELL", "/bin/bash");
-            environment.put("LANG", "C.UTF-8");
-        }
         return environment;
+    }
+
+    /** 构造服务器 shell 的安全环境；这些字段只描述 Java 用户，不会切换 UID 或增加权限。 */
+    static Map<String, String> serverShellEnvironment() {
+        Map<String, String> environment = new HashMap<>();
+        String userName = safeValue(System.getProperty("user.name"), "unknown");
+        environment.put("PATH", safeValue(System.getenv("PATH"), "/usr/local/bin:/usr/bin:/bin"));
+        environment.put("HOME", safeValue(System.getProperty("user.home"), "/"));
+        environment.put("USER", userName);
+        environment.put("LOGNAME", userName);
+        environment.put("SHELL", "/bin/bash");
+        environment.put("LANG", safeValue(System.getenv("LANG"), "C"));
+        return environment;
+    }
+
+    private static String safeValue(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 }

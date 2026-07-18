@@ -49,7 +49,7 @@ public class TerminalController {
     }
 
     /**
-     * 为超级管理员签发目标服务器 root 终端 ticket；远端服务器通过公共 Java 路由器转发。
+     * 为超级管理员签发目标服务器终端 ticket；shell 使用目标 Java 的系统用户，远端请求通过公共 Java 路由器转发。
      */
     @PostMapping("/api/internal/platform/opencode-runtime/management/linux-servers/{linuxServerId}/terminal/tickets")
     public Mono<ApiResponse<TerminalTicketResponse>> createServerTicket(
@@ -73,7 +73,7 @@ public class TerminalController {
                     String pathAndQuery = "/api/internal/platform/opencode-runtime/management/linux-servers/"
                             + parsedLinuxServerId.value() + "/terminal/ws?ticket=" + response.ticket();
                     return ApiResponse.ok(new TerminalTicketResponse(
-                            response.ticket(), response.expiresAt(), webSocketUrlFactory.serverRootUrl(pathAndQuery)), traceId);
+                            response.ticket(), response.expiresAt(), webSocketUrlFactory.serverTerminalUrl(pathAndQuery)), traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }

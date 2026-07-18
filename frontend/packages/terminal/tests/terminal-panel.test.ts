@@ -110,9 +110,9 @@ describe("TerminalPanel", () => {
       props: {
         baseUrl: "https://console.example",
         createTicket: vi.fn().mockResolvedValue({
-          ticket: "pty_root",
+          ticket: "pty_server",
           expiresAt: "2026-07-18T14:00:00Z",
-          webSocketUrl: "wss://console.example/terminal/ws?ticket=pty_root"
+          webSocketUrl: "wss://console.example/terminal/ws?ticket=pty_server"
         }),
         WebSocketCtor: FakeWebSocket as any
       }
@@ -135,5 +135,22 @@ describe("TerminalPanel", () => {
       { type: "resize", cols: 80, rows: 24 },
       { type: "input", data: "whoami\r" }
     ]);
+  });
+
+  it("用户取消连接确认时恢复 idle 且不展示 ticket 失败", async () => {
+    const aborted = new Error("用户取消连接");
+    aborted.name = "AbortError";
+    const view = render(TerminalPanel, {
+      props: {
+        baseUrl: "https://console.example",
+        createTicket: vi.fn().mockRejectedValue(aborted),
+        WebSocketCtor: FakeWebSocket as any
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "连接终端" }));
+    await waitFor(() => expect(view.getByText("idle")).toBeTruthy());
+    expect(view.queryByText(/PTY_TICKET_FAILED/)).toBeNull();
+    expect(FakeWebSocket.instances).toHaveLength(0);
   });
 });

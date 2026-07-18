@@ -30,6 +30,11 @@ test-agent:
   managed-workspace:
     replica-reconciler:
       enabled: false
+  terminal:
+    # 本地 test profile 直接使用启动 Java 的当前用户，并允许浏览器连接本机 ws 地址。
+    server-enabled: true
+    server-working-directory: ${TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY:${user.dir}}
+    allow-insecure-server-websocket: true
   model-catalog:
     source: ${TEST_AGENT_MODEL_CATALOG_SOURCE:internal}
     external:

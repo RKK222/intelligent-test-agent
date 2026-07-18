@@ -1936,18 +1936,18 @@ describe("backend-api", () => {
     );
   });
 
-  it("creates server root terminal tickets with explicit confirmation", async () => {
+  it("creates server terminal tickets with target-bound confirmation", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({
         success: true,
         traceId: "trace_fixed",
-        data: { ticket: "pty_root", expiresAt: "2026-07-18T13:00:00Z", webSocketUrl: "wss://console/api/root/ws?ticket=pty_root" }
+        data: { ticket: "pty_server", expiresAt: "2026-07-18T13:00:00Z", webSocketUrl: "wss://console/api/server/ws?ticket=pty_server" }
       }), { status: 200 })
     );
     const client = createBackendApiClient({ baseUrl: "https://console", fetcher, traceIdFactory: () => "trace_fixed" });
 
-    await client.createServerRootTerminalTicket("server-a", {
-      confirmationText: "ROOT@server-a",
+    await client.createServerTerminalTicket("server-a", {
+      confirmationText: "SERVER@server-a",
       cols: 120,
       rows: 32
     });
@@ -1956,7 +1956,7 @@ describe("backend-api", () => {
       "https://console/api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/tickets",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ confirmationText: "ROOT@server-a", cols: 120, rows: 32 })
+        body: JSON.stringify({ confirmationText: "SERVER@server-a", cols: 120, rows: 32 })
       })
     );
   });
