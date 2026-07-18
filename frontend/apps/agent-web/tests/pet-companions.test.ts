@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   PET_PREFERENCE_STORAGE_KEY,
+  PET_SCALE_DEFAULT,
+  PET_SCALE_MAX,
   normalizePetScale,
   dailyPetId,
   loadPetPreference,
@@ -14,8 +16,11 @@ describe("pet companions", () => {
   it("normalizes pet sizes to the supported range and step", () => {
     expect(normalizePetScale(0.4)).toBe(0.75);
     expect(normalizePetScale(1.13)).toBe(1.15);
-    expect(normalizePetScale(2)).toBe(1.5);
-    expect(normalizePetScale("invalid")).toBe(1);
+    expect(normalizePetScale(PET_SCALE_DEFAULT)).toBe(1.5);
+    expect(normalizePetScale(2)).toBe(2);
+    expect(normalizePetScale(PET_SCALE_MAX)).toBe(2.5);
+    expect(normalizePetScale(3)).toBe(PET_SCALE_MAX);
+    expect(normalizePetScale("invalid")).toBe(PET_SCALE_DEFAULT);
   });
 
   it("rotates deterministically by local calendar day", () => {

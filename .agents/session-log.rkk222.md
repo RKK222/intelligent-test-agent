@@ -5,6 +5,17 @@
 
 ## Entries
 
+### 2026-07-18 - 调整小宠物默认与最大尺寸
+
+- Why:
+  - 用户希望小宠物默认更大，并允许更大的桌面展示尺寸。
+- What:
+  - 将无历史缩放偏好的默认值调整为 150%，上限调整为 250%；保留已有明确缩放偏好，并补充滑杆、边界、位置夹紧和持久化测试。
+- How:
+  - 复用现有 `normalizePetScale`、本地 `test-agent.pet-companion.v1` 和兼容旧版 Chromium 的普通 range input；尺寸仍通过根元素 width/height 计算，未修改 API、RunEvent、数据库或环境配置。
+- Result:
+  - 定向宠物偏好与 FigmaShell 测试 51 项通过；agent-web 类型检查、生产构建通过；Vite preview 在 `127.0.0.1:4176` 返回 HTTP 200。
+
 ### 2026-07-18 - 将设置引导切换到真实页签
 
 - Why:

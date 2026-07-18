@@ -11,6 +11,7 @@ import {
   getPetCompanion,
   loadPetPreference,
   normalizePetScale,
+  PET_SCALE_DEFAULT,
   PET_SCALE_MAX,
   PET_SCALE_MIN,
   PET_SCALE_STEP,
@@ -461,7 +462,7 @@ const ROBOT_FIXED_STORAGE_KEY = "figma-shell-robot-fixed";
 const petPreference = ref(loadPetPreference(typeof window === "undefined" ? undefined : window.localStorage));
 const activePetId = ref<PetCompanionId>("sniffer");
 const activePet = computed(() => getPetCompanion(activePetId.value));
-const robotScale = computed(() => normalizePetScale(petPreference.value.scale ?? 1));
+const robotScale = computed(() => normalizePetScale(petPreference.value.scale ?? PET_SCALE_DEFAULT));
 const robotWidth = computed(() => ROBOT_BASE_WIDTH * robotScale.value);
 const robotHeight = computed(() => ROBOT_BASE_HEIGHT * robotScale.value);
 const robotScalePercent = computed(() => Math.round(robotScale.value * 100));

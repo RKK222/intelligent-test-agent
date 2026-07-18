@@ -133,15 +133,19 @@ describe("FigmaShell", () => {
     await wrapper.get('button[aria-label="选择小宠物"]').trigger("click");
 
     const range = wrapper.get('[data-testid="pet-size-range"]');
-    await range.setValue("1.25");
+    expect(range.attributes("max")).toBe("2.5");
+    expect(wrapper.get('[data-testid="pet-size-value"]').text()).toBe("150%");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("width: 66px");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("height: 72px");
 
-    expect(wrapper.get('[data-testid="pet-size-value"]').text()).toBe("125%");
-    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("width: 55px");
-    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("height: 60px");
-    expect(JSON.parse(window.localStorage.getItem("test-agent.pet-companion.v1")!)).toMatchObject({ scale: 1.25 });
+    await range.setValue("2.5");
+    expect(wrapper.get('[data-testid="pet-size-value"]').text()).toBe("250%");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("width: 110px");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("height: 120px");
+    expect(JSON.parse(window.localStorage.getItem("test-agent.pet-companion.v1")!)).toMatchObject({ scale: 2.5 });
 
     await wrapper.get('button[aria-label="缩小小宠物"]').trigger("click");
-    expect(wrapper.get('[data-testid="pet-size-value"]').text()).toBe("120%");
+    expect(wrapper.get('[data-testid="pet-size-value"]').text()).toBe("245%");
   });
 
   it("persists a pointer drag after crossing the movement threshold", async () => {
@@ -241,9 +245,9 @@ describe("FigmaShell", () => {
     await summonRobot(wrapper);
 
     const robot = wrapper.get('[data-testid="figma-robot"]');
-    expect(robot.attributes("style")).toContain("left: 268px");
-    expect(robot.attributes("style")).toContain("top: 184px");
-    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 268, y: 184 }));
+    expect(robot.attributes("style")).toContain("left: 246px");
+    expect(robot.attributes("style")).toContain("top: 160px");
+    expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify({ x: 246, y: 160 }));
   });
 
   it("does not overwrite the saved start position when natural motion is reclamped on resize", async () => {
@@ -263,7 +267,7 @@ describe("FigmaShell", () => {
     await wrapper.vm.$nextTick();
 
     expect(window.localStorage.getItem("figma-shell-robot-pos")).toBe(JSON.stringify(savedPosition));
-    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("left: 148px");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("left: 126px");
   });
 
   it("ignores malformed robot positions and storage access failures", async () => {

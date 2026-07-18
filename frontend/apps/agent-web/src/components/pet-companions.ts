@@ -43,7 +43,7 @@ export type PetDisplayMode = "daily" | "random" | "selected";
 export type PetPreference = {
   mode: PetDisplayMode;
   selectedPetId: PetCompanionId;
-  /** 宠物显示比例；旧版本没有该字段时按 100% 兼容。 */
+  /** 宠物显示比例；旧版本没有该字段时按默认 150% 兼容。 */
   scale?: number;
   randomDate?: string;
   randomPetId?: PetCompanionId;
@@ -51,7 +51,8 @@ export type PetPreference = {
 
 export const PET_PREFERENCE_STORAGE_KEY = "test-agent.pet-companion.v1";
 export const PET_SCALE_MIN = 0.75;
-export const PET_SCALE_MAX = 1.5;
+export const PET_SCALE_DEFAULT = 1.5;
+export const PET_SCALE_MAX = 2.5;
 export const PET_SCALE_STEP = 0.05;
 
 const DEFAULT_PREFERENCE: PetPreference = {
@@ -64,7 +65,7 @@ const PET_IDS = new Set<PetCompanionId>(PET_COMPANIONS.map((pet) => pet.id));
 /** 将输入和历史偏好规整到兼容旧版浏览器的固定步进范围。 */
 export function normalizePetScale(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numeric)) return 1;
+  if (!Number.isFinite(numeric)) return PET_SCALE_DEFAULT;
   const bounded = Math.min(PET_SCALE_MAX, Math.max(PET_SCALE_MIN, numeric));
   return Number((Math.round(bounded / PET_SCALE_STEP) * PET_SCALE_STEP).toFixed(2));
 }
