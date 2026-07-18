@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-07-18 - 增强 Mermaid SequenceDiagram 结构化编辑能力
+
+- Why:
+  - 既有 Sequence 编辑器只有参与者与平铺消息，无法安全表达控制片段、生命周期、激活、Note 和嵌套调用，也不能像 Flowchart 一样在画布、结构和属性之间完成可视化编辑。
+- What:
+  - 将 Sequence 领域模型升级为递归语句 AST，覆盖 8 类参与者、别名/box、10 种标准箭头、消息、Note、注释、显式与快捷激活、自调用、create/destroy、autonumber、多行文本，以及 `loop`、`alt/else`、`opt`、`par/and`、`critical/option`、`break`、`rect` 任意嵌套。
+  - parser 改为 tokenizer + 显式容器栈，serializer 依据源码锚点、父容器和语义指纹最小差异回写；CRLF、缩进、大小写、旧紧凑坐标 metadata 与未修改快捷语法保持不变。半箭头、中央连接、Actor 菜单、标题/无障碍指令、`par_over`、分号串联和未知配置作为局部锁定纯文本无损保留。
+  - 新增不可变命令/语义校验与确定性布局，统一处理重命名引用、跨分支移动、端点重绑、级联删除、分组连续性、分支生命周期与激活规则；`create` 保持全图唯一，互斥分支 `destroy` 状态隔离。
+  - Sequence 使用单个专用 SVG 场景和“元素 / 结构 / 属性”右侧三标签；支持元素点击/拖放创建、生命线拖建消息、消息端点拖拽重绑、参与者横向拖序、结构树键盘/拖放、画布双向选中、就地编辑和带影响数的参与者级联删除确认。Vue Flow 仅复用视口能力。
+  - 扩展 Markdown、组件、领域、命令、布局和 workbench mock E2E；将测试引导键同步到产品当前 `onboarding.v7`，恢复目标 Chromium/mobile 场景。同步设计、实施计划、前端总 README、editor README 与包级说明。
+- How:
+  - 按 TDD 分层补齐 parser/serializer、命令、布局、组件和保存链回归；最终复审发现互斥分支重复 `create` 漏检后，先用命令测试复现，再共享全图 `created` 集合并继续按分支克隆 `destroyed`，修复后复审无 P0/P1。
+  - 精确排除同一工作树中并发出现的 backend、API/规范、AgentWorkbench、file-explorer、夜间执行设计等无关变更，只暂存本任务文件与本条记录。
+- Result:
+  - Sequence 定向 6 文件 89 项通过；前端全量 Vitest 81 个文件通过（1353 passed / 1 skipped），lint、13 个 workspace typecheck、用户手册与生产 build 通过；目标 workbench Playwright 在 Chromium/mobile 2/2 通过，构建仅保留既有大 chunk 提示。
+  - 不涉及 HTTP API、RunEvent/广播、数据库、后端、manager、generated SDK、依赖版本、环境配置、安全权限或既有 Markdown 保存契约；高级语法首批按设计仅锁定保留，没有未完成的编码项。
+- Verification:
+  - `corepack pnpm exec vitest run packages/editor/tests/mermaid-sequence-domain.test.ts packages/editor/tests/mermaid-sequence-commands.test.ts packages/editor/tests/mermaid-sequence-layout.test.ts packages/editor/tests/SequenceVisualEditor.test.ts packages/editor/tests/MarkdownPreview.test.ts packages/editor/tests/mermaid-compact-metadata.test.ts --reporter=dot`
+  - `corepack pnpm test`、`corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build`
+  - `corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts --grep "Markdown Mermaid Flowchart 和 Sequence"`
+  - `git diff --check`、全部 session log 回顾、冲突标记扫描与最终只读代码复审。
+- Next:
+  - 在真实浏览器手工验证超深嵌套和超长多行文本的可用性；半箭头、中央连接、Actor 菜单等高级创建入口继续按既定后续范围评估。
+
 ### 2026-07-18 - 点击引用资产库展示真实同步进度
 
 - Why:

@@ -18,9 +18,10 @@ vi.mock("mermaid", () => {
 vi.mock("@vue-flow/core", () => ({
   VueFlow: defineComponent({
     props: ["nodes", "edges"],
-    emits: ["nodeClick", "nodeDragStop", "connect"],
+    emits: ["nodeClick", "nodeDragStop", "connect", "init"],
     template: `<div data-testid="vue-flow-mock">
       <slot name="node-mermaid" v-for="node in (nodes || [])" :key="node.id" :id="node.id" :data="node.data" />
+      <slot name="node-sequence-scene" v-for="node in (nodes || [])" :key="'sequence-' + node.id" :id="node.id" :data="node.data" />
       <button data-testid="mock-select-a" @click="$emit('nodeClick', { node: { id: 'A' } })">select A</button>
     </div>`
   }),
@@ -196,15 +197,27 @@ classDef important fill:red
     expect(emitted().change).toBeUndefined();
   });
 
-  it("sequenceDiagram 可编辑有序消息并保留复杂语句", async () => {
+  it("sequenceDiagram 可编辑递归消息并保留 Note、激活、生命周期和嵌套片段", async () => {
     const content = `# 时序
 
 \`\`\`mermaid
 sequenceDiagram
 actor U as 用户
 participant S as 服务
-U->>S: 请求
-Note over U,S: 保留说明
+create participant W as 工作器
+U->>+W: 请求
+alt 成功
+  W->>S: 执行
+  par 记录
+    Note over U,S: 保留说明
+  and 通知
+    S--)U: 完成
+  end
+else 失败
+  W-->>-U: 回退
+end
+destroy W
+W-xU: 中断
 \`\`\``;
     const { container, emitted, findByRole, getByLabelText } = render(MarkdownPreview, {
       props: { content }
@@ -213,13 +226,17 @@ Note over U,S: 保留说明
 
     await fireEvent.click(container.querySelector('[data-mermaid-mode="visual"]') as Element);
     await findByRole("dialog", { name: "Mermaid 可视化编辑" });
-    await fireEvent.update(getByLabelText("消息 1 标签"), "登录请求");
+    await fireEvent.click(getByLabelText("选择消息 请求"));
+    await fireEvent.update(getByLabelText("消息文本"), "登录请求");
     await fireEvent.click(await findByRole("button", { name: "应用到 Markdown" }));
 
     await vi.waitFor(() => expect(emitted().change).toBeTruthy());
     const markdown = (emitted().change as Array<[string]>)[0]?.[0] ?? "";
     expect(markdown).toContain("sequenceDiagram");
-    expect(markdown).toContain("U->>S: 登录请求");
+    expect(markdown).toContain("U->>+W: 登录请求");
+    expect(markdown).toContain("alt 成功");
+    expect(markdown).toContain("par 记录");
     expect(markdown).toContain("Note over U,S: 保留说明");
+    expect(markdown).toContain("destroy W");
   });
 });

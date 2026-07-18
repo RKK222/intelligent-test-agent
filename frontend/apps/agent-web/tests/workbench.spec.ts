@@ -1349,8 +1349,21 @@ classDef important fill:red
 sequenceDiagram
 actor U as 用户
 participant S as 服务
-U->>S: 请求
-Note over U,S: 保留说明
+create participant W as 工作器
+U->>+W: 请求
+alt 成功
+  W->>S: 执行
+  par 记录
+    Note over U,S: 保留说明
+  and 通知
+    S--)U: 完成
+  end
+else 失败
+  W-->>U: 回退
+end
+deactivate W
+destroy W
+W-xU: 中断
 \`\`\``
     },
     personalWorkspaces: {
@@ -1386,7 +1399,8 @@ Note over U,S: 保留说明
 
   await expect(visualButtons).toHaveCount(2);
   await visualButtons.nth(1).click();
-  await dialog.getByLabel("消息 1 标签").fill("登录请求");
+  await dialog.getByLabel("选择消息 请求").click();
+  await dialog.getByLabel("消息文本").fill("登录请求");
   await dialog.getByRole("button", { name: "应用到 Markdown" }).click();
 
   await page.locator(".ta-workbench-footer-save").click();
@@ -1396,9 +1410,12 @@ Note over U,S: 保留说明
     path: "docs/mermaid.md"
   });
   expect(fileWriteRequests[0]?.content).toContain('A@{ shape: rect, label: "准备" }');
-  expect(fileWriteRequests[0]?.content).toContain("U->>S: 登录请求");
+  expect(fileWriteRequests[0]?.content).toContain("U->>+W: 登录请求");
   expect(fileWriteRequests[0]?.content).toContain("classDef important fill:red");
+  expect(fileWriteRequests[0]?.content).toContain("alt 成功");
+  expect(fileWriteRequests[0]?.content).toContain("par 记录");
   expect(fileWriteRequests[0]?.content).toContain("Note over U,S: 保留说明");
+  expect(fileWriteRequests[0]?.content).toContain("destroy W");
 });
 
 test("switching to an application without recent workspace clears the previous file tree", async ({ page }) => {
@@ -5330,7 +5347,7 @@ async function mockBackendApi(
     await page.addInitScript(() => {
       sessionStorage.setItem("test-agent.auth.token", "test-token");
       // 工作台 E2E 默认跳过首次引导，避免遮罩拦截真实文件树与 tab 点击。
-      localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
+      localStorage.setItem("test-agent.onboarding.v7:usr_admin", "seen");
     });
   }
   await page.addInitScript(({
