@@ -40,12 +40,16 @@ type PendingWorkspaceRefresh = {
   confirmationDeadlineMs: number | null;
   paused: boolean;
 };
-type VerificationRequestState = "REQUESTING" | "ACCEPTED" | "FAILED";
-type VerificationStepState = "waiting" | "running" | "completed" | "failed";
-type VerificationProgress = {
+type RepositoryProgressOperation = "SYNCHRONIZE" | "VERIFY_POINTERS";
+type RepositoryOperationTrigger = "repository-card" | "verify-button";
+type RepositoryOperationRequestState = "REQUESTING" | "ACCEPTED" | "FAILED";
+type RepositoryOperationStepState = "waiting" | "running" | "completed" | "failed";
+type RepositoryOperationProgress = {
   repositoryId: string;
   requestToken: number;
-  requestState: VerificationRequestState;
+  operation: RepositoryProgressOperation;
+  trigger: RepositoryOperationTrigger;
+  requestState: RepositoryOperationRequestState;
   generation: number | null;
   error: Notice | null;
 };
@@ -69,7 +73,7 @@ const form = ref<ReferenceConfigValue>({ path: "", merge: true, sddFolderName: "
 const baseline = ref<ReferenceConfigValue | null>(null);
 const configNotice = ref<(Notice & { kind: "error" | "success" }) | null>(null);
 const dialogElement = ref<HTMLElement | null>(null);
-const verificationDialogElement = ref<HTMLElement | null>(null);
+const operationDialogElement = ref<HTMLElement | null>(null);
 
 const branchPopoverRepositoryId = ref<string | null>(null);
 const branchPopoverMode = ref<"initialize" | "switch" | null>(null);
@@ -79,14 +83,14 @@ const branchesLoading = ref(false);
 const branchError = ref<Notice | null>(null);
 const branchSwitchConfirmation = ref<{ repositoryId: string; repositoryName: string; from: string; to: string } | null>(null);
 const pendingWorkspaceRefreshes = ref<Map<string, PendingWorkspaceRefresh>>(new Map());
-const verificationProgress = ref<VerificationProgress | null>(null);
+const operationProgress = ref<RepositoryOperationProgress | null>(null);
 
 let dialogGeneration = 0;
 let selectionGeneration = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingWorkspaceRefreshPollTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingWorkspaceRefreshSequence = 0;
-let verificationRequestSequence = 0;
+let operationRequestSequence = 0;
 let repositoryRequestSequence = 0;
 const repositoryResponseTokens = new Map<string, number>();
 let restoreFocusTo: HTMLElement | null = null;
@@ -103,32 +107,32 @@ const selectedRepository = computed(() =>
   repositories.value.find((repository) => repository.repositoryId === selectedRepositoryId.value) ?? null
 );
 
-const verificationRepository = computed(() => {
-  const progress = verificationProgress.value;
+const operationRepository = computed(() => {
+  const progress = operationProgress.value;
   if (!progress) return null;
   return repositories.value.find((repository) => repository.repositoryId === progress.repositoryId) ?? null;
 });
 
 /** 只有本次请求已接受且响应代次、操作类型一致时，才允许驱动后续步骤，避免旧 READY 快照提前完成弹层。 */
-const acceptedVerificationRepository = computed(() => {
-  const progress = verificationProgress.value;
-  const repository = verificationRepository.value;
+const acceptedOperationRepository = computed(() => {
+  const progress = operationProgress.value;
+  const repository = operationRepository.value;
   if (!progress || progress.requestState !== "ACCEPTED" || progress.generation === null || !repository) return null;
-  if (repository.generation < progress.generation || repository.operation !== "VERIFY_POINTERS") return null;
+  if (repository.generation < progress.generation || repository.operation !== progress.operation) return null;
   return repository;
 });
 
-const verificationCanClose = computed(() => {
-  const progress = verificationProgress.value;
+const operationCanClose = computed(() => {
+  const progress = operationProgress.value;
   if (!progress) return false;
   if (progress.requestState === "FAILED") return true;
-  return ["READY", "FAILED"].includes(acceptedVerificationRepository.value?.status ?? "");
+  return ["READY", "FAILED"].includes(acceptedOperationRepository.value?.status ?? "");
 });
 
-const verificationCanRetry = computed(() => {
-  const progress = verificationProgress.value;
+const operationCanRetry = computed(() => {
+  const progress = operationProgress.value;
   if (!progress || progress.requestState === "REQUESTING") return false;
-  return progress.requestState === "FAILED" || acceptedVerificationRepository.value?.status === "FAILED";
+  return progress.requestState === "FAILED" || acceptedOperationRepository.value?.status === "FAILED";
 });
 
 const visibleTreeNodes = computed<VisibleTreeNode[]>(() => {
@@ -339,7 +343,7 @@ function resetSelectionState() {
   configMode.value = null;
   baseline.value = null;
   configNotice.value = null;
-  verificationProgress.value = null;
+  operationProgress.value = null;
   branchSwitchConfirmation.value = null;
   closeBranchPopover();
 }
@@ -427,6 +431,35 @@ async function applyOperationStatus(
   }
 }
 
+function isProgressOperation(operation: ReferenceRepositoryStatus["operation"]): operation is RepositoryProgressOperation {
+  return operation === "SYNCHRONIZE" || operation === "VERIFY_POINTERS";
+}
+
+/**
+ * 操作弹层必须先于远端请求出现；请求序号与后端 generation 共同隔离迟到响应。
+ */
+function beginOperationProgress(
+  repository: ReferenceRepositoryStatus,
+  operation: RepositoryProgressOperation,
+  trigger: RepositoryOperationTrigger,
+  requestState: RepositoryOperationRequestState = "REQUESTING",
+  generation: number | null = null
+) {
+  const requestToken = ++operationRequestSequence;
+  operationProgress.value = {
+    repositoryId: repository.repositoryId,
+    requestToken,
+    operation,
+    trigger,
+    requestState,
+    generation,
+    error: null
+  };
+  actionError.value = null;
+  void nextTick(() => operationDialogElement.value?.focus());
+  return requestToken;
+}
+
 async function selectRepository(repository: ReferenceRepositoryStatus, synchronize = true) {
   const repairsFailedSwitch = repository.operation === "SWITCH_BRANCH"
     && repository.status === "FAILED"
@@ -444,23 +477,49 @@ async function selectRepository(repository: ReferenceRepositoryStatus, synchroni
   const selectionToken = selectionGeneration;
   if (!synchronize || !repository.initialized) return;
   if (ACTIVE_STATUSES.has(repository.status)) {
+    if (isProgressOperation(repository.operation)) {
+      beginOperationProgress(repository, repository.operation, "repository-card", "ACCEPTED", repository.generation);
+    }
     scheduleStatusPoll(repository.repositoryId, dialogToken, selectionToken);
     return;
   }
+  const requestToken = beginOperationProgress(repository, "SYNCHRONIZE", "repository-card");
   selectionBusy.value = true;
   try {
     const responseToken = beginRepositoryRequest();
     const next = await api.synchronizeReferenceRepository(props.appId, repository.repositoryId);
+    const progress = operationProgress.value;
+    if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)
+      || !progress
+      || progress.requestToken !== requestToken
+      || progress.operation !== "SYNCHRONIZE") return;
+    operationProgress.value = {
+      ...progress,
+      requestState: "ACCEPTED",
+      generation: next.generation,
+      error: null
+    };
     await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
   } catch (error) {
     if (repairsFailedSwitch && error instanceof BackendApiError && !error.retryable) {
       dropPendingWorkspaceRefresh(repository.repositoryId, pendingRefreshRequestToken);
     }
-    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) {
-      actionError.value = notice(error, "同步引用资产库失败");
+    const progress = operationProgress.value;
+    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)
+      && progress
+      && progress.requestToken === requestToken
+      && progress.operation === "SYNCHRONIZE") {
+      operationProgress.value = {
+        ...progress,
+        requestState: "FAILED",
+        error: notice(error, "同步引用资产库失败")
+      };
     }
   } finally {
-    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) selectionBusy.value = false;
+    const progress = operationProgress.value;
+    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)
+      && progress
+      && progress.requestToken === requestToken) selectionBusy.value = false;
   }
 }
 
@@ -566,9 +625,25 @@ async function confirmSwitchBranch() {
   }
 }
 
-function verificationStepState(step: 1 | 2 | 3): VerificationStepState {
-  const progress = verificationProgress.value;
-  const repository = acceptedVerificationRepository.value;
+function isSynchronizationProgress() {
+  return operationProgress.value?.operation === "SYNCHRONIZE";
+}
+
+function operationDialogLabel() {
+  return isSynchronizationProgress() ? "资产库同步进度" : "Git 指针核验进度";
+}
+
+function operationCloseLabel() {
+  return isSynchronizationProgress() ? "关闭资产库同步进度" : "关闭 Git 指针核验进度";
+}
+
+function operationRetryLabel() {
+  return isSynchronizationProgress() ? "重试资产库同步" : "重试 Git 指针核验";
+}
+
+function operationStepState(step: 1 | 2 | 3): RepositoryOperationStepState {
+  const progress = operationProgress.value;
+  const repository = acceptedOperationRepository.value;
   if (!progress) return "waiting";
   if (step === 1) {
     if (progress.requestState === "REQUESTING") return "running";
@@ -580,28 +655,65 @@ function verificationStepState(step: 1 | 2 | 3): VerificationStepState {
   return step === 2 ? "running" : "waiting";
 }
 
-function verificationStepText(step: 1 | 2 | 3) {
-  const state = verificationStepState(step);
+function operationStepText(step: 1 | 2 | 3) {
+  const state = operationStepState(step);
+  const synchronization = isSynchronizationProgress();
   if (step === 1) {
     return state === "running" ? "正在创建" : state === "failed" ? "创建失败" : "任务已创建";
   }
   if (step === 2) {
-    return state === "running" ? "核验中" : state === "completed" ? "已完成" : state === "failed" ? "核验失败" : "等待";
+    return state === "running"
+      ? synchronization ? "同步中" : "核验中"
+      : state === "completed"
+        ? "已完成"
+        : state === "failed"
+          ? synchronization ? "同步失败" : "核验失败"
+          : "等待";
   }
-  return state === "completed" ? "核验完成" : state === "failed" ? "核验失败" : "等待服务器";
+  return state === "completed"
+    ? synchronization ? "同步完成" : "核验完成"
+    : state === "failed"
+      ? synchronization ? "同步失败" : "核验失败"
+      : "等待服务器";
 }
 
-function verificationHeadline() {
-  const progress = verificationProgress.value;
-  const repository = acceptedVerificationRepository.value;
-  if (!progress || progress.requestState === "REQUESTING") return "正在创建核验任务";
-  if (progress.requestState === "FAILED") return "核验任务创建失败";
-  if (repository?.status === "READY") return "核验完成";
-  if (repository?.status === "FAILED") return "核验失败";
-  return "正在核验服务器 Git 指针";
+function operationStepTitle(step: 1 | 2 | 3) {
+  const synchronization = isSynchronizationProgress();
+  if (step === 1) return synchronization ? "创建同步任务" : "创建核验任务";
+  if (step === 2) return synchronization ? "各服务器同步" : "各服务器核验";
+  return synchronization ? "汇总同步结果" : "汇总核验结果";
 }
 
-function verificationServerStatusText(server: ReferenceRepositoryStatus["servers"][number]) {
+function operationStepDescription(step: 1 | 2 | 3) {
+  const synchronization = isSynchronizationProgress();
+  if (step === 1) return synchronization ? "向多节点协调器提交同步代次" : "向多节点协调器提交只读核验代次";
+  if (step === 2) return synchronization ? "同步固定分支与目标 HEAD 到各服务器" : "读取本地分支、HEAD、origin 和工作树状态";
+  return "按当前在线服务器判断本轮是否收敛";
+}
+
+function operationHeadline() {
+  const progress = operationProgress.value;
+  const repository = acceptedOperationRepository.value;
+  const synchronization = isSynchronizationProgress();
+  if (!progress || progress.requestState === "REQUESTING") return synchronization ? "正在创建同步任务" : "正在创建核验任务";
+  if (progress.requestState === "FAILED") return synchronization ? "同步任务创建失败" : "核验任务创建失败";
+  if (repository?.status === "READY") return synchronization ? "同步完成" : "核验完成";
+  if (repository?.status === "FAILED") return synchronization ? "同步失败" : "核验失败";
+  return synchronization ? "正在同步各服务器资产副本" : "正在核验服务器 Git 指针";
+}
+
+function operationServerStatusText(server: ReferenceRepositoryStatus["servers"][number]) {
+  if (isSynchronizationProgress()) {
+    switch (server.status) {
+      case "PENDING": return "等待同步";
+      case "PROCESSING": return "同步中";
+      case "READY": return "已同步";
+      case "BLOCKED": return "同步失败";
+      case "RETRY_WAIT": return "等待重试";
+      case "DEFERRED": return "离线延后";
+      default: return server.status;
+    }
+  }
   switch (server.status) {
     case "PENDING": return "等待认领";
     case "PROCESSING": return "核验中";
@@ -614,7 +726,7 @@ function verificationServerStatusText(server: ReferenceRepositoryStatus["servers
   }
 }
 
-function verificationServerStatusClass(server: ReferenceRepositoryStatus["servers"][number]) {
+function operationServerStatusClass(server: ReferenceRepositoryStatus["servers"][number]) {
   if (server.status === "READY") return "is-completed";
   if (server.status === "BLOCKED") return "is-failed";
   if (["PENDING", "PROCESSING", "RETRY_WAIT"].includes(server.status)) return "is-running";
@@ -624,25 +736,17 @@ function verificationServerStatusClass(server: ReferenceRepositoryStatus["server
 async function verifyPointers(repository: ReferenceRepositoryStatus) {
   const dialogToken = dialogGeneration;
   const selectionToken = selectionGeneration;
-  const requestToken = ++verificationRequestSequence;
-  verificationProgress.value = {
-    repositoryId: repository.repositoryId,
-    requestToken,
-    requestState: "REQUESTING",
-    generation: null,
-    error: null
-  };
+  const requestToken = beginOperationProgress(repository, "VERIFY_POINTERS", "verify-button");
   selectionBusy.value = true;
-  actionError.value = null;
-  void nextTick(() => verificationDialogElement.value?.focus());
   try {
     const responseToken = beginRepositoryRequest();
     const next = await api.verifyReferenceRepositoryPointers(props.appId, repository.repositoryId);
-    const progress = verificationProgress.value;
+    const progress = operationProgress.value;
     if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)
       || !progress
-      || progress.requestToken !== requestToken) return;
-    verificationProgress.value = {
+      || progress.requestToken !== requestToken
+      || progress.operation !== "VERIFY_POINTERS") return;
+    operationProgress.value = {
       ...progress,
       requestState: "ACCEPTED",
       generation: next.generation,
@@ -650,38 +754,50 @@ async function verifyPointers(repository: ReferenceRepositoryStatus) {
     };
     await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
   } catch (error) {
-    const progress = verificationProgress.value;
+    const progress = operationProgress.value;
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)
       && progress
-      && progress.requestToken === requestToken) {
-      verificationProgress.value = {
+      && progress.requestToken === requestToken
+      && progress.operation === "VERIFY_POINTERS") {
+      operationProgress.value = {
         ...progress,
         requestState: "FAILED",
         error: notice(error, "核验服务器 Git 指针失败")
       };
     }
   } finally {
-    const progress = verificationProgress.value;
+    const progress = operationProgress.value;
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)
       && progress
       && progress.requestToken === requestToken) selectionBusy.value = false;
   }
 }
 
-function retryVerification() {
-  const repository = verificationRepository.value;
-  if (!repository || !verificationCanRetry.value) return;
+function retryOperation() {
+  const repository = operationRepository.value;
+  const progress = operationProgress.value;
+  if (!repository || !progress || !operationCanRetry.value) return;
+  if (progress.operation === "SYNCHRONIZE") {
+    void selectRepository(repository);
+    return;
+  }
   void verifyPointers(repository);
 }
 
-function closeVerificationProgress() {
-  if (!verificationCanClose.value) return;
-  verificationProgress.value = null;
+function closeOperationProgress() {
+  const progress = operationProgress.value;
+  if (!progress || !operationCanClose.value) return;
+  operationProgress.value = null;
   actionError.value = null;
   void nextTick(() => {
-    dialogElement.value
-      ?.querySelector<HTMLElement>('button[data-reference-verify="true"]')
-      ?.focus();
+    if (progress.trigger === "verify-button") {
+      dialogElement.value?.querySelector<HTMLElement>('button[data-reference-verify="true"]')?.focus();
+      return;
+    }
+    const repositoryButton = Array.from(
+      dialogElement.value?.querySelectorAll<HTMLElement>("button[data-reference-repository-select]") ?? []
+    ).find((element) => element.dataset.referenceRepositorySelect === progress.repositoryId);
+    repositoryButton?.focus();
   });
 }
 
@@ -883,7 +999,7 @@ async function submitConfig() {
 function focusableElements() {
   const dialog = dialogElement.value;
   if (!dialog) return [];
-  const scope = verificationProgress.value
+  const scope = operationProgress.value
     ? dialog.querySelector<HTMLElement>(".reference-verification-progress") ?? dialog
     : branchSwitchConfirmation.value
       ? dialog.querySelector<HTMLElement>(".reference-confirmation") ?? dialog
@@ -897,8 +1013,8 @@ function handleWindowKeydown(event: KeyboardEvent) {
   if (!props.open) return;
   if (event.key === "Escape") {
     event.preventDefault();
-    if (verificationProgress.value) {
-      if (verificationCanClose.value) closeVerificationProgress();
+    if (operationProgress.value) {
+      if (operationCanClose.value) closeOperationProgress();
       return;
     }
     if (branchSwitchConfirmation.value) {
@@ -915,7 +1031,7 @@ function handleWindowKeydown(event: KeyboardEvent) {
   const last = focusable.at(-1);
   if (!first || !last) {
     event.preventDefault();
-    (verificationProgress.value ? verificationDialogElement.value : dialogElement.value)?.focus();
+    (operationProgress.value ? operationDialogElement.value : dialogElement.value)?.focus();
     return;
   }
   const active = document.activeElement;
@@ -991,8 +1107,8 @@ onBeforeUnmount(() => {
       >
         <header
           class="reference-dialog-header"
-          :aria-hidden="branchSwitchConfirmation || verificationProgress ? 'true' : undefined"
-          :inert="branchSwitchConfirmation || verificationProgress ? true : undefined"
+          :aria-hidden="branchSwitchConfirmation || operationProgress ? 'true' : undefined"
+          :inert="branchSwitchConfirmation || operationProgress ? true : undefined"
         >
           <div>
             <h2 id="reference-dialog-title">引用配置</h2>
@@ -1005,7 +1121,7 @@ onBeforeUnmount(() => {
             aria-label="关闭引用配置"
             data-reference-initial-focus
             v-initial-focus
-            :disabled="Boolean(verificationProgress)"
+            :disabled="Boolean(operationProgress)"
             @click="emit('close')"
           >
             <X class="h-4 w-4" />
@@ -1014,8 +1130,8 @@ onBeforeUnmount(() => {
 
         <div
           class="reference-dialog-body"
-          :aria-hidden="branchSwitchConfirmation || verificationProgress ? 'true' : undefined"
-          :inert="branchSwitchConfirmation || verificationProgress ? true : undefined"
+          :aria-hidden="branchSwitchConfirmation || operationProgress ? 'true' : undefined"
+          :inert="branchSwitchConfirmation || operationProgress ? true : undefined"
         >
           <aside class="reference-repository-column" aria-label="应用资产库">
             <div class="reference-column-heading">
@@ -1049,6 +1165,7 @@ onBeforeUnmount(() => {
                   class="reference-repository-main"
                   :aria-label="`选择${repository.name}`"
                   :aria-pressed="selectedRepositoryId === repository.repositoryId"
+                  :data-reference-repository-select="repository.repositoryId"
                   :disabled="configSaving || (selectionBusy && selectedRepositoryId === repository.repositoryId)"
                   @click="selectRepository(repository)"
                 >
@@ -1405,74 +1522,74 @@ onBeforeUnmount(() => {
           </main>
         </div>
 
-        <div v-if="verificationProgress" class="reference-confirmation-backdrop">
+        <div v-if="operationProgress" class="reference-confirmation-backdrop">
           <section
-            ref="verificationDialogElement"
+            ref="operationDialogElement"
             class="reference-verification-progress"
             role="dialog"
             aria-modal="true"
-            aria-label="Git 指针核验进度"
-            :aria-busy="verificationCanClose ? undefined : 'true'"
+            :aria-label="operationDialogLabel()"
+            :aria-busy="operationCanClose ? undefined : 'true'"
             tabindex="-1"
           >
             <header class="reference-verification-header">
               <div>
-                <h3>刷新 Git 指针</h3>
-                <p aria-live="polite">{{ verificationHeadline() }}</p>
+                <h3>{{ isSynchronizationProgress() ? "同步资产库" : "刷新 Git 指针" }}</h3>
+                <p aria-live="polite">{{ operationHeadline() }}</p>
               </div>
               <Button
                 size="sm"
                 variant="ghost"
-                aria-label="关闭 Git 指针核验进度"
-                :disabled="!verificationCanClose"
-                @click="closeVerificationProgress"
+                :aria-label="operationCloseLabel()"
+                :disabled="!operationCanClose"
+                @click="closeOperationProgress"
               >关闭</Button>
             </header>
 
-            <div v-if="verificationRepository" class="reference-verification-target">
+            <div v-if="operationRepository" class="reference-verification-target">
               <div>
                 <span>版本库</span>
-                <strong>{{ verificationRepository.name }}（{{ verificationRepository.englishName }}）</strong>
+                <strong>{{ operationRepository.name }}（{{ operationRepository.englishName }}）</strong>
               </div>
               <div>
                 <span>目标指针</span>
-                <code>{{ verificationRepository.branch || "—" }} · {{ shortCommit(verificationRepository.targetCommitHash) }}</code>
+                <code>{{ operationRepository.branch || "—" }} · {{ shortCommit(operationRepository.targetCommitHash) }}</code>
               </div>
               <div>
                 <span>服务器</span>
-                <strong>{{ verificationRepository.readyServerCount }}/{{ verificationRepository.targetServerCount }} 台就绪</strong>
+                <strong>{{ operationRepository.readyServerCount }}/{{ operationRepository.targetServerCount }} 台就绪</strong>
               </div>
             </div>
 
             <ol class="reference-verification-steps">
-              <li :class="`is-${verificationStepState(1)}`">
+              <li :class="`is-${operationStepState(1)}`">
                 <span class="reference-verification-marker" aria-hidden="true">
-                  <Check v-if="verificationStepState(1) === 'completed'" class="h-3.5 w-3.5" />
-                  <X v-else-if="verificationStepState(1) === 'failed'" class="h-3.5 w-3.5" />
-                  <RefreshCw v-else-if="verificationStepState(1) === 'running'" class="h-3.5 w-3.5 animate-spin" />
+                  <Check v-if="operationStepState(1) === 'completed'" class="h-3.5 w-3.5" />
+                  <X v-else-if="operationStepState(1) === 'failed'" class="h-3.5 w-3.5" />
+                  <RefreshCw v-else-if="operationStepState(1) === 'running'" class="h-3.5 w-3.5 animate-spin" />
                   <span v-else>1</span>
                 </span>
                 <div>
-                  <strong>创建核验任务</strong>
-                  <small>向多节点协调器提交只读核验代次</small>
+                  <strong>{{ operationStepTitle(1) }}</strong>
+                  <small>{{ operationStepDescription(1) }}</small>
                 </div>
-                <span class="reference-verification-step-status">{{ verificationStepText(1) }}</span>
+                <span class="reference-verification-step-status">{{ operationStepText(1) }}</span>
               </li>
-              <li :class="`is-${verificationStepState(2)}`">
+              <li :class="`is-${operationStepState(2)}`">
                 <span class="reference-verification-marker" aria-hidden="true">
-                  <Check v-if="verificationStepState(2) === 'completed'" class="h-3.5 w-3.5" />
-                  <X v-else-if="verificationStepState(2) === 'failed'" class="h-3.5 w-3.5" />
-                  <RefreshCw v-else-if="verificationStepState(2) === 'running'" class="h-3.5 w-3.5 animate-spin" />
+                  <Check v-if="operationStepState(2) === 'completed'" class="h-3.5 w-3.5" />
+                  <X v-else-if="operationStepState(2) === 'failed'" class="h-3.5 w-3.5" />
+                  <RefreshCw v-else-if="operationStepState(2) === 'running'" class="h-3.5 w-3.5 animate-spin" />
                   <span v-else>2</span>
                 </span>
                 <div>
-                  <strong>各服务器核验</strong>
-                  <small>读取本地分支、HEAD、origin 和工作树状态</small>
+                  <strong>{{ operationStepTitle(2) }}</strong>
+                  <small>{{ operationStepDescription(2) }}</small>
                 </div>
-                <span class="reference-verification-step-status">{{ verificationStepText(2) }}</span>
-                <div v-if="verificationProgress.requestState === 'ACCEPTED'" class="reference-verification-servers">
+                <span class="reference-verification-step-status">{{ operationStepText(2) }}</span>
+                <div v-if="operationProgress.requestState === 'ACCEPTED'" class="reference-verification-servers">
                   <div
-                    v-for="server in acceptedVerificationRepository?.servers || []"
+                    v-for="server in acceptedOperationRepository?.servers || []"
                     :key="server.linuxServerId"
                     class="reference-verification-server"
                   >
@@ -1480,33 +1597,33 @@ onBeforeUnmount(() => {
                       <strong>{{ server.linuxServerId }}</strong>
                       <small>{{ serverOnline(server) === true ? "在线" : serverOnline(server) === false ? "离线" : "在线状态未知" }}</small>
                     </div>
-                    <span :class="verificationServerStatusClass(server)">{{ verificationServerStatusText(server) }}</span>
+                    <span :class="operationServerStatusClass(server)">{{ operationServerStatusText(server) }}</span>
                     <code>{{ server.currentBranch || "—" }} · {{ shortCommit(server.currentCommitHash) }}</code>
                     <small v-if="server.error" class="is-error">{{ server.error }}</small>
                   </div>
-                  <div v-if="(acceptedVerificationRepository?.servers.length || 0) === 0" class="reference-verification-server-empty">
-                    正在等待服务器领取核验任务…
+                  <div v-if="(acceptedOperationRepository?.servers.length || 0) === 0" class="reference-verification-server-empty">
+                    正在等待服务器领取{{ isSynchronizationProgress() ? "同步" : "核验" }}任务…
                   </div>
                 </div>
               </li>
-              <li :class="`is-${verificationStepState(3)}`">
+              <li :class="`is-${operationStepState(3)}`">
                 <span class="reference-verification-marker" aria-hidden="true">
-                  <Check v-if="verificationStepState(3) === 'completed'" class="h-3.5 w-3.5" />
-                  <X v-else-if="verificationStepState(3) === 'failed'" class="h-3.5 w-3.5" />
-                  <RefreshCw v-else-if="verificationStepState(3) === 'running'" class="h-3.5 w-3.5 animate-spin" />
+                  <Check v-if="operationStepState(3) === 'completed'" class="h-3.5 w-3.5" />
+                  <X v-else-if="operationStepState(3) === 'failed'" class="h-3.5 w-3.5" />
+                  <RefreshCw v-else-if="operationStepState(3) === 'running'" class="h-3.5 w-3.5 animate-spin" />
                   <span v-else>3</span>
                 </span>
                 <div>
-                  <strong>汇总核验结果</strong>
-                  <small>按当前在线服务器判断本轮是否收敛</small>
+                  <strong>{{ operationStepTitle(3) }}</strong>
+                  <small>{{ operationStepDescription(3) }}</small>
                 </div>
-                <span class="reference-verification-step-status">{{ verificationStepText(3) }}</span>
+                <span class="reference-verification-step-status">{{ operationStepText(3) }}</span>
               </li>
             </ol>
 
-            <div v-if="verificationProgress.error" class="reference-verification-error" role="alert">
-              <strong>{{ verificationProgress.error.message }}</strong>
-              <code v-if="verificationProgress.error.traceId">traceId: {{ verificationProgress.error.traceId }}</code>
+            <div v-if="operationProgress.error" class="reference-verification-error" role="alert">
+              <strong>{{ operationProgress.error.message }}</strong>
+              <code v-if="operationProgress.error.traceId">traceId: {{ operationProgress.error.traceId }}</code>
             </div>
             <div v-else-if="actionError" class="reference-verification-error is-retrying" role="status">
               <strong>{{ actionError.message }}</strong>
@@ -1514,23 +1631,23 @@ onBeforeUnmount(() => {
               <code v-if="actionError.traceId">traceId: {{ actionError.traceId }}</code>
             </div>
             <div
-              v-else-if="acceptedVerificationRepository?.status === 'FAILED'"
+              v-else-if="acceptedOperationRepository?.status === 'FAILED'"
               class="reference-verification-error"
               role="alert"
             >
-              <strong>{{ acceptedVerificationRepository.message || "服务器指针核验失败" }}</strong>
-              <code v-if="acceptedVerificationRepository.traceId">traceId: {{ acceptedVerificationRepository.traceId }}</code>
+              <strong>{{ acceptedOperationRepository.message || (isSynchronizationProgress() ? "服务器资产副本同步失败" : "服务器指针核验失败") }}</strong>
+              <code v-if="acceptedOperationRepository.traceId">traceId: {{ acceptedOperationRepository.traceId }}</code>
             </div>
 
             <footer class="reference-verification-actions">
               <Button
-                v-if="verificationCanRetry"
+                v-if="operationCanRetry"
                 size="sm"
                 variant="ghost"
-                aria-label="重试 Git 指针核验"
-                @click="retryVerification"
+                :aria-label="operationRetryLabel()"
+                @click="retryOperation"
               >重试</Button>
-              <span v-if="!verificationCanClose">核验期间请保持此窗口打开</span>
+              <span v-if="!operationCanClose">{{ isSynchronizationProgress() ? "同步" : "核验" }}期间请保持此窗口打开</span>
             </footer>
           </section>
         </div>

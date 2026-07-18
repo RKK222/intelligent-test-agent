@@ -765,6 +765,47 @@ describe("ReferenceConfigurationDialog", () => {
     expect(wrapper.get('[data-reference-repository-path="true"]').text()).toContain("服务器路径暂不可用");
   });
 
+  it("opens synchronization progress before selecting an initialized repository finishes", async () => {
+    const synchronization = deferred<ReferenceRepositoryStatus>();
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockReturnValue(synchronization.promise),
+      verifyReferenceRepositoryPointers: vi.fn()
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const progress = wrapper.get('[aria-label="资产库同步进度"]');
+    expect(progress.text()).toContain("创建同步任务");
+    expect(progress.text()).toContain("正在创建");
+    expect(wrapper.get('button[aria-label="关闭资产库同步进度"]').attributes()).toHaveProperty("disabled");
+    expect(wrapper.get(".reference-dialog-header").attributes()).toHaveProperty("inert");
+    expect(wrapper.get(".reference-dialog-body").attributes()).toHaveProperty("inert");
+    expect(document.activeElement).toBe(progress.element);
+    expect(mockApi.synchronizeReferenceRepository).toHaveBeenCalledWith("app-demo", "repo-assets");
+    expect(mockApi.verifyReferenceRepositoryPointers).not.toHaveBeenCalled();
+
+    synchronization.resolve(status({
+      generation: 2,
+      status: "SYNCHRONIZING",
+      operation: "SYNCHRONIZE",
+      targetServerCount: 2,
+      readyServerCount: 0,
+      servers: [
+        { linuxServerId: "linux-a", status: "PENDING", online: true },
+        { linuxServerId: "linux-b", status: "PROCESSING", online: true }
+      ]
+    }));
+    await flushPromises();
+
+    const updatedProgress = wrapper.get('[aria-label="资产库同步进度"]');
+    expect(updatedProgress.text()).toContain("各服务器同步");
+    expect(updatedProgress.text()).toContain("等待同步");
+    expect(updatedProgress.text()).toContain("同步中");
+  });
+
   it("opens verification progress before the request resolves and expands live server stages", async () => {
     const verification = deferred<ReferenceRepositoryStatus>();
     const mockApi = api({
