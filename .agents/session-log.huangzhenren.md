@@ -5,6 +5,27 @@
 
 ## Entries
 
+### 2026-07-18 - 定稿夜间定时执行任务设计
+
+- Why:
+  - 白天算力不足，需要让用户在现有对话中提交一次性夜间任务，并在北京时间 21:00 至次日 07:00 的 15 分钟时段内无人值守执行。
+- What:
+  - 新增夜间任务设计规范，确认定时图标位于发送按钮左侧，取消“执行位置”选择；任务始终绑定当前对话，需要新会话时先使用现有新建对话入口。
+  - 待执行任务采用当前对话锁定卡与“待执行任务”页签双重展示；同一 Session 只允许一个待执行任务，但其他会话仍可使用。
+  - 明确全局时段硬容量、最空闲且尽量早的推荐、同夜窗口顺延、07:00 最终失败、进程自动启动、来源标识和失败卡关闭规则。
+  - 技术设计复用 scheduler `USER_PLAN`、运行记录、Redis 锁和 handler；一次性正文放独立业务表，新增 MyBatis/Flyway、执行亲和和服务端内部 scheduled Run 入口，不使用 Cron 计划 payload 保存正文。
+- How:
+  - 结合现有 `FigmaChatPanel`/`AgentWorkbench`、Session/Run 来源字段、scheduler runner、用户进程公共启动与多 Java 路由约束，固定交互、API、状态机、数据安全、并发容量和测试验收边界。
+  - 设计自检消除了“空 Session 最终失败即归档”与“失败状态可见”的冲突：最终失败先解除锁并保留可关闭卡片，关闭后才按是否为空决定归档。
+- Result:
+  - 本次仅新增设计文档和本条会话记录，未修改代码、API、RunEvent、数据库、环境配置或 generated SDK，也未触碰工作区内并行开发的已有修改。
+  - 设计规划未来新增普通用户 HTTP API、来源 DTO 字段、Flyway/MyBatis 数据模型和 scheduler USER_PLAN 能力；待用户复核规范后再编写实施计划。
+- Verification:
+  - `git diff --check -- docs/superpowers/specs/2026-07-18-night-execution-task-design.md .agents/session-log.huangzhenren.md`
+  - 规范占位符、内部一致性、范围和歧义自检；提交前回顾全部 `.agents/session-log*.md` 近期条目。
+- Next:
+  - 用户确认书面规范后，按 `superpowers:writing-plans` 生成可执行实施计划。
+
 ### 2026-07-18 - 增强 Mermaid SequenceDiagram 结构化编辑能力
 
 - Why:
