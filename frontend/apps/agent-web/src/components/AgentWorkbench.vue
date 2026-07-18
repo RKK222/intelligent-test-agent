@@ -233,7 +233,7 @@ const isAppAdmin = computed(() =>
   isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true
 );
 
-const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v4";
+const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v5";
 const firstLoginGuideActive = ref(true);
 
 function firstLoginGuideStorageKey(userId: string) {

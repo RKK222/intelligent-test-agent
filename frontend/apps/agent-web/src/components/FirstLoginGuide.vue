@@ -2,8 +2,8 @@
 import { nextTick, ref, watch } from "vue";
 import { ElTour, ElTourStep } from "element-plus";
 
-// v4 在设置步骤打开真实设置弹窗，并把气泡锚定到设置导航，避免只说明齿轮却看不到面板内容。
-const GUIDE_VERSION = "v4";
+// v5 在设置步骤打开真实设置弹窗，并把三类常用配置改成可照着操作的短流程。
+const GUIDE_VERSION = "v5";
 
 const props = defineProps<{
   userId?: string | null;
@@ -163,7 +163,14 @@ defineExpose({ restart });
       :next-button-props="nextButton"
     >
       <template #header><div class="ta-onboarding-heading"><span>07</span><strong>设置里的常用操作</strong></div></template>
-      <p>设置面板已自动打开。普通用户主要使用“个人设置”添加或删除自己的 SSH Key；应用管理员还会使用用户配置（应用人员管理）、版本库配置（版本库管理与应用关联）和应用工作区配置（工作空间管理）。“用户管理”不属于普通用户操作。</p>
+      <div class="ta-onboarding-settings-guide">
+        <p>面板已自动打开，按你的权限操作：</p>
+        <ol>
+          <li>普通用户：点“个人设置”→“SSH Key”，填写名称、粘贴私钥，点“添加 SSH key”；删除时点对应 Key 的“删除”。</li>
+          <li>应用管理员：点“应用管理”并先选应用；在“应用人员管理”添加成员，在“应用与版本库关联”关联版本库，在“工作空间管理”选择测试工作库、分支和目录后保存。</li>
+          <li>没有版本库先到“版本库管理”新增；保存工作区后，普通用户回到工作台左下角选择 workspace/version。“用户管理”无需操作。</li>
+        </ol>
+      </div>
     </ElTourStep>
     <ElTourStep
       target='[data-onboarding="manual"]'
@@ -207,6 +214,24 @@ p {
   color: #526171;
   font-size: 13px;
   line-height: 1.65;
+}
+
+.ta-onboarding-settings-guide ol {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: #526171;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ta-onboarding-settings-guide {
+  max-height: min(42vh, 260px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ta-onboarding-settings-guide li + li {
+  margin-top: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {

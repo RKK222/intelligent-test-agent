@@ -147,6 +147,7 @@ describe("help center", () => {
   it("grounds settings questions in the role-aware operations chapter", () => {
     const settings = helpTopicById("settings").content;
 
+    expect(settings).toContain("设置面板怎么用");
     expect(settings).toContain("普通用户：个人设置");
     expect(settings).toContain("用户配置");
     expect(settings).toContain("版本库配置");
