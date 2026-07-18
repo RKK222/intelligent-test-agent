@@ -330,6 +330,62 @@ class ReferenceRepositoryApplicationServiceTest {
     }
 
     @Test
+    void activeSwitchRetryRepairsAllTargetsAndRebroadcastsCurrentGeneration() {
+        LinuxServerId online = new LinuxServerId("server-a");
+        LinuxServerId historical = new LinuxServerId("server-offline");
+        ReferenceRepositoryState activeSwitch = new ReferenceRepositoryState(
+                ASSET_ID, "release", "commit-release", 3L, ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SWITCH_BRANCH, ADMIN, "trace_active", null, NOW, NOW, NOW);
+        when(configurationRepository.findRepositoriesByApplication(APP)).thenReturn(List.of(assetRepository()));
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.of(activeSwitch));
+        when(referenceRepository.findReplicas(ASSET_ID)).thenReturn(List.of(replica(historical, 2L)));
+        when(heartbeatStore.liveBackendServerIds()).thenReturn(Set.of(online));
+
+        ReferenceRepositoryResponses.Status result = service.switchBranch(
+                APP.value(), ASSET_ID.value(), "release", ADMIN, "trace_retry");
+
+        assertThat(result.generation()).isEqualTo(3L);
+        verify(referenceRepository).upsertTargets(
+                ASSET_ID, 3L, "release", Set.of(online, historical), NOW);
+        verify(referenceRepository).deferOfflineReplicas(ASSET_ID, 3L, Set.of(online), NOW);
+        assertThat(publisher.events).singleElement().satisfies(event ->
+                assertThat(event.payload().get("generation")).isEqualTo(3L));
+    }
+
+    @Test
+    void switchRetryRepairsTargetsAfterFirstPostCasUpsertFailure() {
+        LinuxServerId online = new LinuxServerId("server-a");
+        LinuxServerId historical = new LinuxServerId("server-offline");
+        ReferenceRepositoryState ready = state("main", 2L, ReferenceRepositoryStatus.READY);
+        ReferenceRepositoryState activeSwitch = new ReferenceRepositoryState(
+                ASSET_ID, "release", "commit-release", 3L, ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SWITCH_BRANCH, ADMIN, "trace_switch", null, NOW, NOW, NOW);
+        when(configurationRepository.findRepositoriesByApplication(APP)).thenReturn(List.of(assetRepository()));
+        when(referenceRepository.findState(ASSET_ID))
+                .thenReturn(Optional.of(ready), Optional.of(activeSwitch));
+        when(referenceRepository.findReplicas(ASSET_ID)).thenReturn(List.of(replica(historical, 2L)));
+        when(heartbeatStore.liveBackendServerIds()).thenReturn(Set.of(online));
+        when(gitWorkspaceService.resolveRemoteBranchCommit(
+                "https://git.example.test/assets.git", "release", null)).thenReturn("commit-release");
+        when(referenceRepository.advanceGenerationIfCurrent(eq(2L), eq("main"), any()))
+                .thenReturn(Optional.of(activeSwitch));
+        doThrow(new RuntimeException("first target write failed"))
+                .doNothing()
+                .when(referenceRepository).upsertTargets(
+                        ASSET_ID, 3L, "release", Set.of(online, historical), NOW);
+
+        assertThatThrownBy(() -> service.switchBranch(
+                APP.value(), ASSET_ID.value(), "release", ADMIN, "trace_switch"))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(service.switchBranch(
+                APP.value(), ASSET_ID.value(), "release", ADMIN, "trace_retry").generation()).isEqualTo(3L);
+
+        verify(referenceRepository, times(2)).upsertTargets(
+                ASSET_ID, 3L, "release", Set.of(online, historical), NOW);
+        assertThat(publisher.events).hasSize(1);
+    }
+
+    @Test
     void missingSwitchBranchDoesNotAdvanceGeneration() {
         when(configurationRepository.findRepositoriesByApplication(APP)).thenReturn(List.of(assetRepository()));
         when(referenceRepository.findState(ASSET_ID))
@@ -368,6 +424,25 @@ class ReferenceRepositoryApplicationServiceTest {
     }
 
     @Test
+    void activeVerifyRetryRepairsHistoricalTargetsAndRebroadcasts() {
+        LinuxServerId historical = new LinuxServerId("server-offline");
+        ReferenceRepositoryState activeVerify = new ReferenceRepositoryState(
+                ASSET_ID, "main", "commit-2", 5L, ReferenceRepositoryStatus.VERIFYING,
+                ReferenceRepositoryOperationType.VERIFY_POINTERS, ADMIN, "trace_verify", null, NOW, NOW, NOW);
+        when(configurationRepository.findRepositoriesByApplication(APP)).thenReturn(List.of(assetRepository()));
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.of(activeVerify));
+        when(referenceRepository.findReplicas(ASSET_ID)).thenReturn(List.of(replica(historical, 4L)));
+        when(heartbeatStore.liveBackendServerIds()).thenReturn(Set.of());
+
+        assertThat(service.verify(APP.value(), ASSET_ID.value(), "trace_retry").generation()).isEqualTo(5L);
+
+        verify(referenceRepository).upsertTargets(
+                ASSET_ID, 5L, "main", Set.of(historical), NOW);
+        verify(referenceRepository).deferOfflineReplicas(ASSET_ID, 5L, Set.of(), NOW);
+        assertThat(publisher.events).hasSize(1);
+    }
+
+    @Test
     void concurrentSynchronizeLoserReturnsWinningStateWithoutPublishingDuplicateWork() {
         ReferenceRepositoryState failed = state("main", 2L, ReferenceRepositoryStatus.FAILED);
         ReferenceRepositoryState winner = new ReferenceRepositoryState(
@@ -403,8 +478,10 @@ class ReferenceRepositoryApplicationServiceTest {
     void reconciliationAddsLocalTargetAndClaimsDueReplicaThroughDatabaseLease() {
         ReferenceRepositoryState state = state("main", 4L, ReferenceRepositoryStatus.SYNCHRONIZING);
         ReferenceRepositoryReplica due = replica(new LinuxServerId("server-a"), 4L);
+        LinuxServerId historical = new LinuxServerId("server-offline");
         when(heartbeatStore.liveBackendServerIds()).thenReturn(Set.of(new LinuxServerId("server-a")));
         when(referenceRepository.findStatesAfter(null, 200)).thenReturn(List.of(state));
+        when(referenceRepository.findReplicas(ASSET_ID)).thenReturn(List.of(replica(historical, 3L)));
         when(referenceRepository.findClaimableReplicas(new LinuxServerId("server-a"), NOW, 100))
                 .thenReturn(List.of(due));
         when(referenceRepository.claimReplica(
@@ -419,7 +496,7 @@ class ReferenceRepositoryApplicationServiceTest {
         service.reconcileLocalReplicas("trace_reconcile");
 
         verify(referenceRepository).upsertTargets(
-                ASSET_ID, 4L, "main", Set.of(new LinuxServerId("server-a")), NOW);
+                ASSET_ID, 4L, "main", Set.of(new LinuxServerId("server-a"), historical), NOW);
         verify(referenceRepository).deferOfflineReplicas(
                 ASSET_ID, 4L, Set.of(new LinuxServerId("server-a")), NOW);
         verify(referenceRepository).claimReplica(
@@ -447,24 +524,28 @@ class ReferenceRepositoryApplicationServiceTest {
         service.reconcileLocalReplicas("trace_offline");
 
         verify(referenceRepository).deferOfflineReplicas(ASSET_ID, 5L, Set.of(online), NOW);
-        verify(referenceRepository).upsertTargets(ASSET_ID, 5L, "main", Set.of(online), NOW);
+        verify(referenceRepository).upsertTargets(ASSET_ID, 5L, "main", Set.of(online, offline), NOW);
         verify(referenceRepository).updateOverallStatus(
                 ASSET_ID, 5L, ReferenceRepositoryStatus.READY, null, NOW);
         verify(heartbeatStore, times(1)).liveBackendServerIds();
     }
 
     @Test
-    void reconciliationWithNoLiveServersDefersAllWithoutTargetingOrClaiming() {
+    void reconciliationWithNoLiveServersAdvancesHistoricalTargetsThenDefersWithoutClaiming() {
         ReferenceRepositoryState state = state("main", 6L, ReferenceRepositoryStatus.SYNCHRONIZING);
+        LinuxServerId historical = new LinuxServerId("server-a");
         when(heartbeatStore.liveBackendServerIds()).thenReturn(Set.of());
         when(referenceRepository.findStatesAfter(null, 200)).thenReturn(List.of(state));
         when(referenceRepository.findReplicas(ASSET_ID)).thenReturn(List.of(
-                replica(new LinuxServerId("server-a"), 6L, ReferenceRepositoryReplicaStatus.DEFERRED)));
+                replica(historical, 5L, ReferenceRepositoryReplicaStatus.READY)));
 
         service.reconcileLocalReplicas("trace_no_live");
 
+        org.mockito.InOrder targetThenDefer = org.mockito.Mockito.inOrder(referenceRepository);
+        targetThenDefer.verify(referenceRepository).upsertTargets(
+                ASSET_ID, 6L, "main", Set.of(historical), NOW);
+        targetThenDefer.verify(referenceRepository).deferOfflineReplicas(ASSET_ID, 6L, Set.of(), NOW);
         verify(referenceRepository).deferOfflineReplicas(ASSET_ID, 6L, Set.of(), NOW);
-        verify(referenceRepository, never()).upsertTargets(any(), anyLong(), any(), any(), any());
         verify(referenceRepository, never()).findClaimableReplicas(any(), any(), anyInt());
     }
 
@@ -528,6 +609,26 @@ class ReferenceRepositoryApplicationServiceTest {
             assertThat(server.matchesTarget()).isTrue();
             assertThat(server.verifiedAt()).isEqualTo(NOW);
             assertThat(server.syncedAt()).isEqualTo(NOW.minusSeconds(60));
+        });
+    }
+
+    @Test
+    void statusDoesNotReportBlockedReplicaAsMatchingEvenWhenPointerEqualsTarget() {
+        ReferenceRepositoryState failed = state("main", 8L, ReferenceRepositoryStatus.FAILED);
+        ReferenceRepositoryReplica dirty = new ReferenceRepositoryReplica(
+                ASSET_ID, new LinuxServerId("server-a"), 8L, ReferenceRepositoryReplicaStatus.BLOCKED,
+                "main", "commit-2", 0, null, null, null, "引用资产本地仓库存在未提交修改",
+                NOW.minusSeconds(60), NOW, NOW.minusSeconds(120), NOW);
+        when(configurationRepository.findRepositoriesByApplication(APP)).thenReturn(List.of(assetRepository()));
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.of(failed));
+        when(referenceRepository.findReplicas(ASSET_ID)).thenReturn(List.of(dirty));
+
+        ReferenceRepositoryResponses.Status response = service.status(APP.value(), ASSET_ID.value());
+
+        assertThat(response.servers()).singleElement().satisfies(server -> {
+            assertThat(server.currentBranch()).isEqualTo("main");
+            assertThat(server.currentCommitHash()).isEqualTo("commit-2");
+            assertThat(server.matchesTarget()).isFalse();
         });
     }
 
@@ -742,6 +843,7 @@ class ReferenceRepositoryApplicationServiceTest {
                 eq("https://git.example.test/assets.git"), eq("main"), any(), isNull());
         when(gitWorkspaceService.resolveCommit(any(), eq("commit-2"))).thenReturn("commit-2");
         when(gitWorkspaceService.headCommit(any())).thenReturn("commit-2");
+        when(gitWorkspaceService.currentBranch(tempDir.resolve("assets"))).thenReturn("main");
         when(referenceRepository.markReady(
                         eq(ASSET_ID),
                         eq(1L),
@@ -771,7 +873,63 @@ class ReferenceRepositoryApplicationServiceTest {
     }
 
     @Test
+    void synchronizationBlocksWhenPostWriteObservedPointerDoesNotMatchTarget() throws Exception {
+        Path repositoryRoot = tempDir.resolve("assets");
+        stubClaimedWorker(1L);
+        when(referenceRepository.findState(ASSET_ID))
+                .thenReturn(Optional.of(state("main", 1L, ReferenceRepositoryStatus.INITIALIZING)));
+        when(configurationRepository.findRepository(ASSET_ID)).thenReturn(Optional.of(assetRepository()));
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR")).thenReturn(Optional.of(tempDir.toString()));
+        doAnswer(invocation -> {
+            Files.createDirectories(invocation.getArgument(2, Path.class));
+            return null;
+        }).when(gitWorkspaceService).cloneBranch(anyString(), eq("main"), any(), isNull());
+        when(gitWorkspaceService.resolveCommit(any(), eq("commit-2"))).thenReturn("commit-2");
+        when(gitWorkspaceService.headCommit(any())).thenAnswer(invocation ->
+                invocation.getArgument(0, Path.class).equals(repositoryRoot) ? "commit-other" : "commit-2");
+        when(gitWorkspaceService.currentBranch(repositoryRoot)).thenReturn("main");
+
+        service.handle(syncEvent(1L));
+
+        verify(referenceRepository).markBlocked(
+                eq(ASSET_ID), eq(1L), eq(new LinuxServerId("server-a")), anyString(),
+                eq("引用资产同步后实际指针与目标不一致"), eq(NOW));
+        verify(referenceRepository, never()).markReady(
+                any(), anyLong(), any(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
     void switchWorkerChecksOutCleanCrossBranchRepositoryAtFixedCommit() throws Exception {
+        Path repositoryRoot = tempDir.resolve("assets");
+        Files.createDirectories(repositoryRoot);
+        stubClaimedWorker(3L);
+        ReferenceRepositoryState switching = new ReferenceRepositoryState(
+                ASSET_ID, "release", "commit-release", 3L, ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SWITCH_BRANCH, ADMIN, "trace_switch", null, NOW, NOW, NOW);
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.of(switching));
+        when(configurationRepository.findRepository(ASSET_ID)).thenReturn(Optional.of(assetRepository()));
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR")).thenReturn(Optional.of(tempDir.toString()));
+        when(gitWorkspaceService.isGitRepository(repositoryRoot)).thenReturn(true);
+        when(gitWorkspaceService.isWorktreeClean(repositoryRoot)).thenReturn(true);
+        when(gitWorkspaceService.originUrl(repositoryRoot)).thenReturn("https://git.example.test/assets.git");
+        when(gitWorkspaceService.currentBranch(repositoryRoot)).thenReturn("release");
+        when(gitWorkspaceService.headCommit(repositoryRoot)).thenReturn("commit-main", "commit-release");
+        when(gitWorkspaceService.resolveCommit(repositoryRoot, "commit-release")).thenReturn("commit-release");
+        when(referenceRepository.markReady(any(), anyLong(), any(), anyString(), any(), any(), any(), any()))
+                .thenReturn(true);
+
+        service.handle(syncEvent(3L));
+
+        verify(gitWorkspaceService).fetch(repositoryRoot, null);
+        verify(gitWorkspaceService).checkoutBranchForFixedCommit(
+                repositoryRoot, "release", "commit-release", null);
+        verify(referenceRepository).markReady(
+                eq(ASSET_ID), eq(3L), eq(new LinuxServerId("server-a")), anyString(),
+                eq("release"), eq("commit-release"), eq(NOW), eq(NOW));
+    }
+
+    @Test
+    void switchWorkerRenewsLeaseBetweenCheckoutAndReset() throws Exception {
         Path repositoryRoot = tempDir.resolve("assets");
         Files.createDirectories(repositoryRoot);
         stubClaimedWorker(3L);
@@ -787,17 +945,16 @@ class ReferenceRepositoryApplicationServiceTest {
         when(gitWorkspaceService.currentBranch(repositoryRoot)).thenReturn("main");
         when(gitWorkspaceService.headCommit(repositoryRoot)).thenReturn("commit-main");
         when(gitWorkspaceService.resolveCommit(repositoryRoot, "commit-release")).thenReturn("commit-release");
-        when(referenceRepository.markReady(any(), anyLong(), any(), anyString(), any(), any(), any(), any()))
-                .thenReturn(true);
+        when(referenceRepository.renewLease(any(), anyLong(), any(), anyString(), any(), any()))
+                .thenReturn(true, true, true, false);
 
         service.handle(syncEvent(3L));
 
-        verify(gitWorkspaceService).fetch(repositoryRoot, null);
-        verify(gitWorkspaceService).checkoutBranchAtFixedCommit(
+        verify(gitWorkspaceService).checkoutBranchForFixedCommit(
                 repositoryRoot, "release", "commit-release", null);
-        verify(referenceRepository).markReady(
-                eq(ASSET_ID), eq(3L), eq(new LinuxServerId("server-a")), anyString(),
-                eq("release"), eq("commit-release"), eq(NOW), eq(NOW));
+        verify(gitWorkspaceService, never()).resetHardToCommit(repositoryRoot, "commit-release");
+        verify(referenceRepository, never()).markReady(
+                any(), anyLong(), any(), anyString(), any(), any(), any(), any());
     }
 
     @Test
@@ -815,7 +972,7 @@ class ReferenceRepositoryApplicationServiceTest {
         when(gitWorkspaceService.currentBranch(repositoryRoot)).thenReturn("main");
         when(gitWorkspaceService.headCommit(repositoryRoot)).thenReturn("commit-2");
         when(gitWorkspaceService.originUrl(repositoryRoot)).thenReturn("https://git.example.test/assets.git");
-        when(gitWorkspaceService.isWorktreeClean(repositoryRoot)).thenReturn(true);
+        when(gitWorkspaceService.isWorktreeCleanReadOnly(repositoryRoot)).thenReturn(true);
         when(referenceRepository.markVerificationResult(any(), anyLong(), any(), anyString(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(true);
 
@@ -827,7 +984,11 @@ class ReferenceRepositoryApplicationServiceTest {
                 eq(NOW), isNull(), eq(NOW));
         verify(gitWorkspaceService, never()).fetch(any(), any());
         verify(gitWorkspaceService, never()).resetHardToCommit(any(), any());
-        verify(gitWorkspaceService, never()).checkoutBranchAtFixedCommit(any(), any(), any(), any());
+        verify(gitWorkspaceService, never()).checkoutBranchForFixedCommit(any(), any(), any(), any());
+        verify(gitWorkspaceService, never()).cloneBranch(any(), any(), any(), any());
+        verify(gitWorkspaceService, never()).setOriginUrl(any(), any(), any());
+        verify(gitWorkspaceService).isWorktreeCleanReadOnly(repositoryRoot);
+        verify(gitWorkspaceService, never()).isWorktreeClean(repositoryRoot);
     }
 
     @Test
@@ -845,7 +1006,7 @@ class ReferenceRepositoryApplicationServiceTest {
         when(gitWorkspaceService.currentBranch(repositoryRoot)).thenReturn("release");
         when(gitWorkspaceService.headCommit(repositoryRoot)).thenReturn("commit-other");
         when(gitWorkspaceService.originUrl(repositoryRoot)).thenReturn("https://git.example.test/assets.git");
-        when(gitWorkspaceService.isWorktreeClean(repositoryRoot)).thenReturn(true);
+        when(gitWorkspaceService.isWorktreeCleanReadOnly(repositoryRoot)).thenReturn(true);
         when(referenceRepository.markVerificationResult(any(), anyLong(), any(), anyString(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(true);
 
@@ -855,6 +1016,38 @@ class ReferenceRepositoryApplicationServiceTest {
                 eq(ASSET_ID), eq(5L), eq(new LinuxServerId("server-a")), anyString(),
                 eq(ReferenceRepositoryReplicaStatus.BLOCKED), eq("release"), eq("commit-other"),
                 eq(NOW), eq("引用资产本地实际指针与目标不一致"), eq(NOW));
+    }
+
+    @Test
+    void verifyReadFailurePreservesPreviousSnapshotAndVerificationTime() throws Exception {
+        Path repositoryRoot = tempDir.resolve("assets");
+        Files.createDirectories(repositoryRoot);
+        String leaseToken = "lease-verify";
+        ReferenceRepositoryReplica claimed = new ReferenceRepositoryReplica(
+                ASSET_ID, new LinuxServerId("server-a"), 6L, ReferenceRepositoryReplicaStatus.PROCESSING,
+                "main", "commit-old", 0, null, leaseToken, NOW.plusSeconds(120), null,
+                NOW.minusSeconds(120), NOW.minusSeconds(60), NOW.minusSeconds(360), NOW);
+        when(referenceRepository.claimReplica(
+                eq(ASSET_ID), eq(6L), eq(new LinuxServerId("server-a")), anyString(),
+                eq(NOW.plusSeconds(120)), eq(NOW))).thenReturn(Optional.of(claimed));
+        ReferenceRepositoryState verifying = new ReferenceRepositoryState(
+                ASSET_ID, "main", "commit-2", 6L, ReferenceRepositoryStatus.VERIFYING,
+                ReferenceRepositoryOperationType.VERIFY_POINTERS, ADMIN, "trace_verify", null, NOW, NOW, NOW);
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.of(verifying));
+        when(configurationRepository.findRepository(ASSET_ID)).thenReturn(Optional.of(assetRepository()));
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR")).thenReturn(Optional.of(tempDir.toString()));
+        when(gitWorkspaceService.isGitRepository(repositoryRoot)).thenReturn(true);
+        when(gitWorkspaceService.currentBranch(repositoryRoot)).thenReturn("release");
+        when(gitWorkspaceService.headCommit(repositoryRoot)).thenThrow(new PlatformException(
+                ErrorCode.GIT_UNAVAILABLE, "HEAD 读取失败"));
+
+        service.handle(syncEvent(6L));
+
+        verify(referenceRepository).markBlocked(
+                eq(ASSET_ID), eq(6L), eq(new LinuxServerId("server-a")), eq(leaseToken),
+                eq("引用资产本地指针核验失败"), eq(NOW));
+        verify(referenceRepository, never()).markVerificationResult(
+                any(), anyLong(), any(), anyString(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

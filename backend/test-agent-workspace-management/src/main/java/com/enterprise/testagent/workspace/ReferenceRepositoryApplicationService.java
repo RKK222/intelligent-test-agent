@@ -318,6 +318,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         if (current.status().active()) {
             if (current.operationType() == ReferenceRepositoryOperationType.SWITCH_BRANCH
                     && normalizedBranch.equals(current.branch())) {
+                repairTargetsAndBroadcast(current, clock.instant());
                 return status(repository, current);
             }
             throw new PlatformException(ErrorCode.CONFLICT, "引用资产库存在执行中的操作");
@@ -340,6 +341,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             if (winner.operationType() == ReferenceRepositoryOperationType.SWITCH_BRANCH
                     && winner.status().active()
                     && normalizedBranch.equals(winner.branch())) {
+                repairTargetsAndBroadcast(winner, clock.instant());
                 return status(repository, winner);
             }
             throw new PlatformException(ErrorCode.CONFLICT, "引用资产库切换与其它操作冲突");
@@ -357,6 +359,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库尚未初始化"));
         if (current.status().active()) {
             if (current.operationType() == ReferenceRepositoryOperationType.VERIFY_POINTERS) {
+                repairTargetsAndBroadcast(current, clock.instant());
                 return status(repository, current);
             }
             throw new PlatformException(ErrorCode.CONFLICT, "引用资产库存在执行中的操作");
@@ -374,6 +377,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             ReferenceRepositoryState winner = referenceRepository.findState(repository.repositoryId())
                     .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库核验竞争状态不存在"));
             if (winner.operationType() == ReferenceRepositoryOperationType.VERIFY_POINTERS && winner.status().active()) {
+                repairTargetsAndBroadcast(winner, clock.instant());
                 return status(repository, winner);
             }
             throw new PlatformException(ErrorCode.CONFLICT, "引用资产库核验与其它操作冲突");
@@ -386,6 +390,20 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
 
     private void createTargetsForNewGeneration(ReferenceRepositoryState state, Instant now) {
         Set<LinuxServerId> live = liveServerIds();
+        ensureCurrentGenerationTargets(state, live, now);
+    }
+
+    /** CAS 已成功但建档或广播失败时，同一活动请求可安全重放事实源目标并再次唤醒。 */
+    private void repairTargetsAndBroadcast(ReferenceRepositoryState state, Instant now) {
+        createTargetsForNewGeneration(state, now);
+        publishSyncRequested(state);
+    }
+
+    /** 当前代次目标始终覆盖在线服务器和所有历史副本；建档完成后再排空离线任务。 */
+    private void ensureCurrentGenerationTargets(
+            ReferenceRepositoryState state,
+            Set<LinuxServerId> live,
+            Instant now) {
         Set<LinuxServerId> targets = new LinkedHashSet<>(live);
         referenceRepository.findReplicas(state.repositoryId()).stream()
                 .map(ReferenceRepositoryReplica::linuxServerId)
@@ -527,12 +545,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             List<ReferenceRepositoryState> page = referenceRepository.findStatesAfter(cursor, STATE_SCAN_PAGE_SIZE);
             for (ReferenceRepositoryState state : page) {
                 if (state.branch() != null && state.status() != ReferenceRepositoryStatus.UNINITIALIZED) {
-                    referenceRepository.deferOfflineReplicas(
-                            state.repositoryId(), state.generation(), live, now);
-                    if (!live.isEmpty()) {
-                        referenceRepository.upsertTargets(
-                                state.repositoryId(), state.generation(), state.branch(), live, now);
-                    }
+                    ensureCurrentGenerationTargets(state, live, now);
                     refreshOverallStatus(state.repositoryId(), state.generation(), live);
                 }
             }
@@ -592,15 +605,27 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             String privateKey = privateKeyFor(repository, state.credentialUserId());
             String gitUrl = effectiveGitUrl(repository, state.credentialUserId());
             synchronizeDirectory(claimed, repository, state, repoRoot, gitUrl, privateKey);
+            renewLeaseOrThrow(claimed);
+            ObservedPointer observed;
+            try {
+                observed = observePointer(repoRoot);
+            } catch (RuntimeException exception) {
+                throw new ReplicaBlockedException("引用资产同步后无法完整读取实际指针");
+            }
+            if (!state.branch().equals(observed.branch())
+                    || !state.targetCommitHash().equals(observed.commitHash())) {
+                throw new ReplicaBlockedException("引用资产同步后实际指针与目标不一致");
+            }
+            Instant completedAt = clock.instant();
             boolean updated = referenceRepository.markReady(
                     claimed.repositoryId(),
                     claimed.generation(),
                     claimed.linuxServerId(),
                     claimed.leaseToken(),
-                    state.branch(),
-                    state.targetCommitHash(),
-                    clock.instant(),
-                    clock.instant());
+                    observed.branch(),
+                    observed.commitHash(),
+                    completedAt,
+                    completedAt);
             if (updated) {
                 refreshOverallStatus(state.repositoryId(), state.generation());
             }
@@ -631,38 +656,46 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         }
     }
 
-    /** 主动核验全程只读 Git 与文件系统；任何不可信状态都按 BLOCKED fenced 写回实际快照。 */
+    /** 主动核验全程只读 Git 与文件系统；只有完整可信观察才刷新实际快照和 verifiedAt。 */
     private void verifyClaimedReplica(
             ReferenceRepositoryReplica claimed,
             CodeRepository repository,
             ReferenceRepositoryState state,
             String traceId) {
-        String actualBranch = claimed.currentBranch();
-        String actualCommit = claimed.currentCommitHash();
-        String error = null;
+        Path repoRoot = repositoryRoot(repository);
+        boolean trustedDirectory;
         try {
-            Path repoRoot = repositoryRoot(repository);
-            if (Files.isSymbolicLink(repoRoot)
-                    || !Files.isDirectory(repoRoot, LinkOption.NOFOLLOW_LINKS)
-                    || !gitWorkspaceService.isGitRepository(repoRoot)) {
-                error = "引用资产目标目录不是可信 Git 仓库";
+            trustedDirectory = !Files.isSymbolicLink(repoRoot)
+                    && Files.isDirectory(repoRoot, LinkOption.NOFOLLOW_LINKS)
+                    && gitWorkspaceService.isGitRepository(repoRoot);
+        } catch (RuntimeException exception) {
+            markBlocked(claimed, "引用资产本地 Git 仓库可信性核验失败");
+            return;
+        }
+        if (!trustedDirectory) {
+            markBlocked(claimed, "引用资产目标目录不是可信 Git 仓库");
+            return;
+        }
+        ObservedPointer observed;
+        String error;
+        try {
+            observed = observePointer(repoRoot);
+            if (!repository.matchesStoredOrigin(gitWorkspaceService.originUrl(repoRoot))) {
+                error = "引用资产本地仓库 origin 与数据库不一致";
+            } else if (!gitWorkspaceService.isWorktreeCleanReadOnly(repoRoot)) {
+                error = "引用资产本地仓库存在未提交修改";
+            } else if (!state.branch().equals(observed.branch())
+                    || !state.targetCommitHash().equals(observed.commitHash())) {
+                error = "引用资产本地实际指针与目标不一致";
             } else {
-                actualBranch = gitWorkspaceService.currentBranch(repoRoot);
-                actualCommit = gitWorkspaceService.headCommit(repoRoot);
-                if (!repository.matchesStoredOrigin(gitWorkspaceService.originUrl(repoRoot))) {
-                    error = "引用资产本地仓库 origin 与数据库不一致";
-                } else if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
-                    error = "引用资产本地仓库存在未提交修改";
-                } else if (!state.branch().equals(actualBranch)
-                        || !state.targetCommitHash().equals(actualCommit)) {
-                    error = "引用资产本地实际指针与目标不一致";
-                }
+                error = null;
             }
         } catch (RuntimeException exception) {
             LOGGER.warn(
                     "Reference repository pointer verification failed repositoryId={} linuxServerId={} generation={} traceId={}",
                     claimed.repositoryId().value(), claimed.linuxServerId().value(), claimed.generation(), traceId);
-            error = "引用资产本地指针核验失败";
+            markBlocked(claimed, "引用资产本地指针核验失败");
+            return;
         }
         Instant now = clock.instant();
         ReferenceRepositoryReplicaStatus resultStatus = error == null
@@ -670,7 +703,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 : ReferenceRepositoryReplicaStatus.BLOCKED;
         boolean updated = referenceRepository.markVerificationResult(
                 claimed.repositoryId(), claimed.generation(), claimed.linuxServerId(), claimed.leaseToken(),
-                resultStatus, actualBranch, actualCommit, now, error, now);
+                resultStatus, observed.branch(), observed.commitHash(), now, error, now);
         if (updated) {
             refreshOverallStatus(state.repositoryId(), state.generation());
         }
@@ -763,7 +796,9 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         }
         if (state.operationType() == ReferenceRepositoryOperationType.SWITCH_BRANCH) {
             renewLeaseOrThrow(claimed);
-            gitWorkspaceService.checkoutBranchAtFixedCommit(repoRoot, state.branch(), targetCommit, privateKey);
+            gitWorkspaceService.checkoutBranchForFixedCommit(repoRoot, state.branch(), targetCommit, privateKey);
+            renewLeaseOrThrow(claimed);
+            gitWorkspaceService.resetHardToCommit(repoRoot, targetCommit);
             return;
         }
         if (!gitWorkspaceService.isAncestor(repoRoot, currentCommit, targetCommit)) {
@@ -946,8 +981,19 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         if (state == null || replica.currentBranch() == null || replica.currentCommitHash() == null) {
             return null;
         }
-        return Objects.equals(state.branch(), replica.currentBranch())
+        return replica.status() == ReferenceRepositoryReplicaStatus.READY
+                && Objects.equals(state.branch(), replica.currentBranch())
                 && Objects.equals(state.targetCommitHash(), replica.currentCommitHash());
+    }
+
+    /** 分支与 HEAD 必须在同一次完整读取中获得；任一读取失败时调用方不得拼接或刷新旧快照。 */
+    private ObservedPointer observePointer(Path repoRoot) {
+        String branch = gitWorkspaceService.currentBranch(repoRoot);
+        String commitHash = gitWorkspaceService.headCommit(repoRoot);
+        if (branch == null || branch.isBlank() || commitHash == null || commitHash.isBlank()) {
+            throw new IllegalStateException("Git pointer observation is incomplete");
+        }
+        return new ObservedPointer(branch, commitHash);
     }
 
     private CodeRepository requireLinkedAssetRepository(ApplicationId appId, CodeRepositoryId repositoryId) {
@@ -1294,6 +1340,9 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
     }
 
     private static final class LeaseLostException extends RuntimeException {
+    }
+
+    private record ObservedPointer(String branch, String commitHash) {
     }
 
     private static final class ReplicaFileLock implements AutoCloseable {

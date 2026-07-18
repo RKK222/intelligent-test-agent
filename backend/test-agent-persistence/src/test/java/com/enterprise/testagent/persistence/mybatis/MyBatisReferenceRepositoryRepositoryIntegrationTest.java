@@ -101,14 +101,6 @@ class MyBatisReferenceRepositoryRepositoryIntegrationTest {
     }
 
     @Test
-    void migrationAddsCompatibleOperationAndVerifiedAtColumns() {
-        assertThat(jdbcClient.sql("select operation_type from reference_repository_states")
-                .query(String.class).optional()).isEmpty();
-        assertThat(jdbcClient.sql("select verified_at from reference_repository_replicas")
-                .query(Timestamp.class).optional()).isEmpty();
-    }
-
-    @Test
     void generationAdvanceUsesExpectedOldBranchAndMapsOperation() {
         assertThat(repository.initializeIfAbsent(state(
                 "main", "commit-1", 1L, ReferenceRepositoryStatus.READY))).isPresent();

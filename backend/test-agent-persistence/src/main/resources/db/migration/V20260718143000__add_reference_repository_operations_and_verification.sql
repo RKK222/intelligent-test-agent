@@ -3,7 +3,7 @@ alter table reference_repository_states
 
 update reference_repository_states
 set operation_type = case
-    when status = 'INITIALIZING' then 'INITIALIZE'
+    when status in ('INITIALIZING', 'UNINITIALIZED') then 'INITIALIZE'
     when status = 'VERIFYING' then 'VERIFY_POINTERS'
     else 'SYNCHRONIZE'
 end;

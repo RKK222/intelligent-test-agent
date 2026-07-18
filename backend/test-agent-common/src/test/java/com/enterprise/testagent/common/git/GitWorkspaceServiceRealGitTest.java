@@ -8,7 +8,9 @@ import com.enterprise.testagent.common.error.PlatformException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -190,18 +192,19 @@ class GitWorkspaceServiceRealGitTest {
         write(repo, "base.txt", "base\n");
         git(repo, "add", "--all");
         git(repo, "commit", "-m", "base");
+        String releaseBeforeReset = git(repo, "rev-parse", "HEAD").stdoutText().trim();
         git(repo, "branch", "release");
-        git(repo, "checkout", "release");
         write(repo, "release.txt", "release\n");
         git(repo, "add", "--all");
         git(repo, "commit", "-m", "release target");
         String target = git(repo, "rev-parse", "HEAD").stdoutText().trim();
-        git(repo, "checkout", "main");
 
         GitWorkspaceService service = new GitWorkspaceService();
-        service.checkoutBranchAtFixedCommit(repo, "release", target, null);
+        service.checkoutBranchForFixedCommit(repo, "release", target, null);
 
         assertThat(service.currentBranch(repo)).isEqualTo("release");
+        assertThat(service.headCommit(repo)).isEqualTo(releaseBeforeReset);
+        service.resetHardToCommit(repo, target);
         assertThat(service.headCommit(repo)).isEqualTo(target);
 
         git(repo, "checkout", "main");
@@ -213,9 +216,42 @@ class GitWorkspaceServiceRealGitTest {
         git(repo, "commit", "-m", "diverged release");
         git(repo, "checkout", "main");
 
-        assertThatThrownBy(() -> service.checkoutBranchAtFixedCommit(repo, "release", target, null))
+        assertThatThrownBy(() -> service.checkoutBranchForFixedCommit(repo, "release", target, null))
                 .isInstanceOf(PlatformException.class);
         assertThat(service.currentBranch(repo)).isEqualTo("main");
+    }
+
+    @Test
+    void readOnlyCleanCheckDoesNotRefreshOrRewriteIndex() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "tracked.txt", "base\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        write(repo, "tracked.txt", "dirty\n");
+        write(repo, "untracked.txt", "untracked\n");
+        Path index = repo.resolve(".git/index");
+        FileTime preservedTime = FileTime.from(Instant.parse("2020-01-02T03:04:05Z"));
+        Files.setLastModifiedTime(index, preservedTime);
+        byte[] before = Files.readAllBytes(index);
+
+        GitCommandExecutor.startRecording();
+        boolean clean;
+        List<String> commands;
+        try {
+            clean = new GitWorkspaceService().isWorktreeCleanReadOnly(repo);
+        } finally {
+            commands = GitCommandExecutor.stopRecording();
+        }
+
+        assertThat(clean).isFalse();
+        assertThat(Files.readAllBytes(index)).containsExactly(before);
+        assertThat(Files.getLastModifiedTime(index)).isEqualTo(preservedTime);
+        assertThat(commands).singleElement().satisfies(command -> {
+            assertThat(command).contains("git --no-optional-locks");
+            assertThat(command).contains("status --porcelain --untracked-files=all");
+            assertThat(command).contains("core.untrackedCache=false");
+            assertThat(command).contains("core.fsmonitor=false");
+        });
     }
 
     private Path createAddDeleteConflict(String suffix) throws Exception {

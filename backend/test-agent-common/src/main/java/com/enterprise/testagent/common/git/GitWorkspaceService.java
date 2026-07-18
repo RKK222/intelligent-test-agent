@@ -374,7 +374,7 @@ public class GitWorkspaceService {
      * 将受管共享副本安全切换到固定提交。已有目标本地分支必须可快进到目标提交；
      * 不存在时只从同名 origin 分支建立 tracking，绝不使用 -B 覆盖未知本地分支。
      */
-    public void checkoutBranchAtFixedCommit(
+    public void checkoutBranchForFixedCommit(
             Path repoRoot,
             String branch,
             String targetCommit,
@@ -398,7 +398,6 @@ public class GitWorkspaceService {
                     privateKey,
                     DEFAULT_TIMEOUT);
         }
-        resetHardToCommit(repoRoot, targetCommit);
     }
 
     private boolean localBranchExists(Path repoRoot, String localRef) {
@@ -1175,6 +1174,31 @@ public class GitWorkspaceService {
     public boolean isWorktreeClean(Path repoRoot) {
         GitCommandResult result = executor.execute(
                 gitNoQuotedPath(repoRoot, "status", "--porcelain"),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText().trim().isEmpty();
+    }
+
+    /**
+     * 只读核验工作树状态，不刷新 index stat、fsmonitor 或 untracked cache。
+     * 引用资产指针核验不得调用可能获取可选锁并回写 index 的通用 status 路径。
+     */
+    public boolean isWorktreeCleanReadOnly(Path repoRoot) {
+        GitCommandResult result = executor.execute(
+                List.of(
+                        "git",
+                        "--no-optional-locks",
+                        "-c",
+                        "core.quotepath=false",
+                        "-c",
+                        "core.untrackedCache=false",
+                        "-c",
+                        "core.fsmonitor=false",
+                        "-C",
+                        repoRoot.toString(),
+                        "status",
+                        "--porcelain",
+                        "--untracked-files=all"),
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText().trim().isEmpty();
