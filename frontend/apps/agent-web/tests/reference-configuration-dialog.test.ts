@@ -16,6 +16,7 @@ function status(overrides: Partial<ReferenceRepositoryStatus> = {}): ReferenceRe
     targetCommitHash: "abc123",
     generation: 1,
     status: "READY",
+    operation: "SYNCHRONIZE",
     targetServerCount: 1,
     readyServerCount: 1,
     servers: [{ linuxServerId: "linux-a", status: "READY", currentBranch: "main", currentCommitHash: "abc123" }],
@@ -76,9 +77,18 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+async function closeCompletedSyncProgress(wrapper: ReturnType<typeof render>) {
+  const close = wrapper.find('button[aria-label="关闭资产库同步进度"]');
+  if (close.exists() && !close.attributes("disabled")) {
+    await close.trigger("click");
+    await flushPromises();
+  }
+}
+
 async function selectReadyFolder(wrapper: ReturnType<typeof render>) {
   await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
   await flushPromises();
+  await closeCompletedSyncProgress(wrapper);
   await wrapper.get('button[data-reference-selectable="true"]').trigger("click");
   await flushPromises();
 }
@@ -804,6 +814,99 @@ describe("ReferenceConfigurationDialog", () => {
     expect(updatedProgress.text()).toContain("各服务器同步");
     expect(updatedProgress.text()).toContain("等待同步");
     expect(updatedProgress.text()).toContain("同步中");
+  });
+
+  it("retries failed synchronization in place and restores focus to the repository card", async () => {
+    const synchronize = vi.fn()
+      .mockRejectedValueOnce(new BackendApiError(503, {
+        success: false,
+        code: "REFERENCE_SYNCHRONIZE_FAILED",
+        message: "同步任务暂时无法创建",
+        traceId: "trace_sync_request_failed",
+        retryable: true
+      }))
+      .mockResolvedValueOnce(status({
+        generation: 2,
+        status: "READY",
+        operation: "SYNCHRONIZE"
+      }));
+    const mockApi = api({ synchronizeReferenceRepository: synchronize });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    const failedProgress = wrapper.get('[aria-label="资产库同步进度"]');
+    expect(failedProgress.text()).toContain("同步任务暂时无法创建");
+    expect(failedProgress.text()).toContain("trace_sync_request_failed");
+    expect(wrapper.get('button[aria-label="关闭资产库同步进度"]').attributes()).not.toHaveProperty("disabled");
+
+    await wrapper.get('button[aria-label="重试资产库同步"]').trigger("click");
+    await flushPromises();
+
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    const completedProgress = wrapper.get('[aria-label="资产库同步进度"]');
+    expect(completedProgress.text()).toContain("同步完成");
+    const close = wrapper.get('button[aria-label="关闭资产库同步进度"]');
+    expect(close.attributes()).not.toHaveProperty("disabled");
+
+    await close.trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[aria-label="资产库同步进度"]').exists()).toBe(false);
+    expect(document.activeElement).toBe(wrapper.get('button[data-reference-repository-select="repo-assets"]').element);
+  });
+
+  it("adopts an active synchronization without submitting a duplicate operation", async () => {
+    vi.useFakeTimers();
+    const active = status({
+      generation: 4,
+      status: "SYNCHRONIZING",
+      operation: "SYNCHRONIZE",
+      readyServerCount: 0
+    });
+    const mockApi = api({
+      listReferenceRepositories: vi.fn().mockResolvedValue([active]),
+      getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status({
+        generation: 4,
+        status: "READY",
+        operation: "SYNCHRONIZE"
+      }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[aria-label="资产库同步进度"]').text()).toContain("正在同步各服务器资产副本");
+    expect(mockApi.synchronizeReferenceRepository).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(mockApi.getReferenceRepositoryStatus).toHaveBeenCalledWith("app-demo", "repo-assets");
+    expect(wrapper.get('[aria-label="资产库同步进度"]').text()).toContain("同步完成");
+  });
+
+  it("selects an uninitialized repository without opening synchronization progress", async () => {
+    const uninitialized = status({
+      initialized: false,
+      branch: null,
+      status: "UNINITIALIZED",
+      operation: null,
+      generation: 0,
+      readyServerCount: 0,
+      servers: []
+    });
+    const mockApi = api({ listReferenceRepositories: vi.fn().mockResolvedValue([uninitialized]) });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[aria-label="资产库同步进度"]').exists()).toBe(false);
+    expect(mockApi.synchronizeReferenceRepository).not.toHaveBeenCalled();
   });
 
   it("opens verification progress before the request resolves and expands live server stages", async () => {
