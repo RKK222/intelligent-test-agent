@@ -404,6 +404,7 @@ describe("AgentConfigPanel", () => {
       expect(payload).toMatchObject({
         scope: "PUBLIC",
         path: ".gitignore",
+        absolutePath: "/data/opencode-public-worktrees/change-agent-md/opencode/.gitignore",
         workspaceId: undefined,
         worktreeId: "agw_1234567890abcdef",
         linuxServerId: "linux-1",
@@ -417,6 +418,31 @@ describe("AgentConfigPanel", () => {
     });
     expect(apiClientMock.readPublicAgentFile).not.toHaveBeenCalled();
     expect(view.container.querySelector(".agent-root-row.active")).toBeNull();
+  });
+
+  it("emits the real workspace Agent absolute path instead of the synthetic tab route", async () => {
+    apiClientMock.listWorkspaceAgentFiles.mockResolvedValue([
+      {
+        path: "agents/git-worktree-opencode-baseline-20260717.md",
+        name: "git-worktree-opencode-baseline-20260717.md",
+        type: "file"
+      }
+    ]);
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalled());
+    await fireEvent.click(view.getByText("应用级"));
+    await fireEvent.click(await view.findByText("git-worktree-opencode-baseline-20260717.md"));
+
+    await waitFor(() => {
+      const events = (view.emitted("openFile") ?? []) as unknown[][];
+      expect(events.at(-1)?.[0]).toMatchObject({
+        scope: "WORKSPACE",
+        path: "agents/git-worktree-opencode-baseline-20260717.md",
+        absolutePath: "/workspace/F-COSS/workspace/.opencode/agents/git-worktree-opencode-baseline-20260717.md",
+        workspaceId: "wrk_1234567890abcdef"
+      });
+    });
   });
 
 
@@ -522,7 +548,9 @@ function publicStatus(scope = "PUBLIC") {
     writable: true,
     gitUrl: "git@gitee.com:org/config.git",
     gitRootPath: "/data/opencode-public-config",
-    agentDirectory: "/data/opencode-public-config/opencode/agent",
+    agentDirectory: scope === "WORKSPACE"
+      ? "/workspace/F-COSS/workspace/.opencode"
+      : "/data/opencode-public-config/opencode",
     currentBranch: "main",
     commitHash: "abc1234"
   };

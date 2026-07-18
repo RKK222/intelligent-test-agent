@@ -208,7 +208,7 @@ describe("WorkbenchFooter", () => {
     expect(wrapper2.emitted("update:markdownPreviewMode")).toEqual([["off"]]);
   });
 
-  it("copies relative and absolute paths as two lines from one button", async () => {
+  it("copies only the resolved absolute path from one button", async () => {
     // mock window.isSecureContext and navigator.clipboard
     Object.defineProperty(window, "isSecureContext", {
       value: true,
@@ -237,12 +237,12 @@ describe("WorkbenchFooter", () => {
     expect(copyButtons).toHaveLength(1);
     expect(copyButtons[0].text()).toBe("复制路径");
     expect(copyButtons[0].attributes("title"))
-      .toBe("src/components/WorkbenchFooter.vue\n/workspace/project/src/components/WorkbenchFooter.vue");
+      .toBe("/workspace/project/src/components/WorkbenchFooter.vue");
 
     await copyButtons[0].trigger("click");
     expect(mockWriteText).toHaveBeenCalledOnce();
     expect(mockWriteText)
-      .toHaveBeenCalledWith("src/components/WorkbenchFooter.vue\n/workspace/project/src/components/WorkbenchFooter.vue");
+      .toHaveBeenCalledWith("/workspace/project/src/components/WorkbenchFooter.vue");
   });
 
   it("normalizes Windows separators when copying an absolute path", async () => {
@@ -269,7 +269,36 @@ describe("WorkbenchFooter", () => {
     await wrapper.find(".ta-workbench-footer-copy-path").trigger("click");
 
     expect(mockWriteText)
-      .toHaveBeenCalledWith("src\\components\\WorkbenchFooter.vue\nC:/workspace/project/src/components/WorkbenchFooter.vue");
+      .toHaveBeenCalledWith("C:/workspace/project/src/components/WorkbenchFooter.vue");
+  });
+
+  it("copies an explicit Agent absolute path instead of the synthetic tab route", async () => {
+    const mockWriteText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: mockWriteText },
+      writable: true,
+      configurable: true
+    });
+
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        writePath: "agent-workspace:wrk_850cccb889474f4a84cf04fd90584134:::agents%2Fgit-worktree-opencode-baseline-20260717.md",
+        copyPath: "/workspace/F-COSS/workspace/.opencode/agents/git-worktree-opencode-baseline-20260717.md",
+        workspaceRootPath: "/workspace/F-COSS/workspace"
+      }
+    });
+
+    const copyButton = wrapper.get(".ta-workbench-footer-copy-path");
+    expect(copyButton.attributes("title"))
+      .toBe("/workspace/F-COSS/workspace/.opencode/agents/git-worktree-opencode-baseline-20260717.md");
+
+    await copyButton.trigger("click");
+
+    expect(mockWriteText).toHaveBeenCalledWith(
+      "/workspace/F-COSS/workspace/.opencode/agents/git-worktree-opencode-baseline-20260717.md"
+    );
+    expect(mockWriteText.mock.calls[0]?.[0]).not.toContain(":::");
   });
 
   it("renders locate button when writePath is defined, and emits locate on click", async () => {

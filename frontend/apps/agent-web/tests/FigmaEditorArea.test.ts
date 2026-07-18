@@ -138,4 +138,23 @@ describe("FigmaEditorArea", () => {
     expect(wrapper.emitted("locateFile")).toEqual([["src/b.ts"]]);
     wrapper.unmount();
   });
+
+  it("forwards the resolved copy path to the footer", () => {
+    const wrapper = mount(FigmaEditorArea, {
+      props: {
+        tabs,
+        activePath: "src/b.ts",
+        writePath: "agent-workspace:wrk_1:::agents%2Freview.md",
+        copyPath: "/workspace/.opencode/agents/review.md"
+      },
+      global: {
+        stubs: {
+          WorkbenchFooter: true
+        }
+      }
+    });
+
+    expect(wrapper.getComponent({ name: "WorkbenchFooter" }).props("copyPath"))
+      .toBe("/workspace/.opencode/agents/review.md");
+  });
 });

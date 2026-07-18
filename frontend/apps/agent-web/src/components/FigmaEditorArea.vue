@@ -14,6 +14,8 @@ const props = withDefaults(
     breadcrumbPath?: string;
     /** 写入路径（编辑器模式显示） */
     writePath?: string;
+    /** 已解析的真实文件路径；Agent tab 的合成路由不能直接用于复制。 */
+    copyPath?: string;
     /** 当前工作区绝对根目录，用于页脚复制文件绝对路径 */
     workspaceRootPath?: string;
     /** 最近一次更新时间（秒或 ISO 字符串） */
@@ -230,6 +232,7 @@ watch(
 
     <WorkbenchFooter
       :write-path="writePath"
+      :copy-path="copyPath"
       :workspace-root-path="workspaceRootPath"
       :updated-at="updatedAt"
       :dirty="dirty"

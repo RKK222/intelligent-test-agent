@@ -5,6 +5,8 @@ import { ref } from "vue";
 export type EditorTab = {
   id: string;
   path: string;
+  /** 文件在目标服务器上的真实绝对路径；合成 tab path 只负责身份和路由，不能用于复制。 */
+  absolutePath?: string;
   title: string;
   content: string;
   savedContent: string;

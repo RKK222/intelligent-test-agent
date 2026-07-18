@@ -633,6 +633,12 @@ const activeWorkspaceViewNodeId = computed(() =>
 );
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
+const activeTabCopyPath = computed(() => {
+  const tab = activeTab.value;
+  if (!tab || !isAgentFilePath(tab.path)) return undefined;
+  // Agent tab.path 是携带 workspace/worktree/server 的合成路由；没有绝对路径时也只回退到解码后的文件路径。
+  return tab.absolutePath ?? agentFileInfo(tab.path).path;
+});
 const activeTabInitialLoading = computed(() =>
   activeTab.value?.loadState === "loading" && activeTab.value.hasLoadedSnapshot === false
 );
@@ -3805,6 +3811,7 @@ function agentFileLoadRequestFromTab(tab: EditorTab, activate: boolean): AgentFi
   }
   return {
     ...file,
+    absolutePath: tab.absolutePath,
     workspaceId,
     readonly: Boolean(tab.readonly),
     activate,
@@ -3856,6 +3863,7 @@ async function loadAgentFile(request: AgentFileLoadRequest) {
   const hadLoadedCache = agentTabHasLoadedSnapshot(existing);
   const contentRevisionAtStart = existing?.contentRevision ?? 0;
   const loadingPatch = {
+    absolutePath: request.absolutePath ?? existing?.absolutePath,
     loadState: "loading" as const,
     loadError: undefined,
     hasLoadedSnapshot: hadLoadedCache
@@ -6363,6 +6371,7 @@ async function handleLogout() {
           :active-path="activePath"
           :breadcrumb-path="breadcrumbDisplay"
           :write-path="activeTab?.path"
+          :copy-path="activeTabCopyPath"
           :workspace-root-path="selectedWorkspace?.rootPath"
           :updated-at="activeTab ? Date.now() / 1000 : undefined"
           :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"

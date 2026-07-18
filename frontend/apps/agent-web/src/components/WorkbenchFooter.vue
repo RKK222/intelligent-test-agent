@@ -19,6 +19,8 @@ export type AppWorkspaceVersion = ApplicationWorkspaceVersion;
 const props = defineProps<{
   /** 写入路径（编辑器模式显示） */
   writePath?: string;
+  /** 已由上层解析的真实复制路径，优先于工作区根目录拼接结果。 */
+  copyPath?: string;
   /** 当前工作区绝对根目录，用于生成可复制的文件绝对路径 */
   workspaceRootPath?: string;
   /** 最近一次更新时间（秒或 ISO 字符串均可） */
@@ -112,10 +114,10 @@ const absoluteWritePath = computed(() => {
 });
 
 const copyPathText = computed(() => {
+  if (props.copyPath !== undefined) return props.copyPath.replace(/\\/g, "/");
   if (!props.writePath) return "";
-  return absoluteWritePath.value
-    ? `${props.writePath}\n${absoluteWritePath.value}`
-    : props.writePath;
+  // 复制入口直接给出可执行定位的绝对路径，不再混入相对路径或内部 tab 路由。
+  return absoluteWritePath.value || props.writePath;
 });
 
 async function copyPath(textToCopy: string) {

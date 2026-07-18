@@ -381,6 +381,7 @@ async function openFile(scope: Scope, path: string) {
     emit("openFile", {
       scope,
       path,
+      absolutePath: agentAbsolutePath(scope, path),
       workspaceId: scope === "WORKSPACE" ? props.workspaceId : undefined,
       worktreeId: worktreeId(scope),
       linuxServerId,
@@ -413,6 +414,7 @@ async function refreshActiveEditorFile(scope?: Scope, notifySkippedFile = true) 
     emit("openFile", {
       scope: activeFile.scope,
       path: activeFile.path,
+      absolutePath: agentAbsolutePath(activeFile.scope, activeFile.path),
       workspaceId: activeFile.scope === "WORKSPACE" ? props.workspaceId : undefined,
       worktreeId: worktreeId(activeFile.scope),
       linuxServerId,
@@ -785,6 +787,15 @@ const publicSourceTooltip = computed(() => {
 
 function joinLinuxPath(root: string, child: string) {
   return `${root.replace(/\/+$/, "")}/${child}`;
+}
+
+/**
+ * Agent tab 使用合成 path 隔离路由；复制路径必须使用服务端状态返回的真实根目录。
+ * 公共个人分支以当前 worktree 为准，应用配置以 workspace 状态中的实际 Agent 目录为准。
+ */
+function agentAbsolutePath(scope: Scope, path: string): string | undefined {
+  const root = scope === "PUBLIC" ? publicSource.value.path : status.value.WORKSPACE?.agentDirectory;
+  return root ? joinLinuxPath(root.replace(/\\/g, "/"), path.replace(/\\/g, "/").replace(/^\/+/, "")) : undefined;
 }
 
 const publicUpdateConflictMessage = computed(() =>

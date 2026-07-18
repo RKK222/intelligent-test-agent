@@ -2,6 +2,8 @@
 export type AgentFileLoadRequest = {
   scope: "PUBLIC" | "WORKSPACE";
   path: string;
+  /** 后端返回的真实 Agent 根目录与相对路径合成的磁盘绝对路径，仅用于展示和复制。 */
+  absolutePath?: string;
   workspaceId?: string;
   worktreeId?: string | null;
   linuxServerId?: string | null;
