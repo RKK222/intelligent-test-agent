@@ -1,70 +1,138 @@
-# 1. 测试设计文档
+# 应用工作区分支模型与测试
 
-| 条件/动作 | 普通成员 | 应用负责人（APP_ADMIN） | 超级管理员（SUPER_ADMIN） |
+本文是公共 Agent、应用工作空间和应用 Agent 三个区域的分支、权限、发布影响与测试数据事实源。OpenCode 保持原生配置加载，平台只编排 Git worktree、固定提交同步和原生 `/global/dispose`，不修改 OpenCode 源码。
+
+## 1. 分支模型
+
+### 1.1 公共 Agent/Skill
+
+| 对象 | 分支/目录 | 用途 | 是否直接编辑 |
 | --- | --- | --- | --- |
-| 个人 worktree 普通文件读写、暂存、本地提交 | 允许本人操作 | 允许本人操作 | 允许 |
-| 应用 feature 工作区普通文件写操作 | 只读，前端不展示写入口 | 只读，前端不展示写入口 | 只读；超管同样只通过个人 HEAD 投影允许发布的非 spec 路径，避免形成第二套直提协议 |
-| `docs/**` 从个人 HEAD 投影并推送 feature | 允许 | 允许 | 允许 |
-| `spec/**` 从个人 HEAD 投影并推送 feature | 禁止，仅本地提交 | 禁止，仅本地提交 | 禁止，仅本地提交 |
-| 应用 `.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates） | 只读 | 允许在当前版本个人 worktree 操作 | 允许 |
-| 公共 Git | 禁止写入 | 禁止写入 | 允许 |
-| 应用 Agent/Skill 推送后更新版本 HEAD 并广播 | 不适用 | 必须执行 | 必须执行 |
+| 公共远程分支 | 配置的公共分支，通常为 `main` | 公共配置发布事实源 | 否 |
+| 管理员公共个人 worktree | 稳定分支 `public-{userId}` | `SUPER_ADMIN` 编辑、暂存、提交和处理远端合并冲突 | 是，仅本人 |
+| 每服务器公共运行副本 | `OPENCODE_PUBLIC_CONFIG_DIR` 对应共享仓库 | 由 OpenCode 通过 `OPENCODE_CONFIG_DIR` 原生加载 | 否，发布程序同步 |
+
+公共配置不按应用或版本拆分。保存和本地提交只改变当前管理员的公共个人 worktree；推送成功后，持久化 rollout 才把固定公共提交同步到每台服务器的共享运行副本，并在旧任务空闲后对受影响进程调用原生 `/global/dispose`。
+
+### 1.2 应用工作空间与应用 Agent
+
+应用普通文件和 `.opencode` 使用同一个人分支，不存在“应用 Agent 独立 worktree”或运行时覆盖合并层。
+
+| 对象 | 分支/目录 | 用途 | 是否直接编辑 |
+| --- | --- | --- | --- |
+| 应用远程 feature | 标准库为 `feature_testagent_{version}`；非标准库为创建版本时所选分支 | 该应用版本的共享事实源 | 否 |
+| 每服务器 feature 副本 | 同一 feature 的本地副本 | 发布投影目标、多服务器固定提交同步源；对所有角色只读 | 否 |
+| 用户个人 worktree | `{featureBranch}_{userId}_{workspaceName}` | 本人的普通文件、`docs/**`、`spec/**` 和 `.opencode/**` 编辑/调试分支 | 是，仅 owner |
+| 应用 Agent Diff 作用域 | 个人 worktree 中 `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**` | 只隔离展示、权限、暂存和发布路径 | 不是独立分支 |
 
 ```mermaid
-flowchart TD
-  A[选中应用文件并暂存] --> B[提交到个人 HEAD]
-  B --> C{路径是否位于 spec}
-  C -- 是 --> D[只保留个人提交]
-  C -- 否 --> E[允许文件投影到 feature]
-  E --> F[提交并推送 feature]
-  F --> G[更新版本 HEAD 并广播]
-  D --> H[结束且不推送]
+flowchart LR
+  P["个人 worktree\n本地编辑与提交"] -->|"选中非 spec 文件投影"| F["应用 feature 副本"]
+  F -->|"git push feature"| R["远程 feature 事实源"]
+  R -->|"广播固定 targetCommit"| S["各服务器 feature 副本"]
+  S -->|"git merge --no-edit targetCommit"| O["各用户个人 worktree"]
+  O --> C{"个人工作树状态"}
+  C -->|clean| M["快进或 merge commit"]
+  C -->|dirty/staged| D["保留本地内容并标记待同步"]
+  C -->|Git 冲突| X["保留 MERGE_HEAD 与三方 index"]
 ```
 
-| 状态 | 触发事件 | 合法迁移 | 非法迁移及预期 |
+反向同步固定使用版本记录的 `targetCommitHash`，不在执行时重新解析可移动分支名。个人 worktree clean 时立即合并；任意 dirty、staged 或 untracked 内容存在时不 stash、不 reset、不覆盖，Diff 返回待同步状态；真实冲突保留 Git 原生 merge 状态，在三方编辑器解决全部冲突后点击“完成合并”提交完整 merge index。
+
+## 2. 角色权限
+
+托管应用工作区始终要求用户是启用应用的有效成员，`SUPER_ADMIN` 不绕过应用成员校验。
+
+| 能力 | 普通成员 `USER` | 应用负责人 `APP_ADMIN` | 超级管理员 `SUPER_ADMIN` |
 | --- | --- | --- | --- |
-| feature 只读 | 普通成员点击文件、搜索或加入对话 | 保持只读，可继续读取 | 新增、删除、重命名、stage、回退、解决冲突入口不可见且不发请求 |
-| 个人 worktree 有未暂存文件 | 暂存选中文件 | 进入已暂存 | 未选择文件时提交按钮禁用 |
-| 个人 worktree 已暂存 | 本地提交 | 进入个人 HEAD 已提交 | 无个人 worktree 时普通文件提交不得执行 |
-| 个人 HEAD 已提交 | 提交并推送 | 允许路径投影到 feature 并广播 | 任意角色选择 `spec/**` 时只保留本地提交，直接 API 发布被拒绝 |
-| 应用配置已暂存 | 应用负责人提交或推送 | 先提交个人 HEAD；推送时只把 `.opencode/**` 投影到 feature，更新版本 HEAD 并广播 | 普通成员无暂存、提交、推送入口 |
+| 读取应用 feature 副本 | 允许，只读 | 允许，只读 | 允许，只读，且需为应用成员 |
+| 本人个人 worktree 普通文件读写、暂存、回退、提交 | 允许 | 允许 | 允许，且需为应用成员 |
+| 发布个人 HEAD 中非 `spec/**` 普通文件到 feature | 允许 | 允许 | 允许，且需为应用成员 |
+| 本地提交 `spec/**` | 允许 | 允许 | 允许 |
+| 发布 `spec/**` | 禁止 | 禁止 | 禁止 |
+| 读取应用 `.opencode/**` | 允许 | 允许 | 允许，且需为应用成员 |
+| 写入、暂存、提交、发布应用 Agent/Skill/JSONC | 禁止 | 允许 | 允许，且需为应用成员 |
+| 读取公共 Agent/Skill | 允许，读取共享运行副本 | 允许，读取共享运行副本 | 允许 |
+| 创建/写入/提交/推送公共个人 worktree | 禁止 | 禁止 | 允许，仅本人的 `public-{userId}` |
 
-# 2. 测试案例
+## 3. 保存、提交和推送后的影响
 
-| 案例名称 | 测试步骤 | 测试数据 | 预期结果 |
+| 区域与动作 | Git/磁盘影响 | 别人的效果 | OpenCode 运行态影响 |
 | --- | --- | --- | --- |
-| 普通成员浏览 feature 只读文件树 | 1. 以普通成员进入应用 feature 文件树；2. 展开 `docs`；3. 单击并双击 `README.md`；4. 检查行操作和网络请求 | `roles=[USER]`；`workspaceId=wrk_feature_readonly_20260715`；`canWrite=false`；固定数据：`frontend/tests/fixtures/application-workspace-restrictions.ts` | 文件和目录可展开、读取；新增、删除、重命名入口不可见；双击不进入重命名；无写请求 |
-| 普通成员在个人 worktree 修改普通文件 | 1. 切换默认个人 worktree；2. 修改并保存文件；3. 暂存；4. 输入说明并本地提交 | `personalWorkspaceId=psw_member_default_20260715`；`path=src/payment/PaymentService.ts`；`message=fix: 修复支付校验` | 保存、暂存和本地提交成功；个人 HEAD 更新；未触发 feature push 或广播 |
-| 普通成员发布 docs 文件 | 1. 在个人 worktree 提交 `docs` 文件；2. 点击提交并推送 | `path=docs/payment/publish-guide.md`；`branch=feature_testagent_20260715` | 后端从个人 HEAD 投影该文件到 feature，提交并推送；返回 `remotePushed=true`；版本 HEAD 更新并广播 |
-| 普通成员混选 docs 与 spec | 1. 同时暂存并提交两个文件；2. 点击提交并推送；3. 检查请求文件集合和提示 | `files=[docs/payment/publish-guide.md,spec/payment/design.md]`；`roles=[USER]` | 两文件都进入个人 HEAD；仅 `docs/payment/publish-guide.md` 进入发布请求；页面提示 1 个 spec 仅本地提交 |
-| 普通成员只选择 spec | 1. 暂存 `spec`；2. 检查按钮和目录标记；3. 点击本地“提交”；4. 检查请求 | `path=spec/payment/design.md`；`roles=[USER]` | diff 保留该文件并标记“仅本地”；“提交并推送”禁用；只执行个人 worktree 本地提交；不调用 feature 发布 |
-| 普通角色使用 spec 路径别名绕过 | 1. 直接调用发布入口并传别名；2. 检查 Git 是否执行 | `files=[docs/payment/publish-guide.md,.//spec/payment/design.md]`；`roles=[APP_ADMIN]` | 返回 `FORBIDDEN`，details 指出 spec 文件；feature worktree 未 materialize、未 commit、未 push |
-| 普通成员查看应用 Agent 配置 | 1. 以普通成员打开应用级 Agent 树和变更页；2. 检查 Agent 行操作；3. 输入提交说明 | `roles=[USER]`；`path=agents/payment-test.md`；`canManageAgentConfig=false` | 可以读取和查看 diff；初始化、创建 worktree、暂存、取消暂存、提交和推送入口不可用；无写请求 |
-| 应用负责人提交应用 Skill | 1. 以应用负责人进入应用版本个人 worktree；2. 在“应用Agent”暂存 Skill；3. 输入说明并提交 | `roles=[APP_ADMIN]`；`workspaceId=wrk_personal_default_20260715`；`personalWorkspaceId=psw_member_default_20260715`；`path=skills/payment-case-design/SKILL.md` | 调用个人 worktree 本地提交，文件白名单转换为 `.opencode/skills/payment-case-design/SKILL.md`；不调用旧应用配置 worktree 提交入口 |
-| 应用配置与 workspace 共用个人 worktree | 1. 加载 workspace diff；2. 切到“应用Agent”加载 diff；3. 提交应用配置；4. 记录 workspaceId 和分支 | 两个视图均使用 `workspaceId=wrk_personal_default_20260715`；`branch=feature_testagent_20260715_usr_member_default` | workspace 过滤 `.opencode/**`；应用 Agent 只显示 `.opencode/**`；两者展示同一个人 worktree 分支，不创建独立应用配置 worktree |
-| 应用与公共 Agent 文件回退 | 1. 分别切换到“应用Agent”“公共Agent”；2. 回退已跟踪文件、暂存新增文件和未跟踪文件；3. 检查打开的编辑器 tab | `paths=[agents/review.md,skills/case/SKILL.md]`；应用为 APP_ADMIN，公共为 SUPER_ADMIN | 两个作用域均显示逐个和批量回退；已跟踪文件恢复 HEAD，新增/未跟踪文件删除；已打开 tab 刷新或关闭；数量角标同步更新 |
-| Agent 冲突必须走合并处理 | 1. 返回 `rawStatus=UU` 的应用或公共 Agent 文件；2. 检查行操作和批量回退；3. 打开冲突文件 | `path=agents/review.md`；`status=conflict` | 冲突行没有普通回退按钮，批量回退禁用；继续展示并调用既有三方合并、保留当前/远端或取消 merge 能力；直接调用 discard 返回 `CONFLICT` |
-| 显式创建公共个人 worktree | 1. 以超管打开公共级“更多操作”；2. 点击“创建公共 worktree”；3. 选择已初始化服务器并确认；4. 重复创建 | `linuxServerId=linux-2`；当前用户 `usr_admin` | 调用创建接口并挂载 `public-usr_admin` 稳定分支/worktree；重复调用返回已有记录；不允许任意命名、不出现他人 worktree 或共享目录直编入口 |
-| 应用配置推送后广播 | 1. 应用负责人推送 Agent/Skill；2. 检查个人 HEAD、feature HEAD；3. 检查广播事件 | `personalWorkspaceId=psw_member_default_20260715`；`files=[.opencode/agents/payment-test.md]`；`commitHash=commit_agent_config` | 先提交个人 HEAD，再投影指定 `.opencode/**` 到 feature；版本和本机副本 HEAD 更新并广播版本同步 |
-| 普通成员绕过 Agent API 提交 `.opencode` | 1. 使用普通成员登录态直接调用个人 worktree commit/publish；2. 传入 `.opencode/skills/payment-case-design/SKILL.md` | `roles=[USER]` | 后端返回 `FORBIDDEN` 且 Git 服务不执行；APP_ADMIN 与 SUPER_ADMIN 允许继续 |
-| 应用负责人不能写公共 Git | 1. 以应用负责人打开公共级 Agent；2. 检查操作入口；3. 尝试调用公共写接口 | `roles=[APP_ADMIN]`；`path=agents/public-review.md` | 前端无公共写入口；后端返回 `FORBIDDEN`；公共仓库无变化 |
-| 超管拥有应用与公共配置写权限 | 1. 以超级管理员进入同一应用；2. 检查 feature 文件、个人 worktree、应用配置和公共配置操作入口 | `roles=[SUPER_ADMIN]`；`workspaceId=wrk_personal_default_20260715`；`personalWorkspaceId=psw_member_default_20260715` | 个人 worktree 可写；非 spec 普通路径可发布；应用配置初始化可用但不出现独立应用 worktree 创建入口；公共 Git 操作可用 |
-| 超管的 spec 仍仅本地 | 1. 在个人 worktree 暂存 spec；2. 检查按钮和目录标记；3. 点击本地“提交”；4. 直接调用发布 API 验证后端兜底 | `roles=[SUPER_ADMIN]`；`path=spec/payment/design.md`；`message=spec: 超管本地提交设计` | diff 保留该文件并标记“仅本地”；“提交并推送”禁用；本地提交成功且不调用 feature 发布；直接 API 返回 `FORBIDDEN`，feature 未 materialize、未 commit、未 push |
-| 只读 feature 冲突不暴露解决入口 | 1. 返回一个 `rawStatus=UU` 的冲突文件；2. 以普通成员打开变更页；3. 点击冲突行 | `roles=[USER]`；`canWrite=false`；`path=src/payment/PaymentService.ts` | 可看到冲突状态；保留本地、保留远程、取消和合并编辑器入口不可用；不调用冲突解决 API |
-| 不同权限下提交按钮只统计可写变更 | 1. 同时返回普通文件 staged 和应用 Agent staged；2. 分别用普通成员、应用负责人进入；3. 输入提交说明 | 普通成员：`canWrite=true,canManageAgentConfig=false`；应用负责人：`canWrite=true,canManageAgentConfig=true` | 普通成员仅能提交个人普通文件；应用负责人切到“应用Agent”后只提交 `.opencode/**`；无权限 staged 项不触发对应 API |
-| 公共 Agent 发布排空旧 Session | 1. 超管在个人 worktree 提交并推送；2. 检查各服务器共享 Git commit；3. 检查 rollout/server/target 表；4. 为用户 A 的同一实例绑定两个 Workspace，分别返回 idle/busy，为用户 B 返回 idle；5. 再让 A 返回非法 status 后恢复为全 idle；6. 等待重试 | `rollout.status=DRAINING`；A、B 初始 `messageSendAllowed=false` | push 后立即禁发；每台服务器用发起人凭据同步并登记本机 manager 进程，只能处理本服务器目标；A 任一目录 busy 或 status 非法时不调用 dispose 且 `retry_count+1`；B 的单次 `/global/dispose` 明确成功后 B 立即变为 `messageSendAllowed=true`，A 仍为 false；A 全部目录 idle 并单次 dispose 后恢复，下一请求加载新公共配置，最后 rollout 为 `COMPLETED` |
-| UI 自动化固定数据回归 | 1. 执行组件测试；2. 执行 Playwright 权限用例；3. 检查失败截图和 trace | `corepack pnpm vitest run apps/agent-web/tests/git-changes-panel.test.ts apps/agent-web/tests/help-center.test.ts packages/file-explorer/tests/DirectoryRows.test.ts`；`corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts --grep "application workspace mutation entries"` | 组件测试验证 diff 中的“仅本地”标记、仅 spec 时禁用远程发布、后端调用及帮助文档口径；浏览器用例验证普通成员隐藏应用配置写入口、超管显示入口；全部通过且无控制台错误 |
+| 个人 worktree 普通文件保存 | 只写本人工作树，进入 Diff | 无 | 无 dispose |
+| 个人 worktree 普通文件本地提交 | 只更新本人个人分支；若此前有待同步 feature，提交后立即重试固定提交 merge | 无远程变化 | 无 dispose |
+| 个人 worktree `docs/**` 提交并推送 | 先提交本人 HEAD，再把选中非 spec 路径投影到 feature，提交并 push；随后各服务器把固定 feature commit 合并到相关个人 worktree | clean worktree 自动更新；dirty worktree 显示待同步；冲突保留在 Diff。已经打开的浏览器树/标签没有新增 SSE，按现有刷新或重新进入工作区重读磁盘 | 无 dispose |
+| 个人 worktree `spec/**` 提交 | 只进入本人个人分支 | 无 | 无 dispose，任何角色都不能推送 |
+| 应用 Agent/Skill/JSONC 保存 | 写入本人个人 worktree，并出现在“应用 Agent”Diff；`agents/**/*.md`、`skills/**/SKILL.md`、`opencode.jsonc` 保存后在当前任务空闲时只 dispose 本人实例，供发布前调试；rules/templates 只保存 | 无 | 只热加载当前用户，不是全局发布 |
+| 应用 Agent/Skill/JSONC 本地提交 | 只更新本人个人分支 | 无 | 不新增全局影响；保存时的本人调试热加载仍有效 |
+| 应用 Agent/Skill/JSONC 提交并推送 | 复用普通发布投影进入 feature；各服务器以同一个固定 commit 反向合并完整 feature 更新 | 所有相关个人 worktree 必须先包含目标 commit；dirty/冲突保持待处理，持久化 rollout 每 5 秒补偿，不覆盖个人内容 | 个人 worktree 收敛后进入应用级全局 rollout，等待旧任务空闲并对目标用户进程调用原生 `/global/dispose` |
+| 公共 Agent/Skill 保存 | 只写当前超管公共个人 worktree，并进入公共 Diff | 无 | 不 dispose；公共配置以推送为发布边界 |
+| 公共 Agent/Skill 本地提交 | 只更新 `public-{userId}` | 无 | 无 dispose |
+| 公共 Agent/Skill 提交并推送 | 先合并远端公共分支并推送，再把固定提交同步到所有服务器公共运行副本 | 所有用户下一次实例 bootstrap 读取新公共配置 | 全局 rollout 等待旧任务空闲并调用原生 `/global/dispose` |
 
-# 3. 案例审核结果
+应用资产引用本身仍由资产库 generation/副本程序维护；`opencode.jsonc` 只记录引用关系。保存引用 JSONC 只热加载本人；只有管理员明确把该 JSONC 提交并推送后，引用配置才随 feature 固定提交合并到其他个人 worktree，资产文件不会复制进应用仓库，也不会把资产库分支合并进 feature。
 
-| 审核项 | 审核结果 | 说明 |
+## 4. 代码与 Git 操作
+
+| 阶段 | 代码入口 | 关键操作 |
 | --- | --- | --- |
-| 需求/设计覆盖 | 补充后通过 | 已覆盖个人 worktree、feature、docs、spec 目录硬规则、应用配置、公共 Git、广播和超管角色权限 |
-| 方法分析与案例一致性 | 通过 | 判定表、发布路径和状态迁移均有对应案例 |
-| 正常、异常、边界与关键分支 | 补充后通过 | 补充了路径别名绕过、无个人 worktree、只读冲突和混合 staged 分支 |
-| 测试数据具体性 | 通过 | 角色、workspaceId、路径、分支、commitHash 与命令均为固定值 |
-| 步骤可执行性 | 通过 | 每条案例给出可操作 UI/API 步骤，自动化入口已固定 |
-| 预期结果可观察性 | 通过 | 通过 DOM、API 调用、Git push 结果、版本 HEAD 和广播事件观察 |
-| 接口七区块完整性 | 通过 | 本文按用户要求对整体工作区规则采用四列表达，接口仅作为流程验证步骤 |
+| 个人本地提交 | `ManagedWorkspaceApplicationService.commitPersonalWorkspace` | 隔离 index，`git add -- <files>`，提交个人分支；不 push |
+| 个人发布 | `ManagedWorkspaceApplicationService.publishPersonalWorkspace` | feature 副本 `fetch` + `pull --ff-only`；从个人 `HEAD` 定点 checkout/删除选中路径；feature `commit` + `git push origin {featureBranch}` |
+| 版本广播 | `publishVersionSync` / `handleVersionSyncEvent` | payload 只携带 `targetCommitHash` 等标识；远端服务器先把 feature 副本 reset 到固定提交 |
+| feature 反向同步 | `synchronizeFeatureCommitToPersonalWorktrees` → `mergeFeatureCommitIntoPersonalWorkspace` | 先用 `git merge-base --is-ancestor <target> HEAD` 判定；clean 时调用 `GitWorkspaceService.mergeCommit` 执行 `git merge --no-edit <targetCommit>` |
+| dirty 补偿 | `retryLatestFeatureMerge` | 本地提交、回退、显式进入 default 个人工作区后重试；副本补偿和版本广播也会重试 |
+| 冲突展示 | `getWorkspaceGitDiff` / `GitChangesPanel.vue` | Diff 返回 `mergeInProgress`、`applicationUpdatePending`、`applicationTargetCommit`；Git unmerged stage 用既有三方编辑器读取 |
+| 冲突完成 | `completeWorkspaceGitMerge` | 冲突全部解决后提交完整 merge index；若包含 `.opencode/**`，入口要求 `APP_ADMIN` |
+| 应用配置发布热加载 | `PublicAgentConfigRolloutCoordinator` 的 APPLICATION scope | 每服务器个人 worktree 全部包含固定提交后登记目标用户，等待空闲并调用现有 OpenCode client 的 `/global/dispose` |
+| 保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` | 仅 `scope=WORKSPACE` 的目录定义调用当前用户 `disposeGlobal()`；`scope=PUBLIC` 直接返回 |
 
-总评：补充后通过。
+兼容接口 `POST /personal-workspaces/{id}/sync-from-application` 不再逐文件复制，也不接受 `force` 覆盖个人内容；它校验请求后同样尝试合并整个固定 feature commit。
+
+## 5. 可重复测试数据
+
+执行：
+
+```bash
+tools/create-workspace-branch-model-test-data.sh
+```
+
+脚本在被 Git 忽略的 `.tmp/workspace-branch-model.*` 下创建独立真实仓库，并输出目录。每次运行包含：
+
+- `application-repository`：已提交 docs 与应用 Agent 的 feature 事实源。
+- `personal-clean`：有个人提交且已成功生成真实 merge commit。
+- `personal-dirty`：保留未提交文件，模拟 `applicationUpdatePending=true`。
+- `personal-conflict`：保留 `MERGE_HEAD`、三方 index 和 `docs/shared.md` 冲突。
+- `public-personal-admin`：保留未推送公共 Agent 修改。
+- `README.md`：记录本次随机目录、目标 commit 和可复制的核对命令。
+
+脚本末尾会自动断言 clean worktree 已包含目标提交、dirty worktree 仍有修改、conflict worktree 存在 `MERGE_HEAD` 和 unmerged 路径、公共个人 worktree 存在未推送修改。
+
+## 6. 核心测试案例
+
+| 案例 | 操作 | 预期 |
+| --- | --- | --- |
+| A 推送 docs，B clean | A 从个人 HEAD 推送 `docs/publish.md` | feature push 成功；B 所在服务器合并固定 commit；B 分支包含 target；无 dispose |
+| A 推送 docs，B dirty | B 先保存未提交文件，A 再推送 | 不 stash/reset B；Diff 显示 feature 待同步；B 提交或回退后自动重试 |
+| A 推送 docs，B 同文件已有提交 | A、B 修改同一文件，A 先推送 | B 保留 Git merge 冲突和 `MERGE_HEAD`；三方解决后“完成合并”生成 merge commit |
+| A 推送应用 Agent，B clean | APP_ADMIN 推送 `.opencode/agents/review.md` | 与 docs 相同的完整 feature merge；全部相关 worktree 收敛后才进入全局 dispose |
+| A 推送应用 Agent，B dirty/冲突 | B 有任意 dirty 或真实冲突 | 不覆盖 B；应用 rollout 保持 retry，B 处理后补偿推进 dispose |
+| 应用 Agent 保存调试 | APP_ADMIN 保存 `agents/**/*.md` 或 `skills/**/SKILL.md` | 只 dispose 当前用户；不广播、不影响别人 |
+| 公共 Agent 保存 | SUPER_ADMIN 保存公共 Agent | 只产生公共个人 Diff，不 dispose |
+| 公共 Agent 推送 | SUPER_ADMIN 提交并推送 | 各服务器公共运行副本同步，旧任务空闲后全局 dispose |
+| 普通成员绕过权限写 `.opencode` | USER 直接调用 stage/commit/publish | 后端返回 `FORBIDDEN`，不执行 Git 写操作 |
+| 任意角色发布 `spec/**` | 直接调用 publish 并传规范路径或别名 | 后端返回 `FORBIDDEN`；个人本地提交仍保留 |
+
+自动化覆盖入口：
+
+```bash
+cd backend
+mvn -pl test-agent-common,test-agent-workspace-management,test-agent-api -am \
+  -Dtest=GitWorkspaceServiceRealGitTest,ManagedWorkspaceApplicationServiceTest,ManagedWorkspaceControllerTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+cd ../frontend
+corepack pnpm vitest run \
+  apps/agent-web/tests/agent-file-load.test.ts \
+  apps/agent-web/tests/git-changes-panel.test.ts
+corepack pnpm --filter @test-agent/agent-web typecheck
+```

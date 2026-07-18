@@ -45,51 +45,46 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
-    void applicationAgentProjectionCommitsOnlyWhitelistAndPreservesOtherStagedFiles() throws Exception {
+    void mergesFixedFeatureCommitAndCompletesConflictWithNativeGitState() throws Exception {
         Path repo = initializeRepository();
-        Files.createDirectories(repo.resolve("workspace/.opencode/agents"));
         Files.createDirectories(repo.resolve("workspace/docs"));
-        write(repo, "workspace/.opencode/agents/reviewer.md", "version 1\n");
-        write(repo, "workspace/docs/design.md", "base docs\n");
+        write(repo, "workspace/docs/design.md", "base\n");
         git(repo, "add", "--all");
         git(repo, "commit", "-m", "base");
         String base = git(repo, "rev-parse", "HEAD").stdoutText().trim();
 
         git(repo, "checkout", "-b", "feature");
-        write(repo, "workspace/.opencode/agents/reviewer.md", "version 2\n");
-        write(repo, "workspace/.opencode/opencode.jsonc", "{\"agent\": {}}\n");
-        git(repo, "add", "--all");
-        git(repo, "commit", "-m", "publish application agent");
+        write(repo, "workspace/docs/design.md", "feature\n");
+        git(repo, "commit", "-am", "publish feature docs");
         String feature = git(repo, "rev-parse", "HEAD").stdoutText().trim();
 
         git(repo, "checkout", "-b", "personal", base);
-        write(repo, "workspace/docs/design.md", "personal staged docs\n");
-        git(repo, "add", "--", "workspace/docs/design.md");
+        write(repo, "workspace/docs/design.md", "personal\n");
+        git(repo, "commit", "-am", "personal docs");
 
         GitWorkspaceService service = new GitWorkspaceService();
-        assertThat(service.listTrackedFiles(repo, "workspace/.opencode"))
-                .containsExactly("workspace/.opencode/agents/reviewer.md");
-        assertThat(service.listFilesAtCommit(repo, feature, "workspace/.opencode"))
-                .containsExactlyInAnyOrder(
-                        "workspace/.opencode/agents/reviewer.md",
-                        "workspace/.opencode/opencode.jsonc");
-
-        List<String> files = List.of(
-                "workspace/.opencode/agents/reviewer.md",
-                "workspace/.opencode/opencode.jsonc");
-        service.materializeCommitFiles(repo, feature, files, null);
-        service.commitFilesOnly(
+        assertThatThrownBy(() -> service.mergeCommit(
                 repo,
-                "同步应用 Agent 配置",
-                files,
+                feature,
                 null,
-                GitCommitIdentity.forPlatformUser("publisher", "AUTH_PUBLISHER"));
+                GitCommitIdentity.forPlatformUser("publisher", "AUTH_PUBLISHER")))
+                .isInstanceOf(PlatformException.class);
+        assertThat(service.isMergeInProgress(repo)).isTrue();
+        assertThat(service.conflictPaths(repo)).containsExactly("workspace/docs/design.md");
 
-        assertThat(git(repo, "show", "--name-only", "--pretty=format:", "HEAD").stdoutText())
-                .contains("workspace/.opencode/agents/reviewer.md")
-                .contains("workspace/.opencode/opencode.jsonc")
-                .doesNotContain("workspace/docs/design.md");
-        assertThat(service.statusPorcelain(repo)).contains("M  workspace/docs/design.md");
+        service.resolveAllConflicts(
+                repo,
+                GitWorkspaceService.ConflictResolutionSide.INCOMING,
+                null);
+        service.commitStaged(
+                repo,
+                "完成 feature 合并",
+                null,
+                GitCommitIdentity.forPlatformUser("personal-user", "AUTH_PERSONAL"));
+
+        assertThat(service.isMergeInProgress(repo)).isFalse();
+        assertThat(service.isAncestor(repo, feature, "HEAD")).isTrue();
+        assertThat(Files.readString(repo.resolve("workspace/docs/design.md"))).isEqualTo("feature\n");
     }
 
     @Test

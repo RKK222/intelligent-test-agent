@@ -442,6 +442,26 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 把已经解析并固定的提交合并到当前分支。
+     *
+     * <p>托管应用同步不能在执行时重新解析可移动的分支名，否则广播记录的目标 commit 与实际
+     * 合并内容可能不一致。这里显式使用 {@code --no-edit}，无分叉时允许 Git fast-forward，
+     * 有个人提交时生成正常 merge commit，冲突时则保留 Git 原生 MERGE_HEAD 和三方 index。</p>
+     */
+    public void mergeCommit(
+            Path repoRoot,
+            String targetCommit,
+            String privateKey,
+            GitCommitIdentity identity) {
+        List<String> command = List.of(
+                "git", "-C", repoRoot.toString(), "merge", "--no-edit", targetCommit);
+        executor.execute(
+                identity == null ? command : withCommitIdentity(command, identity),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
      * 返回当前仓库未解决的合并冲突文件列表，用于"个人 worktree 合并回应用版本分支"失败时提示前端。
      */
     public List<String> conflictPaths(Path repoRoot) {
@@ -1100,53 +1120,6 @@ public class GitWorkspaceService {
                 withCommitIdentity(List.of("git", "-C", repoRoot.toString(), "commit", "-m", message), identity),
                 privateKey,
                 DEFAULT_TIMEOUT);
-    }
-
-    /**
-     * 只提交明确列出的文件，并保留索引中其它暂存项。
-     *
-     * <p>应用 Agent 发布回写个人分支时不能先 reset 整个 index，否则会破坏用户正在准备的普通文件提交；
-     * Git {@code commit --only} 会从工作树提交白名单路径，同时让其它 staged 文件继续留在索引中。</p>
-     */
-    public void commitFilesOnly(
-            Path repoRoot,
-            String message,
-            List<String> files,
-            String privateKey,
-            GitCommitIdentity identity) {
-        if (files == null || files.isEmpty()) {
-            return;
-        }
-        ArrayList<String> command = new ArrayList<>(List.of("git", "-C", repoRoot.toString(), "commit", "--only", "-m", message, "--"));
-        command.addAll(files);
-        List<String> immutableCommand = List.copyOf(command);
-        executor.execute(
-                identity == null ? immutableCommand : withCommitIdentity(immutableCommand, identity),
-                privateKey,
-                DEFAULT_TIMEOUT);
-    }
-
-    /** 返回当前分支在 pathspec 下已跟踪的文件，路径始终使用 Git 的正斜杠格式。 */
-    public List<String> listTrackedFiles(Path repoRoot, String pathspec) {
-        return outputPaths(executor.execute(
-                gitNoQuotedPath(repoRoot, "ls-files", "--", pathspec),
-                null,
-                DEFAULT_TIMEOUT).stdoutText());
-    }
-
-    /** 返回指定提交在 pathspec 下包含的文件，不切换目标 worktree。 */
-    public List<String> listFilesAtCommit(Path repoRoot, String commit, String pathspec) {
-        return outputPaths(executor.execute(
-                gitNoQuotedPath(repoRoot, "ls-tree", "-r", "--name-only", commit, "--", pathspec),
-                null,
-                DEFAULT_TIMEOUT).stdoutText());
-    }
-
-    private List<String> outputPaths(String output) {
-        if (output == null || output.isBlank()) {
-            return List.of();
-        }
-        return output.lines().map(String::trim).filter(path -> !path.isBlank()).toList();
     }
 
     /**

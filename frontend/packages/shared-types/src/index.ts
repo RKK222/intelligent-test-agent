@@ -2143,4 +2143,15 @@ export type WorkspaceGitDiffFile = {
 
 export type WorkspaceGitDiff = {
   files: WorkspaceGitDiffFile[];
+  /** Git 已进入 merge，可能仍有冲突，也可能只等待最终 merge commit。 */
+  mergeInProgress?: boolean;
+  /** 当前个人 HEAD 尚未包含应用版本固定的 target commit。 */
+  applicationUpdatePending?: boolean;
+  applicationTargetCommit?: string | null;
+};
+
+export type WorkspaceGitMergeCompletion = {
+  status: "MERGED";
+  headCommit: string;
+  applicationTargetCommit?: string | null;
 };

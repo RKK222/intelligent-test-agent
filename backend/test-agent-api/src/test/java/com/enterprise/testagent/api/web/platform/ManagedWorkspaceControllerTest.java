@@ -21,6 +21,7 @@ import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.ManagedAppli
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.PersonalWorkspacePublishPreviewResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRuntimeResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitConflictResponse;
+import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitMergeCompletionResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -268,6 +269,24 @@ class ManagedWorkspaceControllerTest {
                 .expectStatus().isOk();
 
         verify(service).resolveAllWorkspaceGitConflicts("wks_123", "CURRENT", USER_ID);
+    }
+
+    @Test
+    void applicationAdministratorCanCompleteResolvedWorkspaceMerge() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.completeWorkspaceGitMerge("wks_123", USER_ID, TRACE_ID))
+                .thenReturn(new WorkspaceGitMergeCompletionResponse("MERGED", "merge-head", "feature-head"));
+
+        client(service, readyAssignmentService("127.0.0.1"), List.of("APP_ADMIN")).post()
+                .uri("/api/internal/platform/workspace-management/workspaces/wks_123/git-conflict/complete")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("MERGED")
+                .jsonPath("$.data.headCommit").isEqualTo("merge-head");
+
+        verify(service).completeWorkspaceGitMerge("wks_123", USER_ID, TRACE_ID);
     }
 
     @Test

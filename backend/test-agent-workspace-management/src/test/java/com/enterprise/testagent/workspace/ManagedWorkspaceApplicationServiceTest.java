@@ -1218,7 +1218,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void applicationAgentRolloutUpdatesCleanPersonalWorktreeWithoutTouchingDirtyDocs() {
+    void applicationAgentRolloutMergesFixedFeatureCommitIntoCleanPersonalWorktree() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1227,10 +1227,7 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
                 "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
         service.ensureDefaultPersonalWorkspace(version.versionId(), new UserId("usr_1"), "trace_personal");
-        git.nextStatusPorcelain = "M  F-GCMS/workspace/docs/design.md\n";
-        git.targetAgentFiles = List.of(
-                "F-GCMS/workspace/.opencode/agents/reviewer.md",
-                "F-GCMS/workspace/.opencode/opencode.jsonc");
+        git.targetContainedInHead = false;
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
         PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest(version.versionId());
         when(coordinator.claimPendingSync("127.0.0.1", AgentConfigRolloutScope.APPLICATION))
@@ -1240,11 +1237,9 @@ class ManagedWorkspaceApplicationServiceTest {
 
         service.retryPendingApplicationConfigSync();
 
-        assertThat(git.materializedCommit).isEqualTo("commit_application_agent");
-        assertThat(git.materializedFiles).containsExactly(
-                "F-GCMS/workspace/.opencode/agents/reviewer.md",
-                "F-GCMS/workspace/.opencode/opencode.jsonc");
-        assertThat(git.committedOnlyFiles).containsExactlyElementsOf(git.materializedFiles);
+        assertThat(git.mergedCommit).isEqualTo("commit_application_agent");
+        assertThat(git.mergedCommitRepoRoot).isEqualTo(
+                personalRepoRoot("feature_testagent_20260707_usr_1_default"));
         assertThat(managed.syncRecords).singleElement().satisfies(record -> {
             assertThat(record.direction()).isEqualTo(WorkspaceSyncDirection.APPLICATION_TO_PERSONAL);
             assertThat(record.status()).isEqualTo(WorkspaceSyncStatus.SUCCEEDED);
@@ -1253,7 +1248,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void applicationAgentRolloutSkipsUserWithDirtyPersonalAgentConfig() {
+    void applicationAgentRolloutKeepsServerPendingWhenPersonalWorktreeIsDirty() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1262,8 +1257,8 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
                 "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
         service.ensureDefaultPersonalWorkspace(version.versionId(), new UserId("usr_1"), "trace_personal");
-        git.nextStatusPorcelain = " M F-GCMS/workspace/.opencode/agents/reviewer.md\n";
-        git.targetAgentFiles = List.of("F-GCMS/workspace/.opencode/agents/reviewer.md");
+        git.targetContainedInHead = false;
+        git.dirtyRepoRoot = personalRepoRoot("feature_testagent_20260707_usr_1_default");
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
         PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest(version.versionId());
         when(coordinator.claimPendingSync("127.0.0.1", AgentConfigRolloutScope.APPLICATION))
@@ -1273,10 +1268,58 @@ class ManagedWorkspaceApplicationServiceTest {
 
         service.retryPendingApplicationConfigSync();
 
-        assertThat(git.materializedFiles).isEmpty();
-        assertThat(managed.syncRecords).singleElement().satisfies(record ->
-                assertThat(record.status()).isEqualTo(WorkspaceSyncStatus.FAILED));
-        verify(coordinator).markServerSyncedForUsers(request, Set.of());
+        assertThat(git.mergedCommit).isNull();
+        assertThat(managed.syncRecords).isEmpty();
+        verify(coordinator).markServerSyncRetry(request, "PERSONAL_WORKTREE_UPDATE_PENDING");
+        verify(coordinator, org.mockito.Mockito.never()).markServerSyncedForUsers(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anySet());
+    }
+
+    @Test
+    void featureMergeConflictStaysInDiffUntilUserCompletesMergeCommit() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_personal");
+        git.targetContainedInHead = false;
+        git.failMergeWithConflict = true;
+        git.nextConflictPaths = List.of("F-GCMS/workspace/docs/design.md");
+        git.nextStatusPorcelain = "UU F-GCMS/workspace/docs/design.md\n";
+
+        ManagedWorkspaceResponses.WorkspaceSyncResponse sync = service.syncApplicationToPersonal(
+                personal.personalWorkspaceId(),
+                List.of("docs/design.md"),
+                new UserId("usr_1"),
+                "trace_sync");
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                personal.runtimeWorkspace().workspaceId(),
+                new UserId("usr_1"));
+
+        assertThat(sync.status()).isEqualTo(WorkspaceSyncStatus.FAILED.name());
+        assertThat(diff.mergeInProgress()).isTrue();
+        assertThat(diff.applicationUpdatePending()).isTrue();
+        assertThat(diff.files()).singleElement().satisfies(file ->
+                assertThat(file.status()).isEqualTo("conflict"));
+
+        // 模拟三方编辑器已把全部冲突写回 index；完成入口提交完整 merge，而不是 reset index 后按文件提交。
+        git.nextConflictPaths = List.of();
+        git.nextStatusPorcelain = "M  F-GCMS/workspace/docs/design.md\n";
+        git.commitStagedUpdatesHead = true;
+        ManagedWorkspaceResponses.WorkspaceGitMergeCompletionResponse completion = service.completeWorkspaceGitMerge(
+                personal.runtimeWorkspace().workspaceId(),
+                new UserId("usr_1"),
+                "trace_complete");
+
+        assertThat(completion.status()).isEqualTo("MERGED");
+        assertThat(git.mergeInProgress).isFalse();
+        assertThat(git.targetContainedInHead).isTrue();
+        assertThat(git.committedStagedMessage).startsWith("合并应用 feature 更新");
     }
 
     private PublicAgentConfigRolloutSyncRequest applicationSyncRequest(String versionId) {
@@ -1458,6 +1501,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
         // 合并成功后应用版本副本 HEAD 变为 commit_merged
         git.nextHeadCommit = "commit_merged";
+        git.targetContainedInHead = false;
 
         ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
@@ -1484,8 +1528,10 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.pushes.get(0).repoRoot).isEqualTo(applicationRepoRoot);
         assertThat(git.pushedBranch).isEqualTo(version.branch());
         assertThat(git.pushedRepoRoot).isEqualTo(applicationRepoRoot);
-        // head commit 取自应用版本副本而非个人 worktree
-        assertThat(git.headCommitRepoRoot).isEqualTo(applicationRepoRoot);
+        // feature 推送后立即把固定 commit 反向合并到本机个人 worktree。
+        assertThat(git.mergedCommit).isEqualTo("commit_merged");
+        assertThat(git.mergedCommitRepoRoot).isEqualTo(
+                personalRepoRoot("feature_testagent_20260707_usr_1_default"));
         // 发布不改个人索引；目标 feature worktree 承担投影后的提交。
         assertThat(git.stagedRepoRoot).isNull();
         assertThat(git.stagedFilesRepoRoot).isNull();
@@ -2005,6 +2051,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private int nextCommitCount;
         private String nextNameStatus = "";
         private boolean worktreeClean = true;
+        private Path dirtyRepoRoot;
         private final List<String> calls = new ArrayList<>();
         private boolean failCreateWorktreeWithConflict;
         private String reusedWorktreeBranch;
@@ -2032,13 +2079,13 @@ class ManagedWorkspaceApplicationServiceTest {
         private Path materializedRepoRoot;
         private String materializedCommit;
         private List<String> materializedFiles = List.of();
-        private List<String> trackedAgentFiles = List.of();
-        private List<String> targetAgentFiles = List.of();
-        private List<String> committedOnlyFiles = List.of();
         private Path fetchedRepoRoot;
         private String mergedBranch;
         private Path mergedBranchRepoRoot;
         private final List<MergeCall> mergeCalls = new ArrayList<>();
+        private Path mergedCommitRepoRoot;
+        private String mergedCommit;
+        private boolean targetContainedInHead = true;
         private boolean failMergeWithConflict;
         private List<String> nextConflictPaths = List.of();
         private Path abortedMergeRepoRoot;
@@ -2199,26 +2246,6 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
-        public List<String> listTrackedFiles(Path repoRoot, String pathspec) {
-            return trackedAgentFiles;
-        }
-
-        @Override
-        public List<String> listFilesAtCommit(Path repoRoot, String commit, String pathspec) {
-            return targetAgentFiles;
-        }
-
-        @Override
-        public void commitFilesOnly(
-                Path repoRoot,
-                String message,
-                List<String> files,
-                String privateKey,
-                GitCommitIdentity identity) {
-            this.committedOnlyFiles = List.copyOf(files);
-        }
-
-        @Override
         public void resetIndexToHead(Path repoRoot, String privateKey) {
             this.resetIndexRepoRoot = repoRoot;
         }
@@ -2246,7 +2273,13 @@ class ManagedWorkspaceApplicationServiceTest {
             this.committedStagedRepoRoot = repoRoot;
             this.committedStagedMessage = message;
             if (commitStagedUpdatesHead) {
-                this.nextHeadCommit = "commit_after_push";
+                this.nextHeadCommit = mergeInProgress && mergedCommit != null
+                        ? mergedCommit
+                        : "commit_after_push";
+                if (mergeInProgress) {
+                    this.mergeInProgress = false;
+                    this.targetContainedInHead = true;
+                }
             }
         }
 
@@ -2282,6 +2315,27 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public boolean isAncestor(Path repoRoot, String ancestor, String descendant) {
+            return targetContainedInHead;
+        }
+
+        @Override
+        public void mergeCommit(
+                Path repoRoot,
+                String targetCommit,
+                String privateKey,
+                GitCommitIdentity identity) {
+            this.mergedCommitRepoRoot = repoRoot;
+            this.mergedCommit = targetCommit;
+            if (failMergeWithConflict) {
+                this.mergeInProgress = true;
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
+            }
+            this.targetContainedInHead = true;
+            this.nextHeadCommit = targetCommit;
+        }
+
+        @Override
         public List<String> conflictPaths(Path repoRoot) {
             calls.add("conflicts:" + repoRoot);
             return nextConflictPaths;
@@ -2305,7 +2359,7 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public boolean isWorktreeClean(Path repoRoot) {
             calls.add("clean:" + repoRoot);
-            return worktreeClean;
+            return worktreeClean && (dirtyRepoRoot == null || !dirtyRepoRoot.equals(repoRoot));
         }
 
         @Override

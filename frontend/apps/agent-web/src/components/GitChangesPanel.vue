@@ -142,7 +142,9 @@ const commitStep = ref(0);
 const executedCommands = ref<string[]>([]);
 const hasLivePublishCommand = ref(false);
 const publishResultConfirmed = ref(false);
-const mergeResolutionCompleted = ref(false);
+const workspaceMergeInProgress = ref(false);
+const workspaceApplicationUpdatePending = ref(false);
+const workspaceApplicationTargetCommit = ref<string | null>(null);
 const commitRequestedPush = ref(false);
 type CommitResultSummary = {
   committedFiles: number;
@@ -405,6 +407,12 @@ const workspaceAgentConflicts = computed(() =>
     })
     .filter((file): file is Exclude<typeof file, null> => file !== null)
 );
+const hasAnyPersonalWorkspaceConflicts = computed(() =>
+  workspaceConflicts.value.length + workspaceAgentConflicts.value.length > 0
+);
+const canCompleteWorkspaceMerge = computed(() =>
+  props.canWrite && workspaceMergeInProgress.value && !hasAnyPersonalWorkspaceConflicts.value
+);
 
 const activeDiffScope = ref<DiffScope>("WORKSPACE");
 const hasSelectedDiffScope = ref(false);
@@ -549,7 +557,9 @@ watch(
   () => props.workspaceId,
   () => {
     resetCommitBatch();
-    mergeResolutionCompleted.value = false;
+    workspaceMergeInProgress.value = false;
+    workspaceApplicationUpdatePending.value = false;
+    workspaceApplicationTargetCommit.value = null;
     stagedWorkspacePaths.value.clear();
     void refreshChanges();
   },
@@ -592,6 +602,9 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
       try {
         const gitDiff = await api.getWorkspaceGitDiff(props.workspaceId);
         if (token !== refreshChangesToken) return;
+        workspaceMergeInProgress.value = gitDiff.mergeInProgress === true;
+        workspaceApplicationUpdatePending.value = gitDiff.applicationUpdatePending === true;
+        workspaceApplicationTargetCommit.value = gitDiff.applicationTargetCommit ?? null;
         // `.opencode` 与普通文件同属个人 worktree，但在“应用Agent”视图单独展示和提交。
         const workspaceFiles = gitDiff.files
           .filter((f) => !isWorkspaceAgentConfigPath(f.path))
@@ -614,9 +627,15 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
       } catch {
         if (token !== refreshChangesToken) return;
         workspaceDiffFiles.value = [];
+        workspaceMergeInProgress.value = false;
+        workspaceApplicationUpdatePending.value = false;
+        workspaceApplicationTargetCommit.value = null;
       }
     } else {
       workspaceDiffFiles.value = [];
+      workspaceMergeInProgress.value = false;
+      workspaceApplicationUpdatePending.value = false;
+      workspaceApplicationTargetCommit.value = null;
     }
 
     // 2. Fetch public agent changes
@@ -814,7 +833,6 @@ async function resolveWorkspaceConflict(payload: {
     activeConflict.value = null;
     activeConflictScope.value = null;
     await refreshChanges();
-    mergeResolutionCompleted.value = workspaceConflicts.value.length === 0;
     notifyChangesRefreshed([path], true);
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "解决 Git 冲突失败");
@@ -831,7 +849,6 @@ async function abortWorkspaceConflict() {
     await api.abortWorkspaceGitConflict(props.workspaceId);
     activeConflict.value = null;
     activeConflictScope.value = null;
-    mergeResolutionCompleted.value = false;
     await refreshChanges();
     notifyChangesRefreshed(undefined, true);
   } catch (error) {
@@ -852,10 +869,24 @@ async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") 
     activeConflict.value = null;
     activeConflictScope.value = null;
     await refreshChanges();
-    mergeResolutionCompleted.value = workspaceConflicts.value.length === 0;
     notifyChangesRefreshed(undefined, true);
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "批量解决 Git 冲突失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+async function completeWorkspaceMerge() {
+  if (!canCompleteWorkspaceMerge.value || !props.workspaceId || conflictResolving.value) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.completeWorkspaceGitMerge(props.workspaceId);
+    await refreshChanges();
+    notifyChangesRefreshed(undefined, true);
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "完成 Git 合并失败");
   } finally {
     conflictResolving.value = false;
   }
@@ -1296,7 +1327,6 @@ async function handleCommit(push = false) {
         progressMessage.value = "个人 worktree 提交成功（尚未推送）。";
       }
       stagedWorkspacePaths.value.clear();
-      mergeResolutionCompleted.value = false;
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
@@ -1606,6 +1636,45 @@ defineExpose({
           <!-- 1a. Application Workspace -->
           <div v-if="activeDiffScope === 'WORKSPACE'" class="git-sub-section">
             <div class="git-sub-content px-2 py-0.5 space-y-0.5">
+              <div v-if="canCompleteWorkspaceMerge" class="git-conflict-banner">
+                <div class="git-conflict-header">
+                  <CheckCircle2 class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-500 shrink-0" />
+                  <span>冲突已全部解决，等待完成 feature 合并</span>
+                </div>
+                <div class="git-conflict-actions">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn"
+                    :disabled="conflictResolving"
+                    @click.stop="completeWorkspaceMerge"
+                  >
+                    完成合并
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn btn-abort"
+                    :disabled="conflictResolving"
+                    @click.stop="abortWorkspaceConflict"
+                  >
+                    取消合并
+                  </Button>
+                </div>
+              </div>
+              <div
+                v-else-if="workspaceApplicationUpdatePending && !workspaceMergeInProgress"
+                class="git-conflict-note"
+              >
+                应用 feature 有待同步更新<span v-if="workspaceApplicationTargetCommit">（{{ workspaceApplicationTargetCommit.slice(0, 12) }}）</span>；
+                请先提交或回退当前个人变更，系统随后自动重试 Git 合并。
+              </div>
+              <div
+                v-else-if="workspaceMergeInProgress && workspaceAgentConflicts.length > 0 && workspaceConflicts.length === 0"
+                class="git-conflict-note"
+              >
+                当前合并仍有应用 Agent 冲突，请切换到“应用Agent”处理。
+              </div>
               <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner">
                 <div class="git-conflict-header">
                   <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
@@ -1742,6 +1811,39 @@ defineExpose({
               </div>
               <div v-if="activeDiffScope === 'AGENT_WORKSPACE' && workspaceAgentConflicts.length > 0" class="git-conflict-note">
                 检测到 {{ workspaceAgentConflicts.length }} 个应用 Agent 冲突，点击文件后使用与 workspace 相同的合并编辑器处理。
+              </div>
+              <div v-else-if="activeDiffScope === 'AGENT_WORKSPACE' && canCompleteWorkspaceMerge" class="git-conflict-banner">
+                <div class="git-conflict-header">
+                  <CheckCircle2 class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-500 shrink-0" />
+                  <span>应用配置冲突已解决，等待完成 feature 合并</span>
+                </div>
+                <div class="git-conflict-actions">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn"
+                    :disabled="conflictResolving"
+                    @click.stop="completeWorkspaceMerge"
+                  >
+                    完成合并
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="git-conflict-action-btn btn-abort"
+                    :disabled="conflictResolving"
+                    @click.stop="abortWorkspaceConflict"
+                  >
+                    取消合并
+                  </Button>
+                </div>
+              </div>
+              <div
+                v-else-if="activeDiffScope === 'AGENT_WORKSPACE' && workspaceApplicationUpdatePending && !workspaceMergeInProgress"
+                class="git-conflict-note"
+              >
+                应用 feature 有待同步更新<span v-if="workspaceApplicationTargetCommit">（{{ workspaceApplicationTargetCommit.slice(0, 12) }}）</span>；
+                请先提交或回退当前个人变更，系统随后自动重试 Git 合并。
               </div>
               <div
                 v-for="file in activeAgentConflicts"

@@ -417,7 +417,7 @@ scope 发现与缓存规则：
 
 应用配置管理、版本库部署模式配置和个人 SSH key 管理不产生 RunEvent，也不新增 SSE 事件类型。`/api/internal/platform/configuration-management/**` 的版本库创建/编辑/列表、部署模式选项查询和个人 SSH key 维护均通过 HTTP 同步返回；设置页创建应用工作空间接口虽然会触发初始版本工作区 clone/checkout 和运行态 Workspace 创建，但进度写入 `workspace_create_operations` 并由 `GET /api/internal/platform/configuration-management/workspace-create-operations/{operationId}` HTTP 轮询读取；不通过 RunEvent SSE 发布“校验、保存配置、解析版本、下载代码、创建运行态工作区、完成/失败”等步骤。
 
-应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。多服务器下应用版本工作区同步使用后端内部服务器广播，不暴露给浏览器 SSE。
+应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push/merge 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。feature push 后，多服务器通过内部广播取得固定 `targetCommitHash`，再向当前服务器相关个人 worktree 执行原生 Git merge；dirty 内容不覆盖，冲突保留在本机 Diff。该分支同步不暴露给浏览器 SSE，已打开的文件树/标签仍按现有刷新或重新进入机制重读磁盘。
 
 应用引用资产库的初始化、同步、状态和目录树接口同样不产生 RunEvent/SSE。多服务器副本通过内部 `reference-repository.sync-requested` 广播低延迟唤醒，并通过数据库 generation、租约和定时补偿收敛；该广播不写入 `run_events`，不进入 RunEvent SSE，也不参与 `Last-Event-ID` 续传。
 
@@ -467,7 +467,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 }
 ```
 
-`workspace.version.sync-requested` 的 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`AGENT_CONFIG_PUBLISHED`、`GIT_PULL_REQUESTED`、`GIT_PULLED`。当前应用 Agent/Skill 与 workspace 共用个人 worktree，按个人 `HEAD` 白名单投影成功后使用 `PERSONAL_PUBLISHED`；兼容的旧工作空间 Agent 直发入口仍使用 `AGENT_CONFIG_PUBLISHED`。两条路径都会先更新应用版本与本机副本 HEAD。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；远端节点使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset 到目标 commit。浏览器不订阅该广播；在线用户由前端提示手动刷新/同步，禁止自动覆盖脏个人 worktree。消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
+`workspace.version.sync-requested` 的 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`AGENT_CONFIG_PUBLISHED`、`GIT_PULL_REQUESTED`、`GIT_PULLED`。当前应用 Agent/Skill 与 workspace 共用个人 worktree，按个人 `HEAD` 白名单投影成功后使用 `PERSONAL_PUBLISHED`；兼容的旧工作空间 Agent 直发入口仍使用 `AGENT_CONFIG_PUBLISHED`。两条路径都会先更新应用版本与本机副本 HEAD。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；远端节点使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset feature 副本到目标 commit，然后以 `git merge --no-edit <targetCommit>` 反向同步本机相关个人 worktree。dirty/staged/untracked worktree 保留原状并由 Diff 显示待同步；冲突保留 `MERGE_HEAD` 和三方 index。广播只负责服务器间低延迟唤醒，不进入浏览器 SSE；消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
 
 `common-parameter.refresh-requested` 用于通用参数 `value` 修改后的跨实例联动。某实例 `PATCH` 修改参数后，本地广播器发布该广播并发布本地 `CommonParameterReloadedEvent`；其他实例收到后发布本地 `CommonParameterReloadedEvent`，监听方直接从数据库读取最新参数并向本实例持有的 opencode manager 下发最新运行配置。远端处理不再转发广播，避免循环；消费者跳过 `originInstanceId` 与本机相同的事件。payload 只携带参数标识，不携带参数值（各实例自行从库读取，避免值在总线明文）：
 

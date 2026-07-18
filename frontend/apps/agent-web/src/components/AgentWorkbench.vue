@@ -77,6 +77,7 @@ import {
   agentFileInfo,
   agentTabPath,
   isAgentFilePath,
+  shouldReloadPersonalRuntimeCatalog,
   type AgentFileLoadRequest
 } from "./agentFileLoad";
 import {
@@ -2016,15 +2017,12 @@ watch(diffFiles, (files) => {
  * Agent 与 Skill 定义会被 OpenCode 工作区实例缓存。只在目录定义文件保存后重载运行态，
  * rules/templates 等普通资源仍按原保存链路处理，避免无关编辑打断当前实例。
  */
-function isRuntimeCatalogDefinition(path: string): boolean {
-  const normalized = path.replaceAll("\\", "/");
-  return /(^|\/)opencode\.jsonc?$/i.test(normalized)
-    || /(^|\/)agents\/.*\.md$/i.test(normalized)
-    || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized);
-}
-
-async function refreshRuntimeCatalogAfterAgentConfigSave(path: string): Promise<unknown | null> {
-  if (!isRuntimeCatalogDefinition(path) || !opencodeCatalogReady.value) {
+async function refreshRuntimeCatalogAfterAgentConfigSave(
+  path: string,
+  scope: "PUBLIC" | "WORKSPACE"
+): Promise<unknown | null> {
+  // 公共配置以公共分支推送为发布边界；只有应用个人 worktree 保存后允许 dispose 本人实例做发布前调试。
+  if (!shouldReloadPersonalRuntimeCatalog(scope, path) || !opencodeCatalogReady.value) {
     return null;
   }
   lastRuntimeReloadError = null;
@@ -2118,18 +2116,21 @@ const saveMutation = useMutation({
   },
   onSuccess: async (tab) => {
     workbench.markTabSaved(tab.path, tab.content);
-    if (isAgentFilePath(tab.path)) {
+    const agentInfo = isAgentFilePath(tab.path) ? agentFileInfo(tab.path) : null;
+    if (agentInfo) {
       agentConfigRevision.value += 1;
     }
-    const catalogRefreshError = isAgentFilePath(tab.path)
-      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentFileInfo(tab.path).path)
+    const catalogRefreshError = agentInfo
+      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentInfo.path, agentInfo.scope)
       : null;
     feedback.value = catalogRefreshError
       ? errorFeedback("文件已保存，运行态目录刷新失败", catalogRefreshError)
       : {
           kind: "success",
           title: "文件已保存",
-          description: runtimeBusy.value && isRuntimeCatalogDefinition(agentFileInfo(tab.path).path)
+          description: runtimeBusy.value
+            && agentInfo
+            && shouldReloadPersonalRuntimeCatalog(agentInfo.scope, agentInfo.path)
             ? `${tab.path}；当前任务结束后会自动重新加载当前用户运行态。`
             : tab.path
         };
@@ -5751,18 +5752,21 @@ const saveDiffFileMutation = useMutation({
     if (tab) {
       workbench.markTabSaved(path, content);
     }
-    if (isAgentFilePath(path)) {
+    const agentInfo = isAgentFilePath(path) ? agentFileInfo(path) : null;
+    if (agentInfo) {
       agentConfigRevision.value += 1;
     }
-    const catalogRefreshError = isAgentFilePath(path)
-      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentFileInfo(path).path)
+    const catalogRefreshError = agentInfo
+      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentInfo.path, agentInfo.scope)
       : null;
     feedback.value = catalogRefreshError
       ? errorFeedback("文件已保存，运行态目录刷新失败", catalogRefreshError)
       : {
           kind: "success",
           title: "文件已保存",
-          description: runtimeBusy.value && isRuntimeCatalogDefinition(agentFileInfo(path).path)
+          description: runtimeBusy.value
+            && agentInfo
+            && shouldReloadPersonalRuntimeCatalog(agentInfo.scope, agentInfo.path)
             ? `${path}；当前任务结束后会自动重新加载当前用户运行态。`
             : path
         };

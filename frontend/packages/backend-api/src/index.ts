@@ -129,6 +129,7 @@ import type {
   WorkspaceCreateOperation,
   WorkspaceDiff,
   WorkspaceGitDiff,
+  WorkspaceGitMergeCompletion,
   WorkspaceGitConflict,
   PublishPersonalWorkspacePreview,
   WorkspaceSyncResult,
@@ -761,6 +762,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     abortWorkspaceGitConflict: (workspaceId: string) =>
       request<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/abort`,
+        { method: "POST" }
+      ),
+    completeWorkspaceGitMerge: (workspaceId: string) =>
+      request<WorkspaceGitMergeCompletion>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/complete`,
         { method: "POST" }
       ),
     /** 仅提交个人 worktree，不推送远端。 */

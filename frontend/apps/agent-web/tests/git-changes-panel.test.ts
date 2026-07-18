@@ -15,6 +15,7 @@ const apiClientMock = vi.hoisted(() => ({
   resolveWorkspaceGitConflict: vi.fn(),
   abortWorkspaceGitConflict: vi.fn(),
   resolveAllWorkspaceGitConflicts: vi.fn(),
+  completeWorkspaceGitMerge: vi.fn(),
   getPublicAgentGitConflict: vi.fn(),
   resolvePublicAgentGitConflict: vi.fn(),
   resolveAllPublicAgentGitConflicts: vi.fn(),
@@ -81,6 +82,11 @@ describe("GitChangesPanel", () => {
     apiClientMock.discardWorkspaceGitFiles.mockResolvedValue(undefined);
     apiClientMock.stageWorkspaceGitFiles.mockResolvedValue(undefined);
     apiClientMock.unstageWorkspaceGitFiles.mockResolvedValue(undefined);
+    apiClientMock.completeWorkspaceGitMerge.mockResolvedValue({
+      status: "MERGED",
+      headCommit: "personal_merge_head",
+      applicationTargetCommit: "feature_target"
+    });
     apiClientMock.getPublicAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.discardPublicAgentFiles.mockResolvedValue(undefined);
@@ -1161,6 +1167,46 @@ describe("GitChangesPanel", () => {
     expect(within(row).queryByTitle("暂存文件")).toBeNull();
     expect((view.getByRole("button", { name: "全部暂存应用工作空间变更" }) as HTMLButtonElement).disabled).toBe(true);
     expect(apiClientMock.stageWorkspaceGitFiles).not.toHaveBeenCalled();
+  });
+
+  it("shows pending feature update and completes a resolved native merge from the diff area", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [],
+        mergeInProgress: false,
+        applicationUpdatePending: true,
+        applicationTargetCommit: "1234567890abcdef"
+      })
+      .mockResolvedValue({
+        files: [],
+        mergeInProgress: true,
+        applicationUpdatePending: true,
+        applicationTargetCommit: "1234567890abcdef"
+      });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText(/应用 feature 有待同步更新/)).toBeTruthy();
+    await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
+    expect(await view.findByText(/应用 feature 有待同步更新/)).toBeTruthy();
+    await fireEvent.click(view.getByRole("tab", { name: /^workspace/ }));
+    await fireEvent.click(view.getByTitle("刷新变更列表"));
+    const complete = await view.findByRole("button", { name: "完成合并" });
+    await fireEvent.click(complete);
+
+    await waitFor(() => expect(apiClientMock.completeWorkspaceGitMerge).toHaveBeenCalledWith(
+      fixture.application.personalRuntimeWorkspaceId
+    ));
   });
 
   it("keeps conflict prompt after publish refresh and separates unmerged files from staged files", async () => {

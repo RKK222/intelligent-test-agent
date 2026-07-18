@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { agentFileInfo, agentTabPath } from "../src/components/agentFileLoad";
+import {
+  agentFileInfo,
+  agentTabPath,
+  shouldReloadPersonalRuntimeCatalog
+} from "../src/components/agentFileLoad";
 
 describe("Agent 文件标签路由", () => {
   it("按 workspace、worktree 和 server 隔离标签身份并可还原原始路由", () => {
@@ -38,5 +42,14 @@ describe("Agent 文件标签路由", () => {
       worktreeId: "public_worktree",
       linuxServerId: "server_a"
     });
+  });
+
+  it("只允许应用个人 worktree 的目录定义在保存后热加载本人运行态", () => {
+    expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "agents/reviewer.md")).toBe(true);
+    expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "skills/test-design/SKILL.md")).toBe(true);
+    expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "opencode.jsonc")).toBe(true);
+    expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "skills/test-design/rules/check.md")).toBe(false);
+    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "agents/reviewer.md")).toBe(false);
+    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "skills/test-design/SKILL.md")).toBe(false);
   });
 });

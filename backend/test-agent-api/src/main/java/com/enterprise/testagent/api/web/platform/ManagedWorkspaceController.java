@@ -202,7 +202,11 @@ public class ManagedWorkspaceController {
             @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
-        service.discardWorkspaceGitFiles(workspaceId, request.files(), principal.userId());
+        service.discardWorkspaceGitFiles(
+                workspaceId,
+                request.files(),
+                principal.userId(),
+                RuntimeApiSupport.traceId(exchange));
         return ok(exchange, null);
     }
 
@@ -266,6 +270,18 @@ public class ManagedWorkspaceController {
         AuthPrincipal principal = requireWorkspaceConflictPermission(exchange, workspaceId);
         service.resolveAllWorkspaceGitConflicts(workspaceId, request.resolution(), principal.userId());
         return ok(exchange, null);
+    }
+
+    /** 全部冲突解决后提交完整 merge index；不得走会 reset index 的普通文件提交入口。 */
+    @PostMapping("/workspaces/{workspaceId}/git-conflict/complete")
+    public ApiResponse<Object> completeWorkspaceGitMerge(
+            @PathVariable String workspaceId,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = requireWorkspaceMergeCompletionPermission(exchange, workspaceId);
+        return ok(exchange, service.completeWorkspaceGitMerge(
+                workspaceId,
+                principal.userId(),
+                RuntimeApiSupport.traceId(exchange)));
     }
 
     @PostMapping("/personal-workspaces/{personalWorkspaceId}/publish-preview")
@@ -347,6 +363,28 @@ public class ManagedWorkspaceController {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
                     "应用 Agent 配置冲突仅允许应用管理员处理",
+                    Map.of("files", protectedFiles));
+        }
+        return principal;
+    }
+
+    /** 合并完成时冲突状态已经消失，因此要检查完整 merge diff 中是否仍包含受保护的应用配置。 */
+    private AuthPrincipal requireWorkspaceMergeCompletionPermission(
+            ServerWebExchange exchange,
+            String workspaceId) {
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        if (AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
+            return principal;
+        }
+        var diff = service.getWorkspaceGitDiff(workspaceId, principal.userId());
+        List<String> protectedFiles = diff == null ? List.of() : diff.files().stream()
+                .map(com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse::path)
+                .filter(this::isApplicationAgentConfigPath)
+                .toList();
+        if (!protectedFiles.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "包含应用 Agent 配置的合并仅允许应用管理员完成",
                     Map.of("files", protectedFiles));
         }
         return principal;

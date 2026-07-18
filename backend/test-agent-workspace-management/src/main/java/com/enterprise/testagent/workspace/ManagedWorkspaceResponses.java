@@ -340,7 +340,27 @@ public final class ManagedWorkspaceResponses {
             int deletions) {
     }
 
-    public record WorkspaceGitDiffResponse(List<WorkspaceGitDiffFileResponse> files) {
+    /**
+     * 个人 worktree 的 Git 变更和应用 feature 同步状态。
+     *
+     * <p>新增字段保持 JSON 向后兼容：mergeInProgress 表示 Git 已进入待解决/待提交的 merge，
+     * applicationUpdatePending 表示当前个人 HEAD 尚未包含版本固定的 target commit。</p>
+     */
+    public record WorkspaceGitDiffResponse(
+            List<WorkspaceGitDiffFileResponse> files,
+            boolean mergeInProgress,
+            boolean applicationUpdatePending,
+            String applicationTargetCommit) {
+
+        public WorkspaceGitDiffResponse(List<WorkspaceGitDiffFileResponse> files) {
+            this(files, false, false, null);
+        }
+    }
+
+    public record WorkspaceGitMergeCompletionResponse(
+            String status,
+            String headCommit,
+            String applicationTargetCommit) {
     }
 
     /**

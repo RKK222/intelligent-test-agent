@@ -29,6 +29,20 @@ export function isAgentFilePath(path: string): boolean {
   return path.startsWith(AGENT_PUBLIC_FILE_PREFIX) || path.startsWith(AGENT_WORKSPACE_FILE_PREFIX);
 }
 
+/** 只有应用个人 worktree 的运行目录定义允许在保存后热加载本人实例；公共配置必须以推送为发布边界。 */
+export function shouldReloadPersonalRuntimeCatalog(
+  scope: "PUBLIC" | "WORKSPACE",
+  path: string
+): boolean {
+  if (scope !== "WORKSPACE") {
+    return false;
+  }
+  const normalized = path.replaceAll("\\", "/");
+  return /(^|\/)opencode\.jsonc?$/i.test(normalized)
+    || /(^|\/)agents\/.*\.md$/i.test(normalized)
+    || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized);
+}
+
 /**
  * Agent tab 的 path 同时承担唯一身份与后续写入路由，应用级文件必须把 feature workspace 固化在其中。
  * 路径本身先编码，因此分隔符只会出现在路由元数据之间。
