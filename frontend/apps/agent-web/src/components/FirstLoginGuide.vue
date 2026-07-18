@@ -5,9 +5,12 @@ import { ElTour, ElTourStep } from "element-plus";
 // v5 在设置步骤打开真实设置弹窗，并把三类常用配置改成可照着操作的短流程。
 const GUIDE_VERSION = "v5";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   userId?: string | null;
-}>();
+  appAdmin?: boolean;
+}>(), {
+  appAdmin: false
+});
 
 const emit = defineEmits<{
   (event: "prepare"): void;
@@ -18,6 +21,9 @@ const emit = defineEmits<{
 
 const open = ref(false);
 const current = ref(0);
+const settingsPersonalTarget = ref<string | HTMLElement>('[data-onboarding="settings-personal"]');
+const settingsRepositoryTarget = ref<string | HTMLElement>('[data-onboarding="settings-repository"]');
+const settingsWorkspaceTarget = ref<string | HTMLElement>('[data-onboarding="settings-app-workspace"]');
 let scheduledUserId: string | null = null;
 
 const previousButton = { children: "上一步" };
@@ -74,9 +80,21 @@ function restart() {
   void show();
 }
 
-watch(current, (step) => {
-  // 第 07 步需要让用户看到设置弹窗中的真实导航；返回上一步或进入手册时关闭它。
-  emit("settings-step", step === 6);
+async function refreshSettingsTargets() {
+  await nextTick();
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  // 设置弹窗是异步挂载的；拿到真实 DOM 后再替换 selector，避免 Tour 在左上角生成无目标气泡。
+  settingsPersonalTarget.value = document.querySelector('[data-onboarding="settings-personal"]') ?? '[data-onboarding="settings-personal"]';
+  settingsRepositoryTarget.value = document.querySelector('[data-onboarding="settings-repository"]') ?? '[data-onboarding="settings-repository"]';
+  settingsWorkspaceTarget.value = document.querySelector('[data-onboarding="settings-app-workspace"]') ?? '[data-onboarding="settings-app-workspace"]';
+}
+
+watch(current, async (step) => {
+  // 设置相关步骤需要让用户看到设置弹窗中的真实导航；返回上一步或进入手册时关闭它。
+  const lastSettingsStep = props.appAdmin ? 8 : 6;
+  const settingsStep = step >= 6 && step <= lastSettingsStep;
+  emit("settings-step", settingsStep);
+  if (settingsStep) await refreshSettingsTargets();
 });
 
 watch(
@@ -157,19 +175,38 @@ defineExpose({ restart });
       <p>点击宠物按钮可查看 TestAgent 服务状态、初始化专属进程，或随时提问；没有主对话时会依据用户手册回答。</p>
     </ElTourStep>
     <ElTourStep
-      target='[data-onboarding="settings-panel"]'
-      placement="right-start"
+      :target="settingsPersonalTarget"
+      placement="right"
       :prev-button-props="previousButton"
       :next-button-props="nextButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>07</span><strong>设置里的常用操作</strong></div></template>
+      <template #header><div class="ta-onboarding-heading"><span>07</span><strong>SSH 配置</strong></div></template>
       <div class="ta-onboarding-settings-guide">
-        <p>面板已自动打开，按你的权限操作：</p>
-        <ol>
-          <li>普通用户：点“个人设置”→“SSH Key”，填写名称、粘贴私钥，点“添加 SSH key”；删除时点对应 Key 的“删除”。</li>
-          <li>应用管理员：点“应用管理”并先选应用；在“应用人员管理”添加成员，在“应用与版本库关联”关联版本库，在“工作空间管理”选择测试工作库、分支和目录后保存。</li>
-          <li>没有版本库先到“版本库管理”新增；保存工作区后，普通用户回到工作台左下角选择 workspace/version。“用户管理”无需操作。</li>
-        </ol>
+        <p>面板已自动打开，点击“个人设置”。填写 SSH Key 名称，粘贴私钥内容，点击“添加 SSH key”；不再使用时点击对应 Key 的“删除”。</p>
+      </div>
+    </ElTourStep>
+    <ElTourStep
+      v-if="appAdmin"
+      :target="settingsRepositoryTarget"
+      placement="right"
+      :prev-button-props="previousButton"
+      :next-button-props="nextButton"
+    >
+      <template #header><div class="ta-onboarding-heading"><span>08</span><strong>应用与版本库配置</strong></div></template>
+      <div class="ta-onboarding-settings-guide">
+        <p>点击“版本库管理”→“新增”，填写 Git 地址、名称、部署模式和版本库类型。然后点击“应用管理”，先选目标应用，在“应用人员管理”添加成员，再到“应用与版本库关联”点击“关联”。</p>
+      </div>
+    </ElTourStep>
+    <ElTourStep
+      v-if="appAdmin"
+      :target="settingsWorkspaceTarget"
+      placement="right"
+      :prev-button-props="previousButton"
+      :next-button-props="nextButton"
+    >
+      <template #header><div class="ta-onboarding-heading"><span>09</span><strong>应用工作区配置</strong></div></template>
+      <div class="ta-onboarding-settings-guide">
+        <p>点击“应用管理”并选应用，进入“工作空间管理”，选择测试工作库、分支、工作空间别名和目录后点击“保存”。保存成功后，普通用户回到工作台左下角选择 workspace/version。</p>
       </div>
     </ElTourStep>
     <ElTourStep
@@ -178,7 +215,7 @@ defineExpose({ restart });
       :prev-button-props="previousButton"
       :next-button-props="finishButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>08</span><strong>有疑问就打开用户手册</strong></div></template>
+      <template #header><div class="ta-onboarding-heading"><span>{{ appAdmin ? '10' : '08' }}</span><strong>有疑问就打开用户手册</strong></div></template>
       <p>手册提供操作说明和全文检索，还能直接问小宠物。即使没有建立主对话，小宠物也会依据手册回答。</p>
     </ElTourStep>
   </ElTour>

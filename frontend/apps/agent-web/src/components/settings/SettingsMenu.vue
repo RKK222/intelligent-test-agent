@@ -17,6 +17,13 @@ const emit = defineEmits<{
 type MenuItem = { key: MenuKey; label: string; icon: Component };
 const frontendBuildVersion = import.meta.env.VITE_TEST_AGENT_BUILD_VERSION || "-";
 
+function onboardingTarget(key: MenuKey) {
+  if (key === "appWorkspace") return "settings-app-workspace";
+  if (key === "repository") return "settings-repository";
+  if (key === "personal") return "settings-personal";
+  return "settings-user-management";
+}
+
 const items = computed<MenuItem[]>(() => {
   const menuItems: MenuItem[] = [];
   const roles = props.currentUser?.roles ?? [];
@@ -44,6 +51,7 @@ const items = computed<MenuItem[]>(() => {
         :class="['ta-settings-menu-item', { 'is-active': activeKey === item.key }]"
         role="button"
         tabindex="0"
+        :data-onboarding="onboardingTarget(item.key)"
         @click="emit('select', item.key)"
         @keydown.enter="emit('select', item.key)"
         @keydown.space.prevent="emit('select', item.key)"

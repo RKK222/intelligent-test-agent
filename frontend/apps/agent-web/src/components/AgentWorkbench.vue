@@ -6532,6 +6532,7 @@ async function handleLogout() {
   <FirstLoginGuide
     ref="firstLoginGuideRef"
     :user-id="authStore.currentUser?.userId"
+    :app-admin="isAppAdmin"
     @prepare="prepareFirstLoginGuide"
     @settings-step="handleFirstLoginGuideSettingsStep"
     @dismiss="dismissFirstLoginGuide"

@@ -161,6 +161,9 @@ describe("runtime management settings", () => {
     expect(appAdmin.getByText("应用管理")).toBeTruthy();
     expect(appAdmin.getByText("版本库管理")).toBeTruthy();
     expect(appAdmin.getByText("个人设置")).toBeTruthy();
+    expect(appAdmin.getByText("应用管理").closest("li")?.getAttribute("data-onboarding")).toBe("settings-app-workspace");
+    expect(appAdmin.getByText("版本库管理").closest("li")?.getAttribute("data-onboarding")).toBe("settings-repository");
+    expect(appAdmin.getByText("个人设置").closest("li")?.getAttribute("data-onboarding")).toBe("settings-personal");
     expect(appAdmin.queryByText("运行管理")).toBeNull();
   });
 
