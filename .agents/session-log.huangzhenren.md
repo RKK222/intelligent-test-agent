@@ -5,6 +5,28 @@
 
 ## Entries
 
+### 2026-07-18 - 点击引用资产库展示真实同步进度
+
+- Why:
+  - 引用配置左侧已初始化资产库卡片实际调用 `synchronizeReferenceRepository`，但现有步骤弹层只绑定右侧 `/verify` 且只接受 `operation=VERIFY_POINTERS`，导致卡片同步期间页面没有可见进度。
+- What:
+  - 将核验专用弹层状态抽象为 `SYNCHRONIZE/VERIFY_POINTERS` 操作感知状态机；卡片在同步 POST 返回前打开“创建同步任务 → 各服务器同步 → 汇总同步结果”，右侧按钮继续展示只读核验步骤，两者不互相追加请求。
+  - 同步模式逐服务器展示等待同步、同步中、已同步、同步失败、等待重试和离线延后；POST 失败可原地重试，活动任务可直接接管既有 generation，终态手动关闭后焦点回到触发卡片。
+  - 弹层继续按仓库、operation、请求序号和 generation fencing，复用既有 2 秒 `/status` 轮询、父弹层锁定和焦点限制；未改后端接口或状态语义。
+  - 同步前端工程/agent-web README、PACKAGE、引用配置用户手册以及方案/实施计划。
+- How:
+  - TDD 先增加 deferred 同步请求回归，确认原实现只因缺少 `资产库同步进度` 失败，再抽象进度状态、动态文案和触发焦点；补充同步请求失败重试、活动同步接管、未初始化兼容和卡片焦点恢复测试。
+  - 全量校验首次并行执行时，`typecheck/lint` 同时写 VitePress `.temp` 引发临时模块竞争，agent-chat 异步 Markdown 用例也在资源竞争下超时；两项独立复跑及全量顺序复跑均通过，未修改无关代码。
+- Result:
+  - 引用配置组件测试 45/45 通过；前端全量 Vitest 79 个文件通过（1309 passed / 1 skipped），13 个项目 typecheck、lint、用户手册和生产 build 通过，构建仅保留既有大 chunk 提示。
+  - 仅改变前端交互和稳定文档；不涉及 HTTP API、RunEvent/广播、数据库、后端、manager、generated SDK、环境配置或安全权限。Playwright 仍沿用上一条记录中的 onboarding v2/v7 既有基线，本次未扩大范围修改。
+- Verification:
+  - `corepack pnpm exec vitest run apps/agent-web/tests/reference-configuration-dialog.test.ts`
+  - `corepack pnpm test`、`corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm build`
+  - `git diff --check`、全部 session log 回顾和只读差异审查。
+- Next:
+  - 在真实多服务器环境点击左侧资产库卡片，人工确认长耗时同步的逐节点状态与后台实际 HEAD 收敛一致；Playwright 引导基线修复继续作为独立任务。
+
 ### 2026-07-18 - Service 日志切面改为仅在异常时打印
 
 - Why:
