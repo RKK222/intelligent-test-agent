@@ -40,7 +40,7 @@ describe("FirstLoginGuide", () => {
     expect(wrapper.getComponent(tourStub).props("contentStyle")).toEqual({
       width: "min(320px, calc(100vw - 32px))"
     });
-    expect(wrapper.findAll("article")).toHaveLength(10);
+    expect(wrapper.findAll("article")).toHaveLength(12);
     expect(wrapper.findAll("article").map((step) => step.attributes("data-target"))).toEqual([
       undefined,
       '[data-onboarding="application"]',
@@ -50,7 +50,9 @@ describe("FirstLoginGuide", () => {
       '[data-onboarding="pet"]',
       '[data-onboarding="settings-personal"]',
       '[data-onboarding="settings-repository"]',
-      '[data-onboarding="settings-app-workspace"]',
+      '[data-onboarding="settings-app-members"]',
+      '[data-onboarding="settings-app-repositories"]',
+      '[data-onboarding="settings-app-workspaces"]',
       '[data-onboarding="manual"]'
     ]);
     expect(wrapper.findAll("article")[0]?.attributes("data-target")).toBeUndefined();
@@ -58,37 +60,48 @@ describe("FirstLoginGuide", () => {
     expect(wrapper.text()).toContain("一定要选中 workspace");
     expect(wrapper.text()).toContain("小地球");
     expect(wrapper.text()).toContain("第一条消息会建立对话");
-    expect(wrapper.text()).toContain("10");
+    expect(wrapper.text()).toContain("12");
     expect(wrapper.text()).not.toContain("超级管理员");
     const sshStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-personal\\\"]"]');
     expect(sshStep.text()).toContain("粘贴私钥");
     const repositoryStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-repository\\\"]"]');
-    expect(repositoryStep.text()).toContain("应用人员管理");
     expect(repositoryStep.text()).toContain("版本库管理");
     expect(repositoryStep.text()).toContain("部署模式");
     expect(repositoryStep.text()).toContain("版本库英文名称");
-    expect(repositoryStep.text()).toContain("应用与版本库关联");
-    expect(repositoryStep.text()).toContain("点击“关联”");
-    const workspaceStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-app-workspace\\\"]"]');
-    expect(workspaceStep.text()).toContain("类型为“测试工作库”");
-    expect(workspaceStep.text()).toContain("工作空间别名");
-    expect(workspaceStep.text()).toContain("目录树");
-    expect(workspaceStep.text()).toContain("feature_testagent_yyyymmdd");
-    expect(workspaceStep.text()).toContain("workspace/version");
+    const membersStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-app-members\\\"]"]');
+    expect(membersStep.text()).toContain("添加成员");
+    const repositoriesStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-app-repositories\\\"]"]');
+    expect(repositoriesStep.text()).toContain("选择版本库");
+    expect(repositoriesStep.text()).toContain("点击“关联”");
+    const workspacesStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-app-workspaces\\\"]"]');
+    expect(workspacesStep.text()).toContain("类型为“测试工作库”");
+    expect(workspacesStep.text()).toContain("工作空间别名");
+    expect(workspacesStep.text()).toContain("目录树");
+    expect(workspacesStep.text()).toContain("feature_testagent_yyyymmdd");
+    expect(workspacesStep.text()).toContain("先选择 workspace，再选择版本");
 
     wrapper.getComponent(tourStub).vm.$emit("update:current", 6);
     await wrapper.vm.$nextTick();
-    expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([true]);
+    expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([true, "personal"]);
+    wrapper.getComponent(tourStub).vm.$emit("update:current", 7);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([true, "repository"]);
     wrapper.getComponent(tourStub).vm.$emit("update:current", 8);
     await wrapper.vm.$nextTick();
-    expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([true]);
+    expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([true, "members"]);
     wrapper.getComponent(tourStub).vm.$emit("update:current", 9);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([true, "repositories"]);
+    wrapper.getComponent(tourStub).vm.$emit("update:current", 10);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([true, "workspaces"]);
+    wrapper.getComponent(tourStub).vm.$emit("update:current", 11);
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([false]);
 
     wrapper.getComponent(tourStub).vm.$emit("finish");
     await wrapper.vm.$nextTick();
-    expect(window.localStorage.getItem("test-agent.onboarding.v6:usr_guide_1")).toBe("seen");
+    expect(window.localStorage.getItem("test-agent.onboarding.v7:usr_guide_1")).toBe("seen");
     expect(wrapper.emitted("finish")).toHaveLength(1);
 
     const second = mountGuide();
@@ -101,7 +114,7 @@ describe("FirstLoginGuide", () => {
       callback(0);
       return 1;
     });
-    window.localStorage.setItem("test-agent.onboarding.v6:usr_guide_1", "seen");
+    window.localStorage.setItem("test-agent.onboarding.v7:usr_guide_1", "seen");
     const wrapper = mountGuide();
 
     (wrapper.vm as unknown as { restart: () => void }).restart();

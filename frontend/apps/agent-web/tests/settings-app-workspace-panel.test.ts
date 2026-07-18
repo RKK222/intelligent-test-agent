@@ -121,9 +121,9 @@ const ElRadioGroupStub = defineComponent({
 
 const ElRadioButtonStub = defineComponent({
   props: ["value"],
-  setup(props, { slots }) {
+  setup(props, { attrs, slots }) {
     const selectRadio = inject<(value: string) => void>(radioGroupKey);
-    return () => h("button", { type: "button", onClick: () => selectRadio?.(String(props.value)) }, slots.default?.());
+    return () => h("button", { type: "button", ...attrs, onClick: () => selectRadio?.(String(props.value)) }, slots.default?.());
   }
 });
 
@@ -232,9 +232,10 @@ function getTreePathButton(container: ParentNode, path: string) {
   return getTreePathElement(container, path)!.closest("button") as HTMLButtonElement;
 }
 
-function renderPanel(api = createApi(), roles = ["APP_ADMIN"]) {
+function renderPanel(api = createApi(), roles = ["APP_ADMIN"], initialAppTab?: "members" | "repositories" | "workspaces") {
   return render(SettingsAppWorkspacePanel, {
     props: {
+      initialAppTab,
       currentUser: {
         userId: "usr_admin",
         username: "admin",
@@ -315,6 +316,9 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await findByText("应用人员管理");
     const tabs = Array.from(container.querySelectorAll(".ta-sub-tab-group button")).map((item) => item.textContent?.trim());
     expect(tabs).toEqual(["应用人员管理", "应用与版本库关联", "工作空间管理"]);
+    expect(container.querySelector('[data-onboarding="settings-app-members"]')?.textContent).toContain("应用人员管理");
+    expect(container.querySelector('[data-onboarding="settings-app-repositories"]')?.textContent).toContain("应用与版本库关联");
+    expect(container.querySelector('[data-onboarding="settings-app-workspaces"]')?.textContent).toContain("工作空间管理");
 
     await fireEvent.click(getByText("应用与版本库关联"));
 
@@ -330,6 +334,14 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(queryByText("新增版本库")).toBeNull();
     expect(queryByText("应用与代码库关联")).toBeNull();
     expect(queryByText("新增代码库")).toBeNull();
+  });
+
+  it("opens the tab requested by the onboarding guide", async () => {
+    const { findByText, getByText, queryByText } = renderPanel(createApi(), ["APP_ADMIN"], "workspaces");
+
+    expect(await findByText("创建工作空间")).toBeTruthy();
+    expect(getByText("工作空间管理")).toBeTruthy();
+    expect(queryByText("添加成员")).toBeNull();
   });
 
   it("formats repository select options with name and URL and exposes create option", async () => {

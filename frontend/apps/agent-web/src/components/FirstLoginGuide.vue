@@ -2,8 +2,10 @@
 import { nextTick, ref, watch } from "vue";
 import { ElTour, ElTourStep } from "element-plus";
 
-// v6 将设置流程拆成 SSH、应用与版本库、应用工作区三个独立步骤。
-const GUIDE_VERSION = "v6";
+// v7 将应用管理员设置流程拆到真实的版本库入口和应用管理页签。
+const GUIDE_VERSION = "v7";
+
+type SettingsGuideTarget = "personal" | "repository" | "members" | "repositories" | "workspaces";
 
 const props = withDefaults(defineProps<{
   userId?: string | null;
@@ -16,14 +18,16 @@ const emit = defineEmits<{
   (event: "prepare"): void;
   (event: "dismiss"): void;
   (event: "finish"): void;
-  (event: "settings-step", open: boolean): void;
+  (event: "settings-step", open: boolean, target?: SettingsGuideTarget): void;
 }>();
 
 const open = ref(false);
 const current = ref(0);
 const settingsPersonalTarget = ref<string | HTMLElement>('[data-onboarding="settings-personal"]');
 const settingsRepositoryTarget = ref<string | HTMLElement>('[data-onboarding="settings-repository"]');
-const settingsWorkspaceTarget = ref<string | HTMLElement>('[data-onboarding="settings-app-workspace"]');
+const settingsMembersTarget = ref<string | HTMLElement>('[data-onboarding="settings-app-members"]');
+const settingsRepositoriesTarget = ref<string | HTMLElement>('[data-onboarding="settings-app-repositories"]');
+const settingsWorkspacesTarget = ref<string | HTMLElement>('[data-onboarding="settings-app-workspaces"]');
 let scheduledUserId: string | null = null;
 
 const previousButton = { children: "上一步" };
@@ -80,21 +84,55 @@ function restart() {
   void show();
 }
 
-async function refreshSettingsTargets() {
-  await nextTick();
-  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-  // 设置弹窗是异步挂载的；拿到真实 DOM 后再替换 selector，避免 Tour 在左上角生成无目标气泡。
-  settingsPersonalTarget.value = document.querySelector('[data-onboarding="settings-personal"]') ?? '[data-onboarding="settings-personal"]';
-  settingsRepositoryTarget.value = document.querySelector('[data-onboarding="settings-repository"]') ?? '[data-onboarding="settings-repository"]';
-  settingsWorkspaceTarget.value = document.querySelector('[data-onboarding="settings-app-workspace"]') ?? '[data-onboarding="settings-app-workspace"]';
+function settingsGuideTargetFor(step: number): SettingsGuideTarget | undefined {
+  if (step === 6) return "personal";
+  if (!props.appAdmin) return undefined;
+  if (step === 7) return "repository";
+  if (step === 8) return "members";
+  if (step === 9) return "repositories";
+  if (step === 10) return "workspaces";
+  return undefined;
+}
+
+function settingsTargetSelector(target: SettingsGuideTarget) {
+  if (target === "personal") return '[data-onboarding="settings-personal"]';
+  if (target === "repository") return '[data-onboarding="settings-repository"]';
+  if (target === "members") return '[data-onboarding="settings-app-members"]';
+  if (target === "repositories") return '[data-onboarding="settings-app-repositories"]';
+  return '[data-onboarding="settings-app-workspaces"]';
+}
+
+function setSettingsTarget(target: SettingsGuideTarget, element: Element | null) {
+  const selector = settingsTargetSelector(target);
+  const value: string | HTMLElement = element instanceof HTMLElement ? element : selector;
+  if (target === "personal") settingsPersonalTarget.value = value;
+  else if (target === "repository") settingsRepositoryTarget.value = value;
+  else if (target === "members") settingsMembersTarget.value = value;
+  else if (target === "repositories") settingsRepositoriesTarget.value = value;
+  else settingsWorkspacesTarget.value = value;
+}
+
+async function refreshSettingsTarget(target: SettingsGuideTarget) {
+  const selector = settingsTargetSelector(target);
+  // 设置弹窗和应用管理数据是异步挂载的；轮询真实 Tab，避免 Tour 在左上角生成无目标气泡。
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await nextTick();
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    const element = document.querySelector(selector);
+    if (element) {
+      setSettingsTarget(target, element);
+      return;
+    }
+  }
+  setSettingsTarget(target, null);
 }
 
 watch(current, async (step) => {
-  // 设置相关步骤需要让用户看到设置弹窗中的真实导航；返回上一步或进入手册时关闭它。
-  const lastSettingsStep = props.appAdmin ? 8 : 6;
-  const settingsStep = step >= 6 && step <= lastSettingsStep;
-  emit("settings-step", settingsStep);
-  if (settingsStep) await refreshSettingsTargets();
+  // 设置相关步骤需要切换到对应真实菜单/页签；返回上一步或进入手册时关闭它。
+  const target = settingsGuideTargetFor(step);
+  if (target) emit("settings-step", true, target);
+  else emit("settings-step", false);
+  if (target !== undefined) await refreshSettingsTarget(target);
 });
 
 watch(
@@ -192,57 +230,67 @@ defineExpose({ restart });
       :prev-button-props="previousButton"
       :next-button-props="nextButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>08</span><strong>应用与版本库配置</strong></div></template>
+      <template #header><div class="ta-onboarding-heading"><span>08</span><strong>版本库管理</strong></div></template>
       <div class="ta-onboarding-settings-guide">
-        <p>请按下面 3 个页签/入口完成配置；没有版本库时，先做第 1 项。</p>
-        <section>
-          <h4>1. “版本库管理”入口</h4>
-          <ol>
-            <li>点击左侧“版本库管理”→“新增”。</li>
-            <li>选择部署模式：外部部署填写完整 Git URL；内部部署保留页面显示的 SSH 前缀，只填写主机、端口和仓库路径。</li>
-            <li>填写“版本库名称”“版本库英文名称”，选择“版本库类型”；只有“测试工作库”能在第 09 步创建 workspace。</li>
-            <li>点击“新增”。已有版本库可点“编辑”修改名称和英文名称，地址、模式和类型只读。</li>
-          </ol>
-        </section>
-        <section>
-          <h4>2. “应用管理”→“应用人员管理”</h4>
-          <ol>
-            <li>顶部“应用选择”先选目标应用。</li>
-            <li>在“添加成员”输入用户 ID、用户名或统一认证号，从候选中选中后点击“添加”；空输入不会查询。</li>
-            <li>移除成员时点击已有成员右侧的删除按钮，并在页面内确认。</li>
-          </ol>
-        </section>
-        <section>
-          <h4>3. “应用管理”→“应用与版本库关联”</h4>
-          <ol>
-            <li>切换到该页签，选择刚登记的版本库，点击“关联”。</li>
-            <li>已关联的版本库会列在下方；误关联时点击“解除”并确认。</li>
-            <li>关联列表为空时，回到第 1 项检查版本库是否已新增。</li>
-          </ol>
-        </section>
+        <p>这里只登记 Git 版本库，先点击“新增”。</p>
+        <ol>
+          <li>选择“部署模式”：外部部署填写完整 Git URL；内部部署保留页面显示的 SSH 前缀，只填写主机、端口和仓库路径。</li>
+          <li>填写“版本库名称”“版本库英文名称”，选择“版本库类型”。只有“测试工作库”能在后面的工作空间页签创建 workspace。</li>
+          <li>点击“新增”。已有版本库可点“编辑”修改名称和英文名称，地址、模式和类型只读。</li>
+        </ol>
       </div>
     </ElTourStep>
     <ElTourStep
       v-if="appAdmin"
-      :target="settingsWorkspaceTarget"
-      placement="right"
+      :target="settingsMembersTarget"
+      placement="bottom-start"
       :prev-button-props="previousButton"
       :next-button-props="nextButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>09</span><strong>应用工作区配置</strong></div></template>
+      <template #header><div class="ta-onboarding-heading"><span>09</span><strong>应用人员管理</strong></div></template>
       <div class="ta-onboarding-settings-guide">
-        <p>先在顶部“应用选择”选中目标应用，再进入“工作空间管理”页签，按字段填写：</p>
-        <section>
-          <h4>“工作空间管理”页签</h4>
-          <ol>
-            <li>“已关联版本库”：只选择类型为“测试工作库”的版本库；下拉为空时先完成第 08 步。</li>
-            <li>“分支”：选择符合 <code>feature_testagent_yyyymmdd</code> 规则的分支；分支加载后才会出现目录树。</li>
-            <li>“工作空间别名”：默认是 <code>ai-test</code>，同一应用下不能与已有 workspace 重名。</li>
-            <li>“目录树”：只选择当前应用同名目录下的一级子目录；文件不能选，必要时可在应用目录下新增一级目录。</li>
-            <li>点击“保存”，等待“校验参数、保存配置、解析版本和分支、下载代码、创建运行态工作区、完成”全部成功。</li>
-          </ol>
-        </section>
-        <p>创建成功后回到工作台左下角，先选择 workspace，再选择版本；只选应用、不选 workspace/version 时，左侧文件树仍会是空白。</p>
+        <p>先确认顶部“应用选择”已选目标应用。</p>
+        <ol>
+          <li>在“添加成员”输入用户 ID、用户名或统一认证号。</li>
+          <li>从候选下拉中选中用户，再点击“添加”；空输入不会查询。</li>
+          <li>移除成员时点击“已有成员”右侧删除按钮，并在页面内确认。</li>
+        </ol>
+      </div>
+    </ElTourStep>
+    <ElTourStep
+      v-if="appAdmin"
+      :target="settingsRepositoriesTarget"
+      placement="bottom-start"
+      :prev-button-props="previousButton"
+      :next-button-props="nextButton"
+    >
+      <template #header><div class="ta-onboarding-heading"><span>10</span><strong>应用与版本库关联</strong></div></template>
+      <div class="ta-onboarding-settings-guide">
+        <p>这是“应用管理”里的关联页签，不是左侧“版本库管理”入口。</p>
+        <ol>
+          <li>顶部“应用选择”先选目标应用。</li>
+          <li>在“选择版本库”下拉框选择刚登记的版本库，点击“关联”。</li>
+          <li>已关联版本库会显示在下方；误关联时点击“解除”并确认。列表为空时回到第 08 步。</li>
+        </ol>
+      </div>
+    </ElTourStep>
+    <ElTourStep
+      v-if="appAdmin"
+      :target="settingsWorkspacesTarget"
+      placement="bottom-start"
+      :prev-button-props="previousButton"
+      :next-button-props="nextButton"
+    >
+      <template #header><div class="ta-onboarding-heading"><span>11</span><strong>工作空间管理</strong></div></template>
+      <div class="ta-onboarding-settings-guide">
+        <ol>
+          <li>“已关联版本库”只选择类型为“测试工作库”的版本库；下拉为空时先完成第 10 步。</li>
+          <li>“分支”选择符合 <code>feature_testagent_yyyymmdd</code> 规则的分支，加载后才会出现目录树。</li>
+          <li>“工作空间别名”默认是 <code>ai-test</code>，同一应用下不能重名。</li>
+          <li>“目录树”只选择当前应用同名目录下的一级子目录；文件不能选，必要时可新增一级目录。</li>
+          <li>点击“保存”，等待校验、保存配置、解析版本、下载代码、创建运行态工作区和完成全部成功。</li>
+          <li>回工作台左下角，先选择 workspace，再选择版本；否则文件树仍为空白。</li>
+        </ol>
       </div>
     </ElTourStep>
     <ElTourStep
@@ -251,7 +299,7 @@ defineExpose({ restart });
       :prev-button-props="previousButton"
       :next-button-props="finishButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>{{ appAdmin ? '10' : '08' }}</span><strong>有疑问就打开用户手册</strong></div></template>
+      <template #header><div class="ta-onboarding-heading"><span>{{ appAdmin ? '12' : '08' }}</span><strong>有疑问就打开用户手册</strong></div></template>
       <p>手册提供操作说明和全文检索，还能直接问小宠物。即使没有建立主对话，小宠物也会依据手册回答。</p>
     </ElTourStep>
   </ElTour>
@@ -301,10 +349,6 @@ p {
   max-height: min(42vh, 260px);
   overflow-y: auto;
   padding-right: 2px;
-}
-
-.ta-onboarding-settings-guide section + section {
-  margin-top: 10px;
 }
 
 .ta-onboarding-settings-guide h4 {

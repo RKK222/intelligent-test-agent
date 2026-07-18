@@ -11,6 +11,8 @@ const props = defineProps<{
   open: boolean;
   currentUser: CurrentUser | null;
   initialAppId?: string;
+  initialMenuKey?: MenuKey;
+  initialAppTab?: "members" | "repositories" | "workspaces";
 }>();
 
 const emit = defineEmits<{
@@ -32,9 +34,20 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      activeKey.value = defaultMenuKey.value;
+      activeKey.value = props.initialMenuKey ?? defaultMenuKey.value;
       autoOpenCreate.value = false;
       refreshKey.value += 1;
+    }
+  }
+);
+
+watch(
+  () => props.initialMenuKey,
+  (menuKey) => {
+    // 新手引导在同一个设置弹窗内切换真实页签，不重新挂载弹窗。
+    if (props.open && menuKey) {
+      activeKey.value = menuKey;
+      autoOpenCreate.value = false;
     }
   }
 );
@@ -93,7 +106,15 @@ function selectMenu(key: MenuKey) {
     <div class="ta-settings-shell">
       <SettingsMenu :active-key="activeKey" :current-user="currentUser" @select="selectMenu" />
       <div class="ta-settings-content">
-        <SettingsPanel :active-key="activeKey" :current-user="currentUser" :auto-open-create="autoOpenCreate" :initial-app-id="props.initialAppId" :refresh-key="refreshKey" @switch-menu="handleSwitchMenu" />
+        <SettingsPanel
+          :active-key="activeKey"
+          :current-user="currentUser"
+          :auto-open-create="autoOpenCreate"
+          :initial-app-id="props.initialAppId"
+          :initial-app-tab="props.initialAppTab"
+          :refresh-key="refreshKey"
+          @switch-menu="handleSwitchMenu"
+        />
       </div>
     </div>
     <template #footer>

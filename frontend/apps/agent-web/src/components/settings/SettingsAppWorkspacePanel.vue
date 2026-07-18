@@ -35,6 +35,7 @@ type WorkspaceTreeNode = Omit<RepositoryTreeNode, "children"> & {
   children: WorkspaceTreeNode[];
   directoryNew?: boolean;
 };
+type AppTab = "members" | "repositories" | "workspaces";
 
 const WorkspaceDirectoryTree = defineComponent({
   name: "WorkspaceDirectoryTree",
@@ -114,6 +115,7 @@ const WorkspaceDirectoryTree = defineComponent({
 const props = defineProps<{
   currentUser: CurrentUser | null;
   initialAppId?: string;
+  initialAppTab?: AppTab;
   refreshKey?: number;
 }>();
 
@@ -123,7 +125,7 @@ const emit = defineEmits<{
 
 const api = inject<BackendApiClient>("api")!;
 
-const appTab = ref<"members" | "repositories" | "workspaces">("members");
+const appTab = ref<AppTab>("members");
 const loading = ref(false);
 const errorMessage = ref("");
 const pendingDangerAction = ref<PendingDangerAction | null>(null);
@@ -206,6 +208,14 @@ const canAddWorkspaceDirectory = computed(() => {
   if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return false;
   return Boolean(findTreeNode(repositoryTree.value, selectedAppName.value));
 });
+
+watch(
+  () => props.initialAppTab,
+  (tab) => {
+    if (tab) appTab.value = tab;
+  },
+  { immediate: true }
+);
 const canSaveWorkspace = computed(() => {
   if (loading.value || !workspaceRepositoryId.value || !workspaceBranch.value || !workspaceDirectory.value) return false;
   if (customBranchError.value || workspaceAliasDuplicate.value || !workspaceAlias.value) return false;
@@ -854,9 +864,9 @@ onBeforeUnmount(() => {
       <!-- 子选项卡 -->
       <div class="ta-sub-tabs" v-if="selectedAppId">
         <el-radio-group v-model="appTab" class="ta-sub-tab-group">
-          <el-radio-button value="members">应用人员管理</el-radio-button>
-          <el-radio-button value="repositories">应用与版本库关联</el-radio-button>
-          <el-radio-button value="workspaces">工作空间管理</el-radio-button>
+          <el-radio-button value="members" data-onboarding="settings-app-members">应用人员管理</el-radio-button>
+          <el-radio-button value="repositories" data-onboarding="settings-app-repositories">应用与版本库关联</el-radio-button>
+          <el-radio-button value="workspaces" data-onboarding="settings-app-workspaces">工作空间管理</el-radio-button>
         </el-radio-group>
       </div>
 

@@ -13,6 +13,7 @@ const props = defineProps<{
   currentUser: CurrentUser | null;
   autoOpenCreate?: boolean;
   initialAppId?: string;
+  initialAppTab?: "members" | "repositories" | "workspaces";
   refreshKey?: number;
 }>();
 
@@ -47,7 +48,15 @@ const current = computed<PanelDef>(() => panels[effectiveKey.value] ?? panels.pe
       <h3 class="ta-settings-panel-title">{{ current.title }}</h3>
     </header>
     <div class="ta-settings-panel-body">
-      <component :is="current.component" :current-user="currentUser" :auto-open-create="autoOpenCreate" :initial-app-id="props.initialAppId" :refresh-key="props.refreshKey" @switch-menu="(key: string) => emit('switch-menu', key)" />
+      <component
+        :is="current.component"
+        :current-user="currentUser"
+        :auto-open-create="autoOpenCreate"
+        :initial-app-id="props.initialAppId"
+        :initial-app-tab="props.initialAppTab"
+        :refresh-key="props.refreshKey"
+        @switch-menu="(key: string) => emit('switch-menu', key)"
+      />
     </div>
   </div>
 </template>

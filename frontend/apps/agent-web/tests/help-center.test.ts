@@ -155,6 +155,7 @@ describe("help center", () => {
     expect(settings).toContain("应用人员管理");
     expect(settings).toContain("应用与版本库关联");
     expect(settings).toContain("工作空间管理");
+    expect(settings).toContain("08“版本库管理”、09“应用人员管理”、10“应用与版本库关联”、11“工作空间管理”");
     expect(settings).toContain("超级管理员专属的“用户管理”");
   });
 });

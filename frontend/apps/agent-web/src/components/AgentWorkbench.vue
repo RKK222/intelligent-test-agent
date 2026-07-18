@@ -233,7 +233,7 @@ const isAppAdmin = computed(() =>
   isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true
 );
 
-const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v6";
+const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v7";
 const firstLoginGuideActive = ref(true);
 
 function firstLoginGuideStorageKey(userId: string) {
@@ -430,6 +430,8 @@ let lastDuration: string | undefined;
 let lastTokens = 0;
 const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
+const firstLoginGuideSettingsMenu = ref<"appWorkspace" | "repository" | "personal">("appWorkspace");
+const firstLoginGuideSettingsTab = ref<"members" | "repositories" | "workspaces" | undefined>();
 const helpCenterOpen = ref(false);
 const helpCenterTopic = ref("getting-started");
 const firstLoginGuideRef = ref<InstanceType<typeof FirstLoginGuide> | null>(null);
@@ -4822,12 +4824,27 @@ function openHelpCenter(topic = "getting-started") {
 function prepareFirstLoginGuide() {
   firstLoginGuideActive.value = true;
   settingsOpen.value = false;
+  firstLoginGuideSettingsMenu.value = "appWorkspace";
+  firstLoginGuideSettingsTab.value = undefined;
   leftPanelOpen.value = true;
   rightPanelOpen.value = true;
   centerMode.value = "editor";
 }
 
-function handleFirstLoginGuideSettingsStep(open: boolean) {
+function handleFirstLoginGuideSettingsStep(
+  open: boolean,
+  target?: "personal" | "repository" | "members" | "repositories" | "workspaces"
+) {
+  if (target === "personal") {
+    firstLoginGuideSettingsMenu.value = "personal";
+    firstLoginGuideSettingsTab.value = undefined;
+  } else if (target === "repository") {
+    firstLoginGuideSettingsMenu.value = "repository";
+    firstLoginGuideSettingsTab.value = undefined;
+  } else if (target) {
+    firstLoginGuideSettingsMenu.value = "appWorkspace";
+    firstLoginGuideSettingsTab.value = target;
+  }
   settingsOpen.value = open;
 }
 
@@ -6514,7 +6531,14 @@ async function handleLogout() {
     @saved="refreshWorkspaceViewAfterReferenceSaved"
   />
 
-  <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" :initial-app-id="selectedAppId" @close="settingsOpen = false" />
+  <SettingsDialog
+    :open="settingsOpen"
+    :current-user="authStore.currentUser"
+    :initial-app-id="selectedAppId"
+    :initial-menu-key="firstLoginGuideActive ? firstLoginGuideSettingsMenu : undefined"
+    :initial-app-tab="firstLoginGuideActive ? firstLoginGuideSettingsTab : undefined"
+    @close="settingsOpen = false"
+  />
 
   <HelpCenterDialog
     :open="helpCenterOpen"
