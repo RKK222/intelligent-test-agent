@@ -1,5 +1,6 @@
 package com.enterprise.testagent.persistence.mybatis;
 
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
@@ -33,10 +34,13 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     }
 
     @Override
-    public Optional<PublicAgentConfigRolloutPreparation> findPreparing(String linuxServerId) {
-        return Optional.ofNullable(mapper.findPreparing(linuxServerId))
+    public Optional<PublicAgentConfigRolloutPreparation> findPreparing(
+            String linuxServerId,
+            AgentConfigRolloutScope scope) {
+        return Optional.ofNullable(mapper.findPreparing(linuxServerId, scope.name()))
                 .map(row -> new PublicAgentConfigRolloutPreparation(
-                        row.rolloutId(), row.branch(), row.expectedCommitHash(), row.previousCommitHash(),
+                        row.rolloutId(), AgentConfigRolloutScope.valueOf(row.scope()), row.scopeKey(),
+                        row.branch(), row.expectedCommitHash(), row.previousCommitHash(),
                         row.initiatedByUserId(),
                         row.initiatedLinuxServerId(), row.traceId(), row.createdAt()));
     }
@@ -44,6 +48,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     @Override
     public void createRollout(
             String rolloutId,
+            AgentConfigRolloutScope scope,
+            String scopeKey,
             String branch,
             String expectedCommitHash,
             String previousCommitHash,
@@ -53,6 +59,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
             Instant now) {
         mapper.insertRollout(
                 rolloutId,
+                scope.name(),
+                scopeKey,
                 branch,
                 expectedCommitHash,
                 previousCommitHash,
@@ -115,9 +123,10 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     @Transactional
     public Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(
             String linuxServerId,
+            AgentConfigRolloutScope scope,
             Instant now,
             Instant leaseUntil) {
-        return mapper.findClaimableServerSyncs(linuxServerId, now, 1).stream()
+        return mapper.findClaimableServerSyncs(linuxServerId, scope.name(), now, 1).stream()
                 .findFirst()
                 .flatMap(row -> {
                     String leaseToken = com.enterprise.testagent.common.id.RuntimeIdGenerator
@@ -128,7 +137,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                         return Optional.empty();
                     }
                     return Optional.of(new PublicAgentConfigRolloutSyncRequest(
-                            row.rolloutId(), row.branch(), row.commitHash(), row.initiatedByUserId(), row.traceId(),
+                            row.rolloutId(), AgentConfigRolloutScope.valueOf(row.scope()), row.scopeKey(),
+                            row.branch(), row.commitHash(), row.initiatedByUserId(), row.traceId(),
                             row.retryCount(), leaseUntil, leaseToken));
                 });
     }

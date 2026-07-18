@@ -971,16 +971,19 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void workspaceDiffOnlyIncludesApplicationAgentAndSkillFiles() {
+    void workspaceDiffIncludesApplicationRuntimeConfigAgentAndSkillFiles() {
         Path workspaceRoot = root.resolve("project/F-COSS/workspace");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         git.statusByPathspec.put(
                 ".opencode",
                 """
                  M F-COSS/workspace/02-设计/Test Material.md
+                ?? F-COSS/workspace/.opencode/opencode.jsonc
                  M "F-COSS/workspace/.opencode/agents/review rule.md"
                  M F-COSS/workspace/.opencode/skills/payment/SKILL.md
+                ?? F-COSS/workspace/.opencode/package.json
                 """);
+        git.diffByFile.put(".opencode/opencode.jsonc", "diff --git a/.opencode/opencode.jsonc b/.opencode/opencode.jsonc\n");
         git.diffByFile.put(".opencode/agents/review rule.md", "diff --git a/.opencode/agents/review rule.md b/.opencode/agents/review rule.md\n");
         git.diffByFile.put(".opencode/skills/payment/SKILL.md", "diff --git a/.opencode/skills/payment/SKILL.md b/.opencode/skills/payment/SKILL.md\n");
         AgentConfigApplicationService service = service(
@@ -1004,9 +1007,12 @@ class AgentConfigApplicationServiceTest {
         AgentConfigResponses.AgentConfigDiffResponse diff = service.workspaceDiff("wrk_project", null);
 
         assertThat(diff.files()).extracting(AgentConfigResponses.AgentConfigDiffFileResponse::path)
-                .containsExactly("agents/review rule.md", "skills/payment/SKILL.md");
+                .containsExactly("opencode.jsonc", "agents/review rule.md", "skills/payment/SKILL.md");
         assertThat(git.lastStatusPathspec).isEqualTo(".opencode");
-        assertThat(git.diffFiles).containsExactly(".opencode/agents/review rule.md", ".opencode/skills/payment/SKILL.md");
+        // 未跟踪文件由 collectDiffFiles 直接合成响应，不会调用 git diff；已跟踪文件仍逐个读取 patch。
+        assertThat(git.diffFiles).containsExactly(
+                ".opencode/agents/review rule.md",
+                ".opencode/skills/payment/SKILL.md");
     }
 
     @Test
@@ -1440,9 +1446,16 @@ class AgentConfigApplicationServiceTest {
                         "linux-1",
                         "trace_workspace")));
 
-        service.workspaceStage("wrk_project", List.of("agents/review.md", "skills/payment/SKILL.md"), null, ADMIN);
+        service.workspaceStage(
+                "wrk_project",
+                List.of("opencode.jsonc", "agents/review.md", "skills/payment/SKILL.md", "package.json"),
+                null,
+                ADMIN);
 
-        assertThat(git.stagedFiles).containsExactly(".opencode/agents/review.md", ".opencode/skills/payment/SKILL.md");
+        assertThat(git.stagedFiles).containsExactly(
+                ".opencode/opencode.jsonc",
+                ".opencode/agents/review.md",
+                ".opencode/skills/payment/SKILL.md");
     }
 
     @Test

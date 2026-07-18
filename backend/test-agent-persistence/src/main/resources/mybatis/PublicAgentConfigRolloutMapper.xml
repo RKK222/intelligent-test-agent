@@ -4,6 +4,8 @@
     <resultMap id="SyncRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutSyncRow">
         <constructor>
             <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="config_scope" javaType="java.lang.String"/>
+            <arg column="scope_key" javaType="java.lang.String"/>
             <arg column="branch" javaType="java.lang.String"/>
             <arg column="commit_hash" javaType="java.lang.String"/>
             <arg column="initiated_by_user_id" javaType="java.lang.String"/>
@@ -16,6 +18,8 @@
     <resultMap id="PreparationRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutPreparationRow">
         <constructor>
             <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="config_scope" javaType="java.lang.String"/>
+            <arg column="scope_key" javaType="java.lang.String"/>
             <arg column="branch" javaType="java.lang.String"/>
             <arg column="commit_hash" javaType="java.lang.String"/>
             <arg column="previous_commit_hash" javaType="java.lang.String"/>
@@ -71,10 +75,11 @@
     </select>
 
     <select id="findPreparing" resultMap="PreparationRowMap">
-        select rollout_id, branch, commit_hash, previous_commit_hash, initiated_by_user_id,
+        select rollout_id, config_scope, scope_key, branch, commit_hash, previous_commit_hash, initiated_by_user_id,
                initiated_linux_server_id, trace_id, created_at
         from public_agent_config_rollouts
         where status = 'PREPARING' and initiated_linux_server_id = #{linuxServerId}
+          and config_scope = #{scope}
         order by created_at
         limit 1
     </select>
@@ -87,12 +92,13 @@
     </select>
 
     <select id="findClaimableServerSyncs" resultMap="SyncRowMap">
-        select r.rollout_id, r.branch, r.commit_hash, r.initiated_by_user_id, r.trace_id,
+        select r.rollout_id, r.config_scope, r.scope_key, r.branch, r.commit_hash, r.initiated_by_user_id, r.trace_id,
                s.retry_count, s.lease_until, s.lease_token
         from public_agent_config_rollouts r
         join public_agent_config_rollout_servers s on s.rollout_id = r.rollout_id
         where r.status = 'DRAINING'
           and s.linux_server_id = #{linuxServerId}
+          and r.config_scope = #{scope}
           and ((s.status in ('PENDING', 'RETRY_WAIT') and s.next_retry_at &lt;= #{now})
             or (s.status = 'PROCESSING' and s.lease_until &lt;= #{now}))
         order by r.created_at
@@ -115,10 +121,11 @@
 
     <insert id="insertRollout">
         insert into public_agent_config_rollouts(
-            rollout_id, branch, commit_hash, previous_commit_hash, initiated_by_user_id, initiated_linux_server_id,
+            rollout_id, config_scope, scope_key, branch, commit_hash, previous_commit_hash,
+            initiated_by_user_id, initiated_linux_server_id,
             status, trace_id, created_at, updated_at
         ) values (
-            #{rolloutId}, #{branch}, #{expectedCommitHash}, #{previousCommitHash},
+            #{rolloutId}, #{scope}, #{scopeKey}, #{branch}, #{expectedCommitHash}, #{previousCommitHash},
             #{initiatedByUserId}, #{initiatedLinuxServerId},
             'PREPARING', #{traceId}, #{now}, #{now}
         )

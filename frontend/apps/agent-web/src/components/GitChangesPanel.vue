@@ -676,7 +676,7 @@ function normalizeWorkspaceAgentDiffPath(path: string): string | null {
   if (markerIndex >= 0) {
     value = value.slice(markerIndex + marker.length);
   }
-  return value.startsWith("agents/") || value.startsWith("skills/") ? value : null;
+  return value === "opencode.jsonc" || value.startsWith("agents/") || value.startsWith("skills/") ? value : null;
 }
 
 // 单文件和批量暂存复用同一真实 Git index 链路，避免批量操作产生第二套状态语义。

@@ -20,6 +20,10 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.AgentConfigOperationStatus;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.configuration.WorkspaceCreateOperation;
 import com.enterprise.testagent.domain.configuration.WorkspaceCreateOperationRepository;
@@ -53,6 +57,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -66,6 +71,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -91,6 +97,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private static final String VERSION_SYNC_EVENT = "workspace.version.sync-requested";
     private static final String PARAM_OPENCODE_APP_WORKSPACE_ROOT = "OPENCODE_APP_WORKSPACE_ROOT";
     private static final String PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT = "OPENCODE_PERSONAL_WORKTREE_ROOT";
+    private static final String PENDING_APPLICATION_COMMIT = "PENDING_APPLICATION_COMMIT";
+    private static final Duration CONFIG_ROLLOUT_RECOVERY_DELAY = Duration.ofMinutes(3);
+    private static final Duration CONFIG_ROLLOUT_ABORT_DELAY = Duration.ofMinutes(5);
     private static final ServerBroadcastPublisher NOOP_BROADCAST_PUBLISHER = event -> { };
     private static final CommonParameterValues EMPTY_PARAMETER_VALUES = new CommonParameterValues() {
         @Override
@@ -138,6 +147,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final String broadcastInstanceId;
     private final Object defaultPersonalWorkspaceLock = new Object();
     private ConversationContextStore conversationContextStore;
+    private PublicAgentConfigRolloutCoordinator agentConfigRolloutCoordinator;
 
     /**
      * 可选注入运行上下文端口；测试构造器无需感知 Redis，实现仍保持模块只依赖 domain。
@@ -145,6 +155,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     @Autowired(required = false)
     void setConversationContextStore(ConversationContextStore conversationContextStore) {
         this.conversationContextStore = conversationContextStore;
+    }
+
+    /** 复用公共配置的持久化闸门和空闲排空程序，应用共享层不另起一套 dispose 实现。 */
+    @Autowired(required = false)
+    void setAgentConfigRolloutCoordinator(PublicAgentConfigRolloutCoordinator coordinator) {
+        this.agentConfigRolloutCoordinator = coordinator;
     }
 
     /**
@@ -1627,10 +1643,27 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             }
         }
 
-        // 只推送应用版本 feature 分支，并广播给其它服务器在线用户。
+        // 只推送应用版本 feature 分支。Agent 配置发布先建立持久化闸门，避免其它用户在共享层切换中继续发消息。
         progress.step("PUSH_REMOTE");
         String applicationBranch = version.branch();
-        gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
+        String preparedHead = gitWorkspaceService.headCommit(prepared.repoRoot());
+        String rolloutId = prepareApplicationConfigRolloutIfNeeded(
+                publishFiles,
+                version,
+                applicationBranch,
+                preparedHead,
+                prepared.headCommit(),
+                userId,
+                traceId);
+        try {
+            gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
+        } catch (RuntimeException exception) {
+            if (rolloutId != null && prepared.headCommit() != null && !prepared.headCommit().isBlank()) {
+                gitWorkspaceService.resetHardToCommit(prepared.repoRoot(), prepared.headCommit());
+            }
+            abortApplicationConfigRollout(rolloutId, "APPLICATION_PUSH_FAILED");
+            throw exception;
+        }
         Instant now = Instant.now();
         String headCommit = gitWorkspaceService.headCommit(prepared.repoRoot());
         ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
@@ -1639,7 +1672,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         if (currentReplica.isPresent()) {
             managedWorkspaceRepository.saveVersionReplica(currentReplica.get().ready(headCommit, now, traceId));
         }
+        activateApplicationConfigRollout(rolloutId, headCommit);
         publishVersionSync(updatedVersion, userId, "PERSONAL_PUBLISHED", traceId, Map.of());
+        synchronizeLocalApplicationConfigRollout();
         progress.step("COMPLETED");
         return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                 "PUBLISHED", personalWorkspaceId, version.versionId().value(), List.of(),
@@ -1692,6 +1727,162 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     "发布文件存在未提交变更，请先提交个人 worktree",
                     Map.of("files", dirty));
         }
+    }
+
+    /** 只有应用共享 Agent/Skill 白名单文件才触发全局排空，普通业务文件仍沿用既有同步语义。 */
+    private boolean containsApplicationAgentConfig(List<String> files) {
+        return files.stream()
+                .map(path -> path.replace('\\', '/'))
+                .anyMatch(path -> path.equals(".opencode/opencode.jsonc")
+                        || path.equals(".opencode/opencode.json")
+                        || path.startsWith(".opencode/agents/")
+                        || path.startsWith(".opencode/skills/"));
+    }
+
+    private String prepareApplicationConfigRolloutIfNeeded(
+            List<String> files,
+            ApplicationWorkspaceVersion version,
+            String branch,
+            String expectedCommit,
+            String previousCommit,
+            UserId userId,
+            String traceId) {
+        if (agentConfigRolloutCoordinator == null || !containsApplicationAgentConfig(files)) {
+            return null;
+        }
+        return agentConfigRolloutCoordinator.prepareApplication(
+                version.versionId().value(),
+                branch,
+                expectedCommit,
+                previousCommit,
+                serverIdentity.linuxServerId(),
+                userId.value(),
+                traceId);
+    }
+
+    private void activateApplicationConfigRollout(String rolloutId, String commitHash) {
+        if (rolloutId != null && agentConfigRolloutCoordinator != null) {
+            agentConfigRolloutCoordinator.activate(rolloutId, commitHash);
+        }
+    }
+
+    private void abortApplicationConfigRollout(String rolloutId, String reason) {
+        if (rolloutId != null && agentConfigRolloutCoordinator != null) {
+            agentConfigRolloutCoordinator.abortPreparation(rolloutId, reason);
+        }
+    }
+
+    /** 广播可能丢失，应用副本同步与全局 dispose 由数据库任务持续补偿。 */
+    @Scheduled(
+            fixedDelayString = "${test-agent.application-agent-config.rollout.sync-retry-delay-ms:5000}",
+            initialDelayString = "${test-agent.public-agent-config.rollout.initial-delay-ms:5000}")
+    void retryPendingApplicationConfigSync() {
+        synchronizeLocalApplicationConfigRollout();
+    }
+
+    /** PREPARING 记录覆盖“本地已生成提交但进程在 push/activate 间退出”的恢复窗口。 */
+    @Scheduled(
+            fixedDelayString = "${test-agent.application-agent-config.rollout.preparing-retry-delay-ms:5000}",
+            initialDelayString = "${test-agent.public-agent-config.rollout.initial-delay-ms:5000}")
+    void retryPreparingApplicationConfigRollout() {
+        if (agentConfigRolloutCoordinator == null) {
+            return;
+        }
+        agentConfigRolloutCoordinator
+                .preparing(serverIdentity.linuxServerId(), AgentConfigRolloutScope.APPLICATION)
+                .ifPresent(this::reconcilePreparingApplicationConfigRollout);
+    }
+
+    private void reconcilePreparingApplicationConfigRollout(PublicAgentConfigRolloutPreparation preparation) {
+        if (preparation.createdAt().plus(CONFIG_ROLLOUT_RECOVERY_DELAY).isAfter(Instant.now())) {
+            return;
+        }
+        try {
+            ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(preparation.scopeKey()));
+            UserId initiator = new UserId(preparation.initiatedByUserId());
+            ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
+            ApplicationWorkspaceVersionReplica replica = ensureLocalReplica(version, template, initiator, preparation.traceId());
+            Path repoRoot = pathResolver.resolve(replica.repoRootPath());
+            CodeRepository repository = existingRepository(version.repositoryId());
+            String privateKey = privateKeyFor(repository, initiator);
+            ensureInternalOrigin(repository, initiator, repoRoot, privateKey);
+            gitWorkspaceService.fetch(repoRoot, privateKey);
+            String remoteRef = "origin/" + preparation.branch();
+            String remoteCommit = gitWorkspaceService.resolveCommit(repoRoot, remoteRef);
+            boolean expectedReached = !PENDING_APPLICATION_COMMIT.equals(preparation.expectedCommitHash())
+                    && (preparation.expectedCommitHash().equals(remoteCommit)
+                    || gitWorkspaceService.isAncestor(repoRoot, preparation.expectedCommitHash(), remoteRef));
+            if (expectedReached) {
+                agentConfigRolloutCoordinator.activate(preparation.rolloutId(), remoteCommit);
+                synchronizeLocalApplicationConfigRollout();
+                return;
+            }
+            if (preparation.createdAt().plus(CONFIG_ROLLOUT_ABORT_DELAY).isBefore(Instant.now())) {
+                if (preparation.previousCommitHash() != null && !preparation.previousCommitHash().isBlank()) {
+                    gitWorkspaceService.resetHardToCommit(repoRoot, preparation.previousCommitHash());
+                }
+                agentConfigRolloutCoordinator.abortPreparation(preparation.rolloutId(), "APPLICATION_REMOTE_COMMIT_NOT_REACHED");
+            }
+        } catch (Exception exception) {
+            LOGGER.warn(
+                    "event=application_agent_config_preparing_recovery_retry rolloutId={} versionId={}",
+                    preparation.rolloutId(),
+                    preparation.scopeKey(),
+                    exception);
+        }
+    }
+
+    private void synchronizeLocalApplicationConfigRollout() {
+        if (agentConfigRolloutCoordinator == null) {
+            return;
+        }
+        agentConfigRolloutCoordinator
+                .claimPendingSync(serverIdentity.linuxServerId(), AgentConfigRolloutScope.APPLICATION)
+                .ifPresent(this::synchronizeApplicationConfigReplica);
+    }
+
+    private void synchronizeApplicationConfigReplica(PublicAgentConfigRolloutSyncRequest request) {
+        try {
+            if (!agentConfigRolloutCoordinator.renewServerSync(request)) {
+                return;
+            }
+            ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(request.scopeKey()));
+            UserId initiator = new UserId(request.initiatedByUserId());
+            ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
+            ApplicationWorkspaceVersionReplica replica = ensureLocalReplica(version, template, initiator, request.traceId());
+            Path repoRoot = pathResolver.resolve(replica.repoRootPath());
+            if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "应用共享 Agent 配置副本存在未提交变更",
+                        Map.of("versionId", request.scopeKey(), "path", repoRoot.toString()));
+            }
+            CodeRepository repository = existingRepository(version.repositoryId());
+            String privateKey = privateKeyFor(repository, initiator);
+            ensureInternalOrigin(repository, initiator, repoRoot, privateKey);
+            gitWorkspaceService.fetch(repoRoot, privateKey);
+            if (!agentConfigRolloutCoordinator.renewServerSync(request)) {
+                return;
+            }
+            gitWorkspaceService.checkoutTrackingBranch(repoRoot, request.branch(), privateKey);
+            gitWorkspaceService.resetHardToCommit(repoRoot, request.commitHash());
+            Instant now = Instant.now();
+            managedWorkspaceRepository.saveVersionReplica(replica.ready(request.commitHash(), now, request.traceId()));
+            agentConfigRolloutCoordinator.markServerSynced(request);
+        } catch (Exception exception) {
+            agentConfigRolloutCoordinator.markServerSyncRetry(request, safeMessage(exception));
+            LOGGER.warn(
+                    "event=application_agent_config_replica_sync_retry rolloutId={} versionId={} linuxServerId={}",
+                    request.rolloutId(),
+                    request.scopeKey(),
+                    serverIdentity.linuxServerId(),
+                    exception);
+        }
+    }
+
+    private String safeMessage(Exception exception) {
+        String message = exception.getMessage();
+        return message == null || message.isBlank() ? exception.getClass().getSimpleName() : message;
     }
 
     private PlatformException withPublishProgressDetails(
@@ -2361,6 +2552,44 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String commitHash,
             UserId userId,
             String traceId) {
+        String rolloutId = prepareFeatureWorkspaceAgentConfigPublish(workspaceId, userId, traceId);
+        recordFeatureWorkspacePublished(workspaceId, commitHash, rolloutId, userId, traceId);
+    }
+
+    /** 旧 workspace Agent 发布入口在 push 前建立应用共享层闸门。 */
+    public String prepareFeatureWorkspaceAgentConfigPublish(
+            String workspaceId,
+            UserId userId,
+            String traceId) {
+        if (agentConfigRolloutCoordinator == null) {
+            return null;
+        }
+        WorkspaceId runtimeWorkspaceId = new WorkspaceId(requireText(workspaceId, "工作区 ID 不能为空", "workspaceId"));
+        ApplicationWorkspaceVersion version = managedWorkspaceRepository.findVersionByRuntimeWorkspace(runtimeWorkspaceId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "应用 Agent 配置工作区不属于 feature 版本",
+                        Map.of("workspaceId", workspaceId)));
+        return agentConfigRolloutCoordinator.prepareApplication(
+                version.versionId().value(),
+                version.branch(),
+                PENDING_APPLICATION_COMMIT,
+                version.targetCommitHash(),
+                serverIdentity.linuxServerId(),
+                userId.value(),
+                traceId);
+    }
+
+    public void abortFeatureWorkspaceAgentConfigPublish(String rolloutId, String reason) {
+        abortApplicationConfigRollout(rolloutId, reason);
+    }
+
+    public void recordFeatureWorkspacePublished(
+            String workspaceId,
+            String commitHash,
+            String rolloutId,
+            UserId userId,
+            String traceId) {
         WorkspaceId runtimeWorkspaceId = new WorkspaceId(requireText(workspaceId, "工作区 ID 不能为空", "workspaceId"));
         ApplicationWorkspaceVersion version = managedWorkspaceRepository.findVersionByRuntimeWorkspace(runtimeWorkspaceId)
                 .orElseThrow(() -> new PlatformException(
@@ -2375,7 +2604,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         managedWorkspaceRepository.findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
                 .ifPresent(replica -> managedWorkspaceRepository.saveVersionReplica(
                         replica.ready(commitHash, now, traceId)));
+        if (rolloutId != null && agentConfigRolloutCoordinator != null) {
+            agentConfigRolloutCoordinator.recordExpectedCommit(rolloutId, commitHash);
+            agentConfigRolloutCoordinator.activate(rolloutId, commitHash);
+        }
         publishVersionSync(updatedVersion, userId, "AGENT_CONFIG_PUBLISHED", traceId, Map.of());
+        synchronizeLocalApplicationConfigRollout();
     }
 
     private void handleVersionSyncEvent(ServerBroadcastEvent event) {

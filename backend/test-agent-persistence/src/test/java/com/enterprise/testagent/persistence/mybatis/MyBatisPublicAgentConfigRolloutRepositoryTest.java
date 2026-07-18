@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import java.io.Reader;
 import java.time.Instant;
 import java.util.List;
@@ -80,15 +81,18 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
         PublicAgentConfigRolloutMapper mapper = mock(PublicAgentConfigRolloutMapper.class);
         MyBatisPublicAgentConfigRolloutRepository repository = new MyBatisPublicAgentConfigRolloutRepository(mapper);
         PublicAgentConfigRolloutSyncRow row = new PublicAgentConfigRolloutSyncRow(
-                "acr_rollout", "main", "abc123", "usr-admin", "trace-rollout",
+                "acr_rollout", "APPLICATION", "app-1", "main", "abc123", "usr-admin", "trace-rollout",
                 2, null, null);
-        when(mapper.findClaimableServerSyncs("linux-1", NOW, 1)).thenReturn(List.of(row));
+        when(mapper.findClaimableServerSyncs("linux-1", "APPLICATION", NOW, 1)).thenReturn(List.of(row));
         when(mapper.markServerSyncProcessing(eq("acr_rollout"), eq("linux-1"), any(), any(), eq(NOW)))
                 .thenReturn(1);
 
-        var claim = repository.claimPendingSync("linux-1", NOW, NOW.plusSeconds(180));
+        var claim = repository.claimPendingSync(
+                "linux-1", AgentConfigRolloutScope.APPLICATION, NOW, NOW.plusSeconds(180));
 
         assertThat(claim).isPresent();
+        assertThat(claim.get().scope()).isEqualTo(AgentConfigRolloutScope.APPLICATION);
+        assertThat(claim.get().scopeKey()).isEqualTo("app-1");
         assertThat(claim.get().retryCount()).isEqualTo(2);
         assertThat(claim.get().leaseToken()).startsWith("acl_");
     }

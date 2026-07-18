@@ -349,6 +349,12 @@ const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<"editor" | "diff" | "system">("editor");
 const feedback = ref<Feedback | null>(null);
+// 引用配置保存可能发生在 Run 执行中；记录代次并等空闲后 dispose，避免释放正在使用的 workspace 实例。
+const pendingReferenceRuntimeReloadRevision = ref(0);
+let handledReferenceRuntimeReloadRevision = 0;
+let referenceRuntimeReloadInFlight = false;
+let pendingRuntimeReloadKind: "reference" | "agent" = "reference";
+let lastRuntimeReloadError: unknown | null = null;
 const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
 const isDiffDirty = ref(false);
 const sessionSearch = ref("");
@@ -2006,7 +2012,8 @@ watch(diffFiles, (files) => {
  */
 function isRuntimeCatalogDefinition(path: string): boolean {
   const normalized = path.replaceAll("\\", "/");
-  return /(^|\/)agents\/.*\.md$/i.test(normalized)
+  return /(^|\/)opencode\.jsonc?$/i.test(normalized)
+    || /(^|\/)agents\/.*\.md$/i.test(normalized)
     || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized);
 }
 
@@ -2014,13 +2021,65 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(path: string): Promise<
   if (!isRuntimeCatalogDefinition(path) || !opencodeCatalogReady.value) {
     return null;
   }
+  lastRuntimeReloadError = null;
+  pendingRuntimeReloadKind = "agent";
+  pendingReferenceRuntimeReloadRevision.value += 1;
+  if (runtimeBusy.value) {
+    return null;
+  }
+  await reloadReferenceRuntimeIfIdle();
+  return lastRuntimeReloadError;
+}
+
+async function reloadReferenceRuntimeIfIdle(): Promise<void> {
+  const targetRevision = pendingReferenceRuntimeReloadRevision.value;
+  if (
+    targetRevision <= handledReferenceRuntimeReloadRevision
+    || referenceRuntimeReloadInFlight
+    || runtimeBusy.value
+  ) {
+    return;
+  }
+  if (!opencodeProcessReady.value || !selectedWorkspaceIdRef.value) {
+    // 进程未运行时无需 dispose；下次受管启动会直接读取刚保存的磁盘配置和引用目录环境。
+    handledReferenceRuntimeReloadRevision = targetRevision;
+    lastRuntimeReloadError = null;
+    feedback.value = {
+      kind: "info",
+      title: pendingRuntimeReloadKind === "reference" ? "引用配置已保存" : "Agent 配置已保存",
+      description: "TestAgent 进程下次启动时会加载最新配置。"
+    };
+    return;
+  }
+  referenceRuntimeReloadInFlight = true;
   try {
-    // 复用 OpenCode 原生 dispose：响应返回时旧实例已经释放，随后重拉即可读取最新磁盘配置。
+    // OpenCode 原生 dispose 只释放当前进程缓存的 workspace Instance；下一次请求会重新 bootstrap 并读取 opencode.jsonc。
     await api.disposeGlobal();
     await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
-    return null;
+    handledReferenceRuntimeReloadRevision = targetRevision;
+    lastRuntimeReloadError = null;
+    feedback.value = {
+      kind: "info",
+      title: pendingRuntimeReloadKind === "reference" ? "引用配置已生效" : "Agent 配置已生效",
+      description: "已重新加载当前用户的 TestAgent workspace 实例，无需重启专属进程。"
+    };
   } catch (error) {
-    return error;
+    handledReferenceRuntimeReloadRevision = targetRevision;
+    lastRuntimeReloadError = error;
+    feedback.value = errorFeedback(
+      pendingRuntimeReloadKind === "reference"
+        ? "引用配置已保存，但运行态重新加载失败"
+        : "Agent 配置已保存，但运行态重新加载失败",
+      error
+    );
+  } finally {
+    referenceRuntimeReloadInFlight = false;
+    if (
+      pendingReferenceRuntimeReloadRevision.value > handledReferenceRuntimeReloadRevision
+      && !runtimeBusy.value
+    ) {
+      void reloadReferenceRuntimeIfIdle();
+    }
   }
 }
 
@@ -2061,7 +2120,13 @@ const saveMutation = useMutation({
       : null;
     feedback.value = catalogRefreshError
       ? errorFeedback("文件已保存，运行态目录刷新失败", catalogRefreshError)
-      : { kind: "success", title: "文件已保存", description: tab.path };
+      : {
+          kind: "success",
+          title: "文件已保存",
+          description: runtimeBusy.value && isRuntimeCatalogDefinition(agentFileInfo(tab.path).path)
+            ? `${tab.path}；当前任务结束后会自动重新加载当前用户运行态。`
+            : tab.path
+        };
     if (!isAgentFilePath(tab.path)) {
       void refreshWorkspaceGitDiff();
     }
@@ -2460,7 +2525,10 @@ function stopTick() {
 onScopeDispose(() => stopTick());
 watch(runtimeBusy, (busy) => {
   if (busy) startTick();
-  else stopTick();
+  else {
+    stopTick();
+    void reloadReferenceRuntimeIfIdle();
+  }
 }, { immediate: true });
 
 watch(
@@ -2952,7 +3020,18 @@ function openReferenceConfiguration() {
 }
 
 async function refreshWorkspaceViewAfterReferenceSaved() {
+  pendingRuntimeReloadKind = "reference";
+  pendingReferenceRuntimeReloadRevision.value += 1;
   await refreshWorkspaceView();
+  if (runtimeBusy.value) {
+    feedback.value = {
+      kind: "info",
+      title: "引用配置已保存",
+      description: "当前任务结束后会自动重新加载 TestAgent workspace 实例。"
+    };
+    return;
+  }
+  await reloadReferenceRuntimeIfIdle();
 }
 
 async function refreshWorkspaceView(workspaceId = selectedWorkspace.value?.workspaceId) {
@@ -5672,7 +5751,13 @@ const saveDiffFileMutation = useMutation({
       : null;
     feedback.value = catalogRefreshError
       ? errorFeedback("文件已保存，运行态目录刷新失败", catalogRefreshError)
-      : { kind: "success", title: "文件已保存", description: path };
+      : {
+          kind: "success",
+          title: "文件已保存",
+          description: runtimeBusy.value && isRuntimeCatalogDefinition(agentFileInfo(path).path)
+            ? `${path}；当前任务结束后会自动重新加载当前用户运行态。`
+            : path
+        };
     await loadDiffSource(diffSource.value);
   },
   onError: (error) => {

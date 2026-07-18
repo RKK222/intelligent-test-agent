@@ -9,6 +9,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
@@ -91,10 +92,51 @@ public class PublicAgentConfigRolloutService
             String localLinuxServerId,
             String initiatedByUserId,
             String traceId) {
+        return prepareRollout(
+                AgentConfigRolloutScope.PUBLIC,
+                null,
+                branch,
+                expectedCommitHash,
+                previousCommitHash,
+                localLinuxServerId,
+                initiatedByUserId,
+                traceId);
+    }
+
+    @Override
+    @Transactional
+    public String prepareApplication(
+            String versionId,
+            String branch,
+            String expectedCommitHash,
+            String previousCommitHash,
+            String localLinuxServerId,
+            String initiatedByUserId,
+            String traceId) {
+        return prepareRollout(
+                AgentConfigRolloutScope.APPLICATION,
+                versionId,
+                branch,
+                expectedCommitHash,
+                previousCommitHash,
+                localLinuxServerId,
+                initiatedByUserId,
+                traceId);
+    }
+
+    private String prepareRollout(
+            AgentConfigRolloutScope scope,
+            String scopeKey,
+            String branch,
+            String expectedCommitHash,
+            String previousCommitHash,
+            String localLinuxServerId,
+            String initiatedByUserId,
+            String traceId) {
         repository.findActiveRolloutId().ifPresent(active -> {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "已有公共 Agent/Skill 配置发布正在排空",
+                    "已有共享 Agent/Skill 配置发布正在排空",
                     Map.of("rolloutId", active));
         });
         String rolloutId = RuntimeIdGenerator.publicAgentConfigRolloutId();
@@ -102,6 +144,8 @@ public class PublicAgentConfigRolloutService
         repository.registerServerMembership(localLinuxServerId, now);
         repository.createRollout(
                 rolloutId,
+                scope,
+                scopeKey,
                 branch,
                 expectedCommitHash,
                 previousCommitHash,
@@ -155,14 +199,18 @@ public class PublicAgentConfigRolloutService
     }
 
     @Override
-    public Optional<PublicAgentConfigRolloutPreparation> preparing(String linuxServerId) {
-        return repository.findPreparing(linuxServerId);
+    public Optional<PublicAgentConfigRolloutPreparation> preparing(
+            String linuxServerId,
+            AgentConfigRolloutScope scope) {
+        return repository.findPreparing(linuxServerId, scope);
     }
 
     @Override
-    public Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(String linuxServerId) {
+    public Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(
+            String linuxServerId,
+            AgentConfigRolloutScope scope) {
         Instant now = Instant.now();
-        return repository.claimPendingSync(linuxServerId, now, now.plus(SERVER_SYNC_LEASE));
+        return repository.claimPendingSync(linuxServerId, scope, now, now.plus(SERVER_SYNC_LEASE));
     }
 
     @Override
@@ -223,12 +271,14 @@ public class PublicAgentConfigRolloutService
     @Override
     @Transactional
     public void decommissionServer(String linuxServerId) {
-        repository.findPreparing(linuxServerId).ifPresent(preparation -> {
+        for (AgentConfigRolloutScope scope : AgentConfigRolloutScope.values()) {
+            repository.findPreparing(linuxServerId, scope).ifPresent(preparation -> {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "服务器仍有待确认的公共配置发布，不能退役",
+                    "服务器仍有待确认的共享配置发布，不能退役",
                     Map.of("linuxServerId", linuxServerId, "rolloutId", preparation.rolloutId()));
-        });
+            });
+        }
         boolean currentServer = backendInstanceIdentity.linuxServerId().equals(linuxServerId);
         Set<LinuxServerId> liveBackendServerIds = heartbeatStore.liveBackendServerIds();
         boolean liveBackend = liveBackendServerIds != null

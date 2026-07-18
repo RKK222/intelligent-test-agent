@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-18 - 四层 Agent 配置、应用发布排空与个人热加载
+
+- Why:
+  - OpenCode 原实现只加载公共共享层和当前项目层，应用资产引用保存后既不会主动重建 workspace Instance，`.opencode/opencode.jsonc` 也被应用 Agent Diff 白名单遗漏；公共、应用、个人配置的 Git 分支和运行时优先级没有形成一致模型。
+- What:
+  - OpenCode 受管进程按“公共共享 → 公共个人 → 应用共享 → 应用个人”加载并后层覆盖前层；个人 worktree 只做受信路径映射，不合并公共或应用 Git 分支。启动服务显式注入公共个人、应用共享和应用个人根目录，企业离线兼容补丁同步固化该行为。
+  - 公共共享与应用共享 Agent/Skill 在推送前共用数据库持久化闸门，推送后由所有服务器同步副本、等待活跃 Run 排空，再全局 dispose；应用发布补充 PREPARING 恢复和失败中止。公共个人、应用个人保存只在当前用户 Run 空闲后调用其专属 OpenCode `/global/dispose`。
+  - 应用 Agent Diff/Git 白名单精确扩展为 `.opencode/opencode.json(c)`、`.opencode/agents/**`、`.opencode/skills/**`，继续复用个人提交和 feature 投影发布链路；同步运行时、workspace、数据库、API、部署、前端和用户手册文档。
+- How:
+  - 复用现有 `PublicAgentConfigRolloutCoordinator`、公共路由/进程启动程序、版本副本同步、`disposeGlobal()`、Agent/Command refetch 和 `runtimeBusy`；数据库迁移把 rollout 增加 `PUBLIC/APPLICATION` scope 及 scopeKey，旧记录默认兼容为 `PUBLIC`。
+  - 在 OpenCode 1.17.8 精确上游提交应用离线补丁并运行路径测试；按 Java 25、`.env.test`、`test` profile 和本地补丁 OpenCode 重启三服务，通过受管 API初始化用户进程。
+- Result:
+  - 后端定向测试通过：workspace management 93、opencode runtime 29、persistence 4；OpenCode 四层路径测试 2/2，Git 面板 35 项、agent-web typecheck、用户手册和生产构建通过。真实 PostgreSQL 已成功执行 `V20260718123000`；persistence 全量 H2 测试仍被既有 `TIMESTAMPTZ` migration 兼容问题阻断。
+  - backend/readiness 为 UP，frontend 3000 返回 200，manager 已连接；用户 OpenCode 在 4096 READY，进程环境包含三个新增根目录。保存引用并 dispose 后 `/config` 曾读到 `docs-appdocs`，随后按测试要求删除应用资产引用关系和个人 `.opencode/opencode.jsonc`，再次 dispose 后 `references=null`，应用 Agent Diff 不再包含该文件。
+  - `.config` 的 `origin/master` 与本地 `master` 均为 `3c89512`；本地 `enterprise` 为未跟踪远程的分叉分支 `1ad3d20`，当前运行和更新以 `origin/master` 为准，企业专有内容需评审后显式合并，不能自动覆盖。
+  - 未新增 HTTP 路径、RunEvent/SSE 或 generated SDK；涉及数据库兼容迁移和调度轮询，不修改 `.env.local`，没有引入依赖。
+
 ### 2026-07-18 - 更新公共 OpenCode 配置并重启引用功能环境
 
 - Why:

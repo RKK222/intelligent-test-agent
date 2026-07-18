@@ -1108,12 +1108,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             String traceId) {
         Workspace workspace = existingWorkspace(workspaceId);
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.WORKSPACE, workspace.workspaceId(), "publish", null, traceId);
+        String applicationRolloutId = null;
         try {
             String privateKey = decryptSingleSshKey(userId);
             GitCommitIdentity commitIdentity = gitCommitIdentity(userId);
             Path repoRoot = workspaceRoot(workspace);
             ensureExistingCleanRepository(repoRoot, (String) null);
             String branch = gitWorkspaceService.currentBranch(repoRoot);
+            if (managedWorkspaceApplicationService != null) {
+                applicationRolloutId = managedWorkspaceApplicationService.prepareFeatureWorkspaceAgentConfigPublish(
+                        workspaceId, userId, traceId);
+            }
             String commitHash;
             if (worktreeId != null && !worktreeId.isBlank()) {
                 AgentConfigWorktree worktree = existingWorktree(worktreeId, AgentConfigScope.WORKSPACE, workspace.workspaceId());
@@ -1135,17 +1140,27 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             }
             progress.step(AgentConfigOperationStep.BROADCASTING);
             if (managedWorkspaceApplicationService != null) {
-                managedWorkspaceApplicationService.recordFeatureWorkspacePublished(
-                        workspaceId,
-                        commitHash,
-                        userId,
-                        traceId);
+                if (applicationRolloutId == null) {
+                    managedWorkspaceApplicationService.recordFeatureWorkspacePublished(
+                            workspaceId, commitHash, userId, traceId);
+                } else {
+                    managedWorkspaceApplicationService.recordFeatureWorkspacePublished(
+                            workspaceId, commitHash, applicationRolloutId, userId, traceId);
+                }
             }
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
+            if (managedWorkspaceApplicationService != null) {
+                managedWorkspaceApplicationService.abortFeatureWorkspaceAgentConfigPublish(
+                        applicationRolloutId, "APPLICATION_AGENT_CONFIG_PUBLISH_FAILED");
+            }
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
             throw exception;
         } catch (Exception exception) {
+            if (managedWorkspaceApplicationService != null) {
+                managedWorkspaceApplicationService.abortFeatureWorkspaceAgentConfigPublish(
+                        applicationRolloutId, "APPLICATION_AGENT_CONFIG_PUBLISH_FAILED");
+            }
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "发布工作空间 Agent 配置失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "发布工作空间 Agent 配置失败", Map.of(), exception);
         }
@@ -1345,7 +1360,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     /**
-     * 工作空间级 Agent 配置只允许展示 .opencode 下的 agents 与 skills。
+     * 工作空间级 Agent 配置只允许展示 .opencode 下的 opencode.jsonc、agents 与 skills。
      * Git porcelain 在子目录执行时仍可能返回仓库根相对路径，因此这里保留 Git 命令路径并单独生成 UI 展示路径。
      */
     private AgentConfigResponses.AgentConfigDiffResponse workspaceDiff(Path repoRoot) {
@@ -1999,7 +2014,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             return null;
         }
         String display = normalized.substring(prefix.length());
-        return display.startsWith("agents/") || display.startsWith("skills/") ? display : null;
+        // opencode.jsonc 是应用级 Agent/Skill 的运行态入口配置，必须与目录定义进入同一 Diff、提交和发布链路。
+        return "opencode.jsonc".equals(display)
+                || display.startsWith("agents/")
+                || display.startsWith("skills/")
+                ? display
+                : null;
     }
 
     private void broadcastPublicSync(String branch, String commitHash, String reason, String rolloutId, String traceId) {

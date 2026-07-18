@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -17,6 +18,7 @@ import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
@@ -86,10 +88,38 @@ class PublicAgentConfigRolloutServiceTest {
 
         assertThat(rolloutId).startsWith("acr_");
         verify(repository).createRollout(
-                eq(rolloutId), eq("main"), eq("abc123"), eq("previous123"), eq("usr-admin"), eq("linux-1"),
+                eq(rolloutId), eq(AgentConfigRolloutScope.PUBLIC), isNull(),
+                eq("main"), eq("abc123"), eq("previous123"), eq("usr-admin"), eq("linux-1"),
                 eq("trace-1"), any(Instant.class));
         verify(repository).addServer(eq(rolloutId), eq("linux-1"), any(Instant.class));
         verify(repository).addServer(eq(rolloutId), eq("linux-2"), any(Instant.class));
+    }
+
+    @Test
+    void applicationPreparePersistsVersionScopeBeforeGitMutation() {
+        when(repository.findActiveRolloutId()).thenReturn(Optional.empty());
+        when(repository.findActiveServerMembershipIds()).thenReturn(List.of("linux-1"));
+
+        String rolloutId = service.prepareApplication(
+                "awv_1234567890abcdef",
+                "feature_testagent_20260718",
+                "new123",
+                "old123",
+                "linux-1",
+                "usr-admin",
+                "trace-app");
+
+        verify(repository).createRollout(
+                eq(rolloutId),
+                eq(AgentConfigRolloutScope.APPLICATION),
+                eq("awv_1234567890abcdef"),
+                eq("feature_testagent_20260718"),
+                eq("new123"),
+                eq("old123"),
+                eq("usr-admin"),
+                eq("linux-1"),
+                eq("trace-app"),
+                any(Instant.class));
     }
 
     @Test
@@ -113,7 +143,7 @@ class PublicAgentConfigRolloutServiceTest {
 
     @Test
     void offlineServerCanBeExplicitlyDecommissionedFromRolloutMembership() {
-        when(repository.findPreparing("linux-old")).thenReturn(Optional.empty());
+        when(repository.findPreparing(eq("linux-old"), any())).thenReturn(Optional.empty());
 
         service.decommissionServer("linux-old");
 
@@ -123,7 +153,7 @@ class PublicAgentConfigRolloutServiceTest {
 
     @Test
     void currentServerCannotBeDecommissionedWhileItIsOnline() {
-        when(repository.findPreparing("linux-1")).thenReturn(Optional.empty());
+        when(repository.findPreparing(eq("linux-1"), any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.decommissionServer("linux-1"))
                 .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class);

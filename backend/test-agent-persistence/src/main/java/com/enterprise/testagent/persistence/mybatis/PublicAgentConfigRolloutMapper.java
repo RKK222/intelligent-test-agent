@@ -15,7 +15,9 @@ public interface PublicAgentConfigRolloutMapper {
 
     String findBlockingRolloutId(@Param("userId") String userId);
 
-    PublicAgentConfigRolloutPreparationRow findPreparing(@Param("linuxServerId") String linuxServerId);
+    PublicAgentConfigRolloutPreparationRow findPreparing(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("scope") String scope);
 
     List<String> findActiveServerMembershipIds();
 
@@ -23,6 +25,8 @@ public interface PublicAgentConfigRolloutMapper {
 
     void insertRollout(
             @Param("rolloutId") String rolloutId,
+            @Param("scope") String scope,
+            @Param("scopeKey") String scopeKey,
             @Param("branch") String branch,
             @Param("expectedCommitHash") String expectedCommitHash,
             @Param("previousCommitHash") String previousCommitHash,
@@ -73,6 +77,7 @@ public interface PublicAgentConfigRolloutMapper {
 
     List<PublicAgentConfigRolloutSyncRow> findClaimableServerSyncs(
             @Param("linuxServerId") String linuxServerId,
+            @Param("scope") String scope,
             @Param("now") Instant now,
             @Param("limit") int limit);
 

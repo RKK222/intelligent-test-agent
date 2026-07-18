@@ -6,6 +6,8 @@
 
 ## 主要职责
 
+- 共享 Agent 配置 rollout 同时覆盖公共共享层和应用共享层，以 `config_scope=PUBLIC/APPLICATION` 区分同步源：公共范围由公共配置服务同步 Git 运行副本，应用范围由托管工作区服务同步指定版本副本；两者复用同一进程身份核验、Session 空闲检查、用户消息闸门和 `/global/dispose`，避免应用级另起不安全的直接重载链路。
+
 - `PublicAgentConfigRolloutService` 实现公共 Agent/Skill 发布的 `PREPARING -> DRAINING -> COMPLETED/ABORTED` 持久化消息闸门与持续排空 worker。发布成员使用独立 membership 表：新版 Java 自动登记，临时离线成员继续参与，`linux_servers` 历史行不会误阻塞；超级管理员只能显式退役已经停止 Java 和 manager 的成员。每台服务器先用带 fencing token 的数据库租约认领 Git 同步，再取得本服务器 manager 快照；进程清单必须包含 PID、启动时间和 baseUrl，用户归属只查询本 `linuxServerId` 在分页进程仓储允许的 200 条上限，按服务器/容器/端口/PID/启动时间匹配，其他服务器历史脏行不能阻塞本机登记，无法归属的本机目标会保持全员门禁直到安全 dispose。所有服务器确认后，每个 Java 只认领本 `linuxServerId` 的一个目标，通过既有 session binding 找出该进程使用过的全部 workspace directory，逐目录调用本机 `/session/status`；处理过程中持续续租，dispose 前再次对比 PID 和启动时间，防止端口复用后误操作新进程。任一 `busy/retry`、未知结构或 manager 快照缺失都递增重试次数并退避，全部明确空闲后只调用本机 `/global/dispose`。某用户全部 target dispose 后立即恢复该用户；`RunApplicationService`、流式/旧版旁路问答、legacy command/shell 同时读取同一用户级闸门。
 
 - Session 创建、查询、消息追加、归档和当前用户历史会话分页；用户历史由 `SessionHistoryRepository` 只读端口提供，按会话创建人、Run 触发人、消息发送人归因，保留 `pinned` 字段但排序只使用更新时间倒序。

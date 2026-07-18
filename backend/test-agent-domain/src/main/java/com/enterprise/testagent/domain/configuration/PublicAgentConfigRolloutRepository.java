@@ -14,10 +14,12 @@ public interface PublicAgentConfigRolloutRepository {
     /** 所有服务器同步前阻止全部用户；同步后仅阻止仍有未 dispose 旧实例的用户。 */
     Optional<String> findBlockingRolloutId(String userId);
 
-    Optional<PublicAgentConfigRolloutPreparation> findPreparing(String linuxServerId);
+    Optional<PublicAgentConfigRolloutPreparation> findPreparing(String linuxServerId, AgentConfigRolloutScope scope);
 
     void createRollout(
             String rolloutId,
+            AgentConfigRolloutScope scope,
+            String scopeKey,
             String branch,
             String expectedCommitHash,
             String previousCommitHash,
@@ -47,6 +49,7 @@ public interface PublicAgentConfigRolloutRepository {
 
     Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(
             String linuxServerId,
+            AgentConfigRolloutScope scope,
             Instant now,
             Instant leaseUntil);
 

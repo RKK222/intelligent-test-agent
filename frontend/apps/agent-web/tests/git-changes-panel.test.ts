@@ -1034,7 +1034,10 @@ describe("GitChangesPanel", () => {
   it("commits application Agent config in the current version personal worktree", async () => {
     apiClientMock.getWorkspaceAgentDiff
       .mockResolvedValueOnce({
-        files: [{ path: fixture.files.applicationSkill, status: "M", staged: true, patch: "" }]
+        files: [
+          { path: "opencode.jsonc", status: "M", staged: true, patch: "" },
+          { path: fixture.files.applicationSkill, status: "M", staged: true, patch: "" }
+        ]
       })
       .mockResolvedValue({ files: [] });
 
@@ -1052,6 +1055,7 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
+    expect(await view.findByText("opencode.jsonc", { exact: false })).toBeTruthy();
     expect(await view.findByText("SKILL.md", { exact: false })).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 更新支付案例技能");
     await fireEvent.click(view.getByRole("button", { name: "提交" }));
@@ -1060,7 +1064,7 @@ describe("GitChangesPanel", () => {
       fixture.application.personalWorkspaceId,
       expect.objectContaining({
         commitMessage: "agent: 更新支付案例技能",
-        files: [`.opencode/${fixture.files.applicationSkill}`]
+        files: [".opencode/opencode.jsonc", `.opencode/${fixture.files.applicationSkill}`]
       })
     ));
     expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();

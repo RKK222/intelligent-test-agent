@@ -7,6 +7,8 @@ import java.time.Instant;
  */
 public record PublicAgentConfigRolloutPreparation(
         String rolloutId,
+        AgentConfigRolloutScope scope,
+        String scopeKey,
         String branch,
         String expectedCommitHash,
         String previousCommitHash,
@@ -14,4 +16,27 @@ public record PublicAgentConfigRolloutPreparation(
         String initiatedLinuxServerId,
         String traceId,
         Instant createdAt) {
+
+    /** 兼容存量公共配置测试和调用方；新应用范围必须显式传 scope/scopeKey。 */
+    public PublicAgentConfigRolloutPreparation(
+            String rolloutId,
+            String branch,
+            String expectedCommitHash,
+            String previousCommitHash,
+            String initiatedByUserId,
+            String initiatedLinuxServerId,
+            String traceId,
+            Instant createdAt) {
+        this(
+                rolloutId,
+                AgentConfigRolloutScope.PUBLIC,
+                null,
+                branch,
+                expectedCommitHash,
+                previousCommitHash,
+                initiatedByUserId,
+                initiatedLinuxServerId,
+                traceId,
+                createdAt);
+    }
 }
