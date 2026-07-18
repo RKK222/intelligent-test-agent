@@ -62,6 +62,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -157,7 +158,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         this.conversationContextStore = conversationContextStore;
     }
 
-    /** 复用公共配置的持久化闸门和空闲排空程序，应用共享层不另起一套 dispose 实现。 */
+    /** 复用公共配置的持久化闸门和空闲排空程序，应用发布不另起一套 dispose 实现。 */
     @Autowired(required = false)
     void setAgentConfigRolloutCoordinator(PublicAgentConfigRolloutCoordinator coordinator) {
         this.agentConfigRolloutCoordinator = coordinator;
@@ -1868,7 +1869,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             gitWorkspaceService.resetHardToCommit(repoRoot, request.commitHash());
             Instant now = Instant.now();
             managedWorkspaceRepository.saveVersionReplica(replica.ready(request.commitHash(), now, request.traceId()));
-            agentConfigRolloutCoordinator.markServerSynced(request);
+            Set<String> synchronizedUserIds = synchronizeApplicationAgentConfigToPersonalWorktrees(
+                    version,
+                    replica,
+                    request,
+                    initiator);
+            agentConfigRolloutCoordinator.markServerSyncedForUsers(request, synchronizedUserIds);
         } catch (Exception exception) {
             agentConfigRolloutCoordinator.markServerSyncRetry(request, safeMessage(exception));
             LOGGER.warn(
@@ -1878,6 +1884,181 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     serverIdentity.linuxServerId(),
                     exception);
         }
+    }
+
+    /**
+     * 把应用 feature 提交中的 Agent 白名单反向投影到本机个人分支。
+     *
+     * <p>只要同一用户任一相关 worktree 的白名单路径存在本地改动，就整组跳过且不 dispose；普通 docs/spec
+     * 的 dirty 或 staged 状态不会阻塞，也不会被自动提交。</p>
+     */
+    private Set<String> synchronizeApplicationAgentConfigToPersonalWorktrees(
+            ApplicationWorkspaceVersion version,
+            ApplicationWorkspaceVersionReplica replica,
+            PublicAgentConfigRolloutSyncRequest request,
+            UserId initiator) {
+        Set<String> synchronizedUserIds = new LinkedHashSet<>();
+        GitCommitIdentity commitIdentity = gitCommitIdentity(initiator);
+        for (var member : configurationRepository.findActiveMembers(version.appId())) {
+            UserId targetUserId = member.userId();
+            List<PersonalWorkspace> personalWorkspaces = managedWorkspaceRepository
+                    .findPersonalWorkspaces(version.versionId(), targetUserId).stream()
+                    .filter(personal -> personal.status() == ManagedWorkspaceStatus.ACTIVE)
+                    .filter(this::isPersonalWorkspaceOnCurrentServer)
+                    .toList();
+            if (personalWorkspaces.isEmpty()) {
+                continue;
+            }
+            List<PersonalAgentConfigSyncPlan> plans = List.of();
+            try {
+                plans = personalWorkspaces.stream()
+                        .map(personal -> personalAgentConfigSyncPlan(personal, request.commitHash()))
+                        .toList();
+                List<PersonalAgentConfigSyncPlan> dirtyPlans = plans.stream()
+                        .filter(this::hasDirtyApplicationAgentConfig)
+                        .toList();
+                if (!dirtyPlans.isEmpty()) {
+                    plans.forEach(plan -> saveApplicationAgentConfigSync(
+                            replica,
+                            plan,
+                            WorkspaceSyncStatus.FAILED,
+                            request.traceId()));
+                    LOGGER.warn(
+                            "event=application_agent_config_personal_sync_skipped rolloutId={} versionId={} userId={} dirtyWorktreeCount={}",
+                            request.rolloutId(),
+                            version.versionId().value(),
+                            targetUserId.value(),
+                            dirtyPlans.size());
+                    continue;
+                }
+                for (PersonalAgentConfigSyncPlan plan : plans) {
+                    gitWorkspaceService.materializeCommitFiles(
+                            plan.repoRoot(),
+                            request.commitHash(),
+                            plan.gitFiles(),
+                            null);
+                    commitApplicationAgentConfigIfChanged(
+                            plan,
+                            request.commitHash(),
+                            commitIdentity);
+                    saveApplicationAgentConfigSync(
+                            replica,
+                            plan,
+                            WorkspaceSyncStatus.SUCCEEDED,
+                            request.traceId());
+                }
+                synchronizedUserIds.add(targetUserId.value());
+            } catch (Exception exception) {
+                List<PersonalAgentConfigSyncPlan> failedPlans = plans;
+                failedPlans.forEach(plan -> saveApplicationAgentConfigSync(
+                        replica,
+                        plan,
+                        WorkspaceSyncStatus.FAILED,
+                        request.traceId()));
+                LOGGER.warn(
+                        "event=application_agent_config_personal_sync_failed rolloutId={} versionId={} userId={}",
+                        request.rolloutId(),
+                        version.versionId().value(),
+                        targetUserId.value(),
+                        exception);
+            }
+        }
+        return Set.copyOf(synchronizedUserIds);
+    }
+
+    private boolean isPersonalWorkspaceOnCurrentServer(PersonalWorkspace personal) {
+        return workspaceRepository.findById(personal.runtimeWorkspaceId())
+                .filter(workspace -> workspace.status() == WorkspaceStatus.ACTIVE)
+                .map(Workspace::linuxServerId)
+                .filter(serverIdentity.linuxServerId()::equals)
+                .isPresent();
+    }
+
+    private PersonalAgentConfigSyncPlan personalAgentConfigSyncPlan(
+            PersonalWorkspace personal,
+            String targetCommit) {
+        Path repoRoot = pathResolver.resolve(personal.repoRootPath());
+        Path workspaceRoot = pathResolver.resolve(personal.workspaceRootPath());
+        String workspacePrefix = repoRelativePrefix(repoRoot, workspaceRoot);
+        String pathspec = workspacePrefix + ".opencode";
+        Set<String> controlledFiles = new LinkedHashSet<>();
+        controlledFiles.addAll(gitWorkspaceService.listTrackedFiles(repoRoot, pathspec));
+        controlledFiles.addAll(gitWorkspaceService.listFilesAtCommit(repoRoot, targetCommit, pathspec));
+        List<String> gitFiles = controlledFiles.stream()
+                .filter(path -> isApplicationAgentConfigGitPath(path, workspacePrefix))
+                .sorted()
+                .toList();
+        List<String> workspaceFiles = gitFiles.stream()
+                .map(path -> workspacePrefix.isBlank() ? path : path.substring(workspacePrefix.length()))
+                .toList();
+        return new PersonalAgentConfigSyncPlan(personal, repoRoot, pathspec, workspacePrefix, gitFiles, workspaceFiles);
+    }
+
+    private boolean hasDirtyApplicationAgentConfig(PersonalAgentConfigSyncPlan plan) {
+        return gitWorkspaceService.parseStatusPorcelain(
+                        gitWorkspaceService.statusPorcelain(plan.repoRoot(), plan.pathspec())).stream()
+                .map(GitStatusEntry::path)
+                .anyMatch(path -> isApplicationAgentConfigGitPath(path, plan.workspacePrefix()));
+    }
+
+    private boolean isApplicationAgentConfigGitPath(String path, String workspacePrefix) {
+        if (path == null || !path.startsWith(workspacePrefix)) {
+            return false;
+        }
+        String workspacePath = path.substring(workspacePrefix.length()).replace('\\', '/');
+        return workspacePath.equals(".opencode/opencode.json")
+                || workspacePath.equals(".opencode/opencode.jsonc")
+                || workspacePath.startsWith(".opencode/agents/")
+                || workspacePath.startsWith(".opencode/skills/");
+    }
+
+    private void commitApplicationAgentConfigIfChanged(
+            PersonalAgentConfigSyncPlan plan,
+            String targetCommit,
+            GitCommitIdentity commitIdentity) {
+        if (plan.gitFiles().isEmpty()) {
+            return;
+        }
+        String shortCommit = targetCommit.length() <= 12 ? targetCommit : targetCommit.substring(0, 12);
+        try {
+            gitWorkspaceService.commitFilesOnly(
+                    plan.repoRoot(),
+                    "同步应用 Agent 配置 " + shortCommit,
+                    plan.gitFiles(),
+                    null,
+                    commitIdentity);
+        } catch (PlatformException exception) {
+            if (!exception.getMessage().contains("nothing to commit")
+                    && !exception.getMessage().contains("nothing added")) {
+                throw exception;
+            }
+        }
+    }
+
+    private void saveApplicationAgentConfigSync(
+            ApplicationWorkspaceVersionReplica replica,
+            PersonalAgentConfigSyncPlan plan,
+            WorkspaceSyncStatus status,
+            String traceId) {
+        saveSync(
+                new WorkspaceSyncRecordId(RuntimeIdGenerator.workspaceSyncRecordId()),
+                plan.personal().userId(),
+                replica.runtimeWorkspaceId(),
+                plan.personal().runtimeWorkspaceId(),
+                WorkspaceSyncDirection.APPLICATION_TO_PERSONAL,
+                plan.workspaceFiles(),
+                false,
+                status,
+                traceId);
+    }
+
+    private record PersonalAgentConfigSyncPlan(
+            PersonalWorkspace personal,
+            Path repoRoot,
+            String pathspec,
+            String workspacePrefix,
+            List<String> gitFiles,
+            List<String> workspaceFiles) {
     }
 
     private String safeMessage(Exception exception) {
@@ -2556,7 +2737,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         recordFeatureWorkspacePublished(workspaceId, commitHash, rolloutId, userId, traceId);
     }
 
-    /** 旧 workspace Agent 发布入口在 push 前建立应用共享层闸门。 */
+    /** 旧 workspace Agent 发布入口在 push 前建立应用范围闸门。 */
     public String prepareFeatureWorkspaceAgentConfigPublish(
             String workspaceId,
             UserId userId,

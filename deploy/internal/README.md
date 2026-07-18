@@ -53,7 +53,7 @@ deploy/internal/dist/frontend/
 
 这套基线覆盖使用官方 `tool(...)`、schema、SDK 类型和 Effect/Zod 的 Tool。`axios`、数据库驱动或企业私有 SDK 等任意业务依赖不会被猜测加入；新增这类 import 时，必须同步修改 `opencode-node-runtime.package.json` 和 lockfile，在外网 Mac 重新打完整企业包。升级依赖不能只替换 Tool 文件，必须同时解压新 programs、导入新 worker 镜像并重启 worker；标准 `deploy-internal-release.sh` 已按该顺序执行。
 
-worker 内的 OpenCode 通过 `opencode-node-compat.patch` 支持平台四层配置：`OPENCODE_CONFIG_DIR` 公共共享、Java 启动时生成的 `OPENCODE_PUBLIC_PERSONAL_CONFIG_DIR` 公共个人、由 `OPENCODE_APP_WORKSPACE_ROOT` 与 `OPENCODE_PERSONAL_WORKTREE_ROOT` 安全映射的应用共享，以及当前 workspace `.opencode` 应用个人。后三个值由 Java 根据通用参数注入用户进程，不需要也不允许在 `docker.env` 手工拼接个人物理路径。
+Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，再调用 OpenCode 原生 `/global/dispose`。`opencode-node-compat.patch` 只保留既有企业离线 Node 依赖兼容内容，不再包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
 
 ## 统一上传目录
 

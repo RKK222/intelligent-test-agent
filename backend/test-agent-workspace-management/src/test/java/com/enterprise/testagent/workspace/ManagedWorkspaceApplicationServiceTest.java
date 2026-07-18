@@ -2,6 +2,9 @@ package com.enterprise.testagent.workspace;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -24,6 +27,9 @@ import com.enterprise.testagent.domain.configuration.CommonParameter;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
@@ -1212,6 +1218,82 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void applicationAgentRolloutUpdatesCleanPersonalWorktreeWithoutTouchingDirtyDocs() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        service.ensureDefaultPersonalWorkspace(version.versionId(), new UserId("usr_1"), "trace_personal");
+        git.nextStatusPorcelain = "M  F-GCMS/workspace/docs/design.md\n";
+        git.targetAgentFiles = List.of(
+                "F-GCMS/workspace/.opencode/agents/reviewer.md",
+                "F-GCMS/workspace/.opencode/opencode.jsonc");
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest(version.versionId());
+        when(coordinator.claimPendingSync("127.0.0.1", AgentConfigRolloutScope.APPLICATION))
+                .thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingApplicationConfigSync();
+
+        assertThat(git.materializedCommit).isEqualTo("commit_application_agent");
+        assertThat(git.materializedFiles).containsExactly(
+                "F-GCMS/workspace/.opencode/agents/reviewer.md",
+                "F-GCMS/workspace/.opencode/opencode.jsonc");
+        assertThat(git.committedOnlyFiles).containsExactlyElementsOf(git.materializedFiles);
+        assertThat(managed.syncRecords).singleElement().satisfies(record -> {
+            assertThat(record.direction()).isEqualTo(WorkspaceSyncDirection.APPLICATION_TO_PERSONAL);
+            assertThat(record.status()).isEqualTo(WorkspaceSyncStatus.SUCCEEDED);
+        });
+        verify(coordinator).markServerSyncedForUsers(request, Set.of("usr_1"));
+    }
+
+    @Test
+    void applicationAgentRolloutSkipsUserWithDirtyPersonalAgentConfig() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        service.ensureDefaultPersonalWorkspace(version.versionId(), new UserId("usr_1"), "trace_personal");
+        git.nextStatusPorcelain = " M F-GCMS/workspace/.opencode/agents/reviewer.md\n";
+        git.targetAgentFiles = List.of("F-GCMS/workspace/.opencode/agents/reviewer.md");
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest(version.versionId());
+        when(coordinator.claimPendingSync("127.0.0.1", AgentConfigRolloutScope.APPLICATION))
+                .thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingApplicationConfigSync();
+
+        assertThat(git.materializedFiles).isEmpty();
+        assertThat(managed.syncRecords).singleElement().satisfies(record ->
+                assertThat(record.status()).isEqualTo(WorkspaceSyncStatus.FAILED));
+        verify(coordinator).markServerSyncedForUsers(request, Set.of());
+    }
+
+    private PublicAgentConfigRolloutSyncRequest applicationSyncRequest(String versionId) {
+        return new PublicAgentConfigRolloutSyncRequest(
+                "acr_application",
+                AgentConfigRolloutScope.APPLICATION,
+                versionId,
+                "feature_testagent_20260707",
+                "commit_application_agent",
+                "usr_1",
+                "trace_application_agent",
+                0,
+                Instant.now().plusSeconds(180),
+                "acl_application");
+    }
+
+    @Test
     void syncPersonalToApplicationRejectsDirtyApplicationReplicaBeforeCopyingFiles() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -1950,6 +2032,9 @@ class ManagedWorkspaceApplicationServiceTest {
         private Path materializedRepoRoot;
         private String materializedCommit;
         private List<String> materializedFiles = List.of();
+        private List<String> trackedAgentFiles = List.of();
+        private List<String> targetAgentFiles = List.of();
+        private List<String> committedOnlyFiles = List.of();
         private Path fetchedRepoRoot;
         private String mergedBranch;
         private Path mergedBranchRepoRoot;
@@ -2114,6 +2199,26 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public List<String> listTrackedFiles(Path repoRoot, String pathspec) {
+            return trackedAgentFiles;
+        }
+
+        @Override
+        public List<String> listFilesAtCommit(Path repoRoot, String commit, String pathspec) {
+            return targetAgentFiles;
+        }
+
+        @Override
+        public void commitFilesOnly(
+                Path repoRoot,
+                String message,
+                List<String> files,
+                String privateKey,
+                GitCommitIdentity identity) {
+            this.committedOnlyFiles = List.copyOf(files);
+        }
+
+        @Override
         public void resetIndexToHead(Path repoRoot, String privateKey) {
             this.resetIndexRepoRoot = repoRoot;
         }
@@ -2155,6 +2260,11 @@ class ManagedWorkspaceApplicationServiceTest {
         public void fetch(Path repoRoot, String privateKey) {
             calls.add("fetch:" + repoRoot);
             this.fetchedRepoRoot = repoRoot;
+        }
+
+        @Override
+        public void checkoutTrackingBranch(Path repoRoot, String branch, String privateKey) {
+            this.currentBranchValue = branch;
         }
 
         @Override
@@ -2264,7 +2374,11 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override public Optional<ApplicationDefinition> findApplication(ApplicationId appId) { return Optional.of(app); }
         @Override public List<ApplicationDefinition> findApplicationsByMember(UserId userId) { return member ? List.of(app) : List.of(); }
         @Override public boolean isActiveMember(ApplicationId appId, UserId userId) { return member; }
-        @Override public List<ApplicationMember> findActiveMembers(ApplicationId appId) { return List.of(); }
+        @Override public List<ApplicationMember> findActiveMembers(ApplicationId appId) {
+            return member
+                    ? List.of(ApplicationMember.active(appId, new UserId("usr_1"), Instant.now()))
+                    : List.of();
+        }
         @Override public void saveMember(ApplicationMember member) {}
         @Override public void deleteMember(ApplicationId appId, UserId userId) {}
         @Override public PageResponse<CodeRepository> findRepositories(PageRequest pageRequest) { return new PageResponse<>(List.of(repository), 1, 20, 1); }

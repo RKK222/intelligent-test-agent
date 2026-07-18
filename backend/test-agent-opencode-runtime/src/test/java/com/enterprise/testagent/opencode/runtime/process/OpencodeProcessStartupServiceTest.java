@@ -176,36 +176,6 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
-    void startAndVerifyInjectsTrustedFourLayerConfigRoots() {
-        FakeRepository repository = new FakeRepository();
-        RecordingGateway gateway = new RecordingGateway();
-        CommonParameterValues commonParameterValues = Mockito.mock(CommonParameterValues.class);
-        Mockito.when(commonParameterValues.resolvedValue("OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", ParameterPlatform.current()))
-                .thenReturn(Optional.of("/data/configdev"));
-        Mockito.when(commonParameterValues.resolvedValue("OPENCODE_APP_WORKSPACE_ROOT", ParameterPlatform.current()))
-                .thenReturn(Optional.of("/data/appworkspace"));
-        Mockito.when(commonParameterValues.resolvedValue("OPENCODE_PERSONAL_WORKTREE_ROOT", ParameterPlatform.current()))
-                .thenReturn(Optional.of("/data/personalworktree"));
-        OpencodeProcessStartupService service = new OpencodeProcessStartupService(
-                repository,
-                repository,
-                gateway,
-                new RecordingHeartbeatStore(),
-                Clock.fixed(NOW, ZoneOffset.UTC),
-                commonParameterValues);
-
-        service.startAndVerify(request(null, null, null));
-
-        assertThat(gateway.startCommands).singleElement().satisfies(command ->
-                assertThat(command.environment())
-                        .containsEntry(
-                                "OPENCODE_PUBLIC_PERSONAL_CONFIG_DIR",
-                                "/data/configdev/public-usr_1234567890abcdef/opencode")
-                        .containsEntry("OPENCODE_APP_WORKSPACE_ROOT", "/data/appworkspace")
-                        .containsEntry("OPENCODE_PERSONAL_WORKTREE_ROOT", "/data/personalworktree"));
-    }
-
-    @Test
     void successfulRestartInvalidatesPreviousProcessConversationContexts() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();

@@ -4,7 +4,7 @@
 
 完全自研测试智能体 Web IDE 前端。`frontend/interaction-visual-demo` 只作为交互参考资料，不纳入 `pnpm-workspace.yaml` 构建；顶层 `frontend-opencode` 是 opencode IDE App 的 Vue/TypeScript/Vite 复刻交付物，作为独立工程单独安装、构建和验收，不纳入 `frontend/pnpm-workspace.yaml`。
 
-公共 Agent/Skill 更新或发布进入存量 Session 排空期时，`/processes/me` 按当前用户返回 `messageSendAllowed=false` 和阻断原因；前端只在被阻断期间每 5 秒刷新该状态，该用户旧 opencode target dispose 后下一轮会立即恢复为 true 并停止轮询，不等待其他用户。聊天面板禁用发送与新会话按钮、输入框展示排空提示，父级普通发送和宠物/手册旁路问答再次拦截；字段缺失按允许处理以兼容旧后端。前端状态只负责即时反馈，后端所有新 opencode 消息入口仍以同一持久化用户级门禁为准。
+公共或应用 Agent/Skill 发布进入存量 Session 排空期时，`/processes/me` 按当前用户返回 `messageSendAllowed=false` 和阻断原因；应用发布只阻断已同步个人 worktree、等待 dispose 的目标用户，个人 `.opencode` 有本地改动而被跳过的用户不被覆盖也不进入目标。前端只在被阻断期间每 5 秒刷新该状态，该用户旧 opencode target dispose 后下一轮会立即恢复为 true 并停止轮询，不等待其他用户。聊天面板禁用发送与新会话按钮、输入框展示排空提示，父级普通发送和宠物/手册旁路问答再次拦截；字段缺失按允许处理以兼容旧后端。前端状态只负责即时反馈，后端所有新 opencode 消息入口仍以同一持久化用户级门禁为准。
 
 ## 技术栈
 
@@ -81,7 +81,7 @@ tools/dev-frontend-check.sh
 
 应用工作区暂存通过平台 API 操作真实 Git index，同时仍作为发布文件白名单；未暂存区可一次暂存全部普通文件，或经二次确认后丢弃全部已暂存和未暂存普通文件；已暂存区的一键回退只调用 unstage all，把全部已暂存普通文件移回未暂存区，不丢弃文件内容。后端普通发布会隔离历史 index。冲突期间批量暂存和丢弃全部改动入口禁用，已暂存区一键回退及普通文件逐个 stage/unstage 仍可使用，但按 Git 原生规则禁止提交；冲突文件可在 Monaco 三方合并编辑器中可靠选择结果、保存或取消整次 merge。Git 三个 Tab 直接在 `UNSTAGED/STAGED` 下展示文件，不再重复作用域标题和 worktree 说明；只暂存 `spec/**` 时只展示本地“提交”，混合暂存时会在操作前明确提示提交、推送和仅本地文件数。前端只有在后端明确返回 `remotePushed=true` 时才展示提交并推送成功；连续处理 workspace、应用 Agent、公共 Agent 时，进度页按本轮累计实际提交、远端推送及仅本地 spec 数量，并列出各作用域明细，三类差异全部清空后结束本轮。
 
-当前权限口径补充：公共 Git 只有 `SUPER_ADMIN` 可写；应用级 `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）由 `APP_ADMIN` 管理，普通成员只读。应用版本副本对普通成员只读，个人 worktree 普通文件可写；“本地提交”只提交个人 worktree，“提交并推送”先把选中文件提交到个人 `HEAD`，再只投影非 `spec/**` 文件到 feature worktree。`spec/**` 即使被选择也只做本地提交，前端不会发送发布请求，后端也会拒绝直接 API 发布和路径别名绕过。工作空间级“初始化应用 Agent/Skill 配置包”会同时生成 OpenCode 可识别的 Agent、Skill、rules 和 templates 文件。
+当前权限口径补充：公共 Git 只有 `SUPER_ADMIN` 可写；应用级 `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）由 `APP_ADMIN` 管理，普通成员只读。应用版本副本对普通成员只读，个人 worktree 普通文件可写；“本地提交”只提交个人 worktree，“提交并推送”先把选中文件提交到个人 `HEAD`，再只投影非 `spec/**` 文件到 feature worktree。普通 docs 推送后其他人只收到版本更新提示，个人 worktree 由本人手动更新；应用 Agent 白名单推送后，平台才会反向投影到干净的相关个人 worktree并定向 dispose。`spec/**` 即使被选择也只做本地提交，前端不会发送发布请求，后端也会拒绝直接 API 发布和路径别名绕过。工作空间级“初始化应用 Agent/Skill 配置包”会同时生成 OpenCode 可识别的 Agent、Skill、rules 和 templates 文件。
 
 文件页进入时默认展开工作空间并把收起的 `Agents` 固定在面板底部，减少文件树被上下分屏压缩；用户展开 `Agents` 后仍可拖拽分隔线调整两区高度。
 

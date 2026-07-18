@@ -1103,6 +1103,53 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 只提交明确列出的文件，并保留索引中其它暂存项。
+     *
+     * <p>应用 Agent 发布回写个人分支时不能先 reset 整个 index，否则会破坏用户正在准备的普通文件提交；
+     * Git {@code commit --only} 会从工作树提交白名单路径，同时让其它 staged 文件继续留在索引中。</p>
+     */
+    public void commitFilesOnly(
+            Path repoRoot,
+            String message,
+            List<String> files,
+            String privateKey,
+            GitCommitIdentity identity) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        ArrayList<String> command = new ArrayList<>(List.of("git", "-C", repoRoot.toString(), "commit", "--only", "-m", message, "--"));
+        command.addAll(files);
+        List<String> immutableCommand = List.copyOf(command);
+        executor.execute(
+                identity == null ? immutableCommand : withCommitIdentity(immutableCommand, identity),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /** 返回当前分支在 pathspec 下已跟踪的文件，路径始终使用 Git 的正斜杠格式。 */
+    public List<String> listTrackedFiles(Path repoRoot, String pathspec) {
+        return outputPaths(executor.execute(
+                gitNoQuotedPath(repoRoot, "ls-files", "--", pathspec),
+                null,
+                DEFAULT_TIMEOUT).stdoutText());
+    }
+
+    /** 返回指定提交在 pathspec 下包含的文件，不切换目标 worktree。 */
+    public List<String> listFilesAtCommit(Path repoRoot, String commit, String pathspec) {
+        return outputPaths(executor.execute(
+                gitNoQuotedPath(repoRoot, "ls-tree", "-r", "--name-only", commit, "--", pathspec),
+                null,
+                DEFAULT_TIMEOUT).stdoutText());
+    }
+
+    private List<String> outputPaths(String output) {
+        if (output == null || output.isBlank()) {
+            return List.of();
+        }
+        return output.lines().map(String::trim).filter(path -> !path.isBlank()).toList();
+    }
+
+    /**
      * 从指定提交把白名单文件投影到目标 worktree 的工作树和索引。
      *
      * <p>发布流程使用个人 worktree 的不可变 HEAD 作为 sourceCommit，目标只能是应用

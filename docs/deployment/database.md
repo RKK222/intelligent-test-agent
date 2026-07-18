@@ -9,9 +9,9 @@
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository` 与 `RunEventRepository` 已迁移到 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
-## V20260718123000 共享 Agent 配置 rollout 范围
+## V20260718123000 Agent 配置发布 rollout 范围
 
-`V20260718123000__generalize_agent_config_rollout_scope.sql` 为既有 `public_agent_config_rollouts` 增加 `config_scope` 与 `scope_key`。历史记录通过默认值保持 `PUBLIC`；新应用共享配置发布写入 `APPLICATION + 应用版本 ID`。唯一活动 rollout、服务器租约、目标进程租约和用户消息闸门继续共用既有表，不新增第二套排空状态机。`config_scope` 受 CHECK 约束限制为 `PUBLIC/APPLICATION`，旧 Java 未写该字段时仍兼容为 `PUBLIC`。
+`V20260718123000__generalize_agent_config_rollout_scope.sql` 为既有 `public_agent_config_rollouts` 增加 `config_scope` 与 `scope_key`。历史记录通过默认值保持 `PUBLIC`；新应用 Agent 配置发布写入 `APPLICATION + 应用版本 ID`。唯一活动 rollout、服务器租约、目标进程租约和用户消息闸门继续共用既有表，不新增第二套排空状态机。`config_scope` 受 CHECK 约束限制为 `PUBLIC/APPLICATION`，旧 Java 未写该字段时仍兼容为 `PUBLIC`。
 
 ## V1 核心表
 

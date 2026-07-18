@@ -1,6 +1,7 @@
 package com.enterprise.testagent.domain.configuration;
 
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 公共 Agent/Skill 配置发布协调端口，由运行时模块负责进程快照、排空与 dispose。
@@ -46,6 +47,15 @@ public interface PublicAgentConfigRolloutCoordinator {
     boolean renewServerSync(PublicAgentConfigRolloutSyncRequest request);
 
     void markServerSynced(PublicAgentConfigRolloutSyncRequest request);
+
+    /**
+     * 应用级发布只登记已经同步个人 worktree 的用户进程；公共发布继续使用 {@link #markServerSynced} 覆盖全机进程。
+     */
+    default void markServerSyncedForUsers(
+            PublicAgentConfigRolloutSyncRequest request,
+            Set<String> targetUserIds) {
+        markServerSynced(request);
+    }
 
     void markServerSyncRetry(PublicAgentConfigRolloutSyncRequest request, String errorMessage);
 

@@ -45,6 +45,54 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void applicationAgentProjectionCommitsOnlyWhitelistAndPreservesOtherStagedFiles() throws Exception {
+        Path repo = initializeRepository();
+        Files.createDirectories(repo.resolve("workspace/.opencode/agents"));
+        Files.createDirectories(repo.resolve("workspace/docs"));
+        write(repo, "workspace/.opencode/agents/reviewer.md", "version 1\n");
+        write(repo, "workspace/docs/design.md", "base docs\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        String base = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        git(repo, "checkout", "-b", "feature");
+        write(repo, "workspace/.opencode/agents/reviewer.md", "version 2\n");
+        write(repo, "workspace/.opencode/opencode.jsonc", "{\"agent\": {}}\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "publish application agent");
+        String feature = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        git(repo, "checkout", "-b", "personal", base);
+        write(repo, "workspace/docs/design.md", "personal staged docs\n");
+        git(repo, "add", "--", "workspace/docs/design.md");
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        assertThat(service.listTrackedFiles(repo, "workspace/.opencode"))
+                .containsExactly("workspace/.opencode/agents/reviewer.md");
+        assertThat(service.listFilesAtCommit(repo, feature, "workspace/.opencode"))
+                .containsExactlyInAnyOrder(
+                        "workspace/.opencode/agents/reviewer.md",
+                        "workspace/.opencode/opencode.jsonc");
+
+        List<String> files = List.of(
+                "workspace/.opencode/agents/reviewer.md",
+                "workspace/.opencode/opencode.jsonc");
+        service.materializeCommitFiles(repo, feature, files, null);
+        service.commitFilesOnly(
+                repo,
+                "同步应用 Agent 配置",
+                files,
+                null,
+                GitCommitIdentity.forPlatformUser("publisher", "AUTH_PUBLISHER"));
+
+        assertThat(git(repo, "show", "--name-only", "--pretty=format:", "HEAD").stdoutText())
+                .contains("workspace/.opencode/agents/reviewer.md")
+                .contains("workspace/.opencode/opencode.jsonc")
+                .doesNotContain("workspace/docs/design.md");
+        assertThat(service.statusPorcelain(repo)).contains("M  workspace/docs/design.md");
+    }
+
+    @Test
     void commitStagedUsesExplicitIdentityWhenRepositoryHasNoConfiguredIdentity() throws Exception {
         Path repo = initializeRepository();
         git(repo, "config", "--unset-all", "user.name");

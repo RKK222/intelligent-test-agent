@@ -29,6 +29,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
@@ -37,6 +38,7 @@ import java.time.Instant;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -231,6 +233,79 @@ class PublicAgentConfigRolloutServiceTest {
         assertThatThrownBy(() -> service.markServerSynced(request))
                 .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class);
 
+        verify(repository, never()).markServerSynced(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any());
+    }
+
+    @Test
+    void applicationSyncSnapshotsOnlyUsersWhosePersonalWorktreesWereUpdated() {
+        ManagerRuntimeSnapshot manager = managerWithPorts(4096, 4097);
+        when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(manager));
+        OpencodeServerProcess included = mock(OpencodeServerProcess.class);
+        when(included.userId()).thenReturn(new UserId("usr-included"));
+        when(included.linuxServerId()).thenReturn(new LinuxServerId("linux-1"));
+        when(included.containerId()).thenReturn(new OpencodeContainerId("container-1"));
+        when(included.port()).thenReturn(4096);
+        when(included.pid()).thenReturn(123L);
+        when(included.startedAt()).thenReturn(PROCESS_STARTED_AT);
+        OpencodeServerProcess excluded = mock(OpencodeServerProcess.class);
+        when(excluded.userId()).thenReturn(new UserId("usr-excluded"));
+        when(excluded.linuxServerId()).thenReturn(new LinuxServerId("linux-1"));
+        when(excluded.containerId()).thenReturn(new OpencodeContainerId("container-1"));
+        when(excluded.port()).thenReturn(4097);
+        when(excluded.pid()).thenReturn(123L);
+        when(excluded.startedAt()).thenReturn(PROCESS_STARTED_AT);
+        when(processRepository.findOpencodeServerProcesses(
+                any(OpencodeServerProcessFilter.class), any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(included, excluded), 1, PageRequest.MAX_SIZE, 2));
+        PublicAgentConfigRolloutSyncRequest request = syncRequest();
+        when(repository.renewServerSync(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(), any()))
+                .thenReturn(true);
+
+        service.markServerSyncedForUsers(request, Set.of("usr-included"));
+
+        ArgumentCaptor<PublicAgentConfigRolloutTarget> targetCaptor =
+                ArgumentCaptor.forClass(PublicAgentConfigRolloutTarget.class);
+        verify(repository).addTarget(targetCaptor.capture(), any(Instant.class));
+        assertThat(targetCaptor.getValue().userId()).isEqualTo("usr-included");
+        assertThat(targetCaptor.getValue().port()).isEqualTo(4096);
+        verify(repository).markServerSynced(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any());
+    }
+
+    @Test
+    void applicationSyncWithoutEligibleUsersNeedsNoManagerSnapshot() {
+        PublicAgentConfigRolloutSyncRequest request = syncRequest();
+        when(repository.renewServerSync(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(), any()))
+                .thenReturn(true);
+
+        service.markServerSyncedForUsers(request, Set.of());
+
+        verify(repository, never()).addTarget(any(), any());
+        verify(repository).markServerSynced(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any());
+    }
+
+    @Test
+    void applicationSyncRetriesWhenEligibleUsersExactProcessIdentityHasNotConverged() {
+        ManagerRuntimeSnapshot manager = managerWithPorts(4096);
+        when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(manager));
+        OpencodeServerProcess stale = mock(OpencodeServerProcess.class);
+        when(stale.userId()).thenReturn(new UserId("usr-included"));
+        when(stale.linuxServerId()).thenReturn(new LinuxServerId("linux-1"));
+        when(stale.containerId()).thenReturn(new OpencodeContainerId("container-1"));
+        when(stale.port()).thenReturn(4096);
+        when(stale.pid()).thenReturn(122L);
+        when(stale.startedAt()).thenReturn(PROCESS_STARTED_AT.minusSeconds(1));
+        when(processRepository.findOpencodeServerProcesses(
+                any(OpencodeServerProcessFilter.class), any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(stale), 1, PageRequest.MAX_SIZE, 1));
+        PublicAgentConfigRolloutSyncRequest request = syncRequest();
+        when(repository.renewServerSync(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(), any()))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> service.markServerSyncedForUsers(request, Set.of("usr-included")))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("身份尚未收敛");
+
+        verify(repository, never()).addTarget(any(), any());
         verify(repository, never()).markServerSynced(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any());
     }
 

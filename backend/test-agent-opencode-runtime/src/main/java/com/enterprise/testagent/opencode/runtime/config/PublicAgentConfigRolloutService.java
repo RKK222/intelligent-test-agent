@@ -236,7 +236,39 @@ public class PublicAgentConfigRolloutService
                 request.rolloutId(),
                 backendInstanceIdentity.linuxServerId(),
                 request.traceId(),
-                now);
+                now,
+                null);
+        markServerSyncedAfterSnapshot(request, now);
+    }
+
+    /** 应用级同步只 dispose 已成功更新个人 worktree 的用户，不影响同机其它应用或本地脏配置用户。 */
+    @Override
+    @Transactional
+    public void markServerSyncedForUsers(
+            PublicAgentConfigRolloutSyncRequest request,
+            Set<String> targetUserIds) {
+        if (!renewServerSync(request)) {
+            return;
+        }
+        Instant now = Instant.now();
+        Set<String> normalizedUserIds = targetUserIds == null
+                ? Set.of()
+                : targetUserIds.stream()
+                        .filter(userId -> userId != null && !userId.isBlank())
+                        .map(String::trim)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (!normalizedUserIds.isEmpty()) {
+            snapshotServerTargets(
+                    request.rolloutId(),
+                    backendInstanceIdentity.linuxServerId(),
+                    request.traceId(),
+                    now,
+                    normalizedUserIds);
+        }
+        markServerSyncedAfterSnapshot(request, now);
+    }
+
+    private void markServerSyncedAfterSnapshot(PublicAgentConfigRolloutSyncRequest request, Instant now) {
         repository.markServerSynced(
                 request.rolloutId(),
                 backendInstanceIdentity.linuxServerId(),
@@ -296,7 +328,12 @@ public class PublicAgentConfigRolloutService
         repository.completeReadyRollouts(now);
     }
 
-    private void snapshotServerTargets(String rolloutId, String linuxServerId, String traceId, Instant now) {
+    private void snapshotServerTargets(
+            String rolloutId,
+            String linuxServerId,
+            String traceId,
+            Instant now,
+            Set<String> targetUserIds) {
         List<ManagerRuntimeSnapshot> managers = heartbeatStore.liveManagerSnapshots().stream()
                 .filter(manager -> linuxServerId.equals(manager.container().linuxServerId().value()))
                 .toList();
@@ -306,27 +343,16 @@ public class PublicAgentConfigRolloutService
                     "目标服务器 manager 进程清单尚未就绪",
                     Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
         }
-        List<ManagedOpencodeProcessSnapshot> managedProcesses = managers.stream()
-                .flatMap(manager -> manager.managedProcesses().stream())
-                .toList();
-        boolean identityMissing = managedProcesses.stream()
-                .anyMatch(process -> process.pid() == null
-                        || process.pid() <= 0
-                        || process.startedAt() == null
-                        || process.baseUrl() == null
-                        || process.baseUrl().isBlank());
-        if (identityMissing) {
-            throw new PlatformException(
-                    ErrorCode.OPENCODE_UNAVAILABLE,
-                    "目标服务器 manager 进程清单缺少 PID 或启动时间，不能安全 dispose",
-                    Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
-        }
         Map<ProcessKey, String> usersByProcess = new HashMap<>();
+        Map<ProcessLocation, String> usersByLocation = new HashMap<>();
         // 目标登记只允许读取本服务器进程；跨服务器历史脏行既不属于本 worker，也不能阻塞本机排空。
         List<OpencodeServerProcess> localProcesses = processRepository.findOpencodeServerProcesses(
                 new OpencodeServerProcessFilter(null, new LinuxServerId(linuxServerId), null, null),
                 new PageRequest(1, TOPOLOGY_LIMIT)).items();
         for (OpencodeServerProcess process : localProcesses) {
+            usersByLocation.putIfAbsent(
+                    new ProcessLocation(process.containerId().value(), process.port()),
+                    process.userId().value());
             usersByProcess.putIfAbsent(
                     new ProcessKey(
                             process.linuxServerId().value(),
@@ -339,15 +365,42 @@ public class PublicAgentConfigRolloutService
         for (ManagerRuntimeSnapshot manager : managers) {
             String containerId = manager.container().containerId().value();
             for (ManagedOpencodeProcessSnapshot process : manager.managedProcesses()) {
+                String locationUserId = usersByLocation.get(new ProcessLocation(containerId, process.port()));
+                if (process.pid() == null
+                        || process.pid() <= 0
+                        || process.startedAt() == null
+                        || process.baseUrl() == null
+                        || process.baseUrl().isBlank()) {
+                    if (targetUserIds != null
+                            && (locationUserId == null || !targetUserIds.contains(locationUserId))) {
+                        continue;
+                    }
+                    throw new PlatformException(
+                            ErrorCode.OPENCODE_UNAVAILABLE,
+                            "目标服务器 manager 进程清单缺少 PID 或启动时间，不能安全 dispose",
+                            Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
+                }
+                String exactUserId = usersByProcess.get(new ProcessKey(
+                        linuxServerId,
+                        containerId,
+                        process.port(),
+                        process.pid(),
+                        normalizedStartedAt(process.startedAt())));
+                if (targetUserIds != null
+                        && (exactUserId == null || !targetUserIds.contains(exactUserId))) {
+                    if (locationUserId != null && targetUserIds.contains(locationUserId)) {
+                        // 端口属于目标用户但精确进程身份尚未收敛时必须重试，不能漏掉本次热加载。
+                        throw new PlatformException(
+                                ErrorCode.OPENCODE_UNAVAILABLE,
+                                "目标用户进程身份尚未收敛，暂不能安全 dispose",
+                                Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
+                    }
+                    continue;
+                }
                 repository.addTarget(new PublicAgentConfigRolloutTarget(
                         RuntimeIdGenerator.publicAgentConfigRolloutTargetId(),
                         rolloutId,
-                        usersByProcess.get(new ProcessKey(
-                                linuxServerId,
-                                containerId,
-                                process.port(),
-                                process.pid(),
-                                normalizedStartedAt(process.startedAt()))),
+                        exactUserId,
                         linuxServerId,
                         containerId,
                         process.port(),
@@ -360,6 +413,9 @@ public class PublicAgentConfigRolloutService
                         traceId), now);
             }
         }
+    }
+
+    private record ProcessLocation(String containerId, int port) {
     }
 
     @Override

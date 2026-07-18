@@ -44,10 +44,6 @@ public class OpencodeProcessStartupService {
 
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final String OPENCODE_REFERENCES_DIR_PARAM = "OPENCODE_REFERENCES_DIR";
-    private static final String OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT_PARAM = "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT";
-    private static final String OPENCODE_APP_WORKSPACE_ROOT_PARAM = "OPENCODE_APP_WORKSPACE_ROOT";
-    private static final String OPENCODE_PERSONAL_WORKTREE_ROOT_PARAM = "OPENCODE_PERSONAL_WORKTREE_ROOT";
-    private static final String OPENCODE_PUBLIC_PERSONAL_CONFIG_DIR_ENV = "OPENCODE_PUBLIC_PERSONAL_CONFIG_DIR";
     private static final Duration DEFAULT_STARTUP_HEALTH_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration DEFAULT_STARTUP_HEALTH_POLL_INTERVAL = Duration.ofMillis(500);
 
@@ -513,8 +509,8 @@ public class OpencodeProcessStartupService {
     /**
      * 合并调用方环境、目标 Java 平台引用目录和平台内部代理变量。
      *
-     * <p>引用目录和四层配置所需的受信路径都是可选的滚动升级能力：旧库缺少参数时不阻止既有进程启动；
-     * 调用方显式提供同名值时保留调用方选择。内部代理变量继续由平台权威配置覆盖，避免调用方替换鉴权或路由信息。
+     * <p>引用目录是可选的滚动升级能力：旧库缺少参数时不阻止既有进程启动；调用方显式提供同名值时
+     * 保留调用方选择。内部代理变量继续由平台权威配置覆盖，避免调用方替换鉴权或路由信息。
      */
     private Map<String, String> startupEnvironment(OpencodeProcessStartupRequest request) {
         Map<String, String> environment = new java.util.LinkedHashMap<>(request.environment());
@@ -524,45 +520,12 @@ public class OpencodeProcessStartupService {
                     .filter(value -> !value.isBlank())
                     .ifPresent(value -> environment.put(OPENCODE_REFERENCES_DIR_PARAM, value));
         }
-        addResolvedEnvironment(environment, OPENCODE_APP_WORKSPACE_ROOT_PARAM, OPENCODE_APP_WORKSPACE_ROOT_PARAM);
-        addResolvedEnvironment(environment, OPENCODE_PERSONAL_WORKTREE_ROOT_PARAM, OPENCODE_PERSONAL_WORKTREE_ROOT_PARAM);
-        if (!environment.containsKey(OPENCODE_PUBLIC_PERSONAL_CONFIG_DIR_ENV) && commonParameterValues != null) {
-            commonParameterValues.resolvedValue(OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT_PARAM, ParameterPlatform.current())
-                    .map(String::trim)
-                    .filter(value -> !value.isBlank())
-                    .map(root -> java.nio.file.Path.of(root)
-                            .resolve(publicWorktreeName(request.userId()))
-                            .resolve("opencode")
-                            .normalize()
-                            .toString())
-                    .ifPresent(value -> environment.put(OPENCODE_PUBLIC_PERSONAL_CONFIG_DIR_ENV, value));
-        }
         if (internalProxySettings != null) {
             environment.put(InternalModelProxyRuntimeSettings.API_KEY_ENV_NAME, internalProxySettings.requireApiKey());
             environment.put(InternalModelProxyRuntimeSettings.BASE_URL_ENV_NAME, internalProxySettings.sameNodeProxyBaseUrl());
             environment.put(InternalModelProxyRuntimeSettings.UCID_ENV_NAME, unifiedAuthId(request.userId()));
         }
         return Map.copyOf(environment);
-    }
-
-    /** 只把平台已配置的受信目录注入子进程，调用方显式值优先。 */
-    private void addResolvedEnvironment(Map<String, String> environment, String parameterName, String environmentName) {
-        if (environment.containsKey(environmentName) || commonParameterValues == null) {
-            return;
-        }
-        commonParameterValues.resolvedValue(parameterName, ParameterPlatform.current())
-                .map(String::trim)
-                .filter(value -> !value.isBlank())
-                .ifPresent(value -> environment.put(environmentName, value));
-    }
-
-    /** 与公共配置服务保持同一稳定 worktree 命名，进程可在 worktree 创建前先拿到固定路径。 */
-    private String publicWorktreeName(com.enterprise.testagent.domain.user.UserId userId) {
-        String userPart = userId.value().replaceAll("[^A-Za-z0-9._-]", "-");
-        if (userPart.length() > 48) {
-            userPart = userPart.substring(0, 48);
-        }
-        return "public-" + userPart;
     }
 
     private String unifiedAuthId(com.enterprise.testagent.domain.user.UserId userId) {

@@ -17,22 +17,26 @@
 - Result:
   - 定向 Vitest 4 文件 32 项、agent-web typecheck、用户手册与 agent-web 生产 build 通过；按 `.env.test`/`test` 重启三服务后 backend health/readiness UP、frontend 3000 为 200、CORS 与 manager WebSocket 正常。
 
-### 2026-07-18 - 四层 Agent 配置、应用发布排空与个人热加载
+### 2026-07-18 - 校正 Agent 分支模型与应用发布定向热加载
 
 - Why:
-  - OpenCode 原实现只加载公共共享层和当前项目层，应用资产引用保存后既不会主动重建 workspace Instance，`.opencode/opencode.jsonc` 也被应用 Agent Diff 白名单遗漏；公共、应用、个人配置的 Git 分支和运行时优先级没有形成一致模型。
+  - 公共 Agent 原有 `public-{userId}` 编辑分支、推送 `master` 和跨服务器 rollout 模型已经正确；此前把公共个人、应用 feature 和应用个人 worktree 误当成 OpenCode 运行时覆盖层，复杂化了实现。
+  - 应用普通 docs 与应用 Agent/Skill 的发布效果不同：docs 只应通知其他成员手动更新个人工作区，Agent 配置发布则需要在不覆盖个人调试改动的前提下同步并热加载。
 - What:
-  - OpenCode 受管进程按“公共共享 → 公共个人 → 应用共享 → 应用个人”加载并后层覆盖前层；个人 worktree 只做受信路径映射，不合并公共或应用 Git 分支。启动服务显式注入公共个人、应用共享和应用个人根目录，企业离线兼容补丁同步固化该行为。
-  - 公共共享与应用共享 Agent/Skill 在推送前共用数据库持久化闸门，推送后由所有服务器同步副本、等待活跃 Run 排空，再全局 dispose；应用发布补充 PREPARING 恢复和失败中止。公共个人、应用个人保存只在当前用户 Run 空闲后调用其专属 OpenCode `/global/dispose`。
-  - 应用 Agent Diff/Git 白名单精确扩展为 `.opencode/opencode.json(c)`、`.opencode/agents/**`、`.opencode/skills/**`，继续复用个人提交和 feature 投影发布链路；同步运行时、workspace、数据库、API、部署、前端和用户手册文档。
+  - 完整撤销 OpenCode 1.17.8 原生四层加载、三个新增启动环境变量及离线补丁内容；运行时保持原生模型：公共配置由 `OPENCODE_CONFIG_DIR` 加载，应用配置由当前个人工作区 `.opencode` 加载。`OPENCODE_REFERENCES_DIR` 引用能力保留。
+  - 公共 Agent 流程不变。应用普通 docs 推送 feature 后继续广播版本更新，其他成员收到更新提示但个人 worktree 不自动覆盖，用户在“更新个人工作区”时同步。
+  - 应用 Agent/Skill/`opencode.json(c)` 推送 feature 后，各服务器只把白名单精确投影到本机无 `.opencode` 脏改动的成员个人 worktree；使用 `git commit --only` 保留普通 docs/spec 的 staged/dirty 状态。存在个人配置改动的用户整组跳过并写失败审计，不 dispose。
+  - 对成功同步的用户按精确 PID/启动时间登记 rollout target，等待运行空闲后定向调用 `/global/dispose`；端口复用或身份尚未收敛时重试，不能误排空或漏热加载。个人 Agent/Skill/引用 JSONC 保存仍只排空当前用户进程。
+  - 应用 Agent Diff、暂存、提交和发布白名单包含 `.opencode/opencode.jsonc`；同步 workspace/runtime、HTTP API、部署、模块图和前端说明。
 - How:
-  - 复用现有 `PublicAgentConfigRolloutCoordinator`、公共路由/进程启动程序、版本副本同步、`disposeGlobal()`、Agent/Command refetch 和 `runtimeBusy`；数据库迁移把 rollout 增加 `PUBLIC/APPLICATION` scope 及 scopeKey，旧记录默认兼容为 `PUBLIC`。
-  - 在 OpenCode 1.17.8 精确上游提交应用离线补丁并运行路径测试；按 Java 25、`.env.test`、`test` profile 和本地补丁 OpenCode 重启三服务，通过受管 API初始化用户进程。
+  - 复用现有 `PublicAgentConfigRolloutCoordinator`、版本同步广播、个人 worktree、`materializeCommitFiles`、workspace sync 审计和公共 rollout 排空状态机；没有新增平行 Git/dispose 实现，也没有修改 generated SDK、manager 协议或 `.env.local`。
+  - 新增 Git 白名单查询与 `commit --only` 原语；应用发布按活跃成员和当前服务器个人 worktree 收敛，普通工作区内容不参与自动投影。
 - Result:
-  - 后端定向测试通过：workspace management 93、opencode runtime 29、persistence 4；OpenCode 四层路径测试 2/2，Git 面板 35 项、agent-web typecheck、用户手册和生产构建通过。真实 PostgreSQL 已成功执行 `V20260718123000`；persistence 全量 H2 测试仍被既有 `TIMESTAMPTZ` migration 兼容问题阻断。
-  - backend/readiness 为 UP，frontend 3000 返回 200，manager 已连接；用户 OpenCode 在 4096 READY，进程环境包含三个新增根目录。保存引用并 dispose 后 `/config` 曾读到 `docs-appdocs`，随后按测试要求删除应用资产引用关系和个人 `.opencode/opencode.jsonc`，再次 dispose 后 `references=null`，应用 Agent Diff 不再包含该文件。
-  - `.config` 的 `origin/master` 与本地 `master` 均为 `3c89512`；本地 `enterprise` 为未跟踪远程的分叉分支 `1ad3d20`，当前运行和更新以 `origin/master` 为准，企业专有内容需评审后显式合并，不能自动覆盖。
-  - 未新增 HTTP 路径、RunEvent/SSE 或 generated SDK；涉及数据库兼容迁移和调度轮询，不修改 `.env.local`，没有引入依赖。
+  - 定向测试通过：真实 Git 9 项、workspace management 50 项、rollout/runtime 19 项、启动服务 12 项；前端全量 79 个文件通过（1313 passed / 1 skipped），全工作区 typecheck 通过。
+  - 后端全量 `mvn test` 中本轮涉及模块及 API 均通过，最终仍被既有公共 rollout migration `V20260717173000` 的 `timestamptz` 与 H2 不兼容阻断（persistence 76 errors）；已执行迁移未改写，避免真实测试库 Flyway checksum 冲突。
+  - 按 `.env.test`/`test` profile 完整构建并重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端 3000 为 200、CORS 200、manager WebSocket 已连接。manager 使用标准 `/Users/kaka/.opencode/bin/opencode`，未运行自定义四层 OpenCode 源码。
+  - 先前测试用应用资产引用关系和个人 `.opencode/opencode.jsonc` 保持删除状态；`.config` 当前仍以 `origin/master@3c89512` 为运行/更新事实源，`enterprise@1ad3d20` 只可评审后选择性合并，不能自动覆盖。
+  - 未新增 HTTP 路径或 RunEvent/SSE；保留已执行的应用 rollout scope 数据库兼容迁移，无新 migration。安全上不覆盖个人配置脏改动，进程定向采用精确身份；性能开销仅发生在应用 Agent 发布时，按活跃成员及其本机 worktree 有界执行。
 
 ### 2026-07-18 - 更新公共 OpenCode 配置并重启引用功能环境
 
