@@ -102,11 +102,11 @@ Token 校验流程：
 
 工作区文件与 Agent 配置文件操作属于受控 WebSocket 例外。前端不得直连 opencode server 或任意文件服务，必须先通过平台后端解析目标服务器，再使用目标后端的一次性 ticket 建立 WebSocket。实现和后续扩展必须满足：
 
-1. `file-ws-route` 必须基于当前登录用户的 opencode 进程解析目标后端，并强校验 `workspace.linuxServerId == opencodeProcess.linuxServerId == targetBackend.linuxServerId`；历史 `workspace.linuxServerId` 为空时只能在 root path 校验成功后回填。
+1. `file-ws-route` 必须基于当前登录用户的 opencode 进程解析目标后端，并强校验 `workspace.linuxServerId == opencodeProcess.linuxServerId == targetBackend.linuxServerId`；历史 `workspace.linuxServerId` 为空时只能在 root path 校验成功后回填。托管工作区在 route、workspace ticket 签发和每一条 `workspace.*` RPC 都必须实时校验当前用户仍是有效应用成员，`SUPER_ADMIN` 不旁路成员关系，不能依赖 ticket 签发时缓存的成员状态；非托管 Workspace 默认拒绝文件访问，仅服务器工作空间兼容链路可依据当前登录角色向 `SUPER_ADMIN` 放行，并把该角色写入 ticket 供每条 RPC 复核。
 2. Agent 配置文件必须通过 `agent-config/file-ws-route` 按 `scope/workspaceId/worktreeId/linuxServerId` 解析目标后端；公共 worktree 使用落库 `linuxServerId`，公共直接模式必须由前端传入已初始化公共配置服务器 ID。
 3. ticket 只能通过用户登录态创建，短期过期、一次性消费，并绑定 workspace、目标服务器、当前 agent 服务器、模式、Agent 配置 scope/worktree、traceId 和是否 `SUPER_ADMIN`；不得把长期 Bearer token 放入 WebSocket URL。
 4. WebSocket upgrade 必须校验 Origin 白名单、ticket 有效性和 ticket 模式；ticket 消费后无论连接成功与否都不能重复使用。
-5. `workspace.list/read/write/rename/status/delete` 必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，删除默认只允许普通文件，目录删除返回统一错误，不允许递归删除。
+5. 所有 `workspace.*` 操作必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，目录树删除不跟随符号链接并拒绝根目录和任意层级 `.git`。`workspace.view.list/read` 的 locator 只能表达逻辑来源，后端必须从当前工作区最新 JSONC 重建允许挂载，重新校验当前应用关联、`APPLICATION_ASSET_REPOSITORY`、总体及本机副本 READY、当前平台 `OPENCODE_REFERENCES_DIR`、SDD 根目录白名单和路径安全，禁止接收物理路径或 repositoryId。引用内容只能读取，单引用错误以不含物理路径的局部 warning 返回。
 6. `agent-config.list/read/write` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，公共配置写入校验 `SUPER_ADMIN`，应用配置写入校验 `APP_ADMIN`（`SUPER_ADMIN` 继承），路径仍由 workspace-management 文件服务归一化。
 7. 应用 `.opencode/**` 与普通文件共用版本个人 worktree 时，个人 worktree 的 `commit/publish` HTTP 入口也必须对规范化文件白名单执行 `APP_ADMIN` 校验；不能只依赖前端 Tab 或 Agent 文件 WebSocket 权限。`spec/**` 禁止发布的服务层规则继续对所有角色生效。
 8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。

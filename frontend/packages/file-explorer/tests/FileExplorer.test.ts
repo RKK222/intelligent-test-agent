@@ -3,6 +3,32 @@ import { describe, expect, it } from "vitest";
 import FileExplorer from "../src/FileExplorer.vue";
 
 describe("FileExplorer", () => {
+  it("forwards view entries so duplicate logical paths keep their locator identity", async () => {
+    const reference = {
+      id: "reference:requirements:guide",
+      type: "file" as const,
+      path: "docs/guide.md",
+      name: "guide.md",
+      locator: { kind: "REFERENCE" as const, path: "docs/guide.md", referenceAlias: "requirements" },
+      source: "REFERENCE" as const,
+      merged: true,
+      collision: false,
+      readonly: true,
+      referenceAliases: ["requirements"]
+    };
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: { "": [reference] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "guide.md" }));
+    expect(view.emitted("openViewFile")).toEqual([[reference]]);
+    expect(view.emitted("openFile")).toBeUndefined();
+  });
+
   it("uploads selected files to the workspace root", async () => {
     const view = render(FileExplorer, {
       props: {

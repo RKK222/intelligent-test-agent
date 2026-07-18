@@ -1,6 +1,12 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
-import type { PromptPart } from "@test-agent/shared-types";
+import type { PromptPart, WorkspaceViewLocator } from "@test-agent/shared-types";
+
+export type ChatContextOpenTarget = {
+  workspaceId: string;
+  locator: WorkspaceViewLocator;
+  logicalPath?: string;
+};
 
 export const CHAT_CONTEXT_LIMITS = {
   MAX_SELECTION_CHARS: 20_000,
@@ -12,7 +18,7 @@ export const CHAT_CONTEXT_LIMITS = {
 export type ChatSelectionContextItem = {
   id: string;
   type: "selection";
-  source: "workspace";
+  source: "workspace" | "reference";
   path: string;
   fileName: string;
   language?: string;
@@ -21,12 +27,13 @@ export type ChatSelectionContextItem = {
   text: string;
   charCount: number;
   createdAt: number;
+  openTarget?: ChatContextOpenTarget;
 };
 
 export type ChatFileContextItem = {
   id: string;
   type: "file";
-  source: "workspace";
+  source: "workspace" | "reference";
   path: string;
   fileName: string;
   language?: string;
@@ -35,6 +42,7 @@ export type ChatFileContextItem = {
   lineCount: number;
   sizeBytes?: number;
   createdAt: number;
+  openTarget?: ChatContextOpenTarget;
 };
 
 export type ChatContextItem = ChatSelectionContextItem | ChatFileContextItem;

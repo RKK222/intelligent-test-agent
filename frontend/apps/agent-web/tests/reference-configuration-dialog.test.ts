@@ -235,6 +235,7 @@ describe("ReferenceConfigurationDialog", () => {
       ".opencode/opencode.jsonc",
       expect.stringContaining('"description": "产品需求与接口约束"')
     );
+    expect(wrapper.emitted("saved")).toEqual([[]]);
   });
 
   it("loads an existing local reference, enables Update only after a change, and preserves unknown fields", async () => {

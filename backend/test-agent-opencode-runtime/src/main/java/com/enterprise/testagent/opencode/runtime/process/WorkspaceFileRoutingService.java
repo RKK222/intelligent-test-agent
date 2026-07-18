@@ -10,6 +10,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -41,6 +42,7 @@ public class WorkspaceFileRoutingService {
     private final ManagedWorkspacePathResolver pathResolver;
     private final Clock clock;
     private final ConversationContextStore conversationContextStore;
+    private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
 
     /**
      * 生产构造器使用系统时钟。
@@ -51,14 +53,16 @@ public class WorkspaceFileRoutingService {
             UserOpencodeProcessAssignmentService assignmentService,
             BackendJavaRouteResolver routeResolver,
             ManagedWorkspacePathResolver pathResolver,
-            ConversationContextStore conversationContextStore) {
+            ConversationContextStore conversationContextStore,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
         this(
                 workspaceRepository,
                 assignmentService,
                 routeResolver,
                 pathResolver,
                 Clock.systemUTC(),
-                conversationContextStore);
+                conversationContextStore,
+                workspaceAccessAuthorizer);
     }
 
     /**
@@ -88,12 +92,33 @@ public class WorkspaceFileRoutingService {
             ManagedWorkspacePathResolver pathResolver,
             Clock clock,
             ConversationContextStore conversationContextStore) {
+        this(
+                workspaceRepository,
+                assignmentService,
+                routeResolver,
+                pathResolver,
+                clock,
+                conversationContextStore,
+                (userId, workspaceId) -> { });
+    }
+
+    public WorkspaceFileRoutingService(
+            WorkspaceRepository workspaceRepository,
+            UserOpencodeProcessAssignmentService assignmentService,
+            BackendJavaRouteResolver routeResolver,
+            ManagedWorkspacePathResolver pathResolver,
+            Clock clock,
+            ConversationContextStore conversationContextStore,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.conversationContextStore = conversationContextStore;
+        this.workspaceAccessAuthorizer = Objects.requireNonNull(
+                workspaceAccessAuthorizer,
+                "workspaceAccessAuthorizer must not be null");
     }
 
     /**
@@ -123,6 +148,19 @@ public class WorkspaceFileRoutingService {
      * 根据当前用户 opencode 进程定位工作空间文件 WebSocket 所在后端。
      */
     public WorkspaceFileRouteResponse routeWorkspace(UserId userId, String agentId, WorkspaceId workspaceId, String traceId) {
+        return routeWorkspace(userId, agentId, workspaceId, traceId, false);
+    }
+
+    /**
+     * 根据当前用户 opencode 进程定位工作空间文件 WebSocket 所在后端；非托管服务器工作区仅向超级管理员兼容开放。
+     */
+    public WorkspaceFileRouteResponse routeWorkspace(
+            UserId userId,
+            String agentId,
+            WorkspaceId workspaceId,
+            String traceId,
+            boolean allowUnmanagedWorkspace) {
+        workspaceAccessAuthorizer.requireFileAccess(userId, workspaceId, allowUnmanagedWorkspace);
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
         UserOpencodeProcessFileRoutingAffinity process = assignmentService.fileRoutingAffinity(userId, agentId, traceId);

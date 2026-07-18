@@ -45,7 +45,9 @@ import type {
   Workspace,
   WorkspaceBackendServer,
   WorkspaceDirectoryList,
-  WorkspaceGitDiffFile
+  WorkspaceGitDiffFile,
+  WorkspaceViewEntry,
+  WorkspaceViewWarning
 } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
@@ -77,6 +79,26 @@ import {
   isAgentFilePath,
   type AgentFileLoadRequest
 } from "./agentFileLoad";
+import {
+  isReferenceFilePath,
+  referenceFileInfo,
+  referenceReadFailurePatch,
+  referenceTabPath
+} from "./referenceFileLoad";
+import {
+  collectWorkspaceViewWarnings,
+  copiedWorkspaceFileTargetPath,
+  ROOT_WORKSPACE_VIEW_TARGET,
+  referenceChatPath,
+  revalidatedWorkspaceViewRefreshTarget,
+  resolveWorkspaceViewLoadTarget,
+  workspaceViewContextIsCurrent,
+  workspaceViewEntries,
+  workspaceFileRefreshSettlements,
+  workspaceViewRefreshTargets,
+  type WorkspaceViewLoadTarget,
+  type WorkspaceViewWarningSnapshot
+} from "./workspaceViewState";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
 import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
@@ -109,7 +131,6 @@ import {
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
   errorFeedback,
-  filterWorkspaceRootEntries,
   historyItems,
   inferDiffFromToolPart,
   initialMessages,
@@ -240,6 +261,10 @@ const selectedWorkspaceId = ref<string | undefined>(undefined);
 const selectedWorkspaceSnapshot = shallowRef<Workspace | undefined>(undefined);
 const entriesByDirectory = ref<Record<string, FileTreeEntry[]>>({});
 const expandedDirectories = ref<Set<string>>(new Set());
+const workspaceViewDirectoryById = new Map<string, WorkspaceViewEntry>();
+const workspaceViewNodeIdByTabPath = new Map<string, string>();
+const workspaceViewWarningByDirectory = new Map<string, WorkspaceViewWarningSnapshot>();
+const workspaceViewWarnings = ref<WorkspaceViewWarning[]>([]);
 // 文件树面板内错误状态，不覆盖全局顶部反馈
 const fileTreeError = ref<string | null>(null);
 let workspaceLoadGeneration = 0;
@@ -570,6 +595,9 @@ const chatMessagesForPanel = computed<AgentMessage[]>(() =>
 
 const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
+const activeWorkspaceViewNodeId = computed(() =>
+  workbench.activePath ? workspaceViewNodeIdByTabPath.get(workbench.activePath) ?? workbench.activePath : undefined
+);
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
 const activeTabInitialLoading = computed(() =>
@@ -578,7 +606,13 @@ const activeTabInitialLoading = computed(() =>
 const codeEditorRef = ref<any>(null);
 const breadcrumbDisplay = computed(() => {
   if (!activePath.value) return "";
-  return activePath.value.split(/[\\/]+/).filter(Boolean).join(" › ");
+  const displayPath = isReferenceFilePath(activePath.value)
+    ? (() => {
+        const info = referenceFileInfo(activePath.value!);
+        return referenceChatPath(info.referenceAlias, info.referencePath);
+      })()
+    : activePath.value;
+  return displayPath.split(/[\\/]+/).filter(Boolean).join(" › ");
 });
 
 // ===== 查询 =====
@@ -1754,7 +1788,7 @@ watch(opencodeProcessReady, (ready, previous) => {
   void queryClient.invalidateQueries({ queryKey: ["runtime", "vcs"] });
   refreshAgentsCatalog();
   if (selectedWorkspaceId.value) {
-    void loadDirectory("", selectedWorkspaceId.value, true);
+    void refreshWorkspaceView(selectedWorkspaceId.value);
   }
   if (selectedAppId.value && !selectedWorkspaceId.value && !retryingWorkspaceAfterOpencodeReady) {
     retryingWorkspaceAfterOpencodeReady = true;
@@ -1969,6 +2003,9 @@ const agentConfigRevision = ref(0);
 
 const saveMutation = useMutation({
   mutationFn: async (tab: NonNullable<typeof activeTab.value>) => {
+    if (isReferenceFilePath(tab.path)) {
+      throw new Error("引用文件为只读，不能保存");
+    }
     if (isAgentFilePath(tab.path)) {
       const agent = agentFileInfo(tab.path);
       if (agent.scope === "PUBLIC") {
@@ -2725,6 +2762,10 @@ function resetWorkspaceState() {
   clearFileTreeRetryTimers();
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
+  workspaceViewDirectoryById.clear();
+  workspaceViewNodeIdByTabPath.clear();
+  workspaceViewWarningByDirectory.clear();
+  workspaceViewWarnings.value = [];
   loadingPath.value = new Set();
   fileTreeError.value = null;
   // 切换工作区时清空搜索状态，避免旧工作区的搜索结果残留。
@@ -2872,6 +2913,32 @@ async function openServerWorkspacePicker() {
 function openReferenceConfiguration() {
   if (!showReferenceConfiguration.value || !selectedAppId.value || !selectedWorkspace.value) return;
   referenceConfigurationOpen.value = true;
+}
+
+async function refreshWorkspaceViewAfterReferenceSaved() {
+  await refreshWorkspaceView();
+}
+
+async function refreshWorkspaceView(workspaceId = selectedWorkspace.value?.workspaceId) {
+  if (!workspaceId) return;
+  const targets = workspaceViewRefreshTargets(expandedDirectories.value, workspaceViewDirectoryById);
+  for (const settlement of workspaceFileRefreshSettlements(workbench.tabs, isAgentFilePath)) {
+    workbench.updateTab(settlement.path, settlement.patch);
+  }
+  latestWorkspaceFileReadByPath.clear();
+  const generation = ++workspaceLoadGeneration;
+  clearFileTreeRetryTimers();
+  entriesByDirectory.value = {};
+  workspaceViewDirectoryById.clear();
+  workspaceViewWarningByDirectory.clear();
+  workspaceViewWarnings.value = [];
+  loadingPath.value = new Set();
+  await loadDirectory(targets[0] ?? ROOT_WORKSPACE_VIEW_TARGET, workspaceId, true, 0, generation);
+  // 逐层重放展开目录，使子目录能从刚加载的父目录中重新认领最新 locator。
+  for (const previous of targets.slice(1)) {
+    const current = revalidatedWorkspaceViewRefreshTarget(previous, workspaceViewDirectoryById);
+    if (current) await loadDirectory(current, workspaceId, true, 0, generation);
+  }
 }
 
 async function selectServerWorkspaceServer(server: WorkspaceBackendServer) {
@@ -3047,12 +3114,7 @@ function handleLoadVersions(templateId: string) {
 
 function refreshCurrentWorkspacePanels() {
   if (!selectedWorkspace.value) return;
-  void loadDirectory("", undefined, true);
-  for (const path of Object.keys(entriesByDirectory.value)) {
-    if (path !== "") {
-      void loadDirectory(path, undefined, true);
-    }
-  }
+  void refreshWorkspaceView();
   void refreshWorkspaceGitDiff();
 }
 
@@ -3171,12 +3233,22 @@ async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBacken
 }
 
 async function loadDirectory(
-  path: string,
+  requestedTarget: string | WorkspaceViewLoadTarget,
   workspaceId = selectedWorkspace.value?.workspaceId,
   force = false,
   retryCount = 0,
   generation = workspaceLoadGeneration
 ) {
+  const target: WorkspaceViewLoadTarget = typeof requestedTarget === "string"
+    ? requestedTarget === ""
+      ? ROOT_WORKSPACE_VIEW_TARGET
+      : resolveWorkspaceViewLoadTarget(requestedTarget, workspaceViewDirectoryById)
+        ?? {
+          id: requestedTarget,
+          locator: { kind: "WORKSPACE", path: requestedTarget }
+        }
+    : requestedTarget;
+  const cacheKey = target.id;
   if (!workspaceId || !workspaceLoadIsCurrent(
     workspaceId,
     generation,
@@ -3188,19 +3260,26 @@ async function loadDirectory(
   // 已被其他并发请求加载完成（或正在加载）就直接返回，避免重复请求与状态竞争。
   // 显式传 force=true（典型场景：用户点击文件树刷新按钮）时，即便已经加载也要重新拉取；
   // 但仍跳过正在加载中的请求，避免短时间内多次点击产生并发重复请求。
-  if (loadingPath.value.has(path) || (!force && entriesByDirectory.value[path] !== undefined)) {
+  if (loadingPath.value.has(cacheKey) || (!force && entriesByDirectory.value[cacheKey] !== undefined)) {
     return;
   }
   const nextLoading = new Set(loadingPath.value);
-  nextLoading.add(path);
+  nextLoading.add(cacheKey);
   loadingPath.value = nextLoading;
   try {
-    const entries = filterWorkspaceRootEntries(path, await api.listFiles(workspaceId, path));
+    const response = await api.listWorkspaceView(workspaceId, target.locator);
+    const entries = workspaceViewEntries(response.entries);
     if (!workspaceLoadIsCurrent(workspaceId, generation, selectedWorkspaceIdRef.value, workspaceLoadGeneration)) {
       return;
     }
-    entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
-    if (path === "") {
+    entriesByDirectory.value = { ...entriesByDirectory.value, [cacheKey]: entries };
+    for (const entry of response.entries) workspaceViewDirectoryById.set(entry.id, entry);
+    workspaceViewWarningByDirectory.set(cacheKey, {
+      warnings: response.warnings,
+      truncated: response.truncated
+    });
+    workspaceViewWarnings.value = collectWorkspaceViewWarnings(workspaceViewWarningByDirectory);
+    if (cacheKey === "") {
       workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: true };
       // 根目录加载成功后清除面板内错误
       fileTreeError.value = null;
@@ -3210,7 +3289,7 @@ async function loadDirectory(
       return;
     }
     // 根目录加载失败：设置面板内错误，保留上次成功数据
-    if (path === "") {
+    if (cacheKey === "") {
       if (error instanceof BackendApiError && ["OPENCODE_UNAVAILABLE", "OPENCODE_BAD_GATEWAY"].includes(error.code)) {
         workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: false };
       }
@@ -3220,7 +3299,7 @@ async function loadDirectory(
         fileTreeError.value = `加载文件树失败，${delay / 1000} 秒后重试...`;
         const timer = setTimeout(() => {
           fileTreeRetryTimers.delete(timer);
-          void loadDirectory(path, workspaceId, force, retryCount + 1, generation);
+          void loadDirectory(target, workspaceId, force, retryCount + 1, generation);
         }, delay);
         fileTreeRetryTimers.add(timer);
       } else {
@@ -3229,16 +3308,16 @@ async function loadDirectory(
       }
     } else {
       // 非根目录加载失败：从展开集合里把这条目录回滚掉
-      if (expandedDirectories.value.has(path)) {
+      if (expandedDirectories.value.has(cacheKey)) {
         const nextExpanded = new Set(expandedDirectories.value);
-        nextExpanded.delete(path);
+        nextExpanded.delete(cacheKey);
         expandedDirectories.value = nextExpanded;
       }
     }
   } finally {
     if (workspaceLoadIsCurrent(workspaceId, generation, selectedWorkspaceIdRef.value, workspaceLoadGeneration)) {
       const cleared = new Set(loadingPath.value);
-      cleared.delete(path);
+      cleared.delete(cacheKey);
       loadingPath.value = cleared;
     }
   }
@@ -3510,6 +3589,67 @@ async function openFile(path: string) {
   await loadWorkspaceFile(path, { activate: true });
 }
 
+async function openWorkspaceViewFile(entry: WorkspaceViewEntry) {
+  if (entry.source === "WORKSPACE") {
+    const path = entry.workspacePath ?? entry.path;
+    workspaceViewNodeIdByTabPath.set(path, entry.id);
+    await loadWorkspaceFile(path, { activate: true });
+    return;
+  }
+  const workspace = selectedWorkspace.value;
+  const alias = entry.locator.referenceAlias ?? entry.referenceAliases[0];
+  if (!workspace || !alias) {
+    feedback.value = { kind: "error", title: "无法打开引用文件", description: "引用来源缺少稳定别名。" };
+    return;
+  }
+  const tabPath = referenceTabPath({
+    workspaceId: workspace.workspaceId,
+    referenceAlias: alias,
+    referencePath: entry.locator.path,
+    logicalPath: entry.path
+  });
+  const existing = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+  const hadLoadedCache = workbench.tabHasLoadedSnapshot(existing);
+  const requestGeneration = ++workspaceFileReadSequence;
+  const workspaceGeneration = workspaceLoadGeneration;
+  latestWorkspaceFileReadByPath.set(tabPath, requestGeneration);
+  workspaceViewNodeIdByTabPath.set(tabPath, entry.id);
+  centerMode.value = "editor";
+  workbench.openTab({
+    id: existing?.id ?? `file:${tabPath}`,
+    path: tabPath,
+    title: entry.name,
+    content: existing?.content ?? "",
+    savedContent: existing?.savedContent ?? "",
+    readonly: true,
+    livePreview: false,
+    loadState: "loading",
+    loadError: undefined,
+    hasLoadedSnapshot: hadLoadedCache
+  });
+  try {
+    const file = await api.readWorkspaceViewFile(workspace.workspaceId, entry.locator);
+    if (selectedWorkspaceIdRef.value !== workspace.workspaceId
+      || workspaceLoadGeneration !== workspaceGeneration
+      || latestWorkspaceFileReadByPath.get(tabPath) !== requestGeneration
+      || !workbench.tabs.some((tab: EditorTab) => tab.path === tabPath)) return;
+    workbench.updateTab(tabPath, {
+      content: file.content,
+      savedContent: file.content,
+      readonly: true,
+      loadState: "loaded",
+      loadError: undefined,
+      hasLoadedSnapshot: true
+    });
+  } catch (error) {
+    if (selectedWorkspaceIdRef.value !== workspace.workspaceId
+      || workspaceLoadGeneration !== workspaceGeneration
+      || latestWorkspaceFileReadByPath.get(tabPath) !== requestGeneration) return;
+    const failure = errorFeedback("读取引用文件失败", error);
+    workbench.updateTab(tabPath, referenceReadFailurePatch(hadLoadedCache, failure.description));
+  }
+}
+
 function normalizedAgentRouteValue(value?: string | null): string {
   return value ?? "";
 }
@@ -3706,6 +3846,11 @@ function activateEditorTab(path: string) {
     workbench.setActivePath(path);
     return;
   }
+  if (isReferenceFilePath(path)) {
+    if (tab.loadState === "error") void reloadReferenceTab(tab);
+    else workbench.setActivePath(path);
+    return;
+  }
   if (tab.loadState === "error") {
     void loadWorkspaceFile(path, { activate: true });
     return;
@@ -3724,7 +3869,29 @@ function retryActiveFile() {
     void loadAgentFile(request);
     return;
   }
+  if (isReferenceFilePath(tab.path)) {
+    void reloadReferenceTab(tab);
+    return;
+  }
   void openFile(tab.path);
+}
+
+async function reloadReferenceTab(tab: EditorTab) {
+  const info = referenceFileInfo(tab.path);
+  const nodeId = workspaceViewNodeIdByTabPath.get(tab.path);
+  const known = nodeId ? workspaceViewDirectoryById.get(nodeId) : undefined;
+  await openWorkspaceViewFile(known ?? {
+    id: nodeId ?? tab.path,
+    path: info.logicalPath,
+    name: tab.title,
+    type: "file",
+    locator: { kind: "REFERENCE", path: info.referencePath, referenceAlias: info.referenceAlias },
+    source: "REFERENCE",
+    merged: true,
+    collision: false,
+    readonly: true,
+    referenceAliases: [info.referenceAlias]
+  });
 }
 
 async function handleCreateEntry(directory: string, name: string, type: "file" | "directory") {
@@ -3766,25 +3933,6 @@ function workspacePathInDirectory(directory: string, name: string): string {
   return `${directory}${directory.includes("\\") ? "\\" : "/"}${name}`;
 }
 
-/** 同目录复制时生成不覆盖原文件的名称，其余冲突仍由后端原子校验兜底。 */
-function copiedFileTargetPath(sourcePath: string, targetDirectory: string): string {
-  const originalName = fileNameOf(sourcePath);
-  const existingNames = new Set((entriesByDirectory.value[targetDirectory] ?? []).map((entry) => entry.name));
-  if (!existingNames.has(originalName)) return workspacePathInDirectory(targetDirectory, originalName);
-
-  const extensionIndex = originalName.lastIndexOf(".");
-  const hasExtension = extensionIndex > 0;
-  const stem = hasExtension ? originalName.slice(0, extensionIndex) : originalName;
-  const extension = hasExtension ? originalName.slice(extensionIndex) : "";
-  let sequence = 1;
-  let candidate = `${stem} copy${extension}`;
-  while (existingNames.has(candidate)) {
-    sequence += 1;
-    candidate = `${stem} copy ${sequence}${extension}`;
-  }
-  return workspacePathInDirectory(targetDirectory, candidate);
-}
-
 /** 使用分块转换避免一次展开整个 Uint8Array 导致调用栈溢出。 */
 async function workspaceUploadBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -3800,7 +3948,12 @@ async function handleCopyEntry(sourcePath: string, targetDirectory: string) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再复制文件。" };
     return;
   }
-  const targetPath = copiedFileTargetPath(sourcePath, targetDirectory);
+  const targetPath = copiedWorkspaceFileTargetPath(
+    sourcePath,
+    targetDirectory,
+    entriesByDirectory.value,
+    workspaceViewDirectoryById
+  );
   try {
     await api.copyWorkspaceFile(selectedWorkspace.value.workspaceId, sourcePath, targetPath);
     await loadDirectory(targetDirectory, undefined, true);
@@ -4015,6 +4168,7 @@ async function handleRenameEntry(path: string, name: string) {
         entry.path === nextPath ? { ...entry, name } : entry
       )
     };
+    await refreshWorkspaceView(workspaceId);
 
     // 重命名会改变 Git diff 路径；刷新变更面板但不重新读取刚刚已经打开的文件内容。
     void refreshWorkspaceGitDiff();
@@ -4061,6 +4215,7 @@ async function handleDeleteEntry(path: string, type: "file" | "directory") {
         })
       );
     }
+    await refreshWorkspaceView(workspaceId);
 
     // 删除目录时关闭目录内全部已打开文件，避免保留指向已不存在路径的编辑器标签。
     const normalizedDeletedPath = path.replace(/\\/g, "/");
@@ -4197,7 +4352,24 @@ async function handlePreviewContext(item: ChatContextItem) {
   if (!item.path) {
     return;
   }
-  await openFile(item.path);
+  if (item.openTarget?.locator.kind === "REFERENCE") {
+    const alias = item.openTarget.locator.referenceAlias;
+    if (!alias || item.openTarget.workspaceId !== selectedWorkspace.value?.workspaceId) return;
+    await openWorkspaceViewFile({
+      id: item.id,
+      path: item.openTarget.logicalPath ?? item.openTarget.locator.path,
+      name: item.fileName,
+      type: "file",
+      locator: item.openTarget.locator,
+      source: "REFERENCE",
+      merged: true,
+      collision: false,
+      readonly: true,
+      referenceAliases: [alias]
+    });
+  } else {
+    await openFile(item.path);
+  }
   if (item.type === "selection") {
     setTimeout(() => {
       codeEditorRef.value?.revealSelection({
@@ -4229,20 +4401,28 @@ function addCurrentSelectionToChatContext() {
     return;
   }
   const tab = activeTab.value;
+  const reference = isReferenceFilePath(tab.path) ? referenceFileInfo(tab.path) : undefined;
   const selection = editorSelection.value;
   const text = selection.text;
   const result = chatContextStore.addSelectionContext({
     id: createContextId(),
     type: "selection",
-    source: "workspace",
-    path: tab.path,
-    fileName: fileNameOf(tab.path),
-    language: languageFromPath(tab.path),
+    source: reference ? "reference" : "workspace",
+    path: reference ? referenceChatPath(reference.referenceAlias, reference.referencePath) : tab.path,
+    fileName: reference ? fileNameOf(reference.logicalPath) : fileNameOf(tab.path),
+    language: languageFromPath(reference?.logicalPath ?? tab.path),
     startLine: selection.startLineNumber,
     endLine: selection.endLineNumber,
     text,
     charCount: text.length,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    ...(reference ? {
+      openTarget: {
+        workspaceId: reference.workspaceId,
+        locator: { kind: "REFERENCE" as const, path: reference.referencePath, referenceAlias: reference.referenceAlias },
+        logicalPath: reference.logicalPath
+      }
+    } : {})
   });
   notifyChatContextValidation(result, "已添加选区上下文");
 }
@@ -4291,6 +4471,57 @@ async function addWorkspaceFileToChatContext(path: string, silentSuccess = false
     return result.ok;
   } catch (error) {
     feedback.value = errorFeedback("添加文件上下文失败", error);
+    return false;
+  }
+}
+
+async function addWorkspaceViewFileToChatContext(entry: WorkspaceViewEntry): Promise<boolean> {
+  if (entry.source === "WORKSPACE") {
+    return addWorkspaceFileToChatContext(entry.workspacePath ?? entry.path);
+  }
+  const workspace = selectedWorkspace.value;
+  const alias = entry.locator.referenceAlias ?? entry.referenceAliases[0];
+  if (!workspace || !alias) {
+    feedback.value = { kind: "info", title: "无法添加引用文件", description: "引用来源缺少稳定别名。" };
+    return false;
+  }
+  const workspaceGeneration = workspaceLoadGeneration;
+  try {
+    const file = await api.readWorkspaceViewFile(workspace.workspaceId, entry.locator);
+    if (!workspaceViewContextIsCurrent(
+      workspace.workspaceId,
+      workspaceGeneration,
+      selectedWorkspaceIdRef.value,
+      workspaceLoadGeneration
+    )) return false;
+    if (looksBinaryContent(file.content)) {
+      feedback.value = { kind: "info", title: "暂不支持添加二进制文件", description: entry.path };
+      return false;
+    }
+    const content = file.content;
+    const path = referenceChatPath(alias, entry.locator.path);
+    const result = chatContextStore.addFileContext({
+      id: `reference:${workspace.workspaceId}:${alias}:${entry.locator.path}`,
+      type: "file",
+      source: "reference",
+      path,
+      fileName: entry.name,
+      language: languageFromPath(entry.path),
+      content,
+      charCount: content.length,
+      lineCount: content.length === 0 ? 0 : content.split("\n").length,
+      sizeBytes: new Blob([content]).size,
+      createdAt: Date.now(),
+      openTarget: {
+        workspaceId: workspace.workspaceId,
+        locator: entry.locator,
+        logicalPath: entry.path
+      }
+    });
+    notifyChatContextValidation(result, "已添加引用文件上下文");
+    return result.ok;
+  } catch (error) {
+    feedback.value = errorFeedback("添加引用文件上下文失败", error);
     return false;
   }
 }
@@ -4352,6 +4583,20 @@ function toggleDirectory(path: string) {
     if (entriesByDirectory.value[path] === undefined) {
       void loadDirectory(path);
     }
+  }
+  expandedDirectories.value = next;
+}
+
+function toggleWorkspaceViewDirectory(entry: WorkspaceViewEntry) {
+  const id = entry.id;
+  workspaceViewDirectoryById.set(id, entry);
+  if (loadingPath.value.has(id)) return;
+  const next = new Set(expandedDirectories.value);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+    if (entriesByDirectory.value[id] === undefined) void loadDirectory(entry);
   }
   expandedDirectories.value = next;
 }
@@ -4757,10 +5002,7 @@ function applyRunEventWorkbenchProjection(
       : run.value;
     // Run 完成后刷新所有已展开的目录，确保新增/删除/修改的文件在左侧工作区立即可见。
     setTimeout(() => {
-      loadDirectory("", undefined, true);
-      for (const dir of expandedDirectories.value) {
-        loadDirectory(dir, undefined, true);
-      }
+      void refreshWorkspaceView();
     }, 500);
     // 计算任务消耗统计：duration 由 chatStartedAt 锁定，tokens 仍优先取累计值；
     // 如果后端 payload 直接带上 tokens 字段，则覆盖一次（向后兼容未来后端实现）。
@@ -4956,7 +5198,7 @@ function refreshParentDirectory(relPath: string) {
   }
   const segments = relPath.split("/").filter(Boolean);
   if (segments.length <= 1) {
-    void loadDirectory("", undefined, true);
+    void refreshWorkspaceView();
     return;
   }
   const parentPath = segments.slice(0, -1).join("/");
@@ -4964,7 +5206,7 @@ function refreshParentDirectory(relPath: string) {
 }
 
 // 展开文件树到目标文件：把所有祖先目录加入 expandedDirectories 并按需懒加载。
-function expandPathToFile(relPath: string) {
+async function expandPathToFile(relPath: string) {
   if (!relPath || relPath.startsWith("/")) {
     return;
   }
@@ -4976,10 +5218,11 @@ function expandPathToFile(relPath: string) {
   let acc = "";
   for (let i = 0; i < segments.length - 1; i += 1) {
     acc = acc ? `${acc}/${segments[i]}` : segments[i];
-    next.add(acc);
-    if (!entriesByDirectory.value[acc]) {
-      void loadDirectory(acc);
-    }
+    const target = resolveWorkspaceViewLoadTarget(acc, workspaceViewDirectoryById);
+    if (!target) return;
+    next.add(target.id);
+    expandedDirectories.value = new Set(next);
+    if (!entriesByDirectory.value[target.id]) await loadDirectory(target);
   }
   expandedDirectories.value = next;
 }
@@ -5211,6 +5454,7 @@ async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
     (tab: EditorTab) =>
       !tab.livePreview &&
       !isAgentFilePath(tab.path) &&
+      !isReferenceFilePath(tab.path) &&
       (!pathFilter || pathFilter.has(tab.path))
   );
   for (const tab of workspaceTabs) {
@@ -5845,7 +6089,7 @@ async function handleLogout() {
           :workspace-root-path="selectedWorkspace?.rootPath"
           :entries-by-directory="entriesByDirectory"
           :expanded-directories="expandedDirectories"
-          :active-path="activePath"
+          :active-path="activeWorkspaceViewNodeId"
           :changed-files="vcsDiffFiles"
           :loading-path="loadingPath"
           :app-name="selectedManagedApplication?.appName"
@@ -5870,11 +6114,15 @@ async function handleLogout() {
           :search-loading="searchLoading"
           :search-keyword="searchKeyword"
           :file-tree-error="fileTreeError"
+          :workspace-view-warnings="workspaceViewWarnings"
           :user-id="authStore.currentUser?.userId"
           :backend-java-server-ip="opencodeProcessStatus?.backendJavaServerIp"
           @toggle-directory="toggleDirectory"
+          @toggle-view-directory="toggleWorkspaceViewDirectory"
           @open-file="openFile"
+          @open-view-file="openWorkspaceViewFile"
           @add-file-context="addWorkspaceFileToChatContext"
+          @add-view-file-context="addWorkspaceViewFileToChatContext"
           @open-diff="handleOpenDiff"
           @refresh="refreshCurrentWorkspacePanels"
           @changes-refreshed="(payload) => refreshWorkspaceGitDiff({
@@ -6210,6 +6458,7 @@ async function handleLogout() {
     :app-id="selectedAppId ?? ''"
     :workspace-id="selectedWorkspace?.workspaceId ?? ''"
     @close="referenceConfigurationOpen = false"
+    @saved="refreshWorkspaceViewAfterReferenceSaved"
   />
 
   <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" :initial-app-id="selectedAppId" @close="settingsOpen = false" />

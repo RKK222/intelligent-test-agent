@@ -10,6 +10,15 @@ import com.enterprise.testagent.workspace.FileContentResponse;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
+import com.enterprise.testagent.workspace.WorkspaceViewEntry;
+import com.enterprise.testagent.workspace.WorkspaceViewListResponse;
+import com.enterprise.testagent.workspace.WorkspaceViewLocator;
+import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
+import com.enterprise.testagent.workspace.WorkspaceViewReadResponse;
+import com.enterprise.testagent.workspace.WorkspaceViewSource;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.user.UserId;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -217,6 +226,191 @@ class WorkspaceFileWebSocketHandlerTest {
         verify(workspaceService).moveFile(workspaceId, "docs/a.md", "archive/a.md");
     }
 
+    @Test
+    void listsCompositeWorkspaceViewAndMapsOnlyLogicalLocatorFields() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(workspaceTicket("wrk_1234567890abcdef"));
+        WorkspaceViewLocator root = WorkspaceViewLocator.root();
+        when(viewService.list(new WorkspaceId("wrk_1234567890abcdef"), root)).thenReturn(new WorkspaceViewListResponse(
+                List.of(new WorkspaceViewEntry(
+                        "view_docs",
+                        "docs",
+                        "docs",
+                        true,
+                        0L,
+                        NOW,
+                        new WorkspaceViewLocator(WorkspaceViewLocatorKind.COMPOSITE, "docs", null),
+                        WorkspaceViewSource.MIXED,
+                        true,
+                        false,
+                        false,
+                        "docs",
+                        List.of("docs-requirements"))),
+                List.of(),
+                false));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                viewService,
+                authorizer,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_view","op":"workspace.view.list","params":{
+                          "workspaceId":"wrk_1234567890abcdef",
+                          "locator":{"kind":"COMPOSITE","path":""}
+                        }}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message -> {
+            assertThat(message).contains("\"type\":\"result\"");
+            assertThat(message).contains("\"id\":\"view_docs\"");
+            assertThat(message).contains("\"source\":\"MIXED\"");
+        });
+        verify(authorizer).requireFileAccess(
+                new UserId("usr_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                false);
+        verify(viewService).list(new WorkspaceId("wrk_1234567890abcdef"), root);
+    }
+
+    @Test
+    void readsReferenceFileThroughLogicalLocator() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        WorkspaceViewLocator locator = new WorkspaceViewLocator(
+                WorkspaceViewLocatorKind.REFERENCE,
+                "guide.md",
+                "docs-requirements");
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(workspaceTicket(workspaceId.value()));
+        when(viewService.read(workspaceId, locator)).thenReturn(new WorkspaceViewReadResponse(
+                "docs/guide.md",
+                "reference-content",
+                17L,
+                true,
+                WorkspaceViewSource.REFERENCE,
+                "docs-requirements",
+                locator));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                Mockito.mock(WorkspaceApplicationService.class),
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                viewService,
+                authorizer,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_read","op":"workspace.view.read","params":{
+                          "workspaceId":"wrk_1234567890abcdef",
+                          "locator":{"kind":"REFERENCE","path":"guide.md","referenceAlias":"docs-requirements"}
+                        }}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message -> {
+            assertThat(message).contains("\"type\":\"result\"");
+            assertThat(message).contains("\"content\":\"reference-content\"");
+            assertThat(message).doesNotContain("physicalPath", "rootPath", "repositoryId");
+        });
+        verify(authorizer).requireFileAccess(new UserId("usr_1234567890abcdef"), workspaceId, false);
+        verify(viewService).read(workspaceId, locator);
+    }
+
+    @Test
+    void revokedMembershipStopsTheNextWorkspaceModeRpcOnTheSameSocket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        UserId userId = new UserId("usr_1234567890abcdef");
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(workspaceTicket(workspaceId.value()));
+        when(workspaceService.listFiles(workspaceId, "")).thenReturn(List.of());
+        Mockito.doNothing()
+                .doThrow(new com.enterprise.testagent.common.error.PlatformException(
+                        com.enterprise.testagent.common.error.ErrorCode.FORBIDDEN,
+                        "成员关系已失效"))
+                .when(authorizer)
+                .requireFileAccess(userId, workspaceId, false);
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                viewService,
+                authorizer,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of(
+                        """
+                        {"id":"req_1","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """,
+                        """
+                        {"id":"req_2","op":"workspace.view.read","params":{"workspaceId":"wrk_1234567890abcdef","locator":{"kind":"REFERENCE","path":"readme.md","referenceAlias":"docs-requirements"}}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(2);
+        assertThat(session.sentText().get(0)).contains("\"type\":\"result\"");
+        assertThat(session.sentText().get(1)).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\"");
+        verify(viewService, never()).read(Mockito.any(), Mockito.any());
+        verify(workspaceService).listFiles(workspaceId, "");
+    }
+
+    @Test
+    void rejectsViewWorkspaceIdSpoofAndPhysicalLocatorFieldsBeforeCallingViewService() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(workspaceTicket("wrk_1234567890abcdef"));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                Mockito.mock(WorkspaceApplicationService.class),
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                viewService,
+                Mockito.mock(ConversationWorkspaceAccessAuthorizer.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of(
+                        """
+                        {"id":"req_spoof","op":"workspace.view.list","params":{"workspaceId":"wrk_other","locator":{"kind":"COMPOSITE","path":""}}}
+                        """,
+                        """
+                        {"id":"req_physical","op":"workspace.view.read","params":{"workspaceId":"wrk_1234567890abcdef","locator":{"kind":"REFERENCE","path":"guide.md","referenceAlias":"docs-requirements","physicalPath":"/private/reference"}}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(2).allSatisfy(message ->
+                assertThat(message).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
+        verify(viewService, never()).list(Mockito.any(), Mockito.any());
+        verify(viewService, never()).read(Mockito.any(), Mockito.any());
+    }
+
     private static WorkspaceFileWebSocketHandler handler(
             WorkspaceFileSocketTicketService ticketService,
             AgentConfigApplicationService agentConfigService) {
@@ -254,8 +448,10 @@ class WorkspaceFileWebSocketHandlerTest {
                 "wft_workspace",
                 workspaceId,
                 "linux-1",
-                workspaceId,
+                "linux-1",
                 false,
+                false,
+                "usr_1234567890abcdef",
                 "workspace",
                 null,
                 null,

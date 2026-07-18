@@ -5,6 +5,36 @@
 
 ## Entries
 
+### 2026-07-18 - 在应用工作区文件树展示引用目录
+
+- Why:
+  - 引用配置保存后，应用工作区文件树还只能读取物理工作区，无法按 `merge` 展示引用资产，也无法区分只读引用内容。
+- What:
+  - 新增 `workspace.view.list/read` 文件 WebSocket 组合视图：`merge=true` 按 `sdd-folder-name` 合并到工作区同名一级目录，纯引用文件/目录标记为蓝色只读；工作区已有同名目录返回 `MIXED` 并保持普通颜色。`merge=false` 以参考别名作为只读一级目录。
+  - 后端每次从最新 JSONC 重建挂载，只接受能反向验证到当前应用资产库、本机同 generation READY 副本和平台引用根目录的配置；拒绝物理路径伪造、`.git`、路径穿越与符号链接。单引用失败转为局部 warning，每层最多 1000 项。
+  - 工作区目录从 `WORKSPACE` 变为 `MIXED` 时保持稳定 ID；前端刷新按目录深度逐层用新父节点返回的 locator 重放展开状态，并汇总、去重所有已加载目录的 warnings/truncated，恢复后清除旧告警。
+  - 引用文件可只读打开、重试、复制逻辑路径和加入对话上下文；保存、重命名、删除、移动、粘贴及撤销入口按来源关闭，普通工作区写操作继续走原 RPC。
+  - 加固文件通道权限：托管工作区在 route、ticket 和每条 RPC 都实时校验有效应用成员；非托管 Workspace 默认拒绝，仅 `SUPER_ADMIN` 服务器工作空间兼容入口放行。会话运行上下文对历史非托管 Workspace 的 Session owner 兼容规则不变。
+  - 同步 HTTP/文件 WebSocket 协议、安全规范、后端模块 README/PACKAGE、前端包说明和用户手册。
+- How:
+  - 组合视图继续走平台文件 WebSocket route/ticket/RPC，不新增 Java 间 HTTP 文件代理；引用副本读取复用既有本机安全目录服务，不把物理路径返回浏览器。
+  - 前端复用现有 FileExplorer，通过稳定节点 ID 作为缓存/展开键，并保留原 `workspace.list/read/write` 兼容调用。
+  - TDD 覆盖 merge/alias、颜色与写入口、JSONC/READY/路径安全、稳定 ID、刷新 locator、告警恢复、鉴权及读失败重试；最终只读复审未发现 Critical/Important 并批准。
+- Result:
+  - 后端 workspace/runtime/api 聚焦测试 49 项通过；用户指定 Reactor 中 common/domain/workspace/runtime/api 全量均通过。persistence 仍被既有 `V20260717173000__create_public_agent_config_rollouts.sql` 的 `TIMESTAMPTZ` 与 H2 不兼容统一阻断（76 errors），本次未改数据库或该 migration。
+  - 前端全量 Vitest 77 个文件通过（1269 passed / 1 skipped），13 个项目 typecheck、用户手册和生产 build 通过；构建仅有既有大 chunk 提示。manager `go test ./...` 通过。
+  - 新增引用树 Playwright 在 Chromium/mobile 2 项通过；三个既有工作区切换/未选择工作区场景在两项目共 6 项仍超时或找不到旧空态文案，本次没有扩大范围修复这些既有 E2E 基线。
+  - 涉及文件 WebSocket 协议与权限安全边界；不新增 HTTP 端点、RunEvent、数据库表/migration、manager 协议或环境配置，不修改 generated SDK。组合视图为懒加载且每层限 1000 项；真实双服务器人工验收仍沿用上一条引用同步功能的待办。
+- Verification:
+  - `mvn -pl test-agent-workspace-management,test-agent-opencode-runtime,test-agent-api -am -Dtest='WorkspaceViewApplicationServiceTest,ManagedConversationWorkspaceAccessAuthorizerTest,WorkspaceFileRoutingServiceTest,WorkspaceFileSocketTicketServiceTest,WorkspaceFileWebSocketHandlerTest' -Dsurefire.failIfNoSpecifiedTests=false test`
+  - `mvn -pl test-agent-common,test-agent-domain,test-agent-workspace-management,test-agent-opencode-runtime,test-agent-persistence,test-agent-api -am test`（除上述既有 H2 migration 阻断外，其余目标模块成功）
+  - `corepack pnpm test && corepack pnpm typecheck && corepack pnpm build`
+  - `corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts --grep 'workspace tree merges references'`
+  - `go test ./...`
+  - `git diff --check`、冲突标记扫描和最终只读代码复审。
+- Next:
+  - 单独修复既有 H2 migration 与 workbench E2E 工作区选择基线后重跑完整套件；在真实双服务器部署完成引用副本与组合文件树人工验收。
+
 ### 2026-07-18 - 增加引用配置与资产库多节点同步
 
 - Why:

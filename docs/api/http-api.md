@@ -977,7 +977,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 | `GET` | `/api/internal/platform/workspace-management/backend-servers` | 查询可用于服务器工作空间选择器的后端服务器。 |
 | `POST` | `/api/internal/platform/workspace-management/file-ws/tickets` | 在目标后端创建文件 WebSocket 一次性 ticket。 |
 
-旧 `/api/workspaces/**`、旧 HTTP 文件接口以及内部平台 HTTP 文件 `workspaces/{workspaceId}/files*` 已作废，返回 `410 API_GONE`。工作区文件列表、读取、写入、上传、复制、移动、状态和删除必须走 `file-ws-route`、目标后端 ticket 和文件 WebSocket RPC。
+旧 `/api/workspaces/**`、旧 HTTP 文件接口以及内部平台 HTTP 文件 `workspaces/{workspaceId}/files*` 已作废，返回 `410 API_GONE`。工作区文件列表、读取、写入、上传、复制、移动、状态和删除必须走 `file-ws-route`、目标后端 ticket 和文件 WebSocket RPC。工作台文件树使用同一通道的 `workspace.view.list` / `workspace.view.read` 读取“工作区 + 已配置引用”的只读组合视图；原始 `workspace.list` / `workspace.read` 继续保留给配置文件等明确只访问工作区物理内容的调用方。
 
 普通前端不再通过 HTTP 传入物理目录注册 Workspace。应用版本工作区和个人工作区由后端根据应用、模板、版本、个人工作区等 id 读取通用参数并派生物理目录；仅超级管理员服务器工作空间选择器可通过目标后端文件 WebSocket ticket 在目标服务器上创建运行态 Workspace。
 
@@ -1042,7 +1042,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 ]
 ```
 
-`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 要求当前用户 opencode 进程服务器归属、workspace 和目标后端同服务器。签发优先使用轻量归属快照；当快照未 READY 时会复查当前用户 opencode 强状态，避免文件树与进程状态卡可用性不一致，但不会触发 `start` 命令；`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录；`mode=agent-config` 绑定 Agent 配置 scope/workspace/worktree，读取允许登录用户，公共 Git 写入仅 `SUPER_ADMIN`，应用级配置写入由 WebSocket handler 校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。普通用户写应用版本副本会返回只读错误；个人 worktree 普通文件仍可写，并可通过 `workspace.delete` 删除普通文件或递归删除目录树；删除不跟随符号链接，工作区根目录和任意层级 `.git` 元数据禁止删除。`.opencode` 根及其 `agents/**`、`skills/**`（含 rules/templates）仅 APP_ADMIN 可写。
+`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 对托管工作区要求当前用户仍是所属应用的有效成员，并要求当前用户 opencode 进程服务器归属、workspace 和目标后端同服务器；找不到应用版本、副本或个人工作区映射的非托管 Workspace 默认拒绝文件访问，仅 `SUPER_ADMIN` 的服务器工作空间兼容入口可在 route、ticket 和 RPC 三层放行。签发优先使用轻量归属快照；当快照未 READY 时会复查当前用户 opencode 强状态，避免文件树与进程状态卡可用性不一致，但不会触发 `start` 命令；`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录；`mode=agent-config` 绑定 Agent 配置 scope/workspace/worktree，读取允许登录用户，公共 Git 写入仅 `SUPER_ADMIN`，应用级配置写入由 WebSocket handler 校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。普通用户写应用版本副本会返回只读错误；个人 worktree 普通文件仍可写，并可通过 `workspace.delete` 删除普通文件或递归删除目录树；删除不跟随符号链接，工作区根目录和任意层级 `.git` 元数据禁止删除。`.opencode` 根及其 `agents/**`、`skills/**`（含 rules/templates）仅 APP_ADMIN 可写。路由、ticket 签发和每一条 workspace RPC 都重新校验托管成员关系，已退出应用的用户不能依赖旧 ticket 继续读取工作区或引用内容。
 
 请求体：
 
@@ -1081,6 +1081,10 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 服务器目录选择器只通过短期 ticket 建立的文件 WebSocket 使用；缺失、不可访问或非目录返回 `VALIDATION_ERROR`。创建服务器工作空间仍要求 `SUPER_ADMIN`，且目标服务器必须与当前 agent 服务器一致。
 
 文件 WebSocket RPC 的 `path` / `sourcePath` / `targetPath` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层、不递归，默认最多 1000 项；`workspace.search` 按工作区相对路径递归匹配，空 query 可返回受深度、数量和超时保护的文件目录，默认最多 200 项、20 层、5 秒，并跳过 `.git`、`node_modules` 等黑名单目录。文件读取和文本写入只支持 UTF-8，Base64 二进制上传允许新建任意普通文件；读取、写入和上传默认单文件上限 1MB，可通过 `test-agent.files.*` 配置，WebSocket 单帧上限会按该值的 Base64 膨胀量加 RPC envelope 余量同步设置。`workspace.upload`、`workspace.copy`、`workspace.move` 不覆盖已有目标，其中复制和移动只处理普通文件；源路径与目标路径分别执行写权限及 `.opencode/agents/**`、`.opencode/skills/**` 保护校验。
+
+组合视图只消费当前工作区 `.opencode/opencode.jsonc` 中平台可验证的本地引用对象。后端会重新校验引用别名、`path`、`merge`、`sdd-folder-name`、当前应用关联的 `APPLICATION_ASSET_REPOSITORY`、总体和本机副本 `READY` 状态，以及当前平台解析后的 `OPENCODE_REFERENCES_DIR`；配置不能把视图指向任意绝对路径、其它应用仓库、`.git` 或符号链接。单个引用失效时 `workspace.view.list` 仍返回可用工作区内容，并在 `warnings` 中说明被跳过的别名；每层组合结果最多 1000 项，超限通过 `truncated=true` 显式标记。
+
+`merge=true` 时，引用内容按 `sdd-folder-name` 合并进工作区同名一级目录：工作区已经存在的同名目录返回 `source=MIXED` 且保持普通颜色，纯引用文件或目录返回 `source=REFERENCE` 供前端显示为蓝色；同名文件不会覆盖工作区文件，冲突节点携带 `collision=true` 和稳定 `id`。工作区目录从纯 `WORKSPACE` 变为 `MIXED` 时沿用工作区路径生成的 `id`，前端刷新后以该稳定身份重新取得最新 `COMPOSITE` locator；各层 `warnings/truncated` 都会汇总展示。`merge=false` 时，以参考别名作为只读一级目录，展开后展示引用路径内容。组合视图的 `locator` 是后端签发的逻辑定位信息；读取时仍会重新解析当前配置和安全根，不能通过伪造 `referenceAlias/path` 绕过校验。详细字段见 `docs/api/event-stream.md`。
 
 ### 应用引用资产库 API
 

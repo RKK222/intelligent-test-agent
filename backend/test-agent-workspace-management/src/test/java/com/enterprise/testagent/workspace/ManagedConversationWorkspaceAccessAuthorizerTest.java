@@ -12,6 +12,8 @@ import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
+import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
+import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.user.UserId;
@@ -45,6 +47,43 @@ class ManagedConversationWorkspaceAccessAuthorizerTest {
 
         verify(configurationRepository).isActiveMember(APP_ID, USER_ID);
         verify(managedRepository, never()).findPersonalWorkspaceByRuntimeWorkspace(WORKSPACE_ID);
+    }
+
+    @Test
+    void removedMemberCannotUseApplicationVersionReplicaWorkspace() {
+        ApplicationWorkspaceVersionReplica replica = mock(ApplicationWorkspaceVersionReplica.class);
+        ApplicationWorkspaceVersion version = mock(ApplicationWorkspaceVersion.class);
+        ApplicationWorkspaceVersionId versionId = new ApplicationWorkspaceVersionId("awv_1234567890abcdef");
+        when(replica.versionId()).thenReturn(versionId);
+        when(version.appId()).thenReturn(APP_ID);
+        when(managedRepository.findVersionByRuntimeWorkspace(WORKSPACE_ID)).thenReturn(Optional.empty());
+        when(managedRepository.findVersionReplicaByRuntimeWorkspace(WORKSPACE_ID))
+                .thenReturn(Optional.of(replica));
+        when(managedRepository.findVersion(versionId)).thenReturn(Optional.of(version));
+        when(configurationRepository.findApplication(APP_ID)).thenReturn(Optional.of(application(true)));
+        when(configurationRepository.isActiveMember(APP_ID, USER_ID)).thenReturn(false);
+
+        assertThatThrownBy(() -> authorizer.requireAccess(USER_ID, WORKSPACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        org.assertj.core.api.Assertions.assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void applicationVersionReplicaWithoutVersionMappingFailsClosed() {
+        ApplicationWorkspaceVersionReplica replica = mock(ApplicationWorkspaceVersionReplica.class);
+        ApplicationWorkspaceVersionId versionId = new ApplicationWorkspaceVersionId("awv_missing_mapping");
+        when(replica.versionId()).thenReturn(versionId);
+        when(managedRepository.findVersionByRuntimeWorkspace(WORKSPACE_ID)).thenReturn(Optional.empty());
+        when(managedRepository.findVersionReplicaByRuntimeWorkspace(WORKSPACE_ID))
+                .thenReturn(Optional.of(replica));
+        when(managedRepository.findVersion(versionId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authorizer.requireAccess(USER_ID, WORKSPACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        org.assertj.core.api.Assertions.assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.FORBIDDEN));
+        verify(configurationRepository, never()).isActiveMember(APP_ID, USER_ID);
     }
 
     @Test
@@ -100,6 +139,22 @@ class ManagedConversationWorkspaceAccessAuthorizerTest {
 
         authorizer.requireAccess(USER_ID, WORKSPACE_ID);
 
+        verify(configurationRepository, never()).findApplication(APP_ID);
+        verify(configurationRepository, never()).isActiveMember(APP_ID, USER_ID);
+    }
+
+    @Test
+    void unmanagedWorkspaceFileAccessRequiresSuperAdminCompatibilityFlag() {
+        when(managedRepository.findVersionByRuntimeWorkspace(WORKSPACE_ID)).thenReturn(Optional.empty());
+        when(managedRepository.findVersionReplicaByRuntimeWorkspace(WORKSPACE_ID)).thenReturn(Optional.empty());
+        when(managedRepository.findPersonalWorkspaceByRuntimeWorkspace(WORKSPACE_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authorizer.requireFileAccess(USER_ID, WORKSPACE_ID, false))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        org.assertj.core.api.Assertions.assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.FORBIDDEN));
+
+        authorizer.requireFileAccess(USER_ID, WORKSPACE_ID, true);
         verify(configurationRepository, never()).findApplication(APP_ID);
         verify(configurationRepository, never()).isActiveMember(APP_ID, USER_ID);
     }

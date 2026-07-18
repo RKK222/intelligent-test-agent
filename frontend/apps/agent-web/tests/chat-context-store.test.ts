@@ -15,7 +15,7 @@ function selection(overrides: Partial<Extract<ChatContextItem, { type: "selectio
   return {
     id: overrides.id ?? "sel_1",
     type: "selection",
-    source: "workspace",
+    source: overrides.source ?? "workspace",
     path: overrides.path ?? "src/App.ts",
     fileName: overrides.fileName ?? "App.ts",
     language: "typescript",
@@ -40,6 +40,7 @@ function file(overrides: Partial<Extract<ChatContextItem, { type: "file" }>> = {
     charCount: overrides.charCount ?? content.length,
     lineCount: overrides.lineCount ?? content.split("\n").length,
     sizeBytes: overrides.sizeBytes ?? content.length,
+    openTarget: overrides.openTarget,
     createdAt: overrides.createdAt ?? 2
   };
 }
@@ -129,5 +130,48 @@ describe("chat context store", () => {
     expect(prompt).toContain('<context type="selection" path="src/App.ts" lines="3-3">');
     expect(prompt).toContain('<context type="file" path="docs/api.md">');
     expect(prompt.indexOf('type="selection"')).toBeLessThan(prompt.indexOf('type="file"'));
+  });
+
+  it("keeps reference aliases independent and preserves locator metadata for prompt and preview", () => {
+    const first = file({
+      id: "reference:req:guide",
+      source: "reference",
+      path: "references/requirements/docs/guide.md",
+      fileName: "guide.md",
+      openTarget: {
+        workspaceId: "wrk_1",
+        locator: { kind: "REFERENCE", path: "docs/guide.md", referenceAlias: "requirements" }
+      }
+    });
+    const second = file({
+      id: "reference:legacy:guide",
+      source: "reference",
+      path: "references/legacy/docs/guide.md",
+      fileName: "guide.md",
+      openTarget: {
+        workspaceId: "wrk_1",
+        locator: { kind: "REFERENCE", path: "docs/guide.md", referenceAlias: "legacy" }
+      }
+    });
+    const store = useChatContextStore();
+
+    expect(store.addFileContext(first).ok).toBe(true);
+    expect(store.addFileContext(second).ok).toBe(true);
+    expect(chatContextItemsToPromptParts(store.items)).toEqual([
+      expect.objectContaining({
+        path: "references/requirements/docs/guide.md",
+        source: expect.not.objectContaining({ workspaceViewLocator: expect.anything() })
+      }),
+      expect.objectContaining({
+        path: "references/legacy/docs/guide.md",
+        source: expect.not.objectContaining({ workspaceViewLocator: expect.anything() })
+      })
+    ]);
+    expect(store.items.map((item) => item.openTarget?.locator)).toEqual([
+      first.openTarget?.locator,
+      second.openTarget?.locator
+    ]);
+    expect(serializeChatContexts("比较", store.items)).toContain('path="references/requirements/docs/guide.md"');
+    expect(serializeChatContexts("比较", store.items)).toContain('path="references/legacy/docs/guide.md"');
   });
 });

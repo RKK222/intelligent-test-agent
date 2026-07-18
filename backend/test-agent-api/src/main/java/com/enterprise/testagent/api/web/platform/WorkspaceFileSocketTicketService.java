@@ -6,6 +6,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
@@ -15,6 +16,7 @@ import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 工作空间文件 WebSocket ticket 签发服务，在 HTTP 阶段完成用户、服务器与工作区校验。
@@ -31,14 +33,20 @@ class WorkspaceFileSocketTicketService {
     private final WorkspaceApplicationService workspaceService;
     private final UserOpencodeProcessAssignmentService assignmentService;
     private final WorkspaceFileSocketTicketStore ticketStore;
+    private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
 
+    @Autowired
     WorkspaceFileSocketTicketService(
             WorkspaceApplicationService workspaceService,
             UserOpencodeProcessAssignmentService assignmentService,
-            WorkspaceFileSocketTicketStore ticketStore) {
+            WorkspaceFileSocketTicketStore ticketStore,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.ticketStore = Objects.requireNonNull(ticketStore, "ticketStore must not be null");
+        this.workspaceAccessAuthorizer = Objects.requireNonNull(
+                workspaceAccessAuthorizer,
+                "workspaceAccessAuthorizer must not be null");
     }
 
     WorkspaceFileSocketDtos.TicketResponse createTicket(
@@ -69,10 +77,16 @@ class WorkspaceFileSocketTicketService {
                     normalizeOptional(request.worktreeId()),
                     traceId));
         }
-        UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal, traceId);
-        String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY ? process.linuxServerId() : null;
         if (MODE_WORKSPACE.equals(mode)) {
             String workspaceId = requiredWorkspaceId(request);
+            workspaceAccessAuthorizer.requireFileAccess(
+                    principal.userId(),
+                    new WorkspaceId(workspaceId),
+                    superAdmin);
+            UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal, traceId);
+            String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY
+                    ? process.linuxServerId()
+                    : null;
             requireReadyAgentOnCurrentServer(process, currentLinuxServerId, workspaceId);
             workspaceService.requireWorkspaceOnCurrentServer(new WorkspaceId(workspaceId), traceId);
             return response(ticketStore.issue(workspaceId, currentLinuxServerId, agentLinuxServerId, superAdmin, appAdmin,
@@ -81,6 +95,8 @@ class WorkspaceFileSocketTicketService {
         if (!MODE_DIRECTORY_PICKER.equals(mode)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "文件 WebSocket ticket 模式无效", Map.of("mode", mode));
         }
+        UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal, traceId);
+        String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY ? process.linuxServerId() : null;
         if (!superAdmin) {
             requireReadyAgentOnCurrentServer(process, currentLinuxServerId, "directory-picker");
         }

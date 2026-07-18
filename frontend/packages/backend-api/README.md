@@ -12,7 +12,7 @@
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。
 - 暴露 Workspace、Session message、Run 与 Diff API；历史恢复优先使用 `getSessionTreeMessages`，`listSessionMessages(..., refresh=false)` 用于只读 transcript、Run ID 恢复和旧消息反馈兼容。新反馈不再依赖平台 assistant messageId。
-- 工作区文件列表、读取、写入、二进制上传、普通文件复制/移动、状态和删除统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。
+- 工作区原始文件列表、读取、写入、二进制上传、普通文件复制/移动、状态和删除，以及工作台使用的引用组合视图 `listWorkspaceView/readWorkspaceViewFile`，统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。组合视图只映射后端签发的稳定 `id/locator/source/readonly/workspacePath/warnings`，不在浏览器自行解析引用根目录。
 - 工作区与 Agent 配置文件连接分别按路由键复用 single-flight 建连过程，并对缓存连接做实例身份校验；连接在 open 前关闭、报错或同步发送失败时会立即结算 pending，同步发送失败还会安全关闭已失效的底层 socket。只有 `workspace.read` 与 `agent-config.read` 遇到明确 WebSocket 传输错误时自动重连并重试一次，业务错误、请求超时和写操作不重试。
 - 暴露 `listWorkspaceBackendServers()`、`listServerWorkspaceDirectories()`、`createServerWorkspace()` 等超级管理员服务器工作空间选择方法，目录浏览和创建也通过目标后端文件 WebSocket ticket 执行。
 - 暴露 `getActiveRun(sessionId)` 作为用户级 runtime-state SSE 不可用时的单次 fallback；返回 `null` 表示当前会话没有非终态 Run。调用方不得用它恢复固定间隔 active-run 轮询。
@@ -48,4 +48,4 @@ corepack pnpm --filter @test-agent/backend-api typecheck
 corepack pnpm test -- backend-api
 ```
 
-`backend-api.test.ts` 覆盖 5 个引用资产端点的 app/repository/path 编码、初始化 body、无 body 同步和响应透传。
+`backend-api.test.ts` 覆盖 5 个引用资产端点的 app/repository/path 编码、初始化 body、无 body 同步和响应透传，以及组合视图 list/read 的 locator、稳定身份、只读来源和局部 warning 映射。

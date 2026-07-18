@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
-import type { FileSearchResult } from "@test-agent/shared-types";
+import type { FileSearchResult, WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
@@ -53,6 +53,8 @@ const props = defineProps<FileExplorerProps & {
   searchKeyword?: string;
   /** 文件树面板内错误（根目录加载失败时不覆盖全局反馈） */
   fileTreeError?: string | null;
+  /** 引用副本局部不可用时保留有效树，同时展示可恢复警告。 */
+  workspaceViewWarnings?: WorkspaceViewWarning[];
   /** 当前用户 ID，用于拼接 iframe URL */
   userId?: string;
   /** 后端 Java 服务器 IP 地址，用于构建 iframe URL */
@@ -61,8 +63,11 @@ const props = defineProps<FileExplorerProps & {
 
 const emit = defineEmits<{
   toggleDirectory: [path: string];
+  toggleViewDirectory: [entry: WorkspaceViewEntry];
   openFile: [path: string];
+  openViewFile: [entry: WorkspaceViewEntry];
   addFileContext: [path: string];
+  addViewFileContext: [entry: WorkspaceViewEntry];
   openDiff: [payload: string | { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
   "changes-refreshed": [payload?: {
     paths?: string[];
@@ -388,6 +393,12 @@ defineExpose({
             </div>
           </div>
           <div v-show="workspaceExpanded" class="figma-fe-section-content">
+            <div v-if="workspaceViewWarnings?.length" class="figma-fe-warning-banner" role="status">
+              <span class="figma-fe-error-text">
+                {{ workspaceViewWarnings.map((warning) => `${warning.alias ? `${warning.alias}：` : ''}${warning.message}`).join('；') }}
+              </span>
+              <button type="button" class="figma-fe-error-retry" aria-label="刷新引用文件树" @click="emit('refresh')">刷新</button>
+            </div>
             <!-- 文件树面板内错误：根目录加载失败时显示，不覆盖全局反馈 -->
             <div v-if="fileTreeError" class="figma-fe-error-banner">
               <span class="figma-fe-error-text">{{ fileTreeError }}</span>
@@ -416,8 +427,11 @@ defineExpose({
               :search-loading="searchLoading"
               :search-keyword="searchKeyword"
               @toggle-directory="emit('toggleDirectory', $event)"
+              @toggle-view-directory="emit('toggleViewDirectory', $event)"
               @open-file="emit('openFile', $event)"
+              @open-view-file="emit('openViewFile', $event)"
               @add-file-context="emit('addFileContext', $event)"
+              @add-view-file-context="emit('addViewFileContext', $event)"
               @open-diff="emit('openDiff', $event)"
               @refresh="emit('refresh')"
               @search="emit('search', $event)"
@@ -714,6 +728,21 @@ defineExpose({
   background: #fef2f2;
   border-bottom: 1px solid #fecaca;
   flex-shrink: 0;
+}
+
+.figma-fe-warning-banner {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--ta-tree-border, #e5e7eb);
+  background: var(--ta-tree-hover, #f3f4f6);
+}
+
+.figma-fe-warning-banner .figma-fe-error-text {
+  color: var(--ta-tree-text, #3b3b3b);
 }
 
 .figma-fe-error-text {

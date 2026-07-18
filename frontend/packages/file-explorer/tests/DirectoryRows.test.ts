@@ -4,6 +4,219 @@ import DirectoryRows from "../src/DirectoryRows.vue";
 import { applicationWorkspaceRestrictionsFixture } from "../../../tests/fixtures/application-workspace-restrictions";
 
 describe("DirectoryRows", () => {
+  it("selects duplicate workspace view rows only by stable node id", () => {
+    const entries = [
+      {
+        id: "workspace:guide",
+        type: "file" as const,
+        path: "docs/guide.md",
+        name: "guide.md",
+        locator: { kind: "WORKSPACE" as const, path: "docs/guide.md" },
+        source: "WORKSPACE" as const,
+        merged: false,
+        collision: false,
+        readonly: false,
+        referenceAliases: []
+      },
+      {
+        id: "reference:requirements:guide",
+        type: "file" as const,
+        path: "docs/guide.md",
+        name: "guide.md",
+        locator: { kind: "REFERENCE" as const, path: "guide.md", referenceAlias: "docs-requirements" },
+        source: "REFERENCE" as const,
+        merged: true,
+        collision: false,
+        readonly: true,
+        referenceAliases: ["docs-requirements"]
+      }
+    ];
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": entries },
+        expandedDirectories: new Set<string>(),
+        activePath: "docs/guide.md"
+      }
+    });
+
+    const rows = view.getAllByRole("button", { name: "guide.md" });
+    expect(rows[0]?.classList.contains("is-active")).toBe(false);
+    expect(rows[1]?.classList.contains("is-active")).toBe(false);
+  });
+
+  it("renders duplicate logical names by stable id with semantic reference source details", async () => {
+    const entries = [
+      {
+        id: "workspace:guide",
+        type: "file" as const,
+        path: "docs/guide.md",
+        name: "guide.md",
+        locator: { kind: "WORKSPACE" as const, path: "docs/guide.md" },
+        source: "WORKSPACE" as const,
+        merged: false,
+        collision: false,
+        readonly: false,
+        referenceAliases: []
+      },
+      {
+        id: "reference:requirements:guide",
+        type: "file" as const,
+        path: "docs/guide.md",
+        name: "guide.md",
+        locator: { kind: "REFERENCE" as const, path: "docs/guide.md", referenceAlias: "requirements" },
+        source: "REFERENCE" as const,
+        merged: true,
+        collision: false,
+        readonly: true,
+        referenceAliases: ["requirements"]
+      },
+      {
+        id: "reference:legacy:guide",
+        type: "file" as const,
+        path: "docs/guide.md",
+        name: "guide.md",
+        locator: { kind: "REFERENCE" as const, path: "docs/guide.md", referenceAlias: "legacy" },
+        source: "REFERENCE" as const,
+        merged: true,
+        collision: true,
+        readonly: true,
+        referenceAliases: ["legacy"]
+      },
+      {
+        id: "reference:plain",
+        type: "file" as const,
+        path: "plain.md",
+        name: "plain.md",
+        locator: { kind: "REFERENCE" as const, path: "plain.md", referenceAlias: "plain" },
+        source: "REFERENCE" as const,
+        merged: false,
+        collision: false,
+        readonly: true,
+        referenceAliases: ["plain"]
+      }
+    ];
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": entries },
+        expandedDirectories: new Set<string>()
+      }
+    });
+
+    const duplicateRows = view.getAllByRole("button", { name: "guide.md" });
+    expect(duplicateRows).toHaveLength(3);
+    expect(duplicateRows[1]?.classList.contains("is-reference-merged")).toBe(true);
+    expect(duplicateRows[1]?.title).toContain("引用来源：requirements");
+    expect(duplicateRows[2]?.classList.contains("is-reference-collision")).toBe(true);
+    expect(duplicateRows[2]?.title).toContain("引用冲突：legacy");
+    expect(view.getByRole("button", { name: /plain\.md/ }).classList.contains("is-reference-merged")).toBe(false);
+
+    await fireEvent.click(duplicateRows[1]!);
+    expect(view.emitted("openViewFile")).toEqual([[entries[1]]]);
+  });
+
+  it("keeps mixed directories ordinary and allows child writes only through workspacePath", async () => {
+    const mixed = {
+      id: "mixed:docs",
+      type: "directory" as const,
+      path: "docs",
+      name: "docs",
+      locator: { kind: "COMPOSITE" as const, path: "docs" },
+      source: "MIXED" as const,
+      merged: true,
+      collision: false,
+      readonly: false,
+      workspacePath: "docs",
+      referenceAliases: ["requirements"]
+    };
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": [mixed] },
+        expandedDirectories: new Set<string>(),
+        clipboardEntry: { path: "README.md", mode: "copy" }
+      }
+    });
+    const row = view.getByRole("button", { name: "docs" });
+
+    expect(row.classList.contains("is-reference-merged")).toBe(false);
+    expect(view.queryByRole("button", { name: "删除 docs" })).toBeNull();
+    await fireEvent.dblClick(row);
+    expect(view.queryByRole("textbox", { name: "重命名工作区条目" })).toBeNull();
+    await fireEvent.keyDown(row, { key: "v", ctrlKey: true });
+    expect(view.emitted("pasteEntry")).toEqual([["docs"]]);
+    await fireEvent.click(view.getByRole("button", { name: "新建或上传到此目录" }));
+    expect(view.getByRole("dialog", { name: "新建或上传文件" }).textContent).toContain("docs");
+  });
+
+  it("blocks mutations and git badges for pure reference nodes", async () => {
+    const reference = {
+      id: "reference:requirements:guide",
+      type: "file" as const,
+      path: "docs/guide.md",
+      name: "guide.md",
+      locator: { kind: "REFERENCE" as const, path: "docs/guide.md", referenceAlias: "requirements" },
+      source: "REFERENCE" as const,
+      merged: true,
+      collision: false,
+      readonly: true,
+      referenceAliases: ["requirements"]
+    };
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": [reference] },
+        expandedDirectories: new Set<string>(),
+        changeStats: { "docs/guide.md": { additions: 2, deletions: 1 } },
+        clipboardEntry: { path: "README.md", mode: "copy" }
+      }
+    });
+    const row = view.getByRole("button", { name: "guide.md" });
+
+    expect(row.getAttribute("draggable")).toBe("false");
+    expect(view.queryByRole("button", { name: "删除 guide.md" })).toBeNull();
+    expect(view.queryByText("+2")).toBeNull();
+    await fireEvent.keyDown(row, { key: "Delete" });
+    await fireEvent.keyDown(row, { key: "c", ctrlKey: true });
+    await fireEvent.keyDown(row, { key: "v", ctrlKey: true });
+    await fireEvent.contextMenu(row);
+    expect(view.queryByRole("menuitem", { name: /粘贴到此处/ })).toBeNull();
+    expect(view.emitted("deleteEntry")).toBeUndefined();
+    expect(view.emitted("setClipboard")).toBeUndefined();
+    expect(view.emitted("pasteEntry")).toBeUndefined();
+  });
+
+  it("blocks keyboard and context-menu undo from a pure reference row", async () => {
+    const reference = {
+      id: "reference:requirements:guide",
+      type: "file" as const,
+      path: "docs/guide.md",
+      name: "guide.md",
+      locator: { kind: "REFERENCE" as const, path: "docs/guide.md", referenceAlias: "requirements" },
+      source: "REFERENCE" as const,
+      merged: true,
+      collision: false,
+      readonly: true,
+      referenceAliases: ["requirements"]
+    };
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": [reference] },
+        expandedDirectories: new Set<string>(),
+        canUndo: true
+      }
+    });
+    const row = view.getByRole("button", { name: "guide.md" });
+
+    await fireEvent.keyDown(row, { key: "z", metaKey: true });
+    await fireEvent.contextMenu(row);
+
+    expect(view.emitted("undoEntry")).toBeUndefined();
+    expect(view.queryByRole("menuitem", { name: /撤销上一步/ })).toBeNull();
+  });
+
   it("exposes minus delete actions for both files and directories", async () => {
     const view = render(DirectoryRows, {
       props: {

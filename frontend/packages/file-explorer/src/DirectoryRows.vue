@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { FileTreeEntry } from "@test-agent/shared-types";
+import type { FileTreeEntry, WorkspaceViewEntry } from "@test-agent/shared-types";
 
 export type DirectoryRowsProps = {
   directory: string;
@@ -35,8 +35,11 @@ import FileIcon from "./FileIcon.vue";
 const props = withDefaults(defineProps<DirectoryRowsProps>(), { depth: 0, canWrite: true });
 const emit = defineEmits<{
   toggleDirectory: [path: string];
+  toggleViewDirectory: [entry: WorkspaceViewEntry];
   openFile: [path: string];
+  openViewFile: [entry: WorkspaceViewEntry];
   addFileContext: [path: string];
+  addViewFileContext: [entry: WorkspaceViewEntry];
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
   renameEntry: [path: string, name: string];
@@ -56,6 +59,55 @@ const entries = computed(() => {
     return a.type === "directory" ? -1 : 1;
   });
 });
+
+type MaybeWorkspaceViewEntry = FileTreeEntry & Partial<WorkspaceViewEntry>;
+
+function nodeId(entry: MaybeWorkspaceViewEntry): string {
+  return entry.id ?? entry.path;
+}
+
+function isWorkspaceViewEntry(entry: MaybeWorkspaceViewEntry): entry is WorkspaceViewEntry {
+  return Boolean(entry.id && entry.locator && entry.source);
+}
+
+function canMutateEntry(entry: MaybeWorkspaceViewEntry): boolean {
+  return props.canWrite && entry.readonly !== true && entry.source !== "REFERENCE" && entry.source !== "MIXED";
+}
+
+function canWriteChildren(entry: MaybeWorkspaceViewEntry): boolean {
+  if (!props.canWrite || entry.type !== "directory" || entry.readonly === true || entry.source === "REFERENCE") return false;
+  return entry.source !== "MIXED" || Boolean(entry.workspacePath);
+}
+
+function canPasteIntoEntry(entry: MaybeWorkspaceViewEntry): boolean {
+  return entry.type === "directory" ? canWriteChildren(entry) : canMutateEntry(entry);
+}
+
+function canUndoFromEntry(entry: MaybeWorkspaceViewEntry): boolean {
+  return props.canWrite && Boolean(props.canUndo) && entry.readonly !== true && entry.source !== "REFERENCE";
+}
+
+function workspaceEntryPath(entry: MaybeWorkspaceViewEntry): string {
+  return entry.workspacePath ?? entry.path;
+}
+
+function sourceDescription(entry: MaybeWorkspaceViewEntry): string | undefined {
+  const aliases = entry.referenceAliases?.join("、") || entry.locator?.referenceAlias;
+  if (entry.source === "REFERENCE" && entry.collision) return `引用冲突：${aliases || "未知来源"}`;
+  if (entry.source === "REFERENCE") return `引用来源：${aliases || "未知来源"}`;
+  if (entry.source === "MIXED") return aliases ? `工作区与引用合并目录；引用来源：${aliases}` : "工作区与引用合并目录";
+  return undefined;
+}
+
+function semanticClass(entry: MaybeWorkspaceViewEntry): string | undefined {
+  if (entry.source !== "REFERENCE") return undefined;
+  if (entry.collision) return "is-reference-collision";
+  return entry.merged ? "is-reference-merged" : undefined;
+}
+
+function showsWorkspaceChangeStats(entry: MaybeWorkspaceViewEntry): boolean {
+  return entry.source === undefined || entry.source === "WORKSPACE";
+}
 
 const entryContextMenu = ref<{ entry: FileTreeEntry; x: number; y: number } | null>(null);
 const dragOverDirectory = ref<string | null>(null);
@@ -94,7 +146,8 @@ function emitAddFileContext() {
   if (!entry || entry.type !== "file") {
     return;
   }
-  emit("addFileContext", entry.path);
+  if (isWorkspaceViewEntry(entry)) emit("addViewFileContext", entry);
+  else emit("addFileContext", entry.path);
   closeFileContextMenu();
 }
 
@@ -104,44 +157,44 @@ function parentDirectory(path: string): string {
 }
 
 function targetDirectory(entry: FileTreeEntry): string {
-  return entry.type === "directory" ? entry.path : parentDirectory(entry.path);
+  return entry.type === "directory" ? workspaceEntryPath(entry) : parentDirectory(workspaceEntryPath(entry));
 }
 
 function emitSetClipboard(mode: "copy" | "move") {
   const entry = entryContextMenu.value?.entry;
-  if (!props.canWrite || !entry || entry.type !== "file") return;
-  emit("setClipboard", entry.path, mode);
+  if (!entry || entry.type !== "file" || !canMutateEntry(entry)) return;
+  emit("setClipboard", workspaceEntryPath(entry), mode);
   closeFileContextMenu();
 }
 
 function emitPasteEntry() {
   const entry = entryContextMenu.value?.entry;
-  if (!props.canWrite || !props.clipboardEntry || !entry) return;
+  if (!props.clipboardEntry || !entry || !canPasteIntoEntry(entry)) return;
   emit("pasteEntry", targetDirectory(entry));
   closeFileContextMenu();
 }
 
 /** 文件树行聚焦后支持 Delete 和 Ctrl/Cmd+C、X、V、Z，所有写操作复用现有确认或事件链路。 */
 function onRowKeydown(event: KeyboardEvent, entry: FileTreeEntry) {
-  if (!props.canWrite || event.target instanceof HTMLInputElement) return;
+  if (event.target instanceof HTMLInputElement) return;
   const key = event.key.toLowerCase();
   if (key === "delete" || key === "del") {
     event.preventDefault();
-    openDeleteDialog(entry);
+    if (canMutateEntry(entry)) openDeleteDialog(entry);
     return;
   }
   if (!event.ctrlKey && !event.metaKey) return;
-  if ((key === "c" || key === "x") && entry.type === "file") {
+  if ((key === "c" || key === "x") && entry.type === "file" && canMutateEntry(entry)) {
     event.preventDefault();
-    emit("setClipboard", entry.path, key === "c" ? "copy" : "move");
+    emit("setClipboard", workspaceEntryPath(entry), key === "c" ? "copy" : "move");
     return;
   }
-  if (key === "v" && props.clipboardEntry) {
+  if (key === "v" && props.clipboardEntry && canPasteIntoEntry(entry)) {
     event.preventDefault();
     emit("pasteEntry", targetDirectory(entry));
     return;
   }
-  if (key === "z" && props.canUndo) {
+  if (key === "z" && canUndoFromEntry(entry)) {
     event.preventDefault();
     emit("undoEntry");
   }
@@ -153,51 +206,53 @@ watch(() => props.dragResetToken, () => {
 
 /** 普通文件使用 HTML5 drag data 传递相对路径，目录仅作为工作区内移动目标。 */
 function onDragStart(event: DragEvent, entry: FileTreeEntry) {
-  if (!props.canWrite || entry.type !== "file" || !event.dataTransfer) {
+  if (!canMutateEntry(entry) || entry.type !== "file" || !event.dataTransfer) {
     event.preventDefault();
     return;
   }
   event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("application/x-test-agent-workspace-file", entry.path);
-  event.dataTransfer.setData("text/plain", entry.path);
+  event.dataTransfer.setData("application/x-test-agent-workspace-file", workspaceEntryPath(entry));
+  event.dataTransfer.setData("text/plain", workspaceEntryPath(entry));
 }
 
 function onDirectoryDragOver(event: DragEvent, entry: FileTreeEntry) {
-  if (!props.canWrite || entry.type !== "directory") return;
+  if (!canWriteChildren(entry)) return;
   event.preventDefault();
   event.stopPropagation();
   if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-  dragOverDirectory.value = entry.path;
+  dragOverDirectory.value = nodeId(entry);
 }
 
 function onDirectoryDrop(event: DragEvent, entry: FileTreeEntry) {
-  if (!props.canWrite || entry.type !== "directory" || !event.dataTransfer) return;
+  if (!canWriteChildren(entry) || !event.dataTransfer) return;
   event.preventDefault();
   event.stopPropagation();
   const files = Array.from(event.dataTransfer.files ?? []);
   if (files.length > 0) {
     dragOverDirectory.value = null;
-    emit("uploadFiles", entry.path, files);
+    emit("uploadFiles", workspaceEntryPath(entry), files);
     return;
   }
   const sourcePath = event.dataTransfer.getData("application/x-test-agent-workspace-file");
   dragOverDirectory.value = null;
-  if (sourcePath) emit("moveEntry", sourcePath, entry.path);
+  if (sourcePath) emit("moveEntry", sourcePath, workspaceEntryPath(entry));
 }
 
-function isKnownEmptyDirectory(path: string): boolean {
-  const children = props.entriesByDirectory[path];
+function isKnownEmptyDirectory(entry: FileTreeEntry): boolean {
+  const children = props.entriesByDirectory[nodeId(entry)];
   return Array.isArray(children) && children.length === 0;
 }
 
 function onRowClick(entry: FileTreeEntry) {
   if (entry.type === "directory") {
-    if (isKnownEmptyDirectory(entry.path)) {
+    if (isKnownEmptyDirectory(entry)) {
       return;
     }
-    emit("toggleDirectory", entry.path);
+    if (isWorkspaceViewEntry(entry)) emit("toggleViewDirectory", entry);
+    else emit("toggleDirectory", entry.path);
   } else {
-    emit("openFile", entry.path);
+    if (isWorkspaceViewEntry(entry)) emit("openViewFile", entry);
+    else emit("openFile", entry.path);
   }
 }
 
@@ -239,8 +294,8 @@ function submitCreateDialog() {
 }
 
 function openDeleteDialog(entry: FileTreeEntry) {
-  if (!props.canWrite) return;
-  deleteDialogEntry.value = { path: entry.path, name: entry.name, type: entry.type };
+  if (!canMutateEntry(entry)) return;
+  deleteDialogEntry.value = { path: workspaceEntryPath(entry), name: entry.name, type: entry.type };
   showDeleteDialog.value = true;
 }
 
@@ -259,8 +314,8 @@ function submitDeleteDialog() {
 }
 
 function startRename(entry: FileTreeEntry) {
-  if (!props.canWrite) return;
-  renamingPath.value = entry.path;
+  if (!canMutateEntry(entry)) return;
+  renamingPath.value = workspaceEntryPath(entry);
   renameName.value = entry.name;
   renameOriginalName.value = entry.name;
   renameError.value = "";
@@ -302,15 +357,17 @@ function submitRename() {
 
 <template>
   <div>
-    <div v-for="entry in entries" :key="entry.path" class="ta-file-tree-row-wrapper">
+    <div v-for="entry in entries" :key="nodeId(entry)" class="ta-file-tree-row-wrapper">
       <button
         type="button"
         :class="cn(
           'ta-file-tree-row',
-          activePath === entry.path && 'is-active',
-          dragOverDirectory === entry.path && 'is-drop-target'
+          (isWorkspaceViewEntry(entry) ? activePath === nodeId(entry) : activePath === entry.path) && 'is-active',
+          dragOverDirectory === nodeId(entry) && 'is-drop-target',
+          semanticClass(entry)
         )"
-        :draggable="canWrite && entry.type === 'file'"
+        :draggable="canMutateEntry(entry) && entry.type === 'file'"
+        :title="sourceDescription(entry)"
         :style="{
           paddingLeft: depth * 16 + 6 + 'px',
           paddingRight: canWrite
@@ -319,11 +376,11 @@ function submitRename() {
         }"
         @click="onRowClick(entry)"
         @contextmenu="openFileContextMenu($event, entry)"
-        @dblclick.stop="canWrite && startRename(entry)"
+        @dblclick.stop="startRename(entry)"
         @keydown="onRowKeydown($event, entry)"
         @dragstart="onDragStart($event, entry)"
         @dragover="onDirectoryDragOver($event, entry)"
-        @dragleave="dragOverDirectory === entry.path && (dragOverDirectory = null)"
+        @dragleave="dragOverDirectory === nodeId(entry) && (dragOverDirectory = null)"
         @drop="onDirectoryDrop($event, entry)"
       >
         <span
@@ -334,17 +391,18 @@ function submitRename() {
         />
         <template v-if="entry.type === 'directory'">
           <i
-            v-if="!isKnownEmptyDirectory(entry.path)"
-            :class="cn('codicon codicon-chevron-right ta-file-tree-twistie', expandedDirectories.has(entry.path) && 'is-open')"
+            v-if="!isKnownEmptyDirectory(entry)"
+            :class="cn('codicon codicon-chevron-right ta-file-tree-twistie', expandedDirectories.has(nodeId(entry)) && 'is-open')"
             aria-hidden="true"
           />
           <span v-else class="ta-file-tree-spacer" />
+          <i class="codicon codicon-folder ta-file-tree-source-icon" aria-hidden="true" />
         </template>
         <template v-else>
           <span class="ta-file-tree-file-spacer" />
           <FileIcon :entry="entry" />
         </template>
-        <span v-if="renamingPath !== entry.path" class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+        <span v-if="renamingPath !== workspaceEntryPath(entry)" class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
         <input
           v-else
           ref="renameInput"
@@ -357,25 +415,25 @@ function submitRename() {
           @keydown.esc.stop.prevent="cancelRename"
           @blur="submitRename"
         />
-        <template v-if="entry.type === 'file' && changeStats?.[entry.path]">
-          <span class="ta-file-tree-badge is-added">+{{ changeStats[entry.path].additions }}</span>
-          <span class="ta-file-tree-badge is-deleted">-{{ changeStats[entry.path].deletions }}</span>
+        <template v-if="entry.type === 'file' && showsWorkspaceChangeStats(entry) && changeStats?.[workspaceEntryPath(entry)]">
+          <span class="ta-file-tree-badge is-added">+{{ changeStats[workspaceEntryPath(entry)]?.additions }}</span>
+          <span class="ta-file-tree-badge is-deleted">-{{ changeStats[workspaceEntryPath(entry)]?.deletions }}</span>
         </template>
-        <i v-if="loadingPath?.has(entry.path)" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
+        <i v-if="loadingPath?.has(nodeId(entry))" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
       </button>
       <div class="ta-file-tree-actions">
         <button
-          v-if="canWrite && entry.type === 'directory'"
+          v-if="canWriteChildren(entry)"
           type="button"
           class="ta-file-tree-add-btn"
           title="新建或上传到此目录"
           aria-label="新建或上传到此目录"
-          @click.stop="openCreateDialog(entry.path)"
+          @click.stop="openCreateDialog(workspaceEntryPath(entry))"
         >
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
-          v-if="canWrite"
+          v-if="canMutateEntry(entry)"
           type="button"
           class="ta-file-tree-delete-btn"
           title="删除"
@@ -385,7 +443,7 @@ function submitRename() {
           <Trash2 class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
-          v-if="entry.type === 'directory' && entry.name.includes('测试执行')"
+          v-if="canMutateEntry(entry) && entry.type === 'directory' && entry.name.includes('测试执行')"
           type="button"
           class="ta-file-tree-plane-btn"
           title="缓存并跳转"
@@ -395,12 +453,12 @@ function submitRename() {
           <Plane class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
       </div>
-      <div v-if="renamingPath === entry.path && renameError" class="ta-file-tree-rename-error">
+      <div v-if="renamingPath === workspaceEntryPath(entry) && renameError" class="ta-file-tree-rename-error">
         {{ renameError }}
       </div>
       <DirectoryRows
-        v-if="entry.type === 'directory' && expandedDirectories.has(entry.path)"
-        :directory="entry.path"
+        v-if="entry.type === 'directory' && expandedDirectories.has(nodeId(entry))"
+        :directory="nodeId(entry)"
         :entries-by-directory="entriesByDirectory"
         :expanded-directories="expandedDirectories"
         :active-path="activePath"
@@ -412,8 +470,11 @@ function submitRename() {
         :clipboard-entry="clipboardEntry"
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
+        @toggle-view-directory="emit('toggleViewDirectory', $event)"
         @open-file="emit('openFile', $event)"
+        @open-view-file="emit('openViewFile', $event)"
         @add-file-context="emit('addFileContext', $event)"
+        @add-view-file-context="emit('addViewFileContext', $event)"
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
         @rename-entry="(path, name) => emit('renameEntry', path, name)"
@@ -449,7 +510,7 @@ function submitRename() {
           添加文件到对话
         </button>
         <button
-          v-if="canWrite && entryContextMenu.entry.type === 'file'"
+          v-if="entryContextMenu.entry.type === 'file' && canMutateEntry(entryContextMenu.entry)"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"
@@ -459,7 +520,7 @@ function submitRename() {
           <span>Ctrl/Cmd+C</span>
         </button>
         <button
-          v-if="canWrite && entryContextMenu.entry.type === 'file'"
+          v-if="entryContextMenu.entry.type === 'file' && canMutateEntry(entryContextMenu.entry)"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"
@@ -469,7 +530,7 @@ function submitRename() {
           <span>Ctrl/Cmd+X</span>
         </button>
         <button
-          v-if="canWrite && clipboardEntry"
+          v-if="clipboardEntry && canPasteIntoEntry(entryContextMenu.entry)"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"
@@ -479,7 +540,7 @@ function submitRename() {
           <span>Ctrl/Cmd+V</span>
         </button>
         <button
-          v-if="canWrite && canUndo"
+          v-if="canUndoFromEntry(entryContextMenu.entry)"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"
@@ -1048,6 +1109,39 @@ function submitRename() {
   outline: 1px solid var(--ta-accent, #2563eb);
   outline-offset: -1px;
   background: rgb(37 99 235 / 10%);
+}
+
+.ta-file-tree-row.is-reference-merged {
+  color: var(--ta-reference-merged, #2563eb);
+}
+
+.ta-file-tree-row.is-reference-collision {
+  color: var(--ta-reference-collision, #dc2626);
+}
+
+.ta-file-tree-row.is-reference-merged:focus-visible,
+.ta-file-tree-row.is-reference-merged.is-active {
+  color: var(--ta-reference-merged-active, #1d4ed8);
+}
+
+.ta-file-tree-row.is-reference-collision:focus-visible,
+.ta-file-tree-row.is-reference-collision.is-active {
+  color: var(--ta-reference-collision-active, #b91c1c);
+}
+
+.ta-file-tree-source-icon {
+  width: 16px;
+  flex: 0 0 16px;
+  color: currentColor;
+}
+
+/* sprite 内部带固定 fill，语义来源色通过整枚图标滤镜统一覆盖，不改变图标和行布局。 */
+.ta-file-tree-row.is-reference-merged :deep(.ta-file-tree-icon) {
+  filter: brightness(0) saturate(100%) invert(35%) sepia(89%) saturate(1719%) hue-rotate(207deg) brightness(93%) contrast(94%);
+}
+
+.ta-file-tree-row.is-reference-collision :deep(.ta-file-tree-icon) {
+  filter: brightness(0) saturate(100%) invert(24%) sepia(83%) saturate(3165%) hue-rotate(347deg) brightness(93%) contrast(87%);
 }
 
 .ta-file-context-menu-item:hover {

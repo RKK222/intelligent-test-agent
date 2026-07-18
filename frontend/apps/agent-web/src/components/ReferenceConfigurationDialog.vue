@@ -27,7 +27,7 @@ const props = defineProps<{
   workspaceId: string;
 }>();
 
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; saved: [] }>();
 const api = inject<BackendApiClient>("api")!;
 
 type Notice = { message: string; traceId?: string };
@@ -416,6 +416,7 @@ async function submitConfig() {
     baseline.value = { ...submitted };
     configMode.value = "update";
     configNotice.value = { kind: "success", message: "引用配置已保存" };
+    emit("saved");
   } catch (error) {
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) && selectedFolderPath.value === folderPath) {
       configNotice.value = { ...notice(error, "保存引用配置失败"), kind: "error" };

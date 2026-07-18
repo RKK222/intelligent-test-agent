@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { FileStatus, FileTreeEntry, RunDiffFile, FileSearchResult } from "@test-agent/shared-types";
+import type { FileStatus, FileTreeEntry, RunDiffFile, FileSearchResult, WorkspaceViewEntry } from "@test-agent/shared-types";
 
 export type FileExplorerProps = {
   workspaceName?: string;
@@ -41,8 +41,11 @@ const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "W
 const computedTab = computed(() => props.activeTab ?? tab.value);
 const emit = defineEmits<{
   toggleDirectory: [path: string];
+  toggleViewDirectory: [entry: WorkspaceViewEntry];
   openFile: [path: string];
+  openViewFile: [entry: WorkspaceViewEntry];
   addFileContext: [path: string];
+  addViewFileContext: [entry: WorkspaceViewEntry];
   openDiff: [path: string];
   refresh: [];
   search: [keyword: string];
@@ -268,8 +271,11 @@ defineExpose({ openRootActions });
         :clipboard-entry="clipboardEntry"
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
+        @toggle-view-directory="emit('toggleViewDirectory', $event)"
         @open-file="emit('openFile', $event)"
+        @open-view-file="emit('openViewFile', $event)"
         @add-file-context="emit('addFileContext', $event)"
+        @add-view-file-context="emit('addViewFileContext', $event)"
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
         @rename-entry="(path, name) => emit('renameEntry', path, name)"

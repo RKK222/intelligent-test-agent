@@ -49,7 +49,8 @@ public class WorkspaceFileSocketController {
                 principal.userId(),
                 "opencode",
                 new WorkspaceId(workspaceId),
-                traceId), traceId);
+                traceId,
+                AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN)), traceId);
     }
 
     /**

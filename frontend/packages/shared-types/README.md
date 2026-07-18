@@ -23,6 +23,7 @@
 - 定义 Run 整体回复反馈 DTO：`AiRunFeedback`、`AiRunFeedbackPayload`、`RunFeedbackState`、`RunFeedbackQuery`；旧 `AiMessageFeedback` 类型保留兼容。
 - 定义运营分析 DTO：`AnalyticsQueryParams`、`AnalyticsOverview`、`AnalyticsTimeSeriesPoint`、`AnalyticsPeaks`、用户/组织/满意度/异常明细行和 freshness；类型只表达 token 使用，不新增费用字段。
 - 定义 Workspace/Agent 配置文件 WebSocket 路由、目标后端服务器、ticket 请求/响应 DTO，供 `backend-api` 和 agent-web 复用；`AgentConfigWorktreeOption` 在公共 worktree 切换列表中补充 `createdByUserId/createdByUsername`。
+- 定义 `WorkspaceViewLocator`、稳定 `WorkspaceViewEntry.id`、`WORKSPACE/REFERENCE/MIXED` 来源、节点只读/冲突/工作区写入路径、局部 warning 和组合视图读取结果；展示 `path` 允许重复，调用方必须使用 `id/locator` 区分工作区与引用文件。
 - 定义应用配置管理 DTO：`ApplicationDefinition`、`ApplicationMember`、`CodeRepositoryConfig`、`RepositoryTypeOption`、`RepositoryDeploymentOptions`、`RepositoryTreeNode`、`RepositoryTreeResponse`、`ApplicationWorkspaceConfig`、`WorkspaceCreateOperation`、`SshKeyMetadata` 和对应请求 payload；`CodeRepositoryConfig.englishName` 对历史数据保持可空，新增/编辑 payload 必填；`deploymentMode` 对旧响应保持可选，新增 payload 可携带 `EXTERNAL/INTERNAL`；`repositoryType` / `repositoryTypeLabel` 对旧响应保持可选，新增 payload 可携带 `repositoryType` 并继续保留兼容 `standard`；`CreateApplicationWorkspacePayload.directoryNew` 可选，仅表示设置页保存时需要在 clone 后创建前端内存新增的工作空间目录。
 - 定义应用版本工作区 DTO：`ManagedApplication`、`ApplicationWorkspaceTemplate`、`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`WorkspaceDiff`、`WorkspaceSyncResult` 和对应请求 payload；`ApplicationWorkspaceVersion` 的 `targetCommitHash`、`replicaCommitHash`、`replicaLinuxServerId`、`replicaStatus` 均为可选字段，兼容旧后端和历史版本。
 - 不引入运行时依赖。

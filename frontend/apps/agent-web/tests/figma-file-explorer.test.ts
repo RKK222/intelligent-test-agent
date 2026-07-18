@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import FigmaFileExplorer from "../src/components/FigmaFileExplorer.vue";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
 import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
+import { FileExplorer } from "@test-agent/file-explorer";
 
 vi.mock("@test-agent/workbench-shell", async () =>
   vi.importActual("../../../packages/workbench-shell/src/workbenchStore")
@@ -69,5 +70,49 @@ describe("FigmaFileExplorer", () => {
     await wrapper.vm.$nextTick();
 
     expect(wrapper.emitted("openReferenceConfiguration")).toHaveLength(1);
+  });
+
+  it("forwards workspace view node navigation without collapsing it to a path", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+    const node = {
+      id: "reference:requirements:guide",
+      type: "file" as const,
+      path: "docs/guide.md",
+      name: "guide.md",
+      locator: { kind: "REFERENCE" as const, path: "docs/guide.md", referenceAlias: "requirements" },
+      source: "REFERENCE" as const,
+      merged: true,
+      collision: false,
+      readonly: true,
+      referenceAliases: ["requirements"]
+    };
+
+    wrapper.findComponent(FileExplorer).vm.$emit("open-view-file", node);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.emitted("openViewFile")).toEqual([[node]]);
+  });
+
+  it("keeps partial reference warnings visible with a refresh action", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: [],
+        workspaceViewWarnings: [{ alias: "legacy", code: "REFERENCE_UNAVAILABLE", message: "引用副本不可用" }]
+      }
+    });
+
+    expect(wrapper.text()).toContain("legacy：引用副本不可用");
+    await wrapper.get('button[aria-label="刷新引用文件树"]').trigger("click");
+    expect(wrapper.emitted("refresh")).toHaveLength(1);
   });
 });

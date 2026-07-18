@@ -10,12 +10,13 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 - 工作区注册、查询和分页。
 - 应用引用资产库管理：只处理当前应用关联的 `APPLICATION_ASSET_REPOSITORY`，首次初始化固定分支和远端 HEAD，后续同步以 generation 固定新提交；按在线 Linux 服务器创建副本目标，通过 `reference-repository.sync-requested` 低延迟唤醒、数据库租约/CAS fencing、本机文件锁和 60 秒补偿扫描收敛。离线副本进入 `DEFERRED` 并在恢复后补齐；新目录在同根临时目录校验后原子移动，已有目录只允许干净、同源、同分支且可快进的 Git 仓库。目录树仅开放总体与当前服务器副本均 `READY` 的单层安全读取，并只把根层命中 `REFERENCES_SDD_FOLDER_NAMES` 的目录标记为可选。
+- 工作区引用组合视图：读取当前工作区最新 `.opencode/opencode.jsonc`，只接受能反向验证到当前应用资产库、本机同 generation `READY` 副本、当前平台引用根目录和允许 SDD 根目录的本地引用对象。`merge=true` 按 `sdd-folder-name` 合并到工作区同名一级目录，工作区已有目录保持普通来源，纯引用后代标记只读引用来源；`merge=false` 以参考别名投影只读一级目录。文件同名不覆盖，节点使用稳定身份并携带冲突来源；单引用异常转为局部 warning，不阻断工作区内容，所有路径继续拒绝 `.git`、符号链接和 root 穿越。
 - 工作区注册时记录 `linuxServerId`，并通过 `WorkspaceServerIdentity` 提供当前 Java 进程所属服务器和默认目录。
-- 工作区内文件单层列表、受限相对路径搜索、UTF-8 内容读写、Base64 二进制新文件上传、普通文件跨目录复制/移动、普通文件或目录同目录重命名、文件状态、普通文件/目录树删除和路径越权拦截；目录删除不跟随符号链接，并拒绝工作区根目录和任意层级 `.git` 元数据；上传沿用单文件大小上限且不覆盖已有条目，复制/移动只处理普通文件并拒绝覆盖目标；搜索支持空关键字文件目录，并受数量、深度和超时上限保护。
+- 工作区内原始文件单层列表、受限相对路径搜索、UTF-8 内容读写、Base64 二进制新文件上传、普通文件跨目录复制/移动、普通文件或目录同目录重命名、文件状态、普通文件/目录树删除和路径越权拦截；目录删除不跟随符号链接，并拒绝工作区根目录和任意层级 `.git` 元数据；上传沿用单文件大小上限且不覆盖已有条目，复制/移动只处理普通文件并拒绝覆盖目标；搜索支持空关键字文件目录，并受数量、深度和超时上限保护。组合文件树只新增只读 list/read 视图，不改变这些原始写操作的物理工作区边界。
 - 文件 WebSocket ticket 创建前通过 `requireWorkspaceOnCurrentServer` 校验 workspace、当前后端和用户 opencode 进程同服务器；历史空服务器归属工作区在 root path 校验成功后回填当前服务器 ID。
 - 普通前端不再传物理目录创建 Workspace；应用版本和个人工作区目录由后端按通用参数与业务 id 派生。超级管理员服务器工作空间选择器通过目标后端目录浏览能力从该后端 Java 进程运行目录开始浏览。
 - `WorkspaceApplicationService` 同时实现领域 `TrustedWorkspaceResolver`：历史 `linux_server_id=null` 只有在当前节点能解析并访问真实 root 时才回填当前服务器。可信 root/server/status 变更先建立 Workspace mutation gate，关系型保存成功后用单个 Lua 原子再次失效并释放 gate，数据库失败只撤回自己的 gate token；托管个人/应用副本更新沿用同一规则，且仅在可信字段真正变化时执行，创建新 Workspace 不做无效清理。
-- `ManagedConversationWorkspaceAccessAuthorizer` 实现运行上下文权限领域端口：应用版本/replica Workspace 必须属于已启用应用且当前用户为有效成员；个人 Workspace 还必须由当前用户拥有。`SUPER_ADMIN` 不旁路成员规则；找不到托管版本或个人映射的历史 Workspace 沿用 Session owner 与可信路径规则。
+- `ManagedConversationWorkspaceAccessAuthorizer` 实现运行上下文权限领域端口：应用版本/replica Workspace 必须属于已启用应用且当前用户为有效成员；个人 Workspace 还必须由当前用户拥有。`SUPER_ADMIN` 不旁路托管成员规则；找不到托管版本或个人映射的历史 Workspace 在会话入口沿用 Session owner 与可信路径规则，在文件入口默认拒绝，仅显式标记的 `SUPER_ADMIN` 服务器工作空间兼容访问可放行。
 - Agent/Skill 配置管理：公共 Git 仍由 `SUPER_ADMIN` 独占并使用每位管理员的公共个人 worktree；服务器公共仓库“拉取”会先把远端公共分支合并到当前管理员在该服务器的稳定个人 worktree，再更新共享运行副本，避免文件树继续读取旧内容。个人 worktree 有未提交修改时默认拒绝拉取，显式确认放弃本地已跟踪修改后才允许 reset；合并冲突保留在个人 worktree 并沿用三方冲突处理。应用级 `.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）由 `APP_ADMIN` 管理，`SUPER_ADMIN` 继承该权限，普通成员只能读取。应用级配置不创建独立 Agent worktree，而是使用当前版本个人 workspace 的 Git 根；文件树、读取和写入统一走目标服务器文件 WebSocket ticket，暂存和文件回退沿用 AgentConfig 目录权限，提交/发布复用个人 `HEAD` 白名单投影；普通回退拒绝 unmerged 文件，冲突继续使用三方合并能力。创建应用技能包默认生成 OpenCode 可识别的 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md` 模板。
 - 基于配置管理中的应用工作空间模板创建应用版本工作区，clone 指定分支并创建运行态 `Workspace`；设置页创建应用工作空间时会复用该能力同步创建初始版本工作区，并按 `workspace_create_operations` 记录“校验、保存配置、解析版本、下载代码、创建运行态工作区、完成/失败”进度。设置页保存前的分支、目录树和新增目录操作均不落磁盘；只有保存接口会 clone/checkout。测试工作库在保存阶段强校验分支必须符合 `feature_testagent_yyyyMMdd`，`directoryPath` 必须是当前应用同名根目录的一级子目录；`directoryNew=true` 且 clone 后目标目录不存在时才创建该目录，不向 Git 提交空目录。新前端表单默认传入工作空间别名 `ai-test`；后端创建和重命名时按去首尾空白后的精确字符串校验同一应用内唯一，旧客户端不传别名时仍按目录末段兜底。
 - 应用版本工作区根目录优先读取 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT`，路径片段包含安全化版本号和代码库 `englishName`；历史代码库缺少英文名称时拒绝创建新的版本工作区。新建或显式修复的应用版本、服务器副本和托管运行态 `Workspace.rootPath` 入库保存 `appworkspace:<versionSegment>/<repositoryEnglishName>[/<templateDirectory>]` 逻辑路径；接口响应和 Git/文件/PTY/Run 执行前统一解析为当前服务器物理路径。内部部署模式版本库执行 clone/fetch/pull/push 前会按当前操作人统一认证号拼接 `ssh://{unifiedAuthId}@{gitUrl}` 并刷新 origin，公共配置“更新并推送”也必须在 fetch 前刷新共享仓库 origin，避免沿用上一位管理员的 SSH 用户；接管已有仓库时忽略 origin 中的 `ssh://任意用户@` 前缀后再比较数据库保存片段。公共仓库脏状态仍保持 `initialized=true/status=CONFLICT`，message 最多列出五个真实 Git 路径，不能把“文件待提交”误报成“目录未初始化”。旧 Unix/Windows 绝对路径只兼容读取，不批量迁移。
@@ -37,12 +38,14 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - `AgentConfigApplicationServiceTest` 覆盖公共仓库初始化/更新、显式拉取先合并当前管理员稳定个人 worktree 且脏 worktree 不更新共享副本、当前用户长期公共 worktree 的稳定命名与复用、按服务器和创建人过滤、跨用户操作拒绝、公共/应用 Agent 文件回退路径映射、公共个人分支合并远端后以 refspec 推送到公共分支、冲突保留在个人 worktree、共享运行时副本同步与广播、push 成功后本机同步触发异常不反转发布结果，以及工作空间级 Agent/Skill 配置读写和 diff。`GitWorkspaceServiceRealGitTest` 使用临时 bare 远端验证远端先产生新提交后，个人 worktree 与共享运行副本均能同步到同一提交。
 
 - `ReferenceRepositoryApplicationServiceTest`、`ReferenceRepositoryRealGitSafetyTest`、`ReferenceRepositoryReplicaReconcilerTest` 覆盖分支一次性初始化、generation/CAS、广播唤醒、租约丢失、离线 `DEFERRED`/恢复、指数退避与永久阻塞、本机文件锁、临时 clone + 原子移动、已有仓库脏状态/origin/分支/分叉保护、树路径穿越/`.git`/符号链接/1000 项上限和补偿器生命周期。
+- `WorkspaceViewApplicationServiceTest` 覆盖 JSONC 注释/尾逗号/缺失/非法/超限、Git 引用对象拒绝、merge true/false、递归目录归并、文件及类型冲突并列、稳定 ID、归并后 1000 项上限、personal/version/replica 映射、逐次 READY 校验、UTF-8 只读、路径穿越/`.git`/符号链接和安全 warning。
 
 ## 允许依赖
 
 - `test-agent-common`。
 - `test-agent-domain`。
 - Spring Context。
+- Jackson Databind（仅用于服务端安全解析工作区 JSONC 引用元数据）。
 - SLF4J API。
 
 ## 禁止依赖

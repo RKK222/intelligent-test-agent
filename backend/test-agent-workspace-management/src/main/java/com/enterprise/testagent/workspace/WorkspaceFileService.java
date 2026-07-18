@@ -351,6 +351,16 @@ public class WorkspaceFileService {
      * 列出指定目录的一层子项，按文件名排序并限制最大返回数量，避免递归扫描大仓库。
      */
     public List<FileTreeEntryResponse> listDirectory(String rootPath, String relativePath) {
+        return listDirectory(rootPath, relativePath, maxDirectoryEntries);
+    }
+
+    /**
+     * 组合视图需要在多来源归并后统一应用上限，因此允许调用方多取一项用于精确判断 truncated。
+     */
+    public List<FileTreeEntryResponse> listDirectory(String rootPath, String relativePath, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
         Path root = rootRealPath(rootPath);
         Path directory = resolveInsideRoot(rootPath, relativePath);
         if (!Files.isDirectory(directory)) {
@@ -358,7 +368,7 @@ public class WorkspaceFileService {
         }
         try (var stream = Files.list(directory)) {
             return stream.sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                    .limit(maxDirectoryEntries)
+                    .limit(limit)
                     .map(path -> entry(root, path))
                     .toList();
         } catch (Exception exception) {

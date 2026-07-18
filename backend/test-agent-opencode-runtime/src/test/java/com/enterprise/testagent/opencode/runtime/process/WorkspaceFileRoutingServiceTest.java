@@ -22,6 +22,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -99,6 +100,35 @@ class WorkspaceFileRoutingServiceTest {
     }
 
     @Test
+    void rechecksManagedWorkspaceMembershipBeforeEveryRoute() {
+        WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "成员关系已失效"))
+                .when(authorizer)
+                .requireFileAccess(USER_ID, WORKSPACE_ID, false);
+
+        assertThatThrownBy(() -> new WorkspaceFileRoutingService(
+                        workspaceRepository,
+                        assignmentService,
+                        new BackendJavaRouteResolver(
+                                heartbeatStore,
+                                settings(),
+                                Clock.fixed(NOW, ZoneOffset.UTC)),
+                        ManagedWorkspacePathResolver.legacyOnly(),
+                        Clock.fixed(NOW, ZoneOffset.UTC),
+                        null,
+                        authorizer)
+                .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(assignmentService, never()).fileRoutingAffinity(any(), any(), any());
+        verify(workspaceRepository, never()).findById(any());
+    }
+
+    @Test
     void rebindsWorkspaceWhenStoredLinuxServerIsStaleAndCurrentPathExists() {
         WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
@@ -155,6 +185,17 @@ class WorkspaceFileRoutingServiceTest {
                         Duration.ofSeconds(10),
                         100),
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static ManagerControlSettings settings() {
+        return new ManagerControlSettings(
+                "secret-token",
+                "http://10.8.0.12:8080",
+                new LinuxServerId("10.8.0.12"),
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(10),
+                Duration.ofSeconds(10),
+                100);
     }
 
     private static WorkspaceFileRoutingService service(

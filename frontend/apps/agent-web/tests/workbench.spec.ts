@@ -45,6 +45,153 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   ]);
 });
 
+test("workspace tree merges references with source colors and exposes non-merged aliases", async ({ page }) => {
+  await mockBackendApi(page, {
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    },
+    workspaceViewLists: {
+      "COMPOSITE::": {
+        entries: [
+          {
+            id: "composite:docs",
+            path: "docs",
+            name: "docs",
+            directory: true,
+            size: 0,
+            locator: { kind: "COMPOSITE", path: "docs" },
+            source: "MIXED",
+            merged: true,
+            collision: false,
+            readonly: false,
+            workspacePath: "docs",
+            referenceAliases: ["docs-assets"]
+          },
+          {
+            id: "reference:spec-assets",
+            path: "spec-assets",
+            name: "spec-assets",
+            directory: true,
+            size: 0,
+            locator: { kind: "REFERENCE", path: "", referenceAlias: "spec-assets" },
+            source: "REFERENCE",
+            merged: false,
+            collision: false,
+            readonly: true,
+            referenceAliases: ["spec-assets"]
+          }
+        ],
+        warnings: [],
+        truncated: false
+      },
+      "COMPOSITE::docs": {
+        entries: [
+          {
+            id: "workspace:docs/local.md",
+            path: "docs/local.md",
+            name: "local.md",
+            directory: false,
+            size: 5,
+            locator: { kind: "WORKSPACE", path: "docs/local.md" },
+            source: "WORKSPACE",
+            merged: false,
+            collision: false,
+            readonly: false,
+            workspacePath: "docs/local.md",
+            referenceAliases: []
+          },
+          {
+            id: "reference:docs-assets:guide.md",
+            path: "docs/guide.md",
+            name: "guide.md",
+            directory: false,
+            size: 15,
+            locator: { kind: "REFERENCE", path: "guide.md", referenceAlias: "docs-assets" },
+            source: "REFERENCE",
+            merged: true,
+            collision: false,
+            readonly: true,
+            referenceAliases: ["docs-assets"]
+          },
+          {
+            id: "reference:docs-assets:same.md",
+            path: "docs/same.md",
+            name: "same.md",
+            directory: false,
+            size: 9,
+            locator: { kind: "REFERENCE", path: "same.md", referenceAlias: "docs-assets" },
+            source: "REFERENCE",
+            merged: true,
+            collision: true,
+            readonly: true,
+            referenceAliases: ["docs-assets"]
+          }
+        ],
+        warnings: [],
+        truncated: false
+      },
+      "REFERENCE:spec-assets:": {
+        entries: [
+          {
+            id: "reference:spec-assets:spec.md",
+            path: "spec-assets/spec.md",
+            name: "spec.md",
+            directory: false,
+            size: 13,
+            locator: { kind: "REFERENCE", path: "spec.md", referenceAlias: "spec-assets" },
+            source: "REFERENCE",
+            merged: false,
+            collision: false,
+            readonly: true,
+            referenceAliases: ["spec-assets"]
+          }
+        ],
+        warnings: [],
+        truncated: false
+      }
+    },
+    workspaceViewContents: {
+      "REFERENCE:docs-assets:guide.md": "reference guide",
+      "REFERENCE:docs-assets:same.md": "collision",
+      "REFERENCE:spec-assets:spec.md": "standalone spec"
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const docs = page.getByRole("button", { name: "docs", exact: true });
+  const alias = page.getByRole("button", { name: "spec-assets", exact: true });
+  await expect(docs).toBeVisible();
+  await expect(alias).toBeVisible();
+  await expect(docs).not.toHaveClass(/is-reference-merged/);
+  await expect(alias).not.toHaveClass(/is-reference-merged/);
+
+  await docs.click();
+  const guide = page.getByRole("button", { name: "guide.md", exact: true });
+  await expect(guide).toHaveClass(/is-reference-merged/);
+  await expect(page.getByRole("button", { name: "same.md", exact: true }))
+    .toHaveClass(/is-reference-collision/);
+  await guide.click();
+  await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loaded");
+  await expect(page.locator(".monaco-editor")).toContainText("reference guide");
+  await page.getByRole("textbox", { name: "Editor content" }).focus();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" must remain readonly");
+  await expect(page.locator(".monaco-editor")).not.toContainText("must remain readonly");
+
+  await alias.click();
+  const standalone = page.getByRole("button", { name: "spec.md", exact: true });
+  await expect(standalone).toBeVisible();
+  await expect(standalone).not.toHaveClass(/is-reference-merged/);
+});
+
 test("Agent files open through the parent loader for public and workspace scopes", async ({ page }) => {
   const agentFileFrames: Array<{
     op: string;
@@ -5049,6 +5196,14 @@ async function mockBackendApi(
     fileReadResponses?: Record<string, string[]>;
     workspaceMutationDelays?: Record<string, number>;
     fileWriteRequests?: Array<{ workspaceId: string; path: string; content: string }>;
+    /** 组合工作区视图响应以 `kind:alias:path` 为键；未配置时自动映射普通工作区目录。 */
+    workspaceViewLists?: Record<string, {
+      entries: Array<Record<string, unknown>>;
+      warnings?: Array<{ alias?: string; code: string; message: string }>;
+      truncated?: boolean;
+    }>;
+    /** 引用文件正文以 `kind:alias:path` 为键。 */
+    workspaceViewContents?: Record<string, string>;
     agentFileFrames?: Array<{
       op: string;
       scope: string;
@@ -5186,6 +5341,8 @@ async function mockBackendApi(
     fileReadNotFoundAttempts,
     fileReadResponses,
     workspaceMutationDelays,
+    workspaceViewLists,
+    workspaceViewContents,
     agentFileContents,
     agentFileReadDelays,
     agentFileReadFailureAttempts,
@@ -5228,6 +5385,9 @@ async function mockBackendApi(
     };
     const readAttempts: Record<string, number> = {};
     const agentReadAttempts: Record<string, number> = {};
+    type ViewLocator = { kind?: string; path?: string; referenceAlias?: string };
+    const viewKey = (locator: ViewLocator) =>
+      `${locator.kind ?? "COMPOSITE"}:${locator.referenceAlias ?? ""}:${locator.path ?? ""}`;
     const entries = (path: string, workspaceId = "wrk_1234567890abcdef") => {
       if (workspaceId === "wrk_project_a") {
         return path === "src"
@@ -5314,8 +5474,32 @@ async function mockBackendApi(
       send(payload: string) {
         const request = JSON.parse(payload) as { id: string; op: string; params?: Record<string, string | undefined> };
         const params = request.params ?? {};
+        const locator = (request.params as unknown as { locator?: ViewLocator } | undefined)?.locator
+          ?? { kind: "COMPOSITE", path: "" };
         let data: unknown = null;
-        if (request.op === "workspace.list") {
+        if (request.op === "workspace.view.list") {
+          recordFileRequest(params.workspaceId ?? "", locator.path ?? "");
+          const configured = (workspaceViewLists as Record<string, {
+            entries: Array<Record<string, unknown>>;
+            warnings?: Array<{ alias?: string; code: string; message: string }>;
+            truncated?: boolean;
+          }>)[viewKey(locator)];
+          data = configured ?? {
+            entries: entries(locator.path ?? "", params.workspaceId).map((entry) => ({
+              id: `workspace:${entry.path}`,
+              ...entry,
+              locator: { kind: "WORKSPACE", path: entry.path },
+              source: "WORKSPACE",
+              merged: false,
+              collision: false,
+              readonly: false,
+              workspacePath: entry.path,
+              referenceAliases: []
+            })),
+            warnings: [],
+            truncated: false
+          };
+        } else if (request.op === "workspace.list") {
           recordFileRequest(params.workspaceId ?? "", params.path ?? "");
           data = entries(params.path ?? "", params.workspaceId);
         } else if (request.op === "workspace.search") {
@@ -5329,6 +5513,17 @@ async function mockBackendApi(
               size: (fileContents as Record<string, string>)[path]?.length ?? 0,
               lastModifiedAt: "2026-06-19T00:00:00Z"
             }));
+        } else if (request.op === "workspace.view.read") {
+          const content = (workspaceViewContents as Record<string, string>)[viewKey(locator)] ?? "";
+          data = {
+            path: locator.path ?? "",
+            content,
+            size: content.length,
+            readonly: true,
+            source: "REFERENCE",
+            referenceAlias: locator.referenceAlias,
+            locator
+          };
         } else if (request.op === "workspace.read") {
           const path = params.path ?? "tests/checkout.spec.ts";
           const workspaceId = params.workspaceId ?? "";
@@ -5499,6 +5694,8 @@ async function mockBackendApi(
     fileReadNotFoundAttempts: capture.fileReadNotFoundAttempts ?? {},
     fileReadResponses: capture.fileReadResponses ?? {},
     workspaceMutationDelays: capture.workspaceMutationDelays ?? {},
+    workspaceViewLists: capture.workspaceViewLists ?? {},
+    workspaceViewContents: capture.workspaceViewContents ?? {},
     agentFileContents: capture.agentFileContents ?? {},
     agentFileReadDelays: capture.agentFileReadDelays ?? {},
     agentFileReadFailureAttempts: capture.agentFileReadFailureAttempts ?? {},

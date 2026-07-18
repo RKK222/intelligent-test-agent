@@ -71,6 +71,45 @@ export type FileTreeEntry = {
   modifiedAt?: string;
 };
 
+export type WorkspaceViewLocator = {
+  kind: "COMPOSITE" | "WORKSPACE" | "REFERENCE";
+  path: string;
+  referenceAlias?: string;
+};
+
+export type WorkspaceViewSource = "WORKSPACE" | "REFERENCE" | "MIXED";
+
+/** 合并工作区树节点；`id` 是缓存、展开状态和 Vue 渲染唯一允许使用的节点身份。 */
+export type WorkspaceViewEntry = FileTreeEntry & {
+  id: string;
+  locator: WorkspaceViewLocator;
+  source: WorkspaceViewSource;
+  merged: boolean;
+  collision: boolean;
+  readonly: boolean;
+  workspacePath?: string;
+  referenceAliases: string[];
+};
+
+export type WorkspaceViewWarning = {
+  alias?: string;
+  code: string;
+  message: string;
+};
+
+export type WorkspaceViewList = {
+  entries: WorkspaceViewEntry[];
+  warnings: WorkspaceViewWarning[];
+  truncated: boolean;
+};
+
+export type WorkspaceViewFileContent = FileContent & {
+  readonly: boolean;
+  source: WorkspaceViewSource;
+  referenceAlias?: string;
+  locator: WorkspaceViewLocator;
+};
+
 export type FileSearchResult = {
   path: string;
   name: string;

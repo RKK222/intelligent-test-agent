@@ -34,6 +34,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
 import java.time.Clock;
 import java.time.Duration;
@@ -52,6 +53,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * 引用资产库多服务器协调服务。广播只负责唤醒，磁盘写入前必须通过数据库 generation 与租约认领。
@@ -81,6 +83,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
     private final ServerBroadcastPublisher broadcastPublisher;
     private final Clock clock;
     private final ReferenceRepositoryDirectoryMover directoryMover;
+    private final long maxFileBytes;
 
     @Autowired
     public ReferenceRepositoryApplicationService(
@@ -91,7 +94,8 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             CommonParameterValues commonParameterValues,
             SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
-            ServerBroadcastPublisher broadcastPublisher) {
+            ServerBroadcastPublisher broadcastPublisher,
+            @Value("${test-agent.files.max-file-bytes:1048576}") long maxFileBytes) {
         this(
                 configurationRepository,
                 referenceRepository,
@@ -103,7 +107,8 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 serverIdentity,
                 broadcastPublisher,
                 Clock.systemUTC(),
-                ReferenceRepositoryDirectoryMover.filesystem());
+                ReferenceRepositoryDirectoryMover.filesystem(),
+                maxFileBytes);
     }
 
     /** 测试构造器允许固定时间，以验证 generation、租约和退避边界。 */
@@ -129,7 +134,8 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 serverIdentity,
                 broadcastPublisher,
                 clock,
-                ReferenceRepositoryDirectoryMover.filesystem());
+                ReferenceRepositoryDirectoryMover.filesystem(),
+                1024 * 1024L);
     }
 
     /** 测试构造器允许模拟不支持原子 rename 的文件系统。 */
@@ -145,6 +151,35 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             ServerBroadcastPublisher broadcastPublisher,
             Clock clock,
             ReferenceRepositoryDirectoryMover directoryMover) {
+        this(
+                configurationRepository,
+                referenceRepository,
+                userRepository,
+                heartbeatStore,
+                commonParameterValues,
+                gitWorkspaceService,
+                sshKeyEncryptionService,
+                serverIdentity,
+                broadcastPublisher,
+                clock,
+                directoryMover,
+                1024 * 1024L);
+    }
+
+    /** 测试构造器允许缩小引用文件读取上限。 */
+    ReferenceRepositoryApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            ReferenceRepositoryRepository referenceRepository,
+            UserRepository userRepository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            CommonParameterValues commonParameterValues,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyEncryptionService sshKeyEncryptionService,
+            WorkspaceServerIdentity serverIdentity,
+            ServerBroadcastPublisher broadcastPublisher,
+            Clock clock,
+            ReferenceRepositoryDirectoryMover directoryMover,
+            long maxFileBytes) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository);
         this.referenceRepository = Objects.requireNonNull(referenceRepository);
         this.userRepository = Objects.requireNonNull(userRepository);
@@ -156,6 +191,10 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         this.broadcastPublisher = Objects.requireNonNull(broadcastPublisher);
         this.clock = Objects.requireNonNull(clock);
         this.directoryMover = Objects.requireNonNull(directoryMover);
+        if (maxFileBytes < 1L) {
+            throw new IllegalArgumentException("maxFileBytes must be positive");
+        }
+        this.maxFileBytes = maxFileBytes;
     }
 
     /** 列表只读取当前应用已关联的应用资产库；其它仓库类型不会触发状态查询。 */
@@ -270,18 +309,9 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
     /** READY 时仅列出当前服务器本地副本的单层安全目录。 */
     public List<ReferenceRepositoryResponses.TreeNode> tree(String appId, String repositoryId, String path) {
         CodeRepository repository = requireLinkedAssetRepository(applicationId(appId), repositoryId(repositoryId));
-        ReferenceRepositoryState state = referenceRepository.findState(repository.repositoryId())
-                .filter(value -> value.status() == ReferenceRepositoryStatus.READY)
-                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库尚未就绪"));
-        LinuxServerId localServer = new LinuxServerId(serverIdentity.linuxServerId());
-        boolean localReady = referenceRepository.findReplicas(repository.repositoryId()).stream()
-                .anyMatch(replica -> replica.linuxServerId().equals(localServer)
-                        && replica.generation() == state.generation()
-                        && replica.status() == ReferenceRepositoryReplicaStatus.READY);
-        if (!localReady) {
-            throw new PlatformException(ErrorCode.CONFLICT, "当前服务器引用资产副本尚未就绪");
-        }
-        String normalizedPath = normalizeRelativePath(path);
+        requireReadyLocalState(repository);
+        // 既有配置管理 tree API 保留历史的输入 trim 兼容；工作区 view locator 则必须逐字保留文件名。
+        String normalizedPath = normalizeRelativePath(path == null ? null : path.trim());
         Path root = repositoryRoot(repository);
         Path directory = resolveSafeDirectory(root, normalizedPath);
         Set<String> highlightedNames = normalizedPath.isEmpty() ? sddFolderNames() : Set.of();
@@ -297,6 +327,74 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                     .toList();
         } catch (IOException exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取引用资产目录失败", Map.of(), exception);
+        }
+    }
+
+    /**
+     * 为工作区组合视图列出某个受管规格目录的一层内容。
+     *
+     * <p>仓库链接、类型、总体 generation、本机副本和规格目录白名单都在每次调用时重新校验；
+     * 客户端只提供配置中的英文名与逻辑目录，不接触物理路径或 repositoryId。
+     */
+    public ViewListing listView(
+            String appId,
+            String repositoryEnglishName,
+            String folder,
+            String path,
+            int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        ViewRoot viewRoot = requireReadyViewRoot(appId, repositoryEnglishName, folder);
+        String normalizedPath = normalizeRelativePath(path);
+        Path directory = resolveSafeDirectory(viewRoot.folderRoot(), normalizedPath);
+        try (java.util.stream.Stream<Path> stream = Files.list(directory)) {
+            List<ViewEntry> entries = stream
+                    .filter(entry -> !".git".equalsIgnoreCase(entry.getFileName().toString()))
+                    .filter(entry -> !Files.isSymbolicLink(entry))
+                    .sorted(Comparator.comparing(entry -> entry.getFileName().toString()))
+                    .limit((long) limit + 1L)
+                    .map(entry -> viewEntry(viewRoot.folderRoot(), entry))
+                    .toList();
+            boolean truncated = entries.size() > limit;
+            return new ViewListing(truncated ? entries.subList(0, limit) : entries, truncated);
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取引用资产目录失败", Map.of(), exception);
+        }
+    }
+
+    /**
+     * 为工作区组合视图读取安全 UTF-8 引用文件；禁止绝对路径、穿越、.git、符号链接和超限文件。
+     */
+    public ViewContent readView(
+            String appId,
+            String repositoryEnglishName,
+            String folder,
+            String path) {
+        ViewRoot viewRoot = requireReadyViewRoot(appId, repositoryEnglishName, folder);
+        String normalizedPath = normalizeRelativePath(path);
+        if (normalizedPath.isEmpty()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "引用资产文件路径不能为空");
+        }
+        Path target = resolveSafeEntry(viewRoot.folderRoot(), normalizedPath);
+        if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "引用资产文件不存在");
+        }
+        try {
+            long size = Files.size(target);
+            if (size > maxFileBytes) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "引用资产文件超过读取大小限制",
+                        Map.of("maxFileBytes", maxFileBytes));
+            }
+            return new ViewContent(normalizedPath, Files.readString(target, StandardCharsets.UTF_8), size);
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取引用资产文件失败", Map.of(), exception);
         }
     }
 
@@ -770,6 +868,37 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         return resolved;
     }
 
+    private ViewRoot requireReadyViewRoot(String appId, String repositoryEnglishName, String folder) {
+        String normalizedEnglishName = repositoryEnglishName == null ? "" : repositoryEnglishName.trim();
+        CodeRepository repository = configurationRepository.findRepositoryByEnglishName(normalizedEnglishName)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "引用资产库不存在"));
+        repository = requireLinkedAssetRepository(applicationId(appId), repository.repositoryId());
+        String normalizedFolder = normalizeRelativePath(folder);
+        if (normalizedFolder.isEmpty()
+                || normalizedFolder.contains("/")
+                || !sddFolderNames().contains(normalizedFolder)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "引用资产目录不在当前规格目录白名单中");
+        }
+        requireReadyLocalState(repository);
+        Path repositoryRoot = repositoryRoot(repository);
+        return new ViewRoot(repository, resolveSafeDirectory(repositoryRoot, normalizedFolder));
+    }
+
+    private ReferenceRepositoryState requireReadyLocalState(CodeRepository repository) {
+        ReferenceRepositoryState state = referenceRepository.findState(repository.repositoryId())
+                .filter(value -> value.status() == ReferenceRepositoryStatus.READY)
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库尚未就绪"));
+        LinuxServerId localServer = new LinuxServerId(serverIdentity.linuxServerId());
+        boolean localReady = referenceRepository.findReplicas(repository.repositoryId()).stream()
+                .anyMatch(replica -> replica.linuxServerId().equals(localServer)
+                        && replica.generation() == state.generation()
+                        && replica.status() == ReferenceRepositoryReplicaStatus.READY);
+        if (!localReady) {
+            throw new PlatformException(ErrorCode.CONFLICT, "当前服务器引用资产副本尚未就绪");
+        }
+        return state;
+    }
+
     private String validatedRepositoryEnglishName(CodeRepository repository) {
         String englishName = repository.englishName();
         if (englishName == null || !REPOSITORY_ENGLISH_NAME_PATTERN.matcher(englishName).matches()) {
@@ -824,6 +953,38 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         return normalized;
     }
 
+    private Path resolveSafeEntry(Path root, String relativePath) {
+        if (Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "当前服务器引用资产目录不可用");
+        }
+        Path current = root;
+        for (String segment : relativePath.split("/")) {
+            current = current.resolve(segment);
+            if (Files.isSymbolicLink(current)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "引用资产路径禁止经过符号链接");
+            }
+        }
+        Path normalized = current.toAbsolutePath().normalize();
+        if (!normalized.startsWith(root.toAbsolutePath().normalize())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "引用资产路径越界");
+        }
+        return normalized;
+    }
+
+    private ViewEntry viewEntry(Path root, Path entry) {
+        try {
+            boolean directory = Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS);
+            return new ViewEntry(
+                    root.relativize(entry).toString().replace('\\', '/'),
+                    entry.getFileName().toString(),
+                    directory,
+                    directory ? 0L : Files.size(entry),
+                    Files.getLastModifiedTime(entry, LinkOption.NOFOLLOW_LINKS).toInstant());
+        } catch (IOException exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取引用资产条目失败", Map.of(), exception);
+        }
+    }
+
     private ReferenceRepositoryResponses.TreeNode treeNode(
             Path root,
             Path entry,
@@ -846,7 +1007,8 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
     }
 
     private String normalizeRelativePath(String path) {
-        String value = path == null ? "" : path.trim();
+        // 引用视图的 locator 由目录列表生成，文件名中的合法首尾空格必须保持原样。
+        String value = path == null ? "" : path;
         if (value.isEmpty()) {
             return "";
         }
@@ -979,5 +1141,28 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 // 任务状态由数据库 fencing 决定，关闭告警不覆盖同步结果。
             }
         }
+    }
+
+    /** 工作区组合视图使用的安全引用目录列表。 */
+    public record ViewListing(List<ViewEntry> entries, boolean truncated) {
+        public ViewListing {
+            entries = List.copyOf(entries);
+        }
+    }
+
+    /** 工作区组合视图使用的引用文件元数据。 */
+    public record ViewEntry(
+            String path,
+            String name,
+            boolean directory,
+            long size,
+            Instant lastModifiedAt) {
+    }
+
+    /** 工作区组合视图使用的只读 UTF-8 文件正文。 */
+    public record ViewContent(String path, String content, long size) {
+    }
+
+    private record ViewRoot(CodeRepository repository, Path folderRoot) {
     }
 }

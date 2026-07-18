@@ -2024,6 +2024,96 @@ describe("backend-api", () => {
     expect(sockets[0]?.sentMessages.map((message) => message.op)).toEqual(["workspace.list", "workspace.read"]);
   });
 
+  it("maps composite workspace view list and readonly reference reads through workspace RPC", async () => {
+    const fetcher = workspaceFileFetcher("wrk_view");
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const factory = ((url: string) => {
+      const socket = new FakeWorkspaceWebSocket(url, false);
+      socket.onSend = (message) => {
+        queueMicrotask(() => {
+          socket.onmessage?.({
+            data: JSON.stringify({
+              id: message.id,
+              type: "result",
+              data: message.op === "workspace.view.list"
+                ? {
+                    entries: [{
+                      id: "ref:requirements:docs%2Fguide.md",
+                      path: "docs/guide.md",
+                      name: "guide.md",
+                      directory: false,
+                      size: 12,
+                      locator: { kind: "REFERENCE", path: "docs/guide.md", referenceAlias: "requirements" },
+                      source: "REFERENCE",
+                      merged: true,
+                      collision: false,
+                      readonly: true,
+                      referenceAliases: ["requirements"]
+                    }],
+                    warnings: [{ alias: "legacy", code: "REFERENCE_UNAVAILABLE", message: "副本不可用" }],
+                    truncated: false
+                  }
+                : {
+                    path: "docs/guide.md",
+                    content: "reference",
+                    size: 9,
+                    readonly: true,
+                    source: "REFERENCE",
+                    referenceAlias: "requirements",
+                    locator: { kind: "REFERENCE", path: "docs/guide.md", referenceAlias: "requirements" }
+                  }
+            })
+          });
+        });
+      };
+      sockets.push(socket);
+      queueMicrotask(() => socket.openConnection());
+      return socket;
+    }) satisfies WorkspaceWebSocketFactory;
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: factory
+    });
+
+    await expect(client.listWorkspaceView("wrk_view", { kind: "COMPOSITE", path: "" })).resolves.toEqual({
+      entries: [expect.objectContaining({
+        id: "ref:requirements:docs%2Fguide.md",
+        type: "file",
+        source: "REFERENCE",
+        readonly: true
+      })],
+      warnings: [{ alias: "legacy", code: "REFERENCE_UNAVAILABLE", message: "副本不可用" }],
+      truncated: false
+    });
+    await expect(client.readWorkspaceViewFile("wrk_view", {
+      kind: "REFERENCE",
+      path: "docs/guide.md",
+      referenceAlias: "requirements"
+    })).resolves.toMatchObject({
+      path: "docs/guide.md",
+      content: "reference",
+      readonly: true,
+      source: "REFERENCE",
+      referenceAlias: "requirements"
+    });
+
+    expect(sockets[0]?.sentMessages).toEqual([
+      expect.objectContaining({
+        op: "workspace.view.list",
+        params: { workspaceId: "wrk_view", locator: { kind: "COMPOSITE", path: "" } }
+      }),
+      expect.objectContaining({
+        op: "workspace.view.read",
+        params: {
+          workspaceId: "wrk_view",
+          locator: { kind: "REFERENCE", path: "docs/guide.md", referenceAlias: "requirements" }
+        }
+      })
+    ]);
+  });
+
   it("rejects a workspace connection closed before open and reconnects on the next call", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const isRoute = String(input).includes("/workspaces/wrk_reconnect/file-ws-route");

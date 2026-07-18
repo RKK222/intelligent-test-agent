@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
@@ -85,6 +86,28 @@ class WorkspaceFileSocketTicketServiceTest {
     }
 
     @Test
+    void rejectsWorkspaceTicketAfterApplicationMembershipIsRevoked() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService, authorizer);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        when(workspaceService.currentLinuxServerId()).thenReturn("10.8.0.12");
+        Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "成员关系已失效"))
+                .when(authorizer)
+                .requireFileAccess(USER_ID, workspaceId, true);
+
+        assertThatThrownBy(() -> service.createTicket(
+                        principal(List.of(Dictionary.ROLE_SUPER_ADMIN)),
+                        new WorkspaceFileSocketDtos.TicketRequest(workspaceId.value(), "10.8.0.12", "workspace"),
+                        TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(assignmentService, never()).fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
+    }
+
+    @Test
     void createsAgentConfigTicketWithoutUserOpencodeProcessAffinity() {
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
@@ -135,10 +158,18 @@ class WorkspaceFileSocketTicketServiceTest {
     private static WorkspaceFileSocketTicketService service(
             WorkspaceApplicationService workspaceService,
             UserOpencodeProcessAssignmentService assignmentService) {
+        return service(workspaceService, assignmentService, Mockito.mock(ConversationWorkspaceAccessAuthorizer.class));
+    }
+
+    private static WorkspaceFileSocketTicketService service(
+            WorkspaceApplicationService workspaceService,
+            UserOpencodeProcessAssignmentService assignmentService,
+            ConversationWorkspaceAccessAuthorizer authorizer) {
         return new WorkspaceFileSocketTicketService(
                 workspaceService,
                 assignmentService,
-                new WorkspaceFileSocketTicketStore(Clock.fixed(NOW, ZoneOffset.UTC), () -> "wft_fixed"));
+                new WorkspaceFileSocketTicketStore(Clock.fixed(NOW, ZoneOffset.UTC), () -> "wft_fixed"),
+                authorizer);
     }
 
     private static UserOpencodeProcessFileRoutingAffinity readyAffinity(String linuxServerId) {

@@ -6,11 +6,15 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
+import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
+import com.enterprise.testagent.workspace.WorkspaceViewLocator;
+import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -20,6 +24,7 @@ import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
@@ -43,17 +48,22 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private final WorkspaceApplicationService workspaceService;
     private final WorkspaceDirectoryService directoryService;
     private final AgentConfigApplicationService agentConfigService;
+    private final WorkspaceViewApplicationService workspaceViewService;
+    private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
     private final ObjectMapper objectMapper;
     private final Set<String> allowedOrigins;
 
     /**
      * 装配文件 WebSocket handler 依赖和 Origin 白名单。
      */
-    public WorkspaceFileWebSocketHandler(
+    @Autowired
+    WorkspaceFileWebSocketHandler(
             WorkspaceFileSocketTicketService ticketService,
             WorkspaceApplicationService workspaceService,
             WorkspaceDirectoryService directoryService,
             AgentConfigApplicationService agentConfigService,
+            WorkspaceViewApplicationService workspaceViewService,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
             ObjectMapper objectMapper,
             @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}")
             String allowedOrigins) {
@@ -61,6 +71,31 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
         this.directoryService = Objects.requireNonNull(directoryService, "directoryService must not be null");
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
+        this.workspaceViewService = Objects.requireNonNull(workspaceViewService, "workspaceViewService must not be null");
+        this.workspaceAccessAuthorizer = Objects.requireNonNull(
+                workspaceAccessAuthorizer,
+                "workspaceAccessAuthorizer must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isBlank())
+                .toList());
+    }
+
+    /** 兼容既有 handler 单元测试构造路径；生产装配始终使用带组合视图和实时鉴权的构造器。 */
+    public WorkspaceFileWebSocketHandler(
+            WorkspaceFileSocketTicketService ticketService,
+            WorkspaceApplicationService workspaceService,
+            WorkspaceDirectoryService directoryService,
+            AgentConfigApplicationService agentConfigService,
+            ObjectMapper objectMapper,
+            String allowedOrigins) {
+        this.ticketService = Objects.requireNonNull(ticketService, "ticketService must not be null");
+        this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
+        this.directoryService = Objects.requireNonNull(directoryService, "directoryService must not be null");
+        this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
+        this.workspaceViewService = null;
+        this.workspaceAccessAuthorizer = (userId, workspaceId) -> { };
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -107,6 +142,9 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             id = text(root, "id");
             String op = requiredText(root, "op");
             JsonNode params = root.path("params");
+            if (MODE_WORKSPACE.equals(ticket.mode()) && op.startsWith("workspace.")) {
+                authorizeWorkspaceRpc(ticket, params);
+            }
             Object data = switch (op) {
                 case "workspace.list" -> workspaceService.listFiles(workspaceId(ticket, params), text(params, "path"));
                 case "workspace.search" -> workspaceService.searchFiles(workspaceId(ticket, params), text(params, "query"));
@@ -168,6 +206,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     workspaceService.createDirectory(workspaceId, path);
                     yield null;
                 }
+                case "workspace.view.list" -> workspaceViewService.list(
+                        workspaceId(ticket, params),
+                        viewLocator(params));
+                case "workspace.view.read" -> workspaceViewService.read(
+                        workspaceId(ticket, params),
+                        viewLocator(params));
                 case "agent-config.list" -> agentConfigList(ticket, params);
                 case "agent-config.read" -> agentConfigRead(ticket, params);
                 case "agent-config.write" -> {
@@ -184,6 +228,35 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         } catch (Exception exception) {
             return error(id, ErrorCode.VALIDATION_ERROR.name(), "文件 WebSocket 消息无效", traceId, Map.of());
         }
+    }
+
+    private void authorizeWorkspaceRpc(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        if (ticket.userId() == null || ticket.userId().isBlank()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "工作区文件 ticket 缺少用户身份");
+        }
+        workspaceAccessAuthorizer.requireFileAccess(
+                new com.enterprise.testagent.domain.user.UserId(ticket.userId()),
+                workspaceId,
+                ticket.superAdmin());
+    }
+
+    private WorkspaceViewLocator viewLocator(JsonNode params) {
+        JsonNode locator = params == null ? null : params.get("locator");
+        if (locator == null || !locator.isObject()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "workspace view locator 无效");
+        }
+        if (locator.has("physicalPath") || locator.has("rootPath") || locator.has("repositoryId")) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "workspace view locator 禁止携带物理路径或 repositoryId");
+        }
+        String kindValue = requiredText(locator, "kind");
+        WorkspaceViewLocatorKind kind;
+        try {
+            kind = WorkspaceViewLocatorKind.valueOf(kindValue.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (RuntimeException exception) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "workspace view locator kind 无效");
+        }
+        return new WorkspaceViewLocator(kind, text(locator, "path"), text(locator, "referenceAlias"));
     }
 
     private void requireWorkspaceWrite(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId, String path) {

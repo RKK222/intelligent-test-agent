@@ -77,6 +77,9 @@ import type {
   PersonalWorkspace,
   PermissionRequest,
   PromptPart,
+  WorkspaceViewFileContent,
+  WorkspaceViewList,
+  WorkspaceViewLocator,
   PublicAgentRepositoryStatus,
   ProviderInfo,
   RepositoryDeploymentOptions,
@@ -767,6 +770,53 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         size: entry.size,
         modifiedAt: entry.lastModifiedAt
       })) satisfies FileTreeEntry[];
+    },
+    listWorkspaceView: async (workspaceId: string, locator: WorkspaceViewLocator): Promise<WorkspaceViewList> => {
+      const result = await workspaceFileRpc<BackendWorkspaceViewList>(
+        workspaceId,
+        "workspace.view.list",
+        { locator }
+      );
+      return {
+        entries: result.entries.map((entry) => ({
+          id: entry.id,
+          path: entry.path,
+          name: entry.name,
+          type: entry.directory ? "directory" : "file",
+          size: entry.size,
+          modifiedAt: entry.lastModifiedAt,
+          locator: entry.locator,
+          source: entry.source,
+          merged: entry.merged,
+          collision: entry.collision,
+          readonly: entry.readonly,
+          workspacePath: entry.workspacePath,
+          referenceAliases: entry.referenceAliases ?? []
+        })),
+        warnings: result.warnings ?? [],
+        truncated: result.truncated === true
+      };
+    },
+    readWorkspaceViewFile: async (
+      workspaceId: string,
+      locator: WorkspaceViewLocator
+    ): Promise<WorkspaceViewFileContent> => {
+      const data = await workspaceFileRpc<BackendWorkspaceViewFileContent>(
+        workspaceId,
+        "workspace.view.read",
+        { locator },
+        true
+      );
+      return {
+        path: data.path || locator.path,
+        content: typeof data.content === "string" ? data.content : "",
+        encoding: "utf-8",
+        size: data.size,
+        readonly: data.readonly,
+        source: data.source,
+        referenceAlias: data.referenceAlias,
+        locator: data.locator
+      };
     },
     readFile: async (workspaceId: string, path: string, readonly = false) => {
       // 工作区文件读取与列表、写入保持同一条平台 WebSocket 路由，避免旧 OpenCode
@@ -1509,6 +1559,38 @@ type BackendFileContent = {
   path: string;
   content: string;
   size: number;
+};
+
+type BackendWorkspaceViewEntry = {
+  id: string;
+  path: string;
+  name: string;
+  directory: boolean;
+  size: number;
+  lastModifiedAt?: string;
+  locator: WorkspaceViewLocator;
+  source: "WORKSPACE" | "REFERENCE" | "MIXED";
+  merged: boolean;
+  collision: boolean;
+  readonly: boolean;
+  workspacePath?: string;
+  referenceAliases?: string[];
+};
+
+type BackendWorkspaceViewList = {
+  entries: BackendWorkspaceViewEntry[];
+  warnings?: WorkspaceViewList["warnings"];
+  truncated?: boolean;
+};
+
+type BackendWorkspaceViewFileContent = {
+  path: string;
+  content: string;
+  size: number;
+  readonly: boolean;
+  source: "WORKSPACE" | "REFERENCE" | "MIXED";
+  referenceAlias?: string;
+  locator: WorkspaceViewLocator;
 };
 
 type BackendFileStatus = {
