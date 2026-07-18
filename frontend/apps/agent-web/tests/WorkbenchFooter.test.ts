@@ -32,6 +32,7 @@ describe("WorkbenchFooter", () => {
     });
 
     expect(hidden.find('[aria-label="切换服务器工作空间"]').exists()).toBe(false);
+    expect(hidden.get('[data-onboarding="workspace-selector"]').attributes("data-onboarding")).toBe("workspace-selector");
 
     const shown = mount(WorkbenchFooter, {
       props: {

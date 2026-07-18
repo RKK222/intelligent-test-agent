@@ -25,6 +25,7 @@ describe("FigmaFileExplorer", () => {
     expect(sections[0].attributes("style")).toContain("flex: 1");
     expect(sections[1].classes()).not.toContain("is-expanded");
     expect(sections[1].text()).toContain("Agents");
+    expect(wrapper.get('[data-onboarding="workspace-reference"]').attributes("aria-label")).toBe("打开外部页面");
   });
 
   it("shows the total diff count reported by all three change scopes", async () => {

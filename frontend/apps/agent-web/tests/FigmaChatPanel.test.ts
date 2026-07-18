@@ -904,6 +904,7 @@ describe("FigmaChatPanel", () => {
     const newConversationButton = wrapper.get(".figma-chat-new-btn");
 
     expect(newConversationButton.attributes("aria-label")).toBe("新建对话");
+    expect(newConversationButton.attributes("data-onboarding")).toBe("new-conversation");
     expect(newConversationButton.text()).toBe("");
   });
 

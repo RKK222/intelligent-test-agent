@@ -4749,6 +4749,7 @@ function onCompositionEnd() {
               type="button"
               class="figma-chat-card-btn figma-chat-new-btn"
               aria-label="新建对话"
+              data-onboarding="new-conversation"
               :disabled="newConversationBlocked"
               @click="emit('new-conversation')"
             >

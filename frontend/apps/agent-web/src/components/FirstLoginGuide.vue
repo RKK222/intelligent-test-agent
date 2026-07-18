@@ -2,8 +2,8 @@
 import { nextTick, ref, watch } from "vue";
 import { ElTour, ElTourStep } from "element-plus";
 
-// v2 修正 SSH 步骤的目标元素，并扩展为普通用户可见的工作台主入口说明。
-const GUIDE_VERSION = "v2";
+// v3 将引导锚定到应用、workspace/version、小地球和新建对话等真实操作按钮。
+const GUIDE_VERSION = "v3";
 
 const props = defineProps<{
   userId?: string | null;
@@ -105,35 +105,35 @@ defineExpose({ restart });
       :prev-button-props="previousButton"
       :next-button-props="nextButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>02</span><strong>选择要处理的应用</strong></div></template>
-      <p>这里切换你已加入的应用；目标应用不在列表时，打开菜单并选择“加入其他应用”。</p>
+      <template #header><div class="ta-onboarding-heading"><span>02</span><strong>应用在这里切换或加入</strong></div></template>
+      <p>普通用户不能在工作区里新建应用；看不到“新建应用”是权限正常。请让管理员在“设置 → 应用管理”创建并把你加入，自己则点击“加入其他应用”选择已有应用。</p>
     </ElTourStep>
     <ElTourStep
-      target='[data-onboarding="editor-button"]'
+      target='[data-onboarding="workspace-selector"]'
+      placement="top-start"
+      :prev-button-props="previousButton"
+      :next-button-props="nextButton"
+    >
+      <template #header><div class="ta-onboarding-heading"><span>03</span><strong>一定要选中 workspace</strong></div></template>
+      <p>顶部选中应用后还不够。点击左下角双向箭头，先悬停选择工作空间，再选择右侧版本；按钮显示“工作空间 / 版本”后，左侧文件树才会加载。只选应用时文件区保持空白是正常的。</p>
+    </ElTourStep>
+    <ElTourStep
+      target='[data-onboarding="workspace-reference"]'
       placement="right-start"
       :prev-button-props="previousButton"
       :next-button-props="nextButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>03</span><strong>返回编辑工作台</strong></div></template>
-      <p>点击代码图标可从其他页面回到文件、编辑器和对话组成的主工作台。</p>
+      <template #header><div class="ta-onboarding-heading"><span>04</span><strong>用小地球引入子条目</strong></div></template>
+      <p>工作区选中后，点击“工作空间”标题右侧的小地球打开外部需求页面；在页面中选择要引入的需求子条目并完成保存，返回后文件树会刷新。它不是刷新按钮，也不是新建应用入口。</p>
     </ElTourStep>
     <ElTourStep
-      target='[data-onboarding="workspace"]'
-      placement="right-start"
+      target='[data-onboarding="new-conversation"]'
+      placement="top-end"
       :prev-button-props="previousButton"
       :next-button-props="nextButton"
     >
-      <template #header><div class="ta-onboarding-heading"><span>04</span><strong>选择工作区和文件</strong></div></template>
-      <p>先选择应用版本和自己的个人工作区，再在文件树中浏览、搜索或打开文件。工作区决定智能体能够读取和修改的代码范围。</p>
-    </ElTourStep>
-    <ElTourStep
-      target='[data-onboarding="chat"]'
-      placement="left-start"
-      :prev-button-props="previousButton"
-      :next-button-props="nextButton"
-    >
-      <template #header><div class="ta-onboarding-heading"><span>05</span><strong>向智能体描述任务</strong></div></template>
-      <p>在对话区发送测试、分析或编码任务，也可以带上文件上下文。运行进度和结果都会留在当前会话。</p>
+      <template #header><div class="ta-onboarding-heading"><span>05</span><strong>第一条消息会建立对话</strong></div></template>
+      <p>在右侧输入任务并点击发送，系统会自动创建主对话，不必先点“新建对话”。“新建对话”按钮用于主动清空当前草稿、开始另一条对话；需要引用子条目时先用小地球引入，再在输入框使用 # 选择。</p>
     </ElTourStep>
     <ElTourStep
       target='[data-onboarding="pet"]'

@@ -374,6 +374,7 @@ defineExpose({
                 class="figma-fe-section-action-btn"
                 title="打开外部页面"
                 aria-label="打开外部页面"
+                data-onboarding="workspace-reference"
                 :disabled="!workspaceId"
                 @click="openIframeDialog"
               >

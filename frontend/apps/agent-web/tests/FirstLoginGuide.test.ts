@@ -41,15 +41,28 @@ describe("FirstLoginGuide", () => {
       width: "min(320px, calc(100vw - 32px))"
     });
     expect(wrapper.findAll("article")).toHaveLength(8);
+    expect(wrapper.findAll("article").map((step) => step.attributes("data-target"))).toEqual([
+      undefined,
+      '[data-onboarding="application"]',
+      '[data-onboarding="workspace-selector"]',
+      '[data-onboarding="workspace-reference"]',
+      '[data-onboarding="new-conversation"]',
+      '[data-onboarding="pet"]',
+      '[data-onboarding="settings"]',
+      '[data-onboarding="manual"]'
+    ]);
     expect(wrapper.findAll("article")[0]?.attributes("data-target")).toBeUndefined();
     expect(wrapper.text()).toContain("这是你的工作面板");
+    expect(wrapper.text()).toContain("一定要选中 workspace");
+    expect(wrapper.text()).toContain("小地球");
+    expect(wrapper.text()).toContain("第一条消息会建立对话");
     expect(wrapper.text()).toContain("08");
     expect(wrapper.text()).not.toContain("超级管理员");
     expect(wrapper.find('[data-target="[data-onboarding=\\\"settings\\\"]"]').text()).toContain("配置 SSH");
 
     wrapper.getComponent(tourStub).vm.$emit("finish");
     await wrapper.vm.$nextTick();
-    expect(window.localStorage.getItem("test-agent.onboarding.v2:usr_guide_1")).toBe("seen");
+    expect(window.localStorage.getItem("test-agent.onboarding.v3:usr_guide_1")).toBe("seen");
     expect(wrapper.emitted("finish")).toHaveLength(1);
 
     const second = mountGuide();
@@ -62,7 +75,7 @@ describe("FirstLoginGuide", () => {
       callback(0);
       return 1;
     });
-    window.localStorage.setItem("test-agent.onboarding.v2:usr_guide_1", "seen");
+    window.localStorage.setItem("test-agent.onboarding.v3:usr_guide_1", "seen");
     const wrapper = mountGuide();
 
     (wrapper.vm as unknown as { restart: () => void }).restart();

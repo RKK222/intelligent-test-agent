@@ -469,6 +469,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
           ref="cascadeButtonRef"
           type="button"
           class="ta-workbench-footer-branch"
+          data-onboarding="workspace-selector"
           :title="triggerTitle"
           :aria-expanded="menuOpen"
           aria-haspopup="menu"

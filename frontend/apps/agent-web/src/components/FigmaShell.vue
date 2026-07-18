@@ -1981,7 +1981,7 @@ function submitJoinApp() {
       </aside>
 
       <div class="figma-panel-group">
-        <div class="figma-panel-left" data-onboarding="workspace" :class="{ 'is-resizing': resizing === 'left' }" :style="leftPanelStyle">
+        <div class="figma-panel-left" :class="{ 'is-resizing': resizing === 'left' }" :style="leftPanelStyle">
           <slot name="files" />
         </div>
         <div
