@@ -2,11 +2,14 @@ package com.enterprise.testagent.workspace;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardOpenOption;
@@ -31,12 +34,16 @@ import org.springframework.stereotype.Service;
 @Service
 public class WorkspaceFileService {
 
+    private static final String FILE_TARGET_EXISTS_MESSAGE = "目标文件已存在";
+    private static final String MOVE_TARGET_EXISTS_MESSAGE = "目标文件或目录已存在";
+
     private final long maxFileBytes;
     private final int maxDirectoryEntries;
     // 搜索相关配置
     private final int maxSearchResults;
     private final int maxSearchDepth;
     private final long searchTimeoutMillis;
+    private final Runnable beforeSecureMove;
     // 黑名单目录：搜索时跳过这些目录
     private static final Set<String> BLACKLISTED_DIRECTORIES = Set.of(
             ".git", "node_modules", ".idea", "target", "build", ".gradle", "__pycache__", ".venv", "venv"
@@ -46,14 +53,21 @@ public class WorkspaceFileService {
      * 使用默认文件大小和目录项上限构造服务，适用于本地测试和未显式配置的运行环境。
      */
     public WorkspaceFileService() {
-        this(1024 * 1024, 1000, 200, 20, 5000L);
+        this(1024 * 1024, 1000, 200, 20, 5000L, () -> {});
     }
 
     /**
      * 兼容测试路径：仅指定文件大小和目录项上限，搜索相关参数取默认值。
      */
     public WorkspaceFileService(long maxFileBytes, int maxDirectoryEntries) {
-        this(maxFileBytes, maxDirectoryEntries, 200, 20, 5000L);
+        this(maxFileBytes, maxDirectoryEntries, 200, 20, 5000L, () -> {});
+    }
+
+    /**
+     * 测试专用构造器，在最终安全移动前注入一次文件系统变化，用于验证路径竞态必须失败关闭。
+     */
+    WorkspaceFileService(long maxFileBytes, int maxDirectoryEntries, Runnable beforeSecureMove) {
+        this(maxFileBytes, maxDirectoryEntries, 200, 20, 5000L, beforeSecureMove);
     }
 
     /**
@@ -66,6 +80,16 @@ public class WorkspaceFileService {
             @Value("${test-agent.files.max-search-results:200}") int maxSearchResults,
             @Value("${test-agent.files.max-search-depth:20}") int maxSearchDepth,
             @Value("${test-agent.files.search-timeout-millis:5000}") long searchTimeoutMillis) {
+        this(maxFileBytes, maxDirectoryEntries, maxSearchResults, maxSearchDepth, searchTimeoutMillis, () -> {});
+    }
+
+    private WorkspaceFileService(
+            long maxFileBytes,
+            int maxDirectoryEntries,
+            int maxSearchResults,
+            int maxSearchDepth,
+            long searchTimeoutMillis,
+            Runnable beforeSecureMove) {
         if (maxFileBytes < 1) {
             throw new IllegalArgumentException("maxFileBytes must be positive");
         }
@@ -77,6 +101,7 @@ public class WorkspaceFileService {
         this.maxSearchResults = maxSearchResults;
         this.maxSearchDepth = maxSearchDepth;
         this.searchTimeoutMillis = searchTimeoutMillis;
+        this.beforeSecureMove = beforeSecureMove == null ? () -> {} : beforeSecureMove;
     }
 
     /**
@@ -188,19 +213,66 @@ public class WorkspaceFileService {
     }
 
     /**
-     * 在工作区内跨目录移动普通文件；源文件和目标路径都必须位于同一工作区，且不覆盖已有条目。
+     * 在工作区内跨目录移动普通文件或目录；源和目标必须位于同一工作区，且不覆盖已有条目。
      */
     public void moveFile(String rootPath, String sourcePath, String targetPath) {
-        Path source = requireRegularFile(rootPath, sourcePath);
+        Path source = requireMovableSource(rootPath, sourcePath);
         Path target = resolveInsideRoot(rootPath, targetPath);
         if (source.equals(target)) {
             return;
         }
-        target = resolveNewFileTarget(rootPath, targetPath);
+        // 目录不能移动到自身后代，否则底层重命名会产生依赖文件系统实现的异常。
+        if (Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS) && target.startsWith(source)) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "目标目录不能位于源目录内部",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)));
+        }
+        target = resolveNewMoveTarget(rootPath, targetPath);
+        Path realRoot = rootRealPath(rootPath);
+        Path realSource;
+        Path realTarget;
         try {
-            Files.move(source, target);
+            // 目标父目录可能经工作区内符号链接落入源目录后代，移动必须使用本次校验得到的真实路径。
+            realSource = source.toRealPath();
+            realTarget = target.getParent().toRealPath().resolve(target.getFileName()).normalize();
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "解析移动目标失败",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)),
+                    exception);
+        }
+        if (!realSource.startsWith(realRoot) || !realTarget.startsWith(realRoot)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "文件路径超出工作区根目录",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)));
+        }
+        if (Files.isDirectory(realSource, LinkOption.NOFOLLOW_LINKS) && realTarget.startsWith(realSource)) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "目标目录不能位于源目录内部",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)));
+        }
+        try {
+            moveAtomicallyWithDirectoryDescriptors(realRoot, realSource, realTarget, sourcePath, targetPath);
         } catch (FileAlreadyExistsException exception) {
-            throw targetConflict(targetPath, exception);
+            throw targetConflict(targetPath, exception, MOVE_TARGET_EXISTS_MESSAGE);
+        } catch (NoSuchFileException exception) {
+            throw new PlatformException(
+                    ErrorCode.NOT_FOUND,
+                    "文件或目标目录不存在",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)),
+                    exception);
+        } catch (FileSystemException exception) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "移动路径发生变化或包含符号链接",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)),
+                    exception);
+        } catch (PlatformException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new PlatformException(
                     ErrorCode.INTERNAL_ERROR,
@@ -208,6 +280,25 @@ public class WorkspaceFileService {
                     Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)),
                     exception);
         }
+    }
+
+    /**
+     * 相对已打开的工作区目录句柄执行原子移动，目标父目录即使在校验后被替换为符号链接也不会越界。
+     */
+    private void moveAtomicallyWithDirectoryDescriptors(
+            Path realRoot,
+            Path realSource,
+            Path realTarget,
+            String sourcePath,
+            String targetPath) throws IOException {
+        if (realSource.getParent() == null || realTarget.getParent() == null) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "移动路径缺少父目录",
+                    Map.of("sourcePath", safePath(sourcePath), "targetPath", safePath(targetPath)));
+        }
+        beforeSecureMove.run();
+        SecureWorkspaceMover.move(realRoot, realSource, realTarget);
     }
 
     /**
@@ -420,20 +511,85 @@ public class WorkspaceFileService {
     }
 
     /**
+     * 校验移动源必须是工作区内的普通文件或普通目录；符号链接和特殊文件均不跟随，避免越界或意外操作设备文件。
+     */
+    private Path requireMovableSource(String rootPath, String relativePath) {
+        Path root = rootRealPath(rootPath);
+        Path source = resolveInsideRoot(rootPath, relativePath);
+        if (source.equals(root)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "禁止移动工作区根目录", Map.of("path", safePath(relativePath)));
+        }
+        if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在", Map.of("path", safePath(relativePath)));
+        }
+        if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "仅支持移动普通文件或目录",
+                    Map.of("path", safePath(relativePath)));
+        }
+        try {
+            // 中间路径可以含有符号链接，但源条目的真实路径仍必须留在工作区 root 内。
+            if (!source.toRealPath().startsWith(root)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "文件路径超出工作区根目录", Map.of("path", safePath(relativePath)));
+            }
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "文件路径超出工作区根目录",
+                    Map.of("path", safePath(relativePath)),
+                    exception);
+        }
+        return source;
+    }
+
+    /**
      * 校验新文件目标：不能是工作区根目录、不能覆盖已有条目，父目录必须真实存在于工作区内。
      */
     private Path resolveNewFileTarget(String rootPath, String relativePath) {
+        return resolveNewTarget(rootPath, relativePath, false, false, FILE_TARGET_EXISTS_MESSAGE);
+    }
+
+    /**
+     * 校验移动目标：目标条目按不跟随符号链接方式判断存在，且真实父目录越界时必须拒绝移动。
+     */
+    private Path resolveNewMoveTarget(String rootPath, String relativePath) {
+        return resolveNewTarget(rootPath, relativePath, true, true, MOVE_TARGET_EXISTS_MESSAGE);
+    }
+
+    /**
+     * 统一校验新目标，保留上传/复制的既有错误语义，并允许移动操作强化符号链接边界校验。
+     */
+    private Path resolveNewTarget(
+            String rootPath,
+            String relativePath,
+            boolean targetExistsWithoutFollowingLinks,
+            boolean rejectExternalRealParent,
+            String targetExistsMessage) {
         Path root = rootRealPath(rootPath);
         Path target = resolveInsideRoot(rootPath, relativePath);
         if (target.equals(root) || target.getFileName() == null) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目标文件路径不能为空", Map.of("path", safePath(relativePath)));
         }
-        if (Files.exists(target)) {
-            throw targetConflict(relativePath, null);
+        boolean targetExists = targetExistsWithoutFollowingLinks
+                ? Files.exists(target, LinkOption.NOFOLLOW_LINKS)
+                : Files.exists(target);
+        if (targetExists) {
+            throw targetConflict(relativePath, null, targetExistsMessage);
         }
         Path parent = target.getParent();
         try {
-            if (parent == null || !Files.isDirectory(parent) || !parent.toRealPath().startsWith(root)) {
+            if (parent == null || !Files.isDirectory(parent)) {
+                throw new PlatformException(ErrorCode.NOT_FOUND, "目标目录不存在", Map.of("path", safePath(relativePath)));
+            }
+            // 父目录可能是符号链接；移动必须拒绝借此写出工作区，复制/上传保持既有 NOT_FOUND 语义。
+            if (!parent.toRealPath().startsWith(root)) {
+                if (rejectExternalRealParent) {
+                    throw new PlatformException(ErrorCode.FORBIDDEN, "文件路径超出工作区根目录", Map.of("path", safePath(relativePath)));
+                }
                 throw new PlatformException(ErrorCode.NOT_FOUND, "目标目录不存在", Map.of("path", safePath(relativePath)));
             }
         } catch (PlatformException exception) {
@@ -448,15 +604,22 @@ public class WorkspaceFileService {
      * 统一构造不覆盖目标条目的冲突错误，details 只返回工作区相对路径。
      */
     private PlatformException targetConflict(String relativePath, Exception cause) {
+        return targetConflict(relativePath, cause, FILE_TARGET_EXISTS_MESSAGE);
+    }
+
+    /**
+     * 按具体文件操作构造冲突错误，避免移动目录的文案改变上传和复制的既有契约。
+     */
+    private PlatformException targetConflict(String relativePath, Exception cause, String message) {
         if (cause == null) {
             return new PlatformException(
                     ErrorCode.CONFLICT,
-                    "目标文件已存在",
+                    message,
                     Map.of("path", safePath(relativePath)));
         }
         return new PlatformException(
                 ErrorCode.CONFLICT,
-                "目标文件已存在",
+                message,
                 Map.of("path", safePath(relativePath)),
                 cause);
     }

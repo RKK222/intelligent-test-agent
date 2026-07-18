@@ -45,6 +45,100 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   ]);
 });
 
+test("workspace directory move keeps expanded descendants and reloads a pending child tab before reverse undo", async ({ page }) => {
+  const workspaceMoveRequests: Array<{ workspaceId: string; sourcePath: string; targetPath: string }> = [];
+  const fileReadRequests: Array<{ workspaceId: string; path: string; attempt: number }> = [];
+  const response = (entries: Array<Record<string, unknown>>) => ({ entries, warnings: [], truncated: false });
+  await mockBackendApi(page, {
+    workspaceMoveRequests,
+    fileReadRequests,
+    fileContents: { "src/nested/guide.md": "moved guide content" },
+    fileReadDelays: { "src/nested/guide.md": [3000] },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    },
+    workspaceViewLists: {
+      "COMPOSITE::": response([
+        workspaceViewDirectoryEntry("workspace:src-old", "src"),
+        workspaceViewDirectoryEntry("workspace:archive", "archive")
+      ]),
+      "WORKSPACE::src": response([
+        workspaceViewDirectoryEntry("workspace:src-nested-old", "src/nested")
+      ]),
+      "WORKSPACE::src/nested": response([
+        workspaceViewFileEntry("workspace:src-guide-old", "src/nested/guide.md")
+      ])
+    },
+    workspaceViewListsAfterMoves: [
+      {
+        "COMPOSITE::": response([workspaceViewDirectoryEntry("workspace:archive", "archive")]),
+        "WORKSPACE::archive": response([
+          workspaceViewDirectoryEntry("workspace:archive-src-new", "archive/src")
+        ]),
+        "WORKSPACE::archive/src": response([
+          workspaceViewDirectoryEntry("workspace:archive-src-nested-new", "archive/src/nested")
+        ]),
+        "WORKSPACE::archive/src/nested": response([
+          workspaceViewFileEntry("workspace:archive-src-guide-new", "archive/src/nested/guide.md")
+        ])
+      },
+      {
+        "COMPOSITE::": response([
+          workspaceViewDirectoryEntry("workspace:src-restored", "src"),
+          workspaceViewDirectoryEntry("workspace:archive", "archive")
+        ]),
+        "WORKSPACE::archive": response([]),
+        "WORKSPACE::src": response([
+          workspaceViewDirectoryEntry("workspace:src-nested-restored", "src/nested")
+        ]),
+        "WORKSPACE::src/nested": response([
+          workspaceViewFileEntry("workspace:src-guide-restored", "src/nested/guide.md")
+        ])
+      }
+    ]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "src", exact: true }).click();
+  await page.getByRole("button", { name: "nested", exact: true }).click();
+  await page.getByRole("button", { name: "guide.md", exact: true }).click();
+  await expect.poll(() => fileReadRequests.some((request) => request.path === "src/nested/guide.md")).toBe(true);
+
+  const source = page.getByRole("button", { name: "src", exact: true });
+  const target = page.getByRole("button", { name: "archive", exact: true });
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await source.dispatchEvent("dragstart", { dataTransfer });
+  await target.dispatchEvent("dragover", { dataTransfer });
+  await target.dispatchEvent("drop", { dataTransfer });
+  await source.dispatchEvent("dragend", { dataTransfer });
+
+  await expect.poll(() => workspaceMoveRequests).toEqual([
+    { workspaceId: "wrk_personal_default", sourcePath: "src", targetPath: "archive/src" }
+  ]);
+  await expect(page.getByRole("button", { name: "src", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "nested", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "guide.md", exact: true })).toBeVisible();
+  await expect(page.locator(".monaco-editor")).toContainText("moved guide content", { timeout: 10_000 });
+
+  await page.getByRole("button", { name: "src", exact: true }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: /撤销/ }).click();
+  await expect.poll(() => workspaceMoveRequests).toEqual([
+    { workspaceId: "wrk_personal_default", sourcePath: "src", targetPath: "archive/src" },
+    { workspaceId: "wrk_personal_default", sourcePath: "archive/src", targetPath: "src" }
+  ]);
+  await expect(page.getByRole("button", { name: "src", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "nested", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "guide.md", exact: true })).toBeVisible();
+});
+
 test("workspace tree merges references with source colors and exposes non-merged aliases", async ({ page }) => {
   await mockBackendApi(page, {
     personalWorkspaces: {
@@ -5244,12 +5338,19 @@ async function mockBackendApi(
     fileReadResponses?: Record<string, string[]>;
     workspaceMutationDelays?: Record<string, number>;
     fileWriteRequests?: Array<{ workspaceId: string; path: string; content: string }>;
+    workspaceMoveRequests?: Array<{ workspaceId: string; sourcePath: string; targetPath: string }>;
     /** 组合工作区视图响应以 `kind:alias:path` 为键；未配置时自动映射普通工作区目录。 */
     workspaceViewLists?: Record<string, {
       entries: Array<Record<string, unknown>>;
       warnings?: Array<{ alias?: string; code: string; message: string }>;
       truncated?: boolean;
     }>;
+    /** 每次 workspace.move 成功后替换组合树响应，用于覆盖稳定 ID 变化和反向撤销。 */
+    workspaceViewListsAfterMoves?: Array<Record<string, {
+      entries: Array<Record<string, unknown>>;
+      warnings?: Array<{ alias?: string; code: string; message: string }>;
+      truncated?: boolean;
+    }>>;
     /** 引用文件正文以 `kind:alias:path` 为键。 */
     workspaceViewContents?: Record<string, string>;
     agentFileFrames?: Array<{
@@ -5363,6 +5464,9 @@ async function mockBackendApi(
   await page.exposeFunction("__taRecordWorkspaceFileRead", (workspaceId: string, path: string, attempt: number) => {
     capture.fileReadRequests?.push({ workspaceId, path, attempt });
   });
+  await page.exposeFunction("__taRecordWorkspaceMove", (workspaceId: string, sourcePath: string, targetPath: string) => {
+    capture.workspaceMoveRequests?.push({ workspaceId, sourcePath, targetPath });
+  });
   await page.exposeFunction("__taRecordAgentFileFrame", (frame: {
     op: string;
     scope: string;
@@ -5390,6 +5494,7 @@ async function mockBackendApi(
     fileReadResponses,
     workspaceMutationDelays,
     workspaceViewLists,
+    workspaceViewListsAfterMoves,
     workspaceViewContents,
     agentFileContents,
     agentFileReadDelays,
@@ -5402,8 +5507,15 @@ async function mockBackendApi(
         __taRecordWorkspaceFileRequest?: (workspaceId: string, path: string) => void;
         __taRecordWorkspaceFileRead?: (workspaceId: string, path: string, attempt: number) => void;
         __taRecordWorkspaceFileWrite?: (workspaceId: string, path: string, content: string) => void;
+        __taRecordWorkspaceMove?: (workspaceId: string, sourcePath: string, targetPath: string) => void;
       };
       win.__taRecordWorkspaceFileRequest?.(workspaceId, path);
+    };
+    const recordWorkspaceMove = (workspaceId: string, sourcePath: string, targetPath: string) => {
+      const win = window as Window & {
+        __taRecordWorkspaceMove?: (workspaceId: string, sourcePath: string, targetPath: string) => void;
+      };
+      win.__taRecordWorkspaceMove?.(workspaceId, sourcePath, targetPath);
     };
     const recordFileWrite = (workspaceId: string, path: string, content: string) => {
       const win = window as Window & {
@@ -5433,6 +5545,7 @@ async function mockBackendApi(
     };
     const readAttempts: Record<string, number> = {};
     const agentReadAttempts: Record<string, number> = {};
+    let workspaceMoveAttempt = 0;
     type ViewLocator = { kind?: string; path?: string; referenceAlias?: string };
     const viewKey = (locator: ViewLocator) =>
       `${locator.kind ?? "COMPOSITE"}:${locator.referenceAlias ?? ""}:${locator.path ?? ""}`;
@@ -5634,6 +5747,29 @@ async function mockBackendApi(
             }));
           }, (workspaceMutationDelays as Record<string, number>)[request.op] ?? 0);
           return;
+        } else if (request.op === "workspace.move") {
+          const workspaceId = params.workspaceId ?? "";
+          const sourcePath = params.sourcePath ?? "";
+          const targetPath = params.targetPath ?? "";
+          recordWorkspaceMove(workspaceId, sourcePath, targetPath);
+          const contents = fileContents as Record<string, string>;
+          for (const currentPath of Object.keys(contents)) {
+            if (currentPath !== sourcePath && !currentPath.startsWith(`${sourcePath}/`)) continue;
+            const movedPath = `${targetPath}${currentPath.slice(sourcePath.length)}`;
+            contents[movedPath] = contents[currentPath] ?? "";
+            delete contents[currentPath];
+          }
+          const nextViewLists = (workspaceViewListsAfterMoves as Array<Record<string, {
+            entries: Array<Record<string, unknown>>;
+            warnings?: Array<{ alias?: string; code: string; message: string }>;
+            truncated?: boolean;
+          }>>)[workspaceMoveAttempt];
+          workspaceMoveAttempt += 1;
+          if (nextViewLists) {
+            const currentViewLists = workspaceViewLists as Record<string, unknown>;
+            for (const key of Object.keys(currentViewLists)) delete currentViewLists[key];
+            Object.assign(currentViewLists, nextViewLists);
+          }
         } else if (request.op === "agent-config.list") {
           const scope = params.scope ?? "PUBLIC";
           const path = params.path ?? "";
@@ -5743,6 +5879,7 @@ async function mockBackendApi(
     fileReadResponses: capture.fileReadResponses ?? {},
     workspaceMutationDelays: capture.workspaceMutationDelays ?? {},
     workspaceViewLists: capture.workspaceViewLists ?? {},
+    workspaceViewListsAfterMoves: capture.workspaceViewListsAfterMoves ?? [],
     workspaceViewContents: capture.workspaceViewContents ?? {},
     agentFileContents: capture.agentFileContents ?? {},
     agentFileReadDelays: capture.agentFileReadDelays ?? {},
@@ -6462,6 +6599,32 @@ function workspace() {
     status: "ACTIVE",
     createdAt: "2026-06-19T00:00:00Z",
     updatedAt: "2026-06-19T00:00:00Z"
+  };
+}
+
+function workspaceViewDirectoryEntry(id: string, path: string) {
+  return {
+    id,
+    path,
+    name: path.split("/").at(-1) ?? path,
+    directory: true,
+    size: 0,
+    lastModifiedAt: "2026-06-19T00:00:00Z",
+    locator: { kind: "WORKSPACE", path },
+    source: "WORKSPACE",
+    merged: false,
+    collision: false,
+    readonly: false,
+    workspacePath: path,
+    referenceAliases: []
+  };
+}
+
+function workspaceViewFileEntry(id: string, path: string) {
+  return {
+    ...workspaceViewDirectoryEntry(id, path),
+    directory: false,
+    size: 12
   };
 }
 

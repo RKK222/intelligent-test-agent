@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
 import {
+  migrateWorkspaceViewRefreshTargets,
   ROOT_WORKSPACE_VIEW_TARGET,
   referenceChatPath,
+  revalidatedWorkspaceViewRefreshTarget,
   resolveWorkspaceViewLoadTarget,
   workspaceViewContextIsCurrent,
   workspaceViewEntries,
@@ -161,6 +163,56 @@ describe("workspace view state", () => {
 
     expect(target).toEqual(refreshed);
     expect(target?.locator.kind).toBe("COMPOSITE");
+  });
+
+  it("migrates expanded workspace paths and resolves new stable ids through each target ancestor", () => {
+    const source = {
+      ...directory("workspace:src-old", "src"),
+      locator: { kind: "WORKSPACE" as const, path: "src" },
+      source: "WORKSPACE" as const,
+      merged: false,
+      referenceAliases: []
+    };
+    const nested = {
+      ...directory("workspace:src-nested-old", "src/nested"),
+      locator: { kind: "WORKSPACE" as const, path: "src/nested" },
+      source: "WORKSPACE" as const,
+      merged: false,
+      referenceAliases: []
+    };
+    const targets = migrateWorkspaceViewRefreshTargets(
+      workspaceViewRefreshTargets(
+        new Set([source.id, nested.id]),
+        new Map([[source.id, source], [nested.id, nested]])
+      ),
+      "src",
+      "archive/src"
+    );
+
+    expect(targets.map((target) => target.workspacePath ?? target.id)).toEqual([
+      "",
+      "archive",
+      "archive/src",
+      "archive/src/nested"
+    ]);
+
+    const archive = {
+      ...directory("workspace:archive", "archive"),
+      locator: { kind: "WORKSPACE" as const, path: "archive" },
+      source: "WORKSPACE" as const,
+      merged: false,
+      referenceAliases: []
+    };
+    const movedSource = {
+      ...directory("workspace:archive-src-new", "archive/src"),
+      locator: { kind: "WORKSPACE" as const, path: "archive/src" },
+      source: "WORKSPACE" as const,
+      merged: false,
+      referenceAliases: []
+    };
+
+    expect(revalidatedWorkspaceViewRefreshTarget(targets[1]!, new Map([[archive.id, archive]]))).toEqual(archive);
+    expect(revalidatedWorkspaceViewRefreshTarget(targets[2]!, new Map([[movedSource.id, movedSource]]))).toEqual(movedSource);
   });
 
   it("collects nested warnings and truncation once, then clears a recovered directory", () => {

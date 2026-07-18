@@ -191,6 +191,7 @@ mvn test
 - `test-agent-app` 只放启动、装配、profile、migration 和 health 等运行入口，不放 Controller 或业务服务。
 - HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 默认保留，明确作废的入口除外；新 URL 同步写入 `docs/api/http-api.md`。
 - Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、应用引用资产库副本、agent、skill 管理业务放在 `test-agent-workspace-management`。
+- 工作区 `workspace.move` 保持既有文件 WebSocket RPC 契约并整体移动普通文件或非空目录；Linux 通过 JNA 直接调用内核 `renameat2(RENAME_NOREPLACE)`（兼容 Alpine/musl 未导出包装函数），macOS 调用 `renameatx_np(RENAME_EXCL | RENAME_NOFOLLOW_ANY)`，Windows 使用源条目句柄与目标父目录句柄的 `SetFileInformationByHandle`。三者都执行一次不覆盖的原子重命名并阻断校验后的路径替换竞态，缺少等价原子能力的平台失败关闭。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
 - Model/Provider 目录始终由 opencode 配置文件决定；内部模型代理和 `<think>` 流式转换放在 `test-agent-opencode-runtime` / `test-agent-api`，内部供应商地址和 token 端口放在 `test-agent-domain`，MyBatis/Flyway 实现放在 `test-agent-persistence`。

@@ -2,6 +2,7 @@ package com.enterprise.testagent.workspace;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -15,6 +16,9 @@ class WorkspaceFileServiceTest {
 
     @TempDir
     Path root;
+
+    @TempDir
+    Path externalRoot;
 
     @Test
     void serviceReadsAndWritesUtf8FilesInsideWorkspaceRoot() throws Exception {
@@ -82,8 +86,10 @@ class WorkspaceFileServiceTest {
 
         assertThat(Files.readAllBytes(root.resolve("assets/icon.bin"))).containsExactly(content);
         assertThatThrownBy(() -> service.uploadFile(root.toString(), "assets/icon.bin", "AA=="))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).isEqualTo("目标文件已存在");
+                });
         assertThatThrownBy(() -> service.uploadFile(root.toString(), "assets/bad.bin", "***"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
@@ -97,6 +103,11 @@ class WorkspaceFileServiceTest {
         Files.writeString(root.resolve("src/example.txt"), "example");
 
         service.copyFile(root.toString(), "src/example.txt", "docs/copied.txt");
+        assertThatThrownBy(() -> service.copyFile(root.toString(), "src/example.txt", "docs/copied.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).isEqualTo("目标文件已存在");
+                });
         service.moveFile(root.toString(), "src/example.txt", "docs/moved.txt");
 
         assertThat(Files.readString(root.resolve("docs/copied.txt"))).isEqualTo("example");
@@ -105,6 +116,214 @@ class WorkspaceFileServiceTest {
         assertThatThrownBy(() -> service.copyFile(root.toString(), "docs/copied.txt", "../outside.txt"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void serviceMovesNonEmptyDirectoryWithSingleFilesystemMove() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("src/nested"));
+        Files.createDirectories(root.resolve("archive"));
+        Files.writeString(root.resolve("src/nested/case.md"), "case");
+
+        service.moveFile(root.toString(), "src", "archive/src");
+
+        assertThat(Files.exists(root.resolve("src"))).isFalse();
+        assertThat(Files.readString(root.resolve("archive/src/nested/case.md"))).isEqualTo("case");
+    }
+
+    @Test
+    void serviceTreatsDirectoryMoveToSamePathAsIdempotent() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("suite/cases"));
+        Files.writeString(root.resolve("suite/cases/case.md"), "case");
+
+        service.moveFile(root.toString(), "suite", "suite");
+
+        assertThat(Files.readString(root.resolve("suite/cases/case.md"))).isEqualTo("case");
+    }
+
+    @Test
+    void serviceRejectsMovingWorkspaceRootOrDirectoryIntoItsDescendant() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("suite/target"));
+
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "", "renamed-root"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "suite", "suite/target/moved-suite"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void serviceRejectsMovingDirectoryIntoDescendantResolvedThroughWorkspaceAlias() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("suite/target"));
+        Files.writeString(root.resolve("suite/case.md"), "case");
+        Files.createSymbolicLink(root.resolve("alias"), root.resolve("suite/target"));
+
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "suite", "alias/moved-suite"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+        assertThat(Files.isDirectory(root.resolve("suite"))).isTrue();
+        assertThat(Files.readString(root.resolve("suite/case.md"))).isEqualTo("case");
+    }
+
+    @Test
+    void serviceRejectsMoveWhenSourceMissingTargetExistsOrTargetParentMissing() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve("source.txt"), "source");
+        Files.writeString(root.resolve("existing.txt"), "existing");
+
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "missing.txt", "new.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "source.txt", "existing.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).isEqualTo("目标文件或目录已存在");
+                });
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "source.txt", "missing/new.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+    }
+
+    @Test
+    void serviceRejectsSymbolicLinkAndSpecialFileMoveSources() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("target"));
+        Path linkedFile = root.resolve("linked.txt");
+        Files.createSymbolicLink(linkedFile, root.resolve("target-file.txt"));
+
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "linked.txt", "target/linked.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+
+        assumeTrue(isUnixLikePlatform());
+        Path fifo = root.resolve("events.fifo");
+        Process process = new ProcessBuilder("mkfifo", fifo.toString()).start();
+        assertThat(process.waitFor()).isZero();
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "events.fifo", "target/events.fifo"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void serviceRejectsMovePathTraversalAndTargetParentSymlinkOutsideWorkspace() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve("source.txt"), "source");
+
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "source.txt", "../outside.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        Path outsideLink = root.resolve("outside-link");
+        Files.createSymbolicLink(outsideLink, externalRoot);
+        try {
+            assertThatThrownBy(() -> service.moveFile(root.toString(), "source.txt", "outside-link/moved.txt"))
+                    .isInstanceOfSatisfying(PlatformException.class, exception ->
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+            assertThat(Files.exists(externalRoot.resolve("moved.txt"))).isFalse();
+        } finally {
+            Files.deleteIfExists(outsideLink);
+        }
+    }
+
+    @Test
+    void serviceRejectsMoveWhenSourceResolvesOutsideWorkspaceThroughLinkedParent() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Path linkedParent = root.resolve("linked-parent");
+        Files.writeString(externalRoot.resolve("source.txt"), "external source");
+        Files.createSymbolicLink(linkedParent, externalRoot);
+
+        try {
+            assertThatThrownBy(() -> service.moveFile(root.toString(), "linked-parent/source.txt", "moved.txt"))
+                    .isInstanceOfSatisfying(PlatformException.class, exception ->
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+            assertThat(Files.readString(externalRoot.resolve("source.txt"))).isEqualTo("external source");
+            assertThat(Files.exists(root.resolve("moved.txt"))).isFalse();
+        } finally {
+            Files.deleteIfExists(linkedParent);
+        }
+    }
+
+    @Test
+    void serviceFailsClosedWhenTargetParentBecomesSymlinkBeforeFilesystemMove() throws Exception {
+        Files.writeString(root.resolve("source.txt"), "source");
+        Files.createDirectories(root.resolve("target"));
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000, () -> {
+            try {
+                Files.delete(root.resolve("target"));
+                Files.createSymbolicLink(root.resolve("target"), externalRoot);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        });
+
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "source.txt", "target/moved.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThat(Files.readString(root.resolve("source.txt"))).isEqualTo("source");
+        assertThat(Files.exists(externalRoot.resolve("moved.txt"))).isFalse();
+    }
+
+    @Test
+    void serviceFailsClosedWhenWorkspaceRootAncestorBecomesSymlinkBeforeFilesystemMove() throws Exception {
+        Path container = Files.createDirectories(root.resolve("container"));
+        Path workspace = Files.createDirectories(container.resolve("workspace"));
+        Files.createDirectories(workspace.resolve("target"));
+        Files.writeString(workspace.resolve("source.txt"), "source");
+        Path externalWorkspace = Files.createDirectories(externalRoot.resolve("workspace"));
+        Files.createDirectories(externalWorkspace.resolve("target"));
+        Files.writeString(externalWorkspace.resolve("source.txt"), "external source");
+        Path originalContainer = root.resolve("container-original");
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000, () -> {
+            try {
+                Files.move(container, originalContainer);
+                Files.createSymbolicLink(container, externalRoot);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        });
+
+        try {
+            assertThatThrownBy(() -> service.moveFile(
+                            workspace.toString(), "source.txt", "target/moved.txt"))
+                    .isInstanceOfSatisfying(PlatformException.class, exception ->
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+            assertThat(Files.readString(originalContainer.resolve("workspace/source.txt"))).isEqualTo("source");
+            assertThat(Files.readString(externalWorkspace.resolve("source.txt"))).isEqualTo("external source");
+            assertThat(Files.exists(externalWorkspace.resolve("target/moved.txt"))).isFalse();
+        } finally {
+            Files.deleteIfExists(container);
+            Files.move(originalContainer, container);
+        }
+    }
+
+    @Test
+    void serviceDoesNotOverwriteTargetCreatedImmediatelyBeforeFilesystemMove() throws Exception {
+        Files.writeString(root.resolve("source.txt"), "source");
+        Files.createDirectories(root.resolve("target"));
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000, () -> {
+            try {
+                Files.writeString(root.resolve("target/moved.txt"), "concurrent target");
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        });
+
+        assertThatThrownBy(() -> service.moveFile(root.toString(), "source.txt", "target/moved.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        assertThat(Files.readString(root.resolve("source.txt"))).isEqualTo("source");
+        assertThat(Files.readString(root.resolve("target/moved.txt"))).isEqualTo("concurrent target");
+    }
+
+    /**
+     * FIFO 仅在类 Unix 平台可创建，其他平台跳过特殊文件断言以保持测试可移植。
+     */
+    private boolean isUnixLikePlatform() {
+        return !System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
     @Test

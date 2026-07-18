@@ -128,4 +128,107 @@ describe("FileExplorer", () => {
     await fireEvent.dragEnd(window);
     expect(tree.classList.contains("is-root-drop-target")).toBe(false);
   });
+
+  it("shares the internal drag source with recursive rows and clears the source row after dragend", async () => {
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: { "": [{ type: "directory", path: "docs", name: "docs" }] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? ""
+    };
+    const docs = view.getByRole("button", { name: "docs" });
+
+    await fireEvent.dragStart(docs, { dataTransfer });
+    expect(docs.classList.contains("is-dragging")).toBe(true);
+    await fireEvent.dragEnd(window, { dataTransfer });
+
+    expect(docs.classList.contains("is-dragging")).toBe(false);
+  });
+
+  it("moves an internal source to the blank workspace root but rejects its current parent", async () => {
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: {
+          "": [
+            { type: "directory", path: "docs", name: "docs" },
+            { type: "file", path: "README.md", name: "README.md" }
+          ],
+          docs: [{ type: "file", path: "docs/guide.md", name: "guide.md" }]
+        },
+        expandedDirectories: new Set(["docs"]),
+        changedFiles: []
+      }
+    });
+    const tree = view.container.querySelector(".ta-file-tree-scroll") as HTMLElement;
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? ""
+    };
+    const guide = view.getByRole("button", { name: "guide.md" });
+    const readme = view.getByRole("button", { name: "README.md" });
+
+    await fireEvent.dragStart(guide, { dataTransfer });
+    await fireEvent.dragOver(tree, { dataTransfer });
+    await fireEvent.drop(tree, { dataTransfer });
+    expect(view.emitted("moveEntry")).toEqual([["docs/guide.md", ""]]);
+
+    await fireEvent.dragStart(readme, { dataTransfer });
+    await fireEvent.dragOver(tree, { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe("none");
+    await fireEvent.drop(tree, { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe("none");
+    expect(view.emitted("moveEntry")).toEqual([["docs/guide.md", ""]]);
+  });
+
+  it("keeps nested directory and file moves working after window drop capture clears the shared source", async () => {
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: {
+          "": [
+            { type: "directory", path: "src", name: "src" },
+            { type: "directory", path: "target", name: "target" }
+          ],
+          src: [{ type: "file", path: "src/guide.md", name: "guide.md" }],
+          target: [{ type: "directory", path: "target/nested", name: "nested" }]
+        },
+        expandedDirectories: new Set(["src", "target"]),
+        changedFiles: []
+      }
+    });
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? ""
+    };
+    const src = view.getByRole("button", { name: "src" });
+    const guide = view.getByRole("button", { name: "guide.md" });
+    const nested = view.getByRole("button", { name: "nested" });
+
+    await fireEvent.dragStart(src, { dataTransfer });
+    expect(src.classList.contains("is-dragging")).toBe(true);
+    await fireEvent.drop(nested, { dataTransfer });
+    expect(src.classList.contains("is-dragging")).toBe(false);
+
+    await fireEvent.dragStart(guide, { dataTransfer });
+    expect(guide.classList.contains("is-dragging")).toBe(true);
+    await fireEvent.drop(nested, { dataTransfer });
+    expect(guide.classList.contains("is-dragging")).toBe(false);
+
+    expect(view.emitted("moveEntry")).toEqual([
+      ["src", "target/nested"],
+      ["src/guide.md", "target/nested"]
+    ]);
+  });
 });

@@ -46,6 +46,7 @@
         <druid.version>1.2.28</druid.version>
         <mybatis-spring-boot.version>4.0.1</mybatis-spring-boot.version>
         <pty4j.version>0.13.12</pty4j.version>
+        <jna.version>5.14.0</jna.version>
         <spring-boot.version>4.1.0</spring-boot.version>
         <start-class>com.enterprise.testagent.app.TestAgentApplication</start-class>
     </properties>
@@ -218,6 +219,11 @@
                 <groupId>org.jetbrains.pty4j</groupId>
                 <artifactId>pty4j</artifactId>
                 <version>${pty4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.java.dev.jna</groupId>
+                <artifactId>jna</artifactId>
+                <version>${jna.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.alibaba</groupId>

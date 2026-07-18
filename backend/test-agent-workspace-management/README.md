@@ -13,7 +13,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 引用资产库列表和状态另返回可空的 `repositoryPath`：业务层只用当前平台 `OPENCODE_REFERENCES_DIR` 与可信英文名派生规范化绝对路径；参数缺失或历史非法名称不阻断仓库列表，也不把物理路径写入错误或日志。
 - 工作区引用组合视图：读取当前工作区最新 `.opencode/opencode.jsonc`，只接受能反向验证到当前应用资产库、本机同 generation `READY` 副本、当前平台引用根目录和允许 SDD 根目录的本地引用对象。`merge=true` 按 `sdd-folder-name` 合并到工作区同名一级目录，工作区已有目录保持普通来源，纯引用后代标记只读引用来源；`merge=false` 以参考别名投影只读一级目录。文件同名不覆盖，节点使用稳定身份并携带冲突来源；单引用异常转为局部 warning，不阻断工作区内容，所有路径继续拒绝 `.git`、符号链接和 root 穿越。
 - 工作区注册时记录 `linuxServerId`，并通过 `WorkspaceServerIdentity` 提供当前 Java 进程所属服务器和默认目录。
-- 工作区内原始文件单层列表、受限相对路径搜索、UTF-8 内容读写、Base64 二进制新文件上传、普通文件跨目录复制/移动、普通文件或目录同目录重命名、文件状态、普通文件/目录树删除和路径越权拦截；目录删除不跟随符号链接，并拒绝工作区根目录和任意层级 `.git` 元数据；上传沿用单文件大小上限且不覆盖已有条目，复制/移动只处理普通文件并拒绝覆盖目标；搜索支持空关键字文件目录，并受数量、深度和超时上限保护。组合文件树只新增只读 list/read 视图，不改变这些原始写操作的物理工作区边界。
+- 工作区内原始文件单层列表、受限相对路径搜索、UTF-8 内容读写、Base64 二进制新文件上传、普通文件跨目录复制、普通文件或普通目录（包括非空目录）同工作区移动、普通文件或目录同目录重命名、文件状态、普通文件/目录树删除和路径越权拦截；目录删除不跟随符号链接，并拒绝工作区根目录和任意层级 `.git` 元数据。`workspace.move` 保持 `workspaceId/sourcePath/targetPath` 与成功 `null` 的既有 RPC 契约，以一次原子文件系统重命名整体移动普通文件或普通目录（包括非空目录），不递归拆分且不覆盖目标；同路径幂等成功，缺失源为 `NOT_FOUND`，目标已存在为 `CONFLICT`，根、符号链接/特殊文件、目录自身后代目标为 `VALIDATION_ERROR`，路径越界为 `FORBIDDEN`。移动前固定真实 root/source/目标父目录；Linux 从 `/` 逐段打开目录句柄并直接调用内核 `renameat2(RENAME_NOREPLACE)`，兼容 Alpine/musl 未导出包装函数；macOS 使用逐段目录句柄和 `renameatx_np(RENAME_EXCL | RENAME_NOFOLLOW_ANY)`；Windows 固定源条目和目标父目录句柄、核对最终路径后使用 `SetFileInformationByHandle` 且禁止替换。目标父目录替换或目标并发创建都在原子操作层失败关闭，其他平台缺少等价能力时拒绝移动。上传沿用单文件大小上限且不覆盖已有条目；搜索支持空关键字文件目录，并受数量、深度和超时上限保护。组合文件树只新增只读 list/read 视图，不改变这些原始写操作的物理工作区边界。
 - 文件 WebSocket ticket 创建前通过 `requireWorkspaceOnCurrentServer` 校验 workspace、当前后端和用户 opencode 进程同服务器；历史空服务器归属工作区在 root path 校验成功后回填当前服务器 ID。
 - 普通前端不再传物理目录创建 Workspace；应用版本和个人工作区目录由后端按通用参数与业务 id 派生。超级管理员服务器工作空间选择器通过目标后端目录浏览能力从该后端 Java 进程运行目录开始浏览。
 - `WorkspaceApplicationService` 同时实现领域 `TrustedWorkspaceResolver`：历史 `linux_server_id=null` 只有在当前节点能解析并访问真实 root 时才回填当前服务器。可信 root/server/status 变更先建立 Workspace mutation gate，关系型保存成功后用单个 Lua 原子再次失效并释放 gate，数据库失败只撤回自己的 gate token；托管个人/应用副本更新沿用同一规则，且仅在可信字段真正变化时执行，创建新 Workspace 不做无效清理。
@@ -33,7 +33,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 ## 测试覆盖
 
 - `WorkspaceApplicationServiceTest` 覆盖工作区创建、服务器归属、分页/详情查询、未找到错误和文件服务编排。
-- `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、Base64 二进制上传、普通文件复制/移动、普通文件和目录同目录重命名、目标冲突、普通文件/目录树删除、工作区根与 `.git` 删除拒绝、路径穿越拒绝、目录列表排序与上限、相对路径/空关键字文件搜索、文件大小限制和 null 内容写入。
+- `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、Base64 二进制上传、普通文件与非空目录整体移动、同路径幂等、根/后代/符号链接/特殊文件/越界拒绝、校验后工作区根祖先或目标父目录替换失败关闭、目标并发创建不覆盖、普通文件和目录同目录重命名、普通文件/目录树删除、工作区根与 `.git` 删除拒绝、目录列表排序与上限、相对路径/空关键字文件搜索、文件大小限制和 null 内容写入。
 - `WorkspaceDirectoryServiceTest` 覆盖服务器工作空间选择器的默认目录、只返回子目录、排序、父目录、条目上限和缺失目录错误码。
 - `GitPublishWorkflowTest` 覆盖直接发布、worktree 合并发布、冲突文件收集、merge abort、abort 失败保护，以及同步文件时先 clean/pull 再复制提交推送。
 - `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验及 `FORBIDDEN` 加载上下文、托管逻辑路径、个人 worktree 创建、Git diff、个人 worktree 本地提交、从个人 `HEAD` 按白名单投影并推送 feature、所有角色 spec 禁推、应用 Agent 发布后的版本 HEAD 更新、feature 固定提交反向 merge、dirty worktree 保持 rollout retry、真实冲突进入 Diff 并通过专用接口完成，以及应用副本只读 Git 操作及失败阶段命令透传。`GitWorkspaceServiceRealGitTest` 使用真实临时 Git 仓库验证固定提交 merge、三方冲突、解决和提交完成。
@@ -50,6 +50,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - Spring Context。
 - Jackson Databind（仅用于服务端安全解析工作区 JSONC 引用元数据）。
 - SLF4J API。
+- JNA（用于 Linux/macOS/Windows 目录句柄相对、不覆盖的原子工作区移动）。
 
 ## 禁止依赖
 

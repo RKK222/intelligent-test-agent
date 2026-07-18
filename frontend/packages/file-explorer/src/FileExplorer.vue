@@ -66,6 +66,7 @@ const uploadInput = ref<HTMLInputElement | null>(null);
 const uploadDirectory = ref("");
 const rootDropActive = ref(false);
 const dragResetToken = ref(0);
+const dragSourcePath = ref<string>();
 const directoryRowsRef = ref<InstanceType<typeof DirectoryRows> | null>(null);
 // 本地过滤结果（备用，当 searchResults prop 未提供时使用），统一映射为 FileSearchResult 形态
 const localSearchResults = computed<FileSearchResult[]>(() =>
@@ -150,28 +151,68 @@ function onUploadInput(event: Event) {
   input.value = "";
 }
 
+function normalizePath(path: string): string {
+  return path.split(/[\\/]+/).filter(Boolean).join("/");
+}
+
+function parentDirectory(path: string): string {
+  const segments = normalizePath(path).split("/");
+  segments.pop();
+  return segments.join("/");
+}
+
+function internalDragSource(event: DragEvent): string {
+  const transfer = event.dataTransfer;
+  const transferredPath = transfer && typeof transfer.getData === "function"
+    ? transfer.getData("application/x-test-agent-workspace-file")
+    : "";
+  return normalizePath(dragSourcePath.value ?? transferredPath);
+}
+
+function setDragSource(path: string | undefined) {
+  dragSourcePath.value = path ? normalizePath(path) : undefined;
+}
+
+function canMoveIntoRoot(sourcePath: string): boolean {
+  return Boolean(sourcePath) && parentDirectory(sourcePath) !== "";
+}
+
 function onRootDragOver(event: DragEvent) {
   if (!props.canWrite) return;
+  if (event.target !== event.currentTarget) return;
   event.preventDefault();
-  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  const sourcePath = internalDragSource(event);
+  if (sourcePath && !canMoveIntoRoot(sourcePath)) {
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+    rootDropActive.value = false;
+    return;
+  }
+  if (event.dataTransfer) event.dataTransfer.dropEffect = sourcePath ? "move" : "copy";
   rootDropActive.value = true;
 }
 
 function onRootDrop(event: DragEvent) {
   if (!props.canWrite || !event.dataTransfer) return;
+  if (event.target !== event.currentTarget) return;
   event.preventDefault();
+  const sourcePath = internalDragSource(event);
   const files = Array.from(event.dataTransfer.files ?? []);
   rootDropActive.value = false;
+  if (sourcePath && !canMoveIntoRoot(sourcePath)) {
+    event.dataTransfer.dropEffect = "none";
+    return;
+  }
   if (files.length > 0) {
     emit("uploadFiles", "", files);
     return;
   }
-  const sourcePath = event.dataTransfer.getData("application/x-test-agent-workspace-file");
-  if (sourcePath) emit("moveEntry", sourcePath, "");
+  if (sourcePath && canMoveIntoRoot(sourcePath)) emit("moveEntry", sourcePath, "");
 }
 
 function resetDragState() {
   rootDropActive.value = false;
+  dragSourcePath.value = undefined;
   dragResetToken.value += 1;
 }
 
@@ -268,6 +309,7 @@ defineExpose({ openRootActions });
         :can-write="canWrite"
         :can-undo="canUndo"
         :drag-reset-token="dragResetToken"
+        :drag-source-path="dragSourcePath"
         :clipboard-entry="clipboardEntry"
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
@@ -286,6 +328,7 @@ defineExpose({ openRootActions });
         @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
         @request-upload="requestUpload"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
+        @drag-source-change="setDragSource"
       />
       <input
         ref="uploadInput"

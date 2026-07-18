@@ -392,6 +392,238 @@ describe("DirectoryRows", () => {
     expect(view.emitted("moveEntry")).toEqual([["README.md", "docs"]]);
   });
 
+  it("moves a dragged directory and marks its source row while the drag is active", async () => {
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [
+            { type: "directory" as const, path: "archive", name: "archive" },
+            { type: "directory" as const, path: "src", name: "src" }
+          ]
+        },
+        expandedDirectories: new Set<string>(),
+        dragSourcePath: "src"
+      }
+    });
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? ""
+    };
+    const src = view.getByRole("button", { name: "src" });
+    const archive = view.getByRole("button", { name: "archive" });
+
+    expect(src.getAttribute("draggable")).toBe("true");
+    expect(src.classList.contains("is-dragging")).toBe(true);
+    await fireEvent.dragStart(src, { dataTransfer });
+    await fireEvent.dragOver(archive, { dataTransfer });
+    await fireEvent.drop(archive, { dataTransfer });
+    await fireEvent.dragEnd(src, { dataTransfer });
+
+    expect(view.emitted("moveEntry")).toEqual([["src", "archive"]]);
+    expect(view.emitted("dragSourceChange")).toEqual([["src"], [undefined]]);
+  });
+
+  it("rejects a directory dropped onto itself, its parent, or a descendant without matching sibling prefixes", async () => {
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [
+            { type: "directory" as const, path: "docs", name: "docs" },
+            { type: "directory" as const, path: "docs2", name: "docs2" }
+          ],
+          docs: [{ type: "directory" as const, path: "docs/guides", name: "guides" }]
+        },
+        expandedDirectories: new Set(["docs"]),
+        dragSourcePath: "docs"
+      }
+    });
+    const dataTransfer = { dropEffect: "none", getData: () => "docs" };
+    const docs = view.getByRole("button", { name: "docs" });
+    const guides = view.getByRole("button", { name: "guides" });
+    const docs2 = view.getByRole("button", { name: "docs2" });
+
+    await fireEvent.dragOver(docs, { dataTransfer });
+    await fireEvent.drop(docs, { dataTransfer });
+    await fireEvent.dragOver(guides, { dataTransfer });
+    await fireEvent.drop(guides, { dataTransfer });
+    await fireEvent.dragOver(docs2, { dataTransfer });
+    await fireEvent.drop(docs2, { dataTransfer });
+
+    expect(docs.classList.contains("is-drop-target")).toBe(false);
+    expect(guides.classList.contains("is-drop-target")).toBe(false);
+    expect(view.emitted("moveEntry")).toEqual([["docs", "docs2"]]);
+  });
+
+  it("blocks pure reference drops from bubbling and uses a mixed directory workspacePath as the move target", async () => {
+    const reference = {
+      id: "reference:docs",
+      type: "directory" as const,
+      path: "reference-docs",
+      name: "reference-docs",
+      locator: { kind: "REFERENCE" as const, path: "reference-docs", referenceAlias: "requirements" },
+      source: "REFERENCE" as const,
+      merged: true,
+      collision: false,
+      readonly: true,
+      referenceAliases: ["requirements"]
+    };
+    const mixed = {
+      id: "mixed:docs",
+      type: "directory" as const,
+      path: "references/docs",
+      name: "mixed-docs",
+      locator: { kind: "COMPOSITE" as const, path: "references/docs" },
+      source: "MIXED" as const,
+      merged: true,
+      collision: false,
+      readonly: false,
+      workspacePath: "workspace/docs",
+      referenceAliases: ["requirements"]
+    };
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": [reference, mixed] },
+        expandedDirectories: new Set<string>(),
+        dragSourcePath: "src/README.md"
+      }
+    });
+    const dataTransfer = { dropEffect: "none", getData: () => "src\\README.md" };
+    const referenceRow = view.getByRole("button", { name: "reference-docs" });
+    const mixedRow = view.getByRole("button", { name: "mixed-docs" });
+    let bubbled = false;
+    view.container.addEventListener("drop", () => { bubbled = true; });
+
+    expect(referenceRow.getAttribute("draggable")).toBe("false");
+    expect(mixedRow.getAttribute("draggable")).toBe("false");
+    await fireEvent.dragOver(referenceRow, { dataTransfer });
+    await fireEvent.drop(referenceRow, { dataTransfer });
+    await fireEvent.dragOver(mixedRow, { dataTransfer });
+    await fireEvent.drop(mixedRow, { dataTransfer });
+
+    expect(referenceRow.classList.contains("is-drop-target")).toBe(false);
+    expect(bubbled).toBe(false);
+    expect(view.emitted("moveEntry")).toEqual([["src/README.md", "workspace/docs"]]);
+  });
+
+  it("blocks drops on file and reference rows without bubbling, while reference files remain non-draggable", async () => {
+    const referenceFile = {
+      id: "reference:guide",
+      type: "file" as const,
+      path: "reference/guide.md",
+      name: "reference-guide.md",
+      locator: { kind: "REFERENCE" as const, path: "reference/guide.md", referenceAlias: "requirements" },
+      source: "REFERENCE" as const,
+      merged: true,
+      collision: false,
+      readonly: true,
+      referenceAliases: ["requirements"]
+    };
+    const referenceDirectory = {
+      id: "reference:docs",
+      type: "directory" as const,
+      path: "reference/docs",
+      name: "reference-docs",
+      locator: { kind: "REFERENCE" as const, path: "reference/docs", referenceAlias: "requirements" },
+      source: "REFERENCE" as const,
+      merged: true,
+      collision: false,
+      readonly: true,
+      referenceAliases: ["requirements"]
+    };
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [
+            { type: "file" as const, path: "README.md", name: "README.md" },
+            referenceFile,
+            referenceDirectory
+          ]
+        },
+        expandedDirectories: new Set<string>(),
+        dragSourcePath: "src/README.md"
+      }
+    });
+    const dataTransfer = { dropEffect: "move", getData: () => "src/README.md" };
+    const rows = [
+      view.getByRole("button", { name: "README.md" }),
+      view.getByRole("button", { name: "reference-guide.md" }),
+      view.getByRole("button", { name: "reference-docs" })
+    ];
+    let dragOverBubbles = 0;
+    let dropBubbles = 0;
+    view.container.addEventListener("dragover", () => { dragOverBubbles += 1; });
+    view.container.addEventListener("drop", () => { dropBubbles += 1; });
+
+    expect(rows[1]?.getAttribute("draggable")).toBe("false");
+    for (const row of rows) {
+      dataTransfer.dropEffect = "move";
+      await fireEvent.dragOver(row!, { dataTransfer });
+      expect(dataTransfer.dropEffect).toBe("none");
+      dataTransfer.dropEffect = "move";
+      await fireEvent.drop(row!, { dataTransfer });
+      expect(dataTransfer.dropEffect).toBe("none");
+    }
+
+    expect(dragOverBubbles).toBe(0);
+    expect(dropBubbles).toBe(0);
+    expect(view.emitted("moveEntry")).toBeUndefined();
+  });
+
+  it("blocks all readonly workspace file and directory drops without bubbling", async () => {
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [
+            { type: "directory" as const, path: "docs", name: "docs" },
+            { type: "file" as const, path: "README.md", name: "README.md" }
+          ]
+        },
+        expandedDirectories: new Set<string>(),
+        canWrite: false,
+        dragSourcePath: "src/README.md"
+      }
+    });
+    const dataTransfer = { dropEffect: "move", getData: () => "src/README.md" };
+    let dropBubbles = 0;
+    view.container.addEventListener("drop", () => { dropBubbles += 1; });
+
+    for (const name of ["docs", "README.md"]) {
+      const row = view.getByRole("button", { name });
+      await fireEvent.dragOver(row, { dataTransfer });
+      await fireEvent.drop(row, { dataTransfer });
+    }
+
+    expect(dropBubbles).toBe(0);
+    expect(view.emitted("moveEntry")).toBeUndefined();
+  });
+
+  it("makes both files and directories non-draggable when the workspace is readonly", () => {
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [
+            { type: "directory" as const, path: "docs", name: "docs" },
+            { type: "file" as const, path: "README.md", name: "README.md" }
+          ]
+        },
+        expandedDirectories: new Set<string>(),
+        canWrite: false
+      }
+    });
+
+    expect(view.getByRole("button", { name: "docs" }).getAttribute("draggable")).toBe("false");
+    expect(view.getByRole("button", { name: "README.md" }).getAttribute("draggable")).toBe("false");
+  });
+
   it("offers upload from the selected directory plus menu and shows the target path", async () => {
     const view = render(DirectoryRows, {
       props: {

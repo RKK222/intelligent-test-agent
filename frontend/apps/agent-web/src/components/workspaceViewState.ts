@@ -5,7 +5,10 @@ import type {
   WorkspaceViewWarning
 } from "@test-agent/shared-types";
 
-export type WorkspaceViewLoadTarget = Pick<WorkspaceViewEntry, "id" | "locator">;
+export type WorkspaceViewLoadTarget = Pick<WorkspaceViewEntry, "id" | "locator"> & {
+  /** 工作区侧真实相对路径，用于条目移动后跨稳定 ID 重新认领目录。 */
+  workspacePath?: string;
+};
 
 export type WorkspaceViewWarningSnapshot = {
   warnings: WorkspaceViewWarning[];
@@ -69,13 +72,72 @@ export function workspaceViewRefreshTargets(
   ];
 }
 
+/**
+ * 目录移动会改变工作区稳定 ID；刷新前先迁移工作区侧路径，并补齐新位置的祖先目录，
+ * 这样即使目标父目录原先未展开，也能从根开始逐层加载并恢复展开状态。
+ */
+export function migrateWorkspaceViewRefreshTargets(
+  targets: readonly WorkspaceViewLoadTarget[],
+  sourcePath: string,
+  targetPath: string
+): WorkspaceViewLoadTarget[] {
+  const root = targets.find((target) => target.id === "") ?? ROOT_WORKSPACE_VIEW_TARGET;
+  const workspaceTargets = new Map<string, WorkspaceViewLoadTarget>();
+  const otherTargets: WorkspaceViewLoadTarget[] = [];
+
+  for (const target of targets) {
+    if (target.id === "") continue;
+    if (!target.workspacePath) {
+      otherTargets.push(target);
+      continue;
+    }
+    const workspacePath = renameWorkspaceRelativePath(target.workspacePath, sourcePath, targetPath);
+    const pathChanged = workspacePath !== normalizeWorkspacePath(target.workspacePath);
+    const migrated = {
+      ...target,
+      workspacePath,
+      locator: pathChanged
+        ? { ...target.locator, path: renameWorkspaceRelativePath(target.locator.path, sourcePath, targetPath) }
+        : target.locator
+    };
+    const segments = workspacePath.split("/").filter(Boolean);
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      const ancestor = segments.slice(0, depth).join("/");
+      if (!workspaceTargets.has(ancestor)) {
+        workspaceTargets.set(ancestor, {
+          id: `workspace-refresh:${ancestor}`,
+          locator: { kind: "WORKSPACE", path: ancestor },
+          workspacePath: ancestor
+        });
+      }
+    }
+    workspaceTargets.set(workspacePath, migrated);
+  }
+
+  return [
+    root,
+    ...[...otherTargets, ...workspaceTargets.values()]
+      .sort((left, right) => pathDepth(left.workspacePath ?? left.locator.path)
+        - pathDepth(right.workspacePath ?? right.locator.path))
+  ];
+}
+
 /** 根目录刷新后必须使用新父节点返回的 locator，避免继续用刷新前的 WORKSPACE 视图漏掉刚合并的引用。 */
 export function revalidatedWorkspaceViewRefreshTarget(
   previous: WorkspaceViewLoadTarget,
   directoryById: Map<string, WorkspaceViewEntry>
 ): WorkspaceViewLoadTarget | undefined {
   const current = directoryById.get(previous.id);
-  return current?.type === "directory" ? current : undefined;
+  if (current?.type === "directory"
+    && (!previous.workspacePath || current.workspacePath === previous.workspacePath)) {
+    return current;
+  }
+  if (previous.workspacePath) {
+    return [...directoryById.values()].find((entry) =>
+      entry.type === "directory" && entry.workspacePath === previous.workspacePath
+    );
+  }
+  return undefined;
 }
 
 /** 汇总所有已加载目录的引用告警，并对重复告警和截断提示去重。 */
@@ -104,7 +166,21 @@ export function collectWorkspaceViewWarnings(
 }
 
 function pathDepth(path: string): number {
-  return path.split("/").filter(Boolean).length;
+  return path.split(/[\\/]+/).filter(Boolean).length;
+}
+
+function normalizeWorkspacePath(path: string): string {
+  return path.split(/[\\/]+/).filter(Boolean).join("/");
+}
+
+function renameWorkspaceRelativePath(path: string, sourcePath: string, targetPath: string): string {
+  const normalizedPath = normalizeWorkspacePath(path);
+  const normalizedSource = normalizeWorkspacePath(sourcePath);
+  const normalizedTarget = normalizeWorkspacePath(targetPath);
+  if (normalizedPath === normalizedSource) return normalizedTarget;
+  return normalizedPath.startsWith(`${normalizedSource}/`)
+    ? `${normalizedTarget}${normalizedPath.slice(normalizedSource.length)}`
+    : normalizedPath;
 }
 
 export function referenceChatPath(alias: string, relativePath: string): string {

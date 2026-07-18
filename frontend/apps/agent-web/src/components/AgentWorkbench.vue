@@ -90,6 +90,7 @@ import {
 import {
   collectWorkspaceViewWarnings,
   copiedWorkspaceFileTargetPath,
+  migrateWorkspaceViewRefreshTargets,
   ROOT_WORKSPACE_VIEW_TARGET,
   referenceChatPath,
   revalidatedWorkspaceViewRefreshTarget,
@@ -3068,10 +3069,21 @@ async function refreshWorkspaceViewAfterReferenceSaved() {
   await reloadReferenceRuntimeIfIdle();
 }
 
-async function refreshWorkspaceView(workspaceId = selectedWorkspace.value?.workspaceId) {
+type WorkspaceViewRefreshOptions = {
+  targets?: readonly WorkspaceViewLoadTarget[];
+  preserveLoadingPaths?: ReadonlySet<string>;
+};
+
+async function refreshWorkspaceView(
+  workspaceId = selectedWorkspace.value?.workspaceId,
+  options: WorkspaceViewRefreshOptions = {}
+) {
   if (!workspaceId) return;
-  const targets = workspaceViewRefreshTargets(expandedDirectories.value, workspaceViewDirectoryById);
-  for (const settlement of workspaceFileRefreshSettlements(workbench.tabs, isAgentFilePath)) {
+  const targets = options.targets ?? workspaceViewRefreshTargets(expandedDirectories.value, workspaceViewDirectoryById);
+  for (const settlement of workspaceFileRefreshSettlements(
+    workbench.tabs,
+    (path) => isAgentFilePath(path) || options.preserveLoadingPaths?.has(path) === true
+  )) {
     workbench.updateTab(settlement.path, settlement.patch);
   }
   latestWorkspaceFileReadByPath.clear();
@@ -3082,11 +3094,18 @@ async function refreshWorkspaceView(workspaceId = selectedWorkspace.value?.works
   workspaceViewWarningByDirectory.clear();
   workspaceViewWarnings.value = [];
   loadingPath.value = new Set();
+  expandedDirectories.value = new Set();
   await loadDirectory(targets[0] ?? ROOT_WORKSPACE_VIEW_TARGET, workspaceId, true, 0, generation);
   // 逐层重放展开目录，使子目录能从刚加载的父目录中重新认领最新 locator。
+  const restoredExpanded = new Set<string>();
   for (const previous of targets.slice(1)) {
     const current = revalidatedWorkspaceViewRefreshTarget(previous, workspaceViewDirectoryById);
-    if (current) await loadDirectory(current, workspaceId, true, 0, generation);
+    if (!current) continue;
+    await loadDirectory(current, workspaceId, true, 0, generation);
+    if (entriesByDirectory.value[current.id] !== undefined) {
+      restoredExpanded.add(current.id);
+      expandedDirectories.value = new Set(restoredExpanded);
+    }
   }
 }
 
@@ -4118,19 +4137,26 @@ async function handleCopyEntry(sourcePath: string, targetDirectory: string) {
 
 async function handleMoveEntry(sourcePath: string, targetDirectory: string) {
   if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
-    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再移动文件。" };
+    feedback.value = { kind: "info", title: "当前工作区条目只读", description: "请切换到个人 worktree 后再移动工作区条目。" };
     return;
   }
   const sourceDirectory = workspaceParentDirectory(sourcePath);
   if (sourceDirectory === targetDirectory) return;
   const targetPath = workspacePathInDirectory(targetDirectory, fileNameOf(sourcePath));
   try {
-    await api.moveWorkspaceFile(selectedWorkspace.value.workspaceId, sourcePath, targetPath);
-    renameWorkspaceTreeEntry(sourcePath, targetPath);
-    await Promise.all([
-      loadDirectory(sourceDirectory, undefined, true),
-      loadDirectory(targetDirectory, undefined, true)
-    ]);
+    const workspaceId = selectedWorkspace.value.workspaceId;
+    const refreshTargets = migrateWorkspaceViewRefreshTargets(
+      workspaceViewRefreshTargets(expandedDirectories.value, workspaceViewDirectoryById),
+      sourcePath,
+      targetPath
+    );
+    await api.moveWorkspaceFile(workspaceId, sourcePath, targetPath);
+    const pendingReloadPaths = renameWorkspaceTreeEntry(sourcePath, targetPath, { deferLoadingReload: true });
+    await refreshWorkspaceView(workspaceId, {
+      targets: refreshTargets,
+      preserveLoadingPaths: new Set(pendingReloadPaths)
+    });
+    for (const path of pendingReloadPaths) void loadWorkspaceFile(path, { activate: false });
     workspaceUndoStack.value.push({
       kind: "move",
       sourcePath: targetPath,
@@ -4138,9 +4164,9 @@ async function handleMoveEntry(sourcePath: string, targetDirectory: string) {
       label: `移动 ${sourcePath}`
     });
     void refreshWorkspaceGitDiff();
-    feedback.value = { kind: "success", title: "文件已移动", description: targetPath };
+    feedback.value = { kind: "success", title: "工作区条目已移动", description: targetPath };
   } catch (error) {
-    feedback.value = errorFeedback("移动工作区文件失败", error);
+    feedback.value = errorFeedback("移动工作区条目失败", error);
   }
 }
 
@@ -4189,13 +4215,22 @@ async function handleUndoWorkspaceFileOperation() {
 
   try {
     if (operation.kind === "move") {
+      const refreshTargets = migrateWorkspaceViewRefreshTargets(
+        workspaceViewRefreshTargets(expandedDirectories.value, workspaceViewDirectoryById),
+        operation.sourcePath,
+        operation.targetPath
+      );
       await api.moveWorkspaceFile(workspace.workspaceId, operation.sourcePath, operation.targetPath);
-      renameWorkspaceTreeEntry(operation.sourcePath, operation.targetPath);
-      const directories = new Set([
-        workspaceParentDirectory(operation.sourcePath),
-        workspaceParentDirectory(operation.targetPath)
-      ]);
-      await Promise.all([...directories].map((directory) => loadDirectory(directory, undefined, true)));
+      const pendingReloadPaths = renameWorkspaceTreeEntry(
+        operation.sourcePath,
+        operation.targetPath,
+        { deferLoadingReload: true }
+      );
+      await refreshWorkspaceView(workspace.workspaceId, {
+        targets: refreshTargets,
+        preserveLoadingPaths: new Set(pendingReloadPaths)
+      });
+      for (const path of pendingReloadPaths) void loadWorkspaceFile(path, { activate: false });
     } else {
       const originalPaths = [...operation.paths];
       const failedPaths: string[] = [];
@@ -4239,7 +4274,11 @@ function renameWorkspacePath(path: string, oldPath: string, nextPath: string): s
   return path;
 }
 
-function renameWorkspaceTreeEntry(path: string, nextPath: string) {
+function renameWorkspaceTreeEntry(
+  path: string,
+  nextPath: string,
+  options: { deferLoadingReload?: boolean } = {}
+): string[] {
   const nextEntriesByDirectory: Record<string, FileTreeEntry[]> = {};
   for (const [directory, entries] of Object.entries(entriesByDirectory.value)) {
     const nextDirectory = renameWorkspacePath(directory, path, nextPath);
@@ -4279,9 +4318,11 @@ function renameWorkspaceTreeEntry(path: string, nextPath: string) {
       }
     }
   }
-  // 首次读取没有快照时，从服务端已完成移动/改名的新路径后台补读，不抢回用户焦点。
-  for (const targetPath of targetPathsToReload) {
-    void loadWorkspaceFile(targetPath, { activate: false });
+  // 普通重命名立即补读；移动需要先切换文件树代次，再由调用方在新代次下补读。
+  if (!options.deferLoadingReload) {
+    for (const targetPath of targetPathsToReload) {
+      void loadWorkspaceFile(targetPath, { activate: false });
+    }
   }
   const activePathAfterRename = workbench.activePath && renameWorkspacePath(workbench.activePath, path, nextPath);
   if (activePathAfterRename && activePathAfterRename !== workbench.activePath) {
@@ -4291,6 +4332,7 @@ function renameWorkspaceTreeEntry(path: string, nextPath: string) {
   if (selectedDiffPathAfterRename && selectedDiffPathAfterRename !== workbench.selectedDiffPath) {
     workbench.setSelectedDiffPath(selectedDiffPathAfterRename);
   }
+  return targetPathsToReload;
 }
 
 async function handleRenameEntry(path: string, name: string) {

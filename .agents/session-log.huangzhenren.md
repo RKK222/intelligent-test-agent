@@ -5,6 +5,32 @@
 
 ## Entries
 
+### 2026-07-19 - 支持工作区文件和目录拖拽移动
+
+- Why:
+  - 工作区文件树原先只能拖动普通文件，目录不能整体移动，且组合引用树中的只读来源缺少完整的拖源/落点阻断和移动后的状态收敛。
+- What:
+  - 文件树允许可写纯 `WORKSPACE` 文件和目录作为拖源，保留浏览器原生拖影并提供抓取、半透明源行和蓝色合法落点；只读、纯 `REFERENCE`、整棵 `MIXED` 不可拖，纯引用目录、文件行、当前父目录、自身和后代目录吞掉非法落下，带 `workspacePath` 的 `MIXED` 目录仍可接收工作区条目。
+  - app 层沿用 `workspace.move` 与反向移动撤销，移动后迁移已打开子文件 Tab、活动/Diff/请求路径和展开路径，按新 `workspacePath` 补齐祖先并逐层认领组合树的新稳定 ID，再刷新 Git Diff；无快照的加载中 Tab 在新刷新代次建立后补读。
+  - 后端 `WorkspaceFileService.moveFile` 支持普通文件和非空目录的一次整体移动，拒绝根、符号链接/特殊文件、越界、冲突和目录自身后代。Linux 从 `/` 逐段固定目录句柄后通过 JNA 直接调用内核 `renameat2(RENAME_NOREPLACE)`，macOS 使用 `renameatx_np`，Windows 使用已核对的源条目/目标父目录句柄和 `SetFileInformationByHandle`；目标并发创建不覆盖，校验后路径替换失败关闭。
+  - 同步前后端 README、workspace/file-explorer 包说明、前后端规范和文件 WebSocket 协议文档；RPC 名称、请求/响应 DTO 与错误码集合不变。
+- How:
+  - 按 TDD 覆盖文件/目录拖源和视觉状态、根/目录合法落点、引用与 `MIXED` 边界、非法落点冒泡阻断、拖拽清理、目录移动后的 Tab/展开/撤销收敛，以及非空目录、同路径、根/后代/冲突/符号链接/特殊文件/越界、路径替换竞态和目标并发创建。
+  - 项目实际镜像 `eclipse-temurin:21-jre-alpine` 使用 musl 且不导出 `renameat2` 包装函数，因此无需修改镜像，直接调用同一 Linux 内核 syscall；已在该镜像完成普通移动与目标不覆盖 smoke。完成前回顾全部 `.agents/session-log*.md` 近期条目并只暂存本任务文件，保留并行夜间任务等未提交改动。
+- Result:
+  - 前端定向 Vitest 40 项、目录移动 Playwright Chromium/mobile 2 项、全量 Vitest 1383 passed / 1 skipped、lint、typecheck 和生产 build 通过；构建仅保留既有大 chunk 提示。
+  - 后端 workspace 定向 26 项、workspace/API reactor 测试通过，`mvn clean package -DskipTests` 18 模块通过；全量 `mvn test` 仅被既有 `V20260717173000__create_public_agent_config_rollouts.sql` 的 PostgreSQL `TIMESTAMPTZ` 与当前 H2 不兼容阻断（persistence 76 errors），本次未修改该 migration。
+  - 不涉及数据库、RunEvent SSE、generated SDK、跨服务器路由、鉴权模型或环境配置；新增 workspace 模块对既有版本 JNA 5.14.0 的直接编译依赖。macOS 与项目实际 Linux 镜像已运行验证；Windows 实现已编译并通过专项代码审查，但发布前仍建议在 Windows x64/arm64 验证普通/目录移动、目标冲突与 junction 竞态。
+- Verification:
+  - `corepack pnpm vitest run packages/file-explorer/tests/DirectoryRows.test.ts packages/file-explorer/tests/FileExplorer.test.ts apps/agent-web/tests/workspaceViewState.test.ts`
+  - `corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts --grep 'workspace directory move'`
+  - `corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm test`、`corepack pnpm build`
+  - `mvn -q -pl test-agent-workspace-management -Dtest=WorkspaceFileServiceTest test`
+  - `mvn -pl test-agent-api -am test`、`mvn test`、`mvn clean package -DskipTests`
+  - 项目实际 Alpine JRE 镜像 Linux 安全移动 smoke、`git diff --check`、全部 session log 近期条目回顾和最终只读代码审查。
+- Next:
+  - 在真实 Windows x64/arm64 环境补充原生移动 smoke；既有 H2 migration 兼容问题另行修复，不属于本次拖拽移动范围。
+
 ### 2026-07-18 - 新增 Mermaid State Diagram 可视化编辑
 
 - Why:

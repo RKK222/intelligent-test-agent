@@ -14,6 +14,8 @@ export type DirectoryRowsProps = {
   canUndo?: boolean;
   /** 根组件递增该值，统一清理递归目录残留的拖放高亮。 */
   dragResetToken?: number;
+  /** 根组件保存的内部拖源相对路径，递归行共享它以统一校验落点。 */
+  dragSourcePath?: string;
   /** 文件路径 → 行变更统计，用于在文件名后展示 +N -N。 */
   changeStats?: Record<string, { additions: number; deletions: number }>;
   /** 文件树内部剪贴板，仅保存当前工作区的普通文件引用。 */
@@ -50,6 +52,7 @@ const emit = defineEmits<{
   uploadFiles: [directory: string, files: File[]];
   requestUpload: [directory: string];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
+  dragSourceChange: [path: string | undefined];
 }>();
 
 const entries = computed(() => {
@@ -152,8 +155,39 @@ function emitAddFileContext() {
 }
 
 function parentDirectory(path: string): string {
-  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return index >= 0 ? path.slice(0, index) : "";
+  const segments = normalizePath(path).split("/");
+  segments.pop();
+  return segments.join("/");
+}
+
+/** 拖放路径仅按完整目录段比较，统一兼容服务端返回的 Windows 分隔符。 */
+function normalizePath(path: string): string {
+  return path.split(/[\\/]+/).filter(Boolean).join("/");
+}
+
+function isDescendantPath(path: string, candidate: string): boolean {
+  const sourceSegments = normalizePath(path).split("/").filter(Boolean);
+  const targetSegments = normalizePath(candidate).split("/").filter(Boolean);
+  return targetSegments.length > sourceSegments.length && sourceSegments.every((segment, index) => segment === targetSegments[index]);
+}
+
+function internalDragSource(event: DragEvent): string {
+  const transfer = event.dataTransfer;
+  const transferredPath = transfer && typeof transfer.getData === "function"
+    ? transfer.getData("application/x-test-agent-workspace-file")
+    : "";
+  return normalizePath(props.dragSourcePath ?? transferredPath);
+}
+
+/** 同目录、自身或目录后代都会让服务端移动语义失效，必须在树内提前阻断。 */
+function canMoveIntoDirectory(sourcePath: string, entry: MaybeWorkspaceViewEntry): boolean {
+  if (!sourcePath || !canWriteChildren(entry)) return false;
+  const targetPath = normalizePath(workspaceEntryPath(entry));
+  return targetPath !== sourcePath && parentDirectory(sourcePath) !== targetPath && !isDescendantPath(sourcePath, targetPath);
+}
+
+function isDraggingEntry(entry: MaybeWorkspaceViewEntry): boolean {
+  return normalizePath(props.dragSourcePath ?? "") === normalizePath(workspaceEntryPath(entry));
 }
 
 function targetDirectory(entry: FileTreeEntry): string {
@@ -204,27 +238,44 @@ watch(() => props.dragResetToken, () => {
   dragOverDirectory.value = null;
 });
 
-/** 普通文件使用 HTML5 drag data 传递相对路径，目录仅作为工作区内移动目标。 */
+/** 可写工作区文件和目录都使用 HTML5 drag data 传递相对路径。 */
 function onDragStart(event: DragEvent, entry: FileTreeEntry) {
-  if (!canMutateEntry(entry) || entry.type !== "file" || !event.dataTransfer) {
+  if (!canMutateEntry(entry) || !event.dataTransfer) {
     event.preventDefault();
     return;
   }
+  const sourcePath = workspaceEntryPath(entry);
   event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("application/x-test-agent-workspace-file", workspaceEntryPath(entry));
-  event.dataTransfer.setData("text/plain", workspaceEntryPath(entry));
+  event.dataTransfer.setData("application/x-test-agent-workspace-file", sourcePath);
+  event.dataTransfer.setData("text/plain", sourcePath);
+  emit("dragSourceChange", normalizePath(sourcePath));
 }
 
 function onDirectoryDragOver(event: DragEvent, entry: FileTreeEntry) {
-  if (!canWriteChildren(entry)) return;
+  const sourcePath = internalDragSource(event);
+  if (entry.type !== "directory" || !canWriteChildren(entry) || (sourcePath && !canMoveIntoDirectory(sourcePath, entry))) {
+    // 非法树内落点必须吞掉事件，避免错误冒泡到工作区根目录触发移动或上传。
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+    dragOverDirectory.value = null;
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
-  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  if (event.dataTransfer) event.dataTransfer.dropEffect = sourcePath ? "move" : "copy";
   dragOverDirectory.value = nodeId(entry);
 }
 
 function onDirectoryDrop(event: DragEvent, entry: FileTreeEntry) {
-  if (!canWriteChildren(entry) || !event.dataTransfer) return;
+  const sourcePath = internalDragSource(event);
+  if (entry.type !== "directory" || !canWriteChildren(entry) || (sourcePath && !canMoveIntoDirectory(sourcePath, entry)) || !event.dataTransfer) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+    dragOverDirectory.value = null;
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
   const files = Array.from(event.dataTransfer.files ?? []);
@@ -233,9 +284,12 @@ function onDirectoryDrop(event: DragEvent, entry: FileTreeEntry) {
     emit("uploadFiles", workspaceEntryPath(entry), files);
     return;
   }
-  const sourcePath = event.dataTransfer.getData("application/x-test-agent-workspace-file");
   dragOverDirectory.value = null;
   if (sourcePath) emit("moveEntry", sourcePath, workspaceEntryPath(entry));
+}
+
+function onDragEnd() {
+  emit("dragSourceChange", undefined);
 }
 
 function isKnownEmptyDirectory(entry: FileTreeEntry): boolean {
@@ -364,9 +418,11 @@ function submitRename() {
           'ta-file-tree-row',
           (isWorkspaceViewEntry(entry) ? activePath === nodeId(entry) : activePath === entry.path) && 'is-active',
           dragOverDirectory === nodeId(entry) && 'is-drop-target',
+          canMutateEntry(entry) && 'is-draggable',
+          isDraggingEntry(entry) && 'is-dragging',
           semanticClass(entry)
         )"
-        :draggable="canMutateEntry(entry) && entry.type === 'file'"
+        :draggable="canMutateEntry(entry)"
         :title="sourceDescription(entry)"
         :style="{
           paddingLeft: depth * 16 + 6 + 'px',
@@ -379,6 +435,7 @@ function submitRename() {
         @dblclick.stop="startRename(entry)"
         @keydown="onRowKeydown($event, entry)"
         @dragstart="onDragStart($event, entry)"
+        @dragend="onDragEnd"
         @dragover="onDirectoryDragOver($event, entry)"
         @dragleave="dragOverDirectory === nodeId(entry) && (dragOverDirectory = null)"
         @drop="onDirectoryDrop($event, entry)"
@@ -467,6 +524,7 @@ function submitRename() {
         :can-write="canWrite"
         :can-undo="canUndo"
         :drag-reset-token="dragResetToken"
+        :drag-source-path="dragSourcePath"
         :clipboard-entry="clipboardEntry"
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
@@ -485,6 +543,7 @@ function submitRename() {
         @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
         @request-upload="emit('requestUpload', $event)"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
+        @drag-source-change="emit('dragSourceChange', $event)"
       />
     </div>
     <Teleport to="body">
@@ -694,6 +753,17 @@ function submitRename() {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.ta-file-tree-row.is-draggable {
+  cursor: grab;
+}
+
+.ta-file-tree-row.is-dragging {
+  cursor: grabbing;
+  opacity: 0.55;
+}
+</style>
 
 <style scoped>
 .ta-file-dialog-overlay {
