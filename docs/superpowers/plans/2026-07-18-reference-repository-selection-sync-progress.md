@@ -332,7 +332,7 @@ git add frontend/README.md frontend/apps/agent-web/README.md frontend/apps/agent
 git commit -m "docs: 更新引用资产同步进度说明"
 ```
 
-- [ ] **Step 7: 推送当前 main 分支**
+- [x] **Step 7: 推送当前 main 分支**
 
 先执行 `git fetch origin main` 和 `git status --short --branch`，确认没有远端分叉后运行：
 
