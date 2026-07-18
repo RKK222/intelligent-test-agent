@@ -22,6 +22,9 @@ vi.mock("@vue-flow/core", () => ({
     template: `<div data-testid="vue-flow-mock">
       <slot name="node-mermaid" v-for="node in (nodes || [])" :key="node.id" :id="node.id" :data="node.data" />
       <slot name="node-sequence-scene" v-for="node in (nodes || [])" :key="'sequence-' + node.id" :id="node.id" :data="node.data" />
+      <slot name="node-state-region" v-for="node in (nodes || []).filter(item => item.type === 'state-region')" :key="'state-region-' + node.id" :id="node.id" :data="node.data" />
+      <slot name="node-state" v-for="node in (nodes || []).filter(item => item.type === 'state')" :key="'state-' + node.id" :id="node.id" :data="node.data" />
+      <slot name="node-state-note" v-for="node in (nodes || []).filter(item => item.type === 'state-note')" :key="'state-note-' + node.id" :id="node.id" :data="node.data" />
       <button data-testid="mock-select-a" @click="$emit('nodeClick', { node: { id: 'A' } })">select A</button>
     </div>`
   }),
@@ -238,5 +241,58 @@ W-xU: 中断
     expect(markdown).toContain("par 记录");
     expect(markdown).toContain("Note over U,S: 保留说明");
     expect(markdown).toContain("destroy W");
+  });
+
+  it("stateDiagram-v2 可聚焦编辑状态，并且只替换当前 Mermaid 围栏", async () => {
+    const untouched = `flowchart LR
+X[保持] --> Y[不变]`;
+    const content = `# 状态机
+
+\`\`\`mermaid
+stateDiagram-v2
+direction TB
+[*] --> Idle
+state "空闲" as Idle
+Idle: 等待任务
+Idle --> Running: 启动
+state Running {
+  direction LR
+  [*] --> Frontend
+  Frontend --> [*]
+  --
+  [*] --> Backend
+  Backend --> [*]
+}
+Running --> [*]
+note right of Idle: 可以启动
+style Idle fill:#ABC,stroke:#123456,color:#FFF
+\`\`\`
+
+\`\`\`mermaid
+${untouched}
+\`\`\``;
+    const { container, emitted, findByRole } = render(MarkdownPreview, { props: { content } });
+    await waitRender();
+
+    const visualButtons = container.querySelectorAll('[data-mermaid-mode="visual"]');
+    await fireEvent.click(visualButtons[0] as Element);
+    const dialog = await findByRole("dialog", { name: "Mermaid 可视化编辑" }, { timeout: 5000 });
+    await fireEvent.click(within(dialog).getByLabelText("状态 Idle"));
+    const statePanel = within(dialog).getByRole("region", { name: "状态属性" });
+    await fireEvent.update(within(statePanel).getByLabelText("状态名称"), "就绪");
+    await fireEvent.update(within(statePanel).getByLabelText("状态说明"), "第一行\n第二行");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "应用到 Markdown" }));
+
+    await vi.waitFor(() => expect(emitted().change).toBeTruthy());
+    const markdown = (emitted().change as Array<[string]>)[0]?.[0] ?? "";
+    expect(markdown).toContain("stateDiagram-v2");
+    expect(markdown).toContain('state "就绪" as Idle');
+    expect(markdown).toContain("Idle: 第一行");
+    expect(markdown).toContain("Idle: 第二行");
+    expect(markdown).toContain("state Running {");
+    expect(markdown).toContain("  --");
+    expect(markdown).toContain("note right of Idle: 可以启动");
+    expect(markdown).toContain("style Idle fill:#AABBCC,stroke:#123456,color:#FFFFFF");
+    expect(markdown).toContain(`\`\`\`mermaid\n${untouched}\n\`\`\``);
   });
 });

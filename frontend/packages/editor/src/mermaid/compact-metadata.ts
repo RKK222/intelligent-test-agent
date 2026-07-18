@@ -1,15 +1,24 @@
 import type { MermaidGraph, MermaidPosition } from "./model";
 import type { MermaidSequenceDiagram } from "./sequence/model";
+import {
+  flattenMermaidStateScopes,
+  type MermaidStateNode,
+  type MermaidStateTransition,
+  type MermaidStateDiagram
+} from "./state/model";
 
 const FLOW_VERSION_A1 = 0xa1;
 const FLOW_VERSION_A2 = 0xa2;
+const STATE_VERSION_B1 = 0xb1;
 const FLAG_COORDINATES = 1 << 0;
 const FLAG_PORTS = 1 << 1;
 const FLAG_ROUTES = 1 << 2;
 const FLAG_SEQUENCE = 1 << 3;
 const FLAG_SCALES = 1 << 4;
+const FLAG_STATE = 1 << 5;
 const KNOWN_FLAGS_A1 = FLAG_COORDINATES | FLAG_PORTS | FLAG_ROUTES | FLAG_SEQUENCE;
 const KNOWN_FLAGS_A2 = KNOWN_FLAGS_A1 | FLAG_SCALES;
+const KNOWN_FLAGS_STATE_B1 = FLAG_COORDINATES | FLAG_PORTS | FLAG_STATE;
 const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const MAX_DECODED_BYTES = 1024 * 1024;
 const MAX_ENCODED_CHARS = Math.ceil(MAX_DECODED_BYTES * 4 / 3);
@@ -91,6 +100,41 @@ function topologySignatureForSequence(diagram: MermaidSequenceDiagram): string {
   return JSON.stringify([
     "sequence",
     diagram.participants.map((participant) => [participant.id, participant.type, participant.text])
+  ]);
+}
+
+/** State metadata 必须绑定递归层级、Region 和转换顺序，不能把父层坐标误套到子层。 */
+function stableStateScopes(diagram: MermaidStateDiagram) {
+  return [...flattenMermaidStateScopes(diagram)].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function stableStateNodes(diagram: MermaidStateDiagram): MermaidStateNode[] {
+  return stableStateScopes(diagram)
+    .flatMap((scope) => scope.regions.flatMap((region) => region.nodes))
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function stableStateTransitions(diagram: MermaidStateDiagram): MermaidStateTransition[] {
+  return stableStateScopes(diagram).flatMap((scope) =>
+    scope.regions.flatMap((region) => region.transitions)
+  );
+}
+
+function topologySignatureForState(diagram: MermaidStateDiagram): string {
+  return JSON.stringify([
+    "state",
+    diagram.header,
+    stableStateScopes(diagram).map((scope) => [
+      scope.id,
+      scope.direction,
+      scope.regions.map((region) => [
+        region.id,
+        [...region.nodes]
+          .sort((left, right) => left.id.localeCompare(right.id))
+          .map((node) => [node.id, node.kind, node.label, node.descriptions]),
+        region.transitions.map((transition) => [transition.source, transition.target, transition.label])
+      ])
+    ])
   ]);
 }
 
@@ -593,6 +637,82 @@ export function applyMermaidCompactSequence(diagram: MermaidSequenceDiagram, enc
     if (!reader.done) throw new Error("metadata 尾部存在多余内容");
     diagram.participants.forEach((participant, index) => {
       participant.position = positionFromScaled(positions[index]!);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** State 使用独立 B1 版本，只保存各 Region 局部节点坐标和转换端口。 */
+export function serializeMermaidCompactState(diagram: MermaidStateDiagram): string[] {
+  if (flattenMermaidStateScopes(diagram).some((scope) => containsMermaidCompactMarker(scope.preservedLines))) {
+    return [];
+  }
+  const nodes = stableStateNodes(diagram);
+  const transitions = stableStateTransitions(diagram);
+  const positions = nodes.map((node) => scaledPosition(node.position));
+  if (!positions.every((position) => position !== null)) return [];
+  const hasCoordinates = (positions as ScaledPosition[]).some((position) => position.x !== 0 || position.y !== 0);
+  const portBytes = transitions.map((transition) =>
+    portCode(transition.sourceHandle) | (portCode(transition.targetHandle) << 4)
+  );
+  const hasPorts = portBytes.some((value) => value !== 0);
+  if (!hasCoordinates && !hasPorts) return [];
+
+  const flags = FLAG_STATE | (hasCoordinates ? FLAG_COORDINATES : 0) | (hasPorts ? FLAG_PORTS : 0);
+  const body = [STATE_VERSION_B1, flags];
+  writeUnsigned(body, nodes.length);
+  writeUnsigned(body, transitions.length);
+  if (hasCoordinates) encodeCoordinates(body, positions as ScaledPosition[]);
+  if (hasPorts) body.push(...portBytes);
+  const bytes = appendChecksum(body, topologySignatureForState(diagram));
+  return bytes.length <= MAX_DECODED_BYTES ? formatCompactMarker(encodeBase64Url(bytes)) : [];
+}
+
+/** State metadata 任一字段异常都整体拒绝，禁止局部坐标污染递归模型。 */
+export function applyMermaidCompactState(diagram: MermaidStateDiagram, encoded: string): boolean {
+  try {
+    const body = verifyEnvelope(encoded, topologySignatureForState(diagram));
+    const reader = new ByteReader(body);
+    if (reader.readByte() !== STATE_VERSION_B1) throw new Error("State metadata 版本不支持");
+    const flags = reader.readByte();
+    if (
+      (flags & ~KNOWN_FLAGS_STATE_B1) !== 0
+      || (flags & FLAG_STATE) === 0
+      || (flags & (FLAG_SEQUENCE | FLAG_ROUTES | FLAG_SCALES)) !== 0
+      || (flags & (FLAG_COORDINATES | FLAG_PORTS)) === 0
+    ) throw new Error("State flags 非法");
+
+    const nodes = stableStateNodes(diagram);
+    const transitions = stableStateTransitions(diagram);
+    const nodeCount = reader.readUnsigned();
+    const transitionCount = reader.readUnsigned();
+    if (nodeCount !== nodes.length || transitionCount !== transitions.length) {
+      throw new Error("State 拓扑数量不匹配");
+    }
+
+    const hasCoordinates = (flags & FLAG_COORDINATES) !== 0;
+    const positions = hasCoordinates
+      ? decodeCoordinates(reader, nodeCount).map(positionFromScaled)
+      : nodes.map(() => ({ x: 0, y: 0 }));
+    const hasPorts = (flags & FLAG_PORTS) !== 0;
+    const ports = transitions.map(() => {
+      const packed = hasPorts ? reader.readByte() : 0;
+      return {
+        sourceHandle: handleFromPortCode(packed & 0x0f),
+        targetHandle: handleFromPortCode(packed >>> 4)
+      };
+    });
+    if (!reader.done) throw new Error("State metadata 尾部存在多余内容");
+
+    nodes.forEach((node, index) => { node.position = { ...positions[index]! }; });
+    transitions.forEach((transition, index) => {
+      delete transition.sourceHandle;
+      delete transition.targetHandle;
+      const port = ports[index]!;
+      if (hasPorts && port.sourceHandle) transition.sourceHandle = port.sourceHandle;
+      if (hasPorts && port.targetHandle) transition.targetHandle = port.targetHandle;
     });
     return true;
   } catch {

@@ -5,6 +5,31 @@
 
 ## Entries
 
+### 2026-07-18 - 新增 Mermaid State Diagram 可视化编辑
+
+- Why:
+  - 现有 Mermaid 编辑器只支持 Flowchart 与 Sequence，无法安全编辑 State Diagram 的递归层级、并发区域和伪状态；直接复用 Flow 的扁平模型与重复边规则会破坏 State 语义。
+- What:
+  - 新增 `stateDiagram` / `stateDiagram-v2` 递归 Scope/Region 领域模型、自研 parser、规范化 serializer、严格校验、B1 紧凑 metadata 和分层 ELK 布局；支持开始/结束、普通状态与多行说明、自循环、标签转换、复合/嵌套状态、Choice、Fork/Join、并发 Region、Note、各层方向和限定直接样式。
+  - 新增“概览 + 聚焦”State 画布：根层展示复合状态摘要，双击进入内部，面包屑返回，聚焦层同时展示全部并发 Region；支持元素点击/拖放创建、状态与转换就地编辑、拖线/端点重连、Note 属性和受限颜色编辑。
+  - 把通用屏幕坐标拖线控制器抽象为可注入领域连接规则，Flow 保持原规则，State 允许同端点多转换并阻止跨 Scope/Region、伪状态非法方向和基数上限；外部包导出、Markdown 围栏并发保护、官方 Mermaid 双重校验与保存链路不变。
+  - 扩展领域、布局、组件、Markdown 和 workbench Playwright 回归；同步前端总 README、editor README/PACKAGE、模块地图以及已批准的设计/执行计划。
+- How:
+  - 按 TDD 从解析/序列化/校验/metadata 开始，再实现递归布局、概览/聚焦画布和 Markdown 集成；无法安全映射的结构语法降级源码编辑，注释、复杂样式、class/accessibility 指令按 Scope 原样保留。
+  - State 应用时先做完整领域校验，再生成规范源码并调用 Mermaid 11.16.0 官方 parser；任一步失败都保留草稿且不覆盖 Markdown。坐标与转换端口继续使用既有紧凑 envelope，损坏/重复 marker 原样保留且不制造第二个 marker。
+  - 精确排除共享工作区中并行出现的 backend、scheduler、workspace、AgentWorkbench、file-explorer 等无关改动，只暂存 State 编辑器相关文件和本条记录。
+- Result:
+  - editor 全量 20 个测试文件、402 项通过；前端全量 Vitest 84 个文件通过（1383 passed / 1 skipped），13 个 workspace 的 lint/typecheck、用户手册和生产 build 通过。目标 workbench Playwright Chromium 1/1 通过，验证 Flowchart、Sequence、State 共用一次 workspace 保存链路。
+  - 生产构建确认 `MermaidEditorDialog` 与 `elk.bundled` 仍为独立懒加载资源；只保留既有大 chunk 提示。未新增初始页面依赖，DOMPurify 边界未变。
+  - 不涉及后端、HTTP API、RunEvent/广播、数据库、SQL、migration、generated SDK、环境配置、安全权限或外部包导出；Flowchart 与 Sequence 回归全部通过，无未完成编码项。
+- Verification:
+  - `corepack pnpm exec vitest run packages/editor/tests --reporter=dot`
+  - `corepack pnpm test`、`corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build`
+  - `corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts --project=chromium -g "Markdown Mermaid Flowchart、Sequence 和 State"`
+  - `git diff --check`、全部 session log 近期条目回顾和共享工作区暂存范围复核。
+- Next:
+  - 在真实浏览器使用超深嵌套、超长 Note/状态说明和大量并发 Region 做人工可用性验收；不影响本次交付范围。
+
 ### 2026-07-18 - 定稿夜间定时执行任务设计
 
 - Why:

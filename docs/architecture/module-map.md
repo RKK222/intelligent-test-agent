@@ -71,7 +71,7 @@ Browser
 | `packages/event-stream-client` | RunEvent SSE 和用户级运行态 fetch SSE client，负责按默认 `opencode` agent URL 连接 RunEvent、携带 Bearer Token 连接 runtime-state、自动重连、识别 `run.snapshot.reset`、解析前原始 `MessageEvent.data` 回调、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、带加载三态/稳定快照身份/用户内容修订代次及真实绝对路径元数据的文件 tab Pinia 状态，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |
 | `packages/file-explorer` | 文件树、普通文件复制/剪切/粘贴与拖放、浏览器文件上传选择、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口；实际文件操作由 app 层调用 backend-api。 |
-| `packages/editor` | Monaco 编辑器（原生 `monaco-editor`，源码区默认按可视宽度自动换行）、语言识别、内容编辑、只读展示，以及 path/model URI 一致时才执行的外部正文同步。 |
+| `packages/editor` | Monaco 编辑器（原生 `monaco-editor`，源码区默认按可视宽度自动换行）、语言识别、内容编辑、只读展示、path/model URI 一致时才执行的外部正文同步，以及 Mermaid Flowchart、Sequence、State Diagram 的懒加载可视化编辑。 |
 | `packages/diff-viewer` | Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。 |
 | `packages/agent-chat` | 自建最小 chat 运行时、opencode-like 主时间线、用户消息、message part timeline（text/reasoning/tool/file/retry/unknown fallback）、工具视图、Diff 摘要、runtime selector/status、slash command、`@` context、permission/question/Todo dock、Markdown 懒加载渲染（markdown-it + DOMPurify + highlight.js）、支持 `run.snapshot.reset` 的纯 RunEvent reducer，以及供实时事件和历史 `partsJson` 共用的 message part 归一化入口。旧 `AgentCard`/`TimelineCard`/`MessageParts` 路径已作废，仅保留兼容。 |
 | `packages/terminal` | 受控 PTY 前端包，负责 ticket WebSocket 连接、输入、resize、关闭和输出渲染，不创建 ticket、不直连 opencode server。 |

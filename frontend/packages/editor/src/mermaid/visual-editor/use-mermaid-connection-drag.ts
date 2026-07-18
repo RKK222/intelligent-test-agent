@@ -8,7 +8,7 @@ import {
   type MermaidConnectionPortGeometry,
   type MermaidScreenPoint
 } from "./mermaid-connection-geometry";
-import { canAppendMermaidEdge, getMermaidConnectionInvalidReason, type MermaidPortConnection } from "./vue-flow-adapter";
+import { getMermaidConnectionInvalidReason, type MermaidPortConnection } from "./vue-flow-adapter";
 
 export type MermaidConnectionStart = {
   pointerId: number;
@@ -18,9 +18,14 @@ export type MermaidConnectionStart = {
   point: MermaidScreenPoint;
 };
 
-type ControllerOptions = {
+type ControllerOptions<TGraph = MermaidGraph> = {
   getCanvasElement: () => HTMLElement | undefined;
-  getGraph: () => MermaidGraph;
+  getGraph: () => TGraph;
+  /** 未提供时沿用 Flow 规则；State 等领域可注入自己的作用域与基数校验。 */
+  getConnectionInvalidReason?: (
+    connection: MermaidPortConnection,
+    excludeEdgeId?: string
+  ) => string | undefined;
   onConnect: (connection: MermaidPortConnection) => void;
   /** 拖动已存在连线的端点重连到新节点/端口时调用；end 表示拖动的是哪一端。 */
   onReconnect?: (edgeId: string, end: "source" | "target", connection: MermaidPortConnection) => void;
@@ -49,7 +54,7 @@ function centerOf(element: Element): MermaidScreenPoint {
  * 管理一次拖线的完整窗口生命周期。屏幕坐标测量让命中半径不随 Vue Flow 缩放变化，
  * DOM 仅在合并后的动画帧内读取，避免 pointermove 频繁触发布局计算。
  */
-export function createMermaidConnectionDragController(options: ControllerOptions) {
+export function createMermaidConnectionDragController<TGraph = MermaidGraph>(options: ControllerOptions<TGraph>) {
   const windowTarget = options.windowTarget ?? window;
   const documentTarget = options.documentTarget ?? document;
   const requestFrame = options.requestAnimationFrame ?? windowTarget.requestAnimationFrame.bind(windowTarget);
@@ -187,12 +192,15 @@ export function createMermaidConnectionDragController(options: ControllerOptions
       const connection = buildConnection();
       const graph = options.getGraph();
       const excludeId = reconnect?.edgeId;
-      if (canAppendMermaidEdge(graph, connection, excludeId)) {
+      const reason = options.getConnectionInvalidReason
+        ? options.getConnectionInvalidReason(connection, excludeId)
+        : getMermaidConnectionInvalidReason(graph as MermaidGraph, connection, excludeId);
+      if (!reason) {
         targetStatus.value = "valid";
         invalidReason.value = undefined;
       } else {
         targetStatus.value = "invalid";
-        invalidReason.value = getMermaidConnectionInvalidReason(graph, connection, excludeId);
+        invalidReason.value = reason;
       }
     } else {
       lastSnappedPort = undefined;
@@ -307,7 +315,7 @@ export function createMermaidConnectionDragController(options: ControllerOptions
   };
 }
 
-export function useMermaidConnectionDrag(options: ControllerOptions) {
+export function useMermaidConnectionDrag<TGraph = MermaidGraph>(options: ControllerOptions<TGraph>) {
   const controller = createMermaidConnectionDragController(options);
   onBeforeUnmount(controller.dispose);
   return controller;

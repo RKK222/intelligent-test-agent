@@ -1331,7 +1331,7 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
   await expect(manualFrame.getByRole("cell", { name: "具体研发阶段的个人输入输出产物" })).toBeVisible();
 });
 
-test("Markdown Mermaid Flowchart 和 Sequence 可视化编辑后复用保存链路", async ({ page }) => {
+test("Markdown Mermaid Flowchart、Sequence 和 State 可视化编辑后复用保存链路", async ({ page }) => {
   test.setTimeout(60_000);
   const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
   await mockBackendApi(page, {
@@ -1364,6 +1364,25 @@ end
 deactivate W
 destroy W
 W-xU: 中断
+\`\`\`
+
+\`\`\`mermaid
+stateDiagram-v2
+[*] --> Idle
+state "空闲" as Idle
+Idle: 等待任务
+Idle --> Running: 启动
+state Running {
+  direction LR
+  [*] --> Frontend
+  Frontend --> [*]
+  --
+  [*] --> Backend
+  Backend --> [*]
+}
+Running --> [*]
+note right of Idle: 可以启动
+style Idle fill:#ABC,stroke:#123456,color:#FFF
 \`\`\``
     },
     personalWorkspaces: {
@@ -1388,7 +1407,7 @@ W-xU: 中断
   await page.getByTestId("footer-markdown-preview").click();
 
   const visualButtons = page.getByRole("button", { name: "可视化编辑" });
-  await expect(visualButtons).toHaveCount(2);
+  await expect(visualButtons).toHaveCount(3);
   await visualButtons.nth(0).click();
   const dialog = page.getByRole("dialog", { name: "Mermaid 可视化编辑" });
   await expect(dialog).toBeVisible();
@@ -1397,10 +1416,17 @@ W-xU: 中断
   await page.getByRole("button", { name: "完成" }).click();
   await dialog.getByRole("button", { name: "应用到 Markdown" }).click();
 
-  await expect(visualButtons).toHaveCount(2);
+  await expect(visualButtons).toHaveCount(3);
   await visualButtons.nth(1).click();
   await dialog.getByLabel("选择消息 请求").click();
   await dialog.getByLabel("消息文本").fill("登录请求");
+  await dialog.getByRole("button", { name: "应用到 Markdown" }).click();
+
+  await expect(visualButtons).toHaveCount(3);
+  await visualButtons.nth(2).click();
+  await dialog.getByLabel("状态 Idle").click();
+  await dialog.getByLabel("状态名称").fill("就绪");
+  await dialog.getByLabel("状态说明").fill("第一行\n第二行");
   await dialog.getByRole("button", { name: "应用到 Markdown" }).click();
 
   await page.locator(".ta-workbench-footer-save").click();
@@ -1416,6 +1442,11 @@ W-xU: 中断
   expect(fileWriteRequests[0]?.content).toContain("par 记录");
   expect(fileWriteRequests[0]?.content).toContain("Note over U,S: 保留说明");
   expect(fileWriteRequests[0]?.content).toContain("destroy W");
+  expect(fileWriteRequests[0]?.content).toContain('state "就绪" as Idle');
+  expect(fileWriteRequests[0]?.content).toContain("Idle: 第一行");
+  expect(fileWriteRequests[0]?.content).toContain("state Running {");
+  expect(fileWriteRequests[0]?.content).toContain("note right of Idle: 可以启动");
+  expect(fileWriteRequests[0]?.content).toContain("style Idle fill:#AABBCC,stroke:#123456,color:#FFFFFF");
 });
 
 test("switching to an application without recent workspace clears the previous file tree", async ({ page }) => {

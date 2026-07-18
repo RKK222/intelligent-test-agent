@@ -6,6 +6,9 @@ import type { MermaidGraph } from "../model";
 import { autoLayoutMermaidSequence } from "../sequence/layout";
 import type { MermaidSequenceDiagram } from "../sequence/model";
 import SequenceVisualEditor from "../sequence/visual-editor/SequenceVisualEditor.vue";
+import { autoLayoutMermaidState } from "../state/layout";
+import { flattenMermaidStateNodes, type MermaidStateDiagram } from "../state/model";
+import StateVisualEditor from "../state/visual-editor/StateVisualEditor.vue";
 import MermaidVisualEditor from "./MermaidVisualEditor.vue";
 
 const props = defineProps<{
@@ -34,6 +37,15 @@ watch(
       const hasStoredLayout = cloned.participants.some((participant) => participant.position.x !== 0 || participant.position.y !== 0);
       if (lastWatchModel === model) {
         draft.value = hasStoredLayout ? cloned : autoLayoutMermaidSequence(cloned);
+      }
+    } else if (cloned.kind === "stateDiagram") {
+      const hasStoredLayout = flattenMermaidStateNodes(cloned)
+        .some((node) => node.position.x !== 0 || node.position.y !== 0);
+      if (lastWatchModel === model) draft.value = cloned;
+      if (!hasStoredLayout) {
+        // State 先呈现可交互草稿，再异步完成各层级 Region 的 ELK 布局，避免打开弹窗时出现空白。
+        const laidOut = await autoLayoutMermaidState(cloned);
+        if (lastWatchModel === model) draft.value = laidOut;
       }
     } else {
       const hasStoredLayout = cloned.nodes.some((node) => node.position.x !== 0 || node.position.y !== 0);
@@ -64,6 +76,7 @@ function apply() {
 
 function updateFlowchart(graph: MermaidGraph) { draft.value = graph; }
 function updateSequence(diagram: MermaidSequenceDiagram) { draft.value = diagram; }
+function updateState(diagram: MermaidStateDiagram) { draft.value = diagram; }
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") emit("cancel");
@@ -97,14 +110,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         </div>
 
         <MermaidVisualEditor
-          v-if="draft && draft.kind !== 'sequenceDiagram'"
+          v-if="draft && (draft.kind === 'flowchart' || draft.kind === 'graph')"
           :model-value="draft"
           @update:model-value="updateFlowchart"
         />
         <SequenceVisualEditor
-          v-else-if="draft"
+          v-else-if="draft?.kind === 'sequenceDiagram'"
           :model-value="draft"
           @update:model-value="updateSequence"
+        />
+        <StateVisualEditor
+          v-else-if="draft?.kind === 'stateDiagram'"
+          :model-value="draft"
+          @update:model-value="updateState"
         />
 
         <footer class="ta-mermaid-dialog__footer">

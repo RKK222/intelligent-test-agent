@@ -347,7 +347,7 @@ loop 未闭合
       "A->>B: hi"
     );
     expect(() => parseMermaidDiagram("classDiagram\nA <|-- B")).toThrow(
-      "仅支持 flowchart、graph 或 sequenceDiagram"
+      "仅支持 flowchart、graph、sequenceDiagram 或 stateDiagram"
     );
   });
 });

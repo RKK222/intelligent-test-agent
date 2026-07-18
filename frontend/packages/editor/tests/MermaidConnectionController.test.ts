@@ -75,7 +75,15 @@ function setRect(element: Element, rect: { left: number; top: number; right: num
   });
 }
 
-function createControllerFixture(existingEdge = false) {
+function createControllerFixture(
+  existingEdge = false,
+  getConnectionInvalidReason?: (connection: {
+    source: string | null;
+    target: string | null;
+    sourceHandle: string | null;
+    targetHandle: string | null;
+  }, excludeEdgeId?: string) => string | undefined
+) {
   const canvas = document.createElement("div");
   const sourceNode = document.createElement("div");
   const targetNode = document.createElement("div");
@@ -116,6 +124,7 @@ function createControllerFixture(existingEdge = false) {
   const controller = createMermaidConnectionDragController({
     getCanvasElement: () => canvas,
     getGraph: () => graph,
+    ...(getConnectionInvalidReason ? { getConnectionInvalidReason } : {}),
     onConnect,
     onReconnect,
     requestAnimationFrame: (callback) => {
@@ -143,6 +152,30 @@ afterEach(() => {
 });
 
 describe("Mermaid 拖线控制器", () => {
+  it("允许 State 等领域注入连接规则而不复用 Flow 重复边限制", () => {
+    const policy = vi.fn(() => undefined);
+    const { controller, frames, onConnect } = createControllerFixture(true, policy);
+    controller.startConnection({
+      pointerId: 7,
+      nodeId: "A",
+      handleId: "source-0",
+      position: Position.Right,
+      point: { x: 120, y: 60 }
+    });
+
+    window.dispatchEvent(pointerEvent("pointermove", 250, 60));
+    frames[0]!(0);
+    expect(controller.targetStatus.value).toBe("valid");
+    window.dispatchEvent(pointerEvent("pointerup", 250, 60));
+    expect(policy).toHaveBeenCalledWith({
+      source: "A",
+      target: "B",
+      sourceHandle: "source-0",
+      targetHandle: "target-1"
+    }, undefined);
+    expect(onConnect).toHaveBeenCalledOnce();
+  });
+
   it("合并移动帧并在有效端口松开时创建固定连接", () => {
     const { controller, frames, onConnect } = createControllerFixture();
     controller.startConnection({
