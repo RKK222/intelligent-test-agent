@@ -246,6 +246,26 @@ function refreshChanges() {
   gitChangesPanelRef.value?.refreshChanges();
 }
 
+const DIFF_AUTO_REFRESH_INTERVAL_MS = 5000;
+let diffAutoRefreshTimer: number | undefined;
+
+function stopDiffAutoRefresh() {
+  if (diffAutoRefreshTimer !== undefined) {
+    window.clearInterval(diffAutoRefreshTimer);
+    diffAutoRefreshTimer = undefined;
+  }
+}
+
+watch(tab, (nextTab) => {
+  stopDiffAutoRefresh();
+  if (nextTab !== "changes") return;
+  // Git Diff 没有服务端推送事件；进入面板先查一次，停留期间持续复用同一刷新程序感知磁盘变化。
+  refreshChanges();
+  diffAutoRefreshTimer = window.setInterval(refreshChanges, DIFF_AUTO_REFRESH_INTERVAL_MS);
+});
+
+onUnmounted(stopDiffAutoRefresh);
+
 function refreshAll() {
   refreshAgents();
   refreshChanges();

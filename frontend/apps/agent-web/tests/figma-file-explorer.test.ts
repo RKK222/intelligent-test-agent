@@ -1,4 +1,5 @@
 import { shallowMount } from "@vue/test-utils";
+import { defineComponent, h } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import FigmaFileExplorer from "../src/components/FigmaFileExplorer.vue";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
@@ -10,6 +11,45 @@ vi.mock("@test-agent/workbench-shell", async () =>
 );
 
 describe("FigmaFileExplorer", () => {
+  it("refreshes changes immediately and continuously while the changes panel is visible", async () => {
+    vi.useFakeTimers();
+    const refreshChanges = vi.fn();
+    const GitChangesPanelStub = defineComponent({
+      name: "GitChangesPanel",
+      setup(_, { expose }) {
+        expose({ refreshChanges });
+        return () => h("div", { "data-testid": "git-changes-panel" });
+      }
+    });
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      },
+      global: {
+        stubs: { GitChangesPanel: GitChangesPanelStub }
+      }
+    });
+
+    try {
+      await wrapper.get('button[aria-label="变更"]').trigger("click");
+      await wrapper.vm.$nextTick();
+      expect(refreshChanges).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(refreshChanges).toHaveBeenCalledTimes(2);
+
+      await wrapper.get('button[aria-label="文件树"]').trigger("click");
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(refreshChanges).toHaveBeenCalledTimes(2);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps Agents collapsed at the bottom when entering the file view", () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {
