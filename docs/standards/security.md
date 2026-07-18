@@ -127,12 +127,14 @@ Token 校验流程：
 交互式 PTY 终端属于受控 WebSocket 例外。当前已落地后端 ticket、Origin、cwd workspace root 归一化、单次使用、每 session 单 active PTY、ticket 创建限流、input/resize 限速、审计、idle/hard timeout、输出截断和前端 terminal panel。实现和后续扩展必须满足：
 
 1. 先通过 HTTP API 创建一次性 ticket，再使用 ticket 建立 WebSocket；不得直接以长期 Bearer token 暴露在 WebSocket URL 中。
-2. ticket 必须绑定 session、workspace、execution node、traceId 和过期时间，且只能使用一次。
+2. workspace ticket 必须绑定 session、workspace、execution node；服务器 ticket 必须绑定 linuxServerId 和发起用户。两类 ticket 均绑定 traceId、过期时间且只能使用一次。
 3. cwd 必须归一化在 workspace root 内，shell 必须走后端白名单；在白名单配置完成前，前端不得覆盖 shell。
 4. WebSocket upgrade 必须校验 Origin、ticket、session/workspace 归属和限流。
 5. input/output 审计日志默认只记录长度、事件类型、截断、退出码和必要状态，不记录完整终端内容。
 6. input、resize、output buffer、idle timeout 和 hard timeout 必须有明确上限。
 7. 断开连接、session abort、后端关闭或超时时必须清理 PTY 进程。
+8. 服务器 root 终端必须默认关闭，仅允许 `SUPER_ADMIN`，逐次手工确认 `ROOT@{linuxServerId}`，且 Java effective UID 必须为 0；不得使用 `sudo`、SSH 密码或保存主机凭据绕过部署身份。
+9. root 终端只能返回 `wss://` 网关地址，网关必须按 `linuxServerId` 定向到签票 JVM；shell 环境使用固定最小白名单，不继承 Java 进程密钥。审计不得记录命令和输出正文。
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 

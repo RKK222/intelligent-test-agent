@@ -1,9 +1,12 @@
 package com.enterprise.testagent.opencode.runtime.terminal;
 
+import com.pty4j.PtyProcess;
+import com.pty4j.PtyProcessBuilder;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -32,20 +35,23 @@ public class TerminalProcessFactory {
      */
     public TerminalProcessSession start(TerminalTicket ticket) {
         try {
-            // 终端当前以受控 stdin/stdout 管道承载交互；-s 明确要求 shell 从 stdin 读取命令，
-            // 避免 zsh 等交互 shell 在没有原生 TTY 时只完成启动脚本却不继续消费输入。
-            Process process = new ProcessBuilder(shellCommand(ticket.shell()))
-                    .directory(ticket.cwd().toFile())
-                    .redirectErrorStream(true)
+            List<String> command = shellCommand(ticket.shell());
+            PtyProcess process = new PtyProcessBuilder()
+                    .setCommand(command.toArray(String[]::new))
+                    .setDirectory(ticket.cwd().toString())
+                    .setEnvironment(environment(ticket))
+                    .setRedirectErrorStream(true)
+                    .setInitialColumns(ticket.cols())
+                    .setInitialRows(ticket.rows())
                     .start();
             return new TerminalProcessSession(process, new TerminalOutputLimiter(
                     maxOutputFrameBytes,
                     maxOutputConnectionBytes));
         } catch (Exception exception) {
             throw new PlatformException(
-                    ErrorCode.OPENCODE_UNAVAILABLE,
+                    ErrorCode.TERMINAL_UNAVAILABLE,
                     "PTY 后端不可用",
-                    Map.of("sessionId", ticket.sessionId().value()),
+                    Map.of("targetType", ticket.targetType(), "targetId", ticket.auditTargetId()),
                     exception);
         }
     }
@@ -56,5 +62,20 @@ public class TerminalProcessFactory {
             throw new IllegalArgumentException("unsupported shell: " + executable);
         }
         return List.of(shell, "-i", "-s");
+    }
+
+    /** root 终端不继承 Java 进程中的密钥环境；workspace 终端保持既有环境兼容性。 */
+    private Map<String, String> environment(TerminalTicket ticket) {
+        Map<String, String> environment = ticket.serverRoot() ? new HashMap<>() : new HashMap<>(System.getenv());
+        environment.put("TERM", "xterm-256color");
+        if (ticket.serverRoot()) {
+            environment.put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+            environment.put("HOME", "/root");
+            environment.put("USER", "root");
+            environment.put("LOGNAME", "root");
+            environment.put("SHELL", "/bin/bash");
+            environment.put("LANG", "C.UTF-8");
+        }
+        return environment;
     }
 }

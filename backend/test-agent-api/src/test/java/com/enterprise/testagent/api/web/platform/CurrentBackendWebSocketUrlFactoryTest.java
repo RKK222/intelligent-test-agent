@@ -26,6 +26,25 @@ class CurrentBackendWebSocketUrlFactoryTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void buildsServerRootUrlOnlyFromConfiguredWssGateway() {
+        CurrentBackendWebSocketUrlFactory factory = new CurrentBackendWebSocketUrlFactory(
+                mock(BackendInstanceIdentity.class), "wss://console.example/internal");
+
+        assertThat(factory.serverRootUrl("/api/root/ws?ticket=pty_1"))
+                .isEqualTo("wss://console.example/internal/api/root/ws?ticket=pty_1");
+    }
+
+    @Test
+    void rejectsPlaintextServerRootGateway() {
+        CurrentBackendWebSocketUrlFactory factory = new CurrentBackendWebSocketUrlFactory(
+                mock(BackendInstanceIdentity.class), "ws://console.example");
+
+        assertThatThrownBy(() -> factory.serverRootUrl("/api/root/ws?ticket=pty_1"))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("wss");
+    }
+
     private CurrentBackendWebSocketUrlFactory factory(String listenUrl) {
         BackendInstanceIdentity identity = mock(BackendInstanceIdentity.class);
         when(identity.listenUrl()).thenReturn(listenUrl);

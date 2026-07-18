@@ -9,7 +9,7 @@
 - 使用后端返回的一次性 terminal ticket 建立 WebSocket。
 - 解析 `output`、`exit`、`error`、`warning` JSON envelope；`warning` 用于展示输出截断等非致命状态。
 - 发送 `input`、`resize`、`close` JSON envelope。
-- 提供 `TerminalPanel` 供 `apps/agent-web` 组合。
+- 提供基于 xterm.js + FitAddon 的 `TerminalPanel`，键盘数据直发 PTY，容器变化触发真实 resize，供 workspace 与运行管理 root 终端复用。
 - 输出按 seq 追加展示；`warning`、连接失败、ticket 创建失败和 close 状态必须留在面板内展示，不能自动降级为其他连接方式。
 - resize/input/close 只通过平台 envelope 发送，不解释 shell 语义，不记录或持久化终端内容。
 
@@ -27,4 +27,4 @@ corepack pnpm --filter @test-agent/terminal typecheck
 corepack pnpm test -- terminal
 ```
 
-真实 PTY 浏览器到后端 WebSocket 的验收属于 `tools/dev-phase11-real-e2e.sh --start-services`，当前仍没有最新通过记录。
+workspace 真实 PTY 浏览器到后端 WebSocket 的验收属于 `tools/dev-phase11-real-e2e.sh --start-services`；服务器 root 终端还必须在 Linux root Java + HTTPS/WSS Nginx 环境验收，macOS 本地环境只能验证默认关闭和普通 PTY。

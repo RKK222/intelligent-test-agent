@@ -1,5 +1,7 @@
 package com.enterprise.testagent.opencode.runtime.terminal;
 
+import com.pty4j.PtyProcess;
+import com.pty4j.WinSize;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -71,10 +73,15 @@ public class TerminalProcessSession {
     }
 
     /**
-     * 调整 PTY 尺寸；当前本地进程适配器暂不支持真实 resize，保留幂等空操作。
+     * 调整真实 PTY 尺寸；旧测试进程不是 PtyProcess 时保持兼容空操作。
      */
     public Mono<Void> resize(Integer cols, Integer rows) {
-        return Mono.empty();
+        if (!(process instanceof PtyProcess ptyProcess) || cols == null || rows == null || cols < 1 || rows < 1) {
+            return Mono.empty();
+        }
+        return Mono.fromRunnable(() -> ptyProcess.setWinSize(new WinSize(cols, rows)))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then();
     }
 
     /**
@@ -82,6 +89,7 @@ public class TerminalProcessSession {
      */
     public Mono<Void> close() {
         return Mono.fromRunnable(() -> {
+                    process.descendants().forEach(ProcessHandle::destroy);
                     process.destroy();
                     output.tryEmitComplete();
                 })

@@ -345,6 +345,9 @@ public class TestAgentRuntimeProperties {
      * 受控 PTY 终端连接、输入、输出和 ticket 限制配置项。
      */
     public static class Terminal {
+        private boolean serverRootEnabled;
+        private Path serverWorkingDirectory = Path.of("/data/testagent");
+        private String publicWebsocketBaseUrl = "";
         private int maxInputBytes = 16 * 1024;
         private int inputMessagesPerWindow = 64;
         private int resizeMessagesPerWindow = 10;
@@ -355,6 +358,36 @@ public class TestAgentRuntimeProperties {
         private Duration hardTimeout = Duration.ofHours(2);
         private int ticketCapacity = 10;
         private Duration ticketWindow = Duration.ofMinutes(1);
+
+        /** 返回是否开放超级管理员服务器 root 终端。 */
+        public boolean isServerRootEnabled() {
+            return serverRootEnabled;
+        }
+
+        /** 绑定是否开放超级管理员服务器 root 终端。 */
+        public void setServerRootEnabled(boolean serverRootEnabled) {
+            this.serverRootEnabled = serverRootEnabled;
+        }
+
+        /** 返回服务器终端固定工作目录。 */
+        public Path getServerWorkingDirectory() {
+            return serverWorkingDirectory;
+        }
+
+        /** 绑定服务器终端固定工作目录。 */
+        public void setServerWorkingDirectory(Path serverWorkingDirectory) {
+            this.serverWorkingDirectory = serverWorkingDirectory;
+        }
+
+        /** 返回对浏览器公开的 WSS 网关基址。 */
+        public String getPublicWebsocketBaseUrl() {
+            return publicWebsocketBaseUrl;
+        }
+
+        /** 绑定对浏览器公开的 WSS 网关基址。 */
+        public void setPublicWebsocketBaseUrl(String publicWebsocketBaseUrl) {
+            this.publicWebsocketBaseUrl = publicWebsocketBaseUrl;
+        }
 
         /**
          * 返回单条输入消息允许的最大字节数。

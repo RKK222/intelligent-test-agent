@@ -64,6 +64,7 @@
 | `opencode-runtime` | `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 或 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` | 旧 `/api/sessions/{sessionId}/session-tree/messages` 返回 `410 API_GONE`。 |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/agents` | 旧 `/api/agents` 返回 `410 API_GONE`。 |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` | 旧 `/api/sessions/{sessionId}/terminal/tickets|ws` 返回 `410 API_GONE`。 |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/linux-servers/{linuxServerId}/terminal/tickets` | `SUPER_ADMIN` 服务器 root 终端；默认关闭，WebSocket 必须走 WSS 定向网关。 |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/overview` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/containers/{containerId}/processes/{port}/restart` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/containers/{containerId}/processes/{port}/stop` | 无旧 URL |
@@ -2608,6 +2609,8 @@ PTY WebSocket 不在上述默认 HTTP/SSE 契约内，已按 `docs/standards/sec
 
 - `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets`：创建一次性 PTY ticket，仍返回 `ApiResponse<T>`。
 - `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/ws?ticket=...`：仅用于 WebSocket upgrade，ticket 单次使用并短期过期。
+- `POST /api/internal/platform/opencode-runtime/management/linux-servers/{linuxServerId}/terminal/tickets`：仅 `SUPER_ADMIN` 可创建目标服务器 root ticket；请求会通过公共 Java 路由器转发到目标服务器。
+- `GET /api/internal/platform/opencode-runtime/management/linux-servers/{linuxServerId}/terminal/ws?ticket=...`：服务器 root WebSocket upgrade，必须通过按 `linuxServerId` 定向的 WSS 网关访问。
 - 旧 `POST /api/sessions/{sessionId}/terminal/tickets` 和 `GET /api/sessions/{sessionId}/terminal/ws?ticket=...` 已作废，返回 `410 API_GONE`。
 
 创建 ticket 的请求体为：
@@ -2643,6 +2646,14 @@ ticket 响应 data：
 
 `webSocketUrl` 固定返回签发 ticket 的当前 Java 绝对地址。多后台时 ticket 请求可先经入口 Java 转发到用户进程所属 Java，响应仍指向实际签发节点，后续 upgrade 不再由 Nginx 二次负载；浏览器必须能访问该 Java 的 `listenUrl`，后端 Origin 白名单仍校验前端 origin。
 
+服务器 root ticket 请求体固定为：
+
+```json
+{ "confirmationText": "ROOT@test-agent-backend-a", "cols": 120, "rows": 32 }
+```
+
+该入口默认关闭。开启后仍会逐次校验 `SUPER_ADMIN`、确认文本严格等于 `ROOT@{linuxServerId}`、目标就是当前 Java、`/bin/bash` 与固定工作目录可用、Java effective UID 为 `0`。它不使用 SSH，因此不接收用户名、密码或私钥；Java 直接在本机启动 root PTY。响应 `webSocketUrl` 只允许由 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 生成 `wss://` 地址，明文 `ws://` 配置会失败关闭。root shell 使用最小固定环境，不继承 Java 进程中的数据库密码、token 或其它密钥环境变量。
+
 WebSocket 消息使用 JSON envelope：
 
 ```json
@@ -2656,7 +2667,7 @@ WebSocket 消息使用 JSON envelope：
 { "type": "error", "code": "PTY_DENIED", "message": "..." }
 ```
 
-当前已覆盖后端 ticket、Origin、session/workspace/cwd、单次使用、ticket 创建限流、每 session 单 active PTY、input/resize 限速、output 截断、结构化审计、idle/hard timeout 和前端 terminal package 基础接入。已有 active PTY 时，新 WebSocket 会返回 `error` envelope，`code=CONFLICT`，并关闭连接；非法 client envelope 返回 `error` envelope，`code=VALIDATION_ERROR`；input/resize 超限返回 `error` envelope，`code=RATE_LIMITED`；idle/hard timeout 返回 `error` envelope，`code=PTY_TIMEOUT`。真实前端、后端、opencode server 三服务 E2E 仍是后续完成项。
+当前已覆盖后端 ticket、Origin、workspace/server-root 目标、单次使用、ticket 创建限流、JVM 内 active 租约、真实 PTY resize、output 截断、结构化审计、idle/hard timeout 和 xterm 前端接入。已有 active PTY 时，新 WebSocket 会返回 `error` envelope，`code=CONFLICT`，并关闭连接；非法 client envelope 返回 `error` envelope，`code=VALIDATION_ERROR`；input/resize 超限返回 `error` envelope，`code=RATE_LIMITED`；idle/hard timeout 返回 `error` envelope，`code=PTY_TIMEOUT`。root 终端未开启、Java 非 root 或 WSS 网关未配置时返回 `TERMINAL_UNAVAILABLE`。未新增 SSE 事件或数据库字段。
 
 ### Diff API
 

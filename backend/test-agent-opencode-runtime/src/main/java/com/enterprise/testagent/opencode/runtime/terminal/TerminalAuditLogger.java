@@ -17,11 +17,11 @@ public class TerminalAuditLogger {
      */
     public void ticketCreated(TerminalTicket ticket) {
         LOGGER.info(
-                "event=pty.ticket.created traceId={} sessionId={} workspaceId={} cwd={} expiresAt={}",
+                "event=pty.ticket.created traceId={} targetType={} targetId={} userId={} expiresAt={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
-                ticket.cwd(),
+                ticket.targetType(),
+                ticket.auditTargetId(),
+                userId(ticket),
                 ticket.expiresAt());
     }
 
@@ -30,11 +30,9 @@ public class TerminalAuditLogger {
      */
     public void upgradeAccepted(TerminalTicket ticket) {
         LOGGER.info(
-                "event=pty.upgrade.accepted traceId={} sessionId={} workspaceId={} cwd={}",
+                "event=pty.upgrade.accepted traceId={} targetType={} targetId={} userId={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
-                ticket.cwd());
+                ticket.targetType(), ticket.auditTargetId(), userId(ticket));
     }
 
     /**
@@ -42,10 +40,9 @@ public class TerminalAuditLogger {
      */
     public void upgradeRejected(TerminalTicket ticket, String code) {
         LOGGER.warn(
-                "event=pty.upgrade.rejected traceId={} sessionId={} workspaceId={} code={}",
+                "event=pty.upgrade.rejected traceId={} targetType={} targetId={} code={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
+                ticket.targetType(), ticket.auditTargetId(),
                 code);
     }
 
@@ -54,10 +51,9 @@ public class TerminalAuditLogger {
      */
     public void input(TerminalTicket ticket, int bytes) {
         LOGGER.info(
-                "event=pty.input traceId={} sessionId={} workspaceId={} bytes={}",
+                "event=pty.input traceId={} targetType={} targetId={} bytes={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
+                ticket.targetType(), ticket.auditTargetId(),
                 Math.max(0, bytes));
     }
 
@@ -66,10 +62,9 @@ public class TerminalAuditLogger {
      */
     public void inputRejected(TerminalTicket ticket, String code, int bytes) {
         LOGGER.warn(
-                "event=pty.input.rejected traceId={} sessionId={} workspaceId={} code={} bytes={}",
+                "event=pty.input.rejected traceId={} targetType={} targetId={} code={} bytes={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
+                ticket.targetType(), ticket.auditTargetId(),
                 code,
                 Math.max(0, bytes));
     }
@@ -79,10 +74,9 @@ public class TerminalAuditLogger {
      */
     public void resize(TerminalTicket ticket, Integer cols, Integer rows) {
         LOGGER.info(
-                "event=pty.resize traceId={} sessionId={} workspaceId={} cols={} rows={}",
+                "event=pty.resize traceId={} targetType={} targetId={} cols={} rows={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
+                ticket.targetType(), ticket.auditTargetId(),
                 cols,
                 rows);
     }
@@ -92,10 +86,9 @@ public class TerminalAuditLogger {
      */
     public void close(TerminalTicket ticket, String reason) {
         LOGGER.info(
-                "event=pty.close traceId={} sessionId={} workspaceId={} reason={}",
+                "event=pty.close traceId={} targetType={} targetId={} reason={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
+                ticket.targetType(), ticket.auditTargetId(),
                 reason == null || reason.isBlank() ? "unknown" : reason);
     }
 
@@ -104,10 +97,9 @@ public class TerminalAuditLogger {
      */
     public void timeout(TerminalTicket ticket, String message) {
         LOGGER.warn(
-                "event=pty.timeout traceId={} sessionId={} workspaceId={} reason={}",
+                "event=pty.timeout traceId={} targetType={} targetId={} reason={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
+                ticket.targetType(), ticket.auditTargetId(),
                 message);
     }
 
@@ -116,10 +108,13 @@ public class TerminalAuditLogger {
      */
     public void exit(TerminalTicket ticket, int exitCode) {
         LOGGER.info(
-                "event=pty.exit traceId={} sessionId={} workspaceId={} exitCode={}",
+                "event=pty.exit traceId={} targetType={} targetId={} exitCode={}",
                 ticket.traceId(),
-                ticket.sessionId().value(),
-                ticket.workspaceId().value(),
+                ticket.targetType(), ticket.auditTargetId(),
                 exitCode);
+    }
+
+    private String userId(TerminalTicket ticket) {
+        return ticket.userId() == null ? "-" : ticket.userId().value();
     }
 }

@@ -133,7 +133,9 @@ Redis `reference-repository.sync-requested` 广播只负责低延迟唤醒，数
 - `OPENCODE_MANAGER_STATE_DIR/processes/{port}.json` 是 manager 运行态 state，不是普通日志；不要在 worker 运行中直接删除。需要清理坏 state 时，先通过运行管理停止对应用户进程，或停 worker 后再处理。
 - 对外排障日志必须脱敏 token、Authorization、Cookie、完整 prompt、私钥和用户完整输入；优先提供 traceId、linuxServerId、containerId、port、错误码和最近 200 行上下文。
 
-当前企业交付使用同一份离线 zip：单后台按 `deploy/internal/SINGLE-BACKEND.md` 执行；两个或更多后台按 `deploy/internal/MULTI-BACKEND.md` 执行。多后台每个节点都使用本机 `--backend-host <advertised-host> --skip-frontend` 部署，共享 PostgreSQL/Redis，但分别维护稳定 `linuxServerId`、本机数据目录、worker、公共配置和 9070 出站链路；前端只在 `122.233.30.2` 部署一次并通过自动生成的 Nginx upstream 访问全部后台。PTY 和 Agent 配置进度 ticket 返回签发 Java 的绝对 WebSocket 地址，Workspace/Agent 文件 route 返回目标 Java 地址；浏览器必须能访问每台 Java `:8080`，不需要 sticky 或共享 ticket。
+当前企业交付使用同一份离线 zip：单后台按 `deploy/internal/SINGLE-BACKEND.md` 执行；两个或更多后台按 `deploy/internal/MULTI-BACKEND.md` 执行。多后台每个节点都使用本机 `--backend-host <advertised-host> --skip-frontend` 部署，共享 PostgreSQL/Redis，但分别维护稳定 `linuxServerId`、本机数据目录、worker、公共配置和 9070 出站链路；前端只部署一次。workspace PTY 和 Agent 配置进度仍返回签发 Java 地址；服务器 root 终端必须走 HTTPS Nginx，并由 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 按服务器 ID 定向到签票 JVM，不使用 sticky 或 Redis 共享 ticket。
+
+服务器 root 终端启用参数为 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true`、`TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY=/data/testagent`、`TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<入口域名>`。Java systemd unit 不得配置非 root `User=`；容器化 Java 默认是非 root，不能开启该能力。Nginx 同时配置 TLS 证书和 `linuxServerId=host:port` 路由，后端 CORS Origin 必须使用对应 `https://` 地址。
 
 后端 jar 的 Spring Boot build-info 与 manager 二进制 linker flag 都在各自产物构建时生成北京时间 `VyyyyMMdd.HHmmss`，并通过既有 Redis 心跳快照进入运行管理。`backend.env`、`docker.env` 无需也不得新增版本参数；Java/worker 普通重启不会改变版本。升级必须先替换并启动 Java，确认 health、`.serverid/.serverhost` 后再替换/重启 worker，最后在运行管理逐行核对 Java 与 manager 版本；旧进程显示 `-` 属滚动兼容行为。
 

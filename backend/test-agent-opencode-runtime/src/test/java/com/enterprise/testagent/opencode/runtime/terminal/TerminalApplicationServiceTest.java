@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verify;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
+import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRepository;
@@ -16,6 +18,7 @@ import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
+import com.enterprise.testagent.domain.user.UserId;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -121,6 +124,68 @@ class TerminalApplicationServiceTest {
                 .isInstanceOf(PlatformException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.RATE_LIMITED);
+    }
+
+    @Test
+    void createServerTicketRequiresExactConfirmationAndIssuesRootTarget() {
+        TerminalApplicationService service = serverService(true, true);
+
+        assertThatThrownBy(() -> service.createServerTicket(
+                        new LinuxServerId("server-a"),
+                        new UserId("usr_admin"),
+                        new ServerTerminalTicketRequest("ROOT@server-b", 120, 32),
+                        "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.VALIDATION_ERROR);
+
+        TerminalTicketResponse response = service.createServerTicket(
+                new LinuxServerId("server-a"),
+                new UserId("usr_admin"),
+                new ServerTerminalTicketRequest("ROOT@server-a", 120, 32),
+                "trace_1234567890abcdef");
+        TerminalTicket ticket = service.consumeServerTicket(
+                new LinuxServerId("server-a"), response.ticket(), "https://console.example", "trace_ws");
+
+        assertThat(ticket.serverRoot()).isTrue();
+        assertThat(ticket.userId()).isEqualTo(new UserId("usr_admin"));
+        assertThat(ticket.cwd()).isEqualTo(tempDir.toAbsolutePath().normalize());
+        assertThat(ticket.shell()).isEqualTo("/bin/bash");
+    }
+
+    @Test
+    void createServerTicketFailsClosedWhenFeatureOrRootProcessIsMissing() {
+        assertThatThrownBy(() -> serverService(false, true).createServerTicket(
+                        new LinuxServerId("server-a"), new UserId("usr_admin"),
+                        new ServerTerminalTicketRequest("ROOT@server-a", 80, 24), "trace"))
+                .isInstanceOf(PlatformException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.TERMINAL_UNAVAILABLE);
+        assertThatThrownBy(() -> serverService(true, false).createServerTicket(
+                        new LinuxServerId("server-a"), new UserId("usr_admin"),
+                        new ServerTerminalTicketRequest("ROOT@server-a", 80, 24), "trace"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("root");
+    }
+
+    private TerminalApplicationService serverService(boolean enabled, boolean root) {
+        BackendInstanceIdentity identity = new BackendInstanceIdentity() {
+            @Override public String instanceId() { return "backend-a"; }
+            @Override public String linuxServerId() { return "server-a"; }
+            @Override public String backendProcessId() { return "bjp_a"; }
+            @Override public String listenUrl() { return "http://127.0.0.1:8080"; }
+        };
+        return new TerminalApplicationService(
+                org.mockito.Mockito.mock(WorkspaceRepository.class),
+                org.mockito.Mockito.mock(SessionRepository.class),
+                new TerminalTicketStore(Clock.fixed(NOW, ZoneOffset.UTC), () -> "pty_server1234567890"),
+                new TerminalTicketRateLimiter(Clock.fixed(NOW, ZoneOffset.UTC), 10, java.time.Duration.ofMinutes(1)),
+                org.mockito.Mockito.mock(TerminalAuditLogger.class),
+                com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
+                identity,
+                enabled,
+                tempDir,
+                () -> root);
     }
 
     private static final class Fixture {

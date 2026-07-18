@@ -24,7 +24,9 @@ public class TerminalWebSocketConfig {
     @Bean
     HandlerMapping terminalWebSocketHandlerMapping(TerminalWebSocketHandler handler) {
         SimpleUrlHandlerMapping mapping = new SimpleUrlHandlerMapping();
-        mapping.setUrlMap(Map.of("/api/internal/platform/opencode-runtime/sessions/*/terminal/ws", handler));
+        mapping.setUrlMap(Map.of(
+                "/api/internal/platform/opencode-runtime/sessions/*/terminal/ws", handler,
+                "/api/internal/platform/opencode-runtime/management/linux-servers/*/terminal/ws", handler));
         mapping.setOrder(-1);
         return mapping;
     }

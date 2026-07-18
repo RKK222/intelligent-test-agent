@@ -9,24 +9,25 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.stereotype.Component;
 
 /**
- * 单实例 active PTY 注册表，固定语义为同一平台 session 同时只允许一个交互式终端。
+ * 单实例 active PTY 注册表：workspace 按 session、root 终端按服务器和用户限制单连接。
  */
 @Component
 public class TerminalActiveSessionRegistry {
 
-    private final Map<SessionId, Lease> active = new ConcurrentHashMap<>();
+    private final Map<String, Lease> active = new ConcurrentHashMap<>();
 
     /**
      * 为 ticket 对应 Session 预留 active PTY，若已有租约则拒绝第二条连接。
      */
     public Lease reserve(TerminalTicket ticket) {
-        Lease lease = new Lease(ticket.sessionId(), ticket.traceId());
-        Lease existing = active.putIfAbsent(ticket.sessionId(), lease);
+        String key = ticket.activeKey();
+        Lease lease = new Lease(key, ticket.sessionId(), ticket.traceId());
+        Lease existing = active.putIfAbsent(key, lease);
         if (existing != null) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "Session 已存在 active PTY",
-                    Map.of("sessionId", ticket.sessionId().value()));
+                    ticket.serverRoot() ? "当前用户已打开该服务器 root 终端" : "Session 已存在 active PTY",
+                    Map.of("targetId", ticket.auditTargetId()));
         }
         return lease;
     }
@@ -35,10 +36,11 @@ public class TerminalActiveSessionRegistry {
      * 判断指定 Session 当前是否存在未释放的 PTY 租约。
      */
     public boolean isActive(SessionId sessionId) {
-        return active.containsKey(sessionId);
+        return active.containsKey("workspace:" + sessionId.value());
     }
 
     public final class Lease implements AutoCloseable {
+        private final String key;
         private final SessionId sessionId;
         private final String traceId;
         private final AtomicBoolean released = new AtomicBoolean(false);
@@ -46,7 +48,8 @@ public class TerminalActiveSessionRegistry {
         /**
          * 创建租约对象，生命周期由 WebSocket 会话关闭时释放。
          */
-        private Lease(SessionId sessionId, String traceId) {
+        private Lease(String key, SessionId sessionId, String traceId) {
+            this.key = key;
             this.sessionId = sessionId;
             this.traceId = traceId;
         }
@@ -71,7 +74,7 @@ public class TerminalActiveSessionRegistry {
         @Override
         public void close() {
             if (released.compareAndSet(false, true)) {
-                active.remove(sessionId, this);
+                active.remove(key, this);
             }
         }
     }

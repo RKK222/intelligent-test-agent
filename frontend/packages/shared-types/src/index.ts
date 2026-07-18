@@ -1716,6 +1716,12 @@ export type TerminalTicketRequest = {
   rows?: number;
 };
 
+export type ServerTerminalTicketRequest = {
+  confirmationText: string;
+  cols?: number;
+  rows?: number;
+};
+
 export type TerminalTicketResponse = {
   ticket: string;
   expiresAt: string;

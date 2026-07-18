@@ -113,6 +113,10 @@ NGINX_MODE="${TEST_AGENT_NGINX_MODE:-single}"
 NGINX_LISTEN_PORT="${TEST_AGENT_NGINX_LISTEN_PORT:-80}"
 FRONTEND_ROOT="${TEST_AGENT_FRONTEND_ROOT:-/data/testagent/frontend}"
 NGINX_BACKENDS="${TEST_AGENT_NGINX_BACKENDS:-}"
+NGINX_TERMINAL_ROUTES="${TEST_AGENT_NGINX_TERMINAL_ROUTES:-}"
+NGINX_TLS_ENABLED="${TEST_AGENT_NGINX_TLS_ENABLED:-false}"
+NGINX_TLS_CERTIFICATE="${TEST_AGENT_NGINX_TLS_CERTIFICATE:-}"
+NGINX_TLS_CERTIFICATE_KEY="${TEST_AGENT_NGINX_TLS_CERTIFICATE_KEY:-}"
 NGINX_CONF_PATH="${TEST_AGENT_NGINX_CONF_PATH:-/etc/nginx/conf.d/test-agent-gateway.conf}"
 NGINX_BIN="${TEST_AGENT_NGINX_BIN:-nginx}"
 NGINX_PREFIX="${TEST_AGENT_NGINX_PREFIX:-}"
@@ -152,6 +156,22 @@ NGINX_SYSTEMD_SERVICE="${TEST_AGENT_NGINX_SYSTEMD_SERVICE:-nginx}"
   echo "Invalid TEST_AGENT_NGINX_SYSTEMD_SERVICE: ${NGINX_SYSTEMD_SERVICE}" >&2
   exit 1
 }
+[[ "${NGINX_TLS_ENABLED}" == "true" || "${NGINX_TLS_ENABLED}" == "false" ]] || {
+  echo "TEST_AGENT_NGINX_TLS_ENABLED must be true or false" >&2
+  exit 1
+}
+if [[ "${NGINX_TLS_ENABLED}" == "true" ]]; then
+  [[ "${NGINX_TLS_CERTIFICATE}" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
+    echo "Invalid TEST_AGENT_NGINX_TLS_CERTIFICATE" >&2
+    exit 1
+  }
+  [[ "${NGINX_TLS_CERTIFICATE_KEY}" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
+    echo "Invalid TEST_AGENT_NGINX_TLS_CERTIFICATE_KEY" >&2
+    exit 1
+  }
+  require_file "${NGINX_TLS_CERTIFICATE}"
+  require_file "${NGINX_TLS_CERTIFICATE_KEY}"
+fi
 
 nginx_command=("${NGINX_BIN}")
 if [[ -n "${NGINX_PREFIX}" ]]; then
@@ -167,6 +187,7 @@ run_nginx() {
 
 IFS=',' read -r -a raw_backends <<<"${NGINX_BACKENDS}"
 backend_directives=()
+backend_endpoints=()
 for raw_backend in "${raw_backends[@]}"; do
   backend="$(trim "${raw_backend}")"
   [[ "${backend}" =~ ^([A-Za-z0-9.-]+):([0-9]{1,5})$ ]] || {
@@ -179,6 +200,7 @@ for raw_backend in "${raw_backends[@]}"; do
     exit 1
   }
   backend_directives+=("server ${backend} max_fails=3 fail_timeout=10s;")
+  backend_endpoints+=("${backend}")
 done
 
 if [[ "${NGINX_MODE}" == "single" && "${#backend_directives[@]}" -ne 1 ]]; then
@@ -190,6 +212,31 @@ if [[ "${NGINX_MODE}" == "multi" && "${#backend_directives[@]}" -lt 2 ]]; then
   exit 1
 fi
 
+terminal_route_ids=()
+terminal_route_endpoints=()
+if [[ -n "${NGINX_TERMINAL_ROUTES}" ]]; then
+  IFS=',' read -r -a raw_terminal_routes <<<"${NGINX_TERMINAL_ROUTES}"
+  for raw_route in "${raw_terminal_routes[@]}"; do
+    route="$(trim "${raw_route}")"
+    [[ "${route}" =~ ^([A-Za-z0-9._-]{1,128})=([A-Za-z0-9.-]+):([0-9]{1,5})$ ]] || {
+      echo "Invalid terminal route: ${route}" >&2
+      exit 1
+    }
+    route_id="${BASH_REMATCH[1]}"
+    route_endpoint="${BASH_REMATCH[2]}:${BASH_REMATCH[3]}"
+    route_known=0
+    for backend_endpoint in "${backend_endpoints[@]}"; do
+      [[ "${route_endpoint}" == "${backend_endpoint}" ]] && route_known=1
+    done
+    [[ "${route_known}" -eq 1 ]] || {
+      echo "Terminal route endpoint must exist in TEST_AGENT_NGINX_BACKENDS: ${route_endpoint}" >&2
+      exit 1
+    }
+    terminal_route_ids+=("${route_id}")
+    terminal_route_endpoints+=("${route_endpoint}")
+  done
+fi
+
 rendered="$(mktemp)"
 installed_new="${NGINX_CONF_PATH}.new.$$"
 backup=""
@@ -198,9 +245,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-listen_token='${TEST_AGENT_NGINX_LISTEN_PORT}'
 root_token='${TEST_AGENT_FRONTEND_ROOT}'
 backends_token='${TEST_AGENT_BACKEND_SERVERS}'
+listen_token='${TEST_AGENT_NGINX_LISTEN_DIRECTIVE}'
+tls_token='${TEST_AGENT_NGINX_TLS_DIRECTIVES}'
+terminal_token='${TEST_AGENT_TERMINAL_LOCATIONS}'
+listen_directive="listen ${NGINX_LISTEN_PORT};"
+tls_directives=""
+if [[ "${NGINX_TLS_ENABLED}" == "true" ]]; then
+  listen_directive="listen ${NGINX_LISTEN_PORT} ssl;"
+  tls_directives="ssl_certificate ${NGINX_TLS_CERTIFICATE}; ssl_certificate_key ${NGINX_TLS_CERTIFICATE_KEY}; ssl_protocols TLSv1.2 TLSv1.3;"
+fi
 while IFS= read -r line || [[ -n "${line}" ]]; do
   if [[ "${line}" == *"${backends_token}"* ]]; then
     indent="${line%%"${backends_token}"*}"
@@ -209,7 +264,29 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
     done
     continue
   fi
-  line="${line//${listen_token}/${NGINX_LISTEN_PORT}}"
+  if [[ "${line}" == *"${terminal_token}"* ]]; then
+    indent="${line%%"${terminal_token}"*}"
+    for ((index = 0; index < ${#terminal_route_ids[@]}; index++)); do
+      route_id="${terminal_route_ids[index]}"
+      route_endpoint="${terminal_route_endpoints[index]}"
+      printf '%slocation = /api/internal/platform/opencode-runtime/management/linux-servers/%s/terminal/ws {\n' "${indent}" "${route_id}" >>"${rendered}"
+      printf '%s    proxy_pass http://%s;\n' "${indent}" "${route_endpoint}" >>"${rendered}"
+      printf '%s    proxy_http_version 1.1;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header Host $host;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header X-Real-IP $remote_addr;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header X-Forwarded-Proto $scheme;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header Upgrade $http_upgrade;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header Connection $connection_upgrade;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_read_timeout 7200s;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_send_timeout 7200s;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_buffering off;\n' "${indent}" >>"${rendered}"
+      printf '%s}\n' "${indent}" >>"${rendered}"
+    done
+    continue
+  fi
+  line="${line//${listen_token}/${listen_directive}}"
+  line="${line//${tls_token}/${tls_directives}}"
   line="${line//${root_token}/${FRONTEND_ROOT}}"
   printf '%s\n' "${line}" >>"${rendered}"
 done <"${TEMPLATE}"
@@ -223,6 +300,8 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   printf 'nginx mode: %s\n' "${NGINX_MODE}"
   printf 'nginx config: %s\n' "${NGINX_CONF_PATH}"
   printf 'backend count: %s\n' "${#backend_directives[@]}"
+  printf 'terminal route count: %s\n' "${#terminal_route_ids[@]}"
+  printf 'tls enabled: %s\n' "${NGINX_TLS_ENABLED}"
   exit 0
 fi
 

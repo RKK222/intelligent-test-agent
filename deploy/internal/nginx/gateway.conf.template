@@ -10,7 +10,8 @@ upstream test_agent_backend {
 }
 
 server {
-    listen ${TEST_AGENT_NGINX_LISTEN_PORT};
+    ${TEST_AGENT_NGINX_LISTEN_DIRECTIVE}
+    ${TEST_AGENT_NGINX_TLS_DIRECTIVES}
     server_name _;
     root ${TEST_AGENT_FRONTEND_ROOT};
     index index.html;
@@ -35,6 +36,9 @@ server {
         proxy_buffering off;
         proxy_cache off;
     }
+
+    # 服务器 root 终端 ticket 保存在目标 Java 内存，必须按 linuxServerId 定向代理 WebSocket。
+    ${TEST_AGENT_TERMINAL_LOCATIONS}
 
     location /api/ {
         proxy_pass http://test_agent_backend;

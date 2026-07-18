@@ -1936,6 +1936,31 @@ describe("backend-api", () => {
     );
   });
 
+  it("creates server root terminal tickets with explicit confirmation", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { ticket: "pty_root", expiresAt: "2026-07-18T13:00:00Z", webSocketUrl: "wss://console/api/root/ws?ticket=pty_root" }
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "https://console", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.createServerRootTerminalTicket("server-a", {
+      confirmationText: "ROOT@server-a",
+      cols: 120,
+      rows: 32
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://console/api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/tickets",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ confirmationText: "ROOT@server-a", cols: 120, rows: 32 })
+      })
+    );
+  });
+
   it("routes workspace file listing through target backend websocket", async () => {
     const fetcher = vi
       .fn<typeof fetch>()

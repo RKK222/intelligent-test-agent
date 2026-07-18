@@ -4,6 +4,8 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -56,6 +58,18 @@ public class TerminalTicketRateLimiter {
                     ErrorCode.RATE_LIMITED,
                     "PTY ticket 创建过于频繁",
                     Map.of("sessionId", sessionId.value(), "workspaceId", workspaceId.value()));
+        }
+    }
+
+    /** 按服务器和超级管理员用户限制 root ticket 创建频率。 */
+    public void acquireServer(LinuxServerId linuxServerId, UserId userId) {
+        String key = "server-root|" + linuxServerId.value() + "|" + userId.value();
+        Counter counter = counters.computeIfAbsent(key, ignored -> new Counter(clock.instant()));
+        if (!counter.tryAcquire(clock.instant(), capacity, window)) {
+            throw new PlatformException(
+                    ErrorCode.RATE_LIMITED,
+                    "服务器终端 ticket 创建过于频繁",
+                    Map.of("linuxServerId", linuxServerId.value(), "userId", userId.value()));
         }
     }
 

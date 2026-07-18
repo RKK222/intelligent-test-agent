@@ -12,6 +12,7 @@ import com.enterprise.testagent.opencode.runtime.terminal.TerminalServerMessage;
 import com.enterprise.testagent.opencode.runtime.terminal.TerminalTicket;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
 import java.net.URI;
@@ -97,7 +98,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
             if (!allowedOrigins.contains(origin)) {
                 return sendErrorAndClose(session, "PTY_ORIGIN_DENIED", "origin denied");
             }
-            ticket = terminalService.consumeTicket(sessionId(uri.getPath()), query(uri, "ticket"), origin, traceId);
+            ticket = isServerTerminal(uri.getPath())
+                    ? terminalService.consumeServerTicket(linuxServerId(uri.getPath()), query(uri, "ticket"), origin, traceId)
+                    : terminalService.consumeTicket(sessionId(uri.getPath()), query(uri, "ticket"), origin, traceId);
         } catch (PlatformException exception) {
             return sendErrorAndClose(session, exception.errorCode().name(), exception.getMessage());
         } catch (Exception exception) {
@@ -295,6 +298,20 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
             throw new IllegalArgumentException("missing session id");
         }
         return new SessionId(segments.get(index + 1));
+    }
+
+    private boolean isServerTerminal(String path) {
+        return path != null && path.contains("/management/linux-servers/") && path.endsWith("/terminal/ws");
+    }
+
+    /** 从服务器终端 WebSocket 路径提取安全格式的 linuxServerId。 */
+    private LinuxServerId linuxServerId(String path) {
+        List<String> segments = List.of(path.split("/"));
+        int index = segments.indexOf("linux-servers");
+        if (index < 0 || index + 1 >= segments.size()) {
+            throw new IllegalArgumentException("missing linux server id");
+        }
+        return new LinuxServerId(segments.get(index + 1));
     }
 
     /**

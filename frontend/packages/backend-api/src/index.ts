@@ -117,6 +117,7 @@ import type {
   SshKeyPublicKeyResponse,
   SyncWorkspacePayload,
   TerminalTicketRequest,
+  ServerTerminalTicketRequest,
   TerminalTicketResponse,
   TodoItem,
   UpdateUserRolePayload,
@@ -1412,6 +1413,14 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(compactObject(payload))
       }),
+    createServerRootTerminalTicket: (linuxServerId: string, payload: ServerTerminalTicketRequest) =>
+      request<TerminalTicketResponse>(
+        `${opencodeRuntimeBase}/management/linux-servers/${encodeURIComponent(linuxServerId)}/terminal/tickets`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload)
+        }
+      ),
 
     // ---- 认证相关 API ----
 

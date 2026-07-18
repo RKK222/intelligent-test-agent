@@ -76,7 +76,7 @@
 - `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/{agentId}/...` 原始 opencode 路径兼容、agentId、traceId 和可选用户主体透传。
 - `AuthWebSupportTest` 覆盖可选认证主体读取，确保 static-token 兼容入口不会因缺少用户主体抛错。
 - `ReferenceRepositoryControllerTest` 覆盖 5 个内部端点、初始化 body/traceId/当前用户透传、`APP_ADMIN` 成功、`SUPER_ADMIN` 继承和普通用户在调用业务服务前被拒绝。
-- `CurrentBackendWebSocketUrlFactoryTest`、`TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖当前 Java 绝对 WebSocket URL、PTY ticket、origin 拒绝、单会话互斥、输入限流、关闭和超时。
+- `CurrentBackendWebSocketUrlFactoryTest`、`TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖 workspace 绝对 URL、服务器终端强制 WSS、PTY ticket、origin 拒绝、单目标互斥、输入限流、关闭和超时；服务器 ticket POST 复用 `BackendJavaRouteResolver`/`BackendHttpForwarder` 跨 Java 路由。
 - Workspace 文件 WebSocket 入口应覆盖 route、ticket、Origin、同服务器和实时应用成员校验、ticket 在归属未 READY 时复查强状态、RPC 成功/错误 envelope、组合视图 list/read 与 locator 防伪造、上传/复制/移动、普通文件/目录树删除和受保护 `.opencode` 根目录拒绝；对应 HTTP/协议契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、文件 WebSocket route/ticket/op、文件读写权限、Git stage/unstage/discard/冲突操作鉴权、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。

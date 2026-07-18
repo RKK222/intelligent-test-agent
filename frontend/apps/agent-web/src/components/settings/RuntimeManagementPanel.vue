@@ -3,6 +3,7 @@ import { computed, inject, ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh, Search } from "@element-plus/icons-vue";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
+import { TerminalPanel } from "@test-agent/terminal";
 import type {
   CurrentUser,
   OpencodeRuntimeBackendMetricHistory,
@@ -76,6 +77,11 @@ const selectedMetricsTarget = ref<{ type: "container" | "backend"; id: string; t
 const selectedWindowMinutes = ref(60);
 const actionErrorMessage = ref("");
 const activeManagedProcessAction = ref<ManagedProcessActionRequest | null>(null);
+const rootTerminalOpen = ref(false);
+const rootTerminalLinuxServerId = ref("");
+const rootTerminalConfirmation = ref("");
+const rootTerminalExpectedConfirmation = computed(() => `ROOT@${rootTerminalLinuxServerId.value}`);
+const terminalBaseUrl = typeof window === "undefined" ? "https://localhost" : window.location.origin;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => ({
@@ -411,6 +417,21 @@ function selectBackendServer(linuxServerId: string) {
   }
 }
 
+/** 打开高危 root 终端前清空确认文本，避免上一次确认被复用。 */
+function openRootTerminal(linuxServerId: string) {
+  rootTerminalLinuxServerId.value = linuxServerId;
+  rootTerminalConfirmation.value = "";
+  rootTerminalOpen.value = true;
+}
+
+function createRootTerminalTicket() {
+  return api.createServerRootTerminalTicket(rootTerminalLinuxServerId.value, {
+    confirmationText: rootTerminalConfirmation.value,
+    cols: 120,
+    rows: 32
+  });
+}
+
 function formatPercent(value?: number | null) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "-";
@@ -719,7 +740,7 @@ function startResize(e: MouseEvent) {
                       <th style="width: 180px; position: relative;">JVM<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 140px; position: relative;">心跳<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                       <th style="width: 120px; position: relative;">容量<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
-                      <th style="width: 100px; position: relative;">操作<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 170px; position: relative;">操作<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -763,17 +784,24 @@ function startResize(e: MouseEvent) {
                       <td>{{ formatDate(row.backend?.lastHeartbeatAt ?? row.server?.lastHeartbeatAt) }}</td>
                       <td class="is-compact">{{ compactRecord(row.server?.capacitySummary) }}</td>
                       <td>
-                        <button
-                          v-if="row.backend"
-                          type="button"
-                          class="ta-runtime-trend-button"
-                          :aria-label="`查看 ${row.backend.linuxServerId} 后端监控趋势`"
-                          :title="`查看 ${row.backend.linuxServerId} 后端监控趋势`"
-                          @click.stop="selectBackendServer(row.backend.linuxServerId)"
-                          @keydown.enter.stop
-                        >
-                          趋势
-                        </button>
+                        <div v-if="row.backend" class="ta-runtime-process-actions">
+                          <button
+                            type="button"
+                            class="ta-runtime-trend-button"
+                            :aria-label="`查看 ${row.backend.linuxServerId} 后端监控趋势`"
+                            :title="`查看 ${row.backend.linuxServerId} 后端监控趋势`"
+                            @click.stop="selectBackendServer(row.backend.linuxServerId)"
+                            @keydown.enter.stop
+                          >趋势</button>
+                          <button
+                            type="button"
+                            class="ta-runtime-action-button is-danger"
+                            :disabled="row.backend.status !== 'READY'"
+                            :aria-label="`打开 ${row.backend.linuxServerId} root 终端`"
+                            title="以 root 身份打开当前部署服务器终端"
+                            @click.stop="openRootTerminal(row.backend.linuxServerId)"
+                          >root 终端</button>
+                        </div>
                         <span v-else>-</span>
                       </td>
                     </tr>
@@ -1217,6 +1245,32 @@ function startResize(e: MouseEvent) {
         </section>
       </template>
     </template>
+
+    <el-dialog
+      v-model="rootTerminalOpen"
+      :title="`服务器 root 终端 · ${rootTerminalLinuxServerId}`"
+      width="90%"
+      destroy-on-close
+      class="ta-root-terminal-dialog"
+    >
+      <div class="ta-root-terminal-warning" role="alert">
+        这是目标 Linux 主机的 root shell，命令会直接修改部署服务器。平台不会要求 SSH 用户名或密码；目标 Java 本身必须以 root 运行。
+      </div>
+      <label class="ta-root-terminal-confirmation">
+        <span>请手工输入 <code>{{ rootTerminalExpectedConfirmation }}</code> 后再连接</span>
+        <el-input v-model="rootTerminalConfirmation" autocomplete="off" :placeholder="rootTerminalExpectedConfirmation" />
+      </label>
+      <TerminalPanel
+        v-if="rootTerminalLinuxServerId"
+        :base-url="terminalBaseUrl"
+        :create-ticket="createRootTerminalTicket"
+        :disabled="rootTerminalConfirmation !== rootTerminalExpectedConfirmation"
+        :disabled-reason="`确认文本必须完全等于 ${rootTerminalExpectedConfirmation}`"
+        :title="`root@${rootTerminalLinuxServerId}`"
+        connect-label="连接 root 终端"
+        danger
+      />
+    </el-dialog>
   </section>
 </template>
 
@@ -1561,6 +1615,25 @@ function startResize(e: MouseEvent) {
   background: #eff6ff;
   outline: none;
 }
+.ta-root-terminal-warning {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #991b1b;
+  line-height: 1.6;
+}
+.ta-root-terminal-confirmation {
+  display: grid;
+  grid-template-columns: minmax(260px, auto) minmax(280px, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #3f3f46;
+  font-size: 13px;
+}
+.ta-root-terminal-confirmation code { color: #b91c1c; font-weight: 700; }
 .ta-status {
   display: inline-flex;
   align-items: center;

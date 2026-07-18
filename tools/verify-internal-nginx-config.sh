@@ -55,11 +55,28 @@ grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 1
 
 write_env multi '122.233.30.4:8080,122.233.30.114:8080'
+printf 'TEST_AGENT_NGINX_TERMINAL_ROUTES=server-a=122.233.30.4:8080,server-b=122.233.30.114:8080\n' >>"${ENV_FILE}"
 run_configure
 grep -Fq 'server 122.233.30.4:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
+grep -Fq 'location = /api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/ws {' "${CONF_PATH}"
+grep -Fq 'proxy_pass http://122.233.30.4:8080;' "${CONF_PATH}"
 test "$(grep -Fxc 'reload nginx' "${CALL_LOG}")" = 2
+
+TLS_CERT="${TMP_ROOT}/test-agent.crt"
+TLS_KEY="${TMP_ROOT}/test-agent.key"
+: >"${TLS_CERT}"
+: >"${TLS_KEY}"
+write_env single '122.233.30.114:8080'
+{
+  printf 'TEST_AGENT_NGINX_TLS_ENABLED=true\n'
+  printf 'TEST_AGENT_NGINX_TLS_CERTIFICATE=%s\n' "${TLS_CERT}"
+  printf 'TEST_AGENT_NGINX_TLS_CERTIFICATE_KEY=%s\n' "${TLS_KEY}"
+} >>"${ENV_FILE}"
+run_configure
+grep -Fq 'listen 80 ssl;' "${CONF_PATH}"
+grep -Fq "ssl_certificate ${TLS_CERT};" "${CONF_PATH}"
 
 CUSTOM_ROOT="${TMP_ROOT}/custom-nginx"
 CUSTOM_CONF_PATH="${CUSTOM_ROOT}/conf/conf.d/test-agent-gateway.conf"

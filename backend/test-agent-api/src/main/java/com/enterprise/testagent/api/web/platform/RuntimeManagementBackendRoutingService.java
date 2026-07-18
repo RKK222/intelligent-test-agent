@@ -85,6 +85,16 @@ class RuntimeManagementBackendRoutingService {
                 .map(LinuxServerId::value);
     }
 
+    /** 返回服务器级命令应转发到的远端 Java；路由头存在时不再二次转发。 */
+    Optional<String> forwardTargetForLinuxServer(ServerWebExchange exchange, LinuxServerId linuxServerId) {
+        Objects.requireNonNull(exchange, "exchange must not be null");
+        Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
+        if (exchange.getRequest().getHeaders().getFirst(BackendHttpForwarder.ROUTED_HEADER) != null) {
+            return Optional.empty();
+        }
+        return routeResolver.remoteTarget(linuxServerId).map(LinuxServerId::value);
+    }
+
     /**
      * 将当前运行管理命令转发到目标服务器 Java，并把目标统一响应解析回当前 Controller。
      */
@@ -94,5 +104,15 @@ class RuntimeManagementBackendRoutingService {
             TypeReference<ApiResponse<T>> responseType) {
         BackendJavaProcess backend = routeResolver.requireBackend(linuxServerId);
         return forwarder.forwardTyped(exchange, backend, null, responseType);
+    }
+
+    /** 转发带 JSON 请求体的服务器级命令。 */
+    <T> ApiResponse<T> forward(
+            ServerWebExchange exchange,
+            String linuxServerId,
+            Object requestBody,
+            TypeReference<ApiResponse<T>> responseType) {
+        BackendJavaProcess backend = routeResolver.requireBackend(linuxServerId);
+        return forwarder.forwardTyped(exchange, backend, requestBody, responseType);
     }
 }
