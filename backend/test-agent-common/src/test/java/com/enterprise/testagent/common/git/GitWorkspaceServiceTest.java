@@ -408,6 +408,24 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void fetchesExplicitRemoteBranchIntoTrackingRef() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.fetchBranch(tempDir, "release", "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(new Call(
+                List.of(
+                        "git",
+                        "-C",
+                        tempDir.toString(),
+                        "fetch",
+                        "origin",
+                        "+refs/heads/release:refs/remotes/origin/release"),
+                "PRIVATE KEY"));
+    }
+
+    @Test
     void resolvesCommitAndChecksAncestryForUncertainPushVerification() {
         RecordingExecutor executor = new RecordingExecutor("abc123\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);

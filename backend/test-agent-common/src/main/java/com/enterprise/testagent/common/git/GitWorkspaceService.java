@@ -372,7 +372,8 @@ public class GitWorkspaceService {
 
     /**
      * 将受管共享副本安全切换到固定提交。已有目标本地分支必须可快进到目标提交；
-     * 不存在时只从同名 origin 分支建立 tracking，绝不使用 -B 覆盖未知本地分支。
+     * 不存在时从本次已固定并验证可解析的目标提交创建，绝不使用 -B 覆盖未知本地分支。
+     * single-branch clone 的 fetchspec 不识别后来显式抓取的 remote ref，不能依赖 --track 建分支。
      */
     public void checkoutBranchForFixedCommit(
             Path repoRoot,
@@ -394,7 +395,7 @@ public class GitWorkspaceService {
                     DEFAULT_TIMEOUT);
         } else {
             executor.execute(
-                    List.of("git", "-C", repoRoot.toString(), "checkout", "-b", branch, "--track", "origin/" + branch),
+                    List.of("git", "-C", repoRoot.toString(), "checkout", "-b", branch, targetCommit),
                     privateKey,
                     DEFAULT_TIMEOUT);
         }
@@ -612,6 +613,23 @@ public class GitWorkspaceService {
     public void fetch(Path repoRoot, String privateKey) {
         executor.execute(
                 List.of("git", "-C", repoRoot.toString(), "fetch", "origin"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 显式抓取目标远端分支并刷新同名 tracking ref。引用资产初始化使用 single-branch clone，
+     * 普通 fetch 会继续受初始 fetchspec 限制，因此受控切换分支必须使用明确 refspec。
+     */
+    public void fetchBranch(Path repoRoot, String branch, String privateKey) {
+        String normalizedBranch = Objects.requireNonNull(branch, "branch must not be null").trim();
+        if (normalizedBranch.isEmpty()) {
+            throw new IllegalArgumentException("branch must not be blank");
+        }
+        String remoteRef = "refs/heads/" + normalizedBranch;
+        String trackingRef = "refs/remotes/origin/" + normalizedBranch;
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "fetch", "origin", "+" + remoteRef + ":" + trackingRef),
                 privateKey,
                 DEFAULT_TIMEOUT);
     }

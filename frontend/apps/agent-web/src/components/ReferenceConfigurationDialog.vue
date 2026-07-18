@@ -6,8 +6,8 @@ import {
   type ReferenceRepositoryStatus,
   type ReferenceRepositoryTreeNode
 } from "@test-agent/backend-api";
-import { Button, Input, Spinner, Textarea } from "@test-agent/ui-kit";
-import { ChevronDown, ChevronRight, File, Folder, GitBranch, LibraryBig, RefreshCw, X } from "lucide-vue-next";
+import { Button, copyTextToClipboard, Input, Spinner, Textarea } from "@test-agent/ui-kit";
+import { Check, ChevronDown, ChevronRight, Copy, File, Folder, GitBranch, LibraryBig, RefreshCw, X } from "lucide-vue-next";
 import {
   ReferenceConfigValidationError,
   inspectReferenceConfig,
@@ -19,6 +19,7 @@ import {
 
 const OPENCODE_CONFIG_PATH = ".opencode/opencode.jsonc";
 const POLL_INTERVAL_MS = 2_000;
+const PENDING_REFRESH_CONFIRMATION_WINDOW_MS = 30_000;
 const ACTIVE_STATUSES = new Set(["INITIALIZING", "SYNCHRONIZING", "VERIFYING"]);
 
 const props = defineProps<{
@@ -32,6 +33,13 @@ const api = inject<BackendApiClient>("api")!;
 
 type Notice = { message: string; traceId?: string };
 type VisibleTreeNode = ReferenceRepositoryTreeNode & { depth: number; parentPath: string };
+type PendingWorkspaceRefresh = {
+  targetBranch: string;
+  minGeneration: number;
+  requestToken: number;
+  confirmationDeadlineMs: number | null;
+  paused: boolean;
+};
 
 const repositories = ref<ReferenceRepositoryStatus[]>([]);
 const listLoading = ref(false);
@@ -54,15 +62,23 @@ const configNotice = ref<(Notice & { kind: "error" | "success" }) | null>(null);
 const dialogElement = ref<HTMLElement | null>(null);
 
 const branchPopoverRepositoryId = ref<string | null>(null);
+const branchPopoverMode = ref<"initialize" | "switch" | null>(null);
 const branches = ref<string[]>([]);
 const selectedBranch = ref("");
 const branchesLoading = ref(false);
 const branchError = ref<Notice | null>(null);
+const branchSwitchConfirmation = ref<{ repositoryId: string; repositoryName: string; from: string; to: string } | null>(null);
+const pendingWorkspaceRefreshes = ref<Map<string, PendingWorkspaceRefresh>>(new Map());
 
 let dialogGeneration = 0;
 let selectionGeneration = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingWorkspaceRefreshPollTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingWorkspaceRefreshSequence = 0;
+let repositoryRequestSequence = 0;
+const repositoryResponseTokens = new Map<string, number>();
 let restoreFocusTo: HTMLElement | null = null;
+let workspaceRefreshContextKey = "";
 
 /** v-if 创建弹窗内容后直接聚焦关闭按钮，避免依赖父组件更新时序。 */
 const vInitialFocus = {
@@ -129,10 +145,135 @@ function isFileMissing(error: unknown) {
   return error instanceof BackendApiError && (error.code === "FILE_NOT_FOUND" || error.code === "NOT_FOUND");
 }
 
-function replaceRepository(next: ReferenceRepositoryStatus) {
+function beginRepositoryRequest() {
+  return ++repositoryRequestSequence;
+}
+
+/** generation 优先，同 generation 再按请求发起顺序 fencing，迟到快照不得回滚新状态。 */
+function replaceRepository(next: ReferenceRepositoryStatus, responseToken: number) {
   const index = repositories.value.findIndex((item) => item.repositoryId === next.repositoryId);
-  if (index < 0) return;
-  repositories.value = repositories.value.map((item, itemIndex) => itemIndex === index ? next : item);
+  const lastResponseToken = repositoryResponseTokens.get(next.repositoryId) ?? 0;
+  if (index >= 0) {
+    const current = repositories.value[index]!;
+    if (current.generation > next.generation) return false;
+    if (current.generation === next.generation && lastResponseToken > responseToken) return false;
+    repositories.value = repositories.value.map((item, itemIndex) => itemIndex === index ? next : item);
+  } else {
+    repositories.value = [...repositories.value, next];
+  }
+  repositoryResponseTokens.set(next.repositoryId, Math.max(lastResponseToken, responseToken));
+  return true;
+}
+
+function replaceRepositoryList(result: ReferenceRepositoryStatus[], responseToken: number) {
+  const resultIds = new Set(result.map((repository) => repository.repositoryId));
+  const accepted: ReferenceRepositoryStatus[] = [];
+  for (const repository of result) {
+    if (replaceRepository(repository, responseToken)) accepted.push(repository);
+  }
+  repositories.value = repositories.value.filter((repository) =>
+    resultIds.has(repository.repositoryId)
+    || (repositoryResponseTokens.get(repository.repositoryId) ?? 0) > responseToken);
+  return accepted;
+}
+
+function markWorkspaceRefreshPending(repositoryId: string, targetBranch: string, minGeneration: number) {
+  const requestToken = ++pendingWorkspaceRefreshSequence;
+  const next = new Map(pendingWorkspaceRefreshes.value);
+  next.set(repositoryId, {
+    targetBranch,
+    minGeneration,
+    requestToken,
+    confirmationDeadlineMs: Date.now() + PENDING_REFRESH_CONFIRMATION_WINDOW_MS,
+    paused: false
+  });
+  pendingWorkspaceRefreshes.value = next;
+  schedulePendingWorkspaceRefreshPoll(dialogGeneration);
+  return requestToken;
+}
+
+function dropPendingWorkspaceRefresh(repositoryId: string, expectedRequestToken?: number) {
+  const current = pendingWorkspaceRefreshes.value.get(repositoryId);
+  if (!current || (expectedRequestToken !== undefined && current.requestToken !== expectedRequestToken)) return;
+  const next = new Map(pendingWorkspaceRefreshes.value);
+  next.delete(repositoryId);
+  pendingWorkspaceRefreshes.value = next;
+  if (next.size === 0) clearPendingWorkspaceRefreshPoll();
+}
+
+/** 先确认目标分支/代次真实存在；明确失败暂停轮询，READY 才消费刷新。 */
+function observeWorkspaceRefresh(repository: ReferenceRepositoryStatus) {
+  const pending = pendingWorkspaceRefreshes.value.get(repository.repositoryId);
+  if (!pending) return false;
+  const targetObserved = repository.branch === pending.targetBranch
+    && repository.generation >= pending.minGeneration;
+  if (targetObserved && repository.status === "READY") {
+    dropPendingWorkspaceRefresh(repository.repositoryId, pending.requestToken);
+    return true;
+  }
+  if (targetObserved) {
+    const next = new Map(pendingWorkspaceRefreshes.value);
+    next.set(repository.repositoryId, {
+      ...pending,
+      confirmationDeadlineMs: null,
+      paused: repository.status === "FAILED"
+    });
+    pendingWorkspaceRefreshes.value = next;
+  } else if (pending.confirmationDeadlineMs !== null && Date.now() >= pending.confirmationDeadlineMs) {
+    dropPendingWorkspaceRefresh(repository.repositoryId, pending.requestToken);
+  }
+  return false;
+}
+
+function pruneExpiredPendingWorkspaceRefreshes() {
+  for (const [repositoryId, pending] of pendingWorkspaceRefreshes.value) {
+    if (pending.confirmationDeadlineMs !== null && Date.now() >= pending.confirmationDeadlineMs) {
+      dropPendingWorkspaceRefresh(repositoryId, pending.requestToken);
+    }
+  }
+}
+
+function hasPollablePendingWorkspaceRefresh() {
+  pruneExpiredPendingWorkspaceRefreshes();
+  return Array.from(pendingWorkspaceRefreshes.value.values()).some((pending) => !pending.paused);
+}
+
+function consumeReadyWorkspaceRefreshes(result: ReferenceRepositoryStatus[]) {
+  let shouldRefresh = false;
+  for (const repository of result) {
+    if (observeWorkspaceRefresh(repository)) shouldRefresh = true;
+  }
+  if (shouldRefresh) emit("saved");
+}
+
+function clearPendingWorkspaceRefreshPoll() {
+  if (pendingWorkspaceRefreshPollTimer !== null) {
+    clearTimeout(pendingWorkspaceRefreshPollTimer);
+    pendingWorkspaceRefreshPollTimer = null;
+  }
+}
+
+/** 请求结果可能因弹窗关闭被丢弃；重开后用轻量列表轮询继续等待目标分支/代次 READY。 */
+function schedulePendingWorkspaceRefreshPoll(dialogToken: number) {
+  clearPendingWorkspaceRefreshPoll();
+  if (!props.open || !hasPollablePendingWorkspaceRefresh()) return;
+  pendingWorkspaceRefreshPollTimer = setTimeout(async () => {
+    pendingWorkspaceRefreshPollTimer = null;
+    if (!contextIsCurrent(dialogToken)) return;
+    try {
+      const responseToken = beginRepositoryRequest();
+      const result = await api.listReferenceRepositories(props.appId);
+      if (!contextIsCurrent(dialogToken)) return;
+      const accepted = replaceRepositoryList(result, responseToken);
+      consumeReadyWorkspaceRefreshes(accepted);
+    } catch {
+      // 后台刷新失败不覆盖页面主错误；未确认请求只在有限窗口内继续核对。
+      pruneExpiredPendingWorkspaceRefreshes();
+    }
+    if (contextIsCurrent(dialogToken) && hasPollablePendingWorkspaceRefresh()) {
+      schedulePendingWorkspaceRefreshPoll(dialogToken);
+    }
+  }, POLL_INTERVAL_MS);
 }
 
 function clearPoll() {
@@ -158,6 +299,7 @@ function resetSelectionState() {
   configMode.value = null;
   baseline.value = null;
   configNotice.value = null;
+  branchSwitchConfirmation.value = null;
   closeBranchPopover();
 }
 
@@ -172,13 +314,19 @@ async function loadRepositories(dialogToken: number) {
   listLoading.value = true;
   listError.value = null;
   try {
+    const responseToken = beginRepositoryRequest();
     const result = await api.listReferenceRepositories(props.appId);
     if (!contextIsCurrent(dialogToken)) return;
-    repositories.value = result;
+    const accepted = replaceRepositoryList(result, responseToken);
+    consumeReadyWorkspaceRefreshes(accepted);
   } catch (error) {
     if (contextIsCurrent(dialogToken)) listError.value = notice(error, "加载引用资产库失败");
   } finally {
-    if (contextIsCurrent(dialogToken)) listLoading.value = false;
+    if (contextIsCurrent(dialogToken)) {
+      listLoading.value = false;
+      // 关闭后重开时首轮列表即使失败，也要恢复尚未确认切换结果的有限补偿轮询。
+      if (hasPollablePendingWorkspaceRefresh()) schedulePendingWorkspaceRefreshPoll(dialogToken);
+    }
   }
 }
 
@@ -193,11 +341,19 @@ function scheduleStatusPoll(repositoryId: string, dialogToken: number, selection
     pollTimer = null;
     if (!contextIsCurrent(dialogToken, selectionToken, repositoryId)) return;
     try {
+      const responseToken = beginRepositoryRequest();
       const next = await api.getReferenceRepositoryStatus(props.appId, repositoryId);
       if (!contextIsCurrent(dialogToken, selectionToken, repositoryId)) return;
       actionError.value = null;
-      replaceRepository(next);
+      if (!replaceRepository(next, responseToken)) {
+        if (selectedRepository.value && ACTIVE_STATUSES.has(selectedRepository.value.status)) {
+          scheduleStatusPoll(repositoryId, dialogToken, selectionToken);
+        }
+        return;
+      }
+      const shouldRefreshWorkspace = observeWorkspaceRefresh(next);
       if (next.status === "READY") {
+        if (shouldRefreshWorkspace) emit("saved");
         await loadTreeLevel("", dialogToken, selectionToken, repositoryId);
         return;
       }
@@ -213,11 +369,17 @@ function scheduleStatusPoll(repositoryId: string, dialogToken: number, selection
 async function applyOperationStatus(
   next: ReferenceRepositoryStatus,
   dialogToken: number,
-  selectionToken: number
+  selectionToken: number,
+  responseToken: number
 ) {
   if (!contextIsCurrent(dialogToken, selectionToken, next.repositoryId)) return;
-  replaceRepository(next);
+  if (!replaceRepository(next, responseToken)) {
+    scheduleStatusPoll(next.repositoryId, dialogToken, selectionToken);
+    return;
+  }
+  const shouldRefreshWorkspace = observeWorkspaceRefresh(next);
   if (next.status === "READY") {
+    if (shouldRefreshWorkspace) emit("saved");
     await loadTreeLevel("", dialogToken, selectionToken, next.repositoryId);
   } else if (ACTIVE_STATUSES.has(next.status)) {
     scheduleStatusPoll(next.repositoryId, dialogToken, selectionToken);
@@ -225,16 +387,34 @@ async function applyOperationStatus(
 }
 
 async function selectRepository(repository: ReferenceRepositoryStatus, synchronize = true) {
+  const repairsFailedSwitch = repository.operation === "SWITCH_BRANCH"
+    && repository.status === "FAILED"
+    && Boolean(repository.branch);
   resetSelectionState();
   selectedRepositoryId.value = repository.repositoryId;
+  let pendingRefreshRequestToken: number | undefined;
+  if (repairsFailedSwitch) {
+    pendingRefreshRequestToken = markWorkspaceRefreshPending(
+      repository.repositoryId,
+      repository.branch!,
+      repository.generation + 1);
+  }
   const dialogToken = dialogGeneration;
   const selectionToken = selectionGeneration;
   if (!synchronize || !repository.initialized) return;
+  if (ACTIVE_STATUSES.has(repository.status)) {
+    scheduleStatusPoll(repository.repositoryId, dialogToken, selectionToken);
+    return;
+  }
   selectionBusy.value = true;
   try {
+    const responseToken = beginRepositoryRequest();
     const next = await api.synchronizeReferenceRepository(props.appId, repository.repositoryId);
-    await applyOperationStatus(next, dialogToken, selectionToken);
+    await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
   } catch (error) {
+    if (repairsFailedSwitch && error instanceof BackendApiError && !error.retryable) {
+      dropPendingWorkspaceRefresh(repository.repositoryId, pendingRefreshRequestToken);
+    }
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) {
       actionError.value = notice(error, "同步引用资产库失败");
     }
@@ -248,6 +428,7 @@ async function openBranchPopover(repository: ReferenceRepositoryStatus) {
   const dialogToken = dialogGeneration;
   const selectionToken = selectionGeneration;
   branchPopoverRepositoryId.value = repository.repositoryId;
+  branchPopoverMode.value = "initialize";
   branches.value = [];
   selectedBranch.value = "";
   branchesLoading.value = true;
@@ -266,12 +447,140 @@ async function openBranchPopover(repository: ReferenceRepositoryStatus) {
   }
 }
 
+async function openSwitchBranchPopover(repository: ReferenceRepositoryStatus) {
+  if (selectedRepositoryId.value !== repository.repositoryId) {
+    await selectRepository(repository, false);
+  }
+  const dialogToken = dialogGeneration;
+  const selectionToken = selectionGeneration;
+  branchPopoverRepositoryId.value = repository.repositoryId;
+  branchPopoverMode.value = "switch";
+  branches.value = [];
+  selectedBranch.value = "";
+  branchesLoading.value = true;
+  branchError.value = null;
+  try {
+    const result = await api.listRepositoryBranches(repository.repositoryId);
+    if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) return;
+    branches.value = result.filter((branch) => branch !== repository.branch);
+    selectedBranch.value = branches.value[0] ?? "";
+  } catch (error) {
+    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) {
+      branchError.value = notice(error, "加载分支失败");
+    }
+  } finally {
+    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) branchesLoading.value = false;
+  }
+}
+
+function continueSwitchBranch(repository: ReferenceRepositoryStatus) {
+  if (!selectedBranch.value || !repository.branch || selectedBranch.value === repository.branch) return;
+  branchSwitchConfirmation.value = {
+    repositoryId: repository.repositoryId,
+    repositoryName: repository.name,
+    from: repository.branch,
+    to: selectedBranch.value
+  };
+}
+
+async function confirmSwitchBranch() {
+  const confirmation = branchSwitchConfirmation.value;
+  if (!confirmation || confirmation.repositoryId !== selectedRepositoryId.value) return;
+  const minGeneration = (selectedRepository.value?.generation ?? 0) + 1;
+  const dialogToken = dialogGeneration;
+  // 新分支操作提升选择代次，隔离旧分支尚未返回的目录、配置和状态响应。
+  const selectionToken = ++selectionGeneration;
+  clearPoll();
+  treeLoadingPaths.value = new Set();
+  configLoading.value = false;
+  const pendingRefreshRequestToken = markWorkspaceRefreshPending(
+    confirmation.repositoryId,
+    confirmation.to,
+    minGeneration);
+  selectionBusy.value = true;
+  actionError.value = null;
+  try {
+    const responseToken = beginRepositoryRequest();
+    const next = await api.switchReferenceRepositoryBranch(props.appId, confirmation.repositoryId, confirmation.to);
+    if (!contextIsCurrent(dialogToken, selectionToken, confirmation.repositoryId)) return;
+    branchSwitchConfirmation.value = null;
+    closeBranchPopover();
+    treeByParent.value = {};
+    expandedPaths.value = new Set();
+    selectedFolderPath.value = null;
+    configTarget.value = null;
+    configMode.value = null;
+    baseline.value = null;
+    await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
+  } catch (error) {
+    if (error instanceof BackendApiError && !error.retryable) {
+      dropPendingWorkspaceRefresh(confirmation.repositoryId, pendingRefreshRequestToken);
+    }
+    if (contextIsCurrent(dialogToken, selectionToken, confirmation.repositoryId)) {
+      actionError.value = notice(error, "切换引用资产库分支失败");
+      closeBranchSwitchConfirmation();
+    }
+  } finally {
+    if (contextIsCurrent(dialogToken, selectionToken, confirmation.repositoryId)) selectionBusy.value = false;
+  }
+}
+
+async function verifyPointers(repository: ReferenceRepositoryStatus) {
+  const dialogToken = dialogGeneration;
+  const selectionToken = selectionGeneration;
+  selectionBusy.value = true;
+  actionError.value = null;
+  try {
+    const responseToken = beginRepositoryRequest();
+    const next = await api.verifyReferenceRepositoryPointers(props.appId, repository.repositoryId);
+    await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
+  } catch (error) {
+    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) {
+      actionError.value = notice(error, "核验服务器 Git 指针失败");
+    }
+  } finally {
+    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) selectionBusy.value = false;
+  }
+}
+
 function closeBranchPopover() {
   branchPopoverRepositoryId.value = null;
+  branchPopoverMode.value = null;
   branches.value = [];
   selectedBranch.value = "";
   branchesLoading.value = false;
   branchError.value = null;
+}
+
+function shortCommit(commitHash?: string | null) {
+  return commitHash ? commitHash.slice(0, 12) : "—";
+}
+
+function formattedTime(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function serverOnline(server: ReferenceRepositoryStatus["servers"][number]) {
+  return server.online === true ? true : server.online === false ? false : null;
+}
+
+function serverMatchesTarget(server: ReferenceRepositoryStatus["servers"][number]) {
+  return server.matchesTarget === true ? true : server.matchesTarget === false ? false : null;
+}
+
+function copyCommit(commitHash?: string | null) {
+  if (commitHash) void copyTextToClipboard(commitHash);
+}
+
+function closeBranchSwitchConfirmation() {
+  branchSwitchConfirmation.value = null;
+  void nextTick(() => {
+    dialogElement.value
+      ?.querySelector<HTMLElement>('button[data-reference-switch-continue="true"]')
+      ?.focus();
+  });
 }
 
 async function confirmInitialize(repository: ReferenceRepositoryStatus) {
@@ -281,10 +590,11 @@ async function confirmInitialize(repository: ReferenceRepositoryStatus) {
   selectionBusy.value = true;
   actionError.value = null;
   try {
+    const responseToken = beginRepositoryRequest();
     const next = await api.initializeReferenceRepository(props.appId, repository.repositoryId, selectedBranch.value);
     if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) return;
     closeBranchPopover();
-    await applyOperationStatus(next, dialogToken, selectionToken);
+    await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
   } catch (error) {
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) {
       branchError.value = notice(error, "初始化引用资产库失败");
@@ -431,7 +741,10 @@ async function submitConfig() {
 function focusableElements() {
   const dialog = dialogElement.value;
   if (!dialog) return [];
-  return Array.from(dialog.querySelectorAll<HTMLElement>(
+  const scope = branchSwitchConfirmation.value
+    ? dialog.querySelector<HTMLElement>(".reference-confirmation") ?? dialog
+    : dialog;
+  return Array.from(scope.querySelectorAll<HTMLElement>(
     'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
   )).filter((element) => !element.hasAttribute("hidden"));
 }
@@ -440,6 +753,11 @@ function handleWindowKeydown(event: KeyboardEvent) {
   if (!props.open) return;
   if (event.key === "Escape") {
     event.preventDefault();
+    if (branchSwitchConfirmation.value) {
+      if (selectionBusy.value) return;
+      closeBranchSwitchConfirmation();
+      return;
+    }
     emit("close");
     return;
   }
@@ -465,10 +783,17 @@ function handleWindowKeydown(event: KeyboardEvent) {
 
 watch(
   () => [props.open, props.appId, props.workspaceId] as const,
-  ([open]) => {
+  ([open, appId, workspaceId]) => {
+    const nextContextKey = `${appId}\u0000${workspaceId}`;
+    if (workspaceRefreshContextKey !== nextContextKey) {
+      workspaceRefreshContextKey = nextContextKey;
+      pendingWorkspaceRefreshes.value = new Map();
+    }
+    clearPendingWorkspaceRefreshPoll();
     dialogGeneration++;
     resetSelectionState();
     repositories.value = [];
+    repositoryResponseTokens.clear();
     listError.value = null;
     selectedRepositoryId.value = null;
     if (open) {
@@ -500,6 +825,7 @@ onBeforeUnmount(() => {
   dialogGeneration++;
   selectionGeneration++;
   clearPoll();
+  clearPendingWorkspaceRefreshPoll();
   window.removeEventListener("keydown", handleWindowKeydown);
 });
 </script>
@@ -515,7 +841,11 @@ onBeforeUnmount(() => {
         aria-labelledby="reference-dialog-title"
         tabindex="-1"
       >
-        <header class="reference-dialog-header">
+        <header
+          class="reference-dialog-header"
+          :aria-hidden="branchSwitchConfirmation ? 'true' : undefined"
+          :inert="branchSwitchConfirmation ? true : undefined"
+        >
           <div>
             <h2 id="reference-dialog-title">引用配置</h2>
             <p>从应用资产库选择首层 SDD 目录，并写入当前个人工作区的 OpenCode 配置。</p>
@@ -533,7 +863,11 @@ onBeforeUnmount(() => {
           </Button>
         </header>
 
-        <div class="reference-dialog-body">
+        <div
+          class="reference-dialog-body"
+          :aria-hidden="branchSwitchConfirmation ? 'true' : undefined"
+          :inert="branchSwitchConfirmation ? true : undefined"
+        >
           <aside class="reference-repository-column" aria-label="应用资产库">
             <div class="reference-column-heading">
               <span>应用资产库</span>
@@ -588,32 +922,53 @@ onBeforeUnmount(() => {
                   >
                     初始化
                   </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="reference-inline-action"
+                    :aria-label="`切换${repository.name}分支`"
+                    :disabled="configSaving || selectionBusy || ACTIVE_STATUSES.has(repository.status)"
+                    @click="openSwitchBranchPopover(repository)"
+                  >
+                    切换分支
+                  </button>
                 </div>
                 <div
                   v-if="branchPopoverRepositoryId === repository.repositoryId"
                   class="reference-branch-popover"
                   role="dialog"
-                  :aria-label="`初始化${repository.name}`"
+                  :aria-label="branchPopoverMode === 'switch' ? `切换${repository.name}分支` : `初始化${repository.name}`"
                 >
-                  <div class="reference-branch-title"><GitBranch class="h-3.5 w-3.5" />选择初始化分支</div>
+                  <div class="reference-branch-title">
+                    <GitBranch class="h-3.5 w-3.5" />
+                    {{ branchPopoverMode === "switch" ? "选择目标分支" : "选择初始化分支" }}
+                  </div>
                   <div v-if="branchesLoading" class="reference-compact-state">正在加载分支…</div>
                   <div v-else-if="branchError" class="reference-compact-state is-error">
                     {{ branchError.message }}
                     <code v-if="branchError.traceId">traceId: {{ branchError.traceId }}</code>
                   </div>
                   <template v-else>
-                    <select v-model="selectedBranch" aria-label="初始化分支" class="reference-select">
+                    <select
+                      v-model="selectedBranch"
+                      :aria-label="branchPopoverMode === 'switch' ? '目标分支' : '初始化分支'"
+                      class="reference-select"
+                    >
                       <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
                     </select>
+                    <div v-if="branchPopoverMode === 'switch' && branches.length === 0" class="reference-compact-state">
+                      没有可切换的其它分支。
+                    </div>
                     <div class="reference-popover-actions">
                       <Button size="sm" variant="ghost" @click="closeBranchPopover">取消</Button>
                       <Button
                         size="sm"
                         :disabled="!selectedBranch || selectionBusy"
-                        :aria-label="`确认初始化${repository.name}`"
-                        @click="confirmInitialize(repository)"
+                        :aria-label="branchPopoverMode === 'switch' ? `继续切换${repository.name}分支` : `确认初始化${repository.name}`"
+                        :data-reference-switch-continue="branchPopoverMode === 'switch' ? 'true' : undefined"
+                        @click="branchPopoverMode === 'switch' ? continueSwitchBranch(repository) : confirmInitialize(repository)"
                       >
-                        {{ selectionBusy ? "初始化中…" : "确认初始化" }}
+                        {{ branchPopoverMode === "switch" ? "继续" : selectionBusy ? "初始化中…" : "确认初始化" }}
                       </Button>
                     </div>
                   </template>
@@ -643,8 +998,117 @@ onBeforeUnmount(() => {
                   <strong>{{ selectedRepository.name }}</strong>
                   <span>{{ selectedRepository.branch || "未选择分支" }}</span>
                 </div>
-                <RefreshCw v-if="selectionBusy || ACTIVE_STATUSES.has(selectedRepository.status)" class="h-4 w-4 animate-spin" />
+                <div class="reference-selected-actions">
+                  <Button
+                    v-if="selectedRepository.initialized"
+                    size="sm"
+                    variant="ghost"
+                    :aria-label="`刷新${selectedRepository.name} Git 指针`"
+                    :disabled="selectionBusy || configSaving || ACTIVE_STATUSES.has(selectedRepository.status)"
+                    @click="verifyPointers(selectedRepository)"
+                  >
+                    <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': selectedRepository.operation === 'VERIFY_POINTERS' && ACTIVE_STATUSES.has(selectedRepository.status) }" />
+                    刷新 Git 指针
+                  </Button>
+                  <RefreshCw v-if="selectionBusy || ACTIVE_STATUSES.has(selectedRepository.status)" class="h-4 w-4 animate-spin" />
+                </div>
               </div>
+              <section v-if="selectedRepository.initialized" class="reference-pointer-panel" aria-label="服务器 Git 指针">
+                <div class="reference-pointer-target">
+                  <span>目标 Git 指针</span>
+                  <strong>{{ selectedRepository.branch || "—" }}</strong>
+                  <code
+                    :title="selectedRepository.targetCommitHash || undefined"
+                    :data-full-commit="selectedRepository.targetCommitHash || undefined"
+                  >{{ shortCommit(selectedRepository.targetCommitHash) }}</code>
+                  <button
+                    v-if="selectedRepository.targetCommitHash"
+                    type="button"
+                    class="reference-copy-action"
+                    aria-label="复制目标 Git HEAD"
+                    @click="copyCommit(selectedRepository.targetCommitHash)"
+                  >
+                    <Copy class="h-3 w-3" />
+                  </button>
+                </div>
+                <div v-if="selectedRepository.servers.length === 0" class="reference-compact-state">暂无服务器副本。</div>
+                <div v-else class="reference-pointer-table-wrap">
+                  <table class="reference-pointer-table">
+                    <thead>
+                      <tr>
+                        <th>服务器</th>
+                        <th>状态</th>
+                        <th>实际分支</th>
+                        <th>实际 HEAD</th>
+                        <th>目标</th>
+                        <th>最近同步 / 核验</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="server in selectedRepository.servers" :key="server.linuxServerId">
+                        <td>
+                          <strong>{{ server.linuxServerId }}</strong>
+                          <small :class="serverOnline(server) === true ? 'is-online' : 'is-offline'">
+                            {{ serverOnline(server) === true
+                              ? "在线"
+                              : serverOnline(server) === false ? "离线 · 非实时" : "在线状态未知 · 非实时" }}
+                          </small>
+                        </td>
+                        <td><span class="reference-pointer-status">{{ server.status }}</span></td>
+                        <td><code>{{ server.currentBranch || "—" }}</code></td>
+                        <td>
+                          <span class="reference-commit-cell">
+                            <code
+                              :title="server.currentCommitHash || undefined"
+                              :data-full-commit="server.currentCommitHash || undefined"
+                            >{{ shortCommit(server.currentCommitHash) }}</code>
+                            <button
+                              v-if="server.currentCommitHash"
+                              type="button"
+                              class="reference-copy-action"
+                              :aria-label="`复制 ${server.linuxServerId} Git HEAD`"
+                              @click="copyCommit(server.currentCommitHash)"
+                            >
+                              <Copy class="h-3 w-3" />
+                            </button>
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            class="reference-pointer-match"
+                            :class="{
+                              'is-match': serverMatchesTarget(server) === true,
+                              'is-mismatch': serverMatchesTarget(server) === false
+                            }"
+                          >
+                            <Check v-if="serverMatchesTarget(server) === true" class="h-3 w-3" />
+                            {{ serverMatchesTarget(server) === true
+                              ? "一致"
+                              : serverMatchesTarget(server) === false ? "不一致" : "未核验" }}
+                          </span>
+                        </td>
+                        <td>
+                          <small>
+                            同步
+                            <time
+                              :datetime="server.syncedAt || undefined"
+                              :data-reference-synced-at="server.syncedAt || undefined"
+                            >{{ formattedTime(server.syncedAt) }}</time>
+                          </small>
+                          <small>
+                            核验
+                            <time
+                              :datetime="server.verifiedAt || undefined"
+                              :data-reference-verified-at="server.verifiedAt || undefined"
+                            >{{ formattedTime(server.verifiedAt) }}</time>
+                          </small>
+                          <small v-if="server.error" class="is-error">{{ server.error }}</small>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
               <div v-if="actionError" class="reference-state is-error" role="alert">
                 <span>{{ actionError.message }}</span>
                 <code v-if="actionError.traceId">traceId: {{ actionError.traceId }}</code>
@@ -781,6 +1245,42 @@ onBeforeUnmount(() => {
             </template>
           </main>
         </div>
+
+        <div v-if="branchSwitchConfirmation" class="reference-confirmation-backdrop">
+          <section
+            class="reference-confirmation"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="reference-switch-title"
+            :aria-busy="selectionBusy ? 'true' : undefined"
+          >
+            <h3 id="reference-switch-title">确认切换引用分支</h3>
+            <p>
+              {{ branchSwitchConfirmation.repositoryName }} 将从
+              <code>{{ branchSwitchConfirmation.from }}</code>
+              切换到 <code>{{ branchSwitchConfirmation.to }}</code>。
+            </p>
+            <p>此操作将更新所有服务器，现有引用路径中的内容也会随之变化。</p>
+            <div class="reference-popover-actions">
+              <Button
+                v-initial-focus
+                size="sm"
+                variant="ghost"
+                aria-label="取消切换引用分支"
+                :disabled="selectionBusy"
+                @click="closeBranchSwitchConfirmation"
+              >取消</Button>
+              <Button
+                size="sm"
+                :disabled="selectionBusy"
+                :aria-label="`确认将${branchSwitchConfirmation.repositoryName}切换到 ${branchSwitchConfirmation.to}`"
+                @click="confirmSwitchBranch"
+              >
+                {{ selectionBusy ? "切换中…" : "确认切换" }}
+              </Button>
+            </div>
+          </section>
+        </div>
       </section>
     </div>
   </Teleport>
@@ -800,6 +1300,7 @@ onBeforeUnmount(() => {
 
 .reference-dialog {
   --reference-folder-accent: #d97706;
+  position: relative;
   display: flex;
   width: min(1120px, calc(100vw - 32px));
   height: min(760px, calc(100vh - 32px));
@@ -1048,6 +1549,166 @@ onBeforeUnmount(() => {
 .reference-selected-heading strong,
 .reference-selected-heading span {
   display: block;
+}
+
+.reference-selected-actions,
+.reference-commit-cell,
+.reference-pointer-match,
+.reference-pointer-target {
+  display: flex;
+  align-items: center;
+}
+
+.reference-selected-actions {
+  gap: 6px;
+}
+
+.reference-pointer-panel {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-surface);
+}
+
+.reference-pointer-target {
+  min-height: 34px;
+  gap: 8px;
+  border-bottom: 1px solid var(--ta-border);
+  padding: 0 12px;
+  color: var(--ta-muted);
+  font-size: 10px;
+}
+
+.reference-pointer-target strong,
+.reference-pointer-target code,
+.reference-pointer-table code,
+.reference-pointer-table time {
+  color: var(--ta-text);
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+}
+
+.reference-pointer-table-wrap {
+  max-height: 148px;
+  overflow: auto;
+}
+
+.reference-pointer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  text-align: left;
+}
+
+.reference-pointer-table th,
+.reference-pointer-table td {
+  border-bottom: 1px solid var(--ta-border);
+  padding: 5px 8px;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.reference-pointer-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ta-panel-2);
+  color: var(--ta-muted);
+  font-weight: 600;
+}
+
+.reference-pointer-table td:first-child strong,
+.reference-pointer-table td:first-child small,
+.reference-pointer-table td:last-child small {
+  display: block;
+}
+
+.reference-pointer-table small {
+  margin-top: 2px;
+  color: var(--ta-muted);
+  font-size: 9px;
+}
+
+.reference-pointer-table small.is-online,
+.reference-pointer-match.is-match {
+  color: var(--ta-ok);
+}
+
+.reference-pointer-table small.is-offline {
+  color: var(--ta-muted);
+}
+
+.reference-pointer-table small.is-error,
+.reference-pointer-match.is-mismatch {
+  color: var(--ta-error);
+}
+
+.reference-pointer-status {
+  color: var(--ta-muted);
+  font-family: "Geist Mono", monospace;
+}
+
+.reference-commit-cell,
+.reference-pointer-match {
+  gap: 3px;
+}
+
+.reference-copy-action {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  padding: 0;
+  background: transparent;
+  color: var(--ta-muted);
+  cursor: pointer;
+}
+
+.reference-copy-action:hover,
+.reference-copy-action:focus-visible {
+  background: var(--ta-hover);
+  color: var(--ta-text);
+}
+
+.reference-confirmation-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.reference-confirmation {
+  width: min(430px, 100%);
+  border: 1px solid var(--ta-border-strong);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--ta-panel);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24);
+}
+
+.reference-confirmation h3,
+.reference-confirmation p {
+  margin: 0;
+}
+
+.reference-confirmation h3 {
+  font-size: 14px;
+}
+
+.reference-confirmation p {
+  margin-top: 10px;
+  color: var(--ta-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.reference-confirmation code {
+  color: var(--ta-text);
+  font-family: "Geist Mono", monospace;
 }
 
 .reference-selected-heading strong {

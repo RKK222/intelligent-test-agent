@@ -13,9 +13,20 @@ describe("backend-api", () => {
       targetCommitHash: "abc123",
       generation: 2,
       status: "READY",
+      operation: "VERIFY_POINTERS",
       targetServerCount: 1,
       readyServerCount: 1,
-      servers: [],
+      servers: [{
+        linuxServerId: "linux-a",
+        status: "READY",
+        currentBranch: "main",
+        currentCommitHash: "abc123",
+        online: true,
+        matchesTarget: true,
+        verifiedAt: "2026-07-18T10:00:00Z",
+        syncedAt: "2026-07-18T09:59:00Z",
+        error: null
+      }],
       traceId: "trace_backend",
       message: null
     };
@@ -33,7 +44,21 @@ describe("backend-api", () => {
     await client.listReferenceRepositories("app/demo");
     await client.initializeReferenceRepository("app/demo", "repo/assets", "feature/docs");
     await client.synchronizeReferenceRepository("app/demo", "repo/assets");
-    await client.getReferenceRepositoryStatus("app/demo", "repo/assets");
+    await client.switchReferenceRepositoryBranch("app/demo", "repo/assets", "release/2026");
+    await client.verifyReferenceRepositoryPointers("app/demo", "repo/assets");
+    await expect(client.getReferenceRepositoryStatus("app/demo", "repo/assets")).resolves.toEqual(
+      expect.objectContaining({
+        operation: "VERIFY_POINTERS",
+        servers: [expect.objectContaining({
+          online: true,
+          matchesTarget: true,
+          currentBranch: "main",
+          currentCommitHash: "abc123",
+          verifiedAt: "2026-07-18T10:00:00Z",
+          syncedAt: "2026-07-18T09:59:00Z"
+        })]
+      })
+    );
     await expect(client.listReferenceRepositoryTree("app/demo", "repo/assets", "docs/api")).resolves.toEqual([
       expect.objectContaining({ path: "docs/api/openapi.yaml", directory: false })
     ]);
@@ -47,6 +72,16 @@ describe("backend-api", () => {
       ],
       [
         "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/synchronize",
+        "POST",
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/switch-branch",
+        "POST",
+        JSON.stringify({ branch: "release/2026" })
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/verify",
         "POST",
         undefined
       ],

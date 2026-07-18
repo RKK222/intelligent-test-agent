@@ -24,6 +24,7 @@ import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplica;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryOperationType;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryState;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
@@ -161,6 +162,46 @@ class ReferenceRepositoryRealGitSafetyTest {
                 anyString(),
                 eq("main"),
                 eq(targetCommit),
+                eq(NOW),
+                eq(NOW));
+    }
+
+    @Test
+    void singleBranchCloneCanSwitchToUnrelatedRemoteBranch() throws Exception {
+        git(writer, "checkout", "--orphan", "release");
+        git(writer, "rm", "-rf", ".");
+        Files.writeString(writer.resolve("release.md"), "release assets\n");
+        git(writer, "add", "--all");
+        git(writer, "commit", "-m", "create unrelated release assets");
+        git(writer, "push", "-u", "origin", "release");
+        String releaseCommit = git(writer, "rev-parse", "HEAD").stdoutText().trim();
+        ReferenceRepositoryState switching = new ReferenceRepositoryState(
+                REPOSITORY_ID,
+                "release",
+                releaseCommit,
+                1L,
+                ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SWITCH_BRANCH,
+                ADMIN,
+                "trace_real_git",
+                null,
+                NOW,
+                NOW,
+                NOW);
+        when(referenceRepository.findState(REPOSITORY_ID)).thenReturn(Optional.of(switching));
+
+        service.handle(syncEvent());
+
+        assertThat(git(local, "rev-parse", "--abbrev-ref", "HEAD").stdoutText().trim()).isEqualTo("release");
+        assertThat(git(local, "rev-parse", "HEAD").stdoutText().trim()).isEqualTo(releaseCommit);
+        assertThat(Files.readString(local.resolve("release.md"))).isEqualTo("release assets\n");
+        verify(referenceRepository).markReady(
+                eq(REPOSITORY_ID),
+                eq(1L),
+                eq(SERVER_ID),
+                anyString(),
+                eq("release"),
+                eq(releaseCommit),
                 eq(NOW),
                 eq(NOW));
     }

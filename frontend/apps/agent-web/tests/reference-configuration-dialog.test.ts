@@ -30,6 +30,13 @@ function api(overrides: Record<string, unknown> = {}) {
     listRepositoryBranches: vi.fn().mockResolvedValue(["main", "release"]),
     initializeReferenceRepository: vi.fn().mockResolvedValue(status({ status: "INITIALIZING", initialized: true, readyServerCount: 0 })),
     synchronizeReferenceRepository: vi.fn().mockResolvedValue(status({ status: "SYNCHRONIZING", readyServerCount: 0 })),
+    switchReferenceRepositoryBranch: vi.fn().mockResolvedValue(status({
+      branch: "release",
+      targetCommitHash: "def456",
+      status: "SYNCHRONIZING",
+      readyServerCount: 0
+    })),
+    verifyReferenceRepositoryPointers: vi.fn().mockResolvedValue(status({ status: "VERIFYING", readyServerCount: 0 })),
     getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status()),
     listReferenceRepositoryTree: vi.fn().mockResolvedValue([]),
     readFile: vi.fn().mockRejectedValue(new BackendApiError(500, {
@@ -153,6 +160,737 @@ describe("ReferenceConfigurationDialog", () => {
 
     await vi.advanceTimersByTimeAsync(4000);
     expect(mockApi.getReferenceRepositoryStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("switches an initialized repository only after explicit old/new branch confirmation", async () => {
+    const mockApi = api({ synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()) });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    expect(mockApi.listRepositoryBranches).toHaveBeenCalledWith("repo-assets");
+    const branchSelect = wrapper.get('select[aria-label="目标分支"]');
+    expect(branchSelect.findAll("option").map((option) => option.attributes("value"))).toEqual(["release"]);
+    await branchSelect.setValue("release");
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+
+    expect(wrapper.text()).toContain("main");
+    expect(wrapper.text()).toContain("release");
+    expect(wrapper.text()).toContain("将更新所有服务器");
+    expect(mockApi.switchReferenceRepositoryBranch).not.toHaveBeenCalled();
+
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+    expect(mockApi.switchReferenceRepositoryBranch).toHaveBeenCalledWith("app-demo", "repo-assets", "release");
+  });
+
+  it("refreshes the workspace tree when a successful switch reaches READY", async () => {
+    vi.useFakeTimers();
+    const mockApi = api({
+      switchReferenceRepositoryBranch: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        status: "SYNCHRONIZING",
+        operation: "SWITCH_BRANCH",
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        operation: "SWITCH_BRANCH"
+      }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+
+    expect(mockApi.getReferenceRepositoryStatus).toHaveBeenCalledWith("app-demo", "repo-assets");
+    expect(mockApi.listReferenceRepositoryTree).toHaveBeenCalledWith("app-demo", "repo-assets", "");
+    expect(wrapper.emitted("saved")).toEqual([[]]);
+  });
+
+  it("refreshes the workspace before a READY dialog tree request can be cancelled", async () => {
+    vi.useFakeTimers();
+    const treeRequest = deferred<Array<{ path: string; name: string; directory: boolean; size: number; highlighted: boolean; selectable: boolean }>>();
+    const mockApi = api({
+      switchReferenceRepositoryBranch: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        status: "SYNCHRONIZING",
+        operation: "SWITCH_BRANCH",
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        operation: "SWITCH_BRANCH"
+      })),
+      listReferenceRepositoryTree: vi.fn().mockReturnValue(treeRequest.promise)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+
+    expect(mockApi.listReferenceRepositoryTree).toHaveBeenCalledWith("app-demo", "repo-assets", "");
+    expect(wrapper.emitted("saved")).toEqual([[]]);
+    await wrapper.setProps({ open: false });
+    treeRequest.resolve([]);
+    await flushPromises();
+  });
+
+  it("does not let an older same-generation list response roll READY back to SYNCHRONIZING", async () => {
+    vi.useFakeTimers();
+    const staleList = deferred<ReferenceRepositoryStatus[]>();
+    const listRepositories = vi.fn()
+      .mockResolvedValueOnce([status()])
+      .mockReturnValueOnce(staleList.promise);
+    const mockApi = api({
+      listReferenceRepositories: listRepositories,
+      switchReferenceRepositoryBranch: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        status: "SYNCHRONIZING",
+        operation: "SWITCH_BRANCH",
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        operation: "SWITCH_BRANCH"
+      }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("READY");
+
+    staleList.resolve([status({
+      branch: "release",
+      targetCommitHash: "def456",
+      generation: 2,
+      status: "SYNCHRONIZING",
+      operation: "SWITCH_BRANCH",
+      readyServerCount: 0
+    })]);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("READY");
+    expect(wrapper.text()).not.toContain("SYNCHRONIZING");
+  });
+
+  it("does not consume a workspace refresh from a rejected same-generation READY response", async () => {
+    vi.useFakeTimers();
+    const staleList = deferred<ReferenceRepositoryStatus[]>();
+    const listRepositories = vi.fn()
+      .mockResolvedValueOnce([status()])
+      .mockReturnValueOnce(staleList.promise);
+    const mockApi = api({
+      listReferenceRepositories: listRepositories,
+      switchReferenceRepositoryBranch: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        status: "SYNCHRONIZING",
+        operation: "SWITCH_BRANCH",
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        status: "FAILED",
+        operation: "SWITCH_BRANCH",
+        readyServerCount: 0,
+        message: "新快照已失败"
+      }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("新快照已失败");
+
+    staleList.resolve([status({
+      branch: "release",
+      targetCommitHash: "def456",
+      generation: 2,
+      operation: "SWITCH_BRANCH"
+    })]);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("新快照已失败");
+    expect(wrapper.emitted("saved")).toBeUndefined();
+  });
+
+  it("keeps focus inside the branch switch confirmation and Escape only cancels the confirmation", async () => {
+    const mockApi = api({ synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()) });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+
+    const cancel = wrapper.get('button[aria-label="取消切换引用分支"]').element as HTMLButtonElement;
+    const confirm = wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').element as HTMLButtonElement;
+    expect(document.activeElement).toBe(cancel);
+    confirm.focus();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(cancel);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushPromises();
+    expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false);
+    expect(wrapper.emitted("close")).toBeUndefined();
+    expect(document.activeElement).toBe(wrapper.get('button[aria-label="继续切换需求资产库分支"]').element);
+  });
+
+  it("keeps an accepted switch confirmation visible and non-cancellable while its request is pending", async () => {
+    const switchRequest = deferred<ReferenceRepositoryStatus>();
+    const mockApi = api({
+      switchReferenceRepositoryBranch: vi.fn().mockReturnValue(switchRequest.promise)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('button[aria-label="取消切换引用分支"]').attributes()).toHaveProperty("disabled");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushPromises();
+    expect(wrapper.find('[role="alertdialog"]').exists()).toBe(true);
+    expect(wrapper.emitted("close")).toBeUndefined();
+
+    switchRequest.resolve(status({
+      branch: "release",
+      targetCommitHash: "def456",
+      generation: 2,
+      status: "SYNCHRONIZING",
+      operation: "SWITCH_BRANCH"
+    }));
+    await flushPromises();
+  });
+
+  it("retains the target generation across close and reopen until the switched branch is READY", async () => {
+    vi.useFakeTimers();
+    const switchRequest = deferred<ReferenceRepositoryStatus>();
+    const oldReady = status({ generation: 1, branch: "release", targetCommitHash: "old-release" });
+    const newReady = status({ generation: 2, branch: "release", targetCommitHash: "def456", operation: "SWITCH_BRANCH" });
+    const listRepositories = vi.fn()
+      .mockResolvedValueOnce([status({ generation: 1, branch: "main" })])
+      .mockResolvedValueOnce([oldReady])
+      .mockResolvedValueOnce([newReady]);
+    const mockApi = api({
+      listReferenceRepositories: listRepositories,
+      switchReferenceRepositoryBranch: vi.fn().mockReturnValue(switchRequest.promise)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+    expect(wrapper.emitted("saved")).toBeUndefined();
+
+    switchRequest.resolve(newReady);
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(listRepositories).toHaveBeenCalledTimes(3);
+    expect(wrapper.emitted("saved")).toEqual([[]]);
+  });
+
+  it("resumes pending switch confirmation when the first list request after reopen fails", async () => {
+    vi.useFakeTimers();
+    const switchRequest = deferred<ReferenceRepositoryStatus>();
+    const newReady = status({
+      generation: 2,
+      branch: "release",
+      targetCommitHash: "def456",
+      operation: "SWITCH_BRANCH"
+    });
+    const listRepositories = vi.fn()
+      .mockResolvedValueOnce([status()])
+      .mockRejectedValueOnce(new BackendApiError(503, {
+        success: false,
+        code: "REFERENCE_LIST_UNAVAILABLE",
+        message: "重开后的列表暂时不可用",
+        traceId: "trace_reopen_list",
+        retryable: true
+      }))
+      .mockResolvedValueOnce([newReady]);
+    const mockApi = api({
+      listReferenceRepositories: listRepositories,
+      switchReferenceRepositoryBranch: vi.fn().mockReturnValue(switchRequest.promise)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+    expect(wrapper.text()).toContain("重开后的列表暂时不可用");
+    switchRequest.resolve(newReady);
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(listRepositories).toHaveBeenCalledTimes(3);
+    expect(wrapper.emitted("saved")).toEqual([[]]);
+  });
+
+  it("stops pending refresh polling after a definitive branch switch rejection", async () => {
+    vi.useFakeTimers();
+    const mockApi = api({
+      switchReferenceRepositoryBranch: vi.fn().mockRejectedValue(new BackendApiError(409, {
+        success: false,
+        code: "CONFLICT",
+        message: "目标分支切换冲突",
+        traceId: "trace_switch_conflict",
+        retryable: false
+      }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("目标分支切换冲突");
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flushPromises();
+    expect(mockApi.listReferenceRepositories).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted("saved")).toBeUndefined();
+  });
+
+  it("bounds status confirmation polling after an uncertain branch switch failure", async () => {
+    vi.useFakeTimers();
+    const mockApi = api({
+      switchReferenceRepositoryBranch: vi.fn().mockRejectedValue(new BackendApiError(503, {
+        success: false,
+        code: "REFERENCE_SWITCH_UNAVAILABLE",
+        message: "切换结果暂时未知",
+        traceId: "trace_switch_uncertain",
+        retryable: true
+      }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flushPromises();
+    const callsAfterConfirmationWindow = mockApi.listReferenceRepositories.mock.calls.length;
+    expect(callsAfterConfirmationWindow).toBeGreaterThan(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flushPromises();
+    expect(mockApi.listReferenceRepositories).toHaveBeenCalledTimes(callsAfterConfirmationWindow);
+  });
+
+  it("does not let an old failed request delete a newer pending switch for the same repository", async () => {
+    const oldSwitch = deferred<ReferenceRepositoryStatus>();
+    const newSwitch = deferred<ReferenceRepositoryStatus>();
+    const mockApi = api({
+      switchReferenceRepositoryBranch: vi.fn()
+        .mockReturnValueOnce(oldSwitch.promise)
+        .mockReturnValueOnce(newSwitch.promise)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+
+    oldSwitch.reject(new BackendApiError(409, {
+      success: false,
+      code: "CONFLICT",
+      message: "旧切换请求失败",
+      traceId: "trace_old_switch",
+      retryable: false
+    }));
+    await flushPromises();
+    newSwitch.resolve(status({
+      branch: "release",
+      targetCommitHash: "def456",
+      generation: 2,
+      operation: "SWITCH_BRANCH"
+    }));
+    await flushPromises();
+
+    expect(wrapper.emitted("saved")).toEqual([[]]);
+  });
+
+  it("polls an already active repository without starting another synchronize operation", async () => {
+    vi.useFakeTimers();
+    const active = status({ status: "SYNCHRONIZING", operation: "SWITCH_BRANCH", readyServerCount: 0 });
+    const mockApi = api({
+      listReferenceRepositories: vi.fn().mockResolvedValue([active]),
+      getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status())
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    expect(mockApi.synchronizeReferenceRepository).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(mockApi.getReferenceRepositoryStatus).toHaveBeenCalledWith("app-demo", "repo-assets");
+  });
+
+  it("does not let a stale tree response repopulate content after branch switching starts", async () => {
+    const childTree = deferred<Array<{ path: string; name: string; directory: boolean; size: number; highlighted: boolean; selectable: boolean }>>();
+    const listTree = vi.fn()
+      .mockResolvedValueOnce([{ path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }])
+      .mockReturnValueOnce(childTree.promise)
+      .mockResolvedValueOnce([{ path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }])
+      .mockResolvedValueOnce([{ path: "docs/fresh.md", name: "fresh.md", directory: false, size: 1, highlighted: false, selectable: false }]);
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
+      switchReferenceRepositoryBranch: vi.fn().mockResolvedValue(status({
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 2,
+        operation: "SWITCH_BRANCH"
+      })),
+      listReferenceRepositoryTree: listTree
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="展开 docs"]').trigger("click");
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+
+    childTree.resolve([{ path: "docs/stale.md", name: "stale.md", directory: false, size: 1, highlighted: false, selectable: false }]);
+    await flushPromises();
+    await wrapper.get('button[aria-label="展开 docs"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("stale.md");
+    expect(wrapper.text()).toContain("fresh.md");
+    expect(listTree).toHaveBeenCalledTimes(4);
+  });
+
+  it("ignores a lower-generation status response and continues polling the current operation", async () => {
+    vi.useFakeTimers();
+    const stale = status({ generation: 1, status: "FAILED", message: "旧代次失败" });
+    const current = status({ generation: 2, status: "SYNCHRONIZING", operation: "SWITCH_BRANCH", readyServerCount: 0 });
+    const getStatus = vi.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(status({ generation: 2 }));
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(current),
+      getReferenceRepositoryStatus: getStatus
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("SYNCHRONIZING");
+    expect(wrapper.text()).not.toContain("旧代次失败");
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(getStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("polls current status when an operation POST returns a lower generation", async () => {
+    vi.useFakeTimers();
+    const getStatus = vi.fn().mockResolvedValue(status({ generation: 3 }));
+    const mockApi = api({
+      listReferenceRepositories: vi.fn().mockResolvedValue([status({ generation: 2 })]),
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status({
+        generation: 1,
+        status: "SYNCHRONIZING",
+        operation: "SYNCHRONIZE",
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: getStatus
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(getStatus).toHaveBeenCalledWith("app-demo", "repo-assets");
+  });
+
+  it("shows target and actual server pointers and actively refreshes them without synchronizing", async () => {
+    const verified = status({
+      operation: "VERIFY_POINTERS",
+      targetCommitHash: "0123456789abcdef0123456789abcdef01234567",
+      servers: [
+        {
+          linuxServerId: "linux-a",
+          status: "READY",
+          currentBranch: "main",
+          currentCommitHash: "0123456789abcdef0123456789abcdef01234567",
+          online: true,
+          matchesTarget: true,
+          verifiedAt: "2026-07-18T10:00:00Z",
+          syncedAt: "2026-07-18T09:59:00Z"
+        },
+        {
+          linuxServerId: "linux-b",
+          status: "DEFERRED",
+          currentBranch: "release",
+          currentCommitHash: "fedcba9876543210fedcba9876543210fedcba98",
+          online: false,
+          matchesTarget: false,
+          verifiedAt: "2026-07-17T10:00:00Z",
+          syncedAt: null
+        }
+      ]
+    });
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(verified),
+      verifyReferenceRepositoryPointers: vi.fn().mockResolvedValue(status({ status: "VERIFYING" }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("目标 Git 指针");
+    expect(wrapper.text()).toContain("0123456789ab");
+    expect(wrapper.text()).toContain("linux-a");
+    expect(wrapper.text()).toContain("在线");
+    expect(wrapper.text()).toContain("一致");
+    expect(wrapper.text()).toContain("linux-b");
+    expect(wrapper.text()).toContain("离线 · 非实时");
+    expect(wrapper.text()).toContain("不一致");
+    expect(wrapper.get('[data-reference-synced-at="2026-07-18T09:59:00Z"]').attributes("datetime"))
+      .toBe("2026-07-18T09:59:00Z");
+    expect(wrapper.get('[data-reference-verified-at="2026-07-18T10:00:00Z"]').attributes("datetime"))
+      .toBe("2026-07-18T10:00:00Z");
+    expect(wrapper.get('[data-full-commit="0123456789abcdef0123456789abcdef01234567"]').attributes("title"))
+      .toContain("0123456789abcdef0123456789abcdef01234567");
+
+    await wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]').trigger("click");
+    await flushPromises();
+    expect(mockApi.verifyReferenceRepositoryPointers).toHaveBeenCalledWith("app-demo", "repo-assets");
+    expect(mockApi.synchronizeReferenceRepository).toHaveBeenCalledTimes(1);
+  });
+
+  it("copies the complete target and server commit hashes", async () => {
+    const secureContextDescriptor = Object.getOwnPropertyDescriptor(window, "isSecureContext");
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      const fullHash = "0123456789abcdef0123456789abcdef01234567";
+      const mockApi = api({
+        synchronizeReferenceRepository: vi.fn().mockResolvedValue(status({
+          targetCommitHash: fullHash,
+          servers: [{
+            linuxServerId: "linux-a",
+            status: "READY",
+            currentBranch: "main",
+            currentCommitHash: fullHash,
+            online: true,
+            matchesTarget: true
+          }]
+        }))
+      });
+      const wrapper = render(mockApi);
+      await flushPromises();
+      await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+      await flushPromises();
+
+      await wrapper.get('button[aria-label="复制目标 Git HEAD"]').trigger("click");
+      await wrapper.get('button[aria-label="复制 linux-a Git HEAD"]').trigger("click");
+      await flushPromises();
+      expect(writeText).toHaveBeenNthCalledWith(1, fullHash);
+      expect(writeText).toHaveBeenNthCalledWith(2, fullHash);
+    } finally {
+      if (secureContextDescriptor) Object.defineProperty(window, "isSecureContext", secureContextDescriptor);
+      else Reflect.deleteProperty(window, "isSecureContext");
+      if (clipboardDescriptor) Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("refreshes the workspace view after a failed branch switch is repaired by synchronization", async () => {
+    vi.useFakeTimers();
+    const failedSwitch = status({
+      generation: 2,
+      branch: "release",
+      targetCommitHash: "def456",
+      status: "FAILED",
+      operation: "SWITCH_BRANCH",
+      readyServerCount: 0,
+      message: "一台服务器切换失败"
+    });
+    const synchronized = status({
+      generation: 3,
+      branch: "release",
+      targetCommitHash: "def456",
+      status: "READY",
+      operation: "SYNCHRONIZE"
+    });
+    const getStatus = vi.fn()
+      .mockResolvedValueOnce(failedSwitch)
+      .mockResolvedValueOnce(synchronized);
+    const mockApi = api({
+      switchReferenceRepositoryBranch: vi.fn().mockResolvedValue(status({
+        generation: 2,
+        branch: "release",
+        targetCommitHash: "def456",
+        status: "SYNCHRONIZING",
+        operation: "SWITCH_BRANCH",
+        readyServerCount: 0
+      })),
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status({
+        generation: 3,
+        branch: "release",
+        targetCommitHash: "def456",
+        status: "SYNCHRONIZING",
+        operation: "SYNCHRONIZE",
+        readyServerCount: 0
+      })),
+      getReferenceRepositoryStatus: getStatus
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="切换需求资产库分支"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="继续切换需求资产库分支"]').trigger("click");
+    await wrapper.get('button[aria-label="确认将需求资产库切换到 release"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("一台服务器切换失败");
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+
+    expect(wrapper.emitted("saved")).toEqual([[]]);
+  });
+
+  it("refreshes the workspace when a previously failed switch is repaired after a fresh selection", async () => {
+    const failedSwitch = status({
+      status: "FAILED",
+      operation: "SWITCH_BRANCH",
+      branch: "release",
+      targetCommitHash: "def456",
+      generation: 2,
+      message: "上次切换失败"
+    });
+    const mockApi = api({
+      listReferenceRepositories: vi.fn().mockResolvedValue([failedSwitch]),
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status({
+        operation: "SYNCHRONIZE",
+        branch: "release",
+        targetCommitHash: "def456",
+        generation: 3
+      }))
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.emitted("saved")).toEqual([[]]);
+  });
+
+  it("does not infer online or matching state when compatibility fields are absent", async () => {
+    const compatible = status({
+      servers: [{
+        linuxServerId: "linux-legacy",
+        status: "READY",
+        currentBranch: "main",
+        currentCommitHash: "abc123",
+        online: undefined,
+        matchesTarget: null
+      }]
+    });
+    const mockApi = api({ synchronizeReferenceRepository: vi.fn().mockResolvedValue(compatible) });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    const panel = wrapper.get('[aria-label="服务器 Git 指针"]');
+    expect(panel.text()).toContain("在线状态未知 · 非实时");
+    expect(panel.text()).toContain("未核验");
+    expect(panel.text()).not.toContain("一致");
   });
 
   it("clears a transient polling error after the next successful status response", async () => {

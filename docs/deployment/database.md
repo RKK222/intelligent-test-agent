@@ -558,7 +558,7 @@ generation、租约和 CAS 规则：
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260718143000__add_reference_repository_operations_and_verification.sql` 在既有两表上增量增加：
 
-- `reference_repository_states.operation_type`：非空，取值为 `INITIALIZE`、`SYNCHRONIZE`、`SWITCH_BRANCH`、`VERIFY_POINTERS`。存量 `UNINITIALIZED/INITIALIZING` 行回填 `INITIALIZE`，其它行回填 `SYNCHRONIZE`。
+- `reference_repository_states.operation_type`：非空，取值为 `INITIALIZE`、`SYNCHRONIZE`、`SWITCH_BRANCH`、`VERIFY_POINTERS`。存量 `UNINITIALIZED/INITIALIZING` 行回填 `INITIALIZE`，`VERIFYING` 行回填 `VERIFY_POINTERS`，其它行回填 `SYNCHRONIZE`。
 - `reference_repository_replicas.verified_at`：最近一次完整读取本机实际 branch 与 HEAD 的时间；未核验或读取未完成时为空或保留旧值。
 - `reference_repository_replicas.branch` 改为可空并明确表示实际观察值，而不是目标分支；目标分支只读取主状态 `branch`。
 

@@ -789,7 +789,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         }
         String currentCommit = gitWorkspaceService.headCommit(repoRoot);
         renewLeaseOrThrow(claimed);
-        gitWorkspaceService.fetch(repoRoot, privateKey);
+        gitWorkspaceService.fetchBranch(repoRoot, state.branch(), privateKey);
         String targetCommit = gitWorkspaceService.resolveCommit(repoRoot, state.targetCommitHash());
         if (!state.targetCommitHash().equals(targetCommit)) {
             throw new ReplicaBlockedException("引用资产无法解析固定目标提交");

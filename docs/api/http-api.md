@@ -1100,7 +1100,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 | `GET` | `/{repositoryId}/status` | 查询总体状态和当前 generation 的逐服务器状态。 |
 | `GET` | `/{repositoryId}/tree?path=` | 从当前 Java 所在服务器的本地副本读取指定相对目录的单层树。 |
 
-列表接口的 `data[]` 条目，以及初始化、同步和状态接口的 `data`，使用同一结构：
+列表接口的 `data[]` 条目，以及初始化、同步、切换分支、核验和状态接口的 `data`，使用同一结构：
 
 ```json
 {

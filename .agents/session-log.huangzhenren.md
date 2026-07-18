@@ -5,6 +5,35 @@
 
 ## Entries
 
+### 2026-07-18 - 引用资产分支切换与服务器指针核验
+
+- Why:
+  - 应用管理员需要在引用资产库初始化后受控切换分支并同步所有服务器，同时在配置页查看每台服务器实际 Git branch/HEAD，确认多节点是否真正收敛。
+- What:
+  - 新增 `switch-branch` 与只读 `verify` 内部 API、`SWITCH_BRANCH/VERIFY_POINTERS` 操作类型、逐服务器 `online/matchesTarget/verifiedAt/syncedAt` 响应，以及 `operation_type/verified_at` Flyway 增量迁移和 MyBatis XML 映射。
+  - 分支切换以远端 `ls-remote` 固定目标提交并 CAS 推进 generation；worker 写回实际读取的 branch/HEAD，核验只读本地 Git 元数据。活动任务和历史副本由广播、租约 fencing、在线/离线补偿继续收敛。
+  - 配置弹窗增加分支选择和旧/新分支二次确认、目标指针与逐服务器实际指针/在线状态/匹配状态/同步及核验时间、完整 HEAD 复制和“刷新 Git 指针”。成功切换后刷新工作区引用组合树。
+  - 前端以选择代次、后端 generation、同代次请求发起序号三层 fencing 丢弃迟到状态；READY 先通知工作区刷新，再独立加载弹窗目录。关闭/重开、失败后重新同步、模糊请求结果和多仓库 pending 均保留有限补偿语义。
+  - 最终审查补出并修复 single-branch clone 切换分支缺陷：切换时显式 fetch `+refs/heads/<branch>:refs/remotes/origin/<branch>`，不存在的本地分支从已固定提交创建，不依赖旧 fetchspec 的 `--track`；已有目标本地分支仍执行可快进校验。
+  - 同步更新 HTTP、事件、数据库、后端部署、模块 README/PACKAGE、前端包说明和用户手册。
+- How:
+  - API 与业务层继续要求 `APP_ADMIN`（`SUPER_ADMIN` 继承），并复核应用关联和 `APPLICATION_ASSET_REPOSITORY` 类型；广播名称及仅含 `repositoryId/generation/traceId` 的安全 payload 保持不变，不进入 RunEvent SSE。
+  - 数据库副本保留上一代实际指针快照，新 generation 不用目标值伪造实际值；`matchesTarget` 只对完整可信的 `READY` 观察为真。核验使用禁用 optional lock、untracked cache 和 fsmonitor 的只读 Git status。
+  - TDD 先复现 single-branch 无共同历史分支切换失败、READY 目录请求期间关闭导致刷新丢失、同 generation 迟到回滚、被拒快照误消费 pending，以及重开首轮列表失败后补偿轮询停摆，再做最小修复；最终综合审查无 Critical/Important。
+- Result:
+  - 引用/Git/API/MyBatis/Flyway 定向 114 项通过，含真实 single-branch clone 切换到无共同历史分支；后端用户指定 Reactor 中除 persistence 外均成功，persistence 仍被既有 `V20260717173000__create_public_agent_config_rollouts.sql` 的 `TIMESTAMPTZ` 与 H2 不兼容统一阻断（76 errors），本次引用 MyBatis/PostgreSQL/migration 用例均通过。
+  - 前端全量 Vitest 77 个文件通过（1290 passed / 1 skipped），13 个项目 typecheck、lint、用户手册和生产 build 通过；构建仅有既有大 chunk 提示。manager `go test ./...` 的 6 个包通过。
+  - 全量 Playwright 为 123 passed / 70 failed / 1 skipped；失败是近期日志已记录的 35 类 workbench 文件加载、Agent、Help、设置、模型和运行流旧基线在 Chromium/mobile 的成对失败，精确数量不能与此前提前停止的套件等同。本次引用组合树 Chromium/mobile 定向 2/2 通过。
+  - 涉及新增内部 HTTP API、数据库兼容字段和既有内部广播消费语义；不修改广播 payload、RunEvent、generated SDK、`.env.local`、manager 协议或已运行 OpenCode 进程。显式 refspec 不经 shell，凭据仍只在发起/目标 worker 内使用。
+- Verification:
+  - `mvn -pl test-agent-api,test-agent-persistence -am -Dtest='GitWorkspaceServiceTest,GitWorkspaceServiceRealGitTest,ReferenceRepository*,MyBatisReferenceRepository*' -Dsurefire.failIfNoSpecifiedTests=false test`
+  - `mvn -pl test-agent-common,test-agent-domain,test-agent-workspace-management,test-agent-opencode-runtime,test-agent-persistence,test-agent-api -am test`（除上述既有 H2 migration 阻断外，其余目标模块成功）
+  - `corepack pnpm test && corepack pnpm typecheck && corepack pnpm build`、`corepack pnpm lint`
+  - `corepack pnpm e2e`、`corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts --grep 'workspace tree merges references'`
+  - `go test ./...`、`git diff --check`、冲突标记扫描和三轮只读代码审查。
+- Next:
+  - 在真实双服务器环境完成分支切换、部分节点离线/恢复、逐服务器 HEAD 展示与引用组合树刷新人工验收；另行修复既有 H2 migration 和 workbench E2E 基线。
+
 ### 2026-07-18 - 在应用工作区文件树展示引用目录
 
 - Why:

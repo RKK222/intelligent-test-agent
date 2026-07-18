@@ -236,6 +236,10 @@ export type ReferenceRepositoryServerStatus = {
   status: string;
   currentBranch?: string | null;
   currentCommitHash?: string | null;
+  online?: boolean;
+  matchesTarget?: boolean | null;
+  verifiedAt?: string | null;
+  syncedAt?: string | null;
   error?: string | null;
 };
 
@@ -250,6 +254,7 @@ export type ReferenceRepositoryStatus = {
   targetCommitHash?: string | null;
   generation: number;
   status: string;
+  operation?: "INITIALIZE" | "SYNCHRONIZE" | "SWITCH_BRANCH" | "VERIFY_POINTERS" | string | null;
   targetServerCount: number;
   readyServerCount: number;
   servers: ReferenceRepositoryServerStatus[];
@@ -631,6 +636,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     synchronizeReferenceRepository: (appId: string, repositoryId: string) =>
       request<ReferenceRepositoryStatus>(
         `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/synchronize`,
+        { method: "POST" }
+      ),
+    /** 将共享引用资产库切换到固定远端分支 HEAD，并由多节点协调器完成收敛。 */
+    switchReferenceRepositoryBranch: (appId: string, repositoryId: string, branch: string) =>
+      request<ReferenceRepositoryStatus>(
+        `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/switch-branch`,
+        { method: "POST", body: JSON.stringify({ branch }) }
+      ),
+    /** 只读核验各服务器本地 Git 指针，不触发 fetch 或 checkout。 */
+    verifyReferenceRepositoryPointers: (appId: string, repositoryId: string) =>
+      request<ReferenceRepositoryStatus>(
+        `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/verify`,
         { method: "POST" }
       ),
     getReferenceRepositoryStatus: (appId: string, repositoryId: string) =>

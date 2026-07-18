@@ -418,7 +418,7 @@ class ReferenceRepositoryApplicationServiceTest {
         assertThat(result.generation()).isEqualTo(5L);
         assertThat(result.targetCommitHash()).isEqualTo("commit-2");
         assertThat(result.operation()).isEqualTo(ReferenceRepositoryOperationType.VERIFY_POINTERS.name());
-        verify(gitWorkspaceService, never()).fetch(any(), any());
+        verify(gitWorkspaceService, never()).fetchBranch(any(), anyString(), any());
         verify(referenceRepository).upsertTargets(
                 ASSET_ID, 5L, "main", Set.of(online, offline), NOW);
     }
@@ -920,7 +920,7 @@ class ReferenceRepositoryApplicationServiceTest {
 
         service.handle(syncEvent(3L));
 
-        verify(gitWorkspaceService).fetch(repositoryRoot, null);
+        verify(gitWorkspaceService).fetchBranch(repositoryRoot, "release", null);
         verify(gitWorkspaceService).checkoutBranchForFixedCommit(
                 repositoryRoot, "release", "commit-release", null);
         verify(referenceRepository).markReady(
@@ -982,7 +982,7 @@ class ReferenceRepositoryApplicationServiceTest {
                 eq(ASSET_ID), eq(4L), eq(new LinuxServerId("server-a")), anyString(),
                 eq(ReferenceRepositoryReplicaStatus.READY), eq("main"), eq("commit-2"),
                 eq(NOW), isNull(), eq(NOW));
-        verify(gitWorkspaceService, never()).fetch(any(), any());
+        verify(gitWorkspaceService, never()).fetchBranch(any(), anyString(), any());
         verify(gitWorkspaceService, never()).resetHardToCommit(any(), any());
         verify(gitWorkspaceService, never()).checkoutBranchForFixedCommit(any(), any(), any(), any());
         verify(gitWorkspaceService, never()).cloneBranch(any(), any(), any(), any());
