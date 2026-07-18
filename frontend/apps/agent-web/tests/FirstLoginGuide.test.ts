@@ -65,8 +65,15 @@ describe("FirstLoginGuide", () => {
     const repositoryStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-repository\\\"]"]');
     expect(repositoryStep.text()).toContain("应用人员管理");
     expect(repositoryStep.text()).toContain("版本库管理");
+    expect(repositoryStep.text()).toContain("部署模式");
+    expect(repositoryStep.text()).toContain("版本库英文名称");
+    expect(repositoryStep.text()).toContain("应用与版本库关联");
+    expect(repositoryStep.text()).toContain("点击“关联”");
     const workspaceStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-app-workspace\\\"]"]');
-    expect(workspaceStep.text()).toContain("选择测试工作库");
+    expect(workspaceStep.text()).toContain("类型为“测试工作库”");
+    expect(workspaceStep.text()).toContain("工作空间别名");
+    expect(workspaceStep.text()).toContain("目录树");
+    expect(workspaceStep.text()).toContain("feature_testagent_yyyymmdd");
     expect(workspaceStep.text()).toContain("workspace/version");
 
     wrapper.getComponent(tourStub).vm.$emit("update:current", 6);

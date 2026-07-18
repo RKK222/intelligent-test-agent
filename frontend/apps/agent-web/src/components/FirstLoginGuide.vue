@@ -194,7 +194,32 @@ defineExpose({ restart });
     >
       <template #header><div class="ta-onboarding-heading"><span>08</span><strong>应用与版本库配置</strong></div></template>
       <div class="ta-onboarding-settings-guide">
-        <p>点击“版本库管理”→“新增”，填写 Git 地址、名称、部署模式和版本库类型。然后点击“应用管理”，先选目标应用，在“应用人员管理”添加成员，再到“应用与版本库关联”点击“关联”。</p>
+        <p>请按下面 3 个页签/入口完成配置；没有版本库时，先做第 1 项。</p>
+        <section>
+          <h4>1. “版本库管理”入口</h4>
+          <ol>
+            <li>点击左侧“版本库管理”→“新增”。</li>
+            <li>选择部署模式：外部部署填写完整 Git URL；内部部署保留页面显示的 SSH 前缀，只填写主机、端口和仓库路径。</li>
+            <li>填写“版本库名称”“版本库英文名称”，选择“版本库类型”；只有“测试工作库”能在第 09 步创建 workspace。</li>
+            <li>点击“新增”。已有版本库可点“编辑”修改名称和英文名称，地址、模式和类型只读。</li>
+          </ol>
+        </section>
+        <section>
+          <h4>2. “应用管理”→“应用人员管理”</h4>
+          <ol>
+            <li>顶部“应用选择”先选目标应用。</li>
+            <li>在“添加成员”输入用户 ID、用户名或统一认证号，从候选中选中后点击“添加”；空输入不会查询。</li>
+            <li>移除成员时点击已有成员右侧的删除按钮，并在页面内确认。</li>
+          </ol>
+        </section>
+        <section>
+          <h4>3. “应用管理”→“应用与版本库关联”</h4>
+          <ol>
+            <li>切换到该页签，选择刚登记的版本库，点击“关联”。</li>
+            <li>已关联的版本库会列在下方；误关联时点击“解除”并确认。</li>
+            <li>关联列表为空时，回到第 1 项检查版本库是否已新增。</li>
+          </ol>
+        </section>
       </div>
     </ElTourStep>
     <ElTourStep
@@ -206,7 +231,18 @@ defineExpose({ restart });
     >
       <template #header><div class="ta-onboarding-heading"><span>09</span><strong>应用工作区配置</strong></div></template>
       <div class="ta-onboarding-settings-guide">
-        <p>点击“应用管理”并选应用，进入“工作空间管理”，选择测试工作库、分支、工作空间别名和目录后点击“保存”。保存成功后，普通用户回到工作台左下角选择 workspace/version。</p>
+        <p>先在顶部“应用选择”选中目标应用，再进入“工作空间管理”页签，按字段填写：</p>
+        <section>
+          <h4>“工作空间管理”页签</h4>
+          <ol>
+            <li>“已关联版本库”：只选择类型为“测试工作库”的版本库；下拉为空时先完成第 08 步。</li>
+            <li>“分支”：选择符合 <code>feature_testagent_yyyymmdd</code> 规则的分支；分支加载后才会出现目录树。</li>
+            <li>“工作空间别名”：默认是 <code>ai-test</code>，同一应用下不能与已有 workspace 重名。</li>
+            <li>“目录树”：只选择当前应用同名目录下的一级子目录；文件不能选，必要时可在应用目录下新增一级目录。</li>
+            <li>点击“保存”，等待“校验参数、保存配置、解析版本和分支、下载代码、创建运行态工作区、完成”全部成功。</li>
+          </ol>
+        </section>
+        <p>创建成功后回到工作台左下角，先选择 workspace，再选择版本；只选应用、不选 workspace/version 时，左侧文件树仍会是空白。</p>
       </div>
     </ElTourStep>
     <ElTourStep
@@ -265,6 +301,25 @@ p {
   max-height: min(42vh, 260px);
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.ta-onboarding-settings-guide section + section {
+  margin-top: 10px;
+}
+
+.ta-onboarding-settings-guide h4 {
+  margin: 0 0 3px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ta-onboarding-settings-guide code {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: #f1f5f9;
+  color: #3b5872;
+  font-size: 11px;
 }
 
 .ta-onboarding-settings-guide li + li {
