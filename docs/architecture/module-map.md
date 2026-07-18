@@ -43,13 +43,13 @@ Browser
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
-| `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/上传/复制/移动/删除、基于工作区 JSONC 与本机 READY 引用副本的只读组合文件视图、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、应用引用资产库的 generation/租约/补偿副本与安全目录树、agent 和 skill 管理业务。 |
+| `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/上传/复制/移动/删除、基于工作区 JSONC 与本机 READY 引用副本的只读组合文件视图、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、应用引用资产库的 generation/租约/补偿副本、受控分支切换、只读实际指针核验与安全目录树、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、用户级会话运行态摘要/状态流、stale active Run 收敛业务任务、当前用户 opencode 进程强状态/弱健康/初始化契约和可选引用目录启动环境、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、带实时应用成员校验的 workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理查询、创建测试用户和单角色调整。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、已初始化引用资产库英文名/类型冻结、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器和参数更新跨实例广播。 |
 | `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、运行记录保留清理、Cron 调整、手动触发和协作式停止管理服务；其它具体业务任务放回所属业务模块。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
-| `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、RunEvent SSE 按生产 Java 流式转发入口、用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图与 Agent 配置文件）、应用引用资产库 5 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史和定时任务管理入口、trace Web 入口。 |
+| `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、RunEvent SSE 按生产 Java 流式转发入口、用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图与 Agent 配置文件）、应用引用资产库 7 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史和定时任务管理入口、trace Web 入口。 |
 | `test-agent-persistence` | 数据库、MyBatis XML mapper、Flyway、Repository 和 Redis 必需适配，包括 Run manifest/input/durable 与 runtime 双 Stream/Hash + order ZSET 物化 snapshot/scope/active 索引、会话上下文、workspace 服务器归属、用户级会话运行态只读查询、通用参数表、工作空间创建进度表、应用版本副本表、引用资产总体/服务器副本表、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
 | `test-agent-event` | 按 RunStorageMode 分流的 RunEvent 追加、SSE、Redis 首帧物化 reset 与 `runtimeVersion` 有序尾流、legacy 数据库回放、全局事件触发流，以及 Redis/Noop 通用服务器广播适配。 |
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
@@ -63,7 +63,7 @@ Browser
 |---|---|
 | `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、应用管理员引用配置双栏/2 秒状态轮询/JSONC 最小补丁、工作区与引用目录组合文件树（合并引用蓝色、冲突红色、只读 tab 和局部告警）、带上下文/路径请求代次和 dirty 修订保护的普通文件及公共级/应用级 Agent 文件加载编排、Agent 保存后的 Git Changes 修订刷新、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、后台运行会话历史计数/铃铛提醒（历史按钮数字只统计第一页 30 条中的未完成会话）、会话级前端原始报文内存查看器、五种 SVG 宠物的本地轮换/随机/固定选择和一次性旁路问答、设置模态（含版本库英文名、版本库类型、工作空间创建进度和用户管理页签，用户管理支持查询、创建测试用户和超管直接调角色）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
 | `apps/user-manual` | VitePress 内置用户手册，负责稳定 Markdown 操作说明、本地全文搜索和 `/help/` 静态构建；不访问后端 API、不保存用户数据，构建结果由 `agent-web` 同源嵌入。 |
-| `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、可选安全原始 HTTP 交换 observer、超级管理员服务器目录选择、带 keyed single-flight/连接所有权清理/只读单次传输重试的平台文件 WebSocket route/ticket/RPC（workspace 原始文件、引用组合视图与 Agent 配置文件）、应用引用资产库 5 个 API、工作区 Git diff/stage/unstage/冲突 API、用户 opencode 进程状态/初始化、用户级会话运行态摘要、运行管理 overview 与指标历史、定时任务管理、配置管理、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询、兼容同步 `askSideQuestion`、流式 `startSideQuestionRun` 和默认 `opencode` 的 agent URL 前缀。 |
+| `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、可选安全原始 HTTP 交换 observer、超级管理员服务器目录选择、带 keyed single-flight/连接所有权清理/只读单次传输重试的平台文件 WebSocket route/ticket/RPC（workspace 原始文件、引用组合视图与 Agent 配置文件）、应用引用资产库 7 个 API及目标/实际指针状态、工作区 Git diff/stage/unstage/冲突 API、用户 opencode 进程状态/初始化、用户级会话运行态摘要、运行管理 overview 与指标历史、定时任务管理、配置管理、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询、兼容同步 `askSideQuestion`、流式 `startSideQuestionRun` 和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE 和用户级运行态 fetch SSE client，负责按默认 `opencode` agent URL 连接 RunEvent、携带 Bearer Token 连接 runtime-state、自动重连、识别 `run.snapshot.reset`、解析前原始 `MessageEvent.data` 回调、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、带加载三态/稳定快照身份/用户内容修订代次的文件 tab Pinia 状态，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |
 | `packages/file-explorer` | 文件树、普通文件复制/剪切/粘贴与拖放、浏览器文件上传选择、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口；实际文件操作由 app 层调用 backend-api。 |

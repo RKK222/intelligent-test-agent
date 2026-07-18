@@ -1095,6 +1095,8 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 | `GET` | Base URL | 列出当前应用关联的全部应用资产库及总体、逐服务器状态。 |
 | `POST` | `/{repositoryId}/initialize` | 首次固定分支和远端 HEAD，创建 generation 1 的各在线服务器副本目标。请求体为 `{ "branch": "main" }`。 |
 | `POST` | `/{repositoryId}/synchronize` | 在已固定分支上重新解析远端 HEAD；当前总体状态已在执行时幂等返回，终态时以 CAS 推进 generation 并同步在线服务器及历史副本服务器。无请求体。 |
+| `POST` | `/{repositoryId}/switch-branch` | 把已初始化资产库切换到指定分支的固定远端 HEAD。请求体为 `{ "branch": "release" }`；仅 `READY/FAILED` 可开始，活动中的同目标切换幂等返回，冲突操作返回 `CONFLICT`。 |
+| `POST` | `/{repositoryId}/verify` | 新建只读核验 generation，要求各在线服务器读取本地实际 branch、HEAD、origin 和工作树状态；不执行 fetch、checkout 或 reset。无请求体。 |
 | `GET` | `/{repositoryId}/status` | 查询总体状态和当前 generation 的逐服务器状态。 |
 | `GET` | `/{repositoryId}/tree?path=` | 从当前 Java 所在服务器的本地副本读取指定相对目录的单层树。 |
 
@@ -1111,21 +1113,30 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
   "targetCommitHash": "0123456789abcdef",
   "generation": 2,
   "status": "SYNCHRONIZING",
+  "operation": "SWITCH_BRANCH",
   "targetServerCount": 2,
   "readyServerCount": 1,
   "servers": [
     {
       "linuxServerId": "server-a",
       "status": "READY",
+      "online": true,
       "currentBranch": "main",
       "currentCommitHash": "0123456789abcdef",
+      "matchesTarget": true,
+      "verifiedAt": "2026-07-18T10:00:00Z",
+      "syncedAt": "2026-07-18T09:59:00Z",
       "error": null
     },
     {
       "linuxServerId": "server-b",
       "status": "DEFERRED",
-      "currentBranch": null,
-      "currentCommitHash": null,
+      "online": false,
+      "currentBranch": "main",
+      "currentCommitHash": "fedcba9876543210",
+      "matchesTarget": false,
+      "verifiedAt": "2026-07-17T10:00:00Z",
+      "syncedAt": "2026-07-17T09:59:00Z",
       "error": null
     }
   ],
@@ -1134,7 +1145,11 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 }
 ```
 
-总体 `status` 枚举为 `UNINITIALIZED`、`INITIALIZING`、`VERIFYING`、`SYNCHRONIZING`、`READY`、`FAILED`。副本 `servers[].status` 枚举为 `PENDING`、`PROCESSING`、`READY`、`RETRY_WAIT`、`BLOCKED`、`DEFERRED`；`DEFERRED` 表示目标服务器当前离线，恢复心跳后由补偿任务重新转为可处理状态，不阻塞其它在线服务器收敛。`message` 和 `servers[].error` 只返回安全错误说明，不包含凭据、Git 原始 stderr 或内部命令。
+总体 `status` 枚举为 `UNINITIALIZED`、`INITIALIZING`、`VERIFYING`、`SYNCHRONIZING`、`READY`、`FAILED`，`operation` 为 `INITIALIZE`、`SYNCHRONIZE`、`SWITCH_BRANCH`、`VERIFY_POINTERS`。副本 `servers[].status` 枚举为 `PENDING`、`PROCESSING`、`READY`、`RETRY_WAIT`、`BLOCKED`、`DEFERRED`；`DEFERRED` 表示目标服务器当前离线，恢复心跳后由补偿任务重新转为可处理状态，不阻塞其它在线服务器收敛。
+
+`branch/targetCommitHash` 是当前 generation 的目标指针，`servers[].currentBranch/currentCommitHash` 是最近一次从该服务器实际观察到的指针；新 generation 不用目标值覆盖实际快照。`online=false` 时实际指针和 `verifiedAt` 可能是离线前快照；`matchesTarget=null` 表示尚无完整观察，`false` 也用于 branch/HEAD、origin、干净状态或可信目录任一不符合目标的情况。`syncedAt` 是最近成功同步时间，`verifiedAt` 是最近成功完成实际指针读取的时间。`message` 和 `servers[].error` 只返回安全错误说明，不包含凭据、Git 原始 stderr 或内部命令。
+
+分支切换先解析远端 HEAD，再用旧 generation 与旧分支 CAS 建立新代次。在线节点在干净、origin 匹配的共享仓库中切换；已有目标本地分支必须可快进到固定目标，脏仓库、非 Git 目录、origin 冲突或分叉会阻塞该服务器，不删除、清理或强制覆盖。已经成功的服务器不因其它节点失败而回滚；离线及历史副本由数据库目标、广播唤醒和补偿扫描最终追平。
 
 树接口的 `data[]` 字段为：
 

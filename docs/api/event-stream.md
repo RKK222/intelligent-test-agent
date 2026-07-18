@@ -480,7 +480,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 }
 ```
 
-`reference-repository.sync-requested` 用于应用资产库首次初始化或新 generation 同步后的低延迟唤醒。payload 固定只包含：
+`reference-repository.sync-requested` 用于应用资产库首次初始化、同分支同步、受控分支切换或只读指针核验 generation 的低延迟唤醒。事件名称保持不变，具体操作由消费者读取数据库 `operation_type` 判断；payload 固定只包含：
 
 ```json
 {
@@ -490,7 +490,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 }
 ```
 
-消费者只把广播视为唤醒信号，仍需按 `repositoryId + generation + 本机 linuxServerId` 从数据库认领带 fencing token 的租约；重复、乱序或丢失广播均不能绕过数据库状态。payload 不包含分支、commit、Git URL、用户 ID、SSH 私钥、token、Authorization、Cookie、文件内容或目录内容。广播发布失败不反转已经提交的数据库目标，默认 60 秒补偿扫描负责恢复漏消息和节点重新上线后的 `DEFERRED` 副本。
+消费者只把广播视为唤醒信号，仍需按 `repositoryId + generation + 本机 linuxServerId` 从数据库认领带 fencing token 的租约；重复、乱序或丢失广播均不能绕过数据库状态。payload 不包含操作类型、分支、commit、Git URL、用户 ID、SSH 私钥、token、Authorization、Cookie、文件内容或目录内容。广播发布失败不反转已经提交的数据库目标，默认 60 秒补偿扫描会重建当前 generation 的在线及历史副本目标，恢复漏消息、CAS 后建档中断和节点重新上线后的 `DEFERRED` 副本。`VERIFY_POINTERS` 消费路径只读取本地 Git 元数据，不执行 fetch、checkout 或 reset；该内部广播仍不进入 RunEvent SSE。
 
 `agent-config.public-sync-requested` 用于公共 Agent 配置更新或发布后的多服务器同步，payload 只允许包含：
 ```json
