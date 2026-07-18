@@ -842,6 +842,29 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(false);
   });
 
+  it("defers the initialization panel until the onboarding guide ends", async () => {
+    const wrapper = mountShell({
+      props: {
+        opencodeProcessStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          message: "TestAgent 进程不可用，需要重新初始化",
+          serviceStatus: "UNASSIGNED"
+        },
+        opencodeProcessLoading: false,
+        showProcessStatusInPet: true,
+        onboardingActive: true
+      }
+    });
+
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(false);
+
+    await wrapper.setProps({ onboardingActive: false });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(true);
+  });
+
   it("shows server name without inventing an address when service address is missing", async () => {
     const wrapper = mountShell({
       props: {

@@ -56,6 +56,8 @@ const props = withDefaults(
     opencodeProcessLoading?: boolean;
     opencodeProcessInitializing?: boolean;
     showProcessStatusInPet?: boolean;
+    /** 新手引导展示期间不自动弹出宠物进程状态面板。 */
+    onboardingActive?: boolean;
     sideQuestionAnswer?: string | null;
     sideQuestionError?: string | null;
     sideQuestionLoading?: boolean;
@@ -79,6 +81,7 @@ const props = withDefaults(
     joinableApps: () => [],
     selectedAppId: "fgcms-psn",
     showProcessStatusInPet: false,
+    onboardingActive: false,
     sideQuestionAvailable: true,
     sideQuestionManualMode: false,
     canPlayPetGames: false,
@@ -1565,14 +1568,21 @@ watch(() => props.canPlayPetGames, (allowed) => {
   if (!allowed) robotGameOpen.value = false;
 });
 
+watch(() => props.onboardingActive, (active) => {
+  if (!active) return;
+  // 引导开始时清理已经排队或刚打开的状态面板，避免遮挡引导遮罩。
+  robotProcessStatusOpen.value = false;
+});
+
 watch(
   [
     processStatusInteractionEnabled,
+    () => props.onboardingActive,
     () => props.opencodeProcessStatus?.status,
     () => props.opencodeProcessLoading,
   ],
-  ([enabled, status, loading]) => {
-    if (!enabled || loading || status !== "NEEDS_INITIALIZATION" || processInitializationPromptShown.value) return;
+  ([enabled, onboardingActive, status, loading]) => {
+    if (!enabled || onboardingActive || loading || status !== "NEEDS_INITIALIZATION" || processInitializationPromptShown.value) return;
     processInitializationPromptShown.value = true;
     // 首次拿到未初始化状态时主动唤出宠物，并让状态气泡直接承担初始化确认。
     if (robotState.value === "sleeping") {
@@ -2059,7 +2069,7 @@ function submitJoinApp() {
       </div>
     </div>
     <section
-      v-if="robotProcessStatusOpen && robotState !== 'sleeping' && processStatusInteractionEnabled"
+      v-if="robotProcessStatusOpen && robotState !== 'sleeping' && processStatusInteractionEnabled && !onboardingActive"
       class="figma-robot-process-status"
       :class="`is-${robotProcessTone}`"
       data-testid="robot-process-status"

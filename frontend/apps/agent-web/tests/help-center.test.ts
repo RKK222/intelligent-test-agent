@@ -148,6 +148,9 @@ describe("help center", () => {
     const settings = helpTopicById("settings").content;
 
     expect(settings).toContain("普通用户：个人设置");
+    expect(settings).toContain("用户配置");
+    expect(settings).toContain("版本库配置");
+    expect(settings).toContain("应用工作区配置");
     expect(settings).toContain("应用人员管理");
     expect(settings).toContain("应用与版本库关联");
     expect(settings).toContain("工作空间管理");

@@ -36,7 +36,7 @@ const items = computed<MenuItem[]>(() => {
 </script>
 
 <template>
-  <nav class="ta-settings-menu" aria-label="设置导航">
+  <nav class="ta-settings-menu" aria-label="设置导航" data-onboarding="settings-panel">
     <ul class="ta-settings-menu-list">
       <li
         v-for="item in items"

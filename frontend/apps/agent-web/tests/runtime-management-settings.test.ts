@@ -144,6 +144,7 @@ describe("runtime management settings", () => {
     expect(superAdmin.queryByText("运行管理")).toBeNull();
     expect(superAdmin.getByText("前端版本")).toBeTruthy();
     expect(superAdmin.getByText("V20260715.101112")).toBeTruthy();
+    expect(superAdmin.getByRole("navigation", { name: "设置导航" }).getAttribute("data-onboarding")).toBe("settings-panel");
     superAdmin.unmount();
 
     const appAdmin = render(SettingsMenu, {

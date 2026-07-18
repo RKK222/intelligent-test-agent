@@ -48,7 +48,7 @@ describe("FirstLoginGuide", () => {
       '[data-onboarding="workspace-reference"]',
       '[data-onboarding="new-conversation"]',
       '[data-onboarding="pet"]',
-      '[data-onboarding="settings"]',
+      '[data-onboarding="settings-panel"]',
       '[data-onboarding="manual"]'
     ]);
     expect(wrapper.findAll("article")[0]?.attributes("data-target")).toBeUndefined();
@@ -58,15 +58,20 @@ describe("FirstLoginGuide", () => {
     expect(wrapper.text()).toContain("第一条消息会建立对话");
     expect(wrapper.text()).toContain("08");
     expect(wrapper.text()).not.toContain("超级管理员");
-    const settingsStep = wrapper.find('[data-target="[data-onboarding=\\\"settings\\\"]"]');
+    const settingsStep = wrapper.find('[data-target="[data-onboarding=\\\"settings-panel\\\"]"]');
     expect(settingsStep.text()).toContain("个人设置");
-    expect(settingsStep.text()).toContain("应用管理");
+    expect(settingsStep.text()).toContain("应用人员管理");
     expect(settingsStep.text()).toContain("版本库管理");
+    expect(settingsStep.text()).toContain("工作空间管理");
     expect(settingsStep.text()).toContain("用户管理");
+
+    wrapper.getComponent(tourStub).vm.$emit("update:current", 6);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("settings-step")?.at(-1)).toEqual([true]);
 
     wrapper.getComponent(tourStub).vm.$emit("finish");
     await wrapper.vm.$nextTick();
-    expect(window.localStorage.getItem("test-agent.onboarding.v3:usr_guide_1")).toBe("seen");
+    expect(window.localStorage.getItem("test-agent.onboarding.v4:usr_guide_1")).toBe("seen");
     expect(wrapper.emitted("finish")).toHaveLength(1);
 
     const second = mountGuide();
@@ -79,7 +84,7 @@ describe("FirstLoginGuide", () => {
       callback(0);
       return 1;
     });
-    window.localStorage.setItem("test-agent.onboarding.v3:usr_guide_1", "seen");
+    window.localStorage.setItem("test-agent.onboarding.v4:usr_guide_1", "seen");
     const wrapper = mountGuide();
 
     (wrapper.vm as unknown as { restart: () => void }).restart();

@@ -233,6 +233,31 @@ const isAppAdmin = computed(() =>
   isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true
 );
 
+const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v4";
+const firstLoginGuideActive = ref(true);
+
+function firstLoginGuideStorageKey(userId: string) {
+  return `test-agent.onboarding.${FIRST_LOGIN_GUIDE_STORAGE_VERSION}:${userId}`;
+}
+
+function hasSeenFirstLoginGuide(userId: string) {
+  try {
+    return localStorage.getItem(firstLoginGuideStorageKey(userId)) === "seen";
+  } catch {
+    return false;
+  }
+}
+
+watch(
+  () => authStore.currentUser?.userId?.trim() || null,
+  (userId) => {
+    // 登录态尚未加载时先保持抑制，避免进程状态面板抢在引导组件之前闪现。
+    if (!userId) return;
+    firstLoginGuideActive.value = !hasSeenFirstLoginGuide(userId);
+  },
+  { immediate: true }
+);
+
 function readStoredRuntimePreference() {
   return {
     provider: localStorage.getItem(SELECTED_PROVIDER_STORAGE_KEY) || "",
@@ -4795,9 +4820,24 @@ function openHelpCenter(topic = "getting-started") {
 }
 
 function prepareFirstLoginGuide() {
+  firstLoginGuideActive.value = true;
+  settingsOpen.value = false;
   leftPanelOpen.value = true;
   rightPanelOpen.value = true;
   centerMode.value = "editor";
+}
+
+function handleFirstLoginGuideSettingsStep(open: boolean) {
+  settingsOpen.value = open;
+}
+
+function finishFirstLoginGuide() {
+  firstLoginGuideActive.value = false;
+  openHelpCenter("getting-started");
+}
+
+function dismissFirstLoginGuide() {
+  firstLoginGuideActive.value = false;
 }
 
 async function restartFirstLoginGuide() {
@@ -6030,6 +6070,7 @@ async function handleLogout() {
     :opencode-process-loading="opencodeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
     show-process-status-in-pet
+    :onboarding-active="firstLoginGuideActive"
     :side-question-answer="robotSideQuestion.answer.value"
     :side-question-error="robotSideQuestion.error.value"
     :side-question-loading="robotSideQuestion.loading.value"
@@ -6492,7 +6533,9 @@ async function handleLogout() {
     ref="firstLoginGuideRef"
     :user-id="authStore.currentUser?.userId"
     @prepare="prepareFirstLoginGuide"
-    @finish="openHelpCenter('getting-started')"
+    @settings-step="handleFirstLoginGuideSettingsStep"
+    @dismiss="dismissFirstLoginGuide"
+    @finish="finishFirstLoginGuide"
   />
 
   <OpencodeProcessStartupDialog

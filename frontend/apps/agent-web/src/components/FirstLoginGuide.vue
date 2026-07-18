@@ -2,8 +2,8 @@
 import { nextTick, ref, watch } from "vue";
 import { ElTour, ElTourStep } from "element-plus";
 
-// v3 将引导锚定到应用、workspace/version、小地球和新建对话等真实操作按钮。
-const GUIDE_VERSION = "v3";
+// v4 在设置步骤打开真实设置弹窗，并把气泡锚定到设置导航，避免只说明齿轮却看不到面板内容。
+const GUIDE_VERSION = "v4";
 
 const props = defineProps<{
   userId?: string | null;
@@ -11,7 +11,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: "prepare"): void;
+  (event: "dismiss"): void;
   (event: "finish"): void;
+  (event: "settings-step", open: boolean): void;
 }>();
 
 const open = ref(false);
@@ -45,6 +47,7 @@ function markSeen() {
 }
 
 async function show() {
+  emit("settings-step", false);
   emit("prepare");
   await nextTick();
   current.value = 0;
@@ -56,17 +59,25 @@ async function show() {
 function close() {
   markSeen();
   open.value = false;
+  emit("settings-step", false);
+  emit("dismiss");
 }
 
 function finish() {
   markSeen();
   open.value = false;
+  emit("settings-step", false);
   emit("finish");
 }
 
 function restart() {
   void show();
 }
+
+watch(current, (step) => {
+  // 第 07 步需要让用户看到设置弹窗中的真实导航；返回上一步或进入手册时关闭它。
+  emit("settings-step", step === 6);
+});
 
 watch(
   () => props.userId?.trim() || null,
@@ -86,6 +97,7 @@ defineExpose({ restart });
     v-model="open"
     v-model:current="current"
     class="ta-onboarding-tour"
+    :z-index="3000"
     :mask="{ color: 'rgba(13, 24, 38, 0.68)' }"
     :gap="{ offset: 8, radius: 10 }"
     :content-style="{ width: 'min(320px, calc(100vw - 32px))' }"
@@ -145,13 +157,13 @@ defineExpose({ restart });
       <p>点击宠物按钮可查看 TestAgent 服务状态、初始化专属进程，或随时提问；没有主对话时会依据用户手册回答。</p>
     </ElTourStep>
     <ElTourStep
-      target='[data-onboarding="settings"]'
-      placement="right-end"
+      target='[data-onboarding="settings-panel"]'
+      placement="right-start"
       :prev-button-props="previousButton"
       :next-button-props="nextButton"
     >
       <template #header><div class="ta-onboarding-heading"><span>07</span><strong>设置里的常用操作</strong></div></template>
-      <p>普通用户点击齿轮后主要使用“个人设置”添加或删除自己的 SSH Key。若账号同时有应用管理员权限，还会看到“应用管理”（成员、版本库关联、工作空间）和“版本库管理”；“用户管理”不属于普通用户操作。</p>
+      <p>设置面板已自动打开。普通用户主要使用“个人设置”添加或删除自己的 SSH Key；应用管理员还会使用用户配置（应用人员管理）、版本库配置（版本库管理与应用关联）和应用工作区配置（工作空间管理）。“用户管理”不属于普通用户操作。</p>
     </ElTourStep>
     <ElTourStep
       target='[data-onboarding="manual"]'
