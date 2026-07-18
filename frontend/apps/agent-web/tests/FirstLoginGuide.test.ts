@@ -81,7 +81,7 @@ describe("FirstLoginGuide", () => {
 
     wrapper.getComponent(tourStub).vm.$emit("finish");
     await wrapper.vm.$nextTick();
-    expect(window.localStorage.getItem("test-agent.onboarding.v5:usr_guide_1")).toBe("seen");
+    expect(window.localStorage.getItem("test-agent.onboarding.v6:usr_guide_1")).toBe("seen");
     expect(wrapper.emitted("finish")).toHaveLength(1);
 
     const second = mountGuide();
@@ -94,7 +94,7 @@ describe("FirstLoginGuide", () => {
       callback(0);
       return 1;
     });
-    window.localStorage.setItem("test-agent.onboarding.v5:usr_guide_1", "seen");
+    window.localStorage.setItem("test-agent.onboarding.v6:usr_guide_1", "seen");
     const wrapper = mountGuide();
 
     (wrapper.vm as unknown as { restart: () => void }).restart();

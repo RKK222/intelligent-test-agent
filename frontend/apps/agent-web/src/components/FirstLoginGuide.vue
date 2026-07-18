@@ -2,8 +2,8 @@
 import { nextTick, ref, watch } from "vue";
 import { ElTour, ElTourStep } from "element-plus";
 
-// v5 在设置步骤打开真实设置弹窗，并把三类常用配置改成可照着操作的短流程。
-const GUIDE_VERSION = "v5";
+// v6 将设置流程拆成 SSH、应用与版本库、应用工作区三个独立步骤。
+const GUIDE_VERSION = "v6";
 
 const props = withDefaults(defineProps<{
   userId?: string | null;
