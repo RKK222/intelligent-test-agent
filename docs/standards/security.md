@@ -134,7 +134,7 @@ Token 校验流程：
 6. input、resize、output buffer、idle timeout 和 hard timeout 必须有明确上限。
 7. 断开连接、session abort、后端关闭或超时时必须清理 PTY 进程。
 8. 服务器终端必须默认关闭，仅允许 `SUPER_ADMIN`，每次连接都展示目标服务器二次确认，并由后端严格校验 `SERVER@{linuxServerId}` 目标绑定值；PTY 必须直接继承启动目标 Java 的操作系统用户和权限，禁止 `sudo`、切换用户、SSH 密码、私钥或其它额外提权。
-9. 正式环境的服务器终端只能返回 `wss://` 网关地址，网关必须按 `linuxServerId` 定向到签票 JVM；仅本地 `test` profile 可显式允许直连 `ws://`。shell 使用不含 Java 进程密钥的最小环境，审计不得记录命令和输出正文。
+9. 正式环境的服务器终端只能返回 `wss://` 网关地址，网关必须按 `linuxServerId` 定向到签票 JVM；仅本地 `test` profile 可显式允许直连 `ws://`。shell 使用不含 Java 进程密钥的最小环境，审计不得记录命令和输出正文。默认配色只能通过当前 Java 用户创建的随机临时 rcfile 注入，不得写入用户主目录、系统 shell 配置或全局 Git 配置；兼容加载用户已有 `.bashrc` 时不得改变其文件内容。
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 

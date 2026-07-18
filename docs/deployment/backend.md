@@ -135,7 +135,7 @@ Redis `reference-repository.sync-requested` 广播只负责低延迟唤醒，数
 
 当前企业交付使用同一份离线 zip：单后台按 `deploy/internal/SINGLE-BACKEND.md` 执行；两个或更多后台按 `deploy/internal/MULTI-BACKEND.md` 执行。多后台每个节点都使用本机 `--backend-host <advertised-host> --skip-frontend` 部署，共享 PostgreSQL/Redis，但分别维护稳定 `linuxServerId`、本机数据目录、worker、公共配置和 9070 出站链路；前端只部署一次。workspace PTY 和 Agent 配置进度仍返回签发 Java 地址；服务器终端必须走 HTTPS Nginx，并由 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 按服务器 ID 定向到签票 JVM，不使用 sticky 或 Redis 共享 ticket。
 
-服务器终端启用参数为 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true`、`TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY=/data/testagent`、`TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<入口域名>`。PTY 直接继承 Java systemd unit 的 `User=` 身份和权限，不使用 `sudo` 或额外授权；未配置 `User=` 时则使用启动该服务的系统用户。容器化 Java 打开的也是容器内同一用户的 shell，不会因此获得宿主机权限。Nginx 同时配置 TLS 证书和 `linuxServerId=host:port` 路由，后端 CORS Origin 必须使用对应 `https://` 地址。
+服务器终端启用参数为 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true`、`TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY=/data/testagent`、`TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<入口域名>`。PTY 直接继承 Java systemd unit 的 `User=` 身份和权限，不使用 `sudo` 或额外授权；未配置 `User=` 时则使用启动该服务的系统用户。容器化 Java 打开的也是容器内同一用户的 shell，不会因此获得宿主机权限。Nginx 同时配置 TLS 证书和 `linuxServerId=host:port` 路由，后端 CORS Origin 必须使用对应 `https://` 地址。彩色提示符和 `ls`、`grep`、`git` 配色由应用内置，无需修改用户 `.bashrc`、系统配置或增加部署参数。
 
 后端 jar 的 Spring Boot build-info 与 manager 二进制 linker flag 都在各自产物构建时生成北京时间 `VyyyyMMdd.HHmmss`，并通过既有 Redis 心跳快照进入运行管理。`backend.env`、`docker.env` 无需也不得新增版本参数；Java/worker 普通重启不会改变版本。升级必须先替换并启动 Java，确认 health、`.serverid/.serverhost` 后再替换/重启 worker，最后在运行管理逐行核对 Java 与 manager 版本；旧进程显示 `-` 属滚动兼容行为。
 
