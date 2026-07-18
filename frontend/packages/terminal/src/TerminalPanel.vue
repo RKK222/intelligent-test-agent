@@ -31,6 +31,9 @@ const sessionRef = shallowRef<TerminalSession | null>(null);
 const xtermRef = shallowRef<XTerm | null>(null);
 const fitAddonRef = shallowRef<FitAddon | null>(null);
 let resizeObserver: ResizeObserver | null = null;
+let resizeFrame: number | null = null;
+let lastObservedWidth = -1;
+let lastObservedHeight = -1;
 
 const connecting = computed(() => snapshot.value.status === "connecting");
 const open = computed(() => snapshot.value.status === "open");
@@ -48,23 +51,51 @@ onMounted(() => {
   terminal.loadAddon(fitAddon);
   if (host.value) {
     terminal.open(host.value);
-    fitAddon.fit();
   }
   terminal.onData(data => sessionRef.value?.sendInput(data));
   terminal.onResize(size => sessionRef.value?.resize(size.cols, size.rows));
   xtermRef.value = terminal;
   fitAddonRef.value = fitAddon;
   if (typeof ResizeObserver !== "undefined" && host.value) {
-    resizeObserver = new ResizeObserver(() => fitAddon.fit());
+    // 只响应终端宿主的真实尺寸变化，并延迟到下一帧执行 fit，避免 xterm 自身布局
+    // 再次触发 ResizeObserver 后形成“fit -> resize -> fit”的高度反馈循环。
+    resizeObserver = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      scheduleFit(rect?.width, rect?.height);
+    });
     resizeObserver.observe(host.value);
   }
+  void nextTick(() => scheduleFit(undefined, undefined, true));
 });
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
+  if (resizeFrame !== null) {
+    cancelAnimationFrame(resizeFrame);
+  }
   sessionRef.value?.close("unmount");
   xtermRef.value?.dispose();
 });
+
+/**
+ * 合并同一帧内的尺寸通知，并忽略数值未变化的回调。
+ * 宿主尺寸由外层布局决定，xterm 采用绝对定位，不能反向撑高宿主。
+ */
+function scheduleFit(width = host.value?.clientWidth, height = host.value?.clientHeight, force = false) {
+  const nextWidth = Math.round(width ?? 0);
+  const nextHeight = Math.round(height ?? 0);
+  if (nextWidth <= 0 || nextHeight <= 0) return;
+  if (!force && nextWidth === lastObservedWidth && nextHeight === lastObservedHeight) return;
+  lastObservedWidth = nextWidth;
+  lastObservedHeight = nextHeight;
+  if (resizeFrame !== null) {
+    cancelAnimationFrame(resizeFrame);
+  }
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null;
+    fitAddonRef.value?.fit();
+  });
+}
 
 async function connect() {
   if (props.disabled || connecting.value || open.value) return;
@@ -81,6 +112,12 @@ async function connect() {
       ticket,
       WebSocketCtor: props.WebSocketCtor,
       onEvent: event => {
+        if (event.type === "open") {
+          // WebSocket 建立后再同步一次当前网格尺寸，并把键盘焦点交给 xterm。
+          // 连接前的 fit 发生在 session 尚不存在时，其 resize 事件不会发送给后端。
+          nextSession.resize(terminal?.cols ?? 120, terminal?.rows ?? 32);
+          terminal?.focus();
+        }
         if (event.type === "output") terminal?.write(event.data);
         if (event.type === "exit") terminal?.writeln(`\r\n[进程已退出: ${event.code}]`);
         if (event.type === "warning") terminal?.writeln(`\r\n[警告 ${event.code}] ${event.message}`);
@@ -122,17 +159,20 @@ function close() {
     </div>
     <div v-if="disabled" class="ta-terminal-notice">{{ disabledReason ?? "终端当前不可用" }}</div>
     <div v-if="snapshot.error" class="ta-terminal-error">{{ snapshot.error.code }}: {{ snapshot.error.message }}</div>
-    <div ref="host" class="ta-terminal-host" />
+    <div class="ta-terminal-viewport">
+      <div ref="host" class="ta-terminal-host" />
+    </div>
   </div>
 </template>
 
 <style scoped>
-.ta-terminal-panel { display: flex; min-height: 320px; height: 100%; flex-direction: column; overflow: hidden; background: #05070b; border: 1px solid #1e293b; border-radius: 8px; }
+.ta-terminal-panel { display: flex; min-width: 0; min-height: 240px; height: 100%; max-height: 100%; flex-direction: column; overflow: hidden; background: #05070b; border: 1px solid #1e293b; border-radius: 8px; }
 .ta-terminal-panel.is-danger { border-color: rgba(239, 68, 68, .65); box-shadow: 0 0 0 1px rgba(239, 68, 68, .12); }
 .ta-terminal-toolbar { display: flex; min-height: 42px; align-items: center; gap: 8px; border-bottom: 1px solid #1e293b; background: #020617; padding: 0 12px; }
 .ta-terminal-notice, .ta-terminal-error { padding: 8px 12px; font-size: 12px; border-bottom: 1px solid #1e293b; }
 .ta-terminal-notice { color: #94a3b8; }
 .ta-terminal-error { color: #fecaca; background: rgba(127, 29, 29, .35); }
-.ta-terminal-host { min-height: 0; flex: 1; padding: 8px; }
-.ta-terminal-host :deep(.xterm) { height: 100%; }
+.ta-terminal-viewport { position: relative; min-width: 0; min-height: 0; flex: 1 1 0; overflow: hidden; }
+.ta-terminal-host { position: absolute; inset: 8px; min-width: 0; min-height: 0; overflow: hidden; }
+.ta-terminal-host :deep(.xterm) { width: 100%; height: 100%; }
 </style>

@@ -2753,6 +2753,15 @@ function createTerminalTicket() {
   });
 }
 
+/** 为服务器选择器内的超级管理员 root 终端签发一次性 ticket。 */
+function createServerTerminalTicket(linuxServerId: string, confirmationText: string) {
+  return api.createServerRootTerminalTicket(linuxServerId, {
+    confirmationText,
+    cols: 120,
+    rows: 32
+  });
+}
+
 function resetWorkspaceState() {
   // Workspace 切换后必须清掉旧根目录绑定的文件树、编辑器、Diff 与运行态，避免误操作旧路径。
   workspaceLoadGeneration++;
@@ -6447,6 +6456,9 @@ async function handleLogout() {
     :directory="serverWorkspaceDirectory"
     :loading="serverWorkspacePickerLoading"
     :current-agent-linux-server-id="opencodeProcessStatus?.linuxServerId"
+    :server-terminal-enabled="isSuperAdmin"
+    :terminal-base-url="apiBaseUrl"
+    :create-server-terminal-ticket="createServerTerminalTicket"
     @close="serverWorkspacePickerOpen = false"
     @select-server="selectServerWorkspaceServer"
     @navigate="(path: string) => loadServerWorkspaceDirectories(path)"

@@ -68,14 +68,6 @@ function renderRuntimePanel(api: Partial<BackendApiClient>) {
         },
         ElRadioGroup: ElRadioGroupStub,
         ElRadioButton: ElRadioButtonStub,
-        ElDialog: {
-          props: ["modelValue", "title"],
-          template: `<div v-if="modelValue" role="dialog"><h3>{{ title }}</h3><slot /></div>`
-        },
-        TerminalPanel: {
-          props: ["disabled", "title"],
-          template: `<div data-testid="terminal-panel" :data-disabled="String(disabled)">{{ title }}</div>`
-        },
         RuntimeMetricChart: {
           props: ["title"],
           template: `<div class="runtime-metric-chart-stub"><h6>{{ title }}</h6></div>`
@@ -278,10 +270,9 @@ describe("runtime management settings", () => {
       ]
     };
     const api = {
-      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview),
-      createServerRootTerminalTicket: vi.fn()
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview)
     };
-    const { findAllByText, findByText, findByRole, findByPlaceholderText, findByTestId, queryByText, queryClient } = renderRuntimePanel(api);
+    const { findAllByText, findByText, queryByText, queryClient } = renderRuntimePanel(api);
 
     expect(await findByText("服务器 / Java 进程")).toBeTruthy();
     const backendProcessIdCell = await findByText("bjp_1234567890abcdef");
@@ -295,12 +286,7 @@ describe("runtime management settings", () => {
     expect(queryByText("Linux 服务器")).toBeNull();
     expect(queryByText("后端 Java 进程")).toBeNull();
 
-    await fireEvent.click(await findByRole("button", { name: "打开 10.8.0.12 root 终端" }));
-    expect(await findByText("服务器 root 终端 · 10.8.0.12")).toBeTruthy();
-    const terminal = await findByTestId("terminal-panel");
-    expect(terminal.getAttribute("data-disabled")).toBe("true");
-    await fireEvent.update(await findByPlaceholderText("ROOT@10.8.0.12"), "ROOT@10.8.0.12");
-    expect(terminal.getAttribute("data-disabled")).toBe("false");
+    expect(queryByText("root 终端")).toBeNull();
 
     queryClient.clear();
   });

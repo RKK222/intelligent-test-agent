@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import type { WorkspaceBackendServer, WorkspaceDirectoryList } from "@test-agent/shared-types";
-import { AlertTriangle, ChevronLeft, ChevronRight, Folder, Home, Server } from "lucide-vue-next";
+import type { TerminalTicketResponse, WorkspaceBackendServer, WorkspaceDirectoryList } from "@test-agent/shared-types";
+import { TerminalPanel } from "@test-agent/terminal";
+import { AlertTriangle, ChevronLeft, ChevronRight, Folder, Home, Server, Terminal as TerminalIcon } from "lucide-vue-next";
 import { Button } from "@test-agent/ui-kit";
 import ServerWorkspaceDirectoryNode from "./ServerWorkspaceDirectoryNode.vue";
 
@@ -12,6 +13,9 @@ const props = defineProps<{
   directory: WorkspaceDirectoryList | null;
   loading: boolean;
   currentAgentLinuxServerId?: string;
+  serverTerminalEnabled?: boolean;
+  terminalBaseUrl?: string;
+  createServerTerminalTicket?: (linuxServerId: string, confirmationText: string) => Promise<TerminalTicketResponse>;
 }>();
 
 const emit = defineEmits<{
@@ -26,6 +30,31 @@ const serverMismatch = computed(
   () => Boolean(selectedServer.value && props.currentAgentLinuxServerId && selectedServer.value.linuxServerId !== props.currentAgentLinuxServerId)
 );
 const disabledReason = computed(() => (serverMismatch.value ? "工作空间与 agent 不在同一服务器" : ""));
+const activeView = ref<"workspace" | "terminal">("workspace");
+const terminalConfirmation = ref("");
+const expectedTerminalConfirmation = computed(() => `ROOT@${selectedServer.value?.linuxServerId ?? ""}`);
+
+/** 切换服务器或关闭弹窗时清除高危确认，禁止在不同目标间复用确认文本。 */
+watch(
+  [() => props.selectedServerId, () => props.open],
+  ([, open]) => {
+    terminalConfirmation.value = "";
+    if (!open) activeView.value = "workspace";
+  }
+);
+
+function openServerTerminal() {
+  if (!props.serverTerminalEnabled || !selectedServer.value) return;
+  terminalConfirmation.value = "";
+  activeView.value = "terminal";
+}
+
+function createSelectedServerTerminalTicket() {
+  if (!selectedServer.value || !props.createServerTerminalTicket) {
+    throw new Error("当前服务器终端不可用");
+  }
+  return props.createServerTerminalTicket(selectedServer.value.linuxServerId, terminalConfirmation.value);
+}
 
 // macOS Finder-style navigation history stack
 const historyStack = ref<string[]>([]);
@@ -148,7 +177,28 @@ const breadcrumbs = computed(() => {
       >
         <header class="flex h-12 shrink-0 items-center justify-between border-b border-[var(--ta-border)] px-4">
           <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">选择服务器工作空间</h2>
-          <Button variant="ghost" size="sm" @click="emit('close')">取消</Button>
+          <div class="flex items-center gap-2">
+            <div v-if="serverTerminalEnabled" class="flex items-center rounded-md border border-[var(--ta-border)] bg-[#f8fafc] p-0.5" aria-label="服务器工具">
+              <button
+                type="button"
+                :class="[
+                  'rounded px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                  activeView === 'workspace' ? 'bg-white text-[#1d4ed8] shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                ]"
+                @click="activeView = 'workspace'"
+              >浏览目录</button>
+              <button
+                type="button"
+                :class="[
+                  'flex items-center gap-1 rounded px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                  activeView === 'terminal' ? 'bg-[#7f1d1d] text-white shadow-sm' : 'text-[#b91c1c] hover:bg-red-50'
+                ]"
+                :disabled="!selectedServer"
+                @click="openServerTerminal"
+              ><TerminalIcon class="h-3.5 w-3.5" />服务器终端</button>
+            </div>
+            <Button variant="ghost" size="sm" @click="emit('close')">取消</Button>
+          </div>
         </header>
 
         <div class="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] bg-[#f3f4f6]">
@@ -179,7 +229,7 @@ const breadcrumbs = computed(() => {
           </aside>
 
           <!-- Main Content: Directory Explorer -->
-          <main class="flex flex-col min-h-0 p-3 bg-[#fafafa]">
+          <main v-if="activeView === 'workspace'" class="flex flex-col min-h-0 p-3 bg-[#fafafa]">
             <!-- Warning banner -->
             <div v-if="disabledReason" class="mb-2 flex items-center gap-2 rounded-md bg-red-50 border border-red-100 px-3 py-1.5 text-[12px] text-red-600 shrink-0 select-none">
               <AlertTriangle class="h-3.5 w-3.5 text-red-500 shrink-0" />
@@ -298,6 +348,47 @@ const breadcrumbs = computed(() => {
                   {{ directory?.path ?? selectedServer?.defaultDirectory ?? "—" }}
                 </span>
               </div>
+            </div>
+          </main>
+
+          <!-- 服务器终端固定在有明确高度的选择器内容区内，避免再次创建无高度边界的弹窗。 -->
+          <main v-else class="flex min-h-0 flex-col gap-3 bg-[#fafafa] p-3">
+            <div class="flex shrink-0 items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-800" role="alert">
+              <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+              <span>
+                这是 <strong>{{ selectedServer?.name || selectedServer?.linuxServerId }}</strong> 的 Linux root shell，命令会直接修改部署服务器。
+                平台不使用 SSH 用户名或密码；目标 Java 必须以 root 运行。
+              </span>
+            </div>
+
+            <section class="shrink-0 rounded-md border border-[var(--ta-border)] bg-white px-3 py-2 shadow-sm">
+              <label class="grid grid-cols-[minmax(260px,auto)_minmax(240px,1fr)] items-center gap-3 text-[12px] text-gray-700">
+                <span>请手工输入 <code class="font-mono font-bold text-red-700">{{ expectedTerminalConfirmation }}</code> 后连接</span>
+                <input
+                  v-model="terminalConfirmation"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :placeholder="expectedTerminalConfirmation"
+                  class="h-8 min-w-0 rounded-md border border-gray-300 px-2.5 font-mono text-[12px] outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                />
+              </label>
+            </section>
+
+            <div class="min-h-0 flex-1">
+              <TerminalPanel
+                v-if="selectedServer"
+                :key="selectedServer.linuxServerId"
+                class="h-full min-h-0"
+                :base-url="terminalBaseUrl ?? ''"
+                :create-ticket="createSelectedServerTerminalTicket"
+                :disabled="terminalConfirmation !== expectedTerminalConfirmation"
+                :disabled-reason="`确认文本必须完全等于 ${expectedTerminalConfirmation}`"
+                :title="`root@${selectedServer.linuxServerId}`"
+                connect-label="连接 root 终端"
+                danger
+              />
+              <div v-else class="flex h-full items-center justify-center text-[13px] text-gray-400">请先选择服务器。</div>
             </div>
           </main>
         </div>

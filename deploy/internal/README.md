@@ -2,7 +2,7 @@
 
 当前代码支持单后台和完整多后台部署。两种模式使用同一套 Mac 离线交付物、数据库结构、Redis 运行态、Java→manager 控制协议和内部模型代理；一次性 WebSocket ticket 继续保存在签发 JVM。workspace PTY、文件和 Agent 配置进度沿用既有固定节点方式；服务器 root PTY 通过 HTTPS Nginx 的精确 `linuxServerId` location 固定到签发 Java，不依赖 sticky。
 
-服务器 root 终端默认关闭。上线时先在每个后端 `backend.env` 配置 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true` 和 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<前端入口>`，确认 systemd Java 的 effective UID 为 0；再在前端 `nginx.env` 开启 TLS、配置证书路径，并以 `linuxServerId=host:port` 填写 `TEST_AGENT_NGINX_TERMINAL_ROUTES`。重新执行 `configure-nginx.sh` 后先启动/验证 Java，再启动 worker，最后使用运行管理页手工输入 `ROOT@linuxServerId` 验收。
+服务器 root 终端默认关闭。上线时先在每个后端 `backend.env` 配置 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true` 和 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<前端入口>`，确认 systemd Java 的 effective UID 为 0；再在前端 `nginx.env` 开启 TLS、配置证书路径，并以 `linuxServerId=host:port` 填写 `TEST_AGENT_NGINX_TERMINAL_ROUTES`。重新执行 `configure-nginx.sh` 后先启动/验证 Java，再启动 worker，最后在“选择服务器工作空间”弹窗切换到“服务器终端”，手工输入 `ROOT@linuxServerId` 验收。
 
 请选择对应文档：
 
