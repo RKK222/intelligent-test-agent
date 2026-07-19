@@ -22,12 +22,12 @@ describe("PetCompanionAvatar", () => {
 
   it("uses the supplied raster avatar and hides status overlays in the roster", () => {
     const wrapper = mount(PetCompanionAvatar, {
-      props: { petId: "bird" },
+      props: { petId: "panda" },
     });
 
     expect(wrapper.get("svg").classes()).not.toContain("has-status");
     expect(wrapper.get("image").attributes("href")).toBeTruthy();
-    expect(wrapper.get(".pet-status-disc").attributes("fill")).toBe("#f7d77d");
+    expect(wrapper.get(".pet-status-disc").attributes("fill")).toBe("#e5ddd2");
   });
 
   it("maps initialization, error, and checking states onto the status halo", async () => {

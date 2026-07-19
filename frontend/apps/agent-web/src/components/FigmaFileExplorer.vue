@@ -41,6 +41,10 @@ const props = defineProps<FileExplorerProps & {
   personalWorkspaceBranch?: string;
   /** Agent 配置保存修订号；变化时通知 GitChangesPanel 立即重新统计变更。 */
   agentConfigRevision?: number;
+  /** 当前正在手动重载的 Agent 运行态作用域。 */
+  personalRuntimeReloading?: "PUBLIC" | "WORKSPACE" | null;
+  /** 运行中任务不允许 dispose。 */
+  runtimeBusy?: boolean;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
   /** 是否显示应用管理员个人工作区引用配置入口 */
@@ -76,6 +80,12 @@ const emit = defineEmits<{
     totalCount?: number;
   }];
   "agent-files-discarded": [payload: { scope: "PUBLIC" | "WORKSPACE"; paths: string[] }];
+  "personal-runtime-reload": [payload: {
+    scope: "PUBLIC" | "WORKSPACE";
+    worktreeId?: string;
+    linuxServerId?: string;
+    workspaceId?: string;
+  }];
   refresh: [];
   // 选择某个应用版本后由父组件切换运行态 Workspace
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -509,10 +519,13 @@ defineExpose({
               :workspace-id="agentConfigWorkspaceId"
               :can-write="canManagePublicConfig ?? !!canWrite"
               :can-manage-workspace-config="canManageAgentConfig ?? !!canWrite"
+              :personal-runtime-reloading="personalRuntimeReloading"
+              :runtime-busy="runtimeBusy"
               :hide-header="true"
               :hide-git-ops="true"
               :active-path="activePath"
               @open-file="emit('openAgentFile', $event)"
+              @personal-runtime-reload="emit('personal-runtime-reload', $event)"
             />
           </div>
         </div>

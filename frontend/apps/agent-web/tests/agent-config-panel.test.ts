@@ -37,6 +37,8 @@ const apiClientMock = vi.hoisted(() => ({
   resolvePublicAgentGitConflict: vi.fn(),
   resolveAllPublicAgentGitConflicts: vi.fn(),
   abortPublicAgentGitConflict: vi.fn(),
+  disposeGlobal: vi.fn(),
+  reloadPublicPersonalAgentRuntime: vi.fn(),
   connectAgentConfigProgress: vi.fn()
 }));
 
@@ -114,6 +116,8 @@ describe("AgentConfigPanel", () => {
     apiClientMock.resolvePublicAgentGitConflict.mockResolvedValue(undefined);
     apiClientMock.resolveAllPublicAgentGitConflicts.mockResolvedValue(undefined);
     apiClientMock.abortPublicAgentGitConflict.mockResolvedValue(undefined);
+    apiClientMock.disposeGlobal.mockResolvedValue(true);
+    apiClientMock.reloadPublicPersonalAgentRuntime.mockResolvedValue({ reloaded: true, message: "reloaded" });
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
   });
 
@@ -192,6 +196,31 @@ describe("AgentConfigPanel", () => {
     expect(view.getByText("创建公共 worktree")).toBeTruthy();
     expect(view.getByText("切换公共 worktree")).toBeTruthy();
   });
+
+  it("keeps Agent config update buttons in the left tree for authorized scopes", async () => {
+    const { view } = renderPanel();
+
+    await view.findByText("worktree · change-agent-md · 测试服务器");
+    await fireEvent.click(view.getByRole("button", { name: "Agent 配置更新（公共）" }));
+    await waitFor(() => {
+      const events = (view.emitted("personal-runtime-reload") ?? []) as unknown[][];
+      expect(events.at(-1)?.[0]).toMatchObject({
+        scope: "PUBLIC",
+        worktreeId: "agw_1234567890abcdef",
+        linuxServerId: "linux-1"
+      });
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "Agent 配置更新（应用）" }));
+    await waitFor(() => {
+      const events = (view.emitted("personal-runtime-reload") ?? []) as unknown[][];
+      expect(events.at(-1)?.[0]).toMatchObject({
+        scope: "WORKSPACE",
+        workspaceId: "wrk_1234567890abcdef"
+      });
+    });
+  });
+
 
   it("explicitly creates and mounts the current user's stable public worktree", async () => {
     const secondRepository = {
@@ -388,6 +417,8 @@ describe("AgentConfigPanel", () => {
     expect(view.queryByText("opencode.jsonc")).toBeNull();
     expect(view.queryByText("package-lock.json")).toBeNull();
     expect(view.queryByText("package.json")).toBeNull();
+    expect(view.queryByRole("button", { name: "Agent 配置更新（公共）" })).toBeNull();
+    expect(view.queryByRole("button", { name: "Agent 配置更新（应用）" })).toBeNull();
   });
 
   it("emits a public Agent load request without reading content in the panel", async () => {

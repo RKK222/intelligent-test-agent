@@ -32,6 +32,8 @@ import { agentFileInfo, isAgentFilePath, type AgentFileLoadRequest } from "./age
 import { notifyError, notifyInfo, notifySuccess } from "./notify";
 import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 
+type Scope = "PUBLIC" | "WORKSPACE";
+
 const props = defineProps<{
   baseUrl: string;
   workspaceId?: string;
@@ -42,17 +44,25 @@ const props = defineProps<{
   hideHeader?: boolean;
   hideGitOps?: boolean;
   activePath?: string;
+  /** 当前正在手动重载的 Agent 运行态作用域；由工作台统一防止重复操作。 */
+  personalRuntimeReloading?: Scope | null;
+  /** 运行中任务不允许 dispose，避免释放正在使用的 workspace 实例。 */
+  runtimeBusy?: boolean;
 }>();
 
 const emit = defineEmits<{
   openFile: [payload: AgentFileLoadRequest];
+  "personal-runtime-reload": [payload: {
+    scope: Scope;
+    worktreeId?: string;
+    linuxServerId?: string;
+    workspaceId?: string;
+  }];
 }>();
 
 const workbench = useWorkbenchStore();
 const api = createBackendApiClient({ baseUrl: props.baseUrl });
 const workspaceCanWrite = computed(() => props.canManageWorkspaceConfig ?? props.canWrite);
-
-type Scope = "PUBLIC" | "WORKSPACE";
 
 const status = ref<{ PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus }>({});
 const entriesByScope = ref<Record<Scope, Record<string, FileTreeEntry[]>>>({ PUBLIC: {}, WORKSPACE: {} });
@@ -436,6 +446,32 @@ async function refreshScope(scope: Scope) {
     await reloadExpandedDirectories(scope, expandedSnapshot);
     await refreshActiveEditorFile(scope);
   }
+}
+
+const personalRuntimeReloadDisabled = computed(() =>
+  busy.value
+  || props.runtimeBusy === true
+  || (props.personalRuntimeReloading !== null && props.personalRuntimeReloading !== undefined)
+);
+
+/** 从左侧 Agent 区域请求当前用户的 Agent 配置运行态更新。 */
+function requestPersonalRuntimeReload(scope: Scope) {
+  if (personalRuntimeReloadDisabled.value) return;
+  if (scope === "PUBLIC") {
+    const currentWorktree = publicWorktree.value;
+    if (!currentWorktree?.worktreeId || !currentWorktree.linuxServerId) {
+      errorMessage.value = "请先创建或切换到当前用户的公共个人 worktree";
+      return;
+    }
+    emit("personal-runtime-reload", {
+      scope,
+      worktreeId: currentWorktree.worktreeId,
+      linuxServerId: currentWorktree.linuxServerId
+    });
+    return;
+  }
+  if (!props.workspaceId) return;
+  emit("personal-runtime-reload", { scope, workspaceId: props.workspaceId });
 }
 
 // “更新公共配置”操作的正在进行状态标记，用以控制按钮禁用和加载动效
@@ -1304,6 +1340,21 @@ defineExpose({
             <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
           </button>
         </el-tooltip>
+        <button
+          v-if="canWrite"
+          type="button"
+          class="agent-icon-btn"
+          title="Agent 配置更新（公共）"
+          aria-label="Agent 配置更新（公共）"
+          :disabled="personalRuntimeReloadDisabled || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
+          @click="requestPersonalRuntimeReload('PUBLIC')"
+        >
+          <RefreshCw
+            class="h-3.5 w-3.5"
+            :class="{ 'animate-spin': personalRuntimeReloading === 'PUBLIC' }"
+            :stroke-width="1.5"
+          />
+        </button>
         <div v-if="canWrite" class="agent-more-menu-container">
           <button
             type="button"
@@ -1376,6 +1427,21 @@ defineExpose({
           @click="openCreateWorkspacePackageModal"
         >
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+        </button>
+        <button
+          v-if="workspaceCanWrite"
+          type="button"
+          class="agent-icon-btn"
+          title="Agent 配置更新（应用）"
+          aria-label="Agent 配置更新（应用）"
+          :disabled="personalRuntimeReloadDisabled || !workspaceId"
+          @click="requestPersonalRuntimeReload('WORKSPACE')"
+        >
+          <RefreshCw
+            class="h-3.5 w-3.5"
+            :class="{ 'animate-spin': personalRuntimeReloading === 'WORKSPACE' }"
+            :stroke-width="1.5"
+          />
         </button>
       </div>
       <div v-if="rootExpanded.has('WORKSPACE')" class="agent-node-list">

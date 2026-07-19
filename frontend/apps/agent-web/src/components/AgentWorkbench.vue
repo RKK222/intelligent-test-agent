@@ -376,6 +376,8 @@ const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<"editor" | "diff" | "system">("editor");
 const feedback = ref<Feedback | null>(null);
+// 手动重载仅释放当前用户的 OpenCode 运行态；按钮状态由工作台统一管理，避免重复 dispose。
+const personalRuntimeReloading = ref<"PUBLIC" | "WORKSPACE" | null>(null);
 // 引用配置保存可能发生在 Run 执行中；记录代次并等空闲后 dispose，避免释放正在使用的 workspace 实例。
 const pendingReferenceRuntimeReloadRevision = ref(0);
 let handledReferenceRuntimeReloadRevision = 0;
@@ -2160,6 +2162,85 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(
   }
   await reloadReferenceRuntimeIfIdle();
   return lastRuntimeReloadError;
+}
+
+/**
+ * 手动验证个人 Agent/Skill 配置的运行态重载。
+ * 公共配置必须先切换当前用户的公共 worktree 指针，再 dispose；应用配置只 dispose 当前用户。
+ */
+async function handlePersonalRuntimeReload(payload: {
+  scope: "PUBLIC" | "WORKSPACE";
+  worktreeId?: string;
+  linuxServerId?: string;
+  workspaceId?: string;
+}) {
+  if (personalRuntimeReloading.value || referenceRuntimeReloadInFlight) return;
+  if (!selectedWorkspaceIdRef.value) {
+    feedback.value = {
+      kind: "info",
+      title: "个人配置未重载",
+      description: "请先选择应用工作区，再重载个人运行态。"
+    };
+    return;
+  }
+  if (runtimeBusy.value) {
+    feedback.value = {
+      kind: "info",
+      title: "当前任务运行中",
+      description: "任务结束后再手动重载个人运行态。"
+    };
+    return;
+  }
+  if (!opencodeProcessReady.value) {
+    feedback.value = {
+      kind: "info",
+      title: payload.scope === "PUBLIC" ? "公共个人配置未重载" : "应用个人配置未重载",
+      description: "当前 TestAgent 进程未就绪，无需 dispose；下次启动会读取最新配置。"
+    };
+    return;
+  }
+  const publicRuntimeRoute = payload.scope === "PUBLIC"
+    ? {
+        worktreeId: payload.worktreeId ?? workbench.publicWorktree?.worktreeId,
+        linuxServerId: payload.linuxServerId
+          ?? workbench.publicWorktree?.linuxServerId
+          ?? workbench.publicConfigLinuxServerId
+          ?? undefined
+      }
+    : null;
+  if (payload.scope === "PUBLIC" && (!publicRuntimeRoute?.worktreeId || !publicRuntimeRoute.linuxServerId)) {
+    feedback.value = {
+      kind: "error",
+      title: "公共个人配置未重载",
+      description: "缺少当前用户公共 worktree 路由。"
+    };
+    return;
+  }
+
+  personalRuntimeReloading.value = payload.scope;
+  try {
+    if (payload.scope === "PUBLIC") {
+      const result = await api.reloadPublicPersonalAgentRuntime(publicRuntimeRoute!.worktreeId!, publicRuntimeRoute!.linuxServerId!);
+      if (!result.reloaded) {
+        throw new Error(result.message || "公共个人配置未重新加载");
+      }
+    } else {
+      await api.disposeGlobal();
+    }
+    await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
+    feedback.value = {
+      kind: "success",
+      title: payload.scope === "PUBLIC" ? "公共个人配置已重载" : "应用个人配置已重载",
+      description: "已只刷新当前用户的 OpenCode 运行态；其他用户不受影响。"
+    };
+  } catch (error) {
+    feedback.value = errorFeedback(
+      payload.scope === "PUBLIC" ? "公共个人配置重载失败" : "应用个人配置重载失败",
+      error
+    );
+  } finally {
+    personalRuntimeReloading.value = null;
+  }
 }
 
 async function reloadReferenceRuntimeIfIdle(): Promise<void> {
@@ -6622,6 +6703,10 @@ async function handleLogout() {
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :can-play-pet-games="isSuperAdmin"
+    :can-manage-public-agent-config="isSuperAdmin"
+    :can-manage-workspace-agent-config="isAppAdmin"
+    :personal-runtime-reloading="personalRuntimeReloading"
+    :runtime-busy="runtimeBusy"
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
@@ -6643,6 +6728,7 @@ async function handleLogout() {
     @join-app="handleJoinApp"
     @robot-side-question="handleRobotSideQuestion"
     @close-robot-side-question="handleCloseRobotSideQuestion"
+    @personal-runtime-reload="handlePersonalRuntimeReload"
     @open-help="openHelpCenter"
   >
     <template #activity>
@@ -6714,6 +6800,8 @@ async function handleLogout() {
           :personal-workspace-id="currentPersonalWorkspaceId"
           :personal-workspace-branch="currentPersonalWorkspaceBranch"
           :agent-config-revision="agentConfigRevision"
+          :personal-runtime-reloading="personalRuntimeReloading"
+          :runtime-busy="runtimeBusy"
           :show-server-workspace-switch="isSuperAdmin"
           :show-reference-configuration="showReferenceConfiguration"
           :search-results="searchResults"
@@ -6737,6 +6825,7 @@ async function handleLogout() {
             files: payload?.files
           })"
           @agent-files-discarded="refreshDiscardedAgentFiles"
+          @personal-runtime-reload="handlePersonalRuntimeReload"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"

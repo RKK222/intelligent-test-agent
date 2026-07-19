@@ -35,7 +35,7 @@ describe("pet companions", () => {
 
   it("keeps a random companion stable for the day and redraws on the next day", () => {
     const random = vi.fn().mockReturnValueOnce(0.2).mockReturnValueOnce(0.8);
-    const preference: PetPreference = { mode: "random", selectedPetId: "sniffer" };
+    const preference: PetPreference = { mode: "random", selectedPetId: "deer" };
 
     const first = resolvePetPreference(preference, new Date(2026, 6, 15), random);
     const sameDay = resolvePetPreference(first.preference, new Date(2026, 6, 15, 22), random);
@@ -53,9 +53,9 @@ describe("pet companions", () => {
       setItem: vi.fn((_: string, value: string) => { storage.value = value; }),
     };
 
-    expect(loadPetPreference(storage)).toMatchObject({ mode: "daily", selectedPetId: "sniffer" });
+    expect(loadPetPreference(storage)).toMatchObject({ mode: "daily", selectedPetId: "deer" });
 
-    const selected: PetPreference = { mode: "selected", selectedPetId: "bird" };
+    const selected: PetPreference = { mode: "selected", selectedPetId: "cat" };
     savePetPreference(storage, selected);
     expect(storage.setItem).toHaveBeenCalledWith(PET_PREFERENCE_STORAGE_KEY, JSON.stringify(selected));
     expect(loadPetPreference(storage)).toEqual(selected);
@@ -68,18 +68,18 @@ describe("pet companions", () => {
 
     expect(loadPetPreference(storage)).toMatchObject({
       mode: "selected",
-      selectedPetId: "bird",
-      randomPetId: "hedgehog",
+      selectedPetId: "cat",
+      randomPetId: "raccoon",
     });
   });
 
   it("loads and clamps a persisted pet size without breaking old records", () => {
     const storage = {
-      getItem: vi.fn(() => JSON.stringify({ mode: "selected", selectedPetId: "bird", scale: 1.37 })),
+      getItem: vi.fn(() => JSON.stringify({ mode: "selected", selectedPetId: "cat", scale: 1.37 })),
     };
 
     expect(loadPetPreference(storage)).toMatchObject({ scale: 1.35 });
-    expect(loadPetPreference({ getItem: vi.fn(() => JSON.stringify({ mode: "selected", selectedPetId: "bird" })) }))
+    expect(loadPetPreference({ getItem: vi.fn(() => JSON.stringify({ mode: "selected", selectedPetId: "cat" })) }))
       .not.toHaveProperty("scale");
   });
 });

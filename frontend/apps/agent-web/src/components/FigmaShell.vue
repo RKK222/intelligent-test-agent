@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
-import { CalendarDays, ChevronDown, CircleHelp, Dices, Gamepad2, LogOut, MousePointer2, PawPrint, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { CalendarDays, ChevronDown, CircleHelp, Dices, Gamepad2, LogOut, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
@@ -68,6 +68,13 @@ const props = withDefaults(
     sideQuestionManualMode?: boolean;
     /** 仅 SUPER_ADMIN 可以打开宠物小游戏；默认关闭以避免独立挂载时泄露入口。 */
     canPlayPetGames?: boolean;
+    /** 是否显示公共/应用个人配置的手动运行态重载入口。 */
+    canManagePublicAgentConfig?: boolean;
+    canManageWorkspaceAgentConfig?: boolean;
+    /** 当前正在手动重载的个人运行态作用域。 */
+    personalRuntimeReloading?: "PUBLIC" | "WORKSPACE" | null;
+    /** 运行中任务不允许手动 dispose。 */
+    runtimeBusy?: boolean;
     showLeftPanel?: boolean;
     showRightPanel?: boolean;
     runtimeInventory?: RuntimeInventorySummary;
@@ -86,6 +93,10 @@ const props = withDefaults(
     sideQuestionAvailable: true,
     sideQuestionManualMode: false,
     canPlayPetGames: false,
+    canManagePublicAgentConfig: false,
+    canManageWorkspaceAgentConfig: false,
+    personalRuntimeReloading: null,
+    runtimeBusy: false,
     showLeftPanel: true,
     showRightPanel: true
   }
@@ -126,6 +137,7 @@ const emit = defineEmits<{
   (e: "join-app", appId: string, callback: (success: boolean) => void): void;
   (e: "robot-side-question", question: string): void;
   (e: "close-robot-side-question"): void;
+  (e: "personal-runtime-reload", payload: { scope: "PUBLIC" | "WORKSPACE" }): void;
   (e: "open-help", topic?: string): void;
 }>();
 
@@ -427,6 +439,8 @@ const robotQuestionOpen = ref(false);
 const robotGameOpen = ref(false);
 // 伙伴选择与问答共用浮层，避免新增独立设置入口占用活动栏。
 const petSettingsOpen = ref(false);
+// 个人配置重载先在宠物面板内确认，再由工作台调用既有接口。
+const pendingPetRuntimeReloadScope = ref<"PUBLIC" | "WORKSPACE" | null>(null);
 // 进程状态气泡与宠物共用坐标，不再单独维护可拖动的状态点位置。
 const robotProcessStatusOpen = ref(false);
 // 首次未初始化提醒每次页面生命周期只自动展示一次，用户关闭后不被状态轮询反复打扰。
@@ -460,7 +474,7 @@ const ROBOT_POSITION_STORAGE_KEY = "figma-shell-robot-pos";
 const ROBOT_FIXED_STORAGE_KEY = "figma-shell-robot-fixed";
 
 const petPreference = ref(loadPetPreference(typeof window === "undefined" ? undefined : window.localStorage));
-const activePetId = ref<PetCompanionId>("sniffer");
+const activePetId = ref<PetCompanionId>("deer");
 const activePet = computed(() => getPetCompanion(activePetId.value));
 const robotScale = computed(() => normalizePetScale(petPreference.value.scale ?? PET_SCALE_DEFAULT));
 const robotWidth = computed(() => ROBOT_BASE_WIDTH * robotScale.value);
@@ -1441,8 +1455,25 @@ function closeRobotQuestion() {
   robotQuestionOpen.value = false;
   robotGameOpen.value = false;
   petSettingsOpen.value = false;
+  pendingPetRuntimeReloadScope.value = null;
   robotQuestionDraft.value = "";
   emit("close-robot-side-question");
+}
+
+function requestPetRuntimeReload(scope: "PUBLIC" | "WORKSPACE") {
+  if (props.runtimeBusy || props.personalRuntimeReloading !== null) return;
+  pendingPetRuntimeReloadScope.value = scope;
+}
+
+function cancelPetRuntimeReload() {
+  pendingPetRuntimeReloadScope.value = null;
+}
+
+function confirmPetRuntimeReload() {
+  const scope = pendingPetRuntimeReloadScope.value;
+  if (!scope || props.runtimeBusy || props.personalRuntimeReloading !== null) return;
+  pendingPetRuntimeReloadScope.value = null;
+  emit("personal-runtime-reload", { scope });
 }
 
 function openRobotGames() {
@@ -2173,6 +2204,55 @@ function submitJoinApp() {
           <button type="button" aria-label="关闭宠物旁路问答" @click="closeRobotQuestion">×</button>
         </div>
       </header>
+      <div
+        v-if="(canManagePublicAgentConfig || canManageWorkspaceAgentConfig) && !robotGameOpen"
+        class="figma-pet-runtime-actions"
+        data-testid="pet-runtime-reload-actions"
+      >
+        <span>Agent 配置更新</span>
+        <div class="figma-pet-runtime-action-buttons">
+          <button
+            v-if="canManagePublicAgentConfig"
+            type="button"
+            class="figma-pet-runtime-action"
+            aria-label="重载公共个人配置"
+            title="重载公共个人配置"
+            :disabled="runtimeBusy || personalRuntimeReloading !== null"
+            @click="requestPetRuntimeReload('PUBLIC')"
+          >
+            <RefreshCw :size="12" :class="{ 'animate-spin': personalRuntimeReloading === 'PUBLIC' }" aria-hidden="true" />
+            公共
+          </button>
+          <button
+            v-if="canManageWorkspaceAgentConfig"
+            type="button"
+            class="figma-pet-runtime-action"
+            aria-label="重载应用个人配置"
+            title="重载应用个人配置"
+            :disabled="runtimeBusy || personalRuntimeReloading !== null"
+            @click="requestPetRuntimeReload('WORKSPACE')"
+          >
+            <RefreshCw :size="12" :class="{ 'animate-spin': personalRuntimeReloading === 'WORKSPACE' }" aria-hidden="true" />
+            应用
+          </button>
+        </div>
+      </div>
+      <div
+        v-if="pendingPetRuntimeReloadScope"
+        class="figma-pet-runtime-confirm"
+        role="status"
+        data-testid="pet-runtime-reload-confirm"
+      >
+          <p>
+            {{ pendingPetRuntimeReloadScope === 'PUBLIC'
+              ? 'Agent 配置更新会切换到你的公共个人 worktree，并只释放你的 OpenCode 缓存。'
+              : 'Agent 配置更新会只释放你的应用 OpenCode 缓存，下一次请求会重新读取个人配置。' }}
+        </p>
+        <div>
+          <button type="button" @click="cancelPetRuntimeReload">取消</button>
+          <button type="button" class="is-primary" @click="confirmPetRuntimeReload">确认重载</button>
+        </div>
+      </div>
       <section v-if="petSettingsOpen" class="figma-pet-roster" data-testid="pet-companion-settings" aria-label="小宠物显示方式">
         <div class="figma-pet-mode-tabs" role="group" aria-label="显示方式">
           <button
@@ -2643,8 +2723,95 @@ function submitJoinApp() {
 
 .figma-pet-roster-list {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.figma-pet-runtime-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid #e4e9ef;
+  color: #8795a5;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.figma-pet-runtime-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.figma-pet-runtime-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid #d4dee8;
+  border-radius: 6px;
+  background: #fff;
+  color: #617183;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.figma-pet-runtime-action:hover:not(:disabled),
+.figma-pet-runtime-action:focus-visible {
+  border-color: #9db6ca;
+  background: #edf4f8;
+  color: #294c65;
+  outline: none;
+}
+
+.figma-pet-runtime-action:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.figma-pet-runtime-confirm {
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid #d8e1ea;
+  border-radius: 7px;
+  background: #f7fafc;
+  color: #647487;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.figma-pet-runtime-confirm p {
+  margin: 0;
+}
+
+.figma-pet-runtime-confirm > div {
+  display: flex;
+  justify-content: flex-end;
   gap: 5px;
+  margin-top: 6px;
+}
+
+.figma-pet-runtime-confirm button {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid #d1dce7;
+  border-radius: 5px;
+  background: #fff;
+  color: #627286;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.figma-pet-runtime-confirm button.is-primary {
+  border-color: #9db6ca;
+  background: #edf4f8;
+  color: #294c65;
 }
 
 .figma-pet-roster-item {
@@ -4155,7 +4322,7 @@ function submitJoinApp() {
   height: 29px;
 }
 
-/* 五种轮廓共享同一组整体彩蛋动作，避免依赖某一种动物的腿、耳或尾巴结构。 */
+/* 七种轮廓共享同一组整体彩蛋动作，避免依赖某一种动物的腿、耳或尾巴结构。 */
 .state-waving .robot-svg {
   animation: pet-greeting 0.48s infinite ease-in-out alternate;
 }

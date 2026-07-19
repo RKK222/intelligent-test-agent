@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import snifferHoundUrl from "../assets/pets/sniffer-hound.png";
-import radarBunnyUrl from "../assets/pets/radar-bunny.png";
-import starFoxUrl from "../assets/pets/star-fox.png";
-import inspectorBirdUrl from "../assets/pets/inspector-bird.png";
-import dataHedgehogUrl from "../assets/pets/data-hedgehog.png";
+import deerUrl from "../assets/pets/deer.png";
+import redPandaUrl from "../assets/pets/red-panda.png";
+import dragonUrl from "../assets/pets/dragon.png";
+import purpleFoxUrl from "../assets/pets/purple-fox.png";
+import pandaUrl from "../assets/pets/panda.png";
+import raccoonUrl from "../assets/pets/raccoon.png";
+import tuxedoCatUrl from "../assets/pets/tuxedo-cat.png";
 import type { PetCompanionId } from "./pet-companions";
 
 type PetStatusTone = "ready" | "needs-initialization" | "checking" | "error";
@@ -19,20 +21,24 @@ const props = withDefaults(defineProps<{
 });
 
 const petImageUrls: Record<PetCompanionId, string> = {
-  sniffer: snifferHoundUrl,
-  bunny: radarBunnyUrl,
-  fox: starFoxUrl,
-  bird: inspectorBirdUrl,
-  hedgehog: dataHedgehogUrl,
+  deer: deerUrl,
+  "red-panda": redPandaUrl,
+  dragon: dragonUrl,
+  fox: purpleFoxUrl,
+  panda: pandaUrl,
+  raccoon: raccoonUrl,
+  cat: tuxedoCatUrl,
 };
 
 // 名册场景按角色使用不同底色；运行态场景用头像下方的细光圈表达进程状态。
 const petDiscColors: Record<PetCompanionId, string> = {
-  sniffer: "#f1d8b2",
-  bunny: "#bfe9e2",
-  fox: "#f3c39c",
-  bird: "#f7d77d",
-  hedgehog: "#c9baf2",
+  deer: "#f0d6a9",
+  "red-panda": "#f3c0a1",
+  dragon: "#c0d1f4",
+  fox: "#d9c8f4",
+  panda: "#e5ddd2",
+  raccoon: "#d9c8bd",
+  cat: "#ded7e9",
 };
 
 const statusDiscColors: Record<PetStatusTone, string> = {

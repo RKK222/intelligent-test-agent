@@ -121,6 +121,43 @@ describe("FigmaShell", () => {
     });
   });
 
+  it("shows personal runtime controls in the first pet panel and confirms before emitting", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell({
+      props: {
+        canManagePublicAgentConfig: true,
+        canManageWorkspaceAgentConfig: true
+      }
+    });
+    await summonRobot(wrapper);
+
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="pet-runtime-reload-actions"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="pet-companion-settings"]').exists()).toBe(false);
+    await wrapper.get('button[aria-label="重载公共个人配置"]').trigger("click");
+    expect(wrapper.get('[data-testid="pet-runtime-reload-confirm"]').text()).toContain("公共个人 worktree");
+    expect(wrapper.emitted("personal-runtime-reload")).toBeUndefined();
+
+    await wrapper.get('[data-testid="pet-runtime-reload-confirm"] button.is-primary').trigger("click");
+    expect(wrapper.emitted("personal-runtime-reload")?.[0]).toEqual([{ scope: "PUBLIC" }]);
+  });
+
+  it("hides personal Agent update controls without update permission", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell();
+    await summonRobot(wrapper);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="pet-runtime-reload-actions"]').exists()).toBe(false);
+  });
+
   it("allows adjusting the pet size and persists it with the companion preference", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);

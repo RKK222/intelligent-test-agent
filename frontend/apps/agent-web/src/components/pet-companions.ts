@@ -1,38 +1,52 @@
 export const PET_COMPANIONS = [
   {
-    id: "sniffer",
-    name: "Bug 嗅探者",
-    species: "侦探犬",
-    duty: "精准发现漏洞",
-    accent: "#45b98f",
+    id: "deer",
+    name: "寻迹鹿",
+    species: "敏捷小鹿",
+    duty: "快速发现线索",
+    accent: "#d89b55",
   },
   {
-    id: "bunny",
-    name: "雷达兔",
-    species: "雷达兔",
-    duty: "环境扫描与快速感知",
-    accent: "#48bdb7",
+    id: "red-panda",
+    name: "巡查红熊猫",
+    species: "红熊猫",
+    duty: "敏锐巡检与定位",
+    accent: "#d66b4d",
+  },
+  {
+    id: "dragon",
+    name: "深夜龙",
+    species: "夜巡龙",
+    duty: "全域扫描与守护",
+    accent: "#4b79d5",
   },
   {
     id: "fox",
     name: "星探狐",
     species: "探索狐狸",
     duty: "敏锐定位异常",
-    accent: "#e78a55",
+    accent: "#9c7be4",
   },
   {
-    id: "bird",
-    name: "巡检小鸟",
-    species: "巡检小鸟",
-    duty: "巡检与持续监控",
-    accent: "#f0b52b",
+    id: "panda",
+    name: "稳态熊猫",
+    species: "熊猫",
+    duty: "稳定运行与质量守护",
+    accent: "#6f8791",
   },
   {
-    id: "hedgehog",
-    name: "数据刺猬",
-    species: "数据刺猬",
-    duty: "收集分析与深度排查",
-    accent: "#7662d8",
+    id: "raccoon",
+    name: "工具浣熊",
+    species: "浣熊",
+    duty: "工具排查与修复",
+    accent: "#9b7c6b",
+  },
+  {
+    id: "cat",
+    name: "夜巡猫",
+    species: "黑白猫",
+    duty: "安静监控与异常提醒",
+    accent: "#8f79bb",
   },
 ] as const;
 
@@ -57,7 +71,7 @@ export const PET_SCALE_STEP = 0.05;
 
 const DEFAULT_PREFERENCE: PetPreference = {
   mode: "daily",
-  selectedPetId: "sniffer",
+  selectedPetId: "deer",
 };
 
 const PET_IDS = new Set<PetCompanionId>(PET_COMPANIONS.map((pet) => pet.id));
@@ -72,13 +86,16 @@ export function normalizePetScale(value: unknown): number {
 
 // 角色替换后仍兼容旧浏览器里的选择记录，把原角色映射到新的同职责伙伴。
 const LEGACY_PET_ID_ALIASES: Record<string, PetCompanionId> = {
-  chameleon: "bunny",
-  platypus: "fox",
-  octopus: "fox",
-  cat: "fox",
-  owl: "bird",
-  glitch: "hedgehog",
-  shark: "hedgehog",
+  sniffer: "deer",
+  bunny: "red-panda",
+  bird: "raccoon",
+  hedgehog: "panda",
+  chameleon: "dragon",
+  platypus: "panda",
+  octopus: "dragon",
+  owl: "cat",
+  glitch: "raccoon",
+  shark: "dragon",
 };
 
 function normalizePetCompanionId(value: unknown): PetCompanionId | undefined {
