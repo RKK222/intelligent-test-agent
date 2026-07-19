@@ -114,7 +114,8 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(gateway.healthCommands).hasSize(1);
         assertThat(gateway.startCommands.getFirst().containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
         assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(USER_SESSION_DIR);
-        assertThat(gateway.startCommands.getFirst().configPath()).isEqualTo(CONFIG_DIR);
+        assertThat(gateway.startCommands.getFirst().configPath())
+                .isEqualTo("/tmp/testagent/.session/users/ucid_001/.testagent-runtime/current-public-config");
         assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
@@ -621,7 +622,7 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
-    void initializeDelegatesPublicConfigCheckToSelectedManagerWhenLocalDirIsMissing() {
+    void initializeBuildsStableManagedConfigLinkWhenSharedConfigIsOnSelectedManager() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_busy", container("ctr_busy", "10.8.0.12", 4096, 4100, 4, 3));
         repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.13", 4200, 4205, 4, 0));
@@ -639,7 +640,8 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(gateway.startCommands).singleElement().satisfies(command -> {
             assertThat(command.containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
             assertThat(command.linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.13"));
-            assertThat(command.configPath()).isEqualTo(missingConfigDir.toString().replace('\\', '/') + "/");
+            assertThat(command.configPath())
+                    .isEqualTo("/tmp/testagent/.session/users/ucid_001/.testagent-runtime/current-public-config");
         });
     }
 

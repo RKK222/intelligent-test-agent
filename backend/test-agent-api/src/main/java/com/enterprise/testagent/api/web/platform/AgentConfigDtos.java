@@ -31,6 +31,10 @@ final class AgentConfigDtos {
     record WorktreeRequest(String baseName, String branch, String operationId, String linuxServerId) {
     }
 
+    /** 公共个人 worktree 保存后只热加载当前用户运行态。 */
+    record PublicRuntimeReloadRequest(String worktreeId, String linuxServerId) {
+    }
+
     record FileContentRequest(String path, String content, String worktreeId) {
     }
 

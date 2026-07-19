@@ -44,12 +44,14 @@ describe("Agent 文件标签路由", () => {
     });
   });
 
-  it("只允许应用个人 worktree 的目录定义在保存后热加载本人运行态", () => {
+  it("公共和应用个人 worktree 的目录定义保存后都热加载本人运行态", () => {
     expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "agents/reviewer.md")).toBe(true);
     expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "skills/test-design/SKILL.md")).toBe(true);
     expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "opencode.jsonc")).toBe(true);
     expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "skills/test-design/rules/check.md")).toBe(false);
-    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "agents/reviewer.md")).toBe(false);
-    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "skills/test-design/SKILL.md")).toBe(false);
+    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "agents/reviewer.md")).toBe(true);
+    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "skills/test-design/SKILL.md")).toBe(true);
+    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "opencode.jsonc")).toBe(true);
+    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "skills/test-design/rules/check.md")).toBe(false);
   });
 });

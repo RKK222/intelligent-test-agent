@@ -33,6 +33,7 @@
         <constructor>
             <arg column="target_id" javaType="java.lang.String"/>
             <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="config_scope" javaType="java.lang.String"/>
             <arg column="user_id" javaType="java.lang.String"/>
             <arg column="linux_server_id" javaType="java.lang.String"/>
             <arg column="container_id" javaType="java.lang.String"/>
@@ -238,7 +239,7 @@
     </update>
 
     <select id="findClaimableTargets" resultMap="TargetRowMap">
-        select t.target_id, t.rollout_id, t.user_id, t.linux_server_id, t.container_id, t.port,
+        select t.target_id, t.rollout_id, r.config_scope, t.user_id, t.linux_server_id, t.container_id, t.port,
                t.process_pid, t.process_started_at, t.base_url,
                t.retry_count, t.lease_until, t.lease_token, r.trace_id
         from public_agent_config_rollout_targets t

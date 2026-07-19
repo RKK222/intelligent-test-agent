@@ -50,7 +50,7 @@ class ManagerControlMessageCodecTest {
     }
 
     @Test
-    void encodesCommandSessionPath() throws Exception {
+    void encodesCommandSessionAndManagedConfigPaths() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         ManagerControlMessageCodec codec = new ManagerControlMessageCodec(objectMapper);
         ManagerControlMessage command = ManagerControlMessage.command(
@@ -58,6 +58,7 @@ class ManagerControlMessageCodecTest {
                 "start",
                 4096,
                 "/data/opencode/session/users/usr_1234567890abcdef",
+                "/data/opencode/session/users/usr_1234567890abcdef/.testagent-runtime/current-public-config",
                 Map.of("ENTERPRISE_UCID", "U001"),
                 10_000,
                 "trace_1234567890abcdef");
@@ -68,6 +69,8 @@ class ManagerControlMessageCodecTest {
         assertThat(objectMapper.readTree(payload).path("sessionPath").asText())
                 .isEqualTo("/data/opencode/session/users/usr_1234567890abcdef");
         assertThat(decoded.sessionPath()).isEqualTo("/data/opencode/session/users/usr_1234567890abcdef");
+        assertThat(decoded.configPath())
+                .isEqualTo("/data/opencode/session/users/usr_1234567890abcdef/.testagent-runtime/current-public-config");
     }
 
     @Test

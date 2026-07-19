@@ -601,6 +601,21 @@ public record ManagerControlMessage(
             Map<String, String> environment,
             long timeoutMillis,
             String traceId) {
+        return command(commandId, command, port, sessionPath, null, environment, timeoutMillis, traceId);
+    }
+
+    /**
+     * 构造后端发往管理进程的启动命令，并携带用户稳定 session 与 Git 外有效配置目录。
+     */
+    public static ManagerControlMessage command(
+            String commandId,
+            String command,
+            int port,
+            String sessionPath,
+            String configPath,
+            Map<String, String> environment,
+            long timeoutMillis,
+            String traceId) {
         return new ManagerControlMessage(
                 ManagerControlProtocol.TYPE_COMMAND,
                 ManagerControlProtocol.VERSION,
@@ -630,7 +645,7 @@ public record ManagerControlMessage(
                 null,
                 null,
                 sessionPath,
-                null,
+                configPath,
                 null,
                 null,
                 null,

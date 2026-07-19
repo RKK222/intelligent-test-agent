@@ -656,7 +656,7 @@ public class UserOpencodeProcessAssignmentService {
                 port,
                 baseUrl,
                 sessionPath(userId),
-                configPath(),
+                configPath(userId),
                 Map.of(),
                 traceId);
     }
@@ -719,8 +719,10 @@ public class UserOpencodeProcessAssignmentService {
         return segment;
     }
 
-    private String configPath() {
-        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_PUBLIC_CONFIG_DIR));
+    private String configPath(UserId userId) {
+        // 每个用户进程固定读取 session 下的 Git 外软链接；默认指向共享公共目录，
+        // 公共个人 worktree 保存时只切换本人链接，不改动其它进程。
+        return OpencodeProcessConfigLinkService.managedConfigPath(sessionPath(userId)).toString();
     }
 
     /**

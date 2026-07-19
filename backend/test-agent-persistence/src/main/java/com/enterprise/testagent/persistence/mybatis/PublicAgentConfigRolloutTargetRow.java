@@ -8,6 +8,7 @@ import java.time.Instant;
 public record PublicAgentConfigRolloutTargetRow(
         String targetId,
         String rolloutId,
+        String configScope,
         String userId,
         String linuxServerId,
         String containerId,

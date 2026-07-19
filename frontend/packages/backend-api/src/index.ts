@@ -75,6 +75,7 @@ import type {
   PageResponse,
   PlatformUserSummary,
   PersonalWorkspace,
+  PersonalAgentConfigRuntimeReloadResult,
   PermissionRequest,
   PromptPart,
   WorkspaceViewFileContent,
@@ -1010,6 +1011,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<AgentConfigWorktree>(`${agentConfigBase}/public/worktrees`, {
         method: "POST",
         body: JSON.stringify(payload)
+      }),
+    reloadPublicPersonalAgentRuntime: (worktreeId: string, linuxServerId?: string | null) =>
+      request<PersonalAgentConfigRuntimeReloadResult>(`${agentConfigBase}/public/runtime-reload`, {
+        method: "POST",
+        body: JSON.stringify({ worktreeId, linuxServerId })
       }),
     getPublicAgentDiff: (worktreeId?: string | null) =>
       request<AgentConfigDiff>(`${agentConfigBase}/public/diff${query({ worktreeId })}`),

@@ -69,6 +69,7 @@ public class SocketOpencodeProcessManagerGateway implements OpencodeProcessManag
                 "start",
                 command.port(),
                 command.sessionPath(),
+                command.configPath(),
                 command.environment(),
                 settings.commandTimeout().toMillis(),
                 command.traceId()));

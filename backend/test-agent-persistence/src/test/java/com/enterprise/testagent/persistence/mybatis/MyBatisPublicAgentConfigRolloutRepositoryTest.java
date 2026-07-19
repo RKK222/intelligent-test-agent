@@ -53,6 +53,7 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
         PublicAgentConfigRolloutTargetRow row = new PublicAgentConfigRolloutTargetRow(
                 "act_target",
                 "acr_rollout",
+                "PUBLIC",
                 "usr_1",
                 "linux-1",
                 "container-1",
@@ -71,6 +72,7 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
 
         assertThat(targets).hasSize(1);
         assertThat(targets.get(0).userId()).isEqualTo("usr_1");
+        assertThat(targets.get(0).configScope()).isEqualTo(AgentConfigRolloutScope.PUBLIC);
         assertThat(targets.get(0).traceId()).isEqualTo("trace_rollout");
         assertThat(targets.get(0).leaseToken()).startsWith("acl_");
         assertThat(targets.get(0).processPid()).isEqualTo(123L);

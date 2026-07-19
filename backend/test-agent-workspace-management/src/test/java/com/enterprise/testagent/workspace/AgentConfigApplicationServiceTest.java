@@ -25,6 +25,8 @@ import com.enterprise.testagent.domain.configuration.CommonParameter;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloader;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
@@ -1628,6 +1630,52 @@ class AgentConfigApplicationServiceTest {
                 .containsExactly("agw_public_new");
         assertThat(options.get(0).createdByUserId()).isEqualTo("usr_admin");
         assertThat(options.get(0).createdByUsername()).isEqualTo("admin");
+    }
+
+    @Test
+    void reloadPublicPersonalRuntimeUsesOwnedWorktreeConfigRootAndCurrentServer() throws Exception {
+        Path worktreeRoot = root.resolve("worktrees/public-usr_admin");
+        Files.createDirectories(worktreeRoot.resolve("opencode"));
+        Files.writeString(worktreeRoot.resolve("opencode/opencode.jsonc"), "{}");
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                worktreeRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher());
+        PersonalAgentConfigRuntimeReloader reloader = mock(PersonalAgentConfigRuntimeReloader.class);
+        when(reloader.reloadPublicPreview(
+                        ADMIN,
+                        "linux-1",
+                        worktreeRoot.resolve("opencode").toString(),
+                        "trace-reload"))
+                .thenReturn(new PersonalAgentConfigRuntimeReloadResult(true, "reloaded"));
+        service.setPersonalRuntimeReloader(reloader);
+
+        PersonalAgentConfigRuntimeReloadResult result = service.reloadPublicPersonalRuntime(
+                "agw_public", ADMIN, "trace-reload");
+
+        assertThat(result.reloaded()).isTrue();
+        verify(reloader).reloadPublicPreview(
+                ADMIN,
+                "linux-1",
+                worktreeRoot.resolve("opencode").toString(),
+                "trace-reload");
     }
 
     private AgentConfigApplicationService service(Map<String, String> parameters) {

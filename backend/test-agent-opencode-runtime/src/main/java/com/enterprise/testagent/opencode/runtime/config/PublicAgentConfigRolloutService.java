@@ -28,6 +28,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
@@ -36,8 +37,10 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -64,6 +67,13 @@ public class PublicAgentConfigRolloutService
     private final BackendInstanceIdentity backendInstanceIdentity;
     private final ManagedWorkspacePathResolver workspacePathResolver;
     private final Duration retryDelay;
+    private OpencodeProcessConfigLinkService configLinkService;
+
+    /** 公共发布排空时把个人预览指针恢复到共享运行副本；方法注入保持既有测试构造器兼容。 */
+    @Autowired
+    void setConfigLinkService(OpencodeProcessConfigLinkService configLinkService) {
+        this.configLinkService = Objects.requireNonNull(configLinkService, "configLinkService must not be null");
+    }
 
     public PublicAgentConfigRolloutService(
             PublicAgentConfigRolloutRepository repository,
@@ -234,6 +244,7 @@ public class PublicAgentConfigRolloutService
         // 每台服务器完成 Git 更新后才采集本机 manager 进程清单，确保表中对应的是切换窗口内的存量实例。
         snapshotServerTargets(
                 request.rolloutId(),
+                request.scope(),
                 backendInstanceIdentity.linuxServerId(),
                 request.traceId(),
                 now,
@@ -260,6 +271,7 @@ public class PublicAgentConfigRolloutService
         if (!normalizedUserIds.isEmpty()) {
             snapshotServerTargets(
                     request.rolloutId(),
+                    request.scope(),
                     backendInstanceIdentity.linuxServerId(),
                     request.traceId(),
                     now,
@@ -330,6 +342,7 @@ public class PublicAgentConfigRolloutService
 
     private void snapshotServerTargets(
             String rolloutId,
+            AgentConfigRolloutScope scope,
             String linuxServerId,
             String traceId,
             Instant now,
@@ -400,6 +413,7 @@ public class PublicAgentConfigRolloutService
                 repository.addTarget(new PublicAgentConfigRolloutTarget(
                         RuntimeIdGenerator.publicAgentConfigRolloutTargetId(),
                         rolloutId,
+                        scope,
                         exactUserId,
                         linuxServerId,
                         containerId,
@@ -501,6 +515,10 @@ public class PublicAgentConfigRolloutService
                 retry(target, "PROCESS_IDENTITY_CHANGED", Instant.now());
                 return;
             }
+            if (!restoreSharedPublicConfig(target)) {
+                retry(target, "PROCESS_CONFIG_IDENTITY_CHANGED", Instant.now());
+                return;
+            }
             JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
                             node, "POST", "/global/dispose", null, null, Map.of(), Map.of(),
                             target.traceId()))
@@ -524,6 +542,44 @@ public class PublicAgentConfigRolloutService
         Instant now = Instant.now();
         return repository.renewTargetLease(
                 target.targetId(), target.leaseToken(), now.plus(TARGET_LEASE), now);
+    }
+
+    /** 应用发布不触碰公共配置指针；公共发布必须在 dispose 前把本人预览切回共享副本。 */
+    private boolean restoreSharedPublicConfig(PublicAgentConfigRolloutTarget target) {
+        if (target.configScope() != AgentConfigRolloutScope.PUBLIC) {
+            return true;
+        }
+        if (configLinkService == null) {
+            // 仅兼容未注入该依赖的旧单元测试；Spring 运行态必须注入。
+            return true;
+        }
+        Optional<OpencodeServerProcess> process = exactTargetProcess(target);
+        if (process.isEmpty()) {
+            return false;
+        }
+        OpencodeServerProcess current = process.get();
+        if (configLinkService.isSharedConfigPath(current.configPath())) {
+            // 升级前启动的进程本来就直接读取共享副本，公共发布只需 dispose。
+            return true;
+        }
+        if (!configLinkService.isManagedConfigPath(current.sessionPath(), current.configPath())) {
+            return false;
+        }
+        configLinkService.switchToShared(current.sessionPath(), current.configPath());
+        return true;
+    }
+
+    private Optional<OpencodeServerProcess> exactTargetProcess(PublicAgentConfigRolloutTarget target) {
+        return processRepository.findUserBinding(new UserId(target.userId()), "opencode")
+                .flatMap(binding -> processRepository.findOpencodeServerProcessById(binding.processId()))
+                .filter(process -> target.userId().equals(process.userId().value()))
+                .filter(process -> target.linuxServerId().equals(process.linuxServerId().value()))
+                .filter(process -> target.containerId().equals(process.containerId().value()))
+                .filter(process -> target.port() == process.port())
+                .filter(process -> Objects.equals(target.processPid(), process.pid()))
+                .filter(process -> Objects.equals(
+                        normalizedStartedAt(target.processStartedAt()),
+                        normalizedStartedAt(process.startedAt())));
     }
 
     private void retry(PublicAgentConfigRolloutTarget target, String error, Instant now) {

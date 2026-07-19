@@ -55,4 +55,32 @@ describe("public agent config update", () => {
       })
     );
   });
+
+  it("reloads only the current user's public personal worktree runtime", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: { reloaded: true, message: "reloaded" }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.reloadPublicPersonalAgentRuntime("agw_public", "linux-1"))
+      .resolves.toEqual({ reloaded: true, message: "reloaded" });
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/workspace-management/agent-config/public/runtime-reload",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ worktreeId: "agw_public", linuxServerId: "linux-1" })
+      })
+    );
+  });
 });

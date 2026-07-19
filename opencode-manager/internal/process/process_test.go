@@ -71,6 +71,21 @@ func TestBuildStartSpecPrefersExplicitSessionPath(t *testing.T) {
 	}
 }
 
+func TestBuildStartSpecPrefersExplicitManagedConfigPath(t *testing.T) {
+	cfg := testConfig(t)
+	managedConfig := "/tmp/sessions/users/usr_1234567890abcdef/.testagent-runtime/current-public-config"
+
+	spec, err := BuildStartSpec(cfg, StartRequest{
+		Port: 4096, ConfigPath: managedConfig, TraceID: "trace_1234567890abcdef",
+	})
+	if err != nil {
+		t.Fatalf("BuildStartSpec returned error: %v", err)
+	}
+	if spec.ConfigPath != managedConfig || spec.Env["OPENCODE_CONFIG_DIR"] != managedConfig {
+		t.Fatalf("expected explicit managed config path, spec=%#v", spec)
+	}
+}
+
 func TestBuildStartSpecDisplaysReferencesDirWithoutExposingSensitiveEnvironment(t *testing.T) {
 	cfg := testConfig(t)
 	spec, err := BuildStartSpec(cfg, StartRequest{
@@ -163,6 +178,34 @@ func TestManagerStartRejectsWhenMaxProcessesReached(t *testing.T) {
 	}
 	if result.Status != StatusFailed {
 		t.Fatalf("expected failed result, got %#v", result)
+	}
+}
+
+func TestManagerStartRejectsHealthyExistingProcessWithDifferentExplicitConfigPath(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	if err := store.Save(state.ProcessRecord{
+		Port: 4096, PID: 12345, BaseURL: server.URL,
+		SessionPath: cfg.SessionPath(4096), ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save process state: %v", err)
+	}
+	manager := NewManager(cfg, store, &fakeStarter{pid: 22345}, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return true },
+		Client:       server.Client(), ProbeBaseURL: server.URL,
+	})
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port: 4096, SessionPath: cfg.SessionPath(4096), ConfigPath: "/tmp/session/current-public-config",
+		TraceID: "trace_1234567890abcdef",
+	})
+	if err == nil || !strings.Contains(err.Error(), "config path differs") {
+		t.Fatalf("expected explicit config mismatch, result=%#v err=%v", result, err)
 	}
 }
 
@@ -403,11 +446,18 @@ func TestManagerRestartPreservesStoredSessionPath(t *testing.T) {
 	if result.SessionPath != sessionPath {
 		t.Fatalf("expected restart result to keep session path %q, got %q", sessionPath, result.SessionPath)
 	}
+	expectedConfigPath := filepath.Clean(cfg.ConfigDir)
+	if result.ConfigPath != expectedConfigPath {
+		t.Fatalf("expected restart result to keep config path %q, got %q", expectedConfigPath, result.ConfigPath)
+	}
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected one start after stop, got %d", len(starter.specs))
 	}
 	if starter.specs[0].SessionPath != sessionPath {
 		t.Fatalf("expected restart to use stored session path %q, got %q", sessionPath, starter.specs[0].SessionPath)
+	}
+	if starter.specs[0].ConfigPath != expectedConfigPath {
+		t.Fatalf("expected restart to use stored config path %q, got %q", expectedConfigPath, starter.specs[0].ConfigPath)
 	}
 }
 

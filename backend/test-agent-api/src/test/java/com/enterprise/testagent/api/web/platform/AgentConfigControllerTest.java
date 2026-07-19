@@ -9,6 +9,7 @@ import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
@@ -294,6 +295,47 @@ class AgentConfigControllerTest {
                 .expectStatus().isForbidden()
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("FORBIDDEN");
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void superAdminCanReloadOwnedPublicPersonalRuntime() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        when(service.reloadPublicPersonalRuntime("agw_public", USER_ID, TRACE_ID))
+                .thenReturn(new PersonalAgentConfigRuntimeReloadResult(true, "reloaded"));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/runtime-reload")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"worktreeId":"agw_public","linuxServerId":"127.0.0.1"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.reloaded").isEqualTo(true)
+                .jsonPath("$.data.message").isEqualTo("reloaded");
+
+        verify(service).reloadPublicPersonalRuntime("agw_public", USER_ID, TRACE_ID);
+    }
+
+    @Test
+    void nonSuperAdminCannotReloadPublicPersonalRuntime() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/runtime-reload")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"worktreeId":"agw_public","linuxServerId":"127.0.0.1"}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden();
 
         verifyNoInteractions(service);
     }

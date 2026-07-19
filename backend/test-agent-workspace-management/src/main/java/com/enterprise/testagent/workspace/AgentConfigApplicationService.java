@@ -26,6 +26,8 @@ import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepo
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloader;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
@@ -120,6 +122,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private final Map<String, Object> publicWorktreeLocks = new ConcurrentHashMap<>();
     private ManagedWorkspaceApplicationService managedWorkspaceApplicationService;
     private PublicAgentConfigRolloutCoordinator publicConfigRolloutCoordinator;
+    private PersonalAgentConfigRuntimeReloader personalRuntimeReloader;
 
     /** 应用配置发布复用托管 feature 版本的 HEAD 更新与广播链路。 */
     @Autowired
@@ -131,6 +134,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     @Autowired
     void setPublicConfigRolloutCoordinator(PublicAgentConfigRolloutCoordinator coordinator) {
         this.publicConfigRolloutCoordinator = Objects.requireNonNull(coordinator, "coordinator must not be null");
+    }
+
+    /** 个人保存热加载由 opencode-runtime 实现，工作区模块只传递已校验的公共 worktree 配置根。 */
+    @Autowired
+    void setPersonalRuntimeReloader(PersonalAgentConfigRuntimeReloader reloader) {
+        this.personalRuntimeReloader = Objects.requireNonNull(reloader, "reloader must not be null");
     }
 
     /**
@@ -743,6 +752,39 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
         ensureDirectory(agentRoot);
         fileService.writeContent(agentRoot.toString(), relativePath, content);
+    }
+
+    /**
+     * 把当前管理员公共个人 worktree 的完整 opencode 配置热加载到本人进程。
+     *
+     * <p>worktree 所有权和服务器归属必须先在本模块确认；运行时模块只接收可信绝对路径，
+     * 不参与 Git 分支、文件路由或权限判断。
+     */
+    public PersonalAgentConfigRuntimeReloadResult reloadPublicPersonalRuntime(
+            String worktreeId,
+            UserId userId,
+            String traceId) {
+        AgentConfigWorktree worktree = ownedPublicWorktree(
+                requireText(worktreeId, "公共 Agent 个人 worktree 不能为空", "worktreeId"),
+                userId);
+        String worktreeServer = worktree.linuxServerId() == null
+                ? serverIdentity.linuxServerId()
+                : worktree.linuxServerId();
+        if (!serverIdentity.linuxServerId().equals(worktreeServer)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "公共 Agent 个人 worktree 不属于当前服务器");
+        }
+        Path configRoot = publicStandardAgentRoot(Path.of(worktree.rootPath()));
+        if (!Files.isDirectory(configRoot)) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "公共 Agent 个人配置目录不存在");
+        }
+        if (personalRuntimeReloader == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "个人 Agent 配置运行态重载服务不可用");
+        }
+        return personalRuntimeReloader.reloadPublicPreview(
+                userId,
+                worktreeServer,
+                configRoot.toString(),
+                traceId);
     }
 
     public List<FileTreeEntryResponse> listWorkspaceAgentFiles(String workspaceId, String relativePath, String worktreeId) {

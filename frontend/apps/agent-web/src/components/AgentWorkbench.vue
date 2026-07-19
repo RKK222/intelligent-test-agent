@@ -78,6 +78,7 @@ import {
   agentTabPath,
   isAgentFilePath,
   shouldReloadPersonalRuntimeCatalog,
+  type AgentFileTabInfo,
   type AgentFileLoadRequest
 } from "./agentFileLoad";
 import {
@@ -355,6 +356,7 @@ const pendingReferenceRuntimeReloadRevision = ref(0);
 let handledReferenceRuntimeReloadRevision = 0;
 let referenceRuntimeReloadInFlight = false;
 let pendingRuntimeReloadKind: "reference" | "agent" = "reference";
+let pendingPublicRuntimeReloadTarget: Pick<AgentFileTabInfo, "worktreeId" | "linuxServerId"> | null = null;
 let lastRuntimeReloadError: unknown | null = null;
 const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
 const isDiffDirty = ref(false);
@@ -2018,12 +2020,20 @@ watch(diffFiles, (files) => {
  * rules/templates 等普通资源仍按原保存链路处理，避免无关编辑打断当前实例。
  */
 async function refreshRuntimeCatalogAfterAgentConfigSave(
-  path: string,
-  scope: "PUBLIC" | "WORKSPACE"
+  agent: AgentFileTabInfo
 ): Promise<unknown | null> {
-  // 公共配置以公共分支推送为发布边界；只有应用个人 worktree 保存后允许 dispose 本人实例做发布前调试。
-  if (!shouldReloadPersonalRuntimeCatalog(scope, path) || !opencodeCatalogReady.value) {
+  if (!shouldReloadPersonalRuntimeCatalog(agent.scope, agent.path) || !opencodeCatalogReady.value) {
     return null;
+  }
+  if (agent.scope === "PUBLIC") {
+    if (!agent.worktreeId) {
+      return new Error("公共 Agent 个人 worktree 路由缺失，无法只热加载当前用户");
+    }
+    // 公共个人配置不写入共享运行目录；后端先切换本人 Git 外固定配置链接，再 dispose 本人实例。
+    pendingPublicRuntimeReloadTarget = {
+      worktreeId: agent.worktreeId,
+      linuxServerId: agent.linuxServerId
+    };
   }
   lastRuntimeReloadError = null;
   pendingRuntimeReloadKind = "agent";
@@ -2056,11 +2066,25 @@ async function reloadReferenceRuntimeIfIdle(): Promise<void> {
     return;
   }
   referenceRuntimeReloadInFlight = true;
+  const publicReloadTarget = pendingPublicRuntimeReloadTarget;
   try {
-    // OpenCode 原生 dispose 只释放当前进程缓存的 workspace Instance；下一次请求会重新 bootstrap 并读取 opencode.jsonc。
-    await api.disposeGlobal();
+    if (publicReloadTarget?.worktreeId) {
+      const result = await api.reloadPublicPersonalAgentRuntime(
+        publicReloadTarget.worktreeId,
+        publicReloadTarget.linuxServerId
+      );
+      if (!result.reloaded) {
+        throw new Error(result.message || "当前用户公共 Agent 配置未重新加载");
+      }
+    } else {
+      // 应用个人配置仍由 OpenCode 原生 workspace 配置读取，只需释放当前进程缓存的实例。
+      await api.disposeGlobal();
+    }
     await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
     handledReferenceRuntimeReloadRevision = targetRevision;
+    if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
+      pendingPublicRuntimeReloadTarget = null;
+    }
     lastRuntimeReloadError = null;
     feedback.value = {
       kind: "info",
@@ -2069,6 +2093,9 @@ async function reloadReferenceRuntimeIfIdle(): Promise<void> {
     };
   } catch (error) {
     handledReferenceRuntimeReloadRevision = targetRevision;
+    if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
+      pendingPublicRuntimeReloadTarget = null;
+    }
     lastRuntimeReloadError = error;
     feedback.value = errorFeedback(
       pendingRuntimeReloadKind === "reference"
@@ -2121,7 +2148,7 @@ const saveMutation = useMutation({
       agentConfigRevision.value += 1;
     }
     const catalogRefreshError = agentInfo
-      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentInfo.path, agentInfo.scope)
+      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentInfo)
       : null;
     feedback.value = catalogRefreshError
       ? errorFeedback("文件已保存，运行态目录刷新失败", catalogRefreshError)
@@ -5757,7 +5784,7 @@ const saveDiffFileMutation = useMutation({
       agentConfigRevision.value += 1;
     }
     const catalogRefreshError = agentInfo
-      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentInfo.path, agentInfo.scope)
+      ? await refreshRuntimeCatalogAfterAgentConfigSave(agentInfo)
       : null;
     feedback.value = catalogRefreshError
       ? errorFeedback("文件已保存，运行态目录刷新失败", catalogRefreshError)

@@ -289,6 +289,26 @@ public class AgentConfigController {
         return ApiResponse.ok(service.listPublicWorktrees(linuxServerId, principal.userId()), RuntimeApiSupport.traceId(exchange));
     }
 
+    /**
+     * 公共个人配置保存后的本人热加载入口；跨服务器先复用公共 worktree 的既有 Java 路由。
+     */
+    @PostMapping("/public/runtime-reload")
+    public ApiResponse<Object> reloadPublicPersonalRuntime(
+            @RequestBody AgentConfigDtos.PublicRuntimeReloadRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return publicConflictTarget(request.worktreeId(), request.linuxServerId())
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        request,
+                        new TypeReference<ApiResponse<Object>>() {}))
+                .orElseGet(() -> ok(exchange, service.reloadPublicPersonalRuntime(
+                        request.worktreeId(),
+                        principal.userId(),
+                        RuntimeApiSupport.traceId(exchange))));
+    }
+
     @GetMapping("/public/diff")
     public ApiResponse<Object> publicDiff(@RequestParam(required = false) String worktreeId, ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);

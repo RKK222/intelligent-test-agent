@@ -254,6 +254,7 @@ func (s *Supervisor) dispatchProcessCommand(ctx context.Context, message Message
 		return s.manager.Start(ctx, process.StartRequest{
 			Port:        message.Port,
 			SessionPath: message.SessionPath,
+			ConfigPath:  message.ConfigPath,
 			Environment: message.Environment,
 			TraceID:     message.TraceID,
 		})

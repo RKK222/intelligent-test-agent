@@ -201,7 +201,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                         return null;
                     }
                     return new PublicAgentConfigRolloutTarget(
-                            row.targetId(), row.rolloutId(), row.userId(), row.linuxServerId(), row.containerId(),
+                            row.targetId(), row.rolloutId(), AgentConfigRolloutScope.valueOf(row.configScope()),
+                            row.userId(), row.linuxServerId(), row.containerId(),
                             row.port(), row.processPid(), row.processStartedAt(), row.baseUrl(), row.retryCount(),
                             leaseUntil, leaseToken, row.traceId());
                 })
@@ -241,7 +242,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
 
     private PublicAgentConfigRolloutTargetRow toRow(PublicAgentConfigRolloutTarget target) {
         return new PublicAgentConfigRolloutTargetRow(
-                target.targetId(), target.rolloutId(), target.userId(), target.linuxServerId(), target.containerId(),
+                target.targetId(), target.rolloutId(), target.configScope().name(),
+                target.userId(), target.linuxServerId(), target.containerId(),
                 target.port(), target.processPid(), target.processStartedAt(), target.baseUrl(), target.retryCount(),
                 target.leaseUntil(), target.leaseToken(), target.traceId());
     }

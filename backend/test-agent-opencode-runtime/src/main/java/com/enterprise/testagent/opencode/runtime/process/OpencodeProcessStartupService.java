@@ -59,6 +59,13 @@ public class OpencodeProcessStartupService {
     private final UserRepository userRepository;
     private final ConversationContextStore conversationContextStore;
     private final CommonParameterValues commonParameterValues;
+    private OpencodeProcessConfigLinkService configLinkService;
+
+    /** 启动前把用户有效公共配置链接到共享运行副本；方法注入保持既有测试构造器兼容。 */
+    @Autowired
+    void setConfigLinkService(OpencodeProcessConfigLinkService configLinkService) {
+        this.configLinkService = Objects.requireNonNull(configLinkService, "configLinkService must not be null");
+    }
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -303,6 +310,9 @@ public class OpencodeProcessStartupService {
         OpencodeProcessStartProgress resolvedProgress = progress == null ? OpencodeProcessStartProgress.noop() : progress;
         try {
             resolvedProgress.step(OpencodeProcessStartOperationStep.STARTING_PROCESS);
+            if (configLinkService != null) {
+                configLinkService.switchToShared(request.sessionPath(), request.configPath());
+            }
             OpencodeProcessStartResult started = gateway.startProcess(startCommand(request));
             if (started == null) {
                 throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程启动未返回结果");

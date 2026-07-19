@@ -29,18 +29,16 @@ export function isAgentFilePath(path: string): boolean {
   return path.startsWith(AGENT_PUBLIC_FILE_PREFIX) || path.startsWith(AGENT_WORKSPACE_FILE_PREFIX);
 }
 
-/** 只有应用个人 worktree 的运行目录定义允许在保存后热加载本人实例；公共配置必须以推送为发布边界。 */
+/** 公共与应用个人 worktree 的运行目录定义保存后都只热加载当前用户实例。 */
 export function shouldReloadPersonalRuntimeCatalog(
   scope: "PUBLIC" | "WORKSPACE",
   path: string
 ): boolean {
-  if (scope !== "WORKSPACE") {
-    return false;
-  }
   const normalized = path.replaceAll("\\", "/");
-  return /(^|\/)opencode\.jsonc?$/i.test(normalized)
+  const personalPreviewScope = scope === "PUBLIC" || scope === "WORKSPACE";
+  return personalPreviewScope && (/(^|\/)opencode\.jsonc?$/i.test(normalized)
     || /(^|\/)agents\/.*\.md$/i.test(normalized)
-    || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized);
+    || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized));
 }
 
 /**

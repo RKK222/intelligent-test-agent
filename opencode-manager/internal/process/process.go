@@ -42,6 +42,7 @@ var errPublicConfigNotInitialized = errors.New("public config directory not init
 type StartRequest struct {
 	Port        int
 	SessionPath string
+	ConfigPath  string
 	Environment map[string]string
 	TraceID     string
 }
@@ -222,7 +223,14 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 	for _, origin := range cfg.AllowedCORS {
 		args = append(args, "--cors", origin)
 	}
-	env := map[string]string{"XDG_DATA_HOME": sessionPath, "OPENCODE_CONFIG_DIR": cfg.ConfigDir}
+	configPath := strings.TrimSpace(request.ConfigPath)
+	if configPath == "" {
+		// 旧 CLI 与滚动升级期间未携带个人路径的命令继续读取公共共享配置。
+		configPath = cfg.ConfigDir
+	} else {
+		configPath = filepath.Clean(configPath)
+	}
+	env := map[string]string{"XDG_DATA_HOME": sessionPath, "OPENCODE_CONFIG_DIR": configPath}
 	for key, value := range request.Environment {
 		if strings.TrimSpace(key) != "" {
 			env[key] = value
@@ -236,7 +244,7 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 		Port:         request.Port,
 		BaseURL:      fmt.Sprintf("http://%s:%d", cfg.ServerHost, request.Port),
 		SessionPath:  sessionPath,
-		ConfigPath:   cfg.ConfigDir,
+		ConfigPath:   configPath,
 		StartCommand: formatStartCommand(cfg.OpencodeBin, args, env),
 		TraceID:      request.TraceID,
 	}, nil
@@ -259,6 +267,13 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 		// start 命令需要对健康的既有 state 幂等，便于后端在数据库记录丢失时补齐平台进程快照。
 		checked := m.checker.Check(ctx, record)
 		if checked.Status == health.StatusHealthy {
+			// 新后端显式携带用户稳定配置软链接；端口上若仍是旧配置路径，不能把旧进程冒充为本次启动结果。
+			if strings.TrimSpace(request.ConfigPath) != "" && filepath.Clean(record.ConfigPath) != spec.ConfigPath {
+				err := fmt.Errorf(
+					"port %d is healthy but config path differs: managed=%s requested=%s; stop and start it through the platform",
+					request.Port, record.ConfigPath, spec.ConfigPath)
+				return failed(request.Port, request.TraceID, err), err
+			}
 			return result(StatusStarted, record, "opencode server already managed and healthy", request.TraceID), nil
 		}
 		err := fmt.Errorf("port %d is already managed but unhealthy: %s", request.Port, checked.Message)
@@ -349,13 +364,17 @@ func (m *Manager) Restart(ctx context.Context, request StopRequest) (Result, err
 		return failed(request.Port, request.TraceID, err), err
 	}
 	sessionPath := ""
+	configPath := ""
 	if ok {
 		sessionPath = record.SessionPath
+		configPath = record.ConfigPath
 	}
 	if _, err := m.Stop(ctx, request); err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
-	return m.Start(ctx, StartRequest{Port: request.Port, SessionPath: sessionPath, TraceID: request.TraceID})
+	return m.Start(ctx, StartRequest{
+		Port: request.Port, SessionPath: sessionPath, ConfigPath: configPath, TraceID: request.TraceID,
+	})
 }
 
 // Health 查询本地 state 后执行 PID 和 HTTP 健康检测。
@@ -422,6 +441,7 @@ func (m *Manager) withDerivedStartCommands(records []state.ProcessRecord, traceI
 		spec, err := BuildStartSpec(cfg, StartRequest{
 			Port:        records[i].Port,
 			SessionPath: records[i].SessionPath,
+			ConfigPath:  records[i].ConfigPath,
 			TraceID:     nonEmptyTraceID(traceID),
 		})
 		if err == nil {

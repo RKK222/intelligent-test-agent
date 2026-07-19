@@ -27,7 +27,7 @@
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-agent-runtime` | 多 agent 运行时接口、registry、统一日志/指标包装和 opencode 适配器 |
 | `test-agent-workspace-management` | Workspace、文件、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、应用引用资产库多服务器副本、agent 和 skill 管理业务 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、Redis active/session scope 路由、用户级会话运行态摘要、opencode 进程启动环境、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、Redis active/session scope 路由、用户级会话运行态摘要、每用户公共配置软链接/个人保存与发布 dispose、opencode 进程启动环境、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库英文名/类型冻结、应用工作空间和个人 SSH key 配置管理 |
 | `test-agent-scheduler` | 分布式定时任务框架，提供任务注册、Cron 调度、Redis 锁、运行记录、运行记录保留清理、Cron 调整、手动触发和协作式停止管理服务；具体业务任务仍放在所属业务模块 |

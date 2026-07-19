@@ -81,7 +81,7 @@ tools/dev-frontend-check.sh
 
 应用工作区暂存通过平台 API 操作真实 Git index，同时仍作为发布文件白名单；未暂存区可一次暂存全部普通文件，或经二次确认后丢弃全部已暂存和未暂存普通文件；已暂存区的一键回退只调用 unstage all，把全部已暂存普通文件移回未暂存区，不丢弃文件内容。后端普通发布会隔离历史 index。冲突期间批量暂存和丢弃全部改动入口禁用，已暂存区一键回退及普通文件逐个 stage/unstage 仍可使用，但按 Git 原生规则禁止提交；冲突文件可在 Monaco 三方合并编辑器中可靠选择结果、保存或取消整次 merge。Git 三个 Tab 直接在 `UNSTAGED/STAGED` 下展示文件，不再重复作用域标题和 worktree 说明；只暂存 `spec/**` 时只展示本地“提交”，混合暂存时会在操作前明确提示提交、推送和仅本地文件数。前端只有在后端明确返回 `remotePushed=true` 时才展示提交并推送成功；连续处理 workspace、应用 Agent、公共 Agent 时，进度页按本轮累计实际提交、远端推送及仅本地 spec 数量，并列出各作用域明细，三类差异全部清空后结束本轮。
 
-当前权限口径补充：公共 Git 只有 `SUPER_ADMIN` 可写；应用级 `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）由 `APP_ADMIN` 管理，普通成员只读；所有托管应用操作仍要求有效应用成员，`SUPER_ADMIN` 不旁路成员校验。应用 feature 副本对所有角色普通文件只读，个人 worktree 普通文件可写；“本地提交”只提交个人分支，“提交并推送”再把非 `spec/**` 选中路径投影并 push feature。push 后各服务器把同一固定 commit 自动 merge 到相关个人 worktree：clean 时立即更新，dirty 时面板提示待同步，真实冲突进入三方编辑器，全部解决后需点击“完成合并”。docs 不触发 dispose；应用 Agent/Skill rollout 在相关个人 worktree 收敛后全局 dispose。`spec/**` 对任何角色都只做本地提交。
+当前权限口径补充：公共 Git 只有 `SUPER_ADMIN` 可写；应用级 `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**`（含 rules/templates）由 `APP_ADMIN` 管理，普通成员只读；所有托管应用操作仍要求有效应用成员，`SUPER_ADMIN` 不旁路成员校验。应用 feature 副本对所有角色普通文件只读，个人 worktree 普通文件可写；“本地提交”只提交个人分支，“提交并推送”再把非 `spec/**` 选中路径投影并 push feature。push 后各服务器把同一固定 commit 自动 merge 到相关个人 worktree：clean 时立即更新，dirty 时面板提示待同步，真实冲突进入三方编辑器，全部解决后需点击“完成合并”。docs 不触发 dispose；应用 Agent/Skill rollout 在相关个人 worktree 收敛后只 dispose 目标用户。公共或应用个人 Agent/Skill/JSONC 保存都只热加载当前用户：公共保存先把本人有效公共配置软链接切到公共个人 worktree，应用保存继续由请求工作区 `.opencode` 原生加载。`spec/**` 对任何角色都只做本地提交。
 
 文件页进入时默认展开工作空间并把收起的 `Agents` 固定在面板底部，减少文件树被上下分屏压缩；用户展开 `Agents` 后仍可拖拽分隔线调整两区高度。
 

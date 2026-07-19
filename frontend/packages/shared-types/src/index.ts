@@ -224,6 +224,12 @@ export type AgentConfigWorktreeOption = AgentConfigWorktree & {
   createdByUsername?: string | null;
 };
 
+/** 公共个人 worktree 保存后的当前用户运行态重载结果。 */
+export type PersonalAgentConfigRuntimeReloadResult = {
+  reloaded: boolean;
+  message: string;
+};
+
 export type AgentConfigDiffFile = {
   path: string;
   status: string;

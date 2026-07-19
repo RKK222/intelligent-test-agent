@@ -85,6 +85,22 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
+    void startAndVerifyPointsManagedConfigLinkToSharedBeforeManagerStart() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+        OpencodeProcessConfigLinkService configLinkService = Mockito.mock(OpencodeProcessConfigLinkService.class);
+        service.setConfigLinkService(configLinkService);
+        OpencodeProcessStartupRequest request = request(null, null, null);
+
+        service.startAndVerify(request);
+
+        Mockito.verify(configLinkService).switchToShared(request.sessionPath(), request.configPath());
+        assertThat(gateway.startCommands).singleElement().satisfies(command ->
+                assertThat(command.configPath()).isEqualTo(request.configPath()));
+    }
+
+    @Test
     void startAndVerifyReusesExistingProcessAndBindingTimestamps() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
