@@ -83,6 +83,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
     private final SshKeyEncryptionService sshKeyEncryptionService;
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
+    private final ReferenceRepositoryReplicaTaskDispatcher taskDispatcher;
     private final Clock clock;
     private final ReferenceRepositoryDirectoryMover directoryMover;
     private final long maxFileBytes;
@@ -97,6 +98,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
+            ReferenceRepositoryReplicaTaskDispatcher taskDispatcher,
             @Value("${test-agent.files.max-file-bytes:1048576}") long maxFileBytes) {
         this(
                 configurationRepository,
@@ -108,6 +110,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 sshKeyEncryptionService,
                 serverIdentity,
                 broadcastPublisher,
+                taskDispatcher,
                 Clock.systemUTC(),
                 ReferenceRepositoryDirectoryMover.filesystem(),
                 maxFileBytes);
@@ -124,6 +127,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
+            ReferenceRepositoryReplicaTaskDispatcher taskDispatcher,
             Clock clock) {
         this(
                 configurationRepository,
@@ -135,6 +139,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 sshKeyEncryptionService,
                 serverIdentity,
                 broadcastPublisher,
+                taskDispatcher,
                 clock,
                 ReferenceRepositoryDirectoryMover.filesystem(),
                 1024 * 1024L);
@@ -151,6 +156,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
+            ReferenceRepositoryReplicaTaskDispatcher taskDispatcher,
             Clock clock,
             ReferenceRepositoryDirectoryMover directoryMover) {
         this(
@@ -163,6 +169,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 sshKeyEncryptionService,
                 serverIdentity,
                 broadcastPublisher,
+                taskDispatcher,
                 clock,
                 directoryMover,
                 1024 * 1024L);
@@ -179,6 +186,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
+            ReferenceRepositoryReplicaTaskDispatcher taskDispatcher,
             Clock clock,
             ReferenceRepositoryDirectoryMover directoryMover,
             long maxFileBytes) {
@@ -191,6 +199,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService);
         this.serverIdentity = Objects.requireNonNull(serverIdentity);
         this.broadcastPublisher = Objects.requireNonNull(broadcastPublisher);
+        this.taskDispatcher = Objects.requireNonNull(taskDispatcher);
         this.clock = Objects.requireNonNull(clock);
         this.directoryMover = Objects.requireNonNull(directoryMover);
         if (maxFileBytes < 1L) {
@@ -522,7 +531,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         return SYNC_REQUESTED_EVENT.equals(type);
     }
 
-    /** 广播载荷只作为低延迟唤醒；实际任务仍通过 DB 租约认领。 */
+    /** 广播载荷只作为远端低延迟唤醒；消费线程只排队，实际任务仍通过 DB 租约认领。 */
     @Override
     public void handle(ServerBroadcastEvent event) {
         if (!supports(event.type())) {
@@ -533,7 +542,13 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         if (!(repositoryId instanceof String id) || !(generation instanceof Number number)) {
             return;
         }
-        claimAndSynchronize(new CodeRepositoryId(id), number.longValue(), event.traceId());
+        CodeRepositoryId parsedRepositoryId = new CodeRepositoryId(id);
+        taskDispatcher.dispatchNow(
+                parsedRepositoryId,
+                number.longValue(),
+                event.traceId(),
+                ReferenceRepositoryReplicaTaskDispatcher.WakeSource.SERVER_BROADCAST,
+                () -> claimAndSynchronize(parsedRepositoryId, number.longValue(), event.traceId()));
     }
 
     /** 定时补偿丢广播，并在服务器重新上线时为当前 generation 补建本机目标。 */
@@ -564,22 +579,32 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             return;
         }
         for (ReferenceRepositoryReplica replica : referenceRepository.findClaimableReplicas(localServer, now, 100)) {
-            claimAndSynchronize(replica.repositoryId(), replica.generation(), traceId);
+            taskDispatcher.dispatchNow(
+                    replica.repositoryId(),
+                    replica.generation(),
+                    traceId,
+                    ReferenceRepositoryReplicaTaskDispatcher.WakeSource.RECONCILIATION,
+                    () -> claimAndSynchronize(replica.repositoryId(), replica.generation(), traceId));
         }
     }
 
     private void claimAndSynchronize(CodeRepositoryId repositoryId, long generation, String traceId) {
+        Instant claimStartedAt = clock.instant();
         Instant now = clock.instant();
         LinuxServerId localServer = new LinuxServerId(serverIdentity.linuxServerId());
         String leaseToken = "rrl_" + UUID.randomUUID().toString().replace("-", "");
-        referenceRepository.claimReplica(
+        Optional<ReferenceRepositoryReplica> claimed = referenceRepository.claimReplica(
                         repositoryId,
                         generation,
                         localServer,
                         leaseToken,
                         now.plus(LEASE_DURATION),
-                        now)
-                .ifPresent(replica -> synchronizeClaimedReplica(replica, traceId));
+                        now);
+        LOGGER.info(
+                "event=reference_repository_replica_claim_completed repositoryId={} generation={} linuxServerId={} result={} durationMs={} traceId={}",
+                repositoryId.value(), generation, localServer.value(), claimed.isPresent() ? "CLAIMED" : "SKIPPED",
+                elapsedMillis(claimStartedAt, clock.instant()), traceId);
+        claimed.ifPresent(replica -> synchronizeClaimedReplica(replica, traceId));
     }
 
     private void synchronizeClaimedReplica(ReferenceRepositoryReplica claimed, String traceId) {
@@ -605,7 +630,18 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             Path repoRoot = repositoryRoot(repository);
             String privateKey = privateKeyFor(repository, state.credentialUserId());
             String gitUrl = effectiveGitUrl(repository, state.credentialUserId());
-            synchronizeDirectory(claimed, repository, state, repoRoot, gitUrl, privateKey);
+            Instant gitStartedAt = clock.instant();
+            boolean gitSucceeded = false;
+            try {
+                synchronizeDirectory(claimed, repository, state, repoRoot, gitUrl, privateKey);
+                gitSucceeded = true;
+            } finally {
+                LOGGER.info(
+                        "event=reference_repository_git_sync_completed repositoryId={} generation={} linuxServerId={} operation={} result={} durationMs={} traceId={}",
+                        claimed.repositoryId().value(), claimed.generation(), claimed.linuxServerId().value(),
+                        state.operationType(), gitSucceeded ? "SUCCESS" : "FAILED",
+                        elapsedMillis(gitStartedAt, clock.instant()), traceId);
+            }
             renewLeaseOrThrow(claimed);
             ObservedPointer observed;
             try {
@@ -637,12 +673,12 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                     claimed.linuxServerId().value(),
                     claimed.generation());
         } catch (ReplicaRetryException exception) {
-            markRetry(claimed, exception.getMessage());
+            markRetry(claimed, exception.getMessage(), traceId);
         } catch (ReplicaBlockedException exception) {
             markBlocked(claimed, exception.getMessage());
         } catch (PlatformException exception) {
             if (isTransientGitFailure(exception)) {
-                markRetry(claimed, safeError(exception.getMessage()));
+                markRetry(claimed, safeError(exception.getMessage()), traceId);
             } else {
                 markBlocked(claimed, safeError(exception.getMessage()));
             }
@@ -777,8 +813,9 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         if (!repository.matchesStoredOrigin(gitWorkspaceService.originUrl(repoRoot))) {
             throw new ReplicaBlockedException("引用资产本地仓库 origin 与数据库不一致");
         }
+        String currentBranch = gitWorkspaceService.currentBranch(repoRoot);
         if (state.operationType() != ReferenceRepositoryOperationType.SWITCH_BRANCH
-                && !state.branch().equals(gitWorkspaceService.currentBranch(repoRoot))) {
+                && !state.branch().equals(currentBranch)) {
             throw new ReplicaBlockedException("引用资产本地仓库分支与初始化分支不一致");
         }
         if (repository.internalDeployment()) {
@@ -789,6 +826,13 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                     privateKey);
         }
         String currentCommit = gitWorkspaceService.headCommit(repoRoot);
+        // 协调节点已固定本 generation 的远端 HEAD；本地分支和提交完全一致时无需再次访问远端。
+        if (state.branch().equals(currentBranch) && state.targetCommitHash().equals(currentCommit)) {
+            LOGGER.info(
+                    "event=reference_repository_git_sync_noop repositoryId={} generation={} linuxServerId={} traceId={}",
+                    claimed.repositoryId().value(), claimed.generation(), claimed.linuxServerId().value(), state.traceId());
+            return;
+        }
         renewLeaseOrThrow(claimed);
         gitWorkspaceService.fetchBranch(repoRoot, state.branch(), privateKey);
         String targetCommit = gitWorkspaceService.resolveCommit(repoRoot, state.targetCommitHash());
@@ -866,20 +910,28 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         }
     }
 
-    private void markRetry(ReferenceRepositoryReplica claimed, String message) {
+    private void markRetry(ReferenceRepositoryReplica claimed, String message, String traceId) {
         int retryCount = claimed.retryCount() + 1;
         Instant now = clock.instant();
+        Instant nextRetryAt = now.plus(ReferenceRepositoryReplica.retryDelay(retryCount));
         boolean updated = referenceRepository.markRetry(
                 claimed.repositoryId(),
                 claimed.generation(),
                 claimed.linuxServerId(),
                 claimed.leaseToken(),
                 retryCount,
-                now.plus(ReferenceRepositoryReplica.retryDelay(retryCount)),
+                nextRetryAt,
                 message,
                 now);
         if (updated) {
             refreshOverallStatus(claimed.repositoryId(), claimed.generation());
+            taskDispatcher.dispatchAt(
+                    claimed.repositoryId(),
+                    claimed.generation(),
+                    traceId,
+                    ReferenceRepositoryReplicaTaskDispatcher.WakeSource.RETRY,
+                    nextRetryAt,
+                    () -> claimAndSynchronize(claimed.repositoryId(), claimed.generation(), traceId));
         }
     }
 
@@ -1067,6 +1119,10 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 && (gitUrl.startsWith("ssh://") || (gitUrl.contains("@") && gitUrl.contains(":")));
     }
 
+    private long elapsedMillis(Instant startedAt, Instant completedAt) {
+        return Math.max(0L, Duration.between(startedAt, completedAt).toMillis());
+    }
+
     private Set<LinuxServerId> liveServerIds() {
         Set<LinuxServerId> live = heartbeatStore.liveBackendServerIds();
         return live == null ? Set.of() : Set.copyOf(live);
@@ -1092,6 +1148,13 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                     state.repositoryId().value(),
                     state.generation());
         }
+        // Redis 发布者会忽略本实例事件，因此本机必须显式排队；失败仍由 60 秒补偿扫描恢复。
+        taskDispatcher.dispatchNow(
+                state.repositoryId(),
+                state.generation(),
+                state.traceId(),
+                ReferenceRepositoryReplicaTaskDispatcher.WakeSource.LOCAL_REQUEST,
+                () -> claimAndSynchronize(state.repositoryId(), state.generation(), state.traceId()));
     }
 
     private Path repositoryRoot(CodeRepository repository) {

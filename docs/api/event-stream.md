@@ -492,7 +492,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 }
 ```
 
-消费者只把广播视为唤醒信号，仍需按 `repositoryId + generation + 本机 linuxServerId` 从数据库认领带 fencing token 的租约；重复、乱序或丢失广播均不能绕过数据库状态。payload 不包含操作类型、分支、commit、Git URL、用户 ID、SSH 私钥、token、Authorization、Cookie、文件内容或目录内容。广播发布失败不反转已经提交的数据库目标，默认 60 秒补偿扫描会重建当前 generation 的在线及历史副本目标，恢复漏消息、CAS 后建档中断和节点重新上线后的 `DEFERRED` 副本。`VERIFY_POINTERS` 消费路径只读取本地 Git 元数据，不执行 fetch、checkout 或 reset；该内部广播仍不进入 RunEvent SSE。
+发起 Java 在 generation 目标建档后会直接把本机任务提交给有界异步调度器，因此不依赖接收自身广播；其它 Java 的消费者也只负责排队并立即返回，不在 Redis listener 线程执行 Git。所有 worker 仍需按 `repositoryId + generation + 本机 linuxServerId` 从数据库认领带 fencing token 的租约；重复、乱序或丢失广播均不能绕过数据库状态。payload 不包含操作类型、分支、commit、Git URL、用户 ID、SSH 私钥、token、Authorization、Cookie、文件内容或目录内容。广播发布失败不反转已经提交的数据库目标；瞬时失败按数据库 `nextRetryAt` 定向唤醒，默认 60 秒补偿扫描继续重建当前 generation 的在线及历史副本目标，恢复漏消息、调度拒绝、Java 退出、CAS 后建档中断和节点重新上线后的 `DEFERRED` 副本。`VERIFY_POINTERS` 消费路径只读取本地 Git 元数据，不执行 fetch、checkout 或 reset；该内部广播仍不进入 RunEvent SSE。
 
 `agent-config.public-sync-requested` 用于公共 Agent 配置更新或发布后的多服务器同步，payload 只允许包含：
 ```json

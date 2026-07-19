@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-07-19 - 优化引用资产库多服务器同步耗时
+
+- Why:
+  - 引用资产 generation 建档后只发布 Redis 广播，而发布者会忽略自身事件；发起 Java 的本机副本因此常等到默认 60 秒补偿扫描才开始。瞬时 Git 失败的 5 秒退避也可能被同一扫描周期放大。
+- What:
+  - workspace-management 新增按 `repositoryId + generation` 去重的本机有界异步调度器，默认两个 worker、最多保留 256 个 key，支持立即和按 `nextRetryAt` 调度；队列饱和时拒绝 caller-runs，并由既有补偿扫描恢复。
+  - 初始化、同步、分支切换和指针核验在广播其它 Java 的同时立即提交本机任务；Redis 消费者与 60 秒补偿器只负责排队，不再在线程内执行阻塞 Git。瞬时失败写入 `RETRY_WAIT` 后直接安排退避到期重试。
+  - 已有可信、干净、同源仓库在实际分支和 HEAD 已等于固定目标时走无操作快速路径，跳过 fetch、提交解析、祖先校验和 reset；增加排队、租约认领、Git 和总体任务耗时的脱敏结构化日志。
+  - 同步 workspace-management README/PACKAGE、模块图、后端部署和内部广播文档；未修改 HTTP API/DTO、广播 payload、RunEvent、数据库/MyBatis、前端、manager、generated SDK 或环境配置。
+- How:
+  - 保留数据库 generation、租约 token/CAS fencing、本机文件锁和 60 秒补偿扫描作为一致性边界；调度器只改变唤醒与线程承载，不改变脏仓库、origin 冲突、分支分叉或租约丢失的安全阻断规则。
+  - TDD 覆盖立即执行、去重、延迟任务被更早唤醒替换、并发上限、容量拒绝、关闭、四类操作本机提交、广播 listener 非阻塞、首次 5 秒定向重试和已对齐 HEAD 无操作路径。
+- Result:
+  - workspace-management reactor 全量通过：common 87、domain 78、workspace-management 230 项；引用资产 Controller 定向 3 项通过，聚焦调度/服务测试 82 项通过。
+  - `test-agent-api` 全量共运行 325 项，其中 324 项通过；唯一失败为并行未提交的通用参数内存化改动新增 `SensitiveDataMaskerTest.mask_commonParameterMemoryValues`，其测试和被测脱敏器均不在本次提交范围，已保留未暂存。
+  - 本机没有真实双服务器环境；各节点即时进入 `PROCESSING` 和正常小仓库 3 秒内页面收敛仍需部署环境人工验收。
+- Verification:
+  - `mvn -pl test-agent-workspace-management -am test`
+  - `mvn -pl test-agent-api -am test`（上述任务外单项失败）
+  - `mvn -pl test-agent-api -am -Dtest='ReferenceRepositoryControllerTest' -Dsurefire.failIfNoSpecifiedTests=false test`
+  - `git diff --check`、全部 session log 近期条目回顾和精确暂存差异审查。
+- Next:
+  - 在真实双服务器部署执行 generation 到 `PROCESSING/READY` 的耗时验收；通用参数内存化任务需单独修复其脱敏测试。
+
 ### 2026-07-19 - 修复引用文件定位到当前文件失效
 
 - Why:

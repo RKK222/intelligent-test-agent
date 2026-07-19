@@ -136,6 +136,13 @@ class ReferenceRepositoryRealGitSafetyTest {
         when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR"))
                 .thenReturn(Optional.of(referencesRoot.toString()));
         when(heartbeatStore.liveBackendServerIds()).thenReturn(Set.of(SERVER_ID));
+        ReferenceRepositoryReplicaTaskDispatcher taskDispatcher =
+                mock(ReferenceRepositoryReplicaTaskDispatcher.class);
+        when(taskDispatcher.dispatchNow(any(), anyLong(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    invocation.getArgument(4, Runnable.class).run();
+                    return true;
+                });
         service = new ReferenceRepositoryApplicationService(
                 configurationRepository,
                 referenceRepository,
@@ -146,6 +153,7 @@ class ReferenceRepositoryRealGitSafetyTest {
                 encryptionService,
                 new WorkspaceServerIdentity(SERVER_ID.value()),
                 publisher,
+                taskDispatcher,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

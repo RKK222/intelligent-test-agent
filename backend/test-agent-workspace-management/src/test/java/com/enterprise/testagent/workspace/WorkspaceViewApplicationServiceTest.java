@@ -109,6 +109,7 @@ class WorkspaceViewApplicationServiceTest {
                 mock(SshKeyEncryptionService.class),
                 new WorkspaceServerIdentity("server-a"),
                 mock(ServerBroadcastPublisher.class),
+                mock(ReferenceRepositoryReplicaTaskDispatcher.class),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         service = new WorkspaceViewApplicationService(
                 workspaceService,

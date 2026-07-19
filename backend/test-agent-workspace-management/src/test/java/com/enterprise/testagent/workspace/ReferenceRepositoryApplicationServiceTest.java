@@ -81,6 +81,7 @@ class ReferenceRepositoryApplicationServiceTest {
     private CommonParameterValues parameterValues;
     private GitWorkspaceService gitWorkspaceService;
     private SshKeyEncryptionService sshKeyEncryptionService;
+    private ReferenceRepositoryReplicaTaskDispatcher taskDispatcher;
     private CapturingPublisher publisher;
     private ReferenceRepositoryApplicationService service;
 
@@ -93,7 +94,18 @@ class ReferenceRepositoryApplicationServiceTest {
         parameterValues = mock(CommonParameterValues.class);
         gitWorkspaceService = mock(GitWorkspaceService.class);
         sshKeyEncryptionService = mock(SshKeyEncryptionService.class);
+        taskDispatcher = mock(ReferenceRepositoryReplicaTaskDispatcher.class);
         publisher = new CapturingPublisher();
+        when(taskDispatcher.dispatchNow(any(), anyLong(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ReferenceRepositoryReplicaTaskDispatcher.WakeSource source = invocation.getArgument(3);
+                    if (source == ReferenceRepositoryReplicaTaskDispatcher.WakeSource.SERVER_BROADCAST
+                            || source == ReferenceRepositoryReplicaTaskDispatcher.WakeSource.RECONCILIATION) {
+                        invocation.getArgument(4, Runnable.class).run();
+                    }
+                    return true;
+                });
+        when(taskDispatcher.dispatchAt(any(), anyLong(), anyString(), any(), any(), any())).thenReturn(true);
         service = new ReferenceRepositoryApplicationService(
                 configurationRepository,
                 referenceRepository,
@@ -104,6 +116,7 @@ class ReferenceRepositoryApplicationServiceTest {
                 sshKeyEncryptionService,
                 new WorkspaceServerIdentity("server-a"),
                 publisher,
+                taskDispatcher,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(configurationRepository.findApplication(APP)).thenReturn(Optional.of(application()));
         when(userRepository.findByUserId(ADMIN)).thenReturn(Optional.of(admin()));
@@ -198,6 +211,9 @@ class ReferenceRepositoryApplicationServiceTest {
                     "generation", 1L,
                     "traceId", "trace_init"));
         });
+        verify(taskDispatcher).dispatchNow(
+                eq(ASSET_ID), eq(1L), eq("trace_init"),
+                eq(ReferenceRepositoryReplicaTaskDispatcher.WakeSource.LOCAL_REQUEST), any());
     }
 
     @Test
@@ -216,6 +232,7 @@ class ReferenceRepositoryApplicationServiceTest {
                 sshKeyEncryptionService,
                 new WorkspaceServerIdentity("server-a"),
                 failingPublisher,
+                taskDispatcher,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(configurationRepository.findRepositoriesByApplication(APP)).thenReturn(List.of(assetRepository()));
         when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.empty());
@@ -232,6 +249,9 @@ class ReferenceRepositoryApplicationServiceTest {
         assertThat(result.status()).isEqualTo(ReferenceRepositoryStatus.INITIALIZING.name());
         verify(referenceRepository).upsertTargets(
                 ASSET_ID, 1L, "main", Set.of(new LinuxServerId("server-a")), NOW);
+        verify(taskDispatcher).dispatchNow(
+                eq(ASSET_ID), eq(1L), eq("trace_broadcast_failure"),
+                eq(ReferenceRepositoryReplicaTaskDispatcher.WakeSource.LOCAL_REQUEST), any());
     }
 
     @Test
@@ -303,6 +323,9 @@ class ReferenceRepositoryApplicationServiceTest {
         verify(referenceRepository).upsertTargets(
                 ASSET_ID, 3L, "main", Set.of(online, offline), NOW);
         assertThat(result.operation()).isEqualTo(ReferenceRepositoryOperationType.SYNCHRONIZE.name());
+        verify(taskDispatcher).dispatchNow(
+                eq(ASSET_ID), eq(3L), eq("trace_sync"),
+                eq(ReferenceRepositoryReplicaTaskDispatcher.WakeSource.LOCAL_REQUEST), any());
     }
 
     @Test
@@ -327,6 +350,9 @@ class ReferenceRepositoryApplicationServiceTest {
         assertThat(result.operation()).isEqualTo(ReferenceRepositoryOperationType.SWITCH_BRANCH.name());
         verify(referenceRepository).upsertTargets(
                 ASSET_ID, 3L, "release", Set.of(online, historical), NOW);
+        verify(taskDispatcher).dispatchNow(
+                eq(ASSET_ID), eq(3L), eq("trace_switch"),
+                eq(ReferenceRepositoryReplicaTaskDispatcher.WakeSource.LOCAL_REQUEST), any());
     }
 
     @Test
@@ -452,6 +478,9 @@ class ReferenceRepositoryApplicationServiceTest {
         verify(gitWorkspaceService, never()).fetchBranch(any(), anyString(), any());
         verify(referenceRepository).upsertTargets(
                 ASSET_ID, 5L, "main", Set.of(online, offline), NOW);
+        verify(taskDispatcher).dispatchNow(
+                eq(ASSET_ID), eq(5L), eq("trace_verify"),
+                eq(ReferenceRepositoryReplicaTaskDispatcher.WakeSource.LOCAL_REQUEST), any());
     }
 
     @Test
@@ -706,6 +735,8 @@ class ReferenceRepositoryApplicationServiceTest {
                         java.util.Map.of("gitFailureType", "NETWORK_UNAVAILABLE")))
                 .when(gitWorkspaceService).cloneBranch(anyString(), eq("main"), any(), isNull());
         when(heartbeatStore.liveBackendServerIds()).thenReturn(Set.of(new LinuxServerId("server-a")));
+        when(referenceRepository.markRetry(any(), anyLong(), any(), anyString(), anyInt(), any(), any(), any()))
+                .thenReturn(true);
 
         service.handle(syncEvent(1L));
 
@@ -718,6 +749,42 @@ class ReferenceRepositoryApplicationServiceTest {
                 eq(NOW.plusSeconds(5)),
                 eq("Git 暂时不可用"),
                 eq(NOW));
+        verify(taskDispatcher).dispatchAt(
+                eq(ASSET_ID), eq(1L), eq("trace_event"),
+                eq(ReferenceRepositoryReplicaTaskDispatcher.WakeSource.RETRY),
+                eq(NOW.plusSeconds(5)), any());
+    }
+
+    @Test
+    void broadcastHandlerOnlyEnqueuesWorkerAndReturnsBeforeClaimingLease() {
+        ReferenceRepositoryReplicaTaskDispatcher deferredDispatcher =
+                mock(ReferenceRepositoryReplicaTaskDispatcher.class);
+        when(deferredDispatcher.dispatchNow(any(), anyLong(), anyString(), any(), any())).thenReturn(true);
+        ReferenceRepositoryApplicationService isolated = new ReferenceRepositoryApplicationService(
+                configurationRepository,
+                referenceRepository,
+                userRepository,
+                heartbeatStore,
+                parameterValues,
+                gitWorkspaceService,
+                sshKeyEncryptionService,
+                new WorkspaceServerIdentity("server-a"),
+                publisher,
+                deferredDispatcher,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ArgumentCaptor<Runnable> worker = ArgumentCaptor.forClass(Runnable.class);
+
+        isolated.handle(syncEvent(1L));
+
+        verify(deferredDispatcher).dispatchNow(
+                eq(ASSET_ID), eq(1L), eq("trace_event"),
+                eq(ReferenceRepositoryReplicaTaskDispatcher.WakeSource.SERVER_BROADCAST), worker.capture());
+        verify(referenceRepository, never()).claimReplica(any(), anyLong(), any(), anyString(), any(), any());
+
+        worker.getValue().run();
+        verify(referenceRepository).claimReplica(
+                eq(ASSET_ID), eq(1L), eq(new LinuxServerId("server-a")),
+                anyString(), eq(NOW.plusSeconds(120)), eq(NOW));
     }
 
     @ParameterizedTest
@@ -832,6 +899,7 @@ class ReferenceRepositoryApplicationServiceTest {
                 sshKeyEncryptionService,
                 new WorkspaceServerIdentity("server-a"),
                 publisher,
+                taskDispatcher,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         ExecutorService executor = Executors.newSingleThreadExecutor();
         var firstWorker = executor.submit(() -> service.handle(syncEvent(1L)));
@@ -927,6 +995,37 @@ class ReferenceRepositoryApplicationServiceTest {
                 eq("引用资产同步后实际指针与目标不一致"), eq(NOW));
         verify(referenceRepository, never()).markReady(
                 any(), anyLong(), any(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    void alreadySynchronizedRepositorySkipsFetchAncestryCheckAndReset() throws Exception {
+        Path repositoryRoot = tempDir.resolve("assets");
+        Files.createDirectories(repositoryRoot);
+        stubClaimedWorker(2L);
+        ReferenceRepositoryState synchronizing = new ReferenceRepositoryState(
+                ASSET_ID, "main", "commit-2", 2L, ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SYNCHRONIZE, ADMIN, "trace_noop", null, NOW, NOW, NOW);
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.of(synchronizing));
+        when(configurationRepository.findRepository(ASSET_ID)).thenReturn(Optional.of(assetRepository()));
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR")).thenReturn(Optional.of(tempDir.toString()));
+        when(gitWorkspaceService.isGitRepository(repositoryRoot)).thenReturn(true);
+        when(gitWorkspaceService.isWorktreeClean(repositoryRoot)).thenReturn(true);
+        when(gitWorkspaceService.originUrl(repositoryRoot)).thenReturn("https://git.example.test/assets.git");
+        when(gitWorkspaceService.currentBranch(repositoryRoot)).thenReturn("main");
+        when(gitWorkspaceService.headCommit(repositoryRoot)).thenReturn("commit-2");
+        when(gitWorkspaceService.resolveCommit(repositoryRoot, "commit-2")).thenReturn("commit-2");
+        when(referenceRepository.markReady(any(), anyLong(), any(), anyString(), any(), any(), any(), any()))
+                .thenReturn(true);
+
+        service.handle(syncEvent(2L));
+
+        verify(gitWorkspaceService, never()).fetchBranch(any(), anyString(), any());
+        verify(gitWorkspaceService, never()).resolveCommit(any(), anyString());
+        verify(gitWorkspaceService, never()).isAncestor(any(), anyString(), anyString());
+        verify(gitWorkspaceService, never()).resetHardToCommit(any(), anyString());
+        verify(referenceRepository).markReady(
+                eq(ASSET_ID), eq(2L), eq(new LinuxServerId("server-a")), anyString(),
+                eq("main"), eq("commit-2"), eq(NOW), eq(NOW));
     }
 
     @Test
@@ -1107,6 +1206,7 @@ class ReferenceRepositoryApplicationServiceTest {
                 sshKeyEncryptionService,
                 new WorkspaceServerIdentity("server-a"),
                 publisher,
+                taskDispatcher,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 (source, target) -> {
                     throw new AtomicMoveNotSupportedException(
