@@ -22,6 +22,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Agent 配置 HTTP Controller：公共/工作空间文件、Git 操作和进度 ticket 入口。
@@ -293,20 +295,23 @@ public class AgentConfigController {
      * 公共个人配置保存后的本人热加载入口；跨服务器先复用公共 worktree 的既有 Java 路由。
      */
     @PostMapping("/public/runtime-reload")
-    public ApiResponse<Object> reloadPublicPersonalRuntime(
+    public Mono<ApiResponse<Object>> reloadPublicPersonalRuntime(
             @RequestBody AgentConfigDtos.PublicRuntimeReloadRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
-        return publicConflictTarget(request.worktreeId(), request.linuxServerId())
-                .map(target -> routingService.forward(
-                        exchange,
-                        target,
-                        request,
-                        new TypeReference<ApiResponse<Object>>() {}))
-                .orElseGet(() -> ok(exchange, service.reloadPublicPersonalRuntime(
-                        request.worktreeId(),
-                        principal.userId(),
-                        RuntimeApiSupport.traceId(exchange))));
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        // 本地重载会同步等待 OpenCode dispose，必须离开 WebFlux 事件线程；跨服务器转发同样可能阻塞。
+        return Mono.fromCallable(() -> publicConflictTarget(request.worktreeId(), request.linuxServerId())
+                        .map(target -> routingService.forward(
+                                exchange,
+                                target,
+                                request,
+                                new TypeReference<ApiResponse<Object>>() {}))
+                        .orElseGet(() -> ApiResponse.ok(service.reloadPublicPersonalRuntime(
+                                request.worktreeId(),
+                                principal.userId(),
+                                traceId), traceId)))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     @GetMapping("/public/diff")

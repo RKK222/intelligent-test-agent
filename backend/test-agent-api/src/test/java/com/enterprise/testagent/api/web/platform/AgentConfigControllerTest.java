@@ -24,6 +24,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.scheduler.Schedulers;
 
 class AgentConfigControllerTest {
 
@@ -303,7 +304,12 @@ class AgentConfigControllerTest {
     void superAdminCanReloadOwnedPublicPersonalRuntime() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
         when(service.reloadPublicPersonalRuntime("agw_public", USER_ID, TRACE_ID))
-                .thenReturn(new PersonalAgentConfigRuntimeReloadResult(true, "reloaded"));
+                .thenAnswer(ignored -> {
+                    if (Schedulers.isInNonBlockingThread()) {
+                        throw new IllegalStateException("runtime reload must not run on the WebFlux event thread");
+                    }
+                    return new PersonalAgentConfigRuntimeReloadResult(true, "reloaded");
+                });
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.post()
