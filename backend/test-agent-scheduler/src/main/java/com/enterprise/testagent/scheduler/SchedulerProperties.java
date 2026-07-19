@@ -16,6 +16,9 @@ public class SchedulerProperties {
     private Duration scanInterval = Duration.ofSeconds(30);
     private int dueTaskLimit = 50;
     private int manualRunLimit = 50;
+    private int userPlanRunLimit = 50;
+    private int userPlanWorkerCount = 4;
+    private int userPlanQueueCapacity = 100;
     private String instanceId = "backend-" + UUID.randomUUID();
 
     /**
@@ -81,6 +84,39 @@ public class SchedulerProperties {
             throw new IllegalArgumentException("manualRunLimit must be positive");
         }
         this.manualRunLimit = manualRunLimit;
+    }
+
+    /** 返回当前服务器单轮最多扫描的用户计划数。 */
+    public int getUserPlanRunLimit() {
+        return userPlanRunLimit;
+    }
+
+    /** 绑定当前服务器单轮最多扫描的用户计划数。 */
+    public void setUserPlanRunLimit(int userPlanRunLimit) {
+        if (userPlanRunLimit < 1) throw new IllegalArgumentException("userPlanRunLimit must be positive");
+        this.userPlanRunLimit = userPlanRunLimit;
+    }
+
+    /** 返回用户计划有界执行线程数。 */
+    public int getUserPlanWorkerCount() {
+        return userPlanWorkerCount;
+    }
+
+    /** 绑定用户计划有界执行线程数。 */
+    public void setUserPlanWorkerCount(int userPlanWorkerCount) {
+        if (userPlanWorkerCount < 1) throw new IllegalArgumentException("userPlanWorkerCount must be positive");
+        this.userPlanWorkerCount = userPlanWorkerCount;
+    }
+
+    /** 返回用户计划等待队列容量。 */
+    public int getUserPlanQueueCapacity() {
+        return userPlanQueueCapacity;
+    }
+
+    /** 绑定用户计划等待队列容量。 */
+    public void setUserPlanQueueCapacity(int userPlanQueueCapacity) {
+        if (userPlanQueueCapacity < 1) throw new IllegalArgumentException("userPlanQueueCapacity must be positive");
+        this.userPlanQueueCapacity = userPlanQueueCapacity;
     }
 
     /**

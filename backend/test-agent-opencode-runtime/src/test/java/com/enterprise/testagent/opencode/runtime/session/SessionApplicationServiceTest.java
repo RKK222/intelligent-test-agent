@@ -12,6 +12,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextSessionRevocation;
 import com.enterprise.testagent.domain.session.Session;
@@ -32,6 +33,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService;
+import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +46,26 @@ class SessionApplicationServiceTest {
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
     private static final WorkspaceId WORKSPACE_ID = new WorkspaceId("wrk_1234567890abcdef");
     private static final SessionId SESSION_ID = new SessionId("ses_1234567890abcdef");
+
+    @Test
+    void nightExecutionLockBlocksArchiveAndManualMessageAppend() {
+        NightExecutionTaskRepository locks = Mockito.mock(NightExecutionTaskRepository.class);
+        Mockito.when(locks.hasSessionLock(SESSION_ID)).thenReturn(true);
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        FakeMessageRepository messages = new FakeMessageRepository();
+        SessionApplicationService service = service(new FakeWorkspaceRepository(true), sessions, messages);
+        service.setNightExecutionLockGuard(new NightExecutionSessionLockGuard(locks));
+
+        assertThatThrownBy(() -> service.archiveSession(SESSION_ID, "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        assertThatThrownBy(() -> service.appendMessage(
+                SESSION_ID, SessionMessageRole.USER, "blocked", "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        assertThat(sessions.saved).isEmpty();
+        assertThat(messages.saved).isEmpty();
+    }
 
     @Test
     void createsSessionOnlyWhenWorkspaceExists() {

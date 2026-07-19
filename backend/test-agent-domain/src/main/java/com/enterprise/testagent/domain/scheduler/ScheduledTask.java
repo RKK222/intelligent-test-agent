@@ -49,7 +49,9 @@ public record ScheduledTask(
     public ScheduledTask {
         Objects.requireNonNull(taskKey, "taskKey must not be null");
         name = DomainValidation.requireText(name, "name");
-        cronExpression = DomainValidation.requireText(cronExpression, "cronExpression");
+        if (cronExpression != null) {
+            cronExpression = DomainValidation.requireText(cronExpression, "cronExpression");
+        }
         lockTtl = Objects.requireNonNull(lockTtl, "lockTtl must not be null");
         if (lockTtl.isZero() || lockTtl.isNegative()) {
             throw new IllegalArgumentException("lockTtl must be positive");

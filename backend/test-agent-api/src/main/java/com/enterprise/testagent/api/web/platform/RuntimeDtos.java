@@ -279,7 +279,9 @@ final class RuntimeDtos {
             boolean pinned,
             Instant createdAt,
             Instant updatedAt,
-            SessionWorkspaceContextResponse workspaceContext) {
+            SessionWorkspaceContextResponse workspaceContext,
+            String sourceType,
+            String sourceRefId) {
 
         /**
          * 从领域会话映射为 API 响应。
@@ -293,7 +295,9 @@ final class RuntimeDtos {
                     session.pinned(),
                     session.createdAt(),
                     session.updatedAt(),
-                    null);
+                    null,
+                    session.sourceType().name(),
+                    session.sourceRefId());
         }
 
         /**
@@ -309,7 +313,9 @@ final class RuntimeDtos {
                     session.pinned(),
                     session.createdAt(),
                     session.updatedAt(),
-                    SessionWorkspaceContextResponse.from(item.workspaceContext()));
+                    SessionWorkspaceContextResponse.from(item.workspaceContext()),
+                    session.sourceType().name(),
+                    session.sourceRefId());
         }
     }
 
@@ -330,7 +336,9 @@ final class RuntimeDtos {
             Instant updatedAt,
             String contentKind,
             String summaryStatus,
-            Integer summaryVersion) {
+            Integer summaryVersion,
+            String sourceType,
+            String sourceRefId) {
 
         /**
          * 从旧领域消息映射为 API 响应；摘要元数据保持可空，避免旧数据被误标记为终态摘要。
@@ -361,7 +369,9 @@ final class RuntimeDtos {
                     message.updatedAt(),
                     contentKind,
                     summaryStatus,
-                    summaryVersion);
+                    summaryVersion,
+                    message.sourceType().name(),
+                    message.sourceRefId());
         }
     }
 
@@ -402,7 +412,9 @@ final class RuntimeDtos {
             BigDecimal costUsd,
             String storageMode,
             String clientRequestId,
-            Instant detailsAvailableUntil) {
+            Instant detailsAvailableUntil,
+            String sourceType,
+            String sourceRefId) {
 
         /**
          * 从旧领域运行对象映射为 API 响应；新存储元数据保持可空以兼容历史 Run。
@@ -430,7 +442,9 @@ final class RuntimeDtos {
                     run.costUsd(),
                     storageMode == null ? null : storageMode.name(),
                     clientRequestId,
-                    detailsAvailableUntil);
+                    detailsAvailableUntil,
+                    run.sourceType().name(),
+                    run.sourceRefId());
         }
     }
 

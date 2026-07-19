@@ -184,6 +184,14 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesNightExecutionApisToTheUsersBoundBackend() {
+        assertRequestIsForwarded(
+                "/api/internal/platform/opencode-runtime/night-execution/tasks");
+        assertRequestIsForwardedGet(
+                "/api/internal/platform/opencode-runtime/night-execution/tasks?sessionId=ses_1234567890abcdef");
+    }
+
+    @Test
     void routesAgentScopedSideQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
         assertRequestIsForwarded(
                 "/api/internal/agent/opencode/session/ses_1234567890abcdef/side-question/runs");
@@ -427,6 +435,35 @@ class UserOpencodeBackendRoutingWebFilterTest {
                 .post("/api/internal/agent/opencode/runs")
                 .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
                 .body("{\"sessionId\":\"ses_1234567890abcdef\",\"prompt\":\"" + "x".repeat(64) + "\"}"));
+
+        filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        Mockito.verifyNoInteractions(assignmentService, contextStore);
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(400);
+        assertThat(exchange.getResponse().getBodyAsString().block())
+                .contains("\"code\":\"VALIDATION_ERROR\"")
+                .contains("\"maxBytes\":64");
+        assertThat(httpClient.requests).isEmpty();
+    }
+
+    @Test
+    void oversizedNightTaskBodyReturnsValidationErrorBeforeRoutingLookup() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationContextStore contextStore = Mockito.mock(ConversationContextStore.class);
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = new UserOpencodeBackendRoutingWebFilter(
+                new UserOpencodeBackendRoutingService(
+                        assignmentService,
+                        new WorkspaceServerIdentity("10.8.0.21"),
+                        heartbeatStore("server-b"),
+                        new ObjectMapper().findAndRegisterModules(),
+                        httpClient,
+                        contextStore,
+                        64));
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/platform/opencode-runtime/night-execution/tasks")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body("{\"prompt\":\"" + "x".repeat(64) + "\"}"));
 
         filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
 

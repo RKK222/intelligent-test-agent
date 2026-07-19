@@ -13,6 +13,25 @@
   max-width: min(620px, 82%);
 }
 
+.oc-user-message__source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  padding: 2px 7px;
+  border: 1px solid #d8dbe7;
+  border-radius: 999px;
+  background: #f1f2f8;
+  color: #3d466e;
+  font-size: var(--oc-text-xs);
+  font-weight: 650;
+}
+
+.oc-user-message__source-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
 .oc-user-message__bubble {
   position: relative;
   width: fit-content;

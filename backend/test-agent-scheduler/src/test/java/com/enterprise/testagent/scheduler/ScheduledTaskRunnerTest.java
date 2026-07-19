@@ -143,6 +143,46 @@ class ScheduledTaskRunnerTest {
     }
 
     @Test
+    void pendingUserPlanRunExecutesOnlyOnMatchingAffinityAndUsesRunLevelConcurrency() {
+        InMemoryScheduledTaskRepository repository = new InMemoryScheduledTaskRepository();
+        ScheduledTaskRun matching = ScheduledTaskRun.pending(
+                new ScheduledTaskRunId("str_user_plan_matching_123456"),
+                TASK_KEY,
+                null,
+                ScheduledTaskTriggerType.USER_PLAN,
+                null,
+                NOW,
+                "linux-a",
+                TRACE_ID);
+        ScheduledTaskRun remote = ScheduledTaskRun.pending(
+                new ScheduledTaskRunId("str_user_plan_remote_12345678"),
+                TASK_KEY,
+                null,
+                ScheduledTaskTriggerType.USER_PLAN,
+                null,
+                NOW,
+                "linux-b",
+                TRACE_ID);
+        repository.saveRun(matching);
+        repository.saveRun(remote);
+        RecordingHandler handler = new RecordingHandler(false) {
+            @Override
+            public java.util.Set<ScheduledTaskTriggerType> supportedTriggerTypes() {
+                return java.util.Set.of(ScheduledTaskTriggerType.USER_PLAN);
+            }
+        };
+        ScheduledTaskRunner runner = runner(repository, new FakeScheduledTaskLock(), handler, () -> "linux-a");
+
+        runner.scanOnce();
+        runner.awaitUserPlanIdle(Duration.ofSeconds(2));
+
+        assertThat(repository.findRunById(matching.taskRunId()).orElseThrow().status())
+                .isEqualTo(ScheduledTaskRunStatus.SUCCEEDED);
+        assertThat(repository.findRunById(remote.taskRunId()).orElseThrow().status())
+                .isEqualTo(ScheduledTaskRunStatus.PENDING);
+    }
+
+    @Test
     void handlerCanObserveStopRequestAndRunnerRecordsManualStop() {
         InMemoryScheduledTaskRepository repository = new InMemoryScheduledTaskRepository();
         repository.saveTask(dueTask().withNextFireAt(NOW.plusSeconds(3600), NOW));
@@ -176,6 +216,20 @@ class ScheduledTaskRunnerTest {
         return new ScheduledTaskRunner(repository, registry, lock, calculator, properties, clock);
     }
 
+    private ScheduledTaskRunner runner(
+            InMemoryScheduledTaskRepository repository,
+            FakeScheduledTaskLock lock,
+            ScheduledTaskHandler handler,
+            ScheduledTaskExecutionAffinityProvider affinityProvider) {
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setInstanceId("scheduler-test-instance");
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        CronScheduleCalculator calculator = new CronScheduleCalculator();
+        ScheduledTaskRegistry registry = new ScheduledTaskRegistry(repository, calculator, clock, List.of(handler));
+        registry.syncRegisteredTasks(TRACE_ID);
+        return new ScheduledTaskRunner(repository, registry, lock, calculator, properties, clock, affinityProvider);
+    }
+
     private ScheduledTask dueTask() {
         return ScheduledTask.registered(
                         TASK_KEY,
@@ -187,10 +241,12 @@ class ScheduledTaskRunnerTest {
                 .withNextFireAt(NOW.minusSeconds(60), NOW.minusSeconds(3600));
     }
 
-    private record RecordingHandler(boolean fail) implements ScheduledTaskHandler {
+    private static class RecordingHandler implements ScheduledTaskHandler {
         private static final AtomicInteger invocations = new AtomicInteger();
+        private final boolean fail;
 
-        private RecordingHandler {
+        private RecordingHandler(boolean fail) {
+            this.fail = fail;
             invocations.set(0);
         }
 

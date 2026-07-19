@@ -41,6 +41,7 @@ import com.enterprise.testagent.domain.run.RunSummaryPersistencePort;
 import com.enterprise.testagent.domain.run.TokenUsage;
 import com.enterprise.testagent.domain.run.ConversationRunContext;
 import com.enterprise.testagent.domain.session.Session;
+import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageId;
@@ -57,6 +58,7 @@ import com.enterprise.testagent.event.RunEventLiveBus;
 import com.enterprise.testagent.event.RunEventLiveEvent;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
+import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.client.OpencodeCancelCommand;
@@ -139,6 +141,24 @@ class RunApplicationServiceTest {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.details()).containsEntry("rolloutId", "acr_rollout");
                 });
+    }
+
+    @Test
+    void manualRunChecksNightExecutionSessionLockBeforeDispatch() {
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), new FakeRunRepository(),
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(), new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()), new FakeAgentSessionBindingRepository());
+        NightExecutionSessionLockGuard guard = org.mockito.Mockito.mock(NightExecutionSessionLockGuard.class);
+        SessionId sessionId = new SessionId("ses_1234567890abcdef");
+        org.mockito.Mockito.doThrow(new PlatformException(ErrorCode.CONFLICT, "locked"))
+                .when(guard).requireUnlocked(sessionId);
+        service.setNightExecutionLockGuard(guard);
+
+        assertThatThrownBy(() -> service.startRun(sessionId, "manual", "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
     }
 
     @Test
@@ -319,6 +339,41 @@ class RunApplicationServiceTest {
         assertThat(facade.createSessionCommands).hasSize(1);
         assertThat(facade.createSessionCommands.getFirst().node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
         assertThat(facade.startRunCommands.getFirst().node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
+    }
+
+    @Test
+    void scheduledRunRecordsServerControlledSourceOnRunAndUserMessage() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        UserOpencodeProcessAssignmentService assignmentService =
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ExecutionNode assignedNode = userProcessNode("node_night_1234567890ab", "http://10.8.0.12:4096");
+        UserId userId = new UserId("usr_1234567890abcdef");
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(
+                        userId, "opencode", "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(assignedNode));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), runs, messages,
+                new FakeExecutionNodeRepository(), new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()), new FakeAgentSessionBindingRepository(),
+                assignmentService);
+
+        Run run = service.startScheduledRun(
+                userId,
+                new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"), "night run", List.of(),
+                        RUNTIME_DISPATCH_MESSAGE_ID, null, null, null, null),
+                "net_night_1234567890abcdef",
+                "trace_1234567890abcdef");
+
+        assertThat(run.sourceType()).isEqualTo(ConversationSourceType.SCHEDULED_TASK);
+        assertThat(run.sourceRefId()).isEqualTo("net_night_1234567890abcdef");
+        assertThat(messages.saved).singleElement().satisfies(message -> {
+            assertThat(message.sourceType()).isEqualTo(ConversationSourceType.SCHEDULED_TASK);
+            assertThat(message.sourceRefId()).isEqualTo("net_night_1234567890abcdef");
+            assertThat(message.senderUserId()).isEqualTo(userId);
+        });
     }
 
     @Test

@@ -77,6 +77,11 @@ public class SchedulerManagementService {
      */
     public ScheduledTask updateTask(ScheduledTaskKey taskKey, ScheduledTaskUpdateCommand command, String traceId) {
         ScheduledTask current = getTask(taskKey);
+        if (current.cronExpression() == null) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "该任务仅支持 USER_PLAN，不能配置管理员 Cron");
+        }
         Instant now = clock.instant();
         boolean enabled = command.enabled() == null ? current.enabled() : command.enabled();
         String cronExpression = textOrNull(command.cronExpression()) == null ? current.cronExpression() : command.cronExpression().trim();
@@ -109,7 +114,12 @@ public class SchedulerManagementService {
      * 创建管理员手动触发运行记录，实际执行由后台 runner 异步扫描。
      */
     public ScheduledTaskRun trigger(ScheduledTaskKey taskKey, UserId requestedByUserId, String traceId) {
-        getTask(taskKey);
+        ScheduledTask task = getTask(taskKey);
+        if (task.cronExpression() == null) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "该任务仅支持 USER_PLAN，不能手工触发");
+        }
         if (!properties.isEnabled()) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,

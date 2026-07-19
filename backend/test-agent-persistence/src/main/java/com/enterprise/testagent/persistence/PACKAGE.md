@@ -27,6 +27,8 @@
 - `mybatis.RunSummaryMapper` / `mybatis.MyBatisRunSummaryPersistenceRepository`：新模式启动执行单条无原文锚点 INSERT；终态事务执行 Run statusVersion CAS、最多两条摘要批量 MERGE、Session 时间更新三条 SQL；较高事件序号只允许一次晚到刷新，跨终态状态仅允许 `FAILED + TRANSPORT_ERROR` 被可信 root 事实纠正；详情 locator 从既有 `dispatch_message_id` 映射目标用户轮次，低频 Run 恢复、Diff 定位和 accepted/rejected 计数都只走 XML SQL，不写 `run_events`。
 - `mybatis.ScheduledTaskRunRetentionMapper` / `mybatis/ScheduledTaskRunRetentionMapper.xml`：按 `ended_at` 和终态 status 清理超过 7 天的 scheduler 运行记录，显式排除活动状态。
 - `mybatis.MyBatisScheduledTaskRunRetentionRepository`：实现 scheduler 运行记录保留策略 domain 端口，供 scheduler 框架维护任务调用。
+- `mybatis.ScheduledTaskMapper` / `mybatis/ScheduledTaskMapper.xml` / `mybatis.MyBatisScheduledTaskRepository`：scheduler 任务与运行记录的生产 MyBatis 实现，包含服务器亲和 USER_PLAN 到期查询和状态 CAS 认领。
+- `mybatis.NightExecutionTaskMapper` / `mybatis/NightExecutionTaskMapper.xml` / `mybatis.MyBatisNightExecutionTaskRepository`：夜间任务、幂等创建、会话写锁、15 分钟全局容量占位和 30 天清理的生产实现。
 - `mybatis.ReferenceRepositoryMapper` / `mybatis/ReferenceRepositoryMapper.xml`：引用资产总体状态与服务器副本的全部关系型 SQL，包含操作类型、旧分支/generation CAS、保留实际指针的目标 upsert、离线 `DEFERRED`、租约认领/续期和带 fencing 条件的同步/核验写回。
 - `mybatis.MyBatisReferenceRepositoryRepository`：引用资产仓储领域端口的生产 Bean，负责行模型映射、分页上限和多目标事务边界。
 - `RedisRunRuntimeStore` / `RunRuntimeStoreConfig`：Run 运行数据面领域端口的 Redis 唯一生产实现和装配；单 Run key 使用 `{runId}` hash tag，durable `events` Stream 使用 `${seq}-0`，durable/transient `runtime-events` Stream 使用 `${runtimeVersion}-0`，snapshot 使用 Hash + order ZSET 物化当前实体状态，外部 snapshot 同时 CAS seq/runtimeVersion，动态 key registry 统一滑动 TTL；跨 slot active/history 索引在单 Run Lua 前按“active TTL + pending TTL”安全窗保守登记并由读路径清脏，避免任一事件 Lua 提交后 Java 退出造成恢复失联；owner 条件接管原子校验活跃 manifest 快照并提升 token，事件、远端 Session 绑定和 scope/dedup/pending Lua 在副作用前校验 owner + token，pending 同时原子计入/扣减统一详情字节预算；生产 32 MiB 中为关键快照固定预留 4 MiB，durable/runtime 事件或 snapshot 投影项超过 20,000 或总详情超限时显式截断旧 Stream、递增 reset generation，并保留专用 USER 输入、JSON role 为 assistant 的最新 message、对应最新可见 text part 和 run-status，tool/reasoning/非 assistant 实体只作为可淘汰投影。
@@ -43,7 +45,6 @@
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及运行管理页拓扑列表、连接列表、进程分页筛选和绑定关联查询；读取历史用户进程时会兼容 `updated_at < created_at` 的脏数据并按 `created_at` 归一化，避免旧记录阻断状态查询和重新初始化。
 - `JdbcCommonParameterRepository`：通用参数存量 JDBC 实现，不再作为生产 Spring Bean，仅保留旧集成测试直接构造。
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度记录，供配置管理 HTTP 轮询接口读取。
-- `JdbcScheduledTaskRepository`：实现定时任务定义、用户计划和运行记录持久化，支持 due task、pending run 和管理页分页筛选查询。
 - `db/migration/V1__create_core_tables.sql`：创建核心业务表和索引。
 - `db/migration/V2__create_session_messages.sql`：创建会话消息表和分页索引。
 - `db/migration/V3__add_session_opencode_mapping.sql`：为 sessions 增加可空内部 opencode 映射列、成对 check、节点外键和索引。
@@ -62,6 +63,8 @@
 - `db/migration/V20260627020000__seed_opencode_manager_max_processes_param.sql`：初始化 `OPENCODE_MANAGER_MAX_PROCESSES` 通用参数，供 manager 运行时最大进程数配置使用。
 - `db/migration/V20260703141000__create_run_session_scopes.sql`：创建 Run session scope 表并为 `run_events` 预留 scope/raw event id 列。
 - `db/migration/V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加运行记录保留清理索引。
+- `db/migration/V20260718210000__extend_scheduler_user_plan.sql`：允许 USER_PLAN 专用任务无 Cron，并为运行记录增加执行亲和字段和到期索引。
+- `db/migration/V20260718211000__create_night_execution_tasks.sql`：创建夜间任务、会话锁和时段容量占位表及约束/索引/中文注释。
 - `db/migration/V20260718100000__seed_references_params.sql`：初始化引用资产根目录和 SDD 根层目录名称清单。
 - `db/migration/V20260718110000__create_reference_repository_replica_tables.sql`：创建引用资产总体状态/服务器副本表及认领、generation 查询索引。
 - `db/migration/V20260718143000__add_reference_repository_operations_and_verification.sql`：增加引用资产操作类型、实际指针可空语义与核验时间。
@@ -107,6 +110,7 @@
 - ExecutionNode 测试必须覆盖可路由节点过滤和排序，防止不可用或满载节点被派发。
 - OpencodeProcessManagement 测试必须覆盖拓扑读写、V17 loopback 种子清理、历史用户进程时间戳归一化、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - ScheduledTask 测试必须覆盖任务定义、用户计划、运行记录、分页筛选和来源字段读写。
+- NightExecution 测试必须覆盖幂等键、状态 CAS、单会话锁、容量上限/释放、过期占位清理和 owner 隔离。
 - CommonParameter 和 WorkspaceCreateOperation 测试必须覆盖平台优先级、默认路径 seed、进度步骤更新、成功/失败状态和按用户隔离查询。
 - ReferenceRepository 测试必须覆盖 Flyway 建表、MyBatis XML generation/CAS、同服务器租约互斥/续期、过期 worker fencing、离线 `DEFERRED`/恢复和稳定游标分页。
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL、MyBatis 注解 SQL，并固化 PostgreSQL 专有 SQL 兼容约束。

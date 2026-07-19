@@ -11,7 +11,12 @@ import {
   reduceAgentChatRuntime,
   type ComposerAttachment
 } from "@test-agent/agent-chat";
-import { BackendApiError, createBackendApiClient, type RawHttpExchange } from "@test-agent/backend-api";
+import {
+  BackendApiError,
+  createBackendApiClient,
+  type CreateNightExecutionTaskPayload,
+  type RawHttpExchange
+} from "@test-agent/backend-api";
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
@@ -35,6 +40,9 @@ import type {
   RuntimeResourceInfo,
   RuntimeToolInfo,
   ModelInfo,
+  NightExecutionSlots,
+  NightExecutionTask,
+  NightExecutionTaskQueryResponse,
   ProviderInfo,
   Session,
   SessionMessage,
@@ -169,6 +177,7 @@ import {
   platformSessionTitleFromSynchronizedEventPayload,
   sessionTitleEventMatchesCurrentSession,
   sessionTitleFromFirstMessage,
+  shouldResetAfterNightTaskClosure,
   shouldFailExhaustedRetry,
   syntheticEvent,
   text,
@@ -323,6 +332,21 @@ const workspaceRequirementCandidatesLoading = ref(false);
 let workspaceRequirementLoadSeq = 0;
 const session = shallowRef<Session | null>(null);
 const run = shallowRef<Run | null>(null);
+const nightTasks = ref<NightExecutionTask[]>([]);
+const nightVisibleFailure = shallowRef<NightExecutionTask | null>(null);
+const nightSlots = shallowRef<NightExecutionSlots | null>(null);
+const nightSlotsLoading = ref(false);
+const nightTaskSubmitting = ref(false);
+const nightTaskActionPending = ref<Record<string, boolean>>({});
+const recentlyCreatedNightTask = shallowRef<NightExecutionTask | null>(null);
+let nightTaskRefreshSequence = 0;
+let nightSlotRequestSequence = 0;
+let nightTaskPollingTimer: ReturnType<typeof setInterval> | null = null;
+let nightCreateIdempotency: {
+  signature: string;
+  clientRequestId: string;
+  runClientRequestId: string;
+} | null = null;
 // OpenCode 原生 title agent 会在 root Run 成功后异步发出 session.updated。
 // 该 Run 处于待命名状态时，保留既有 Run SSE，直到后端确认标题已持久化或显式关闭监听。
 const pendingSessionTitleRunId = ref<string | null>(null);
@@ -427,6 +451,15 @@ let selectingAppId: string | undefined;
 let appSelectionSeq = 0;
 const readonlySessionReason = ref("");
 const chatTitle = computed(() => session.value?.title ?? "");
+const currentNightTask = computed<NightExecutionTask | null>(() => {
+  const sessionId = session.value?.sessionId;
+  const pending = (task: NightExecutionTask | null | undefined) =>
+    task?.status === "SCHEDULED" || task?.status === "DISPATCHING" ? task : null;
+  if (sessionId) {
+    return pending(nightTasks.value.find((task) => task.sessionId === sessionId));
+  }
+  return pending(recentlyCreatedNightTask.value);
+});
 const currentRawOutputEntries = computed(() => {
   const sessionId = session.value?.sessionId;
   return sessionId ? rawEntriesBySessionId.value[sessionId] ?? [] : [];
@@ -678,6 +711,89 @@ const selectedWorkspace = computed(() => {
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
 const sessionRuntimeStateQueryKey = ["sessions", "runtime-state"] as const;
+
+/** 待执行页是集中视图，按后端允许的最大页长逐页收齐，避免第 101 条任务静默消失。 */
+async function listAllPendingNightExecutionTasks(): Promise<NightExecutionTaskQueryResponse> {
+  const first = await api.listNightExecutionTasks({ page: 1, size: 200 });
+  const tasksById = new Map(first.items.map((task) => [task.taskId, task]));
+  const pageCount = Math.ceil(first.total / Math.max(first.size, 1));
+  for (let page = 2; page <= pageCount; page += 1) {
+    const next = await api.listNightExecutionTasks({ page, size: first.size });
+    next.items.forEach((task) => tasksById.set(task.taskId, task));
+  }
+  return { ...first, items: [...tasksById.values()] };
+}
+
+async function refreshNightExecutionTasks(options: { reportError?: boolean } = {}) {
+  if (!authStore.token) {
+    nightTaskRefreshSequence += 1;
+    nightTasks.value = [];
+    nightVisibleFailure.value = null;
+    recentlyCreatedNightTask.value = null;
+    return;
+  }
+  const sequence = ++nightTaskRefreshSequence;
+  const currentSessionId = session.value?.sessionId;
+  try {
+    const [allTasks, currentTasks] = await Promise.all([
+      listAllPendingNightExecutionTasks(),
+      currentSessionId
+        ? api.listNightExecutionTasks({ sessionId: currentSessionId, page: 1, size: 20 })
+        : Promise.resolve(null)
+    ]);
+    if (sequence !== nightTaskRefreshSequence) return;
+    nightTasks.value = allTasks.items;
+    nightVisibleFailure.value = currentTasks?.visibleFailure ?? null;
+    if (recentlyCreatedNightTask.value) {
+      const refreshed = allTasks.items.find((task) => task.taskId === recentlyCreatedNightTask.value?.taskId);
+      recentlyCreatedNightTask.value = refreshed ?? null;
+    }
+  } catch (error) {
+    if (sequence !== nightTaskRefreshSequence || !options.reportError) return;
+    feedback.value = errorFeedback("查询夜间任务失败", error);
+  }
+}
+
+async function requestNightExecutionSlots() {
+  const sequence = ++nightSlotRequestSequence;
+  nightSlotsLoading.value = true;
+  try {
+    const slots = await api.getNightExecutionSlots();
+    if (sequence !== nightSlotRequestSequence) return;
+    nightSlots.value = slots;
+  } catch (error) {
+    if (sequence !== nightSlotRequestSequence) return;
+    nightSlots.value = null;
+    feedback.value = errorFeedback("夜间执行暂不可用", error);
+  } finally {
+    if (sequence === nightSlotRequestSequence) nightSlotsLoading.value = false;
+  }
+}
+
+function refreshNightTasksOnFocus() {
+  if (document.visibilityState === "visible") void refreshNightExecutionTasks();
+}
+
+watch(
+  [() => authStore.token, () => session.value?.sessionId],
+  () => void refreshNightExecutionTasks(),
+  { immediate: true }
+);
+
+onMounted(() => {
+  window.addEventListener("focus", refreshNightTasksOnFocus);
+  nightTaskPollingTimer = setInterval(() => void refreshNightExecutionTasks(), 30_000);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("focus", refreshNightTasksOnFocus);
+  if (nightTaskPollingTimer) {
+    clearInterval(nightTaskPollingTimer);
+    nightTaskPollingTimer = null;
+  }
+  nightTaskRefreshSequence += 1;
+  nightSlotRequestSequence += 1;
+});
 
 const managedApplicationsQuery = useQuery({
   queryKey: ["managed-workspace", "applications"],
@@ -2928,6 +3044,8 @@ function resetWorkspaceState() {
   workspaceRequirementLoadSeq++;
   session.value = null;
   run.value = null;
+  nightVisibleFailure.value = null;
+  recentlyCreatedNightTask.value = null;
   pendingSessionTitleRunId.value = null;
   logs.value = [];
   diffFiles.value = [];
@@ -4799,6 +4917,16 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   if (historySwitchingSessionId.value) {
     return;
   }
+  if (currentNightTask.value) {
+    feedback.value = {
+      kind: "info",
+      title: "当前对话已有夜间任务",
+      description: currentNightTask.value.status === "DISPATCHING"
+        ? "任务正在启动，执行完成后可继续对话。"
+        : "请先取消待执行任务，再在当前对话中发送新消息。"
+    };
+    return;
+  }
   if (readonlySessionReason.value) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
     return;
@@ -4915,6 +5043,225 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   requestChatRun(userMessageId);
   chatContextStore.clearContexts();
   startRunMutation.mutate({ input: runDraft, guard: captureConversationInteraction() });
+}
+
+/**
+ * 夜间任务使用与立即发送相同的 prompt/上下文组装规则，但提交成功前不写入 Timeline，
+ * 避免“尚未执行”的输入被误认为已经发送给模型。
+ */
+async function handleScheduleNight(payload: { prompt: string; slotStart: string }) {
+  if (nightTaskSubmitting.value || historySwitchingSessionId.value) return;
+  if (currentNightTask.value) {
+    feedback.value = { kind: "info", title: "当前对话已有夜间任务", description: "请先取消原任务再重新安排。" };
+    return;
+  }
+  if (readonlySessionReason.value) {
+    feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
+    return;
+  }
+  if (runtimeBusy.value) {
+    feedback.value = { kind: "info", title: "当前任务仍在执行", description: "请等待当前任务结束后再安排夜间执行。" };
+    return;
+  }
+  if (!opencodeProcessReady.value || opencodeProcessStatus.value?.messageSendAllowed === false) {
+    feedback.value = {
+      kind: "info",
+      title: "暂不能安排夜间执行",
+      description: opencodeProcessStatus.value?.messageSendBlockedReason
+        ?? opencodeProcessStatus.value?.message
+        ?? "请先初始化 TestAgent 进程。"
+    };
+    return;
+  }
+  const workspace = selectedWorkspace.value;
+  if (!workspace) {
+    feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区。" };
+    return;
+  }
+  const validation = validateChatSend(payload.prompt.trim(), chatContextStore.items);
+  if (!validation.ok) {
+    feedback.value = { kind: "info", title: "上下文过长", description: validation.reason };
+    return;
+  }
+
+  const guard = captureConversationInteraction();
+  const chatContextParts = chatContextItemsToPromptParts(chatContextStore.items);
+  const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
+  const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;
+  const selectionContexts = chatContextStore.items.filter(
+    (item): item is Extract<ChatContextItem, { type: "selection" }> => item.type === "selection"
+  );
+  const displayParts = buildPromptParts(
+    payload.prompt,
+    implicitEditorTab,
+    [],
+    [...chatContextParts, ...diffContextParts.value],
+    implicitEditorSelection
+  );
+  const displayPrompt = payload.prompt.trim() || promptFromParts(displayParts);
+  const rawSubmitPrompt = payload.prompt.trim() || displayPrompt;
+  const submitPrompt = selectionContexts.length > 0
+    ? serializeChatContexts(rawSubmitPrompt, selectionContexts)
+    : rawSubmitPrompt;
+  const parts = buildPromptParts(
+    submitPrompt,
+    implicitEditorTab,
+    [],
+    [...chatContextParts, ...diffContextParts.value],
+    implicitEditorSelection
+  );
+  if (!submitPrompt) return;
+  const command = parseCommand(payload.prompt, promptMode.value);
+  const signature = JSON.stringify({
+    sessionId: guard.sessionId,
+    workspaceId: workspace.workspaceId,
+    prompt: submitPrompt,
+    parts,
+    slotStart: payload.slotStart,
+    agent: selectedAgent.value,
+    model: selectedModel.value,
+    mode: promptMode.value,
+    command
+  });
+  if (!nightCreateIdempotency || nightCreateIdempotency.signature !== signature) {
+    nightCreateIdempotency = {
+      signature,
+      clientRequestId: createClientRequestId(),
+      runClientRequestId: createClientRequestId()
+    };
+  }
+  const requestIds = nightCreateIdempotency;
+  const request: CreateNightExecutionTaskPayload = {
+    clientRequestId: requestIds.clientRequestId,
+    runClientRequestId: requestIds.runClientRequestId,
+    sessionId: guard.sessionId ?? undefined,
+    workspaceId: workspace.workspaceId,
+    sessionTitle: sessionTitleFromFirstMessage(displayPrompt),
+    prompt: submitPrompt,
+    parts,
+    agent: selectedAgent.value || undefined,
+    model: selectedModel.value || undefined,
+    mode: promptMode.value,
+    command: command?.command,
+    arguments: command?.arguments,
+    slotStart: payload.slotStart
+  };
+
+  nightTaskSubmitting.value = true;
+  try {
+    const created = await api.createNightExecutionTask(request);
+    nightCreateIdempotency = null;
+    nightTasks.value = [created, ...nightTasks.value.filter((task) => task.taskId !== created.taskId)];
+    recentlyCreatedNightTask.value = created;
+    if (!conversationInteractionIsCurrent(guard)) {
+      void refreshNightExecutionTasks();
+      return;
+    }
+    if (!session.value) {
+      try {
+        const createdSession = await api.getSession(created.sessionId);
+        if (conversationInteractionIsCurrent(guard)) {
+          session.value = createdSession;
+        }
+      } catch (error) {
+        // 任务已经持久化成功；会话详情迟到不应把成功反馈改成失败，轮询会继续恢复。
+        console.warn("夜间任务会话详情暂未恢复", error);
+      }
+    }
+    if (session.value?.sessionId === created.sessionId) {
+      recentlyCreatedNightTask.value = null;
+    }
+    chatContextStore.clearContexts();
+    diffContextParts.value = [];
+    feedback.value = {
+      kind: "success",
+      title: "夜间任务已安排",
+      description: "任务会在所选 15 分钟时间段内自动启动。"
+    };
+    void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    void refreshNightExecutionTasks();
+  } catch (error) {
+    const ambiguous = !(error instanceof BackendApiError) || error.status === 408 || error.status >= 500;
+    if (!ambiguous) nightCreateIdempotency = null;
+    feedback.value = errorFeedback("安排夜间任务失败", error);
+    if (error instanceof BackendApiError && error.status === 409) void requestNightExecutionSlots();
+    if (ambiguous) void refreshNightExecutionTasks();
+  } finally {
+    nightTaskSubmitting.value = false;
+  }
+}
+
+function markNightTaskAction(taskId: string, pending: boolean) {
+  const next = { ...nightTaskActionPending.value };
+  if (pending) next[taskId] = true;
+  else delete next[taskId];
+  nightTaskActionPending.value = next;
+}
+
+async function handleAdjustNightTask(payload: { taskId: string; slotStart: string }) {
+  if (nightTaskActionPending.value[payload.taskId]) return;
+  markNightTaskAction(payload.taskId, true);
+  try {
+    const adjusted = await api.adjustNightExecutionTask(payload.taskId, payload.slotStart);
+    nightTasks.value = nightTasks.value.map((task) => task.taskId === adjusted.taskId ? adjusted : task);
+    if (recentlyCreatedNightTask.value?.taskId === adjusted.taskId) recentlyCreatedNightTask.value = adjusted;
+    feedback.value = { kind: "success", title: "执行时间已调整", description: "系统已重新预留夜间容量。" };
+    void requestNightExecutionSlots();
+  } catch (error) {
+    feedback.value = errorFeedback("调整夜间任务失败", error);
+    if (error instanceof BackendApiError && error.status === 409) void requestNightExecutionSlots();
+  } finally {
+    markNightTaskAction(payload.taskId, false);
+    void refreshNightExecutionTasks();
+  }
+}
+
+async function handleCancelNightTask(taskId: string) {
+  if (nightTaskActionPending.value[taskId]) return;
+  const task = nightTasks.value.find((item) => item.taskId === taskId) ?? recentlyCreatedNightTask.value;
+  markNightTaskAction(taskId, true);
+  try {
+    await api.cancelNightExecutionTask(taskId);
+    nightTasks.value = nightTasks.value.filter((item) => item.taskId !== taskId);
+    if (recentlyCreatedNightTask.value?.taskId === taskId) recentlyCreatedNightTask.value = null;
+    feedback.value = { kind: "success", title: "夜间任务已取消", description: "当前对话现在可以继续发送消息。" };
+    const persistedMessageCount = chatState.value.messages.filter((message) => message.id !== "welcome").length;
+    if (task?.sessionId === session.value?.sessionId
+        && shouldResetAfterNightTaskClosure(session.value, taskId, persistedMessageCount)) {
+      handleNewConversation();
+    }
+    void requestNightExecutionSlots();
+  } catch (error) {
+    feedback.value = errorFeedback("取消夜间任务失败", error);
+  } finally {
+    markNightTaskAction(taskId, false);
+    void refreshNightExecutionTasks();
+  }
+}
+
+async function handleDismissNightTask(taskId: string) {
+  if (nightTaskActionPending.value[taskId]) return;
+  const failure = nightVisibleFailure.value?.taskId === taskId ? nightVisibleFailure.value : null;
+  markNightTaskAction(taskId, true);
+  try {
+    await api.dismissNightExecutionTask(taskId);
+    if (nightVisibleFailure.value?.taskId === taskId) nightVisibleFailure.value = null;
+    const persistedMessageCount = chatState.value.messages.filter((message) => message.id !== "welcome").length;
+    if (failure?.sessionId === session.value?.sessionId
+        && shouldResetAfterNightTaskClosure(session.value, taskId, persistedMessageCount)) {
+      handleNewConversation();
+    }
+  } catch (error) {
+    feedback.value = errorFeedback("关闭夜间任务提示失败", error);
+  } finally {
+    markNightTaskAction(taskId, false);
+    void refreshNightExecutionTasks();
+  }
+}
+
+function openNightTaskSession(sessionId: string) {
+  if (session.value?.sessionId === sessionId) return;
+  void switchSession(sessionId);
 }
 
 function latestRemoteMessageId(): string | undefined {
@@ -6159,6 +6506,8 @@ function handleNewConversation() {
   pendingSessionTitleRunId.value = null;
   session.value = null;
   run.value = null;
+  nightVisibleFailure.value = null;
+  recentlyCreatedNightTask.value = null;
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   clearAutoRetryState();
   dispatchChat({ type: "reset" });
@@ -6574,6 +6923,14 @@ async function handleLogout() {
           :permissions="chatState.permissions"
           :questions="chatState.questions"
           :current-session-id="session?.sessionId"
+          :current-session-source-type="session?.sourceType"
+          :night-tasks="nightTasks"
+          :current-night-task="currentNightTask"
+          :night-visible-failure="nightVisibleFailure"
+          :night-slots="nightSlots"
+          :night-slots-loading="nightSlotsLoading"
+          :night-task-submitting="nightTaskSubmitting"
+          :night-task-action-pending="nightTaskActionPending"
           :todos="chatState.todos"
           :todo-snapshots-by-user-message-id="chatState.todoSnapshotsByUserMessageId"
           :chat-contexts="chatContextStore.items"
@@ -6606,6 +6963,13 @@ async function handleLogout() {
           @stop="handleStopRun"
           @retry="handleRetryRun"
           @new-conversation="handleNewConversation"
+          @request-night-slots="requestNightExecutionSlots"
+          @request-night-tasks="refreshNightExecutionTasks({ reportError: true })"
+          @schedule-night="handleScheduleNight"
+          @adjust-night-task="handleAdjustNightTask"
+          @cancel-night-task="handleCancelNightTask"
+          @dismiss-night-task="handleDismissNightTask"
+          @open-night-task-session="openNightTaskSession"
           @open-history="refreshHistoryOnOpen"
           @history-search-change="handleHistorySearchChange"
           @load-more-history="loadMoreHistory"

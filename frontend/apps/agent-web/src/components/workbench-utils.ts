@@ -63,6 +63,17 @@ export function filterWorkspaceRootEntries(path: string, entries: FileTreeEntry[
   return entries.filter((entry) => !isWorkspaceAgentConfigPath(entry.name));
 }
 
+/** 关闭夜间任务后，只离开由该任务创建且仍无真实消息的空白会话。 */
+export function shouldResetAfterNightTaskClosure(
+  session: Session | null,
+  taskId: string,
+  persistedMessageCount: number
+): boolean {
+  return persistedMessageCount === 0
+    && session?.sourceType === "SCHEDULED_TASK"
+    && session.sourceRefId === taskId;
+}
+
 export const workspaceRequirementStageDirectories = ["01-需求", "02-设计", "03-编码", "04-测试"] as const;
 const workspaceRequirementStages = new Set<string>(workspaceRequirementStageDirectories);
 
@@ -716,7 +727,8 @@ export function historyItems(run: Run | null, sessions: Session[], runtimeStates
       runStatus: runtimeState?.runStatus,
       pendingQuestion: runtimeState?.attention === "QUESTION",
       attentionEventId: runtimeState?.attentionEventId ?? undefined,
-      attentionAt: runtimeState?.attentionAt ?? undefined
+      attentionAt: runtimeState?.attentionAt ?? undefined,
+      ...(item.sourceType ? { sourceType: item.sourceType } : {})
     };
   });
 }
@@ -789,6 +801,8 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
         platformMessageId: message.messageId,
         remoteMessageId: message.remoteMessageId,
         runId: message.runId,
+        ...(message.sourceType ? { sourceType: message.sourceType } : {}),
+        ...(message.sourceRefId ? { sourceRefId: message.sourceRefId } : {}),
         role: "user",
         text: message.content,
         parts: normalizeSessionPromptParts(message),

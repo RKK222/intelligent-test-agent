@@ -13,6 +13,8 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 ## 主要程序清单
 
 - `session.SessionApplicationService`：会话创建、查询、消息和归档；消息列表会优先触发 projected messages 刷新，失败回退数据库快照。
+- `night.*`：夜间任务窗口/容量、提交查询/改期/取消、会话锁、USER_PLAN 投递和 5 分钟补偿。任务到期后按当前 `scheduledTaskRunId` 条件认领，进程启动和远端 Run 创建位于认领事务之外，再以短事务写回终态和解锁；投递复用 `UserOpencodeProcessAssignmentService.initialize`、会话上下文及 `RunApplicationService.startScheduledRun`，不直接调用 manager gateway，任务成功启动后沿用既有 RunEvent SSE。
+- `process.OpencodeScheduledTaskExecutionAffinityProvider`：把 scheduler USER_PLAN 亲和标识固定为当前稳定 Linux 服务器 ID。
 - `run.RunApplicationService`：Run 启动、路由、通用 agent binding 创建/复用、root session scope 记录、事件订阅、active-run 查询和取消；自动 dispatch 锚点由当前 runtime 生成并在远端 command、平台 USER、scope、manifest 和持久化锚点间复用，Legacy 显式旧 ID 保持透传。所有带 runId 的用户入口先通过该服务校验 Run 归属，新模式只读 Redis manifest 用户字段，legacy/manifest 缺失才回查 Run 与 Session。active-run 对已有 Redis user marker 的用户只读 Session active 索引。携带有效上下文的新 Run 由 `RunStorageModeSelector` 按 userId 稳定灰度固定为 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动期间不得切换；容量 reset 继续由同一运行数据面保留 USER、最新 assistant/可见 text part 和 run-status，不从数据库补原文。
 - `run.RunSessionScopeRouter`：在订阅级状态中维护当前 Run root/child known sessions 和 scopeVersion，负责 child discovery、pending drain、raw event dedup、child 终态过滤和无 session 全局 unknown 噪声过滤；新模式的 root/child scope、dedup 和 pending 全部走 `RunRuntimeStore` 同一 `{runId}` 数据面，禁止读写 scope 表；legacy 仅在 cache miss/新 child 时兼容访问 Repository。
 - `run.RunSessionScopeRuntimeCache`：只服务 legacy 的 Redis 热 cache，维护 `test-agent:run-scope:{runId}:pending:{sessionId}` 与 `test-agent:run-scope:{runId}:dedup:{sessionId}:{rawEventId}`，TTL 30 分钟，Redis 不可用时 legacy 可按数据库事实源继续处理；新模式不得调用该旧 cache。
@@ -57,6 +59,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 
 - `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime`。
 - `run.*` 测试必须覆盖 Run 创建、通用 agent binding 保存/复用、远端 session 懒创建/复用、事件持久化策略、Redis manifest 优先的 RunEvent SSE 生产 Java 路由、Run 用户归属与新模式鉴权零 PostgreSQL、new/legacy scope 数据库访问边界和新模式 root/scope/dedup/pending 统一端口、终态快照/token 回写、确定性双摘要的净化/Unicode 截断/fallback、Redis active-run、Redis 连续故障 30 秒后的无原文收敛、待交互 7 天与普通无活动 2 小时精确边界/同服务器 Java 路由/owner lease、Diff fallback、按 dispatch user 的跨 Run 消息/Todo 隔离、Session 全量历史，以及 legacy stale active Run 收敛任务。
+- `night.*` 测试必须覆盖北京时间夜间窗口、15 分钟推荐/容量、幂等提交、单会话锁、服务器亲和重路由、公共进程启动、稳定 Run 恢复、窗口内顺延、07:00 最终失败和 30 天清理。
 - `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新、消息追加默认 role 和消息列表数据库 fallback。
 - `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤、permission/question body 兼容、旁路事件隔离、终态竞态和孤儿清理。
 - `process.*` 测试必须覆盖用户进程分配、公共状态查询、公共启动/停止健康确认、通用参数路径读取、引用目录启动环境的目标平台解析/覆盖/缺失兼容、workspace 文件路由的实时应用成员校验、manager 控制面命令路由、后端心跳注册和运行管理快照聚合。

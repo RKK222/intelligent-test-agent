@@ -25,13 +25,24 @@ public interface ScheduledTaskRepository {
 
     ScheduledTaskRun saveRun(ScheduledTaskRun run);
 
+    /** 仅当运行记录仍处于预期状态时推进，避免取消与调度认领互相覆盖。 */
+    boolean updateRunIfStatus(ScheduledTaskRun run, ScheduledTaskRunStatus expectedStatus);
+
     Optional<ScheduledTaskRun> findRunById(ScheduledTaskRunId taskRunId);
 
     Optional<ScheduledTaskRun> findActiveRunByTaskKey(ScheduledTaskKey taskKey);
 
     Optional<ScheduledTaskRun> findActiveRunByTaskKeyExcluding(ScheduledTaskKey taskKey, ScheduledTaskRunId taskRunId);
 
-    List<ScheduledTaskRun> findPendingRuns(ScheduledTaskTriggerType triggerType, Instant now, int limit);
+    default List<ScheduledTaskRun> findPendingRuns(ScheduledTaskTriggerType triggerType, Instant now, int limit) {
+        return findPendingRuns(triggerType, null, now, limit);
+    }
+
+    List<ScheduledTaskRun> findPendingRuns(
+            ScheduledTaskTriggerType triggerType,
+            String executionAffinity,
+            Instant now,
+            int limit);
 
     PageResponse<ScheduledTaskRun> findRuns(ScheduledTaskRunFilter filter, PageRequest pageRequest);
 }

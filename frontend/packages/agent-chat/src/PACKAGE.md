@@ -21,6 +21,7 @@
 - `process-status.ts`：过程状态归一化、中文文案、状态色和 Skill tool 判定工具。
 - `prompt-parts.ts`：浏览器文件和图片到平台 `PromptPart` 的纯转换，供 composer 和单测复用。
 - `user-message-display.ts`：用户消息展示文案与工作区上下文 chip 派生工具；历史 `<context>` 文本只用于兼容解析，原生 file prompt parts 优先展示，并按 `type/path/lines` 去重。乐观 user message 会剥离 `content`、内联 URL 和 `source.text`，只保留用户原始问题与附件展示元数据；模型提交 parts 不经过该展示转换。
+- `opencode-like/components/rows/UserMessageRow.vue`：渲染用户消息与工作区附件；`sourceType=SCHEDULED_TASK` 时追加“夜间定时执行”来源标签和北京时间的实际启动时间。
 - `runtime-reducer.ts`：纯 RunEvent reducer，归并旧 `assistant.message.delta` 和 `message.*`、permission/question、todo、diff/session status 事件。
 
 ## 允许依赖

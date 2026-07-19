@@ -58,6 +58,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.event.RunEventAppender;
 import com.enterprise.testagent.event.RunEventLiveBus;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
+import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
@@ -173,6 +174,7 @@ public class RunApplicationService {
             PublicAgentConfigMessageGate.MessageGateStatus.open();
     private RunOwnerLeaseSupervisor ownerLeaseSupervisor;
     private RunRuntimeLossConvergenceScheduler runtimeLossScheduler;
+    private NightExecutionSessionLockGuard nightExecutionLockGuard;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -799,7 +801,7 @@ public class RunApplicationService {
      * 启动一次指定 agent 的平台 Run，所有 agent 复用同一 RunEvent 和错误处理链路。
      */
     public Run startRun(String agentId, StartRunInput input, String traceId) {
-        return startRunInternal(null, agentId, input, traceId);
+        return startRunInternal(null, agentId, input, traceId, RunSource.manual());
     }
 
     /**
@@ -813,10 +815,32 @@ public class RunApplicationService {
      * 以当前登录用户启动指定 agent Run；opencode 会先解析用户专属进程。
      */
     public Run startRun(UserId userId, String agentId, StartRunInput input, String traceId) {
-        return startRunInternal(Objects.requireNonNull(userId, "userId must not be null"), agentId, input, traceId);
+        return startRunInternal(
+                Objects.requireNonNull(userId, "userId must not be null"), agentId, input, traceId, RunSource.manual());
     }
 
-    private Run startRunInternal(UserId userId, String agentId, StartRunInput input, String traceId) {
+    /** 调度器内部入口；来源由服务端固定，浏览器无法伪造。 */
+    public Run startScheduledRun(UserId userId, StartRunInput input, String sourceRefId, String traceId) {
+        if (sourceRefId == null || sourceRefId.isBlank()) {
+            throw new IllegalArgumentException("sourceRefId must not be blank");
+        }
+        return startRunInternal(
+                Objects.requireNonNull(userId, "userId must not be null"),
+                agentRuntimeRegistry.defaultAgentId(),
+                input,
+                traceId,
+                RunSource.scheduled(sourceRefId));
+    }
+
+    private Run startRunInternal(
+            UserId userId,
+            String agentId,
+            StartRunInput input,
+            String traceId,
+            RunSource source) {
+        if (source.type() == ConversationSourceType.MANUAL && nightExecutionLockGuard != null) {
+            nightExecutionLockGuard.requireUnlocked(input.sessionId());
+        }
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(resolvedAgentId)) {
             publicConfigMessageGate.requireAllowed(userId);
@@ -858,7 +882,7 @@ public class RunApplicationService {
                 now,
                 traceId);
         if (userId != null) {
-            pending = pending.withSource(ConversationSourceType.MANUAL, null, userId);
+            pending = pending.withSource(source.type(), source.refId(), userId);
         }
         pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
         RunStorageMode storageMode = runStorageModeSelector == null
@@ -887,7 +911,7 @@ public class RunApplicationService {
         runRepository.save(pending);
         saveUserMessage(
                 session.sessionId(), pending.runId(), prompt, input.parts(), userId,
-                dispatchMessageId, traceId, now);
+                dispatchMessageId, traceId, now, source);
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
                 Map.of("status", RunStatus.PENDING.name()), storageMode);
 
@@ -2634,7 +2658,8 @@ public class RunApplicationService {
             UserId userId,
             String remoteMessageId,
             String traceId,
-            Instant createdAt) {
+            Instant createdAt,
+            RunSource source) {
         SessionMessage message = new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
                 sessionId,
@@ -2651,7 +2676,23 @@ public class RunApplicationService {
                 createdAt);
         sessionMessageRepository.save(userId == null
                 ? message
-                : message.withSource(ConversationSourceType.MANUAL, null, userId));
+                : message.withSource(source.type(), source.refId(), userId));
+    }
+
+    /** 可选 setter 保持既有单元测试构造器稳定；生产装配会注入数据库会话锁。 */
+    @Autowired(required = false)
+    void setNightExecutionLockGuard(NightExecutionSessionLockGuard nightExecutionLockGuard) {
+        this.nightExecutionLockGuard = nightExecutionLockGuard;
+    }
+
+    private record RunSource(ConversationSourceType type, String refId) {
+        static RunSource manual() {
+            return new RunSource(ConversationSourceType.MANUAL, null);
+        }
+
+        static RunSource scheduled(String refId) {
+            return new RunSource(ConversationSourceType.SCHEDULED_TASK, refId);
+        }
     }
 
     /** 注册条件只在写入本轮用户消息前判断，遍历分页结果而不是假定前 200 条足以代表会话历史。 */

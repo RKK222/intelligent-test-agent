@@ -40,6 +40,7 @@ import {
   isSupersededInteractionAsk,
   runEventProjection,
   sessionTitleFromFirstMessage,
+  shouldResetAfterNightTaskClosure,
   shouldFailExhaustedRetry,
   workspaceRequirementReferences,
   workspaceRequirementStageDirectories,
@@ -73,6 +74,34 @@ describe("filterWorkspaceRootEntries", () => {
       { path: "src", name: "src", type: "directory" }
     ]);
     expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
+
+describe("shouldResetAfterNightTaskClosure", () => {
+  const baseSession: Session = {
+    sessionId: "ses_night_created",
+    workspaceId: "wrk_night",
+    title: "夜间任务",
+    status: "ACTIVE",
+    createdAt: "2026-07-18T04:00:00Z",
+    updatedAt: "2026-07-18T04:00:00Z"
+  };
+
+  it("resets only a still-empty session created by the same night task", () => {
+    expect(shouldResetAfterNightTaskClosure({
+      ...baseSession,
+      sourceType: "SCHEDULED_TASK",
+      sourceRefId: "night_1"
+    }, "night_1", 0)).toBe(true);
+    expect(shouldResetAfterNightTaskClosure({
+      ...baseSession,
+      sourceType: "MANUAL"
+    }, "night_1", 0)).toBe(false);
+    expect(shouldResetAfterNightTaskClosure({
+      ...baseSession,
+      sourceType: "SCHEDULED_TASK",
+      sourceRefId: "night_1"
+    }, "night_1", 1)).toBe(false);
   });
 });
 
@@ -330,6 +359,21 @@ describe("runEventProjection", () => {
 });
 
 describe("historyItems", () => {
+  it("keeps the scheduled-task source marker for the history list", () => {
+    const items = historyItems(null, [{
+      sessionId: "ses_night",
+      workspaceId: "wrk_1",
+      title: "夜间回归",
+      status: "ACTIVE",
+      sourceType: "SCHEDULED_TASK",
+      sourceRefId: "night_1",
+      createdAt: "2026-07-18T13:15:00Z",
+      updatedAt: "2026-07-18T13:15:00Z"
+    }]);
+
+    expect(items[0]).toMatchObject({ id: "ses_night", sourceType: "SCHEDULED_TASK" });
+  });
+
   it("only returns backend sessions and maps workspace context fields", () => {
     const sessions: Session[] = [
       {
@@ -771,6 +815,24 @@ describe("nextCenterModeAfterRunDiff", () => {
 });
 
 describe("historical session restoration", () => {
+  it("keeps scheduled-task source fields on restored user messages", () => {
+    const mapped = messagesFromSessionMessages([{
+      messageId: "msg_night",
+      sessionId: "ses_night",
+      role: "USER",
+      content: "执行夜间回归",
+      sourceType: "SCHEDULED_TASK",
+      sourceRefId: "night_1",
+      createdAt: "2026-07-18T13:15:00Z"
+    }]);
+
+    expect(mapped[0]).toMatchObject({
+      role: "user",
+      sourceType: "SCHEDULED_TASK",
+      sourceRefId: "night_1"
+    });
+  });
+
   it("deduplicates persisted history rows before rendering", () => {
     const messages: SessionMessage[] = [
       {

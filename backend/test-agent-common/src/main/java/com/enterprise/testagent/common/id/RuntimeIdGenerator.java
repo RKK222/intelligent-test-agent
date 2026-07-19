@@ -209,6 +209,11 @@ public final class RuntimeIdGenerator {
         return prefixed("stp_");
     }
 
+    /** 生成夜间异步执行任务 ID。 */
+    public static String nightExecutionTaskId() {
+        return prefixed("net_");
+    }
+
     /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */

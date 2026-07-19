@@ -304,7 +304,13 @@ export type Session = {
   costUsd?: number;
   tokens?: TokenUsage;
   workspaceContext?: SessionWorkspaceContext | null;
+  /** 会话来源；旧数据与旧后端可缺失。 */
+  sourceType?: ConversationSourceType | null;
+  /** 来源业务主键，例如夜间执行任务 id。 */
+  sourceRefId?: string | null;
 };
+
+export type ConversationSourceType = "MANUAL" | "SCHEDULED_TASK" | "SIDE_QUESTION" | string;
 
 export type SessionWorkspaceContext = {
   appId?: string | null;
@@ -362,6 +368,56 @@ export type SessionMessage = {
   contentKind?: SessionMessageContentKind | null;
   summaryStatus?: SessionMessageSummaryStatus | null;
   summaryVersion?: number | null;
+  sourceType?: ConversationSourceType | null;
+  sourceRefId?: string | null;
+};
+
+export type NightExecutionTaskStatus =
+  | "SCHEDULED"
+  | "DISPATCHING"
+  | "DISPATCHED"
+  | "CANCELLED"
+  | "FAILED"
+  | string;
+
+export type NightExecutionSlot = {
+  slotStart: string;
+  slotEnd: string;
+  reservedCount: number;
+  capacity: number;
+  available: boolean;
+  recommended: boolean;
+};
+
+export type NightExecutionSlots = {
+  timeZone: string;
+  windowStart: string;
+  windowEnd: string;
+  capacity: number;
+  slots: NightExecutionSlot[];
+};
+
+/** 夜间任务响应只包含安全预览，不返回完整 prompt 或附件。 */
+export type NightExecutionTask = {
+  taskId: string;
+  sessionId: string;
+  workspaceId: string;
+  sessionTitle?: string | null;
+  contentPreview: string;
+  status: NightExecutionTaskStatus;
+  slotStart: string;
+  slotEnd: string;
+  windowEnd: string;
+  rolloverCount: number;
+  runId?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NightExecutionTaskQueryResponse = PageResponse<NightExecutionTask> & {
+  visibleFailure?: NightExecutionTask | null;
 };
 
 export type SideQuestionRequest = {
@@ -706,6 +762,8 @@ export type Run = {
   updatedAt: string;
   costUsd?: number;
   tokens?: TokenUsage;
+  sourceType?: ConversationSourceType | null;
+  sourceRefId?: string | null;
 };
 
 export type UserOpencodeProcessStatus = "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE" | string;
@@ -1745,6 +1803,8 @@ export type AgentMessage =
       platformMessageId?: string;
       remoteMessageId?: string;
       runId?: string;
+      sourceType?: ConversationSourceType | null;
+      sourceRefId?: string | null;
     }
   | {
       id: string;

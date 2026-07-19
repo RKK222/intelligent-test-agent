@@ -30,7 +30,35 @@ public record ScheduledTaskRun(
         Map<String, Object> result,
         String traceId,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        String executionAffinity) {
+
+    /** 兼容新增执行亲和字段前的构造调用。 */
+    public ScheduledTaskRun(
+            ScheduledTaskRunId taskRunId,
+            ScheduledTaskKey taskKey,
+            ScheduledTaskPlanId planId,
+            ScheduledTaskTriggerType triggerType,
+            ScheduledTaskRunStatus status,
+            UserId requestedByUserId,
+            Instant scheduledFireAt,
+            Instant startedAt,
+            Instant endedAt,
+            String ownerInstanceId,
+            Instant stopRequestedAt,
+            UserId stopRequestedByUserId,
+            String stopReason,
+            String skipReason,
+            String errorCode,
+            String errorMessage,
+            Map<String, Object> result,
+            String traceId,
+            Instant createdAt,
+            Instant updatedAt) {
+        this(taskRunId, taskKey, planId, triggerType, status, requestedByUserId, scheduledFireAt,
+                startedAt, endedAt, ownerInstanceId, stopRequestedAt, stopRequestedByUserId,
+                stopReason, skipReason, errorCode, errorMessage, result, traceId, createdAt, updatedAt, null);
+    }
 
     /**
      * 创建待执行运行记录，等待 runner 抢锁并调用 handler。
@@ -43,6 +71,34 @@ public record ScheduledTaskRun(
             UserId requestedByUserId,
             Instant scheduledFireAt,
             String traceId) {
+        return pending(taskRunId, taskKey, planId, triggerType, requestedByUserId, scheduledFireAt, null, traceId);
+    }
+
+    /** 创建带目标服务器亲和键的用户计划运行。 */
+    public static ScheduledTaskRun pending(
+            ScheduledTaskRunId taskRunId,
+            ScheduledTaskKey taskKey,
+            ScheduledTaskPlanId planId,
+            ScheduledTaskTriggerType triggerType,
+            UserId requestedByUserId,
+            Instant scheduledFireAt,
+            String executionAffinity,
+            String traceId) {
+        return pending(taskRunId, taskKey, planId, triggerType, requestedByUserId, scheduledFireAt,
+                executionAffinity, traceId, scheduledFireAt);
+    }
+
+    /** 创建可提前入库、在未来触发的运行记录。 */
+    public static ScheduledTaskRun pending(
+            ScheduledTaskRunId taskRunId,
+            ScheduledTaskKey taskKey,
+            ScheduledTaskPlanId planId,
+            ScheduledTaskTriggerType triggerType,
+            UserId requestedByUserId,
+            Instant scheduledFireAt,
+            String executionAffinity,
+            String traceId,
+            Instant createdAt) {
         return new ScheduledTaskRun(
                 taskRunId,
                 taskKey,
@@ -62,8 +118,9 @@ public record ScheduledTaskRun(
                 null,
                 Map.of(),
                 traceId,
-                scheduledFireAt,
-                scheduledFireAt);
+                createdAt,
+                createdAt,
+                executionAffinity);
     }
 
     /**
@@ -95,6 +152,7 @@ public record ScheduledTaskRun(
         skipReason = optionalText(skipReason);
         errorCode = optionalText(errorCode);
         errorMessage = optionalText(errorMessage);
+        executionAffinity = optionalText(executionAffinity);
         result = immutableCopy(result);
         traceId = DomainValidation.requireText(traceId, "traceId");
         createdAt = DomainValidation.requireInstant(createdAt, "createdAt");
@@ -128,7 +186,8 @@ public record ScheduledTaskRun(
                 result,
                 traceId,
                 createdAt,
-                startedAt);
+                startedAt,
+                executionAffinity);
     }
 
     /**
@@ -155,7 +214,8 @@ public record ScheduledTaskRun(
                 result,
                 traceId,
                 createdAt,
-                endedAt);
+                endedAt,
+                executionAffinity);
     }
 
     /**
@@ -197,7 +257,8 @@ public record ScheduledTaskRun(
                 result,
                 traceId,
                 createdAt,
-                requestedAt);
+                requestedAt,
+                executionAffinity);
     }
 
     /**
@@ -233,7 +294,8 @@ public record ScheduledTaskRun(
                 result,
                 traceId,
                 createdAt,
-                endedAt);
+                endedAt,
+                executionAffinity);
     }
 
     private static String optionalText(String value) {

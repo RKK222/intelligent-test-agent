@@ -79,6 +79,15 @@ final class InMemoryScheduledTaskRepository implements ScheduledTaskRepository {
     }
 
     @Override
+    public synchronized boolean updateRunIfStatus(
+            ScheduledTaskRun run, ScheduledTaskRunStatus expectedStatus) {
+        ScheduledTaskRun current = runs.get(run.taskRunId());
+        if (current == null || current.status() != expectedStatus) return false;
+        runs.put(run.taskRunId(), run);
+        return true;
+    }
+
+    @Override
     public Optional<ScheduledTaskRun> findRunById(ScheduledTaskRunId taskRunId) {
         return Optional.ofNullable(runs.get(taskRunId));
     }
@@ -98,9 +107,11 @@ final class InMemoryScheduledTaskRepository implements ScheduledTaskRepository {
     }
 
     @Override
-    public List<ScheduledTaskRun> findPendingRuns(ScheduledTaskTriggerType triggerType, Instant now, int limit) {
+    public List<ScheduledTaskRun> findPendingRuns(
+            ScheduledTaskTriggerType triggerType, String executionAffinity, Instant now, int limit) {
         return runs.values().stream()
                 .filter(run -> run.triggerType() == triggerType)
+                .filter(run -> java.util.Objects.equals(run.executionAffinity(), executionAffinity))
                 .filter(run -> run.status() == ScheduledTaskRunStatus.PENDING)
                 .filter(run -> !run.scheduledFireAt().isAfter(now))
                 .sorted(Comparator.comparing(ScheduledTaskRun::scheduledFireAt))

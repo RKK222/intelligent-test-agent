@@ -52,6 +52,178 @@ describe("FigmaChatPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("opens the night slot picker from the timer immediately left of send", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "夜间分析完整测试集",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        nightSlots: {
+          timeZone: "Asia/Shanghai",
+          windowStart: "2026-07-18T13:00:00Z",
+          windowEnd: "2026-07-18T23:00:00Z",
+          capacity: 2,
+          slots: [
+            {
+              slotStart: "2026-07-18T13:15:00Z",
+              slotEnd: "2026-07-18T13:30:00Z",
+              reservedCount: 0,
+              capacity: 2,
+              available: true,
+              recommended: true
+            }
+          ]
+        }
+      } as any
+    });
+
+    const actions = wrapper.get(".figma-chat-card-actions");
+    const timer = actions.get('button[aria-label="定时执行"]');
+    const send = actions.get('button[aria-label="发送"]');
+    expect(timer.element.nextElementSibling).toBe(send.element);
+
+    await timer.trigger("click");
+    expect(wrapper.get('[data-testid="night-slot-picker"]').text()).toContain("系统推荐");
+    expect(wrapper.text()).not.toContain("执行位置");
+
+    await wrapper.get('[data-testid="night-slot-option"]').trigger("click");
+    await wrapper.get('[data-testid="night-schedule-confirm"]').trigger("click");
+    expect(wrapper.emitted("schedule-night")?.[0]).toEqual([
+      { prompt: "夜间分析完整测试集", slotStart: "2026-07-18T13:15:00Z" }
+    ]);
+  });
+
+  it("shows pending night tasks in a tab and locks only further messages in that session", async () => {
+    const pendingTask = {
+      taskId: "night_1",
+      sessionId: "session_1",
+      workspaceId: "workspace_1",
+      sessionTitle: "夜间分析",
+      contentPreview: "分析完整测试集",
+      status: "SCHEDULED",
+      slotStart: "2026-07-18T13:15:00Z",
+      slotEnd: "2026-07-18T13:30:00Z",
+      windowEnd: "2026-07-18T23:00:00Z",
+      rolloverCount: 0,
+      createdAt: "2026-07-18T04:00:00Z",
+      updatedAt: "2026-07-18T04:00:00Z"
+    };
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "session_1",
+        inputValue: "不能继续发送",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        nightTasks: [pendingTask],
+        currentNightTask: pendingTask
+      } as any
+    });
+
+    expect(wrapper.get("textarea").attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[aria-label="发送"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[aria-label="新建对话"]').attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('[data-testid="current-night-task-card"]').text()).toContain("等待执行");
+
+    await wrapper.get('[data-testid="night-tasks-tab"]').trigger("click");
+    expect(wrapper.emitted("request-night-tasks")).toHaveLength(1);
+    expect(wrapper.get('[data-testid="night-task-list"]').text()).toContain("分析完整测试集");
+    expect(wrapper.get('[data-testid="night-task-list"]').text()).toContain("创建于");
+  });
+
+  it("places the current session night task first in the pending task tab", async () => {
+    const task = (taskId: string, sessionId: string, title: string, slotStart: string) => ({
+      taskId,
+      sessionId,
+      workspaceId: "workspace_1",
+      sessionTitle: title,
+      contentPreview: `${title}内容`,
+      status: "SCHEDULED",
+      slotStart,
+      slotEnd: new Date(new Date(slotStart).getTime() + 15 * 60_000).toISOString(),
+      windowEnd: "2026-07-18T23:00:00Z",
+      rolloverCount: 0,
+      createdAt: "2026-07-18T04:00:00Z",
+      updatedAt: "2026-07-18T04:00:00Z"
+    });
+    const earlierOtherTask = task("night_other", "session_other", "其他会话", "2026-07-18T13:00:00Z");
+    const currentTask = task("night_current", "session_current", "当前会话", "2026-07-18T14:00:00Z");
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "session_current",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        nightTasks: [earlierOtherTask, currentTask],
+        currentNightTask: currentTask
+      } as any
+    });
+
+    await wrapper.get('[data-testid="night-tasks-tab"]').trigger("click");
+
+    expect(wrapper.findAll(".figma-chat-night-list .figma-chat-night-title").map((item) => item.text()))
+      .toEqual(["当前会话", "其他会话"]);
+  });
+
+  it("returns to the conversation view when opening a task session", async () => {
+    const pendingTask = {
+      taskId: "night_open",
+      sessionId: "session_target",
+      workspaceId: "workspace_1",
+      sessionTitle: "目标会话",
+      contentPreview: "查看夜间任务上下文",
+      status: "SCHEDULED",
+      slotStart: "2026-07-18T13:15:00Z",
+      slotEnd: "2026-07-18T13:30:00Z",
+      windowEnd: "2026-07-18T23:00:00Z",
+      rolloverCount: 0,
+      createdAt: "2026-07-18T04:00:00Z",
+      updatedAt: "2026-07-18T04:00:00Z"
+    };
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "session_current",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        nightTasks: [pendingTask]
+      } as any
+    });
+
+    await wrapper.get('[data-testid="night-tasks-tab"]').trigger("click");
+    await wrapper.get(".figma-chat-night-actions button").trigger("click");
+
+    expect(wrapper.emitted("open-night-task-session")?.[0]).toEqual(["session_target"]);
+    expect(wrapper.find('[data-testid="night-task-list"]').exists()).toBe(false);
+  });
+
+  it("keeps a failed night task visible without locking the composer", () => {
+    const failedTask = {
+      taskId: "night_failed",
+      sessionId: "session_1",
+      workspaceId: "workspace_1",
+      sessionTitle: "失败任务",
+      contentPreview: "重跑回归测试",
+      status: "FAILED",
+      slotStart: "2026-07-18T13:15:00Z",
+      slotEnd: "2026-07-18T13:30:00Z",
+      windowEnd: "2026-07-18T23:00:00Z",
+      rolloverCount: 0,
+      errorMessage: "夜间容量窗口已结束",
+      createdAt: "2026-07-18T04:00:00Z",
+      updatedAt: "2026-07-18T23:00:00Z"
+    };
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "session_1",
+        inputValue: "可以继续发送",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        nightVisibleFailure: failedTask
+      } as any
+    });
+
+    expect(wrapper.get("textarea").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('[data-testid="night-failure-card"]').text()).toContain("夜间容量窗口已结束");
+  });
+
   it("blocks submit while a history session is still loading", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

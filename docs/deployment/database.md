@@ -6,7 +6,7 @@
 
 - 关系型数据库连接池继续统一使用 Druid，migration 继续由 Flyway 管理。
 - 新增或修改关系型数据库 SQL 必须通过 `test-agent-persistence` 的 MyBatis XML mapper 实现；mapper 接口只声明方法，禁止写注解 SQL。
-- 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository` 与 `RunEventRepository` 已迁移到 MyBatis XML。
+- 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
 ## V20260718123000 Agent 配置发布 rollout 范围
@@ -809,6 +809,32 @@ V10 种子数据对 F-COSS 的影响：
 - 分布式互斥由 Redis 锁保证，数据库表不作为锁 fallback；Redis 不可用时 scheduler 启用校验失败或运行失败，不降级为本机锁。
 - `result_json`、`payload_json` 保存结构化 JSON 文本，禁止写入密钥、Token、完整 prompt 或其他敏感内容。
 
+## V20260718210000 scheduler USER_PLAN 执行亲和
+
+`V20260718210000__extend_scheduler_user_plan.sql` 允许 `scheduled_tasks.cron_expression` 为空，并为 `scheduled_task_runs` 增加可空 `execution_affinity` 和 `(trigger_type, status, execution_affinity, scheduled_fire_at)` 索引。无 Cron 仅允许代码注册且只支持 `USER_PLAN` 的 handler；普通 Cron/管理任务仍必须提供 Cron。
+
+夜间任务创建一次性 `USER_PLAN` 运行记录时，把目标稳定 Linux 服务器 ID 写入 `execution_affinity`。每台 Java 只扫描当前服务器亲和的到期记录，并以状态条件更新把 `PENDING` 认领为 `RUNNING`；取消也使用 `PENDING -> SKIPPED` 条件更新，避免取消与 runner 互相覆盖。scheduler 任务定义、运行记录、分页、亲和扫描和 CAS 已由 `ScheduledTaskMapper.xml` / `MyBatisScheduledTaskRepository` 接管；旧 `JdbcScheduledTaskRepository` 删除，不再作为生产或测试实现。
+
+## V20260718211000 夜间异步执行任务
+
+`V20260718211000__create_night_execution_tasks.sql` 创建三张表：
+
+| 表 | 说明 |
+|---|---|
+| `night_execution_tasks` | 夜间任务聚合，保存 owner、Session/Workspace、幂等请求、展示预览、待执行输入、15 分钟时段、服务器亲和、USER_PLAN/Run 关联、状态和安全错误。 |
+| `night_execution_session_locks` | 每个 Session 至多一个待执行任务的持久化写锁；任务取消、最终失败或 Run 成功创建后删除。 |
+| `night_execution_slot_reservations` | 以 `slot_start` 为主键保存每个 15 分钟时段的全局已占名额；条件更新保证不超过部署容量。 |
+
+关键约束和保留策略：
+
+- `task_id`、`scheduled_task_run_id` 各自唯一；`(owner_user_id, client_request_id)` 保证用户提交幂等。
+- `status` 仅允许 `SCHEDULED/DISPATCHING/DISPATCHED/CANCELLED/FAILED`，`slot_start < slot_end <= window_end`。
+- `night_execution_session_locks.session_id` 为主键，`task_id` 唯一，数据库层保证单会话互斥；删除任务时锁级联删除。
+- `run_input_json` 只在待执行期短期保存完整 Run 输入，任务进入 `DISPATCHED/CANCELLED/FAILED` 后清空；查询 API 只返回 `content_preview`。不得把该字段写入 scheduler `result_json`、RunEvent、日志或运营分析表。
+- 任务绑定已有 Session，或在创建事务中预创建 `source_type=SCHEDULED_TASK/source_ref_id=task_id` 的空白 Session。成功 Run 和 USER 消息沿用同一来源字段；旧数据默认 `MANUAL` 兼容。
+- 终态任务和已过夜的容量占位保留 30 天，由 `opencode-runtime.night-execution-reconcile` 分批清理。容量占位在成功投递后仍保留到清理期，用于表达该启动时段已经消耗的名额；取消、最终失败和窗口内顺延会及时释放原时段名额。
+- 全部关系型 SQL 位于 `NightExecutionTaskMapper.xml`；首次创建用 PostgreSQL 事务级 advisory lock 串行化同一 owner/request。投递认领同时匹配 `SCHEDULED` 和当前 `scheduled_task_run_id`，避免改期前的旧运行误认领；恢复查询同时检查 `slot_start/updated_at`，为每次重试保留 5 分钟租约。任务迁移使用状态 CAS，会话锁和容量都在业务事务中维护，`status + slot_start + updated_at`、`status + updated_at` 索引支持有界补偿扫描。
+
 ## V20260625192100 scheduler 停止字段与状态字典
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260625192100__extend_scheduler_management_stop_and_dicts.sql` 在 scheduler 框架表上扩展管理可视化所需字段和字典：
@@ -1136,6 +1162,9 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 | `scheduled_tasks` | 定时任务定义表 |
 | `scheduled_task_plans` | 用户级Cron计划预留表 |
 | `scheduled_task_runs` | 定时任务运行记录表 |
+| `night_execution_tasks` | 夜间异步执行任务主表 |
+| `night_execution_session_locks` | 待执行夜间任务会话写锁表 |
+| `night_execution_slot_reservations` | 夜间15分钟启动时段容量占位表 |
 
 ### 字段注释原则
 

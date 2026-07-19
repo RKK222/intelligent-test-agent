@@ -277,6 +277,7 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `OPENCODE_UNAVAILABLE` | 503 | opencode 服务不可用 |
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
 | `RUNTIME_STATE_UNAVAILABLE` | 503 | 运行态存储不可用 |
+| `NIGHT_EXECUTION_UNAVAILABLE` | 503 | 夜间执行功能不可用 |
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
 | `GIT_TIMEOUT` | 504 | Git 操作超时 |
 
@@ -1524,7 +1525,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`、`workspaceContext`。
+`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`、`workspaceContext`，以及可选来源字段 `sourceType/sourceRefId`。普通会话默认为 `MANUAL/null`；由夜间任务预创建的会话返回 `SCHEDULED_TASK/net_...`。旧后端缺失来源字段时前端按普通会话兼容。
 
 `workspaceContext` 仅在用户历史列表中尽量补齐，详情/更新/删除等单会话接口可为 `null`：
 
@@ -1583,6 +1584,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `contentKind` | `RAW_LEGACY` 表示旧原文，`SUMMARY` 表示新模式终态摘要；旧数据可空。 |
 | `summaryStatus` | 摘要状态；正常、截断和安全兜底分别使用 `COMPLETE`、`PARTIAL`、`FALLBACK`。 |
 | `summaryVersion` | 确定性摘要规则版本；旧数据可空。 |
+| `sourceType` / `sourceRefId` | 可选消息来源；夜间任务启动的 USER 消息为 `SCHEDULED_TASK/net_...`，旧数据可空。 |
 
 ### Run、Cancel 和 Event API
 
@@ -2071,7 +2073,7 @@ Base URL：`/api/internal/platform/scheduler-management`
 | `page` / `size` | 分页参数，默认 `1/50`。 |
 | `taskKey` | 可选任务 key。 |
 | `status` | 可选：`PENDING`、`RUNNING`、`STOPPING`、`SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED`。 |
-| `triggerType` | 可选：`CRON`、`MANUAL`、`USER_PLAN`。首版 HTTP 只创建 `MANUAL`。 |
+| `triggerType` | 可选：`CRON`、`MANUAL`、`USER_PLAN`。scheduler-management 只创建 `MANUAL`；夜间任务 API 通过框架创建一次性 `USER_PLAN`。 |
 | `requestedByUserId` | 可选管理员用户 ID。 |
 
 运行记录响应字段：
@@ -2105,12 +2107,100 @@ Base URL：`/api/internal/platform/scheduler-management`
 
 兼容性与审计：
 
-- `scheduled_task_plans` 只作为用户级 Cron 计划预留模型，本批次不开放普通用户 HTTP API。
+- `scheduled_task_plans` 仍只作为用户级 Cron 计划预留模型，不开放普通用户 Cron API；夜间任务使用一次性 `scheduled_task_runs(USER_PLAN)`，不写该计划表。
+- `opencode-runtime.night-execution` 是无 Cron 的 USER_PLAN 专用代码任务；管理端可查看运行记录，但不能调整 Cron、手工触发或停止。任务定义响应的 `cronExpression/nextFireAt` 对该任务为 `null`。
 - 同一 `taskKey` 已有 `PENDING`、`RUNNING` 或 `STOPPING` 记录时，管理员手动触发返回统一 `CONFLICT` 错误，不创建新的手动运行记录；Cron 调度重叠仍会写入 `SKIPPED` 并保存 `skipReason`。
 - `POST /runs/{taskRunId}/stop` 只允许停止 `RUNNING` 记录，成功后状态先变为 `STOPPING` 并记录 `stopRequestedAt/stopRequestedByUserId/stopReason`；handler 协作退出后 runner 保存终态 `MANUALLY_STOPPED`。终态、`PENDING`、不存在记录返回统一错误。
 - `TaskResponse`、`RunResponse` 的中文 label 由后端按字典表查询，字典缺失时回退为原 code；不新增通用字典查询 API。
 - 分布式互斥只使用 Redis 锁；Redis 不可用时 scheduler 不降级为本机锁。
 - 对应测试：`SchedulerManagementControllerTest`、`SchedulerManagementServiceTest`、`ScheduledTaskRunnerTest`。
+
+### 夜间异步执行 API
+
+Base URL：`/api/internal/platform/opencode-runtime/night-execution`。所有入口要求当前登录用户，owner 始终取认证主体；任务完整输入不会出现在响应、scheduler 运行结果或日志中。夜间窗口固定为 `Asia/Shanghai` 21:00 至次日 07:00，按 15 分钟划分启动时段；后端根据每个时段的全局占用选择最低占用且最早的推荐时段，前端可以调整。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/slots` | 查询当前可提交夜间窗口、全局容量、各 15 分钟时段和推荐值。 |
+| `POST` | `/tasks` | 幂等创建夜间任务；可绑定当前 Session，省略 `sessionId` 时事务内预创建空白会话。 |
+| `GET` | `/tasks?page=&size=` | 分页查询当前用户全部待执行/投递中的任务。 |
+| `GET` | `/tasks?sessionId={sessionId}` | 查询当前 Session 的待执行任务和最近未关闭最终失败卡。 |
+| `PATCH` | `/tasks/{taskId}` | 调整尚未认领任务的启动时段。 |
+| `POST` | `/tasks/{taskId}/cancel` | 取消尚未认领任务并解除会话锁。 |
+| `POST` | `/tasks/{taskId}/dismiss` | 关闭最终失败卡；不影响已启动 Run。 |
+
+`GET /slots` 的 `data` 示例：
+
+```json
+{
+  "timeZone": "Asia/Shanghai",
+  "windowStart": "2026-07-18T13:00:00Z",
+  "windowEnd": "2026-07-18T23:00:00Z",
+  "capacity": 4,
+  "slots": [
+    {
+      "slotStart": "2026-07-18T13:00:00Z",
+      "slotEnd": "2026-07-18T13:15:00Z",
+      "reservedCount": 1,
+      "capacity": 4,
+      "available": true,
+      "recommended": true
+    }
+  ]
+}
+```
+
+创建请求复用普通 Run 的 prompt/parts 和运行选择字段，但不接收 `contextToken`；到期投递时由服务端重新读取权限、公共初始化用户 opencode 进程并签发会话上下文：
+
+```json
+{
+  "clientRequestId": "night-ui-7a6e...",
+  "sessionId": "ses_existing_or_omit",
+  "workspaceId": "wrk_...",
+  "sessionTitle": "夜间生成回归用例",
+  "prompt": "生成支付模块回归用例",
+  "parts": [{ "type": "text", "text": "生成支付模块回归用例" }],
+  "messageId": "msg_...",
+  "agent": "build",
+  "model": "provider/model",
+  "variant": null,
+  "mode": null,
+  "command": null,
+  "arguments": null,
+  "runClientRequestId": "run-night-7a6e...",
+  "slotStart": "2026-07-18T13:00:00Z"
+}
+```
+
+同一用户重复提交相同 `clientRequestId` 返回原任务，不重复创建 Session、容量占位或 USER_PLAN。`prompt` 或至少一个 text part 必须非空；`workspaceId` 和 `slotStart` 必填。`sessionId` 存在时必须是当前用户可用、ACTIVE 且属于同一 Workspace 的会话；省略时后端创建来源为 `SCHEDULED_TASK` 的空白会话，取消或最终失败关闭后若仍无消息会自动归档。交互不提供单独“执行位置”字段：已有会话默认在该会话继续，新对话草稿默认使用预创建的新会话。`POST /tasks` 与普通 Run 一样由路由层缓存请求体，硬上限为 32 MiB；超限返回 `400 VALIDATION_ERROR`，不查询进程 assignment，也不会进入本地 Controller 或远端转发。
+
+任务响应只返回安全展示字段：
+
+```json
+{
+  "taskId": "net_...",
+  "sessionId": "ses_...",
+  "workspaceId": "wrk_...",
+  "sessionTitle": "夜间生成回归用例",
+  "contentPreview": "生成支付模块回归用例",
+  "status": "SCHEDULED",
+  "slotStart": "2026-07-18T13:00:00Z",
+  "slotEnd": "2026-07-18T13:15:00Z",
+  "windowEnd": "2026-07-18T23:00:00Z",
+  "rolloverCount": 0,
+  "runId": null,
+  "errorCode": null,
+  "errorMessage": null,
+  "createdAt": "2026-07-18T08:00:00Z",
+  "updatedAt": "2026-07-18T08:00:00Z"
+}
+```
+
+`GET /tasks` 返回 `{ items, page, size, total, visibleFailure }`。无 `sessionId` 时 `items` 只包含当前用户的 `SCHEDULED/DISPATCHING` 任务并按 `slotStart` 排序；带 `sessionId` 时 `items` 最多一条，`visibleFailure` 返回该会话最近一条 `FAILED` 且未关闭的任务。任务状态为 `SCHEDULED` 时允许改期/取消；进入 `DISPATCHING` 后不可改期或取消。`DISPATCHED` 表示 Run 已经启动，`runId` 非空；`CANCELLED/FAILED` 为最终状态。完整输入在 `DISPATCHED/CANCELLED/FAILED` 时清除，终态任务和时段占位保留 30 天后清理。
+
+同一 Session 同时最多一个 `SCHEDULED/DISPATCHING` 夜间任务。持锁期间普通 Run 启动、手工追加消息和 Session 归档返回 `409 CONFLICT`；取消、最终失败或成功创建 Run 后解除锁。任务到期时只有仍匹配当前 `scheduledTaskRunId` 的运行记录可以把任务条件认领为 `DISPATCHING`；认领立即提交，进程启动和远端 Run 创建不占用数据库长事务，终态与解锁再以短事务写回。任务按当前用户 binding 所属 Linux 服务器执行；binding 已迁移时重新创建亲和 USER_PLAN，目标 Java 再通过公共 `UserOpencodeProcessAssignmentService.initialize` 启动/确认进程并复用既有 Run 编排，不直连 manager gateway。临时故障由 5 分钟补偿任务恢复；错过原时段时在同一夜间窗口内按最低占用时段顺延，达到北京时间 07:00 仍未启动则最终失败。
+
+容量未配置、scheduler 关闭或功能运行依赖不可用时返回 `503 NIGHT_EXECUTION_UNAVAILABLE`；时段已满、会话已有任务、任务已开始或状态变化返回 `409 CONFLICT`。其中创建或改期遇到时段容量竞争时，错误 `details` 会返回与 `/slots` 同结构的最新 `timeZone/windowStart/windowEnd/capacity/slots`，前端立即刷新选择器；owner 不匹配对外按 `404 NOT_FOUND` 隔离。对应测试：`NightExecutionControllerTest`、`NightExecutionDtosTest`、`NightExecutionTaskApplicationServiceTest`、`NightExecutionDispatchServiceTest`、`NightExecutionReconcileServiceTest`、`UserOpencodeBackendRoutingWebFilterTest`。
 
 ### 会话运行上下文 API
 
@@ -2565,7 +2655,7 @@ Session 运行态接口：
 
 成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。
 
-`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`、`storageMode`、`clientRequestId`、`detailsAvailableUntil`。`storageMode` 为创建时固定的 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动 Run 不允许中途切换；`clientRequestId` 用于同一次发送的幂等关联；`detailsAvailableUntil` 表示 Redis 完整详情最晚可用时间。三个新字段对旧 Run、旧后端或尚未接入新锚点的兼容响应均可为 `null`/缺失；`tokens` 字段结构同 `SessionMessageResponse.tokens`。
+`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`、`storageMode`、`clientRequestId`、`detailsAvailableUntil`、`sourceType`、`sourceRefId`。`storageMode` 为创建时固定的 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动 Run 不允许中途切换；`clientRequestId` 用于同一次发送的幂等关联；`detailsAvailableUntil` 表示 Redis 完整详情最晚可用时间。夜间任务启动的 Run 返回 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...`，普通/旧 Run 为 `MANUAL/null` 或缺失；`tokens` 字段结构同 `SessionMessageResponse.tokens`。
 
 `REDIS_SUMMARY` 的 `run.created` 事件还会携带 `assistantSummaryMessageId`，格式为稳定的 `msg_` + 32 位十六进制；终态 ASSISTANT 摘要复用同一 ID。反馈目标已经统一为 `runId`，该消息 ID 只保留摘要定位和旧消息反馈接口兼容用途。
 

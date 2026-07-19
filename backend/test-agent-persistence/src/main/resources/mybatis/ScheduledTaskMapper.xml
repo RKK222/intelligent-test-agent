@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.ScheduledTaskMapper">
+    <sql id="taskColumns">
+        task_key as taskKey, name, cron_expression as cronExpression, enabled,
+        lock_ttl_seconds as lockTtlSeconds, next_fire_at as nextFireAt,
+        registration_status as registrationStatus, trace_id as traceId,
+        created_at as createdAt, updated_at as updatedAt
+    </sql>
+    <sql id="planColumns">
+        plan_id as planId, task_key as taskKey, owner_user_id as ownerUserId,
+        cron_expression as cronExpression, payload_json as payloadJson, enabled,
+        next_fire_at as nextFireAt, trace_id as traceId, created_at as createdAt, updated_at as updatedAt
+    </sql>
+    <sql id="runColumns">
+        task_run_id as taskRunId, task_key as taskKey, plan_id as planId,
+        trigger_type as triggerType, status, requested_by_user_id as requestedByUserId,
+        scheduled_fire_at as scheduledFireAt, started_at as startedAt, ended_at as endedAt,
+        owner_instance_id as ownerInstanceId, stop_requested_at as stopRequestedAt,
+        stop_requested_by_user_id as stopRequestedByUserId, stop_reason as stopReason,
+        skip_reason as skipReason, error_code as errorCode, error_message as errorMessage,
+        result_json as resultJson, trace_id as traceId, created_at as createdAt, updated_at as updatedAt,
+        execution_affinity as executionAffinity
+    </sql>
+
+    <update id="updateTask" parameterType="map">
+        update scheduled_tasks set name=#{name}, cron_expression=#{cronExpression}, enabled=#{enabled},
+        lock_ttl_seconds=#{lockTtlSeconds}, next_fire_at=#{nextFireAt}, registration_status=#{registrationStatus},
+        trace_id=#{traceId}, created_at=#{createdAt}, updated_at=#{updatedAt} where task_key=#{taskKey}
+    </update>
+    <insert id="insertTask" parameterType="map">
+        insert into scheduled_tasks(task_key,name,cron_expression,enabled,lock_ttl_seconds,next_fire_at,
+        registration_status,trace_id,created_at,updated_at)
+        values(#{taskKey},#{name},#{cronExpression},#{enabled},#{lockTtlSeconds},#{nextFireAt},
+        #{registrationStatus},#{traceId},#{createdAt},#{updatedAt})
+    </insert>
+    <select id="findTaskByKey" resultType="map"><include refid="taskSelect"/></select>
+    <sql id="taskSelect">select <include refid="taskColumns"/> from scheduled_tasks where task_key=#{taskKey}</sql>
+    <select id="findTasks" resultType="map">
+        select <include refid="taskColumns"/> from scheduled_tasks order by task_key limit #{limit} offset #{offset}
+    </select>
+    <select id="countTasks" resultType="long">select count(*) from scheduled_tasks</select>
+    <select id="findDueTasks" resultType="map">
+        select <include refid="taskColumns"/> from scheduled_tasks
+        where enabled=true and registration_status='REGISTERED' and next_fire_at is not null and next_fire_at &lt;= #{now}
+        order by next_fire_at, task_key limit #{limit}
+    </select>
+
+    <update id="updatePlan" parameterType="map">
+        update scheduled_task_plans set task_key=#{taskKey}, owner_user_id=#{ownerUserId},
+        cron_expression=#{cronExpression}, payload_json=#{payloadJson}, enabled=#{enabled},
+        next_fire_at=#{nextFireAt}, trace_id=#{traceId}, created_at=#{createdAt}, updated_at=#{updatedAt}
+        where plan_id=#{planId}
+    </update>
+    <insert id="insertPlan" parameterType="map">
+        insert into scheduled_task_plans(plan_id,task_key,owner_user_id,cron_expression,payload_json,enabled,
+        next_fire_at,trace_id,created_at,updated_at)
+        values(#{planId},#{taskKey},#{ownerUserId},#{cronExpression},#{payloadJson},#{enabled},
+        #{nextFireAt},#{traceId},#{createdAt},#{updatedAt})
+    </insert>
+    <select id="findPlanById" resultType="map">
+        select <include refid="planColumns"/> from scheduled_task_plans where plan_id=#{planId}
+    </select>
+
+    <sql id="runAssignments">
+        task_key=#{taskKey}, plan_id=#{planId}, trigger_type=#{triggerType},
+        status=#{status}, requested_by_user_id=#{requestedByUserId}, scheduled_fire_at=#{scheduledFireAt},
+        started_at=#{startedAt}, ended_at=#{endedAt}, owner_instance_id=#{ownerInstanceId},
+        stop_requested_at=#{stopRequestedAt}, stop_requested_by_user_id=#{stopRequestedByUserId},
+        stop_reason=#{stopReason}, skip_reason=#{skipReason}, error_code=#{errorCode}, error_message=#{errorMessage},
+        result_json=#{resultJson}, trace_id=#{traceId}, created_at=#{createdAt}, updated_at=#{updatedAt},
+        execution_affinity=#{executionAffinity}
+    </sql>
+    <update id="updateRun" parameterType="map">
+        update scheduled_task_runs set <include refid="runAssignments"/>
+        where task_run_id=#{taskRunId}
+    </update>
+    <update id="updateRunIfStatus" parameterType="map">
+        update scheduled_task_runs set <include refid="runAssignments"/>
+        where task_run_id=#{taskRunId} and status=#{expectedStatus}
+    </update>
+    <insert id="insertRun" parameterType="map">
+        insert into scheduled_task_runs(task_run_id,task_key,plan_id,trigger_type,status,requested_by_user_id,
+        scheduled_fire_at,started_at,ended_at,owner_instance_id,stop_requested_at,stop_requested_by_user_id,
+        stop_reason,skip_reason,error_code,error_message,result_json,trace_id,created_at,updated_at,execution_affinity)
+        values(#{taskRunId},#{taskKey},#{planId},#{triggerType},#{status},#{requestedByUserId},
+        #{scheduledFireAt},#{startedAt},#{endedAt},#{ownerInstanceId},#{stopRequestedAt},#{stopRequestedByUserId},
+        #{stopReason},#{skipReason},#{errorCode},#{errorMessage},#{resultJson},#{traceId},#{createdAt},#{updatedAt},#{executionAffinity})
+    </insert>
+    <select id="findRunById" resultType="map">
+        select <include refid="runColumns"/> from scheduled_task_runs where task_run_id=#{taskRunId}
+    </select>
+    <select id="findActiveRunByTaskKey" resultType="map">
+        select <include refid="runColumns"/> from scheduled_task_runs
+        where task_key=#{taskKey} and status in ('PENDING','RUNNING','STOPPING')
+        <if test="excludedTaskRunId != null">and task_run_id != #{excludedTaskRunId}</if>
+        order by updated_at desc, id desc limit 1
+    </select>
+    <select id="findPendingRuns" resultType="map">
+        select <include refid="runColumns"/> from scheduled_task_runs
+        where trigger_type=#{triggerType} and status='PENDING' and scheduled_fire_at &lt;= #{now}
+        <choose>
+            <when test="executionAffinity != null">and execution_affinity=#{executionAffinity}</when>
+            <otherwise>and execution_affinity is null</otherwise>
+        </choose>
+        order by scheduled_fire_at, id limit #{limit}
+    </select>
+    <sql id="runFilters">
+        <where>
+            <if test="taskKey != null">and task_key=#{taskKey}</if>
+            <if test="status != null">and status=#{status}</if>
+            <if test="triggerType != null">and trigger_type=#{triggerType}</if>
+            <if test="requestedByUserId != null">and requested_by_user_id=#{requestedByUserId}</if>
+        </where>
+    </sql>
+    <select id="findRuns" resultType="map">
+        select <include refid="runColumns"/> from scheduled_task_runs <include refid="runFilters"/>
+        order by scheduled_fire_at desc, id desc limit #{limit} offset #{offset}
+    </select>
+    <select id="countRuns" resultType="long">
+        select count(*) from scheduled_task_runs <include refid="runFilters"/>
+    </select>
+</mapper>

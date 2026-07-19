@@ -164,6 +164,11 @@ Redis `reference-repository.sync-requested` 广播只负责低延迟唤醒，数
 | `TEST_AGENT_BACKEND_DISCOVERY_LIMIT` | `100` | 兼容诊断端点和 Java 间路由读取在线后端快照时的上限。 |
 | `TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT` | `10s` | 后端等待 manager 命令结果的超时。 |
 | `TEST_AGENT_SCHEDULER_ENABLED` | `true` | 控制 scheduler 后台扫描和 pending run 执行，默认开启；显式设为 `false` 可关闭。任务定义在应用启动时仍会同步到 `scheduled_tasks`，管理页可展示。运行记录保留清理、opencode stale active Run 收敛和运营分析汇总任务复用该框架。 |
+| `TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT` | `50` | 当前服务器单轮扫描到期 USER_PLAN 上限。 |
+| `TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT` | `4` | 当前 Java 执行服务器亲和 USER_PLAN 的有界 worker 数。 |
+| `TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY` | `100` | USER_PLAN 等待队列容量；队列满时记录保持 `PENDING`，后续扫描重试。 |
+| `TEST_AGENT_NIGHT_EXECUTION_SLOT_CAPACITY` | 无默认，生产必填 | 每个北京时间 15 分钟夜间启动时段的全局任务数上限，必须为正整数。缺失/非法时应用继续启动，但夜间任务 API 返回 `NIGHT_EXECUTION_UNAVAILABLE`。 |
+| 夜间任务补偿 cron | `0 */5 * * * *` | 任务 key 为 `opencode-runtime.night-execution-reconcile`，恢复超过 5 分钟的认领、窗口内顺延、07:00 最终失败，并清理 30 天前终态任务/容量占位。 |
 | scheduler.run-retention-cleanup cron | `0 0 0 * * *` | 每天 UTC 00:00 清理 `scheduled_task_runs` 中超过 7 天的已结束记录；`PENDING`、`RUNNING`、`STOPPING` 始终保留。 |
 | legacy stale active Run 收敛 cron | `0 */5 * * * *` | 每 5 分钟只扫描 `storage_mode=LEGACY_FULL` 的数据库 active Run，启动 catch-up 不扫描；`REDIS_SUMMARY` 不进入该 SQL 或旧事件写入链路。 |
 | 运营分析汇总 cron | `0 */5 * * * *` | 代码任务 key 为 `opencode-runtime.analytics-rollup`，每 5 分钟刷新最近 hourly/daily rollup 和耗时直方图；管理员可在定时任务管理页覆盖 Cron。旧 `TEST_AGENT_ANALYTICS_ROLLUP_ENABLED`、`TEST_AGENT_ANALYTICS_ROLLUP_FIXED_DELAY_MS` 已删除。 |
@@ -425,6 +430,10 @@ TEST_AGENT_SCHEDULER_ENABLED=true
 TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
 TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT=50
 TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
+TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT=50
+TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT=4
+TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY=100
+TEST_AGENT_NIGHT_EXECUTION_SLOT_CAPACITY=4
 ```
 
 生产 Redis 必须满足以下运行基线；Run 运行数据面不允许以 PostgreSQL 或 JVM 内存自动降级：
@@ -446,7 +455,9 @@ RunEvent 实时 SSE 不使用 Redis Pub/Sub fan-out。入口 Java 优先从 Run 
 
 `TEST_AGENT_REDIS_SUMMARY_ENABLED=false` 和 rollout `0` 是安全默认值。生产必须先完成 `noeviction`、AOF `everysec`、ACL/TLS、容量告警、真实 Redis/Lua/Stream 测试及两 Java 接管和故障收敛演练，再按 userId 稳定哈希逐步提高新 Run 比例；活动 Run 不切换模式，异常时只把后续新 Run 比例调回 `0`。当 `legacy_run_without_context_total` 连续 7 天为 0 后，可关闭旧客户端兼容开关。
 
-`TEST_AGENT_SCHEDULER_ENABLED` 默认 `true`，应用启动后会运行后台扫描；显式设为 `false` 可关闭，环境变量存在但值为空时也按 `false` 处理。应用启动时会先同步 `ScheduledTaskHandler` 代码注册任务，确保超级管理员定时任务管理页能看到任务定义；只有启用 scheduler 后才启动后台扫描线程并执行 due task 或 pending manual run。关闭时管理端手动触发会返回 `CONFLICT`，不会再创建无法执行的 `PENDING` 运行记录；历史已存在的 `PENDING` 记录需要启用 scheduler 后由后台扫描消费，或由管理员按排障流程显式处理。scheduler 框架使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。`opencode-runtime.analytics-rollup` 业务服务暂时额外竞争 `analytics_job_locks`，只为新版本 handler 与滚动部署期间旧版本 `@Scheduled` 实例共同互斥；锁被占用时该次运行正常结束并记录 `executed=false`，待旧版本全部下线后可单独评估移除这层兼容保护。
+`TEST_AGENT_SCHEDULER_ENABLED` 默认 `true`，应用启动后会运行后台扫描；显式设为 `false` 可关闭，环境变量存在但值为空时也按 `false` 处理。应用启动时会先同步 `ScheduledTaskHandler` 代码注册任务，确保超级管理员定时任务管理页能看到任务定义；只有启用 scheduler 后才启动后台扫描线程并执行 due task、pending manual run 或匹配当前稳定 Linux 服务器 ID 的 USER_PLAN。USER_PLAN 由独立有界 worker/queue 执行，数据库状态 CAS 防止多 Java 重复认领；队列满时保留 `PENDING` 等待下轮。关闭时管理端手动触发和普通用户夜间任务创建都会返回统一冲突/功能不可用错误，不创建无法消费的记录。scheduler 框架使用 Redis `SET NX PX` + Lua token 校验作为 Cron/任务级分布式互斥实现，不降级为本机锁或数据库锁。`opencode-runtime.analytics-rollup` 业务服务暂时额外竞争 `analytics_job_locks`，只为新版本 handler 与滚动部署期间旧版本 `@Scheduled` 实例共同互斥；锁被占用时该次运行正常结束并记录 `executed=false`，待旧版本全部下线后可单独评估移除这层兼容保护。
+
+夜间任务窗口固定为北京时间 21:00 至次日 07:00，按 15 分钟时段使用数据库全局容量占位。`TEST_AGENT_NIGHT_EXECUTION_SLOT_CAPACITY` 不提供隐式默认，便于运维按夜间算力明确核定；所有 Java 实例必须使用同一值。任务按创建时的用户 opencode binding 服务器写入执行亲和；到期发现 binding 迁移时创建新的亲和 USER_PLAN，并由目标 Java 调用公共 `OpencodeProcessStartupService` 链路完成 manager state/PID 与 HTTP health 确认，再复用普通 Run 编排。不得为夜间任务增加本机启动、固定节点或 manager gateway 直调降级。夜间任务 `SCHEDULED/DISPATCHING` 时会锁定对应 Session 的普通发送和归档；取消、最终失败或 Run 成功创建后解锁。待执行任务通过 HTTP 每 30 秒/focus 查询，执行中的任务继续使用现有会话与 RunEvent。
 
 ## 运行示例
 
@@ -471,7 +482,7 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。`TEST_AGENT_MODEL_CATALOG_SOURCE` 仅保留历史兼容，前端模型和供应商目录始终来自用户 opencode server 的公共配置。
 
-应用启动时，`ScheduledTaskRegistry` 会同步 `scheduler.run-retention-cleanup`、`opencode-runtime.stale-active-run-reconcile` 和 `opencode-runtime.analytics-rollup` 三项代码注册任务。scheduler 默认启用，`ScheduledTaskRunner` 后台线程会扫描 due task 和管理员手动触发的 pending run；显式关闭 scheduler 后，手工启动会返回冲突错误且不会写入新的 pending run。
+应用启动时，`ScheduledTaskRegistry` 会同步 USER_PLAN 专用 `opencode-runtime.night-execution`，以及 `opencode-runtime.night-execution-reconcile`、`scheduler.run-retention-cleanup`、`opencode-runtime.stale-active-run-reconcile`、`opencode-runtime.analytics-rollup` 等代码注册任务。scheduler 默认启用，`ScheduledTaskRunner` 后台线程会扫描 due task、管理员手动触发和服务器亲和 USER_PLAN；显式关闭后手工启动会返回冲突，夜间任务创建返回功能不可用，均不会写入新的 pending run。
 
 运行记录清理任务每天 UTC 00:00 删除超过 7 天的已结束记录，并保留所有活动记录。超级管理员可在定时任务管理页查看任务状态和运行历史、调整 Cron、手工启动非 active 任务，并对 `RUNNING` 记录发起协作式停止。停止请求会先写入 `STOPPING`；需要协作式停止的 handler 在长循环或外部调用间隙检查 `ScheduledTaskContext.stopRequested()` / `throwIfStopRequested()`，最终由 runner 保存 `MANUALLY_STOPPED`。
 

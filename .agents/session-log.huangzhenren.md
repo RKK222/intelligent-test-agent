@@ -5,6 +5,31 @@
 
 ## Entries
 
+### 2026-07-19 - 实施夜间异步执行任务
+
+- Why:
+  - 公司白天算力不足，需要用户在现有对话中预先提交北京时间 21:00 至次日 07:00 的一次性任务，并在 15 分钟容量时段内无人值守启动；已有会话待执行期间必须锁定普通对话，执行过程继续复用现有 Session/Run/RunEvent 展示。
+- What:
+  - scheduler 增加一次性 `USER_PLAN`、Linux 执行亲和、按运行 ID 分布式锁和有界 worker；既有 scheduler JDBC 仓储迁移为 MyBatis XML。夜间任务新增领域模型、Flyway/MyBatis 主表/会话锁/容量占位、创建/查询/改期/取消/失败卡关闭 API，以及 5 分钟恢复、同夜顺延、07:00 最终失败和 30 天清理。
+  - 到期投递重新校验 owner、Session、Workspace 和权限，binding 迁移时重建亲和计划，通过公共 `UserOpencodeProcessAssignmentService.initialize` 启动进程，再调用既有 `RunApplicationService` 创建带 `SCHEDULED_TASK` 来源的 Run 和 USER 消息；手工发送、追加消息和归档在会话持锁期间由后端硬拦截。
+  - 当前对话发送按钮左侧新增定时图标和 15 分钟时段选择；“对话 / 待执行任务”页签分页收齐全部任务，展示预览、计划时段、创建时间、状态和顺延次数，支持改期/内联确认取消。空白草稿事务内创建新 Session；任务启动后回到既有消息与 Run 展示，来源标签显示北京时间实际启动时间。
+  - 创建请求纳入现有 opencode 后端路由并复用 32 MiB 请求体硬上限；容量竞争返回最新时段详情，前端立即重取选择器。同步 HTTP、事件、数据库、部署、安全、架构、前后端 README/PACKAGE 和内置用户手册；未新增 RunEvent 类型，也未修改 generated SDK 或真实环境配置。
+- How:
+  - 创建、改期、取消和终态迁移使用事务、条件更新、PostgreSQL advisory lock、时段原子占位及 `scheduledTaskRunId` fencing；完整 prompt/parts 只保存在业务表，响应、日志和 scheduler result 仅暴露安全预览，终态清除完整输入。
+  - 列表使用 owner/status/slot 索引并由前端按后端最大 200 条逐页收齐；runner 的扫描批量、worker、队列和每时段容量均显式配置。`TEST_AGENT_NIGHT_EXECUTION_SLOT_CAPACITY` 缺失时应用继续启动，但夜间 API 失败关闭为 `NIGHT_EXECUTION_UNAVAILABLE`。
+  - 完成前回顾 `.agents/session-log.md`、`.agents/session-log.huangzhenren.md` 和 `.agents/session-log.rkk222.md` 的近期条目，保留已提交的工作区目录移动、Mermaid 与引用资产成果；没有修改已发布的 `V20260717173000`。
+- Result:
+  - 后端夜间/runtime/scheduler/API/路由定向测试通过，`mvn -q clean package -DskipTests` 18 模块通过；前端全量 Vitest 85 文件为 1393 passed / 1 skipped，lint、typecheck、用户手册和生产 build 通过，桌面/移动夜间 Playwright 4/4 通过，构建仅保留既有大 chunk 提示。
+  - 后端全量 `mvn test` 仍只在 persistence 被已发布 `V20260717173000__create_public_agent_config_rollouts.sql` 的 PostgreSQL `timestamptz` 与当前 H2 2.4 不兼容阻断（76 errors）；该问题已在前序日志和干净基线确认，生产 PostgreSQL 支持，本次按最小范围没有篡改历史 migration。
+  - 涉及新增内部 HTTP API、兼容性 DTO 来源字段、两份 scheduler/夜间 Flyway 增量和运行时配置；不新增 SSE 事件、不改变鉴权角色、不输出敏感输入。生产启用前需配置正整数时段容量，并建议在真实多 Java/夜间窗口验证 binding 迁移、进程自动启动和算力容量。
+- Verification:
+  - `mvn -q -pl test-agent-opencode-runtime,test-agent-api -am -Dtest='NightExecution*Test,UserOpencodeBackendRoutingWebFilterTest' -Dsurefire.failIfNoSpecifiedTests=false test`
+  - `mvn -q -pl test-agent-persistence -am -Dtest='MyBatisNightExecutionTaskRepositoryIntegrationTest,MyBatisScheduledTaskRepositoryIntegrationTest' -Dsurefire.failIfNoSpecifiedTests=false test`
+  - `mvn -q clean package -DskipTests`
+  - `corepack pnpm test`、`corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build`
+  - `corepack pnpm e2e --grep "night task"`
+  - `git diff --check`、全部 session log 近期条目回顾和最终只读差异审查。
+
 ### 2026-07-19 - 支持工作区文件和目录拖拽移动
 
 - Why:

@@ -7,6 +7,7 @@ import {
   BookOpen,
   CircleHelp,
   CheckCircle,
+  Clock3,
   ChevronDown,
   ChevronUp,
   ChevronRight,
@@ -40,6 +41,8 @@ import type {
   FileSearchResult,
   MessageScope,
   MessagePart,
+  NightExecutionSlots,
+  NightExecutionTask,
   PermissionRequest,
   QuestionRequest,
   RunDiffFile,
@@ -648,6 +651,7 @@ const props =
       pendingQuestion?: boolean
       attentionEventId?: string
       attentionAt?: string
+      sourceType?: string
     }>
     /** 当前用户历史中仍在运行的会话数。 */
     historyRunningCount?: number
@@ -734,12 +738,24 @@ const props =
     questions?: QuestionRequest[]
     /** 当前 root 会话；历史切换时用于退出上一次子 Agent 视图。 */
     currentSessionId?: string
+    currentSessionSourceType?: string | null
     /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
     messageScopesById?: Record<string, MessageScope>
     /** 当前运行期发现的子 Agent 会话索引。 */
     subagentsBySessionId?: Record<string, SubagentSession>
     /** task part 到子 Agent session 的索引。 */
     subagentByTaskPartId?: Record<string, string>
+    /** 当前用户仍待执行的夜间任务，供“待执行任务”页签展示。 */
+    nightTasks?: NightExecutionTask[]
+    /** 当前会话的待执行任务；存在时只锁定当前会话的继续发送。 */
+    currentNightTask?: NightExecutionTask | null
+    /** 当前会话最近一次尚未关闭的夜间失败任务。 */
+    nightVisibleFailure?: NightExecutionTask | null
+    /** 当前夜间窗口的 15 分钟容量槽。 */
+    nightSlots?: NightExecutionSlots | null
+    nightSlotsLoading?: boolean
+    nightTaskSubmitting?: boolean
+    nightTaskActionPending?: Record<string, boolean>
   }>(), {
     processRefreshBlocksSubmit: true,
     processStatusPlacement: 'chat',
@@ -756,7 +772,12 @@ const props =
     questions: () => [],
     messageScopesById: () => ({}),
     subagentsBySessionId: () => ({}),
-    subagentByTaskPartId: () => ({})
+    subagentByTaskPartId: () => ({}),
+    nightTasks: () => [],
+    currentNightTask: null,
+    nightVisibleFailure: null,
+    nightSlots: null,
+    nightTaskActionPending: () => ({})
   })
 
 const emit =
@@ -765,12 +786,18 @@ const emit =
     (e: 'stop'): void
     (e: 'retry'): void
     (e: 'new-conversation'): void
+    (e: 'request-night-slots'): void
+    (e: 'schedule-night', payload: { prompt: string; slotStart: string }): void
+    (e: 'adjust-night-task', payload: { taskId: string; slotStart: string }): void
+    (e: 'cancel-night-task', taskId: string): void
+    (e: 'dismiss-night-task', taskId: string): void
+    (e: 'open-night-task-session', sessionId: string): void
     (e: 'close'): void
     (e: 'open-history'): void
     (e: 'history-search-change', query: string): void
     (e: 'load-more-history'): void
     (e: 'select-session', id: string): void
-    (e: 'open-tasks'): void
+    (e: 'request-night-tasks'): void
     (e: 'update:inputValue', value: string): void
     (e: 'open-diff', path: string): void
     (e: 'open-file', path: string): void
@@ -804,6 +831,23 @@ const emit =
 const collapsedMessages = ref<Record<string, boolean>>({})
 
 const localInput = ref(props.inputValue ?? '')
+const mainView = ref<'conversation' | 'night'>('conversation')
+const nightPickerOpen = ref(false)
+const nightPickerMode = ref<'create' | 'adjust'>('create')
+const adjustingNightTaskId = ref<string | null>(null)
+const selectedNightSlotStart = ref('')
+const nightSubmissionAwaiting = ref(false)
+const submittedNightTaskId = ref<string | null>(null)
+const cancelConfirmTaskId = ref<string | null>(null)
+// 集中页签保持服务端时段顺序，但把当前正在查看的会话任务固定置顶，便于与对话卡相互确认。
+const orderedNightTasks = computed(() => [...props.nightTasks].sort((left, right) => {
+  const currentOrder = Number(right.sessionId === props.currentSessionId)
+    - Number(left.sessionId === props.currentSessionId)
+  return currentOrder
+    || left.slotStart.localeCompare(right.slotStart)
+    || left.createdAt.localeCompare(right.createdAt)
+    || left.taskId.localeCompare(right.taskId)
+}))
 const COMPOSER_TEXTAREA_MIN_HEIGHT = 40
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 260
 const composerTextareaHeight = ref(COMPOSER_TEXTAREA_MIN_HEIGHT)
@@ -2000,6 +2044,15 @@ const publicConfigMessageBlockedReason = computed(
     || '公共 Agent/Skill 配置正在同步，旧会话排空后将自动恢复发送'
 )
 const composerInteractionBlocked = computed(() => !processReady.value)
+const nightSessionLocked = computed(() => {
+  const status = props.currentNightTask?.status
+  return status === 'SCHEDULED' || status === 'DISPATCHING'
+})
+const nightSessionLockedReason = computed(() =>
+  props.currentNightTask?.status === 'DISPATCHING'
+    ? '夜间任务正在启动，执行完成后可继续对话'
+    : '当前对话已有待执行夜间任务，取消后可继续对话'
+)
 const agentPickerDisabled = computed(() => composerInteractionBlocked.value)
 const modelSelectionDisabled = computed(() => props.modelPickerDisabled === true || composerInteractionBlocked.value)
 const processSubmitBlocked = computed(
@@ -2026,12 +2079,14 @@ const contextSendBlockedReason = computed(() => {
 const sendBlockedTitle = computed(() => {
   if (!processReady.value) return '请先初始化 TestAgent 进程'
   if (publicConfigMessageBlocked.value) return publicConfigMessageBlockedReason.value
+  if (nightSessionLocked.value) return nightSessionLockedReason.value
   return readonlyBlockedReason.value || contextSendBlockedReason.value || '发送'
 })
 const sendSubmitBlocked = computed(
   () => props.historyLoading === true
     || props.historySubmitBlocked === true
     || processSubmitBlocked.value
+    || nightSessionLocked.value
     || readonlySubmitBlocked.value
     || contextSubmitBlocked.value
 )
@@ -2039,8 +2094,21 @@ const composerPlaceholder = computed(() => {
   if (props.processLoading && !props.processStatus) return '正在检查 TestAgent 进程…'
   if (!processReady.value) return '请先初始化 TestAgent 进程'
   if (publicConfigMessageBlocked.value) return publicConfigMessageBlockedReason.value
+  if (nightSessionLocked.value) return nightSessionLockedReason.value
   return props.placeholder || 'Ask the AI agent...'
 })
+const nightScheduleBlocked = computed(() =>
+  !localInput.value.trim()
+    || props.running === true
+    || composerInteractionBlocked.value
+    || publicConfigMessageBlocked.value
+    || props.historyLoading === true
+    || props.historySubmitBlocked === true
+    || readonlySubmitBlocked.value
+    || contextSubmitBlocked.value
+    || nightSessionLocked.value
+    || props.nightTaskSubmitting === true
+)
 const processStatusVisible = computed(
   () =>
     props.processStatusPlacement !== 'pet' &&
@@ -2971,6 +3039,44 @@ watch(
 watch(localInput, (v) => onComposerInput(v))
 
 watch(
+  () => props.nightSlots,
+  (window) => {
+    if (nightPickerMode.value === 'adjust' && selectedNightSlotStart.value) return
+    const selectedStillAvailable = window?.slots.some(
+      (slot) => slot.slotStart === selectedNightSlotStart.value && slot.available
+    )
+    if (selectedStillAvailable) return
+    selectedNightSlotStart.value =
+      window?.slots.find((slot) => slot.available && slot.recommended)?.slotStart
+      ?? window?.slots.find((slot) => slot.available)?.slotStart
+      ?? ''
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.currentNightTask?.taskId ?? null,
+  (taskId) => {
+    if (!nightSubmissionAwaiting.value || !taskId || taskId === submittedNightTaskId.value) return
+    nightSubmissionAwaiting.value = false
+    submittedNightTaskId.value = taskId
+    nightPickerOpen.value = false
+    localInput.value = ''
+    emit('update:inputValue', '')
+  }
+)
+
+watch(
+  () => props.nightTaskSubmitting,
+  (submitting, previous) => {
+    // 创建失败时保留原输入和已选时间，用户可以直接重试。
+    if (previous && !submitting && nightSubmissionAwaiting.value) {
+      nightSubmissionAwaiting.value = false
+    }
+  }
+)
+
+watch(
   () => props.running,
   (now, prev) => {
     if (now && !prev) {
@@ -3411,6 +3517,116 @@ function formatTime(iso: string) {
   }
 }
 
+const nightDateFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  month: 'numeric',
+  day: 'numeric',
+  weekday: 'short',
+})
+const nightTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
+function formatNightDate(iso: string): string {
+  return nightDateFormatter.format(new Date(iso))
+}
+
+function formatNightTime(iso: string): string {
+  return nightTimeFormatter.format(new Date(iso))
+}
+
+function formatNightRange(task: Pick<NightExecutionTask, 'slotStart' | 'slotEnd'>): string {
+  return `${formatNightDate(task.slotStart)} ${formatNightTime(task.slotStart)}–${formatNightTime(task.slotEnd)}`
+}
+
+function formatNightCreatedAt(iso: string): string {
+  return `${formatNightDate(iso)} ${formatNightTime(iso)}`
+}
+
+function nightTaskStatusLabel(task: NightExecutionTask): string {
+  if (task.status === 'DISPATCHING') return '启动中'
+  if (task.status === 'FAILED') return '执行失败'
+  if (task.rolloverCount > 0) return `已顺延 ${task.rolloverCount} 次`
+  return '等待执行'
+}
+
+function nightTaskIsPending(task: NightExecutionTask): boolean {
+  return task.status === 'SCHEDULED' || task.status === 'DISPATCHING'
+}
+
+function nightActionPending(taskId: string): boolean {
+  return props.nightTaskActionPending?.[taskId] === true
+}
+
+function openNightPicker() {
+  if (nightScheduleBlocked.value) return
+  nightPickerMode.value = 'create'
+  adjustingNightTaskId.value = null
+  submittedNightTaskId.value = props.currentNightTask?.taskId ?? null
+  nightPickerOpen.value = !nightPickerOpen.value
+  if (nightPickerOpen.value) emit('request-night-slots')
+}
+
+function openNightTasksView() {
+  mainView.value = 'night'
+  emit('request-night-tasks')
+}
+
+function openNightTaskConversation(sessionId: string) {
+  mainView.value = 'conversation'
+  emit('open-night-task-session', sessionId)
+}
+
+function closeNightPicker() {
+  if (props.nightTaskSubmitting) return
+  nightPickerOpen.value = false
+  nightPickerMode.value = 'create'
+  adjustingNightTaskId.value = null
+}
+
+function selectNightSlot(slotStart: string, available: boolean) {
+  if (!available || props.nightTaskSubmitting) return
+  selectedNightSlotStart.value = slotStart
+}
+
+function confirmNightSchedule() {
+  if (!selectedNightSlotStart.value || props.nightTaskSubmitting) return
+  if (nightPickerMode.value === 'adjust' && adjustingNightTaskId.value) {
+    emit('adjust-night-task', {
+      taskId: adjustingNightTaskId.value,
+      slotStart: selectedNightSlotStart.value,
+    })
+    closeNightPicker()
+    return
+  }
+  const prompt = localInput.value.trim()
+  if (!prompt || nightScheduleBlocked.value) return
+  nightSubmissionAwaiting.value = true
+  submittedNightTaskId.value = props.currentNightTask?.taskId ?? null
+  emit('schedule-night', { prompt, slotStart: selectedNightSlotStart.value })
+}
+
+function beginAdjustNightTask(task: NightExecutionTask) {
+  if (task.status !== 'SCHEDULED' || nightActionPending(task.taskId)) return
+  nightPickerMode.value = 'adjust'
+  adjustingNightTaskId.value = task.taskId
+  selectedNightSlotStart.value = task.slotStart
+  nightPickerOpen.value = true
+  emit('request-night-slots')
+}
+
+function askCancelNightTask(taskId: string) {
+  cancelConfirmTaskId.value = taskId
+}
+
+function confirmCancelNightTask(taskId: string) {
+  cancelConfirmTaskId.value = null
+  emit('cancel-night-task', taskId)
+}
+
 function submit() {
   const text = localInput.value.trim()
   if (!text || sendSubmitBlocked.value) return
@@ -3451,6 +3667,13 @@ function onCompositionEnd() {
     <header class="figma-chat-header">
       <div class="figma-chat-header-left">
         <h2 class="figma-chat-title" :title="title">{{ title }}</h2>
+        <span
+          v-if="currentSessionSourceType === 'SCHEDULED_TASK'"
+          class="figma-chat-night-source-badge"
+          title="该对话由夜间定时任务创建"
+        >
+          <Clock3 :size="11" /> 夜间执行
+        </span>
         <button
           type="button"
           class="figma-chat-header-btn"
@@ -3487,7 +3710,28 @@ function onCompositionEnd() {
       </div>
     </header>
 
+    <nav class="figma-chat-view-tabs" aria-label="对话内容">
+      <button
+        type="button"
+        :class="['figma-chat-view-tab', mainView === 'conversation' && 'is-active']"
+        data-testid="conversation-tab"
+        @click="mainView = 'conversation'"
+      >
+        对话
+      </button>
+      <button
+        type="button"
+        :class="['figma-chat-view-tab', mainView === 'night' && 'is-active']"
+        data-testid="night-tasks-tab"
+        @click="openNightTasksView"
+      >
+        待执行任务
+        <span v-if="nightTasks.length" class="figma-chat-view-tab-count">{{ nightTasks.length }}</span>
+      </button>
+    </nav>
+
     <div ref="scrollEl" class="figma-chat-scroll" @scroll="handleChatScroll">
+      <template v-if="mainView === 'conversation'">
       <div v-if="historyLoading" class="figma-chat-history-loading" role="status">
         <Spinner />
         <span>正在加载消息列表…</span>
@@ -3535,6 +3779,60 @@ function onCompositionEnd() {
           </div>
         </template>
       </OpencodeTimeline>
+      <article
+        v-if="currentNightTask && nightTaskIsPending(currentNightTask)"
+        class="figma-chat-night-card figma-chat-night-card--current"
+        :class="{ 'is-dispatching': currentNightTask.status === 'DISPATCHING' }"
+        data-testid="current-night-task-card"
+      >
+        <div class="figma-chat-night-card-head">
+          <span class="figma-chat-night-status">{{ nightTaskStatusLabel(currentNightTask) }}</span>
+          <span class="figma-chat-night-time">{{ formatNightRange(currentNightTask) }}</span>
+        </div>
+        <strong class="figma-chat-night-title">夜间执行已安排</strong>
+        <p class="figma-chat-night-preview">{{ currentNightTask.contentPreview }}</p>
+        <div class="figma-chat-night-actions">
+          <template v-if="currentNightTask.status === 'SCHEDULED'">
+            <button
+              type="button"
+              :disabled="nightActionPending(currentNightTask.taskId)"
+              @click="beginAdjustNightTask(currentNightTask)"
+            >调整时间</button>
+            <button
+              v-if="cancelConfirmTaskId !== currentNightTask.taskId"
+              type="button"
+              class="is-danger"
+              :disabled="nightActionPending(currentNightTask.taskId)"
+              @click="askCancelNightTask(currentNightTask.taskId)"
+            >取消任务</button>
+            <template v-else>
+              <span class="figma-chat-night-confirm-copy">取消后可继续对话，确定取消？</span>
+              <button type="button" class="is-danger" @click="confirmCancelNightTask(currentNightTask.taskId)">确认</button>
+              <button type="button" @click="cancelConfirmTaskId = null">返回</button>
+            </template>
+          </template>
+          <span v-else class="figma-chat-night-dispatch-copy">任务正在启动，请稍候…</span>
+        </div>
+      </article>
+      <article
+        v-if="nightVisibleFailure"
+        class="figma-chat-night-card figma-chat-night-card--failed"
+        data-testid="night-failure-card"
+      >
+        <div class="figma-chat-night-card-head">
+          <span class="figma-chat-night-status">夜间执行失败</span>
+          <span class="figma-chat-night-time">{{ formatNightRange(nightVisibleFailure) }}</span>
+        </div>
+        <strong class="figma-chat-night-title">{{ nightVisibleFailure.contentPreview }}</strong>
+        <p class="figma-chat-night-error">{{ nightVisibleFailure.errorMessage || '任务未能在夜间窗口内启动' }}</p>
+        <div class="figma-chat-night-actions">
+          <button
+            type="button"
+            :disabled="nightActionPending(nightVisibleFailure.taskId)"
+            @click="emit('dismiss-night-task', nightVisibleFailure.taskId)"
+          >关闭提示</button>
+        </div>
+      </article>
       <button
         v-if="hasNewContent"
         type="button"
@@ -4212,6 +4510,49 @@ function onCompositionEnd() {
           </div>
         </div>
       </div>
+      </template>
+      <section v-else class="figma-chat-night-list" data-testid="night-task-list">
+        <div v-if="nightTasks.length === 0" class="figma-chat-night-empty">
+          <Clock3 :size="22" />
+          <strong>暂无待执行任务</strong>
+          <span>在消息框中写好任务后，点击定时执行即可安排到今晚。</span>
+        </div>
+        <template v-else>
+        <article
+          v-for="task in orderedNightTasks"
+          :key="task.taskId"
+          class="figma-chat-night-card"
+          :class="{ 'is-dispatching': task.status === 'DISPATCHING' }"
+        >
+          <div class="figma-chat-night-card-head">
+            <span class="figma-chat-night-status">{{ nightTaskStatusLabel(task) }}</span>
+            <span class="figma-chat-night-time">{{ formatNightRange(task) }}</span>
+          </div>
+          <strong class="figma-chat-night-title">{{ task.sessionTitle || '新对话' }}</strong>
+          <p class="figma-chat-night-preview">{{ task.contentPreview }}</p>
+          <span class="figma-chat-night-created">创建于 {{ formatNightCreatedAt(task.createdAt) }}</span>
+          <div class="figma-chat-night-actions">
+            <button type="button" @click="openNightTaskConversation(task.sessionId)">查看对话</button>
+            <template v-if="task.status === 'SCHEDULED'">
+              <button type="button" :disabled="nightActionPending(task.taskId)" @click="beginAdjustNightTask(task)">调整时间</button>
+              <button
+                v-if="cancelConfirmTaskId !== task.taskId"
+                type="button"
+                class="is-danger"
+                :disabled="nightActionPending(task.taskId)"
+                @click="askCancelNightTask(task.taskId)"
+              >取消任务</button>
+              <template v-else>
+                <span class="figma-chat-night-confirm-copy">确定取消？</span>
+                <button type="button" class="is-danger" @click="confirmCancelNightTask(task.taskId)">确认</button>
+                <button type="button" @click="cancelConfirmTaskId = null">返回</button>
+              </template>
+            </template>
+            <span v-else class="figma-chat-night-dispatch-copy">正在复用对话后台执行能力启动…</span>
+          </div>
+        </article>
+        </template>
+      </section>
     </div>
 
 
@@ -4537,11 +4878,70 @@ function onCompositionEnd() {
     />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
+      <section
+        v-if="nightPickerOpen"
+        class="figma-chat-night-picker"
+        data-testid="night-slot-picker"
+        aria-label="选择夜间执行时间"
+      >
+        <div class="figma-chat-night-picker-head">
+          <div>
+            <strong>{{ nightPickerMode === 'adjust' ? '调整启动时间' : '安排夜间执行' }}</strong>
+            <span>北京时间 · 每 15 分钟一个启动时间段</span>
+          </div>
+          <button type="button" aria-label="关闭时间选择" @click="closeNightPicker"><X :size="14" /></button>
+        </div>
+        <div v-if="nightSlotsLoading" class="figma-chat-night-picker-loading">
+          <Spinner /> 正在计算合适时间…
+        </div>
+        <div v-else-if="!nightSlots?.slots.length" class="figma-chat-night-picker-empty">
+          暂无可用夜间时间段，请稍后重试。
+        </div>
+        <div v-else class="figma-chat-night-track">
+          <button
+            v-for="slot in nightSlots.slots"
+            :key="slot.slotStart"
+            type="button"
+            data-testid="night-slot-option"
+            :class="[
+              'figma-chat-night-slot',
+              selectedNightSlotStart === slot.slotStart && 'is-selected',
+              slot.recommended && 'is-recommended',
+            ]"
+            :disabled="!slot.available || nightTaskSubmitting"
+            :title="slot.available ? `${slot.reservedCount}/${slot.capacity} 已预约` : '该时间段已满'"
+            @click="selectNightSlot(slot.slotStart, slot.available)"
+          >
+            <span>{{ formatNightTime(slot.slotStart) }}</span>
+            <small v-if="slot.recommended">系统推荐</small>
+            <small v-else-if="!slot.available">已满</small>
+            <small v-else>{{ slot.reservedCount }}/{{ slot.capacity }}</small>
+          </button>
+        </div>
+        <div class="figma-chat-night-picker-foot">
+          <span v-if="selectedNightSlotStart">
+            将在 {{ formatNightDate(selectedNightSlotStart) }} {{ formatNightTime(selectedNightSlotStart) }}–{{
+              formatNightTime(nightSlots?.slots.find((slot) => slot.slotStart === selectedNightSlotStart)?.slotEnd || selectedNightSlotStart)
+            }} 内启动
+          </span>
+          <span v-else>请选择一个仍有容量的时间段</span>
+          <button
+            type="button"
+            data-testid="night-schedule-confirm"
+            :disabled="!selectedNightSlotStart || nightTaskSubmitting"
+            @click="confirmNightSchedule"
+          >
+            <Spinner v-if="nightTaskSubmitting" />
+            {{ nightPickerMode === 'adjust' ? '保存调整' : '确认定时执行' }}
+          </button>
+        </div>
+      </section>
       <div
         class="figma-chat-input-card"
         :class="{
           'is-resizing': isResizingComposer,
           'is-disabled': composerInteractionBlocked,
+          'is-night-locked': nightSessionLocked,
         }"
         @click="onComposerCardClick"
       >
@@ -4558,7 +4958,7 @@ function onCompositionEnd() {
           :style="composerTextareaStyle"
           :placeholder="composerPlaceholder"
           rows="1"
-          :disabled="running || composerInteractionBlocked || readonlySubmitBlocked"
+          :disabled="running || composerInteractionBlocked || readonlySubmitBlocked || nightSessionLocked"
           :title="sendBlockedTitle"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
@@ -4754,6 +5154,22 @@ function onCompositionEnd() {
               @click="emit('new-conversation')"
             >
               <SquarePen class="figma-chat-btn-icon" />
+            </button>
+          </el-tooltip>
+          <el-tooltip
+            :content="nightSessionLocked ? nightSessionLockedReason : '定时执行'"
+            placement="top"
+            :show-after="0"
+          >
+            <button
+              type="button"
+              class="figma-chat-card-btn figma-chat-night-btn"
+              aria-label="定时执行"
+              :disabled="nightScheduleBlocked"
+              :aria-expanded="nightPickerOpen"
+              @click="openNightPicker"
+            >
+              <Clock3 class="figma-chat-btn-icon" />
             </button>
           </el-tooltip>
           <button
@@ -5134,6 +5550,7 @@ function onCompositionEnd() {
                 <div class="figma-chat-history-card-content">
                   <div class="figma-chat-history-card-title-row">
                     <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
+                    <span v-if="item.sourceType === 'SCHEDULED_TASK'" class="figma-chat-history-source-badge">夜间执行</span>
                     <span
                       :class="[
                         'figma-chat-history-card-status',
@@ -5341,6 +5758,25 @@ function onCompositionEnd() {
   flex: 1;
   min-width: 0;
 }
+.figma-chat-night-source-badge,
+.figma-chat-history-source-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid #d8dbe7;
+  border-radius: 9px;
+  background: #f1f2f8;
+  color: #3d466e;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 16px;
+}
+.figma-chat-history-source-badge {
+  margin-left: auto;
+}
 .figma-chat-header-btn {
   display: flex;
   align-items: center;
@@ -5360,6 +5796,58 @@ function onCompositionEnd() {
   color: var(--ta-text);
   background: var(--ta-hover);
   border-color: transparent;
+}
+.figma-chat-view-tabs {
+  display: flex;
+  align-items: end;
+  gap: 18px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--ta-border, #e4e5e7);
+  background: #fff;
+}
+.figma-chat-view-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: #71717a;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.figma-chat-view-tab::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+}
+.figma-chat-view-tab.is-active {
+  color: #18181b;
+  font-weight: 650;
+}
+.figma-chat-view-tab.is-active::after {
+  background: #27325e;
+}
+.figma-chat-view-tab-count {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #eef0f8;
+  color: #27325e;
+  font-size: 10px;
+  line-height: 17px;
+  text-align: center;
 }
 .figma-chat-history-header-icon {
   position: relative;
@@ -5877,6 +6365,137 @@ function onCompositionEnd() {
 .figma-chat-new-content-btn:hover {
   background: var(--ta-hover, #f4f4f5);
   border-color: var(--ta-border-strong, #d4d4d8);
+}
+
+.figma-chat-night-list {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+.figma-chat-night-empty {
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #71717a;
+  text-align: center;
+}
+.figma-chat-night-empty strong {
+  color: #3f3f46;
+  font-size: 13px;
+}
+.figma-chat-night-empty span {
+  max-width: 250px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.figma-chat-night-card {
+  display: grid;
+  gap: 7px;
+  padding: 11px 12px;
+  border: 1px solid #dfe2eb;
+  border-left: 3px solid #27325e;
+  border-radius: 9px;
+  background: linear-gradient(115deg, #fbfbfd 0%, #f6f7fb 100%);
+  color: #27272a;
+}
+.figma-chat-night-card.is-dispatching {
+  border-left-color: #d9993b;
+  background: linear-gradient(115deg, #fffdf8 0%, #faf7ef 100%);
+}
+.figma-chat-night-card--current {
+  margin-top: 2px;
+}
+.figma-chat-night-card--failed {
+  border-color: #efc9c6;
+  border-left-color: #b5423b;
+  background: #fffafa;
+}
+.figma-chat-night-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.figma-chat-night-status {
+  color: #27325e;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.figma-chat-night-card.is-dispatching .figma-chat-night-status {
+  color: #986218;
+}
+.figma-chat-night-card--failed .figma-chat-night-status {
+  color: #a23731;
+}
+.figma-chat-night-time {
+  color: #71717a;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.figma-chat-night-title {
+  overflow: hidden;
+  color: #27272a;
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.figma-chat-night-preview,
+.figma-chat-night-error {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: #52525b;
+  font-size: 12px;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.figma-chat-night-error {
+  color: #9f302a;
+}
+.figma-chat-night-created {
+  color: #8a8a93;
+  font-size: 11px;
+  line-height: 16px;
+}
+.figma-chat-night-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 24px;
+}
+.figma-chat-night-actions button {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #d6d8df;
+  border-radius: 6px;
+  background: #fff;
+  color: #3f3f46;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.figma-chat-night-actions button:hover:not(:disabled) {
+  border-color: #9ca3b7;
+  background: #f7f7fa;
+}
+.figma-chat-night-actions button.is-danger {
+  color: #a23731;
+}
+.figma-chat-night-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.figma-chat-night-confirm-copy,
+.figma-chat-night-dispatch-copy {
+  color: #71717a;
+  font-size: 11px;
 }
 
 /* ---- File Changes Card (above task usage) ---- */
@@ -7621,6 +8240,133 @@ function onCompositionEnd() {
   background: transparent;
 }
 
+.figma-chat-night-picker {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 11px;
+  border: 1px solid #d8dbe7;
+  border-radius: 12px;
+  background: #fbfbfd;
+  box-shadow: 0 10px 24px rgba(39, 50, 94, 0.11);
+}
+.figma-chat-night-picker-head,
+.figma-chat-night-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.figma-chat-night-picker-head > div {
+  display: grid;
+  gap: 2px;
+}
+.figma-chat-night-picker-head strong {
+  color: #27272a;
+  font-size: 13px;
+  line-height: 18px;
+}
+.figma-chat-night-picker-head span,
+.figma-chat-night-picker-foot > span {
+  color: #71717a;
+  font-size: 11px;
+  line-height: 16px;
+}
+.figma-chat-night-picker-head > button {
+  display: inline-grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+}
+.figma-chat-night-picker-head > button:hover {
+  background: #eceef4;
+  color: #27272a;
+}
+.figma-chat-night-track {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(50px, 1fr));
+  gap: 5px;
+  max-height: 154px;
+  overflow-y: auto;
+  padding: 1px;
+}
+.figma-chat-night-slot {
+  display: grid;
+  min-height: 43px;
+  place-content: center;
+  gap: 1px;
+  border: 1px solid #e0e1e7;
+  border-radius: 7px;
+  background: #fff;
+  color: #3f3f46;
+  font: inherit;
+  cursor: pointer;
+}
+.figma-chat-night-slot span {
+  font-size: 11px;
+  font-weight: 650;
+}
+.figma-chat-night-slot small {
+  color: #8a8a93;
+  font-size: 9px;
+}
+.figma-chat-night-slot.is-recommended {
+  border-color: #c4a66b;
+  background: #fffdf7;
+}
+.figma-chat-night-slot.is-recommended small {
+  color: #936621;
+}
+.figma-chat-night-slot.is-selected {
+  border-color: #27325e;
+  background: #27325e;
+  color: #fff;
+  box-shadow: 0 0 0 1px #27325e;
+}
+.figma-chat-night-slot.is-selected small {
+  color: #e3e7f8;
+}
+.figma-chat-night-slot:disabled {
+  border-style: dashed;
+  background: #f3f3f4;
+  color: #aaaab0;
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+.figma-chat-night-picker-loading,
+.figma-chat-night-picker-empty {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #71717a;
+  font-size: 12px;
+}
+.figma-chat-night-picker-foot > button {
+  flex: 0 0 auto;
+  min-height: 29px;
+  padding: 0 11px;
+  border: 1px solid #27325e;
+  border-radius: 7px;
+  background: #27325e;
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.figma-chat-night-picker-foot > button:disabled {
+  border-color: #c7c9d1;
+  background: #c7c9d1;
+  cursor: not-allowed;
+}
+
 .figma-chat-subagent-notice {
   flex-shrink: 0;
   display: flex;
@@ -7731,6 +8477,19 @@ function onCompositionEnd() {
 .figma-chat-input-card.is-disabled .figma-chat-textarea::placeholder {
   color: #989ca3;
   opacity: 1;
+}
+.figma-chat-input-card.is-night-locked {
+  border-color: #d6d9e6;
+  background: #f7f7fa;
+}
+.figma-chat-input-card.is-night-locked .figma-chat-textarea::placeholder {
+  color: #74788c;
+  opacity: 1;
+}
+.figma-chat-night-btn[aria-expanded='true'] {
+  border-color: #c6cadc;
+  background: #eef0f8;
+  color: #27325e;
 }
 
 .figma-chat-textarea {

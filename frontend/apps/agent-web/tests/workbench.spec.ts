@@ -1954,6 +1954,101 @@ test("new runs use one in-memory conversation context and a client request id", 
   expect(String(runRequests[0]?.clientRequestId)).toMatch(/^req_/);
 });
 
+test("a blank conversation schedules a night task and restores it from the pending tab", async ({ page }) => {
+  const nightTaskRequests: Array<Record<string, unknown>> = [];
+  const nightTasks: Array<Record<string, unknown>> = [];
+  const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {};
+  const backendState = {
+    ...runnableWorkspaceSetup(),
+    nightTaskRequests,
+    nightTasks,
+    sessionMessagesBySessionId,
+    activeRun: null as Record<string, unknown> | null,
+    runEventsByRunId: { run_night_e2e: [] }
+  };
+  await mockBackendApi(page, backendState);
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("夜间执行完整回归");
+  await page.getByRole("button", { name: "定时执行" }).click();
+  await expect(page.getByTestId("night-slot-picker")).toBeVisible();
+  await expect(page.getByTestId("night-slot-picker")).not.toContainText("执行位置");
+  await expect(page.getByTestId("night-schedule-confirm")).toBeEnabled();
+  await page.getByTestId("night-schedule-confirm").click();
+
+  await expect.poll(() => nightTaskRequests.length).toBe(1);
+  expect(nightTaskRequests[0]).toMatchObject({
+    workspaceId: "wrk_personal_default",
+    prompt: "夜间执行完整回归",
+    slotStart: "2026-07-18T13:15:00Z"
+  });
+  expect(nightTaskRequests[0]?.sessionId).toBeUndefined();
+  await expect(page.getByTestId("current-night-task-card")).toContainText("等待执行");
+  await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("night-tasks-tab").click();
+  await expect(page.getByTestId("night-task-list")).toContainText("夜间执行完整回归");
+
+  // 模拟后台按时投递：待执行项消失，既有会话接口返回真实 USER 消息和现有 Run。
+  const dispatchedTask = nightTasks[0]!;
+  dispatchedTask.status = "DISPATCHED";
+  dispatchedTask.runId = "run_night_e2e";
+  dispatchedTask.updatedAt = "2026-07-18T13:16:00Z";
+  sessionMessagesBySessionId.ses_night_created = [{
+    messageId: "msg_night_e2e",
+    sessionId: "ses_night_created",
+    runId: "run_night_e2e",
+    role: "USER",
+    content: "夜间执行完整回归",
+    sourceType: "SCHEDULED_TASK",
+    sourceRefId: dispatchedTask.taskId,
+    createdAt: "2026-07-18T13:16:00Z",
+    updatedAt: "2026-07-18T13:16:00Z"
+  }];
+  backendState.activeRun = {
+    runId: "run_night_e2e",
+    sessionId: "ses_night_created",
+    workspaceId: "wrk_personal_default",
+    status: "RUNNING",
+    sourceType: "SCHEDULED_TASK",
+    sourceRefId: dispatchedTask.taskId,
+    createdAt: "2026-07-18T13:16:00Z",
+    updatedAt: "2026-07-18T13:16:00Z"
+  };
+  await page.getByRole("button", { name: "查看对话" }).click();
+  await expect(page.locator(".oc-user-message__source-badge")).toContainText("夜间定时执行");
+  await expect(page.locator(".oc-user-message__source-badge")).toContainText("21:16");
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByTestId("current-night-task-card")).toHaveCount(0);
+});
+
+test("an existing-session night task locks only that conversation", async ({ page }) => {
+  const nightTaskRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    nightTaskRequests,
+    sessions: [session()]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await selectPetContextSession(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("已有会话夜间回归");
+  await page.getByRole("button", { name: "定时执行" }).click();
+  await expect(page.getByTestId("night-schedule-confirm")).toBeEnabled();
+  await page.getByTestId("night-schedule-confirm").click();
+
+  await expect.poll(() => nightTaskRequests.length).toBe(1);
+  expect(nightTaskRequests[0]).toMatchObject({ sessionId: "ses_1", prompt: "已有会话夜间回归" });
+  await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "新建对话" })).toBeEnabled();
+
+  await page.getByRole("button", { name: "新建对话" }).click();
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("其他对话仍可发送");
+  await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "定时执行" })).toBeEnabled();
+});
+
 test("expired conversation context retries once with the same client request id", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const runContextRequests: string[] = [];
@@ -5413,6 +5508,8 @@ async function mockBackendApi(
     initializeFailureThenReady?: boolean;
     ensureDefaultRequiresReady?: boolean;
     sessions?: Array<Record<string, unknown>>;
+    nightTaskRequests?: Array<Record<string, unknown>>;
+    nightTasks?: Array<Record<string, unknown>>;
     sessionRequestGate?: Promise<void>;
     sessionTreeMessages?: Record<string, unknown>;
     sessionTreeMessagesBySessionId?: Record<string, Record<string, unknown>>;
@@ -5898,6 +5995,7 @@ async function mockBackendApi(
   const applications = capture.applications ?? [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }];
   const managedApplications = capture.managedApplications ?? applications;
   const agentResponses = [...(capture.agentResponses ?? [])];
+  const nightTasks = capture.nightTasks ?? [];
   let currentProcessStatus = capture.processStatus ?? "READY";
   let sshKeys: Array<Record<string, unknown>> = [];
   await page.route("**/api/**", async (route) => {
@@ -6266,10 +6364,87 @@ async function mockBackendApi(
       await route.fulfill(json(pageOf(capture.sessions ?? [])));
       return;
     }
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/night-execution/slots") {
+      await route.fulfill(json({
+        timeZone: "Asia/Shanghai",
+        windowStart: "2026-07-18T13:00:00Z",
+        windowEnd: "2026-07-18T23:00:00Z",
+        capacity: 2,
+        slots: [{
+          slotStart: "2026-07-18T13:15:00Z",
+          slotEnd: "2026-07-18T13:30:00Z",
+          reservedCount: 0,
+          capacity: 2,
+          available: true,
+          recommended: true
+        }]
+      }));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/night-execution/tasks") {
+      const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      capture.nightTaskRequests?.push(request);
+      const taskId = `net_e2e_${nightTasks.length + 1}`;
+      const task = {
+        taskId,
+        sessionId: String(request.sessionId ?? "ses_night_created"),
+        workspaceId: String(request.workspaceId ?? "wrk_1234567890abcdef"),
+        sessionTitle: String(request.sessionTitle ?? "夜间任务"),
+        contentPreview: String(request.prompt ?? "夜间任务"),
+        status: "SCHEDULED",
+        slotStart: String(request.slotStart ?? "2026-07-18T13:15:00Z"),
+        slotEnd: "2026-07-18T13:30:00Z",
+        windowEnd: "2026-07-18T23:00:00Z",
+        rolloverCount: 0,
+        runId: null,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: "2026-07-18T04:00:00Z",
+        updatedAt: "2026-07-18T04:00:00Z"
+      };
+      nightTasks.push(task);
+      await route.fulfill(json(task));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/night-execution/tasks") {
+      const sessionId = url.searchParams.get("sessionId");
+      const pending = nightTasks.filter((task) =>
+        (task.status === "SCHEDULED" || task.status === "DISPATCHING")
+        && (!sessionId || task.sessionId === sessionId));
+      const visibleFailure = sessionId
+        ? nightTasks.find((task) => task.sessionId === sessionId && task.status === "FAILED") ?? null
+        : null;
+      const pageNumber = Math.max(Number(url.searchParams.get("page") ?? "1"), 1);
+      const pageSize = Math.max(Number(url.searchParams.get("size") ?? "100"), 1);
+      const start = (pageNumber - 1) * pageSize;
+      await route.fulfill(json({
+        items: pending.slice(start, start + pageSize),
+        page: pageNumber,
+        size: pageSize,
+        total: pending.length,
+        visibleFailure
+      }));
+      return;
+    }
     if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions") {
       capture.sessionRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await capture.sessionRequestGate;
       await route.fulfill(json(session()));
+      return;
+    }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+$/.test(url.pathname)) {
+      const sessionId = decodeURIComponent(url.pathname.match(/\/sessions\/([^/]+)$/)?.[1] ?? "ses_1");
+      const nightTask = nightTasks.find((task) => task.sessionId === sessionId);
+      await route.fulfill(json(nightTask ? {
+        sessionId,
+        workspaceId: nightTask.workspaceId,
+        title: nightTask.sessionTitle,
+        status: "ACTIVE",
+        sourceType: "SCHEDULED_TASK",
+        sourceRefId: nightTask.taskId,
+        createdAt: "2026-07-18T04:00:00Z",
+        updatedAt: "2026-07-18T04:00:00Z"
+      } : (capture.sessions ?? []).find((item) => item.sessionId === sessionId) ?? session()));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/sessions") {

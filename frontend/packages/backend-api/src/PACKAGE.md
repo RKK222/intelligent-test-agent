@@ -11,6 +11,7 @@
 - 引用资产状态的 `repositoryPath?: string | null` 只做兼容透传；缺字段时调用方显示不可用，client 不自行构造服务器路径。
 - 文件 WebSocket client 对 workspace 与 Agent 配置路由键分别维护 single-flight 连接 Promise；socket/error/close/send 只清理自身缓存与 pending，旧连接的迟到回调不得删除新连接，同步 send 失败完成原错误清理后安全关闭底层 socket。读取 RPC 只对内部传输错误重连重试一次，`BackendApiError`、`REQUEST_TIMEOUT` 和所有写操作原样返回。
 - `getMyOpencodeMessageGate()` 是公共配置发布期间的轻量只读门禁查询；它不替代后端 Run 入口校验，也不触发 manager/opencode 健康检查。
+- `getNightExecutionSlots/createNightExecutionTask/listNightExecutionTasks/adjustNightExecutionTask/cancelNightExecutionTask/dismissNightExecutionTask`：夜间时段和任务 HTTP client；完整输入只用于创建请求，任务响应使用 shared-types 的安全投影。
 
 - 工作区重命名 WebSocket RPC 通过 `renameWorkspaceFile(workspaceId, path, name)` 兼容调用文件和目录；`uploadWorkspaceFile`、`copyWorkspaceFile`、`moveWorkspaceFile` 分别承载 Base64 二进制新文件上传和普通文件复制/移动；实际路径、写权限、目标冲突和大小限制由目标后端统一校验。
 

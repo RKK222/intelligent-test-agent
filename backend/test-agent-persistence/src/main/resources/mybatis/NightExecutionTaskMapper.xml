@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.NightExecutionTaskMapper">
+    <!-- PostgreSQL 事务级 advisory lock 串行化同 owner/clientRequestId 的首次创建。 -->
+    <select id="lockCreateRequest" databaseId="postgresql" resultType="int">
+        select 1 from (select pg_advisory_xact_lock(hashtext(#{lockKey}))) locked
+    </select>
+    <select id="lockCreateRequest" resultType="int">select 1</select>
+    <sql id="columns">
+        task_id as taskId, owner_user_id as ownerUserId, session_id as sessionId,
+        workspace_id as workspaceId, client_request_id as clientRequestId, session_title as sessionTitle,
+        content_preview as contentPreview, run_input_json as runInputJson, status,
+        slot_start as slotStart, slot_end as slotEnd, window_end as windowEnd,
+        target_linux_server_id as targetLinuxServerId, scheduled_task_run_id as scheduledTaskRunId,
+        run_id as runId, rollover_count as rolloverCount, task_created_session as taskCreatedSession,
+        dispatch_started_at as dispatchStartedAt, dismissed_at as dismissedAt,
+        reservation_released_at as reservationReleasedAt, error_code as errorCode,
+        error_message as errorMessage, trace_id as traceId, created_at as createdAt, updated_at as updatedAt
+    </sql>
+    <sql id="taskValues">
+        owner_user_id=#{ownerUserId}, session_id=#{sessionId}, workspace_id=#{workspaceId},
+        client_request_id=#{clientRequestId}, session_title=#{sessionTitle}, content_preview=#{contentPreview},
+        run_input_json=#{runInputJson}, status=#{status}, slot_start=#{slotStart}, slot_end=#{slotEnd},
+        window_end=#{windowEnd}, target_linux_server_id=#{targetLinuxServerId},
+        scheduled_task_run_id=#{scheduledTaskRunId}, run_id=#{runId}, rollover_count=#{rolloverCount},
+        task_created_session=#{taskCreatedSession}, dispatch_started_at=#{dispatchStartedAt},
+        dismissed_at=#{dismissedAt}, reservation_released_at=#{reservationReleasedAt},
+        error_code=#{errorCode}, error_message=#{errorMessage}, trace_id=#{traceId},
+        created_at=#{createdAt}, updated_at=#{updatedAt}
+    </sql>
+
+    <update id="updateTask" parameterType="map">
+        update night_execution_tasks set <include refid="taskValues"/> where task_id=#{taskId}
+    </update>
+    <update id="updateTaskIfStatus" parameterType="map">
+        update night_execution_tasks set <include refid="taskValues"/>
+        where task_id=#{taskId} and status=#{expectedStatus}
+    </update>
+    <update id="claimTaskForScheduledRun" parameterType="map">
+        update night_execution_tasks set <include refid="taskValues"/>
+        where task_id=#{taskId} and status='SCHEDULED'
+        and scheduled_task_run_id=#{expectedScheduledTaskRunId}
+    </update>
+    <insert id="insertTask" parameterType="map">
+        insert into night_execution_tasks(
+        task_id, owner_user_id, session_id, workspace_id, client_request_id, session_title, content_preview,
+        run_input_json, status, slot_start, slot_end, window_end, target_linux_server_id,
+        scheduled_task_run_id, run_id, rollover_count, task_created_session, dispatch_started_at,
+        dismissed_at, reservation_released_at, error_code, error_message, trace_id, created_at, updated_at)
+        values(#{taskId},#{ownerUserId},#{sessionId},#{workspaceId},#{clientRequestId},#{sessionTitle},
+        #{contentPreview},#{runInputJson},#{status},#{slotStart},#{slotEnd},#{windowEnd},
+        #{targetLinuxServerId},#{scheduledTaskRunId},#{runId},#{rolloverCount},#{taskCreatedSession},
+        #{dispatchStartedAt},#{dismissedAt},#{reservationReleasedAt},#{errorCode},#{errorMessage},
+        #{traceId},#{createdAt},#{updatedAt})
+    </insert>
+    <select id="findById" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks where task_id=#{taskId}
+    </select>
+    <select id="findByScheduledTaskRunId" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where scheduled_task_run_id=#{scheduledTaskRunId}
+    </select>
+    <select id="findByOwnerAndClientRequestId" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where owner_user_id=#{ownerUserId} and client_request_id=#{clientRequestId}
+    </select>
+    <select id="findPendingBySession" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where session_id=#{sessionId} and status in ('SCHEDULED','DISPATCHING')
+        order by created_at desc limit 1
+    </select>
+    <select id="findVisibleFailureBySession" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where owner_user_id=#{ownerUserId} and session_id=#{sessionId} and status='FAILED' and dismissed_at is null
+        order by updated_at desc limit 1
+    </select>
+    <select id="findPendingByOwner" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where owner_user_id=#{ownerUserId} and status in ('SCHEDULED','DISPATCHING')
+        order by slot_start, created_at, task_id limit #{limit} offset #{offset}
+    </select>
+    <select id="countPendingByOwner" resultType="long">
+        select count(*) from night_execution_tasks
+        where owner_user_id=#{ownerUserId} and status in ('SCHEDULED','DISPATCHING')
+    </select>
+    <select id="findScheduledDueBefore" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where status='SCHEDULED' and slot_start &lt;= #{cutoff} and updated_at &lt;= #{cutoff}
+        order by slot_start, created_at limit #{limit}
+    </select>
+    <select id="findDispatchingBefore" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where status='DISPATCHING' and dispatch_started_at &lt;= #{cutoff}
+        order by dispatch_started_at limit #{limit}
+    </select>
+    <select id="findTerminalBefore" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where status in ('DISPATCHED','CANCELLED','FAILED') and updated_at &lt;= #{cutoff}
+        order by updated_at limit #{limit}
+    </select>
+
+    <select id="reservationCounts" resultType="map">
+        select slot_start as slotStart, reserved_count as reservedCount
+        from night_execution_slot_reservations
+        where slot_start &gt;= #{windowStart} and slot_start &lt; #{windowEnd}
+        order by slot_start
+    </select>
+    <insert id="insertReservation" databaseId="postgresql">
+        insert into night_execution_slot_reservations(slot_start,reserved_count,updated_at)
+        values(#{slotStart},0,#{now})
+        on conflict (slot_start) do nothing
+    </insert>
+    <insert id="insertReservation">
+        insert into night_execution_slot_reservations(slot_start,reserved_count,updated_at)
+        select #{slotStart},0,#{now}
+        where not exists (
+        select 1 from night_execution_slot_reservations where slot_start=#{slotStart}
+        )
+    </insert>
+    <update id="reserveSlot">
+        update night_execution_slot_reservations
+        set reserved_count=reserved_count+1, updated_at=#{now}
+        where slot_start=#{slotStart} and reserved_count &lt; #{capacity}
+    </update>
+    <update id="releaseSlot">
+        update night_execution_slot_reservations
+        set reserved_count=case when reserved_count &gt; 0 then reserved_count-1 else 0 end, updated_at=#{now}
+        where slot_start=#{slotStart}
+    </update>
+    <delete id="deleteReservationsBefore">
+        delete from night_execution_slot_reservations where slot_start &lt; #{cutoff}
+    </delete>
+
+    <insert id="insertSessionLock" databaseId="postgresql">
+        insert into night_execution_session_locks(session_id,task_id,owner_user_id,created_at)
+        values(#{sessionId},#{taskId},#{ownerUserId},#{now})
+        on conflict do nothing
+    </insert>
+    <insert id="insertSessionLock">
+        insert into night_execution_session_locks(session_id,task_id,owner_user_id,created_at)
+        select #{sessionId},#{taskId},#{ownerUserId},#{now}
+        where not exists (
+        select 1 from night_execution_session_locks where session_id=#{sessionId} or task_id=#{taskId}
+        )
+    </insert>
+    <delete id="deleteSessionLock">
+        delete from night_execution_session_locks where session_id=#{sessionId} and task_id=#{taskId}
+    </delete>
+    <select id="countSessionLocks" resultType="long">
+        select count(*) from night_execution_session_locks where session_id=#{sessionId}
+    </select>
+    <delete id="deleteTask">delete from night_execution_tasks where task_id=#{taskId}</delete>
+</mapper>

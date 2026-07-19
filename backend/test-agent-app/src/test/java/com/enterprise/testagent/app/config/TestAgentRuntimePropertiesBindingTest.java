@@ -30,22 +30,40 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
-    void defaultDruidConfigValidatesBorrowedConnections() {
+    void defaultDruidConfigUsesIdleValidationAndKeepAlive() {
         profileContextRunner.run(context -> {
             assertThat(context.getEnvironment().getProperty("spring.datasource.druid.validation-query"))
                     .isEqualTo("SELECT 1");
             assertThat(context.getEnvironment().getProperty("spring.datasource.druid.test-on-borrow", Boolean.class))
-                    .isTrue();
+                    .isFalse();
             assertThat(context.getEnvironment().getProperty("spring.datasource.druid.test-while-idle", Boolean.class))
+                    .isTrue();
+            assertThat(context.getEnvironment().getProperty("spring.datasource.druid.keep-alive", Boolean.class))
                     .isTrue();
         });
     }
 
     @Test
-    void defaultSchedulerScanningIsDisabled() {
+    void defaultSchedulerScanningIsEnabled() {
         profileContextRunner
                 .withBean(SchedulerProperties.class)
-                .run(context -> assertThat(context.getBean(SchedulerProperties.class).isEnabled()).isFalse());
+                .run(context -> assertThat(context.getBean(SchedulerProperties.class).isEnabled()).isTrue());
+    }
+
+    @Test
+    void bindsSchedulerUserPlanConcurrencyLimits() {
+        contextRunner
+                .withBean(SchedulerProperties.class)
+                .withPropertyValues(
+                        "test-agent.scheduler.user-plan-run-limit=17",
+                        "test-agent.scheduler.user-plan-worker-count=3",
+                        "test-agent.scheduler.user-plan-queue-capacity=41")
+                .run(context -> {
+                    SchedulerProperties properties = context.getBean(SchedulerProperties.class);
+                    assertThat(properties.getUserPlanRunLimit()).isEqualTo(17);
+                    assertThat(properties.getUserPlanWorkerCount()).isEqualTo(3);
+                    assertThat(properties.getUserPlanQueueCapacity()).isEqualTo(41);
+                });
     }
 
     @Test

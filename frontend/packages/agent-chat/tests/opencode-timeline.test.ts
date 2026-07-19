@@ -9,6 +9,22 @@ import AssistantThread from "../src/AssistantThread.vue";
 const waitMarkdown = () => new Promise((resolve) => setTimeout(resolve, 400));
 
 describe("OpencodeTimeline", () => {
+  it("marks a user turn that originated from a scheduled night task", () => {
+    const scheduled = {
+      ...userMessage("msg_night_1", "执行夜间回归"),
+      sourceType: "SCHEDULED_TASK",
+      sourceRefId: "night_1"
+    };
+    const state = createOpencodeLikeState({ messages: [scheduled], running: false });
+
+    const { container } = render(OpencodeTimeline, { props: { state } });
+
+    const badge = container.querySelector(".oc-user-message__source-badge");
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toContain("夜间定时执行");
+    expect(badge?.textContent).toContain("08:00");
+  });
+
   it("does not render a synthetic assistant row before the first real event", () => {
     const state = createOpencodeLikeState({
       messages: [],

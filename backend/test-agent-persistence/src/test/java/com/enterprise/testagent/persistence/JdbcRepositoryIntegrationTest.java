@@ -78,6 +78,9 @@ import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunFilter;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunStatus;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskTriggerType;
+import com.enterprise.testagent.domain.scheduler.ScheduledTaskRepository;
+import com.enterprise.testagent.persistence.mybatis.MyBatisScheduledTaskRepository;
+import com.enterprise.testagent.persistence.mybatis.ScheduledTaskMapper;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
@@ -107,6 +110,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
+import org.mybatis.spring.SqlSessionFactoryBean;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -134,12 +140,12 @@ class JdbcRepositoryIntegrationTest {
     private JdbcAgentConfigRepository agentConfigs;
     private JdbcManagedWorkspaceRepository managedWorkspaces;
     private JdbcOpencodeProcessManagementRepository opencodeProcesses;
-    private JdbcScheduledTaskRepository scheduledTasks;
+    private ScheduledTaskRepository scheduledTasks;
     private JdbcUserRepository users;
     private JdbcClient jdbcClient;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         database = new EmbeddedDatabaseBuilder()
                 .setType(EmbeddedDatabaseType.H2)
                 .setName("testagent;MODE=PostgreSQL;DATABASE_TO_UPPER=false")
@@ -162,7 +168,13 @@ class JdbcRepositoryIntegrationTest {
         agentConfigs = new JdbcAgentConfigRepository(jdbcClient);
         managedWorkspaces = new JdbcManagedWorkspaceRepository(jdbcClient, objectMapper);
         opencodeProcesses = new JdbcOpencodeProcessManagementRepository(jdbcClient, objectMapper);
-        scheduledTasks = new JdbcScheduledTaskRepository(jdbcClient, objectMapper);
+        SqlSessionFactoryBean schedulerFactory = new SqlSessionFactoryBean();
+        schedulerFactory.setDataSource(database);
+        schedulerFactory.setMapperLocations(new PathMatchingResourcePatternResolver()
+                .getResources("classpath*:mybatis/**/*.xml"));
+        ScheduledTaskMapper scheduledTaskMapper = new SqlSessionTemplate(schedulerFactory.getObject())
+                .getMapper(ScheduledTaskMapper.class);
+        scheduledTasks = new MyBatisScheduledTaskRepository(scheduledTaskMapper, objectMapper);
         users = new JdbcUserRepository(jdbcClient);
     }
 

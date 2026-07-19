@@ -73,6 +73,25 @@ class SchedulerManagementServiceTest {
     }
 
     @Test
+    void userPlanOnlyTaskRejectsAdminCronUpdateAndManualTrigger() {
+        InMemoryScheduledTaskRepository repository = new InMemoryScheduledTaskRepository();
+        ScheduledTaskKey key = new ScheduledTaskKey("opencode-runtime.night-execution");
+        repository.saveTask(ScheduledTask.registered(
+                key, "夜间异步执行", null, Duration.ofMinutes(20), NOW, "trace_scheduler_test"));
+        SchedulerManagementService service = service(repository, new RecordingDispatcher());
+
+        assertThatThrownBy(() -> service.updateTask(
+                        key, new ScheduledTaskUpdateCommand(null, "0 0 21 * * *", null),
+                        "trace_scheduler_test"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("USER_PLAN");
+        assertThatThrownBy(() -> service.trigger(
+                        key, new UserId("usr_admin_1234567890"), "trace_scheduler_test"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("USER_PLAN");
+    }
+
+    @Test
     void triggerRejectsWhenSchedulerDisabledToAvoidPermanentPendingRun() {
         InMemoryScheduledTaskRepository repository = repositoryWithTask();
         RecordingDispatcher dispatcher = new RecordingDispatcher();

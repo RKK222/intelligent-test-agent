@@ -6,6 +6,7 @@ import com.enterprise.testagent.domain.scheduler.ScheduledTask;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRegistrationStatus;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRepository;
+import com.enterprise.testagent.domain.scheduler.ScheduledTaskTriggerType;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -49,25 +50,34 @@ public class ScheduledTaskRegistry {
             ScheduledTaskKey taskKey = handler.taskKey();
             Optional<ScheduledTask> existing = repository.findTaskByKey(taskKey);
             if (existing.isEmpty()) {
+                boolean cronSupported = handler.supportedTriggerTypes().contains(ScheduledTaskTriggerType.CRON);
+                String cronExpression = cronSupported ? handler.cronExpression() : null;
                 ScheduledTask task = ScheduledTask.registered(
                                 taskKey,
                                 handler.name(),
-                                handler.cronExpression(),
+                                cronExpression,
                                 handler.lockTtl(),
                                 now,
-                                traceId)
-                        .withNextFireAt(cronScheduleCalculator.nextFireAt(handler.cronExpression(), now), now);
+                                traceId);
+                if (cronSupported) {
+                    task = task.withNextFireAt(cronScheduleCalculator.nextFireAt(cronExpression, now), now);
+                }
                 repository.saveTask(task);
                 continue;
             }
             ScheduledTask current = existing.get();
-            Instant nextFireAt = current.nextFireAt() == null
-                    ? cronScheduleCalculator.nextFireAt(current.cronExpression(), now)
-                    : current.nextFireAt();
+            boolean cronSupported = handler.supportedTriggerTypes().contains(ScheduledTaskTriggerType.CRON);
+            // 触发能力发生迁移时必须同步清理或恢复 Cron，避免 USER_PLAN-only 任务暴露管理员触发入口。
+            String cronExpression = cronSupported
+                    ? Objects.requireNonNullElse(current.cronExpression(), handler.cronExpression())
+                    : null;
+            Instant nextFireAt = cronSupported && current.nextFireAt() == null
+                    ? cronScheduleCalculator.nextFireAt(cronExpression, now)
+                    : cronSupported ? current.nextFireAt() : null;
             repository.saveTask(new ScheduledTask(
                     current.taskKey(),
                     handler.name(),
-                    current.cronExpression(),
+                    cronExpression,
                     current.enabled(),
                     current.lockTtl(),
                     nextFireAt,
@@ -83,6 +93,11 @@ public class ScheduledTaskRegistry {
      */
     public Optional<ScheduledTaskHandler> handlerFor(ScheduledTaskKey taskKey) {
         return Optional.ofNullable(handlers.get(taskKey));
+    }
+
+    /** 校验注册 handler 是否接受指定触发类型。 */
+    public boolean supports(ScheduledTaskKey taskKey, ScheduledTaskTriggerType triggerType) {
+        return handlerFor(taskKey).map(handler -> handler.supportedTriggerTypes().contains(triggerType)).orElse(false);
     }
 
     private Map<ScheduledTaskKey, ScheduledTaskHandler> indexHandlers(List<ScheduledTaskHandler> handlers) {

@@ -2,6 +2,8 @@ package com.enterprise.testagent.scheduler;
 
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
 import java.time.Duration;
+import java.util.Set;
+import com.enterprise.testagent.domain.scheduler.ScheduledTaskTriggerType;
 
 /**
  * 定时任务处理器契约。业务模块只需要提供 Bean，本框架统一负责注册、互斥、调度和运行记录。
@@ -22,6 +24,11 @@ public interface ScheduledTaskHandler {
      * 返回代码默认 Cron 表达式；管理员覆盖后数据库值优先生效。
      */
     String cronExpression();
+
+    /** 声明 handler 接受的触发类型；既有任务默认保持 Cron 和手工触发。 */
+    default Set<ScheduledTaskTriggerType> supportedTriggerTypes() {
+        return Set.of(ScheduledTaskTriggerType.CRON, ScheduledTaskTriggerType.MANUAL);
+    }
 
     /**
      * 返回代码默认锁租约时长；管理员覆盖后数据库值优先生效。

@@ -12,7 +12,7 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、Run、ConversationRunContext、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
+- Workspace、Session、AgentSessionBinding、Run、ConversationRunContext、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、夜间执行任务、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 
@@ -35,9 +35,10 @@
 - Configuration：`ApplicationDefinition`、`ApplicationMember`、`CodeRepository`（含可空 `englishName`）、`ApplicationRepositoryLink`、`ApplicationWorkspace`、`UserSshKey`、`CommonParameter`、`CommonParameterReferenceResolver`、`WorkspaceCreateOperation`，与运行态 Workspace/Session/Run 解耦；通用参数支持 `${englishName}` 互相引用，`${NAME}` 未命中通用参数时回退进程环境变量，`$NAME` 直接读取环境变量，并在路径开头支持 `$HOME` / `~/` 展开为用户主目录。
 - ManagedWorkspace：`ApplicationWorkspaceVersion`、`ApplicationWorkspaceVersionReplica`、`PersonalWorkspace`、`UserWorkspacePreference`、`WorkspaceSyncRecord`，把应用工作空间模板落为运行态 Workspace，记录每服务器副本 commit/status、个人 worktree 与同步审计。
 - Broadcast：`ServerBroadcastEvent`、`ServerBroadcastPublisher`、`ServerBroadcastHandler`，定义后端实例之间广播事件的领域端口，不绑定 Redis 或其他传输。
-- Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象，以及运行记录保留清理端口；用户级计划仅作为后续定时会话能力预留。
+- Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象，以及运行记录保留清理端口；`USER_PLAN` 运行记录携带可空服务器执行亲和并通过状态 CAS 认领。
+- NightExecution：`NightExecutionTask`、`NightExecutionTaskStatus`、`NightExecutionTaskRepository` 表达任务状态机、完整输入短期持有、会话锁和 15 分钟时段容量端口；`SCHEDULED/DISPATCHING` 为待执行，成功投递、取消或最终失败后清除完整输入。
 - Analytics：`AiRunFeedback` 是新反馈事实，按 `(userId, runId)` 定位整轮回复；`AiMessageFeedback` 仅保留旧消息兼容。反馈评分/原因枚举、`AnalyticsModels` 和 `AnalyticsRepository` 不暴露 prompt/assistant 原文或 cost 字段。
-- Repository 端口：Workspace、Session、SessionTitleUpdate、AgentSessionBinding、SessionMessage、Run、RunEvent、RunSessionScope、ExecutionNode、RoutingDecision、OpencodeProcessManagement、ConfigurationManagement、CommonParameter、WorkspaceCreateOperation、ManagedWorkspace、ScheduledTask、ScheduledTaskRunRetention、AiMessageFeedback、Analytics 持久化端口。`SessionTitleUpdateRepository` 仅在当前标题与预期临时标题一致时更新，用于避免异步标题覆盖原生或人工标题；RunRepository 的条件保存端口要求成功时返回本次快照，条件不匹配时返回数据库当前 Run。
+- Repository 端口：Workspace、Session、SessionTitleUpdate、AgentSessionBinding、SessionMessage、Run、RunEvent、RunSessionScope、ExecutionNode、RoutingDecision、OpencodeProcessManagement、ConfigurationManagement、CommonParameter、WorkspaceCreateOperation、ManagedWorkspace、ScheduledTask、ScheduledTaskRunRetention、NightExecutionTask、AiMessageFeedback、Analytics 持久化端口。`SessionTitleUpdateRepository` 仅在当前标题与预期临时标题一致时更新，用于避免异步标题覆盖原生或人工标题；RunRepository 的条件保存端口要求成功时返回本次快照，条件不匹配时返回数据库当前 Run。
 - `RunRepository.findStaleActiveSideQuestionRuns` 只查询有上限的 stale active `SIDE_QUESTION` Run，供旁路临时会话孤儿回收，不影响普通 stale Run 收敛查询。
 
 ## Run 状态机

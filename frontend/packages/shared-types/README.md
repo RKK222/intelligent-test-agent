@@ -6,7 +6,8 @@
 
 ## 主要职责
 
-- 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Workspace 可选携带 `linuxServerId`，用于前端文件 WebSocket 同服务器路由。`Session.workspaceContext` 可选携带历史会话所属 `appId/appName/applicationWorkspaceId/workspaceName/versionId/version`，旧后端或单会话详情缺失时前端必须兼容 `null/undefined`。
+- 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Session、SessionMessage、Run 和 AgentMessage 可选携带 `sourceType/sourceRefId`，用于兼容并展示 `SCHEDULED_TASK` 来源。Workspace 可选携带 `linuxServerId`，用于前端文件 WebSocket 同服务器路由。`Session.workspaceContext` 可选携带历史会话所属 `appId/appName/applicationWorkspaceId/workspaceName/versionId/version`，旧后端或单会话详情缺失时前端必须兼容 `null/undefined`。
+- 定义 `NightExecutionSlotsResponse`、`NightExecutionTask`、`NightExecutionTaskQueryResponse`，表达北京时间夜间窗口、15 分钟容量时段、待执行任务和当前会话可见失败卡；任务响应不包含完整 prompt/parts。
 - 定义兼容同步 `SideQuestionRequest/Response`、主会话流式 `SideQuestionRunRequest/Response` 和无主对话 `ManualQuestionRunRequest`；旁路 Run 的问题和回答不进入普通主会话时间线。配置管理类型包含超级管理员新建应用的 `CreateApplicationPayload`。
 - `SessionMessage` 保留旧 `content` 字段，并可选承载 `runId`、`remoteMessageId`、`parts`、`tokens`、`costUsd`、`updatedAt` 及 `contentKind/summaryStatus/summaryVersion`，用于区分旧原文与新模式终态摘要；旧响应缺失这些字段时前端继续按纯文本展示。
 - `AgentMessage` 可选携带 `runId` 以绑定整轮状态与反馈；`platformMessageId`/`remoteMessageId` 继续分别用于平台摘要和运行期消息归并，不再作为新反馈业务键。

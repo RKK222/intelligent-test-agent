@@ -103,7 +103,13 @@ test-agent:
     scan-interval: ${TEST_AGENT_SCHEDULER_SCAN_INTERVAL:30s}
     due-task-limit: ${TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT:50}
     manual-run-limit: ${TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT:50}
+    user-plan-run-limit: ${TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT:50}
+    user-plan-worker-count: ${TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT:4}
+    user-plan-queue-capacity: ${TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY:100}
     instance-id: ${TEST_AGENT_SCHEDULER_INSTANCE_ID:backend-${random.uuid}}
+  night-execution:
+    # 故意不提供任意默认容量；环境未配置时仅关闭夜间任务 API，不影响应用启动。
+    slot-capacity: ${TEST_AGENT_NIGHT_EXECUTION_SLOT_CAPACITY:}
   server-broadcast:
     enabled: ${TEST_AGENT_SERVER_BROADCAST_ENABLED:false}
     channel: ${TEST_AGENT_SERVER_BROADCAST_CHANNEL:test-agent:server-broadcast}

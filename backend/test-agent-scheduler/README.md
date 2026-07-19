@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-分布式定时任务框架模块，负责通用任务注册、Cron 计算、Redis 分布式锁、后台扫描执行、统一运行记录和管理服务。本模块包含框架自身的运行记录保留维护任务；其它具体业务任务在所属业务模块实现 `ScheduledTaskHandler` Bean，例如 opencode runtime 的 stale active Run 收敛和运营分析汇总任务。
+分布式定时任务框架模块，负责通用任务注册、Cron 计算、Redis 分布式锁、后台扫描执行、按服务器亲和执行用户计划、统一运行记录和管理服务。本模块包含框架自身的运行记录保留维护任务；其它具体业务任务在所属业务模块实现 `ScheduledTaskHandler` Bean，例如 opencode runtime 的夜间执行、stale active Run 收敛和运营分析汇总任务。
 
 ## 技术栈
 
@@ -17,7 +17,8 @@
 - 启动时扫描 `ScheduledTaskHandler` Bean，并把代码注册任务同步到 `scheduled_tasks`；`test-agent.scheduler.enabled=false` 时仍同步任务定义，便于管理页展示。
 - 使用 Spring `CronExpression` 计算 `nextFireAt`；漏扫只补执行一次，不回放所有错过的 cron 次数。
 - 使用 Redis `SET NX PX` 获取锁，Lua 脚本按 token 续租和释放锁，锁 key 为 `test-agent:scheduler:lock:{taskKey}`。
-- 启用 scheduler 后，后台线程扫描 due task 和管理员手动触发 pending run，统一写入 `scheduled_task_runs`。
+- 启用 scheduler 后，后台线程扫描 due task、管理员手动触发 pending run，以及 `executionAffinity` 命中当前服务器的 `USER_PLAN`；用户计划由有界线程池并发执行，运行记录以 `PENDING -> RUNNING` 条件更新认领，取消与执行不会互相覆盖。
+- `ScheduledUserPlanService` 为业务模块提供一次性用户计划创建/取消能力；`ScheduledTaskExecutionAffinityProvider` 由运行模块提供当前服务器亲和标识。`USER_PLAN` 专用 handler 可以不配置 Cron，也不能被管理 API 调整 Cron、手工触发或停止。
 - 提供 `SchedulerManagementService` 给 API 模块实现超级管理员管理入口，支持查看任务/运行记录、调整 Cron、手动触发和协作式停止 `RUNNING` 运行记录。
 - 提供只读诊断能力，展示当前进程 scheduler 生效配置、扫描线程状态、任务 active/pending 运行和 Redis 锁 TTL，用于判断任务为何无法执行。
 - `ScheduledTaskContext` 提供 `stopRequested()` 和 `throwIfStopRequested()`；未来具体业务任务在长循环或外部调用间隙必须主动检查停止请求，退出后由 runner 记录 `MANUALLY_STOPPED`。
@@ -56,21 +57,25 @@
 - `test-agent.scheduler.scan-interval` / `TEST_AGENT_SCHEDULER_SCAN_INTERVAL`：扫描间隔，默认 `30s`。
 - `test-agent.scheduler.due-task-limit` / `TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT`：单轮扫描 due task 上限，默认 `50`。
 - `test-agent.scheduler.manual-run-limit` / `TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT`：单轮扫描手动 pending run 上限，默认 `50`。
+- `test-agent.scheduler.user-plan-run-limit` / `TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT`：当前服务器单轮认领用户计划上限，默认 `50`。
+- `test-agent.scheduler.user-plan-worker-count` / `TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT`：用户计划执行线程数，默认 `4`。
+- `test-agent.scheduler.user-plan-queue-capacity` / `TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY`：用户计划执行队列容量，默认 `100`；队列满时记录保留 `PENDING`，等待后续扫描。
 
 启用 scheduler 时必须装配 `StringRedisTemplate`。Redis 不可用时不降级为本机锁。
 
 ## 业务任务接入约定
 
 - 业务模块可以依赖 `test-agent-scheduler` 并提供 `ScheduledTaskHandler` Bean，由本模块统一完成任务注册、Redis 锁、运行记录、cron 调整、手动触发和停止信号传递。
+- 一次性用户计划必须通过 `ScheduledUserPlanService` 创建，并提供稳定 `executionAffinity`；业务模块不得自行轮询 `scheduled_task_runs`。handler 必须显式声明支持 `USER_PLAN`，专用 handler 不得伪造 Cron。
 - 长循环业务任务必须读取 `ScheduledTaskContext.stopRequested()` 或调用 `throwIfStopRequested()`，不要自行实现分布式锁或运行记录。
 - 业务模块自己的扫描阈值、Redis key、数据库查询和事件副作用必须在业务模块 README 与测试中说明；本模块不保存这些业务语义。
-- 当前代码注册示例包括 `scheduler.run-retention-cleanup`、`opencode-runtime.stale-active-run-reconcile` 和 `opencode-runtime.analytics-rollup`；清理任务默认每天 UTC 00:00 执行，运营分析汇总默认每 5 分钟执行，并在主要数据库阶段间检查停止信号。运营分析的业务数据库锁仅用于滚动部署期间兼容仍在运行的旧 `@Scheduled` 实例，不是 scheduler 框架的锁降级实现。
+- 当前代码注册示例包括 USER_PLAN 专用 `opencode-runtime.night-execution`，以及 Cron 任务 `opencode-runtime.night-execution-reconcile`、`scheduler.run-retention-cleanup`、`opencode-runtime.stale-active-run-reconcile` 和 `opencode-runtime.analytics-rollup`；清理任务默认每天 UTC 00:00 执行，夜间任务补偿和运营分析汇总默认每 5 分钟执行。运营分析的业务数据库锁仅用于滚动部署期间兼容仍在运行的旧 `@Scheduled` 实例，不是 scheduler 框架的锁降级实现。
 
 ## 测试覆盖
 
 - `CronScheduleCalculatorTest` 覆盖 Cron 下次触发和非法 Cron 统一错误。
 - `ScheduledTaskRegistryTest` 覆盖任务注册同步、nextFireAt 计算和管理员覆盖值保留。
-- `ScheduledTaskRunnerTest` 覆盖 Cron 成功执行、重叠触发 `SKIPPED`、Redis 锁失败、handler 异常 `FAILED`、手动 pending run 执行和停止请求最终记录 `MANUALLY_STOPPED`。
+- `ScheduledTaskRunnerTest` 覆盖 Cron 成功执行、重叠触发 `SKIPPED`、Redis 锁失败、handler 异常 `FAILED`、手动 pending run、按亲和并发认领 `USER_PLAN`、取消/认领 CAS 竞态和停止请求最终记录 `MANUALLY_STOPPED`；`ScheduledUserPlanServiceTest` 覆盖创建、取消与 scheduler 关闭边界。
 - `ScheduledTaskRunRetentionTaskHandlerTest` 覆盖七天截止时间、删除结果和每日 Cron/锁 TTL 元数据。
 - `RedisScheduledTaskLockTest` 覆盖 Redis `SET NX` 获取锁、token Lua 续租/释放和锁 TTL 只读检查。
 - `SchedulerManagementServiceTest` 覆盖管理端 patch、非法 Cron、scheduler 关闭时拒绝手动触发、手动触发 active 冲突、只允许停止 `RUNNING` 和诊断阻塞原因。

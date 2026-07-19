@@ -46,6 +46,7 @@
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
 - 企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖；PostgreSQL JDBC 驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
 - `application.yml`：`test-agent.scheduler.enabled` 默认 `true`，可通过 `TEST_AGENT_SCHEDULER_ENABLED=false` 显式关闭；环境变量为空时同样按关闭处理。
+- `application.yml`：USER_PLAN 默认单轮 50 条、4 个 worker、100 个等待位；分别由 `TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT`、`TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT`、`TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY` 覆盖。夜间执行每个 15 分钟时段容量必须显式设置 `TEST_AGENT_NIGHT_EXECUTION_SLOT_CAPACITY`；缺失或非正整数时仅夜间任务 API fail-closed 为 `NIGHT_EXECUTION_UNAVAILABLE`，应用仍可启动。
 - 运营分析汇总不再使用 `test-agent.analytics.rollup.*` 专用配置；代码任务 `opencode-runtime.analytics-rollup` 会在启动时注册，启停和 Cron 覆盖统一由定时任务管理配置控制。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
 - 用户进程运行管理和 manager 控制面在线状态强依赖 Redis；多服务器应用版本工作区副本实时同步也需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。
@@ -56,7 +57,7 @@
 
 - `AppModuleBoundaryTest` 保证 app 模块不回流 workspace、session、run、runtime、terminal、web 等业务包。
 - `ConversationMemberRevocationIntegrationTest` 跨 configuration/workspace/runtime 验证成员移除会使旧 token 失效，并让同一托管 Workspace 的后续上下文签发返回 `FORBIDDEN`。
-- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、终端安全阈值、Spring Redis 配置入口、scheduler 配置绑定、废弃 opencode 固定节点配置缺失、废弃普通工作区目录选择配置缺失、manager 控制面 5 秒心跳和 10 秒 TTL。
+- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、终端安全阈值、Spring Redis 配置入口、scheduler 与 USER_PLAN 配置绑定、废弃 opencode 固定节点配置缺失、废弃普通工作区目录选择配置缺失、manager 控制面 5 秒心跳和 10 秒 TTL。
 - `ServerIdentityFilePathResolverTest` / `ServerIdentityFileWriterTest` 覆盖 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 派生、参数缺失失败、父目录创建、旧内容覆盖和单行身份/地址写入。
 - `OpencodeManagerControlConfigTest` 覆盖稳定服务器身份按环境变量优先、主机名兜底，advertised host 按环境变量优先、探测 IPv4 兜底，以及后端直连地址由 advertised host 和 `server.port` 自动派生。
 - `RedisHealthIndicatorTest` 覆盖 Redis 必需依赖的 TCP 健康检查。

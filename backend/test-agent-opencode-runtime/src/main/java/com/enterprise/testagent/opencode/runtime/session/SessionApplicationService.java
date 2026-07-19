@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService;
+import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -46,6 +47,7 @@ public class SessionApplicationService {
     private final RunSessionMessageSnapshotService snapshotService;
     private final RunSessionTitleWatchService titleWatchService;
     private final ConversationContextStore conversationContextStore;
+    private NightExecutionSessionLockGuard nightExecutionLockGuard;
 
     /**
      * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
@@ -263,6 +265,7 @@ public class SessionApplicationService {
      * 归档 Session，并在持久化前建立会话撤销 gate，阻止并发 bootstrap 把旧快照迟到写回。
      */
     public Session archiveSession(UserId userId, SessionId sessionId, String traceId) {
+        requireNightExecutionUnlocked(sessionId);
         Session current = getSession(sessionId);
         ConversationContextSessionRevocation revocation = conversationContextStore == null
                 ? null
@@ -299,6 +302,7 @@ public class SessionApplicationService {
      * 追加当前用户发送的 Session 消息，并记录 senderUserId 供用户活跃统计使用。
      */
     public SessionMessage appendMessage(UserId userId, SessionId sessionId, SessionMessageRole role, String content, String traceId) {
+        requireNightExecutionUnlocked(sessionId);
         getSession(sessionId);
         SessionMessageRole resolvedRole = role == null ? SessionMessageRole.USER : role;
         SessionMessage draft = new SessionMessage(
@@ -311,6 +315,18 @@ public class SessionApplicationService {
         return sessionMessageRepository.save(userId == null
                 ? draft
                 : draft.withSource(ConversationSourceType.MANUAL, null, userId));
+    }
+
+    /** 可选 setter 保持大量既有手工构造测试兼容；生产 Spring 装配始终注入数据库锁门禁。 */
+    @Autowired(required = false)
+    void setNightExecutionLockGuard(NightExecutionSessionLockGuard nightExecutionLockGuard) {
+        this.nightExecutionLockGuard = nightExecutionLockGuard;
+    }
+
+    private void requireNightExecutionUnlocked(SessionId sessionId) {
+        if (nightExecutionLockGuard != null) {
+            nightExecutionLockGuard.requireUnlocked(sessionId);
+        }
     }
 
     /**

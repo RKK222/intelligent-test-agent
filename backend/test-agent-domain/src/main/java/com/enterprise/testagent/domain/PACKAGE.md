@@ -2,7 +2,7 @@
 
 ## 职责
 
-纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置、通用参数、工作空间创建进度、定时任务框架等核心业务概念和状态规则。
+纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、夜间执行任务、应用配置、通用参数、工作空间创建进度、定时任务框架等核心业务概念和状态规则。
 
 ## 不负责
 
@@ -27,7 +27,8 @@
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
 - `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
 - `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数和设置页工作空间创建进度；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
-- `scheduler.*`：定时任务定义、用户级 Cron 计划、运行记录、触发来源和状态枚举；`ScheduledTaskRepository`、`ScheduledTaskRunRetentionRepository` 作为持久化端口。
+- `scheduler.*`：定时任务定义、用户级计划、带服务器执行亲和的运行记录、触发来源和状态枚举；`ScheduledTaskRepository`、`ScheduledTaskRunRetentionRepository` 作为持久化端口。
+- `nightexecution.*`：夜间任务聚合、状态和值对象；完整 Run 输入仅在待执行期短期保存，仓储端口统一暴露任务状态 CAS、会话写锁和 15 分钟时段容量。
 - 后续可新增领域命令、领域服务接口和更多状态规则。
 
 ## 允许依赖

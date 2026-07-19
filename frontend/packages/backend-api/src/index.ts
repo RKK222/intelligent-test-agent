@@ -60,6 +60,9 @@ import type {
   ManagedApplication,
   ManagedWorkspaceRuntime,
   ModelInfo,
+  NightExecutionSlots,
+  NightExecutionTask,
+  NightExecutionTaskQueryResponse,
   OpencodeRuntimeManagementOverview,
   OpencodeRuntimeManagementOverviewParams,
   OpencodeRuntimeMetricHistoryParams,
@@ -231,6 +234,16 @@ export type StartRunPayload = {
   arguments?: string;
   contextToken?: string;
   clientRequestId?: string;
+};
+
+export type CreateNightExecutionTaskPayload = Omit<StartRunPayload, "sessionId" | "contextToken"> & {
+  /** 夜间任务本身的幂等键，与 Run 幂等键分离。 */
+  clientRequestId: string;
+  runClientRequestId?: string;
+  sessionId?: string;
+  workspaceId: string;
+  sessionTitle?: string;
+  slotStart: string;
 };
 
 /** 引用资产库在单台 Linux 服务器上的同步投影。 */
@@ -1160,6 +1173,34 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<PageResponse<SessionMessage>>(
         `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages${query({ page, size, refresh: options.refresh })}`
       ),
+    getNightExecutionSlots: () =>
+      request<NightExecutionSlots>(`${opencodeRuntimeBase}/night-execution/slots`),
+    createNightExecutionTask: (payload: CreateNightExecutionTaskPayload) =>
+      request<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    listNightExecutionTasks: (params: { sessionId?: string; page?: number; size?: number } = {}) =>
+      request<NightExecutionTaskQueryResponse>(
+        `${opencodeRuntimeBase}/night-execution/tasks${query({
+          sessionId: params.sessionId,
+          page: params.page,
+          size: params.size
+        })}`
+      ),
+    adjustNightExecutionTask: (taskId: string, slotStart: string) =>
+      request<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ slotStart })
+      }),
+    cancelNightExecutionTask: (taskId: string) =>
+      request<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}/cancel`, {
+        method: "POST"
+      }),
+    dismissNightExecutionTask: (taskId: string) =>
+      request<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}/dismiss`, {
+        method: "POST"
+      }),
     getSessionTreeMessages: (sessionId: string) =>
       request<SessionTreeMessagesResponse>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/session-tree/messages`)),
     putMessageFeedback: (messageId: string, payload: AiMessageFeedbackPayload) =>

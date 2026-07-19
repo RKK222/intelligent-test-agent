@@ -4,6 +4,7 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.scheduler.ScheduledTask;
+import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskPlan;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRepository;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRun;
@@ -16,6 +17,10 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -25,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -45,6 +51,9 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
     private final CronScheduleCalculator cronScheduleCalculator;
     private final SchedulerProperties properties;
     private final Clock clock;
+    private final ScheduledTaskExecutionAffinityProvider affinityProvider;
+    private final ThreadPoolExecutor userPlanExecutor;
+    private final Set<ScheduledTaskRunId> queuedUserPlanRuns = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final Object monitor = new Object();
     private final ScheduledExecutorService renewalExecutor = Executors.newSingleThreadScheduledExecutor(
             namedThreadFactory("test-agent-scheduler-lock-renewal"));
@@ -65,12 +74,34 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
             CronScheduleCalculator cronScheduleCalculator,
             SchedulerProperties properties,
             Clock clock) {
+        this(repository, registry, lock, cronScheduleCalculator, properties, clock, () -> null);
+    }
+
+    /** 生产装配注入当前 Linux 服务器亲和键。 */
+    @Autowired
+    public ScheduledTaskRunner(
+            ScheduledTaskRepository repository,
+            ScheduledTaskRegistry registry,
+            ScheduledTaskLock lock,
+            CronScheduleCalculator cronScheduleCalculator,
+            SchedulerProperties properties,
+            Clock clock,
+            ScheduledTaskExecutionAffinityProvider affinityProvider) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
         this.lock = Objects.requireNonNull(lock, "lock must not be null");
         this.cronScheduleCalculator = Objects.requireNonNull(cronScheduleCalculator, "cronScheduleCalculator must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.affinityProvider = Objects.requireNonNull(affinityProvider, "affinityProvider must not be null");
+        this.userPlanExecutor = new ThreadPoolExecutor(
+                properties.getUserPlanWorkerCount(),
+                properties.getUserPlanWorkerCount(),
+                0L,
+                TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(properties.getUserPlanQueueCapacity()),
+                namedThreadFactory("test-agent-scheduler-user-plan"),
+                new ThreadPoolExecutor.AbortPolicy());
     }
 
     /**
@@ -92,6 +123,7 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
         running = false;
         wakeUp();
         renewalExecutor.shutdownNow();
+        userPlanExecutor.shutdownNow();
     }
 
     @Override
@@ -157,6 +189,7 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
         try {
             scanDueTasks(now);
             scanPendingManualRuns(now);
+            scanPendingUserPlanRuns(now);
             lastScanErrorMessage = null;
         } catch (RuntimeException exception) {
             lastScanErrorMessage = exception.getMessage();
@@ -223,17 +256,58 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
         }
     }
 
+    private void scanPendingUserPlanRuns(Instant now) {
+        String affinity = affinityProvider.currentAffinity();
+        if (affinity == null || affinity.isBlank()) {
+            return;
+        }
+        for (ScheduledTaskRun run : repository.findPendingRuns(
+                ScheduledTaskTriggerType.USER_PLAN,
+                affinity.trim(),
+                now,
+                properties.getUserPlanRunLimit())) {
+            if (!queuedUserPlanRuns.add(run.taskRunId())) {
+                continue;
+            }
+            try {
+                userPlanExecutor.execute(() -> {
+                    try {
+                        Optional<ScheduledTask> task = repository.findTaskByKey(run.taskKey());
+                        if (task.isEmpty()) {
+                            repository.updateRunIfStatus(
+                                    run.fail(ErrorCode.NOT_FOUND.name(), "定时任务不存在", clock.instant()),
+                                    ScheduledTaskRunStatus.PENDING);
+                            return;
+                        }
+                        processPendingRun(task.get(), run, false);
+                    } finally {
+                        queuedUserPlanRuns.remove(run.taskRunId());
+                    }
+                });
+            } catch (RejectedExecutionException exception) {
+                queuedUserPlanRuns.remove(run.taskRunId());
+                LOGGER.debug("USER_PLAN worker 队列已满，保留待执行记录 taskRunId={}", run.taskRunId().value());
+                return;
+            }
+        }
+    }
+
     private void processPendingRun(ScheduledTask task, ScheduledTaskRun pendingRun, boolean skipOnLockFailure) {
         if (pendingRun.status() != ScheduledTaskRunStatus.PENDING) {
             return;
         }
         Instant now = clock.instant();
-        Optional<ScheduledTaskRun> activeRun = repository.findActiveRunByTaskKeyExcluding(task.taskKey(), pendingRun.taskRunId());
-        if (activeRun.isPresent()) {
-            repository.saveRun(pendingRun.skip(activeSkipReason(activeRun.get()), now));
-            return;
+        if (pendingRun.triggerType() != ScheduledTaskTriggerType.USER_PLAN) {
+            Optional<ScheduledTaskRun> activeRun = repository.findActiveRunByTaskKeyExcluding(task.taskKey(), pendingRun.taskRunId());
+            if (activeRun.isPresent()) {
+                repository.saveRun(pendingRun.skip(activeSkipReason(activeRun.get()), now));
+                return;
+            }
         }
-        Optional<ScheduledTaskLockLease> lease = lock.acquire(task.taskKey(), task.lockTtl());
+        ScheduledTaskKey lockIdentity = pendingRun.triggerType() == ScheduledTaskTriggerType.USER_PLAN
+                ? new ScheduledTaskKey("run." + pendingRun.taskRunId().value())
+                : task.taskKey();
+        Optional<ScheduledTaskLockLease> lease = lock.acquire(lockIdentity, task.lockTtl());
         if (lease.isEmpty()) {
             if (skipOnLockFailure) {
                 repository.saveRun(pendingRun.skip("未获取 Redis 分布式锁", now));
@@ -241,14 +315,26 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
             return;
         }
         ScheduledTaskLockLease acquiredLease = lease.get();
+        ScheduledTaskRun latestPending = repository.findRunById(pendingRun.taskRunId()).orElse(pendingRun);
+        if (latestPending.status() != ScheduledTaskRunStatus.PENDING) {
+            acquiredLease.release();
+            return;
+        }
+        ScheduledTaskRun runningRun = latestPending.start(properties.getInstanceId(), clock.instant());
+        if (!repository.updateRunIfStatus(runningRun, ScheduledTaskRunStatus.PENDING)) {
+            acquiredLease.release();
+            return;
+        }
         ScheduledFuture<?> renewalFuture = scheduleRenewal(acquiredLease);
-        ScheduledTaskRun runningRun = repository.saveRun(pendingRun.start(properties.getInstanceId(), clock.instant()));
         try {
             ScheduledTaskHandler handler = registry.handlerFor(task.taskKey())
                     .orElseThrow(() -> new PlatformException(
                             ErrorCode.NOT_FOUND,
                             "定时任务 handler 未注册",
                             Map.of("taskKey", task.taskKey().value())));
+            if (!handler.supportedTriggerTypes().contains(runningRun.triggerType())) {
+                throw new PlatformException(ErrorCode.CONFLICT, "定时任务 handler 不支持当前触发类型");
+            }
             ScheduledTaskResult result = handler.run(contextFor(runningRun));
             if (stopRequested(runningRun.taskRunId())) {
                 repository.saveRun(latestRunOr(runningRun).manuallyStopped(clock.instant()));
@@ -271,6 +357,21 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
             }
             acquiredLease.release();
         }
+    }
+
+    /** 测试与有序关闭使用：等待 USER_PLAN worker 队列清空。 */
+    public boolean awaitUserPlanIdle(java.time.Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (queuedUserPlanRuns.isEmpty() && userPlanExecutor.getActiveCount() == 0) return true;
+            try {
+                Thread.sleep(5L);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return queuedUserPlanRuns.isEmpty() && userPlanExecutor.getActiveCount() == 0;
     }
 
     private ScheduledTaskContext contextFor(ScheduledTaskRun run) {

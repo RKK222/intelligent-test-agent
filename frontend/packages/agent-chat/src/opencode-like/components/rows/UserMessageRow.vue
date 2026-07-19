@@ -8,7 +8,7 @@ export type UserMessageRowProps = {
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { FileText, Scissors } from "lucide-vue-next";
+import { Clock3, FileText, Scissors } from "lucide-vue-next";
 import {
   displayTextFromUserPrompt,
   workspaceContextAttachmentsFromPromptParts,
@@ -18,6 +18,20 @@ import OcCopyButton from "../primitives/OcCopyButton.vue";
 
 const props = defineProps<UserMessageRowProps>();
 const displayText = computed(() => displayTextFromUserPrompt(props.message.text));
+const scheduledAtFormatter = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  month: "numeric",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
+const scheduledAt = computed(() => {
+  if (!props.message.createdAt) return "";
+  const createdAt = new Date(props.message.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return "";
+  return scheduledAtFormatter.format(createdAt);
+});
 const workspaceContexts = computed(() => {
   const partContexts = workspaceContextAttachmentsFromPromptParts(props.message.parts);
   return partContexts.length ? partContexts : workspaceContextAttachmentsFromUserPrompt(props.message.text);
@@ -32,6 +46,10 @@ const workspaceContexts = computed(() => {
     :data-oc-turn-id="message.messageId ?? message.id"
   >
     <div class="oc-user-message__content">
+      <div v-if="message.sourceType === 'SCHEDULED_TASK'" class="oc-user-message__source-badge">
+        <Clock3 aria-hidden="true" />
+        <span>夜间定时执行<span v-if="scheduledAt"> · {{ scheduledAt }}</span></span>
+      </div>
       <div class="oc-user-message__bubble">
         <div class="oc-user-message__copy">
           <OcCopyButton :value="message.text" />

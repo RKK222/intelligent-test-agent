@@ -57,14 +57,14 @@ class UserOpencodeBackendRoutingService {
             "/api/internal/platform/configuration-management/applications/";
     private static final String WORKSPACE_MANAGEMENT_PREFIX =
             "/api/internal/platform/workspace-management/";
-    private static final int DEFAULT_MAX_START_RUN_BODY_BYTES = 32 * 1024 * 1024;
+    private static final int DEFAULT_MAX_ROUTED_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
 
     private final UserOpencodeProcessAssignmentService assignmentService;
     private final BackendJavaRouteResolver routeResolver;
     private final BackendHttpForwarder forwarder;
     private final ObjectMapper objectMapper;
     private final ConversationContextStore conversationContextStore;
-    private final int maxStartRunBodyBytes;
+    private final int maxRoutedRequestBodyBytes;
 
     @Autowired
     UserOpencodeBackendRoutingService(
@@ -80,7 +80,7 @@ class UserOpencodeBackendRoutingService {
         this.conversationContextStore = Objects.requireNonNull(
                 conversationContextStore,
                 "conversationContextStore must not be null");
-        this.maxStartRunBodyBytes = DEFAULT_MAX_START_RUN_BODY_BYTES;
+        this.maxRoutedRequestBodyBytes = DEFAULT_MAX_ROUTED_REQUEST_BODY_BYTES;
     }
 
     UserOpencodeBackendRoutingService(
@@ -93,7 +93,7 @@ class UserOpencodeBackendRoutingService {
         this.forwarder = Objects.requireNonNull(forwarder, "forwarder must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.conversationContextStore = null;
-        this.maxStartRunBodyBytes = DEFAULT_MAX_START_RUN_BODY_BYTES;
+        this.maxRoutedRequestBodyBytes = DEFAULT_MAX_ROUTED_REQUEST_BODY_BYTES;
     }
 
     UserOpencodeBackendRoutingService(
@@ -119,7 +119,7 @@ class UserOpencodeBackendRoutingService {
         this.conversationContextStore = Objects.requireNonNull(
                 conversationContextStore,
                 "conversationContextStore must not be null");
-        this.maxStartRunBodyBytes = DEFAULT_MAX_START_RUN_BODY_BYTES;
+        this.maxRoutedRequestBodyBytes = DEFAULT_MAX_ROUTED_REQUEST_BODY_BYTES;
     }
 
     /** 仅供路由层边界测试注入较小请求体上限，生产构造固定使用 32 MiB。 */
@@ -130,7 +130,7 @@ class UserOpencodeBackendRoutingService {
             ObjectMapper objectMapper,
             HttpClient httpClient,
             ConversationContextStore conversationContextStore,
-            int maxStartRunBodyBytes) {
+            int maxRoutedRequestBodyBytes) {
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.routeResolver = testRouteResolver(serverIdentity, heartbeatStore);
         this.forwarder = new BackendHttpForwarder(objectMapper, httpClient);
@@ -138,10 +138,10 @@ class UserOpencodeBackendRoutingService {
         this.conversationContextStore = Objects.requireNonNull(
                 conversationContextStore,
                 "conversationContextStore must not be null");
-        if (maxStartRunBodyBytes <= 0) {
-            throw new IllegalArgumentException("maxStartRunBodyBytes must be greater than zero");
+        if (maxRoutedRequestBodyBytes <= 0) {
+            throw new IllegalArgumentException("maxRoutedRequestBodyBytes must be greater than zero");
         }
-        this.maxStartRunBodyBytes = maxStartRunBodyBytes;
+        this.maxRoutedRequestBodyBytes = maxRoutedRequestBodyBytes;
     }
 
     private static BackendJavaRouteResolver testRouteResolver(
@@ -189,13 +189,19 @@ class UserOpencodeBackendRoutingService {
     }
 
     /**
-     * 解析路由并在 start-run 场景缓存请求体；携带 contextToken 时只读 Redis 快照，禁止查询进程 assignment。
+     * 解析路由并在需要读取或转发大请求体的场景缓存请求体；携带 contextToken 时只读 Redis 快照，禁止查询进程 assignment。
      */
     Mono<RoutingResolution> resolveRoute(ServerWebExchange exchange, AuthPrincipal principal) {
         Objects.requireNonNull(exchange, "exchange must not be null");
         Objects.requireNonNull(principal, "principal must not be null");
         if (exchange.getRequest().getHeaders().getFirst(BackendHttpForwarder.ROUTED_HEADER) != null) {
             return Mono.just(new RoutingResolution(exchange, Optional.empty()));
+        }
+        if (isNightExecutionTaskCreate(exchange)) {
+            return cacheRequestBody(exchange)
+                    .map(cached -> new RoutingResolution(
+                            cached.exchange(),
+                            legacyTarget(principal, OPENCODE_AGENT_ID)));
         }
         Optional<String> startRunAgentId = startRunAgentId(exchange);
         if (startRunAgentId.isEmpty()) {
@@ -268,8 +274,14 @@ class UserOpencodeBackendRoutingService {
                 .filter(ignored -> path.equals(AGENT_PREFIX + OPENCODE_AGENT_ID + "/runs"));
     }
 
+    private boolean isNightExecutionTaskCreate(ServerWebExchange exchange) {
+        String path = exchange.getRequest().getURI().getRawPath();
+        return HttpMethod.POST.equals(exchange.getRequest().getMethod())
+                && (PLATFORM_RUNTIME_PREFIX + "/night-execution/tasks").equals(path);
+    }
+
     private Mono<CachedRequest> cacheRequestBody(ServerWebExchange exchange) {
-        return DataBufferUtils.join(exchange.getRequest().getBody(), maxStartRunBodyBytes)
+        return DataBufferUtils.join(exchange.getRequest().getBody(), maxRoutedRequestBodyBytes)
                 .map(buffer -> {
                     byte[] body = new byte[buffer.readableByteCount()];
                     buffer.read(body);
@@ -280,8 +292,8 @@ class UserOpencodeBackendRoutingService {
                         DataBufferLimitException.class,
                         exception -> new PlatformException(
                                 ErrorCode.VALIDATION_ERROR,
-                                "Run 请求体超过允许上限",
-                                Map.of("maxBytes", maxStartRunBodyBytes)))
+                                "请求体超过允许上限",
+                                Map.of("maxBytes", maxRoutedRequestBodyBytes)))
                 .defaultIfEmpty(new CachedRequest(withBody(exchange, new byte[0]), new byte[0]));
     }
 

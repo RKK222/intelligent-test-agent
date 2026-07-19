@@ -89,7 +89,7 @@
 ### 数据库
 
 1. 避免 N+1 查询，高频查询必须有索引，批量写入使用批处理或明确事务边界，查询只取需要字段。
-2. JDBC 连接池统一使用 Druid，通过 `TEST_AGENT_DB_POOL_INITIAL_SIZE`、`TEST_AGENT_DB_POOL_MIN_IDLE`、`TEST_AGENT_DB_POOL_MAX_ACTIVE`、`TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS` 配置；默认保留 `validation-query=SELECT 1` 和借出连接校验，`TEST_AGENT_DB_POOL_TEST_ON_BORROW` 只允许在明确评估数据库稳定性后关闭；不得在代码中硬编码环境容量。
+2. JDBC 连接池统一使用 Druid，通过 `TEST_AGENT_DB_POOL_INITIAL_SIZE`、`TEST_AGENT_DB_POOL_MIN_IDLE`、`TEST_AGENT_DB_POOL_MAX_ACTIVE`、`TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS` 配置；默认保留 `validation-query=SELECT 1`、空闲校验和 keep-alive，`TEST_AGENT_DB_POOL_TEST_ON_BORROW` 默认 `false`，需要逐次借出校验的生产环境应显式设为 `true`；不得在代码中硬编码环境容量。
 3. 新增或修改关系型数据库 SQL 必须通过 MyBatis XML mapper 实现，mapper 接口只能声明方法和 `@Param`，禁止使用 MyBatis 注解 SQL；存量 `Jdbc*Repository` 仅作为迁移窗口保留，触及其 SQL 时迁移到 MyBatis XML。
 
 ### opencode 调用
