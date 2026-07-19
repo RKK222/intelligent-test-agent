@@ -109,6 +109,7 @@
 3. `LEGACY_FULL` SSE polling 默认批量读取 100 条事件，轮询间隔默认 500ms；调整必须同时评估数据库读压和前端渲染频率。`REDIS_SUMMARY` 禁止创建数据库 polling：首帧总发送完整物化 `run.snapshot.reset`，然后由最短 5 秒的 Redis 安全扫描和生产 Java 本机 live bus 只唤醒按 `runtimeVersion` 分页读 Redis 尾流；live 事件仍即时唤醒，但帧本身不得直接输出。
 4. Redis durable `events` Stream ID 必须使用 `${seq}-0`，durable/transient 全事件 `runtime-events` Stream ID 必须使用 `${runtimeVersion}-0`。seq/runtimeVersion 分配、`XADD`、Hash/ZSET snapshot 投影、manifest 容量计数和动态 key TTL 刷新必须由同 slot Lua 原子完成。容量换代使 runtime 游标落后时必须再次发送 transient `run.snapshot.reset`；该事件不设置 SSE `id`，前端应用物化 snapshot 后仍只用后续 durable seq 推进 `Last-Event-ID`。
 5. 单 Run 详情上限为 20,000 条 durable 事件、20,000 条 runtime 事件或 20,000 个 snapshot 投影项，总规范化详情上限为 32 MiB；任一阈值超限都必须显式删除旧 Stream、更新 manifest/reset generation 并保留物化状态，禁止依赖 Redis eviction、`MAXLEN` 静默裁剪或 PostgreSQL 原始事件降级。
+6. Redis Lua 的全部 `KEYS` 必须使用同一个 hash tag；单 Run `{runId}` 与用户索引 `{userId}` 的协调必须拆成各自 slot 内的原子脚本和可恢复外部索引，禁止把两类 key 放进同一个脚本。用户级 dispose 与新消息互斥时，闸门检查、`active:user` 登记和 `runtime-user` marker 创建必须在同一用户 slot 原子完成，被拒绝的初始化不得留下会改变 legacy/Redis 运行态选择的 marker。
 
 ## 数据变更规则
 

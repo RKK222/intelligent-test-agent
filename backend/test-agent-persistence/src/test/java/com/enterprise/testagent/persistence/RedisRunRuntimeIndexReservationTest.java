@@ -1,12 +1,15 @@
 package com.enterprise.testagent.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,7 +88,11 @@ class RedisRunRuntimeIndexReservationTest {
         when(redis.opsForValue()).thenReturn(values);
         when(redis.opsForZSet()).thenReturn(zsets);
         when(redis.execute(
-                any(RedisScript.class),
+                argThat(script -> isUserRuntimeReservation(script)),
+                anyList(),
+                any(), any(), any(), any())).thenReturn(1L);
+        when(redis.execute(
+                argThat(script -> isInitialize(script)),
                 anyList(),
                 any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), any(), any(), any(), any())).thenReturn(1L);
@@ -107,15 +114,18 @@ class RedisRunRuntimeIndexReservationTest {
         String serverIndex = "test-agent:run:active:server:{server-a}";
         String historyIndex = "test-agent:run:history:session:{ses_index_reservation}";
         String marker = "test-agent:run:runtime-user:{usr_index_reservation}";
+        String disposeLock = "test-agent:run:runtime-dispose:{usr_index_reservation}";
 
         store.initialize(manifest, input(manifest.runId()));
 
         InOrder order = inOrder(zsets, values, redis);
-        order.verify(zsets).add(userIndex, manifest.runId().value(), maximumScore);
         order.verify(redis).execute(
-                argThat(script -> isTtlExtension(script)),
-                eq(List.of(userIndex)),
-                eq(Long.toString(maximumRetention.toMillis())));
+                argThat(script -> isUserRuntimeReservation(script)),
+                eq(List.of(userIndex, disposeLock, marker)),
+                eq(manifest.runId().value()),
+                eq(Long.toString(maximumScore)),
+                eq(Long.toString(maximumRetention.toMillis())),
+                argThat((String value) -> value.startsWith("initialize:")));
         order.verify(values).set(sessionIndex, manifest.runId().value(), maximumRetention);
         order.verify(zsets).add(serverIndex, manifest.runId().value(), maximumScore);
         order.verify(redis).execute(
@@ -127,8 +137,36 @@ class RedisRunRuntimeIndexReservationTest {
                 argThat(script -> isTtlExtension(script)),
                 eq(List.of(historyIndex)),
                 eq(Long.toString(maximumRetention.toMillis())));
-        order.verify(values).set(marker, "1", maximumRetention);
         order.verify(redis).execute(
+                argThat(script -> isInitialize(script)),
+                anyList(),
+                any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void disposeGateRejectionDoesNotReserveSessionServerHistoryOrMarker() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        ZSetOperations<String, String> zsets = mock(ZSetOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(redis.opsForZSet()).thenReturn(zsets);
+        String marker = "test-agent:run:runtime-user:{usr_index_reservation}";
+        when(redis.execute(
+                argThat(script -> isUserRuntimeReservation(script)),
+                anyList(),
+                any(), any(), any(), any())).thenReturn(-1L);
+        RedisRunRuntimeStore store = store(redis);
+
+        assertThatThrownBy(() -> store.initialize(manifest(), input(new RunId("run_index_reservation"))))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("正在重载");
+
+        verify(values, never()).set(eq("test-agent:run:active:session:{ses_index_reservation}"), anyString(), any(Duration.class));
+        verify(values, never()).set(eq(marker), anyString(), any(Duration.class));
+        verify(zsets, never()).add(anyString(), anyString(), any(Double.class));
+        verify(redis, never()).execute(
                 argThat(script -> isInitialize(script)),
                 anyList(),
                 any(), any(), any(), any(), any(), any(), any(),
@@ -196,12 +234,31 @@ class RedisRunRuntimeIndexReservationTest {
         return fields;
     }
 
+    private RedisRunRuntimeStore store(StringRedisTemplate redis) {
+        return new RedisRunRuntimeStore(
+                redis,
+                new ObjectMapper().registerModule(new JavaTimeModule()),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofMinutes(5),
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(30),
+                100,
+                1024 * 1024,
+                100);
+    }
+
     private boolean isTtlExtension(RedisScript<?> script) {
         return script != null && script.getScriptAsString().contains("local current = redis.call('PTTL'");
     }
 
     private boolean isInitialize(RedisScript<?> script) {
         return script != null && script.getScriptAsString().contains("'inputBytes', ARGV[8]");
+    }
+
+    private boolean isUserRuntimeReservation(RedisScript<?> script) {
+        return script != null
+                && script.getScriptAsString().contains("if redis.call('GET', KEYS[2]) then return -1 end")
+                && script.getScriptAsString().contains("'NX'");
     }
 
     private RunRuntimeManifest manifest() {

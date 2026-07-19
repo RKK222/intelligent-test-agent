@@ -41,6 +41,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 
@@ -89,6 +90,43 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               return redis.call('DEL', KEYS[1])
             end
             return 0
+            """, Long.class);
+
+    /**
+     * 用户级 dispose 闸门与 active:user 索引位于同一用户 hash slot，申请和空闲确认在 Redis 内一次完成。
+     * 新 Run 通过同一用户 slot 的预留脚本检查闸门，避免跨 Redis Cluster slot 执行 Lua。
+     */
+    private static final DefaultRedisScript<Long> CLAIM_USER_RUNTIME_DISPOSE_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[2]) then return 0 end
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])
+            if redis.call('ZCARD', KEYS[1]) > 0 then return 0 end
+            redis.call('SET', KEYS[2], ARGV[1], 'PX', ARGV[2])
+            return 1
+            """, Long.class);
+
+    /** 用户 slot 内原子阻止 dispose，并登记新 Run 与带随机 owner 的 runtime marker。 */
+    private static final DefaultRedisScript<Long> RESERVE_USER_RUNTIME_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[2]) then return -1 end
+            redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+            local activeTtl = redis.call('PTTL', KEYS[1])
+            if activeTtl < tonumber(ARGV[3]) then redis.call('PEXPIRE', KEYS[1], ARGV[3]) end
+            local markerCreated = redis.call('SET', KEYS[3], ARGV[4], 'PX', ARGV[3], 'NX')
+            if not markerCreated then
+              local markerTtl = redis.call('PTTL', KEYS[3])
+              if markerTtl < tonumber(ARGV[3]) then redis.call('PEXPIRE', KEYS[3], ARGV[3]) end
+            end
+            return 1
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> RENEW_USER_RUNTIME_DISPOSE_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+            redis.call('PEXPIRE', KEYS[1], ARGV[2])
+            return 1
+            """, Long.class);
+
+    private static final DefaultRedisScript<Long> COMPARE_AND_DELETE_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+            return redis.call('DEL', KEYS[1])
             """, Long.class);
 
     private static final DefaultRedisScript<Long> CONFIRM_CLIENT_REQUEST_SCRIPT = new DefaultRedisScript<>("""
@@ -967,7 +1005,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             // 外部索引与单 Run key 分属不同 Redis Cluster slot，无法放入同一 Lua。
             // 先以最大物理保留期登记保守索引：即使 Java 在 Run Lua 成功后立刻崩溃，恢复扫描仍能找到该 Run；
             // 若 Lua 随后失败，读路径会根据缺失 manifest 清理这些无害的悬空索引。
-            reserveRuntimeIndexes(manifest);
+            reserveRuntimeIndexesForInitialize(manifest);
             Long created = redisTemplate.execute(
                     INITIALIZE_SCRIPT,
                     List.of(
@@ -1794,6 +1832,65 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     }
 
     @Override
+    public boolean tryAcquireUserRuntimeDispose(UserId userId, String token, Duration ttl) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        String ownerToken = requireText(token, "token");
+        Duration leaseTtl = positive(ttl, "ttl");
+        try {
+            Long claimed = redisTemplate.execute(
+                    CLAIM_USER_RUNTIME_DISPOSE_SCRIPT,
+                    List.of(activeUserKey(userId), userRuntimeDisposeKey(userId)),
+                    ownerToken,
+                    Long.toString(leaseTtl.toMillis()),
+                    Long.toString(clock.millis()));
+            return claimed != null && claimed == 1L;
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public boolean isUserRuntimeDisposeActive(UserId userId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(userRuntimeDisposeKey(userId)));
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public boolean renewUserRuntimeDispose(UserId userId, String token, Duration ttl) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        String ownerToken = requireText(token, "token");
+        Duration leaseTtl = positive(ttl, "ttl");
+        try {
+            Long renewed = redisTemplate.execute(
+                    RENEW_USER_RUNTIME_DISPOSE_SCRIPT,
+                    List.of(userRuntimeDisposeKey(userId)),
+                    ownerToken,
+                    Long.toString(leaseTtl.toMillis()));
+            return renewed != null && renewed == 1L;
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public void releaseUserRuntimeDispose(UserId userId, String token) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        String ownerToken = requireText(token, "token");
+        try {
+            redisTemplate.execute(
+                    COMPARE_AND_DELETE_SCRIPT,
+                    List.of(userRuntimeDisposeKey(userId)),
+                    ownerToken);
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
     public List<RunRuntimeManifest> findActiveByServer(String linuxServerId) {
         if (linuxServerId == null || linuxServerId.isBlank()) {
             return List.of();
@@ -2192,6 +2289,48 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         }
         indexHistory(manifest);
         if (manifest.userId() != null) {
+            redisTemplate.opsForValue().set(
+                    userRuntimeMarkerKey(manifest.userId()), "1", indexRetentionTtl());
+        }
+    }
+
+    /**
+     * 用户 slot 内先原子检查闸门，再登记 active:user 与 marker；被拒绝时不会写入任何用户运行态标记。
+     * 已由 legacy/历史 Redis Run 建立的 marker 只续期、不改值。
+     */
+    private void reserveRuntimeIndexesForInitialize(RunRuntimeManifest manifest) {
+        if (manifest.active()) {
+            Duration ttl = indexRetentionTtl();
+            long expiresAt = clock.instant().plus(ttl).toEpochMilli();
+            if (manifest.userId() != null) {
+                String markerOwner = "initialize:" + UUID.randomUUID();
+                Long reserved = redisTemplate.execute(
+                        RESERVE_USER_RUNTIME_SCRIPT,
+                        List.of(
+                                activeUserKey(manifest.userId()),
+                                userRuntimeDisposeKey(manifest.userId()),
+                                userRuntimeMarkerKey(manifest.userId())),
+                        manifest.runId().value(),
+                        Long.toString(expiresAt),
+                        Long.toString(ttl.toMillis()),
+                        markerOwner);
+                if (reserved == null) {
+                    throw new IllegalStateException("Redis Run user reservation returned no result");
+                }
+                if (reserved == -1L) {
+                    // 用户 slot 内尚未登记 active/marker，拒绝不会污染 runtime-user 路径选择。
+                    throw new PlatformException(ErrorCode.CONFLICT, "当前用户运行态正在重载，请稍后再启动 Run");
+                }
+            }
+            redisTemplate.opsForValue().set(
+                    activeSessionKey(manifest.sessionId()), manifest.runId().value(), ttl);
+            indexServerRecovery(manifest, ttl, expiresAt);
+        }
+        indexHistory(manifest);
+        if (manifest.userId() == null) {
+            return;
+        }
+        if (!manifest.active()) {
             redisTemplate.opsForValue().set(
                     userRuntimeMarkerKey(manifest.userId()), "1", indexRetentionTtl());
         }
@@ -2705,6 +2844,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     private String pendingKey(RunId runId, String sessionId) { return runPrefix(runId) + "pending:" + safe(sessionId); }
     private String activeUserKey(UserId userId) { return PREFIX + "active:user:{" + userId.value() + "}"; }
     private String userRuntimeMarkerKey(UserId userId) { return PREFIX + "runtime-user:{" + userId.value() + "}"; }
+    private String userRuntimeDisposeKey(UserId userId) {
+        return PREFIX + "runtime-dispose:{" + (userId == null ? "anonymous" : userId.value()) + "}";
+    }
     private String activeSessionKey(SessionId sessionId) { return PREFIX + "active:session:{" + sessionId.value() + "}"; }
     private String historySessionKey(SessionId sessionId) { return PREFIX + "history:session:{" + sessionId.value() + "}"; }
     private String clientRequestKey(SessionId sessionId, String clientRequestId) {
@@ -2712,6 +2854,13 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     }
     private String activeServerKey(String serverId) { return PREFIX + "active:server:{" + safe(serverId) + "}"; }
     private String safe(String value) { return value == null ? "unknown" : value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
+
+    private String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " must not be blank");
+        }
+        return value.trim();
+    }
 
     private static Duration positive(Duration value, String field) {
         Objects.requireNonNull(value, field + " must not be null");

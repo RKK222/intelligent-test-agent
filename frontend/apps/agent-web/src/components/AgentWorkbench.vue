@@ -376,12 +376,19 @@ const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<"editor" | "diff" | "system">("editor");
 const feedback = ref<Feedback | null>(null);
-// 手动重载仅释放当前用户的 OpenCode 运行态；按钮状态由工作台统一管理，避免重复 dispose。
-const personalRuntimeReloading = ref<"PUBLIC" | "WORKSPACE" | null>(null);
-// 引用配置保存可能发生在 Run 执行中；记录代次并等空闲后 dispose，避免释放正在使用的 workspace 实例。
+// 所有个人运行态重载共用一把响应式锁，手动入口和自动保存入口不会并发 dispose。
+const runtimeReloadLock = ref<"PUBLIC" | "WORKSPACE" | "REFERENCE" | null>(null);
+const personalRuntimeReloading = computed<"PUBLIC" | "WORKSPACE" | null>(() =>
+  runtimeReloadLock.value === "PUBLIC" || runtimeReloadLock.value === "WORKSPACE"
+    ? runtimeReloadLock.value
+    : null
+);
+// 后端权威闸门可能捕获前端 SSE 尚未到达的并发 Session；CONFLICT 时保留代次并等待空闲后重试。
+const runtimeReloadConflictWaitingForIdle = ref(false);
+let runtimeReloadConflictRetryTimer: ReturnType<typeof setTimeout> | null = null;
+// 引用配置保存可能发生在 Run 执行中；记录代次并等用户全部 Session 空闲后 dispose。
 const pendingReferenceRuntimeReloadRevision = ref(0);
 let handledReferenceRuntimeReloadRevision = 0;
-let referenceRuntimeReloadInFlight = false;
 let pendingRuntimeReloadKind: "reference" | "agent" = "reference";
 let pendingPublicRuntimeReloadTarget: Pick<AgentFileTabInfo, "worktreeId" | "linuxServerId"> | null = null;
 let lastRuntimeReloadError: unknown | null = null;
@@ -2157,7 +2164,7 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(
   lastRuntimeReloadError = null;
   pendingRuntimeReloadKind = "agent";
   pendingReferenceRuntimeReloadRevision.value += 1;
-  if (runtimeBusy.value) {
+  if (userRuntimeBusy.value) {
     return null;
   }
   await reloadReferenceRuntimeIfIdle();
@@ -2174,8 +2181,8 @@ async function handlePersonalRuntimeReload(payload: {
   linuxServerId?: string;
   workspaceId?: string;
 }) {
-  if (personalRuntimeReloading.value || referenceRuntimeReloadInFlight) return;
-  if (!selectedWorkspaceIdRef.value) {
+  if (runtimeReloadLock.value) return;
+  if (payload.scope === "WORKSPACE" && !selectedWorkspaceIdRef.value) {
     feedback.value = {
       kind: "info",
       title: "个人配置未重载",
@@ -2183,11 +2190,11 @@ async function handlePersonalRuntimeReload(payload: {
     };
     return;
   }
-  if (runtimeBusy.value) {
+  if (userRuntimeBusy.value) {
     feedback.value = {
       kind: "info",
       title: "当前任务运行中",
-      description: "任务结束后再手动重载个人运行态。"
+      description: "当前用户仍有运行中的 Session，结束后再重载个人运行态。"
     };
     return;
   }
@@ -2217,7 +2224,7 @@ async function handlePersonalRuntimeReload(payload: {
     return;
   }
 
-  personalRuntimeReloading.value = payload.scope;
+  runtimeReloadLock.value = payload.scope;
   try {
     if (payload.scope === "PUBLIC") {
       const result = await api.reloadPublicPersonalAgentRuntime(publicRuntimeRoute!.worktreeId!, publicRuntimeRoute!.linuxServerId!);
@@ -2239,7 +2246,15 @@ async function handlePersonalRuntimeReload(payload: {
       error
     );
   } finally {
-    personalRuntimeReloading.value = null;
+    if (runtimeReloadLock.value === payload.scope) {
+      runtimeReloadLock.value = null;
+    }
+    if (
+      pendingReferenceRuntimeReloadRevision.value > handledReferenceRuntimeReloadRevision
+      && !userRuntimeBusy.value
+    ) {
+      void reloadReferenceRuntimeIfIdle();
+    }
   }
 }
 
@@ -2247,12 +2262,14 @@ async function reloadReferenceRuntimeIfIdle(): Promise<void> {
   const targetRevision = pendingReferenceRuntimeReloadRevision.value;
   if (
     targetRevision <= handledReferenceRuntimeReloadRevision
-    || referenceRuntimeReloadInFlight
-    || runtimeBusy.value
+    || runtimeReloadLock.value
+    || runtimeReloadConflictWaitingForIdle.value
+    || userRuntimeBusy.value
   ) {
     return;
   }
-  if (!opencodeProcessReady.value || !selectedWorkspaceIdRef.value) {
+  const publicReloadTarget = pendingPublicRuntimeReloadTarget;
+  if (!opencodeProcessReady.value || (!publicReloadTarget && !selectedWorkspaceIdRef.value)) {
     // 进程未运行时无需 dispose；下次受管启动会直接读取刚保存的磁盘配置和引用目录环境。
     handledReferenceRuntimeReloadRevision = targetRevision;
     lastRuntimeReloadError = null;
@@ -2263,8 +2280,7 @@ async function reloadReferenceRuntimeIfIdle(): Promise<void> {
     };
     return;
   }
-  referenceRuntimeReloadInFlight = true;
-  const publicReloadTarget = pendingPublicRuntimeReloadTarget;
+  runtimeReloadLock.value = "REFERENCE";
   try {
     if (publicReloadTarget?.worktreeId) {
       const result = await api.reloadPublicPersonalAgentRuntime(
@@ -2290,6 +2306,18 @@ async function reloadReferenceRuntimeIfIdle(): Promise<void> {
       description: "已重新加载当前用户的 TestAgent workspace 实例，无需重启专属进程。"
     };
   } catch (error) {
+    if (error instanceof BackendApiError && error.code === "CONFLICT") {
+      // 不消费 revision/公共 worktree 目标；SSE 若尚未观察到新 Run，短延迟后再复核一次。
+      lastRuntimeReloadError = null;
+      runtimeReloadConflictWaitingForIdle.value = true;
+      scheduleRuntimeReloadConflictRetry();
+      feedback.value = {
+        kind: "info",
+        title: pendingRuntimeReloadKind === "reference" ? "引用配置已保存" : "Agent 配置已保存",
+        description: "当前用户有刚启动的 Session，结束后会自动重新加载运行态。"
+      };
+      return;
+    }
     handledReferenceRuntimeReloadRevision = targetRevision;
     if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
       pendingPublicRuntimeReloadTarget = null;
@@ -2302,14 +2330,39 @@ async function reloadReferenceRuntimeIfIdle(): Promise<void> {
       error
     );
   } finally {
-    referenceRuntimeReloadInFlight = false;
+    if (runtimeReloadLock.value === "REFERENCE") {
+      runtimeReloadLock.value = null;
+    }
     if (
       pendingReferenceRuntimeReloadRevision.value > handledReferenceRuntimeReloadRevision
-      && !runtimeBusy.value
+      && !runtimeReloadConflictWaitingForIdle.value
+      && !userRuntimeBusy.value
     ) {
       void reloadReferenceRuntimeIfIdle();
     }
   }
+}
+
+function clearRuntimeReloadConflictRetryTimer() {
+  if (runtimeReloadConflictRetryTimer === null) return;
+  clearTimeout(runtimeReloadConflictRetryTimer);
+  runtimeReloadConflictRetryTimer = null;
+}
+
+function resumeRuntimeReloadAfterConflict() {
+  clearRuntimeReloadConflictRetryTimer();
+  runtimeReloadConflictWaitingForIdle.value = false;
+  void reloadReferenceRuntimeIfIdle();
+}
+
+function scheduleRuntimeReloadConflictRetry() {
+  if (runtimeReloadConflictRetryTimer !== null) return;
+  runtimeReloadConflictRetryTimer = setTimeout(() => {
+    runtimeReloadConflictRetryTimer = null;
+    if (!userRuntimeBusy.value && runtimeReloadConflictWaitingForIdle.value) {
+      resumeRuntimeReloadAfterConflict();
+    }
+  }, 1000);
 }
 
 // ===== Mutations =====
@@ -2353,10 +2406,10 @@ const saveMutation = useMutation({
       : {
           kind: "success",
           title: "文件已保存",
-          description: runtimeBusy.value
+          description: userRuntimeBusy.value
             && agentInfo
             && shouldReloadPersonalRuntimeCatalog(agentInfo.scope, agentInfo.path)
-            ? `${tab.path}；当前任务结束后会自动重新加载当前用户运行态。`
+            ? `${tab.path}；当前用户任务结束后会自动重新加载运行态。`
             : tab.path
         };
     if (!isAgentFilePath(tab.path)) {
@@ -2622,6 +2675,16 @@ const initializeOpencodeProcessMutation = useMutation({
 const runtimeBusy = computed(() =>
   isRuntimeBusy(run.value?.status, chatState.value.status, startRunMutation.isPending.value)
 );
+// dispose 释放当前用户全部 Workspace Instance，不能只看当前页面的 Run；后端仍会在 dispose 前做权威复核。
+const userRuntimeBusy = computed(() =>
+  runtimeBusy.value || (sessionRuntimeState.value?.runningCount ?? 0) > 0
+);
+// 自动保存重载期间也锁住手动按钮，避免用户看到可用状态后再次发起 dispose。
+const runtimeReloadBusy = computed(() =>
+  userRuntimeBusy.value
+  || runtimeReloadLock.value !== null
+  || runtimeReloadConflictWaitingForIdle.value
+);
 const timelineRuntimeStatusForPanel = computed(() => {
   const status = chatState.value.runtimeStatus;
   if (!status || status.type !== "retry") {
@@ -2754,13 +2817,23 @@ function stopTick() {
     tickHandle = null;
   }
 }
-onScopeDispose(() => stopTick());
+onScopeDispose(() => {
+  stopTick();
+  clearRuntimeReloadConflictRetryTimer();
+});
 watch(runtimeBusy, (busy) => {
   if (busy) startTick();
   else {
     stopTick();
-    void reloadReferenceRuntimeIfIdle();
   }
+}, { immediate: true });
+watch(userRuntimeBusy, (busy) => {
+  if (busy) return;
+  if (runtimeReloadConflictWaitingForIdle.value) {
+    resumeRuntimeReloadAfterConflict();
+    return;
+  }
+  void reloadReferenceRuntimeIfIdle();
 }, { immediate: true });
 
 watch(
@@ -3257,11 +3330,11 @@ async function refreshWorkspaceViewAfterReferenceSaved() {
   pendingRuntimeReloadKind = "reference";
   pendingReferenceRuntimeReloadRevision.value += 1;
   await refreshWorkspaceView();
-  if (runtimeBusy.value) {
+  if (userRuntimeBusy.value) {
     feedback.value = {
       kind: "info",
       title: "引用配置已保存",
-      description: "当前任务结束后会自动重新加载 TestAgent workspace 实例。"
+      description: "当前用户仍有运行中的 Session，结束后会自动重新加载 TestAgent workspace 实例。"
     };
     return;
   }
@@ -6285,10 +6358,10 @@ const saveDiffFileMutation = useMutation({
       : {
           kind: "success",
           title: "文件已保存",
-          description: runtimeBusy.value
+          description: userRuntimeBusy.value
             && agentInfo
             && shouldReloadPersonalRuntimeCatalog(agentInfo.scope, agentInfo.path)
-            ? `${path}；当前任务结束后会自动重新加载当前用户运行态。`
+            ? `${path}；当前用户任务结束后会自动重新加载运行态。`
             : path
         };
     await loadDiffSource(diffSource.value);
@@ -6706,7 +6779,7 @@ async function handleLogout() {
     :can-manage-public-agent-config="isSuperAdmin"
     :can-manage-workspace-agent-config="isAppAdmin"
     :personal-runtime-reloading="personalRuntimeReloading"
-    :runtime-busy="runtimeBusy"
+    :runtime-busy="runtimeReloadBusy"
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
@@ -6801,7 +6874,7 @@ async function handleLogout() {
           :personal-workspace-branch="currentPersonalWorkspaceBranch"
           :agent-config-revision="agentConfigRevision"
           :personal-runtime-reloading="personalRuntimeReloading"
-          :runtime-busy="runtimeBusy"
+          :runtime-busy="runtimeReloadBusy"
           :show-server-workspace-switch="isSuperAdmin"
           :show-reference-configuration="showReferenceConfiguration"
           :search-results="searchResults"

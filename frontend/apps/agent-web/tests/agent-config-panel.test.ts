@@ -229,6 +229,14 @@ describe("AgentConfigPanel", () => {
     });
   });
 
+  it("disables both scope update buttons while any user runtime is busy", async () => {
+    const { view } = renderPanel(undefined, { runtimeBusy: true });
+
+    await view.findByText("worktree · change-agent-md · 测试服务器");
+    expect((view.getByRole("button", { name: "Agent 配置更新（公共）" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((view.getByRole("button", { name: "Agent 配置更新（应用）" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
 
   it("explicitly creates and mounts the current user's stable public worktree", async () => {
     const secondRepository = {
@@ -552,7 +560,7 @@ type WorkbenchStoreMock = {
 
 function renderPanel(
   setup?: (workbench: WorkbenchStoreMock) => void,
-  options?: { canWrite?: boolean; hideHeader?: boolean; activePath?: string }
+  options?: { canWrite?: boolean; hideHeader?: boolean; activePath?: string; runtimeBusy?: boolean }
 ) {
   const pinia = createPinia();
   const workbench = currentWorkbenchStore();
@@ -564,7 +572,8 @@ function renderPanel(
       canWrite: options?.canWrite ?? true,
       canManageWorkspaceConfig: options?.canWrite ?? true,
       hideHeader: options?.hideHeader ?? true,
-      activePath: options?.activePath
+      activePath: options?.activePath,
+      runtimeBusy: options?.runtimeBusy ?? false
     },
     global: {
       plugins: [pinia]

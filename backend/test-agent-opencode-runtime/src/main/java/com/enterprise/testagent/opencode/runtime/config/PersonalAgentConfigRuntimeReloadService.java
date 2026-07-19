@@ -17,11 +17,13 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
+import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -40,6 +42,7 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
     private final BackendInstanceIdentity backendIdentity;
     private final OpencodeProcessConfigLinkService configLinkService;
     private final AgentRuntime runtime;
+    private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
 
     public PersonalAgentConfigRuntimeReloadService(
             OpencodeProcessManagementRepository repository,
@@ -51,6 +54,13 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
         this.configLinkService = Objects.requireNonNull(configLinkService, "configLinkService must not be null");
         this.runtime = Objects.requireNonNull(runtimeRegistry, "runtimeRegistry must not be null")
                 .require(AgentRuntimeRegistry.DEFAULT_AGENT_ID);
+    }
+
+    /** 公共个人重载与应用 dispose 共用用户级跨 Session 空闲闸门。 */
+    @Autowired(required = false)
+    void configureUserRuntimeDisposeCoordinator(UserRuntimeDisposeCoordinator coordinator) {
+        this.userRuntimeDisposeCoordinator = Objects.requireNonNull(
+                coordinator, "coordinator must not be null");
     }
 
     @Override
@@ -77,20 +87,30 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
                     "当前用户 TestAgent 进程仍使用旧版共享配置路径，请通过平台受管方式重启一次后再保存调试");
         }
 
-        configLinkService.switchTo(sourceConfigPath, process.configPath());
-        JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
-                        executionNode(process),
-                        "POST",
-                        "/global/dispose",
-                        null,
-                        null,
-                        Map.of(),
-                        Map.of(),
-                        traceId))
-                .map(AgentRuntimeResult::body)
-                .block(RUNTIME_TIMEOUT);
-        if (disposed == null || !disposed.isBoolean() || !disposed.booleanValue()) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "当前用户 TestAgent 运行态重新加载失败");
+        Runnable reload = () -> {
+            configLinkService.switchTo(sourceConfigPath, process.configPath());
+            JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
+                            executionNode(process),
+                            "POST",
+                            "/global/dispose",
+                            null,
+                            null,
+                            Map.of(),
+                            Map.of(),
+                            traceId))
+                    .map(AgentRuntimeResult::body)
+                    .block(RUNTIME_TIMEOUT);
+            if (disposed == null || !disposed.isBoolean() || !disposed.booleanValue()) {
+                throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "当前用户 TestAgent 运行态重新加载失败");
+            }
+        };
+        if (userRuntimeDisposeCoordinator == null) {
+            reload.run();
+        } else {
+            userRuntimeDisposeCoordinator.withUserIdle(userId, traceId, () -> {
+                reload.run();
+                return Boolean.TRUE;
+            });
         }
         return new PersonalAgentConfigRuntimeReloadResult(true, "已加载公共个人 worktree 配置并重新加载当前用户运行态");
     }

@@ -33,6 +33,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.event.RunEventAppender;
 import com.enterprise.testagent.event.RunEventLiveBus;
+import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.Duration;
@@ -80,11 +81,19 @@ public class SideQuestionStreamingApplicationService {
     private final SideQuestionAnswerExtractor answerExtractor = new SideQuestionAnswerExtractor();
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
+    private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
 
     /** 公共配置发布期间，旁路问答与普通 Run 必须复用同一用户级消息门禁。 */
     @Autowired
     void configurePublicConfigMessageGate(PublicAgentConfigMessageGate messageGate) {
         this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
+    }
+
+    /** 宠物与手册旁路问答复用用户级 dispose 闸门，禁止释放期间创建新的 OpenCode 消息。 */
+    @Autowired(required = false)
+    void configureUserRuntimeDisposeCoordinator(UserRuntimeDisposeCoordinator coordinator) {
+        this.userRuntimeDisposeCoordinator = Objects.requireNonNull(
+                coordinator, "coordinator must not be null");
     }
 
     /** 生产环境使用 bounded-elastic 执行阻塞式仓储和远端调用，避免占用 WebFlux 事件线程。 */
@@ -173,9 +182,7 @@ public class SideQuestionStreamingApplicationService {
             String traceId) {
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(mainSessionId, "mainSessionId must not be null");
-        if (isDefaultAgent(agentId)) {
-            publicConfigMessageGate.requireAllowed(userId);
-        }
+        requireNewMessageAllowed(userId, agentId, traceId);
         String normalizedQuestion = SideQuestionPolicy.requireQuestion(question);
         String normalizedMessageId = normalizeOptional(messageId);
         String normalizedModel = normalizeOptional(model);
@@ -257,9 +264,7 @@ public class SideQuestionStreamingApplicationService {
             String traceId) {
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(workspaceId, "workspaceId must not be null");
-        if (isDefaultAgent(agentId)) {
-            publicConfigMessageGate.requireAllowed(userId);
-        }
+        requireNewMessageAllowed(userId, agentId, traceId);
         String normalizedQuestion = SideQuestionPolicy.requireQuestion(question);
         String normalizedModel = normalizeOptional(model);
 
@@ -849,6 +854,15 @@ public class SideQuestionStreamingApplicationService {
     private boolean isDefaultAgent(String agentId) {
         return AgentRuntimeRegistry.DEFAULT_AGENT_ID.equalsIgnoreCase(
                 Optional.ofNullable(agentId).map(String::trim).orElse(""));
+    }
+
+    private void requireNewMessageAllowed(UserId userId, String agentId, String traceId) {
+        if (isDefaultAgent(agentId)) {
+            publicConfigMessageGate.requireAllowed(userId);
+        }
+        if (userRuntimeDisposeCoordinator != null) {
+            userRuntimeDisposeCoordinator.requireNotDisposing(userId, traceId);
+        }
     }
 
     private String firstText(Map<String, Object> values, String... keys) {

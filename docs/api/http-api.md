@@ -2525,7 +2525,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/tools?workspaceId=&provider=&model=` | 读取 MCP/runtime tool 目录；带 provider/model 时返回工具 schema，否则返回 tool id 降级列表。 |
 | `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 读取 opencode global config。 |
 | `PATCH` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 更新 opencode global config，body 透传给 runtime。 |
-| `POST` | `/api/internal/platform/opencode-runtime/global/dispose` | 触发当前用户 opencode 进程释放缓存的 workspace Instance；后续请求重新 bootstrap 并读取磁盘配置。引用 JSONC、Agent 定义或 Skill 入口保存只在当前 Run 空闲时调用，运行中延迟到结束后；该接口不会重启进程，也不能补充进程启动时缺失的环境变量。 |
+| `POST` | `/api/internal/platform/opencode-runtime/global/dispose` | 触发当前用户 opencode 进程释放缓存的 workspace Instance；后续请求重新 bootstrap 并读取磁盘配置。引用 JSONC、Agent 定义或 Skill 入口保存只在当前用户全部 Session 空闲时调用，运行中或与其它重载竞态时返回 `CONFLICT`，由后端用户级闸门原子复核；闸门覆盖主 Run、宠物/手册旁路问答和 legacy sideQuestion/command/shell，并以 token 定时续租覆盖 OpenCode 超时重试上限。该接口不会重启进程，也不能补充进程启动时缺失的环境变量。 |
 | `GET` | `/api/internal/platform/opencode-runtime/provider/auth?workspaceId=` | 查询 provider auth 状态。 |
 | `POST` | `/api/internal/platform/opencode-runtime/provider/{providerId}/oauth/authorize` | 发起 provider OAuth。 |
 | `POST` | `/api/internal/platform/opencode-runtime/provider/{providerId}/oauth/callback` | 完成 provider OAuth 回调。 |

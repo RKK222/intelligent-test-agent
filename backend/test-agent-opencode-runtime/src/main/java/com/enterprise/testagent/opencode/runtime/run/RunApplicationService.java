@@ -62,6 +62,7 @@ import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLock
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
+import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
@@ -175,6 +176,7 @@ public class RunApplicationService {
     private RunOwnerLeaseSupervisor ownerLeaseSupervisor;
     private RunRuntimeLossConvergenceScheduler runtimeLossScheduler;
     private NightExecutionSessionLockGuard nightExecutionLockGuard;
+    private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -681,6 +683,13 @@ public class RunApplicationService {
         this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
     }
 
+    /** Run 启动前读取与 dispose 共用的用户级闸门，避免释放全部 workspace 实例时产生新任务竞态。 */
+    @Autowired(required = false)
+    void configureUserRuntimeDisposeCoordinator(UserRuntimeDisposeCoordinator coordinator) {
+        this.userRuntimeDisposeCoordinator = Objects.requireNonNull(
+                coordinator, "coordinator must not be null");
+    }
+
     /**
      * 创建兼容旧装配的服务实例，不显式传入快照服务时内部构造默认实现。
      */
@@ -844,6 +853,9 @@ public class RunApplicationService {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(resolvedAgentId)) {
             publicConfigMessageGate.requireAllowed(userId);
+        }
+        if (userRuntimeDisposeCoordinator != null) {
+            userRuntimeDisposeCoordinator.requireNotDisposing(userId, traceId);
         }
         ConversationRunContext conversationContext = resolveConversationContext(userId, resolvedAgentId, input, traceId);
         LOGGER.info("Run starting, userId={}, agentId={}, sessionId={}, traceId={}",

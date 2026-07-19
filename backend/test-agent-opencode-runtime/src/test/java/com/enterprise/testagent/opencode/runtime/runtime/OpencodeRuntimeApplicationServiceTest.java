@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.never;
@@ -31,6 +32,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
+import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.enterprise.testagent.opencode.client.OpencodeClientFacade;
 import com.enterprise.testagent.opencode.client.OpencodeCreateSessionCommand;
 import com.enterprise.testagent.opencode.client.OpencodeCreateSessionResult;
@@ -70,6 +72,51 @@ class OpencodeRuntimeApplicationServiceTest {
                                 "trace_1234567890abcdef")))
                 .isInstanceOf(PlatformException.class);
 
+        verify(fixture.facade, never()).runtime(any());
+    }
+
+    @Test
+    void legacyMessageEntrypointsUseSameUserDisposeGate() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        UserRuntimeDisposeCoordinator coordinator = org.mockito.Mockito.mock(UserRuntimeDisposeCoordinator.class);
+        doThrow(new PlatformException(ErrorCode.CONFLICT, "运行态正在释放"))
+                .when(coordinator)
+                .requireNotDisposing(userId, "trace_1234567890abcdef");
+        fixture.service.configureUserRuntimeDisposeCoordinator(coordinator);
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.sideQuestion(
+                                "ses_1234567890abcdef",
+                                new SideQuestionInput("问题", null, null, "provider/model"),
+                                "trace_1234567890abcdef")))
+                .isInstanceOf(PlatformException.class);
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.commandSession(
+                                "ses_1234567890abcdef",
+                                Map.of("command", "test"),
+                                "trace_1234567890abcdef")))
+                .isInstanceOf(PlatformException.class);
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.shellSession(
+                                "ses_1234567890abcdef",
+                                Map.of("command", "pwd"),
+                                "trace_1234567890abcdef")))
+                .isInstanceOf(PlatformException.class);
+        assertThatThrownBy(() -> fixture.service.withAgent(
+                        "custom-agent",
+                        userId,
+                        () -> fixture.service.sideQuestion(
+                                "ses_1234567890abcdef",
+                                new SideQuestionInput("自定义 Agent 问题", null, null, "provider/model"),
+                                "trace_1234567890abcdef")))
+                .isInstanceOf(PlatformException.class);
+
+        verify(coordinator, org.mockito.Mockito.times(4))
+                .requireNotDisposing(userId, "trace_1234567890abcdef");
         verify(fixture.facade, never()).runtime(any());
     }
 

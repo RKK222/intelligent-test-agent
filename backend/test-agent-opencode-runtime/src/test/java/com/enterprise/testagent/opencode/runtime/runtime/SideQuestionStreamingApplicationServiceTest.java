@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -18,6 +19,8 @@ import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessage;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.enterprise.testagent.agent.runtime.AgentStartRunCommand;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.event.RunEventDraft;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.event.RunEventType;
@@ -39,6 +42,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.event.RunEventAppender;
 import com.enterprise.testagent.event.RunEventLiveBus;
+import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -84,6 +88,38 @@ class SideQuestionStreamingApplicationServiceTest {
                         TRACE_ID))
                 .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class);
 
+        verify(fixture.sessions, never()).save(any());
+        verify(fixture.runs, never()).save(any());
+    }
+
+    @Test
+    void disposeGateBlocksPetAndManualQuestionsBeforeCreatingInternalRuns() {
+        Fixture fixture = new Fixture(Runnable::run);
+        UserRuntimeDisposeCoordinator coordinator = mock(UserRuntimeDisposeCoordinator.class);
+        doThrow(new PlatformException(ErrorCode.CONFLICT, "运行态正在释放"))
+                .when(coordinator)
+                .requireNotDisposing(USER_ID, TRACE_ID);
+        fixture.service.configureUserRuntimeDisposeCoordinator(coordinator);
+
+        assertThatThrownBy(() -> fixture.service.start(
+                        USER_ID,
+                        "opencode",
+                        MAIN_SESSION_ID,
+                        "宠物问题",
+                        null,
+                        "provider/model",
+                        TRACE_ID))
+                .isInstanceOf(PlatformException.class);
+        assertThatThrownBy(() -> fixture.service.startManual(
+                        USER_ID,
+                        "custom-agent",
+                        WORKSPACE_ID,
+                        "手册问题",
+                        "provider/model",
+                        TRACE_ID))
+                .isInstanceOf(PlatformException.class);
+
+        verify(coordinator, org.mockito.Mockito.times(2)).requireNotDisposing(USER_ID, TRACE_ID);
         verify(fixture.sessions, never()).save(any());
         verify(fixture.runs, never()).save(any());
     }

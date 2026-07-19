@@ -17,6 +17,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
+import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -45,6 +46,7 @@ public class OpencodeRuntimeApplicationService {
     private final ObjectMapper objectMapper;
     private final ModelCatalogApplicationService modelCatalogService;
     private final RunApplicationService runApplicationService;
+    private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
     private final ThreadLocal<String> agentContext = new ThreadLocal<>();
@@ -82,6 +84,13 @@ public class OpencodeRuntimeApplicationService {
     @Autowired
     void configurePublicConfigMessageGate(PublicAgentConfigMessageGate messageGate) {
         this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
+    }
+
+    /** 所有用户级 OpenCode dispose 入口共用同一套跨 Session 空闲闸门。 */
+    @Autowired(required = false)
+    void configureUserRuntimeDisposeCoordinator(UserRuntimeDisposeCoordinator coordinator) {
+        this.userRuntimeDisposeCoordinator = Objects.requireNonNull(
+                coordinator, "coordinator must not be null");
     }
 
     /**
@@ -327,7 +336,14 @@ public class OpencodeRuntimeApplicationService {
      * 触发 opencode runtime dispose，用于 Web App 设置页的服务重载能力。
      */
     public Object disposeGlobal(String traceId) {
-        return post(workspaceLocation(null, traceId), "/global/dispose", Map.of(), traceId);
+        UserId userId = currentUserId();
+        if (userId == null || userRuntimeDisposeCoordinator == null) {
+            return post(workspaceLocation(null, traceId), "/global/dispose", Map.of(), traceId);
+        }
+        return userRuntimeDisposeCoordinator.withUserIdle(
+                userId,
+                traceId,
+                () -> post(workspaceLocation(null, traceId), "/global/dispose", Map.of(), traceId));
     }
 
     /**
@@ -439,7 +455,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public SideQuestionResult sideQuestion(String sessionId, SideQuestionInput input, String traceId) {
         Objects.requireNonNull(input, "input must not be null");
-        requireNewMessageAllowed();
+        requireNewMessageAllowed(traceId);
         String question = SideQuestionPolicy.requireQuestion(input.question());
 
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
@@ -543,7 +559,7 @@ public class OpencodeRuntimeApplicationService {
      * 执行远端 session command。
      */
     public Object commandSession(String sessionId, Map<String, Object> body, String traceId) {
-        requireNewMessageAllowed();
+        requireNewMessageAllowed(traceId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/command", safeBody(body), traceId);
     }
@@ -552,7 +568,7 @@ public class OpencodeRuntimeApplicationService {
      * 执行远端 session shell 命令；shell 安全边界由 API 层和 opencode runtime 共同约束。
      */
     public Object shellSession(String sessionId, Map<String, Object> body, String traceId) {
-        requireNewMessageAllowed();
+        requireNewMessageAllowed(traceId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/shell", safeBody(body), traceId);
     }
@@ -918,10 +934,14 @@ public class OpencodeRuntimeApplicationService {
         return userContext.get();
     }
 
-    /** legacy runtime 中仍会触发新推理的入口统一复用公共配置门禁。 */
-    private void requireNewMessageAllowed() {
+    /** legacy runtime 中仍会触发新推理的入口统一复用公共配置与用户级 dispose 门禁。 */
+    private void requireNewMessageAllowed(String traceId) {
+        UserId userId = currentUserId();
         if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(currentAgentId())) {
-            publicConfigMessageGate.requireAllowed(currentUserId());
+            publicConfigMessageGate.requireAllowed(userId);
+        }
+        if (userRuntimeDisposeCoordinator != null) {
+            userRuntimeDisposeCoordinator.requireNotDisposing(userId, traceId);
         }
     }
 

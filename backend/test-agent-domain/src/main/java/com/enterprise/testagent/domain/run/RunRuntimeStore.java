@@ -136,6 +136,29 @@ public interface RunRuntimeStore {
     /** 用户是否已经进入 Redis 运行态链路；即使当前无 active Run 也用于阻止回退数据库轮询。 */
     boolean hasUserRuntimeState(UserId userId);
 
+    /**
+     * 原子申请当前用户的运行态 dispose 闸门；实现必须在申请时同时确认用户 active Run 索引为空。
+     * 未接入 Redis 运行态的兼容实现默认放行，由上层会话快照继续做保守校验。
+     */
+    default boolean tryAcquireUserRuntimeDispose(UserId userId, String token, Duration ttl) {
+        return true;
+    }
+
+    /** 返回当前用户是否已经有另一个 dispose 闸门，供 Run 启动入口拒绝竞态请求。 */
+    default boolean isUserRuntimeDisposeActive(UserId userId) {
+        return false;
+    }
+
+    /** 仅在 token 仍匹配时续租当前用户 dispose 闸门；false 表示租约已失效。 */
+    default boolean renewUserRuntimeDispose(UserId userId, String token, Duration ttl) {
+        return true;
+    }
+
+    /** 仅释放 token 仍匹配的当前用户 dispose 闸门。 */
+    default void releaseUserRuntimeDispose(UserId userId, String token) {
+        // 兼容未接入用户级 Redis 闸门的旧实现无需释放动作。
+    }
+
     List<RunRuntimeManifest> findActiveByServer(String linuxServerId);
 
     /** 查询同服务器恢复索引中尚未完成 PostgreSQL CAS 的终态 outbox；单次最多返回 limit 条。 */
