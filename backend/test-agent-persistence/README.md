@@ -140,8 +140,8 @@
 - `RedisConversationContextStoreTest` 覆盖同 slot SHA-256 token key、五类反向索引/generation、只读路由解析、签发 fence CAS、Session revoke gate、全局代次、Lua 原子保存与续期及 Redis 异常映射；`RedisConversationContextStoreIntegrationTest` 在提供真实 Redis 端口时验证完整 `OpencodeServerProcess` JSON 往返、Workspace/进程/全局失效、并发归档 gate CAS 回滚及 `beginIssue → invalidate/revoke → late save` 拒绝。
 - `RedisRunCapacityPolicyTest` 固化 USER 输入专用 key、4 MiB 关键快照预留、单槽规范化上限以及 APPEND/PROJECT Lua 对 assistant role、text part 和显式 reset 的脚本契约。`RedisRunRuntimeStoreIntegrationTest` 在提供真实 Redis 端口时验证并发 append 的原子 seq/`${seq}-0` Stream、manifest 与 active 索引、容量截断后仍保留 USER/最终 assistant/text part/run-status 的物化 snapshot/reset、transient delta 聚合、durable/transient runtimeVersion 顺序、status/attention、动态 key TTL、scopeVersion、dedup、pending 字节记账/容量拒绝/原子 drain，并校验真实 Redis `noeviction` / `appendfsync everysec`；`RedisRunRuntimeIndexReservationTest` 验证跨 slot 恢复索引先于单 Run Lua 且始终使用最大保留窗口；`RedisRunOwnerLeaseIntegrationTest` 额外覆盖条件接管、终态拒绝和所有 fenced 写入口的旧 token 隔离。测试未提供真实 Redis 端口时会跳过，不能用 H2 或 mock 替代 Lua/Streams 原子行为验证。
 - `RedisRunTerminalRetryStoreIntegrationTest` 验证 record/due 固定同 slot 与 Lua 原子写删契约，并使用真实 Redis 验证安全投影白名单、due 时间、generation 单调覆盖、旧重排拒绝、compare-delete 和不超过 24 小时的 TTL。
-- `MyBatisScheduledTaskRepositoryIntegrationTest` 覆盖 scheduler 任务/运行记录 XML 映射、亲和 USER_PLAN 到期查询和条件认领；`MyBatisScheduledTaskRunRetentionRepositoryIntegrationTest` 额外覆盖七天边界、活动状态保留和 `ended_at` 索引。
-- `MyBatisNightExecutionTaskRepositoryIntegrationTest` 覆盖 Flyway 建表、幂等查询、任务读写、会话锁、容量上限/释放和过期占位清理。
+- `MyBatisScheduledTaskRepositoryIntegrationTest` 以 PostgreSQL 小写标识符规则覆盖 scheduler 任务/运行记录 XML 的驼峰 Map 别名、亲和 USER_PLAN 到期查询和条件认领；`MyBatisScheduledTaskRunRetentionRepositoryIntegrationTest` 额外覆盖七天边界、活动状态保留和 `ended_at` 索引。
+- `MyBatisNightExecutionTaskRepositoryIntegrationTest` 以相同标识符规则覆盖 Flyway 建表、驼峰 Map 别名、幂等查询、任务读写、会话锁、容量上限/释放和过期占位清理。
 - Session 全局分页在空搜索条件下不会绑定可空 query pattern，避免 PostgreSQL 无法推断 null 参数类型。
 - ExecutionNode 覆盖可路由节点过滤：仅 READY 且 `running_runs < max_runs`，并按负载、权重、更新时间稳定排序。
 - `DruidDataSourceConfigurationTest` 覆盖 Druid DataSource 绑定和 Web 控制台默认关闭。

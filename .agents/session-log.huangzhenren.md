@@ -5,6 +5,21 @@
 
 ## Entries
 
+### 2026-07-19 - 修复 scheduler PostgreSQL Map 别名导致的启动失败
+
+- Why:
+  - scheduler 与夜间任务仓储从 JDBC 迁移到 MyBatis `resultType="map"` 后使用未引用的驼峰 SQL 别名；PostgreSQL 将 `taskKey` 折叠为 `taskkey`，Java 读取 `row.get("taskKey")` 得到空值，启动同步代码注册任务时触发 `taskKey must not be null`。
+- What:
+  - `ScheduledTaskMapper.xml` 与 `NightExecutionTaskMapper.xml` 的全部驼峰 Map 别名改为双引号精确别名，覆盖任务、计划、运行记录、夜间任务和容量统计读取。
+  - 两组 MyBatis 集成测试改用 H2 `DATABASE_TO_LOWER=true` 模拟 PostgreSQL 标识符折叠规则；同步 persistence README 的测试覆盖说明。
+- How:
+  - TDD 先在旧 Mapper 上复现 scheduler `taskKey` 和夜间任务 `taskId` NPE（4 个用例均失败），再做最小 XML 修复并复跑相同用例。
+  - 未修改 migration、数据库结构、API、RunEvent、环境配置或 generated SDK。
+- Result:
+  - 两组定向集成测试 4/4 通过；后端 18 模块 `mvn clean package -Dmaven.test.skip=true` 成功。
+  - 使用 `.env.test` / `test` profile 单独启动后端，Flyway 62 个 migration 校验成功、Redis 探测成功，`/actuator/health` 返回 `UP`，原始 NPE 未再出现。
+  - persistence 全量测试仍被既有 `V20260717173000` 的 `timestamptz` 与 H2 不兼容阻断（160 tests，76 errors），与本次别名修复无关；三服务脚本还因本机缺少 `go` 未启动 manager/frontend，本次仅验证后端。
+
 ### 2026-07-19 - 实施夜间异步执行任务
 
 - Why:

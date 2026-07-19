@@ -6,16 +6,18 @@
         select 1 from (select pg_advisory_xact_lock(hashtext(#{lockKey}))) locked
     </select>
     <select id="lockCreateRequest" resultType="int">select 1</select>
+    <!-- PostgreSQL 会折叠未引用的驼峰别名，Map 映射必须保留 Java 读取使用的精确键名。 -->
     <sql id="columns">
-        task_id as taskId, owner_user_id as ownerUserId, session_id as sessionId,
-        workspace_id as workspaceId, client_request_id as clientRequestId, session_title as sessionTitle,
-        content_preview as contentPreview, run_input_json as runInputJson, status,
-        slot_start as slotStart, slot_end as slotEnd, window_end as windowEnd,
-        target_linux_server_id as targetLinuxServerId, scheduled_task_run_id as scheduledTaskRunId,
-        run_id as runId, rollover_count as rolloverCount, task_created_session as taskCreatedSession,
-        dispatch_started_at as dispatchStartedAt, dismissed_at as dismissedAt,
-        reservation_released_at as reservationReleasedAt, error_code as errorCode,
-        error_message as errorMessage, trace_id as traceId, created_at as createdAt, updated_at as updatedAt
+        task_id as "taskId", owner_user_id as "ownerUserId", session_id as "sessionId",
+        workspace_id as "workspaceId", client_request_id as "clientRequestId", session_title as "sessionTitle",
+        content_preview as "contentPreview", run_input_json as "runInputJson", status,
+        slot_start as "slotStart", slot_end as "slotEnd", window_end as "windowEnd",
+        target_linux_server_id as "targetLinuxServerId", scheduled_task_run_id as "scheduledTaskRunId",
+        run_id as "runId", rollover_count as "rolloverCount", task_created_session as "taskCreatedSession",
+        dispatch_started_at as "dispatchStartedAt", dismissed_at as "dismissedAt",
+        reservation_released_at as "reservationReleasedAt", error_code as "errorCode",
+        error_message as "errorMessage", trace_id as "traceId", created_at as "createdAt",
+        updated_at as "updatedAt"
     </sql>
     <sql id="taskValues">
         owner_user_id=#{ownerUserId}, session_id=#{sessionId}, workspace_id=#{workspaceId},
@@ -100,7 +102,7 @@
     </select>
 
     <select id="reservationCounts" resultType="map">
-        select slot_start as slotStart, reserved_count as reservedCount
+        select slot_start as "slotStart", reserved_count as "reservedCount"
         from night_execution_slot_reservations
         where slot_start &gt;= #{windowStart} and slot_start &lt; #{windowEnd}
         order by slot_start

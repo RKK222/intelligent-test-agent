@@ -37,7 +37,7 @@ class MyBatisScheduledTaskRepositoryIntegrationTest {
     @BeforeEach
     void setUp() throws Exception {
         dataSource = new SingleConnectionDataSource(
-                ("jdbc:h2:mem:testagent_scheduler_mybatis_%s;MODE=PostgreSQL;DATABASE_TO_UPPER=false;"
+                ("jdbc:h2:mem:testagent_scheduler_mybatis_%s;MODE=PostgreSQL;DATABASE_TO_LOWER=true;"
                         + "INIT=CREATE DOMAIN IF NOT EXISTS TIMESTAMPTZ AS TIMESTAMP WITH TIME ZONE")
                         .formatted(UUID.randomUUID().toString().replace("-", "")),
                 "sa",
