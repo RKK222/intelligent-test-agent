@@ -5525,21 +5525,6 @@ function onCompositionEnd() {
         aria-modal="false"
         aria-label="会话列表"
       >
-        <header class="figma-chat-drawer-header">
-          <div class="figma-chat-drawer-title">
-            <span class="figma-chat-drawer-title-text">会话列表</span>
-            <span class="figma-chat-drawer-count">{{ historyTotalCount }}</span>
-          </div>
-          <button
-            type="button"
-            class="figma-chat-drawer-close"
-            aria-label="关闭会话列表抽屉"
-            @click="closeHistoryDrawer()"
-          >
-            <X :size="14" />
-          </button>
-        </header>
-
         <div class="figma-chat-history-tabs" role="tablist" aria-label="会话列表内容">
           <button
             :id="historyDrawerSessionsTabId"
@@ -5572,6 +5557,14 @@ function onCompositionEnd() {
             @keydown="onHistoryDrawerTabKeydown($event, 'night')"
           >
             待执行任务 <span>{{ nightTasks.length }}</span>
+          </button>
+          <button
+            type="button"
+            class="figma-chat-history-drawer-close"
+            aria-label="关闭会话列表抽屉"
+            @click="closeHistoryDrawer()"
+          >
+            <X :size="14" />
           </button>
         </div>
 
@@ -5935,6 +5928,26 @@ function onCompositionEnd() {
   border-bottom: 1px solid var(--ta-border, #e4e5e7);
   background: var(--ta-panel, #fafafa);
 }
+.figma-chat-history-drawer-close {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  margin-bottom: 4px;
+  border: none;
+  background: transparent;
+  color: var(--ta-muted, #71717a);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.12s ease;
+}
+.figma-chat-history-drawer-close:hover {
+  background: var(--ta-hover, #f0f0f0);
+  color: var(--ta-text, #18181b);
+}
 .figma-chat-history-tab {
   position: relative;
   display: inline-flex;
@@ -6286,7 +6299,7 @@ function onCompositionEnd() {
 .figma-chat-history-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -6295,8 +6308,8 @@ function onCompositionEnd() {
   width: 100%;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
+  gap: 8px;
+  padding: 8px 12px;
   border-radius: 8px;
   background: var(--ta-surface);
   border: 1px solid var(--ta-border);
@@ -6350,7 +6363,7 @@ function onCompositionEnd() {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .figma-chat-history-card-title {
   flex: 1;
@@ -6380,7 +6393,7 @@ function onCompositionEnd() {
   background: #dcfce7;
 }
 .figma-chat-history-card-context {
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   color: var(--ta-muted);
   font-size: 12px;
   line-height: 1.4;

@@ -11,8 +11,8 @@ describe("session list drawer placement", () => {
     expect(placement).toEqual({
       mode: "left",
       top: 40,
-      left: 540,
-      width: 360,
+      left: 500,
+      width: 400,
       height: 720
     });
   });
@@ -50,8 +50,8 @@ describe("session list drawer placement", () => {
     expect(placement).toEqual({
       mode: "left",
       top: 8,
-      left: 540,
-      width: 360,
+      left: 500,
+      width: 400,
       height: 784
     });
   });

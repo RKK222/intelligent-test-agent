@@ -18,7 +18,7 @@ export type SessionListDrawerPlacement = {
   height: number;
 };
 
-const DRAWER_MAX_WIDTH = 360;
+const DRAWER_MAX_WIDTH = 400;
 const DRAWER_MIN_LEFT_WIDTH = 280;
 const VIEWPORT_MARGIN = 8;
 

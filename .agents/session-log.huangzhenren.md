@@ -5,6 +5,29 @@
 
 ## Entries
 
+### 2026-07-19 - 优化会话列表样式与布局
+
+- Why:
+  - 用户的会话列表单项垂直高度偏大，限制了一屏内能展示的会话数量；且顶部的“会话列表”标题栏占用了空间，用户希望移除该标题栏，并将关闭按钮移至选项卡右侧以使布局更紧凑，同时希望抽屉宽度更宽。
+- What:
+  - 修改 `FigmaChatPanel.vue` 中会话卡片的 CSS 样式，重构了历史会话抽屉的 DOM 结构与样式，并增加了抽屉的最大宽度限制：
+    - 移除了顶部的 `<header class="figma-chat-drawer-header">`。
+    - 将带有 `aria-label="关闭会话列表抽屉"` 属性的关闭按钮移入选项卡面板 `.figma-chat-history-tabs` 中，并为其添加新的定位样式使其靠右对齐。
+    - 微调了卡片 padding、margin 以及列表 gap 属性，进一步压缩垂直空隙。
+    - 修改 `session-list-drawer.ts`，将抽屉最大宽度 `DRAWER_MAX_WIDTH` 从 360 像素提升至 400 像素，并同步更新了 `session-list-drawer.test.ts` 中对应的断言。
+- How:
+  - 将 `.figma-chat-history-list` 的 `gap` 从 `8px` 调整为 `6px`。
+  - 将 `.figma-chat-history-card` 的 `padding` 从 `12px` 调整为 `8px 12px`，其内 icon 与 content 的 `gap` 从 `12px` 调整为 `8px`。
+  - 将 `.figma-chat-history-card-title-row` 和 `.figma-chat-history-card-context` 的 `margin-bottom` 从 `4px` 调整为 `2px`。
+  - 移除了历史抽屉标题，在 `figma-chat-history-tabs` 中追加 close 按钮，利用 `margin-left: auto` 和 `align-self: center` 样式使其在选项卡右侧居中对齐，并保持 hover 背景切换效果。
+  - 修改 `session-list-drawer.ts` 中 `const DRAWER_MAX_WIDTH = 400;`，并调整对应单测中的 `width` 与计算出的 `left` 坐标值。
+- Result:
+  - 成功缩减了每个历史会话列表项的高度，移除了无用的标题栏，抽屉宽度调整为 400px，整体界面布局更加紧凑实用。
+  - 运行单元测试 `vitest run FigmaChatPanel` (132 tests) 和 `vitest run session-list-drawer` (4 tests) 全部通过。
+  - 前端 `typecheck` 验证无类型报错。
+- Verification:
+  - 在 `frontend` 目录下执行 `corepack pnpm test FigmaChatPanel` 和 `corepack pnpm --filter @test-agent/agent-web typecheck`。
+
 ### 2026-07-19 - 修复内存通用参数早于 Flyway 加载
 
 - Why:
