@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-07-19 - Flowchart 快捷图形选中后立即收起菜单
+
+- Why:
+  - Flowchart 快捷建连选择备选图形后只发出了建连事件，没有清空当前快捷箭头状态，Teleport 备选菜单会继续遮挡画布。
+- What:
+  - 快捷图形选中时先清理菜单关闭/箭头悬停定时器并复位活动箭头，再沿用原有 `quickConnect` 数据创建节点和连线；四向快捷箭头、端口与建连规则不变。
+  - 同步前端总览和 editor 包 README，明确备选图形选中后菜单立即收起。
+- How:
+  - TDD 先新增“选择快捷图形后立即关闭备选菜单”组件用例并确认旧实现失败；代码审查进一步覆盖节点/箭头离开、进入 Teleport 菜单再点击的真实路径，确保菜单和已离开节点的四向箭头同步收敛。
+- Result:
+  - MermaidVisualEditor 组件测试 121/121、前端全量 Vitest 1401 passed / 1 skipped、lint、typecheck、production build 和 `git diff --check` 通过；构建只保留既有大 chunk 警告。
+  - 不涉及 API、RunEvent、数据库、性能、安全、依赖或环境配置。
+
 ### 2026-07-19 - 修复 scheduler PostgreSQL Map 别名导致的启动失败
 
 - Why:

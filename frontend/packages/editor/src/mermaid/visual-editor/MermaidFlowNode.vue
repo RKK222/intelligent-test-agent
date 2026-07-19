@@ -261,6 +261,11 @@ function onArrowMouseLeave() {
 function emitQuickConnect(shapeType: MermaidNodeType) {
   const arrow = activeQuickArrow.value;
   if (!arrow) return;
+  // 选中备选图形后立即收起 Teleport 菜单，避免建连完成后菜单继续遮挡画布。
+  clearQuickMenuCloseTimer();
+  clearArrowHoverTimer();
+  activeQuickArrow.value = undefined;
+  if (!nodeHovered.value && !nodeFocused.value) hovered.value = false;
   emit("quickConnect", { nodeId: props.id, portId: arrow.portId, position: arrow.dir, shapeType });
 }
 

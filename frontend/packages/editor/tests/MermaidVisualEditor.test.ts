@@ -574,6 +574,37 @@ describe("MermaidFlowNode", () => {
     }
   });
 
+  it("选择快捷图形后立即关闭备选菜单", async () => {
+    vi.useFakeTimers();
+    try {
+      const { container, emitted } = render(MermaidFlowNode, {
+        props: { id: "A", data: { text: "开始", nodeType: "rectangle", direction: "LR" } }
+      });
+      const root = container.querySelector<HTMLElement>("[data-mermaid-node-id]")!;
+      await fireEvent.mouseEnter(root);
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+      const arrow = container.querySelector<HTMLElement>(".ta-mermaid-quick-arrow")!;
+      await fireEvent.mouseEnter(arrow);
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
+
+      const menu = document.body.querySelector<HTMLElement>(".ta-mermaid-quick-menu")!;
+      // 真实鼠标路径会先离开箭头和节点，再进入 Teleport 到 body 的菜单。
+      await fireEvent.mouseLeave(arrow);
+      await fireEvent.mouseLeave(root);
+      await fireEvent.mouseEnter(menu);
+      const button = menu.querySelector<HTMLElement>("button")!;
+      await fireEvent.click(button);
+
+      expect(emitted().quickConnect).toHaveLength(1);
+      expect(document.body.querySelector(".ta-mermaid-quick-menu")).toBeNull();
+      expect(container.querySelectorAll(".ta-mermaid-quick-connector-wrapper")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("快捷建连使用包含十四种中文名称的双列菜单", async () => {
     vi.useFakeTimers();
     try {
