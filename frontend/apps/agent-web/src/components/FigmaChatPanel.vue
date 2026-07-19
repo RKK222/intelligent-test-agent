@@ -2831,6 +2831,14 @@ function openHistoryDrawer() {
   })
 }
 
+function toggleHistoryDrawer() {
+  if (historyDrawerOpen.value) {
+    closeHistoryDrawer()
+    return
+  }
+  openHistoryDrawer()
+}
+
 function showHistoryDrawerView(view: HistoryDrawerView) {
   historyDrawerView.value = view
   if (view === 'night') emit('request-night-tasks')
@@ -3776,7 +3784,9 @@ function onCompositionEnd() {
           type="button"
           class="figma-chat-header-btn"
           title="查看会话列表"
-          @click="openHistoryDrawer"
+          :aria-expanded="historyDrawerOpen"
+          aria-haspopup="dialog"
+          @click="toggleHistoryDrawer"
         >
           <span class="figma-chat-history-header-icon">
             <Spinner

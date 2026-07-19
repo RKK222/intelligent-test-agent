@@ -1265,6 +1265,36 @@ describe("FigmaChatPanel", () => {
     }
   });
 
+  it("closes the session list drawer when the header trigger is clicked again", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(FigmaChatPanel, {
+      attachTo: host,
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: []
+      } as any
+    });
+
+    try {
+      const trigger = wrapper.get('button[title="查看会话列表"]');
+      expect(trigger.attributes("aria-expanded")).toBe("false");
+      await trigger.trigger("click");
+      await nextTick();
+      expect(document.body.querySelector('[aria-label="会话列表"]')).not.toBeNull();
+      expect(trigger.attributes("aria-expanded")).toBe("true");
+
+      await trigger.trigger("click");
+      await nextTick();
+      expect(document.body.querySelector('[aria-label="会话列表"]')).toBeNull();
+      expect(trigger.attributes("aria-expanded")).toBe("false");
+    } finally {
+      wrapper.unmount();
+      host.remove();
+    }
+  });
+
   it("keeps the session list drawer open while switching sessions and closes it explicitly", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

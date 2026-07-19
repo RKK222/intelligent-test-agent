@@ -24,14 +24,14 @@
   - 主对话顶部“对话 / 待执行任务”页签占用内容空间，历史会话选择后列表自动关闭，连续查找会话效率较低；原始输出页面缓存也需要明确的内存上限。
 - What:
   - 主区域固定展示当前会话；顶部“消息列表”统一改为“会话列表”，会话与待执行任务迁入 Teleport 非模态抽屉。桌面抽屉贴在右侧对话栏左侧，窄屏退化为视口内覆盖，并随栏位、滚动与窗口尺寸更新。
-  - 会话/任务选择继续复用既有回调且不关闭抽屉，当前会话增加选中态；抽屉只由关闭按钮、Esc 或右侧栏收起关闭，每次重新打开默认进入会话页签，并补齐 WAI-ARIA Tab 键盘交互。
+  - 会话/任务选择继续复用既有回调且不关闭抽屉，当前会话增加选中态；抽屉可由再次点击“会话列表”入口、关闭按钮、Esc 或右侧栏收起关闭，每次重新打开默认进入会话页签，并补齐入口 `aria-expanded` 与 WAI-ARIA Tab 键盘交互。
   - 每个 Session 的原始输出内存缓存改为有界追加，只保留最新 2000 条；继续沿用既有 Session 隔离、脱敏、正文截断和刷新清空规则。
   - 同步 frontend、agent-web、agent-chat、模块地图和内置对话手册；更新 mock/real E2E 选择器与关键连续切换场景。
 - How:
   - 新增纯函数 `resolveSessionListDrawerPlacement` 统一桌面/窄屏定位；`FigmaChatPanel` 仅增加内部可选 `panelVisible` 属性，现有 `select-session`、夜间任务事件和会话加载流程不变。
-  - TDD 覆盖主页签移除、抽屉双页签/关闭边界/当前项/键盘操作/窄屏定位，以及 2001 条原始输出保留最后 2000 条和顺序不变。
+  - TDD 覆盖主页签移除、抽屉双页签/入口二次点击收起/关闭边界/当前项/键盘操作/窄屏定位，以及 2001 条原始输出保留最后 2000 条和顺序不变。
 - Result:
-  - `corepack pnpm lint`、`typecheck`、`test`、`build` 全部通过；Vitest 86 个文件共 1419 passed / 1 skipped。关键 Playwright 场景在 Chromium/mobile 4/4 通过，另两个抽屉保持开启后的精确选择器用例 2/2 通过。
+  - `corepack pnpm lint`、`typecheck`、`test`、`build` 全部通过；Vitest 86 个文件共 1420 passed / 1 skipped。关键 Playwright 场景在 Chromium/mobile 4/4 通过，另两个抽屉保持开启后的精确选择器用例 2/2 通过。
   - 完整 mock E2E 已执行，但在本次未改动的 Agent/文件树基线用例中持续失败（`.agent-root-row` 隐藏、mock Agent 目录缺失）；手动停止时为 5 passed、15 failed、2 interrupted、178 did not run，退出码 130。本任务会话列表关键路径不受影响。
   - 不涉及 HTTP/SSE API、DTO、RunEvent、数据库、后端会话逻辑、权限、安全、环境配置、generated SDK 或新依赖；构建只保留既有大 chunk 提示。
 
