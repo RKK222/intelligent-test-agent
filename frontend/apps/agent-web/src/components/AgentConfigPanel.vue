@@ -1340,51 +1340,53 @@ defineExpose({
             <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
           </button>
         </el-tooltip>
-        <button
-          v-if="canWrite"
-          type="button"
-          class="agent-icon-btn"
-          title="Agent 配置更新（公共）"
-          aria-label="Agent 配置更新（公共）"
-          :disabled="personalRuntimeReloadDisabled || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
-          @click="requestPersonalRuntimeReload('PUBLIC')"
-        >
-          <RefreshCw
-            class="h-3.5 w-3.5"
-            :class="{ 'animate-spin': personalRuntimeReloading === 'PUBLIC' }"
-            :stroke-width="1.5"
-          />
-        </button>
-        <div v-if="canWrite" class="agent-more-menu-container">
+        <div class="agent-root-actions">
+          <div v-if="canWrite" class="agent-more-menu-container">
+            <button
+              type="button"
+              class="agent-icon-btn"
+              title="更多操作"
+              aria-label="更多操作"
+              :disabled="busy || status.PUBLIC?.enabled === false"
+            >
+              <MoreHorizontal class="h-3.5 w-3.5" :stroke-width="1.5" />
+            </button>
+            <div class="agent-more-menu-dropdown">
+              <button
+                type="button"
+                class="agent-dropdown-item"
+                :disabled="busy || status.PUBLIC?.enabled === false"
+                @click="openCreatePublicWorktreeModal"
+              >
+                <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+                <span>创建公共 worktree</span>
+              </button>
+              <button
+                type="button"
+                class="agent-dropdown-item"
+                :disabled="busy || status.PUBLIC?.enabled === false"
+                @click="openSwitchWorktreeModal"
+              >
+                <GitBranch class="h-3.5 w-3.5" :stroke-width="1.5" />
+                <span>切换公共 worktree</span>
+              </button>
+            </div>
+          </div>
           <button
+            v-if="canWrite"
             type="button"
             class="agent-icon-btn"
-            title="更多操作"
-            aria-label="更多操作"
-            :disabled="busy || status.PUBLIC?.enabled === false"
+            title="Agent 配置更新（公共）"
+            aria-label="Agent 配置更新（公共）"
+            :disabled="personalRuntimeReloadDisabled || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
+            @click="requestPersonalRuntimeReload('PUBLIC')"
           >
-            <MoreHorizontal class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <RefreshCw
+              class="h-3.5 w-3.5"
+              :class="{ 'animate-spin': personalRuntimeReloading === 'PUBLIC' }"
+              :stroke-width="1.5"
+            />
           </button>
-          <div class="agent-more-menu-dropdown">
-            <button
-              type="button"
-              class="agent-dropdown-item"
-              :disabled="busy || status.PUBLIC?.enabled === false"
-              @click="openCreatePublicWorktreeModal"
-            >
-              <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span>创建公共 worktree</span>
-            </button>
-            <button
-              type="button"
-              class="agent-dropdown-item"
-              :disabled="busy || status.PUBLIC?.enabled === false"
-              @click="openSwitchWorktreeModal"
-            >
-              <GitBranch class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span>切换公共 worktree</span>
-            </button>
-          </div>
         </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
@@ -1417,32 +1419,34 @@ defineExpose({
             <span v-if="workspaceId" class="agent-root-badge">个人 worktree</span>
           </button>
         </el-tooltip>
-        <button
-          v-if="workspaceCanWrite"
-          type="button"
-          class="agent-icon-btn"
-          title="初始化应用 Agent/Skill 配置包"
-          aria-label="初始化应用 Agent/Skill 配置包"
-          :disabled="busy || !workspaceId"
-          @click="openCreateWorkspacePackageModal"
-        >
-          <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
-        </button>
-        <button
-          v-if="workspaceCanWrite"
-          type="button"
-          class="agent-icon-btn"
-          title="Agent 配置更新（应用）"
-          aria-label="Agent 配置更新（应用）"
-          :disabled="personalRuntimeReloadDisabled || !workspaceId"
-          @click="requestPersonalRuntimeReload('WORKSPACE')"
-        >
-          <RefreshCw
-            class="h-3.5 w-3.5"
-            :class="{ 'animate-spin': personalRuntimeReloading === 'WORKSPACE' }"
-            :stroke-width="1.5"
-          />
-        </button>
+        <div class="agent-root-actions">
+          <button
+            v-if="workspaceCanWrite"
+            type="button"
+            class="agent-icon-btn"
+            title="初始化应用 Agent/Skill 配置包"
+            aria-label="初始化应用 Agent/Skill 配置包"
+            :disabled="busy || !workspaceId"
+            @click="openCreateWorkspacePackageModal"
+          >
+            <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </button>
+          <button
+            v-if="workspaceCanWrite"
+            type="button"
+            class="agent-icon-btn"
+            title="Agent 配置更新（应用）"
+            aria-label="Agent 配置更新（应用）"
+            :disabled="personalRuntimeReloadDisabled || !workspaceId"
+            @click="requestPersonalRuntimeReload('WORKSPACE')"
+          >
+            <RefreshCw
+              class="h-3.5 w-3.5"
+              :class="{ 'animate-spin': personalRuntimeReloading === 'WORKSPACE' }"
+              :stroke-width="1.5"
+            />
+          </button>
+        </div>
       </div>
       <div v-if="rootExpanded.has('WORKSPACE')" class="agent-node-list">
         <div v-if="loadingByScope.WORKSPACE.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
@@ -2068,6 +2072,14 @@ defineExpose({
   line-height: var(--ta-tree-row-height, 22px);
   padding: 0 0 0 6px;
   cursor: pointer;
+}
+.agent-root-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  height: 100%;
 }
 .agent-root-title {
   flex-shrink: 0;

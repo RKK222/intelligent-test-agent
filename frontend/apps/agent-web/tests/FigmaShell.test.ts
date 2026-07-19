@@ -146,6 +146,26 @@ describe("FigmaShell", () => {
     expect(wrapper.emitted("personal-runtime-reload")?.[0]).toEqual([{ scope: "PUBLIC" }]);
   });
 
+  it("hides runtime controls while the pet selection page is open", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell({
+      props: {
+        canManagePublicAgentConfig: true,
+        canManageWorkspaceAgentConfig: true
+      }
+    });
+    await summonRobot(wrapper);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('button[aria-label="选择小宠物"]').trigger("click");
+    expect(wrapper.find('[data-testid="pet-companion-settings"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="pet-runtime-reload-actions"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="pet-runtime-reload-confirm"]').exists()).toBe(false);
+  });
+
   it("hides personal Agent update controls without update permission", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);

@@ -531,7 +531,11 @@ function nudgePetScale(delta: number) {
 
 function togglePetSettings() {
   petSettingsOpen.value = !petSettingsOpen.value;
-  if (petSettingsOpen.value) robotGameOpen.value = false;
+  if (petSettingsOpen.value) {
+    robotGameOpen.value = false;
+    // 选择页只负责伙伴与大小偏好；切入选择页时收起对话页里的运行态确认提示。
+    pendingPetRuntimeReloadScope.value = null;
+  }
 }
 
 refreshActivePet();
@@ -2205,7 +2209,7 @@ function submitJoinApp() {
         </div>
       </header>
       <div
-        v-if="(canManagePublicAgentConfig || canManageWorkspaceAgentConfig) && !robotGameOpen"
+        v-if="(canManagePublicAgentConfig || canManageWorkspaceAgentConfig) && !robotGameOpen && !petSettingsOpen"
         class="figma-pet-runtime-actions"
         data-testid="pet-runtime-reload-actions"
       >
@@ -2238,7 +2242,7 @@ function submitJoinApp() {
         </div>
       </div>
       <div
-        v-if="pendingPetRuntimeReloadScope"
+        v-if="pendingPetRuntimeReloadScope && !petSettingsOpen"
         class="figma-pet-runtime-confirm"
         role="status"
         data-testid="pet-runtime-reload-confirm"

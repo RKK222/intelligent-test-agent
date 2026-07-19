@@ -201,6 +201,14 @@ describe("AgentConfigPanel", () => {
     const { view } = renderPanel();
 
     await view.findByText("worktree · change-agent-md · 测试服务器");
+    const rootRows = view.container.querySelectorAll(".agent-root-row");
+    expect(rootRows).toHaveLength(2);
+    expect([...rootRows[0].querySelectorAll(".agent-root-actions > button, .agent-root-actions > .agent-more-menu-container > button")]
+      .map((button) => button.getAttribute("aria-label")))
+      .toEqual(["更多操作", "Agent 配置更新（公共）"]);
+    expect([...rootRows[1].querySelectorAll(".agent-root-actions > button")]
+      .map((button) => button.getAttribute("aria-label")))
+      .toEqual(["初始化应用 Agent/Skill 配置包", "Agent 配置更新（应用）"]);
     await fireEvent.click(view.getByRole("button", { name: "Agent 配置更新（公共）" }));
     await waitFor(() => {
       const events = (view.emitted("personal-runtime-reload") ?? []) as unknown[][];
