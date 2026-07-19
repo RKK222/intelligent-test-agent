@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-07-19 - 修复引用文件定位到当前文件失效
+
+- Why:
+  - 编辑器页脚“定位到当前文件”和标签双击沿用普通工作区相对路径展开逻辑，但引用 tab 使用 `workspace-reference:` 合成身份，导致折叠的引用祖先目录无法展开和滚动。
+- What:
+  - 新增纯函数按组合文件树的稳定节点 ID 和“父目录 ID → 子节点”缓存反向恢复祖先链；缺失、不完整或循环链路失败关闭，不按展示路径猜测。
+  - `AgentWorkbench` 对引用 tab 使用打开文件时保存的稳定叶子节点 ID，从根到叶展开祖先；普通工作区文件继续使用原相对路径逻辑，两类路径都等待展开完成后再高亮滚动。
+  - 同步 agent-web 与 file-explorer README，明确合并引用、非合并引用及同名冲突的精确定位规则。
+- How:
+  - TDD 先增加合并引用、非合并别名根、同名工作区/引用和异常父链回归并确认 4 项失败，再实现纯函数；随后增加 `AgentWorkbench` 接入断言并确认失败，再完成稳定节点展开。
+  - 保持 `WorkbenchFooter`、`FigmaEditorArea` 的事件签名和 `EditorTab` 数据结构不变，没有新增接口或全局定位服务。
+- Result:
+  - 引用文件可通过页脚按钮或标签双击精确展开到实际引用节点；同名冲突不会误选工作区副本，普通文件定位还消除了未等待异步目录展开就提前滚动的时序问题。
+  - 不涉及 HTTP API、RunEvent、数据库、backend、OpenCode manager、generated SDK、依赖、安全或环境配置。
+- Verification:
+  - 定向 Vitest 3 个文件 31/31 通过；全量 Vitest 85 个文件 1406 passed / 1 skipped。
+  - 全仓 `corepack pnpm typecheck`、`corepack pnpm lint`、生产 `corepack pnpm build` 和 `git diff --check` 通过；构建仅保留既有大 chunk 警告。
+  - 首次把全量 Vitest 与 typecheck/lint 并行运行时，`opencode-timeline` 一项出现时序失败；该用例定向复跑通过，随后独立全量 Vitest 复跑全部通过。
+
 ### 2026-07-19 - Flowchart 快捷图形选中后立即收起菜单
 
 - Why:
