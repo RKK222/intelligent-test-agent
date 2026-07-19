@@ -18,7 +18,6 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -26,7 +25,7 @@ import org.springframework.stereotype.Service;
  * 本 Java 进程的显式内存通用参数注册表，统一负责启动加载、事件刷新、手工刷新和诊断状态。
  */
 @Service
-public class CommonParameterMemoryRegistry implements SmartInitializingSingleton {
+public class CommonParameterMemoryRegistry {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CommonParameterMemoryRegistry.class);
 
@@ -75,12 +74,6 @@ public class CommonParameterMemoryRegistry implements SmartInitializingSingleton
         if (!failures.isEmpty()) {
             throw new IllegalStateException("JVM 内存通用参数启动加载失败: " + String.join(",", failures));
         }
-    }
-
-    /** Spring 完成单例装配后立即执行严格加载，避免 Web 接口观察到未初始化状态。 */
-    @Override
-    public void afterSingletonsInstantiated() {
-        loadOnStartup();
     }
 
     /** 返回按英文名、平台稳定排序的当前诊断状态。 */

@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-07-19 - 修复内存通用参数早于 Flyway 加载
+
+- Why:
+  - 项目通过最高优先级 `ApplicationRunner` 执行运行态 Flyway，而内存通用参数注册表原先在 Spring 单例装配完成时查库；新环境尚未执行参数种子 migration，因而以“数据库值缺失”阻止启动。
+- What:
+  - 移除 `CommonParameterMemoryRegistry` 的 `SmartInitializingSingleton` 启动回调，新增紧随 `DatabaseMigrationRunner` 的 `CommonParameterMemoryStartupRunner`，在 migration 完成后、scheduler 等默认业务 Runner 前继续执行严格加载。
+  - 同步 app、configuration-management 与后端部署文档中的启动生命周期说明；严格失败语义、参数值、API、事件和数据库结构均不变。
+- How:
+  - TDD 先用缺失 runner 的编译失败固化预期，再验证新 runner 调用注册表、顺序为 `HIGHEST_PRECEDENCE + 1`，并确认注册表不再实现单例初始化回调。
+- Result:
+  - 聚焦回归测试和后端跳过测试打包通过；按 `.env.test` 重启后，日志确认 Flyway 成功应用 `V20260719210000`，随后加载 `NIGHT_EXECUTION_SLOT_CAPACITY/all`，readiness 为 `UP`。
+  - 测试库参数为 `20/all/editable=true`。不涉及新增 API、RunEvent、数据库结构、环境配置、安全或兼容性变化；仅修正已有 migration 与内存加载的启动先后顺序。
+
 ### 2026-07-19 - 优化对话页会话列表交互
 
 - Why:
