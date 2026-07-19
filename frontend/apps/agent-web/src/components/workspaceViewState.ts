@@ -165,6 +165,39 @@ export function collectWorkspaceViewWarnings(
   return warnings;
 }
 
+type WorkspaceViewIdentityEntry = Pick<FileTreeEntry, "type"> & { id?: string };
+
+/** 按当前已加载的稳定节点关系反向恢复祖先；链路异常时不按展示路径猜测。 */
+export function workspaceViewAncestorDirectoryIds(
+  targetNodeId: string,
+  entriesByDirectory: Readonly<Record<string, readonly WorkspaceViewIdentityEntry[]>>
+): string[] | undefined {
+  if (!targetNodeId) return undefined;
+  const parentByNodeId = new Map<string, string>();
+  const directoryIds = new Set<string>();
+  for (const [parentId, entries] of Object.entries(entriesByDirectory)) {
+    for (const entry of entries) {
+      if (!entry.id) continue;
+      parentByNodeId.set(entry.id, parentId);
+      if (entry.type === "directory") directoryIds.add(entry.id);
+    }
+  }
+  if (!parentByNodeId.has(targetNodeId)) return undefined;
+
+  const ancestors: string[] = [];
+  const visited = new Set([targetNodeId]);
+  let current = targetNodeId;
+  while (parentByNodeId.has(current)) {
+    const parentId = parentByNodeId.get(current)!;
+    if (parentId === "") return ancestors.reverse();
+    if (visited.has(parentId) || !directoryIds.has(parentId)) return undefined;
+    visited.add(parentId);
+    ancestors.push(parentId);
+    current = parentId;
+  }
+  return undefined;
+}
+
 function pathDepth(path: string): number {
   return path.split(/[\\/]+/).filter(Boolean).length;
 }

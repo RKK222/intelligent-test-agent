@@ -6,6 +6,7 @@ import {
   referenceChatPath,
   revalidatedWorkspaceViewRefreshTarget,
   resolveWorkspaceViewLoadTarget,
+  workspaceViewAncestorDirectoryIds,
   workspaceViewContextIsCurrent,
   workspaceViewEntries,
   workspaceViewRefreshTargets
@@ -29,6 +30,61 @@ function directory(id: string, path: string): WorkspaceViewEntry {
 }
 
 describe("workspace view state", () => {
+  it("restores merged reference ancestors from stable node ids", () => {
+    const entries = {
+      "": [{ id: "mixed:docs", type: "directory" as const }],
+      "mixed:docs": [{ id: "reference:assets:docs/guide.md", type: "file" as const }]
+    };
+
+    expect(workspaceViewAncestorDirectoryIds("reference:assets:docs/guide.md", entries)).toEqual([
+      "mixed:docs"
+    ]);
+  });
+
+  it("restores alias and nested directories for non-merged references", () => {
+    const entries = {
+      "": [{ id: "reference-root:assets", type: "directory" as const }],
+      "reference-root:assets": [{ id: "reference:assets:docs", type: "directory" as const }],
+      "reference:assets:docs": [{ id: "reference:assets:docs/guide.md", type: "file" as const }]
+    };
+
+    expect(workspaceViewAncestorDirectoryIds("reference:assets:docs/guide.md", entries)).toEqual([
+      "reference-root:assets",
+      "reference:assets:docs"
+    ]);
+  });
+
+  it("does not confuse same-name workspace and reference nodes", () => {
+    const entries = {
+      "": [
+        { id: "workspace:docs", type: "directory" as const },
+        { id: "reference-root:assets", type: "directory" as const }
+      ],
+      "workspace:docs": [{ id: "workspace:docs/guide.md", type: "file" as const }],
+      "reference-root:assets": [{ id: "reference:assets:docs", type: "directory" as const }],
+      "reference:assets:docs": [{ id: "reference:assets:docs/guide.md", type: "file" as const }]
+    };
+
+    expect(workspaceViewAncestorDirectoryIds("reference:assets:docs/guide.md", entries)).toEqual([
+      "reference-root:assets",
+      "reference:assets:docs"
+    ]);
+  });
+
+  it("rejects missing, incomplete and cyclic parent chains", () => {
+    expect(workspaceViewAncestorDirectoryIds("missing", { "": [] })).toBeUndefined();
+    expect(workspaceViewAncestorDirectoryIds("reference:file", {
+      orphan: [{ id: "reference:file", type: "file" as const }]
+    })).toBeUndefined();
+    expect(workspaceViewAncestorDirectoryIds("reference:file", {
+      "loop-a": [
+        { id: "reference:file", type: "file" as const },
+        { id: "loop-b", type: "directory" as const }
+      ],
+      "loop-b": [{ id: "loop-a", type: "directory" as const }]
+    })).toBeUndefined();
+  });
+
   it("refreshes root plus only expanded nodes that still have stable locator records", () => {
     const docs = directory("mixed:docs", "docs");
     const api = directory("mixed:docs/api", "docs/api");
