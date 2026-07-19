@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch, type CSSProperties } from 'vue'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -58,6 +58,7 @@ import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
 import type { WorkspaceRequirementReference } from './workbench-utils'
+import { resolveSessionListDrawerPlacement } from './session-list-drawer'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -739,6 +740,8 @@ const props =
     /** 当前 root 会话；历史切换时用于退出上一次子 Agent 视图。 */
     currentSessionId?: string
     currentSessionSourceType?: string | null
+    /** 右侧对话栏是否可见；收起时同步关闭传送到 body 的会话列表浮层。 */
+    panelVisible?: boolean
     /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
     messageScopesById?: Record<string, MessageScope>
     /** 当前运行期发现的子 Agent 会话索引。 */
@@ -777,7 +780,8 @@ const props =
     currentNightTask: null,
     nightVisibleFailure: null,
     nightSlots: null,
-    nightTaskActionPending: () => ({})
+    nightTaskActionPending: () => ({}),
+    panelVisible: true,
   })
 
 const emit =
@@ -831,7 +835,6 @@ const emit =
 const collapsedMessages = ref<Record<string, boolean>>({})
 
 const localInput = ref(props.inputValue ?? '')
-const mainView = ref<'conversation' | 'night'>('conversation')
 const nightPickerOpen = ref(false)
 const nightPickerMode = ref<'create' | 'adjust'>('create')
 const adjustingNightTaskId = ref<string | null>(null)
@@ -2750,7 +2753,22 @@ function selectDrawerFile(path: string) {
   void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }))
 }
 
+type HistoryDrawerView = 'sessions' | 'night'
+
+const chatRootEl = ref<HTMLElement | null>(null)
+const historyDrawerTriggerEl = ref<HTMLButtonElement | null>(null)
+const historyDrawerSearchEl = ref<HTMLInputElement | null>(null)
+const historyDrawerSessionsTabEl = ref<HTMLButtonElement | null>(null)
+const historyDrawerNightTabEl = ref<HTMLButtonElement | null>(null)
+const historyDrawerId = useId()
+const historyDrawerSessionsTabId = `${historyDrawerId}-sessions-tab`
+const historyDrawerNightTabId = `${historyDrawerId}-night-tab`
+const historyDrawerSessionsPanelId = `${historyDrawerId}-sessions-panel`
+const historyDrawerNightPanelId = `${historyDrawerId}-night-panel`
 const historyDrawerOpen = ref(false)
+const historyDrawerView = ref<HistoryDrawerView>('sessions')
+const historyDrawerPlacement = ref<ReturnType<typeof resolveSessionListDrawerPlacement> | null>(null)
+let historyDrawerResizeObserver: ResizeObserver | null = null
 const localHistorySearchQuery = ref('')
 const historySearchQuery = computed({
   get: () => props.historySearch ?? localHistorySearchQuery.value,
@@ -2765,6 +2783,16 @@ const visibleHistoryRunningCount = computed(() => visibleHistory.value.filter((i
 const visibleHistoryQuestionCount = computed(() => visibleHistory.value.filter((item) => item.pendingQuestion).length)
 const historyRunningCount = computed(() => props.historyRunningCount ?? visibleHistoryRunningCount.value)
 const historyQuestionCount = computed(() => props.historyQuestionCount ?? visibleHistoryQuestionCount.value)
+const historyDrawerPanelStyle = computed<CSSProperties>(() => {
+  const placement = historyDrawerPlacement.value
+  if (!placement) return {}
+  return {
+    top: `${placement.top}px`,
+    left: `${placement.left}px`,
+    width: `${placement.width}px`,
+    height: `${placement.height}px`,
+  }
+})
 
 function historyTime(value?: string) {
   if (!value) return '暂无'
@@ -2781,12 +2809,57 @@ function historyTime(value?: string) {
   })
 }
 
-function closeHistoryDrawer() {
+// 会话抽屉通过 Teleport 脱离右栏布局，位置统一从右栏实测矩形计算，避免拖拽或缩放后漂移。
+function updateHistoryDrawerPlacement() {
+  const root = chatRootEl.value
+  if (!root || typeof window === 'undefined') return
+  const rect = root.getBoundingClientRect()
+  historyDrawerPlacement.value = resolveSessionListDrawerPlacement(
+    { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+    { width: window.innerWidth, height: window.innerHeight },
+  )
+}
+
+function openHistoryDrawer() {
+  historyDrawerView.value = 'sessions'
+  updateHistoryDrawerPlacement()
+  historyDrawerOpen.value = true
+  emit('open-history')
+  void nextTick(() => {
+    updateHistoryDrawerPlacement()
+    historyDrawerSearchEl.value?.focus()
+  })
+}
+
+function showHistoryDrawerView(view: HistoryDrawerView) {
+  historyDrawerView.value = view
+  if (view === 'night') emit('request-night-tasks')
+}
+
+// 按 WAI-ARIA Tabs 模式提供循环方向键与 Home/End 导航，选中页签同时进入 Tab 顺序。
+function onHistoryDrawerTabKeydown(event: KeyboardEvent, current: HistoryDrawerView) {
+  let target: HistoryDrawerView | null = null
+  if (event.key === 'Home') target = 'sessions'
+  if (event.key === 'End') target = 'night'
+  if (event.key === 'ArrowLeft') target = current === 'sessions' ? 'night' : 'sessions'
+  if (event.key === 'ArrowRight') target = current === 'sessions' ? 'night' : 'sessions'
+  if (!target) return
+  event.preventDefault()
+  if (historyDrawerView.value !== target) showHistoryDrawerView(target)
+  void nextTick(() => {
+    const tab = target === 'sessions' ? historyDrawerSessionsTabEl.value : historyDrawerNightTabEl.value
+    tab?.focus()
+  })
+}
+
+function closeHistoryDrawer(restoreFocus = true) {
   historyDrawerOpen.value = false
+  if (restoreFocus) {
+    void nextTick(() => historyDrawerTriggerEl.value?.focus())
+  }
 }
 function selectHistoryItem(id: string) {
   emit('select-session', id)
-  closeHistoryDrawer()
 }
 
 function historyContextText(item: { appName?: string; workspaceName?: string; version?: string }) {
@@ -3020,14 +3093,35 @@ function onOverlayKeydown(event: KeyboardEvent) {
   }
 }
 
+function handleHistoryDrawerViewportChange() {
+  if (historyDrawerOpen.value) updateHistoryDrawerPlacement()
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onOverlayKeydown)
+  window.addEventListener('resize', handleHistoryDrawerViewportChange)
+  window.addEventListener('scroll', handleHistoryDrawerViewportChange, true)
+  if (typeof ResizeObserver !== 'undefined' && chatRootEl.value) {
+    historyDrawerResizeObserver = new ResizeObserver(handleHistoryDrawerViewportChange)
+    historyDrawerResizeObserver.observe(chatRootEl.value)
+  }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onOverlayKeydown)
+  window.removeEventListener('resize', handleHistoryDrawerViewportChange)
+  window.removeEventListener('scroll', handleHistoryDrawerViewportChange, true)
+  historyDrawerResizeObserver?.disconnect()
+  historyDrawerResizeObserver = null
   stopRawOutputDrag()
   stopRunTimer()
 })
+
+watch(
+  () => props.panelVisible,
+  (visible) => {
+    if (!visible && historyDrawerOpen.value) closeHistoryDrawer(false)
+  },
+)
 
 watch(
   () => props.inputValue,
@@ -3570,13 +3664,7 @@ function openNightPicker() {
   if (nightPickerOpen.value) emit('request-night-slots')
 }
 
-function openNightTasksView() {
-  mainView.value = 'night'
-  emit('request-night-tasks')
-}
-
 function openNightTaskConversation(sessionId: string) {
-  mainView.value = 'conversation'
   emit('open-night-task-session', sessionId)
 }
 
@@ -3663,7 +3751,7 @@ function onCompositionEnd() {
 </script>
 
 <template>
-  <div class="figma-chat-root">
+  <div ref="chatRootEl" class="figma-chat-root">
     <header class="figma-chat-header">
       <div class="figma-chat-header-left">
         <h2 class="figma-chat-title" :title="title">{{ title }}</h2>
@@ -3684,10 +3772,11 @@ function onCompositionEnd() {
           <span>原始输出</span>
         </button>
         <button
+          ref="historyDrawerTriggerEl"
           type="button"
           class="figma-chat-header-btn"
-          title="查看消息列表"
-          @click="historyDrawerOpen = true; emit('open-history')"
+          title="查看会话列表"
+          @click="openHistoryDrawer"
         >
           <span class="figma-chat-history-header-icon">
             <Spinner
@@ -3700,7 +3789,7 @@ function onCompositionEnd() {
               {{ historyRunningCount }}
             </span>
           </span>
-          <span>消息列表</span>
+          <span>会话列表</span>
           <Bell
             v-if="historyQuestionCount > 0"
             :size="13"
@@ -3710,31 +3799,10 @@ function onCompositionEnd() {
       </div>
     </header>
 
-    <nav class="figma-chat-view-tabs" aria-label="对话内容">
-      <button
-        type="button"
-        :class="['figma-chat-view-tab', mainView === 'conversation' && 'is-active']"
-        data-testid="conversation-tab"
-        @click="mainView = 'conversation'"
-      >
-        对话
-      </button>
-      <button
-        type="button"
-        :class="['figma-chat-view-tab', mainView === 'night' && 'is-active']"
-        data-testid="night-tasks-tab"
-        @click="openNightTasksView"
-      >
-        待执行任务
-        <span v-if="nightTasks.length" class="figma-chat-view-tab-count">{{ nightTasks.length }}</span>
-      </button>
-    </nav>
-
     <div ref="scrollEl" class="figma-chat-scroll" @scroll="handleChatScroll">
-      <template v-if="mainView === 'conversation'">
       <div v-if="historyLoading" class="figma-chat-history-loading" role="status">
         <Spinner />
-        <span>正在加载消息列表…</span>
+        <span>正在加载会话内容…</span>
       </div>
       <OpencodeTimeline
         v-else
@@ -4510,49 +4578,6 @@ function onCompositionEnd() {
           </div>
         </div>
       </div>
-      </template>
-      <section v-else class="figma-chat-night-list" data-testid="night-task-list">
-        <div v-if="nightTasks.length === 0" class="figma-chat-night-empty">
-          <Clock3 :size="22" />
-          <strong>暂无待执行任务</strong>
-          <span>在消息框中写好任务后，点击定时执行即可安排到今晚。</span>
-        </div>
-        <template v-else>
-        <article
-          v-for="task in orderedNightTasks"
-          :key="task.taskId"
-          class="figma-chat-night-card"
-          :class="{ 'is-dispatching': task.status === 'DISPATCHING' }"
-        >
-          <div class="figma-chat-night-card-head">
-            <span class="figma-chat-night-status">{{ nightTaskStatusLabel(task) }}</span>
-            <span class="figma-chat-night-time">{{ formatNightRange(task) }}</span>
-          </div>
-          <strong class="figma-chat-night-title">{{ task.sessionTitle || '新对话' }}</strong>
-          <p class="figma-chat-night-preview">{{ task.contentPreview }}</p>
-          <span class="figma-chat-night-created">创建于 {{ formatNightCreatedAt(task.createdAt) }}</span>
-          <div class="figma-chat-night-actions">
-            <button type="button" @click="openNightTaskConversation(task.sessionId)">查看对话</button>
-            <template v-if="task.status === 'SCHEDULED'">
-              <button type="button" :disabled="nightActionPending(task.taskId)" @click="beginAdjustNightTask(task)">调整时间</button>
-              <button
-                v-if="cancelConfirmTaskId !== task.taskId"
-                type="button"
-                class="is-danger"
-                :disabled="nightActionPending(task.taskId)"
-                @click="askCancelNightTask(task.taskId)"
-              >取消任务</button>
-              <template v-else>
-                <span class="figma-chat-night-confirm-copy">确定取消？</span>
-                <button type="button" class="is-danger" @click="confirmCancelNightTask(task.taskId)">确认</button>
-                <button type="button" @click="cancelConfirmTaskId = null">返回</button>
-              </template>
-            </template>
-            <span v-else class="figma-chat-night-dispatch-copy">正在复用对话后台执行能力启动…</span>
-          </div>
-        </article>
-        </template>
-      </section>
     </div>
 
 
@@ -5478,48 +5503,90 @@ function onCompositionEnd() {
       </div>
     </div>
 
-    <!-- 消息列表抽屉 -->
-    <div
-      v-if="historyDrawerOpen"
-      class="figma-chat-drawer-mask"
-      role="presentation"
-      @click.self="closeHistoryDrawer"
-    >
-      <div
+    <!-- 会话列表使用 Teleport 覆盖左侧编辑区，保留右侧对话栏可见且可连续切换。 -->
+    <Teleport to="body">
+      <aside
+        v-if="historyDrawerOpen && historyDrawerPlacement"
         class="figma-chat-history-drawer"
+        :class="`figma-chat-history-drawer--${historyDrawerPlacement.mode}`"
+        :style="historyDrawerPanelStyle"
+        :data-placement="historyDrawerPlacement.mode"
         role="dialog"
-        aria-modal="true"
-        aria-label="消息列表记录"
+        aria-modal="false"
+        aria-label="会话列表"
       >
         <header class="figma-chat-drawer-header">
           <div class="figma-chat-drawer-title">
-            <span class="figma-chat-drawer-title-text">消息列表</span>
+            <span class="figma-chat-drawer-title-text">会话列表</span>
             <span class="figma-chat-drawer-count">{{ historyTotalCount }}</span>
           </div>
           <button
             type="button"
             class="figma-chat-drawer-close"
-            aria-label="关闭消息列表抽屉"
-            @click="closeHistoryDrawer"
+            aria-label="关闭会话列表抽屉"
+            @click="closeHistoryDrawer()"
           >
             <X :size="14" />
           </button>
         </header>
 
-        <div class="figma-chat-history-search">
+        <div class="figma-chat-history-tabs" role="tablist" aria-label="会话列表内容">
+          <button
+            :id="historyDrawerSessionsTabId"
+            ref="historyDrawerSessionsTabEl"
+            type="button"
+            class="figma-chat-history-tab"
+            :class="{ 'is-active': historyDrawerView === 'sessions' }"
+            role="tab"
+            :aria-selected="historyDrawerView === 'sessions'"
+            :aria-controls="historyDrawerSessionsPanelId"
+            :tabindex="historyDrawerView === 'sessions' ? 0 : -1"
+            data-testid="session-list-sessions-tab"
+            @click="showHistoryDrawerView('sessions')"
+            @keydown="onHistoryDrawerTabKeydown($event, 'sessions')"
+          >
+            会话 <span>{{ historyTotalCount }}</span>
+          </button>
+          <button
+            :id="historyDrawerNightTabId"
+            ref="historyDrawerNightTabEl"
+            type="button"
+            class="figma-chat-history-tab"
+            :class="{ 'is-active': historyDrawerView === 'night' }"
+            role="tab"
+            :aria-selected="historyDrawerView === 'night'"
+            :aria-controls="historyDrawerNightPanelId"
+            :tabindex="historyDrawerView === 'night' ? 0 : -1"
+            data-testid="session-list-night-tasks-tab"
+            @click="showHistoryDrawerView('night')"
+            @keydown="onHistoryDrawerTabKeydown($event, 'night')"
+          >
+            待执行任务 <span>{{ nightTasks.length }}</span>
+          </button>
+        </div>
+
+        <div v-if="historyDrawerView === 'sessions'" class="figma-chat-history-search">
           <input
+            ref="historyDrawerSearchEl"
             v-model="historySearchQuery"
             type="text"
-            placeholder="搜索消息列表..."
+            placeholder="搜索会话..."
             class="figma-chat-history-search-input"
+            aria-label="搜索会话列表"
           />
         </div>
 
-        <div class="figma-chat-history-body">
+        <div
+          v-if="historyDrawerView === 'sessions'"
+          :id="historyDrawerSessionsPanelId"
+          class="figma-chat-history-body"
+          role="tabpanel"
+          :aria-labelledby="historyDrawerSessionsTabId"
+        >
           <div v-if="visibleHistory.length === 0" class="figma-chat-history-empty">
             <MessageSquare :size="32" class="figma-chat-history-empty-icon" />
             <p class="figma-chat-history-empty-text">
-              {{ historySearchQuery.trim() ? '无匹配的消息列表' : '暂无消息记录，快在下方开启新会话吧~' }}
+              {{ historySearchQuery.trim() ? '无匹配会话' : '暂无会话记录，快在下方开启新会话吧~' }}
             </p>
           </div>
           <ul v-else class="figma-chat-history-list">
@@ -5527,7 +5594,9 @@ function onCompositionEnd() {
               <button
                 type="button"
                 class="figma-chat-history-card"
+                :class="{ 'is-active': item.id === currentSessionId }"
                 :title="item.title"
+                :aria-current="item.id === currentSessionId ? 'true' : undefined"
                 @click="selectHistoryItem(item.id)"
               >
                 <div class="figma-chat-history-card-icon">
@@ -5583,8 +5652,58 @@ function onCompositionEnd() {
             </button>
           </div>
         </div>
-      </div>
-    </div>
+        <div
+          v-else
+          :id="historyDrawerNightPanelId"
+          class="figma-chat-history-body figma-chat-history-body--night"
+          role="tabpanel"
+          :aria-labelledby="historyDrawerNightTabId"
+        >
+          <section class="figma-chat-night-list" data-testid="night-task-list">
+            <div v-if="nightTasks.length === 0" class="figma-chat-night-empty">
+              <Clock3 :size="22" />
+              <strong>暂无待执行任务</strong>
+              <span>在消息框中写好任务后，点击定时执行即可安排到今晚。</span>
+            </div>
+            <template v-else>
+              <article
+                v-for="task in orderedNightTasks"
+                :key="task.taskId"
+                class="figma-chat-night-card"
+                :class="{ 'is-dispatching': task.status === 'DISPATCHING' }"
+              >
+                <div class="figma-chat-night-card-head">
+                  <span class="figma-chat-night-status">{{ nightTaskStatusLabel(task) }}</span>
+                  <span class="figma-chat-night-time">{{ formatNightRange(task) }}</span>
+                </div>
+                <strong class="figma-chat-night-title">{{ task.sessionTitle || '新对话' }}</strong>
+                <p class="figma-chat-night-preview">{{ task.contentPreview }}</p>
+                <span class="figma-chat-night-created">创建于 {{ formatNightCreatedAt(task.createdAt) }}</span>
+                <div class="figma-chat-night-actions">
+                  <button type="button" @click="openNightTaskConversation(task.sessionId)">查看对话</button>
+                  <template v-if="task.status === 'SCHEDULED'">
+                    <button type="button" :disabled="nightActionPending(task.taskId)" @click="beginAdjustNightTask(task)">调整时间</button>
+                    <button
+                      v-if="cancelConfirmTaskId !== task.taskId"
+                      type="button"
+                      class="is-danger"
+                      :disabled="nightActionPending(task.taskId)"
+                      @click="askCancelNightTask(task.taskId)"
+                    >取消任务</button>
+                    <template v-else>
+                      <span class="figma-chat-night-confirm-copy">确定取消？</span>
+                      <button type="button" class="is-danger" @click="confirmCancelNightTask(task.taskId)">确认</button>
+                      <button type="button" @click="cancelConfirmTaskId = null">返回</button>
+                    </template>
+                  </template>
+                  <span v-else class="figma-chat-night-dispatch-copy">正在复用对话后台执行能力启动…</span>
+                </div>
+              </article>
+            </template>
+          </section>
+        </div>
+      </aside>
+    </Teleport>
 
     <div
       v-if="rawOutputOpen"
@@ -5797,22 +5916,22 @@ function onCompositionEnd() {
   background: var(--ta-hover);
   border-color: transparent;
 }
-.figma-chat-view-tabs {
+.figma-chat-history-tabs {
   display: flex;
-  align-items: end;
-  gap: 18px;
-  min-height: 34px;
-  padding: 0 14px;
+  align-items: stretch;
+  gap: 4px;
+  min-height: 38px;
+  padding: 4px 12px 0;
   border-bottom: 1px solid var(--ta-border, #e4e5e7);
-  background: #fff;
+  background: var(--ta-panel, #fafafa);
 }
-.figma-chat-view-tab {
+.figma-chat-history-tab {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 34px;
-  padding: 0 2px;
+  min-height: 34px;
+  padding: 0 8px;
   border: 0;
   background: transparent;
   color: #71717a;
@@ -5821,7 +5940,7 @@ function onCompositionEnd() {
   font-weight: 500;
   cursor: pointer;
 }
-.figma-chat-view-tab::after {
+.figma-chat-history-tab::after {
   content: '';
   position: absolute;
   right: 0;
@@ -5831,14 +5950,14 @@ function onCompositionEnd() {
   border-radius: 2px 2px 0 0;
   background: transparent;
 }
-.figma-chat-view-tab.is-active {
+.figma-chat-history-tab.is-active {
   color: #18181b;
   font-weight: 650;
 }
-.figma-chat-view-tab.is-active::after {
+.figma-chat-history-tab.is-active::after {
   background: #27325e;
 }
-.figma-chat-view-tab-count {
+.figma-chat-history-tab span {
   min-width: 17px;
   height: 17px;
   padding: 0 5px;
@@ -6093,17 +6212,21 @@ function onCompositionEnd() {
   word-break: break-word;
 }
 .figma-chat-history-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 100%;
-  height: 100%;
+  position: fixed;
+  overflow: hidden;
+  border: 1px solid var(--ta-border, #dedfe3);
+  border-radius: 10px 0 0 10px;
   background: var(--ta-surface);
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
+  box-shadow: -8px 0 28px rgba(15, 23, 42, 0.14);
   display: flex;
   flex-direction: column;
-  z-index: 100;
-  animation: figma-chat-drawer-slide 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+  z-index: 1200;
+  font-family: var(--font-sans);
+  animation: figma-chat-session-drawer-in 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.figma-chat-history-drawer--overlay {
+  border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.2);
 }
 .figma-chat-history-search {
   padding: 12px 16px;
@@ -6126,8 +6249,12 @@ function onCompositionEnd() {
 }
 .figma-chat-history-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px 16px;
+}
+.figma-chat-history-body--night {
+  background: var(--ta-panel, #fafafa);
 }
 .figma-chat-history-empty {
   display: flex;
@@ -6172,6 +6299,11 @@ function onCompositionEnd() {
   border-color: var(--ta-muted);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   transform: translateY(-1px);
+}
+.figma-chat-history-card.is-active {
+  border-color: #27325e;
+  background: #f3f4f9;
+  box-shadow: inset 3px 0 0 #27325e;
 }
 .figma-chat-history-card-icon {
   position: relative;
@@ -6288,8 +6420,25 @@ function onCompositionEnd() {
   min-height: 0;
   background: #fff;
   font-family: var(--font-sans);
-  /* 抽屉遮罩使用 position: absolute 覆盖在聊天面板上，需要 root 作为定位上下文 */
+  /* diff 等面板内浮层仍使用 root 作为定位上下文；会话列表独立 Teleport 到 body。 */
   position: relative;
+}
+
+@keyframes figma-chat-session-drawer-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0.72;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .figma-chat-history-drawer {
+    animation: none;
+  }
 }
 
 /* ---- Header ---- */

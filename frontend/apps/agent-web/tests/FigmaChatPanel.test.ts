@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { DOMWrapper, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { nextTick } from "vue";
@@ -45,6 +45,14 @@ function setViewport(width: number, height: number) {
 // 原生 Timeline 始终完整展示；保留此 helper 只为让相关断言等待一次 Vue 更新。
 async function showFullTimeline(wrapper: any) {
   await wrapper.vm.$nextTick();
+}
+
+async function openSessionListDrawer(wrapper: any) {
+  await wrapper.get('button[title="查看会话列表"]').trigger("click");
+  await nextTick();
+  const drawer = document.body.querySelector('[aria-label="会话列表"]');
+  if (!drawer) throw new Error("会话列表抽屉未打开");
+  return new DOMWrapper(drawer);
 }
 
 describe("FigmaChatPanel", () => {
@@ -124,10 +132,12 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.get('button[aria-label="新建对话"]').attributes("disabled")).toBeUndefined();
     expect(wrapper.get('[data-testid="current-night-task-card"]').text()).toContain("等待执行");
 
-    await wrapper.get('[data-testid="night-tasks-tab"]').trigger("click");
+    const drawer = await openSessionListDrawer(wrapper);
+    await drawer.get('[data-testid="session-list-night-tasks-tab"]').trigger("click");
     expect(wrapper.emitted("request-night-tasks")).toHaveLength(1);
-    expect(wrapper.get('[data-testid="night-task-list"]').text()).toContain("分析完整测试集");
-    expect(wrapper.get('[data-testid="night-task-list"]').text()).toContain("创建于");
+    expect(drawer.get('[data-testid="night-task-list"]').text()).toContain("分析完整测试集");
+    expect(drawer.get('[data-testid="night-task-list"]').text()).toContain("创建于");
+    wrapper.unmount();
   });
 
   it("places the current session night task first in the pending task tab", async () => {
@@ -157,13 +167,15 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    await wrapper.get('[data-testid="night-tasks-tab"]').trigger("click");
+    const drawer = await openSessionListDrawer(wrapper);
+    await drawer.get('[data-testid="session-list-night-tasks-tab"]').trigger("click");
 
-    expect(wrapper.findAll(".figma-chat-night-list .figma-chat-night-title").map((item) => item.text()))
+    expect(drawer.findAll(".figma-chat-night-list .figma-chat-night-title").map((item) => item.text()))
       .toEqual(["当前会话", "其他会话"]);
+    wrapper.unmount();
   });
 
-  it("returns to the conversation view when opening a task session", async () => {
+  it("keeps the pending-task view open when opening a task session", async () => {
     const pendingTask = {
       taskId: "night_open",
       sessionId: "session_target",
@@ -187,11 +199,14 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    await wrapper.get('[data-testid="night-tasks-tab"]').trigger("click");
-    await wrapper.get(".figma-chat-night-actions button").trigger("click");
+    const drawer = await openSessionListDrawer(wrapper);
+    await drawer.get('[data-testid="session-list-night-tasks-tab"]').trigger("click");
+    await drawer.get(".figma-chat-night-actions button").trigger("click");
 
     expect(wrapper.emitted("open-night-task-session")?.[0]).toEqual(["session_target"]);
-    expect(wrapper.find('[data-testid="night-task-list"]').exists()).toBe(false);
+    expect(drawer.find('[data-testid="night-task-list"]').exists()).toBe(true);
+    expect(drawer.get('[data-testid="session-list-night-tasks-tab"]').attributes("aria-selected")).toBe("true");
+    wrapper.unmount();
   });
 
   it("keeps a failed night task visible without locking the composer", () => {
@@ -887,10 +902,12 @@ describe("FigmaChatPanel", () => {
       const cardElement = card.element as HTMLElement;
       expect(cardElement.style.left).toBe("700px");
       expect(cardElement.style.top).toBe("600px");
-      expect(resizeObservers).toHaveLength(1);
+      // 第一个 observer 跟踪会话列表相对右栏的位置，最后一个才是进程状态卡尺寸。
+      expect(resizeObservers).toHaveLength(2);
 
       cardSize = { width: 300, height: 120 };
-      resizeObservers[0].callback([], resizeObservers[0] as unknown as ResizeObserver);
+      const processCardObserver = resizeObservers.at(-1)!;
+      processCardObserver.callback([], processCardObserver as unknown as ResizeObserver);
       await nextTick();
 
       expect(cardElement.style.left).toBe("684px");
@@ -1108,21 +1125,210 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    await wrapper.get('button[title="查看消息列表"]').trigger("click");
+    const drawer = await openSessionListDrawer(wrapper);
 
-    expect(wrapper.text()).toContain("61");
-    expect(wrapper.text()).toContain("智能测试平台 · 主干工作区 · 20260708");
-    expect(wrapper.text()).toContain("未关联应用 · 未知工作空间 · 无版本");
+    expect(drawer.text()).toContain("61");
+    expect(drawer.text()).toContain("智能测试平台 · 主干工作区 · 20260708");
+    expect(drawer.text()).toContain("未关联应用 · 未知工作空间 · 无版本");
 
-    await wrapper.get(".figma-chat-history-search-input").setValue("回归");
+    await drawer.get(".figma-chat-history-search-input").setValue("回归");
     expect(wrapper.emitted("history-search-change")).toEqual([["回归"]]);
 
-    const loadMore = wrapper
+    const loadMore = drawer
       .findAll("button")
       .find((button) => button.text().includes("显示更多会话"));
     expect(loadMore).toBeTruthy();
     await loadMore!.trigger("click");
     expect(wrapper.emitted("load-more-history")).toEqual([[]]);
+    wrapper.unmount();
+  });
+
+  it("moves pending tasks into the persistent session list drawer", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(FigmaChatPanel, {
+      attachTo: host,
+      props: {
+        messages: [],
+        currentSessionId: "session_current",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "session_current",
+            title: "当前会话",
+            createdAt: "2026-07-18T04:00:00Z",
+            updatedAt: "2026-07-18T05:00:00Z"
+          }
+        ],
+        nightTasks: [
+          {
+            taskId: "night_target",
+            sessionId: "session_target",
+            workspaceId: "workspace_1",
+            sessionTitle: "目标夜间会话",
+            contentPreview: "执行完整回归",
+            status: "SCHEDULED",
+            slotStart: "2026-07-18T13:15:00Z",
+            slotEnd: "2026-07-18T13:30:00Z",
+            windowEnd: "2026-07-18T23:00:00Z",
+            rolloverCount: 0,
+            createdAt: "2026-07-18T04:00:00Z",
+            updatedAt: "2026-07-18T04:00:00Z"
+          }
+        ]
+      } as any
+    });
+
+    try {
+      expect(wrapper.find(".figma-chat-view-tabs").exists()).toBe(false);
+
+      await wrapper.get('button[title="查看会话列表"]').trigger("click");
+      await nextTick();
+
+      const drawer = document.body.querySelector<HTMLElement>('[aria-label="会话列表"]');
+      expect(drawer).not.toBeNull();
+      const drawerTabs = Array.from(drawer!.querySelectorAll<HTMLElement>('[role="tab"]'));
+      expect(drawerTabs.map((tab) => tab.textContent?.trim())).toEqual(["会话 1", "待执行任务 1"]);
+
+      drawerTabs[1].click();
+      await nextTick();
+      expect(wrapper.emitted("request-night-tasks")).toHaveLength(1);
+      expect(drawer!.querySelector('[data-testid="night-task-list"]')?.textContent).toContain("执行完整回归");
+
+      const openTask = Array.from(drawer!.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "查看对话");
+      expect(openTask).toBeTruthy();
+      openTask!.click();
+      await nextTick();
+
+      expect(wrapper.emitted("open-night-task-session")?.[0]).toEqual(["session_target"]);
+      expect(document.body.querySelector('[aria-label="会话列表"]')).not.toBeNull();
+      expect(drawerTabs[1].getAttribute("aria-selected")).toBe("true");
+
+      const closeButton = drawer!.querySelector<HTMLButtonElement>('[aria-label="关闭会话列表抽屉"]')!;
+      closeButton.click();
+      await nextTick();
+      expect(document.body.querySelector('[aria-label="会话列表"]')).toBeNull();
+
+      await wrapper.get('button[title="查看会话列表"]').trigger("click");
+      await nextTick();
+      const reopenedDrawer = document.body.querySelector<HTMLElement>('[aria-label="会话列表"]')!;
+      expect(reopenedDrawer.querySelector('[data-testid="session-list-sessions-tab"]')?.getAttribute("aria-selected"))
+        .toBe("true");
+    } finally {
+      wrapper.unmount();
+      host.remove();
+    }
+  });
+
+  it("links session-list tabs to their panels and supports keyboard navigation", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(FigmaChatPanel, {
+      attachTo: host,
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: []
+      } as any
+    });
+
+    try {
+      await wrapper.get('button[title="查看会话列表"]').trigger("click");
+      await nextTick();
+      const drawer = document.body.querySelector<HTMLElement>('[aria-label="会话列表"]')!;
+      const tabs = Array.from(drawer.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+      const sessionsPanel = drawer.querySelector<HTMLElement>('[role="tabpanel"]')!;
+
+      expect(tabs[0].getAttribute("aria-controls")).toBe(sessionsPanel.id);
+      expect(sessionsPanel.getAttribute("aria-labelledby")).toBe(tabs[0].id);
+      expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1"]);
+
+      tabs[0].focus();
+      tabs[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await nextTick();
+
+      const nightPanel = drawer.querySelector<HTMLElement>('[role="tabpanel"]')!;
+      expect(document.activeElement).toBe(tabs[1]);
+      expect(tabs[1].getAttribute("aria-selected")).toBe("true");
+      expect(tabs[1].getAttribute("aria-controls")).toBe(nightPanel.id);
+      expect(nightPanel.getAttribute("aria-labelledby")).toBe(tabs[1].id);
+      expect(wrapper.emitted("request-night-tasks")).toHaveLength(1);
+
+      tabs[1].dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      await nextTick();
+      expect(document.activeElement).toBe(tabs[0]);
+      expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    } finally {
+      wrapper.unmount();
+      host.remove();
+    }
+  });
+
+  it("keeps the session list drawer open while switching sessions and closes it explicitly", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(FigmaChatPanel, {
+      attachTo: host,
+      props: {
+        messages: [],
+        currentSessionId: "session_current",
+        panelVisible: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "session_current",
+            title: "当前会话",
+            createdAt: "2026-07-18T04:00:00Z",
+            updatedAt: "2026-07-18T05:00:00Z"
+          },
+          {
+            id: "session_target",
+            title: "目标会话",
+            createdAt: "2026-07-18T03:00:00Z",
+            updatedAt: "2026-07-18T06:00:00Z"
+          }
+        ]
+      } as any
+    });
+
+    try {
+      const trigger = wrapper.get('button[title="查看会话列表"]');
+      await trigger.trigger("click");
+      await nextTick();
+
+      let drawer = document.body.querySelector<HTMLElement>('[aria-label="会话列表"]');
+      const targetButton = Array.from(drawer!.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("目标会话"));
+      expect(targetButton).toBeTruthy();
+      targetButton!.click();
+      await nextTick();
+
+      expect(wrapper.emitted("select-session")?.[0]).toEqual(["session_target"]);
+      expect(document.body.querySelector('[aria-label="会话列表"]')).not.toBeNull();
+
+      await wrapper.setProps({ currentSessionId: "session_target" });
+      drawer = document.body.querySelector<HTMLElement>('[aria-label="会话列表"]');
+      expect(drawer!.querySelector('[aria-current="true"]')?.textContent).toContain("目标会话");
+
+      wrapper.get(".figma-chat-scroll").element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await nextTick();
+      expect(document.body.querySelector('[aria-label="会话列表"]')).not.toBeNull();
+
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await nextTick();
+      expect(document.body.querySelector('[aria-label="会话列表"]')).toBeNull();
+      expect(document.activeElement).toBe(trigger.element);
+
+      await trigger.trigger("click");
+      await nextTick();
+      await wrapper.setProps({ panelVisible: false });
+      await nextTick();
+      expect(document.body.querySelector('[aria-label="会话列表"]')).toBeNull();
+    } finally {
+      wrapper.unmount();
+      host.remove();
+    }
   });
 
   it("shows runtime count, spinning history icon and question bell in history controls", async () => {
@@ -1153,17 +1359,18 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    const historyButton = wrapper.get('button[title="查看消息列表"]');
+    const historyButton = wrapper.get('button[title="查看会话列表"]');
     expect(historyButton.find(".figma-chat-history-running-badge").text()).toBe("2");
     expect(historyButton.find(".figma-chat-history-alert-bell").exists()).toBe(true);
 
-    await historyButton.trigger("click");
+    const drawer = await openSessionListDrawer(wrapper);
 
-    expect(wrapper.find(".figma-chat-history-card-status--running").exists()).toBe(true);
-    expect(wrapper.find(".figma-chat-history-card-status--completed").exists()).toBe(true);
-    expect(wrapper.find(".figma-chat-history-card-attention").exists()).toBe(true);
-    expect(wrapper.text()).toContain("运行中");
-    expect(wrapper.text()).toContain("已完成");
+    expect(drawer.find(".figma-chat-history-card-status--running").exists()).toBe(true);
+    expect(drawer.find(".figma-chat-history-card-status--completed").exists()).toBe(true);
+    expect(drawer.find(".figma-chat-history-card-attention").exists()).toBe(true);
+    expect(drawer.text()).toContain("运行中");
+    expect(drawer.text()).toContain("已完成");
+    wrapper.unmount();
   });
 
   it("keeps new conversation enabled while a run is active and the process is ready", async () => {
@@ -2881,14 +3088,15 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    const historyButton = wrapper.findAll("button").find((button) => button.text().includes("消息列表"));
+    const historyButton = wrapper.findAll("button").find((button) => button.text().includes("会话列表"));
     expect(historyButton).toBeTruthy();
-    await historyButton!.trigger("click");
+    const drawer = await openSessionListDrawer(wrapper);
 
-    expect(wrapper.text()).toContain("车贷案例设计");
-    expect(wrapper.text()).toContain("创建");
-    expect(wrapper.text()).toContain("更新");
-    expect(wrapper.text()).toContain("#abcdef");
+    expect(drawer.text()).toContain("车贷案例设计");
+    expect(drawer.text()).toContain("创建");
+    expect(drawer.text()).toContain("更新");
+    expect(drawer.text()).toContain("#abcdef");
+    wrapper.unmount();
   });
 
   it("shows the checking state before the first process status response arrives", () => {

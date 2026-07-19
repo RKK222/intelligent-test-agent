@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { prepareRawOutputBody } from "../src/components/raw-output";
+import { appendLatestRawOutputEntry, prepareRawOutputBody } from "../src/components/raw-output";
 
 describe("raw output boundary", () => {
+  it("keeps only the latest 2,000 raw-output entries without mutating the input", () => {
+    const current = Array.from({ length: 2_000 }, (_, index) => index);
+    const result = appendLatestRawOutputEntry(current, 2_000);
+
+    expect(result).toHaveLength(2_000);
+    expect(result).not.toContain(0);
+    expect(result[0]).toBe(1);
+    expect(result.at(-1)).toBe(2_000);
+    expect(current).toEqual(Array.from({ length: 2_000 }, (_, index) => index));
+  });
+
   it("recursively redacts context tokens from RunEvent SSE data before storing it", () => {
     const result = prepareRawOutputBody(
       JSON.stringify({

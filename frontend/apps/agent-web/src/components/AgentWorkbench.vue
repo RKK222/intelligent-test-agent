@@ -123,7 +123,7 @@ import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
-import { prepareRawOutputBody } from "./raw-output";
+import { appendLatestRawOutputEntry, prepareRawOutputBody } from "./raw-output";
 import {
   createRuntimeStateOutageTracker,
   type RuntimeStateFallbackLease
@@ -219,7 +219,6 @@ const OPENCODE_PROCESS_START_STEPS = [
 const SELECTED_PROVIDER_STORAGE_KEY = "ta_selected_provider";
 const SELECTED_MODEL_STORAGE_KEY = "ta_selected_model";
 const RUNTIME_STATE_RECOVERY_STABLE_MS = 5_000;
-const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 10000;
 const RAW_OUTPUT_BODY_LIMIT = 200_000;
 const SESSION_HISTORY_PAGE_SIZE = 30;
 
@@ -1697,7 +1696,7 @@ function appendRawOutputEntry(sessionId: string, entry: RawOutputEntry) {
   };
   rawEntriesBySessionId.value = {
     ...rawEntriesBySessionId.value,
-    [sessionId]: [...current, preparedEntry].slice(-RAW_OUTPUT_MAX_ENTRIES_PER_SESSION)
+    [sessionId]: appendLatestRawOutputEntry(current, preparedEntry)
   };
 }
 
@@ -6918,6 +6917,7 @@ async function handleLogout() {
     <template #chat>
       <div class="managed-chat-panel">
         <FigmaChatPanel
+          :panel-visible="rightPanelOpen"
           :messages="chatMessagesForPanel"
           :streaming-text-by-part-id="chatState.streamingTextByPartId"
           :message-scopes-by-id="chatState.messageScopesById"

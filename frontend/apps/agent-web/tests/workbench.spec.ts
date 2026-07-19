@@ -715,8 +715,9 @@ test("initial file loading is not editable and applies the response readonly sta
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await page.getByRole("button", { name: /只读历史会话/ }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
   await expect(page.getByRole("button", { name: "docs", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "docs", exact: true }).click();
@@ -1954,7 +1955,7 @@ test("new runs use one in-memory conversation context and a client request id", 
   expect(String(runRequests[0]?.clientRequestId)).toMatch(/^req_/);
 });
 
-test("a blank conversation schedules a night task and restores it from the pending tab", async ({ page }) => {
+test("a blank conversation schedules a night task and restores it from the pending tab", async ({ page }, testInfo) => {
   const nightTaskRequests: Array<Record<string, unknown>> = [];
   const nightTasks: Array<Record<string, unknown>> = [];
   const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {};
@@ -1987,7 +1988,12 @@ test("a blank conversation schedules a night task and restores it from the pendi
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
 
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("night-tasks-tab").click();
+  await page.getByRole("button", { name: "会话列表" }).click();
+  await expect(page.getByRole("dialog", { name: "会话列表" })).toHaveAttribute(
+    "data-placement",
+    testInfo.project.name === "mobile" ? "overlay" : "left"
+  );
+  await page.getByTestId("session-list-night-tasks-tab").click();
   await expect(page.getByTestId("night-task-list")).toContainText("夜间执行完整回归");
 
   // 模拟后台按时投递：待执行项消失，既有会话接口返回真实 USER 消息和现有 Run。
@@ -2017,6 +2023,8 @@ test("a blank conversation schedules a night task and restores it from the pendi
     updatedAt: "2026-07-18T13:16:00Z"
   };
   await page.getByRole("button", { name: "查看对话" }).click();
+  await expect(page.getByRole("dialog", { name: "会话列表" })).toBeVisible();
+  await expect(page.getByTestId("session-list-night-tasks-tab")).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".oc-user-message__source-badge")).toContainText("夜间定时执行");
   await expect(page.locator(".oc-user-message__source-badge")).toContainText("21:16");
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -2201,7 +2209,7 @@ test("late session creation cannot replace a history switch", async ({ page }) =
   await page.getByRole("button", { name: "发送" }).click();
   await expect.poll(() => sessionRequests.length).toBe(1);
 
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "目标历史会话" }).click();
   await expect(page.getByText("目标历史正文")).toBeVisible();
   releaseSessionRequest();
@@ -3371,8 +3379,9 @@ test("switching history restores assistant documents and the file changes summar
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: /请生成登录测试报告/ }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   await expect.poll(() => sessionTreeRequests).toContain("/api/internal/agent/opencode/sessions/ses_history/session-tree/messages");
   await expect.poll(() => sessionMessageRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_history/messages?page=1&size=100&refresh=false");
@@ -3423,11 +3432,12 @@ test("history run projection keeps sending locked until stale details cannot ove
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "等待历史运行详情" }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await expect.poll(() => historyRunRequests).toContain("/api/internal/agent/opencode/runs/run_history");
   await expect(page.getByText("历史正文已就绪")).toBeVisible();
-  await expect(page.getByText("正在加载消息列表…")).toHaveCount(0);
+  await expect(page.getByText("正在加载会话内容…")).toHaveCount(0);
 
   const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
   const sendButton = page.getByRole("button", { name: "发送" });
@@ -3494,10 +3504,11 @@ test("switching history restores a pending native question dock instead of only 
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await page.getByRole("button", { name: /历史提问会话/ }).click();
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("请选择验证范围");
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await page.getByRole("button", { name: "接口测试" }).click();
   await page.getByRole("button", { name: "提交" }).click();
   await expect.poll(() => questionReplies).toEqual([{ answers: [["接口测试"]] }]);
@@ -3537,10 +3548,11 @@ test("switching history restores a pending native permission dock and allows rep
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await page.getByRole("button", { name: /历史权限会话/ }).click();
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("允许修改测试文件");
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await page.getByRole("button", { name: "一次" }).click();
   await expect.poll(() => permissionReplies).toEqual([{ decision: "once" }]);
 });
@@ -3597,17 +3609,19 @@ test("history pending interaction stays scoped to its own session", async ({ pag
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await page.getByRole("button", { name: /A 会话有提问/ }).click();
   await expect(page.locator(".figma-chat-question-dock")).toContainText("只属于 A 的问题");
-  await page.getByRole("button", { name: "消息列表" }).click();
-  await page.getByRole("button", { name: "收起进程状态" }).click();
+  await expect(page.getByRole("dialog", { name: "会话列表" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /A 会话有提问/ })).toHaveAttribute("aria-current", "true");
   await page.getByRole("button", { name: /B 会话无提问/ }).click({ force: true });
   await expect.poll(() => sessionMessageRequests).toContain(
     "/api/internal/platform/opencode-runtime/sessions/ses_history_question_b/messages?page=1&size=100&refresh=false"
   );
   await expect(page.locator(".figma-chat-question-dock")).toHaveCount(0);
   await expect(page.getByText("只属于 A 的问题")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "会话列表" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /B 会话无提问/ })).toHaveAttribute("aria-current", "true");
 });
 
 test("switching to a running history maps its remote question event and allows reply", async ({ page }) => {
@@ -3684,11 +3698,12 @@ test("switching to a running history maps its remote question event and allows r
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await page.getByRole("button", { name: "运行中的历史提问" }).click();
 
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("历史运行中：选择继续方式");
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await dock.getByRole("button", { name: "继续", exact: true }).click();
   await dock.getByRole("button", { name: "提交", exact: true }).click();
   await expect.poll(() => questionReplies).toEqual([{ answers: [["继续"]] }]);
@@ -3766,7 +3781,7 @@ test("switching history resumes the runtime-state run and reconciles active-run 
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: /test-design-orthogonal/ }).click();
 
   await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
@@ -3796,7 +3811,7 @@ test("runtime-state outage performs only one active-run fallback", async ({ page
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: /恢复中的会话/ }).click();
   await expect.poll(() => runtimeStateEventRequests.length).toBeGreaterThanOrEqual(2);
   await page.waitForTimeout(3500);
@@ -3836,13 +3851,12 @@ test("runtime-state outage falls back once for each switched session in the same
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "故障会话 A" }).click();
   await expect.poll(() => activeRunRequests).toContain(
     "/api/internal/platform/opencode-runtime/sessions/ses_outage_a/active-run"
   );
 
-  await page.getByRole("button", { name: /消息列表/ }).click();
   await page.getByRole("button", { name: "故障会话 B" }).click();
   await expect.poll(() => activeRunRequests).toContain(
     "/api/internal/platform/opencode-runtime/sessions/ses_outage_b/active-run"
@@ -3928,11 +3942,10 @@ test("a delayed history switch cannot overwrite a newer session and workspace", 
 
   await gotoWorkbench(page);
   fileRequests.length = 0;
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "竞态会话 A" }).click();
   await expect.poll(() => workspaceRequests).toContain("wrk_race_a");
 
-  await page.getByRole("button", { name: /消息列表/ }).click();
   await page.getByRole("button", { name: "竞态会话 B" }).click();
   await expect(page.getByText("竞态正文 B")).toBeVisible();
   releaseWorkspaceA();
@@ -4018,17 +4031,18 @@ test("history loading cannot send a run to the previous session", async ({ page 
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "发送保护旧会话" }).click();
   await expect(page.getByText("发送保护旧正文")).toBeVisible();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
   await composer.fill("切换中不得发送");
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "发送保护目标会话" }).click();
   await expect.poll(() => workspaceRequests).toContain("wrk_history_send_target");
 
-  const sendButton = page.getByRole("button", { name: "发送" });
+  const sendButton = page.getByRole("button", { name: "发送", exact: true });
   await expect(sendButton).toBeDisabled();
   await sendButton.click({ force: true });
   await page.waitForTimeout(100);
@@ -4088,8 +4102,9 @@ test("a delayed history switch cannot survive a new conversation", async ({ page
 
   await gotoWorkbench(page);
   fileRequests.length = 0;
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "等待后新建对话" }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await page.getByRole("button", { name: "新建对话" }).click();
   releaseHistoryWorkspace();
   await page.waitForTimeout(200);
@@ -4187,8 +4202,9 @@ test("a delayed history switch cannot overwrite a manual application workspace s
 
   await gotoWorkbench(page);
   fileRequests.length = 0;
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "等待手动切工作区" }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   await page.getByRole("button", { name: "F-GCMS" }).click();
   await page.getByRole("option", { name: /F-COSS/ }).click();
@@ -4251,8 +4267,9 @@ test("a delayed history switch cannot survive an authentication change", async (
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "等待认证变化" }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await page.getByRole("button", { name: /当前用户/ }).click();
   await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect.poll(() => logoutRequests).toEqual(["POST /api/auth/logout"]);
@@ -4316,14 +4333,15 @@ test("a delayed conversation context cannot dispatch after switching history", a
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "上下文会话 A" }).click();
   await expect(page.getByText("上下文正文 A")).toBeVisible();
   await expect.poll(() => runContextRequests).toContain("ses_context_a");
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("等待上下文");
   await page.getByRole("button", { name: "发送" }).click();
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "上下文会话 B" }).click();
   await expect(page.getByText("上下文正文 B")).toBeVisible();
   releaseContextA();
@@ -4384,14 +4402,15 @@ test("a delayed startRun response cannot replace a newer history session", async
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "启动会话 A" }).click();
   await expect(page.getByText("启动正文 A")).toBeVisible();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("等待启动结果");
   await page.getByRole("button", { name: "发送" }).click();
   await expect.poll(() => runRequests.length).toBe(1);
-  await page.getByRole("button", { name: /消息列表/ }).click();
+  await page.getByRole("button", { name: /会话列表/ }).click();
   await page.getByRole("button", { name: "启动会话 B" }).click();
   await expect(page.getByText("启动正文 B")).toBeVisible();
   releaseRunRequest();
@@ -4546,14 +4565,15 @@ test("history loading does not wait for interaction snapshot or message feedback
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await page.getByRole("button", { name: /历史加载测试/ }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
-  await expect(page.getByText("正在加载消息列表…")).toBeVisible();
+  await expect(page.getByText("正在加载会话内容…")).toBeVisible();
 
   releaseSessionMessages();
   await expect(page.getByText("历史正文已加载")).toHaveCount(1);
-  await expect(page.getByText("正在加载消息列表…")).toHaveCount(0);
+  await expect(page.getByText("正在加载会话内容…")).toHaveCount(0);
   const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
   await composer.fill("等待历史交互快照完成后发送");
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
@@ -4634,12 +4654,12 @@ test("switching history changes to the session application and workspace", async
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await expect(page.getByText("F-COSS · COSS 主干 · 20260708")).toBeVisible();
   await page.getByRole("button", { name: /COSS 历史会话/ }).click();
 
   await expect.poll(() => markRecentRequests).toContain("wrk_history_coss");
-  await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "F-COSS", exact: true })).toBeVisible();
   await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_history_coss", path: "" });
 });
 
@@ -4708,7 +4728,7 @@ test("history switch failure keeps current context and makes the session readonl
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await page.getByRole("button", { name: /失效应用历史/ }).click();
 
   await expect.poll(() => markRecentRequests).toContain("wrk_forbidden_coss");
@@ -5404,9 +5424,10 @@ async function installPetSideQuestionRunEventStream(page: Page, scenarios: Recor
 }
 
 async function selectPetContextSession(page: Page) {
-  await page.getByRole("button", { name: "消息列表" }).click();
+  await page.getByRole("button", { name: "会话列表" }).click();
   await page.getByRole("button", { name: /E2E Session/ }).click();
   await expect(page.locator(".figma-chat-title")).toHaveText("E2E Session");
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 }
 
 async function openPetSideQuestion(page: Page) {

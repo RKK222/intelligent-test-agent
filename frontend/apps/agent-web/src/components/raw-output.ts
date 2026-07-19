@@ -3,6 +3,15 @@ export type PreparedRawOutputBody = {
   truncated?: boolean;
 };
 
+export const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 2_000;
+
+/**
+ * 原始输出列表仅保留最新固定数量，避免长会话无限占用页面内存且不修改现有数组。
+ */
+export function appendLatestRawOutputEntry<T>(current: readonly T[], entry: T): T[] {
+  return [...current, entry].slice(-RAW_OUTPUT_MAX_ENTRIES_PER_SESSION);
+}
+
 /**
  * 原始输出统一在进入页面缓存前脱敏并截断，避免 HTTP/SSE 新入口绕过安全边界。
  */

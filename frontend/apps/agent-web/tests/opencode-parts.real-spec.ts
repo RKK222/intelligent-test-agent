@@ -539,11 +539,12 @@ async function writeSseEvidence(runId: string, kind: PartKind, events: unknown[]
 async function openHistorySession(page: Page, title: string): Promise<void> {
   await page.addInitScript((token) => token && sessionStorage.setItem("test-agent.auth.token", token), process.env.TEST_AGENT_API_TOKEN ?? "");
   await page.goto("/", { timeout: 15_000, waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: /消息列表/ }).click({ timeout: 15_000 });
+  await page.getByRole("button", { name: /会话列表/ }).click({ timeout: 15_000 });
   // 首屏 history query 可能仍在飞行，open-history 会为避免并发而跳过 refetch；
   // 使用真实搜索输入改变 query key，确保刚创建的 Session 通过平台列表重新加载。
-  await page.getByPlaceholder("搜索消息列表...").fill(title);
+  await page.getByPlaceholder("搜索会话...").fill(title);
   await page.locator(`button[title='${title}']`).click({ timeout: 15_000 });
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click({ timeout: 15_000 });
 }
 
 /**
