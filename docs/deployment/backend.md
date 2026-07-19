@@ -60,6 +60,17 @@ OPENCODE_REFERENCES_DIR=/data/.testagent/agent-opencode/references \
 opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 ```
 
+其中 `sessionPath` 就是上例的 `XDG_DATA_HOME`，按统一认证号隔离，不对应任何应用 worktree；`current-public-config` 是 Java 维护的固定软链接，而不是复制出来的配置目录。本仓库本地 test profile 的默认测试用户可对应为：
+
+```text
+XDG_DATA_HOME=<repo>/.testagent/agent-opencode/.session/users/DEV_888888888
+OPENCODE_CONFIG_DIR=<repo>/.testagent/agent-opencode/.session/users/DEV_888888888/.testagent-runtime/current-public-config
+共享目标=<repo>/.testagent/agent-opencode/.config/opencode
+公共个人预览目标=<repo>/.testagent/agent-opencode/.configdev/public-usr_test_dev/opencode
+```
+
+启动和公共发布完成后软链接指向共享目标；公共个人可热加载配置保存后只把当前超管的链接切到预览目标。应用个人 `.opencode` 始终由请求 directory 原生发现，不经过此链接。可用 manager state 的 `configPath`、进程展示用 `startCommand` 和操作系统 `readlink` 三者交叉核对；禁止手工把链接替换为配置副本。
+
 `XDG_DATA_HOME` 的根和公共配置源不再由 manager 环境变量传入，而是 manager 通过 WebSocket `configRequest` 从 Java 后端获取通用参数 `OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`；Java 再按用户生成 session 与固定 `current-public-config` 软链接，通过 `start.sessionPath/start.configPath` 显式下发。链接默认指向共享公共目录，公共个人保存时只切到本人 worktree，公共发布排空时恢复共享目录；不复制配置。最大进程数同样来自 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`）。OpenCode 会合并用户全局配置、`OPENCODE_CONFIG_DIR` 自定义目录和请求工作区 `.opencode`，企业部署必须保证运行 `opencode serve` 的系统用户 `~/.config/opencode/config.json`、`opencode.json`、`opencode.jsonc` 不维护模型或供应商配置，最多保留只含 `$schema` 的空配置；模型和供应商只写入公共配置 Git。收到完整 `configUpdate` 前，manager 会拒绝 `start`/`restart` 命令，不会用容器内默认路径启动用户进程；成功应用 `configUpdate` 后，manager 会立即补发 heartbeat，把端口池裁剪后的生效容量写入运行管理 Redis 快照。后续前端只允许修改最大进程数，Java 只向本服务器 manager 热推 max-only `configUpdate`，路径参数不做运行中刷新。通用参数值不会经过 shell；`$NAME` 直接按 Java 后端进程环境变量展开，`${NAME}` 先按通用参数引用解析、未命中时再按环境变量展开，路径开头的 `$HOME` 和 `~/` 会解析为当前用户主目录后再下发给 manager。实际 `configPath` 的存在性和非空检查发生在目标 manager 执行 `start` 时；软链接不受支持或权限不足时 Java 明确失败，不降级为配置复制。
 
 `OPENCODE_REFERENCES_DIR` 不属于 manager 自身启动环境或 `configUpdate` 字段。Java 的公共 `OpencodeProcessStartupService` 在每次新启动用户 opencode server 时，按目标 Java 当前平台解析同名通用参数，并通过 `start.environment` 传给 manager；调用方已显式提供同名值时保留调用方值。为兼容尚未执行参数迁移的滚动升级节点，参数缺失或空白不阻断用户进程启动，只是不注入该变量。已运行进程不会因参数或引用资产同步完成而自动重启；变量只对后续新启动或通过平台公共停止/启动程序执行的受管重启生效。
