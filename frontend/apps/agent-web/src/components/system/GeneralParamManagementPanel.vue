@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Refresh, Clock } from "@element-plus/icons-vue";
+import { Refresh, Clock, Monitor } from "@element-plus/icons-vue";
 import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem, ElDrawer, ElEmpty, ElTag } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
   GeneralParameter,
   CommonParameterChangeLog,
+  CommonParameterMemoryCluster,
+  CommonParameterMemoryProcess,
+  CommonParameterMemoryProcessStatus,
   RepositoryDeploymentOptions
 } from "@test-agent/shared-types";
 
@@ -22,6 +25,7 @@ const DEFAULT_REPOSITORY_DEPLOYMENT_OPTIONS: RepositoryDeploymentOptions = {
     { mode: INTERNAL_DEPLOYMENT_MODE, label: "内部部署" }
   ]
 };
+const MEMORY_VALUES_QUERY_KEY = ["common-parameter-memory-values"] as const;
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -45,6 +49,10 @@ const saving = ref(false);
 // 修改历史抽屉状态
 const changeLogsDrawerOpen = ref(false);
 const changeLogsParam = ref<GeneralParameter | null>(null);
+
+// JVM 内存参数只在运维抽屉打开时查询，避免通用参数页面常驻轮询集群。
+const memoryValuesDrawerOpen = ref(false);
+const refreshingMemoryProcessId = ref<string | null>(null);
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
@@ -131,8 +139,129 @@ const changeLogs = computed<CommonParameterChangeLog[]>(() => changeLogsQuery.da
 const changeLogsFetching = computed(() => changeLogsQuery.isFetching.value);
 const changeLogsError = computed(() => formatError(changeLogsQuery.error.value));
 
+const memoryValuesQuery = useQuery({
+  queryKey: MEMORY_VALUES_QUERY_KEY,
+  enabled: () => hasSuperAdmin.value && memoryValuesDrawerOpen.value,
+  retry: false,
+  queryFn: () => api.listCommonParameterMemoryValues()
+});
+
+const memoryCluster = computed<CommonParameterMemoryCluster | null>(() => memoryValuesQuery.data.value ?? null);
+const memoryProcesses = computed<CommonParameterMemoryProcess[]>(() => memoryCluster.value?.processes ?? []);
+const memoryValuesFetching = computed(() => memoryValuesQuery.isFetching.value);
+const memoryValuesError = computed(() => formatError(memoryValuesQuery.error.value));
+const memoryPartialNotice = computed(() => {
+  const result = memoryCluster.value;
+  if (!result || (result.partiallySuccessfulProcesses === 0 && result.failedProcesses === 0)) return "";
+  return `${result.partiallySuccessfulProcesses} 个 Java 部分成功，${result.failedProcesses} 个 Java 失败或不可用；其余成功结果已保留。`;
+});
+
+const refreshAllMemoryMutation = useMutation({
+  mutationFn: () => api.refreshCommonParameterMemoryValues(),
+  onSuccess: (result) => {
+    queryClient.setQueryData(MEMORY_VALUES_QUERY_KEY, result);
+  },
+  onError: (error) => {
+    ElMessage.error(formatError(error) || "刷新全部 Java 失败");
+  }
+});
+
+const refreshOneMemoryMutation = useMutation({
+  mutationFn: (backendProcessId: string) => api.refreshCommonParameterMemoryValuesForProcess(backendProcessId),
+  onSuccess: (process) => {
+    queryClient.setQueryData<CommonParameterMemoryCluster>(
+      MEMORY_VALUES_QUERY_KEY,
+      replaceMemoryProcess(memoryCluster.value, process)
+    );
+  },
+  onError: (error) => {
+    ElMessage.error(formatError(error) || "刷新此 Java 失败");
+  },
+  onSettled: () => {
+    refreshingMemoryProcessId.value = null;
+  }
+});
+
+const refreshingAllMemoryValues = computed(() => refreshAllMemoryMutation.isPending.value);
+
 function refreshChangeLogs() {
   void changeLogsQuery.refetch();
+}
+
+function openMemoryValuesDrawer() {
+  memoryValuesDrawerOpen.value = true;
+}
+
+function closeMemoryValuesDrawer() {
+  memoryValuesDrawerOpen.value = false;
+}
+
+function refreshMemoryValuesQuery() {
+  void memoryValuesQuery.refetch();
+}
+
+async function refreshAllMemoryValues() {
+  try {
+    const result = await refreshAllMemoryMutation.mutateAsync();
+    if (result.partiallySuccessfulProcesses > 0 || result.failedProcesses > 0) {
+      ElMessage.warning("刷新已完成，部分 Java 未完全成功，请查看逐进程结果");
+    } else {
+      ElMessage.success("全部在线 Java 已按数据库值刷新");
+    }
+  } catch {
+    // mutation 统一展示安全错误。
+  }
+}
+
+async function refreshOneMemoryValue(process: CommonParameterMemoryProcess) {
+  refreshingMemoryProcessId.value = process.backendProcessId;
+  try {
+    const result = await refreshOneMemoryMutation.mutateAsync(process.backendProcessId);
+    if (result.status === "SUCCESS") {
+      ElMessage.success(`Java ${process.backendProcessId} 已按数据库值刷新`);
+    } else {
+      ElMessage.warning(`Java ${process.backendProcessId} 刷新完成，请查看失败项`);
+    }
+  } catch {
+    // mutation 统一展示安全错误。
+  }
+}
+
+function replaceMemoryProcess(
+  current: CommonParameterMemoryCluster | null,
+  process: CommonParameterMemoryProcess
+): CommonParameterMemoryCluster {
+  const existing = current?.processes ?? [];
+  const processes = existing.some((item) => item.backendProcessId === process.backendProcessId)
+    ? existing.map((item) => item.backendProcessId === process.backendProcessId ? process : item)
+    : [...existing, process];
+  processes.sort((left, right) =>
+    left.linuxServerId.localeCompare(right.linuxServerId) || left.backendProcessId.localeCompare(right.backendProcessId)
+  );
+  return {
+    capturedAt: process.capturedAt,
+    totalProcesses: processes.length,
+    successfulProcesses: processes.filter((item) => item.status === "SUCCESS").length,
+    partiallySuccessfulProcesses: processes.filter((item) => item.status === "PARTIAL").length,
+    failedProcesses: processes.filter((item) => item.status === "FAILED" || item.status === "UNAVAILABLE").length,
+    processes
+  };
+}
+
+function processStatusLabel(status: CommonParameterMemoryProcessStatus) {
+  return ({
+    SUCCESS: "成功",
+    PARTIAL: "部分成功",
+    FAILED: "失败",
+    UNAVAILABLE: "不可用"
+  } as const)[status];
+}
+
+function processStatusTag(status: CommonParameterMemoryProcessStatus) {
+  if (status === "SUCCESS") return "success";
+  if (status === "PARTIAL") return "warning";
+  if (status === "FAILED") return "danger";
+  return "info";
 }
 
 function refresh() {
@@ -315,6 +444,7 @@ function formatError(error: unknown) {
     <template v-else>
       <div class="ta-common-param-toolbar">
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
+        <el-button size="small" :icon="Monitor" plain @click="openMemoryValuesDrawer">查看内存加载值</el-button>
         <div class="ta-common-param-filter">
           <el-select v-model="draftPlatform" placeholder="平台" size="small" clearable filterable style="width: 140px" @change="applyFilter">
             <el-option label="全部" value="" />
@@ -526,6 +656,124 @@ function formatError(error: unknown) {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </el-drawer>
+
+      <!-- JVM 内存参数诊断抽屉：只管理显式注册项，多数通用参数仍按需直读数据库。 -->
+      <el-drawer
+        v-model="memoryValuesDrawerOpen"
+        title="JVM 内存参数值"
+        direction="rtl"
+        size="72%"
+        destroy-on-close
+        @close="closeMemoryValuesDrawer"
+      >
+        <div class="ta-memory-values">
+          <div class="ta-memory-values-toolbar">
+            <div class="ta-memory-values-summary" aria-label="Java 进程刷新汇总">
+              <span><strong>{{ memoryCluster?.totalProcesses ?? 0 }}</strong> 个在线 Java</span>
+              <span class="is-success"><strong>{{ memoryCluster?.successfulProcesses ?? 0 }}</strong> 成功</span>
+              <span class="is-warning"><strong>{{ memoryCluster?.partiallySuccessfulProcesses ?? 0 }}</strong> 部分成功</span>
+              <span class="is-danger"><strong>{{ memoryCluster?.failedProcesses ?? 0 }}</strong> 失败</span>
+            </div>
+            <div class="ta-memory-values-actions">
+              <el-button
+                size="small"
+                :icon="Refresh"
+                :loading="memoryValuesFetching"
+                :disabled="refreshingAllMemoryValues"
+                @click="refreshMemoryValuesQuery"
+              >重新查询</el-button>
+              <el-button
+                size="small"
+                type="primary"
+                :loading="refreshingAllMemoryValues"
+                :disabled="memoryValuesFetching || refreshingMemoryProcessId !== null"
+                @click="refreshAllMemoryValues"
+              >刷新全部 Java</el-button>
+            </div>
+          </div>
+
+          <p class="ta-memory-values-note">
+            仅展示已显式加载到 JVM 内存的通用参数。手工刷新会从数据库重新读取，不修改数据库，也不会重复发布广播。
+          </p>
+          <div v-if="memoryPartialNotice" class="ta-memory-values-warning" role="status">{{ memoryPartialNotice }}</div>
+          <div v-if="memoryValuesError" class="ta-common-param-alert" role="alert">{{ memoryValuesError }}</div>
+          <div v-if="memoryValuesFetching && memoryProcesses.length === 0" class="ta-memory-values-loading">正在查询在线 Java 的内存值…</div>
+          <el-empty
+            v-if="!memoryValuesFetching && !memoryValuesError && memoryProcesses.length === 0"
+            description="暂无已注册的 JVM 内存参数"
+          />
+
+          <div v-if="memoryProcesses.length > 0" class="ta-memory-process-list">
+            <article
+              v-for="process in memoryProcesses"
+              :key="process.backendProcessId"
+              class="ta-memory-process-card"
+              :class="`is-${process.status.toLowerCase()}`"
+            >
+              <header class="ta-memory-process-header">
+                <div class="ta-memory-process-identity">
+                  <div class="ta-memory-process-title">
+                    <code class="ta-common-param-mono">{{ process.backendProcessId }}</code>
+                    <el-tag size="small" :type="processStatusTag(process.status)">
+                      {{ processStatusLabel(process.status) }}
+                    </el-tag>
+                  </div>
+                  <span>{{ process.linuxServerId }} · {{ process.listenUrl }}</span>
+                </div>
+                <el-button
+                  size="small"
+                  plain
+                  :loading="refreshingMemoryProcessId === process.backendProcessId"
+                  :disabled="refreshingAllMemoryValues || (refreshingMemoryProcessId !== null && refreshingMemoryProcessId !== process.backendProcessId)"
+                  @click="refreshOneMemoryValue(process)"
+                >刷新此 Java</el-button>
+              </header>
+
+              <div class="ta-memory-process-meta">
+                <span>实例标识</span><code>{{ process.instanceId || '-' }}</code>
+                <span>采集时间</span><strong>{{ formatFullDate(process.capturedAt) }}</strong>
+              </div>
+              <div v-if="process.errorMessage" class="ta-memory-process-error" role="status">
+                {{ process.errorMessage }}<span v-if="process.errorCode">（{{ process.errorCode }}）</span>
+              </div>
+
+              <div v-if="process.parameters.length > 0" class="ta-memory-param-table-wrapper">
+                <table class="ta-memory-param-table">
+                  <thead>
+                    <tr>
+                      <th>参数键</th>
+                      <th>数据库加载源值</th>
+                      <th>内存生效值</th>
+                      <th>加载时间</th>
+                      <th>最近刷新</th>
+                      <th>状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="parameter in process.parameters" :key="`${parameter.englishName}:${parameter.platform}`">
+                      <td>
+                        <code class="ta-common-param-mono">{{ parameter.englishName }}</code>
+                        <span class="ta-memory-param-platform">{{ parameter.platform }}</span>
+                      </td>
+                      <td><code class="ta-memory-value-code">{{ parameter.sourceValue ?? '-' }}</code></td>
+                      <td><code class="ta-memory-value-code is-effective">{{ parameter.memoryValue ?? '-' }}</code></td>
+                      <td>{{ formatFullDate(parameter.loadedAt) }}</td>
+                      <td>{{ formatFullDate(parameter.lastRefreshAttemptAt) }}</td>
+                      <td>
+                        <el-tag size="small" :type="parameter.refreshStatus === 'SUCCESS' ? 'success' : 'danger'">
+                          {{ parameter.refreshStatus === 'SUCCESS' ? '成功' : '失败' }}
+                        </el-tag>
+                        <div v-if="parameter.errorMessage" class="ta-memory-param-error">{{ parameter.errorMessage }}</div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-else-if="process.status !== 'UNAVAILABLE'" class="ta-memory-process-empty">本进程暂无已注册内存参数</div>
+            </article>
           </div>
         </div>
       </el-drawer>
@@ -851,5 +1099,203 @@ function formatError(error: unknown) {
   max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* JVM 内存值抽屉：以进程为诊断边界，保留同服务器多个 Java 的独立状态。 */
+.ta-memory-values {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.ta-memory-values-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+}
+.ta-memory-values-summary,
+.ta-memory-values-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ta-memory-values-summary span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #f9fafb;
+  color: #4b5563;
+  font-size: 12px;
+}
+.ta-memory-values-summary strong {
+  color: #111827;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+}
+.ta-memory-values-summary .is-success strong { color: #047857; }
+.ta-memory-values-summary .is-warning strong { color: #b45309; }
+.ta-memory-values-summary .is-danger strong { color: #b91c1c; }
+.ta-memory-values-note {
+  margin: 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ta-memory-values-warning {
+  padding: 8px 12px;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+}
+.ta-memory-values-loading,
+.ta-memory-process-empty {
+  padding: 24px;
+  color: #6b7280;
+  text-align: center;
+  font-size: 13px;
+}
+.ta-memory-process-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ta-memory-process-card {
+  overflow: hidden;
+  border: 1px solid #dbe3ef;
+  border-left: 4px solid #10b981;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.ta-memory-process-card.is-partial { border-left-color: #f59e0b; }
+.ta-memory-process-card.is-failed { border-left-color: #ef4444; }
+.ta-memory-process-card.is-unavailable { border-left-color: #94a3b8; }
+.ta-memory-process-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf1f6;
+  background: #f8fafc;
+}
+.ta-memory-process-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+  color: #64748b;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ta-memory-process-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ta-memory-process-meta {
+  display: grid;
+  grid-template-columns: 72px minmax(140px, 1fr) 72px minmax(140px, 1fr);
+  gap: 8px 12px;
+  padding: 10px 14px;
+  color: #64748b;
+  font-size: 12px;
+}
+.ta-memory-process-meta code,
+.ta-memory-process-meta strong {
+  min-width: 0;
+  color: #1f2937;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.ta-memory-process-error {
+  margin: 0 14px 10px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+}
+.ta-memory-param-table-wrapper {
+  overflow: auto;
+  border-top: 1px solid #edf1f6;
+}
+.ta-memory-param-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.ta-memory-param-table th {
+  padding: 8px 10px;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.ta-memory-param-table td {
+  padding: 9px 10px;
+  border-top: 1px solid #f1f5f9;
+  color: #475569;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.ta-memory-param-table td:first-child {
+  min-width: 220px;
+  white-space: normal;
+}
+.ta-memory-param-platform {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 11px;
+}
+.ta-memory-value-code {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.ta-memory-value-code.is-effective {
+  color: #0f766e;
+  font-weight: 600;
+}
+.ta-memory-param-error {
+  max-width: 220px;
+  margin-top: 5px;
+  color: #b91c1c;
+  white-space: normal;
+}
+
+@media (max-width: 900px) {
+  .ta-memory-values-toolbar,
+  .ta-memory-process-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ta-memory-process-meta {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
 }
 </style>

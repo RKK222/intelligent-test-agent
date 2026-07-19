@@ -75,7 +75,8 @@ Token 校验流程：
 10. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
 11. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。
 12. 定时任务管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端系统管理菜单可见性只作为体验优化。管理员手动触发运行记录必须写入 `requestedByUserId` 和 traceId，停止正在执行的运行记录必须写入 `stopRequestedAt`、`stopRequestedByUserId` 和 `stopReason`。scheduler 启用时必须使用 Redis 分布式锁，不得回退到本机锁或数据库锁，以免分布式多节点重复执行。
-13. 夜间任务 API 必须使用用户 JWT，owner 只能取认证主体；按 `taskId/sessionId` 查询或变更时必须隔离其他用户。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 scheduler payload/result、HTTP 响应、RunEvent、运营分析或日志；任务成功投递、取消或最终失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview` 和安全错误。到期执行必须重新校验 Session/Workspace 权限，并通过公共进程启动和 Run 编排，禁止根据持久化客户端字段绕过权限、选择任意服务器或直调 manager gateway。
+13. 夜间任务 API 必须使用用户 JWT，owner 只能取认证主体；按 `taskId/sessionId` 查询或变更时必须隔离其他用户。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 scheduler payload/result、HTTP 响应、RunEvent、运营分析或日志；任务成功投递、取消或最终失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview` 和安全错误。到期执行必须重新校验 Session/Workspace 权限，并通过公共进程启动和 Run 编排，禁止根据持久化客户端字段绕过权限、选择任意服务器或直调 manager gateway。夜间容量只能由 `SUPER_ADMIN` 通过既有通用参数管理入口修改，服务端必须在审计和广播前校验正整数；跨服务器刷新 payload 不携带参数值，刷新失败日志不得记录数据库原值或底层敏感错误。
+14. JVM 内存通用参数的查询和手工刷新接口必须强制校验 `SUPER_ADMIN`，因为响应会同时暴露数据库加载源值与进程实际生效值；前端入口可见性不能替代后端权限。跨 Java 请求必须按 `backendProcessId` 精确路由并使用统一防循环头。手工刷新不得写参数修改历史或重复发布广播，日志只允许记录脱敏 traceId、进程身份、参数键和结果状态，不得记录源值、内存值、底层异常消息或堆栈。
 
 ## 日志脱敏
 

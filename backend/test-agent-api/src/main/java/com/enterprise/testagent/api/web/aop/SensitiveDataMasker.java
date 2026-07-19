@@ -18,7 +18,8 @@ public final class SensitiveDataMasker {
             "password", "oldpassword", "newpassword",
             "token", "accesstoken", "refreshtoken", "contexttoken",
             "secret", "apikey", "credential", "authorization",
-            "privatekey", "passphrase"
+            "privatekey", "passphrase",
+            "sourcevalue", "memoryvalue"
     );
 
     /** 日志最大长度，超长部分截断 */
@@ -42,9 +43,9 @@ public final class SensitiveDataMasker {
 
         // 脱敏格式: "fieldName": "value" -> "fieldName": "***"
         for (String field : SENSITIVE_FIELDS) {
-            // 匹配双引号包裹的字段名和字符串值
+            // 匹配双引号包裹的字段名和完整 JSON 字符串值，转义引号不能提前结束匹配。
             result = result.replaceAll(
-                    "(?i)(\"" + field + "\"\\s*:\\s*\")[^\"]*\"",
+                    "(?i)(\"" + field + "\"\\s*:\\s*\")(?:\\\\.|[^\"\\\\])*\"",
                     "$1***\""
             );
         }

@@ -185,6 +185,60 @@ class CommonParameterManagementApplicationServiceTest {
     }
 
     @Test
+    void updateValueNormalizesPositiveNightExecutionCapacity() {
+        CommonParameterRepository repository = mock(CommonParameterRepository.class);
+        CommonParameter existing = parameter(
+                "param_night_execution_slot_capacity_all",
+                "NIGHT_EXECUTION_SLOT_CAPACITY",
+                "20",
+                ParameterPlatform.ALL,
+                true);
+        CommonParameter updated = existing.withValue("21", UPDATED_AT);
+        when(repository.findByParameterId(existing.parameterId()))
+                .thenReturn(Optional.of(existing))
+                .thenReturn(Optional.of(updated));
+        when(repository.updateValue(existing.parameterId(), "21", UPDATED_AT)).thenReturn(1);
+        CommonParameterChangeLogRepository changeLogRepository = mock(CommonParameterChangeLogRepository.class);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        CommonParameterManagementApplicationService service = newService(repository, changeLogRepository, publisher);
+
+        CommonParameterResponse response = service.updateValue(
+                existing.parameterId(), " 21 ", "trace_capacity", "usr_test", "testuser");
+
+        assertThat(response.parameterValue()).isEqualTo("21");
+        verify(repository).updateValue(existing.parameterId(), "21", UPDATED_AT);
+        verify(changeLogRepository).save(any(CommonParameterChangeLog.class));
+        verify(publisher).publishEvent(any(CommonParameterUpdatedEvent.class));
+    }
+
+    @Test
+    void updateValueRejectsInvalidNightExecutionCapacityBeforeWriting() {
+        for (String invalidValue : List.of("abc", "0", "-1", "2147483648")) {
+            CommonParameterRepository repository = mock(CommonParameterRepository.class);
+            CommonParameter existing = parameter(
+                    "param_night_execution_slot_capacity_all",
+                    "NIGHT_EXECUTION_SLOT_CAPACITY",
+                    "20",
+                    ParameterPlatform.ALL,
+                    true);
+            when(repository.findByParameterId(existing.parameterId())).thenReturn(Optional.of(existing));
+            CommonParameterChangeLogRepository changeLogRepository = mock(CommonParameterChangeLogRepository.class);
+            ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+            CommonParameterManagementApplicationService service = newService(repository, changeLogRepository, publisher);
+
+            assertThatThrownBy(() -> service.updateValue(
+                            existing.parameterId(), invalidValue, "trace_capacity", "usr_test", "testuser"))
+                    .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                        assertThat(exception.getCause()).isNull();
+                    });
+            verify(repository, org.mockito.Mockito.never()).updateValue(any(), any(), any());
+            verify(changeLogRepository, org.mockito.Mockito.never()).save(any());
+            verify(publisher, org.mockito.Mockito.never()).publishEvent(any());
+        }
+    }
+
+    @Test
     void updateValueThrowsNotFoundWhenRowDisappearsConcurrently() {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
         when(repository.findByParameterId("param_opencode_manager_max_processes_all"))

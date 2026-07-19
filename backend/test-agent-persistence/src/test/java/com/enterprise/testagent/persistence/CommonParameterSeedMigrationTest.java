@@ -39,4 +39,18 @@ class CommonParameterSeedMigrationTest {
         assertThat(sql).contains(
                 "'param_references_sdd_folder_names_all', 'REFERENCES_SDD_FOLDER_NAMES', '规格驱动标准目录名称', 'docs,spec', 'all', true");
     }
+
+    @Test
+    void nightExecutionCapacitySeedContainsEditableGlobalDefault() throws Exception {
+        String sql = Files.readString(Path.of(
+                "src/main/resources/db/migration/V20260719210000__seed_night_execution_capacity_parameter.sql"));
+
+        assertThat(sql).contains(
+                "'param_night_execution_slot_capacity_all'",
+                "'NIGHT_EXECUTION_SLOT_CAPACITY'",
+                "'夜间任务每时段任务上限'",
+                "'20'",
+                "'all'",
+                "true");
+    }
 }

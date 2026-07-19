@@ -121,6 +121,13 @@ public class BackendJavaRouteResolver {
     }
 
     /**
+     * 按稳定进程 ID 判断目标是否就是当前 Java，避免同服务器多 Java 被误判成本机。
+     */
+    public boolean isCurrent(BackendProcessId backendProcessId) {
+        return backendProcessId != null && currentBackendProcessId.equals(backendProcessId);
+    }
+
+    /**
      * 只有目标不是当前 Java 时返回远端路由目标。
      */
     public Optional<LinuxServerId> remoteTarget(LinuxServerId linuxServerId) {
@@ -172,6 +179,24 @@ public class BackendJavaRouteResolver {
                     Map.of("linuxServerId", ""));
         }
         return requireBackend(new LinuxServerId(linuxServerId.trim()));
+    }
+
+    /**
+     * 按 backendProcessId 精确查询在线 Java；当前进程无需依赖 Redis 快照即可命中。
+     */
+    public BackendJavaProcess requireBackend(BackendProcessId backendProcessId) {
+        Objects.requireNonNull(backendProcessId, "backendProcessId must not be null");
+        if (isCurrent(backendProcessId)) {
+            return currentBackend();
+        }
+        return heartbeatStore.liveBackendSnapshots().stream()
+                .map(BackendRuntimeSnapshot::backendProcess)
+                .filter(backend -> backend.backendProcessId().equals(backendProcessId))
+                .max(Comparator.comparing(BackendJavaProcess::lastHeartbeatAt))
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "目标 Java 进程不可用",
+                        Map.of("backendProcessId", backendProcessId.value())));
     }
 
     /**

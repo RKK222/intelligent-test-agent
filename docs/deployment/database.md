@@ -469,7 +469,7 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 
 ## 通用参数数据库直读与变量解析（无 schema 变更）
 
-通用参数值支持变量引用 `${englishName}`，在应用层读取时展开；`${NAME}` 先按通用参数引用解析，未命中时再读取 Java 后端进程环境变量，`$NAME` 直接读取环境变量；路径值开头的 `$HOME` 和 `~/` 会展开为当前用户主目录，**不涉及表结构变更**（`parameter_value` 已为 `text`）。通用参数运行态通过 `RepositoryCommonParameterValues` 直接读取数据库，不写入 JVM 内存缓存或 Redis 参数快照。
+通用参数值支持变量引用 `${englishName}`，在应用层读取时展开；`${NAME}` 先按通用参数引用解析，未命中时再读取 Java 后端进程环境变量，`$NAME` 直接读取环境变量；路径值开头的 `$HOME` 和 `~/` 会展开为当前用户主目录，**不涉及表结构变更**（`parameter_value` 已为 `text`）。通用参数运行态默认通过 `RepositoryCommonParameterValues` 直接读取数据库，不写入 JVM 内存缓存或 Redis 参数快照。只有显式实现 `CommonParameterMemoryEntry` 的条目才由本机注册表缓存；首个条目是夜间容量，启动、匹配广播或手工刷新时仍从数据库读取，只在 JVM 保存已校验的正整数快照。
 
 `PATCH` 修改 `OPENCODE_MANAGER_MAX_PROCESSES` 后，后端仍发布 `common-parameter.refresh-requested` 跨实例广播，但 payload 只携带参数标识，不携带参数值；各 Java 实例收到后直接从数据库读取最新值并向本服务器 manager 下发 max-only `configUpdate`。路径类参数属于部署/初始化参数，不通过前端热刷新。
 
@@ -823,7 +823,7 @@ V10 种子数据对 F-COSS 的影响：
 |---|---|
 | `night_execution_tasks` | 夜间任务聚合，保存 owner、Session/Workspace、幂等请求、展示预览、待执行输入、15 分钟时段、服务器亲和、USER_PLAN/Run 关联、状态和安全错误。 |
 | `night_execution_session_locks` | 每个 Session 至多一个待执行任务的持久化写锁；任务取消、最终失败或 Run 成功创建后删除。 |
-| `night_execution_slot_reservations` | 以 `slot_start` 为主键保存每个 15 分钟时段的全局已占名额；条件更新保证不超过部署容量。 |
+| `night_execution_slot_reservations` | 以 `slot_start` 为主键保存每个 15 分钟时段的全局已占名额；条件更新保证不超过当前内存容量快照。 |
 
 关键约束和保留策略：
 
@@ -834,6 +834,16 @@ V10 种子数据对 F-COSS 的影响：
 - 任务绑定已有 Session，或在创建事务中预创建 `source_type=SCHEDULED_TASK/source_ref_id=task_id` 的空白 Session。成功 Run 和 USER 消息沿用同一来源字段；旧数据默认 `MANUAL` 兼容。
 - 终态任务和已过夜的容量占位保留 30 天，由 `opencode-runtime.night-execution-reconcile` 分批清理。容量占位在成功投递后仍保留到清理期，用于表达该启动时段已经消耗的名额；取消、最终失败和窗口内顺延会及时释放原时段名额。
 - 全部关系型 SQL 位于 `NightExecutionTaskMapper.xml`；首次创建用 PostgreSQL 事务级 advisory lock 串行化同一 owner/request。投递认领同时匹配 `SCHEDULED` 和当前 `scheduled_task_run_id`，避免改期前的旧运行误认领；恢复查询同时检查 `slot_start/updated_at`，为每次重试保留 5 分钟租约。任务迁移使用状态 CAS，会话锁和容量都在业务事务中维护，`status + slot_start + updated_at`、`status + updated_at` 索引支持有界补偿扫描。
+
+## V20260719210000 夜间任务容量通用参数
+
+`V20260719210000__seed_night_execution_capacity_parameter.sql` 初始化生产必需系统参数：
+
+| 参数 | 平台 | 初始值 | 可修改 | 用途 |
+|---|---|---:|---|---|
+| `NIGHT_EXECUTION_SLOT_CAPACITY` | `all` | `20` | `true` | 每个北京时间 15 分钟夜间启动时段的全局任务数上限。 |
+
+该参数由 `SUPER_ADMIN` 通过既有通用参数管理 API 修改；服务端只接受正整数。每个 Java 实例启动时从数据库加载到 `NightExecutionCapacityRegistry`，缺失或非法时启动失败；修改后通过既有 `common-parameter.refresh-requested` 广播触发各实例查库并原子替换内存快照，广播 payload 不携带参数值。运行中刷新失败保留上一有效值。调低容量不删除既有任务或容量占位，只阻止已达到新上限的时段继续预约；调高后后续查询和占位立即使用新值。旧部署容量环境变量不再读取。
 
 ## V20260625192100 scheduler 停止字段与状态字典
 

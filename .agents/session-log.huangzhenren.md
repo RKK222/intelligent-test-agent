@@ -5,6 +5,29 @@
 
 ## Entries
 
+### 2026-07-19 - 支持查询与手工刷新 Java 内存通用参数
+
+- Why:
+  - 多 Java 部署中，超级管理员缺少核对各 JVM 实际加载值及在广播遗漏、运行期读取失败后按数据库值定点恢复的能力；多数通用参数仍应保持按需直读数据库，不能扩大为通用缓存。
+- What:
+  - 新增显式 `CommonParameterMemoryEntry` 领域 SPI 与本机注册表，按英文名/平台唯一排序，启动严格加载，匹配广播或手工操作时查库刷新；运行期失败保留上一有效值并返回安全状态。夜间容量成为首个注册项，保留正整数校验、动态消费者和默认种子 `20/all/editable=true`，删除旧环境变量/yaml 入口。
+  - 公共 Java 路由器增加 `backendProcessId` 精确选择；新增四个仅 `SUPER_ADMIN` 可用的查询/刷新接口，集群操作最多 500 个进程、并发 8、单进程 10 秒，同服务器多个 Java 独立返回，单进程离线统一 503，集群部分失败仍返回逐进程结果。
+  - 通用参数页增加按需加载的 JVM 内存值抽屉与全部/单进程刷新；同步共享类型、backend-api、HTTP API、数据库/部署/安全/后端规范、模块图和前后端 README/PACKAGE。`event-stream.md` 经检查无需修改。
+- How:
+  - 跨 Java 请求复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder`，保留 routed header 防二次转发；手工刷新直接读取目标 JVM 的数据库参数，不写修改历史、不重复广播。响应与结构化日志不记录底层异常，`sourceValue`/`memoryValue` 纳入 JSON 日志脱敏。
+  - TDD 覆盖注册键唯一性、排序、启动/运行失败语义、事件匹配、夜间容量缺失/空白/非正整数/溢出、精确路由、四个接口、超时/离线/部分失败、远端空响应以及前端懒加载、展示和刷新提示。
+- Result:
+  - API、配置管理和运行时相关 Maven 模块全量测试通过；聚焦回归通过，后端 18 模块 `mvn clean package -DskipTests` 成功。前端聚焦 Vitest 84 项及 shared-types、backend-api、agent-web typecheck 通过。
+  - 扩大到 persistence 全量仍被既有 `V20260717173000__create_public_agent_config_rollouts.sql` 的 PostgreSQL `TIMESTAMPTZ` 与 H2 不兼容阻断（76 errors）；全量前端 test/build 又被同工作树并行、未纳入本提交的 Figma/AgentWorkbench 改动失败阻断，任务相关聚焦套件保持通过。
+  - 涉及新增内部 HTTP API、一个生产必需通用参数种子 migration、最多 500×单进程响应的有界并发聚合和超级管理员诊断面；不新增 RunEvent/SSE、Redis 参数快照、业务表、generated SDK 或真实环境文件。仍建议在真实多 Java 环境人工验证同服务器多进程、离线恢复和广播后收敛。
+- Verification:
+  - `mvn -q -pl test-agent-api,test-agent-configuration-management,test-agent-opencode-runtime -am test`
+  - 聚焦 `CommonParameterMemory*`、`NightExecution*`、路由、migration 与脱敏测试；`mvn clean package -DskipTests`
+  - `corepack pnpm exec vitest run apps/agent-web/tests/general-param-management-panel.test.ts packages/backend-api/tests/backend-api.test.ts`
+  - shared-types、backend-api、agent-web typecheck，`git diff --check`、冲突标记/旧配置引用扫描和全部 session log 近期条目回顾。
+- Next:
+  - 并行前端改动和既有 H2 migration 基线修复后重跑全量前端与 persistence；在真实多 Java 部署完成查询、全部/定点刷新及离线 503 人工验收。
+
 ### 2026-07-19 - 优化引用资产库多服务器同步耗时
 
 - Why:

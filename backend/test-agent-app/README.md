@@ -46,7 +46,7 @@
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
 - 企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖；PostgreSQL JDBC 驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
 - `application.yml`：`test-agent.scheduler.enabled` 默认 `true`，可通过 `TEST_AGENT_SCHEDULER_ENABLED=false` 显式关闭；环境变量为空时同样按关闭处理。
-- `application.yml`：USER_PLAN 默认单轮 50 条、4 个 worker、100 个等待位；分别由 `TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT`、`TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT`、`TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY` 覆盖。夜间执行每个 15 分钟时段容量必须显式设置 `TEST_AGENT_NIGHT_EXECUTION_SLOT_CAPACITY`；缺失或非正整数时仅夜间任务 API fail-closed 为 `NIGHT_EXECUTION_UNAVAILABLE`，应用仍可启动。
+- `application.yml`：USER_PLAN 默认单轮 50 条、4 个 worker、100 个等待位；分别由 `TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT`、`TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT`、`TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY` 覆盖。夜间执行每个 15 分钟时段容量不再绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在 Spring 单例装配完成时严格加载，缺失或非法会让应用启动失败。
 - 运营分析汇总不再使用 `test-agent.analytics.rollup.*` 专用配置；代码任务 `opencode-runtime.analytics-rollup` 会在启动时注册，启停和 Cron 覆盖统一由定时任务管理配置控制。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
 - 用户进程运行管理和 manager 控制面在线状态强依赖 Redis；多服务器应用版本工作区副本实时同步也需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。

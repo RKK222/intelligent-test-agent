@@ -59,6 +59,7 @@ class NightExecutionTaskApplicationServiceTest {
     private ConversationWorkspaceAccessAuthorizer accessAuthorizer;
     private UserOpencodeProcessAssignmentService assignmentService;
     private ScheduledUserPlanService scheduledUserPlanService;
+    private NightExecutionCapacityRegistry capacityRegistry;
     private NightExecutionTaskApplicationService service;
 
     @BeforeEach
@@ -73,8 +74,8 @@ class NightExecutionTaskApplicationServiceTest {
         OpencodeScheduledTaskExecutionAffinityProvider affinityProvider =
                 mock(OpencodeScheduledTaskExecutionAffinityProvider.class);
 
-        NightExecutionProperties properties = new NightExecutionProperties();
-        properties.setSlotCapacity("2");
+        capacityRegistry = mock(NightExecutionCapacityRegistry.class);
+        when(capacityRegistry.currentCapacity()).thenReturn(2);
         when(taskRepository.findByOwnerAndClientRequestId(USER, "request-night-service"))
                 .thenReturn(Optional.empty());
         when(taskRepository.reservationCounts(any(), any())).thenReturn(Map.of());
@@ -96,7 +97,7 @@ class NightExecutionTaskApplicationServiceTest {
         service = new NightExecutionTaskApplicationService(
                 taskRepository, sessionRepository, messageRepository, workspaceRepository,
                 accessAuthorizer, assignmentService, scheduledUserPlanService, affinityProvider,
-                new NightExecutionWindowCalculator(), properties,
+                new NightExecutionWindowCalculator(), capacityRegistry,
                 new ObjectMapper().findAndRegisterModules(), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -159,6 +160,24 @@ class NightExecutionTaskApplicationServiceTest {
         assertThatThrownBy(service::slots)
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.NIGHT_EXECUTION_UNAVAILABLE));
+    }
+
+    @Test
+    void slotQueriesUseLatestCapacitySnapshotWithoutCancellingExistingReservations() {
+        when(taskRepository.reservationCounts(any(), any())).thenReturn(Map.of(SLOT, 2));
+        when(capacityRegistry.currentCapacity()).thenReturn(2, 3);
+
+        var atLowerCapacity = service.slots();
+        var atHigherCapacity = service.slots();
+
+        assertThat(atLowerCapacity.capacity()).isEqualTo(2);
+        assertThat(atLowerCapacity.slots()).filteredOn(slot -> slot.slotStart().equals(SLOT))
+                .singleElement()
+                .satisfies(slot -> assertThat(slot.available()).isFalse());
+        assertThat(atHigherCapacity.capacity()).isEqualTo(3);
+        assertThat(atHigherCapacity.slots()).filteredOn(slot -> slot.slotStart().equals(SLOT))
+                .singleElement()
+                .satisfies(slot -> assertThat(slot.available()).isTrue());
     }
 
     @Test

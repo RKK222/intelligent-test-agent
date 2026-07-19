@@ -65,6 +65,7 @@
 - `db/migration/V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加运行记录保留清理索引。
 - `db/migration/V20260718210000__extend_scheduler_user_plan.sql`：允许 USER_PLAN 专用任务无 Cron，并为运行记录增加执行亲和字段和到期索引。
 - `db/migration/V20260718211000__create_night_execution_tasks.sql`：创建夜间任务、会话锁和时段容量占位表及约束/索引/中文注释。
+- `db/migration/V20260719210000__seed_night_execution_capacity_parameter.sql`：初始化 `platform=all`、可编辑、默认值 20 的夜间时段容量通用参数。
 - `db/migration/V20260718100000__seed_references_params.sql`：初始化引用资产根目录和 SDD 根层目录名称清单。
 - `db/migration/V20260718110000__create_reference_repository_replica_tables.sql`：创建引用资产总体状态/服务器副本表及认领、generation 查询索引。
 - `db/migration/V20260718143000__add_reference_repository_operations_and_verification.sql`：增加引用资产操作类型、实际指针可空语义与核验时间。

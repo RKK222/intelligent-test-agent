@@ -49,6 +49,7 @@
 - `V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加每日保留清理使用的索引，不写入业务数据。
 - `V20260718210000__extend_scheduler_user_plan.sql`：允许 USER_PLAN 专用任务不配置 Cron，为运行记录增加服务器执行亲和字段和到期扫描索引。
 - `V20260718211000__create_night_execution_tasks.sql`：创建夜间任务、单会话待执行锁和 15 分钟时段容量占位表，包含幂等键、状态/时间约束、索引和中文注释。
+- `V20260719210000__seed_night_execution_capacity_parameter.sql`：初始化可编辑全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY=20`，供各 Java 实例启动加载和跨实例热刷新。
 - `V20260717173000__create_public_agent_config_rollouts.sql`：创建公共 Agent/Skill 发布 rollout、服务器同步和存量进程目标表。
 - `V20260717200000__harden_public_agent_config_rollout.sql`：为 rollout 保存发起人，为目标快照用户并增加认领 fencing token；历史目标按服务器、容器、端口回填用户归属，不写测试或演示数据。
 - `V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本已可能被历史库应用，禁止删除、重命名或直接改写。

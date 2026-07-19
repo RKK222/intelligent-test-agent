@@ -51,7 +51,7 @@ public class NightExecutionTaskApplicationService {
     private final ScheduledUserPlanService scheduledUserPlanService;
     private final OpencodeScheduledTaskExecutionAffinityProvider affinityProvider;
     private final NightExecutionWindowCalculator windowCalculator;
-    private final NightExecutionProperties properties;
+    private final NightExecutionCapacityRegistry capacityRegistry;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -65,7 +65,7 @@ public class NightExecutionTaskApplicationService {
             ScheduledUserPlanService scheduledUserPlanService,
             OpencodeScheduledTaskExecutionAffinityProvider affinityProvider,
             NightExecutionWindowCalculator windowCalculator,
-            NightExecutionProperties properties,
+            NightExecutionCapacityRegistry capacityRegistry,
             ObjectMapper objectMapper,
             Clock clock) {
         this.taskRepository = Objects.requireNonNull(taskRepository);
@@ -77,7 +77,7 @@ public class NightExecutionTaskApplicationService {
         this.scheduledUserPlanService = Objects.requireNonNull(scheduledUserPlanService);
         this.affinityProvider = Objects.requireNonNull(affinityProvider);
         this.windowCalculator = Objects.requireNonNull(windowCalculator);
-        this.properties = Objects.requireNonNull(properties);
+        this.capacityRegistry = Objects.requireNonNull(capacityRegistry);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.clock = Objects.requireNonNull(clock);
     }
@@ -85,7 +85,7 @@ public class NightExecutionTaskApplicationService {
     /** 返回下一夜间窗口；先计算边界再查询该窗口的真实占用。 */
     public NightExecutionWindowCalculator.NightExecutionWindow slots() {
         requireUserPlanAvailable();
-        int capacity = properties.requireSlotCapacity();
+        int capacity = capacityRegistry.currentCapacity();
         Instant now = clock.instant();
         var window = windowCalculator.nextWindow(now, Map.of(), capacity);
         Map<Instant, Integer> reservations =

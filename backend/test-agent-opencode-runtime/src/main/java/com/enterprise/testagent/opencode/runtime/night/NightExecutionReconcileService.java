@@ -34,7 +34,7 @@ public class NightExecutionReconcileService {
     private final ScheduledUserPlanService userPlanService;
     private final UserOpencodeProcessAssignmentService assignmentService;
     private final OpencodeScheduledTaskExecutionAffinityProvider affinityProvider;
-    private final NightExecutionProperties properties;
+    private final NightExecutionCapacityRegistry capacityRegistry;
     private final Clock clock;
 
     public NightExecutionReconcileService(
@@ -42,13 +42,13 @@ public class NightExecutionReconcileService {
             ScheduledUserPlanService userPlanService,
             UserOpencodeProcessAssignmentService assignmentService,
             OpencodeScheduledTaskExecutionAffinityProvider affinityProvider,
-            NightExecutionProperties properties,
+            NightExecutionCapacityRegistry capacityRegistry,
             Clock clock) {
         this.repository = Objects.requireNonNull(repository);
         this.userPlanService = Objects.requireNonNull(userPlanService);
         this.assignmentService = Objects.requireNonNull(assignmentService);
         this.affinityProvider = Objects.requireNonNull(affinityProvider);
-        this.properties = Objects.requireNonNull(properties);
+        this.capacityRegistry = Objects.requireNonNull(capacityRegistry);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -114,13 +114,7 @@ public class NightExecutionReconcileService {
             return Outcome.RETRIED;
         }
 
-        Optional<Instant> nextSlot;
-        try {
-            nextSlot = reserveNextSlot(task, now);
-        } catch (PlatformException unavailable) {
-            // 配置暂缺时保留已有任务；环境恢复后继续扫描，07:00 仍按真实窗口最终失败。
-            return Outcome.UNCHANGED;
-        }
+        Optional<Instant> nextSlot = reserveNextSlot(task, now);
         if (nextSlot.isEmpty()) {
             return fail(task, expectedStatus, now) ? Outcome.FAILED : Outcome.UNCHANGED;
         }
@@ -145,7 +139,7 @@ public class NightExecutionReconcileService {
     }
 
     private Optional<Instant> reserveNextSlot(NightExecutionTask task, Instant now) {
-        int capacity = properties.requireSlotCapacity();
+        int capacity = capacityRegistry.currentCapacity();
         Instant first = ceilQuarter(now);
         if (first.isBefore(task.slotEnd())) first = task.slotEnd();
         Map<Instant, Integer> counts = repository.reservationCounts(

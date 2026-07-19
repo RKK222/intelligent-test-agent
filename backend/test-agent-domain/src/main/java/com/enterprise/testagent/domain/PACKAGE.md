@@ -26,7 +26,7 @@
 - `node.ExecutionNode`、`node.ExecutionNodeId`、`node.ExecutionNodeStatus`、`node.ExecutionNodeRepository`：执行节点模型和查询端口。
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
 - `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
-- `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数和设置页工作空间创建进度；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
+- `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数、显式 JVM 内存参数 SPI/状态和设置页工作空间创建进度；`CommonParameterMemoryEntry` 约束实现先完整查库校验再原子替换，未注册参数仍按需直读数据库；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
 - `scheduler.*`：定时任务定义、用户级计划、带服务器执行亲和的运行记录、触发来源和状态枚举；`ScheduledTaskRepository`、`ScheduledTaskRunRetentionRepository` 作为持久化端口。
 - `nightexecution.*`：夜间任务聚合、状态和值对象；完整 Run 输入仅在待执行期短期保存，仓储端口统一暴露任务状态 CAS、会话写锁和 15 分钟时段容量。
 - 后续可新增领域命令、领域服务接口和更多状态规则。

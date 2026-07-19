@@ -1353,6 +1353,42 @@ export type CommonParameterChangeLog = {
   createdAt: string;
 };
 
+export type CommonParameterMemoryRefreshStatus = "SUCCESS" | "FAILED";
+
+export type CommonParameterMemoryProcessStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "UNAVAILABLE";
+
+export type CommonParameterMemoryValue = {
+  englishName: string;
+  platform: string;
+  sourceValue: string | null;
+  memoryValue: string | null;
+  loadedAt: string | null;
+  lastRefreshAttemptAt: string | null;
+  refreshStatus: CommonParameterMemoryRefreshStatus;
+  errorMessage: string | null;
+};
+
+export type CommonParameterMemoryProcess = {
+  backendProcessId: string;
+  linuxServerId: string;
+  listenUrl: string;
+  instanceId: string | null;
+  capturedAt: string;
+  status: CommonParameterMemoryProcessStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
+  parameters: CommonParameterMemoryValue[];
+};
+
+export type CommonParameterMemoryCluster = {
+  capturedAt: string;
+  totalProcesses: number;
+  successfulProcesses: number;
+  partiallySuccessfulProcesses: number;
+  failedProcesses: number;
+  processes: CommonParameterMemoryProcess[];
+};
+
 export type InternalModelProviderConfig = {
   providerId: string;
   name: string;

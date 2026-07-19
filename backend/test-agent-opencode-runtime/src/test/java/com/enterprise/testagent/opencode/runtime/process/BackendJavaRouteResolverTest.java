@@ -88,6 +88,43 @@ class BackendJavaRouteResolverTest {
     }
 
     @Test
+    void resolvesBackendExactlyByProcessIdWhenOneServerHasMultipleJavaProcesses() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
+                List.of(
+                        backendSnapshot("bjp_first_backend", "server-b", "http://10.8.0.22:8080", NOW),
+                        backendSnapshot("bjp_second_backend", "server-b", "http://10.8.0.22:18080", NOW)),
+                List.of()));
+
+        BackendJavaProcess first = resolver.requireBackend(new BackendProcessId("bjp_first_backend"));
+        BackendJavaProcess second = resolver.requireBackend(new BackendProcessId("bjp_second_backend"));
+
+        assertThat(first.listenUrl()).isEqualTo("http://10.8.0.22:8080");
+        assertThat(second.listenUrl()).isEqualTo("http://10.8.0.22:18080");
+    }
+
+    @Test
+    void resolvesCurrentBackendByProcessIdWithoutRedisSnapshot() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(List.of(), List.of()));
+
+        BackendJavaProcess current = resolver.requireBackend(new BackendProcessId("bjp_current_backend"));
+
+        assertThat(resolver.isCurrent(new BackendProcessId("bjp_current_backend"))).isTrue();
+        assertThat(resolver.isCurrent(new BackendProcessId("bjp_other_backend"))).isFalse();
+        assertThat(current.listenUrl()).isEqualTo("http://10.8.0.21:8080");
+    }
+
+    @Test
+    void missingBackendProcessThrowsUnifiedUnavailableError() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(List.of(), List.of()));
+
+        assertThatThrownBy(() -> resolver.requireBackend(new BackendProcessId("bjp_missing_backend")))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+                    assertThat(exception.details()).containsEntry("backendProcessId", "bjp_missing_backend");
+                });
+    }
+
+    @Test
     void resolvesContainerOwnerFromLatestManagerSnapshot() {
         BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
                 List.of(),

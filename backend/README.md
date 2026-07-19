@@ -30,10 +30,10 @@
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、Redis active/session scope 路由、用户级会话运行态摘要、每用户公共配置软链接/个人保存与发布 dispose、opencode 进程启动环境、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间异步执行和会话锁、Redis active/session scope 路由、用户级会话运行态摘要、opencode 进程启动环境、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
-| `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库英文名/类型冻结、应用工作空间和个人 SSH key 配置管理 |
+| `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库英文名/类型冻结、应用工作空间、个人 SSH key、可审计通用参数配置管理，以及显式 JVM 内存参数的本机注册/诊断状态 |
 | `test-agent-scheduler` | 分布式定时任务框架，提供任务注册、Cron 调度、服务器亲和 USER_PLAN、有界并发、Redis 锁、运行记录、运行记录保留清理、Cron 调整、手动触发和协作式停止管理服务；具体业务任务仍放在所属业务模块 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
-| `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
+| `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合和统一异常入口 |
 | `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、opencode 用户进程管理表映射、scheduler/夜间任务/会话锁/时段容量、引用资产总体/副本表、AI 反馈表和运营分析 rollup 表 |
 | `test-agent-event` | 按 storage mode 分流的 RunEvent 追加、SSE、Redis/数据库回放，以及用户级运行态刷新所需的全局事件触发流 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |

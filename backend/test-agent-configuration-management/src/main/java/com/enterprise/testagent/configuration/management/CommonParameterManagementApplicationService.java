@@ -33,6 +33,7 @@ public class CommonParameterManagementApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CommonParameterManagementApplicationService.class);
     private static final int CHANGE_LOG_LIMIT = 50;
+    private static final String NIGHT_EXECUTION_SLOT_CAPACITY = "NIGHT_EXECUTION_SLOT_CAPACITY";
 
     private final CommonParameterRepository repository;
     private final CommonParameterChangeLogRepository changeLogRepository;
@@ -114,7 +115,7 @@ public class CommonParameterManagementApplicationService {
         Instant updatedAt = clock.instant();
         CommonParameter updated;
         try {
-            updated = existing.withValue(newValue, updatedAt);
+            updated = existing.withValue(validateManagedValue(existing, newValue), updatedAt);
         } catch (IllegalArgumentException exception) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR, "参数值不能为空", Map.of("parameterId", normalizedParameterId), exception);
@@ -158,6 +159,26 @@ public class CommonParameterManagementApplicationService {
         return changeLogRepository.findByParameterId(normalizedParameterId, CHANGE_LOG_LIMIT).stream()
                 .map(ChangeLogResponse::from)
                 .toList();
+    }
+
+    /** 夜间容量是运行时可调整数；在写库和广播前校验，避免集群加载到非法值。 */
+    private static String validateManagedValue(CommonParameter parameter, String rawValue) {
+        if (!NIGHT_EXECUTION_SLOT_CAPACITY.equals(parameter.englishName())) {
+            return rawValue;
+        }
+        try {
+            int capacity = Integer.parseInt(rawValue == null ? "" : rawValue.trim());
+            if (capacity <= 0) {
+                throw new NumberFormatException("capacity must be positive");
+            }
+            return Integer.toString(capacity);
+        } catch (NumberFormatException ignored) {
+            // 不挂接 NumberFormatException，避免统一异常日志把管理员输入的原始参数值写入堆栈。
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "夜间任务每时段任务上限必须为正整数",
+                    Map.of("parameterId", parameter.parameterId(), "englishName", parameter.englishName()));
+        }
     }
 
     private static String normalize(String value, String field) {

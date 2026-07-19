@@ -1,6 +1,7 @@
 package com.enterprise.testagent.api.web.aop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +63,29 @@ class SensitiveDataMaskerTest {
 
             assertTrue(result.contains("\"contextToken\":\"***\""));
             assertTrue(result.contains("\"contextVersion\":1"));
+        }
+
+        @Test
+        @DisplayName("脱敏 JVM 通用参数源值和内存值")
+        void mask_commonParameterMemoryValues() {
+            String input = "{\"sourceValue\":\"database-secret-like-value\",\"memoryValue\":\"effective-value\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"sourceValue\":\"***\""));
+            assertTrue(result.contains("\"memoryValue\":\"***\""));
+        }
+
+        @Test
+        @DisplayName("完整脱敏含 JSON 转义字符的 JVM 通用参数值")
+        void mask_commonParameterMemoryValuesWithEscapedQuotes() {
+            String input = "{\"sourceValue\":\"database-secret\\\"-tail\",\"memoryValue\":\"effective-value\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"sourceValue\":\"***\""));
+            assertFalse(result.contains("database-secret"));
+            assertFalse(result.contains("-tail"));
         }
 
         @Test

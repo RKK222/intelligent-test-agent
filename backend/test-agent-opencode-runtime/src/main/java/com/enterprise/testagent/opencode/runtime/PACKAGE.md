@@ -13,8 +13,9 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 ## 主要程序清单
 
 - `session.SessionApplicationService`：会话创建、查询、消息和归档；消息列表会优先触发 projected messages 刷新，失败回退数据库快照。
-- `night.*`：夜间任务窗口/容量、提交查询/改期/取消、会话锁、USER_PLAN 投递和 5 分钟补偿。任务到期后按当前 `scheduledTaskRunId` 条件认领，进程启动和远端 Run 创建位于认领事务之外，再以短事务写回终态和解锁；投递复用 `UserOpencodeProcessAssignmentService.initialize`、会话上下文及 `RunApplicationService.startScheduledRun`，不直接调用 manager gateway，任务成功启动后沿用既有 RunEvent SSE。
+- `night.*`：`NightExecutionCapacityRegistry` 实现显式 JVM 内存参数 SPI，由配置管理注册表在启动、匹配广播和手工刷新时读取 `NIGHT_EXECUTION_SLOT_CAPACITY` 并原子替换快照；其余夜间窗口、提交查询/改期/取消、会话锁、USER_PLAN 投递和 5 分钟补偿复用该快照。任务到期后按当前 `scheduledTaskRunId` 条件认领，进程启动和远端 Run 创建位于认领事务之外，再以短事务写回终态和解锁；投递复用 `UserOpencodeProcessAssignmentService.initialize`、会话上下文及 `RunApplicationService.startScheduledRun`，不直接调用 manager gateway，任务成功启动后沿用既有 RunEvent SSE。
 - `process.OpencodeScheduledTaskExecutionAffinityProvider`：把 scheduler USER_PLAN 亲和标识固定为当前稳定 Linux 服务器 ID。
+- `process.BackendJavaRouteResolver`：统一按服务器、容器归属或稳定 `backendProcessId` 解析在线 Java；进程级诊断使用精确 ID，同服务器多个 Java 不合并。
 - `run.RunApplicationService`：Run 启动、路由、通用 agent binding 创建/复用、root session scope 记录、事件订阅、active-run 查询和取消；自动 dispatch 锚点由当前 runtime 生成并在远端 command、平台 USER、scope、manifest 和持久化锚点间复用，Legacy 显式旧 ID 保持透传。所有带 runId 的用户入口先通过该服务校验 Run 归属，新模式只读 Redis manifest 用户字段，legacy/manifest 缺失才回查 Run 与 Session。active-run 对已有 Redis user marker 的用户只读 Session active 索引。携带有效上下文的新 Run 由 `RunStorageModeSelector` 按 userId 稳定灰度固定为 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动期间不得切换；容量 reset 继续由同一运行数据面保留 USER、最新 assistant/可见 text part 和 run-status，不从数据库补原文。
 - `run.RunSessionScopeRouter`：在订阅级状态中维护当前 Run root/child known sessions 和 scopeVersion，负责 child discovery、pending drain、raw event dedup、child 终态过滤和无 session 全局 unknown 噪声过滤；新模式的 root/child scope、dedup 和 pending 全部走 `RunRuntimeStore` 同一 `{runId}` 数据面，禁止读写 scope 表；legacy 仅在 cache miss/新 child 时兼容访问 Repository。
 - `run.RunSessionScopeRuntimeCache`：只服务 legacy 的 Redis 热 cache，维护 `test-agent:run-scope:{runId}:pending:{sessionId}` 与 `test-agent:run-scope:{runId}:dedup:{sessionId}:{rawEventId}`，TTL 30 分钟，Redis 不可用时 legacy 可按数据库事实源继续处理；新模式不得调用该旧 cache。

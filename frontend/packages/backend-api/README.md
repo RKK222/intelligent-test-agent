@@ -19,6 +19,7 @@
 - 暴露 `getSessionRuntimeState()` 兼容读取 `/api/internal/platform/opencode-runtime/sessions/runtime-state`；新工作台以 `event-stream-client` 的用户级 runtime-state SSE 为主入口，不在流连接期间并行调用该 HTTP 接口。
 - Session message、Session tree 和 Run 响应透传可选 `parts`、`tokens`、`costUsd`、`events`、`contentKind/summaryStatus/summaryVersion`、`historyRepresentation/replayAvailable/detailsAvailableUntil` 与 `storageMode/clientRequestId`；client 不推断或改写这些元数据，旧后端缺字段时保持兼容。
 - 暴露配置管理和个人 SSH key API 方法，统一走 `/api/internal/platform/configuration-management`，不直连 Git 服务或 opencode server；代码库新增 payload 包含 `englishName`、`repositoryType`、`deploymentMode` 和兼容 `standard`，编辑 payload 只发送名称/英文名，`listRepositoryTypes()` 读取版本库类型下拉字典，`getRepositoryDeploymentOptions()` 读取部署模式默认值与内部 SSH 前缀；`getRepositoryTree(appId, repositoryId, branch)` 读取应用关联版本库的远端目录/文件树，不落本地磁盘；应用工作空间创建支持 `operationId`/`version`/`directoryNew` 并通过 `getWorkspaceCreateOperation(operationId)` 轮询后端进度。
+- 暴露通用参数显式 JVM 内存值方法：`listCommonParameterMemoryValues()`、`getCommonParameterMemoryValues(backendProcessId)`、`refreshCommonParameterMemoryValues()`、`refreshCommonParameterMemoryValuesForProcess(backendProcessId)`，统一走 `/configuration-management/common-parameters/memory-values` 的 additive 接口；client 只负责进程 ID 编码和 GET/POST 方法，不合并同服务器 Java、不推断未注册参数。
 - 暴露应用版本工作区和个人工作区 API 方法，统一走 `/api/internal/platform/workspace-management`，包括成员应用、模板、版本、个人空间、最近使用、diff、同步和版本工作区 `gitPullWorkspaceVersion(versionId)`；版本响应透传目标 commit 与服务器副本状态字段。
 - 暴露应用引用资产库方法 `listReferenceRepositories`、`initializeReferenceRepository`、`synchronizeReferenceRepository`、`switchReferenceRepositoryBranch`、`verifyReferenceRepositoryPointers`、`getReferenceRepositoryStatus`、`listReferenceRepositoryTree`，统一走 `/api/internal/platform/workspace-management/applications/{appId}/reference-repositories`；初始化与切换的分支候选继续复用既有 `listRepositoryBranches(repositoryId)`。client 透传目标指针、内部操作、逐服务器在线/实际指针/匹配/同步与核验时间和树节点 `highlighted/selectable`，不自行访问 Git 或磁盘；工作区 `.opencode/opencode.jsonc` 仍通过既有 `readFile/writeFile` 的 route + ticket + WebSocket RPC 修改。
 - 引用资产库状态类型额外透传可空 `repositoryPath`；旧后端未返回该字段时保持 `undefined`，client 不拼接、推断或记录物理路径。
@@ -50,4 +51,4 @@ corepack pnpm --filter @test-agent/backend-api typecheck
 corepack pnpm test -- backend-api
 ```
 
-`backend-api.test.ts` 覆盖 7 个引用资产端点的 app/repository/path 编码、初始化/切换 body、无 body 同步/核验和响应透传，以及组合视图 list/read 的 locator、稳定身份、只读来源和局部 warning 映射；`night-execution.test.ts` 覆盖夜间时段和任务创建/查询/改期/取消/关闭的 URL、查询参数与请求体。
+`backend-api.test.ts` 覆盖 7 个引用资产端点的 app/repository/path 编码、初始化/切换 body、无 body 同步/核验和响应透传、组合视图 list/read 的 locator/稳定身份/只读来源/局部 warning 映射，以及通用参数内存值四个接口的 URL 编码与 HTTP 方法；`night-execution.test.ts` 覆盖夜间时段和任务创建/查询/改期/取消/关闭的 URL、查询参数与请求体。

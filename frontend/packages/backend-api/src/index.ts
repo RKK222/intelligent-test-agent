@@ -36,6 +36,8 @@ import type {
   CodeRepositoryConfig,
   CommandInfo,
   CommonParameterChangeLog,
+  CommonParameterMemoryCluster,
+  CommonParameterMemoryProcess,
   ConversationRunContext,
   CreateApplicationWorkspacePayload,
   CreateWorkspaceAcceptedResponse,
@@ -1346,6 +1348,19 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }),
     listCommonParameterChangeLogs: (parameterId: string) =>
       request<CommonParameterChangeLog[]>(`${commonParameterBase}/${encodeURIComponent(parameterId)}/change-logs`),
+    listCommonParameterMemoryValues: () =>
+      request<CommonParameterMemoryCluster>(`${commonParameterBase}/memory-values`),
+    getCommonParameterMemoryValues: (backendProcessId: string) =>
+      request<CommonParameterMemoryProcess>(
+        `${commonParameterBase}/memory-values/${encodeURIComponent(backendProcessId)}`
+      ),
+    refreshCommonParameterMemoryValues: () =>
+      request<CommonParameterMemoryCluster>(`${commonParameterBase}/memory-values/refresh`, { method: "POST" }),
+    refreshCommonParameterMemoryValuesForProcess: (backendProcessId: string) =>
+      request<CommonParameterMemoryProcess>(
+        `${commonParameterBase}/memory-values/${encodeURIComponent(backendProcessId)}/refresh`,
+        { method: "POST" }
+      ),
     getInternalModelProviders: () =>
       request<InternalModelProviderManagementResponse>(`${configurationBase}/internal-model-providers`),
     updateInternalModelProviders: (payload: InternalModelProviderUpdatePayload) =>

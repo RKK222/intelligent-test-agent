@@ -2,6 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import { BackendApiError, createBackendApiClient, type ReferenceRepositoryStatus, type WorkspaceWebSocketFactory } from "../src";
 
 describe("backend-api", () => {
+  it("uses the additive common parameter memory query and refresh endpoints", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: {} }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.listCommonParameterMemoryValues();
+    await client.getCommonParameterMemoryValues("bjp_target/backend");
+    await client.refreshCommonParameterMemoryValues();
+    await client.refreshCommonParameterMemoryValuesForProcess("bjp_target/backend");
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
+      ["http://api/api/internal/platform/configuration-management/common-parameters/memory-values", undefined],
+      ["http://api/api/internal/platform/configuration-management/common-parameters/memory-values/bjp_target%2Fbackend", undefined],
+      ["http://api/api/internal/platform/configuration-management/common-parameters/memory-values/refresh", "POST"],
+      ["http://api/api/internal/platform/configuration-management/common-parameters/memory-values/bjp_target%2Fbackend/refresh", "POST"]
+    ]);
+  });
+
   it("calls every application reference repository endpoint with the current app id", async () => {
     const status: ReferenceRepositoryStatus = {
       repositoryId: "repo/assets",

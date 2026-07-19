@@ -53,8 +53,8 @@ class NightExecutionReconcileServiceTest {
         ScheduledUserPlanService userPlans = mock(ScheduledUserPlanService.class);
         UserOpencodeProcessAssignmentService assignment = mock(UserOpencodeProcessAssignmentService.class);
         OpencodeScheduledTaskExecutionAffinityProvider affinity = mock(OpencodeScheduledTaskExecutionAffinityProvider.class);
-        NightExecutionProperties properties = new NightExecutionProperties();
-        properties.setSlotCapacity("2");
+        NightExecutionCapacityRegistry capacityRegistry = mock(NightExecutionCapacityRegistry.class);
+        when(capacityRegistry.currentCapacity()).thenReturn(2);
         when(repository.findDispatchingBefore(now.minusSeconds(300), 50)).thenReturn(List.of(task));
         when(repository.findScheduledDueBefore(now.minusSeconds(300), 50)).thenReturn(List.of());
         when(repository.findTerminalBefore(now.minusSeconds(30L * 24 * 3600), 50)).thenReturn(List.of());
@@ -72,7 +72,7 @@ class NightExecutionReconcileServiceTest {
                         "trace_night_reconcile", now));
 
         NightExecutionReconcileService service = new NightExecutionReconcileService(
-                repository, userPlans, assignment, affinity, properties,
+                repository, userPlans, assignment, affinity, capacityRegistry,
                 Clock.fixed(now, ZoneOffset.UTC));
         NightExecutionReconcileService.Result result = service.reconcile("trace_night_reconcile", () -> false);
 
@@ -104,8 +104,8 @@ class NightExecutionReconcileServiceTest {
         ScheduledUserPlanService userPlans = mock(ScheduledUserPlanService.class);
         UserOpencodeProcessAssignmentService assignment = mock(UserOpencodeProcessAssignmentService.class);
         OpencodeScheduledTaskExecutionAffinityProvider affinity = mock(OpencodeScheduledTaskExecutionAffinityProvider.class);
-        NightExecutionProperties properties = new NightExecutionProperties();
-        properties.setSlotCapacity("2");
+        NightExecutionCapacityRegistry capacityRegistry = mock(NightExecutionCapacityRegistry.class);
+        when(capacityRegistry.currentCapacity()).thenReturn(2);
         when(repository.findDispatchingBefore(now.minusSeconds(300), 50)).thenReturn(List.of());
         when(repository.findScheduledDueBefore(now.minusSeconds(300), 50)).thenReturn(List.of(task));
         when(repository.updateIfStatus(any(), eq(NightExecutionTaskStatus.SCHEDULED))).thenReturn(false);
@@ -118,7 +118,7 @@ class NightExecutionReconcileServiceTest {
                         "trace_night_reconcile_race", now));
 
         NightExecutionReconcileService service = new NightExecutionReconcileService(
-                repository, userPlans, assignment, affinity, properties,
+                repository, userPlans, assignment, affinity, capacityRegistry,
                 Clock.fixed(now, ZoneOffset.UTC));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -145,15 +145,15 @@ class NightExecutionReconcileServiceTest {
         ScheduledUserPlanService userPlans = mock(ScheduledUserPlanService.class);
         UserOpencodeProcessAssignmentService assignment = mock(UserOpencodeProcessAssignmentService.class);
         OpencodeScheduledTaskExecutionAffinityProvider affinity = mock(OpencodeScheduledTaskExecutionAffinityProvider.class);
-        NightExecutionProperties properties = new NightExecutionProperties();
-        properties.setSlotCapacity("2");
+        NightExecutionCapacityRegistry capacityRegistry = mock(NightExecutionCapacityRegistry.class);
+        when(capacityRegistry.currentCapacity()).thenReturn(2);
         when(repository.findDispatchingBefore(now.minusSeconds(300), 50)).thenReturn(List.of());
         when(repository.findScheduledDueBefore(now.minusSeconds(300), 50)).thenReturn(List.of(task));
         when(repository.findTerminalBefore(now.minusSeconds(30L * 24 * 3600), 50)).thenReturn(List.of());
         when(repository.updateIfStatus(any(), eq(NightExecutionTaskStatus.SCHEDULED))).thenReturn(true);
 
         NightExecutionReconcileService service = new NightExecutionReconcileService(
-                repository, userPlans, assignment, affinity, properties,
+                repository, userPlans, assignment, affinity, capacityRegistry,
                 Clock.fixed(now, ZoneOffset.UTC));
         NightExecutionReconcileService.Result result = service.reconcile(
                 "trace_night_reconcile_expired", () -> false);
