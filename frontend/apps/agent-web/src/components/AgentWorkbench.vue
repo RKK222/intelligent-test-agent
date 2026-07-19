@@ -103,6 +103,7 @@ import {
   referenceChatPath,
   revalidatedWorkspaceViewRefreshTarget,
   resolveWorkspaceViewLoadTarget,
+  workspaceViewAncestorDirectoryIds,
   workspaceViewContextIsCurrent,
   workspaceViewEntries,
   workspaceFileRefreshSettlements,
@@ -5797,16 +5798,40 @@ async function expandPathToFile(relPath: string) {
   expandedDirectories.value = next;
 }
 
-// 双击 Tab 页：在左侧文件树中展开并滚动定位到对应文件
-function handleLocateFile(path: string) {
+/** 引用 tab 使用精确叶子节点反向展开，避免合并路径或同名文件定位到工作区副本。 */
+async function expandWorkspaceViewNodeToFile(tabPath: string): Promise<boolean> {
+  const nodeId = workspaceViewNodeIdByTabPath.get(tabPath);
+  if (!nodeId) return false;
+  const ancestorIds = workspaceViewAncestorDirectoryIds(nodeId, entriesByDirectory.value);
+  if (!ancestorIds) return false;
+
+  const next = new Set(expandedDirectories.value);
+  for (const ancestorId of ancestorIds) {
+    const target = workspaceViewDirectoryById.get(ancestorId);
+    if (!target) return false;
+    next.add(ancestorId);
+    expandedDirectories.value = new Set(next);
+    if (entriesByDirectory.value[ancestorId] === undefined) {
+      await loadDirectory(target);
+    }
+  }
+  expandedDirectories.value = next;
+  return true;
+}
+
+// 编辑器定位：引用文件按稳定节点展开，普通文件沿用相对路径；完成后再滚动。
+async function handleLocateFile(path: string) {
   if (!path) return;
   workbench.setActivePath(path);
-  expandPathToFile(path);
-  void nextTick(() => {
-    scrollToActiveFileTreeRow();
-    setTimeout(scrollToActiveFileTreeRow, 100);
-    setTimeout(scrollToActiveFileTreeRow, 300);
-  });
+  if (isReferenceFilePath(path)) {
+    await expandWorkspaceViewNodeToFile(path);
+  } else {
+    await expandPathToFile(path);
+  }
+  await nextTick();
+  scrollToActiveFileTreeRow();
+  setTimeout(scrollToActiveFileTreeRow, 100);
+  setTimeout(scrollToActiveFileTreeRow, 300);
 }
 
 function scrollToActiveFileTreeRow() {

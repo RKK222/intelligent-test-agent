@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
+import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
 import {
   migrateWorkspaceViewRefreshTargets,
   ROOT_WORKSPACE_VIEW_TARGET,
@@ -83,6 +84,15 @@ describe("workspace view state", () => {
       ],
       "loop-b": [{ id: "loop-a", type: "directory" as const }]
     })).toBeUndefined();
+  });
+
+  it("routes reference tab location through stable node expansion before scrolling", () => {
+    expect(agentWorkbenchSource).toMatch(
+      /if \(isReferenceFilePath\(path\)\) \{\s*await expandWorkspaceViewNodeToFile\(path\);\s*\} else \{\s*await expandPathToFile\(path\);/
+    );
+    expect(agentWorkbenchSource).toMatch(
+      /async function expandWorkspaceViewNodeToFile\(tabPath: string\)[\s\S]*workspaceViewAncestorDirectoryIds\(nodeId, entriesByDirectory\.value\)/
+    );
   });
 
   it("refreshes root plus only expanded nodes that still have stable locator records", () => {
