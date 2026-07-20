@@ -6,23 +6,31 @@ import com.enterprise.testagent.domain.dictionary.UserRoleRepository;
 import com.enterprise.testagent.domain.user.UserLoginLogRepository;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.system.management.auth.AuthApplicationService;
+import com.enterprise.testagent.system.management.user.ThirdPartyUserApiClient;
 import com.enterprise.testagent.system.management.user.UserDomainService;
 import com.enterprise.testagent.system.management.user.UserManagementApplicationService;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestTemplate;
 
-/**
- * 系统管理模块的 Spring 配置，暴露业务服务 Bean。
- */
 @Configuration
+@EnableConfigurationProperties(ThirdPartyApiProperties.class)
 public class SystemManagementConfig {
 
-    /**
-     * 用户领域服务 Bean。
-     */
     @Bean
-    public UserDomainService userDomainService(UserRepository userRepository) {
-        return new UserDomainService(userRepository);
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+
+    @Bean
+    public ThirdPartyUserApiClient thirdPartyUserApiClient(ThirdPartyApiProperties properties, RestTemplate restTemplate) {
+        return new ThirdPartyUserApiClient(properties, restTemplate);
+    }
+
+    @Bean
+    public UserDomainService userDomainService(UserRepository userRepository, ThirdPartyUserApiClient thirdPartyUserApiClient) {
+        return new UserDomainService(userRepository, thirdPartyUserApiClient);
     }
 
     /**

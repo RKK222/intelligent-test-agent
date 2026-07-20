@@ -54,4 +54,14 @@ public final class UserManagementResponses {
      */
     public record RoleOption(String roleCode, String roleLabel) {
     }
+
+    /**
+     * 第三方用户信息接口响应模型。
+     */
+    public record ThirdPartyUserInfoResponse(
+            String fullname,
+            String loginname,
+            String basement,
+            String departname) {
+    }
 }

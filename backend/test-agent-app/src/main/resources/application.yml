@@ -58,6 +58,8 @@ management:
       enabled: true
 
 test-agent:
+  third-party-api:
+    base-url: http://127.0.0.1:8081
   deployment:
     mode: ${TEST_AGENT_DEPLOYMENT_MODE:external}
   security:

@@ -8,20 +8,16 @@ import com.enterprise.testagent.domain.user.UserRepository;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-/**
- * 用户领域服务，封装用户的创建、查询和密码校验业务逻辑。
- */
 public class UserDomainService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ThirdPartyUserApiClient thirdPartyUserApiClient;
 
-    /**
-     * 使用用户仓储和 BCrypt 密码编码器创建服务。
-     */
-    public UserDomainService(UserRepository userRepository) {
+    public UserDomainService(UserRepository userRepository, ThirdPartyUserApiClient thirdPartyUserApiClient) {
         this.userRepository = userRepository;
         this.passwordEncoder = new BCryptPasswordEncoder();
+        this.thirdPartyUserApiClient = thirdPartyUserApiClient;
     }
 
     /**
@@ -66,18 +62,19 @@ public class UserDomainService {
                 .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHENTICATED, "用户名或密码错误"));
     }
 
-    /**
-     * 根据统一认证号查找用户，不存在时自动创建。
-     * user_id、unified_auth_id、username 均使用统一认证号，
-     * password_hash 使用统一认证号经 BCrypt 加密。
-     */
     public User findOrCreateByUnifiedAuthId(String unifiedAuthId) {
         return userRepository.findByUnifiedAuthId(unifiedAuthId)
                 .orElseGet(() -> {
+                    UserManagementResponses.ThirdPartyUserInfoResponse thirdPartyInfo = thirdPartyUserApiClient.getUserByLoginName(unifiedAuthId);
                     String passwordHash = passwordEncoder.encode(unifiedAuthId);
                     User user = User.createNew(
-                            unifiedAuthId, unifiedAuthId, unifiedAuthId,
-                            passwordHash, null, null, null);
+                            thirdPartyInfo.loginname(),
+                            unifiedAuthId,
+                            thirdPartyInfo.fullname(),
+                            passwordHash,
+                            null,
+                            thirdPartyInfo.basement(),
+                            thirdPartyInfo.departname());
                     userRepository.save(user);
                     return user;
                 });
