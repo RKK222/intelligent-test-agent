@@ -497,7 +497,9 @@ wait_worker_config_update() {
   local deadline=$((SECONDS + timeout_seconds))
 
   # worker 重启后必须等 manager 收到 Java 下发配置，否则用户进程启动会缺少运行参数。
-  until docker logs --tail 200 test-agent-opencode-worker 2>&1 | grep -q 'manager config update applied'; do
+  # grep 读取完整的有限日志，避免 pipefail 下 grep -q 提前退出让 docker logs 因 SIGPIPE 被误判失败。
+  until docker logs --tail 200 test-agent-opencode-worker 2>&1 \
+    | grep 'manager config update applied' >/dev/null; do
     if (( SECONDS >= deadline )); then
       echo "Timed out waiting for worker manager config update" >&2
       docker logs --tail 120 test-agent-opencode-worker || true

@@ -347,6 +347,61 @@ TEST_AGENT_NGINX_RELOAD_MODE=binary
 
 ## 7. 部署与启动顺序
 
+### 7.1 使用逐机配置包
+
+如果已经根据三台服务器的轻量采集结果生成逐机配置包，优先使用包内的
+`deploy-multi-backend-node.sh`。它会校验完整发布 ZIP 的 SHA、JAR 内置 RSA、节点身份、端口池、
+manager token 一致性和 Nginx 双 upstream；正式执行前备份当前配置，然后复用标准部署脚本。
+
+三台服务器的 `/data/0709/` 都必须先有同一份：
+
+```text
+test-agent-internal-release.zip
+test-agent-internal-release.zip.sha256
+```
+
+先在 `.4` 执行：
+
+```bash
+cd /data/0709
+sha256sum -c test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz.sha256
+tar -xzf test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz
+cd test-agent-two-backend-122.233.30.4
+bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.4 --validate-only
+bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.4
+bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.4 --verify-only
+```
+
+再在 `.114` 执行：
+
+```bash
+cd /data/0709
+sha256sum -c test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz.sha256
+tar -xzf test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz
+cd test-agent-two-backend-122.233.30.114
+bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.114 --validate-only
+bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.114
+bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.114 --verify-only
+```
+
+两台后台全部通过后，最后在 `.2` 执行：
+
+```bash
+cd /data/0709
+sha256sum -c test-agent-two-backend-122.233.30.2.tar.gz.sha256
+tar -xzf test-agent-two-backend-122.233.30.2.tar.gz
+cd test-agent-two-backend-122.233.30.2
+bash deploy-multi-backend-node.sh frontend --validate-only
+bash deploy-multi-backend-node.sh frontend
+bash deploy-multi-backend-node.sh frontend --verify-only
+```
+
+正式部署必须由 `root` 执行；`--validate-only` 和 `--verify-only` 不修改配置。两个后台配置包包含真实
+数据库密码和 token，权限与传输方式按敏感交付物处理。完整发布 ZIP 仍单独传输，逐机配置包不包含
+JAR、RSA、worker 镜像、programs、日志或业务数据。
+
+### 7.2 使用完整发布包中的标准脚本
+
 先部署后台 A `.4`：
 
 ```bash
