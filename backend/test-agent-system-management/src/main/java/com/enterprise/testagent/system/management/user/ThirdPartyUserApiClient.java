@@ -1,8 +1,7 @@
 package com.enterprise.testagent.system.management.user;
 
-import com.enterprise.testagent.common.error.ErrorCode;
-import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.system.management.config.ThirdPartyApiProperties;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -25,7 +24,12 @@ public class ThirdPartyUserApiClient {
         this.restTemplate = restTemplate;
     }
 
-    public UserManagementResponses.ThirdPartyUserInfoResponse getUserByLoginName(String userId) {
+    /**
+     * 调用第三方用户信息接口。
+     *
+     * <p>超时 30 秒，请求失败时返回空 Optional，由调用方决定是否降级到原逻辑。
+     */
+    public Optional<UserManagementResponses.ThirdPartyUserInfoResponse> getUserByLoginName(String userId) {
         try {
             String url = properties.getBaseUrl() + "/user/getUserByLoginName?userId=" + userId;
             HttpHeaders headers = new HttpHeaders();
@@ -33,10 +37,10 @@ public class ThirdPartyUserApiClient {
             HttpEntity<Void> entity = new HttpEntity<>(headers);
             ResponseEntity<UserManagementResponses.ThirdPartyUserInfoResponse> response = restTemplate.exchange(
                     url, HttpMethod.GET, entity, UserManagementResponses.ThirdPartyUserInfoResponse.class);
-            return response.getBody();
+            return Optional.ofNullable(response.getBody());
         } catch (Exception e) {
             LOGGER.error("Failed to fetch user info from third party API for userId: {}", userId, e);
-            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "获取用户信息失败");
+            return Optional.empty();
         }
     }
 }

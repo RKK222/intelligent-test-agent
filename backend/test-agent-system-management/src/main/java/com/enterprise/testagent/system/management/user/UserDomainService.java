@@ -5,10 +5,13 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserRepository;
+import java.util.Optional;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 public class UserDomainService {
+
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(UserDomainService.class);
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -65,16 +68,27 @@ public class UserDomainService {
     public User findOrCreateByUnifiedAuthId(String unifiedAuthId) {
         return userRepository.findByUnifiedAuthId(unifiedAuthId)
                 .orElseGet(() -> {
-                    UserManagementResponses.ThirdPartyUserInfoResponse thirdPartyInfo = thirdPartyUserApiClient.getUserByLoginName(unifiedAuthId);
+                    Optional<UserManagementResponses.ThirdPartyUserInfoResponse> thirdPartyInfoOpt =
+                            thirdPartyUserApiClient.getUserByLoginName(unifiedAuthId);
                     String passwordHash = passwordEncoder.encode(unifiedAuthId);
-                    User user = User.createNew(
-                            thirdPartyInfo.loginname(),
-                            unifiedAuthId,
-                            thirdPartyInfo.fullname(),
-                            passwordHash,
-                            null,
-                            thirdPartyInfo.basement(),
-                            thirdPartyInfo.departname());
+                    User user;
+                    if (thirdPartyInfoOpt.isPresent()) {
+                        UserManagementResponses.ThirdPartyUserInfoResponse thirdPartyInfo = thirdPartyInfoOpt.get();
+                        user = User.createNew(
+                                thirdPartyInfo.loginname(),
+                                unifiedAuthId,
+                                thirdPartyInfo.fullname(),
+                                passwordHash,
+                                null,
+                                thirdPartyInfo.basement(),
+                                thirdPartyInfo.departname());
+                    } else {
+                        // 第三方接口调用失败或超时，降级到原逻辑
+                        LOGGER.warn("Third party user info API failed, fallback to default user creation for unifiedAuthId: {}", unifiedAuthId);
+                        user = User.createNew(
+                                unifiedAuthId, unifiedAuthId, unifiedAuthId,
+                                passwordHash, null, null, null);
+                    }
                     userRepository.save(user);
                     return user;
                 });

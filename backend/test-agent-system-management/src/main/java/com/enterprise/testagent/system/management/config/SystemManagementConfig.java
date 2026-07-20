@@ -9,9 +9,11 @@ import com.enterprise.testagent.system.management.auth.AuthApplicationService;
 import com.enterprise.testagent.system.management.user.ThirdPartyUserApiClient;
 import com.enterprise.testagent.system.management.user.UserDomainService;
 import com.enterprise.testagent.system.management.user.UserManagementApplicationService;
+import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
 @Configuration
@@ -20,7 +22,10 @@ public class SystemManagementConfig {
 
     @Bean
     public RestTemplate restTemplate() {
-        return new RestTemplate();
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout((int) Duration.ofSeconds(30).toMillis());
+        factory.setReadTimeout((int) Duration.ofSeconds(30).toMillis());
+        return new RestTemplate(factory);
     }
 
     @Bean
