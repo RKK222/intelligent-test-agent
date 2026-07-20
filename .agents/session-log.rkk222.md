@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-07-20 - 增加双后台现场完整敏感采集包
+
+- Why:
+  - 用户希望先把 `.2/.4/.114` 的现场配置和运行证据完整交回，再由本机按真实密码、token、JAR 内 RSA、systemd/Docker/Nginx 和日志生成无占位符部署脚本，避免人工逐项核对。
+- What:
+  - 新增 `deploy/internal/collect-multi-backend-context.sh`，以 `frontend/backend` 角色只读采集；必须显式传 `--include-sensitive`，原样包含 env、部署 JAR、提取的内置 RSA、systemd unit、Docker inspect、近 24 小时 Java/worker 日志、完整 Nginx 配置/日志和已部署前端。
+  - 输出 `0600` 的 `SENSITIVE` tar.gz 与可搬移 SHA 文件；同步企业部署入口和多后台操作手册，并增加隔离 fixture 回归。
+- How:
+  - dotenv 仅按文本读取、不 source；采集命令不调用 start/stop/restart。隔离回归验证原始密码/token/RSA/Cookie/Authorization 日志实际入包、无显式开关时拒绝、两种角色结构和权限正确。
+- Result:
+  - Shell 语法、敏感采集回归、AI 文档、diff 校验通过；重新生成全量企业 ZIP，SHA256 为 `34e413f887fc17978d2ced1276566bc286151aa51d4a2c74acdaf8ae563288a3`，包内采集脚本、JAR RSA、`.4/.114` 后台及 `.2` 前端预检通过。
+  - 未修改 API、RunEvent、数据库、环境配置或 generated SDK；尚未在企业三台服务器执行采集或部署，敏感归档需按受控交付物处理。
+
 ### 2026-07-20 - 确认企业单后台回退实际生效时间
 
 - Why:

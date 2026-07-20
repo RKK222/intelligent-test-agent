@@ -83,6 +83,50 @@ unzip -t test-agent-internal-release.zip
 
 `/data/0709/` 只作为离线交付物上传和校验目录；部署脚本仍把运行文件安装到 `/data/testagent/`，两者不要混用。
 
+## 现场上下文完整敏感采集
+
+需要基于现场真实配置生成逐节点部署脚本时，使用
+[`collect-multi-backend-context.sh`](collect-multi-backend-context.sh) 分别采集前端和后台。
+脚本只读现场文件和运行状态，只在临时目录及指定输出目录创建文件；它必须显式传入
+`--include-sensitive`，并会按现场保留原始密码、token、Cookie/Authorization 日志、部署 JAR、
+JAR 内置 RSA 私钥、systemd/Docker 信息、Nginx 配置及已部署前端。生成的归档和校验文件权限固定为
+`0600`，文件名带 `SENSITIVE`，必须通过受控渠道传输并在分析完成后删除多余副本。
+
+将脚本复制到三台服务器后执行：
+
+```bash
+# 122.233.30.2
+bash /data/0709/collect-multi-backend-context.sh frontend \
+  --include-sensitive \
+  --node-label 122-233-30-2 \
+  --output-dir /data/0709
+
+# 122.233.30.4
+bash /data/0709/collect-multi-backend-context.sh backend \
+  --include-sensitive \
+  --node-label 122-233-30-4 \
+  --output-dir /data/0709
+
+# 122.233.30.114
+bash /data/0709/collect-multi-backend-context.sh backend \
+  --include-sensitive \
+  --node-label 122-233-30-114 \
+  --output-dir /data/0709
+```
+
+每台会生成一对文件：
+
+```text
+test-agent-context-SENSITIVE-<role>-<node>-<timestamp>.tar.gz
+test-agent-context-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
+```
+
+后台归档包含原始 `backend.env`、`docker.env`、身份文件、部署 JAR、从 JAR 提取的
+`rsa-private.key`、外置 `backend/lib` 的 SHA-256 清单、systemd unit、Docker inspect、Java/worker
+最近 24 小时日志和安装目录清单；前端归档包含原始 `nginx.env`、实体 Nginx 主配置与活动网关配置、
+完整 `nginx -T`、Nginx 日志及当前已部署前端。脚本同时探测 `.2:9996`、`.4:8080`、`.114:8080`、
+PostgreSQL、Redis 和企业模型 `9070` 的可达性，但不会启动、停止或重启任何服务。
+
 ## 标准目录
 
 ```text

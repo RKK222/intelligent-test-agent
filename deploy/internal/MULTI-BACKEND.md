@@ -111,6 +111,21 @@ sha256sum -c test-agent-internal-release.zip.sha256
 unzip -t test-agent-internal-release.zip
 ```
 
+如果需要先按现有现场生成无占位符的逐机配置和操作脚本，可把 ZIP 内的采集脚本单独导出到三台机器：
+
+```bash
+unzip -p /data/0709/test-agent-internal-release.zip \
+  deploy/internal/collect-multi-backend-context.sh \
+  >/data/0709/collect-multi-backend-context.sh
+chmod 0700 /data/0709/collect-multi-backend-context.sh
+```
+
+然后在 `.2` 使用 `frontend` 角色，在 `.4`、`.114` 使用 `backend` 角色，并显式传入
+`--include-sensitive`。该模式按现场原样采集密码、token、Cookie/Authorization 日志、部署 JAR、
+JAR 内 RSA 私钥、systemd/Docker/Nginx 信息及已部署前端，输出权限为 `0600` 的 `SENSITIVE` 归档；
+完整命令和内容清单见 [企业内部署文档入口](README.md#现场上下文完整敏感采集)。采集只读运行状态，
+不会改变配置或重启服务；分析完成后必须删除不再需要的敏感副本。
+
 ## 4. 每个后台的 backend.env
 
 以下两份都是可整文件替换的完整配置。IP、端口、路径、超时和安全默认值已经填好；两台机器必须把 3 个同名 `REPLACE_...` 替换为同一组现场值。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份原文件：
