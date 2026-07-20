@@ -8,7 +8,7 @@
 
 个人离线开发备用依赖只能通过本地开发脚本启动，不能作为研发测试或生产部署拓扑。
 
-生产 Java 还必须通过 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 指向宿主机持久 PKCS8 PEM RSA 私钥，文件权限固定为 0600。该私钥用于解开数据库 `user_ssh_keys` 中每条记录的临时 AES 密钥，不进入 JAR、镜像、日志或前端响应；共享同一数据库的全部 Java 必须部署同一私钥内容。未配置路径时仅开发/测试允许使用 classpath 或临时密钥兜底；一旦配置路径，文件缺失、不可读、格式错误或 POSIX 权限过宽都会让 Java 启动失败，避免重启后静默生成新 key 导致已保存 SSH key 永久不可读。
+生产 Java 固定从交付 JAR 的 `classpath:rsa-private.key` 读取 PKCS8 PEM RSA 私钥，用于解开数据库 `user_ssh_keys` 中每条记录的临时 AES 密钥；外置 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 已废除。共享同一数据库的全部 Java 必须部署同一 JAR，升级前后不得替换内置密钥，否则既有 SSH key 密文无法解密。企业交付 JAR/ZIP 因包含平台私钥，必须按密钥交付物限制访问、复制和留存。
 
 ## opencode-manager 容器进程管理
 

@@ -109,7 +109,6 @@ cp .env.local.example .env.local
 | `TESTAGENT` | 本地测试库历史兼容别名，启动脚本默认与 `TEST_AGENT_ROOT` 相同；仅用于展开既有 `$TESTAGENT/...` 通用参数路径。 |
 | `TEST_AGENT_LOCAL_DB_*` | 本地 PostgreSQL 连接信息 |
 | `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | Redis 连接信息，绑定到 Spring 标准 `spring.data.redis.*`；Redis 是系统必需依赖。 |
-| `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` | 个人 SSH key 混合加密使用的持久 PKCS8 PEM RSA 私钥路径；生产文件权限必须为 0600，共享数据库的全部 Java 必须使用同一私钥内容。 |
 | `TEST_AGENT_REDIS_SUMMARY_ENABLED` / `TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE` | Redis summary 运行模式开关和按 userId 稳定哈希的灰度比例，默认 `false/0`；开启后仅影响携带有效 `contextToken + clientRequestId` 的新 Run，活动 Run 不切换模式，回滚时把比例调回 `0`。 |
 | `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 `true`；启用时使用同一 Redis，显式设为 `false` 可关闭。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | 本地脚本判断是否启动 opencode-manager 和端口池的地址，不再作为 Java 固定 opencode node 配置。 |

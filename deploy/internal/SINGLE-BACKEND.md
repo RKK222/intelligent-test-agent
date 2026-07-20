@@ -37,7 +37,7 @@
 
 122.233.30.114 opencode-worker
   <-> 122.233.30.114:8080 Java manager WebSocket
-  -> 4096-4105 用户 OpenCode 进程
+  -> 4096-4115 用户 OpenCode 进程（20 个端口）
   -> 122.233.30.114:8080 Java 内部模型代理
        -> ai-code.sdc.enterprise:9070
 ```
@@ -49,7 +49,7 @@
 - worker 容器能访问 `.114:8080`。
 - `.114` 能访问 PostgreSQL、Redis 和 `ai-code.sdc.enterprise:9070`。
 - 自定义 Tool 访问任意企业外部接口时，若宿主机可达而 worker 容器超时，必须为 Docker bridge 源网段配置 `FORWARD` 和 `MASQUERADE`，不能按会变化的目标 IP 或端口逐条放行。
-- `4096-4105` 的宿主机端口与容器端口必须同号映射。
+- `4096-4115` 的宿主机端口与容器端口必须同号映射。
 - `9070` 只需要 Java 宿主机出站可达，不对外发布。
 - 不启用 `--network host`，不部署 `19070` relay，不修改 worker 网络模式。
 
@@ -61,7 +61,7 @@
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
-VITE_TEST_AGENT_API_BASE_URL=http://mimo.sdc.cs.icbc:9996 \
+VITE_TEST_AGENT_API_BASE_URL= \
   deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
 
@@ -109,20 +109,7 @@ cp -a /data/testagent/config/backend.env \
   /data/testagent/config/backend.env.bak.$(date +%Y%m%d%H%M%S) 2>/dev/null || true
 ```
 
-首次升级到持久 SSH 加密密钥时，在 `.114` 生成一次并永久备份；已有文件绝不能覆盖：
-
-```bash
-umask 077
-if [ ! -s /data/testagent/config/ssh-rsa-private.key ]; then
-  openssl genpkey -algorithm RSA \
-    -pkeyopt rsa_keygen_bits:3072 \
-    -out /data/testagent/config/ssh-rsa-private.key
-fi
-chmod 0600 /data/testagent/config/ssh-rsa-private.key
-openssl pkey -in /data/testagent/config/ssh-rsa-private.key -check -noout
-```
-
-旧版本曾使用启动时临时 RSA key；部署持久文件并重启后，旧密文无法迁移，现有用户需要在“个人设置 → SSH key”删除并重新添加一次。此后升级必须一直保留同一私钥文件。
+平台 RSA 私钥固定内置在交付 JAR 的 `BOOT-INF/classes/rsa-private.key`；不要在 `backend.env` 配置 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`。升级必须使用本交付包完整替换 JAR 与依赖，替换内置密钥会让既有数据库 SSH key 密文无法解密。
 
 ```dotenv
 SPRING_PROFILES_ACTIVE=prod
@@ -142,9 +129,8 @@ TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_REDIS_TIMEOUT=1s
 
-TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996
+TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 TEST_AGENT_API_TOKEN=
-TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_INTERNAL_PROXY_API_KEY=REPLACE_INTERNAL_PROXY_API_KEY
@@ -188,7 +174,7 @@ TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 
 - `TEST_AGENT_SERVER_ADVERTISED_HOST` 必须是 worker 和其他服务器可访问的真实地址，不能写 `127.0.0.1`。
 - `TEST_AGENT_LINUX_SERVER_ID` 是服务器长期稳定身份，升级时不得改变。
-- `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 指向权限 0600 的持久文件，升级 JAR 时不得删除、覆盖或重新生成。
+- `backend.env` 不得包含 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`；Java 日志必须显示从 `classpath:rsa-private.key` 加载。
 - 当前 HTTP 现场必须同时保留空的 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 和显式的 `TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true`；缺一项都会按安全默认拒绝不安全终端。签票后浏览器直连 `ws://122.233.30.114:8080`，不是经 `mimo.sdc.cs.icbc:9996` 转发。
 - 企业模型供应商地址和上游 token 在“内部模型供应商”页面维护，不写入 `backend.env` 或 `docker.env`。
 
@@ -213,13 +199,13 @@ TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 
-VITE_TEST_AGENT_API_BASE_URL=http://mimo.sdc.cs.icbc:9996
+VITE_TEST_AGENT_API_BASE_URL=
 
 OPENCODE_WORKER_BACKEND_PORT=8080
 OPENCODE_WORKER_PORT_START=4096
-OPENCODE_WORKER_PORT_END=4105
+OPENCODE_WORKER_PORT_END=4115
 
-OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996
+OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
 OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
 
@@ -240,6 +226,8 @@ TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 ```
 
 `TEST_AGENT_DATA_ROOT` 必须与 Java 的 `SYS_DATA_ROOT_DIR` 完全一致；每个稳定服务器身份只运行一个 worker。当前 worker 不读取旧的 `TEST_AGENT_BACKEND`，而是读取 Java 写出的 `.serverhost` 再结合 `OPENCODE_WORKER_BACKEND_PORT` 连接本机 Java，因此不要恢复旧变量。
+
+端口池扩容后还要由超级管理员在“系统管理 → 通用参数”把 `OPENCODE_MANAGER_MAX_PROCESSES` 调整为 `20`。该参数是实际并发上限；如果仍为 `8`，即使已经映射 20 个端口，manager 也只允许 8 个进程。保存后会热推给在线 manager，无需重启 Java；运行管理中的 manager `maxProcesses` 应显示 `20`。
 
 ### 4.1 worker 容器访问动态外部接口
 
@@ -347,6 +335,7 @@ TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080
 TEST_AGENT_NGINX_LISTEN_PORT=80
+TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
 TEST_AGENT_NGINX_TLS_ENABLED=false
 TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
 TEST_AGENT_NGINX_CONF_PATH=/data/apps/nginx/conf/test-agent.conf
@@ -356,7 +345,7 @@ TEST_AGENT_NGINX_MAIN_CONF=/data/apps/nginx/conf/nginx.conf
 TEST_AGENT_NGINX_RELOAD_MODE=binary
 ```
 
-`9996` 是浏览器访问企业入口的端口，不是当前实体 Nginx 的监听端口；这里必须保持 `80`。前端部署脚本会调用 [configure-nginx.sh](configure-nginx.sh)，自动渲染 [nginx/gateway.conf.template](nginx/gateway.conf.template)、再次备份旧配置、用实体 Nginx 执行 `-t/-T`、确认该文件确实已被 include，并 reload；失败会恢复旧配置。
+实体 Nginx 同时监听 `80` 和 `9996`：企业域名入口按现有链路落到 `.2:80`，IP 入口直接使用 `http://122.233.30.2:9996`。前端部署脚本会调用 [configure-nginx.sh](configure-nginx.sh)，自动渲染 [nginx/gateway.conf.template](nginx/gateway.conf.template)、再次备份旧配置、用实体 Nginx 执行 `-t/-T`、确认该文件确实已被 include，并 reload；失败会恢复旧配置。
 
 也可从交付包生成同一份环境文件，但必须明确传入已经加载的文件，不能依赖自动目录探测：
 
@@ -405,6 +394,25 @@ bash /tmp/deploy-internal-release.sh \
 ```
 
 后台部署脚本在替换 JAR 前会校验已有 systemd unit 的 `ExecStart` 和 `EnvironmentFile`，执行 `systemctl stop` 后检查 `8080`。若端口仍由同一路径的 `test-agent-app.jar` 占用，脚本会先 TERM、超时后仅对仍匹配该 JAR 的 PID 执行 KILL；若是其他程序占用则拒绝误杀。启动后还会确认 systemd `MainPID` 正是 `8080` 的监听进程，避免旧手工 Java 让 health 误通过。
+
+如果现场此前已经启用了 `.4` 双后台，最后在 `.4` 停止 worker 和 Java，但保留 `/data/testagent` 数据以便回滚：
+
+```bash
+if [[ -x /data/testagent/deploy/internal/opencode-worker-docker.sh ]]; then
+  /data/testagent/deploy/internal/opencode-worker-docker.sh \
+    --env-file /data/testagent/config/docker.env stop
+else
+  docker rm -f test-agent-opencode-worker 2>/dev/null || true
+fi
+
+systemctl disable --now test-agent-backend
+systemctl is-enabled test-agent-backend || true
+systemctl is-active test-agent-backend || true
+docker ps -a --filter 'name=^/test-agent-opencode-worker$'
+ss -lntp 'sport = :8080' || true
+```
+
+预期 Java 为 `disabled`、`inactive`，worker 容器列表为空，`.4:8080` 不再监听。不要删除 `.4` 的数据、配置或 JAR；确认单后台稳定后再按现场保留策略处理。
 
 需要手工重启时执行：
 
@@ -607,21 +615,22 @@ curl -i -X OPTIONS \
   -H 'Origin: http://mimo.sdc.cs.icbc:9996' \
   -H 'Access-Control-Request-Method: POST'
 
-if grep -R 'http://122.233.30.2' /data/testagent/frontend/assets; then
-  echo '前端仍包含旧 API 基址，需要换用正确域名重新打包' >&2
+if grep -R -E 'http://mimo\.sdc\.cs\.icbc:9996|http://122\.233\.30\.2:9996' \
+    /data/testagent/frontend/assets; then
+  echo '前端仍固化了 API 基址，需要用空 VITE_TEST_AGENT_API_BASE_URL 重新打包' >&2
 else
-  echo '前端未发现旧 API 基址'
+  echo '前端使用同源 API，可兼容域名和 IP 入口'
 fi
 ```
 
-预期预检响应包含 `Access-Control-Allow-Origin: http://mimo.sdc.cs.icbc:9996`，静态资源中没有旧 API 基址。
+预期域名预检响应包含 `Access-Control-Allow-Origin: http://mimo.sdc.cs.icbc:9996`；将 `Origin` 改为 `http://122.233.30.2:9996` 也必须返回对应值。静态资源中不应固化任一入口 API 基址。
 
 ## 10. 故障检查
 
 | 现象 | 检查 |
 |---|---|
 | 浏览器 `ERR_NAME_NOT_RESOLVED` | 在实际浏览器终端执行 `nslookup mimo.sdc.cs.icbc`；名称解析失败需由企业 DNS/入口管理方处理。DNS 不负责端口映射，不能靠把实体 Nginx 改成 `9996` 修复。 |
-| 登录请求仍发往 `http://122.233.30.2` 并报 CORS | 前端包在构建时固化了旧 `VITE_TEST_AGENT_API_BASE_URL`；用 `http://mimo.sdc.cs.icbc:9996` 重新打包并部署，同时把 `backend.env` 的 CORS 改成完全一致的 origin 后重启 Java。不要用 `no-cors` 隐藏错误。 |
+| 登录请求跨域并报 CORS | 前端包不应固化 API 地址；用空 `VITE_TEST_AGENT_API_BASE_URL` 重新打包并部署，同时确认 `backend.env` 的 CORS 包含域名和 IP 两个 `:9996` origin 后重启 Java。不要用 `no-cors` 隐藏错误。 |
 | 前端部署提示 Nginx 未 include 新网关文件 | 当前主配置只显式加载 `/data/apps/nginx/conf/test-agent.conf`；把 `TEST_AGENT_NGINX_CONF_PATH` 指向该专用文件，实体端口保持 `80`。不要把同目录新建文件当作已加载，也不要只看 `nginx -t`，必须用 `nginx -T` 核对文件清单。 |
 | 前端 502/进不去 | `.2` 用 `/data/apps/nginx/sbin/nginx -p /data/apps/nginx/ -c /data/apps/nginx/conf/nginx.conf -t`，再从 `.2` curl `.114:8080/actuator/health`。禁止使用 PATH 中可能读取 `/root/conf/nginx.conf` 的另一个 Nginx。 |
 | 部署提示 systemd unit 不匹配 | 执行 `systemctl show test-agent-backend -p ExecStart -p EnvironmentFiles`；必须分别指向 `/data/testagent/dist/backend/test-agent-app.jar` 和 `/data/testagent/config/backend.env`，不要让脚本覆盖未知 unit。 |

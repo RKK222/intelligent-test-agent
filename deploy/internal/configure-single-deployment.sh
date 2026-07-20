@@ -179,6 +179,10 @@ render_backend_template() {
       TEST_AGENT_API_TOKEN) value="${api_token}" ;;
       TEST_AGENT_OPENCODE_MANAGER_TOKEN) value="${manager_token}" ;;
       TEST_AGENT_INTERNAL_PROXY_API_KEY) value="${proxy_key}" ;;
+      # 当前现场同时支持域名和 IP 的 9996 入口，前端使用同源 API。
+      TEST_AGENT_CORS_ALLOWED_ORIGINS) value="http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996" ;;
+      TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL) value="" ;;
+      TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET) value="true" ;;
       *)
         printf '%s\n' "${line}" >>"${output}"
         continue
@@ -191,17 +195,26 @@ render_backend_template() {
 render_docker_template() {
   local output="$1"
   local manager_token="$2"
-  local line key
+  local line key value
 
   : >"${output}"
   while IFS= read -r line || [[ -n "${line}" ]]; do
     line="${line%$'\r'}"
-    if [[ "${line}" == TEST_AGENT_OPENCODE_MANAGER_TOKEN=* ]]; then
-      key="${line%%=*}"
-      printf '%s=%s\n' "${key}" "${manager_token}" >>"${output}"
-    else
+    if [[ "${line}" != *=* ]]; then
       printf '%s\n' "${line}" >>"${output}"
+      continue
     fi
+    key="${line%%=*}"
+    case "${key}" in
+      TEST_AGENT_OPENCODE_MANAGER_TOKEN) value="${manager_token}" ;;
+      VITE_TEST_AGENT_API_BASE_URL) value="" ;;
+      OPENCODE_ALLOWED_CORS) value="http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996" ;;
+      *)
+        printf '%s\n' "${line}" >>"${output}"
+        continue
+        ;;
+    esac
+    printf '%s=%s\n' "${key}" "${value}" >>"${output}"
   done <"${DOCKER_TEMPLATE}"
 }
 
@@ -266,8 +279,12 @@ configure_backend() {
   grep -Fxq 'TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114' "${backend_tmp}"
   grep -Fxq 'SYS_DATA_ROOT_DIR=/data/testagent/data' "${backend_tmp}"
   grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_ENABLED=true' "${backend_tmp}"
-  grep -Eq '^TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://[^[:space:]]+$' "${backend_tmp}"
+  grep -Fxq 'TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996' "${backend_tmp}"
+  grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=' "${backend_tmp}"
+  grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true' "${backend_tmp}"
   grep -Fxq 'TEST_AGENT_DATA_ROOT=/data/testagent/data' "${docker_tmp}"
+  grep -Fxq 'VITE_TEST_AGENT_API_BASE_URL=' "${docker_tmp}"
+  grep -Fxq 'OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996' "${docker_tmp}"
   if grep -q '^TEST_AGENT_INTERNAL_PROXY_API_KEY=' "${docker_tmp}"; then
     echo "Internal proxy key must not be written to docker.env" >&2
     exit 1
@@ -408,7 +425,7 @@ TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080
 TEST_AGENT_NGINX_LISTEN_PORT=80
-TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=
+TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
 TEST_AGENT_NGINX_TLS_ENABLED=false
 TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
 TEST_AGENT_NGINX_CONF_PATH=${NGINX_GATEWAY_CONF}

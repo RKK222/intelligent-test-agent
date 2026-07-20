@@ -67,7 +67,7 @@ Token 校验流程：
 2. 日志、错误响应、前端状态不得输出密钥。
 3. 后端生产容器只运行 Java 进程；数据库、Redis 和 opencode server 地址必须从外部配置注入，不能写入镜像或仓库。
 4. 前端不得把密钥写入源码、localStorage 或可公开构建产物。
-5. 个人 Git SSH 私钥必须在浏览器端使用每条记录独立的 AES-256-GCM 临时密钥加密，临时 AES 密钥再用平台 RSA-OAEP/SHA-256 公钥加密后落库。生产 Java 必须通过 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` / `test-agent.security.ssh-rsa-private-key-path` 加载权限为 0600 的持久 PKCS8 PEM 私钥；共享同一数据库的全部 Java 必须使用同一文件内容，禁止使用重启即变化的临时 RSA key 或把私钥提交到代码/交付包。
+5. 个人 Git SSH 私钥必须在浏览器端使用每条记录独立的 AES-256-GCM 临时密钥加密，临时 AES 密钥再用平台 RSA-OAEP/SHA-256 公钥加密后落库。生产 Java 固定加载交付 JAR 内置 `classpath:rsa-private.key`；共享同一数据库的全部 Java 必须部署同一 JAR，禁止使用重启即变化的临时 RSA key。由于交付 JAR/ZIP 包含平台私钥，必须按密钥交付物限制访问、复制和留存；替换内置密钥前必须完成既有 SSH key 迁移或要求用户重新保存。
 6. SSH key API 只能返回 `sshKeyId/name/fingerprint/createdAt` 元信息，禁止回显私钥明文或密文。指纹基于规范化私钥内容的 SHA-256 生成。
 7. Git SSH 远端命令只允许使用当前登录用户保存的唯一 SSH key。临时私钥文件必须设置最小可行权限并在命令结束后清理；Git 命令环境必须禁用交互式凭据提示。
 8. 应用版本工作区、个人工作区和引用资产库的 Git clone/worktree/diff/push/pull/副本同步仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录只允许来自对应通用参数；缺失或空白时必须失败，不能回退到 yml、环境变量或代码默认路径。磁盘目录已存在时只能在校验可信 Git、目标 origin 和干净状态后接管，不得覆盖或删除未知目录。引用资产同分支同步只允许快进；显式分支切换也必须阻断已分叉的目标本地分支，不能用 `checkout -B` 或清理命令强制覆盖。跨服务器副本在任何 fetch/checkout/reset 前必须确认工作树无未提交变更；主动指针核验必须使用不取得 Git optional lock 的只读命令，禁止刷新 index、fetch 或修改工作树。

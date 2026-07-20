@@ -1,12 +1,11 @@
 # 单后台配置脚本执行单
 
-本文只解决当前单后台现场的三个环境文件和一份持久 RSA 私钥的生成、生效与保留问题：
+本文只解决当前单后台现场的三个环境文件生成与生效问题；平台 RSA 私钥由交付 JAR 内置，不再部署外置文件：
 
 | 服务器 | 配置文件 | 生成方式 |
 |---|---|---|
 | `122.233.30.114` | `/data/testagent/config/backend.env` | `configure-single-deployment.sh backend` |
 | `122.233.30.114` | `/data/testagent/config/docker.env` | 同上，一次同时生成 |
-| `122.233.30.114` | `/data/testagent/config/ssh-rsa-private.key` | 首次部署时用 OpenSSL 生成，后续升级永久保留 |
 | `122.233.30.2` | `/data/testagent/config/nginx.env` | `configure-single-deployment.sh frontend` |
 
 完整部署、模型配置和验收仍见 [SINGLE-BACKEND.md](SINGLE-BACKEND.md)。
@@ -31,18 +30,6 @@ unzip -q /data/0709/test-agent-internal-release.zip \
 
 ## 2. `.114` 生成 backend.env 和 docker.env
 
-先确保持久 RSA 私钥存在；已有文件绝不能覆盖：
-
-```bash
-umask 077
-if [ ! -s /data/testagent/config/ssh-rsa-private.key ]; then
-  openssl genpkey -algorithm RSA \
-    -pkeyopt rsa_keygen_bits:3072 \
-    -out /data/testagent/config/ssh-rsa-private.key
-fi
-chmod 0600 /data/testagent/config/ssh-rsa-private.key
-```
-
 ```bash
 bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.sh \
   backend
@@ -55,7 +42,7 @@ bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.
 - Java/worker 共用的 manager token。
 - Java 内部模型代理 key。
 
-脚本会把 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key` 写入 `backend.env`，但不会创建、覆盖或回显该私钥。
+脚本会清除旧 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`，Java 固定读取当前交付 JAR 内置 `rsa-private.key`。现存外置文件可作为受控回滚备份保留，但不会被读取。
 
 其余值按当前现场固定为：
 
@@ -66,33 +53,11 @@ PostgreSQL 用户       postgres
 Redis                 122.233.30.20:6379
 前端 Origin           http://mimo.sdc.cs.icbc:9996
 数据目录              /data/testagent/data
-OpenCode 端口池       4096-4105
+OpenCode 端口池       4096-4115（20 个端口）
 manager command 超时  10s（只保留一项）
 ```
 
-通用模板保持 HTTPS/WSS 安全默认，而当前现场已经明确选择 HTTP。`backend` 角色生成文件后、重启前必须执行以下现场覆盖；函数会更新已有 key 或在缺失时追加，不会读取或回显 secret：
-
-```bash
-set_env_value() {
-  local file="$1" key="$2" value="$3"
-  if grep -q "^${key}=" "${file}"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "${file}"
-  else
-    printf '%s=%s\n' "${key}" "${value}" >>"${file}"
-  fi
-}
-
-set_env_value /data/testagent/config/backend.env \
-  TEST_AGENT_CORS_ALLOWED_ORIGINS 'http://mimo.sdc.cs.icbc:9996'
-set_env_value /data/testagent/config/backend.env \
-  TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL ''
-set_env_value /data/testagent/config/backend.env \
-  TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET 'true'
-set_env_value /data/testagent/config/docker.env \
-  VITE_TEST_AGENT_API_BASE_URL 'http://mimo.sdc.cs.icbc:9996'
-set_env_value /data/testagent/config/docker.env \
-  OPENCODE_ALLOWED_CORS 'http://mimo.sdc.cs.icbc:9996'
-```
+通用模板保持 HTTPS/WSS 安全默认，而当前现场已经明确选择 HTTP。`backend` 角色会直接生成当前现场的最终值：Java 和 OpenCode CORS 同时允许域名与 IP 的 `:9996` origin，前端 API 基址留空以使用同源路径，终端启用明确的 HTTP/`ws://` 例外；不再需要生成后手工覆盖。
 
 HTTP/`ws://` 会明文传输登录信息和终端内容，只能在已接受风险的可信内网使用。服务器终端签票后由浏览器直连 `122.233.30.114:8080`；浏览器网段不通该端口时，修改 Nginx 或 worker 无法修复。
 
@@ -160,6 +125,7 @@ sed -n '1,40p' /data/testagent/config/nginx.env
 TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_LISTEN_PORT=80
+TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
 TEST_AGENT_NGINX_TLS_ENABLED=false
 TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
 TEST_AGENT_NGINX_CONF_PATH=/data/apps/nginx/conf/test-agent.conf
@@ -169,7 +135,7 @@ TEST_AGENT_NGINX_MAIN_CONF=/data/apps/nginx/conf/nginx.conf
 TEST_AGENT_NGINX_RELOAD_MODE=binary
 ```
 
-外部入口 `http://mimo.sdc.cs.icbc:9996` 的 `9996` 不等于实体 Nginx 监听端口；当前实体 Nginx 必须保持 `80`，由企业入口或网络转发层负责 `9996 -> 122.233.30.2:80`。不要为了域名入口把本机 Nginx 改成 `9996`。
+当前实体 Nginx 同时监听 `80` 和 `9996`：企业域名入口继续按现有网络链路转发到 `.2:80`，浏览器也可以直接访问 `http://122.233.30.2:9996`。两种入口都由同一个 `server` 块提供服务，并转发到单后台 `.114:8080`。
 
 只有确认 `/data/apps/nginx/conf/test-agent.conf` 还承载其他系统、不能由应用部署脚本接管时，才由 Nginx 管理方在 `http {}` 内增加专用通配 include，例如：
 

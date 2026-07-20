@@ -69,4 +69,4 @@
 
 ## 配置项
 
-- `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`：平台持久 PKCS8 PEM RSA 私钥路径。生产必须配置权限为 0600 的文件；共享同一数据库的全部 Java 必须使用同一私钥，否则用户 SSH key 会在跨节点或重启后无法解密。旧 `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 已作废。
+- 平台 RSA 私钥固定读取应用 JAR 内置 `classpath:rsa-private.key`；共享数据库的全部 Java 必须部署同一版本 JAR，否则用户 SSH key 会在跨节点后无法解密。旧 `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 和 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 均已作废。

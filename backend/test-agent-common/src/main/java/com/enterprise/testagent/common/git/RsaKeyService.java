@@ -4,9 +4,6 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermission;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -17,18 +14,17 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.util.Base64;
 import java.util.Map;
-import java.util.Set;
 import java.util.logging.Logger;
 import javax.crypto.Cipher;
 import javax.crypto.spec.OAEPParameterSpec;
 import javax.crypto.spec.PSource;
 
 /**
- * 非对称密钥服务：优先加载部署期 RSA 私钥文件，兼容 classpath:rsa-private.key，推导出公钥，
+ * 非对称密钥服务：加载 JAR 内置的 classpath:rsa-private.key，推导出公钥，
  * 提供公钥导出和私钥解密能力。
  *
- * <p>未配置外部文件且 classpath 私钥不存在时自动生成临时密钥对（仅开发环境兜底），
- * 生产环境务必通过 {@code TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH} 部署权限为 0600 的 PKCS8 PEM 私钥。</p>
+ * <p>classpath 私钥不存在时自动生成临时密钥对，仅用于不携带应用资源的单元测试或开发兜底；
+ * 企业交付包必须包含稳定的 PEM 格式 PKCS8 RSA 私钥资源。</p>
  *
  * <p>使用方需通过 {@code @Bean} 或 {@code new RsaKeyService()} 实例化。</p>
  */
@@ -48,26 +44,13 @@ public class RsaKeyService {
     private final String publicKeyBase64;
 
     public RsaKeyService() {
-        this(null);
-    }
-
-    /**
-     * 从部署期持久文件加载 RSA 私钥；配置了路径后缺失、不可读或权限过宽都必须启动失败。
-     */
-    public RsaKeyService(Path configuredPrivateKeyPath) {
         try {
-            byte[] pemBytes = configuredPrivateKeyPath == null
-                    ? readResourceBytes("rsa-private.key")
-                    : readConfiguredPrivateKey(configuredPrivateKeyPath);
+            byte[] pemBytes = readResourceBytes("rsa-private.key");
             if (pemBytes != null) {
                 String pem = new String(pemBytes, StandardCharsets.UTF_8);
                 this.privateKey = parsePkcs8PrivateKey(pem);
                 this.publicKey = derivePublicKey(privateKey);
-                if (configuredPrivateKeyPath == null) {
-                    LOGGER.info("RSA private key loaded from classpath:rsa-private.key");
-                } else {
-                    LOGGER.info("RSA private key loaded from configured persistent file");
-                }
+                LOGGER.info("RSA private key loaded from classpath:rsa-private.key");
             } else {
                 LOGGER.warning("classpath:rsa-private.key not found; auto-generating ephemeral RSA key pair. "
                         + "For production, place a PEM-encoded PKCS8 private key at classpath:rsa-private.key");
@@ -84,55 +67,6 @@ public class RsaKeyService {
             throw e;
         } catch (Exception e) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "RSA key pair initialization failed", Map.of(), e);
-        }
-    }
-
-    private static byte[] readConfiguredPrivateKey(Path configuredPath) {
-        Path path = configuredPath.toAbsolutePath().normalize();
-        if (!Files.isRegularFile(path) || !Files.isReadable(path)) {
-            throw new PlatformException(
-                    ErrorCode.INTERNAL_ERROR,
-                    "Configured RSA private key file is missing or unreadable",
-                    Map.of("path", path.toString()));
-        }
-        validatePrivateKeyPermissions(path);
-        try {
-            return Files.readAllBytes(path);
-        } catch (Exception exception) {
-            throw new PlatformException(
-                    ErrorCode.INTERNAL_ERROR,
-                    "Failed to read configured RSA private key file",
-                    Map.of("path", path.toString()),
-                    exception);
-        }
-    }
-
-    /**
-     * POSIX 部署要求私钥只允许文件所有者访问；Windows 等非 POSIX 文件系统跳过该检查。
-     */
-    private static void validatePrivateKeyPermissions(Path path) {
-        try {
-            Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(path);
-            boolean exposed = permissions.stream().anyMatch(permission -> switch (permission) {
-                case GROUP_READ, GROUP_WRITE, GROUP_EXECUTE, OTHERS_READ, OTHERS_WRITE, OTHERS_EXECUTE -> true;
-                default -> false;
-            });
-            if (exposed || !permissions.contains(PosixFilePermission.OWNER_READ)) {
-                throw new PlatformException(
-                        ErrorCode.INTERNAL_ERROR,
-                        "Configured RSA private key file permissions must be 0600",
-                        Map.of("path", path.toString()));
-            }
-        } catch (UnsupportedOperationException ignored) {
-            // 非 POSIX 文件系统无法读取 mode，仍由操作系统 ACL 与文件可读性约束。
-        } catch (PlatformException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new PlatformException(
-                    ErrorCode.INTERNAL_ERROR,
-                    "Failed to inspect configured RSA private key file permissions",
-                    Map.of("path", path.toString()),
-                    exception);
         }
     }
 

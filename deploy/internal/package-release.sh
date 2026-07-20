@@ -242,6 +242,10 @@ package_backend() {
     echo "External backend libraries were not extracted" >&2
     exit 1
   }
+  unzip -Z1 "${backend_dir}/test-agent-app.jar" | grep -Fx 'BOOT-INF/classes/rsa-private.key' >/dev/null || {
+    echo "Backend jar is missing the embedded RSA private key resource" >&2
+    exit 1
+  }
   ls -lh "${backend_dir}/test-agent-app.jar"
 }
 

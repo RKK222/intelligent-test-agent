@@ -16,7 +16,7 @@
 - Mac 构建机允许联网；企业服务器完全离线。
 - 企业内不使用 Docker Compose，worker 由 `opencode-worker-docker.sh` 管理。
 - Java 读取 `/data/testagent/config/backend.env`。
-- Java 通过 `backend.env` 中的 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 读取持久 RSA 私钥；文件默认 `/data/testagent/config/ssh-rsa-private.key`、权限 0600，多后台必须内容一致。
+- Java 固定读取交付 JAR 内置的 `classpath:rsa-private.key`；`backend.env` 不再接受外置 RSA 路径，多后台必须部署同一 JAR。
 - worker 读取 `/data/testagent/config/docker.env`。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与本机 worker 的 `TEST_AGENT_DATA_ROOT` 一致。
 - 每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不配置人工 `containerId/managerId`。
@@ -91,13 +91,14 @@ unzip -t test-agent-internal-release.zip
     backend.env
     docker.env
     nginx.env        # 仅前端 Nginx 服务器
-    ssh-rsa-private.key  # 仅 Java 后台；不进入交付包，多后台内容一致
   data/
   deploy/internal/
   dist/
   frontend/
   programs/
 ```
+
+企业交付 JAR/ZIP 包含平台 RSA 私钥，必须按密钥交付物限制读取、复制和留存；替换内置密钥会让既有数据库 SSH key 密文无法解密，除非用户重新保存 SSH key。
 
 ## 固定启动顺序
 

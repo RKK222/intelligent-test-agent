@@ -37,10 +37,20 @@ grep -Fxq 'TEST_AGENT_REDIS_PASSWORD=current-redis-password' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_API_TOKEN=current-api-token' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=current-manager-token' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_INTERNAL_PROXY_API_KEY=current-proxy-key' "${BACKEND_ENV}"
-grep -Fxq 'TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key' "${BACKEND_ENV}"
+grep -Fxq 'TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996' "${BACKEND_ENV}"
+grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=' "${BACKEND_ENV}"
+grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true' "${BACKEND_ENV}"
+if grep -q '^TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=' "${BACKEND_ENV}"; then
+  echo 'backend.env unexpectedly contains an external RSA private key path' >&2
+  exit 1
+fi
 grep -Fxq 'TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres' "${BACKEND_ENV}"
 test "$(grep -c '^TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT=' "${BACKEND_ENV}")" = 1
 grep -Fxq 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=current-manager-token' "${DOCKER_ENV}"
+grep -Fxq 'VITE_TEST_AGENT_API_BASE_URL=' "${DOCKER_ENV}"
+grep -Fxq 'OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996' "${DOCKER_ENV}"
+grep -Fxq 'OPENCODE_WORKER_PORT_START=4096' "${DOCKER_ENV}"
+grep -Fxq 'OPENCODE_WORKER_PORT_END=4115' "${DOCKER_ENV}"
 if grep -q '^TEST_AGENT_INTERNAL_PROXY_API_KEY=' "${DOCKER_ENV}"; then
   echo 'docker.env unexpectedly contains the internal proxy key' >&2
   exit 1
@@ -82,10 +92,12 @@ grep -Fxq "TEST_AGENT_NGINX_MAIN_CONF=${NGINX_HOME}/conf/nginx.conf" "${NGINX_EN
 grep -Fxq "TEST_AGENT_NGINX_CONF_PATH=${LOADED_DIR}/test-agent-gateway.conf" "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_RELOAD_MODE=binary' "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080' "${NGINX_ENV}"
-grep -Fxq 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=' "${NGINX_ENV}"
+grep -Fxq 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996' "${NGINX_ENV}"
 bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' \
   "${LOADED_DIR}/test-agent-gateway.conf"
+grep -Fq 'listen 80;' "${LOADED_DIR}/test-agent-gateway.conf"
+grep -Fq 'listen 9996;' "${LOADED_DIR}/test-agent-gateway.conf"
 
 # 显式 include 单个文件时，同目录新文件并不会自动生效，自动探测必须拒绝该目录。
 EXPLICIT_HOME="${TMP_ROOT}/data/apps/nginx-explicit"
