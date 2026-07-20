@@ -4,17 +4,34 @@
 
 | 角色 | 地址 |
 |---|---|
-| 前端实体 Nginx | `122.233.30.2` |
+| 浏览器入口 | `http://mimo.sdc.cs.icbc:9996` |
+| 企业入口到实体 Nginx | `mimo.sdc.cs.icbc:9996 -> 122.233.30.2:80` |
+| 前端实体 Nginx | `122.233.30.2:80`，安装目录 `/data/apps/nginx` |
 | Java 后台 + worker | `122.233.30.114` |
 | Redis | `122.233.30.20:6379` |
 | PostgreSQL | `122.233.30.147:5432/postgres` |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
+## 当前现场问题结论
+
+| 现象 | 根因/边界 | 正确处理 | 重启范围 |
+|---|---|---|---|
+| Tool 调外部接口时容器 `connect timeout`，宿主机可达 | Docker bridge 转发或源地址伪装缺失；目标 IP/端口会变化 | 按 Docker 源网段配置持久 `FORWARD + MASQUERADE`，再用同一 URL 对比宿主机/容器 | 规则即时生效，通常不重启服务 |
+| 域名访问出现 `ERR_NAME_NOT_RESOLVED` | 浏览器终端没有解析到企业入口 | 由 DNS/入口管理方修复解析；应用方先用 `nslookup` 验证 | 不重启应用 |
+| 登录仍请求 `http://122.233.30.2/api/...` 并报 CORS | 旧前端包固化了 IP 基址，后端 Origin 也未对齐 | 以 `http://mimo.sdc.cs.icbc:9996` 重打前端，CORS 精确配置同一 origin | reload Nginx；CORS 变更需重启 Java |
+| 不使用 HTTPS 但服务器终端不可用 | 通用模板安全默认只接受 WSS | 当前现场显式允许不安全 WebSocket，并保证浏览器直达 `.114:8080` | 重启 Java |
+| 前端部署报 Nginx 未 include 新 `.conf` | 主配置显式加载单个 `test-agent.conf`，不是目录通配 | 使用已加载的 `/data/apps/nginx/conf/test-agent.conf`；实体 Nginx 保持 `80` | 前端脚本 reload Nginx |
+| 执行 restart 后启动时间/JAR 时间仍旧 | unit、JAR 路径、端口监听 PID 或文件替换没有形成同一证据链 | 同时核对 systemd `MainPID`、`ExecMainStartTimestamp`、8080 PID 和 ZIP/安装 JAR SHA | 按实际未生效组件重新部署 |
+| 内部模型 token 或供应商标识报错 | 上游 token 属于数据库供应商配置，`qwen-prod/deepseek-prod` 属于 Java 路由；都不属于 `docker.env` | 在“内部模型供应商”维护并刷新 Java 内存；公共 JSONC 保留准确 provider header | 通常不重启；广播失败时重启 Java |
+
+以下各节给出可复制的最终配置、操作和预期结果。
+
 ## 1. 拓扑与端口
 
 ```text
 浏览器
-  -> 122.233.30.2:80 Nginx
+  -> http://mimo.sdc.cs.icbc:9996 企业入口
+  -> 122.233.30.2:80 实体 Nginx
   -> 122.233.30.114:8080 Java
        -> PostgreSQL / Redis
 
@@ -27,12 +44,16 @@
 
 网络要求：
 
+- 浏览器所在终端必须能解析 `mimo.sdc.cs.icbc`，并能访问该入口的 `9996` 端口；DNS 只负责名称解析，`9996 -> 122.233.30.2:80` 由企业入口或网络转发层负责。
 - `.2` 能访问 `.114:8080`。
 - worker 容器能访问 `.114:8080`。
 - `.114` 能访问 PostgreSQL、Redis 和 `ai-code.sdc.enterprise:9070`。
+- 自定义 Tool 访问任意企业外部接口时，若宿主机可达而 worker 容器超时，必须为 Docker bridge 源网段配置 `FORWARD` 和 `MASQUERADE`，不能按会变化的目标 IP 或端口逐条放行。
 - `4096-4105` 的宿主机端口与容器端口必须同号映射。
 - `9070` 只需要 Java 宿主机出站可达，不对外发布。
 - 不启用 `--network host`，不部署 `19070` relay，不修改 worker 网络模式。
+
+当前现场明确不使用 HTTPS。浏览器登录请求和服务器终端内容会分别通过 HTTP、`ws://` 明文传输，只能在已接受该风险的可信内网使用；服务器终端还要求浏览器网段可以直达 `122.233.30.114:8080`。
 
 ## 2. Mac 打包与分发
 
@@ -40,17 +61,24 @@
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
-deploy/internal/package-release.sh --output-dir deploy/internal/dist
+VITE_TEST_AGENT_API_BASE_URL=http://mimo.sdc.cs.icbc:9996 \
+  deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
 
-必须交付：
+Mac 本地会生成以下产物：
 
 ```text
 deploy/internal/dist/test-agent-internal-release.zip
 deploy/internal/dist/test-agent-internal-release.zip.sha256
+deploy/internal/dist/backend/test-agent-app.jar
+deploy/internal/dist/backend/lib/
+deploy/internal/dist/test-agent-frontend-dist.tar.gz
+deploy/internal/dist/test-agent-programs.tar.gz
+deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
+deploy/internal/dist/frontend/
 ```
 
-zip 内包含 Java JAR、`backend/lib/`、前端静态包、programs、worker 镜像、部署脚本和配置模板。将 zip 和校验文件分别复制到：
+完整 ZIP 已包含 Java JAR、`backend/lib/`、前端静态包、programs、worker 镜像、`deploy/internal/` 部署脚本和配置模板。内网只需传完整 ZIP 与 SHA 文件，分别复制到：
 
 ```text
 122.233.30.2:/data/0709/
@@ -114,7 +142,7 @@ TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_REDIS_TIMEOUT=1s
 
-TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
+TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996
 TEST_AGENT_API_TOKEN=
 TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 
@@ -147,7 +175,8 @@ TEST_AGENT_BACKEND_DISCOVERY_LIMIT=100
 
 TEST_AGENT_SERVER_TERMINAL_ENABLED=true
 TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY=/data/testagent
-TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://122.233.30.2
+TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=
+TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 
 TEST_AGENT_SCHEDULER_ENABLED=false
 TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
@@ -160,6 +189,7 @@ TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 - `TEST_AGENT_SERVER_ADVERTISED_HOST` 必须是 worker 和其他服务器可访问的真实地址，不能写 `127.0.0.1`。
 - `TEST_AGENT_LINUX_SERVER_ID` 是服务器长期稳定身份，升级时不得改变。
 - `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 指向权限 0600 的持久文件，升级 JAR 时不得删除、覆盖或重新生成。
+- 当前 HTTP 现场必须同时保留空的 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 和显式的 `TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true`；缺一项都会按安全默认拒绝不安全终端。签票后浏览器直连 `ws://122.233.30.114:8080`，不是经 `mimo.sdc.cs.icbc:9996` 转发。
 - 企业模型供应商地址和上游 token 在“内部模型供应商”页面维护，不写入 `backend.env` 或 `docker.env`。
 
 保存后先确认没有遗留占位符：
@@ -183,13 +213,13 @@ TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 
-VITE_TEST_AGENT_API_BASE_URL=http://122.233.30.2
+VITE_TEST_AGENT_API_BASE_URL=http://mimo.sdc.cs.icbc:9996
 
 OPENCODE_WORKER_BACKEND_PORT=8080
 OPENCODE_WORKER_PORT_START=4096
 OPENCODE_WORKER_PORT_END=4105
 
-OPENCODE_ALLOWED_CORS=http://122.233.30.2
+OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
 OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
 
@@ -211,20 +241,131 @@ TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 
 `TEST_AGENT_DATA_ROOT` 必须与 Java 的 `SYS_DATA_ROOT_DIR` 完全一致；每个稳定服务器身份只运行一个 worker。当前 worker 不读取旧的 `TEST_AGENT_BACKEND`，而是读取 Java 写出的 `.serverhost` 再结合 `OPENCODE_WORKER_BACKEND_PORT` 连接本机 Java，因此不要恢复旧变量。
 
+### 4.1 worker 容器访问动态外部接口
+
+只有“`.114` 宿主机访问同一 URL 成功、worker 容器访问超时”时才执行本节。目标 IP 和端口会变化，因此规则只按 Docker bridge 源网段放行出站并做源地址伪装，不绑定某一个目标地址。该规则扩大了 worker 的出站范围，生产执行前应由网络安全管理员确认。
+
+在 `.114` 写入持久脚本：
+
+```bash
+install -d -m 0755 /usr/local/sbin
+install -m 0755 /dev/stdin /usr/local/sbin/test-agent-docker-egress.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+network=bridge
+subnet="$(docker network inspect "${network}" --format '{{(index .IPAM.Config 0).Subnet}}')"
+bridge="$(docker network inspect "${network}" --format '{{index .Options "com.docker.network.bridge.name"}}')"
+if [[ -z "${bridge}" || "${bridge}" == '<no value>' ]]; then
+  bridge=docker0
+fi
+egress_if="$(ip -4 route show default | awk 'NR == 1 {print $5}')"
+
+[[ -n "${subnet}" && -n "${egress_if}" ]] || {
+  echo '无法识别 Docker bridge 网段或默认出站网卡' >&2
+  exit 1
+}
+
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
+chain=FORWARD
+if iptables -w -nL DOCKER-USER >/dev/null 2>&1; then
+  chain=DOCKER-USER
+fi
+
+iptables -w -C "${chain}" -i "${bridge}" -o "${egress_if}" -s "${subnet}" -j ACCEPT 2>/dev/null || \
+  iptables -w -I "${chain}" 1 -i "${bridge}" -o "${egress_if}" -s "${subnet}" -j ACCEPT
+iptables -w -C "${chain}" -i "${egress_if}" -o "${bridge}" -d "${subnet}" \
+  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
+  iptables -w -I "${chain}" 1 -i "${egress_if}" -o "${bridge}" -d "${subnet}" \
+    -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -w -t nat -C POSTROUTING -s "${subnet}" -o "${egress_if}" -j MASQUERADE 2>/dev/null || \
+  iptables -w -t nat -A POSTROUTING -s "${subnet}" -o "${egress_if}" -j MASQUERADE
+
+printf 'docker subnet=%s bridge=%s egress=%s chain=%s\n' \
+  "${subnet}" "${bridge}" "${egress_if}" "${chain}"
+EOF
+```
+
+注册为开机规则；如果现场使用统一防火墙平台，应将等价规则交由该平台持久化，避免 firewalld 策略刷新后覆盖本机规则：
+
+```bash
+install -m 0644 /dev/stdin /etc/systemd/system/test-agent-docker-egress.service <<'EOF'
+[Unit]
+Description=Test Agent Docker egress rules
+Wants=network-online.target docker.service
+After=network-online.target docker.service firewalld.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/test-agent-docker-egress.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now test-agent-docker-egress.service
+systemctl status test-agent-docker-egress.service --no-pager
+```
+
+预期 unit 为 `active (exited)`，日志打印实际 Docker 网段、bridge 和出站网卡。用同一个真实 Tool URL 分别验证宿主机和容器：
+
+```bash
+curl -v --connect-timeout 10 'http://<实际工具地址>:<实际端口>/<path>'
+
+docker exec test-agent-opencode-worker node -e '
+const url = process.argv[1]
+fetch(url, { signal: AbortSignal.timeout(10000) })
+  .then((response) => console.log(`HTTP ${response.status}`))
+  .catch((error) => { console.error(error); process.exit(1) })
+' 'http://<实际工具地址>:<实际端口>/<path>'
+```
+
+容器返回任意真实 HTTP 状态（包括 `401`、`403`、`404`）都表示 TCP/HTTP 已经可达；继续出现 `connect timeout` 时检查企业路由、防火墙或目标服务白名单，而不是继续增加固定目标 IP 规则。
+
 ## 5. 配置前端 Nginx
 
-在前端 `.2` 创建 `/data/testagent/config/nginx.env`。以下内容可以整文件替换：
+当前实体 Nginx 主配置已经确认只显式加载：
+
+```nginx
+include /data/apps/nginx/conf/test-agent.conf;
+```
+
+这不是 `*.conf` 通配加载。同目录新增 `/data/apps/nginx/conf/test-agent-gateway.conf` 即使 `nginx -t` 成功也不会生效。先确认现有文件只承载本应用并备份；如果其中还有其他系统的配置，停止覆盖并由 Nginx 管理方拆出专用通配 include。
+
+```bash
+sed -n '1,260p' /data/apps/nginx/conf/test-agent.conf
+cp -a /data/apps/nginx/conf/test-agent.conf \
+  /data/apps/nginx/conf/test-agent.conf.before-deploy.$(date +%Y%m%d%H%M%S)
+```
+
+当前现场在前端 `.2` 创建 `/data/testagent/config/nginx.env`。以下内容可以整文件替换：
 
 ```dotenv
 TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080
 TEST_AGENT_NGINX_LISTEN_PORT=80
+TEST_AGENT_NGINX_TLS_ENABLED=false
 TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
-TEST_AGENT_NGINX_CONF_PATH=/etc/nginx/conf.d/test-agent-gateway.conf
+TEST_AGENT_NGINX_CONF_PATH=/data/apps/nginx/conf/test-agent.conf
+TEST_AGENT_NGINX_BIN=/data/apps/nginx/sbin/nginx
+TEST_AGENT_NGINX_PREFIX=/data/apps/nginx
+TEST_AGENT_NGINX_MAIN_CONF=/data/apps/nginx/conf/nginx.conf
+TEST_AGENT_NGINX_RELOAD_MODE=binary
 ```
 
-`TEST_AGENT_NGINX_CONF_PATH` 必须是当前 Nginx 主配置实际 include 的 `.conf` 文件；如果现场配置目录不同，改成现场路径。前端部署脚本会调用 [configure-nginx.sh](configure-nginx.sh)，自动渲染 [nginx/gateway.conf.template](nginx/gateway.conf.template)、备份旧配置、执行 `nginx -t`、确认该文件已被 include，并 reload；失败会恢复旧配置。
+`9996` 是浏览器访问企业入口的端口，不是当前实体 Nginx 的监听端口；这里必须保持 `80`。前端部署脚本会调用 [configure-nginx.sh](configure-nginx.sh)，自动渲染 [nginx/gateway.conf.template](nginx/gateway.conf.template)、再次备份旧配置、用实体 Nginx 执行 `-t/-T`、确认该文件确实已被 include，并 reload；失败会恢复旧配置。
+
+也可从交付包生成同一份环境文件，但必须明确传入已经加载的文件，不能依赖自动目录探测：
+
+```bash
+bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.sh \
+  frontend \
+  --nginx-home /data/apps/nginx \
+  --gateway-conf /data/apps/nginx/conf/test-agent.conf
+```
 
 ## 6. 部署与重启
 
@@ -238,8 +379,13 @@ bash /tmp/deploy-internal-frontend.sh \
   --archive /data/0709/test-agent-internal-release.zip \
   --validate-only
 bash /tmp/deploy-internal-frontend.sh \
-  --archive /data/0709/test-agent-internal-release.zip
+  --archive /data/0709/test-agent-internal-release.zip \
+  --nginx-env /data/testagent/config/nginx.env \
+  --frontend-health-url http://127.0.0.1/health \
+  --frontend-url http://127.0.0.1/
 ```
+
+预期看到 `Installed single gateway ... /data/apps/nginx/conf/test-agent.conf` 和 `Frontend deployment finished`。脚本自动产生的 `frontend.bak.<时间>`、`deploy/internal.bak.<时间>` 和 `test-agent.conf.bak.<时间>` 都是回滚备份，不是公共 Agent 配置，也不会被前端展示；完成验收并度过回滚窗口后可按现场保留策略清理旧备份。
 
 再在后台 `.114` 部署。脚本会严格按 Java、身份文件、worker 的顺序执行：
 
@@ -331,7 +477,37 @@ deepseek-prod
 
 公共自定义 Tool 文件放在本服务器公共配置的 `tools/*.ts`，项目专用 Tool 放在工作区 `.opencode/tools/*.ts`。当前企业包已离线内置 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及传递依赖；Tool 使用 Node 22 自带 `fetch` 不需要另加包。仅修改 Tool 文件时，由超级管理员保存并重启相关用户 OpenCode 进程即可；若 Tool 新增了上述基线之外的第三方 import，则必须重新打包并部署 programs/worker，不能在内网执行 `npm install`。
 
-## 8. 验收
+## 8. 变更与重启判断
+
+| 变更内容 | 必须执行 | 不需要执行 |
+|---|---|---|
+| 仅前端静态包、`nginx.env` 或 Nginx conf | 重新执行前端部署脚本；脚本会校验并 reload 实体 Nginx | Java、worker 不重启 |
+| `backend.env`、JAR 或 `backend/lib/` | `systemctl restart test-agent-backend`，确认 readiness 和身份文件；完整版本升级再按顺序重启 worker | 无前端变更时不 reload Nginx |
+| 仅 `docker.env`、programs 或 worker 镜像 | 用 `opencode-worker-docker.sh ... restart`，不要手工运行 `opencode-manager` | Java 配置未变时不重启 Java |
+| 内部模型供应商地址、启用状态或 token | 管理页面保存并“刷新 Java 内存”；广播异常时重启 Java | 不因 token 变化重打前端或 worker |
+| 公共 `opencode.jsonc`、Agent、Skill、Tool | 超管保存/推送；公共发布按 rollout 生效，必要时在运行管理重启受影响的用户 OpenCode 进程 | 只重启 Java 不能让已运行用户进程重新读配置 |
+| Docker `FORWARD/MASQUERADE` | 启用并验证 `test-agent-docker-egress.service`；对已经运行的容器即时生效 | 通常不需要重启 Java、worker 或 Docker daemon |
+
+`systemctl status` 只显示 unit 当前状态，不能证明新 JAR 已经替换且新进程占有 `8080`。Java 更新后在 `.114` 交叉检查：
+
+```bash
+systemctl show test-agent-backend \
+  -p ActiveState -p MainPID -p ExecMainStartTimestamp \
+  -p ExecStart -p EnvironmentFiles
+
+pid="$(systemctl show test-agent-backend -p MainPID --value)"
+tr '\0' ' ' <"/proc/${pid}/cmdline"
+ss -lntp 'sport = :8080'
+stat /data/testagent/dist/backend/test-agent-app.jar
+
+unzip -p /data/0709/test-agent-internal-release.zip \
+  dist/backend/test-agent-app.jar | sha256sum
+sha256sum /data/testagent/dist/backend/test-agent-app.jar
+```
+
+预期 `ExecMainStartTimestamp` 是本次重启时间，`MainPID` 同时出现在 `8080` 监听结果中，命令行指向 `/data/testagent/dist/backend/test-agent-app.jar`，并且 ZIP 内 JAR 与已安装 JAR 的 SHA-256 一致。JAR 修改时间仍是旧时间或两个 SHA 不同，表示部署脚本没有完成文件替换，不能用 health 返回 200 当作升级成功。
+
+## 9. 验收
 
 在 `.114` 执行：
 
@@ -393,14 +569,67 @@ ss -lntp | grep 19070
 
 第二条应无输出。
 
-## 9. 故障检查
+在 `.2` 执行实体 Nginx 验收：
+
+```bash
+/data/apps/nginx/sbin/nginx \
+  -p /data/apps/nginx/ \
+  -c /data/apps/nginx/conf/nginx.conf \
+  -T 2>&1 | grep -F \
+  '# configuration file /data/apps/nginx/conf/test-agent.conf:'
+
+/data/apps/nginx/sbin/nginx \
+  -p /data/apps/nginx/ \
+  -c /data/apps/nginx/conf/nginx.conf \
+  -t
+
+ss -lntp | grep -E '(:80[[:space:]]|:80$)'
+curl -fsS http://127.0.0.1/health
+curl -fsS http://127.0.0.1/
+curl -fsS http://122.233.30.114:8080/actuator/health
+```
+
+预期 `-T` 明确列出 `test-agent.conf`、语法校验成功、实体 Nginx 监听 `80`、前端与反代健康均成功。再从实际浏览器终端验收外层入口：
+
+```bash
+nslookup mimo.sdc.cs.icbc
+curl -v --connect-timeout 10 http://mimo.sdc.cs.icbc:9996/health
+curl -I http://mimo.sdc.cs.icbc:9996/
+```
+
+预期域名能解析，入口返回 `200`。如果 `nslookup` 失败或浏览器报 `ERR_NAME_NOT_RESOLVED`，故障在终端 DNS/企业入口，不在 Java 或实体 Nginx；应用部署方无法通过修改 Nginx 修复客户端名称解析。
+
+最后检查 CORS 和编译期地址。浏览器 Network 中登录 API 应保持 `http://mimo.sdc.cs.icbc:9996/api/...` 同域，不应再请求 `http://122.233.30.2/api/...`：
+
+```bash
+curl -i -X OPTIONS \
+  http://127.0.0.1/api/auth/login-by-unified-auth \
+  -H 'Origin: http://mimo.sdc.cs.icbc:9996' \
+  -H 'Access-Control-Request-Method: POST'
+
+if grep -R 'http://122.233.30.2' /data/testagent/frontend/assets; then
+  echo '前端仍包含旧 API 基址，需要换用正确域名重新打包' >&2
+else
+  echo '前端未发现旧 API 基址'
+fi
+```
+
+预期预检响应包含 `Access-Control-Allow-Origin: http://mimo.sdc.cs.icbc:9996`，静态资源中没有旧 API 基址。
+
+## 10. 故障检查
 
 | 现象 | 检查 |
 |---|---|
-| 前端 502/进不去 | `.2` 执行 `nginx -t`，再从 `.2` curl `.114:8080/actuator/health`。 |
+| 浏览器 `ERR_NAME_NOT_RESOLVED` | 在实际浏览器终端执行 `nslookup mimo.sdc.cs.icbc`；名称解析失败需由企业 DNS/入口管理方处理。DNS 不负责端口映射，不能靠把实体 Nginx 改成 `9996` 修复。 |
+| 登录请求仍发往 `http://122.233.30.2` 并报 CORS | 前端包在构建时固化了旧 `VITE_TEST_AGENT_API_BASE_URL`；用 `http://mimo.sdc.cs.icbc:9996` 重新打包并部署，同时把 `backend.env` 的 CORS 改成完全一致的 origin 后重启 Java。不要用 `no-cors` 隐藏错误。 |
+| 前端部署提示 Nginx 未 include 新网关文件 | 当前主配置只显式加载 `/data/apps/nginx/conf/test-agent.conf`；把 `TEST_AGENT_NGINX_CONF_PATH` 指向该专用文件，实体端口保持 `80`。不要把同目录新建文件当作已加载，也不要只看 `nginx -t`，必须用 `nginx -T` 核对文件清单。 |
+| 前端 502/进不去 | `.2` 用 `/data/apps/nginx/sbin/nginx -p /data/apps/nginx/ -c /data/apps/nginx/conf/nginx.conf -t`，再从 `.2` curl `.114:8080/actuator/health`。禁止使用 PATH 中可能读取 `/root/conf/nginx.conf` 的另一个 Nginx。 |
 | 部署提示 systemd unit 不匹配 | 执行 `systemctl show test-agent-backend -p ExecStart -p EnvironmentFiles`；必须分别指向 `/data/testagent/dist/backend/test-agent-app.jar` 和 `/data/testagent/config/backend.env`，不要让脚本覆盖未知 unit。 |
 | 部署提示 8080 被其他进程占用 | 执行 `lsof -nP -iTCP:8080 -sTCP:LISTEN` 和 `tr '\0' ' ' </proc/<PID>/cmdline`；同一交付 JAR 的遗留进程会被部署脚本安全清理，其他进程需人工确认归属。 |
+| `systemctl status` 启动时间或 JAR 时间仍旧 | 对比 `ExecMainStartTimestamp`、`MainPID`、`8080` 监听 PID 和 ZIP/已安装 JAR SHA；任一不一致都表示没有完成替换或旧手工 Java 仍占端口，重新走标准部署脚本，不要只反复执行 status。 |
 | worker 一直断连 | 比对两份 env 的 manager token；检查 `.serverhost`、8080 和 worker 日志。 |
+| Tool 外部接口在宿主机可达、容器 `connect timeout` | 按 4.1 节检查 Docker bridge 源网段的 `FORWARD` 与 `MASQUERADE`；目标变化时不要写死某个目标 IP/端口。规则存在仍超时时交由网络侧检查路由、ACL 和服务白名单。 |
+| 服务器终端提示未启用或拒绝 `ws://` | 当前 HTTP 现场需 `ENABLED=true`、公开 WSS 基址为空、`ALLOW_INSECURE_WEBSOCKET=true`，修改后重启 Java；浏览器还必须能直达 `.114:8080`。 |
 | 模型不显示 | 检查本服务器公共配置是否初始化；`/api/provider` 必须出现 `enterprise-qwen/enterprise-deepseek`，`/api/model` 必须出现两个准确模型 ID；更新后必须重启该用户 OpenCode。 |
 | `内部模型供应商未启用或不存在` | 请求头必须为 `qwen-prod` / `deepseek-prod`，数据库同名 `provider_id` 必须启用；点击“刷新 Java 内存”后再查 refresh-status。 |
 | Java 代理 400 | 读取响应正文，依次核对准确模型 ID、数据库 token、UCID、供应商 base URL；公共配置必须保留 `includeUsage=false`。当前 Java 会原样返回上游 4xx 正文，不应只剩空响应。 |

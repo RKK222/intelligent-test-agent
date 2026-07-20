@@ -64,11 +64,37 @@ Java                  122.233.30.114:8080
 PostgreSQL            122.233.30.147:5432/postgres
 PostgreSQL 用户       postgres
 Redis                 122.233.30.20:6379
-前端 Origin           http://122.233.30.2
+前端 Origin           http://mimo.sdc.cs.icbc:9996
 数据目录              /data/testagent/data
 OpenCode 端口池       4096-4105
 manager command 超时  10s（只保留一项）
 ```
+
+通用模板保持 HTTPS/WSS 安全默认，而当前现场已经明确选择 HTTP。`backend` 角色生成文件后、重启前必须执行以下现场覆盖；函数会更新已有 key 或在缺失时追加，不会读取或回显 secret：
+
+```bash
+set_env_value() {
+  local file="$1" key="$2" value="$3"
+  if grep -q "^${key}=" "${file}"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "${file}"
+  else
+    printf '%s=%s\n' "${key}" "${value}" >>"${file}"
+  fi
+}
+
+set_env_value /data/testagent/config/backend.env \
+  TEST_AGENT_CORS_ALLOWED_ORIGINS 'http://mimo.sdc.cs.icbc:9996'
+set_env_value /data/testagent/config/backend.env \
+  TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL ''
+set_env_value /data/testagent/config/backend.env \
+  TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET 'true'
+set_env_value /data/testagent/config/docker.env \
+  VITE_TEST_AGENT_API_BASE_URL 'http://mimo.sdc.cs.icbc:9996'
+set_env_value /data/testagent/config/docker.env \
+  OPENCODE_ALLOWED_CORS 'http://mimo.sdc.cs.icbc:9996'
+```
+
+HTTP/`ws://` 会明文传输登录信息和终端内容，只能在已接受风险的可信内网使用。服务器终端签票后由浏览器直连 `122.233.30.114:8080`；浏览器网段不通该端口时，修改 Nginx 或 worker 无法修复。
 
 以下任一情况会在写文件前失败：
 
@@ -82,7 +108,7 @@ manager command 超时  10s（只保留一项）
 ```bash
 grep -E '^(TEST_AGENT_DB_URL|TEST_AGENT_DB_USERNAME|TEST_AGENT_SERVER_ADVERTISED_HOST|SYS_DATA_ROOT_DIR|TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT)=' \
   /data/testagent/config/backend.env
-grep -E '^TEST_AGENT_SERVER_TERMINAL_(ENABLED|WORKING_DIRECTORY|PUBLIC_WEBSOCKET_BASE_URL)=' \
+grep -E '^TEST_AGENT_SERVER_TERMINAL_(ENABLED|WORKING_DIRECTORY|PUBLIC_WEBSOCKET_BASE_URL|ALLOW_INSECURE_WEBSOCKET)=' \
   /data/testagent/config/backend.env
 grep -E '^(TEST_AGENT_DATA_ROOT|OPENCODE_WORKER_BACKEND_PORT|OPENCODE_WORKER_PORT_START|OPENCODE_WORKER_PORT_END)=' \
   /data/testagent/config/docker.env
@@ -105,16 +131,25 @@ test-agent-backend-122-233-30-114
 122.233.30.114
 ```
 
-服务器终端配置预期为 `ENABLED=true`、工作目录 `/data/testagent`、公开地址 `wss://122.233.30.2`；前端 Nginx 必须同时启用 TLS 和对应 `linuxServerId` 的精确 WebSocket 路由。
+服务器终端配置预期为 `ENABLED=true`、工作目录 `/data/testagent`、公开 WSS 基址为空、`ALLOW_INSECURE_WEBSOCKET=true`。这是当前 HTTP 现场例外；通用企业模板仍以 WSS 为安全默认。
 
 ## 3. `.2` 生成 nginx.env
 
-当前 Nginx 安装目录是 `/data/apps/nginx`。执行：
+当前 Nginx 安装目录是 `/data/apps/nginx`，`nginx -T` 已确认主配置只显式加载 `/data/apps/nginx/conf/test-agent.conf`，没有 `*.conf` 通配 include。先确认该文件只属于本应用并备份：
+
+```bash
+sed -n '1,260p' /data/apps/nginx/conf/test-agent.conf
+cp -a /data/apps/nginx/conf/test-agent.conf \
+  /data/apps/nginx/conf/test-agent.conf.before-deploy.$(date +%Y%m%d%H%M%S)
+```
+
+若文件中还有其他系统的配置，停止覆盖并由 Nginx 管理方拆出专用 include；若是本应用专用文件，执行：
 
 ```bash
 bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.sh \
   frontend \
-  --nginx-home /data/apps/nginx
+  --nginx-home /data/apps/nginx \
+  --gateway-conf /data/apps/nginx/conf/test-agent.conf
 
 sed -n '1,40p' /data/testagent/config/nginx.env
 ```
@@ -125,14 +160,18 @@ sed -n '1,40p' /data/testagent/config/nginx.env
 TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_LISTEN_PORT=80
+TEST_AGENT_NGINX_TLS_ENABLED=false
 TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
+TEST_AGENT_NGINX_CONF_PATH=/data/apps/nginx/conf/test-agent.conf
 TEST_AGENT_NGINX_BIN=/data/apps/nginx/sbin/nginx
 TEST_AGENT_NGINX_PREFIX=/data/apps/nginx
 TEST_AGENT_NGINX_MAIN_CONF=/data/apps/nginx/conf/nginx.conf
 TEST_AGENT_NGINX_RELOAD_MODE=binary
 ```
 
-`TEST_AGENT_NGINX_CONF_PATH` 以探测结果为准。若主配置没有可自动识别的 `*.conf` include，应先在 `http {}` 内增加一个专用通配 include，例如：
+外部入口 `http://mimo.sdc.cs.icbc:9996` 的 `9996` 不等于实体 Nginx 监听端口；当前实体 Nginx 必须保持 `80`，由企业入口或网络转发层负责 `9996 -> 122.233.30.2:80`。不要为了域名入口把本机 Nginx 改成 `9996`。
+
+只有确认 `/data/apps/nginx/conf/test-agent.conf` 还承载其他系统、不能由应用部署脚本接管时，才由 Nginx 管理方在 `http {}` 内增加专用通配 include，例如：
 
 ```nginx
 include /data/apps/nginx/conf/test-agent-enabled/*.conf;
@@ -158,7 +197,10 @@ unzip -p /data/0709/test-agent-internal-release.zip \
   >/tmp/deploy-internal-frontend.sh
 
 bash /tmp/deploy-internal-frontend.sh \
-  --archive /data/0709/test-agent-internal-release.zip
+  --archive /data/0709/test-agent-internal-release.zip \
+  --nginx-env /data/testagent/config/nginx.env \
+  --frontend-health-url http://127.0.0.1/health \
+  --frontend-url http://127.0.0.1/
 ```
 
 单独检查 Nginx 时执行：
@@ -173,5 +215,7 @@ curl -fsS http://122.233.30.114:8080/actuator/health
 curl -fsS http://127.0.0.1/health
 curl -fsS http://127.0.0.1/
 ```
+
+预期部署输出包含 `Installed single gateway ... /data/apps/nginx/conf/test-agent.conf` 和 `Frontend deployment finished`。脚本自动创建的 `frontend.bak.<时间>`、`deploy/internal.bak.<时间>`、`test-agent.conf.bak.<时间>` 是回滚备份，不是公共 Agent 配置来源。
 
 禁止直接使用当前 PATH 中会读取 `/root/conf/nginx.conf` 的另一个 `nginx`。代码仍保留 PATH nginx + systemd 模式，只作为其他标准系统安装环境没有设置自定义 Nginx 参数时的兼容兜底。
