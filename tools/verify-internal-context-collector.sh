@@ -142,6 +142,7 @@ PATH="${FAKE_BIN}:${PATH}" bash "${COLLECTOR}" backend \
   --install-root "${INSTALL_ROOT}" \
   --nginx-home "${NGINX_HOME}" \
   --node-label test-backend \
+  --all-logs \
   --skip-network
 
 BACKEND_ARCHIVE="$(find "${OUTPUT_DIR}" -maxdepth 1 -type f \

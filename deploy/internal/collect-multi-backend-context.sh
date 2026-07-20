@@ -9,6 +9,7 @@ BACKEND_SERVICE="test-agent-backend"
 WORKER_CONTAINER="test-agent-opencode-worker"
 NODE_LABEL=""
 LOG_HOURS=24
+ALL_LOGS=0
 INCLUDE_SENSITIVE=0
 SKIP_NETWORK=0
 
@@ -29,6 +30,7 @@ Options:
   --backend-service <name>  Backend systemd service. Default: test-agent-backend.
   --worker-container <name> Worker container. Default: test-agent-opencode-worker.
   --log-hours <hours>       Collect service logs from recent hours. Default: 24.
+  --all-logs                Collect all available backend and worker logs.
   --skip-network            Skip fixed-site connectivity probes; intended for tests.
   -h, --help                Show this help.
 
@@ -75,6 +77,10 @@ while [[ $# -gt 0 ]]; do
     --log-hours)
       LOG_HOURS="$2"
       shift 2
+      ;;
+    --all-logs)
+      ALL_LOGS=1
+      shift
       ;;
     --skip-network)
       SKIP_NETWORK=1
@@ -205,6 +211,7 @@ write_system_context() {
     printf 'install_root=%s\n' "${INSTALL_ROOT}"
     printf 'nginx_home=%s\n' "${NGINX_HOME}"
     printf 'log_hours=%s\n' "${LOG_HOURS}"
+    printf 'all_logs=%s\n' "${ALL_LOGS}"
     printf 'kernel=%s\n' "$(uname -srm 2>/dev/null || true)"
     printf 'effective_uid=%s\n' "$(id -u 2>/dev/null || true)"
     if [[ -f /etc/os-release ]]; then
@@ -297,16 +304,26 @@ collect_backend() {
     capture "${BUNDLE_ROOT}/commands/backend-systemd-unit.txt" systemctl cat "${BACKEND_SERVICE}"
   fi
   if command -v journalctl >/dev/null 2>&1; then
-    journalctl -u "${BACKEND_SERVICE}" --since "${LOG_HOURS} hours ago" --no-pager \
-      >"${BUNDLE_ROOT}/logs/test-agent-backend.log" 2>&1 || true
+    if [[ "${ALL_LOGS}" -eq 1 ]]; then
+      journalctl -u "${BACKEND_SERVICE}" --no-pager \
+        >"${BUNDLE_ROOT}/logs/test-agent-backend.log" 2>&1 || true
+    else
+      journalctl -u "${BACKEND_SERVICE}" --since "${LOG_HOURS} hours ago" --no-pager \
+        >"${BUNDLE_ROOT}/logs/test-agent-backend.log" 2>&1 || true
+    fi
   fi
 
   if command -v docker >/dev/null 2>&1; then
     capture "${BUNDLE_ROOT}/commands/docker-ps.txt" docker ps -a --no-trunc
     capture "${BUNDLE_ROOT}/commands/docker-images.txt" docker images --no-trunc
     capture "${BUNDLE_ROOT}/commands/worker-inspect.json" docker inspect "${WORKER_CONTAINER}"
-    docker logs --since "${LOG_HOURS}h" "${WORKER_CONTAINER}" \
-      >"${BUNDLE_ROOT}/logs/${WORKER_CONTAINER}.log" 2>&1 || true
+    if [[ "${ALL_LOGS}" -eq 1 ]]; then
+      docker logs "${WORKER_CONTAINER}" \
+        >"${BUNDLE_ROOT}/logs/${WORKER_CONTAINER}.log" 2>&1 || true
+    else
+      docker logs --since "${LOG_HOURS}h" "${WORKER_CONTAINER}" \
+        >"${BUNDLE_ROOT}/logs/${WORKER_CONTAINER}.log" 2>&1 || true
+    fi
   fi
 
   {
@@ -398,6 +415,7 @@ Included by explicit user request:
 Role: ${ROLE}
 Node: ${NODE_LABEL}
 Collected: $(date '+%Y-%m-%dT%H:%M:%S%z')
+All logs: ${ALL_LOGS}
 
 Keep this archive mode 0600, transfer it through an approved channel, and delete temporary
 copies after the deployment scripts have been generated and verified.
