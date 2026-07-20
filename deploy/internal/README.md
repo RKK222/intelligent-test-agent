@@ -110,6 +110,8 @@ unzip -t test-agent-internal-release.zip
 - 前端 Nginx：[nginx.env.example](nginx.env.example)、[configure-nginx.sh](configure-nginx.sh)
 - 公共模型配置：[opencode.jsonc.example](opencode.jsonc.example)
 
+单后台的 `configure-single-deployment.sh frontend` 会用临时 `.conf` 实测候选目录是否加载新文件，避免把“显式 include 某一个现有文件”的同级目录误判为通配目录。若现场主配置没有 `*.conf` include，应先在 `http {}` 中增加专用通配目录，再通过 `--gateway-conf` 指定网关路径；具体命令见 [单后台配置脚本执行单](SINGLE-BACKEND-CONFIGURATION.md)。
+
 历史链接兼容：
 
 - [OPERATION-MANUAL.md](OPERATION-MANUAL.md) 转到单后台文档。

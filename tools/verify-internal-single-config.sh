@@ -54,7 +54,9 @@ LOADED_DIR="${NGINX_HOME}/conf/vhosts"
 mkdir -p "${NGINX_HOME}/sbin" "${LOADED_DIR}"
 cat >"${NGINX_HOME}/conf/nginx.conf" <<EOF
 events {}
-http { include ${LOADED_DIR}/*.conf; }
+http {
+  include ${LOADED_DIR}/*.conf;
+}
 EOF
 cat >"${NGINX_HOME}/sbin/nginx" <<EOF
 #!/usr/bin/env bash
@@ -62,7 +64,9 @@ set -euo pipefail
 for arg in "\$@"; do
   if [[ "\${arg}" == "-T" ]]; then
     printf '# configuration file %s:\n' '${NGINX_HOME}/conf/nginx.conf'
-    printf '# configuration file %s:\n' "\${TEST_AGENT_NGINX_CONF_PATH:-${LOADED_DIR}/existing.conf}"
+    while IFS= read -r loaded_conf; do
+      printf '# configuration file %s:\n' "\${loaded_conf}"
+    done < <(find '${LOADED_DIR}' -maxdepth 1 -type f -name '*.conf' | sort)
   fi
 done
 EOF
@@ -81,5 +85,35 @@ grep -Fxq 'TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-114=12
 bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' \
   "${LOADED_DIR}/test-agent-gateway.conf"
+
+# 显式 include 单个文件时，同目录新文件并不会自动生效，自动探测必须拒绝该目录。
+EXPLICIT_HOME="${TMP_ROOT}/data/apps/nginx-explicit"
+EXPLICIT_ENV="${CONFIG_DIR}/nginx-explicit.env"
+EXPLICIT_CONF="${EXPLICIT_HOME}/conf/existing.conf"
+mkdir -p "${EXPLICIT_HOME}/sbin" "${EXPLICIT_HOME}/conf"
+printf '# existing explicit include\n' >"${EXPLICIT_CONF}"
+cat >"${EXPLICIT_HOME}/conf/nginx.conf" <<EOF
+events {}
+http { include ${EXPLICIT_CONF}; }
+EOF
+cat >"${EXPLICIT_HOME}/sbin/nginx" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+for arg in "\$@"; do
+  if [[ "\${arg}" == "-T" ]]; then
+    printf '# configuration file %s:\n' '${EXPLICIT_HOME}/conf/nginx.conf'
+    printf '# configuration file %s:\n' '${EXPLICIT_CONF}'
+  fi
+done
+EOF
+chmod +x "${EXPLICIT_HOME}/sbin/nginx"
+
+if bash "${ROOT_DIR}/deploy/internal/configure-single-deployment.sh" frontend \
+  --nginx-env "${EXPLICIT_ENV}" \
+  --nginx-home "${EXPLICIT_HOME}"; then
+  echo 'Explicit single-file include was incorrectly treated as a wildcard directory' >&2
+  exit 1
+fi
+test ! -e "${EXPLICIT_ENV}"
 
 echo 'Single-backend backend.env, docker.env and custom Nginx configuration generation verified'

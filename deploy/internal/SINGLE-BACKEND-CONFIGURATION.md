@@ -119,7 +119,7 @@ bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.
 sed -n '1,40p' /data/testagent/config/nginx.env
 ```
 
-脚本通过实际安装目录中的 Nginx 探测已 include 的子配置目录。生成的配置至少包含：
+脚本会在候选目录短暂写入一个仅含注释的探测 `.conf`，并通过实体 Nginx 的 `-T` 确认新文件确实会被加载，再选择网关目录。仅显式 include 单个现有文件时，不再错误地把其同级目录当成 `*.conf` 通配目录。生成的配置至少包含：
 
 ```dotenv
 TEST_AGENT_NGINX_MODE=single
@@ -132,14 +132,23 @@ TEST_AGENT_NGINX_MAIN_CONF=/data/apps/nginx/conf/nginx.conf
 TEST_AGENT_NGINX_RELOAD_MODE=binary
 ```
 
-`TEST_AGENT_NGINX_CONF_PATH` 以探测结果为准。若主配置没有可自动识别的 `*.conf` include，传入一个已经被主配置 include 的路径：
+`TEST_AGENT_NGINX_CONF_PATH` 以探测结果为准。若主配置没有可自动识别的 `*.conf` include，应先在 `http {}` 内增加一个专用通配 include，例如：
+
+```nginx
+include /data/apps/nginx/conf/test-agent-enabled/*.conf;
+```
+
+创建目录后，再把网关放入这个已确认的通配目录：
 
 ```bash
+mkdir -p /data/apps/nginx/conf/test-agent-enabled
 bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.sh \
   frontend \
   --nginx-home /data/apps/nginx \
-  --gateway-conf /data/apps/nginx/conf/conf.d/test-agent-gateway.conf
+  --gateway-conf /data/apps/nginx/conf/test-agent-enabled/test-agent-gateway.conf
 ```
+
+如果现有主配置已经包含 `/data/apps/nginx/conf/vhosts/*.conf` 或 `conf.d/*.conf`，无需修改主配置，直接把 `--gateway-conf` 指到对应目录。禁止只因为某个同级文件被显式 include，就把新网关放在其旁边；`nginx -t` 虽会成功，但 `nginx -T` 不会列出新文件，部署脚本会拒绝 reload。
 
 然后部署前端；部署脚本会使用 `nginx.env` 中的真实二进制、prefix 和主配置执行 `-t/-T/-s reload`：
 

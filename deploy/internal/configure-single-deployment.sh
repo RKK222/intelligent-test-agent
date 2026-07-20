@@ -310,7 +310,25 @@ resolve_relative_include_dir() {
   return 1
 }
 
-# 优先使用 Nginx 实际已加载的子配置目录；没有现存子配置时再解析主配置中的 *.conf include。
+# 在候选目录写入仅含注释的临时配置，并以 nginx -T 确认新文件确实会被加载。
+# 不能只因为同目录已有一个显式 include 文件，就推断新建的同级文件也会被 include。
+gateway_directory_accepts_new_conf() {
+  local candidate_dir="$1" probe probe_dump included=1
+  [[ -d "${candidate_dir}" && -w "${candidate_dir}" ]] || return 1
+
+  probe="${candidate_dir}/test-agent-include-probe.$$.$RANDOM.conf"
+  printf '# test-agent include probe\n' >"${probe}" || return 1
+  if probe_dump="$("${NGINX_BIN}" -p "${NGINX_HOME%/}/" -c "${NGINX_MAIN_CONF}" -T 2>&1)"; then
+    if printf '%s\n' "${probe_dump}" | grep -F "# configuration file ${probe}:" >/dev/null; then
+      included=0
+    fi
+  fi
+  rm -f "${probe}"
+  return "${included}"
+}
+
+# 优先检查 Nginx 实际已加载的子配置目录，但必须用临时文件证明该目录接受新的 *.conf。
+# 没有现存子配置时，再解析生效配置和主配置中的 *.conf include，并执行同样的探测。
 detect_gateway_conf() {
   local dump loaded_path loaded_dir include_pattern include_dir
   if ! dump="$("${NGINX_BIN}" -p "${NGINX_HOME%/}/" -c "${NGINX_MAIN_CONF}" -T 2>&1)"; then
@@ -325,21 +343,34 @@ detect_gateway_conf() {
     [[ "${loaded_path}" == *.conf ]] || continue
     loaded_dir="$(dirname "${loaded_path}")"
     if [[ "${loaded_dir}" == "${NGINX_HOME}"/* || "${loaded_dir}" == "${NGINX_HOME}" ]]; then
-      printf '%s/test-agent-gateway.conf' "${loaded_dir}"
-      return 0
+      if gateway_directory_accepts_new_conf "${loaded_dir}"; then
+        printf '%s/test-agent-gateway.conf' "${loaded_dir}"
+        return 0
+      fi
     fi
   done < <(printf '%s\n' "${dump}" | sed -n 's/^# configuration file \(.*\.conf\):$/\1/p')
 
   while IFS= read -r include_pattern; do
     [[ -n "${include_pattern}" ]] || continue
-    if include_dir="$(resolve_relative_include_dir "${include_pattern}")"; then
+    if include_dir="$(resolve_relative_include_dir "${include_pattern}")" \
+        && gateway_directory_accepts_new_conf "${include_dir}"; then
+      printf '%s/test-agent-gateway.conf' "${include_dir}"
+      return 0
+    fi
+  done < <(printf '%s\n' "${dump}" \
+    | sed -nE 's/^[[:space:]]*include[[:space:]]+([^;]*\/\*\.conf)[[:space:]]*;.*/\1/p')
+
+  while IFS= read -r include_pattern; do
+    [[ -n "${include_pattern}" ]] || continue
+    if include_dir="$(resolve_relative_include_dir "${include_pattern}")" \
+        && gateway_directory_accepts_new_conf "${include_dir}"; then
       printf '%s/test-agent-gateway.conf' "${include_dir}"
       return 0
     fi
   done < <(sed -nE 's/^[[:space:]]*include[[:space:]]+([^;]*\/\*\.conf)[[:space:]]*;.*/\1/p' "${NGINX_MAIN_CONF}")
 
-  echo "No included *.conf directory was detected under ${NGINX_HOME}" >&2
-  echo "Pass --gateway-conf with a .conf path already included by nginx.conf" >&2
+  echo "No directory that loads newly added *.conf files was detected under ${NGINX_HOME}" >&2
+  echo "Add a dedicated wildcard include inside nginx.conf, or pass --gateway-conf in an existing wildcard include directory" >&2
   return 1
 }
 
