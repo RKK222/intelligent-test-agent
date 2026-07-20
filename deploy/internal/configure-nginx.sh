@@ -116,6 +116,7 @@ FRONTEND_ROOT="${TEST_AGENT_FRONTEND_ROOT:-/data/testagent/frontend}"
 NGINX_BACKENDS="${TEST_AGENT_NGINX_BACKENDS:-}"
 NGINX_SERVER_ROUTES="${TEST_AGENT_NGINX_SERVER_ROUTES:-}"
 NGINX_LEGACY_TERMINAL_ROUTES="${TEST_AGENT_NGINX_TERMINAL_ROUTES:-}"
+NGINX_XXL_JOB_ADMINS="${TEST_AGENT_NGINX_XXL_JOB_ADMINS:-}"
 NGINX_TLS_ENABLED="${TEST_AGENT_NGINX_TLS_ENABLED:-false}"
 NGINX_TLS_CERTIFICATE="${TEST_AGENT_NGINX_TLS_CERTIFICATE:-}"
 NGINX_TLS_CERTIFICATE_KEY="${TEST_AGENT_NGINX_TLS_CERTIFICATE_KEY:-}"
@@ -244,6 +245,31 @@ if [[ "${NGINX_MODE}" == "multi" && "${#backend_directives[@]}" -lt 2 ]]; then
   exit 1
 fi
 
+IFS=',' read -r -a raw_xxl_job_admins <<<"${NGINX_XXL_JOB_ADMINS}"
+xxl_job_admin_directives=()
+for raw_admin in "${raw_xxl_job_admins[@]}"; do
+  admin="$(trim "${raw_admin}")"
+  [[ "${admin}" =~ ^([A-Za-z0-9.-]+):([0-9]{1,5})$ ]] || {
+    echo "Invalid XXL-JOB Admin endpoint: ${admin}" >&2
+    exit 1
+  }
+  admin_port="${BASH_REMATCH[2]}"
+  (( admin_port >= 1 && admin_port <= 65535 )) || {
+    echo "Invalid XXL-JOB Admin port: ${admin}" >&2
+    exit 1
+  }
+  xxl_job_admin_directives+=("server ${admin} max_fails=3 fail_timeout=10s;")
+done
+
+if [[ "${NGINX_MODE}" == "single" && "${#xxl_job_admin_directives[@]}" -ne 1 ]]; then
+  echo "single mode requires exactly one TEST_AGENT_NGINX_XXL_JOB_ADMINS endpoint" >&2
+  exit 1
+fi
+if [[ "${NGINX_MODE}" == "multi" && "${#xxl_job_admin_directives[@]}" -lt 2 ]]; then
+  echo "multi mode requires at least two TEST_AGENT_NGINX_XXL_JOB_ADMINS endpoints" >&2
+  exit 1
+fi
+
 server_route_ids=()
 server_route_endpoints=()
 # 统一路由表只接受静态 ID 和已登记 backend 的一对一映射，客户端输入永远不参与地址拼接。
@@ -299,6 +325,7 @@ trap cleanup EXIT
 
 root_token='${TEST_AGENT_FRONTEND_ROOT}'
 backends_token='${TEST_AGENT_BACKEND_SERVERS}'
+xxl_job_admins_token='${TEST_AGENT_XXL_JOB_ADMIN_SERVERS}'
 listen_token='${TEST_AGENT_NGINX_LISTEN_DIRECTIVE}'
 additional_listen_token='${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_DIRECTIVES}'
 tls_token='${TEST_AGENT_NGINX_TLS_DIRECTIVES}'
@@ -325,6 +352,13 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
   if [[ "${line}" == *"${backends_token}"* ]]; then
     indent="${line%%"${backends_token}"*}"
     for directive in "${backend_directives[@]}"; do
+      printf '%s%s\n' "${indent}" "${directive}" >>"${rendered}"
+    done
+    continue
+  fi
+  if [[ "${line}" == *"${xxl_job_admins_token}"* ]]; then
+    indent="${line%%"${xxl_job_admins_token}"*}"
+    for directive in "${xxl_job_admin_directives[@]}"; do
       printf '%s%s\n' "${indent}" "${directive}" >>"${rendered}"
     done
     continue
@@ -403,6 +437,7 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   printf 'listen ports: %s\n' "$(IFS=,; printf '%s' "${listen_ports[*]}")"
   printf 'backend count: %s\n' "${#backend_directives[@]}"
   printf 'server route count: %s\n' "${#server_route_ids[@]}"
+  printf 'XXL-JOB Admin count: %s\n' "${#xxl_job_admin_directives[@]}"
   printf 'tls enabled: %s\n' "${NGINX_TLS_ENABLED}"
   exit 0
 fi

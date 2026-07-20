@@ -1174,6 +1174,13 @@ export type OpencodeRuntimeBackendMetricHistory = {
   samples: OpencodeRuntimeBackendMetricSample[];
 };
 
+/** 超级管理员以表单 POST 进入 XXL-JOB iframe 的一次性票据。 */
+export type XxlJobSsoTicket = {
+  ticket: string;
+  expiresAt: string;
+  formAction: string;
+};
+
 // ---- 定时任务管理类型 ----
 
 export type SchedulerRunStatus =

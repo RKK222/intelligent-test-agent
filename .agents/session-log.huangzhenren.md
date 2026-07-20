@@ -21,7 +21,25 @@
   - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端 3000 与登录 CORS 正常、manager WebSocket 已连接。本次只改变 Git committer 邮箱规则和前端失败恢复状态，不新增或变更 HTTP/RunEvent/数据库/SQL/权限/generated SDK/环境配置。
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
+### 2026-07-20 - 将平台周期任务迁移至 XXL-JOB 3.4.2
 
+- Why:
+  - 平台周期任务需要统一改由 XXL-JOB 管理和可视化，同时保留 `USER_PLAN`、`executionAffinity` 及夜间一次性计划的既有调度语义；XXL executor 必须随所有 Java 进程注册且不绑定稳定 Linux 服务器。
+  - XXL MySQL 需与平台 PostgreSQL 隔离，平台超级管理员通过同源 iframe 免登录进入 Admin，并在平台会话失效时同步失效 XXL 会话。
+- What:
+  - 新增未做业务改动的 `test-agent-xxl-job-admin-upstream`（固定 XXL-JOB 3.4.2、上游 commit、GPL-3.0 LICENSE 与升级说明）和平台扩展 `test-agent-xxl-job-integration`；每个平台 Java 进程保持 WebFlux 主上下文，同时运行独立 Servlet Admin 子上下文及 executor，Admin/MySQL 故障只上报独立 health DOWN 并指数退避重试。
+  - 新增仅 `SUPER_ADMIN` 可申请的一次性 Redis SSO ticket、SHA-256 session marker、按平台用户 JIT upsert 的 XXL 账号与自定义 `LoginStore`；禁用原生登录/改密/用户写操作，iframe 使用隐藏表单 POST 和显式 ready `postMessage` 握手，设置 SAMEORIGIN/CSP、HttpOnly/Secure/SameSite cookie 并扩充日志脱敏。
+  - MySQL Flyway 使用顶层独立 `classpath:xxl-job/db/migration`：V1 上游基础表无示例管理员，V2 增加平台用户/任务键，V3 初始化自动注册组 `test-agent-backend` 与六条周期任务；统一 handler 支持 `GLOBAL_MUTEX`、`ALLOW_OVERLAP`、锁续租、停止中断和错误收敛，参数中不含 `linuxServerId`/亲和字段。
+  - 旧 runner 仅同步、扫描和执行 `USER_PLAN`，移除本地终态投影 retry ticker；旧管理 API 统一返回 `410 API_GONE`。前端管理页改为同源 XXL iframe；本地 Compose 增加 MySQL 8.4/13306，Vite/Nginx、启动脚本、企业离线包配置及 API/数据库/部署/安全/架构/测试文档同步更新，未修改 `.env.local`。
+- How:
+  - 以 TDD 覆盖 SSO 权限、一次消费/过期、marker 失效、JIT 幂等与改名、原生入口封禁、handler 参数/互斥/重叠/续租/停止/脱敏，以及前端签票、刷新重签、故障与登出；使用 MySQL 8.4、Redis 7 Testcontainers 验证全新/重复/并发 Flyway、六条任务、executor 组和独立 Admin HTTP 行为。
+  - `mvn -f backend/pom.xml -pl test-agent-xxl-job-integration -am clean test` 通过，integration 22 项全过；`mvn -f backend/pom.xml -pl test-agent-app -am clean -DskipTests package` 通过并生成约 102 MB 单应用 JAR，检查确认包含独立 migration 与 SSO 模板。
+  - 前端依次执行 lint、typecheck、test、build：87 个测试文件、1430 passed / 1 skipped，生产构建仅保留既有大 chunk 提示；Compose config、内部 Nginx 单/多后端、单机配置和开发脚本校验均通过。
+  - 平台自研文件执行 `git diff --cached --check` 无错误；原样保存的 XXL 上游目录保留 3.4.2 自带尾随空格，因此未对该 vendored 目录做格式清洗，避免破坏与上游源码的直接比对。
+- Result:
+  - 周期任务已迁移到 XXL-JOB 管理面与所有 Java executor；执行器使用自动注册和轮询，不含 Linux 亲和。夜间一次性 `USER_PLAN` 继续按原 `executionAffinity` 执行，滚动发布期间两入口复用同一 Redis 锁键。
+  - 后端全量 `mvn test` 仍在未改动的 persistence 基线被已发布 `V20260717173000__create_public_agent_config_rollouts.sql` 的 PostgreSQL `TIMESTAMPTZ` 与 H2 不兼容阻断（165 tests、76 errors、17 skipped），已在干净 main 复现；Playwright 全量也仍被既有 `.agent-root-row` 隐藏基线阻断，XXL 相关 Vitest 均通过。
+  - 未新增 RunEvent/SSE；涉及内部 HTTP API、独立 MySQL schema、Redis 会话 marker、GPL-3.0 上游交付和安全响应头。真实生产双 Java/共享 MySQL/网络与人工页面触发尚需按验收文档执行，本次未推送远端。
 ### 2026-07-19 - 优化会话列表样式与布局
 
 - Why:

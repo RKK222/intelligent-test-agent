@@ -66,6 +66,20 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
+        @DisplayName("脱敏 XXL-JOB 一次性票据和会话摘要")
+        void mask_xxlJobTicketAndSessionDigest() {
+            String input = "{\"ticket\":\"one-time-secret\",\"sessionDigest\":\"sha256-secret\",\"formAction\":\"/xxl-job-admin/platform-sso/login\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"ticket\":\"***\""));
+            assertTrue(result.contains("\"sessionDigest\":\"***\""));
+            assertFalse(result.contains("one-time-secret"));
+            assertFalse(result.contains("sha256-secret"));
+            assertTrue(result.contains("\"formAction\":\"/xxl-job-admin/platform-sso/login\""));
+        }
+
+        @Test
         @DisplayName("脱敏 JVM 通用参数源值和内存值")
         void mask_commonParameterMemoryValues() {
             String input = "{\"sourceValue\":\"database-secret-like-value\",\"memoryValue\":\"effective-value\"}";

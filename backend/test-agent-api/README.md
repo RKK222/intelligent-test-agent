@@ -28,7 +28,7 @@
 - `CommonParameterMemoryController` / `CommonParameterMemoryBackendRoutingService`：仅向 `SUPER_ADMIN` 提供显式 JVM 内存参数的全部/单进程查询与手工刷新。集群聚合最多 500 个在线 Java，按 `backendProcessId` 精确保留同服务器多进程，使用公共 resolver/forwarder、并发 8、单进程 10 秒超时和内部路由头防循环；部分失败返回 HTTP 200 逐进程结果，未知或离线单进程统一 503。API 层不读取 Repository、不写修改历史、不发布参数广播。
 - `web.aop.ApiLoggingAspect` 按目标 Controller logger 记录前端 HTTP 操作入口、出口、耗时、状态和脱敏请求/响应摘要；`contextToken`、内存参数 `sourceValue/memoryValue` 与 Authorization、Cookie 等敏感字段同样强制掩码，包含 JSON 转义字符时也不得残留原值。`web.aop.WebSocketLoggingAspect` 按目标 WebSocket handler logger 记录前端长连接入口、结束信号和异常；`web.aop.ServiceLoggingAspect` 按目标 Service logger 仅在抛出异常时记录方法、参数摘要、耗时和错误。三者统一进入 `logs/backend.log`，ERROR 级别同时进入 `logs/error.log`；SSE 相关 Controller/Service/logger 还会额外进入 `logs/sse.log`。
 - 暴露超级管理员运行管理 overview、容器/按稳定服务器身份的后端指标历史和有主/无主 opencode server 重启/停止 API；旧后端进程指标入口已作废。Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、后端指标 DTO 映射和 traceId 处理；后端指标 DTO 按可空字段透传服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped/GC/线程字段，并保留旧别名 `memoryMaxBytes`、`jvmGcPauseMillis`。重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是当前 Java 或同服务器选中 Java 时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 `port ... is not managed` 后重新拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
-- 暴露超级管理员定时任务管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
+- 暴露超级管理员 XXL 一次性 SSO 票据 API，Controller 只做 `SUPER_ADMIN` 鉴权和 traceId；旧 scheduler-management 任意子路径统一返回 `410 API_GONE`。
 - 暴露当前用户夜间执行时段和任务创建/查询/改期/取消/失败卡关闭 API；`NightExecutionDtos` 只把完整 prompt/parts 映射到应用命令，任务响应仅返回安全截断预览，不回显完整输入。
 - 暴露应用引用资产库 7 个内部 API，`ReferenceRepositoryController` 只做 `APP_ADMIN` 鉴权（`SUPER_ADMIN` 继承）、初始化/切换分支请求 DTO、包含可空 `repositoryPath` 的状态响应、traceId 和阻塞 Git/文件任务调度；列表、初始化、同步、受控分支切换、只读指针核验、状态、单层树的业务规则全部委托 workspace-management，不在 Controller 访问 Repository 或文件系统。
 - 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页参数、创建用户请求和单角色调整请求转换；用户创建、角色替换和 ROLE 字典校验委托 `test-agent-system-management`。
@@ -51,6 +51,7 @@
 - `test-agent-system-management`。
 - `test-agent-configuration-management`。
 - `test-agent-scheduler`。
+- `test-agent-xxl-job-integration` 的票据服务接口。
 - Spring WebFlux、Validation、Security。
 
 ## 禁止依赖
@@ -67,7 +68,7 @@
 - `SessionRuntimeStateControllerTest` 覆盖当前登录用户运行态摘要、匿名拒绝、fetch SSE 首帧 snapshot 和 Run/question 事件后的 updated 推送。
 - `RuntimeManagementControllerTest` 覆盖运行管理 overview、按 `linuxServerId` 的后端指标历史主 API 和进程重启/停止 API 的 `SUPER_ADMIN` 成功、扩展后的服务器/Java/JVM 指标字段响应、跨 Java 后端路由优先于本地 manager gateway、manager 下属 opencode server 明细与归属字段响应映射、命令结果响应映射、用户名筛选/响应映射、`windowMinutes` 预设窗口、`hours` 兼容、历史参数默认值与上限、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId；`PublicAgentConfigRolloutManagementControllerTest` 覆盖离线发布成员退役的超管鉴权；`RuntimeManagementBackendRoutingServiceTest` 覆盖按容器归属服务器转发命令和路由头防循环。
 - `CommonParameterMemoryControllerTest`、`CommonParameterMemoryBackendRoutingServiceTest` 覆盖四个超管接口、同服务器多个 Java 精确聚合、当前/远端执行、部分失败、离线、超时、稳定排序和防二次转发；`BackendJavaRouteResolverTest` 覆盖按 `backendProcessId` 精确选择。
-- `SchedulerManagementControllerTest` 覆盖定时任务管理 API 的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝、非法状态参数、任务 patch、手动触发和运行记录查询。
+- `XxlJobSsoTicketControllerTest` 覆盖票据签发的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝；`SchedulerManagementControllerTest` 覆盖旧路径任意后缀统一返回 `410 API_GONE`。
 - `NightExecutionControllerTest`、`NightExecutionDtosTest` 覆盖认证、创建/查询 DTO、输入校验、安全响应和统一错误；`UserOpencodeBackendRoutingWebFilterTest` 覆盖夜间任务创建、改期、取消和失败卡关闭按用户 binding 路由。
 - `UserManagementControllerTest` 覆盖用户管理 API 的 `SUPER_ADMIN` 查询、创建、角色调整、角色列表和非超管/匿名拒绝。
 - `AiRunFeedbackControllerTest` 覆盖登录用户提交、查询和批量读取 Run 反馈；`AiMessageFeedbackControllerTest` 覆盖旧消息接口兼容与匿名拒绝。

@@ -17,6 +17,7 @@ public final class SensitiveDataMasker {
     private static final Set<String> SENSITIVE_FIELDS = Set.of(
             "password", "oldpassword", "newpassword",
             "token", "accesstoken", "refreshtoken", "contexttoken",
+            "ticket", "cookie", "sessiondigest",
             "secret", "apikey", "credential", "authorization",
             "privatekey", "passphrase",
             "sourcevalue", "memoryvalue"

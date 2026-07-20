@@ -10,6 +10,7 @@
 | Java 后台 + worker | `122.233.30.114` |
 | Redis | `122.233.30.20:6379` |
 | PostgreSQL | `122.233.30.147:5432/postgres` |
+| XXL MySQL | `122.233.30.148:3306/xxl_job`（外部共享 MySQL 8.4） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
 ## 当前现场问题结论
@@ -33,7 +34,11 @@
   -> http://mimo.sdc.cs.icbc:9996 企业入口
   -> 122.233.30.2:80 实体 Nginx
   -> 122.233.30.114:8080 Java
-       -> PostgreSQL / Redis
+       -> PostgreSQL / Redis / XXL MySQL
+  -> /xxl-job-admin/ -> 122.233.30.114:18080 Admin
+
+122.233.30.114:9999 XXL executor
+  <- 122.233.30.114:18080 Admin
 
 122.233.30.114 opencode-worker
   <-> 122.233.30.114:8080 Java manager WebSocket
@@ -46,8 +51,10 @@
 
 - 浏览器所在终端必须能解析 `mimo.sdc.cs.icbc`，并能访问该入口的 `9996` 端口；DNS 只负责名称解析，`9996 -> 122.233.30.2:80` 由企业入口或网络转发层负责。
 - `.2` 能访问 `.114:8080`。
+- `.2` 能访问 `.114:18080`，用于同源 `/xxl-job-admin/` 代理；该端口不直接暴露给浏览器。
+- `.114:18080` 能访问 `.114:9999`；executor 端口只对白名单 Admin 网络开放。
 - worker 容器能访问 `.114:8080`。
-- `.114` 能访问 PostgreSQL、Redis 和 `ai-code.sdc.enterprise:9070`。
+- `.114` 能访问 PostgreSQL、Redis、外部 XXL MySQL 和 `ai-code.sdc.enterprise:9070`。
 - 自定义 Tool 访问任意企业外部接口时，若宿主机可达而 worker 容器超时，必须为 Docker bridge 源网段配置 `FORWARD` 和 `MASQUERADE`，不能按会变化的目标 IP 或端口逐条放行。
 - `4096-4115` 的宿主机端口与容器端口必须同号映射。
 - `9070` 只需要 Java 宿主机出站可达，不对外发布。
@@ -101,7 +108,7 @@ unzip -t test-agent-internal-release.zip
 
 ## 3. 配置后台
 
-在 `.114` 创建 `/data/testagent/config/backend.env`。下面是可整文件替换的完整生产配置；IP、端口、目录、模型模式和超时已按当前现场填写，只需要替换 3 个 `REPLACE_...` 值。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份：
+在 `.114` 创建 `/data/testagent/config/backend.env`。下面是可整文件替换的完整生产配置；只需要替换 PostgreSQL 密码、manager token、内部代理 key、XXL MySQL 密码和 XXL access token 这 5 个 `REPLACE_...` 值。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份：
 
 ```bash
 install -d -m 0755 /data/testagent/config
@@ -123,6 +130,16 @@ TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres
 TEST_AGENT_DB_USERNAME=postgres
 TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
+
+TEST_AGENT_XXL_JOB_ENABLED=true
+TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.148:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
+TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
+TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
+TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
+TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES=http://122.233.30.114:18080/xxl-job-admin
+TEST_AGENT_XXL_JOB_EXECUTOR_PORT=9999
+TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS=http://122.233.30.114:9999
 
 TEST_AGENT_REDIS_HOST=122.233.30.20
 TEST_AGENT_REDIS_PORT=6379
@@ -164,10 +181,11 @@ TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY=/data/testagent
 TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=
 TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 
-TEST_AGENT_SCHEDULER_ENABLED=false
+TEST_AGENT_SCHEDULER_ENABLED=true
 TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
-TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT=50
-TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
+TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT=50
+TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT=4
+TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY=100
 ```
 
 关键约束：
@@ -175,6 +193,7 @@ TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 - `TEST_AGENT_SERVER_ADVERTISED_HOST` 必须是 worker 和其他服务器可访问的真实地址，不能写 `127.0.0.1`。
 - `TEST_AGENT_LINUX_SERVER_ID` 是服务器长期稳定身份，升级时不得改变。
 - `backend.env` 不得包含 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`；Java 日志必须显示从 `classpath:rsa-private.key` 加载。
+- XXL executor 固定使用 `.114:9999` 可达地址，不写 `TEST_AGENT_LINUX_SERVER_ID` 或其它亲和字段；稳定服务器亲和只属于旧 scheduler 的夜间 `USER_PLAN`。
 - 当前 HTTP 现场必须同时保留空的 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 和显式的 `TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true`；缺一项都会按安全默认拒绝不安全终端。签票后浏览器直连 `ws://122.233.30.114:8080`，不是经 `mimo.sdc.cs.icbc:9996` 转发。
 - 企业模型供应商地址和上游 token 在“内部模型供应商”页面维护，不写入 `backend.env` 或 `docker.env`。
 
@@ -334,6 +353,7 @@ cp -a /data/apps/nginx/conf/test-agent.conf \
 TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080
+TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080
 TEST_AGENT_NGINX_LISTEN_PORT=80
 TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
 TEST_AGENT_NGINX_TLS_ENABLED=false
@@ -348,6 +368,8 @@ TEST_AGENT_NGINX_RELOAD_MODE=binary
 实体 Nginx 同时监听 `80` 和 `9996`：企业域名入口按现有链路落到 `.2:80`，IP 入口直接使用 `http://122.233.30.2:9996`。`TEST_AGENT_NGINX_SERVER_ROUTES` 是普通 HTTP、SSE 和服务器终端共用的 `linuxServerId -> Java endpoint` 白名单；已知 ID 进入对应专用 upstream，缺失或未知 ID 仍进入默认 upstream。Nginx 发往 Java 前会删除 `X-Test-Agent-Linux-Server-Id` 和外部传入的 `X-Test-Agent-Backend-Routed`。前端部署脚本会调用 [configure-nginx.sh](configure-nginx.sh)，自动渲染 [nginx/gateway.conf.template](nginx/gateway.conf.template)、再次备份旧配置、用实体 Nginx 执行 `-t/-T`、确认该文件确实已被 include，并 reload；失败会恢复旧配置。
 
 从旧包升级时，把 `nginx.env` 中的 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 原键名改为 `TEST_AGENT_NGINX_SERVER_ROUTES`，右侧值不变，不能同时保留两个键。先执行 `bash /data/testagent/deploy/internal/configure-nginx.sh --env-file /data/testagent/config/nginx.env --validate-only`，预期 `server route count: 1`，再按本节前端部署命令正式安装并 reload。
+
+`/xxl-job-admin/` 与静态前端必须保持同一浏览器 origin；Nginx 会保留表单 POST、重定向和安全 Cookie。后台 `backend.env` 还必须配置 XXL MySQL 凭据、共享 access token、`ADMIN_PORT=18080`、`EXECUTOR_PORT=9999`、Admin 地址与 executor 可达地址，具体模板以 `backend.env.example` 为准。
 
 也可从交付包生成同一份环境文件，但必须明确传入已经加载的文件，不能依赖自动目录探测：
 

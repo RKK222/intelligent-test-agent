@@ -90,7 +90,13 @@ export default defineConfig({
   },
   server: {
     host: devServerHost,
-    port: 3000
+    port: 3000,
+    proxy: {
+      "/xxl-job-admin": {
+        target: process.env.TEST_AGENT_XXL_JOB_ADMIN_URL ?? "http://127.0.0.1:18080",
+        changeOrigin: true
+      }
+    }
   },
   build: {
     target: "chrome108",

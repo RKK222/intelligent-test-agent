@@ -53,6 +53,13 @@ management:
     web:
       exposure:
         include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db,redis
   health:
     db:
       enabled: true
@@ -108,6 +115,28 @@ test-agent:
     user-plan-worker-count: ${TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT:4}
     user-plan-queue-capacity: ${TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY:100}
     instance-id: ${TEST_AGENT_SCHEDULER_INSTANCE_ID:backend-${random.uuid}}
+  xxl-job:
+    enabled: ${TEST_AGENT_XXL_JOB_ENABLED:true}
+    access-token: ${TEST_AGENT_XXL_JOB_ACCESS_TOKEN:}
+    admin:
+      port: ${TEST_AGENT_XXL_JOB_ADMIN_PORT:18080}
+      context-path: /xxl-job-admin
+      retry-initial-delay: 5s
+      retry-max-delay: 60s
+    mysql:
+      url: ${TEST_AGENT_XXL_JOB_MYSQL_URL:jdbc:mysql://127.0.0.1:13306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai}
+      username: ${TEST_AGENT_XXL_JOB_MYSQL_USERNAME:xxl_job}
+      password: ${TEST_AGENT_XXL_JOB_MYSQL_PASSWORD:}
+    executor:
+      admin-addresses: ${TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES:http://127.0.0.1:18080/xxl-job-admin}
+      app-name: test-agent-backend
+      address: ${TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS:}
+      ip: ${TEST_AGENT_XXL_JOB_EXECUTOR_IP:}
+      port: ${TEST_AGENT_XXL_JOB_EXECUTOR_PORT:9999}
+      log-path: ${TEST_AGENT_XXL_JOB_EXECUTOR_LOG_PATH:logs/xxl-job}
+      log-retention-days: 30
+    sso:
+      ticket-ttl: 60s
   server-broadcast:
     enabled: ${TEST_AGENT_SERVER_BROADCAST_ENABLED:false}
     channel: ${TEST_AGENT_SERVER_BROADCAST_CHANNEL:test-agent:server-broadcast}

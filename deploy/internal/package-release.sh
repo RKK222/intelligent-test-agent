@@ -246,6 +246,21 @@ package_backend() {
     echo "Backend jar is missing the embedded RSA private key resource" >&2
     exit 1
   }
+
+  # 离线包随平台应用交付固定上游源码、许可证和版本证据，便于履行 GPL-3.0 义务与后续升级核对。
+  local xxl_compliance_dir="${backend_dir}/xxl-job-upstream"
+  mkdir -p "${xxl_compliance_dir}/source"
+  cp "${ROOT_DIR}/backend/test-agent-xxl-job-admin-upstream/LICENSE" "${xxl_compliance_dir}/LICENSE"
+  cp "${ROOT_DIR}/backend/test-agent-xxl-job-admin-upstream/UPSTREAM.md" "${xxl_compliance_dir}/UPSTREAM.md"
+  cp "${ROOT_DIR}/backend/test-agent-xxl-job-admin-upstream/README.md" "${xxl_compliance_dir}/README.md"
+  cp -R "${ROOT_DIR}/backend/test-agent-xxl-job-admin-upstream/src/." "${xxl_compliance_dir}/source/"
+  printf '%s\n' \
+    'component=XXL-JOB Admin' \
+    'version=3.4.2' \
+    'commit=c2bbb46c9a3af8e2a69246728a452c606240b80e' \
+    'license=GPL-3.0' \
+    'integration=test-agent-xxl-job-integration' \
+    >"${xxl_compliance_dir}/VERSION"
   ls -lh "${backend_dir}/test-agent-app.jar"
 }
 

@@ -34,5 +34,28 @@ services:
       timeout: 3s
       retries: 20
 
+  mysql:
+    image: mysql:8.4
+    container_name: test-agent-xxl-job-mysql
+    environment:
+      MYSQL_DATABASE: ${TEST_AGENT_XXL_JOB_MYSQL_DATABASE:-xxl_job}
+      MYSQL_USER: ${TEST_AGENT_XXL_JOB_MYSQL_USERNAME:-xxl_job}
+      MYSQL_PASSWORD: ${TEST_AGENT_XXL_JOB_MYSQL_PASSWORD:-xxl_job}
+      MYSQL_ROOT_PASSWORD: ${TEST_AGENT_XXL_JOB_MYSQL_ROOT_PASSWORD:-xxl_job_root}
+      TZ: Asia/Shanghai
+    ports:
+      - "${TEST_AGENT_XXL_JOB_MYSQL_PORT:-13306}:3306"
+    volumes:
+      - test-agent-xxl-job-mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -u root -p"$${MYSQL_ROOT_PASSWORD}" --silent
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
 volumes:
   test-agent-postgres-data:
+  test-agent-xxl-job-mysql-data:

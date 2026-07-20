@@ -1,6 +1,5 @@
 package com.enterprise.testagent.persistence;
 
-import com.enterprise.testagent.domain.auth.TokenStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,7 +15,7 @@ public class TokenStoreConfig {
      * 创建 RedisTokenStore Bean。
      */
     @Bean
-    public TokenStore redisTokenStore(StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
+    public RedisTokenStore redisTokenStore(StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
         return new RedisTokenStore(redisTemplate, objectMapper);
     }
 }

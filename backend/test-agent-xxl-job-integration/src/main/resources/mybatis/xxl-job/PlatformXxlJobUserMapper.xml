@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.xxljob.admin.PlatformXxlJobUserMapper">
+
+    <resultMap id="PlatformUser" type="com.enterprise.testagent.xxljob.admin.PlatformXxlJobUser">
+        <constructor>
+            <idArg column="id" javaType="_int"/>
+            <arg column="platform_user_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="token" javaType="java.lang.String"/>
+            <arg column="role" javaType="_int"/>
+            <arg column="permission" javaType="java.lang.String"/>
+            <arg column="platform_session_digest" javaType="java.lang.String"/>
+            <arg column="platform_session_expires_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="columns">
+        id, platform_user_id, username, token, role, permission,
+        platform_session_digest, platform_session_expires_at
+    </sql>
+
+    <select id="findByPlatformUserId" resultMap="PlatformUser">
+        SELECT <include refid="columns"/>
+        FROM xxl_job_user
+        WHERE platform_user_id = #{platformUserId}
+    </select>
+
+    <select id="findByUsername" resultMap="PlatformUser">
+        SELECT <include refid="columns"/>
+        FROM xxl_job_user
+        WHERE username = #{username}
+    </select>
+
+    <select id="findById" resultMap="PlatformUser">
+        SELECT <include refid="columns"/>
+        FROM xxl_job_user
+        WHERE id = #{id}
+    </select>
+
+    <insert id="upsert" parameterType="com.enterprise.testagent.xxljob.admin.PlatformXxlJobUserUpsert">
+        INSERT INTO xxl_job_user (
+            platform_user_id, username, password, token, role, permission,
+            platform_session_digest, platform_session_expires_at
+        ) VALUES (
+            #{platformUserId}, #{username}, #{password}, NULL, #{role}, #{permission},
+            #{sessionDigest}, #{sessionExpiresAt}
+        )
+        ON DUPLICATE KEY UPDATE
+            username = VALUES(username),
+            role = VALUES(role),
+            permission = VALUES(permission),
+            platform_session_digest = VALUES(platform_session_digest),
+            platform_session_expires_at = VALUES(platform_session_expires_at)
+    </insert>
+
+    <update id="updateToken">
+        UPDATE xxl_job_user
+        SET token = #{token}
+        WHERE id = #{id}
+    </update>
+</mapper>

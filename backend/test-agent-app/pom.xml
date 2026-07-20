@@ -59,6 +59,10 @@
             <artifactId>test-agent-integration</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.enterprise.testagent</groupId>
+            <artifactId>test-agent-xxl-job-integration</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>

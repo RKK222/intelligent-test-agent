@@ -9,6 +9,7 @@
 ```text
 test-agent-app
   -> test-agent-api
+  -> test-agent-xxl-job-integration
   -> test-agent-system-management
   -> test-agent-configuration-management
   -> test-agent-scheduler
@@ -26,6 +27,15 @@ test-agent-api
   -> test-agent-system-management
   -> test-agent-configuration-management
   -> test-agent-scheduler
+  -> test-agent-xxl-job-integration
+
+test-agent-xxl-job-integration
+  -> test-agent-common / test-agent-domain / test-agent-observability
+  -> test-agent-scheduler
+  -> test-agent-xxl-job-admin-upstream
+
+test-agent-xxl-job-admin-upstream
+  -> Spring MVC / MyBatis / XXL Core（仅上游源码所需）
 
 test-agent-scheduler
   -> test-agent-common
@@ -73,7 +83,7 @@ test-agent-event
   -> test-agent-domain
 ```
 
-`test-agent-app` 仍是唯一可部署 Spring Boot jar，但不承载业务逻辑。它可以为了启动、profile、migration、health 和 seed 依赖基础运行模块；HTTP/SSE/WebSocket 入口属于 `test-agent-api`，具体业务属于对应业务模块。
+`test-agent-app` 仍是唯一可部署 Spring Boot jar，但不承载业务逻辑。它强制启动 WebFlux 主上下文，并可为了启动、profile、migration、health、XXL 子上下文/executor 和 seed 依赖基础运行模块；平台 HTTP/SSE/WebSocket 入口属于 `test-agent-api`，XXL Servlet 页面入口只属于 integration 启动的子上下文。
 
 ## 后端禁止关系
 
@@ -92,6 +102,8 @@ test-agent-event
 13. 涉及 opencode server 启动、重启后拉起、端口复用或启动成功状态回写时，不得在业务入口直接调用 `OpencodeProcessManagerGateway.startProcess()` 并自行保存进程/binding/heartbeat/`ExecutionNode`；必须复用 `OpencodeProcessStartupService`，由它统一完成 start、候选快照、manager health、opencode HTTP health、最终状态和兼容投影。
 14. 涉及 opencode server 停止、停止后状态回写或运行管理停止命令时，不得在业务入口直接调用 `OpencodeProcessManagerGateway.stopProcess()` 并自行保存 `STOPPED`；必须复用 `OpencodeProcessStopService`，由它统一完成 stop、停止后 manager health 失败确认和最终状态回写。
 15. 涉及 opencode server 状态查询、健康探测、状态回写或 heartbeat 刷新时，不得在业务入口直接调用 `OpencodeProcessManagerGateway.checkHealth()` 并自行映射查询结果；必须复用 `OpencodeProcessStatusQueryService`。
+16. 禁止修改 `test-agent-xxl-job-admin-upstream` 的上游 Java/资源；平台 SSO、登录禁用、安全头、MySQL migration、executor 和 health 改造必须放在 `test-agent-xxl-job-integration`。
+17. XXL executor 地址与路由不得携带 `linuxServerId`、`executionAffinity` 或稳定 Linux 服务器亲和；该亲和只保留给旧 scheduler 的一次性 `USER_PLAN`。
 
 ## 业务工程归属
 
@@ -102,11 +114,12 @@ test-agent-event
 - Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、terminal ticket/PTY、opencode runtime 业务定时任务：`test-agent-opencode-runtime`。
 - 用户、角色、权限等平台内部管理：`test-agent-system-management`。
 - 应用定义只读消费、应用成员、代码库配置、应用工作空间模板、个人 SSH key 和 Git 远端只读目录查询：`test-agent-configuration-management`。
-- 通用定时任务注册、Cron 调度、Redis 分布式锁、统一运行记录、运行记录保留清理、Cron 调整、手动触发和协作式停止管理服务：`test-agent-scheduler`；其它具体业务任务实现放回所属业务模块，并通过 `ScheduledTaskContext` 检查停止请求。
+- 周期任务 Admin/executor/SSO/MySQL Flyway 与统一 handler adapter：`test-agent-xxl-job-integration`；未修改的上游代码只放 `test-agent-xxl-job-admin-upstream`。业务 handler 仍放所属业务模块。
+- `ScheduledTaskHandler`、`ScheduledTaskContext`、Redis 锁和带服务器亲和的 `USER_PLAN` runner：`test-agent-scheduler`；不得在旧 runner 恢复 Cron/手工扫描。
 - 非 opencode 的外部系统联动：`test-agent-integration`。
 - Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、trace Web 入口：`test-agent-api`。
 - 启动、profile、migration、health、日志和运行装配：`test-agent-app`。
-- 关系型数据库 SQL：`test-agent-persistence` 的 MyBatis XML mapper；存量 `Jdbc*Repository` 只保留迁移窗口，不承接新 SQL。
+- 平台 PostgreSQL 关系型 SQL：`test-agent-persistence` 的 MyBatis XML mapper；XXL 独立 MySQL 的平台扩展 SQL：`test-agent-xxl-job-integration` 的 MyBatis XML 与独立 Flyway location。存量 `Jdbc*Repository` 只保留迁移窗口，不承接新 SQL。
 
 如果没有合适工程，按业务边界新建 Maven module，并同步 `backend/README.md`、模块 README、包级说明和本文件。
 
@@ -130,6 +143,7 @@ test-agent-event
 7. 自研 Web IDE 功能必须按 package 边界沉淀，不能把全部逻辑堆到 `apps/agent-web`。
 8. Phase 07 搜索只过滤已加载文件树的文件名；Phase 08 Diff 接受/拒绝只能通过平台 Run 级 API。
 9. 交互式 PTY 只能作为平台后端的受控 WebSocket 例外暴露；前端 terminal package 不得直连 opencode server、SSH、sidecar 或任意主机。
+10. XXL 管理页只允许同源 `/xxl-job-admin/` iframe；前端先经 `backend-api` 签发一次性票据，再以表单 POST，禁止把票据放入 URL、router 或持久存储。
 
 ## 文档要求
 

@@ -8,14 +8,19 @@ usage() {
   cat <<'USAGE'
 Usage: tools/dev-local-up.sh [--redis] [--help]
 
-Start personal offline development dependencies with Docker Compose.
-Research/test and production environments must use external PostgreSQL and Redis addresses.
+Start personal offline development PostgreSQL and XXL-JOB MySQL dependencies with Docker Compose.
+Research/test and production environments must use external PostgreSQL, MySQL and Redis addresses.
 
 Environment:
   TEST_AGENT_POSTGRES_DB        default: test_agent
   TEST_AGENT_POSTGRES_USER      default: test_agent
   TEST_AGENT_POSTGRES_PASSWORD  default: test_agent
   TEST_AGENT_POSTGRES_PORT      default: 15432
+  TEST_AGENT_XXL_JOB_MYSQL_DATABASE       default: xxl_job
+  TEST_AGENT_XXL_JOB_MYSQL_USERNAME       default: xxl_job
+  TEST_AGENT_XXL_JOB_MYSQL_PASSWORD       default: xxl_job
+  TEST_AGENT_XXL_JOB_MYSQL_ROOT_PASSWORD  default: xxl_job_root
+  TEST_AGENT_XXL_JOB_MYSQL_PORT           default: 13306
   TEST_AGENT_REDIS_PORT         default: 16379
 
 Options:
@@ -52,9 +57,9 @@ else
 fi
 
 if [[ "${with_redis}" == "true" ]]; then
-  "${compose[@]}" -f "${COMPOSE_FILE}" --profile redis up -d postgres redis
+  "${compose[@]}" -f "${COMPOSE_FILE}" --profile redis up -d postgres mysql redis
 else
-  "${compose[@]}" -f "${COMPOSE_FILE}" up -d postgres
+  "${compose[@]}" -f "${COMPOSE_FILE}" up -d postgres mysql
 fi
 
 "${compose[@]}" -f "${COMPOSE_FILE}" ps

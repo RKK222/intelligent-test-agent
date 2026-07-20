@@ -163,6 +163,8 @@ render_backend_template() {
   local api_token="$4"
   local manager_token="$5"
   local proxy_key="$6"
+  local xxl_mysql_password="$7"
+  local xxl_access_token="$8"
   local line key value
 
   : >"${output}"
@@ -183,6 +185,8 @@ render_backend_template() {
       TEST_AGENT_CORS_ALLOWED_ORIGINS) value="http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996" ;;
       TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL) value="" ;;
       TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET) value="true" ;;
+      TEST_AGENT_XXL_JOB_MYSQL_PASSWORD) value="${xxl_mysql_password}" ;;
+      TEST_AGENT_XXL_JOB_ACCESS_TOKEN) value="${xxl_access_token}" ;;
       *)
         printf '%s\n' "${line}" >>"${output}"
         continue
@@ -221,6 +225,7 @@ render_docker_template() {
 configure_backend() {
   local timestamp config_dir backend_tmp docker_tmp
   local db_password redis_password api_token backend_manager_token docker_manager_token manager_token proxy_key
+  local xxl_mysql_password xxl_access_token
 
   require_file "${BACKEND_TEMPLATE}"
   require_file "${DOCKER_TEMPLATE}"
@@ -234,6 +239,8 @@ configure_backend() {
   backend_manager_token="$(env_value "${BACKEND_ENV}" TEST_AGENT_OPENCODE_MANAGER_TOKEN)"
   docker_manager_token="$(env_value "${DOCKER_ENV}" TEST_AGENT_OPENCODE_MANAGER_TOKEN)"
   proxy_key="$(env_value "${BACKEND_ENV}" TEST_AGENT_INTERNAL_PROXY_API_KEY)"
+  xxl_mysql_password="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_MYSQL_PASSWORD)"
+  xxl_access_token="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_ACCESS_TOKEN)"
 
   [[ -n "${db_password}" ]] || {
     echo "TEST_AGENT_DB_PASSWORD is missing from ${BACKEND_ENV}" >&2
@@ -252,6 +259,14 @@ configure_backend() {
     echo "TEST_AGENT_INTERNAL_PROXY_API_KEY is missing from ${BACKEND_ENV}" >&2
     exit 1
   }
+  [[ -n "${xxl_mysql_password}" ]] || {
+    echo "TEST_AGENT_XXL_JOB_MYSQL_PASSWORD is missing from ${BACKEND_ENV}" >&2
+    exit 1
+  }
+  [[ -n "${xxl_access_token}" ]] || {
+    echo "TEST_AGENT_XXL_JOB_ACCESS_TOKEN is missing from ${BACKEND_ENV}" >&2
+    exit 1
+  }
 
   config_dir="$(dirname "${BACKEND_ENV}")"
   [[ "$(dirname "${DOCKER_ENV}")" == "${config_dir}" ]] || {
@@ -263,7 +278,7 @@ configure_backend() {
   docker_tmp="$(mktemp "${config_dir}/.docker.env.new.XXXXXX")"
   trap 'rm -f "${backend_tmp:-}" "${docker_tmp:-}"' EXIT
 
-  render_backend_template "${backend_tmp}" "${db_password}" "${redis_password}" "${api_token}" "${manager_token}" "${proxy_key}"
+  render_backend_template "${backend_tmp}" "${db_password}" "${redis_password}" "${api_token}" "${manager_token}" "${proxy_key}" "${xxl_mysql_password}" "${xxl_access_token}"
   render_docker_template "${docker_tmp}" "${manager_token}"
 
   if grep -q 'REPLACE_' "${backend_tmp}" "${docker_tmp}"; then
@@ -424,6 +439,7 @@ configure_frontend() {
 TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080
+TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080
 TEST_AGENT_NGINX_LISTEN_PORT=80
 TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
 TEST_AGENT_NGINX_TLS_ENABLED=false

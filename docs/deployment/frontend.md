@@ -2,7 +2,7 @@
 
 ## 部署边界
 
-默认平台前端是 `frontend/apps/agent-web`，基于 Vue 3 + Vite SPA。`frontend-opencode` 是独立的 Vue/TypeScript/Vite opencode IDE App 复刻工程，需要按该目录 README 单独构建和部署；后端 `test-agent-app`、PostgreSQL、Redis 和 opencode server 都是外部服务。`frontend/interaction-visual-demo` 和 `opencode-source/` 不纳入部署构建。
+默认平台前端是 `frontend/apps/agent-web`，基于 Vue 3 + Vite SPA。定时任务管理以同源 `/xxl-job-admin/` iframe 嵌入 Java 进程中的 XXL Admin，静态前端不打包 XXL 页面。`frontend-opencode` 是独立的 Vue/TypeScript/Vite opencode IDE App 复刻工程，需要按该目录 README 单独构建和部署；后端及数据库、Redis、opencode server 都是外部服务。
 
 ## 构建
 
@@ -70,9 +70,11 @@ npx serve apps/agent-web/dist -l 3000
 - 前端与后端通常分属不同 origin，后端必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式声明前端 origin（见 `docs/deployment/backend.md`）。
 - 若通过同域反代把 `/api` 转发到 `test-agent-app`，可避免跨域，但仍需保证后端 CORS 配置与实际访问 origin 一致。
 - 同一 Nginx `server` 块可通过 `TEST_AGENT_NGINX_LISTEN_PORT=80` 与 `TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996` 同时承接企业入口转发和 IP 直连；两个浏览器 URL 都保持 `:9996`，不代表实体链路内部只能监听一个端口。
+- `/xxl-job-admin/` 必须在同一个浏览器 origin 下代理到 Java 的 XXL Admin 子端口，并保留路径前缀、表单 POST、重定向和 `Set-Cookie`。禁止把它改成跨域 iframe，否则平台 SSO Cookie、`SAMEORIGIN` 和 `frame-ancestors 'self'` 会阻断页面。
+- 多 Java 时，Nginx 可对 Admin 子端口负载均衡；所有节点必须共用 XXL MySQL 与 access token。iframe 登录 POST 与后续请求不依赖 ticket 重放，平台会话校验由共享 marker 完成。
 - SSE（`text/event-stream`）和 PTY WebSocket 升级路径需在反代层禁用缓冲、支持长连接和 `Upgrade` 头。
 - 浏览器报 `ERR_NAME_NOT_RESOLVED` 时应在浏览器所在终端检查 DNS；Nginx 配置不能修复客户端名称解析。DNS 只解析域名，不提供端口转换；外部入口使用 `9996`、实体 Nginx 使用 `80` 时，必须由企业网关或网络转发层明确承担端口映射。
 
 ## 本地联调
 
-本地三服务联调见 `frontend/README.md`：默认用 `./restart-dev-services.sh` 或 Windows PowerShell 下的 `.\restart-dev-services.ps1` 读取 `.env.test` 并以 `test` profile 一键重启；个人离线开发也可分别启动 `test-agent-app`（local profile）、`opencode serve` 和 `corepack pnpm dev`，备用依赖通过本地开发脚本启动。
+本地联调见 `frontend/README.md`：Vite 把 `/xxl-job-admin/` 代理到 `TEST_AGENT_XXL_JOB_ADMIN_URL`（默认 `http://127.0.0.1:18080`）。个人离线依赖通过 `tools/dev-local-up.sh` 启动 PostgreSQL 与 MySQL 8.4；不得为了联调自动改写 `.env.local`。

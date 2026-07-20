@@ -1,6 +1,6 @@
 # 企业内部署文档入口
 
-当前代码支持单后台和完整多后台部署。两种模式使用同一套 Mac 离线交付物、数据库结构、Redis 运行态、Java→manager 控制协议和内部模型代理；一次性 WebSocket ticket 继续保存在签发 JVM。页面从 `/processes/me` 获得用户 binding 后，会给后续 OpenCode、会话、Run、SSE 和本地工作区请求携带页面内存中的 `linuxServerId`；Nginx 用静态白名单把已知 ID 精确首跳到一机一 Java 的目标节点，缺失或未知 ID 仍走 `least_conn`，后端权威路由继续兜底。workspace PTY、文件和 Agent 配置进度沿用既有固定节点方式；标准生产部署中，服务器 PTY 也复用同一静态路由表固定到签发 Java，不依赖 sticky。
+当前代码支持单后台和完整多后台部署。两种模式使用同一套 Mac 离线交付物、平台 PostgreSQL、独立共享 XXL MySQL、Redis 运行态、Java→manager 控制协议和内部模型代理。每个 Java 进程同时运行平台 WebFlux、独立 Admin 子端口和 executor；XXL executor 不使用 Linux 亲和，夜间一次性 `USER_PLAN` 仍保留原亲和。一次性 WebSocket ticket 继续保存在签发 JVM；页面从 `/processes/me` 获得用户 binding 后，会给后续 OpenCode、会话、Run、SSE 和本地工作区请求携带页面内存中的 `linuxServerId`，Nginx 用静态白名单把已知 ID 精确首跳到一机一 Java 的目标节点，缺失或未知 ID 仍走 `least_conn`，后端权威路由继续兜底。workspace PTY、文件和 Agent 配置进度沿用既有固定节点方式；标准生产部署中，服务器 PTY 也复用同一静态路由表固定到签发 Java，不依赖 sticky。
 
 企业交付模板默认设置 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true`，并要求 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<前端入口>`；应用本身在缺少该显式配置时仍保持关闭。上线时确认 systemd Java 的 `User=` 就是期望的运维用户，终端只继承该用户权限，不使用 `sudo` 或额外授权。标准入口的前端 `nginx.env` 必须开启 TLS、配置证书路径，并以 `linuxServerId=host:port` 填写统一的 `TEST_AGENT_NGINX_SERVER_ROUTES`。旧 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 只用于升级兼容，新配置不得与新键并存。当前现场明确选择 HTTP、不能使用 HTTPS，因此单后台和 `.4 + .114` 多后台都按对应文档显式允许 `ws://`，并接受登录数据和终端内容明文传输、浏览器网段必须直达各 Java `:8080` 的风险；该现场例外不改变通用 WSS 安全默认。
 
@@ -17,6 +17,8 @@
 - 企业内不使用 Docker Compose，worker 由 `opencode-worker-docker.sh` 管理。
 - Java 读取 `/data/testagent/config/backend.env`。
 - Java 固定读取交付 JAR 内置的 `classpath:rsa-private.key`；`backend.env` 不再接受外置 RSA 路径，多后台必须部署同一 JAR。
+- 所有 Java 连接同一个外部 XXL MySQL，并使用同一个强随机 XXL access token；平台 PostgreSQL 与 XXL MySQL 必须分开。
+- 同机多 Java 的 Admin/executor 端口必须唯一，所有 Admin 必须能访问所有 executor；前端 Nginx 把 `/xxl-job-admin/` 同源代理到 Admin 子端口。
 - worker 读取 `/data/testagent/config/docker.env`。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与本机 worker 的 `TEST_AGENT_DATA_ROOT` 一致。
 - 每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不配置人工 `containerId/managerId`。
@@ -71,6 +73,7 @@ deploy/internal/dist/test-agent-internal-release.zip
 deploy/internal/dist/test-agent-internal-release.zip.sha256
 deploy/internal/dist/backend/test-agent-app.jar
 deploy/internal/dist/backend/lib/
+deploy/internal/dist/backend/xxl-job-upstream/  # 3.4.2 源码、LICENSE、UPSTREAM、VERSION
 deploy/internal/dist/test-agent-frontend-dist.tar.gz
 deploy/internal/dist/test-agent-programs.tar.gz
 deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
@@ -171,12 +174,13 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 
 无论单后台还是多后台，每个后端节点都按以下顺序部署：
 
-1. 替换 Java JAR 和 `backend/lib/`。
-2. 启动 Java，确认 health/readiness。
-3. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
-4. 导入 worker 镜像、解压 programs。
-5. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。
-6. 初始化本服务器公共 OpenCode 配置并验证用户进程。
+1. 创建/校验外部 XXL MySQL 空库和最小权限账号，准备所有节点共用 access token。
+2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
+3. 启动 Java，确认平台 health/readiness，并单独确认 XXL Flyway V3 与 Admin health。
+4. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
+5. 导入 worker 镜像、解压 programs。
+6. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。
+7. 配置/重载 Nginx 同源 `/xxl-job-admin/` 代理，初始化公共 OpenCode 并完成 iframe SSO/executor 验收。
 
 不要先启动 worker 再修 Java 身份文件。
 

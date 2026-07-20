@@ -6,13 +6,8 @@ import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
   OpencodeRuntimeManagementOverview,
-  PageResponse,
-  PublicAgentRepositoryStatus,
-  ScheduledTaskManagementRun,
-  ScheduledTaskManagementTask,
-  SchedulerDiagnostics
+  PublicAgentRepositoryStatus
 } from "@test-agent/shared-types";
-import ScheduledTaskManagementPanel from "../src/components/system/ScheduledTaskManagementPanel.vue";
 import SystemManagementPanel from "../src/components/system/SystemManagementPanel.vue";
 
 function queryClient() {
@@ -24,83 +19,6 @@ const currentUser: CurrentUser = {
   username: "admin",
   unifiedAuthId: "AUTH_1",
   roles: ["SUPER_ADMIN"]
-};
-
-const task: ScheduledTaskManagementTask = {
-  taskKey: "daily.cleanup",
-  name: "每日清理",
-  cronExpression: "0 0 2 * * *",
-  enabled: true,
-  lockTtlSeconds: 300,
-  nextFireAt: "2026-06-25T02:00:00Z",
-  registrationStatus: "REGISTERED",
-  registrationStatusLabel: "已注册",
-  currentRun: null,
-  latestRun: null,
-  traceId: "trace_task",
-  createdAt: "2026-06-25T00:00:00Z",
-  updatedAt: "2026-06-25T00:00:00Z"
-};
-
-const runningRun: ScheduledTaskManagementRun = {
-  taskRunId: "str_1234567890abcdef",
-  taskKey: "daily.cleanup",
-  planId: null,
-  triggerType: "MANUAL",
-  triggerTypeLabel: "手工触发",
-  status: "RUNNING",
-  statusLabel: "运行中",
-  requestedByUserId: "usr_admin",
-  scheduledFireAt: "2026-06-25T00:00:00Z",
-  startedAt: "2026-06-25T00:00:01Z",
-  endedAt: null,
-  ownerInstanceId: "backend-a",
-  stopRequestedAt: null,
-  stopRequestedByUserId: null,
-  stopReason: null,
-  skipReason: null,
-  errorCode: null,
-  errorMessage: null,
-  result: {},
-  traceId: "trace_run",
-  createdAt: "2026-06-25T00:00:00Z",
-  updatedAt: "2026-06-25T00:00:01Z"
-};
-
-const diagnostics: SchedulerDiagnostics = {
-  scheduler: {
-    enabled: true,
-    runnerRunning: false,
-    instanceId: "scheduler-test-instance",
-    scanIntervalSeconds: 30,
-    dueTaskLimit: 50,
-    manualRunLimit: 50,
-    lastScanStartedAt: "2026-06-25T00:00:00Z",
-    lastScanFinishedAt: "2026-06-25T00:00:01Z",
-    lastScanErrorMessage: null
-  },
-  redisLock: {
-    checkable: true,
-    lockKey: "test-agent:scheduler:lock:daily.cleanup",
-    locked: true,
-    ttlMillis: 42_000
-  },
-  task: {
-    taskKey: "daily.cleanup",
-    enabled: true,
-    registrationStatus: "REGISTERED",
-    registrationStatusLabel: "已注册",
-    nextFireAt: "2026-06-25T02:00:00Z",
-    lockTtlSeconds: 300,
-    currentRun: null,
-    latestRun: null,
-    pendingManualRunCount: 1
-  },
-  diagnosis: {
-    manualTriggerReady: false,
-    cronReady: false,
-    blockers: [{ code: "RUNNER_NOT_RUNNING", message: "后台扫描线程未运行" }]
-  }
 };
 
 const emptyRuntimeOverview: OpencodeRuntimeManagementOverview = {
@@ -141,19 +59,9 @@ const publicRepository: PublicAgentRepositoryStatus = {
   message: "未初始化"
 };
 
-function pageOf<T>(items: T[]): PageResponse<T> {
-  return { items, page: 1, size: 20, total: items.length };
-}
-
 function api(overrides: Partial<BackendApiClient> = {}) {
   return {
-    listScheduledTasks: vi.fn().mockResolvedValue(pageOf([task])),
-    updateScheduledTask: vi.fn().mockResolvedValue(task),
-    triggerScheduledTask: vi.fn().mockResolvedValue(runningRun),
-    listScheduledTaskRuns: vi.fn().mockResolvedValue(pageOf([runningRun])),
-    getScheduledTaskRun: vi.fn().mockResolvedValue(runningRun),
-    stopScheduledTaskRun: vi.fn().mockResolvedValue({ ...runningRun, status: "STOPPING", statusLabel: "停止中" }),
-    getSchedulerDiagnostics: vi.fn().mockResolvedValue(diagnostics),
+    createXxlJobSsoTicket: vi.fn().mockRejectedValue(new Error("XXL-JOB unavailable in navigation test")),
     getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyRuntimeOverview),
     listPublicAgentRepositories: vi.fn().mockResolvedValue([publicRepository]),
     listPublicAgentBranches: vi.fn().mockResolvedValue(["main", "develop"]),
@@ -208,51 +116,12 @@ describe("scheduler management panel", () => {
     vi.clearAllMocks();
   });
 
-  it("loads tasks and supports cron update plus manual trigger", async () => {
-    const backendApi = api();
-    const view = renderWithApi(ScheduledTaskManagementPanel, backendApi);
-
-    expect(await view.findByText("每日清理")).toBeTruthy();
-    await fireEvent.update(view.getByPlaceholderText("Cron 表达式"), "0 0 3 * * *");
-    await fireEvent.click(view.getByText("保存 Cron"));
-    await fireEvent.click(view.getByText("手工启动"));
-
-    await waitFor(() => expect(backendApi.updateScheduledTask).toHaveBeenCalledWith("daily.cleanup", {
-      cronExpression: "0 0 3 * * *"
-    }));
-    expect(backendApi.triggerScheduledTask).toHaveBeenCalledWith("daily.cleanup");
-    view.queryClient.clear();
-  });
-
-  it("filters runs and stops a running task run", async () => {
-    const backendApi = api();
-    const view = renderWithApi(ScheduledTaskManagementPanel, backendApi);
-
-    expect(await view.findByText("str_1234567890abcdef")).toBeTruthy();
-    await fireEvent.click(view.getByText("停止"));
-
-    await waitFor(() => expect(backendApi.stopScheduledTaskRun).toHaveBeenCalledWith("str_1234567890abcdef"));
-    view.queryClient.clear();
-  });
-
-  it("shows scheduler diagnostics and selected task blockers", async () => {
-    const backendApi = api();
-    const view = renderWithApi(ScheduledTaskManagementPanel, backendApi);
-
-    expect(await view.findByText("运行条件")).toBeTruthy();
-    expect(await view.findByText("实例 scheduler-test-instance")).toBeTruthy();
-    expect(await view.findByText("后台扫描线程未运行")).toBeTruthy();
-    expect(await view.findByText("锁占用，剩余 42 秒")).toBeTruthy();
-    await waitFor(() => expect(backendApi.getSchedulerDiagnostics).toHaveBeenCalledWith("daily.cleanup"));
-    view.queryClient.clear();
-  });
-
   it("system management switches between scheduler and runtime management", async () => {
     const backendApi = api();
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
     expect(await view.findByText("定时任务管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
-    expect(await view.findByText("每日清理")).toBeTruthy();
+    expect(view.getByTitle("XXL-JOB 定时任务管理")).toBeTruthy();
     await fireEvent.click(view.getByText("运行管理", { selector: ".ta-system-menu-text" }));
 
     await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());

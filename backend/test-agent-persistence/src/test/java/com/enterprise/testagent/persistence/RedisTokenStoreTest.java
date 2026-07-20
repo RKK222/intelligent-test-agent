@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.auth.TokenSessionMarkerStore;
 import com.enterprise.testagent.domain.user.UserId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -44,6 +45,8 @@ class RedisTokenStoreTest {
         store.deleteByUserIds(List.of(new UserId("usr_target")));
 
         verify(redisTemplate).delete(List.of("test-agent:token:target"));
+        verify(redisTemplate).delete(List.of(
+                "test-agent:token-session:" + TokenSessionMarkerStore.sha256("token-target")));
         verify(cursor).close();
     }
 

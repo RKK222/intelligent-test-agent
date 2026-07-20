@@ -17,6 +17,12 @@ map $http_x_test_agent_linux_server_id $test_agent_backend_route {
     ${TEST_AGENT_SERVER_ROUTE_MAP}
 }
 
+upstream test_agent_xxl_job_admin {
+    least_conn;
+    ${TEST_AGENT_XXL_JOB_ADMIN_SERVERS}
+    keepalive 16;
+}
+
 server {
     ${TEST_AGENT_NGINX_LISTEN_DIRECTIVE}
     ${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_DIRECTIVES}
@@ -52,6 +58,24 @@ server {
 
     # 服务器终端 ticket 保存在目标 Java 内存，复用同一 linuxServerId 静态路由表定向代理 WebSocket。
     ${TEST_AGENT_TERMINAL_LOCATIONS}
+
+    location = /xxl-job-admin {
+        return 308 /xxl-job-admin/;
+    }
+
+    # XXL Admin 与平台 API 同源，但使用每个 Java 进程独立的 Servlet 子端口。
+    location /xxl-job-admin/ {
+        proxy_pass http://test_agent_xxl_job_admin;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_buffering off;
+        proxy_cache off;
+    }
 
     location /api/ {
         proxy_pass http://$test_agent_backend_route;

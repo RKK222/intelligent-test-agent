@@ -45,8 +45,23 @@ public class ScheduledTaskRegistry {
      * 同步代码注册任务。已有数据库定义保留管理员启停、Cron 和锁 TTL 覆盖值。
      */
     public void syncRegisteredTasks(String traceId) {
+        syncHandlers(handlers.values(), traceId);
+    }
+
+    /**
+     * XXL-JOB 接管周期/手工任务后，旧 PostgreSQL runner 只同步 USER_PLAN handler。
+     */
+    public void syncUserPlanTasks(String traceId) {
+        syncHandlers(
+                handlers.values().stream()
+                        .filter(handler -> handler.supportedTriggerTypes().contains(ScheduledTaskTriggerType.USER_PLAN))
+                        .toList(),
+                traceId);
+    }
+
+    private void syncHandlers(java.util.Collection<ScheduledTaskHandler> selectedHandlers, String traceId) {
         Instant now = clock.instant();
-        for (ScheduledTaskHandler handler : handlers.values()) {
+        for (ScheduledTaskHandler handler : selectedHandlers) {
             ScheduledTaskKey taskKey = handler.taskKey();
             Optional<ScheduledTask> existing = repository.findTaskByKey(taskKey);
             if (existing.isEmpty()) {

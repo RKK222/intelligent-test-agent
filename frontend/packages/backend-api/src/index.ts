@@ -147,7 +147,8 @@ import type {
   WorkspaceDirectoryList,
   WorkspaceFileRoute,
   WorkspaceFileSocketTicketRequest,
-  WorkspaceFileSocketTicketResponse
+  WorkspaceFileSocketTicketResponse,
+  XxlJobSsoTicket
 } from "@test-agent/shared-types";
 
 type WorkspaceWebSocketLike = {
@@ -319,6 +320,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const opencodeRuntimeBase = "/api/internal/platform/opencode-runtime";
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
+  const xxlJobBase = "/api/internal/platform/xxl-job";
   const systemManagementBase = "/api/internal/platform/system-management";
   const analyticsBase = "/api/internal/platform/analytics";
   const commonParameterBase = `${configurationBase}/common-parameters`;
@@ -1378,6 +1380,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<PageResponse<AnalyticsExceptionDetail>>(`${analyticsBase}/exceptions${query({ ...params })}`),
     exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions", params: AnalyticsQueryParams = {}) =>
       requestCsv(`${analyticsBase}/export${query({ ...params, type })}`),
+    createXxlJobSsoTicket: () =>
+      request<XxlJobSsoTicket>(`${xxlJobBase}/sso-tickets`, { method: "POST" }),
     listScheduledTasks: (params: ScheduledTaskListParams = {}) =>
       request<PageResponse<ScheduledTaskManagementTask>>(
         `${schedulerManagementBase}/tasks${query({ page: params.page, size: params.size })}`
@@ -2188,14 +2192,28 @@ function bodyToObservedRawText(body: BodyInit | null | undefined): string | unde
 /** 优先递归脱敏 JSON；解析失败时继续按字段名处理 SSE/截断文本，调试副本禁止泄露 token。 */
 function redactObservedJsonText(raw: string): string {
   try {
-    return JSON.stringify(redactConversationContextToken(JSON.parse(raw)));
+    return JSON.stringify(redactObservedSensitiveData(JSON.parse(raw)));
   } catch {
-    return redactConversationContextTokenText(raw);
+    return redactObservedSensitiveText(raw);
   }
 }
 
-function redactConversationContextTokenText(raw: string): string {
-  const keyPattern = /(["']?)\bcontexttoken\b\1\s*[:=]\s*/gi;
+const OBSERVED_SENSITIVE_KEYS = new Set([
+  "authorization",
+  "accesstoken",
+  "cookie",
+  "contexttoken",
+  "password",
+  "refreshtoken",
+  "secret",
+  "sessiondigest",
+  "setcookie",
+  "ticket",
+  "token"
+]);
+
+function redactObservedSensitiveText(raw: string): string {
+  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;
@@ -2233,9 +2251,9 @@ function redactConversationContextTokenText(raw: string): string {
   return redacted + raw.slice(cursor);
 }
 
-function redactConversationContextToken(value: unknown): unknown {
+function redactObservedSensitiveData(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map(redactConversationContextToken);
+    return value.map(redactObservedSensitiveData);
   }
   if (!value || typeof value !== "object") {
     return value;
@@ -2243,7 +2261,9 @@ function redactConversationContextToken(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, item]) => [
       key,
-      key.toLowerCase() === "contexttoken" ? "[REDACTED]" : redactConversationContextToken(item)
+      OBSERVED_SENSITIVE_KEYS.has(key.toLowerCase().replace(/[-_]/g, ""))
+        ? "[REDACTED]"
+        : redactObservedSensitiveData(item)
     ])
   );
 }

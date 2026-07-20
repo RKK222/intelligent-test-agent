@@ -105,11 +105,11 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
     }
 
     /**
-     * 先同步代码注册任务，便于管理页展示；默认关闭时只是不启动后台扫描线程。
+     * 只同步 USER_PLAN 任务；周期与手工任务已由 XXL-JOB/MySQL 管理。
      */
     @Override
     public void start() {
-        registry.syncRegisteredTasks(TraceIdSupport.generate());
+        registry.syncUserPlanTasks(TraceIdSupport.generate());
         if (!properties.isEnabled() || running) {
             return;
         }
@@ -187,8 +187,6 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
         lastScanStartedAt = clock.instant();
         Instant now = clock.instant();
         try {
-            scanDueTasks(now);
-            scanPendingManualRuns(now);
             scanPendingUserPlanRuns(now);
             lastScanErrorMessage = null;
         } catch (RuntimeException exception) {

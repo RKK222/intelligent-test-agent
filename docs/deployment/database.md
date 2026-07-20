@@ -4,10 +4,26 @@
 
 ## 数据访问规范
 
-- 关系型数据库连接池继续统一使用 Druid，migration 继续由 Flyway 管理。
-- 新增或修改关系型数据库 SQL 必须通过 `test-agent-persistence` 的 MyBatis XML mapper 实现；mapper 接口只声明方法，禁止写注解 SQL。
+- 平台 PostgreSQL 连接池继续使用 Druid；XXL Admin 子上下文按上游运行方式使用隔离 Hikari MySQL DataSource。两套 schema 都由各自 Flyway 管理，禁止共用连接或 migration location。
+- 新增或修改平台 PostgreSQL SQL 必须通过 `test-agent-persistence` 的 MyBatis XML mapper 实现；XXL MySQL 的平台扩展 SQL 只能写在 `test-agent-xxl-job-integration` 的 MyBatis XML。mapper 接口只声明方法，禁止写注解 SQL。
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
+
+## XXL-JOB 独立 MySQL migration
+
+XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration`，平台主 Flyway 的 `classpath:db/migration` 不会扫描该独立顶层目录。
+
+| 版本 | 内容 |
+|---|---|
+| `V1__xxl_job_3_4_2_base_schema.sql` | XXL-JOB 3.4.2 基础表与 schedule lock；不包含示例任务和默认管理员。 |
+| `V2__platform_sso_and_task_keys.sql` | `xxl_job_user` 增加唯一 `platform_user_id`、SHA-256 session digest/expiry，用户名扩为 128；`xxl_job_info` 增加唯一 `platform_task_key`。 |
+| `V3__register_platform_executor_and_tasks.sql` | 新增自动注册执行器组 `test-agent-backend` 与六个首批周期任务。 |
+
+V3 是生产必需基础调度配置，不是演示数据。后续新增任务与本次首批初始化使用完全相同的模式：每次新建不可变的 `V4`、`V5` 等版本 SQL，以新的 `platform_task_key` 插入任务；不得在应用启动阶段 upsert，也不得覆盖 XXL 页面中已调整的启停、Cron 或其它运行参数。
+
+所有首批任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V3 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
+
+本次不搬运 PostgreSQL 的旧周期任务行或运行记录。旧行保留审计，但只有 `USER_PLAN` 会继续产生新的 PostgreSQL scheduler 运行；XXL 运行日志独立留在 MySQL，默认保留 30 天。
 
 ## V20260718123000 Agent 配置发布 rollout 范围
 
@@ -775,24 +791,24 @@ V10 种子数据对 F-COSS 的影响：
 
 ## V20260625184300 scheduler 框架表与来源预留字段
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260625184300__create_scheduler_framework_tables.sql` 创建通用定时任务框架表，并给会话、Run、消息增加来源预留字段。框架内置运行记录保留清理任务，其它具体业务任务仍由所属业务模块提供；不开放普通用户创建 Cron 计划 API。该版本使用 14 位时间戳，避免与既有 `V15__add_opencode_process_id_check_constraints.sql`、`V17__seed_local_opencode_machine_for_default_user.sql` 或其他并行分支的数字版本冲突。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260625184300__create_scheduler_framework_tables.sql` 创建旧 scheduler 框架表，并给会话、Run、消息增加来源预留字段。迁移到 XXL 后这些表继续保留历史和夜间 `USER_PLAN`；旧 runner 不再从中调度 `CRON` 或 `MANUAL`。该版本使用 14 位时间戳，避免与既有数字版本冲突。
 
 | 表 | 说明 |
 |---|---|
 | `scheduled_tasks` | 代码注册任务定义，保存任务 key、名称、Cron、启停、锁 TTL、下次触发时间和注册状态。 |
 | `scheduled_task_plans` | 用户级 Cron 计划预留表，包含 owner 用户、Cron、payload、启停和下次触发时间。 |
-| `scheduled_task_runs` | 单次运行记录，统一记录 Cron、管理员手动触发和未来用户计划触发的状态、时间、实例、跳过原因、错误和结果。 |
+| `scheduled_task_runs` | 旧 Cron/手工历史与当前一次性 `USER_PLAN` 运行记录；迁移后不再新增旧入口的 Cron/手工记录。 |
 
 关键字段：
 
 - `scheduled_tasks.task_key` 唯一，作为代码注册、数据库定义、Redis 锁和运行记录关联键。
 - `scheduled_tasks.lock_ttl_seconds` 保存 Redis 锁租约秒数，必须为正数。
 - `scheduled_task_plans.plan_id`、`scheduled_task_runs.task_run_id` 是业务 ID，不暴露数据库自增 surrogate PK。
-- `scheduled_task_runs.trigger_type` 当前支持 `CRON`、`MANUAL`、`USER_PLAN`；HTTP 首版只创建 `MANUAL`。
+- `scheduled_task_runs.trigger_type` 兼容 `CRON`、`MANUAL`、`USER_PLAN`；迁移后只有夜间业务创建 `USER_PLAN`。
 - `scheduled_task_runs.status` 当前支持 `PENDING`、`RUNNING`、`STOPPING`、`SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED`。
 - `scheduled_task_runs.skip_reason` 保存同一 `taskKey` 已有未结束运行或 Redis 锁竞争失败时的跳过原因。
 - `scheduled_task_runs.stop_requested_at`、`stop_requested_by_user_id`、`stop_reason` 记录超级管理员发起协作式停止的时间、操作者和原因。
-- `V20260715000000__add_scheduler_run_retention_index.sql` 为 `scheduled_task_runs.ended_at` 创建 `idx_scheduled_task_runs_ended_at` 索引。`scheduler.run-retention-cleanup` 每天 UTC 00:00 删除 `ended_at` 早于当前时间 7 天且状态为 `SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED` 的记录；`PENDING`、`RUNNING`、`STOPPING` 始终保留。
+- `V20260715000000__add_scheduler_run_retention_index.sql` 为 `scheduled_task_runs.ended_at` 创建索引。`scheduler.run-retention-cleanup` 现在由 XXL 在北京时间 08:00 触发同一 handler，删除早于 7 天的已结束 PostgreSQL 记录；活动状态始终保留。
 
 新增来源字段：
 
@@ -805,13 +821,13 @@ V10 种子数据对 F-COSS 的影响：
 兼容策略：
 
 - 旧数据通过 `default 'MANUAL'` 保持兼容；新增用户字段均可空。
-- `scheduled_task_plans` 只预留领域模型和 Repository，不开放 HTTP API，不会被普通用户直接创建。
+- `scheduled_task_plans` 只作为历史预留，不开放 HTTP API；当前一次性夜间计划直接使用 `scheduled_task_runs(USER_PLAN)`。
 - 分布式互斥由 Redis 锁保证，数据库表不作为锁 fallback；Redis 不可用时 scheduler 启用校验失败或运行失败，不降级为本机锁。
 - `result_json`、`payload_json` 保存结构化 JSON 文本，禁止写入密钥、Token、完整 prompt 或其他敏感内容。
 
 ## V20260718210000 scheduler USER_PLAN 执行亲和
 
-`V20260718210000__extend_scheduler_user_plan.sql` 允许 `scheduled_tasks.cron_expression` 为空，并为 `scheduled_task_runs` 增加可空 `execution_affinity` 和 `(trigger_type, status, execution_affinity, scheduled_fire_at)` 索引。无 Cron 仅允许代码注册且只支持 `USER_PLAN` 的 handler；普通 Cron/管理任务仍必须提供 Cron。
+`V20260718210000__extend_scheduler_user_plan.sql` 允许 `scheduled_tasks.cron_expression` 为空，并为 `scheduled_task_runs` 增加可空 `execution_affinity` 和 `(trigger_type, status, execution_affinity, scheduled_fire_at)` 索引。无 Cron 只允许代码注册且支持 `USER_PLAN` 的 handler；周期任务的 Cron 已转移到 XXL MySQL。
 
 夜间任务创建一次性 `USER_PLAN` 运行记录时，把目标稳定 Linux 服务器 ID 写入 `execution_affinity`。每台 Java 只扫描当前服务器亲和的到期记录，并以状态条件更新把 `PENDING` 认领为 `RUNNING`；取消也使用 `PENDING -> SKIPPED` 条件更新，避免取消与 runner 互相覆盖。scheduler 任务定义、运行记录、分页、亲和扫描和 CAS 已由 `ScheduledTaskMapper.xml` / `MyBatisScheduledTaskRepository` 接管；旧 `JdbcScheduledTaskRepository` 删除，不再作为生产或测试实现。
 
@@ -847,7 +863,7 @@ V10 种子数据对 F-COSS 的影响：
 
 ## V20260625192100 scheduler 停止字段与状态字典
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260625192100__extend_scheduler_management_stop_and_dicts.sql` 在 scheduler 框架表上扩展管理可视化所需字段和字典：
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260625192100__extend_scheduler_management_stop_and_dicts.sql` 是旧 scheduler 管理页的兼容 schema。迁移后字段和字典保留历史，不再由已作废的管理 API 写入：
 
 - `scheduled_task_runs` 增加 `stop_requested_at`、`stop_requested_by_user_id`、`stop_reason`，用于记录管理员停止正在运行任务的审计信息；`stop_requested_by_user_id` 外键指向 `users(user_id)`。
 - 新增 `idx_scheduled_task_runs_stop_user`，支持按停止操作者追溯。

@@ -19,6 +19,8 @@ TEST_AGENT_REDIS_PASSWORD=current-redis-password
 TEST_AGENT_API_TOKEN=current-api-token
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=current-manager-token
 TEST_AGENT_INTERNAL_PROXY_API_KEY=current-proxy-key
+TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=current-xxl-mysql-password
+TEST_AGENT_XXL_JOB_ACCESS_TOKEN=current-xxl-access-token
 TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT=30s
 TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT=10s
 EOF
@@ -37,6 +39,8 @@ grep -Fxq 'TEST_AGENT_REDIS_PASSWORD=current-redis-password' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_API_TOKEN=current-api-token' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=current-manager-token' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_INTERNAL_PROXY_API_KEY=current-proxy-key' "${BACKEND_ENV}"
+grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=current-xxl-mysql-password' "${BACKEND_ENV}"
+grep -Fxq 'TEST_AGENT_XXL_JOB_ACCESS_TOKEN=current-xxl-access-token' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true' "${BACKEND_ENV}"
@@ -93,9 +97,13 @@ grep -Fxq "TEST_AGENT_NGINX_CONF_PATH=${LOADED_DIR}/test-agent-gateway.conf" "${
 grep -Fxq 'TEST_AGENT_NGINX_RELOAD_MODE=binary' "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080' "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996' "${NGINX_ENV}"
+grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080' "${NGINX_ENV}"
 bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' \
   "${LOADED_DIR}/test-agent-gateway.conf"
+grep -Fq 'server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;' \
+  "${LOADED_DIR}/test-agent-gateway.conf"
+grep -Fq 'location /xxl-job-admin/ {' "${LOADED_DIR}/test-agent-gateway.conf"
 grep -Fq 'listen 80;' "${LOADED_DIR}/test-agent-gateway.conf"
 grep -Fq 'listen 9996;' "${LOADED_DIR}/test-agent-gateway.conf"
 

@@ -5,6 +5,20 @@ export type PreparedRawOutputBody = {
 
 export const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 2_000;
 
+const RAW_OUTPUT_SENSITIVE_KEYS = new Set([
+  "authorization",
+  "accesstoken",
+  "cookie",
+  "contexttoken",
+  "password",
+  "refreshtoken",
+  "secret",
+  "sessiondigest",
+  "setcookie",
+  "ticket",
+  "token"
+]);
+
 /**
  * 原始输出列表仅保留最新固定数量，避免长会话无限占用页面内存且不修改现有数组。
  */
@@ -16,7 +30,7 @@ export function appendLatestRawOutputEntry<T>(current: readonly T[], entry: T): 
  * 原始输出统一在进入页面缓存前脱敏并截断，避免 HTTP/SSE 新入口绕过安全边界。
  */
 export function prepareRawOutputBody(body: string, maxLength: number): PreparedRawOutputBody {
-  const redactedBody = redactContextTokensFromJson(body);
+  const redactedBody = redactSensitiveDataFromJson(body);
   if (redactedBody.length <= maxLength) {
     return { body: redactedBody };
   }
@@ -26,17 +40,17 @@ export function prepareRawOutputBody(body: string, maxLength: number): PreparedR
   };
 }
 
-function redactContextTokensFromJson(body: string): string {
+function redactSensitiveDataFromJson(body: string): string {
   try {
-    return JSON.stringify(redactContextTokens(JSON.parse(body)));
+    return JSON.stringify(redactSensitiveData(JSON.parse(body)));
   } catch {
     // SSE data 前缀、截断 JSON 或表单文本都可能让整体解析失败；调试副本仍必须 fail-closed 脱敏。
-    return redactContextTokensFromText(body);
+    return redactSensitiveDataFromText(body);
   }
 }
 
-function redactContextTokensFromText(body: string): string {
-  const keyPattern = /(["']?)\bcontexttoken\b\1\s*[:=]\s*/gi;
+function redactSensitiveDataFromText(body: string): string {
+  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;
@@ -74,9 +88,9 @@ function redactContextTokensFromText(body: string): string {
   return redacted + body.slice(cursor);
 }
 
-function redactContextTokens(value: unknown): unknown {
+function redactSensitiveData(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map(redactContextTokens);
+    return value.map(redactSensitiveData);
   }
   if (!value || typeof value !== "object") {
     return value;
@@ -84,7 +98,9 @@ function redactContextTokens(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, item]) => [
       key,
-      key.toLowerCase() === "contexttoken" ? "[REDACTED]" : redactContextTokens(item)
+      RAW_OUTPUT_SENSITIVE_KEYS.has(key.toLowerCase().replace(/[-_]/g, ""))
+        ? "[REDACTED]"
+        : redactSensitiveData(item)
     ])
   );
 }

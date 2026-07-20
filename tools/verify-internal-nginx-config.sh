@@ -35,9 +35,14 @@ write_env() {
   local mode="$1"
   local backends="$2"
   local additional_listen_ports="${3:-}"
+  local admins="122.233.30.114:18080"
+  if [[ "${mode}" == "multi" ]]; then
+    admins="122.233.30.4:18080,122.233.30.114:18080"
+  fi
   {
     printf 'TEST_AGENT_NGINX_MODE=%s\n' "${mode}"
     printf 'TEST_AGENT_NGINX_BACKENDS=%s\n' "${backends}"
+    printf 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=%s\n' "${admins}"
     printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
     printf 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=%s\n' "${additional_listen_ports}"
     printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
@@ -54,16 +59,19 @@ run_configure() {
 write_env single '122.233.30.114:8080'
 run_configure
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
-test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 1
+grep -Fq 'server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
+grep -Fq 'location /xxl-job-admin/ {' "${CONF_PATH}"
+test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
 
 write_env multi '122.233.30.4:8080,122.233.30.114:8080' '9996'
 printf 'TEST_AGENT_NGINX_SERVER_ROUTES=server-a=122.233.30.4:8080,server-b=122.233.30.114:8080\n' >>"${ENV_FILE}"
 run_configure
 grep -Fq 'server 122.233.30.4:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
-test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
 grep -Fq 'listen 80;' "${CONF_PATH}"
 grep -Fq 'listen 9996;' "${CONF_PATH}"
+grep -Fq 'server 122.233.30.4:18080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
+test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 4
 grep -Fq 'location = /api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/ws {' "${CONF_PATH}"
 grep -Fq 'default test_agent_backend;' "${CONF_PATH}"
 grep -Fq '"server-a" test_agent_server_route_0;' "${CONF_PATH}"
@@ -117,6 +125,7 @@ chmod +x "${CUSTOM_ROOT}/sbin/nginx"
 {
   printf 'TEST_AGENT_NGINX_MODE=single\n'
   printf 'TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080\n'
+  printf 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080\n'
   printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
   printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
   printf 'TEST_AGENT_NGINX_CONF_PATH=%s\n' "${CUSTOM_CONF_PATH}"

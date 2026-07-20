@@ -21,6 +21,7 @@ Token 校验流程：
 - opencode runtime 代理可以读取可选 `AuthPrincipal`：存在用户主体时业务层使用用户专属 opencode 进程；用户已有 ACTIVE binding 且属于其他服务器时，API 层只允许把用户进程状态、初始化、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java，并必须透传原始用户 Authorization 和 traceId，由目标 Java 继续鉴权。只有 static token 或本地放行而没有用户主体时，才允许走固定 `execution_nodes` 兼容 fallback。静态 API token 不得被伪装成用户身份。
 - RunEvent SSE 跨 Java 路由必须在鉴权过滤器之后执行，按 Run 原始归属定位生产 Java，并透传原始 `Authorization`、`X-Trace-Id`、`Last-Event-ID` 和 query；目标 Java 收到 `X-Test-Agent-Backend-Routed=true` 后跳过二次路由，但仍执行同一 Controller 和业务校验。
 - Run cancel 是跨 Java 写操作，不得仅凭 `X-Test-Agent-Backend-Routed` 跳过生产节点解析，因为该 HTTP 头可由浏览器伪造；每一跳都必须通过 `RunEventSseRouteService.forwardTargetStrict` 重新确认 Run 原始生产服务器和当前被选中的 Java，到达本机 owner 后才允许进入 Controller。
+- XXL SSO 票据签发必须使用真实用户 Token 主体并强制 `SUPER_ADMIN`；静态 API token、本地放行或仅前端菜单可见性都不能建立 XXL 用户会话。
 
 本地占位策略：
 
@@ -75,7 +76,7 @@ Token 校验流程：
 9. 设置页创建应用工作空间的 `workspace_create_operations.error_message` 只能保存平台安全错误说明或通用失败文案，不得写入 SSH 私钥、token、Authorization、Cookie、完整命令行、完整用户输入或敏感路径片段。
 10. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
 11. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。
-12. 定时任务管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端系统管理菜单可见性只作为体验优化。管理员手动触发运行记录必须写入 `requestedByUserId` 和 traceId，停止正在执行的运行记录必须写入 `stopRequestedAt`、`stopRequestedByUserId` 和 `stopReason`。scheduler 启用时必须使用 Redis 分布式锁，不得回退到本机锁或数据库锁，以免分布式多节点重复执行。
+12. XXL SSO 票据 API 必须使用用户 JWT 并由后端强制校验 `SUPER_ADMIN`；票据使用至少 256 位安全随机值、最长 60 秒、Redis `GETDEL` 一次消费，且不得保存原始平台 Token。iframe 只能通过隐藏表单 POST 传票据，禁止 URL/query/hash、浏览器存储、访问日志和错误响应携带票据。JIT 用户以稳定平台用户 ID 唯一，所有 XXL 账号均为管理员展示账号但不得使用本地密码登录；原生登录、改密和账号写入口必须禁用。XXL 会话每次请求校验平台 SHA-256 session marker，平台登出、刷新或过期必须同步失效。周期任务 `GLOBAL_MUTEX` 必须使用现有 Redis 锁和续租，不得回退本机或数据库锁。
 13. 夜间任务 API 必须使用用户 JWT，owner 只能取认证主体；按 `taskId/sessionId` 查询或变更时必须隔离其他用户。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 scheduler payload/result、HTTP 响应、RunEvent、运营分析或日志；任务成功投递、取消或最终失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview` 和安全错误。到期执行必须重新校验 Session/Workspace 权限，并通过公共进程启动和 Run 编排，禁止根据持久化客户端字段绕过权限、选择任意服务器或直调 manager gateway。夜间容量只能由 `SUPER_ADMIN` 通过既有通用参数管理入口修改，服务端必须在审计和广播前校验正整数；跨服务器刷新 payload 不携带参数值，刷新失败日志不得记录数据库原值或底层敏感错误。
 14. JVM 内存通用参数的查询和手工刷新接口必须强制校验 `SUPER_ADMIN`，因为响应会同时暴露数据库加载源值与进程实际生效值；前端入口可见性不能替代后端权限。跨 Java 请求必须按 `backendProcessId` 精确路由并使用统一防循环头。手工刷新不得写参数修改历史或重复发布广播，日志只允许记录脱敏 traceId、进程身份、参数键和结果状态，不得记录源值、内存值、底层异常消息或堆栈。
 
@@ -83,12 +84,12 @@ Token 校验流程：
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、用户 Token 和 `contextToken`。
+- Authorization、Cookie、API key、用户 Token、`contextToken`、XXL SSO ticket 和 platform session digest。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。
 
-日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis health、scheduler 运行记录日志和 opencode-manager 控制面日志必须避免输出 token、完整 Authorization header、Cookie、用户输入或完整 prompt。
+日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis health、scheduler/XXL 运行日志和 opencode-manager 控制面日志必须避免输出 ticket、token、完整 Authorization header、Cookie、session digest、MySQL 密码、用户输入、完整 prompt 或原始 executor 敏感 payload。前端 `rawExchangeObserver` 对 ticket/token/cookie/password/secret/sessionDigest 做递归、大小写不敏感脱敏后才允许展示。
 
 ## Web 安全
 
@@ -102,6 +103,8 @@ Token 校验流程：
 8. `tools/verify-opencode-process-deployment.sh` 只用于只读 smoke check；传入的 manager token 和 `SUPER_ADMIN` 用户 token 不会由脚本打印。生产执行时应使用临时 shell、禁用命令历史或通过安全变量注入，避免 token 留在 history 中。
 9. 应用引用资产库状态中的 `repositoryPath` 只能由服务端使用当前平台 `OPENCODE_REFERENCES_DIR` 和已校验版本库英文名派生，并且只通过既有 `APP_ADMIN` 接口返回；参数缺失或历史名称非法时返回空。客户端输入不得控制该路径，日志、trace 和错误消息不得记录该物理路径。
 10. `X-Test-Agent-Linux-Server-Id` 只能作为 Nginx 首跳性能提示，不能作为鉴权、binding、Session 归属或运行上下文事实源。Nginx 必须通过静态 `linuxServerId -> Java endpoint` 白名单映射，禁止把头值直接拼成地址；缺失或未知值回退默认 upstream。代理给 Java 前必须删除该头，并清除外部传入的 `X-Test-Agent-Backend-Routed`，后者只允许公共 Java→Java 转发器产生。前端只在页面内存保存 binding ID，仅对用户 OpenCode、会话、Run、SSE 和本地工作区请求发送；登录和共享控制面不得被该提示固定到用户节点。CORS 可允许该头，但目标 Java 仍必须重新执行完整鉴权和归属校验。
+11. XXL Admin 只允许经同源 `/xxl-job-admin/` iframe 访问；响应必须包含 `Content-Security-Policy: frame-ancestors 'self'`、`X-Frame-Options: SAMEORIGIN`，会话 Cookie 必须为 `HttpOnly; Secure; SameSite=Lax` 并限制 Path。Nginx/Vite 必须保持同源和路径前缀，不能通过放宽 frame/Cookie 策略解决代理错误。
+12. XXL access token 与 MySQL 密码只能从外部配置注入，所有 Java/Admin/executor 使用同一 access token；executor 端口只对可信 Admin 网络开放。Admin/MySQL health 不进入平台 readiness，但必须独立告警。
 
 ## 平台文件 WebSocket 安全例外
 

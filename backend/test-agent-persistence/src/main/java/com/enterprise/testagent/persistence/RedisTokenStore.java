@@ -2,6 +2,7 @@ package com.enterprise.testagent.persistence;
 
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.auth.TokenStore;
+import com.enterprise.testagent.domain.auth.TokenSessionMarkerStore;
 import com.enterprise.testagent.domain.user.UserId;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,11 +24,12 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  * Key 格式：{@code test-agent:token:{token}}
  * TTL：与 AuthPrincipal.expiresAt 一致（1天）
  */
-public class RedisTokenStore implements TokenStore {
+public class RedisTokenStore implements TokenStore, TokenSessionMarkerStore {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RedisTokenStore.class);
 
     private static final String KEY_PREFIX = "test-agent:token:";
+    private static final String SESSION_MARKER_KEY_PREFIX = "test-agent:token-session:";
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -49,7 +51,10 @@ public class RedisTokenStore implements TokenStore {
             if (ttlSeconds <= 0) {
                 ttlSeconds = 86400; // 默认 1 天
             }
-            redisTemplate.opsForValue().set(key, value, Duration.ofSeconds(ttlSeconds));
+            Duration ttl = Duration.ofSeconds(ttlSeconds);
+            redisTemplate.opsForValue().set(key, value, ttl);
+            // 第三方会话只持有该摘要 marker；平台登出/刷新时和原 Token 一起删除。
+            redisTemplate.opsForValue().set(markerKey(digest(principal.token())), principal.userId().value(), ttl);
         } catch (JsonProcessingException exception) {
             LOGGER.error("Failed to serialize AuthPrincipal to JSON", exception);
             throw new RuntimeException("Token serialization failed", exception);
@@ -75,6 +80,7 @@ public class RedisTokenStore implements TokenStore {
     @Override
     public void delete(String token) {
         redisTemplate.delete(redisKey(token));
+        redisTemplate.delete(markerKey(digest(token)));
     }
 
     /**
@@ -99,6 +105,7 @@ public class RedisTokenStore implements TokenStore {
         }
 
         List<String> matchedTokenKeys = new ArrayList<>();
+        List<String> matchedMarkerKeys = new ArrayList<>();
         ScanOptions options = ScanOptions.scanOptions().match(KEY_PREFIX + "*").count(256).build();
         try (Cursor<String> cursor = redisTemplate.scan(options)) {
             while (cursor.hasNext()) {
@@ -111,6 +118,7 @@ public class RedisTokenStore implements TokenStore {
                     AuthPrincipal principal = objectMapper.readValue(value, AuthPrincipal.class);
                     if (targetUserIds.contains(principal.userId().value())) {
                         matchedTokenKeys.add(key);
+                        matchedMarkerKeys.add(markerKey(digest(principal.token())));
                     }
                 } catch (JsonProcessingException exception) {
                     // 兼容历史损坏值：不输出包含 token 的 Redis key，只记录一次低级别诊断。
@@ -120,6 +128,7 @@ public class RedisTokenStore implements TokenStore {
         }
         if (!matchedTokenKeys.isEmpty()) {
             redisTemplate.delete(matchedTokenKeys);
+            redisTemplate.delete(matchedMarkerKeys);
         }
     }
 
@@ -130,10 +139,27 @@ public class RedisTokenStore implements TokenStore {
         return ttl != null && ttl > 0;
     }
 
+    @Override
+    public String digest(String token) {
+        return TokenSessionMarkerStore.sha256(token);
+    }
+
+    @Override
+    public boolean isActive(String sessionDigest) {
+        if (sessionDigest == null || !sessionDigest.matches("[a-f0-9]{64}")) {
+            return false;
+        }
+        return redisTemplate.opsForValue().get(markerKey(sessionDigest)) != null;
+    }
+
     /**
      * 构造 Redis key 格式。
      */
     private static String redisKey(String token) {
         return KEY_PREFIX + token;
+    }
+
+    private static String markerKey(String digest) {
+        return SESSION_MARKER_KEY_PREFIX + digest;
     }
 }

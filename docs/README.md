@@ -22,6 +22,7 @@
 
 - `docs/architecture/module-map.md`：后端模块与前端包职责速查，按功能定位代码位置。
 - `docs/architecture/dependency-rules.md`：模块归属与依赖方向，新增文件前必读。
+- `docs/architecture/xxl-job-integration.md`：XXL-JOB 3.4.2 集成、SSO、数据库、executor 与旧 USER_PLAN 边界的单一事实源。
 - `backend/test-agent-*/README.md`：各后端模块职责与依赖边界。
 - `frontend/packages/*/README.md`、`frontend/apps/agent-web/README.md`：各前端包职责。
 
@@ -34,6 +35,7 @@
 
 - `docs/testing/conversation-scenes.md`：直接对话、历史运行中、Todo、ask、permission、subagent、宠物旁路成功/失败等可重复 fixture 入口。
 - `docs/testing/application-worktree-feature-cases.md`：应用 worktree、feature、角色写权限、发布投影和固定 UI 测试数据案例。
+- `docs/testing/xxl-job-integration.md`：XXL-JOB 自动化、双 Java、故障隔离和安全验收清单。
 
 ## 部署与数据库
 

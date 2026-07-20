@@ -52,6 +52,25 @@ describe("raw output boundary", () => {
     expect(form.body).not.toContain("ctx_form_secret");
   });
 
+  it("redacts XXL tickets, cookies, tokens, passwords, secrets and session digests", () => {
+    const json = prepareRawOutputBody(JSON.stringify({
+      ticket: "xxl-ticket-secret",
+      Cookie: "test_agent_xxl_login=cookie-secret",
+      access_token: "access-secret",
+      password: "mysql-secret",
+      nested: { secret: "nested-secret", sessionDigest: "digest-secret", keep: "visible" }
+    }), 10_000);
+    const text = prepareRawOutputBody(
+      "ticket=xxl-text-secret&set-cookie=cookie-text-secret&token=token-text-secret&keep=visible",
+      10_000
+    );
+
+    expect(json.body).not.toMatch(/xxl-ticket-secret|cookie-secret|access-secret|mysql-secret|nested-secret|digest-secret/);
+    expect(json.body).toContain('"keep":"visible"');
+    expect(text.body).not.toMatch(/xxl-text-secret|cookie-text-secret|token-text-secret/);
+    expect(text.body).toContain("keep=visible");
+  });
+
   it("redacts an unterminated quoted token in linear time", () => {
     const malformed = `data: contextToken:"${"\\".repeat(20_000)}ctx_unterminated_secret`;
     const startedAt = performance.now();

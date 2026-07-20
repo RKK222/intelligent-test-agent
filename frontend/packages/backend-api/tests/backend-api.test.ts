@@ -1029,6 +1029,39 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("posts for an XXL-JOB one-time SSO ticket without putting the ticket in a URL", async () => {
+    const exchanges: Array<Record<string, unknown>> = [];
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        ticket: "one-time-secret",
+        expiresAt: "2026-07-20T08:00:00Z",
+        formAction: "/xxl-job-admin/platform-sso/login"
+      }
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    await expect(client.createXxlJobSsoTicket()).resolves.toMatchObject({
+      ticket: "one-time-secret",
+      formAction: "/xxl-job-admin/platform-sso/login"
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/xxl-job/sso-tickets",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(String(fetcher.mock.calls[0]?.[0])).not.toContain("one-time-secret");
+    expect(exchanges[0]?.responseText).toContain('"ticket":"[REDACTED]"');
+    expect(exchanges[0]?.responseText).not.toContain("one-time-secret");
+  });
+
   it("maps scheduler management APIs through platform URL", async () => {
     const taskPage = {
       items: [

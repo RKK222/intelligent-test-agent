@@ -41,7 +41,7 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile test] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--help]
+Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
@@ -68,7 +68,7 @@ Defaults:
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
 
 Options:
-  --profile              Only test is supported; default is test.
+  --profile              test or local; default is test. local 默认读取 .env.local。
   --env-file             Backend dotenv file. Relative paths are resolved from the repo root.
   --log-dir              Service log directory. Relative paths are resolved from the repo root.
   --skip-backend-build   Restart backend without running Maven package first.
@@ -130,10 +130,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${profile}" in
-  test)
+  test|local)
     ;;
   *)
-    echo "Unsupported profile: ${profile}. Expected test." >&2
+    echo "Unsupported profile: ${profile}. Expected test or local." >&2
     exit 2
     ;;
 esac
@@ -894,13 +894,14 @@ start_frontend() {
   : >"${LOG_DIR}/frontend.log"
   if command -v screen >/dev/null 2>&1; then
     local frontend_cmd
-    printf -v frontend_cmd 'cd %q && export HOST=%q PORT=%q VITE_TEST_AGENT_API_BASE_URL=%q && exec corepack pnpm dev >>%q 2>&1' \
-      "${FRONTEND_DIR}" "${frontend_host}" "${frontend_port}" "${backend_url}" "${LOG_DIR}/frontend.log"
+    printf -v frontend_cmd 'cd %q && export HOST=%q PORT=%q VITE_TEST_AGENT_API_BASE_URL=%q TEST_AGENT_XXL_JOB_ADMIN_URL=%q && exec corepack pnpm dev >>%q 2>&1' \
+      "${FRONTEND_DIR}" "${frontend_host}" "${frontend_port}" "${backend_url}" "${TEST_AGENT_XXL_JOB_ADMIN_URL:-http://127.0.0.1:18080}" "${LOG_DIR}/frontend.log"
     screen -dmS "${FRONTEND_SCREEN_SESSION}" bash -lc "${frontend_cmd}"
   else
     (
       cd "${FRONTEND_DIR}"
       HOST="${frontend_host}" PORT="${frontend_port}" VITE_TEST_AGENT_API_BASE_URL="${backend_url}" \
+        TEST_AGENT_XXL_JOB_ADMIN_URL="${TEST_AGENT_XXL_JOB_ADMIN_URL:-http://127.0.0.1:18080}" \
         nohup corepack pnpm dev >>"${LOG_DIR}/frontend.log" 2>&1 &
       echo "$!" >"${LOG_DIR}/frontend.pid"
     )
