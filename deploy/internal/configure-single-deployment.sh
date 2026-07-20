@@ -265,6 +265,8 @@ configure_backend() {
   grep -Fxq 'TEST_AGENT_DB_USERNAME=postgres' "${backend_tmp}"
   grep -Fxq 'TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114' "${backend_tmp}"
   grep -Fxq 'SYS_DATA_ROOT_DIR=/data/testagent/data' "${backend_tmp}"
+  grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_ENABLED=true' "${backend_tmp}"
+  grep -Eq '^TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://[^[:space:]]+$' "${backend_tmp}"
   grep -Fxq 'TEST_AGENT_DATA_ROOT=/data/testagent/data' "${docker_tmp}"
   if grep -q '^TEST_AGENT_INTERNAL_PROXY_API_KEY=' "${docker_tmp}"; then
     echo "Internal proxy key must not be written to docker.env" >&2

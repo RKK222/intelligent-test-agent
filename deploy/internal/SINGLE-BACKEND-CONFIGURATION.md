@@ -82,6 +82,8 @@ manager command 超时  10s（只保留一项）
 ```bash
 grep -E '^(TEST_AGENT_DB_URL|TEST_AGENT_DB_USERNAME|TEST_AGENT_SERVER_ADVERTISED_HOST|SYS_DATA_ROOT_DIR|TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT)=' \
   /data/testagent/config/backend.env
+grep -E '^TEST_AGENT_SERVER_TERMINAL_(ENABLED|WORKING_DIRECTORY|PUBLIC_WEBSOCKET_BASE_URL)=' \
+  /data/testagent/config/backend.env
 grep -E '^(TEST_AGENT_DATA_ROOT|OPENCODE_WORKER_BACKEND_PORT|OPENCODE_WORKER_PORT_START|OPENCODE_WORKER_PORT_END)=' \
   /data/testagent/config/docker.env
 
@@ -102,6 +104,8 @@ cd /data/testagent/deploy/internal
 test-agent-backend-122-233-30-114
 122.233.30.114
 ```
+
+服务器终端配置预期为 `ENABLED=true`、工作目录 `/data/testagent`、公开地址 `wss://122.233.30.2`；前端 Nginx 必须同时启用 TLS 和对应 `linuxServerId` 的精确 WebSocket 路由。
 
 ## 3. `.2` 生成 nginx.env
 

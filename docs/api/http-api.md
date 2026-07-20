@@ -64,7 +64,7 @@
 | `opencode-runtime` | `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 或 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` | 旧 `/api/sessions/{sessionId}/session-tree/messages` 返回 `410 API_GONE`。 |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/agents` | 旧 `/api/agents` 返回 `410 API_GONE`。 |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` | 旧 `/api/sessions/{sessionId}/terminal/tickets|ws` 返回 `410 API_GONE`。 |
-| `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/linux-servers/{linuxServerId}/terminal/tickets` | `SUPER_ADMIN` 服务器终端；权限与目标 Java 系统用户一致，默认关闭，正式环境 WebSocket 必须走 WSS 定向网关。 |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/linux-servers/{linuxServerId}/terminal/tickets` | `SUPER_ADMIN` 服务器终端；权限与目标 Java 系统用户一致，应用级默认关闭，企业交付模板显式启用，正式环境 WebSocket 必须走 WSS 定向网关。 |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/overview` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/containers/{containerId}/processes/{port}/restart` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/containers/{containerId}/processes/{port}/stop` | 无旧 URL |
@@ -2822,7 +2822,7 @@ ticket 响应 data：
 { "confirmationText": "SERVER@test-agent-backend-a", "cols": 120, "rows": 32 }
 ```
 
-该入口默认关闭。开启后仍会逐次校验 `SUPER_ADMIN`、确认值严格等于 `SERVER@{linuxServerId}`、目标就是当前 Java、`/bin/bash` 与固定工作目录可用。确认值由前端在用户确认目标服务器后生成，不再要求手工输入。Java 直接启动本机 PTY，shell 的操作系统用户和权限与启动目标 Java 的用户完全一致，不使用 SSH、`sudo`、切换用户、密码或私钥。正式环境的响应 `webSocketUrl` 只允许由 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 生成 `wss://` 地址；本地 `test` profile 会显式允许直连目标 Java 的 `ws://` 地址。服务器 shell 使用最小环境，不继承 Java 进程中的数据库密码、token 或其它密钥环境变量。平台通过临时 rcfile 提供彩色提示符以及 `ls`、`grep`、`git` 的交互式 ANSI 配色，不修改用户 `.bashrc` 或系统配置；用户现有 `.bashrc` 仍会最后加载并可覆盖默认配色。
+该入口在应用未配置时默认关闭，企业内部署模板会显式设置为开启。开启后仍会逐次校验 `SUPER_ADMIN`、确认值严格等于 `SERVER@{linuxServerId}`、目标就是当前 Java、`/bin/bash` 与固定工作目录可用。确认值由前端在用户确认目标服务器后生成，不再要求手工输入。Java 直接启动本机 PTY，shell 的操作系统用户和权限与启动目标 Java 的用户完全一致，不使用 SSH、`sudo`、切换用户、密码或私钥。正式环境的响应 `webSocketUrl` 只允许由 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 生成 `wss://` 地址；本地 `test` profile 会显式允许直连目标 Java 的 `ws://` 地址。服务器 shell 使用最小环境，不继承 Java 进程中的数据库密码、token 或其它密钥环境变量。平台通过临时 rcfile 提供彩色提示符以及 `ls`、`grep`、`git` 的交互式 ANSI 配色，不修改用户 `.bashrc` 或系统配置；用户现有 `.bashrc` 仍会最后加载并可覆盖默认配色。
 
 WebSocket 消息使用 JSON envelope：
 

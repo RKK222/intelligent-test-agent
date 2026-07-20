@@ -136,7 +136,7 @@ Token 校验流程：
 5. input/output 审计日志默认只记录长度、事件类型、截断、退出码和必要状态，不记录完整终端内容。
 6. input、resize、output buffer、idle timeout 和 hard timeout 必须有明确上限。
 7. 断开连接、session abort、后端关闭或超时时必须清理 PTY 进程。
-8. 服务器终端必须默认关闭，仅允许 `SUPER_ADMIN`，每次连接都展示目标服务器二次确认，并由后端严格校验 `SERVER@{linuxServerId}` 目标绑定值；PTY 必须直接继承启动目标 Java 的操作系统用户和权限，禁止 `sudo`、切换用户、SSH 密码、私钥或其它额外提权。
+8. 服务器终端的应用级默认值必须关闭；获批的企业交付模板可在同时配置 WSS 定向网关时显式启用。终端仅允许 `SUPER_ADMIN`，每次连接都展示目标服务器二次确认，并由后端严格校验 `SERVER@{linuxServerId}` 目标绑定值；PTY 必须直接继承启动目标 Java 的操作系统用户和权限，禁止 `sudo`、切换用户、SSH 密码、私钥或其它额外提权。
 9. 正式环境的服务器终端只能返回 `wss://` 网关地址，网关必须按 `linuxServerId` 定向到签票 JVM；仅本地 `test` profile 可显式允许直连 `ws://`。shell 使用不含 Java 进程密钥的最小环境，审计不得记录命令和输出正文。默认配色只能通过当前 Java 用户创建的随机临时 rcfile 注入，不得写入用户主目录、系统 shell 配置或全局 Git 配置；兼容加载用户已有 `.bashrc` 时不得改变其文件内容。
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
