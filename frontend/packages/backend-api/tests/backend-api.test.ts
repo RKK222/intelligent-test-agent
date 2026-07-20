@@ -2,6 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 import { BackendApiError, createBackendApiClient, type ReferenceRepositoryStatus, type WorkspaceWebSocketFactory } from "../src";
 
 describe("backend-api", () => {
+  it("keeps an explicitly empty Vite API base URL for same-origin deployment", async () => {
+    vi.stubEnv("VITE_TEST_AGENT_API_BASE_URL", "");
+    try {
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+        new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: [] }), { status: 200 })
+      );
+      const client = createBackendApiClient({ fetcher, traceIdFactory: () => "trace_fixed" });
+
+      await client.listCommonParameterMemoryValues();
+
+      expect(fetcher.mock.calls[0]?.[0]).toBe(
+        "/api/internal/platform/configuration-management/common-parameters/memory-values"
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("uses the additive common parameter memory query and refresh endpoints", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: {} }), { status: 200 })

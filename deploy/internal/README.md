@@ -2,7 +2,7 @@
 
 当前代码支持单后台和完整多后台部署。两种模式使用同一套 Mac 离线交付物、数据库结构、Redis 运行态、Java→manager 控制协议和内部模型代理；一次性 WebSocket ticket 继续保存在签发 JVM。workspace PTY、文件和 Agent 配置进度沿用既有固定节点方式；标准生产部署中，服务器 PTY 通过 HTTPS Nginx 的精确 `linuxServerId` location 固定到签发 Java，不依赖 sticky。
 
-企业交付模板默认设置 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true`，并要求 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<前端入口>`；应用本身在缺少该显式配置时仍保持关闭。上线时确认 systemd Java 的 `User=` 就是期望的运维用户，终端只继承该用户权限，不使用 `sudo` 或额外授权。标准入口的前端 `nginx.env` 必须开启 TLS、配置证书路径，并以 `linuxServerId=host:port` 填写 `TEST_AGENT_NGINX_TERMINAL_ROUTES`。当前单后台现场明确选择 HTTP、不能使用 HTTPS，因此必须按 [单后台部署](SINGLE-BACKEND.md) 的现场覆盖项显式允许 `ws://`，并接受登录数据和终端内容明文传输、浏览器网段必须直达 Java `:8080` 的风险；该现场例外不改变通用 WSS 安全默认。
+企业交付模板默认设置 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true`，并要求 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<前端入口>`；应用本身在缺少该显式配置时仍保持关闭。上线时确认 systemd Java 的 `User=` 就是期望的运维用户，终端只继承该用户权限，不使用 `sudo` 或额外授权。标准入口的前端 `nginx.env` 必须开启 TLS、配置证书路径，并以 `linuxServerId=host:port` 填写 `TEST_AGENT_NGINX_TERMINAL_ROUTES`。当前现场明确选择 HTTP、不能使用 HTTPS，因此单后台和 `.4 + .114` 多后台都按对应文档显式允许 `ws://`，并接受登录数据和终端内容明文传输、浏览器网段必须直达各 Java `:8080` 的风险；该现场例外不改变通用 WSS 安全默认。
 
 请选择对应文档：
 
@@ -32,14 +32,14 @@ cd /Users/kaka/Desktop/intelligent-test-agent
 deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
 
-`VITE_TEST_AGENT_API_BASE_URL` 是编译期参数。前端入口不是模板默认值时，必须在打包命令中显式导出；例如当前单后台现场使用：
+`VITE_TEST_AGENT_API_BASE_URL` 是编译期参数。只允许一个入口时可固化完整 origin；域名和 IP 需要同时兼容时必须显式传空值，让前端使用当前页面同源的相对 `/api`。当前双入口包使用：
 
 ```bash
-VITE_TEST_AGENT_API_BASE_URL=http://mimo.sdc.cs.icbc:9996 \
+VITE_TEST_AGENT_API_BASE_URL="" \
   deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
 
-入口变更后只修改服务器 `docker.env` 不会改变已经编译的静态文件，必须重新构建并替换前端产物。
+这样 `http://mimo.sdc.cs.icbc:9996` 和 `http://122.233.30.2:9996` 都请求各自同源 `/api`。入口策略变更后只修改服务器 `docker.env` 不会改变已经编译的静态文件，必须重新构建并替换前端产物。
 
 交付物：
 
@@ -120,6 +120,8 @@ unzip -t test-agent-internal-release.zip
 - 公共模型配置：[opencode.jsonc.example](opencode.jsonc.example)
 
 单后台的 `configure-single-deployment.sh frontend` 会用临时 `.conf` 实测候选目录是否加载新文件，避免把“显式 include 某一个现有文件”的同级目录误判为通配目录。当前 `.2` 已确认显式加载专用 `/data/apps/nginx/conf/test-agent.conf`，检查并备份后应通过 `--gateway-conf` 明确复用该文件；只有它还承载其他系统、不能由本应用接管时，才由 Nginx 管理方增加专用通配目录。具体命令见 [单后台配置脚本执行单](SINGLE-BACKEND-CONFIGURATION.md)。
+
+同一个 Nginx `server` 块需要同时监听多个端口时，保留主端口 `TEST_AGENT_NGINX_LISTEN_PORT`，并在 `TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS` 中填写逗号分隔的附加端口。当前域名链路继续落到实体 `:80`，IP 直连增加 `:9996`；渲染脚本会拒绝非法或重复端口。
 
 历史链接兼容：
 

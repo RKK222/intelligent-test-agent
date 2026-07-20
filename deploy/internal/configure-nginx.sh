@@ -111,6 +111,7 @@ load_dotenv "${ENV_FILE}"
 
 NGINX_MODE="${TEST_AGENT_NGINX_MODE:-single}"
 NGINX_LISTEN_PORT="${TEST_AGENT_NGINX_LISTEN_PORT:-80}"
+NGINX_ADDITIONAL_LISTEN_PORTS="${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS:-}"
 FRONTEND_ROOT="${TEST_AGENT_FRONTEND_ROOT:-/data/testagent/frontend}"
 NGINX_BACKENDS="${TEST_AGENT_NGINX_BACKENDS:-}"
 NGINX_TERMINAL_ROUTES="${TEST_AGENT_NGINX_TERMINAL_ROUTES:-}"
@@ -132,6 +133,28 @@ NGINX_SYSTEMD_SERVICE="${TEST_AGENT_NGINX_SYSTEMD_SERVICE:-nginx}"
   echo "Invalid TEST_AGENT_NGINX_LISTEN_PORT: ${NGINX_LISTEN_PORT}" >&2
   exit 1
 }
+
+# 一个 server 块可同时承接企业网关转发端口和实体 IP 直连端口；端口必须唯一，避免 Nginx 重复 listen。
+listen_ports=("${NGINX_LISTEN_PORT}")
+additional_listen_ports=()
+if [[ -n "${NGINX_ADDITIONAL_LISTEN_PORTS}" ]]; then
+  IFS=',' read -r -a raw_additional_listen_ports <<<"${NGINX_ADDITIONAL_LISTEN_PORTS}"
+  for raw_listen_port in "${raw_additional_listen_ports[@]}"; do
+    listen_port="$(trim "${raw_listen_port}")"
+    [[ "${listen_port}" =~ ^[0-9]{1,5}$ ]] && (( listen_port >= 1 && listen_port <= 65535 )) || {
+      echo "Invalid TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS entry: ${listen_port}" >&2
+      exit 1
+    }
+    for configured_listen_port in "${listen_ports[@]}"; do
+      [[ "${listen_port}" != "${configured_listen_port}" ]] || {
+        echo "Duplicate Nginx listen port: ${listen_port}" >&2
+        exit 1
+      }
+    done
+    additional_listen_ports+=("${listen_port}")
+    listen_ports+=("${listen_port}")
+  done
+fi
 [[ "${FRONTEND_ROOT}" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
   echo "Invalid TEST_AGENT_FRONTEND_ROOT: ${FRONTEND_ROOT}" >&2
   exit 1
@@ -248,13 +271,24 @@ trap cleanup EXIT
 root_token='${TEST_AGENT_FRONTEND_ROOT}'
 backends_token='${TEST_AGENT_BACKEND_SERVERS}'
 listen_token='${TEST_AGENT_NGINX_LISTEN_DIRECTIVE}'
+additional_listen_token='${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_DIRECTIVES}'
 tls_token='${TEST_AGENT_NGINX_TLS_DIRECTIVES}'
 terminal_token='${TEST_AGENT_TERMINAL_LOCATIONS}'
 listen_directive="listen ${NGINX_LISTEN_PORT};"
+additional_listen_directives=()
 tls_directives=""
 if [[ "${NGINX_TLS_ENABLED}" == "true" ]]; then
   listen_directive="listen ${NGINX_LISTEN_PORT} ssl;"
   tls_directives="ssl_certificate ${NGINX_TLS_CERTIFICATE}; ssl_certificate_key ${NGINX_TLS_CERTIFICATE_KEY}; ssl_protocols TLSv1.2 TLSv1.3;"
+fi
+if [[ -n "${NGINX_ADDITIONAL_LISTEN_PORTS}" ]]; then
+  for additional_listen_port in "${additional_listen_ports[@]}"; do
+    if [[ "${NGINX_TLS_ENABLED}" == "true" ]]; then
+      additional_listen_directives+=("listen ${additional_listen_port} ssl;")
+    else
+      additional_listen_directives+=("listen ${additional_listen_port};")
+    fi
+  done
 fi
 while IFS= read -r line || [[ -n "${line}" ]]; do
   if [[ "${line}" == *"${backends_token}"* ]]; then
@@ -285,6 +319,15 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
     done
     continue
   fi
+  if [[ "${line}" == *"${additional_listen_token}"* ]]; then
+    indent="${line%%"${additional_listen_token}"*}"
+    if [[ -n "${NGINX_ADDITIONAL_LISTEN_PORTS}" ]]; then
+      for directive in "${additional_listen_directives[@]}"; do
+        printf '%s%s\n' "${indent}" "${directive}" >>"${rendered}"
+      done
+    fi
+    continue
+  fi
   line="${line//${listen_token}/${listen_directive}}"
   line="${line//${tls_token}/${tls_directives}}"
   line="${line//${root_token}/${FRONTEND_ROOT}}"
@@ -299,6 +342,7 @@ fi
 if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   printf 'nginx mode: %s\n' "${NGINX_MODE}"
   printf 'nginx config: %s\n' "${NGINX_CONF_PATH}"
+  printf 'listen ports: %s\n' "$(IFS=,; printf '%s' "${listen_ports[*]}")"
   printf 'backend count: %s\n' "${#backend_directives[@]}"
   printf 'terminal route count: %s\n' "${#terminal_route_ids[@]}"
   printf 'tls enabled: %s\n' "${NGINX_TLS_ENABLED}"

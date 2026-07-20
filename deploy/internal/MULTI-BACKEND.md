@@ -1,12 +1,14 @@
 # 企业内多后台部署
 
-当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。任意入口 Java 收到需要归属路由的请求后，会根据公共路由程序选择目标 Java，再由目标 Java控制本机 manager。workspace PTY 和 Agent 配置进度 ticket 响应沿用签发 Java 地址；服务器终端 ticket 的 HTTP POST 先按 `linuxServerId` 路由，WSS 再由 Nginx 精确 location 固定到同一 Java，因此 ticket 的签发和消费不会跨 JVM，也不依赖 sticky。
+当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。任意入口 Java 收到需要归属路由的请求后，会根据公共路由程序选择目标 Java，再由目标 Java 控制本机 manager。workspace PTY 和 Agent 配置进度 ticket 响应沿用签发 Java 地址；当前 HTTP 现场的服务器终端 ticket POST 先按 `linuxServerId` 路由，响应再返回签发 Java 的直接 `ws://` 地址，因此 ticket 的签发和消费不会跨 JVM，也不依赖 sticky。
 
 本文用两个后台举例：
 
 | 角色 | 地址/身份 |
 |---|---|
-| 前端实体 Nginx | `122.233.30.2` |
+| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996`，企业入口继续转发到实体 Nginx `:80` |
+| 浏览器 IP 入口 | `http://122.233.30.2:9996`，直连实体 Nginx 新增监听 `:9996` |
+| 前端实体 Nginx | `122.233.30.2:80` + `122.233.30.2:9996`，安装目录 `/data/apps/nginx` |
 | 后台 A + worker A | `122.233.30.4` / `test-agent-backend-122-233-30-4` |
 | 后台 B + worker B | `122.233.30.114` / `test-agent-backend-122-233-30-114` |
 | Redis | `122.233.30.20:6379` |
@@ -16,7 +18,8 @@
 ## 1. 正式拓扑
 
 ```text
-浏览器 -> 122.233.30.2 Nginx
+浏览器 -> mimo.sdc.cs.icbc:9996 -> 企业入口 -> 122.233.30.2:80 Nginx
+       `-> 122.233.30.2:9996 ----------------------^ 同一个 Nginx server 块
                     |-> 122.233.30.4:8080   Java A -> 本机 worker A/OpenCode A
                     `-> 122.233.30.114:8080 Java B -> 本机 worker B/OpenCode B
 
@@ -44,6 +47,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 
 | 来源 | 目标 | 用途 |
 |---|---|---|
+| 企业浏览器网段 | `mimo.sdc.cs.icbc:9996`、`.2:9996` | 同一版本前端的域名和 IP 双入口 |
 | `.2` | `.4:8080`、`.114:8080` | Nginx 负载均衡 |
 | 企业浏览器网段 | `.4:8080`、`.114:8080` | PTY、Workspace/Agent 文件和 Agent 配置进度 WebSocket 按 ticket 签发节点直连 |
 | `.4` | `.114:8080` | Java A 转发到 Java B |
@@ -53,11 +57,14 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | 每台后台 | `ai-code.sdc.enterprise:9070` | 企业内部模型调用 |
 | Java 后台 | 每台后台 `4096-4105` | 访问本机或目标服务器上的用户 OpenCode 进程；浏览器不直连这些端口 |
 
-两个服务器可以重复使用 `4096-4105`，因为 IP 不同；同一台服务器的宿主机和容器端口必须同号。正式部署不使用 `--network host`、`19070` relay 或额外 model relay。
+两个服务器可以重复使用 `4096-4105`，因为 IP 不同；同一台服务器的宿主机和容器端口必须同号。正式部署不使用 `--network host`、`19070` relay 或额外 model relay。域名和 IP 虽然都由浏览器访问 `9996`，但域名链路已有企业入口把 `9996` 转到实体 Nginx `80`；实体 Nginx 额外监听 `9996` 是为了让 IP 直连，不得删掉原来的 `listen 80`。
 
 部署前验证：
 
 ```bash
+# 在 .2；如果已有非 Nginx 进程占用 9996，先停止并确认归属，不能直接覆盖。
+ss -lntp | grep ':9996 ' || true
+
 # 在 .4
 curl -fsS http://122.233.30.114:8080/actuator/health
 nc -vz 122.233.30.20 6379
@@ -75,8 +82,11 @@ nc -vz ai-code.sdc.enterprise 9070
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
-deploy/internal/package-release.sh --output-dir deploy/internal/dist
+VITE_TEST_AGENT_API_BASE_URL="" \
+  deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
+
+空值是有意配置：前端统一使用同源相对 `/api`，所以从域名打开时请求域名，从 IP 打开时请求 IP。不得固定成其中任一 origin，否则另一个入口会重新产生跨域或名称解析问题。
 
 交付：
 
@@ -144,7 +154,7 @@ TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_REDIS_TIMEOUT=1s
 
-TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
+TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 TEST_AGENT_API_TOKEN=
 TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
@@ -176,7 +186,8 @@ TEST_AGENT_BACKEND_DISCOVERY_LIMIT=100
 
 TEST_AGENT_SERVER_TERMINAL_ENABLED=true
 TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY=/data/testagent
-TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://122.233.30.2
+TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=
+TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 
 TEST_AGENT_SCHEDULER_ENABLED=false
 TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
@@ -204,7 +215,7 @@ TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_REDIS_TIMEOUT=1s
 
-TEST_AGENT_CORS_ALLOWED_ORIGINS=http://122.233.30.2
+TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 TEST_AGENT_API_TOKEN=
 TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=/data/testagent/config/ssh-rsa-private.key
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
@@ -236,7 +247,8 @@ TEST_AGENT_BACKEND_DISCOVERY_LIMIT=100
 
 TEST_AGENT_SERVER_TERMINAL_ENABLED=true
 TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY=/data/testagent
-TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://122.233.30.2
+TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=
+TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 
 TEST_AGENT_SCHEDULER_ENABLED=false
 TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
@@ -264,13 +276,13 @@ TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 
-VITE_TEST_AGENT_API_BASE_URL=http://122.233.30.2
+VITE_TEST_AGENT_API_BASE_URL=
 
 OPENCODE_WORKER_BACKEND_PORT=8080
 OPENCODE_WORKER_PORT_START=4096
 OPENCODE_WORKER_PORT_END=4105
 
-OPENCODE_ALLOWED_CORS=http://122.233.30.2
+OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
 OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
 
@@ -313,11 +325,17 @@ TEST_AGENT_NGINX_MODE=multi
 TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080
 TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080
 TEST_AGENT_NGINX_LISTEN_PORT=80
+TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
+TEST_AGENT_NGINX_TLS_ENABLED=false
 TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
-TEST_AGENT_NGINX_CONF_PATH=/etc/nginx/conf.d/test-agent-gateway.conf
+TEST_AGENT_NGINX_CONF_PATH=/data/apps/nginx/conf/test-agent.conf
+TEST_AGENT_NGINX_BIN=/data/apps/nginx/sbin/nginx
+TEST_AGENT_NGINX_PREFIX=/data/apps/nginx
+TEST_AGENT_NGINX_MAIN_CONF=/data/apps/nginx/conf/nginx.conf
+TEST_AGENT_NGINX_RELOAD_MODE=binary
 ```
 
-`TEST_AGENT_NGINX_CONF_PATH` 必须是当前 Nginx 主配置实际 include 的 `.conf` 文件。前端部署脚本统一调用 [configure-nginx.sh](configure-nginx.sh)，由同一个 [gateway.conf.template](nginx/gateway.conf.template) 生成 `least_conn` upstream、逐节点 `max_fails/fail_timeout`、WebSocket Upgrade、SSE 禁缓冲和长连接超时；配置失败自动恢复旧文件，不再手工维护另一份多节点 Nginx 配置。
+`TEST_AGENT_NGINX_CONF_PATH` 使用已经由主配置显式 include 的 `/data/apps/nginx/conf/test-agent.conf`，不要另建一个未加载的同级文件。前端部署脚本统一调用 [configure-nginx.sh](configure-nginx.sh)，由同一个 [gateway.conf.template](nginx/gateway.conf.template) 生成 `listen 80`、`listen 9996`、`least_conn` upstream、逐节点 `max_fails/fail_timeout`、WebSocket Upgrade、SSE 禁缓冲和长连接超时；配置失败自动恢复旧文件，不再手工维护另一份多节点 Nginx 配置。
 
 普通 HTTP、RunEvent SSE 和模型请求不依赖 sticky session：用户进程归属由数据库 binding 和 Redis 服务器快照决定，入口 Java 会转发到进程所属服务器；长连接建立后由 Nginx 保持当前上游。一次性 WebSocket ticket 仍是 JVM 内存状态，但路由已经闭合：
 
@@ -325,11 +343,45 @@ TEST_AGENT_NGINX_CONF_PATH=/etc/nginx/conf.d/test-agent-gateway.conf
 - Workspace/Agent 配置文件 route 返回目标 Java `baseUrl`，浏览器在目标 Java 申请 ticket 并连接同一 Java。
 - Agent 配置进度 ticket 返回当前签发 Java 的绝对 WebSocket 地址；跨节点进度由既有服务器广播汇入。
 
-因此不需要 `ip_hash`、cookie sticky、共享 ticket 或 Java 间文件/WebSocket 代理。浏览器网段必须能访问 `.4:8080` 和 `.114:8080`，两台 Java 的 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 都必须包含 `http://122.233.30.2`；这是绝对 WebSocket 地址可用的网络前提。
+因此不需要 `ip_hash`、cookie sticky、共享 ticket 或 Java 间文件/WebSocket 代理。当前现场明确不启用 HTTPS，两台 Java 都以空的公开 WSS 基址和 `ALLOW_INSECURE=true` 返回本节点 `ws://.4:8080` 或 `ws://.114:8080`；浏览器网段必须能访问两个 Java `:8080`，两台 Java 和 worker 的 Origin 白名单也都必须同时包含域名和 IP 两个 `:9996` origin。HTTP/WS 会明文传输登录信息和终端内容，只能在已接受风险的可信内网使用。
 
 ## 7. 部署与启动顺序
 
-前端 `.2` 只部署一次：
+先部署后台 A `.4`：
+
+```bash
+unzip -p /data/0709/test-agent-internal-release.zip \
+  deploy/internal/deploy-internal-release.sh \
+  > /tmp/deploy-internal-release.sh
+bash /tmp/deploy-internal-release.sh \
+  --archive /data/0709/test-agent-internal-release.zip \
+  --backend-host 122.233.30.4 \
+  --skip-frontend \
+  --validate-only
+bash /tmp/deploy-internal-release.sh \
+  --archive /data/0709/test-agent-internal-release.zip \
+  --backend-host 122.233.30.4 \
+  --skip-frontend
+```
+
+再部署后台 B `.114`：
+
+```bash
+unzip -p /data/0709/test-agent-internal-release.zip \
+  deploy/internal/deploy-internal-release.sh \
+  > /tmp/deploy-internal-release.sh
+bash /tmp/deploy-internal-release.sh \
+  --archive /data/0709/test-agent-internal-release.zip \
+  --backend-host 122.233.30.114 \
+  --skip-frontend \
+  --validate-only
+bash /tmp/deploy-internal-release.sh \
+  --archive /data/0709/test-agent-internal-release.zip \
+  --backend-host 122.233.30.114 \
+  --skip-frontend
+```
+
+两台后台都通过 health/readiness、身份文件和 worker 检查后，最后在前端 `.2` 部署一次，避免 Nginx 提前把流量分到尚未就绪的 `.4`：
 
 ```bash
 unzip -p /data/0709/test-agent-internal-release.zip \
@@ -340,40 +392,6 @@ bash /tmp/deploy-internal-frontend.sh \
   --validate-only
 bash /tmp/deploy-internal-frontend.sh \
   --archive /data/0709/test-agent-internal-release.zip
-```
-
-后台 A `.4`：
-
-```bash
-unzip -p /data/0709/test-agent-internal-release.zip \
-  deploy/internal/deploy-internal-release.sh \
-  > /tmp/deploy-internal-release.sh
-bash /tmp/deploy-internal-release.sh \
-  --archive /data/0709/test-agent-internal-release.zip \
-  --backend-host 122.233.30.4 \
-  --skip-frontend \
-  --validate-only
-bash /tmp/deploy-internal-release.sh \
-  --archive /data/0709/test-agent-internal-release.zip \
-  --backend-host 122.233.30.4 \
-  --skip-frontend
-```
-
-后台 B `.114`：
-
-```bash
-unzip -p /data/0709/test-agent-internal-release.zip \
-  deploy/internal/deploy-internal-release.sh \
-  > /tmp/deploy-internal-release.sh
-bash /tmp/deploy-internal-release.sh \
-  --archive /data/0709/test-agent-internal-release.zip \
-  --backend-host 122.233.30.114 \
-  --skip-frontend \
-  --validate-only
-bash /tmp/deploy-internal-release.sh \
-  --archive /data/0709/test-agent-internal-release.zip \
-  --backend-host 122.233.30.114 \
-  --skip-frontend
 ```
 
 首次部署时先让两台 Java 都通过 health/readiness 并写对身份文件，再分别启动本机 worker。升级时可以逐台滚动，但每一台内部仍必须按：
@@ -451,14 +469,28 @@ docker logs --tail 200 test-agent-opencode-worker | \
 
 然后验收：
 
-1. 运行管理中出现两个不同 `linuxServerId` 的 Java、manager 和容器，连接均在线。
-2. 从 `.4` curl `.114:8080/actuator/health`，从 `.114` curl `.4:8080/actuator/health`。
-3. 两个服务器都能初始化用户进程，动态端口的 `/global/health`、`/api/provider`、`/api/model` 正常。
-4. 从前端连续创建多个用户/会话，确认进程可分布在两个服务器。
-5. 让请求从另一个入口 Java 进入，已有会话仍能继续发送、停止、重启和读取状态，证明 Java 跨节点路由生效。
-6. 分别用 Qwen 和 DeepSeek 验证普通正文、think/reasoning、工具调用、持续 SSE 和 `[DONE]`。
-7. 两台后台都确认 9070 直连；正式链路中没有监听 19070 的 relay。
-8. 分别打开终端、Workspace/Agent 文件编辑和 Agent 配置 Git 进度，浏览器 WebSocket URL 应直连 ticket 响应中的 `.4:8080` 或 `.114:8080`，连接不出现 ticket 无效。
+1. 在 `.2` 执行下面的 Nginx 检查，预期配置只由已加载的 `test-agent.conf` 承载，同时出现 `listen 80;`、`listen 9996;` 和两个 upstream：
+
+   ```bash
+   /data/apps/nginx/sbin/nginx -p /data/apps/nginx/ \
+     -c /data/apps/nginx/conf/nginx.conf -t
+   /data/apps/nginx/sbin/nginx -p /data/apps/nginx/ \
+     -c /data/apps/nginx/conf/nginx.conf -T 2>&1 | \
+     grep -E 'configuration file /data/apps/nginx/conf/test-agent.conf|listen (80|9996);|server 122\.233\.30\.(4|114):8080'
+   ss -lntp | grep -E ':(80|9996)[[:space:]]'
+   ```
+
+2. 从实际浏览器网段分别执行 `curl -fsS http://mimo.sdc.cs.icbc:9996/health` 和 `curl -fsS http://122.233.30.2:9996/health`，两条都返回 `ok`；浏览器 Network 中 API 都是当前地址下的相对 `/api/...`，不能固定请求另一个 origin。
+3. 运行管理中出现两个不同 `linuxServerId` 的 Java、manager 和容器，连接均在线。
+4. 从 `.4` curl `.114:8080/actuator/health`，从 `.114` curl `.4:8080/actuator/health`。
+5. 两个服务器都能初始化用户进程，动态端口的 `/global/health`、`/api/provider`、`/api/model` 正常。
+6. 从前端连续创建多个用户/会话，确认进程可分布在两个服务器。
+7. 让请求从另一个入口 Java 进入，已有会话仍能继续发送、停止、重启和读取状态，证明 Java 跨节点路由生效。
+8. 分别用 Qwen 和 DeepSeek 验证普通正文、think/reasoning、工具调用、持续 SSE 和 `[DONE]`。
+9. 两台后台都确认 9070 直连；正式链路中没有监听 19070 的 relay。
+10. 分别打开终端、Workspace/Agent 文件编辑和 Agent 配置 Git 进度，浏览器 WebSocket URL 应直连 ticket 响应中的 `.4:8080` 或 `.114:8080`，连接不出现 ticket 无效。
+
+两个入口是不同浏览器 origin，Cookie、`localStorage` 和登录态不会天然共享；首次分别打开时需要各自登录。这不影响同一套后台数据和会话路由。
 
 模型验收不能只在其中一台执行。在 `.4` 和 `.114` 分别用本机 `127.0.0.1:8080` 执行 [单后台文档的两条 Java 代理 curl](SINGLE-BACKEND.md#8-验收)，分别验证 `qwen-prod + Qwen3.6-27B` 和 `deepseek-prod + DeepSeek-V4-Flash-W8A8`。两台都应持续返回单层 `data:`、正确的 `reasoning_content` 和单层 `[DONE]`；这样才能同时覆盖每台 Java 的内存快照、内部代理 key、UCID 转发和本机 9070 出站网络。
 
@@ -467,6 +499,8 @@ docker logs --tail 200 test-agent-opencode-worker | \
 | 现象 | 排查顺序 |
 |---|---|
 | Nginx 只命中一台或出现 502 | `.2` 分别 curl 两个 health；检查 upstream、`nginx -t` 和后台防火墙。 |
+| 域名正常但 IP `:9996` 拒绝连接 | 检查渲染结果是否同时包含 `listen 80;` 和 `listen 9996;`，再检查 `.2` 防火墙是否放行 TCP 9996；不要删除域名链路仍依赖的 `listen 80`。 |
+| 一个入口的 API 请求跑到另一个入口或 `127.0.0.1` | 前端不是以显式空的 `VITE_TEST_AGENT_API_BASE_URL` 构建；重新部署本次双入口包，不能只改服务器 `docker.env`。 |
 | WebSocket 报 ticket 无效或浏览器连接超时 | 检查 ticket 响应是否为目标 Java 的绝对 `ws://<后台>:8080/...`，再从浏览器网段检查两个 `:8080` 可达性和两台 Java 的 Origin 白名单；不增加 sticky。 |
 | 部署提示 systemd/8080 不匹配 | 执行 `systemctl show test-agent-backend -p ExecStart -p EnvironmentFiles -p MainPID` 和 `lsof -nP -iTCP:8080 -sTCP:LISTEN`；脚本只自动清理同一路径交付 JAR，其他进程必须人工确认。 |
 | 运行管理只显示一个服务器 | 检查两台是否共享同一 Redis、ID 是否唯一、heartbeat 日志和广播 channel 是否一致。 |

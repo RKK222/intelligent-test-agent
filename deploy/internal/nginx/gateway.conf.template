@@ -11,6 +11,7 @@ upstream test_agent_backend {
 
 server {
     ${TEST_AGENT_NGINX_LISTEN_DIRECTIVE}
+    ${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_DIRECTIVES}
     ${TEST_AGENT_NGINX_TLS_DIRECTIVES}
     server_name _;
     root ${TEST_AGENT_FRONTEND_ROOT};

@@ -2,7 +2,7 @@
 
 ## 职责
 
-封装后端 Runtime HTTP API，输出稳定 TypeScript 方法和错误对象；agent 相关能力默认使用 `opencode`，可通过 `agentId` 切换 URL 前缀。
+封装后端 Runtime HTTP API，输出稳定 TypeScript 方法和错误对象；agent 相关能力默认使用 `opencode`，可通过 `agentId` 切换 URL 前缀。构建时显式设置空的 `VITE_TEST_AGENT_API_BASE_URL` 表示同源相对访问，不能回退到 `127.0.0.1`。
 
 ## 主要程序清单
 

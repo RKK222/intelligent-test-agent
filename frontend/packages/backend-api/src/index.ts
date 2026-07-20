@@ -216,7 +216,8 @@ export type BackendApiClient = ReturnType<typeof createBackendApiClient>;
 // 统一读取环境变量：Vite 运行时（import.meta.env）优先，Node 运行时（process.env）兜底
 function readEnv(key: string): string | undefined {
   const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-  if (viteEnv?.[key]) {
+  // 显式空字符串表示同源部署，必须区别于变量未定义，避免回退到本机开发地址。
+  if (viteEnv && Object.prototype.hasOwnProperty.call(viteEnv, key)) {
     return viteEnv[key];
   }
   const proc = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process;

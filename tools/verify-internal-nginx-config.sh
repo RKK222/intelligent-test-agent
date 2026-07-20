@@ -34,10 +34,12 @@ chmod +x "${FAKE_BIN}/nginx" "${FAKE_BIN}/systemctl"
 write_env() {
   local mode="$1"
   local backends="$2"
+  local additional_listen_ports="${3:-}"
   {
     printf 'TEST_AGENT_NGINX_MODE=%s\n' "${mode}"
     printf 'TEST_AGENT_NGINX_BACKENDS=%s\n' "${backends}"
     printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
+    printf 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=%s\n' "${additional_listen_ports}"
     printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
     printf 'TEST_AGENT_NGINX_CONF_PATH=%s\n' "${CONF_PATH}"
   } >"${ENV_FILE}"
@@ -54,12 +56,14 @@ run_configure
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 1
 
-write_env multi '122.233.30.4:8080,122.233.30.114:8080'
+write_env multi '122.233.30.4:8080,122.233.30.114:8080' '9996'
 printf 'TEST_AGENT_NGINX_TERMINAL_ROUTES=server-a=122.233.30.4:8080,server-b=122.233.30.114:8080\n' >>"${ENV_FILE}"
 run_configure
 grep -Fq 'server 122.233.30.4:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
+grep -Fq 'listen 80;' "${CONF_PATH}"
+grep -Fq 'listen 9996;' "${CONF_PATH}"
 grep -Fq 'location = /api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/ws {' "${CONF_PATH}"
 grep -Fq 'proxy_pass http://122.233.30.4:8080;' "${CONF_PATH}"
 test "$(grep -Fxc 'reload nginx' "${CALL_LOG}")" = 2
@@ -68,7 +72,7 @@ TLS_CERT="${TMP_ROOT}/test-agent.crt"
 TLS_KEY="${TMP_ROOT}/test-agent.key"
 : >"${TLS_CERT}"
 : >"${TLS_KEY}"
-write_env single '122.233.30.114:8080'
+write_env single '122.233.30.114:8080' '443'
 {
   printf 'TEST_AGENT_NGINX_TLS_ENABLED=true\n'
   printf 'TEST_AGENT_NGINX_TLS_CERTIFICATE=%s\n' "${TLS_CERT}"
@@ -76,6 +80,7 @@ write_env single '122.233.30.114:8080'
 } >>"${ENV_FILE}"
 run_configure
 grep -Fq 'listen 80 ssl;' "${CONF_PATH}"
+grep -Fq 'listen 443 ssl;' "${CONF_PATH}"
 grep -Fq "ssl_certificate ${TLS_CERT};" "${CONF_PATH}"
 
 CUSTOM_ROOT="${TMP_ROOT}/custom-nginx"
@@ -115,6 +120,12 @@ grep -Fq -- "-p ${CUSTOM_ROOT}/ -c ${CUSTOM_MAIN_CONF} -s reload" "${CUSTOM_CALL
 write_env single '122.233.30.4:8080,122.233.30.114:8080'
 if PATH="${FAKE_BIN}:${PATH}" bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${ENV_FILE}" --validate-only; then
   echo "single mode unexpectedly accepted multiple backends" >&2
+  exit 1
+fi
+
+write_env multi '122.233.30.4:8080,122.233.30.114:8080' '9996,80'
+if PATH="${FAKE_BIN}:${PATH}" bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${ENV_FILE}" --validate-only; then
+  echo "duplicate additional listen port was unexpectedly accepted" >&2
   exit 1
 fi
 
