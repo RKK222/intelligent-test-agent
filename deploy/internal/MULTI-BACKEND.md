@@ -111,20 +111,18 @@ sha256sum -c test-agent-internal-release.zip.sha256
 unzip -t test-agent-internal-release.zip
 ```
 
-如果需要先按现有现场生成无占位符的逐机配置和操作脚本，可把 ZIP 内的采集脚本单独导出到三台机器：
+如果需要先按现有现场生成无占位符的逐机配置和操作脚本，只需把独立采集脚本复制到三台机器，
+不需要上传或解压完整发布包：
 
 ```bash
-unzip -p /data/0709/test-agent-internal-release.zip \
-  deploy/internal/collect-multi-backend-context.sh \
-  >/data/0709/collect-multi-backend-context.sh
 chmod 0700 /data/0709/collect-multi-backend-context.sh
 ```
 
 然后在 `.2` 使用 `frontend` 角色，在 `.4`、`.114` 使用 `backend` 角色，并显式传入
-`--include-sensitive`。该模式按现场原样采集密码、token、Cookie/Authorization 日志、部署 JAR、
-JAR 内 RSA 私钥、systemd/Docker/Nginx 信息及已部署前端，输出权限为 `0600` 的 `SENSITIVE` 归档；
-完整命令和内容清单见 [企业内部署文档入口](README.md#现场上下文完整敏感采集)。采集只读运行状态，
-不会改变配置或重启服务；分析完成后必须删除不再需要的敏感副本。
+`--include-sensitive`。该模式只采集原始 env、后台身份/systemd unit 和 Nginx 配置，保留其中的密码、
+token，但不采集 JAR/RSA、日志、Docker、programs、worker 镜像、业务数据或前端文件；输出权限为
+`0600`，且强制不超过 `1 MiB`。完整命令和内容清单见
+[企业内部署文档入口](README.md#现场配置轻量敏感采集)。采集不会改变配置或重启服务。
 
 ## 4. 每个后台的 backend.env
 

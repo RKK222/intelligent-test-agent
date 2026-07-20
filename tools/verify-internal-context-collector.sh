@@ -16,9 +16,8 @@ FAKE_BIN="${TMP_ROOT}/bin"
 mkdir -p \
   "${INSTALL_ROOT}/config" \
   "${INSTALL_ROOT}/data" \
-  "${INSTALL_ROOT}/dist/backend/lib" \
-  "${INSTALL_ROOT}/frontend/assets" \
-  "${NGINX_HOME}/sbin" \
+  "${INSTALL_ROOT}/dist/backend" \
+  "${INSTALL_ROOT}/frontend" \
   "${NGINX_HOME}/conf" \
   "${NGINX_HOME}/logs" \
   "${OUTPUT_DIR}" \
@@ -38,101 +37,40 @@ printf '%s\n' \
   >"${INSTALL_ROOT}/config/docker.env"
 printf 'test-agent-backend-122-233-30-4\n' >"${INSTALL_ROOT}/data/.serverid"
 printf '122.233.30.4\n' >"${INSTALL_ROOT}/data/.serverhost"
-
-JAR_ROOT="${TMP_ROOT}/jar-root"
-mkdir -p "${JAR_ROOT}/BOOT-INF/classes"
-printf '%s\n' \
-  '-----BEGIN PRIVATE KEY-----' \
-  'rsa-private-key-raw' \
-  '-----END PRIVATE KEY-----' \
-  >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.key"
-(cd "${JAR_ROOT}" && zip -qr "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" .)
-printf 'fake-library\n' >"${INSTALL_ROOT}/dist/backend/lib/example.jar"
+printf 'jar-must-not-be-collected\n' >"${INSTALL_ROOT}/dist/backend/test-agent-app.jar"
+printf 'frontend-must-not-be-collected\n' >"${INSTALL_ROOT}/frontend/index.html"
+printf 'logs-must-not-be-collected\n' >"${NGINX_HOME}/logs/error.log"
 
 printf '%s\n' \
   'TEST_AGENT_NGINX_MODE=single' \
   'TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080' \
-  "TEST_AGENT_NGINX_BIN=${NGINX_HOME}/sbin/nginx" \
-  "TEST_AGENT_NGINX_PREFIX=${NGINX_HOME}" \
   "TEST_AGENT_NGINX_MAIN_CONF=${NGINX_HOME}/conf/nginx.conf" \
   "TEST_AGENT_NGINX_CONF_PATH=${NGINX_HOME}/conf/test-agent.conf" \
   'TEST_AGENT_NGINX_PRIVATE_TOKEN=nginx-token-raw' \
   >"${INSTALL_ROOT}/config/nginx.env"
 printf 'events {}\nhttp { include %s; }\n' "${NGINX_HOME}/conf/test-agent.conf" \
   >"${NGINX_HOME}/conf/nginx.conf"
-printf 'server { listen 80; location /api { proxy_pass http://122.233.30.114:8080; } }\n' \
+printf 'server { listen 80; proxy_pass http://122.233.30.114:8080; }\n' \
   >"${NGINX_HOME}/conf/test-agent.conf"
-printf '<html>deployed frontend</html>\n' >"${INSTALL_ROOT}/frontend/index.html"
-printf 'frontend asset\n' >"${INSTALL_ROOT}/frontend/assets/app.js"
-printf 'cookie=frontend-cookie-raw\n' >"${NGINX_HOME}/logs/access.log"
-printf 'authorization=frontend-authorization-raw\n' >"${NGINX_HOME}/logs/error.log"
-
-cat >"${NGINX_HOME}/sbin/nginx" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ " \$* " == *" -T "* ]]; then
-  printf '# configuration file %s:\n' '${NGINX_HOME}/conf/nginx.conf'
-  cat '${NGINX_HOME}/conf/nginx.conf'
-  printf '# configuration file %s:\n' '${NGINX_HOME}/conf/test-agent.conf'
-  cat '${NGINX_HOME}/conf/test-agent.conf'
-fi
-EOF
-chmod +x "${NGINX_HOME}/sbin/nginx"
 
 cat >"${FAKE_BIN}/systemctl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == "show" ]]; then
-  printf '%s\n' \
-    'LoadState=loaded' \
-    'ActiveState=active' \
-    'MainPID=1234' \
-    'ExecStart={ path=/usr/bin/java ; argv[]=/usr/bin/java -jar /data/testagent/dist/backend/test-agent-app.jar ; }'
-else
-  printf '%s\n' \
-    '[Service]' \
-    'Environment=UNIT_SECRET=unit-secret-raw' \
-    'ExecStart=/usr/bin/java -jar /data/testagent/dist/backend/test-agent-app.jar'
-fi
+printf '%s\n' \
+  '[Service]' \
+  'Environment=UNIT_SECRET=unit-secret-raw' \
+  'EnvironmentFile=/data/testagent/config/backend.env' \
+  'ExecStart=/usr/bin/java -jar /data/testagent/dist/backend/test-agent-app.jar'
 EOF
-cat >"${FAKE_BIN}/journalctl" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf 'backend business log token=journal-token-raw\n'
-EOF
-cat >"${FAKE_BIN}/docker" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  --version) printf 'Docker version test\n' ;;
-  ps) printf 'test-agent-opencode-worker running\n' ;;
-  images) printf 'test-agent-opencode-worker:internal image-id\n' ;;
-  inspect) printf '[{"Config":{"Env":["TOKEN=docker-inspect-token-raw"]}}]\n' ;;
-  logs) printf 'worker business log cookie=docker-log-cookie-raw\n' ;;
-  *) printf 'fake docker command\n' ;;
-esac
-EOF
-cat >"${FAKE_BIN}/ss" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf 'LISTEN 0 128 0.0.0.0:8080 0.0.0.0:* users:(("java",pid=1234,fd=1))\n'
-EOF
-cat >"${FAKE_BIN}/java" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf 'openjdk version "21-test"\n' >&2
-EOF
-chmod +x "${FAKE_BIN}/systemctl" "${FAKE_BIN}/journalctl" \
-  "${FAKE_BIN}/docker" "${FAKE_BIN}/ss" "${FAKE_BIN}/java"
+chmod +x "${FAKE_BIN}/systemctl"
 
 COLLECTOR="${ROOT_DIR}/deploy/internal/collect-multi-backend-context.sh"
 if PATH="${FAKE_BIN}:${PATH}" bash "${COLLECTOR}" backend \
   --output-dir "${OUTPUT_DIR}" \
   --install-root "${INSTALL_ROOT}" \
   --nginx-home "${NGINX_HOME}" \
-  --node-label test-backend \
-  --skip-network; then
-  echo 'Collector unexpectedly accepted a sensitive run without explicit consent' >&2
+  --node-label test-backend; then
+  echo 'Collector unexpectedly accepted raw secrets without explicit consent' >&2
   exit 1
 fi
 
@@ -141,18 +79,12 @@ PATH="${FAKE_BIN}:${PATH}" bash "${COLLECTOR}" backend \
   --output-dir "${OUTPUT_DIR}" \
   --install-root "${INSTALL_ROOT}" \
   --nginx-home "${NGINX_HOME}" \
-  --node-label test-backend \
-  --all-logs \
-  --skip-network
+  --node-label test-backend
 
 BACKEND_ARCHIVE="$(find "${OUTPUT_DIR}" -maxdepth 1 -type f \
-  -name 'test-agent-context-SENSITIVE-backend-test-backend-*.tar.gz' | head -n 1)"
+  -name 'test-agent-config-SENSITIVE-backend-test-backend-*.tar.gz' | head -n 1)"
 test -n "${BACKEND_ARCHIVE}"
-if command -v sha256sum >/dev/null 2>&1; then
-  (cd "${OUTPUT_DIR}" && sha256sum -c "$(basename "${BACKEND_ARCHIVE}").sha256")
-else
-  (cd "${OUTPUT_DIR}" && shasum -a 256 -c "$(basename "${BACKEND_ARCHIVE}").sha256")
-fi
+test "$(stat -f '%z' "${BACKEND_ARCHIVE}" 2>/dev/null || stat -c '%s' "${BACKEND_ARCHIVE}")" -le 1048576
 BACKEND_EXTRACT="${TMP_ROOT}/backend-extract"
 mkdir -p "${BACKEND_EXTRACT}"
 tar -C "${BACKEND_EXTRACT}" -xzf "${BACKEND_ARCHIVE}"
@@ -160,21 +92,17 @@ grep -Fq 'backend-db-password-raw' \
   "${BACKEND_EXTRACT}/files/data/testagent/config/backend.env"
 grep -Fq 'manager-token-raw' \
   "${BACKEND_EXTRACT}/files/data/testagent/config/docker.env"
-grep -Fq 'rsa-private-key-raw' \
-  "${BACKEND_EXTRACT}/files/data/testagent/dist/backend/rsa-private.key"
-test -f "${BACKEND_EXTRACT}/files/data/testagent/dist/backend/test-agent-app.jar"
-grep -Fq 'journal-token-raw' "${BACKEND_EXTRACT}/logs/test-agent-backend.log"
-grep -Fq 'docker-inspect-token-raw' \
-  "${BACKEND_EXTRACT}/commands/worker-inspect.json"
-grep -Fq 'docker-log-cookie-raw' \
-  "${BACKEND_EXTRACT}/logs/test-agent-opencode-worker.log"
 grep -Fq 'unit-secret-raw' \
-  "${BACKEND_EXTRACT}/commands/backend-systemd-unit.txt"
-
-if stat -f '%Lp' "${BACKEND_ARCHIVE}" >/dev/null 2>&1; then
-  test "$(stat -f '%Lp' "${BACKEND_ARCHIVE}")" = 600
-else
-  test "$(stat -c '%a' "${BACKEND_ARCHIVE}")" = 600
+  "${BACKEND_EXTRACT}/files/etc/systemd/system/test-agent-backend.effective.service"
+test -f "${BACKEND_EXTRACT}/files/data/testagent/data/.serverid"
+test -f "${BACKEND_EXTRACT}/files/data/testagent/data/.serverhost"
+test ! -e "${BACKEND_EXTRACT}/files/data/testagent/dist"
+test ! -e "${BACKEND_EXTRACT}/files/data/testagent/frontend"
+test ! -e "${BACKEND_EXTRACT}/files/data/apps/nginx/logs"
+if find "${BACKEND_EXTRACT}" -type f \( -name '*.jar' -o -name '*.log' -o -name '*rsa*' \) \
+  | grep -q .; then
+  echo 'Backend configuration archive contains a forbidden large or log file' >&2
+  exit 1
 fi
 
 PATH="${FAKE_BIN}:${PATH}" bash "${COLLECTOR}" frontend \
@@ -182,22 +110,45 @@ PATH="${FAKE_BIN}:${PATH}" bash "${COLLECTOR}" frontend \
   --output-dir "${OUTPUT_DIR}" \
   --install-root "${INSTALL_ROOT}" \
   --nginx-home "${NGINX_HOME}" \
-  --node-label test-frontend \
-  --skip-network
+  --node-label test-frontend
 
 FRONTEND_ARCHIVE="$(find "${OUTPUT_DIR}" -maxdepth 1 -type f \
-  -name 'test-agent-context-SENSITIVE-frontend-test-frontend-*.tar.gz' | head -n 1)"
+  -name 'test-agent-config-SENSITIVE-frontend-test-frontend-*.tar.gz' | head -n 1)"
 test -n "${FRONTEND_ARCHIVE}"
+test "$(stat -f '%z' "${FRONTEND_ARCHIVE}" 2>/dev/null || stat -c '%s' "${FRONTEND_ARCHIVE}")" -le 1048576
 FRONTEND_EXTRACT="${TMP_ROOT}/frontend-extract"
 mkdir -p "${FRONTEND_EXTRACT}"
 tar -C "${FRONTEND_EXTRACT}" -xzf "${FRONTEND_ARCHIVE}"
 grep -Fq 'nginx-token-raw' \
   "${FRONTEND_EXTRACT}/files/data/testagent/config/nginx.env"
 grep -Fq '122.233.30.114:8080' \
-  "${FRONTEND_EXTRACT}/commands/nginx-active-config.txt"
-grep -Fq 'deployed frontend' \
-  "${FRONTEND_EXTRACT}/files/data/testagent/frontend/index.html"
-grep -Fq 'frontend-cookie-raw' \
-  "${FRONTEND_EXTRACT}/files/data/apps/nginx/logs/access.log"
+  "${FRONTEND_EXTRACT}/files/data/apps/nginx/conf/test-agent.conf"
+test -f "${FRONTEND_EXTRACT}/files/data/apps/nginx/conf/nginx.conf"
+test ! -e "${FRONTEND_EXTRACT}/files/data/testagent/frontend"
+test ! -e "${FRONTEND_EXTRACT}/files/data/apps/nginx/logs"
 
-echo 'Sensitive backend/frontend deployment context collection verified'
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "${OUTPUT_DIR}" && sha256sum -c "$(basename "${BACKEND_ARCHIVE}").sha256")
+else
+  (cd "${OUTPUT_DIR}" && shasum -a 256 -c "$(basename "${BACKEND_ARCHIVE}").sha256")
+fi
+
+# 构造不可压缩的大配置，确认超过 1 MiB 时脚本删除归档并明确失败。
+LARGE_ROOT="${TMP_ROOT}/large-testagent"
+LARGE_OUTPUT="${TMP_ROOT}/large-output"
+mkdir -p "${LARGE_ROOT}/config" "${LARGE_ROOT}/data" "${LARGE_OUTPUT}"
+dd if=/dev/urandom bs=1048576 count=2 2>/dev/null | base64 \
+  >"${LARGE_ROOT}/config/backend.env"
+printf 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=value\n' >"${LARGE_ROOT}/config/docker.env"
+if PATH="${FAKE_BIN}:${PATH}" bash "${COLLECTOR}" backend \
+  --include-sensitive \
+  --output-dir "${LARGE_OUTPUT}" \
+  --install-root "${LARGE_ROOT}" \
+  --nginx-home "${NGINX_HOME}" \
+  --node-label oversized; then
+  echo 'Collector unexpectedly accepted an archive larger than 1 MiB' >&2
+  exit 1
+fi
+test -z "$(find "${LARGE_OUTPUT}" -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
+
+echo 'Configuration-only backend/frontend collection and 1 MiB limit verified'

@@ -5,18 +5,18 @@
 
 ## Entries
 
-### 2026-07-20 - 增加双后台现场完整敏感采集包
+### 2026-07-20 - 增加双后台现场轻量配置采集包
 
 - Why:
-  - 用户希望先把 `.2/.4/.114` 的现场配置和运行证据完整交回，再由本机按真实密码、token、JAR 内 RSA、systemd/Docker/Nginx 和日志生成无占位符部署脚本，避免人工逐项核对。
+  - 用户最终要求只交回 `.2/.4/.114` 的现场配置，保留真实密码/token 以便生成无占位符部署脚本，但排除 JAR、RSA、日志等大文件，并把每台导出包控制在 `1 MiB` 内。
 - What:
-  - 新增 `deploy/internal/collect-multi-backend-context.sh`，以 `frontend/backend` 角色只读采集；必须显式传 `--include-sensitive`，原样包含 env、部署 JAR、提取的内置 RSA、systemd unit、Docker inspect、Java/worker/Nginx 日志和已部署前端；现场命令用 `--all-logs` 收集全部可用日志。
-  - 输出 `0600` 的 `SENSITIVE` tar.gz 与可搬移 SHA 文件；同步企业部署入口和多后台操作手册，并增加隔离 fixture 回归。
+  - `deploy/internal/collect-multi-backend-context.sh` 以 `frontend/backend` 角色只读采集：后台为原始 `backend.env/docker.env`、身份文件和 systemd 有效 unit，前端为原始 `nginx.env`、主配置和 `test-agent.conf`。
+  - 输出 `0600` 的 `SENSITIVE` tar.gz 与可搬移 SHA 文件，强制压缩包不超过 `1 MiB`；明确排除 JAR/lib、RSA、日志、Docker、programs、worker 镜像、业务数据和已部署前端。
 - How:
-  - dotenv 仅按文本读取、不 source；采集命令不调用 start/stop/restart。隔离回归验证原始密码/token/RSA/Cookie/Authorization 日志实际入包、无显式开关时拒绝、两种角色结构和权限正确。
+  - dotenv 仅按文本读取、不 source；采集命令不调用 start/stop/restart。隔离回归验证原始密码/token 入包、禁止项不入包、无显式开关时拒绝、两种角色结构、SHA 和 `1 MiB` 超限删除行为。
 - Result:
-  - Shell 语法、敏感采集回归、AI 文档、diff 校验通过；加入全量日志选项后重新生成全量企业 ZIP，SHA256 为 `a1b222c7d32544dccc6a5bcfe7d6733b53f5d08485dad2981fc7ddc622a08a87`，包内采集脚本、JAR RSA、`.4/.114` 后台及 `.2` 前端预检通过。
-  - 未修改 API、RunEvent、数据库、环境配置或 generated SDK；尚未在企业三台服务器执行采集或部署，敏感归档需按受控交付物处理。
+  - Shell 语法、配置采集回归、AI 文档和 diff 校验通过；独立脚本可直接复制到三台服务器，不要求重新传完整企业 ZIP。
+  - 未修改 API、RunEvent、数据库、环境配置或 generated SDK；尚未在企业三台服务器执行采集或部署，配置包仍包含真实凭据，需按受控交付物处理。
 
 ### 2026-07-20 - 确认企业单后台回退实际生效时间
 
