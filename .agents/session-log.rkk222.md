@@ -10,12 +10,12 @@
 - Why:
   - 企业双后台现场同时出现公共 Git 凭据 `RSA decryption failed`、新增 `.4` 引用资产指针核验失败和 RunEvent SSE 必现断流，需要区分部署数据、节点网络与代码问题。
 - What:
-  - 两台磁盘 RSA 私钥摘要已由现场确认一致，但仍需通过无鉴权公钥接口比较当前 Java 进程实际加载公钥；若进程公钥一致，现有数据库 SSH key 即为旧 RSA 密文，需要用户删除后重新添加。
+  - 两台磁盘 RSA 私钥和当前 Java 进程公钥已由现场确认一致；`.114` 日志同时证明 08:45 仍加载旧 classpath RSA，10:58 才切换到当前持久 RSA，因此此前保存的数据库 SSH key 是旧 RSA 密文，需要用户删除后重新添加。
   - `.4` 的引用根目录只有平台创建的 `.reference-repository-locks`，目标仓库目录尚不存在，不是残留坏仓库；修复凭据后应从前端仓库卡片触发同步，让后端临时 clone 后原子落位，不能用只读“刷新 Git 指针”代替同步。
 - How:
   - 现场已验证 `.4/.114` 身份文件和 advertised host 正确、Java 均监听 `*:8080`、两台 Java 双向 readiness 为 `UP`、`.2` 可访问两台 readiness；Nginx 已加载两个 upstream，`/api/` 为 `proxy_buffering off` 且 `proxy_read_timeout=3600s`。
 - Result:
-  - 基础短连接网络和 Nginx SSE 参数已排除；RunEvent 必现断流尚未定位，下一步必须取得 `/runs/{runId}/events` 的实际 HTTP 状态、traceId、三入口流式 curl 结果及两台 Java 同一 runId 日志。当前没有证据要求重新打包或修改 API、事件、数据库、依赖和安全配置。
+  - `RSA decryption failed` 根因已定位为持久 RSA 切换前的历史 SSH 密文，不需要再改服务器私钥；基础短连接网络和 Nginx SSE 参数已排除。RunEvent 必现断流尚未定位，下一步必须取得 `/runs/{runId}/events` 的实际 HTTP 状态、traceId、三入口流式 curl 结果及两台 Java 同一 runId 日志。当前没有证据要求重新打包或修改 API、事件、数据库、依赖和安全配置。
 
 ### 2026-07-20 - 生成域名/IP同端口双后台企业包
 
