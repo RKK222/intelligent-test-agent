@@ -1,6 +1,6 @@
 ---
 name: enterprise-offline-deploy
-description: Use whenever the user asks about enterprise/internal/offline deployment, packaging on Mac, release artifacts, deploy/internal/package-release.sh, backend.env, docker.env, opencode-worker, opencode-manager, or how to deploy this project in a network-isolated enterprise environment. Always provide the full Mac packaging to offline enterprise deployment workflow and list which configuration files must be changed.
+description: Use whenever the user asks about enterprise/internal/offline deployment, packaging on Mac, release artifacts, enterprise staging-host transfer, deploy/internal/package-release.sh, backend.env, docker.env, opencode-worker, opencode-manager, or how to deploy this project in a network-isolated enterprise environment. Distinguish the external build Mac from the enterprise staging host, and always provide explicit step-by-step deployment instructions.
 ---
 
 # 企业内离线部署说明
@@ -11,6 +11,8 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 
 - 打包机是 Mac，允许联网，用来拉 Maven、pnpm、Docker base image、npm/opencode 包等构建依赖。
 - 企业内部署环境完全不能联网，只能接收 Mac 打好的交付物。
+- 当前现场通过 U 盘把完整交付物导入企业内部中转机；用户说文件已位于 `Desktop/mimoagent/0709` 时，该目录属于企业内部中转机，不是 Mac。后续 `scp` 从企业内部中转机发起。
+- Mac 只负责构建交付物。交付物已进入企业内部中转机后，不得再把现场传输步骤描述为“从 Mac scp”。
 - 企业内不使用 Docker Compose；`opencode-worker` 用 `deploy/internal/opencode-worker-docker.sh` 纯 Docker 命令管理。
 - 企业内不要使用根目录 `.env.local`、`.env.test` 作为生产配置。
 - Java 后端读取 `/data/testagent/config/backend.env`。
@@ -24,13 +26,25 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 
 回答企业内部署问题时，不要只给单条命令。必须覆盖：
 
-1. Mac 打包前提和打包命令。
+1. 说明 Mac 打包前提和当前完成状态；如果用户已把包导入企业内部中转机，明确该阶段已完成，从中转机校验和 `scp` 开始，不要求用户重跑 Mac 打包。
 2. 打包产物清单。
 3. 每个产物传到企业内哪台服务器、哪个路径。
 4. 企业内需要准备和修改的配置文件：`backend.env`、`docker.env`、必要时 `nginx.env` 或 Nginx conf。
 5. 启动/升级顺序：先 Java，确认 `.serverid/.serverhost`，再 worker。
 6. 验证命令和预期现象。
 7. `opencode-manager` 端口或连接报错时的优先排查点。
+
+## 现场操作说明偏好
+
+用户每次部署都需要一步一步的执行单，回答必须遵守：
+
+1. 每一步先写明当前操作机器，例如“企业内部中转机”“122.233.30.4 后台”“122.233.30.114 后台”“122.233.30.2 前端”。
+2. 明确写出进入的绝对目录、完整文件名和完整命令，不使用前后不一致的 `BASE`、`WORK` 等假定目录。
+3. 命令按实际顺序逐条给出，不用循环、批量伪代码或“同上”省略三台机器的操作。
+4. 每个关键命令后写预期输出或成功条件；任一步失败时明确要求停止，不继续下一台。
+5. 顺序固定为：中转机校验并 `scp` → `.4` 后台 → `.114` 后台 → `.2` 前端 → 浏览器业务验收；滚动部署有特殊前提时必须说明。
+6. 区分“外层 U 盘完整包”“内层完整发布 ZIP”“节点专属配置包”，明确每台服务器需要哪一对文件及落盘路径。
+7. 不要求用户回传真实数据库密码、token、Cookie、RSA 私钥或其他密钥；诊断输出只展示状态、长度或哈希。
 
 ## 标准目录
 
@@ -69,6 +83,8 @@ deploy/internal/dist/
 ```bash
 deploy/internal/package-release.sh --output-dir /path/to/dist
 ```
+
+以上命令只在外部联网 Mac 重新构建交付物时执行。包已通过 U 盘进入企业内部中转机后，现场步骤从中转机上的 SHA256 校验和 `scp` 开始。
 
 ## 打包产物
 
@@ -194,4 +210,4 @@ docker logs --tail 120 test-agent-opencode-worker
 
 ## 回答风格
 
-优先给可复制命令和明确检查项。涉及 token、数据库密码、模型密钥时使用占位符，不要要求用户把真实密钥发回聊天。
+优先给可复制的逐条命令和明确检查项。默认用户需要完整的一步步操作，不把多台服务器压缩成循环或省略步骤。涉及 token、数据库密码、模型密钥时使用占位符，不要要求用户把真实密钥发回聊天。
