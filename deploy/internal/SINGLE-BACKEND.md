@@ -534,7 +534,7 @@ docker logs --tail 200 test-agent-opencode-worker | \
 nc -vz ai-code.sdc.enterprise 9070
 ```
 
-预期 worker 日志出现 `manager config update applied`。再在管理页面确认一个 Java、一个 manager、一个容器均在线；初始化一个用户 OpenCode 进程后，用其实际动态端口检查：
+预期 worker 日志出现当前结构化事件 `event=manager_config_update status=applied`；旧版 worker 可能输出 `manager config update applied`，部署脚本兼容两者。再在管理页面确认一个 Java、一个 manager、一个容器均在线；初始化一个用户 OpenCode 进程后，用其实际动态端口检查：
 
 ```bash
 curl -fsS http://127.0.0.1:<实际端口>/global/health

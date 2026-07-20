@@ -124,4 +124,53 @@ if bash "${DEPLOY_SCRIPT}" frontend \
   exit 1
 fi
 
-echo 'Two-backend per-node validation, embedded RSA and secret redaction verified'
+# 用假的 systemctl/curl/docker 执行真实 --verify-only 分支，防止结构化 manager 日志被误报失败。
+VERIFY_INSTALL_ROOT="${TMP_ROOT}/verify-install"
+VERIFY_BIN="${TMP_ROOT}/verify-bin"
+mkdir -p "${VERIFY_INSTALL_ROOT}/config" "${VERIFY_INSTALL_ROOT}/data" \
+  "${VERIFY_INSTALL_ROOT}/dist/backend" "${VERIFY_BIN}"
+cp "${CONFIG_4}/backend.env" "${VERIFY_INSTALL_ROOT}/config/backend.env"
+cp "${CONFIG_4}/docker.env" "${VERIFY_INSTALL_ROOT}/config/docker.env"
+cp "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" \
+  "${VERIFY_INSTALL_ROOT}/dist/backend/test-agent-app.jar"
+printf 'test-agent-backend-122-233-30-4\n' >"${VERIFY_INSTALL_ROOT}/data/.serverid"
+printf '122.233.30.4\n' >"${VERIFY_INSTALL_ROOT}/data/.serverhost"
+
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${VERIFY_BIN}/systemctl"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${VERIFY_BIN}/curl"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'case "$1" in' \
+  '  inspect)' \
+  '    if [[ "$*" == *".State.Running"* ]]; then printf "true\n"; else printf "healthy\n"; fi' \
+  '    ;;' \
+  '  port)' \
+  '    printf "4096/tcp -> 0.0.0.0:4096\n4115/tcp -> 0.0.0.0:4115\n"' \
+  '    ;;' \
+  '  logs)' \
+  '    printf "%s\n" "${TEST_AGENT_WORKER_LOG_LINE}"' \
+  '    ;;' \
+  '  *) exit 1 ;;' \
+  'esac' >"${VERIFY_BIN}/docker"
+chmod +x "${VERIFY_BIN}/systemctl" "${VERIFY_BIN}/curl" "${VERIFY_BIN}/docker"
+
+verify_worker_log_format() {
+  local log_line="$1"
+  local output
+  output="$(PATH="${VERIFY_BIN}:${PATH}" \
+    TEST_AGENT_WORKER_LOG_LINE="${log_line}" \
+    bash "${DEPLOY_SCRIPT}" backend \
+      --install-root "${VERIFY_INSTALL_ROOT}" \
+      --backend-host 122.233.30.4 \
+      --verify-only 2>&1)"
+  grep -Fq 'Backend verification passed: host=122.233.30.4' <<<"${output}"
+}
+
+verify_worker_log_format \
+  'event=manager_config_update status=applied traceId=fixture previousMaxProcesses=20 appliedMaxProcesses=8 requestedMaxProcesses=8'
+verify_worker_log_format 'manager config update applied'
+grep -Fq "grep -E 'event=manager_config_update status=applied|manager config update applied'" \
+  "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh"
+
+echo 'Two-backend per-node validation, embedded RSA, secret redaction and manager log compatibility verified'

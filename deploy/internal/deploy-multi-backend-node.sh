@@ -415,8 +415,9 @@ verify_backend() {
   worker_ports="$(docker port test-agent-opencode-worker)"
   grep -Eq '^4096/tcp[[:space:]]+->' <<<"${worker_ports}"
   grep -Eq '^4115/tcp[[:space:]]+->' <<<"${worker_ports}"
+  # 当前 manager 输出结构化事件；保留旧文本兼容，避免升级期间把健康节点误报为失败。
   docker logs --tail 200 test-agent-opencode-worker 2>&1 \
-    | grep 'manager config update applied' >/dev/null
+    | grep -E 'event=manager_config_update status=applied|manager config update applied' >/dev/null
 
   printf 'Backend verification passed: host=%s id=%s peer=%s jar_sha256=%s\n' \
     "${BACKEND_HOST}" "${expected_server_id}" "${peer_host}" "${jar_digest}"

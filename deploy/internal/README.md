@@ -152,7 +152,7 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 2. 启动 Java，确认 health/readiness。
 3. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
 4. 导入 worker 镜像、解压 programs。
-5. 启动本机唯一 worker，等待 `manager config update applied`。
+5. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。
 6. 初始化本服务器公共 OpenCode 配置并验证用户进程。
 
 不要先启动 worker 再修 Java 身份文件。

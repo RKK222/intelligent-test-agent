@@ -182,7 +182,7 @@ curl -fsS http://<前端入口>/
 docker logs --tail 120 test-agent-opencode-worker
 ```
 
-worker 日志期望看到 `manager config update applied`。
+当前 worker 日志期望看到 `event=manager_config_update status=applied`；旧版可能输出 `manager config update applied`，部署验证必须兼容两种格式。
 
 ## 常见问题提醒
 

@@ -400,6 +400,9 @@ bash deploy-multi-backend-node.sh frontend --verify-only
 数据库密码和 token，权限与传输方式按敏感交付物处理。完整发布 ZIP 仍单独传输，逐机配置包不包含
 JAR、RSA、worker 镜像、programs、日志或业务数据。
 
+当前 manager 配置下发成功日志为 `event=manager_config_update status=applied`。逐机验证脚本同时兼容
+旧版 `manager config update applied`；不能只按旧文本判断当前结构化日志失败。
+
 ### 7.2 使用完整发布包中的标准脚本
 
 先部署后台 A `.4`：
