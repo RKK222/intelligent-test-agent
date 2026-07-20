@@ -25,9 +25,15 @@ public class XxlJobAdminHealthIndicator implements HealthIndicator {
         if (state.isUp()) {
             return Health.up().withDetail("port", properties.getAdmin().getPort()).build();
         }
-        return Health.down()
-                .withDetail("reason", state.failureReason())
-                .withDetail("checkedAt", state.checkedAt())
-                .build();
+        Health.Builder down = Health.down();
+        String reason = state.failureReason();
+        if (reason != null) {
+            down.withDetail("reason", reason);
+        }
+        // 子上下文首次启动尝试前尚无检查时间，不能把 null 交给 Spring Boot 4 的 Health.Builder。
+        if (state.checkedAt() != null) {
+            down.withDetail("checkedAt", state.checkedAt());
+        }
+        return down.build();
     }
 }

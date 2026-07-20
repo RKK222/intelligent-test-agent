@@ -21,6 +21,19 @@
   - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端 3000 与登录 CORS 正常、manager WebSocket 已连接。本次只改变 Git committer 邮箱规则和前端失败恢复状态，不新增或变更 HTTP/RunEvent/数据库/SQL/权限/generated SDK/环境配置。
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
+### 2026-07-20 - 修复 XXL Admin 初始健康状态空时间
+
+- Why:
+  - 合入 main 前重新执行完整 XXL integration 测试时，`XxlJobAdminHealthIndicatorTest` 暴露 Admin 首次启动尝试前 `checkedAt=null` 被传入 Spring Boot 4 `Health.Builder`，导致健康查询抛出 `IllegalArgumentException`。
+- What:
+  - XXL Admin 为 DOWN 且尚未完成首次检查时省略 `checkedAt` detail；保留初始安全原因、后续检查时间、独立 DOWN/UP 状态以及不参与平台 readiness 的既有语义。
+  - 回归测试显式要求初始健康查询不抛异常、返回 DOWN、保留“尚未启动”原因且不包含空 `checkedAt`。
+- How:
+  - TDD 先将运行时异常收敛为明确断言失败，再做空值条件化的最小修复；定向测试经历 RED→GREEN。
+  - 重新执行 `mvn -f backend/pom.xml -pl test-agent-xxl-job-integration -am -q clean test`，退出码 0；前端 `corepack pnpm test` 为 87 个文件、1430 passed / 1 skipped。
+- Result:
+  - 初始 Admin health 可稳定返回 DOWN，不再因尚无检查时间抛异常；不涉及 API、事件、数据库、配置、权限或文档契约变化。
+
 ### 2026-07-20 - 将平台周期任务迁移至 XXL-JOB 3.4.2
 
 - Why:
