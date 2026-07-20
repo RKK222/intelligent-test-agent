@@ -29,6 +29,7 @@
 11. 前端 `onRawMessage` 捕获的 RunEvent SSE `MessageEvent.data` 只用于页面“原始输出”观察副本；它与 HTTP 原始报文共用预缓存安全处理，递归脱敏所有层级、大小写不敏感的 `contextToken` 后再截断和缓存。该处理不改写交给 RunEvent reducer 的实际事件，但禁止原始 SSE 数据绕过脱敏直接进入调试缓存。
 12. Run 的 `storageMode` 由创建时 manifest 固定，活动期间禁止切换。manifest 缺失表示 legacy/旧数据；Redis 新模式运行态缺失或不可用时返回 `RUN_DETAILS_EXPIRED` / `RUNTIME_STATE_UNAVAILABLE`，不得回退数据库或 JVM 内存读取原始详情。
 13. 已认证前端以标量 `(runId, sessionId, token)` 标识单 Run fetch SSE，同一逻辑 Run 同时最多保留一条应用层订阅；Run 对象的 status 投影、冲突终态纠正和标题等待不得重建连接。终态先保留 500ms 稳定窗口，普通终态随后关闭，标题待定则复用原连接直到标题同步或 watch closed；连接内游标、事件去重与 transport reconnect 仍由公共 event-stream client 维护。
+14. 企业同源部署将前端 API base URL 显式配置为空，RunEvent 与用户级运行态 SSE 客户端必须保留 `/api/...` 相对地址交给浏览器按当前 origin 解析；不得用缺少 origin 的 `new URL("/api/...")` 构造地址。前后端分离部署仍使用配置的绝对 base URL。
 
 ## RunEvent 基础字段
 

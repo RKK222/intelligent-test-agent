@@ -136,6 +136,27 @@ describe("event-stream-client", () => {
     expect(received).toEqual(["message.part.delta"]);
   });
 
+  it("uses a same-origin relative RunEvent URL when base URL is explicitly empty", () => {
+    const source = new FakeEventSource();
+    let openedUrl = "";
+
+    const subscription = subscribeRunEvents({
+      baseUrl: "",
+      runId: "run_same_origin",
+      lastEventId: "9",
+      eventSourceFactory: (url) => {
+        openedUrl = url;
+        return source;
+      },
+      onEvent: () => undefined
+    });
+
+    expect(openedUrl).toBe(
+      "/api/internal/agent/opencode/runs/run_same_origin/events?lastEventId=9"
+    );
+    subscription.close();
+  });
+
   it("uses authenticated fetch for run events and keeps the server SSE id as reconnect cursor", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(sseResponse([
       "id: evt_durable_7\n",

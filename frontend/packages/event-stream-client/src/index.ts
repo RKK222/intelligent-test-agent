@@ -383,11 +383,13 @@ export function subscribeSessionRuntimeState(
 }
 
 function runEventsUrl(baseUrl: string, agentId: string, runId: string, lastEventId?: string) {
-  const url = new URL(`${baseUrl}/api/internal/agent/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/events`);
-  if (lastEventId && lastEventId.trim().length > 0) {
-    url.searchParams.set("lastEventId", lastEventId.trim());
+  const path = `${baseUrl}/api/internal/agent/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/events`;
+  const resumeEventId = lastEventId?.trim();
+  if (!resumeEventId) {
+    return path;
   }
-  return url.toString();
+  // 企业同源构建会显式传入空 baseUrl；此时必须保留相对 URL，不能交给缺少 origin 的 new URL()。
+  return `${path}?${new URLSearchParams({ lastEventId: resumeEventId }).toString()}`;
 }
 
 function sessionRuntimeStateEventsUrl(baseUrl: string) {
