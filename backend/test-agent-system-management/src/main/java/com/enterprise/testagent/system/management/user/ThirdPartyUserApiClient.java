@@ -31,6 +31,7 @@ public class ThirdPartyUserApiClient {
      */
     public Optional<UserManagementResponses.ThirdPartyUserInfoResponse> getUserByLoginName(String userId) {
         try {
+//            /user/getUserByLoginName
             String url = properties.getBaseUrl() + "/user/getUserByLoginName?userId=" + userId;
             HttpHeaders headers = new HttpHeaders();
             headers.set(HEADER_TOOL_ID, TOOL_ID_VALUE);
