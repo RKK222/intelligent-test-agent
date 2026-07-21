@@ -25,6 +25,9 @@ const apiClientMock = vi.hoisted(() => ({
   readWorkspaceAgentFile: vi.fn(),
   writePublicAgentFile: vi.fn(),
   writeWorkspaceAgentFile: vi.fn(),
+  uploadPublicAgentFile: vi.fn(),
+  uploadWorkspaceAgentFile: vi.fn(),
+  renamePublicAgentFile: vi.fn(),
   renameWorkspaceAgentFile: vi.fn(),
   deletePublicAgentFile: vi.fn(),
   deleteWorkspaceAgentFile: vi.fn(),
@@ -101,6 +104,9 @@ describe("AgentConfigPanel", () => {
     apiClientMock.readWorkspaceAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.writePublicAgentFile.mockResolvedValue(undefined);
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
+    apiClientMock.uploadPublicAgentFile.mockResolvedValue(undefined);
+    apiClientMock.uploadWorkspaceAgentFile.mockResolvedValue(undefined);
+    apiClientMock.renamePublicAgentFile.mockResolvedValue(undefined);
     apiClientMock.renameWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.deletePublicAgentFile.mockResolvedValue(undefined);
     apiClientMock.deleteWorkspaceAgentFile.mockResolvedValue(undefined);
@@ -213,10 +219,10 @@ describe("AgentConfigPanel", () => {
     expect(rootRows).toHaveLength(2);
     expect([...rootRows[0].querySelectorAll(".agent-root-actions > button, .agent-root-actions > .agent-more-menu-container > button")]
       .map((button) => button.getAttribute("aria-label")))
-      .toEqual(["在公共级根目录新建文件或文件夹", "更多操作", "Agent 配置更新（公共）"]);
+      .toEqual(["新建或上传公共配置", "更多操作", "Agent 配置更新（公共）"]);
     expect([...rootRows[1].querySelectorAll(".agent-root-actions > button")]
       .map((button) => button.getAttribute("aria-label")))
-      .toEqual(["在应用级根目录新建文件或文件夹", "初始化应用 Agent/Skill 配置包", "Agent 配置更新（应用）"]);
+      .toEqual(["新建或上传应用配置", "Agent 配置更新（应用）"]);
     await fireEvent.click(view.getByRole("button", { name: "Agent 配置更新（公共）" }));
     await waitFor(() => {
       const events = (view.emitted("personal-runtime-reload") ?? []) as unknown[][];
@@ -505,9 +511,11 @@ describe("AgentConfigPanel", () => {
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" }));
-    const dialog = await view.findByRole("dialog", { name: "初始化应用 Agent/Skill 配置包" });
+    await fireEvent.click(view.getByRole("button", { name: "新建或上传应用配置" }));
+    const dialog = await view.findByRole("dialog", { name: "新建或上传应用配置" });
+    await fireEvent.click(within(dialog).getByRole("radio", { name: "Agent" }));
     expect(within(dialog).getByRole("radio", { name: "Agent" }).getAttribute("aria-checked")).toBe("true");
+    expect(dialog.textContent).toContain("用于定义可选择、可调用的 Agent");
     await fireEvent.update(within(dialog).getByLabelText("Agent 名称"), "Payment Agent");
     await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
@@ -525,8 +533,8 @@ describe("AgentConfigPanel", () => {
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" }));
-    const dialog = await view.findByRole("dialog", { name: "初始化应用 Agent/Skill 配置包" });
+    await fireEvent.click(view.getByRole("button", { name: "新建或上传应用配置" }));
+    const dialog = await view.findByRole("dialog", { name: "新建或上传应用配置" });
     await fireEvent.click(within(dialog).getByRole("radio", { name: "Skill" }));
     expect(within(dialog).getByRole("radio", { name: "Skill" }).getAttribute("aria-checked")).toBe("true");
     await fireEvent.update(within(dialog).getByLabelText("Skill 名称"), "支付测试技能");
@@ -550,6 +558,68 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
   });
 
+  it("uploads application Agent configuration files from the shared create panel", async () => {
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
+    await fireEvent.click(view.getByRole("button", { name: "新建或上传应用配置" }));
+    const dialog = await view.findByRole("dialog", { name: "新建或上传应用配置" });
+    await fireEvent.click(within(dialog).getByRole("radio", { name: "上传" }));
+    expect(dialog.textContent).toContain("支持一次选择多个文件");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "选择文件" }));
+
+    const file = new File(["{}"], "opencode.jsonc", { type: "application/json" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("{}").buffer
+    });
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    await fireEvent.change(input!, { target: { files: [file] } });
+
+    await waitFor(() => expect(apiClientMock.uploadWorkspaceAgentFile).toHaveBeenCalledWith(
+      "wrk_1234567890abcdef",
+      "opencode.jsonc",
+      "e30=",
+      undefined
+    ));
+    await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
+      scope: "WORKSPACE",
+      paths: ["opencode.jsonc"]
+    }));
+  });
+
+  it("creates a public OpenCode Skill from the same root create dialog", async () => {
+    const { view } = renderPanel();
+
+    await view.findByText("worktree · change-agent-md · 测试服务器");
+    await fireEvent.click(view.getByRole("button", { name: "新建或上传公共配置" }));
+    const dialog = await view.findByRole("dialog", { name: "新建或上传公共配置" });
+    expect(within(dialog).getAllByRole("radio").map((button) => button.textContent?.trim()))
+      .toEqual(["文件", "文件夹", "上传", "Agent", "Skill"]);
+    await fireEvent.click(within(dialog).getByRole("radio", { name: "Skill" }));
+    await fireEvent.update(within(dialog).getByLabelText("Skill 名称"), "Shared Testing");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(apiClientMock.writePublicAgentFile).toHaveBeenCalledTimes(3));
+    expect(apiClientMock.writePublicAgentFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
+      ["skills/shared-testing/SKILL.md", expect.stringContaining("description: Shared Testing public skill")],
+      ["skills/shared-testing/rules/README.md", expect.stringContaining("shared public rule Markdown files")],
+      ["skills/shared-testing/templates/README.md", expect.stringContaining("shared public reusable output templates")]
+    ]);
+    expect(apiClientMock.writePublicAgentFile.mock.calls.every((call) =>
+      call[2] === "agw_1234567890abcdef" && call[3] === "linux-1"
+    )).toBe(true);
+    expect(String(apiClientMock.writePublicAgentFile.mock.calls[0]?.[1])).toContain("scope: public");
+    await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
+      scope: "PUBLIC",
+      paths: [
+        "skills/shared-testing/SKILL.md",
+        "skills/shared-testing/rules/README.md",
+        "skills/shared-testing/templates/README.md"
+      ]
+    }));
+  });
+
   it("creates a public Agent file in a selected directory and reports the Git mutation", async () => {
     apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => path === ""
       ? [{ path: "agents", name: "agents", type: "directory" }]
@@ -563,8 +633,8 @@ describe("AgentConfigPanel", () => {
       "agw_1234567890abcdef",
       "linux-1"
     ));
-    await fireEvent.click(view.getByRole("button", { name: "在 agents 中新建文件或文件夹" }));
-    const dialog = await view.findByRole("dialog", { name: "新建文件或文件夹" });
+    await fireEvent.click(view.getByRole("button", { name: "在 agents 中新建或上传文件" }));
+    const dialog = await view.findByRole("dialog", { name: "新建或上传文件" });
     expect(dialog.textContent).toContain("agents");
     await fireEvent.update(within(dialog).getByLabelText("文件名"), "review.md");
     await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
@@ -587,10 +657,10 @@ describe("AgentConfigPanel", () => {
     const { view } = renderPanel();
 
     await fireEvent.click(view.getByRole("button", { name: /^应用级/ }));
-    await fireEvent.click(await view.findByRole("button", { name: "在 skills 中新建文件或文件夹" }));
-    const dialog = await view.findByRole("dialog", { name: "新建文件或文件夹" });
+    await fireEvent.click(await view.findByRole("button", { name: "在 skills 中新建或上传文件" }));
+    const dialog = await view.findByRole("dialog", { name: "新建或上传文件" });
     expect(dialog.textContent).toContain("skills");
-    await fireEvent.click(within(dialog).getByRole("button", { name: "文件夹" }));
+    await fireEvent.click(within(dialog).getByRole("radio", { name: "文件夹" }));
     await fireEvent.update(within(dialog).getByLabelText("文件夹名"), "templates");
     await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
@@ -615,7 +685,7 @@ describe("AgentConfigPanel", () => {
     await fireEvent.click(await view.findByRole("button", { name: "agents" }));
     const fileRow = await view.findByRole("button", { name: "review.md" });
     await fireEvent.dblClick(fileRow);
-    const input = view.getByLabelText("重命名应用 Agent 文件");
+    const input = view.getByLabelText("重命名 Agent 文件");
     await fireEvent.update(input, "payment-review.md");
     await fireEvent.keyDown(input, { key: "Enter" });
 
@@ -638,6 +708,36 @@ describe("AgentConfigPanel", () => {
     ]]));
   });
 
+  it("renames a public Agent file through the same inline interaction", async () => {
+    apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => path === ""
+      ? [{ path: "agents", name: "agents", type: "directory" }]
+      : [{ path: "agents/public.md", name: "public.md", type: "file" }]);
+    const { view } = renderPanel();
+
+    await fireEvent.click(await view.findByRole("button", { name: "agents" }));
+    const fileRow = await view.findByRole("button", { name: "public.md" });
+    await fireEvent.dblClick(fileRow);
+    const input = view.getByLabelText("重命名 Agent 文件");
+    await fireEvent.update(input, "shared-review.md");
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(apiClientMock.renamePublicAgentFile).toHaveBeenCalledWith(
+      "agents/public.md",
+      "shared-review.md",
+      "agw_1234567890abcdef",
+      "linux-1"
+    ));
+    await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
+      scope: "PUBLIC",
+      paths: ["agents/public.md", "agents/shared-review.md"],
+      renamed: {
+        path: "agents/public.md",
+        nextPath: "agents/shared-review.md",
+        type: "file"
+      }
+    }));
+  });
+
   it("keeps public and application Agent files read-only for users without write permission", async () => {
     apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => path === ""
       ? [{ path: "agents", name: "agents", type: "directory" }]
@@ -658,9 +758,11 @@ describe("AgentConfigPanel", () => {
     await fireEvent.click(applicationFile);
     await fireEvent.dblClick(applicationFile);
 
-    expect(view.queryByLabelText("重命名应用 Agent 文件")).toBeNull();
+    expect(view.queryByLabelText("重命名 Agent 文件")).toBeNull();
     expect(apiClientMock.renameWorkspaceAgentFile).not.toHaveBeenCalled();
-    expect(view.queryByRole("button", { name: /新建文件或文件夹/ })).toBeNull();
+    expect(apiClientMock.renamePublicAgentFile).not.toHaveBeenCalled();
+    expect(view.queryByRole("button", { name: /新建或上传文件/ })).toBeNull();
+    expect(view.queryByRole("button", { name: /^新建或上传(公共|应用)配置$/ })).toBeNull();
     expect(view.queryByRole("button", { name: /删除/ })).toBeNull();
     const openedFiles = ((view.emitted("openFile") ?? []) as unknown[][]).map((event) => event[0]);
     expect(openedFiles).toEqual(expect.arrayContaining([

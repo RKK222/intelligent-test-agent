@@ -5,21 +5,30 @@ import { FilePlus2, Upload, X } from "lucide-vue-next";
 const props = withDefaults(defineProps<{
   /** 根目录在目标路径块中的业务名称。 */
   rootLabel?: string;
-  /** 工作空间允许上传；Agent 配置树只复用文件/文件夹创建。 */
+  /** 是否展示本机文件上传入口。 */
   allowUpload?: boolean;
+  /** Agent 配置根目录可额外创建 OpenCode Agent/Skill 标准模板。 */
+  allowAgentTemplates?: boolean;
+  /** 复用统一面板时允许调用方提供具体业务标题。 */
+  title?: string;
+  dialogLabel?: string;
 }>(), {
   rootLabel: "工作区根目录",
-  allowUpload: true
+  allowUpload: true,
+  allowAgentTemplates: false,
+  title: "",
+  dialogLabel: ""
 });
 
 const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
+  createAgentTemplate: [directory: string, name: string, type: "agent" | "skill"];
   requestUpload: [directory: string];
 }>();
 
 const visible = ref(false);
 const targetDirectory = ref("");
-const entryType = ref<"file" | "directory" | "upload">("file");
+const entryType = ref<"file" | "directory" | "upload" | "agent" | "skill">("file");
 const entryName = ref("");
 const errorMessage = ref("");
 const nameInput = ref<HTMLInputElement | null>(null);
@@ -55,8 +64,37 @@ function submit() {
     errorMessage.value = "名称不能包含路径分隔符";
     return;
   }
-  emit("createEntry", targetDirectory.value, name, entryType.value);
+  if (entryType.value === "agent" || entryType.value === "skill") {
+    if (!props.allowAgentTemplates) return;
+    emit("createAgentTemplate", targetDirectory.value, name, entryType.value);
+  } else {
+    emit("createEntry", targetDirectory.value, name, entryType.value);
+  }
   close();
+}
+
+const resolvedTitle = () => props.title || (props.allowUpload ? "新建或上传" : "新建");
+const resolvedDialogLabel = () => props.dialogLabel || (props.allowUpload ? "新建或上传文件" : "新建文件或文件夹");
+
+function entryLabel() {
+  if (entryType.value === "file") return "文件名";
+  if (entryType.value === "directory") return "文件夹名";
+  if (entryType.value === "agent") return "Agent 名称";
+  return "Skill 名称";
+}
+
+function entryPlaceholder() {
+  if (entryType.value === "file") return "例如：README.md";
+  if (entryType.value === "directory") return "例如：docs";
+  if (entryType.value === "agent") return "例如：支付测试 Agent";
+  return "例如：支付测试技能";
+}
+
+function entryHelp() {
+  if (entryType.value === "file") return "创建空白普通文件，由你自行编写内容；不会自动生成可调用的 Agent 或 Skill。";
+  if (entryType.value === "directory") return "创建普通目录，用于整理配置素材；不会生成 Agent 或 Skill 模板。";
+  if (entryType.value === "agent") return "按 OpenCode 模板创建 agents/<名称>.md，用于定义可选择、可调用的 Agent。";
+  return "按 OpenCode 模板创建 skills/<名称>/ 及 SKILL.md、rules、templates，用于封装可复用技能。";
 }
 
 defineExpose({ open });
@@ -73,14 +111,14 @@ defineExpose({ open });
       <section
         role="dialog"
         aria-modal="true"
-        :aria-label="allowUpload ? '新建或上传文件' : '新建文件或文件夹'"
+        :aria-label="resolvedDialogLabel()"
         class="ta-file-dialog"
       >
         <header class="ta-file-dialog-header">
           <div class="ta-file-dialog-heading">
             <span class="ta-file-dialog-icon"><FilePlus2 :size="16" :stroke-width="1.7" /></span>
             <div>
-              <h2>{{ allowUpload ? '新建或上传' : '新建' }}</h2>
+              <h2>{{ resolvedTitle() }}</h2>
               <p>选择要在当前目录执行的操作</p>
             </div>
           </div>
@@ -95,34 +133,62 @@ defineExpose({ open });
           </div>
           <div class="ta-file-dialog-field">
             <label>操作类型</label>
-            <div class="ta-file-dialog-segments" :class="{ 'has-upload': allowUpload }">
-              <button type="button" :class="{ 'is-active': entryType === 'file' }" @click="entryType = 'file'">
+            <div
+              role="radiogroup"
+              aria-label="操作类型"
+              class="ta-file-dialog-segments"
+              :class="{ 'has-upload': allowUpload, 'has-agent-templates': allowAgentTemplates }"
+            >
+              <button type="button" role="radio" :aria-checked="entryType === 'file'" :class="{ 'is-active': entryType === 'file' }" @click="entryType = 'file'">
                 文件
               </button>
-              <button type="button" :class="{ 'is-active': entryType === 'directory' }" @click="entryType = 'directory'">
+              <button type="button" role="radio" :aria-checked="entryType === 'directory'" :class="{ 'is-active': entryType === 'directory' }" @click="entryType = 'directory'">
                 文件夹
               </button>
               <button
                 v-if="allowUpload"
                 type="button"
+                role="radio"
+                :aria-checked="entryType === 'upload'"
                 :class="{ 'is-active': entryType === 'upload' }"
                 @click="entryType = 'upload'"
               >
                 上传
               </button>
+              <button
+                v-if="allowAgentTemplates"
+                type="button"
+                role="radio"
+                :aria-checked="entryType === 'agent'"
+                :class="{ 'is-active': entryType === 'agent' }"
+                @click="entryType = 'agent'"
+              >
+                Agent
+              </button>
+              <button
+                v-if="allowAgentTemplates"
+                type="button"
+                role="radio"
+                :aria-checked="entryType === 'skill'"
+                :class="{ 'is-active': entryType === 'skill' }"
+                @click="entryType = 'skill'"
+              >
+                Skill
+              </button>
             </div>
           </div>
           <div v-if="entryType !== 'upload'" class="ta-file-dialog-field">
-            <label :for="`new-entry-${entryType}`">{{ entryType === 'file' ? '文件名' : '文件夹名' }}</label>
+            <label :for="`new-entry-${entryType}`">{{ entryLabel() }}</label>
             <input
               :id="`new-entry-${entryType}`"
               ref="nameInput"
               v-model="entryName"
               type="text"
-              :placeholder="entryType === 'file' ? '例如：README.md' : '例如：docs'"
+              :placeholder="entryPlaceholder()"
               class="ta-file-dialog-input"
               @keydown.enter="submit"
             />
+            <span v-if="allowAgentTemplates" class="ta-file-dialog-help">{{ entryHelp() }}</span>
             <span v-if="errorMessage" class="ta-file-dialog-error">{{ errorMessage }}</span>
           </div>
           <div v-else class="ta-file-dialog-upload-note">
@@ -283,6 +349,10 @@ defineExpose({ open });
   grid-template-columns: repeat(3, 1fr);
 }
 
+.ta-file-dialog-segments.has-agent-templates {
+  grid-template-columns: repeat(5, 1fr);
+}
+
 .ta-file-dialog-segments button {
   min-height: 30px;
   border: 0;
@@ -321,6 +391,12 @@ defineExpose({ open });
 .ta-file-dialog-error {
   color: var(--ta-error, #9e3b34);
   font-size: 12px;
+}
+
+.ta-file-dialog-help {
+  color: var(--ta-muted, #7a7a7a);
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .ta-file-dialog-upload-note {

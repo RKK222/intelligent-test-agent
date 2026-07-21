@@ -2694,6 +2694,18 @@ describe("backend-api", () => {
         modifiedAt: "2026-06-26T09:00:00Z"
       }
     ]);
+    await expect(client.renamePublicAgentFile(
+      "opencode/agents/review.md",
+      "shared-review.md",
+      "agw_1234567890abcdef",
+      "linux-2"
+    )).resolves.toBeNull();
+    await expect(client.uploadPublicAgentFile(
+      "opencode/agents/icon.bin",
+      "AAEC/w==",
+      "agw_1234567890abcdef",
+      "linux-2"
+    )).resolves.toBeNull();
     await expect(client.deletePublicAgentFile(
       "opencode/agents/obsolete.md",
       "agw_1234567890abcdef",
@@ -2721,6 +2733,24 @@ describe("backend-api", () => {
       params: { scope: "PUBLIC", path: "opencode/agents", worktreeId: "agw_1234567890abcdef" }
     });
     expect(sockets[0]?.sentMessages[1]).toMatchObject({
+      op: "agent-config.rename",
+      params: {
+        scope: "PUBLIC",
+        path: "opencode/agents/review.md",
+        name: "shared-review.md",
+        worktreeId: "agw_1234567890abcdef"
+      }
+    });
+    expect(sockets[0]?.sentMessages[2]).toMatchObject({
+      op: "agent-config.upload",
+      params: {
+        scope: "PUBLIC",
+        path: "opencode/agents/icon.bin",
+        contentBase64: "AAEC/w==",
+        worktreeId: "agw_1234567890abcdef"
+      }
+    });
+    expect(sockets[0]?.sentMessages[3]).toMatchObject({
       op: "agent-config.delete",
       params: {
         scope: "PUBLIC",

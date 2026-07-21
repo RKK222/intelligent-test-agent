@@ -1023,6 +1023,20 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { path, content },
         { worktreeId, linuxServerId }
       ),
+    uploadPublicAgentFile: (path: string, contentBase64: string, worktreeId?: string | null, linuxServerId?: string | null) =>
+      agentConfigFileRpc<void>(
+        "PUBLIC",
+        "agent-config.upload",
+        { path, contentBase64 },
+        { worktreeId, linuxServerId }
+      ),
+    renamePublicAgentFile: (path: string, name: string, worktreeId?: string | null, linuxServerId?: string | null) =>
+      agentConfigFileRpc<void>(
+        "PUBLIC",
+        "agent-config.rename",
+        { path, name },
+        { worktreeId, linuxServerId }
+      ),
     deletePublicAgentFile: (path: string, worktreeId?: string | null, linuxServerId?: string | null) =>
       agentConfigFileRpc<void>(
         "PUBLIC",
@@ -1079,6 +1093,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         "WORKSPACE",
         "agent-config.write",
         { path, content },
+        { workspaceId, worktreeId }
+      ),
+    uploadWorkspaceAgentFile: (workspaceId: string, path: string, contentBase64: string, worktreeId?: string | null) =>
+      agentConfigFileRpc<void>(
+        "WORKSPACE",
+        "agent-config.upload",
+        { path, contentBase64 },
         { workspaceId, worktreeId }
       ),
     renameWorkspaceAgentFile: (workspaceId: string, path: string, name: string, worktreeId?: string | null) =>

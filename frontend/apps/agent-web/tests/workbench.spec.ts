@@ -1176,7 +1176,7 @@ test("application workspace mutation entries follow member and super administrat
 
   await page.getByRole("button", { name: "tests", exact: true }).hover();
   await expect(page.getByRole("button", { name: "新建或上传到此目录" }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "新建或上传应用配置" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "创建应用 worktree" })).toHaveCount(0);
 
   const superPage = await context.newPage();
@@ -1186,7 +1186,8 @@ test("application workspace mutation entries follow member and super administrat
   });
   await gotoWorkbench(superPage, { selectConversation: false });
 
-  await expect(superPage.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" })).toBeVisible();
+  await expect(superPage.getByRole("button", { name: "新建或上传公共配置" })).toBeVisible();
+  await expect(superPage.getByRole("button", { name: "新建或上传应用配置" })).toBeVisible();
   await expect(superPage.getByRole("button", { name: "创建应用 worktree" })).toHaveCount(0);
   await superPage.close();
 });

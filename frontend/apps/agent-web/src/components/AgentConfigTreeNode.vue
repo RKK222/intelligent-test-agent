@@ -158,7 +158,7 @@ function submitRename() {
         v-model="renameName"
         type="text"
         class="ta-file-tree-rename-input min-w-0 flex-1"
-        aria-label="重命名应用 Agent 文件"
+        aria-label="重命名 Agent 文件"
         @click.stop
         @keydown.enter.stop.prevent="submitRename"
         @keydown.esc.stop.prevent="cancelRename"
@@ -172,8 +172,8 @@ function submitRename() {
         v-if="isDirectory && (canCreateInDirectory?.(entry.path) ?? true)"
         type="button"
         class="agent-tree-action-btn"
-        :aria-label="`在 ${entry.name} 中新建文件或文件夹`"
-        title="新建文件或文件夹"
+        :aria-label="`在 ${entry.name} 中新建或上传文件`"
+        title="新建或上传文件"
         @click.stop="emit('createEntry', entry.path)"
       >
         <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />

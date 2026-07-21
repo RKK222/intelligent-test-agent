@@ -754,6 +754,19 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         fileService.writeContent(agentRoot.toString(), relativePath, content);
     }
 
+    /** 公共 Agent 上传复用工作空间文件服务的 Base64、大小、重名和路径安全校验。 */
+    public void uploadPublicAgentFile(String relativePath, String contentBase64, String worktreeId, UserId userId) {
+        Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
+        ensureDirectory(agentRoot);
+        fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
+    }
+
+    /** 公共 Agent 文件改名复用工作空间文件服务的同目录重命名与路径安全校验。 */
+    public void renamePublicAgentFile(String relativePath, String name, String worktreeId, UserId userId) {
+        Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
+        fileService.renameFile(agentRoot.toString(), relativePath, name);
+    }
+
     /** 公共 Agent 文件和目录删除复用工作空间文件服务的路径归一化与递归删除保护。 */
     public void deletePublicAgentFile(String relativePath, String worktreeId, UserId userId) {
         Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
@@ -810,6 +823,18 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
         ensureDirectory(agentRoot);
         fileService.writeContent(agentRoot.toString(), relativePath, content);
+    }
+
+    /** 应用 Agent 上传固定在可发布的 opencode.jsonc、agents 和 skills 白名单内。 */
+    public void uploadWorkspaceAgentFile(String workspaceId, String relativePath, String contentBase64, String worktreeId) {
+        if (workspaceAgentDisplayPath(workspaceAgentGitPath(relativePath)) == null) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "应用 Agent 配置只允许上传 opencode.jsonc、agents 或 skills 下的文件");
+        }
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        ensureDirectory(agentRoot);
+        fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
     }
 
     /** 应用 Agent 文件改名复用工作空间文件服务的同目录重命名与路径安全校验。 */

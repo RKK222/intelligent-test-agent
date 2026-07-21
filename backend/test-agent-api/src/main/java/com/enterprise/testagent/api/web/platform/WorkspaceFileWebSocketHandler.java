@@ -218,6 +218,10 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     agentConfigWrite(ticket, params);
                     yield null;
                 }
+                case "agent-config.upload" -> {
+                    agentConfigUpload(ticket, params);
+                    yield null;
+                }
                 case "agent-config.rename" -> {
                     agentConfigRename(ticket, params);
                     yield null;
@@ -367,10 +371,43 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         agentConfigService.writeWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), text(params, "content"), worktreeId);
     }
 
+    private void agentConfigUpload(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String scope = agentConfigScope(ticket, params);
+        String path = requiredText(params, "path");
+        String contentBase64 = text(params, "contentBase64");
+        if (SCOPE_PUBLIC.equals(scope)) {
+            if (!ticket.superAdmin()) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+            }
+            agentConfigService.uploadPublicAgentFile(
+                    path,
+                    contentBase64,
+                    agentConfigWorktreeId(ticket, params),
+                    ticketUserId(ticket));
+            return;
+        }
+        if (!ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用 Agent 配置仅应用管理员可编辑");
+        }
+        agentConfigService.uploadWorkspaceAgentFile(
+                agentConfigWorkspaceId(ticket, params),
+                path,
+                contentBase64,
+                agentConfigWorktreeId(ticket, params));
+    }
+
     private void agentConfigRename(WorkspaceFileSocketTicket ticket, JsonNode params) {
         String scope = agentConfigScope(ticket, params);
         if (SCOPE_PUBLIC.equals(scope)) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "公共 Agent 配置暂不支持重命名");
+            if (!ticket.superAdmin()) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+            }
+            agentConfigService.renamePublicAgentFile(
+                    requiredText(params, "path"),
+                    requiredText(params, "name"),
+                    agentConfigWorktreeId(ticket, params),
+                    ticketUserId(ticket));
+            return;
         }
         if (!ticket.appAdmin()) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "应用 Agent 配置仅应用管理员可编辑");

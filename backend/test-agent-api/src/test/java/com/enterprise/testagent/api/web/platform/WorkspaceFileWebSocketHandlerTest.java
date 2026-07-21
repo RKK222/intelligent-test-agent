@@ -91,6 +91,76 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void renamesPublicAgentFileThroughSuperAdminTicket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_public", "http://localhost:3000")).thenReturn(agentTicket(true, "PUBLIC", null, "agw_123"));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_public",
+                List.of("""
+                        {"id":"req_rename","op":"agent-config.rename","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"agents/review.md","name":"shared-review.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(1).allSatisfy(message ->
+                assertThat(message).contains("\"id\":\"req_rename\"", "\"type\":\"result\""));
+        verify(agentConfigService).renamePublicAgentFile(
+                "agents/review.md",
+                "shared-review.md",
+                "agw_123",
+                new UserId("usr_admin"));
+    }
+
+    @Test
+    void uploadsPublicAgentFileThroughSuperAdminTicket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_public", "http://localhost:3000")).thenReturn(agentTicket(true, "PUBLIC", null, "agw_123"));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_public",
+                List.of("""
+                        {"id":"req_upload","op":"agent-config.upload","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"agents/icon.bin","contentBase64":"AAEC/w=="}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(1).allSatisfy(message ->
+                assertThat(message).contains("\"id\":\"req_upload\"", "\"type\":\"result\""));
+        verify(agentConfigService).uploadPublicAgentFile(
+                "agents/icon.bin",
+                "AAEC/w==",
+                "agw_123",
+                new UserId("usr_admin"));
+    }
+
+    @Test
+    void uploadsWorkspaceAgentFileThroughAppAdminTicket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_workspace_agent", "http://localhost:3000"))
+                .thenReturn(workspaceAgentTicket(true));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace_agent",
+                List.of("""
+                        {"id":"req_upload","op":"agent-config.upload","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef","path":"skills/payment/example.json","contentBase64":"e30="}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(1).allSatisfy(message ->
+                assertThat(message).contains("\"id\":\"req_upload\"", "\"type\":\"result\""));
+        verify(agentConfigService).uploadWorkspaceAgentFile(
+                "wrk_1234567890abcdef",
+                "skills/payment/example.json",
+                "e30=",
+                null);
+    }
+
+    @Test
     void deletesWorkspaceAgentFileWhenTicketHasAppAdminPermission() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
@@ -125,16 +195,22 @@ class WorkspaceFileWebSocketHandlerTest {
                         {"id":"req_1","op":"agent-config.write","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"review.md","content":"changed"}}
                         """, """
                         {"id":"req_2","op":"agent-config.delete","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"review.md"}}
+                        """, """
+                        {"id":"req_3","op":"agent-config.rename","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"review.md","name":"renamed.md"}}
+                        """, """
+                        {"id":"req_4","op":"agent-config.upload","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"review.bin","contentBase64":"AA=="}}
                         """));
 
         handler.handle(session).block();
 
-        assertThat(session.sentText()).hasSize(2).allSatisfy(message -> {
+        assertThat(session.sentText()).hasSize(4).allSatisfy(message -> {
             assertThat(message).contains("\"type\":\"error\"");
             assertThat(message).contains("\"code\":\"FORBIDDEN\"");
         });
         verify(agentConfigService, never()).writePublicAgentFile("review.md", "changed", "agw_123", new UserId("usr_admin"));
         verify(agentConfigService, never()).deletePublicAgentFile("review.md", "agw_123", new UserId("usr_admin"));
+        verify(agentConfigService, never()).renamePublicAgentFile("review.md", "renamed.md", "agw_123", new UserId("usr_admin"));
+        verify(agentConfigService, never()).uploadPublicAgentFile("review.bin", "AA==", "agw_123", new UserId("usr_admin"));
     }
 
     @Test
@@ -174,11 +250,13 @@ class WorkspaceFileWebSocketHandlerTest {
                 "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace_agent",
                 List.of("""
                         {"id":"req_rename","op":"agent-config.rename","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef","path":"agents/review.md","name":"payment-review.md"}}
+                        """, """
+                        {"id":"req_upload","op":"agent-config.upload","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef","path":"agents/icon.bin","contentBase64":"AA=="}}
                         """));
 
         handler.handle(session).block();
 
-        assertThat(session.sentText()).hasSize(1).allSatisfy(message -> {
+        assertThat(session.sentText()).hasSize(2).allSatisfy(message -> {
             assertThat(message).contains("\"type\":\"error\"");
             assertThat(message).contains("\"code\":\"FORBIDDEN\"");
         });
@@ -186,6 +264,11 @@ class WorkspaceFileWebSocketHandlerTest {
                 "wrk_1234567890abcdef",
                 "agents/review.md",
                 "payment-review.md",
+                null);
+        verify(agentConfigService, never()).uploadWorkspaceAgentFile(
+                "wrk_1234567890abcdef",
+                "agents/icon.bin",
+                "AA==",
                 null);
     }
 

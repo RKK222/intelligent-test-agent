@@ -931,13 +931,19 @@ class AgentConfigApplicationServiceTest {
 
         List<FileTreeEntryResponse> entries = service.listWorkspaceAgentFiles("wrk_project", "agents", null);
         service.writeWorkspaceAgentFile("wrk_project", "agents/new.md", "new agent", null);
+        service.uploadWorkspaceAgentFile("wrk_project", "agents/icon.bin", "AAEC/w==", null);
         service.renameWorkspaceAgentFile("wrk_project", "agents/review.md", "payment-review.md", null);
 
         assertThat(entries).extracting(FileTreeEntryResponse::name).contains("review.md");
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/new.md"))).isEqualTo("new agent");
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/payment-review.md"))).isEqualTo("review");
+        assertThat(Files.readAllBytes(workspaceRoot.resolve(".opencode/agents/icon.bin")))
+                .containsExactly((byte) 0, (byte) 1, (byte) 2, (byte) 255);
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/review.md"))).isFalse();
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agent/new.md"))).isFalse();
+        assertThatThrownBy(() -> service.uploadWorkspaceAgentFile("wrk_project", "package.json", "e30=", null))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("只允许上传");
         service.deleteWorkspaceAgentFile("wrk_project", "agents/new.md", null);
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/new.md"))).isFalse();
     }
@@ -1111,6 +1117,43 @@ class AgentConfigApplicationServiceTest {
                 ADMIN);
 
         assertThat(git.discardedFiles).containsExactly("opencode/agents/review.md", "opencode/skills/case/SKILL.md");
+    }
+
+    @Test
+    void publicAgentFileRenameUsesOwnedPersonalWorktree() throws Exception {
+        Path worktreeRoot = root.resolve(".configdev/public-usr_admin");
+        Files.createDirectories(worktreeRoot.resolve("opencode/agents"));
+        Files.writeString(worktreeRoot.resolve("opencode/agents/review.md"), "review");
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_rename",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                worktreeRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+
+        service.renamePublicAgentFile("agents/review.md", "shared-review.md", "agw_public_rename", ADMIN);
+        service.uploadPublicAgentFile("agents/icon.bin", "AAEC/w==", "agw_public_rename", ADMIN);
+
+        assertThat(Files.readString(worktreeRoot.resolve("opencode/agents/shared-review.md"))).isEqualTo("review");
+        assertThat(Files.readAllBytes(worktreeRoot.resolve("opencode/agents/icon.bin")))
+                .containsExactly((byte) 0, (byte) 1, (byte) 2, (byte) 255);
+        assertThat(Files.exists(worktreeRoot.resolve("opencode/agents/review.md"))).isFalse();
     }
 
     @Test

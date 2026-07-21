@@ -84,7 +84,10 @@ const activeScope = ref<Scope | null>(null);
 const activeFileByScope = ref<Record<Scope, string | null>>({ PUBLIC: null, WORKSPACE: null });
 const diffFiles = ref<AgentConfigDiffFile[]>([]);
 const createEntryDialog = ref<InstanceType<typeof FileEntryCreateDialog> | null>(null);
+const rootCreateEntryDialog = ref<InstanceType<typeof FileEntryCreateDialog> | null>(null);
 const createEntryScope = ref<Scope>("WORKSPACE");
+const uploadDirectory = ref("");
+const uploadInput = ref<HTMLInputElement | null>(null);
 const deleteEntryDialog = ref<InstanceType<typeof FileEntryDeleteDialog> | null>(null);
 const deleteEntryScope = ref<Scope>("WORKSPACE");
 const publicConflictPathHints = ref<string[]>([]);
@@ -324,8 +327,9 @@ function canDeleteEntry(scope: Scope, path: string) {
 
 function canRenameEntry(scope: Scope, path: string) {
   const normalized = path.replace(/^\/+|\/+$/g, "");
-  return scope === "WORKSPACE"
-    && (normalized.startsWith("agents/") || normalized.startsWith("skills/"));
+  return scope === "PUBLIC"
+    || normalized.startsWith("agents/")
+    || normalized.startsWith("skills/");
 }
 
 /** 文件和目录沿用工作空间删除确认面板，作用域仅负责补齐 Agent 文件路由。 */
@@ -377,18 +381,23 @@ async function createAgentEntry(directory: string, name: string, type: "file" | 
   }
 }
 
-/** 应用 Agent 文件沿用普通文件树的双击行内改名交互，落盘仍走专用 Agent 配置 RPC。 */
-async function renameAgentEntry(path: string, name: string) {
-  const scope: Scope = "WORKSPACE";
-  if (!props.workspaceId || !canWriteScope(scope) || busy.value || !canRenameEntry(scope, path)) return;
+/** 公共/应用 Agent 文件共用普通文件树的双击行内改名交互与专用 Agent 配置 RPC。 */
+async function renameAgentEntry(scope: Scope, path: string, name: string) {
+  if (!canWriteScope(scope) || busy.value || !canRenameEntry(scope, path)) return;
+  if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
+  if (scope === "WORKSPACE" && !props.workspaceId) return;
   const parent = parentDirectory(path);
   const nextPath = agentEntryPath(parent, name);
   busy.value = true;
   errorMessage.value = "";
   try {
-    await api.renameWorkspaceAgentFile(props.workspaceId, path, name, worktreeId(scope));
-    if (activeFileByScope.value.WORKSPACE === path) {
-      activeFileByScope.value = { ...activeFileByScope.value, WORKSPACE: nextPath };
+    if (scope === "PUBLIC") {
+      await api.renamePublicAgentFile(path, name, worktreeId(scope), await publicFileLinuxServerId());
+    } else {
+      await api.renameWorkspaceAgentFile(props.workspaceId!, path, name, worktreeId(scope));
+    }
+    if (activeFileByScope.value[scope] === path) {
+      activeFileByScope.value = { ...activeFileByScope.value, [scope]: nextPath };
     }
     await loadDirectory(scope, parent, true);
     emit("files-mutated", {
@@ -396,10 +405,11 @@ async function renameAgentEntry(path: string, name: string) {
       paths: [path, nextPath],
       renamed: { path, nextPath, type: "file" }
     });
-    notifySuccess("应用 Agent 文件已重命名", nextPath);
+    notifySuccess(`${scope === "PUBLIC" ? "公共" : "应用"} Agent 文件已重命名`, nextPath);
   } catch (error) {
-    errorMessage.value = formatAgentConfigError(error, "重命名应用 Agent 文件失败");
-    notifyError("重命名应用 Agent 文件失败", errorMessage.value);
+    const action = `重命名${scope === "PUBLIC" ? "公共" : "应用"} Agent 文件失败`;
+    errorMessage.value = formatAgentConfigError(error, action);
+    notifyError(action, errorMessage.value);
   } finally {
     busy.value = false;
   }
@@ -946,11 +956,6 @@ const switchPublicWorktrees = ref<AgentConfigWorktreeOption[]>([]);
 const showCreatePublicWorktreeModal = ref(false);
 const createPublicWorktreeLinuxServerId = ref("");
 const createPublicWorktreeError = ref("");
-const showCreateWorkspacePackageModal = ref(false);
-const workspacePackageType = ref<"AGENT" | "SKILL">("AGENT");
-const workspacePackageName = ref("");
-const workspacePackageError = ref("");
-
 const initializedPublicRepositories = computed(() =>
   publicRepositories.value.filter((repository) => repository.initialized)
 );
@@ -1223,98 +1228,192 @@ function worktreeOptionLabel(worktree: AgentConfigWorktreeOption) {
   return `${worktree.worktreeName} / ${worktree.branch} / ${creator}`;
 }
 
-function openCreateWorkspacePackageModal() {
-  if (!props.workspaceId || !workspaceCanWrite.value || busy.value) return;
-  workspacePackageType.value = "AGENT";
-  workspacePackageName.value = "";
-  workspacePackageError.value = "";
-  showCreateWorkspacePackageModal.value = true;
+/** 公共级和应用级根目录共用工作空间同款新建/上传面板，并额外开放 Agent/Skill 模板类型。 */
+function openCreateConfigModal(scope: Scope) {
+  if (!canWriteScope(scope) || busy.value) return;
+  if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
+  if (scope === "WORKSPACE" && !props.workspaceId) return;
+  createEntryScope.value = scope;
+  rootCreateEntryDialog.value?.open("");
 }
 
-function closeCreateWorkspacePackageModal() {
-  showCreateWorkspacePackageModal.value = false;
-  workspacePackageError.value = "";
-}
-
-async function submitCreateWorkspacePackage() {
-  if (!props.workspaceId || !workspaceCanWrite.value || busy.value) return;
-  const displayName = workspacePackageName.value.trim();
-  const packageName = slugifyPackageName(displayName);
-  if (!displayName || !packageName) {
-    workspacePackageError.value = `请输入${workspacePackageType.value === "AGENT" ? "Agent" : "Skill"} 名称`;
+async function writeScopedAgentFile(scope: Scope, path: string, content: string) {
+  if (scope === "PUBLIC") {
+    await api.writePublicAgentFile(path, content, worktreeId(scope), await publicFileLinuxServerId());
     return;
   }
-  closeCreateWorkspacePackageModal();
+  await api.writeWorkspaceAgentFile(props.workspaceId!, path, content, worktreeId(scope));
+}
+
+/** Agent/Skill 类型只在根入口出现，并在这里组合 OpenCode 原生模板。 */
+async function createAgentTemplate(_directory: string, rawName: string, type: "agent" | "skill") {
+  const scope = createEntryScope.value;
+  if (!canWriteScope(scope) || busy.value) return;
+  if (scope === "PUBLIC" && !publicWorktree.value?.worktreeId) return;
+  if (scope === "WORKSPACE" && !props.workspaceId) return;
+  const displayName = rawName.trim();
+  const packageName = slugifyPackageName(displayName);
+  if (!packageName) return;
   busy.value = true;
   errorMessage.value = "";
   try {
-    const createdPaths = workspacePackageType.value === "AGENT"
+    const createdPaths = type === "agent"
       ? [`agents/${packageName}.md`]
       : [
           `skills/${packageName}/SKILL.md`,
           `skills/${packageName}/rules/README.md`,
           `skills/${packageName}/templates/README.md`
         ];
-    if (workspacePackageType.value === "AGENT") {
-      await api.writeWorkspaceAgentFile(
-        props.workspaceId,
-        createdPaths[0],
-        workspaceAgentTemplate(displayName),
-        worktreeId("WORKSPACE")
-      );
+    if (type === "agent") {
+      await writeScopedAgentFile(scope, createdPaths[0], agentTemplate(displayName, scope));
     } else {
-      await api.writeWorkspaceAgentFile(props.workspaceId, createdPaths[0], workspaceSkillTemplate(displayName, packageName), worktreeId("WORKSPACE"));
-      await api.writeWorkspaceAgentFile(props.workspaceId, createdPaths[1], workspaceRulesTemplate(displayName), worktreeId("WORKSPACE"));
-      await api.writeWorkspaceAgentFile(props.workspaceId, createdPaths[2], workspaceTemplatesTemplate(displayName), worktreeId("WORKSPACE"));
+      await writeScopedAgentFile(scope, createdPaths[0], skillTemplate(displayName, packageName, scope));
+      await writeScopedAgentFile(scope, createdPaths[1], rulesTemplate(displayName, scope));
+      await writeScopedAgentFile(scope, createdPaths[2], templatesTemplate(displayName, scope));
     }
-    rootExpanded.value = new Set([...rootExpanded.value, "WORKSPACE"]);
-    entriesByScope.value = { ...entriesByScope.value, WORKSPACE: {} };
+    rootExpanded.value = new Set([...rootExpanded.value, scope]);
+    entriesByScope.value = { ...entriesByScope.value, [scope]: {} };
     expandedByScope.value = {
       ...expandedByScope.value,
-      WORKSPACE: workspacePackageType.value === "AGENT"
+      [scope]: type === "agent"
         ? new Set(["agents"])
         : new Set(["skills", `skills/${packageName}`])
     };
-    await loadDirectory("WORKSPACE", "");
-    if (workspacePackageType.value === "AGENT") {
-      await loadDirectory("WORKSPACE", "agents");
+    await loadDirectory(scope, "");
+    if (type === "agent") {
+      await loadDirectory(scope, "agents");
     } else {
-      await loadDirectory("WORKSPACE", "skills");
-      await loadDirectory("WORKSPACE", `skills/${packageName}`);
+      await loadDirectory(scope, "skills");
+      await loadDirectory(scope, `skills/${packageName}`);
     }
+    emit("files-mutated", { scope, paths: createdPaths });
+    notifySuccess(`${scope === "PUBLIC" ? "公共" : "应用"} ${type === "agent" ? "Agent" : "Skill"} 已创建`, createdPaths[0]);
   } catch (error) {
     errorMessage.value = formatAgentConfigError(
       error,
-      `新建应用 ${workspacePackageType.value === "AGENT" ? "Agent" : "Skill"} 失败`
+      `新建${scope === "PUBLIC" ? "公共" : "应用"} ${type === "agent" ? "Agent" : "Skill"} 失败`
     );
   } finally {
     busy.value = false;
   }
 }
 
-/** OpenCode Markdown Agent 的名称由文件名决定，模板只写原生支持的配置和提示词。 */
-function workspaceAgentTemplate(displayName: string) {
+/** 上传入口与工作区一致，浏览器仅提交 basename，后端继续负责大小、重名和越界校验。 */
+function requestAgentUpload(directory: string) {
+  uploadDirectory.value = directory;
+  if (uploadInput.value) {
+    uploadInput.value.value = "";
+    uploadInput.value.click();
+  }
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+  }
+  return btoa(chunks.join(""));
+}
+
+function uploadedFileName(name: string) {
+  return name.split(/[\\/]+/).filter(Boolean).at(-1) ?? name;
+}
+
+async function uploadAgentFiles(files: File[]) {
+  const scope = createEntryScope.value;
+  const directory = uploadDirectory.value;
+  if (!canWriteScope(scope) || busy.value || files.length === 0) return;
+  const failures: string[] = [];
+  const uploadedPaths: string[] = [];
+  busy.value = true;
+  errorMessage.value = "";
+  try {
+    for (const file of files) {
+      const path = agentEntryPath(directory, uploadedFileName(file.name));
+      if (scope === "WORKSPACE" && !isWorkspaceAgentDiffPath(path)) {
+        failures.push(`${file.name}：应用根目录仅允许上传 opencode.jsonc，其他文件请上传到 agents 或 skills 目录`);
+        continue;
+      }
+      try {
+        const contentBase64 = await fileToBase64(file);
+        if (scope === "PUBLIC") {
+          await api.uploadPublicAgentFile(path, contentBase64, worktreeId(scope), await publicFileLinuxServerId());
+        } else {
+          await api.uploadWorkspaceAgentFile(props.workspaceId!, path, contentBase64, worktreeId(scope));
+        }
+        uploadedPaths.push(path);
+      } catch (error) {
+        failures.push(`${file.name}：${formatAgentConfigError(error, "上传失败")}`);
+      }
+    }
+    if (uploadedPaths.length > 0) {
+      await loadDirectory(scope, directory, true);
+      emit("files-mutated", { scope, paths: uploadedPaths });
+      notifySuccess(`已上传 ${uploadedPaths.length} 个 Agent 配置文件`, directory || "Agent 配置根目录");
+    }
+    if (failures.length > 0) {
+      errorMessage.value = failures.join("；");
+      notifyError(uploadedPaths.length > 0 ? "部分文件上传失败" : "上传 Agent 配置文件失败", errorMessage.value);
+    }
+  } finally {
+    busy.value = false;
+  }
+}
+
+function handleAgentUploadChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  void uploadAgentFiles(files);
+}
+
+const TEMPLATE_SCOPE_COPY = {
+  PUBLIC: {
+    agentDescription: "public agent",
+    agentLocation: "shared public configuration worktree",
+    skillDescription: "public skill",
+    metadataScope: "public",
+    skillPurpose: "shared testing, design, and delivery instructions across applications",
+    skillContext: "shared public context",
+    resourceQualifier: "shared public"
+  },
+  WORKSPACE: {
+    agentDescription: "application workspace agent",
+    agentLocation: "current personal worktree",
+    skillDescription: "application workspace skill",
+    metadataScope: "workspace",
+    skillPurpose: "application-specific testing, design, and delivery instructions for this workspace",
+    skillContext: "application context",
+    resourceQualifier: "application-specific"
+  }
+} as const;
+
+/** OpenCode Markdown Agent 的名称由文件名决定，模板文案按公共/应用作用域集中配置。 */
+function agentTemplate(displayName: string, scope: Scope) {
+  const copy = TEMPLATE_SCOPE_COPY[scope];
   return `---
-description: ${displayName} application workspace agent
+description: ${displayName} ${copy.agentDescription}
 mode: primary
 hidden: false
 ---
 
 # ${displayName}
 
-You are the ${displayName} application agent.
+You are the ${displayName} ${scope === "PUBLIC" ? "public" : "application"} agent.
 
-Return verifiable results and keep changes scoped to the current personal worktree.
+Return verifiable results and keep changes scoped to the ${copy.agentLocation}.
 `;
 }
 
-function workspaceSkillTemplate(displayName: string, packageName: string) {
+function skillTemplate(displayName: string, packageName: string, scope: Scope) {
+  const copy = TEMPLATE_SCOPE_COPY[scope];
   return `---
 name: ${packageName}
-description: ${displayName} application workspace skill
+description: ${displayName} ${copy.skillDescription}
 compatibility: opencode
 metadata:
-  scope: workspace
+  scope: ${copy.metadataScope}
   source: test-agent
 ---
 
@@ -1322,34 +1421,36 @@ metadata:
 
 ## What I do
 
-- Load application-specific testing, design, and delivery instructions for this workspace.
+- Load ${copy.skillPurpose}.
 - Use the files under \`rules/\` and \`templates/\` only when they are relevant to the current task.
 - Return verifiable output and list unresolved assumptions.
 
 ## When to use me
 
-Use this skill for tasks that need ${displayName} application context, reusable rules, or output templates.
+Use this skill for tasks that need ${displayName} ${copy.skillContext}, reusable rules, or output templates.
 
 Ask clarifying questions when the target application, version, or workspace is ambiguous.
 
 ## Resources
 
-- \`rules/\`: application-specific rules.
+- \`rules/\`: ${copy.resourceQualifier} rules.
 - \`templates/\`: reusable output templates.
 `;
 }
 
-function workspaceRulesTemplate(displayName: string) {
+function rulesTemplate(displayName: string, scope: Scope) {
+  const qualifier = TEMPLATE_SCOPE_COPY[scope].resourceQualifier;
   return `# ${displayName} Rules
 
-Add application-specific rule Markdown files here. Reference them from \`../SKILL.md\` only when the skill should load them for a concrete workflow.
+Add ${qualifier} rule Markdown files here. Reference them from \`../SKILL.md\` only when the skill should load them for a concrete workflow.
 `;
 }
 
-function workspaceTemplatesTemplate(displayName: string) {
+function templatesTemplate(displayName: string, scope: Scope) {
+  const qualifier = TEMPLATE_SCOPE_COPY[scope].resourceQualifier;
   return `# ${displayName} Templates
 
-Add reusable output templates here. Document the purpose and selection conditions in \`../SKILL.md\`.
+Add ${qualifier} reusable output templates here. Document the purpose and selection conditions in \`../SKILL.md\`.
 `;
 }
 
@@ -1555,10 +1656,10 @@ defineExpose({
             v-if="canWrite"
             type="button"
             class="agent-icon-btn"
-            title="在公共级根目录新建文件或文件夹"
-            aria-label="在公共级根目录新建文件或文件夹"
+            title="新建或上传公共配置"
+            aria-label="新建或上传公共配置"
             :disabled="busy || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
-            @click="openCreateEntryDialog('PUBLIC', '')"
+            @click="openCreateConfigModal('PUBLIC')"
           >
             <FilePlus2 class="h-3.5 w-3.5" :stroke-width="1.5" />
           </button>
@@ -1625,11 +1726,12 @@ defineExpose({
           :can-write="canWrite"
           :can-create-in-directory="(path) => canCreateInDirectory('PUBLIC', path)"
           :can-delete-entry="(path) => canDeleteEntry('PUBLIC', path)"
-          :can-rename-entry="() => false"
+          :can-rename-entry="(path) => canRenameEntry('PUBLIC', path)"
           @toggle="(path) => toggleDirectory('PUBLIC', path)"
           @open-file="(path) => openFile('PUBLIC', path)"
           @create-entry="(path) => openCreateEntryDialog('PUBLIC', path)"
           @delete-entry="(entry) => openDeleteEntryDialog('PUBLIC', entry)"
+          @rename-entry="(path, name) => renameAgentEntry('PUBLIC', path, name)"
         />
       </div>
 
@@ -1651,23 +1753,12 @@ defineExpose({
             v-if="workspaceCanWrite"
             type="button"
             class="agent-icon-btn"
-            title="在应用级根目录新建文件或文件夹"
-            aria-label="在应用级根目录新建文件或文件夹"
+            title="新建或上传应用配置"
+            aria-label="新建或上传应用配置"
             :disabled="busy || !workspaceId"
-            @click="openCreateEntryDialog('WORKSPACE', '')"
+            @click="openCreateConfigModal('WORKSPACE')"
           >
             <FilePlus2 class="h-3.5 w-3.5" :stroke-width="1.5" />
-          </button>
-          <button
-            v-if="workspaceCanWrite"
-            type="button"
-            class="agent-icon-btn"
-            title="初始化应用 Agent/Skill 配置包"
-            aria-label="初始化应用 Agent/Skill 配置包"
-            :disabled="busy || !workspaceId"
-            @click="openCreateWorkspacePackageModal"
-          >
-            <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
           </button>
           <button
             v-if="workspaceCanWrite"
@@ -1706,17 +1797,30 @@ defineExpose({
           @open-file="(path) => openFile('WORKSPACE', path)"
           @create-entry="(path) => openCreateEntryDialog('WORKSPACE', path)"
           @delete-entry="(entry) => openDeleteEntryDialog('WORKSPACE', entry)"
-          @rename-entry="renameAgentEntry"
+          @rename-entry="(path, name) => renameAgentEntry('WORKSPACE', path, name)"
         />
       </div>
     </div>
 
     <FileEntryCreateDialog
       ref="createEntryDialog"
-      :allow-upload="false"
+      :allow-upload="true"
       :root-label="createEntryScope === 'PUBLIC' ? '公共 Agent 根目录' : '应用 Agent 根目录'"
       @create-entry="createAgentEntry"
+      @request-upload="requestAgentUpload"
     />
+    <FileEntryCreateDialog
+      ref="rootCreateEntryDialog"
+      :allow-upload="true"
+      :allow-agent-templates="true"
+      :root-label="createEntryScope === 'PUBLIC' ? '公共 Agent 根目录' : '应用 Agent 根目录'"
+      :title="`新建或上传${createEntryScope === 'PUBLIC' ? '公共' : '应用'}配置`"
+      :dialog-label="`新建或上传${createEntryScope === 'PUBLIC' ? '公共' : '应用'}配置`"
+      @create-entry="createAgentEntry"
+      @create-agent-template="createAgentTemplate"
+      @request-upload="requestAgentUpload"
+    />
+    <input ref="uploadInput" type="file" multiple hidden @change="handleAgentUploadChange" />
     <FileEntryDeleteDialog ref="deleteEntryDialog" @confirm="deleteAgentEntry" />
 
     <div v-if="activeScope === 'PUBLIC' && canWrite && !hideGitOps" class="agent-diff">
@@ -2095,78 +2199,6 @@ defineExpose({
               </div>
             </div>
           </div>
-        </section>
-      </div>
-    </Teleport>
-    <Teleport to="body">
-      <div
-        v-if="showCreateWorkspacePackageModal"
-        class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6"
-        @keydown.esc="closeCreateWorkspacePackageModal"
-      >
-        <section
-          role="dialog"
-          aria-modal="true"
-          aria-label="初始化应用 Agent/Skill 配置包"
-          class="flex w-[min(420px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
-        >
-          <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
-            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">初始化应用 Agent/Skill 配置包</h2>
-          </header>
-
-          <div class="flex flex-col gap-3">
-            <div v-if="workspacePackageError" class="agent-modal-alert">
-              <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
-              <span>{{ workspacePackageError }}</span>
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <span class="text-[11px] text-[var(--ta-muted)] font-medium">配置类型</span>
-              <div role="radiogroup" aria-label="配置类型" class="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  role="radio"
-                  :aria-checked="workspacePackageType === 'AGENT'"
-                  class="h-8 rounded-md border text-[12px] transition-colors"
-                  :class="workspacePackageType === 'AGENT'
-                    ? 'border-[var(--ta-accent)] bg-[var(--ta-hover)] text-[var(--ta-accent)]'
-                    : 'border-[var(--ta-border)] bg-[var(--ta-panel)] text-[var(--ta-muted)] hover:text-[var(--ta-text)]'"
-                  @click="workspacePackageType = 'AGENT'"
-                >
-                  Agent
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  :aria-checked="workspacePackageType === 'SKILL'"
-                  class="h-8 rounded-md border text-[12px] transition-colors"
-                  :class="workspacePackageType === 'SKILL'
-                    ? 'border-[var(--ta-accent)] bg-[var(--ta-hover)] text-[var(--ta-accent)]'
-                    : 'border-[var(--ta-border)] bg-[var(--ta-panel)] text-[var(--ta-muted)] hover:text-[var(--ta-text)]'"
-                  @click="workspacePackageType = 'SKILL'"
-                >
-                  Skill
-                </button>
-              </div>
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label for="workspace-package-name-input" class="text-[11px] text-[var(--ta-muted)] font-medium">
-                {{ workspacePackageType === 'AGENT' ? 'Agent 名称' : 'Skill 名称' }}
-              </label>
-              <Input
-                id="workspace-package-name-input"
-                v-model="workspacePackageName"
-                :placeholder="workspacePackageType === 'AGENT' ? '例如：支付测试 Agent' : '例如：支付测试技能'"
-                class="h-8 text-[13px]"
-                autofocus
-                @keydown.enter="submitCreateWorkspacePackage"
-              />
-            </div>
-          </div>
-
-          <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
-            <Button variant="ghost" size="sm" @click="closeCreateWorkspacePackageModal">取消</Button>
-            <Button variant="primary" size="sm" :disabled="busy || !workspacePackageName.trim()" @click="submitCreateWorkspacePackage">创建</Button>
-          </footer>
         </section>
       </div>
     </Teleport>
