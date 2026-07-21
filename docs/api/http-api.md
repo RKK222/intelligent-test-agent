@@ -25,6 +25,19 @@
 5. API 文档变更必须与 Controller、DTO、测试同步。
 6. 旧 runtime/workspace `/api/...` URL 已强制作废，命中时统一返回 `410 API_GONE` 和 `ApiErrorResponse`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。
 7. CORS 本地默认仅覆盖主前端与 `frontend-opencode` 的 localhost/127.0.0.1 开发、预览和 real E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式配置允许来源。
+8. 多 Java 同源部署允许前端在需要用户绑定服务器的请求上携带可选 `X-Test-Agent-Linux-Server-Id`。该头只是 Nginx 静态白名单的首跳性能提示，不参与鉴权，不替代数据库 binding、Session 归属、运行上下文或后端公共路由判断。
+
+### 用户绑定服务器首跳提示
+
+页面首次 `GET /api/internal/agent/opencode/processes/me` 不携带路由提示，按 Nginx 默认 upstream 进入任意 Java。响应包含非空 `linuxServerId` 后，前端只在当前页面内存保存该值；刷新、退出或切换登录用户都会清空，禁止写入 localStorage/sessionStorage。随后以下请求由 `backend-api` 的 routed request 或 fetch SSE 携带 `X-Test-Agent-Linux-Server-Id`：
+
+- 当前用户 OpenCode 进程状态、初始化、弱健康和 runtime 代理。
+- Session、run-context、Run、permission/question、Session 原生操作和 RunEvent/用户运行态 SSE。
+- 用户绑定服务器上的 Workspace、个人工作树、Git、Agent 配置与文件 route/ticket 操作。
+
+登录、用户/角色管理、应用与共享配置列表、公共控制面查询等 API 不携带该头，继续使用普通负载均衡。Nginx 只把与部署静态 `TEST_AGENT_NGINX_SERVER_ROUTES` 精确匹配的值映射到目标 Java；缺失或未知值使用默认 upstream，并在代理给 Java 前删除该头。同时必须删除外部客户端传入的 `X-Test-Agent-Backend-Routed`，该头只允许公共 Java→Java 转发器生成。
+
+前端跨域部署的预检允许 `X-Test-Agent-Linux-Server-Id`。客户端伪造、旧页面保留或 binding 变化不会绕过后端鉴权和归属校验：请求首跳到错误 Java 时，现有 `BackendJavaRouteResolver` / `BackendHttpForwarder` 仍按权威状态定位并转发到正确节点。旧前端不发送该头时保持兼容，只会继续产生原有 Java→Java 转发。
 
 ## API URL 分层
 

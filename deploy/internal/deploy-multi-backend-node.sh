@@ -265,9 +265,9 @@ validate_frontend_config() {
   fi
   require_exact_value "${nginx_env}" TEST_AGENT_NGINX_MODE multi
   require_one_key "${nginx_env}" TEST_AGENT_NGINX_BACKENDS
-  require_one_key "${nginx_env}" TEST_AGENT_NGINX_TERMINAL_ROUTES
+  require_one_key "${nginx_env}" TEST_AGENT_NGINX_SERVER_ROUTES
   backends="$(env_value "${nginx_env}" TEST_AGENT_NGINX_BACKENDS)"
-  routes="$(env_value "${nginx_env}" TEST_AGENT_NGINX_TERMINAL_ROUTES)"
+  routes="$(env_value "${nginx_env}" TEST_AGENT_NGINX_SERVER_ROUTES)"
   IFS=',' read -r -a backend_entries <<<"${backends}"
   [[ "${#backend_entries[@]}" -ge 2 ]] || {
     echo "TEST_AGENT_NGINX_BACKENDS must contain at least two backends" >&2
@@ -289,7 +289,7 @@ validate_frontend_config() {
     exit 1
   }
   [[ "${routes}" == "${expected_routes}" ]] || {
-    echo "TEST_AGENT_NGINX_TERMINAL_ROUTES must match TEST_AGENT_NGINX_BACKENDS in order" >&2
+    echo "TEST_AGENT_NGINX_SERVER_ROUTES must match TEST_AGENT_NGINX_BACKENDS in order" >&2
     exit 1
   }
   require_exact_value "${nginx_env}" TEST_AGENT_NGINX_LISTEN_PORT 80

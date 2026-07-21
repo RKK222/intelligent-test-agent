@@ -32,12 +32,15 @@ class RuntimeSecurityConfigTest {
         var exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .options("http://127.0.0.1:8080/api/internal/platform/opencode-runtime/sessions")
                 .header("Origin", "http://127.0.0.1:4187")
-                .header("Access-Control-Request-Method", "POST"));
+                .header("Access-Control-Request-Method", "POST")
+                .header("Access-Control-Request-Headers", "X-Test-Agent-Linux-Server-Id"));
 
         filter.filter(exchange, chain -> reactor.core.publisher.Mono.empty()).block(java.time.Duration.ofSeconds(2));
 
         org.springframework.http.HttpHeaders headers = exchange.getResponse().getHeaders();
         assertThat(headers.getFirst("Access-Control-Allow-Origin")).isEqualTo("http://127.0.0.1:4187");
         assertThat(headers.getFirst("Access-Control-Allow-Methods")).contains("POST");
+        assertThat(headers.getFirst("Access-Control-Allow-Headers"))
+                .containsIgnoringCase("X-Test-Agent-Linux-Server-Id");
     }
 }

@@ -52,6 +52,8 @@ const props = defineProps<{
   /** Agent 文件成功落盘后递增，用于在面板隐藏时也主动刷新 diff。 */
   agentConfigRevision?: number;
   apiBaseUrl?: string;
+  /** 当前页面内存中的用户绑定服务器。 */
+  routeLinuxServerId?: string;
   canWrite: boolean;
   /** 应用级 Agent/Skill/Rules/Templates 的独立写权限。 */
   canManageAgentConfig?: boolean;
@@ -79,7 +81,10 @@ const emit = defineEmits<{
 }>();
 
 const workbench = useWorkbenchStore();
-const api = createBackendApiClient({ baseUrl: props.apiBaseUrl ?? "" });
+const api = createBackendApiClient({
+  baseUrl: props.apiBaseUrl ?? "",
+  routeLinuxServerId: () => props.routeLinuxServerId
+});
 const effectiveAgentConfigWorkspaceId = computed(() =>
   props.agentConfigWorkspaceId === undefined ? props.workspaceId : (props.agentConfigWorkspaceId || undefined)
 );

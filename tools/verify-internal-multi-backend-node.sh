@@ -51,7 +51,7 @@ rm -f "${CONFIG_4}/backend.env.bak"
 printf '%s\n' \
   'TEST_AGENT_NGINX_MODE=multi' \
   'TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080' \
-  'TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080' \
+  'TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080' \
   'TEST_AGENT_NGINX_LISTEN_PORT=80' \
   'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996' \
   'TEST_AGENT_NGINX_TLS_ENABLED=false' \
@@ -113,7 +113,7 @@ validate_without_secret_output backend "${CONFIG_115}" --backend-host 122.233.30
 cp "${CONFIG_FRONTEND}/nginx.env" "${CONFIG_FRONTEND_3}/nginx.env"
 sed -i.bak \
   -e 's#TEST_AGENT_NGINX_BACKENDS=.*#TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080,122.233.30.115:8080#' \
-  -e 's#TEST_AGENT_NGINX_TERMINAL_ROUTES=.*#TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080,test-agent-backend-122-233-30-115=122.233.30.115:8080#' \
+  -e 's#TEST_AGENT_NGINX_SERVER_ROUTES=.*#TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080,test-agent-backend-122-233-30-115=122.233.30.115:8080#' \
   "${CONFIG_FRONTEND_3}/nginx.env"
 rm -f "${CONFIG_FRONTEND_3}/nginx.env.bak"
 validate_without_secret_output frontend "${CONFIG_FRONTEND_3}"

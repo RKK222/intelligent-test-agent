@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { BackendApiError, createBackendApiClient, type ReferenceRepositoryStatus, type WorkspaceWebSocketFactory } from "../src";
+import {
+  BackendApiError,
+  createBackendApiClient,
+  LINUX_SERVER_ROUTE_HEADER,
+  type ReferenceRepositoryStatus,
+  type WorkspaceWebSocketFactory
+} from "../src";
 
 describe("backend-api", () => {
   it("keeps an explicitly empty Vite API base URL for same-origin deployment", async () => {
@@ -215,6 +221,33 @@ describe("backend-api", () => {
     );
     const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("X-Trace-Id")).toBe("trace_fixed");
+  });
+
+  it("adds the in-memory linux server hint only to routed requests", async () => {
+    let linuxServerId = "";
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: {} }), { status: 200 })
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      routeLinuxServerId: () => linuxServerId
+    });
+
+    await client.getMyOpencodeProcess();
+    linuxServerId = " server-a ";
+    await client.createSession("wrk_1", "新会话");
+    await client.startRun("ses_1", "hello");
+    await client.stageWorkspaceGitFiles("wrk_1", ["README.md"]);
+    await client.listApplications();
+    linuxServerId = "server-b";
+    await client.getMyOpencodeProcessHealth({ linuxServerId: "server-b", containerId: "ctr_1", port: 4096 });
+
+    const routeHeaders = fetcher.mock.calls.map((call) =>
+      (call[1]?.headers as Headers).get(LINUX_SERVER_ROUTE_HEADER)
+    );
+    expect(routeHeaders).toEqual([null, "server-a", "server-a", "server-a", null, "server-b"]);
   });
 
   it("stages and unstages workspace files through platform git endpoints", async () => {

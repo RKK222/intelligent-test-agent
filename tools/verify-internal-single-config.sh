@@ -91,7 +91,7 @@ grep -Fxq "TEST_AGENT_NGINX_PREFIX=${NGINX_HOME}" "${NGINX_ENV}"
 grep -Fxq "TEST_AGENT_NGINX_MAIN_CONF=${NGINX_HOME}/conf/nginx.conf" "${NGINX_ENV}"
 grep -Fxq "TEST_AGENT_NGINX_CONF_PATH=${LOADED_DIR}/test-agent-gateway.conf" "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_RELOAD_MODE=binary' "${NGINX_ENV}"
-grep -Fxq 'TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080' "${NGINX_ENV}"
+grep -Fxq 'TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080' "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996' "${NGINX_ENV}"
 bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' \

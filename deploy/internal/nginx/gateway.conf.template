@@ -9,6 +9,14 @@ upstream test_agent_backend {
     keepalive 32;
 }
 
+${TEST_AGENT_SERVER_UPSTREAMS}
+
+# 只使用部署脚本生成的静态 upstream 名称；缺失或未知客户端提示继续走默认负载均衡。
+map $http_x_test_agent_linux_server_id $test_agent_backend_route {
+    default test_agent_backend;
+    ${TEST_AGENT_SERVER_ROUTE_MAP}
+}
+
 server {
     ${TEST_AGENT_NGINX_LISTEN_DIRECTIVE}
     ${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_DIRECTIVES}
@@ -24,32 +32,40 @@ server {
     }
 
     location = /api {
-        proxy_pass http://test_agent_backend;
+        proxy_pass http://$test_agent_backend_route;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # 路由提示在 Nginx 消费后即删除，内部防循环头也不接受外部客户端注入。
+        proxy_set_header X-Test-Agent-Linux-Server-Id "";
+        proxy_set_header X-Test-Agent-Backend-Routed "";
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+        proxy_next_upstream error timeout;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         proxy_buffering off;
         proxy_cache off;
     }
 
-    # 服务器终端 ticket 保存在目标 Java 内存，必须按 linuxServerId 定向代理 WebSocket。
+    # 服务器终端 ticket 保存在目标 Java 内存，复用同一 linuxServerId 静态路由表定向代理 WebSocket。
     ${TEST_AGENT_TERMINAL_LOCATIONS}
 
     location /api/ {
-        proxy_pass http://test_agent_backend;
+        proxy_pass http://$test_agent_backend_route;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # 与精确 /api location 保持同一信任边界。
+        proxy_set_header X-Test-Agent-Linux-Server-Id "";
+        proxy_set_header X-Test-Agent-Backend-Routed "";
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+        proxy_next_upstream error timeout;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         proxy_buffering off;

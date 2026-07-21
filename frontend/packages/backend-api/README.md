@@ -7,6 +7,7 @@
 ## 主要职责
 
 - 统一 baseUrl、traceId、鉴权头和 JSON 解析；`VITE_TEST_AGENT_API_BASE_URL` 显式为空时保留同源相对 `/api`，不会回退到本机开发地址。
+- 可选 `routeLinuxServerId` 动态读取当前页面内存中的用户 binding；只有用户 OpenCode、Session、Run、夜间任务和本地工作区/Agent 配置请求通过内部 `routedRequest` 增加 `X-Test-Agent-Linux-Server-Id`。空值不发送，登录、用户管理、应用列表和共享控制面仍使用普通请求；该值仅用于 Nginx 首跳，不替代后端权威路由。
 - 可选 `rawExchangeObserver` 供前端调试面板记录浏览器与平台后端之间的最终 method/url/path/traceId、请求体、响应状态/响应头和响应原文；observer 不记录 `Authorization`、Cookie 等敏感请求头，也不改变后端 API 契约。
 - 支持 `agentId?: string` 配置，默认 `opencode`；Run、Diff 和 runtime 相关请求统一走 `/api/internal/agent/{agentId}/...`。
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
@@ -51,4 +52,4 @@ corepack pnpm --filter @test-agent/backend-api typecheck
 corepack pnpm test -- backend-api
 ```
 
-`backend-api.test.ts` 覆盖 7 个引用资产端点的 app/repository/path 编码、初始化/切换 body、无 body 同步/核验和响应透传、组合视图 list/read 的 locator/稳定身份/只读来源/局部 warning 映射，以及通用参数内存值四个接口的 URL 编码与 HTTP 方法；`night-execution.test.ts` 覆盖夜间时段和任务创建/查询/改期/取消/关闭的 URL、查询参数与请求体。
+`backend-api.test.ts` 覆盖动态路由 ID 空值不发送、绑定请求携带修剪后的 `X-Test-Agent-Linux-Server-Id`、普通控制面不携带，以及 7 个引用资产端点的 app/repository/path 编码、初始化/切换 body、无 body 同步/核验和响应透传、组合视图 list/read 的 locator/稳定身份/只读来源/局部 warning 映射、通用参数内存值四个接口的 URL 编码与 HTTP 方法；`night-execution.test.ts` 覆盖夜间时段和任务创建/查询/改期/取消/关闭的 URL、查询参数与请求体。

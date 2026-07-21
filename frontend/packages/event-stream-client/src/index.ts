@@ -21,6 +21,8 @@ export type RunEventSubscribeOptions = {
    * token 仅放在请求头，绝不拼接到 URL，避免被浏览器历史、代理日志或原始报文面板记录。
    */
   token?: string | null;
+  /** Nginx 首跳路由提示；只作性能优化，后端仍以 Run 归属为准。 */
+  linuxServerId?: string | null;
   fetcher?: typeof fetch;
   onEvent: (event: RunEvent) => void;
   onRawMessage?: (message: RunEventRawMessage) => void;
@@ -50,6 +52,8 @@ export type EventSourceFactory = (url: string) => EventSourceLike;
 export type SessionRuntimeStateSubscribeOptions = {
   baseUrl?: string;
   token?: string | null;
+  /** Nginx 首跳路由提示；页面内存中没有绑定服务器时不发送。 */
+  linuxServerId?: string | null;
   fetcher?: typeof fetch;
   onEvent: (event: SessionRuntimeStateSummary, meta: { eventName: string }) => void;
   onStatus?: (status: SessionRuntimeStateStreamStatus) => void;
@@ -58,6 +62,7 @@ export type SessionRuntimeStateSubscribeOptions = {
 
 const SESSION_RUNTIME_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 const RUN_EVENT_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
+const LINUX_SERVER_ROUTE_HEADER = "X-Test-Agent-Linux-Server-Id";
 
 export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
   "run.created",
@@ -209,6 +214,7 @@ function subscribeAuthenticatedRunEvents(options: RunEventSubscribeOptions): Run
         const headers = new Headers();
         headers.set("Accept", "text/event-stream");
         headers.set("Authorization", `Bearer ${options.token!.trim()}`);
+        setLinuxServerRouteHeader(headers, options.linuxServerId);
         const response = await fetcher(runEventsUrl(baseUrl, agentId, options.runId, resumeEventId), {
           headers,
           signal: controller.signal
@@ -311,6 +317,7 @@ export function subscribeSessionRuntimeState(
         if (options.token?.trim()) {
           headers.set("Authorization", `Bearer ${options.token.trim()}`);
         }
+        setLinuxServerRouteHeader(headers, options.linuxServerId);
         const response = await fetcher(sessionRuntimeStateEventsUrl(baseUrl), {
           headers,
           signal: controller.signal
@@ -394,6 +401,14 @@ function runEventsUrl(baseUrl: string, agentId: string, runId: string, lastEvent
 
 function sessionRuntimeStateEventsUrl(baseUrl: string) {
   return `${baseUrl}/api/internal/platform/opencode-runtime/sessions/runtime-state/events`;
+}
+
+/** 空值时不发头，保持首次进程查询和旧前端的 least_conn 行为。 */
+function setLinuxServerRouteHeader(headers: Headers, linuxServerId?: string | null) {
+  const normalized = linuxServerId?.trim();
+  if (normalized) {
+    headers.set(LINUX_SERVER_ROUTE_HEADER, normalized);
+  }
 }
 
 function normalizeAgentId(agentId: string) {

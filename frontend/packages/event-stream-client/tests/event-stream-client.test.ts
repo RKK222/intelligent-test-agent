@@ -169,6 +169,7 @@ describe("event-stream-client", () => {
       baseUrl: "http://api",
       runId: "run_1",
       token: "token_secret",
+      linuxServerId: " server-a ",
       fetcher,
       onEvent: (event) => received.push(event.type),
       onRawMessage: (message) => rawIds.push(message.lastEventId)
@@ -184,6 +185,7 @@ describe("event-stream-client", () => {
     const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer token_secret");
     expect(headers.get("Accept")).toBe("text/event-stream");
+    expect(headers.get("X-Test-Agent-Linux-Server-Id")).toBe("server-a");
     expect(received).toEqual(["question.asked"]);
     expect(rawIds).toEqual(["evt_durable_7"]);
   });
@@ -403,6 +405,7 @@ describe("event-stream-client", () => {
     const subscription = subscribeSessionRuntimeState({
       baseUrl: "http://api",
       token: "token_secret",
+      linuxServerId: "server-a",
       fetcher,
       onStatus: (status) => statuses.push(status),
       onEvent: (event) => received.push(event)
@@ -418,6 +421,7 @@ describe("event-stream-client", () => {
     const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer token_secret");
     expect(headers.get("Accept")).toBe("text/event-stream");
+    expect(headers.get("X-Test-Agent-Linux-Server-Id")).toBe("server-a");
     expect(received).toEqual([
       expect.objectContaining({ runningCount: 0, questionCount: 0 }),
       expect.objectContaining({ runningCount: 1, questionCount: 1 })

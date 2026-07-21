@@ -13,6 +13,7 @@
 - 订阅只投递与当前 `runId` 完全一致的事件；调用 `close()` 后，即使浏览器还有已排队的旧 listener 回调，也不会继续触发 `onEvent`。
 - 使用 `lastEventId` query 参数支持浏览器原生 EventSource 的首次续传，agent URL 下格式不变。
 - `baseUrl` 显式为空时按同源相对路径 `/api/...` 建立 RunEvent SSE，兼容企业版由 Nginx 统一代理前端与多后台；非空地址继续支持前后端分离部署。
+- 已认证 fetch RunEvent SSE 和用户级运行态 SSE 可传 `linuxServerId`，非空时设置 `X-Test-Agent-Linux-Server-Id` 供 Nginx 首跳；值会修剪且不会写入 URL。空值和原生 EventSource 保持旧行为。
 - 提供 `subscribeSessionRuntimeState()`，通过 fetch 订阅 `/api/internal/platform/opencode-runtime/sessions/runtime-state/events`，可携带 Bearer Token，解析 `session-runtime.snapshot` / `session-runtime.updated`，断线按 1/2/5/10/30 秒退避重连。是否执行 active-run fallback 及迟到结果 fencing 属于 app 交互状态，不在 client 内写 Vue 状态。
 - 可选 `onRawMessage` 在解析 RunEvent 前回调浏览器实际收到的 SSE `MessageEvent.data`、事件名、`lastEventId`、runId 和接收时间；浏览器 `EventSource` 不暴露完整 HTTP 字节流，因此该回调不代表 DevTools 里的 wire bytes。
 - 提供关闭订阅和连接状态回调。
@@ -32,3 +33,5 @@
 corepack pnpm --filter @test-agent/event-stream-client typecheck
 corepack pnpm test -- event-stream-client
 ```
+
+测试覆盖 RunEvent 与用户级运行态 fetch SSE 的路由头、Bearer Token、续传、解析、去重和关闭；该头不改变任何事件 payload 或游标。

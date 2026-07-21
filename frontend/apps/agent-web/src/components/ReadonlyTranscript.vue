@@ -13,13 +13,25 @@ import { dedupeSessionMessages } from "./workbench-utils";
 const props = defineProps<ReadonlyTranscriptProps>();
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
-const api = createBackendApiClient({ baseUrl: apiBaseUrl });
+const routeLinuxServerId = ref("");
+const api = createBackendApiClient({
+  baseUrl: apiBaseUrl,
+  routeLinuxServerId: () => routeLinuxServerId.value
+});
 const session = shallowRef<Session | null>(null);
 const messages = ref<SessionMessage[]>([]);
 const feedback = ref<Feedback | null>(null);
 
 async function load() {
   try {
+    // Transcript 独立页同样先取得当前 binding，且只在页面内存中保留。
+    try {
+      const process = await api.getMyOpencodeProcess();
+      routeLinuxServerId.value = process.linuxServerId?.trim() ?? "";
+    } catch {
+      // 路由提示不可用时继续走默认 upstream，不能阻断只读历史恢复。
+      routeLinuxServerId.value = "";
+    }
     const [nextSession, page] = await Promise.all([
       api.getSession(props.sessionId),
       api.listSessionMessages(props.sessionId, 1, 200, { refresh: false })

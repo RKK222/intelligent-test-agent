@@ -192,7 +192,14 @@ import {
 } from "./workbench-utils";
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
-const api = createBackendApiClient({ baseUrl: apiBaseUrl, rawExchangeObserver: observeRawHttpExchange });
+// 只保存当前页面生命周期内的 binding 提示，避免刷新或切换用户后沿用旧服务器。
+const routeLinuxServerId = ref("");
+const routeLinuxServerResolved = ref(false);
+const api = createBackendApiClient({
+  baseUrl: apiBaseUrl,
+  routeLinuxServerId: () => routeLinuxServerId.value,
+  rawExchangeObserver: observeRawHttpExchange
+});
 const conversationRunContexts = createConversationRunContextCache((sessionId) => api.getRunContext(sessionId));
 provide("api", api);
 const queryClient = useQueryClient();
@@ -490,7 +497,8 @@ const firstLoginGuideRef = ref<InstanceType<typeof FirstLoginGuide> | null>(null
 const robotSideQuestion = useSideQuestionRun({
   api,
   baseUrl: apiBaseUrl,
-  getAuthToken: () => authStore.token
+  getAuthToken: () => authStore.token,
+  getRouteLinuxServerId: () => routeLinuxServerId.value
 });
 const serverWorkspacePickerOpen = ref(false);
 const referenceConfigurationOpen = ref(false);
@@ -990,7 +998,7 @@ watch(selectedAppId, () => {
 
 const sessionsQuery = useQuery({
   queryKey: ["sessions", "user-history", sessionSearchTrim, sessionHistoryPage],
-  enabled: () => authStore.isAuthenticated(),
+  enabled: () => authStore.isAuthenticated() && routeLinuxServerResolved.value,
   queryFn: () => {
     const query = sessionSearchTrim.value;
     return api.listAllSessions(
@@ -1024,21 +1032,26 @@ watch(
 );
 
 watch(
-  () => authStore.token,
-  (token, oldToken, onCleanup) => {
+  [() => authStore.token, routeLinuxServerId, routeLinuxServerResolved],
+  ([token, linuxServerId, routeResolved], [oldToken], onCleanup) => {
+    const subscriptionLinuxServerId = token === oldToken ? linuxServerId : "";
+    const subscriptionRouteResolved = token === oldToken && routeResolved;
     if (token !== oldToken) {
       // context 与认证用户绑定，切换登录态必须丢弃页面内存缓存。
       invalidateConversationInteraction();
       conversationRunContexts.clear();
       runtimeStateOutages.reset();
+      routeLinuxServerId.value = "";
+      routeLinuxServerResolved.value = false;
     }
-    if (!token) {
+    if (!token || !subscriptionRouteResolved) {
       sessionRuntimeState.value = null;
       return;
     }
     const subscription = subscribeSessionRuntimeState({
       baseUrl: apiBaseUrl,
       token,
+      linuxServerId: subscriptionLinuxServerId,
       onEvent: (summary) => {
         runtimeStateOutages.onSnapshot();
         activeRunProbeSeq += 1;
@@ -1146,6 +1159,17 @@ const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => {
       }
     : process;
 });
+watch(
+  [opencodeProcessStatus, () => opencodeProcessQuery.isFetched.value],
+  ([process, isFetched]) => {
+    if (!isFetched) {
+      return;
+    }
+    routeLinuxServerId.value = process?.linuxServerId?.trim() ?? "";
+    routeLinuxServerResolved.value = true;
+  },
+  { immediate: true }
+);
 const opencodeAvailability = ref<OpencodeAvailabilityState>({ ready: false, source: "process" });
 const opencodeHealthRequest = computed(() => opencodeHealthRequestFromProcess(opencodeProcessStatus.value));
 const opencodeHealthQuery = useQuery({
@@ -2015,8 +2039,8 @@ function clearTerminalRunEventSubscriptionHold() {
 }
 
 watch(
-  [activeRunEventSubscriptionRunId, activeRunEventSubscriptionSessionId, () => authStore.token],
-  ([subscribedRunId, subscribedSessionId, token], _old, onCleanup) => {
+  [activeRunEventSubscriptionRunId, activeRunEventSubscriptionSessionId, () => authStore.token, routeLinuxServerId],
+  ([subscribedRunId, subscribedSessionId, token, linuxServerId], _old, onCleanup) => {
     if (!subscribedRunId || !subscribedSessionId || !token) {
       return;
     }
@@ -2024,6 +2048,7 @@ watch(
       baseUrl: apiBaseUrl,
       runId: subscribedRunId,
       token,
+      linuxServerId,
       onRawMessage: (message) => observeRawRunEventMessage(message, subscribedSessionId),
       onEvent: (event) => {
         if (ignoredRunIds.value.has(event.runId)) {
@@ -6923,6 +6948,7 @@ async function handleLogout() {
           :can-manage-agent-config="isAppAdmin"
           :can-manage-public-config="isSuperAdmin"
           :api-base-url="apiBaseUrl"
+          :route-linux-server-id="routeLinuxServerId"
           :workspace-id="selectedWorkspace?.workspaceId"
           :agent-config-workspace-id="selectedAgentConfigWorkspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"
@@ -7308,6 +7334,7 @@ async function handleLogout() {
   <SettingsDialog
     :open="settingsOpen"
     :current-user="authStore.currentUser"
+    :route-linux-server-id="routeLinuxServerId"
     :initial-app-id="selectedAppId"
     :initial-menu-key="firstLoginGuideActive ? firstLoginGuideSettingsMenu : undefined"
     :initial-app-tab="firstLoginGuideActive ? firstLoginGuideSettingsTab : undefined"

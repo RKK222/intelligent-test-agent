@@ -31,6 +31,8 @@ const props = defineProps<FileExplorerProps & {
   canManagePublicConfig?: boolean;
   /** 后端 base url，透传给 AgentConfigPanel/GitChangesPanel */
   apiBaseUrl?: string;
+  /** 当前用户绑定服务器，仅用于工作区本地 HTTP 首跳提示。 */
+  routeLinuxServerId?: string;
   /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
   workspaceId?: string;
   /** 应用 Agent 配置使用当前版本的个人 worktree，与普通 workspace 文件共用 Git 根。 */
@@ -358,6 +360,7 @@ defineExpose({
         :personal-workspace-branch="personalWorkspaceBranch"
         :agent-config-revision="agentConfigRevision"
         :api-base-url="apiBaseUrl"
+        :route-linux-server-id="routeLinuxServerId"
         :can-write="!!canWrite"
         :can-manage-agent-config="canManageAgentConfig ?? !!canWrite"
         :can-manage-public-config="canManagePublicConfig ?? !!canWrite"
@@ -522,6 +525,7 @@ defineExpose({
             <AgentConfigPanel
               ref="agentConfigPanelRef"
               :base-url="apiBaseUrl ?? ''"
+              :route-linux-server-id="routeLinuxServerId"
               :workspace-id="agentConfigWorkspaceId"
               :can-write="canManagePublicConfig ?? !!canWrite"
               :can-manage-workspace-config="canManageAgentConfig ?? !!canWrite"

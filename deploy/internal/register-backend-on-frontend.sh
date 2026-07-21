@@ -27,7 +27,7 @@ NGINX_ENV="${TMP_ROOT}/${NODE_NAME}/config/nginx.env"
 [[ -f "${NGINX_ENV}" ]] || { echo "Frontend package does not contain nginx.env" >&2; exit 1; }
 
 append_env_csv_value "${NGINX_ENV}" TEST_AGENT_NGINX_BACKENDS "${BACKEND_IP}:8080"
-append_env_csv_value "${NGINX_ENV}" TEST_AGENT_NGINX_TERMINAL_ROUTES \
+append_env_csv_value "${NGINX_ENV}" TEST_AGENT_NGINX_SERVER_ROUTES \
   "$(server_id_from_host "${BACKEND_IP}")=${BACKEND_IP}:8080"
 
 TARGET_TMP="$(mktemp "${SCRIPT_DIR}/nodes/.${NODE_NAME}.tar.gz.XXXXXX")"

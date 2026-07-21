@@ -162,6 +162,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 - 前端不得直连 opencode server。
 - HTTP 请求只能通过 `packages/backend-api`；Run/Diff/runtime 默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` 后端 URL。
+- 工作台首次 `/processes/me` 不携带服务器路由头；响应包含 binding `linuxServerId` 后只在当前页面内存保存，后续用户 OpenCode、Session、Run、SSE 和本地工作区请求通过 backend-api/event-stream-client 携带 `X-Test-Agent-Linux-Server-Id`。退出、切换用户和刷新必须清空，禁止持久化；登录、用户管理、应用列表及其它共享控制面继续普通负载均衡。该头只优化 Nginx 首跳，不能替代后端归属校验。
 - 夜间异步执行仍在当前对话交互：发送按钮左侧定时图标只选择后端返回的北京时间 15 分钟时段；右侧栏“会话列表”浮层内的“待执行任务”页签分页收齐当前用户全部 `SCHEDULED/DISPATCHING` 任务并展示创建时间，主对话不再切换视图，当前 Session 有待执行任务时禁用普通发送但不禁用新建对话。工作台每 30 秒和窗口 focus 刷新任务，容量冲突时立即重取时段；任务投递后不引入独立执行视图，继续复用既有 Session、RunEvent SSE，并在来源标签显示北京时间实际启动时间。
 - 新建 Session 或切换到可交互历史 Session 后，通过 `backend-api.getRunContext(sessionId)` 获取一次会话运行上下文，并只缓存在当前页面内存；同一 Session 的后续 Run 复用该 token。每次发送生成稳定 `clientRequestId`，若后端返回 `CONVERSATION_CONTEXT_REQUIRED` 或 `CONVERSATION_CONTEXT_EXPIRED`，清除该 Session 缓存、重新签发并只重试一次，重试复用原 `clientRequestId`。退出登录、认证用户变化或页面刷新后清空全部上下文，禁止写入 localStorage、sessionStorage、IndexedDB 或持久化 store。
 - 历史切换与 Run 启动都使用页面交互代次 fencing：每个异步返回点重新校验认证 token、Session、Workspace 和发起代次，迟到的 Session/workspace/context/Run/active-run 结果不得覆盖当前会话或建立 SSE。历史 Session 的工作区、上下文和正文尚未恢复完成时，发送按钮与父层发送入口都会硬阻断，避免仍以旧 Session 启动 Run。`startRun` 出现超时或 5xx 时，如果同一发起上下文已由 runtime-state 接管 busy Run，则不生成本地 `run.request.failed`；响应带 `clientRequestId` 时优先精确匹配，旧响应缺失时才使用同 Session 与同交互代次的兼容判断。

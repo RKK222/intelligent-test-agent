@@ -29,6 +29,7 @@ function setup() {
   const state = scope.run(() => useSideQuestionRun({
     api: { startSideQuestionRun, startManualQuestionRun },
     baseUrl: "http://backend.test",
+    getRouteLinuxServerId: () => "server-a",
     subscribe
   }))!;
   return { startSideQuestionRun, startManualQuestionRun, subscribe, close, getOptions: () => options!, scope, state };
@@ -55,6 +56,7 @@ describe("useSideQuestionRun", () => {
     expect(fixture.subscribe).toHaveBeenCalledOnce();
     expect(fixture.getOptions().runId).toBe("run_side_1");
     expect(fixture.getOptions().baseUrl).toBe("http://backend.test");
+    expect(fixture.getOptions().linuxServerId).toBe("server-a");
     expect(fixture.state.loading.value).toBe(true);
   });
 

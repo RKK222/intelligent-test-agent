@@ -30,6 +30,7 @@
 12. Run 的 `storageMode` 由创建时 manifest 固定，活动期间禁止切换。manifest 缺失表示 legacy/旧数据；Redis 新模式运行态缺失或不可用时返回 `RUN_DETAILS_EXPIRED` / `RUNTIME_STATE_UNAVAILABLE`，不得回退数据库或 JVM 内存读取原始详情。
 13. 已认证前端以标量 `(runId, sessionId, token)` 标识单 Run fetch SSE，同一逻辑 Run 同时最多保留一条应用层订阅；Run 对象的 status 投影、冲突终态纠正和标题等待不得重建连接。终态先保留 500ms 稳定窗口，普通终态随后关闭，标题待定则复用原连接直到标题同步或 watch closed；连接内游标、事件去重与 transport reconnect 仍由公共 event-stream client 维护。
 14. 企业同源部署将前端 API base URL 显式配置为空，RunEvent 与用户级运行态 SSE 客户端必须保留 `/api/...` 相对地址交给浏览器按当前 origin 解析；不得用缺少 origin 的 `new URL("/api/...")` 构造地址。前后端分离部署仍使用配置的绝对 base URL。
+15. 已认证 fetch SSE 可携带页面内存中的 `X-Test-Agent-Linux-Server-Id`，RunEvent 与用户级运行态 SSE 使用同一动态值；空值不发送。它只供 Nginx 做静态白名单首跳，Nginx 转发前删除，后端仍按 Run/用户归属执行权威校验和跨 Java 兜底。旧客户端或无法自定义 header 的原生 EventSource 不发送时继续使用默认 upstream，事件格式和恢复语义不变。
 
 ## RunEvent 基础字段
 

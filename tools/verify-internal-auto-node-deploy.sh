@@ -68,7 +68,7 @@ create_frontend_node() {
   mkdir -p "${root}/${node}/config"
   printf '%s\n' \
     'TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080' \
-    'TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080' \
+    'TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080' \
     >"${root}/${node}/config/nginx.env"
   printf '%s\n' \
     '#!/usr/bin/env bash' \

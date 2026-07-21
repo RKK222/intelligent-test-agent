@@ -166,6 +166,10 @@ export type BackendApiClientOptions = {
   baseUrl?: string;
   agentId?: string;
   apiToken?: string;
+  /**
+   * 返回当前页面内存中的用户绑定服务器；未绑定时不产生 Nginx 路由提示头。
+   */
+  routeLinuxServerId?: () => string | null | undefined;
   fetcher?: typeof fetch;
   webSocketFactory?: WorkspaceWebSocketFactory;
   traceIdFactory?: () => string;
@@ -212,6 +216,8 @@ export class BackendApiError extends Error {
 }
 
 export type BackendApiClient = ReturnType<typeof createBackendApiClient>;
+
+export const LINUX_SERVER_ROUTE_HEADER = "X-Test-Agent-Linux-Server-Id";
 
 // 统一读取环境变量：Vite 运行时（import.meta.env）优先，Node 运行时（process.env）兜底
 function readEnv(key: string): string | undefined {
@@ -429,6 +435,19 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     return requestFrom<T>(baseUrl, path, init);
   }
 
+  /**
+   * 仅为需要用户绑定 Java 的请求增加 Nginx 首跳提示。该值不持久化，也不替代后端权威路由校验。
+   */
+  async function routedRequest<T>(path: string, init: ExtraRequestInit = {}): Promise<T> {
+    const linuxServerId = options.routeLinuxServerId?.()?.trim();
+    if (!linuxServerId) {
+      return request<T>(path, init);
+    }
+    const headers = new Headers(init.headers);
+    headers.set(LINUX_SERVER_ROUTE_HEADER, linuxServerId);
+    return requestFrom<T>(baseUrl, path, { ...init, headers });
+  }
+
   async function requestCsv(path: string, init: RequestInit = {}): Promise<Blob> {
     const traceId = traceIdFactory();
     const headers = new Headers(init.headers);
@@ -483,7 +502,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     existing?.close();
     // route、ticket 和 socket 创建必须作为一个整体复用，避免并发打开文件时重复建连。
     const connection = (async () => {
-      const route = await request<WorkspaceFileRoute>(
+      const route = await routedRequest<WorkspaceFileRoute>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/file-ws-route`,
         { method: "POST" }
       );
@@ -643,7 +662,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   return {
     listWorkspaces: (page = 1, size = 20) =>
       request<PageResponse<Workspace>>(`${workspaceManagementBase}/workspaces?page=${page}&size=${size}`),
-    getWorkspace: (workspaceId: string) => request<Workspace>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}`),
+    getWorkspace: (workspaceId: string) => routedRequest<Workspace>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}`),
     listManagedApplications: () => request<ManagedApplication[]>(`${workspaceManagementBase}/applications`),
     /** 仅返回当前应用关联的 APPLICATION_ASSET_REPOSITORY。 */
     listReferenceRepositories: (appId: string) =>
@@ -681,23 +700,23 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listWorkspaceTemplates: (appId: string) =>
       request<ApplicationWorkspaceTemplate[]>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates`),
     listWorkspaceVersions: (appId: string, templateId: string) =>
-      request<ApplicationWorkspaceVersion[]>(
+      routedRequest<ApplicationWorkspaceVersion[]>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`
       ),
     createWorkspaceVersion: (appId: string, templateId: string, payload: CreateWorkspaceVersionPayload) =>
-      request<ApplicationWorkspaceVersion>(
+      routedRequest<ApplicationWorkspaceVersion>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
     gitPullWorkspaceVersion: (versionId: string) =>
-      request<ApplicationWorkspaceVersion>(
+      routedRequest<ApplicationWorkspaceVersion>(
         `${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/git-pull`,
         { method: "POST" }
       ),
     listPersonalWorkspaces: (versionId: string) =>
-      request<PersonalWorkspace[]>(`${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/personal-workspaces`),
+      routedRequest<PersonalWorkspace[]>(`${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/personal-workspaces`),
     createPersonalWorkspace: (versionId: string, payload: CreatePersonalWorkspacePayload) =>
-      request<PersonalWorkspace>(`${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/personal-workspaces`, {
+      routedRequest<PersonalWorkspace>(`${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/personal-workspaces`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
@@ -705,25 +724,25 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     getRecentManagedWorkspaceForApplication: (appId: string) =>
       request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/recent-workspace`),
     markRecentManagedWorkspace: (workspaceId: string) =>
-      request<ManagedWorkspaceRuntime>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/recent`, { method: "POST" }),
+      routedRequest<ManagedWorkspaceRuntime>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/recent`, { method: "POST" }),
     markRecentBranch: (appId: string, workspaceId: string, branch: string) =>
-      request<WorkspaceBranchPreference>(
+      routedRequest<WorkspaceBranchPreference>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}/branch-preference`,
         { method: "POST", body: JSON.stringify({ branch }) }
       ),
     getRecentBranch: (appId: string, workspaceId: string) =>
-      request<WorkspaceBranchPreference | null>(
+      routedRequest<WorkspaceBranchPreference | null>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}/branch-preference`
       ),
     diffPersonalWorkspace: (personalWorkspaceId: string) =>
-      request<WorkspaceDiff>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/diff`),
+      routedRequest<WorkspaceDiff>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/diff`),
     syncPersonalToApplication: (personalWorkspaceId: string, payload: SyncWorkspacePayload) =>
-      request<WorkspaceSyncResult>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/sync-to-application`, {
+      routedRequest<WorkspaceSyncResult>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/sync-to-application`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
     syncApplicationToPersonal: (personalWorkspaceId: string, payload: SyncWorkspacePayload) =>
-      request<WorkspaceSyncResult>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/sync-from-application`, {
+      routedRequest<WorkspaceSyncResult>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/sync-from-application`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
@@ -732,7 +751,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
      * 存在则复用，不存在则后台创建。
      */
     ensureDefaultPersonalWorkspace: (versionId: string) =>
-      request<DefaultPersonalWorkspaceResponse>(
+      routedRequest<DefaultPersonalWorkspaceResponse>(
         `${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/ensure-default-personal-workspace`,
         { method: "POST" }
       ),
@@ -741,30 +760,30 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
      * @param workspaceId 运行时 workspace ID（personal workspace 的 runtimeWorkspace.workspaceId）
      */
     getWorkspaceGitDiff: (workspaceId: string) =>
-      request<WorkspaceGitDiff>(
+      routedRequest<WorkspaceGitDiff>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-diff`
       ),
     discardWorkspaceGitFiles: (workspaceId: string, files: string[]) =>
-      request<void>(
+      routedRequest<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-discard`,
         { method: "POST", body: JSON.stringify({ files }) }
       ),
     stageWorkspaceGitFiles: (workspaceId: string, files: string[]) =>
-      request<void>(
+      routedRequest<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-stage`,
         { method: "POST", body: JSON.stringify({ files }) }
       ),
     unstageWorkspaceGitFiles: (workspaceId: string, files: string[]) =>
-      request<void>(
+      routedRequest<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-unstage`,
         { method: "POST", body: JSON.stringify({ files }) }
       ),
     getWorkspaceGitConflict: (workspaceId: string, path: string) =>
-      request<WorkspaceGitConflict>(
+      routedRequest<WorkspaceGitConflict>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict${query({ path })}`
       ),
     resolveWorkspaceGitConflict: (workspaceId: string, payload: ResolveWorkspaceGitConflictPayload) =>
-      request<void>(
+      routedRequest<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/resolve`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
@@ -772,34 +791,34 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       workspaceId: string,
       payload: ResolveAllWorkspaceGitConflictsPayload
     ) =>
-      request<void>(
+      routedRequest<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/resolve-all`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
     abortWorkspaceGitConflict: (workspaceId: string) =>
-      request<void>(
+      routedRequest<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/abort`,
         { method: "POST" }
       ),
     completeWorkspaceGitMerge: (workspaceId: string) =>
-      request<WorkspaceGitMergeCompletion>(
+      routedRequest<WorkspaceGitMergeCompletion>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/complete`,
         { method: "POST" }
       ),
     /** 仅提交个人 worktree，不推送远端。 */
     commitPersonalWorkspace: (personalWorkspaceId: string, payload: PublishPersonalWorkspacePayload) =>
-      request<PublishPersonalWorkspaceResult>(
+      routedRequest<PublishPersonalWorkspaceResult>(
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/commit`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
     /** 从个人 HEAD 按白名单投影到应用 feature worktree，提交并推送。 */
     publishPersonalWorkspace: (personalWorkspaceId: string, payload: PublishPersonalWorkspacePayload) =>
-      request<PublishPersonalWorkspaceResult>(
+      routedRequest<PublishPersonalWorkspaceResult>(
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/publish`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
     previewPersonalWorkspacePublish: (personalWorkspaceId: string) =>
-      request<PublishPersonalWorkspacePreview>(
+      routedRequest<PublishPersonalWorkspacePreview>(
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/publish-preview`,
         { method: "POST" }
       ),
@@ -929,7 +948,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     getPublicAgentConfigStatus: () => request<AgentConfigStatus>(`${agentConfigBase}/public/status`),
     getWorkspaceAgentConfigStatus: (workspaceId: string) =>
-      request<AgentConfigStatus>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/status`),
+      routedRequest<AgentConfigStatus>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/status`),
     listPublicAgentBranches: () => request<string[]>(`${agentConfigBase}/public/branches`),
     listPublicAgentRepositories: () => request<PublicAgentRepositoryStatus[]>(`${agentConfigBase}/public/repositories`),
     listPublicAgentWorktrees: (linuxServerId: string) =>
@@ -1117,34 +1136,34 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { workspaceId, worktreeId }
       ),
     createWorkspaceAgentWorktree: (workspaceId: string, payload: AgentConfigWorktreePayload) =>
-      request<AgentConfigWorktree>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/worktrees`, {
+      routedRequest<AgentConfigWorktree>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/worktrees`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
     getWorkspaceAgentDiff: (workspaceId: string, worktreeId?: string | null) =>
-      request<AgentConfigDiff>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/diff${query({ worktreeId })}`),
+      routedRequest<AgentConfigDiff>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/diff${query({ worktreeId })}`),
     stageWorkspaceAgentFiles: (workspaceId: string, files: string[], worktreeId?: string | null) =>
-      request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/stage`, {
+      routedRequest<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/stage`, {
         method: "POST",
         body: JSON.stringify({ files, worktreeId })
       }),
     unstageWorkspaceAgentFiles: (workspaceId: string, files: string[], worktreeId?: string | null) =>
-      request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/unstage`, {
+      routedRequest<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/unstage`, {
         method: "POST",
         body: JSON.stringify({ files, worktreeId })
       }),
     discardWorkspaceAgentFiles: (workspaceId: string, files: string[], worktreeId?: string | null) =>
-      request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/discard`, {
+      routedRequest<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/discard`, {
         method: "POST",
         body: JSON.stringify({ files, worktreeId })
       }),
     commitWorkspaceAgentConfig: (workspaceId: string, payload: AgentConfigCommitPayload) =>
-      request<AgentConfigOperation>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/commit`, {
+      routedRequest<AgentConfigOperation>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/commit`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
     publishWorkspaceAgentConfig: (workspaceId: string, worktreeId?: string | null, operationId?: string) =>
-      request<AgentConfigOperation>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/publish`, {
+      routedRequest<AgentConfigOperation>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/publish`, {
         method: "POST",
         body: JSON.stringify({ worktreeId, operationId })
       }),
@@ -1205,28 +1224,28 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       return socket;
     },
     listAllSessions: (page = 1, size = 30, q?: string) =>
-      request<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),
+      routedRequest<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),
     getSessionRuntimeState: () =>
-      request<SessionRuntimeStateSummary>(`${opencodeRuntimeBase}/sessions/runtime-state`),
+      routedRequest<SessionRuntimeStateSummary>(`${opencodeRuntimeBase}/sessions/runtime-state`),
     listSessions: (workspaceId: string, page = 1, size = 20) =>
-      request<PageResponse<Session>>(`${opencodeRuntimeBase}/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),
-    getSession: (sessionId: string) => request<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`),
+      routedRequest<PageResponse<Session>>(`${opencodeRuntimeBase}/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),
+    getSession: (sessionId: string) => routedRequest<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`),
     updateSession: (sessionId: string, payload: { title?: string; pinned?: boolean }) =>
-      request<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`, { method: "PATCH", body: JSON.stringify(payload) }),
-    deleteSession: (sessionId: string) => request<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
+      routedRequest<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    deleteSession: (sessionId: string) => routedRequest<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
     listSessionMessages: (sessionId: string, page = 1, size = 100, options: { refresh?: boolean } = {}) =>
-      request<PageResponse<SessionMessage>>(
+      routedRequest<PageResponse<SessionMessage>>(
         `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages${query({ page, size, refresh: options.refresh })}`
       ),
     getNightExecutionSlots: () =>
-      request<NightExecutionSlots>(`${opencodeRuntimeBase}/night-execution/slots`),
+      routedRequest<NightExecutionSlots>(`${opencodeRuntimeBase}/night-execution/slots`),
     createNightExecutionTask: (payload: CreateNightExecutionTaskPayload) =>
-      request<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks`, {
+      routedRequest<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
     listNightExecutionTasks: (params: { sessionId?: string; page?: number; size?: number } = {}) =>
-      request<NightExecutionTaskQueryResponse>(
+      routedRequest<NightExecutionTaskQueryResponse>(
         `${opencodeRuntimeBase}/night-execution/tasks${query({
           sessionId: params.sessionId,
           page: params.page,
@@ -1234,20 +1253,20 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         })}`
       ),
     adjustNightExecutionTask: (taskId: string, slotStart: string) =>
-      request<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}`, {
+      routedRequest<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}`, {
         method: "PATCH",
         body: JSON.stringify({ slotStart })
       }),
     cancelNightExecutionTask: (taskId: string) =>
-      request<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}/cancel`, {
+      routedRequest<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}/cancel`, {
         method: "POST"
       }),
     dismissNightExecutionTask: (taskId: string) =>
-      request<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}/dismiss`, {
+      routedRequest<NightExecutionTask>(`${opencodeRuntimeBase}/night-execution/tasks/${encodeURIComponent(taskId)}/dismiss`, {
         method: "POST"
       }),
     getSessionTreeMessages: (sessionId: string) =>
-      request<SessionTreeMessagesResponse>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/session-tree/messages`)),
+      routedRequest<SessionTreeMessagesResponse>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/session-tree/messages`)),
     putMessageFeedback: (messageId: string, payload: AiMessageFeedbackPayload) =>
       request<AiMessageFeedback>(`/api/internal/platform/opencode-runtime/messages/${encodeURIComponent(messageId)}/feedback`, {
         method: "PUT",
@@ -1267,17 +1286,17 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(payload)
       }),
-    getActiveRun: (sessionId: string) => request<Run | null>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/active-run`),
+    getActiveRun: (sessionId: string) => routedRequest<Run | null>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/active-run`),
     askSideQuestion: (sessionId: string, payload: SideQuestionRequest) =>
-      request<SideQuestionResponse>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/side-question`, {
+      routedRequest<SideQuestionResponse>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/side-question`, {
         method: "POST",
         body: JSON.stringify(payload),
         timeoutMs: 120000
       }),
     getRunContext: (sessionId: string) =>
-      request<ConversationRunContext>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/run-context`), { method: "POST" }),
+      routedRequest<ConversationRunContext>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/run-context`), { method: "POST" }),
     startSideQuestionRun: (sessionId: string, payload: SideQuestionRunRequest) =>
-      request<SideQuestionRunResponse>(
+      routedRequest<SideQuestionRunResponse>(
         `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/side-question/runs`,
         {
           method: "POST",
@@ -1285,25 +1304,25 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         }
       ),
     startManualQuestionRun: (payload: ManualQuestionRunRequest) =>
-      request<SideQuestionRunResponse>(`${opencodeRuntimeBase}/manual-question/runs`, {
+      routedRequest<SideQuestionRunResponse>(`${opencodeRuntimeBase}/manual-question/runs`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
     createSession: (workspaceId: string, title: string) =>
-      request<Session>(`${opencodeRuntimeBase}/sessions`, { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
+      routedRequest<Session>(`${opencodeRuntimeBase}/sessions`, { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
     startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>
-      request<Run>(agentPath("/runs"), {
+      routedRequest<Run>(agentPath("/runs"), {
         method: "POST",
         body: JSON.stringify(normalizeStartRunPayload(sessionIdOrPayload, prompt)),
         timeoutMs: 120000
       }),
-    getMyOpencodeProcess: () => request<UserOpencodeProcess>(agentPath("/processes/me")),
+    getMyOpencodeProcess: () => routedRequest<UserOpencodeProcess>(agentPath("/processes/me")),
     getMyOpencodeMessageGate: () =>
       request<UserOpencodeMessageGate>(agentPath("/processes/me/message-gate")),
     getMyOpencodeProcessHealth: (params: UserOpencodeProcessHealthRequest) =>
-      request<UserOpencodeProcessHealth>(agentPath(`/processes/me/health${query(params)}`)),
+      routedRequest<UserOpencodeProcessHealth>(agentPath(`/processes/me/health${query(params)}`)),
     initializeMyOpencodeProcess: (operationId?: string) =>
-      request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), {
+      routedRequest<UserOpencodeProcess>(agentPath("/processes/me/initialize"), {
         method: "POST",
         ...(operationId ? { body: JSON.stringify({ operationId }) } : {}),
         timeoutMs: 120000
@@ -1415,113 +1434,113 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<InternalModelProviderRefreshStatus>(`${configurationBase}/internal-model-providers/refresh-status`),
     refreshInternalModelProviders: () =>
       request<InternalModelProviderRefreshStatus>(`${configurationBase}/internal-model-providers/refresh`, { method: "POST" }),
-    getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
-    cancelRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
-    getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),
-    acceptRunDiff: (runId: string) => request<RunDiffAction>(agentPath(`/runs/${encodeURIComponent(runId)}/diff/accept`), { method: "POST" }),
-    rejectRunDiff: (runId: string) => request<RunDiffAction>(agentPath(`/runs/${encodeURIComponent(runId)}/diff/reject`), { method: "POST" }),
+    getRun: (runId: string) => routedRequest<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
+    cancelRun: (runId: string) => routedRequest<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
+    getRunDiff: (runId: string) => routedRequest<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),
+    acceptRunDiff: (runId: string) => routedRequest<RunDiffAction>(agentPath(`/runs/${encodeURIComponent(runId)}/diff/accept`), { method: "POST" }),
+    rejectRunDiff: (runId: string) => routedRequest<RunDiffAction>(agentPath(`/runs/${encodeURIComponent(runId)}/diff/reject`), { method: "POST" }),
     listAgents: async (workspaceId?: string, init?: ExtraRequestInit) =>
-      (await runtimeList(`${opencodeRuntimeBase}/agents${query({ workspaceId })}`, request, init)).map(toAgentInfo),
-    listModels: async (workspaceId?: string) => (await runtimeList(`${opencodeRuntimeBase}/models${query({ workspaceId })}`, request)).map(toModelInfo),
+      (await runtimeList(`${opencodeRuntimeBase}/agents${query({ workspaceId })}`, routedRequest, init)).map(toAgentInfo),
+    listModels: async (workspaceId?: string) => (await runtimeList(`${opencodeRuntimeBase}/models${query({ workspaceId })}`, routedRequest)).map(toModelInfo),
     listProviders: async (workspaceId?: string) =>
-      (await runtimeList(`${opencodeRuntimeBase}/providers${query({ workspaceId })}`, request)).map(toProviderInfo),
-    getConfig: (workspaceId?: string) => request<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`),
+      (await runtimeList(`${opencodeRuntimeBase}/providers${query({ workspaceId })}`, routedRequest)).map(toProviderInfo),
+    getConfig: (workspaceId?: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`),
     updateConfig: (payload: Record<string, unknown>, workspaceId?: string) =>
-      request<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`, { method: "PATCH", body: JSON.stringify(payload) }),
-    disposeGlobal: () => request<unknown>(`${opencodeRuntimeBase}/global/dispose`, { method: "POST" }),
-    listProviderAuth: (workspaceId?: string) => request<unknown>(`${opencodeRuntimeBase}/provider/auth${query({ workspaceId })}`),
+      routedRequest<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    disposeGlobal: () => routedRequest<unknown>(`${opencodeRuntimeBase}/global/dispose`, { method: "POST" }),
+    listProviderAuth: (workspaceId?: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/provider/auth${query({ workspaceId })}`),
     authorizeProviderOAuth: (providerId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/provider/${encodeURIComponent(providerId)}/oauth/authorize`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/provider/${encodeURIComponent(providerId)}/oauth/authorize`, payload, routedRequest),
     completeProviderOAuth: (providerId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/provider/${encodeURIComponent(providerId)}/oauth/callback`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/provider/${encodeURIComponent(providerId)}/oauth/callback`, payload, routedRequest),
     setProviderAuth: (providerId: string, payload: Record<string, unknown>) =>
-      request<unknown>(`${opencodeRuntimeBase}/auth/${encodeURIComponent(providerId)}`, { method: "PUT", body: JSON.stringify(payload) }),
+      routedRequest<unknown>(`${opencodeRuntimeBase}/auth/${encodeURIComponent(providerId)}`, { method: "PUT", body: JSON.stringify(payload) }),
     removeProviderAuth: (providerId: string) =>
-      request<unknown>(`${opencodeRuntimeBase}/auth/${encodeURIComponent(providerId)}`, { method: "DELETE" }),
+      routedRequest<unknown>(`${opencodeRuntimeBase}/auth/${encodeURIComponent(providerId)}`, { method: "DELETE" }),
     listCommands: async (workspaceId?: string) =>
-      (await runtimeList(`${opencodeRuntimeBase}/commands${query({ workspaceId })}`, request)).map(toCommandInfo),
-    listReferences: (workspaceId?: string) => request<unknown>(`${opencodeRuntimeBase}/references${query({ workspaceId })}`),
-    listRuntimeFiles: (workspaceId?: string, path = ".") => request<unknown>(`${opencodeRuntimeBase}/fs/list${query({ workspaceId, path })}`),
-    findRuntimeFiles: (workspaceId?: string, search = "") => request<unknown>(`${opencodeRuntimeBase}/fs/find${query({ workspaceId, query: search })}`),
+      (await runtimeList(`${opencodeRuntimeBase}/commands${query({ workspaceId })}`, routedRequest)).map(toCommandInfo),
+    listReferences: (workspaceId?: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/references${query({ workspaceId })}`),
+    listRuntimeFiles: (workspaceId?: string, path = ".") => routedRequest<unknown>(`${opencodeRuntimeBase}/fs/list${query({ workspaceId, path })}`),
+    findRuntimeFiles: (workspaceId?: string, search = "") => routedRequest<unknown>(`${opencodeRuntimeBase}/fs/find${query({ workspaceId, query: search })}`),
     readRuntimeFile: (workspaceId: string | undefined, path: string) =>
-      request<unknown>(`${opencodeRuntimeBase}/fs/read${query({ workspaceId, path })}`),
-    getVcsStatus: (workspaceId?: string) => request<unknown>(`${opencodeRuntimeBase}/vcs/status${query({ workspaceId })}`),
+      routedRequest<unknown>(`${opencodeRuntimeBase}/fs/read${query({ workspaceId, path })}`),
+    getVcsStatus: (workspaceId?: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/vcs/status${query({ workspaceId })}`),
     getVcsDiff: (workspaceId?: string, mode = "git", context?: number) =>
-      request<unknown>(`${opencodeRuntimeBase}/vcs/diff${query({ workspaceId, mode, context })}`),
+      routedRequest<unknown>(`${opencodeRuntimeBase}/vcs/diff${query({ workspaceId, mode, context })}`),
     getVcsDiffFiles: async (workspaceId?: string, mode = "working", context?: number) => ({
-      files: listFromRuntimeEnvelope(await request<unknown>(`${opencodeRuntimeBase}/vcs/diff${query({ workspaceId, mode, context })}`)).map(toRunDiffFile)
+      files: listFromRuntimeEnvelope(await routedRequest<unknown>(`${opencodeRuntimeBase}/vcs/diff${query({ workspaceId, mode, context })}`)).map(toRunDiffFile)
     }),
-    getLspStatus: (workspaceId?: string) => request<unknown>(`${opencodeRuntimeBase}/lsp/status${query({ workspaceId })}`),
-    getMcpStatus: (workspaceId?: string) => request<unknown>(`${opencodeRuntimeBase}/mcp/status${query({ workspaceId })}`),
+    getLspStatus: (workspaceId?: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/lsp/status${query({ workspaceId })}`),
+    getMcpStatus: (workspaceId?: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/mcp/status${query({ workspaceId })}`),
     getMcpResources: async (workspaceId?: string) =>
-      listFromRuntimeEnvelope(await request<unknown>(`${opencodeRuntimeBase}/mcp/resources${query({ workspaceId })}`)).map(toRuntimeResourceInfo),
+      listFromRuntimeEnvelope(await routedRequest<unknown>(`${opencodeRuntimeBase}/mcp/resources${query({ workspaceId })}`)).map(toRuntimeResourceInfo),
     getMcpTools: async (workspaceId?: string, provider?: string, model?: string) =>
-      listValuesFromRuntimeEnvelope(await request<unknown>(`${opencodeRuntimeBase}/mcp/tools${query({ workspaceId, provider, model })}`)).map((item) =>
+      listValuesFromRuntimeEnvelope(await routedRequest<unknown>(`${opencodeRuntimeBase}/mcp/tools${query({ workspaceId, provider, model })}`)).map((item) =>
         typeof item === "string" ? toRuntimeToolInfo({ id: item, name: item }) : toRuntimeToolInfo(item)
       ),
     startMcpAuth: (name: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/mcp/${encodeURIComponent(name)}/auth`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/mcp/${encodeURIComponent(name)}/auth`, payload, routedRequest),
     completeMcpAuth: (name: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/mcp/${encodeURIComponent(name)}/auth/callback`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/mcp/${encodeURIComponent(name)}/auth/callback`, payload, routedRequest),
     authenticateMcp: (name: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/mcp/${encodeURIComponent(name)}/auth/authenticate`, payload, request),
-    removeMcpAuth: (name: string) => request<unknown>(`${opencodeRuntimeBase}/mcp/${encodeURIComponent(name)}/auth`, { method: "DELETE" }),
-    listWorktrees: (workspaceId?: string) => request<unknown>(`${opencodeRuntimeBase}/worktrees${query({ workspaceId })}`),
-    createWorktree: (payload?: Record<string, unknown>) => postRuntime(`${opencodeRuntimeBase}/worktrees`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/mcp/${encodeURIComponent(name)}/auth/authenticate`, payload, routedRequest),
+    removeMcpAuth: (name: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/mcp/${encodeURIComponent(name)}/auth`, { method: "DELETE" }),
+    listWorktrees: (workspaceId?: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/worktrees${query({ workspaceId })}`),
+    createWorktree: (payload?: Record<string, unknown>) => postRuntime(`${opencodeRuntimeBase}/worktrees`, payload, routedRequest),
     removeWorktree: (payload?: Record<string, unknown>) =>
-      request<unknown>(`${opencodeRuntimeBase}/worktrees`, { method: "DELETE", body: payload == null ? undefined : JSON.stringify(payload) }),
-    resetWorktree: (payload?: Record<string, unknown>) => postRuntime(`${opencodeRuntimeBase}/worktrees/reset`, payload, request),
-    getSessionChildren: (sessionId: string) => request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/children`),
+      routedRequest<unknown>(`${opencodeRuntimeBase}/worktrees`, { method: "DELETE", body: payload == null ? undefined : JSON.stringify(payload) }),
+    resetWorktree: (payload?: Record<string, unknown>) => postRuntime(`${opencodeRuntimeBase}/worktrees/reset`, payload, routedRequest),
+    getSessionChildren: (sessionId: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/children`),
     getSessionTodo: async (sessionId: string) =>
-      listFromRuntimeEnvelope(await request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/todo`)).map(toTodoItem),
+      listFromRuntimeEnvelope(await routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/todo`)).map(toTodoItem),
     getSessionDiff: async (sessionId: string, messageId?: string) => ({
       sessionId,
       messageId,
       files: listFromRuntimeEnvelope(
-        await request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/diff${query({ messageId })}`)
+        await routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/diff${query({ messageId })}`)
       ).map(toRunDiffFile)
     }) satisfies SessionDiff,
-    abortSession: (sessionId: string) => request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
+    abortSession: (sessionId: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
     forkSession: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/fork`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/fork`, payload, routedRequest),
     compactSession: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/compact`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/compact`, payload, routedRequest),
     revertSession: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/revert`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/revert`, payload, routedRequest),
     unrevertSession: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/unrevert`, payload, request),
+      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/unrevert`, payload, routedRequest),
     runSessionCommand: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/command`, payload, request, { timeoutMs: 120000 }),
+      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/command`, payload, routedRequest, { timeoutMs: 120000 }),
     runSessionShell: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/shell`, payload, request, { timeoutMs: 120000 }),
+      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/shell`, payload, routedRequest, { timeoutMs: 120000 }),
     shareSession: (sessionId: string) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/share`, undefined, request),
+      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/share`, undefined, routedRequest),
     unshareSession: (sessionId: string) =>
-      request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/share`, { method: "DELETE" }),
+      routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/share`, { method: "DELETE" }),
     listSessionPermissions: async (sessionId: string) =>
-      listFromRuntimeEnvelope(await request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/permissions`)).map((item) =>
+      listFromRuntimeEnvelope(await routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/permissions`)).map((item) =>
         toPermissionRequest(item, sessionId)
       ),
     replySessionPermission: (sessionId: string, requestId: string, payload: { decision?: "once" | "always" | "reject"; reply?: string; message?: string }) =>
-      request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(requestId)}/reply`, {
+      routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(requestId)}/reply`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
     listSessionQuestions: async (sessionId: string) =>
-      listFromRuntimeEnvelope(await request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions`)).map((item) =>
+      listFromRuntimeEnvelope(await routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions`)).map((item) =>
         toQuestionRequest(item, sessionId)
       ),
     replySessionQuestion: (sessionId: string, requestId: string, payload: { answers: unknown[] }) =>
-      request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reply`, {
+      routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reply`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),
     rejectSessionQuestion: (sessionId: string, requestId: string) =>
-      request<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reject`, {
+      routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reject`, {
         method: "POST"
       }),
     createTerminalTicket: (sessionId: string, payload: TerminalTicketRequest = {}) =>
-      request<TerminalTicketResponse>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/terminal/tickets`, {
+      routedRequest<TerminalTicketResponse>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/terminal/tickets`, {
         method: "POST",
         body: JSON.stringify(compactObject(payload))
       }),
@@ -1658,9 +1677,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${configurationBase}/applications/${encodeURIComponent(appId)}/repositories/${encodeURIComponent(repositoryId)}/tree${query({ branch })}`
       ),
     listApplicationWorkspaces: (appId: string) =>
-      request<ApplicationWorkspaceConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`),
+      routedRequest<ApplicationWorkspaceConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`),
     createApplicationWorkspace: (appId: string, payload: CreateApplicationWorkspacePayload) =>
-      request<CreateWorkspaceAcceptedResponse>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`, {
+      routedRequest<CreateWorkspaceAcceptedResponse>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),

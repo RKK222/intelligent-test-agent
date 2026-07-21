@@ -43,6 +43,8 @@ type AgentConfigMutation = {
 
 const props = defineProps<{
   baseUrl: string;
+  /** 当前页面内存中的用户绑定服务器；公共配置 API 不使用该提示。 */
+  routeLinuxServerId?: string;
   workspaceId?: string;
   /** 公共配置 Git 写权限，仅超级管理员可用。 */
   canWrite: boolean;
@@ -69,7 +71,10 @@ const emit = defineEmits<{
 }>();
 
 const workbench = useWorkbenchStore();
-const api = createBackendApiClient({ baseUrl: props.baseUrl });
+const api = createBackendApiClient({
+  baseUrl: props.baseUrl,
+  routeLinuxServerId: () => props.routeLinuxServerId
+});
 const workspaceCanWrite = computed(() => props.canManageWorkspaceConfig ?? props.canWrite);
 
 const status = ref<{ PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus }>({});

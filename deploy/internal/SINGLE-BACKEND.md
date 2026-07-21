@@ -333,7 +333,7 @@ cp -a /data/apps/nginx/conf/test-agent.conf \
 ```dotenv
 TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
-TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080
+TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080
 TEST_AGENT_NGINX_LISTEN_PORT=80
 TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
 TEST_AGENT_NGINX_TLS_ENABLED=false
@@ -345,7 +345,9 @@ TEST_AGENT_NGINX_MAIN_CONF=/data/apps/nginx/conf/nginx.conf
 TEST_AGENT_NGINX_RELOAD_MODE=binary
 ```
 
-实体 Nginx 同时监听 `80` 和 `9996`：企业域名入口按现有链路落到 `.2:80`，IP 入口直接使用 `http://122.233.30.2:9996`。前端部署脚本会调用 [configure-nginx.sh](configure-nginx.sh)，自动渲染 [nginx/gateway.conf.template](nginx/gateway.conf.template)、再次备份旧配置、用实体 Nginx 执行 `-t/-T`、确认该文件确实已被 include，并 reload；失败会恢复旧配置。
+实体 Nginx 同时监听 `80` 和 `9996`：企业域名入口按现有链路落到 `.2:80`，IP 入口直接使用 `http://122.233.30.2:9996`。`TEST_AGENT_NGINX_SERVER_ROUTES` 是普通 HTTP、SSE 和服务器终端共用的 `linuxServerId -> Java endpoint` 白名单；已知 ID 进入对应专用 upstream，缺失或未知 ID 仍进入默认 upstream。Nginx 发往 Java 前会删除 `X-Test-Agent-Linux-Server-Id` 和外部传入的 `X-Test-Agent-Backend-Routed`。前端部署脚本会调用 [configure-nginx.sh](configure-nginx.sh)，自动渲染 [nginx/gateway.conf.template](nginx/gateway.conf.template)、再次备份旧配置、用实体 Nginx 执行 `-t/-T`、确认该文件确实已被 include，并 reload；失败会恢复旧配置。
+
+从旧包升级时，把 `nginx.env` 中的 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 原键名改为 `TEST_AGENT_NGINX_SERVER_ROUTES`，右侧值不变，不能同时保留两个键。先执行 `bash /data/testagent/deploy/internal/configure-nginx.sh --env-file /data/testagent/config/nginx.env --validate-only`，预期 `server route count: 1`，再按本节前端部署命令正式安装并 reload。
 
 也可从交付包生成同一份环境文件，但必须明确传入已经加载的文件，不能依赖自动目录探测：
 

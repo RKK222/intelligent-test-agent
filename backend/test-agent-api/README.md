@@ -9,6 +9,7 @@
 - 暴露 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
 - 旧 runtime/workspace `/api/...` 兼容 URL 由 `LegacyApiGoneWebFilter` 在进入 Controller 前统一返回 `410 API_GONE`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。
 - `web.platform` 承载平台自身接口，`web.agent` 承载 agent runtime 代理入口，`web.common` 承载 traceId、鉴权、限流、旧接口作废拦截和统一异常等入口支撑。
+- CORS allowed headers 包含前端可选的 `X-Test-Agent-Linux-Server-Id`。该头在生产由 Nginx 静态白名单消费并在转发前删除，只是首跳提示；API 层仍按 binding、Session、Run 和运行上下文执行既有权威路由与鉴权。
 - 普通 Workspace HTTP 入口只保留查询和文件路由；服务器目录选择与创建仅通过超级管理员文件 WebSocket ticket 执行。
 - 暴露应用版本工作区、版本 `git pull` 和个人工作区运行接口，Controller 只解析登录主体、traceId、当前用户 opencode agent 服务器并委托 workspace-management；应用成员权限由业务服务校验。
 - 工作区 Git 入口包含 diff/discard、真实 stage/unstage、三方冲突读取、单文件解决、取消 merge、个人 worktree 本地提交和 feature 发布；发布只把个人 `HEAD` 中允许发布的非 `spec/**` 文件投影到应用 feature worktree，不 merge 个人分支，`SUPER_ADMIN` 也不能绕过目录规则。应用 `.opencode/**` 与普通文件共用个人 worktree，因此 `ManagedWorkspaceController` 在 commit/publish 入口对该目录再次校验 `APP_ADMIN`（含 `SUPER_ADMIN`），防止绕过 AgentConfig API；其它 Git 业务规则仍由 workspace-management 负责。个人工作区提交/发布 DTO 透传可选 `operationId`，供业务层复用 Agent 配置进度 WebSocket 推送当前 Git 命令。
@@ -85,7 +86,7 @@
 - Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、公共个人 `runtime-reload` 离开 WebFlux 事件线程执行、文件 WebSocket route/ticket/op、文件读写改名删除权限、Git stage/unstage/discard/冲突操作鉴权、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
 - `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull`、工作区 Git stage/unstage、冲突解决、最近使用接口，以及普通成员绕过 Agent API 提交 `.opencode/**` 时的拒绝。
-- `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单。
+- `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单，以及 `X-Test-Agent-Linux-Server-Id` 的 CORS 预检允许。
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。
 - `ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 请求/响应字段脱敏。

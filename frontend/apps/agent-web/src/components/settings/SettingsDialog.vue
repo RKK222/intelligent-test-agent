@@ -10,6 +10,8 @@ type MenuKey = "appWorkspace" | "repository" | "personal" | "userManagement";
 const props = defineProps<{
   open: boolean;
   currentUser: CurrentUser | null;
+  /** 当前页面内存中的用户绑定服务器；只有本地工作区 API 会使用。 */
+  routeLinuxServerId?: string;
   initialAppId?: string;
   initialMenuKey?: MenuKey;
   initialAppTab?: "members" | "repositories" | "workspaces";
@@ -20,7 +22,10 @@ const emit = defineEmits<{
 }>();
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
-const api = createBackendApiClient({ baseUrl: apiBaseUrl });
+const api = createBackendApiClient({
+  baseUrl: apiBaseUrl,
+  routeLinuxServerId: () => props.routeLinuxServerId
+});
 provide("api", api);
 
 const activeKey = ref<MenuKey>("appWorkspace");
