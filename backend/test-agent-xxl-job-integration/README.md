@@ -25,11 +25,13 @@
 - `TEST_AGENT_XXL_JOB_MYSQL_URL/USERNAME/PASSWORD` 只供 Admin 子上下文使用，Flyway location 固定为顶层独立路径 `xxl-job/db/migration`，不会被平台 PostgreSQL 的 `db/migration` 扫描。
 - `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` 必须在生产使用强随机值并由全部 Admin/executor 共享。
 - `TEST_AGENT_XXL_JOB_ADMIN_PORT` 与 `TEST_AGENT_XXL_JOB_EXECUTOR_PORT` 在同机多进程间必须唯一；executor address 必须可被所有 Admin 节点访问。
-- Admin 启动失败按 5～60 秒指数退避；`xxlJobAdmin` health 独立上报，不属于平台 readiness。
+- Admin 启动失败按 5～60 秒指数退避；`xxlJobAdmin` health 独立上报，不属于平台 readiness；Admin 子上下文的 readiness 只检查其独立 MySQL，不继承平台 Redis 成员。
+- 上游 `application.properties` 在依赖 JAR 中位于 `META-INF/xxl-job-admin-upstream/`，launcher 只把它作为 Admin 子上下文的低优先级默认配置加载；MySQL、端口、access token、SSO 和 Flyway 等平台运行配置以高优先级覆盖，平台主上下文不会读取上游的 Hikari/MySQL 默认值。
 
 ## 测试
 
 - 单元测试覆盖 ticket 一次消费/过期、session marker、JIT 幂等/改名、原生入口禁用、参数校验、锁/续租/停止和异常脱敏。
 - MySQL 8.4 Testcontainers 覆盖 V1-V3 全新初始化、重复 migration、一个 executor 组、六条任务和无默认管理员。
 - `DefaultXxlJobAdminContextLauncherTest` 启动真实 Servlet/Tomcat 子上下文，验证 Flyway 先于 scheduler、原生登录 403、表单 SSO/JIT 和安全 Cookie。
+- `TestAgentRuntimePropertiesBindingTest` 验证上游通用 `spring.datasource.*` 不会进入平台主上下文，launcher 集成测试同时验证重定位后的上游默认项仍在 Admin 子上下文生效。
 - 全部架构与双节点人工验收见 `docs/testing/xxl-job-integration.md`。

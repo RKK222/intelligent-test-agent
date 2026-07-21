@@ -65,4 +65,28 @@
             <artifactId>xxl-sso-core</artifactId>
         </dependency>
     </dependencies>
+
+    <build>
+        <!--
+          上游源码目录保持原样，但不能把 application.properties 放在依赖 JAR 根目录，
+          否则平台主 Spring Boot 上下文会自动加载其中的 MySQL/Hikari 配置。
+        -->
+        <resources combine.self="override">
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>application.properties</exclude>
+                </excludes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <includes>
+                    <include>application.properties</include>
+                </includes>
+                <targetPath>META-INF/xxl-job-admin-upstream</targetPath>
+            </resource>
+        </resources>
+    </build>
 </project>

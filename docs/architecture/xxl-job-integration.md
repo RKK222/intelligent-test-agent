@@ -23,6 +23,7 @@
 
 - `TestAgentApplication` 强制使用 `WebApplicationType.REACTIVE`，避免引入 Servlet 依赖后把平台主上下文切换为 MVC。
 - Admin 使用 `WebApplicationType.SERVLET` 在独立子上下文启动，隔离 Tomcat、MySQL DataSource、MyBatis、Flyway 和安全自动配置。
+- 上游源码目录保留原始 `application.properties`，但依赖 JAR 将它重定位到 `META-INF/xxl-job-admin-upstream/`。Admin launcher 只向 Servlet 子上下文加载这份低优先级默认配置，再用平台 MySQL、端口、access token、SSO 和 Flyway 配置覆盖；WebFlux 主上下文不会加载其中的 Hikari/MySQL 默认值。
 - Admin 启动失败不会关闭平台主上下文。生命周期组件按 5、10、20、40、60 秒上限指数退避重试。
 - `xxlJobAdmin` health component 在 Admin/MySQL 不可用时返回 `DOWN`，但平台 readiness group 只包含平台必需依赖，不包含 XXL health。
 - 同机多 Java 进程必须配置不同的 Admin 端口和 executor 端口。生产入口通过 Nginx 对多个 Admin 子端口做同源代理。

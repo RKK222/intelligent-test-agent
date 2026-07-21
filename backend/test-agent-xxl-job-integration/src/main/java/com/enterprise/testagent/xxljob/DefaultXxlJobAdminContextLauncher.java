@@ -1,6 +1,7 @@
 package com.enterprise.testagent.xxljob;
 
 import com.enterprise.testagent.xxljob.admin.PlatformXxlJobAdminApplication;
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -8,11 +9,16 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.io.support.ResourcePropertySource;
 import org.springframework.stereotype.Component;
 
 /** 使用高优先级属性源启动与平台 WebFlux 完全独立的 Servlet/Tomcat Admin 上下文。 */
 @Component
 public class DefaultXxlJobAdminContextLauncher implements XxlJobAdminContextLauncher {
+
+    private static final String UPSTREAM_DEFAULTS_LOCATION =
+            "classpath:META-INF/xxl-job-admin-upstream/application.properties";
 
     private final XxlJobProperties properties;
 
@@ -23,15 +29,27 @@ public class DefaultXxlJobAdminContextLauncher implements XxlJobAdminContextLaun
     @Override
     public ConfigurableApplicationContext launch(XxlJobAdminBridge bridge) {
         Map<String, Object> childProperties = childProperties();
+        PropertySource<?> upstreamDefaults = loadUpstreamDefaults();
         return new SpringApplicationBuilder(PlatformXxlJobAdminApplication.class)
                 .web(WebApplicationType.SERVLET)
                 .profiles("xxl-admin-child")
                 .initializers(context -> {
+                    // 上游默认项只进入 Admin 子上下文，平台运行配置始终以最高优先级覆盖。
+                    context.getEnvironment().getPropertySources().addLast(upstreamDefaults);
                     context.getEnvironment().getPropertySources()
                             .addFirst(new MapPropertySource("platformXxlJobAdmin", childProperties));
                     context.getBeanFactory().registerSingleton("xxlJobAdminBridge", bridge);
                 })
                 .run();
+    }
+
+    /** 加载构建阶段重定位的上游默认配置，缺失时只让 Admin 子上下文本次启动失败。 */
+    private PropertySource<?> loadUpstreamDefaults() {
+        try {
+            return new ResourcePropertySource("xxlJobAdminUpstreamDefaults", UPSTREAM_DEFAULTS_LOCATION);
+        } catch (IOException exception) {
+            throw new IllegalStateException("XXL Admin 上游默认配置缺失", exception);
+        }
     }
 
     Map<String, Object> childProperties() {
@@ -59,6 +77,8 @@ public class DefaultXxlJobAdminContextLauncher implements XxlJobAdminContextLaun
         values.put("xxl-sso.client.excluded.paths", "/static/**,/platform-sso/**,/error,/actuator/**");
         values.put("xxl-sso.client.login.path", "/platform-sso/required");
         values.put("management.health.mail.enabled", false);
+        // Admin 子上下文不启用 Redis，readiness 只校验其独立 MySQL 数据源。
+        values.put("management.endpoint.health.group.readiness.include", "db");
         values.put("spring.jackson.time-zone", "Asia/Shanghai");
         values.put("spring.autoconfigure.exclude", String.join(",",
                 "org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration",

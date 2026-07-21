@@ -27,6 +27,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** 把 XXL 通用 handler 参数转换为现有 ScheduledTaskHandler 调用，并复用同一 Redis 锁键。 */
@@ -41,6 +42,7 @@ public class XxlJobScheduledTaskAdapter {
     private final Duration renewalMinimum;
     private final boolean ownsExecutor;
 
+    @Autowired
     public XxlJobScheduledTaskAdapter(
             ScheduledTaskRegistry registry,
             ScheduledTaskLock lock,

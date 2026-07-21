@@ -4,6 +4,8 @@
 
 本模块原样保存 XXL-JOB Admin 3.4.2 的 `src/main/java` 与 `src/main/resources`，构建为普通依赖 JAR，不作为独立可部署应用。平台适配、认证和启动装配全部放在 `test-agent-xxl-job-integration`，禁止直接修改本模块中的上游源码。
 
+源码目录中的 `application.properties` 同样保持上游原样；构建时由本模块 POM 将它重定位到 `META-INF/xxl-job-admin-upstream/application.properties`，避免作为依赖时被平台主 Spring Boot 上下文自动加载。`test-agent-xxl-job-integration` 只在 Admin Servlet 子上下文启动时显式加载该资源，因此上游 Freemarker、邮件、调度线程池和超时等默认项仍然有效。
+
 ## 上游信息
 
 - 项目：`xuxueli/xxl-job`
@@ -26,3 +28,4 @@
 - 下游依赖：Spring MVC、Freemarker、MyBatis、MySQL Driver、`xxl-job-core`、`xxl-sso-core`。
 - 允许修改：本模块 POM、README、LICENSE 和上游版本元数据。
 - 禁止修改：`com.xxl.job.admin` 源码与上游静态资源；平台改造必须放到 integration 模块。
+- 资源打包：禁止把上游 `application.properties` 放回依赖 JAR 根目录；升级替换 `src/main` 后必须确认它仍只出现在上述 `META-INF` 路径。

@@ -14,6 +14,7 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +32,7 @@ public class RedisXxlJobSsoTicketService implements XxlJobSsoTicketService {
     private final Clock clock;
     private final SecureRandom secureRandom;
 
+    @Autowired
     public RedisXxlJobSsoTicketService(
             StringRedisTemplate redisTemplate,
             ObjectMapper objectMapper,

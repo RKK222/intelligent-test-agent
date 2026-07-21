@@ -11,6 +11,9 @@
 - handler 参数、未知任务/策略、`GLOBAL_MUTEX`/`ALLOW_OVERLAP`、锁续租丢失、线程中断和异常脱敏。
 - MySQL 8.4 全新 Flyway、重复启动、并发 migration、一个 executor 组、六个任务和无默认管理员。
 - 平台主应用保持 Reactive；Admin 使用独立 Servlet 端口；Admin 启动失败只上报 XXL health DOWN，不进入平台 readiness。
+- Admin 子上下文即使继承到平台 `readinessState,db,redis` 配置，也必须覆盖为仅检查自身 MySQL，不能因未启用 Redis 而启动失败。
+- 上游 `application.properties` 不会向平台主上下文暴露通用 Hikari/MySQL 数据源配置；重定位后的 Freemarker、调度超时等默认项仍由 Admin 子上下文加载，并由平台运行配置按优先级覆盖。
+- 带生产构造器和测试构造器的 Spring 组件必须通过真实应用上下文装配测试，确保生产构造器被明确选中且不会退回无参实例化。
 
 前端至少覆盖：
 

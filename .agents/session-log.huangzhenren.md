@@ -21,6 +21,22 @@
   - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端 3000 与登录 CORS 正常、manager WebSocket 已连接。本次只改变 Git committer 邮箱规则和前端失败恢复状态，不新增或变更 HTTP/RunEvent/数据库/SQL/权限/generated SDK/环境配置。
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
+### 2026-07-21 - 修复 XXL-JOB 后端启动失败
+
+- Why:
+  - XXL 上游依赖 JAR 根目录的 `application.properties` 被平台主 Spring Boot 上下文自动加载，可能以 MySQL/Hikari 通用配置污染平台 PostgreSQL/Druid；隔离后，后端又依次暴露两个多构造器组件未明确注入构造器，以及 Admin 子上下文继承平台 Redis readiness 成员而无法启动的问题。
+- What:
+  - 构建时把未修改的上游 `application.properties` 重定位到 `META-INF/xxl-job-admin-upstream/`，由 Admin launcher 显式低优先级加载；平台运行配置继续高优先级覆盖，上游 Freemarker、调度超时等默认项仍生效。
+  - 为 `RedisXxlJobSsoTicketService` 与 `XxlJobScheduledTaskAdapter` 的公开生产构造器增加 `@Autowired`，保留包级测试构造器；新增真实 Spring 上下文装配回归，防止再次退回无参实例化。
+  - Admin 子上下文把 readiness 固定为仅检查独立 MySQL `db`，不继承主应用 `readinessState,db,redis`；同步上游模块、集成模块、架构与测试文档。
+- How:
+  - TDD 分别复现两个组件的 `No default constructor found`，以及 Admin 子上下文的 `Health contributor 'redis' ... does not exist`，完成最小修复后定向复跑转绿。
+  - `test-agent-xxl-job-integration` Reactor 全量通过，集成模块 25 项测试无失败；`test-agent-app` 跳过测试打包成功。无参数执行 `sh restart-dev-services.sh`，确认默认读取 `.env.test` 并使用 `test` profile。
+- Result:
+  - 同一 Java PID 已监听平台 Netty `8080`、XXL Admin Tomcat `18080` 和 executor `9999`；平台与 Admin readiness 均为 200。日志确认平台连接 PostgreSQL `15432`、XXL 连接 MySQL `13306`，未再出现本次启动的无参构造器、Redis health group 或 MySQL `3306` 误连；MySQL 中为 6 个任务、1 个 `test-agent-backend` 组，executor 注册时间持续刷新且地址不含 Linux 亲和信息。
+  - 后端全量 `mvn test` 仍在未修改的 persistence 基线被 `V20260717173000__create_public_agent_config_rollouts.sql` 的 PostgreSQL `TIMESTAMPTZ` 与 H2 不兼容阻断（165 tests、76 errors、17 skipped）；本次按既定范围未修改该历史 migration。
+  - 未修改 `.env.test`/`.env.local`、HTTP API、RunEvent、数据库结构、任务数据或安全协议；仅收紧 Spring 配置作用域和组件装配，兼容既有 XXL 行为。
+
 ### 2026-07-20 - 修复 XXL Admin 初始健康状态空时间
 
 - Why:

@@ -1,6 +1,7 @@
 package com.enterprise.testagent.xxljob;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 import com.enterprise.testagent.xxljob.admin.PlatformXxlJobUserProvisioner;
 import java.net.ServerSocket;
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.testcontainers.containers.MySQLContainer;
@@ -36,8 +38,20 @@ class DefaultXxlJobAdminContextLauncherTest {
         DefaultXxlJobAdminContextLauncher launcher = new DefaultXxlJobAdminContextLauncher(properties);
 
         TicketBridge bridge = new TicketBridge();
-        try (ConfigurableApplicationContext context = launcher.launch(bridge)) {
+        try (ConfigurableApplicationContext context = assertDoesNotThrow(() -> TestPropertyValues
+                .of("management.endpoint.health.group.readiness.include=readinessState,db,redis")
+                .applyToSystemProperties(() -> launcher.launch(bridge)))) {
             assertThat(context).isInstanceOf(ServletWebServerApplicationContext.class);
+            assertThat(context.getEnvironment().getProperty("management.endpoint.health.group.readiness.include"))
+                    .as("Admin 子上下文不得继承平台 Redis readiness 成员")
+                    .isEqualTo("db");
+            assertThat(context.getEnvironment().getProperty("xxl.job.timeout"))
+                    .as("重定位后的上游默认配置仍应在 Admin 子上下文生效")
+                    .isEqualTo("3");
+            assertThat(context.getEnvironment().getProperty("spring.freemarker.suffix"))
+                    .isEqualTo(".ftl");
+            assertThat(context.getEnvironment().getProperty("spring.datasource.url"))
+                    .isEqualTo(MYSQL.getJdbcUrl());
             assertThat(context.getBean(PlatformXxlJobUserProvisioner.class).provision(identity()).username())
                     .isEqualTo("平台管理员");
 

@@ -44,6 +44,28 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void xxlAdminDatasourceDefaultsDoNotLeakIntoPlatformContext() {
+        profileContextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=test",
+                        "TEST_AGENT_TEST_DB_HOST=test-postgres.example.internal",
+                        "TEST_AGENT_TEST_DB_PORT=25432",
+                        "TEST_AGENT_TEST_DB_NAME=test_agent_ci",
+                        "TEST_AGENT_TEST_DB_USERNAME=test_agent",
+                        "TEST_AGENT_TEST_DB_PASSWORD=secret")
+                .run(context -> {
+                    assertThat(context.getEnvironment().getProperty("spring.datasource.url"))
+                            .as("平台主上下文不得加载 XXL Admin 的通用数据源地址")
+                            .isNull();
+                    assertThat(context.getEnvironment().getProperty("spring.datasource.type"))
+                            .as("平台主上下文必须继续使用自身的 Druid 配置")
+                            .isEqualTo("com.alibaba.druid.pool.DruidDataSource");
+                    assertThat(context.getEnvironment().getProperty("spring.datasource.druid.url"))
+                            .isEqualTo("jdbc:postgresql://test-postgres.example.internal:25432/test_agent_ci");
+                });
+    }
+
+    @Test
     void defaultSchedulerScanningIsEnabled() {
         profileContextRunner
                 .withBean(SchedulerProperties.class)
