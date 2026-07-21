@@ -78,6 +78,7 @@ type Message struct {
 	BaseURL                    string            `json:"baseUrl,omitempty"`
 	SessionPath                string            `json:"sessionPath,omitempty"`
 	ConfigPath                 string            `json:"configPath,omitempty"`
+	UnifiedAuthID              string            `json:"unifiedAuthId,omitempty"`
 	Healthy                    *bool             `json:"healthy,omitempty"`
 	Message                    string            `json:"message,omitempty"`
 	ErrorCode                  string            `json:"errorCode,omitempty"`

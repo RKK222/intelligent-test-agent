@@ -252,11 +252,12 @@ func (s *Supervisor) dispatchProcessCommand(ctx context.Context, message Message
 	switch message.Command {
 	case "start":
 		return s.manager.Start(ctx, process.StartRequest{
-			Port:        message.Port,
-			SessionPath: message.SessionPath,
-			ConfigPath:  message.ConfigPath,
-			Environment: message.Environment,
-			TraceID:     message.TraceID,
+			Port:          message.Port,
+			UnifiedAuthID: message.UnifiedAuthID,
+			SessionPath:   message.SessionPath,
+			ConfigPath:    message.ConfigPath,
+			Environment:   message.Environment,
+			TraceID:       message.TraceID,
 		})
 	case "health":
 		return s.manager.Health(ctx, process.HealthRequest{Port: message.Port, TraceID: message.TraceID})

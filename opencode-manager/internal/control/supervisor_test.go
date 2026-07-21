@@ -38,7 +38,7 @@ func TestTopologyMessagesIncludeLinkerBuildVersion(t *testing.T) {
 	}
 }
 
-func TestDispatchStartCommandPassesSessionPathToProcessManager(t *testing.T) {
+func TestDispatchStartCommandPassesUnifiedAuthIDAndSessionPathToProcessManager(t *testing.T) {
 	configDir := filepath.Join(t.TempDir(), "opencode-config")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("pre-create config dir: %v", err)
@@ -70,10 +70,11 @@ func TestDispatchStartCommandPassesSessionPathToProcessManager(t *testing.T) {
 	sessionPath := "/tmp/opencode-session/users/usr_1234567890abcdef"
 
 	result, err := supervisor.dispatchProcessCommand(context.Background(), Message{
-		Command:     "start",
-		Port:        4096,
-		SessionPath: sessionPath,
-		TraceID:     "trace_1234567890abcdef",
+		Command:       "start",
+		Port:          4096,
+		UnifiedAuthID: "usr_1234567890abcdef",
+		SessionPath:   sessionPath,
+		TraceID:       "trace_1234567890abcdef",
 	}, time.Second)
 	if err != nil {
 		t.Fatalf("dispatchProcessCommand returned error: %v", err)
@@ -87,6 +88,9 @@ func TestDispatchStartCommandPassesSessionPathToProcessManager(t *testing.T) {
 	}
 	if starter.specs[0].SessionPath != sessionPath {
 		t.Fatalf("expected start spec session path %q, got %q", sessionPath, starter.specs[0].SessionPath)
+	}
+	if starter.specs[0].UnifiedAuthID != "usr_1234567890abcdef" {
+		t.Fatalf("expected unified auth id to reach start spec, got %#v", starter.specs[0])
 	}
 }
 
