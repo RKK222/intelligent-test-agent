@@ -1,5 +1,6 @@
 package com.enterprise.testagent.domain.configuration;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -56,6 +57,24 @@ public interface PublicAgentConfigRolloutCoordinator {
             Set<String> targetUserIds) {
         markServerSynced(request);
     }
+
+    /**
+     * 完成应用共享副本同步，并把未收敛个人 worktree 转为不占用主 rollout 的持久化补偿任务。
+     */
+    default void markServerSyncedForUsers(
+            PublicAgentConfigRolloutSyncRequest request,
+            Set<String> targetUserIds,
+            List<AgentConfigRolloutWorktreePending> pendingWorktrees) {
+        markServerSyncedForUsers(request, targetUserIds);
+    }
+
+    Optional<AgentConfigRolloutWorktreeClaim> claimPendingApplicationWorktree(String linuxServerId);
+
+    void markApplicationWorktreeRetry(AgentConfigRolloutWorktreeClaim claim, String reason);
+
+    void markApplicationWorktreeSynchronized(AgentConfigRolloutWorktreeClaim claim);
+
+    void abandonApplicationWorktree(AgentConfigRolloutWorktreeClaim claim, String reason);
 
     void markServerSyncRetry(PublicAgentConfigRolloutSyncRequest request, String errorMessage);
 

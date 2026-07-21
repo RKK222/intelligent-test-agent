@@ -21,6 +21,8 @@ import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.AgentConfigOperationStatus;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
@@ -2040,17 +2042,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     request.commitHash(),
                     initiator,
                     request.traceId());
-            if (!mergeResult.allSynchronized()) {
-                // 应用 Agent/Skill 的 dispose 必须发生在相关个人 worktree 都真正包含目标 commit 之后。
-                // 脏工作区或冲突保留原状，并借助持久化 rollout 的下一次 claim 自动重试。
-                agentConfigRolloutCoordinator.markServerSyncRetry(
-                        request,
-                        "PERSONAL_WORKTREE_UPDATE_PENDING");
-                return;
-            }
             agentConfigRolloutCoordinator.markServerSyncedForUsers(
                     request,
-                    mergeResult.synchronizedUserIds());
+                    mergeResult.synchronizedUserIds(),
+                    mergeResult.pendingWorktrees());
+            mergeResult.pendingWorktrees().forEach(pending -> LOGGER.warn(
+                    "event=application_agent_config_worktree status=awaiting_user rolloutId={} versionId={} personalWorkspaceId={} reason={}",
+                    request.rolloutId(),
+                    request.scopeKey(),
+                    pending.personalWorkspaceId(),
+                    pending.reason()));
         } catch (Exception exception) {
             agentConfigRolloutCoordinator.markServerSyncRetry(request, safeMessage(exception));
             LOGGER.warn(
@@ -2058,6 +2059,68 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     request.rolloutId(),
                     request.scopeKey(),
                     serverIdentity.linuxServerId(),
+                    exception);
+        }
+    }
+
+    /**
+     * 个人 worktree 的本地修改或冲突不再占用主 rollout；后台按独立租约持续尝试，用户处理完成后只 dispose 该用户。
+     */
+    @Scheduled(
+            fixedDelayString = "${test-agent.application-agent-config.rollout.worktree-retry-delay-ms:5000}",
+            initialDelayString = "${test-agent.public-agent-config.rollout.initial-delay-ms:5000}")
+    void retryPendingApplicationConfigWorktrees() {
+        if (agentConfigRolloutCoordinator == null) {
+            return;
+        }
+        agentConfigRolloutCoordinator
+                .claimPendingApplicationWorktree(serverIdentity.linuxServerId())
+                .ifPresent(this::reconcilePendingApplicationConfigWorktree);
+    }
+
+    private void reconcilePendingApplicationConfigWorktree(AgentConfigRolloutWorktreeClaim claim) {
+        try {
+            Optional<PersonalWorkspace> personalOptional = managedWorkspaceRepository.findPersonalWorkspace(
+                    new PersonalWorkspaceId(claim.personalWorkspaceId()));
+            if (personalOptional.isEmpty()) {
+                agentConfigRolloutCoordinator.abandonApplicationWorktree(claim, "PERSONAL_WORKTREE_REMOVED");
+                return;
+            }
+            PersonalWorkspace personal = personalOptional.get();
+            if (personal.status() != ManagedWorkspaceStatus.ACTIVE
+                    || !personal.versionId().value().equals(claim.versionId())
+                    || !personal.userId().value().equals(claim.userId())
+                    || !isPersonalWorkspaceOnCurrentServer(personal)) {
+                agentConfigRolloutCoordinator.abandonApplicationWorktree(claim, "PERSONAL_WORKTREE_NO_LONGER_ELIGIBLE");
+                return;
+            }
+            ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
+            ApplicationWorkspaceVersionReplica replica = replicaForPersonalWorkspace(
+                    version, personal, claim.traceId());
+            PersonalFeatureMergeResult result = mergeFeatureCommitIntoPersonalWorkspace(
+                    version,
+                    replica,
+                    personal,
+                    claim.targetCommit(),
+                    gitCommitIdentity(personal.userId()),
+                    claim.traceId());
+            if (!result.synchronizedWithTarget()) {
+                agentConfigRolloutCoordinator.markApplicationWorktreeRetry(claim, result.status());
+                return;
+            }
+            agentConfigRolloutCoordinator.markApplicationWorktreeSynchronized(claim);
+            LOGGER.info(
+                    "event=application_agent_config_worktree status=synced rolloutId={} versionId={} personalWorkspaceId={}",
+                    claim.rolloutId(),
+                    claim.versionId(),
+                    claim.personalWorkspaceId());
+        } catch (RuntimeException exception) {
+            agentConfigRolloutCoordinator.markApplicationWorktreeRetry(claim, safeMessage(exception));
+            LOGGER.warn(
+                    "event=application_agent_config_worktree status=retry rolloutId={} versionId={} personalWorkspaceId={}",
+                    claim.rolloutId(),
+                    claim.versionId(),
+                    claim.personalWorkspaceId(),
                     exception);
         }
     }
@@ -2076,8 +2139,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserId initiator,
             String traceId) {
         Set<String> synchronizedUserIds = new LinkedHashSet<>();
+        List<AgentConfigRolloutWorktreePending> pendingWorktrees = new ArrayList<>();
         GitCommitIdentity commitIdentity = gitCommitIdentity(initiator);
-        boolean allSynchronized = true;
         for (var member : configurationRepository.findActiveMembers(version.appId())) {
             UserId targetUserId = member.userId();
             List<PersonalWorkspace> personalWorkspaces = managedWorkspaceRepository
@@ -2099,15 +2162,19 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         traceId);
                 if (!result.synchronizedWithTarget()) {
                     userSynchronized = false;
+                    pendingWorktrees.add(new AgentConfigRolloutWorktreePending(
+                            personal.personalWorkspaceId().value(),
+                            personal.userId().value(),
+                            result.status()));
                 }
             }
             if (userSynchronized) {
                 synchronizedUserIds.add(targetUserId.value());
-            } else {
-                allSynchronized = false;
             }
         }
-        return new FeatureMergeBatchResult(Set.copyOf(synchronizedUserIds), allSynchronized);
+        return new FeatureMergeBatchResult(
+                Set.copyOf(synchronizedUserIds),
+                List.copyOf(pendingWorktrees));
     }
 
     private boolean isPersonalWorkspaceOnCurrentServer(PersonalWorkspace personal) {
@@ -2249,7 +2316,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return "trace_" + java.util.UUID.randomUUID().toString().replace("-", "");
     }
 
-    private record FeatureMergeBatchResult(Set<String> synchronizedUserIds, boolean allSynchronized) {
+    private record FeatureMergeBatchResult(
+            Set<String> synchronizedUserIds,
+            List<AgentConfigRolloutWorktreePending> pendingWorktrees) {
     }
 
     private record PersonalFeatureMergeResult(
