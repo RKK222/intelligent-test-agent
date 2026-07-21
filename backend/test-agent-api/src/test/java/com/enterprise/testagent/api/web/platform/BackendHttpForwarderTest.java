@@ -105,6 +105,30 @@ class BackendHttpForwarderTest {
         });
     }
 
+    @Test
+    void forwardsSystemRequestWithXxlTokenTraceAndLoopHeader() {
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, """
+                {"success":true,"traceId":"trace_system","data":{"value":"ok"}}
+                """, false);
+        BackendHttpForwarder forwarder = new BackendHttpForwarder(
+                new ObjectMapper().findAndRegisterModules(), httpClient);
+
+        ApiResponse<Map<String, String>> response = forwarder.forwardSystemTyped(
+                backend("10.8.0.22", "http://10.8.0.22:18080"),
+                "/api/internal/platform/opencode-runtime/night-execution/internal-dispatch",
+                Map.of("linuxServerId", "10.8.0.22", "taskIds", List.of("net_internal_dispatch")),
+                new com.fasterxml.jackson.core.type.TypeReference<>() {},
+                "trace_system",
+                "xxl-secret");
+
+        assertThat(response.data()).containsEntry("value", "ok");
+        assertThat(httpClient.requests).singleElement().satisfies(request -> {
+            assertThat(request.headers().firstValue("XXL-JOB-ACCESS-TOKEN")).contains("xxl-secret");
+            assertThat(request.headers().firstValue(TraceConstants.TRACE_ID_HEADER)).contains("trace_system");
+            assertThat(request.headers().firstValue(BackendHttpForwarder.ROUTED_HEADER)).contains("true");
+        });
+    }
+
     private static BackendJavaProcess backend(String linuxServerId, String listenUrl) {
         return new BackendJavaProcess(
                 new BackendProcessId("bjp_1234567890abcdef"),

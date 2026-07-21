@@ -32,7 +32,7 @@
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间异步执行和会话锁、Redis active/session scope 路由、用户级会话运行态摘要、每用户公共配置软链接/个人保存与发布 dispose、opencode 进程启动环境、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库英文名/类型冻结、应用工作空间、个人 SSH key、可审计通用参数配置管理，以及显式 JVM 内存参数的本机注册/诊断状态 |
-| `test-agent-scheduler` | 旧调度契约与 Redis 锁模块；迁移后 runner 只同步、扫描和执行带服务器亲和的 `USER_PLAN`，周期任务 handler 与锁能力供 XXL adapter 复用 |
+| `test-agent-scheduler` | XXL adapter 复用的任务 handler/context/result、Redis 全局锁和旧运行记录清理；不再启动 PostgreSQL runner 或创建 `USER_PLAN` |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-xxl-job-admin-upstream` | 原样保存 XXL-JOB Admin 3.4.2 源码/资源与 GPL-3.0 许可证，不承载平台补丁 |
 | `test-agent-xxl-job-integration` | 独立 Servlet Admin 子上下文、MySQL Flyway、Admin readiness 就绪后延迟启动的 executor、周期任务 adapter、平台一次性 SSO、JIT 用户和 XXL health |
@@ -114,7 +114,6 @@ cp .env.local.example .env.local
 | `TEST_AGENT_DB_URL` / `TEST_AGENT_DB_USERNAME` / `TEST_AGENT_DB_PASSWORD` | 平台 PostgreSQL 连接信息；个人离线 Compose 默认使用 `127.0.0.1:15432/test_agent`。 |
 | `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | Redis 连接信息，绑定到 Spring 标准 `spring.data.redis.*`；Redis 是系统必需依赖。 |
 | `TEST_AGENT_REDIS_SUMMARY_ENABLED` / `TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE` | Redis summary 运行模式开关和按 userId 稳定哈希的灰度比例，默认 `false/0`；开启后仅影响携带有效 `contextToken + clientRequestId` 的新 Run，活动 Run 不切换模式，回滚时把比例调回 `0`。 |
-| `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 `true`；启用时使用同一 Redis，显式设为 `false` 可关闭。 |
 | `TEST_AGENT_XXL_JOB_ENABLED` | 是否启动进程内 XXL Admin 与 executor；生产默认开启。 |
 | `TEST_AGENT_XXL_JOB_MYSQL_*` | 独立 XXL MySQL JDBC URL、账号和密码；不得指向平台 PostgreSQL。 |
 | `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` | Admin 与所有 executor 共用的独立 access token。 |
@@ -206,7 +205,7 @@ mvn test
 - 涉及 opencode-manager 路由、Java 到 manager 控制、用户 opencode 进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway` 公共链路；禁止新增自写 Redis 快照扫描、Java->Java HTTP 转发、防循环 header、本机降级或本地绕过。涉及 opencode server 启动、停止或状态查询时，分别复用 `OpencodeProcessStartupService`、`OpencodeProcessStopService` 和 `OpencodeProcessStatusQueryService`。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。
 - 应用配置、应用人员、代码库英文名与关联、应用工作空间模板和个人 SSH key 管理放在 `test-agent-configuration-management`；应用版本工作区运行编排和工作空间创建进度放在 `test-agent-workspace-management`。
-- 周期任务的 XXL Admin、executor、MySQL Flyway、iframe SSO 与统一 handler 适配放在 `test-agent-xxl-job-integration`；XXL executor 只按自动注册节点轮询，不携带 `linuxServerId` 或 Linux 亲和。`test-agent-scheduler` 继续提供 `ScheduledTaskHandler`、Redis 锁与服务器亲和 `USER_PLAN` 执行能力；夜间一次性计划通过 `ScheduledUserPlanService` 创建，并在长循环中检查 `ScheduledTaskContext` 的停止请求。
+- 周期任务的 XXL Admin、executor、MySQL Flyway、iframe SSO 与统一 handler 适配放在 `test-agent-xxl-job-integration`；XXL executor 本身不携带稳定 Linux 亲和。`test-agent-scheduler` 只提供 `ScheduledTaskHandler`、context/result、Redis 锁和历史清理能力。夜间任务直接保存在 `night_execution_tasks`，由 XXL 每 15 分钟扫描并通过公共 Java 路由转发到任务创建时固定的目标服务器；目标 Java 复用普通 Run 受理链路，不建立夜间专属队列。
 - 非 opencode 外部系统联动放在 `test-agent-integration`。
 - 业务模块不要直接依赖 `test-agent-opencode-sdk-generated`，应通过 `test-agent-opencode-client`。
 - 领域模型保持在 `test-agent-domain`，不要依赖 Spring Web 或持久化技术。

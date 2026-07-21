@@ -25,7 +25,7 @@
 - `ErrorCode`：平台稳定错误码及 HTTP 状态映射数字。
 - `PlatformException`：业务层抛出的平台基础异常。
 - `PageRequest`、`PageResponse<T>`：分页请求和响应模型。
-- `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间、应用版本工作区、应用版本服务器副本、服务器广播事件、个人工作区、同步记录、SSH key、scheduler 运行/计划和夜间任务的稳定前缀 ID。
+- `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间、应用版本工作区、应用版本服务器副本、服务器广播事件、个人工作区、同步记录、SSH key、scheduler 历史运行/计划，以及 `net_` 夜间任务和 `nda_` 分发 attempt 的稳定前缀 ID。
 - `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads`、`git archive --remote`、tar 目录/文件树解析、超时、输出上限、非交互环境、临时 SSH key 文件清理，以及 `git_command_start/success/slow/failed/timeout/unavailable` 单行脱敏日志。
 - `GitCommitIdentity`：生成并校验单次 Git 提交身份；平台用户没有邮箱字段时按统一认证号生成已在企业 SCM 登记的 `mails.icbc` 邮箱，避免远端以 invalid committer 拒绝提交。
 - `GitWorkspaceService`：封装 clone、worktree add、分支/origin/head/status、porcelain/diff、索引恢复到 HEAD、指定文件回退（恢复已跟踪文件并清理新增/未跟踪文件）、冲突 stage 1/2/3 读取、按操作人身份提交、同名分支 push、个人分支到公共目标分支的非强制 refspec push、pull/fetch、目标分支显式 refspec fetch、冲突文件列表、`merge --abort` 和按提交/路径白名单投影文件等 Git 原子命令；所有可能生成 commit 的入口必须显式传入非空 `GitCommitIdentity`，不依赖仓库或全局 Git 配置中的默认身份，冲突文件拒绝通过普通回退处理。

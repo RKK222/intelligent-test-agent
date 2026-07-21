@@ -34,6 +34,7 @@ import reactor.core.scheduler.Schedulers;
 public class BackendHttpForwarder {
 
     static final String ROUTED_HEADER = "X-Test-Agent-Backend-Routed";
+    static final String XXL_ACCESS_TOKEN_HEADER = "XXL-JOB-ACCESS-TOKEN";
 
     private static final Duration FORWARD_TIMEOUT = Duration.ofSeconds(120);
     private static final List<String> FORWARDED_HEADERS = List.of(
@@ -92,6 +93,44 @@ public class BackendHttpForwarder {
                 exchange.getRequest().getMethod().name(),
                 requestBody,
                 responseType);
+    }
+
+    /**
+     * 发送不依赖浏览器 exchange 的系统级 JSON 请求；仅携带 trace、XXL token 和统一防循环头。
+     */
+    <T> ApiResponse<T> forwardSystemTyped(
+            BackendJavaProcess backend,
+            String path,
+            Object requestBody,
+            TypeReference<ApiResponse<T>> responseType,
+            String traceId,
+            String xxlAccessToken) {
+        Objects.requireNonNull(backend, "backend must not be null");
+        Objects.requireNonNull(path, "path must not be null");
+        Objects.requireNonNull(responseType, "responseType must not be null");
+        try {
+            HttpRequest.BodyPublisher body = HttpRequest.BodyPublishers.ofString(
+                    objectMapper.writeValueAsString(requestBody));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(trimTrailingSlash(backend.listenUrl()) + path))
+                    .timeout(FORWARD_TIMEOUT)
+                    .header(HttpHeaders.CONTENT_TYPE, "application/json")
+                    .header(TraceConstants.TRACE_ID_HEADER, traceId)
+                    .header(XXL_ACCESS_TOKEN_HEADER, xxlAccessToken == null ? "" : xxlAccessToken)
+                    .header(ROUTED_HEADER, "true")
+                    .POST(body)
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return objectMapper.readValue(response.body(), responseType);
+            }
+            ApiErrorResponse error = objectMapper.readValue(response.body(), ApiErrorResponse.class);
+            throw new PlatformException(errorCode(error.code()), error.message(), error.details());
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw unavailable(backend, exception);
+        }
     }
 
     /**

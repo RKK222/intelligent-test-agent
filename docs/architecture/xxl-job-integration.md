@@ -62,9 +62,10 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 - `V1` 是 XXL-JOB 3.4.2 基础表，不写示例任务或默认管理员。
 - `V2` 增加平台用户/session 字段、`platform_task_key` 唯一键并扩展用户名长度。
 - `V3` 新增自动注册执行器组 `test-agent-backend` 和首批六个周期任务。
-- 后续新增任务必须新建 `V4`、`V5` 等版本 SQL，按 `platform_task_key` 插入；禁止启动时 upsert/覆盖页面已调整的启停或 Cron。
+- `V4` 注册夜间数据库分发任务 `opencode-runtime.night-execution-dispatch`。
+- 后续新增任务必须新建 `V5`、`V6` 等版本 SQL，按 `platform_task_key` 插入；禁止启动时 upsert/覆盖页面已调整的启停或 Cron。
 
-旧 PostgreSQL 的周期任务定义和运行历史只做保留，不复制到 MySQL，也不再被旧 runner 调度。`USER_PLAN`、`executionAffinity` 和夜间一次性计划仍使用旧 PostgreSQL scheduler。
+旧 PostgreSQL 的任务定义和运行历史只做保留，不复制到 MySQL，也不再被 runner 调度。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免 runner 删除后残留永久活动记录；不删除历史审计，新夜间任务只写 `night_execution_tasks`。
 
 ## 执行器与任务契约
 
@@ -91,6 +92,7 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 | 任务 key | XXL cron | Redis 锁 TTL |
 |---|---|---|
 | `opencode-runtime.analytics-rollup` | `0 0/5 * * * ? *` | 5 分钟 |
+| `opencode-runtime.night-execution-dispatch` | `0 0/15 * * * ? *` | 15 分钟 |
 | `opencode-runtime.night-execution-reconcile` | `0 0/5 * * * ? *` | 5 分钟 |
 | `opencode-runtime.stale-active-run-reconcile` | `0 0/5 * * * ? *` | 5 分钟 |
 | `opencode-runtime.terminal-projection-retry` | `0/5 * * * * ? *` | 30 秒 |
@@ -99,11 +101,15 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 
 JVM 和 XXL 统一使用 `Asia/Shanghai`。运行记录清理在北京时间 08:00 执行，对应原 UTC 00:00；XXL 日志保留 30 天，旧 PostgreSQL scheduler 历史仍由任务清理 7 天。
 
-## 旧 scheduler 边界
+## 夜间分发与旧 scheduler 边界
 
-旧 `ScheduledTaskRunner` 启动时只同步包含 `USER_PLAN` 能力的 handler，每轮只扫描匹配当前 `executionAffinity` 的 `USER_PLAN`。它不再扫描 Cron 到期任务或管理员手工任务。旧本地终态投影重试 ticker 已移除，改由 XXL 中的 `opencode-runtime.terminal-projection-retry` 调度；其它心跳、租约、恢复和配置轮询不变。
+应用内已移除 `ScheduledTaskRunner`、`ScheduledUserPlanService`、亲和 provider 和对应运行配置。`test-agent-scheduler` 只保留 handler/context/result、Redis 全局锁与历史运行清理；`ScheduledTaskRegistry` 只维护内存 handler 映射，不同步 PostgreSQL 定义。
 
-夜间一次性计划仍按当前用户 opencode binding 的稳定 Linux 服务器执行，这个亲和只属于 `USER_PLAN`，不得复制到 XXL executor 注册、任务参数或路由策略中。
+`opencode-runtime.night-execution-dispatch` 每 15 分钟按 `slot_start, created_at` 扫描最多 500 条 `status=SCHEDULED AND slot_start<=now AND window_end>now` 的任务，按提交时固化的 `target_linux_server_id` 分组，每批最多 50 条、同时最多调用 8 台服务器。同一目标服务器的批次串行，单服务器或单任务失败只进入本轮统计并留待下轮；数据库扫描等全局故障才使 XXL 本轮失败。任务不自动顺延，最晚只重试到北京时间 07:00。
+
+executor 的 XXL 注册和 ROUND 路由仍不携带 Linux 亲和；取得全局扫描锁的任意 Java 在业务层复用 `BackendJavaRouteResolver` 和 `BackendHttpForwarder`，先选出目标服务器上的精确 backendProcessId，再把目标服务器与任务 ID 交给该 Java；同服务器多 JVM 不得按 linuxServerId 直接本机短路。内部请求不携带 prompt、附件或用户信息。目标 Java 以 attemptId、精确 backendProcessId 和 5 分钟租约认领后，只调用普通 `startScheduledRun`；批次最多并发 4 个同步受理调用，不等待 Run 完成，也没有夜间专属队列。
+
+普通 Run 锚点受理后夜间任务进入 `DISPATCHED` 并释放输入、时段容量和会话锁。`DISPATCHED` 只表示已交给 Run；最终成功、失败或取消仍由现有会话、Run 状态和 RunEvent SSE 展示。默认 `LEGACY_FULL` Scheduled Run 也先把稳定 clientRequestId 写入 `runs` 唯一锚点，并用 Run 级 attempt、5 分钟租约和 handoff 受理时间封住“锚点已写但 prompt 未交付”的崩溃窗口：未受理锚点只能由有效 attempt CAS 认领并复用原 runId/messageId；恢复重投前按 remoteSessionId + dispatchMessageId 探测远端，ACCEPTED 只补 handoff 标记，NOT_ACCEPTED 才发送，UNKNOWN 不发送，避免 prompt 已受理但本地标记未落库时重复进入执行 loop。恢复时必须校验来源类型、taskId、owner、Session 和 Workspace，客户端复用历史 ID 不得命中旧 Run。5 分钟补偿先查已受理锚点，再检查任务租约和精确 owner Java 心跳；owner 仍在线时不跨进程抢占，由 owner 本机每分钟 watchdog 在 in-flight handle 消失后先查锚点再恢复。Run 创建副作用前还要以 attempt 和 `window_end > now` 最终续租 CAS；达到 07:00 时仍在本机 handle/在线 owner 保护中的调用先等待收敛，避免先写 `FAILED` 后旧调用又创建 Run。所有续租、完成和恢复均匹配 attemptId，通用 stale legacy Run 扫描排除新协议下尚未 handoff 的 Scheduled 锚点。传输语义为至少一次，数据库/Redis 唯一锚点与远端接收探测保证同一夜间任务只创建一个 Run，恢复时不重复执行。
 
 旧 `/api/internal/platform/scheduler-management/**` 统一返回 `410 API_GONE`。周期任务的启停、Cron 修改、手动触发、停止和日志查看均在嵌入的 XXL 页面完成；不新增 RunEvent/SSE 事件。
 
@@ -112,7 +118,7 @@ JVM 和 XXL 统一使用 `Asia/Shanghai`。运行记录清理在北京时间 08:
 - 本地 `deploy/local/docker-compose.yml` 提供 MySQL 8.4、`xxl_job` 库、健康检查和持久卷，默认主机端口 `13306`；表和首批任务由 Admin 子上下文 Flyway 初始化。
 - 只通过 `.env.local.example` 提供示例，禁止自动修改开发者的 `.env.local`。
 - 本地 Vite 和生产 Nginx 都把 `/xxl-job-admin/` 代理到 Admin 子端口，保持 iframe 同源。
-- 生产使用外部共享 MySQL。部署顺序：创建库与最小权限账号；配置凭据、生产 XXL access token 和端口；部署 Java；检查 `.serverid/.serverhost` 及派生 executor 地址；开放 Admin 到 executor 网络；启动 worker；更新并 reload Nginx。
+- 生产使用外部共享 MySQL。夜间迁移采用短暂停机：先停止全部旧 Java，再执行 PostgreSQL/XXL MySQL migration 并启动新版本，避免旧 `USER_PLAN` 与 XXL 分发并行。随后检查 `.serverid/.serverhost`、派生 executor 地址、15 分钟分发和 5 分钟补偿均启用，确认没有旧 runner 线程；开放 Admin 到 executor 网络并更新/reload Nginx。
 - 离线包仍只有一个平台应用 JAR，同时包含上游源码、LICENSE、UPSTREAM 元数据、版本文件和配置示例。
 
 完整变量和网络要求见 `docs/deployment/backend.md`，验证清单见 `docs/testing/xxl-job-integration.md`。

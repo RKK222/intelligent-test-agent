@@ -14,7 +14,10 @@
         slot_start as "slotStart", slot_end as "slotEnd", window_end as "windowEnd",
         target_linux_server_id as "targetLinuxServerId", scheduled_task_run_id as "scheduledTaskRunId",
         run_id as "runId", rollover_count as "rolloverCount", task_created_session as "taskCreatedSession",
-        dispatch_started_at as "dispatchStartedAt", dismissed_at as "dismissedAt",
+        dispatch_started_at as "dispatchStartedAt", dispatch_attempt_id as "dispatchAttemptId",
+        dispatch_owner_backend_process_id as "dispatchOwnerBackendProcessId",
+        dispatch_lease_until as "dispatchLeaseUntil", state_version as "stateVersion",
+        dismissed_at as "dismissedAt",
         reservation_released_at as "reservationReleasedAt", error_code as "errorCode",
         error_message as "errorMessage", trace_id as "traceId", created_at as "createdAt",
         updated_at as "updatedAt"
@@ -26,6 +29,9 @@
         window_end=#{windowEnd}, target_linux_server_id=#{targetLinuxServerId},
         scheduled_task_run_id=#{scheduledTaskRunId}, run_id=#{runId}, rollover_count=#{rolloverCount},
         task_created_session=#{taskCreatedSession}, dispatch_started_at=#{dispatchStartedAt},
+        dispatch_attempt_id=#{dispatchAttemptId},
+        dispatch_owner_backend_process_id=#{dispatchOwnerBackendProcessId},
+        dispatch_lease_until=#{dispatchLeaseUntil}, state_version=#{stateVersion},
         dismissed_at=#{dismissedAt}, reservation_released_at=#{reservationReleasedAt},
         error_code=#{errorCode}, error_message=#{errorMessage}, trace_id=#{traceId},
         created_at=#{createdAt}, updated_at=#{updatedAt}
@@ -36,31 +42,42 @@
     </update>
     <update id="updateTaskIfStatus" parameterType="map">
         update night_execution_tasks set <include refid="taskValues"/>
-        where task_id=#{taskId} and status=#{expectedStatus}
+        where task_id=#{taskId} and status=#{expectedStatus} and state_version=#{expectedStateVersion}
     </update>
-    <update id="claimTaskForScheduledRun" parameterType="map">
+    <update id="claimTaskForDispatch" parameterType="map">
         update night_execution_tasks set <include refid="taskValues"/>
         where task_id=#{taskId} and status='SCHEDULED'
-        and scheduled_task_run_id=#{expectedScheduledTaskRunId}
+        and target_linux_server_id=#{expectedTargetLinuxServerId}
+        and state_version=#{expectedStateVersion}
+    </update>
+    <update id="updateDispatchIfAttempt" parameterType="map">
+        update night_execution_tasks set <include refid="taskValues"/>
+        where task_id=#{taskId} and status='DISPATCHING'
+        and dispatch_attempt_id=#{expectedAttemptId}
+    </update>
+    <update id="renewDispatchLease">
+        update night_execution_tasks
+        set dispatch_lease_until=#{leaseUntil}, updated_at=#{now}
+        where task_id=#{taskId} and status='DISPATCHING'
+        and dispatch_attempt_id=#{attemptId}
+        and window_end &gt; #{now}
     </update>
     <insert id="insertTask" parameterType="map">
         insert into night_execution_tasks(
         task_id, owner_user_id, session_id, workspace_id, client_request_id, session_title, content_preview,
         run_input_json, status, slot_start, slot_end, window_end, target_linux_server_id,
         scheduled_task_run_id, run_id, rollover_count, task_created_session, dispatch_started_at,
+        dispatch_attempt_id, dispatch_owner_backend_process_id, dispatch_lease_until, state_version,
         dismissed_at, reservation_released_at, error_code, error_message, trace_id, created_at, updated_at)
         values(#{taskId},#{ownerUserId},#{sessionId},#{workspaceId},#{clientRequestId},#{sessionTitle},
         #{contentPreview},#{runInputJson},#{status},#{slotStart},#{slotEnd},#{windowEnd},
         #{targetLinuxServerId},#{scheduledTaskRunId},#{runId},#{rolloverCount},#{taskCreatedSession},
-        #{dispatchStartedAt},#{dismissedAt},#{reservationReleasedAt},#{errorCode},#{errorMessage},
+        #{dispatchStartedAt},#{dispatchAttemptId},#{dispatchOwnerBackendProcessId},#{dispatchLeaseUntil},
+        #{stateVersion},#{dismissedAt},#{reservationReleasedAt},#{errorCode},#{errorMessage},
         #{traceId},#{createdAt},#{updatedAt})
     </insert>
     <select id="findById" resultType="map">
         select <include refid="columns"/> from night_execution_tasks where task_id=#{taskId}
-    </select>
-    <select id="findByScheduledTaskRunId" resultType="map">
-        select <include refid="columns"/> from night_execution_tasks
-        where scheduled_task_run_id=#{scheduledTaskRunId}
     </select>
     <select id="findByOwnerAndClientRequestId" resultType="map">
         select <include refid="columns"/> from night_execution_tasks
@@ -85,15 +102,25 @@
         select count(*) from night_execution_tasks
         where owner_user_id=#{ownerUserId} and status in ('SCHEDULED','DISPATCHING')
     </select>
-    <select id="findScheduledDueBefore" resultType="map">
+    <select id="findScheduledDue" resultType="map">
         select <include refid="columns"/> from night_execution_tasks
-        where status='SCHEDULED' and slot_start &lt;= #{cutoff} and updated_at &lt;= #{cutoff}
-        order by slot_start, created_at limit #{limit}
+        where status='SCHEDULED' and slot_start &lt;= #{now} and window_end &gt; #{now}
+        order by slot_start, created_at, task_id limit #{limit}
     </select>
-    <select id="findDispatchingBefore" resultType="map">
+    <select id="findScheduledWindowExpired" resultType="map">
         select <include refid="columns"/> from night_execution_tasks
-        where status='DISPATCHING' and dispatch_started_at &lt;= #{cutoff}
-        order by dispatch_started_at limit #{limit}
+        where status='SCHEDULED' and window_end &lt;= #{now}
+        order by window_end, created_at, task_id limit #{limit}
+    </select>
+    <select id="findDispatchingLeaseExpiredBefore" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where status='DISPATCHING' and dispatch_lease_until &lt;= #{cutoff}
+        order by dispatch_lease_until, created_at, task_id limit #{limit}
+    </select>
+    <select id="findDispatchingByOwner" resultType="map">
+        select <include refid="columns"/> from night_execution_tasks
+        where status='DISPATCHING' and dispatch_owner_backend_process_id=#{backendProcessId}
+        order by dispatch_lease_until, created_at, task_id limit #{limit}
     </select>
     <select id="findTerminalBefore" resultType="map">
         select <include refid="columns"/> from night_execution_tasks
@@ -151,5 +178,12 @@
     <select id="countSessionLocks" resultType="long">
         select count(*) from night_execution_session_locks where session_id=#{sessionId}
     </select>
+    <delete id="deleteTerminalIfUnchanged">
+        delete from night_execution_tasks
+        where task_id=#{taskId}
+          and state_version=#{stateVersion}
+          and status in ('DISPATCHED','CANCELLED','FAILED')
+          and updated_at &lt;= #{cutoff}
+    </delete>
     <delete id="deleteTask">delete from night_execution_tasks where task_id=#{taskId}</delete>
 </mapper>

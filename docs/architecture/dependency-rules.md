@@ -103,7 +103,7 @@ test-agent-event
 14. 涉及 opencode server 停止、停止后状态回写或运行管理停止命令时，不得在业务入口直接调用 `OpencodeProcessManagerGateway.stopProcess()` 并自行保存 `STOPPED`；必须复用 `OpencodeProcessStopService`，由它统一完成 stop、停止后 manager health 失败确认和最终状态回写。
 15. 涉及 opencode server 状态查询、健康探测、状态回写或 heartbeat 刷新时，不得在业务入口直接调用 `OpencodeProcessManagerGateway.checkHealth()` 并自行映射查询结果；必须复用 `OpencodeProcessStatusQueryService`。
 16. 禁止修改 `test-agent-xxl-job-admin-upstream` 的上游 Java/资源；平台 SSO、登录禁用、安全头、MySQL migration、executor 和 health 改造必须放在 `test-agent-xxl-job-integration`。
-17. XXL executor 地址与路由不得携带 `linuxServerId`、`executionAffinity` 或稳定 Linux 服务器亲和；该亲和只保留给旧 scheduler 的一次性 `USER_PLAN`。
+17. XXL executor 注册地址、调度参数和 ROUND 路由不得绑定稳定 Linux 服务器；夜间扫描后的业务分发必须读取任务固化的 `target_linux_server_id`，并复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder` 调用目标 Java，不能把该目标改造成 executor affinity。
 
 ## 业务工程归属
 
@@ -115,7 +115,7 @@ test-agent-event
 - 用户、角色、权限等平台内部管理：`test-agent-system-management`。
 - 应用定义只读消费、应用成员、代码库配置、应用工作空间模板、个人 SSH key 和 Git 远端只读目录查询：`test-agent-configuration-management`。
 - 周期任务 Admin/executor/SSO/MySQL Flyway 与统一 handler adapter：`test-agent-xxl-job-integration`；未修改的上游代码只放 `test-agent-xxl-job-admin-upstream`。业务 handler 仍放所属业务模块。
-- `ScheduledTaskHandler`、`ScheduledTaskContext`、Redis 锁和带服务器亲和的 `USER_PLAN` runner：`test-agent-scheduler`；不得在旧 runner 恢复 Cron/手工扫描。
+- `ScheduledTaskHandler`、`ScheduledTaskContext`、结果协议、Redis 锁和旧运行记录清理：`test-agent-scheduler`；不得恢复 PostgreSQL runner、`USER_PLAN` 服务或 scheduler worker 配置。
 - 非 opencode 的外部系统联动：`test-agent-integration`。
 - Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、trace Web 入口：`test-agent-api`。
 - 启动、profile、migration、health、日志和运行装配：`test-agent-app`。

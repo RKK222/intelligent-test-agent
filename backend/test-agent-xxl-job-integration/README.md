@@ -16,7 +16,7 @@
 
 - 所有 Java 进程注册到同一自动注册执行器组，不携带 `linuxServerId` 或稳定 Linux 服务器亲和。
 - 周期任务由统一 `testAgentScheduledTaskHandler` 进入；`GLOBAL_MUTEX` 复用旧 Redis 锁键，`ALLOW_OVERLAP` 不申请全局锁。
-- `USER_PLAN` 与带 `executionAffinity` 的夜间一次性计划继续由旧 scheduler 执行。
+- 夜间一次性任务由 XXL 的 `opencode-runtime.night-execution-dispatch` 每 15 分钟扫描 PostgreSQL，并由业务层按任务固化的 `linuxServerId` 路由到目标 Java；executor 注册仍不携带服务器亲和。
 - 上游源码不在本模块复制或修改，所有登录禁用、平台 SSO、响应安全头都通过扩展 Bean/Filter 实现。
 - 平台嵌入态横向导航样式由本模块以 `/static/platform/xxl-job-embedded-shell.css` 提供；只有同源父页面显式添加 `test-agent-xxl-embedded` 根 class 后生效，直接访问 Admin 仍使用上游原生布局。
 
@@ -33,7 +33,7 @@
 ## 测试
 
 - 单元测试覆盖 ticket 一次消费/过期、session marker、JIT 幂等/改名、原生入口禁用、参数校验、锁/续租/停止和异常脱敏。
-- MySQL 8.4 Testcontainers 覆盖 V1-V3 全新初始化、重复 migration、一个 executor 组、六条任务和无默认管理员。
+- MySQL 8.4 Testcontainers 覆盖 V1-V4 全新初始化、重复 migration、一个 executor 组、七条任务和无默认管理员；夜间分发任务固定使用 ROUND、DISCARD_LATER、DO_NOTHING、GLOBAL_MUTEX 和零 XXL 重试。
 - `DefaultXxlJobAdminContextLauncherTest` 启动真实 Servlet/Tomcat 子上下文，验证 Flyway 先于 scheduler、原生登录 403、表单 SSO/JIT、安全 Cookie、上游 AdminLTE 与平台嵌入样式资源可访问，以及两个先注册节点在另一 Admin 新增第三节点后仍保留于共享 MySQL registry。
 - endpoint/readiness/lifecycle 测试验证 advertised IPv4/DNS 地址派生、本机 Admin context path 规整、非法监听地址安全拒绝、非 200 不启动、恢复后只启动一次，以及 Spring 自动装配使用派生地址且不会提前创建 executor 注册线程。
 - `TestAgentRuntimePropertiesBindingTest` 验证上游通用 `spring.datasource.*` 不会进入平台主上下文，launcher 集成测试同时验证重定位后的上游默认项仍在 Admin 子上下文生效。

@@ -1,198 +1,194 @@
 package com.enterprise.testagent.opencode.runtime.night;
 
-import com.enterprise.testagent.common.error.ErrorCode;
-import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
-import com.enterprise.testagent.opencode.runtime.process.OpencodeScheduledTaskExecutionAffinityProvider;
-import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
-import com.enterprise.testagent.scheduler.ScheduledUserPlanService;
+import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
+import com.enterprise.testagent.domain.run.Run;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
+import com.enterprise.testagent.opencode.runtime.run.ScheduledRunMetadata;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
-/** 周期恢复失去认领的任务、顺延错过时段、执行 07:00 失败和 30 天清理。 */
+/** 5 分钟补偿：锚点优先，随后按 attempt 租约和精确 Java 心跳做安全恢复。 */
 @Service
 public class NightExecutionReconcileService {
 
     private static final int BATCH_SIZE = 50;
-    private static final Duration CLAIM_TIMEOUT = Duration.ofMinutes(5);
     private static final Duration RETENTION = Duration.ofDays(30);
 
     private final NightExecutionTaskRepository repository;
-    private final ScheduledUserPlanService userPlanService;
-    private final UserOpencodeProcessAssignmentService assignmentService;
-    private final OpencodeScheduledTaskExecutionAffinityProvider affinityProvider;
-    private final NightExecutionCapacityRegistry capacityRegistry;
+    private final NightExecutionRunLifecycleService lifecycleService;
+    private final BackendJavaRouteResolver routeResolver;
+    private final NightExecutionDispatchLeaseGuard leaseGuard;
     private final Clock clock;
+    private final Supplier<String> attemptIdSupplier;
+    private TransactionTemplate transactionTemplate;
 
     public NightExecutionReconcileService(
             NightExecutionTaskRepository repository,
-            ScheduledUserPlanService userPlanService,
-            UserOpencodeProcessAssignmentService assignmentService,
-            OpencodeScheduledTaskExecutionAffinityProvider affinityProvider,
-            NightExecutionCapacityRegistry capacityRegistry,
+            NightExecutionRunLifecycleService lifecycleService,
+            BackendJavaRouteResolver routeResolver,
+            NightExecutionDispatchLeaseGuard leaseGuard,
             Clock clock) {
-        this.repository = Objects.requireNonNull(repository);
-        this.userPlanService = Objects.requireNonNull(userPlanService);
-        this.assignmentService = Objects.requireNonNull(assignmentService);
-        this.affinityProvider = Objects.requireNonNull(affinityProvider);
-        this.capacityRegistry = Objects.requireNonNull(capacityRegistry);
-        this.clock = Objects.requireNonNull(clock);
+        this(repository, lifecycleService, routeResolver, leaseGuard, clock,
+                RuntimeIdGenerator::nightExecutionDispatchAttemptId);
     }
 
-    @Transactional
+    NightExecutionReconcileService(
+            NightExecutionTaskRepository repository,
+            NightExecutionRunLifecycleService lifecycleService,
+            BackendJavaRouteResolver routeResolver,
+            NightExecutionDispatchLeaseGuard leaseGuard,
+            Clock clock,
+            Supplier<String> attemptIdSupplier) {
+        this.repository = Objects.requireNonNull(repository);
+        this.lifecycleService = Objects.requireNonNull(lifecycleService);
+        this.routeResolver = Objects.requireNonNull(routeResolver);
+        this.leaseGuard = Objects.requireNonNull(leaseGuard);
+        this.clock = Objects.requireNonNull(clock);
+        this.attemptIdSupplier = Objects.requireNonNull(attemptIdSupplier);
+    }
+
     public Result reconcile(String traceId, BooleanSupplier stopRequested) {
         Instant now = clock.instant();
+        int repaired = 0;
         int retried = 0;
-        int rolledOver = 0;
         int failed = 0;
+        int heartbeatSkipped = 0;
         int cleaned = 0;
 
-        for (NightExecutionTask task : repository.findDispatchingBefore(now.minus(CLAIM_TIMEOUT), BATCH_SIZE)) {
+        for (NightExecutionTask task : repository.findDispatchingLeaseExpiredBefore(now, BATCH_SIZE)) {
             if (stopRequested.getAsBoolean()) break;
-            Outcome outcome = recover(task, NightExecutionTaskStatus.DISPATCHING, now, traceId);
-            retried += outcome == Outcome.RETRIED ? 1 : 0;
-            rolledOver += outcome == Outcome.ROLLED_OVER ? 1 : 0;
-            failed += outcome == Outcome.FAILED ? 1 : 0;
+            Optional<Run> anchor = lifecycleService.findAcceptedRun(task);
+            if (anchor.isPresent()) {
+                lifecycleService.onAccepted(
+                        new ScheduledRunMetadata(task.taskId().value(), task.dispatchAttemptId()),
+                        anchor.orElseThrow());
+                repaired++;
+                continue;
+            }
+            if (ownerStillHandling(task)) {
+                // 即使刚过窗口也先等待仍持有 in-flight handle 的 owner；否则旧调用可能在 FAILED 后创建 Run。
+                heartbeatSkipped++;
+                continue;
+            }
+            if (!now.isBefore(task.windowEnd())) {
+                if (failDispatching(task, now)) failed++;
+                continue;
+            }
+            if (repository.updateDispatchIfAttempt(
+                    task.retryDispatch(now), task.dispatchAttemptId())) {
+                retried++;
+            }
         }
-        for (NightExecutionTask task : repository.findScheduledDueBefore(now.minus(CLAIM_TIMEOUT), BATCH_SIZE)) {
+
+        for (NightExecutionTask task : repository.findScheduledWindowExpired(now, BATCH_SIZE)) {
             if (stopRequested.getAsBoolean()) break;
-            Outcome outcome = recover(task, NightExecutionTaskStatus.SCHEDULED, now, traceId);
-            retried += outcome == Outcome.RETRIED ? 1 : 0;
-            rolledOver += outcome == Outcome.ROLLED_OVER ? 1 : 0;
-            failed += outcome == Outcome.FAILED ? 1 : 0;
+            Optional<Run> anchor = lifecycleService.findAcceptedRun(task);
+            if (anchor.isPresent() && repairScheduledAnchor(task, anchor.orElseThrow(), now)) {
+                repaired++;
+                continue;
+            }
+            if (failScheduled(task, now)) failed++;
         }
+
         for (NightExecutionTask task : repository.findTerminalBefore(now.minus(RETENTION), BATCH_SIZE)) {
             if (stopRequested.getAsBoolean()) break;
-            repository.delete(task.taskId());
-            cleaned++;
+            if (repository.deleteTerminalIfUnchanged(
+                    task.taskId(), task.stateVersion(), now.minus(RETENTION))) {
+                cleaned++;
+            }
         }
         if (!stopRequested.getAsBoolean()) {
-            // 时段占位保留用于表达已消耗的启动额度，超过任务保留期后统一清理。
             repository.deleteReservationsBefore(now.minus(RETENTION));
         }
-        return new Result(retried, rolledOver, failed, cleaned);
+        return new Result(repaired, retried, failed, heartbeatSkipped, cleaned);
     }
 
-    private Outcome recover(
-            NightExecutionTask task,
-            NightExecutionTaskStatus expectedStatus,
-            Instant now,
-            String traceId) {
-        if (!now.isBefore(task.windowEnd())) {
-            return fail(task, expectedStatus, now) ? Outcome.FAILED : Outcome.UNCHANGED;
-        }
-        String affinity = assignmentService.routingLinuxServerId(task.ownerUserId(), "opencode")
-                .orElseGet(affinityProvider::currentAffinity);
-        if (now.isBefore(task.slotEnd())) {
-            var run = userPlanService.schedule(
-                    NightExecutionTaskApplicationService.TASK_KEY,
-                    task.ownerUserId(),
-                    now.isAfter(task.slotStart()) ? now : task.slotStart(),
-                    affinity,
-                    traceId);
-            NightExecutionTask retry = task.reschedule(
-                    task.slotStart(), task.slotEnd(), affinity, run.taskRunId(), now);
-            if (!repository.updateIfStatus(retry, expectedStatus)) {
-                throw new PlatformException(
-                        ErrorCode.CONFLICT,
-                        "夜间任务重试状态已变化");
-            }
-            retirePreviousPlan(task);
-            return Outcome.RETRIED;
-        }
-
-        Optional<Instant> nextSlot = reserveNextSlot(task, now);
-        if (nextSlot.isEmpty()) {
-            return fail(task, expectedStatus, now) ? Outcome.FAILED : Outcome.UNCHANGED;
-        }
-        Instant slotStart = nextSlot.orElseThrow();
-        var run = userPlanService.schedule(
-                NightExecutionTaskApplicationService.TASK_KEY,
-                task.ownerUserId(), slotStart, affinity, traceId);
-        NightExecutionTask rolled = task.rollover(
-                slotStart,
-                slotStart.plus(NightExecutionWindowCalculator.SLOT_DURATION),
-                affinity,
-                run.taskRunId(),
+    private boolean repairScheduledAnchor(NightExecutionTask task, Run run, Instant now) {
+        String attemptId = attemptIdSupplier.get();
+        NightExecutionTask claimed = task.startDispatch(
+                attemptId,
+                routeResolver.currentBackendProcessIdValue(),
+                now.plus(NightExecutionDispatchLeaseGuard.LEASE_DURATION),
                 now);
-        if (!repository.updateIfStatus(rolled, expectedStatus)) {
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "夜间任务顺延状态已变化");
-        }
-        retirePreviousPlan(task);
-        repository.releaseSlot(task.slotStart(), now);
-        return Outcome.ROLLED_OVER;
-    }
-
-    private Optional<Instant> reserveNextSlot(NightExecutionTask task, Instant now) {
-        int capacity = capacityRegistry.currentCapacity();
-        Instant first = ceilQuarter(now);
-        if (first.isBefore(task.slotEnd())) first = task.slotEnd();
-        Map<Instant, Integer> counts = repository.reservationCounts(
-                task.windowEnd().minus(Duration.ofHours(10)), task.windowEnd());
-        List<Instant> candidates = new ArrayList<>();
-        for (Instant cursor = first;
-                !cursor.plus(NightExecutionWindowCalculator.SLOT_DURATION).isAfter(task.windowEnd());
-                cursor = cursor.plus(NightExecutionWindowCalculator.SLOT_DURATION)) {
-            candidates.add(cursor);
-        }
-        candidates.sort(Comparator
-                .comparingInt((Instant slot) -> counts.getOrDefault(slot, 0))
-                .thenComparing(slot -> slot));
-        for (Instant candidate : candidates) {
-            if (counts.getOrDefault(candidate, 0) >= capacity) continue;
-            if (repository.reserveSlot(candidate, capacity, now)) return Optional.of(candidate);
-        }
-        return Optional.empty();
-    }
-
-    private boolean fail(
-            NightExecutionTask task,
-            NightExecutionTaskStatus expectedStatus,
-            Instant now) {
-        NightExecutionTask failed = task.fail("WINDOW_EXPIRED", "夜间执行窗口内未能启动", now);
-        if (!repository.updateIfStatus(failed, expectedStatus)) return false;
-        retirePreviousPlan(task);
-        repository.deleteSessionLock(task.sessionId(), task.taskId());
-        repository.releaseSlot(task.slotStart(), now);
+        if (!repository.claimForDispatch(claimed, task.targetLinuxServerId())) return false;
+        lifecycleService.onAccepted(new ScheduledRunMetadata(task.taskId().value(), attemptId), run);
         return true;
     }
 
-    private void retirePreviousPlan(NightExecutionTask task) {
-        userPlanService.cancelPendingIfPresent(
-                task.scheduledTaskRunId(),
-                "夜间任务原执行计划已失效");
+    private boolean ownerStillHandling(NightExecutionTask task) {
+        BackendProcessId owner;
+        try {
+            owner = new BackendProcessId(task.dispatchOwnerBackendProcessId());
+        } catch (RuntimeException invalidOwner) {
+            return false;
+        }
+        if (routeResolver.isCurrent(owner)) {
+            // 当前 Java 能看到自己的 in-flight guard；租约过期且 handle 已消失即可由本机恢复。
+            return leaseGuard.isInFlight(task.taskId(), task.dispatchAttemptId());
+        }
+        try {
+            routeResolver.requireBackend(owner);
+            return true;
+        } catch (RuntimeException offline) {
+            return false;
+        }
     }
 
-    private Instant ceilQuarter(Instant value) {
-        long epochSecond = value.getEpochSecond();
-        long remainder = Math.floorMod(epochSecond, 900L);
-        if (remainder == 0L && value.getNano() == 0) return value;
-        return Instant.ofEpochSecond(epochSecond - remainder + 900L);
+    private boolean failDispatching(NightExecutionTask task, Instant now) {
+        return inTransaction(() -> {
+            NightExecutionTask failed = task.fail("WINDOW_EXPIRED", "夜间执行窗口内未能启动", now);
+            if (!repository.updateDispatchIfAttempt(failed, task.dispatchAttemptId())) return false;
+            release(task, now);
+            return true;
+        });
     }
 
-    private enum Outcome { RETRIED, ROLLED_OVER, FAILED, UNCHANGED }
+    private boolean failScheduled(NightExecutionTask task, Instant now) {
+        return inTransaction(() -> {
+            NightExecutionTask failed = task.fail("WINDOW_EXPIRED", "夜间执行窗口内未能启动", now);
+            if (!repository.updateIfStatus(failed, NightExecutionTaskStatus.SCHEDULED)) return false;
+            release(task, now);
+            return true;
+        });
+    }
 
-    public record Result(int retried, int rolledOver, int failed, int cleaned) {
+    private void release(NightExecutionTask task, Instant now) {
+        repository.deleteSessionLock(task.sessionId(), task.taskId());
+        repository.releaseSlot(task.slotStart(), now);
+    }
+
+    @Autowired(required = false)
+    void setTransactionManager(PlatformTransactionManager transactionManager) {
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+    }
+
+    private <T> T inTransaction(Supplier<T> action) {
+        if (transactionTemplate == null) return action.get();
+        return Objects.requireNonNull(transactionTemplate.execute(status -> action.get()));
+    }
+
+    public record Result(int repaired, int retried, int failed, int heartbeatSkipped, int cleaned) {
         public Map<String, Object> toMap() {
             LinkedHashMap<String, Object> values = new LinkedHashMap<>();
+            values.put("repaired", repaired);
             values.put("retried", retried);
-            values.put("rolledOver", rolledOver);
             values.put("failed", failed);
+            values.put("heartbeatSkipped", heartbeatSkipped);
             values.put("cleaned", cleaned);
             return values;
         }

@@ -36,7 +36,7 @@ Browser
 - `test-agent-agent-runtime` 是多 agent 选择、统一日志/指标包装和具体 agent 适配器边界。
 - `test-agent-opencode-client` 是业务代码访问 opencode server 的唯一门面。
 - `test-agent-opencode-sdk-generated` 只保存生成代码，不承载业务逻辑。
-- XXL 周期任务不使用稳定 Linux 服务器亲和；夜间一次性 `USER_PLAN` 仍由旧 scheduler 按 `executionAffinity` 执行。
+- XXL executor 注册不使用稳定 Linux 服务器亲和；夜间扫描取得任务后，由业务层按任务提交时固化的目标服务器通过公共 Java 路由分发。
 
 ## 后端模块职责
 
@@ -49,10 +49,10 @@ Browser
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
 | `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/上传/复制/移动/删除、基于工作区 JSONC 与本机 READY 引用副本的只读组合文件视图、超级管理员服务器目录选择、git/diff、版本选择前按当前用户身份做 Git 只读访问预检、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、feature 固定提交向相关个人 worktree 的原生 Git merge/dirty 待同步/三方冲突与完成、应用 Agent/Skill 发布 rollout、应用引用资产库的 generation/租约/本机有界即时调度/定向退避/补偿副本、受控分支切换、只读实际指针核验与安全目录树、agent 和 skill 管理业务。 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间任务提交/查询/会话锁/USER_PLAN 投递/窗口补偿与首个显式内存参数容量条目、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、每用户有效公共配置软链接与公共个人保存热加载、公共全机/应用定向 Agent 配置发布排空、用户级会话运行态摘要/状态流、stale active Run 收敛业务任务、当前用户 opencode 进程强状态/弱健康/初始化契约和可选引用目录启动环境、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、带实时应用成员校验的 workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、按 `backendProcessId` 精确选择在线 Java、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间任务提交/查询/会话锁/XXL 固定目标批量分发/attempt 租约/Run 锚点补偿与显式内存容量条目、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、每用户有效公共配置软链接与公共个人保存热加载、公共全机/应用定向 Agent 配置发布排空、用户级会话运行态摘要/状态流、stale active Run 收敛业务任务、当前用户 opencode 进程强状态/弱健康/初始化契约和可选引用目录启动环境、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、带实时应用成员校验的 workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、按 `backendProcessId` 精确选择在线 Java、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理查询、创建测试用户和单角色调整。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、已初始化引用资产库英文名/类型冻结、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器、参数更新跨实例广播，以及只管理显式 SPI 条目的本机内存参数注册表/诊断响应。 |
-| `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/Redis 锁/运行记录契约；旧 runner 只同步、扫描和执行带服务器亲和的 `USER_PLAN`，周期任务由 XXL adapter 调用同一业务 handler。 |
+| `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/result、Redis 全局锁与旧运行记录清理；不再启动 runner 或创建/执行 `USER_PLAN`，全部周期任务由 XXL adapter 调用业务 handler。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-xxl-job-admin-upstream` | 未做业务修改的 XXL-JOB Admin 3.4.2 源码与资源普通 JAR；只允许整体上游升级。 |
 | `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、平台 advertised host 地址派生、由本机 Admin readiness 门控且不阻塞主服务的 executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |

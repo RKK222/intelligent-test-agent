@@ -25,10 +25,11 @@
 - `mybatis.MyBatisRunEventRepository`：RunEvent 领域端口的生产 Bean，保留 `(run_id, seq)` 冲突重试、`runId + lastSeq` 增量读取和 root session 历史状态读取。
 - `mybatis.RunSessionScopeMapper` / `mybatis/RunSessionScopeMapper.xml`：Run session scope MyBatis SQL，包含按 Run 和按 root session 查询；`MERGE ... USING (VALUES ...)` 写入时间参数时显式 cast 为 `timestamp`，兼容 PostgreSQL 参数类型推断。
 - `mybatis.MyBatisRunSessionScopeRepository`：RunSessionScope 领域端口的生产 Bean。
-- `mybatis.RunSummaryMapper` / `mybatis.MyBatisRunSummaryPersistenceRepository`：新模式启动执行单条无原文锚点 INSERT；终态事务执行 Run statusVersion CAS、最多两条摘要批量 MERGE、Session 时间更新三条 SQL；较高事件序号只允许一次晚到刷新，跨终态状态仅允许 `FAILED + TRANSPORT_ERROR` 被可信 root 事实纠正；详情 locator 从既有 `dispatch_message_id` 映射目标用户轮次，低频 Run 恢复、Diff 定位和 accepted/rejected 计数都只走 XML SQL，不写 `run_events`。
+- `mybatis.RunSummaryMapper` / `mybatis.MyBatisRunSummaryPersistenceRepository`：新模式启动执行单条无原文锚点 INSERT；legacy Scheduled Run 额外用 XML SQL 按 attempt/租约认领 anchor-only 恢复并写 durable handoff 受理时间。终态事务执行 Run statusVersion CAS、最多两条摘要批量 MERGE、Session 时间更新三条 SQL；较高事件序号只允许一次晚到刷新，跨终态状态仅允许 `FAILED + TRANSPORT_ERROR` 被可信 root 事实纠正；详情 locator 从既有 `dispatch_message_id` 映射目标用户轮次，低频 Run 恢复、Diff 定位和 accepted/rejected 计数都只走 XML SQL，不写 `run_events`。
 - `mybatis.ScheduledTaskRunRetentionMapper` / `mybatis/ScheduledTaskRunRetentionMapper.xml`：按 `ended_at` 和终态 status 清理超过 7 天的 scheduler 运行记录，显式排除活动状态。
 - `mybatis.MyBatisScheduledTaskRunRetentionRepository`：实现 scheduler 运行记录保留策略 domain 端口，供 scheduler 框架维护任务调用。
-- `mybatis.ScheduledTaskMapper` / `mybatis/ScheduledTaskMapper.xml` / `mybatis.MyBatisScheduledTaskRepository`：scheduler 任务与运行记录的生产 MyBatis 实现，包含服务器亲和 USER_PLAN 到期查询和状态 CAS 认领。
+- `mybatis.ScheduledTaskMapper` / `mybatis/ScheduledTaskMapper.xml` / `mybatis.MyBatisScheduledTaskRepository`：旧 scheduler 任务与运行记录的 MyBatis 历史兼容实现；生产不再扫描或认领 `USER_PLAN`。
+- `mybatis.NightExecutionTaskMapper` / `mybatis/NightExecutionTaskMapper.xml` / `mybatis.MyBatisNightExecutionTaskRepository`：夜间任务到期/窗口扫描、固定目标 state-version 认领、attempt 租约续期与完成 fencing、会话锁和时段容量实现。
 - `mybatis.NightExecutionTaskMapper` / `mybatis/NightExecutionTaskMapper.xml` / `mybatis.MyBatisNightExecutionTaskRepository`：夜间任务、幂等创建、会话写锁、15 分钟全局容量占位和 30 天清理的生产实现。
 - `mybatis.ReferenceRepositoryMapper` / `mybatis/ReferenceRepositoryMapper.xml`：引用资产总体状态与服务器副本的全部关系型 SQL，包含操作类型、旧分支/generation CAS、保留实际指针的目标 upsert、离线 `DEFERRED`、租约认领/续期和带 fencing 条件的同步/核验写回。
 - `mybatis.MyBatisReferenceRepositoryRepository`：引用资产仓储领域端口的生产 Bean，负责行模型映射、分页上限和多目标事务边界。
@@ -66,6 +67,7 @@
 - `db/migration/V20260703141000__create_run_session_scopes.sql`：创建 Run session scope 表并为 `run_events` 预留 scope/raw event id 列。
 - `db/migration/V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加运行记录保留清理索引。
 - `db/migration/V20260718210000__extend_scheduler_user_plan.sql`：允许 USER_PLAN 专用任务无 Cron，并为运行记录增加执行亲和字段和到期索引。
+- `db/migration/V20260721134000__migrate_night_execution_to_xxl.sql`：增加夜间任务 attempt/精确 owner/租约/state-version 与 legacy Scheduled Run attempt/租约/受理时间，重建扫描索引，跳过待执行旧 USER_PLAN，并保留历史审计数据。
 - `db/migration/V20260718211000__create_night_execution_tasks.sql`：创建夜间任务、会话锁和时段容量占位表及约束/索引/中文注释。
 - `db/migration/V20260719210000__seed_night_execution_capacity_parameter.sql`：初始化 `platform=all`、可编辑、默认值 20 的夜间时段容量通用参数。
 - `db/migration/V20260718100000__seed_references_params.sql`：初始化引用资产根目录和 SDD 根层目录名称清单。

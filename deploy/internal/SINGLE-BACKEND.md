@@ -179,11 +179,6 @@ TEST_AGENT_SERVER_TERMINAL_WORKING_DIRECTORY=/data/testagent
 TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=
 TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 
-TEST_AGENT_SCHEDULER_ENABLED=true
-TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
-TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT=50
-TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT=4
-TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY=100
 ```
 
 关键约束：
@@ -191,7 +186,7 @@ TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY=100
 - `TEST_AGENT_SERVER_ADVERTISED_HOST` 必须是 worker 和其他服务器可访问的真实地址，不能写 `127.0.0.1`。
 - `TEST_AGENT_LINUX_SERVER_ID` 是服务器长期稳定身份，升级时不得改变。
 - `backend.env` 不得包含 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`；Java 日志必须显示从 `classpath:rsa-private.key` 加载。
-- XXL executor 固定使用 `.114:9999` 可达地址，不写 `TEST_AGENT_LINUX_SERVER_ID` 或其它亲和字段；稳定服务器亲和只属于旧 scheduler 的夜间 `USER_PLAN`。
+- XXL executor 固定使用 `.114:9999` 可达地址，注册不携带 Linux 亲和；夜间扫描后由业务层读取任务固化的目标服务器并调用对应 Java。
 - 当前 HTTP 现场必须同时保留空的 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 和显式的 `TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true`；缺一项都会按安全默认拒绝不安全终端。签票后浏览器直连 `ws://122.233.30.114:8080`，不是经 `mimo.sdc.cs.icbc:9996` 转发。
 - 企业模型供应商地址和上游 token 在“内部模型供应商”页面维护，不写入 `backend.env` 或 `docker.env`。
 

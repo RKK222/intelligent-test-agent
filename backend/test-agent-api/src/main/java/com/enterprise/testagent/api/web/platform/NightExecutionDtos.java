@@ -28,14 +28,14 @@ final class NightExecutionDtos {
             @Size(max = 255) String sessionTitle,
             String prompt,
             List<RuntimeDtos.PromptPartRequest> parts,
-            String messageId,
+            @Size(max = 128) String messageId,
             String agent,
             String model,
             String variant,
             String mode,
             String command,
             String arguments,
-            String runClientRequestId,
+            @Size(max = 128) String runClientRequestId,
             @NotNull Instant slotStart) {
 
         @AssertTrue(message = "prompt or text part must not be blank")

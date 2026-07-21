@@ -7,7 +7,6 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -39,12 +38,13 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
 
     private SingleConnectionDataSource dataSource;
     private NightExecutionTaskRepository repository;
+    private JdbcTemplate jdbc;
 
     @BeforeEach
     void setUp() throws Exception {
         dataSource = new SingleConnectionDataSource(
                 ("jdbc:h2:mem:testagent_night_mybatis_%s;MODE=PostgreSQL;DATABASE_TO_LOWER=true;"
-                        + "INIT=CREATE DOMAIN IF NOT EXISTS TIMESTAMPTZ AS TIMESTAMP WITH TIME ZONE")
+                        + "INIT=CREATE DOMAIN IF NOT EXISTS timestamptz AS TIMESTAMP WITH TIME ZONE")
                         .formatted(UUID.randomUUID().toString().replace("-", "")),
                 "sa", "", true);
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
@@ -52,7 +52,21 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260718211000__create_night_execution_tasks.sql")).execute(dataSource);
 
-        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc = new JdbcTemplate(dataSource);
+        jdbc.update("insert into scheduled_tasks(task_key,name,cron_expression,enabled,lock_ttl_seconds,"
+                        + "registration_status,trace_id,created_at,updated_at) values(?,?,?,?,?,?,?,?,?)",
+                "opencode-runtime.night-execution", "legacy night", "0 0/15 * * * ?", true, 300,
+                "REGISTERED", "trace_legacy_night", NOW, NOW);
+        for (String status : java.util.List.of("PENDING", "RUNNING", "STOPPING")) {
+            jdbc.update("insert into scheduled_task_runs(task_run_id,task_key,trigger_type,status,"
+                            + "scheduled_fire_at,result_json,trace_id,created_at,updated_at) "
+                            + "values(?,?,?,?,?,?,?,?,?)",
+                    "str_legacy_" + status.toLowerCase(), "opencode-runtime.night-execution",
+                    "USER_PLAN", status, NOW, "{}", "trace_legacy_night", NOW, NOW);
+        }
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260721134000__migrate_night_execution_to_xxl.sql")).execute(dataSource);
+
         jdbc.update("insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at) "
                 + "values(?,?,?,?,?,?,?)", USER.value(), "u_night_repository", "night-user", "hash", "ACTIVE", NOW, NOW);
         jdbc.update("insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at) "
@@ -99,28 +113,88 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
     }
 
     @Test
-    void scheduledRecoveryWaitsForTheLatestFiveMinuteLease() {
-        Instant retriedAt = Instant.parse("2026-07-18T13:04:00Z");
-        NightExecutionTask retried = task().reschedule(
-                SLOT, SLOT.plusSeconds(900), "linux-night-1", null, retriedAt);
-        repository.save(retried);
+    void scheduledScanUsesSlotAndWindowInsteadOfUpdatedAtDelay() {
+        NightExecutionTask scheduled = task().reschedule(
+                SLOT, SLOT.plusSeconds(900), "linux-night-1", SLOT.plusSeconds(30));
+        repository.save(scheduled);
 
-        assertThat(repository.findScheduledDueBefore(retriedAt.minusSeconds(1), 10)).isEmpty();
-        assertThat(repository.findScheduledDueBefore(retriedAt, 10)).containsExactly(retried);
+        assertThat(repository.findScheduledDue(SLOT.minusSeconds(1), 10)).isEmpty();
+        assertThat(repository.findScheduledDue(SLOT.plusSeconds(1), 10)).containsExactly(scheduled);
+        assertThat(repository.findScheduledDue(scheduled.windowEnd(), 10)).isEmpty();
+        assertThat(repository.findScheduledWindowExpired(scheduled.windowEnd(), 10)).containsExactly(scheduled);
     }
 
     @Test
-    void claimRequiresTheCurrentScheduledRunId() {
-        ScheduledTaskRunId currentRunId = new ScheduledTaskRunId("str_night_repository_current");
-        NightExecutionTask scheduled = task().withScheduledRun(currentRunId, NOW);
+    void claimAndCompletionAreFencedByTargetAndAttemptId() {
+        NightExecutionTask scheduled = task();
         repository.save(scheduled);
-        NightExecutionTask dispatching = scheduled.startDispatch(NOW.plusSeconds(1));
+        Instant claimedAt = SLOT.plusSeconds(1);
+        NightExecutionTask dispatching = scheduled.startDispatch(
+                "nda_attempt_current", "bjp_backend_current", claimedAt.plusSeconds(300), claimedAt);
 
-        assertThat(repository.claimForScheduledRun(
-                dispatching, new ScheduledTaskRunId("str_night_repository_stale"))).isFalse();
-        assertThat(repository.claimForScheduledRun(dispatching, currentRunId)).isTrue();
-        assertThat(repository.findById(scheduled.taskId()).orElseThrow().status())
-                .isEqualTo(NightExecutionTaskStatus.DISPATCHING);
+        assertThat(repository.claimForDispatch(dispatching, "linux-night-stale")).isFalse();
+        assertThat(repository.claimForDispatch(dispatching, "linux-night-1")).isTrue();
+        assertThat(repository.renewDispatchLease(
+                scheduled.taskId(), "nda_attempt_stale", claimedAt.plusSeconds(600), claimedAt.plusSeconds(60)))
+                .isFalse();
+        assertThat(repository.renewDispatchLease(
+                scheduled.taskId(), "nda_attempt_current", claimedAt.plusSeconds(600), claimedAt.plusSeconds(60)))
+                .isTrue();
+        assertThat(repository.renewDispatchLease(
+                scheduled.taskId(), "nda_attempt_current", scheduled.windowEnd().plusSeconds(300),
+                scheduled.windowEnd()))
+                .isFalse();
+
+        NightExecutionTask retry = dispatching.retryDispatch(claimedAt.plusSeconds(61));
+        assertThat(repository.updateDispatchIfAttempt(retry, "nda_attempt_stale")).isFalse();
+        assertThat(repository.updateDispatchIfAttempt(retry, "nda_attempt_current")).isTrue();
+        NightExecutionTask restored = repository.findById(scheduled.taskId()).orElseThrow();
+        assertThat(restored.status()).isEqualTo(NightExecutionTaskStatus.SCHEDULED);
+        assertThat(restored.dispatchAttemptId()).isNull();
+        assertThat(restored.dispatchOwnerBackendProcessId()).isNull();
+        assertThat(restored.dispatchLeaseUntil()).isNull();
+    }
+
+    @Test
+    void scheduledUpdatesUseStateVersionToRejectConcurrentOverwrite() {
+        NightExecutionTask scheduled = task();
+        repository.save(scheduled);
+        NightExecutionTask adjusted = scheduled.reschedule(
+                SLOT.plusSeconds(900), SLOT.plusSeconds(1800), "linux-night-1", NOW.plusSeconds(1));
+        NightExecutionTask cancelled = scheduled.cancel(NOW.plusSeconds(2));
+
+        assertThat(repository.updateIfStatus(adjusted, NightExecutionTaskStatus.SCHEDULED)).isTrue();
+        assertThat(repository.updateIfStatus(cancelled, NightExecutionTaskStatus.SCHEDULED)).isFalse();
+        assertThat(repository.findById(scheduled.taskId())).contains(adjusted);
+    }
+
+    @Test
+    void migrationTerminatesEveryLegacyUserPlanActiveState() {
+        for (String previous : java.util.List.of("pending", "running", "stopping")) {
+            assertThat(jdbc.queryForMap(
+                    "select status, ended_at, skip_reason from scheduled_task_runs where task_run_id=?",
+                    "str_legacy_" + previous))
+                    .containsEntry("STATUS", "SKIPPED")
+                    .containsEntry("SKIP_REASON", "夜间执行已迁移至 XXL-JOB")
+                    .containsKey("ENDED_AT");
+        }
+    }
+
+    @Test
+    void terminalCleanupDoesNotDeleteATaskChangedAfterTheScan() {
+        NightExecutionTask failed = task().fail("WINDOW_EXPIRED", "窗口结束", NOW.plusSeconds(1));
+        repository.save(failed);
+        NightExecutionTask scanned = repository.findTerminalBefore(NOW.plusSeconds(10), 10)
+                .getFirst();
+        NightExecutionTask dismissed = failed.dismiss(NOW.plusSeconds(2));
+        assertThat(repository.updateIfStatus(dismissed, NightExecutionTaskStatus.FAILED)).isTrue();
+
+        assertThat(repository.deleteTerminalIfUnchanged(
+                scanned.taskId(), scanned.stateVersion(), NOW.plusSeconds(10))).isFalse();
+        assertThat(repository.findById(failed.taskId())).contains(dismissed);
+        assertThat(repository.deleteTerminalIfUnchanged(
+                dismissed.taskId(), dismissed.stateVersion(), NOW.plusSeconds(10))).isTrue();
+        assertThat(repository.findById(failed.taskId())).isEmpty();
     }
 
     private NightExecutionTask task() {

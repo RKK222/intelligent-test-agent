@@ -17,7 +17,7 @@
 - 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包；persistence 装配 Redis 唯一 `RunRuntimeStore`，负责 manifest、durable/runtime 双 Stream、Hash/ZSET 物化 snapshot 和 active 索引，event/runtime 只依赖领域端口；多服务器部署时由 event 模块装配 Redis 服务器广播，workspace-management 模块执行应用版本工作区副本补偿。
 - Maven package 通过 Spring Boot `build-info` 把产物构建时刻写入 jar；运行时按北京时间格式化为 `VyyyyMMdd.HHmmss` 并随 Java Redis 心跳快照上报。IDE 直接启动或旧 jar 缺少构建元数据时版本为空，不使用启动时间替代。
 - 强制主应用使用 `WebApplicationType.REACTIVE`，装配 `test-agent-xxl-job-integration` 在独立端口异步启动 Admin 并注册 executor；Admin/MySQL 故障不关闭主服务。
-- 装配 `test-agent-scheduler`，默认只扫描服务器亲和 `USER_PLAN`，由 scheduler 模块校验 Redis 必需；可通过配置显式关闭。
+- 装配 `test-agent-scheduler` 的公共 handler/Redis 锁以及 `test-agent-xxl-job-integration`；应用内不再启动 PostgreSQL scheduler 扫描线程。
 - 保持生产容器只运行一个 Java 应用进程；PostgreSQL、XXL MySQL、Redis 和 opencode server 均由外部配置注入。
 
 ## 不负责
@@ -47,9 +47,8 @@
 - 根目录 `restart-dev-services.sh` 默认读取 `.env.test` 并以 `test` profile 一键重启；本地直接使用 `tools/dev-backend-run.sh --env-file .env.local`，不设置 Spring profile。
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
 - 企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖；PostgreSQL JDBC 驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
-- `application.yml`：`test-agent.scheduler.enabled` 默认 `true`，但只控制 `USER_PLAN` runner；可通过 `TEST_AGENT_SCHEDULER_ENABLED=false` 显式关闭。
 - `application.yml`：`test-agent.xxl-job.enabled` 默认 `true`；MySQL、access token、Admin/executor 端口和地址使用 `TEST_AGENT_XXL_JOB_*` 注入。readiness group 明确不包含 `xxlJobAdmin`。
-- `application.yml`：USER_PLAN 默认单轮 50 条、4 个 worker、100 个等待位；分别由 `TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT`、`TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT`、`TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY` 覆盖。夜间执行每个 15 分钟时段容量不再绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在运行态 Flyway 完成后严格加载，缺失或非法会让应用启动失败。
+- 夜间执行每个 15 分钟时段容量不绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在运行态 Flyway 完成后严格加载，缺失或非法会让应用启动失败。15 分钟分发和 5 分钟补偿均由 XXL 任务触发。
 - 运营分析等周期 handler 不再由旧 runner 注册；任务定义由 XXL MySQL 版本 SQL 初始化，启停、Cron、手动触发和日志在 XXL 页面维护。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
 - 用户进程运行管理和 manager 控制面在线状态强依赖 Redis；多服务器应用版本工作区副本实时同步也需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。
@@ -60,7 +59,7 @@
 
 - `AppModuleBoundaryTest` 保证 app 模块不回流 workspace、session、run、runtime、terminal、web 等业务包。
 - `ConversationMemberRevocationIntegrationTest` 跨 configuration/workspace/runtime 验证成员移除会使旧 token 失效，并让同一托管 Workspace 的后续上下文签发返回 `FORBIDDEN`。
-- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、终端安全阈值、Spring Redis 配置入口、scheduler 与 USER_PLAN 配置绑定、废弃 opencode 固定节点配置缺失、废弃普通工作区目录选择配置缺失、manager 控制面 5 秒心跳和 10 秒 TTL。
+- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、终端安全阈值、Spring Redis 配置入口、XXL 配置、废弃 scheduler/opencode 固定节点/普通工作区目录配置缺失，以及 manager 控制面 5 秒心跳和 10 秒 TTL。
 - `ServerIdentityFilePathResolverTest` / `ServerIdentityFileWriterTest` 覆盖 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 派生、参数缺失失败、父目录创建、旧内容覆盖和单行身份/地址写入。
 - `OpencodeManagerControlConfigTest` 覆盖稳定服务器身份按环境变量优先、主机名兜底，advertised host 按环境变量优先、探测 IPv4 兜底，以及后端直连地址由 advertised host 和 `server.port` 自动派生。
 - `RedisHealthIndicatorTest` 覆盖 Redis 必需依赖的 TCP 健康检查。

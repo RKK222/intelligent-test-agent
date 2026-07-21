@@ -17,13 +17,14 @@ import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Redis 摘要模式的 PostgreSQL 适配器：启动只插入无原文锚点，终态用三条 SQL 完成 CAS、双摘要和 Session 更新。
+ * 普通 Run 的 PostgreSQL 无原文控制面适配器：启动只插入幂等锚点，摘要终态再完成 CAS 和双摘要投影。
  */
 @Repository
 public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersistencePort {
@@ -39,6 +40,9 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
     /** 正常启动只执行一条 INSERT；冲突后的查询由调用方显式发起，避免新 Run 多一次 SELECT。 */
     @Override
     public boolean insertAnchor(RunPersistenceAnchor anchor) {
+        if (anchor.status().isTerminal()) {
+            throw new IllegalArgumentException("new Run anchor status must be active");
+        }
         return mapper.insertAnchor(toRow(anchor)) == 1;
     }
 
@@ -51,6 +55,26 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
         }
         return Optional.ofNullable(mapper.findBySessionAndClientRequestId(sessionId.value(), clientRequestId))
                 .map(this::toDomain);
+    }
+
+    @Override
+    public boolean claimLegacyScheduledDispatch(
+            com.enterprise.testagent.domain.run.RunId runId,
+            String sourceRefId,
+            String dispatchAttemptId,
+            Instant leaseUntil,
+            Instant now) {
+        return mapper.claimLegacyScheduledDispatch(
+                runId.value(), sourceRefId, dispatchAttemptId, leaseUntil, now) == 1;
+    }
+
+    @Override
+    public boolean markLegacyScheduledDispatchAccepted(
+            com.enterprise.testagent.domain.run.RunId runId,
+            String dispatchAttemptId,
+            Instant acceptedAt) {
+        return mapper.markLegacyScheduledDispatchAccepted(
+                runId.value(), dispatchAttemptId, acceptedAt) == 1;
     }
 
     @Override
@@ -127,7 +151,12 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                 anchor.opencodeProcessIdSnapshot(),
                 anchor.rootRemoteSessionId(),
                 anchor.dispatchMessageId(),
-                anchor.assistantSummaryMessageId().value(),
+                anchor.scheduledDispatchAttemptId(),
+                anchor.scheduledDispatchLeaseUntil(),
+                anchor.scheduledDispatchAcceptedAt(),
+                anchor.assistantSummaryMessageId() == null
+                        ? null
+                        : anchor.assistantSummaryMessageId().value(),
                 anchor.traceId(),
                 anchor.createdAt(),
                 anchor.updatedAt(),
@@ -202,7 +231,12 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                 row.opencodeProcessIdSnapshot(),
                 row.rootRemoteSessionId(),
                 row.dispatchMessageId(),
-                new SessionMessageId(row.assistantSummaryMessageId()),
+                row.scheduledDispatchAttemptId(),
+                row.scheduledDispatchLeaseUntil(),
+                row.scheduledDispatchAcceptedAt(),
+                row.assistantSummaryMessageId() == null
+                        ? null
+                        : new SessionMessageId(row.assistantSummaryMessageId()),
                 row.traceId(),
                 row.createdAt(),
                 row.updatedAt(),

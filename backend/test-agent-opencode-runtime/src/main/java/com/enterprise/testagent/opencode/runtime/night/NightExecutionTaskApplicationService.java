@@ -11,8 +11,6 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskRun;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
@@ -24,9 +22,8 @@ import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuth
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
-import com.enterprise.testagent.opencode.runtime.process.OpencodeScheduledTaskExecutionAffinityProvider;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
-import com.enterprise.testagent.scheduler.ScheduledUserPlanService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -39,17 +36,13 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class NightExecutionTaskApplicationService {
 
-    public static final ScheduledTaskKey TASK_KEY =
-            new ScheduledTaskKey("opencode-runtime.night-execution");
-
     private final NightExecutionTaskRepository taskRepository;
     private final SessionRepository sessionRepository;
     private final SessionMessageRepository messageRepository;
     private final WorkspaceRepository workspaceRepository;
     private final ConversationWorkspaceAccessAuthorizer accessAuthorizer;
     private final UserOpencodeProcessAssignmentService assignmentService;
-    private final ScheduledUserPlanService scheduledUserPlanService;
-    private final OpencodeScheduledTaskExecutionAffinityProvider affinityProvider;
+    private final BackendJavaRouteResolver routeResolver;
     private final NightExecutionWindowCalculator windowCalculator;
     private final NightExecutionCapacityRegistry capacityRegistry;
     private final ObjectMapper objectMapper;
@@ -62,8 +55,7 @@ public class NightExecutionTaskApplicationService {
             WorkspaceRepository workspaceRepository,
             ConversationWorkspaceAccessAuthorizer accessAuthorizer,
             UserOpencodeProcessAssignmentService assignmentService,
-            ScheduledUserPlanService scheduledUserPlanService,
-            OpencodeScheduledTaskExecutionAffinityProvider affinityProvider,
+            BackendJavaRouteResolver routeResolver,
             NightExecutionWindowCalculator windowCalculator,
             NightExecutionCapacityRegistry capacityRegistry,
             ObjectMapper objectMapper,
@@ -74,8 +66,7 @@ public class NightExecutionTaskApplicationService {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository);
         this.accessAuthorizer = Objects.requireNonNull(accessAuthorizer);
         this.assignmentService = Objects.requireNonNull(assignmentService);
-        this.scheduledUserPlanService = Objects.requireNonNull(scheduledUserPlanService);
-        this.affinityProvider = Objects.requireNonNull(affinityProvider);
+        this.routeResolver = Objects.requireNonNull(routeResolver);
         this.windowCalculator = Objects.requireNonNull(windowCalculator);
         this.capacityRegistry = Objects.requireNonNull(capacityRegistry);
         this.objectMapper = Objects.requireNonNull(objectMapper);
@@ -84,7 +75,6 @@ public class NightExecutionTaskApplicationService {
 
     /** 返回下一夜间窗口；先计算边界再查询该窗口的真实占用。 */
     public NightExecutionWindowCalculator.NightExecutionWindow slots() {
-        requireUserPlanAvailable();
         int capacity = capacityRegistry.currentCapacity();
         Instant now = clock.instant();
         var window = windowCalculator.nextWindow(now, Map.of(), capacity);
@@ -93,7 +83,7 @@ public class NightExecutionTaskApplicationService {
         return windowCalculator.nextWindow(now, reservations, capacity);
     }
 
-    /** 幂等创建夜间任务；空白对话的 Session、占位、锁和 USER_PLAN 同属一个数据库事务。 */
+    /** 幂等创建夜间任务；空白对话的 Session、占位和锁同属一个数据库事务。 */
     @Transactional
     public NightExecutionTask create(UserId owner, NightExecutionCreateCommand command, String traceId) {
         Objects.requireNonNull(owner, "owner must not be null");
@@ -118,7 +108,7 @@ public class NightExecutionTaskApplicationService {
 
         NightExecutionRunInputSnapshot snapshot = command.runInput().withStableIds();
         String targetLinuxServerId = assignmentService.routingLinuxServerId(owner, "opencode")
-                .orElseGet(affinityProvider::currentAffinity);
+                .orElseGet(routeResolver::currentLinuxServerIdValue);
         NightExecutionTask draft = new NightExecutionTask(
                 taskId, owner, session.session().sessionId(), workspace.workspaceId(), command.clientRequestId(),
                 session.session().title(), preview(snapshot.effectivePrompt()), writeSnapshot(snapshot),
@@ -129,11 +119,7 @@ public class NightExecutionTaskApplicationService {
         if (!taskRepository.insertSessionLock(session.session().sessionId(), taskId, owner, now)) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前会话已有待执行夜间任务");
         }
-        ScheduledTaskRun scheduledRun = scheduledUserPlanService.schedule(
-                TASK_KEY, owner, selected.slotStart(), targetLinuxServerId, traceId);
-        NightExecutionTask saved = draft.withScheduledRun(scheduledRun.taskRunId(), now);
-        taskRepository.save(saved);
-        return saved;
+        return draft;
     }
 
     /** 集中任务页分页；按 sessionId 查询时同时恢复最近未关闭失败卡。 */
@@ -150,7 +136,7 @@ public class NightExecutionTaskApplicationService {
                 taskRepository.findVisibleFailureBySession(owner, sessionId).orElse(null));
     }
 
-    /** 用户改期只允许尚未认领的任务；新占位和新 USER_PLAN 成功后才释放旧记录。 */
+    /** 用户改期只允许尚未认领的任务；新占位写入成功后才释放旧时段。 */
     @Transactional
     public NightExecutionTask adjust(UserId owner, NightExecutionTaskId taskId, Instant slotStart, String traceId) {
         NightExecutionTask current = owned(owner, taskId);
@@ -165,14 +151,11 @@ public class NightExecutionTaskApplicationService {
         if (!taskRepository.reserveSlot(selected.slotStart(), window.capacity(), now)) {
             throw slotConflict("所选夜间时段刚刚已满，请重新选择", slots());
         }
-        ScheduledTaskRun newRun = scheduledUserPlanService.schedule(
-                TASK_KEY, owner, selected.slotStart(), current.targetLinuxServerId(), traceId);
         NightExecutionTask adjusted = current.reschedule(
-                selected.slotStart(), selected.slotEnd(), current.targetLinuxServerId(), newRun.taskRunId(), now);
+                selected.slotStart(), selected.slotEnd(), current.targetLinuxServerId(), now);
         if (!taskRepository.updateIfStatus(adjusted, NightExecutionTaskStatus.SCHEDULED)) {
             throw new PlatformException(ErrorCode.CONFLICT, "任务已经开始，无法调整时段");
         }
-        scheduledUserPlanService.cancelPending(current.scheduledTaskRunId(), "用户调整夜间执行时段");
         taskRepository.releaseSlot(current.slotStart(), now);
         return adjusted;
     }
@@ -183,7 +166,6 @@ public class NightExecutionTaskApplicationService {
         NightExecutionTask current = owned(owner, taskId);
         requireScheduled(current, "任务已经开始，无法取消");
         Instant now = clock.instant();
-        scheduledUserPlanService.cancelPending(current.scheduledTaskRunId(), "用户取消夜间执行任务");
         NightExecutionTask cancelled = current.cancel(now);
         if (!taskRepository.updateIfStatus(cancelled, NightExecutionTaskStatus.SCHEDULED)) {
             throw new PlatformException(ErrorCode.CONFLICT, "任务已经开始，无法取消");
@@ -273,14 +255,8 @@ public class NightExecutionTaskApplicationService {
     }
 
     private void requireScheduled(NightExecutionTask task, String message) {
-        if (task.status() != NightExecutionTaskStatus.SCHEDULED || task.scheduledTaskRunId() == null) {
+        if (task.status() != NightExecutionTaskStatus.SCHEDULED) {
             throw new PlatformException(ErrorCode.CONFLICT, message);
-        }
-    }
-
-    private void requireUserPlanAvailable() {
-        if (!scheduledUserPlanService.available()) {
-            throw new PlatformException(ErrorCode.NIGHT_EXECUTION_UNAVAILABLE, "定时任务后台扫描未启用");
         }
     }
 

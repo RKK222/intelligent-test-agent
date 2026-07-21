@@ -22,6 +22,8 @@ import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.persistence.mybatis.MyBatisRunSummaryPersistenceRepository;
+import com.enterprise.testagent.persistence.mybatis.RunMapper;
+import com.enterprise.testagent.persistence.mybatis.RunRow;
 import com.enterprise.testagent.persistence.mybatis.RunSummaryMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -56,22 +58,31 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
     private CountingDataSource countingDataSource;
     private JdbcClient jdbcClient;
     private RunSummaryPersistencePort repository;
+    private RunMapper runMapper;
 
     @BeforeEach
     void setUp() throws Exception {
         physicalDataSource = new SingleConnectionDataSource(
-                "jdbc:h2:mem:testagent_run_summary_%s;MODE=PostgreSQL;DATABASE_TO_UPPER=false"
+                ("jdbc:h2:mem:testagent_run_summary_%s;MODE=PostgreSQL;DATABASE_TO_UPPER=false;"
+                        + "INIT=CREATE DOMAIN IF NOT EXISTS timestamptz AS TIMESTAMP WITH TIME ZONE")
                         .formatted(UUID.randomUUID().toString().replace("-", "")),
                 "sa",
                 "",
                 true);
-        Flyway.configure().dataSource(physicalDataSource).locations("classpath:db/migration").load().migrate();
+        // 后续 migration 含 H2 不支持的 PostgreSQL 部分表达式索引；本测试固定在 Run 摘要完整基线。
+        Flyway.configure().dataSource(physicalDataSource).locations("classpath:db/migration")
+                .target("20260715000000").load().migrate();
         jdbcClient = JdbcClient.create(physicalDataSource);
+        jdbcClient.sql("alter table runs add column scheduled_dispatch_attempt_id varchar(128)").update();
+        jdbcClient.sql("alter table runs add column scheduled_dispatch_lease_until timestamp with time zone").update();
+        jdbcClient.sql("alter table runs add column scheduled_dispatch_accepted_at timestamp with time zone").update();
         seedWorkspaceSessionAndUser();
 
         countingDataSource = new CountingDataSource(physicalDataSource);
         SqlSessionFactory factory = sqlSessionFactory(countingDataSource);
-        RunSummaryMapper mapper = new SqlSessionTemplate(factory).getMapper(RunSummaryMapper.class);
+        SqlSessionTemplate template = new SqlSessionTemplate(factory);
+        RunSummaryMapper mapper = template.getMapper(RunSummaryMapper.class);
+        runMapper = template.getMapper(RunMapper.class);
         repository = new MyBatisRunSummaryPersistenceRepository(mapper);
     }
 
@@ -108,6 +119,86 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
 
         assertThat(repository.findBySessionAndClientRequestId(SESSION_ID, "request-anchor-find"))
                 .contains(anchor);
+    }
+
+    @Test
+    void legacyScheduledAnchorUsesTheSameSessionClientRequestUniqueKey() {
+        RunPersistenceAnchor first = legacyAnchor(
+                "run_legacy_scheduled_one", "request-legacy-scheduled", "net_legacy_one");
+        RunPersistenceAnchor retry = legacyAnchor(
+                "run_legacy_scheduled_other", "request-legacy-scheduled", "net_legacy_one");
+
+        assertThat(repository.insertAnchor(first)).isTrue();
+        assertThat(repository.insertAnchor(retry)).isFalse();
+        assertThat(repository.findBySessionAndClientRequestId(SESSION_ID, "request-legacy-scheduled"))
+                .contains(first);
+        assertThat(jdbcClient.sql("select count(*) from runs where client_request_id = 'request-legacy-scheduled'")
+                .query(Long.class)
+                .single()).isEqualTo(1L);
+    }
+
+    @Test
+    void legacyScheduledDispatchClaimAndAcceptanceAreAttemptFenced() {
+        RunPersistenceAnchor anchor = legacyAnchor(
+                "run_legacy_scheduled_fenced", "request-legacy-fenced", "net_legacy_fenced");
+        assertThat(repository.insertAnchor(anchor)).isTrue();
+
+        assertThat(repository.claimLegacyScheduledDispatch(
+                anchor.runId(), anchor.sourceRefId(), "nda_new", NOW.plusSeconds(600), NOW)).isFalse();
+        assertThat(repository.claimLegacyScheduledDispatch(
+                anchor.runId(), anchor.sourceRefId(), anchor.scheduledDispatchAttemptId(),
+                NOW.plusSeconds(600), NOW)).isTrue();
+        assertThat(repository.claimLegacyScheduledDispatch(
+                anchor.runId(), anchor.sourceRefId(), "nda_new",
+                NOW.plusSeconds(901), NOW.plusSeconds(601))).isTrue();
+
+        assertThat(repository.markLegacyScheduledDispatchAccepted(
+                anchor.runId(), anchor.scheduledDispatchAttemptId(), NOW.plusSeconds(602))).isFalse();
+        assertThat(repository.markLegacyScheduledDispatchAccepted(
+                anchor.runId(), "nda_new", NOW.plusSeconds(602))).isTrue();
+        assertThat(repository.findBySessionAndClientRequestId(SESSION_ID, "request-legacy-fenced"))
+                .get()
+                .satisfies(found -> {
+                    assertThat(found.scheduledDispatchAttemptId()).isEqualTo("nda_new");
+                    assertThat(found.scheduledDispatchAcceptedAt()).isEqualTo(NOW.plusSeconds(602));
+                });
+        assertThat(repository.claimLegacyScheduledDispatch(
+                anchor.runId(), anchor.sourceRefId(), "nda_late",
+                NOW.plusSeconds(1200), NOW.plusSeconds(1000))).isFalse();
+    }
+
+    @Test
+    void staleLegacyScanExcludesScheduledAnchorWhoseRemoteHandoffIsUnconfirmed() {
+        RunPersistenceAnchor unconfirmed = legacyAnchor(
+                "run_legacy_unconfirmed", "request-legacy-unconfirmed", "net_legacy_unconfirmed");
+        RunPersistenceAnchor accepted = legacyAnchor(
+                "run_legacy_accepted", "request-legacy-accepted", "net_legacy_accepted");
+        assertThat(repository.insertAnchor(unconfirmed)).isTrue();
+        assertThat(repository.insertAnchor(accepted)).isTrue();
+        assertThat(repository.markLegacyScheduledDispatchAccepted(
+                accepted.runId(), accepted.scheduledDispatchAttemptId(), NOW.plusSeconds(1))).isTrue();
+
+        assertThat(runMapper.findStaleActiveRuns(NOW.plusSeconds(10), 10))
+                .extracting(RunRow::runId)
+                .contains(accepted.runId().value())
+                .doesNotContain(unconfirmed.runId().value());
+    }
+
+    @Test
+    void findByClientRequestIdKeepsStableRunIdentityAfterTerminalProjection() {
+        RunPersistenceAnchor anchor = anchor("run_summary_anchor_terminal", "request-anchor-terminal");
+        repository.insertAnchor(anchor);
+        jdbcClient.sql("update runs set status='SUCCEEDED', status_version=2 where run_id=:runId")
+                .param("runId", anchor.runId().value())
+                .update();
+
+        RunPersistenceAnchor terminal = repository
+                .findBySessionAndClientRequestId(SESSION_ID, "request-anchor-terminal")
+                .orElseThrow();
+
+        assertThat(terminal.runId()).isEqualTo(anchor.runId());
+        assertThat(terminal.status()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(terminal.statusVersion()).isEqualTo(2L);
     }
 
     @Test
@@ -397,6 +488,9 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
                 "opc_process-summary-a",
                 "remote-session-summary-a",
                 "dispatch-summary-a",
+                null,
+                null,
+                null,
                 new SessionMessageId("msg_assistant_" + runId.substring(4)),
                 "trace_run_summary",
                 NOW,
@@ -404,6 +498,35 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
                 NOW.plusSeconds(86_400),
                 ConversationSourceType.MANUAL,
                 null,
+                USER_ID,
+                "opencode",
+                "provider/model");
+    }
+
+    private RunPersistenceAnchor legacyAnchor(String runId, String clientRequestId, String sourceRefId) {
+        return new RunPersistenceAnchor(
+                new RunId(runId),
+                SESSION_ID,
+                WORKSPACE_ID,
+                RunStatus.PENDING,
+                RunStorageMode.LEGACY_FULL,
+                0L,
+                clientRequestId,
+                "server-summary-a",
+                null,
+                null,
+                null,
+                "dispatch-legacy-a",
+                "nda_legacy_initial",
+                NOW.plusSeconds(300),
+                null,
+                null,
+                "trace_run_summary",
+                NOW,
+                NOW,
+                null,
+                ConversationSourceType.SCHEDULED_TASK,
+                sourceRefId,
                 USER_ID,
                 "opencode",
                 "provider/model");

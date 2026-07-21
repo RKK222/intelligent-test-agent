@@ -214,6 +214,11 @@ public final class RuntimeIdGenerator {
         return prefixed("net_");
     }
 
+    /** 生成夜间任务分发尝试 ID，用于租约续期和旧执行者写回栅栏。 */
+    public static String nightExecutionDispatchAttemptId() {
+        return prefixed("nda_");
+    }
+
     /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */

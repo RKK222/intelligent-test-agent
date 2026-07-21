@@ -2,7 +2,7 @@ package com.enterprise.testagent.persistence.mybatis;
 
 import java.time.Instant;
 
-/** runs 表的 Redis 摘要模式锚点行，只包含控制面元数据。 */
+/** runs 表的控制面锚点行，覆盖 Redis 摘要模式与 legacy Scheduled Run，且不包含对话原文。 */
 public record RunPersistenceAnchorRow(
         String runId,
         String sessionId,
@@ -16,6 +16,9 @@ public record RunPersistenceAnchorRow(
         String opencodeProcessIdSnapshot,
         String rootRemoteSessionId,
         String dispatchMessageId,
+        String scheduledDispatchAttemptId,
+        Instant scheduledDispatchLeaseUntil,
+        Instant scheduledDispatchAcceptedAt,
         String assistantSummaryMessageId,
         String traceId,
         Instant createdAt,

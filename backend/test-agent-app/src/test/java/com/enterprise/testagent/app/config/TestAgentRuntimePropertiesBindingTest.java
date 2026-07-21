@@ -2,7 +2,6 @@ package com.enterprise.testagent.app.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.enterprise.testagent.scheduler.SchedulerProperties;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -62,29 +61,6 @@ class TestAgentRuntimePropertiesBindingTest {
                             .isEqualTo("com.alibaba.druid.pool.DruidDataSource");
                     assertThat(context.getEnvironment().getProperty("spring.datasource.druid.url"))
                             .isEqualTo("jdbc:postgresql://test-postgres.example.internal:25432/test_agent_ci");
-                });
-    }
-
-    @Test
-    void defaultSchedulerScanningIsEnabled() {
-        profileContextRunner
-                .withBean(SchedulerProperties.class)
-                .run(context -> assertThat(context.getBean(SchedulerProperties.class).isEnabled()).isTrue());
-    }
-
-    @Test
-    void bindsSchedulerUserPlanConcurrencyLimits() {
-        contextRunner
-                .withBean(SchedulerProperties.class)
-                .withPropertyValues(
-                        "test-agent.scheduler.user-plan-run-limit=17",
-                        "test-agent.scheduler.user-plan-worker-count=3",
-                        "test-agent.scheduler.user-plan-queue-capacity=41")
-                .run(context -> {
-                    SchedulerProperties properties = context.getBean(SchedulerProperties.class);
-                    assertThat(properties.getUserPlanRunLimit()).isEqualTo(17);
-                    assertThat(properties.getUserPlanWorkerCount()).isEqualTo(3);
-                    assertThat(properties.getUserPlanQueueCapacity()).isEqualTo(41);
                 });
     }
 

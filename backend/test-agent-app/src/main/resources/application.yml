@@ -106,15 +106,6 @@ test-agent:
       ucid-header-name: ${TEST_AGENT_ENTERPRISE_OPENAI_UCID_HEADER_NAME:ucid}
       auth-mode: ${TEST_AGENT_ENTERPRISE_OPENAI_AUTH_MODE:auth-token}
       default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:Qwen3.6-27B}
-  scheduler:
-    enabled: ${TEST_AGENT_SCHEDULER_ENABLED:true}
-    scan-interval: ${TEST_AGENT_SCHEDULER_SCAN_INTERVAL:30s}
-    due-task-limit: ${TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT:50}
-    manual-run-limit: ${TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT:50}
-    user-plan-run-limit: ${TEST_AGENT_SCHEDULER_USER_PLAN_RUN_LIMIT:50}
-    user-plan-worker-count: ${TEST_AGENT_SCHEDULER_USER_PLAN_WORKER_COUNT:4}
-    user-plan-queue-capacity: ${TEST_AGENT_SCHEDULER_USER_PLAN_QUEUE_CAPACITY:100}
-    instance-id: ${TEST_AGENT_SCHEDULER_INSTANCE_ID:backend-${random.uuid}}
   xxl-job:
     enabled: ${TEST_AGENT_XXL_JOB_ENABLED:true}
     access-token: ${TEST_AGENT_XXL_JOB_ACCESS_TOKEN:10fd68f816007609067786ece7e8be0e8ec94d20bee733e4f500cf6f7598e502}

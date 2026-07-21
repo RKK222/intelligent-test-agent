@@ -54,24 +54,37 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
     public boolean updateIfStatus(NightExecutionTask task, NightExecutionTaskStatus expectedStatus) {
         Map<String, Object> values = params(task);
         values.put("expectedStatus", expectedStatus.name());
+        values.put("expectedStateVersion", task.stateVersion() - 1);
         return mapper.updateTaskIfStatus(values) == 1;
     }
 
     @Override
-    public boolean claimForScheduledRun(NightExecutionTask task, ScheduledTaskRunId expectedScheduledRunId) {
+    public boolean claimForDispatch(NightExecutionTask task, String expectedTargetLinuxServerId) {
         Map<String, Object> values = params(task);
-        values.put("expectedScheduledTaskRunId", expectedScheduledRunId.value());
-        return mapper.claimTaskForScheduledRun(values) == 1;
+        values.put("expectedTargetLinuxServerId", expectedTargetLinuxServerId);
+        values.put("expectedStateVersion", task.stateVersion() - 1);
+        return mapper.claimTaskForDispatch(values) == 1;
+    }
+
+    @Override
+    public boolean updateDispatchIfAttempt(NightExecutionTask task, String expectedAttemptId) {
+        Map<String, Object> values = params(task);
+        values.put("expectedAttemptId", expectedAttemptId);
+        return mapper.updateDispatchIfAttempt(values) == 1;
+    }
+
+    @Override
+    public boolean renewDispatchLease(
+            NightExecutionTaskId taskId,
+            String attemptId,
+            Instant leaseUntil,
+            Instant now) {
+        return mapper.renewDispatchLease(taskId.value(), attemptId, leaseUntil, now) == 1;
     }
 
     @Override
     public Optional<NightExecutionTask> findById(NightExecutionTaskId taskId) {
         return optional(mapper.findById(taskId.value()));
-    }
-
-    @Override
-    public Optional<NightExecutionTask> findByScheduledTaskRunId(ScheduledTaskRunId taskRunId) {
-        return optional(mapper.findByScheduledTaskRunId(taskRunId.value()));
     }
 
     @Override
@@ -99,13 +112,23 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
     }
 
     @Override
-    public List<NightExecutionTask> findScheduledDueBefore(Instant cutoff, int limit) {
-        return tasks(mapper.findScheduledDueBefore(cutoff, limit));
+    public List<NightExecutionTask> findScheduledDue(Instant now, int limit) {
+        return tasks(mapper.findScheduledDue(now, limit));
     }
 
     @Override
-    public List<NightExecutionTask> findDispatchingBefore(Instant cutoff, int limit) {
-        return tasks(mapper.findDispatchingBefore(cutoff, limit));
+    public List<NightExecutionTask> findScheduledWindowExpired(Instant now, int limit) {
+        return tasks(mapper.findScheduledWindowExpired(now, limit));
+    }
+
+    @Override
+    public List<NightExecutionTask> findDispatchingLeaseExpiredBefore(Instant cutoff, int limit) {
+        return tasks(mapper.findDispatchingLeaseExpiredBefore(cutoff, limit));
+    }
+
+    @Override
+    public List<NightExecutionTask> findDispatchingByOwner(String backendProcessId, int limit) {
+        return tasks(mapper.findDispatchingByOwner(backendProcessId, limit));
     }
 
     @Override
@@ -159,6 +182,14 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
     }
 
     @Override
+    public boolean deleteTerminalIfUnchanged(
+            NightExecutionTaskId taskId,
+            long stateVersion,
+            Instant cutoff) {
+        return mapper.deleteTerminalIfUnchanged(taskId.value(), stateVersion, cutoff) == 1;
+    }
+
+    @Override
     public void delete(NightExecutionTaskId taskId) {
         mapper.deleteTask(taskId.value());
     }
@@ -184,7 +215,9 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
                 value(row, "scheduledTaskRunId", ScheduledTaskRunId::new),
                 value(row, "runId", RunId::new),
                 number(row, "rolloverCount").intValue(), bool(row, "taskCreatedSession"),
-                instant(row, "dispatchStartedAt"), instant(row, "dismissedAt"),
+                instant(row, "dispatchStartedAt"), text(row, "dispatchAttemptId"),
+                text(row, "dispatchOwnerBackendProcessId"), instant(row, "dispatchLeaseUntil"),
+                number(row, "stateVersion").longValue(), instant(row, "dismissedAt"),
                 instant(row, "reservationReleasedAt"), text(row, "errorCode"), text(row, "errorMessage"),
                 text(row, "traceId"), instant(row, "createdAt"), instant(row, "updatedAt"));
     }
@@ -209,6 +242,10 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
         values.put("rolloverCount", task.rolloverCount());
         values.put("taskCreatedSession", task.taskCreatedSession());
         values.put("dispatchStartedAt", task.dispatchStartedAt());
+        values.put("dispatchAttemptId", task.dispatchAttemptId());
+        values.put("dispatchOwnerBackendProcessId", task.dispatchOwnerBackendProcessId());
+        values.put("dispatchLeaseUntil", task.dispatchLeaseUntil());
+        values.put("stateVersion", task.stateVersion());
         values.put("dismissedAt", task.dismissedAt());
         values.put("reservationReleasedAt", task.reservationReleasedAt());
         values.put("errorCode", task.errorCode());

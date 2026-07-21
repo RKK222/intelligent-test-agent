@@ -56,7 +56,7 @@ public class ScheduledTaskRunRetentionTaskHandler implements ScheduledTaskHandle
     }
 
     /**
-     * 按当前时钟计算七天保留边界；删除失败交由 scheduler runner 统一记录为失败运行。
+     * 按当前时钟计算七天保留边界；删除失败交由 XXL adapter 统一标记执行失败。
      */
     @Override
     public ScheduledTaskResult run(ScheduledTaskContext context) {

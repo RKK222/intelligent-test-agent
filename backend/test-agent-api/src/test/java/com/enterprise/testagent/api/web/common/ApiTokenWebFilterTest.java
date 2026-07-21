@@ -37,4 +37,19 @@ class ApiTokenWebFilterTest {
 
         assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(401);
     }
+
+    @Test
+    void filterExemptsOnlyNightExecutionInternalDispatchPath() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
+                "/api/internal/platform/opencode-runtime/night-execution/internal-dispatch"));
+        final boolean[] called = {false};
+
+        filter.filter(exchange, currentExchange -> {
+            called[0] = true;
+            return Mono.empty();
+        }).block();
+
+        assertThat(called[0]).isTrue();
+    }
 }

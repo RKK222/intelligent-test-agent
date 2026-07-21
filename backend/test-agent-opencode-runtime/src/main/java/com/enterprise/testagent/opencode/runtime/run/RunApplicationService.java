@@ -143,6 +143,7 @@ public class RunApplicationService {
             RunEventType.RUN_SUCCEEDED,
             RunEventType.RUN_FAILED,
             RunEventType.RUN_CANCELLED);
+    private static final Duration LEGACY_SCHEDULED_DISPATCH_LEASE = Duration.ofMinutes(5);
 
     private final WorkspaceRepository workspaceRepository;
     private final com.enterprise.testagent.domain.session.SessionRepository sessionRepository;
@@ -177,6 +178,8 @@ public class RunApplicationService {
     private RunRuntimeLossConvergenceScheduler runtimeLossScheduler;
     private NightExecutionSessionLockGuard nightExecutionLockGuard;
     private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
+    private List<ScheduledRunLifecycleObserver> scheduledRunLifecycleObservers = List.of();
+    private RunDispatchAcceptanceProbe runDispatchAcceptanceProbe;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -830,15 +833,50 @@ public class RunApplicationService {
 
     /** 调度器内部入口；来源由服务端固定，浏览器无法伪造。 */
     public Run startScheduledRun(UserId userId, StartRunInput input, String sourceRefId, String traceId) {
-        if (sourceRefId == null || sourceRefId.isBlank()) {
-            throw new IllegalArgumentException("sourceRefId must not be blank");
+        return startScheduledRun(userId, input, new ScheduledRunMetadata(sourceRefId, null), traceId);
+    }
+
+    /**
+     * 启动带内部生命周期元数据的普通 Scheduled Run；回调发生在 Run 锚点和异步 prompt 已受理之后。
+     */
+    public Run startScheduledRun(
+            UserId userId,
+            StartRunInput input,
+            ScheduledRunMetadata metadata,
+            String traceId) {
+        Objects.requireNonNull(metadata, "metadata must not be null");
+        Run run;
+        try {
+            run = startRunInternal(
+                    Objects.requireNonNull(userId, "userId must not be null"),
+                    agentRuntimeRegistry.defaultAgentId(),
+                    input,
+                    traceId,
+                    RunSource.scheduled(metadata.sourceRefId(), metadata.dispatchAttemptId()));
+        } catch (RuntimeException failure) {
+            notifyScheduledRunRejected(metadata, failure, traceId);
+            throw failure;
         }
-        return startRunInternal(
-                Objects.requireNonNull(userId, "userId must not be null"),
-                agentRuntimeRegistry.defaultAgentId(),
-                input,
-                traceId,
-                RunSource.scheduled(sourceRefId));
+        // 受理回调异常不触发 rejected 回调；锚点已经存在，补偿任务会按幂等键修复业务状态。
+        for (ScheduledRunLifecycleObserver observer : scheduledRunLifecycleObservers) {
+            observer.onAccepted(metadata, run);
+        }
+        return run;
+    }
+
+    private void notifyScheduledRunRejected(
+            ScheduledRunMetadata metadata,
+            RuntimeException failure,
+            String traceId) {
+        for (ScheduledRunLifecycleObserver observer : scheduledRunLifecycleObservers) {
+            try {
+                observer.onRejected(metadata, failure);
+            } catch (RuntimeException observerFailure) {
+                LOGGER.warn(
+                        "Scheduled Run 拒绝回调失败，sourceRefId={}, traceId={}, exceptionType={}",
+                        metadata.sourceRefId(), traceId, observerFailure.getClass().getSimpleName());
+            }
+        }
     }
 
     private Run startRunInternal(
@@ -900,6 +938,16 @@ public class RunApplicationService {
         RunStorageMode storageMode = runStorageModeSelector == null
                 ? RunStorageMode.LEGACY_FULL
                 : runStorageModeSelector.select(userId, input, conversationContext);
+        Optional<RunPersistenceAnchor> existingScheduledAnchor = findExistingScheduledAnchor(
+                source, input, pending);
+        if (existingScheduledAnchor.isPresent()) {
+            RunPersistenceAnchor existing = existingScheduledAnchor.orElseThrow();
+            if (legacyScheduledAnchorAccepted(existing)) {
+                return anchorRun(existing);
+            }
+            // rollout 模式可能在重试之间变化；未完成的 legacy 锚点必须沿原模式和同一 runId 恢复。
+            storageMode = RunStorageMode.LEGACY_FULL;
+        }
         if (storageMode == RunStorageMode.REDIS_SUMMARY) {
             return startRedisSummaryRun(
                     userId,
@@ -920,12 +968,31 @@ public class RunApplicationService {
         String dispatchMessageId = input.messageId() == null
                 ? runtime.createDispatchMessageId()
                 : input.messageId();
-        runRepository.save(pending);
-        saveUserMessage(
-                session.sessionId(), pending.runId(), prompt, input.parts(), userId,
-                dispatchMessageId, traceId, now, source);
-        append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
-                Map.of("status", RunStatus.PENDING.name()), storageMode);
+        LegacyScheduledAnchorClaim scheduledClaim = claimLegacyScheduledAnchor(
+                source, userId, input, pending, dispatchMessageId, existingScheduledAnchor, now);
+        if (scheduledClaim.accepted()) {
+            return scheduledClaim.run();
+        }
+        pending = scheduledClaim.run();
+        dispatchMessageId = scheduledClaim.dispatchMessageId();
+        if (!scheduledClaim.managed()) {
+            runRepository.save(pending);
+        }
+        boolean userMessageCreated;
+        if (scheduledClaim.managed()) {
+            userMessageCreated = ensureLegacyScheduledUserMessage(
+                    session.sessionId(), pending.runId(), prompt, input.parts(), userId,
+                    dispatchMessageId, traceId, now, source);
+        } else {
+            saveUserMessage(
+                    session.sessionId(), pending.runId(), prompt, input.parts(), userId,
+                    dispatchMessageId, traceId, now, source);
+            userMessageCreated = true;
+        }
+        if (userMessageCreated) {
+            append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
+                    Map.of("status", RunStatus.PENDING.name()), storageMode);
+        }
 
         try {
             AgentRoutingTarget target = userProcessAssignment == null
@@ -959,9 +1026,17 @@ public class RunApplicationService {
                     target.node(),
                     workspace,
                     binding.remoteSessionId());
-            Run running = runRepository.save(pending.start(Instant.now()));
-            append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(),
-                    Map.of("status", RunStatus.RUNNING.name()), storageMode);
+            Run running;
+            if (pending.status() == RunStatus.PENDING) {
+                running = runRepository.save(pending.start(Instant.now()));
+                append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(),
+                        Map.of("status", RunStatus.RUNNING.name()), storageMode);
+            } else if (pending.status() == RunStatus.RUNNING) {
+                // 锚点可能在状态已转 RUNNING、handoff 标记尚未写入时崩溃；继续复用同一 Run。
+                running = pending;
+            } else {
+                throw new RunOwnershipLostException("legacy Scheduled Run 已不处于可恢复状态");
+            }
             recordRootSessionScope(
                     resolvedAgentId,
                     running,
@@ -985,6 +1060,24 @@ public class RunApplicationService {
                     storageMode,
                     traceId,
                     titleWatchToken);
+            RunDispatchAcceptance recoveredDispatch = probeRecoveredLegacyScheduledDispatch(
+                    scheduledClaim,
+                    running,
+                    resolvedAgentId,
+                    binding.remoteSessionId(),
+                    dispatchMessageId,
+                    target.node(),
+                    traceId);
+            if (recoveredDispatch == RunDispatchAcceptance.ACCEPTED) {
+                // 远端已存在稳定 user message 时只恢复订阅和 durable handoff，绝不能再次进入执行 loop。
+                renewLegacyScheduledDispatchClaim(scheduledClaim, source, running.runId());
+                markLegacyScheduledDispatchAccepted(scheduledClaim, source, running.runId());
+                return running;
+            }
+            if (recoveredDispatch == RunDispatchAcceptance.UNKNOWN) {
+                // 查询失败或未穷尽时宁可等待下一次补偿，也不能把“不确定”当作未接收而重复发送。
+                throw new RunOwnershipLostException("legacy Scheduled Run 远端接收状态暂不可确认");
+            }
             AgentStartRunCommand command = new AgentStartRunCommand(
                     target.node(),
                     binding.remoteSessionId(),
@@ -1001,6 +1094,7 @@ public class RunApplicationService {
                     input.command(),
                     input.arguments(),
                     traceId);
+            renewLegacyScheduledDispatchClaim(scheduledClaim, source, running.runId());
             // prompt_async/command 的 HTTP 结果不是 Run 终态，后台调用异常需给 root 终态留出到达窗口。
             Mono.defer(() -> runtime.startRun(command))
                     .subscribe(
@@ -1008,8 +1102,10 @@ public class RunApplicationService {
                             },
                             error -> failRunFromDispatch(
                                     resolvedAgentId, running, RunStorageMode.LEGACY_FULL, traceId, error));
+            markLegacyScheduledDispatchAccepted(scheduledClaim, source, running.runId());
             return running;
         } catch (PlatformException exception) {
+            renewLegacyScheduledDispatchClaim(scheduledClaim, source, pending.runId());
             LOGGER.error("Run failed to start, runId={}, errorCode={}, traceId={}",
                     pending.runId().value(),
                     exception.errorCode().name(),
@@ -1019,6 +1115,7 @@ public class RunApplicationService {
                     Map.of("errorCode", exception.errorCode().name()), storageMode);
             snapshotService.persistRunSnapshot(resolvedAgentId, failed, traceId);
             runSessionScopeRouter.finishRun(failed.runId());
+            markLegacyScheduledDispatchAccepted(scheduledClaim, source, failed.runId());
             throw exception;
         }
     }
@@ -1041,12 +1138,12 @@ public class RunApplicationService {
             String prompt,
             Instant now) {
         requireRedisSummaryDependencies(context);
-        Optional<Run> existing = redisSummaryRetry(input, context);
+        Optional<Run> existing = redisSummaryRetry(input, context, pending);
         if (existing.isPresent()) {
             return existing.orElseThrow();
         }
         if (!runRuntimeStore.claimClientRequest(session.sessionId(), input.clientRequestId(), pending.runId())) {
-            return redisSummaryRetry(input, context)
+            return redisSummaryRetry(input, context, pending)
                     .orElseThrow(() -> new PlatformException(
                             ErrorCode.RUNTIME_STATE_UNAVAILABLE,
                             "clientRequestId 已被占用但 Run 运行态尚不可见"));
@@ -1121,6 +1218,9 @@ public class RunApplicationService {
                     context.processId(),
                     context.remoteSessionId(),
                     dispatchMessageId,
+                    null,
+                    null,
+                    null,
                     RunSummaryIdentifiers.assistant(running.runId()),
                     traceId,
                     running.createdAt(),
@@ -1139,6 +1239,7 @@ public class RunApplicationService {
                         .orElseThrow(() -> new PlatformException(
                                 ErrorCode.RUNTIME_STATE_UNAVAILABLE,
                                 "Run 幂等锚点冲突但既有记录不可见"));
+                requireSameScheduledSource(existingAnchor, pending);
                 // 短 claim 窗口内发生并发时，新 Run 的 compare-delete 可能刚移除临时映射；
                 // 用数据库唯一锚点的稳定 runId 重新确认，避免后续重试反复初始化再撞唯一索引。
                 runRuntimeStore.confirmClientRequest(
@@ -1380,7 +1481,10 @@ public class RunApplicationService {
         }
     }
 
-    private Optional<Run> redisSummaryRetry(StartRunInput input, ConversationRunContext context) {
+    private Optional<Run> redisSummaryRetry(
+            StartRunInput input,
+            ConversationRunContext context,
+            Run pending) {
         Optional<RunId> runId = runRuntimeStore.findByClientRequest(input.sessionId(), input.clientRequestId());
         if (runId.isEmpty()) {
             return Optional.empty();
@@ -1389,7 +1493,188 @@ public class RunApplicationService {
         // 禁止把 crash 窗口中的未派发 RUNNING manifest 直接返回给客户端。
         return runSummaryPersistencePort
                 .findBySessionAndClientRequestId(context.sessionId(), input.clientRequestId())
-                .map(this::anchorRun);
+                .map(anchor -> {
+                    requireSameScheduledSource(anchor, pending);
+                    return anchorRun(anchor);
+                });
+    }
+
+    /** 先查询既有 Scheduled 锚点，rollout 模式变化时仍沿原 Run 模式恢复。 */
+    private Optional<RunPersistenceAnchor> findExistingScheduledAnchor(
+            RunSource source,
+            StartRunInput input,
+            Run pending) {
+        if (!usesLegacyScheduledAnchor(source, input)) {
+            return Optional.empty();
+        }
+        Optional<RunPersistenceAnchor> existing = runSummaryPersistencePort
+                .findBySessionAndClientRequestId(pending.sessionId(), input.clientRequestId());
+        existing.ifPresent(anchor -> requireSameScheduledSource(anchor, pending));
+        return existing;
+    }
+
+    /**
+     * legacy Scheduled Run 先写关系型唯一锚点；anchor-only 冲突必须按 attempt/lease 认领后续跑同一 Run。
+     */
+    private LegacyScheduledAnchorClaim claimLegacyScheduledAnchor(
+            RunSource source,
+            UserId userId,
+            StartRunInput input,
+            Run pending,
+            String dispatchMessageId,
+            Optional<RunPersistenceAnchor> preloaded,
+            Instant now) {
+        if (!usesLegacyScheduledAnchor(source, input)) {
+            return new LegacyScheduledAnchorClaim(pending, dispatchMessageId, false, false, false);
+        }
+        RunPersistenceAnchor existing = preloaded.orElse(null);
+        if (existing == null) {
+            boolean inserted = runSummaryPersistencePort.insertAnchor(new RunPersistenceAnchor(
+                    pending.runId(),
+                    pending.sessionId(),
+                    pending.workspaceId(),
+                    pending.status(),
+                    RunStorageMode.LEGACY_FULL,
+                    0L,
+                    input.clientRequestId(),
+                    backendInstanceIdentity == null ? null : backendInstanceIdentity.linuxServerId(),
+                    null,
+                    null,
+                    null,
+                    dispatchMessageId,
+                    source.dispatchAttemptId(),
+                    now.plus(LEGACY_SCHEDULED_DISPATCH_LEASE),
+                    null,
+                    null,
+                    pending.traceId(),
+                    pending.createdAt(),
+                    pending.updatedAt(),
+                    null,
+                    pending.sourceType(),
+                    pending.sourceRefId(),
+                    userId,
+                    pending.agentId(),
+                    pending.modelId()));
+            if (inserted) {
+                return new LegacyScheduledAnchorClaim(pending, dispatchMessageId, true, false, false);
+            }
+            existing = runSummaryPersistencePort
+                    .findBySessionAndClientRequestId(pending.sessionId(), input.clientRequestId())
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                            "Run 幂等锚点冲突但既有记录不可见"));
+            requireSameScheduledSource(existing, pending);
+        }
+        if (legacyScheduledAnchorAccepted(existing)) {
+            return new LegacyScheduledAnchorClaim(
+                    anchorRun(existing), existing.dispatchMessageId(), true, true, true);
+        }
+        if (!runSummaryPersistencePort.claimLegacyScheduledDispatch(
+                existing.runId(), source.refId(), source.dispatchAttemptId(),
+                now.plus(LEGACY_SCHEDULED_DISPATCH_LEASE), now)) {
+            RunPersistenceAnchor latest = runSummaryPersistencePort
+                    .findBySessionAndClientRequestId(pending.sessionId(), input.clientRequestId())
+                    .orElse(existing);
+            requireSameScheduledSource(latest, pending);
+            if (legacyScheduledAnchorAccepted(latest)) {
+                return new LegacyScheduledAnchorClaim(
+                        anchorRun(latest), latest.dispatchMessageId(), true, true, true);
+            }
+            throw new RunOwnershipLostException("legacy Scheduled Run 启动租约仍由其它 attempt 持有");
+        }
+        return new LegacyScheduledAnchorClaim(
+                anchorRun(existing), existing.dispatchMessageId(), true, false, true);
+    }
+
+    /**
+     * 未完成 handoff 的 legacy Scheduled Run 在重投前精确探测远端稳定消息。
+     * UNKNOWN 必须停止本次恢复，避免 prompt_async 已受理但本地标记未落库时重复执行。
+     */
+    private RunDispatchAcceptance probeRecoveredLegacyScheduledDispatch(
+            LegacyScheduledAnchorClaim claim,
+            Run run,
+            String agentId,
+            String remoteSessionId,
+            String dispatchMessageId,
+            ExecutionNode node,
+            String traceId) {
+        if (!claim.recovered()) {
+            return RunDispatchAcceptance.NOT_ACCEPTED;
+        }
+        if (runDispatchAcceptanceProbe == null || backendInstanceIdentity == null) {
+            return RunDispatchAcceptance.UNKNOWN;
+        }
+        try {
+            RunDispatchAcceptance acceptance = runDispatchAcceptanceProbe.probe(new RunDispatchProbeRequest(
+                    run.runId(),
+                    agentId,
+                    remoteSessionId,
+                    dispatchMessageId,
+                    node.executionNodeId().value(),
+                    node.baseUrl(),
+                    null,
+                    backendInstanceIdentity.linuxServerId(),
+                    traceId));
+            return acceptance == null ? RunDispatchAcceptance.UNKNOWN : acceptance;
+        } catch (RuntimeException failure) {
+            LOGGER.warn(
+                    "legacy Scheduled Run 远端接收状态探测失败，runId={}, traceId={}, exceptionType={}",
+                    run.runId().value(), traceId, failure.getClass().getSimpleName());
+            return RunDispatchAcceptance.UNKNOWN;
+        }
+    }
+
+    private boolean usesLegacyScheduledAnchor(RunSource source, StartRunInput input) {
+        return source.type() == ConversationSourceType.SCHEDULED_TASK
+                && source.dispatchAttemptId() != null
+                && input.clientRequestId() != null
+                && runSummaryPersistencePort != null;
+    }
+
+    /** Redis 锚点由 owner recovery 收敛；legacy 必须有 handoff 标记或已形成明确终态。 */
+    private boolean legacyScheduledAnchorAccepted(RunPersistenceAnchor anchor) {
+        return anchor.storageMode() != RunStorageMode.LEGACY_FULL
+                || anchor.scheduledDispatchAcceptedAt() != null
+                || anchor.status().isTerminal();
+    }
+
+    /** 远端副作用前最后一次续租，旧 attempt 失去 fencing 后不得发送 prompt 或写失败终态。 */
+    private void renewLegacyScheduledDispatchClaim(
+            LegacyScheduledAnchorClaim claim,
+            RunSource source,
+            RunId runId) {
+        if (!claim.managed()) return;
+        Instant now = Instant.now();
+        if (!runSummaryPersistencePort.claimLegacyScheduledDispatch(
+                runId, source.refId(), source.dispatchAttemptId(),
+                now.plus(LEGACY_SCHEDULED_DISPATCH_LEASE), now)) {
+            throw new RunOwnershipLostException("legacy Scheduled Run 启动 attempt 已失效");
+        }
+    }
+
+    /** handoff 标记是夜间补偿判断 legacy Run 已受理的唯一活动态依据。 */
+    private void markLegacyScheduledDispatchAccepted(
+            LegacyScheduledAnchorClaim claim,
+            RunSource source,
+            RunId runId) {
+        if (!claim.managed()) return;
+        if (!runSummaryPersistencePort.markLegacyScheduledDispatchAccepted(
+                runId, source.dispatchAttemptId(), Instant.now())) {
+            throw new RunOwnershipLostException("legacy Scheduled Run 受理标记 attempt 已失效");
+        }
+    }
+
+    /** 客户端可提交幂等 ID，但绝不能借此把新夜间任务绑定到同会话的历史 Run。 */
+    private void requireSameScheduledSource(RunPersistenceAnchor existing, Run pending) {
+        if (pending.sourceType() != ConversationSourceType.SCHEDULED_TASK) {
+            return;
+        }
+        if (existing.sourceType() != ConversationSourceType.SCHEDULED_TASK
+                || !Objects.equals(existing.sourceRefId(), pending.sourceRefId())
+                || !Objects.equals(existing.triggeredByUserId(), pending.triggeredByUserId())
+                || !existing.workspaceId().equals(pending.workspaceId())) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Scheduled Run 幂等请求号已被其它任务使用");
+        }
     }
 
     private Run anchorRun(RunPersistenceAnchor anchor) {
@@ -2691,19 +2976,76 @@ public class RunApplicationService {
                 : message.withSource(source.type(), source.refId(), userId));
     }
 
+    /**
+     * 恢复 anchor-only legacy Run 时复用稳定 remote message id；既有消息必须精确属于同一 Run/任务/用户。
+     */
+    private boolean ensureLegacyScheduledUserMessage(
+            SessionId sessionId,
+            RunId runId,
+            String prompt,
+            List<StartRunInput.PromptPart> parts,
+            UserId userId,
+            String remoteMessageId,
+            String traceId,
+            Instant createdAt,
+            RunSource source) {
+        Optional<SessionMessage> existing = sessionMessageRepository
+                .findBySessionIdAndRemoteMessageId(sessionId, remoteMessageId);
+        if (existing.isEmpty()) {
+            saveUserMessage(
+                    sessionId, runId, prompt, parts, userId,
+                    remoteMessageId, traceId, createdAt, source);
+            return true;
+        }
+        SessionMessage message = existing.orElseThrow();
+        if (message.role() != SessionMessageRole.USER
+                || !Objects.equals(message.runId(), runId)
+                || message.sourceType() != ConversationSourceType.SCHEDULED_TASK
+                || !Objects.equals(message.sourceRefId(), source.refId())
+                || !Objects.equals(message.senderUserId(), userId)) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "Scheduled Run 稳定消息号已被其它消息使用");
+        }
+        return false;
+    }
+
     /** 可选 setter 保持既有单元测试构造器稳定；生产装配会注入数据库会话锁。 */
     @Autowired(required = false)
     void setNightExecutionLockGuard(NightExecutionSessionLockGuard nightExecutionLockGuard) {
         this.nightExecutionLockGuard = nightExecutionLockGuard;
     }
 
-    private record RunSource(ConversationSourceType type, String refId) {
+    /** 可选观察者列表保持现有测试构造器稳定，并避免把夜间字段暴露到 Run 聚合。 */
+    @Autowired(required = false)
+    void setScheduledRunLifecycleObservers(List<ScheduledRunLifecycleObserver> observers) {
+        this.scheduledRunLifecycleObservers = observers == null ? List.of() : List.copyOf(observers);
+    }
+
+    /** 复用普通 Run 恢复的远端稳定消息探测器，避免扩张已有生产构造器。 */
+    @Autowired(required = false)
+    void setRunDispatchAcceptanceProbe(RunDispatchAcceptanceProbe probe) {
+        this.runDispatchAcceptanceProbe = probe;
+    }
+
+    private record LegacyScheduledAnchorClaim(
+            Run run,
+            String dispatchMessageId,
+            boolean managed,
+            boolean accepted,
+            boolean recovered) {
+    }
+
+    private record RunSource(
+            ConversationSourceType type,
+            String refId,
+            String dispatchAttemptId) {
         static RunSource manual() {
-            return new RunSource(ConversationSourceType.MANUAL, null);
+            return new RunSource(ConversationSourceType.MANUAL, null, null);
         }
 
-        static RunSource scheduled(String refId) {
-            return new RunSource(ConversationSourceType.SCHEDULED_TASK, refId);
+        static RunSource scheduled(String refId, String dispatchAttemptId) {
+            return new RunSource(ConversationSourceType.SCHEDULED_TASK, refId, dispatchAttemptId);
         }
     }
 

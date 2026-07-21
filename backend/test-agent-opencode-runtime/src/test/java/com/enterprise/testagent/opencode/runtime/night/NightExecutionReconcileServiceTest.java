@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -11,160 +12,172 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskRun;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskTriggerType;
+import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
+import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.run.Run;
+import com.enterprise.testagent.domain.run.RunId;
+import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
-import com.enterprise.testagent.opencode.runtime.process.OpencodeScheduledTaskExecutionAffinityProvider;
-import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
-import com.enterprise.testagent.scheduler.ScheduledUserPlanService;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
+import com.enterprise.testagent.opencode.runtime.run.ScheduledRunMetadata;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-/** 验证错过时段的任务在同一夜间窗口内顺延，并原子转移容量占位。 */
+/** 验证补偿先查 Run 锚点，再按租约和精确 backendProcessId 心跳决定是否恢复。 */
 class NightExecutionReconcileServiceTest {
 
     @Test
-    void rollsStaleDispatchToNextAvailableQuarter() {
+    void repairsDispatchedStateFromExistingRunBeforeConsideringLeaseOwner() {
         Instant now = Instant.parse("2026-07-18T13:20:00Z");
-        UserId owner = new UserId("usr_night_reconcile");
-        NightExecutionTask task = new NightExecutionTask(
-                new NightExecutionTaskId("net_night_reconcile"), owner,
-                new SessionId("ses_night_reconcile"), new WorkspaceId("wrk_night_reconcile"),
-                "request-night-reconcile", "夜间回归", "执行回归", "{}",
-                NightExecutionTaskStatus.DISPATCHING,
-                Instant.parse("2026-07-18T13:00:00Z"), Instant.parse("2026-07-18T13:15:00Z"),
-                Instant.parse("2026-07-18T23:00:00Z"), "linux-night-a",
-                new ScheduledTaskRunId("str_night_reconcile_old"), null, 0, false,
-                Instant.parse("2026-07-18T13:01:00Z"), null, null, null, null,
-                "trace_night_reconcile", Instant.parse("2026-07-18T12:00:00Z"),
-                Instant.parse("2026-07-18T13:01:00Z"));
+        NightExecutionTask task = dispatchingTask(now.minusSeconds(600), now.minusSeconds(60));
+        NightExecutionTaskRepository repository = baseRepository(now, task);
+        NightExecutionRunLifecycleService lifecycle = mock(NightExecutionRunLifecycleService.class);
+        Run run = new Run(new RunId("run_recovered"), task.sessionId(), task.workspaceId(),
+                RunStatus.RUNNING, now, now, "trace_reconcile");
+        when(lifecycle.findAcceptedRun(task)).thenReturn(Optional.of(run));
+        NightExecutionReconcileService service = service(repository, lifecycle, now);
 
-        NightExecutionTaskRepository repository = mock(NightExecutionTaskRepository.class);
-        ScheduledUserPlanService userPlans = mock(ScheduledUserPlanService.class);
-        UserOpencodeProcessAssignmentService assignment = mock(UserOpencodeProcessAssignmentService.class);
-        OpencodeScheduledTaskExecutionAffinityProvider affinity = mock(OpencodeScheduledTaskExecutionAffinityProvider.class);
-        NightExecutionCapacityRegistry capacityRegistry = mock(NightExecutionCapacityRegistry.class);
-        when(capacityRegistry.currentCapacity()).thenReturn(2);
-        when(repository.findDispatchingBefore(now.minusSeconds(300), 50)).thenReturn(List.of(task));
-        when(repository.findScheduledDueBefore(now.minusSeconds(300), 50)).thenReturn(List.of());
-        when(repository.findTerminalBefore(now.minusSeconds(30L * 24 * 3600), 50)).thenReturn(List.of());
-        when(repository.reservationCounts(any(), any())).thenReturn(Map.of());
-        when(repository.reserveSlot(Instant.parse("2026-07-18T13:30:00Z"), 2, now)).thenReturn(true);
-        when(repository.updateIfStatus(any(), eq(NightExecutionTaskStatus.DISPATCHING))).thenReturn(true);
-        when(assignment.routingLinuxServerId(owner, "opencode")).thenReturn(Optional.of("linux-night-a"));
-        when(affinity.currentAffinity()).thenReturn("linux-current");
-        when(userPlans.schedule(any(), eq(owner), eq(Instant.parse("2026-07-18T13:30:00Z")),
-                eq("linux-night-a"), any())).thenReturn(ScheduledTaskRun.pending(
-                        new ScheduledTaskRunId("str_night_reconcile_new"),
-                        new ScheduledTaskKey("opencode-runtime.night-execution"), null,
-                        ScheduledTaskTriggerType.USER_PLAN, owner,
-                        Instant.parse("2026-07-18T13:30:00Z"), "linux-night-a",
-                        "trace_night_reconcile", now));
+        NightExecutionReconcileService.Result result = service.reconcile("trace_reconcile", () -> false);
 
-        NightExecutionReconcileService service = new NightExecutionReconcileService(
-                repository, userPlans, assignment, affinity, capacityRegistry,
-                Clock.fixed(now, ZoneOffset.UTC));
-        NightExecutionReconcileService.Result result = service.reconcile("trace_night_reconcile", () -> false);
-
-        assertThat(result.rolledOver()).isEqualTo(1);
-        ArgumentCaptor<NightExecutionTask> updated = ArgumentCaptor.forClass(NightExecutionTask.class);
-        verify(repository).updateIfStatus(updated.capture(), eq(NightExecutionTaskStatus.DISPATCHING));
-        assertThat(updated.getValue().slotStart()).isEqualTo(Instant.parse("2026-07-18T13:30:00Z"));
-        assertThat(updated.getValue().rolloverCount()).isEqualTo(1);
-        verify(userPlans).cancelPendingIfPresent(task.scheduledTaskRunId(), "夜间任务原执行计划已失效");
-        verify(repository).releaseSlot(task.slotStart(), now);
-        verify(repository).deleteReservationsBefore(now.minusSeconds(30L * 24 * 3600));
+        assertThat(result.repaired()).isEqualTo(1);
+        verify(lifecycle).onAccepted(
+                new ScheduledRunMetadata(task.taskId().value(), task.dispatchAttemptId()), run);
+        verify(repository, never()).updateDispatchIfAttempt(any(), any());
     }
 
     @Test
-    void rejectsOrphanReplacementWhenTaskStateChangesDuringRecovery() {
-        Instant now = Instant.parse("2026-07-18T13:06:00Z");
-        UserId owner = new UserId("usr_night_reconcile_race");
-        NightExecutionTask task = new NightExecutionTask(
-                new NightExecutionTaskId("net_night_reconcile_race"), owner,
-                new SessionId("ses_night_reconcile_race"), new WorkspaceId("wrk_night_reconcile_race"),
-                "request-night-reconcile-race", "夜间回归", "执行回归", "{}",
-                NightExecutionTaskStatus.SCHEDULED,
-                Instant.parse("2026-07-18T13:00:00Z"), Instant.parse("2026-07-18T13:15:00Z"),
-                Instant.parse("2026-07-18T23:00:00Z"), "linux-night-a",
-                new ScheduledTaskRunId("str_night_reconcile_race_old"), null, 0, false,
-                null, null, null, null, null, "trace_night_reconcile_race",
-                Instant.parse("2026-07-18T12:00:00Z"), Instant.parse("2026-07-18T12:00:00Z"));
-        NightExecutionTaskRepository repository = mock(NightExecutionTaskRepository.class);
-        ScheduledUserPlanService userPlans = mock(ScheduledUserPlanService.class);
-        UserOpencodeProcessAssignmentService assignment = mock(UserOpencodeProcessAssignmentService.class);
-        OpencodeScheduledTaskExecutionAffinityProvider affinity = mock(OpencodeScheduledTaskExecutionAffinityProvider.class);
-        NightExecutionCapacityRegistry capacityRegistry = mock(NightExecutionCapacityRegistry.class);
-        when(capacityRegistry.currentCapacity()).thenReturn(2);
-        when(repository.findDispatchingBefore(now.minusSeconds(300), 50)).thenReturn(List.of());
-        when(repository.findScheduledDueBefore(now.minusSeconds(300), 50)).thenReturn(List.of(task));
-        when(repository.updateIfStatus(any(), eq(NightExecutionTaskStatus.SCHEDULED))).thenReturn(false);
-        when(assignment.routingLinuxServerId(owner, "opencode")).thenReturn(Optional.of("linux-night-a"));
-        when(userPlans.schedule(any(), eq(owner), eq(now), eq("linux-night-a"), any()))
-                .thenReturn(ScheduledTaskRun.pending(
-                        new ScheduledTaskRunId("str_night_reconcile_race_new"),
-                        new ScheduledTaskKey("opencode-runtime.night-execution"), null,
-                        ScheduledTaskTriggerType.USER_PLAN, owner, now, "linux-night-a",
-                        "trace_night_reconcile_race", now));
-
+    void keepsExpiredLeaseWhenRemoteOwnerHeartbeatIsStillLive() {
+        Instant now = Instant.parse("2026-07-18T13:20:00Z");
+        NightExecutionTask task = dispatchingTask(now.minusSeconds(600), now.minusSeconds(60));
+        NightExecutionTaskRepository repository = baseRepository(now, task);
+        NightExecutionRunLifecycleService lifecycle = mock(NightExecutionRunLifecycleService.class);
+        when(lifecycle.findAcceptedRun(task)).thenReturn(Optional.empty());
+        BackendJavaRouteResolver routes = mock(BackendJavaRouteResolver.class);
+        BackendProcessId owner = new BackendProcessId(task.dispatchOwnerBackendProcessId());
+        when(routes.isCurrent(owner)).thenReturn(false);
+        when(routes.requireBackend(owner)).thenReturn(new BackendJavaProcess(
+                owner, new LinuxServerId("linux-night-a"), "http://10.0.0.2:8080",
+                BackendJavaProcessStatus.READY, now, now, now, now, "trace_reconcile"));
         NightExecutionReconcileService service = new NightExecutionReconcileService(
-                repository, userPlans, assignment, affinity, capacityRegistry,
+                repository, lifecycle, routes, mock(NightExecutionDispatchLeaseGuard.class),
                 Clock.fixed(now, ZoneOffset.UTC));
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(
-                        () -> service.reconcile("trace_night_reconcile_race", () -> false))
-                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
-                .hasMessageContaining("状态已变化");
+        NightExecutionReconcileService.Result result = service.reconcile("trace_reconcile", () -> false);
+
+        assertThat(result.heartbeatSkipped()).isEqualTo(1);
+        verify(repository, never()).updateDispatchIfAttempt(any(), any());
     }
 
     @Test
-    void failsScheduledTaskAtSevenAndReleasesItsSessionAndCapacity() {
+    void windowEndDoesNotFailAnAttemptStillProtectedByLocalInFlightGuard() {
         Instant now = Instant.parse("2026-07-18T23:00:00Z");
-        UserId owner = new UserId("usr_night_reconcile_expired");
-        NightExecutionTask task = new NightExecutionTask(
-                new NightExecutionTaskId("net_night_reconcile_expired"), owner,
-                new SessionId("ses_night_reconcile_expired"), new WorkspaceId("wrk_night_reconcile_expired"),
-                "request-night-reconcile-expired", "夜间回归", "执行回归", "{}",
-                NightExecutionTaskStatus.SCHEDULED,
-                Instant.parse("2026-07-18T22:45:00Z"), Instant.parse("2026-07-18T23:00:00Z"),
-                now, "linux-night-a", new ScheduledTaskRunId("str_night_reconcile_expired"),
-                null, 0, false, null, null, null, null, null,
-                "trace_night_reconcile_expired", Instant.parse("2026-07-18T12:00:00Z"),
-                Instant.parse("2026-07-18T22:45:00Z"));
+        NightExecutionTask task = scheduledTask(now)
+                .startDispatch("nda_reconcile", "bjp_local_owner", now.minusSeconds(60), now.minusSeconds(600));
+        NightExecutionTaskRepository repository = baseRepository(now, task);
+        NightExecutionRunLifecycleService lifecycle = mock(NightExecutionRunLifecycleService.class);
+        when(lifecycle.findAcceptedRun(task)).thenReturn(Optional.empty());
+        BackendJavaRouteResolver routes = mock(BackendJavaRouteResolver.class);
+        BackendProcessId owner = new BackendProcessId(task.dispatchOwnerBackendProcessId());
+        when(routes.isCurrent(owner)).thenReturn(true);
+        NightExecutionDispatchLeaseGuard guard = mock(NightExecutionDispatchLeaseGuard.class);
+        when(guard.isInFlight(task.taskId(), task.dispatchAttemptId())).thenReturn(true);
+        NightExecutionReconcileService service = new NightExecutionReconcileService(
+                repository, lifecycle, routes, guard, Clock.fixed(now, ZoneOffset.UTC));
+
+        NightExecutionReconcileService.Result result = service.reconcile("trace_reconcile", () -> false);
+
+        assertThat(result.heartbeatSkipped()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        verify(repository, never()).updateDispatchIfAttempt(any(), any());
+    }
+
+    @Test
+    void retriesSameAttemptWhenRemoteOwnerHeartbeatDisappears() {
+        Instant now = Instant.parse("2026-07-18T13:20:00Z");
+        NightExecutionTask task = dispatchingTask(now.minusSeconds(600), now.minusSeconds(60));
+        NightExecutionTaskRepository repository = baseRepository(now, task);
+        when(repository.updateDispatchIfAttempt(any(), eq(task.dispatchAttemptId()))).thenReturn(true);
+        NightExecutionRunLifecycleService lifecycle = mock(NightExecutionRunLifecycleService.class);
+        when(lifecycle.findAcceptedRun(task)).thenReturn(Optional.empty());
+        BackendJavaRouteResolver routes = mock(BackendJavaRouteResolver.class);
+        BackendProcessId owner = new BackendProcessId(task.dispatchOwnerBackendProcessId());
+        when(routes.isCurrent(owner)).thenReturn(false);
+        when(routes.requireBackend(owner)).thenThrow(new IllegalStateException("owner offline"));
+        NightExecutionReconcileService service = new NightExecutionReconcileService(
+                repository, lifecycle, routes, mock(NightExecutionDispatchLeaseGuard.class),
+                Clock.fixed(now, ZoneOffset.UTC));
+
+        NightExecutionReconcileService.Result result = service.reconcile("trace_reconcile", () -> false);
+
+        assertThat(result.retried()).isEqualTo(1);
+        ArgumentCaptor<NightExecutionTask> retried = ArgumentCaptor.forClass(NightExecutionTask.class);
+        verify(repository).updateDispatchIfAttempt(retried.capture(), eq(task.dispatchAttemptId()));
+        assertThat(retried.getValue().status()).isEqualTo(NightExecutionTaskStatus.SCHEDULED);
+        assertThat(retried.getValue().dispatchAttemptId()).isNull();
+    }
+
+    @Test
+    void failsScheduledTaskAtWindowEndAndReleasesLockAndCapacity() {
+        Instant now = Instant.parse("2026-07-18T23:00:00Z");
+        NightExecutionTask task = scheduledTask(now);
         NightExecutionTaskRepository repository = mock(NightExecutionTaskRepository.class);
-        ScheduledUserPlanService userPlans = mock(ScheduledUserPlanService.class);
-        UserOpencodeProcessAssignmentService assignment = mock(UserOpencodeProcessAssignmentService.class);
-        OpencodeScheduledTaskExecutionAffinityProvider affinity = mock(OpencodeScheduledTaskExecutionAffinityProvider.class);
-        NightExecutionCapacityRegistry capacityRegistry = mock(NightExecutionCapacityRegistry.class);
-        when(capacityRegistry.currentCapacity()).thenReturn(2);
-        when(repository.findDispatchingBefore(now.minusSeconds(300), 50)).thenReturn(List.of());
-        when(repository.findScheduledDueBefore(now.minusSeconds(300), 50)).thenReturn(List.of(task));
+        when(repository.findDispatchingLeaseExpiredBefore(now, 50)).thenReturn(List.of());
+        when(repository.findScheduledWindowExpired(now, 50)).thenReturn(List.of(task));
         when(repository.findTerminalBefore(now.minusSeconds(30L * 24 * 3600), 50)).thenReturn(List.of());
         when(repository.updateIfStatus(any(), eq(NightExecutionTaskStatus.SCHEDULED))).thenReturn(true);
+        NightExecutionReconcileService service = service(
+                repository, mock(NightExecutionRunLifecycleService.class), now);
 
-        NightExecutionReconcileService service = new NightExecutionReconcileService(
-                repository, userPlans, assignment, affinity, capacityRegistry,
-                Clock.fixed(now, ZoneOffset.UTC));
-        NightExecutionReconcileService.Result result = service.reconcile(
-                "trace_night_reconcile_expired", () -> false);
+        NightExecutionReconcileService.Result result = service.reconcile("trace_reconcile", () -> false);
 
         assertThat(result.failed()).isEqualTo(1);
         ArgumentCaptor<NightExecutionTask> failed = ArgumentCaptor.forClass(NightExecutionTask.class);
         verify(repository).updateIfStatus(failed.capture(), eq(NightExecutionTaskStatus.SCHEDULED));
         assertThat(failed.getValue().status()).isEqualTo(NightExecutionTaskStatus.FAILED);
-        assertThat(failed.getValue().errorCode()).isEqualTo("WINDOW_EXPIRED");
-        verify(userPlans).cancelPendingIfPresent(task.scheduledTaskRunId(), "夜间任务原执行计划已失效");
         verify(repository).deleteSessionLock(task.sessionId(), task.taskId());
         verify(repository).releaseSlot(task.slotStart(), now);
+    }
+
+    private NightExecutionTaskRepository baseRepository(Instant now, NightExecutionTask task) {
+        NightExecutionTaskRepository repository = mock(NightExecutionTaskRepository.class);
+        when(repository.findDispatchingLeaseExpiredBefore(now, 50)).thenReturn(List.of(task));
+        when(repository.findScheduledWindowExpired(now, 50)).thenReturn(List.of());
+        when(repository.findTerminalBefore(now.minusSeconds(30L * 24 * 3600), 50)).thenReturn(List.of());
+        return repository;
+    }
+
+    private NightExecutionReconcileService service(
+            NightExecutionTaskRepository repository,
+            NightExecutionRunLifecycleService lifecycle,
+            Instant now) {
+        return new NightExecutionReconcileService(
+                repository, lifecycle, mock(BackendJavaRouteResolver.class),
+                mock(NightExecutionDispatchLeaseGuard.class), Clock.fixed(now, ZoneOffset.UTC));
+    }
+
+    private NightExecutionTask dispatchingTask(Instant claimedAt, Instant leaseUntil) {
+        return scheduledTask(Instant.parse("2026-07-18T23:00:00Z"))
+                .startDispatch("nda_reconcile", "bjp_remote_owner", leaseUntil, claimedAt);
+    }
+
+    private NightExecutionTask scheduledTask(Instant windowEnd) {
+        Instant created = Instant.parse("2026-07-18T12:00:00Z");
+        return new NightExecutionTask(
+                new NightExecutionTaskId("net_night_reconcile"), new UserId("usr_night_reconcile"),
+                new SessionId("ses_night_reconcile"), new WorkspaceId("wrk_night_reconcile"),
+                "request-night-reconcile", "夜间回归", "执行回归", "{}",
+                NightExecutionTaskStatus.SCHEDULED,
+                Instant.parse("2026-07-18T13:00:00Z"), Instant.parse("2026-07-18T13:15:00Z"),
+                windowEnd, "linux-night-a", null, null, 0, false,
+                null, null, null, null, null, "trace_reconcile", created, created);
     }
 }

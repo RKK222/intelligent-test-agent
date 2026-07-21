@@ -31,6 +31,7 @@ import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunDetailsLocator;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunOwnerLease;
+import com.enterprise.testagent.domain.run.RunPersistenceAnchor;
 import com.enterprise.testagent.domain.run.RunRepository;
 import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.run.RunStorageMode;
@@ -358,13 +359,17 @@ class RunApplicationServiceTest {
                 new RunEventAppender(new FakeRunEventRepository()),
                 runtimeRegistry(new FakeOpencodeFacade()), new FakeAgentSessionBindingRepository(),
                 assignmentService);
+        ScheduledRunLifecycleObserver observer = org.mockito.Mockito.mock(ScheduledRunLifecycleObserver.class);
+        service.setScheduledRunLifecycleObservers(List.of(observer));
+        ScheduledRunMetadata metadata = new ScheduledRunMetadata(
+                "net_night_1234567890abcdef", "nda_night_1234567890abcdef");
 
         Run run = service.startScheduledRun(
                 userId,
                 new StartRunInput(
                         new SessionId("ses_1234567890abcdef"), "night run", List.of(),
                         RUNTIME_DISPATCH_MESSAGE_ID, null, null, null, null),
-                "net_night_1234567890abcdef",
+                metadata,
                 "trace_1234567890abcdef");
 
         assertThat(run.sourceType()).isEqualTo(ConversationSourceType.SCHEDULED_TASK);
@@ -374,6 +379,166 @@ class RunApplicationServiceTest {
             assertThat(message.sourceRefId()).isEqualTo("net_night_1234567890abcdef");
             assertThat(message.senderUserId()).isEqualTo(userId);
         });
+        org.mockito.Mockito.verify(observer).onAccepted(metadata, run);
+    }
+
+    @Test
+    void legacyScheduledRetryResumesIncompleteDatabaseAnchorWithoutCreatingSecondRun() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        UserOpencodeProcessAssignmentService assignmentService =
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ExecutionNode assignedNode = userProcessNode("node_night_anchor_1234", "http://10.8.0.12:4096");
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(
+                        userId, "opencode", "trace_legacy_anchor"))
+                .thenReturn(new UserOpencodeProcessAssignment(assignedNode));
+        StartRunInput input = new StartRunInput(
+                new SessionId("ses_1234567890abcdef"), "night run", List.of(),
+                RUNTIME_DISPATCH_MESSAGE_ID, null, null, null, null,
+                null, null, null, "request-legacy-night-anchor");
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, null)).thenReturn(RunStorageMode.LEGACY_FULL);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        RunPersistenceAnchor existing = new RunPersistenceAnchor(
+                new RunId("run_legacy_night_anchor"), input.sessionId(), workspace().workspaceId(),
+                RunStatus.PENDING, RunStorageMode.LEGACY_FULL, 0L,
+                input.clientRequestId(), "server-a", null, null, null,
+                RUNTIME_DISPATCH_MESSAGE_ID, "nda_previous_anchor", NOW.minusSeconds(1), null,
+                null, "trace_legacy_anchor", NOW, NOW, null,
+                ConversationSourceType.SCHEDULED_TASK, "net_night_anchor", userId, "build", null);
+        org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenReturn(false);
+        org.mockito.Mockito.when(summaryPort.findBySessionAndClientRequestId(
+                        input.sessionId(), input.clientRequestId()))
+                .thenReturn(Optional.of(existing));
+        org.mockito.Mockito.when(summaryPort.claimLegacyScheduledDispatch(
+                        org.mockito.ArgumentMatchers.eq(existing.runId()),
+                        org.mockito.ArgumentMatchers.eq("net_night_anchor"),
+                        org.mockito.ArgumentMatchers.eq("nda_night_anchor"),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(true);
+        org.mockito.Mockito.when(summaryPort.markLegacyScheduledDispatchAccepted(
+                        org.mockito.ArgumentMatchers.eq(existing.runId()),
+                        org.mockito.ArgumentMatchers.eq("nda_night_anchor"),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(true);
+        com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), runs, messages,
+                new FakeExecutionNodeRepository(), new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade, RUNTIME_DISPATCH_MESSAGE_ID),
+                new FakeAgentSessionBindingRepository(), new RunEventLiveBus(),
+                new RunEventPersistencePolicy(), null, assignmentService,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class), null, null, null,
+                null, org.mockito.Mockito.mock(RunRuntimeStore.class), selector, summaryPort,
+                org.mockito.Mockito.mock(RunTerminalProjectionService.class), identity);
+        service.setRunDispatchAcceptanceProbe(request -> RunDispatchAcceptance.NOT_ACCEPTED);
+
+        Run recovered = service.startScheduledRun(
+                userId, input, new ScheduledRunMetadata("net_night_anchor", "nda_night_anchor"),
+                "trace_legacy_anchor");
+
+        assertThat(recovered.runId()).isEqualTo(existing.runId());
+        assertThat(recovered.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(runs.saved).extracting(Run::runId).containsOnly(existing.runId());
+        assertThat(messages.saved).singleElement().satisfies(message -> {
+            assertThat(message.runId()).isEqualTo(existing.runId());
+            assertThat(message.remoteMessageId()).isEqualTo(RUNTIME_DISPATCH_MESSAGE_ID);
+        });
+        assertThat(facade.startRunCommands).singleElement().satisfies(command ->
+                assertThat(command.messageId()).isEqualTo(RUNTIME_DISPATCH_MESSAGE_ID));
+        org.mockito.Mockito.verify(summaryPort, org.mockito.Mockito.times(2)).claimLegacyScheduledDispatch(
+                org.mockito.ArgumentMatchers.eq(existing.runId()),
+                org.mockito.ArgumentMatchers.eq("net_night_anchor"),
+                org.mockito.ArgumentMatchers.eq("nda_night_anchor"),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(summaryPort).markLegacyScheduledDispatchAccepted(
+                org.mockito.ArgumentMatchers.eq(existing.runId()),
+                org.mockito.ArgumentMatchers.eq("nda_night_anchor"),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void legacyScheduledRecoverySkipsPromptWhenRemoteDispatchAlreadyExists() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        UserOpencodeProcessAssignmentService assignmentService =
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ExecutionNode assignedNode = userProcessNode("node_night_probe_12345", "http://10.8.0.12:4096");
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(
+                        userId, "opencode", "trace_legacy_probe"))
+                .thenReturn(new UserOpencodeProcessAssignment(assignedNode));
+        StartRunInput input = new StartRunInput(
+                new SessionId("ses_1234567890abcdef"), "night run", List.of(),
+                RUNTIME_DISPATCH_MESSAGE_ID, null, null, null, null,
+                null, null, null, "request-legacy-night-probe");
+        RunStorageModeSelector selector = org.mockito.Mockito.mock(RunStorageModeSelector.class);
+        org.mockito.Mockito.when(selector.select(userId, input, null)).thenReturn(RunStorageMode.LEGACY_FULL);
+        RunSummaryPersistencePort summaryPort = org.mockito.Mockito.mock(RunSummaryPersistencePort.class);
+        RunPersistenceAnchor existing = new RunPersistenceAnchor(
+                new RunId("run_legacy_night_probe"), input.sessionId(), workspace().workspaceId(),
+                RunStatus.RUNNING, RunStorageMode.LEGACY_FULL, 0L,
+                input.clientRequestId(), "server-a", assignedNode.executionNodeId().value(), null,
+                REMOTE_SESSION_ID, RUNTIME_DISPATCH_MESSAGE_ID, "nda_previous_probe",
+                NOW.minusSeconds(1), null, null, "trace_legacy_probe", NOW, NOW, null,
+                ConversationSourceType.SCHEDULED_TASK, "net_night_probe", userId, "build", null);
+        org.mockito.Mockito.when(summaryPort.findBySessionAndClientRequestId(
+                        input.sessionId(), input.clientRequestId()))
+                .thenReturn(Optional.of(existing));
+        org.mockito.Mockito.when(summaryPort.claimLegacyScheduledDispatch(
+                        org.mockito.ArgumentMatchers.eq(existing.runId()),
+                        org.mockito.ArgumentMatchers.eq("net_night_probe"),
+                        org.mockito.ArgumentMatchers.eq("nda_night_probe"),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(true);
+        org.mockito.Mockito.when(summaryPort.markLegacyScheduledDispatchAccepted(
+                        org.mockito.ArgumentMatchers.eq(existing.runId()),
+                        org.mockito.ArgumentMatchers.eq("nda_night_probe"),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(true);
+        com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity identity =
+                org.mockito.Mockito.mock(com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity.class);
+        org.mockito.Mockito.when(identity.linuxServerId()).thenReturn("server-a");
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), runs, messages,
+                new FakeExecutionNodeRepository(), new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade, RUNTIME_DISPATCH_MESSAGE_ID),
+                new FakeAgentSessionBindingRepository(), new RunEventLiveBus(),
+                new RunEventPersistencePolicy(), null, assignmentService,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                org.mockito.Mockito.mock(RunSessionMessageSnapshotService.class), null, null, null,
+                null, org.mockito.Mockito.mock(RunRuntimeStore.class), selector, summaryPort,
+                org.mockito.Mockito.mock(RunTerminalProjectionService.class), identity);
+        AtomicReference<RunDispatchProbeRequest> probeRequest = new AtomicReference<>();
+        service.setRunDispatchAcceptanceProbe(request -> {
+            probeRequest.set(request);
+            return RunDispatchAcceptance.ACCEPTED;
+        });
+
+        Run recovered = service.startScheduledRun(
+                userId, input, new ScheduledRunMetadata("net_night_probe", "nda_night_probe"),
+                "trace_legacy_probe");
+
+        assertThat(recovered.runId()).isEqualTo(existing.runId());
+        assertThat(facade.startRunCommands).isEmpty();
+        assertThat(probeRequest.get()).satisfies(request -> {
+            assertThat(request.remoteSessionId()).isEqualTo(REMOTE_SESSION_ID);
+            assertThat(request.dispatchMessageId()).isEqualTo(RUNTIME_DISPATCH_MESSAGE_ID);
+            assertThat(request.executionNodeId()).isEqualTo(assignedNode.executionNodeId().value());
+            assertThat(request.executionNodeBaseUrl()).isEqualTo(assignedNode.baseUrl());
+        });
+        org.mockito.Mockito.verify(summaryPort).markLegacyScheduledDispatchAccepted(
+                org.mockito.ArgumentMatchers.eq(existing.runId()),
+                org.mockito.ArgumentMatchers.eq("nda_night_probe"),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test

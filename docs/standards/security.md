@@ -22,6 +22,7 @@ Token 校验流程：
 - RunEvent SSE 跨 Java 路由必须在鉴权过滤器之后执行，按 Run 原始归属定位生产 Java，并透传原始 `Authorization`、`X-Trace-Id`、`Last-Event-ID` 和 query；目标 Java 收到 `X-Test-Agent-Backend-Routed=true` 后跳过二次路由，但仍执行同一 Controller 和业务校验。
 - Run cancel 是跨 Java 写操作，不得仅凭 `X-Test-Agent-Backend-Routed` 跳过生产节点解析，因为该 HTTP 头可由浏览器伪造；每一跳都必须通过 `RunEventSseRouteService.forwardTargetStrict` 重新确认 Run 原始生产服务器和当前被选中的 Java，到达本机 owner 后才允许进入 Controller。
 - XXL SSO 票据签发必须使用真实用户 Token 主体并强制 `SUPER_ADMIN`；静态 API token、本地放行或仅前端菜单可见性都不能建立 XXL 用户会话。
+- 夜间系统分发只对精确路径 `/api/internal/platform/opencode-runtime/night-execution/internal-dispatch` 豁免普通静态 API token；Controller 必须使用 `MessageDigest.isEqual` 常量时间校验标准 `XXL-JOB-ACCESS-TOKEN`。前缀、子路径和其它夜间 API 不得继承该豁免。
 
 本地占位策略：
 
@@ -77,7 +78,7 @@ Token 校验流程：
 10. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
 11. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。
 12. XXL SSO 票据 API 必须使用用户 JWT 并由后端强制校验 `SUPER_ADMIN`；票据使用至少 256 位安全随机值、最长 60 秒、Redis `GETDEL` 一次消费，且不得保存原始平台 Token。iframe 只能通过隐藏表单 POST 传票据，禁止 URL/query/hash、浏览器存储、访问日志和错误响应携带票据。JIT 用户以稳定平台用户 ID 唯一，所有 XXL 账号均为管理员展示账号但不得使用本地密码登录；原生登录、改密和账号写入口必须禁用。XXL 会话每次请求校验平台 SHA-256 session marker，平台登出、刷新或过期必须同步失效。周期任务 `GLOBAL_MUTEX` 必须使用现有 Redis 锁和续租，不得回退本机或数据库锁。
-13. 夜间任务 API 必须使用用户 JWT，owner 只能取认证主体；按 `taskId/sessionId` 查询或变更时必须隔离其他用户。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 scheduler payload/result、HTTP 响应、RunEvent、运营分析或日志；任务成功投递、取消或最终失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview` 和安全错误。到期执行必须重新校验 Session/Workspace 权限，并通过公共进程启动和 Run 编排，禁止根据持久化客户端字段绕过权限、选择任意服务器或直调 manager gateway。夜间容量只能由 `SUPER_ADMIN` 通过既有通用参数管理入口修改，服务端必须在审计和广播前校验正整数；跨服务器刷新 payload 不携带参数值，刷新失败日志不得记录数据库原值或底层敏感错误。
+13. 普通夜间任务 API 必须使用用户 JWT，owner 只能取认证主体；按 `taskId/sessionId` 查询或变更时必须隔离其他用户。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 XXL 参数/result、跨服务器请求、HTTP 响应、RunEvent、运营分析或日志；普通 Run 锚点受理、取消或最终调度失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview` 和安全错误。目标 Java 必须从共享数据库重读完整任务并重新校验 Session/Workspace 权限，固定目标只能使用任务提交时服务端保存的 `target_linux_server_id`；不得接受客户端覆盖、根据后续 binding 自动迁移、直调 manager gateway或建立夜间专属队列。内部批量请求只允许 `linuxServerId + 1..50 taskId`，使用公共 resolver 选出的精确 backendProcessId 和公共 forwarder、traceId、标准 XXL token、统一防循环 header；同服务器多 JVM 不得按 linuxServerId 本机短路。Run 锚点恢复必须校验来源类型、taskId、owner、Session 和 Workspace，客户端提供的幂等 ID 不能替代归属校验。token、prompt、附件、用户信息和底层异常不得进入日志。夜间容量只能由 `SUPER_ADMIN` 通过既有通用参数管理入口修改，服务端必须在审计和广播前校验正整数；跨服务器刷新 payload 不携带参数值，刷新失败日志不得记录数据库原值或底层敏感错误。
 14. JVM 内存通用参数的查询和手工刷新接口必须强制校验 `SUPER_ADMIN`，因为响应会同时暴露数据库加载源值与进程实际生效值；前端入口可见性不能替代后端权限。跨 Java 请求必须按 `backendProcessId` 精确路由并使用统一防循环头。手工刷新不得写参数修改历史或重复发布广播，日志只允许记录脱敏 traceId、进程身份、参数键和结果状态，不得记录源值、内存值、底层异常消息或堆栈。
 
 ## 日志脱敏

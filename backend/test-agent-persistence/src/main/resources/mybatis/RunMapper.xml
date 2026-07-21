@@ -114,6 +114,12 @@
         from runs
         where status in ('PENDING', 'RUNNING', 'CANCELLING')
           and storage_mode = 'LEGACY_FULL'
+          -- 新夜间 Run 的远端 handoff 未确认前只能由 attempt/租约恢复，通用 stale 扫描不得抢先终态化。
+          and not (
+              source_type = 'SCHEDULED_TASK'
+              and scheduled_dispatch_attempt_id is not null
+              and scheduled_dispatch_accepted_at is null
+          )
           and updated_at &lt; #{updatedBefore}
         order by updated_at asc, id asc
         limit #{limit}

@@ -16,13 +16,19 @@ public interface NightExecutionTaskMapper {
 
     int updateTaskIfStatus(Map<String, Object> params);
 
-    int claimTaskForScheduledRun(Map<String, Object> params);
+    int claimTaskForDispatch(Map<String, Object> params);
+
+    int updateDispatchIfAttempt(Map<String, Object> params);
+
+    int renewDispatchLease(
+            @Param("taskId") String taskId,
+            @Param("attemptId") String attemptId,
+            @Param("leaseUntil") Instant leaseUntil,
+            @Param("now") Instant now);
 
     int insertTask(Map<String, Object> params);
 
     Map<String, Object> findById(@Param("taskId") String taskId);
-
-    Map<String, Object> findByScheduledTaskRunId(@Param("scheduledTaskRunId") String scheduledTaskRunId);
 
     Map<String, Object> findByOwnerAndClientRequestId(
             @Param("ownerUserId") String ownerUserId,
@@ -41,9 +47,19 @@ public interface NightExecutionTaskMapper {
 
     long countPendingByOwner(@Param("ownerUserId") String ownerUserId);
 
-    List<Map<String, Object>> findScheduledDueBefore(@Param("cutoff") Instant cutoff, @Param("limit") int limit);
+    List<Map<String, Object>> findScheduledDue(@Param("now") Instant now, @Param("limit") int limit);
 
-    List<Map<String, Object>> findDispatchingBefore(@Param("cutoff") Instant cutoff, @Param("limit") int limit);
+    List<Map<String, Object>> findScheduledWindowExpired(
+            @Param("now") Instant now,
+            @Param("limit") int limit);
+
+    List<Map<String, Object>> findDispatchingLeaseExpiredBefore(
+            @Param("cutoff") Instant cutoff,
+            @Param("limit") int limit);
+
+    List<Map<String, Object>> findDispatchingByOwner(
+            @Param("backendProcessId") String backendProcessId,
+            @Param("limit") int limit);
 
     List<Map<String, Object>> findTerminalBefore(@Param("cutoff") Instant cutoff, @Param("limit") int limit);
 
@@ -71,6 +87,11 @@ public interface NightExecutionTaskMapper {
     int deleteSessionLock(@Param("sessionId") String sessionId, @Param("taskId") String taskId);
 
     long countSessionLocks(@Param("sessionId") String sessionId);
+
+    int deleteTerminalIfUnchanged(
+            @Param("taskId") String taskId,
+            @Param("stateVersion") long stateVersion,
+            @Param("cutoff") Instant cutoff);
 
     int deleteTask(@Param("taskId") String taskId);
 }

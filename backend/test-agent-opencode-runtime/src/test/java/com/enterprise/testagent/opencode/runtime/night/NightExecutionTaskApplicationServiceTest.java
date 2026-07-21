@@ -14,10 +14,6 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskRun;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
-import com.enterprise.testagent.domain.scheduler.ScheduledTaskTriggerType;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
@@ -30,10 +26,9 @@ import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
-import com.enterprise.testagent.opencode.runtime.process.OpencodeScheduledTaskExecutionAffinityProvider;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.run.StartRunInput;
-import com.enterprise.testagent.scheduler.ScheduledUserPlanService;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -44,7 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-/** 验证提交夜间任务时复用当前会话、占用容量、加会话锁并写入 USER_PLAN。 */
+/** 验证提交夜间任务时复用当前会话、占用容量并加会话锁，不创建旧 USER_PLAN。 */
 class NightExecutionTaskApplicationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-07-18T12:00:00Z");
@@ -58,7 +53,6 @@ class NightExecutionTaskApplicationServiceTest {
     private WorkspaceRepository workspaceRepository;
     private ConversationWorkspaceAccessAuthorizer accessAuthorizer;
     private UserOpencodeProcessAssignmentService assignmentService;
-    private ScheduledUserPlanService scheduledUserPlanService;
     private NightExecutionCapacityRegistry capacityRegistry;
     private NightExecutionTaskApplicationService service;
 
@@ -69,10 +63,8 @@ class NightExecutionTaskApplicationServiceTest {
         workspaceRepository = mock(WorkspaceRepository.class);
         accessAuthorizer = mock(ConversationWorkspaceAccessAuthorizer.class);
         assignmentService = mock(UserOpencodeProcessAssignmentService.class);
-        scheduledUserPlanService = mock(ScheduledUserPlanService.class);
         SessionMessageRepository messageRepository = mock(SessionMessageRepository.class);
-        OpencodeScheduledTaskExecutionAffinityProvider affinityProvider =
-                mock(OpencodeScheduledTaskExecutionAffinityProvider.class);
+        BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
 
         capacityRegistry = mock(NightExecutionCapacityRegistry.class);
         when(capacityRegistry.currentCapacity()).thenReturn(2);
@@ -82,27 +74,20 @@ class NightExecutionTaskApplicationServiceTest {
         when(taskRepository.reserveSlot(SLOT, 2, NOW)).thenReturn(true);
         when(taskRepository.insertSessionLock(eq(SESSION_ID), any(), eq(USER), eq(NOW))).thenReturn(true);
         when(taskRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(scheduledUserPlanService.available()).thenReturn(true);
         when(sessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(existingSession()));
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace()));
         when(assignmentService.routingLinuxServerId(USER, "opencode")).thenReturn(Optional.of("linux-night-a"));
-        when(affinityProvider.currentAffinity()).thenReturn("linux-night-current");
-        when(scheduledUserPlanService.schedule(any(), eq(USER), eq(SLOT), eq("linux-night-a"), any()))
-                .thenReturn(ScheduledTaskRun.pending(
-                        new ScheduledTaskRunId("str_night_service"),
-                        new ScheduledTaskKey("opencode-runtime.night-execution"), null,
-                        ScheduledTaskTriggerType.USER_PLAN, USER, SLOT, "linux-night-a",
-                        "trace_night_service", NOW));
+        when(routeResolver.currentLinuxServerIdValue()).thenReturn("linux-night-current");
 
         service = new NightExecutionTaskApplicationService(
                 taskRepository, sessionRepository, messageRepository, workspaceRepository,
-                accessAuthorizer, assignmentService, scheduledUserPlanService, affinityProvider,
+                accessAuthorizer, assignmentService, routeResolver,
                 new NightExecutionWindowCalculator(), capacityRegistry,
                 new ObjectMapper().findAndRegisterModules(), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
-    void createsTaskForExistingSessionAndBindsScheduledRun() {
+    void createsTaskForExistingSessionWithoutCreatingUserPlan() {
         NightExecutionTask created = service.create(
                 USER,
                 new NightExecutionCreateCommand(
@@ -117,14 +102,14 @@ class NightExecutionTaskApplicationServiceTest {
         assertThat(created.status()).isEqualTo(NightExecutionTaskStatus.SCHEDULED);
         assertThat(created.sessionId()).isEqualTo(SESSION_ID);
         assertThat(created.targetLinuxServerId()).isEqualTo("linux-night-a");
-        assertThat(created.scheduledTaskRunId()).isEqualTo(new ScheduledTaskRunId("str_night_service"));
+        assertThat(created.scheduledTaskRunId()).isNull();
         assertThat(created.contentPreview()).isEqualTo("生成回归测试");
         verify(accessAuthorizer).requireAccess(USER, WORKSPACE_ID);
         verify(taskRepository).reserveSlot(SLOT, 2, NOW);
 
         ArgumentCaptor<NightExecutionTask> saved = ArgumentCaptor.forClass(NightExecutionTask.class);
-        verify(taskRepository, org.mockito.Mockito.times(2)).save(saved.capture());
-        assertThat(saved.getAllValues().getLast().scheduledTaskRunId().value()).isEqualTo("str_night_service");
+        verify(taskRepository).save(saved.capture());
+        assertThat(saved.getValue().scheduledTaskRunId()).isNull();
     }
 
     @Test
@@ -154,12 +139,8 @@ class NightExecutionTaskApplicationServiceTest {
     }
 
     @Test
-    void slotQueryFailsClosedWhenUserPlanRunnerIsUnavailable() {
-        when(scheduledUserPlanService.available()).thenReturn(false);
-
-        assertThatThrownBy(service::slots)
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NIGHT_EXECUTION_UNAVAILABLE));
+    void slotQueryDoesNotDependOnSchedulerAvailability() {
+        assertThat(service.slots().capacity()).isEqualTo(2);
     }
 
     @Test

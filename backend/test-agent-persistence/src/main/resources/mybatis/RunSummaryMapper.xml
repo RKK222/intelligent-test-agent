@@ -17,6 +17,9 @@
             <arg column="opencode_process_id_snapshot" javaType="java.lang.String"/>
             <arg column="root_remote_session_id" javaType="java.lang.String"/>
             <arg column="dispatch_message_id" javaType="java.lang.String"/>
+            <arg column="scheduled_dispatch_attempt_id" javaType="java.lang.String"/>
+            <arg column="scheduled_dispatch_lease_until" javaType="java.time.Instant"/>
+            <arg column="scheduled_dispatch_accepted_at" javaType="java.time.Instant"/>
             <arg column="assistant_summary_message_id" javaType="java.lang.String"/>
             <arg column="trace_id" javaType="java.lang.String"/>
             <arg column="created_at" javaType="java.time.Instant"/>
@@ -69,6 +72,7 @@
         run_id, session_id, workspace_id, status, storage_mode, status_version,
         client_request_id, producer_linux_server_id, execution_node_id_snapshot,
         opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
+        scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
         assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
         source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
     </sql>
@@ -78,12 +82,14 @@
             run_id, session_id, workspace_id, status, storage_mode, status_version,
             client_request_id, producer_linux_server_id, execution_node_id_snapshot,
             opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
+            scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
         ) values (
             #{row.runId}, #{row.sessionId}, #{row.workspaceId}, #{row.status}, #{row.storageMode}, #{row.statusVersion},
             #{row.clientRequestId}, #{row.producerLinuxServerId}, #{row.executionNodeIdSnapshot},
             #{row.opencodeProcessIdSnapshot}, #{row.rootRemoteSessionId}, #{row.dispatchMessageId},
+            #{row.scheduledDispatchAttemptId}, #{row.scheduledDispatchLeaseUntil}, #{row.scheduledDispatchAcceptedAt},
             #{row.assistantSummaryMessageId}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt}, #{row.detailsExpiresAt},
             #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId}
         )
@@ -97,6 +103,8 @@
             #{row.runId}, #{row.sessionId}, #{row.workspaceId}, #{row.status}, #{row.storageMode}, #{row.statusVersion},
             #{row.clientRequestId}, #{row.producerLinuxServerId}, #{row.executionNodeIdSnapshot},
             #{row.opencodeProcessIdSnapshot}, #{row.rootRemoteSessionId}, #{row.dispatchMessageId},
+            #{row.scheduledDispatchAttemptId}, cast(#{row.scheduledDispatchLeaseUntil} as timestamp),
+            cast(#{row.scheduledDispatchAcceptedAt} as timestamp),
             #{row.assistantSummaryMessageId}, #{row.traceId}, cast(#{row.createdAt} as timestamp),
             cast(#{row.updatedAt} as timestamp), cast(#{row.detailsExpiresAt} as timestamp),
             #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId}
@@ -104,6 +112,7 @@
             run_id, session_id, workspace_id, status, storage_mode, status_version,
             client_request_id, producer_linux_server_id, execution_node_id_snapshot,
             opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
+            scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
         )
@@ -112,13 +121,16 @@
             run_id, session_id, workspace_id, status, storage_mode, status_version,
             client_request_id, producer_linux_server_id, execution_node_id_snapshot,
             opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
+            scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
         ) values (
             source.run_id, source.session_id, source.workspace_id, source.status, source.storage_mode,
             source.status_version, source.client_request_id, source.producer_linux_server_id,
             source.execution_node_id_snapshot, source.opencode_process_id_snapshot,
-            source.root_remote_session_id, source.dispatch_message_id, source.assistant_summary_message_id,
+            source.root_remote_session_id, source.dispatch_message_id, source.scheduled_dispatch_attempt_id,
+            source.scheduled_dispatch_lease_until, source.scheduled_dispatch_accepted_at,
+            source.assistant_summary_message_id,
             source.trace_id, source.created_at, source.updated_at, source.details_expires_at,
             source.source_type, source.source_ref_id, source.triggered_by_user_id, source.agent_id, source.model_id
         )
@@ -131,6 +143,33 @@
         where session_id = #{sessionId}
           and client_request_id = #{clientRequestId}
     </select>
+
+    <update id="claimLegacyScheduledDispatch">
+        update runs
+        set scheduled_dispatch_attempt_id = #{dispatchAttemptId},
+            scheduled_dispatch_lease_until = #{leaseUntil}
+        where run_id = #{runId}
+          and storage_mode = 'LEGACY_FULL'
+          and source_type = 'SCHEDULED_TASK'
+          and source_ref_id = #{sourceRefId}
+          and scheduled_dispatch_accepted_at is null
+          and (
+              scheduled_dispatch_attempt_id = #{dispatchAttemptId}
+              or scheduled_dispatch_lease_until is null
+              or scheduled_dispatch_lease_until &lt;= #{now}
+          )
+    </update>
+
+    <update id="markLegacyScheduledDispatchAccepted">
+        update runs
+        set scheduled_dispatch_accepted_at = #{acceptedAt},
+            scheduled_dispatch_lease_until = null
+        where run_id = #{runId}
+          and storage_mode = 'LEGACY_FULL'
+          and source_type = 'SCHEDULED_TASK'
+          and scheduled_dispatch_attempt_id = #{dispatchAttemptId}
+          and scheduled_dispatch_accepted_at is null
+    </update>
 
     <select id="findDetailsLocator" resultMap="RunDetailsLocatorRowMap">
         select run_id, storage_mode, root_remote_session_id, dispatch_message_id, execution_node_id_snapshot,

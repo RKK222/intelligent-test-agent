@@ -2,19 +2,37 @@ package com.enterprise.testagent.domain.run;
 
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.session.SessionId;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-/** Redis 摘要模式的 PostgreSQL 控制面端口；运行中原文和事件不得通过本端口写入。 */
+/** 普通 Run 的 PostgreSQL 无原文控制面端口；运行中原文和事件不得通过本端口写入。 */
 public interface RunSummaryPersistencePort {
 
     /**
      * 插入无原文 Run 锚点；相同 Session/clientRequestId 重试返回已存在锚点，不创建第二个 Run。
+     * Redis 摘要 Run 和带稳定请求号的 legacy Scheduled Run 共用同一唯一约束。
      */
     boolean insertAnchor(RunPersistenceAnchor anchor);
 
     /** 按幂等键查询已存在锚点，供客户端重试恢复稳定 runId/assistant messageId。 */
     Optional<RunPersistenceAnchor> findBySessionAndClientRequestId(SessionId sessionId, String clientRequestId);
+
+    /**
+     * 认领或续租尚未完成 handoff 的 legacy Scheduled Run；attempt 与租约共同阻止旧 JVM 恢复后重复提交。
+     */
+    boolean claimLegacyScheduledDispatch(
+            RunId runId,
+            String sourceRefId,
+            String dispatchAttemptId,
+            Instant leaseUntil,
+            Instant now);
+
+    /** 仅由当前 attempt 在异步 prompt 已提交后写入受理标记，旧 attempt 不得完成新认领。 */
+    boolean markLegacyScheduledDispatchAccepted(
+            RunId runId,
+            String dispatchAttemptId,
+            Instant acceptedAt);
 
     /** 按 Run 读取不含原文的远端定位快照，用于 Diff 显式低频动作和详情过期判定。 */
     Optional<RunDetailsLocator> findDetailsLocator(RunId runId);

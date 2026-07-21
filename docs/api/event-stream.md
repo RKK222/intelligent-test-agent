@@ -433,7 +433,7 @@ Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspa
 
 超级管理员定时任务管理页只调用 `POST /api/internal/platform/xxl-job/sso-tickets`，随后把 XXL Admin 作为同源 iframe 加载；任务启停、Cron、手动触发、停止和日志都留在 XXL HTML/HTTP 边界。该迁移不新增 SSE 事件类型，也不向 RunEvent 流发布 XXL 任务状态或日志；旧 `/api/internal/platform/scheduler-management/**` 返回 `410 API_GONE`。
 
-夜间任务的提交、时段容量、待执行列表、改期、取消和最终失败卡同样只通过 `/api/internal/platform/opencode-runtime/night-execution/**` HTTP 查询/变更，不新增 RunEvent 类型，也不把 `SCHEDULED/DISPATCHING/CANCELLED/FAILED` 任务状态写入 RunEvent。任务到期成功创建平台 Run 后，执行过程与前端即时发送完全复用该 Run 的既有 RunEvent SSE、snapshot/replay、终态和用户级 runtime-state；Session、USER 消息和 Run 的 HTTP DTO 可选携带 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...` 用于展示来源。旧前端忽略新增字段仍可按普通 Run 展示；待执行任务页面必须继续通过 HTTP 轮询和窗口 focus 刷新，不得从 RunEvent 猜测任务状态。
+夜间任务的提交、时段容量、待执行列表、改期、取消和最终失败卡同样只通过 `/api/internal/platform/opencode-runtime/night-execution/**` HTTP 查询/变更，不新增 RunEvent 类型，也不把 `SCHEDULED/DISPATCHING/DISPATCHED/CANCELLED/FAILED` 调度状态写入 RunEvent。XXL/内部批量接口只负责取得普通 Run 的已受理 runId，不等待或发布 Run 终态；`DISPATCHED` 只表示已交给 Run。此后执行过程与前端即时发送完全复用该 Run 的既有 RunEvent SSE、snapshot/replay、终态和用户级 runtime-state；Session、USER 消息和 Run 的 HTTP DTO 可选携带 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...` 用于展示来源。旧前端忽略新增字段仍可按普通 Run 展示；待执行任务页面必须继续通过 HTTP 轮询和窗口 focus 刷新，不得从 RunEvent 猜测任务状态。
 
 AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId}/feedback` 只写入 `ai_message_feedbacks` 事实表，不产生 RunEvent，不通过 SSE 推送反馈状态；前端用既有 Run 终态事件绑定用户轮次，并通过 HTTP 批量接口恢复历史 Run 状态与当前用户反馈。旧消息反馈接口只作兼容。运营分析页 `/api/internal/platform/analytics/**` 只读取 hourly/daily rollup、水位和明细查询接口，不订阅 RunEvent，也不新增 SSE 事件类型。反馈、Diff、Run 状态和 token 等运营指标由后台 rollup runner 定期从事实表聚合，主链路不在 RunEvent 里补发统计事件。
 

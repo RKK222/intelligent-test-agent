@@ -22,6 +22,26 @@
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
 
+### 2026-07-21 - 夜间执行迁移至 XXL-JOB
+
+- Why:
+  - 公司夜间算力任务需要废弃应用内 `USER_PLAN` 扫描，统一由 XXL-JOB 每 15 分钟分发，并在 HTTP 超时、响应丢失、Java 崩溃和补偿重试下保证同一夜间任务只创建一个普通 Run。
+- What:
+  - 新增 XXL MySQL V4 注册 `opencode-runtime.night-execution-dispatch`，按到期时间最多扫描 500 条 `SCHEDULED`，固定服务器分组、每批 50、最多并发 8 台 Java；保留 5 分钟 `night-execution-reconcile`。
+  - 新增精确内部接口 `/api/internal/platform/opencode-runtime/night-execution/internal-dispatch`，只传 `linuxServerId/taskIds`，复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和普通 `startScheduledRun`；接口只等待 Run 受理，不等待执行终态。
+  - 夜间任务增加 attempt、精确 backend owner、租约和版本字段；Run 锚点增加 Scheduled dispatch attempt/租约/受理标记。认领、续租、回退、失败和完成均以 `taskId + DISPATCHING + attemptId` fencing，Run 受理后夜间状态保持 `DISPATCHED`，实际结果继续由既有会话、Run 与 RunEvent SSE 展示。
+  - 增加每分钟 in-flight 续租、本机 owner watchdog 和跨 Java 补偿；恢复 legacy Scheduled Run 前通过稳定消息 ID 探测远端受理状态，`ACCEPTED` 仅补标记、`NOT_ACCEPTED` 才提交、`UNKNOWN` 不重投，且通用 stale Run 扫描排除尚未确认交接的夜间锚点。
+  - 删除旧 `ScheduledTaskRunner`、`ScheduledUserPlanService`、affinity、管理/诊断和启动配置；夜间创建、改期、取消不再维护 `USER_PLAN`。保留 XXL 公共 handler/context/result、Redis 全局锁、历史清理以及可空历史 `scheduled_task_run_id`。
+  - 新增 PostgreSQL migration `V20260721134000` 和 MyBatis XML SQL；同步根/后端/模块 README、PACKAGE、HTTP API、RunEvent、数据库、部署、XXL 架构、安全和测试文档。公共夜间 API、前端待执行 Tab、DTO 与 SSE 保持兼容，`NIGHT_EXECUTION_SLOT_CAPACITY` 仍为通用参数默认 20。
+- How:
+  - 内部路径仅精确豁免普通用户鉴权，再由 Controller 对 `XXL-JOB-ACCESS-TOKEN` 做常量时间校验；跨服务器不传 prompt、附件或用户敏感内容，目标 Java 从共享数据库读取完整输入。
+  - Run 接受锚点以稳定 `sessionId + clientRequestId` 和 Redis claim 幂等；分发采用至少一次传输，业务语义由数据库唯一锚点、attempt 租约与远端受理探测收敛为只创建一个 Run。
+  - PostgreSQL 全部新增关系型业务 SQL 落在 MyBatis XML；没有修改 generated SDK 或真实 `.env.local`。工作树原有 `backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config` 删除继续保持未暂存，不纳入提交。
+- Result:
+  - scheduler/runtime/XXL/API/persistence/app 组合定向套件通过（对应模块分别 2/97/3/16/20/14 项）；真实 PostgreSQL Docker 环境成功执行完整 Flyway 链并通过持久化集成测试；后端 20 模块 `clean package -DskipTests` 通过，`git diff --check` 通过。
+  - 扩大到 H2 全量 `clean verify` 仍被已发布且未修改的 `V20260717173000__create_public_agent_config_rollouts.sql` 中 PostgreSQL `TIMESTAMPTZ`/局部表达式索引阻断（167 tests、0 failures、67 setup errors、17 skipped）；同一完整 migration 链已在真实 PostgreSQL 通过，未改写历史迁移以免破坏 checksum。
+  - 本机未配置真实多 Java/XXL 网络故障环境，未执行三服务物理端到端；HTTP 超时、响应丢失、崩溃、租约与补偿边界由单元及持久化测试覆盖。远端消息长期不可判定时会安全延迟恢复而不重复发送，这是当前剩余的可用性权衡，无任务内未完成编码项。
+
 ### 2026-07-21 - 优化 XXL-JOB 定时任务管理页面头部样式
 
 - Why:

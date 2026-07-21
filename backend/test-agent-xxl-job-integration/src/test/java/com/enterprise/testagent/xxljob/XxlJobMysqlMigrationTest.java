@@ -47,7 +47,7 @@ class XxlJobMysqlMigrationTest {
     }
 
     @Test
-    void initializesExecutorAndSixPlatformTasksWithoutLocalAdmin() throws Exception {
+    void initializesExecutorAndSevenPlatformTasksWithoutLocalAdmin() throws Exception {
         try (Connection connection = DriverManager.getConnection(
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
@@ -56,11 +56,13 @@ class XxlJobMysqlMigrationTest {
             assertThat(singleInt(statement, "select count(*) from xxl_job_group where app_name='test-agent-backend' and address_type=0 and address_list is null"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key is not null"))
-                    .isEqualTo(6);
+                    .isEqualTo(7);
             assertThat(singleInt(statement, "select count(*) from xxl_job_user"))
                     .isZero();
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_route_strategy='ROUND' and executor_block_strategy='DISCARD_LATER' and misfire_strategy='DO_NOTHING' and executor_fail_retry_count=0"))
-                    .isEqualTo(6);
+                    .isEqualTo(7);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.night-execution-dispatch' and schedule_conf='0 0/15 * * * ? *' and trigger_status=1"))
+                    .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_param like '%executionAffinity%' or executor_param like '%linuxServerId%'"))
                     .isZero();
         }
@@ -92,9 +94,9 @@ class XxlJobMysqlMigrationTest {
                 schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
             assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
-                    .isEqualTo(3);
+                    .isEqualTo(4);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key is not null"))
-                    .isEqualTo(6);
+                    .isEqualTo(7);
         }
     }
 
