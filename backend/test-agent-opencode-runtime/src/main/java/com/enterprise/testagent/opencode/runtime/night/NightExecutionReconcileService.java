@@ -37,6 +37,7 @@ public class NightExecutionReconcileService {
     private final Supplier<String> attemptIdSupplier;
     private TransactionTemplate transactionTemplate;
 
+    @Autowired
     public NightExecutionReconcileService(
             NightExecutionTaskRepository repository,
             NightExecutionRunLifecycleService lifecycleService,

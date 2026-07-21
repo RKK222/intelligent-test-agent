@@ -1,6 +1,7 @@
 package com.enterprise.testagent.opencode.runtime.night;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -31,9 +32,29 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 /** 验证补偿先查 Run 锚点，再按租约和精确 backendProcessId 心跳决定是否恢复。 */
 class NightExecutionReconcileServiceTest {
+
+    @Test
+    void springSelectsProductionConstructorWhenTestConstructorAlsoExists() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(NightExecutionTaskRepository.class,
+                    () -> mock(NightExecutionTaskRepository.class));
+            context.registerBean(NightExecutionRunLifecycleService.class,
+                    () -> mock(NightExecutionRunLifecycleService.class));
+            context.registerBean(BackendJavaRouteResolver.class,
+                    () -> mock(BackendJavaRouteResolver.class));
+            context.registerBean(NightExecutionDispatchLeaseGuard.class,
+                    () -> mock(NightExecutionDispatchLeaseGuard.class));
+            context.registerBean(Clock.class, Clock::systemUTC);
+            context.register(NightExecutionReconcileService.class);
+
+            assertThatCode(context::refresh).doesNotThrowAnyException();
+            assertThat(context.getBean(NightExecutionReconcileService.class)).isNotNull();
+        }
+    }
 
     @Test
     void repairsDispatchedStateFromExistingRunBeforeConsideringLeaseOwner() {

@@ -22,6 +22,19 @@
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
 
+### 2026-07-21 - 修复夜间补偿服务启动装配失败
+
+- Why:
+  - 夜间执行迁移后，`NightExecutionReconcileService` 同时保留生产构造器和包级测试构造器，却未明确 Spring 注入入口，fat JAR 启动时报 `No default constructor found`。
+- What:
+  - 为五参数生产构造器增加 `@Autowired`，保持用于稳定 attemptId 测试的六参数构造器为包级可见，不改补偿业务逻辑。
+  - 新增真实 `AnnotationConfigApplicationContext` 回归，注册全部依赖后验证 Spring 能选择生产构造器并创建 Bean。
+- How:
+  - TDD 先确认新增测试稳定复现相同 `BeanCreationException`，再用同目录 `NightExecutionDispatchService` 已采用的多构造器装配模式完成最小修复。
+- Result:
+  - `NightExecutionReconcileServiceTest` 6 项和全部 `NightExecution*Test` 28 项通过；本地重启完成后后端 readiness、XXL Admin readiness 均为 `UP`，前端返回 200，日志出现新的 `Started TestAgentApplication`，XXL V4 migration、Admin 与 executor 正常启动且未再出现本次构造器异常。
+  - 重启流程完成后端 20 模块 clean package 和前端生产构建；不涉及 API、事件、数据库、配置、安全或兼容性文档变更。工作树原有 `backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config` 删除继续保持未暂存。
+
 ### 2026-07-21 - 夜间执行迁移至 XXL-JOB
 
 - Why:
