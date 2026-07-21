@@ -1884,6 +1884,14 @@ test("application without recent version does not fallback to first template ver
 test("version selection checks git access and prompts for repository permission before creating worktree", async ({ page }) => {
   const gitAccessRequests: string[] = [];
   const defaultPersonalRequests: string[] = [];
+  await page.addInitScript(() => {
+    window.open = ((url?: string | URL, target?: string, features?: string) => {
+      Object.assign(window, {
+        __testOpenedExternalUrl: [String(url), target, features]
+      });
+      return null;
+    }) as typeof window.open;
+  });
   await mockBackendApi(page, {
     recentWorkspaces: { app_gcms: null },
     gitAccessRequests,
@@ -1934,7 +1942,15 @@ test("version selection checks git access and prompts for repository permission 
 
   await expect(page.getByText("需要申请版本库权限")).toBeVisible();
   await expect(page.getByText(/F-GCMS 测试版本库/)).toBeVisible();
-  await expect(page.getByText(/开发者门户/)).toBeVisible();
+  await expect(page.getByText(/scm-gmp\.sdc\.cs\.icbc\/icbc\/gmp\/index\.jsp#@/)).toBeVisible();
+  await page.getByRole("button", { name: "前往申请" }).click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __testOpenedExternalUrl?: string[] }
+  ).__testOpenedExternalUrl)).toEqual([
+    "http://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@",
+    "_blank",
+    "noopener,noreferrer"
+  ]);
   expect(gitAccessRequests).toEqual(["awv_20260715"]);
   expect(defaultPersonalRequests).toEqual([]);
 });

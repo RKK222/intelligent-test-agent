@@ -192,6 +192,7 @@ import {
 } from "./workbench-utils";
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
+const SCM_GMP_PERMISSION_APPLICATION_URL = "http://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@";
 // 只保存当前页面生命周期内的 binding 提示，避免刷新或切换用户后沿用旧服务器。
 const routeLinuxServerId = ref("");
 const routeLinuxServerResolved = ref(false);
@@ -3547,11 +3548,18 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
           { type: "warning", confirmButtonText: "我知道了", autofocus: false }
         ).catch(() => undefined);
       } else {
-        await ElMessageBox.alert(
-          `当前账号没有版本库「${gitAccess.repositoryName}」的读取权限。请前往开发者门户申请该版本库权限，权限开通后再重新选择。`,
+        await ElMessageBox.confirm(
+          `当前账号没有版本库「${gitAccess.repositoryName}」的读取权限。请前往 ${SCM_GMP_PERMISSION_APPLICATION_URL} 申请该版本库权限，权限开通后再重新选择。`,
           "需要申请版本库权限",
-          { type: "warning", confirmButtonText: "我知道了", autofocus: false }
-        ).catch(() => undefined);
+          {
+            type: "warning",
+            confirmButtonText: "前往申请",
+            cancelButtonText: "稍后申请",
+            autofocus: false
+          }
+        ).then(() => {
+          window.open(SCM_GMP_PERMISSION_APPLICATION_URL, "_blank", "noopener,noreferrer");
+        }).catch(() => undefined);
       }
       return;
     }
