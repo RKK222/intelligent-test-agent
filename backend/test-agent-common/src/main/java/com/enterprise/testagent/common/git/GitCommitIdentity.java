@@ -9,7 +9,7 @@ import java.util.Objects;
  */
 public record GitCommitIdentity(String name, String email) {
 
-    private static final String LOCAL_EMAIL_DOMAIN = "testagent.local";
+    private static final String ENTERPRISE_EMAIL_DOMAIN = "mails.icbc";
 
     public GitCommitIdentity {
         Objects.requireNonNull(name, "name must not be null");
@@ -26,8 +26,9 @@ public record GitCommitIdentity(String name, String email) {
     }
 
     /**
-     * 根据平台用户的展示名和统一认证号生成稳定的本地提交身份。
-     * User 领域当前没有邮箱字段，因此使用平台保留域名补足 Git 必需的 email；不影响远端 SSH 鉴权。
+     * 根据平台用户的展示名和统一认证号生成企业 SCM 可识别的提交身份。
+     * User 领域当前没有邮箱字段，企业 SCM 已按统一认证号登记 {@code mails.icbc} 邮箱；
+     * 使用同一规则避免远端因 invalid committer 拒绝平台生成的提交，不影响 SSH 鉴权。
      */
     public static GitCommitIdentity forPlatformUser(String username, String unifiedAuthId) {
         Objects.requireNonNull(username, "username must not be null");
@@ -36,7 +37,7 @@ public record GitCommitIdentity(String name, String email) {
         if (localPart.isBlank()) {
             localPart = "user";
         }
-        return new GitCommitIdentity(username.trim(), localPart + "@" + LOCAL_EMAIL_DOMAIN);
+        return new GitCommitIdentity(username.trim(), localPart + "@" + ENTERPRISE_EMAIL_DOMAIN);
     }
 
     private static boolean containsLineBreak(String value) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
-import type { FileSearchResult, WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
+import type { FileSearchResult, RunDiffFile, WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
@@ -74,7 +74,12 @@ const emit = defineEmits<{
   openViewFile: [entry: WorkspaceViewEntry];
   addFileContext: [path: string];
   addViewFileContext: [entry: WorkspaceViewEntry];
-  openDiff: [payload: string | { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
+  openDiff: [payload: string | {
+    path: string;
+    source: "vcs" | "agent";
+    scope?: "PUBLIC" | "WORKSPACE";
+    file?: RunDiffFile;
+  }];
   "changes-refreshed": [payload?: {
     paths?: string[];
     reloadOpenFiles?: boolean;

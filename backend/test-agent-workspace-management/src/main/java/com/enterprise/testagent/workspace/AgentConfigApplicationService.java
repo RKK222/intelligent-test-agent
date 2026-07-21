@@ -1713,7 +1713,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     /**
-     * 将当前平台用户转换为 Git 单次提交身份；平台用户表没有邮箱字段，因此使用保留域名生成稳定地址。
+     * 将当前平台用户转换为 Git 单次提交身份；平台用户表没有邮箱字段，因此按统一认证号生成企业 SCM 登记邮箱。
      */
     private GitCommitIdentity gitCommitIdentity(UserId userId) {
         User user = userRepository.findByUserId(userId)

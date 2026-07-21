@@ -39,7 +39,15 @@ import { isWorkspaceAgentConfigPath } from "./workbench-utils";
 
 type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
 type DiffScope = "WORKSPACE" | "AGENT_WORKSPACE" | "PUBLIC";
-type AgentPanelDiffFile = AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" };
+type WorkspaceAgentDiffFile = AgentConfigDiffFile & { pendingPublish?: boolean };
+type AgentPanelDiffFile = WorkspaceAgentDiffFile & { scope: "PUBLIC" | "WORKSPACE" };
+
+type PendingWorkspaceAgentPublish = {
+  personalWorkspaceId: string;
+  agentConfigWorkspaceId: string;
+  files: string[];
+  diffFiles: WorkspaceAgentDiffFile[];
+};
 
 const props = defineProps<{
   workspaceId?: string;
@@ -88,6 +96,54 @@ const api = createBackendApiClient({
 const effectiveAgentConfigWorkspaceId = computed(() =>
   props.agentConfigWorkspaceId === undefined ? props.workspaceId : (props.agentConfigWorkspaceId || undefined)
 );
+const pendingWorkspaceAgentPublish = ref<PendingWorkspaceAgentPublish | null>(null);
+
+/**
+ * 应用 Agent 的“提交并推送”由两个 HTTP 请求组成。本地提交成功、远端发布失败时，
+ * Git status 已经 clean，但这些文件仍是本轮需要重试的发布白名单，不能被轮询刷新清掉。
+ */
+function currentPendingWorkspaceAgentPublish(): PendingWorkspaceAgentPublish | null {
+  const pending = pendingWorkspaceAgentPublish.value;
+  if (
+    !pending
+    || !props.personalWorkspaceId
+    || pending.personalWorkspaceId !== props.personalWorkspaceId
+    || pending.agentConfigWorkspaceId !== effectiveAgentConfigWorkspaceId.value
+  ) return null;
+  return pending;
+}
+
+function rememberPendingWorkspaceAgentPublish(
+  personalWorkspaceId: string,
+  files: string[],
+  diffFiles: AgentPanelDiffFile[]
+) {
+  const agentConfigWorkspaceId = effectiveAgentConfigWorkspaceId.value;
+  if (!agentConfigWorkspaceId) return;
+  pendingWorkspaceAgentPublish.value = {
+    personalWorkspaceId,
+    agentConfigWorkspaceId,
+    files: [...files],
+    diffFiles: diffFiles.map((file) => ({
+      path: file.path,
+      status: file.status,
+      staged: true,
+      patch: file.patch,
+      pendingPublish: true
+    }))
+  };
+  const pendingPaths = new Set(diffFiles.map((file) => file.path));
+  workspaceAgentDiffs.value = workspaceAgentDiffs.value.map((file) => {
+    const path = normalizeWorkspaceAgentDiffPath(file.path);
+    return path && pendingPaths.has(path)
+      ? { ...file, path, staged: true, pendingPublish: true }
+      : file;
+  });
+}
+
+function clearPendingWorkspaceAgentPublish() {
+  pendingWorkspaceAgentPublish.value = null;
+}
 
 // Resizing unstaged / staged boundary
 const unstagedHeight = ref<number | null>(null);
@@ -184,10 +240,13 @@ function getCommitStepClass(stepNum: number) {
   if (errorMessage.value && commitStep.value === stepNum) {
     return "is-failed";
   }
-  if (commitStep.value > stepNum || (stepNum === 5 && commitStep.value === 5)) {
+  if (
+    commitStep.value > stepNum
+    || (commitStep.value === stepNum && !committing.value && !errorMessage.value)
+  ) {
     return "is-succeeded";
   }
-  if (commitStep.value === stepNum) {
+  if (commitStep.value === stepNum && committing.value) {
     return "is-running";
   }
   return "is-pending";
@@ -197,10 +256,13 @@ function getCommitStepIcon(stepNum: number) {
   if (errorMessage.value && commitStep.value === stepNum) {
     return XCircle;
   }
-  if (commitStep.value > stepNum || (stepNum === 5 && commitStep.value === 5)) {
+  if (
+    commitStep.value > stepNum
+    || (commitStep.value === stepNum && !committing.value && !errorMessage.value)
+  ) {
     return CheckCircle2;
   }
-  if (commitStep.value === stepNum) {
+  if (commitStep.value === stepNum && committing.value) {
     return Loader2;
   }
   return Circle;
@@ -210,10 +272,13 @@ function getCommitStepStatusText(stepNum: number) {
   if (errorMessage.value && commitStep.value === stepNum) {
     return "FAILED";
   }
-  if (commitStep.value > stepNum || (stepNum === 5 && commitStep.value === 5)) {
+  if (
+    commitStep.value > stepNum
+    || (commitStep.value === stepNum && !committing.value && !errorMessage.value)
+  ) {
     return "SUCCEEDED";
   }
-  if (commitStep.value === stepNum) {
+  if (commitStep.value === stepNum && committing.value) {
     return "RUNNING";
   }
   return "PENDING";
@@ -370,7 +435,7 @@ const agentGitMutationPending = computed(() =>
 
 // Agent diff lists (Public + Workspace)
 const publicAgentDiffs = ref<AgentConfigDiffFile[]>([]);
-const workspaceAgentDiffs = ref<AgentConfigDiffFile[]>([]);
+const workspaceAgentDiffs = ref<WorkspaceAgentDiffFile[]>([]);
 const publicAgentConflicts = computed(() =>
   publicAgentDiffs.value
     .filter((file) => isConflictFile(file))
@@ -548,6 +613,9 @@ const activeHasBlockingConflicts = computed(() =>
       ? hasBlockingAgentConflicts.value
       : canWriteAgentScope("WORKSPACE") && workspaceAgentConflicts.value.length > 0
 );
+const activeWorkspaceAgentPublishPending = computed(() =>
+  activeDiffScope.value === "AGENT_WORKSPACE" && currentPendingWorkspaceAgentPublish() !== null
+);
 
 function selectInitialDiffScope() {
   if (hasSelectedDiffScope.value) return;
@@ -566,6 +634,7 @@ watch(
   () => props.workspaceId,
   () => {
     resetCommitBatch();
+    clearPendingWorkspaceAgentPublish();
     workspaceMergeInProgress.value = false;
     workspaceApplicationUpdatePending.value = false;
     workspaceApplicationTargetCommit.value = null;
@@ -573,6 +642,16 @@ watch(
     void refreshChanges();
   },
   { immediate: true }
+);
+
+watch(
+  () => [props.personalWorkspaceId, effectiveAgentConfigWorkspaceId.value] as const,
+  ([personalWorkspaceId, agentConfigWorkspaceId], previous) => {
+    if (!previous) return;
+    if (personalWorkspaceId !== previous[0] || agentConfigWorkspaceId !== previous[1]) {
+      clearPendingWorkspaceAgentPublish();
+    }
+  }
 );
 
 watch(
@@ -592,6 +671,30 @@ watch(
     }
   }
 );
+
+/**
+ * 轮询仍以真实 Git status 为主；只有 status 已 clean 的待重试发布文件才叠加回列表。
+ * 如果同一路径再次出现真实改动，说明用户已继续编辑，旧发布快照立即失效并回到正常提交流程。
+ */
+function applyWorkspaceAgentDiffRefresh(files: AgentConfigDiffFile[]) {
+  const pending = currentPendingWorkspaceAgentPublish();
+  if (!pending) {
+    workspaceAgentDiffs.value = files;
+    return;
+  }
+  const refreshedPaths = new Set(
+    files.flatMap((file) => {
+      const path = normalizeWorkspaceAgentDiffPath(file.path);
+      return path ? [path] : [];
+    })
+  );
+  if (pending.diffFiles.some((file) => refreshedPaths.has(file.path))) {
+    clearPendingWorkspaceAgentPublish();
+    workspaceAgentDiffs.value = files;
+    return;
+  }
+  workspaceAgentDiffs.value = [...files, ...pending.diffFiles];
+}
 
 async function refreshChanges(options: { preserveError?: boolean } = {}) {
   const token = ++refreshChangesToken;
@@ -662,10 +765,10 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
       try {
         const wksDiff = await api.getWorkspaceAgentDiff(effectiveAgentConfigWorkspaceId.value);
         if (token !== refreshChangesToken) return;
-        workspaceAgentDiffs.value = wksDiff.files;
+        applyWorkspaceAgentDiffRefresh(wksDiff.files);
       } catch {
         if (token !== refreshChangesToken) return;
-        workspaceAgentDiffs.value = [];
+        applyWorkspaceAgentDiffRefresh([]);
       }
     } else {
       workspaceAgentDiffs.value = [];
@@ -1103,8 +1206,12 @@ async function stageAllAgentChanges() {
 }
 
 // Unstage agent file (real / mock)
-async function unstageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" }) {
+async function unstageAgentFile(file: AgentPanelDiffFile) {
   if (!canWriteAgentScope(file.scope)) return;
+  if (file.pendingPublish) {
+    errorMessage.value = "该文件已完成本地提交，当前等待重新推送，不能取消暂存。";
+    return;
+  }
   errorMessage.value = "";
   try {
     if (workbench.useMockTestData) {
@@ -1140,6 +1247,10 @@ async function discardAgentFiles(files: AgentPanelDiffFile[]) {
     || activeAgentConflicts.value.length > 0
     || (scope === "WORKSPACE" && !effectiveAgentConfigWorkspaceId.value)
   ) return;
+  if (files.some((file) => file.pendingPublish)) {
+    errorMessage.value = "待推送文件已完成本地提交，不能按工作树改动回退；请先重新推送。";
+    return;
+  }
   const paths = [...new Set(files.filter((file) => file.scope === scope).map((file) => file.path))];
   const pendingPaths = paths.filter((path) => !discardingAgentPaths.value.has(agentMutationKey(scope, path)));
   if (pendingPaths.length === 0) return;
@@ -1205,10 +1316,28 @@ function handleOpenFileDiff(
   });
 }
 
+function agentRunDiffFile(file: AgentPanelDiffFile): WorkspacePanelDiffFile {
+  return {
+    path: file.path,
+    status: file.status,
+    patch: file.patch,
+    additions: 0,
+    deletions: 0
+  };
+}
+
 // Commit changes
 async function handleCommit(push = false) {
   if (committing.value || !hasWritableStagedChanges.value) return;
   const operationScope = activeDiffScope.value;
+  const retryingWorkspaceAgentPublish = operationScope === "AGENT_WORKSPACE"
+    ? currentPendingWorkspaceAgentPublish()
+    : null;
+  if (!push && retryingWorkspaceAgentPublish) {
+    errorMessage.value = "应用 Agent 文件已完成本地提交，请使用“重新推送”继续发布。";
+    progressMessage.value = "";
+    return;
+  }
   if (activeDiffScope.value === "WORKSPACE" && props.canWrite && hasWorkspaceConflicts.value) {
     errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
     progressMessage.value = "";
@@ -1232,7 +1361,9 @@ async function handleCommit(push = false) {
 
   const plannedCommittedFileCount = activeDiffScope.value === "WORKSPACE"
     ? workspaceStaged.value.length
-    : activeAgentStaged.value.filter((file) => canWriteAgentScope(file.scope)).length;
+    : retryingWorkspaceAgentPublish
+      ? retryingWorkspaceAgentPublish.diffFiles.length
+      : activeAgentStaged.value.filter((file) => canWriteAgentScope(file.scope)).length;
   const plannedLocalOnlySpecFileCount = activeDiffScope.value === "WORKSPACE"
     ? workspaceStagedSpecCount.value
     : 0;
@@ -1400,9 +1531,11 @@ async function handleCommit(push = false) {
     }
 
     // 3. 应用 Agent 与普通文件共用个人 worktree，只是按 `.opencode` 路径隔离提交范围。
-    const workspaceStagedFiles = canWriteAgentScope("WORKSPACE")
-      ? workspaceAgentStaged.value.map((file) => workspaceAgentPersonalPath(file.path))
+    const workspaceStagedPanelFiles = canWriteAgentScope("WORKSPACE")
+      ? [...workspaceAgentStaged.value]
       : [];
+    const workspaceStagedFiles = retryingWorkspaceAgentPublish?.files
+      ?? workspaceStagedPanelFiles.map((file) => workspaceAgentPersonalPath(file.path));
     if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceStagedFiles.length > 0) {
       if (!props.personalWorkspaceId) {
         errorMessage.value = "当前不是个人 worktree，不能提交或发布应用 Agent。";
@@ -1410,14 +1543,25 @@ async function handleCommit(push = false) {
         committing.value = false;
         return;
       }
-      progressMessage.value = "正在提交个人 worktree 中的应用 Agent 配置...";
+      progressMessage.value = retryingWorkspaceAgentPublish
+        ? "正在重新推送已完成本地提交的应用 Agent 配置..."
+        : "正在提交个人 worktree 中的应用 Agent 配置...";
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
-      await api.commitPersonalWorkspace(props.personalWorkspaceId, {
-        commitMessage: msg,
-        files: workspaceStagedFiles,
-        operationId: newOperationId()
-      });
+      if (!retryingWorkspaceAgentPublish) {
+        await api.commitPersonalWorkspace(props.personalWorkspaceId, {
+          commitMessage: msg,
+          files: workspaceStagedFiles,
+          operationId: newOperationId()
+        });
+        if (push) {
+          rememberPendingWorkspaceAgentPublish(
+            props.personalWorkspaceId,
+            workspaceStagedFiles,
+            workspaceStagedPanelFiles
+          );
+        }
+      }
       commitStep.value = 2;
       if (push) {
         publishAttempted = true;
@@ -1449,6 +1593,7 @@ async function handleCommit(push = false) {
         }
         publishResultConfirmed.value = true;
         remotePublishCompleted = true;
+        clearPendingWorkspaceAgentPublish();
         commitStep.value = 5;
       }
     }
@@ -1474,17 +1619,15 @@ async function handleCommit(push = false) {
     }, 2000);
   } catch (error) {
     publishErrorExecution(error);
+    // 失败响应已经给出终态；阻断延迟到达的 RUNNING WebSocket 事件把失败步骤重新改成转圈。
+    publishResultConfirmed.value = true;
     progressMessage.value = "";
     const publishError = errorMessageFor(error, "提交失败");
-    if (publishAttempted) {
-      try {
-        // 发布失败时重新读取个人 worktree 的 Git 状态，让冲突/未暂存文件立即可见。
-        await refreshChanges();
-      } catch {
-        // 保留原始发布错误，刷新失败不覆盖用户可操作的错误信息。
-      }
-    }
     errorMessage.value = publishError;
+    if (publishAttempted) {
+      // 错误弹框先立即结束；后台刷新用于补充冲突状态，应用 Agent 的待重试快照会跨轮询保留。
+      void refreshChanges({ preserveError: true });
+    }
   } finally {
     committing.value = false;
   }
@@ -1662,7 +1805,7 @@ defineExpose({
                 class="git-bulk-action"
                 :aria-label="`丢弃全部${activeScopeItem.label}改动`"
                 :title="activeAgentConflicts.length > 0 ? '存在未解决冲突，请先处理或取消合并' : `丢弃全部${activeScopeItem.label}改动`"
-                :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending"
+                :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending || activeWorkspaceAgentPublishPending"
                 @click.stop="discardAllAgentChanges"
               >
                 <Loader2 v-if="discardingAllAgentFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
@@ -1920,7 +2063,7 @@ defineExpose({
                 class="git-file-row group"
                 :title="file.path"
                 :aria-label="file.path"
-                @click="handleOpenFileDiff(file.path, 'agent', file.scope)"
+                @click="handleOpenFileDiff(file.path, 'agent', file.scope, agentRunDiffFile(file))"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">
@@ -2036,6 +2179,9 @@ defineExpose({
           <!-- 2b. Agent/Skill scope -->
           <div v-else class="git-sub-section">
             <div class="git-sub-content px-2 py-0.5 space-y-0.5">
+              <div v-if="activeWorkspaceAgentPublishPending" class="git-conflict-note">
+                本地提交已完成，远端推送失败；文件会保留在此处，点击“重新推送”继续发布。
+              </div>
               <div v-if="activeAgentStaged.length === 0" class="git-empty-text">无暂存文件</div>
               <div
                 v-for="file in activeAgentStaged"
@@ -2043,15 +2189,16 @@ defineExpose({
                 class="git-file-row group"
                 :title="file.path"
                 :aria-label="file.path"
-                @click="handleOpenFileDiff(file.path, 'agent', file.scope)"
+                @click="handleOpenFileDiff(file.path, 'agent', file.scope, agentRunDiffFile(file))"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">
                   {{ getFileName(file.path) }}
                 </span>
+                <Badge v-if="file.pendingPublish" tone="warning" class="ml-1 py-0 px-1 text-[9px]">待推送</Badge>
                 
                 <button
-                  v-if="canWriteAgentScope(file.scope) && activeAgentConflicts.length === 0"
+                  v-if="canWriteAgentScope(file.scope) && activeAgentConflicts.length === 0 && !file.pendingPublish"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="回退文件改动"
@@ -2062,7 +2209,7 @@ defineExpose({
                   <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
                 <button
-                  v-if="canWriteAgentScope(file.scope)"
+                  v-if="canWriteAgentScope(file.scope) && !file.pendingPublish"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="取消暂存"
@@ -2100,8 +2247,10 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-commit flex-1"
-          :title="activeHasBlockingConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
-          :disabled="committing || activeHasBlockingConflicts || !hasWritableStagedChanges || !commitMessage.trim()"
+          :title="activeWorkspaceAgentPublishPending
+            ? '应用 Agent 已完成本地提交，请重新推送'
+            : (activeHasBlockingConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更')"
+          :disabled="committing || activeHasBlockingConflicts || activeWorkspaceAgentPublishPending || !hasWritableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(false)"
         >
           <FolderGit2 class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -2111,14 +2260,16 @@ defineExpose({
           v-if="hasPublishableStagedChanges"
           type="button"
           class="git-action-btn btn-push flex-1"
-          :title="activeHasBlockingConflicts
+          :title="activeWorkspaceAgentPublishPending
+            ? '重新推送已完成本地提交的应用 Agent 文件'
+            : activeHasBlockingConflicts
             ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送'
             : (!hasPublishableStagedChanges ? '当前暂存内容仅允许本地提交' : '提交并推送可发布变更')"
           :disabled="committing || activeHasBlockingConflicts || !hasPublishableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(true)"
         >
           <Upload class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
-          <span>提交并推送</span>
+          <span>{{ activeWorkspaceAgentPublishPending ? '重新推送' : '提交并推送' }}</span>
         </button>
       </div>
     </div>

@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-21 - 修复 Git 推送身份与提交进度终态
+
+- Why:
+  - 企业 SCM 拒绝平台生成的 `统一认证号@testagent.local` committer，导致应用 Agent 已在个人 worktree 本地提交、但投影到 feature 分支后 push 失败；前端随后按 clean worktree 刷新，文件从 Diff 消失且失败步骤仍显示 RUNNING。应用 workspace 仅本地提交成功时也因步骤终态只看 step 序号而持续转圈。
+- What:
+  - 平台 Git 单次提交身份改为 `统一认证号@mails.icbc`，匹配企业 SCM 已登记邮箱；继续只注入当前 Git 命令，不修改仓库或服务器全局配置。
+  - 应用 Agent 在本地提交成功后先保留文件白名单和提交前 patch；远端发布失败时以“待推送”跨 5 秒 Diff 轮询保留，点击文件仍可查看差异，重新推送只重放 publish，不重复本地 commit。HTTP 失败与仅本地提交成功都会把当前进度步骤收敛为 FAILED/SUCCEEDED，不再残留 RUNNING。
+  - 同步 common/workspace-management、HTTP API、agent-web README/PACKAGE，并新增真实 Git 身份断言和进度/失败重试组件回归。
+- How:
+  - 复用现有个人 worktree `commit -> publish` 两阶段协议、Agent 配置 operation progress 和定时 Diff 查询；没有新增恢复接口、第二套 Git 状态或裸 Git 推送路径。发布成功后清除待推送快照，同一路径产生新工作树改动或切换工作区时使旧快照失效。
+- Result:
+  - GitChangesPanel 40 项、common 真实 Git 9 项、workspace-management 聚焦 98 项通过；前端 lint、typecheck、agent-web 生产构建与后端 18 模块跳过测试打包通过，`git diff --check` 通过。
+  - 前端全量 Vitest 为 1450 passed / 1 skipped / 1 failed；唯一失败是既有 `DirectoryRows` 测试用 `button` 查询实际 `radio` 角色的“上传”，单文件复跑稳定失败且相关文件未修改，本次未扩大范围处理。
+  - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端 3000 与登录 CORS 正常、manager WebSocket 已连接。本次只改变 Git committer 邮箱规则和前端失败恢复状态，不新增或变更 HTTP/RunEvent/数据库/SQL/权限/generated SDK/环境配置。
+- Pitfalls:
+  - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
+
 ### 2026-07-19 - 优化会话列表样式与布局
 
 - Why:

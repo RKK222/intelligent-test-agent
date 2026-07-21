@@ -6364,6 +6364,11 @@ async function handleOpenDiff(payload: string | {
       workbench.setSelectedDiffPath(payload.path);
     } else {
       await loadDiffSource("agent");
+      // 发布失败后的应用 Agent 已经完成本地提交，后端工作树 diff 为空；
+      // 复用变更面板保留的提交前 patch，确保点击“待推送”文件仍能看到本轮差异。
+      if (payload.file && !diffFiles.value.some((file) => file.path === payload.path)) {
+        diffFiles.value = [...diffFiles.value, payload.file];
+      }
       workbench.setSelectedDiffPath(payload.path);
     }
   }

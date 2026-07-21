@@ -103,7 +103,7 @@ class GitWorkspaceServiceRealGitTest {
                 GitCommitIdentity.forPlatformUser("alice", "AUTH_ALICE"));
 
         assertThat(git(repo, "show", "-s", "--format=%an <%ae>", "HEAD").stdoutText().trim())
-                .isEqualTo("alice <AUTH_ALICE@testagent.local>");
+                .isEqualTo("alice <AUTH_ALICE@mails.icbc>");
     }
 
     @Test

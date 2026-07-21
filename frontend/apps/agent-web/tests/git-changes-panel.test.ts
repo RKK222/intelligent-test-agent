@@ -1502,6 +1502,90 @@ describe("GitChangesPanel", () => {
     expect(view.getByText("FAILED")).toBeTruthy();
   });
 
+  it("finishes the progress step after a successful local workspace commit", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/local-only.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("local-only.ts")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: local commit");
+    await fireEvent.click(view.getByRole("button", { name: "提交" }));
+
+    expect(await view.findByText("提交成功！")).toBeTruthy();
+    expect(view.queryByText("RUNNING")).toBeNull();
+    expect(view.getAllByText("SUCCEEDED")).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "关闭" })
+      .every((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
+  });
+
+  it("keeps failed application Agent files pending and retries without another local commit", async () => {
+    const { BackendApiError } = await import("@test-agent/backend-api");
+    apiClientMock.getWorkspaceAgentDiff
+      .mockResolvedValueOnce({
+        files: [{
+          path: "opencode.jsonc",
+          status: "modified",
+          staged: true,
+          patch: "@@ -1 +1 @@\n-old\n+new"
+        }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockRejectedValueOnce(new BackendApiError(502, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 远端拒绝推送",
+      traceId: "trace_rejected",
+      details: {
+        failedStep: "PUSH_REMOTE",
+        gitFailureType: "REMOTE_REJECTED",
+        executedCommands: ["git -C /repo push origin feature_testagent_20260717"]
+      }
+    }));
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_personal_runtime",
+        agentConfigWorkspaceId: "wrk_personal_runtime",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(await view.findByRole("tab", { name: /^应用Agent/ }));
+    expect(await view.findByText("opencode.jsonc")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "更新opencode配置");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText(/提交失败：Git 远端拒绝推送/)).toBeTruthy();
+    await waitFor(() => expect(apiClientMock.getWorkspaceAgentDiff.mock.calls.length).toBeGreaterThan(1));
+    expect(await view.findByText("待推送")).toBeTruthy();
+    expect(view.getByLabelText("opencode.jsonc")).toBeTruthy();
+    expect(view.queryByText("RUNNING")).toBeNull();
+    expect(view.getByText("FAILED")).toBeTruthy();
+    expect(view.getAllByRole("button", { name: "关闭" })
+      .every((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
+
+    await fireEvent.click(view.getByRole("button", { name: "重新推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(2));
+    expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledTimes(1);
+    expect(await view.findByText("提交并推送成功！")).toBeTruthy();
+    await waitFor(() => expect(view.queryByLabelText("opencode.jsonc")).toBeNull());
+  });
+
   it("shows the currently running git command from publish progress events", async () => {
     let progressHandler: ((event: { currentStep?: string; command?: string; status?: string }) => void) | undefined;
     apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: typeof progressHandler) => {
