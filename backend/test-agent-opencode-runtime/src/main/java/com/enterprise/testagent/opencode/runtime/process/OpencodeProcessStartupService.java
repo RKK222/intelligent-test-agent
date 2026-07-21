@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerCommandNotDispatchedException;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -506,6 +507,7 @@ public class OpencodeProcessStartupService {
     private OpencodeProcessStartCommand startCommand(OpencodeProcessStartupRequest request) {
         return new OpencodeProcessStartCommand(
                 request.userId(),
+                logUnifiedAuthId(request),
                 request.linuxServerId(),
                 request.containerId(),
                 request.port(),
@@ -514,6 +516,33 @@ public class OpencodeProcessStartupService {
                 request.configPath(),
                 startupEnvironment(request),
                 request.traceId());
+    }
+
+    /**
+     * 解析仅用于进程日志文件名的统一认证号。
+     *
+     * <p>优先使用用户主数据；滚动升级或测试装配未注入用户仓储时，只允许从稳定的
+     * {@code users/{统一认证号}} session 路径恢复，不能回退到平台 userId。
+     */
+    private String logUnifiedAuthId(OpencodeProcessStartupRequest request) {
+        if (userRepository != null) {
+            String value = userRepository.findByUserId(request.userId())
+                    .map(User::unifiedAuthId)
+                    .map(String::trim)
+                    .filter(item -> !item.isBlank())
+                    .orElse(null);
+            if (value != null) {
+                return value;
+            }
+        }
+        Path sessionPath = Path.of(request.sessionPath()).normalize();
+        Path parent = sessionPath.getParent();
+        return parent != null
+                        && parent.getFileName() != null
+                        && "users".equals(parent.getFileName().toString())
+                        && sessionPath.getFileName() != null
+                ? sessionPath.getFileName().toString().trim()
+                : null;
     }
 
     /**

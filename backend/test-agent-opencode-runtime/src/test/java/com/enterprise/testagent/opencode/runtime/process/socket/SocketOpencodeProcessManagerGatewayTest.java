@@ -44,7 +44,8 @@ class SocketOpencodeProcessManagerGatewayTest {
                 new BackendProcessId("bjp_1234567890abcdef"),
                 message -> {
                     assertThat(message.environment()).containsEntry("ENTERPRISE_UCID", "U001");
-                    assertThat(message.sessionPath()).isEqualTo("/data/opencode/session/users/usr_1234567890abcdef");
+                    assertThat(message.unifiedAuthId()).isEqualTo("ucid_001");
+                    assertThat(message.sessionPath()).isEqualTo("/data/opencode/session/users/ucid_001");
                     pending.complete(message.commandId(), ManagerControlMessage.commandResult(
                         message.commandId(),
                         message.command(),
@@ -62,11 +63,12 @@ class SocketOpencodeProcessManagerGatewayTest {
 
         OpencodeProcessStartResult result = gateway.startProcess(new OpencodeProcessStartCommand(
                 new UserId("usr_1234567890abcdef"),
+                " ucid_001 ",
                 new LinuxServerId("10.8.0.12"),
                 new OpencodeContainerId("ctr_01"),
                 4096,
                 "http://10.8.0.12:4096",
-                "/data/opencode/session/users/usr_1234567890abcdef",
+                "/data/opencode/session/users/ucid_001",
                 "/data/opencode/.config/opencode/",
                 Map.of("ENTERPRISE_UCID", "U001"),
                 "trace_1234567890abcdef"));
@@ -101,6 +103,7 @@ class SocketOpencodeProcessManagerGatewayTest {
 
         assertThatThrownBy(() -> gateway.startProcess(new OpencodeProcessStartCommand(
                 new UserId("usr_1234567890abcdef"),
+                "ucid_001",
                 new LinuxServerId("10.8.0.12"),
                 new OpencodeContainerId("ctr_01"),
                 4096,
@@ -237,6 +240,7 @@ class SocketOpencodeProcessManagerGatewayTest {
 
         assertThatThrownBy(() -> gateway.startProcess(new OpencodeProcessStartCommand(
                 new UserId("usr_1234567890abcdef"),
+                "ucid_001",
                 new LinuxServerId("10.8.0.12"),
                 new OpencodeContainerId("ctr_01"),
                 4096,

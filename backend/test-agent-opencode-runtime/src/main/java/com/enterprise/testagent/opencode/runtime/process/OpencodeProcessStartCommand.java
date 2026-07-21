@@ -12,6 +12,7 @@ import java.util.Objects;
  */
 public record OpencodeProcessStartCommand(
         UserId userId,
+        String unifiedAuthId,
         LinuxServerId linuxServerId,
         OpencodeContainerId containerId,
         int port,
@@ -23,6 +24,9 @@ public record OpencodeProcessStartCommand(
 
     public OpencodeProcessStartCommand {
         Objects.requireNonNull(userId, "userId must not be null");
+        unifiedAuthId = unifiedAuthId == null || unifiedAuthId.isBlank()
+                ? null
+                : unifiedAuthId.trim();
         Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
         Objects.requireNonNull(containerId, "containerId must not be null");
         if (port < 1 || port > 65535) {

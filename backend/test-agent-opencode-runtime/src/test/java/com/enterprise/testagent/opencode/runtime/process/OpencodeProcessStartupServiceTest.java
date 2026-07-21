@@ -68,6 +68,8 @@ class OpencodeProcessStartupServiceTest {
         OpencodeServerProcess process = service.startAndVerify(request(null, null, null));
 
         assertThat(gateway.startCommands).hasSize(1);
+        assertThat(gateway.startCommands).singleElement().satisfies(command ->
+                assertThat(command.unifiedAuthId()).isEqualTo("ucid_001"));
         assertThat(gateway.healthCommands).singleElement().satisfies(command -> {
             assertThat(command.processId()).isEqualTo(process.processId());
             assertThat(command.baseUrl()).isEqualTo("http://10.8.0.12:4097");
@@ -364,7 +366,7 @@ class OpencodeProcessStartupServiceTest {
                 CONTAINER_ID,
                 4097,
                 "http://10.8.0.12:4097",
-                "/data/opencode/session/4097",
+                "/data/opencode/session/users/ucid_001",
                 "/data/opencode/.config/opencode/",
                 environment,
                 TRACE_ID);

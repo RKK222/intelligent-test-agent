@@ -651,6 +651,7 @@ public class UserOpencodeProcessAssignmentService {
         String baseUrl = addressResolver.baseUrl(port);
         return new OpencodeProcessStartCommand(
                 userId,
+                userUnifiedAuthPathSegment(userId),
                 container.linuxServerId(),
                 container.containerId(),
                 port,

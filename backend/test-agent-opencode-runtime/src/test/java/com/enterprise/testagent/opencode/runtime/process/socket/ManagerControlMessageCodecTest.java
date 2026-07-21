@@ -57,8 +57,9 @@ class ManagerControlMessageCodecTest {
                 "cmd_1234567890abcdef",
                 "start",
                 4096,
-                "/data/opencode/session/users/usr_1234567890abcdef",
-                "/data/opencode/session/users/usr_1234567890abcdef/.testagent-runtime/current-public-config",
+                "/data/opencode/session/users/ucid_001",
+                "/data/opencode/session/users/ucid_001/.testagent-runtime/current-public-config",
+                "ucid_001",
                 Map.of("ENTERPRISE_UCID", "U001"),
                 10_000,
                 "trace_1234567890abcdef");
@@ -67,10 +68,12 @@ class ManagerControlMessageCodecTest {
         ManagerControlMessage decoded = codec.decode(payload);
 
         assertThat(objectMapper.readTree(payload).path("sessionPath").asText())
-                .isEqualTo("/data/opencode/session/users/usr_1234567890abcdef");
-        assertThat(decoded.sessionPath()).isEqualTo("/data/opencode/session/users/usr_1234567890abcdef");
+                .isEqualTo("/data/opencode/session/users/ucid_001");
+        assertThat(objectMapper.readTree(payload).path("unifiedAuthId").asText()).isEqualTo("ucid_001");
+        assertThat(decoded.sessionPath()).isEqualTo("/data/opencode/session/users/ucid_001");
         assertThat(decoded.configPath())
-                .isEqualTo("/data/opencode/session/users/usr_1234567890abcdef/.testagent-runtime/current-public-config");
+                .isEqualTo("/data/opencode/session/users/ucid_001/.testagent-runtime/current-public-config");
+        assertThat(decoded.unifiedAuthId()).isEqualTo("ucid_001");
     }
 
     @Test

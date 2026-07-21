@@ -113,6 +113,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(gateway.startCommands).hasSize(1);
         assertThat(gateway.healthCommands).hasSize(1);
         assertThat(gateway.startCommands.getFirst().containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
+        assertThat(gateway.startCommands.getFirst().unifiedAuthId()).isEqualTo(USER_UNIFIED_AUTH_ID);
         assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(USER_SESSION_DIR);
         assertThat(gateway.startCommands.getFirst().configPath())
                 .isEqualTo("/tmp/testagent/.session/users/ucid_001/.testagent-runtime/current-public-config");
