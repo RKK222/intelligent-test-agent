@@ -54,7 +54,7 @@
 - `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、版本库管理、版本库关联、应用工作空间和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示；"应用人员管理" tab 用 `el-autocomplete` 懒加载搜索候选用户（userId/unifiedAuthId/username LIKE 匹配，空输入不查后端），选中后主按钮从"搜索"切换为"添加"；"工作空间管理" tab 的创建区只允许从已关联测试工作库中选择版本库，随后自动刷新分支、加载目录并创建工作空间，创建时生成 `operationId` 并轮询后端进度接口；移除应用成员、解除应用与版本库关联前必须弹出页面内 div 确认框。
 - `utils/ssh-crypto.ts`：个人 SSH key 浏览器端混合加密工具，按后端契约生成 AES-GCM 私钥密文、RSA-OAEP/SHA-256 临时 AES 密钥密文和 SHA-256 指纹；优先使用 Web Crypto，企业内 Chromium 108 的 HTTP 内网访问缺少 `crypto.subtle` 时使用 node-forge 纯 JS 回退；如果 `getRandomValues` 不可用则返回明确错误，不允许明文降级。
 - `components/SystemManagementWrapper.vue`、`components/system/SystemManagementPanel.vue`：超级管理员系统管理入口和二级导航，包含定时任务管理与运行管理。
-- `components/system/ScheduledTaskManagementPanel.vue`：超级管理员 XXL 同源 iframe 壳；申请 60 秒一次性票据并以隐藏表单 POST，处理重签、403、票据/会话过期、Admin 不可用和登出清理。任务操作与日志由 iframe 内 XXL 页面提供。
+- `components/system/ScheduledTaskManagementPanel.vue`、`components/system/xxl-job-embedded-shell.ts`：超级管理员 XXL 同源 iframe 壳；申请 60 秒一次性票据并以隐藏表单 POST，处理重签、403、票据/会话过期、Admin 不可用和登出清理，并只对真实 XXL shell 幂等启用横向导航及只读映射账号。任务操作与日志由 iframe 内 XXL 页面提供。
 - `components/EditorPane.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。

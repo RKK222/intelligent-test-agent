@@ -3,6 +3,7 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } fr
 import { AlertTriangle, RefreshCw, ShieldCheck } from "lucide-vue-next";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser } from "@test-agent/shared-types";
+import { applyXxlJobEmbeddedShell } from "./xxl-job-embedded-shell";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -20,6 +21,7 @@ type ConsoleState =
 const api = inject<BackendApiClient>("api")!;
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const formRef = ref<HTMLFormElement | null>(null);
+const frameRef = ref<HTMLIFrameElement | null>(null);
 const frameName = `test-agent-xxl-job-${Math.random().toString(36).slice(2)}`;
 const state = ref<ConsoleState>("idle");
 const ticket = ref("");
@@ -143,6 +145,13 @@ function onSsoMessage(event: MessageEvent) {
   }
 }
 
+function onFrameLoad() {
+  if (frameRef.value) {
+    // SSO 中转页和错误页会安全跳过；只有真实 XXL shell 才应用平台嵌入态布局。
+    applyXxlJobEmbeddedShell(frameRef.value);
+  }
+}
+
 watch(hasSuperAdmin, (allowed) => {
   requestSequence += 1;
   clearTimers();
@@ -195,11 +204,13 @@ onBeforeUnmount(() => {
 
       <div class="ta-xxl-console">
         <iframe
+          ref="frameRef"
           :name="frameName"
           src="about:blank"
           title="XXL-JOB 定时任务管理"
           referrerpolicy="same-origin"
           :aria-busy="state === 'loading'"
+          @load="onFrameLoad"
         />
 
         <div v-if="state !== 'ready'" class="ta-xxl-state" :class="{ 'is-loading': state === 'loading' }">

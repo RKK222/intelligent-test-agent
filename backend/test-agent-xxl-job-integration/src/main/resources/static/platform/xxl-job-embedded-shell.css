@@ -1,0 +1,210 @@
+/*
+ * 平台同源 iframe 专用外壳。所有规则都依赖显式根 class，直接访问 XXL Admin 时保持上游原生布局。
+ */
+html.test-agent-xxl-embedded {
+  --ta-xxl-nav-height: 44px;
+  --ta-xxl-account-width: clamp(132px, 20vw, 220px);
+}
+
+html.test-agent-xxl-embedded,
+html.test-agent-xxl-embedded body,
+html.test-agent-xxl-embedded body .wrapper {
+  min-height: 0 !important;
+  background: #f7f8fa;
+}
+
+html.test-agent-xxl-embedded body .main-header {
+  position: fixed !important;
+  top: 0;
+  right: 0;
+  left: auto !important;
+  width: var(--ta-xxl-account-width);
+  height: var(--ta-xxl-nav-height);
+  max-height: var(--ta-xxl-nav-height);
+  border-bottom: 1px solid #e5e7eb;
+  border-left: 1px solid #e5e7eb;
+  background: #fff;
+  box-shadow: none;
+}
+
+html.test-agent-xxl-embedded body .main-header .logo,
+html.test-agent-xxl-embedded body .main-header .sidebar-toggle {
+  display: none !important;
+}
+
+html.test-agent-xxl-embedded body .main-header .navbar {
+  min-height: var(--ta-xxl-nav-height);
+  margin-left: 0 !important;
+  background: #fff !important;
+}
+
+html.test-agent-xxl-embedded body .main-header .navbar-custom-menu,
+html.test-agent-xxl-embedded body .main-header .navbar-custom-menu > .navbar-nav,
+html.test-agent-xxl-embedded body .main-header .navbar-custom-menu > .navbar-nav > li {
+  width: 100%;
+  height: var(--ta-xxl-nav-height);
+  margin: 0;
+}
+
+html.test-agent-xxl-embedded body .main-header .navbar-custom-menu > .navbar-nav > li > .dropdown-toggle {
+  display: block;
+  width: 100%;
+  height: var(--ta-xxl-nav-height);
+  padding: 12px 14px;
+  overflow: hidden;
+  background: #fff !important;
+  color: #64748b !important;
+  cursor: default;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.test-agent-xxl-embedded body .main-header .navbar-custom-menu .dropdown-menu,
+html.test-agent-xxl-embedded body .main-header .navbar-custom-menu .caret {
+  display: none !important;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar {
+  position: fixed !important;
+  top: 0;
+  right: var(--ta-xxl-account-width);
+  bottom: auto;
+  left: 0;
+  width: auto !important;
+  min-height: var(--ta-xxl-nav-height) !important;
+  height: var(--ta-xxl-nav-height);
+  padding-top: 0 !important;
+  overflow: hidden;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff !important;
+  box-shadow: none;
+  transform: none !important;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar {
+  width: 100%;
+  height: var(--ta-xxl-nav-height) !important;
+  overflow: hidden !important;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu {
+  display: flex;
+  width: 100%;
+  height: var(--ta-xxl-nav-height);
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 6px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: #fff;
+  list-style: none;
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu::-webkit-scrollbar {
+  height: 4px;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > .header {
+  display: none !important;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li {
+  flex: 0 0 auto;
+  height: 32px;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li > a {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  border: 0 !important;
+  border-radius: 6px;
+  background: transparent !important;
+  color: #475569 !important;
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li > a > .fa {
+  width: 16px;
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  text-align: center;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li:hover > a,
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li > a:focus-visible {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li > a:focus-visible {
+  outline: 2px solid #93b4f5;
+  outline-offset: 1px;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li.active > a,
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li.active:hover > a {
+  background: #e8f0ff !important;
+  color: #2563eb !important;
+}
+
+html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu > li.active > a > .fa {
+  color: #2563eb;
+}
+
+html.test-agent-xxl-embedded body .content-wrapper {
+  height: calc(100% - 36px) !important;
+  min-height: 0 !important;
+  margin-left: 0 !important;
+  padding-top: var(--ta-xxl-nav-height) !important;
+  background: #f7f8fa;
+}
+
+html.test-agent-xxl-embedded body .main-footer {
+  margin-left: 0 !important;
+}
+
+html.test-agent-xxl-embedded body.sidebar-collapse .main-sidebar,
+html.test-agent-xxl-embedded body.sidebar-open .main-sidebar {
+  right: var(--ta-xxl-account-width);
+  left: 0;
+  width: auto !important;
+  transform: none !important;
+}
+
+@media (max-width: 720px) {
+  html.test-agent-xxl-embedded {
+    --ta-xxl-account-width: clamp(116px, 32vw, 160px);
+  }
+
+  html.test-agent-xxl-embedded body .main-header .navbar-custom-menu > .navbar-nav {
+    float: none;
+  }
+
+  html.test-agent-xxl-embedded body .main-header .navbar-custom-menu > .navbar-nav > li > .dropdown-toggle {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.test-agent-xxl-embedded body .main-sidebar .sidebar-menu {
+    scroll-behavior: auto;
+  }
+}

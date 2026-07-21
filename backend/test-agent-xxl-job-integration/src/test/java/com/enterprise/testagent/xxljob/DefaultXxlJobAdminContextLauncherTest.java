@@ -71,6 +71,27 @@ class DefaultXxlJobAdminContextLauncherTest {
                     HttpResponse.BodyHandlers.ofString());
             assertThat(readiness.statusCode()).isEqualTo(200);
 
+            assertStaticAsset(
+                    properties,
+                    "/static/adminlte/dist/css/AdminLTE.min.css",
+                    "text/css",
+                    "AdminLTE v2.4.18");
+            assertStaticAsset(
+                    properties,
+                    "/static/adminlte/dist/css/skins/_all-skins.min.css",
+                    "text/css",
+                    ".skin-blue");
+            assertStaticAsset(
+                    properties,
+                    "/static/adminlte/dist/js/adminlte.min.js",
+                    "text/javascript",
+                    "AdminLTE");
+            assertStaticAsset(
+                    properties,
+                    "/static/platform/xxl-job-embedded-shell.css",
+                    "text/css",
+                    ".test-agent-xxl-embedded");
+
             HttpResponse<String> response = HttpClient.newHttpClient().send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + properties.getAdmin().getPort()
                                     + "/xxl-job-admin/auth/login"))
@@ -125,6 +146,26 @@ class DefaultXxlJobAdminContextLauncherTest {
                 }
             }
         }
+    }
+
+    /** 验证 Admin 子上下文真实交付上游与平台嵌入态静态资源，避免构建忽略规则再次漏包。 */
+    private static void assertStaticAsset(
+            XxlJobProperties properties,
+            String path,
+            String expectedContentType,
+            String expectedMarker) throws Exception {
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + properties.getAdmin().getPort()
+                                + "/xxl-job-admin" + path))
+                        .GET()
+                        .timeout(Duration.ofSeconds(10))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).as(path).isEqualTo(200);
+        assertThat(response.headers().firstValue("Content-Type")).as(path).hasValueSatisfying(
+                contentType -> assertThat(contentType).startsWith(expectedContentType));
+        assertThat(response.body()).as(path).contains(expectedMarker);
     }
 
     @Test

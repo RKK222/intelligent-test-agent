@@ -3,6 +3,10 @@ import { fireEvent, render, waitFor } from "@testing-library/vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser } from "@test-agent/shared-types";
 import ScheduledTaskManagementPanel from "../src/components/system/ScheduledTaskManagementPanel.vue";
+import {
+  XXL_JOB_EMBEDDED_STYLESHEET_PATH,
+  applyXxlJobEmbeddedShell
+} from "../src/components/system/xxl-job-embedded-shell";
 
 const superAdmin: CurrentUser = {
   userId: "usr_admin",
@@ -37,6 +41,43 @@ function renderPanel(backendApi: BackendApiClient, currentUser: CurrentUser = su
   });
 }
 
+function xxlShellDocument() {
+  const frameDocument = document.implementation.createHTMLDocument("XXL-JOB");
+  frameDocument.body.innerHTML = `
+    <div class="wrapper">
+      <header class="main-header">
+        <a class="logo">XXL 任务调度中心</a>
+        <nav class="navbar">
+          <a class="sidebar-toggle">Toggle navigation</a>
+          <div class="navbar-custom-menu">
+            <ul class="nav navbar-nav">
+              <li class="dropdown">
+                <a href="javascript:" class="dropdown-toggle" data-toggle="dropdown" aria-expanded="false">
+                  欢迎：admin <span class="caret"></span>
+                </a>
+                <ul class="dropdown-menu"><li>修改密码</li></ul>
+              </li>
+            </ul>
+          </div>
+        </nav>
+      </header>
+      <aside class="main-sidebar">
+        <section class="sidebar">
+          <ul class="sidebar-menu">
+            <li class="header">导航</li>
+            <li class="nav-click"><a class="J_menuItem" href="/xxl-job-admin/"><span>运行报表</span></a></li>
+          </ul>
+        </section>
+      </aside>
+      <div class="content-wrapper"></div>
+    </div>`;
+  return frameDocument;
+}
+
+function frameWithDocument(frameDocument: Document) {
+  return { contentDocument: frameDocument } as HTMLIFrameElement;
+}
+
 describe("XXL-JOB management panel", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -66,6 +107,67 @@ describe("XXL-JOB management panel", () => {
       data: { type: "test-agent-xxl-job-sso", status: "ready" }
     }));
     expect(await view.findByText("XXL-JOB 控制台已连接")).toBeTruthy();
+  });
+
+  it("decorates the embedded XXL shell idempotently and makes the mapped account read-only", () => {
+    const frameDocument = xxlShellDocument();
+    const frame = frameWithDocument(frameDocument);
+
+    expect(applyXxlJobEmbeddedShell(frame)).toBe(true);
+    expect(applyXxlJobEmbeddedShell(frame)).toBe(true);
+
+    expect(frameDocument.documentElement.classList.contains("test-agent-xxl-embedded")).toBe(true);
+    const links = frameDocument.querySelectorAll<HTMLLinkElement>("#test-agent-xxl-embedded-shell-styles");
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe(XXL_JOB_EMBEDDED_STYLESHEET_PATH);
+
+    const account = frameDocument.querySelector<HTMLAnchorElement>(".navbar-custom-menu .dropdown-toggle");
+    expect(account?.hasAttribute("href")).toBe(false);
+    expect(account?.hasAttribute("data-toggle")).toBe(false);
+    expect(account?.hasAttribute("aria-expanded")).toBe(false);
+    expect(account?.getAttribute("role")).toBe("status");
+    expect(frameDocument.querySelector(".navbar-custom-menu .dropdown-menu")).toBeNull();
+    expect(frameDocument.querySelector(".navbar-custom-menu .caret")).toBeNull();
+  });
+
+  it("skips SSO and inaccessible documents without changing their markup", () => {
+    const ssoDocument = document.implementation.createHTMLDocument("XXL-JOB 登录完成");
+    ssoDocument.body.textContent = "登录完成";
+    expect(applyXxlJobEmbeddedShell(frameWithDocument(ssoDocument))).toBe(false);
+    expect(ssoDocument.documentElement.classList.contains("test-agent-xxl-embedded")).toBe(false);
+
+    const inaccessibleFrame = {} as HTMLIFrameElement;
+    Object.defineProperty(inaccessibleFrame, "contentDocument", {
+      get() {
+        throw new DOMException("Blocked", "SecurityError");
+      }
+    });
+    expect(applyXxlJobEmbeddedShell(inaccessibleFrame)).toBe(false);
+  });
+
+  it("keeps the clicked horizontal menu item inside the visible scroll area", () => {
+    const frameDocument = xxlShellDocument();
+    const item = frameDocument.querySelector<HTMLElement>(".sidebar-menu .nav-click")!;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(item, "scrollIntoView", { value: scrollIntoView });
+    applyXxlJobEmbeddedShell(frameWithDocument(frameDocument));
+
+    frameDocument.querySelector<HTMLElement>(".J_menuItem")!.click();
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+  });
+
+  it("decorates the shell on iframe load without treating load as SSO readiness", async () => {
+    vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
+    const view = renderPanel(api());
+    const iframe = await view.findByTitle("XXL-JOB 定时任务管理") as HTMLIFrameElement;
+    const frameDocument = iframe.contentDocument!;
+    frameDocument.documentElement.innerHTML = xxlShellDocument().documentElement.innerHTML;
+
+    await fireEvent.load(iframe);
+
+    expect(frameDocument.documentElement.classList.contains("test-agent-xxl-embedded")).toBe(true);
+    expect(view.queryByText("XXL-JOB 控制台已连接")).toBeNull();
   });
 
   it("requests a fresh ticket when the embedded console is reloaded", async () => {

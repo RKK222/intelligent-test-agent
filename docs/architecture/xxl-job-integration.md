@@ -47,6 +47,12 @@
 
 Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `X-Frame-Options: SAMEORIGIN`；会话 Cookie 使用 `HttpOnly`、`Secure`、`SameSite=Lax` 和 `/xxl-job-admin/` Path。
 
+## 嵌入页面边界
+
+- 上游模块完整保留 XXL-JOB 3.4.2 引用的 AdminLTE `dist` CSS/JS，根忽略规则对该目录设置精确例外；平台不修改这些上游文件。
+- integration 只提供作用域为 `test-agent-xxl-embedded` 的平台样式资源。前端在同源 iframe 确认为 XXL shell 后添加根 class 和样式链接，把左侧菜单转为紧凑横向导航，并把 JIT 映射账号收敛为只读文本。
+- 装饰器不把普通 iframe `load` 当作 SSO 成功，不处理登录中转、错误或不可访问文档；直接访问 Admin 没有根 class，继续使用上游原生纵向布局。任务页面、原生页签和 SSO/会话失效协议不变。
+
 ## 数据库边界
 
 平台 PostgreSQL 与 XXL MySQL 完全分离：

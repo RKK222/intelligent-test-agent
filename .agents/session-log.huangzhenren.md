@@ -22,6 +22,22 @@
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
 
+### 2026-07-21 - 修复 XXL-JOB 嵌入页样式并改为横向导航
+
+- Why:
+  - 根 `.gitignore` 的通用 `dist/` 规则误忽略 XXL-JOB 3.4.2 AdminLTE 发布资源，真实 Admin 请求核心 CSS/JS 返回 404，嵌入页因此退化为项目符号导航；平台还需要在不修改上游模板和 Java 源码的前提下提供紧凑横向导航。
+- What:
+  - 为上游 AdminLTE `dist` 增加精确例外并恢复 3.4.2 原版 `AdminLTE.min.css`、`_all-skins.min.css`、`adminlte.min.js`；integration 提供仅在 `test-agent-xxl-embedded` 根 class 下生效的嵌入态样式。
+  - 前端 iframe 每次加载后幂等识别并装饰 XXL shell：六个菜单单行横排，窄屏横向滚动，当前账号改为只读文本；SSO 中转页、错误页和不可访问文档保持无操作，直接访问 Admin 仍保留完整原生布局。
+  - 同步 upstream/integration、frontend/agent-web README、PACKAGE、XXL 架构与测试文档；HTTP API、RunEvent、数据库、权限和 SSO 协议不变。
+- How:
+  - TDD 先以真实 Admin 静态资源 404 和前端缺失装饰器复现失败，再补最小实现；三份上游资源的 SHA-256 与 XXL-JOB 3.4.2 官方文件一致，真实 Admin 与 Vite 代理均验证正确状态码、MIME 和非空内容。
+  - integration 全量 36 项、应用打包、前端 lint/typecheck、87 个文件 1434 passed / 1 skipped、生产 build 均通过；无参数重启使用默认 `test` profile，8080/18080 readiness 为 200、9999 正常监听。
+- Result:
+  - 真实浏览器确认六个菜单同一水平线、选中态与原生页签切换正常、账号无下拉、窄屏可横向滚动；平台重新加载会重新签票并恢复装饰，票据未进入顶层 URL，控制台无 AdminLTE 404。直接访问 Admin 不注入平台样式。
+  - 后端全量复跑仍仅在既有 persistence H2 基线被 `V20260717173000__create_public_agent_config_rollouts.sql` 的 `TIMESTAMPTZ` 阻断；另一次运行态调度测试的并发时序抖动独立连续复跑 5 次通过，未改无关代码。
+  - 未修改 `.env.local`、XXL 上游模板/Java、API、事件、数据库或安全协议；工作树原有 `backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config` 删除保持未暂存，不纳入本次提交。
+
 ### 2026-07-21 - 自动派生 XXL-JOB 多后端节点地址
 
 - Why:

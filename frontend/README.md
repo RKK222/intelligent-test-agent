@@ -76,7 +76,7 @@ tools/dev-frontend-check.sh
 
 ## 本地联调
 
-定时任务管理页使用同源 XXL iframe。Vite dev server 固定代理 `/xxl-job-admin/`，目标读取 `TEST_AGENT_XXL_JOB_ADMIN_URL`，未配置时使用 `http://127.0.0.1:18080`；平台 API 仍走 `VITE_TEST_AGENT_API_BASE_URL`。页面进入和手工刷新都会重新申请一次性票据并用隐藏表单 POST，票据不会出现在地址栏。
+定时任务管理页使用同源 XXL iframe。Vite dev server 固定代理 `/xxl-job-admin/`，目标读取 `TEST_AGENT_XXL_JOB_ADMIN_URL`，未配置时使用 `http://127.0.0.1:18080`；平台 API 仍走 `VITE_TEST_AGENT_API_BASE_URL`。页面进入和手工刷新都会重新申请一次性票据并用隐藏表单 POST，票据不会出现在地址栏。真实 XXL shell 加载后，前端幂等启用仅嵌入态生效的横向导航样式；SSO 中转页、错误页和直接访问 Admin 保持原样。
 
 推荐从仓库根目录使用一键脚本重启三服务，脚本默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」顺序逐个先 kill 原进程再启动；前端构建和 dev server 启动前会检查 `node_modules` 是否落后于 `pnpm-lock.yaml`、workspace 配置或各包 `package.json`，过期时自动执行 `corepack pnpm install --frozen-lockfile`；当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时默认启动 Go `opencode-manager`（由它派生 opencode 子进程，不再单独启动 `opencode serve`）：
 
