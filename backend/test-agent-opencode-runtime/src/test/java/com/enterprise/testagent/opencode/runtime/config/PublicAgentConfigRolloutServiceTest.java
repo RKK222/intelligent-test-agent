@@ -369,6 +369,47 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
+    void publicRolloutWithUnknownUserRestoresSharedConfigFromExactManagerSnapshot() {
+        PublicAgentConfigRolloutTarget target = target(null, 0, AgentConfigRolloutScope.PUBLIC);
+        OpencodeProcessConfigLinkService configLinkService = mock(OpencodeProcessConfigLinkService.class);
+        service.setConfigLinkService(configLinkService);
+        String sessionPath = "/session/unknown";
+        String configPath = "/session/unknown/.testagent-runtime/current-public-config";
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1))).thenReturn(List.of(target));
+        when(configLinkService.isSharedConfigPath(configPath)).thenReturn(false);
+        when(configLinkService.isManagedConfigPath(sessionPath, configPath)).thenReturn(true);
+        useManagerProcess(4096, 123L, PROCESS_STARTED_AT, sessionPath, configPath);
+        when(runtime.runtime(any(AgentRuntimeCommand.class)))
+                .thenReturn(Mono.just(new AgentRuntimeResult(objectMapper.createObjectNode())))
+                .thenReturn(Mono.just(new AgentRuntimeResult(objectMapper.getNodeFactory().booleanNode(true))));
+
+        service.drainTargets();
+
+        verify(configLinkService).switchToShared(sessionPath, configPath);
+        verify(processRepository, never()).findUserBinding(any(UserId.class), eq("opencode"));
+        verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+    }
+
+    @Test
+    void publicRolloutWithUnknownUserAndMissingManagerPathsRemainsFailClosed() {
+        PublicAgentConfigRolloutTarget target = target(null, 0, AgentConfigRolloutScope.PUBLIC);
+        OpencodeProcessConfigLinkService configLinkService = mock(OpencodeProcessConfigLinkService.class);
+        service.setConfigLinkService(configLinkService);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1))).thenReturn(List.of(target));
+        useManagerPorts(4096);
+        when(runtime.runtime(any(AgentRuntimeCommand.class)))
+                .thenReturn(Mono.just(new AgentRuntimeResult(objectMapper.createObjectNode())));
+
+        service.drainTargets();
+
+        verify(processRepository, never()).findUserBinding(any(UserId.class), eq("opencode"));
+        verify(repository).markTargetRetry(
+                eq("act_target"), eq("acl_lease"), eq(1), any(),
+                eq("PROCESS_CONFIG_IDENTITY_CHANGED"), any());
+        verify(repository, never()).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+    }
+
+    @Test
     void applicationRolloutDisposesConvergedUserWithoutChangingPublicConfigLink() {
         PublicAgentConfigRolloutTarget target = target(0, AgentConfigRolloutScope.APPLICATION);
         OpencodeProcessConfigLinkService configLinkService = mock(OpencodeProcessConfigLinkService.class);
@@ -448,9 +489,16 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     private PublicAgentConfigRolloutTarget target(int retryCount, AgentConfigRolloutScope scope) {
+        return target("usr-1", retryCount, scope);
+    }
+
+    private PublicAgentConfigRolloutTarget target(
+            String userId,
+            int retryCount,
+            AgentConfigRolloutScope scope) {
         return new PublicAgentConfigRolloutTarget(
                 "act_target", "acr_rollout", scope,
-                "usr-1", "linux-1", "container-1", 4096,
+                userId, "linux-1", "container-1", 4096,
                 123L, PROCESS_STARTED_AT, "http://127.0.0.1:4096", retryCount, Instant.now().plusSeconds(60),
                 "acl_lease", "trace-rollout");
     }
@@ -513,13 +561,23 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     private void useManagerProcess(int port, long pid, Instant startedAt) {
+        useManagerProcess(port, pid, startedAt, null, null);
+    }
+
+    private void useManagerProcess(
+            int port,
+            long pid,
+            Instant startedAt,
+            String sessionPath,
+            String configPath) {
         ManagerRuntimeSnapshot manager = mock(ManagerRuntimeSnapshot.class);
         OpencodeContainer container = mock(OpencodeContainer.class);
         when(container.linuxServerId()).thenReturn(new LinuxServerId("linux-1"));
         when(container.containerId()).thenReturn(new OpencodeContainerId("container-1"));
         when(manager.container()).thenReturn(container);
         when(manager.managedProcesses()).thenReturn(List.of(new ManagedOpencodeProcessSnapshot(
-                port, pid, "http://127.0.0.1:" + port, null, null, startedAt, null, null)));
+                port, pid, "http://127.0.0.1:" + port,
+                sessionPath, configPath, startedAt, null, null)));
         when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(manager));
     }
 }

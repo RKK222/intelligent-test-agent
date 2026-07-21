@@ -553,23 +553,59 @@ public class PublicAgentConfigRolloutService
             // 仅兼容未注入该依赖的旧单元测试；Spring 运行态必须注入。
             return true;
         }
-        Optional<OpencodeServerProcess> process = exactTargetProcess(target);
-        if (process.isEmpty()) {
+        // manager 快照是当前受管进程身份和实际路径的权威来源。即使平台进程表因历史 PID 为空或
+        // startedAt 时间源差异无法映射 userId，只要 PID/启动时间仍与 rollout target 完全一致，
+        // 也必须能够先恢复共享配置再 dispose，不能因构造空 UserId 永久卡在 RETRY_WAIT。
+        Optional<ManagedOpencodeProcessSnapshot> managedProcess = exactManagedProcess(target);
+        if (managedProcess.isPresent()
+                && restoreSharedConfigLink(
+                        managedProcess.get().sessionPath(), managedProcess.get().configPath())) {
+            return true;
+        }
+
+        // 兼容尚未上报 sessionPath/configPath 的旧 manager；只有 target 已映射出用户且数据库
+        // 进程身份仍完全一致时，才允许复用历史平台进程路径。
+        return exactTargetProcess(target)
+                .map(process -> restoreSharedConfigLink(process.sessionPath(), process.configPath()))
+                .orElse(false);
+    }
+
+    /** 只使用仍与 rollout target 精确匹配的 manager 进程，避免端口复用后操作替换实例。 */
+    private Optional<ManagedOpencodeProcessSnapshot> exactManagedProcess(PublicAgentConfigRolloutTarget target) {
+        return heartbeatStore.liveManagerSnapshots().stream()
+                .filter(manager -> target.linuxServerId().equals(manager.container().linuxServerId().value()))
+                .filter(manager -> target.containerId().equals(manager.container().containerId().value()))
+                .flatMap(manager -> manager.managedProcesses().stream())
+                .filter(process -> process.port() == target.port())
+                .filter(process -> Objects.equals(process.pid(), target.processPid()))
+                .filter(process -> Objects.equals(
+                        normalizedStartedAt(process.startedAt()),
+                        normalizedStartedAt(target.processStartedAt())))
+                .findFirst();
+    }
+
+    /** 校验受管路径后恢复共享配置；路径缺失或越界时保持失败关闭并交给定时任务重试。 */
+    private boolean restoreSharedConfigLink(String sessionPath, String configPath) {
+        if (configPath == null || configPath.isBlank()) {
             return false;
         }
-        OpencodeServerProcess current = process.get();
-        if (configLinkService.isSharedConfigPath(current.configPath())) {
+        if (configLinkService.isSharedConfigPath(configPath)) {
             // 升级前启动的进程本来就直接读取共享副本，公共发布只需 dispose。
             return true;
         }
-        if (!configLinkService.isManagedConfigPath(current.sessionPath(), current.configPath())) {
+        if (sessionPath == null
+                || sessionPath.isBlank()
+                || !configLinkService.isManagedConfigPath(sessionPath, configPath)) {
             return false;
         }
-        configLinkService.switchToShared(current.sessionPath(), current.configPath());
+        configLinkService.switchToShared(sessionPath, configPath);
         return true;
     }
 
     private Optional<OpencodeServerProcess> exactTargetProcess(PublicAgentConfigRolloutTarget target) {
+        if (target.userId() == null || target.userId().isBlank()) {
+            return Optional.empty();
+        }
         return processRepository.findUserBinding(new UserId(target.userId()), "opencode")
                 .flatMap(binding -> processRepository.findOpencodeServerProcessById(binding.processId()))
                 .filter(process -> target.userId().equals(process.userId().value()))
