@@ -517,6 +517,8 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。
 
+文件 RPC 继续以单条 JSON 文本消息传输。目标 Java 的单帧上限按 `test-agent.files.max-file-bytes` 的文本 JSON 控制字符最坏 6 倍转义量并附加 RPC envelope 余量设置，因此同时覆盖 Base64 上传的 4/3 膨胀；UTF-8 文本或 Base64 解码后的文件仍由业务层执行单文件大小校验，传输层上限不放宽业务限制。
+
 客户端请求 envelope：
 
 ```json

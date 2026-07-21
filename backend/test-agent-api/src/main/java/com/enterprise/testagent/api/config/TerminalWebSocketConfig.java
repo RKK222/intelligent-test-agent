@@ -37,10 +37,17 @@ public class TerminalWebSocketConfig {
     @Bean
     WebSocketHandlerAdapter webSocketHandlerAdapter(
             @Value("${test-agent.files.max-file-bytes:1048576}") long maxFileBytes) {
-        // 文件上传使用 Base64，单帧需容纳 4/3 膨胀后的文件内容和 RPC envelope；
-        // 业务处理层仍按 max-file-bytes 校验解码后大小，避免仅依赖传输层上限。
-        long expectedFrameBytes = 4L * ((maxFileBytes + 2L) / 3L) + 64L * 1024L;
-        int maxFramePayloadLength = (int) Math.min(Integer.MAX_VALUE, expectedFrameBytes);
+        if (maxFileBytes < 1) {
+            throw new IllegalArgumentException("maxFileBytes must be positive");
+        }
+        // 文本写入经过 JSON.stringify 后，单个控制字符最坏会转义为 6 字节的 Unicode 转义形式；
+        // 因此按 6 倍业务文件上限预留，比 Base64 的 4/3 膨胀更严格，再附加 RPC envelope 余量。
+        // 业务处理层仍按 max-file-bytes 校验 UTF-8/解码后大小，传输层只负责让合法请求到达统一校验。
+        long envelopeBytes = 64L * 1024L;
+        long maxScalableFileBytes = (Integer.MAX_VALUE - envelopeBytes) / 6L;
+        int maxFramePayloadLength = maxFileBytes > maxScalableFileBytes
+                ? Integer.MAX_VALUE
+                : Math.toIntExact(maxFileBytes * 6L + envelopeBytes);
         ReactorNettyRequestUpgradeStrategy strategy = new ReactorNettyRequestUpgradeStrategy(
                 () -> WebsocketServerSpec.builder().maxFramePayloadLength(maxFramePayloadLength));
         return new WebSocketHandlerAdapter(new HandshakeWebSocketService(strategy));
