@@ -186,7 +186,6 @@ onBeforeUnmount(() => {
     <template v-else>
       <header class="ta-xxl-toolbar">
         <div class="ta-xxl-heading">
-          <span class="ta-xxl-kicker">SCHEDULER / XXL-JOB</span>
           <strong>定时任务管理</strong>
         </div>
         <div class="ta-xxl-actions">
@@ -195,9 +194,8 @@ onBeforeUnmount(() => {
             <AlertTriangle v-else-if="['forbidden', 'ticketExpired', 'sessionExpired', 'unavailable'].includes(state)" aria-hidden="true" />
             <span>{{ statusText }}</span>
           </span>
-          <button type="button" class="ta-xxl-reload" :disabled="state === 'loading'" @click="loadConsole">
+          <button type="button" class="ta-xxl-reload" :disabled="state === 'loading'" aria-label="重新加载" @click="loadConsole">
             <RefreshCw aria-hidden="true" />
-            <span>重新加载</span>
           </button>
         </div>
       </header>
@@ -264,32 +262,24 @@ onBeforeUnmount(() => {
 
 .ta-xxl-toolbar {
   display: flex;
-  min-height: 58px;
+  min-height: 44px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px 14px 8px 16px;
+  padding: 6px 14px 6px 16px;
   border-bottom: 1px solid #e5e7eb;
   background: #fff;
 }
 
 .ta-xxl-heading {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: center;
 }
 
 .ta-xxl-heading strong {
   font-size: 14px;
   font-weight: 650;
   letter-spacing: 0.01em;
-}
-
-.ta-xxl-kicker {
-  color: #6b7280;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.13em;
 }
 
 .ta-xxl-actions,
@@ -338,10 +328,9 @@ onBeforeUnmount(() => {
 }
 
 .ta-xxl-reload {
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 10px;
-  font-size: 12px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
 }
 
 .ta-xxl-reload:hover:not(:disabled),

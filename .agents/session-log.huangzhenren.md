@@ -22,6 +22,20 @@
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
 
+### 2026-07-21 - 优化 XXL-JOB 定时任务管理页面头部样式
+
+- Why:
+  - 优化定时任务管理页面头部的高度、标题文案和刷新按钮布局，使其更加紧凑、直观且具备更好的视觉效果。
+- What:
+  - 去除定时任务管理页头部左上角的 kicker 文本 `SCHEDULER / XXL-JOB`，使标题仅保留 `定时任务管理`。
+  - 将头部工具栏的 `min-height` 从 `58px` 减小至 `44px`，并收紧 padding 为 `6px 14px 6px 16px`。
+  - 将“重新加载”按钮改为仅显示旋转刷新图标（去除文字，增加 `aria-label="重新加载"` 保证无障碍访问与测试兼容），并将按钮尺寸固定为 `32px * 32px` 的正方形。
+- How:
+  - 仅修改 `ScheduledTaskManagementPanel.vue`，并在 `xxl-job-management-panel.test.ts` 中继续使用带有 `aria-label` 的角色匹配，无需修改测试文件。
+  - 执行 `corepack pnpm test xxl-job`、`corepack pnpm lint` 和 `corepack pnpm typecheck` 确认代码、类型定义和测试全部通过。
+- Result:
+  - 头部高度明显减小，左上角文案仅显示“定时任务管理”，“重新加载”为单图标按钮，交互和无障碍特征正常。
+
 ### 2026-07-21 - 修复 XXL-JOB 嵌入页样式并改为横向导航
 
 - Why:
