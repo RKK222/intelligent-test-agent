@@ -511,7 +511,10 @@ describe("AgentConfigPanel", () => {
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByRole("button", { name: "新建或上传应用配置" }));
+    const workspaceCreateButton = view.getByRole("button", { name: "新建或上传应用配置" });
+    expect(workspaceCreateButton.querySelector(".lucide-plus")).not.toBeNull();
+    expect(workspaceCreateButton.querySelector(".lucide-file-plus-2")).toBeNull();
+    await fireEvent.click(workspaceCreateButton);
     const dialog = await view.findByRole("dialog", { name: "新建或上传应用配置" });
     await fireEvent.click(within(dialog).getByRole("radio", { name: "Agent" }));
     expect(within(dialog).getByRole("radio", { name: "Agent" }).getAttribute("aria-checked")).toBe("true");
@@ -592,7 +595,10 @@ describe("AgentConfigPanel", () => {
     const { view } = renderPanel();
 
     await view.findByText("worktree · change-agent-md · 测试服务器");
-    await fireEvent.click(view.getByRole("button", { name: "新建或上传公共配置" }));
+    const publicCreateButton = view.getByRole("button", { name: "新建或上传公共配置" });
+    expect(publicCreateButton.querySelector(".lucide-plus")).not.toBeNull();
+    expect(publicCreateButton.querySelector(".lucide-file-plus-2")).toBeNull();
+    await fireEvent.click(publicCreateButton);
     const dialog = await view.findByRole("dialog", { name: "新建或上传公共配置" });
     expect(within(dialog).getAllByRole("radio").map((button) => button.textContent?.trim()))
       .toEqual(["文件", "文件夹", "上传", "Agent", "Skill"]);

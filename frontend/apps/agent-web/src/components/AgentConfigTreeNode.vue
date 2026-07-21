@@ -171,7 +171,7 @@ function submitRename() {
       <button
         v-if="isDirectory && (canCreateInDirectory?.(entry.path) ?? true)"
         type="button"
-        class="agent-tree-action-btn"
+        class="agent-tree-action-btn is-add"
         :aria-label="`在 ${entry.name} 中新建或上传文件`"
         title="新建或上传文件"
         @click.stop="emit('createEntry', entry.path)"
@@ -181,7 +181,7 @@ function submitRename() {
       <button
         v-if="canDeleteEntry?.(entry.path) ?? true"
         type="button"
-        class="agent-tree-action-btn"
+        class="agent-tree-action-btn is-delete"
         :aria-label="`删除 ${entry.name}`"
         title="删除"
         @click.stop="emit('deleteEntry', entry)"
@@ -225,24 +225,28 @@ function submitRename() {
 
 .agent-tree-actions {
   position: absolute;
-  top: 1px;
+  top: 2px;
   right: 4px;
   display: flex;
+  height: 18px;
   align-items: center;
+  gap: 2px;
   opacity: 0;
 }
 
 .agent-tree-action-btn {
   display: inline-flex;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
   align-items: center;
   justify-content: center;
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--ta-tree-muted);
+  color: var(--ta-tree-muted, #8b949e);
   cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .agent-config-tree-node:hover > .agent-tree-actions,
@@ -250,9 +254,19 @@ function submitRename() {
   opacity: 1;
 }
 
-.agent-tree-action-btn:hover {
-  background: var(--ta-tree-hover);
-  color: var(--ta-tree-text);
+.agent-tree-action-btn.is-add:hover {
+  background: var(--ta-hover, #f1f5f9);
+  color: var(--ta-tree-text, #3b3b3b);
+}
+
+.agent-tree-action-btn.is-delete:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--ta-danger, #dc2626);
+}
+
+.agent-tree-action-btn:focus-visible {
+  outline: 2px solid var(--ta-accent, #3366ff);
+  outline-offset: 1px;
 }
 
 .ta-file-tree-row.is-conflict {

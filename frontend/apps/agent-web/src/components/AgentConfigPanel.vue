@@ -3,7 +3,6 @@ import { computed, ref, watch } from "vue";
 import {
   AlertTriangle,
   Check,
-  FilePlus2,
   FolderGit2,
   GitBranch,
   GitCompare,
@@ -1661,7 +1660,7 @@ defineExpose({
             :disabled="busy || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
             @click="openCreateConfigModal('PUBLIC')"
           >
-            <FilePlus2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
           </button>
           <div v-if="canWrite" class="agent-more-menu-container">
             <button
@@ -1758,7 +1757,7 @@ defineExpose({
             :disabled="busy || !workspaceId"
             @click="openCreateConfigModal('WORKSPACE')"
           >
-            <FilePlus2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
           </button>
           <button
             v-if="workspaceCanWrite"
@@ -2414,26 +2413,26 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   width: 20px;
   height: 20px;
-  border: 1px solid transparent;
-  border-radius: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
   background: transparent;
   color: var(--ta-tree-muted, #8b949e);
-  font-size: 12px;
   cursor: pointer;
-}
-.agent-icon-btn {
-  padding: 0;
-  transition: background-color 0.1s, color 0.1s;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 .agent-icon-btn:hover {
-  background: var(--ta-tree-hover, #f0f0f0);
+  background: var(--ta-hover, #f1f3f6);
   color: var(--ta-tree-text, #3b3b3b);
 }
 .agent-icon-btn:active {
   background: var(--ta-tree-active, #e8e8e8);
+}
+.agent-icon-btn:focus-visible {
+  outline: 2px solid var(--ta-accent, #3366ff);
+  outline-offset: 1px;
 }
 .agent-action-btn {
   display: inline-flex;
