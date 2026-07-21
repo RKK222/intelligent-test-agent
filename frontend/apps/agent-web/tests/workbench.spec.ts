@@ -4756,6 +4756,25 @@ test("workbench disables chat until opencode process is initialized", async ({ p
   await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
 });
 
+test("workbench restarts a stopped opencode process directly from the activity pet entry", async ({ page }) => {
+  const processInitializations: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    processStatus: "NEEDS_INITIALIZATION",
+    processServiceStatus: "NOT_RUNNING",
+    processInitializations
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "启动 TestAgent 进程并唤起小宠物" }).click();
+
+  await expect.poll(() => processInitializations.length).toBe(1);
+  await expect(page.getByTestId("figma-robot")).toBeVisible();
+  await expect(page.getByTestId("robot-process-status")).toHaveCount(0);
+  await expect(page.getByTestId("robot-side-question")).toHaveCount(0);
+  await expect(page.getByTestId("robot-visibility-toggle")).toHaveAttribute("aria-label", "收起小宠物");
+});
+
 test("workbench refetches opencode status when initialize returns a stale failure", async ({ page }) => {
   const processInitializations: Array<Record<string, unknown>> = [];
   const processStatusRequests: string[] = [];
@@ -5524,6 +5543,7 @@ async function mockBackendApi(
     publicAgentWorktreesByServer?: Record<string, Array<Record<string, unknown>>>;
     defaultPersonalRequests?: string[];
     processStatus?: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE";
+    processServiceStatus?: "UNASSIGNED" | "NOT_RUNNING";
     processStatusRequests?: string[];
     processInitializations?: Array<Record<string, unknown>>;
     initializeFailureThenReady?: boolean;
@@ -6307,7 +6327,7 @@ async function mockBackendApi(
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me") {
       capture.processStatusRequests?.push(`${method} ${url.pathname}`);
-      await route.fulfill(json(opencodeProcessStatus(currentProcessStatus)));
+      await route.fulfill(json(opencodeProcessStatus(currentProcessStatus, capture.processServiceStatus)));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me/health") {
@@ -6333,7 +6353,7 @@ async function mockBackendApi(
         return;
       }
       currentProcessStatus = "READY";
-      await route.fulfill(json(opencodeProcessStatus(currentProcessStatus)));
+      await route.fulfill(json(opencodeProcessStatus(currentProcessStatus, capture.processServiceStatus)));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/workspaces") {
@@ -6974,7 +6994,10 @@ function diffFile() {
   };
 }
 
-function opencodeProcessStatus(status: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE") {
+function opencodeProcessStatus(
+  status: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE",
+  serviceStatus?: "UNASSIGNED" | "NOT_RUNNING"
+) {
   if (status === "READY") {
     return {
       status,
@@ -6994,6 +7017,14 @@ function opencodeProcessStatus(status: "READY" | "NEEDS_INITIALIZATION" | "UNAVA
     status,
     initializable: status === "NEEDS_INITIALIZATION",
     message: status === "NEEDS_INITIALIZATION" ? "需要初始化 TestAgent 进程" : "没有可用的 TestAgent 容器",
+    ...(serviceStatus === "NOT_RUNNING" ? {
+      serviceStatus,
+      processId: "ocp_1234567890abcdef",
+      linuxServerId: "server-a",
+      containerId: "ctr_01",
+      port: 4096,
+      serviceAddress: "10.8.0.12:4096"
+    } : serviceStatus ? { serviceStatus } : {}),
     checkedAt: "2026-06-24T00:00:00Z"
   };
 }

@@ -903,6 +903,94 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(false);
   });
 
+  it("restarts a stopped assigned process from the activity pet and summons the pet after ready", async () => {
+    const wrapper = mountShell({
+      props: {
+        opencodeProcessStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          message: "TestAgent 专属进程未运行",
+          serviceStatus: "NOT_RUNNING",
+          linuxServerId: "server-a",
+          containerId: "ctr_01",
+          port: 4096,
+          checkedAt: "2026-07-21T00:00:00Z"
+        },
+        opencodeProcessLoading: false,
+        opencodeProcessInitializing: false,
+        showProcessStatusInPet: true,
+        onboardingActive: true
+      }
+    });
+
+    const toggle = wrapper.get('[data-testid="robot-visibility-toggle"]');
+    expect(toggle.attributes("aria-label")).toBe("启动 TestAgent 进程并唤起小宠物");
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+
+    await toggle.trigger("click");
+    expect(wrapper.emitted("initialize-process")).toEqual([[]]);
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+
+    await wrapper.setProps({ opencodeProcessInitializing: true });
+    expect(toggle.attributes("aria-label")).toBe("正在启动 TestAgent 进程");
+    expect(toggle.attributes("disabled")).toBeDefined();
+
+    await wrapper.setProps({
+      opencodeProcessInitializing: false,
+      opencodeProcessStatus: {
+        status: "READY",
+        initializable: false,
+        message: "TestAgent 进程可用",
+        serviceStatus: "RUNNING",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 4096,
+        checkedAt: "2026-07-21T00:00:01Z"
+      }
+    });
+
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="robot-process-status"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="robot-side-question"]').exists()).toBe(false);
+    expect(toggle.attributes("aria-label")).toBe("收起小宠物");
+  });
+
+  it("does not summon the pet later when the direct stopped-process restart fails", async () => {
+    const stoppedProcess = {
+      status: "NEEDS_INITIALIZATION",
+      initializable: true,
+      message: "TestAgent 专属进程未运行",
+      serviceStatus: "NOT_RUNNING",
+      linuxServerId: "server-a",
+      containerId: "ctr_01",
+      port: 4096,
+      checkedAt: "2026-07-21T00:00:00Z"
+    };
+    const wrapper = mountShell({
+      props: {
+        opencodeProcessStatus: stoppedProcess,
+        opencodeProcessLoading: false,
+        opencodeProcessInitializing: false,
+        showProcessStatusInPet: true,
+        onboardingActive: true
+      }
+    });
+
+    await wrapper.get('[data-testid="robot-visibility-toggle"]').trigger("click");
+    await wrapper.setProps({ opencodeProcessInitializing: true });
+    await wrapper.setProps({ opencodeProcessInitializing: false, opencodeProcessStatus: stoppedProcess });
+    await wrapper.setProps({
+      opencodeProcessStatus: {
+        ...stoppedProcess,
+        status: "READY",
+        initializable: false,
+        serviceStatus: "RUNNING"
+      }
+    });
+
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+  });
+
   it("defers the initialization panel until the onboarding guide ends", async () => {
     const wrapper = mountShell({
       props: {

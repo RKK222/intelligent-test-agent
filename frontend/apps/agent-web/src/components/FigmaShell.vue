@@ -445,6 +445,9 @@ const pendingPetRuntimeReloadScope = ref<"PUBLIC" | "WORKSPACE" | null>(null);
 const robotProcessStatusOpen = ref(false);
 // 首次未初始化提醒每次页面生命周期只自动展示一次，用户关闭后不被状态轮询反复打扰。
 const processInitializationPromptShown = ref(false);
+// 活动栏从已终止状态发起启动后，等待 READY 再唤出宠物，避免用户为同一动作点击两次。
+const summonRobotAfterProcessStartup = ref(false);
+const petProcessStartupObserved = ref(false);
 const robotQuestionDraft = ref("");
 const robotQuestionInput = ref<HTMLTextAreaElement | null>(null);
 const robotDirection = ref<"left" | "right" | "front">("front");
@@ -1545,6 +1548,33 @@ function onRobotClick() {
   }
 }
 
+const petActivityRestartsStoppedProcess = computed(() =>
+  processStatusInteractionEnabled.value
+  && props.opencodeProcessStatus?.status === "NEEDS_INITIALIZATION"
+  && props.opencodeProcessStatus.initializable
+  && effectiveOpencodeServiceStatus(props.opencodeProcessStatus) === "NOT_RUNNING"
+);
+
+const robotVisibilityToggleLabel = computed(() => {
+  if (petActivityRestartsStoppedProcess.value) {
+    return props.opencodeProcessInitializing ? "正在启动 TestAgent 进程" : "启动 TestAgent 进程并唤起小宠物";
+  }
+  return robotState.value === "sleeping" ? "唤起小宠物" : "收起小宠物";
+});
+
+/** 已分配进程终止时复用初始化入口直接重启；其它状态仍保持原来的宠物显隐语义。 */
+function handleRobotVisibilityToggle() {
+  if (!petActivityRestartsStoppedProcess.value) {
+    toggleRobotVisibility();
+    return;
+  }
+  if (props.opencodeProcessInitializing || props.opencodeProcessLoading) return;
+  summonRobotAfterProcessStartup.value = true;
+  petProcessStartupObserved.value = false;
+  robotProcessStatusOpen.value = false;
+  emit("initialize-process");
+}
+
 function submitRobotQuestion() {
   const question = robotQuestionDraft.value.trim();
   if (!props.sideQuestionAvailable || !question || props.sideQuestionLoading) return;
@@ -1609,6 +1639,31 @@ watch(() => props.onboardingActive, (active) => {
   // 引导开始时清理已经排队或刚打开的状态面板，避免遮挡引导遮罩。
   robotProcessStatusOpen.value = false;
 });
+
+watch(
+  [() => props.opencodeProcessStatus?.status, () => props.opencodeProcessInitializing],
+  ([status, initializing]) => {
+    if (!summonRobotAfterProcessStartup.value) return;
+    if (status === "READY") {
+      summonRobotAfterProcessStartup.value = false;
+      petProcessStartupObserved.value = false;
+      robotProcessStatusOpen.value = false;
+      robotQuestionOpen.value = false;
+      robotGameOpen.value = false;
+      if (robotState.value === "sleeping") toggleRobotVisibility();
+      return;
+    }
+    if (initializing) {
+      petProcessStartupObserved.value = true;
+      return;
+    }
+    // 启动请求已经结束但状态未就绪时视为失败，避免后续无关 READY 误唤出宠物。
+    if (petProcessStartupObserved.value) {
+      summonRobotAfterProcessStartup.value = false;
+      petProcessStartupObserved.value = false;
+    }
+  }
+);
 
 watch(
   [
@@ -2010,10 +2065,12 @@ function submitJoinApp() {
             ]"
             data-testid="robot-visibility-toggle"
             data-onboarding="pet"
-            :aria-label="robotState === 'sleeping' ? '唤起小宠物' : '收起小宠物'"
+            :aria-label="robotVisibilityToggleLabel"
             :aria-pressed="robotState !== 'sleeping'"
-            title="唤起或收起小宠物"
-            @click.stop="toggleRobotVisibility"
+            :aria-busy="petActivityRestartsStoppedProcess && opencodeProcessInitializing"
+            :disabled="petActivityRestartsStoppedProcess && Boolean(opencodeProcessInitializing || opencodeProcessLoading)"
+            :title="petActivityRestartsStoppedProcess ? robotVisibilityToggleLabel : '唤起或收起小宠物'"
+            @click.stop="handleRobotVisibilityToggle"
           >
             <PetCompanionAvatar
               class="robot-toggle-svg"
