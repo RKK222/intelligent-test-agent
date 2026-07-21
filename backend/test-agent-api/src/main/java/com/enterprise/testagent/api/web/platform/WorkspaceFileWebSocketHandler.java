@@ -218,6 +218,10 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     agentConfigWrite(ticket, params);
                     yield null;
                 }
+                case "agent-config.rename" -> {
+                    agentConfigRename(ticket, params);
+                    yield null;
+                }
                 case "directory.list" -> directoryList(ticket, params);
                 case "workspace.create" -> createWorkspace(ticket, params, traceId);
                 default -> throw new PlatformException(ErrorCode.VALIDATION_ERROR, "不支持的文件 WebSocket 操作", Map.of("op", op));
@@ -357,6 +361,21 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         }
         String worktreeId = agentConfigWorktreeId(ticket, params);
         agentConfigService.writeWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), text(params, "content"), worktreeId);
+    }
+
+    private void agentConfigRename(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String scope = agentConfigScope(ticket, params);
+        if (SCOPE_PUBLIC.equals(scope)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "公共 Agent 配置暂不支持重命名");
+        }
+        if (!ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用 Agent 配置仅应用管理员可编辑");
+        }
+        agentConfigService.renameWorkspaceAgentFile(
+                agentConfigWorkspaceId(ticket, params),
+                requiredText(params, "path"),
+                requiredText(params, "name"),
+                agentConfigWorktreeId(ticket, params));
     }
 
     private String agentConfigScope(WorkspaceFileSocketTicket ticket, JsonNode params) {

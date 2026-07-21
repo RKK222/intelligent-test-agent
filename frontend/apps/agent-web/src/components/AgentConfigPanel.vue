@@ -33,6 +33,11 @@ import { notifyError, notifyInfo, notifySuccess } from "./notify";
 import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 
 type Scope = "PUBLIC" | "WORKSPACE";
+type AgentConfigMutation = {
+  scope: Scope;
+  paths: string[];
+  renamed: { path: string; nextPath: string; type: "file" };
+};
 
 const props = defineProps<{
   baseUrl: string;
@@ -58,6 +63,7 @@ const emit = defineEmits<{
     linuxServerId?: string;
     workspaceId?: string;
   }];
+  "files-mutated": [payload: AgentConfigMutation];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -269,6 +275,40 @@ function visibleEntries(scope: Scope, path: string) {
 
 function canWriteScope(scope: Scope) {
   return scope === "PUBLIC" ? props.canWrite : workspaceCanWrite.value;
+}
+
+function canRenameEntry(scope: Scope, path: string) {
+  const normalized = path.replace(/^\/+|\/+$/g, "");
+  return scope === "WORKSPACE"
+    && (normalized.startsWith("agents/") || normalized.startsWith("skills/"));
+}
+
+/** 应用 Agent 文件沿用普通文件树的双击行内改名交互，落盘仍走专用 Agent 配置 RPC。 */
+async function renameAgentEntry(path: string, name: string) {
+  const scope: Scope = "WORKSPACE";
+  if (!props.workspaceId || !canWriteScope(scope) || busy.value || !canRenameEntry(scope, path)) return;
+  const parent = parentDirectory(path);
+  const nextPath = parent ? `${parent}/${name}` : name;
+  busy.value = true;
+  errorMessage.value = "";
+  try {
+    await api.renameWorkspaceAgentFile(props.workspaceId, path, name, worktreeId(scope));
+    if (activeFileByScope.value.WORKSPACE === path) {
+      activeFileByScope.value = { ...activeFileByScope.value, WORKSPACE: nextPath };
+    }
+    await loadDirectory(scope, parent, true);
+    emit("files-mutated", {
+      scope,
+      paths: [path, nextPath],
+      renamed: { path, nextPath, type: "file" }
+    });
+    notifySuccess("应用 Agent 文件已重命名", nextPath);
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, "重命名应用 Agent 文件失败");
+    notifyError("重命名应用 Agent 文件失败", errorMessage.value);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function loadDirectory(scope: Scope, path: string, force = false) {
@@ -1430,6 +1470,8 @@ defineExpose({
           :loading-path="loadingByScope.PUBLIC"
           :active-path="activeAgentFile?.scope === 'PUBLIC' ? activeAgentFile.path : undefined"
           :conflict-paths="publicConflictPathSet"
+          :can-write="canWrite"
+          :can-rename-entry="() => false"
           @toggle="(path) => toggleDirectory('PUBLIC', path)"
           @open-file="(path) => openFile('PUBLIC', path)"
         />
@@ -1489,8 +1531,11 @@ defineExpose({
           :loading-path="loadingByScope.WORKSPACE"
           :active-path="activeAgentFile?.scope === 'WORKSPACE' ? activeAgentFile.path : undefined"
           :conflict-paths="new Set()"
+          :can-write="workspaceCanWrite"
+          :can-rename-entry="(path) => canRenameEntry('WORKSPACE', path)"
           @toggle="(path) => toggleDirectory('WORKSPACE', path)"
           @open-file="(path) => openFile('WORKSPACE', path)"
+          @rename-entry="renameAgentEntry"
         />
       </div>
     </div>

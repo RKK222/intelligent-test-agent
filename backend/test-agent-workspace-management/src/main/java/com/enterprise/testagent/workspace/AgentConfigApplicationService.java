@@ -806,6 +806,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         fileService.writeContent(agentRoot.toString(), relativePath, content);
     }
 
+    /** 应用 Agent 文件改名复用工作空间文件服务的同目录重命名与路径安全校验。 */
+    public void renameWorkspaceAgentFile(String workspaceId, String relativePath, String name, String worktreeId) {
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        fileService.renameFile(agentRoot.toString(), relativePath, name);
+    }
+
     public AgentConfigResponses.AgentConfigWorktreeResponse createPublicWorktree(
             String baseName,
             String branch,

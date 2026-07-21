@@ -93,6 +93,58 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void renamesWorkspaceAgentFileForAppAdmin() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_workspace_agent", "http://localhost:3000"))
+                .thenReturn(agentTicket(true, "WORKSPACE", "wrk_1234567890abcdef", null));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace_agent",
+                List.of("""
+                        {"id":"req_rename","op":"agent-config.rename","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef","path":"agents/review.md","name":"payment-review.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(1).allSatisfy(message -> {
+            assertThat(message).contains("\"type\":\"result\"");
+            assertThat(message).contains("\"id\":\"req_rename\"");
+        });
+        verify(agentConfigService).renameWorkspaceAgentFile(
+                "wrk_1234567890abcdef",
+                "agents/review.md",
+                "payment-review.md",
+                null);
+    }
+
+    @Test
+    void rejectsWorkspaceAgentRenameForOrdinaryUser() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_workspace_agent", "http://localhost:3000"))
+                .thenReturn(agentTicket(false, "WORKSPACE", "wrk_1234567890abcdef", null));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace_agent",
+                List.of("""
+                        {"id":"req_rename","op":"agent-config.rename","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef","path":"agents/review.md","name":"payment-review.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(1).allSatisfy(message -> {
+            assertThat(message).contains("\"type\":\"error\"");
+            assertThat(message).contains("\"code\":\"FORBIDDEN\"");
+        });
+        verify(agentConfigService, never()).renameWorkspaceAgentFile(
+                "wrk_1234567890abcdef",
+                "agents/review.md",
+                "payment-review.md",
+                null);
+    }
+
+    @Test
     void rejectsAgentConfigRequestWhenWorktreeDoesNotMatchTicket() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);

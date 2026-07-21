@@ -110,7 +110,7 @@ Token 校验流程：
 3. ticket 只能通过用户登录态创建，短期过期、一次性消费，并绑定 workspace、目标服务器、当前 agent 服务器、模式、Agent 配置 scope/worktree、traceId 和是否 `SUPER_ADMIN`；不得把长期 Bearer token 放入 WebSocket URL。
 4. WebSocket upgrade 必须校验 Origin 白名单、ticket 有效性和 ticket 模式；ticket 消费后无论连接成功与否都不能重复使用。
 5. 所有 `workspace.*` 操作必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，目录树删除不跟随符号链接并拒绝根目录和任意层级 `.git`。`workspace.view.list/read` 的 locator 只能表达逻辑来源，后端必须从当前工作区最新 JSONC 重建允许挂载，重新校验当前应用关联、`APPLICATION_ASSET_REPOSITORY`、总体及本机副本 READY、当前平台 `OPENCODE_REFERENCES_DIR`、SDD 根目录白名单和路径安全，禁止接收物理路径或 repositoryId。引用内容只能读取，单引用错误以不含物理路径的局部 warning 返回。
-6. `agent-config.list/read/write` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，公共配置写入校验 `SUPER_ADMIN`，应用配置写入校验 `APP_ADMIN`（`SUPER_ADMIN` 继承），路径仍由 workspace-management 文件服务归一化。
+6. `agent-config.list/read/write/rename` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，公共配置写入校验 `SUPER_ADMIN`，应用配置写入和改名校验 `APP_ADMIN`（`SUPER_ADMIN` 继承），路径仍由 workspace-management 文件服务归一化。无写权限用户的编辑器与树操作保持只读，后端仍须独立拒绝越权 RPC。
 7. 应用 `.opencode/**` 与普通文件共用版本个人 worktree 时，个人 worktree 的 `commit/publish` HTTP 入口也必须对规范化文件白名单执行 `APP_ADMIN` 校验；不能只依赖前端 Tab 或 Agent 文件 WebSocket 权限。`spec/**` 禁止发布的服务层规则继续对所有角色生效。
 8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
 9. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。

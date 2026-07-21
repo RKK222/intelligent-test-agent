@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { cn } from "@test-agent/ui-kit";
 import { FileIcon } from "@test-agent/file-explorer";
 import type { FileTreeEntry } from "@test-agent/shared-types";
@@ -33,6 +33,10 @@ const props = defineProps<{
   activePath?: string;
   /** Git 冲突文件路径集合，用于在文件树中直接标识冲突文件。 */
   conflictPaths?: Set<string>;
+  /** 当前作用域是否可写；只读用户不能进入行内改名。 */
+  canWrite?: boolean;
+  /** 当前文件是否允许复用行内重命名交互。 */
+  canRenameEntry?: (path: string) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -40,7 +44,14 @@ const emit = defineEmits<{
   toggle: [path: string];
   /** 用户点击文件行（父组件去拉内容并打开 tab） */
   openFile: [path: string];
+  /** 复用父组件的 Agent 配置文件重命名链路。 */
+  renameEntry: [path: string, name: string];
 }>();
+
+const renameInput = ref<HTMLInputElement | null>(null);
+const renaming = ref(false);
+const renameName = ref("");
+const renameOriginalName = ref("");
 
 // 严格区分"未加载"和"已加载为空数组"：
 // - children 为 undefined：尚未请求过该目录的子项，需要渲染 chevron + 允许点击
@@ -67,6 +78,37 @@ function onRowClick() {
     emit("openFile", props.entry.path);
   }
 }
+
+function startRename() {
+  if (isDirectory.value || !props.canWrite || !(props.canRenameEntry?.(props.entry.path) ?? false)) return;
+  renaming.value = true;
+  renameName.value = props.entry.name;
+  renameOriginalName.value = props.entry.name;
+  void nextTick(() => {
+    renameInput.value?.focus();
+    renameInput.value?.select();
+  });
+}
+
+function cancelRename() {
+  renaming.value = false;
+  renameName.value = "";
+  renameOriginalName.value = "";
+}
+
+/** 与普通工作区文件树保持相同的名称校验，实际路径安全继续由后端文件服务兜底。 */
+function submitRename() {
+  const name = renameName.value.trim();
+  if (!renaming.value || !props.canWrite) return;
+  if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+    void nextTick(() => renameInput.value?.focus());
+    return;
+  }
+  if (name !== renameOriginalName.value) {
+    emit("renameEntry", props.entry.path, name);
+  }
+  cancelRename();
+}
 </script>
 
 <template>
@@ -80,6 +122,7 @@ function onRowClick() {
       )"
       :style="{ paddingLeft: `${indentPx}px` }"
       @click="onRowClick"
+      @dblclick.stop="startRename"
     >
       <span
         v-for="i in depth"
@@ -99,7 +142,19 @@ function onRowClick() {
         <span class="ta-file-tree-file-spacer" />
         <FileIcon :entry="entry" />
       </template>
-      <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+      <span v-if="!renaming" class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+      <input
+        v-else
+        ref="renameInput"
+        v-model="renameName"
+        type="text"
+        class="ta-file-tree-rename-input min-w-0 flex-1"
+        aria-label="重命名应用 Agent 文件"
+        @click.stop
+        @keydown.enter.stop.prevent="submitRename"
+        @keydown.esc.stop.prevent="cancelRename"
+        @blur="submitRename"
+      />
       <span v-if="isConflictFile" class="agent-tree-conflict-badge">冲突</span>
       <i v-if="isLoading" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
     </button>
@@ -114,8 +169,11 @@ function onRowClick() {
         :loading-path="loadingPath"
         :active-path="activePath"
         :conflict-paths="conflictPaths"
+        :can-write="canWrite"
+        :can-rename-entry="canRenameEntry"
         @toggle="(path: string) => emit('toggle', path)"
         @open-file="(path: string) => emit('openFile', path)"
+        @rename-entry="(path: string, name: string) => emit('renameEntry', path, name)"
       />
     </div>
   </div>

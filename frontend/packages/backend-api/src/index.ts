@@ -1074,6 +1074,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { path, content },
         { workspaceId, worktreeId }
       ),
+    renameWorkspaceAgentFile: (workspaceId: string, path: string, name: string, worktreeId?: string | null) =>
+      agentConfigFileRpc<void>(
+        "WORKSPACE",
+        "agent-config.rename",
+        { path, name },
+        { workspaceId, worktreeId }
+      ),
     createWorkspaceAgentWorktree: (workspaceId: string, payload: AgentConfigWorktreePayload) =>
       request<AgentConfigWorktree>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/worktrees`, {
         method: "POST",

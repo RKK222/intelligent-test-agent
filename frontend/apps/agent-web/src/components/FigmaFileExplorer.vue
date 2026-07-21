@@ -80,6 +80,11 @@ const emit = defineEmits<{
     totalCount?: number;
   }];
   "agent-files-discarded": [payload: { scope: "PUBLIC" | "WORKSPACE"; paths: string[] }];
+  "agent-config-mutated": [payload: {
+    scope: "PUBLIC" | "WORKSPACE";
+    paths: string[];
+    renamed: { path: string; nextPath: string; type: "file" };
+  }];
   "personal-runtime-reload": [payload: {
     scope: "PUBLIC" | "WORKSPACE";
     worktreeId?: string;
@@ -525,6 +530,7 @@ defineExpose({
               :hide-git-ops="true"
               :active-path="activePath"
               @open-file="emit('openAgentFile', $event)"
+              @files-mutated="emit('agent-config-mutated', $event)"
               @personal-runtime-reload="emit('personal-runtime-reload', $event)"
             />
           </div>

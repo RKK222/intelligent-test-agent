@@ -931,9 +931,12 @@ class AgentConfigApplicationServiceTest {
 
         List<FileTreeEntryResponse> entries = service.listWorkspaceAgentFiles("wrk_project", "agents", null);
         service.writeWorkspaceAgentFile("wrk_project", "agents/new.md", "new agent", null);
+        service.renameWorkspaceAgentFile("wrk_project", "agents/review.md", "payment-review.md", null);
 
         assertThat(entries).extracting(FileTreeEntryResponse::name).contains("review.md");
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/new.md"))).isEqualTo("new agent");
+        assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/payment-review.md"))).isEqualTo("review");
+        assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/review.md"))).isFalse();
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agent/new.md"))).isFalse();
     }
 

@@ -2878,7 +2878,7 @@ describe("backend-api", () => {
     expect(sockets[1]?.sentMessages).toHaveLength(2);
   });
 
-  it("routes workspace agent config read and write through one file websocket", async () => {
+  it("routes workspace agent config read, write and rename through one file websocket", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -2926,6 +2926,9 @@ describe("backend-api", () => {
       encoding: "utf-8"
     });
     await expect(client.writeWorkspaceAgentFile("wrk_1234567890abcdef", "review.md", "changed")).resolves.toBeNull();
+    await expect(
+      client.renameWorkspaceAgentFile("wrk_1234567890abcdef", "review.md", "renamed.md")
+    ).resolves.toBeNull();
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual({
@@ -2935,7 +2938,11 @@ describe("backend-api", () => {
       scope: "WORKSPACE"
     });
     expect(sockets).toHaveLength(1);
-    expect(sockets[0]?.sentMessages.map((message) => message.op)).toEqual(["agent-config.read", "agent-config.write"]);
+    expect(sockets[0]?.sentMessages.map((message) => message.op)).toEqual([
+      "agent-config.read",
+      "agent-config.write",
+      "agent-config.rename"
+    ]);
   });
 
   it("discards public and application Agent files through their Git worktree endpoints", async () => {

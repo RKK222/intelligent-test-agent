@@ -24,6 +24,7 @@ const apiClientMock = vi.hoisted(() => ({
   readPublicAgentFile: vi.fn(),
   readWorkspaceAgentFile: vi.fn(),
   writeWorkspaceAgentFile: vi.fn(),
+  renameWorkspaceAgentFile: vi.fn(),
   updatePublicAgentConfig: vi.fn(),
   updatePublicAgentConfigAndPush: vi.fn(),
   getPublicAgentGitConflictFiles: vi.fn(),
@@ -96,6 +97,7 @@ describe("AgentConfigPanel", () => {
     apiClientMock.readPublicAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.readWorkspaceAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
+    apiClientMock.renameWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
     apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValue({ status: "SUCCEEDED", commitHash: "newcommit123" });
     apiClientMock.getPublicAgentGitConflictFiles.mockResolvedValue({ files: [] });
@@ -540,6 +542,68 @@ describe("AgentConfigPanel", () => {
     expect(skillContent).toContain("## When to use me");
     expect(skillContent).toContain("## Resources");
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
+  });
+
+  it("renames an application Agent file on double click and reports both Git paths", async () => {
+    apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => path === ""
+      ? [{ path: "agents", name: "agents", type: "directory" }]
+      : [{ path: "agents/review.md", name: "review.md", type: "file" }]);
+    const { view } = renderPanel();
+
+    await fireEvent.click(view.getByRole("button", { name: /^应用级/ }));
+    await fireEvent.click(await view.findByRole("button", { name: "agents" }));
+    const fileRow = await view.findByRole("button", { name: "review.md" });
+    await fireEvent.dblClick(fileRow);
+    const input = view.getByLabelText("重命名应用 Agent 文件");
+    await fireEvent.update(input, "payment-review.md");
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(apiClientMock.renameWorkspaceAgentFile).toHaveBeenCalledWith(
+      "wrk_1234567890abcdef",
+      "agents/review.md",
+      "payment-review.md",
+      undefined
+    ));
+    await waitFor(() => expect(view.emitted("files-mutated")).toEqual([[
+      {
+        scope: "WORKSPACE",
+        paths: ["agents/review.md", "agents/payment-review.md"],
+        renamed: {
+          path: "agents/review.md",
+          nextPath: "agents/payment-review.md",
+          type: "file"
+        }
+      }
+    ]]));
+  });
+
+  it("keeps public and application Agent files read-only for users without write permission", async () => {
+    apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => path === ""
+      ? [{ path: "agents", name: "agents", type: "directory" }]
+      : [{ path: "agents/public.md", name: "public.md", type: "file" }]);
+    apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => path === ""
+      ? [{ path: "agents", name: "agents", type: "directory" }]
+      : [{ path: "agents/app.md", name: "app.md", type: "file" }]);
+    const { view } = renderPanel(undefined, { canWrite: false });
+
+    await fireEvent.click(await view.findByRole("button", { name: "agents" }));
+    const publicFile = await view.findByRole("button", { name: "public.md" });
+    await fireEvent.click(publicFile);
+    await fireEvent.dblClick(publicFile);
+    await fireEvent.click(view.getByRole("button", { name: /^应用级/ }));
+    const agentDirectories = await view.findAllByRole("button", { name: "agents" });
+    await fireEvent.click(agentDirectories.at(-1)!);
+    const applicationFile = await view.findByRole("button", { name: "app.md" });
+    await fireEvent.click(applicationFile);
+    await fireEvent.dblClick(applicationFile);
+
+    expect(view.queryByLabelText("重命名应用 Agent 文件")).toBeNull();
+    expect(apiClientMock.renameWorkspaceAgentFile).not.toHaveBeenCalled();
+    const openedFiles = ((view.emitted("openFile") ?? []) as unknown[][]).map((event) => event[0]);
+    expect(openedFiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scope: "PUBLIC", path: "agents/public.md", readonly: true }),
+      expect.objectContaining({ scope: "WORKSPACE", path: "agents/app.md", readonly: true })
+    ]));
   });
 
 });
