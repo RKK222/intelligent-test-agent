@@ -6,6 +6,8 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserRepository;
 import java.util.Optional;
+import java.util.UUID;
+
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -70,7 +72,7 @@ public class UserDomainService {
                 .orElseGet(() -> {
                     Optional<UserManagementResponses.ThirdPartyUserInfoResponse> thirdPartyInfoOpt =
                             thirdPartyUserApiClient.getUserByLoginName(unifiedAuthId);
-                    String passwordHash = passwordEncoder.encode(unifiedAuthId);
+                    String passwordHash = passwordEncoder.encode(UUID.randomUUID().toString());
                     User user;
                     if (thirdPartyInfoOpt.isPresent()) {
                         UserManagementResponses.ThirdPartyUserInfoResponse thirdPartyInfo = thirdPartyInfoOpt.get();
