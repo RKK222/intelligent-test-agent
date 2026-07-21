@@ -1608,6 +1608,47 @@ test("workbench does not read a workspace file tree before an application is sel
   expect(fileRequests).toEqual([]);
 });
 
+test("revoking the selected application hides its retained workspace after membership refresh", async ({ page }) => {
+  const managedApplications = [
+    { appId: "app_gcms", appName: "F-GCMS", enabled: true },
+    { appId: "app_coss", appName: "F-COSS", enabled: true }
+  ];
+  await mockBackendApi(page, {
+    applications: [...managedApplications],
+    managedApplications,
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        workspaceId: "wrk_app_replica",
+        name: "F-GCMS 报表 / 20260715",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      },
+      app_coss: null
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByRole("button", { name: "F-GCMS" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /tests/ })).toBeVisible();
+
+  managedApplications.splice(0, 1);
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+
+  await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /tests/ })).toHaveCount(0);
+  await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
+  await expect(page.getByText(/原工作区已从工作台隐藏/)).toBeVisible();
+
+  await page.getByRole("button", { name: "F-COSS" }).click();
+  await expect(page.getByRole("option", { name: /F-GCMS/ })).toHaveCount(0);
+});
+
 test("application recent workspace loads existing default personal worktree before loading files", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   const defaultPersonalRequests: string[] = [];

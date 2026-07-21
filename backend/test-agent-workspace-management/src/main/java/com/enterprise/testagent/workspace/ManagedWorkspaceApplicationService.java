@@ -868,7 +868,23 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         // 不再兜底加载首模板首版本。
         return managedWorkspaceRepository.findGlobalPreference(userId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
-                .map(workspace -> resolveRecentWorkspaceResponse(workspace));
+                .map(this::resolveRecentWorkspaceResponse)
+                // 偏好记录和物理 worktree 在撤权后继续保留，但全局 recent 不再把已撤权应用的
+                // 工作区路径及版本信息暴露给前端；非托管服务器工作区仍沿用原兼容语义。
+                .filter(response -> recentWorkspaceVisibleTo(response, userId));
+    }
+
+    private boolean recentWorkspaceVisibleTo(
+            ManagedWorkspaceResponses.WorkspaceRuntimeResponse workspace,
+            UserId userId) {
+        if (workspace.appId() == null || workspace.appId().isBlank()) {
+            return true;
+        }
+        ApplicationId appId = new ApplicationId(workspace.appId());
+        return configurationRepository.findApplication(appId)
+                .filter(ApplicationDefinition::enabled)
+                .isPresent()
+                && configurationRepository.isActiveMember(appId, userId);
     }
 
     public Optional<ManagedWorkspaceResponses.WorkspaceRuntimeResponse> recentWorkspace(String appId, UserId userId) {

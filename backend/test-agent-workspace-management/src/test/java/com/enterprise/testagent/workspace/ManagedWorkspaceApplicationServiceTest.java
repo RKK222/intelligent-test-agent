@@ -591,6 +591,30 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void globalRecentWorkspaceIsHiddenButRetainedAfterMemberRevocation() {
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(
+                new FakeConfigurationRepository(true), managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        creator.ensureDefaultPersonalWorkspace(version.versionId(), new UserId("usr_1"), "trace_default");
+
+        ManagedWorkspaceApplicationService revokedReader = service(
+                new FakeConfigurationRepository(false), managed, workspaces, git);
+
+        assertThat(revokedReader.recentWorkspace(new UserId("usr_1"))).isEmpty();
+        assertThat(managed.personals).hasSize(1);
+        assertThat(workspaces.saved).hasSize(2);
+    }
+
+    @Test
     void ensureDefaultPersonalWorkspaceForbiddenIncludesVersionAndDefaultContext() {
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();

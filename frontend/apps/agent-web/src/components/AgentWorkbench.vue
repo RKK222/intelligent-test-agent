@@ -210,6 +210,7 @@ const chatContextStore = useChatContextStore();
 const router = useRouter();
 const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
 const AGENT_CATALOG_REQUEST_TIMEOUT_MS = 8000;
+const MANAGED_APPLICATION_MEMBERSHIP_REFETCH_INTERVAL_MS = 30_000;
 const RUN_EVENT_SSE_ERROR_TITLE = "RunEvent SSE 连接异常";
 const RUN_EVENT_TERMINAL_SETTLE_MS = 500;
 const OPENCODE_PROCESS_START_STEPS = [
@@ -455,6 +456,8 @@ watch(centerMode, (newMode, oldMode) => {
 });
 
 const selectedAppId = ref<string | undefined>(undefined);
+// null 表示成员应用目录尚未完成首次加载；加载完成后用于阻止撤权期间的迟到响应重新展示旧工作区。
+const visibleManagedApplicationIds = shallowRef<ReadonlySet<string> | null>(null);
 // 当前选中版本对应的默认个人工作区 ID，供 GitChangesPanel 调用 publishPersonalWorkspace。
 const currentPersonalWorkspaceId = ref<string | undefined>(undefined);
 const currentPersonalWorkspaceBranch = ref<string | undefined>(undefined);
@@ -718,11 +721,21 @@ const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
 // selectedWorkspace 只接受应用 recent workspace 或用户显式选择产生的 selectedWorkspaceId。
 // 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
 const selectedWorkspace = computed(() => {
-  if (!selectedAppId.value) return undefined;
+  const appId = selectedAppId.value;
+  if (!appId || (visibleManagedApplicationIds.value && !visibleManagedApplicationIds.value.has(appId))) {
+    return undefined;
+  }
+  const belongsToSelectedApplication = (workspace: Workspace) =>
+    !workspace.appId || workspace.appId === appId;
   const fromList = workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
-  if (fromList) return fromList;
-  if (selectedWorkspaceSnapshot.value?.workspaceId === selectedWorkspaceId.value) {
-    return selectedWorkspaceSnapshot.value;
+  if (fromList && belongsToSelectedApplication(fromList)) return fromList;
+  const snapshot = selectedWorkspaceSnapshot.value;
+  if (
+    snapshot
+    && snapshot.workspaceId === selectedWorkspaceId.value
+    && belongsToSelectedApplication(snapshot)
+  ) {
+    return snapshot;
   }
   return undefined;
 });
@@ -816,7 +829,11 @@ onBeforeUnmount(() => {
 const managedApplicationsQuery = useQuery({
   queryKey: ["managed-workspace", "applications"],
   queryFn: () => api.listManagedApplications(),
-  retry: false
+  retry: false,
+  // 成员撤权不删除物理 worktree；前台定期刷新成员目录并在失权后收起旧工作区。
+  refetchOnWindowFocus: "always",
+  refetchInterval: MANAGED_APPLICATION_MEMBERSHIP_REFETCH_INTERVAL_MS,
+  refetchIntervalInBackground: false
 });
 const managedApplications = computed<ManagedApplication[]>(() => managedApplicationsQuery.data.value ?? []);
 // 右上角切换菜单只展示当前用户已加入的托管应用；未加入应用仅进入"加入其他应用"弹窗。
@@ -1903,9 +1920,33 @@ function trySelectDefaultApp() {
     void handleSelectApp(preferredAppId);
   }
 }
-watch(applicationCatalog, () => {
-  trySelectDefaultApp();
-});
+watch(
+  () => managedApplicationsQuery.data.value,
+  (applications, previousApplications) => {
+    if (!applications) return;
+    const nextVisibleApplicationIds = new Set(applications.map((app) => app.appId));
+    visibleManagedApplicationIds.value = nextVisibleApplicationIds;
+    const currentAppId = selectedAppId.value;
+    if (currentAppId && !nextVisibleApplicationIds.has(currentAppId)) {
+      const revokedAppName = previousApplications?.find((app) => app.appId === currentAppId)?.appName ?? currentAppId;
+      // 失权响应到达后同时废弃旧的应用选择异步链、文件树、编辑器和运行上下文；
+      // 服务器 worktree 与历史 Session 只保留在后端，不再作为当前可操作工作区展示。
+      appSelectionSeq += 1;
+      selectingAppId = undefined;
+      invalidateConversationInteraction();
+      resetWorkspaceState();
+      selectedWorkspaceId.value = undefined;
+      selectedAppId.value = undefined;
+      feedback.value = {
+        kind: "info",
+        title: "应用权限已变更",
+        description: `你已不再是 ${revokedAppName} 的成员，原工作区已从工作台隐藏；服务器数据与历史会话仍保留。`
+      };
+    }
+    trySelectDefaultApp();
+  },
+  { immediate: true }
+);
 // applicationCatalog 先于 globalRecent 加载完成时，等 recent 回来再补一次选择。
 watch(globalRecentLoaded, () => {
   trySelectDefaultApp();
@@ -3592,8 +3633,11 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
 // 前端用这个响应回写 versionId/applicationWorkspaceId 到本次切到的工作区，确保重新登录或换电脑登录时
 // 左下角"切换工作空间"按钮能立刻显示当前所在的应用版本与模板，而不必等模板 versions 异步加载完成。
 // 非托管工作区（不属于任何应用）的 markRecent 会抛 NOT_FOUND，忽略该错误即可，不阻塞切换。
-async function applyManagedWorkspace(workspace: Workspace, feedbackDetail?: { successTitle: string; successDescription: string }) {
-  const appId = selectedAppId.value;
+async function applyManagedWorkspace(
+  workspace: Workspace,
+  feedbackDetail?: { successTitle: string; successDescription: string },
+  isCurrent: () => boolean = () => true
+) {
   let resolvedWorkspace = workspace;
   try {
     const response = await api.markRecentManagedWorkspace(workspace.workspaceId);
@@ -3607,13 +3651,17 @@ async function applyManagedWorkspace(workspace: Workspace, feedbackDetail?: { su
     // NOT_FOUND：工作区不属于任何应用（通常是手动目录注册出来的个人空间），不写入偏好。
     // 其他错误：网络/服务异常，吞掉但仍尝试切工作区，避免偏好写失败导致整个流程中断。
   }
+  // 应用目录刷新可能在 recent 请求期间撤销当前应用；迟到响应不得把已隐藏工作区重新挂回页面。
+  if (!isCurrent()) return false;
   await switchWorkspace(resolvedWorkspace);
+  if (!isCurrent()) return false;
   if (feedbackDetail) {
     feedback.value = { kind: "info", title: feedbackDetail.successTitle, description: feedbackDetail.successDescription };
   }
   // 注意：原「切到运行态工作区后回查 (userId, appId, workspaceId) 维度的最近 VCS 分支偏好」
   // 逻辑（loadBranchPreferenceOnEnter）已随 footer 的「选择分支」/「记住当前分支」入口下线一起移除；
   // 分支信息仍由 runtimeStatus 从 vcs.status 拉取并展示在右侧 Agent 面板。
+  return true;
 }
 
 // 把 markRecentManagedWorkspace 响应里能反映"工作区隶属于哪个应用 / 版本 / 模板"的字段
@@ -3718,7 +3766,7 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
 }
 
 async function handleSelectApp(appId: string) {
-  if (selectingAppId === appId) {
+  if (selectingAppId === appId || !applicationCatalog.value.some((app) => app.appId === appId)) {
     return;
   }
   invalidateConversationInteraction();
@@ -3728,6 +3776,10 @@ async function handleSelectApp(appId: string) {
   resetWorkspaceState();
   selectedWorkspaceId.value = undefined;
   selectedAppId.value = appId;
+  const selectionIsCurrent = () =>
+    selectionSeq === appSelectionSeq
+    && selectedAppId.value === appId
+    && applicationCatalog.value.some((app) => app.appId === appId);
   try {
     // 只有当前用户当前应用 recent 能反查到 versionId 时，才加载对应 default 私人 worktree。
     // 无历史时只切应用并保持工作区空态，footer 仍可新增版本或选择私人工作区。
@@ -3736,8 +3788,8 @@ async function handleSelectApp(appId: string) {
       return;
     }
     if (pick) {
-      await applyManagedWorkspace(pick.workspace);
-      if (selectionSeq !== appSelectionSeq) {
+      const applied = await applyManagedWorkspace(pick.workspace, undefined, selectionIsCurrent);
+      if (!applied || !selectionIsCurrent()) {
         return;
       }
       rememberPersonalWorkspace(pick.personalWorkspaceId, pick.personalWorkspaceBranch);

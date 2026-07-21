@@ -754,7 +754,8 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
     try {
       const pubDiff = await api.getPublicAgentDiff(workbench.publicWorktree?.worktreeId);
       if (token !== refreshChangesToken) return;
-      publicAgentDiffs.value = pubDiff.files;
+      // 工作区撤权/切换会同时刷新三类 Diff；兼容旧后端或空 mock 缺少 files，避免一次异常中断 Vue 空态渲染。
+      publicAgentDiffs.value = Array.isArray(pubDiff.files) ? pubDiff.files : [];
     } catch {
       if (token !== refreshChangesToken) return;
       publicAgentDiffs.value = [];
@@ -765,7 +766,7 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
       try {
         const wksDiff = await api.getWorkspaceAgentDiff(effectiveAgentConfigWorkspaceId.value);
         if (token !== refreshChangesToken) return;
-        applyWorkspaceAgentDiffRefresh(wksDiff.files);
+        applyWorkspaceAgentDiffRefresh(Array.isArray(wksDiff.files) ? wksDiff.files : []);
       } catch {
         if (token !== refreshChangesToken) return;
         applyWorkspaceAgentDiffRefresh([]);
